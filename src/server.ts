@@ -22,13 +22,13 @@ import { buildAdminNfcRouter } from "./routes/admin.nfc.routes";
 import { buildPropertySettingsRouter } from "./routes/property.settings.routes";
 import { buildAdminLocksRouter } from "./routes/admin.locks.routes";
 import { buildAdminLocksSwapRouter } from "./routes/admin.locks.swap.routes";
-import adminUsageRoutes from "./routes/admin.usage.routes";
-import adminCapacityRoutes from "./routes/admin.capacity.routes";
-import adminSubscriptionRoutes from "./routes/admin.subscription.routes";
-import { buildOrgLocksRouter } from "./routes/org.locks.routes";
-import { buildOrgTtlockRouter } from "./routes/org.ttlock.routes";
-import { buildOrgTtlockConnectRouter } from "./routes/org.ttlock.connect.routes";
-import { buildOrgLocksActivateRouter } from "./routes/org.locks.activate.routes";
+//import adminUsageRoutes from "./routes/admin.usage.routes";
+//import adminCapacityRoutes from "./routes/admin.capacity.routes";
+//import adminSubscriptionRoutes from "./routes/admin.subscription.routes";
+//import { buildOrgLocksRouter } from "./routes/org.locks.routes";
+  import { buildOrgTtlockRouter } from "./routes/org.ttlock.routes";
+  import { buildOrgTtlockConnectRouter } from "./routes/org.ttlock.connect.routes";
+//import { buildOrgLocksActivateRouter } from "./routes/org.locks.activate.routes";
 
 const app = express();
 const prisma = new PrismaClient();
@@ -78,16 +78,16 @@ app.use("/api/admin", adminReactivateRoutes);
 // app.use("/api/dev", devRoutes);
 app.use("/access/nfc", buildAccessNfcRouter(prisma));
 app.use("/dev", buildAdminNfcRouter(prisma));
-app.use("/api/admin/properties", buildPropertySettingsRouter(prisma));
-app.use("/api/admin", buildAdminLocksRouter(prisma));
-app.use("/api/admin", buildAdminLocksSwapRouter(prisma));
-app.use("/api/admin", adminUsageRoutes);
-app.use("/api/admin", adminCapacityRoutes);
-app.use("/api/admin", adminSubscriptionRoutes);
-app.use("/api/org", buildOrgLocksRouter(prisma));
-app.use("/api/org", buildOrgTtlockConnectRouter(prisma));
-app.use("/api/org", buildOrgTtlockRouter(prisma));
-app.use("/api/org", buildOrgLocksActivateRouter(prisma));
+//app.use("/api/admin/properties", buildPropertySettingsRouter(prisma));
+//app.use("/api/admin", buildAdminLocksRouter(prisma));
+//app.use("/api/admin", buildAdminLocksSwapRouter(prisma));
+//app.use("/api/admin", adminUsageRoutes);
+//app.use("/api/admin", adminCapacityRoutes);
+//app.use("/api/admin", adminSubscriptionRoutes);
+//app.use("/api/org", buildOrgLocksRouter(prisma));
+  app.use("/api/org", buildOrgTtlockConnectRouter(prisma));
+  app.use("/api/org", buildOrgTtlockRouter(prisma));
+//app.use("/api/org", buildOrgLocksActivateRouter(prisma));
 
 // =====================
 // Staff + Cleaning
