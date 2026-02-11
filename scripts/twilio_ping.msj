@@ -1,0 +1,24 @@
+import 'dotenv/config';
+import twilio from 'twilio';
+
+const { TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN } = process.env;
+
+console.log("ENV TWILIO:", {
+  sid: TWILIO_ACCOUNT_SID ? "OK" : "MISSING",
+  token: TWILIO_AUTH_TOKEN ? "OK" : "MISSING",
+});
+
+if (!TWILIO_ACCOUNT_SID || !TWILIO_AUTH_TOKEN) {
+  console.error("Missing TWILIO env vars");
+  process.exit(1);
+}
+
+const client = twilio(TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN);
+
+try {
+  const acc = await client.api.accounts(TWILIO_ACCOUNT_SID).fetch();
+  console.log("TWILIO OK:", { friendlyName: acc.friendlyName, status: acc.status });
+} catch (e) {
+  console.error("TWILIO FAIL:", e?.status, e?.code, e?.message);
+  process.exit(1);
+}

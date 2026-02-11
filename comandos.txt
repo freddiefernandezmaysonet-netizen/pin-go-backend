@@ -1,0 +1,86 @@
+
+npx prisma generate
+npx prisma migrate deploy   # o migrate dev si estás en dev
+npm run start               # server
+npm run worker              # en otra terminal
+npx tsx src/workers/reservation.worker.ts
+npm run dev                 # subir servidor
+npx prisma studio           # subir prisma
+
+
+
+
+cml10fndd0001n0n07etvg0jj 2026-01-31T15:00:34.830Z 2026-01-31T17:00:34.830Z                         3
+cmkzt9w5h0005n0vomyfst4uv 2026-01-29T18:53:23.421Z 2026-01-29T19:03:23.421Z                         4
+cmkzt85150001n0voq9u7q929 2026-01-29T18:52:01.569Z 2026-01-29T19:02:01.569Z
+cmkzsp1qe000fn0hsanxo5cgs 2026-01-29T18:37:10.833Z 2026-01-29T18:47:10.833Z
+cmkzsjetz000bn0hsrt5tup2q 2026-01-29T18:32:47.919Z 2026-01-29T18:42:47.91
+
+
+
+$body = @{
+  source = "manual"
+  propertyId = "cml1f102b0002n0ek165ksnr8"
+  guestName = "Guest Test"
+  guestEmail = "guest@test.com"
+  guestPhone = "+17875551234"
+  roomName = "Unit 1"
+  checkIn = (Get-Date).ToUniversalTime().AddMinutes(1).ToString("o")
+  checkOut = (Get-Date).ToUniversalTime().AddMinutes(6).ToString("o")
+  paymentState = "PAID"
+} | ConvertTo-Json
+
+Invoke-RestMethod -Uri "http://localhost:3000/api/ingest/reservations" -Method POST -ContentType "application/json" -Body $body
+
+
+http://localhost:3000/checkin/<ae8d83f4188696708120a9ce9c0a03bd>
+
+
+
+$body = @{
+  source = "manual"
+  propertyId = "cml1f102b0002n0ek165ksnr8"
+  guestName = "Guest Test NEW " + (Get-Random)
+  guestEmail = "guest@test.com"
+  guestPhone = "+17875551234"
+  roomName = "Unit NEW " + (Get-Random)
+  checkIn = (Get-Date).ToUniversalTime().AddDays(1).ToString("o")
+  checkOut = (Get-Date).ToUniversalTime().AddDays(1).AddHours(0).ToString("o")
+  paymentState = "PAID"
+} | ConvertTo-Json
+
+
+Invoke-RestMethod `
+  -Method POST `
+  -Uri "http://localhost:3000/ttlock/passcode/create" `
+  -ContentType "application/json" `
+  -Body '{ "lockId": 25439884, "code": "776644", "minutes": 60 }'
+
+
+
+router.post("/passcode/create", async (req, res) => {
+  try {
+    const { lockId, code, minutes } = req.body ?? {};
+    if (!lockId) {
+      return res.status(400).json({ ok: false, error: "Missing lockId" });
+    }
+
+    const mins = Number(minutes ?? 60);
+    const startDate = Date.now() - 30 * 1000; // robustez
+    const endDate = Date.now() + mins * 60 * 1000;
+
+
+Invoke-RestMethod `
+  -Method POST `
+  -Uri "http://localhost:3000/ttlock/passcode/create" `
+  -ContentType "application/json" `
+  -Body '{ "lockId": 25439884, "minutes": 60, "method": "custom", "phone": "+1 (787) 5485989" }'
+
+Invoke-RestMethod `
+  -Method POST `
+  -Uri "http://localhost:3000/ttlock/passcode/create" `
+  -ContentType "application/json" `
+  -Body '{ "lockId": 25439884, "minutes": 60, "method": "custom", "phone": "+1 (787) 555-5555" }'
+
+AC88dd083a6ef42d6192419a6c26ae0121
+a973b6de36953adb75eee5e352b0497c

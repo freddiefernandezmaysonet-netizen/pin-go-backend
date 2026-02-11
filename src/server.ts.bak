@@ -1,0 +1,825 @@
+import "dotenv/config";
+import express from "express";
+import bodyParser from "body-parser";
+import Stripe from "stripe";
+import { PrismaClient } from "@prisma/client";
+import stripe from "./billing/stripe"; // ✅ default export
+import { buildAccessMessage } from "./util/accessMessage.js";
+import { ttlockGetAccessToken } from "./ttlock/ttlock.service";
+import { ttlockListLocks } from "./ttlock/ttlock.api";
+import { ttlockCreatePasscode } from "./ttlock/ttlock.passcode";
+
+const app = express();
+const prisma = new PrismaClient();
+
+const PORT = Number(process.env.PORT ?? 3000);
+
+// =====================
+// Prime Config (Amazon Prime-style)
+// =====================
+const PRIME_GRACE_HOURS = Number(process.env.PRIME_GRACE_HOURS ?? 48);
+const PRIME_ENFORCE_INTERVAL_MINUTES = Number(process.env.PRIME_ENFORCE_INTERVAL_MINUTES ?? 15);
+const PRIME_SUSPEND_ON_PAYMENT_FAILED =
+  String(process.env.PRIME_SUSPEND_ON_PAYMENT_FAILED ?? "0") === "1";
+
+const PRIME_PRICE_ID = process.env.PIN_GO_PRIME_PRICE_ID ?? "";
+const BILLING_RETURN_URL =
+  process.env.BILLING_RETURN_URL ?? "http://127.0.0.1:3000/prime";
+
+const STRIPE_WEBHOOK_SECRET = process.env.STRIPE_WEBHOOK_SECRET ?? "";
+
+// =====================
+// Stripe Webhook (MUST be before express.json)
+// =====================
+app.post(
+  "/webhooks/stripe",
+  bodyParser.raw({ type: "application/json" }),
+  async (req, res) => {
+    const sig = req.headers["stripe-signature"] as string | undefined;
+
+    try {
+      if (!sig) return res.status(400).send("Missing Stripe-Signature header");
+      if (!STRIPE_WEBHOOK_SECRET)
+        return res.status(500).send("Missing STRIPE_WEBHOOK_SECRET in .env");
+
+      let event: Stripe.Event;
+
+      try {
+        event = stripe.webhooks.constructEvent(req.body, sig, STRIPE_WEBHOOK_SECRET);
+      } catch (err: any) {
+        console.error("❌ Stripe webhook signature verification failed:", err?.message ?? err);
+        return res.status(400).send(`Webhook Error: ${err?.message ?? "Invalid signature"}`);
+      }
+
+      switch (event.type) {
+        // 1) Checkout terminado => DB aprende el subId real
+        case "checkout.session.completed": {
+          const sessionObj = event.data.object as Stripe.Checkout.Session;
+
+          const personId = sessionObj.metadata?.personId;
+          const subId = sessionObj.subscription as string | null;
+          const customerId = sessionObj.customer as string | null;
+
+          if (!personId || !subId) break;
+
+          if (customerId) {
+            await prisma.person.update({
+              where: { id: personId },
+              data: { stripeCustomerId: customerId },
+            });
+          }
+
+          await prisma.subscription.upsert({
+            where: { stripeSubscriptionId: subId },
+            create: {
+              personId,
+              stripeSubscriptionId: subId,
+              status: "INCOMPLETE",
+            },
+            update: {
+              personId,
+              status: "INCOMPLETE",
+            },
+          });
+
+          break;
+        }
+
+        // 2) Pago OK => ACTIVE + periodos
+        case "invoice.paid": {
+          const invoice = event.data.object as Stripe.Invoice;
+          const subId = invoice.subscription as string | null;
+
+          if (subId) {
+            const sub = await stripe.subscriptions.retrieve(subId);
+
+            await prisma.subscription.updateMany({
+              where: { stripeSubscriptionId: subId },
+              data: {
+                status: "ACTIVE",
+                currentPeriodStart: new Date(sub.current_period_start * 1000),
+                currentPeriodEnd: new Date(sub.current_period_end * 1000),
+              },
+            });
+          }
+          break;
+        }
+
+        // 3) Falló pago => PAST_DUE
+        case "invoice.payment_failed": {
+          const invoice = event.data.object as Stripe.Invoice;
+          const subId = invoice.subscription as string | null;
+
+          if (subId) {
+            await prisma.subscription.updateMany({
+              where: { stripeSubscriptionId: subId },
+              data: { status: "PAST_DUE" },
+            });
+
+            if (PRIME_SUSPEND_ON_PAYMENT_FAILED) {
+              // (futuro) suspender acceso inmediatamente
+            }
+          }
+          break;
+        }
+
+        // 4) Cancelado => CANCELED
+        case "customer.subscription.deleted": {
+          const sub = event.data.object as Stripe.Subscription;
+
+          await prisma.subscription.updateMany({
+            where: { stripeSubscriptionId: sub.id },
+            data: { status: "CANCELED" },
+          });
+
+          break;
+        }
+
+        default:
+          break;
+      }
+
+      return res.json({ received: true });
+    } catch (e: any) {
+      console.error("❌ Stripe webhook handler error:", e?.message ?? e);
+      return res.status(500).json({ error: e?.message ?? "Webhook handler failed" });
+    }
+  }
+);
+
+// =====================
+// JSON middleware (after webhook)
+// =====================
+app.use(express.json());
+
+app.get("/debug/ttlock/token", async (_req, res) => {
+  try {
+    const token = await ttlockGetAccessToken();
+    return res.json({
+      ok: true,
+      uid: token.uid,
+      expires_in: token.expires_in,
+      scope: token.scope ?? null,
+      access_token_preview: token.access_token.slice(0, 10) + "***",
+    });
+  } catch (e: any) {
+    console.error("TTLock token error:", e?.message ?? e);
+    return res.status(500).json({ ok: false, error: e?.message ?? "TTLock token failed" });
+  }
+});
+
+
+app.get("/debug/env/ttlock", (_req, res) => {
+  res.json({
+    ok: true,
+    TTLOCK_API_BASE: process.env.TTLOCK_API_BASE ?? null,
+    TTLOCK_CLIENT_ID_present: Boolean(process.env.TTLOCK_CLIENT_ID),
+    TTLOCK_CLIENT_SECRET_present: Boolean(process.env.TTLOCK_CLIENT_SECRET),
+    TTLOCK_USERNAME_present: Boolean(process.env.TTLOCK_USERNAME),
+    TTLOCK_PASSWORD_PLAIN_present: Boolean(process.env.TTLOCK_PASSWORD_PLAIN),
+  });
+});
+
+app.get("/debug/ttlock/locks", async (_req, res) => {
+  try {
+    const data = await ttlockListLocks(1, 20);
+    return res.json({ ok: true, ...data });
+  } catch (e: any) {
+    console.error("ttlock locks debug error:", e?.message ?? e);
+    return res.status(500).json({ ok: false, error: e?.message ?? "ttlock locks error" });
+  }
+});
+
+app.get("/debug/locks", async (_req, res) => {
+  const locks = await prisma.lock.findMany({
+    orderBy: { createdAt: "desc" },
+    take: 50,
+  });
+  return res.json({ ok: true, locks });
+});
+
+app.get("/debug/ttlock/locks", async (req, res) => {
+  try {
+    const pageNo = Number(req.query.pageNo ?? 1);
+    const pageSize = Number(req.query.pageSize ?? 20);
+
+    const data = await ttlockListLocks(pageNo, pageSize);
+
+    return res.json({ ok: true, ...data });
+  } catch (e: any) {
+    console.error("debug/ttlock/locks error:", e?.message ?? e);
+    return res.status(500).json({ ok: false, error: e?.message ?? "TTLock list locks failed" });
+  }
+});
+
+app.post("/debug/ttlock/create-passcode", async (req, res) => {
+  try {
+    const { lockId, code, minutes } = req.body ?? {};
+
+    if (!lockId || !code) {
+      return res.status(400).json({ ok: false, error: "Missing lockId or code" });
+    }
+
+    const mins = Number(minutes ?? 30);
+    if (!Number.isFinite(mins) || mins <= 0) {
+      return res.status(400).json({ ok: false, error: "minutes must be a positive number" });
+    }
+
+    const startDate = Date.now();
+    const endDate = startDate + mins * 60 * 1000;
+
+    const data = await ttlockCreatePasscode({
+      lockId: Number(lockId),
+      code: String(code),
+      startDate,
+      endDate,
+    });
+
+    return res.json({
+      ok: true,
+      lockId: Number(lockId),
+      codeMasked: String(code).slice(0, 2) + "****",
+      minutes: mins,
+      startDate,
+      endDate,
+      ttlock: data,
+    });
+  } catch (e: any) {
+    console.error("create-passcode error:", e?.message ?? e);
+    return res.status(500).json({ ok: false, error: e?.message ?? "TTLock create passcode failed" });
+  }
+});
+
+
+// =====================
+// TTLock -> Prisma Sync
+// =====================
+app.post("/debug/ttlock/sync-locks", async (req, res) => {
+  try {
+    const { propertyId } = req.body ?? {};
+    if (!propertyId) {
+      return res.status(400).json({ ok: false, error: "Missing propertyId" });
+    }
+
+    // 1) Verifica que la propiedad exista
+    const prop = await prisma.property.findUnique({ where: { id: String(propertyId) } });
+    if (!prop) return res.status(404).json({ ok: false, error: "Property not found" });
+
+    // 2) Trae locks desde TTLock
+    const result = await ttlockListLocks({ pageNo: 1, pageSize: 50 });
+    const list = result.list ?? [];
+
+    // 3) Upsert en Prisma (Lock) por ttlockLockId
+    let created = 0;
+    let updated = 0;
+
+    for (const l of list) {
+      const lockId = Number(l.lockId);
+      const lockName = String(l.lockAlias ?? l.lockName ?? l.lockName ?? "");
+
+      const existing = await prisma.lock.findUnique({ where: { ttlockLockId: lockId } });
+
+      if (!existing) {
+        await prisma.lock.create({
+          data: {
+            propertyId: prop.id,
+            ttlockLockId: lockId,
+            ttlockLockName: lockName || null,
+            locationLabel: null,
+          },
+        });
+        created++;
+      } else {
+        await prisma.lock.update({
+          where: { ttlockLockId: lockId },
+          data: {
+            propertyId: prop.id, // por si quieres “mover” el lock a esta propiedad
+            ttlockLockName: lockName || existing.ttlockLockName,
+          },
+        });
+        updated++;
+      }
+    }
+
+    return res.json({ ok: true, propertyId: prop.id, totalFromTTLock: list.length, created, updated });
+  } catch (e: any) {
+    console.error("sync-locks error:", e?.message ?? e);
+    return res.status(500).json({ ok: false, error: e?.message ?? "sync-locks failed" });
+  }
+});
+
+app.get("/debug/locks", async (_req, res) => {
+  try {
+    const locks = await prisma.lock.findMany({
+      orderBy: { updatedAt: "desc" },
+      take: 50,
+      select: {
+        id: true,
+        propertyId: true,
+        ttlockLockId: true,
+        ttlockLockName: true,
+        locationLabel: true,
+        isActive: true,
+        createdAt: true,
+        updatedAt: true,
+      },
+    });
+    return res.json({ ok: true, locks });
+  } catch (e: any) {
+    console.error("debug/locks error:", e?.message ?? e);
+    return res.status(500).json({ ok: false, error: e?.message ?? "DB error" });
+  }
+});
+
+// =====================
+// Debug: list locks in DB
+// =====================
+
+// =====================
+// Health
+// =====================
+app.get("/health", (_req, res) => res.json({ ok: true, name: "Pin&Go API" }));
+
+// =====================
+// Debug: Subscriptions
+// =====================
+app.get("/debug/subscriptions", async (_req, res) => {
+  try {
+    const subs = await prisma.subscription.findMany({
+      orderBy: { createdAt: "desc" },
+      take: 20,
+    });
+    return res.json({ ok: true, subs });
+  } catch (e: any) {
+    console.error("debug/subscriptions error:", e?.message ?? e);
+    return res.status(500).json({ ok: false, error: e?.message ?? "DB error" });
+  }
+});
+
+// Crea org + property demo si no existen
+app.post("/debug/bootstrap", async (_req, res) => {
+  try {
+    const orgId = "pingo-org-1";
+
+    const org = await prisma.organization.upsert({
+      where: { id: orgId },
+      create: { id: orgId, name: "Pin&Go Demo Org" },
+      update: {},
+    });
+
+    const prop = await prisma.property.findFirst({ where: { organizationId: org.id } });
+
+    const property =
+      prop ??
+      (await prisma.property.create({
+        data: {
+          organizationId: org.id,
+          name: "Demo Property",
+          timezone: "America/Puerto_Rico",
+        },
+      }));
+
+    return res.json({ ok: true, org, property });
+  } catch (e: any) {
+    console.error("bootstrap error:", e?.message ?? e);
+    return res.status(500).json({ ok: false, error: e?.message ?? "bootstrap error" });
+  }
+});
+
+
+// =====================
+// TTLock Debug: Token (UNO solo)
+// =====================
+app.get("/debug/ttlock/auth", async (_req, res) => {
+  try {
+    const orgId = "pingo-org-1"; // por ahora fijo
+    const auth = await getTTLockAccessToken(prisma, orgId);
+
+    return res.json({
+      ok: true,
+      organizationId: orgId,
+      uid: auth.uid ?? null,
+      expiresAt: auth.expiresAt ?? null,
+      accessTokenPreview: auth.accessToken ? auth.accessToken.slice(0, 10) + "***" : null,
+    });
+  } catch (e: any) {
+    console.error("debug/ttlock/auth error:", e?.message ?? e);
+    return res.status(500).json({ ok: false, error: e?.message ?? "TTLock auth error" });
+  }
+});
+
+app.get("/debug/ttlock/locks", async (req, res) => {
+  try {
+    const pageNo = req.query.pageNo ? Number(req.query.pageNo) : 1;
+    const pageSize = req.query.pageSize ? Number(req.query.pageSize) : 20;
+
+    const result = await ttlockListLocks({ pageNo, pageSize });
+
+    // Normalizamos campos comunes para que lo veas “limpio”
+    const locks = (result.locks || []).map((l: any) => ({
+      lockId: l.lockId ?? l.lock_id ?? l.lockID,
+      lockName: l.lockName ?? l.lock_name ?? l.name,
+      electricQuantity: l.electricQuantity ?? l.battery,
+      isOnline: l.isOnline ?? l.online,
+      timezoneRaw: l.timezoneRaw ?? l.timezone,
+    }));
+
+app.post("/debug/ttlock/sync-locks", async (req, res) => {
+  try {
+    const { propertyId } = req.body ?? {};
+    if (!propertyId) return res.status(400).json({ ok: false, error: "Missing propertyId" });
+
+    // 1) Verifica property existe
+    const property = await prisma.property.findUnique({ where: { id: String(propertyId) } });
+    if (!property) return res.status(404).json({ ok: false, error: "Property not found" });
+
+    // 2) Trae locks de TTLock
+    const remote = await ttlockListLocks(1, 50);
+
+    let created = 0;
+    let updated = 0;
+
+    for (const l of remote.list) {
+      const ttlockLockId = Number(l.lockId);
+      const lockName = String(l.lockAlias ?? l.lockName ?? "");
+
+      const up = await prisma.lock.upsert({
+        where: { ttlockLockId },
+        create: {
+          propertyId: property.id,
+          ttlockLockId,
+          ttlockLockName: lockName || null,
+          locationLabel: null,
+          isActive: true,
+        },
+        update: {
+          propertyId: property.id,
+          ttlockLockName: lockName || null,
+          isActive: true,
+        },
+      });
+
+      // Cuenta created/updated aproximado (si quieres exactitud hay que chequear existía antes)
+      if (up.createdAt.getTime() === up.updatedAt.getTime()) created++;
+      else updated++;
+    }
+
+    return res.json({ ok: true, totalRemote: remote.total, created, updated });
+  } catch (e: any) {
+    console.error("sync-locks error:", e?.message ?? e);
+    return res.status(500).json({ ok: false, error: e?.message ?? "sync-locks error" });
+  }
+});
+
+    return res.json({
+      ok: true,
+      pageNo: result.pageNo,
+      pageSize: result.pageSize,
+      pages: result.pages,
+      total: result.total,
+      count: locks.length,
+      locks,
+      rawFirst: result.locks?.[0] ?? null, // para debug si algo no mapea
+    });
+  } catch (e: any) {
+    console.error("debug/ttlock/locks error:", e?.message ?? e);
+    return res.status(500).json({ ok: false, error: e?.message ?? "TTLock list locks failed" });
+  }
+});
+
+
+// =====================
+// Prime pages (simple)
+// =====================
+app.get("/prime/success", (_req, res) => {
+  res.send("✅ Pin&Go Prime activated. You may close this window.");
+});
+
+app.get("/prime/cancel", (_req, res) => {
+  res.send("❌ Payment canceled. Prime not activated.");
+});
+
+// =====================
+// Billing: Checkout (Prime subscription)
+// =====================
+app.post("/billing/checkout", async (req, res) => {
+  try {
+    const { personId, email, phone } = req.body ?? {};
+    if (!personId) return res.status(400).json({ ok: false, error: "Missing personId" });
+
+    // si ya tiene ACTIVE, no hagas otro checkout
+    const existingActive = await prisma.subscription.findFirst({
+      where: { personId: String(personId), status: "ACTIVE" },
+      orderBy: { updatedAt: "desc" },
+    });
+
+if (existingActive) {
+  // Si está ACTIVE -> manda al Billing Portal (manejar suscripción)
+  const person = await prisma.person.findUnique({ where: { id: String(personId) } });
+  if (!person) return res.status(404).json({ ok: false, error: "Person not found" });
+  if (!person.stripeCustomerId) {
+    return res.status(400).json({ ok: false, error: "No stripeCustomerId yet for this person" });
+  }
+
+  const baseReturn = process.env.BILLING_RETURN_URL || "http://127.0.0.1:3000";
+  if (!/^https?:\/\//i.test(baseReturn)) {
+    return res.status(500).json({ ok: false, error: "Invalid BILLING_RETURN_URL (must start with http/https)" });
+  }
+
+  const portal = await stripe.billingPortal.sessions.create({
+    customer: person.stripeCustomerId,
+    return_url: `${baseReturn}?from=portal`,
+  });
+
+  return res.json({
+    ok: true,
+    alreadyActive: true,
+    stripeSubscriptionId: existingActive.stripeSubscriptionId,
+    portalUrl: portal.url,
+    message: "Prime is ACTIVE. Use portalUrl to manage subscription.",
+  });
+}
+
+    
+    if (!PRIME_PRICE_ID) {
+      return res.status(500).json({ ok: false, error: "Missing PIN_GO_PRIME_PRICE_ID in .env" });
+    }
+
+    if (!/^https?:\/\//i.test(BILLING_RETURN_URL)) {
+      return res.status(500).json({
+        ok: false,
+        error: `Invalid BILLING_RETURN_URL="${BILLING_RETURN_URL}". Must start with http:// or https://`,
+      });
+    }
+
+    const person = await prisma.person.findUnique({ where: { id: String(personId) } });
+    if (!person) return res.status(404).json({ ok: false, error: "Person not found" });
+
+    let customerId = person.stripeCustomerId ?? null;
+
+    if (!customerId) {
+      const customer = await stripe.customers.create({
+        email: email ?? person.email ?? undefined,
+        phone: phone ?? person.phone ?? undefined,
+        metadata: { personId: person.id },
+      });
+
+      customerId = customer.id;
+
+      await prisma.person.update({
+        where: { id: person.id },
+        data: { stripeCustomerId: customerId },
+      });
+    }
+
+    const checkoutSession = await stripe.checkout.sessions.create({
+      mode: "subscription",
+      customer: customerId,
+      line_items: [{ price: PRIME_PRICE_ID, quantity: 1 }],
+      success_url: `${BILLING_RETURN_URL}/success?session_id={CHECKOUT_SESSION_ID}`,
+      cancel_url: `${BILLING_RETURN_URL}/cancel`,
+      subscription_data: { metadata: { personId: person.id } },
+      allow_promotion_codes: true,
+    });
+
+    return res.json({
+      ok: true,
+      url: checkoutSession.url, // <- aquí va el URL
+      sessionId: checkoutSession.id,
+      customerId,
+    });
+  } catch (e: any) {
+    console.error("billing/checkout error:", e?.message ?? e);
+    return res.status(500).json({ ok: false, error: e?.message ?? "Checkout error" });
+  }
+});
+
+app.post("/billing/checkout/force", async (req, res) => {
+  try {
+    const { personId, email, phone } = req.body ?? {};
+    if (!personId) return res.status(400).json({ ok: false, error: "Missing personId" });
+
+    if (!PRIME_PRICE_ID) return res.status(500).json({ ok: false, error: "Missing PIN_GO_PRIME_PRICE_ID in .env" });
+
+    if (!priceId) return res.status(500).json({ ok: false, error: "Missing PIN_GO_PRIME_PRICE_ID in .env" });
+
+    const baseReturn = process.env.BILLING_RETURN_URL || "http://127.0.0.1:3000/prime";
+    if (!/^https?:\/\//i.test(baseReturn)) {
+      return res.status(500).json({ ok: false, error: "Invalid BILLING_RETURN_URL (must start withhttp/https)" }); 
+    }
+
+    const person = await prisma.person.findUnique({ where: { id: String(personId) } });
+    if (!person) return res.status(404).json({ ok: false, error: "Person not found" });
+
+    let customerId = person.stripeCustomerId ?? null;
+    if (!customerId) {
+      const customer = await stripe.customers.create({
+        email: email ?? person.email ?? undefined,
+        phone: phone ?? person.phone ?? undefined,
+        metadata: { personId: person.id },
+      });
+      customerId = customer.id;
+      await prisma.person.update({ where: { id: person.id }, data: { stripeCustomerId: customerId } });
+    }
+
+    const session = await stripe.checkout.sessions.create({
+      mode: "subscription",
+      customer: customerId,
+      line_items: [{ price: PRIME_PRICE_ID, quantity: 1 }],
+      success_url: `${baseReturn}/success?session_id={CHECKOUT_SESSION_ID}`,
+      cancel_url: `${baseReturn}/cancel`,
+      subscription_data: { metadata: { personId: person.id } },
+      allow_promotion_codes: true,
+    });
+
+    return res.json({ ok: true, url: session.url, sessionId: session.id, customerId });
+  } catch (e: any) {
+    console.error("billing/checkout/force error:", e?.message ?? e);
+    return res.status(500).json({ ok: false, error: e?.message ?? "Checkout force error" });
+  }
+});
+
+// =====================
+// Billing: Portal (manage subscription)
+// =====================
+app.post("/billing/portal", async (req, res) => {
+  try {
+    const { personId } = req.body ?? {};
+    if (!personId) return res.status(400).json({ ok: false, error: "Missing personId" });
+
+    const person = await prisma.person.findUnique({ where: { id: String(personId) } });
+    if (!person) return res.status(404).json({ ok: false, error: "Person not found" });
+    if (!person.stripeCustomerId)
+      return res.status(400).json({ ok: false, error: "No stripeCustomerId yet for this person" });
+
+    if (!/^https?:\/\//i.test(BILLING_RETURN_URL)) {
+      return res.status(500).json({ ok: false, error: "Invalid BILLING_RETURN_URL" });
+    }
+
+    const portalSession = await stripe.billingPortal.sessions.create({
+      customer: person.stripeCustomerId,
+      return_url: `${BILLING_RETURN_URL}?from=portal`,
+    });
+
+    return res.json({ ok: true, url: portalSession.url });
+  } catch (e: any) {
+    console.error("billing/portal error:", e?.message ?? e);
+    return res.status(500).json({ ok: false, error: e?.message ?? "Portal error" });
+  }
+});
+
+// =====================
+// Prime enforcement scheduler (safe)
+// =====================
+async function enforcePrime() {
+  try {
+    const cutoff = new Date(Date.now() - PRIME_GRACE_HOURS * 60 * 60 * 1000);
+
+    const updated = await prisma.subscription.updateMany({
+      where: { status: "INCOMPLETE", createdAt: { lt: cutoff } },
+      data: { status: "PAST_DUE" },
+    });
+
+    if (updated.count > 0) {
+      console.log(`✅ Prime enforce: marked PAST_DUE=${updated.count} (reason=INCOMPLETE_GRACE_EXPIRED)`);
+    }
+  } catch (e: any) {
+    console.error("❌ Prime enforce loop error:", e?.message ?? e);
+  }
+}
+
+console.log(
+  `⏱️ Prime enforcement scheduler: every ${PRIME_ENFORCE_INTERVAL_MINUTES} minutes (grace=${PRIME_GRACE_HOURS}h)`
+);
+
+setInterval(() => {
+  void enforcePrime();
+}, PRIME_ENFORCE_INTERVAL_MINUTES * 60 * 1000);
+
+// =====================
+// Access: Guest (passcode timebound - STUB)
+// =====================
+app.post("/access/guest", async (req, res) => {
+  try {
+    const { ttlockLockId, roomName, guestName, guestEmail, guestPhone, checkIn, checkOut } = req.body ?? {};
+
+    if (!ttlockLockId || !guestName || !roomName || !checkIn || !checkOut) {
+      return res.status(400).json({
+        ok: false,
+        error: "Missing required fields: ttlockLockId, roomName, guestName, checkIn, checkOut",
+      });
+    }
+
+    const start = new Date(checkIn);
+    const end = new Date(checkOut);
+
+    if (Number.isNaN(start.getTime()) || Number.isNaN(end.getTime())) {
+      return res.status(400).json({ ok: false, error: "Invalid checkIn/checkOut date format (use ISO string)." });
+    }
+    if (end <= start) {
+      return res.status(400).json({ ok: false, error: "checkOut must be after checkIn." });
+    }
+
+    const lock = await prisma.lock.findUnique({ where: { ttlockLockId: Number(ttlockLockId) } });
+    if (!lock) {
+      return res.status(404).json({ ok: false, error: `Lock not found for ttlockLockId=${ttlockLockId}` });
+    }
+
+    const reservation = await prisma.reservation.create({
+      data: {
+        propertyId: lock.propertyId,
+        guestName,
+        guestEmail: guestEmail ?? null,
+        guestPhone: guestPhone ?? null,
+        roomName,
+        checkIn: start,
+        checkOut: end,
+        paymentState: "NONE",
+      },
+    });
+
+    const unlockKey = "#";
+    const codePlaceholder = "TBD";
+
+    const accessGrant = await prisma.accessGrant.create({
+      data: {
+        lockId: lock.id,
+        reservationId: reservation.id,
+        method: "PASSCODE_TIMEBOUND",
+        status: "PENDING",
+        startsAt: start,
+        endsAt: end,
+        unlockKey,
+        accessCodeMasked: null,
+        ttlockPayload: { roomName, note: "pending ttlock generation" },
+      },
+    });
+
+    const msg = buildAccessMessage({
+      roomName,
+      code: `${codePlaceholder}${unlockKey}`,
+      unlockKeyHint: unlockKey,
+      start,
+      end,
+      brand: "Pin&Go",
+    });
+
+    return res.json({ ok: true, reservation, accessGrant, message: msg });
+  } catch (e: any) {
+    console.error(e);
+    return res.status(500).json({ ok: false, error: e?.message ?? "Internal error" });
+  }
+});
+
+// =====================
+// Access: Admin (Authorized Admin - STUB)
+// =====================
+app.post("/access/admin", async (req, res) => {
+  try {
+    const { ttlockLockId, fullName, email, phone, startsAt, endsAt } = req.body ?? {};
+
+    if (!ttlockLockId || !fullName) {
+      return res.status(400).json({ ok: false, error: "Missing required fields: ttlockLockId, fullName" });
+    }
+
+    const start = startsAt ? new Date(startsAt) : new Date();
+    const end = endsAt ? new Date(endsAt) : new Date(Date.now() + 365 * 24 * 60 * 60 * 1000);
+
+    const lock = await prisma.lock.findUnique({ where: { ttlockLockId: Number(ttlockLockId) } });
+    if (!lock) return res.status(404).json({ ok: false, error: `Lock not found for ttlockLockId=${ttlockLockId}` });
+
+    const org = await prisma.organization.findFirst({ where: { id: "pingo-org-1" } });
+    if (!org) return res.status(500).json({ ok: false, error: "Org not found" });
+
+    const person = await prisma.person.create({
+      data: {
+        organizationId: org.id,
+        role: "MANAGER",
+        fullName,
+        email: email ?? null,
+        phone: phone ?? null,
+      },
+    });
+
+    const grant = await prisma.accessGrant.create({
+      data: {
+        lockId: lock.id,
+        personId: person.id,
+        method: "AUTHORIZED_ADMIN",
+        status: "PENDING",
+        startsAt: start,
+        endsAt: end,
+        unlockKey: "#",
+        ttlockPayload: { channel: "TTLock Authorized Admin", note: "Pending admin authorization" },
+      },
+    });
+
+    return res.json({ ok: true, person, accessGrant: grant });
+  } catch (e: any) {
+    console.error(e);
+    return res.status(500).json({ ok: false, error: e?.message ?? "Internal error" });
+  }
+});
+
+app.listen(PORT, () => console.log(`🚀 Pin&Go API running on http://localhost:${PORT}`));
+
