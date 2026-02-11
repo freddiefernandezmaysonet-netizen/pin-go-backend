@@ -745,14 +745,14 @@ async function tick() {
   } catch (e) {
     errLog('runCheckins crashed:', toErrString(e));
   }
-
+/*
 try {
   const r = await retryPendingNfcSync(prisma, now);
   if (r.activated > 0) log("nfc-retry", r);
 } catch (e) {
   errLog("nfc-retry crashed:", toErrString(e));
 }
-
+*/
   try {
     await processGuestLinkReminders(now);
   } catch (e) {
@@ -765,13 +765,15 @@ try {
     errLog('runCheckouts crashed:', toErrString(e));
   }
 
+/* 
 try {
   const r = await retryNfcAssignments(prisma, now);
   if (r.activated || r.retired) log("nfc-retry", r);
 } catch (e) {
   errLog("nfc-retry crashed:", toErrString(e));
 }
-
+*/
+/*
   try {
     const r = await expireNfcAssignments(prisma, now);
     if (r.expired > 0) log("nfc-expire", { ended: r.expired });
@@ -779,6 +781,7 @@ try {
     errLog("nfc-expire crashed:", toErrString(e));
   }
 
+*/
   // Limpieza (STAFF) corre en su propio carril
   try {
     await processCleaningActivations(now);
