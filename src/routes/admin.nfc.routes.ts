@@ -36,15 +36,26 @@ export function buildAdminNfcRouter(prisma: PrismaClient) {
         if (!ttlockCardId) continue;
 
         try {
-          const row = await prisma.nfcCard.create({
-            data: {
-              propertyId: String(propertyId),
-              ttlockCardId,
-              label: item?.cardName ? String(item.cardName) : `TTLock Card ${ttlockCardId}`,
-              status: Prisma.NfcCardStatus.AVAILABLE
- 
-            },
-          });
+           
+      const row = await prisma.nfcCard.upsert({
+        where: {
+          propertyId_ttlockCardId: {
+            propertyId: String(propertyId),
+            ttlockCardId: Number(ttlockCardId),
+          },
+        },
+        create: {
+          propertyId: String(propertyId),
+          ttlockCardId: Number(ttlockCardId),
+          label,
+          status: NfcCardStatus.AVAILABLE,
+        },
+        update: {
+         label,
+        // NO toques status aquí
+      },
+   });
+        
           imported.push({ id: row.id, ttlockCardId: row.ttlockCardId, label: row.label });
         } catch (e: any) {
           // Duplicado u otro error

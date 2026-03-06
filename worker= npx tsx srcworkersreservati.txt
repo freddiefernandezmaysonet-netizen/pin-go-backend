@@ -1,3 +1,587 @@
 worker= npx tsx src/workers/reservation.worker.ts
 Prisma= npx prisma studio
 Server= npm run dev
+npx tsx src/workers/run.nfc-watchdog.ts
+npx tsx src/workers/run.pms-watchdog.ts
+Limpiar tarjetas nfc= npx tsx src/scripts/nfc.reset.dev.ts
+
+
+  -Body $body
+
+
+
+
+
+$BASE="http://localhost:3000"
+$ORG="cmlk0fpl60000n0o0vo87t6tm"
+
+$body = @{
+  organizationId = $ORG
+  locks = 5
+  fullName = "Test Owner"
+  email = "test-owner@example.com"
+} | ConvertTo-Json
+
+$r = Invoke-RestMethod "$BASE/billing/locks/checkout-session" -Method POST -Body $body -ContentType "application/json"
+$r | ConvertTo-Json -Depth 10
+
+
+
+
+$HDRS = @{ "x-org-id"="cmlk0fpl60000n0o0vo87t6tm" }
+Invoke-RestMethod "http://localhost:3000/api/org/subscription/status" -Method GET -Headers $HDRS | ConvertTo-Json -Depth 10
+
+
+
+$HDRS = @{ "x-org-id"="cmlk0fpl60000n0o0vo87t6tm" }
+Invoke-RestMethod "http://localhost:3000/api/org/subscription/status" -Method GET -Headers $HDRS -TimeoutSec 10
+
+
+
+$HDRS=@{"x-org-id"="cmlk0fpl60000n0o0vo87t6tm"}
+Invoke-RestMethod "http://localhost:3000/api/org/subscription/status" -Headers $HDRS
+
+
+Invoke-WebRequest "http://localhost:3000/api/org/subscription/status" -Headers @{ "x-org-id"="cmlk0fpl60000n0o0vo87t6tm" } -UseBasicParsing
+
+
+$HDRS=@{"x-org-id"="cmlk0fpl60000n0o0vo87t6tm"}
+Invoke-RestMethod "http://localhost:3000/api/org/subscription/status" -Headers $HDRS -TimeoutSec 10 | ConvertTo-Json -Depth 10
+
+
+$BASE="http://localhost:3000"
+$body=@{
+  organizationId="cmlk0fpl60000n0o0vo87t6tm"
+  propertyId="cmlk0hm290001n0o03hbh9j49"
+} | ConvertTo-Json
+
+Invoke-RestMethod "$BASE/api/org/ttlock/sync-locks" -Method POST -Body $body -ContentType "application/json" | ConvertTo-Json -Depth 10
+
+
+$BASE="http://localhost:3000"
+$body=@{
+  organizationId="cmlk0fpl60000n0o0vo87t6tm"
+  propertyId="cmlk0hm290001n0o03hbh9j49"
+} | ConvertTo-Json
+
+Invoke-RestMethod "$BASE/api/org/ttlock/sync-locks" -Method POST -Body $body -ContentType "application/json" | ConvertTo-Json -Depth 10
+
+
+
+$body=@{
+  username="pe-nf@hotmail.com"
+  password="ff44273961"
+} | ConvertTo-Json
+
+Invoke-RestMethod "$BASE/api/org/ttlock/connect" `
+  -Method POST -Headers $HDRS -Body $body -ContentType "application/json" | ConvertTo-Json -Depth 10
+
+
+
+$BASE="http://localhost:3000"
+
+$body=@{
+  organizationId = "cmlk0fpl60000n0o0vo87t6tm"
+  username       = "pe-nf@hotmail.com"   # normalmente email o usuario TTLock
+  password       = "ff44273961"   # plain (el código lo md5 adentro)
+} | ConvertTo-Json
+
+Invoke-RestMethod "$BASE/api/org/ttlock/connect" `
+  -Method POST -Body $body -ContentType "application/json" | ConvertTo-Json -Depth 10
+
+$body=@{
+  deactivateLockId="cmlk970g40007n0v4z02vieua"
+  activateLockId="cmlk970f40003n0v459gdbx6o"
+} | ConvertTo-Json
+
+Invoke-RestMethod "$BASE/api/org/locks/swap" `
+  -Method POST -Headers $HDRS -Body $body -ContentType "application/json" | ConvertTo-Json -Depth 10
+
+
+
+$body=@{
+  propertyId="cmlk0hm290001n0o03hbh9j49"
+  ttlockLockId="25439884"
+  ttlockLockName="M302_d19108"
+} | ConvertTo-Json
+
+Invoke-RestMethod "$BASE/api/org/locks/activate" `
+  -Method POST -Headers $HDRS -Body $body -ContentType "application/json" | ConvertTo-Json -Depth 10
+
+
+$body = @{
+  reservationId = "cmlke0mlo0000n07ge9g9z6x3"
+  ttlockLockId  = 25439884
+  role          = "GUEST"
+  count         = 2
+} | ConvertTo-Json
+
+Invoke-RestMethod -Method POST -Uri "http://localhost:3000/access/nfc/assign" -ContentType "application/json" -Body $body
+
+
+
+$body = @{
+  reservationId = "cmlke0mlo0000n07ge9g9z6x3"
+  ttlockLockId  = 25439884
+  guestCount    = 2
+  cleaningCount = 0
+} | ConvertTo-Json
+
+Invoke-RestMethod -Method POST -Uri "http://localhost:3000/access/nfc/assign" -ContentType "application/json" -Body $body
+
+
+
+$body = @{
+  lockId = 25439884
+  pageNo = 1
+  pageSize = 50
+} | ConvertTo-Json
+
+$r = Invoke-RestMethod -Method POST `
+  -Uri "http://localhost:3000/ttlock/list/cards" `
+  -ContentType "application/json" `
+  -Body $body
+
+$r.ttlockResponse.list | Select-Object cardId, cardName, cardNumber, status | Format-Table -AutoSize
+
+
+
+
+$base="http://localhost:3000"
+$orgId="cmlk0fpl60000n0o0vo87t6tm"
+$propertyId="cmlk0hm290001n0o03hbh9j49"
+
+Invoke-RestMethod "$base/api/org/ttlock/sync-locks" `
+  -Method Post `
+  -Headers @{ "x-org-id" = $orgId } `
+  -ContentType "application/json" `
+  -Body (@{ propertyId = $propertyId } | ConvertTo-Json)
+
+
+
+Invoke-RestMethod "http://localhost:3000/api/org/ttlock/sync-locks" `
+-Headers @{ "x-org-id" = "cmlk0fpl60000n0o0vo87t6tm" } `
+-Method POST `
+-Body '{"propertyId":"Condominio Alondra"}' `
+-ContentType "application/json"
+
+
+$propertyId="Condominio Alondra"cmlk966080001n0v4x3htqxli
+
+Invoke-RestMethod "$base/api/org/ttlock/sync-locks" `
+-Headers @{ "x-org-id" = $orgId } `
+-Method POST `
+-Body (@{ propertyId = $propertyId } | ConvertTo-Json) `
+-ContentType "application/json"
+
+
+
+$ORG_ID="cmlk0fpl60000n0o0vo87t6tm"
+$LOCK_ID="cmlk970f40003n0v459gdbx6o"
+$PROPERTY_ID="cmlmcepkz0001n0cghiw6nlao"
+
+$body = @{
+  orgId=$ORG_ID
+  lockId=$LOCK_ID
+  propertyId=$PROPERTY_ID
+} | ConvertTo-Json
+
+Invoke-RestMethod `
+  -Uri "http://localhost:3000/api/org/locks/assign" `
+  -Method POST `
+  -ContentType "application/json" `
+  -Body $body
+
+
+
+
+$body = @{
+  organizationId = "cmlk0fpl60000n0o0vo87t6tm"
+  propertyId     = "cmlmcepkz0001n0cghiw6nlao"
+  ttlockLockId   = 25439884
+} | ConvertTo-Json
+
+Invoke-RestMethod `
+  -Uri "http://localhost:3000/api/org/locks/activate" `
+  -Method POST `
+  -ContentType "application/json" `
+  -Body $body
+
+
+
+
+$body = @{
+  lockId    = "cmlk970f40003n0v459gdbx6o"
+  cardId    = "cmlmm5deb0002n0cgitgfuhre"
+  guestName = "TEST HAPPY PATH"
+  startDate = (Get-Date).AddMinutes(-2).ToString("o")
+  endDate   = (Get-Date).AddMinutes(30).ToString("o")
+} | ConvertTo-Json
+
+Invoke-RestMethod `
+  -Uri "http://localhost:3000/reservation/checkin" `
+  -Method POST `
+  -ContentType "application/json" `
+  -Body $body
+
+
+
+$body = @{
+  reservationId = "cmlmp0lyz0000n0qwmnhzhcen"
+  ttlockLockId  = 25439884
+  cleaningCount = 1
+  guestCount    = 0
+  force         = $true
+} | ConvertTo-Json -Compress
+
+Invoke-RestMethod `
+  -Method POST `
+  -Uri "http://localhost:3000/access/nfc/assign" `
+  -ContentType "application/json" `
+  -Body $body
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+model NfcCard {
+  id           String        @id @default(cuid())
+  propertyId   String
+  label        String?
+  ttlockCardId Int
+  status       NfcCardStatus @default(AVAILABLE)
+
+  createdAt    DateTime      @default(now())
+  updatedAt    DateTime      @updatedAt
+
+  assignments  NfcAssignment[]
+
+  @@index([propertyId, status])
+  @@unique([propertyId, ttlockCardId])
+}
+
+model NfcAssignment {
+  id            String              @id @default(cuid())
+  reservationId String
+  nfcCardId     String
+  role          NfcAssignmentRole
+  status        NfcAssignmentStatus @default(ACTIVE)
+
+  startsAt      DateTime
+  endsAt        DateTime
+
+  lastError     String?
+
+  createdAt     DateTime            @default(now())
+  updatedAt     DateTime            @updatedAt
+
+  reservation   Reservation         @relation(fields: [reservationId], references: [id], onDelete: Cascade)
+  nfcCard       NfcCard             @relation(fields: [nfcCardId], references: [id])
+
+  @@index([reservationId, status])
+  @@index([nfcCardId, status])
+}
+
+
+✅ Cambio 2 (recomendado): agrega backrelation en NfcCard si no lo pusiste
+
+Si ya lo tienes así, perfecto. Si no, asegúrate:
+
+assignments NfcAssignment[]
+
+
+Ejemplo:
+
+model NfcCard {
+  id           String @id @default(cuid())
+  // ...
+
+  assignments  NfcAssignment[]   // ✅
+}
+
+
+Cómo lo haría en Pin&Go (sin cargar el sistema)
+1) Convención de nombres en TTLock (como propones)
+
+Guest-1
+
+Guest-2
+
+Cleaning Service
+
+Perfecto.
+
+2) En Prisma NO creas otra tabla, solo mejoras NfcCard
+
+Tu tabla NfcCard ya existe. Solo agrega un campo que Pin&Go use para clasificar:
+
+Opción recomendada: roleTag
+
+GUEST
+
+CLEANING
+
+Ejemplo en Prisma:
+
+enum NfcCardRoleTag {
+  GUEST
+  CLEANING
+}
+
+model NfcCard {
+  // ...
+  label      String?
+  roleTag    NfcCardRoleTag? // <- nuevo
+}
+
+3) En el import desde TTLock, auto-clasificas por nombre
+
+Cuando haces /api/admin/nfc/import-from-ttlock, tu backend ya recibe:
+
+cardName
+
+cardId
+
+Ahí mismo haces:
+
+si cardName empieza con "Guest" → roleTag = GUEST
+
+si contiene "Cleaning" → roleTag = CLEANING
+
+si no matchea → roleTag = null (y no se usa para asignación automática)
+
+✅ Así no “cargas el sistema”. Solo guardas cardId + nombre + tag una vez.
+
+4) Asignación automática usando roleTag
+
+Tu lógica de assign queda así:
+
+Para huéspedes: escoger 2 tarjetas AVAILABLE con roleTag = GUEST
+
+Para limpieza: escoger 1 tarjeta AVAILABLE con roleTag = CLEANING y activar con la ventana corta (checkout+30m hasta check-in)
+
+Eso te permite que el admin solo administre nombres en TTLock, y Pin&Go hace el resto.
+
+Lo único que sí te recomiendo (para evitar problemas)
+
+No confíes solo en el nombre “porque alguien puede escribir mal”.
+
+Pon una regla simple:
+
+Si faltan tarjetas para el rol (ej. no hay 2 GUEST disponibles), responder con error claro:
+
+“Faltan tarjetas GUEST disponibles: importa desde TTLock o revisa nombres”.
+
+En resumen
+
+Tu enfoque funciona y es elegante:
+
+TTLock = fuente de verdad de tarjetas
+
+Pin&Go solo “lee” y clasifica por cardName
+
+Prisma guarda el ttlockCardId y un roleTag
+
+Asignación automática por rol
+
+Si quieres, te paso los cambios exactos (archivo por archivo) para:
+
+añadir roleTag a Prisma
+
+actualizar tu endpoint import-from-ttlock para setearlo por cardName
+
+hacer que /access/nfc/assign filtre por roleTag
+
+¿Quieres que lo hagamos con tags exactos (Guest-1, Guest-2, Cleaning Service) o con reglas tipo “empieza por Guest / contiene Cleaning”?
+
+
+
+
+$body = @{
+  reservationId = "cmlokuwao0001n07cr7yqr47g"
+  ttlockLockId  = 25439884
+  guestCount    = 2
+  cleaningCount = 1
+} | ConvertTo-Json
+
+Invoke-RestMethod -Method POST -Uri "http://localhost:3000/access/nfc/assign" -ContentType "application/json" -Body $body
+
+
+
+
+$body = @{
+  lockId = 25439884
+  cardId = 135660086
+  startDate = [DateTimeOffset]::Now.ToUnixTimeMilliseconds()
+  endDate   = [DateTimeOffset]::Now.AddHours(24).ToUnixTimeMilliseconds()
+  guestName = "Freddie"
+} | ConvertTo-Json
+
+Invoke-RestMethod -Method POST `
+  -Uri "http://127.0.0.1:3000/reservation/checkin" `
+  -ContentType "application/json" `
+  -Body $body | ConvertTo-Json -Depth 20
+
+
+
+Buscar tarjetas por cerraduras
+
+Invoke-RestMethod "http://127.0.0.1:3000/debug/ttlock/cards?lockId=25439884" | ConvertTo-Json -Depth 50
+
+
+log("NFC changePeriod payload", {
+  lockId: 25439884,
+  cardId: 135660086,
+  startDate: grant.startsAt.getTime(),
+  endDate: grant.endsAt.getTime(),
+  now: Date.now(),
+  diffStartMin: Math.round((grant.startsAt.getTime() - Date.now()) / 60000),
+  diffEndMin: Math.round((grant.endsAt.getTime() - Date.now()) / 60000),
+
+
+});
+
+
+npx tsx scripts/delete-property.ts <Condominio Alondra>
+npx tsx scripts/dedupe-nfc.ts <cmlmcepkz0001n0cghiw6nlao>
+
+
+
+$body = @{
+  eventType = "reservation.created"
+  externalEventId = "EVT-3"
+  reservation = @{
+    provider = "GUESTY"
+    externalReservationId = "R-123"
+    externalListingId = "L-999"
+    status = "Cancelled"
+    checkIn = "2026-03-01T15:00:00Z"
+    checkOut = "2026-03-05T11:00:00Z"
+    guest = @{ name="John Doe"; phone="+17875551234"; email="john@test.com" }
+    notes = "Late check-in"
+  }
+} | ConvertTo-Json -Depth 10
+
+Invoke-RestMethod -Method POST -Uri "http://localhost:3000/webhooks/pms/GUESTY/cmlzy89tn0000n02szyf0h3g4" -ContentType "application/json" -Body $body
+
+http://localhost:3000/webhooks/pms/GUESTY/cmlzy89tn0000n02szyf0h3g4
+
+
+$body1 = @{
+  source = "PMS"
+  propertyId = "cmlmcepkz0001n0cghiw6nlao"
+  guestName = "John Doe"
+  guestEmail = "john@example.com"
+  guestPhone = $null
+  roomName = "Unit 101"
+  checkIn = "2026-03-10T20:00:00.000Z"
+  checkOut = "2026-03-12T16:00:00.000Z"
+  paymentState = "PAID"
+  externalProvider = "guesty"
+  externalId = "GUESTY-ABC123"
+} | ConvertTo-Json
+
+Invoke-RestMethod -Method POST `
+  -Uri "http://localhost:3000/api/ingest/reservations" `
+  -ContentType "application/json" `
+  -Body $body1
+
+
+$body2 = @{
+  source = "PMS"
+  propertyId = "cmlmcepkz0001n0cghiw6nlao"
+  guestName = "John Smith"
+  guestEmail = "john.smith@example.com"
+  roomName = "Unit 101"
+  checkIn = "2026-03-10T14:55:24.441Z"
+  checkOut = "2026-03-13T14:58:52.680Z"
+  paymentState = "PAID"
+  externalProvider = "guesty"
+  externalId = "GUESTY-ABC123"
+} | ConvertTo-Json
+
+Invoke-RestMethod -Method POST -Uri "http://localhost:3000/api/ingest/reservations" -ContentType "application/json" -Body $body2
+
+
+
+$bodyCancel = @{
+  source="PMS"
+  propertyId="cmlmcepkz0001n0cghiw6nlao"
+  guestName="John Doe"
+  guestEmail="john@example.com"
+  roomName="Unit 101"
+  checkIn="2026-03-01T17:19:43.946Z"
+  checkOut="2026-03-03T17:16:43.946Z"
+  paymentState="PAID"
+  externalProvider="guesty"
+  externalId="GUESTY-ABC123"
+  status="CANCELLED"
+  externalUpdatedAt="2026-03-01T12:00:00.000Z"
+} | ConvertTo-Json
+
+Invoke-RestMethod -Method POST -Uri "http://localhost:3000/api/ingest/reservations" -ContentType "application/json" -Body $bodyCancel
+
+
+$bodyNew = @{
+  source = "PMS"
+  propertyId = "cmlmcepkz0001n0cghiw6nlao"
+  guestName = "John Doe"
+  guestEmail = "john@example.com"
+  roomName = "Unit 101"
+  checkIn = "2026-03-10T20:00:00.000Z"
+  checkOut = "2026-03-14T16:00:00.000Z"
+  paymentState = "PAID"
+
+  externalProvider = "guesty"
+  externalId = "GUESTY-ABC123"
+
+  externalUpdatedAt = "2026-03-11T11:40:00.000Z"  # ✅ más nuevo que 10:00
+} | ConvertTo-Json
+
+Invoke-RestMethod -Method POST -Uri "http://localhost:3000/api/ingest/reservations" -ContentType "application/json" -Body $bodyNew
+
+
+$rid = "GUESTY-NEW-" + (Get-Random)
+$bodyNewRes = @{
+  source = "PMS"
+  propertyId = "cmlmcepkz0001n0cghiw6nlao"
+  guestName = "Test Guest"
+  guestEmail = "test.guest@example.com"
+  roomName = "Unit 101"
+  checkIn = "2026-03-04T11:45:47.587Z"
+  checkOut = "2026-03-04T12:13:18.761Z"
+  paymentState = "PAID"
+  externalProvider = "guesty"
+  externalId = $rid
+  externalUpdatedAt = "2026-03-12T11:30:00.000Z"
+} | ConvertTo-Json
+
+Invoke-RestMethod -Method POST -Uri "http://localhost:3000/api/ingest/reservations" -ContentType "application/json" -Body $bodyNewRes
+
+$bodyCancel = @{
+  source = "PMS"
+  propertyId = "cmlmcepkz0001n0cghiw6nlao"
+  guestName = "Test Guest"
+  guestEmail = "test.guest@example.com"
+  roomName = "Unit 101"
+  checkIn = "2026-03-04T11:45:47.587Z"
+  checkOut = "2026-03-07T12:45:10.833Z"
+  paymentState = "PAID"
+  externalProvider = "guesty"
+  externalId = $rid
+  externalUpdatedAt = "2026-03-12T12:30:00.000Z"
+  status = "CANCELLED"
+} | ConvertTo-Json
+
+Invoke-RestMethod -Method POST -Uri "http://localhost:3000/api/ingest/reservations" -ContentType "application/json" -Body $bodyCancel
+
+

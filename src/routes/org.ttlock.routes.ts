@@ -57,6 +57,7 @@ export function buildOrgTtlockRouter(prisma: PrismaClient) {
    * Devuelve lista de locks desde TTLock para esa org.
    */
   router.get("/ttlock/locks", async (req, res) => {
+   console.log("[org.ttlock] HIT /ttlock/locks", { q: req.query, at: new Date().toISOString() });
     try {
       const organizationId = String(req.query.organizationId ?? "").trim();
       if (!organizationId) {

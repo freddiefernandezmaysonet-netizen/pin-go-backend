@@ -2,6 +2,7 @@ import { prisma } from "../../lib/prisma";
 import { AccessMethod, AccessStatus } from "@prisma/client";
 import { ttlockGetPasscode, ttlockDeletePasscode } from "../../ttlock/ttlock.passcode";
 import { ttlockChangeCardPeriod } from "../../ttlock/ttlock.card";
+import { assignNfcCards } from "../nfc.service";
 
 function phoneTo7Digits(phone?: string | null) {
   if (!phone) return null;
@@ -45,7 +46,8 @@ export async function activateGrant(grantId: string) {
   // 💳 NFC (TIMEBOUND) — usamos ttlockRefId como cardId (string -> number)
   // Regla: ttlockRefId debe contener el cardId numérico de TTLock (si no, no activamos NFC)
   let nfcResult: any = null;
-  if (grant.method === AccessMethod.NFC_TIMEBOUND) {
+  
+if (grant.method === AccessMethod.NFC_TIMEBOUND) {
     const cardId = toIntOrNull(grant.ttlockRefId);
     if (!cardId) {
       throw new Error("NFC_TIMEBOUND grant missing numeric ttlockRefId (cardId)");
@@ -109,7 +111,7 @@ if (grant.method === AccessMethod.PASSCODE_TIMEBOUND) {
     ...(grant.ttlockPayload as any),
     activatedAt: Date.now(),
    otp: otpPayload ? { keyboardPwdId: keyboardPwdId, raw: otpPayload } : null,
-   nfc: nfcResult,
+   nfc: nfcResult ?? null,
   },
 },
 

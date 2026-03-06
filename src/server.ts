@@ -6,6 +6,7 @@ import bodyParser from "body-parser";
 import { registerStripeWebhook } from "./webhooks/stripe.webhook";
 
 // Routers
+import { pmsWebhookRouter } from "./pms/ingest/webhook.routes";
 import { buildTTLockRouter } from "./routes/ttlock.routes";
 import { buildReservationRouter } from "./routes/reservation.routes";
 import { buildAccessRouter } from "./routes/access.routes";
@@ -17,21 +18,31 @@ import { buildStaffRouter } from "./routes/staff.routes";
 import { buildCleaningRouter } from "./routes/cleaning.routes";
 import adminReactivateRoutes from "./routes/admin.reactivate.routes";
 // import devRoutes from "./routes/dev.routes";
-  import { buildAccessNfcRouter } from "./routes/access.nfc.routes";
-  import { buildAdminNfcRouter } from "./routes/admin.nfc.routes";
-  import { buildPropertySettingsRouter } from "./routes/property.settings.routes";
-  import { buildAdminLocksRouter } from "./routes/admin.locks.routes";
-  import { buildAdminLocksSwapRouter } from "./routes/admin.locks.swap.routes";
-  import adminUsageRoutes from "./routes/admin.usage.routes";
-  import adminCapacityRoutes from "./routes/admin.capacity.routes";
-  import adminSubscriptionRoutes from "./routes/admin.subscription.routes";
-  import { buildOrgLocksRouter } from "./routes/org.locks.routes";
-  import { buildOrgTtlockRouter } from "./routes/org.ttlock.routes";
-  import { buildOrgTtlockConnectRouter } from "./routes/org.ttlock.connect.routes";
-  import { buildOrgLocksActivateRouter } from "./routes/org.locks.activate.routes";
+import { buildAccessNfcRouter } from "./routes/access.nfc.routes";
+import { buildAdminNfcRouter } from "./routes/admin.nfc.routes";
+import { buildPropertySettingsRouter } from "./routes/property.settings.routes";
+import { buildAdminLocksRouter } from "./routes/admin.locks.routes";
+import { buildAdminLocksSwapRouter } from "./routes/admin.locks.swap.routes";
+import adminUsageRoutes from "./routes/admin.usage.routes";
+import adminCapacityRoutes from "./routes/admin.capacity.routes";
+import adminSubscriptionRoutes from "./routes/admin.subscription.routes";
+import { buildOrgLocksRouter } from "./routes/org.locks.routes";
+  //import { buildOrgTtlockRouter } from "./routes/org.ttlock.routes";
+import { buildOrgTtlockConnectRouter } from "./routes/org.ttlock.connect.routes";
+import { buildOrgLocksActivateRouter } from "./routes/org.locks.activate.routes";
+import { debugRouter } from "./routes/debug.routes";
+//import nfcSyncRouter from "./routes/nfc.sync.routes";
+import { listingsMappingRouter } from "./pms/routes/listings.mapping.routes";
+import { meRouter } from "./routes/me.route";
+import { dashboardRouter } from "./routes/dashboard.route";
+import { dashboardReservationsRouter } from "./routes/dashboard.reservations.route";
+import { dashboardPropertiesRouter } from "./routes/dashboard.properties.route";
+import { dashboardLocksRouter } from "./routes/dashboard.locks.route";
+import { dashboardAccessRouter } from "./routes/dashboard.access.route";
 
 const app = express();
 const prisma = new PrismaClient();
+
 const PORT = Number(process.env.PORT ?? 3000);
 
 // =====================
@@ -47,7 +58,21 @@ registerStripeWebhook(app, prisma);
 // =====================
 // Middleware
 // =====================
-app.use(express.json({ limit: "1mb" }));
+
+app.use(express.json({
+  verify: (req: any, _res, buf) => {
+    req.rawBody = buf;
+  }
+}));
+
+app.use((req, res, next) => {
+  (req as any).user = {
+    id: "dev-user",
+    email: "dev@pingo.com",
+    orgId: "cmlk0fpl60000n0o0vo87t6tm"
+  };
+  next();
+});
 
 // =====================
 // Guest Portal (HTML)
@@ -84,14 +109,25 @@ app.use("/api/admin", buildAdminLocksSwapRouter(prisma));
 app.use("/api/admin", adminUsageRoutes);
 app.use("/api/admin", adminCapacityRoutes);
 app.use("/api/admin", adminSubscriptionRoutes);
-app.use("/api/org", buildOrgLocksRouter(prisma));
-app.use("/api/org", buildOrgTtlockConnectRouter(prisma));
-app.use("/api/org", buildOrgTtlockRouter(prisma));
-app.use("/api/org", buildOrgLocksActivateRouter(prisma));
+//app.use("/api/org", buildOrgLocksRouter(prisma));
+//app.use("/api/org", buildOrgTtlockConnectRouter(prisma));
+//app.use("/api/org", buildOrgTtlockRouter(prisma));
+//app.use("/api/org", buildOrgLocksActivateRouter(prisma));
+app.use("/debug", debugRouter);
+//app.use("/access/nfc", nfcSyncRouter);
+app.use("/webhooks", pmsWebhookRouter);
+app.use("/api/pms/listings", listingsMappingRouter);
+app.use(meRouter);
+app.use(dashboardRouter);
+app.use(dashboardReservationsRouter);
+app.use(dashboardPropertiesRouter);
+app.use(dashboardLocksRouter);
+app.use(dashboardAccessRouter);
 
 // =====================
 // Staff + Cleaning
 // =====================
+
 app.use("/staff", buildStaffRouter(prisma));
 app.use("/", buildCleaningRouter(prisma));
 
@@ -145,6 +181,8 @@ app.post("/debug/reservations/:id/fix-token", async (req, res) => {
 
   res.json({ ok: true, updated });
 });
+
+export default app;
 
 // =====================
 // Start server

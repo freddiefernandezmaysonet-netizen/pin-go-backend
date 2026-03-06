@@ -190,7 +190,7 @@ export async function ttlockDeletePasscode(params: {
   const lockId = Number(params.lockId);
   if (!Number.isFinite(lockId) || lockId <= 0) throw new Error("Invalid lockId");
 
-  return postForm(`${base}/v3/keyboardPwd/delete`, {
+  return postFormWithRetry(`${base}/v3/keyboardPwd/delete`, {
     clientId,
     accessToken: token.access_token,
     lockId,
@@ -198,6 +198,39 @@ export async function ttlockDeletePasscode(params: {
     deleteType: Number(params.deleteType ?? 2),
     date: Date.now(),
   });
+}
+
+function sleep(ms: number) {
+  return new Promise((r) => setTimeout(r, ms));
+}
+
+async function postFormWithRetry(
+  url: string,
+  form: Record<string, string | number | undefined>,
+  opts?: { retries?: number; baseDelayMs?: number }
+) {
+  const retries = opts?.retries ?? 5;
+  const baseDelayMs = opts?.baseDelayMs ?? 800;
+
+  let lastErr: any = null;
+
+  for (let attempt = 0; attempt <= retries; attempt++) {
+    try {
+      return await postForm(url, form); // usa tu postForm existente
+    } catch (e: any) {
+      lastErr = e;
+
+      const msg = String(e?.message ?? e);
+      const isBusy = msg.includes("errcode=-3003") || msg.toLowerCase().includes("gateway is busy");
+
+      if (!isBusy || attempt === retries) throw e;
+
+      const delay = baseDelayMs * Math.pow(2, attempt); // 800,1600,3200,6400,12800...
+      await sleep(delay);
+    }
+  }
+
+  throw lastErr;
 }
 
 /**

@@ -1,20 +1,23 @@
 // src/services/nfc-sync.service.ts
 import { prisma as prismaSingleton } from "../lib/prisma";
-import { Prisma, PrismaClient } from "@prisma/client";
+import { PrismaClient, NfcAssignmentStatus } from "@prisma/client";
 import { ttlockChangeCardPeriod } from "../ttlock/ttlock.card";
 
 export async function retryPendingNfcSync(db?: PrismaClient, now: Date = new Date()) {
   const prisma = db ?? prismaSingleton;
 
   const batch = await prisma.nfcAssignment.findMany({
-    where: {
-      status: Prisma.NfcAssignmentStatus.FAILED,
-      lastError: { startsWith: "RETRYABLE:" },
-    },
-    include: { nfcCard: true },
-    take: 20,
-    orderBy: { updatedAt: "asc" },
-  });
+  where: {
+    status: NfcAssignmentStatus.FAILED,
+    lastError: { startsWith: "RETRYABLE:" },
+  },
+  include: {
+    NfcCard: true,
+    Reservation: true,
+  },
+  take: 20,
+  orderBy: { updatedAt: "asc" },
+});
 
   let retried = 0;
   let activated = 0;
@@ -23,7 +26,7 @@ export async function retryPendingNfcSync(db?: PrismaClient, now: Date = new Dat
     retried++;
     if (a.endsAt <= now) continue;
 
-    const card = (a as any).nfcCard;
+    const card = (a as any).NfcCard;
     if (!card) continue;
 
     try {
@@ -37,7 +40,7 @@ export async function retryPendingNfcSync(db?: PrismaClient, now: Date = new Dat
 
       await prisma.nfcAssignment.update({
         where: { id: a.id },
-        data: { status: Prisma.NfcAssignmentStatus.ACTIVE, lastError: null },
+        data: { status: NfcAssignmentStatus.ACTIVE, lastError: null },
       });
 
       activated++;

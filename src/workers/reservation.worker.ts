@@ -8,17 +8,24 @@ import {
   AccessGrantType,
   StaffAssignmentStatus,
   StaffAccessMethod,
+  NfcAssignmentRole,
+  NfcAssignmentStatus,
 } from '@prisma/client';
 
 import { isOrgEntitled } from "../services/billing.entitlement";
-
 import { activateGrant, deactivateGrant } from "../services/ttlock/ttlock.brain";
-
+import { assignNfcCards } from "../services/nfc.service";
 import { sendSms } from '../integrations/twilio/twilio.client';
 import { sendGuestAccessLinkSms } from "../services/guestLinkSms.service";
 import { expireNfcAssignments } from "../services/nfc-expire.service";
+import { expireGuestNfcAssignments } from "../services/nfc-expire.service";
+import { expireCleaningNfcAssignments } from "../services/nfc-expire.service";
 import { retryPendingNfcSync } from "../services/nfc-sync.service";
 import { retryNfcAssignments } from "../services/nfc-retry.service";
+import { ttlockChangeCardPeriod, ttlockListCards } from "../ttlock/ttlock.card";
+import { NfcCardStatus } from "@prisma/client";
+import { unassignAllNfcForReservation } from "../services/nfc.service";
+import { unassignGuestNfcForReservation } from "../services/nfc.service";
 
 console.log("[reservation.worker] BOOT", new Date().toISOString());
 
@@ -50,7 +57,6 @@ const POLL_MS = Number(process.env.RESERVATION_WORKER_POLL_MS ?? 10_000);
 const BATCH_SIZE = Number(process.env.RESERVATION_WORKER_BATCH_SIZE ?? 20);
 const REMINDER_ON = process.env.GUEST_LINK_SMS_REMINDER === "1";
 const REMINDER_HOURS = Number(process.env.GUEST_LINK_REMINDER_HOURS ?? 24);
-
 async function processGuestLinkReminders(now: Date) {
   if (!REMINDER_ON) return;
 
@@ -142,7 +148,7 @@ async function processGuestLinkReminders(now: Date) {
       } catch {}
     }
   }
-} // ✅ ESTA LLAVE ERA LA QUE TE FALTABA
+} 
 
 // Si quieres permitir activación sin pago (por pruebas), pon ALLOW_UNPAID=1
 const ALLOW_UNPAID = process.env.ALLOW_UNPAID === '1';
@@ -404,6 +410,219 @@ for (const r of reservations) {
     data: { lastError: null },
   });
 
+// 1) Activar grant usando TTLock Brain (maneja TTLock + Prisma)
+
+  const res = await activateGrant(grant.id);
+  if ((res as any)?.ok === true || (res as any)?.skipped === true) {
+  await prisma.accessGrant.update({ where: { id: grant.id }, data: { lastError: null } });
+
+// ===== PIN&GO: ENSURE CLEANING STAFF ASSIGNMENT (SCHEDULED) =====
+const prop = await prisma.property.findUnique({
+  where: { id: r.propertyId },
+  select: {
+    organizationId: true,
+    cleaningStartOffsetMinutes: true,
+    cleaningDurationMinutes: true,
+  },
+});
+
+if (!prop?.organizationId) {
+  errLog("Cleaning schedule skipped: missing property.organizationId", {
+    reservationId: r.id,
+    propertyId: r.propertyId,
+  });
+} else {
+  // Elige el cleaner "default": el más viejo activo (puedes cambiar el criterio luego)
+  const cleaner = await prisma.staffMember.findFirst({
+    where: { organizationId: prop.organizationId, isActive: true },
+    orderBy: { createdAt: "asc" },
+  });
+
+  if (!cleaner) {
+    errLog("Cleaning schedule skipped: no active StaffMember", {
+      reservationId: r.id,
+      organizationId: prop.organizationId,
+    });
+  } else {
+    const offsetMin = prop.cleaningStartOffsetMinutes ?? 30;
+    const durMin = prop.cleaningDurationMinutes ?? 180;
+
+    const checkOut = new Date(r.checkOut);
+    const cleaningStart = new Date(checkOut.getTime() + offsetMin * 60_000);
+    const cleaningEnd = new Date(cleaningStart.getTime() + durMin * 60_000);
+
+try {
+  const lock = await prisma.lock.findUnique({ where: { id: grant.lockId } });
+  const ttlockLockId = lock?.ttlockLockId;
+  if (!ttlockLockId) throw new Error("Missing lock.ttlockLockId for cleaning pre-assign");
+
+  await assignNfcCards(prisma, {
+    reservationId: r.id,
+    ttlockLockId: Number(ttlockLockId),
+    propertyId: String(r.propertyId),
+    role: "CLEANING",
+    startsAt: cleaningStart,
+    endsAt: cleaningEnd,
+    count: 1,
+  } as any);
+
+  log("Cleaning NFC pre-assigned", { reservationId: r.id });
+} catch (e: any) {
+  errLog("Cleaning NFC pre-assign FAILED", { reservationId: r.id, err: toErrString(e) });
+}
+
+    // ✅ idempotente por @@unique([reservationId, staffMemberId])
+    const existing = await prisma.staffAssignment.findUnique({
+      where: {
+        reservationId_staffMemberId: {
+          reservationId: r.id,
+          staffMemberId: cleaner.id,
+        },
+      },
+    });
+
+    if (!existing) {
+      await prisma.staffAssignment.create({
+        data: {
+          reservationId: r.id,
+          staffMemberId: cleaner.id,
+          method: StaffAccessMethod.NFC_TIMEBOUND,
+          startsAt: cleaningStart,
+          endsAt: cleaningEnd,
+          status: StaffAssignmentStatus.SCHEDULED,
+        },
+      });
+
+      log("Cleaning scheduled", {
+        reservationId: r.id,
+        staffMemberId: cleaner.id,
+        cleaningStart: cleaningStart.toISOString(),
+        cleaningEnd: cleaningEnd.toISOString(),
+      });
+    }
+  }
+}
+
+
+  // ✅ 2) ACTIVAR NFC (GUEST) por periodo via GATEWAY (changeType=2)
+  try {
+    // 2A) Necesitamos el lockId real TTLock
+    // Opción A: si grant ya trae lock embebido (ideal)
+    // const ttlockLockId = (grant as any)?.lock?.ttlockLockId;
+
+    // Opción B: lookup rápido por DB (seguro y simple)
+    const lock = await prisma.lock.findUnique({ where: { id: grant.lockId } });
+    const ttlockLockId = lock?.ttlockLockId;
+
+    if (!ttlockLockId) throw new Error("Missing grant.lock.ttlockLockId");
+
+// 2B) Buscar asignaciones NFC de esa reserva (solo GUEST)
+let assigns = await prisma.nfcAssignment.findMany({
+  where: {
+    reservationId: r.id,
+    role: NfcAssignmentRole.GUEST,
+    status: { in: [NfcAssignmentStatus.ACTIVE, NfcAssignmentStatus.FAILED, NfcAssignmentStatus.ENDED] },
+  },
+  include: { NfcCard: true },
+});
+
+const GUEST_CARDS = 2;
+
+// assigns ya viene del findMany include NfcCard
+if (assigns.length < GUEST_CARDS) {
+  await assignNfcCards(prisma, {
+    reservationId: r.id,
+    ttlockLockId: Number(ttlockLockId),
+    propertyId: String(r.propertyId),
+    role: NfcAssignmentRole.GUEST,
+    startsAt: grant.startsAt,
+    endsAt: grant.endsAt,
+    count: GUEST_CARDS - assigns.length, // ✅ completa hasta 2
+    skipTtlock: true,
+  });
+
+  assigns = await prisma.nfcAssignment.findMany({
+    where: {
+      reservationId: r.id,
+      role: NfcAssignmentRole.GUEST,
+      status: { in: [NfcAssignmentStatus.ACTIVE, NfcAssignmentStatus.FAILED, NfcAssignmentStatus.ENDED] },
+    },
+    include: { NfcCard: true },
+ 
+  });
+}
+
+const cardStatuses = await prisma.nfcCard.findMany({
+  where: { id: { in: assigns.map(x => x.nfcCardId) } },
+  select: { label: true, status: true },
+});
+log("NFC guest card statuses", { reservationId: r.id, cardStatuses });
+
+log("NFC assigns after ensure", {
+  reservationId: r.id,
+  count: assigns.length,
+  cards: assigns.map(x => x.NfcCard?.label),
+});
+
+for (const a of assigns) {
+  const cardId = a.NfcCard?.ttlockCardId;
+  if (!cardId) continue;
+
+ console.log("[NFC] TTLOCK changePeriod WILL RUN", {
+  role: a.role,
+  lockId: Number(ttlockLockId),
+  cardId: Number(cardId),
+  start: grant.startsAt.toISOString(),
+  end: grant.endsAt.toISOString(),
+}); 
+
+  try {
+    await ttlockChangeCardPeriod({
+      lockId: Number(ttlockLockId),
+      cardId: Number(cardId),
+      startDate: grant.startsAt.getTime(),
+      endDate: grant.endsAt.getTime(),
+      changeType: 2,
+    });
+
+console.log("[NFC] TTLOCK changePeriod OK", {
+  role: a.role,
+  cardId: Number(cardId),
+});
+  
+   await prisma.$transaction([
+     prisma.nfcAssignment.update({
+       where: { id: a.id },
+       data: { status: NfcAssignmentStatus.ACTIVE, lastError: null },
+     }),
+     prisma.nfcCard.update({
+        where: { id: a.nfcCardId },
+        data: { status: NfcCardStatus.ASSIGNED }, // ✅ ESTA es la clave
+      }),
+    ]);
+  
+  } catch (e: any) {
+    await prisma.nfcAssignment.update({
+      where: { id: a.id },
+      data: { status: NfcAssignmentStatus.FAILED, lastError: String(e?.message ?? e) },
+    });
+    // ✅ sigue con la próxima card
+    continue;
+  }
+}
+
+    log("NFC activated", { reservationId: r.id, count: assigns.length });
+  } catch (e) {
+    const msg = toErrString(e);
+    errLog("NFC activate FAILED", { reservationId: r.id, grantId: grant.id, err: msg });
+
+    // opcional: guarda error en el grant o en assignments
+    await prisma.accessGrant.update({
+      where: { id: grant.id },
+      data: { lastError: `NFC_FAILED: ${msg}` },  
+      });
+  }
+}
   if (locked.count === 0) continue;
 
   // ===== CAMBIO 2: BILLING GATE (VA AQUÍ) =====
@@ -434,11 +653,6 @@ for (const r of reservations) {
   }
   // ===== FIN CAMBIO 2 =====
 
-// 1) Activar grant usando TTLock Brain (maneja TTLock + Prisma)
-const res = await activateGrant(grant.id);
-if ((res as any)?.ok === true || (res as any)?.skipped === true) {
-  await prisma.accessGrant.update({ where: { id: grant.id }, data: { lastError: null } });
-}
 
 // 3) SMS guest (flag)
 const phone = r.guestPhone;
@@ -486,7 +700,65 @@ const code = (res as any)?.passcodePlain ?? null;
   }
 }
 
-async function processCheckouts(now: Date) {
+async function activateGuestNfcAssignmentsForReservation(params: {
+  reservationId: string;
+  lockIdTtlock: number;
+  startsAt: Date;
+  endsAt: Date;
+}) {
+  const { reservationId, lockIdTtlock, startsAt, endsAt } = params;
+
+  const assigns = await prisma.nfcAssignment.findMany({
+    where: {
+      reservationId,
+      role: "GUEST" as any,
+      status: { in: ["ACTIVE", "FAILED", "ENDED"] as any },
+    },
+    include: { NfcCard: true }, // ✅ OJO: relación se llama NfcCard en tu schema
+  });
+
+  let activated = 0;
+
+  for (const a of assigns) {
+    const cardId = a.NfcCard?.ttlockCardId;
+    if (!cardId) continue;
+
+    try {
+      await ttlockChangeCardPeriod({
+        lockId: Number(lockIdTtlock),
+        cardId: Number(cardId),
+        startDate: startsAt.getTime(),
+        endDate: endsAt.getTime(),
+        changeType: 2, // gateway
+      });
+
+      await prisma.$transaction([
+        prisma.nfcAssignment.update({
+          where: { id: a.id },
+          data: { status: NfcAssignmentStatus.ACTIVE, lastError: null },
+        }),
+        prisma.nfcCard.update({
+          where: { id: a.nfcCardId },
+          data: { status: NfcCardStatus.ASSIGNED },
+        }),
+      ]);
+
+      activated++;
+    } catch (e) {
+      const msg = toErrString(e);
+      await prisma.nfcAssignment
+        .update({
+          where: { id: a.id },
+          data: { status: NfcAssignmentStatus.FAILED, lastError: `TTLOCK_ACTIVATE_FAILED: ${msg}` },
+        })
+        .catch(() => {});
+    }
+  }
+
+  return { ok: true, activated };
+}
+
+ async function processCheckouts(now: Date) {
   const reservations = await fetchDueCheckouts(now);
   log('processCheckouts result', { count: reservations.length });
 
@@ -509,6 +781,43 @@ async function processCheckouts(now: Date) {
       
         // 1) Revocar usando TTLock Brain (maneja TTLock + Prisma)
 await deactivateGrant(grant.id);
+
+try {
+  const lock = await prisma.lock.findUnique({ where: { id: grant.lockId } });
+  const ttlockLockId = lock?.ttlockLockId;
+
+  if (ttlockLockId) {
+    // ✅ SOLO GUEST (NO tocar CLEANING)
+    await unassignGuestNfcForReservation(prisma, {
+      reservationId: r.id,
+      ttlockLockId: Number(ttlockLockId),
+    });
+  } else {
+    // ✅ mínimo: cerrar SOLO GUEST en DB si no tenemos ttlockLockId
+    await prisma.nfcAssignment.updateMany({
+      where: {
+        reservationId: r.id,
+        role: NfcAssignmentRole.GUEST,
+        status: NfcAssignmentStatus.ACTIVE,
+      },
+      data: { status: NfcAssignmentStatus.ENDED, lastError: null },
+    });
+
+    await prisma.nfcCard.updateMany({
+      where: {
+        assignments: {
+          some: {
+            reservationId: r.id,
+            role: NfcAssignmentRole.GUEST,
+          },
+        },
+      },
+      data: { status: NfcCardStatus.AVAILABLE },
+    });
+  }
+} catch (e: any) {
+  errLog("NFC revoke failed", { reservationId: r.id, err: toErrString(e) });
+}
 
 // 2) Limpia error si quedó alguno (opcional, safe)
 await prisma.accessGrant.update({
@@ -533,6 +842,64 @@ await prisma.accessGrant.update({
   }
 }
 
+async function revokeGuestNfcAssignmentsForReservation(params: {
+  reservationId: string;
+  lockIdTtlock: number;
+  now: Date;
+}) {
+  const { reservationId, lockIdTtlock, now } = params;
+
+  const assigns = await prisma.nfcAssignment.findMany({
+    where: {
+      reservationId,
+      role: NfcAssignmentRole.GUEST,
+      status: NfcAssignmentStatus.ACTIVE,
+    },
+    include: { NfcCard: true }, // ✅ mayúscula (según tu schema)
+  });
+
+  let ended = 0;
+
+  for (const a of assigns) {
+    const cardId = a.NfcCard?.ttlockCardId;
+    if (!cardId) continue;
+
+    try {
+      // 1) Revocar en TTLock (vencer periodo)
+      await ttlockChangeCardPeriod({
+        lockId: Number(lockIdTtlock),
+        cardId: Number(cardId),
+        startDate: now.getTime(),
+        endDate: now.getTime(),
+        changeType: 2, // gateway
+      });
+
+      // 2) Prisma: ENDED + liberar card AVAILABLE en una sola transacción
+      await prisma.$transaction([
+        prisma.nfcAssignment.update({
+          where: { id: a.id },
+          data: { status: NfcAssignmentStatus.ENDED, lastError: null, endsAt: now },
+        }),
+        prisma.nfcCard.update({
+          where: { id: a.nfcCardId },
+          data: { status: NfcCardStatus.AVAILABLE },
+        }),
+      ]);
+
+      ended++;
+    } catch (e: any) {
+      const msg = String(e?.message ?? e);
+
+      // ⚠️ Si TTLock falló, NO liberamos tarjeta (seguridad)
+      await prisma.nfcAssignment.update({
+        where: { id: a.id },
+        data: { lastError: `TTLOCK_REVOKE_FAILED: ${msg}` },
+      });
+    }
+  }
+
+  return { ok: true, count: ended };
+}
 
 // ---- Cleaning processors ----
 
@@ -564,6 +931,76 @@ async function processCleaningActivations(now: Date) {
         log('Cleaning activation skipped (grant not PENDING)', { grantId: grant.id });
         continue;
       }
+
+// ✅ PIN&GO: ACTIVAR NFC CLEANING EN EL MOMENTO (checkout + offset)
+try {
+  // lock TTLock id
+  const lockIdTt = a.accessGrant?.lock?.ttlockLockId
+    ? Number(a.accessGrant.lock.ttlockLockId)
+    : Number((await prisma.lock.findFirst({
+        where: { propertyId: a.reservation.propertyId, isActive: true },
+        orderBy: { createdAt: "asc" },
+        select: { ttlockLockId: true },
+      }))?.ttlockLockId);
+
+  if (!lockIdTt) throw new Error("Missing ttlockLockId for cleaning activation");
+
+  // buscamos la(s) tarjeta(s) CLEANING pre-asignada(s) a esta reserva
+  const cleanAssigns = await prisma.nfcAssignment.findMany({
+    where: {
+      reservationId: a.reservationId,
+      role: NfcAssignmentRole.CLEANING,
+      // si tu pre-assign la deja ACTIVE, esto basta:
+      status: NfcAssignmentStatus.ACTIVE,
+    },
+    include: { NfcCard: true },
+    orderBy: { createdAt: "asc" },
+    take: 1, // Pin&Go: 1 cleaning
+  });
+
+  if (cleanAssigns.length === 0) {
+    throw new Error("No CLEANING NfcAssignment ACTIVE found to activate");
+  }
+
+  const na = cleanAssigns[0];
+  const cardId = na.NfcCard?.ttlockCardId;
+  if (!cardId) throw new Error("Cleaning assignment missing NfcCard.ttlockCardId");
+
+  // ⚠️ usa la ventana de cleaning (StaffAssignment), NO la del guest grant
+  const startMs = new Date(a.startsAt).getTime();
+  const endMs = new Date(a.endsAt).getTime();
+
+  await ttlockChangeCardPeriod({
+    lockId: lockIdTt,
+    cardId: Number(cardId),
+    startDate: startMs,
+    endDate: endMs,
+    changeType: 2,
+  });
+
+  await prisma.nfcAssignment.update({
+    where: { id: na.id },
+    data: { lastError: null }, // status se queda ACTIVE
+  });
+
+  log("Cleaning NFC activated", {
+    reservationId: a.reservationId,
+    card: na.NfcCard?.label,
+    lockIdTt,
+    start: new Date(startMs).toISOString(),
+    end: new Date(endMs).toISOString(),
+  });
+} catch (e: any) {
+  const msg = toErrString(e);
+  errLog("Cleaning NFC activation FAILED", { staffAssignmentId: a.id, err: msg });
+
+  // deja StaffAssignment ACTIVE pero con error para debug/retry
+  await prisma.staffAssignment.update({
+    where: { id: a.id },
+    data: { lastError: `CLEANING_NFC_FAILED: ${msg}` },
+  }).catch(() => {});
+}
+
 /*
       const payload = await activateGrant(grant, r.guestPhone ?? undefined);
 
@@ -577,8 +1014,102 @@ async function processCleaningActivations(now: Date) {
         },
       });
 */
-      // ===== Cleaning SMS START =====
-      if (CLEANING_SMS_ENABLED) {
+     if (grantLocked.count === 0) {
+       log('Cleaning activation skipped (grant not PENDING)', { grantId: grant.id });
+       continue;
+     }
+
+     // ✅ ===== PIN&GO CLEANING NFC ACTIVATION =====
+      try {
+
+        const lock = await prisma.lock.findUnique({
+          where: { id: grant.lockId },
+        });
+
+        const ttlockLockId = lock?.ttlockLockId;
+        if (!ttlockLockId) throw new Error("Missing ttlockLockId");
+
+        const reservationId = a.reservationId;
+        const propertyId = a.propertyId;
+
+        const cleaningStart = new Date(a.startsAt);
+        const cleaningEnd   = new Date(a.endsAt);
+
+        let assigns = await prisma.nfcAssignment.findMany({
+          where: {
+            reservationId,
+            role: NfcAssignmentRole.CLEANING,
+            status: {
+              in: [
+                NfcAssignmentStatus.ACTIVE,
+                NfcAssignmentStatus.FAILED,
+                NfcAssignmentStatus.ENDED,
+              ],
+            },
+          },
+          include: { NfcCard: true },
+        });
+
+        const CLEANING_CARDS = 1;
+
+        if (assigns.length < CLEANING_CARDS) {
+          await assignNfcCards(prisma, {
+            reservationId,
+            ttlockLockId: Number(ttlockLockId),
+            propertyId: String(propertyId),
+            role: NfcAssignmentRole.CLEANING,
+            startsAt: cleaningStart,
+            endsAt: cleaningEnd,
+            count: CLEANING_CARDS - assigns.length,
+            skipTtlock: false,
+          });
+
+          assigns = await prisma.nfcAssignment.findMany({
+            where: {
+              reservationId,
+              role: NfcAssignmentRole.CLEANING,
+            },
+            include: { NfcCard: true },
+          });
+        }
+
+        for (const na of assigns) {
+         const cardId = na.NfcCard?.ttlockCardId;
+         if (!cardId) continue;
+
+         await ttlockChangeCardPeriod({
+           lockId: Number(ttlockLockId),
+           cardId: Number(cardId),
+           startDate: cleaningStart.getTime(),
+           endDate: cleaningEnd.getTime(),
+           changeType: 2,
+         });
+
+         await prisma.nfcAssignment.update({
+           where: { id: na.id },
+           data: {
+             status: NfcAssignmentStatus.ACTIVE,
+             lastError: null,
+           },
+        });
+      }
+
+      log("NFC cleaning activated", {
+        reservationId,
+        count: assigns.length,
+      });
+
+    } catch (e) {
+      const msg = toErrString(e);
+      errLog("NFC cleaning activate FAILED", {
+        staffAssignmentId: a.id,
+        grantId: grant.id,
+        err: msg,
+      });
+    }
+
+       // ===== Cleaning SMS START =====
+       if (CLEANING_SMS_ENABLED) {
         try {
           const phone = a.staffMember?.phoneE164;
           if (!phone) {
@@ -745,14 +1276,14 @@ async function tick() {
   } catch (e) {
     errLog('runCheckins crashed:', toErrString(e));
   }
-/*
+
 try {
   const r = await retryPendingNfcSync(prisma, now);
   if (r.activated > 0) log("nfc-retry", r);
 } catch (e) {
   errLog("nfc-retry crashed:", toErrString(e));
 }
-*/
+
   try {
     await processGuestLinkReminders(now);
   } catch (e) {
@@ -765,7 +1296,7 @@ try {
     errLog('runCheckouts crashed:', toErrString(e));
   }
 
-/* 
+ /*
 try {
   const r = await retryNfcAssignments(prisma, now);
   if (r.activated || r.retired) log("nfc-retry", r);
@@ -780,8 +1311,22 @@ try {
   } catch (e) {
     errLog("nfc-expire crashed:", toErrString(e));
   }
-
 */
+
+try {
+  const r = await expireGuestNfcAssignments(prisma, now);
+  if (r.count > 0) log("processGuestEnds (NFC) result", r);
+} catch (e) {
+  errLog("processGuestEnds (NFC) crashed", { err: toErrString(e) });
+}
+
+try {
+  const r = await expireCleaningNfcAssignments(prisma, now);
+  if (r.count > 0) log("processCleaningEnds (NFC) result", r);
+} catch (e) {
+  errLog("processCleaningEnds (NFC) crashed", { err: toErrString(e) });
+}
+
   // Limpieza (STAFF) corre en su propio carril
   try {
     await processCleaningActivations(now);
@@ -841,3 +1386,6 @@ void start().catch((e) => {
   errLog('Fatal start error:', toErrString(e));
   process.exit(1);
 });
+   
+  
+ 

@@ -1,0 +1,23 @@
+import { Router } from "express";
+import { PrismaClient } from "@prisma/client";
+import { requireAuth } from "../middleware/requireAuth";
+
+const prisma = new PrismaClient();
+export const meRouter = Router();
+
+meRouter.get("/api/me", requireAuth, async (req, res) => {
+  const user = (req as any).user;
+  const orgId = user.orgId as string;
+
+  const org = await prisma.organization.findUnique({
+    where: { id: orgId },
+    select: { name: true },
+  });
+
+  return res.json({
+    userId: user.id,
+    email: user.email ?? null,
+    orgId,
+    orgName: org?.name ?? null,
+  });
+});

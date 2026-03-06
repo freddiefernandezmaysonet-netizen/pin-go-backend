@@ -7,6 +7,7 @@ import {
   refreshNfcPoolFromTTLock,
   countAvailableCardsByKind,
 } from "../services/nfc.service";
+
 import { computeCleaningWindow } from "../services/cleaning-window.service";
 
 export function buildAccessNfcRouter(prisma: PrismaClient) {
@@ -58,7 +59,7 @@ const existingActive = await prisma.nfcAssignment.findMany({
     reservationId: reservation.id,
     status: "ACTIVE",
   },
-  include: { nfcCard: true },
+  include: { NfcCard: true },
   orderBy: { createdAt: "asc" },
 });
 
