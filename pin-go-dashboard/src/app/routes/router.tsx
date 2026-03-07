@@ -3,6 +3,7 @@ import { AppShell } from "../layout/AppShell";
 import { OverviewPage } from "../../pages/overview/OverviewPage";
 import { ReservationsPage } from "../../pages/reservations/ReservationsPage";
 import { LocksPage } from "../../pages/locks/LocksPage";
+import { AccessPage } from "../../pages/access/AccessPage";
 
 function Placeholder({ title }: { title: string }) {
   return <div style={{ color: "#666", fontSize: 14 }}>{title} (next)</div>;
@@ -17,7 +18,7 @@ export const router = createBrowserRouter([
       { path: "/reservations", element: <ReservationsPage /> },
       { path: "/locks", element: <LocksPage /> },
       { path: "/properties", element: <Placeholder title="Properties" /> },
-      { path: "/access", element: <Placeholder title="Access" /> },
+      { path: "/access", element: <AccessPage /> },
     ],
   },
 ]);
