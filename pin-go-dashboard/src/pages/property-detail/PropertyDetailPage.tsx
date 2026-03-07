@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useParams, Link } from "react-router-dom";
 
 type PropertyRow = {
@@ -114,6 +114,33 @@ function SectionCard({
   );
 }
 
+function TabButton({
+  active,
+  onClick,
+  label,
+}: {
+  active: boolean;
+  onClick: () => void;
+  label: string;
+}) {
+  return (
+    <button
+      onClick={onClick}
+      style={{
+        padding: "10px 14px",
+        borderRadius: 12,
+        border: "1px solid #e5e7eb",
+        background: active ? "#111827" : "#ffffff",
+        color: active ? "#ffffff" : "#374151",
+        fontWeight: 600,
+        cursor: "pointer",
+      }}
+    >
+      {label}
+    </button>
+  );
+}
+
 function fmt(d: string) {
   const dt = new Date(d);
   return isNaN(dt.getTime()) ? d : dt.toLocaleString();
@@ -121,6 +148,7 @@ function fmt(d: string) {
 
 export function PropertyDetailPage() {
   const { id } = useParams();
+  const [tab, setTab] = useState<"overview" | "locks" | "reservations" | "access">("overview");
 
   const [item, setItem] = useState<PropertyRow | null>(null);
   const [locks, setLocks] = useState<LockRow[]>([]);
@@ -168,6 +196,11 @@ export function PropertyDetailPage() {
       .finally(() => setLoading(false));
   }, [id]);
 
+  const accessCount = useMemo(
+    () => (access?.guestPasscodes?.length ?? 0) + (access?.nfc?.length ?? 0),
+    [access]
+  );
+
   if (loading) {
     return <div style={{ color: "#666" }}>Loading property...</div>;
   }
@@ -207,9 +240,7 @@ export function PropertyDetailPage() {
 
       <div>
         <h1 style={{ fontSize: 30, fontWeight: 700, margin: 0 }}>{item.name}</h1>
-        <p style={{ color: "#666", marginTop: 8 }}>
-          Property operational overview.
-        </p>
+        <p style={{ color: "#666", marginTop: 8 }}>Property operational overview.</p>
       </div>
 
       <div
@@ -225,14 +256,43 @@ export function PropertyDetailPage() {
         <Stat title="Status" value={item.status} />
       </div>
 
-      <div
-        style={{
-          display: "grid",
-          gap: 16,
-          gridTemplateColumns: "1fr 1fr",
-          alignItems: "start",
-        }}
-      >
+      <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
+        <TabButton active={tab === "overview"} onClick={() => setTab("overview")} label="Overview" />
+        <TabButton active={tab === "locks"} onClick={() => setTab("locks")} label={`Locks (${locks.length})`} />
+        <TabButton
+          active={tab === "reservations"}
+          onClick={() => setTab("reservations")}
+          label={`Reservations (${reservations.length})`}
+        />
+        <TabButton active={tab === "access"} onClick={() => setTab("access")} label={`Access (${accessCount})`} />
+      </div>
+
+      {tab === "overview" && (
+        <div
+          style={{
+            display: "grid",
+            gap: 16,
+            gridTemplateColumns: "1fr 1fr",
+            alignItems: "start",
+          }}
+        >
+          <SectionCard title="Property Summary">
+            <div style={{ color: "#6b7280", lineHeight: 1.7 }}>
+              {item.name} currently has <b>{item.locks}</b> active lock(s), <b>{item.activeReservations}</b> active
+              reservation(s), and PMS source <b>{String(item.pms).toUpperCase()}</b>.
+            </div>
+          </SectionCard>
+
+          <SectionCard title="Operational Health">
+            <div style={{ color: "#6b7280", lineHeight: 1.7 }}>
+              Status is <b>{item.status}</b>. Next step here: add live sync health, battery visibility, and recent
+              operational events per property.
+            </div>
+          </SectionCard>
+        </div>
+      )}
+
+      {tab === "locks" && (
         <SectionCard title={`Locks (${locks.length})`}>
           {locks.length === 0 ? (
             <div style={{ color: "#666" }}>No locks found.</div>
@@ -252,9 +312,7 @@ export function PropertyDetailPage() {
                 >
                   <div>
                     <div style={{ fontWeight: 600 }}>{l.name ?? "TTLock Lock"}</div>
-                    <div style={{ color: "#6b7280", fontSize: 12 }}>
-                      TTLock ID: {l.ttlockLockId}
-                    </div>
+                    <div style={{ color: "#6b7280", fontSize: 12 }}>TTLock ID: {l.ttlockLockId}</div>
                   </div>
                   <div>
                     <span
@@ -275,7 +333,9 @@ export function PropertyDetailPage() {
             </div>
           )}
         </SectionCard>
+      )}
 
+      {tab === "reservations" && (
         <SectionCard title={`Reservations (${reservations.length})`}>
           {reservations.length === 0 ? (
             <div style={{ color: "#666" }}>No reservations found.</div>
@@ -302,63 +362,59 @@ export function PropertyDetailPage() {
             </div>
           )}
         </SectionCard>
-      </div>
+      )}
 
-      <SectionCard
-        title={`Access (${(access?.guestPasscodes?.length ?? 0) + (access?.nfc?.length ?? 0)})`}
-      >
-        {!access ? (
-          <div style={{ color: "#666" }}>No access data.</div>
-        ) : (
-          <div style={{ display: "grid", gap: 10 }}>
-            {(access.guestPasscodes ?? []).map((g) => (
-              <div
-                key={g.grantId}
-                style={{
-                  border: "1px solid #f3f4f6",
-                  borderRadius: 12,
-                  padding: 12,
-                }}
-              >
-                <div style={{ fontWeight: 600 }}>PASSCODE · {g.guestName}</div>
-                <div style={{ color: "#6b7280", fontSize: 12 }}>
-                  {g.lock?.name ?? g.lock?.ttlockLockId ?? "—"}
+      {tab === "access" && (
+        <SectionCard title={`Access (${accessCount})`}>
+          {!access ? (
+            <div style={{ color: "#666" }}>No access data.</div>
+          ) : (
+            <div style={{ display: "grid", gap: 10 }}>
+              {(access.guestPasscodes ?? []).map((g) => (
+                <div
+                  key={g.grantId}
+                  style={{
+                    border: "1px solid #f3f4f6",
+                    borderRadius: 12,
+                    padding: 12,
+                  }}
+                >
+                  <div style={{ fontWeight: 600 }}>PASSCODE · {g.guestName}</div>
+                  <div style={{ color: "#6b7280", fontSize: 12 }}>
+                    {g.lock?.name ?? g.lock?.ttlockLockId ?? "—"}
+                  </div>
+                  <div style={{ color: "#6b7280", fontSize: 12 }}>
+                    {fmt(g.startsAt)} → {fmt(g.endsAt)}
+                  </div>
+                  <div style={{ color: "#6b7280", fontSize: 12 }}>Code: {g.codeMasked ?? "—"}</div>
                 </div>
-                <div style={{ color: "#6b7280", fontSize: 12 }}>
-                  {fmt(g.startsAt)} → {fmt(g.endsAt)}
-                </div>
-                <div style={{ color: "#6b7280", fontSize: 12 }}>
-                  Code: {g.codeMasked ?? "—"}
-                </div>
-              </div>
-            ))}
+              ))}
 
-            {(access.nfc ?? []).map((n) => (
-              <div
-                key={n.assignmentId}
-                style={{
-                  border: "1px solid #f3f4f6",
-                  borderRadius: 12,
-                  padding: 12,
-                }}
-              >
-                <div style={{ fontWeight: 600 }}>
-                  NFC · {n.role} · {n.guestName}
+              {(access.nfc ?? []).map((n) => (
+                <div
+                  key={n.assignmentId}
+                  style={{
+                    border: "1px solid #f3f4f6",
+                    borderRadius: 12,
+                    padding: 12,
+                  }}
+                >
+                  <div style={{ fontWeight: 600 }}>
+                    NFC · {n.role} · {n.guestName}
+                  </div>
+                  <div style={{ color: "#6b7280", fontSize: 12 }}>
+                    Card: {n.card?.label ?? `#${n.card?.ttlockCardId ?? ""}`}
+                  </div>
+                  <div style={{ color: "#6b7280", fontSize: 12 }}>
+                    {fmt(n.startsAt)} → {fmt(n.endsAt)}
+                  </div>
+                  <div style={{ color: "#6b7280", fontSize: 12 }}>Status: {n.status}</div>
                 </div>
-                <div style={{ color: "#6b7280", fontSize: 12 }}>
-                  Card: {n.card?.label ?? `#${n.card?.ttlockCardId ?? ""}`}
-                </div>
-                <div style={{ color: "#6b7280", fontSize: 12 }}>
-                  {fmt(n.startsAt)} → {fmt(n.endsAt)}
-                </div>
-                <div style={{ color: "#6b7280", fontSize: 12 }}>
-                  Status: {n.status}
-                </div>
-              </div>
-            ))}
-          </div>
-        )}
-      </SectionCard>
+              ))}
+            </div>
+          )}
+        </SectionCard>
+      )}
     </div>
   );
 }
