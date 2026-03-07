@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 
 type ReservationStatus = "ACTIVE" | "CANCELLED";
+type OperationalStatus = "UPCOMING" | "IN_HOUSE" | "CHECKED_OUT" | "CANCELLED";
 
 type ReservationRow = {
   id: string;
@@ -10,10 +11,11 @@ type ReservationRow = {
   checkIn: string;
   checkOut: string;
   status: ReservationStatus;
+  operationalStatus: OperationalStatus;
   source?: string | null;
   externalProvider?: string | null;
-  property?: { id: string; name: string } | null; // si tu API lo trae
-  propertyId?: string | null; // fallback
+  property?: { id: string; name: string } | null;
+  propertyId?: string | null;
 };
 
 type ReservationsResp = {
@@ -41,6 +43,19 @@ function fmt(d: string) {
   return isNaN(dt.getTime()) ? d : dt.toLocaleString();
 }
 
+function statusStyles(status: OperationalStatus) {
+  if (status === "IN_HOUSE") {
+    return { background: "#ecfdf5", color: "#065f46" };
+  }
+  if (status === "UPCOMING") {
+    return { background: "#eff6ff", color: "#1d4ed8" };
+  }
+  if (status === "CHECKED_OUT") {
+    return { background: "#f3f4f6", color: "#4b5563" };
+  }
+  return { background: "#fef2f2", color: "#991b1b" };
+}
+
 export function ReservationsPage() {
   const [properties, setProperties] = useState<PropertiesResp["items"]>([]);
   const [propertyId, setPropertyId] = useState<string>("ALL");
@@ -52,24 +67,20 @@ export function ReservationsPage() {
   const [loading, setLoading] = useState(false);
   const [err, setErr] = useState<string | null>(null);
 
-  // carga properties una vez
   useEffect(() => {
     api<PropertiesResp>("/api/dashboard/properties")
       .then((r) => setProperties(r.items ?? []))
       .catch(() => setProperties([]));
   }, []);
 
-  // arma query
   const qs = useMemo(() => {
     const q = new URLSearchParams();
     q.set("page", String(page));
     q.set("pageSize", String(pageSize));
     if (propertyId !== "ALL") q.set("propertyId", propertyId);
-    if (status !== "ALL") q.set("status", status);
     return q.toString();
-  }, [page, pageSize, propertyId, status]);
+  }, [page, pageSize, propertyId]);
 
-  // carga reservations
   useEffect(() => {
     setLoading(true);
     setErr(null);
@@ -80,16 +91,20 @@ export function ReservationsPage() {
       .finally(() => setLoading(false));
   }, [qs]);
 
+  const filteredItems =
+    status === "ALL"
+      ? (data?.items ?? [])
+      : (data?.items ?? []).filter((r) => r.operationalStatus === status);
+
   const totalPages = data ? Math.max(1, Math.ceil(data.total / data.pageSize)) : 1;
 
   return (
     <div style={{ display: "grid", gap: 16 }}>
       <div>
         <h1 style={{ fontSize: 28, fontWeight: 700, margin: 0 }}>Reservations</h1>
-        <p style={{ color: "#666" }}>PMS reservations + status. Read-only.</p>
+        <p style={{ color: "#666" }}>PMS reservations + operational status. Read-only.</p>
       </div>
 
-      {/* Filters */}
       <div
         style={{
           display: "flex",
@@ -131,24 +146,24 @@ export function ReservationsPage() {
             style={{ padding: "8px 10px", borderRadius: 10, border: "1px solid #e5e7eb" }}
           >
             <option value="ALL">All</option>
-            <option value="ACTIVE">ACTIVE</option>
+            <option value="UPCOMING">UPCOMING</option>
+            <option value="IN_HOUSE">IN_HOUSE</option>
+            <option value="CHECKED_OUT">CHECKED_OUT</option>
             <option value="CANCELLED">CANCELLED</option>
           </select>
         </div>
 
         <div style={{ marginLeft: "auto", color: "#666", fontSize: 13 }}>
-          {loading ? "Loading…" : data ? `${data.total} total` : "—"}
+          {loading ? "Loading…" : data ? `${filteredItems.length} shown / ${data.total} total` : "—"}
         </div>
       </div>
 
-      {/* Error */}
       {err ? (
         <div style={{ border: "1px solid #fecaca", background: "#fef2f2", padding: 12, borderRadius: 12 }}>
           <b>Error:</b> {err}
         </div>
       ) : null}
 
-      {/* Table */}
       <div style={{ border: "1px solid #e5e7eb", borderRadius: 16, overflow: "hidden" }}>
         <div style={{ overflowX: "auto" }}>
           <table style={{ width: "100%", borderCollapse: "collapse" }}>
@@ -179,49 +194,51 @@ export function ReservationsPage() {
                     Loading…
                   </td>
                 </tr>
-              ) : (data?.items?.length ?? 0) === 0 ? (
+              ) : filteredItems.length === 0 ? (
                 <tr>
                   <td colSpan={6} style={{ padding: 16, color: "#666" }}>
                     No reservations found for this filter.
                   </td>
                 </tr>
               ) : (
-                data!.items.map((r) => (
-                  <tr key={r.id} style={{ borderBottom: "1px solid #f3f4f6" }}>
-                    <td style={{ padding: 12 }}>
-                      <div style={{ fontWeight: 600 }}>{r.guestName}</div>
-                      <div style={{ color: "#666", fontSize: 12 }}>{r.roomName ?? r.guestEmail ?? ""}</div>
-                    </td>
-                    <td style={{ padding: 12, fontWeight: 600 }}>
-                      {r.property?.name ?? (r.propertyId ?? "—")}
-                    </td>
-                    <td style={{ padding: 12, color: "#333", whiteSpace: "nowrap" }}>{fmt(r.checkIn)}</td>
-                    <td style={{ padding: 12, color: "#333", whiteSpace: "nowrap" }}>{fmt(r.checkOut)}</td>
-                    <td style={{ padding: 12 }}>
-                      <span
-                        style={{
-                          fontSize: 12,
-                          padding: "4px 8px",
-                          borderRadius: 999,
-                          border: "1px solid #e5e7eb",
-                          background: r.status === "ACTIVE" ? "#ecfdf5" : "#fef2f2",
-                          color: r.status === "ACTIVE" ? "#065f46" : "#991b1b",
-                        }}
-                      >
-                        {r.status}
-                      </span>
-                    </td>
-                    <td style={{ padding: 12, color: "#666" }}>
-                      {r.externalProvider ?? r.source ?? "—"}
-                    </td>
-                  </tr>
-                ))
+                filteredItems.map((r) => {
+                  const styles = statusStyles(r.operationalStatus);
+                  return (
+                    <tr key={r.id} style={{ borderBottom: "1px solid #f3f4f6" }}>
+                      <td style={{ padding: 12 }}>
+                        <div style={{ fontWeight: 600 }}>{r.guestName}</div>
+                        <div style={{ color: "#666", fontSize: 12 }}>{r.roomName ?? r.guestEmail ?? ""}</div>
+                      </td>
+                      <td style={{ padding: 12, fontWeight: 600 }}>
+                        {r.property?.name ?? (r.propertyId ?? "—")}
+                      </td>
+                      <td style={{ padding: 12, color: "#333", whiteSpace: "nowrap" }}>{fmt(r.checkIn)}</td>
+                      <td style={{ padding: 12, color: "#333", whiteSpace: "nowrap" }}>{fmt(r.checkOut)}</td>
+                      <td style={{ padding: 12 }}>
+                        <span
+                          style={{
+                            fontSize: 12,
+                            padding: "4px 8px",
+                            borderRadius: 999,
+                            border: "1px solid #e5e7eb",
+                            background: styles.background,
+                            color: styles.color,
+                          }}
+                        >
+                          {r.operationalStatus}
+                        </span>
+                      </td>
+                      <td style={{ padding: 12, color: "#666" }}>
+                        {r.externalProvider ?? r.source ?? "—"}
+                      </td>
+                    </tr>
+                  );
+                })
               )}
             </tbody>
           </table>
         </div>
 
-        {/* Pagination */}
         <div style={{ display: "flex", gap: 10, alignItems: "center", padding: 12 }}>
           <button
             onClick={() => setPage((p) => Math.max(1, p - 1))}

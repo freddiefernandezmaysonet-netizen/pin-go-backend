@@ -1,6 +1,17 @@
-import { useDashboardOverview } from "../../api/hooks";
+import { useEffect, useState } from "react";
 
-function StatCard({
+type MetricsResp = {
+  upcomingArrivals: number;
+  inHouse: number;
+  checkoutsToday: number;
+  activeLocks: number;
+  properties: number;
+  updatedAt: string;
+};
+
+const API_BASE = import.meta.env.VITE_API_BASE ?? "http://localhost:3000";
+
+function MetricCard({
   title,
   value,
   accent,
@@ -46,9 +57,33 @@ function StatCard({
 }
 
 export function OverviewPage() {
-  const { data, isLoading, error } = useDashboardOverview();
+  const [data, setData] = useState<MetricsResp | null>(null);
+  const [loading, setLoading] = useState(false);
+  const [err, setErr] = useState<string | null>(null);
 
-  if (error) {
+  useEffect(() => {
+    setLoading(true);
+    setErr(null);
+
+    fetch(`${API_BASE}/api/dashboard/metrics`)
+      .then(async (res) => {
+        if (!res.ok) {
+          const t = await res.text().catch(() => "");
+          throw new Error(`API ${res.status}: ${t || res.statusText}`);
+        }
+        return res.json();
+      })
+      .then((r: MetricsResp) => {
+        setData(r);
+      })
+      .catch((e) => {
+        console.error("OVERVIEW METRICS ERROR", e);
+        setErr(String(e?.message ?? e));
+      })
+      .finally(() => setLoading(false));
+  }, []);
+
+  if (err) {
     return (
       <div
         style={{
@@ -59,7 +94,7 @@ export function OverviewPage() {
           color: "#991b1b",
         }}
       >
-        Error: {(error as Error).message}
+        Error: {err}
       </div>
     );
   }
@@ -86,28 +121,33 @@ export function OverviewPage() {
         style={{
           display: "grid",
           gap: 16,
-          gridTemplateColumns: "repeat(4, minmax(0, 1fr))",
+          gridTemplateColumns: "repeat(5, minmax(0, 1fr))",
         }}
       >
-        <StatCard
-          title="Active Reservations"
-          value={isLoading ? "..." : (data?.activeReservations ?? 0)}
+        <MetricCard
+          title="Upcoming Arrivals"
+          value={loading ? "..." : (data?.upcomingArrivals ?? 0)}
           accent="#2563eb"
         />
-        <StatCard
-          title="Check-ins Today"
-          value={isLoading ? "..." : (data?.checkInsToday ?? 0)}
+        <MetricCard
+          title="Guests In House"
+          value={loading ? "..." : (data?.inHouse ?? 0)}
           accent="#16a34a"
         />
-        <StatCard
-          title="Check-outs Today"
-          value={isLoading ? "..." : (data?.checkOutsToday ?? 0)}
+        <MetricCard
+          title="Checkouts Today"
+          value={loading ? "..." : (data?.checkoutsToday ?? 0)}
           accent="#f59e0b"
         />
-        <StatCard
+        <MetricCard
           title="Active Locks"
-          value={isLoading ? "..." : (data?.activeLocks ?? 0)}
+          value={loading ? "..." : (data?.activeLocks ?? 0)}
           accent="#7c3aed"
+        />
+        <MetricCard
+          title="Properties"
+          value={loading ? "..." : (data?.properties ?? 0)}
+          accent="#0f766e"
         />
       </div>
 
@@ -123,7 +163,7 @@ export function OverviewPage() {
       >
         <div style={{ fontSize: 13, marginBottom: 8 }}>System Status</div>
         <div style={{ color: "#111827", fontWeight: 600 }}>
-          {isLoading
+          {loading
             ? "Loading..."
             : `Last updated: ${new Date(data?.updatedAt ?? "").toLocaleString()}`}
         </div>

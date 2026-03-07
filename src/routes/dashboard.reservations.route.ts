@@ -5,6 +5,19 @@ import { requireAuth } from "../middleware/requireAuth";
 const prisma = new PrismaClient();
 export const dashboardReservationsRouter = Router();
 
+function getOperationalStatus(r: {
+  status: ReservationStatus;
+  checkIn: Date;
+  checkOut: Date;
+}) {
+  const now = new Date();
+
+  if (r.status === ReservationStatus.CANCELLED) return "CANCELLED";
+  if (now < r.checkIn) return "UPCOMING";
+  if (now >= r.checkIn && now < r.checkOut) return "IN_HOUSE";
+  return "CHECKED_OUT";
+}
+
 function toInt(v: any, def: number) {
   const n = Number(v);
   return Number.isFinite(n) ? n : def;
@@ -106,6 +119,7 @@ dashboardReservationsRouter.get("/api/dashboard/reservations", requireAuth, asyn
       checkIn: r.checkIn.toISOString(),
       checkOut: r.checkOut.toISOString(),
       status: r.status,
+      operationalStatus: getOperationalStatus(r),
       source: r.source ?? null,
       externalProvider: r.externalProvider ?? null,
       externalId: r.externalId ?? null,

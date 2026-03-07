@@ -39,6 +39,7 @@ import { dashboardReservationsRouter } from "./routes/dashboard.reservations.rou
 import { dashboardPropertiesRouter } from "./routes/dashboard.properties.route";
 import { dashboardLocksRouter } from "./routes/dashboard.locks.route";
 import { dashboardAccessRouter } from "./routes/dashboard.access.route";
+import { dashboardMetricsRouter } from "./routes/dashboard.metrics.route";
 
 const app = express();
 const prisma = new PrismaClient();
@@ -128,6 +129,7 @@ app.use(dashboardReservationsRouter);
 app.use(dashboardPropertiesRouter);
 app.use(dashboardLocksRouter);
 app.use(dashboardAccessRouter);
+app.use(dashboardMetricsRouter);
 
 // =====================
 // Staff + Cleaning
