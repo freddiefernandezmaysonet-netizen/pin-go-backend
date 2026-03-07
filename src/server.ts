@@ -4,7 +4,7 @@ import crypto from "crypto";
 import { PrismaClient } from "@prisma/client";
 import bodyParser from "body-parser";
 import { registerStripeWebhook } from "./webhooks/stripe.webhook";
-
+import cors from "cors";
 // Routers
 import { pmsWebhookRouter } from "./pms/ingest/webhook.routes";
 import { buildTTLockRouter } from "./routes/ttlock.routes";
@@ -90,6 +90,11 @@ app.use("/api/ingest", ingestRoutes);
 app.get("/health", (_req, res) => {
   res.json({ ok: true, name: "Pin&Go API" });
 });
+
+app.use(cors({
+  origin: "http://localhost:5173",
+  credentials: true,
+}));
 
 // =====================
 // Core Routers
