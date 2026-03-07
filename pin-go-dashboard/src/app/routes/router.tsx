@@ -5,10 +5,8 @@ import { ReservationsPage } from "../../pages/reservations/ReservationsPage";
 import { LocksPage } from "../../pages/locks/LocksPage";
 import { AccessPage } from "../../pages/access/AccessPage";
 import { PropertiesPage } from "../../pages/properties/PropertiesPage";
-
-function Placeholder({ title }: { title: string }) {
-  return <div style={{ color: "#666", fontSize: 14 }}>{title} (next)</div>;
-}
+import { PropertyDetailPage } from "../../pages/property-detail/PropertyDetailPage";
+import { LockDetailPage } from "../../pages/lock-detail/LockDetailPage";
 
 export const router = createBrowserRouter([
   {
@@ -16,9 +14,11 @@ export const router = createBrowserRouter([
     children: [
       { path: "/", element: <Navigate to="/overview" replace /> },
       { path: "/overview", element: <OverviewPage /> },
-      { path: "/reservations", element: <ReservationsPage /> },
-      { path: "/locks", element: <LocksPage /> },
       { path: "/properties", element: <PropertiesPage /> },
+      { path: "/properties/:id", element: <PropertyDetailPage /> },
+      { path: "/locks", element: <LocksPage /> },
+      { path: "/locks/:id", element: <LockDetailPage /> },
+      { path: "/reservations", element: <ReservationsPage /> },
       { path: "/access", element: <AccessPage /> },
     ],
   },

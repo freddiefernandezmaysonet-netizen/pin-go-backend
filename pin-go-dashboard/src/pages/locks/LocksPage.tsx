@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { useNavigate } from "react-router-dom";
 
 type LockRow = {
   id: string;
@@ -19,6 +20,8 @@ type LocksResp = {
 const API_BASE = import.meta.env.VITE_API_BASE ?? "http://localhost:3000";
 
 export function LocksPage() {
+  const navigate = useNavigate();
+
   const [data, setData] = useState<LocksResp | null>(null);
   const [loading, setLoading] = useState(false);
   const [err, setErr] = useState<string | null>(null);
@@ -114,7 +117,14 @@ export function LocksPage() {
               </tr>
             ) : (
               data.items.map((l) => (
-                <tr key={l.id} style={{ borderBottom: "1px solid #f3f4f6" }}>
+                <tr
+                  key={l.id}
+                  onClick={() => navigate(`/locks/${l.id}`)}
+                  style={{
+                    borderBottom: "1px solid #f3f4f6",
+                    cursor: "pointer",
+                  }}
+                >
                   <td style={{ padding: 12, fontWeight: 600 }}>
                     {l.name ?? "TTLock Lock"}
                   </td>

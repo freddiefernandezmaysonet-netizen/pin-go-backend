@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { useNavigate } from "react-router-dom";
 
 type PropertyRow = {
   id: string;
@@ -45,6 +46,7 @@ export function PropertiesPage() {
   const [items, setItems] = useState<PropertyRow[]>([]);
   const [loading, setLoading] = useState(false);
   const [err, setErr] = useState<string | null>(null);
+  const navigate = useNavigate();
 
   useEffect(() => {
     setLoading(true);
@@ -114,8 +116,9 @@ export function PropertiesPage() {
           }}
         >
           {items.map((p) => (
-            <div
+            <button
               key={p.id}
+              onClick={() => navigate(`/properties/${p.id}`)}
               style={{
                 border: "1px solid #e5e7eb",
                 borderRadius: 18,
@@ -124,6 +127,8 @@ export function PropertiesPage() {
                 boxShadow: "0 1px 2px rgba(0,0,0,0.04)",
                 display: "grid",
                 gap: 14,
+                textAlign: "left",
+                cursor: "pointer",
               }}
             >
               <div style={{ display: "flex", justifyContent: "space-between", gap: 12 }}>
@@ -164,7 +169,7 @@ export function PropertiesPage() {
                 <Metric label="PMS" value={String(p.pms).toUpperCase()} />
                 <Metric label="Property" value="ONLINE" />
               </div>
-            </div>
+            </button>
           ))}
         </div>
       )}
