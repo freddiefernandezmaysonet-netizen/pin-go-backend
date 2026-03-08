@@ -6,6 +6,7 @@ const nav = [
   { to: "/locks", label: "Locks" },
   { to: "/reservations", label: "Reservations" },
   { to: "/access", label: "Access" },
+  { to: "/integrations/pms", label: "PMS Connections" },
 ];
 
 function SideItem({ to, label }: { to: string; label: string }) {

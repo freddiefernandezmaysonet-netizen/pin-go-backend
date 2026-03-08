@@ -40,6 +40,7 @@ import { dashboardPropertiesRouter } from "./routes/dashboard.properties.route";
 import { dashboardLocksRouter } from "./routes/dashboard.locks.route";
 import { dashboardAccessRouter } from "./routes/dashboard.access.route";
 import { dashboardMetricsRouter } from "./routes/dashboard.metrics.route";
+import { buildOrgPmsRouter } from "./routes/org.pms.routes";
 
 const app = express();
 const prisma = new PrismaClient();
@@ -123,6 +124,7 @@ app.use("/debug", debugRouter);
 //app.use("/access/nfc", nfcSyncRouter);
 app.use("/webhooks", pmsWebhookRouter);
 app.use("/api/pms/listings", listingsMappingRouter);
+app.use("/api/org", buildOrgPmsRouter(prisma));
 app.use(meRouter);
 app.use(dashboardRouter);
 app.use(dashboardReservationsRouter);

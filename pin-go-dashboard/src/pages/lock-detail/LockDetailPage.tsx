@@ -36,6 +36,39 @@ type SwapResp = {
   };
 };
 
+type TtlockSelectableLock = {
+  ttlockLockId: number;
+  name: string | null;
+  registered: boolean;
+  availableForActivation: boolean;
+  availableForSwap: boolean;
+  existingLock: {
+    id: string;
+    ttlockLockId: number;
+    name: string | null;
+    isActive: boolean;
+    propertyId: string;
+    property: { id: string; name: string } | null;
+  } | null;
+};
+
+type TtlockLocksResp = {
+  ok: boolean;
+  error?: string;
+  organizationId?: string;
+  propertyId?: string | null;
+  totalFromTtlock?: number;
+  locks?: TtlockSelectableLock[];
+};
+
+type SyncLocksResp = {
+  ok: boolean;
+  error?: string;
+  created?: number;
+  updated?: number;
+  totalFromTtlock?: number;
+};
+
 const API_BASE = import.meta.env.VITE_API_BASE ?? "http://localhost:3000";
 
 function Stat({
@@ -154,14 +187,60 @@ function normalizeError(error?: string) {
     case "SWAP_OUT_LOCK_NOT_IN_PROPERTY":
       return "The current lock does not belong to this property.";
     case "NEW_LOCK_BELONGS_TO_ANOTHER_ORG":
-      return "The new lock already belongs to another organization.";
+      return "The selected TTLock device belongs to another organization.";
     case "OLD_AND_NEW_LOCK_CANNOT_MATCH":
-      return "The new TTLock ID must be different from the current lock.";
+      return "The new TTLock device must be different from the current lock.";
     case "PROPERTY_NOT_IN_ORG":
       return "The property does not belong to your organization.";
+    case "PROPERTY_NOT_FOUND_FOR_ORG":
+      return "The property was not found for your organization.";
+    case "TTLOCK_NOT_CONNECTED":
+      return "TTLock is not connected for this organization.";
     default:
       return error ?? "Swap failed.";
   }
+}
+
+function ReadonlyField({
+  label,
+  value,
+}: {
+  label: string;
+  value: React.ReactNode;
+}) {
+  return (
+    <div style={{ display: "grid", gap: 6 }}>
+      <span style={{ fontSize: 13, color: "#6b7280" }}>{label}</span>
+      <div
+        style={{
+          minHeight: 40,
+          borderRadius: 10,
+          border: "1px solid #d1d5db",
+          padding: "10px 12px",
+          background: "#f9fafb",
+          color: "#111827",
+          fontSize: 14,
+          display: "flex",
+          alignItems: "center",
+        }}
+      >
+        {value}
+      </div>
+    </div>
+  );
+}
+
+function buttonStyle(disabled?: boolean): React.CSSProperties {
+  return {
+    height: 40,
+    padding: "0 16px",
+    borderRadius: 10,
+    border: "1px solid #111827",
+    background: disabled ? "#e5e7eb" : "#111827",
+    color: disabled ? "#6b7280" : "#fff",
+    cursor: disabled ? "not-allowed" : "pointer",
+    fontWeight: 600,
+  };
 }
 
 export function LockDetailPage() {
@@ -171,7 +250,13 @@ export function LockDetailPage() {
   const [lock, setLock] = useState<LockRow | null>(null);
   const [loading, setLoading] = useState(false);
 
-  const [newTtlockLockId, setNewTtlockLockId] = useState("");
+  const [availableLocks, setAvailableLocks] = useState<TtlockSelectableLock[]>([]);
+  const [availableLocksLoading, setAvailableLocksLoading] = useState(false);
+  const [availableLocksError, setAvailableLocksError] = useState<string | null>(null);
+  const [syncLoading, setSyncLoading] = useState(false);
+  const [syncMessage, setSyncMessage] = useState<string | null>(null);
+
+  const [selectedTtlockLockId, setSelectedTtlockLockId] = useState("");
   const [newTtlockLockName, setNewTtlockLockName] = useState("");
   const [swapLoading, setSwapLoading] = useState(false);
   const [swapError, setSwapError] = useState<string | null>(null);
@@ -197,9 +282,48 @@ export function LockDetailPage() {
     }
   }, [id]);
 
+  const loadAvailableTtlockLocks = useCallback(
+    async (propertyId: string) => {
+      setAvailableLocksLoading(true);
+      setAvailableLocksError(null);
+
+      try {
+        const r = await fetch(
+          `${API_BASE}/api/org/ttlock/locks?propertyId=${encodeURIComponent(propertyId)}`,
+          { credentials: "include" }
+        );
+
+        const data: TtlockLocksResp = await r.json();
+
+        if (!r.ok || !data.ok) {
+          setAvailableLocks([]);
+          setAvailableLocksError(normalizeError(data.error));
+          return;
+        }
+
+        const filtered = (data.locks ?? []).filter(
+          (item) => item.availableForSwap && item.ttlockLockId !== lock?.ttlockLockId
+        );
+
+        setAvailableLocks(filtered);
+      } catch (err: any) {
+        setAvailableLocks([]);
+        setAvailableLocksError(String(err?.message ?? err ?? "Unable to load TTLock locks."));
+      } finally {
+        setAvailableLocksLoading(false);
+      }
+    },
+    [lock?.ttlockLockId]
+  );
+
   useEffect(() => {
     void loadLock();
   }, [loadLock]);
+
+  useEffect(() => {
+    if (!lock?.property?.id) return;
+    void loadAvailableTtlockLocks(lock.property.id);
+  }, [lock?.property?.id, loadAvailableTtlockLocks]);
 
   const batteryValue = useMemo(() => {
     if (lock?.battery == null) return "—";
@@ -256,6 +380,71 @@ export function LockDetailPage() {
     return lock.gatewayFresh === false ? `${base} (stale)` : base;
   }, [lock]);
 
+  const selectedLockOption = useMemo(() => {
+    const selectedId = Number(selectedTtlockLockId);
+    if (!Number.isFinite(selectedId) || selectedId <= 0) return null;
+    return availableLocks.find((item) => item.ttlockLockId === selectedId) ?? null;
+  }, [availableLocks, selectedTtlockLockId]);
+
+  useEffect(() => {
+    if (!selectedLockOption) {
+      setNewTtlockLockName("");
+      return;
+    }
+
+    setNewTtlockLockName(selectedLockOption.name ?? "");
+  }, [selectedLockOption]);
+
+  const selectedLockLabel = useMemo(() => {
+    if (!selectedLockOption) return "No TTLock device selected";
+    return `${selectedLockOption.name ?? "TTLock Lock"} — ${selectedLockOption.ttlockLockId}`;
+  }, [selectedLockOption]);
+
+  async function handleSyncLocks() {
+    if (!lock?.property?.id) {
+      setAvailableLocksError("This lock does not have a valid property assigned.");
+      setSyncMessage(null);
+      return;
+    }
+
+    setSyncLoading(true);
+    setAvailableLocksError(null);
+    setSyncMessage(null);
+
+    try {
+      const r = await fetch(`${API_BASE}/api/org/ttlock/sync-locks`, {
+        method: "POST",
+        credentials: "include",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          propertyId: lock.property.id,
+        }),
+      });
+
+      const data: SyncLocksResp = await r.json();
+
+      if (!r.ok || !data.ok) {
+        setAvailableLocksError(normalizeError(data.error));
+        return;
+      }
+
+      setSyncMessage(
+        `TTLock sync completed. Created: ${data.created ?? 0}, Updated: ${
+          data.updated ?? 0
+        }, Remote total: ${data.totalFromTtlock ?? 0}.`
+      );
+
+      await loadAvailableTtlockLocks(lock.property.id);
+      await loadLock();
+    } catch (err: any) {
+      setAvailableLocksError(String(err?.message ?? err ?? "Sync failed."));
+    } finally {
+      setSyncLoading(false);
+    }
+  }
+
   async function handleSwapSubmit(e: React.FormEvent) {
     e.preventDefault();
 
@@ -265,16 +454,16 @@ export function LockDetailPage() {
       return;
     }
 
-    const parsedNewId = Number(newTtlockLockId.trim());
+    const parsedNewId = Number(selectedTtlockLockId.trim());
 
     if (!Number.isFinite(parsedNewId) || parsedNewId <= 0) {
-      setSwapError("Enter a valid new TTLock ID.");
+      setSwapError("Select a TTLock device from the available list.");
       setSwapSuccess(null);
       return;
     }
 
     if (parsedNewId === lock.ttlockLockId) {
-      setSwapError("The new TTLock ID must be different from the current lock.");
+      setSwapError("The new TTLock device must be different from the current lock.");
       setSwapSuccess(null);
       return;
     }
@@ -307,7 +496,7 @@ export function LockDetailPage() {
       }
 
       setSwapSuccess("Lock swapped successfully.");
-      setNewTtlockLockId("");
+      setSelectedTtlockLockId("");
       setNewTtlockLockName("");
 
       if (data.lock?.id) {
@@ -316,6 +505,7 @@ export function LockDetailPage() {
       }
 
       await loadLock();
+      await loadAvailableTtlockLocks(lock.property.id);
     } catch (err: any) {
       setSwapError(String(err?.message ?? err ?? "Swap failed."));
       setSwapSuccess(null);
@@ -408,8 +598,8 @@ export function LockDetailPage() {
             <div>
               <div style={{ fontWeight: 600, marginBottom: 6 }}>Swap Lock</div>
               <div style={{ fontSize: 14, color: "#6b7280" }}>
-                Replace this active lock with a new TTLock device for the same
-                property.
+                Replace this active lock with another TTLock device for the same
+                property using the synchronized TTLock list.
               </div>
             </div>
 
@@ -420,16 +610,84 @@ export function LockDetailPage() {
                 gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))",
               }}
             >
+              <ReadonlyField
+                label="Current Lock to Deactivate"
+                value={`${lock.name ?? "TTLock Lock"} — ${lock.ttlockLockId}`}
+              />
+
+              <ReadonlyField
+                label="Property"
+                value={lock.property?.name ?? "—"}
+              />
+            </div>
+
+            <div
+              style={{
+                display: "flex",
+                gap: 12,
+                flexWrap: "wrap",
+                alignItems: "center",
+              }}
+            >
+              <button
+                type="button"
+                onClick={handleSyncLocks}
+                disabled={syncLoading || swapLoading}
+                style={buttonStyle(syncLoading || swapLoading)}
+              >
+                {syncLoading ? "Syncing..." : "Sync TTLock Locks"}
+              </button>
+
+              <span style={{ fontSize: 13, color: "#6b7280" }}>
+                Refresh the list of TTLock devices available for this property.
+              </span>
+            </div>
+
+            {syncMessage ? (
+              <div
+                style={{
+                  borderRadius: 10,
+                  padding: 12,
+                  background: "#eff6ff",
+                  border: "1px solid #bfdbfe",
+                  color: "#1d4ed8",
+                  fontSize: 14,
+                }}
+              >
+                {syncMessage}
+              </div>
+            ) : null}
+
+            {availableLocksError ? (
+              <div
+                style={{
+                  borderRadius: 10,
+                  padding: 12,
+                  background: "#fef2f2",
+                  border: "1px solid #fecaca",
+                  color: "#991b1b",
+                  fontSize: 14,
+                }}
+              >
+                {availableLocksError}
+              </div>
+            ) : null}
+
+            <div
+              style={{
+                display: "grid",
+                gap: 12,
+                gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))",
+              }}
+            >
               <label style={{ display: "grid", gap: 6 }}>
                 <span style={{ fontSize: 13, color: "#6b7280" }}>
-                  New TTLock ID
+                  Available TTLock Device
                 </span>
-                <input
-                  value={newTtlockLockId}
-                  onChange={(e) => setNewTtlockLockId(e.target.value)}
-                  inputMode="numeric"
-                  placeholder="e.g. 25439885"
-                  disabled={swapLoading}
+                <select
+                  value={selectedTtlockLockId}
+                  onChange={(e) => setSelectedTtlockLockId(e.target.value)}
+                  disabled={swapLoading || availableLocksLoading}
                   style={{
                     height: 40,
                     borderRadius: 10,
@@ -437,27 +695,62 @@ export function LockDetailPage() {
                     padding: "0 12px",
                     background: "#fff",
                   }}
-                />
+                >
+                  <option value="">
+                    {availableLocksLoading
+                      ? "Loading TTLock devices..."
+                      : availableLocks.length > 0
+                      ? "Select a TTLock device"
+                      : "No TTLock devices available"}
+                  </option>
+
+                  {availableLocks.map((item) => (
+                    <option key={item.ttlockLockId} value={String(item.ttlockLockId)}>
+                      {(item.name ?? "TTLock Lock") + " — " + item.ttlockLockId}
+                    </option>
+                  ))}
+                </select>
               </label>
 
-              <label style={{ display: "grid", gap: 6 }}>
-                <span style={{ fontSize: 13, color: "#6b7280" }}>
-                  New Lock Name
-                </span>
-                <input
-                  value={newTtlockLockName}
-                  onChange={(e) => setNewTtlockLockName(e.target.value)}
-                  placeholder="Optional"
-                  disabled={swapLoading}
-                  style={{
-                    height: 40,
-                    borderRadius: 10,
-                    border: "1px solid #d1d5db",
-                    padding: "0 12px",
-                    background: "#fff",
-                  }}
-                />
-              </label>
+              <ReadonlyField
+                label="Selected New Lock"
+                value={selectedLockLabel}
+              />
+            </div>
+
+            <div
+              style={{
+                display: "grid",
+                gap: 12,
+                gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))",
+              }}
+            >
+              <ReadonlyField
+                label="Selected TTLock ID"
+                value={selectedTtlockLockId || "—"}
+              />
+
+              <ReadonlyField
+                label="Selected Lock Name"
+                value={newTtlockLockName || "—"}
+              />
+            </div>
+
+            <div
+              style={{
+                border: "1px solid #e5e7eb",
+                borderRadius: 12,
+                padding: 12,
+                background: "#fff",
+                fontSize: 14,
+                color: "#374151",
+              }}
+            >
+              <strong>Swap summary:</strong>{" "}
+              {lock.name ?? "Current Lock"} ({lock.ttlockLockId}) →{" "}
+              {selectedTtlockLockId
+                ? `${newTtlockLockName || "TTLock Lock"} (${selectedTtlockLockId})`
+                : "Select a TTLock device"}
             </div>
 
             <div
@@ -470,17 +763,18 @@ export function LockDetailPage() {
             >
               <button
                 type="submit"
-                disabled={swapLoading || !lock.isActive}
-                style={{
-                  height: 40,
-                  padding: "0 16px",
-                  borderRadius: 10,
-                  border: "1px solid #111827",
-                  background: swapLoading || !lock.isActive ? "#e5e7eb" : "#111827",
-                  color: swapLoading || !lock.isActive ? "#6b7280" : "#fff",
-                  cursor: swapLoading || !lock.isActive ? "not-allowed" : "pointer",
-                  fontWeight: 600,
-                }}
+                disabled={
+                  swapLoading ||
+                  !lock.isActive ||
+                  !selectedTtlockLockId ||
+                  availableLocksLoading
+                }
+                style={buttonStyle(
+                  swapLoading ||
+                    !lock.isActive ||
+                    !selectedTtlockLockId ||
+                    availableLocksLoading
+                )}
               >
                 {swapLoading ? "Swapping..." : "Execute Swap"}
               </button>
@@ -535,9 +829,9 @@ export function LockDetailPage() {
               Operational Safety
             </div>
             <div style={{ fontSize: 14, color: "#6b7280" }}>
-              Battery and gateway sections now distinguish between unavailable
-              values and stale cache values, while swap runs through the org
-              route without exposing admin credentials in the dashboard.
+              Swap now uses synchronized TTLock inventory instead of manual ID
+              entry, reducing operator error while keeping admin credentials out
+              of the dashboard.
             </div>
           </div>
         </div>

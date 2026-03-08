@@ -1,9 +1,12 @@
 import { Router } from "express";
 import type { PrismaClient } from "@prisma/client";
 import { ttlockListLocksWithAccessToken } from "../ttlock/ttlock.api";
+import { requireOrg } from "../middleware/requireOrg";
 
 export function buildOrgTtlockRouter(prisma: PrismaClient) {
   const router = Router();
+
+  router.use(requireOrg);
 
   async function ttlockRefreshAccessToken(refreshToken: string) {
     const base = process.env.TTLOCK_API_BASE ?? "https://api.sciener.com";
@@ -31,17 +34,23 @@ export function buildOrgTtlockRouter(prisma: PrismaClient) {
     try {
       data = JSON.parse(text);
     } catch {
-      throw new Error(`TTLock refresh returned non-JSON. First 120 chars: ${text.slice(0, 120)}`);
+      throw new Error(
+        `TTLock refresh returned non-JSON. First 120 chars: ${text.slice(0, 120)}`
+      );
     }
 
     if (!resp.ok) {
       throw new Error(`TTLock refresh HTTP ${resp.status}: ${JSON.stringify(data)}`);
     }
     if (data?.errcode) {
-      throw new Error(`TTLock refresh errcode=${data.errcode} errmsg=${data.errmsg ?? "unknown"}`);
+      throw new Error(
+        `TTLock refresh errcode=${data.errcode} errmsg=${data.errmsg ?? "unknown"}`
+      );
     }
     if (!data?.access_token) {
-      throw new Error(`TTLock refresh missing access_token: ${JSON.stringify(data)}`);
+      throw new Error(
+        `TTLock refresh missing access_token: ${JSON.stringify(data)}`
+      );
     }
 
     return data as {
@@ -52,153 +61,226 @@ export function buildOrgTtlockRouter(prisma: PrismaClient) {
     };
   }
 
-  /**
-   * GET /api/org/ttlock/locks?organizationId=...
-   * Devuelve lista de locks desde TTLock para esa org.
-   */
-  router.get("/ttlock/locks", async (req, res) => {
-   console.log("[org.ttlock] HIT /ttlock/locks", { q: req.query, at: new Date().toISOString() });
-    try {
-      const organizationId = String(req.query.organizationId ?? "").trim();
-      if (!organizationId) {
-        return res.status(400).json({ ok: false, error: "organizationId required" });
-      }
+  async function getValidAccessTokenForOrg(organizationId: string) {
+    const auth = await prisma.tTLockAuth.findUnique({
+      where: { organizationId },
+      select: {
+        accessToken: true,
+        refreshToken: true,
+        expiresAt: true,
+        uid: true,
+      },
+    });
 
-      const auth = await prisma.tTLockAuth.findUnique({
+    if (!auth?.refreshToken) {
+      return { ok: false as const, status: 401, error: "TTLOCK_NOT_CONNECTED" };
+    }
+
+    const now = Date.now();
+    const expiresAtMs = auth.expiresAt ? new Date(auth.expiresAt).getTime() : 0;
+    const shouldRefresh =
+      !auth.accessToken || !auth.expiresAt || expiresAtMs - now < 2 * 60 * 1000;
+
+    let accessToken = auth.accessToken ?? "";
+
+    if (shouldRefresh) {
+      const refreshed = await ttlockRefreshAccessToken(auth.refreshToken);
+
+      const newAccess = refreshed.access_token;
+      const newRefresh = refreshed.refresh_token ?? auth.refreshToken;
+      const newExpiresAt = new Date(Date.now() + refreshed.expires_in * 1000);
+
+      await prisma.tTLockAuth.update({
         where: { organizationId },
-        select: { accessToken: true, refreshToken: true, expiresAt: true, uid: true },
+        data: {
+          accessToken: newAccess,
+          refreshToken: newRefresh,
+          expiresAt: newExpiresAt,
+          uid: refreshed.uid ?? auth.uid ?? undefined,
+        },
       });
 
-      if (!auth?.refreshToken) {
-        return res.status(401).json({ ok: false, error: "TTLOCK_NOT_CONNECTED" });
-      }
+      accessToken = newAccess;
+    }
 
-      // refresh si no hay accessToken o si expira en < 2 min
-      const now = Date.now();
-      const expiresAtMs = auth.expiresAt ? new Date(auth.expiresAt).getTime() : 0;
-      const shouldRefresh = !auth.accessToken || !auth.expiresAt || expiresAtMs - now < 2 * 60 * 1000;
+    if (!accessToken) {
+      return { ok: false as const, status: 409, error: "TTLOCK_NOT_CONNECTED" };
+    }
 
-      let accessToken = auth.accessToken ?? "";
+    return { ok: true as const, accessToken };
+  }
 
-      if (shouldRefresh) {
-        const refreshed = await ttlockRefreshAccessToken(auth.refreshToken);
+  /**
+   * GET /api/org/ttlock/locks
+   * Query:
+   *   - propertyId? -> opcional para marcar disponibilidad respecto a una property
+   *
+   * Devuelve lista de locks desde TTLock para la org autenticada,
+   * enriquecida con su estado actual en Prisma.
+   */
+  router.get("/ttlock/locks", async (req, res) => {
+    console.log("[org.ttlock] HIT /ttlock/locks", {
+      q: req.query,
+      at: new Date().toISOString(),
+    });
 
-        const newAccess = refreshed.access_token;
-        const newRefresh = refreshed.refresh_token ?? auth.refreshToken;
-        const newExpiresAt = new Date(Date.now() + refreshed.expires_in * 1000);
+    try {
+      const organizationId = String((req as any).orgId);
+      const propertyId =
+        typeof req.query.propertyId === "string" ? req.query.propertyId.trim() : "";
 
-        await prisma.tTLockAuth.update({
-          where: { organizationId },
-          data: {
-            accessToken: newAccess,
-            refreshToken: newRefresh,
-            expiresAt: newExpiresAt,
-            uid: refreshed.uid ?? auth.uid ?? undefined,
-          },
+      if (propertyId) {
+        const prop = await prisma.property.findFirst({
+          where: { id: propertyId, organizationId },
+          select: { id: true },
         });
 
-        accessToken = newAccess;
+        if (!prop) {
+          return res
+            .status(404)
+            .json({ ok: false, error: "PROPERTY_NOT_FOUND_FOR_ORG" });
+        }
       }
 
-      if (!accessToken) {
-        return res.status(409).json({ ok: false, error: "TTLOCK_NOT_CONNECTED" });
+      const tokenResult = await getValidAccessTokenForOrg(organizationId);
+      if (!tokenResult.ok) {
+        return res
+          .status(tokenResult.status)
+          .json({ ok: false, error: tokenResult.error });
       }
 
-      // ✅ listar locks usando el token de ESA org
-      const resp = await ttlockListLocksWithAccessToken(accessToken, 1, 100);
+      const resp = await ttlockListLocksWithAccessToken(tokenResult.accessToken, 1, 100);
+      const remoteLocks = Array.isArray((resp as any)?.list) ? (resp as any).list : [];
 
-      const locks = (resp?.list ?? []).map((l: any) => ({
-        ttlockLockId: Number(l.lockId),
-        name: String(l.lockName ?? l.lockAlias ?? ""),
-      }));
+      const ttlockIds = remoteLocks
+        .map((l: any) => Number(l.lockId))
+        .filter((n: number) => Number.isFinite(n) && n > 0);
 
-      return res.json({ ok: true, organizationId, locks });
+      const existingLocks = ttlockIds.length
+        ? await prisma.lock.findMany({
+            where: {
+              ttlockLockId: { in: ttlockIds },
+              property: { organizationId },
+            },
+            select: {
+              id: true,
+              ttlockLockId: true,
+              ttlockLockName: true,
+              propertyId: true,
+              isActive: true,
+              property: {
+                select: {
+                  id: true,
+                  name: true,
+                },
+              },
+            },
+          })
+        : [];
+
+      const existingByTtlockId = new Map(
+        existingLocks.map((l) => [l.ttlockLockId, l])
+      );
+
+      const locks = remoteLocks
+        .map((l: any) => {
+          const ttlockLockId = Number(l.lockId);
+          if (!Number.isFinite(ttlockLockId) || ttlockLockId <= 0) return null;
+
+          const remoteName =
+            String(l.lockName ?? l.lockAlias ?? "").trim() || null;
+
+          const existing = existingByTtlockId.get(ttlockLockId) ?? null;
+
+          const availableForActivation = !existing;
+          const availableForSwap =
+            !existing ||
+            !existing.isActive ||
+            (propertyId ? existing.propertyId === propertyId : false);
+
+          return {
+            ttlockLockId,
+            name: remoteName,
+            registered: Boolean(existing),
+            availableForActivation,
+            availableForSwap,
+            existingLock: existing
+              ? {
+                  id: existing.id,
+                  ttlockLockId: existing.ttlockLockId,
+                  name: existing.ttlockLockName ?? null,
+                  isActive: existing.isActive,
+                  propertyId: existing.propertyId,
+                  property: existing.property,
+                }
+              : null,
+          };
+        })
+        .filter(Boolean);
+
+      return res.json({
+        ok: true,
+        organizationId,
+        propertyId: propertyId || null,
+        totalFromTtlock: remoteLocks.length,
+        locks,
+      });
     } catch (e: any) {
       console.error("org/ttlock/locks error:", e?.message ?? e);
-      return res.status(500).json({ ok: false, error: e?.message ?? "list locks failed" });
+      return res
+        .status(500)
+        .json({ ok: false, error: e?.message ?? "list locks failed" });
     }
   });
 
   /**
    * POST /api/org/ttlock/sync-locks
-   * Body: { organizationId, propertyId }
-   * - Verifica que propertyId pertenezca a la org
-   * - Lista locks desde TTLock (refresh token si hace falta)
+   * Body: { propertyId }
+   *
+   * - Verifica que propertyId pertenezca a la org autenticada
+   * - Lista locks desde TTLock
    * - Upsert en Prisma.Lock por ttlockLockId asignando propertyId
    */
   router.post("/ttlock/sync-locks", async (req, res) => {
     try {
-      const organizationId = String(req.body?.organizationId ?? "").trim();
+      const organizationId = String((req as any).orgId);
       const propertyId = String(req.body?.propertyId ?? "").trim();
 
-      if (!organizationId || !propertyId) {
-        return res.status(400).json({ ok: false, error: "Missing organizationId or propertyId" });
+      if (!propertyId) {
+        return res.status(400).json({ ok: false, error: "Missing propertyId" });
       }
 
-      // 1) validar propiedad pertenece a org
       const prop = await prisma.property.findFirst({
         where: { id: propertyId, organizationId },
         select: { id: true },
       });
+
       if (!prop) {
-        return res.status(404).json({ ok: false, error: "PROPERTY_NOT_FOUND_FOR_ORG" });
+        return res
+          .status(404)
+          .json({ ok: false, error: "PROPERTY_NOT_FOUND_FOR_ORG" });
       }
 
-      // 2) cargar TTLockAuth
-      const auth = await prisma.tTLockAuth.findUnique({
-        where: { organizationId },
-        select: { accessToken: true, refreshToken: true, expiresAt: true, uid: true },
-      });
-
-      if (!auth?.refreshToken) {
-        return res.status(401).json({ ok: false, error: "TTLOCK_NOT_CONNECTED" });
+      const tokenResult = await getValidAccessTokenForOrg(organizationId);
+      if (!tokenResult.ok) {
+        return res
+          .status(tokenResult.status)
+          .json({ ok: false, error: tokenResult.error });
       }
 
-      // 3) refresh si no hay accessToken o si expira en < 2 min
-      const now = Date.now();
-      const expiresAtMs = auth.expiresAt ? new Date(auth.expiresAt).getTime() : 0;
-      const shouldRefresh = !auth.accessToken || !auth.expiresAt || expiresAtMs - now < 2 * 60 * 1000;
+      const resp = await ttlockListLocksWithAccessToken(tokenResult.accessToken, 1, 100);
+      const list = Array.isArray((resp as any)?.list) ? (resp as any).list : [];
 
-      let accessToken = auth.accessToken ?? "";
-
-      if (shouldRefresh) {
-        const refreshed = await ttlockRefreshAccessToken(auth.refreshToken);
-
-        const newAccess = refreshed.access_token;
-        const newRefresh = refreshed.refresh_token ?? auth.refreshToken;
-        const newExpiresAt = new Date(Date.now() + refreshed.expires_in * 1000);
-
-        await prisma.tTLockAuth.update({
-          where: { organizationId },
-          data: {
-            accessToken: newAccess,
-            refreshToken: newRefresh,
-            expiresAt: newExpiresAt,
-            uid: refreshed.uid ?? auth.uid ?? undefined,
-          },
-        });
-
-        accessToken = newAccess;
-      }
-
-      if (!accessToken) {
-        return res.status(409).json({ ok: false, error: "TTLOCK_NOT_CONNECTED" });
-      }
-
-      // 4) listar locks desde TTLock
-      const resp = await ttlockListLocksWithAccessToken(accessToken, 1, 100);
-      const list = Array.isArray(resp?.list) ? resp.list : [];
-
-      // 5) upsert a Prisma
       let created = 0;
       let updated = 0;
-
       const upserted = [];
+
       for (const l of list) {
         const ttlockLockId = Number(l.lockId);
         if (!Number.isFinite(ttlockLockId) || ttlockLockId <= 0) continue;
 
-        const ttlockLockName = String(l.lockName ?? l.lockAlias ?? "").trim() || null;
+        const ttlockLockName =
+          String(l.lockName ?? l.lockAlias ?? "").trim() || null;
 
         const existing = await prisma.lock.findUnique({
           where: { ttlockLockId },
@@ -218,7 +300,13 @@ export function buildOrgTtlockRouter(prisma: PrismaClient) {
             propertyId,
             isActive: true,
           },
-          select: { id: true, ttlockLockId: true, ttlockLockName: true, propertyId: true, isActive: true },
+          select: {
+            id: true,
+            ttlockLockId: true,
+            ttlockLockName: true,
+            propertyId: true,
+            isActive: true,
+          },
         });
 
         if (existing) updated++;
@@ -238,7 +326,9 @@ export function buildOrgTtlockRouter(prisma: PrismaClient) {
       });
     } catch (e: any) {
       console.error("org/ttlock/sync-locks error:", e?.message ?? e);
-      return res.status(500).json({ ok: false, error: e?.message ?? "sync locks failed" });
+      return res
+        .status(500)
+        .json({ ok: false, error: e?.message ?? "sync locks failed" });
     }
   });
 

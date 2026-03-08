@@ -8,6 +8,7 @@ import { AccessPage } from "../../pages/access/AccessPage";
 import { PropertiesPage } from "../../pages/properties/PropertiesPage";
 import { PropertyDetailPage } from "../../pages/property-detail/PropertyDetailPage";
 import { LockDetailPage } from "../../pages/lock-detail/LockDetailPage";
+import { PmsConnectionsPage } from "../../pages/integrations/PmsConnectionsPage";
 
 export const router = createBrowserRouter([
   {
@@ -26,6 +27,8 @@ export const router = createBrowserRouter([
       { path: "/reservations/:id", element: <ReservationDetailPage /> },
 
       { path: "/access", element: <AccessPage /> },
+
+      { path: "/integrations/pms", element: <PmsConnectionsPage /> },
     ],
   },
 ]);
