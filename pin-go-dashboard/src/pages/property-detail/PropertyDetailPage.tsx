@@ -37,6 +37,7 @@ type ReservationRow = {
   checkIn: string;
   checkOut: string;
   status: "ACTIVE" | "CANCELLED";
+  operationalStatus: "UPCOMING" | "IN_HOUSE" | "CHECKED_OUT" | "CANCELLED";
   source?: string | null;
   externalProvider?: string | null;
   property?: { id: string; name: string } | null;
@@ -59,6 +60,7 @@ type AccessResp = {
     startsAt: string;
     endsAt: string;
     codeMasked: string | null;
+    status?: string;
   }>;
   nfc: Array<{
     assignmentId: string;
@@ -146,6 +148,94 @@ function fmt(d: string) {
   return isNaN(dt.getTime()) ? d : dt.toLocaleString();
 }
 
+function operationalBadge(status: ReservationRow["operationalStatus"]) {
+  let background = "#f3f4f6";
+  let color = "#4b5563";
+  let border = "1px solid #e5e7eb";
+  let label = status;
+
+  if (status === "UPCOMING") {
+    background = "#eff6ff";
+    color = "#1d4ed8";
+    border = "1px solid #bfdbfe";
+    label = "UPCOMING";
+  } else if (status === "IN_HOUSE") {
+    background = "#ecfdf5";
+    color = "#065f46";
+    border = "1px solid #a7f3d0";
+    label = "IN HOUSE";
+  } else if (status === "CHECKED_OUT") {
+    background = "#f3f4f6";
+    color = "#4b5563";
+    border = "1px solid #e5e7eb";
+    label = "CHECKED OUT";
+  } else if (status === "CANCELLED") {
+    background = "#fef2f2";
+    color = "#991b1b";
+    border = "1px solid #fecaca";
+    label = "CANCELLED";
+  }
+
+  return (
+    <span
+      style={{
+        display: "inline-flex",
+        alignItems: "center",
+        padding: "4px 8px",
+        borderRadius: 999,
+        fontSize: 12,
+        fontWeight: 700,
+        background,
+        color,
+        border,
+      }}
+    >
+      {label}
+    </span>
+  );
+}
+
+function accessStatusBadge(status?: string) {
+  const normalized = String(status ?? "").toUpperCase();
+
+  let background = "#f3f4f6";
+  let color = "#4b5563";
+  let border = "1px solid #e5e7eb";
+  let label = normalized || "—";
+
+  if (normalized === "ACTIVE") {
+    background = "#ecfdf5";
+    color = "#065f46";
+    border = "1px solid #a7f3d0";
+  } else if (normalized === "PENDING") {
+    background = "#eff6ff";
+    color = "#1d4ed8";
+    border = "1px solid #bfdbfe";
+  } else if (normalized === "FAILED" || normalized === "CANCELLED") {
+    background = "#fef2f2";
+    color = "#991b1b";
+    border = "1px solid #fecaca";
+  }
+
+  return (
+    <span
+      style={{
+        display: "inline-flex",
+        alignItems: "center",
+        padding: "4px 8px",
+        borderRadius: 999,
+        fontSize: 12,
+        fontWeight: 700,
+        background,
+        color,
+        border,
+      }}
+    >
+      {label}
+    </span>
+  );
+}
+
 export function PropertyDetailPage() {
   const { id } = useParams();
   const [tab, setTab] = useState<"overview" | "locks" | "reservations" | "access">("overview");
@@ -165,19 +255,25 @@ export function PropertyDetailPage() {
     setErr(null);
 
     Promise.all([
-      fetch(`${API_BASE}/api/dashboard/properties`).then(async (res) => {
+      fetch(`${API_BASE}/api/dashboard/properties`, { credentials: "include" }).then(async (res) => {
         if (!res.ok) throw new Error(`Properties ${res.status}`);
         return res.json() as Promise<PropertiesResp>;
       }),
-      fetch(`${API_BASE}/api/dashboard/locks?page=1&pageSize=20&propertyId=${id}`).then(async (res) => {
+      fetch(`${API_BASE}/api/dashboard/locks?page=1&pageSize=20&propertyId=${id}`, {
+        credentials: "include",
+      }).then(async (res) => {
         if (!res.ok) throw new Error(`Locks ${res.status}`);
         return res.json() as Promise<LocksResp>;
       }),
-      fetch(`${API_BASE}/api/dashboard/reservations?page=1&pageSize=10&propertyId=${id}`).then(async (res) => {
+      fetch(`${API_BASE}/api/dashboard/reservations?page=1&pageSize=50&propertyId=${id}`, {
+        credentials: "include",
+      }).then(async (res) => {
         if (!res.ok) throw new Error(`Reservations ${res.status}`);
         return res.json() as Promise<ReservationsResp>;
       }),
-      fetch(`${API_BASE}/api/dashboard/access?propertyId=${id}`).then(async (res) => {
+      fetch(`${API_BASE}/api/dashboard/access?propertyId=${id}`, {
+        credentials: "include",
+      }).then(async (res) => {
         if (!res.ok) throw new Error(`Access ${res.status}`);
         return res.json() as Promise<AccessResp>;
       }),
@@ -196,9 +292,27 @@ export function PropertyDetailPage() {
       .finally(() => setLoading(false));
   }, [id]);
 
-  const accessCount = useMemo(
-    () => (access?.guestPasscodes?.length ?? 0) + (access?.nfc?.length ?? 0),
+  const upcomingReservations = useMemo(
+    () => (reservations ?? []).filter((r) => r.operationalStatus === "UPCOMING"),
+    [reservations]
+  );
+
+  const activeGuestPasscodes = useMemo(
+    () =>
+      (access?.guestPasscodes ?? []).filter(
+        (g) => String(g.status ?? "").toUpperCase() === "ACTIVE"
+      ),
     [access]
+  );
+
+  const activeNfc = useMemo(
+    () => (access?.nfc ?? []).filter((n) => String(n.status ?? "").toUpperCase() === "ACTIVE"),
+    [access]
+  );
+
+  const accessCount = useMemo(
+    () => activeGuestPasscodes.length + activeNfc.length,
+    [activeGuestPasscodes, activeNfc]
   );
 
   if (loading) {
@@ -251,9 +365,9 @@ export function PropertyDetailPage() {
         }}
       >
         <Stat title="Locks" value={item.locks} />
-        <Stat title="Active Reservations" value={item.activeReservations} />
+        <Stat title="Upcoming Reservations" value={upcomingReservations.length} />
         <Stat title="PMS" value={String(item.pms).toUpperCase()} />
-        <Stat title="Status" value={item.status} />
+        <Stat title="Active Access" value={accessCount} />
       </div>
 
       <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
@@ -262,7 +376,7 @@ export function PropertyDetailPage() {
         <TabButton
           active={tab === "reservations"}
           onClick={() => setTab("reservations")}
-          label={`Reservations (${reservations.length})`}
+          label={`Reservations (${upcomingReservations.length})`}
         />
         <TabButton active={tab === "access"} onClick={() => setTab("access")} label={`Access (${accessCount})`} />
       </div>
@@ -278,15 +392,14 @@ export function PropertyDetailPage() {
         >
           <SectionCard title="Property Summary">
             <div style={{ color: "#6b7280", lineHeight: 1.7 }}>
-              {item.name} currently has <b>{item.locks}</b> active lock(s), <b>{item.activeReservations}</b> active
-              reservation(s), and PMS source <b>{String(item.pms).toUpperCase()}</b>.
+              {item.name} currently has <b>{item.locks}</b> active lock(s), <b>{upcomingReservations.length}</b>{" "}
+              upcoming reservation(s), and PMS source <b>{String(item.pms).toUpperCase()}</b>.
             </div>
           </SectionCard>
 
           <SectionCard title="Operational Health">
             <div style={{ color: "#6b7280", lineHeight: 1.7 }}>
-              Status is <b>{item.status}</b>. Next step here: add live sync health, battery visibility, and recent
-              operational events per property.
+              This view is focused on <b>upcoming reservations</b> and <b>active access</b> for this property.
             </div>
           </SectionCard>
         </div>
@@ -312,7 +425,6 @@ export function PropertyDetailPage() {
                 >
                   <div>
                     <div style={{ fontWeight: 600 }}>{l.name ?? "TTLock Lock"}</div>
-                    <div style={{ color: "#6b7280", fontSize: 12 }}>TTLock ID: {l.ttlockLockId}</div>
                   </div>
                   <div>
                     <span
@@ -336,26 +448,39 @@ export function PropertyDetailPage() {
       )}
 
       {tab === "reservations" && (
-        <SectionCard title={`Reservations (${reservations.length})`}>
-          {reservations.length === 0 ? (
-            <div style={{ color: "#666" }}>No reservations found.</div>
+        <SectionCard title={`Upcoming Reservations (${upcomingReservations.length})`}>
+          {upcomingReservations.length === 0 ? (
+            <div style={{ color: "#666" }}>No upcoming reservations found.</div>
           ) : (
             <div style={{ display: "grid", gap: 10 }}>
-              {reservations.map((r) => (
+              {upcomingReservations.map((r) => (
                 <div
                   key={r.id}
                   style={{
                     border: "1px solid #f3f4f6",
                     borderRadius: 12,
                     padding: 12,
+                    display: "grid",
+                    gap: 6,
                   }}
                 >
                   <div style={{ fontWeight: 600 }}>{r.guestName}</div>
                   <div style={{ color: "#6b7280", fontSize: 12 }}>
                     {fmt(r.checkIn)} → {fmt(r.checkOut)}
                   </div>
-                  <div style={{ color: "#6b7280", fontSize: 12, marginTop: 4 }}>
-                    {r.externalProvider ?? r.source ?? "—"} · {r.status}
+                  <div
+                    style={{
+                      marginTop: 2,
+                      display: "flex",
+                      gap: 8,
+                      alignItems: "center",
+                      flexWrap: "wrap",
+                    }}
+                  >
+                    <span style={{ color: "#6b7280", fontSize: 12 }}>
+                      {String(r.externalProvider ?? r.source ?? "—").toUpperCase()}
+                    </span>
+                    {operationalBadge(r.operationalStatus)}
                   </div>
                 </div>
               ))}
@@ -365,50 +490,55 @@ export function PropertyDetailPage() {
       )}
 
       {tab === "access" && (
-        <SectionCard title={`Access (${accessCount})`}>
-          {!access ? (
-            <div style={{ color: "#666" }}>No access data.</div>
+        <SectionCard title={`Active Access (${accessCount})`}>
+          {accessCount === 0 ? (
+            <div style={{ color: "#666" }}>No active access found.</div>
           ) : (
             <div style={{ display: "grid", gap: 10 }}>
-              {(access.guestPasscodes ?? []).map((g) => (
+              {activeGuestPasscodes.map((g) => (
                 <div
                   key={g.grantId}
                   style={{
                     border: "1px solid #f3f4f6",
                     borderRadius: 12,
                     padding: 12,
+                    display: "grid",
+                    gap: 6,
                   }}
                 >
                   <div style={{ fontWeight: 600 }}>PASSCODE · {g.guestName}</div>
+                  <div style={{ color: "#6b7280", fontSize: 12 }}>{g.lock?.name ?? "—"}</div>
                   <div style={{ color: "#6b7280", fontSize: 12 }}>
-                    {g.lock?.name ?? g.lock?.ttlockLockId ?? "—"}
+                    Access Period: {fmt(g.startsAt)} — {fmt(g.endsAt)}
                   </div>
-                  <div style={{ color: "#6b7280", fontSize: 12 }}>
-                    {fmt(g.startsAt)} → {fmt(g.endsAt)}
+                  <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+                    <span style={{ color: "#6b7280", fontSize: 12 }}>Code: {g.codeMasked ?? "—"}</span>
+                    {accessStatusBadge(g.status)}
                   </div>
-                  <div style={{ color: "#6b7280", fontSize: 12 }}>Code: {g.codeMasked ?? "—"}</div>
                 </div>
               ))}
 
-              {(access.nfc ?? []).map((n) => (
+              {activeNfc.map((n) => (
                 <div
                   key={n.assignmentId}
                   style={{
                     border: "1px solid #f3f4f6",
                     borderRadius: 12,
                     padding: 12,
+                    display: "grid",
+                    gap: 6,
                   }}
                 >
                   <div style={{ fontWeight: 600 }}>
                     NFC · {n.role} · {n.guestName}
                   </div>
                   <div style={{ color: "#6b7280", fontSize: 12 }}>
-                    Card: {n.card?.label ?? `#${n.card?.ttlockCardId ?? ""}`}
+                    Card: {n.card?.label ?? "—"}
                   </div>
                   <div style={{ color: "#6b7280", fontSize: 12 }}>
-                    {fmt(n.startsAt)} → {fmt(n.endsAt)}
+                    Access Period: {fmt(n.startsAt)} — {fmt(n.endsAt)}
                   </div>
-                  <div style={{ color: "#6b7280", fontSize: 12 }}>Status: {n.status}</div>
+                  <div>{accessStatusBadge(n.status)}</div>
                 </div>
               ))}
             </div>

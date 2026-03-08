@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
+import { Link } from "react-router-dom";
 
 type ReservationStatus = "ACTIVE" | "CANCELLED";
 type OperationalStatus = "UPCOMING" | "IN_HOUSE" | "CHECKED_OUT" | "CANCELLED";
@@ -45,15 +46,39 @@ function fmt(d: string) {
 
 function statusStyles(status: OperationalStatus) {
   if (status === "IN_HOUSE") {
-    return { background: "#ecfdf5", color: "#065f46" };
+    return {
+      background: "#ecfdf5",
+      color: "#065f46",
+      border: "1px solid #a7f3d0",
+    };
   }
   if (status === "UPCOMING") {
-    return { background: "#eff6ff", color: "#1d4ed8" };
+    return {
+      background: "#eff6ff",
+      color: "#1d4ed8",
+      border: "1px solid #bfdbfe",
+    };
   }
   if (status === "CHECKED_OUT") {
-    return { background: "#f3f4f6", color: "#4b5563" };
+    return {
+      background: "#f3f4f6",
+      color: "#4b5563",
+      border: "1px solid #e5e7eb",
+    };
   }
-  return { background: "#fef2f2", color: "#991b1b" };
+  return {
+    background: "#fef2f2",
+    color: "#991b1b",
+    border: "1px solid #fecaca",
+  };
+}
+
+function sourceLabel(r: ReservationRow) {
+  return r.externalProvider ?? r.source ?? "—";
+}
+
+function propertyLabel(r: ReservationRow) {
+  return r.property?.name ?? r.propertyId ?? "—";
 }
 
 export function ReservationsPage() {
@@ -100,9 +125,19 @@ export function ReservationsPage() {
 
   return (
     <div style={{ display: "grid", gap: 16 }}>
-      <div>
+      <div
+        style={{
+          border: "1px solid #e5e7eb",
+          borderRadius: 20,
+          padding: 20,
+          background: "#ffffff",
+          boxShadow: "0 1px 2px rgba(0,0,0,0.04)",
+        }}
+      >
         <h1 style={{ fontSize: 28, fontWeight: 700, margin: 0 }}>Reservations</h1>
-        <p style={{ color: "#666" }}>PMS reservations + operational status. Read-only.</p>
+        <p style={{ color: "#666", marginTop: 6 }}>
+          PMS reservations with operational visibility and drill-down access.
+        </p>
       </div>
 
       <div
@@ -114,17 +149,23 @@ export function ReservationsPage() {
           border: "1px solid #e5e7eb",
           borderRadius: 16,
           padding: 12,
+          background: "#fff",
         }}
       >
         <div style={{ display: "grid", gap: 6 }}>
-          <div style={{ fontSize: 12, color: "#666" }}>Property</div>
+          <div style={{ fontSize: 12, color: "#666", fontWeight: 600 }}>Property</div>
           <select
             value={propertyId}
             onChange={(e) => {
               setPage(1);
               setPropertyId(e.target.value);
             }}
-            style={{ padding: "8px 10px", borderRadius: 10, border: "1px solid #e5e7eb" }}
+            style={{
+              padding: "8px 10px",
+              borderRadius: 10,
+              border: "1px solid #e5e7eb",
+              background: "#fff",
+            }}
           >
             <option value="ALL">All</option>
             {properties.map((p) => (
@@ -136,14 +177,19 @@ export function ReservationsPage() {
         </div>
 
         <div style={{ display: "grid", gap: 6 }}>
-          <div style={{ fontSize: 12, color: "#666" }}>Status</div>
+          <div style={{ fontSize: 12, color: "#666", fontWeight: 600 }}>Operational Status</div>
           <select
             value={status}
             onChange={(e) => {
               setPage(1);
               setStatus(e.target.value);
             }}
-            style={{ padding: "8px 10px", borderRadius: 10, border: "1px solid #e5e7eb" }}
+            style={{
+              padding: "8px 10px",
+              borderRadius: 10,
+              border: "1px solid #e5e7eb",
+              background: "#fff",
+            }}
           >
             <option value="ALL">All</option>
             <option value="UPCOMING">UPCOMING</option>
@@ -159,17 +205,33 @@ export function ReservationsPage() {
       </div>
 
       {err ? (
-        <div style={{ border: "1px solid #fecaca", background: "#fef2f2", padding: 12, borderRadius: 12 }}>
+        <div
+          style={{
+            border: "1px solid #fecaca",
+            background: "#fef2f2",
+            padding: 12,
+            borderRadius: 12,
+            color: "#991b1b",
+          }}
+        >
           <b>Error:</b> {err}
         </div>
       ) : null}
 
-      <div style={{ border: "1px solid #e5e7eb", borderRadius: 16, overflow: "hidden" }}>
+      <div
+        style={{
+          border: "1px solid #e5e7eb",
+          borderRadius: 16,
+          overflow: "hidden",
+          background: "#fff",
+          boxShadow: "0 1px 2px rgba(0,0,0,0.03)",
+        }}
+      >
         <div style={{ overflowX: "auto" }}>
           <table style={{ width: "100%", borderCollapse: "collapse" }}>
             <thead style={{ background: "#f9fafb" }}>
               <tr>
-                {["Guest", "Property", "Check-in", "Check-out", "Status", "Source"].map((h) => (
+                {["Guest", "Property", "Check-in", "Check-out", "Operational", "Source", "Open"].map((h) => (
                   <th
                     key={h}
                     style={{
@@ -179,6 +241,8 @@ export function ReservationsPage() {
                       padding: 12,
                       borderBottom: "1px solid #e5e7eb",
                       whiteSpace: "nowrap",
+                      fontWeight: 700,
+                      letterSpacing: 0.2,
                     }}
                   >
                     {h}
@@ -190,46 +254,77 @@ export function ReservationsPage() {
             <tbody>
               {loading ? (
                 <tr>
-                  <td colSpan={6} style={{ padding: 16, color: "#666" }}>
+                  <td colSpan={7} style={{ padding: 16, color: "#666" }}>
                     Loading…
                   </td>
                 </tr>
               ) : filteredItems.length === 0 ? (
                 <tr>
-                  <td colSpan={6} style={{ padding: 16, color: "#666" }}>
+                  <td colSpan={7} style={{ padding: 16, color: "#666" }}>
                     No reservations found for this filter.
                   </td>
                 </tr>
               ) : (
                 filteredItems.map((r) => {
                   const styles = statusStyles(r.operationalStatus);
+
                   return (
                     <tr key={r.id} style={{ borderBottom: "1px solid #f3f4f6" }}>
                       <td style={{ padding: 12 }}>
-                        <div style={{ fontWeight: 600 }}>{r.guestName}</div>
-                        <div style={{ color: "#666", fontSize: 12 }}>{r.roomName ?? r.guestEmail ?? ""}</div>
+                        <div style={{ fontWeight: 700, color: "#111827" }}>{r.guestName}</div>
+                        <div style={{ color: "#666", fontSize: 12, marginTop: 4 }}>
+                          {r.roomName ?? r.guestEmail ?? ""}
+                        </div>
                       </td>
-                      <td style={{ padding: 12, fontWeight: 600 }}>
-                        {r.property?.name ?? (r.propertyId ?? "—")}
+
+                      <td style={{ padding: 12 }}>
+                        <div style={{ fontWeight: 600, color: "#111827" }}>{propertyLabel(r)}</div>
                       </td>
+
                       <td style={{ padding: 12, color: "#333", whiteSpace: "nowrap" }}>{fmt(r.checkIn)}</td>
+
                       <td style={{ padding: 12, color: "#333", whiteSpace: "nowrap" }}>{fmt(r.checkOut)}</td>
+
                       <td style={{ padding: 12 }}>
                         <span
                           style={{
                             fontSize: 12,
-                            padding: "4px 8px",
+                            padding: "5px 10px",
                             borderRadius: 999,
-                            border: "1px solid #e5e7eb",
                             background: styles.background,
                             color: styles.color,
+                            border: styles.border,
+                            fontWeight: 700,
+                            display: "inline-flex",
+                            alignItems: "center",
+                            gap: 6,
                           }}
                         >
                           {r.operationalStatus}
                         </span>
                       </td>
-                      <td style={{ padding: 12, color: "#666" }}>
-                        {r.externalProvider ?? r.source ?? "—"}
+
+                      <td style={{ padding: 12, color: "#666" }}>{sourceLabel(r)}</td>
+
+                      <td style={{ padding: 12 }}>
+                        <Link
+                          to={`/reservations/${r.id}`}
+                          style={{
+                            display: "inline-flex",
+                            alignItems: "center",
+                            justifyContent: "center",
+                            padding: "8px 12px",
+                            borderRadius: 10,
+                            border: "1px solid #d1d5db",
+                            background: "#fff",
+                            color: "#111827",
+                            textDecoration: "none",
+                            fontSize: 13,
+                            fontWeight: 600,
+                          }}
+                        >
+                          View
+                        </Link>
                       </td>
                     </tr>
                   );
@@ -239,7 +334,16 @@ export function ReservationsPage() {
           </table>
         </div>
 
-        <div style={{ display: "flex", gap: 10, alignItems: "center", padding: 12 }}>
+        <div
+          style={{
+            display: "flex",
+            gap: 10,
+            alignItems: "center",
+            padding: 12,
+            borderTop: "1px solid #f3f4f6",
+            background: "#fff",
+          }}
+        >
           <button
             onClick={() => setPage((p) => Math.max(1, p - 1))}
             disabled={page <= 1 || loading}
@@ -249,6 +353,8 @@ export function ReservationsPage() {
               border: "1px solid #e5e7eb",
               background: page <= 1 ? "#f9fafb" : "#fff",
               cursor: page <= 1 ? "not-allowed" : "pointer",
+              color: "#111827",
+              fontWeight: 600,
             }}
           >
             Prev
@@ -267,6 +373,8 @@ export function ReservationsPage() {
               border: "1px solid #e5e7eb",
               background: page >= totalPages ? "#f9fafb" : "#fff",
               cursor: page >= totalPages ? "not-allowed" : "pointer",
+              color: "#111827",
+              fontWeight: 600,
             }}
           >
             Next
