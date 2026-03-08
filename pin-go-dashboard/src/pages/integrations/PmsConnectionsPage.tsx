@@ -58,7 +58,7 @@ const PROVIDERS: ProviderOption[] = [
   {
     key: "GUESTY",
     label: "Guesty",
-    description: "Connect Guesty credentials for PMS onboarding and sync preparation.",
+    description: "Primary PMS connection for the current Pin&Go rollout.",
     enabled: true,
   },
   {
@@ -92,6 +92,15 @@ function sectionStyle(): React.CSSProperties {
     border: "1px solid #e5e7eb",
     borderRadius: 18,
     padding: 20,
+    background: "#fff",
+  };
+}
+
+function miniCardStyle(): React.CSSProperties {
+  return {
+    border: "1px solid #e5e7eb",
+    borderRadius: 16,
+    padding: 16,
     background: "#fff",
   };
 }
@@ -144,7 +153,7 @@ function buttonStyle(
 }
 
 function statusBoxStyle(
-  tone: "success" | "error" | "info"
+  tone: "success" | "error" | "info" | "warning"
 ): React.CSSProperties {
   if (tone === "success") {
     return {
@@ -164,6 +173,17 @@ function statusBoxStyle(
       background: "#fef2f2",
       border: "1px solid #fecaca",
       color: "#991b1b",
+      fontSize: 14,
+    };
+  }
+
+  if (tone === "warning") {
+    return {
+      borderRadius: 12,
+      padding: 12,
+      background: "#fffbeb",
+      border: "1px solid #fde68a",
+      color: "#92400e",
       fontSize: 14,
     };
   }
@@ -221,13 +241,15 @@ export function PmsConnectionsPage() {
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
   const [info, setInfo] = useState<string | null>(
-    "Guesty is enabled first. Save the connection here, then continue with listing mapping and ingest."
+    "This page can stay in onboarding mode until the client shares Guesty credentials."
   );
 
   const selectedProvider = useMemo(
     () => PROVIDERS.find((p) => p.key === provider) ?? PROVIDERS[0],
     [provider]
   );
+
+  const onboardingReady = Boolean(existingConnection?.hasCredentials);
 
   async function loadConnection(nextProvider: ProviderKey) {
     setLoadingConnection(true);
@@ -371,8 +393,8 @@ export function PmsConnectionsPage() {
           PMS Connections
         </h1>
         <p style={{ color: "#6b7280", margin: 0 }}>
-          Connect your PMS provider so Pin&Go can move into listing mapping and
-          reservation ingestion.
+          Prepare Pin&Go to connect with your PMS provider and continue later
+          when production credentials are available.
         </p>
       </div>
 
@@ -436,6 +458,73 @@ export function PmsConnectionsPage() {
         })}
       </div>
 
+      <div style={sectionStyle()}>
+        <h3 style={{ marginTop: 0, marginBottom: 14 }}>Onboarding Status</h3>
+
+        <div
+          style={{
+            display: "grid",
+            gap: 12,
+            gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))",
+          }}
+        >
+          <div style={miniCardStyle()}>
+            <div style={{ fontSize: 13, color: "#6b7280", marginBottom: 6 }}>
+              Provider
+            </div>
+            <div style={{ fontSize: 18, fontWeight: 700 }}>
+              {selectedProvider.label}
+            </div>
+          </div>
+
+          <div style={miniCardStyle()}>
+            <div style={{ fontSize: 13, color: "#6b7280", marginBottom: 6 }}>
+              Current Phase
+            </div>
+            <div style={{ fontSize: 18, fontWeight: 700 }}>
+              {onboardingReady ? "Configured" : "Awaiting Credentials"}
+            </div>
+          </div>
+
+          <div style={miniCardStyle()}>
+            <div style={{ fontSize: 13, color: "#6b7280", marginBottom: 6 }}>
+              Next Step
+            </div>
+            <div style={{ fontSize: 16, fontWeight: 700 }}>
+              {onboardingReady ? "Listing Mapping" : "Collect Guesty Access"}
+            </div>
+          </div>
+
+          <div style={miniCardStyle()}>
+            <div style={{ fontSize: 13, color: "#6b7280", marginBottom: 6 }}>
+              Existing Connection
+            </div>
+            <div style={{ fontSize: 16, fontWeight: 700 }}>
+              {existingConnection ? existingConnection.status : "Not Saved"}
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div style={statusBoxStyle("warning")}>
+        Guesty credentials are not required to keep building the dashboard.
+        You can leave this page in onboarding mode and return when the client
+        shares real access details.
+      </div>
+
+      <div style={sectionStyle()}>
+        <h3 style={{ marginTop: 0, marginBottom: 14 }}>
+          What the client needs to provide
+        </h3>
+
+        <div style={{ display: "grid", gap: 10, color: "#6b7280", fontSize: 14 }}>
+          <div>1. Guesty Client ID</div>
+          <div>2. Guesty Client Secret</div>
+          <div>3. Optional account identifier or portfolio name</div>
+          <div>4. Optional webhook secret if webhook signing is enabled</div>
+        </div>
+      </div>
+
       <form onSubmit={handleSaveConnection} style={sectionStyle()}>
         <div
           style={{
@@ -450,8 +539,7 @@ export function PmsConnectionsPage() {
           <div>
             <h3 style={{ margin: 0 }}>{selectedProvider.label} Connection</h3>
             <p style={{ margin: "6px 0 0 0", color: "#6b7280", fontSize: 14 }}>
-              Save credentials by organization. Guesty is the first supported
-              PMS in this rollout.
+              Save credentials by organization when they become available.
             </p>
           </div>
 
@@ -509,7 +597,7 @@ export function PmsConnectionsPage() {
             <input
               value={clientId}
               onChange={(e) => setClientId(e.target.value)}
-              placeholder="Client ID"
+              placeholder="Guesty Client ID"
               disabled={!selectedProvider.enabled || saving || testing}
               style={inputStyle(!selectedProvider.enabled || saving || testing)}
             />
@@ -521,7 +609,7 @@ export function PmsConnectionsPage() {
               type="password"
               value={clientSecret}
               onChange={(e) => setClientSecret(e.target.value)}
-              placeholder="Client Secret"
+              placeholder="Guesty Client Secret"
               disabled={!selectedProvider.enabled || saving || testing}
               style={inputStyle(!selectedProvider.enabled || saving || testing)}
             />
@@ -612,7 +700,7 @@ export function PmsConnectionsPage() {
               gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))",
             }}
           >
-            <div style={sectionStyle()}>
+            <div style={miniCardStyle()}>
               <div style={{ fontSize: 13, color: "#6b7280", marginBottom: 6 }}>
                 Status
               </div>
@@ -621,7 +709,7 @@ export function PmsConnectionsPage() {
               </div>
             </div>
 
-            <div style={sectionStyle()}>
+            <div style={miniCardStyle()}>
               <div style={{ fontSize: 13, color: "#6b7280", marginBottom: 6 }}>
                 Credentials
               </div>
@@ -630,7 +718,7 @@ export function PmsConnectionsPage() {
               </div>
             </div>
 
-            <div style={sectionStyle()}>
+            <div style={miniCardStyle()}>
               <div style={{ fontSize: 13, color: "#6b7280", marginBottom: 6 }}>
                 Webhook Secret
               </div>
@@ -639,16 +727,28 @@ export function PmsConnectionsPage() {
               </div>
             </div>
 
-            <div style={sectionStyle()}>
+            <div style={miniCardStyle()}>
               <div style={{ fontSize: 13, color: "#6b7280", marginBottom: 6 }}>
                 Last Configured
               </div>
               <div style={{ fontSize: 16, fontWeight: 700 }}>
-                {formatDate(existingConnection.metadata?.lastConfiguredAt ?? existingConnection.updatedAt)}
+                {formatDate(
+                  existingConnection.metadata?.lastConfiguredAt ??
+                    existingConnection.updatedAt
+                )}
               </div>
             </div>
           </div>
         )}
+      </div>
+
+      <div style={sectionStyle()}>
+        <h3 style={{ marginTop: 0 }}>What comes after credentials are available</h3>
+        <div style={{ color: "#6b7280", fontSize: 14, display: "grid", gap: 8 }}>
+          <div>1. Save the Guesty connection in this page.</div>
+          <div>2. Load and map PMS listings to Pin&Go properties.</div>
+          <div>3. Activate reservation ingestion and retry failed webhook events if needed.</div>
+        </div>
       </div>
     </div>
   );
