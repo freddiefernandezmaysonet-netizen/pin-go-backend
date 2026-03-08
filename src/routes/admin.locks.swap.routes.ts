@@ -14,11 +14,15 @@ export function buildAdminLocksSwapRouter(prisma: PrismaClient) {
     const expected = process.env.ADMIN_KEY;
 
     if (!expected) {
-      return res.status(500).json({ ok: false, error: "ADMIN_KEY not configured" });
+      return res
+        .status(500)
+        .json({ ok: false, error: "ADMIN_KEY not configured" });
     }
+
     if (!key || key !== expected) {
       return res.status(401).json({ ok: false, error: "Unauthorized" });
     }
+
     next();
   });
 
@@ -30,7 +34,12 @@ export function buildAdminLocksSwapRouter(prisma: PrismaClient) {
    */
   router.post("/locks/swap", async (req, res) => {
     try {
-      const { propertyId, oldTtlockLockId, newTtlockLockId, newTtlockLockName } = req.body ?? {};
+      const {
+        propertyId,
+        oldTtlockLockId,
+        newTtlockLockId,
+        newTtlockLockName,
+      } = req.body ?? {};
 
       if (!propertyId || !oldTtlockLockId || !newTtlockLockId) {
         return res.status(400).json({
@@ -40,7 +49,10 @@ export function buildAdminLocksSwapRouter(prisma: PrismaClient) {
       }
 
       if (Number(oldTtlockLockId) === Number(newTtlockLockId)) {
-        return res.status(400).json({ ok: false, error: "oldTtlockLockId cannot equal newTtlockLockId" });
+        return res.status(400).json({
+          ok: false,
+          error: "oldTtlockLockId cannot equal newTtlockLockId",
+        });
       }
 
       // 1) Cargar property + orgId
@@ -48,31 +60,50 @@ export function buildAdminLocksSwapRouter(prisma: PrismaClient) {
         where: { id: String(propertyId) },
         select: { id: true, organizationId: true },
       });
-      if (!property) return res.status(404).json({ ok: false, error: "Property not found" });
+
+      if (!property) {
+        return res.status(404).json({ ok: false, error: "Property not found" });
+      }
 
       const orgId = property.organizationId;
 
       // 2) Validar que el lock viejo existe, está activo, y pertenece a esa property
       const oldLock = await prisma.lock.findUnique({
         where: { ttlockLockId: Number(oldTtlockLockId) },
-        select: { id: true, ttlockLockId: true, propertyId: true, isActive: true },
+        select: {
+          id: true,
+          ttlockLockId: true,
+          propertyId: true,
+          isActive: true,
+        },
       });
 
-      if (!oldLock) return res.status(404).json({ ok: false, error: "Old lock not found" });
-      if (oldLock.propertyId !== property.id) {
-        return res.status(400).json({ ok: false, error: "Old lock does not belong to this property" });
+      if (!oldLock) {
+        return res.status(404).json({ ok: false, error: "Old lock not found" });
       }
+
+      if (oldLock.propertyId !== property.id) {
+        return res.status(400).json({
+          ok: false,
+          error: "Old lock does not belong to this property",
+        });
+      }
+
       if (!oldLock.isActive) {
-        return res.status(400).json({ ok: false, error: "Old lock is not active (cannot swap)" });
+        return res.status(400).json({
+          ok: false,
+          error: "Old lock is not active (cannot swap)",
+        });
       }
 
       // 3) Capacity check sin aumento neto (add=0)
       //    Esto garantiza que la org tenga suscripción válida.
       const cap = await assertLockCapacity(prisma, String(orgId), 0);
+
       if (!cap.ok) {
         return res.status(403).json({
           ok: false,
-          error: cap.code, // LOCK_LIMIT_REACHED (o lo que sea)
+          error: cap.code,
           entitledLocks: cap.entitled,
           usedLocks: cap.used,
         });
@@ -89,20 +120,20 @@ export function buildAdminLocksSwapRouter(prisma: PrismaClient) {
           where: { ttlockLockId: Number(newTtlockLockId) },
           create: {
             ttlockLockId: Number(newTtlockLockId),
-            ttlockLockName: newTtlockLockName ? String(newTtlockLockName) : null,
+            ttlockLockName: newTtlockLockName
+              ? String(newTtlockLockName)
+              : null,
             propertyId: property.id,
             isActive: true,
           },
           update: {
-            // Si ya existía, lo movemos a esta property y lo activamos
             propertyId: property.id,
             isActive: true,
-            ttlockLockName: newTtlockLockName ? String(newTtlockLockName) : undefined,
+            ttlockLockName: newTtlockLockName
+              ? String(newTtlockLockName)
+              : undefined,
           },
         });
-
-        // Safety: evitar que queden dos activos con mismo property (si ya existía activo en otra property)
-        // (Opcional) aquí podrías forzar isActive=false a otros locks duplicados, pero no es necesario si tu negocio lo permite.
 
         return { deactivated, newLock };
       });
@@ -122,7 +153,9 @@ export function buildAdminLocksSwapRouter(prisma: PrismaClient) {
       });
     } catch (e: any) {
       console.error("admin/locks/swap error:", e?.message ?? e);
-      return res.status(500).json({ ok: false, error: e?.message ?? "swap failed" });
+      return res
+        .status(500)
+        .json({ ok: false, error: e?.message ?? "swap failed" });
     }
   });
 

@@ -9,6 +9,7 @@ function toInt(v: any, def: number) {
   const n = Number(v);
   return Number.isFinite(n) ? n : def;
 }
+
 function clamp(n: number, min: number, max: number) {
   return Math.max(min, Math.min(max, n));
 }
@@ -17,8 +18,10 @@ dashboardLocksRouter.get("/api/dashboard/locks", requireAuth, async (req, res) =
   const user = (req as any).user;
   const orgId = user.orgId as string;
 
-  const propertyId = typeof req.query.propertyId === "string" ? req.query.propertyId : undefined;
-  const search = typeof req.query.search === "string" ? req.query.search.trim() : "";
+  const propertyId =
+    typeof req.query.propertyId === "string" ? req.query.propertyId : undefined;
+  const search =
+    typeof req.query.search === "string" ? req.query.search.trim() : "";
 
   const page = clamp(toInt(req.query.page, 1), 1, 10_000);
   const pageSize = clamp(toInt(req.query.pageSize, 25), 1, 100);
@@ -30,7 +33,6 @@ dashboardLocksRouter.get("/api/dashboard/locks", requireAuth, async (req, res) =
   if (propertyId) where.propertyId = propertyId;
 
   if (search) {
-    // búsqueda por nombre o lockId
     const maybeId = Number(search);
     where.OR = [
       { ttlockLockName: { contains: search, mode: "insensitive" } },
@@ -53,12 +55,16 @@ dashboardLocksRouter.get("/api/dashboard/locks", requireAuth, async (req, res) =
         ttlockLockName: true,
         isActive: true,
         updatedAt: true,
-        property: { select: { id: true, name: true } },
+        property: {
+          select: {
+            id: true,
+            name: true,
+          },
+        },
       },
     }),
   ]);
 
-  // Battery aún no existe en DB: devolvemos null (listo para futuro cache)
   return res.json({
     page,
     pageSize,
@@ -70,8 +76,16 @@ dashboardLocksRouter.get("/api/dashboard/locks", requireAuth, async (req, res) =
       isActive: l.isActive,
       updatedAt: l.updatedAt.toISOString(),
       property: l.property,
-      battery: null as number | null,        // ← futuro: 0-100
-      batteryFresh: false,                   // ← futuro: true cuando venga de cache
+
+      // Battery
+      battery: null as number | null,
+      batteryFresh: false,
+
+      // Gateway
+      gatewayId: null as number | null,
+      gatewayName: null as string | null,
+      gatewayOnline: null as boolean | null,
+      gatewayFresh: false,
     })),
   });
 });
