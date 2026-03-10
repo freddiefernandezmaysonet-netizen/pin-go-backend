@@ -1,54 +1,175 @@
 import { useState } from "react";
+import { useNavigate } from "react-router-dom";
 import { login } from "../api/auth";
 import { useAuth } from "../auth/AuthProvider";
-import { useNavigate } from "react-router-dom";
 
 export default function LoginPage() {
-  const { refresh } = useAuth();
   const navigate = useNavigate();
+  const { refresh } = useAuth();
 
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [error, setError] = useState("");
+  const [submitting, setSubmitting] = useState(false);
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
+    setError("");
+    setSubmitting(true);
 
     try {
       await login(email, password);
       await refresh();
       navigate("/overview");
     } catch {
-      setError("Invalid credentials");
+      setError("Invalid email or password");
+    } finally {
+      setSubmitting(false);
     }
   }
 
   return (
-    <div style={{ maxWidth: 360, margin: "100px auto" }}>
-      <h2>Pin&Go Dashboard</h2>
+    <div
+      style={{
+        minHeight: "100vh",
+        background:
+          "linear-gradient(180deg, #f8fafc 0%, #eef2ff 100%)",
+        display: "grid",
+        placeItems: "center",
+        padding: 24,
+      }}
+    >
+      <div
+        style={{
+          width: "100%",
+          maxWidth: 420,
+          background: "#ffffff",
+          border: "1px solid #e5e7eb",
+          borderRadius: 20,
+          boxShadow: "0 20px 50px rgba(15, 23, 42, 0.08)",
+          padding: 28,
+        }}
+      >
+        <div style={{ marginBottom: 24 }}>
+          <div
+            style={{
+              fontSize: 28,
+              fontWeight: 800,
+              color: "#111827",
+              marginBottom: 6,
+            }}
+          >
+            Pin&Go
+          </div>
 
-      <form onSubmit={handleSubmit}>
-        <input
-          placeholder="Email"
-          value={email}
-          onChange={(e) => setEmail(e.target.value)}
-          style={{ width: "100%", marginBottom: 10 }}
-        />
+          <div
+            style={{
+              fontSize: 14,
+              color: "#6b7280",
+              lineHeight: 1.5,
+            }}
+          >
+            Smart access dashboard for properties, locks, reservations, and guest access.
+          </div>
+        </div>
 
-        <input
-          type="password"
-          placeholder="Password"
-          value={password}
-          onChange={(e) => setPassword(e.target.value)}
-          style={{ width: "100%", marginBottom: 10 }}
-        />
+        <form onSubmit={handleSubmit} style={{ display: "grid", gap: 14 }}>
+          <div>
+            <label
+              style={{
+                display: "block",
+                fontSize: 13,
+                fontWeight: 600,
+                color: "#374151",
+                marginBottom: 6,
+              }}
+            >
+              Email
+            </label>
+            <input
+              type="email"
+              placeholder="admin@pingo.com"
+              value={email}
+              onChange={(e) => setEmail(e.target.value)}
+              autoComplete="email"
+              style={{
+                width: "100%",
+                height: 44,
+                borderRadius: 12,
+                border: "1px solid #d1d5db",
+                padding: "0 14px",
+                fontSize: 14,
+                outline: "none",
+                boxSizing: "border-box",
+              }}
+            />
+          </div>
 
-        {error && <div style={{ color: "red" }}>{error}</div>}
+          <div>
+            <label
+              style={{
+                display: "block",
+                fontSize: 13,
+                fontWeight: 600,
+                color: "#374151",
+                marginBottom: 6,
+              }}
+            >
+              Password
+            </label>
+            <input
+              type="password"
+              placeholder="Enter your password"
+              value={password}
+              onChange={(e) => setPassword(e.target.value)}
+              autoComplete="current-password"
+              style={{
+                width: "100%",
+                height: 44,
+                borderRadius: 12,
+                border: "1px solid #d1d5db",
+                padding: "0 14px",
+                fontSize: 14,
+                outline: "none",
+                boxSizing: "border-box",
+              }}
+            />
+          </div>
 
-        <button style={{ width: "100%" }}>
-          Login
-        </button>
-      </form>
+          {error ? (
+            <div
+              style={{
+                borderRadius: 12,
+                background: "#fef2f2",
+                border: "1px solid #fecaca",
+                color: "#b91c1c",
+                fontSize: 13,
+                padding: "10px 12px",
+              }}
+            >
+              {error}
+            </div>
+          ) : null}
+
+          <button
+            type="submit"
+            disabled={submitting}
+            style={{
+              height: 46,
+              borderRadius: 12,
+              border: "none",
+              background: submitting ? "#93c5fd" : "#2563eb",
+              color: "#ffffff",
+              fontSize: 14,
+              fontWeight: 700,
+              cursor: submitting ? "not-allowed" : "pointer",
+              marginTop: 4,
+            }}
+          >
+            {submitting ? "Signing in..." : "Sign in"}
+          </button>
+        </form>
+      </div>
     </div>
   );
 }
