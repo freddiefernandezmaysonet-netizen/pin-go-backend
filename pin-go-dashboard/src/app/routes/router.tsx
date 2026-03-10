@@ -12,13 +12,19 @@ import { PmsConnectionsPage } from "../../pages/integrations/PmsConnectionsPage"
 import ListingsMappingPage from "../../pages/pms/ListingsMappingPage";
 import LoginPage from "../../pages/LoginPage";
 
+import { RequireAuth } from "../../auth/RequireAuth";
+
 export const router = createBrowserRouter([
   {
     path: "/login",
     element: <LoginPage />,
   },
   {
-    element: <AppShell />,
+    element: (
+      <RequireAuth>
+        <AppShell />
+      </RequireAuth>
+    ),
     children: [
       { path: "/", element: <Navigate to="/overview" replace /> },
       { path: "/overview", element: <OverviewPage /> },
