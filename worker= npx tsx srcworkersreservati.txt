@@ -5,13 +5,12 @@ npx tsx src/workers/run.nfc-watchdog.ts
 npx tsx src/workers/run.pms-watchdog.ts
 Limpiar tarjetas nfc= npx tsx src/scripts/nfc.reset.dev.ts
 
+git add .
+git commit -m "checkpoint"
+
+
 
   -Body $body
-
-
-
-
-
 $BASE="http://localhost:3000"
 $ORG="cmlk0fpl60000n0o0vo87t6tm"
 
@@ -100,7 +99,7 @@ Invoke-RestMethod "$BASE/api/org/locks/swap" `
 
 
 $body=@{
-  propertyId="cmlk0hm290001n0o03hbh9j49"
+  propertyId="cmlmcepkz0001n0cghiw6nlao"
   ttlockLockId="25439884"
   ttlockLockName="M302_d19108"
 } | ConvertTo-Json
@@ -554,15 +553,15 @@ $rid = "GUESTY-NEW-" + (Get-Random)
 $bodyNewRes = @{
   source = "PMS"
   propertyId = "cmlmcepkz0001n0cghiw6nlao"
-  guestName = "Test Guest"
-  guestEmail = "test.guest@example.com"
-  roomName = "Unit 101"
-  checkIn = "2026-03-04T11:45:47.587Z"
-  checkOut = "2026-03-04T12:13:18.761Z"
+  guestName = "Test Guest 3961"
+  guestEmail = "test.guest3961@example.com"
+  roomName = "Unit 121"
+  checkIn = "2026-03-09T13:07:34.072Z"
+  checkOut = "2026-03-10T13:07:34.072Z"
   paymentState = "PAID"
   externalProvider = "guesty"
   externalId = $rid
-  externalUpdatedAt = "2026-03-12T11:30:00.000Z"
+  externalUpdatedAt = "2026-03-07T13:00:00.000Z"
 } | ConvertTo-Json
 
 Invoke-RestMethod -Method POST -Uri "http://localhost:3000/api/ingest/reservations" -ContentType "application/json" -Body $bodyNewRes
@@ -573,8 +572,8 @@ $bodyCancel = @{
   guestName = "Test Guest"
   guestEmail = "test.guest@example.com"
   roomName = "Unit 101"
-  checkIn = "2026-03-04T11:45:47.587Z"
-  checkOut = "2026-03-07T12:45:10.833Z"
+  checkIn = "2026-03-04T18:54:23.316Z"
+  checkOut = "2026-03-04T20:54:23.316Z"
   paymentState = "PAID"
   externalProvider = "guesty"
   externalId = $rid
@@ -583,5 +582,70 @@ $bodyCancel = @{
 } | ConvertTo-Json
 
 Invoke-RestMethod -Method POST -Uri "http://localhost:3000/api/ingest/reservations" -ContentType "application/json" -Body $bodyCancel
+
+
+$env:CONNECTION_ID="cmlzy89tn0000n02szyf0h3g4"
+npx ts-node scripts/pingo-lifecycle-test.ts
+
+
+
+$rid = "Hostaway-LISTING-" + (Get-Random)
+
+$body = @{
+  connectionId = "cmmjfr5yg0001n060cvyj4vq0"
+  externalListingId = $rid
+  name = "Hostaway Test Listing " + $rid
+} | ConvertTo-Json
+
+Invoke-RestMethod `
+  -Method POST `
+  -Uri "http://localhost:3000/api/pms/listings/dev-create" `
+  -ContentType "application/json" `
+  -Body $body
+
+
+$rid = "Hostaway-NEW-" + (Get-Random)
+
+$body = @{
+  source = "PMS"
+  propertyId = "cmlmcepkz0001n0cghiw6nlao"
+
+  guestName = "Hostaway Test Guest"
+  guestEmail = "hostaway.guest@example.com"
+
+  roomName = "Unit 105"
+
+  checkIn = "2026-03-13T15:00:00.000Z"
+  checkOut = "2026-03-15T11:00:00.000Z"
+
+  paymentState = "PAID"
+
+  externalProvider = "hostaway"
+  externalId = $rid
+  externalUpdatedAt = "2026-03-09T18:30:00.000Z"
+
+} | ConvertTo-Json
+
+Invoke-RestMethod `
+  -Method POST `
+  -Uri "http://localhost:3000/api/ingest/reservations" `
+  -ContentType "application/json" `
+  -Body $body
+
+
+
+$body = @{
+  propertyId = "cmlmcepkz0001n0cghiw6nlao"
+  oldTtlockLockId = 25439884
+  newTtlockLockId = 25439999
+  newTtlockLockName = "New Lock"
+} | ConvertTo-Json
+
+Invoke-RestMethod `
+  -Method POST `
+  -Uri "http://localhost:3000/api/admin/locks/swap" `
+  -Headers @{ "x-admin-key" = "ff44273964" } `
+  -ContentType "application/json" `
+  -Body $body
 
 

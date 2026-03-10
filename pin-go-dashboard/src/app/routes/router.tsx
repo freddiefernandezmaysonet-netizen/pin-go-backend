@@ -10,8 +10,13 @@ import { PropertyDetailPage } from "../../pages/property-detail/PropertyDetailPa
 import { LockDetailPage } from "../../pages/lock-detail/LockDetailPage";
 import { PmsConnectionsPage } from "../../pages/integrations/PmsConnectionsPage";
 import ListingsMappingPage from "../../pages/pms/ListingsMappingPage";
+import LoginPage from "../../pages/LoginPage";
 
 export const router = createBrowserRouter([
+  {
+    path: "/login",
+    element: <LoginPage />,
+  },
   {
     element: <AppShell />,
     children: [
