@@ -1,4 +1,6 @@
-import { NavLink, Outlet } from "react-router-dom";
+import { NavLink, Outlet, useNavigate } from "react-router-dom";
+import { logout } from "../../api/auth";
+import { useAuth } from "../../auth/AuthProvider";
 
 const nav = [
   { to: "/overview", label: "Overview" },
@@ -29,6 +31,17 @@ function SideItem({ to, label }: { to: string; label: string }) {
 }
 
 export function AppShell() {
+  const navigate = useNavigate();
+  const { user } = useAuth();
+
+  async function handleLogout() {
+    try {
+      await logout();
+    } finally {
+      navigate("/login");
+    }
+  }
+
   return (
     <div
       style={{
@@ -43,6 +56,8 @@ export function AppShell() {
           borderRight: "1px solid #e5e7eb",
           background: "#ffffff",
           padding: 16,
+          display: "flex",
+          flexDirection: "column",
         }}
       >
         <div
@@ -60,6 +75,42 @@ export function AppShell() {
             <SideItem key={item.to} to={item.to} label={item.label} />
           ))}
         </nav>
+
+        <div style={{ flex: 1 }} />
+
+        <div
+          style={{
+            marginTop: 24,
+            paddingTop: 16,
+            borderTop: "1px solid #e5e7eb",
+          }}
+        >
+          <div
+            style={{
+              fontSize: 12,
+              color: "#6b7280",
+              marginBottom: 8,
+              wordBreak: "break-word",
+            }}
+          >
+            {user?.email ?? "No user"}
+          </div>
+
+          <button
+            onClick={handleLogout}
+            style={{
+              width: "100%",
+              padding: "10px 12px",
+              borderRadius: 10,
+              border: "1px solid #e5e7eb",
+              background: "#fff",
+              cursor: "pointer",
+              fontWeight: 600,
+            }}
+          >
+            Log out
+          </button>
+        </div>
       </aside>
 
       <main style={{ padding: 24 }}>
