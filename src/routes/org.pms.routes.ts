@@ -72,7 +72,7 @@ function maskConnection(connection: {
 export function buildOrgPmsRouter(prisma: PrismaClient) {
   const router = Router();
 
-  router.use(requireOrg);
+  router.use(requireOrg(prisma));
 
   router.get("/pms/connection", async (req, res) => {
     try {

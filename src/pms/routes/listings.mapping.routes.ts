@@ -11,8 +11,9 @@ export const listingsMappingRouter = Router();
 listingsMappingRouter.get("/pending", async (req, res) => {
   try {
     const connectionId = String(req.query.connectionId || "");
-    if (!connectionId)
+    if (!connectionId) {
       return res.status(400).json({ ok: false, error: "MISSING_CONNECTION_ID" });
+    }
 
     const items = await prisma.pmsListing.findMany({
       where: {
@@ -43,8 +44,9 @@ listingsMappingRouter.post("/:pmsListingId/map", async (req, res) => {
     const { pmsListingId } = req.params;
     const { propertyId } = req.body;
 
-    if (!propertyId)
+    if (!propertyId) {
       return res.status(400).json({ ok: false, error: "MISSING_PROPERTY_ID" });
+    }
 
     const updated = await prisma.pmsListing.update({
       where: { id: pmsListingId },
@@ -74,11 +76,9 @@ listingsMappingRouter.post("/retry-failed/:connectionId", async (req, res) => {
       take: 50,
     });
 
-    // Aquí simplemente los ponemos otra vez en PENDING
-    // tu worker los volverá a procesar
     await prisma.webhookEventIngest.updateMany({
       where: {
-        id: { in: failedEvents.map(e => e.id) },
+        id: { in: failedEvents.map((e) => e.id) },
       },
       data: {
         status: "PENDING",
@@ -91,5 +91,42 @@ listingsMappingRouter.post("/retry-failed/:connectionId", async (req, res) => {
     });
   } catch (e: any) {
     res.status(500).json({ ok: false, error: e.message });
+  }
+});
+
+/**
+ * DEV ONLY
+ * Crear listing PMS manual para pruebas
+ * POST /api/pms/listings/dev-create
+ */
+listingsMappingRouter.post("/dev-create", async (req, res) => {
+  try {
+    const { connectionId, externalListingId, name } = req.body ?? {};
+
+    if (!connectionId) {
+      return res.status(400).json({ ok: false, error: "MISSING_CONNECTION_ID" });
+    }
+
+    if (!externalListingId) {
+      return res.status(400).json({ ok: false, error: "MISSING_EXTERNAL_LISTING_ID" });
+    }
+
+    const listing = await prisma.pmsListing.create({
+      data: {
+        connectionId: String(connectionId),
+        externalListingId: String(externalListingId),
+        name: String(name ?? `Listing ${externalListingId}`),
+      },
+    });
+
+    res.json({
+      ok: true,
+      listing,
+    });
+  } catch (e: any) {
+    res.status(500).json({
+      ok: false,
+      error: e?.message ?? "dev create listing failed",
+    });
   }
 });

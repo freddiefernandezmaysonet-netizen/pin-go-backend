@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
+import { useNavigate } from "react-router-dom";
 
 const API_BASE = import.meta.env.VITE_API_BASE ?? "http://localhost:3000";
 
@@ -58,20 +59,20 @@ const PROVIDERS: ProviderOption[] = [
   {
     key: "GUESTY",
     label: "Guesty",
-    description: "Primary PMS connection for the current Pin&Go rollout.",
+    description: "Connected to the existing Pin&Go PMS production flow.",
     enabled: true,
   },
   {
     key: "CLOUDBEDS",
     label: "Cloudbeds",
-    description: "Reserved for the next PMS connection phase.",
-    enabled: false,
+    description: "Enabled for dashboard connection and PMS provider expansion.",
+    enabled: true,
   },
   {
     key: "HOSTAWAY",
     label: "Hostaway",
-    description: "Planned for future provider expansion.",
-    enabled: false,
+    description: "Enabled for dashboard connection and PMS provider expansion.",
+    enabled: true,
   },
 ];
 
@@ -220,7 +221,75 @@ function formatDate(value?: string | null) {
   return d.toLocaleString();
 }
 
+function providerCredentialLabels(provider: ProviderKey) {
+  if (provider === "CLOUDBEDS") {
+    return {
+      accountNamePlaceholder: "e.g. My Cloudbeds Portfolio",
+      accountIdPlaceholder: "Optional Cloudbeds account identifier",
+      clientIdLabel: "Client ID / App Key",
+      clientIdPlaceholder: "Cloudbeds Client ID or App Key",
+      clientSecretLabel: "Client Secret",
+      clientSecretPlaceholder: "Cloudbeds Client Secret",
+      apiKeyLabel: "API Key",
+      apiKeyPlaceholder: "Optional Cloudbeds API Key",
+      infoText:
+        "Cloudbeds can stay in onboarding mode until production credentials are available.",
+      collectText: "Collect Cloudbeds Access",
+      readyText: "Cloudbeds is enabled for PMS provider expansion.",
+      afterCredentials: [
+        "1. Save the Cloudbeds connection in this page.",
+        "2. Load and map PMS listings or room types to Pin&Go properties.",
+        "3. Activate reservation ingestion and retry failed webhook events if needed.",
+      ],
+    };
+  }
+
+  if (provider === "HOSTAWAY") {
+    return {
+      accountNamePlaceholder: "e.g. My Hostaway Portfolio",
+      accountIdPlaceholder: "Optional Hostaway account identifier",
+      clientIdLabel: "Client ID / API Key",
+      clientIdPlaceholder: "Hostaway Client ID or API Key",
+      clientSecretLabel: "Client Secret",
+      clientSecretPlaceholder: "Optional Hostaway Client Secret",
+      apiKeyLabel: "API Key",
+      apiKeyPlaceholder: "Optional Hostaway API Key",
+      infoText:
+        "Hostaway can stay in onboarding mode until production credentials are available.",
+      collectText: "Collect Hostaway Access",
+      readyText: "Hostaway is enabled for PMS provider expansion.",
+      afterCredentials: [
+        "1. Save the Hostaway connection in this page.",
+        "2. Load and map PMS listings or properties to Pin&Go properties.",
+        "3. Activate reservation ingestion and retry failed webhook events if needed.",
+      ],
+    };
+  }
+
+  return {
+    accountNamePlaceholder: "e.g. My Guesty Portfolio",
+    accountIdPlaceholder: "Optional account identifier",
+    clientIdLabel: "Client ID",
+    clientIdPlaceholder: "Guesty Client ID",
+    clientSecretLabel: "Client Secret",
+    clientSecretPlaceholder: "Guesty Client Secret",
+    apiKeyLabel: "API Key",
+    apiKeyPlaceholder: "Optional",
+    infoText:
+      "This page can stay in onboarding mode until the client shares Guesty credentials.",
+    collectText: "Collect Guesty Access",
+    readyText: "Guesty is enabled first for the PMS rollout.",
+    afterCredentials: [
+      "1. Save the Guesty connection in this page.",
+      "2. Load and map PMS listings to Pin&Go properties.",
+      "3. Activate reservation ingestion and retry failed webhook events if needed.",
+    ],
+  };
+}
+
 export function PmsConnectionsPage() {
+  const navigate = useNavigate();
+
   const [provider, setProvider] = useState<ProviderKey>("GUESTY");
 
   const [accountName, setAccountName] = useState("");
@@ -249,7 +318,14 @@ export function PmsConnectionsPage() {
     [provider]
   );
 
+  const providerLabels = useMemo(
+    () => providerCredentialLabels(provider),
+    [provider]
+  );
+
   const onboardingReady = Boolean(existingConnection?.hasCredentials);
+  const canProceedToMapping =
+    provider === "GUESTY" || provider === "CLOUDBEDS" || provider === "HOSTAWAY";
 
   async function loadConnection(nextProvider: ProviderKey) {
     setLoadingConnection(true);
@@ -296,6 +372,10 @@ export function PmsConnectionsPage() {
   useEffect(() => {
     void loadConnection(provider);
   }, [provider]);
+
+  useEffect(() => {
+    setInfo(providerLabels.infoText);
+  }, [providerLabels]);
 
   async function handleTestConnection(e: React.FormEvent) {
     e.preventDefault();
@@ -386,16 +466,41 @@ export function PmsConnectionsPage() {
     }
   }
 
+  function openListingsMapping() {
+    navigate(`/integrations/pms/listings-mapping?provider=${provider}`);
+  }
+
   return (
     <div style={{ display: "grid", gap: 20 }}>
-      <div>
-        <h1 style={{ fontSize: 30, fontWeight: 700, marginBottom: 8 }}>
-          PMS Connections
-        </h1>
-        <p style={{ color: "#6b7280", margin: 0 }}>
-          Prepare Pin&Go to connect with your PMS provider and continue later
-          when production credentials are available.
-        </p>
+      <div
+        style={{
+          display: "flex",
+          justifyContent: "space-between",
+          gap: 16,
+          flexWrap: "wrap",
+          alignItems: "flex-start",
+        }}
+      >
+        <div>
+          <h1 style={{ fontSize: 30, fontWeight: 700, marginBottom: 8 }}>
+            PMS Connections
+          </h1>
+          <p style={{ color: "#6b7280", margin: 0 }}>
+            Prepare Pin&Go to connect with your PMS provider and continue later
+            when production credentials are available.
+          </p>
+        </div>
+
+        <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
+          <button
+            type="button"
+            onClick={openListingsMapping}
+            disabled={!canProceedToMapping}
+            style={buttonStyle("secondary", !canProceedToMapping)}
+          >
+            Open Listings Mapping
+          </button>
+        </div>
       </div>
 
       <div
@@ -418,11 +523,7 @@ export function PmsConnectionsPage() {
                 setProvider(item.key);
                 setError(null);
                 setSuccess(null);
-                setInfo(
-                  item.key === "GUESTY"
-                    ? "Guesty is enabled first for the PMS rollout."
-                    : null
-                );
+                setInfo(providerCredentialLabels(item.key).readyText);
               }}
               style={cardStyle(active, !item.enabled)}
             >
@@ -491,7 +592,7 @@ export function PmsConnectionsPage() {
               Next Step
             </div>
             <div style={{ fontSize: 16, fontWeight: 700 }}>
-              {onboardingReady ? "Listing Mapping" : "Collect Guesty Access"}
+              {onboardingReady ? "Listing Mapping" : providerLabels.collectText}
             </div>
           </div>
 
@@ -507,9 +608,48 @@ export function PmsConnectionsPage() {
       </div>
 
       <div style={statusBoxStyle("warning")}>
-        Guesty credentials are not required to keep building the dashboard.
-        You can leave this page in onboarding mode and return when the client
-        shares real access details.
+        {provider === "GUESTY"
+          ? "Guesty credentials are not required to keep building the dashboard. You can leave this page in onboarding mode and return when the client shares real access details."
+          : provider === "CLOUDBEDS"
+            ? "Cloudbeds credentials are not required to keep building the dashboard. You can leave this page in onboarding mode and return when production access is available."
+            : "Hostaway credentials are not required to keep building the dashboard. You can leave this page in onboarding mode and return when production access is available."}
+      </div>
+
+      <div style={sectionStyle()}>
+        <h3 style={{ marginTop: 0, marginBottom: 14 }}>
+          PMS rollout next phase
+        </h3>
+
+        <div
+          style={{
+            display: "grid",
+            gap: 12,
+            gridTemplateColumns: "1.5fr auto",
+            alignItems: "center",
+          }}
+        >
+          <div>
+            <div style={{ fontWeight: 700, fontSize: 16, marginBottom: 6 }}>
+              Listings Mapping UI is the next operational step
+            </div>
+            <div style={{ color: "#6b7280", fontSize: 14 }}>
+              You can continue building the PMS workflow now by mapping external
+              PMS listings to internal Pin&Go properties, even before real
+              production credentials are fully available.
+            </div>
+          </div>
+
+          <div>
+            <button
+              type="button"
+              onClick={openListingsMapping}
+              disabled={!canProceedToMapping}
+              style={buttonStyle("primary", !canProceedToMapping)}
+            >
+              Go to Listings Mapping
+            </button>
+          </div>
+        </div>
       </div>
 
       <div style={sectionStyle()}>
@@ -518,10 +658,28 @@ export function PmsConnectionsPage() {
         </h3>
 
         <div style={{ display: "grid", gap: 10, color: "#6b7280", fontSize: 14 }}>
-          <div>1. Guesty Client ID</div>
-          <div>2. Guesty Client Secret</div>
-          <div>3. Optional account identifier or portfolio name</div>
-          <div>4. Optional webhook secret if webhook signing is enabled</div>
+          {provider === "CLOUDBEDS" ? (
+            <>
+              <div>1. Cloudbeds Client ID / App Key</div>
+              <div>2. Cloudbeds Client Secret if applicable</div>
+              <div>3. Optional account or portfolio identifier</div>
+              <div>4. Optional webhook secret if webhook signing is enabled</div>
+            </>
+          ) : provider === "HOSTAWAY" ? (
+            <>
+              <div>1. Hostaway Client ID / API Key</div>
+              <div>2. Optional Hostaway Client Secret</div>
+              <div>3. Optional account or portfolio identifier</div>
+              <div>4. Optional webhook secret if webhook signing is enabled</div>
+            </>
+          ) : (
+            <>
+              <div>1. Guesty Client ID</div>
+              <div>2. Guesty Client Secret</div>
+              <div>3. Optional account identifier or portfolio name</div>
+              <div>4. Optional webhook secret if webhook signing is enabled</div>
+            </>
+          )}
         </div>
       </div>
 
@@ -575,7 +733,7 @@ export function PmsConnectionsPage() {
             <input
               value={accountName}
               onChange={(e) => setAccountName(e.target.value)}
-              placeholder="e.g. My Guesty Portfolio"
+              placeholder={providerLabels.accountNamePlaceholder}
               disabled={!selectedProvider.enabled || saving || testing}
               style={inputStyle(!selectedProvider.enabled || saving || testing)}
             />
@@ -586,42 +744,48 @@ export function PmsConnectionsPage() {
             <input
               value={accountId}
               onChange={(e) => setAccountId(e.target.value)}
-              placeholder="Optional account identifier"
+              placeholder={providerLabels.accountIdPlaceholder}
               disabled={!selectedProvider.enabled || saving || testing}
               style={inputStyle(!selectedProvider.enabled || saving || testing)}
             />
           </label>
 
           <label style={labelStyle()}>
-            <span style={{ fontSize: 13, color: "#6b7280" }}>Client ID</span>
+            <span style={{ fontSize: 13, color: "#6b7280" }}>
+              {providerLabels.clientIdLabel}
+            </span>
             <input
               value={clientId}
               onChange={(e) => setClientId(e.target.value)}
-              placeholder="Guesty Client ID"
+              placeholder={providerLabels.clientIdPlaceholder}
               disabled={!selectedProvider.enabled || saving || testing}
               style={inputStyle(!selectedProvider.enabled || saving || testing)}
             />
           </label>
 
           <label style={labelStyle()}>
-            <span style={{ fontSize: 13, color: "#6b7280" }}>Client Secret</span>
+            <span style={{ fontSize: 13, color: "#6b7280" }}>
+              {providerLabels.clientSecretLabel}
+            </span>
             <input
               type="password"
               value={clientSecret}
               onChange={(e) => setClientSecret(e.target.value)}
-              placeholder="Guesty Client Secret"
+              placeholder={providerLabels.clientSecretPlaceholder}
               disabled={!selectedProvider.enabled || saving || testing}
               style={inputStyle(!selectedProvider.enabled || saving || testing)}
             />
           </label>
 
           <label style={labelStyle()}>
-            <span style={{ fontSize: 13, color: "#6b7280" }}>API Key</span>
+            <span style={{ fontSize: 13, color: "#6b7280" }}>
+              {providerLabels.apiKeyLabel}
+            </span>
             <input
               type="password"
               value={apiKey}
               onChange={(e) => setApiKey(e.target.value)}
-              placeholder="Optional"
+              placeholder={providerLabels.apiKeyPlaceholder}
               disabled={!selectedProvider.enabled || saving || testing}
               style={inputStyle(!selectedProvider.enabled || saving || testing)}
             />
@@ -745,9 +909,9 @@ export function PmsConnectionsPage() {
       <div style={sectionStyle()}>
         <h3 style={{ marginTop: 0 }}>What comes after credentials are available</h3>
         <div style={{ color: "#6b7280", fontSize: 14, display: "grid", gap: 8 }}>
-          <div>1. Save the Guesty connection in this page.</div>
-          <div>2. Load and map PMS listings to Pin&Go properties.</div>
-          <div>3. Activate reservation ingestion and retry failed webhook events if needed.</div>
+          {providerLabels.afterCredentials.map((line) => (
+            <div key={line}>{line}</div>
+          ))}
         </div>
       </div>
     </div>

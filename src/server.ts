@@ -5,6 +5,7 @@ import { PrismaClient } from "@prisma/client";
 import bodyParser from "body-parser";
 import { registerStripeWebhook } from "./webhooks/stripe.webhook";
 import cors from "cors";
+
 // Routers
 import { pmsWebhookRouter } from "./pms/ingest/webhook.routes";
 import { buildTTLockRouter } from "./routes/ttlock.routes";
@@ -27,11 +28,11 @@ import adminUsageRoutes from "./routes/admin.usage.routes";
 import adminCapacityRoutes from "./routes/admin.capacity.routes";
 import adminSubscriptionRoutes from "./routes/admin.subscription.routes";
 import { buildOrgLocksRouter } from "./routes/org.locks.routes";
-  //import { buildOrgTtlockRouter } from "./routes/org.ttlock.routes";
+// import { buildOrgTtlockRouter } from "./routes/org.ttlock.routes";
 import { buildOrgTtlockConnectRouter } from "./routes/org.ttlock.connect.routes";
 import { buildOrgLocksActivateRouter } from "./routes/org.locks.activate.routes";
 import { debugRouter } from "./routes/debug.routes";
-//import nfcSyncRouter from "./routes/nfc.sync.routes";
+// import nfcSyncRouter from "./routes/nfc.sync.routes";
 import { listingsMappingRouter } from "./pms/routes/listings.mapping.routes";
 import { meRouter } from "./routes/me.route";
 import { dashboardRouter } from "./routes/dashboard.route";
@@ -41,11 +42,17 @@ import { dashboardLocksRouter } from "./routes/dashboard.locks.route";
 import { dashboardAccessRouter } from "./routes/dashboard.access.route";
 import { dashboardMetricsRouter } from "./routes/dashboard.metrics.route";
 import { buildOrgPmsRouter } from "./routes/org.pms.routes";
+import { dashboardPmsRouter } from "./routes/dashboard.pms.route";
+import { devPmsRouter } from "./routes/dev.pms.routes";
+import { authRouter } from "./routes/auth.routes";
+import { eventsRouter } from "./routes/events.route";
 
 const app = express();
 const prisma = new PrismaClient();
 
 const PORT = Number(process.env.PORT ?? 3000);
+const FRONTEND_ORIGIN = process.env.FRONTEND_ORIGIN ?? "http://localhost:5173";
+const ENABLE_DEV_AUTH = process.env.ENABLE_DEV_AUTH === "true";
 
 // =====================
 // ENV CHECK (solo log)
@@ -56,25 +63,54 @@ console.log("ENV CHECK TTLOCK:", {
   username: process.env.TTLOCK_USERNAME ? "OK" : "MISSING",
   password: process.env.TTLOCK_PASSWORD_PLAIN ? "OK" : "MISSING",
 });
+
 registerStripeWebhook(app, prisma);
+
 // =====================
 // Middleware
 // =====================
+app.use(cors({
+  origin: FRONTEND_ORIGIN,
+  credentials: true,
+}));
 
 app.use(express.json({
   verify: (req: any, _res, buf) => {
     req.rawBody = buf;
-  }
+  },
 }));
 
-app.use((req, res, next) => {
-  (req as any).user = {
-    id: "dev-user",
-    email: "dev@pingo.com",
-    orgId: "cmlk0fpl60000n0o0vo87t6tm"
-  };
-  next();
+app.use(bodyParser.urlencoded({ extended: true }));
+
+// Dev auth fallback controlado por env.
+// Mantiene estabilidad mientras migras el dashboard al login real.
+if (ENABLE_DEV_AUTH) {
+  app.use((req, _res, next) => {
+    (req as any).user = {
+      id: "dev-user",
+      email: "dev@pingo.com",
+      orgId: "cmlk0fpl60000n0o0vo87t6tm",
+      role: "ADMIN",
+    };
+    next();
+  });
+
+  console.log("[auth] ENABLE_DEV_AUTH=true -> req.user manual activo");
+} else {
+  console.log("[auth] ENABLE_DEV_AUTH=false -> auth real por login/token");
+}
+
+// =====================
+// Health
+// =====================
+app.get("/health", (_req, res) => {
+  res.json({ ok: true, name: "Pin&Go API" });
 });
+
+// =====================
+// Auth
+// =====================
+app.use(authRouter);
 
 // =====================
 // Guest Portal (HTML)
@@ -85,18 +121,6 @@ app.use(buildGuestRouter(prisma));
 // Ingest API
 // =====================
 app.use("/api/ingest", ingestRoutes);
-
-// =====================
-// Health
-// =====================
-app.get("/health", (_req, res) => {
-  res.json({ ok: true, name: "Pin&Go API" });
-});
-
-app.use(cors({
-  origin: "http://localhost:5173",
-  credentials: true,
-}));
 
 // =====================
 // Core Routers
@@ -116,12 +140,12 @@ app.use("/api/admin", buildAdminLocksSwapRouter(prisma));
 app.use("/api/admin", adminUsageRoutes);
 app.use("/api/admin", adminCapacityRoutes);
 app.use("/api/admin", adminSubscriptionRoutes);
-//app.use("/api/org", buildOrgLocksRouter(prisma));
-//app.use("/api/org", buildOrgTtlockConnectRouter(prisma));
-//app.use("/api/org", buildOrgTtlockRouter(prisma));
-//app.use("/api/org", buildOrgLocksActivateRouter(prisma));
+// app.use("/api/org", buildOrgLocksRouter(prisma));
+// app.use("/api/org", buildOrgTtlockConnectRouter(prisma));
+// app.use("/api/org", buildOrgTtlockRouter(prisma));
+// app.use("/api/org", buildOrgLocksActivateRouter(prisma));
 app.use("/debug", debugRouter);
-//app.use("/access/nfc", nfcSyncRouter);
+// app.use("/access/nfc", nfcSyncRouter);
 app.use("/webhooks", pmsWebhookRouter);
 app.use("/api/pms/listings", listingsMappingRouter);
 app.use("/api/org", buildOrgPmsRouter(prisma));
@@ -132,11 +156,13 @@ app.use(dashboardPropertiesRouter);
 app.use(dashboardLocksRouter);
 app.use(dashboardAccessRouter);
 app.use(dashboardMetricsRouter);
+app.use(dashboardPmsRouter);
+app.use(devPmsRouter);
+app.use(eventsRouter);
 
 // =====================
 // Staff + Cleaning
 // =====================
-
 app.use("/staff", buildStaffRouter(prisma));
 app.use("/", buildCleaningRouter(prisma));
 
@@ -197,13 +223,14 @@ export default app;
 // Start server
 // =====================
 app.listen(PORT, () => {
- 
-console.log("✅ property settings routes loaded");
+  console.log("✅ property settings routes loaded");
 
-console.log("[server] ENV", {
-  nodeEnv: process.env.NODE_ENV,
-  databaseUrl: process.env.DATABASE_URL,
-});
+  console.log("[server] ENV", {
+    nodeEnv: process.env.NODE_ENV,
+    databaseUrl: process.env.DATABASE_URL,
+    frontendOrigin: FRONTEND_ORIGIN,
+    enableDevAuth: ENABLE_DEV_AUTH,
+  });
 
- console.log(`🚀 Pin&Go API running on http://localhost:${PORT}`);
+  console.log(`🚀 Pin&Go API running on http://localhost:${PORT}`);
 });

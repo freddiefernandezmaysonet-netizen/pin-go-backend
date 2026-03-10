@@ -1,18 +1,22 @@
 import { PmsProvider } from "@prisma/client";
 import type { PmsAdapter } from "./types";
 
-// TODO: implement real adapters next
 import { guestyAdapter } from "./guesty.adapter";
 import { cloudbedsAdapter } from "./cloudbeds.adapter";
+import { hostawayAdapter } from "./hostaway.adapter";
 
 export function getAdapter(provider: PmsProvider): PmsAdapter {
   switch (provider) {
     case "GUESTY":
       return guestyAdapter;
+
     case "CLOUDBEDS":
       return cloudbedsAdapter;
+
+    case "HOSTAWAY":
+      return hostawayAdapter;
+
     default:
-      // fallback minimal
       return {
         provider: String(provider),
         parseWebhook: ({ body }) => ({

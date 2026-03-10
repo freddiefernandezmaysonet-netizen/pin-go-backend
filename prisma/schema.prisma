@@ -12,6 +12,7 @@ model Organization {
   name           String
   createdAt      DateTime        @default(now())
   updatedAt      DateTime        @updatedAt
+  dashboardUsers DashboardUser[]
   lockGroups     LockGroup[]
   people         Person[]
   pmsConnections PmsConnection[]
@@ -19,6 +20,23 @@ model Organization {
   staffMembers   StaffMember[]
   subscriptions  Subscription?
   ttlockAuth     TTLockAuth?
+}
+
+model DashboardUser {
+  id             String            @id @default(cuid())
+  organizationId String
+  email          String            @unique
+  passwordHash   String
+  fullName       String?
+  role           DashboardUserRole @default(ADMIN)
+  isActive       Boolean           @default(true)
+  lastLoginAt    DateTime?
+  createdAt      DateTime          @default(now())
+  updatedAt      DateTime          @updatedAt
+  organization   Organization      @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+
+  @@index([organizationId, isActive])
+  @@index([organizationId, role])
 }
 
 model Property {
@@ -454,6 +472,11 @@ enum PersonRole {
   MANAGER
   GUEST
   STAFF
+}
+
+enum DashboardUserRole {
+  ADMIN
+  MEMBER
 }
 
 enum SubscriptionStatus {

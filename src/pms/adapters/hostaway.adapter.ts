@@ -1,11 +1,20 @@
 import type { PmsAdapter } from "./types";
 
-export const cloudbedsAdapter: PmsAdapter = {
-  provider: "CLOUDBEDS",
+export const hostawayAdapter: PmsAdapter = {
+  provider: "HOSTAWAY",
 
   parseWebhook: ({ body }) => {
-    const eventType = body?.eventType ?? body?.event ?? "RESERVATION";
-    const externalEventId = body?.eventId ?? body?.id ?? null;
+    const eventType =
+      body?.event ??
+      body?.eventType ??
+      body?.type ??
+      "RESERVATION";
+
+    const externalEventId =
+      body?.eventId ??
+      body?.id ??
+      body?.reservationId ??
+      null;
 
     const externalReservationId =
       body?.reservationId ??
@@ -17,32 +26,31 @@ export const cloudbedsAdapter: PmsAdapter = {
       null;
 
     const externalListingId =
-      body?.roomTypeId ??
-      body?.room_type_id ??
-      body?.unitId ??
-      body?.unit_id ??
-      body?.data?.roomTypeId ??
-      body?.data?.room_type_id ??
-      body?.data?.unitId ??
-      body?.data?.unit_id ??
-      body?.reservation?.roomTypeId ??
-      body?.reservation?.unitId ??
+      body?.listingId ??
+      body?.listing_id ??
+      body?.propertyId ??
+      body?.property_id ??
+      body?.data?.listingId ??
+      body?.data?.listing_id ??
+      body?.data?.propertyId ??
+      body?.data?.property_id ??
+      body?.reservation?.listingId ??
+      body?.reservation?.propertyId ??
       null;
 
-    // Si el webhook ya trae suficiente data, la dejamos canonicalizada mínima
     if (externalReservationId && externalListingId && body?.checkIn && body?.checkOut) {
       return {
         eventType,
         externalEventId,
         reservation: {
-          provider: "CLOUDBEDS",
+          provider: "HOSTAWAY",
           externalReservationId: String(externalReservationId),
           externalListingId: String(externalListingId),
           listingName:
-            body?.roomTypeName ??
-            body?.unitName ??
-            body?.data?.roomTypeName ??
-            body?.data?.unitName ??
+            body?.listingName ??
+            body?.propertyName ??
+            body?.data?.listingName ??
+            body?.data?.propertyName ??
             null,
           status:
             String(body?.status ?? "").toLowerCase() === "cancelled"

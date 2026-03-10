@@ -9,6 +9,7 @@ import { PropertiesPage } from "../../pages/properties/PropertiesPage";
 import { PropertyDetailPage } from "../../pages/property-detail/PropertyDetailPage";
 import { LockDetailPage } from "../../pages/lock-detail/LockDetailPage";
 import { PmsConnectionsPage } from "../../pages/integrations/PmsConnectionsPage";
+import ListingsMappingPage from "../../pages/pms/ListingsMappingPage";
 
 export const router = createBrowserRouter([
   {
@@ -29,6 +30,7 @@ export const router = createBrowserRouter([
       { path: "/access", element: <AccessPage /> },
 
       { path: "/integrations/pms", element: <PmsConnectionsPage /> },
+      { path: "/integrations/pms/listings-mapping", element: <ListingsMappingPage /> },
     ],
   },
 ]);
