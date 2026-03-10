@@ -516,39 +516,27 @@ export default function ListingsMappingPage() {
       <div
         style={{
           display: "flex",
-          justifyContent: "space-between",
-          gap: 16,
+          justifyContent: "flex-end",
+          gap: 10,
           flexWrap: "wrap",
-          alignItems: "flex-start",
         }}
       >
-        <div>
-          <h1 style={{ fontSize: 30, fontWeight: 700, marginBottom: 8 }}>
-            Listings Mapping
-          </h1>
-          <p style={{ color: "#6b7280", margin: 0 }}>
-            Mapea los listings pendientes del PMS a properties internas de Pin&Go.
-          </p>
-        </div>
+        <button
+          type="button"
+          onClick={() => navigate("/integrations/pms")}
+          style={buttonStyle("secondary")}
+        >
+          Back to PMS Connections
+        </button>
 
-        <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
-          <button
-            type="button"
-            onClick={() => navigate("/integrations/pms")}
-            style={buttonStyle("secondary")}
-          >
-            Back to PMS Connections
-          </button>
-
-          <button
-            type="button"
-            onClick={handleRetryFailed}
-            disabled={!connection?.id || retryingFailed}
-            style={buttonStyle("primary", !connection?.id || retryingFailed)}
-          >
-            {retryingFailed ? "Retrying..." : "Retry Failed Webhooks"}
-          </button>
-        </div>
+        <button
+          type="button"
+          onClick={handleRetryFailed}
+          disabled={!connection?.id || retryingFailed}
+          style={buttonStyle("primary", !connection?.id || retryingFailed)}
+        >
+          {retryingFailed ? "Retrying..." : "Retry Failed Webhooks"}
+        </button>
       </div>
 
       {info ? <div style={statusBoxStyle("info")}>{info}</div> : null}

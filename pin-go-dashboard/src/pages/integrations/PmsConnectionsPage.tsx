@@ -131,7 +131,7 @@ function textAreaStyle(disabled?: boolean): React.CSSProperties {
     padding: 12,
     background: disabled ? "#f9fafb" : "#fff",
     color: "#111827",
-    resize: "vertical" as const,
+    resize: "vertical",
   };
 }
 
@@ -475,32 +475,19 @@ export function PmsConnectionsPage() {
       <div
         style={{
           display: "flex",
-          justifyContent: "space-between",
-          gap: 16,
+          justifyContent: "flex-end",
+          gap: 10,
           flexWrap: "wrap",
-          alignItems: "flex-start",
         }}
       >
-        <div>
-          <h1 style={{ fontSize: 30, fontWeight: 700, marginBottom: 8 }}>
-            PMS Connections
-          </h1>
-          <p style={{ color: "#6b7280", margin: 0 }}>
-            Prepare Pin&Go to connect with your PMS provider and continue later
-            when production credentials are available.
-          </p>
-        </div>
-
-        <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
-          <button
-            type="button"
-            onClick={openListingsMapping}
-            disabled={!canProceedToMapping}
-            style={buttonStyle("secondary", !canProceedToMapping)}
-          >
-            Open Listings Mapping
-          </button>
-        </div>
+        <button
+          type="button"
+          onClick={openListingsMapping}
+          disabled={!canProceedToMapping}
+          style={buttonStyle("secondary", !canProceedToMapping)}
+        >
+          Open Listings Mapping
+        </button>
       </div>
 
       <div

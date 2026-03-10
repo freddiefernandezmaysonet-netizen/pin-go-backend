@@ -1,4 +1,4 @@
-import { NavLink, Outlet, useNavigate } from "react-router-dom";
+import { NavLink, Outlet, useLocation, useNavigate } from "react-router-dom";
 import { logout } from "../../api/auth";
 import { useAuth } from "../../auth/AuthProvider";
 
@@ -30,8 +30,19 @@ function SideItem({ to, label }: { to: string; label: string }) {
   );
 }
 
+function getPageTitle(pathname: string) {
+  if (pathname.startsWith("/overview")) return "Overview";
+  if (pathname.startsWith("/properties")) return "Properties";
+  if (pathname.startsWith("/locks")) return "Locks";
+  if (pathname.startsWith("/reservations")) return "Reservations";
+  if (pathname.startsWith("/access")) return "Access";
+  if (pathname.startsWith("/integrations/pms")) return "PMS Integrations";
+  return "Dashboard";
+}
+
 export function AppShell() {
   const navigate = useNavigate();
+  const location = useLocation();
   const { user } = useAuth();
 
   async function handleLogout() {
@@ -41,6 +52,8 @@ export function AppShell() {
       navigate("/login");
     }
   }
+
+  const pageTitle = getPageTitle(location.pathname);
 
   return (
     <div
@@ -113,9 +126,99 @@ export function AppShell() {
         </div>
       </aside>
 
-      <main style={{ padding: 24 }}>
-        <Outlet />
-      </main>
+      <div style={{ display: "flex", flexDirection: "column", minWidth: 0 }}>
+        <header
+          style={{
+            height: 72,
+            borderBottom: "1px solid #e5e7eb",
+            background: "rgba(255,255,255,0.9)",
+            backdropFilter: "blur(8px)",
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "space-between",
+            padding: "0 24px",
+            position: "sticky",
+            top: 0,
+            zIndex: 10,
+          }}
+        >
+          <div>
+            <div
+              style={{
+                fontSize: 22,
+                fontWeight: 800,
+                color: "#111827",
+                lineHeight: 1.1,
+              }}
+            >
+              {pageTitle}
+            </div>
+
+            <div
+              style={{
+                fontSize: 13,
+                color: "#6b7280",
+                marginTop: 4,
+              }}
+            >
+              Pin&Go Dashboard
+            </div>
+          </div>
+
+          <div
+            style={{
+              display: "flex",
+              alignItems: "center",
+              gap: 12,
+            }}
+          >
+            <div
+              style={{
+                textAlign: "right",
+              }}
+            >
+              <div
+                style={{
+                  fontSize: 12,
+                  color: "#6b7280",
+                }}
+              >
+                Organization
+              </div>
+              <div
+                style={{
+                  fontSize: 14,
+                  fontWeight: 700,
+                  color: "#111827",
+                }}
+              >
+                {user?.orgId ?? "—"}
+              </div>
+            </div>
+
+            <div
+              style={{
+                width: 38,
+                height: 38,
+                borderRadius: 999,
+                background: "#dbeafe",
+                color: "#1d4ed8",
+                display: "grid",
+                placeItems: "center",
+                fontWeight: 800,
+                fontSize: 14,
+                border: "1px solid #bfdbfe",
+              }}
+            >
+              {(user?.email?.[0] ?? "P").toUpperCase()}
+            </div>
+          </div>
+        </header>
+
+        <main style={{ padding: 24 }}>
+          <Outlet />
+        </main>
+      </div>
     </div>
   );
 }

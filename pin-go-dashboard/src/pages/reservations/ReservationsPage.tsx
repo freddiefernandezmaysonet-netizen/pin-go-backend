@@ -127,21 +127,6 @@ export function ReservationsPage() {
     <div style={{ display: "grid", gap: 16 }}>
       <div
         style={{
-          border: "1px solid #e5e7eb",
-          borderRadius: 20,
-          padding: 20,
-          background: "#ffffff",
-          boxShadow: "0 1px 2px rgba(0,0,0,0.04)",
-        }}
-      >
-        <h1 style={{ fontSize: 28, fontWeight: 700, margin: 0 }}>Reservations</h1>
-        <p style={{ color: "#666", marginTop: 6 }}>
-          PMS reservations with operational visibility and drill-down access.
-        </p>
-      </div>
-
-      <div
-        style={{
           display: "flex",
           gap: 12,
           alignItems: "center",

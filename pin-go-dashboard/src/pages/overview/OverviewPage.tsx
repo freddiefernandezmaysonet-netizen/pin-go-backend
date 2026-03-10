@@ -1,16 +1,6 @@
 import { useEffect, useState } from "react";
 import { PmsControlCenter } from "../../components/dashboard/PmsControlCenter";
 
-export function AppShell() {
-
-  useRealtime();
-
-  return (
-    <>
-      {/* dashboard layout */}
-    </>
-  );
-}
 type MetricsResp = {
   upcomingArrivals: number;
   inHouse: number;
@@ -105,7 +95,6 @@ function SmallMetric({
 export function OverviewPage() {
   const [data, setData] = useState<MetricsResp | null>(null);
   const [pms, setPms] = useState<PmsSummaryResp | null>(null);
-
   const [loading, setLoading] = useState(false);
   const [err, setErr] = useState<string | null>(null);
 
@@ -114,8 +103,8 @@ export function OverviewPage() {
     setErr(null);
 
     Promise.all([
-      fetch(`${API_BASE}/api/dashboard/metrics`),
-      fetch(`${API_BASE}/api/dashboard/pms-summary`),
+      fetch(`${API_BASE}/api/dashboard/metrics`, { credentials: "include" }),
+      fetch(`${API_BASE}/api/dashboard/pms-summary`, { credentials: "include" }),
     ])
       .then(async ([metricsRes, pmsRes]) => {
         if (!metricsRes.ok) {
@@ -157,23 +146,6 @@ export function OverviewPage() {
 
   return (
     <div style={{ display: "grid", gap: 20 }}>
-      <div>
-        <h1
-          style={{
-            fontSize: 30,
-            fontWeight: 700,
-            margin: 0,
-            color: "#111827",
-          }}
-        >
-          Overview
-        </h1>
-
-        <p style={{ color: "#6b7280", marginTop: 8 }}>
-          Live operational metrics from Pin&Go backend.
-        </p>
-      </div>
-
       <div
         style={{
           display: "grid",

@@ -52,7 +52,9 @@ export function PropertiesPage() {
     setLoading(true);
     setErr(null);
 
-    fetch(`${API_BASE}/api/dashboard/properties`)
+    fetch(`${API_BASE}/api/dashboard/properties`, {
+      credentials: "include",
+    })
       .then(async (res) => {
         if (!res.ok) {
           const t = await res.text().catch(() => "");
@@ -72,13 +74,6 @@ export function PropertiesPage() {
 
   return (
     <div style={{ display: "grid", gap: 20 }}>
-      <div>
-        <h1 style={{ fontSize: 28, fontWeight: 700, margin: 0 }}>Properties</h1>
-        <p style={{ color: "#666", marginTop: 8 }}>
-          Operational summary by property.
-        </p>
-      </div>
-
       {err ? (
         <div
           style={{

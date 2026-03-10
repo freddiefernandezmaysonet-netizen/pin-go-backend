@@ -30,7 +30,9 @@ export function LocksPage() {
     setLoading(true);
     setErr(null);
 
-    fetch(`${API_BASE}/api/dashboard/locks?page=1&pageSize=20`)
+    fetch(`${API_BASE}/api/dashboard/locks?page=1&pageSize=20`, {
+      credentials: "include",
+    })
       .then(async (res) => {
         if (!res.ok) {
           const t = await res.text().catch(() => "");
@@ -51,29 +53,12 @@ export function LocksPage() {
 
   return (
     <div style={{ display: "grid", gap: 16 }}>
-      <div>
-        <h1 style={{ fontSize: 28, fontWeight: 700, margin: 0 }}>Locks</h1>
-        <p style={{ color: "#666" }}>TTLock devices connected to Pin&Go.</p>
-      </div>
-
-      {err ? (
-        <div
-          style={{
-            border: "1px solid #fecaca",
-            background: "#fef2f2",
-            padding: 12,
-            borderRadius: 12,
-          }}
-        >
-          <b>Error:</b> {err}
-        </div>
-      ) : null}
-
       <div
         style={{
           border: "1px solid #e5e7eb",
           borderRadius: 16,
           overflow: "hidden",
+          background: "#fff",
         }}
       >
         <table style={{ width: "100%", borderCollapse: "collapse" }}>

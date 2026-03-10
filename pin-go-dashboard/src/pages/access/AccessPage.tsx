@@ -50,7 +50,9 @@ export function AccessPage() {
   useEffect(() => {
     setLoading(true);
 
-    fetch(`${API_BASE}/api/dashboard/access`)
+    fetch(`${API_BASE}/api/dashboard/access`, {
+      credentials: "include",
+    })
       .then(async (r) => {
         if (!r.ok) {
           const t = await r.text().catch(() => "");
@@ -98,14 +100,14 @@ export function AccessPage() {
 
   return (
     <div style={{ display: "grid", gap: 16 }}>
-      <div>
-        <h1 style={{ fontSize: 28, fontWeight: 700 }}>Access</h1>
-        <p style={{ color: "#666" }}>
-          Active guest passcodes and NFC assignments.
-        </p>
-      </div>
-
-      <div style={{ border: "1px solid #e5e7eb", borderRadius: 16, overflow: "hidden" }}>
+      <div
+        style={{
+          border: "1px solid #e5e7eb",
+          borderRadius: 16,
+          overflow: "hidden",
+          background: "#fff",
+        }}
+      >
         <table style={{ width: "100%", borderCollapse: "collapse" }}>
           <thead style={{ background: "#f9fafb" }}>
             <tr>
