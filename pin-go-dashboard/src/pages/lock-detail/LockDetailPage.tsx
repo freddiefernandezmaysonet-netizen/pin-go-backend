@@ -17,7 +17,8 @@ type LockRow = {
 };
 
 type LocksResp = {
-  items: LockRow[];
+  items?: LockRow[];
+  error?: string;
 };
 
 type SwapResp = {
@@ -52,7 +53,7 @@ type TtlockSelectableLock = {
   } | null;
 };
 
-type TtlockLocksResp = {
+type TtlockInventoryResp = {
   ok: boolean;
   error?: string;
   organizationId?: string;
@@ -61,15 +62,16 @@ type TtlockLocksResp = {
   locks?: TtlockSelectableLock[];
 };
 
-type SyncLocksResp = {
-  ok: boolean;
-  error?: string;
-  created?: number;
-  updated?: number;
-  totalFromTtlock?: number;
-};
-
 const API_BASE = import.meta.env.VITE_API_BASE ?? "http://localhost:3000";
+
+function getOrganizationId(): string | null {
+  return (
+    localStorage.getItem("organizationId") ||
+    localStorage.getItem("orgId") ||
+    sessionStorage.getItem("organizationId") ||
+    sessionStorage.getItem("orgId")
+  );
+}
 
 function Stat({
   label,
@@ -196,8 +198,18 @@ function normalizeError(error?: string) {
       return "The property was not found for your organization.";
     case "TTLOCK_NOT_CONNECTED":
       return "TTLock is not connected for this organization.";
+    case "ORG_CONTEXT_MISSING":
+      return "Organization context is missing.";
+    case "ORGANIZATION_ID_REQUIRED":
+      return "Organization id is required.";
+    case "ORG_NOT_FOUND":
+      return "Organization was not found.";
+    case "MISSING_SWAP_FIELDS":
+      return "Missing required swap fields.";
+    case "INVALID_TTLOCK_LOCK_ID":
+      return "Invalid TTLock lock id.";
     default:
-      return error ?? "Swap failed.";
+      return error ?? "Operation failed.";
   }
 }
 
@@ -253,8 +265,7 @@ export function LockDetailPage() {
   const [availableLocks, setAvailableLocks] = useState<TtlockSelectableLock[]>([]);
   const [availableLocksLoading, setAvailableLocksLoading] = useState(false);
   const [availableLocksError, setAvailableLocksError] = useState<string | null>(null);
-  const [syncLoading, setSyncLoading] = useState(false);
-  const [syncMessage, setSyncMessage] = useState<string | null>(null);
+  const [inventoryMessage, setInventoryMessage] = useState<string | null>(null);
 
   const [selectedTtlockLockId, setSelectedTtlockLockId] = useState("");
   const [newTtlockLockName, setNewTtlockLockName] = useState("");
@@ -274,26 +285,48 @@ export function LockDetailPage() {
       const r = await fetch(`${API_BASE}/api/dashboard/locks?page=1&pageSize=50`, {
         credentials: "include",
       });
+
       const data: LocksResp = await r.json();
+
+      if (!r.ok) {
+        setLock(null);
+        return;
+      }
+
       const found = data.items?.find((l) => l.id === id) ?? null;
       setLock(found);
+    } catch {
+      setLock(null);
     } finally {
       setLoading(false);
     }
   }, [id]);
 
   const loadAvailableTtlockLocks = useCallback(
-    async (propertyId: string) => {
+    async (propertyId: string, currentTtlockLockId?: number) => {
       setAvailableLocksLoading(true);
       setAvailableLocksError(null);
+      setInventoryMessage(null);
 
       try {
-        const r = await fetch(
-          `${API_BASE}/api/org/ttlock/locks?propertyId=${encodeURIComponent(propertyId)}`,
-          { credentials: "include" }
-        );
+        const organizationId = getOrganizationId();
 
-        const data: TtlockLocksResp = await r.json();
+        if (!organizationId) {
+          setAvailableLocks([]);
+          setAvailableLocksError("Organization id is required.");
+          return;
+        }
+
+        const qs = new URLSearchParams({
+          propertyId,
+          organizationId,
+        }).toString();
+
+        const r = await fetch(`${API_BASE}/api/org/ttlock/inventory?${qs}`, {
+          credentials: "include",
+        });
+
+        const data: TtlockInventoryResp = await r.json();
 
         if (!r.ok || !data.ok) {
           setAvailableLocks([]);
@@ -302,18 +335,23 @@ export function LockDetailPage() {
         }
 
         const filtered = (data.locks ?? []).filter(
-          (item) => item.availableForSwap && item.ttlockLockId !== lock?.ttlockLockId
+          (item) => item.availableForSwap && item.ttlockLockId !== currentTtlockLockId
         );
 
         setAvailableLocks(filtered);
+        setInventoryMessage(
+          `Inventory pulled from TTLock. Total remote locks: ${data.totalFromTtlock ?? 0}.`
+        );
       } catch (err: any) {
         setAvailableLocks([]);
-        setAvailableLocksError(String(err?.message ?? err ?? "Unable to load TTLock locks."));
+        setAvailableLocksError(
+          String(err?.message ?? err ?? "Unable to load TTLock inventory.")
+        );
       } finally {
         setAvailableLocksLoading(false);
       }
     },
-    [lock?.ttlockLockId]
+    []
   );
 
   useEffect(() => {
@@ -321,9 +359,15 @@ export function LockDetailPage() {
   }, [loadLock]);
 
   useEffect(() => {
+    setSelectedTtlockLockId("");
+    setNewTtlockLockName("");
+    setSwapError(null);
+    setSwapSuccess(null);
+    setInventoryMessage(null);
+
     if (!lock?.property?.id) return;
-    void loadAvailableTtlockLocks(lock.property.id);
-  }, [lock?.property?.id, loadAvailableTtlockLocks]);
+    void loadAvailableTtlockLocks(lock.property.id, lock.ttlockLockId);
+  }, [lock?.id, lock?.property?.id, lock?.ttlockLockId, loadAvailableTtlockLocks]);
 
   const batteryValue = useMemo(() => {
     if (lock?.battery == null) return "—";
@@ -363,9 +407,7 @@ export function LockDetailPage() {
   const batteryDetailValue = useMemo(() => {
     if (!lock) return "—";
     if (lock.battery == null) return "—";
-    return lock.batteryFresh === false
-      ? `${lock.battery}% (stale)`
-      : `${lock.battery}%`;
+    return lock.batteryFresh === false ? `${lock.battery}% (stale)` : `${lock.battery}%`;
   }, [lock]);
 
   const gatewayDetailValue = useMemo(() => {
@@ -400,49 +442,14 @@ export function LockDetailPage() {
     return `${selectedLockOption.name ?? "TTLock Lock"} — ${selectedLockOption.ttlockLockId}`;
   }, [selectedLockOption]);
 
-  async function handleSyncLocks() {
+  async function handleRefreshInventory() {
     if (!lock?.property?.id) {
       setAvailableLocksError("This lock does not have a valid property assigned.");
-      setSyncMessage(null);
+      setInventoryMessage(null);
       return;
     }
 
-    setSyncLoading(true);
-    setAvailableLocksError(null);
-    setSyncMessage(null);
-
-    try {
-      const r = await fetch(`${API_BASE}/api/org/ttlock/sync-locks`, {
-        method: "POST",
-        credentials: "include",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({
-          propertyId: lock.property.id,
-        }),
-      });
-
-      const data: SyncLocksResp = await r.json();
-
-      if (!r.ok || !data.ok) {
-        setAvailableLocksError(normalizeError(data.error));
-        return;
-      }
-
-      setSyncMessage(
-        `TTLock sync completed. Created: ${data.created ?? 0}, Updated: ${
-          data.updated ?? 0
-        }, Remote total: ${data.totalFromTtlock ?? 0}.`
-      );
-
-      await loadAvailableTtlockLocks(lock.property.id);
-      await loadLock();
-    } catch (err: any) {
-      setAvailableLocksError(String(err?.message ?? err ?? "Sync failed."));
-    } finally {
-      setSyncLoading(false);
-    }
+    await loadAvailableTtlockLocks(lock.property.id, lock.ttlockLockId);
   }
 
   async function handleSwapSubmit(e: React.FormEvent) {
@@ -468,6 +475,14 @@ export function LockDetailPage() {
       return;
     }
 
+    const organizationId = getOrganizationId();
+
+    if (!organizationId) {
+      setSwapError("Organization id is required.");
+      setSwapSuccess(null);
+      return;
+    }
+
     setSwapLoading(true);
     setSwapError(null);
     setSwapSuccess(null);
@@ -480,6 +495,7 @@ export function LockDetailPage() {
           "Content-Type": "application/json",
         },
         body: JSON.stringify({
+          organizationId,
           propertyId: lock.property.id,
           oldTtlockLockId: lock.ttlockLockId,
           newTtlockLockId: parsedNewId,
@@ -499,13 +515,14 @@ export function LockDetailPage() {
       setSelectedTtlockLockId("");
       setNewTtlockLockName("");
 
+      await loadLock();
+
       if (data.lock?.id) {
         navigate(`/locks/${data.lock.id}`);
         return;
       }
 
-      await loadLock();
-      await loadAvailableTtlockLocks(lock.property.id);
+      await loadAvailableTtlockLocks(lock.property.id, parsedNewId);
     } catch (err: any) {
       setSwapError(String(err?.message ?? err ?? "Swap failed."));
       setSwapSuccess(null);
@@ -558,16 +575,12 @@ export function LockDetailPage() {
         <InfoRow label="Battery" value={batteryDetailValue} />
         <InfoRow
           label="Battery Fresh"
-          value={
-            lock.batteryFresh == null ? "—" : lock.batteryFresh ? "YES" : "NO"
-          }
+          value={lock.batteryFresh == null ? "—" : lock.batteryFresh ? "YES" : "NO"}
         />
         <InfoRow label="Gateway" value={gatewayDetailValue} />
         <InfoRow
           label="Gateway Fresh"
-          value={
-            lock.gatewayFresh == null ? "—" : lock.gatewayFresh ? "YES" : "NO"
-          }
+          value={lock.gatewayFresh == null ? "—" : lock.gatewayFresh ? "YES" : "NO"}
         />
         <InfoRow
           label="Gateway Status"
@@ -599,7 +612,7 @@ export function LockDetailPage() {
               <div style={{ fontWeight: 600, marginBottom: 6 }}>Swap Lock</div>
               <div style={{ fontSize: 14, color: "#6b7280" }}>
                 Replace this active lock with another TTLock device for the same
-                property using the synchronized TTLock list.
+                property using the organization inventory.
               </div>
             </div>
 
@@ -615,10 +628,7 @@ export function LockDetailPage() {
                 value={`${lock.name ?? "TTLock Lock"} — ${lock.ttlockLockId}`}
               />
 
-              <ReadonlyField
-                label="Property"
-                value={lock.property?.name ?? "—"}
-              />
+              <ReadonlyField label="Property" value={lock.property?.name ?? "—"} />
             </div>
 
             <div
@@ -631,19 +641,19 @@ export function LockDetailPage() {
             >
               <button
                 type="button"
-                onClick={handleSyncLocks}
-                disabled={syncLoading || swapLoading}
-                style={buttonStyle(syncLoading || swapLoading)}
+                onClick={handleRefreshInventory}
+                disabled={swapLoading || availableLocksLoading}
+                style={buttonStyle(swapLoading || availableLocksLoading)}
               >
-                {syncLoading ? "Syncing..." : "Sync TTLock Locks"}
+                {availableLocksLoading ? "Refreshing..." : "Refresh TTLock Inventory"}
               </button>
 
               <span style={{ fontSize: 13, color: "#6b7280" }}>
-                Refresh the list of TTLock devices available for this property.
+                Pull neutral TTLock inventory for this organization without assigning locks to a property.
               </span>
             </div>
 
-            {syncMessage ? (
+            {inventoryMessage ? (
               <div
                 style={{
                   borderRadius: 10,
@@ -654,7 +664,7 @@ export function LockDetailPage() {
                   fontSize: 14,
                 }}
               >
-                {syncMessage}
+                {inventoryMessage}
               </div>
             ) : null}
 
@@ -698,7 +708,7 @@ export function LockDetailPage() {
                 >
                   <option value="">
                     {availableLocksLoading
-                      ? "Loading TTLock devices..."
+                      ? "Loading TTLock inventory..."
                       : availableLocks.length > 0
                       ? "Select a TTLock device"
                       : "No TTLock devices available"}
@@ -712,10 +722,7 @@ export function LockDetailPage() {
                 </select>
               </label>
 
-              <ReadonlyField
-                label="Selected New Lock"
-                value={selectedLockLabel}
-              />
+              <ReadonlyField label="Selected New Lock" value={selectedLockLabel} />
             </div>
 
             <div
@@ -829,9 +836,7 @@ export function LockDetailPage() {
               Operational Safety
             </div>
             <div style={{ fontSize: 14, color: "#6b7280" }}>
-              Swap now uses synchronized TTLock inventory instead of manual ID
-              entry, reducing operator error while keeping admin credentials out
-              of the dashboard.
+              Swap now uses TTLock inventory pulled at organization level, while assignment happens only when executing the swap inside the selected property.
             </div>
           </div>
         </div>

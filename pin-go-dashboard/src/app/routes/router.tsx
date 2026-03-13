@@ -13,6 +13,8 @@ import ListingsMappingPage from "../../pages/pms/ListingsMappingPage";
 import LoginPage from "../../pages/LoginPage";
 
 import { RequireAuth } from "../../auth/RequireAuth";
+import CreatePropertyPage from "../../pages/onboarding/CreatePropertyPage";
+import TtlockConnectPage from "../../pages/integrations/TtlockConnectPage";
 
 export const router = createBrowserRouter([
   {
@@ -27,6 +29,7 @@ export const router = createBrowserRouter([
     ),
     children: [
       { path: "/", element: <Navigate to="/overview" replace /> },
+      { path: "/onboarding/property", element: <CreatePropertyPage /> },
       { path: "/overview", element: <OverviewPage /> },
 
       { path: "/properties", element: <PropertiesPage /> },
@@ -41,6 +44,7 @@ export const router = createBrowserRouter([
       { path: "/access", element: <AccessPage /> },
 
       { path: "/integrations/pms", element: <PmsConnectionsPage /> },
+      { path: "/integrations/ttlock", element: <TtlockConnectPage /> },
       { path: "/integrations/pms/listings-mapping", element: <ListingsMappingPage /> },
     ],
   },

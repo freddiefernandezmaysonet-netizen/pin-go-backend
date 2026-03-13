@@ -27,10 +27,6 @@ import { buildAdminLocksSwapRouter } from "./routes/admin.locks.swap.routes";
 import adminUsageRoutes from "./routes/admin.usage.routes";
 import adminCapacityRoutes from "./routes/admin.capacity.routes";
 import adminSubscriptionRoutes from "./routes/admin.subscription.routes";
-import { buildOrgLocksRouter } from "./routes/org.locks.routes";
-//import { buildOrgTtlockRouter } from "./routes/org.ttlock.routes";
-import { buildOrgTtlockConnectRouter } from "./routes/org.ttlock.connect.routes";
-import { buildOrgLocksActivateRouter } from "./routes/org.locks.activate.routes";
 import { debugRouter } from "./routes/debug.routes";
 // import nfcSyncRouter from "./routes/nfc.sync.routes";
 import { listingsMappingRouter } from "./pms/routes/listings.mapping.routes";
@@ -41,11 +37,19 @@ import { dashboardPropertiesRouter } from "./routes/dashboard.properties.route";
 import { dashboardLocksRouter } from "./routes/dashboard.locks.route";
 import { dashboardAccessRouter } from "./routes/dashboard.access.route";
 import { dashboardMetricsRouter } from "./routes/dashboard.metrics.route";
+import { dashboardLocksCapacityRouter } from "./routes/dashboard.locks.capacity.route";
 import { buildOrgPmsRouter } from "./routes/org.pms.routes";
 import { dashboardPmsRouter } from "./routes/dashboard.pms.route";
 import { devPmsRouter } from "./routes/dev.pms.routes";
 import { authRouter } from "./routes/auth.routes";
 import { eventsRouter } from "./routes/events.route";
+
+import { buildOrgTtlockSyncRouter } from "./routes/org.ttlock.sync.router";
+import { buildOrgLocksSwapRouter } from "./routes/org.locks.swap.router";
+import { buildOrgTtlockInventoryRouter } from "./routes/org.ttlock.inventory.router";
+import { buildOrgLocksActivateV2Router } from "./routes/org.locks.activate.v2.router";
+import { buildOrgTtlockConnectV2Router } from "./routes/org.ttlock.connect.v2.router";
+import { orgTtlockStatusRouter } from "./routes/org.ttlock.status.route";
 
 const app = express();
 const prisma = new PrismaClient();
@@ -69,16 +73,20 @@ registerStripeWebhook(app, prisma);
 // =====================
 // Middleware
 // =====================
-app.use(cors({
-  origin: FRONTEND_ORIGIN,
-  credentials: true,
-}));
+app.use(
+  cors({
+    origin: FRONTEND_ORIGIN,
+    credentials: true,
+  })
+);
 
-app.use(express.json({
-  verify: (req: any, _res, buf) => {
-    req.rawBody = buf;
-  },
-}));
+app.use(
+  express.json({
+    verify: (req: any, _res, buf) => {
+      req.rawBody = buf;
+    },
+  })
+);
 
 app.use(bodyParser.urlencoded({ extended: true }));
 
@@ -111,6 +119,8 @@ app.get("/health", (_req, res) => {
 // Auth
 // =====================
 app.use(authRouter);
+app.use(meRouter);
+app.use(orgTtlockStatusRouter);
 
 // =====================
 // Guest Portal (HTML)
@@ -140,22 +150,25 @@ app.use("/api/admin", buildAdminLocksSwapRouter(prisma));
 app.use("/api/admin", adminUsageRoutes);
 app.use("/api/admin", adminCapacityRoutes);
 app.use("/api/admin", adminSubscriptionRoutes);
-//app.use("/api/org", buildOrgLocksRouter(prisma));
-//app.use("/api/org", buildOrgTtlockConnectRouter(prisma));
-//app.use("/api/org", buildOrgTtlockRouter(prisma));
-//app.use("/api/org", buildOrgLocksActivateRouter(prisma));
 app.use("/debug", debugRouter);
 // app.use("/access/nfc", nfcSyncRouter);
 app.use("/webhooks", pmsWebhookRouter);
 app.use("/api/pms/listings", listingsMappingRouter);
 app.use("/api/org", buildOrgPmsRouter(prisma));
-app.use(meRouter);
+
+app.use("/api/org", buildOrgTtlockSyncRouter(prisma));
+app.use("/api/org", buildOrgLocksSwapRouter(prisma));
+app.use("/api/org", buildOrgTtlockInventoryRouter(prisma));
+app.use("/api/org", buildOrgLocksActivateV2Router(prisma));
+app.use("/api/org", buildOrgTtlockConnectV2Router(prisma));
+
 app.use(dashboardRouter);
 app.use(dashboardReservationsRouter);
 app.use(dashboardPropertiesRouter);
 app.use(dashboardLocksRouter);
 app.use(dashboardAccessRouter);
 app.use(dashboardMetricsRouter);
+app.use(dashboardLocksCapacityRouter);
 app.use(dashboardPmsRouter);
 app.use(devPmsRouter);
 app.use(eventsRouter);

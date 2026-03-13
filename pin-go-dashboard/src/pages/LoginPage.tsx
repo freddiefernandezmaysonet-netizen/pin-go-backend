@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { login } from "../api/auth";
+import { fetchProperties } from "../api/properties";
 import { useAuth } from "../auth/AuthProvider";
 
 export default function LoginPage() {
@@ -20,8 +21,17 @@ export default function LoginPage() {
     try {
       await login(email, password);
       await refresh();
+
+      const propsData = await fetchProperties();
+
+      if (!propsData.items?.length) {
+        navigate("/onboarding/property");
+        return;
+      }
+
       navigate("/overview");
-    } catch {
+    } catch (e) {
+      console.error("login failed", e);
       setError("Invalid email or password");
     } finally {
       setSubmitting(false);
@@ -32,8 +42,7 @@ export default function LoginPage() {
     <div
       style={{
         minHeight: "100vh",
-        background:
-          "linear-gradient(180deg, #f8fafc 0%, #eef2ff 100%)",
+        background: "linear-gradient(180deg, #f8fafc 0%, #eef2ff 100%)",
         display: "grid",
         placeItems: "center",
         padding: 24,

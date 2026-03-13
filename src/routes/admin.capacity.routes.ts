@@ -25,7 +25,14 @@ router.get("/org/:orgId/lock-capacity", async (req, res) => {
 
   const activeLocks = await prisma.lock.findMany({
     where: { isActive: true, property: { organizationId: orgId } },
-    select: { id: true, ttlockLockId: true, ttlockLockName: true, propertyId: true, createdAt: true, updatedAt: true },
+    select: {
+      id: true,
+      ttlockLockId: true,
+      ttlockLockName: true,
+      propertyId: true,
+      createdAt: true,
+      updatedAt: true,
+    },
     orderBy: { createdAt: "asc" },
   });
 
@@ -34,6 +41,7 @@ router.get("/org/:orgId/lock-capacity", async (req, res) => {
     orgId,
     entitledLocks: cap.entitled,
     usedLocks: cap.used,
+    remainingLocks: cap.remaining,
     status: cap.status,
     activeLocks,
   });

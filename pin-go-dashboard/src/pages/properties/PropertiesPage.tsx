@@ -74,6 +74,42 @@ export function PropertiesPage() {
 
   return (
     <div style={{ display: "grid", gap: 20 }}>
+      <div
+        style={{
+          display: "flex",
+          justifyContent: "space-between",
+          alignItems: "center",
+          gap: 12,
+          flexWrap: "wrap",
+        }}
+      >
+        <div>
+          <div style={{ fontSize: 28, fontWeight: 800, color: "#111827" }}>
+            Properties
+          </div>
+          <div style={{ fontSize: 14, color: "#6b7280", marginTop: 4 }}>
+            Manage all your properties from one place.
+          </div>
+        </div>
+
+        <button
+          onClick={() => navigate("/onboarding/property")}
+          style={{
+            height: 44,
+            padding: "0 16px",
+            borderRadius: 12,
+            border: "none",
+            background: "#2563eb",
+            color: "#ffffff",
+            fontSize: 14,
+            fontWeight: 700,
+            cursor: "pointer",
+          }}
+        >
+          Add Property
+        </button>
+      </div>
+
       {err ? (
         <div
           style={{
@@ -98,9 +134,28 @@ export function PropertiesPage() {
             padding: 16,
             color: "#666",
             background: "#fff",
+            display: "grid",
+            gap: 12,
           }}
         >
-          No properties found.
+          <div>No properties found yet.</div>
+
+          <button
+            onClick={() => navigate("/onboarding/property")}
+            style={{
+              height: 42,
+              padding: "0 14px",
+              borderRadius: 12,
+              border: "none",
+              background: "#2563eb",
+              color: "#fff",
+              fontWeight: 700,
+              cursor: "pointer",
+              width: "fit-content",
+            }}
+          >
+            Create First Property
+          </button>
         </div>
       ) : (
         <div

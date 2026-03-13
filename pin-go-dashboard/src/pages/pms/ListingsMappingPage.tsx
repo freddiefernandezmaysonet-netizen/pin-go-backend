@@ -33,11 +33,14 @@ type PendingPmsListing = {
   externalListingId: string;
   name: string;
   createdAt?: string;
+  suggestedPropertyId?: string | null;
+  suggestedPropertyName?: string | null;
 };
 
 type PendingListingsResp = {
   ok: boolean;
   error?: string;
+  provider?: string;
   items?: PendingPmsListing[];
 };
 
@@ -251,8 +254,19 @@ async function requestJson<T>(path: string, init?: RequestInit): Promise<T> {
 }
 
 async function loadConnection(provider: ProviderKey): Promise<PmsConnection | null> {
+  const organizationId = localStorage.getItem("organizationId");
+
+  if (!organizationId) {
+    throw new Error("Missing organizationId in localStorage.");
+  }
+
+  const qs = new URLSearchParams({
+    provider,
+    organizationId,
+  });
+
   const data = await requestJson<ConnectionResp>(
-    `/api/org/pms/connection?provider=${encodeURIComponent(provider)}`
+    `/api/org/pms/connection?${qs.toString()}`
   );
 
   if (!data.ok) {
@@ -390,14 +404,22 @@ export default function ListingsMappingPage() {
 
         const drafts: Record<string, string> = {};
         for (const item of nextListings) {
-          drafts[item.id] = "";
+          drafts[item.id] = item.suggestedPropertyId ?? "";
         }
         setDraftMappings(drafts);
 
         if (nextListings.length === 0) {
           setInfo(providerInfo.emptyListings);
         } else {
-          setInfo(providerInfo.mappingHint);
+          const suggestedCount = nextListings.filter((x) => x.suggestedPropertyId).length;
+
+          if (suggestedCount > 0) {
+            setInfo(
+              `${providerInfo.mappingHint} Pin&Go encontró ${suggestedCount} sugerencia(s) automática(s) por nombre.`
+            );
+          } else {
+            setInfo(providerInfo.mappingHint);
+          }
         }
       } catch (e) {
         if (!active) return;
@@ -663,6 +685,9 @@ export default function ListingsMappingPage() {
                     External ID
                   </th>
                   <th style={{ padding: 14, borderBottom: "1px solid #e5e7eb" }}>
+                    Suggested Property
+                  </th>
+                  <th style={{ padding: 14, borderBottom: "1px solid #e5e7eb" }}>
                     Created
                   </th>
                   <th style={{ padding: 14, borderBottom: "1px solid #e5e7eb" }}>
@@ -694,6 +719,34 @@ export default function ListingsMappingPage() {
                         }}
                       >
                         {listing.externalListingId}
+                      </td>
+
+                      <td
+                        style={{
+                          padding: 14,
+                          borderBottom: "1px solid #f3f4f6",
+                          fontSize: 14,
+                        }}
+                      >
+                        {listing.suggestedPropertyName ? (
+                          <div
+                            style={{
+                              display: "inline-flex",
+                              alignItems: "center",
+                              gap: 8,
+                              padding: "6px 10px",
+                              borderRadius: 999,
+                              background: "#ecfdf5",
+                              border: "1px solid #bbf7d0",
+                              color: "#166534",
+                              fontWeight: 600,
+                            }}
+                          >
+                            {listing.suggestedPropertyName}
+                          </div>
+                        ) : (
+                          <span style={{ color: "#6b7280" }}>—</span>
+                        )}
                       </td>
 
                       <td
@@ -814,6 +867,11 @@ export default function ListingsMappingPage() {
                     <div style={{ color: "#6b7280", marginTop: 4, fontSize: 14 }}>
                       External ID: {l.externalListingId}
                     </div>
+                    {l.suggestedPropertyName ? (
+                      <div style={{ color: "#166534", marginTop: 4, fontSize: 14 }}>
+                        Suggested: {l.suggestedPropertyName}
+                      </div>
+                    ) : null}
                   </div>
                 ))
             )}

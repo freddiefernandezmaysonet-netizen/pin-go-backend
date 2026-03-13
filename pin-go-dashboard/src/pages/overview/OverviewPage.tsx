@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { PmsControlCenter } from "../../components/dashboard/PmsControlCenter";
+import { LocksCapacityCard } from "../../components/dashboard/LocksCapacityCard";
 
 type MetricsResp = {
   upcomingArrivals: number;
@@ -183,6 +184,8 @@ export function OverviewPage() {
           accent="#0f766e"
         />
       </div>
+    
+    <LocksCapacityCard />
 
       <div
         style={{

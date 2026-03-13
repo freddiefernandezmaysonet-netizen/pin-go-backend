@@ -1,5 +1,3 @@
-// src/services/lockCapacity.service.ts
-
 import { PrismaClient, SubscriptionStatus } from "@prisma/client";
 
 export async function assertLockCapacity(
@@ -7,27 +5,32 @@ export async function assertLockCapacity(
   orgId: string,
   additional = 1
 ) {
-  // 1) Cupo (entitled) viene de la suscripción del ORG
+  // 1️⃣ Cupo (entitled) viene de la suscripción
   const sub = await prisma.subscription.findUnique({
-    where: { organizationId: orgId }, // @unique -> findUnique perfecto
+    where: { organizationId: orgId },
     select: { entitledLocks: true, status: true },
   });
 
   const status = sub?.status ?? null;
   const entitled = sub?.entitledLocks ?? 0;
 
-  // (opcional) si quieres bloquear cuando no está activa
-  // Ajusta los nombres reales de tu enum si difieren
   const allowedStatuses: SubscriptionStatus[] = [
     SubscriptionStatus.ACTIVE,
     SubscriptionStatus.TRIALING,
   ];
 
   if (!sub || !allowedStatuses.includes(sub.status)) {
-    return { ok: false, entitled, used: 0, status, error: "SUBSCRIPTION_INACTIVE" as const };
+    return {
+      ok: false,
+      entitled,
+      used: 0,
+      remaining: entitled,
+      status,
+      error: "SUBSCRIPTION_INACTIVE" as const,
+    };
   }
 
-  // 2) Usados = locks activos dentro del org
+  // 2️⃣ Locks usadas
   const used = await prisma.lock.count({
     where: {
       isActive: true,
@@ -35,9 +38,24 @@ export async function assertLockCapacity(
     },
   });
 
+  const remaining = entitled - used;
+
   if (used + additional > entitled) {
-    return { ok: false, entitled, used, status };
+    return {
+      ok: false,
+      entitled,
+      used,
+      remaining,
+      status,
+      error: "LOCK_LIMIT_REACHED" as const,
+    };
   }
 
-  return { ok: true, entitled, used, status };
+  return {
+    ok: true,
+    entitled,
+    used,
+    remaining,
+    status,
+  };
 }
