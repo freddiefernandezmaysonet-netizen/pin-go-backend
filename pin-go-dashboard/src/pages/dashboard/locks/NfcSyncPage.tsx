@@ -40,6 +40,16 @@ type NfcCardsResp = {
   error?: string;
 };
 
+type NfcStatsResp = {
+  ok?: boolean;
+  stats?: {
+    guest?: number;
+    cleaning?: number;
+    total?: number;
+  };
+  error?: string;
+};
+
 type NfcSyncResp = {
   ok: boolean;
   error?: string;
@@ -252,6 +262,22 @@ async function loadCardsRequest(propertyId: string): Promise<NfcCardRow[]> {
   return data.items ?? [];
 }
 
+async function loadStatsRequest(propertyId: string): Promise<{
+  guest: number;
+  cleaning: number;
+  total: number;
+}> {
+  const data = await requestJson<NfcStatsResp>(
+    `/access/nfc/stats?propertyId=${encodeURIComponent(propertyId)}`
+  );
+
+  return {
+    guest: Number(data.stats?.guest ?? 0),
+    cleaning: Number(data.stats?.cleaning ?? 0),
+    total: Number(data.stats?.total ?? 0),
+  };
+}
+
 export default function NfcSyncPage() {
   const [properties, setProperties] = useState<PropertyRow[]>([]);
   const [locks, setLocks] = useState<LockRow[]>([]);
@@ -263,6 +289,7 @@ export default function NfcSyncPage() {
   const [loading, setLoading] = useState(true);
   const [syncLoading, setSyncLoading] = useState(false);
   const [cardsLoading, setCardsLoading] = useState(false);
+  const [statsLoading, setStatsLoading] = useState(false);
 
   const [error, setError] = useState("");
   const [success, setSuccess] = useState("");
@@ -274,6 +301,10 @@ export default function NfcSyncPage() {
   const [lastImportedCount, setLastImportedCount] = useState(0);
   const [lastUpdatedCount, setLastUpdatedCount] = useState(0);
   const [lastTotalFromTtlock, setLastTotalFromTtlock] = useState(0);
+
+  const [availableTotal, setAvailableTotal] = useState(0);
+  const [guestTotal, setGuestTotal] = useState(0);
+  const [cleaningTotal, setCleaningTotal] = useState(0);
 
   const loadData = useCallback(async () => {
     setLoading(true);
@@ -325,6 +356,31 @@ export default function NfcSyncPage() {
     }
   }, []);
 
+  const loadStats = useCallback(async (nextPropertyId: string) => {
+    if (!nextPropertyId) {
+      setAvailableTotal(0);
+      setGuestTotal(0);
+      setCleaningTotal(0);
+      return;
+    }
+
+    setStatsLoading(true);
+
+    try {
+      const stats = await loadStatsRequest(nextPropertyId);
+      setAvailableTotal(stats.total);
+      setGuestTotal(stats.guest);
+      setCleaningTotal(stats.cleaning);
+    } catch (e) {
+      console.error("Failed to load NFC stats", e);
+      setAvailableTotal(0);
+      setGuestTotal(0);
+      setCleaningTotal(0);
+    } finally {
+      setStatsLoading(false);
+    }
+  }, []);
+
   useEffect(() => {
     void loadData();
   }, [loadData]);
@@ -333,11 +389,15 @@ export default function NfcSyncPage() {
     if (!propertyId) {
       setCards([]);
       setCardsError("");
+      setAvailableTotal(0);
+      setGuestTotal(0);
+      setCleaningTotal(0);
       return;
     }
 
     void loadCards(propertyId);
-  }, [propertyId, loadCards]);
+    void loadStats(propertyId);
+  }, [propertyId, loadCards, loadStats]);
 
   const filteredLocks = useMemo(() => {
     return locks.filter((lock) => lock.property?.id === propertyId);
@@ -386,6 +446,7 @@ export default function NfcSyncPage() {
       setLastTotalFromTtlock(Number(resp.result?.totalFromTtlock ?? 0));
 
       await loadCards(propertyId);
+      await loadStats(propertyId);
 
       setSuccess(
         resp.message ??
@@ -452,6 +513,33 @@ export default function NfcSyncPage() {
           value={lastUpdatedCount}
           helper="Tarjetas ya existentes actualizadas"
         />
+        <Stat
+          label="Available NFC"
+          value={availableTotal}
+          helper={
+            statsLoading
+              ? "Cargando pool disponible..."
+              : "Tarjetas disponibles en el pool"
+          }
+        />
+        <Stat
+          label="Guest Cards"
+          value={guestTotal}
+          helper={
+            statsLoading
+              ? "Cargando tarjetas guest..."
+              : "Tarjetas de huésped disponibles"
+          }
+        />
+        <Stat
+          label="Cleaning Cards"
+          value={cleaningTotal}
+          helper={
+            statsLoading
+              ? "Cargando tarjetas cleaning..."
+              : "Tarjetas de limpieza disponibles"
+          }
+        />
       </section>
 
       <section style={sectionStyle()}>
@@ -482,8 +570,12 @@ export default function NfcSyncPage() {
                   setError("");
                   setSuccess("");
                   setCardsError("");
+
                   if (!nextPropertyId) {
                     setCards([]);
+                    setAvailableTotal(0);
+                    setGuestTotal(0);
+                    setCleaningTotal(0);
                   }
                 }}
                 disabled={loading || syncLoading}
@@ -597,14 +689,20 @@ export default function NfcSyncPage() {
 
             <button
               type="button"
-              onClick={() => void loadCards(propertyId)}
-              disabled={!propertyId || cardsLoading || syncLoading}
+              onClick={async () => {
+                if (!propertyId) return;
+                await loadCards(propertyId);
+                await loadStats(propertyId);
+              }}
+              disabled={!propertyId || cardsLoading || statsLoading || syncLoading}
               style={buttonStyle(
                 "secondary",
-                !propertyId || cardsLoading || syncLoading
+                !propertyId || cardsLoading || statsLoading || syncLoading
               )}
             >
-              {cardsLoading ? "Refreshing Cards..." : "Refresh NFC Cards"}
+              {cardsLoading || statsLoading
+                ? "Refreshing NFC..."
+                : "Refresh NFC Cards"}
             </button>
           </div>
         </form>
@@ -633,7 +731,9 @@ export default function NfcSyncPage() {
           </div>
         </div>
 
-        {cardsError ? <div style={statusBoxStyle("warning")}>{cardsError}</div> : null}
+        {cardsError ? (
+          <div style={statusBoxStyle("warning")}>{cardsError}</div>
+        ) : null}
 
         {!propertyId ? (
           <div style={statusBoxStyle("info")}>
@@ -663,16 +763,36 @@ export default function NfcSyncPage() {
             >
               <thead>
                 <tr style={{ background: "#f9fafb", textAlign: "left" }}>
-                  <th style={{ padding: "12px 14px", borderBottom: "1px solid #e5e7eb" }}>
+                  <th
+                    style={{
+                      padding: "12px 14px",
+                      borderBottom: "1px solid #e5e7eb",
+                    }}
+                  >
                     TTLock Card ID
                   </th>
-                  <th style={{ padding: "12px 14px", borderBottom: "1px solid #e5e7eb" }}>
+                  <th
+                    style={{
+                      padding: "12px 14px",
+                      borderBottom: "1px solid #e5e7eb",
+                    }}
+                  >
                     Label
                   </th>
-                  <th style={{ padding: "12px 14px", borderBottom: "1px solid #e5e7eb" }}>
+                  <th
+                    style={{
+                      padding: "12px 14px",
+                      borderBottom: "1px solid #e5e7eb",
+                    }}
+                  >
                     Status
                   </th>
-                  <th style={{ padding: "12px 14px", borderBottom: "1px solid #e5e7eb" }}>
+                  <th
+                    style={{
+                      padding: "12px 14px",
+                      borderBottom: "1px solid #e5e7eb",
+                    }}
+                  >
                     Created At
                   </th>
                 </tr>
