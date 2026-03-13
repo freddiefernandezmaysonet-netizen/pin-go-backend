@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
+import { getOrganizationId } from "../../lib/getOrganizationId";
 
 const API_BASE = import.meta.env.VITE_API_BASE ?? "http://localhost:3000";
 

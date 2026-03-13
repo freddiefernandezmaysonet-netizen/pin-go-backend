@@ -649,3 +649,16 @@ Invoke-RestMethod `
   -Body $body
 
 
+function getOrganizationId(): string {
+  const organizationId = localStorage.getItem("organizationId")?.trim();
+
+  if (!organizationId) {
+    throw new Error("ORGANIZATION_ID_REQUIRED");
+  }
+
+  return organizationId;
+}
+
+
+
+

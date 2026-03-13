@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
+import { getOrganizationId } from "../../lib/getOrganizationId";
 
 const API_BASE = import.meta.env.VITE_API_BASE ?? "http://localhost:3000";
 
@@ -209,6 +210,8 @@ function normalizeError(error?: string) {
       return "Client ID is required for Guesty.";
     case "PMS_CLIENT_SECRET_REQUIRED":
       return "Client Secret is required for Guesty.";
+    case "ORGANIZATION_ID_REQUIRED":
+      return "Organization ID is required.";
     default:
       return error ?? "Unexpected PMS connection error.";
   }
@@ -333,8 +336,15 @@ export function PmsConnectionsPage() {
     setSuccess(null);
 
     try {
+      const organizationId = getOrganizationId();
+
+      const qs = new URLSearchParams({
+        provider: nextProvider,
+        organizationId,
+      });
+
       const resp = await fetch(
-        `${API_BASE}/api/org/pms/connection?provider=${encodeURIComponent(nextProvider)}`,
+        `${API_BASE}/api/org/pms/connection?${qs.toString()}`,
         {
           credentials: "include",
         }
@@ -363,7 +373,7 @@ export function PmsConnectionsPage() {
       setWebhookSecret("");
     } catch (err: any) {
       setExistingConnection(null);
-      setError(String(err?.message ?? err ?? "Failed to load PMS connection."));
+      setError(normalizeError(String(err?.message ?? err ?? "Failed to load PMS connection.")));
     } finally {
       setLoadingConnection(false);
     }
@@ -388,6 +398,8 @@ export function PmsConnectionsPage() {
     setInfo(null);
 
     try {
+      const organizationId = getOrganizationId();
+
       const resp = await fetch(`${API_BASE}/api/org/pms/test-connection`, {
         method: "POST",
         credentials: "include",
@@ -395,6 +407,7 @@ export function PmsConnectionsPage() {
           "Content-Type": "application/json",
         },
         body: JSON.stringify({
+          organizationId,
           provider,
           accountName: accountName.trim() || undefined,
           accountId: accountId.trim() || undefined,
@@ -415,7 +428,7 @@ export function PmsConnectionsPage() {
 
       setSuccess(data.message ?? "Connection payload validated successfully.");
     } catch (err: any) {
-      setError(String(err?.message ?? err ?? "Connection test failed."));
+      setError(normalizeError(String(err?.message ?? err ?? "Connection test failed.")));
     } finally {
       setTesting(false);
     }
@@ -432,6 +445,8 @@ export function PmsConnectionsPage() {
     setInfo(null);
 
     try {
+      const organizationId = getOrganizationId();
+
       const resp = await fetch(`${API_BASE}/api/org/pms/connect`, {
         method: "POST",
         credentials: "include",
@@ -439,6 +454,7 @@ export function PmsConnectionsPage() {
           "Content-Type": "application/json",
         },
         body: JSON.stringify({
+          organizationId,
           provider,
           accountName: accountName.trim() || undefined,
           accountId: accountId.trim() || undefined,
@@ -460,7 +476,7 @@ export function PmsConnectionsPage() {
       setSuccess(data.message ?? "PMS connection saved successfully.");
       await loadConnection(provider);
     } catch (err: any) {
-      setError(String(err?.message ?? err ?? "Save connection failed."));
+      setError(normalizeError(String(err?.message ?? err ?? "Save connection failed.")));
     } finally {
       setSaving(false);
     }

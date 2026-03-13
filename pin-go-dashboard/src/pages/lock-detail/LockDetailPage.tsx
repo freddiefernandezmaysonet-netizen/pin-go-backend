@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useParams, Link, useNavigate } from "react-router-dom";
+import { getOrganizationId } from "../../lib/getOrganizationId";
 
 type LockRow = {
   id: string;
@@ -64,14 +65,6 @@ type TtlockInventoryResp = {
 
 const API_BASE = import.meta.env.VITE_API_BASE ?? "http://localhost:3000";
 
-function getOrganizationId(): string | null {
-  return (
-    localStorage.getItem("organizationId") ||
-    localStorage.getItem("orgId") ||
-    sessionStorage.getItem("organizationId") ||
-    sessionStorage.getItem("orgId")
-  );
-}
 
 function Stat({
   label,

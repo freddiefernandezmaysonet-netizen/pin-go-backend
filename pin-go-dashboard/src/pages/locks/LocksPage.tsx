@@ -115,6 +115,25 @@ export function LocksPage() {
             Monitor active locks and open each lock detail to manage swap and status.
           </div>
         </div>
+
+        <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
+          <button
+            type="button"
+            onClick={() => navigate("/locks/nfc-sync")}
+            style={{
+              height: 40,
+              padding: "0 14px",
+              borderRadius: 10,
+              border: "1px solid #111827",
+              background: "#111827",
+              color: "#ffffff",
+              fontWeight: 700,
+              cursor: "pointer",
+            }}
+          >
+            NFC Sync
+          </button>
+        </div>
       </div>
 
       {ttlockStatusLoading ? (
@@ -153,22 +172,41 @@ export function LocksPage() {
             </div>
           </div>
 
-          <button
-            type="button"
-            onClick={() => navigate("/integrations/ttlock")}
-            style={{
-              height: 40,
-              padding: "0 14px",
-              borderRadius: 10,
-              border: "1px solid #bbf7d0",
-              background: "#ffffff",
-              color: "#166534",
-              fontWeight: 700,
-              cursor: "pointer",
-            }}
-          >
-            Review Connection
-          </button>
+          <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
+            <button
+              type="button"
+              onClick={() => navigate("/locks/nfc-sync")}
+              style={{
+                height: 40,
+                padding: "0 14px",
+                borderRadius: 10,
+                border: "1px solid #166534",
+                background: "#ffffff",
+                color: "#166534",
+                fontWeight: 700,
+                cursor: "pointer",
+              }}
+            >
+              Open NFC Sync
+            </button>
+
+            <button
+              type="button"
+              onClick={() => navigate("/integrations/ttlock")}
+              style={{
+                height: 40,
+                padding: "0 14px",
+                borderRadius: 10,
+                border: "1px solid #bbf7d0",
+                background: "#ffffff",
+                color: "#166534",
+                fontWeight: 700,
+                cursor: "pointer",
+              }}
+            >
+              Review Connection
+            </button>
+          </div>
         </div>
       ) : (
         <div
@@ -193,22 +231,41 @@ export function LocksPage() {
             </div>
           </div>
 
-          <button
-            type="button"
-            onClick={() => navigate("/integrations/ttlock")}
-            style={{
-              height: 40,
-              padding: "0 14px",
-              borderRadius: 10,
-              border: "1px solid #111827",
-              background: "#111827",
-              color: "#ffffff",
-              fontWeight: 700,
-              cursor: "pointer",
-            }}
-          >
-            Connect TTLock
-          </button>
+          <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
+            <button
+              type="button"
+              onClick={() => navigate("/locks/nfc-sync")}
+              style={{
+                height: 40,
+                padding: "0 14px",
+                borderRadius: 10,
+                border: "1px solid #d1d5db",
+                background: "#ffffff",
+                color: "#111827",
+                fontWeight: 700,
+                cursor: "pointer",
+              }}
+            >
+              View NFC Sync
+            </button>
+
+            <button
+              type="button"
+              onClick={() => navigate("/integrations/ttlock")}
+              style={{
+                height: 40,
+                padding: "0 14px",
+                borderRadius: 10,
+                border: "1px solid #111827",
+                background: "#111827",
+                color: "#ffffff",
+                fontWeight: 700,
+                cursor: "pointer",
+              }}
+            >
+              Connect TTLock
+            </button>
+          </div>
         </div>
       )}
 

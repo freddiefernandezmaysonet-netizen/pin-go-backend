@@ -15,6 +15,7 @@ import LoginPage from "../../pages/LoginPage";
 import { RequireAuth } from "../../auth/RequireAuth";
 import CreatePropertyPage from "../../pages/onboarding/CreatePropertyPage";
 import TtlockConnectPage from "../../pages/integrations/TtlockConnectPage";
+import NfcSyncPage from "../../pages/dashboard/locks/NfcSyncPage";
 
 export const router = createBrowserRouter([
   {
@@ -36,6 +37,7 @@ export const router = createBrowserRouter([
       { path: "/properties/:id", element: <PropertyDetailPage /> },
 
       { path: "/locks", element: <LocksPage /> },
+      { path: "/locks/nfc-sync", element: <NfcSyncPage /> },
       { path: "/locks/:id", element: <LockDetailPage /> },
 
       { path: "/reservations", element: <ReservationsPage /> },
