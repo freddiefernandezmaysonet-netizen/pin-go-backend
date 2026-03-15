@@ -20,6 +20,7 @@ model Organization {
   staffMembers   StaffMember[]
   subscriptions  Subscription?
   ttlockAuth     TTLockAuth?
+  deviceHealths  DeviceHealth[]
 }
 
 model DashboardUser {
@@ -52,11 +53,14 @@ model Property {
   updatedAt                  DateTime      @updatedAt
   cleaningDurationMinutes    Int           @default(180)
   cleaningStartOffsetMinutes Int           @default(30)
+  status                     String        @default("ACTIVE")
   locks                      Lock[]
   organization               Organization  @relation(fields: [organizationId], references: [id])
   reservations               Reservation[]
-
-  @@index([organizationId])
+  deviceHealths              DeviceHealth[]
+ 
+ @@index([organizationId])
+  @@index([organizationId, status])
 }
 
 model Lock {
@@ -71,8 +75,9 @@ model Lock {
   sGrants        AccessGrant[]
   property       Property        @relation(fields: [propertyId], references: [id])
   groups         LockGroupLock[]
-
-  @@index([propertyId, isActive])
+  deviceHealth   DeviceHealth?
+ 
+ @@index([propertyId, isActive])
 }
 
 model Person {
@@ -259,6 +264,39 @@ model LockGroupLock {
   lock        Lock      @relation(fields: [lockId], references: [id])
 
   @@unique([lockGroupId, lockId])
+}
+
+model DeviceHealth {
+  id               String             @id @default(cuid())
+  organizationId   String
+  propertyId       String?
+  lockId           String             @unique
+
+  battery          Int?
+  gatewayConnected Boolean?
+  isOnline         Boolean?
+
+  lastSyncAt       DateTime?
+  lastEventAt      DateTime?
+  lastSeenAt       DateTime?
+
+  healthStatus     DeviceHealthStatus @default(UNKNOWN)
+  healthMessage    String?
+
+  source           String?
+  rawPayload       Json?
+
+  createdAt        DateTime           @default(now())
+  updatedAt        DateTime           @updatedAt
+
+  organization     Organization       @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  property         Property?          @relation(fields: [propertyId], references: [id], onDelete: SetNull)
+  lock             Lock               @relation(fields: [lockId], references: [id], onDelete: Cascade)
+
+  @@index([organizationId])
+  @@index([propertyId])
+  @@index([healthStatus])
+  @@index([lastSeenAt])
 }
 
 model ManagerAssignment {
@@ -547,6 +585,14 @@ enum NfcAssignmentStatus {
 enum NfcAssignmentRole {
   GUEST
   CLEANING
+}
+
+enum DeviceHealthStatus {
+  HEALTHY
+  WARNING
+  OFFLINE
+  LOW_BATTERY
+  UNKNOWN
 }
 
 enum PmsProvider {

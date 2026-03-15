@@ -46,31 +46,68 @@ export function PropertiesPage() {
   const [items, setItems] = useState<PropertyRow[]>([]);
   const [loading, setLoading] = useState(false);
   const [err, setErr] = useState<string | null>(null);
+  const [archivingId, setArchivingId] = useState<string | null>(null);
   const navigate = useNavigate();
 
-  useEffect(() => {
+  async function loadProperties() {
     setLoading(true);
     setErr(null);
 
-    fetch(`${API_BASE}/api/dashboard/properties`, {
-      credentials: "include",
-    })
-      .then(async (res) => {
-        if (!res.ok) {
-          const t = await res.text().catch(() => "");
-          throw new Error(`API ${res.status}: ${t || res.statusText}`);
-        }
-        return res.json();
-      })
-      .then((data: PropertiesResp) => {
-        setItems(data.items ?? []);
-      })
-      .catch((e) => {
-        console.error("PROPERTIES ERROR", e);
-        setErr(String(e?.message ?? e));
-      })
-      .finally(() => setLoading(false));
+    try {
+      const res = await fetch(`${API_BASE}/api/dashboard/properties`, {
+        credentials: "include",
+      });
+
+      if (!res.ok) {
+        const t = await res.text().catch(() => "");
+        throw new Error(`API ${res.status}: ${t || res.statusText}`);
+      }
+
+      const data: PropertiesResp = await res.json();
+      setItems(data.items ?? []);
+    } catch (e: any) {
+      console.error("PROPERTIES ERROR", e);
+      setErr(String(e?.message ?? e));
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  useEffect(() => {
+    loadProperties();
   }, []);
+
+  async function handleArchive(propertyId: string) {
+    const ok = window.confirm(
+      "Are you sure you want to archive this property?"
+    );
+    if (!ok) return;
+
+    setArchivingId(propertyId);
+    setErr(null);
+
+    try {
+      const res = await fetch(
+        `${API_BASE}/api/dashboard/properties/${propertyId}/archive`,
+        {
+          method: "POST",
+          credentials: "include",
+        }
+      );
+
+      if (!res.ok) {
+        const t = await res.text().catch(() => "");
+        throw new Error(`API ${res.status}: ${t || res.statusText}`);
+      }
+
+      await loadProperties();
+    } catch (e: any) {
+      console.error("ARCHIVE PROPERTY ERROR", e);
+      setErr(String(e?.message ?? e));
+    } finally {
+      setArchivingId(null);
+    }
+  }
 
   return (
     <div style={{ display: "grid", gap: 20 }}>
@@ -181,7 +218,14 @@ export function PropertiesPage() {
                 cursor: "pointer",
               }}
             >
-              <div style={{ display: "flex", justifyContent: "space-between", gap: 12 }}>
+              <div
+                style={{
+                  display: "flex",
+                  justifyContent: "space-between",
+                  gap: 12,
+                  alignItems: "flex-start",
+                }}
+              >
                 <div>
                   <div style={{ fontSize: 20, fontWeight: 700, color: "#111827" }}>
                     {p.name}
@@ -218,6 +262,60 @@ export function PropertiesPage() {
                 <Metric label="Active Reservations" value={p.activeReservations} />
                 <Metric label="PMS" value={String(p.pms).toUpperCase()} />
                 <Metric label="Property" value="ONLINE" />
+              </div>
+
+              <div
+                style={{
+                  display: "flex",
+                  justifyContent: "flex-end",
+                  gap: 10,
+                  flexWrap: "wrap",
+                  marginTop: 4,
+                }}
+              >
+                <button
+                  type="button"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    navigate(`/properties/${p.id}/edit`);
+                  }}
+                  style={{
+                    height: 38,
+                    padding: "0 14px",
+                    borderRadius: 10,
+                    border: "1px solid #d1d5db",
+                    background: "#fff",
+                    color: "#111827",
+                    fontSize: 13,
+                    fontWeight: 700,
+                    cursor: "pointer",
+                  }}
+                >
+                  Edit
+                </button>
+
+                <button
+                  type="button"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    handleArchive(p.id);
+                  }}
+                  disabled={archivingId === p.id}
+                  style={{
+                    height: 38,
+                    padding: "0 14px",
+                    borderRadius: 10,
+                    border: "1px solid #fecaca",
+                    background: "#fff",
+                    color: "#b91c1c",
+                    fontSize: 13,
+                    fontWeight: 700,
+                    cursor: archivingId === p.id ? "not-allowed" : "pointer",
+                    opacity: archivingId === p.id ? 0.7 : 1,
+                  }}
+                >
+                  {archivingId === p.id ? "Archiving..." : "Archive"}
+                </button>
               </div>
             </button>
           ))}

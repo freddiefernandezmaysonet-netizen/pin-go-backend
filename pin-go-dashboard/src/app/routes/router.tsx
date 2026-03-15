@@ -7,6 +7,7 @@ import { LocksPage } from "../../pages/locks/LocksPage";
 import { AccessPage } from "../../pages/access/AccessPage";
 import { PropertiesPage } from "../../pages/properties/PropertiesPage";
 import { PropertyDetailPage } from "../../pages/property-detail/PropertyDetailPage";
+import { PropertyEditPage } from "../../pages/properties/PropertyEditPage";
 import { LockDetailPage } from "../../pages/lock-detail/LockDetailPage";
 import { PmsConnectionsPage } from "../../pages/integrations/PmsConnectionsPage";
 import ListingsMappingPage from "../../pages/pms/ListingsMappingPage";
@@ -16,6 +17,10 @@ import { RequireAuth } from "../../auth/RequireAuth";
 import CreatePropertyPage from "../../pages/onboarding/CreatePropertyPage";
 import TtlockConnectPage from "../../pages/integrations/TtlockConnectPage";
 import NfcSyncPage from "../../pages/dashboard/locks/NfcSyncPage";
+import { BillingPage } from "../../pages/dashboard/BillingPage";
+import BillingSuccessPage from "../../pages/dashboard/BillingSuccessPage";
+import BillingCancelPage from "../../pages/dashboard/BillingCancelPage";
+import { HealthCenterPage } from "../../pages/health-center/HealthCenterPage";
 
 export const router = createBrowserRouter([
   {
@@ -35,6 +40,7 @@ export const router = createBrowserRouter([
 
       { path: "/properties", element: <PropertiesPage /> },
       { path: "/properties/:id", element: <PropertyDetailPage /> },
+      { path: "/properties/:id/edit", element: <PropertyEditPage /> },
 
       { path: "/locks", element: <LocksPage /> },
       { path: "/locks/nfc-sync", element: <NfcSyncPage /> },
@@ -44,6 +50,13 @@ export const router = createBrowserRouter([
       { path: "/reservations/:id", element: <ReservationDetailPage /> },
 
       { path: "/access", element: <AccessPage /> },
+      
+      { path: "/health", element: <HealthCenterPage /> },
+
+      { path: "/billing", element: <BillingPage /> },
+
+      { path: "/billing/success", element: <BillingSuccessPage /> },
+      { path: "/billing/cancel", element: <BillingCancelPage /> },
 
       { path: "/integrations/pms", element: <PmsConnectionsPage /> },
       { path: "/integrations/ttlock", element: <TtlockConnectPage /> },

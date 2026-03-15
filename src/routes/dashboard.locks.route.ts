@@ -61,6 +61,18 @@ dashboardLocksRouter.get("/api/dashboard/locks", requireAuth, async (req, res) =
             name: true,
           },
         },
+        deviceHealth: {
+          select: {
+            battery: true,
+            gatewayConnected: true,
+            isOnline: true,
+            lastSeenAt: true,
+            lastSyncAt: true,
+            healthStatus: true,
+            healthMessage: true,
+            updatedAt: true,
+          },
+        },
       },
     }),
   ]);
@@ -77,15 +89,30 @@ dashboardLocksRouter.get("/api/dashboard/locks", requireAuth, async (req, res) =
       updatedAt: l.updatedAt.toISOString(),
       property: l.property,
 
-      // Battery
-      battery: null as number | null,
-      batteryFresh: false,
+      battery: l.deviceHealth?.battery ?? null,
+      batteryFresh: !!l.deviceHealth?.lastSyncAt,
 
-      // Gateway
       gatewayId: null as number | null,
       gatewayName: null as string | null,
-      gatewayOnline: null as boolean | null,
-      gatewayFresh: false,
+      gatewayOnline: l.deviceHealth?.gatewayConnected ?? null,
+      gatewayFresh: !!l.deviceHealth?.lastSyncAt,
+
+      deviceHealth: l.deviceHealth
+        ? {
+            battery: l.deviceHealth.battery ?? null,
+            gatewayConnected: l.deviceHealth.gatewayConnected ?? null,
+            isOnline: l.deviceHealth.isOnline ?? null,
+            lastSeenAt: l.deviceHealth.lastSeenAt
+              ? l.deviceHealth.lastSeenAt.toISOString()
+              : null,
+            lastSyncAt: l.deviceHealth.lastSyncAt
+              ? l.deviceHealth.lastSyncAt.toISOString()
+              : null,
+            healthStatus: l.deviceHealth.healthStatus,
+            healthMessage: l.deviceHealth.healthMessage ?? null,
+            updatedAt: l.deviceHealth.updatedAt.toISOString(),
+          }
+        : null,
     })),
   });
 });

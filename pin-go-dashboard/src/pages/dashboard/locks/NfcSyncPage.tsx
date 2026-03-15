@@ -720,7 +720,7 @@ export default function NfcSyncPage() {
           }}
         >
           <div>
-            <h3 style={{ margin: 0 }}>NFC Cards in Prisma</h3>
+            <h3 style={{ margin: 0 }}>NFC Cards Disponibles </h3>
             <p style={{ margin: "6px 0 0 0", color: "#6b7280", fontSize: 14 }}>
               Lista real de tarjetas NFC guardadas para la property seleccionada.
             </p>

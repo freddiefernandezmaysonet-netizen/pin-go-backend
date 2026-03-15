@@ -1,5 +1,16 @@
-import { useEffect, useState } from "react";
+import { useEffect, useState, type CSSProperties } from "react";
 import { useNavigate } from "react-router-dom";
+
+type DeviceHealth = {
+  battery?: number | null;
+  gatewayConnected?: boolean | null;
+  isOnline?: boolean | null;
+  lastSeenAt?: string | null;
+  lastSyncAt?: string | null;
+  healthStatus?: "HEALTHY" | "WARNING" | "OFFLINE" | "LOW_BATTERY" | "UNKNOWN";
+  healthMessage?: string | null;
+  updatedAt?: string | null;
+} | null;
 
 type LockRow = {
   id: string;
@@ -8,6 +19,12 @@ type LockRow = {
   isActive: boolean;
   property: { id: string; name: string } | null;
   battery?: number | null;
+  gatewayId?: number | null;
+  gatewayName?: string | null;
+  gatewayOnline?: boolean | null;
+  batteryFresh?: boolean;
+  gatewayFresh?: boolean;
+  deviceHealth?: DeviceHealth;
 };
 
 type LocksResp = {
@@ -24,9 +41,19 @@ type TtlockStatusResp = {
   error?: string;
 };
 
+type AlertItem = {
+  lockId: string;
+  lockName: string;
+  propertyName?: string | null;
+  battery?: number | null;
+  gatewayConnected?: boolean | null;
+  healthStatus: string;
+  healthMessage?: string | null;
+};
+
 const API_BASE = import.meta.env.VITE_API_BASE ?? "http://localhost:3000";
 
-function badgeStyle(active: boolean): React.CSSProperties {
+function badgeStyle(active: boolean): CSSProperties {
   return {
     fontSize: 12,
     padding: "4px 8px",
@@ -38,6 +65,137 @@ function badgeStyle(active: boolean): React.CSSProperties {
   };
 }
 
+function healthBadgeStyle(status?: string | null): CSSProperties {
+  switch (status) {
+    case "HEALTHY":
+      return {
+        fontSize: 12,
+        padding: "4px 8px",
+        borderRadius: 999,
+        border: "1px solid #bbf7d0",
+        background: "#ecfdf5",
+        color: "#166534",
+        fontWeight: 700,
+      };
+    case "LOW_BATTERY":
+      return {
+        fontSize: 12,
+        padding: "4px 8px",
+        borderRadius: 999,
+        border: "1px solid #fde68a",
+        background: "#fffbeb",
+        color: "#92400e",
+        fontWeight: 700,
+      };
+    case "WARNING":
+      return {
+        fontSize: 12,
+        padding: "4px 8px",
+        borderRadius: 999,
+        border: "1px solid #fed7aa",
+        background: "#fff7ed",
+        color: "#9a3412",
+        fontWeight: 700,
+      };
+    case "OFFLINE":
+      return {
+        fontSize: 12,
+        padding: "4px 8px",
+        borderRadius: 999,
+        border: "1px solid #fecaca",
+        background: "#fef2f2",
+        color: "#991b1b",
+        fontWeight: 700,
+      };
+    default:
+      return {
+        fontSize: 12,
+        padding: "4px 8px",
+        borderRadius: 999,
+        border: "1px solid #e5e7eb",
+        background: "#f3f4f6",
+        color: "#374151",
+        fontWeight: 700,
+      };
+  }
+}
+
+function formatBattery(lock: LockRow) {
+  const value = lock.deviceHealth?.battery ?? lock.battery;
+  return value != null ? `${value}%` : "—";
+}
+
+function formatGateway(lock: LockRow) {
+  const value = lock.deviceHealth?.gatewayConnected ?? lock.gatewayOnline;
+
+  if (value == null) return "—";
+  return value ? "Connected" : "No gateway";
+}
+
+type ClickableLockRowProps = {
+  lock: LockRow;
+  onClick: () => void;
+};
+
+function ClickableLockRow({ lock, onClick }: ClickableLockRowProps) {
+  const [hovered, setHovered] = useState(false);
+
+  return (
+    <tr
+      onClick={onClick}
+      onMouseEnter={() => setHovered(true)}
+      onMouseLeave={() => setHovered(false)}
+      style={{
+        cursor: "pointer",
+        borderBottom: "1px solid #f3f4f6",
+        background: hovered ? "#f9fafb" : "#fff",
+        transition: "background 120ms ease",
+      }}
+    >
+      <td style={{ padding: 14 }}>
+        <div style={{ fontWeight: 600, color: "#111827" }}>
+          {lock.name ?? "TTLock Lock"}
+        </div>
+      </td>
+
+      <td
+        style={{
+          padding: 14,
+          color: "#6b7280",
+          fontFamily: "monospace",
+          fontSize: 13,
+        }}
+      >
+        {lock.ttlockLockId}
+      </td>
+
+      <td style={{ padding: 14, color: "#374151" }}>
+        {lock.property?.name ?? "—"}
+      </td>
+
+      <td style={{ padding: 14 }}>
+        <span style={badgeStyle(lock.isActive)}>
+          {lock.isActive ? "ACTIVE" : "DISABLED"}
+        </span>
+      </td>
+
+      <td style={{ padding: 14, color: "#374151" }}>
+        {formatBattery(lock)}
+      </td>
+
+      <td style={{ padding: 14, color: "#374151" }}>
+        {formatGateway(lock)}
+      </td>
+
+      <td style={{ padding: 14 }}>
+        <span style={healthBadgeStyle(lock.deviceHealth?.healthStatus)}>
+          {lock.deviceHealth?.healthStatus ?? "UNKNOWN"}
+        </span>
+      </td>
+    </tr>
+  );
+}
+
 export function LocksPage() {
   const navigate = useNavigate();
 
@@ -45,10 +203,12 @@ export function LocksPage() {
   const [loading, setLoading] = useState(false);
   const [err, setErr] = useState<string | null>(null);
 
+  const [alerts, setAlerts] = useState<AlertItem[]>([]);
+
   const [ttlockStatus, setTtlockStatus] = useState<TtlockStatusResp | null>(null);
   const [ttlockStatusLoading, setTtlockStatusLoading] = useState(true);
 
-  useEffect(() => {
+  const loadLocks = () => {
     setLoading(true);
     setErr(null);
 
@@ -70,6 +230,31 @@ export function LocksPage() {
         setErr(String(e?.message ?? e));
       })
       .finally(() => setLoading(false));
+  };
+
+  const loadAlerts = () => {
+    fetch(`${API_BASE}/api/dashboard/locks/alerts`, {
+      credentials: "include",
+    })
+      .then(async (res) => {
+        if (!res.ok) {
+          const t = await res.text().catch(() => "");
+          throw new Error(`API ${res.status}: ${t || res.statusText}`);
+        }
+        return res.json();
+      })
+      .then((resp) => {
+        setAlerts(resp.items ?? []);
+      })
+      .catch((e) => {
+        console.error("ALERTS ERROR", e);
+        setAlerts([]);
+      });
+  };
+
+  useEffect(() => {
+    loadLocks();
+    loadAlerts();
   }, []);
 
   useEffect(() => {
@@ -119,6 +304,26 @@ export function LocksPage() {
         <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
           <button
             type="button"
+            onClick={() => {
+              loadLocks();
+              loadAlerts();
+            }}
+            style={{
+              height: 40,
+              padding: "0 14px",
+              borderRadius: 10,
+              border: "1px solid #d1d5db",
+              background: "#ffffff",
+              color: "#111827",
+              fontWeight: 700,
+              cursor: "pointer",
+            }}
+          >
+            Refresh
+          </button>
+
+          <button
+            type="button"
             onClick={() => navigate("/locks/nfc-sync")}
             style={{
               height: 40,
@@ -135,6 +340,32 @@ export function LocksPage() {
           </button>
         </div>
       </div>
+
+      {alerts.length > 0 && (
+        <div
+          style={{
+            border: "1px solid #fde68a",
+            borderRadius: 14,
+            background: "#fffbeb",
+            padding: 14,
+            color: "#92400e",
+            fontSize: 14,
+          }}
+        >
+          <div style={{ fontWeight: 700 }}>
+            ⚠ {alerts.length} locks need attention
+          </div>
+
+          <div style={{ marginTop: 8, display: "grid", gap: 4 }}>
+            {alerts.slice(0, 3).map((a) => (
+              <div key={a.lockId}>
+                {a.lockName}
+                {a.propertyName ? ` · ${a.propertyName}` : ""} — {a.healthMessage}
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
 
       {ttlockStatusLoading ? (
         <div
@@ -316,50 +547,18 @@ export function LocksPage() {
                 <th style={{ padding: 14, borderBottom: "1px solid #e5e7eb" }}>Property</th>
                 <th style={{ padding: 14, borderBottom: "1px solid #e5e7eb" }}>Status</th>
                 <th style={{ padding: 14, borderBottom: "1px solid #e5e7eb" }}>Battery</th>
+                <th style={{ padding: 14, borderBottom: "1px solid #e5e7eb" }}>Gateway</th>
+                <th style={{ padding: 14, borderBottom: "1px solid #e5e7eb" }}>Health</th>
               </tr>
             </thead>
 
             <tbody>
               {items.map((lock) => (
-                <tr
+                <ClickableLockRow
                   key={lock.id}
+                  lock={lock}
                   onClick={() => navigate(`/locks/${lock.id}`)}
-                  style={{
-                    cursor: "pointer",
-                    borderBottom: "1px solid #f3f4f6",
-                  }}
-                >
-                  <td style={{ padding: 14 }}>
-                    <div style={{ fontWeight: 600, color: "#111827" }}>
-                      {lock.name ?? "TTLock Lock"}
-                    </div>
-                  </td>
-
-                  <td
-                    style={{
-                      padding: 14,
-                      color: "#6b7280",
-                      fontFamily: "monospace",
-                      fontSize: 13,
-                    }}
-                  >
-                    {lock.ttlockLockId}
-                  </td>
-
-                  <td style={{ padding: 14, color: "#374151" }}>
-                    {lock.property?.name ?? "—"}
-                  </td>
-
-                  <td style={{ padding: 14 }}>
-                    <span style={badgeStyle(lock.isActive)}>
-                      {lock.isActive ? "ACTIVE" : "DISABLED"}
-                    </span>
-                  </td>
-
-                  <td style={{ padding: 14, color: "#374151" }}>
-                    {lock.battery ?? "—"}
-                  </td>
-                </tr>
+                />
               ))}
             </tbody>
           </table>

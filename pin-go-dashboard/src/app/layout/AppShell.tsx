@@ -8,7 +8,11 @@ const nav = [
   { to: "/locks", label: "Locks" },
   { to: "/reservations", label: "Reservations" },
   { to: "/access", label: "Access" },
+
+  { to: "/health", label: "Locks Health Center" },
+
   { to: "/integrations/pms", label: "PMS" },
+  { to: "/billing", label: "Billing" },
 ];
 
 function SideItem({ to, label }: { to: string; label: string }) {
@@ -36,7 +40,9 @@ function getPageTitle(pathname: string) {
   if (pathname.startsWith("/locks")) return "Locks";
   if (pathname.startsWith("/reservations")) return "Reservations";
   if (pathname.startsWith("/access")) return "Access";
+  if (pathname.startsWith("/health")) return "Health Center";
   if (pathname.startsWith("/integrations/pms")) return "PMS Integrations";
+  if (pathname.startsWith("/billing")) return "Billing";
   return "Dashboard";
 }
 
