@@ -1,0 +1,114 @@
+PIN&GO PLATFORM — PROJECT BASELINE
+
+STACK
+Node.js
+Express
+TypeScript
+Prisma
+PostgreSQL
+React (Dashboard)
+TTLock Integration
+
+ARCHITECTURE
+
+API
+server.ts
+
+Workers run as separate processes (NOT inside server.ts)
+
+Pattern used by workers:
+
+tick()
+setInterval()
+batch processing
+error logging
+
+WORKERS CURRENTLY IN PROJECT
+
+access-grant-expire.worker
+passcode-expire.worker
+access-code-cleanup.worker
+reservation.worker
+pms-watchdog.worker
+nfc-watchdog.worker
+deviceHealth.worker
+
+Workers executed independently using run scripts.
+
+DASHBOARD MODULES
+
+LocksPage
+Purpose: Lock operations only
+
+Functions:
+- Sync Lock
+- NFC Sync
+- Swap Lock
+- Open Lock Detail
+
+LocksPage should NOT show:
+- battery health
+- gateway alerts
+- operational risk
+- system alerts
+
+LockDetailPage
+Purpose: Lock management
+
+Functions:
+- Swap Lock
+- Refresh TTLock inventory
+- NFC actions
+- Lock metadata
+
+HEALTH CENTER
+
+Route:
+/health
+
+Purpose:
+Operational Readiness Monitoring
+
+Health Center only shows locks with operational risk.
+
+Table Columns:
+
+Lock
+Property
+Battery
+Gateway
+Next Check-in
+Risk
+Recommended Action
+
+Operational Risk States:
+
+HEALTHY
+WARNING
+AT_RISK
+CRITICAL
+UNKNOWN
+
+Risk calculated from:
+
+battery level
+battery freshness
+gateway connectivity
+gateway freshness
+next reservation
+active access impact
+
+PLANNED WORKERS
+
+battery-monitor.worker
+gateway-watchdog.worker
+operational-risk logic
+
+Health Center will consume:
+
+/api/dashboard/health
+
+Goal of Health Center:
+Prevent operational failures before guest arrival.
+
+END CONTEXT

@@ -1,11 +1,54 @@
 import { useCallback, useEffect, useState } from "react";
-import { Link, useNavigate } from "react-router-dom";
-import {
-  fetchHealthSummary,
-  fetchHealthLocks,
-  type HealthSummary,
-  type HealthLockRow,
-} from "../../services/health";
+import { Link } from "react-router-dom";
+
+const API_BASE = import.meta.env.VITE_API_BASE ?? "http://localhost:3000";
+
+type HealthSummary = {
+  healthy: number;
+  warning: number;
+  atRisk: number;
+  critical: number;
+  unknown: number;
+  openAlerts: number;
+};
+
+type HealthLockRow = {
+  id: string;
+  name: string;
+  property: { id: string; name: string } | null;
+
+  battery: number | null;
+  isOnline: boolean | null;
+  gatewayConnected: boolean | null;
+
+  healthStatus: string;
+  healthMessage: string | null;
+
+  operationalRisk: string;
+  operationalMessage: string | null;
+  recommendedAction: string | null;
+
+  nextCheckInAt: string | null;
+  hasActiveAccess: boolean;
+  lastSeenAt: string | null;
+  lastSyncAt: string | null;
+  riskCalculatedAt: string | null;
+
+  updatedAt: string;
+};
+
+type ControlTowerRow = {
+  id: string;
+  name: string;
+  property: { id: string; name: string } | null;
+  battery: number | null;
+  gatewayConnected: boolean | null;
+  operationalRisk: string;
+  operationalMessage: string | null;
+  recommendedAction: string | null;
+  nextCheckInAt: string | null;
+  updatedAt: string;
+};
 
 function Stat({
   label,
@@ -44,11 +87,9 @@ function Stat({
 function SectionCard({
   title,
   children,
-  right,
 }: {
   title: string;
   children: React.ReactNode;
-  right?: React.ReactNode;
 }) {
   return (
     <div
@@ -70,7 +111,6 @@ function SectionCard({
         }}
       >
         <h3 style={{ margin: 0 }}>{title}</h3>
-        {right}
       </div>
 
       {children}
@@ -78,53 +118,46 @@ function SectionCard({
   );
 }
 
-function buttonStyle(disabled?: boolean): React.CSSProperties {
-  return {
-    height: 40,
-    padding: "0 16px",
-    borderRadius: 10,
-    border: "1px solid #111827",
-    background: disabled ? "#e5e7eb" : "#111827",
-    color: disabled ? "#6b7280" : "#fff",
-    cursor: disabled ? "not-allowed" : "pointer",
-    fontWeight: 600,
-  };
-}
-
-function healthBadgeStyle(status: string): React.CSSProperties {
+function riskBadgeStyle(risk: string): React.CSSProperties {
   let background = "#f3f4f6";
   let color = "#374151";
   let border = "1px solid #e5e7eb";
 
-  if (status === "HEALTHY") {
+  if (risk === "HEALTHY") {
     background = "#ecfdf5";
     color = "#166534";
     border = "1px solid #bbf7d0";
   }
 
-  if (status === "LOW_BATTERY") {
+  if (risk === "WARNING") {
     background = "#fffbeb";
     color = "#92400e";
     border = "1px solid #fde68a";
   }
 
-  if (status === "CRITICAL" || status === "OFFLINE") {
+  if (risk === "AT_RISK") {
+    background = "#fff7ed";
+    color = "#c2410c";
+    border = "1px solid #fdba74";
+  }
+
+  if (risk === "CRITICAL") {
     background = "#fef2f2";
     color = "#991b1b";
     border = "1px solid #fecaca";
   }
 
-  if (status === "GATEWAY_DISCONNECTED") {
-    background = "#eff6ff";
-    color = "#1d4ed8";
-    border = "1px solid #bfdbfe";
+  if (risk === "UNKNOWN") {
+    background = "#f3f4f6";
+    color = "#4b5563";
+    border = "1px solid #d1d5db";
   }
 
   return {
     display: "inline-flex",
     alignItems: "center",
     justifyContent: "center",
-    minWidth: 120,
+    minWidth: 110,
     height: 30,
     padding: "0 10px",
     borderRadius: 999,
@@ -136,7 +169,7 @@ function healthBadgeStyle(status: string): React.CSSProperties {
   };
 }
 
-function formatLastSeen(value?: string | null) {
+function formatDateTime(value?: string | null) {
   if (!value) return "—";
 
   const d = new Date(value);
@@ -145,67 +178,120 @@ function formatLastSeen(value?: string | null) {
   return d.toLocaleString();
 }
 
-type ClickableRowProps = {
-  lock: HealthLockRow;
-  onClick: () => void;
-};
+function formatBattery(value?: number | null) {
+  if (value == null) return "—";
+  return `${value}%`;
+}
 
-function ClickableRow({ lock, onClick }: ClickableRowProps) {
-  const [hovered, setHovered] = useState(false);
+function formatGateway(value?: boolean | null) {
+  if (value == null) return "—";
+  return value ? "CONNECTED" : "DISCONNECTED";
+}
 
+function TowerRow({ item }: { item: ControlTowerRow }) {
   return (
-    <tr
-      onClick={onClick}
-      onMouseEnter={() => setHovered(true)}
-      onMouseLeave={() => setHovered(false)}
+    <div
       style={{
-        cursor: "pointer",
-        background: hovered ? "#f9fafb" : "#fff",
-        transition: "background 120ms ease",
+        border: "1px solid #f3f4f6",
+        borderRadius: 14,
+        padding: 14,
+        display: "grid",
+        gap: 10,
+        background: "#fff",
       }}
     >
+      <div
+        style={{
+          display: "flex",
+          justifyContent: "space-between",
+          alignItems: "flex-start",
+          gap: 12,
+          flexWrap: "wrap",
+        }}
+      >
+        <div>
+          <div style={{ fontWeight: 700, color: "#111827" }}>{item.name}</div>
+          <div style={{ fontSize: 13, color: "#6b7280", marginTop: 4 }}>
+            {item.property?.name ?? "—"}
+          </div>
+        </div>
+
+        <span style={riskBadgeStyle(item.operationalRisk)}>
+          {item.operationalRisk}
+        </span>
+      </div>
+
+      <div
+        style={{
+          display: "grid",
+          gap: 8,
+          gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))",
+        }}
+      >
+        <div style={towerMetaStyle}>
+          <strong>Battery:</strong> {formatBattery(item.battery)}
+        </div>
+        <div style={towerMetaStyle}>
+          <strong>Gateway:</strong> {formatGateway(item.gatewayConnected)}
+        </div>
+        <div style={towerMetaStyle}>
+          <strong>Next Check-in:</strong> {formatDateTime(item.nextCheckInAt)}
+        </div>
+      </div>
+
+      <div style={{ fontSize: 14, color: "#111827" }}>
+        {item.operationalMessage ?? "No operational message available."}
+      </div>
+
+      <div
+        style={{
+          fontSize: 13,
+          color: "#92400e",
+          background: "#fffbeb",
+          border: "1px solid #fde68a",
+          borderRadius: 10,
+          padding: 10,
+        }}
+      >
+        <strong>Recommended Action:</strong>{" "}
+        {item.recommendedAction ?? "Review this lock."}
+      </div>
+    </div>
+  );
+}
+
+function HealthTableRow({ lock }: { lock: HealthLockRow }) {
+  return (
+    <tr>
       <td style={tdStyle}>
         <div style={{ fontWeight: 600, color: "#111827" }}>{lock.name}</div>
       </td>
 
       <td style={tdStyle}>{lock.property?.name ?? "—"}</td>
 
-      <td style={tdStyle}>
-        {lock.battery == null ? "—" : `${lock.battery}%`}
-      </td>
+      <td style={tdStyle}>{formatBattery(lock.battery)}</td>
+
+      <td style={tdStyle}>{formatGateway(lock.gatewayConnected)}</td>
+
+      <td style={tdStyle}>{formatDateTime(lock.nextCheckInAt)}</td>
 
       <td style={tdStyle}>
-        {lock.isOnline == null
-          ? "—"
-          : lock.isOnline
-          ? "ONLINE"
-          : "OFFLINE"}
-      </td>
-
-      <td style={tdStyle}>
-        {lock.gatewayConnected == null
-          ? "—"
-          : lock.gatewayConnected
-          ? "CONNECTED"
-          : "DISCONNECTED"}
-      </td>
-
-      <td style={tdStyle}>{formatLastSeen(lock.lastSeenAt)}</td>
-
-      <td style={tdStyle}>
-        <span style={healthBadgeStyle(lock.healthStatus)}>
-          {lock.healthStatus}
+        <span style={riskBadgeStyle(lock.operationalRisk)}>
+          {lock.operationalRisk}
         </span>
+      </td>
+
+      <td style={tdStyle}>
+        {lock.recommendedAction ?? lock.operationalMessage ?? "—"}
       </td>
     </tr>
   );
 }
 
 export function HealthCenterPage() {
-  const navigate = useNavigate();
-
   const [summary, setSummary] = useState<HealthSummary | null>(null);
   const [locks, setLocks] = useState<HealthLockRow[]>([]);
+  const [controlTower, setControlTower] = useState<ControlTowerRow[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -214,13 +300,37 @@ export function HealthCenterPage() {
       setLoading(true);
       setError(null);
 
-      const [summaryResp, locksResp] = await Promise.all([
-        fetchHealthSummary(),
-        fetchHealthLocks(),
+      const [summaryResp, locksResp, towerResp] = await Promise.all([
+        fetch(`${API_BASE}/api/dashboard/health/summary`, {
+          credentials: "include",
+        }),
+        fetch(`${API_BASE}/api/dashboard/health/locks`, {
+          credentials: "include",
+        }),
+        fetch(`${API_BASE}/api/dashboard/health/control-tower`, {
+          credentials: "include",
+        }),
       ]);
 
-      setSummary(summaryResp.summary);
-      setLocks(locksResp.items ?? []);
+      if (!summaryResp.ok) {
+        throw new Error("Failed to load health summary");
+      }
+
+      if (!locksResp.ok) {
+        throw new Error("Failed to load health locks");
+      }
+
+      if (!towerResp.ok) {
+        throw new Error("Failed to load health control tower");
+      }
+
+      const summaryData = await summaryResp.json();
+      const locksData = await locksResp.json();
+      const towerData = await towerResp.json();
+
+      setSummary(summaryData.summary ?? null);
+      setLocks(locksData.items ?? []);
+      setControlTower(towerData.items ?? []);
     } catch (err: any) {
       console.error("Health Center load failed", err);
       setError(String(err?.message ?? err ?? "Failed to load Health Center."));
@@ -242,8 +352,7 @@ export function HealthCenterPage() {
           Health Center
         </h1>
         <p style={{ color: "#666", margin: 0 }}>
-          Monitor device health, connectivity and active operational status
-          across active locks.
+          Show only locks that require attention before operations are affected.
         </p>
       </div>
 
@@ -257,114 +366,117 @@ export function HealthCenterPage() {
         <Stat
           label="Healthy"
           value={summary?.healthy ?? 0}
-          helper="Active locks currently counted as healthy"
+          helper="Locks operating normally"
         />
         <Stat
-          label="Warnings"
+          label="Warning"
           value={summary?.warning ?? 0}
-          helper="Locks needing review soon"
+          helper="Preventive attention required"
+        />
+        <Stat
+          label="At Risk"
+          value={summary?.atRisk ?? 0}
+          helper="Operational issue may impact upcoming stays"
         />
         <Stat
           label="Critical"
           value={summary?.critical ?? 0}
-          helper="Locks requiring immediate attention"
+          helper="Immediate action required"
         />
         <Stat
-          label="Open Alerts"
-          value={summary?.openAlerts ?? 0}
-          helper="Current alert load across active locks"
+          label="Unknown"
+          value={summary?.unknown ?? 0}
+          helper="Missing or stale telemetry"
         />
       </div>
 
-      <SectionCard
-        title="Active Locks Health"
-        right={
-          <button
-            type="button"
-            onClick={() => void load()}
-            disabled={loading}
-            style={buttonStyle(loading)}
-          >
-            {loading ? "Refreshing..." : "Refresh"}
-          </button>
-        }
-      >
-        <div style={{ display: "grid", gap: 12 }}>
-          {error ? (
-            <div
-              style={{
-                borderRadius: 10,
-                padding: 12,
-                background: "#fef2f2",
-                border: "1px solid #fecaca",
-                color: "#991b1b",
-                fontSize: 14,
-              }}
-            >
-              {error}
-            </div>
-          ) : null}
+      {error ? (
+        <div
+          style={{
+            borderRadius: 12,
+            padding: 14,
+            background: "#fef2f2",
+            border: "1px solid #fecaca",
+            color: "#991b1b",
+            fontSize: 14,
+          }}
+        >
+          {error}
+        </div>
+      ) : null}
 
-          <div
+      <SectionCard title="Control Tower">
+        {loading ? (
+          <div style={emptyBlockStyle}>Loading control tower...</div>
+        ) : controlTower.length === 0 ? (
+          <div style={emptyBlockStyle}>
+            No locks require immediate operational attention.
+          </div>
+        ) : (
+          <div style={{ display: "grid", gap: 12 }}>
+            {controlTower.map((item) => (
+              <TowerRow key={item.id} item={item} />
+            ))}
+          </div>
+        )}
+      </SectionCard>
+
+      <SectionCard title="Locks Requiring Attention">
+        <div
+          style={{
+            overflowX: "auto",
+            border: "1px solid #f3f4f6",
+            borderRadius: 14,
+            background: "#fff",
+          }}
+        >
+          <table
             style={{
-              overflowX: "auto",
-              border: "1px solid #f3f4f6",
-              borderRadius: 14,
-              background: "#fff",
+              width: "100%",
+              borderCollapse: "collapse",
+              minWidth: 980,
             }}
           >
-            <table
-              style={{
-                width: "100%",
-                borderCollapse: "collapse",
-                minWidth: 980,
-              }}
-            >
-              <thead>
-                <tr style={{ background: "#f9fafb", textAlign: "left" }}>
-                  <th style={thStyle}>Lock</th>
-                  <th style={thStyle}>Property</th>
-                  <th style={thStyle}>Battery</th>
-                  <th style={thStyle}>Online</th>
-                  <th style={thStyle}>Gateway</th>
-                  <th style={thStyle}>Last Seen</th>
-                  <th style={thStyle}>Health</th>
-                </tr>
-              </thead>
+            <thead>
+              <tr style={{ background: "#f9fafb", textAlign: "left" }}>
+                <th style={thStyle}>Lock</th>
+                <th style={thStyle}>Property</th>
+                <th style={thStyle}>Battery</th>
+                <th style={thStyle}>Gateway</th>
+                <th style={thStyle}>Next Check-in</th>
+                <th style={thStyle}>Risk</th>
+                <th style={thStyle}>Recommended Action</th>
+              </tr>
+            </thead>
 
-              <tbody>
-                {loading ? (
-                  <tr>
-                    <td style={emptyTdStyle} colSpan={7}>
-                      Loading health data...
-                    </td>
-                  </tr>
-                ) : locks.length === 0 ? (
-                  <tr>
-                    <td style={emptyTdStyle} colSpan={7}>
-                      No active locks found.
-                    </td>
-                  </tr>
-                ) : (
-                  locks.map((lock) => (
-                    <ClickableRow
-                      key={lock.id}
-                      lock={lock}
-                      onClick={() => navigate(`/locks/${lock.id}`)}
-                    />
-                  ))
-                )}
-              </tbody>
-            </table>
-          </div>
+            <tbody>
+              {loading ? (
+                <tr>
+                  <td style={emptyTdStyle} colSpan={7}>
+                    Loading locks requiring attention...
+                  </td>
+                </tr>
+              ) : locks.length === 0 ? (
+                <tr>
+                  <td style={emptyTdStyle} colSpan={7}>
+                    No locks currently require attention.
+                  </td>
+                </tr>
+              ) : (
+                locks.map((lock) => (
+                  <HealthTableRow key={lock.id} lock={lock} />
+                ))
+              )}
+            </tbody>
+          </table>
         </div>
       </SectionCard>
 
       <SectionCard title="Operational Notes">
         <p style={{ color: "#6b7280", margin: 0 }}>
-          This first version of Health Center is showing active locks only.
-          Next step: connect live device health, battery freshness, gateway
-          status and dashboard alerts for a fully operational monitoring view.
+          Health Center is an operational work queue. Healthy locks are counted
+          in summary only and are intentionally excluded from the control tower
+          and main table.
         </p>
       </SectionCard>
     </div>
@@ -392,4 +504,18 @@ const emptyTdStyle: React.CSSProperties = {
   textAlign: "center",
   color: "#6b7280",
   fontSize: 14,
+};
+
+const emptyBlockStyle: React.CSSProperties = {
+  borderRadius: 12,
+  padding: 16,
+  background: "#f9fafb",
+  border: "1px solid #f3f4f6",
+  color: "#6b7280",
+  fontSize: 14,
+};
+
+const towerMetaStyle: React.CSSProperties = {
+  fontSize: 13,
+  color: "#374151",
 };

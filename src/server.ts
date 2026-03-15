@@ -62,7 +62,6 @@ import { buildOrgTtlockConnectV2Router } from "./routes/org.ttlock.connect.v2.ro
 import { buildBillingOverviewRouter } from "./routes/billing.overview.route";
 import { orgTtlockStatusRouter } from "./routes/org.ttlock.status.route";
 import { getDeviceHealthAccessToken } from "./ttlock/ttlock.deviceHealth.auth";
-import { runDeviceHealthWorker } from "./workers/deviceHealth.worker";
 
 const app = express();
 const prisma = new PrismaClient();
@@ -286,14 +285,8 @@ export default app;
 // =====================
 // Start server
 // =====================
-app.listen(PORT, () => {
-  
- runDeviceHealthWorker().catch(console.error);
 
-setInterval(() => {
-  runDeviceHealthWorker().catch(console.error);
-}, 24 * 60 * 60 * 1000);
- 
+app.listen(PORT, () => {
   console.log("✅ property settings routes loaded");
 
   console.log("[server] ENV", {

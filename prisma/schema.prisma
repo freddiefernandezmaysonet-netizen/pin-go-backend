@@ -267,36 +267,45 @@ model LockGroupLock {
 }
 
 model DeviceHealth {
-  id               String             @id @default(cuid())
-  organizationId   String
-  propertyId       String?
-  lockId           String             @unique
+  id                 String               @id @default(cuid())
+  organizationId     String
+  propertyId         String?
+  lockId             String               @unique
 
-  battery          Int?
-  gatewayConnected Boolean?
-  isOnline         Boolean?
+  battery            Int?
+  gatewayConnected   Boolean?
+  isOnline           Boolean?
 
-  lastSyncAt       DateTime?
-  lastEventAt      DateTime?
-  lastSeenAt       DateTime?
+  lastSyncAt         DateTime?
+  lastEventAt        DateTime?
+  lastSeenAt         DateTime?
 
-  healthStatus     DeviceHealthStatus @default(UNKNOWN)
-  healthMessage    String?
+  healthStatus       DeviceHealthStatus   @default(UNKNOWN)
+  healthMessage      String?
 
-  source           String?
-  rawPayload       Json?
+  operationalRisk    OperationalRiskLevel @default(UNKNOWN)
+  operationalMessage String?
+  recommendedAction  String?
+  nextCheckInAt      DateTime?
+  hasActiveAccess    Boolean?
+  riskCalculatedAt   DateTime?
 
-  createdAt        DateTime           @default(now())
-  updatedAt        DateTime           @updatedAt
+  source             String?
+  rawPayload         Json?
 
-  organization     Organization       @relation(fields: [organizationId], references: [id], onDelete: Cascade)
-  property         Property?          @relation(fields: [propertyId], references: [id], onDelete: SetNull)
-  lock             Lock               @relation(fields: [lockId], references: [id], onDelete: Cascade)
+  createdAt          DateTime             @default(now())
+  updatedAt          DateTime             @updatedAt
+
+  organization       Organization         @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  property           Property?            @relation(fields: [propertyId], references: [id], onDelete: SetNull)
+  lock               Lock                 @relation(fields: [lockId], references: [id], onDelete: Cascade)
 
   @@index([organizationId])
   @@index([propertyId])
   @@index([healthStatus])
+  @@index([operationalRisk])
   @@index([lastSeenAt])
+  @@index([nextCheckInAt])
 }
 
 model ManagerAssignment {
@@ -592,6 +601,14 @@ enum DeviceHealthStatus {
   WARNING
   OFFLINE
   LOW_BATTERY
+  UNKNOWN
+}
+
+enum OperationalRiskLevel {
+  HEALTHY
+  WARNING
+  AT_RISK
+  CRITICAL
   UNKNOWN
 }
 

@@ -62,6 +62,9 @@ type UpsertDeviceHealthInput = {
   lastSeenAt?: Date | null;
   source?: string | null;
   rawPayload?: unknown;
+
+  healthOverrideStatus?: DeviceHealthStatus;
+  healthOverrideMessage?: string;
 };
 
 export async function upsertDeviceHealth(
@@ -112,12 +115,18 @@ export async function upsertDeviceHealth(
     existing?.lastSeenAt ??
     null;
 
-  const health = computeDeviceHealth({
+  const computedHealth = computeDeviceHealth({
     battery,
     gatewayConnected,
     isOnline,
     lastSeenAt,
   });
+
+  const healthStatus =
+    input.healthOverrideStatus ?? computedHealth.healthStatus;
+
+  const healthMessage =
+    input.healthOverrideMessage ?? computedHealth.healthMessage;
 
   return prisma.deviceHealth.upsert({
     where: { lockId: input.lockId },
@@ -138,8 +147,8 @@ export async function upsertDeviceHealth(
       source: input.source ?? null,
       rawPayload: input.rawPayload as any,
 
-      healthStatus: health.healthStatus,
-      healthMessage: health.healthMessage,
+      healthStatus,
+      healthMessage,
     },
 
     update: {
@@ -154,8 +163,8 @@ export async function upsertDeviceHealth(
       source: input.source ?? existing?.source ?? undefined,
       rawPayload: input.rawPayload as any,
 
-      healthStatus: health.healthStatus,
-      healthMessage: health.healthMessage,
+      healthStatus,
+      healthMessage,
     },
   });
 }

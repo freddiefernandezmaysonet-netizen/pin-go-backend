@@ -8,6 +8,7 @@
     "worker": "tsx src/workers/worker.ts",
     "worker:reservation": "tsx src/workers/reservation.worker.ts",
     "worker:accesscode-cleanup": "tsx src/workers/accesscode.cleanup.worker.ts",
+    "worker:device-health": "tsx src/workers/runDeviceHealth.worker.ts",
     "prisma:migrate": "prisma migrate dev",
     "prisma:studio": "prisma studio",
     "seed": "tsx prisma/seed/seed.ts"
