@@ -1,15 +1,15 @@
 import { useState } from "react";
-import { Link, useNavigate } from "react-router-dom";
-import { login } from "../api/auth";
+import { useNavigate, Link } from "react-router-dom";
+import { registerOrganization } from "../api/auth";
 import { fetchProperties } from "../api/properties";
 import { useAuth } from "../auth/AuthProvider";
 
-const SHOW_DEV_SIGNUP = import.meta.env.DEV;
-
-export default function LoginPage() {
+export default function SignupPage() {
   const navigate = useNavigate();
   const { refresh } = useAuth();
 
+  const [organizationName, setOrganizationName] = useState("");
+  const [name, setName] = useState("");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [error, setError] = useState("");
@@ -21,7 +21,14 @@ export default function LoginPage() {
     setSubmitting(true);
 
     try {
-      await login(email, password);
+      await registerOrganization({
+        organizationName,
+        name,
+        email,
+        password,
+        role: "ADMIN",
+      });
+
       await refresh();
 
       const propsData = await fetchProperties();
@@ -32,9 +39,9 @@ export default function LoginPage() {
       }
 
       navigate("/overview");
-    } catch (e) {
-      console.error("login failed", e);
-      setError("Invalid email or password");
+    } catch (e: any) {
+      console.error("signup failed", e);
+      setError(e?.message ?? "Could not create organization");
     } finally {
       setSubmitting(false);
     }
@@ -80,8 +87,7 @@ export default function LoginPage() {
               lineHeight: 1.5,
             }}
           >
-            Smart access dashboard for properties, locks, reservations, and guest
-            access.
+            Create a development organization and admin account.
           </div>
         </div>
 
@@ -96,11 +102,71 @@ export default function LoginPage() {
                 marginBottom: 6,
               }}
             >
+              Organization name
+            </label>
+            <input
+              type="text"
+              placeholder="PinGo Demo Org"
+              value={organizationName}
+              onChange={(e) => setOrganizationName(e.target.value)}
+              style={{
+                width: "100%",
+                height: 44,
+                borderRadius: 12,
+                border: "1px solid #d1d5db",
+                padding: "0 14px",
+                fontSize: 14,
+                outline: "none",
+                boxSizing: "border-box",
+              }}
+            />
+          </div>
+
+          <div>
+            <label
+              style={{
+                display: "block",
+                fontSize: 13,
+                fontWeight: 600,
+                color: "#374151",
+                marginBottom: 6,
+              }}
+            >
+              Full name
+            </label>
+            <input
+              type="text"
+              placeholder="Freddie"
+              value={name}
+              onChange={(e) => setName(e.target.value)}
+              style={{
+                width: "100%",
+                height: 44,
+                borderRadius: 12,
+                border: "1px solid #d1d5db",
+                padding: "0 14px",
+                fontSize: 14,
+                outline: "none",
+                boxSizing: "border-box",
+              }}
+            />
+          </div>
+
+          <div>
+            <label
+              style={{
+                display: "block",
+                fontSize: 13,
+                fontWeight: 600,
+                color: "#374151",
+                marginBottom: 6,
+              }}
+            >
               Email
             </label>
             <input
               type="email"
-              placeholder="admin@pingo.com"
+              placeholder="owner@pingo.dev"
               value={email}
               onChange={(e) => setEmail(e.target.value)}
               autoComplete="email"
@@ -131,10 +197,10 @@ export default function LoginPage() {
             </label>
             <input
               type="password"
-              placeholder="Enter your password"
+              placeholder="Create a password"
               value={password}
               onChange={(e) => setPassword(e.target.value)}
-              autoComplete="current-password"
+              autoComplete="new-password"
               style={{
                 width: "100%",
                 height: 44,
@@ -178,32 +244,30 @@ export default function LoginPage() {
               marginTop: 4,
             }}
           >
-            {submitting ? "Signing in..." : "Sign in"}
+            {submitting ? "Creating..." : "Create organization"}
           </button>
         </form>
 
-        {SHOW_DEV_SIGNUP ? (
-          <div
+        <div
+          style={{
+            marginTop: 18,
+            fontSize: 13,
+            color: "#6b7280",
+            textAlign: "center",
+          }}
+        >
+          Already have an account?{" "}
+          <Link
+            to="/login"
             style={{
-              marginTop: 18,
-              fontSize: 13,
-              color: "#6b7280",
-              textAlign: "center",
+              color: "#2563eb",
+              fontWeight: 600,
+              textDecoration: "none",
             }}
           >
-            Don&apos;t have an organization yet?{" "}
-            <Link
-              to="/signup"
-              style={{
-                color: "#2563eb",
-                fontWeight: 600,
-                textDecoration: "none",
-              }}
-            >
-              Create one
-            </Link>
-          </div>
-        ) : null}
+            Sign in
+          </Link>
+        </div>
       </div>
     </div>
   );

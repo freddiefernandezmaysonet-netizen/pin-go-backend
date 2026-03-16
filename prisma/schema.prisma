@@ -13,6 +13,7 @@ model Organization {
   createdAt      DateTime        @default(now())
   updatedAt      DateTime        @updatedAt
   dashboardUsers DashboardUser[]
+  deviceHealths  DeviceHealth[]
   lockGroups     LockGroup[]
   people         Person[]
   pmsConnections PmsConnection[]
@@ -20,7 +21,6 @@ model Organization {
   staffMembers   StaffMember[]
   subscriptions  Subscription?
   ttlockAuth     TTLockAuth?
-  deviceHealths  DeviceHealth[]
 }
 
 model DashboardUser {
@@ -41,7 +41,7 @@ model DashboardUser {
 }
 
 model Property {
-  id                         String        @id @default(cuid())
+  id                         String         @id @default(cuid())
   organizationId             String
   name                       String
   address1                   String?
@@ -49,17 +49,17 @@ model Property {
   region                     String?
   country                    String?
   timezone                   String?
-  createdAt                  DateTime      @default(now())
-  updatedAt                  DateTime      @updatedAt
-  cleaningDurationMinutes    Int           @default(180)
-  cleaningStartOffsetMinutes Int           @default(30)
-  status                     String        @default("ACTIVE")
-  locks                      Lock[]
-  organization               Organization  @relation(fields: [organizationId], references: [id])
-  reservations               Reservation[]
+  createdAt                  DateTime       @default(now())
+  updatedAt                  DateTime       @updatedAt
+  cleaningDurationMinutes    Int            @default(180)
+  cleaningStartOffsetMinutes Int            @default(30)
+  status                     String         @default("ACTIVE")
   deviceHealths              DeviceHealth[]
- 
- @@index([organizationId])
+  locks                      Lock[]
+  organization               Organization   @relation(fields: [organizationId], references: [id])
+  reservations               Reservation[]
+
+  @@index([organizationId])
   @@index([organizationId, status])
 }
 
@@ -73,11 +73,11 @@ model Lock {
   propertyId     String
   ttlockLockName String?
   sGrants        AccessGrant[]
+  deviceHealth   DeviceHealth?
   property       Property        @relation(fields: [propertyId], references: [id])
   groups         LockGroupLock[]
-  deviceHealth   DeviceHealth?
- 
- @@index([propertyId, isActive])
+
+  @@index([propertyId, isActive])
 }
 
 model Person {
@@ -271,34 +271,27 @@ model DeviceHealth {
   organizationId     String
   propertyId         String?
   lockId             String               @unique
-
   battery            Int?
   gatewayConnected   Boolean?
   isOnline           Boolean?
-
   lastSyncAt         DateTime?
   lastEventAt        DateTime?
   lastSeenAt         DateTime?
-
   healthStatus       DeviceHealthStatus   @default(UNKNOWN)
   healthMessage      String?
-
-  operationalRisk    OperationalRiskLevel @default(UNKNOWN)
-  operationalMessage String?
-  recommendedAction  String?
-  nextCheckInAt      DateTime?
-  hasActiveAccess    Boolean?
-  riskCalculatedAt   DateTime?
-
   source             String?
   rawPayload         Json?
-
   createdAt          DateTime             @default(now())
   updatedAt          DateTime             @updatedAt
-
-  organization       Organization         @relation(fields: [organizationId], references: [id], onDelete: Cascade)
-  property           Property?            @relation(fields: [propertyId], references: [id], onDelete: SetNull)
+  hasActiveAccess    Boolean?
+  nextCheckInAt      DateTime?
+  operationalMessage String?
+  operationalRisk    OperationalRiskLevel @default(UNKNOWN)
+  recommendedAction  String?
+  riskCalculatedAt   DateTime?
   lock               Lock                 @relation(fields: [lockId], references: [id], onDelete: Cascade)
+  organization       Organization         @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  property           Property?            @relation(fields: [propertyId], references: [id])
 
   @@index([organizationId])
   @@index([propertyId])

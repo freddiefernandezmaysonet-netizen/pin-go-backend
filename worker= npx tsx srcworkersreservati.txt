@@ -3,12 +3,29 @@ Prisma= npx prisma studio
 Server= npm run dev
 npx tsx src/workers/run.nfc-watchdog.ts
 npx tsx src/workers/run.pms-watchdog.ts
+worker bateria y gateway=  npm run worker:device-health
 Limpiar tarjetas nfc= npx tsx src/scripts/nfc.reset.dev.ts
+Crear Organizacion= http://localhost:5173/signup
 
 git add .
 git commit -m "checkpoint"
 
 
+crar usuario nuevo
+
+$body = @{
+  email = "user@collores.com"
+  password = "123456"
+  name = "Feddie Fernandez"
+  role = "MEMBER"
+  organizationId = "cmmla00ci0000n0qco3bejnla"
+} | ConvertTo-Json
+
+Invoke-RestMethod `
+  -Method POST `
+  -Uri "http://localhost:3000/api/admin/users" `
+  -ContentType "application/json" `
+  -Body $body
 
   -Body $body
 $BASE="http://localhost:3000"
@@ -121,7 +138,7 @@ Invoke-RestMethod -Method POST -Uri "http://localhost:3000/access/nfc/assign" -C
 
 $body = @{
   reservationId = "cmlke0mlo0000n07ge9g9z6x3"
-  ttlockLockId  = 25439884
+  ttlockLockId  = 29994614
   guestCount    = 2
   cleaningCount = 0
 } | ConvertTo-Json
@@ -131,7 +148,7 @@ Invoke-RestMethod -Method POST -Uri "http://localhost:3000/access/nfc/assign" -C
 
 
 $body = @{
-  lockId = 25439884
+  lockId = 29994614
   pageNo = 1
   pageSize = 50
 } | ConvertTo-Json
@@ -434,7 +451,7 @@ Invoke-RestMethod -Method POST `
 
 Buscar tarjetas por cerraduras
 
-Invoke-RestMethod "http://127.0.0.1:3000/debug/ttlock/cards?lockId=25439884" | ConvertTo-Json -Depth 50
+Invoke-RestMethod "http://127.0.0.1:3000/debug/ttlock/cards?lockId=29944630" | ConvertTo-Json -Depth 50
 
 
 log("NFC changePeriod payload", {
@@ -659,6 +676,180 @@ function getOrganizationId(): string {
   return organizationId;
 }
 
+import { Router } from "express";
+import { PrismaClient } from "@prisma/client";
+import { refreshNfcPoolFromTTLock } from "../services/nfc.service";
+import { dedupeNfcCards } from "../services/nfc.service"; // ajusta path
+
+const prisma = new PrismaClient();
+const router = Router();
+
+/**
+ * POST /access/nfc/sync
+ * Body:
+ * {
+ *   propertyId: string,
+ *   ttlockLockId: number
+ * }
+ */
+router.post("/sync", async (req, res) => {
+  try {
+    const { propertyId, ttlockLockId } = req.body ?? {};
+
+    if (!propertyId || !ttlockLockId) {
+      return res.status(400).json({
+        ok: false,
+        error: "Missing propertyId or ttlockLockId",
+      });
+    }
+
+    const result = await refreshNfcPoolFromTTLock(prisma, {
+      propertyId: String(propertyId),
+      ttlockLockId: Number(ttlockLockId),
+      minTotals: {
+        guest: 0,
+        cleaning: 0,
+      },
+    });
+
+    return res.json({
+      ok: true,
+      message: "NFC pool synchronized from TTLock",
+      result,
+    });
+  } catch (e: any) {
+    console.error("NFC sync failed:", e);
+    return res.status(500).json({
+      ok: false,
+      error: e?.message ?? "sync failed",
+    });
+  }
+});
+
+export default function buildNfcSyncRouter(prisma: PrismaClient) {
+  const router = Router();
+
+  router.post("/dedupe", async (req, res) => {
+    try {
+      const { propertyId } = req.body ?? {};
+      if (!propertyId) return res.status(400).json({ ok: false, error: "Missing propertyId" });
+
+      const out = await dedupeNfcCards(prisma, String(propertyId));
+      return res.json(out);
+    } catch (e: any) {
+      return res.status(500).json({ ok: false, error: e?.message ?? String(e) });
+    }
+  });
+
+  return router;
+}
+
+
+$session = New-Object Microsoft.PowerShell.Commands.WebRequestSession
+
+$body = @{
+  propertyId   = "cmmmmqv360001n0nwrrtqk0n7"
+  ttlockLockId = 29944630
+} | ConvertTo-Json
+
+Invoke-RestMethod `
+  -Method POST `
+  -Uri "http://localhost:3000/access/nfc/sync" `
+  -ContentType "application/json" `
+  -WebSession $session `
+  -Body $body
+
+http://localhost:3000/access/nfc/cards?propertyId=cmmmmqv360001n0nwrrtqk0n7
+
+cmmnptxbi0000n0iodfanus9g
+
+
+$body = @{
+  organizationId = "cmmsdvno20000n0d4e10atluh"
+  locks = 2
+  email = "test@example.com"
+  fullName = "Freddie"
+} | ConvertTo-Json
+
+Invoke-RestMethod `
+  -Method POST `
+  -Uri "http://localhost:3000/billing/locks/checkout-session" `
+  -ContentType "application/json" `
+  -Body $body
+
+
+Invoke-RestMethod `
+-Method GET `
+-Uri "http://localhost:3000/billing/overview" `
+-Headers @{
+  
+
+cmmnq74bt0001n07kclub35qp
+cmmmmqv360001n0nwrrtqk0n7
+
+
+$body = @{
+  source = "manual-test"
+  propertyId = "cmmmmqv360001n0nwrrtqk0n7"
+  guestName = "Test Guest1"
+  guestEmail = "test1@example.com"
+  roomName = "Unit 1"
+  checkIn = "2026-04-20T15:00:00.000Z"
+  checkOut = "2026-04-22T11:00:00.000Z"
+  paymentState = "PAID"
+  externalProvider = "guesty"
+  externalId = "GUESTY-ABC124"
+  externalUpdatedAt = "2026-03-11T12:40:00.000Z"
+} | ConvertTo-Json -Depth 10
+
+Invoke-RestMethod `
+  -Method POST `
+  -Uri "http://localhost:3000/api/ingest/reservations" `
+  -ContentType "application/json" `
+  -Body $body
+
+
+$body = @{
+  connectionId = "cmmmmqv360001n0nwrrtqk0n7"
+  externalReservationId = "GUESTY-DEV-001"
+  externalListingId = "LISTING-001"
+  guestName = "Test PMS Guest"
+  guestEmail = "guest@test.com"
+  checkIn = "2026-03-20T15:00:00.000Z"
+  checkOut = "2026-03-22T11:00:00.000Z"
+} | ConvertTo-Json
+
+Invoke-RestMethod `
+  -Method POST `
+  -Uri "http://localhost:3000/dev/pms/event" `
+  -ContentType "application/json" `
+  -Body $body
+
+Invoke-RestMethod `
+  -Method POST `
+  -Uri "http://localhost:3000/api/dev/locks/cmmozlutk000hn03krq7v0yk8/device-health/refresh"
+
+
+
+Invoke-RestMethod `
+  -Method GET `
+  -Uri "http://localhost:3000/api/dev/locks/cmmozlutk000hn03krq7v0yk8/device-health"
+
+
+
+Invoke-RestMethod `
+  -Method POST `
+  -Uri "http://localhost:3000/api/dev/locks/cmmozlutk000hn03krq7v0yk8/gateway/refresh"
+
+
+Invoke-RestMethod `
+  -Method GET `
+  -Uri "http://localhost:3000/api/dev/device-health/locks/cmmozlutk000hn03krq7v0yk8"
+
+
+Invoke-RestMethod `
+  -Method POST `
+  -Uri "http://localhost:3000/api/dev/locks/cmmozlutk000hn03krq7v0yk8/gateway/refresh"
 
 
 

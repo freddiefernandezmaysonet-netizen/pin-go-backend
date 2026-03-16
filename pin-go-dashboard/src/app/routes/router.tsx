@@ -12,6 +12,7 @@ import { LockDetailPage } from "../../pages/lock-detail/LockDetailPage";
 import { PmsConnectionsPage } from "../../pages/integrations/PmsConnectionsPage";
 import ListingsMappingPage from "../../pages/pms/ListingsMappingPage";
 import LoginPage from "../../pages/LoginPage";
+import SignupPage from "../../pages/SignupPage";
 
 import { RequireAuth } from "../../auth/RequireAuth";
 import CreatePropertyPage from "../../pages/onboarding/CreatePropertyPage";
@@ -26,6 +27,10 @@ export const router = createBrowserRouter([
   {
     path: "/login",
     element: <LoginPage />,
+  },
+  {
+    path: "/signup",
+    element: <SignupPage />,
   },
   {
     element: (
@@ -50,7 +55,7 @@ export const router = createBrowserRouter([
       { path: "/reservations/:id", element: <ReservationDetailPage /> },
 
       { path: "/access", element: <AccessPage /> },
-      
+
       { path: "/health", element: <HealthCenterPage /> },
 
       { path: "/billing", element: <BillingPage /> },

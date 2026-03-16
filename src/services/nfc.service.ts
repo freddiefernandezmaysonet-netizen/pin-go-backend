@@ -16,11 +16,12 @@ type AssignParams = {
   reservationId: string;
   ttlockLockId: number;
   propertyId: string;
-  role: Prisma.NfcAssignmentRole; // "GUEST" | "CLEANING"
+  role: Prisma.NfcAssignmentRole;
   startsAt: Date;
   endsAt: Date;
-  count: number; // cantidad de tarjetas a asignar
-  skipTtlock?: boolean; // ✅ si true, NO llama a TTLock changePeriod (solo DB)
+  count: number;
+  skipTtlock?: boolean;
+  accessToken?: string;
 };
 
 function isRetryableTtlockError(e: any) {
@@ -46,11 +47,12 @@ function isCardMissingError(e: any) {
   );
 }
 
-
-/**
- * Asigna N tarjetas del pool (AVAILABLE) a una reserva y activa vigencia en TTLock (changePeriod).
- * - Reusable: NO enroll aquí, solo changePeriod.
- */
+function requireAccessToken(accessToken?: string) {
+  if (!accessToken) {
+    throw new Error("Missing TTLock accessToken for org-scoped NFC operation");
+  }
+  return accessToken;
+}
 
 // Clasifica por nombre en TTLock
 function classifyCardName(name?: string): "GUEST" | "CLEANING" | "UNKNOWN" {
@@ -63,24 +65,32 @@ function classifyCardName(name?: string): "GUEST" | "CLEANING" | "UNKNOWN" {
   return "UNKNOWN";
 }
 
-export async function refreshNfcPoolFromTTLock(prisma: PrismaClient, params: {
-  propertyId: string;
-  ttlockLockId: number;
-  minTotals?: { guest: number; cleaning: number };
-}) {
+export async function refreshNfcPoolFromTTLock(
+  prisma: PrismaClient,
+  params: {
+    propertyId: string;
+    ttlockLockId: number;
+    accessToken: string;
+    minTotals?: { guest: number; cleaning: number };
+  }
+) {
   const minTotals = params.minTotals ?? { guest: 4, cleaning: 2 };
+
+  const accessToken = requireAccessToken(params.accessToken);
 
   // 1) Leer lista actual desde TTLock
   const resp = await ttlockListCards({
+    accessToken,
     lockId: Number(params.ttlockLockId),
     pageNo: 1,
     pageSize: 100,
   });
 
-  const list: any[] =
-  Array.isArray(resp?.list) ? resp.list :
-  Array.isArray(resp?.cardList) ? resp.cardList :
-  [];
+  const list: any[] = Array.isArray(resp?.list)
+    ? resp.list
+    : Array.isArray(resp?.cardList)
+      ? resp.cardList
+      : [];
 
   // 2) Validar mínimos en TTLock (por nombres)
   let guestTotal = 0;
@@ -91,6 +101,7 @@ export async function refreshNfcPoolFromTTLock(prisma: PrismaClient, params: {
   for (const item of list) {
     const cardId = Number(item?.cardId);
     if (!cardId) continue;
+
     ttlockCardIds.push(cardId);
 
     const kind = classifyCardName(item?.cardName);
@@ -101,14 +112,13 @@ export async function refreshNfcPoolFromTTLock(prisma: PrismaClient, params: {
   if (guestTotal < minTotals.guest || cleaningTotal < minTotals.cleaning) {
     throw new Error(
       `TTLock pool below minimum. Guest=${guestTotal}/${minTotals.guest}, Cleaning=${cleaningTotal}/${minTotals.cleaning}. ` +
-      `Please enroll/rename cards in TTLock (e.g. Guest-1..Guest-4, Cleaning Service-1..2) and ensure gateway sync.`
+        `Please enroll/rename cards in TTLock (e.g. Guest-1..Guest-4, Cleaning Service-1..2) and ensure gateway sync.`
     );
   }
 
-  // 3) Upsert en Prisma (agrega nuevas / actualiza label)
-  // Prisma compound unique generado normalmente: propertyId_ttlockCardId
-  // Si tu nombre difiere, te digo cómo ajustarlo.
+  // 3) Upsert en Prisma
   const upserted: number[] = [];
+
   for (const item of list) {
     const cardId = Number(item?.cardId);
     if (!cardId) continue;
@@ -131,40 +141,39 @@ export async function refreshNfcPoolFromTTLock(prisma: PrismaClient, params: {
         },
         update: {
           label,
-          // No cambiamos status aquí porque puede estar ASSIGNED por una reserva activa
         },
       });
 
       upserted.push(cardId);
     } catch (e: any) {
-      // si tu compound unique no se llama propertyId_ttlockCardId, verás error aquí.
-      // En ese caso ajustamos el "where" al nombre correcto.
-      throw new Error(`NfcCard upsert failed for cardId=${cardId}: ${String(e?.message ?? e)}`);
+      throw new Error(
+        `NfcCard upsert failed for cardId=${cardId}: ${String(e?.message ?? e)}`
+      );
     }
   }
 
-  // 4) Retirar tarjetas en Prisma que ya no existan en TTLock (evita fallos por “borradas”)
+  // 4) Retirar tarjetas en Prisma que ya no existan en TTLock
   if (ttlockCardIds.length > 0) {
     const toRetire = await prisma.nfcCard.findMany({
-  where: {
-    propertyId: String(params.propertyId),
-    ttlockCardId: { notIn: ttlockCardIds },
-    status: NfcCardStatus.AVAILABLE, // ✅ SOLO AVAILABLE
-  },
-  select: { id: true, ttlockCardId: true },
-});
+      where: {
+        propertyId: String(params.propertyId),
+        ttlockCardId: { notIn: ttlockCardIds },
+        status: NfcCardStatus.AVAILABLE,
+      },
+      select: { id: true, ttlockCardId: true },
+    });
 
-for (const c of toRetire) {
-  await prisma.nfcCard.update({
-    where: { id: c.id },
-    data: {
-      status: NfcCardStatus.RETIRED,
-      label: `RETIRED (missing in TTLock) ${c.ttlockCardId}`,
-    },
-  });
-}
-    
-  return {
+    for (const c of toRetire) {
+      await prisma.nfcCard.update({
+        where: { id: c.id },
+        data: {
+          status: NfcCardStatus.RETIRED,
+          label: `RETIRED (missing in TTLock) ${c.ttlockCardId}`,
+        },
+      });
+    }
+
+    return {
       ttlockTotal: Number(resp?.total ?? list.length),
       guestTotal,
       cleaningTotal,
@@ -188,7 +197,10 @@ export async function countAvailableCardsByKind(
   params: { propertyId: string }
 ) {
   const cards = await prisma.nfcCard.findMany({
-    where: { propertyId: String(params.propertyId), status: NfcCardStatus.AVAILABLE },
+    where: {
+      propertyId: String(params.propertyId),
+      status: NfcCardStatus.AVAILABLE,
+    },
     select: { label: true },
   });
 
@@ -208,11 +220,18 @@ export async function assignNfcCards(
   prisma: PrismaClient,
   params: AssignParams
 ) {
-  const { reservationId, ttlockLockId, propertyId, role, startsAt, endsAt, count } = params;
+  const {
+    reservationId,
+    ttlockLockId,
+    propertyId,
+    role,
+    startsAt,
+    endsAt,
+    count,
+  } = params;
 
   if (count <= 0) return [];
 
-  // 1) Buscar tarjetas disponibles por rol
   const roleFilter =
     role === "CLEANING"
       ? { label: { startsWith: "Cleaning Service-", mode: "insensitive" as const } }
@@ -226,7 +245,6 @@ export async function assignNfcCards(
     },
     distinct: ["ttlockCardId"],
     orderBy: [{ ttlockCardId: "asc" }],
-    // OJO: aquí traemos un poquito más para poder "completar" si alguna se claim-ea por otro flujo
     take: Math.max(count * 3, count),
   });
 
@@ -239,17 +257,14 @@ export async function assignNfcCards(
   for (const c of cards) {
     if (assignments.length >= count) break;
 
-    // ✅ CLAIM atómico: solo si aún está AVAILABLE
     const claimed = await prisma.nfcCard.updateMany({
       where: { id: c.id, status: NfcCardStatus.AVAILABLE },
       data: { status: NfcCardStatus.ASSIGNED },
     });
 
-    // si alguien ya la tomó, sigue con la próxima
     if (claimed.count === 0) continue;
 
     try {
-      // ✅ Crea assignment SIEMPRE (aunque skipTtlock=true)
       const a = await prisma.nfcAssignment.create({
         data: {
           reservationId,
@@ -263,20 +278,20 @@ export async function assignNfcCards(
 
       assignments.push(a);
 
-       // ✅ Solo salta TTLock si el boolean es EXACTAMENTE true
-       if (params.skipTtlock === true) {
-         continue;
-       }
+      if (params.skipTtlock === true) {
+        continue;
+      }
 
-      // ✅ TTLock: programar vigencia (solo cuando skipTtlock=false)
+      const accessToken = requireAccessToken(params.accessToken);
+
       await ttlockChangeCardPeriod({
+        accessToken,
         lockId: Number(ttlockLockId),
         cardId: Number(c.ttlockCardId),
         startDate: startsAt.getTime(),
         endDate: endsAt.getTime(),
         changeType: 2,
       });
-
     } catch (e: any) {
       const errMsg = String(e?.message ?? e);
 
@@ -289,27 +304,25 @@ export async function assignNfcCards(
         skipTtlock: Boolean(params.skipTtlock),
       });
 
-      // ✅ Si falló algo en DB (o en TTLock) revertimos el claim para no “quemar” card
-      await prisma.nfcCard.update({
-        where: { id: c.id },
-        data: { status: NfcCardStatus.AVAILABLE },
-      }).catch(() => {});
+      await prisma.nfcCard
+        .update({
+          where: { id: c.id },
+          data: { status: NfcCardStatus.AVAILABLE },
+        })
+        .catch(() => {});
 
-      // Si ya habíamos creado assignment y quieres marcarlo FAILED, lo dejamos como está
-      // (no intentamos adivinar su id aquí). Si quieres, lo afinamos luego.
-
-      // En modo estricto: abortar para que el caller vea el error
       throw e;
     }
   }
 
   if (assignments.length < count) {
-    throw new Error(`Not enough NFC cards could be claimed. Needed=${count} got=${assignments.length}`);
+    throw new Error(
+      `Not enough NFC cards could be claimed. Needed=${count} got=${assignments.length}`
+    );
   }
 
   return assignments;
 }
-
 
 export async function dedupeNfcCards(prisma: PrismaClient, propertyId: string) {
   const cards = await prisma.nfcCard.findMany({
@@ -317,25 +330,11 @@ export async function dedupeNfcCards(prisma: PrismaClient, propertyId: string) {
     orderBy: { createdAt: "asc" },
   });
 
-// ✅ Seatbelt: evita duplicar la misma tarjeta TTLock (ttlockCardId)
-const uniqueCards = [];
-const seen = new Set<number>();
-
-for (const c of cards) {
-  if (seen.has(Number(c.ttlockCardId))) continue;
-  seen.add(Number(c.ttlockCardId));
-  uniqueCards.push(c);
-}
-
-if (uniqueCards.length < count) {
-  throw new Error(`Not enough UNIQUE NFC cards. Needed=${count} found=${uniqueCards.length}`);
-}
-
-  const keepByTt = new Map<number, string>(); // ttlockCardId -> keepId
+  const keepByTt = new Map<number, string>();
   let retired = 0;
 
   for (const c of cards) {
-    const tt = c.ttlockCardId;
+    const tt = Number(c.ttlockCardId);
     const keepId = keepByTt.get(tt);
 
     if (!keepId) {
@@ -343,13 +342,11 @@ if (uniqueCards.length < count) {
       continue;
     }
 
-    // mueve assignments del duplicado al keep
     await prisma.nfcAssignment.updateMany({
       where: { nfcCardId: c.id },
       data: { nfcCardId: keepId },
     });
 
-    // retira duplicado
     await prisma.nfcCard.update({
       where: { id: c.id },
       data: { status: NfcCardStatus.RETIRED },
@@ -358,18 +355,24 @@ if (uniqueCards.length < count) {
     retired++;
   }
 
-  return { ok: true, propertyId, total: cards.length, kept: keepByTt.size, retired };
+  return {
+    ok: true,
+    propertyId,
+    total: cards.length,
+    kept: keepByTt.size,
+    retired,
+  };
 }
 
 /**
  * Vence TODAS las tarjetas activas de una reserva y las libera (AVAILABLE).
- * Esto se llama típicamente en checkout.
  */
 export async function unassignAllNfcForReservation(
   prisma: PrismaClient,
-  params: { reservationId: string; ttlockLockId: number }
+  params: { reservationId: string; ttlockLockId: number; accessToken: string }
 ) {
   const { reservationId, ttlockLockId } = params;
+  const accessToken = requireAccessToken(params.accessToken);
 
   const active = await prisma.nfcAssignment.findMany({
     where: { reservationId, status: NfcAssignmentStatus.ACTIVE },
@@ -383,6 +386,7 @@ export async function unassignAllNfcForReservation(
       const now = Date.now();
 
       await ttlockChangeCardPeriod({
+        accessToken,
         lockId: Number(ttlockLockId),
         cardId: Number(a.NfcCard.ttlockCardId),
         startDate: now - 60_000,
@@ -417,9 +421,10 @@ export async function unassignAllNfcForReservation(
 
 export async function unassignGuestNfcForReservation(
   prisma: PrismaClient,
-  params: { reservationId: string; ttlockLockId: number }
+  params: { reservationId: string; ttlockLockId: number; accessToken: string }
 ) {
   const { reservationId, ttlockLockId } = params;
+  const accessToken = requireAccessToken(params.accessToken);
 
   const activeGuest = await prisma.nfcAssignment.findMany({
     where: {
@@ -437,6 +442,7 @@ export async function unassignGuestNfcForReservation(
       const now = Date.now();
 
       await ttlockChangeCardPeriod({
+        accessToken,
         lockId: Number(ttlockLockId),
         cardId: Number(a.NfcCard.ttlockCardId),
         startDate: now - 60_000,

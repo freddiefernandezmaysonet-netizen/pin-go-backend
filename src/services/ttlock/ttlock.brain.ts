@@ -1,15 +1,11 @@
 import { prisma } from "../../lib/prisma";
 import { AccessMethod, AccessStatus } from "@prisma/client";
-import { ttlockGetPasscode, ttlockDeletePasscode } from "../../ttlock/ttlock.passcode";
+import {
+  ttlockGetPasscode,
+  ttlockDeletePasscode,
+} from "../../ttlock/ttlock.passcode";
 import { ttlockChangeCardPeriod } from "../../ttlock/ttlock.card";
-import { assignNfcCards } from "../nfc.service";
-
-function phoneTo7Digits(phone?: string | null) {
-  if (!phone) return null;
-  const digits = String(phone).replace(/\D/g, "");
-  return digits.length >= 7 ? digits.slice(-7) : null;
-}
-
+import { ttlockRefreshAccessToken } from "../../ttlock/ttlock.service";
 
 function maskCode(code: string) {
   if (code.length <= 2) return "**";
@@ -20,6 +16,80 @@ function toIntOrNull(v: unknown): number | null {
   if (v === null || v === undefined) return null;
   const n = Number(v);
   return Number.isFinite(n) ? n : null;
+}
+
+async function resolveGrantAccessToken(lockPropertyId: string) {
+  const property = await prisma.property.findUnique({
+    where: { id: lockPropertyId },
+    select: { organizationId: true },
+  });
+
+  const organizationId = property?.organizationId ?? null;
+
+  console.log("TTLOCK GRANT DEBUG property->org", {
+    lockPropertyId,
+    organizationId,
+  });
+
+  if (!organizationId) {
+    throw new Error("Could not resolve organizationId from grant lock property");
+  }
+
+  const auth = await prisma.tTLockAuth.findUnique({
+    where: { organizationId },
+    select: {
+      accessToken: true,
+      refreshToken: true,
+      expiresAt: true,
+      uid: true,
+    },
+  });
+
+  console.log("TTLOCK AUTH DEBUG", {
+    organizationId,
+    hasAccessToken: !!auth?.accessToken,
+    hasRefreshToken: !!auth?.refreshToken,
+    uid: auth?.uid ?? null,
+    expiresAt: auth?.expiresAt ?? null,
+  });
+
+  if (!auth) {
+    throw new Error("TTLockAuth not configured for this organization");
+  }
+
+  const now = Date.now();
+  const expiresAtMs = auth.expiresAt ? new Date(auth.expiresAt).getTime() : 0;
+
+  const stillValid =
+    !!auth.accessToken &&
+    !!auth.expiresAt &&
+    expiresAtMs > now + 5 * 60 * 1000;
+
+  if (stillValid) {
+    return auth.accessToken as string;
+  }
+
+  if (!auth.refreshToken) {
+    throw new Error("TTLockAuth refreshToken missing for this organization");
+  }
+
+  console.log("TTLOCK refreshing access token…");
+
+  const refreshed = await ttlockRefreshAccessToken({
+    refreshToken: auth.refreshToken,
+  });
+
+  await prisma.tTLockAuth.update({
+    where: { organizationId },
+    data: {
+      accessToken: refreshed.access_token,
+      refreshToken: refreshed.refresh_token ?? auth.refreshToken,
+      uid: refreshed.uid ?? auth.uid ?? null,
+      expiresAt: new Date(Date.now() + refreshed.expires_in * 1000),
+    },
+  });
+
+  return refreshed.access_token;
 }
 
 export async function activateGrant(grantId: string) {
@@ -34,7 +104,6 @@ export async function activateGrant(grantId: string) {
 
   if (!grant) throw new Error("AccessGrant not found");
 
-  // Idempotencia
   if (grant.status !== AccessStatus.PENDING) {
     return { skipped: true, reason: `Grant not pending (${grant.status})` };
   }
@@ -43,83 +112,87 @@ export async function activateGrant(grantId: string) {
     throw new Error("Grant has no TTLock lock assigned");
   }
 
-  // 💳 NFC (TIMEBOUND) — usamos ttlockRefId como cardId (string -> number)
-  // Regla: ttlockRefId debe contener el cardId numérico de TTLock (si no, no activamos NFC)
+  if (!grant.lock?.propertyId) {
+    throw new Error("Grant lock missing propertyId");
+  }
+
+  console.log("TTLOCK ACTIVATE DEBUG", {
+    grantId: grant.id,
+    reservationId: grant.reservationId,
+    lockId: grant.lock.ttlockLockId,
+    propertyId: grant.lock.propertyId,
+    method: grant.method,
+  });
+
+  const accessToken = await resolveGrantAccessToken(grant.lock.propertyId);
+
   let nfcResult: any = null;
-  
-if (grant.method === AccessMethod.NFC_TIMEBOUND) {
+
+  if (grant.method === AccessMethod.NFC_TIMEBOUND) {
     const cardId = toIntOrNull(grant.ttlockRefId);
+
     if (!cardId) {
       throw new Error("NFC_TIMEBOUND grant missing numeric ttlockRefId (cardId)");
     }
 
     nfcResult = await ttlockChangeCardPeriod({
+      accessToken,
       lockId: Number(grant.lock.ttlockLockId),
       cardId,
       startDate: grant.startsAt.getTime(),
       endDate: grant.endsAt.getTime(),
-      changeType: 2, // gateway
+      changeType: 2,
     });
   }
 
-  // 🔐 PASSCODE (OTP one-time) — tu método estable que abre
   let keyboardPwdId: number | null = null;
   let code: string | null = null;
   let otpPayload: any = null;
 
-if (grant.method === AccessMethod.PASSCODE_TIMEBOUND) {
-  const pass = await ttlockGetPasscode({
-    lockId: Number(grant.lock.ttlockLockId),
-    keyboardPwdType: 1, // OTP one-time
-    name: grant.reservation?.guestName
-      ? `PinGo ${String(grant.reservation.guestName).slice(0, 20)}`
-      : "PinGo Guest",
-  });
-
-  keyboardPwdId = pass?.keyboardPwdId ? Number(pass.keyboardPwdId) : null;
-  code = pass?.keyboardPwd ? String(pass.keyboardPwd) : null;
-  otpPayload = pass;
-
-  if (!code) {
-    await prisma.accessGrant.update({
-      where: { id: grant.id },
-      data: {
-        status: AccessStatus.FAILED,
-        lastError: "TTLock did not return keyboardPwd",
-        ttlockPayload: {
-          ...(grant.ttlockPayload as any),
-          activatedAt: Date.now(),
-          otp: otpPayload,
-          nfc: nfcResult,
-        },
-      },
+  if (grant.method === AccessMethod.PASSCODE_TIMEBOUND) {
+    const pass = await ttlockGetPasscode({
+      accessToken,
+      lockId: Number(grant.lock.ttlockLockId),
+      keyboardPwdType: 1,
+      name: grant.reservation?.guestName
+        ? `PinGo ${String(grant.reservation.guestName).slice(0, 20)}`
+        : "PinGo Guest",
     });
 
-    return { ok: false, reason: "No OTP returned" };
-  }
-}
+    keyboardPwdId = pass?.keyboardPwdId ? Number(pass.keyboardPwdId) : null;
+    code = pass?.keyboardPwd ? String(pass.keyboardPwd) : null;
+    otpPayload = pass;
 
-  // ✅ Update DB
+    if (!code) {
+      await prisma.accessGrant.update({
+        where: { id: grant.id },
+        data: {
+          status: AccessStatus.FAILED,
+          lastError: "TTLock did not return keyboardPwd",
+        },
+      });
+
+      return { ok: false, reason: "No OTP returned" };
+    }
+  }
+
   await prisma.accessGrant.update({
     where: { id: grant.id },
-     data: {
-  status: AccessStatus.ACTIVE,
-  ttlockKeyboardPwdId: keyboardPwdId,
-  accessCodeMasked: code ? maskCode(code) : null,
-  lastError: null,
-  ttlockPayload: {
-    ...(grant.ttlockPayload as any),
-    activatedAt: Date.now(),
-   otp: otpPayload ? { keyboardPwdId: keyboardPwdId, raw: otpPayload } : null,
-   nfc: nfcResult ?? null,
-  },
-},
+    data: {
+      status: AccessStatus.ACTIVE,
+      ttlockKeyboardPwdId: keyboardPwdId,
+      accessCodeMasked: code ? maskCode(code) : null,
+      lastError: null,
+      ttlockPayload: {
+        activatedAt: Date.now(),
+        otp: otpPayload ?? null,
+        nfc: nfcResult ?? null,
+      },
+    },
+  });
 
-});
-
-return { ok: true, passcodePlain: code ?? null };
-
-  }
+  return { ok: true, passcodePlain: code ?? null };
+}
 
 export async function deactivateGrant(grantId: string) {
   const grant = await prisma.accessGrant.findUnique({
@@ -131,7 +204,6 @@ export async function deactivateGrant(grantId: string) {
 
   if (!grant) throw new Error("AccessGrant not found");
 
-  // Idempotencia
   if (grant.status !== AccessStatus.ACTIVE) {
     return { skipped: true, reason: `Grant not active (${grant.status})` };
   }
@@ -140,16 +212,25 @@ export async function deactivateGrant(grantId: string) {
     throw new Error("Grant has no TTLock lock assigned");
   }
 
-  // 💳 NFC revoke por periodo (NO borrar)
+  if (!grant.lock?.propertyId) {
+    throw new Error("Grant lock missing propertyId");
+  }
+
+  const accessToken = await resolveGrantAccessToken(grant.lock.propertyId);
+
   let nfcResult: any = null;
+
   if (grant.method === AccessMethod.NFC_TIMEBOUND) {
     const cardId = toIntOrNull(grant.ttlockRefId);
+
     if (!cardId) {
-      throw new Error("NFC_TIMEBOUND grant missing numeric ttlockRefId (cardId)");
+      throw new Error("NFC_TIMEBOUND grant missing numeric ttlockRefId");
     }
 
     const now = Date.now();
+
     nfcResult = await ttlockChangeCardPeriod({
+      accessToken,
       lockId: Number(grant.lock.ttlockLockId),
       cardId,
       startDate: now,
@@ -158,49 +239,34 @@ export async function deactivateGrant(grantId: string) {
     });
   }
 
-// 🔐 Delete passcode (best-effort)
-// Si TTLock responde -3 (Invalid Parameter), NO bloqueamos el flujo: seguimos y marcamos REVOKED.
-if (grant.method === AccessMethod.PASSCODE_TIMEBOUND && grant.ttlockKeyboardPwdId) {
-  try {
-    await ttlockDeletePasscode({
-      lockId: Number(grant.lock.ttlockLockId),
-      keyboardPwdId: Number(grant.ttlockKeyboardPwdId),
-      deleteType: Number(process.env.TTLOCK_DELETE_TYPE ?? 2),
-    });
-  } catch (e: any) {
-    const msg = String(e?.message ?? e);
+  if (grant.method === AccessMethod.PASSCODE_TIMEBOUND && grant.ttlockKeyboardPwdId) {
+    try {
+      await ttlockDeletePasscode({
+        accessToken,
+        lockId: Number(grant.lock.ttlockLockId),
+        keyboardPwdId: Number(grant.ttlockKeyboardPwdId),
+        deleteType: 2,
+      });
+    } catch (e: any) {
+      const msg = String(e?.message ?? e);
 
-    // -3 => TTLock no acepta borrar ese pwd (OTP viejo / mismatch / parámetro inválido).
-    // Lo ignoramos para que checkout no se quede pegado.
-    if (msg.includes("errcode=-3")) {
-      // opcional: log
-      // console.log("[ttlock] delete skipped (-3)", { grantId: grant.id, keyboardPwdId: grant.ttlockKeyboardPwdId });
-    } else {
-      // otros errores sí los dejamos fallar para reintento
-      throw e;
+      if (!msg.includes("errcode=-3")) {
+        throw e;
+      }
     }
   }
-}
 
-  // 🔐 PASSCODE (CUSTOM 7 dígitos)
-
-  // (Si luego implementas CUSTOM timebound passcodes, ahí sí se usa delete con ttlockKeyboardPwdId.)
-
-  // 🚫 Update DB
   await prisma.accessGrant.update({
     where: { id: grant.id },
-     data: {
-  status: AccessStatus.REVOKED,
-  lastError: null,
-  ttlockPayload: {
-    ...(grant.ttlockPayload as any),
-    revokedAt: Date.now(),
-    nfc: nfcResult,
-   },
- },
- 
-});
+    data: {
+      status: AccessStatus.REVOKED,
+      lastError: null,
+      ttlockPayload: {
+        revokedAt: Date.now(),
+        nfc: nfcResult,
+      },
+    },
+  });
 
-return { ok: true };
-
+  return { ok: true };
 }
