@@ -1,4 +1,5 @@
 // src/ttlock/ttlock.passcode.ts
+import { ttlockGetAccessToken } from "./ttlock.service";
 
 function roundDownToHourMs(ms: number) {
   const d = new Date(ms);
@@ -9,14 +10,8 @@ function roundDownToHourMs(ms: number) {
 type TTLockResp = { errcode?: number; errmsg?: string } & Record<string, any>;
 
 function toMs(ts: number) {
+  // si viene en seconds, lo pasamos a ms
   return ts < 10_000_000_000 ? ts * 1000 : ts;
-}
-
-function requireAccessToken(accessToken?: string) {
-  if (!accessToken) {
-    throw new Error("Missing TTLock accessToken for org-scoped passcode operation");
-  }
-  return accessToken;
 }
 
 async function postForm(url: string, form: Record<string, string | number>) {
@@ -47,82 +42,80 @@ async function postForm(url: string, form: Record<string, string | number>) {
     throw new Error(`TTLock returned non-JSON. First 120: ${text.slice(0, 120)}`);
   }
 
-  if (!resp.ok || data?.errcode) {
-    const safe = {
-      url,
-      status: resp.status,
-      errcode: data?.errcode,
-      errmsg: data?.errmsg ?? "?",
-      lockId: form.lockId,
-      keyboardPwdType: form.keyboardPwdType,
-      keyboardPwdVersion: form.keyboardPwdVersion,
-      startDate: form.startDate,
-      endDate: form.endDate,
-      date: form.date,
-      keys: Object.keys(form).sort(),
-    };
-    throw new Error(`TTLock error ${JSON.stringify(safe)}`);
-  }
+if (!resp.ok || data?.errcode) {
+  const safe = {
+    url,
+    status: resp.status,
+    errcode: data?.errcode,
+    errmsg: data?.errmsg ?? "?",
+    lockId: form.lockId,
+    keyboardPwdType: form.keyboardPwdType,
+    keyboardPwdVersion: form.keyboardPwdVersion,
+    startDate: form.startDate,
+    endDate: form.endDate,
+    date: form.date,
+    keys: Object.keys(form).sort(),
+  };
+  throw new Error(`TTLock error ${JSON.stringify(safe)}`);
+}
 
-  return data;
+    return data;
 }
 
 /**
- * keyboardPwdVersion (REQUIRED para /keyboardPwd/get)
+ * ✅ keyboardPwdVersion (REQUIRED para /keyboardPwd/get)
  */
-export async function ttlockGetKeyboardPwdVersion(params: {
-  accessToken: string;
-  lockId: number;
-}) {
+export async function ttlockGetKeyboardPwdVersion(params: { lockId: number }) {
   const base = process.env.TTLOCK_API_BASE ?? "https://api.sciener.com";
   const clientId = process.env.TTLOCK_CLIENT_ID ?? "";
   if (!clientId) throw new Error("Missing TTLOCK_CLIENT_ID");
 
-  const accessToken = requireAccessToken(params.accessToken);
+  const token = await ttlockGetAccessToken();
 
   const lockId = Number(params.lockId);
   if (!Number.isFinite(lockId) || lockId <= 0) throw new Error("Invalid lockId");
 
   return postForm(`${base}/v3/lock/getKeyboardPwdVersion`, {
     clientId,
-    accessToken,
+    accessToken: token.access_token,
     lockId,
     date: Date.now(),
   });
 }
 
 /**
- * OTP / PASSCODE GET
+ * ✅ OTP / PASSCODE GET
  * keyboardPwdType: 1=one-time, 2=permanent, 3=period
+ *
+ * Para type=1 (OTP) lo más estable es NO mandar startDate/endDate.
+ * Para type=3 (period) sí mandar startDate/endDate (en ms) y start < end.
  */
 export async function ttlockGetPasscode(params: {
-  accessToken: string;
   lockId: number;
   keyboardPwdType: 1 | 2 | 3;
   name?: string;
-  startDate?: number;
-  endDate?: number;
+
+  // solo si keyboardPwdType=3
+  startDate?: number; // ms (o seconds; se normaliza)
+  endDate?: number; // ms (o seconds; se normaliza)
 }) {
   const base = process.env.TTLOCK_API_BASE ?? "https://api.sciener.com";
   const clientId = process.env.TTLOCK_CLIENT_ID ?? "";
   if (!clientId) throw new Error("Missing TTLOCK_CLIENT_ID");
 
-  const accessToken = requireAccessToken(params.accessToken);
+  const token = await ttlockGetAccessToken();
 
   const lockId = Number(params.lockId);
   if (!Number.isFinite(lockId) || lockId <= 0) throw new Error("Invalid lockId");
 
-  const ver = await ttlockGetKeyboardPwdVersion({
-    accessToken,
-    lockId,
-  });
-
+  // ✅ REQUIRED para /keyboardPwd/get
+  const ver = await ttlockGetKeyboardPwdVersion({ lockId });
   const keyboardPwdVersion = ver?.keyboardPwdVersion;
   if (!keyboardPwdVersion) throw new Error("Missing keyboardPwdVersion from TTLock");
 
   const form: Record<string, string | number> = {
     clientId,
-    accessToken,
+    accessToken: token.access_token,
     lockId,
     keyboardPwdType: params.keyboardPwdType,
     keyboardPwdName: params.name ?? "Pin&Go",
@@ -130,71 +123,76 @@ export async function ttlockGetPasscode(params: {
     date: Date.now(),
   };
 
+  // SOLO si es PERIOD (3)
   if (params.keyboardPwdType === 3) {
-    if (!params.startDate || !params.endDate) {
-      throw new Error("keyboardPwdType=3 requires startDate and endDate");
-    }
-
-    let start = toMs(Number(params.startDate));
-    let end = toMs(Number(params.endDate));
-
-    start = roundDownToHourMs(start);
-    end = roundDownToHourMs(end);
-
-    if (end <= start) {
-      end = start + 60 * 60 * 1000;
-    }
-
-    form.startDate = start;
-    form.endDate = end;
+  if (!params.startDate || !params.endDate) {
+    throw new Error("keyboardPwdType=3 requires startDate and endDate");
   }
 
-  if (params.keyboardPwdType === 1) {
-    const start = roundDownToHourMs(Date.now());
-    const end = start + 6 * 60 * 60 * 1000;
+  let start = toMs(Number(params.startDate));
+  let end = toMs(Number(params.endDate));
 
-    form.startDate = start;
-    form.endDate = end;
+  // TTLock requiere ventanas por HORA (minutos/segundos en 0)
+  start = roundDownToHourMs(start);
+  end = roundDownToHourMs(end);
+
+  // asegurar rango válido
+  if (end <= start) {
+    end = start + 60 * 60 * 1000;
   }
 
-  try {
-    return await postForm(`${base}/v3/keyboardPwd/get`, form);
-  } catch (e: any) {
-    const msg = String(e?.message ?? e);
+  form.startDate = start;
+  form.endDate = end;
+}
 
-    if (params.keyboardPwdType === 3 && msg.includes('"errcode":-3')) {
-      const otpForm: Record<string, string | number> = {
-        ...form,
-        keyboardPwdType: 1,
-      };
-      delete (otpForm as any).startDate;
-      delete (otpForm as any).endDate;
+// ✅ Para OTP (type=1): este lock requiere startDate/endDate.
+if (params.keyboardPwdType === 1) {
+  const start = roundDownToHourMs(Date.now());
+  const end = start + 6 * 60 * 60 * 1000; // 6 horas
 
-      return await postForm(`${base}/v3/keyboardPwd/get`, otpForm);
-    }
+  form.startDate = start;
+  form.endDate = end;
+}
 
-    throw e;
+ try {
+  return await postForm(`${base}/v3/keyboardPwd/get`, form);
+} catch (e: any) {
+  const msg = String(e?.message ?? e);
+
+  // ✅ Retry: si PERIOD (3) falla con -3, intenta OTP (1) sin fechas.
+  if (params.keyboardPwdType === 3 && msg.includes('"errcode":-3')) {
+    const otpForm: Record<string, string | number> = {
+      ...form,
+      keyboardPwdType: 1,
+    };
+    delete (otpForm as any).startDate;
+    delete (otpForm as any).endDate;
+
+    return await postForm(`${base}/v3/keyboardPwd/get`, otpForm);
   }
+
+  throw e;
+}
+
 }
 
 export async function ttlockDeletePasscode(params: {
-  accessToken: string;
   lockId: number;
   keyboardPwdId: number;
-  deleteType?: 1 | 2 | 3;
+  deleteType?: 1 | 2 | 3; // 1=bluetooth, 2=gateway, 3=nbiot
 }) {
   const base = process.env.TTLOCK_API_BASE ?? "https://api.sciener.com";
   const clientId = process.env.TTLOCK_CLIENT_ID ?? "";
   if (!clientId) throw new Error("Missing TTLOCK_CLIENT_ID");
 
-  const accessToken = requireAccessToken(params.accessToken);
+  const token = await ttlockGetAccessToken();
 
   const lockId = Number(params.lockId);
   if (!Number.isFinite(lockId) || lockId <= 0) throw new Error("Invalid lockId");
 
   return postFormWithRetry(`${base}/v3/keyboardPwd/delete`, {
     clientId,
-    accessToken,
+    accessToken: token.access_token,
     lockId,
     keyboardPwdId: Number(params.keyboardPwdId),
     deleteType: Number(params.deleteType ?? 2),
@@ -218,18 +216,16 @@ async function postFormWithRetry(
 
   for (let attempt = 0; attempt <= retries; attempt++) {
     try {
-      return await postForm(url, form as Record<string, string | number>);
+      return await postForm(url, form); // usa tu postForm existente
     } catch (e: any) {
       lastErr = e;
 
       const msg = String(e?.message ?? e);
-      const isBusy =
-        msg.includes("errcode=-3003") ||
-        msg.toLowerCase().includes("gateway is busy");
+      const isBusy = msg.includes("errcode=-3003") || msg.toLowerCase().includes("gateway is busy");
 
       if (!isBusy || attempt === retries) throw e;
 
-      const delay = baseDelayMs * Math.pow(2, attempt);
+      const delay = baseDelayMs * Math.pow(2, attempt); // 800,1600,3200,6400,12800...
       await sleep(delay);
     }
   }
@@ -238,14 +234,13 @@ async function postFormWithRetry(
 }
 
 /**
- * CUSTOM PASSCODE ADD
+ * ✅ CUSTOM PASSCODE ADD (si algún día lo vuelves a usar)
  */
 export async function ttlockCreatePasscode(params: {
-  accessToken: string;
   lockId: number;
   code: string;
-  startDate: number;
-  endDate: number;
+  startDate: number; // ms (o seconds; se normaliza)
+  endDate: number; // ms (o seconds; se normaliza)
   addType?: number;
   name?: string;
 }) {
@@ -253,21 +248,19 @@ export async function ttlockCreatePasscode(params: {
   const clientId = process.env.TTLOCK_CLIENT_ID ?? "";
   if (!clientId) throw new Error("Missing TTLOCK_CLIENT_ID");
 
-  const accessToken = requireAccessToken(params.accessToken);
+  const token = await ttlockGetAccessToken();
 
   const lockId = Number(params.lockId);
   if (!Number.isFinite(lockId) || lockId <= 0) throw new Error("Invalid lockId");
 
   const start = toMs(Number(params.startDate));
   const end = toMs(Number(params.endDate));
-  if (!Number.isFinite(start) || !Number.isFinite(end)) {
-    throw new Error("Invalid start/end");
-  }
+  if (!Number.isFinite(start) || !Number.isFinite(end)) throw new Error("Invalid start/end");
   if (start >= end) throw new Error("startDate must be < endDate");
 
   return postForm(`${base}/v3/keyboardPwd/add`, {
     clientId,
-    accessToken,
+    accessToken: token.access_token,
     lockId,
     keyboardPwd: params.code,
     keyboardPwdName: params.name ?? "Pin&Go Custom",

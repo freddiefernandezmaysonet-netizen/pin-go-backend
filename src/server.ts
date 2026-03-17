@@ -76,7 +76,8 @@ const ENABLE_DEV_AUTH = process.env.ENABLE_DEV_AUTH === "true";
 console.log("ENV CHECK TTLOCK:", {
   clientId: process.env.TTLOCK_CLIENT_ID ? "OK" : "MISSING",
   clientSecret: process.env.TTLOCK_CLIENT_SECRET ? "OK" : "MISSING",
-  orgScopedAuth: "EXPECTED_FROM_DB_TTLockAuth",
+  username: process.env.TTLOCK_USERNAME ? "OK" : "MISSING",
+  password: process.env.TTLOCK_PASSWORD_PLAIN ? "OK" : "MISSING",
 });
 
 registerStripeWebhook(app, prisma);

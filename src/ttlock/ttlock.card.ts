@@ -1,4 +1,5 @@
 // src/ttlock/ttlock.card.ts
+import { ttlockGetAccessToken } from "./ttlock.service";
 
 async function postForm(url: string, form: Record<string, string | number | undefined>) {
   const body = new URLSearchParams();
@@ -14,15 +15,10 @@ async function postForm(url: string, form: Record<string, string | number | unde
 
   const text = await resp.text();
 
-  if (text.trim().startsWith("<")) {
-    throw new Error("TTLock returned HTML instead of JSON");
-  }
+  if (text.trim().startsWith("<")) throw new Error("TTLock returned HTML instead of JSON");
 
   const data = JSON.parse(text);
-
-  if (!resp.ok || data?.errcode) {
-    throw new Error(`TTLock errcode=${data?.errcode} errmsg=${data?.errmsg}`);
-  }
+  if (!resp.ok || data?.errcode) throw new Error(`TTLock errcode=${data?.errcode} errmsg=${data?.errmsg}`);
 
   return data;
 }
@@ -34,17 +30,13 @@ function ttlockBase() {
   return { base, clientId };
 }
 
-export async function ttlockListCards(params: {
-  accessToken: string;
-  lockId: number;
-  pageNo: number;
-  pageSize: number;
-}) {
+export async function ttlockListCards(params: { lockId: number; pageNo: number; pageSize: number }) {
   const { base, clientId } = ttlockBase();
+  const token = await ttlockGetAccessToken();
 
   return postForm(`${base}/v3/identityCard/list`, {
     clientId,
-    accessToken: params.accessToken,
+    accessToken: token.access_token,
     lockId: params.lockId,
     pageNo: params.pageNo,
     pageSize: params.pageSize,
@@ -53,57 +45,41 @@ export async function ttlockListCards(params: {
 }
 
 export async function ttlockChangeCardPeriod(params: {
-  accessToken: string;
   lockId: number;
   cardId: number;
   startDate: number;
   endDate: number;
-  changeType?: 1 | 2 | 3;
+  changeType?: 1 | 2 | 3; // 2 = gateway
 }) {
   const { base, clientId } = ttlockBase();
+  const token = await ttlockGetAccessToken();
 
-  console.log("[NFC] TTLOCK changePeriod REQUEST", {
-    lockId: params.lockId,
-    cardId: params.cardId,
-    startDate: new Date(params.startDate).toISOString(),
-    endDate: new Date(params.endDate).toISOString(),
-    changeType: params.changeType ?? 2,
-  });
-
-  const result = await postForm(`${base}/v3/identityCard/changePeriod`, {
+  return postForm(`${base}/v3/identityCard/changePeriod`, {
     clientId,
-    accessToken: params.accessToken,
+    accessToken: token.access_token,
     lockId: params.lockId,
     cardId: params.cardId,
     startDate: params.startDate,
     endDate: params.endDate,
-    changeType: params.changeType ?? 2,
+    changeType: params.changeType ?? 2, // gateway by default
     date: Date.now(),
   });
-
-  console.log("[NFC] TTLOCK changePeriod RESPONSE", {
-    lockId: params.lockId,
-    cardId: params.cardId,
-    result,
-  });
-
-  return result;
 }
 
 export async function ttlockDeleteCard(params: {
-  accessToken: string;
   lockId: number;
   cardId: number;
-  deleteType?: 1 | 2 | 3;
+  deleteType?: 1 | 2 | 3; // 2 = gateway
 }) {
   const { base, clientId } = ttlockBase();
+  const token = await ttlockGetAccessToken();
 
   return postForm(`${base}/v3/identityCard/delete`, {
     clientId,
-    accessToken: params.accessToken,
+    accessToken: token.access_token,
     lockId: params.lockId,
     cardId: params.cardId,
-    deleteType: params.deleteType ?? 2,
+    deleteType: params.deleteType ?? 2, // gateway by default
     date: Date.now(),
   });
 }
