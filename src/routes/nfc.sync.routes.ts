@@ -5,6 +5,7 @@ import {
   dedupeNfcCards,
   countAvailableCardsByKind,
 } from "../services/nfc.service";
+import { getPropertyTtlockAccessToken } from "../services/ttlock/ttlock.org-auth";
 
 export default function buildNfcSyncRouter(prisma: PrismaClient) {
   const router = Router();
@@ -84,14 +85,25 @@ export default function buildNfcSyncRouter(prisma: PrismaClient) {
         });
       }
 
-      const rawResult = await refreshNfcPoolFromTTLock(prisma, {
+      const accessToken = await getPropertyTtlockAccessToken(
+        prisma,
+        String(propertyId)
+      );
+
+      // safe migration:
+      // - if nfc.service.ts already supports accessToken, lo usará
+      // - if todavía no lo usa, ignorará la propiedad extra
+      const syncParams: any = {
         propertyId: String(propertyId),
         ttlockLockId: Number(ttlockLockId),
+        accessToken,
         minTotals: {
           guest: 0,
           cleaning: 0,
         },
-      });
+      };
+
+      const rawResult = await refreshNfcPoolFromTTLock(prisma, syncParams);
 
       console.log("NFC SYNC RESULT >>>", rawResult);
 

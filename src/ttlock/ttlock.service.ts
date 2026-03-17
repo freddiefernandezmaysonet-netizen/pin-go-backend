@@ -36,6 +36,31 @@ async function postForm<T = any>(url: string, body: Record<string, any>): Promis
   return data as T;
 }
 
+export async function ttlockRefreshAccessToken(params: {
+  refreshToken: string;
+}): Promise<TTLockTokenResponse> {
+  const base = process.env.TTLOCK_API_BASE ?? "https://api.sciener.com";
+  const client_id = process.env.TTLOCK_CLIENT_ID;
+  const client_secret = process.env.TTLOCK_CLIENT_SECRET;
+
+  if (!client_id || !client_secret) {
+    throw new Error("Missing TTLOCK_CLIENT_ID / TTLOCK_CLIENT_SECRET");
+  }
+
+  const data = await postForm<TTLockTokenResponse>(`${base}/oauth2/token`, {
+    client_id,
+    client_secret,
+    grant_type: "refresh_token",
+    refresh_token: params.refreshToken,
+  });
+
+  if (!(data as any)?.access_token) {
+    throw new Error(`TTLock refresh missing access_token: ${JSON.stringify(data)}`);
+  }
+
+  return data;
+}
+
 export async function ttlockGetAccessToken(): Promise<TTLockTokenResponse> {
   const base = process.env.TTLOCK_API_BASE ?? "https://api.sciener.com";
   const client_id = process.env.TTLOCK_CLIENT_ID;
@@ -62,8 +87,12 @@ export async function ttlockGetAccessToken(): Promise<TTLockTokenResponse> {
 
   const data = (await resp.json()) as any;
 
-  if (!resp.ok) throw new Error(`TTLock HTTP ${resp.status}: ${JSON.stringify(data)}`);
-  if (!data?.access_token) throw new Error(`TTLock token missing access_token: ${JSON.stringify(data)}`);
+  if (!resp.ok) {
+    throw new Error(`TTLock HTTP ${resp.status}: ${JSON.stringify(data)}`);
+  }
+  if (!data?.access_token) {
+    throw new Error(`TTLock token missing access_token: ${JSON.stringify(data)}`);
+  }
 
   return data as TTLockTokenResponse;
 }
@@ -71,7 +100,10 @@ export async function ttlockGetAccessToken(): Promise<TTLockTokenResponse> {
 /**
  * ✅ Borra (revoca) un keyboardPwd existente en TTLock.
  */
-export async function ttlockDeleteKeyboardPwd(params: { lockId: number; keyboardPwdId: number }) {
+export async function ttlockDeleteKeyboardPwd(params: {
+  lockId: number;
+  keyboardPwdId: number;
+}) {
   const base = process.env.TTLOCK_API_BASE ?? "https://api.sciener.com";
   const clientId = process.env.TTLOCK_CLIENT_ID;
   if (!clientId) throw new Error("Missing TTLOCK_CLIENT_ID");
