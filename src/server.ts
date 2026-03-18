@@ -80,7 +80,7 @@ console.log("ENV CHECK TTLOCK:", {
   password: process.env.TTLOCK_PASSWORD_PLAIN ? "OK" : "MISSING",
 });
 
-registerStripeWebhook(app, prisma);
+registerStripeWebhook(app);
 
 // =====================
 // Middleware

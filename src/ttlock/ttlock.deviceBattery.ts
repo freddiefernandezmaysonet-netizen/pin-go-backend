@@ -1,7 +1,7 @@
-import { getDeviceHealthAccessToken } from "./ttlock.deviceHealth.auth";
+import { getDeviceHealthAccessTokenForTtlockLock } from "./ttlock.deviceHealth.auth";
 
 export async function ttlockFetchBattery(ttlockLockId: number) {
-  const accessToken = await getDeviceHealthAccessToken();
+  const accessToken = await getDeviceHealthAccessTokenForTtlockLock(ttlockLockId);
 
   const base = process.env.TTLOCK_API_BASE ?? "https://api.sciener.com";
 

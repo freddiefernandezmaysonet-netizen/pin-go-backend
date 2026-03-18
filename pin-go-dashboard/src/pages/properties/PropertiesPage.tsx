@@ -235,20 +235,18 @@ export function PropertiesPage() {
                   </div>
                 </div>
 
-                <div>
-                  <span
-                    style={{
-                      fontSize: 12,
-                      padding: "4px 8px",
-                      borderRadius: 999,
-                      border: "1px solid #e5e7eb",
-                      background: "#ecfdf5",
-                      color: "#065f46",
-                    }}
-                  >
-                    {p.status}
-                  </span>
-                </div>
+                <span
+                  style={{
+                    fontSize: 12,
+                    padding: "4px 8px",
+                    borderRadius: 999,
+                    border: "1px solid #e5e7eb",
+                    background: "#ecfdf5",
+                    color: "#065f46",
+                  }}
+                >
+                  {p.status}
+                </span>
               </div>
 
               <div
@@ -270,7 +268,6 @@ export function PropertiesPage() {
                   justifyContent: "flex-end",
                   gap: 10,
                   flexWrap: "wrap",
-                  marginTop: 4,
                 }}
               >
                 <button
@@ -285,8 +282,6 @@ export function PropertiesPage() {
                     borderRadius: 10,
                     border: "1px solid #d1d5db",
                     background: "#fff",
-                    color: "#111827",
-                    fontSize: 13,
                     fontWeight: 700,
                     cursor: "pointer",
                   }}
@@ -308,9 +303,8 @@ export function PropertiesPage() {
                     border: "1px solid #fecaca",
                     background: "#fff",
                     color: "#b91c1c",
-                    fontSize: 13,
                     fontWeight: 700,
-                    cursor: archivingId === p.id ? "not-allowed" : "pointer",
+                    cursor: "pointer",
                     opacity: archivingId === p.id ? 0.7 : 1,
                   }}
                 >

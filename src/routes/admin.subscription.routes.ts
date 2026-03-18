@@ -56,20 +56,47 @@ router.post("/subscription/sync", async (req, res) => {
     }
 
     // 1) Resolver stripeSubscriptionId si no vino
-    let subId = String(stripeSubscriptionId ?? "").trim() || null;
+    
+      let subId = String(stripeSubscriptionId ?? "").trim() || null;
 
-    if (!subId) {
-      const row = await prisma.subscription.findUnique({
-        where: { organizationId: String(organizationId) },
-        select: { stripeSubscriptionId: true },
-      });
-      subId = row?.stripeSubscriptionId ?? null;
+      let row:
+        | {
+            stripeSubscriptionId: string | null;
+            stripeCustomerId: string | null;
+          }
+        | null = null;
+
+      if (!subId && organizationId) {
+        row = await prisma.subscription.findUnique({
+          where: { organizationId: String(organizationId) },
+          select: {
+            stripeSubscriptionId: true,
+            stripeCustomerId: true,
+         },
+       });
+
+       subId = row?.stripeSubscriptionId ?? null;
+     }
+
+     if (!subId && row?.stripeCustomerId) {
+       const subs = await stripe.subscriptions.list({
+         customer: row.stripeCustomerId,
+         status: "all",
+         limit: 10,
+       });
+
+       const preferred =
+         subs.data.find((s) => s.status === "active") ??
+         subs.data.find((s) => s.status === "trialing") ??
+         subs.data[0];
+
+      subId = preferred?.id ?? null;
     }
 
     if (!subId) {
       return res.status(404).json({
         ok: false,
-        error: "No stripeSubscriptionId found for organization",
+        error: "No stripeSubscriptionId found for organization or customer",
       });
     }
 

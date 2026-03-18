@@ -3,224 +3,198 @@ import bodyParser from "body-parser";
 import Stripe from "stripe";
 import { PrismaClient } from "@prisma/client";
 import stripe from "../billing/stripe";
-import { sendGuestAccessLinkSms } from "../services/guestLinkSms.service";
 
-export function registerStripeWebhook(app: Express, prisma: PrismaClient) {
-  const STRIPE_WEBHOOK_SECRET = process.env.STRIPE_WEBHOOK_SECRET ?? "";
+const prisma = new PrismaClient();
 
-  // IMPORTANTE: raw antes de express.json (por eso esto se registra antes en server.ts)
+export function registerStripeWebhook(app: Express) {
+  const endpointSecret = process.env.STRIPE_WEBHOOK_SECRET ?? "";
+
   app.post(
     "/webhooks/stripe",
     bodyParser.raw({ type: "application/json" }),
     async (req: Request, res: Response) => {
       const sig = req.headers["stripe-signature"] as string | undefined;
 
+      let event: Stripe.Event;
+
       try {
-        if (!sig) return res.status(400).send("Missing Stripe-Signature header");
-        if (!STRIPE_WEBHOOK_SECRET) {
+        if (!sig) {
+          return res.status(400).send("Missing Stripe-Signature header");
+        }
+
+        if (!endpointSecret) {
           return res.status(500).send("Missing STRIPE_WEBHOOK_SECRET in .env");
         }
 
-        let event: Stripe.Event;
-        try {
-          event = stripe.webhooks.constructEvent(req.body, sig, STRIPE_WEBHOOK_SECRET);
-        } catch (err: any) {
-          return res.status(400).send(`Webhook Error: ${err?.message ?? "Invalid signature"}`);
-        }
+        console.log(">>> WEBHOOK HIT");
+        console.log(">>> has-signature:", !!sig);
+        console.log(">>> body-is-buffer:", Buffer.isBuffer(req.body));
+        console.log(">>> body-length:", (req.body as Buffer)?.length ?? 0);
 
-        // =====================
-        // Dedup (idempotencia)
-        // =====================
-        const stripeId = event.id;
-        const existing = await prisma.stripeEventLog.findUnique({ where: { stripeId } });
+        event = stripe.webhooks.constructEvent(req.body, sig, endpointSecret);
+      } catch (err: any) {
+        console.error("❌ Webhook signature error:", err?.message ?? err);
+        return res.status(400).send(`Webhook Error: ${err?.message ?? "Invalid signature"}`);
+      }
 
-        if (existing?.processedAt) {
-          return res.json({ received: true, deduped: true, type: event.type });
-        }
+      console.log(`📩 Stripe event received: ${event.type}`);
 
-        if (!existing) {
-          await prisma.stripeEventLog.create({
-            data: {
-              stripeId,
-              type: event.type,
-              livemode: event.livemode,
-              payload: event as any,
-            },
-          });
-        }
+      try {
+        switch (event.type) {
+          case "checkout.session.completed": {
+            const session = event.data.object as Stripe.Checkout.Session;
 
-        // =====================
-        // Procesamiento
-        // =====================
-       
-     try {
-  switch (event.type) {
-    case "checkout.session.completed": {
-      const session = event.data.object as any;
+            console.log("🧾 checkout.session.completed", {
+              sessionId: session.id,
+              customer: session.customer,
+              subscription: session.subscription,
+              metadata: session.metadata,
+            });
 
-      // ✅ Pago one-time por reserva (mode=payment)
-      if (session.mode === "payment") {
-        const reservationId = session?.metadata?.reservationId as string | undefined;
+            if (session.subscription) {
+              await safeSyncBySubscriptionId(String(session.subscription));
+            }
 
-        let reservation = reservationId
-          ? await prisma.reservation.findUnique({ where: { id: reservationId } })
-          : null;
+            break;
+          }
 
-        if (!reservation) {
-          reservation = await prisma.reservation.findFirst({
-            where: { stripeCheckoutSessionId: session.id },
-          });
-        }
+          case "customer.subscription.created":
+          case "customer.subscription.updated":
+          case "customer.subscription.deleted": {
+            const sub = event.data.object as Stripe.Subscription;
 
-        if (reservation) {
-          await prisma.reservation.update({
-            where: { id: reservation.id },
-            data: {
-              paymentState: "PAID",
-              stripeCheckoutSessionId: session.id,
-              stripePaymentIntentId: session.payment_intent ?? null,
-            } as any,
-          });
+            console.log("🔄 subscription event", {
+              id: sub.id,
+              status: sub.status,
+              customer: sub.customer,
+              metadata: sub.metadata,
+            });
 
-          if (process.env.GUEST_LINK_SMS_ON_PAID === "1") {
-            await sendGuestAccessLinkSms(prisma, reservation.id, "PAID");
+            await safeSyncBySubscriptionId(sub.id);
+            break;
+          }
+
+          default: {
+            console.log("ℹ️ unhandled event:", event.type);
+            break;
           }
         }
-      }
 
-      // ✅ Si fue checkout de suscripción: sincroniza inmediatamente
-      if (session.mode === "subscription" && session.subscription) {
-        const stripeSub = await stripe.subscriptions.retrieve(String(session.subscription));
-        await syncSubscriptionToDb(prisma, stripeSub as any);
-      }
+        return res.json({ received: true, type: event.type });
+      } catch (err: any) {
+        console.error("🔥 webhook processing error:", err?.message ?? err);
 
-      break;
-    }
-
-    case "customer.subscription.created":
-    case "customer.subscription.updated":
-    case "customer.subscription.deleted": {
-      const sub = event.data.object as Stripe.Subscription;
-      await syncSubscriptionToDb(prisma, sub);
-      break;
-    }
-
-    default: {
-      break;
-    }
-  }
-
-  // ✅ Log seguro (sin usar "sub" fuera de scope)
-  const obj: any = event.data?.object;
-  console.log("[stripe webhook]", event.type, "id:", obj?.id);
-
-  await prisma.stripeEventLog.update({
-    where: { stripeId },
-    data: { processedAt: new Date(), error: null },
-  });
-
-  return res.json({ received: true, type: event.type });
-} catch (err: any) {
-  await prisma.stripeEventLog.update({
-    where: { stripeId },
-    data: { processedAt: new Date(), error: err?.message ?? String(err) },
-  });
-
-  return res.status(500).json({ error: err?.message ?? "Webhook processing failed" });
-}
-
-      
-      } catch (e: any) {
-        return res.status(500).json({ error: e?.message ?? "Webhook handler failed" });
+        return res.status(500).json({
+          ok: false,
+          error: err?.message ?? "webhook failed",
+        });
       }
     }
   );
 }
 
-async function syncSubscriptionToDb(prisma: PrismaClient, sub: Stripe.Subscription) {
-  const lockPriceId = process.env.STRIPE_PRICE_LOCK_MONTHLY;
-  if (!lockPriceId) {
-    console.warn("[stripe sync] missing STRIPE_PRICE_LOCK_MONTHLY");
-    return;
-  }
+async function safeSyncBySubscriptionId(subscriptionId: string) {
+  try {
+    console.log("🚀 sync start:", subscriptionId);
 
-  // 🔥 siempre refrescar desde Stripe (con prices expandidos)
-  const fullSub = await stripe.subscriptions.retrieve(sub.id, {
-    expand: ["items.data.price"],
-  });
-
-  // 1) Resolver organizationId
-  let organizationId = (fullSub.metadata?.organizationId as string | undefined) ?? null;
-
-  if (!organizationId) {
-    const found = await prisma.subscription.findFirst({
-      where: { stripeCustomerId: String(fullSub.customer) },
-      select: { organizationId: true },
+    const fullSub = await stripe.subscriptions.retrieve(subscriptionId, {
+      expand: ["items.data.price"],
     });
-    organizationId = found?.organizationId ?? null;
-  }
 
-  if (!organizationId) {
-    console.warn("[stripe sync] missing organizationId for sub:", fullSub.id);
-    return;
-  }
+    let organizationId =
+      (fullSub.metadata?.organizationId as string | undefined) ?? null;
 
-  // 2) Item correcto por price id (locks)
-  const item =
-    fullSub.items.data.find((i) => (i.price as any)?.id === lockPriceId) ?? fullSub.items.data[0];
+    if (!organizationId) {
+      console.warn("⚠️ No orgId in metadata, fallback by customer");
 
-  const quantity = item?.quantity ?? 0;
+      const found = await prisma.subscription.findFirst({
+        where: {
+          stripeCustomerId: String(fullSub.customer),
+        },
+        select: {
+          organizationId: true,
+        },
+      });
 
-  // 3) Mapear status Stripe -> tu enum
-  const stripeStatus = fullSub.status;
-  const status =
-    stripeStatus === "active"
-      ? "ACTIVE"
-      : stripeStatus === "trialing"
-      ? "TRIALING"
-      : stripeStatus === "past_due"
-      ? "PAST_DUE"
-      : stripeStatus === "canceled"
-      ? "CANCELED"
-      : stripeStatus === "unpaid"
-      ? "UNPAID"
-      : stripeStatus === "incomplete"
-      ? "INCOMPLETE"
-      : stripeStatus === "incomplete_expired"
-      ? "INCOMPLETE_EXPIRED"
-      : "INCOMPLETE";
+      organizationId = found?.organizationId ?? null;
+    }
 
-  // 4) Entitlement
-  const entitledLocks = status === "ACTIVE" || status === "TRIALING" ? quantity : 0;
+    if (!organizationId) {
+      console.error("❌ Cannot resolve organizationId for sub:", subscriptionId);
+      return;
+    }
 
-  await prisma.subscription.upsert({
-    where: { organizationId },
-    create: {
+    const lockPriceId = process.env.STRIPE_PRICE_LOCK_MONTHLY;
+    const items = fullSub.items?.data ?? [];
+
+    const item =
+      (lockPriceId
+        ? items.find((i: any) => i?.price?.id === lockPriceId)
+        : null) ?? items[0];
+
+    const quantity = Number(item?.quantity ?? 0);
+
+    const status =
+      fullSub.status === "active"
+        ? "ACTIVE"
+        : fullSub.status === "trialing"
+        ? "TRIALING"
+        : fullSub.status === "past_due"
+        ? "PAST_DUE"
+        : fullSub.status === "canceled"
+        ? "CANCELED"
+        : fullSub.status === "unpaid"
+        ? "UNPAID"
+        : fullSub.status === "incomplete"
+        ? "INCOMPLETE"
+        : fullSub.status === "incomplete_expired"
+        ? "INCOMPLETE_EXPIRED"
+        : "INCOMPLETE";
+
+    const entitledLocks =
+      status === "ACTIVE" || status === "TRIALING" ? quantity : 0;
+
+    console.log("📊 sync computed", {
       organizationId,
-      stripeCustomerId: String(fullSub.customer),
       stripeSubscriptionId: fullSub.id,
-      stripeSubscriptionItemId: item?.id ?? null,
-      status: status as any,
+      quantity,
       entitledLocks,
-      currentPeriodStart: fullSub.current_period_start
-        ? new Date(fullSub.current_period_start * 1000)
-        : null,
-      currentPeriodEnd: fullSub.current_period_end
-        ? new Date(fullSub.current_period_end * 1000)
-        : null,
-    } as any,
-    update: {
-      stripeCustomerId: String(fullSub.customer),
-      stripeSubscriptionId: fullSub.id,
-      stripeSubscriptionItemId: item?.id ?? null,
-      status: status as any,
-      entitledLocks,
-      currentPeriodStart: fullSub.current_period_start
-        ? new Date(fullSub.current_period_start * 1000)
-        : null,
-      currentPeriodEnd: fullSub.current_period_end
-        ? new Date(fullSub.current_period_end * 1000)
-        : null,
-    } as any,
-  });
+      status,
+    });
+
+    await prisma.subscription.upsert({
+      where: { organizationId },
+      create: {
+        organizationId,
+        stripeCustomerId: String(fullSub.customer),
+        stripeSubscriptionId: fullSub.id,
+        stripeSubscriptionItemId: item?.id ?? null,
+        status: status as any,
+        entitledLocks,
+        currentPeriodStart: fullSub.current_period_start
+          ? new Date(fullSub.current_period_start * 1000)
+          : null,
+        currentPeriodEnd: fullSub.current_period_end
+          ? new Date(fullSub.current_period_end * 1000)
+          : null,
+      },
+      update: {
+        stripeCustomerId: String(fullSub.customer),
+        stripeSubscriptionId: fullSub.id,
+        stripeSubscriptionItemId: item?.id ?? null,
+        status: status as any,
+        entitledLocks,
+        currentPeriodStart: fullSub.current_period_start
+          ? new Date(fullSub.current_period_start * 1000)
+          : null,
+        currentPeriodEnd: fullSub.current_period_end
+          ? new Date(fullSub.current_period_end * 1000)
+          : null,
+      },
+    });
+
+    console.log("✅ sync success:", subscriptionId);
+  } catch (err: any) {
+    console.error("🔥 sync error:", err?.message ?? err);
+  }
 }

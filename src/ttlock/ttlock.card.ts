@@ -1,10 +1,16 @@
 // src/ttlock/ttlock.card.ts
 import { ttlockGetAccessToken } from "./ttlock.service";
+import { getDeviceHealthAccessTokenForTtlockLock } from "./ttlock.deviceHealth.auth";
 
-async function resolveAccessToken(accessToken?: string) {
+async function resolveAccessToken(accessToken?: string, ttlockLockId?: number) {
   if (accessToken) return accessToken;
+
+  if (ttlockLockId) {
+    return getDeviceHealthAccessTokenForTtlockLock(ttlockLockId);
+  }
+
   const token = await ttlockGetAccessToken();
-  return token.access_token;
+  return typeof token === "string" ? token : token.access_token;
 }
 
 async function postForm(url: string, form: Record<string, string | number | undefined>) {
@@ -48,7 +54,7 @@ export async function ttlockListCards(params: {
   accessToken?: string;
 }) {
   const { base, clientId } = ttlockBase();
-  const accessToken = await resolveAccessToken(params.accessToken);
+  const accessToken = await resolveAccessToken(params.accessToken, params.lockId);
 
   return postForm(`${base}/v3/identityCard/list`, {
     clientId,
@@ -69,7 +75,7 @@ export async function ttlockChangeCardPeriod(params: {
   accessToken?: string;
 }) {
   const { base, clientId } = ttlockBase();
-  const accessToken = await resolveAccessToken(params.accessToken);
+  const accessToken = await resolveAccessToken(params.accessToken, params.lockId);
 
   return postForm(`${base}/v3/identityCard/changePeriod`, {
     clientId,
@@ -90,7 +96,7 @@ export async function ttlockDeleteCard(params: {
   accessToken?: string;
 }) {
   const { base, clientId } = ttlockBase();
-  const accessToken = await resolveAccessToken(params.accessToken);
+  const accessToken = await resolveAccessToken(params.accessToken, params.lockId);
 
   return postForm(`${base}/v3/identityCard/delete`, {
     clientId,

@@ -1,5 +1,6 @@
 // src/ttlock/ttlock.passcode.ts
 import { ttlockGetAccessToken } from "./ttlock.service";
+import { getDeviceHealthAccessTokenForTtlockLock } from "./ttlock.deviceHealth.auth";
 
 function roundDownToHourMs(ms: number) {
   const d = new Date(ms);
@@ -14,10 +15,15 @@ function toMs(ts: number) {
   return ts < 10_000_000_000 ? ts * 1000 : ts;
 }
 
-async function resolveAccessToken(accessToken?: string) {
+async function resolveAccessToken(accessToken?: string, ttlockLockId?: number) {
   if (accessToken) return accessToken;
+
+  if (ttlockLockId) {
+    return await getDeviceHealthAccessTokenForTtlockLock(ttlockLockId);
+  }
+
   const token = await ttlockGetAccessToken();
-  return token.access_token;
+  return typeof token === "string" ? token : token.access_token;
 }
 
 async function postForm(url: string, form: Record<string, string | number>) {
@@ -79,7 +85,7 @@ export async function ttlockGetKeyboardPwdVersion(params: {
   const clientId = process.env.TTLOCK_CLIENT_ID ?? "";
   if (!clientId) throw new Error("Missing TTLOCK_CLIENT_ID");
 
-  const accessToken = await resolveAccessToken(params.accessToken);
+  const accessToken = await resolveAccessToken(params.accessToken, params.lockId);
 
   const lockId = Number(params.lockId);
   if (!Number.isFinite(lockId) || lockId <= 0) throw new Error("Invalid lockId");
@@ -113,7 +119,7 @@ export async function ttlockGetPasscode(params: {
   const clientId = process.env.TTLOCK_CLIENT_ID ?? "";
   if (!clientId) throw new Error("Missing TTLOCK_CLIENT_ID");
 
-  const accessToken = await resolveAccessToken(params.accessToken);
+  const accessToken = await resolveAccessToken(params.accessToken, params.lockId);
 
   const lockId = Number(params.lockId);
   if (!Number.isFinite(lockId) || lockId <= 0) throw new Error("Invalid lockId");
@@ -199,7 +205,7 @@ export async function ttlockDeletePasscode(params: {
   const clientId = process.env.TTLOCK_CLIENT_ID ?? "";
   if (!clientId) throw new Error("Missing TTLOCK_CLIENT_ID");
 
-  const accessToken = await resolveAccessToken(params.accessToken);
+  const accessToken = await resolveAccessToken(params.accessToken, params.lockId);
 
   const lockId = Number(params.lockId);
   if (!Number.isFinite(lockId) || lockId <= 0) throw new Error("Invalid lockId");
@@ -265,7 +271,7 @@ export async function ttlockCreatePasscode(params: {
   const clientId = process.env.TTLOCK_CLIENT_ID ?? "";
   if (!clientId) throw new Error("Missing TTLOCK_CLIENT_ID");
 
-  const accessToken = await resolveAccessToken(params.accessToken);
+  const accessToken = await resolveAccessToken(params.accessToken, params.lockId);
 
   const lockId = Number(params.lockId);
   if (!Number.isFinite(lockId) || lockId <= 0) throw new Error("Invalid lockId");

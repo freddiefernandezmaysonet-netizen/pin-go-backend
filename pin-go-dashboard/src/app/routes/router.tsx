@@ -22,6 +22,7 @@ import { BillingPage } from "../../pages/dashboard/BillingPage";
 import BillingSuccessPage from "../../pages/dashboard/BillingSuccessPage";
 import BillingCancelPage from "../../pages/dashboard/BillingCancelPage";
 import { HealthCenterPage } from "../../pages/health-center/HealthCenterPage";
+import { StaffMembersPage } from "../../pages/staff/StaffMembersPage";
 
 export const router = createBrowserRouter([
   {
@@ -55,11 +56,11 @@ export const router = createBrowserRouter([
       { path: "/reservations/:id", element: <ReservationDetailPage /> },
 
       { path: "/access", element: <AccessPage /> },
+      { path: "/staff", element: <StaffMembersPage /> },
 
       { path: "/health", element: <HealthCenterPage /> },
 
       { path: "/billing", element: <BillingPage /> },
-
       { path: "/billing/success", element: <BillingSuccessPage /> },
       { path: "/billing/cancel", element: <BillingCancelPage /> },
 
