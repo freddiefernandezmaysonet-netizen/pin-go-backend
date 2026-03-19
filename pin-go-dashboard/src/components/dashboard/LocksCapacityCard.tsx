@@ -49,24 +49,50 @@ function progressOuterStyle(): React.CSSProperties {
   };
 }
 
-function getProgressInnerStyle(utilizationPct: number): React.CSSProperties {
+function getProgressInnerStyle(
+  utilizationPct: number,
+  entitledLocks: number,
+  usedLocks: number
+): React.CSSProperties {
+  const safePct = Math.max(0, Math.min(utilizationPct, 100));
+
+  const isCritical = usedLocks > entitledLocks;
+  const isSmallAccountAtFullCapacity =
+    usedLocks === entitledLocks && usedLocks <= 2;
+  const shouldShowCapacityAlertColors =
+    entitledLocks >= 3 || usedLocks >= 3;
+
+  let background = "#111827";
+
+  if (isCritical) {
+    background = "#dc2626";
+  } else if (isSmallAccountAtFullCapacity) {
+    background = "#111827";
+  } else if (shouldShowCapacityAlertColors) {
+    background =
+      safePct >= 100
+        ? "#ea580c"
+        : safePct >= 90
+        ? "#d97706"
+        : safePct >= 75
+        ? "#f59e0b"
+        : "#111827";
+  }
+
   return {
-    width: `${utilizationPct}%`,
+    width: `${safePct}%`,
     height: "100%",
     borderRadius: 999,
-    background:
-      utilizationPct >= 100
-        ? "#dc2626"
-        : utilizationPct >= 88
-        ? "#ea580c"
-        : utilizationPct >= 70
-        ? "#d97706"
-        : "#111827",
+    background,
     transition: "width 200ms ease",
   };
 }
 
-function getStatusMessage(remainingLocks: number, entitledLocks: number) {
+function getStatusMessage(
+  remainingLocks: number,
+  entitledLocks: number,
+  usedLocks: number
+) {
   if (entitledLocks <= 0) {
     return {
       text: "No locks included in current plan.",
@@ -76,18 +102,36 @@ function getStatusMessage(remainingLocks: number, entitledLocks: number) {
     };
   }
 
-  if (remainingLocks <= 0) {
+  if (usedLocks > entitledLocks) {
     return {
-      text: "Lock limit reached. Upgrade plan to add more locks.",
+      text: "System inconsistency: active locks exceed plan capacity.",
       tone: "#991b1b",
       bg: "#fef2f2",
       border: "#fecaca",
     };
   }
 
+  if (usedLocks === entitledLocks && usedLocks <= 2) {
+    return {
+      text: "Your current lock capacity is fully allocated and aligned with your setup.",
+      tone: "#374151",
+      bg: "#f9fafb",
+      border: "#e5e7eb",
+    };
+  }
+
+  if (remainingLocks <= 0) {
+    return {
+      text: "You are at full capacity. Add more only if you plan to activate another lock.",
+      tone: "#92400e",
+      bg: "#fffbeb",
+      border: "#fcd34d",
+    };
+  }
+
   if (remainingLocks === 1) {
     return {
-      text: "Only 1 lock remaining before reaching your plan limit.",
+      text: "Only 1 lock remaining before reaching your current plan capacity.",
       tone: "#9a3412",
       bg: "#fff7ed",
       border: "#fdba74",
@@ -96,7 +140,7 @@ function getStatusMessage(remainingLocks: number, entitledLocks: number) {
 
   if (remainingLocks === 2) {
     return {
-      text: "You have 2 locks remaining in your plan.",
+      text: "You have 2 locks remaining in your current plan.",
       tone: "#92400e",
       bg: "#fffbeb",
       border: "#fcd34d",
@@ -104,7 +148,7 @@ function getStatusMessage(remainingLocks: number, entitledLocks: number) {
   }
 
   return {
-    text: `${remainingLocks} locks remaining in your plan.`,
+    text: `${remainingLocks} locks remaining in your current plan.`,
     tone: "#166534",
     bg: "#f0fdf4",
     border: "#bbf7d0",
@@ -148,7 +192,11 @@ export function LocksCapacityCard() {
 
   const statusBox = useMemo(() => {
     if (!data) return null;
-    return getStatusMessage(data.remainingLocks, data.entitledLocks);
+    return getStatusMessage(
+      data.remainingLocks,
+      data.entitledLocks,
+      data.usedLocks
+    );
   }, [data]);
 
   if (loading) {
@@ -182,7 +230,14 @@ export function LocksCapacityCard() {
 
   return (
     <div style={cardStyle()}>
-      <div style={{ display: "flex", justifyContent: "space-between", gap: 12, flexWrap: "wrap" }}>
+      <div
+        style={{
+          display: "flex",
+          justifyContent: "space-between",
+          gap: 12,
+          flexWrap: "wrap",
+        }}
+      >
         <div>
           <div style={labelStyle()}>Locks Capacity</div>
           <div style={valueStyle()}>
@@ -197,7 +252,13 @@ export function LocksCapacityCard() {
       </div>
 
       <div style={progressOuterStyle()}>
-        <div style={getProgressInnerStyle(data.utilizationPct)} />
+        <div
+          style={getProgressInnerStyle(
+            data.utilizationPct,
+            data.entitledLocks,
+            data.usedLocks
+          )}
+        />
       </div>
 
       <div
@@ -216,7 +277,9 @@ export function LocksCapacityCard() {
           }}
         >
           <div style={labelStyle()}>Included</div>
-          <div style={{ fontSize: 22, fontWeight: 700 }}>{data.entitledLocks}</div>
+          <div style={{ fontSize: 22, fontWeight: 700 }}>
+            {data.entitledLocks}
+          </div>
         </div>
 
         <div
@@ -240,7 +303,9 @@ export function LocksCapacityCard() {
           }}
         >
           <div style={labelStyle()}>Usage</div>
-          <div style={{ fontSize: 22, fontWeight: 700 }}>{data.utilizationPct}%</div>
+          <div style={{ fontSize: 22, fontWeight: 700 }}>
+            {data.utilizationPct}%
+          </div>
         </div>
       </div>
 

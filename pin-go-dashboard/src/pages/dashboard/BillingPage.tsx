@@ -311,10 +311,17 @@ export function BillingPage() {
 
   const primaryButtonLabel = useMemo(() => {
     if (!hasExistingSubscription) return "Start Subscription";
-    if (changeType === "upgrade") return "Update Capacity";
-    if (changeType === "downgrade") return "Reduce Capacity";
-    return "Save Capacity";
+    if (changeType === "upgrade") return "Confirm Upgrade";
+    if (changeType === "downgrade") return "Confirm Reduction";
+    return "No Changes";
   }, [hasExistingSubscription, changeType]);
+
+  const minAllowed = Math.max(s?.activeLocks ?? 1, 1);
+  const sliderMax = Math.max(
+    (s?.entitledLocks ?? 1) + 20,
+    (s?.activeLocks ?? 1) + 20,
+    25
+  );
 
   return (
     <div style={{ display: "grid", gap: 20 }}>
@@ -539,42 +546,140 @@ export function BillingPage() {
                   Total locks desired
                 </label>
 
-                <input
-                  id="locks-capacity"
-                  type="number"
-                  min={1}
-                  step={1}
-                  value={locks}
-                  onChange={(e) => {
-                    const next = Number(e.target.value);
-                    setLocks(Number.isFinite(next) ? Math.max(1, Math.floor(next)) : 1);
-                  }}
-                  style={{
-                    height: 44,
-                    borderRadius: 12,
-                    border: "1px solid #d1d5db",
-                    padding: "0 12px",
-                    fontSize: 16,
-                    fontWeight: 700,
-                  }}
-                />
+                <div style={{ display: "grid", gap: 12 }}>
+                  <div
+                    style={{
+                      display: "flex",
+                      justifyContent: "space-between",
+                      alignItems: "center",
+                      gap: 12,
+                      flexWrap: "wrap",
+                    }}
+                  >
+                    <div style={{ fontSize: 13, color: "#374151", fontWeight: 700 }}>
+                      Selected capacity
+                    </div>
 
-                <div style={{ fontSize: 12, color: "#6b7280" }}>
-                  Suggested starting point: {suggestedLocks}
+                    <div
+                      style={{
+                        minWidth: 88,
+                        height: 38,
+                        padding: "0 12px",
+                        borderRadius: 999,
+                        border: "1px solid #d1d5db",
+                        background: "#f9fafb",
+                        display: "flex",
+                        alignItems: "center",
+                        justifyContent: "center",
+                        fontSize: 16,
+                        fontWeight: 800,
+                        color: "#111827",
+                      }}
+                    >
+                      {locks} locks
+                    </div>
+                  </div>
+
+                  <input
+                    id="locks-capacity"
+                    type="range"
+                    min={minAllowed}
+                    max={sliderMax}
+                    step={1}
+                    value={locks}
+                    onChange={(e) => {
+                      const next = Number(e.target.value);
+                      setLocks(
+                        Number.isFinite(next) ? Math.floor(next) : minAllowed
+                      );
+                    }}
+                    style={{
+                      width: "100%",
+                      cursor: "pointer",
+                      accentColor: "#111827",
+                    }}
+                  />
+
+                  <div
+                    style={{
+                      display: "flex",
+                      justifyContent: "space-between",
+                      fontSize: 12,
+                      color: "#6b7280",
+                      gap: 12,
+                      flexWrap: "wrap",
+                    }}
+                  >
+                    <span>Minimum allowed now: {minAllowed}</span>
+                    <span>Suggested start: {suggestedLocks}</span>
+                  </div>
+
+                  <div
+                    style={{
+                      display: "flex",
+                      gap: 10,
+                      alignItems: "center",
+                      flexWrap: "wrap",
+                    }}
+                  >
+                    <div style={{ fontSize: 13, color: "#374151", fontWeight: 700 }}>
+                      Exact number:
+                    </div>
+
+                    <input
+                      type="number"
+                      min={minAllowed}
+                      step={1}
+                      value={locks}
+                      onChange={(e) => {
+                        const next = Number(e.target.value);
+                        setLocks(
+                          Number.isFinite(next)
+                            ? Math.max(minAllowed, Math.floor(next))
+                            : minAllowed
+                        );
+                      }}
+                      style={{
+                        width: 120,
+                        height: 40,
+                        borderRadius: 10,
+                        border: "1px solid #d1d5db",
+                        padding: "0 10px",
+                        fontSize: 15,
+                        fontWeight: 700,
+                      }}
+                    />
+
+                    <span style={{ fontSize: 12, color: "#6b7280" }}>
+                      Total desired capacity
+                    </span>
+                  </div>
                 </div>
 
                 <button
                   type="button"
                   onClick={startUpgrade}
-                  disabled={upgradeLoading || locks < 1}
+                  disabled={
+                    upgradeLoading ||
+                    locks < 1 ||
+                    (hasExistingSubscription && changeType === "same")
+                  }
                   style={{
                     height: 44,
                     borderRadius: 12,
                     border: "1px solid #111827",
-                    background: upgradeLoading ? "#9ca3af" : "#111827",
+                    background:
+                      upgradeLoading ||
+                      (hasExistingSubscription && changeType === "same")
+                        ? "#9ca3af"
+                        : "#111827",
                     color: "#ffffff",
                     fontWeight: 800,
-                    cursor: upgradeLoading ? "not-allowed" : "pointer",
+                    cursor:
+                      upgradeLoading ||
+                      (hasExistingSubscription && changeType === "same")
+                        ? "not-allowed"
+                        : "pointer",
                   }}
                 >
                   {upgradeLoading ? "Saving..." : primaryButtonLabel}
@@ -592,6 +697,43 @@ export function BillingPage() {
                 >
                   <div style={{ fontSize: 13, fontWeight: 800, color: "#111827" }}>
                     Billing Preview
+                  </div>
+
+                  <div
+                    style={{
+                      marginTop: 10,
+                      marginBottom: 2,
+                      padding: 10,
+                      borderRadius: 12,
+                      border:
+                        changeType === "upgrade"
+                          ? "1px solid #bfdbfe"
+                          : changeType === "downgrade"
+                          ? "1px solid #fde68a"
+                          : "1px solid #e5e7eb",
+                      background:
+                        changeType === "upgrade"
+                          ? "#eff6ff"
+                          : changeType === "downgrade"
+                          ? "#fffbeb"
+                          : "#f9fafb",
+                      color:
+                        changeType === "upgrade"
+                          ? "#1d4ed8"
+                          : changeType === "downgrade"
+                          ? "#92400e"
+                          : "#374151",
+                      fontSize: 13,
+                      fontWeight: 700,
+                    }}
+                  >
+                    {!hasExistingSubscription
+                      ? "This will start your first subscription."
+                      : changeType === "upgrade"
+                      ? `You are increasing capacity from ${s?.entitledLocks ?? 0} to ${locks} locks.`
+                      : changeType === "downgrade"
+                      ? `You are reducing capacity from ${s?.entitledLocks ?? 0} to ${locks} locks.`
+                      : `Your capacity remains at ${locks} locks.`}
                   </div>
 
                   {!hasExistingSubscription ? (

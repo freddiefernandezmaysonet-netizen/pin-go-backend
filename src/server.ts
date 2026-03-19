@@ -15,6 +15,8 @@ import { reservationsRouter } from "./routes/reservations.routes";
 import { buildGuestRouter } from "./routes/guest.routes";
 import { buildBillingRouter } from "./routes/billing.routes";
 import { buildBillingPortalRouter } from "./routes/billing.portal.route";
+import billingPreviewRouter from "./routes/billing.preview.routes";
+import billingCapacityRouter from "./routes/billing.capacity.routes";
 import ingestRoutes from "./routes/ingest.routes";
 import { buildStaffRouter } from "./routes/staff.routes";
 import { buildCleaningRouter } from "./routes/cleaning.routes";
@@ -184,6 +186,8 @@ app.use("/reservations", reservationsRouter);
 app.use("/billing", buildBillingRouter(prisma));
 app.use("/billing", buildBillingOverviewRouter(prisma));
 app.use("/billing", buildBillingPortalRouter(prisma));
+app.use("/billing", billingCapacityRouter);
+app.use("/billing", billingPreviewRouter);
 
 app.use(buildCreatePropertyRouter(prisma));
 app.use(buildPropertiesRouter(prisma));
