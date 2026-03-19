@@ -305,17 +305,49 @@ async function safeSyncBySubscriptionId(subscriptionId: string) {
         ? "INCOMPLETE_EXPIRED"
         : "INCOMPLETE";
 
-    const entitledLocks =
-      status === "ACTIVE" || status === "TRIALING" ? quantity : 0;
-
-    console.log("📊 sync computed", {
+    const activeLocks = await prisma.lock.count({
+  where: {
+    isActive: true,
+    property: {
       organizationId,
-      stripeSubscriptionId: fullSub.id,
-      quantity,
-      entitledLocks,
-      status,
-    });
+    },
+  },
+});
 
+const stripeEntitledLocks =
+  status === "ACTIVE" || status === "TRIALING" ? quantity : 0;
+
+// Blindaje: nunca persistir entitledLocks por debajo de activeLocks
+const entitledLocks =
+  status === "ACTIVE" || status === "TRIALING"
+    ? Math.max(stripeEntitledLocks, activeLocks)
+    : 0;
+
+const belowActiveLocks =
+  (status === "ACTIVE" || status === "TRIALING") &&
+  stripeEntitledLocks < activeLocks;
+
+if (belowActiveLocks) {
+  console.error("❌ Stripe quantity below active locks detected", {
+    organizationId,
+    stripeSubscriptionId: fullSub.id,
+    stripeQuantity: quantity,
+    stripeEntitledLocks,
+    activeLocks,
+    persistedEntitledLocks: entitledLocks,
+  });
+}
+
+console.log("📊 sync computed", {
+  organizationId,
+  stripeSubscriptionId: fullSub.id,
+  quantity,
+  stripeEntitledLocks,
+  activeLocks,
+  entitledLocks,
+  status,
+});
+    
     await prisma.subscription.upsert({
       where: { organizationId },
       create: {

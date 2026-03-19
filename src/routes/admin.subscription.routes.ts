@@ -139,18 +139,44 @@ router.post("/subscription/sync", async (req, res) => {
 
     // 5) Mapear status + entitlement
     const status = mapStripeStatus(String(fullSub.status));
-    const entitledLocks =
-      status === SubscriptionStatus.ACTIVE || status === SubscriptionStatus.TRIALING
-        ? quantity
-        : 0;
+    
+     const activeLocks = await prisma.lock.count({
+  where: {
+    isActive: true,
+    property: {
+      organizationId: orgId,
+    },
+  },
+});
 
-    const currentPeriodStart = fullSub.current_period_start
-      ? new Date(fullSub.current_period_start * 1000)
-      : null;
+const stripeEntitledLocks =
+  status === SubscriptionStatus.ACTIVE || status === SubscriptionStatus.TRIALING
+    ? quantity
+    : 0;
 
-    const currentPeriodEnd = fullSub.current_period_end
-      ? new Date(fullSub.current_period_end * 1000)
-      : null;
+const entitledLocks =
+  status === SubscriptionStatus.ACTIVE || status === SubscriptionStatus.TRIALING
+    ? Math.max(stripeEntitledLocks, activeLocks)
+    : 0;
+
+const belowActiveLocks =
+  (status === SubscriptionStatus.ACTIVE || status === SubscriptionStatus.TRIALING) &&
+  stripeEntitledLocks < activeLocks;
+
+if (belowActiveLocks) {
+  console.error("❌ admin sync detected Stripe quantity below active locks", {
+    orgId,
+    stripeSubscriptionId: fullSub.id,
+    stripeQuantity: quantity,
+    stripeEntitledLocks,
+    activeLocks,
+    persistedEntitledLocks: entitledLocks,
+  });
+}
+
+const currentPeriodStart = fullSub.current_period_start
+  ? new Date(fullSub.current_period_start * 1000)
+  : null;
 
     // 6) Upsert a DB
     const saved = await prisma.subscription.upsert({
