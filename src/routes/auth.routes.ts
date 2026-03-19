@@ -7,7 +7,13 @@ import {
   buildClearAuthCookie,
   extractTokenFromRequest,
   verifyAuthToken,
+  hashPassword,
 } from "../lib/auth";
+import { validatePasswordPolicy } from "../lib/passwordPolicy";
+import {
+  forgotPasswordHandler,
+  resetPasswordHandler,
+} from "../controllers/password.controller";
 
 const prisma = new PrismaClient();
 export const authRouter = Router();
@@ -30,6 +36,7 @@ authRouter.post("/auth/login", async (req, res) => {
         passwordHash: true,
         role: true,
         isActive: true,
+        tokenVersion: true,
       },
     });
 
@@ -52,6 +59,7 @@ authRouter.post("/auth/login", async (req, res) => {
       orgId: user.organizationId,
       email: user.email,
       role: user.role,
+      tokenVersion: user.tokenVersion,
     });
 
     await prisma.dashboardUser.update({
@@ -99,6 +107,7 @@ authRouter.get("/auth/me", async (req, res) => {
         email: true,
         role: true,
         isActive: true,
+        tokenVersion: true,
       },
     });
 
@@ -109,7 +118,12 @@ authRouter.get("/auth/me", async (req, res) => {
     if (!user.isActive) {
       return res.status(403).json({ error: "USER_DISABLED" });
     }
-
+    
+    if (user.tokenVersion !== payload.tokenVersion) {
+      res.setHeader("Set-Cookie", buildClearAuthCookie());
+      return res.status(401).json({ error: "SESSION_EXPIRED" });
+    }
+    
     return res.json({
       user: {
         id: user.id,
@@ -122,6 +136,9 @@ authRouter.get("/auth/me", async (req, res) => {
     return res.status(401).json({ error: "UNAUTHENTICATED" });
   }
 });
+
+authRouter.post("/auth/forgot-password", forgotPasswordHandler);
+authRouter.post("/auth/reset-password", resetPasswordHandler);
 
 authRouter.post("/api/auth/register-organization", async (req, res) => {
   try {
@@ -142,6 +159,20 @@ authRouter.post("/api/auth/register-organization", async (req, res) => {
       });
     }
 
+    const passwordPolicy = validatePasswordPolicy(password, {
+      email,
+      fullName,
+      organizationName,
+    });
+
+    if (!passwordPolicy.ok) {
+      return res.status(400).json({
+        ok: false,
+        error: "WEAK_PASSWORD",
+        details: passwordPolicy.errors,
+      });
+    }
+
     const existingUser = await prisma.dashboardUser.findUnique({
       where: { email },
       select: { id: true },
@@ -154,8 +185,7 @@ authRouter.post("/api/auth/register-organization", async (req, res) => {
       });
     }
 
-    const bcrypt = await import("bcryptjs");
-    const passwordHash = await bcrypt.hash(password, 10);
+    const passwordHash = await hashPassword(password);
 
     const created = await prisma.organization.create({
       data: {
@@ -167,6 +197,7 @@ authRouter.post("/api/auth/register-organization", async (req, res) => {
             fullName,
             role,
             isActive: true,
+            tokenVersion: true,
           },
         },
       },
@@ -191,6 +222,7 @@ authRouter.post("/api/auth/register-organization", async (req, res) => {
       orgId: createdUser.organizationId,
       email: createdUser.email,
       role: createdUser.role,
+      tokenVersion: createdUser.tokenVersion,
     });
 
     res.setHeader("Set-Cookie", buildAuthCookie(token));

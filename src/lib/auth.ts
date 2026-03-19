@@ -1,12 +1,12 @@
-// src/lib/auth.ts
 import jwt from "jsonwebtoken";
 import bcrypt from "bcryptjs";
 
 export type AuthTokenPayload = {
-  sub: string;          // userId
-  orgId: string;        // organizationId
+  sub: string;
+  orgId: string;
   email: string;
   role?: string;
+  tokenVersion: number;
 };
 
 const JWT_SECRET = process.env.JWT_SECRET ?? "dev-secret-change-this";
@@ -39,7 +39,12 @@ export function verifyAuthToken(token: string): AuthTokenPayload {
 
   const payload = decoded as Partial<AuthTokenPayload>;
 
-  if (!payload.sub || !payload.orgId || !payload.email) {
+  if (
+    !payload.sub ||
+    !payload.orgId ||
+    !payload.email ||
+    typeof payload.tokenVersion !== "number"
+  ) {
     throw new Error("Token missing required fields");
   }
 
@@ -48,6 +53,7 @@ export function verifyAuthToken(token: string): AuthTokenPayload {
     orgId: payload.orgId,
     email: payload.email,
     role: payload.role,
+    tokenVersion: payload.tokenVersion,
   };
 }
 

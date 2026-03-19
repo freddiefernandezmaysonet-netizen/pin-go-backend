@@ -29,7 +29,7 @@ import { buildPropertiesRouter } from "./routes/properties.route";
 import { buildAdminLocksRouter } from "./routes/admin.locks.routes";
 import { buildAdminLocksSwapRouter } from "./routes/admin.locks.swap.routes";
 import buildDeviceHealthRouter from "./routes/deviceHealth.routes";
-//import { buildAdminDeviceHealthRouter } from "./routes/admin.deviceHealth.routes";
+// import { buildAdminDeviceHealthRouter } from "./routes/admin.deviceHealth.routes";
 import buildDeviceBatteryRouter from "./routes/deviceBattery.routes";
 import buildDeviceGatewayRouter from "./routes/deviceGateway.routes";
 import adminUsageRoutes from "./routes/admin.usage.routes";
@@ -61,7 +61,7 @@ import { buildOrgLocksActivateV2Router } from "./routes/org.locks.activate.v2.ro
 import { buildOrgTtlockConnectV2Router } from "./routes/org.ttlock.connect.v2.router";
 import { buildBillingOverviewRouter } from "./routes/billing.overview.route";
 import { orgTtlockStatusRouter } from "./routes/org.ttlock.status.route";
-import { getDeviceHealthAccessToken } from "./ttlock/ttlock.deviceHealth.auth";
+import signupPublicRoutes from "./routes/public.signup.routes";
 
 const app = express();
 const prisma = new PrismaClient();
@@ -80,6 +80,9 @@ console.log("ENV CHECK TTLOCK:", {
   password: process.env.TTLOCK_PASSWORD_PLAIN ? "OK" : "MISSING",
 });
 
+// =====================
+// Webhooks primero
+// =====================
 registerStripeWebhook(app);
 
 // =====================
@@ -127,6 +130,13 @@ app.get("/health", (_req, res) => {
   res.json({ ok: true, name: "Pin&Go API" });
 });
 
+// =====================
+// Public / open routes
+// =====================
+app.use(signupPublicRoutes);
+app.use(authRouter);
+
+// Debug públicos temporales
 app.get("/api/dev/test-open", (_req, res) => {
   console.log(">>> OPEN DEV TEST HIT");
   res.json({ ok: true, route: "open-dev-test" });
@@ -140,15 +150,9 @@ app.get("/api/dev/locks/:lockId/device-health-test", (req, res) => {
   });
 });
 
-app.use(buildDeviceHealthRouter(prisma));
-app.use(buildDeviceBatteryRouter(prisma));
-app.use(buildDeviceGatewayRouter(prisma));
-app.use(dashboardAlertsRouter);
-
 // =====================
-// Auth
+// Auth-related / user session
 // =====================
-app.use(authRouter);
 app.use(meRouter);
 app.use(orgTtlockStatusRouter);
 
@@ -161,6 +165,14 @@ app.use(buildGuestRouter(prisma));
 // Ingest API
 // =====================
 app.use("/api/ingest", ingestRoutes);
+
+// =====================
+// Device / alerts
+// =====================
+app.use(buildDeviceHealthRouter(prisma));
+app.use(buildDeviceBatteryRouter(prisma));
+app.use(buildDeviceGatewayRouter(prisma));
+app.use(dashboardAlertsRouter);
 
 // =====================
 // Core Routers
@@ -176,8 +188,7 @@ app.use("/billing", buildBillingPortalRouter(prisma));
 app.use(buildCreatePropertyRouter(prisma));
 app.use(buildPropertiesRouter(prisma));
 
-
-//app.use(buildAdminDeviceHealthRouter(prisma));
+// app.use(buildAdminDeviceHealthRouter(prisma));
 
 app.use("/api/admin", adminReactivateRoutes);
 // app.use("/api/dev", devRoutes);
@@ -217,7 +228,6 @@ app.use(dashboardLocksCapacityRouter);
 app.use(dashboardPmsRouter);
 app.use(devPmsRouter);
 app.use(eventsRouter);
-
 
 // =====================
 // Staff + Cleaning
@@ -285,7 +295,6 @@ export default app;
 // =====================
 // Start server
 // =====================
-
 app.listen(PORT, () => {
   console.log("✅ property settings routes loaded");
 

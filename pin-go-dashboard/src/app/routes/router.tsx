@@ -12,8 +12,8 @@ import { LockDetailPage } from "../../pages/lock-detail/LockDetailPage";
 import { PmsConnectionsPage } from "../../pages/integrations/PmsConnectionsPage";
 import ListingsMappingPage from "../../pages/pms/ListingsMappingPage";
 import LoginPage from "../../pages/LoginPage";
-import SignupPage from "../../pages/SignupPage";
-
+import SignupPage from "../../pages/auth/SignupPage";
+import SignupSuccessPage from "../../pages/auth/SignupSuccessPage";
 import { RequireAuth } from "../../auth/RequireAuth";
 import CreatePropertyPage from "../../pages/onboarding/CreatePropertyPage";
 import TtlockConnectPage from "../../pages/integrations/TtlockConnectPage";
@@ -23,6 +23,8 @@ import BillingSuccessPage from "../../pages/dashboard/BillingSuccessPage";
 import BillingCancelPage from "../../pages/dashboard/BillingCancelPage";
 import { HealthCenterPage } from "../../pages/health-center/HealthCenterPage";
 import { StaffMembersPage } from "../../pages/staff/StaffMembersPage";
+import ForgotPasswordPage from "../../pages/auth/ForgotPasswordPage";
+import ResetPasswordPage from "../../pages/auth/ResetPasswordPage";
 
 export const router = createBrowserRouter([
   {
@@ -33,6 +35,19 @@ export const router = createBrowserRouter([
     path: "/signup",
     element: <SignupPage />,
   },
+  {
+    path: "/signup/success",
+    element: <SignupSuccessPage />,
+  },
+   {
+    path: "/forgot-password",
+    element: <ForgotPasswordPage />,
+  },
+  {
+    path: "/reset-password",
+    element: <ResetPasswordPage />,
+  },
+
   {
     element: (
       <RequireAuth>

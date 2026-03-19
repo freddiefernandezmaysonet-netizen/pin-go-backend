@@ -1,7 +1,11 @@
 import type { Express, Request, Response } from "express";
 import bodyParser from "body-parser";
 import Stripe from "stripe";
-import { PrismaClient } from "@prisma/client";
+import {
+  PrismaClient,
+  DashboardUserRole,
+  PendingSignupStatus,
+} from "@prisma/client";
 import stripe from "../billing/stripe";
 
 const prisma = new PrismaClient();
@@ -51,6 +55,8 @@ export function registerStripeWebhook(app: Express) {
               metadata: session.metadata,
             });
 
+            await maybeCompleteSignupOnboarding(session);
+
             if (session.subscription) {
               await safeSyncBySubscriptionId(String(session.subscription));
             }
@@ -93,6 +99,128 @@ export function registerStripeWebhook(app: Express) {
   );
 }
 
+async function maybeCompleteSignupOnboarding(session: Stripe.Checkout.Session) {
+  const metadata = session.metadata ?? {};
+  const flow = String(metadata.flow ?? "");
+
+  if (flow !== "signup_onboarding") {
+    return;
+  }
+
+  const pendingSignupId = String(metadata.pendingSignupId ?? "").trim();
+
+  if (!pendingSignupId) {
+    console.warn("⚠️ signup onboarding session missing pendingSignupId", {
+      sessionId: session.id,
+    });
+    return;
+  }
+
+  console.log("🚀 onboarding webhook start", {
+    sessionId: session.id,
+    pendingSignupId,
+    customer: session.customer,
+    subscription: session.subscription,
+  });
+
+  const pending = await prisma.pendingSignup.findUnique({
+    where: { id: pendingSignupId },
+  });
+
+  if (!pending) {
+    console.warn("⚠️ PendingSignup not found", {
+      pendingSignupId,
+      sessionId: session.id,
+    });
+    return;
+  }
+
+  if (pending.status === PendingSignupStatus.COMPLETED && pending.organizationId) {
+    console.log("✅ onboarding already completed, skipping", {
+      pendingSignupId,
+      organizationId: pending.organizationId,
+    });
+    return;
+  }
+
+  const existingUser = await prisma.dashboardUser.findUnique({
+    where: { email: pending.email },
+    select: {
+      id: true,
+      organizationId: true,
+    },
+  });
+
+  if (existingUser) {
+    console.warn("⚠️ DashboardUser already exists for pending signup email", {
+      pendingSignupId,
+      email: pending.email,
+      userId: existingUser.id,
+    });
+
+    await prisma.pendingSignup.update({
+      where: { id: pending.id },
+      data: {
+        status: PendingSignupStatus.COMPLETED,
+        completedAt: new Date(),
+        organizationId: existingUser.organizationId,
+        stripeCustomerId: session.customer ? String(session.customer) : pending.stripeCustomerId,
+        stripeSubscriptionId: session.subscription
+          ? String(session.subscription)
+          : pending.stripeSubscriptionId,
+      },
+    });
+
+    return;
+  }
+
+  await prisma.$transaction(async (tx) => {
+    let organizationId = pending.organizationId ?? null;
+
+    if (!organizationId) {
+      const org = await tx.organization.create({
+        data: {
+          name: pending.organizationName,
+          stripeCustomerId: session.customer ? String(session.customer) : pending.stripeCustomerId,
+        },
+        select: { id: true },
+      });
+
+      organizationId = org.id;
+    }
+
+    await tx.dashboardUser.create({
+      data: {
+        organizationId,
+        email: pending.email,
+        passwordHash: pending.passwordHash,
+        fullName: pending.fullName,
+        role: DashboardUserRole.ADMIN,
+        isActive: true,
+      },
+    });
+
+    await tx.pendingSignup.update({
+      where: { id: pending.id },
+      data: {
+        status: PendingSignupStatus.COMPLETED,
+        completedAt: new Date(),
+        organizationId,
+        stripeCustomerId: session.customer ? String(session.customer) : pending.stripeCustomerId,
+        stripeSubscriptionId: session.subscription
+          ? String(session.subscription)
+          : pending.stripeSubscriptionId,
+        stripeCheckoutSessionId: session.id,
+      },
+    });
+  });
+
+  console.log("✅ onboarding webhook completed", {
+    pendingSignupId,
+    sessionId: session.id,
+  });
+}
+
 async function safeSyncBySubscriptionId(subscriptionId: string) {
   try {
     console.log("🚀 sync start:", subscriptionId);
@@ -117,6 +245,32 @@ async function safeSyncBySubscriptionId(subscriptionId: string) {
       });
 
       organizationId = found?.organizationId ?? null;
+    }
+
+    if (!organizationId) {
+      const foundOrg = await prisma.organization.findFirst({
+        where: {
+          stripeCustomerId: String(fullSub.customer),
+        },
+        select: {
+          id: true,
+        },
+      });
+
+      organizationId = foundOrg?.id ?? null;
+    }
+
+    if (!organizationId) {
+      const foundPending = await prisma.pendingSignup.findFirst({
+        where: {
+          stripeSubscriptionId: fullSub.id,
+        },
+        select: {
+          organizationId: true,
+        },
+      });
+
+      organizationId = foundPending?.organizationId ?? null;
     }
 
     if (!organizationId) {

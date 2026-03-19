@@ -8,36 +8,53 @@ datasource db {
 }
 
 model Organization {
-  id             String          @id @default(cuid())
-  name           String
-  createdAt      DateTime        @default(now())
-  updatedAt      DateTime        @updatedAt
-  dashboardUsers DashboardUser[]
-  deviceHealths  DeviceHealth[]
-  lockGroups     LockGroup[]
-  people         Person[]
-  pmsConnections PmsConnection[]
-  properties     Property[]
-  staffMembers   StaffMember[]
-  subscriptions  Subscription?
-  ttlockAuth     TTLockAuth?
+  id               String          @id @default(cuid())
+  name             String
+  createdAt        DateTime        @default(now())
+  updatedAt        DateTime        @updatedAt
+  stripeCustomerId String?
+  dashboardUsers   DashboardUser[]
+  deviceHealths    DeviceHealth[]
+  lockGroups       LockGroup[]
+  pendingSignups   PendingSignup[]
+  people           Person[]
+  pmsConnections   PmsConnection[]
+  properties       Property[]
+  staffMembers     StaffMember[]
+  subscriptions    Subscription?
+  ttlockAuth       TTLockAuth?
 }
 
 model DashboardUser {
-  id             String            @id @default(cuid())
-  organizationId String
-  email          String            @unique
-  passwordHash   String
-  fullName       String?
-  role           DashboardUserRole @default(ADMIN)
-  isActive       Boolean           @default(true)
-  lastLoginAt    DateTime?
-  createdAt      DateTime          @default(now())
-  updatedAt      DateTime          @updatedAt
-  organization   Organization      @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  id                  String               @id @default(cuid())
+  organizationId      String
+  email               String               @unique
+  passwordHash        String
+  fullName            String?
+  role                DashboardUserRole    @default(ADMIN)
+  isActive            Boolean              @default(true)
+  lastLoginAt         DateTime?
+  createdAt           DateTime             @default(now())
+  updatedAt           DateTime             @updatedAt
+  tokenVersion        Int                  @default(0)
+  organization        Organization         @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  passwordResetTokens PasswordResetToken[]
 
   @@index([organizationId, isActive])
   @@index([organizationId, role])
+}
+
+model PasswordResetToken {
+  id        String        @id @default(cuid())
+  userId    String
+  tokenHash String        @unique
+  expiresAt DateTime
+  usedAt    DateTime?
+  createdAt DateTime      @default(now())
+  user      DashboardUser @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([expiresAt])
 }
 
 model Property {
@@ -96,6 +113,33 @@ model Person {
   subscriptions    Subscription[]
 
   @@index([organizationId, role])
+}
+
+model PendingSignup {
+  id                      String              @id @default(cuid())
+  email                   String
+  passwordHash            String
+  fullName                String?
+  organizationName        String
+  phone                   String?
+  requestedLocks          Int                 @default(1)
+  stripeCheckoutSessionId String?             @unique
+  stripeCustomerId        String?
+  stripeSubscriptionId    String?
+  stripePriceId           String?
+  status                  PendingSignupStatus @default(PENDING)
+  organizationId          String?
+  completedAt             DateTime?
+  expiresAt               DateTime?
+  metadata                Json?
+  createdAt               DateTime            @default(now())
+  updatedAt               DateTime            @updatedAt
+  organization            Organization?       @relation(fields: [organizationId], references: [id])
+
+  @@index([email])
+  @@index([status])
+  @@index([stripeCustomerId])
+  @@index([stripeSubscriptionId])
 }
 
 model Subscription {
@@ -512,6 +556,15 @@ enum PersonRole {
   MANAGER
   GUEST
   STAFF
+}
+
+enum PendingSignupStatus {
+  PENDING
+  CHECKOUT_CREATED
+  COMPLETED
+  EXPIRED
+  CANCELED
+  FAILED
 }
 
 enum DashboardUserRole {

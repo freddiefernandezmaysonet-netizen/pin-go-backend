@@ -1,40 +1,25 @@
 import { useState } from "react";
-import { Link, useNavigate } from "react-router-dom";
-import { login } from "../api/auth";
-import { fetchProperties } from "../api/properties";
-import { useAuth } from "../auth/AuthProvider";
+import { Link } from "react-router-dom";
+import { forgotPassword } from "../../api/password";
 
-const SHOW_DEV_SIGNUP = import.meta.env.DEV;
-
-export default function LoginPage() {
-  const navigate = useNavigate();
-  const { refresh } = useAuth();
-
+export default function ForgotPasswordPage() {
   const [email, setEmail] = useState("");
-  const [password, setPassword] = useState("");
   const [error, setError] = useState("");
+  const [message, setMessage] = useState("");
   const [submitting, setSubmitting] = useState(false);
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
     setError("");
+    setMessage("");
     setSubmitting(true);
 
     try {
-      await login(email, password);
-      await refresh();
-
-      const propsData = await fetchProperties();
-
-      if (!propsData.items?.length) {
-        navigate("/onboarding/property");
-        return;
-      }
-
-      navigate("/overview");
+      const result = await forgotPassword(email);
+      setMessage(result.message || "If the account exists, a reset link has been sent.");
     } catch (e) {
-      console.error("login failed", e);
-      setError("Invalid email or password");
+      console.error("forgot password failed", e);
+      setMessage("If the account exists, a reset link has been sent.");
     } finally {
       setSubmitting(false);
     }
@@ -80,8 +65,8 @@ export default function LoginPage() {
               lineHeight: 1.5,
             }}
           >
-            Smart access dashboard for properties, locks, reservations, and guest
-            access.
+            Enter your account email and we will send you a password reset link if
+            the account exists.
           </div>
         </div>
 
@@ -117,56 +102,6 @@ export default function LoginPage() {
             />
           </div>
 
-          <div>
-            <label
-              style={{
-                display: "block",
-                fontSize: 13,
-                fontWeight: 600,
-                color: "#374151",
-                marginBottom: 6,
-              }}
-            >
-              Password
-            </label>
-            <input
-              type="password"
-              placeholder="Enter your password"
-              value={password}
-              onChange={(e) => setPassword(e.target.value)}
-              autoComplete="current-password"
-              style={{
-                width: "100%",
-                height: 44,
-                borderRadius: 12,
-                border: "1px solid #d1d5db",
-                padding: "0 14px",
-                fontSize: 14,
-                outline: "none",
-                boxSizing: "border-box",
-              }}
-            />
-          </div>
-
-          <div
-            style={{
-              marginTop: -2,
-              textAlign: "right",
-            }}
-          >
-            <Link
-              to="/forgot-password"
-              style={{
-                color: "#2563eb",
-                fontSize: 13,
-                fontWeight: 600,
-                textDecoration: "none",
-              }}
-            >
-              Forgot password?
-            </Link>
-          </div>
-
           {error ? (
             <div
               style={{
@@ -179,6 +114,21 @@ export default function LoginPage() {
               }}
             >
               {error}
+            </div>
+          ) : null}
+
+          {message ? (
+            <div
+              style={{
+                borderRadius: 12,
+                background: "#eff6ff",
+                border: "1px solid #bfdbfe",
+                color: "#1d4ed8",
+                fontSize: 13,
+                padding: "10px 12px",
+              }}
+            >
+              {message}
             </div>
           ) : null}
 
@@ -197,32 +147,30 @@ export default function LoginPage() {
               marginTop: 4,
             }}
           >
-            {submitting ? "Signing in..." : "Sign in"}
+            {submitting ? "Sending..." : "Send reset link"}
           </button>
         </form>
 
-        {SHOW_DEV_SIGNUP ? (
-          <div
+        <div
+          style={{
+            marginTop: 18,
+            fontSize: 13,
+            color: "#6b7280",
+            textAlign: "center",
+          }}
+        >
+          Back to{" "}
+          <Link
+            to="/login"
             style={{
-              marginTop: 18,
-              fontSize: 13,
-              color: "#6b7280",
-              textAlign: "center",
+              color: "#2563eb",
+              fontWeight: 600,
+              textDecoration: "none",
             }}
           >
-            Don&apos;t have an organization yet?{" "}
-            <Link
-              to="/signup"
-              style={{
-                color: "#2563eb",
-                fontWeight: 600,
-                textDecoration: "none",
-              }}
-            >
-              Create one
-            </Link>
-          </div>
-        ) : null}
+            Sign in
+          </Link>
+        </div>
       </div>
     </div>
   );

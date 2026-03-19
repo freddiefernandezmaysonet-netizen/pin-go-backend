@@ -23,7 +23,7 @@ export default function CreatePropertyPage() {
     setSubmitting(true);
 
     try {
-      const data = await createProperty({
+      await createProperty({
         name,
         address1,
         city,
@@ -34,7 +34,7 @@ export default function CreatePropertyPage() {
         cleaningStartOffsetMinutes: Number(cleaningStartOffsetMinutes),
       });
 
-      navigate(`/properties/${data.property.id}`);
+      navigate("/integrations/ttlock");
     } catch (e: any) {
       setError(String(e?.message ?? e));
     } finally {
@@ -83,7 +83,7 @@ export default function CreatePropertyPage() {
               lineHeight: 1.5,
             }}
           >
-            Add a new property to your Pin&Go dashboard.
+            Add your first property to Pin&Go and continue to TTLock setup.
           </div>
         </div>
 
