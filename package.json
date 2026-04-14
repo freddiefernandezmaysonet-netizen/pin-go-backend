@@ -17,6 +17,7 @@
   },
   "dependencies": {
     "@prisma/client": "^6.19.2",
+    "prisma": "^6.15.0",
     "@tanstack/react-query": "^5.90.21",
     "axios": "^1.13.5",
     "bcryptjs": "^3.0.3",
@@ -41,7 +42,7 @@
     "@types/node": "^20.11.19",
     "autoprefixer": "^10.4.27",
     "postcss": "^8.5.8",
-    "prisma": "^6.15.0",
+    
     "tailwindcss": "^4.2.1",
     "tsx": "^4.21.0",
     "typescript": "^5.3.3"
