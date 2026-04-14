@@ -7,6 +7,7 @@ export type PmsProviderKey =
   | "GUESTY"
   | "CLOUDBEDS"
   | "HOSTAWAY"
+  | "LODGIFY"
   | "MANUAL";
 
 /**
@@ -67,7 +68,7 @@ export type NormalizedReservation = {
   status: NormalizedReservationStatus;
 
   /**
-   * Estado de pago
+   * Estado de pago simplificado
    */
   paymentState: NormalizedPaymentState;
 

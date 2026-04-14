@@ -4,7 +4,7 @@ import { getOrganizationId } from "../../lib/getOrganizationId";
 
 const API_BASE = import.meta.env.VITE_API_BASE ?? "http://localhost:3000";
 
-type ProviderKey = "GUESTY" | "CLOUDBEDS" | "HOSTAWAY";
+type ProviderKey = "GUESTY" | "CLOUDBEDS" | "HOSTAWAY" | "LODGIFY";
 
 type ConnectionResp = {
   ok: boolean;
@@ -60,19 +60,27 @@ const PROVIDERS: ProviderOption[] = [
   {
     key: "GUESTY",
     label: "Guesty",
-    description: "Connected to the existing Pin&Go PMS production flow.",
+    description: "Connect Guesty securely to sync listings and reservations.",
     enabled: true,
   },
+  /*
   {
     key: "CLOUDBEDS",
     label: "Cloudbeds",
     description: "Enabled for dashboard connection and PMS provider expansion.",
     enabled: true,
   },
+  */
   {
     key: "HOSTAWAY",
     label: "Hostaway",
-    description: "Enabled for dashboard connection and PMS provider expansion.",
+    description: "Connect Hostaway securely to sync listings and reservations.",
+    enabled: true,
+  },  
+  {
+    key: "LODGIFY",
+    label: "Lodgify",
+    description: "Connect Lodgify securely using an API key to sync listings and reservations.",
     enabled: true,
   },
 ];
@@ -210,6 +218,10 @@ function normalizeError(error?: string) {
       return "Client ID is required for Guesty.";
     case "PMS_CLIENT_SECRET_REQUIRED":
       return "Client Secret is required for Guesty.";
+    case "PMS_ACCOUNT_ID_REQUIRED":
+      return "Account ID is required for Hostaway.";
+    case "PMS_API_KEY_REQUIRED":
+      return "API Key is required for this provider.";
     case "ORGANIZATION_ID_REQUIRED":
       return "Organization ID is required.";
     default:
@@ -250,21 +262,43 @@ function providerCredentialLabels(provider: ProviderKey) {
   if (provider === "HOSTAWAY") {
     return {
       accountNamePlaceholder: "e.g. My Hostaway Portfolio",
-      accountIdPlaceholder: "Optional Hostaway account identifier",
+      accountIdPlaceholder: "Hostaway Account ID",
       clientIdLabel: "Client ID / API Key",
-      clientIdPlaceholder: "Hostaway Client ID or API Key",
+      clientIdPlaceholder: "Optional Hostaway Client ID",
       clientSecretLabel: "Client Secret",
       clientSecretPlaceholder: "Optional Hostaway Client Secret",
       apiKeyLabel: "API Key",
-      apiKeyPlaceholder: "Optional Hostaway API Key",
+      apiKeyPlaceholder: "Hostaway API Key",
       infoText:
-        "Hostaway can stay in onboarding mode until production credentials are available.",
-      collectText: "Collect Hostaway Access",
-      readyText: "Hostaway is enabled for PMS provider expansion.",
+        "Connect Hostaway securely and complete setup when credentials are available..",
+      collectText: "Add Hostaway Credentials",
+      readyText: "Hostaway is available for connection setup.",
       afterCredentials: [
-        "1. Save the Hostaway connection in this page.",
-        "2. Load and map PMS listings or properties to Pin&Go properties.",
-        "3. Activate reservation ingestion and retry failed webhook events if needed.",
+        "1. Save the Hostaway connection.",
+        "2. Map PMS listings or properties to Pin&Go properties.",
+        "3. Enable reservation sync and review any failed events if needed.",
+      ],
+    };
+  }
+
+  if (provider === "LODGIFY") {
+    return {
+      accountNamePlaceholder: "e.g. My Lodgify Portfolio",
+      accountIdPlaceholder: "Not required for Lodgify",
+      clientIdLabel: "Client ID",
+      clientIdPlaceholder: "Not required for Lodgify",
+      clientSecretLabel: "Client Secret",
+      clientSecretPlaceholder: "Not required for Lodgify",
+      apiKeyLabel: "API Key",
+      apiKeyPlaceholder: "Lodgify API Key",
+      infoText:
+        "Lodgify uses a direct API Key connection.",
+      collectText: "Add Lodgify API Key",
+      readyText: "Lodgify is available for connection setup. ",
+      afterCredentials: [
+        "1. Save the Lodgify connection.",
+        "2. Map Lodgify listings to Pin&Go properties.",      
+        "3. Enable reservation sync and review any failed events if needed.",
       ],
     };
   }
@@ -279,13 +313,13 @@ function providerCredentialLabels(provider: ProviderKey) {
     apiKeyLabel: "API Key",
     apiKeyPlaceholder: "Optional",
     infoText:
-      "This page can stay in onboarding mode until the client shares Guesty credentials.",
-    collectText: "Collect Guesty Access",
-    readyText: "Guesty is enabled first for the PMS rollout.",
+      "Add Guesty credentials to connect listings and reservations .",
+    collectText: "Add Guesty Access",
+    readyText: "Guesty is available for connection setup.",
     afterCredentials: [
-      "1. Save the Guesty connection in this page.",
-      "2. Load and map PMS listings to Pin&Go properties.",
-      "3. Activate reservation ingestion and retry failed webhook events if needed.",
+      "1. Save the Guesty connection.",
+      "2. Map PMS listings to Pin&Go properties.",
+      "3. Enable reservation sync and review any failed events if needed.",
     ],
   };
 }
@@ -313,7 +347,7 @@ export function PmsConnectionsPage() {
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
   const [info, setInfo] = useState<string | null>(
-    "This page can stay in onboarding mode until the client shares Guesty credentials."
+    "Add your PMS credentials to configure the connection."
   );
 
   const selectedProvider = useMemo(
@@ -328,7 +362,10 @@ export function PmsConnectionsPage() {
 
   const onboardingReady = Boolean(existingConnection?.hasCredentials);
   const canProceedToMapping =
-    provider === "GUESTY" || provider === "CLOUDBEDS" || provider === "HOSTAWAY";
+    provider === "GUESTY" ||
+    provider === "CLOUDBEDS" ||
+    provider === "HOSTAWAY" ||
+    provider === "LODGIFY";
 
   async function loadConnection(nextProvider: ProviderKey) {
     setLoadingConnection(true);
@@ -368,6 +405,8 @@ export function PmsConnectionsPage() {
         setNotes("");
       }
 
+      setAccountId("");
+      setClientId("");
       setClientSecret("");
       setApiKey("");
       setWebhookSecret("");
@@ -612,10 +651,12 @@ export function PmsConnectionsPage() {
 
       <div style={statusBoxStyle("warning")}>
         {provider === "GUESTY"
-          ? "Guesty credentials are not required to keep building the dashboard. You can leave this page in onboarding mode and return when the client shares real access details."
+          ? "Add your Guesty credentials to continue with listings mapping ."
           : provider === "CLOUDBEDS"
             ? "Cloudbeds credentials are not required to keep building the dashboard. You can leave this page in onboarding mode and return when production access is available."
-            : "Hostaway credentials are not required to keep building the dashboard. You can leave this page in onboarding mode and return when production access is available."}
+            : provider === "HOSTAWAY"
+              ? "Add your Hostaway credentials to complete the connection and continue with listings mapping."
+              : "Add your Lodgify API Key to continue with listings mapping."}
       </div>
 
       <div style={sectionStyle()}>
@@ -636,9 +677,7 @@ export function PmsConnectionsPage() {
               Listings Mapping UI is the next operational step
             </div>
             <div style={{ color: "#6b7280", fontSize: 14 }}>
-              You can continue building the PMS workflow now by mapping external
-              PMS listings to internal Pin&Go properties, even before real
-              production credentials are fully available.
+               Continue by mapping PMS listings to your internal properties so reservations can sync correctly.
             </div>
           </div>
 
@@ -670,10 +709,17 @@ export function PmsConnectionsPage() {
             </>
           ) : provider === "HOSTAWAY" ? (
             <>
-              <div>1. Hostaway Client ID / API Key</div>
-              <div>2. Optional Hostaway Client Secret</div>
-              <div>3. Optional account or portfolio identifier</div>
+              <div>1. Hostaway Account ID</div>
+              <div>2. Hostaway API Key</div>
+              <div>3. Optional Hostaway Client Secret</div>
               <div>4. Optional webhook secret if webhook signing is enabled</div>
+            </>
+          ) : provider === "LODGIFY" ? (
+            <>
+              <div>1. Lodgify API Key</div>
+              <div>2. Optional account or portfolio name</div>
+              <div>3. Optional webhook secret if webhook signing is enabled</div>
+              <div>4. Configure Lodgify webhook URL pointing to Pin&Go</div>
             </>
           ) : (
             <>

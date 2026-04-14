@@ -1,0 +1,700 @@
+import { useEffect, useMemo, useState, type CSSProperties } from "react";
+import { Link } from "react-router-dom";
+
+type HistoryItem = {
+  id: string;
+  propertyId: string;
+  reservationId?: string | null;
+
+  trigger: string;
+  source: string;
+
+  deviceName?: string | null;
+  deviceCategory?: string | null;
+  externalId?: string | null;
+
+  action?: string | null;
+  value?: any;
+
+  status: string;
+  errorMessage?: string | null;
+
+  executedAt: string;
+
+  property?: {
+    id: string;
+    name: string;
+  } | null;
+
+  reservation?: {
+    id: string;
+    guestName: string;
+    roomName?: string | null;
+    checkIn: string;
+    checkOut: string;
+  } | null;
+};
+
+type HistoryResponse = {
+  ok: boolean;
+  count: number;
+  items: HistoryItem[];
+  error?: string;
+};
+
+type PropertyRow = {
+  id: string;
+  name: string;
+};
+
+type PropertiesResponse = {
+  items: PropertyRow[];
+};
+
+const API_BASE = import.meta.env.VITE_API_BASE ?? "http://localhost:3000";
+
+function Stat({ title, value }: { title: string; value: string | number }) {
+  return (
+    <div
+      style={{
+        border: "1px solid #e5e7eb",
+        borderRadius: 16,
+        padding: 18,
+        background: "#fff",
+      }}
+    >
+      <div style={{ fontSize: 13, color: "#6b7280", marginBottom: 8 }}>{title}</div>
+      <div style={{ fontSize: 28, fontWeight: 700, color: "#111827" }}>{value}</div>
+    </div>
+  );
+}
+
+function SectionCard({
+  title,
+  children,
+  right,
+}: {
+  title: string;
+  children: React.ReactNode;
+  right?: React.ReactNode;
+}) {
+  return (
+    <div
+      style={{
+        border: "1px solid #e5e7eb",
+        borderRadius: 18,
+        padding: 18,
+        background: "#fff",
+        display: "grid",
+        gap: 12,
+      }}
+    >
+      <div
+        style={{
+          display: "flex",
+          justifyContent: "space-between",
+          alignItems: "center",
+          gap: 12,
+          flexWrap: "wrap",
+        }}
+      >
+        <div style={{ fontSize: 18, fontWeight: 700 }}>{title}</div>
+        {right}
+      </div>
+      {children}
+    </div>
+  );
+}
+
+export default function AutomationHistoryPage() {
+  const [items, setItems] = useState<HistoryItem[]>([]);
+  const [properties, setProperties] = useState<PropertyRow[]>([]);
+  const [propertyId, setPropertyId] = useState("");
+  const [loading, setLoading] = useState(true);
+  const [loadingProps, setLoadingProps] = useState(true);
+  const [error, setError] = useState("");
+
+  const isAutomationPremium = true;
+
+  useEffect(() => {
+    let ignore = false;
+
+    async function loadProperties() {
+      setLoadingProps(true);
+      try {
+        const resp = await fetch(`${API_BASE}/api/dashboard/properties`, {
+          credentials: "include",
+        });
+
+        const data = (await resp.json()) as PropertiesResponse;
+
+        if (!ignore) {
+          setProperties(Array.isArray(data?.items) ? data.items : []);
+        }
+      } catch (err: any) {
+        if (!ignore) {
+          console.error("[automation-history] properties error", err);
+        }
+      } finally {
+        if (!ignore) setLoadingProps(false);
+      }
+    }
+
+    void loadProperties();
+
+    return () => {
+      ignore = true;
+    };
+  }, []);
+
+  useEffect(() => {
+    let ignore = false;
+
+    async function loadHistory() {
+      if (!isAutomationPremium) {
+        setLoading(false);
+        return;
+      }
+
+      setLoading(true);
+      setError("");
+
+      try {
+        const qs = new URLSearchParams();
+        if (propertyId) qs.set("propertyId", propertyId);
+        qs.set("take", "100");
+
+        const resp = await fetch(
+          `${API_BASE}/api/dev/automation/history?${qs.toString()}`,
+          {
+            credentials: "include",
+          }
+        );
+
+        const data = (await resp.json()) as HistoryResponse;
+
+        if (!resp.ok || !data?.ok) {
+          throw new Error(data?.error || "Failed to load automation history");
+        }
+
+        if (!ignore) {
+          setItems(Array.isArray(data.items) ? data.items : []);
+        }
+      } catch (err: any) {
+        if (!ignore) {
+          setError(String(err?.message ?? err));
+          setItems([]);
+        }
+      } finally {
+        if (!ignore) setLoading(false);
+      }
+    }
+
+    void loadHistory();
+
+    return () => {
+      ignore = true;
+    };
+  }, [propertyId, isAutomationPremium]);
+
+  const propertyMap = useMemo(() => {
+    return new Map(properties.map((p) => [p.id, p.name]));
+  }, [properties]);
+
+  const selectedPropertyName = useMemo(() => {
+    if (!propertyId) return "All Properties";
+    return propertyMap.get(propertyId) ?? "Selected Property";
+  }, [propertyId, propertyMap]);
+
+  const checkInCount = useMemo(
+    () => items.filter((x) => String(x.trigger).toUpperCase() === "CHECK_IN").length,
+    [items]
+  );
+
+  const checkOutCount = useMemo(
+    () => items.filter((x) => String(x.trigger).toUpperCase() === "CHECK_OUT").length,
+    [items]
+  );
+
+  const failedCount = useMemo(
+    () => items.filter((x) => String(x.status).toUpperCase() === "FAILED").length,
+    [items]
+  );
+
+  return (
+    <div style={{ display: "grid", gap: 20 }}>
+      <div>
+        <Link to="/overview" style={{ color: "#2563eb", textDecoration: "none" }}>
+          ← Back to overview
+        </Link>
+      </div>
+
+      <div>
+        <h1 style={{ fontSize: 30, fontWeight: 700, margin: 0 }}>Automation History</h1>
+        <p style={{ color: "#666", marginTop: 8 }}>
+          Review recent automation executions by property, device, action, and result.
+        </p>
+      </div>
+
+      {!isAutomationPremium ? (
+        <SectionCard
+          title="Premium Feature"
+          right={
+            <Link
+              to="/billing"
+              style={{
+                textDecoration: "none",
+                borderRadius: 12,
+                padding: "10px 14px",
+                background: "#111827",
+                color: "#fff",
+                fontWeight: 700,
+              }}
+            >
+              Upgrade plan
+            </Link>
+          }
+        >
+          <div style={{ color: "#6b7280", lineHeight: 1.7 }}>
+            Automation History is available on Premium plans. Upgrade to access
+            execution visibility, automation auditing, and property-level tracking.
+          </div>
+        </SectionCard>
+      ) : (
+        <>
+          <div
+            style={{
+              display: "grid",
+              gap: 16,
+              gridTemplateColumns: "repeat(5, minmax(0, 1fr))",
+            }}
+          >
+            <Stat title="Executions" value={items.length} />
+            <Stat title="Check-ins" value={checkInCount} />
+            <Stat title="Check-outs" value={checkOutCount} />
+            <Stat title="Failures" value={failedCount} />
+            <Stat title="Scope" value={selectedPropertyName} />
+          </div>
+
+          <div
+            style={{
+              display: "grid",
+              gap: 16,
+              gridTemplateColumns: "1fr 1fr",
+              alignItems: "start",
+            }}
+          >
+            <SectionCard title="History Summary">
+              <div style={{ color: "#6b7280", lineHeight: 1.7 }}>
+                This view shows the most recent automation executions for your
+                properties, including device, action, trigger, execution time,
+                and success or failure details.
+              </div>
+            </SectionCard>
+
+            <SectionCard title="Filter Controls">
+              <div style={{ display: "grid", gap: 8 }}>
+                <label
+                  style={{
+                    display: "block",
+                    fontSize: 13,
+                    fontWeight: 700,
+                    color: "#374151",
+                  }}
+                >
+                  Property
+                </label>
+                <select
+                  value={propertyId}
+                  onChange={(e) => setPropertyId(e.target.value)}
+                  disabled={loadingProps}
+                  style={{
+                    width: "100%",
+                    height: 42,
+                    borderRadius: 12,
+                    border: "1px solid #d1d5db",
+                    padding: "0 12px",
+                    background: "#fff",
+                  }}
+                >
+                  <option value="">All Properties</option>
+                  {properties.map((p) => (
+                    <option key={p.id} value={p.id}>
+                      {p.name}
+                    </option>
+                  ))}
+                </select>
+              </div>
+            </SectionCard>
+          </div>
+
+          <SectionCard
+            title={`Execution Log (${items.length})`}
+            right={
+              propertyId ? (
+                <button
+                  onClick={() => setPropertyId("")}
+                  style={{
+                    height: 40,
+                    padding: "0 14px",
+                    borderRadius: 12,
+                    border: "1px solid #d1d5db",
+                    background: "#fff",
+                    color: "#111827",
+                    fontWeight: 700,
+                    cursor: "pointer",
+                  }}
+                >
+                  Clear Filter
+                </button>
+              ) : null
+            }
+          >
+            {loading ? (
+              <div style={{ padding: 8, color: "#6b7280" }}>
+                Loading automation history...
+              </div>
+            ) : error ? (
+              <div
+                style={{
+                  border: "1px solid #fecaca",
+                  background: "#fef2f2",
+                  padding: 12,
+                  borderRadius: 12,
+                  color: "#991b1b",
+                }}
+              >
+                <b>Error:</b> {error}
+              </div>
+            ) : items.length === 0 ? (
+              <div
+                style={{
+                  borderRadius: 12,
+                  padding: 16,
+                  background: "#f9fafb",
+                  border: "1px solid #e5e7eb",
+                  color: "#6b7280",
+                }}
+              >
+                No automation executions found for the selected filter.
+              </div>
+            ) : (
+              <div style={{ overflowX: "auto" }}>
+                <table
+                  style={{
+                    width: "100%",
+                    borderCollapse: "collapse",
+                    minWidth: 1320,
+                  }}
+                >
+                  <thead>
+                    <tr style={{ background: "#f9fafb", textAlign: "left" }}>
+                      <th style={thStyle}>Executed</th>
+                      <th style={thStyle}>Trigger</th>
+                      <th style={thStyle}>Device</th>
+                      <th style={thStyle}>Action</th>
+                      <th style={thStyle}>Status</th>
+                      <th style={thStyle}>Property</th>
+                      <th style={thStyle}>Reservation</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {items.map((row) => {
+                      const propertyName =
+                        row.property?.name ??
+                        propertyMap.get(row.propertyId) ??
+                        "Unknown property";
+
+                      return (
+                        <tr key={row.id} style={{ borderTop: "1px solid #f3f4f6" }}>
+                          <td style={tdStyle}>
+                            <div style={{ display: "grid", gap: 4 }}>
+                              <div style={{ fontWeight: 600, color: "#111827" }}>
+                                {formatDateTime(row.executedAt)}
+                              </div>
+                              <div style={{ fontSize: 12, color: "#6b7280" }}>
+                                {row.externalId ? `Device ID: ${row.externalId}` : "Execution log"}
+                              </div>
+                            </div>
+                          </td>
+
+                          <td style={tdStyle}>
+                            <div style={{ display: "grid", gap: 6 }}>
+                              <TriggerBadge trigger={row.trigger} />
+                              <SourceBadge source={row.source} />
+                            </div>
+                          </td>
+
+                          <td style={tdStyle}>
+                            <div style={{ display: "grid", gap: 4 }}>
+                              <div style={{ fontWeight: 600, color: "#111827" }}>
+                                {row.deviceName ?? "Unknown device"}
+                              </div>
+                              <div style={{ fontSize: 12, color: "#6b7280" }}>
+                                {row.deviceCategory ?? "—"}
+                              </div>
+                            </div>
+                          </td>
+
+                          <td style={tdStyle}>
+                            <div style={{ display: "grid", gap: 4 }}>
+                              <div style={{ fontWeight: 600, color: "#111827" }}>
+                                {row.action ?? "—"}
+                              </div>
+
+                              {row.value != null ? (
+                                <div style={{ fontSize: 12, color: "#6b7280", lineHeight: 1.5 }}>
+                                  {formatValue(row.value)}
+                                </div>
+                              ) : null}
+                            </div>
+                          </td>
+
+                          <td style={tdStyle}>
+                            <div style={{ display: "grid", gap: 6 }}>
+                              <StatusBadge status={row.status} />
+
+                              {row.errorMessage ? (
+                                <div
+                                  style={{
+                                    fontSize: 12,
+                                    color: "#991b1b",
+                                    lineHeight: 1.5,
+                                    background: "#fef2f2",
+                                    border: "1px solid #fecaca",
+                                    borderRadius: 10,
+                                    padding: "8px 10px",
+                                  }}
+                                >
+                                  {row.errorMessage}
+                                </div>
+                              ) : null}
+                            </div>
+                          </td>
+
+                          <td style={tdStyle}>
+                            <div style={{ display: "grid", gap: 4 }}>
+                              <div style={{ fontWeight: 600, color: "#111827" }}>
+                                {propertyName}
+                              </div>
+                              <div style={{ fontSize: 12, color: "#6b7280" }}>
+                                Property-linked automation
+                              </div>
+                            </div>
+                          </td>
+
+                          <td style={tdStyle}>
+                            {row.reservation ? (
+                              <div style={{ display: "grid", gap: 6 }}>
+                                <div style={{ fontWeight: 600, color: "#111827" }}>
+                                  {row.reservation.guestName || "Guest"}
+                                </div>
+
+                                <div style={{ fontSize: 12, color: "#6b7280", lineHeight: 1.5 }}>
+                                  {row.reservation.roomName
+                                    ? `${row.reservation.roomName} · `
+                                    : ""}
+                                  {formatDateRange(
+                                    row.reservation.checkIn,
+                                    row.reservation.checkOut
+                                  )}
+                                </div>
+
+                                <div>
+                                  <Link
+                                    to={`/reservations/${row.reservation.id}`}
+                                    style={{
+                                      textDecoration: "none",
+                                      color: "#2563eb",
+                                      fontWeight: 700,
+                                    }}
+                                  >
+                                    View reservation
+                                  </Link>
+                                </div>
+                              </div>
+                            ) : row.reservationId ? (
+                              <Link
+                                to={`/reservations/${row.reservationId}`}
+                                style={{
+                                  textDecoration: "none",
+                                  color: "#2563eb",
+                                  fontWeight: 700,
+                                }}
+                              >
+                                View reservation
+                              </Link>
+                            ) : (
+                              <span style={{ color: "#9ca3af" }}>—</span>
+                            )}
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </SectionCard>
+        </>
+      )}
+    </div>
+  );
+}
+
+function TriggerBadge({ trigger }: { trigger: string }) {
+  return (
+    <span
+      style={{
+        display: "inline-flex",
+        alignItems: "center",
+        borderRadius: 999,
+        padding: "6px 10px",
+        fontSize: 12,
+        fontWeight: 800,
+        background: "#eef2ff",
+        color: "#3730a3",
+        width: "fit-content",
+      }}
+    >
+      {formatTrigger(trigger)}
+    </span>
+  );
+}
+
+function SourceBadge({ source }: { source: string }) {
+  return (
+    <span
+      style={{
+        display: "inline-flex",
+        alignItems: "center",
+        borderRadius: 999,
+        padding: "6px 10px",
+        fontSize: 12,
+        fontWeight: 800,
+        background: "#f3f4f6",
+        color: "#4b5563",
+        width: "fit-content",
+      }}
+    >
+      {formatSource(source)}
+    </span>
+  );
+}
+
+function StatusBadge({ status }: { status: string }) {
+  const normalized = String(status).toUpperCase();
+  const ok = normalized === "SUCCESS";
+
+  return (
+    <span
+      style={{
+        display: "inline-flex",
+        alignItems: "center",
+        borderRadius: 999,
+        padding: "6px 10px",
+        fontSize: 12,
+        fontWeight: 800,
+        background: ok ? "#ecfdf5" : "#fef2f2",
+        color: ok ? "#065f46" : "#991b1b",
+        border: ok ? "1px solid #a7f3d0" : "1px solid #fecaca",
+        width: "fit-content",
+      }}
+    >
+      {ok ? "Success" : "Failed"}
+    </span>
+  );
+}
+
+function formatTrigger(trigger: string) {
+  switch (String(trigger).toUpperCase()) {
+    case "CHECK_IN":
+      return "Check-in";
+    case "CHECK_OUT":
+      return "Check-out";
+    case "BEFORE_CHECK_IN":
+      return "Before check-in";
+    case "AFTER_CHECK_OUT":
+      return "After check-out";
+    default:
+      return humanizeToken(trigger);
+  }
+}
+
+function formatSource(source: string) {
+  switch (String(source).toUpperCase()) {
+    case "RULE_ACTION":
+      return "Rule Action";
+    case "PROPERTY_AUTOMATION_DEVICE":
+      return "Property Device";
+    case "GUEST_EXPERIENCE":
+      return "Guest Experience";
+    default:
+      return humanizeToken(source);
+  }
+}
+
+function humanizeToken(value: string) {
+  return String(value || "")
+    .toLowerCase()
+    .split("_")
+    .filter(Boolean)
+    .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
+    .join(" ");
+}
+
+function formatDateTime(value: string) {
+  const d = new Date(value);
+  if (Number.isNaN(d.getTime())) return value;
+
+  return new Intl.DateTimeFormat("en-US", {
+    dateStyle: "medium",
+    timeStyle: "short",
+  }).format(d);
+}
+
+function formatDateRange(checkIn: string, checkOut: string) {
+  const start = new Date(checkIn);
+  const end = new Date(checkOut);
+
+  if (Number.isNaN(start.getTime()) || Number.isNaN(end.getTime())) {
+    return `${checkIn} → ${checkOut}`;
+  }
+
+  return `${new Intl.DateTimeFormat("en-US", {
+    dateStyle: "medium",
+    timeStyle: "short",
+  }).format(start)} → ${new Intl.DateTimeFormat("en-US", {
+    dateStyle: "medium",
+    timeStyle: "short",
+  }).format(end)}`;
+}
+
+function formatValue(value: unknown) {
+  if (value == null) return "—";
+  if (typeof value === "string" || typeof value === "number" || typeof value === "boolean") {
+    return String(value);
+  }
+
+  try {
+    return JSON.stringify(value);
+  } catch {
+    return "—";
+  }
+}
+
+const thStyle: CSSProperties = {
+  padding: "14px 16px",
+  fontSize: 12,
+  fontWeight: 800,
+  letterSpacing: 0.3,
+  color: "#6b7280",
+  textTransform: "uppercase",
+};
+
+const tdStyle: CSSProperties = {
+  padding: "14px 16px",
+  fontSize: 14,
+  color: "#111827",
+  verticalAlign: "top",
+};

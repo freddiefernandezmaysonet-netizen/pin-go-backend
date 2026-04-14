@@ -35,7 +35,8 @@ dashboardLocksRouter.get("/api/dashboard/locks", requireAuth, async (req, res) =
   if (search) {
     const maybeId = Number(search);
     where.OR = [
-      { ttlockLockName: { contains: search, mode: "insensitive" } },
+      { displayName: { contains: search, mode: "insensitive" } },
+      { ttlockLockName: { contains: search, mode: "insensitive" } }, 
       ...(Number.isFinite(maybeId) ? [{ ttlockLockId: maybeId }] : []),
     ];
   }
@@ -53,6 +54,7 @@ dashboardLocksRouter.get("/api/dashboard/locks", requireAuth, async (req, res) =
         id: true,
         ttlockLockId: true,
         ttlockLockName: true,
+        displayName: true,
         isActive: true,
         updatedAt: true,
         property: {
@@ -84,7 +86,7 @@ dashboardLocksRouter.get("/api/dashboard/locks", requireAuth, async (req, res) =
     items: rows.map((l) => ({
       id: l.id,
       ttlockLockId: l.ttlockLockId,
-      name: l.ttlockLockName ?? null,
+      name: l.displayName ?? l.ttlockLockName ?? null,
       isActive: l.isActive,
       updatedAt: l.updatedAt.toISOString(),
       property: l.property,

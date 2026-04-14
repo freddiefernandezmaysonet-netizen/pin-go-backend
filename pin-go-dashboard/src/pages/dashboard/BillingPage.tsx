@@ -13,6 +13,10 @@ type BillingResp = {
     activeLocks: number;
     remainingLocks: number;
     usagePct: number;
+    entitledSmartProperties: number;
+    activeSmartProperties: number;
+    remainingSmartProperties: number;
+    smartUsagePct: number;
     currentPeriodStart: string | null;
     currentPeriodEnd: string | null;
     cancelAtPeriodEnd: boolean;
@@ -32,6 +36,15 @@ type BillingPreviewResp = {
   nextTotal: number;
   lines: PreviewLine[];
   error?: string;
+};
+
+type TuyaAccessResp = {
+  ok: boolean;
+  tuya?: {
+    state?: "locked" | "pending_onboarding" | "connected";
+    hasEntitlement?: boolean;
+    hasTuyaUid?: boolean;
+  };
 };
 
 function statusBadgeStyle(status: string | null): React.CSSProperties {
@@ -70,6 +83,28 @@ function statusBadgeStyle(status: string | null): React.CSSProperties {
     color: "#374151",
     fontWeight: 700,
   };
+}
+
+function addonBadgeStyle(active: boolean): React.CSSProperties {
+  return active
+    ? {
+        fontSize: 12,
+        padding: "4px 8px",
+        borderRadius: 999,
+        border: "1px solid #bbf7d0",
+        background: "#ecfdf5",
+        color: "#065f46",
+        fontWeight: 700,
+      }
+    : {
+        fontSize: 12,
+        padding: "4px 8px",
+        borderRadius: 999,
+        border: "1px solid #e5e7eb",
+        background: "#f9fafb",
+        color: "#374151",
+        fontWeight: 700,
+      };
 }
 
 function formatMoney(amountMinor: number, currency: string) {
@@ -112,6 +147,16 @@ export function BillingPage() {
   const [preview, setPreview] = useState<BillingPreviewResp | null>(null);
   const [previewLoading, setPreviewLoading] = useState(false);
 
+  const [smartQuantity, setSmartQuantity] = useState(1);
+  const [smartUpdateLoading, setSmartUpdateLoading] = useState(false);
+  const [smartPreview, setSmartPreview] = useState<BillingPreviewResp | null>(null);
+  const [smartPreviewLoading, setSmartPreviewLoading] = useState(false);
+
+  const [tuyaState, setTuyaState] = useState<
+    "locked" | "pending_onboarding" | "connected"
+  >("locked");
+  const [tuyaLoading, setTuyaLoading] = useState(false);
+
   async function loadBilling() {
     setLoading(true);
     setErr(null);
@@ -129,15 +174,38 @@ export function BillingPage() {
       const json = (await res.json()) as BillingResp;
       setData(json);
     } catch (e: any) {
-      console.error("BILLING OVERVIEW ERROR", e);
       setErr(String(e?.message ?? e));
     } finally {
       setLoading(false);
     }
   }
 
+  async function loadTuyaState() {
+    try {
+      setTuyaLoading(true);
+
+      const res = await fetch(`${API_BASE}/api/org/tuya/access/status`, {
+        credentials: "include",
+      });
+
+      const json = (await res.json().catch(() => null)) as TuyaAccessResp | null;
+
+      if (!res.ok || !json?.ok) {
+        setTuyaState("locked");
+        return;
+      }
+
+      setTuyaState(json.tuya?.state ?? "locked");
+    } catch (e) {
+      setTuyaState("locked");
+    } finally {
+      setTuyaLoading(false);
+    }
+  }
+
   useEffect(() => {
-    loadBilling();
+    void loadBilling();
+    void loadTuyaState();
   }, []);
 
   const s = data?.subscription ?? null;
@@ -145,10 +213,19 @@ export function BillingPage() {
 
   useEffect(() => {
     if (!s) return;
-
-    const base = Math.max(s.entitledLocks, s.activeLocks, 1);
-    setLocks(base);
+    setLocks(Math.max(s.entitledLocks, s.activeLocks, 1));
   }, [s?.stripeSubscriptionId, s?.entitledLocks, s?.activeLocks]);
+
+  useEffect(() => {
+    if (!s) return;
+    setSmartQuantity(
+      Math.max(s.entitledSmartProperties, s.activeSmartProperties, 1)
+    );
+  }, [
+    s?.stripeSubscriptionId,
+    s?.entitledSmartProperties,
+    s?.activeSmartProperties,
+  ]);
 
   async function loadPreview(quantity: number) {
     if (!hasExistingSubscription) {
@@ -167,9 +244,7 @@ export function BillingPage() {
       const res = await fetch(`${API_BASE}/billing/locks/preview`, {
         method: "POST",
         credentials: "include",
-        headers: {
-          "Content-Type": "application/json",
-        },
+        headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ quantity }),
       });
 
@@ -182,10 +257,45 @@ export function BillingPage() {
 
       setPreview(json);
     } catch (e) {
-      console.error("PREVIEW ERROR", e);
       setPreview(null);
     } finally {
       setPreviewLoading(false);
+    }
+  }
+
+  async function loadSmartPreview(quantity: number) {
+    if (!hasExistingSubscription) {
+      setSmartPreview(null);
+      return;
+    }
+
+    if (!Number.isInteger(quantity) || quantity < 1) {
+      setSmartPreview(null);
+      return;
+    }
+
+    try {
+      setSmartPreviewLoading(true);
+
+      const res = await fetch(`${API_BASE}/billing/smart/preview`, {
+        method: "POST",
+        credentials: "include",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ quantity }),
+      });
+
+      const json = (await res.json().catch(() => null)) as BillingPreviewResp | null;
+
+      if (!res.ok || !json?.ok) {
+        setSmartPreview(null);
+        return;
+      }
+
+      setSmartPreview(json);
+    } catch (e) {
+      setSmartPreview(null);
+    } finally {
+      setSmartPreviewLoading(false);
     }
   }
 
@@ -203,6 +313,20 @@ export function BillingPage() {
     void loadPreview(locks);
   }, [locks, s?.stripeSubscriptionId]);
 
+  useEffect(() => {
+    if (!s?.stripeSubscriptionId) {
+      setSmartPreview(null);
+      return;
+    }
+
+    if (!Number.isInteger(smartQuantity) || smartQuantity < 1) {
+      setSmartPreview(null);
+      return;
+    }
+
+    void loadSmartPreview(smartQuantity);
+  }, [smartQuantity, s?.stripeSubscriptionId]);
+
   async function startUpgrade() {
     try {
       setUpgradeLoading(true);
@@ -212,12 +336,8 @@ export function BillingPage() {
         const res = await fetch(`${API_BASE}/billing/locks/quantity`, {
           method: "POST",
           credentials: "include",
-          headers: {
-            "Content-Type": "application/json",
-          },
-          body: JSON.stringify({
-            quantity: locks,
-          }),
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ quantity: locks }),
         });
 
         const json = await res.json().catch(() => null);
@@ -242,12 +362,8 @@ export function BillingPage() {
       const res = await fetch(`${API_BASE}/billing/locks/checkout-session`, {
         method: "POST",
         credentials: "include",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({
-          locks,
-        }),
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ locks }),
       });
 
       const json = await res.json().catch(() => null);
@@ -263,10 +379,44 @@ export function BillingPage() {
 
       throw new Error("Stripe checkout URL not returned");
     } catch (e: any) {
-      console.error("BILLING UPGRADE ERROR", e);
       setErr(String(e?.message ?? e));
     } finally {
       setUpgradeLoading(false);
+    }
+  }
+
+  async function startSmartUpdate() {
+    try {
+      setSmartUpdateLoading(true);
+      setErr(null);
+
+      const res = await fetch(`${API_BASE}/billing/smart/quantity`, {
+        method: "POST",
+        credentials: "include",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ quantity: smartQuantity }),
+      });
+
+      const json = await res.json().catch(() => null);
+
+      if (!res.ok) {
+        if (json?.error === "SUBSCRIPTION_BELOW_ACTIVE_SMART_PROPERTIES") {
+          throw new Error(
+            `You cannot reduce capacity below active smart properties. Active smart properties: ${
+              json?.activeSmartProperties ?? "unknown"
+            }, requested: ${json?.requestedQuantity ?? smartQuantity}.`
+          );
+        }
+
+        throw new Error(json?.error || `API ${res.status}`);
+      }
+
+      await loadBilling();
+      await loadSmartPreview(smartQuantity);
+    } catch (e: any) {
+      setErr(String(e?.message ?? e));
+    } finally {
+      setSmartUpdateLoading(false);
     }
   }
 
@@ -292,14 +442,22 @@ export function BillingPage() {
 
       throw new Error("Stripe portal URL not returned");
     } catch (e: any) {
-      console.error("BILLING PORTAL ERROR", e);
       setErr(String(e?.message ?? e));
     }
+  }
+
+  async function openTuyaSetup() {
+    navigate("/integrations/tuya");
   }
 
   const suggestedLocks = useMemo(() => {
     if (!s) return 1;
     return Math.max(s.entitledLocks, s.activeLocks, 1);
+  }, [s]);
+
+  const suggestedSmart = useMemo(() => {
+    if (!s) return 1;
+    return Math.max(s.entitledSmartProperties, s.activeSmartProperties, 1);
   }, [s]);
 
   const changeType = useMemo(() => {
@@ -309,6 +467,13 @@ export function BillingPage() {
     return "same";
   }, [locks, s]);
 
+  const smartChangeType = useMemo(() => {
+    if (!s) return "same";
+    if (smartQuantity > s.entitledSmartProperties) return "upgrade";
+    if (smartQuantity < s.entitledSmartProperties) return "downgrade";
+    return "same";
+  }, [smartQuantity, s]);
+
   const primaryButtonLabel = useMemo(() => {
     if (!hasExistingSubscription) return "Start Subscription";
     if (changeType === "upgrade") return "Confirm Upgrade";
@@ -316,10 +481,24 @@ export function BillingPage() {
     return "No Changes";
   }, [hasExistingSubscription, changeType]);
 
+  const smartButtonLabel = useMemo(() => {
+    if (smartChangeType === "upgrade") return "Confirm Smart Upgrade";
+    if (smartChangeType === "downgrade") return "Confirm Smart Reduction";
+    return "No Changes";
+  }, [smartChangeType]);
+
   const minAllowed = Math.max(s?.activeLocks ?? 1, 1);
+  const smartMinAllowed = Math.max(s?.activeSmartProperties ?? 1, 1);
+
   const sliderMax = Math.max(
     (s?.entitledLocks ?? 1) + 20,
     (s?.activeLocks ?? 1) + 20,
+    25
+  );
+
+  const smartSliderMax = Math.max(
+    (s?.entitledSmartProperties ?? 1) + 20,
+    (s?.activeSmartProperties ?? 1) + 20,
     25
   );
 
@@ -339,14 +518,18 @@ export function BillingPage() {
             Billing
           </div>
           <div style={{ fontSize: 14, color: "#6b7280", marginTop: 4 }}>
-            Manage subscription capacity for active locks in Pin&amp;Go.
+            Manage subscription capacity for active locks and smart properties in
+            Pin&amp;Go.
           </div>
         </div>
 
         <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
           <button
             type="button"
-            onClick={loadBilling}
+            onClick={() => {
+              void loadBilling();
+              void loadTuyaState();
+            }}
             style={{
               height: 40,
               padding: "0 14px",
@@ -488,10 +671,82 @@ export function BillingPage() {
               }}
             >
               <div style={{ fontSize: 12, color: "#6b7280", marginBottom: 8 }}>
-                Remaining Capacity
+                Remaining Lock Capacity
               </div>
               <div style={{ fontSize: 28, fontWeight: 800, color: "#111827" }}>
                 {s.remainingLocks}
+              </div>
+            </div>
+          </div>
+
+          <div
+            style={{
+              display: "grid",
+              gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))",
+              gap: 14,
+            }}
+          >
+            <div
+              style={{
+                border: "1px solid #e5e7eb",
+                borderRadius: 16,
+                padding: 16,
+                background: "#ffffff",
+              }}
+            >
+              <div style={{ fontSize: 12, color: "#6b7280", marginBottom: 8 }}>
+                Entitled Smart Properties
+              </div>
+              <div style={{ fontSize: 28, fontWeight: 800, color: "#111827" }}>
+                {s.entitledSmartProperties}
+              </div>
+            </div>
+
+            <div
+              style={{
+                border: "1px solid #e5e7eb",
+                borderRadius: 16,
+                padding: 16,
+                background: "#ffffff",
+              }}
+            >
+              <div style={{ fontSize: 12, color: "#6b7280", marginBottom: 8 }}>
+                Active Smart Properties
+              </div>
+              <div style={{ fontSize: 28, fontWeight: 800, color: "#111827" }}>
+                {s.activeSmartProperties}
+              </div>
+            </div>
+
+            <div
+              style={{
+                border: "1px solid #e5e7eb",
+                borderRadius: 16,
+                padding: 16,
+                background: "#ffffff",
+              }}
+            >
+              <div style={{ fontSize: 12, color: "#6b7280", marginBottom: 8 }}>
+                Remaining Smart Capacity
+              </div>
+              <div style={{ fontSize: 28, fontWeight: 800, color: "#111827" }}>
+                {s.remainingSmartProperties}
+              </div>
+            </div>
+
+            <div
+              style={{
+                border: "1px solid #e5e7eb",
+                borderRadius: 16,
+                padding: 16,
+                background: "#ffffff",
+              }}
+            >
+              <div style={{ fontSize: 12, color: "#6b7280", marginBottom: 8 }}>
+                Smart Usage
+              </div>
+              <div style={{ fontSize: 28, fontWeight: 800, color: "#111827" }}>
+                {s.smartUsagePct}%
               </div>
             </div>
           </div>
@@ -517,11 +772,11 @@ export function BillingPage() {
             >
               <div>
                 <div style={{ fontSize: 18, fontWeight: 800, color: "#111827" }}>
-                  Capacity Management
+                  Lock Capacity Management
                 </div>
                 <div style={{ fontSize: 13, color: "#6b7280", marginTop: 4 }}>
-                  Adjust your total lock capacity. Existing subscriptions update with
-                  prorated billing.
+                  Adjust your total lock capacity. Existing subscriptions update
+                  with prorated billing.
                 </div>
               </div>
 
@@ -589,9 +844,7 @@ export function BillingPage() {
                     value={locks}
                     onChange={(e) => {
                       const next = Number(e.target.value);
-                      setLocks(
-                        Number.isFinite(next) ? Math.floor(next) : minAllowed
-                      );
+                      setLocks(Number.isFinite(next) ? Math.floor(next) : minAllowed);
                     }}
                     style={{
                       width: "100%",
@@ -837,8 +1090,8 @@ export function BillingPage() {
                       ) : null}
 
                       <div style={{ fontSize: 12, color: "#6b7280" }}>
-                        Stripe preview only. Final invoice may vary slightly based on
-                        taxes, credits, or timing.
+                        Stripe preview only. Final invoice may vary slightly based
+                        on taxes, credits, or timing.
                       </div>
                     </div>
                   ) : (
@@ -847,31 +1100,463 @@ export function BillingPage() {
                     </div>
                   )}
                 </div>
+              </div>
+            </div>
+          </div>
 
+          <div
+            style={{
+              border: "1px solid #e5e7eb",
+              borderRadius: 16,
+              padding: 18,
+              background: "#ffffff",
+              display: "grid",
+              gap: 16,
+            }}
+          >
+            <div
+              style={{
+                display: "flex",
+                justifyContent: "space-between",
+                gap: 12,
+                flexWrap: "wrap",
+                alignItems: "center",
+              }}
+            >
+              <div>
+                <div style={{ fontSize: 18, fontWeight: 800, color: "#111827" }}>
+                  Smart Property Capacity Management
+                </div>
+                <div style={{ fontSize: 13, color: "#6b7280", marginTop: 4 }}>
+                  Adjust your total smart property capacity. Existing
+                  subscriptions update with prorated billing.
+                </div>
+              </div>
+            </div>
+
+            <div
+              style={{
+                display: "grid",
+                gridTemplateColumns: "minmax(220px, 320px) 1fr",
+                gap: 18,
+              }}
+            >
+              <div style={{ display: "grid", gap: 12 }}>
+                <label
+                  htmlFor="smart-capacity"
+                  style={{ fontSize: 13, fontWeight: 700, color: "#374151" }}
+                >
+                  Total smart properties desired
+                </label>
+
+                <div style={{ display: "grid", gap: 12 }}>
+                  <div
+                    style={{
+                      display: "flex",
+                      justifyContent: "space-between",
+                      alignItems: "center",
+                      gap: 12,
+                      flexWrap: "wrap",
+                    }}
+                  >
+                    <div style={{ fontSize: 13, color: "#374151", fontWeight: 700 }}>
+                      Selected capacity
+                    </div>
+
+                    <div
+                      style={{
+                        minWidth: 88,
+                        height: 38,
+                        padding: "0 12px",
+                        borderRadius: 999,
+                        border: "1px solid #d1d5db",
+                        background: "#f9fafb",
+                        display: "flex",
+                        alignItems: "center",
+                        justifyContent: "center",
+                        fontSize: 16,
+                        fontWeight: 800,
+                        color: "#111827",
+                      }}
+                    >
+                      {smartQuantity} smart
+                    </div>
+                  </div>
+
+                  <input
+                    id="smart-capacity"
+                    type="range"
+                    min={smartMinAllowed}
+                    max={smartSliderMax}
+                    step={1}
+                    value={smartQuantity}
+                    onChange={(e) => {
+                      const next = Number(e.target.value);
+                      setSmartQuantity(
+                        Number.isFinite(next) ? Math.floor(next) : smartMinAllowed
+                      );
+                    }}
+                    style={{
+                      width: "100%",
+                      cursor: "pointer",
+                      accentColor: "#111827",
+                    }}
+                  />
+
+                  <div
+                    style={{
+                      display: "flex",
+                      justifyContent: "space-between",
+                      fontSize: 12,
+                      color: "#6b7280",
+                      gap: 12,
+                      flexWrap: "wrap",
+                    }}
+                  >
+                    <span>Minimum allowed now: {smartMinAllowed}</span>
+                    <span>Suggested start: {suggestedSmart}</span>
+                  </div>
+
+                  <div
+                    style={{
+                      display: "flex",
+                      gap: 10,
+                      alignItems: "center",
+                      flexWrap: "wrap",
+                    }}
+                  >
+                    <div style={{ fontSize: 13, color: "#374151", fontWeight: 700 }}>
+                      Exact number:
+                    </div>
+
+                    <input
+                      type="number"
+                      min={smartMinAllowed}
+                      step={1}
+                      value={smartQuantity}
+                      onChange={(e) => {
+                        const next = Number(e.target.value);
+                        setSmartQuantity(
+                          Number.isFinite(next)
+                            ? Math.max(smartMinAllowed, Math.floor(next))
+                            : smartMinAllowed
+                        );
+                      }}
+                      style={{
+                        width: 120,
+                        height: 40,
+                        borderRadius: 10,
+                        border: "1px solid #d1d5db",
+                        padding: "0 10px",
+                        fontSize: 15,
+                        fontWeight: 700,
+                      }}
+                    />
+
+                    <span style={{ fontSize: 12, color: "#6b7280" }}>
+                      Total desired capacity
+                    </span>
+                  </div>
+                </div>
+
+                <button
+                  type="button"
+                  onClick={startSmartUpdate}
+                  disabled={
+                    smartUpdateLoading ||
+                    smartQuantity < 1 ||
+                    smartChangeType === "same"
+                  }
+                  style={{
+                    height: 44,
+                    borderRadius: 12,
+                    border: "1px solid #111827",
+                    background:
+                      smartUpdateLoading || smartChangeType === "same"
+                        ? "#9ca3af"
+                        : "#111827",
+                    color: "#ffffff",
+                    fontWeight: 800,
+                    cursor:
+                      smartUpdateLoading || smartChangeType === "same"
+                        ? "not-allowed"
+                        : "pointer",
+                  }}
+                >
+                  {smartUpdateLoading ? "Saving..." : smartButtonLabel}
+                </button>
+              </div>
+
+              <div style={{ display: "grid", gap: 12 }}>
                 <div
                   style={{
                     border: "1px solid #e5e7eb",
                     borderRadius: 14,
-                    background: "#ffffff",
+                    background: "#f9fafb",
                     padding: 14,
                   }}
                 >
                   <div style={{ fontSize: 13, fontWeight: 800, color: "#111827" }}>
-                    Capacity Rules
+                    Smart Billing Preview
                   </div>
 
-                  <div style={{ display: "grid", gap: 6, marginTop: 10 }}>
-                    <div style={{ fontSize: 13, color: "#374151" }}>
-                      • You can increase capacity at any time.
-                    </div>
-                    <div style={{ fontSize: 13, color: "#374151" }}>
-                      • You cannot reduce capacity below active locks.
-                    </div>
-                    <div style={{ fontSize: 13, color: "#374151" }}>
-                      • Quantity is treated as total desired capacity, not a delta.
-                    </div>
+                  <div
+                    style={{
+                      marginTop: 10,
+                      marginBottom: 2,
+                      padding: 10,
+                      borderRadius: 12,
+                      border:
+                        smartChangeType === "upgrade"
+                          ? "1px solid #bfdbfe"
+                          : smartChangeType === "downgrade"
+                          ? "1px solid #fde68a"
+                          : "1px solid #e5e7eb",
+                      background:
+                        smartChangeType === "upgrade"
+                          ? "#eff6ff"
+                          : smartChangeType === "downgrade"
+                          ? "#fffbeb"
+                          : "#f9fafb",
+                      color:
+                        smartChangeType === "upgrade"
+                          ? "#1d4ed8"
+                          : smartChangeType === "downgrade"
+                          ? "#92400e"
+                          : "#374151",
+                      fontSize: 13,
+                      fontWeight: 700,
+                    }}
+                  >
+                    {smartChangeType === "upgrade"
+                      ? `You are increasing smart capacity from ${
+                          s?.entitledSmartProperties ?? 0
+                        } to ${smartQuantity} smart properties.`
+                      : smartChangeType === "downgrade"
+                      ? `You are reducing smart capacity from ${
+                          s?.entitledSmartProperties ?? 0
+                        } to ${smartQuantity} smart properties.`
+                      : `Your smart capacity remains at ${smartQuantity} smart properties.`}
                   </div>
+
+                  {smartPreviewLoading ? (
+                    <div style={{ fontSize: 13, color: "#6b7280", marginTop: 8 }}>
+                      Loading preview...
+                    </div>
+                  ) : smartPreview ? (
+                    <div style={{ display: "grid", gap: 10, marginTop: 10 }}>
+                      <div>
+                        <div
+                          style={{
+                            fontSize: 12,
+                            color: "#6b7280",
+                            textTransform: "uppercase",
+                            letterSpacing: 0.4,
+                          }}
+                        >
+                          Estimated charge now
+                        </div>
+                        <div
+                          style={{
+                            fontSize: 28,
+                            fontWeight: 800,
+                            color: "#111827",
+                            marginTop: 4,
+                          }}
+                        >
+                          {formatMoney(smartPreview.amountDue, smartPreview.currency)}
+                        </div>
+                      </div>
+
+                      <div>
+                        <div
+                          style={{
+                            fontSize: 12,
+                            color: "#6b7280",
+                            textTransform: "uppercase",
+                            letterSpacing: 0.4,
+                          }}
+                        >
+                          Upcoming invoice total
+                        </div>
+                        <div
+                          style={{
+                            fontSize: 18,
+                            fontWeight: 700,
+                            color: "#111827",
+                            marginTop: 4,
+                          }}
+                        >
+                          {formatMoney(smartPreview.nextTotal, smartPreview.currency)}
+                        </div>
+                      </div>
+
+                      {smartPreview.lines?.length ? (
+                        <div
+                          style={{
+                            borderTop: "1px solid #e5e7eb",
+                            paddingTop: 10,
+                            display: "grid",
+                            gap: 8,
+                          }}
+                        >
+                          {smartPreview.lines.map((line, idx) => (
+                            <div
+                              key={`${line.description ?? "line"}-${idx}`}
+                              style={{
+                                display: "flex",
+                                justifyContent: "space-between",
+                                gap: 12,
+                                alignItems: "flex-start",
+                              }}
+                            >
+                              <div
+                                style={{
+                                  fontSize: 13,
+                                  color: "#374151",
+                                  lineHeight: 1.35,
+                                }}
+                              >
+                                {line.description ?? "Subscription adjustment"}
+                              </div>
+                              <div
+                                style={{
+                                  fontSize: 13,
+                                  fontWeight: 700,
+                                  color: "#111827",
+                                  whiteSpace: "nowrap",
+                                }}
+                              >
+                                {formatMoney(line.amount, smartPreview.currency)}
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+                      ) : null}
+
+                      <div style={{ fontSize: 12, color: "#6b7280" }}>
+                        Stripe preview only. Final invoice may vary slightly based
+                        on taxes, credits, or timing.
+                      </div>
+                    </div>
+                  ) : (
+                    <div style={{ fontSize: 13, color: "#6b7280", marginTop: 8 }}>
+                      Preview unavailable for the selected quantity.
+                    </div>
+                  )}
                 </div>
+              </div>
+            </div>
+          </div>
+
+          <div
+            style={{
+              border: "1px solid #e5e7eb",
+              borderRadius: 16,
+              padding: 18,
+              background: "#ffffff",
+              display: "grid",
+              gap: 16,
+            }}
+          >
+            <div>
+              <div style={{ fontSize: 18, fontWeight: 800, color: "#111827" }}>
+                Smart Features
+              </div>
+              <div style={{ fontSize: 13, color: "#6b7280", marginTop: 4 }}>
+                Connect devices and manage smart automation across your
+                properties.
+              </div>
+            </div>
+
+            <div
+              style={{
+                border: "1px solid #e5e7eb",
+                borderRadius: 14,
+                padding: 14,
+                display: "flex",
+                justifyContent: "space-between",
+                alignItems: "center",
+                gap: 12,
+                flexWrap: "wrap",
+              }}
+            >
+              <div style={{ display: "grid", gap: 6 }}>
+                <div
+                  style={{
+                    display: "flex",
+                    gap: 8,
+                    alignItems: "center",
+                    flexWrap: "wrap",
+                  }}
+                >
+                  <div style={{ fontWeight: 800 }}>Tuya Smart Integration</div>
+                  <span style={addonBadgeStyle(tuyaState !== "locked")}>
+                    {tuyaLoading
+                      ? "Checking..."
+                      : tuyaState === "connected"
+                      ? "Connected"
+                      : tuyaState === "pending_onboarding"
+                      ? "Pending onboarding"
+                      : "Locked"}
+                  </span>
+                </div>
+                <div style={{ fontSize: 13, color: "#6b7280" }}>
+                  Connect IoT devices like AC, lights, curtains and other smart
+                  devices to automation.
+                </div>
+              </div>
+
+              <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
+                {tuyaState === "connected" ? (
+                  <button
+                    onClick={() => navigate("/integrations/tuya")}
+                    style={{
+                      height: 40,
+                      padding: "0 14px",
+                      borderRadius: 10,
+                      border: "1px solid #111827",
+                      background: "#111827",
+                      color: "#fff",
+                      fontWeight: 700,
+                      cursor: "pointer",
+                    }}
+                  >
+                    Manage Tuya
+                  </button>
+                ) : tuyaState === "pending_onboarding" ? (
+                  <button
+                    onClick={() => navigate("/integrations/tuya")}
+                    style={{
+                      height: 40,
+                      padding: "0 14px",
+                      borderRadius: 10,
+                      border: "1px solid #111827",
+                      background: "#111827",
+                      color: "#fff",
+                      fontWeight: 700,
+                      cursor: "pointer",
+                    }}
+                  >
+                    Continue Setup
+                  </button>
+                ) : (
+                  <button
+                    onClick={openTuyaSetup}
+                    style={{
+                      height: 40,
+                      padding: "0 14px",
+                      borderRadius: 10,
+                      border: "1px solid #111827",
+                      background: "#111827",
+                      color: "#fff",
+                      fontWeight: 700,
+                      cursor: "pointer",
+                    }}
+                  >
+                    Open Tuya Setup
+                  </button>
+                )}
               </div>
             </div>
           </div>

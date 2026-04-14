@@ -66,7 +66,6 @@ export function PropertiesPage() {
       const data: PropertiesResp = await res.json();
       setItems(data.items ?? []);
     } catch (e: any) {
-      console.error("PROPERTIES ERROR", e);
       setErr(String(e?.message ?? e));
     } finally {
       setLoading(false);
@@ -102,7 +101,6 @@ export function PropertiesPage() {
 
       await loadProperties();
     } catch (e: any) {
-      console.error("ARCHIVE PROPERTY ERROR", e);
       setErr(String(e?.message ?? e));
     } finally {
       setArchivingId(null);

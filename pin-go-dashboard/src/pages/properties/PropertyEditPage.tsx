@@ -14,6 +14,8 @@ type PropertyItem = {
   status: string;
   cleaningDurationMinutes: number;
   cleaningStartOffsetMinutes: number;
+  latitude?: number | null;
+  longitude?: number | null;
 };
 
 export function PropertyEditPage() {
@@ -33,6 +35,8 @@ export function PropertyEditPage() {
     timezone: "",
     cleaningDurationMinutes: 180,
     cleaningStartOffsetMinutes: 30,
+    latitude: "",
+    longitude: "",
   });
 
   useEffect(() => {
@@ -63,10 +67,17 @@ export function PropertyEditPage() {
           timezone: p.timezone ?? "",
           cleaningDurationMinutes: p.cleaningDurationMinutes ?? 180,
           cleaningStartOffsetMinutes: p.cleaningStartOffsetMinutes ?? 30,
+          latitude:
+            p.latitude !== null && p.latitude !== undefined
+              ? String(p.latitude)
+              : "",
+          longitude:
+            p.longitude !== null && p.longitude !== undefined
+              ? String(p.longitude)
+              : "",
         });
       })
       .catch((e: any) => {
-        console.error("LOAD PROPERTY ERROR", e);
         setErr(String(e?.message ?? e));
       })
       .finally(() => setLoading(false));
@@ -80,6 +91,23 @@ export function PropertyEditPage() {
     setErr(null);
 
     try {
+      const latitude =
+        form.latitude.trim() === "" ? null : Number(form.latitude);
+      const longitude =
+        form.longitude.trim() === "" ? null : Number(form.longitude);
+
+      if ((latitude === null) !== (longitude === null)) {
+        throw new Error("Latitude and longitude must be provided together");
+      }
+
+      if (latitude !== null && !Number.isFinite(latitude)) {
+        throw new Error("Latitude must be a valid number");
+      }
+
+      if (longitude !== null && !Number.isFinite(longitude)) {
+        throw new Error("Longitude must be a valid number");
+      }
+
       const res = await fetch(`${API_BASE}/api/dashboard/properties/${id}`, {
         method: "PATCH",
         credentials: "include",
@@ -95,6 +123,8 @@ export function PropertyEditPage() {
           timezone: form.timezone,
           cleaningDurationMinutes: Number(form.cleaningDurationMinutes),
           cleaningStartOffsetMinutes: Number(form.cleaningStartOffsetMinutes),
+          latitude,
+          longitude,
         }),
       });
 
@@ -105,7 +135,6 @@ export function PropertyEditPage() {
 
       navigate("/properties");
     } catch (e: any) {
-      console.error("SAVE PROPERTY ERROR", e);
       setErr(String(e?.message ?? e));
     } finally {
       setSaving(false);
@@ -264,6 +293,42 @@ export function PropertyEditPage() {
                   setForm((s) => ({ ...s, timezone: e.target.value }))
                 }
                 placeholder="Timezone"
+                style={inputStyle}
+              />
+            </div>
+          </div>
+
+          <div
+            style={{
+              display: "grid",
+              gap: 16,
+              gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))",
+            }}
+          >
+            <div style={{ display: "grid", gap: 6 }}>
+              <div style={labelStyle}>Latitude</div>
+              <input
+                type="number"
+                step="any"
+                value={form.latitude}
+                onChange={(e) =>
+                  setForm((s) => ({ ...s, latitude: e.target.value }))
+                }
+                placeholder="18.4655"
+                style={inputStyle}
+              />
+            </div>
+
+            <div style={{ display: "grid", gap: 6 }}>
+              <div style={labelStyle}>Longitude</div>
+              <input
+                type="number"
+                step="any"
+                value={form.longitude}
+                onChange={(e) =>
+                  setForm((s) => ({ ...s, longitude: e.target.value }))
+                }
+                placeholder="-66.1057"
                 style={inputStyle}
               />
             </div>

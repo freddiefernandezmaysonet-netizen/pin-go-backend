@@ -53,8 +53,6 @@ export default function SignupSuccessPage() {
 
         if (cancelled || finishedRef.current) return;
 
-        console.log("🧪 signup-success-status response", data);
-
         if (data.ok && data.ready && data.autoLoggedIn) {
           finishedRef.current = true;
 
@@ -88,7 +86,6 @@ export default function SignupSuccessPage() {
         timeoutId = window.setTimeout(poll, 1500);
       } catch (e: any) {
         if (cancelled) return;
-        console.error("signup success polling failed", e);
         setError(e?.message ?? "Failed to verify signup");
         setLoading(false);
       }

@@ -1,0 +1,71 @@
+﻿{
+    "count":  null,
+    "items":  [
+                  {
+                      "id":  19615252,
+                      "user_id":  848439,
+                      "arrival":  "2026-04-03",
+                      "departure":  "2026-04-06",
+                      "property_id":  787396,
+                      "rooms":  [
+                                    {
+                                        "room_type_id":  854547,
+                                        "guest_breakdown":  {
+                                                                "adults":  2,
+                                                                "children":  0,
+                                                                "infants":  0,
+                                                                "pets":  0
+                                                            },
+                                        "people":  2,
+                                        "key_code":  ""
+                                    }
+                                ],
+                      "guest":  {
+                                    "name":  "Yennaira Torres",
+                                    "email":  "pe-nf@hotmail.com",
+                                    "phone":  "+17874294117",
+                                    "country_code":  "US"
+                                },
+                      "language":  "en",
+                      "status":  "Booked",
+                      "is_unavailable":  false,
+                      "is_overbooked":  false,
+                      "tentative_expires_at":  null,
+                      "source":  "Manual",
+                      "source_text":  "",
+                      "created_from_ip":  null,
+                      "created_at":  "2026-04-02T02:30:54",
+                      "updated_at":  "2026-04-02T02:30:54",
+                      "canceled_at":  null,
+                      "is_new":  true,
+                      "is_deleted":  false,
+                      "currency_code":  "USD",
+                      "total_amount":  0.0,
+                      "subtotals":  {
+                                        "stay":  0.0,
+                                        "promotions":  0.0,
+                                        "fees":  0.0,
+                                        "taxes":  0.0,
+                                        "addons":  0.0,
+                                        "vat":  null
+                                    },
+                      "amount_paid":  0.0,
+                      "amount_due":  0.0,
+                      "quote":  null,
+                      "transactions":  null,
+                      "damage_protection":  null,
+                      "notes":  "",
+                      "thread_uid":  "1c959087-43a9-4fec-a48d-d82af001b194",
+                      "external_booking":  null,
+                      "check_in":  {
+                                       "time":  null,
+                                       "initiator":  null
+                                   },
+                      "check_out":  {
+                                        "time":  null,
+                                        "initiator":  null
+                                    },
+                      "upgraded_enquiry_id":  null
+                  }
+              ]
+}

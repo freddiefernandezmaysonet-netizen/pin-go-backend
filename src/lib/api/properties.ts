@@ -12,6 +12,8 @@ export type PropertyRow = {
   region?: string;
   country?: string;
   timezone?: string;
+  latitude?: number | null;
+  longitude?: number | null;
   checkInTime?: "15:00" | "16:00";
   cleaningStartOffsetMinutes?: number;
 };
@@ -27,6 +29,8 @@ export type CreatePropertyInput = {
   region?: string;
   country?: string;
   timezone?: string;
+  latitude?: number | null;
+  longitude?: number | null;
   checkInTime: "15:00" | "16:00";
   cleaningStartOffsetMinutes?: number;
 };
@@ -38,6 +42,8 @@ export type UpdatePropertyInput = {
   region?: string;
   country?: string;
   timezone?: string;
+  latitude?: number | null;
+  longitude?: number | null;
   checkInTime?: "15:00" | "16:00";
   cleaningStartOffsetMinutes?: number;
 };

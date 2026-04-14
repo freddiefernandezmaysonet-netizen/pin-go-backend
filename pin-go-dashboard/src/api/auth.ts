@@ -1,4 +1,10 @@
-const API_BASE = import.meta.env.VITE_API_BASE ?? "http://localhost:3000";
+const API_BASE =
+  import.meta.env.VITE_API_BASE ||
+  (import.meta.env.DEV ? "http://localhost:3000" : "");
+
+if (!API_BASE) {
+  throw new Error("Missing VITE_API_BASE");
+}
 
 export async function fetchMe() {
   const res = await fetch(`${API_BASE}/auth/me`, {
@@ -23,24 +29,26 @@ export async function login(email: string, password: string) {
     body: JSON.stringify({ email, password }),
   });
 
+  const data = await res.json().catch(() => null);
+
   if (!res.ok) {
-    throw new Error("Login failed");
+    throw new Error(data?.error ?? "LOGIN_FAILED");
   }
 
-  return res.json();
+  return data;
 }
 
 export async function logout() {
-  await fetch(`${API_BASE}/auth/logout`, {
+  const res = await fetch(`${API_BASE}/auth/logout`, {
     method: "POST",
     credentials: "include",
   });
+
+  if (!res.ok) {
+    throw new Error("LOGOUT_FAILED");
+  }
 }
 
-/**
- * Crear organización + usuario administrador
- * El backend automáticamente crea la cookie de sesión
- */
 export async function registerOrganization(input: {
   organizationName: string;
   name: string;

@@ -1,4 +1,4 @@
-import { useEffect, useState, type CSSProperties } from "react";
+import { useEffect, useMemo, useState, type CSSProperties } from "react";
 import { useNavigate } from "react-router-dom";
 
 type DeviceHealth = {
@@ -207,6 +207,10 @@ export function LocksPage() {
 
   const [ttlockStatus, setTtlockStatus] = useState<TtlockStatusResp | null>(null);
   const [ttlockStatusLoading, setTtlockStatusLoading] = useState(true);
+  const [disconnectLoading, setDisconnectLoading] = useState(false);
+
+  const [propertyFilter, setPropertyFilter] = useState("ALL");
+  const [statusFilter, setStatusFilter] = useState("ALL");
 
   const loadLocks = () => {
     setLoading(true);
@@ -226,7 +230,6 @@ export function LocksPage() {
         setData(resp);
       })
       .catch((e) => {
-        console.error("LOCKS ERROR", e);
         setErr(String(e?.message ?? e));
       })
       .finally(() => setLoading(false));
@@ -246,18 +249,12 @@ export function LocksPage() {
       .then((resp) => {
         setAlerts(resp.items ?? []);
       })
-      .catch((e) => {
-        console.error("ALERTS ERROR", e);
+      .catch(() => {
         setAlerts([]);
       });
   };
 
-  useEffect(() => {
-    loadLocks();
-    loadAlerts();
-  }, []);
-
-  useEffect(() => {
+  const loadTtlockStatus = () => {
     setTtlockStatusLoading(true);
 
     fetch(`${API_BASE}/api/org/ttlock/status`, {
@@ -272,14 +269,81 @@ export function LocksPage() {
 
         setTtlockStatus(json as TtlockStatusResp);
       })
-      .catch((e) => {
-        console.error("TTLOCK STATUS ERROR", e);
+      .catch(() => {
         setTtlockStatus(null);
       })
       .finally(() => setTtlockStatusLoading(false));
+  };
+
+  async function handleDisconnectTTLock() {
+    const confirmed = window.confirm(
+      "This will disconnect all TTLock locks from this organization.\n\nExisting access codes may stop working.\nAutomations that depend on TTLock may stop working.\n\nAre you sure you want to continue?"
+    );
+
+    if (!confirmed) return;
+
+    try {
+      setDisconnectLoading(true);
+
+      const res = await fetch(`${API_BASE}/api/org/ttlock/disconnect`, {
+        method: "DELETE",
+        credentials: "include",
+      });
+
+      const data = await res.json().catch(() => null);
+
+      if (!res.ok) {
+        throw new Error(data?.error || "Failed to disconnect TTLock");
+      }
+
+      alert(data?.message || "TTLock disconnected successfully");
+
+      loadLocks();
+      loadAlerts();
+      loadTtlockStatus();
+    } catch (e: any) {
+      console.error("[LocksPage] disconnect TTLock failed", e);
+      alert(e?.message || "Error disconnecting TTLock");
+    } finally {
+      setDisconnectLoading(false);
+    }
+  }
+
+  useEffect(() => {
+    loadLocks();
+    loadAlerts();
+    loadTtlockStatus();
   }, []);
 
   const items = data?.items ?? [];
+
+  const propertyOptions = useMemo(() => {
+    const map = new Map<string, string>();
+
+    items.forEach((lock) => {
+      if (lock.property?.id && lock.property?.name) {
+        map.set(lock.property.id, lock.property.name);
+      }
+    });
+
+    return Array.from(map.entries()).map(([id, name]) => ({ id, name }));
+  }, [items]);
+
+  const filteredItems = useMemo(() => {
+    return items.filter((lock) => {
+      const matchesProperty =
+        propertyFilter === "ALL" ? true : lock.property?.id === propertyFilter;
+
+      const matchesStatus =
+        statusFilter === "ALL"
+          ? true
+          : statusFilter === "ACTIVE"
+          ? lock.isActive
+          : !lock.isActive;
+
+      return matchesProperty && matchesStatus;
+    });
+  }, [items, propertyFilter, statusFilter]);
 
   return (
     <div style={{ display: "grid", gap: 20 }}>
@@ -307,6 +371,7 @@ export function LocksPage() {
             onClick={() => {
               loadLocks();
               loadAlerts();
+              loadTtlockStatus();
             }}
             style={{
               height: 40,
@@ -404,23 +469,7 @@ export function LocksPage() {
           </div>
 
           <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
-            <button
-              type="button"
-              onClick={() => navigate("/locks/nfc-sync")}
-              style={{
-                height: 40,
-                padding: "0 14px",
-                borderRadius: 10,
-                border: "1px solid #166534",
-                background: "#ffffff",
-                color: "#166534",
-                fontWeight: 700,
-                cursor: "pointer",
-              }}
-            >
-              Open NFC Sync
-            </button>
-
+           
             <button
               type="button"
               onClick={() => navigate("/integrations/ttlock")}
@@ -529,44 +578,96 @@ export function LocksPage() {
           No locks found yet.
         </div>
       ) : (
-        <div style={{ overflowX: "auto" }}>
-          <table
+        <>
+          <div
             style={{
-              width: "100%",
-              borderCollapse: "collapse",
-              background: "#fff",
-              border: "1px solid #e5e7eb",
-              borderRadius: 16,
-              overflow: "hidden",
+              display: "flex",
+              gap: 12,
+              flexWrap: "wrap",
+              alignItems: "center",
             }}
           >
-            <thead>
-              <tr style={{ background: "#f9fafb", textAlign: "left" }}>
-                <th style={{ padding: 14, borderBottom: "1px solid #e5e7eb" }}>Lock</th>
-                <th style={{ padding: 14, borderBottom: "1px solid #e5e7eb" }}>TTLock ID</th>
-                <th style={{ padding: 14, borderBottom: "1px solid #e5e7eb" }}>Property</th>
-                <th style={{ padding: 14, borderBottom: "1px solid #e5e7eb" }}>Status</th>
-                <th style={{ padding: 14, borderBottom: "1px solid #e5e7eb" }}>Battery</th>
-                <th style={{ padding: 14, borderBottom: "1px solid #e5e7eb" }}>Gateway</th>
-                <th style={{ padding: 14, borderBottom: "1px solid #e5e7eb" }}>Health</th>
-              </tr>
-            </thead>
-
-            <tbody>
-              {items.map((lock) => (
-                <ClickableLockRow
-                  key={lock.id}
-                  lock={lock}
-                  onClick={() => navigate(`/locks/${lock.id}`)}
-                />
+            <select
+              value={propertyFilter}
+              onChange={(e) => setPropertyFilter(e.target.value)}
+              style={{
+                height: 40,
+                minWidth: 220,
+                padding: "0 12px",
+                borderRadius: 10,
+                border: "1px solid #d1d5db",
+                background: "#fff",
+                color: "#111827",
+                outline: "none",
+              }}
+            >
+              <option value="ALL">All properties</option>
+              {propertyOptions.map((property) => (
+                <option key={property.id} value={property.id}>
+                  {property.name}
+                </option>
               ))}
-            </tbody>
-          </table>
-        </div>
+            </select>
+
+            <select
+              value={statusFilter}
+              onChange={(e) => setStatusFilter(e.target.value)}
+              style={{
+                height: 40,
+                minWidth: 180,
+                padding: "0 12px",
+                borderRadius: 10,
+                border: "1px solid #d1d5db",
+                background: "#fff",
+                color: "#111827",
+                outline: "none",
+              }}
+            >
+              <option value="ALL">All status</option>
+              <option value="ACTIVE">ACTIVE</option>
+              <option value="DISABLED">DISABLED</option>
+            </select>
+          </div>
+
+          <div style={{ overflowX: "auto" }}>
+            <table
+              style={{
+                width: "100%",
+                borderCollapse: "collapse",
+                background: "#fff",
+                border: "1px solid #e5e7eb",
+                borderRadius: 16,
+                overflow: "hidden",
+              }}
+            >
+              <thead>
+                <tr style={{ background: "#f9fafb", textAlign: "left" }}>
+                  <th style={{ padding: 14, borderBottom: "1px solid #e5e7eb" }}>Lock</th>
+                  <th style={{ padding: 14, borderBottom: "1px solid #e5e7eb" }}>TTLock ID</th>
+                  <th style={{ padding: 14, borderBottom: "1px solid #e5e7eb" }}>Property</th>
+                  <th style={{ padding: 14, borderBottom: "1px solid #e5e7eb" }}>Status</th>
+                  <th style={{ padding: 14, borderBottom: "1px solid #e5e7eb" }}>Battery</th>
+                  <th style={{ padding: 14, borderBottom: "1px solid #e5e7eb" }}>Gateway</th>
+                  <th style={{ padding: 14, borderBottom: "1px solid #e5e7eb" }}>Health</th>
+                </tr>
+              </thead>
+
+              <tbody>
+                {filteredItems.map((lock) => (
+                  <ClickableLockRow
+                    key={lock.id}
+                    lock={lock}
+                    onClick={() => navigate(`/locks/${lock.id}`)}
+                  />
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </>
       )}
 
       <div style={{ color: "#666", fontSize: 13 }}>
-        {loading ? "Loading..." : `${items.length} locks`}
+        {loading ? "Loading..." : `${filteredItems.length} locks`}
       </div>
     </div>
   );

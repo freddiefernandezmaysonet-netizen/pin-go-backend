@@ -9,15 +9,24 @@ export type AuthTokenPayload = {
   tokenVersion: number;
 };
 
-const JWT_SECRET = process.env.JWT_SECRET ?? "dev-secret-change-this";
+const JWT_SECRET = process.env.JWT_SECRET;
 const JWT_EXPIRES_IN = process.env.JWT_EXPIRES_IN ?? "7d";
 const AUTH_COOKIE_NAME = process.env.AUTH_COOKIE_NAME ?? "pingo_token";
+const COOKIE_DOMAIN = process.env.COOKIE_DOMAIN;
 
 function getJwtSecret() {
-  if (!JWT_SECRET || JWT_SECRET.trim().length < 8) {
+  const value = String(JWT_SECRET ?? "").trim();
+
+  if (!value || value.length < 32) {
     throw new Error("JWT_SECRET is missing or too weak");
   }
-  return JWT_SECRET;
+
+  return value;
+}
+
+function getCookieDomain() {
+  const value = String(COOKIE_DOMAIN ?? "").trim();
+  return value || null;
 }
 
 export function getAuthCookieName() {
@@ -128,12 +137,14 @@ export function extractTokenFromRequest(req: {
 
 export function buildAuthCookie(token: string) {
   const isProd = process.env.NODE_ENV === "production";
+  const sameSite = isProd ? "None" : "Lax";
+  const cookieDomain = getCookieDomain();
 
   const parts = [
     `${getAuthCookieName()}=${encodeURIComponent(token)}`,
     "Path=/",
     "HttpOnly",
-    "SameSite=Lax",
+    `SameSite=${sameSite}`,
     `Max-Age=${7 * 24 * 60 * 60}`,
   ];
 
@@ -141,22 +152,32 @@ export function buildAuthCookie(token: string) {
     parts.push("Secure");
   }
 
+  if (isProd && cookieDomain) {
+    parts.push(`Domain=${cookieDomain}`);
+  }
+
   return parts.join("; ");
 }
 
 export function buildClearAuthCookie() {
   const isProd = process.env.NODE_ENV === "production";
+  const sameSite = isProd ? "None" : "Lax";
+  const cookieDomain = getCookieDomain();
 
   const parts = [
     `${getAuthCookieName()}=`,
     "Path=/",
     "HttpOnly",
-    "SameSite=Lax",
+    `SameSite=${sameSite}`,
     "Max-Age=0",
   ];
 
   if (isProd) {
     parts.push("Secure");
+  }
+
+  if (isProd && cookieDomain) {
+    parts.push(`Domain=${cookieDomain}`);
   }
 
   return parts.join("; ");

@@ -4,6 +4,10 @@ Server= npm run dev
 npx tsx src/workers/run.nfc-watchdog.ts
 npx tsx src/workers/run.pms-watchdog.ts
 worker bateria y gateway=  npm run worker:device-health
+Worker automation=npx tsx src/workers/automation.worker.ts
+Worker message retry=npm run worker:message-retry
+Worker de Lodgify= npm run worker:lodgify
+Stripe webhook=stripe listen --forward-to localhost:3000/webhooks/stripe
 Limpiar tarjetas nfc= npx tsx src/scripts/nfc.reset.dev.ts
 Crear Organizacion= http://localhost:5173/signup
 
@@ -811,12 +815,12 @@ Invoke-RestMethod `
 
 $body = @{
   connectionId = "cmmmmqv360001n0nwrrtqk0n7"
-  externalReservationId = "GUESTY-DEV-001"
-  externalListingId = "LISTING-001"
-  guestName = "Test PMS Guest"
-  guestEmail = "guest@test.com"
-  checkIn = "2026-03-20T15:00:00.000Z"
-  checkOut = "2026-03-22T11:00:00.000Z"
+  externalReservationId = "GUESTY-DEV-002"
+  externalListingId = "LISTING-002"
+  guestName = "Test Guest"
+  guestEmail = "guest@test1.com"
+  checkIn = "2026-03-22T15:00:00.000Z"
+  checkOut = "2026-03-24T11:00:00.000Z"
 } | ConvertTo-Json
 
 Invoke-RestMethod `
@@ -850,6 +854,235 @@ Invoke-RestMethod `
 Invoke-RestMethod `
   -Method POST `
   -Uri "http://localhost:3000/api/dev/locks/cmmozlutk000hn03krq7v0yk8/gateway/refresh"
+
+
+$connectionId = "cmmz3bw5h0000n0e0mvc3ttys"
+
+$body = @{
+  event = "reservation.created"
+  reservationId = "TEST-RES-411"
+  listingId = "L-1002"
+  listingName = "Beach House PR"
+
+  checkIn = "2026-05-11T15:00:00Z"
+  checkOut = "2026-05-16T11:00:00Z"
+
+  status = "confirmed"
+
+  guestName = "Juan Test1"
+  guestEmail = "juan@test1.com"
+  guestPhone = "+17875541234"
+
+  notes = "Test reservation from Hostaway simulation"
+} | ConvertTo-Json -Depth 5
+
+Invoke-RestMethod `
+  -Method POST `
+  -Uri "http://localhost:3000/webhooks/pms/hostaway/$connectionId" `
+  -Headers @{
+    "Content-Type" = "application/json"
+  } `
+  -Body $body
+
+
+$connectionId = "cmmz3bw5h0000n0e0mvc3ttys"
+
+Invoke-RestMethod `
+  -Method GET `
+  -Uri "http://localhost:3000/api/pms/listings/pending?connectionId=$connectionId"
+
+$connectionId = "cmmz3bw5h0000n0e0mvc3ttys"
+
+Invoke-RestMethod `
+  -Method GET `
+  -Uri "http://localhost:3000/api/pms/listings/pending?connectionId=$connectionId"
+
+
+
+$pmsListingId = "cmmjg47el0001n0jcljbfmz48"
+$propertyId = "cmmsed3zf0003n0lsxd0hm64w"
+
+$body = @{
+  propertyId = $propertyId
+} | ConvertTo-Json
+
+Invoke-RestMethod `
+  -Method POST `
+  -Uri "http://localhost:3000/api/pms/listings/$pmsListingId/map" `
+  -Headers @{
+    "Content-Type" = "application/json"
+  } `
+  -Body $body
+
+
+$connectionId = "cmmz3bw5h0000n0e0mvc3ttys"
+
+Invoke-RestMethod `
+  -Method POST `
+  -Uri "http://localhost:3000/api/pms/listings/retry-failed/$connectionId"
+
+
+$connectionId = "cmmjfr5yg0001n060cvyj4vq0"
+
+$body = @{
+  event = "reservation.created"
+  reservationId = "TEST-RES-999"
+  listingId = "HOSTAWAY-DEMO-01"
+  listingName = "Beach House PR"
+  checkIn = "2026-04-10T15:00:00Z"
+  checkOut = "2026-04-15T11:00:00Z"
+  status = "confirmed"
+  guestName = "Juan Test"
+  guestEmail = "juan@test.com"
+  guestPhone = "+17875551234"
+  notes = "Test reservation from Hostaway simulation"
+} | ConvertTo-Json -Depth 5
+
+Invoke-RestMethod `
+  -Method POST `
+  -Uri "http://localhost:3000/webhooks/pms/hostaway/$connectionId" `
+  -Headers @{
+    "Content-Type" = "application/json"
+  } `
+  -Body $body
+
+
+$connectionId = "cmmjfr5yg0001n060cvyj4vq0"
+
+Invoke-RestMethod `
+  -Method POST `
+  -Uri "http://localhost:3000/api/pms/listings/retry-failed/$connectionId"
+
+
+
+$connectionId = "cmmjfr5yg0001n060cvyj4vq0"
+
+$body = @{
+  event = "reservation.created"
+  eventId = "HOSTAWAY-EVT-002"
+  reservationId = "TEST-RES-002"
+  listingId = "HOSTAWAY-DEMO-01"
+  listingName = "Beach House PR"
+  checkIn = "2026-04-10T15:00:00Z"
+  checkOut = "2026-04-15T11:00:00Z"
+  status = "confirmed"
+  guestName = "Juan Test"
+  guestEmail = "juan@test.com"
+  guestPhone = "+17875551234"
+  notes = "Test reservation from Hostaway simulation"
+} | ConvertTo-Json -Depth 5
+
+Invoke-RestMethod `
+  -Method POST `
+  -Uri "http://localhost:3000/webhooks/pms/hostaway/$connectionId" `
+  -Headers @{
+    "Content-Type" = "application/json"
+  } `
+  -Body $body
+
+
+$connectionId = "cmmjfr5yg0001n060cvyj4vq0"
+
+$body = @{
+  event = "reservation.created"
+  eventId = "HOSTAWAY-EVT-002"
+  reservationId = "TEST-RES-002"
+  listingId = "HOSTAWAY-DEMO-01"
+  listingName = "Beach House PR"
+  checkIn = "2026-04-10T15:00:00Z"
+  checkOut = "2026-04-15T11:00:00Z"
+  status = "confirmed"
+  guestName = "Juan Test"
+  guestEmail = "juan@test.com"
+  guestPhone = "+17875551234"
+  notes = "Test reservation from Hostaway simulation"
+} | ConvertTo-Json -Depth 5
+
+Invoke-RestMethod `
+  -Method POST `
+  -Uri "http://localhost:3000/webhooks/pms/hostaway/$connectionId" `
+  -Headers @{
+    "Content-Type" = "application/json"
+  } `
+  -Body $body
+
+$connectionId = "cmmjfr5yg0001n060cvyj4vq0"
+
+$body = @{
+  event = "reservation.created"
+  eventId = "HOSTAWAY-Pingo-021"
+  reservationId = "TEST-Pin-022"
+  listingId = "HOSTAWAY-DEMO-22"
+  listingName = "Villas de Palmas"
+  checkIn = "2026-03-30T19:10:03.866Z"
+  checkOut = "2026-03-30T17:04:03.866Z"
+  status = "confirmed"
+  guestName = "Freddie Perez"
+  guestEmail = "carlsperez26test.com"
+  guestPhone = "+1787756000"
+  notes = "Test reservation after mapping"
+} | ConvertTo-Json -Depth 5
+
+Invoke-RestMethod `
+  -Method POST `
+  -Uri "http://localhost:3000/webhooks/pms/hostaway/$connectionId" `
+  -Headers @{
+    "Content-Type" = "application/json"
+  } `
+  -Body $body
+
+
+
+$accessToken = "f6c2cf51c141bca34a43eb5f6571f707"
+$uid = "bay1774142701141aCOX"
+
+Invoke-RestMethod -Method Get `
+  -Uri "https://openapi.tuyaus.com/v1.0/users/$uid/devices" `
+  -Headers @{
+    client_id = "m7dkrtcxpayggx94n8dt"
+    access_token = $accessToken
+  }
+
+$body = @{
+  uid = "bay1774142701141aCOX"
+} | ConvertTo-Json
+
+Invoke-RestMethod `
+  -Method POST `
+  -Uri http://localhost:3000/api/org/tuya/link `
+  -WebSession $session `
+  -ContentType "application/json" `
+  -Body $body
+
+
+
+$clientId = "m7dkrtcxpayggx94n8dt"
+$clientSecret = "fb0215df7c2a4afdb3f0cd0f9560efb3"
+$t = [DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds().ToString()
+
+$stringToSign = $clientId + $t
+
+$keyBytes = [System.Text.Encoding]::UTF8.GetBytes($clientSecret)
+$messageBytes = [System.Text.Encoding]::UTF8.GetBytes($StringToSign)
+
+$hmac = New-Object System.Security.Cryptography.HMACSHA256
+$hmac.Key = $keyBytes
+$hashBytes = $hmac.ComputeHash($messageBytes)
+
+$sign = -join ($hashBytes | ForEach-Object { $_.ToString("X2") })
+
+Write-Host "t=$t"
+Write-Host "stringToSign=$stringToSign"
+Write-Host "sign=$sign"
+
+Invoke-RestMethod -Method Get `
+  -Uri "https://openapi.tuyaus.com/v1.0/token?grant_type=1" `
+  -Headers @{
+    client_id = $clientId
+    t = $t
+    sign_method = "HMAC-SHA256"
+    sign = $sign
+  }
 
 
 

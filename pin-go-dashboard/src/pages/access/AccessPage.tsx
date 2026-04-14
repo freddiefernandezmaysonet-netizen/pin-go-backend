@@ -92,7 +92,6 @@ export function AccessPage() {
         setRows(list);
       })
       .catch((e) => {
-        console.error("ACCESS ERROR", e);
         setRows([]);
       })
       .finally(() => setLoading(false));

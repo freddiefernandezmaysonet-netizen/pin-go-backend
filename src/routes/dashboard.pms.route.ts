@@ -14,6 +14,7 @@ dashboardPmsRouter.get("/api/dashboard/pms-summary", requireAuth, async (req, re
       PmsProvider.GUESTY,
       PmsProvider.CLOUDBEDS,
       PmsProvider.HOSTAWAY,
+      PmsProvider.LODGIFY,
     ];
 
     const connections = await prisma.pmsConnection.findMany({

@@ -2,6 +2,15 @@ import { Router } from "express";
 import type { PrismaClient } from "@prisma/client";
 import { requireAuth } from "../middleware/requireAuth";
 
+function parseOptionalCoordinate(value: unknown): number | null {
+  if (value === undefined || value === null || String(value).trim() === "") {
+    return null;
+  }
+
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? parsed : NaN;
+}
+
 export function buildPropertiesRouter(prisma: PrismaClient) {
   const router = Router();
 
@@ -30,7 +39,6 @@ export function buildPropertiesRouter(prisma: PrismaClient) {
               },
             },
           },
-          pmsConnection: true,
         },
       });
 
@@ -40,13 +48,15 @@ export function buildPropertiesRouter(prisma: PrismaClient) {
           name: p.name,
           locks: p._count.locks,
           activeReservations: p._count.reservations,
-          pms: p.pmsConnection?.provider ?? "—",
+          pms: "—",
           status: p.status,
           address1: p.address1 ?? "",
           city: p.city ?? "",
           region: p.region ?? "",
           country: p.country ?? "",
           timezone: p.timezone ?? "",
+          latitude: p.latitude ?? null,
+          longitude: p.longitude ?? null,
           checkInTime: p.checkInTime ?? "15:00",
           cleaningStartOffsetMinutes: p.cleaningStartOffsetMinutes ?? 0,
         })),
@@ -66,21 +76,62 @@ export function buildPropertiesRouter(prisma: PrismaClient) {
       const user = (req as any).user;
       const orgId = user.orgId as string;
 
-      const {
-        name,
-        address1,
-        city,
-        region,
-        country,
-        timezone,
-        checkInTime,
-        cleaningStartOffsetMinutes,
-      } = req.body ?? {};
+const {
+  name,
+  address1,
+  city,
+  region,
+  country,
+  timezone,
+  checkInTime,
+  cleaningStartOffsetMinutes,
+  latitude: latitudeRaw,
+  longitude: longitudeRaw,
+} = req.body ?? {};
 
+      
       if (!name || typeof name !== "string" || !name.trim()) {
         return res.status(400).json({
           ok: false,
           error: "Property name is required",
+        });
+      }
+
+      const latitude = parseOptionalCoordinate(latitudeRaw);
+      const longitude = parseOptionalCoordinate(longitudeRaw);
+
+      if (Number.isNaN(latitude)) {
+        return res.status(400).json({
+          ok: false,
+          error: "latitude must be a valid number",
+        });
+      }
+
+      if (Number.isNaN(longitude)) {
+        return res.status(400).json({
+          ok: false,
+          error: "longitude must be a valid number",
+        });
+      }
+
+      if ((latitude !== null) !== (longitude !== null)) {
+        return res.status(400).json({
+          ok: false,
+          error: "latitude and longitude must be provided together",
+        });
+      }
+
+      if (latitude !== null && (latitude < -90 || latitude > 90)) {
+        return res.status(400).json({
+          ok: false,
+          error: "latitude must be between -90 and 90",
+        });
+      }
+
+      if (longitude !== null && (longitude < -180 || longitude > 180)) {
+        return res.status(400).json({
+          ok: false,
+          error: "longitude must be between -180 and 180",
         });
       }
 
@@ -93,6 +144,8 @@ export function buildPropertiesRouter(prisma: PrismaClient) {
           region: region?.trim() || null,
           country: country?.trim() || null,
           timezone: timezone?.trim() || "America/Puerto_Rico",
+          latitude,
+          longitude,
           checkInTime: checkInTime || "15:00",
           cleaningStartOffsetMinutes:
             typeof cleaningStartOffsetMinutes === "number"
@@ -145,7 +198,52 @@ export function buildPropertiesRouter(prisma: PrismaClient) {
         timezone,
         checkInTime,
         cleaningStartOffsetMinutes,
+        latitude: latitudeRaw,
+        longitude: longitudeRaw,
       } = req.body ?? {};
+
+      const latitude = parseOptionalCoordinate(latitudeRaw);
+      const longitude = parseOptionalCoordinate(longitudeRaw);
+
+      if (Number.isNaN(latitude)) {
+        return res.status(400).json({
+          ok: false,
+          error: "latitude must be a valid number",
+        });
+      }
+
+      if (Number.isNaN(longitude)) {
+        return res.status(400).json({
+          ok: false,
+          error: "longitude must be a valid number",
+        });
+      }
+
+      if (
+        latitudeRaw !== undefined ||
+        longitudeRaw !== undefined
+      ) {
+        if ((latitude !== null) !== (longitude !== null)) {
+          return res.status(400).json({
+            ok: false,
+            error: "latitude and longitude must be provided together",
+          });
+        }
+
+        if (latitude !== null && (latitude < -90 || latitude > 90)) {
+          return res.status(400).json({
+            ok: false,
+            error: "latitude must be between -90 and 90",
+          });
+        }
+
+        if (longitude !== null && (longitude < -180 || longitude > 180)) {
+          return res.status(400).json({
+            ok: false,
+            error: "longitude must be between -180 and 180",
+          });
+        }
+      }
 
       const updated = await prisma.property.update({
         where: { id },
@@ -155,11 +253,15 @@ export function buildPropertiesRouter(prisma: PrismaClient) {
           ...(city !== undefined ? { city: city?.trim() || null } : {}),
           ...(region !== undefined ? { region: region?.trim() || null } : {}),
           ...(country !== undefined ? { country: country?.trim() || null } : {}),
-          ...(timezone !== undefined ? { timezone: timezone?.trim() || "America/Puerto_Rico" } : {}),
+          ...(timezone !== undefined
+            ? { timezone: timezone?.trim() || "America/Puerto_Rico" }
+            : {}),
           ...(checkInTime !== undefined ? { checkInTime } : {}),
           ...(cleaningStartOffsetMinutes !== undefined
             ? { cleaningStartOffsetMinutes: Number(cleaningStartOffsetMinutes) || 0 }
             : {}),
+          ...(latitudeRaw !== undefined ? { latitude } : {}),
+          ...(longitudeRaw !== undefined ? { longitude } : {}),
         },
       });
 
@@ -176,7 +278,7 @@ export function buildPropertiesRouter(prisma: PrismaClient) {
     }
   });
 
-  // POST /api/properties/:id/archive
+  // POST /api/properties/:id/archive (sin cambios)
   router.post("/api/properties/:id/archive", async (req, res) => {
     try {
       const user = (req as any).user;

@@ -1,0 +1,177 @@
+$body = @{
+  propertyId = "cmlmcepkz0001n0cghiw6nlao"
+  externalId = "eb5bb1a47162968283ai7g"
+  name = "Color Light 2 cuarto Yayi"
+  type = "LIGHT"
+  metadata = @{
+    category = "dj"
+    productId = "xhebnprpwivypgtt"
+    productName = "Color Light"
+    online = $true
+    uid = "az1774214495948aLCXI"
+  }
+} | ConvertTo-Json -Depth 10
+
+Invoke-RestMethod `
+  -Method POST `
+  -Uri http://localhost:3000/api/org/tuya/map-device `
+  -WebSession $session `
+  -ContentType "application/json" `
+  -Body $body
+
+
+
+$body = @{
+  deviceId = "cmn4tuago0001n0ww9hesyl4q"
+  commands = @(
+    @{
+      code = "switch_led"
+      value = $true
+    }
+  )
+} | ConvertTo-Json -Depth 10
+
+Invoke-RestMethod `
+  -Method POST `
+  -Uri http://localhost:3000/api/org/tuya/command `
+  -WebSession $session `
+  -ContentType "application/json" `
+  -Body $body
+
+
+$body = @{
+  trigger = "CHECK_OUT"
+  propertyId = "cmlmcepkz0001n0cghiw6nlao"
+} | ConvertTo-Json
+
+Invoke-RestMethod `
+  -Method POST `
+  -Uri http://localhost:3000/api/dev/automation/run `
+  -WebSession $session `
+  -ContentType "application/json" `
+  -Body $body
+
+
+
+Invoke-RestMethod `
+  -Method GET `
+  -Uri "http://localhost:3000/api/dev/automation/history?propertyId=cmlmcepkz0001n0cghiw6nlao&limit=20" `
+  -WebSession $session
+
+
+
+$connectionId = "cmmjfr5yg0001n060cvyj4vq0"
+
+$body = @{
+  event = "reservation.created 3"
+  reservationId = "TEST-RES-995"
+  listingId = "HOSTAWAY-DEMO-012"
+  listingName = "Villas de Palmas"
+  checkIn = "2026-03-25T19:31:18.461Z"
+  checkOut = "2026-03-25T20:30:00Z"
+  status = "confirmed"
+  guestName = "Juan Test 02"
+  guestEmail = "juan@test02.com"
+  guestPhone = "+17875551334"
+  notes = "Test reservation from Hostaway simulation"
+} | ConvertTo-Json -Depth 5
+
+Invoke-RestMethod `
+  -Method POST `
+  -Uri "http://localhost:3000/webhooks/pms/hostaway/$connectionId" `
+  -Headers @{
+    "Content-Type" = "application/json"
+  } `
+  -Body $body
+
+
+
+Invoke-RestMethod -Method POST http://localhost:3000/api/org/tuya/link `
+  -Body (@{ uid = "az1774214495948aLCXI" } | ConvertTo-Json) `
+  -ContentType "application/json" `
+  -WebSession $session
+
+
+
+
+$body = @{
+  uid = "az1774214495948aLCXI"
+} | ConvertTo-Json
+
+Invoke-RestMethod `
+  -Method POST `
+  -Uri http://localhost:3000/api/org/tuya/link `
+  -WebSession $session `
+  -ContentType "application/json" `
+  -Body $body
+
+
+cmlmcepkz0001n0cghiw6nlao
+
+
+
+$body = @{
+  propertyId = "cmlmcepkz0001n0cghiw6nlao"
+  trigger    = "CHECK_OUT"
+} | ConvertTo-Json
+
+Invoke-RestMethod `
+  -Uri "http://localhost:3000/api/dev/automation/run" `
+  -Method POST `
+  -ContentType "application/json" `
+  -Body $body `
+  -WebSession $session
+
+
+
+
+$connectionId = "cmmz3bw5h0000n0e0mvc3ttys"
+
+
+
+$body = @{
+  deviceId = "cmnfe0zuc000jn0e4ofsxtox3"
+  commands = @(
+    @{
+      code = ""master_mode""
+      value = "arm"
+    }
+  )
+} | ConvertTo-Json -Depth 10
+
+Invoke-RestMethod `
+  -Method POST `
+  -Uri http://localhost:3000/api/org/tuya/command `
+  -WebSession $session `
+  -ContentType "application/json" `
+  -Body $body
+
+
+
+$body = @{
+  event = "reservation.created"
+  eventId = "HOSTAWAY-Pingo-026"
+  reservationId = "TEST-Pin-027"
+  listingId = "HOSTAWAY-DEMO-247"
+  listingName = "Villa Fox"
+  checkIn = "2026-04-01T158:22.497Z"
+  checkOut = "2026-04-01T15:54:12.305Z"
+  status = "confirmed"
+  guestName = "Freddie Maysonet"
+  guestEmail = "carlosperez267test.com"
+  guestPhone = "+17874294117"
+  notes = "Test reservation after mapping"
+} | ConvertTo-Json -Depth 5
+
+Invoke-RestMethod `
+  -Method POST `
+  -Uri "http://localhost:3000/webhooks/pms/hostaway/$connectionId" `
+  -Headers @{
+    "Content-Type" = "application/json"
+  } `
+  -Body $body
+
+
+
+
+TeoBT+5HaRXm70kpYTDB1hTc7WRCqGst5I1VNPvrMJubj5HRziY9M52ghbz2l5rK

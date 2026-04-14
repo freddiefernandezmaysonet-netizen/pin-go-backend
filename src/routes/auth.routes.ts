@@ -18,6 +18,9 @@ import {
 const prisma = new PrismaClient();
 export const authRouter = Router();
 
+// =======================
+// LOGIN
+// =======================
 authRouter.post("/auth/login", async (req, res) => {
   try {
     const email = String(req.body?.email ?? "").trim().toLowerCase();
@@ -37,6 +40,11 @@ authRouter.post("/auth/login", async (req, res) => {
         role: true,
         isActive: true,
         tokenVersion: true,
+        organization: {
+          select: {
+            name: true,
+          },
+        },
       },
     });
 
@@ -67,6 +75,7 @@ authRouter.post("/auth/login", async (req, res) => {
       data: { lastLoginAt: new Date() },
     });
 
+    // ✅ Cookie PRODUCTION READY
     res.setHeader("Set-Cookie", buildAuthCookie(token));
 
     return res.json({
@@ -76,6 +85,7 @@ authRouter.post("/auth/login", async (req, res) => {
         email: user.email,
         orgId: user.organizationId,
         role: user.role,
+        organizationName: user.organization?.name ?? null,
       },
     });
   } catch (e) {
@@ -84,11 +94,18 @@ authRouter.post("/auth/login", async (req, res) => {
   }
 });
 
+// =======================
+// LOGOUT
+// =======================
 authRouter.post("/auth/logout", async (_req, res) => {
+  // ✅ Limpieza correcta de cookie
   res.setHeader("Set-Cookie", buildClearAuthCookie());
   return res.json({ ok: true });
 });
 
+// =======================
+// ME (SESSION CHECK)
+// =======================
 authRouter.get("/auth/me", async (req, res) => {
   try {
     const token = extractTokenFromRequest(req);
@@ -97,7 +114,14 @@ authRouter.get("/auth/me", async (req, res) => {
       return res.status(401).json({ error: "UNAUTHENTICATED" });
     }
 
-    const payload = verifyAuthToken(token);
+    let payload: any;
+
+    try {
+      payload = verifyAuthToken(token);
+    } catch {
+      res.setHeader("Set-Cookie", buildClearAuthCookie());
+      return res.status(401).json({ error: "INVALID_TOKEN" });
+    }
 
     const user = await prisma.dashboardUser.findUnique({
       where: { id: payload.sub },
@@ -108,38 +132,52 @@ authRouter.get("/auth/me", async (req, res) => {
         role: true,
         isActive: true,
         tokenVersion: true,
+        organization: {
+          select: {
+            name: true,
+          },
+        },
       },
     });
 
     if (!user) {
+      res.setHeader("Set-Cookie", buildClearAuthCookie());
       return res.status(401).json({ error: "USER_NOT_FOUND" });
     }
 
     if (!user.isActive) {
       return res.status(403).json({ error: "USER_DISABLED" });
     }
-    
+
     if (user.tokenVersion !== payload.tokenVersion) {
       res.setHeader("Set-Cookie", buildClearAuthCookie());
       return res.status(401).json({ error: "SESSION_EXPIRED" });
     }
-    
+
     return res.json({
       user: {
         id: user.id,
         email: user.email,
         orgId: user.organizationId,
         role: user.role,
+        organizationName: user.organization?.name ?? null,
       },
     });
-  } catch {
+  } catch (e) {
+    console.error("[auth/me] ERROR", e);
     return res.status(401).json({ error: "UNAUTHENTICATED" });
   }
 });
 
+// =======================
+// PASSWORD FLOWS
+// =======================
 authRouter.post("/auth/forgot-password", forgotPasswordHandler);
 authRouter.post("/auth/reset-password", resetPasswordHandler);
 
+// =======================
+// REGISTER ORG
+// =======================
 authRouter.post("/api/auth/register-organization", async (req, res) => {
   try {
     const organizationName = String(req.body?.organizationName ?? "").trim();
@@ -197,7 +235,7 @@ authRouter.post("/api/auth/register-organization", async (req, res) => {
             fullName,
             role,
             isActive: true,
-            tokenVersion: true,
+            tokenVersion: 1,
           },
         },
       },
@@ -210,6 +248,7 @@ authRouter.post("/api/auth/register-organization", async (req, res) => {
             fullName: true,
             role: true,
             isActive: true,
+            tokenVersion: true,
           },
         },
       },
@@ -225,6 +264,7 @@ authRouter.post("/api/auth/register-organization", async (req, res) => {
       tokenVersion: createdUser.tokenVersion,
     });
 
+    // ✅ Cookie consistente con login
     res.setHeader("Set-Cookie", buildAuthCookie(token));
 
     return res.status(201).json({
@@ -239,6 +279,7 @@ authRouter.post("/api/auth/register-organization", async (req, res) => {
         fullName: createdUser.fullName,
         orgId: createdUser.organizationId,
         role: createdUser.role,
+        organizationName: created.name,
       },
     });
   } catch (e: any) {

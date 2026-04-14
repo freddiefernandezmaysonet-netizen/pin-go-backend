@@ -89,6 +89,7 @@ export async function ttlockListLocksWithAccessToken(
   const data = await ttlockGetJson(url);
 
   return {
+    raw: data,
     list: data.list ?? [],
     pageNo: data.pageNo ?? pageNo,
     pageSize: data.pageSize ?? pageSize,

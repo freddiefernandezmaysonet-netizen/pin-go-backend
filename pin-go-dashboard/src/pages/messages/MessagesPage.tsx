@@ -1,0 +1,474 @@
+import { useEffect, useMemo, useState } from "react";
+
+const API_BASE = import.meta.env.VITE_API_BASE ?? "http://localhost:3000";
+
+type MessageRow = {
+  id: string;
+  to: string;
+  body: string;
+  status?: string | null;
+  retryCount: number;
+  createdAt: string;
+  propertyId?: string | null;
+  propertyName?: string | null;
+  reservationId?: string | null;
+  organizationId?: string | null;
+};
+
+type Resp = {
+  items: MessageRow[];
+};
+
+type PropertyOption = {
+  id: string;
+  name: string;
+};
+
+function Stat({ title, value }: { title: string; value: number }) {
+  return (
+    <div
+      style={{
+        border: "1px solid #e5e7eb",
+        borderRadius: 16,
+        padding: 18,
+        background: "#fff",
+      }}
+    >
+      <div style={{ fontSize: 13, color: "#6b7280", marginBottom: 8 }}>
+        {title}
+      </div>
+      <div style={{ fontSize: 28, fontWeight: 700 }}>{value}</div>
+    </div>
+  );
+}
+
+function SectionCard({
+  title,
+  children,
+  right,
+}: {
+  title: string;
+  children: React.ReactNode;
+  right?: React.ReactNode;
+}) {
+  return (
+    <div
+      style={{
+        border: "1px solid #e5e7eb",
+        borderRadius: 18,
+        padding: 18,
+        background: "#fff",
+        display: "grid",
+        gap: 12,
+      }}
+    >
+      <div
+        style={{
+          display: "flex",
+          justifyContent: "space-between",
+          alignItems: "center",
+          gap: 12,
+          flexWrap: "wrap",
+        }}
+      >
+        <div style={{ fontSize: 18, fontWeight: 700 }}>{title}</div>
+        {right}
+      </div>
+      {children}
+    </div>
+  );
+}
+
+function StatusBadge({ status }: { status?: string | null }) {
+  const s = String(status || "").toUpperCase();
+
+  if (s === "SENT") {
+    return <span style={badge("#ecfdf5", "#065f46", "#a7f3d0")}>SENT</span>;
+  }
+
+  if (s === "FAILED") {
+    return <span style={badge("#fef2f2", "#991b1b", "#fecaca")}>FAILED</span>;
+  }
+
+  return <span style={badge("#f3f4f6", "#374151", "#e5e7eb")}>—</span>;
+}
+
+function badge(bg: string, color: string, border: string) {
+  return {
+    background: bg,
+    color,
+    border: `1px solid ${border}`,
+    padding: "6px 10px",
+    borderRadius: 999,
+    fontSize: 12,
+    fontWeight: 800,
+  };
+}
+
+function uniquePropertiesFromMessages(items: MessageRow[]): PropertyOption[] {
+  const map = new Map<string, string>();
+
+  for (const item of items) {
+    const id = String(item.propertyId ?? "").trim();
+    const name = String(item.propertyName ?? "").trim();
+
+    if (!id || !name) continue;
+    if (!map.has(id)) map.set(id, name);
+  }
+
+  return Array.from(map.entries())
+    .map(([id, name]) => ({ id, name }))
+    .sort((a, b) => a.name.localeCompare(b.name));
+}
+
+export default function MessagesPage() {
+  const [data, setData] = useState<MessageRow[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [statusFilter, setStatusFilter] = useState("");
+  const [propertyFilter, setPropertyFilter] = useState("");
+  const [propertyOptions, setPropertyOptions] = useState<PropertyOption[]>([]);
+
+  async function loadMessages() {
+    try {
+      setLoading(true);
+
+      const params = new URLSearchParams();
+      if (statusFilter) params.set("status", statusFilter);
+      if (propertyFilter) params.set("propertyId", propertyFilter);
+
+      const url = `${API_BASE}/api/dashboard/messages${
+        params.toString() ? `?${params.toString()}` : ""
+      }`;
+
+      const res = await fetch(url, {
+        credentials: "include",
+      });
+
+      const json: Resp = await res.json();
+      setData(json.items ?? []);
+    } catch (e) {
+      setData([]);
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  async function loadPropertyOptions() {
+    try {
+      const res = await fetch(`${API_BASE}/api/dashboard/messages`, {
+        credentials: "include",
+      });
+
+      const json: Resp = await res.json();
+      setPropertyOptions(uniquePropertiesFromMessages(json.items ?? []));
+    } catch (e) {
+      setPropertyOptions([]);
+    }
+  }
+
+  async function loadAll() {
+    await Promise.all([loadMessages(), loadPropertyOptions()]);
+  }
+
+  async function retryMessage(id: string) {
+    try {
+      await fetch(`${API_BASE}/api/dashboard/messages/${id}/retry`, {
+        method: "POST",
+        credentials: "include",
+      });
+
+      await loadMessages();
+      await loadPropertyOptions();
+    } catch (e) {
+    }
+  }
+
+  useEffect(() => {
+    loadMessages();
+  }, [statusFilter, propertyFilter]);
+
+  useEffect(() => {
+    loadPropertyOptions();
+  }, []);
+
+  const stats = useMemo(() => {
+    let sent = 0;
+    let failed = 0;
+    let retries = 0;
+
+    for (const m of data) {
+      if (String(m.status || "").toUpperCase() === "SENT") sent++;
+      if (String(m.status || "").toUpperCase() === "FAILED") failed++;
+      if (m.retryCount > 0) retries++;
+    }
+
+    return { sent, failed, retries };
+  }, [data]);
+
+  const hasActiveFilters = Boolean(statusFilter || propertyFilter);
+
+  return (
+    <div style={{ display: "grid", gap: 20 }}>
+      <div>
+        <h1 style={{ fontSize: 30, fontWeight: 700, margin: 0 }}>Messages</h1>
+        <p style={{ color: "#666", marginTop: 8 }}>
+          Messaging activity, delivery status and retries.
+        </p>
+      </div>
+
+      <div
+        style={{
+          display: "grid",
+          gap: 16,
+          gridTemplateColumns: "repeat(3, minmax(0, 1fr))",
+        }}
+      >
+        <Stat title="Sent" value={stats.sent} />
+        <Stat title="Failed" value={stats.failed} />
+        <Stat title="With Retries" value={stats.retries} />
+      </div>
+
+      <div
+        style={{
+          display: "grid",
+          gap: 16,
+          gridTemplateColumns: "1fr",
+        }}
+      >
+        <SectionCard title="Filter Controls">
+          <div
+            style={{
+              display: "grid",
+              gap: 14,
+              maxWidth: 320,
+            }}
+          >
+            <div style={{ display: "grid", gap: 8 }}>
+              <label
+                style={{
+                  display: "block",
+                  fontSize: 13,
+                  fontWeight: 700,
+                  color: "#374151",
+                }}
+              >
+                Status
+              </label>
+              <select
+                value={statusFilter}
+                onChange={(e) => setStatusFilter(e.target.value)}
+                style={selectStyle}
+              >
+                <option value="">All</option>
+                <option value="SENT">SENT</option>
+                <option value="FAILED">FAILED</option>
+              </select>
+            </div>
+
+            <div style={{ display: "grid", gap: 8 }}>
+              <label
+                style={{
+                  display: "block",
+                  fontSize: 13,
+                  fontWeight: 700,
+                  color: "#374151",
+                }}
+              >
+                Property
+              </label>
+              <select
+                value={propertyFilter}
+                onChange={(e) => setPropertyFilter(e.target.value)}
+                style={selectStyle}
+              >
+                <option value="">All</option>
+                {propertyOptions.map((p) => (
+                  <option key={p.id} value={p.id}>
+                    {p.name}
+                  </option>
+                ))}
+              </select>
+            </div>
+          </div>
+        </SectionCard>
+      </div>
+
+      <SectionCard
+        title={`Message Log (${data.length})`}
+        right={
+          <div style={{ display: "flex", gap: 10 }}>
+            {hasActiveFilters ? (
+              <button
+                onClick={() => {
+                  setStatusFilter("");
+                  setPropertyFilter("");
+                }}
+                style={clearButton}
+              >
+                Clear Filter
+              </button>
+            ) : null}
+
+            <button onClick={loadAll} style={refreshButton}>
+              Refresh
+            </button>
+          </div>
+        }
+      >
+        {loading ? (
+          <div style={{ padding: 10, color: "#6b7280" }}>
+            Loading messages...
+          </div>
+        ) : data.length === 0 ? (
+          <div
+            style={{
+              padding: 16,
+              background: "#f9fafb",
+              border: "1px solid #e5e7eb",
+              borderRadius: 12,
+              color: "#6b7280",
+            }}
+          >
+            No messages found for the selected filter.
+          </div>
+        ) : (
+          <div
+            style={{
+              overflowX: "auto",
+              border: "1px solid #e5e7eb",
+              borderRadius: 14,
+            }}
+          >
+            <table
+              style={{
+                width: "100%",
+                borderCollapse: "collapse",
+                minWidth: 980,
+                background: "#fff",
+              }}
+            >
+              <thead>
+                <tr style={{ background: "#f9fafb" }}>
+                  <th style={th}>To</th>
+                  <th style={th}>Property</th>
+                  <th style={th}>Status</th>
+                  <th style={th}>Retries</th>
+                  <th style={th}>Message</th>
+                  <th style={th}>Date</th>
+                  <th style={th}>Action</th>
+                </tr>
+              </thead>
+
+              <tbody>
+                {data.map((m, index) => (
+                  <tr
+                    key={m.id}
+                    style={{
+                      borderTop: index === 0 ? "1px solid #e5e7eb" : "none",
+                      borderBottom: "1px solid #e5e7eb",
+                    }}
+                  >
+                    <td style={td}>{m.to}</td>
+
+                    <td style={td}>{m.propertyName ?? "—"}</td>
+
+                    <td style={td}>
+                      <StatusBadge status={m.status} />
+                    </td>
+
+                    <td style={td}>{m.retryCount}</td>
+
+                    <td
+                      style={{
+                        ...td,
+                        maxWidth: 430,
+                        whiteSpace: "pre-wrap",
+                        lineHeight: 1.5,
+                        fontSize: 13,
+                      }}
+                    >
+                      {m.body.length > 220 ? `${m.body.slice(0, 220)}...` : m.body}
+                    </td>
+
+                    <td style={td}>
+                      {new Date(m.createdAt).toLocaleString()}
+                    </td>
+
+                    <td style={td}>
+                      {String(m.status || "").toUpperCase() === "FAILED" && (
+                        <button
+                          onClick={() => retryMessage(m.id)}
+                          style={retryButton}
+                        >
+                          Retry
+                        </button>
+                      )}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </SectionCard>
+    </div>
+  );
+}
+
+const selectStyle: React.CSSProperties = {
+  width: "100%",
+  height: 42,
+  borderRadius: 12,
+  border: "1px solid #d1d5db",
+  padding: "0 12px",
+  background: "#fff",
+};
+
+const refreshButton: React.CSSProperties = {
+  height: 40,
+  padding: "0 14px",
+  borderRadius: 12,
+  border: "1px solid #111827",
+  background: "#111827",
+  color: "#fff",
+  fontWeight: 700,
+  cursor: "pointer",
+};
+
+const clearButton: React.CSSProperties = {
+  height: 40,
+  padding: "0 14px",
+  borderRadius: 12,
+  border: "1px solid #d1d5db",
+  background: "#fff",
+  color: "#111827",
+  fontWeight: 700,
+  cursor: "pointer",
+};
+
+const retryButton: React.CSSProperties = {
+  padding: "6px 10px",
+  borderRadius: 10,
+  border: "1px solid #111827",
+  background: "#111827",
+  color: "#fff",
+  fontSize: 12,
+  fontWeight: 700,
+  cursor: "pointer",
+};
+
+const th: React.CSSProperties = {
+  textAlign: "left",
+  fontSize: 12,
+  fontWeight: 800,
+  padding: "14px 16px",
+  color: "#6b7280",
+  borderBottom: "1px solid #e5e7eb",
+};
+
+const td: React.CSSProperties = {
+  padding: "14px 16px",
+  fontSize: 14,
+  color: "#111827",
+  verticalAlign: "top",
+};

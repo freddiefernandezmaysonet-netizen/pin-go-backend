@@ -151,7 +151,8 @@ export function buildOrgTtlockRouter(prisma: PrismaClient) {
 
       const resp = await ttlockListLocksWithAccessToken(tokenResult.accessToken, 1, 100);
       const remoteLocks = Array.isArray((resp as any)?.list) ? (resp as any).list : [];
-
+      console.log("[TTLOCK RAW LOCK]", JSON.stringify(remoteLocks[0], null, 2));
+      
       const ttlockIds = remoteLocks
         .map((l: any) => Number(l.lockId))
         .filter((n: number) => Number.isFinite(n) && n > 0);
@@ -188,7 +189,7 @@ export function buildOrgTtlockRouter(prisma: PrismaClient) {
           if (!Number.isFinite(ttlockLockId) || ttlockLockId <= 0) return null;
 
           const remoteName =
-            String(l.lockName ?? l.lockAlias ?? "").trim() || null;
+            String(l.lockAlias ?? l.lockName ?? "").trim() || null;
 
           const existing = existingByTtlockId.get(ttlockLockId) ?? null;
 
@@ -223,6 +224,7 @@ export function buildOrgTtlockRouter(prisma: PrismaClient) {
         organizationId,
         propertyId: propertyId || null,
         totalFromTtlock: remoteLocks.length,
+        rawFirstLock: remoteLocks[0] ?? null,
         locks,
       });
     } catch (e: any) {
@@ -280,7 +282,7 @@ export function buildOrgTtlockRouter(prisma: PrismaClient) {
         if (!Number.isFinite(ttlockLockId) || ttlockLockId <= 0) continue;
 
         const ttlockLockName =
-          String(l.lockName ?? l.lockAlias ?? "").trim() || null;
+          String(l.lockAlias ?? l.lockName ?? "").trim() || null;
 
         const existing = await prisma.lock.findUnique({
           where: { ttlockLockId },
@@ -322,6 +324,8 @@ export function buildOrgTtlockRouter(prisma: PrismaClient) {
         created,
         updated,
         totalFromTtlock: list.length,
+        rawSample: list[0] ?? null,
+        rawList: list,
         locks: upserted,
       });
     } catch (e: any) {
@@ -331,6 +335,31 @@ export function buildOrgTtlockRouter(prisma: PrismaClient) {
         .json({ ok: false, error: e?.message ?? "sync locks failed" });
     }
   });
+
+/**
+ * DELETE /api/org/ttlock/disconnect
+ * Elimina conexión TTLock de la organización
+ */
+router.delete("/ttlock/disconnect", async (req, res) => {
+  try {
+    const organizationId = String((req as any).orgId);
+
+    await prisma.tTLockAuth.deleteMany({
+      where: { organizationId },
+    });
+
+    return res.json({
+      ok: true,
+      message: "TTLock disconnected",
+    });
+  } catch (e: any) {
+    console.error("ttlock/disconnect error:", e?.message ?? e);
+    return res.status(500).json({
+      ok: false,
+      error: e?.message ?? "disconnect failed",
+    });
+  }
+});
 
   return router;
 }

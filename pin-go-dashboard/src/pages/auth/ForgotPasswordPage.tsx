@@ -18,7 +18,6 @@ export default function ForgotPasswordPage() {
       const result = await forgotPassword(email);
       setMessage(result.message || "If the account exists, a reset link has been sent.");
     } catch (e) {
-      console.error("forgot password failed", e);
       setMessage("If the account exists, a reset link has been sent.");
     } finally {
       setSubmitting(false);

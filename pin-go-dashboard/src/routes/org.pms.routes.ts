@@ -107,7 +107,6 @@ export function buildOrgPmsRouter(prisma: PrismaClient) {
         connection: connection ? maskConnection(connection) : null,
       });
     } catch (e: any) {
-      console.error("org/pms/connection GET error:", e?.message ?? e);
       return res.status(500).json({
         ok: false,
         error: e?.message ?? "pms connection lookup failed",
@@ -163,7 +162,6 @@ export function buildOrgPmsRouter(prisma: PrismaClient) {
         },
       });
     } catch (e: any) {
-      console.error("org/pms/test-connection error:", e?.message ?? e);
       return res.status(500).json({
         ok: false,
         error: e?.message ?? "pms test connection failed",
@@ -244,7 +242,6 @@ export function buildOrgPmsRouter(prisma: PrismaClient) {
         connection: maskConnection(connection),
       });
     } catch (e: any) {
-      console.error("org/pms/connect error:", e?.message ?? e);
       return res.status(500).json({
         ok: false,
         error: e?.message ?? "pms connect failed",

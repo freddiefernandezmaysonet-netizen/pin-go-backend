@@ -332,7 +332,6 @@ export function HealthCenterPage() {
       setLocks(locksData.items ?? []);
       setControlTower(towerData.items ?? []);
     } catch (err: any) {
-      console.error("Health Center load failed", err);
       setError(String(err?.message ?? err ?? "Failed to load Health Center."));
     } finally {
       setLoading(false);

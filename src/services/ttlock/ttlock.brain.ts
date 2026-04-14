@@ -82,40 +82,60 @@ export async function activateGrant(grantId: string) {
   let code: string | null = null;
   let otpPayload: any = null;
 
-  if (grant.method === AccessMethod.PASSCODE_TIMEBOUND) {
-    const pass = await ttlockGetPasscode({
-      lockId: Number(grant.lock.ttlockLockId),
-      keyboardPwdType: 1,
-      name: grant.reservation?.guestName
-        ? `PinGo ${String(grant.reservation.guestName).slice(0, 20)}`
-        : "PinGo Guest",
-      accessToken,
+if (grant.method === AccessMethod.PASSCODE_TIMEBOUND) {
+  // Validar fechas
+  const startDate = grant.startsAt?.getTime();
+  const endDate = grant.endsAt?.getTime();
+
+  if (!startDate || !endDate || endDate <= startDate) {
+    console.warn("[activateGrant] invalid dates, fallback to TTLock default OTP", {
+      grantId: grant.id,
+      startsAt: grant.startsAt,
+      endsAt: grant.endsAt,
     });
-
-    keyboardPwdId = pass?.keyboardPwdId ? Number(pass.keyboardPwdId) : null;
-    code = pass?.keyboardPwd ? String(pass.keyboardPwd) : null;
-    otpPayload = pass;
-
-    if (!code) {
-      await prisma.accessGrant.update({
-        where: { id: grant.id },
-        data: {
-          status: AccessStatus.FAILED,
-          lastError: "TTLock did not return keyboardPwd",
-          ttlockPayload: {
-            ...(grant.ttlockPayload as any),
-            activatedAt: Date.now(),
-            otp: otpPayload,
-            nfc: nfcResult,
-          },
-        },
-      });
-
-      return { ok: false, reason: "No OTP returned" };
-    }
   }
 
-  await prisma.accessGrant.update({
+  const pass = await ttlockGetPasscode({
+    lockId: Number(grant.lock.ttlockLockId),
+
+    // 👇 CAMBIO CLAVE
+    keyboardPwdType: 3, // ← PERIOD password (controlado por fechas)
+
+    name: grant.reservation?.guestName
+      ? `PinGo ${String(grant.reservation.guestName).slice(0, 20)}`
+      : "PinGo Guest",
+
+    // 👇 NUEVO
+    startDate: startDate,
+    endDate: endDate,
+
+    accessToken,
+  });
+
+  keyboardPwdId = pass?.keyboardPwdId ? Number(pass.keyboardPwdId) : null;
+  code = pass?.keyboardPwd ? String(pass.keyboardPwd) : null;
+  otpPayload = pass;
+
+  if (!code) {
+    await prisma.accessGrant.update({
+      where: { id: grant.id },
+      data: {
+        status: AccessStatus.FAILED,
+        lastError: "TTLock did not return keyboardPwd",
+        ttlockPayload: {
+          ...(grant.ttlockPayload as any),
+          activatedAt: Date.now(),
+          otp: otpPayload,
+          nfc: nfcResult,
+        },
+      },
+    });
+
+    return { ok: false, reason: "No passcode returned" };
+  }
+}
+
+    await prisma.accessGrant.update({
     where: { id: grant.id },
     data: {
       status: AccessStatus.ACTIVE,

@@ -372,7 +372,6 @@ export default function NfcSyncPage() {
       setGuestTotal(stats.guest);
       setCleaningTotal(stats.cleaning);
     } catch (e) {
-      console.error("Failed to load NFC stats", e);
       setAvailableTotal(0);
       setGuestTotal(0);
       setCleaningTotal(0);

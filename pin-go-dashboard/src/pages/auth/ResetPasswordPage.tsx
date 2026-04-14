@@ -49,7 +49,6 @@ export default function ResetPasswordPage() {
         navigate("/login");
       }, 1500);
     } catch (e) {
-      console.error("reset password failed", e);
       setError("Unable to reset password.");
     } finally {
       setSubmitting(false);

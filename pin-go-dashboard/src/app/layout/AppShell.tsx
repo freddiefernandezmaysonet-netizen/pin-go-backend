@@ -6,14 +6,18 @@ const nav = [
   { to: "/overview", label: "Overview" },
   { to: "/properties", label: "Properties" },
   { to: "/locks", label: "Locks" },
+  { to: "/health", label: "Locks Health Center" },
   { to: "/reservations", label: "Reservations" },
   { to: "/access", label: "Access" },
+  
+   // 👇 NUEVO
+  { to: "/messages", label: "Messages" },
   { to: "/staff", label: "Staff Members" },
-
-  { to: "/health", label: "Locks Health Center" },
 
   { to: "/integrations/pms", label: "PMS" },
   { to: "/billing", label: "Billing" },
+  { to: "/integrations/tuya", label: "Tuya Integration" },
+  { to: "/automation/history", label: "Automation History" },
 ];
 
 function SideItem({ to, label }: { to: string; label: string }) {
@@ -43,8 +47,15 @@ function getPageTitle(pathname: string) {
   if (pathname.startsWith("/access")) return "Access";
   if (pathname.startsWith("/staff")) return "Staff Members";
   if (pathname.startsWith("/health")) return "Health Center";
+  if (pathname.startsWith("/automation/history")) return "Automation History";
+
+  // 👇 NUEVO
+  if (pathname.startsWith("/messages")) return "Messages";
+
   if (pathname.startsWith("/integrations/pms")) return "PMS Integrations";
   if (pathname.startsWith("/billing")) return "Billing";
+  if (pathname.startsWith("/integrations/tuya")) return "Tuya Integration";
+
   return "Dashboard";
 }
 
@@ -180,29 +191,17 @@ export function AppShell() {
               gap: 12,
             }}
           >
-            <div
-              style={{
-                textAlign: "right",
-              }}
-            >
-              <div
-                style={{
-                  fontSize: 12,
-                  color: "#6b7280",
-                }}
-              >
-                Organization
-              </div>
-              <div
-                style={{
-                  fontSize: 14,
-                  fontWeight: 700,
-                  color: "#111827",
-                }}
-              >
-                {user?.orgId ?? "—"}
-              </div>
-            </div>
+             <div style={{ textAlign: "right" }}>
+    <div
+      style={{
+        fontSize: 14,
+        fontWeight: 700,
+        color: "#111827",
+      }}
+    >
+    {user?.organizationName ?? "Organization"}   
+  </div>
+  </div>
 
             <div
               style={{

@@ -90,7 +90,6 @@ export function StaffMembersPage() {
       const data: StaffRow[] = await res.json();
       setItems(data ?? []);
     } catch (e: any) {
-      console.error("STAFF LOAD ERROR", e);
       setErr(String(e?.message ?? e));
     } finally {
       setLoading(false);
@@ -173,7 +172,6 @@ export function StaffMembersPage() {
       resetForm();
       await loadStaff(organizationId);
     } catch (e: any) {
-      console.error("STAFF SAVE ERROR", e);
       setErr(String(e?.message ?? e));
     } finally {
       setSaving(false);
@@ -215,7 +213,6 @@ export function StaffMembersPage() {
 
       await loadStaff(organizationId);
     } catch (e: any) {
-      console.error("STAFF ARCHIVE ERROR", e);
       setErr(String(e?.message ?? e));
     } finally {
       setArchivingId(null);

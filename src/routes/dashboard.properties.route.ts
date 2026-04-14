@@ -18,6 +18,15 @@ function getOperationalStatus(r: {
   return "CHECKED_OUT";
 }
 
+function parseOptionalCoordinate(value: unknown): number | null {
+  if (value === undefined || value === null || String(value).trim() === "") {
+    return null;
+  }
+
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? parsed : NaN;
+}
+
 dashboardPropertiesRouter.get(
   "/api/dashboard/properties",
   requireAuth,
@@ -109,6 +118,8 @@ dashboardPropertiesRouter.get(
           country: true,
           timezone: true,
           status: true,
+          latitude: true,
+          longitude: true,
           cleaningDurationMinutes: true,
           cleaningStartOffsetMinutes: true,
           createdAt: true,
@@ -155,7 +166,49 @@ dashboardPropertiesRouter.patch(
         timezone,
         cleaningDurationMinutes,
         cleaningStartOffsetMinutes,
+        latitude: latitudeRaw,
+        longitude: longitudeRaw,
       } = req.body ?? {};
+
+      const latitude = parseOptionalCoordinate(latitudeRaw);
+      const longitude = parseOptionalCoordinate(longitudeRaw);
+
+      if (Number.isNaN(latitude)) {
+        return res.status(400).json({
+          ok: false,
+          error: "latitude must be a valid number",
+        });
+      }
+
+      if (Number.isNaN(longitude)) {
+        return res.status(400).json({
+          ok: false,
+          error: "longitude must be a valid number",
+        });
+      }
+
+      if (latitudeRaw !== undefined || longitudeRaw !== undefined) {
+        if ((latitude !== null) !== (longitude !== null)) {
+          return res.status(400).json({
+            ok: false,
+            error: "latitude and longitude must be provided together",
+          });
+        }
+
+        if (latitude !== null && (latitude < -90 || latitude > 90)) {
+          return res.status(400).json({
+            ok: false,
+            error: "latitude must be between -90 and 90",
+          });
+        }
+
+        if (longitude !== null && (longitude < -180 || longitude > 180)) {
+          return res.status(400).json({
+            ok: false,
+            error: "longitude must be between -180 and 180",
+          });
+        }
+      }
 
       const existing = await prisma.property.findFirst({
         where: {
@@ -195,11 +248,25 @@ dashboardPropertiesRouter.patch(
         data.name = cleanName;
       }
 
-      if (address1 !== undefined) data.address1 = String(address1 || "").trim() || null;
-      if (city !== undefined) data.city = String(city || "").trim() || null;
-      if (region !== undefined) data.region = String(region || "").trim() || null;
-      if (country !== undefined) data.country = String(country || "").trim() || null;
-      if (timezone !== undefined) data.timezone = String(timezone || "").trim() || null;
+      if (address1 !== undefined) {
+        data.address1 = String(address1 || "").trim() || null;
+      }
+
+      if (city !== undefined) {
+        data.city = String(city || "").trim() || null;
+      }
+
+      if (region !== undefined) {
+        data.region = String(region || "").trim() || null;
+      }
+
+      if (country !== undefined) {
+        data.country = String(country || "").trim() || null;
+      }
+
+      if (timezone !== undefined) {
+        data.timezone = String(timezone || "").trim() || null;
+      }
 
       if (cleaningDurationMinutes !== undefined) {
         const n = Number(cleaningDurationMinutes);
@@ -223,6 +290,14 @@ dashboardPropertiesRouter.patch(
         data.cleaningStartOffsetMinutes = n;
       }
 
+      if (latitudeRaw !== undefined) {
+        data.latitude = latitude;
+      }
+
+      if (longitudeRaw !== undefined) {
+        data.longitude = longitude;
+      }
+
       const updated = await prisma.property.update({
         where: { id: existing.id },
         data,
@@ -235,6 +310,8 @@ dashboardPropertiesRouter.patch(
           country: true,
           timezone: true,
           status: true,
+          latitude: true,
+          longitude: true,
           cleaningDurationMinutes: true,
           cleaningStartOffsetMinutes: true,
           updatedAt: true,

@@ -153,13 +153,13 @@ export async function ttlockGetPasscode(params: {
     let end = toMs(Number(params.endDate));
 
     // TTLock requiere ventanas por HORA (minutos/segundos en 0)
-    start = roundDownToHourMs(start);
-    end = roundDownToHourMs(end);
+   
+  start = roundDownToHourMs(start);
+end = roundDownToHourMs(end);
 
-    // asegurar rango válido
-    if (end <= start) {
-      end = start + 60 * 60 * 1000;
-    }
+if (end <= start) {
+  end = start + 60 * 60 * 1000;
+}
 
     form.startDate = start;
     form.endDate = end;
@@ -180,18 +180,22 @@ export async function ttlockGetPasscode(params: {
     const msg = String(e?.message ?? e);
 
     // ✅ Retry: si PERIOD (3) falla con -3, intenta OTP (1) sin fechas.
-    if (params.keyboardPwdType === 3 && msg.includes('"errcode":-3')) {
-      const otpForm: Record<string, string | number> = {
-        ...form,
-        keyboardPwdType: 1,
-      };
-      delete (otpForm as any).startDate;
-      delete (otpForm as any).endDate;
+    
+    // ⚠️ IMPORTANTE: NO fallback automático a OTP
+if (params.keyboardPwdType === 3 && msg.includes('"errcode":-3')) {
+  console.error("[TTLock] PERIOD passcode failed", {
+    lockId,
+    reason: msg,
+    startDate: form.startDate,
+    endDate: form.endDate,
+  });
 
-      return await postForm(`${base}/v3/keyboardPwd/get`, otpForm);
-    }
-
-    throw e;
+  // ❌ NO fallback automático
+  // 👉 dejamos que falle para detectar problema real
+  throw new Error("TTLock PERIOD passcode failed (errcode -3)");
+}
+    
+     throw e;
   }
 }
 

@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import { Link } from "react-router-dom";
+import { useNavigate } from "react-router-dom";
 
 type ReservationStatus = "ACTIVE" | "CANCELLED";
 type OperationalStatus = "UPCOMING" | "IN_HOUSE" | "CHECKED_OUT" | "CANCELLED";
@@ -82,6 +82,8 @@ function propertyLabel(r: ReservationRow) {
 }
 
 export function ReservationsPage() {
+  const navigate = useNavigate();
+
   const [properties, setProperties] = useState<PropertiesResp["items"]>([]);
   const [propertyId, setPropertyId] = useState<string>("ALL");
   const [status, setStatus] = useState<string>("ALL");
@@ -216,7 +218,7 @@ export function ReservationsPage() {
           <table style={{ width: "100%", borderCollapse: "collapse" }}>
             <thead style={{ background: "#f9fafb" }}>
               <tr>
-                {["Guest", "Property", "Check-in", "Check-out", "Operational", "Source", "Open"].map((h) => (
+                {["Guest", "Property", "Check-in", "Check-out", "Operational", "Source"].map((h) => (
                   <th
                     key={h}
                     style={{
@@ -239,13 +241,13 @@ export function ReservationsPage() {
             <tbody>
               {loading ? (
                 <tr>
-                  <td colSpan={7} style={{ padding: 16, color: "#666" }}>
+                  <td colSpan={6} style={{ padding: 16, color: "#666" }}>
                     Loading…
                   </td>
                 </tr>
               ) : filteredItems.length === 0 ? (
                 <tr>
-                  <td colSpan={7} style={{ padding: 16, color: "#666" }}>
+                  <td colSpan={6} style={{ padding: 16, color: "#666" }}>
                     No reservations found for this filter.
                   </td>
                 </tr>
@@ -254,7 +256,20 @@ export function ReservationsPage() {
                   const styles = statusStyles(r.operationalStatus);
 
                   return (
-                    <tr key={r.id} style={{ borderBottom: "1px solid #f3f4f6" }}>
+                    <tr
+                      key={r.id}
+                      onClick={() => navigate(`/reservations/${r.id}`)}
+                      style={{
+                        borderBottom: "1px solid #f3f4f6",
+                        cursor: "pointer",
+                      }}
+                      onMouseEnter={(e) => {
+                        e.currentTarget.style.background = "#f9fafb";
+                      }}
+                      onMouseLeave={(e) => {
+                        e.currentTarget.style.background = "#fff";
+                      }}
+                    >
                       <td style={{ padding: 12 }}>
                         <div style={{ fontWeight: 700, color: "#111827" }}>{r.guestName}</div>
                         <div style={{ color: "#666", fontSize: 12, marginTop: 4 }}>
@@ -290,27 +305,6 @@ export function ReservationsPage() {
                       </td>
 
                       <td style={{ padding: 12, color: "#666" }}>{sourceLabel(r)}</td>
-
-                      <td style={{ padding: 12 }}>
-                        <Link
-                          to={`/reservations/${r.id}`}
-                          style={{
-                            display: "inline-flex",
-                            alignItems: "center",
-                            justifyContent: "center",
-                            padding: "8px 12px",
-                            borderRadius: 10,
-                            border: "1px solid #d1d5db",
-                            background: "#fff",
-                            color: "#111827",
-                            textDecoration: "none",
-                            fontSize: 13,
-                            fontWeight: 600,
-                          }}
-                        >
-                          View
-                        </Link>
-                      </td>
                     </tr>
                   );
                 })

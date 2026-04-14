@@ -11,6 +11,25 @@ import { sendResetPasswordEmail } from "../lib/mailer";
 
 const prisma = new PrismaClient();
 
+function getPasswordResetUrl(token: string) {
+  const explicitResetUrl = String(process.env.PASSWORD_RESET_URL ?? "").trim();
+  const frontendOrigin = String(process.env.FRONTEND_ORIGIN ?? "").trim();
+
+  if (explicitResetUrl) {
+    return `${explicitResetUrl}?token=${encodeURIComponent(token)}`;
+  }
+
+  if (frontendOrigin) {
+    return `${frontendOrigin}/reset-password?token=${encodeURIComponent(token)}`;
+  }
+
+  if (process.env.NODE_ENV !== "production") {
+    return `http://localhost:5173/reset-password?token=${encodeURIComponent(token)}`;
+  }
+
+  throw new Error("Missing PASSWORD_RESET_URL or FRONTEND_ORIGIN");
+}
+
 export async function forgotPasswordHandler(req: Request, res: Response) {
   try {
     const email = String(req.body?.email ?? "").trim().toLowerCase();
@@ -51,10 +70,7 @@ export async function forgotPasswordHandler(req: Request, res: Response) {
       },
     });
 
-    const frontendOrigin =
-      process.env.FRONTEND_ORIGIN ?? "http://localhost:5173";
-
-    const resetUrl = `${frontendOrigin}/reset-password?token=${encodeURIComponent(token)}`;
+    const resetUrl = getPasswordResetUrl(token);
 
     await sendResetPasswordEmail({
       to: user.email,
@@ -92,7 +108,11 @@ export async function resetPasswordHandler(req: Request, res: Response) {
       },
     });
 
-    if (!resetRecord || resetRecord.usedAt || resetRecord.expiresAt < new Date()) {
+    if (
+      !resetRecord ||
+      resetRecord.usedAt ||
+      resetRecord.expiresAt < new Date()
+    ) {
       return res.status(400).json({
         ok: false,
         error: "INVALID_OR_EXPIRED_TOKEN",
@@ -114,18 +134,17 @@ export async function resetPasswordHandler(req: Request, res: Response) {
 
     const passwordHash = await hashPassword(password);
 
-await prisma.$transaction([
-  prisma.dashboardUser.update({
-    where: { id: resetRecord.userId },
-    data: {
-      passwordHash,
-      tokenVersion: {
-        increment: 1,
-      },
-    },
-  }),
-
-    prisma.passwordResetToken.update({
+    await prisma.$transaction([
+      prisma.dashboardUser.update({
+        where: { id: resetRecord.userId },
+        data: {
+          passwordHash,
+          tokenVersion: {
+            increment: 1,
+          },
+        },
+      }),
+      prisma.passwordResetToken.update({
         where: { id: resetRecord.id },
         data: { usedAt: new Date() },
       }),

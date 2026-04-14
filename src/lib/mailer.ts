@@ -1,9 +1,8 @@
 import { Resend } from "resend";
 
 const resendApiKey = String(process.env.RESEND_API_KEY ?? "").trim();
-const emailFrom = String(
-  process.env.EMAIL_FROM ?? "Pin&Go <onboarding@resend.dev>"
-).trim();
+const emailFrom = String(process.env.EMAIL_FROM ?? "").trim();
+const isProd = process.env.NODE_ENV === "production";
 
 const resend = resendApiKey ? new Resend(resendApiKey) : null;
 
@@ -12,12 +11,26 @@ type SendResetPasswordEmailInput = {
   resetUrl: string;
 };
 
+function getEmailFrom() {
+  if (emailFrom) return emailFrom;
+
+  if (isProd) {
+    throw new Error("EMAIL_FROM missing in production");
+  }
+
+  return "Pin&Go <onboarding@resend.dev>";
+}
+
 export async function sendResetPasswordEmail(
   input: SendResetPasswordEmailInput
 ) {
   const { to, resetUrl } = input;
 
   if (!resend) {
+    if (isProd) {
+      throw new Error("RESEND_API_KEY missing in production");
+    }
+
     console.log("📨 RESEND_API_KEY missing. Using console fallback.");
     console.log("🔑 RESET LINK:", resetUrl);
 
@@ -29,7 +42,7 @@ export async function sendResetPasswordEmail(
 
   try {
     const { data, error } = await resend.emails.send({
-      from: emailFrom,
+      from: getEmailFrom(),
       to,
       subject: "Reset your Pin&Go password",
       html: `
@@ -70,6 +83,10 @@ export async function sendResetPasswordEmail(
     });
 
     if (error) {
+      if (isProd) {
+        throw new Error(`Resend send failed: ${error.message}`);
+      }
+
       console.error("❌ Resend send failed. Using console fallback:", error);
       console.log("🔑 RESET LINK:", resetUrl);
 
@@ -87,6 +104,10 @@ export async function sendResetPasswordEmail(
       data,
     };
   } catch (err) {
+    if (isProd) {
+      throw err;
+    }
+
     console.error("❌ Resend exception. Using console fallback:", err);
     console.log("🔑 RESET LINK:", resetUrl);
 

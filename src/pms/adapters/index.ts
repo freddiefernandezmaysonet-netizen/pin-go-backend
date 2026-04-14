@@ -4,6 +4,7 @@ import type { PmsAdapter } from "./types";
 import { guestyAdapter } from "./guesty.adapter";
 import { cloudbedsAdapter } from "./cloudbeds.adapter";
 import { hostawayAdapter } from "./hostaway.adapter";
+import { lodgifyAdapter } from "./lodgify.adapter";
 
 export function getAdapter(provider: PmsProvider): PmsAdapter {
   switch (provider) {
@@ -15,6 +16,9 @@ export function getAdapter(provider: PmsProvider): PmsAdapter {
 
     case "HOSTAWAY":
       return hostawayAdapter;
+
+    case "LODGIFY":
+      return lodgifyAdapter;
 
     default:
       return {

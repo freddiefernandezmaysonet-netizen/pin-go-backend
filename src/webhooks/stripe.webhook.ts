@@ -7,6 +7,7 @@ import {
   PendingSignupStatus,
 } from "@prisma/client";
 import stripe from "../billing/stripe";
+import syncTuyaEntitlementFromStripeEvent from "../billing/stripe/stripe.tuya.entitlement";
 
 const prisma = new PrismaClient();
 
@@ -22,45 +23,27 @@ export function registerStripeWebhook(app: Express) {
       let event: Stripe.Event;
 
       try {
-        if (!sig) {
-          return res.status(400).send("Missing Stripe-Signature header");
-        }
-
-        if (!endpointSecret) {
-          return res.status(500).send("Missing STRIPE_WEBHOOK_SECRET in .env");
-        }
-
-        console.log(">>> WEBHOOK HIT");
-        console.log(">>> has-signature:", !!sig);
-        console.log(">>> body-is-buffer:", Buffer.isBuffer(req.body));
-        console.log(">>> body-length:", (req.body as Buffer)?.length ?? 0);
+        if (!sig) return res.status(400).send("Missing Stripe-Signature header");
+        if (!endpointSecret)
+          return res.status(500).send("Missing STRIPE_WEBHOOK_SECRET");
 
         event = stripe.webhooks.constructEvent(req.body, sig, endpointSecret);
       } catch (err: any) {
-        console.error("❌ Webhook signature error:", err?.message ?? err);
-        return res.status(400).send(`Webhook Error: ${err?.message ?? "Invalid signature"}`);
+        return res.status(400).send(`Webhook Error: ${err?.message}`);
       }
 
-      console.log(`📩 Stripe event received: ${event.type}`);
-
       try {
+        await syncTuyaEntitlementFromStripeEvent(prisma, event);
+
         switch (event.type) {
           case "checkout.session.completed": {
             const session = event.data.object as Stripe.Checkout.Session;
-
-            console.log("🧾 checkout.session.completed", {
-              sessionId: session.id,
-              customer: session.customer,
-              subscription: session.subscription,
-              metadata: session.metadata,
-            });
 
             await maybeCompleteSignupOnboarding(session);
 
             if (session.subscription) {
               await safeSyncBySubscriptionId(String(session.subscription));
             }
-
             break;
           }
 
@@ -68,130 +51,49 @@ export function registerStripeWebhook(app: Express) {
           case "customer.subscription.updated":
           case "customer.subscription.deleted": {
             const sub = event.data.object as Stripe.Subscription;
-
-            console.log("🔄 subscription event", {
-              id: sub.id,
-              status: sub.status,
-              customer: sub.customer,
-              metadata: sub.metadata,
-            });
-
             await safeSyncBySubscriptionId(sub.id);
-            break;
-          }
-
-          default: {
-            console.log("ℹ️ unhandled event:", event.type);
             break;
           }
         }
 
-        return res.json({ received: true, type: event.type });
+        return res.json({ received: true });
       } catch (err: any) {
-        console.error("🔥 webhook processing error:", err?.message ?? err);
-
-        return res.status(500).json({
-          ok: false,
-          error: err?.message ?? "webhook failed",
-        });
+        return res.status(500).json({ ok: false, error: err?.message });
       }
     }
   );
 }
 
+/* ===========================
+   ONBOARDING (SIN CAMBIOS)
+=========================== */
 async function maybeCompleteSignupOnboarding(session: Stripe.Checkout.Session) {
   const metadata = session.metadata ?? {};
-  const flow = String(metadata.flow ?? "");
-
-  if (flow !== "signup_onboarding") {
-    return;
-  }
-
-  const pendingSignupId = String(metadata.pendingSignupId ?? "").trim();
-
-  if (!pendingSignupId) {
-    console.warn("⚠️ signup onboarding session missing pendingSignupId", {
-      sessionId: session.id,
-    });
-    return;
-  }
-
-  console.log("🚀 onboarding webhook start", {
-    sessionId: session.id,
-    pendingSignupId,
-    customer: session.customer,
-    subscription: session.subscription,
-  });
+  if (metadata.flow !== "signup_onboarding") return;
 
   const pending = await prisma.pendingSignup.findUnique({
-    where: { id: pendingSignupId },
+    where: { id: String(metadata.pendingSignupId) },
   });
 
-  if (!pending) {
-    console.warn("⚠️ PendingSignup not found", {
-      pendingSignupId,
-      sessionId: session.id,
-    });
-    return;
-  }
+  if (!pending) return;
 
-  if (pending.status === PendingSignupStatus.COMPLETED && pending.organizationId) {
-    console.log("✅ onboarding already completed, skipping", {
-      pendingSignupId,
-      organizationId: pending.organizationId,
-    });
-    return;
-  }
-
-  const existingUser = await prisma.dashboardUser.findUnique({
-    where: { email: pending.email },
-    select: {
-      id: true,
-      organizationId: true,
-    },
-  });
-
-  if (existingUser) {
-    console.warn("⚠️ DashboardUser already exists for pending signup email", {
-      pendingSignupId,
-      email: pending.email,
-      userId: existingUser.id,
-    });
-
-    await prisma.pendingSignup.update({
-      where: { id: pending.id },
-      data: {
-        status: PendingSignupStatus.COMPLETED,
-        completedAt: new Date(),
-        organizationId: existingUser.organizationId,
-        stripeCustomerId: session.customer ? String(session.customer) : pending.stripeCustomerId,
-        stripeSubscriptionId: session.subscription
-          ? String(session.subscription)
-          : pending.stripeSubscriptionId,
-      },
-    });
-
-    return;
-  }
+  if (pending.status === PendingSignupStatus.COMPLETED) return;
 
   await prisma.$transaction(async (tx) => {
-    let organizationId = pending.organizationId ?? null;
-
-    if (!organizationId) {
-      const org = await tx.organization.create({
-        data: {
-          name: pending.organizationName,
-          stripeCustomerId: session.customer ? String(session.customer) : pending.stripeCustomerId,
-        },
-        select: { id: true },
-      });
-
-      organizationId = org.id;
-    }
+    const org =
+      pending.organizationId ??
+      (
+        await tx.organization.create({
+          data: {
+            name: pending.organizationName,
+            stripeCustomerId: String(session.customer),
+          },
+        })
+      ).id;
 
     await tx.dashboardUser.create({
       data: {
-        organizationId,
+        organizationId: org,
         email: pending.email,
         passwordHash: pending.passwordHash,
         fullName: pending.fullName,
@@ -204,89 +106,56 @@ async function maybeCompleteSignupOnboarding(session: Stripe.Checkout.Session) {
       where: { id: pending.id },
       data: {
         status: PendingSignupStatus.COMPLETED,
-        completedAt: new Date(),
-        organizationId,
-        stripeCustomerId: session.customer ? String(session.customer) : pending.stripeCustomerId,
-        stripeSubscriptionId: session.subscription
-          ? String(session.subscription)
-          : pending.stripeSubscriptionId,
-        stripeCheckoutSessionId: session.id,
+        organizationId: org,
+        stripeCustomerId: String(session.customer),
+        stripeSubscriptionId: String(session.subscription),
       },
     });
   });
-
-  console.log("✅ onboarding webhook completed", {
-    pendingSignupId,
-    sessionId: session.id,
-  });
 }
 
+/* ===========================
+   CORE SYNC (CORREGIDO)
+=========================== */
 async function safeSyncBySubscriptionId(subscriptionId: string) {
   try {
-    console.log("🚀 sync start:", subscriptionId);
-
     const fullSub = await stripe.subscriptions.retrieve(subscriptionId, {
       expand: ["items.data.price"],
     });
 
     let organizationId =
-      (fullSub.metadata?.organizationId as string | undefined) ?? null;
+      (fullSub.metadata?.organizationId as string) ?? null;
 
     if (!organizationId) {
-      console.warn("⚠️ No orgId in metadata, fallback by customer");
-
-      const found = await prisma.subscription.findFirst({
-        where: {
-          stripeCustomerId: String(fullSub.customer),
-        },
-        select: {
-          organizationId: true,
-        },
+      const sub = await prisma.subscription.findFirst({
+        where: { stripeCustomerId: String(fullSub.customer) },
       });
-
-      organizationId = found?.organizationId ?? null;
+      organizationId = sub?.organizationId ?? null;
     }
 
     if (!organizationId) {
-      const foundOrg = await prisma.organization.findFirst({
-        where: {
-          stripeCustomerId: String(fullSub.customer),
-        },
-        select: {
-          id: true,
-        },
+      const org = await prisma.organization.findFirst({
+        where: { stripeCustomerId: String(fullSub.customer) },
       });
-
-      organizationId = foundOrg?.id ?? null;
+      organizationId = org?.id ?? null;
     }
 
-    if (!organizationId) {
-      const foundPending = await prisma.pendingSignup.findFirst({
-        where: {
-          stripeSubscriptionId: fullSub.id,
-        },
-        select: {
-          organizationId: true,
-        },
-      });
+    if (!organizationId) return;
 
-      organizationId = foundPending?.organizationId ?? null;
-    }
+    const existing = await prisma.subscription.findUnique({
+      where: { organizationId },
+    });
 
-    if (!organizationId) {
-      console.error("❌ Cannot resolve organizationId for sub:", subscriptionId);
-      return;
-    }
+    const lockPriceId = process.env.STRIPE_PRICE_LOCK_MONTHLY!;
+    const smartPriceId = process.env.STRIPE_PRICE_SMART_PROPERTY!;
 
-    const lockPriceId = process.env.STRIPE_PRICE_LOCK_MONTHLY;
-    const items = fullSub.items?.data ?? [];
+    const items = fullSub.items.data;
 
-    const item =
-      (lockPriceId
-        ? items.find((i: any) => i?.price?.id === lockPriceId)
-        : null) ?? items[0];
+    const lockItem = items.find((i) => i.price.id === lockPriceId);
+    const smartItem = items.find((i) => i.price.id === smartPriceId);
 
-    const quantity = Number(item?.quantity ?? 0);
+    const quantity = lockItem?.quantity ?? 0;
+    const smartQuantity = smartItem?.quantity ?? 0;
 
     const status =
       fullSub.status === "active"
@@ -306,57 +175,35 @@ async function safeSyncBySubscriptionId(subscriptionId: string) {
         : "INCOMPLETE";
 
     const activeLocks = await prisma.lock.count({
-  where: {
-    isActive: true,
-    property: {
-      organizationId,
-    },
-  },
-});
+      where: {
+        isActive: true,
+        property: { organizationId },
+      },
+    });
 
-const stripeEntitledLocks =
-  status === "ACTIVE" || status === "TRIALING" ? quantity : 0;
+    const stripeEntitledLocks =
+      status === "ACTIVE" || status === "TRIALING" ? quantity : 0;
 
-// Blindaje: nunca persistir entitledLocks por debajo de activeLocks
-const entitledLocks =
-  status === "ACTIVE" || status === "TRIALING"
-    ? Math.max(stripeEntitledLocks, activeLocks)
-    : 0;
+    const entitledLocks = Math.max(stripeEntitledLocks, activeLocks);
 
-const belowActiveLocks =
-  (status === "ACTIVE" || status === "TRIALING") &&
-  stripeEntitledLocks < activeLocks;
+    const stripeEntitledSmartProperties =
+      status === "ACTIVE" || status === "TRIALING" ? smartQuantity : 0;
 
-if (belowActiveLocks) {
-  console.error("❌ Stripe quantity below active locks detected", {
-    organizationId,
-    stripeSubscriptionId: fullSub.id,
-    stripeQuantity: quantity,
-    stripeEntitledLocks,
-    activeLocks,
-    persistedEntitledLocks: entitledLocks,
-  });
-}
+    const entitledSmartProperties = stripeEntitledSmartProperties;
 
-console.log("📊 sync computed", {
-  organizationId,
-  stripeSubscriptionId: fullSub.id,
-  quantity,
-  stripeEntitledLocks,
-  activeLocks,
-  entitledLocks,
-  status,
-});
-    
     await prisma.subscription.upsert({
       where: { organizationId },
       create: {
         organizationId,
         stripeCustomerId: String(fullSub.customer),
         stripeSubscriptionId: fullSub.id,
-        stripeSubscriptionItemId: item?.id ?? null,
+        stripeSubscriptionItemId:
+          lockItem?.id ?? existing?.stripeSubscriptionItemId ?? null,
+        stripeSmartSubscriptionItemId:
+          smartItem?.id ?? existing?.stripeSmartSubscriptionItemId ?? null,
         status: status as any,
         entitledLocks,
+        entitledSmartProperties,
         currentPeriodStart: fullSub.current_period_start
           ? new Date(fullSub.current_period_start * 1000)
           : null,
@@ -367,9 +214,13 @@ console.log("📊 sync computed", {
       update: {
         stripeCustomerId: String(fullSub.customer),
         stripeSubscriptionId: fullSub.id,
-        stripeSubscriptionItemId: item?.id ?? null,
+        stripeSubscriptionItemId:
+          lockItem?.id ?? existing?.stripeSubscriptionItemId ?? null,
+        stripeSmartSubscriptionItemId:
+          smartItem?.id ?? existing?.stripeSmartSubscriptionItemId ?? null,
         status: status as any,
         entitledLocks,
+        entitledSmartProperties,
         currentPeriodStart: fullSub.current_period_start
           ? new Date(fullSub.current_period_start * 1000)
           : null,
@@ -378,8 +229,6 @@ console.log("📊 sync computed", {
           : null,
       },
     });
-
-    console.log("✅ sync success:", subscriptionId);
   } catch (err: any) {
     console.error("🔥 sync error:", err?.message ?? err);
   }

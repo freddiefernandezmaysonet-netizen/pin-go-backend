@@ -1,0 +1,641 @@
+import { useEffect, useMemo, useState, type CSSProperties } from "react";
+import { useNavigate } from "react-router-dom";
+
+type DeviceHealth = {
+  battery?: number | null;
+  gatewayConnected?: boolean | null;
+  isOnline?: boolean | null;
+  lastSeenAt?: string | null;
+  lastSyncAt?: string | null;
+  healthStatus?: "HEALTHY" | "WARNING" | "OFFLINE" | "LOW_BATTERY" | "UNKNOWN";
+  healthMessage?: string | null;
+  updatedAt?: string | null;
+} | null;
+
+type LockRow = {
+  id: string;
+  ttlockLockId: number;
+  name: string | null;
+  isActive: boolean;
+  property: { id: string; name: string } | null;
+  battery?: number | null;
+  gatewayId?: number | null;
+  gatewayName?: string | null;
+  gatewayOnline?: boolean | null;
+  batteryFresh?: boolean;
+  gatewayFresh?: boolean;
+  deviceHealth?: DeviceHealth;
+};
+
+type LocksResp = {
+  page: number;
+  pageSize: number;
+  total: number;
+  items: LockRow[];
+};
+
+type TtlockStatusResp = {
+  ok: boolean;
+  connected: boolean;
+  uid?: number | string;
+  error?: string;
+};
+
+type AlertItem = {
+  lockId: string;
+  lockName: string;
+  propertyName?: string | null;
+  battery?: number | null;
+  gatewayConnected?: boolean | null;
+  healthStatus: string;
+  healthMessage?: string | null;
+};
+
+const API_BASE = import.meta.env.VITE_API_BASE ?? "http://localhost:3000";
+
+function badgeStyle(active: boolean): CSSProperties {
+  return {
+    fontSize: 12,
+    padding: "4px 8px",
+    borderRadius: 999,
+    border: "1px solid #e5e7eb",
+    background: active ? "#ecfdf5" : "#fef2f2",
+    color: active ? "#065f46" : "#991b1b",
+    fontWeight: 700,
+  };
+}
+
+function healthBadgeStyle(status?: string | null): CSSProperties {
+  switch (status) {
+    case "HEALTHY":
+      return {
+        fontSize: 12,
+        padding: "4px 8px",
+        borderRadius: 999,
+        border: "1px solid #bbf7d0",
+        background: "#ecfdf5",
+        color: "#166534",
+        fontWeight: 700,
+      };
+    case "LOW_BATTERY":
+      return {
+        fontSize: 12,
+        padding: "4px 8px",
+        borderRadius: 999,
+        border: "1px solid #fde68a",
+        background: "#fffbeb",
+        color: "#92400e",
+        fontWeight: 700,
+      };
+    case "WARNING":
+      return {
+        fontSize: 12,
+        padding: "4px 8px",
+        borderRadius: 999,
+        border: "1px solid #fed7aa",
+        background: "#fff7ed",
+        color: "#9a3412",
+        fontWeight: 700,
+      };
+    case "OFFLINE":
+      return {
+        fontSize: 12,
+        padding: "4px 8px",
+        borderRadius: 999,
+        border: "1px solid #fecaca",
+        background: "#fef2f2",
+        color: "#991b1b",
+        fontWeight: 700,
+      };
+    default:
+      return {
+        fontSize: 12,
+        padding: "4px 8px",
+        borderRadius: 999,
+        border: "1px solid #e5e7eb",
+        background: "#f3f4f6",
+        color: "#374151",
+        fontWeight: 700,
+      };
+  }
+}
+
+function formatBattery(lock: LockRow) {
+  const value = lock.deviceHealth?.battery ?? lock.battery;
+  return value != null ? `${value}%` : "—";
+}
+
+function formatGateway(lock: LockRow) {
+  const value = lock.deviceHealth?.gatewayConnected ?? lock.gatewayOnline;
+
+  if (value == null) return "—";
+  return value ? "Connected" : "No gateway";
+}
+
+type ClickableLockRowProps = {
+  lock: LockRow;
+  onClick: () => void;
+};
+
+function ClickableLockRow({ lock, onClick }: ClickableLockRowProps) {
+  const [hovered, setHovered] = useState(false);
+
+  return (
+    <tr
+      onClick={onClick}
+      onMouseEnter={() => setHovered(true)}
+      onMouseLeave={() => setHovered(false)}
+      style={{
+        cursor: "pointer",
+        borderBottom: "1px solid #f3f4f6",
+        background: hovered ? "#f9fafb" : "#fff",
+        transition: "background 120ms ease",
+      }}
+    >
+      <td style={{ padding: 14 }}>
+        <div style={{ fontWeight: 600, color: "#111827" }}>
+          {lock.name ?? "TTLock Lock"}
+        </div>
+      </td>
+
+      <td
+        style={{
+          padding: 14,
+          color: "#6b7280",
+          fontFamily: "monospace",
+          fontSize: 13,
+        }}
+      >
+        {lock.ttlockLockId}
+      </td>
+
+      <td style={{ padding: 14, color: "#374151" }}>
+        {lock.property?.name ?? "—"}
+      </td>
+
+      <td style={{ padding: 14 }}>
+        <span style={badgeStyle(lock.isActive)}>
+          {lock.isActive ? "ACTIVE" : "DISABLED"}
+        </span>
+      </td>
+
+      <td style={{ padding: 14, color: "#374151" }}>
+        {formatBattery(lock)}
+      </td>
+
+      <td style={{ padding: 14, color: "#374151" }}>
+        {formatGateway(lock)}
+      </td>
+
+      <td style={{ padding: 14 }}>
+        <span style={healthBadgeStyle(lock.deviceHealth?.healthStatus)}>
+          {lock.deviceHealth?.healthStatus ?? "UNKNOWN"}
+        </span>
+      </td>
+    </tr>
+  );
+}
+
+export function LocksPage() {
+  const navigate = useNavigate();
+
+  const [data, setData] = useState<LocksResp | null>(null);
+  const [loading, setLoading] = useState(false);
+  const [err, setErr] = useState<string | null>(null);
+
+  const [alerts, setAlerts] = useState<AlertItem[]>([]);
+
+  const [ttlockStatus, setTtlockStatus] = useState<TtlockStatusResp | null>(null);
+  const [ttlockStatusLoading, setTtlockStatusLoading] = useState(true);
+
+  const [propertyFilter, setPropertyFilter] = useState("ALL");
+  const [statusFilter, setStatusFilter] = useState("ALL");
+
+  const loadLocks = () => {
+    setLoading(true);
+    setErr(null);
+
+    fetch(`${API_BASE}/api/dashboard/locks?page=1&pageSize=20`, {
+      credentials: "include",
+    })
+      .then(async (res) => {
+        if (!res.ok) {
+          const t = await res.text().catch(() => "");
+          throw new Error(`API ${res.status}: ${t || res.statusText}`);
+        }
+        return res.json();
+      })
+      .then((resp: LocksResp) => {
+        setData(resp);
+      })
+      .catch((e) => {
+        console.error("LOCKS ERROR", e);
+        setErr(String(e?.message ?? e));
+      })
+      .finally(() => setLoading(false));
+  };
+
+  const loadAlerts = () => {
+    fetch(`${API_BASE}/api/dashboard/locks/alerts`, {
+      credentials: "include",
+    })
+      .then(async (res) => {
+        if (!res.ok) {
+          const t = await res.text().catch(() => "");
+          throw new Error(`API ${res.status}: ${t || res.statusText}`);
+        }
+        return res.json();
+      })
+      .then((resp) => {
+        setAlerts(resp.items ?? []);
+      })
+      .catch((e) => {
+        console.error("ALERTS ERROR", e);
+        setAlerts([]);
+      });
+  };
+
+  useEffect(() => {
+    loadLocks();
+    loadAlerts();
+  }, []);
+
+  useEffect(() => {
+    setTtlockStatusLoading(true);
+
+    fetch(`${API_BASE}/api/org/ttlock/status`, {
+      credentials: "include",
+    })
+      .then(async (res) => {
+        const json = await res.json().catch(() => null);
+
+        if (!res.ok) {
+          throw new Error(json?.error || `API ${res.status}`);
+        }
+
+        setTtlockStatus(json as TtlockStatusResp);
+      })
+      .catch((e) => {
+        console.error("TTLOCK STATUS ERROR", e);
+        setTtlockStatus(null);
+      })
+      .finally(() => setTtlockStatusLoading(false));
+  }, []);
+
+  const items = data?.items ?? [];
+
+  const propertyOptions = useMemo(() => {
+    const map = new Map<string, string>();
+
+    items.forEach((lock) => {
+      if (lock.property?.id && lock.property?.name) {
+        map.set(lock.property.id, lock.property.name);
+      }
+    });
+
+    return Array.from(map.entries()).map(([id, name]) => ({ id, name }));
+  }, [items]);
+
+  const filteredItems = useMemo(() => {
+    return items.filter((lock) => {
+      const matchesProperty =
+        propertyFilter === "ALL" ? true : lock.property?.id === propertyFilter;
+
+      const matchesStatus =
+        statusFilter === "ALL"
+          ? true
+          : statusFilter === "ACTIVE"
+          ? lock.isActive
+          : !lock.isActive;
+
+      return matchesProperty && matchesStatus;
+    });
+  }, [items, propertyFilter, statusFilter]);
+
+  return (
+    <div style={{ display: "grid", gap: 20 }}>
+      <div
+        style={{
+          display: "flex",
+          justifyContent: "space-between",
+          alignItems: "center",
+          gap: 12,
+          flexWrap: "wrap",
+        }}
+      >
+        <div>
+          <div style={{ fontSize: 28, fontWeight: 800, color: "#111827" }}>
+            Locks
+          </div>
+          <div style={{ fontSize: 14, color: "#6b7280", marginTop: 4 }}>
+            Monitor active locks and open each lock detail to manage swap and status.
+          </div>
+        </div>
+
+        <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
+          <button
+            type="button"
+            onClick={() => {
+              loadLocks();
+              loadAlerts();
+            }}
+            style={{
+              height: 40,
+              padding: "0 14px",
+              borderRadius: 10,
+              border: "1px solid #d1d5db",
+              background: "#ffffff",
+              color: "#111827",
+              fontWeight: 700,
+              cursor: "pointer",
+            }}
+          >
+            Refresh
+          </button>
+
+          <button
+            type="button"
+            onClick={() => navigate("/locks/nfc-sync")}
+            style={{
+              height: 40,
+              padding: "0 14px",
+              borderRadius: 10,
+              border: "1px solid #111827",
+              background: "#111827",
+              color: "#ffffff",
+              fontWeight: 700,
+              cursor: "pointer",
+            }}
+          >
+            NFC Sync
+          </button>
+        </div>
+      </div>
+
+      {alerts.length > 0 && (
+        <div
+          style={{
+            border: "1px solid #fde68a",
+            borderRadius: 14,
+            background: "#fffbeb",
+            padding: 14,
+            color: "#92400e",
+            fontSize: 14,
+          }}
+        >
+          <div style={{ fontWeight: 700 }}>
+            ⚠ {alerts.length} locks need attention
+          </div>
+
+          <div style={{ marginTop: 8, display: "grid", gap: 4 }}>
+            {alerts.slice(0, 3).map((a) => (
+              <div key={a.lockId}>
+                {a.lockName}
+                {a.propertyName ? ` · ${a.propertyName}` : ""} — {a.healthMessage}
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {ttlockStatusLoading ? (
+        <div
+          style={{
+            border: "1px solid #e5e7eb",
+            borderRadius: 14,
+            background: "#fff",
+            padding: 14,
+            color: "#6b7280",
+            fontSize: 14,
+          }}
+        >
+          Checking TTLock connection...
+        </div>
+      ) : ttlockStatus?.connected ? (
+        <div
+          style={{
+            border: "1px solid #bbf7d0",
+            borderRadius: 14,
+            background: "#f0fdf4",
+            padding: 14,
+            color: "#166534",
+            fontSize: 14,
+            display: "flex",
+            justifyContent: "space-between",
+            alignItems: "center",
+            gap: 12,
+            flexWrap: "wrap",
+          }}
+        >
+          <div>
+            <div style={{ fontWeight: 700 }}>TTLock connected</div>
+            <div style={{ fontSize: 13, marginTop: 4 }}>
+              {ttlockStatus.uid ? `UID: ${ttlockStatus.uid}` : "Connection active"}
+            </div>
+          </div>
+
+          <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
+           
+
+            <button
+              type="button"
+              onClick={() => navigate("/integrations/ttlock")}
+              style={{
+                height: 40,
+                padding: "0 14px",
+                borderRadius: 10,
+                border: "1px solid #bbf7d0",
+                background: "#ffffff",
+                color: "#166534",
+                fontWeight: 700,
+                cursor: "pointer",
+              }}
+            >
+              Review Connection
+            </button>
+          </div>
+        </div>
+      ) : (
+        <div
+          style={{
+            border: "1px solid #fde68a",
+            borderRadius: 14,
+            background: "#fffbeb",
+            padding: 14,
+            color: "#92400e",
+            fontSize: 14,
+            display: "flex",
+            justifyContent: "space-between",
+            alignItems: "center",
+            gap: 12,
+            flexWrap: "wrap",
+          }}
+        >
+          <div>
+            <div style={{ fontWeight: 700 }}>TTLock not connected</div>
+            <div style={{ fontSize: 13, marginTop: 4 }}>
+              Connect TTLock to import locks and automate access from Pin&Go.
+            </div>
+          </div>
+
+          <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
+            <button
+              type="button"
+              onClick={() => navigate("/locks/nfc-sync")}
+              style={{
+                height: 40,
+                padding: "0 14px",
+                borderRadius: 10,
+                border: "1px solid #d1d5db",
+                background: "#ffffff",
+                color: "#111827",
+                fontWeight: 700,
+                cursor: "pointer",
+              }}
+            >
+              View NFC Sync
+            </button>
+
+            <button
+              type="button"
+              onClick={() => navigate("/integrations/ttlock")}
+              style={{
+                height: 40,
+                padding: "0 14px",
+                borderRadius: 10,
+                border: "1px solid #111827",
+                background: "#111827",
+                color: "#ffffff",
+                fontWeight: 700,
+                cursor: "pointer",
+              }}
+            >
+              Connect TTLock
+            </button>
+          </div>
+        </div>
+      )}
+
+      {err ? (
+        <div
+          style={{
+            border: "1px solid #fecaca",
+            background: "#fef2f2",
+            padding: 12,
+            borderRadius: 12,
+            color: "#991b1b",
+          }}
+        >
+          <b>Error:</b> {err}
+        </div>
+      ) : null}
+
+      {loading ? (
+        <div style={{ color: "#666" }}>Loading locks...</div>
+      ) : items.length === 0 ? (
+        <div
+          style={{
+            border: "1px solid #e5e7eb",
+            borderRadius: 16,
+            padding: 16,
+            color: "#666",
+            background: "#fff",
+          }}
+        >
+          No locks found yet.
+        </div>
+      ) : (
+        <>
+          <div
+            style={{
+              display: "flex",
+              gap: 12,
+              flexWrap: "wrap",
+              alignItems: "center",
+            }}
+          >
+            <select
+              value={propertyFilter}
+              onChange={(e) => setPropertyFilter(e.target.value)}
+              style={{
+                height: 40,
+                minWidth: 220,
+                padding: "0 12px",
+                borderRadius: 10,
+                border: "1px solid #d1d5db",
+                background: "#fff",
+                color: "#111827",
+                outline: "none",
+              }}
+            >
+              <option value="ALL">All properties</option>
+              {propertyOptions.map((property) => (
+                <option key={property.id} value={property.id}>
+                  {property.name}
+                </option>
+              ))}
+            </select>
+
+            <select
+              value={statusFilter}
+              onChange={(e) => setStatusFilter(e.target.value)}
+              style={{
+                height: 40,
+                minWidth: 180,
+                padding: "0 12px",
+                borderRadius: 10,
+                border: "1px solid #d1d5db",
+                background: "#fff",
+                color: "#111827",
+                outline: "none",
+              }}
+            >
+              <option value="ALL">All status</option>
+              <option value="ACTIVE">ACTIVE</option>
+              <option value="DISABLED">DISABLED</option>
+            </select>
+          </div>
+
+          <div style={{ overflowX: "auto" }}>
+            <table
+              style={{
+                width: "100%",
+                borderCollapse: "collapse",
+                background: "#fff",
+                border: "1px solid #e5e7eb",
+                borderRadius: 16,
+                overflow: "hidden",
+              }}
+            >
+              <thead>
+                <tr style={{ background: "#f9fafb", textAlign: "left" }}>
+                  <th style={{ padding: 14, borderBottom: "1px solid #e5e7eb" }}>Lock</th>
+                  <th style={{ padding: 14, borderBottom: "1px solid #e5e7eb" }}>TTLock ID</th>
+                  <th style={{ padding: 14, borderBottom: "1px solid #e5e7eb" }}>Property</th>
+                  <th style={{ padding: 14, borderBottom: "1px solid #e5e7eb" }}>Status</th>
+                  <th style={{ padding: 14, borderBottom: "1px solid #e5e7eb" }}>Battery</th>
+                  <th style={{ padding: 14, borderBottom: "1px solid #e5e7eb" }}>Gateway</th>
+                  <th style={{ padding: 14, borderBottom: "1px solid #e5e7eb" }}>Health</th>
+                </tr>
+              </thead>
+
+              <tbody>
+                {filteredItems.map((lock) => (
+                  <ClickableLockRow
+                    key={lock.id}
+                    lock={lock}
+                    onClick={() => navigate(`/locks/${lock.id}`)}
+                  />
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </>
+      )}
+
+      <div style={{ color: "#666", fontSize: 13 }}>
+        {loading ? "Loading..." : `${filteredItems.length} locks`}
+      </div>
+    </div>
+  );
+}

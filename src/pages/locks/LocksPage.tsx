@@ -1,4 +1,5 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
+import { Link } from "react-router-dom";
 
 type LockRow = {
   id: string;
@@ -23,6 +24,9 @@ export function LocksPage() {
   const [loading, setLoading] = useState(false);
   const [err, setErr] = useState<string | null>(null);
 
+  const [propertyFilter, setPropertyFilter] = useState("ALL");
+  const [statusFilter, setStatusFilter] = useState("ALL");
+
   useEffect(() => {
     setLoading(true);
     setErr(null);
@@ -46,6 +50,35 @@ export function LocksPage() {
       .finally(() => setLoading(false));
   }, []);
 
+  const propertyOptions = useMemo(() => {
+    const map = new Map<string, string>();
+
+    for (const lock of data?.items ?? []) {
+      if (lock.property?.id && lock.property?.name) {
+        map.set(lock.property.id, lock.property.name);
+      }
+    }
+
+    return Array.from(map.entries())
+      .map(([id, name]) => ({ id, name }))
+      .sort((a, b) => a.name.localeCompare(b.name));
+  }, [data]);
+
+  const filteredItems = useMemo(() => {
+    const items = data?.items ?? [];
+
+    return items.filter((lock) => {
+      const matchesProperty =
+        propertyFilter === "ALL" ? true : lock.property?.id === propertyFilter;
+
+      const status = lock.isActive ? "ACTIVE" : "DISABLED";
+      const matchesStatus =
+        statusFilter === "ALL" ? true : status === statusFilter;
+
+      return matchesProperty && matchesStatus;
+    });
+  }, [data, propertyFilter, statusFilter]);
+
   return (
     <div style={{ display: "grid", gap: 16 }}>
       <div>
@@ -65,6 +98,52 @@ export function LocksPage() {
           <b>Error:</b> {err}
         </div>
       ) : null}
+
+      <div
+        style={{
+          display: "flex",
+          gap: 12,
+          flexWrap: "wrap",
+          alignItems: "center",
+        }}
+      >
+        <select
+          value={propertyFilter}
+          onChange={(e) => setPropertyFilter(e.target.value)}
+          style={{
+            height: 40,
+            minWidth: 220,
+            borderRadius: 10,
+            border: "1px solid #d1d5db",
+            padding: "0 12px",
+            background: "#fff",
+          }}
+        >
+          <option value="ALL">All Properties</option>
+          {propertyOptions.map((property) => (
+            <option key={property.id} value={property.id}>
+              {property.name}
+            </option>
+          ))}
+        </select>
+
+        <select
+          value={statusFilter}
+          onChange={(e) => setStatusFilter(e.target.value)}
+          style={{
+            height: 40,
+            minWidth: 180,
+            borderRadius: 10,
+            border: "1px solid #d1d5db",
+            padding: "0 12px",
+            background: "#fff",
+          }}
+        >
+          <option value="ALL">All Status</option>
+          <option value="ACTIVE">ACTIVE</option>
+          <option value="DISABLED">DISABLED</option>
+        </select>
+      </div>
 
       <div
         style={{
@@ -106,17 +185,26 @@ export function LocksPage() {
                   Failed to load locks.
                 </td>
               </tr>
-            ) : !data || data.items.length === 0 ? (
+            ) : !data || filteredItems.length === 0 ? (
               <tr>
                 <td colSpan={5} style={{ padding: 16, color: "#666" }}>
                   No locks found.
                 </td>
               </tr>
             ) : (
-              data.items.map((l) => (
+              filteredItems.map((l) => (
                 <tr key={l.id} style={{ borderBottom: "1px solid #f3f4f6" }}>
                   <td style={{ padding: 12, fontWeight: 600 }}>
-                    {l.name ?? "TTLock Lock"}
+                    <Link
+                      to={`/locks/${l.id}`}
+                      style={{
+                        color: "#111827",
+                        textDecoration: "underline",
+                        textUnderlineOffset: 3,
+                      }}
+                    >
+                      {l.name ?? "TTLock Lock"}
+                    </Link>
                   </td>
                   <td style={{ padding: 12 }}>{l.property?.name ?? "—"}</td>
                   <td style={{ padding: 12 }}>{l.ttlockLockId}</td>
@@ -145,7 +233,11 @@ export function LocksPage() {
       </div>
 
       <div style={{ color: "#666", fontSize: 13 }}>
-        {loading ? "Loading…" : data ? `${data.total} locks` : "—"}
+        {loading
+          ? "Loading…"
+          : data
+          ? `${filteredItems.length} of ${data.total} locks`
+          : "—"}
       </div>
     </div>
   );

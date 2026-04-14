@@ -8,15 +8,13 @@ const prisma = new PrismaClient();
  */
 export async function handlePmsWebhookEvent(params: {
   connectionId: string;
-  provider: "GUESTY" | "CLOUDBEDS" | "HOSTAWAY";
+  provider: "GUESTY" | "CLOUDBEDS" | "HOSTAWAY" | "LODGIFY";
   eventType: string | null;
   payload: unknown;
 }) {
-
   const { connectionId, provider, eventType, payload } = params;
 
   try {
-
     /**
      * 1. Normalizar el evento
      */
@@ -63,9 +61,10 @@ export async function handlePmsWebhookEvent(params: {
         checkIn: new Date(normalized.checkIn),
         checkOut: new Date(normalized.checkOut),
 
-        status: normalized.status === "CANCELLED"
-          ? "CANCELLED"
-          : "ACTIVE",
+        status:
+          normalized.status === "CANCELLED"
+            ? "CANCELLED"
+            : "ACTIVE",
 
         externalProvider: provider,
         externalId: normalized.externalReservationId,
@@ -82,9 +81,10 @@ export async function handlePmsWebhookEvent(params: {
         checkIn: new Date(normalized.checkIn),
         checkOut: new Date(normalized.checkOut),
 
-        status: normalized.status === "CANCELLED"
-          ? "CANCELLED"
-          : "ACTIVE",
+        status:
+          normalized.status === "CANCELLED"
+            ? "CANCELLED"
+            : "ACTIVE",
 
         externalUpdatedAt: normalized.rawUpdatedAt
           ? new Date(normalized.rawUpdatedAt)
@@ -96,9 +96,7 @@ export async function handlePmsWebhookEvent(params: {
       ok: true,
       reservationId: reservation.id,
     };
-
   } catch (error: any) {
-
     console.error("PMS webhook handler error", error);
 
     return {

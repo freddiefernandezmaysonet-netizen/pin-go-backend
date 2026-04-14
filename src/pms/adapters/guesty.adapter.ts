@@ -1,27 +1,164 @@
 import type { PmsAdapter, CanonicalReservation } from "./types";
 import axios from "axios";
+import crypto from "crypto";
 
 const GUESTY_BASE_URL = "https://open-api.guesty.com/v1";
+const GUESTY_AUTH_URL = "https://open-api.guesty.com/oauth2/token";
 
-/**
- * V1: asumimos que credentialsEncrypted contiene accessToken.
- * Ejemplo (sin cifrar por ahora):
- * {
- *   "accessToken": "xxx"
- * }
- *
- * Cuando tengas clientId/clientSecret, lo extendemos para hacer token exchange y refresh.
- */
-function getAccessTokenOrThrow(connection: { credentialsEncrypted?: string | null }) {
-  if (!connection.credentialsEncrypted) throw new Error("GUESTY_NO_CREDENTIALS");
-  let creds: any;
+type GuestyCredentials = {
+  accessToken?: string | null;
+  clientId?: string | null;
+  clientSecret?: string | null;
+};
+
+type GuestyTokenCacheEntry = {
+  accessToken: string;
+  expiresAt: number;
+};
+
+const guestyTokenCache = new Map<string, GuestyTokenCacheEntry>();
+
+function getEncryptionKey() {
+  const secret = process.env.PMS_CREDENTIALS_SECRET ?? "";
+  if (!secret) {
+    throw new Error("PMS_CREDENTIALS_SECRET not configured");
+  }
+  return crypto.createHash("sha256").update(secret).digest();
+}
+
+function decryptCredentialsIfNeeded(input: string): string {
+  const raw = String(input ?? "").trim();
+  if (!raw) {
+    throw new Error("GUESTY_NO_CREDENTIALS");
+  }
+
+  let parsed: any;
   try {
-    creds = JSON.parse(connection.credentialsEncrypted);
+    parsed = JSON.parse(raw);
   } catch {
     throw new Error("GUESTY_BAD_CREDENTIALS_JSON");
   }
-  if (!creds.accessToken) throw new Error("GUESTY_NO_ACCESS_TOKEN");
-  return String(creds.accessToken);
+
+  // Compatibilidad hacia atrás:
+  // si ya viene como JSON plano con accessToken/clientId/clientSecret
+  if (
+    parsed &&
+    !parsed.alg &&
+    !parsed.iv &&
+    !parsed.tag &&
+    !parsed.data
+  ) {
+    return JSON.stringify(parsed);
+  }
+
+  // Nuevo formato cifrado AES-256-GCM
+  if (
+    parsed?.alg !== "aes-256-gcm" ||
+    !parsed?.iv ||
+    !parsed?.tag ||
+    !parsed?.data
+  ) {
+    throw new Error("GUESTY_BAD_CREDENTIALS_FORMAT");
+  }
+
+  const key = getEncryptionKey();
+  const iv = Buffer.from(String(parsed.iv), "base64");
+  const tag = Buffer.from(String(parsed.tag), "base64");
+  const encrypted = Buffer.from(String(parsed.data), "base64");
+
+  const decipher = crypto.createDecipheriv("aes-256-gcm", key, iv);
+  decipher.setAuthTag(tag);
+
+  const decrypted = Buffer.concat([
+    decipher.update(encrypted),
+    decipher.final(),
+  ]);
+
+  return decrypted.toString("utf8");
+}
+
+function parseCredentials(connection: { credentialsEncrypted?: string | null }) {
+  if (!connection.credentialsEncrypted) throw new Error("GUESTY_NO_CREDENTIALS");
+
+  let creds: any;
+  try {
+    const decryptedJson = decryptCredentialsIfNeeded(connection.credentialsEncrypted);
+    creds = JSON.parse(decryptedJson);
+  } catch (err: any) {
+    const msg = String(err?.message ?? err);
+    if (
+      msg === "GUESTY_NO_CREDENTIALS" ||
+      msg === "GUESTY_BAD_CREDENTIALS_JSON" ||
+      msg === "GUESTY_BAD_CREDENTIALS_FORMAT" ||
+      msg === "PMS_CREDENTIALS_SECRET not configured"
+    ) {
+      throw err;
+    }
+    throw new Error("GUESTY_CREDENTIALS_DECRYPT_FAILED");
+  }
+
+  return {
+    accessToken: creds?.accessToken ? String(creds.accessToken) : null,
+    clientId: creds?.clientId ? String(creds.clientId) : null,
+    clientSecret: creds?.clientSecret ? String(creds.clientSecret) : null,
+  } satisfies GuestyCredentials;
+}
+
+/**
+ * Compatibilidad hacia atrás:
+ * - Si la conexión vieja tiene accessToken guardado, lo usamos.
+ * - Si la conexión nueva tiene clientId/clientSecret, hacemos OAuth2 real.
+ */
+async function getAccessTokenOrThrow(connection: {
+  id?: string | null;
+  credentialsEncrypted?: string | null;
+}) {
+  const creds = parseCredentials(connection);
+
+  if (creds.accessToken) {
+    return creds.accessToken;
+  }
+
+  if (!creds.clientId || !creds.clientSecret) {
+    throw new Error("GUESTY_NO_ACCESS_TOKEN");
+  }
+
+  const cacheKey = String(connection.id ?? `${creds.clientId}:guesty`);
+  const cached = guestyTokenCache.get(cacheKey);
+
+  if (cached && cached.expiresAt > Date.now() + 60_000) {
+    return cached.accessToken;
+  }
+
+  const basicAuth = Buffer.from(`${creds.clientId}:${creds.clientSecret}`).toString("base64");
+
+  const body = new URLSearchParams({
+    grant_type: "client_credentials",
+    scope: "open-api",
+  });
+
+  const resp = await axios.post(GUESTY_AUTH_URL, body.toString(), {
+    headers: {
+      "Content-Type": "application/x-www-form-urlencoded",
+      Authorization: `Basic ${basicAuth}`,
+      Accept: "application/json",
+    },
+    timeout: 15000,
+  });
+
+  const accessToken = resp.data?.access_token;
+  const expiresIn = Number(resp.data?.expires_in ?? 86400);
+
+  if (!accessToken) {
+    throw new Error("GUESTY_TOKEN_RESPONSE_INVALID");
+  }
+
+  guestyTokenCache.set(cacheKey, {
+    accessToken: String(accessToken),
+    expiresAt: Date.now() + expiresIn * 1000,
+  });
+
+  return String(accessToken);
 }
 
 /**
@@ -42,13 +179,15 @@ function mapGuestyReservationToCanonical(externalReservationId: string, r: any):
     r?.guest?.fullName ??
     [r?.guest?.firstName, r?.guest?.lastName].filter(Boolean).join(" ") ??
     r?.guestName;
-    
+
   const listingName =
     r?.listing?.title ?? r?.listing?.nickname ?? r?.listingTitle ?? null;
 
   // Status (ajustaremos cuando veas el enum exacto)
   const status: CanonicalReservation["status"] =
-    String(r?.status ?? "").toLowerCase() === "cancelled" ? "CANCELLED" : "CONFIRMED";
+    ["cancelled", "canceled"].includes(String(r?.status ?? "").toLowerCase())
+      ? "CANCELLED"
+      : "CONFIRMED";
 
   if (!externalListingId) throw new Error("GUESTY_RESERVATION_MISSING_LISTING_ID");
   if (!checkInRaw || !checkOutRaw) throw new Error("GUESTY_RESERVATION_MISSING_DATES");
@@ -111,34 +250,35 @@ export const guestyAdapter: PmsAdapter = {
    * Webhook trae solo reservationId → hacemos GET /reservations/:id
    */
   fetchReservation: async ({ connection, externalReservationId }) => {
-    //const accessToken = getAccessTokenOrThrow(connection);
-    // const resp = await axios.get(...);
-    const url = `${GUESTY_BASE_URL}/reservations/${encodeURIComponent(externalReservationId)}`;
+    if (!externalReservationId) {
+      throw new Error("GUESTY_MISSING_EXTERNAL_RESERVATION_ID");
+    }
 
-// 🔥 MOCK TEMPORAL (solo para probar flujo real)
-const suffix = String(externalReservationId).slice(-4);
-const listingId = `L-${suffix}`;
+    try {
+      const accessToken = await getAccessTokenOrThrow(connection);
 
-const payload = {
-  id: externalReservationId,
-  listingId,
-  listing: {
-    title: `Listing ${listingId}`,
-    nickname: `Listing ${listingId}`,
-  },
-  checkIn: "2026-02-25T22:50:41.960Z",
-  checkOut: "2026-02-26T22:46:41.960Z",                        
-  status: "cancelled",                             
-  guest: {
-    fullName: "Mock Guest",
-    email: "mock@test.com",
-    phone: "+123456789",
-  },
-};
+      const url = `${GUESTY_BASE_URL}/reservations/${encodeURIComponent(externalReservationId)}`;
 
-       // Dependiendo del wrapper de Guesty, puede venir en resp.data o resp.data.data
-    //const payload = resp.data?.data ?? resp.data;
+      const resp = await axios.get(url, {
+        headers: {
+          Authorization: `Bearer ${accessToken}`,
+          Accept: "application/json",
+        },
+        timeout: 15000,
+      });
 
-    return mapGuestyReservationToCanonical(externalReservationId, payload);
+      // Dependiendo del wrapper de Guesty, puede venir en resp.data o resp.data.data
+      const payload = resp.data?.data ?? resp.data;
+
+      return mapGuestyReservationToCanonical(externalReservationId, payload);
+    } catch (err: any) {
+      console.error("❌ Guesty fetchReservation error:", {
+        externalReservationId,
+        message: err?.message,
+        responseStatus: err?.response?.status,
+        responseData: err?.response?.data,
+      });
+      throw err;
+    }
   },
 };

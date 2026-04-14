@@ -123,7 +123,6 @@ export function OverviewPage() {
         setPms(pmsSummary);
       })
       .catch((e) => {
-        console.error("OVERVIEW ERROR", e);
         setErr(String(e?.message ?? e));
       })
       .finally(() => setLoading(false));

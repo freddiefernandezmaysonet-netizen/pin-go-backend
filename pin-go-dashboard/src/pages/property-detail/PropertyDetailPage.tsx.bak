@@ -1,0 +1,1769 @@
+import { useEffect, useMemo, useState, useCallback } from "react";
+import { useParams, Link } from "react-router-dom";
+import { ActivateLockModal } from "../../components/dashboard/ActivateLockModal";
+import GuestExperienceCard, {
+  type DeviceExperienceConfig,
+  type DeviceExperienceMap,
+  type GuestExperienceDevice,
+  type GuestExperiencePreset,
+} from "../../components/properties/GuestExperienceCard";
+
+type PropertyRow = {
+  id: string;
+  name: string;
+  locks: number;
+  activeReservations: number;
+  pms: string;
+  status: string;
+};
+
+type PropertiesResp = {
+  items: PropertyRow[];
+};
+
+type LockRow = {
+  id: string;
+  ttlockLockId: number;
+  name: string | null;
+  isActive: boolean;
+  property: { id: string; name: string } | null;
+};
+
+type LocksResp = {
+  page: number;
+  pageSize: number;
+  total: number;
+  items: LockRow[];
+};
+
+type ReservationRow = {
+  id: string;
+  guestName: string;
+  guestEmail?: string | null;
+  roomName?: string | null;
+  checkIn: string;
+  checkOut: string;
+  status: "ACTIVE" | "CANCELLED";
+  operationalStatus: "UPCOMING" | "IN_HOUSE" | "CHECKED_OUT" | "CANCELLED";
+  source?: string | null;
+  externalProvider?: string | null;
+  property?: { id: string; name: string } | null;
+};
+
+type ReservationsResp = {
+  page: number;
+  pageSize: number;
+  total: number;
+  items: ReservationRow[];
+};
+
+type AccessResp = {
+  now: string;
+  guestPasscodes: Array<{
+    grantId: string;
+    guestName: string;
+    property: { id: string; name: string } | null;
+    lock: { ttlockLockId: number; name: string | null } | null;
+    startsAt: string;
+    endsAt: string;
+    codeMasked: string | null;
+    status?: string;
+  }>;
+  nfc: Array<{
+    assignmentId: string;
+    guestName: string;
+    property: { id: string; name: string };
+    role: string;
+    status: string;
+    card: { id: string; label: string | null; ttlockCardId: number };
+    startsAt: string;
+    endsAt: string;
+  }>;
+};
+
+type AutomationSavedDevice = {
+  id: string;
+  provider: string;
+  externalDeviceId: string;
+  deviceName: string;
+  deviceCategory?: string | null;
+  isEnabled: boolean;
+  autoOnAtCheckIn?: boolean;
+  autoOffAtCheckOut?: boolean;
+};
+
+type AutomationSettingsResp = {
+  ok: boolean;
+  settings?: {
+    propertyId: string;
+    arrivalOffsetMinutes: number;
+    departureOffsetMinutes: number;
+    automationEnabled: boolean;
+    guestExperienceEnabled?: boolean;
+    guestExperienceDevices?: any;
+  } | null;
+  devices?: AutomationSavedDevice[];
+  error?: string;
+};
+
+type TuyaDeviceItem = {
+  id: string;
+  name: string;
+  category?: string | null;
+  online?: boolean;
+  isAssigned: boolean;
+  assignment?: {
+    propertyId: string;
+    propertyName: string;
+  } | null;
+};
+
+type OrgTuyaDevicesResp = {
+  ok: boolean;
+  count?: number;
+  items?: any[];
+  error?: string;
+};
+
+type DeviceFlagsState = Record<
+  string,
+  {
+    autoOn: boolean;
+    autoOff: boolean;
+  }
+>;
+
+type PropertyDeviceView = {
+  id: string;
+  name: string;
+  category?: string | null;
+  online?: boolean;
+  assignment?: {
+    propertyId: string;
+    propertyName: string;
+  } | null;
+};
+
+const API_BASE = import.meta.env.VITE_API_BASE ?? "http://localhost:3000";
+
+function Stat({ title, value }: { title: string; value: string | number }) {
+  return (
+    <div
+      style={{
+        border: "1px solid #e5e7eb",
+        borderRadius: 16,
+        padding: 18,
+        background: "#fff",
+      }}
+    >
+      <div style={{ fontSize: 13, color: "#6b7280", marginBottom: 8 }}>{title}</div>
+      <div style={{ fontSize: 28, fontWeight: 700, color: "#111827" }}>{value}</div>
+    </div>
+  );
+}
+
+function SectionCard({
+  title,
+  children,
+  right,
+}: {
+  title: string;
+  children: React.ReactNode;
+  right?: React.ReactNode;
+}) {
+  return (
+    <div
+      style={{
+        border: "1px solid #e5e7eb",
+        borderRadius: 18,
+        padding: 18,
+        background: "#fff",
+        display: "grid",
+        gap: 12,
+      }}
+    >
+      <div
+        style={{
+          display: "flex",
+          justifyContent: "space-between",
+          alignItems: "center",
+          gap: 12,
+          flexWrap: "wrap",
+        }}
+      >
+        <div style={{ fontSize: 18, fontWeight: 700 }}>{title}</div>
+        {right}
+      </div>
+      {children}
+    </div>
+  );
+}
+
+function TabButton({
+  active,
+  onClick,
+  label,
+}: {
+  active: boolean;
+  onClick: () => void;
+  label: string;
+}) {
+  return (
+    <button
+      onClick={onClick}
+      style={{
+        padding: "10px 14px",
+        borderRadius: 12,
+        border: "1px solid #e5e7eb",
+        background: active ? "#111827" : "#ffffff",
+        color: active ? "#ffffff" : "#374151",
+        fontWeight: 600,
+        cursor: "pointer",
+      }}
+    >
+      {label}
+    </button>
+  );
+}
+
+function fmt(d: string) {
+  const dt = new Date(d);
+  return isNaN(dt.getTime()) ? d : dt.toLocaleString();
+}
+
+function operationalBadge(status: ReservationRow["operationalStatus"]) {
+  let background = "#f3f4f6";
+  let color = "#4b5563";
+  let border = "1px solid #e5e7eb";
+  let label = status;
+
+  if (status === "UPCOMING") {
+    background = "#eff6ff";
+    color = "#1d4ed8";
+    border = "1px solid #bfdbfe";
+    label = "UPCOMING";
+  } else if (status === "IN_HOUSE") {
+    background = "#ecfdf5";
+    color = "#065f46";
+    border = "1px solid #a7f3d0";
+    label = "IN HOUSE";
+  } else if (status === "CHECKED_OUT") {
+    background = "#f3f4f6";
+    color = "#4b5563";
+    border = "1px solid #e5e7eb";
+    label = "CHECKED OUT";
+  } else if (status === "CANCELLED") {
+    background = "#fef2f2";
+    color = "#991b1b";
+    border = "1px solid #fecaca";
+    label = "CANCELLED";
+  }
+
+  return (
+    <span
+      style={{
+        display: "inline-flex",
+        alignItems: "center",
+        padding: "4px 8px",
+        borderRadius: 999,
+        fontSize: 12,
+        fontWeight: 700,
+        background,
+        color,
+        border,
+      }}
+    >
+      {label}
+    </span>
+  );
+}
+
+function accessStatusBadge(status?: string) {
+  const normalized = String(status ?? "").toUpperCase();
+
+  let background = "#f3f4f6";
+  let color = "#4b5563";
+  let border = "1px solid #e5e7eb";
+  let label = normalized || "—";
+
+  if (normalized === "ACTIVE") {
+    background = "#ecfdf5";
+    color = "#065f46";
+    border = "1px solid #a7f3d0";
+  } else if (normalized === "PENDING") {
+    background = "#eff6ff";
+    color = "#1d4ed8";
+    border = "1px solid #bfdbfe";
+  } else if (normalized === "FAILED" || normalized === "CANCELLED") {
+    background = "#fef2f2";
+    color = "#991b1b";
+    border = "1px solid #fecaca";
+  }
+
+  return (
+    <span
+      style={{
+        display: "inline-flex",
+        alignItems: "center",
+        padding: "4px 8px",
+        borderRadius: 999,
+        fontSize: 12,
+        fontWeight: 700,
+        background,
+        color,
+        border,
+      }}
+    >
+      {label}
+    </span>
+  );
+}
+
+function deviceCategoryLabel(value?: string | null) {
+  const text = String(value ?? "").trim();
+  if (!text) return "Unknown category";
+
+  return text
+    .split("_")
+    .filter(Boolean)
+    .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
+    .join(" ");
+}
+
+function cardStyle(selected: boolean, disabled?: boolean): React.CSSProperties {
+  return {
+    display: "flex",
+    justifyContent: "space-between",
+    alignItems: "flex-start",
+    gap: 12,
+    border: "1px solid #e5e7eb",
+    borderRadius: 14,
+    padding: 12,
+    background: disabled ? "#f9fafb" : selected ? "#f0fdf4" : "#fff",
+    opacity: disabled ? 0.65 : 1,
+    cursor: disabled ? "not-allowed" : "pointer",
+    transition: "background 0.15s ease, border-color 0.15s ease, box-shadow 0.15s ease",
+  };
+}
+
+function DeviceStatus({ online }: { online?: boolean }) {
+  return (
+    <span
+      style={{
+        display: "inline-flex",
+        alignItems: "center",
+        padding: "4px 8px",
+        borderRadius: 999,
+        fontSize: 12,
+        fontWeight: 700,
+        border: "1px solid #e5e7eb",
+        background: online ? "#ecfdf5" : "#f3f4f6",
+        color: online ? "#065f46" : "#4b5563",
+        whiteSpace: "nowrap",
+      }}
+    >
+      {online ? "ONLINE" : "OFFLINE"}
+    </span>
+  );
+}
+
+function DeviceToggles({
+  disabled,
+  autoOn,
+  autoOff,
+  onAutoOnChange,
+  onAutoOffChange,
+}: {
+  disabled?: boolean;
+  autoOn: boolean;
+  autoOff: boolean;
+  onAutoOnChange: (value: boolean) => void;
+  onAutoOffChange: (value: boolean) => void;
+}) {
+  return (
+    <div
+      style={{
+        display: "flex",
+        gap: 16,
+        flexWrap: "wrap",
+        marginTop: 8,
+      }}
+    >
+      <label
+        style={{
+          display: "inline-flex",
+          alignItems: "center",
+          gap: 8,
+          fontSize: 12,
+          color: disabled ? "#9ca3af" : "#374151",
+        }}
+      >
+        <input
+          type="checkbox"
+          checked={autoOn}
+          disabled={disabled}
+          onChange={(e) => onAutoOnChange(e.target.checked)}
+        />
+        Turn on at check-in
+      </label>
+
+      <label
+        style={{
+          display: "inline-flex",
+          alignItems: "center",
+          gap: 8,
+          fontSize: 12,
+          color: disabled ? "#9ca3af" : "#374151",
+        }}
+      >
+        <input
+          type="checkbox"
+          checked={autoOff}
+          disabled={disabled}
+          onChange={(e) => onAutoOffChange(e.target.checked)}
+        />
+        Turn off at check-out
+      </label>
+    </div>
+  );
+}
+
+function normalizeGuestExperienceCategory(value?: string | null) {
+  const raw = String(value ?? "").trim().toLowerCase();
+
+  if (!raw) return "generic";
+
+  if (
+    raw.includes("air") ||
+    raw.includes("ac") ||
+    raw.includes("climate") ||
+    raw.includes("hvac") ||
+    raw.includes("infrared_ac")
+  ) {
+    return "ac";
+  }
+
+  if (
+    raw.includes("light") ||
+    raw.includes("lamp") ||
+    raw.includes("bulb") ||
+    raw.includes("led") ||
+    raw.includes("dj") ||
+    raw.includes("rgb") ||
+    raw.includes("strip")
+  ) {
+    return "light";
+  }
+
+  if (
+    raw.includes("alarm") ||
+    raw.includes("security") ||
+    raw.includes("siren") ||
+    raw.includes("mal")
+  ) {
+    return "alarm";
+  }
+
+  if (raw.includes("curtain") || raw.includes("blind")) {
+    return "curtain";
+  }
+
+  if (raw.includes("switch") || raw.includes("plug") || raw.includes("cz")) {
+    return "switch";
+  }
+
+  return "generic";
+}
+
+function getDefaultExperienceConfig(category?: string | null): DeviceExperienceConfig {
+  const normalized = normalizeGuestExperienceCategory(category);
+
+  if (normalized === "ac") {
+    return {
+      enabled: true,
+      checkInAction: "SET_COMFORT",
+      checkOutAction: "TURN_OFF",
+      temperature: 72,
+      mode: "cool",
+    };
+  }
+
+  if (normalized === "light") {
+    return {
+      enabled: true,
+      checkInAction: "TURN_ON",
+      checkOutAction: "TURN_OFF",
+      brightness: 80,
+    };
+  }
+
+  if (normalized === "alarm") {
+    return {
+      enabled: true,
+      checkInAction: "DISARM",
+      checkOutAction: "ARM",
+    };
+  }
+
+  return {
+    enabled: true,
+    checkInAction: "TURN_ON",
+    checkOutAction: "TURN_OFF",
+  };
+}
+
+function sanitizeGuestExperienceConfigForCategory(
+  category: string | null | undefined,
+  config: Partial<DeviceExperienceConfig> | undefined
+): DeviceExperienceConfig {
+  const normalized = normalizeGuestExperienceCategory(category);
+  const base = getDefaultExperienceConfig(category);
+
+  const next: DeviceExperienceConfig = {
+    ...base,
+    ...(config ?? {}),
+  };
+
+  if (normalized === "alarm") {
+    const rawCheckIn = String(next.checkInAction ?? "").toUpperCase();
+    const rawCheckOut = String(next.checkOutAction ?? "").toUpperCase();
+
+    next.checkInAction =
+      rawCheckIn === "DISARM"
+        ? "DISARM"
+        : rawCheckIn === "NONE"
+        ? "NONE"
+        : "DISARM";
+
+    next.checkOutAction =
+      rawCheckOut === "ARM"
+        ? "ARM"
+        : rawCheckOut === "NONE"
+        ? "NONE"
+        : "ARM";
+
+    delete next.temperature;
+    delete next.brightness;
+    delete next.mode;
+  }
+
+  return next;
+}
+
+function applyGuestExperiencePresetToDevices(
+  preset: GuestExperiencePreset,
+  devices: GuestExperienceDevice[]
+): DeviceExperienceMap {
+  const next: DeviceExperienceMap = {};
+
+  for (const device of devices) {
+    const category = normalizeGuestExperienceCategory(device.category);
+    const base = getDefaultExperienceConfig(device.category);
+
+    if (preset === "WELCOME") {
+      next[device.id] =
+        category === "light"
+          ? {
+              ...base,
+              enabled: true,
+              checkInAction: "TURN_ON",
+              checkOutAction: "TURN_OFF",
+              brightness: 85,
+            }
+          : category === "alarm"
+          ? {
+              ...base,
+              enabled: true,
+              checkInAction: "DISARM",
+              checkOutAction: "ARM",
+            }
+          : {
+              ...base,
+              enabled: true,
+              checkInAction: "TURN_ON",
+              checkOutAction: "TURN_OFF",
+            };
+      continue;
+    }
+
+    if (preset === "COMFORT") {
+      next[device.id] =
+        category === "ac"
+          ? {
+              ...base,
+              enabled: true,
+              checkInAction: "SET_COMFORT",
+              checkOutAction: "TURN_OFF",
+              temperature: 72,
+              mode: "cool",
+            }
+          : category === "light"
+          ? {
+              ...base,
+              enabled: true,
+              checkInAction: "TURN_ON",
+              checkOutAction: "TURN_OFF",
+              brightness: 75,
+            }
+          : category === "alarm"
+          ? {
+              ...base,
+              enabled: true,
+              checkInAction: "DISARM",
+              checkOutAction: "ARM",
+            }
+          : {
+              ...base,
+              enabled: true,
+              checkInAction: "TURN_ON",
+              checkOutAction: "TURN_OFF",
+            };
+      continue;
+    }
+
+    if (preset === "ENERGY_SAVER") {
+      next[device.id] =
+        category === "ac"
+          ? {
+              ...base,
+              enabled: true,
+              checkInAction: "SET_COMFORT",
+              checkOutAction: "TURN_OFF",
+              temperature: 76,
+              mode: "cool",
+            }
+          : category === "alarm"
+          ? {
+              ...base,
+              enabled: true,
+              checkInAction: "DISARM",
+              checkOutAction: "ARM",
+            }
+          : {
+              ...base,
+              enabled: true,
+              checkInAction: "NONE",
+              checkOutAction: "TURN_OFF",
+            };
+      continue;
+    }
+
+    if (preset === "LIGHTS_ONLY") {
+      next[device.id] =
+        category === "light"
+          ? {
+              ...base,
+              enabled: true,
+              checkInAction: "TURN_ON",
+              checkOutAction: "TURN_OFF",
+              brightness: 80,
+            }
+          : {
+              ...base,
+              enabled: false,
+              checkInAction: "NONE",
+              checkOutAction: "NONE",
+            };
+    }
+  }
+
+  return next;
+}
+
+export function PropertyDetailPage() {
+  const { id } = useParams();
+  const [tab, setTab] = useState<"overview" | "locks" | "reservations" | "access">("overview");
+
+  const [item, setItem] = useState<PropertyRow | null>(null);
+  const [locks, setLocks] = useState<LockRow[]>([]);
+  const [reservations, setReservations] = useState<ReservationRow[]>([]);
+  const [access, setAccess] = useState<AccessResp | null>(null);
+
+  const [loading, setLoading] = useState(false);
+  const [err, setErr] = useState<string | null>(null);
+  const [openAddLock, setOpenAddLock] = useState(false);
+
+  const [automationEnabled, setAutomationEnabled] = useState(true);
+  const [arrivalOffset, setArrivalOffset] = useState(30);
+  const [departureOffset, setDepartureOffset] = useState(15);
+  const [savingAutomation, setSavingAutomation] = useState(false);
+
+  const [tuyaDevices, setTuyaDevices] = useState<TuyaDeviceItem[]>([]);
+  const [savedAutomationDevices, setSavedAutomationDevices] = useState<AutomationSavedDevice[]>([]);
+  const [selectedDevices, setSelectedDevices] = useState<string[]>([]);
+  const [deviceFlags, setDeviceFlags] = useState<DeviceFlagsState>({});
+  const [tuyaDevicesError, setTuyaDevicesError] = useState<string | null>(null);
+
+  const [guestExperienceEnabled, setGuestExperienceEnabled] = useState(true);
+  const [guestExperienceDevices, setGuestExperienceDevices] = useState<DeviceExperienceMap>({});
+
+  const isAutomationPremium = true;
+
+  const loadData = useCallback(async () => {
+    if (!id) return;
+
+    setLoading(true);
+    setErr(null);
+    setTuyaDevicesError(null);
+
+    try {
+      const [propsData, locksData, reservationsData, accessData] = await Promise.all([
+        fetch(`${API_BASE}/api/dashboard/properties`, { credentials: "include" }).then(async (res) => {
+          if (!res.ok) throw new Error(`Properties ${res.status}`);
+          return res.json() as Promise<PropertiesResp>;
+        }),
+        fetch(`${API_BASE}/api/dashboard/locks?page=1&pageSize=20&propertyId=${id}`, {
+          credentials: "include",
+        }).then(async (res) => {
+          if (!res.ok) throw new Error(`Locks ${res.status}`);
+          return res.json() as Promise<LocksResp>;
+        }),
+        fetch(`${API_BASE}/api/dashboard/reservations?page=1&pageSize=50&propertyId=${id}`, {
+          credentials: "include",
+        }).then(async (res) => {
+          if (!res.ok) throw new Error(`Reservations ${res.status}`);
+          return res.json() as Promise<ReservationsResp>;
+        }),
+        fetch(`${API_BASE}/api/dashboard/access?propertyId=${id}`, {
+          credentials: "include",
+        }).then(async (res) => {
+          if (!res.ok) throw new Error(`Access ${res.status}`);
+          return res.json() as Promise<AccessResp>;
+        }),
+      ]);
+
+      const found = (propsData.items ?? []).find((x) => x.id === id) ?? null;
+      setItem(found);
+      setLocks(locksData.items ?? []);
+      setReservations(reservationsData.items ?? []);
+      setAccess(accessData);
+
+      const [autoResp, tuyaResp] = await Promise.all([
+        fetch(`${API_BASE}/api/properties/${id}/automation-settings`, {
+          credentials: "include",
+        }),
+        fetch(`${API_BASE}/api/org/tuya/devices`, {
+          credentials: "include",
+        }),
+      ]);
+
+      let savedDeviceIds: string[] = [];
+      let savedDevices: AutomationSavedDevice[] = [];
+      const nextFlags: DeviceFlagsState = {};
+
+      if (autoResp.ok) {
+        const autoData = (await autoResp.json()) as AutomationSettingsResp;
+
+        if (autoData?.settings) {
+          setAutomationEnabled(autoData.settings.automationEnabled ?? true);
+          setArrivalOffset(autoData.settings.arrivalOffsetMinutes ?? 30);
+          setDepartureOffset(autoData.settings.departureOffsetMinutes ?? 15);
+        } else {
+          setAutomationEnabled(true);
+          setArrivalOffset(30);
+          setDepartureOffset(15);
+        }
+
+        setGuestExperienceEnabled(
+          autoData.settings?.guestExperienceEnabled ?? true
+        );
+
+        const rawGuestDevices = Array.isArray(autoData.settings?.guestExperienceDevices)
+          ? autoData.settings?.guestExperienceDevices
+          : [];
+
+        const mapped: DeviceExperienceMap = {};
+
+        for (const d of rawGuestDevices as any[]) {
+          const deviceId = String(d?.externalDeviceId ?? "").trim();
+          if (!deviceId) continue;
+
+          mapped[deviceId] = sanitizeGuestExperienceConfigForCategory(
+            d?.deviceCategory ?? null,
+            {
+              enabled: d?.enabled ?? true,
+              checkInAction: d?.checkInAction ?? "NONE",
+              checkOutAction: d?.checkOutAction ?? "NONE",
+              temperature: d?.temperature ?? undefined,
+              brightness: d?.brightness ?? undefined,
+              mode: d?.mode ?? undefined,
+            }
+          );
+        }
+
+        setGuestExperienceDevices(mapped);
+
+        savedDevices = Array.isArray(autoData?.devices) ? autoData.devices : [];
+        setSavedAutomationDevices(savedDevices);
+
+        savedDeviceIds = savedDevices
+          .filter((d) => d.isEnabled !== false)
+          .map((d) => String(d.externalDeviceId));
+
+        for (const d of savedDevices) {
+          const externalId = String(d.externalDeviceId ?? "").trim();
+          if (!externalId) continue;
+
+          nextFlags[externalId] = {
+            autoOn: d.autoOnAtCheckIn ?? true,
+            autoOff: d.autoOffAtCheckOut ?? true,
+          };
+        }
+      } else {
+        setAutomationEnabled(true);
+        setArrivalOffset(30);
+        setDepartureOffset(15);
+        setSavedAutomationDevices([]);
+        savedDeviceIds = [];
+      }
+
+      if (tuyaResp.ok) {
+        const tuyaData = (await tuyaResp.json()) as OrgTuyaDevicesResp;
+
+        const normalized: TuyaDeviceItem[] = Array.isArray(tuyaData.items)
+          ? tuyaData.items.map((d: any) => ({
+              id: String(d?.id ?? d?.externalDeviceId ?? "").trim(),
+              name: String(d?.name ?? d?.deviceName ?? "").trim(),
+              category:
+                d?.category == null && d?.deviceCategory == null
+                  ? null
+                  : String(d?.category ?? d?.deviceCategory ?? "").trim() || null,
+              online: typeof d?.online === "boolean" ? d.online : undefined,
+              isAssigned: Boolean(d?.isAssigned),
+              assignment: d?.assignment
+                ? {
+                    propertyId: String(d.assignment.propertyId ?? ""),
+                    propertyName: String(d.assignment.propertyName ?? "Property"),
+                  }
+                : null,
+            }))
+          : [];
+
+        setTuyaDevices(normalized);
+
+        for (const d of normalized) {
+          if (!nextFlags[d.id]) {
+            nextFlags[d.id] = {
+              autoOn: true,
+              autoOff: true,
+            };
+          }
+        }
+
+        const autoSelected = normalized
+          .filter((d) => d.assignment?.propertyId === id)
+          .map((d) => d.id);
+
+        setSelectedDevices(Array.from(new Set([...savedDeviceIds, ...autoSelected])));
+        setDeviceFlags(nextFlags);
+      } else {
+        const tuyaData = (await tuyaResp
+          .json()
+          .catch(() => ({ error: "Failed to load Tuya devices" }))) as {
+          error?: string;
+        };
+
+        setTuyaDevices([]);
+        setSelectedDevices(savedDeviceIds);
+        setDeviceFlags(nextFlags);
+        setTuyaDevicesError(String(tuyaData?.error ?? "Failed to load Tuya devices"));
+      }
+    } catch (e: any) {
+      console.error("PROPERTY DETAIL ERROR", e);
+      setErr(String(e?.message ?? e));
+    } finally {
+      setLoading(false);
+    }
+  }, [id]);
+
+  useEffect(() => {
+    void loadData();
+  }, [loadData]);
+
+  function toggleSelectedDevice(externalDeviceId: string) {
+    const device = tuyaDevices.find((d) => d.id === externalDeviceId);
+    const assignedToOther =
+      device?.assignment?.propertyId && device.assignment.propertyId !== id;
+
+    if (assignedToOther) return;
+
+    setSelectedDevices((prev) =>
+      prev.includes(externalDeviceId)
+        ? prev.filter((deviceId) => deviceId !== externalDeviceId)
+        : [...prev, externalDeviceId]
+    );
+
+    setDeviceFlags((prev) => ({
+      ...prev,
+      [externalDeviceId]: {
+        autoOn: prev[externalDeviceId]?.autoOn ?? true,
+        autoOff: prev[externalDeviceId]?.autoOff ?? true,
+      },
+    }));
+  }
+
+  function updateDeviceFlag(
+    deviceId: string,
+    field: "autoOn" | "autoOff",
+    value: boolean
+  ) {
+    setDeviceFlags((prev) => ({
+      ...prev,
+      [deviceId]: {
+        autoOn: prev[deviceId]?.autoOn ?? true,
+        autoOff: prev[deviceId]?.autoOff ?? true,
+        [field]: value,
+      },
+    }));
+  }
+
+  const assignedToThisProperty = useMemo<PropertyDeviceView[]>(() => {
+    const inventoryAssigned = tuyaDevices
+      .filter((d) => d.assignment?.propertyId === id)
+      .map((d) => ({
+        id: d.id,
+        name: String(d.name || "").trim() || "Unnamed device",
+        category: d.category ?? null,
+        online: d.online,
+        assignment: d.assignment ?? null,
+      }));
+
+    const inventoryAssignedIds = new Set(inventoryAssigned.map((d) => d.id));
+
+    const savedOnlyAssigned = savedAutomationDevices
+      .filter((d) => d.isEnabled !== false && !inventoryAssignedIds.has(String(d.externalDeviceId)))
+      .map((savedDevice) => ({
+        id: String(savedDevice.externalDeviceId),
+        name: String(savedDevice.deviceName ?? "").trim() || "Unnamed device",
+        category: savedDevice.deviceCategory ?? null,
+        online: undefined,
+        assignment: {
+          propertyId: String(id ?? ""),
+          propertyName: item?.name ?? "This property",
+        },
+      }));
+
+    return [...inventoryAssigned, ...savedOnlyAssigned];
+  }, [tuyaDevices, savedAutomationDevices, id, item?.name]);
+
+  const availableDevices = useMemo(() => {
+    return tuyaDevices.filter((d) => !d.assignment?.propertyId);
+  }, [tuyaDevices]);
+
+  const assignedToOtherProperties = useMemo(() => {
+    return tuyaDevices.filter(
+      (d) => d.assignment?.propertyId && d.assignment.propertyId !== id
+    );
+  }, [tuyaDevices, id]);
+
+  const guestExperienceSelectedDevices = useMemo<GuestExperienceDevice[]>(() => {
+    const selectedSet = new Set(selectedDevices);
+
+    const fromInventory = tuyaDevices
+      .filter((device) => selectedSet.has(device.id))
+      .map((device) => ({
+        id: device.id,
+        name: String(device.name || "").trim() || "Unnamed device",
+        category: device.category ?? null,
+        online: device.online,
+      }));
+
+    const inventoryIds = new Set(fromInventory.map((d) => d.id));
+
+    const fromSavedOnly = assignedToThisProperty
+      .filter((device) => selectedSet.has(device.id) && !inventoryIds.has(device.id))
+      .map((device) => ({
+        id: device.id,
+        name: device.name,
+        category: device.category ?? null,
+        online: device.online,
+      }));
+
+    return [...fromInventory, ...fromSavedOnly];
+  }, [tuyaDevices, assignedToThisProperty, selectedDevices]);
+
+  useEffect(() => {
+    setGuestExperienceDevices((prev) => {
+      const next: DeviceExperienceMap = {};
+
+      for (const device of guestExperienceSelectedDevices) {
+        next[device.id] = sanitizeGuestExperienceConfigForCategory(
+          device.category,
+          prev[device.id] ?? getDefaultExperienceConfig(device.category)
+        );
+      }
+
+      return next;
+    });
+  }, [guestExperienceSelectedDevices]);
+
+  function updateGuestExperienceDevice(
+    deviceId: string,
+    patch: Partial<DeviceExperienceConfig>
+  ) {
+    const device = guestExperienceSelectedDevices.find((d) => d.id === deviceId);
+
+    setGuestExperienceDevices((prev) => ({
+      ...prev,
+      [deviceId]: sanitizeGuestExperienceConfigForCategory(device?.category, {
+        ...(prev[deviceId] ?? getDefaultExperienceConfig(device?.category)),
+        ...patch,
+      }),
+    }));
+  }
+
+  function applyGuestExperiencePreset(preset: GuestExperiencePreset) {
+    setGuestExperienceDevices((prev) => {
+      const presetMap = applyGuestExperiencePresetToDevices(
+        preset,
+        guestExperienceSelectedDevices
+      );
+
+      const sanitized: DeviceExperienceMap = {};
+
+      for (const device of guestExperienceSelectedDevices) {
+        sanitized[device.id] = sanitizeGuestExperienceConfigForCategory(
+          device.category,
+          presetMap[device.id] ?? prev[device.id]
+        );
+      }
+
+      return {
+        ...prev,
+        ...sanitized,
+      };
+    });
+
+    setGuestExperienceEnabled(true);
+  }
+
+  async function saveAutomation() {
+    if (!id) return;
+
+    try {
+      setSavingAutomation(true);
+
+      const selectedDevicePayload = selectedDevices
+        .map((externalDeviceId) => {
+          const inventoryDevice = tuyaDevices.find((d) => d.id === externalDeviceId);
+          const savedDevice = savedAutomationDevices.find(
+            (d) => d.externalDeviceId === externalDeviceId
+          );
+
+          const resolvedName =
+            String(inventoryDevice?.name ?? "").trim() ||
+            String(savedDevice?.deviceName ?? "").trim() ||
+            "Unnamed device";
+
+          const resolvedCategory =
+            inventoryDevice?.category ?? savedDevice?.deviceCategory ?? null;
+
+          const flags = deviceFlags[externalDeviceId] ?? {
+            autoOn: true,
+            autoOff: true,
+          };
+
+          return {
+            provider: "TUYA",
+            externalDeviceId,
+            deviceName: resolvedName,
+            deviceCategory: resolvedCategory,
+            isEnabled: true,
+            autoOnAtCheckIn: flags.autoOn,
+            autoOffAtCheckOut: flags.autoOff,
+          };
+        })
+        .filter(Boolean);
+
+      const guestExperiencePayload = {
+        enabled: guestExperienceEnabled,
+        devices: guestExperienceSelectedDevices.map((device) => {
+          const sanitized = sanitizeGuestExperienceConfigForCategory(
+            device.category,
+            guestExperienceDevices[device.id]
+          );
+
+          return {
+            externalDeviceId: device.id,
+            deviceName: device.name,
+            deviceCategory: device.category ?? null,
+            ...sanitized,
+          };
+        }),
+      };
+
+      const resp = await fetch(`${API_BASE}/api/properties/${id}/automation-settings`, {
+        method: "POST",
+        credentials: "include",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          arrivalOffsetMinutes: arrivalOffset,
+          departureOffsetMinutes: departureOffset,
+          automationEnabled,
+          devices: selectedDevicePayload,
+          guestExperience: guestExperiencePayload,
+        }),
+      });
+
+      const data = await resp.json();
+
+      if (!resp.ok || !data?.ok) {
+        throw new Error(data?.error ?? "Failed to save automation settings");
+      }
+
+      alert("Automation settings saved");
+      await loadData();
+    } catch (e: any) {
+      alert(String(e?.message ?? e));
+    } finally {
+      setSavingAutomation(false);
+    }
+  }
+
+  const upcomingReservations = useMemo(
+    () => (reservations ?? []).filter((r) => r.operationalStatus === "UPCOMING"),
+    [reservations]
+  );
+
+  const activeGuestPasscodes = useMemo(
+    () =>
+      (access?.guestPasscodes ?? []).filter(
+        (g) => String(g.status ?? "").toUpperCase() === "ACTIVE"
+      ),
+    [access]
+  );
+
+  const activeNfc = useMemo(
+    () => (access?.nfc ?? []).filter((n) => String(n.status ?? "").toUpperCase() === "ACTIVE"),
+    [access]
+  );
+
+  const accessCount = useMemo(
+    () => activeGuestPasscodes.length + activeNfc.length,
+    [activeGuestPasscodes, activeNfc]
+  );
+
+  const hasActiveLock = useMemo(() => locks.some((l) => l.isActive), [locks]);
+
+  if (loading) {
+    return <div style={{ color: "#666" }}>Loading property...</div>;
+  }
+
+  if (err) {
+    return (
+      <div
+        style={{
+          border: "1px solid #fecaca",
+          background: "#fef2f2",
+          padding: 12,
+          borderRadius: 12,
+          color: "#991b1b",
+        }}
+      >
+        <b>Error:</b> {err}
+      </div>
+    );
+  }
+
+  if (!item) {
+    return (
+      <div style={{ display: "grid", gap: 12 }}>
+        <div style={{ color: "#666" }}>Property not found.</div>
+        <Link to="/properties">Back to properties</Link>
+      </div>
+    );
+  }
+
+  return (
+    <>
+      <div style={{ display: "grid", gap: 20 }}>
+        <div>
+          <Link to="/properties" style={{ color: "#2563eb", textDecoration: "none" }}>
+            ← Back to properties
+          </Link>
+        </div>
+
+        <div>
+          <h1 style={{ fontSize: 30, fontWeight: 700, margin: 0 }}>{item.name}</h1>
+          <p style={{ color: "#666", marginTop: 8 }}>Property operational overview.</p>
+        </div>
+
+        <div
+          style={{
+            display: "grid",
+            gap: 16,
+            gridTemplateColumns: "repeat(4, minmax(0, 1fr))",
+          }}
+        >
+          <Stat title="Locks" value={item.locks} />
+          <Stat title="Upcoming Reservations" value={upcomingReservations.length} />
+          <Stat title="PMS" value={String(item.pms).toUpperCase()} />
+          <Stat title="Active Access" value={accessCount} />
+        </div>
+
+        <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
+          <TabButton active={tab === "overview"} onClick={() => setTab("overview")} label="Overview" />
+          <TabButton active={tab === "locks"} onClick={() => setTab("locks")} label={`Locks (${locks.length})`} />
+          <TabButton
+            active={tab === "reservations"}
+            onClick={() => setTab("reservations")}
+            label={`Reservations (${upcomingReservations.length})`}
+          />
+          <TabButton active={tab === "access"} onClick={() => setTab("access")} label={`Access (${accessCount})`} />
+        </div>
+
+        {tab === "overview" && (
+          <div style={{ display: "grid", gap: 16 }}>
+            <div
+              style={{
+                display: "grid",
+                gap: 16,
+                gridTemplateColumns: "1fr 1fr",
+                alignItems: "start",
+              }}
+            >
+              <SectionCard title="Property Summary">
+                <div style={{ color: "#6b7280", lineHeight: 1.7 }}>
+                  {item.name} currently has <b>{item.locks}</b> active lock(s), <b>{upcomingReservations.length}</b>{" "}
+                  upcoming reservation(s), and PMS source <b>{String(item.pms).toUpperCase()}</b>.
+                </div>
+              </SectionCard>
+
+              <SectionCard title="Operational Health">
+                <div style={{ color: "#6b7280", lineHeight: 1.7 }}>
+                  This view is focused on <b>upcoming reservations</b> and <b>active access</b> for this property.
+                </div>
+              </SectionCard>
+            </div>
+
+            <SectionCard
+              title="Automation Setup"
+              right={
+                !isAutomationPremium ? (
+                  <Link
+                    to="/billing"
+                    style={{
+                      textDecoration: "none",
+                      borderRadius: 12,
+                      padding: "10px 14px",
+                      background: "#111827",
+                      color: "#fff",
+                      fontWeight: 700,
+                    }}
+                  >
+                    Upgrade plan
+                  </Link>
+                ) : null
+              }
+            >
+              {!isAutomationPremium ? (
+                <div
+                  style={{
+                    borderRadius: 12,
+                    padding: 12,
+                    background: "#fffbeb",
+                    border: "1px solid #fcd34d",
+                    color: "#92400e",
+                    fontSize: 14,
+                    lineHeight: 1.6,
+                  }}
+                >
+                  Automation Setup is available on Premium plans.
+                </div>
+              ) : (
+                <div style={{ display: "grid", gap: 14 }}>
+                  <label
+                    style={{
+                      display: "flex",
+                      alignItems: "center",
+                      gap: 10,
+                      fontSize: 14,
+                      fontWeight: 600,
+                      color: "#111827",
+                    }}
+                  >
+                    <input
+                      type="checkbox"
+                      checked={automationEnabled}
+                      onChange={(e) => setAutomationEnabled(e.target.checked)}
+                    />
+                    Enable automation for this property
+                  </label>
+
+                  <div
+                    style={{
+                      display: "grid",
+                      gap: 14,
+                      gridTemplateColumns: "1fr 1fr",
+                    }}
+                  >
+                    <div style={{ display: "grid", gap: 8 }}>
+                      <label
+                        style={{
+                          fontSize: 13,
+                          fontWeight: 700,
+                          color: "#374151",
+                        }}
+                      >
+                        Arrival offset (minutes before check-in)
+                      </label>
+                      <input
+                        type="number"
+                        min={0}
+                        value={arrivalOffset}
+                        onChange={(e) => setArrivalOffset(Number(e.target.value))}
+                        style={{
+                          height: 42,
+                          borderRadius: 12,
+                          border: "1px solid #d1d5db",
+                          padding: "0 12px",
+                          background: "#fff",
+                        }}
+                      />
+                    </div>
+
+                    <div style={{ display: "grid", gap: 8 }}>
+                      <label
+                        style={{
+                          fontSize: 13,
+                          fontWeight: 700,
+                          color: "#374151",
+                        }}
+                      >
+                        Departure offset (minutes after check-out)
+                      </label>
+                      <input
+                        type="number"
+                        min={0}
+                        value={departureOffset}
+                        onChange={(e) => setDepartureOffset(Number(e.target.value))}
+                        style={{
+                          height: 42,
+                          borderRadius: 12,
+                          border: "1px solid #d1d5db",
+                          padding: "0 12px",
+                          background: "#fff",
+                        }}
+                      />
+                    </div>
+                  </div>
+
+                  <div style={{ display: "grid", gap: 10 }}>
+                    <div
+                      style={{
+                        fontSize: 13,
+                        fontWeight: 700,
+                        color: "#374151",
+                      }}
+                    >
+                      Tuya devices for this property
+                    </div>
+
+                    {tuyaDevicesError ? (
+                      <div
+                        style={{
+                          borderRadius: 12,
+                          padding: 12,
+                          background: "#fef2f2",
+                          border: "1px solid #fecaca",
+                          color: "#991b1b",
+                          fontSize: 14,
+                        }}
+                      >
+                        {tuyaDevicesError}
+                      </div>
+                    ) : tuyaDevices.length === 0 && assignedToThisProperty.length === 0 ? (
+                      <div
+                        style={{
+                          borderRadius: 12,
+                          padding: 12,
+                          background: "#f9fafb",
+                          border: "1px solid #e5e7eb",
+                          color: "#6b7280",
+                          fontSize: 14,
+                        }}
+                      >
+                        No Tuya devices available yet for this organization.
+                      </div>
+                    ) : (
+                      <div style={{ display: "grid", gap: 14 }}>
+                        <div style={{ display: "grid", gap: 10 }}>
+                          <div style={{ fontWeight: 700, fontSize: 13, color: "#374151" }}>
+                            Available devices
+                          </div>
+
+                          {availableDevices.length === 0 ? (
+                            <div
+                              style={{
+                                borderRadius: 12,
+                                padding: 12,
+                                background: "#f9fafb",
+                                border: "1px solid #e5e7eb",
+                                color: "#6b7280",
+                                fontSize: 14,
+                              }}
+                            >
+                              No available devices.
+                            </div>
+                          ) : (
+                            availableDevices.map((device) => {
+                              const checked = selectedDevices.includes(device.id);
+
+                              return (
+                                <label
+                                  key={device.id}
+                                  style={cardStyle(checked)}
+                                  onMouseEnter={(e) => {
+                                    if (!checked) {
+                                      e.currentTarget.style.background = "#f9fafb";
+                                      e.currentTarget.style.borderColor = "#d1d5db";
+                                    }
+                                  }}
+                                  onMouseLeave={(e) => {
+                                    if (!checked) {
+                                      e.currentTarget.style.background = "#fff";
+                                      e.currentTarget.style.borderColor = "#e5e7eb";
+                                    }
+                                  }}
+                                >
+                                  <div style={{ display: "flex", gap: 10, alignItems: "flex-start" }}>
+                                    <input
+                                      type="checkbox"
+                                      checked={checked}
+                                      onChange={() => toggleSelectedDevice(device.id)}
+                                      style={{ marginTop: 2 }}
+                                    />
+                                    <div style={{ display: "grid", gap: 4 }}>
+                                      <div style={{ fontWeight: 700, color: "#111827" }}>
+                                        {String(device.name || "").trim() || "Unnamed device"}
+                                      </div>
+                                      <div style={{ fontSize: 12, color: "#6b7280" }}>
+                                        {deviceCategoryLabel(device.category)}
+                                      </div>
+
+                                      {checked ? (
+                                        <DeviceToggles
+                                          autoOn={deviceFlags[device.id]?.autoOn ?? true}
+                                          autoOff={deviceFlags[device.id]?.autoOff ?? true}
+                                          onAutoOnChange={(value) =>
+                                            updateDeviceFlag(device.id, "autoOn", value)
+                                          }
+                                          onAutoOffChange={(value) =>
+                                            updateDeviceFlag(device.id, "autoOff", value)
+                                          }
+                                        />
+                                      ) : null}
+                                    </div>
+                                  </div>
+
+                                  <DeviceStatus online={device.online} />
+                                </label>
+                              );
+                            })
+                          )}
+                        </div>
+
+                        {assignedToThisProperty.length > 0 && (
+                          <div style={{ display: "grid", gap: 10 }}>
+                            <div style={{ fontWeight: 700, fontSize: 13, color: "#065f46" }}>
+                              Assigned to this property
+                            </div>
+
+                            {assignedToThisProperty.map((device) => (
+                              <div key={device.id} style={cardStyle(true)}>
+                                <div style={{ display: "grid", gap: 4 }}>
+                                  <div style={{ fontWeight: 700, color: "#111827" }}>
+                                    {device.name}
+                                  </div>
+                                  <div style={{ fontSize: 12, color: "#065f46" }}>
+                                    Connected to this property
+                                  </div>
+                                  <div style={{ fontSize: 12, color: "#6b7280" }}>
+                                    {deviceCategoryLabel(device.category)}
+                                  </div>
+
+                                  <DeviceToggles
+                                    autoOn={deviceFlags[device.id]?.autoOn ?? true}
+                                    autoOff={deviceFlags[device.id]?.autoOff ?? true}
+                                    onAutoOnChange={(value) =>
+                                      updateDeviceFlag(device.id, "autoOn", value)
+                                    }
+                                    onAutoOffChange={(value) =>
+                                      updateDeviceFlag(device.id, "autoOff", value)
+                                    }
+                                  />
+                                </div>
+
+                                <DeviceStatus online={device.online} />
+                              </div>
+                            ))}
+                          </div>
+                        )}
+
+                        {assignedToOtherProperties.length > 0 && (
+                          <div style={{ display: "grid", gap: 10 }}>
+                            <div style={{ fontWeight: 700, fontSize: 13, color: "#991b1b" }}>
+                              In use by other properties
+                            </div>
+
+                            {assignedToOtherProperties.map((device) => (
+                              <div key={device.id} style={cardStyle(false, true)}>
+                                <div style={{ display: "grid", gap: 4 }}>
+                                  <div style={{ fontWeight: 700, color: "#111827" }}>
+                                    {String(device.name || "").trim() || "Unnamed device"}
+                                  </div>
+                                  <div style={{ fontSize: 12, color: "#991b1b" }}>
+                                    Assigned to {device.assignment?.propertyName ?? "another property"}
+                                  </div>
+                                  <div style={{ fontSize: 12, color: "#6b7280" }}>
+                                    {deviceCategoryLabel(device.category)}
+                                  </div>
+
+                                  <DeviceToggles
+                                    disabled
+                                    autoOn={deviceFlags[device.id]?.autoOn ?? true}
+                                    autoOff={deviceFlags[device.id]?.autoOff ?? true}
+                                    onAutoOnChange={() => {}}
+                                    onAutoOffChange={() => {}}
+                                  />
+                                </div>
+
+                                <DeviceStatus online={device.online} />
+                              </div>
+                            ))}
+                          </div>
+                        )}
+                      </div>
+                    )}
+                  </div>
+
+                  <GuestExperienceCard
+                    enabled={guestExperienceEnabled}
+                    saving={savingAutomation}
+                    devices={guestExperienceSelectedDevices}
+                    value={guestExperienceDevices}
+                    onEnabledChange={setGuestExperienceEnabled}
+                    onChange={updateGuestExperienceDevice}
+                    onApplyPreset={applyGuestExperiencePreset}
+                    onSave={saveAutomation}
+                  />
+
+                  <div>
+                    <button
+                      onClick={saveAutomation}
+                      disabled={savingAutomation}
+                      style={{
+                        height: 42,
+                        padding: "0 16px",
+                        borderRadius: 12,
+                        border: "1px solid #111827",
+                        background: savingAutomation ? "#9ca3af" : "#111827",
+                        color: "#fff",
+                        fontWeight: 700,
+                        cursor: savingAutomation ? "not-allowed" : "pointer",
+                      }}
+                    >
+                      {savingAutomation ? "Saving..." : "Save Automation"}
+                    </button>
+                  </div>
+                </div>
+              )}
+            </SectionCard>
+          </div>
+        )}
+
+        {tab === "locks" && (
+          <SectionCard
+            title={`Locks (${locks.length})`}
+            right={
+              <button
+                onClick={() => {
+                  if (!hasActiveLock) setOpenAddLock(true);
+                }}
+                disabled={hasActiveLock}
+                style={{
+                  height: 40,
+                  padding: "0 14px",
+                  borderRadius: 12,
+                  border: "1px solid #111827",
+                  background: hasActiveLock ? "#e5e7eb" : "#111827",
+                  color: hasActiveLock ? "#6b7280" : "#fff",
+                  fontWeight: 700,
+                  cursor: hasActiveLock ? "not-allowed" : "pointer",
+                }}
+              >
+                {hasActiveLock ? "Lock Already Assigned" : "Add Lock"}
+              </button>
+            }
+          >
+            {hasActiveLock ? (
+              <div
+                style={{
+                  borderRadius: 12,
+                  padding: 12,
+                  background: "#fffbeb",
+                  border: "1px solid #fcd34d",
+                  color: "#92400e",
+                  fontSize: 14,
+                }}
+              >
+                This property already has an active lock. Use Swap Lock from Lock Detail to replace the device.
+              </div>
+            ) : null}
+
+            {locks.length === 0 ? (
+              <div style={{ color: "#666" }}>No locks found for this property yet.</div>
+            ) : (
+              <div style={{ display: "grid", gap: 10 }}>
+                {locks.map((l) => (
+                  <div
+                    key={l.id}
+                    style={{
+                      border: "1px solid #f3f4f6",
+                      borderRadius: 12,
+                      padding: 12,
+                      display: "flex",
+                      justifyContent: "space-between",
+                      gap: 12,
+                    }}
+                  >
+                    <div>
+                      <div style={{ fontWeight: 600 }}>{l.name ?? "TTLock Lock"}</div>
+                      <div style={{ color: "#6b7280", fontSize: 12, marginTop: 4 }}>
+                        TTLock ID: {l.ttlockLockId}
+                      </div>
+                    </div>
+                    <div>
+                      <span
+                        style={{
+                          fontSize: 12,
+                          padding: "4px 8px",
+                          borderRadius: 999,
+                          border: "1px solid #e5e7eb",
+                          background: l.isActive ? "#ecfdf5" : "#fef2f2",
+                          color: l.isActive ? "#065f46" : "#991b1b",
+                        }}
+                      >
+                        {l.isActive ? "ACTIVE" : "DISABLED"}
+                      </span>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </SectionCard>
+        )}
+
+        {tab === "reservations" && (
+          <SectionCard title={`Upcoming Reservations (${upcomingReservations.length})`}>
+            {upcomingReservations.length === 0 ? (
+              <div style={{ color: "#666" }}>No upcoming reservations found.</div>
+            ) : (
+              <div style={{ display: "grid", gap: 10 }}>
+                {upcomingReservations.map((r) => (
+                  <div
+                    key={r.id}
+                    style={{
+                      border: "1px solid #f3f4f6",
+                      borderRadius: 12,
+                      padding: 12,
+                      display: "grid",
+                      gap: 6,
+                    }}
+                  >
+                    <div style={{ fontWeight: 600 }}>{r.guestName}</div>
+                    <div style={{ color: "#6b7280", fontSize: 12 }}>
+                      {fmt(r.checkIn)} → {fmt(r.checkOut)}
+                    </div>
+                    <div
+                      style={{
+                        marginTop: 2,
+                        display: "flex",
+                        gap: 8,
+                        alignItems: "center",
+                        flexWrap: "wrap",
+                      }}
+                    >
+                      <span style={{ color: "#6b7280", fontSize: 12 }}>
+                        {String(r.externalProvider ?? r.source ?? "—").toUpperCase()}
+                      </span>
+                      {operationalBadge(r.operationalStatus)}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </SectionCard>
+        )}
+
+        {tab === "access" && (
+          <SectionCard title={`Active Access (${accessCount})`}>
+            {accessCount === 0 ? (
+              <div style={{ color: "#666" }}>No active access found.</div>
+            ) : (
+              <div style={{ display: "grid", gap: 10 }}>
+                {activeGuestPasscodes.map((g) => (
+                  <div
+                    key={g.grantId}
+                    style={{
+                      border: "1px solid #f3f4f6",
+                      borderRadius: 12,
+                      padding: 12,
+                      display: "grid",
+                      gap: 6,
+                    }}
+                  >
+                    <div style={{ fontWeight: 600 }}>PASSCODE · {g.guestName}</div>
+                    <div style={{ color: "#6b7280", fontSize: 12 }}>{g.lock?.name ?? "—"}</div>
+                    <div style={{ color: "#6b7280", fontSize: 12 }}>
+                      Access Period: {fmt(g.startsAt)} — {fmt(g.endsAt)}
+                    </div>
+                    <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+                      <span style={{ color: "#6b7280", fontSize: 12 }}>Code: {g.codeMasked ?? "—"}</span>
+                      {accessStatusBadge(g.status)}
+                    </div>
+                  </div>
+                ))}
+
+                {activeNfc.map((n) => (
+                  <div
+                    key={n.assignmentId}
+                    style={{
+                      border: "1px solid #f3f4f6",
+                      borderRadius: 12,
+                      padding: 12,
+                      display: "grid",
+                      gap: 6,
+                    }}
+                  >
+                    <div style={{ fontWeight: 600 }}>
+                      NFC · {n.role} · {n.guestName}
+                    </div>
+                    <div style={{ color: "#6b7280", fontSize: 12 }}>
+                      Card: {n.card?.label ?? "—"}
+                    </div>
+                    <div style={{ color: "#6b7280", fontSize: 12 }}>
+                      Access Period: {fmt(n.startsAt)} — {fmt(n.endsAt)}
+                    </div>
+                    <div>{accessStatusBadge(n.status)}</div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </SectionCard>
+        )}
+      </div>
+
+      <ActivateLockModal
+        open={openAddLock}
+        propertyId={item.id}
+        propertyName={item.name}
+        onClose={() => setOpenAddLock(false)}
+        onActivated={async () => {
+          setOpenAddLock(false);
+          await loadData();
+        }}
+      />
+    </>
+  );
+}

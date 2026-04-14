@@ -1,5 +1,6 @@
 // src/workers/reservation.worker.ts
-import 'dotenv/config';
+import dotenv from "dotenv";
+dotenv.config({ path: "./.env", override: true });
 import {
   PrismaClient,
   PaymentState,
@@ -15,8 +16,15 @@ import {
 import { isOrgEntitled } from "../services/billing.entitlement";
 import { activateGrant, deactivateGrant } from "../services/ttlock/ttlock.brain";
 import { assignNfcCards } from "../services/nfc.service";
-import { sendSms } from '../integrations/twilio/twilio.client';
+import {
+  sendGuestPasscodeSms,
+  sendCleaningStartSms,
+  sendCleaningEndSms,
+} from "../services/messaging.service";
 import { sendGuestAccessLinkSms } from "../services/guestLinkSms.service";
+import { sendPreCheckinSms } from "../services/preCheckinSms.service";
+import { sendCheckoutSms } from "../services/checkoutSms.service";
+import { sendCleaningReadySms } from "../services/cleaningReadySms.service";
 import { expireNfcAssignments } from "../services/nfc-expire.service";
 import { expireGuestNfcAssignments } from "../services/nfc-expire.service";
 import { expireCleaningNfcAssignments } from "../services/nfc-expire.service";
@@ -62,7 +70,7 @@ async function processGuestLinkReminders(now: Date) {
 
   const from = new Date(now.getTime() + (REMINDER_HOURS - 1) * 60 * 60 * 1000);
   const to   = new Date(now.getTime() + (REMINDER_HOURS + 1) * 60 * 60 * 1000);
-
+  
   const upcoming = await prisma.reservation.findMany({
     where: {
       checkIn: { gte: from, lte: to },
@@ -149,6 +157,42 @@ async function processGuestLinkReminders(now: Date) {
     }
   }
 } 
+
+async function processPreCheckinMessages(now: Date) {
+  const TWO_HOURS = 2 * 60 * 60 * 1000;
+
+  const upcoming = await prisma.reservation.findMany({
+    where: {
+      checkIn: {
+        gt: now,
+        lte: new Date(now.getTime() + TWO_HOURS),
+      },
+      paymentState: PaymentState.PAID,
+      guestPhone: { not: null },
+      status: "ACTIVE",
+    },
+    select: {
+      id: true,
+    },
+    take: 50,
+    orderBy: { checkIn: "asc" },
+  });
+
+  if (upcoming.length === 0) return;
+
+  log("processPreCheckinMessages", { count: upcoming.length });
+
+  for (const r of upcoming) {
+    try {
+      await sendPreCheckinSms(prisma, r.id);
+    } catch (e) {
+      errLog("Pre-checkin crashed", {
+        reservationId: r.id,
+        err: toErrString(e),
+      });
+    }
+  }
+}
 
 // Si quieres permitir activación sin pago (por pruebas), pon ALLOW_UNPAID=1
 const ALLOW_UNPAID = process.env.ALLOW_UNPAID === '1';
@@ -659,30 +703,41 @@ const phone = r.guestPhone;
 const ok = (res as any)?.ok === true;
 const code = (res as any)?.passcodePlain ?? null;
 
-  if (GUEST_SMS_ENABLED) {
-    try {
-      if (!phone) {
-        log(`Guest SMS skipped: reservation ${r.id} has no guestPhone`);
-      } else if (!code) {
-        log(`Guest SMS skipped: no passcode generated for grant ${grant.id}`);
-      } else {
-        const body =
-          `Pin&Go Access ✅\n` +
-          `Hola ${r.guestName}, tu código de entrada es: ${code}\n` +
-          `Válido hasta: ${formatLocal(new Date(grant.endsAt))}`;
+   if (GUEST_SMS_ENABLED) {
+  try {
+    const result = await sendGuestPasscodeSms({
+      prisma,
+      reservationId: r.id,
+      accessGrantId: grant.id,
+      guestName: r.guestName,
+      guestPhone: r.guestPhone,
+      code,
+      validUntil: grant.endsAt,
+    });
 
-        const sent = await sendSms(phone, body);
-        log(`Guest SMS sent to ${phone}:`, sent);
-      }
-    } catch (e) {
-      const msg = toErrString(e);
-      errLog(`Guest SMS FAILED for reservation ${r.id} grant ${grant.id} -> ${msg}`);
-      await prisma.accessGrant.update({
-        where: { id: grant.id },
-        data: { lastError: `SMS_FAILED: ${msg}` },
+    if (result.ok) {
+      log(`Guest SMS sent`, {
+        reservationId: r.id,
+        grantId: grant.id,
       });
+    } else if (result.skipped) {
+      log(`Guest SMS skipped`, {
+        reservationId: r.id,
+        reason: result.error,
+      });
+    } else {
+      throw new Error(result.error ?? "Unknown SMS error");
     }
+  } catch (e) {
+    const msg = toErrString(e);
+    errLog(`Guest SMS FAILED for reservation ${r.id} grant ${grant.id} -> ${msg}`);
+
+    await prisma.accessGrant.update({
+      where: { id: grant.id },
+      data: { lastError: `SMS_FAILED: ${msg}` },
+    });
   }
+} 
 
   log(`Activated GUEST grant ${grant.id} (reservation ${r.id})`);
 
@@ -825,8 +880,24 @@ await prisma.accessGrant.update({
   data: { lastError: null },
 });
 
-
-        log(`Revoked GUEST grant ${grant.id} (reservation ${r.id})`);
+try {
+  await sendCheckoutSms(prisma, r.id);
+} catch (e) {
+  errLog("Checkout SMS failed", {
+    reservationId: r.id,
+    err: toErrString(e),
+  });
+}
+      
+ try {
+  await sendCleaningReadySms(prisma, r.id);
+} catch (e) {
+  errLog("Cleaning READY SMS failed", {
+    reservationId: r.id,
+    err: toErrString(e),
+  });
+}
+     log(`Revoked GUEST grant ${grant.id} (reservation ${r.id})`);
       } catch (e) {
         const msg = toErrString(e);
 
@@ -842,7 +913,7 @@ await prisma.accessGrant.update({
   }
 }
 
-async function revokeGuestNfcAssignmentsForReservation(params: {
+    async function revokeGuestNfcAssignmentsForReservation(params: {
   reservationId: string;
   lockIdTtlock: number;
   now: Date;
@@ -1108,43 +1179,34 @@ try {
       });
     }
 
-       // ===== Cleaning SMS START =====
-       if (CLEANING_SMS_ENABLED) {
-        try {
-          const phone = a.staffMember?.phoneE164;
-          if (!phone) {
-            log(`Cleaning SMS skipped: staff ${a.staffMemberId} has no phoneE164`);
-          } else {
-            const body =
-              `Pin&Go 🧼 Limpieza ACTIVADA\n` +
-              `Asignado: ${a.staffMember?.fullName ?? 'Staff'}\n` +
-              `Propiedad: ${a.reservation?.property?.name ?? 'N/A'}\n` +
-              `Unidad: ${a.reservation?.roomName ?? 'N/A'}\n` +
-              `Ventana: ${fmtUtc(a.startsAt)} - ${fmtUtc(a.endsAt)}\n` +
-              `Acceso válido solo en esta ventana.`;
+     if (CLEANING_SMS_ENABLED) {
+  try {
+    const result = await sendCleaningStartSms({
+      prisma,
+      accessGrantId: a.accessGrantId ?? null,
+      phoneE164: a.staffMember?.phoneE164,
+      staffName: a.staffMember?.fullName,
+      propertyName: a.reservation?.property?.name,
+      roomName: a.reservation?.roomName,
+      startsAt: a.startsAt,
+      endsAt: a.endsAt,
+    });
 
-            const sent = await sendSms(phone, body);
-
-            await prisma.messageLog.create({
-              data: {
-                channel: 'sms',
-                to: phone,
-                from: process.env.TWILIO_FROM_NUMBER ?? process.env.TWILIO_FROM ?? null,
-                body,
-                provider: 'twilio',
-                providerMessageId: (sent as any)?.sid ?? null,
-                status: 'SENT',
-                accessGrantId: a.accessGrantId ?? null,
-              },
-            });
-
-            log(`Cleaning SMS sent (START) to ${phone}`);
-          }
-        } catch (e) {
-          errLog(`Cleaning SMS START FAILED assignment ${a.id} -> ${toErrString(e)}`);
-        }
-      }
-
+    if (result.ok) {
+      log(`Cleaning SMS sent (START)`, { assignmentId: a.id });
+    } else if (result.skipped) {
+      log(`Cleaning SMS skipped (START)`, {
+        assignmentId: a.id,
+        reason: result.error,
+      });
+    } else {
+      throw new Error(result.error ?? "Unknown SMS error");
+    }
+  } catch (e) {
+    errLog(`Cleaning SMS START FAILED assignment ${a.id} -> ${toErrString(e)}`);
+  }
+}   
+     
       log(
         `Cleaning ACTIVE assignment ${a.id} -> grant ${grant.id} (reservation ${a.reservationId})`
       );
@@ -1202,42 +1264,32 @@ async function processCleaningEnds(now: Date) {
         data: { status: StaffAssignmentStatus.COMPLETED, lastError: null },
       });
 
-      // ===== Cleaning SMS END =====
-      if (CLEANING_SMS_ENABLED) {
-        try {
-          const phone = a.staffMember?.phoneE164;
-          if (!phone) {
-            log(`Cleaning SMS skipped: staff ${a.staffMemberId} has no phoneE164`);
-          } else {
-            const body =
-              `Pin&Go ✅ Limpieza FINALIZADA\n` +
-              `Asignado: ${a.staffMember?.fullName ?? 'Staff'}\n` +
-              `Propiedad: ${a.reservation?.property?.name ?? 'N/A'}\n` +
-              `Unidad: ${a.reservation?.roomName ?? 'N/A'}\n` +
-              `Fin: ${fmtUtc(a.endsAt)}\n` +
-              `Acceso expiró automáticamente.`;
+     if (CLEANING_SMS_ENABLED) {
+  try {
+    const result = await sendCleaningEndSms({
+      prisma,
+      accessGrantId: a.accessGrantId ?? null,
+      phoneE164: a.staffMember?.phoneE164,
+      staffName: a.staffMember?.fullName,
+      propertyName: a.reservation?.property?.name,
+      roomName: a.reservation?.roomName,
+      endsAt: a.endsAt,
+    });
 
-            const sent = await sendSms(phone, body);
-
-            await prisma.messageLog.create({
-              data: {
-                channel: 'sms',
-                to: phone,
-                from: process.env.TWILIO_FROM_NUMBER ?? process.env.TWILIO_FROM ?? null,
-                body,
-                provider: 'twilio',
-                providerMessageId: (sent as any)?.sid ?? null,
-                status: 'SENT',
-                accessGrantId: a.accessGrantId ?? null,
-              },
-            });
-
-            log(`Cleaning SMS sent (END) to ${phone}`);
-          }
-        } catch (e) {
-          errLog(`Cleaning SMS END FAILED assignment ${a.id} -> ${toErrString(e)}`);
-        }
-      }
+    if (result.ok) {
+      log(`Cleaning SMS sent (END)`, { assignmentId: a.id });
+    } else if (result.skipped) {
+      log(`Cleaning SMS skipped (END)`, {
+        assignmentId: a.id,
+        reason: result.error,
+      });
+    } else {
+      throw new Error(result.error ?? "Unknown SMS error");
+    }
+  } catch (e) {
+    errLog(`Cleaning SMS END FAILED assignment ${a.id} -> ${toErrString(e)}`);
+  }
+}
 
       log(`Cleaning COMPLETED assignment ${a.id} -> revoked grant ${grant.id}`);
     } catch (e) {
@@ -1273,6 +1325,7 @@ async function tick() {
 
   try {
     await processCheckins(now);
+    await processPreCheckinMessages(now);
   } catch (e) {
     errLog('runCheckins crashed:', toErrString(e));
   }

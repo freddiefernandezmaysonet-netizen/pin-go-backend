@@ -121,7 +121,6 @@ export function ActivateLockModal({
         setLocks(available);
       })
       .catch((e) => {
-        console.error("ACTIVATE LOCK INVENTORY ERROR", e);
         setLocks([]);
         setErr(String(e?.message ?? e));
       })
@@ -181,7 +180,6 @@ export function ActivateLockModal({
 
       await Promise.resolve(onActivated());
     } catch (e: any) {
-      console.error("ACTIVATE LOCK ERROR", e);
       setErr(String(e?.message ?? e ?? "Activation failed."));
     } finally {
       setActivating(false);

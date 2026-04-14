@@ -144,7 +144,6 @@ export function PmsControlCenter() {
         setData(json);
       })
       .catch((e) => {
-        console.error("PMS CONTROL CENTER ERROR", e);
         setErr(String(e?.message ?? e));
       })
       .finally(() => setLoading(false));

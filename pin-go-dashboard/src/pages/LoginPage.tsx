@@ -4,8 +4,6 @@ import { login } from "../api/auth";
 import { fetchProperties } from "../api/properties";
 import { useAuth } from "../auth/AuthProvider";
 
-const SHOW_DEV_SIGNUP = import.meta.env.DEV;
-
 export default function LoginPage() {
   const navigate = useNavigate();
   const { refresh } = useAuth();
@@ -32,8 +30,7 @@ export default function LoginPage() {
       }
 
       navigate("/overview");
-    } catch (e) {
-      console.error("login failed", e);
+    } catch {
       setError("Invalid email or password");
     } finally {
       setSubmitting(false);
@@ -44,7 +41,8 @@ export default function LoginPage() {
     <div
       style={{
         minHeight: "100vh",
-        background: "linear-gradient(180deg, #f8fafc 0%, #eef2ff 100%)",
+        background:
+          "radial-gradient(circle at top, rgba(37, 99, 235, 0.08), transparent 30%), linear-gradient(180deg, #f8fafc 0%, #eef2ff 100%)",
         display: "grid",
         placeItems: "center",
         padding: 24,
@@ -53,177 +51,106 @@ export default function LoginPage() {
       <div
         style={{
           width: "100%",
-          maxWidth: 420,
-          background: "#ffffff",
-          border: "1px solid #e5e7eb",
+          maxWidth: 1000,
+          display: "grid",
+          gridTemplateColumns: "1fr 1fr",
+          background: "white",
           borderRadius: 20,
-          boxShadow: "0 20px 50px rgba(15, 23, 42, 0.08)",
-          padding: 28,
+          boxShadow: "0 20px 60px rgba(0,0,0,0.08)",
+          overflow: "hidden",
         }}
       >
-        <div style={{ marginBottom: 24 }}>
-          <div
-            style={{
-              fontSize: 28,
-              fontWeight: 800,
-              color: "#111827",
-              marginBottom: 6,
-            }}
-          >
-            Pin&Go
+        {/* LEFT PANEL */}
+        <div
+          style={{
+            background: "#0f172a",
+            color: "white",
+            padding: 40,
+            display: "flex",
+            flexDirection: "column",
+            justifyContent: "center",
+          }}
+        >
+          <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+            <img src="/pin-go-logo.png" style={{ width: 48 }} />
+            <div>
+              <div style={{ fontWeight: 800, fontSize: 22 }}>Pin&Go</div>
+              <div style={{ fontSize: 13, color: "#94a3b8" }}>
+                Control total para propiedades inteligentes
+              </div>
+            </div>
           </div>
 
-          <div
-            style={{
-              fontSize: 14,
-              color: "#6b7280",
-              lineHeight: 1.5,
-            }}
-          >
-            Smart access dashboard for properties, locks, reservations, and guest
-            access.
-          </div>
+          <h1 style={{ marginTop: 30, fontSize: 36 }}>
+            Welcome back
+          </h1>
+
+          <p style={{ color: "#94a3b8", marginTop: 10 }}>
+            Manage access, automate operations, and deliver a seamless guest experience.
+          </p>
+
+          <ul style={{ marginTop: 20, lineHeight: 1.8 }}>
+            <li>✔ Access control & NFC</li>
+            <li>✔ PMS integrations</li>
+            <li>✔ Smart automation</li>
+          </ul>
         </div>
 
-        <form onSubmit={handleSubmit} style={{ display: "grid", gap: 14 }}>
-          <div>
-            <label
-              style={{
-                display: "block",
-                fontSize: 13,
-                fontWeight: 600,
-                color: "#374151",
-                marginBottom: 6,
-              }}
-            >
-              Email
-            </label>
+        {/* RIGHT PANEL */}
+        <div style={{ padding: 40 }}>
+          <h2>Sign in</h2>
+
+          <form onSubmit={handleSubmit} style={{ display: "grid", gap: 14 }}>
             <input
               type="email"
               placeholder="admin@pingo.com"
               value={email}
               onChange={(e) => setEmail(e.target.value)}
-              autoComplete="email"
-              style={{
-                width: "100%",
-                height: 44,
-                borderRadius: 12,
-                border: "1px solid #d1d5db",
-                padding: "0 14px",
-                fontSize: 14,
-                outline: "none",
-                boxSizing: "border-box",
-              }}
+              style={inputStyle}
             />
-          </div>
 
-          <div>
-            <label
-              style={{
-                display: "block",
-                fontSize: 13,
-                fontWeight: 600,
-                color: "#374151",
-                marginBottom: 6,
-              }}
-            >
-              Password
-            </label>
             <input
               type="password"
-              placeholder="Enter your password"
+              placeholder="Password"
               value={password}
               onChange={(e) => setPassword(e.target.value)}
-              autoComplete="current-password"
-              style={{
-                width: "100%",
-                height: 44,
-                borderRadius: 12,
-                border: "1px solid #d1d5db",
-                padding: "0 14px",
-                fontSize: 14,
-                outline: "none",
-                boxSizing: "border-box",
-              }}
+              style={inputStyle}
             />
-          </div>
 
-          <div
-            style={{
-              marginTop: -2,
-              textAlign: "right",
-            }}
-          >
-            <Link
-              to="/forgot-password"
-              style={{
-                color: "#2563eb",
-                fontSize: 13,
-                fontWeight: 600,
-                textDecoration: "none",
-              }}
-            >
-              Forgot password?
-            </Link>
-          </div>
-
-          {error ? (
-            <div
-              style={{
-                borderRadius: 12,
-                background: "#fef2f2",
-                border: "1px solid #fecaca",
-                color: "#b91c1c",
-                fontSize: 13,
-                padding: "10px 12px",
-              }}
-            >
-              {error}
+            <div style={{ textAlign: "right" }}>
+              <Link to="/forgot-password">Forgot password?</Link>
             </div>
-          ) : null}
 
-          <button
-            type="submit"
-            disabled={submitting}
-            style={{
-              height: 46,
-              borderRadius: 12,
-              border: "none",
-              background: submitting ? "#93c5fd" : "#2563eb",
-              color: "#ffffff",
-              fontSize: 14,
-              fontWeight: 700,
-              cursor: submitting ? "not-allowed" : "pointer",
-              marginTop: 4,
-            }}
-          >
-            {submitting ? "Signing in..." : "Sign in"}
-          </button>
-        </form>
+            {error && <div style={{ color: "red" }}>{error}</div>}
 
-        {SHOW_DEV_SIGNUP ? (
-          <div
-            style={{
-              marginTop: 18,
-              fontSize: 13,
-              color: "#6b7280",
-              textAlign: "center",
-            }}
-          >
-            Don&apos;t have an organization yet?{" "}
-            <Link
-              to="/signup"
-              style={{
-                color: "#2563eb",
-                fontWeight: 600,
-                textDecoration: "none",
-              }}
-            >
-              Create one
-            </Link>
+            <button type="submit" disabled={submitting} style={btn}>
+              {submitting ? "Signing in..." : "Sign in"}
+            </button>
+          </form>
+
+          <div style={{ marginTop: 20 }}>
+            Don't have an account?{" "}
+            <Link to="/signup">Create one</Link>
           </div>
-        ) : null}
+        </div>
       </div>
     </div>
   );
 }
+
+const inputStyle: React.CSSProperties = {
+  width: "100%",
+  height: 46,
+  borderRadius: 12,
+  border: "1px solid #d1d5db",
+  padding: "0 14px",
+};
+
+const btn: React.CSSProperties = {
+  height: 46,
+  borderRadius: 12,
+  border: "none",
+  background: "#2563eb",
+  color: "white",
+  fontWeight: 700,
+};

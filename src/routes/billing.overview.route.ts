@@ -11,7 +11,7 @@ export function buildBillingOverviewRouter(prisma: PrismaClient) {
       const orgId = user.orgId as string;
 
       const subscription = await prisma.subscription.findUnique({
-        where: { organizationId: orgId }
+        where: { organizationId: orgId },
       });
 
       const activeLocks = await prisma.lock.count({
@@ -23,15 +23,33 @@ export function buildBillingOverviewRouter(prisma: PrismaClient) {
         },
       });
 
+      const activeSmartProperties = await prisma.property.count({
+        where: {
+          organizationId: orgId,
+          smartAutomationEnabled: true,
+        },
+      });
 
       const entitledLocks = subscription?.entitledLocks ?? 0;
+      const entitledSmartProperties = subscription?.entitledSmartProperties ?? 0;
 
       const remainingLocks = Math.max(entitledLocks - activeLocks, 0);
+      const remainingSmartProperties = Math.max(
+        entitledSmartProperties - activeSmartProperties,
+        0
+      );
 
       const usagePct =
         entitledLocks === 0
           ? 0
           : Math.round((activeLocks / entitledLocks) * 100);
+
+      const smartUsagePct =
+        entitledSmartProperties === 0
+          ? 0
+          : Math.round(
+              (activeSmartProperties / entitledSmartProperties) * 100
+            );
 
       return res.json({
         ok: true,
@@ -46,18 +64,23 @@ export function buildBillingOverviewRouter(prisma: PrismaClient) {
           remainingLocks,
           usagePct,
 
+          entitledSmartProperties,
+          activeSmartProperties,
+          remainingSmartProperties,
+          smartUsagePct,
+
           currentPeriodStart: subscription?.currentPeriodStart ?? null,
           currentPeriodEnd: subscription?.currentPeriodEnd ?? null,
 
-          cancelAtPeriodEnd: subscription?.cancelAtPeriodEnd ?? false
-        }
+          cancelAtPeriodEnd: subscription?.cancelAtPeriodEnd ?? false,
+        },
       });
     } catch (err) {
       console.error("billing overview error", err);
 
       res.status(500).json({
         ok: false,
-        error: "billing_overview_failed"
+        error: "billing_overview_failed",
       });
     }
   });

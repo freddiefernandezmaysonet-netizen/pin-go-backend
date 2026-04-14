@@ -14,6 +14,9 @@ export default function CreatePropertyPage() {
   const [checkInTime, setCheckInTime] = useState<"15:00" | "16:00">("15:00");
   const [cleaningStartOffsetMinutes, setCleaningStartOffsetMinutes] = useState("30");
 
+  const [latitude, setLatitude] = useState("");
+  const [longitude, setLongitude] = useState("");
+
   const [error, setError] = useState("");
   const [submitting, setSubmitting] = useState(false);
 
@@ -23,6 +26,21 @@ export default function CreatePropertyPage() {
     setSubmitting(true);
 
     try {
+      const lat = latitude.trim() === "" ? null : Number(latitude);
+      const lng = longitude.trim() === "" ? null : Number(longitude);
+
+      if ((lat === null) !== (lng === null)) {
+        throw new Error("Latitude and longitude must be provided together");
+      }
+
+      if (lat !== null && !Number.isFinite(lat)) {
+        throw new Error("Latitude must be a valid number");
+      }
+
+      if (lng !== null && !Number.isFinite(lng)) {
+        throw new Error("Longitude must be a valid number");
+      }
+
       await createProperty({
         name,
         address1,
@@ -32,6 +50,8 @@ export default function CreatePropertyPage() {
         timezone,
         checkInTime,
         cleaningStartOffsetMinutes: Number(cleaningStartOffsetMinutes),
+        latitude: lat,
+        longitude: lng,
       });
 
       navigate("/integrations/ttlock");
@@ -89,210 +109,100 @@ export default function CreatePropertyPage() {
 
         <form onSubmit={handleSubmit} style={{ display: "grid", gap: 14 }}>
           <div>
-            <label
-              style={{
-                display: "block",
-                fontSize: 13,
-                fontWeight: 600,
-                color: "#374151",
-                marginBottom: 6,
-              }}
-            >
-              Property name
-            </label>
+            <label style={labelStyle}>Property name</label>
             <input
               value={name}
               onChange={(e) => setName(e.target.value)}
               placeholder="Beach Villa"
-              style={{
-                width: "100%",
-                height: 44,
-                borderRadius: 12,
-                border: "1px solid #d1d5db",
-                padding: "0 14px",
-                fontSize: 14,
-                outline: "none",
-                boxSizing: "border-box",
-              }}
+              style={inputStyle}
             />
           </div>
 
           <div>
-            <label
-              style={{
-                display: "block",
-                fontSize: 13,
-                fontWeight: 600,
-                color: "#374151",
-                marginBottom: 6,
-              }}
-            >
-              Address
-            </label>
+            <label style={labelStyle}>Address</label>
             <input
               value={address1}
               onChange={(e) => setAddress1(e.target.value)}
               placeholder="Optional"
-              style={{
-                width: "100%",
-                height: 44,
-                borderRadius: 12,
-                border: "1px solid #d1d5db",
-                padding: "0 14px",
-                fontSize: 14,
-                outline: "none",
-                boxSizing: "border-box",
-              }}
+              style={inputStyle}
             />
           </div>
 
-          <div style={{ display: "grid", gap: 14, gridTemplateColumns: "1fr 1fr" }}>
+          <div style={twoColGridStyle}>
             <div>
-              <label
-                style={{
-                  display: "block",
-                  fontSize: 13,
-                  fontWeight: 600,
-                  color: "#374151",
-                  marginBottom: 6,
-                }}
-              >
-                City
-              </label>
+              <label style={labelStyle}>City</label>
               <input
                 value={city}
                 onChange={(e) => setCity(e.target.value)}
-                placeholder="Optional"
-                style={{
-                  width: "100%",
-                  height: 44,
-                  borderRadius: 12,
-                  border: "1px solid #d1d5db",
-                  padding: "0 14px",
-                  fontSize: 14,
-                  outline: "none",
-                  boxSizing: "border-box",
-                }}
+                style={inputStyle}
               />
             </div>
 
             <div>
-              <label
-                style={{
-                  display: "block",
-                  fontSize: 13,
-                  fontWeight: 600,
-                  color: "#374151",
-                  marginBottom: 6,
-                }}
-              >
-                Region
-              </label>
+              <label style={labelStyle}>Region</label>
               <input
                 value={region}
                 onChange={(e) => setRegion(e.target.value)}
-                placeholder="Optional"
-                style={{
-                  width: "100%",
-                  height: 44,
-                  borderRadius: 12,
-                  border: "1px solid #d1d5db",
-                  padding: "0 14px",
-                  fontSize: 14,
-                  outline: "none",
-                  boxSizing: "border-box",
-                }}
+                style={inputStyle}
               />
             </div>
           </div>
 
-          <div style={{ display: "grid", gap: 14, gridTemplateColumns: "1fr 1fr" }}>
+          <div style={twoColGridStyle}>
             <div>
-              <label
-                style={{
-                  display: "block",
-                  fontSize: 13,
-                  fontWeight: 600,
-                  color: "#374151",
-                  marginBottom: 6,
-                }}
-              >
-                Country
-              </label>
+              <label style={labelStyle}>Country</label>
               <input
                 value={country}
                 onChange={(e) => setCountry(e.target.value)}
-                placeholder="Optional"
-                style={{
-                  width: "100%",
-                  height: 44,
-                  borderRadius: 12,
-                  border: "1px solid #d1d5db",
-                  padding: "0 14px",
-                  fontSize: 14,
-                  outline: "none",
-                  boxSizing: "border-box",
-                }}
+                style={inputStyle}
               />
             </div>
 
             <div>
-              <label
-                style={{
-                  display: "block",
-                  fontSize: 13,
-                  fontWeight: 600,
-                  color: "#374151",
-                  marginBottom: 6,
-                }}
-              >
-                Timezone
-              </label>
+              <label style={labelStyle}>Timezone</label>
               <input
                 value={timezone}
                 onChange={(e) => setTimezone(e.target.value)}
-                style={{
-                  width: "100%",
-                  height: 44,
-                  borderRadius: 12,
-                  border: "1px solid #d1d5db",
-                  padding: "0 14px",
-                  fontSize: 14,
-                  outline: "none",
-                  boxSizing: "border-box",
-                }}
+                style={inputStyle}
               />
             </div>
           </div>
 
-          <div style={{ display: "grid", gap: 14, gridTemplateColumns: "1fr 1fr" }}>
+          <div style={twoColGridStyle}>
             <div>
-              <label
-                style={{
-                  display: "block",
-                  fontSize: 13,
-                  fontWeight: 600,
-                  color: "#374151",
-                  marginBottom: 6,
-                }}
-              >
-                Guest check-in time
-              </label>
+              <label style={labelStyle}>Latitude</label>
+              <input
+                type="number"
+                step="any"
+                value={latitude}
+                onChange={(e) => setLatitude(e.target.value)}
+                placeholder="18.4655"
+                style={inputStyle}
+              />
+            </div>
 
+            <div>
+              <label style={labelStyle}>Longitude</label>
+              <input
+                type="number"
+                step="any"
+                value={longitude}
+                onChange={(e) => setLongitude(e.target.value)}
+                placeholder="-66.1057"
+                style={inputStyle}
+              />
+            </div>
+          </div>
+
+          <div style={twoColGridStyle}>
+            <div>
+              <label style={labelStyle}>Guest check-in time</label>
               <select
                 value={checkInTime}
-                onChange={(e) => setCheckInTime(e.target.value as "15:00" | "16:00")}
-                style={{
-                  width: "100%",
-                  height: 44,
-                  borderRadius: 12,
-                  border: "1px solid #d1d5db",
-                  padding: "0 14px",
-                  fontSize: 14,
-                  outline: "none",
-                  boxSizing: "border-box",
-                  background: "#fff",
-                }}
+                onChange={(e) =>
+                  setCheckInTime(e.target.value as "15:00" | "16:00")
+                }
+                style={inputStyle}
               >
                 <option value="15:00">3:00 PM</option>
                 <option value="16:00">4:00 PM</option>
@@ -300,67 +210,25 @@ export default function CreatePropertyPage() {
             </div>
 
             <div>
-              <label
-                style={{
-                  display: "block",
-                  fontSize: 13,
-                  fontWeight: 600,
-                  color: "#374151",
-                  marginBottom: 6,
-                }}
-              >
-                Cleaning start offset (minutes)
-              </label>
-
+              <label style={labelStyle}>Cleaning start offset (minutes)</label>
               <input
                 type="number"
                 min={0}
                 max={180}
                 value={cleaningStartOffsetMinutes}
                 onChange={(e) => setCleaningStartOffsetMinutes(e.target.value)}
-                style={{
-                  width: "100%",
-                  height: 44,
-                  borderRadius: 12,
-                  border: "1px solid #d1d5db",
-                  padding: "0 14px",
-                  fontSize: 14,
-                  outline: "none",
-                  boxSizing: "border-box",
-                }}
+                style={inputStyle}
               />
             </div>
           </div>
 
-          <div
-            style={{
-              borderRadius: 12,
-              padding: 12,
-              background: "#f9fafb",
-              border: "1px solid #e5e7eb",
-              color: "#4b5563",
-              fontSize: 13,
-            }}
-          >
+          <div style={infoBoxStyle}>
             {checkInTime === "15:00"
               ? "Check-in at 3:00 PM sets cleaning duration to 180 minutes."
               : "Check-in at 4:00 PM sets cleaning duration to 240 minutes."}
           </div>
 
-          {error ? (
-            <div
-              style={{
-                borderRadius: 12,
-                background: "#fef2f2",
-                border: "1px solid #fecaca",
-                color: "#b91c1c",
-                fontSize: 13,
-                padding: "10px 12px",
-              }}
-            >
-              {error}
-            </div>
-          ) : null}
+          {error ? <div style={errorBoxStyle}>{error}</div> : null}
 
           <button
             type="submit"
@@ -384,3 +252,47 @@ export default function CreatePropertyPage() {
     </div>
   );
 }
+
+const labelStyle: React.CSSProperties = {
+  display: "block",
+  fontSize: 13,
+  fontWeight: 600,
+  color: "#374151",
+  marginBottom: 6,
+};
+
+const inputStyle: React.CSSProperties = {
+  width: "100%",
+  height: 44,
+  borderRadius: 12,
+  border: "1px solid #d1d5db",
+  padding: "0 14px",
+  fontSize: 14,
+  outline: "none",
+  boxSizing: "border-box",
+  background: "#ffffff",
+};
+
+const twoColGridStyle: React.CSSProperties = {
+  display: "grid",
+  gap: 14,
+  gridTemplateColumns: "minmax(0, 1fr) minmax(0, 1fr)",
+};
+
+const infoBoxStyle: React.CSSProperties = {
+  borderRadius: 12,
+  padding: 12,
+  background: "#f9fafb",
+  border: "1px solid #e5e7eb",
+  color: "#4b5563",
+  fontSize: 13,
+};
+
+const errorBoxStyle: React.CSSProperties = {
+  borderRadius: 12,
+  background: "#fef2f2",
+  border: "1px solid #fecaca",
+  color: "#b91c1c",
+  fontSize: 13,
+  padding: "10px 12px",
+};

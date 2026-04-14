@@ -4,7 +4,7 @@ import { getOrganizationId } from "../../lib/getOrganizationId";
 
 const API_BASE = import.meta.env.VITE_API_BASE ?? "http://localhost:3000";
 
-type ProviderKey = "GUESTY" | "CLOUDBEDS" | "HOSTAWAY";
+type ProviderKey = "GUESTY" | "CLOUDBEDS" | "HOSTAWAY" | "LODGIFY";
 
 type PmsConnection = {
   id: string;
@@ -197,6 +197,8 @@ function resolveProviderLabel(provider: ProviderKey) {
       return "Cloudbeds";
     case "HOSTAWAY":
       return "Hostaway";
+    case "LODGIFY":
+      return "Lodgify";
     default:
       return "Guesty";
   }
@@ -206,32 +208,43 @@ function resolveProviderInfo(provider: ProviderKey) {
   if (provider === "CLOUDBEDS") {
     return {
       emptyConnection:
-        "Todavía no existe una conexión Cloudbeds guardada. Puedes volver a PMS Connections y guardarla primero.",
+        "No saved Cloudbeds connection was found. Return to PMS Connections and save it first.",
       emptyListings:
-        "No hay listings pendientes para Cloudbeds. Eso normalmente significa que ya están mapeados o todavía no han llegado listings nuevos.",
+        "There are no pending Cloudbeds listings. This usually means they are already mapped or no new listings have arrived.",
       mappingHint:
-        "Mapea cada listing pendiente de Cloudbeds a una property interna. Después puedes reintentar webhooks fallidos.",
+        "Map each pending Cloudbeds listing to an internal property. Then you can retry failed webhooks.",
     };
   }
 
   if (provider === "HOSTAWAY") {
     return {
       emptyConnection:
-        "Todavía no existe una conexión Hostaway guardada. Puedes volver a PMS Connections y guardarla primero.",
+        "No saved Hostaway connection was found. Return to PMS Connections and save it first.",
       emptyListings:
-        "No hay listings pendientes para Hostaway.",
+        "There are no pending Hostaway listings.",
       mappingHint:
-        "Mapea cada listing pendiente del PMS a una property interna. Después puedes reintentar webhooks fallidos.",
+        "Map each pending PMS listing to an internal property. Then you can retry failed webhooks.",
+    };
+  }
+
+  if (provider === "LODGIFY") {
+    return {
+      emptyConnection:
+        "No saved Lodgify connection was found. Return to PMS Connections and save it first.",
+      emptyListings:
+        "There are no pending Lodgify listings. This usually means they are already mapped or no new listings have arrived.",
+      mappingHint:
+        "Map each pending Lodgify listing to an internal property. Then you can retry failed webhooks.",
     };
   }
 
   return {
     emptyConnection:
-      "Todavía no existe una conexión Guesty guardada. Puedes volver a PMS Connections y guardarla primero.",
+      "No saved Guesty connection was found. Return to PMS Connections and save it first.",
     emptyListings:
-      "No hay listings pendientes para Guesty. Eso normalmente significa que ya están mapeados o todavía no han llegado listings nuevos.",
+      "There are no pending Guesty listings. This usually means they are already mapped or no new listings have arrived.",
     mappingHint:
-      "Mapea cada listing pendiente de Guesty a una property interna. Después puedes reintentar webhooks fallidos.",
+      "Map each pending Guesty listing to an internal property. Then you can retry failed webhooks.",
   };
 }
 
@@ -255,10 +268,10 @@ async function requestJson<T>(path: string, init?: RequestInit): Promise<T> {
 }
 
 async function loadConnection(provider: ProviderKey): Promise<PmsConnection | null> {
-  const organizationId = localStorage.getItem("organizationId");
+  const organizationId = getOrganizationId();
 
   if (!organizationId) {
-    throw new Error("Missing organizationId in localStorage.");
+    throw new Error("Missing organization id in storage/session.");
   }
 
   const qs = new URLSearchParams({
@@ -292,7 +305,9 @@ export default function ListingsMappingPage() {
 
   const rawProvider = (searchParams.get("provider") ?? "GUESTY").toUpperCase();
   const selectedProvider: ProviderKey =
-    rawProvider === "CLOUDBEDS" || rawProvider === "HOSTAWAY"
+    rawProvider === "CLOUDBEDS" ||
+    rawProvider === "HOSTAWAY" ||
+    rawProvider === "LODGIFY"
       ? (rawProvider as ProviderKey)
       : "GUESTY";
 
@@ -319,7 +334,7 @@ export default function ListingsMappingPage() {
   const [error, setError] = useState("");
   const [success, setSuccess] = useState("");
   const [info, setInfo] = useState(
-    `Aquí vas a mapear los listings pendientes de ${providerLabel} a properties internas de Pin&Go.`
+     `Map pending ${providerLabel} listings to internal Pin&Go properties.`
   );
 
   const readyToMapCount = useMemo(() => {
@@ -327,7 +342,7 @@ export default function ListingsMappingPage() {
   }, [draftMappings]);
 
   useEffect(() => {
-    setInfo(`Aquí vas a mapear los listings pendientes de ${providerLabel} a properties internas de Pin&Go.`);
+    setInfo(`Map pending ${providerLabel} listings to internal Pin&Go properties.`);
   }, [providerLabel]);
 
   useEffect(() => {
@@ -352,7 +367,7 @@ export default function ListingsMappingPage() {
         if (!active) return;
         setConnection(null);
         setError(
-          `No se pudo cargar la conexión PMS. ${normalizeError(
+          `Could not load the PMS connection. ${normalizeError(
             e,
             "Load connection failed."
           )}`
@@ -428,7 +443,7 @@ export default function ListingsMappingPage() {
         setProperties([]);
         setDraftMappings({});
         setError(
-          `No se pudo cargar el mapping data. ${normalizeError(
+          `Could not load mapping data. ${normalizeError(
             e,
             "Load mapping data failed."
           )}`
@@ -456,8 +471,8 @@ export default function ListingsMappingPage() {
     const propertyId = draftMappings[listingId];
 
     if (!propertyId) {
-      setError("Selecciona una property antes de guardar el mapping.");
-      setSuccess("");
+      setError("mapping.");
+      setSuccess("Select a property before saving the mapping");
       return;
     }
 
@@ -485,13 +500,13 @@ export default function ListingsMappingPage() {
         return next;
       });
 
-      setSuccess("Listing mapeado correctamente.");
+      setSuccess("Listing mapped successfully.");
       setInfo(
-        `Puedes seguir mapeando los listings restantes de ${providerLabel}. Cuando termines, puedes reintentar los webhooks fallidos.`
+        `You can continue mapping the remaining ${providerLabel} listings. When finished, you can retry failed webhooks .`
       );
     } catch (e) {
       setError(
-        `No se pudo mapear el listing. ${normalizeError(
+        `Could not map the listing. ${normalizeError(
           e,
           "Map listing failed."
         )}`
@@ -521,10 +536,10 @@ export default function ListingsMappingPage() {
         throw new Error(resp.error || "Retry failed webhooks failed.");
       }
 
-      setSuccess(`Eventos fallidos reenviados a PENDING: ${resp.retried ?? 0}.`);
+      setSuccess(`Failed events moved back to PENDING: ${resp.retried ?? 0}.`);
     } catch (e) {
       setError(
-        `No se pudieron reintentar los webhooks fallidos. ${normalizeError(
+        `Could not retry failed webhooks. ${normalizeError(
           e,
           "Retry failed webhooks failed."
         )}`
@@ -654,7 +669,7 @@ export default function ListingsMappingPage() {
           <div>
             <h3 style={{ margin: 0 }}>Pending Listings</h3>
             <p style={{ margin: "6px 0 0 0", color: "#6b7280", fontSize: 14 }}>
-              Cada fila se guarda individualmente usando el endpoint real del backend.
+              Each row is saved individually using the live backend endpoint.
             </p>
           </div>
         </div>
@@ -667,7 +682,7 @@ export default function ListingsMappingPage() {
           </div>
         ) : pendingListings.length === 0 ? (
           <div style={statusBoxStyle("warning")}>
-            No hay listings pendientes para esta conexión.
+            There are no pending listings for this connection..
           </div>
         ) : (
           <div style={{ overflowX: "auto" }}>
@@ -811,12 +826,12 @@ export default function ListingsMappingPage() {
         <div style={sectionStyle()}>
           <div style={{ fontWeight: 700, fontSize: 16 }}>Ready</div>
           <div style={{ color: "#6b7280", marginTop: 6, fontSize: 14 }}>
-            Listings que ya tienen una property seleccionada en la UI.
+            Listings that already have a property selected in the UI.
           </div>
 
           <div style={{ marginTop: 16, display: "grid", gap: 10 }}>
             {pendingListings.filter((l) => Boolean(draftMappings[l.id])).length === 0 ? (
-              <div style={{ color: "#6b7280" }}>Todavía no hay filas listas para guardar.</div>
+              <div style={{ color: "#6b7280" }}>There are no rows ready to save yet.</div>
             ) : (
               pendingListings
                 .filter((l) => Boolean(draftMappings[l.id]))
@@ -834,7 +849,7 @@ export default function ListingsMappingPage() {
                     >
                       <div style={{ fontWeight: 600 }}>{l.name}</div>
                       <div style={{ color: "#6b7280", marginTop: 4, fontSize: 14 }}>
-                        → {property?.name ?? "Property seleccionada"}
+                        → {property?.name ?? "Selected property"}
                       </div>
                     </div>
                   );
@@ -846,12 +861,12 @@ export default function ListingsMappingPage() {
         <div style={sectionStyle()}>
           <div style={{ fontWeight: 700, fontSize: 16 }}>Still Pending</div>
           <div style={{ color: "#6b7280", marginTop: 6, fontSize: 14 }}>
-            Listings pendientes que todavía no tienen property seleccionada.
+            Pending listings that do not yet have a selected property.
           </div>
 
           <div style={{ marginTop: 16, display: "grid", gap: 10 }}>
             {pendingListings.filter((l) => !draftMappings[l.id]).length === 0 ? (
-              <div style={{ color: "#065f46" }}>Todos los pendientes tienen property seleccionada.</div>
+              <div style={{ color: "#065f46" }}>All pending listings already have a selected property.</div>
             ) : (
               pendingListings
                 .filter((l) => !draftMappings[l.id])
