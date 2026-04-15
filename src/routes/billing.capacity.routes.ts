@@ -197,13 +197,33 @@ router.post("/smart/quantity", requireAuth, async (req, res) => {
       },
     });
 
-    if (!subFull?.stripeSubscriptionId || !subFull?.stripeSmartSubscriptionItemId) {
-      return res.status(400).json({
-        ok: false,
-        error: "SMART_SUBSCRIPTION_NOT_READY",
-      });
-    }
+// 🔥 CASO 1: no existe item smart → CREAR
+if (!subFull?.stripeSmartSubscriptionItemId) {
+  const SMART_PRICE_ID = process.env.STRIPE_PRICE_SMART_PROPERTY!;
 
+  const newItem = await stripe.subscriptionItems.create({
+    subscription: subFull.stripeSubscriptionId,
+    price: SMART_PRICE_ID,
+    quantity: requestedQuantity,
+  });
+
+  await prisma.subscription.update({
+    where: { organizationId: orgId },
+    data: {
+      stripeSmartSubscriptionItemId: newItem.id,
+    },
+  });
+
+  return res.json({
+    ok: true,
+    created: true,
+    quantity: requestedQuantity,
+    activeSmartProperties,
+  });
+}
+
+// 🔥 CASO 2: ya existe → continuar con update normal
+ 
     // traer estado actual desde Stripe
     const currentSub = await stripe.subscriptions.retrieve(
       subFull.stripeSubscriptionId
