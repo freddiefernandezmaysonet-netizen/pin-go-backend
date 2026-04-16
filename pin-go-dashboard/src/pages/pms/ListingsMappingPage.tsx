@@ -268,16 +268,14 @@ async function requestJson<T>(path: string, init?: RequestInit): Promise<T> {
 }
 
 async function loadConnection(provider: ProviderKey): Promise<PmsConnection | null> {
-  const organizationId = getOrganizationId();
-
-  if (!organizationId) {
-    throw new Error("Missing organization id in storage/session.");
-  }
-
   const qs = new URLSearchParams({
     provider,
-    organizationId,
   });
+
+  const organizationId = getOrganizationId();
+  if (organizationId) {
+    qs.set("organizationId", organizationId);
+  }
 
   const data = await requestJson<ConnectionResp>(
     `/api/org/pms/connection?${qs.toString()}`

@@ -72,9 +72,36 @@ function makeToken(bytes = 16) {
 }
 
 export async function ingestReservation(p: IngestPayload) {
-  const checkIn = new Date(p.checkIn);
-  const checkOut = new Date(p.checkOut);
 
+// 🔥 FIX: aplicar hora de propiedad cuando Lodgify no envía hora
+
+const rawCheckIn = new Date(p.checkIn);
+const rawCheckOut = new Date(p.checkOut);
+
+// obtener property (debe ya existir en tu flujo)
+const property = await prisma.property.findUnique({
+  where: { id: p.propertyId },
+  select: {
+    checkInTime: true,
+    timezone: true,
+  },
+});
+
+// defaults
+const checkInTime = property?.checkInTime ?? "15:00";
+const checkOutTime = "11:00";
+
+// helper simple
+function applyTime(date: Date, time: string) {
+  const [h, m] = time.split(":").map(Number);
+  const d = new Date(date);
+  d.setHours(h, m, 0, 0);
+  return d;
+}
+
+const checkIn = applyTime(rawCheckIn, checkInTime);
+const checkOut = applyTime(rawCheckOut, checkOutTime);
+  
   if (isNaN(checkIn.getTime())) throw new Error("Invalid checkIn");
   if (isNaN(checkOut.getTime())) throw new Error("Invalid checkOut");
   if (checkOut <= checkIn) throw new Error("checkOut must be after checkIn");
