@@ -15,7 +15,7 @@ type AuthedRequest = Request & {
 
 router.use(requireAuth);
 
-// 🔥 RUN MANUAL
+// 🔥 RUN MANUAL (DEV ONLY)
 router.post("/api/dev/automation/run", async (req: AuthedRequest, res: Response) => {
   try {
     const organizationId = String(req.user?.orgId ?? "").trim();
@@ -65,8 +65,8 @@ router.post("/api/dev/automation/run", async (req: AuthedRequest, res: Response)
   }
 });
 
-// 🔥 HISTORY (MEJORADO)
-router.get("/api/dev/automation/history", async (req: AuthedRequest, res: Response) => {
+// 🔥 HISTORY (PRODUCTION-SAFE)
+router.get("/api/automation/history", async (req: AuthedRequest, res: Response) => {
   try {
     const organizationId = String(req.user?.orgId ?? "").trim();
     const propertyId = String(req.query?.propertyId ?? "").trim();
@@ -108,22 +108,22 @@ router.get("/api/dev/automation/history", async (req: AuthedRequest, res: Respon
       take,
     });
 
-    const propertyIds = Array.from(
-      new Set(items.map((i) => i.propertyId))
-    );
+    const propertyIds = Array.from(new Set(items.map((i) => i.propertyId)));
 
     const reservationIds = Array.from(
       new Set(items.map((i) => i.reservationId).filter(Boolean))
     ) as string[];
 
     const [properties, reservations] = await Promise.all([
-      prisma.property.findMany({
-        where: {
-          organizationId,
-          id: { in: propertyIds },
-        },
-        select: { id: true, name: true },
-      }),
+      propertyIds.length > 0
+        ? prisma.property.findMany({
+            where: {
+              organizationId,
+              id: { in: propertyIds },
+            },
+            select: { id: true, name: true },
+          })
+        : Promise.resolve([]),
       reservationIds.length > 0
         ? prisma.reservation.findMany({
             where: { id: { in: reservationIds } },
@@ -138,22 +138,20 @@ router.get("/api/dev/automation/history", async (req: AuthedRequest, res: Respon
         : Promise.resolve([]),
     ]);
 
-    const propertyMap = new Map(
-      properties.map((p) => [p.id, p])
-    );
-
-    const reservationMap = new Map(
-      reservations.map((r) => [r.id, r])
-    );
+    const propertyMap = new Map(properties.map((p) => [p.id, p]));
+    const reservationMap = new Map(reservations.map((r) => [r.id, r]));
 
     return res.json({
       ok: true,
       count: items.length,
       items: items.map((item) => ({
         id: item.id,
+        propertyId: item.propertyId,
+        reservationId: item.reservationId,
+
         property: propertyMap.get(item.propertyId) ?? null,
         reservation: item.reservationId
-          ? reservationMap.get(item.reservationId)
+          ? reservationMap.get(item.reservationId) ?? null
           : null,
 
         trigger: item.trigger,

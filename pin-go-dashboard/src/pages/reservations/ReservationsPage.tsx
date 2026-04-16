@@ -41,7 +41,18 @@ async function api<T>(path: string): Promise<T> {
 
 function fmt(d: string) {
   const dt = new Date(d);
-  return isNaN(dt.getTime()) ? d : dt.toLocaleString();
+
+  if (isNaN(dt.getTime())) return d;
+
+  return dt.toLocaleString("en-US", {
+    timeZone: "America/Puerto_Rico",
+    hour: "2-digit",
+    minute: "2-digit",
+    hour12: true,
+    year: "numeric",
+    month: "numeric",
+    day: "numeric",
+  });
 }
 
 function statusStyles(status: OperationalStatus) {

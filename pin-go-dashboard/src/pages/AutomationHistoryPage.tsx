@@ -163,19 +163,30 @@ export default function AutomationHistoryPage() {
         if (propertyId) qs.set("propertyId", propertyId);
         qs.set("take", "100");
 
-        const resp = await fetch(
-          `${API_BASE}/api/dev/automation/history?${qs.toString()}`,
-          {
-            credentials: "include",
-          }
-        );
+const resp = await fetch(
+  `${API_BASE}/api/automation/history?${qs.toString()}`,
+  {
+    credentials: "include",
+  }
+);
 
-        const data = (await resp.json()) as HistoryResponse;
+// 🔒 HARDENING: nunca asumir JSON
+const text = await resp.text();
 
-        if (!resp.ok || !data?.ok) {
-          throw new Error(data?.error || "Failed to load automation history");
-        }
+let data: HistoryResponse | null = null;
 
+try {
+  data = JSON.parse(text) as HistoryResponse;
+} catch {
+  throw new Error(
+    `Invalid response from server (not JSON): ${text.slice(0, 200)}`
+  );
+}
+
+if (!resp.ok || !data?.ok) {
+  throw new Error(data?.error || "Failed to load automation history");
+}
+       
         if (!ignore) {
           setItems(Array.isArray(data.items) ? data.items : []);
         }

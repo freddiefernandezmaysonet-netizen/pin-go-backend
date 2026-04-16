@@ -55,6 +55,7 @@ export function buildPropertySmartRouter(prisma: PrismaClient) {
         },
         select: {
           entitledSmartProperties: true,
+          status: true,
         },
       });
 
@@ -65,7 +66,14 @@ export function buildPropertySmartRouter(prisma: PrismaClient) {
         },
       });
 
-      const smartLimit = subscription?.entitledSmartProperties ?? 0;
+      const isActive =
+        subscription &&
+        (subscription.status === "ACTIVE" ||
+          subscription.status === "TRIALING");
+
+      const smartLimit = isActive
+        ? subscription?.entitledSmartProperties ?? 0
+        : 0;
 
       let state: "locked" | "available" | "connected" = "locked";
 
@@ -138,9 +146,28 @@ export function buildPropertySmartRouter(prisma: PrismaClient) {
         orderBy: {
           createdAt: "desc",
         },
+        select: {
+          entitledSmartProperties: true,
+          status: true,
+        },
       });
 
-      const smartLimit = subscription?.entitledSmartProperties ?? 0;
+      const isActive =
+        subscription &&
+        (subscription.status === "ACTIVE" ||
+          subscription.status === "TRIALING");
+
+      const smartLimit = isActive
+        ? subscription?.entitledSmartProperties ?? 0
+        : 0;
+
+      if (smartLimit < 1) {
+        return res.status(403).json({
+          ok: false,
+          error: "SMART_PROPERTY_ENTITLEMENT_REQUIRED",
+          smartLimit,
+        });
+      }
 
       const smartUsed = await prisma.property.count({
         where: {

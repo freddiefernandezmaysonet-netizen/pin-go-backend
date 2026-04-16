@@ -258,10 +258,13 @@ app.use(dashboardAccessRouter);
 app.use(dashboardMetricsRouter);
 app.use(dashboardLocksCapacityRouter);
 app.use(dashboardPmsRouter);
+
 if (process.env.NODE_ENV !== "production") {
-app.use(devPmsRouter);
-app.use(devAutomationRoutes);
+  app.use(devPmsRouter);
 }
+
+app.use(devAutomationRoutes);
+
 app.use(eventsRouter);
 app.use(tuyaRoutes);
 app.use(orgTuyaRoutes);

@@ -46,8 +46,20 @@ type Reservation = {
 
 function fmt(d?: string | null) {
   if (!d) return "—";
+
   const dt = new Date(d);
-  return isNaN(dt.getTime()) ? d : dt.toLocaleString();
+
+  if (isNaN(dt.getTime())) return d;
+
+  return dt.toLocaleString("en-US", {
+    timeZone: "America/Puerto_Rico",
+    hour: "2-digit",
+    minute: "2-digit",
+    hour12: true,
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  });
 }
 
 function labelizeStatus(value?: string | null) {

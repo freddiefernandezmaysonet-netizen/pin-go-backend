@@ -252,7 +252,57 @@ export function buildPropertyAutomationRouter(prisma: PrismaClient) {
         .map(normalizeGuestExperienceDevice)
         .filter(Boolean);
 
-      await prisma.$transaction(async (tx) => {
+     // 🔒 ENTITLEMENT GUARD (CRÍTICO)
+if (willEnableSmart) {
+  const subscription = await prisma.subscription.findFirst({
+    where: {
+      organizationId: orgId,
+    },
+    orderBy: {
+      createdAt: "desc",
+    },
+    select: {
+      entitledSmartProperties: true,
+      status: true,
+    },
+  });
+
+  const isActive =
+    subscription &&
+    (subscription.status === "ACTIVE" ||
+      subscription.status === "TRIALING");
+
+  const smartLimit = isActive
+    ? subscription?.entitledSmartProperties ?? 0
+    : 0;
+
+  if (smartLimit < 1) {
+    return res.status(403).json({
+      ok: false,
+      error: "SMART_PROPERTY_ENTITLEMENT_REQUIRED",
+      smartLimit,
+    });
+  }
+
+  const smartUsed = await prisma.property.count({
+    where: {
+      organizationId: orgId,
+      smartAutomationEnabled: true,
+      NOT: { id: propertyId },
+    },
+  });
+
+  if (smartUsed >= smartLimit) {
+    return res.status(403).json({
+      ok: false,
+      error: "SMART_CAPACITY_EXCEEDED",
+      smartUsed,
+      smartLimit,
+    });
+  }
+}
+
+       await prisma.$transaction(async (tx) => {
         await tx.property.update({
           where: { id: propertyId },
           data: { smartAutomationEnabled: willEnableSmart },
