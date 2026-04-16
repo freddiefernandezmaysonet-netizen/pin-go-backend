@@ -141,6 +141,9 @@ export function PropertyEditPage() {
     }
   }
 
+  const derivedCheckInTime =
+    Number(form.cleaningDurationMinutes) === 240 ? "4:00 PM" : "3:00 PM";
+
   return (
     <div style={{ display: "grid", gap: 20 }}>
       <div
@@ -355,6 +358,10 @@ export function PropertyEditPage() {
                 placeholder="180"
                 style={inputStyle}
               />
+              <div style={{ fontSize: 12, color: "#6b7280" }}>
+                Derived check-in time:{" "}
+                <b style={{ color: "#111827" }}>{derivedCheckInTime}</b>
+              </div>
             </div>
 
             <div style={{ display: "grid", gap: 6 }}>

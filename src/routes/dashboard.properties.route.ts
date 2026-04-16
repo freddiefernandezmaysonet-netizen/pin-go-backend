@@ -268,16 +268,27 @@ dashboardPropertiesRouter.patch(
         data.timezone = String(timezone || "").trim() || null;
       }
 
-      if (cleaningDurationMinutes !== undefined) {
-        const n = Number(cleaningDurationMinutes);
-        if (!Number.isFinite(n) || n < 0) {
-          return res.status(400).json({
-            ok: false,
-            error: "cleaningDurationMinutes must be a valid number",
-          });
-        }
-        data.cleaningDurationMinutes = n;
-      }
+ if (cleaningDurationMinutes !== undefined) {
+  const n = Number(cleaningDurationMinutes);
+
+  if (!Number.isFinite(n) || n < 0) {
+    return res.status(400).json({
+      ok: false,
+      error: "cleaningDurationMinutes must be a valid number",
+    });
+  }
+
+  const normalizedDuration = Math.trunc(n);
+
+  data.cleaningDurationMinutes = normalizedDuration;
+
+  // 🔒 Mantener Property.checkInTime sincronizado con el dashboard
+  if (normalizedDuration === 240) {
+    data.checkInTime = "16:00";
+  } else {
+    data.checkInTime = "15:00";
+  }
+}   
 
       if (cleaningStartOffsetMinutes !== undefined) {
         const n = Number(cleaningStartOffsetMinutes);
