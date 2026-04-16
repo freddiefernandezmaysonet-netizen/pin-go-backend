@@ -67,15 +67,25 @@ router.post("/locks/preview", requireAuth, async (req, res) => {
       subscription_items: subscriptionItems,
     });
 
+    const lines = upcoming.lines.data.map((l: any) => ({
+      description: l.description,
+      amount: l.amount,
+      proration: Boolean(l.proration),
+      periodStart: l.period?.start ?? null,
+      periodEnd: l.period?.end ?? null,
+    }));
+
+    const prorationLines = lines.filter((l) => l.proration);
+    const recurringLines = lines.filter((l) => !l.proration);
+
     return res.json({
       ok: true,
       amountDue: upcoming.amount_due,
       currency: upcoming.currency,
       nextTotal: upcoming.total,
-      lines: upcoming.lines.data.map((l) => ({
-        description: l.description,
-        amount: l.amount,
-      })),
+      prorationLines,
+      recurringLines,
+      lines,
     });
   } catch (e: any) {
     console.error("billing preview error", e);
@@ -147,15 +157,25 @@ router.post("/smart/preview", requireAuth, async (req, res) => {
       subscription_items: subscriptionItems,
     });
 
+    const lines = upcoming.lines.data.map((l: any) => ({
+      description: l.description,
+      amount: l.amount,
+      proration: Boolean(l.proration),
+      periodStart: l.period?.start ?? null,
+      periodEnd: l.period?.end ?? null,
+    }));
+
+    const prorationLines = lines.filter((l) => l.proration);
+    const recurringLines = lines.filter((l) => !l.proration);
+
     return res.json({
       ok: true,
       amountDue: upcoming.amount_due,
       currency: upcoming.currency,
       nextTotal: upcoming.total,
-      lines: upcoming.lines.data.map((l) => ({
-        description: l.description,
-        amount: l.amount,
-      })),
+      prorationLines,
+      recurringLines,
+      lines,
     });
   } catch (e: any) {
     console.error("billing smart preview error", e);
