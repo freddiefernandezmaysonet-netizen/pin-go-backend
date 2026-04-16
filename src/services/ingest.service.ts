@@ -89,7 +89,7 @@ const property = await prisma.property.findUnique({
 
 // defaults
 const checkInTime = property?.checkInTime ?? "15:00";
-const checkOutTime = "11:00";
+const checkOutTime = property?.checkOutTime ?? "11:00";
 
 // helper simple
 function applyTime(date: Date, time: string) {
