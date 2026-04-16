@@ -31,6 +31,14 @@ function clamp(n: number, min: number, max: number) {
   return Math.max(min, Math.min(max, n));
 }
 
+function toLocalDateTimeString(d: Date) {
+  const pad = (n: number) => String(n).padStart(2, "0");
+
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(
+    d.getHours()
+  )}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`;
+}
+
 dashboardReservationsRouter.get("/api/dashboard/reservations", requireAuth, async (req, res) => {
   const user = (req as any).user;
   const orgId = user.orgId as string;
@@ -133,8 +141,8 @@ dashboardReservationsRouter.get("/api/dashboard/reservations", requireAuth, asyn
       guestName: r.guestName,
       guestEmail: r.guestEmail ?? null,
       roomName: r.roomName ?? null,
-      checkIn: r.checkIn.toISOString(),
-      checkOut: r.checkOut.toISOString(),
+      checkIn: toLocalDateTimeString(r.checkIn),
+      checkOut: toLocalDateTimeString(r.checkOut),
       status: r.status,
       operationalStatus: getOperationalStatus(r),
       source: r.source ?? null,
@@ -230,8 +238,8 @@ dashboardReservationsRouter.get(
       guestName: reservation.guestName,
       guestEmail: reservation.guestEmail ?? null,
       roomName: reservation.roomName ?? null,
-      checkIn: reservation.checkIn.toISOString(),
-      checkOut: reservation.checkOut.toISOString(),
+      checkIn: toLocalDateTimeString(reservation.checkIn),
+      checkOut: toLocalDateTimeString(reservation.checkOut),
       operationalStatus: getOperationalStatus(reservation),
       property: reservation.property
         ? {
@@ -243,8 +251,8 @@ dashboardReservationsRouter.get(
         id: g.id,
         method: String(g.method),
         status: String(g.status),
-        startsAt: g.startsAt.toISOString(),
-        endsAt: g.endsAt.toISOString(),
+        startsAt: toLocalDateTimeString(g.startsAt),
+        endsAt: toLocalDateTimeString(g.endsAt),
         codeMasked: g.accessCodeMasked ?? null,
         ttlockKeyboardPwdId: g.ttlockKeyboardPwdId ?? null,
         lock: {
@@ -266,8 +274,8 @@ dashboardReservationsRouter.get(
         id: a.id,
         role: String(a.role),
         status: String(a.status),
-        startsAt: a.startsAt.toISOString(),
-        endsAt: a.endsAt.toISOString(),
+        startsAt: toLocalDateTimeString(a.startsAt),
+        endsAt: toLocalDateTimeString(a.endsAt),
         card: {
           id: a.NfcCard.id,
           label: a.NfcCard.label ?? null,
