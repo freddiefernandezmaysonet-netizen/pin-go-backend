@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useParams, Link, useNavigate } from "react-router-dom";
-import { getOrganizationId } from "../../lib/getOrganizationId";
+
 
 type LockRow = {
   id: string;
@@ -302,18 +302,10 @@ export function LockDetailPage() {
       setInventoryMessage(null);
 
       try {
-        const organizationId = getOrganizationId();
-
-        if (!organizationId) {
-          setAvailableLocks([]);
-          setAvailableLocksError("Organization id is required.");
-          return;
-        }
-
-        const qs = new URLSearchParams({
-          propertyId,
-          organizationId,
-        }).toString();
+       
+       const qs = new URLSearchParams({
+         propertyId,
+       }).toString();
 
         const r = await fetch(`${API_BASE}/api/org/ttlock/inventory?${qs}`, {
           credentials: "include",
@@ -468,14 +460,6 @@ export function LockDetailPage() {
       return;
     }
 
-    const organizationId = getOrganizationId();
-
-    if (!organizationId) {
-      setSwapError("Organization id is required.");
-      setSwapSuccess(null);
-      return;
-    }
-
     setSwapLoading(true);
     setSwapError(null);
     setSwapSuccess(null);
@@ -488,7 +472,6 @@ export function LockDetailPage() {
           "Content-Type": "application/json",
         },
         body: JSON.stringify({
-          organizationId,
           propertyId: lock.property.id,
           oldTtlockLockId: lock.ttlockLockId,
           newTtlockLockId: parsedNewId,

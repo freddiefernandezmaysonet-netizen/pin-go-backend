@@ -26,7 +26,8 @@ function assertEnv() {
     "TTLOCK_CLIENT_SECRET",
 
     "TWILIO_ACCOUNT_SID",
-    "TWILIO_AUTH_TOKEN",
+    "TWILIO_API_KEY",
+    "TWILIO_API_SECRET",
     "TWILIO_FROM",
     "TO_PHONE",
   ];
@@ -44,7 +45,6 @@ async function postForm(url, data) {
     body,
   });
 
-  // TTLock a veces responde HTML cuando hay 404/errores
   const text = await res.text().catch(() => "");
   let json = {};
   try {
@@ -82,10 +82,8 @@ async function getValidAccessToken(organizationId) {
 
   const msLeft = auth.expiresAt ? auth.expiresAt.getTime() - Date.now() : 0;
 
-  // si el token aún tiene más de 2 minutos, úsalo
   if (msLeft > 2 * 60 * 1000) return auth.accessToken;
 
-  // si no, refrescamos
   const token = await refreshAccessToken(auth.refreshToken);
   const accessToken = token.access_token;
   const newRefreshToken = token.refresh_token || auth.refreshToken;
@@ -117,12 +115,9 @@ function fmtLocal(dt) {
 }
 
 function resolveWindow(grant) {
-  // Por default usa lo que está en el AccessGrant
   let startsAt = new Date(grant.startsAt);
   let endsAt = new Date(grant.endsAt);
 
-  // Si quieres forzar la vigencia a 6 horas (como TTLock te limita),
-  // activa FORCE_6H=1 en .env
   if (process.env.FORCE_6H === "1") {
     startsAt = new Date();
     endsAt = new Date(Date.now() + 6 * 60 * 60 * 1000);
@@ -147,7 +142,6 @@ async function main() {
   const ORG_ID = process.env.ORG_ID;
   const ACCESS_GRANT_ID = process.env.ACCESS_GRANT_ID;
 
-  // 1) Cargar AccessGrant + Lock
   const grant = await prisma.accessGrant.findUnique({
     where: { id: ACCESS_GRANT_ID },
     include: { lock: true },
@@ -159,7 +153,6 @@ async function main() {
     throw new Error(`Este script solo maneja PASSCODE_TIMEBOUND. Método actual: ${grant.method}`);
   }
 
-  // Si ya fue provisionado, no podemos reenviar porque NO guardamos el PIN real
   if (grant.ttlockKeyboardPwdId) {
     throw new Error(
       `Este AccessGrant ya fue provisionado (ttlockKeyboardPwdId=${grant.ttlockKeyboardPwdId}). ` +
@@ -180,20 +173,16 @@ async function main() {
     endsAt: grant.endsAt,
   });
 
-  // 2) Token válido TTLock (desde DB + refresh si hace falta)
   const accessToken = await getValidAccessToken(ORG_ID);
 
-  // 3) Crear PIN (solo memoria; NO lo guardamos en DB)
   const pinLength = Number(process.env.PIN_LENGTH || 8);
   const pin = generatePin(pinLength);
   const masked = maskPin(pin);
 
-  // 4) Ventana de tiempo (ms)
   const { startsAt, endsAt } = resolveWindow(grant);
   const startDateMs = startsAt.getTime();
   const endDateMs = endsAt.getTime();
 
-  // 5) Crear passcode en TTLock
   const resp = await postForm(`${API_BASE}/v3/keyboardPwd/add`, {
     clientId: CLIENT_ID,
     accessToken,
@@ -212,7 +201,6 @@ async function main() {
     throw new Error(`TTLock no devolvió keyboardPwdId. Resp: ${JSON.stringify(resp).slice(0, 400)}`);
   }
 
-  // 6) Guardar en DB
   await prisma.accessGrant.update({
     where: { id: grant.id },
     data: {
@@ -221,15 +209,13 @@ async function main() {
       accessCodeMasked: masked,
       ttlockPayload: resp,
       lastError: null,
-      // opcional: guardar ventana real si FORCE_6H=1
       startsAt,
       endsAt,
     },
   });
 
-  // 7) Enviar SMS (Twilio)
-  const to = process.env.TO_PHONE;       // +1787... o whatsapp:+1787...
-  const from = process.env.TWILIO_FROM; // +1...  o whatsapp:+1...
+  const to = process.env.TO_PHONE;
+  const from = process.env.TWILIO_FROM;
 
   const hours = Math.max(1, Math.round((endDateMs - startDateMs) / (1000 * 60 * 60)));
   const lockName = grant.lock.ttlockLockName || "la cerradura";
@@ -242,14 +228,14 @@ async function main() {
     `Hasta: ${fmtLocal(endsAt)}\n` +
     `Luego entrarás con tu tarjeta NFC.\n`;
 
-  const tw = twilio(process.env.TWILIO_ACCOUNT_SID, process.env.TWILIO_AUTH_TOKEN);
+  const tw = twilio(process.env.TWILIO_API_KEY, process.env.TWILIO_API_SECRET, {
+    accountSid: process.env.TWILIO_ACCOUNT_SID,
+  });
 
   let msg;
   try {
     msg = await tw.messages.create({ to, from, body });
   } catch (e) {
-    // si Twilio falla, dejamos el AccessGrant ACTIVE porque el PIN ya existe en TTLock
-    // pero guardamos el error para que puedas reenviar creando OTRO AccessGrant
     await prisma.accessGrant.update({
       where: { id: grant.id },
       data: { lastError: `Twilio: ${e?.message || String(e)}` },
@@ -257,7 +243,6 @@ async function main() {
     throw new Error(`Twilio falló enviando SMS: ${e?.message || e}`);
   }
 
-  // 8) Log en DB (MessageLog)
   await prisma.messageLog.create({
     data: {
       channel: to.startsWith("whatsapp:") ? "whatsapp" : "sms",
