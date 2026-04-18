@@ -6,7 +6,7 @@ import {
   AccessMethod,
   StaffAccessMethod,
   StaffAssignmentStatus,
-  ReservationStatus,          
+  ReservationStatus,
 } from "@prisma/client";
 
 import crypto from "crypto";
@@ -26,16 +26,16 @@ export type IngestPayload = {
   guestPhone?: string | null;
   roomName?: string | null;
 
-  checkIn: string; // ISO string
-  checkOut: string; // ISO string
+  checkIn: string; // ISO string o YYYY-MM-DD
+  checkOut: string; // ISO string o YYYY-MM-DD
   paymentState?: "NONE" | "PAID" | "FAILED" | "PENDING";
 
- // ✅ PMS identity + ordering + status
-  externalProvider?: string | null;        // "cloudbeds" | "guesty" | etc
-  externalId?: string | null;              // id de reserva en el PMS
-  externalUpdatedAt?: string | null;       // ISO string (para out-of-order)
-  externalRaw?: any | null;                // payload/snapshot opcional
-  status?: "ACTIVE" | "CANCELLED";         // cancelación PMS
+  // ✅ PMS identity + ordering + status
+  externalProvider?: string | null;
+  externalId?: string | null;
+  externalUpdatedAt?: string | null;
+  externalRaw?: any | null;
+  status?: "ACTIVE" | "CANCELLED";
 };
 
 function norm(s?: string | null) {
@@ -45,7 +45,6 @@ function norm(s?: string | null) {
 /**
  * Idempotencia interna (cuando no tienes externalReservationId).
  * OJO: incluye email/phone. Si cambian, cambia la key.
- * Si quieres key más estable, te lo ajusto.
  */
 function buildIngestKey(p: {
   source?: string;
@@ -64,44 +63,54 @@ function buildIngestKey(p: {
     norm(p.guestName),
   ].join("|");
 
-  return crypto.createHash("sha1").update(raw).digest("hex"); // 40 chars
+  return crypto.createHash("sha1").update(raw).digest("hex");
 }
 
 function makeToken(bytes = 16) {
   return crypto.randomBytes(bytes).toString("hex");
 }
 
-export async function ingestReservation(p: IngestPayload) {
-
-// 🔥 FIX: aplicar hora de propiedad cuando Lodgify no envía hora
-
-const rawCheckIn = new Date(p.checkIn);
-const rawCheckOut = new Date(p.checkOut);
-
-// obtener property (debe ya existir en tu flujo)
-const property = await prisma.property.findUnique({
-  where: { id: p.propertyId },
-  select: {
-    checkInTime: true,
-    timezone: true,
-  },
-});
-
-// defaults
-const checkInTime = property?.checkInTime ?? "15:00";
-const checkOutTime = property?.checkOutTime ?? "11:00";
-
-// helper simple
-function applyTime(date: Date, time: string) {
-  const [h, m] = time.split(":").map(Number);
-  const d = new Date(date);
-  d.setHours(h, m, 0, 0);
-  return d;
+function isDateOnly(value: string) {
+  return /^\d{4}-\d{2}-\d{2}$/.test(value.trim());
 }
 
-const checkIn = applyTime(rawCheckIn, checkInTime);
-const checkOut = applyTime(rawCheckOut, checkOutTime);
-  
+function buildLocalDateFromDateOnly(value: string, time: string) {
+  const [year, month, day] = value.trim().split("-").map(Number);
+  const [hours, minutes] = time.split(":").map(Number);
+
+  return new Date(
+    year,
+    (month ?? 1) - 1,
+    day ?? 1,
+    hours ?? 0,
+    minutes ?? 0,
+    0,
+    0
+  );
+}
+
+export async function ingestReservation(p: IngestPayload) {
+  const property = await prisma.property.findUnique({
+    where: { id: p.propertyId },
+    select: {
+      checkInTime: true,
+      timezone: true,
+    },
+  });
+
+  const propertyCheckInTime = property?.checkInTime ?? "15:00";
+  const propertyCheckOutTime = "11:00";
+
+  const checkIn =
+    typeof p.checkIn === "string" && isDateOnly(p.checkIn)
+      ? buildLocalDateFromDateOnly(p.checkIn, propertyCheckInTime)
+      : new Date(p.checkIn);
+
+  const checkOut =
+    typeof p.checkOut === "string" && isDateOnly(p.checkOut)
+      ? buildLocalDateFromDateOnly(p.checkOut, propertyCheckOutTime)
+      : new Date(p.checkOut);
+
   if (isNaN(checkIn.getTime())) throw new Error("Invalid checkIn");
   if (isNaN(checkOut.getTime())) throw new Error("Invalid checkOut");
   if (checkOut <= checkIn) throw new Error("checkOut must be after checkIn");
@@ -113,10 +122,8 @@ const checkOut = applyTime(rawCheckOut, checkOutTime);
   const externalProvider = (p.externalProvider ?? "").trim() || null;
   const externalId = (p.externalId ?? "").trim() || null;
 
-  // ✅ 1) termina la transacción y guarda el resultado
   const result = await prisma.$transaction(async (tx) => {
-    // 1) Upsert Reservation por ingestKey
-    const { reservation, didChange } = await upsertReservation(tx, {   
+    const { reservation, didChange } = await upsertReservation(tx, {
       source: p.source,
 
       propertyId: p.propertyId,
@@ -129,19 +136,16 @@ const checkOut = applyTime(rawCheckOut, checkOutTime);
       checkOut,
       paymentState,
       guestTokenExpiresAt,
-   
+
       externalProvider,
       externalId,
       externalUpdatedAt: p.externalUpdatedAt ? new Date(p.externalUpdatedAt) : null,
       externalRaw: p.externalRaw ?? null,
       status: p.status ?? undefined,
-      
     });
 
-    // 2) Asegurar guestToken
     const ensured = await ensureGuestToken(tx, reservation.id, guestTokenExpiresAt);
 
-    // 3) Lock activa
     const lock = await tx.lock.findFirst({
       where: { propertyId: reservation.propertyId, isActive: true },
       orderBy: { createdAt: "asc" },
@@ -152,11 +156,10 @@ const checkOut = applyTime(rawCheckOut, checkOutTime);
         reservationId: reservation.id,
         guestToken: ensured.guestToken,
         warning: `No active lock found for property ${reservation.propertyId}. AccessGrant not created.`,
-      
+        didChange,
       };
     }
 
-    // 4) Grant GUEST PENDING
     const grant = await ensureGuestGrant(tx, {
       reservationId: reservation.id,
       lockId: lock.id,
@@ -164,7 +167,6 @@ const checkOut = applyTime(rawCheckOut, checkOutTime);
       endsAt: reservation.checkOut,
     });
 
-    // 5) StaffAssignment limpieza (safe)
     try {
       const prop = await tx.property.findUnique({
         where: { id: reservation.propertyId },
@@ -195,13 +197,13 @@ const checkOut = applyTime(rawCheckOut, checkOutTime);
               method: StaffAccessMethod.NFC_TIMEBOUND,
               startsAt,
               endsAt,
-              status: reservationStatus,
+              status: StaffAssignmentStatus.SCHEDULED,
             },
             update: {
               method: StaffAccessMethod.NFC_TIMEBOUND,
               startsAt,
               endsAt,
-              status: input.status ? reservationStatus : undefined,            
+              status: StaffAssignmentStatus.SCHEDULED,
               lastError: null,
             },
           });
@@ -210,28 +212,26 @@ const checkOut = applyTime(rawCheckOut, checkOutTime);
     } catch {
       // safe
     }
-return {
-  reservationId: reservation.id,
-  guestToken: ensured.guestToken,
-  accessGrantId: grant?.id ?? null,
-  lockId: lock.id,
-  didChange,
-  };
- });
 
- // ✅ 2) AHORA sí: fuera del tx (evita TTLock dentro de la transacción)
-  
-if (result.didChange) {
-  await reconcileReservation(result.reservationId);
-}
+    return {
+      reservationId: reservation.id,
+      guestToken: ensured.guestToken,
+      accessGrantId: grant?.id ?? null,
+      lockId: lock.id,
+      didChange,
+    };
+  });
 
-log("ingest.result", {
-  reservationId: result.reservationId,
-  didChange: result.didChange,
-});
+  if (result.didChange) {
+    await reconcileReservation(result.reservationId);
+  }
 
-return result;
+  log("ingest.result", {
+    reservationId: result.reservationId,
+    didChange: result.didChange,
+  });
 
+  return result;
 }
 
 async function upsertReservation(
@@ -268,8 +268,6 @@ async function upsertReservation(
 
   const hasPmsKey = !!(input.externalProvider && input.externalId);
 
-  
-  // ✅ PMS KEY path (out-of-order protected)
   if (hasPmsKey) {
     const existingByPms = await tx.reservation.findUnique({
       where: {
@@ -282,71 +280,69 @@ async function upsertReservation(
       select: { id: true, externalUpdatedAt: true },
     });
 
-function isOlderOrSame(incoming?: Date | null, current?: Date | null) {
-  if (!incoming || !current) return false;
-  return incoming.getTime() <= current.getTime();
-}
-    // ✅ viejo o repetido → ignorar
+    function isOlderOrSame(incoming?: Date | null, current?: Date | null) {
+      if (!incoming || !current) return false;
+      return incoming.getTime() <= current.getTime();
+    }
+
     if (
       existingByPms &&
       isOlderOrSame(input.externalUpdatedAt ?? null, existingByPms.externalUpdatedAt ?? null)
     ) {
-      const reservation = await tx.reservation.findUnique({ where: { id: existingByPms.id } });
+      const reservation = await tx.reservation.findUnique({
+        where: { id: existingByPms.id },
+      });
       return { reservation, didChange: false };
     }
 
-   // ✅ existe por PMS → update
-if (existingByPms) {
+    if (existingByPms) {
+      const stayStarted = Date.now() >= input.checkIn.getTime();
 
-  // ✅ Regla enterprise: NO permitir CANCELLED si ya empezó la estancia
-  const stayStarted = Date.now() >= input.checkIn.getTime();
+      if (input.status === "CANCELLED" && stayStarted) {
+        const reservation = await tx.reservation.update({
+          where: { id: existingByPms.id },
+          data: {
+            externalUpdatedAt: input.externalUpdatedAt ?? undefined,
+            externalRaw: input.externalRaw ?? undefined,
+            lastIngestError: "CANCEL_REJECTED_ACTIVE_STAY",
+            lastIngestedAt: new Date(),
+          },
+        });
 
-  if (input.status === "CANCELLED" && stayStarted) {
-    // No cambiamos status; solo registramos el evento PMS para auditoría
-    const reservation = await tx.reservation.update({
-      where: { id: existingByPms.id },
-      data: {
-        externalUpdatedAt: input.externalUpdatedAt ?? undefined,
-        externalRaw: input.externalRaw ?? undefined,
-        lastIngestError: "CANCEL_REJECTED_ACTIVE_STAY",
-        lastIngestedAt: new Date(),
-      },
-    });
+        return { reservation, didChange: false };
+      }
 
-    return { reservation, didChange: false };
-  }
+      const reservation = await tx.reservation.update({
+        where: { id: existingByPms.id },
+        data: {
+          source: input.source ?? undefined,
 
-  const reservation = await tx.reservation.update({
-    where: { id: existingByPms.id },
-    data: {
-      source: input.source ?? undefined,
+          guestName: input.guestName,
+          guestEmail: input.guestEmail ?? null,
+          guestPhone: input.guestPhone ?? null,
+          roomName: input.roomName ?? null,
 
-      guestName: input.guestName,
-      guestEmail: input.guestEmail ?? null,
-      guestPhone: input.guestPhone ?? null,
-      roomName: input.roomName ?? null,
+          externalUpdatedAt: input.externalUpdatedAt ?? undefined,
+          externalRaw: input.externalRaw ?? undefined,
+          status: input.status
+            ? input.status === "CANCELLED"
+              ? ReservationStatus.CANCELLED
+              : ReservationStatus.ACTIVE
+            : undefined,
 
-      externalUpdatedAt: input.externalUpdatedAt ?? undefined,
-      externalRaw: input.externalRaw ?? undefined,
-      status: input.status
-        ? (input.status === "CANCELLED"
-            ? ReservationStatus.CANCELLED
-            : ReservationStatus.ACTIVE)
-        : undefined,
+          checkIn: input.checkIn,
+          checkOut: input.checkOut,
+          paymentState: input.paymentState,
+          guestTokenExpiresAt: input.guestTokenExpiresAt,
 
-      checkIn: input.checkIn,
-      checkOut: input.checkOut,
-      paymentState: input.paymentState,
-      guestTokenExpiresAt: input.guestTokenExpiresAt,
+          lastIngestError: null,
+          lastIngestedAt: new Date(),
+        },
+      });
 
-      lastIngestError: null,
-      lastIngestedAt: new Date(),
-    },
-  });
+      return { reservation, didChange: true };
+    }
 
-  return { reservation, didChange: true };
-}
-    // ✅ no existe por PMS → intenta adoptar legacy por ingestKey
     const existingByIngestKey = await tx.reservation.findUnique({
       where: { ingestKey },
       select: { id: true },
@@ -368,9 +364,9 @@ if (existingByPms) {
           externalUpdatedAt: input.externalUpdatedAt ?? undefined,
           externalRaw: input.externalRaw ?? undefined,
           status: input.status
-            ? (input.status === "CANCELLED"
-                ? ReservationStatus.CANCELLED
-                : ReservationStatus.ACTIVE)
+            ? input.status === "CANCELLED"
+              ? ReservationStatus.CANCELLED
+              : ReservationStatus.ACTIVE
             : undefined,
 
           checkIn: input.checkIn,
@@ -386,7 +382,6 @@ if (existingByPms) {
       return { reservation, didChange: true };
     }
 
-    // ✅ create nuevo con PMS key + ingestKey
     const reservation = await tx.reservation.create({
       data: {
         ingestKey,
@@ -416,10 +411,10 @@ if (existingByPms) {
         lastIngestedAt: new Date(),
       },
     });
-   
-   return { reservation, didChange: true };
+
+    return { reservation, didChange: true };
   }
-    // ✅ fallback legacy: NO PMS key → upsert por ingestKey
+
   const reservation = await tx.reservation.upsert({
     where: { ingestKey },
     create: {
@@ -460,9 +455,9 @@ if (existingByPms) {
       externalUpdatedAt: input.externalUpdatedAt ?? undefined,
       externalRaw: input.externalRaw ?? undefined,
       status: input.status
-        ? (input.status === "CANCELLED"
-            ? ReservationStatus.CANCELLED
-            : ReservationStatus.ACTIVE)
+        ? input.status === "CANCELLED"
+          ? ReservationStatus.CANCELLED
+          : ReservationStatus.ACTIVE
         : undefined,
 
       checkIn: input.checkIn,
@@ -476,7 +471,6 @@ if (existingByPms) {
   });
 
   return { reservation, didChange: true };
-
 }
 
 async function ensureGuestToken(
@@ -508,6 +502,7 @@ async function ensureGuestToken(
 
   return { guestToken: updated.guestToken! };
 }
+
 async function ensureGuestGrant(
   tx: PrismaClient,
   input: { reservationId: string; lockId: string; startsAt: Date; endsAt: Date }
@@ -527,7 +522,7 @@ async function ensureGuestGrant(
         reservationId: input.reservationId,
         lockId: input.lockId,
         type: AccessGrantType.GUEST,
-        method: AccessMethod.PASSCODE_TIMEBOUND, // tu enum actual
+        method: AccessMethod.PASSCODE_TIMEBOUND,
         status: AccessStatus.PENDING,
         startsAt: input.startsAt,
         endsAt: input.endsAt,
@@ -535,7 +530,6 @@ async function ensureGuestGrant(
     });
   }
 
-  // si ya está ACTIVE/REVOKED/etc, no lo tocamos aquí
   if (existing.status !== AccessStatus.PENDING) return existing;
 
   return tx.accessGrant.update({
