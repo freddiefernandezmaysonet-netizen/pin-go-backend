@@ -11,6 +11,21 @@ import { requireAuth } from "../middleware/requireAuth";
 const prisma = new PrismaClient();
 export const dashboardAccessRouter = Router();
 
+function toLocalDateTimeString(date: Date) {
+  const yyyy = date.getFullYear();
+  const mm = String(date.getMonth() + 1).padStart(2, "0");
+  const dd = String(date.getDate()).padStart(2, "0");
+
+  let hours = date.getHours();
+  const minutes = String(date.getMinutes()).padStart(2, "0");
+  const ampm = hours >= 12 ? "PM" : "AM";
+
+  hours = hours % 12;
+  if (hours === 0) hours = 12;
+
+  return `${mm}/${dd}/${yyyy}, ${hours}:${minutes} ${ampm}`;
+}
+
 dashboardAccessRouter.get("/api/dashboard/access", requireAuth, async (req, res) => {
   const user = (req as any).user;
   const orgId = user.orgId as string;
@@ -24,7 +39,6 @@ dashboardAccessRouter.get("/api/dashboard/access", requireAuth, async (req, res)
     ? { property: { id: propertyId, organizationId: orgId } }
     : { property: { organizationId: orgId } };
 
-  // Guest passcodes (masked only)
   const guestPasscodes = await prisma.accessGrant.findMany({
     where: {
       status: AccessStatus.ACTIVE,
@@ -55,7 +69,6 @@ dashboardAccessRouter.get("/api/dashboard/access", requireAuth, async (req, res)
     },
   });
 
-  // NFC assignments (Guest + Cleaning)
   const nfcAssignments = await prisma.nfcAssignment.findMany({
     where: {
       status: NfcAssignmentStatus.ACTIVE,
@@ -90,20 +103,20 @@ dashboardAccessRouter.get("/api/dashboard/access", requireAuth, async (req, res)
     guestName: a.Reservation.guestName,
     roomName: a.Reservation.roomName ?? null,
     property: a.Reservation.property,
-    role: a.role, // GUEST / CLEANING
+    role: a.role,
     status: a.status,
     card: {
       id: a.NfcCard.id,
       label: a.NfcCard.label ?? null,
       ttlockCardId: a.NfcCard.ttlockCardId,
     },
-    startsAt: a.startsAt.toISOString(),
-    endsAt: a.endsAt.toISOString(),
+    startsAt: toLocalDateTimeString(a.startsAt),
+    endsAt: toLocalDateTimeString(a.endsAt),
     lastError: a.lastError ?? null,
   }));
 
   return res.json({
-    now: now.toISOString(),
+    now: toLocalDateTimeString(now),
     guestPasscodes: guestPasscodes.map((g) => ({
       grantId: g.id,
       reservationId: g.reservationId,
@@ -114,14 +127,13 @@ dashboardAccessRouter.get("/api/dashboard/access", requireAuth, async (req, res)
         ttlockLockId: g.lock.ttlockLockId,
         name: g.lock.ttlockLockName ?? null,
       },
-      startsAt: g.startsAt.toISOString(),
-      endsAt: g.endsAt.toISOString(),
-      codeMasked: g.accessCodeMasked ?? null, // ✅ solo masked
+      startsAt: toLocalDateTimeString(g.startsAt),
+      endsAt: toLocalDateTimeString(g.endsAt),
+      codeMasked: g.accessCodeMasked ?? null,
       ttlockKeyboardPwdId: g.ttlockKeyboardPwdId ?? null,
       lastError: g.lastError ?? null,
     })),
     nfc,
-    // opcional: separados para UI
     nfcGuest: nfc.filter((x) => x.role === "GUEST"),
     nfcCleaning: nfc.filter((x) => x.role === "CLEANING"),
   });
