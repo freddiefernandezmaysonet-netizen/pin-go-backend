@@ -163,7 +163,19 @@ if (end <= start) {
 
     form.startDate = start;
     form.endDate = end;
-  }
+  
+console.log("[TTLOCK][PASSCODE] period form prepared", {
+      lockId,
+      keyboardPwdType: params.keyboardPwdType,
+      inputStartDate: params.startDate ?? null,
+      inputEndDate: params.endDate ?? null,
+      normalizedStartDate: start,
+      normalizedEndDate: end,
+      normalizedStartIso: new Date(start).toISOString(),
+      normalizedEndIso: new Date(end).toISOString(),
+    });
+
+ }
 
   // ✅ Para OTP (type=1): este lock requiere startDate/endDate.
   if (params.keyboardPwdType === 1) {
@@ -173,6 +185,21 @@ if (end <= start) {
     form.startDate = start;
     form.endDate = end;
   }
+
+      console.log("[TTLOCK][PASSCODE] sending form", {
+      lockId,
+      keyboardPwdType: form.keyboardPwdType,
+      startDate: form.startDate ?? null,
+      endDate: form.endDate ?? null,
+      startIso:
+        typeof form.startDate === "number"
+          ? new Date(form.startDate).toISOString()
+          : null,
+      endIso:
+        typeof form.endDate === "number"
+          ? new Date(form.endDate).toISOString()
+          : null,
+    });  
 
   try {
     return await postForm(`${base}/v3/keyboardPwd/get`, form);

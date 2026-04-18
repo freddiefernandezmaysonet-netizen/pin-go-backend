@@ -95,6 +95,18 @@ if (grant.method === AccessMethod.PASSCODE_TIMEBOUND) {
     });
   }
 
+  console.log("[ACCESS][PASSCODE] grant window", {
+    grantId: grant.id,
+    reservationId: grant.reservationId,
+    propertyId: grant.lock?.propertyId ?? null,
+    startsAt_raw: grant.startsAt,
+    endsAt_raw: grant.endsAt,
+    startsAt_iso: grant.startsAt?.toISOString?.() ?? null,
+    endsAt_iso: grant.endsAt?.toISOString?.() ?? null,
+    startsAt_ms: grant.startsAt?.getTime?.() ?? null,
+    endsAt_ms: grant.endsAt?.getTime?.() ?? null,
+  });
+
   const pass = await ttlockGetPasscode({
     lockId: Number(grant.lock.ttlockLockId),
 
