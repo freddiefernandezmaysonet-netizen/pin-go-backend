@@ -37,11 +37,6 @@ export function buildAccessNfcRouter(prisma: PrismaClient) {
 });
 if (!property) return res.status(404).json({ ok: false, error: "Property not found" });
 
-const { start: cleaningStart, end: cleaningEnd } = computeCleaningWindow({
-  checkOut: reservation.checkOut,
-  cleaningStartOffsetMinutes: property.cleaningStartOffsetMinutes ?? 30,
-  cleaningDurationMinutes: property.cleaningDurationMinutes ?? 180,
-});
 
      const lock = await prisma.lock.findUnique({ where: { ttlockLockId: Number(ttlockLockId) } });
       if (!lock) return res.status(404).json({ ok: false, error: "Lock not found" });
@@ -113,8 +108,16 @@ if (cCount > 0 && avail.cleaning < cCount) {
     error: `Not enough AVAILABLE CLEANING cards. Needed=${cCount} found=${avail.cleaning}. (TTLock cleaningTotal=${refresh.cleaningTotal})`,
   });
 }
-      const guestStartsAt = new Date(reservation.checkIn);
-      const guestEndsAt = new Date(reservation.checkOut);
+     
+const guestStartsAt =
+  reservation.checkIn instanceof Date
+    ? reservation.checkIn
+    : new Date(reservation.checkIn);
+
+const guestEndsAt =
+  reservation.checkOut instanceof Date
+    ? reservation.checkOut
+    : new Date(reservation.checkOut);
 
       const assigned: any[] = [];
    
