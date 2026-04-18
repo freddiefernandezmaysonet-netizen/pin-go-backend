@@ -109,15 +109,9 @@ if (cCount > 0 && avail.cleaning < cCount) {
   });
 }
      
-const guestStartsAt =
-  reservation.checkIn instanceof Date
-    ? reservation.checkIn
-    : new Date(reservation.checkIn);
+const guestStartsAt = reservation.checkIn as Date;
+const guestEndsAt = reservation.checkOut as Date;
 
-const guestEndsAt =
-  reservation.checkOut instanceof Date
-    ? reservation.checkOut
-    : new Date(reservation.checkOut);
 
       const assigned: any[] = [];
    
