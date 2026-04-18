@@ -34,7 +34,10 @@ function clamp(n: number, min: number, max: number) {
 }
 
 function toStableDateTimeString(d: Date) {
-  return d.toISOString();
+  return d.toLocaleString("en-CA", {
+    timeZone: "America/Puerto_Rico",
+    hour12: false,
+  });
 }
 
 dashboardReservationsRouter.get("/api/dashboard/reservations", requireAuth, async (req, res) => {
