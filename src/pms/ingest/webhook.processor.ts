@@ -5,10 +5,6 @@ import type { CanonicalReservation } from "../adapters/types";
 
 const prisma = new PrismaClient();
 
-const DEFAULT_PROPERTY_TIMEZONE = "America/Puerto_Rico";
-const DEFAULT_CHECKIN_TIME = "15:00";
-const DEFAULT_CHECKOUT_TIME = "11:00";
-
 const normalizeName = (s: string) =>
   s
     .toLowerCase()
@@ -42,140 +38,22 @@ function isCheckedOutStatus(status: string) {
   return ["CHECKED_OUT", "CHECKEDOUT", "COMPLETED", "COMPLETE", "FINISHED"].includes(status);
 }
 
-function isValidTimeString(value?: string | null): value is string {
-  return typeof value === "string" && /^([01]\d|2[0-3]):([0-5]\d)$/.test(value);
-}
+function applyPropertyTime(dateStr: string, timeStr?: string | null) {
+  if (!dateStr) return new Date();
 
-function extractDatePart(dateStr: string, timezone: string) {
-  const raw = String(dateStr ?? "").trim();
-  if (!raw) {
-    throw new Error("INVALID_DATE_STRING_EMPTY");
+  if (dateStr.includes("T")) {
+    return new Date(dateStr);
   }
 
-  // Caso ideal: YYYY-MM-DD o YYYY-MM-DDTHH:mm:ss...
-  const direct = raw.match(/^(\d{4})-(\d{2})-(\d{2})/);
-  if (direct) {
-    return `${direct[1]}-${direct[2]}-${direct[3]}`;
-  }
+  const safeTime =
+    typeof timeStr === "string" && /^([01]\d|2[0-3]):([0-5]\d)$/.test(timeStr)
+      ? timeStr
+      : "16:00";
 
-  const parsed = new Date(raw);
-  if (Number.isNaN(parsed.getTime())) {
-    throw new Error(`INVALID_DATE_STRING:${raw}`);
-  }
+  const [hours, minutes] = safeTime.split(":").map(Number);
+  const [year, month, day] = dateStr.split("-").map(Number);
 
-  return formatDateInTimeZone(parsed, timezone);
-}
-
-function formatDateInTimeZone(date: Date, timezone: string) {
-  const parts = new Intl.DateTimeFormat("en-CA", {
-    timeZone: timezone,
-    year: "numeric",
-    month: "2-digit",
-    day: "2-digit",
-  }).formatToParts(date);
-
-  const map = Object.fromEntries(parts.map((p) => [p.type, p.value]));
-  return `${map.year}-${map.month}-${map.day}`;
-}
-
-function getZonedDateTimeParts(date: Date, timezone: string) {
-  const parts = new Intl.DateTimeFormat("en-CA", {
-    timeZone: timezone,
-    year: "numeric",
-    month: "2-digit",
-    day: "2-digit",
-    hour: "2-digit",
-    minute: "2-digit",
-    second: "2-digit",
-    hourCycle: "h23",
-  }).formatToParts(date);
-
-  const map = Object.fromEntries(parts.map((p) => [p.type, p.value]));
-
-  return {
-    year: Number(map.year),
-    month: Number(map.month),
-    day: Number(map.day),
-    hour: Number(map.hour),
-    minute: Number(map.minute),
-    second: Number(map.second),
-  };
-}
-
-/**
- * Convierte una fecha calendario + hora local de negocio + timezone
- * en un instante UTC estable, sin depender del timezone del servidor.
- */
-function buildDateAtPropertyTime(
-  datePart: string,
-  timeStr: string,
-  timezone: string
-) {
-  const dateMatch = /^(\d{4})-(\d{2})-(\d{2})$/.exec(datePart);
-  if (!dateMatch) {
-    throw new Error(`INVALID_DATE_PART:${datePart}`);
-  }
-
-  if (!isValidTimeString(timeStr)) {
-    throw new Error(`INVALID_TIME_STRING:${timeStr}`);
-  }
-
-  const year = Number(dateMatch[1]);
-  const month = Number(dateMatch[2]);
-  const day = Number(dateMatch[3]);
-
-  const [hour, minute] = timeStr.split(":").map(Number);
-
-  // Primer intento: tratar la fecha/hora local como si fuera UTC
-  let guessUtcMs = Date.UTC(year, month - 1, day, hour, minute, 0, 0);
-
-  // Ajuste iterativo para encontrar el UTC real que representa
-  // esa fecha/hora local en la timezone deseada.
-  for (let i = 0; i < 2; i += 1) {
-    const zoned = getZonedDateTimeParts(new Date(guessUtcMs), timezone);
-
-    const desiredAsUtcMs = Date.UTC(year, month - 1, day, hour, minute, 0, 0);
-    const actualAsUtcMs = Date.UTC(
-      zoned.year,
-      zoned.month - 1,
-      zoned.day,
-      zoned.hour,
-      zoned.minute,
-      zoned.second,
-      0
-    );
-
-    const diffMs = desiredAsUtcMs - actualAsUtcMs;
-    guessUtcMs += diffMs;
-
-    if (diffMs === 0) break;
-  }
-
-  return new Date(guessUtcMs);
-}
-
-/**
- * Regla estable:
- * - siempre toma la fecha calendario del payload PMS
- * - siempre aplica la hora de negocio indicada
- * - siempre usa la timezone de la propiedad
- * - nunca depende del timezone local del servidor
- */
-function applyPropertyTime(
-  dateStr: string,
-  timeStr: string | null | undefined,
-  timezone: string,
-  fallbackTime: string
-) {
-  const safeTimezone =
-    typeof timezone === "string" && timezone.trim()
-      ? timezone.trim()
-      : DEFAULT_PROPERTY_TIMEZONE;
-
-  const safeTime = isValidTimeString(timeStr) ? timeStr : fallbackTime;
-  const datePart = extractDatePart(dateStr, safeTimezone);
-
-  return buildDateAtPropertyTime(datePart, safeTime, safeTimezone);
+  return new Date(year, (month ?? 1) - 1, day ?? 1, hours, minutes, 0, 0);
 }
 
 export async function processWebhookEventById(eventId: string) {
@@ -295,61 +173,51 @@ export async function processWebhookEventById(eventId: string) {
 
       const property = await tx.property.findUnique({
         where: { id: listing.propertyId! },
-        select: {
-          checkInTime: true,
-          timezone: true,
-        },
+        select: { checkInTime: true },
       });
-
-      const propertyTimezone =
-        property?.timezone?.trim() || DEFAULT_PROPERTY_TIMEZONE;
 
       const resolvedCheckIn = applyPropertyTime(
         canonical!.checkIn,
-        property?.checkInTime ?? DEFAULT_CHECKIN_TIME,
-        propertyTimezone,
-        DEFAULT_CHECKIN_TIME
+        property?.checkInTime ?? "15:00"
       );
 
       const resolvedCheckOut = applyPropertyTime(
         canonical!.checkOut,
-        DEFAULT_CHECKOUT_TIME,
-        propertyTimezone,
-        DEFAULT_CHECKOUT_TIME
+        "11:00"
       );
 
       const reservationStatus =
-        isCancelledStatus(normalizedStatus)
-          ? "CANCELLED"
-          : "ACTIVE";
+  isCancelledStatus(normalizedStatus)
+    ? "CANCELLED"
+    : "ACTIVE";
 
-      const reservation = await tx.reservation.upsert({
-        where: { ingestKey },
-        create: {
-          propertyId: listing.propertyId!,
-          guestName: canonical!.guest?.name ?? "Guest",
-          guestEmail: canonical!.guest?.email ?? null,
-          guestPhone: canonical!.guest?.phone ?? null,
-          roomName: listing.name ?? null,
-          checkIn: resolvedCheckIn,
-          checkOut: resolvedCheckOut,
-          status: reservationStatus,
-          ingestKey,
-          source: String(ev.provider),
-        },
-        update: {
-          propertyId: listing.propertyId!,
-          guestName: canonical!.guest?.name ?? "Guest",
-          guestEmail: canonical!.guest?.email ?? null,
-          guestPhone: canonical!.guest?.phone ?? null,
-          roomName: listing.name ?? null,
-          checkIn: resolvedCheckIn,
-          checkOut: resolvedCheckOut,
-          status: reservationStatus,
-          ingestKey,
-          source: String(ev.provider),
-        },
-      });
+const reservation = await tx.reservation.upsert({
+  where: { ingestKey },
+  create: {
+    propertyId: listing.propertyId!,
+    guestName: canonical!.guest?.name ?? "Guest",
+    guestEmail: canonical!.guest?.email ?? null,
+    guestPhone: canonical!.guest?.phone ?? null,
+    roomName: listing.name ?? null,
+    checkIn: resolvedCheckIn,
+    checkOut: resolvedCheckOut,
+    status: reservationStatus, // 🔥 FIX
+    ingestKey,
+    source: String(ev.provider),
+  },
+  update: {
+    propertyId: listing.propertyId!,
+    guestName: canonical!.guest?.name ?? "Guest",
+    guestEmail: canonical!.guest?.email ?? null,
+    guestPhone: canonical!.guest?.phone ?? null,
+    roomName: listing.name ?? null,
+    checkIn: resolvedCheckIn,
+    checkOut: resolvedCheckOut,
+    status: reservationStatus, // 🔥 FIX
+    ingestKey,
+    source: String(ev.provider),
+  },
+});
 
       // ACCESS GRANT (CREATE + UPDATE)
       const existingGrant = await tx.accessGrant.findFirst({
@@ -459,6 +327,7 @@ export async function processWebhookEventById(eventId: string) {
       skipped: (result as any).skipped,
       normalizedStatus,
     });
+
   } catch (e: any) {
     const msg = String(e?.message ?? e);
 
