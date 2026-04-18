@@ -4,8 +4,6 @@ const enabled = (process.env.GUEST_SMS_ENABLED ?? "true").toLowerCase() === "tru
 
 function normalizePhone(phone?: string | null) {
   if (!phone) return null;
-  // asume que ya viene en E.164 (+1787..., +1217..., etc.)
-  // si no, aquí puedes normalizar a +1...
   return phone.trim();
 }
 
@@ -15,15 +13,19 @@ export async function sendGuestSms(toRaw: string | null | undefined, message: st
   const to = normalizePhone(toRaw);
   if (!to) return { skipped: true, reason: "missing phone" };
 
-  const sid = process.env.TWILIO_ACCOUNT_SID ?? "";
-  const token = process.env.TWILIO_AUTH_TOKEN ?? "";
+  const accountSid = process.env.TWILIO_ACCOUNT_SID ?? "";
+  const apiKey = process.env.TWILIO_API_KEY ?? "";
+  const apiSecret = process.env.TWILIO_API_SECRET ?? "";
   const from = process.env.TWILIO_FROM ?? "";
 
-  if (!sid || !token || !from) {
-    throw new Error("Missing Twilio env vars (TWILIO_ACCOUNT_SID/TWILIO_AUTH_TOKEN/TWILIO_FROM)");
+  if (!accountSid || !apiKey || !apiSecret || !from) {
+    throw new Error(
+      "Missing Twilio env vars (TWILIO_ACCOUNT_SID/TWILIO_API_KEY/TWILIO_API_SECRET/TWILIO_FROM)"
+    );
   }
 
-  const client = twilio(sid, token);
+  const client = twilio(apiKey, apiSecret, { accountSid });
   const resp = await client.messages.create({ from, to, body: message });
+
   return { skipped: false, sid: resp.sid };
 }

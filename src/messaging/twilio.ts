@@ -3,18 +3,22 @@ import { PrismaClient } from "@prisma/client";
 
 const prisma = new PrismaClient();
 
-const sid = process.env.TWILIO_ACCOUNT_SID;
-const token = process.env.TWILIO_AUTH_TOKEN;
+const accountSid = process.env.TWILIO_ACCOUNT_SID;
+const apiKey = process.env.TWILIO_API_KEY;
+const apiSecret = process.env.TWILIO_API_SECRET;
 
 const smsFrom = process.env.TWILIO_SMS_FROM;
 const waFrom = process.env.TWILIO_WHATSAPP_FROM;
 const channel = (process.env.NOTIFY_CHANNEL ?? "sms").toLowerCase();
 
-if (!sid || !token) {
+if (!accountSid || !apiKey || !apiSecret) {
   console.warn("⚠️ Twilio credentials missing");
 }
 
-const client = sid && token ? Twilio(sid, token) : null;
+const client =
+  accountSid && apiKey && apiSecret
+    ? Twilio(apiKey, apiSecret, { accountSid })
+    : null;
 
 type SendArgs = {
   toPhoneE164: string;
@@ -42,7 +46,6 @@ export async function sendMessage({ toPhoneE164, body, accessGrantId }: SendArgs
     body,
   });
 
-  // Guardar MessageLog (no rompe si accessGrantId es null)
   await prisma.messageLog.create({
     data: {
       channel: use,

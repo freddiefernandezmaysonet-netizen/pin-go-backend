@@ -9,15 +9,19 @@ function cleanEnv(v?: string) {
 }
 
 function getTwilioEnv() {
-  const SID = cleanEnv(process.env.TWILIO_ACCOUNT_SID);
-  const TOKEN = cleanEnv(process.env.TWILIO_AUTH_TOKEN);
+  const ACCOUNT_SID = cleanEnv(process.env.TWILIO_ACCOUNT_SID);
+  const API_KEY = cleanEnv(process.env.TWILIO_API_KEY);
+  const API_SECRET = cleanEnv(process.env.TWILIO_API_SECRET);
   const FROM = cleanEnv(process.env.TWILIO_FROM_NUMBER);
 
   const missing = [
-    ["TWILIO_ACCOUNT_SID", SID],
-    ["TWILIO_AUTH_TOKEN", TOKEN],
+    ["TWILIO_ACCOUNT_SID", ACCOUNT_SID],
+    ["TWILIO_API_KEY", API_KEY],
+    ["TWILIO_API_SECRET", API_SECRET],
     ["TWILIO_FROM_NUMBER", FROM],
-  ].filter(([, v]) => !v).map(([k]) => k);
+  ]
+    .filter(([, v]) => !v)
+    .map(([k]) => k);
 
   if (missing.length) {
     throw new Error(`Missing Twilio env: ${missing.join(", ")}`);
@@ -25,22 +29,27 @@ function getTwilioEnv() {
 
   // logs seguros para diagnosticar (no exponen secretos)
   console.log(
-    `[Twilio] SID len=${SID.length} prefix=${SID.slice(0, 2)} hasSpace=${/\s/.test(SID)}`
+    `[Twilio] ACCOUNT_SID len=${ACCOUNT_SID.length} prefix=${ACCOUNT_SID.slice(0, 2)} hasSpace=${/\s/.test(ACCOUNT_SID)}`
   );
   console.log(
-    `[Twilio] TOKEN len=${TOKEN.length} prefix=${TOKEN.slice(0, 2)} hasSpace=${/\s/.test(TOKEN)}`
+    `[Twilio] API_KEY len=${API_KEY.length} prefix=${API_KEY.slice(0, 2)} hasSpace=${/\s/.test(API_KEY)}`
+  );
+  console.log(
+    `[Twilio] API_SECRET len=${API_SECRET.length} hasSpace=${/\s/.test(API_SECRET)}`
   );
   console.log(
     `[Twilio] FROM len=${FROM.length} prefix=${FROM.slice(0, 2)} hasSpace=${/\s/.test(FROM)}`
   );
 
-  return { SID, TOKEN, FROM };
+  return { ACCOUNT_SID, API_KEY, API_SECRET, FROM };
 }
 
 export async function sendSms(to: string, body: string) {
-  const { SID, TOKEN, FROM } = getTwilioEnv();
+  const { ACCOUNT_SID, API_KEY, API_SECRET, FROM } = getTwilioEnv();
 
-  const client = Twilio(SID, TOKEN);
+  const client = Twilio(API_KEY, API_SECRET, {
+    accountSid: ACCOUNT_SID,
+  });
 
   const msg = await client.messages.create({
     from: FROM,
