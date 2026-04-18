@@ -14,11 +14,13 @@ function getOperationalStatus(r: {
   checkIn: Date;
   checkOut: Date;
 }) {
-  const now = new Date();
+  const nowMs = Date.now();
+  const checkInMs = r.checkIn.getTime();
+  const checkOutMs = r.checkOut.getTime();
 
   if (r.status === ReservationStatus.CANCELLED) return "CANCELLED";
-  if (now < r.checkIn) return "UPCOMING";
-  if (now >= r.checkIn && now < r.checkOut) return "IN_HOUSE";
+  if (nowMs < checkInMs) return "UPCOMING";
+  if (nowMs >= checkInMs && nowMs < checkOutMs) return "IN_HOUSE";
   return "CHECKED_OUT";
 }
 
@@ -31,12 +33,8 @@ function clamp(n: number, min: number, max: number) {
   return Math.max(min, Math.min(max, n));
 }
 
-function toLocalDateTimeString(d: Date) {
-  const pad = (n: number) => String(n).padStart(2, "0");
-
-  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(
-    d.getHours()
-  )}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`;
+function toStableDateTimeString(d: Date) {
+  return d.toISOString();
 }
 
 dashboardReservationsRouter.get("/api/dashboard/reservations", requireAuth, async (req, res) => {
@@ -141,8 +139,8 @@ dashboardReservationsRouter.get("/api/dashboard/reservations", requireAuth, asyn
       guestName: r.guestName,
       guestEmail: r.guestEmail ?? null,
       roomName: r.roomName ?? null,
-      checkIn: toLocalDateTimeString(r.checkIn),
-      checkOut: toLocalDateTimeString(r.checkOut),
+      checkIn: toStableDateTimeString(r.checkIn),
+      checkOut: toStableDateTimeString(r.checkOut),
       status: r.status,
       operationalStatus: getOperationalStatus(r),
       source: r.source ?? null,
@@ -238,8 +236,8 @@ dashboardReservationsRouter.get(
       guestName: reservation.guestName,
       guestEmail: reservation.guestEmail ?? null,
       roomName: reservation.roomName ?? null,
-      checkIn: toLocalDateTimeString(reservation.checkIn),
-      checkOut: toLocalDateTimeString(reservation.checkOut),
+      checkIn: toStableDateTimeString(reservation.checkIn),
+      checkOut: toStableDateTimeString(reservation.checkOut),
       operationalStatus: getOperationalStatus(reservation),
       property: reservation.property
         ? {
@@ -251,8 +249,8 @@ dashboardReservationsRouter.get(
         id: g.id,
         method: String(g.method),
         status: String(g.status),
-        startsAt: toLocalDateTimeString(g.startsAt),
-        endsAt: toLocalDateTimeString(g.endsAt),
+        startsAt: toStableDateTimeString(g.startsAt),
+        endsAt: toStableDateTimeString(g.endsAt),
         codeMasked: g.accessCodeMasked ?? null,
         ttlockKeyboardPwdId: g.ttlockKeyboardPwdId ?? null,
         lock: {
@@ -274,8 +272,8 @@ dashboardReservationsRouter.get(
         id: a.id,
         role: String(a.role),
         status: String(a.status),
-        startsAt: toLocalDateTimeString(a.startsAt),
-        endsAt: toLocalDateTimeString(a.endsAt),
+        startsAt: toStableDateTimeString(a.startsAt),
+        endsAt: toStableDateTimeString(a.endsAt),
         card: {
           id: a.NfcCard.id,
           label: a.NfcCard.label ?? null,
