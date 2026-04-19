@@ -102,14 +102,14 @@ export async function ingestReservation(p: IngestPayload) {
   const propertyCheckOutTime = "11:00";
 
   const checkIn =
-    typeof p.checkIn === "string" && isDateOnly(p.checkIn)
-      ? buildLocalDateFromDateOnly(p.checkIn, propertyCheckInTime)
-      : new Date(p.checkIn);
+  typeof p.checkIn === "string"
+    ? buildLocalDateFromDateOnly(p.checkIn.slice(0, 10), propertyCheckInTime)
+    : new Date(p.checkIn);
 
-  const checkOut =
-    typeof p.checkOut === "string" && isDateOnly(p.checkOut)
-      ? buildLocalDateFromDateOnly(p.checkOut, propertyCheckOutTime)
-      : new Date(p.checkOut);
+const checkOut =
+  typeof p.checkOut === "string"
+    ? buildLocalDateFromDateOnly(p.checkOut.slice(0, 10), propertyCheckOutTime)
+    : new Date(p.checkOut);
 
   if (isNaN(checkIn.getTime())) throw new Error("Invalid checkIn");
   if (isNaN(checkOut.getTime())) throw new Error("Invalid checkOut");
