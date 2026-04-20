@@ -38,10 +38,14 @@ function isCheckedOutStatus(status: string) {
   return ["CHECKED_OUT", "CHECKEDOUT", "COMPLETED", "COMPLETE", "FINISHED"].includes(status);
 }
 
+function isDateOnly(value: string) {
+  return /^\d{4}-\d{2}-\d{2}$/.test(value.trim());
+}
+
 function applyPropertyTime(dateStr: string, timeStr?: string | null) {
   if (!dateStr) return new Date();
 
-  if (dateStr.includes("T")) {
+  if (!isDateOnly(dateStr)) {
     return new Date(dateStr);
   }
 
@@ -51,10 +55,13 @@ function applyPropertyTime(dateStr: string, timeStr?: string | null) {
       : "16:00";
 
   const [hours, minutes] = safeTime.split(":").map(Number);
-  const [year, month, day] = dateStr.split("-").map(Number);
+  const [year, month, day] = dateStr.trim().split("-").map(Number);
 
-  return new Date(year, (month ?? 1) - 1, day ?? 1, hours, minutes, 0, 0);
+  return new Date(
+    Date.UTC(year, (month ?? 1) - 1, day ?? 1, hours ?? 0, minutes ?? 0, 0, 0)
+  );
 }
+
 
 export async function processWebhookEventById(eventId: string) {
   const ev = await prisma.webhookEventIngest.findUnique({ where: { id: eventId } });

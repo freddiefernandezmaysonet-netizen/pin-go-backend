@@ -3,20 +3,27 @@ import { normalizeReservationEvent } from "../normalizer/reservation.normalizer"
 
 const prisma = new PrismaClient();
 
+function isDateOnly(value: string) {
+  return /^\d{4}-\d{2}-\d{2}$/.test(value.trim());
+}
+
 function buildLocalDateFromDateOnly(value: string, time: string) {
-  const [year, month, day] = value.trim().slice(0, 10).split("-").map(Number);
+  const [year, month, day] = value.trim().split("-").map(Number);
   const [hours, minutes] = time.split(":").map(Number);
 
   return new Date(
-    year,
-    (month ?? 1) - 1,
-    day ?? 1,
-    hours ?? 0,
-    minutes ?? 0,
-    0,
-    0
+    Date.UTC(
+      year,
+      (month ?? 1) - 1,
+      day ?? 1,
+      hours ?? 0,
+      minutes ?? 0,
+      0,
+      0
+    )
   );
 }
+
 
 /**
  * Procesa un webhook PMS ya recibido.
@@ -78,16 +85,21 @@ export async function handlePmsWebhookEvent(params: {
       throw new Error("NORMALIZED_RESERVATION_MISSING_CHECKOUT");
     }
 
-    const checkIn = buildLocalDateFromDateOnly(
-      normalized.checkIn,
-      propertyCheckInTime
-    );
+const checkIn =
+  typeof normalized.checkIn === "string"
+    ? isDateOnly(normalized.checkIn)
+      ? buildLocalDateFromDateOnly(normalized.checkIn, propertyCheckInTime)
+      : new Date(normalized.checkIn)
+    : new Date(normalized.checkIn);
 
-    const checkOut = buildLocalDateFromDateOnly(
-      normalized.checkOut,
-      propertyCheckOutTime
-    );
+const checkOut =
+  typeof normalized.checkOut === "string"
+    ? isDateOnly(normalized.checkOut)
+      ? buildLocalDateFromDateOnly(normalized.checkOut, propertyCheckOutTime)
+      : new Date(normalized.checkOut)
+    : new Date(normalized.checkOut);
 
+   
     /**
      * 3. Upsert reservation interna
      */
