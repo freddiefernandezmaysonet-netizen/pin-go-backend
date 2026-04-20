@@ -33,12 +33,6 @@ function clamp(n: number, min: number, max: number) {
   return Math.max(min, Math.min(max, n));
 }
 
-function toStableDateTimeString(d: Date) {
-  return d.toLocaleString("en-CA", {
-    timeZone: "America/Puerto_Rico",
-    hour12: false,
-  });
-}
 
 dashboardReservationsRouter.get("/api/dashboard/reservations", requireAuth, async (req, res) => {
   const user = (req as any).user;
@@ -142,8 +136,8 @@ dashboardReservationsRouter.get("/api/dashboard/reservations", requireAuth, asyn
       guestName: r.guestName,
       guestEmail: r.guestEmail ?? null,
       roomName: r.roomName ?? null,
-      checkIn: toStableDateTimeString(r.checkIn),
-      checkOut: toStableDateTimeString(r.checkOut),
+      checkIn: r.checkIn.toISOString(),
+      checkOut: r.checkOut.toISOString(),    
       status: r.status,
       operationalStatus: getOperationalStatus(r),
       source: r.source ?? null,
@@ -239,8 +233,8 @@ dashboardReservationsRouter.get(
       guestName: reservation.guestName,
       guestEmail: reservation.guestEmail ?? null,
       roomName: reservation.roomName ?? null,
-      checkIn: toStableDateTimeString(reservation.checkIn),
-      checkOut: toStableDateTimeString(reservation.checkOut),
+      checkIn: reservation.checkIn.toISOString(),
+      checkOut: reservation.checkOut.toISOString(),     
       operationalStatus: getOperationalStatus(reservation),
       property: reservation.property
         ? {
@@ -252,8 +246,8 @@ dashboardReservationsRouter.get(
         id: g.id,
         method: String(g.method),
         status: String(g.status),
-        startsAt: toStableDateTimeString(g.startsAt),
-        endsAt: toStableDateTimeString(g.endsAt),
+        startsAt: g.startsAt.toISOString(),
+        endsAt: g.endsAt.toISOString(),        
         codeMasked: g.accessCodeMasked ?? null,
         ttlockKeyboardPwdId: g.ttlockKeyboardPwdId ?? null,
         lock: {
@@ -275,8 +269,8 @@ dashboardReservationsRouter.get(
         id: a.id,
         role: String(a.role),
         status: String(a.status),
-        startsAt: toStableDateTimeString(a.startsAt),
-        endsAt: toStableDateTimeString(a.endsAt),
+        startsAt: a.startsAt.toISOString(),
+        endsAt: a.endsAt.toISOString(),      
         card: {
           id: a.NfcCard.id,
           label: a.NfcCard.label ?? null,

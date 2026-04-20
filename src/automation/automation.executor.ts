@@ -104,9 +104,20 @@ export async function runAutomation(params: {
   const { organizationId, propertyId, reservationId } = params;
   const trigger = String(params.trigger ?? "").trim().toUpperCase();
   const now = params.now ?? new Date();
-  const reservationCheckIn = params.reservationCheckIn
-    ? new Date(params.reservationCheckIn)
-    : null;
+ 
+let reservationCheckIn: Date | null = null;
+
+if (params.reservationCheckIn instanceof Date) {
+  reservationCheckIn = params.reservationCheckIn;
+} else if (typeof params.reservationCheckIn === "string") {
+  // SOLO aceptar ISO con Z
+  if (params.reservationCheckIn.includes("T") && params.reservationCheckIn.endsWith("Z")) {
+    reservationCheckIn = new Date(params.reservationCheckIn);
+  } else {
+    console.warn("[automation] invalid reservationCheckIn string, ignoring", params.reservationCheckIn);
+    reservationCheckIn = null;
+  }
+}
 
   const handledDevices = new Map<string, { source: string; action: string }>();
 
