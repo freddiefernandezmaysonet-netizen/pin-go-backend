@@ -3,6 +3,21 @@ import { normalizeReservationEvent } from "../normalizer/reservation.normalizer"
 
 const prisma = new PrismaClient();
 
+function buildLocalDateFromDateOnly(value: string, time: string) {
+  const [year, month, day] = value.trim().slice(0, 10).split("-").map(Number);
+  const [hours, minutes] = time.split(":").map(Number);
+
+  return new Date(
+    year,
+    (month ?? 1) - 1,
+    day ?? 1,
+    hours ?? 0,
+    minutes ?? 0,
+    0,
+    0
+  );
+}
+
 /**
  * Procesa un webhook PMS ya recibido.
  */
@@ -43,6 +58,37 @@ export async function handlePmsWebhookEvent(params: {
     }
 
     /**
+     * 2.1 Resolver hora local de la propiedad
+     */
+    const property = await prisma.property.findUnique({
+      where: { id: listing.propertyId },
+      select: {
+        checkInTime: true,
+      },
+    });
+
+    const propertyCheckInTime = property?.checkInTime ?? "15:00";
+    const propertyCheckOutTime = "11:00";
+
+    if (!normalized.checkIn) {
+      throw new Error("NORMALIZED_RESERVATION_MISSING_CHECKIN");
+    }
+
+    if (!normalized.checkOut) {
+      throw new Error("NORMALIZED_RESERVATION_MISSING_CHECKOUT");
+    }
+
+    const checkIn = buildLocalDateFromDateOnly(
+      normalized.checkIn,
+      propertyCheckInTime
+    );
+
+    const checkOut = buildLocalDateFromDateOnly(
+      normalized.checkOut,
+      propertyCheckOutTime
+    );
+
+    /**
      * 3. Upsert reservation interna
      */
     const reservation = await prisma.reservation.upsert({
@@ -58,8 +104,8 @@ export async function handlePmsWebhookEvent(params: {
         guestName: normalized.guestName,
         guestEmail: normalized.guestEmail,
 
-        checkIn: new Date(normalized.checkIn),
-        checkOut: new Date(normalized.checkOut),
+        checkIn,
+        checkOut,
 
         status:
           normalized.status === "CANCELLED"
@@ -78,8 +124,8 @@ export async function handlePmsWebhookEvent(params: {
         guestName: normalized.guestName,
         guestEmail: normalized.guestEmail,
 
-        checkIn: new Date(normalized.checkIn),
-        checkOut: new Date(normalized.checkOut),
+        checkIn,
+        checkOut,
 
         status:
           normalized.status === "CANCELLED"
