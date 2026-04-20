@@ -78,7 +78,8 @@ function buildLocalDateFromDateOnly(value: string, time: string) {
   const [year, month, day] = value.trim().split("-").map(Number);
   const [hours, minutes] = time.split(":").map(Number);
 
-  return new Date(
+return new Date(
+  Date.UTC(
     year,
     (month ?? 1) - 1,
     day ?? 1,
@@ -86,6 +87,7 @@ function buildLocalDateFromDateOnly(value: string, time: string) {
     minutes ?? 0,
     0,
     0
+   )
   );
 }
 
