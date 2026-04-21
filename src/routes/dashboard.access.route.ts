@@ -11,21 +11,6 @@ import { requireAuth } from "../middleware/requireAuth";
 const prisma = new PrismaClient();
 export const dashboardAccessRouter = Router();
 
-function toLocalDateTimeString(date: Date) {
-  const yyyy = date.getFullYear();
-  const mm = String(date.getMonth() + 1).padStart(2, "0");
-  const dd = String(date.getDate()).padStart(2, "0");
-
-  let hours = date.getHours();
-  const minutes = String(date.getMinutes()).padStart(2, "0");
-  const ampm = hours >= 12 ? "PM" : "AM";
-
-  hours = hours % 12;
-  if (hours === 0) hours = 12;
-
-  return `${mm}/${dd}/${yyyy}, ${hours}:${minutes} ${ampm}`;
-}
-
 dashboardAccessRouter.get("/api/dashboard/access", requireAuth, async (req, res) => {
   const user = (req as any).user;
   const orgId = user.orgId as string;
@@ -63,7 +48,7 @@ dashboardAccessRouter.get("/api/dashboard/access", requireAuth, async (req, res)
         select: {
           guestName: true,
           roomName: true,
-          property: { select: { id: true, name: true } },
+          property: { select: { id: true, name: true, timezone: true } },
         },
       },
     },
@@ -91,7 +76,7 @@ dashboardAccessRouter.get("/api/dashboard/access", requireAuth, async (req, res)
         select: {
           guestName: true,
           roomName: true,
-          property: { select: { id: true, name: true } },
+          property: { select: { id: true, name: true, timezone: true  } },
         },
       },
     },
@@ -110,13 +95,13 @@ dashboardAccessRouter.get("/api/dashboard/access", requireAuth, async (req, res)
       label: a.NfcCard.label ?? null,
       ttlockCardId: a.NfcCard.ttlockCardId,
     },
-    startsAt: toLocalDateTimeString(a.startsAt),
-    endsAt: toLocalDateTimeString(a.endsAt),
+    startsAt: a.startsAt.toISOString(),
+    endsAt: a.endsAt.toISOString(),
     lastError: a.lastError ?? null,
   }));
 
   return res.json({
-    now: toLocalDateTimeString(now),
+    now: now.toISOString(),
     guestPasscodes: guestPasscodes.map((g) => ({
       grantId: g.id,
       reservationId: g.reservationId,
@@ -127,8 +112,8 @@ dashboardAccessRouter.get("/api/dashboard/access", requireAuth, async (req, res)
         ttlockLockId: g.lock.ttlockLockId,
         name: g.lock.ttlockLockName ?? null,
       },
-      startsAt: toLocalDateTimeString(g.startsAt),
-      endsAt: toLocalDateTimeString(g.endsAt),
+      startsAt: g.startsAt.toISOString(),
+      endsAt: g.endsAt.toISOString(),
       codeMasked: g.accessCodeMasked ?? null,
       ttlockKeyboardPwdId: g.ttlockKeyboardPwdId ?? null,
       lastError: g.lastError ?? null,
