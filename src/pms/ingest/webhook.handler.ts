@@ -1,5 +1,6 @@
 import { PrismaClient } from "@prisma/client";
 import { normalizeReservationEvent } from "../normalizer/reservation.normalizer";
+import { fromZonedTime } from "date-fns-tz";
 
 const prisma = new PrismaClient();
 
@@ -7,21 +8,18 @@ function isDateOnly(value: string) {
   return /^\d{4}-\d{2}-\d{2}$/.test(value.trim());
 }
 
-function buildLocalDateFromDateOnly(value: string, time: string) {
-  const [year, month, day] = value.trim().split("-").map(Number);
+function buildLocalDateFromDateOnly(
+  value: string,
+  time: string,
+  timezone: string
+) {
   const [hours, minutes] = time.split(":").map(Number);
 
-  return new Date(
-    Date.UTC(
-      year,
-      (month ?? 1) - 1,
-      day ?? 1,
-      hours ?? 0,
-      minutes ?? 0,
-      0,
-      0
-    )
-  );
+  const localDateTime = `${value.trim()}T${String(hours ?? 0).padStart(2, "0")}:${String(
+    minutes ?? 0
+  ).padStart(2, "0")}:00`;
+
+  return fromZonedTime(localDateTime, timezone);
 }
 
 
@@ -67,15 +65,18 @@ export async function handlePmsWebhookEvent(params: {
     /**
      * 2.1 Resolver hora local de la propiedad
      */
+   
     const property = await prisma.property.findUnique({
-      where: { id: listing.propertyId },
-      select: {
-        checkInTime: true,
-      },
-    });
+  where: { id: listing.propertyId },
+  select: {
+    checkInTime: true,
+    timezone: true,
+  },
+});
 
     const propertyCheckInTime = property?.checkInTime ?? "15:00";
     const propertyCheckOutTime = "11:00";
+    const propertyTimeZone = property?.timezone ?? "America/Puerto_Rico";
 
     if (!normalized.checkIn) {
       throw new Error("NORMALIZED_RESERVATION_MISSING_CHECKIN");
@@ -88,14 +89,14 @@ export async function handlePmsWebhookEvent(params: {
 const checkIn =
   typeof normalized.checkIn === "string"
     ? isDateOnly(normalized.checkIn)
-      ? buildLocalDateFromDateOnly(normalized.checkIn, propertyCheckInTime)
+      ? buildLocalDateFromDateOnly(normalized.checkIn, propertyCheckInTime, propertyTimeZone)
       : new Date(normalized.checkIn)
     : new Date(normalized.checkIn);
 
 const checkOut =
   typeof normalized.checkOut === "string"
     ? isDateOnly(normalized.checkOut)
-      ? buildLocalDateFromDateOnly(normalized.checkOut, propertyCheckOutTime)
+      ? buildLocalDateFromDateOnly(normalized.checkOut, propertyCheckOutTime, propertyTimeZone)
       : new Date(normalized.checkOut)
     : new Date(normalized.checkOut);
 

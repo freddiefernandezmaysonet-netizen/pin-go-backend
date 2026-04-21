@@ -2,6 +2,7 @@ import crypto from "crypto";
 import { PrismaClient } from "@prisma/client";
 import { getAdapter } from "../adapters";
 import type { CanonicalReservation } from "../adapters/types";
+import { fromZonedTime } from "date-fns-tz";
 
 const prisma = new PrismaClient();
 
@@ -42,7 +43,11 @@ function isDateOnly(value: string) {
   return /^\d{4}-\d{2}-\d{2}$/.test(value.trim());
 }
 
-function applyPropertyTime(dateStr: string, timeStr?: string | null) {
+function applyPropertyTime(
+  dateStr: string,
+  timeStr: string | null | undefined,
+  timezone: string
+) {
   if (!dateStr) return new Date();
 
   if (!isDateOnly(dateStr)) {
@@ -55,13 +60,13 @@ function applyPropertyTime(dateStr: string, timeStr?: string | null) {
       : "16:00";
 
   const [hours, minutes] = safeTime.split(":").map(Number);
-  const [year, month, day] = dateStr.trim().split("-").map(Number);
 
-  return new Date(
-    Date.UTC(year, (month ?? 1) - 1, day ?? 1, hours ?? 0, minutes ?? 0, 0, 0)
-  );
+  const localDateTime = `${dateStr.trim()}T${String(hours).padStart(2, "0")}:${String(
+    minutes
+  ).padStart(2, "0")}:00`;
+
+  return fromZonedTime(localDateTime, timezone);
 }
-
 
 export async function processWebhookEventById(eventId: string) {
   const ev = await prisma.webhookEventIngest.findUnique({ where: { id: eventId } });
@@ -178,22 +183,26 @@ export async function processWebhookEventById(eventId: string) {
         };
       }
 
-      const property = await tx.property.findUnique({
-        where: { id: listing.propertyId! },
-        select: { checkInTime: true },
-      });
+     const property = await tx.property.findUnique({
+  where: { id: listing.propertyId! },
+  select: { checkInTime: true, timezone: true },
+});
+     
+  const propertyTimeZone = property?.timezone ?? "America/Puerto_Rico";
 
-      const resolvedCheckIn = applyPropertyTime(
-        canonical!.checkIn,
-        property?.checkInTime ?? "15:00"
-      );
+const resolvedCheckIn = applyPropertyTime(
+  canonical!.checkIn,
+  property?.checkInTime ?? "15:00",
+  propertyTimeZone
+);
+     
+const resolvedCheckOut = applyPropertyTime(
+  canonical!.checkOut,
+  "11:00",
+  propertyTimeZone
+);
 
-      const resolvedCheckOut = applyPropertyTime(
-        canonical!.checkOut,
-        "11:00"
-      );
-
-      const reservationStatus =
+           const reservationStatus =
   isCancelledStatus(normalizedStatus)
     ? "CANCELLED"
     : "ACTIVE";
