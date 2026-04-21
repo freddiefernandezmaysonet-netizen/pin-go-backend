@@ -13,6 +13,7 @@ import crypto from "crypto";
 import { computeCleaningWindowPR } from "../services/cleaningWindow.service";
 import { reconcileReservation } from "./reservation.reconcile.service";
 import { log } from "../utils/log";
+import { fromZonedTime } from "date-fns-tz";
 
 console.log("[INGEST] running src/services/ingest.service.ts", new Date().toISOString());
 const prisma = new PrismaClient();
@@ -74,21 +75,20 @@ function isDateOnly(value: string) {
   return /^\d{4}-\d{2}-\d{2}$/.test(value.trim());
 }
 
-function buildLocalDateFromDateOnly(value: string, time: string) {
-  const [year, month, day] = value.trim().split("-").map(Number);
+function buildLocalDateFromDateOnly(
+  value: string,
+  time: string,
+  timezone: string
+) {
   const [hours, minutes] = time.split(":").map(Number);
 
-return new Date(
-  Date.UTC(
-    year,
-    (month ?? 1) - 1,
-    day ?? 1,
-    hours ?? 0,
-    minutes ?? 0,
-    0,
-    0
-   )
-  );
+const localDateTime = new Date(
+  `${value.trim()}T${String(hours ?? 0).padStart(2, "0")}:${String(
+    minutes ?? 0
+  ).padStart(2, "0")}:00`
+);
+
+   return fromZonedTime(localDateTime, timezone);
 }
 
 export async function ingestReservation(p: IngestPayload) {
@@ -102,18 +102,19 @@ export async function ingestReservation(p: IngestPayload) {
 
   const propertyCheckInTime = property?.checkInTime ?? "15:00";
   const propertyCheckOutTime = "11:00";
-
-const checkIn =
+  const propertyTimeZone = property?.timezone ?? "America/Puerto_Rico";
+  
+  const checkIn =
   typeof p.checkIn === "string"
     ? isDateOnly(p.checkIn)
-      ? buildLocalDateFromDateOnly(p.checkIn, propertyCheckInTime)
+      ? buildLocalDateFromDateOnly(p.checkIn, propertyCheckInTime, propertyTimeZone)
       : new Date(p.checkIn)
     : new Date(p.checkIn);
-  
+
 const checkOut =
   typeof p.checkOut === "string"
     ? isDateOnly(p.checkOut)
-      ? buildLocalDateFromDateOnly(p.checkOut, propertyCheckOutTime)
+      ? buildLocalDateFromDateOnly(p.checkOut, propertyCheckOutTime, propertyTimeZone)
       : new Date(p.checkOut)
     : new Date(p.checkOut);
 
