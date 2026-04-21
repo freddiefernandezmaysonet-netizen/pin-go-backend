@@ -174,6 +174,7 @@ export async function sendPreCheckinSms(
             id: true,
             organizationId: true,
             name: true,
+            timezone: true,
             address1: true,
             city: true,
             region: true,
@@ -200,10 +201,12 @@ export async function sendPreCheckinSms(
       country: r.property?.country,
     });
 
-    const checkInTime = new Date(r.checkIn).toLocaleTimeString([], {
-      hour: "2-digit",
-      minute: "2-digit",
-    });
+   const checkInTime = new Intl.DateTimeFormat("en-US", {
+  timeZone: r.property?.timezone ?? "UTC",
+  hour: "2-digit",
+  minute: "2-digit",
+  hour12: true,
+}).format(new Date(r.checkIn));
 
     const body = buildPreCheckinMessage({
       guestName: r.guestName,
