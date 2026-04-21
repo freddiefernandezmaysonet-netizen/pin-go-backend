@@ -121,7 +121,8 @@ dashboardReservationsRouter.get("/api/dashboard/reservations", requireAuth, asyn
           select: {
             id: true,
             name: true,
-          },
+            timezone: true,
+         },
         },
       },
     }),
@@ -143,7 +144,13 @@ dashboardReservationsRouter.get("/api/dashboard/reservations", requireAuth, asyn
       source: r.source ?? null,
       externalProvider: r.externalProvider ?? null,
       externalId: r.externalId ?? null,
-      property: r.property,
+      property: r.property
+  ? {
+      id: r.property.id,
+      name: r.property.name,
+      timezone: r.property.timezone,
+    }
+  : null,
     })),
   });
 });
@@ -175,7 +182,8 @@ dashboardReservationsRouter.get(
           select: {
             id: true,
             name: true,
-          },
+            timezone: true,
+         },
         },
         accessGrants: {
           where: {
@@ -240,6 +248,7 @@ dashboardReservationsRouter.get(
         ? {
             id: reservation.property.id,
             name: reservation.property.name,
+            timezone: reservation.property.timezone,
           }
         : null,
       passcodes: reservation.accessGrants.map((g) => ({
