@@ -69,6 +69,7 @@ export async function sendCheckoutSms(
             id: true,
             organizationId: true,
             name: true,
+            timezone: true,
           },
         },
       },
@@ -80,10 +81,12 @@ export async function sendCheckoutSms(
 
     const propertyName = r.property?.name ?? "your property";
 
-    const checkoutTime = new Date(r.checkOut).toLocaleTimeString([], {
-      hour: "2-digit",
-      minute: "2-digit",
-    });
+   const checkoutTime = new Intl.DateTimeFormat("en-US", {
+  timeZone: r.property?.timezone ?? "UTC",
+  hour: "2-digit",
+  minute: "2-digit",
+  hour12: true,
+}).format(new Date(r.checkOut));
 
     const body = buildCheckoutMessage({
       guestName: r.guestName,
