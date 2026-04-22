@@ -15,7 +15,6 @@ type SendLoggedSmsArgs = {
   body: string;
   accessGrantId?: string | null;
 
-  // ✅ NUEVO (multi-tenant tracing)
   reservationId?: string | null;
   propertyId?: string | null;
   organizationId?: string | null;
@@ -45,7 +44,6 @@ type CleaningSmsArgs = {
   startsAt: Date;
   endsAt: Date;
 
-  // ✅ NUEVO (opcional)
   reservationId?: string | null;
   propertyId?: string | null;
   organizationId?: string | null;
@@ -61,10 +59,6 @@ function toErrString(e: unknown): string {
   return String(e);
 }
 
-function fmtUtc(d: Date): string {
-  return new Date(d).toISOString().replace("T", " ").slice(0, 16) + " UTC";
-}
-
 function getFromNumber(): string | null {
   return (
     cleanEnv(process.env.TWILIO_FROM_NUMBER) ??
@@ -78,7 +72,6 @@ function maskSensitiveBody(body: string): string {
 
   let masked = body;
 
-  // 🔐 Enmascarar código de acceso en español
   masked = masked.replace(
     /(código de entrada es:\s*)(\d{4,10})/gi,
     (_m, prefix, code) => {
@@ -87,7 +80,6 @@ function maskSensitiveBody(body: string): string {
     }
   );
 
-  // 🔐 Enmascarar código de acceso en inglés
   masked = masked.replace(
     /(your access code is:\s*)(\d{4,10})/gi,
     (_m, prefix, code) => {
@@ -96,7 +88,6 @@ function maskSensitiveBody(body: string): string {
     }
   );
 
-  // 🔐 Enmascarar guest link token
   masked = masked.replace(
     /(https?:\/\/[^\s]*\/guest\/access\/)([A-Za-z0-9\-_]+)/gi,
     (_m, prefix, token) => `${prefix}${String(token).slice(0, 4)}****`
@@ -105,13 +96,30 @@ function maskSensitiveBody(body: string): string {
   return masked;
 }
 
+function fmtWithTimezone(d: Date, timezone?: string): string {
+  return new Intl.DateTimeFormat("en-US", {
+    timeZone: timezone ?? "UTC",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+    hour12: true,
+  }).format(new Date(d));
+}
+
+function fmtUtc(d: Date): string {
+  return new Date(d).toISOString().replace("T", " ").slice(0, 16) + " UTC";
+}
+
 export function buildGuestPasscodeSmsBody(params: {
   guestName?: string | null;
   code: string;
   validUntil: Date;
+  timezone?: string;
 }): string {
   const guestName = params.guestName ?? "Guest";
-  const validUntil = new Date(params.validUntil).toLocaleString();
+  const validUntil = fmtWithTimezone(params.validUntil, params.timezone);
 
   const es = `🔐 Pin&Go Access
 
@@ -178,12 +186,9 @@ export async function sendLoggedSms(args: SendLoggedSmsArgs): Promise<SmsSendRes
     to,
     body,
     accessGrantId = null,
-
-    // ✅ NUEVO
     reservationId = null,
     propertyId = null,
     organizationId = null,
-
     provider = "twilio",
     channel = "sms",
     maskBodyForLog = false,
@@ -213,8 +218,6 @@ export async function sendLoggedSms(args: SendLoggedSmsArgs): Promise<SmsSendRes
         providerMessageId: sent?.sid ?? null,
         status: "SENT",
         accessGrantId,
-
-        // ✅ NUEVO (multi-tenant)
         reservationId,
         propertyId,
         organizationId,
@@ -242,8 +245,6 @@ export async function sendLoggedSms(args: SendLoggedSmsArgs): Promise<SmsSendRes
           status: "FAILED",
           accessGrantId,
           error,
-
-          // ✅ NUEVO
           reservationId,
           propertyId,
           organizationId,
@@ -291,10 +292,22 @@ export async function sendGuestPasscodeSms(
     };
   }
 
+  const reservation = await prisma.reservation.findUnique({
+    where: { id: reservationId },
+    select: {
+      property: {
+        select: {
+          timezone: true,
+        },
+      },
+    },
+  });
+
   const body = buildGuestPasscodeSmsBody({
     guestName,
     code: String(code),
     validUntil,
+    timezone: reservation?.property?.timezone,
   });
 
   return sendLoggedSms({
@@ -302,7 +315,7 @@ export async function sendGuestPasscodeSms(
     to: guestPhone,
     body,
     accessGrantId,
-    reservationId, // ✅ YA LO TENEMOS
+    reservationId,
     provider: "twilio",
     channel: "sms",
     maskBodyForLog: true,
@@ -325,12 +338,9 @@ export async function sendCleaningStartSms(
     to: args.phoneE164,
     body,
     accessGrantId: args.accessGrantId ?? null,
-
-    // ✅ NUEVO (si vienen)
     reservationId: args.reservationId ?? null,
     propertyId: args.propertyId ?? null,
     organizationId: args.organizationId ?? null,
-
     provider: "twilio",
     channel: "sms",
     maskBodyForLog: false,
@@ -352,12 +362,9 @@ export async function sendCleaningEndSms(
     to: args.phoneE164,
     body,
     accessGrantId: args.accessGrantId ?? null,
-
-    // ✅ NUEVO
     reservationId: args.reservationId ?? null,
     propertyId: args.propertyId ?? null,
     organizationId: args.organizationId ?? null,
-
     provider: "twilio",
     channel: "sms",
     maskBodyForLog: false,
