@@ -36,7 +36,8 @@ export async function sendCleaningReadySms(
                 id: true,
                 organizationId: true,
                 name: true,
-              },
+                timezone: true,
+             },
             },
           },
         },
@@ -57,8 +58,27 @@ export async function sendCleaningReadySms(
     const roomName = assignment.reservation?.roomName ?? "N/A";
     const staffName = assignment.staffMember.fullName ?? "Staff";
 
-    const start = new Date(assignment.startsAt).toLocaleString();
-    const end = new Date(assignment.endsAt).toLocaleString();
+    const timezone = assignment.reservation?.property?.timezone ?? "UTC";
+
+const start = new Intl.DateTimeFormat("en-US", {
+  timeZone: timezone,
+  year: "numeric",
+  month: "2-digit",
+  day: "2-digit",
+  hour: "2-digit",
+  minute: "2-digit",
+  hour12: true,
+}).format(new Date(assignment.startsAt));
+
+const end = new Intl.DateTimeFormat("en-US", {
+  timeZone: timezone,
+  year: "numeric",
+  month: "2-digit",
+  day: "2-digit",
+  hour: "2-digit",
+  minute: "2-digit",
+  hour12: true,
+}).format(new Date(assignment.endsAt));
 
     const es =
       `🧼 Pin&Go Limpieza lista para comenzar \n` +
