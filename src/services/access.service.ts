@@ -80,7 +80,7 @@ export async function activateGrant(prisma: PrismaClient, grantId: string) {
           name:
             grant.reservation?.guestName ||
             grant.person?.fullName ||
-            "PinGo Guest",
+            "Pin&Go Guest",
         });
 
         const otpCode = String(otp.keyboardPwd ?? "");

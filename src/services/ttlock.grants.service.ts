@@ -98,7 +98,7 @@ export async function activateGrant(prisma: PrismaClient, grantId: string): Prom
     const otp = await ttlockGetPasscode({
       lockId,
       keyboardPwdType: 1,
-      name: grant.reservation?.guestName ?? "PinGo Guest",
+      name: grant.reservation?.guestName ?? "Pin&Go Guest",
     });
 
     const otpCode = String(otp.keyboardPwd ?? "");

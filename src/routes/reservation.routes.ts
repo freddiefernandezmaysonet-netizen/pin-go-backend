@@ -38,7 +38,7 @@ export function buildReservationRouter(_prisma: PrismaClient) {
         passcode = await ttlockGetPasscode({
           lockId: Number(lockId),
           keyboardPwdType: 1,
-          name: guestName ? String(guestName) : "PinGo Guest",
+          name: guestName ? String(guestName) : "Pin&Go Guest",
         });
       } catch (e: any) {
         passcode = { ok: false, error: e?.message ?? String(e) };

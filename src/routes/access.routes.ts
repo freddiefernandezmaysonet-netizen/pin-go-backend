@@ -79,7 +79,7 @@ export function buildAccessRouter(prisma: PrismaClient) {
        startDate: start.getTime(),
        endDate: end.getTime(),
        addType: 2, // gateway
-       name: `PinGo ${reservation.id}`,
+       name: `Pin&Go ${reservation.id}`,
   });
 
       
