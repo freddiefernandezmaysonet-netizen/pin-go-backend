@@ -72,34 +72,66 @@ dashboardAccessRouter.get("/api/dashboard/access", requireAuth, async (req, res)
       endsAt: true,
       lastError: true,
       NfcCard: { select: { id: true, label: true, ttlockCardId: true } },
-           Reservation: {
+      Reservation: {
         select: {
           guestName: true,
           roomName: true,
-          property: { select: { id: true, name: true, timezone: true  } },
+          property: { select: { id: true, name: true, timezone: true } },
         },
       },
     },
   });
 
-  const nfc = nfcAssignments.map((a) => ({
-    assignmentId: a.id,
-    reservationId: a.reservationId,
-    guestName: a.Reservation.guestName,
-    staffName: null,
-    roomName: a.Reservation.roomName ?? null,
-    property: a.Reservation.property,
-    role: a.role,
-    status: a.status,
-    card: {
-      id: a.NfcCard.id,
-      label: a.NfcCard.label ?? null,
-      ttlockCardId: a.NfcCard.ttlockCardId,
+  const reservationIds = nfcAssignments
+    .map((a) => a.reservationId)
+    .filter((id): id is string => Boolean(id));
+
+  const staffAssignments = await prisma.staffAssignment.findMany({
+    where: {
+      reservationId: { in: reservationIds },
     },
-    startsAt: a.startsAt.toISOString(),
-    endsAt: a.endsAt.toISOString(),
-    lastError: a.lastError ?? null,
-  }));
+    select: {
+      reservationId: true,
+      staffMember: {
+        select: {
+          fullName: true,
+        },
+      },
+    },
+  });
+
+  const staffNameByReservationId = new Map(
+    staffAssignments.map((a) => [
+      a.reservationId,
+      a.staffMember?.fullName ?? null,
+    ])
+  );
+
+  const nfc = nfcAssignments.map((a) => {
+    const staffName =
+      a.role === "CLEANING"
+        ? staffNameByReservationId.get(a.reservationId) ?? null
+        : null;
+
+    return {
+      assignmentId: a.id,
+      reservationId: a.reservationId,
+      guestName: a.Reservation.guestName,
+      staffName,
+      roomName: a.Reservation.roomName ?? null,
+      property: a.Reservation.property,
+      role: a.role,
+      status: a.status,
+      card: {
+        id: a.NfcCard.id,
+        label: a.NfcCard.label ?? null,
+        ttlockCardId: a.NfcCard.ttlockCardId,
+      },
+      startsAt: a.startsAt.toISOString(),
+      endsAt: a.endsAt.toISOString(),
+      lastError: a.lastError ?? null,
+    };
+  });
 
   return res.json({
     now: now.toISOString(),
