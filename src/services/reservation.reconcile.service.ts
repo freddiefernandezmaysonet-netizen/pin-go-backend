@@ -106,10 +106,20 @@ export async function reconcileReservation(reservationId: string) {
     if (a.role === NfcAssignmentRole.GUEST) {
       return a.endsAt.getTime() !== desiredEnd.getTime();
     } else {
-      const cleaningStartsAt = new Date(desiredEnd.getTime() + 30 * 60 * 1000);
-      const cleaningEndsAt = new Date(
-        cleaningStartsAt.getTime() + 3 * 60 * 60 * 1000
-      );
+       const cleaningOffsetMin =
+  reservation.property?.cleaningStartOffsetMinutes ?? 30;
+
+const cleaningDurationMin =
+  reservation.property?.cleaningDurationMinutes ?? 180;
+
+const cleaningStartsAt = new Date(
+  desiredEnd.getTime() + cleaningOffsetMin * 60_000
+);
+
+const cleaningEndsAt = new Date(
+  cleaningStartsAt.getTime() + cleaningDurationMin * 60_000
+);     
+
       return (
         a.startsAt.getTime() !== cleaningStartsAt.getTime() ||
         a.endsAt.getTime() !== cleaningEndsAt.getTime()
@@ -177,10 +187,19 @@ export async function reconcileReservation(reservationId: string) {
       console.log("[reconcile][nfc] no active ttlockLockId; DB-only");
     }
 
-    const cleaningStartsAt = new Date(desiredEnd.getTime() + 30 * 60 * 1000);
-    const cleaningEndsAt = new Date(
-      cleaningStartsAt.getTime() + 3 * 60 * 60 * 1000
-    );
+ const cleaningOffsetMin =
+  reservation.property?.cleaningStartOffsetMinutes ?? 30;
+
+const cleaningDurationMin =
+  reservation.property?.cleaningDurationMinutes ?? 180;
+
+const cleaningStartsAt = new Date(
+  desiredEnd.getTime() + cleaningOffsetMin * 60_000
+);
+
+const cleaningEndsAt = new Date(
+  cleaningStartsAt.getTime() + cleaningDurationMin * 60_000
+);   
 
     for (const a of nfcAssignments) {
       if (
