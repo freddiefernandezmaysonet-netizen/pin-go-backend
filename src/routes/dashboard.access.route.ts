@@ -72,12 +72,7 @@ dashboardAccessRouter.get("/api/dashboard/access", requireAuth, async (req, res)
       endsAt: true,
       lastError: true,
       NfcCard: { select: { id: true, label: true, ttlockCardId: true } },
-       staffMember: {
-    select: {
-      fullName: true,
-    },
-  },
-      Reservation: {
+           Reservation: {
         select: {
           guestName: true,
           roomName: true,
@@ -91,7 +86,7 @@ dashboardAccessRouter.get("/api/dashboard/access", requireAuth, async (req, res)
     assignmentId: a.id,
     reservationId: a.reservationId,
     guestName: a.Reservation.guestName,
-    staffName: a.staffMember?.fullName ?? null,
+    staffName: null,
     roomName: a.Reservation.roomName ?? null,
     property: a.Reservation.property,
     role: a.role,
