@@ -30,12 +30,17 @@ function buildGoogleMapsLink(input: {
   region?: string | null;
   country?: string | null;
 }): { address: string | null; mapsLink: string | null } {
-  const addressParts = [
-    input.address1,
-    input.city,
-    input.region,
-    input.country,
-  ]
+     const isPuertoRico =
+  String(input.region ?? "").toLowerCase().includes("puerto rico") ||
+  String(input.country ?? "").toLowerCase() === "puerto rico";
+
+const addressParts = [
+  input.address1,
+  input.city,
+  input.region,
+  isPuertoRico ? null : input.country,
+]
+
     .filter(Boolean)
     .map((part) => String(part).trim())
     .filter(Boolean);
@@ -65,7 +70,7 @@ function buildGoogleMapsLink(input: {
   if (hasCoords) {
     return {
       address,
-      mapsLink: `https://www.google.com/maps?q=${lat},${lng}`,
+  mapsLink: `https://www.google.com/maps/search/?api=1&query=${lat},${lng}`,
     };
   }
 
@@ -73,7 +78,7 @@ function buildGoogleMapsLink(input: {
   if (address) {
     return {
       address,
-      mapsLink: `https://www.google.com/maps?q=${encodeURIComponent(address)}`,
+  mapsLink: `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(address)}`,   
     };
   }
 
