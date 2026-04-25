@@ -354,7 +354,8 @@ async function processConnection(connection: LodgifyConnection) {
       property_id: b?.property_id ?? null,
     });
 
-    try {
+
+   try {
       await createAndProcessEvent({ connection, booking: b });
     } catch (e: any) {
       errLog("booking failed", {
@@ -362,6 +363,54 @@ async function processConnection(connection: LodgifyConnection) {
         error: String(e?.message ?? e),
       });
     }
+  }
+// 🔥 FIX: targeted refresh for ACTIVE reservations already in Pin&Go
+const activeReservations = await prisma.reservation.findMany({
+  where: {
+    externalProvider: "LODGIFY",
+    status: "ACTIVE",
+  },
+  select: {
+    externalId: true,
+  },
+  take: 50, // límite seguro
+});
+
+for (const r of activeReservations) {
+  const bookingId = String(r.externalId ?? "").trim();
+  if (!bookingId) continue;
+
+  try {
+    const url = new URL(
+      `/v2/reservations/bookings/${bookingId}`,
+      LODGIFY_BASE_URL
+    );
+
+    const res = await fetch(url.toString(), {
+      headers: {
+        "X-ApiKey": apiKey,
+        Accept: "application/json",
+      },
+    });
+
+    if (!res.ok) continue;
+
+    const booking = await res.json();
+
+    log("targeted booking refresh", {
+      connectionId: connection.id,
+      bookingId,
+    });
+
+    await createAndProcessEvent({
+      connection,
+      booking,
+    });
+  } catch (e: any) {
+    errLog("targeted refresh failed", {
+      bookingId,
+      error: String(e?.message ?? e),
+    });
   }
 }
 
