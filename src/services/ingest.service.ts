@@ -127,13 +127,18 @@ const checkOut =
 if (p.paymentState) {
   paymentState = p.paymentState as PaymentState;
 } else {
-  const amountPaid = Number((p as any).amount_paid ?? 0);
+ 
+const raw = p.externalRaw ?? p;
 
-  const hasSuccessfulTransaction =
-    Array.isArray((p as any).transactions) &&
-    (p as any).transactions.some(
-      (t: any) => String(t?.status ?? "").toLowerCase() === "done"
-    );
+const raw = p.externalRaw ?? p;
+
+const amountPaid = Number((raw as any).amount_paid ?? 0);
+
+const hasSuccessfulTransaction =
+  Array.isArray((raw as any).transactions) &&
+  (raw as any).transactions.some(
+    (t: any) => String(t?.status ?? "").toLowerCase() === "done"
+  );
 
   if (amountPaid > 0 || hasSuccessfulTransaction) {
     paymentState = PaymentState.PAID;
