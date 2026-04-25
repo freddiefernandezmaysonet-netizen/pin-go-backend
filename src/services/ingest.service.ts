@@ -122,8 +122,25 @@ const checkOut =
   if (isNaN(checkOut.getTime())) throw new Error("Invalid checkOut");
   if (checkOut <= checkIn) throw new Error("checkOut must be after checkIn");
 
-  const paymentState: PaymentState =
-    (p.paymentState as PaymentState) ?? PaymentState.NONE;
+ let paymentState: PaymentState;
+
+if (p.paymentState) {
+  paymentState = p.paymentState as PaymentState;
+} else {
+  const amountPaid = Number((p as any).amount_paid ?? 0);
+
+  const hasSuccessfulTransaction =
+    Array.isArray((p as any).transactions) &&
+    (p as any).transactions.some(
+      (t: any) => String(t?.status ?? "").toLowerCase() === "done"
+    );
+
+  if (amountPaid > 0 || hasSuccessfulTransaction) {
+    paymentState = PaymentState.PAID;
+  } else {
+    paymentState = PaymentState.NONE;
+  }
+}
 
   const guestTokenExpiresAt = new Date(checkOut.getTime() + 48 * 60 * 60 * 1000);
   const externalProvider = (p.externalProvider ?? "").trim() || null;
