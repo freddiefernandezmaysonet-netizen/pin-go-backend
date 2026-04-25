@@ -303,7 +303,7 @@ async function createAndProcessEvent(params: {
     ev &&
     incomingUpdatedAtMs !== null &&
     existingUpdatedAtMs !== null &&
-    incomingUpdatedAtMs < existingUpdatedAtMs
+    incomingUpdatedAtMs <= existingUpdatedAtMs
   ) {
     log("skip older/equal snapshot", {
       bookingId,
