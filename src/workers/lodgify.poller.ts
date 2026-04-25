@@ -411,7 +411,8 @@ for (const r of activeReservations) {
       bookingId,
       error: String(e?.message ?? e),
     });
-  }
+   }
+ }
 }
 
 let running = false;
