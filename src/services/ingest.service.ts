@@ -27,11 +27,10 @@ export type IngestPayload = {
   guestPhone?: string | null;
   roomName?: string | null;
 
-  checkIn: string; // ISO string o YYYY-MM-DD
-  checkOut: string; // ISO string o YYYY-MM-DD
+  checkIn: string;
+  checkOut: string;
   paymentState?: "NONE" | "PAID" | "FAILED" | "PENDING";
 
-  // ✅ PMS identity + ordering + status
   externalProvider?: string | null;
   externalId?: string | null;
   externalUpdatedAt?: string | null;
@@ -43,10 +42,6 @@ function norm(s?: string | null) {
   return (s ?? "").trim().toLowerCase();
 }
 
-/**
- * Idempotencia interna (cuando no tienes externalReservationId).
- * OJO: incluye email/phone. Si cambian, cambia la key.
- */
 function buildIngestKey(p: {
   source?: string;
   propertyId: string;
@@ -82,13 +77,13 @@ function buildLocalDateFromDateOnly(
 ) {
   const [hours, minutes] = time.split(":").map(Number);
 
-const localDateTime = new Date(
-  `${value.trim()}T${String(hours ?? 0).padStart(2, "0")}:${String(
-    minutes ?? 0
-  ).padStart(2, "0")}:00`
-);
+  const localDateTime = new Date(
+    `${value.trim()}T${String(hours ?? 0).padStart(2, "0")}:${String(
+      minutes ?? 0
+    ).padStart(2, "0")}:00`
+  );
 
-   return fromZonedTime(localDateTime, timezone);
+  return fromZonedTime(localDateTime, timezone);
 }
 
 export async function ingestReservation(p: IngestPayload) {
@@ -103,56 +98,53 @@ export async function ingestReservation(p: IngestPayload) {
   const propertyCheckInTime = property?.checkInTime ?? "15:00";
   const propertyCheckOutTime = "11:00";
   const propertyTimeZone = property?.timezone ?? "America/Puerto_Rico";
-  
-  const checkIn =
-  typeof p.checkIn === "string"
-    ? isDateOnly(p.checkIn)
-      ? buildLocalDateFromDateOnly(p.checkIn, propertyCheckInTime, propertyTimeZone)
-      : new Date(p.checkIn)
-    : new Date(p.checkIn);
 
-const checkOut =
-  typeof p.checkOut === "string"
-    ? isDateOnly(p.checkOut)
-      ? buildLocalDateFromDateOnly(p.checkOut, propertyCheckOutTime, propertyTimeZone)
-      : new Date(p.checkOut)
-    : new Date(p.checkOut);
+  const checkIn =
+    typeof p.checkIn === "string"
+      ? isDateOnly(p.checkIn)
+        ? buildLocalDateFromDateOnly(p.checkIn, propertyCheckInTime, propertyTimeZone)
+        : new Date(p.checkIn)
+      : new Date(p.checkIn);
+
+  const checkOut =
+    typeof p.checkOut === "string"
+      ? isDateOnly(p.checkOut)
+        ? buildLocalDateFromDateOnly(p.checkOut, propertyCheckOutTime, propertyTimeZone)
+        : new Date(p.checkOut)
+      : new Date(p.checkOut);
 
   if (isNaN(checkIn.getTime())) throw new Error("Invalid checkIn");
   if (isNaN(checkOut.getTime())) throw new Error("Invalid checkOut");
   if (checkOut <= checkIn) throw new Error("checkOut must be after checkIn");
 
- let paymentState: PaymentState;
+  let paymentState: PaymentState;
 
-if (p.paymentState) {
-  paymentState = p.paymentState as PaymentState;
-} else {
- 
-const raw = p.externalRaw ?? p;
-
-const raw = p.externalRaw ?? p;
-
-const amountPaid = Number((raw as any).amount_paid ?? 0);
-
-const hasSuccessfulTransaction =
-  Array.isArray((raw as any).transactions) &&
-  (raw as any).transactions.some(
-    (t: any) => String(t?.status ?? "").toLowerCase() === "done"
-  );
-
-  if (amountPaid > 0 || hasSuccessfulTransaction) {
-    paymentState = PaymentState.PAID;
+  if (p.paymentState) {
+    paymentState = p.paymentState as PaymentState;
   } else {
-    paymentState = PaymentState.NONE;
+    const raw = p.externalRaw ?? p;
+
+    const amountPaid = Number((raw as any).amount_paid ?? 0);
+
+    const hasSuccessfulTransaction =
+      Array.isArray((raw as any).transactions) &&
+      (raw as any).transactions.some(
+        (t: any) => String(t?.status ?? "").toLowerCase() === "done"
+      );
+
+    if (amountPaid > 0 || hasSuccessfulTransaction) {
+      paymentState = PaymentState.PAID;
+    } else {
+      paymentState = PaymentState.NONE;
+    }
   }
-}
 
   const guestTokenExpiresAt = new Date(checkOut.getTime() + 48 * 60 * 60 * 1000);
   const externalProvider = (p.externalProvider ?? "").trim() || null;
   const externalId = (p.externalId ?? "").trim() || null;
 
   const result = await prisma.$transaction(async (tx) => {
-    const { reservation, didChange } = await upsertReservation(tx, {
+    const { reservation, didChange } = await upsertReservation(tx as any, {
       source: p.source,
 
       propertyId: p.propertyId,
@@ -173,7 +165,7 @@ const hasSuccessfulTransaction =
       status: p.status ?? undefined,
     });
 
-    const ensured = await ensureGuestToken(tx, reservation.id, guestTokenExpiresAt);
+    const ensured = await ensureGuestToken(tx as any, reservation.id, guestTokenExpiresAt);
 
     const lock = await tx.lock.findFirst({
       where: { propertyId: reservation.propertyId, isActive: true },
@@ -189,7 +181,7 @@ const hasSuccessfulTransaction =
       };
     }
 
-    const grant = await ensureGuestGrant(tx, {
+    const grant = await ensureGuestGrant(tx as any, {
       reservationId: reservation.id,
       lockId: lock.id,
       startsAt: reservation.checkIn,
@@ -314,14 +306,26 @@ async function upsertReservation(
       return incoming.getTime() <= current.getTime();
     }
 
-    if (
-      existingByPms &&
-      isOlderOrSame(input.externalUpdatedAt ?? null, existingByPms.externalUpdatedAt ?? null)
-    ) {
-      const reservation = await tx.reservation.findUnique({
+    if (existingByPms) {
+      const existing = await tx.reservation.findUnique({
         where: { id: existingByPms.id },
+        select: { paymentState: true },
       });
-      return { reservation, didChange: false };
+
+      const paymentChanged = existing?.paymentState !== input.paymentState;
+
+      if (
+        !paymentChanged &&
+        isOlderOrSame(
+          input.externalUpdatedAt ?? null,
+          existingByPms.externalUpdatedAt ?? null
+        )
+      ) {
+        const reservation = await tx.reservation.findUnique({
+          where: { id: existingByPms.id },
+        });
+        return { reservation, didChange: false };
+      }
     }
 
     if (existingByPms) {
