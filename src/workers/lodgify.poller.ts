@@ -299,19 +299,37 @@ async function createAndProcessEvent(params: {
     existingUpdatedAt: (ev?.payloadRaw as any)?.updated_at ?? null,
   });
 
-  if (
-    ev &&
-    incomingUpdatedAtMs !== null &&
-    existingUpdatedAtMs !== null &&
-    incomingUpdatedAtMs <= existingUpdatedAtMs
-  ) {
-    log("skip older/equal snapshot", {
-      bookingId,
-      incomingUpdatedAt: enriched?.updated_at ?? null,
-      existingUpdatedAt: (ev?.payloadRaw as any)?.updated_at ?? null,
-    });
-    return;
-  }
+ const existingPayload = (ev?.payloadRaw as any) ?? null;
+
+const paymentChanged =
+  Number((enriched as any)?.amount_paid ?? 0) !==
+    Number(existingPayload?.amount_paid ?? 0) ||
+  Number((enriched as any)?.amount_due ?? 0) !==
+    Number(existingPayload?.amount_due ?? 0) ||
+  Number((enriched as any)?.total_amount ?? 0) !==
+    Number(existingPayload?.total_amount ?? 0);
+
+const datesChanged =
+  String((enriched as any)?.arrival ?? "") !==
+    String(existingPayload?.arrival ?? "") ||
+  String((enriched as any)?.departure ?? "") !==
+    String(existingPayload?.departure ?? "");
+
+if (
+  ev &&
+  incomingUpdatedAtMs !== null &&
+  existingUpdatedAtMs !== null &&
+  incomingUpdatedAtMs <= existingUpdatedAtMs &&
+  !paymentChanged &&
+  !datesChanged
+) {
+  log("skip older/equal snapshot", {
+    bookingId,
+    incomingUpdatedAt: enriched?.updated_at ?? null,
+    existingUpdatedAt: existingPayload?.updated_at ?? null,
+  });
+  return;
+}
 
   if (!ev) {
     ev = await prisma.webhookEventIngest.create({
@@ -397,16 +415,26 @@ for (const r of activeReservations) {
 
     const booking = await res.json();
 
-    log("targeted booking refresh", {
-      connectionId: connection.id,
-      bookingId,
-    });
+log("targeted booking refresh", {
+  connectionId: connection.id,
+  bookingId,
+  amount_paid: booking?.amount_paid ?? null,
+  amount_due: booking?.amount_due ?? null,
+  total_amount: booking?.total_amount ?? null,
+  transactions: Array.isArray(booking?.transactions)
+    ? booking.transactions.map((t: any) => ({
+        status: t?.status ?? null,
+        amount: t?.amount ?? null,
+      }))
+    : null,
+});
 
-    await createAndProcessEvent({
-      connection,
-      booking,
-    });
-  } catch (e: any) {
+await createAndProcessEvent({
+  connection,
+  booking,
+});
+
+    } catch (e: any) {
     errLog("targeted refresh failed", {
       bookingId,
       error: String(e?.message ?? e),
