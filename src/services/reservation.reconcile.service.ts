@@ -168,10 +168,64 @@ const cleaningEndsAt = new Date(
 
       if (!changed) continue;
 
+     // 1. actualizar DB primero
+await prisma.accessGrant.update({
+  where: { id: g.id },
+  data: { startsAt: desiredStart, endsAt: desiredEnd, lastError: null },
+});
+
+// 2. 🔥 FIX: sincronizar TTLock para PASSCODE
+if (
+  g.method === "PASSCODE_TIMEBOUND" &&
+  g.ttlockKeyboardPwdId &&
+  g.lockId
+) {
+  try {
+    const { ttlockDeletePasscode, ttlockGetPasscode } = await import(
+      "../ttlock/ttlock.passcode"
+    );
+
+    // borrar viejo
+    await ttlockDeletePasscode({
+      lockId: Number(g.lockId),
+      keyboardPwdId: Number(g.ttlockKeyboardPwdId),
+    });
+
+    // crear nuevo con nueva ventana
+    const newPwd = await ttlockGetPasscode({
+      lockId: Number(g.lockId),
+      keyboardPwdType: 3,
+      startDate: desiredStart.getTime(),
+      endDate: desiredEnd.getTime(),
+    });
+
+    const newId =
+      newPwd?.keyboardPwdId ??
+      newPwd?.result?.keyboardPwdId ??
+      null;
+
+    if (newId) {
       await prisma.accessGrant.update({
         where: { id: g.id },
-        data: { startsAt: desiredStart, endsAt: desiredEnd, lastError: null },
+        data: {
+          ttlockKeyboardPwdId: Number(newId),
+          lastError: null,
+        },
       });
+    } else {
+      throw new Error("No keyboardPwdId returned");
+    }
+
+  } catch (e: any) {
+    await prisma.accessGrant.update({
+      where: { id: g.id },
+      data: {
+        lastError: `PASSCODE_RESYNC_FAILED: ${String(e?.message ?? e)}`,
+      },
+    });
+  }
+}
+
     }
   }
 
