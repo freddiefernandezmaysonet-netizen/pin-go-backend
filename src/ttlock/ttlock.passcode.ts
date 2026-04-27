@@ -244,7 +244,6 @@ export async function ttlockChangePasscode(params: {
   let start = toMs(Number(params.startDate));
   let end = toMs(Number(params.endDate));
 
-  // 🔥 MISMO FIX QUE getPasscode (CRÍTICO)
   start = roundDownToHourMs(start);
   end = roundDownToHourMs(end);
 
@@ -268,7 +267,7 @@ export async function ttlockChangePasscode(params: {
     keyboardPwdId: Number(params.keyboardPwdId),
     startDate: start,
     endDate: end,
-    changeType: 2, // 🔥 gateway obligatorio
+    changeType: 2,
     date: Date.now(),
   });
 }
