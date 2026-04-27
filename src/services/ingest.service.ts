@@ -306,12 +306,29 @@ async function upsertReservation(
     }
 
     if (existingByPms) {
-      const existing = await tx.reservation.findUnique({
-        where: { id: existingByPms.id },
-        select: { paymentState: true },
-      });
+     
+   const existing = await tx.reservation.findUnique({
+  where: { id: existingByPms.id },
+  select: { paymentState: true },
+});
 
-      const paymentChanged = existing?.paymentState !== input.paymentState;
+// 🔥 recalcular payment desde externalRaw
+const raw = input.externalRaw ?? {};
+const amountPaid = Number((raw as any).amount_paid ?? 0);
+
+const hasSuccessfulTransaction =
+  Array.isArray((raw as any).transactions) &&
+  (raw as any).transactions.some(
+    (t: any) => String(t?.status ?? "").toLowerCase() === "done"
+  );
+
+const recalculatedPaymentState =
+  amountPaid > 0 || hasSuccessfulTransaction
+    ? PaymentState.PAID
+    : PaymentState.NONE;
+
+const paymentChanged =
+  existing?.paymentState !== recalculatedPaymentState;
 
       if (
         !paymentChanged &&
