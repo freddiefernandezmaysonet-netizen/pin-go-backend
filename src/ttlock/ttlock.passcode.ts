@@ -232,31 +232,45 @@ export async function ttlockChangePasscode(params: {
   startDate: number;
   endDate: number;
 }) {
+  const base = process.env.TTLOCK_API_BASE ?? "https://api.sciener.com";
+  const clientId = process.env.TTLOCK_CLIENT_ID ?? "";
+  if (!clientId) throw new Error("Missing TTLOCK_CLIENT_ID");
+
   const accessToken = await resolveAccessToken(undefined, params.lockId);
 
-  const body = new URLSearchParams({
-    clientId: process.env.TTLOCK_CLIENT_ID!,
-    accessToken,
-    lockId: String(params.lockId),
-    keyboardPwdId: String(params.keyboardPwdId),
-    startDate: String(params.startDate),
-    endDate: String(params.endDate),
-    changeType: "2", // 🔥 gateway (CRÍTICO)
-    date: String(Date.now()),
-  });
+  const lockId = Number(params.lockId);
+  if (!Number.isFinite(lockId) || lockId <= 0) throw new Error("Invalid lockId");
 
-  const res = await fetch("https://api.sciener.com/v3/keyboardPwd/change", {
-    method: "POST",
-    body,
-  });
+  let start = toMs(Number(params.startDate));
+  let end = toMs(Number(params.endDate));
 
-  const json = await res.json();
+  // 🔥 MISMO FIX QUE getPasscode (CRÍTICO)
+  start = roundDownToHourMs(start);
+  end = roundDownToHourMs(end);
 
-  if (json.errcode !== 0) {
-    throw new Error(`TTLOCK_CHANGE_PASSCODE_FAILED: ${JSON.stringify(json)}`);
+  if (end <= start) {
+    end = start + 60 * 60 * 1000;
   }
 
-  return json;
+  console.log("[TTLOCK][PASSCODE_CHANGE][FORM]", {
+    lockId,
+    keyboardPwdId: params.keyboardPwdId,
+    start,
+    end,
+    startISO: new Date(start).toISOString(),
+    endISO: new Date(end).toISOString(),
+  });
+
+  return postForm(`${base}/v3/keyboardPwd/change`, {
+    clientId,
+    accessToken,
+    lockId,
+    keyboardPwdId: Number(params.keyboardPwdId),
+    startDate: start,
+    endDate: end,
+    changeType: 2, // 🔥 gateway obligatorio
+    date: Date.now(),
+  });
 }
 
 export async function ttlockDeletePasscode(params: {
