@@ -226,6 +226,39 @@ if (params.keyboardPwdType === 3 && msg.includes('"errcode":-3')) {
   }
 }
 
+export async function ttlockChangePasscode(params: {
+  lockId: number;
+  keyboardPwdId: number;
+  startDate: number;
+  endDate: number;
+}) {
+  const accessToken = await resolveAccessToken(undefined, params.lockId);
+
+  const body = new URLSearchParams({
+    clientId: process.env.TTLOCK_CLIENT_ID!,
+    accessToken,
+    lockId: String(params.lockId),
+    keyboardPwdId: String(params.keyboardPwdId),
+    startDate: String(params.startDate),
+    endDate: String(params.endDate),
+    changeType: "2", // 🔥 gateway (CRÍTICO)
+    date: String(Date.now()),
+  });
+
+  const res = await fetch("https://api.sciener.com/v3/keyboardPwd/change", {
+    method: "POST",
+    body,
+  });
+
+  const json = await res.json();
+
+  if (json.errcode !== 0) {
+    throw new Error(`TTLOCK_CHANGE_PASSCODE_FAILED: ${JSON.stringify(json)}`);
+  }
+
+  return json;
+}
+
 export async function ttlockDeletePasscode(params: {
   lockId: number;
   keyboardPwdId: number;

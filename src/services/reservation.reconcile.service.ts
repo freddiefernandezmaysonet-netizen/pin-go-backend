@@ -189,54 +189,28 @@ if (
   passcodeTtlockLockId
 ) {
   try {
-    const { ttlockDeletePasscode, ttlockGetPasscode } = await import(
-      "../ttlock/ttlock.passcode"
-    );
+   const { ttlockChangePasscode } = await import(
+  "../ttlock/ttlock.passcode"
+);
 
-    // borrar viejo
-    await ttlockDeletePasscode({
-      lockId: passcodeTtlockLockId,
-      keyboardPwdId: Number(g.ttlockKeyboardPwdId),
-    });
-
-    // crear nuevo con nueva ventana
-    const newPwd = await ttlockGetPasscode({
+await ttlockChangePasscode({
   lockId: passcodeTtlockLockId,
-      keyboardPwdType: 3,
-      startDate: desiredStart.getTime(),
-      endDate: desiredEnd.getTime(),
-    });
-
-    const newId =
-      newPwd?.keyboardPwdId ??
-      newPwd?.result?.keyboardPwdId ??
-      null;
-
-    if (newId) {
-      await prisma.accessGrant.update({
-        where: { id: g.id },
-        data: {
-          ttlockKeyboardPwdId: Number(newId),
-          lastError: null,
-        },
-      });
-    } else {
-      throw new Error("No keyboardPwdId returned");
-    }
-
-  } catch (e: any) {
-    await prisma.accessGrant.update({
-      where: { id: g.id },
-      data: {
-        lastError: `PASSCODE_RESYNC_FAILED: ${String(e?.message ?? e)}`,
-      },
-    });
-  }
-}
-
+  keyboardPwdId: Number(g.ttlockKeyboardPwdId),
+  startDate: desiredStart.getTime(),
+  endDate: desiredEnd.getTime(),
+});    
+ } catch (e: any) {
+          await prisma.accessGrant.update({
+            where: { id: g.id },
+            data: {
+              lastError: `PASSCODE_RESYNC_FAILED: ${String(e?.message ?? e)}`,
+            },
+          });
+        }
+      }
     }
   }
-
+    
   // 2) Apply NFC reschedule (DB + TTLock only if debounce passed)
   if (plan.nfcNeedReschedule) {
     const lock = reservation.property?.locks?.find(
