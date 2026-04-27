@@ -114,6 +114,7 @@ dashboardReservationsRouter.get("/api/dashboard/reservations", requireAuth, asyn
         checkIn: true,
         checkOut: true,
         status: true,
+        paymentState: true,
         source: true,
         externalProvider: true,
         externalId: true,
@@ -140,6 +141,7 @@ dashboardReservationsRouter.get("/api/dashboard/reservations", requireAuth, asyn
       checkIn: r.checkIn.toISOString(),
       checkOut: r.checkOut.toISOString(),    
       status: r.status,
+      paymentState: r.paymentState,
       operationalStatus: getOperationalStatus(r),
       source: r.source ?? null,
       externalProvider: r.externalProvider ?? null,
@@ -178,6 +180,7 @@ dashboardReservationsRouter.get(
         checkIn: true,
         checkOut: true,
         status: true,
+        paymentState: true,
         property: {
           select: {
             id: true,
@@ -244,6 +247,7 @@ dashboardReservationsRouter.get(
       checkIn: reservation.checkIn.toISOString(),
       checkOut: reservation.checkOut.toISOString(),     
       operationalStatus: getOperationalStatus(reservation),
+      paymentState: reservation.paymentState,
       property: reservation.property
         ? {
             id: reservation.property.id,
