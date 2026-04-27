@@ -104,14 +104,22 @@ export async function processWebhookEventById(eventId: string) {
 
     const normalizedStatus = normalizePmsStatus(canonical.status);
 
-    const canonicalHash = safeJsonHash({
-      status: canonical.status,
-      checkIn: canonical.checkIn,
-      checkOut: canonical.checkOut,
-      guest: canonical.guest,
-      notes: canonical.notes,
-      listingName: (canonical as any).listingName ?? null,
-    });
+   const rawPayload = ev.payloadRaw as any;
+
+const canonicalHash = safeJsonHash({
+  status: canonical.status,
+  checkIn: canonical.checkIn,
+  checkOut: canonical.checkOut,
+  guest: canonical.guest,
+  notes: canonical.notes,
+  listingName: (canonical as any).listingName ?? null,
+
+  // payment-sensitive fields
+  amount_paid: rawPayload?.amount_paid ?? null,
+  amount_due: rawPayload?.amount_due ?? null,
+  total_amount: rawPayload?.total_amount ?? null,
+  transactions: rawPayload?.transactions ?? null,
+});   
 
     const ingestKey = `PMS:${String(ev.provider)}:${conn.id}:${canonical.externalReservationId}`;
     const listingName = (canonical as any).listingName ?? null;
@@ -212,7 +220,7 @@ const raw = ev.payloadRaw ?? {};
 const amountPaid = Number((raw as any)?.amount_paid ?? 0);
 const total = Number((raw as any)?.total_amount ?? 0);
 
-let paymentState: "PAID" | "PARTIAL" | "UNPAID" = "UNPAID";
+let paymentState: "PAID" | "PARTIAL" | "NONE" = "NONE";
 
 if (total > 0 && amountPaid >= total) {
   paymentState = "PAID";
