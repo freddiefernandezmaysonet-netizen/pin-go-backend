@@ -174,11 +174,19 @@ await prisma.accessGrant.update({
   data: { startsAt: desiredStart, endsAt: desiredEnd, lastError: null },
 });
 
+const passcodeLock = reservation.property?.locks?.find(
+  (l: any) => l.id === g.lockId && l.ttlockLockId
+);
+
+const passcodeTtlockLockId = passcodeLock?.ttlockLockId
+  ? Number(passcodeLock.ttlockLockId)
+  : null;
+
 // 2. 🔥 FIX: sincronizar TTLock para PASSCODE
 if (
   g.method === "PASSCODE_TIMEBOUND" &&
   g.ttlockKeyboardPwdId &&
-  g.lockId
+  passcodeTtlockLockId
 ) {
   try {
     const { ttlockDeletePasscode, ttlockGetPasscode } = await import(
@@ -187,13 +195,13 @@ if (
 
     // borrar viejo
     await ttlockDeletePasscode({
-      lockId: Number(g.lockId),
+      lockId: passcodeTtlockLockId,
       keyboardPwdId: Number(g.ttlockKeyboardPwdId),
     });
 
     // crear nuevo con nueva ventana
     const newPwd = await ttlockGetPasscode({
-      lockId: Number(g.lockId),
+  lockId: passcodeTtlockLockId,
       keyboardPwdType: 3,
       startDate: desiredStart.getTime(),
       endDate: desiredEnd.getTime(),
