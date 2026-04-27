@@ -160,7 +160,7 @@ const cleaningEndsAt = new Date(
   return;
 }
   // 1) Apply grants updates (DB)
-  if (plan.grantsNeedUpdate) {
+  if (plan.grantsNeedUpdate || reservationDatesChanged) {
     for (const g of guestGrants) {
       const changed =
         g.startsAt.getTime() !== desiredStart.getTime() ||
