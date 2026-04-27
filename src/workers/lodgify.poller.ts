@@ -319,7 +319,7 @@ if (
   ev &&
   incomingUpdatedAtMs !== null &&
   existingUpdatedAtMs !== null &&
-  incomingUpdatedAtMs <= existingUpdatedAtMs &&
+  incomingUpdatedAtMs < existingUpdatedAtMs &&
   !paymentChanged &&
   !datesChanged
 ) {

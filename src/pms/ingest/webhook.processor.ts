@@ -207,6 +207,19 @@ const resolvedCheckOut = applyPropertyTime(
     ? "CANCELLED"
     : "ACTIVE";
 
+const raw = ev.payloadRaw ?? {};
+
+const amountPaid = Number((raw as any)?.amount_paid ?? 0);
+const total = Number((raw as any)?.total_amount ?? 0);
+
+let paymentState: "PAID" | "PARTIAL" | "UNPAID" = "UNPAID";
+
+if (total > 0 && amountPaid >= total) {
+  paymentState = "PAID";
+} else if (amountPaid > 0) {
+  paymentState = "PARTIAL";
+}
+
 const reservation = await tx.reservation.upsert({
   where: { ingestKey },
   create: {
@@ -220,6 +233,7 @@ const reservation = await tx.reservation.upsert({
     status: reservationStatus, // 🔥 FIX
     ingestKey,
     source: String(ev.provider),
+    paymentState,
   },
   update: {
     propertyId: listing.propertyId!,
@@ -232,6 +246,7 @@ const reservation = await tx.reservation.upsert({
     status: reservationStatus, // 🔥 FIX
     ingestKey,
     source: String(ev.provider),
+    paymentState,
   },
 });
 
