@@ -242,7 +242,9 @@ const reservation = await tx.reservation.upsert({
     ingestKey,
     source: String(ev.provider),
     paymentState,
-  },
+    externalId: canonical!.externalReservationId,
+    externalProvider: String(ev.provider),
+},
   update: {
     propertyId: listing.propertyId!,
     guestName: canonical!.guest?.name ?? "Guest",
@@ -255,6 +257,8 @@ const reservation = await tx.reservation.upsert({
     ingestKey,
     source: String(ev.provider),
     paymentState,
+    externalId: canonical!.externalReservationId,
+    externalProvider: String(ev.provider),
   },
 });
 
