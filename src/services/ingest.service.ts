@@ -119,11 +119,10 @@ export async function ingestReservation(p: IngestPayload) {
 
   let paymentState: PaymentState;
 
-  if (p.paymentState) {
-    paymentState = p.paymentState as PaymentState;
-  } else {
-    const raw = p.externalRaw ?? p;
-
+ if (p.paymentState && p.paymentState !== "NONE") {
+  paymentState = p.paymentState as PaymentState;
+} else {
+  const raw = p.externalRaw ?? p;
     const amountPaid = Number((raw as any).amount_paid ?? 0);
 
     const hasSuccessfulTransaction =
