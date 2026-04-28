@@ -69,6 +69,7 @@ import buildTuyaAccessRouter from "./routes/tuya.access.routes";
 import buildTuyaBillingRouter from "./routes/tuya.billing.routes";
 import adminFinancialRoutes from "./routes/admin.financial.routes";
 import ttlockDisconnectRoutes from "./routes/org/ttlock.disconnect.routes";
+import { onboardingAppointmentsRouter } from "./routes/onboarding.appointments.routes";
 
 const app = express();
 const prisma = new PrismaClient();
@@ -249,6 +250,7 @@ app.use("/api/org/tuya/billing", buildTuyaBillingRouter(prisma));
 app.use("/api/dashboard", messagesRouter);
 app.use("/api/dashboard/health", buildDashboardHealthRouter(prisma));
 app.use("/api/org", ttlockDisconnectRoutes);
+app.use("/api/onboarding/appointments", onboardingAppointmentsRouter);
 
 app.use(dashboardRouter);
 app.use(dashboardReservationsRouter);
