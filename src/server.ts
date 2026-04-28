@@ -175,7 +175,7 @@ app.get("/ready", async (_req, res) => {
 // =====================
 app.use(signupPublicRoutes);
 app.use(authRouter);
-
+app.use("/api/onboarding/appointments", onboardingAppointmentsRouter);
 // =====================
 // DEV ROUTES (bloqueadas en producción)
 // =====================
@@ -250,7 +250,7 @@ app.use("/api/org/tuya/billing", buildTuyaBillingRouter(prisma));
 app.use("/api/dashboard", messagesRouter);
 app.use("/api/dashboard/health", buildDashboardHealthRouter(prisma));
 app.use("/api/org", ttlockDisconnectRoutes);
-app.use("/api/onboarding/appointments", onboardingAppointmentsRouter);
+
 
 app.use(dashboardRouter);
 app.use(dashboardReservationsRouter);
