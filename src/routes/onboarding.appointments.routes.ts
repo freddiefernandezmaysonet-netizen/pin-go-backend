@@ -5,12 +5,16 @@ import { google } from "googleapis";
 const prisma = new PrismaClient();
 export const onboardingAppointmentsRouter = Router();
 
-/**
- * POST /api/onboarding/appointments
- */
 onboardingAppointmentsRouter.post("/", async (req, res) => {
   try {
-    const { name, email, phone, topic, scheduledAt } = req.body;
+    const {
+      name,
+      email,
+      phone,
+      topic,
+      scheduledAt,
+      remoteAssistanceRequested,
+    } = req.body;
 
     if (!name || !email || !scheduledAt) {
       return res.status(400).json({
@@ -21,21 +25,23 @@ onboardingAppointmentsRouter.post("/", async (req, res) => {
 
     const startDate = new Date(scheduledAt);
 
-    let googleEventId: string | null = null;
-    let calendarStatus: "created" | "skipped" = "skipped";
+    if (Number.isNaN(startDate.getTime())) {
+      return res.status(400).json({
+        ok: false,
+        error: "Invalid scheduledAt date",
+      });
+    }
 
-    // =========================
-    // CHECK GOOGLE CONFIG
-    // =========================
+    let googleEventId: string | null = null;
+    let googleMeetLink: string | null = null;
+    let calendarStatus: "created" | "skipped" | "failed" = "skipped";
+
     const hasGoogleConfig =
       process.env.GOOGLE_CALENDAR_CLIENT_ID &&
       process.env.GOOGLE_CALENDAR_CLIENT_SECRET &&
       process.env.GOOGLE_CALENDAR_REFRESH_TOKEN &&
       process.env.GOOGLE_CALENDAR_ID;
 
-    // =========================
-    // CREATE GOOGLE EVENT (IF CONFIGURED)
-    // =========================
     if (hasGoogleConfig) {
       try {
         const oauth2Client = new google.auth.OAuth2(
@@ -56,8 +62,19 @@ onboardingAppointmentsRouter.post("/", async (req, res) => {
         const endDate = new Date(startDate.getTime() + 30 * 60 * 1000);
 
         const event = {
-          summary: `Onboarding Pin&Go - ${name}`,
-          description: `Cliente: ${name}\nEmail: ${email}\nTel: ${phone ?? "-"}\nTema: ${topic ?? "-"}`,
+          summary: `Pin&Go Onboarding - ${name}`,
+          description: [
+            `Client: ${name}`,
+            `Email: ${email}`,
+            `Phone: ${phone ?? "-"}`,
+            `Topic: ${topic ?? "-"}`,
+            `Remote assistance requested: ${
+              remoteAssistanceRequested ? "Yes" : "No"
+            }`,
+            "",
+            "Pin&Go onboarding session.",
+            "If remote assistance is needed, we may guide the client through screen sharing or a secure remote support tool such as AnyDesk, TeamViewer, or Chrome Remote Desktop.",
+          ].join("\n"),
           start: {
             dateTime: startDate.toISOString(),
             timeZone: "UTC",
@@ -67,25 +84,34 @@ onboardingAppointmentsRouter.post("/", async (req, res) => {
             timeZone: "UTC",
           },
           attendees: [{ email }],
+          conferenceData: {
+            createRequest: {
+              requestId: `pingo-onboarding-${Date.now()}`,
+              conferenceSolutionKey: {
+                type: "hangoutsMeet",
+              },
+            },
+          },
         };
 
         const calendarRes = await calendar.events.insert({
           calendarId: process.env.GOOGLE_CALENDAR_ID,
           requestBody: event,
+          conferenceDataVersion: 1,
+          sendUpdates: "all",
         });
 
         googleEventId = calendarRes.data.id ?? null;
+        googleMeetLink = calendarRes.data.hangoutLink ?? null;
         calendarStatus = "created";
       } catch (calendarError) {
         console.error("[GOOGLE_CALENDAR_ERROR]", calendarError);
+        calendarStatus = "failed";
       }
     } else {
       console.warn("[ONBOARDING] Google Calendar not configured → skipping");
     }
 
-    // =========================
-    // SAVE IN DB (SIEMPRE)
-    // =========================
     const appointment = await prisma.onboardingAppointment.create({
       data: {
         name,
@@ -94,6 +120,8 @@ onboardingAppointmentsRouter.post("/", async (req, res) => {
         topic,
         scheduledAt: startDate,
         googleEventId,
+        googleMeetLink,
+        remoteAssistanceRequested: Boolean(remoteAssistanceRequested),
       },
     });
 
@@ -101,6 +129,7 @@ onboardingAppointmentsRouter.post("/", async (req, res) => {
       ok: true,
       appointmentId: appointment.id,
       calendar: calendarStatus,
+      googleMeetLink,
     });
   } catch (error: any) {
     console.error("[ONBOARDING_APPOINTMENT_ERROR]", error);

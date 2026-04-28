@@ -738,6 +738,8 @@ model OnboardingAppointment {
   topic           String?
   status          String   @default("REQUESTED")
   googleEventId   String?
+  googleMeetLink             String?
+  remoteAssistanceRequested  Boolean  @default(false)
   scheduledAt     DateTime?
   createdAt       DateTime @default(now())
   updatedAt       DateTime @updatedAt
