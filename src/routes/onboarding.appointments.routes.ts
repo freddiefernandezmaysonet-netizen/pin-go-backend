@@ -56,6 +56,17 @@ console.log("[GOOGLE_ENV_CHECK]", {
   refreshTokenPrefix: process.env.GOOGLE_CALENDAR_REFRESH_TOKEN?.slice(0, 4),
   calendarId: process.env.GOOGLE_CALENDAR_ID,
   redirectUri: process.env.GOOGLE_CALENDAR_REDIRECT_URI,
+  clientSecretHasWhitespace:
+  process.env.GOOGLE_CALENDAR_CLIENT_SECRET !==
+  process.env.GOOGLE_CALENDAR_CLIENT_SECRET?.trim(),
+
+refreshTokenHasWhitespace:
+  process.env.GOOGLE_CALENDAR_REFRESH_TOKEN !==
+  process.env.GOOGLE_CALENDAR_REFRESH_TOKEN?.trim(),
+
+clientSecretLength: process.env.GOOGLE_CALENDAR_CLIENT_SECRET?.length,
+refreshTokenLength: process.env.GOOGLE_CALENDAR_REFRESH_TOKEN?.length,
+
 });
 
     const hasGoogleConfig =
@@ -67,14 +78,14 @@ console.log("[GOOGLE_ENV_CHECK]", {
     if (hasGoogleConfig) {
       try {
         const oauth2Client = new google.auth.OAuth2(
-          process.env.GOOGLE_CALENDAR_CLIENT_ID,
-          process.env.GOOGLE_CALENDAR_CLIENT_SECRET,
-          process.env.GOOGLE_CALENDAR_REDIRECT_URI
-        );
+  process.env.GOOGLE_CALENDAR_CLIENT_ID?.trim(),
+  process.env.GOOGLE_CALENDAR_CLIENT_SECRET?.trim(),
+  process.env.GOOGLE_CALENDAR_REDIRECT_URI?.trim()
+);
 
-        oauth2Client.setCredentials({
-          refresh_token: process.env.GOOGLE_CALENDAR_REFRESH_TOKEN,
-        });
+       oauth2Client.setCredentials({
+  refresh_token: process.env.GOOGLE_CALENDAR_REFRESH_TOKEN?.trim(),
+});
 
         const calendar = google.calendar({
           version: "v3",
