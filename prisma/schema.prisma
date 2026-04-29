@@ -742,8 +742,27 @@ model OnboardingAppointment {
   remoteAssistanceRequested  Boolean  @default(false)
   scheduledAt     DateTime?
   bookingType     BookingType @default(ONBOARDING)
+  salesFollowUps  SalesFollowUp[]
   createdAt       DateTime @default(now())
   updatedAt       DateTime @updatedAt
+}
+
+model SalesFollowUp {
+  id              String   @id @default(cuid())
+  appointmentId   String
+  bookingType     BookingType
+  type            String   @default("DEMO_SALES_FOLLOW_UP")
+  status          String   @default("PENDING")
+  dueAt           DateTime
+  completedAt     DateTime?
+  notes           String?
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  appointment     OnboardingAppointment @relation(fields: [appointmentId], references: [id], onDelete: Cascade)
+
+  @@index([status, dueAt])
+  @@index([appointmentId])
 }
 
 enum BookingType {

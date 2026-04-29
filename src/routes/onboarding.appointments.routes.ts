@@ -286,6 +286,25 @@ onboardingAppointmentsRouter.post("/", async (req, res) => {
       },
     });
 
+// ✅ AUTO CREATE SALES FOLLOW-UP (SOLO DEMO)
+if (appointment.bookingType === BookingType.DEMO && appointment.scheduledAt) {
+  try {
+    const dueAt = new Date(
+      appointment.scheduledAt.getTime() + 60 * 60 * 1000 // +1 hora
+    );
+
+    await prisma.salesFollowUp.create({
+      data: {
+        appointmentId: appointment.id,
+        bookingType: appointment.bookingType,
+        dueAt,
+      },
+    });
+  } catch (err) {
+    console.error("[FOLLOWUP_CREATE_ERROR]", err);
+  }
+}
+
     return res.json({
       ok: true,
       appointmentId: appointment.id,
