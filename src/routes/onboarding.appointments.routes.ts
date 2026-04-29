@@ -46,29 +46,6 @@ onboardingAppointmentsRouter.post("/", async (req, res) => {
     let googleMeetLink: string | null = null;
     let calendarStatus: "created" | "skipped" | "failed" = "skipped";
 
-console.log("[GOOGLE_ENV_CHECK]", {
-  hasClientId: Boolean(process.env.GOOGLE_CALENDAR_CLIENT_ID),
-  clientIdEndsOk: process.env.GOOGLE_CALENDAR_CLIENT_ID?.endsWith(".apps.googleusercontent.com"),
-  clientIdTail: process.env.GOOGLE_CALENDAR_CLIENT_ID?.slice(-35),
-  hasClientSecret: Boolean(process.env.GOOGLE_CALENDAR_CLIENT_SECRET),
-  clientSecretPrefix: process.env.GOOGLE_CALENDAR_CLIENT_SECRET?.slice(0, 7),
-  hasRefreshToken: Boolean(process.env.GOOGLE_CALENDAR_REFRESH_TOKEN),
-  refreshTokenPrefix: process.env.GOOGLE_CALENDAR_REFRESH_TOKEN?.slice(0, 4),
-  calendarId: process.env.GOOGLE_CALENDAR_ID,
-  redirectUri: process.env.GOOGLE_CALENDAR_REDIRECT_URI,
-  clientSecretHasWhitespace:
-  process.env.GOOGLE_CALENDAR_CLIENT_SECRET !==
-  process.env.GOOGLE_CALENDAR_CLIENT_SECRET?.trim(),
-
-refreshTokenHasWhitespace:
-  process.env.GOOGLE_CALENDAR_REFRESH_TOKEN !==
-  process.env.GOOGLE_CALENDAR_REFRESH_TOKEN?.trim(),
-
-clientSecretLength: process.env.GOOGLE_CALENDAR_CLIENT_SECRET?.length,
-refreshTokenLength: process.env.GOOGLE_CALENDAR_REFRESH_TOKEN?.length,
-
-});
-
     const hasGoogleConfig =
       process.env.GOOGLE_CALENDAR_CLIENT_ID &&
       process.env.GOOGLE_CALENDAR_CLIENT_SECRET &&
