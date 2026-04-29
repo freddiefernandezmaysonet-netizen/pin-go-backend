@@ -1,5 +1,5 @@
 import { Router } from "express";
-import { PrismaClient } from "@prisma/client";
+import { PrismaClient, BookingType } from "@prisma/client";
 import { google } from "googleapis";
 import { fromZonedTime, formatInTimeZone } from "date-fns-tz";
 
@@ -14,6 +14,14 @@ function extractMeetLink(eventData: any): string | null {
     )?.uri ??
     null
   );
+}
+
+function normalizeBookingType(value: unknown): BookingType {
+  if (value === "DEMO" || value === "demo") {
+    return BookingType.DEMO;
+  }
+
+  return BookingType.ONBOARDING;
 }
 
 onboardingAppointmentsRouter.get("/availability", async (req, res) => {
@@ -32,7 +40,6 @@ onboardingAppointmentsRouter.get("/availability", async (req, res) => {
         ? timezone.trim()
         : "UTC";
 
-    // 🔹 generar horas de 9am a 5pm
     const slots: { time: string; available: boolean }[] = [];
 
     for (let hour = 9; hour < 18; hour++) {
@@ -41,7 +48,6 @@ onboardingAppointmentsRouter.get("/availability", async (req, res) => {
       const startDate = fromZonedTime(localDateTime, appointmentTimezone);
       const endDate = new Date(startDate.getTime() + 60 * 60 * 1000);
 
-      // 🔴 validar fin de semana
       const dayOfWeek = formatInTimeZone(
         startDate,
         appointmentTimezone,
@@ -56,7 +62,6 @@ onboardingAppointmentsRouter.get("/availability", async (req, res) => {
         continue;
       }
 
-      // 🔴 verificar si ya está ocupado
       const existing = await prisma.onboardingAppointment.findFirst({
         where: {
           scheduledAt: {
@@ -99,6 +104,7 @@ onboardingAppointmentsRouter.post("/", async (req, res) => {
       scheduledAt,
       timezone,
       remoteAssistanceRequested,
+      bookingType,
     } = req.body;
 
     if (!name || !email || !scheduledAt) {
@@ -107,6 +113,8 @@ onboardingAppointmentsRouter.post("/", async (req, res) => {
         error: "Missing required fields (name, email, scheduledAt)",
       });
     }
+
+    const normalizedBookingType = normalizeBookingType(bookingType);
 
     const appointmentTimezone =
       typeof timezone === "string" && timezone.trim()
@@ -122,7 +130,6 @@ onboardingAppointmentsRouter.post("/", async (req, res) => {
       });
     }
 
-    // 🔴 1. Bloquear fines de semana
     const dayOfWeek = formatInTimeZone(
       startDate,
       appointmentTimezone,
@@ -136,7 +143,6 @@ onboardingAppointmentsRouter.post("/", async (req, res) => {
       });
     }
 
-    // 🔴 2. Bloquear horario (9am - 6pm)
     const hour = Number(
       formatInTimeZone(startDate, appointmentTimezone, "H")
     );
@@ -148,10 +154,8 @@ onboardingAppointmentsRouter.post("/", async (req, res) => {
       });
     }
 
-    // 🔴 3. Duración 1 hora
     const endDate = new Date(startDate.getTime() + 60 * 60 * 1000);
 
-    // 🔴 4. Evitar doble booking
     const existing = await prisma.onboardingAppointment.findFirst({
       where: {
         scheduledAt: {
@@ -198,13 +202,17 @@ onboardingAppointmentsRouter.post("/", async (req, res) => {
           auth: oauth2Client,
         });
 
-        const requestId = `pingo-onboarding-${Date.now()}-${Math.random()
+        const requestId = `pingo-${normalizedBookingType.toLowerCase()}-${Date.now()}-${Math.random()
           .toString(36)
           .slice(2)}`;
 
+        const appointmentLabel =
+          normalizedBookingType === BookingType.DEMO ? "Demo Call" : "Onboarding";
+
         const event = {
-          summary: `Pin&Go Onboarding - ${name}`,
+          summary: `Pin&Go ${appointmentLabel} - ${name}`,
           description: [
+            `Booking type: ${normalizedBookingType}`,
             `Client: ${name}`,
             `Email: ${email}`,
             `Phone: ${phone ?? "-"}`,
@@ -214,7 +222,9 @@ onboardingAppointmentsRouter.post("/", async (req, res) => {
               remoteAssistanceRequested ? "Yes" : "No"
             }`,
             "",
-            "Pin&Go onboarding session.",
+            normalizedBookingType === BookingType.DEMO
+              ? "Pin&Go demo session."
+              : "Pin&Go onboarding session.",
           ].join("\n"),
           start: {
             dateTime: startDate.toISOString(),
@@ -272,12 +282,14 @@ onboardingAppointmentsRouter.post("/", async (req, res) => {
         googleEventId,
         googleMeetLink,
         remoteAssistanceRequested: Boolean(remoteAssistanceRequested),
+        bookingType: normalizedBookingType,
       },
     });
 
     return res.json({
       ok: true,
       appointmentId: appointment.id,
+      bookingType: appointment.bookingType,
       calendar: calendarStatus,
       googleEventId,
       googleMeetLink,

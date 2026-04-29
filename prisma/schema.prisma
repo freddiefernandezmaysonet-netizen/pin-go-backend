@@ -741,8 +741,14 @@ model OnboardingAppointment {
   googleMeetLink             String?
   remoteAssistanceRequested  Boolean  @default(false)
   scheduledAt     DateTime?
+  bookingType     BookingType @default(ONBOARDING)
   createdAt       DateTime @default(now())
   updatedAt       DateTime @updatedAt
+}
+
+enum BookingType {
+  ONBOARDING
+  DEMO
 }
 
 enum ReminderKind {
