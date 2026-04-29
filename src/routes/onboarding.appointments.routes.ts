@@ -5,6 +5,16 @@ import { google } from "googleapis";
 const prisma = new PrismaClient();
 export const onboardingAppointmentsRouter = Router();
 
+function extractMeetLink(eventData: any): string | null {
+  return (
+    eventData?.hangoutLink ??
+    eventData?.conferenceData?.entryPoints?.find(
+      (p: any) => p.entryPointType === "video"
+    )?.uri ??
+    null
+  );
+}
+
 onboardingAppointmentsRouter.post("/", async (req, res) => {
   try {
     const {
@@ -61,6 +71,10 @@ onboardingAppointmentsRouter.post("/", async (req, res) => {
 
         const endDate = new Date(startDate.getTime() + 30 * 60 * 1000);
 
+        const requestId = `pingo-onboarding-${Date.now()}-${Math.random()
+          .toString(36)
+          .slice(2)}`;
+
         const event = {
           summary: `Pin&Go Onboarding - ${name}`,
           description: [
@@ -86,7 +100,7 @@ onboardingAppointmentsRouter.post("/", async (req, res) => {
           attendees: [{ email }],
           conferenceData: {
             createRequest: {
-              requestId: `pingo-onboarding-${Date.now()}`,
+              requestId,
               conferenceSolutionKey: {
                 type: "hangoutsMeet",
               },
@@ -102,10 +116,33 @@ onboardingAppointmentsRouter.post("/", async (req, res) => {
         });
 
         googleEventId = calendarRes.data.id ?? null;
-        googleMeetLink = calendarRes.data.hangoutLink ?? null;
+        googleMeetLink = extractMeetLink(calendarRes.data);
+
+        if (googleEventId && !googleMeetLink) {
+          const eventRead = await calendar.events.get({
+            calendarId: process.env.GOOGLE_CALENDAR_ID,
+            eventId: googleEventId,
+            conferenceDataVersion: 1,
+          });
+
+          googleMeetLink = extractMeetLink(eventRead.data);
+        }
+
+        console.log("[ONBOARDING_GOOGLE_EVENT_CREATED]", {
+          googleEventId,
+          googleMeetLink,
+          conferenceStatus:
+            calendarRes.data.conferenceData?.createRequest?.status?.statusCode,
+        });
+
         calendarStatus = "created";
-      } catch (calendarError) {
-        console.error("[GOOGLE_CALENDAR_ERROR]", calendarError);
+      } catch (calendarError: any) {
+        console.error("[GOOGLE_CALENDAR_ERROR]", {
+          message: calendarError?.message,
+          code: calendarError?.code,
+          errors: calendarError?.errors,
+        });
+
         calendarStatus = "failed";
       }
     } else {
@@ -129,6 +166,7 @@ onboardingAppointmentsRouter.post("/", async (req, res) => {
       ok: true,
       appointmentId: appointment.id,
       calendar: calendarStatus,
+      googleEventId,
       googleMeetLink,
     });
   } catch (error: any) {
