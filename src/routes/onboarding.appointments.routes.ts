@@ -1,6 +1,7 @@
 import { Router } from "express";
 import { PrismaClient } from "@prisma/client";
 import { google } from "googleapis";
+import { fromZonedTime } from "date-fns-tz";
 
 const prisma = new PrismaClient();
 export const onboardingAppointmentsRouter = Router();
@@ -23,6 +24,7 @@ onboardingAppointmentsRouter.post("/", async (req, res) => {
       phone,
       topic,
       scheduledAt,
+      timezone,
       remoteAssistanceRequested,
     } = req.body;
 
@@ -33,7 +35,12 @@ onboardingAppointmentsRouter.post("/", async (req, res) => {
       });
     }
 
-    const startDate = new Date(scheduledAt);
+    const appointmentTimezone =
+  typeof timezone === "string" && timezone.trim()
+    ? timezone.trim()
+    : "UTC";
+
+const startDate = fromZonedTime(scheduledAt, appointmentTimezone);
 
     if (Number.isNaN(startDate.getTime())) {
       return res.status(400).json({
@@ -91,11 +98,11 @@ onboardingAppointmentsRouter.post("/", async (req, res) => {
           ].join("\n"),
           start: {
             dateTime: startDate.toISOString(),
-            timeZone: "UTC",
+            timeZone: appointmentTimezone,
           },
           end: {
             dateTime: endDate.toISOString(),
-            timeZone: "UTC",
+            timeZone: appointmentTimezone,
           },
           attendees: [{ email }],
           conferenceData: {
