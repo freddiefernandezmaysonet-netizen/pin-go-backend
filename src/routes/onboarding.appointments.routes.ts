@@ -104,8 +104,11 @@ const startDate = fromZonedTime(scheduledAt, appointmentTimezone);
             dateTime: endDate.toISOString(),
             timeZone: appointmentTimezone,
           },
-          attendees: [{ email }],
-          conferenceData: {
+          attendees: [
+  { email },
+  { email: "support@pin-ngo.com" },
+],
+            conferenceData: {
             createRequest: {
               requestId,
               conferenceSolutionKey: {
