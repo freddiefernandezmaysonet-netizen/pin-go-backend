@@ -1,7 +1,7 @@
 import { Router } from "express";
 import { PrismaClient } from "@prisma/client";
 import { google } from "googleapis";
-import { fromZonedTime } from "date-fns-tz";
+import { fromZonedTime, formatInTimeZone } from "date-fns-tz";
 
 const prisma = new PrismaClient();
 export const onboardingAppointmentsRouter = Router();
@@ -36,16 +36,27 @@ onboardingAppointmentsRouter.post("/", async (req, res) => {
     }
 
     const appointmentTimezone =
-  typeof timezone === "string" && timezone.trim()
-    ? timezone.trim()
-    : "UTC";
+      typeof timezone === "string" && timezone.trim() ? timezone.trim() : "UTC";
 
-const startDate = fromZonedTime(scheduledAt, appointmentTimezone);
+    const startDate = fromZonedTime(scheduledAt, appointmentTimezone);
 
     if (Number.isNaN(startDate.getTime())) {
       return res.status(400).json({
         ok: false,
         error: "Invalid scheduledAt date",
+      });
+    }
+
+    const dayOfWeek = formatInTimeZone(
+      startDate,
+      appointmentTimezone,
+      "EEEE"
+    );
+
+    if (dayOfWeek === "Saturday" || dayOfWeek === "Sunday") {
+      return res.status(400).json({
+        ok: false,
+        error: "Weekend appointments are not available",
       });
     }
 
@@ -62,21 +73,21 @@ const startDate = fromZonedTime(scheduledAt, appointmentTimezone);
     if (hasGoogleConfig) {
       try {
         const oauth2Client = new google.auth.OAuth2(
-  process.env.GOOGLE_CALENDAR_CLIENT_ID?.trim(),
-  process.env.GOOGLE_CALENDAR_CLIENT_SECRET?.trim(),
-  process.env.GOOGLE_CALENDAR_REDIRECT_URI?.trim()
-);
+          process.env.GOOGLE_CALENDAR_CLIENT_ID?.trim(),
+          process.env.GOOGLE_CALENDAR_CLIENT_SECRET?.trim(),
+          process.env.GOOGLE_CALENDAR_REDIRECT_URI?.trim()
+        );
 
-       oauth2Client.setCredentials({
-  refresh_token: process.env.GOOGLE_CALENDAR_REFRESH_TOKEN?.trim(),
-});
+        oauth2Client.setCredentials({
+          refresh_token: process.env.GOOGLE_CALENDAR_REFRESH_TOKEN?.trim(),
+        });
 
         const calendar = google.calendar({
           version: "v3",
           auth: oauth2Client,
         });
 
-        const endDate = new Date(startDate.getTime() + 30 * 60 * 1000);
+        const endDate = new Date(startDate.getTime() + 60 * 60 * 1000);
 
         const requestId = `pingo-onboarding-${Date.now()}-${Math.random()
           .toString(36)
@@ -89,6 +100,7 @@ const startDate = fromZonedTime(scheduledAt, appointmentTimezone);
             `Email: ${email}`,
             `Phone: ${phone ?? "-"}`,
             `Topic: ${topic ?? "-"}`,
+            `Timezone: ${appointmentTimezone}`,
             `Remote assistance requested: ${
               remoteAssistanceRequested ? "Yes" : "No"
             }`,
@@ -104,11 +116,8 @@ const startDate = fromZonedTime(scheduledAt, appointmentTimezone);
             dateTime: endDate.toISOString(),
             timeZone: appointmentTimezone,
           },
-          attendees: [
-  { email },
-  { email: "support@pin-ngo.com" },
-],
-            conferenceData: {
+          attendees: [{ email }, { email: "support@pin-ngo.com" }],
+          conferenceData: {
             createRequest: {
               requestId,
               conferenceSolutionKey: {
