@@ -53,11 +53,12 @@ adminSalesFollowupsRouter.get(
       });
     } catch (error: any) {
       console.error("[ADMIN_SALES_FOLLOWUPS_ERROR]", error);
-
-      return res.status(500).json({
-        ok: false,
-        error: "Failed to fetch sales follow-ups",
-      });
+return res.status(500).json({
+  ok: false,
+  error: "Failed to fetch sales follow-ups",
+  detail: error?.message ?? String(error),
+  code: error?.code,
+});
     }
   }
 );
