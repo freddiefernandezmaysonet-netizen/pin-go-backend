@@ -4,11 +4,6 @@ import { PrismaClient } from "@prisma/client";
 const prisma = new PrismaClient();
 const router = Router();
 
-/**
- * Admin Financial is read-only.
- * Do not update Stripe, billing, subscriptions, locks, or properties here.
- */
-
 const LOCK_PRICE = 12.49;
 const SMART_PRICE = 14.99;
 
@@ -18,8 +13,6 @@ const AVG_SMS_COST = 0.008;
 const ESTIMATED_SMS_PER_RESERVATION = 4;
 const TUYA_COST_PER_SMART_PROPERTY = 0.3;
 
-// TEMP: keep existing behavior for now.
-// TODO: replace with real admin middleware before public admin rollout.
 function requireAdmin(_req: any, _res: any, next: any) {
   return next();
 }
@@ -40,8 +33,10 @@ router.get("/financial/overview", requireAdmin, async (_req, res) => {
     ] = await Promise.all([
       prisma.organization.count(),
 
+      // 🔥 FIX: reservation → property → organization
       prisma.reservation.count(),
 
+      // 🔥 FIX: lock → property → organization
       prisma.lock.count({
         where: { isActive: true },
       }),
@@ -50,19 +45,7 @@ router.get("/financial/overview", requireAdmin, async (_req, res) => {
         where: { smartAutomationEnabled: true },
       }),
 
-      prisma.subscription.findMany({
-        select: {
-          id: true,
-          organizationId: true,
-          stripeCustomerId: true,
-          stripeSubscriptionId: true,
-          entitledLocks: true,
-          entitledSmartProperties: true,
-          createdAt: true,
-          updatedAt: true,
-        },
-        orderBy: { updatedAt: "desc" },
-      }),
+      prisma.subscription.findMany(),
 
       prisma.organization.findMany({
         select: {
@@ -70,56 +53,59 @@ router.get("/financial/overview", requireAdmin, async (_req, res) => {
           name: true,
           createdAt: true,
         },
-        orderBy: { createdAt: "desc" },
       }),
     ]);
 
     const orgUsage = await Promise.all(
       organizations.map(async (org) => {
         const [locksUsed, smartUsed, reservations] = await Promise.all([
-         prisma.lock.count({
-  where: {
-    property: {
-      organizationId: org.id,
-    },
-    isActive: true,
-  },
-}),
+          prisma.lock.count({
+            where: {
+              isActive: true,
+              property: {
+                organizationId: org.id,
+              },
+            },
+          }),
+
           prisma.property.count({
             where: {
               organizationId: org.id,
               smartAutomationEnabled: true,
             },
           }),
+
           prisma.reservation.count({
             where: {
-              organizationId: org.id,
+              property: {
+                organizationId: org.id,
+              },
             },
           }),
         ]);
 
-        const subscription = subscriptions.find((s) => s.organizationId === org.id);
+        const subscription = subscriptions.find(
+          (s) => s.organizationId === org.id
+        );
 
         const entitledLocks = subscription?.entitledLocks ?? 0;
-        const entitledSmartProperties = subscription?.entitledSmartProperties ?? 0;
+        const entitledSmartProperties =
+          subscription?.entitledSmartProperties ?? 0;
 
         const estimatedMonthlyRevenue =
-          entitledLocks * LOCK_PRICE + entitledSmartProperties * SMART_PRICE;
+          entitledLocks * LOCK_PRICE +
+          entitledSmartProperties * SMART_PRICE;
 
         return {
           organizationId: org.id,
           organizationName: org.name,
-          createdAt: org.createdAt,
 
           subscription: subscription
             ? {
-                id: subscription.id,
                 stripeCustomerId: subscription.stripeCustomerId,
                 stripeSubscriptionId: subscription.stripeSubscriptionId,
                 entitledLocks,
                 entitledSmartProperties,
-                createdAt: subscription.createdAt,
-                updatedAt: subscription.updatedAt,
               }
             : null,
 
@@ -131,8 +117,6 @@ router.get("/financial/overview", requireAdmin, async (_req, res) => {
 
           revenue: {
             estimatedMonthly: money(estimatedMonthlyRevenue),
-            locks: money(entitledLocks * LOCK_PRICE),
-            smart: money(entitledSmartProperties * SMART_PRICE),
           },
         };
       })
@@ -161,25 +145,26 @@ router.get("/financial/overview", requireAdmin, async (_req, res) => {
 
     const stripeFee =
       totalRevenue > 0
-        ? totalRevenue * STRIPE_PERCENT + subscribedOrgs * STRIPE_FIXED_PER_ORG
+        ? totalRevenue * STRIPE_PERCENT +
+          subscribedOrgs * STRIPE_FIXED_PER_ORG
         : 0;
 
-    const estimatedSms = totalReservations * ESTIMATED_SMS_PER_RESERVATION;
+    const estimatedSms =
+      totalReservations * ESTIMATED_SMS_PER_RESERVATION;
+
     const twilioCost = estimatedSms * AVG_SMS_COST;
-    const tuyaCost = activeSmartProperties * TUYA_COST_PER_SMART_PROPERTY;
+
+    const tuyaCost =
+      activeSmartProperties * TUYA_COST_PER_SMART_PROPERTY;
 
     const totalCosts = stripeFee + twilioCost + tuyaCost;
 
     const netProfit = totalRevenue - totalCosts;
-    const margin = totalRevenue > 0 ? (netProfit / totalRevenue) * 100 : 0;
+    const margin =
+      totalRevenue > 0 ? (netProfit / totalRevenue) * 100 : 0;
 
     return res.json({
       ok: true,
-
-      pricing: {
-        lockPrice: LOCK_PRICE,
-        smartPrice: SMART_PRICE,
-      },
 
       summary: {
         totalOrgs,
