@@ -1,6 +1,7 @@
 import { Router } from "express";
 import { PrismaClient } from "@prisma/client";
 import { requireAuth } from "../middleware/requireAuth";
+import { sendSalesFollowUpEmail } from "../lib/mailer";
 
 const prisma = new PrismaClient();
 export const adminSalesFollowupsRouter = Router();
@@ -39,10 +40,10 @@ adminSalesFollowupsRouter.get(
       }
 
       const followUps = await prisma.salesFollowUp.findMany({
-        where,        
-         include: {
-           appointment: true,
-         },
+        where,
+        include: {
+          appointment: true,
+        },
         orderBy: {
           dueAt: "asc",
         },
@@ -56,12 +57,84 @@ adminSalesFollowupsRouter.get(
       });
     } catch (error: any) {
       console.error("[ADMIN_SALES_FOLLOWUPS_ERROR]", error);
-return res.status(500).json({
-  ok: false,
-  error: "Failed to fetch sales follow-ups",
-  detail: error?.message ?? String(error),
-  code: error?.code,
-});
+
+      return res.status(500).json({
+        ok: false,
+        error: "Failed to fetch sales follow-ups",
+        detail: error?.message ?? String(error),
+        code: error?.code,
+      });
+    }
+  }
+);
+
+// ✉️ SEND MANUAL FOLLOW-UP EMAIL
+adminSalesFollowupsRouter.post(
+  "/api/internal/admin/sales-followups/:id/send-email",
+  requireAuth,
+  async (req, res) => {
+    try {
+      if (!assertPlatformAdmin(req, res)) return;
+
+      const { id } = req.params;
+
+      const followUp = await prisma.salesFollowUp.findUnique({
+        where: { id },
+        include: {
+          appointment: true,
+        },
+      });
+
+      if (!followUp) {
+        return res.status(404).json({
+          ok: false,
+          error: "Follow-up not found",
+        });
+      }
+
+      if (followUp.status !== "READY_TO_SEND") {
+        return res.status(400).json({
+          ok: false,
+          error: `Follow-up is not ready to send. Current status: ${followUp.status}`,
+        });
+      }
+
+      const email = followUp.appointment?.email?.trim();
+
+      if (!email) {
+        return res.status(400).json({
+          ok: false,
+          error: "No email found for this lead",
+        });
+      }
+
+      const result = await sendSalesFollowUpEmail({
+        to: email,
+        name: followUp.appointment?.name,
+      });
+
+      const updated = await prisma.salesFollowUp.update({
+        where: { id },
+        data: {
+          status: "COMPLETED",
+          completedAt: new Date(),
+          notes: `Email follow-up sent manually via ${result.mode}`,
+        },
+      });
+
+      return res.json({
+        ok: true,
+        mode: result.mode,
+        followUp: updated,
+      });
+    } catch (error: any) {
+      console.error("[ADMIN_SALES_FOLLOWUP_EMAIL_ERROR]", error);
+
+      return res.status(500).json({
+        ok: false,
+        error: "Failed to send follow-up email",
+        detail: error?.message ?? String(error),
+      });
     }
   }
 );
