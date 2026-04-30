@@ -40,6 +40,9 @@ adminSalesFollowupsRouter.get(
 
       const followUps = await prisma.salesFollowUp.findMany({
         where,        
+         include: {
+           appointment: true,
+         },
         orderBy: {
           dueAt: "asc",
         },
