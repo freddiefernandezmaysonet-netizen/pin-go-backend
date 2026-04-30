@@ -122,16 +122,19 @@ router.get("/financial/overview", requireAdmin, async (_req, res) => {
       })
     );
 
-    const entitledLocks = subscriptions.reduce(
-      (sum, sub) => sum + (sub.entitledLocks ?? 0),
-      0
-    );
+   orgUsage.sort(
+  (a, b) => b.revenue.estimatedMonthly - a.revenue.estimatedMonthly
+);
 
-    const entitledSmartProperties = subscriptions.reduce(
-      (sum, sub) => sum + (sub.entitledSmartProperties ?? 0),
-      0
-    );
+const entitledLocks = subscriptions.reduce(
+  (sum, sub) => sum + (sub.entitledLocks ?? 0),
+  0
+);
 
+const entitledSmartProperties = subscriptions.reduce(
+  (sum, sub) => sum + (sub.entitledSmartProperties ?? 0),
+  0
+);
     const subscribedOrgs = subscriptions.filter(
       (sub) =>
         (sub.entitledLocks ?? 0) > 0 ||
