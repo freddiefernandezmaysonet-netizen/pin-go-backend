@@ -77,12 +77,14 @@ router.get("/financial/overview", requireAdmin, async (_req, res) => {
     const orgUsage = await Promise.all(
       organizations.map(async (org) => {
         const [locksUsed, smartUsed, reservations] = await Promise.all([
-          prisma.lock.count({
-            where: {
-              organizationId: org.id,
-              isActive: true,
-            },
-          }),
+         prisma.lock.count({
+  where: {
+    property: {
+      organizationId: org.id,
+    },
+    isActive: true,
+  },
+}),
           prisma.property.count({
             where: {
               organizationId: org.id,
