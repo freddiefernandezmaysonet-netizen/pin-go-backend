@@ -289,10 +289,13 @@ onboardingAppointmentsRouter.post("/", async (req, res) => {
 // ✅ AUTO CREATE SALES FOLLOW-UP (SOLO DEMO)
 if (appointment.bookingType === BookingType.DEMO && appointment.scheduledAt) {
   try {
-    const dueAt = new Date(
-      appointment.scheduledAt.getTime() + 60 * 60 * 1000 // +1 hora
-    );
+     // ✅ Delay configurable (default: 2 días)
+const delayDays = Number(process.env.DEMO_FOLLOWUP_DELAY_DAYS ?? 2);
 
+const dueAt = new Date(
+  appointment.scheduledAt.getTime() +
+    delayDays * 24 * 60 * 60 * 1000
+);
     await prisma.salesFollowUp.create({
       data: {
         appointmentId: appointment.id,
