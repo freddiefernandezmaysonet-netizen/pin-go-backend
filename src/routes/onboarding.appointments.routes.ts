@@ -40,6 +40,20 @@ onboardingAppointmentsRouter.get("/availability", async (req, res) => {
         ? timezone.trim()
         : "UTC";
 
+    const today = formatInTimeZone(
+      new Date(),
+      appointmentTimezone,
+      "yyyy-MM-dd"
+    );
+
+    if (date < today) {
+      return res.json({
+        ok: true,
+        slots: [],
+      });
+    }
+
+    const now = new Date();
     const slots: { time: string; available: boolean }[] = [];
 
     for (let hour = 9; hour < 18; hour++) {
@@ -47,6 +61,14 @@ onboardingAppointmentsRouter.get("/availability", async (req, res) => {
 
       const startDate = fromZonedTime(localDateTime, appointmentTimezone);
       const endDate = new Date(startDate.getTime() + 60 * 60 * 1000);
+
+      if (startDate.getTime() <= now.getTime()) {
+        slots.push({
+          time: `${String(hour).padStart(2, "0")}:00`,
+          available: false,
+        });
+        continue;
+      }
 
       const dayOfWeek = formatInTimeZone(
         startDate,
@@ -130,6 +152,13 @@ onboardingAppointmentsRouter.post("/", async (req, res) => {
       });
     }
 
+    if (startDate.getTime() <= Date.now()) {
+      return res.status(400).json({
+        ok: false,
+        error: "Cannot book a past date/time",
+      });
+    }
+
     const dayOfWeek = formatInTimeZone(
       startDate,
       appointmentTimezone,
@@ -143,9 +172,7 @@ onboardingAppointmentsRouter.post("/", async (req, res) => {
       });
     }
 
-    const hour = Number(
-      formatInTimeZone(startDate, appointmentTimezone, "H")
-    );
+    const hour = Number(formatInTimeZone(startDate, appointmentTimezone, "H"));
 
     if (hour < 9 || hour >= 18) {
       return res.status(400).json({
@@ -207,7 +234,9 @@ onboardingAppointmentsRouter.post("/", async (req, res) => {
           .slice(2)}`;
 
         const appointmentLabel =
-          normalizedBookingType === BookingType.DEMO ? "Demo Call" : "Onboarding";
+          normalizedBookingType === BookingType.DEMO
+            ? "Demo Call"
+            : "Onboarding";
 
         const event = {
           summary: `Pin&Go ${appointmentLabel} - ${name}`,
@@ -286,27 +315,26 @@ onboardingAppointmentsRouter.post("/", async (req, res) => {
       },
     });
 
-// ✅ AUTO CREATE SALES FOLLOW-UP (SOLO DEMO)
-if (appointment.bookingType === BookingType.DEMO && appointment.scheduledAt) {
-  try {
-     // ✅ Delay configurable (default: 2 días)
-const delayDays = Number(process.env.DEMO_FOLLOWUP_DELAY_DAYS ?? 2);
+    if (appointment.bookingType === BookingType.DEMO && appointment.scheduledAt) {
+      try {
+        const delayDays = Number(process.env.DEMO_FOLLOWUP_DELAY_DAYS ?? 2);
 
-const dueAt = new Date(
-  appointment.scheduledAt.getTime() +
-    delayDays * 24 * 60 * 60 * 1000
-);
-    await prisma.salesFollowUp.create({
-      data: {
-        appointmentId: appointment.id,
-        bookingType: appointment.bookingType,
-        dueAt,
-      },
-    });
-  } catch (err) {
-    console.error("[FOLLOWUP_CREATE_ERROR]", err);
-  }
-}
+        const dueAt = new Date(
+          appointment.scheduledAt.getTime() +
+            delayDays * 24 * 60 * 60 * 1000
+        );
+
+        await prisma.salesFollowUp.create({
+          data: {
+            appointmentId: appointment.id,
+            bookingType: appointment.bookingType,
+            dueAt,
+          },
+        });
+      } catch (err) {
+        console.error("[FOLLOWUP_CREATE_ERROR]", err);
+      }
+    }
 
     return res.json({
       ok: true,
