@@ -21,7 +21,7 @@ function assertPlatformAdmin(req: any, res: any) {
 
 // 🔍 GET LIST
 adminSalesFollowupsRouter.get(
-  "/api/admin/sales-followups",
+  "/api/internal/admin/sales-followups",
   requireAuth,
   async (req, res) => {
     try {
@@ -65,7 +65,7 @@ return res.status(500).json({
 
 // ✅ MARK AS CONTACTED
 adminSalesFollowupsRouter.post(
-  "/api/admin/sales-followups/:id/contacted",
+  "/api/internal/admin/sales-followups/:id/contacted",
   requireAuth,
   async (req, res) => {
     try {
