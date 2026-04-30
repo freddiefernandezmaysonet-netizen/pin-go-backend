@@ -35,21 +35,32 @@ router.get("/financial/overview", requireAuth, async (req, res) => {
   try {
     if (!assertPlatformAdmin(req, res)) return;
 
+    // 🔥 ÚLTIMOS 30 DÍAS
+    const since = new Date();
+    since.setDate(since.getDate() - 30);
+
     const [
       totalOrgs,
-      totalReservations,
       activeLocks,
       activeSmartProperties,
       subscriptions,
       organizations,
+      totalReservations,
       totalSmsMessages,
       totalAutomationExecutions,
     ] = await Promise.all([
       prisma.organization.count(),
-      prisma.reservation.count(),
-      prisma.lock.count({ where: { isActive: true } }),
-      prisma.property.count({ where: { smartAutomationEnabled: true } }),
+
+      prisma.lock.count({
+        where: { isActive: true },
+      }),
+
+      prisma.property.count({
+        where: { smartAutomationEnabled: true },
+      }),
+
       prisma.subscription.findMany(),
+
       prisma.organization.findMany({
         select: {
           id: true,
@@ -57,10 +68,32 @@ router.get("/financial/overview", requireAuth, async (req, res) => {
           createdAt: true,
         },
       }),
-      prisma.messageLog.count({
-        where: { channel: "sms" },
+
+      // 🔥 SOLO 30 DÍAS
+      prisma.reservation.count({
+        where: {
+          createdAt: {
+            gte: since,
+          },
+        },
       }),
-      prisma.automationExecutionLog.count(),
+
+      prisma.messageLog.count({
+        where: {
+          channel: "sms",
+          createdAt: {
+            gte: since,
+          },
+        },
+      }),
+
+      prisma.automationExecutionLog.count({
+        where: {
+          executedAt: {
+            gte: since,
+          },
+        },
+      }),
     ]);
 
     const orgUsage = await Promise.all(
@@ -88,10 +121,14 @@ router.get("/financial/overview", requireAuth, async (req, res) => {
             },
           }),
 
+          // 🔥 SOLO 30 DÍAS
           prisma.reservation.count({
             where: {
               property: {
                 organizationId: org.id,
+              },
+              createdAt: {
+                gte: since,
               },
             },
           }),
@@ -100,12 +137,18 @@ router.get("/financial/overview", requireAuth, async (req, res) => {
             where: {
               organizationId: org.id,
               channel: "sms",
+              createdAt: {
+                gte: since,
+              },
             },
           }),
 
           prisma.automationExecutionLog.count({
             where: {
               organizationId: org.id,
+              executedAt: {
+                gte: since,
+              },
             },
           }),
         ]);
@@ -138,9 +181,9 @@ router.get("/financial/overview", requireAuth, async (req, res) => {
           usage: {
             locksUsed,
             smartPropertiesUsed: smartUsed,
-            reservations,
-            smsUsed,
-            automationExecutions,
+            reservations, // últimos 30 días
+            smsUsed, // últimos 30 días
+            automationExecutions, // últimos 30 días
           },
 
           revenue: {
@@ -150,6 +193,7 @@ router.get("/financial/overview", requireAuth, async (req, res) => {
       })
     );
 
+    // 🔥 TOP CLIENTES
     orgUsage.sort(
       (a, b) => b.revenue.estimatedMonthly - a.revenue.estimatedMonthly
     );
@@ -181,7 +225,9 @@ router.get("/financial/overview", requireAuth, async (req, res) => {
           subscribedOrgs * STRIPE_FIXED_PER_ORG
         : 0;
 
+    // 🔥 COSTOS REALES (30 días)
     const twilioCost = totalSmsMessages * AVG_SMS_COST;
+
     const tuyaCost =
       activeSmartProperties * TUYA_COST_PER_SMART_PROPERTY;
 
@@ -194,16 +240,18 @@ router.get("/financial/overview", requireAuth, async (req, res) => {
     return res.json({
       ok: true,
 
+      period: "LAST_30_DAYS", // 🔥 CLARIDAD
+
       summary: {
         totalOrgs,
         subscribedOrgs,
-        totalReservations,
+        totalReservations, // 30 días
         entitledLocks,
         entitledSmartProperties,
         activeLocks,
         activeSmartProperties,
-        totalSmsMessages,
-        totalAutomationExecutions,
+        totalSmsMessages, // 30 días
+        totalAutomationExecutions, // 30 días
       },
 
       revenue: {
