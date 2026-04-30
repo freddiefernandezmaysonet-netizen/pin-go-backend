@@ -1,5 +1,6 @@
 import { Router } from "express";
 import { PrismaClient } from "@prisma/client";
+import { requireAuth } from "../middleware/requireAuth";
 
 const prisma = new PrismaClient();
 const router = Router();
@@ -12,16 +13,28 @@ const STRIPE_FIXED_PER_ORG = 0.3;
 const AVG_SMS_COST = 0.008;
 const TUYA_COST_PER_SMART_PROPERTY = 0.3;
 
-function requireAdmin(_req: any, _res: any, next: any) {
-  return next();
+function assertPlatformAdmin(req: any, res: any) {
+  const user = req.user;
+
+  if (!user || user.role !== "PLATFORM_ADMIN") {
+    res.status(403).json({
+      ok: false,
+      error: "Forbidden",
+    });
+    return false;
+  }
+
+  return true;
 }
 
 function money(value: number) {
   return Math.round(value * 100) / 100;
 }
 
-router.get("/financial/overview", requireAdmin, async (_req, res) => {
+router.get("/financial/overview", requireAuth, async (req, res) => {
   try {
+    if (!assertPlatformAdmin(req, res)) return;
+
     const [
       totalOrgs,
       totalReservations,
@@ -33,19 +46,10 @@ router.get("/financial/overview", requireAdmin, async (_req, res) => {
       totalAutomationExecutions,
     ] = await Promise.all([
       prisma.organization.count(),
-
       prisma.reservation.count(),
-
-      prisma.lock.count({
-        where: { isActive: true },
-      }),
-
-      prisma.property.count({
-        where: { smartAutomationEnabled: true },
-      }),
-
+      prisma.lock.count({ where: { isActive: true } }),
+      prisma.property.count({ where: { smartAutomationEnabled: true } }),
       prisma.subscription.findMany(),
-
       prisma.organization.findMany({
         select: {
           id: true,
@@ -53,13 +57,9 @@ router.get("/financial/overview", requireAdmin, async (_req, res) => {
           createdAt: true,
         },
       }),
-
       prisma.messageLog.count({
-        where: {
-          channel: "sms",
-        },
+        where: { channel: "sms" },
       }),
-
       prisma.automationExecutionLog.count(),
     ]);
 
@@ -182,7 +182,6 @@ router.get("/financial/overview", requireAdmin, async (_req, res) => {
         : 0;
 
     const twilioCost = totalSmsMessages * AVG_SMS_COST;
-
     const tuyaCost =
       activeSmartProperties * TUYA_COST_PER_SMART_PROPERTY;
 
