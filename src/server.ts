@@ -229,7 +229,7 @@ app.use("/api/admin", buildAdminLocksSwapRouter(prisma));
 app.use("/api/admin", adminUsageRoutes);
 app.use("/api/admin", adminCapacityRoutes);
 app.use("/api/admin", adminSubscriptionRoutes);
-app.use("/api/admin", adminFinancialRoutes);
+app.use("/api/internal", adminFinancialRoutes);
 
 if (process.env.NODE_ENV !== "production") {
 app.use("/debug", debugRouter);
