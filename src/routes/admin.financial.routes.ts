@@ -10,7 +10,6 @@ const SMART_PRICE = 14.99;
 const STRIPE_PERCENT = 0.029;
 const STRIPE_FIXED_PER_ORG = 0.3;
 const AVG_SMS_COST = 0.008;
-const ESTIMATED_SMS_PER_RESERVATION = 4;
 const TUYA_COST_PER_SMART_PROPERTY = 0.3;
 
 function requireAdmin(_req: any, _res: any, next: any) {
@@ -30,13 +29,13 @@ router.get("/financial/overview", requireAdmin, async (_req, res) => {
       activeSmartProperties,
       subscriptions,
       organizations,
+      totalSmsMessages,
+      totalAutomationExecutions,
     ] = await Promise.all([
       prisma.organization.count(),
 
-      // 🔥 FIX: reservation → property → organization
       prisma.reservation.count(),
 
-      // 🔥 FIX: lock → property → organization
       prisma.lock.count({
         where: { isActive: true },
       }),
@@ -54,11 +53,25 @@ router.get("/financial/overview", requireAdmin, async (_req, res) => {
           createdAt: true,
         },
       }),
+
+      prisma.messageLog.count({
+        where: {
+          channel: "sms",
+        },
+      }),
+
+      prisma.automationExecutionLog.count(),
     ]);
 
     const orgUsage = await Promise.all(
       organizations.map(async (org) => {
-        const [locksUsed, smartUsed, reservations] = await Promise.all([
+        const [
+          locksUsed,
+          smartUsed,
+          reservations,
+          smsUsed,
+          automationExecutions,
+        ] = await Promise.all([
           prisma.lock.count({
             where: {
               isActive: true,
@@ -80,6 +93,19 @@ router.get("/financial/overview", requireAdmin, async (_req, res) => {
               property: {
                 organizationId: org.id,
               },
+            },
+          }),
+
+          prisma.messageLog.count({
+            where: {
+              organizationId: org.id,
+              channel: "sms",
+            },
+          }),
+
+          prisma.automationExecutionLog.count({
+            where: {
+              organizationId: org.id,
             },
           }),
         ]);
@@ -113,6 +139,8 @@ router.get("/financial/overview", requireAdmin, async (_req, res) => {
             locksUsed,
             smartPropertiesUsed: smartUsed,
             reservations,
+            smsUsed,
+            automationExecutions,
           },
 
           revenue: {
@@ -122,19 +150,20 @@ router.get("/financial/overview", requireAdmin, async (_req, res) => {
       })
     );
 
-   orgUsage.sort(
-  (a, b) => b.revenue.estimatedMonthly - a.revenue.estimatedMonthly
-);
+    orgUsage.sort(
+      (a, b) => b.revenue.estimatedMonthly - a.revenue.estimatedMonthly
+    );
 
-const entitledLocks = subscriptions.reduce(
-  (sum, sub) => sum + (sub.entitledLocks ?? 0),
-  0
-);
+    const entitledLocks = subscriptions.reduce(
+      (sum, sub) => sum + (sub.entitledLocks ?? 0),
+      0
+    );
 
-const entitledSmartProperties = subscriptions.reduce(
-  (sum, sub) => sum + (sub.entitledSmartProperties ?? 0),
-  0
-);
+    const entitledSmartProperties = subscriptions.reduce(
+      (sum, sub) => sum + (sub.entitledSmartProperties ?? 0),
+      0
+    );
+
     const subscribedOrgs = subscriptions.filter(
       (sub) =>
         (sub.entitledLocks ?? 0) > 0 ||
@@ -152,10 +181,7 @@ const entitledSmartProperties = subscriptions.reduce(
           subscribedOrgs * STRIPE_FIXED_PER_ORG
         : 0;
 
-    const estimatedSms =
-      totalReservations * ESTIMATED_SMS_PER_RESERVATION;
-
-    const twilioCost = estimatedSms * AVG_SMS_COST;
+    const twilioCost = totalSmsMessages * AVG_SMS_COST;
 
     const tuyaCost =
       activeSmartProperties * TUYA_COST_PER_SMART_PROPERTY;
@@ -177,6 +203,8 @@ const entitledSmartProperties = subscriptions.reduce(
         entitledSmartProperties,
         activeLocks,
         activeSmartProperties,
+        totalSmsMessages,
+        totalAutomationExecutions,
       },
 
       revenue: {
