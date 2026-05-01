@@ -152,10 +152,12 @@ router.post("/api/public/signup-checkout", async (req: Request, res: Response) =
       subscription_data: {
         metadata: {
           pendingSignupId: pendingSignup.id,
+          flow: "signup_onboarding",
         },
       },
       metadata: {
         pendingSignupId: pendingSignup.id,
+        flow: "signup_onboarding",
       },
     });
 
