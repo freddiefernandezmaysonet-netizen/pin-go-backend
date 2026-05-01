@@ -265,6 +265,7 @@ export async function ttlockChangePasscode(params: {
     accessToken,
     lockId,
     keyboardPwdId: Number(params.keyboardPwdId),
+    keyboardPwdName: `Pin&Go ${params.keyboardPwdId}`,
     startDate: start,
     endDate: end,
     changeType: 2,
