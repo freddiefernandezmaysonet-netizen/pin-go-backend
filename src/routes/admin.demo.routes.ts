@@ -8,10 +8,15 @@ export const adminDemoRouter = Router();
 
 function assertPlatformAdmin(req: any, res: any) {
   const user = req.user;
+
   if (!user || user.role !== "PLATFORM_ADMIN") {
-    res.status(403).json({ ok: false, error: "Forbidden" });
+    res.status(403).json({
+      ok: false,
+      error: "Forbidden",
+    });
     return false;
   }
+
   return true;
 }
 
@@ -36,7 +41,7 @@ adminDemoRouter.post(
         },
       });
 
-      if (!property || !property.locks.length) {
+      if (!property || property.locks.length === 0) {
         return res.status(400).json({
           ok: false,
           error: "No demo property or lock found",
@@ -60,43 +65,46 @@ adminDemoRouter.post(
           source: "DEMO",
           checkIn: startsAt,
           checkOut: endsAt,
+          externalProvider: "DEMO",
           externalId: `DEMO:${Date.now()}`,
+          externalRaw: {
+            type: "PIN_GO_LIVE_DEMO",
+            createdBy: user.email ?? user.id,
+          },
         },
       });
 
-      // 🔐 Crear accessGrant
+      // 🔐 Crear accessGrant (solo campos válidos del schema)
       const grant = await prisma.accessGrant.create({
         data: {
           reservationId: reservation.id,
-          propertyId: property.id,
           lockId: lock.id,
           method: AccessMethod.PASSCODE_TIMEBOUND,
           type: AccessGrantType.GUEST,
-          status: "ACTIVE",
+          status: "PENDING", // importante: deja que activateGrant haga su trabajo
           startsAt,
           endsAt,
         },
-        include: {
-          lock: true,
-        },
       });
 
-    const activatedGrant = await activateGrant(prisma, grant.id);
-     
-     return res.json({
-  ok: true,
-  data: {
-    property: property.name,
-    reservationId: reservation.id,
-    grantId: grant.id,
-    startsAt,
-    endsAt,
-    activatedGrant,
-  },
-});
+      // ⚙️ Activar usando flujo REAL (NO directo TTLock)
+      const activatedGrant = await activateGrant(prisma, grant.id);
 
+      return res.json({
+        ok: true,
+        data: {
+          property: property.name,
+          lock: lock.displayName ?? lock.ttlockLockName ?? lock.id,
+          reservationId: reservation.id,
+          grantId: grant.id,
+          startsAt,
+          endsAt,
+          activatedGrant,
+        },
+      });
     } catch (error) {
       console.error("[DEMO_RUN_ERROR]", error);
+
       return res.status(500).json({
         ok: false,
         error: "Demo failed",
