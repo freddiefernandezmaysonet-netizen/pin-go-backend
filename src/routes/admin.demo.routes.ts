@@ -86,7 +86,7 @@ adminDemoRouter.post(
 
         guest_name: "Pin&Go Demo Guest",
         guest_email: "demo@pingo.com",
-        guest_phone: "+17870000000",
+        guest_phone: "+17876768198",
 
         status: "Booked",
 
