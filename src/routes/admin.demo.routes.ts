@@ -53,7 +53,6 @@ adminDemoRouter.post(
       // 🧾 Crear reservation DEMO
       const reservation = await prisma.reservation.create({
         data: {
-          organizationId: orgId,
           propertyId: property.id,
           guestName: "Pin&Go Demo Guest",
           guestEmail: "demo@pingo.com",
