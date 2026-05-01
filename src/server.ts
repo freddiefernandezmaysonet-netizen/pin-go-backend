@@ -72,6 +72,7 @@ import ttlockDisconnectRoutes from "./routes/org/ttlock.disconnect.routes";
 import { onboardingAppointmentsRouter } from "./routes/onboarding.appointments.routes";
 import { adminSalesFollowupsRouter } from "./routes/admin.sales-followups.routes";
 import { adminDemoRouter } from "./routes/admin.demo.routes";
+import { signupSuccessRouter } from "./routes/public.signup.success.routes";
 
 const app = express();
 const prisma = new PrismaClient();
@@ -264,6 +265,7 @@ app.use(dashboardAccessRouter);
 app.use(dashboardMetricsRouter);
 app.use(dashboardLocksCapacityRouter);
 app.use(dashboardPmsRouter);
+app.use(signupSuccessRouter);
 
 if (process.env.NODE_ENV !== "production") {
   app.use(devPmsRouter);
