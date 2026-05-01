@@ -30,7 +30,32 @@ adminDemoRouter.post(
       const user = req.user;
       const orgId = user.orgId as string;
 
-      // 🔗 buscar conexión Lodgify real
+      const { checkIn, checkOut } = req.body ?? {};
+
+      if (!checkIn || !checkOut) {
+        return res.status(400).json({
+          ok: false,
+          error: "Missing checkIn/checkOut",
+        });
+      }
+
+      const checkInDate = new Date(checkIn);
+      const checkOutDate = new Date(checkOut);
+
+      if (Number.isNaN(checkInDate.getTime()) || Number.isNaN(checkOutDate.getTime())) {
+        return res.status(400).json({
+          ok: false,
+          error: "Invalid checkIn/checkOut",
+        });
+      }
+
+      if (checkOutDate <= checkInDate) {
+        return res.status(400).json({
+          ok: false,
+          error: "checkOut must be after checkIn",
+        });
+      }
+
       const connection = await prisma.pmsConnection.findFirst({
         where: {
           organizationId: orgId,
@@ -46,43 +71,78 @@ adminDemoRouter.post(
         });
       }
 
-      // 🧪 payload FAKE tipo Lodgify (clave)
-      const now = new Date();
-      const checkIn = new Date(now.getTime() + 2 * 60 * 1000);
-      const checkOut = new Date(now.getTime() + 60 * 60 * 1000);
+      const externalId = `DEMO-${Date.now()}`;
 
       const payload = {
         event: "booking_change",
-        booking_id: `DEMO-${Date.now()}`,
-        property_id: "DEMO_PROPERTY", // se mapeará por nombre luego
-        property_name: "Demo", // IMPORTANTE → debe coincidir con tu property
-        arrival: checkIn.toISOString().split("T")[0],
-        departure: checkOut.toISOString().split("T")[0],
+        booking_id: externalId,
+        id: externalId,
+
+        property_id: "DEMO",
+        property_name: "Demo",
+
+        arrival: checkInDate.toISOString(),
+        departure: checkOutDate.toISOString(),
+
         guest_name: "Pin&Go Demo Guest",
         guest_email: "demo@pingo.com",
+        guest_phone: "+17870000000",
+
         status: "Booked",
+
+        amount_paid: 100,
+        total_amount: 100,
+        amount_due: 0,
+
         updated_at: new Date().toISOString(),
+        created_at: new Date().toISOString(),
+
+        demo: true,
+        created_by: user.email ?? user.id,
       };
 
-      // 🧾 crear evento ingest
       const event = await prisma.webhookEventIngest.create({
         data: {
           connectionId: connection.id,
           provider: PmsProvider.LODGIFY,
           eventType: "DEMO_BOOKING",
-          externalEventId: `DEMO-${Date.now()}`,
+          externalEventId: externalId,
           payloadRaw: payload,
           status: "PENDING",
         },
       });
 
-      // ⚙️ correr pipeline REAL
       await processWebhookEventById(event.id);
+
+      const processedEvent = await prisma.webhookEventIngest.findUnique({
+        where: { id: event.id },
+      });
+
+      const reservation = await prisma.reservation.findFirst({
+        where: {
+          externalProvider: "LODGIFY",
+          externalId,
+        },
+        include: {
+          accessGrants: {
+            include: {
+              lock: true,
+            },
+          },
+          NfcAssignment: true,
+        },
+      });
 
       return res.json({
         ok: true,
         data: {
           eventId: event.id,
+          eventStatus: processedEvent?.status ?? null,
+          eventError: processedEvent?.lastError ?? null,
+          reservation,
+          checkIn: checkInDate.toISOString(),
+          checkOut: checkOutDate.toISOString(),
+          paymentState: "PAID",
           message: "Demo pipeline executed",
         },
       });
