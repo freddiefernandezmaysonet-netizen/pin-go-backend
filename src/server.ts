@@ -71,6 +71,7 @@ import adminFinancialRoutes from "./routes/admin.financial.routes";
 import ttlockDisconnectRoutes from "./routes/org/ttlock.disconnect.routes";
 import { onboardingAppointmentsRouter } from "./routes/onboarding.appointments.routes";
 import { adminSalesFollowupsRouter } from "./routes/admin.sales-followups.routes";
+import { adminDemoRouter } from "./routes/admin.demo.routes";
 
 const app = express();
 const prisma = new PrismaClient();
@@ -253,6 +254,7 @@ app.use("/api/dashboard/health", buildDashboardHealthRouter(prisma));
 app.use("/api/org", ttlockDisconnectRoutes);
 
 app.use(adminSalesFollowupsRouter);
+app.use(adminDemoRouter);
 
 app.use(dashboardRouter);
 app.use(dashboardReservationsRouter);
