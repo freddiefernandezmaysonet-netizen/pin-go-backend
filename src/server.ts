@@ -179,6 +179,8 @@ app.get("/ready", async (_req, res) => {
 app.use(signupPublicRoutes);
 app.use(authRouter);
 app.use("/api/onboarding/appointments", onboardingAppointmentsRouter);
+app.use(signupSuccessRouter);
+
 // =====================
 // DEV ROUTES (bloqueadas en producción)
 // =====================
@@ -265,7 +267,6 @@ app.use(dashboardAccessRouter);
 app.use(dashboardMetricsRouter);
 app.use(dashboardLocksCapacityRouter);
 app.use(dashboardPmsRouter);
-app.use(signupSuccessRouter);
 
 if (process.env.NODE_ENV !== "production") {
   app.use(devPmsRouter);
