@@ -1,7 +1,7 @@
 import { Router } from "express";
-import { PrismaClient, AccessMethod, AccessGrantType } from "@prisma/client";
+import { PrismaClient, PmsProvider } from "@prisma/client";
 import { requireAuth } from "../middleware/requireAuth";
-import { activateGrant } from "../services/ttlock/ttlock.brain";
+import { processWebhookEventById } from "../pms/ingest/webhook.processor";
 
 const prisma = new PrismaClient();
 export const adminDemoRouter = Router();
@@ -30,84 +30,68 @@ adminDemoRouter.post(
       const user = req.user;
       const orgId = user.orgId as string;
 
-      // 🔍 Buscar propiedad DEMO
-      const property = await prisma.property.findFirst({
+      // 🔗 buscar conexión Lodgify real
+      const connection = await prisma.pmsConnection.findFirst({
         where: {
           organizationId: orgId,
-          name: { contains: "Demo" },
-        },
-        include: {
-          locks: true,
+          provider: PmsProvider.LODGIFY,
+          status: "ACTIVE",
         },
       });
 
-      if (!property || property.locks.length === 0) {
+      if (!connection) {
         return res.status(400).json({
           ok: false,
-          error: "No demo property or lock found",
+          error: "No active Lodgify connection found",
         });
       }
 
-      const lock = property.locks[0];
-
-      // ⏱ Ventana DEMO
+      // 🧪 payload FAKE tipo Lodgify (clave)
       const now = new Date();
-      const startsAt = new Date(now.getTime() + 2 * 60 * 1000); // +2 min
-      const endsAt = new Date(now.getTime() + 60 * 60 * 1000); // +1h
+      const checkIn = new Date(now.getTime() + 2 * 60 * 1000);
+      const checkOut = new Date(now.getTime() + 60 * 60 * 1000);
 
-      // 🧾 Crear reservation DEMO
-      const reservation = await prisma.reservation.create({
+      const payload = {
+        event: "booking_change",
+        booking_id: `DEMO-${Date.now()}`,
+        property_id: "DEMO_PROPERTY", // se mapeará por nombre luego
+        property_name: "Demo", // IMPORTANTE → debe coincidir con tu property
+        arrival: checkIn.toISOString().split("T")[0],
+        departure: checkOut.toISOString().split("T")[0],
+        guest_name: "Pin&Go Demo Guest",
+        guest_email: "demo@pingo.com",
+        status: "Booked",
+        updated_at: new Date().toISOString(),
+      };
+
+      // 🧾 crear evento ingest
+      const event = await prisma.webhookEventIngest.create({
         data: {
-          propertyId: property.id,
-          guestName: "Pin&Go Demo Guest",
-          guestEmail: "demo@pingo.com",
-          status: "ACTIVE",
-          source: "DEMO",
-          checkIn: startsAt,
-          checkOut: endsAt,
-          externalProvider: "DEMO",
-          externalId: `DEMO:${Date.now()}`,
-          externalRaw: {
-            type: "PIN_GO_LIVE_DEMO",
-            createdBy: user.email ?? user.id,
-          },
+          connectionId: connection.id,
+          provider: PmsProvider.LODGIFY,
+          eventType: "DEMO_BOOKING",
+          externalEventId: `DEMO-${Date.now()}`,
+          payloadRaw: payload,
+          status: "PENDING",
         },
       });
 
-      // 🔐 Crear accessGrant (solo campos válidos del schema)
-      const grant = await prisma.accessGrant.create({
-        data: {
-          reservationId: reservation.id,
-          lockId: lock.id,
-          method: AccessMethod.PASSCODE_TIMEBOUND,
-          type: AccessGrantType.GUEST,
-          status: "PENDING", // importante: deja que activateGrant haga su trabajo
-          startsAt,
-          endsAt,
-        },
-      });
-
-      // ⚙️ Activar usando flujo REAL (NO directo TTLock)
-      const activatedGrant = await activateGrant(grant.id);
+      // ⚙️ correr pipeline REAL
+      await processWebhookEventById(event.id);
 
       return res.json({
         ok: true,
         data: {
-          property: property.name,
-          lock: lock.displayName ?? lock.ttlockLockName ?? lock.id,
-          reservationId: reservation.id,
-          grantId: grant.id,
-          startsAt,
-          endsAt,
-          activatedGrant,
+          eventId: event.id,
+          message: "Demo pipeline executed",
         },
       });
     } catch (error) {
-      console.error("[DEMO_RUN_ERROR]", error);
+      console.error("[DEMO_PIPELINE_ERROR]", error);
 
       return res.status(500).json({
         ok: false,
-        error: "Demo failed",
+        error: "Demo pipeline failed",
       });
     }
   }
