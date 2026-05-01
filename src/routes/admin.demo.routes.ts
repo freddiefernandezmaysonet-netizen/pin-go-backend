@@ -1,7 +1,7 @@
 import { Router } from "express";
 import { PrismaClient, AccessMethod, AccessGrantType } from "@prisma/client";
 import { requireAuth } from "../middleware/requireAuth";
-import { activateGrant } from "../services/access.service";
+import { activateGrant } from "../services/ttlock/ttlock.brain";
 
 const prisma = new PrismaClient();
 export const adminDemoRouter = Router();
@@ -88,7 +88,7 @@ adminDemoRouter.post(
       });
 
       // ⚙️ Activar usando flujo REAL (NO directo TTLock)
-      const activatedGrant = await activateGrant(prisma, grant.id);
+      const activatedGrant = await activateGrant(grant.id);
 
       return res.json({
         ok: true,
