@@ -67,7 +67,6 @@ adminDemoRouter.post(
       // 🔐 Crear accessGrant
       const grant = await prisma.accessGrant.create({
         data: {
-          organizationId: orgId,
           reservationId: reservation.id,
           propertyId: property.id,
           lockId: lock.id,
