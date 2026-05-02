@@ -1,7 +1,7 @@
 import { prisma } from "../../lib/prisma";
 import { AccessMethod, AccessStatus } from "@prisma/client";
 import {
-  ttlockGetPasscode,
+  ttlockCreatePasscode,
   ttlockDeletePasscode,
 } from "../../ttlock/ttlock.passcode";
 import { ttlockChangeCardPeriod } from "../../ttlock/ttlock.card";
@@ -16,6 +16,10 @@ function toIntOrNull(v: unknown): number | null {
   if (v === null || v === undefined) return null;
   const n = Number(v);
   return Number.isFinite(n) ? n : null;
+}
+
+function generatePasscode() {
+  return Math.floor(100000 + Math.random() * 900000).toString();
 }
 
 async function resolveGrantAccessToken(propertyId?: string | null) {
@@ -64,6 +68,7 @@ export async function activateGrant(grantId: string) {
 
   if (grant.method === AccessMethod.NFC_TIMEBOUND) {
     const cardId = toIntOrNull(grant.ttlockRefId);
+
     if (!cardId) {
       throw new Error("NFC_TIMEBOUND grant missing numeric ttlockRefId (cardId)");
     }
@@ -80,74 +85,71 @@ export async function activateGrant(grantId: string) {
 
   let keyboardPwdId: number | null = null;
   let code: string | null = null;
-  let otpPayload: any = null;
+  let passcodePayload: any = null;
 
-if (grant.method === AccessMethod.PASSCODE_TIMEBOUND) {
-  // Validar fechas
-  const startDate = grant.startsAt?.getTime();
-  const endDate = grant.endsAt?.getTime();
+  if (grant.method === AccessMethod.PASSCODE_TIMEBOUND) {
+    const startDate = grant.startsAt?.getTime();
+    const endDate = grant.endsAt?.getTime();
 
-  if (!startDate || !endDate || endDate <= startDate) {
-    console.warn("[activateGrant] invalid dates, fallback to TTLock default OTP", {
-      grantId: grant.id,
-      startsAt: grant.startsAt,
-      endsAt: grant.endsAt,
-    });
-  }
-
-  console.log("[ACCESS][PASSCODE] grant window", {
-    grantId: grant.id,
-    reservationId: grant.reservationId,
-    propertyId: grant.lock?.propertyId ?? null,
-    startsAt_raw: grant.startsAt,
-    endsAt_raw: grant.endsAt,
-    startsAt_iso: grant.startsAt?.toISOString?.() ?? null,
-    endsAt_iso: grant.endsAt?.toISOString?.() ?? null,
-    startsAt_ms: grant.startsAt?.getTime?.() ?? null,
-    endsAt_ms: grant.endsAt?.getTime?.() ?? null,
-  });
-
-  const pass = await ttlockGetPasscode({
-    lockId: Number(grant.lock.ttlockLockId),
-
-    // 👇 CAMBIO CLAVE
-    keyboardPwdType: 3, // ← PERIOD password (controlado por fechas)
-
-    name: grant.reservation?.guestName
-      ? `PinGo ${String(grant.reservation.guestName).slice(0, 20)}`
-      : "PinGo Guest",
-
-    // 👇 NUEVO
-    startDate: startDate,
-    endDate: endDate,
-
-    accessToken,
-  });
-
-  keyboardPwdId = pass?.keyboardPwdId ? Number(pass.keyboardPwdId) : null;
-  code = pass?.keyboardPwd ? String(pass.keyboardPwd) : null;
-  otpPayload = pass;
-
-  if (!code) {
-    await prisma.accessGrant.update({
-      where: { id: grant.id },
-      data: {
-        status: AccessStatus.FAILED,
-        lastError: "TTLock did not return keyboardPwd",
-        ttlockPayload: {
-          ...(grant.ttlockPayload as any),
-          activatedAt: Date.now(),
-          otp: otpPayload,
-          nfc: nfcResult,
+    if (!startDate || !endDate || endDate <= startDate) {
+      await prisma.accessGrant.update({
+        where: { id: grant.id },
+        data: {
+          status: AccessStatus.FAILED,
+          lastError: "Invalid passcode window",
         },
-      },
+      });
+
+      return { ok: false, reason: "Invalid passcode window" };
+    }
+
+    console.log("[ACCESS][PASSCODE] creating custom reservation passcode", {
+      grantId: grant.id,
+      reservationId: grant.reservationId,
+      propertyId: grant.lock?.propertyId ?? null,
+      startsAt_iso: grant.startsAt?.toISOString?.() ?? null,
+      endsAt_iso: grant.endsAt?.toISOString?.() ?? null,
+      startsAt_ms: startDate,
+      endsAt_ms: endDate,
     });
 
-    return { ok: false, reason: "No passcode returned" };
-  }
-}
+    code = generatePasscode();
 
-    await prisma.accessGrant.update({
+    const pass = await ttlockCreatePasscode({
+      lockId: Number(grant.lock.ttlockLockId),
+      code,
+      startDate,
+      endDate,
+      addType: 2,
+      name: grant.reservation?.guestName
+        ? `PinGo ${String(grant.reservation.guestName).slice(0, 20)}`
+        : "PinGo Guest",
+      accessToken,
+    });
+
+    keyboardPwdId = pass?.keyboardPwdId ? Number(pass.keyboardPwdId) : null;
+    passcodePayload = pass;
+
+    if (!keyboardPwdId) {
+      await prisma.accessGrant.update({
+        where: { id: grant.id },
+        data: {
+          status: AccessStatus.FAILED,
+          lastError: "TTLock did not return keyboardPwdId",
+          ttlockPayload: {
+            ...(grant.ttlockPayload as any),
+            activatedAt: Date.now(),
+            passcode: passcodePayload,
+            nfc: nfcResult,
+          },
+        },
+      });
+
+      return { ok: false, reason: "No keyboardPwdId returned" };
+    }
+  }
+
+  await prisma.accessGrant.update({
     where: { id: grant.id },
     data: {
       status: AccessStatus.ACTIVE,
@@ -157,7 +159,9 @@ if (grant.method === AccessMethod.PASSCODE_TIMEBOUND) {
       ttlockPayload: {
         ...(grant.ttlockPayload as any),
         activatedAt: Date.now(),
-        otp: otpPayload ? { keyboardPwdId, raw: otpPayload } : null,
+        passcode: passcodePayload
+          ? { keyboardPwdId, raw: passcodePayload }
+          : null,
         nfc: nfcResult ?? null,
       },
     },
@@ -190,6 +194,7 @@ export async function deactivateGrant(grantId: string) {
 
   if (grant.method === AccessMethod.NFC_TIMEBOUND) {
     const cardId = toIntOrNull(grant.ttlockRefId);
+
     if (!cardId) {
       throw new Error("NFC_TIMEBOUND grant missing numeric ttlockRefId (cardId)");
     }
