@@ -61,6 +61,48 @@ export async function reconcileReservation(reservationId: string) {
       }
     }
 
+    // 🔥 CANCELLED → revoke NFC assignments immediately
+    for (const a of reservation.NfcAssignment ?? []) {
+      if (a.status !== NfcAssignmentStatus.ACTIVE) continue;
+
+      try {
+        const lock = reservation.property?.locks?.find(
+          (l: any) => l.isActive && l.ttlockLockId
+        );
+
+        const ttlockLockId = lock?.ttlockLockId
+          ? Number(lock.ttlockLockId)
+          : null;
+
+        if (ttlockLockId && a.NfcCard?.ttlockCardId) {
+          const nowMs = Date.now();
+
+          await ttlockChangeCardPeriod({
+            lockId: ttlockLockId,
+            cardId: Number(a.NfcCard.ttlockCardId),
+            startDate: nowMs - 60_000,
+            endDate: nowMs - 30_000,
+            changeType: 2,
+          });
+        }
+
+        await prisma.nfcAssignment.update({
+          where: { id: a.id },
+          data: {
+            status: NfcAssignmentStatus.ENDED,
+            lastError: null,
+          },
+        });
+      } catch (e: any) {
+        await prisma.nfcAssignment.update({
+          where: { id: a.id },
+          data: {
+            lastError: `CANCELLED_REVOKE_FAILED: ${String(e?.message ?? e)}`,
+          },
+        }).catch(() => {});
+      }
+    }
+
     // opcional enterprise: marca reconciled
     await prisma.reservation.update({
       where: { id: reservation.id },
