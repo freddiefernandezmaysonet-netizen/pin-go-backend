@@ -84,6 +84,7 @@ model Property {
   automationDevices          PropertyAutomationDevice[]
   automationSettings         PropertyAutomationSettings?
   propertyDevices            PropertyDevice[]
+  propertyStaff            PropertyStaff[]
   reservations               Reservation[]
 
   @@index([organizationId])
@@ -433,6 +434,7 @@ model StaffMember {
   updatedAt      DateTime          @updatedAt
   grants         AccessGrant[]
   assignments    StaffAssignment[]
+  propertyStaff  PropertyStaff[]
   organization   Organization      @relation(fields: [organizationId], references: [id])
 
   @@index([organizationId, isActive])
@@ -460,6 +462,27 @@ model StaffAssignment {
   @@index([reservationId])
   @@index([staffMemberId])
   @@index([status, startsAt, endsAt])
+}
+
+model PropertyStaff {
+  id            String   @id @default(cuid())
+  propertyId    String
+  staffMemberId String
+
+  role          PropertyStaffRole
+  backupOrder   Int? // solo para BACKUP
+
+  isActive      Boolean @default(true)
+
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  property      Property     @relation(fields: [propertyId], references: [id], onDelete: Cascade)
+  staffMember   StaffMember  @relation(fields: [staffMemberId], references: [id], onDelete: Cascade)
+
+  @@unique([propertyId, staffMemberId])
+  @@index([propertyId])
+  @@index([staffMemberId])
 }
 
 model GuestLinkReminderLog {
@@ -840,6 +863,11 @@ enum StaffAssignmentStatus {
   COMPLETED
   CANCELLED
   FAILED
+}
+
+enum PropertyStaffRole {
+  PRIMARY
+  BACKUP
 }
 
 enum PaymentState {
