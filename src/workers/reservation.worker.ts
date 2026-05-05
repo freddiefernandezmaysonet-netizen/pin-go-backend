@@ -460,93 +460,13 @@ for (const r of reservations) {
   if ((res as any)?.ok === true || (res as any)?.skipped === true) {
   await prisma.accessGrant.update({ where: { id: grant.id }, data: { lastError: null } });
 
-// ===== PIN&GO: ENSURE CLEANING STAFF ASSIGNMENT (SCHEDULED) =====
-const prop = await prisma.property.findUnique({
-  where: { id: r.propertyId },
-  select: {
-    organizationId: true,
-    cleaningStartOffsetMinutes: true,
-    cleaningDurationMinutes: true,
-  },
+// ===== PIN&GO: CLEANING CONFIRMATION FLOW =====
+// Cleaning staff assignment and cleaning NFC are now created only
+// after the cleaner confirms availability from the SMS link.
+// Do NOT auto-create StaffAssignment or CLEANING NfcAssignment here.
+log("Cleaning auto-assignment skipped; waiting for confirmation", {
+  reservationId: r.id,
 });
-
-if (!prop?.organizationId) {
-  errLog("Cleaning schedule skipped: missing property.organizationId", {
-    reservationId: r.id,
-    propertyId: r.propertyId,
-  });
-} else {
-  // Elige el cleaner "default": el más viejo activo (puedes cambiar el criterio luego)
-  const cleaner = await prisma.staffMember.findFirst({
-    where: { organizationId: prop.organizationId, isActive: true },
-    orderBy: { createdAt: "asc" },
-  });
-
-  if (!cleaner) {
-    errLog("Cleaning schedule skipped: no active StaffMember", {
-      reservationId: r.id,
-      organizationId: prop.organizationId,
-    });
-  } else {
-    const offsetMin = prop.cleaningStartOffsetMinutes ?? 30;
-    const durMin = prop.cleaningDurationMinutes ?? 180;
-
-    const checkOut = new Date(r.checkOut);
-    const cleaningStart = new Date(checkOut.getTime() + offsetMin * 60_000);
-    const cleaningEnd = new Date(cleaningStart.getTime() + durMin * 60_000);
-
-try {
-  const lock = await prisma.lock.findUnique({ where: { id: grant.lockId } });
-  const ttlockLockId = lock?.ttlockLockId;
-  if (!ttlockLockId) throw new Error("Missing lock.ttlockLockId for cleaning pre-assign");
-
-  await assignNfcCards(prisma, {
-    reservationId: r.id,
-    ttlockLockId: Number(ttlockLockId),
-    propertyId: String(r.propertyId),
-    role: "CLEANING",
-    startsAt: cleaningStart,
-    endsAt: cleaningEnd,
-    count: 1,
-  } as any);
-
-  log("Cleaning NFC pre-assigned", { reservationId: r.id });
-} catch (e: any) {
-  errLog("Cleaning NFC pre-assign FAILED", { reservationId: r.id, err: toErrString(e) });
-}
-
-    // ✅ idempotente por @@unique([reservationId, staffMemberId])
-    const existing = await prisma.staffAssignment.findUnique({
-      where: {
-        reservationId_staffMemberId: {
-          reservationId: r.id,
-          staffMemberId: cleaner.id,
-        },
-      },
-    });
-
-    if (!existing) {
-      await prisma.staffAssignment.create({
-        data: {
-          reservationId: r.id,
-          staffMemberId: cleaner.id,
-          method: StaffAccessMethod.NFC_TIMEBOUND,
-          startsAt: cleaningStart,
-          endsAt: cleaningEnd,
-          status: StaffAssignmentStatus.SCHEDULED,
-        },
-      });
-
-      log("Cleaning scheduled", {
-        reservationId: r.id,
-        staffMemberId: cleaner.id,
-        cleaningStart: cleaningStart.toISOString(),
-        cleaningEnd: cleaningEnd.toISOString(),
-      });
-    }
-  }
-}
-
 
   // ✅ 2) ACTIVAR NFC (GUEST) por periodo via GATEWAY (changeType=2)
   try {
