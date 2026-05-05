@@ -15,6 +15,7 @@ import { reconcileReservation } from "./reservation.reconcile.service";
 import { log } from "../utils/log";
 import { fromZonedTime } from "date-fns-tz";
 import { selectNextStaffForProperty } from "./staff-selection.service";
+import { createCleaningConfirmation } from "./cleaning-confirmation.service";
 
 console.log("[INGEST] running src/services/ingest.service.ts", new Date().toISOString());
 const prisma = new PrismaClient();
@@ -188,44 +189,21 @@ export async function ingestReservation(p: IngestPayload) {
       endsAt: reservation.checkOut,
     });
 
-    try {
-      const staff = await selectNextStaffForProperty({
-        propertyId: reservation.propertyId,
-      });
+  try {
+  const staff = await selectNextStaffForProperty({
+    propertyId: reservation.propertyId,
+  });
 
-      if (staff) {
-        const { startsAt, endsAt } = computeCleaningWindowPR(
-          reservation.checkOut
-        );
-
-        await tx.staffAssignment.upsert({
-          where: {
-            reservationId_staffMemberId: {
-              reservationId: reservation.id,
-              staffMemberId: staff.id,
-            },
-          },
-          create: {
-            reservationId: reservation.id,
-            staffMemberId: staff.id,
-            method: StaffAccessMethod.NFC_TIMEBOUND,
-            startsAt,
-            endsAt,
-            status: StaffAssignmentStatus.SCHEDULED,
-          },
-          update: {
-            method: StaffAccessMethod.NFC_TIMEBOUND,
-            startsAt,
-            endsAt,
-            status: StaffAssignmentStatus.SCHEDULED,
-            lastError: null,
-          },
-        });
-      }
-    } catch (e) {
-      console.error("[STAFF_ASSIGNMENT_ERROR]", e);
-    }
-
+  if (staff) {
+    await createCleaningConfirmation({
+      reservationId: reservation.id,
+      propertyId: reservation.propertyId,
+      staffMemberId: staff.id,
+    });
+  }
+} catch (e) {
+  console.error("[CLEANING_CONFIRMATION_CREATE_ERROR]", e);
+}
         return {
       reservationId: reservation.id,
       guestToken: ensured.guestToken,

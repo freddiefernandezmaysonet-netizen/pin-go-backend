@@ -485,6 +485,19 @@ model PropertyStaff {
   @@index([staffMemberId])
 }
 
+model CleaningConfirmation {
+  id             String   @id @default(cuid())
+  reservationId  String
+  propertyId     String
+  staffMemberId  String
+
+  token          String   @unique
+  status         String   // PENDING | CONFIRMED | DECLINED
+
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+}
+
 model GuestLinkReminderLog {
   id            String       @id @default(cuid())
   reservationId String
