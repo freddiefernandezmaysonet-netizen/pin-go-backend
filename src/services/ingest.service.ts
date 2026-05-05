@@ -189,75 +189,44 @@ export async function ingestReservation(p: IngestPayload) {
     });
 
     try {
-      const prop = await tx.property.findUnique({
-        where: { id: reservation.propertyId },
-        select: { organizationId: true },
+      const staff = await selectNextStaffForProperty({
+        propertyId: reservation.propertyId,
       });
 
-      const staff = await selectNextStaffForProperty({
-  propertyId: reservation.propertyId,
-});
+      if (staff) {
+        const { startsAt, endsAt } = computeCleaningWindowPR(
+          reservation.checkOut
+        );
 
-if (staff) {
-  const { startsAt, endsAt } = computeCleaningWindowPR(reservation.checkOut);
-
-  await tx.staffAssignment.upsert({
-    where: {
-      reservationId_staffMemberId: {
-        reservationId: reservation.id,
-        staffMemberId: staff.id,
-      },
-    },
-    create: {
-      reservationId: reservation.id,
-      staffMemberId: staff.id,
-      method: StaffAccessMethod.NFC_TIMEBOUND,
-      startsAt,
-      endsAt,
-      status: StaffAssignmentStatus.SCHEDULED,
-    },
-    update: {
-      method: StaffAccessMethod.NFC_TIMEBOUND,
-      startsAt,
-      endsAt,
-      status: StaffAssignmentStatus.SCHEDULED,
-      lastError: null,
-    },
-  });
-}
-        if (staff) {
-          const { startsAt, endsAt } = computeCleaningWindowPR(reservation.checkOut);
-
-          await tx.staffAssignment.upsert({
-            where: {
-              reservationId_staffMemberId: {
-                reservationId: reservation.id,
-                staffMemberId: staff.id,
-              },
-            },
-            create: {
+        await tx.staffAssignment.upsert({
+          where: {
+            reservationId_staffMemberId: {
               reservationId: reservation.id,
               staffMemberId: staff.id,
-              method: StaffAccessMethod.NFC_TIMEBOUND,
-              startsAt,
-              endsAt,
-              status: StaffAssignmentStatus.SCHEDULED,
             },
-            update: {
-              method: StaffAccessMethod.NFC_TIMEBOUND,
-              startsAt,
-              endsAt,
-              status: StaffAssignmentStatus.SCHEDULED,
-              lastError: null,
-            },
-          });
-        }
+          },
+          create: {
+            reservationId: reservation.id,
+            staffMemberId: staff.id,
+            method: StaffAccessMethod.NFC_TIMEBOUND,
+            startsAt,
+            endsAt,
+            status: StaffAssignmentStatus.SCHEDULED,
+          },
+          update: {
+            method: StaffAccessMethod.NFC_TIMEBOUND,
+            startsAt,
+            endsAt,
+            status: StaffAssignmentStatus.SCHEDULED,
+            lastError: null,
+          },
+        });
       }
-    } catch {
-      // safe
+    } catch (e) {
+      console.error("[STAFF_ASSIGNMENT_ERROR]", e);
     }
 
-    return {
+        return {
       reservationId: reservation.id,
       guestToken: ensured.guestToken,
       accessGrantId: grant?.id ?? null,
