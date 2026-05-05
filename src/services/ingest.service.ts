@@ -121,10 +121,10 @@ export async function ingestReservation(p: IngestPayload) {
 
   let paymentState: PaymentState;
 
- if (p.paymentState && p.paymentState !== "NONE") {
-  paymentState = p.paymentState as PaymentState;
-} else {
-  const raw = p.externalRaw ?? p;
+  if (p.paymentState && p.paymentState !== "NONE") {
+    paymentState = p.paymentState as PaymentState;
+  } else {
+    const raw = p.externalRaw ?? p;
     const amountPaid = Number((raw as any).amount_paid ?? 0);
 
     const hasSuccessfulTransaction =
@@ -179,6 +179,7 @@ export async function ingestReservation(p: IngestPayload) {
         guestToken: ensured.guestToken,
         warning: `No active lock found for property ${reservation.propertyId}. AccessGrant not created.`,
         didChange,
+        cleaningConfirmation: null,
       };
     }
 
@@ -189,29 +190,41 @@ export async function ingestReservation(p: IngestPayload) {
       endsAt: reservation.checkOut,
     });
 
-  try {
-  const staff = await selectNextStaffForProperty({
-    propertyId: reservation.propertyId,
-  });
+    let cleaningConfirmation: {
+      reservationId: string;
+      propertyId: string;
+      staffMemberId: string;
+    } | null = null;
 
-  if (staff) {
-    await createCleaningConfirmation({
-      reservationId: reservation.id,
-      propertyId: reservation.propertyId,
-      staffMemberId: staff.id,
-    });
-  }
-} catch (e) {
-  console.error("[CLEANING_CONFIRMATION_CREATE_ERROR]", e);
-}
-        return {
+    try {
+      const staff = await selectNextStaffForProperty({
+        propertyId: reservation.propertyId,
+      });
+
+      if (staff) {
+        cleaningConfirmation = {
+          reservationId: reservation.id,
+          propertyId: reservation.propertyId,
+          staffMemberId: staff.id,
+        };
+      }
+    } catch (e) {
+      console.error("[CLEANING_CONFIRMATION_SELECT_ERROR]", e);
+    }
+
+    return {
       reservationId: reservation.id,
       guestToken: ensured.guestToken,
       accessGrantId: grant?.id ?? null,
       lockId: lock.id,
       didChange,
+      cleaningConfirmation,
     };
   });
+
+  if (result.cleaningConfirmation) {
+    await createCleaningConfirmation(result.cleaningConfirmation);
+  }
 
   if (result.didChange) {
     await reconcileReservation(result.reservationId);
@@ -277,29 +290,26 @@ async function upsertReservation(
     }
 
     if (existingByPms) {
-     
-   const existing = await tx.reservation.findUnique({
-  where: { id: existingByPms.id },
-  select: { paymentState: true },
-});
+      const existing = await tx.reservation.findUnique({
+        where: { id: existingByPms.id },
+        select: { paymentState: true },
+      });
 
-// 🔥 recalcular payment desde externalRaw
-const raw = input.externalRaw ?? {};
-const amountPaid = Number((raw as any).amount_paid ?? 0);
+      const raw = input.externalRaw ?? {};
+      const amountPaid = Number((raw as any).amount_paid ?? 0);
 
-const hasSuccessfulTransaction =
-  Array.isArray((raw as any).transactions) &&
-  (raw as any).transactions.some(
-    (t: any) => String(t?.status ?? "").toLowerCase() === "done"
-  );
+      const hasSuccessfulTransaction =
+        Array.isArray((raw as any).transactions) &&
+        (raw as any).transactions.some(
+          (t: any) => String(t?.status ?? "").toLowerCase() === "done"
+        );
 
-const recalculatedPaymentState =
-  amountPaid > 0 || hasSuccessfulTransaction
-    ? PaymentState.PAID
-    : PaymentState.NONE;
+      const recalculatedPaymentState =
+        amountPaid > 0 || hasSuccessfulTransaction
+          ? PaymentState.PAID
+          : PaymentState.NONE;
 
-const paymentChanged =
-  existing?.paymentState !== recalculatedPaymentState;
+      const paymentChanged = existing?.paymentState !== recalculatedPaymentState;
 
       if (
         !paymentChanged &&
