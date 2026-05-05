@@ -73,6 +73,7 @@ import { onboardingAppointmentsRouter } from "./routes/onboarding.appointments.r
 import { adminSalesFollowupsRouter } from "./routes/admin.sales-followups.routes";
 import { adminDemoRouter } from "./routes/admin.demo.routes";
 import { signupSuccessRouter } from "./routes/public.signup.success.routes";
+import { cleaningConfirmRouter } from "./routes/cleaning-confirm.routes";
 
 const app = express();
 const prisma = new PrismaClient();
@@ -280,6 +281,7 @@ app.use(orgTuyaRoutes);
 
 app.use("/staff", buildStaffRouter(prisma));
 app.use("/", buildCleaningRouter(prisma));
+app.use(cleaningConfirmRouter);
 
 // =====================
 // Debug protegido
