@@ -34,6 +34,7 @@ import { ttlockChangeCardPeriod, ttlockListCards } from "../ttlock/ttlock.card";
 import { NfcCardStatus } from "@prisma/client";
 import { unassignAllNfcForReservation } from "../services/nfc.service";
 import { unassignGuestNfcForReservation } from "../services/nfc.service";
+import { processPendingCleaningConfirmations } from "../services/cleaning-confirmation-dispatch.service";
 
 console.log("[reservation.worker] BOOT", new Date().toISOString());
 
@@ -1298,6 +1299,15 @@ try {
   if (r.count > 0) log("processCleaningEnds (NFC) result", r);
 } catch (e) {
   errLog("processCleaningEnds (NFC) crashed", { err: toErrString(e) });
+}
+
+try {
+  const r = await processPendingCleaningConfirmations(prisma, now);
+  if (r.sent > 0) log("processPendingCleaningConfirmations result", r);
+} catch (e) {
+  errLog("processPendingCleaningConfirmations crashed", {
+    err: toErrString(e),
+  });
 }
 
   // Limpieza (STAFF) corre en su propio carril
