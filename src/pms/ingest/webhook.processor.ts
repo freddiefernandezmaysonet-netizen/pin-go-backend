@@ -3,6 +3,8 @@ import { PrismaClient } from "@prisma/client";
 import { getAdapter } from "../adapters";
 import type { CanonicalReservation } from "../adapters/types";
 import { fromZonedTime } from "date-fns-tz";
+import { selectNextStaffForProperty } from "../../services/staff-selection.service";
+import { createCleaningConfirmation } from "../../services/cleaning-confirmation.service";
 
 const prisma = new PrismaClient();
 
@@ -353,16 +355,57 @@ const reservation = await tx.reservation.upsert({
           lastSeenAt: new Date(),
         },
       });
+let cleaningConfirmation: {
+  reservationId: string;
+  propertyId: string;
+  staffMemberId: string;
+} | null = null;
 
-      return {
-        reservationId: reservation.id,
-      };
+try {
+  const staff = await selectNextStaffForProperty({
+    propertyId: listing.propertyId!,
+  });
+
+  console.log("[PMS_CLEANING_STAFF]", {
+    reservationId: reservation.id,
+    propertyId: listing.propertyId!,
+    staffId: staff?.id ?? null,
+    phone: staff?.phoneE164 ?? null,
+  });
+
+  if (staff) {
+    cleaningConfirmation = {
+      reservationId: reservation.id,
+      propertyId: listing.propertyId!,
+      staffMemberId: staff.id,
+    };
+  }
+} catch (e) {
+  console.error("[PMS_CLEANING_SELECT_ERROR]", e);
+}
+
+return {
+  reservationId: reservation.id,
+  cleaningConfirmation,
+};
+     
     });
 
     await prisma.webhookEventIngest.update({
       where: { id: ev.id },
       data: { status: "PROCESSED", processedAt: new Date(), lastError: null },
     });
+
+console.log("[PMS_CLEANING_RESULT]", {
+  reservationId: (result as any).reservationId,
+  cleaningConfirmation: (result as any).cleaningConfirmation ?? null,
+});
+
+if ((result as any).cleaningConfirmation) {
+  await createCleaningConfirmation(
+    (result as any).cleaningConfirmation
+  );
+}
 
     console.log("[pms] processed", {
       eventId: ev.id,
