@@ -173,13 +173,6 @@ export async function ingestReservation(p: IngestPayload) {
       orderBy: { createdAt: "asc" },
     });
 
-console.log("[INGEST_LOCK]", {
-  reservationId: reservation.id,
-  propertyId: reservation.propertyId,
-  foundLock: !!lock,
-  lockId: lock?.id,
-});
-
     if (!lock) {
       return {
         reservationId: reservation.id,
@@ -189,6 +182,13 @@ console.log("[INGEST_LOCK]", {
         cleaningConfirmation: null,
       };
     }
+
+console.log("[INGEST_LOCK]", {
+  reservationId: reservation.id,
+  propertyId: reservation.propertyId,
+  foundLock: !!lock,
+  lockId: lock?.id,
+});
 
     const grant = await ensureGuestGrant(tx as any, {
       reservationId: reservation.id,
@@ -203,17 +203,12 @@ console.log("[INGEST_LOCK]", {
       staffMemberId: string;
     } | null = null;
 
-
-});
-
     try {
       const staff = await selectNextStaffForProperty({
         propertyId: reservation.propertyId,
       });
 
-     
-
-    if (staff) {
+      if (staff) {
         cleaningConfirmation = {
           reservationId: reservation.id,
           propertyId: reservation.propertyId,
@@ -221,8 +216,9 @@ console.log("[INGEST_LOCK]", {
         };
       }
     } catch (e) {
-   
-});
+      console.error("[CLEANING_CONFIRMATION_SELECT_ERROR]", e);
+    }
+
     return {
       reservationId: reservation.id,
       guestToken: ensured.guestToken,
@@ -233,9 +229,7 @@ console.log("[INGEST_LOCK]", {
     };
   });
 
-});
-
- if (result.cleaningConfirmation) {
+  if (result.cleaningConfirmation) {
     await createCleaningConfirmation(result.cleaningConfirmation);
   }
 
@@ -574,6 +568,7 @@ async function ensureGuestGrant(
   }
 
   if (existing.status !== AccessStatus.PENDING) return existing;
+
   return tx.accessGrant.update({
     where: { id: existing.id },
     data: {
