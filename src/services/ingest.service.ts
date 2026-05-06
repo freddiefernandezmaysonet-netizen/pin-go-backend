@@ -203,22 +203,28 @@ console.log("[INGEST_LOCK]", {
       staffMemberId: string;
     } | null = null;
 
-    try {
-      const staff = await selectNextStaffForProperty({
-        propertyId: reservation.propertyId,
-      });
+  try {
+  const staff = await selectNextStaffForProperty({
+    propertyId: reservation.propertyId,
+  });
 
-      if (staff) {
-        cleaningConfirmation = {
-          reservationId: reservation.id,
-          propertyId: reservation.propertyId,
-          staffMemberId: staff.id,
-        };
-      }
-    } catch (e) {
-      console.error("[CLEANING_CONFIRMATION_SELECT_ERROR]", e);
-    }
+  console.log("[CLEANING_STAFF_SELECTED]", {
+    reservationId: reservation.id,
+    propertyId: reservation.propertyId,
+    staffId: staff?.id ?? null,
+    staffPhone: staff?.phoneE164 ?? null,
+  });
 
+  if (staff) {
+    cleaningConfirmation = {
+      reservationId: reservation.id,
+      propertyId: reservation.propertyId,
+      staffMemberId: staff.id,
+    };
+  }
+} catch (e) {
+  console.error("[CLEANING_CONFIRMATION_SELECT_ERROR]", e);
+}
     return {
       reservationId: reservation.id,
       guestToken: ensured.guestToken,
@@ -229,10 +235,14 @@ console.log("[INGEST_LOCK]", {
     };
   });
 
-  if (result.cleaningConfirmation) {
-    await createCleaningConfirmation(result.cleaningConfirmation);
-  }
+console.log("[CLEANING_CONFIRMATION_RESULT]", {
+  reservationId: result.reservationId,
+  cleaningConfirmation: result.cleaningConfirmation,
+});
 
+if (result.cleaningConfirmation) {
+  await createCleaningConfirmation(result.cleaningConfirmation);
+}
   if (result.didChange) {
     await reconcileReservation(result.reservationId);
   }
