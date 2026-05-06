@@ -173,6 +173,13 @@ export async function ingestReservation(p: IngestPayload) {
       orderBy: { createdAt: "asc" },
     });
 
+console.log("[INGEST_LOCK]", {
+  reservationId: reservation.id,
+  propertyId: reservation.propertyId,
+  foundLock: !!lock,
+  lockId: lock?.id,
+});
+
     if (!lock) {
       return {
         reservationId: reservation.id,
@@ -196,12 +203,17 @@ export async function ingestReservation(p: IngestPayload) {
       staffMemberId: string;
     } | null = null;
 
+
+});
+
     try {
       const staff = await selectNextStaffForProperty({
         propertyId: reservation.propertyId,
       });
 
-      if (staff) {
+     
+
+    if (staff) {
         cleaningConfirmation = {
           reservationId: reservation.id,
           propertyId: reservation.propertyId,
@@ -209,9 +221,8 @@ export async function ingestReservation(p: IngestPayload) {
         };
       }
     } catch (e) {
-      console.error("[CLEANING_CONFIRMATION_SELECT_ERROR]", e);
-    }
-
+   
+});
     return {
       reservationId: reservation.id,
       guestToken: ensured.guestToken,
@@ -222,7 +233,9 @@ export async function ingestReservation(p: IngestPayload) {
     };
   });
 
-  if (result.cleaningConfirmation) {
+});
+
+ if (result.cleaningConfirmation) {
     await createCleaningConfirmation(result.cleaningConfirmation);
   }
 
@@ -561,7 +574,6 @@ async function ensureGuestGrant(
   }
 
   if (existing.status !== AccessStatus.PENDING) return existing;
-
   return tx.accessGrant.update({
     where: { id: existing.id },
     data: {
