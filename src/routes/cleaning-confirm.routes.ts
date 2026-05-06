@@ -6,12 +6,25 @@ import {
   NfcAssignmentRole,
 } from "@prisma/client";
 
-import { computeCleaningWindowPR } from "../services/cleaningWindow.service";
 import { assignNfcCards } from "../services/nfc.service";
 
 const prisma = new PrismaClient();
 
 export const cleaningConfirmRouter = Router();
+
+function computeCleaningWindowFromProperty(params: {
+  checkOut: Date;
+  cleaningStartOffsetMinutes?: number | null;
+  cleaningDurationMinutes?: number | null;
+}) {
+  const offsetMinutes = params.cleaningStartOffsetMinutes ?? 30;
+  const durationMinutes = params.cleaningDurationMinutes ?? 180;
+
+  const startsAt = new Date(params.checkOut.getTime() + offsetMinutes * 60_000);
+  const endsAt = new Date(startsAt.getTime() + durationMinutes * 60_000);
+
+  return { startsAt, endsAt };
+}
 
 async function loadConfirmationData(token: string) {
   const confirmation = await prisma.cleaningConfirmation.findUnique({
@@ -116,17 +129,13 @@ cleaningConfirmRouter.post(
       const data = await loadConfirmationData(token);
 
       if (!data) {
-        return res
-          .status(404)
-          .send("Invalid or expired cleaning confirmation link.");
+        return res.status(404).send("Invalid or expired cleaning confirmation link.");
       }
 
       const { confirmation, reservation, staffMember, invalidData } = data;
 
       if (invalidData || !reservation || !staffMember) {
-        return res
-          .status(404)
-          .send("Cleaning confirmation data is incomplete.");
+        return res.status(404).send("Cleaning confirmation data is incomplete.");
       }
 
       if (confirmation.status === "CONFIRMED") {
@@ -134,27 +143,23 @@ cleaningConfirmRouter.post(
       }
 
       if (confirmation.status === "DECLINED") {
-        return res
-          .status(409)
-          .send("This request was already declined.");
+        return res.status(409).send("This request was already declined.");
       }
 
-      const { startsAt, endsAt } = computeCleaningWindowPR(
-        reservation.checkOut
-      );
+      const { startsAt, endsAt } = computeCleaningWindowFromProperty({
+        checkOut: reservation.checkOut,
+        cleaningStartOffsetMinutes: reservation.property?.cleaningStartOffsetMinutes,
+        cleaningDurationMinutes: reservation.property?.cleaningDurationMinutes,
+      });
 
       const lock = reservation.property?.locks?.find(
         (l: any) => l.isActive && l.ttlockLockId
       );
 
-      const ttlockLockId = lock?.ttlockLockId
-        ? Number(lock.ttlockLockId)
-        : null;
+      const ttlockLockId = lock?.ttlockLockId ? Number(lock.ttlockLockId) : null;
 
       if (!ttlockLockId) {
-        return res
-          .status(400)
-          .send("No active TTLock lock configured for this property.");
+        return res.status(400).send("No active TTLock lock configured for this property.");
       }
 
       let shouldAssignCleaningNfc = false;
@@ -191,20 +196,18 @@ cleaningConfirmRouter.post(
           },
         });
 
-        const existingCleaningNfc =
-          await tx.nfcAssignment.findFirst({
-            where: {
-              reservationId: confirmation.reservationId,
-              role: NfcAssignmentRole.CLEANING,
-            },
-          });
+        const existingCleaningNfc = await tx.nfcAssignment.findFirst({
+          where: {
+            reservationId: confirmation.reservationId,
+            role: NfcAssignmentRole.CLEANING,
+          },
+        });
 
         if (!existingCleaningNfc) {
           shouldAssignCleaningNfc = true;
         }
       });
 
-      // ⚠️ FUERA DEL TRANSACTION
       if (shouldAssignCleaningNfc) {
         await assignNfcCards(prisma as any, {
           reservationId: confirmation.reservationId,
@@ -223,9 +226,7 @@ cleaningConfirmRouter.post(
     } catch (e: any) {
       console.error("[CLEANING_CONFIRM_CONFIRM_ERROR]", e);
 
-      return res
-        .status(500)
-        .send(e?.message ?? "Failed to confirm cleaning.");
+      return res.status(500).send(e?.message ?? "Failed to confirm cleaning.");
     }
   }
 );
@@ -242,15 +243,11 @@ cleaningConfirmRouter.post(
       });
 
       if (!confirmation) {
-        return res
-          .status(404)
-          .send("Invalid or expired cleaning confirmation link.");
+        return res.status(404).send("Invalid or expired cleaning confirmation link.");
       }
 
       if (confirmation.status === "CONFIRMED") {
-        return res
-          .status(409)
-          .send("This request was already confirmed.");
+        return res.status(409).send("This request was already confirmed.");
       }
 
       await prisma.cleaningConfirmation.update({
@@ -264,9 +261,7 @@ cleaningConfirmRouter.post(
         "Cleaning declined. Pin&Go will try the next available backup cleaner."
       );
     } catch (e: any) {
-      return res
-        .status(500)
-        .send(e?.message ?? "Failed to decline cleaning.");
+      return res.status(500).send(e?.message ?? "Failed to decline cleaning.");
     }
   }
 );
