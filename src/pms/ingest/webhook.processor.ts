@@ -5,6 +5,7 @@ import type { CanonicalReservation } from "../adapters/types";
 import { fromZonedTime } from "date-fns-tz";
 import { selectNextStaffForProperty } from "../../services/staff-selection.service";
 import { createCleaningConfirmation } from "../../services/cleaning-confirmation.service";
+import { reconcileReservation } from "../../services/reservation.reconcile.service";
 
 const prisma = new PrismaClient();
 
@@ -445,6 +446,15 @@ if ((result as any).cleaningConfirmation) {
   );
 }
 
+ if (
+  (result as any).reservationId &&
+  !(result as any).skipped
+) {
+  await reconcileReservation(
+    (result as any).reservationId
+  );
+}
+    
     console.log("[pms] processed", {
       eventId: ev.id,
       reservationId: (result as any).reservationId,
