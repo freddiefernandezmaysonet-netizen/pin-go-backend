@@ -223,8 +223,16 @@ const passcodeLock = reservation.property?.locks?.find(
 const passcodeTtlockLockId = passcodeLock?.ttlockLockId
   ? Number(passcodeLock.ttlockLockId)
   : null;
+console.log("[reconcile][passcode]", {
+  reservationId: reservation.id,
+  grantId: g.id,
+  method: g.method,
+  ttlockKeyboardPwdId: g.ttlockKeyboardPwdId,
+  passcodeTtlockLockId,
+  desiredStart: desiredStart.toISOString(),
+  desiredEnd: desiredEnd.toISOString(),
+});
 
-// 2. 🔥 FIX: sincronizar TTLock para PASSCODE
 if (
   g.method === "PASSCODE_TIMEBOUND" &&
   g.ttlockKeyboardPwdId &&
@@ -242,6 +250,12 @@ await ttlockChangePasscode({
   endDate: desiredEnd.getTime(),
 });    
  } catch (e: any) {
+     console.error("[reconcile][passcode][FAILED]", {
+    reservationId: reservation.id,
+    grantId: g.id,
+    error: String(e?.message ?? e),
+  });       
+
           await prisma.accessGrant.update({
             where: { id: g.id },
             data: {
