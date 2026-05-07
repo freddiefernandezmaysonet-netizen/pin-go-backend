@@ -264,42 +264,29 @@ export async function assignNfcCards(
     let assignment: any | null = null;
 
     try {
-      assignment = await prisma.nfcAssignment.create({
-        data: {
-          reservationId,
-          nfcCardId: c.id,
-          role,
-          status:
-            params.skipTtlock === true
-              ? NfcAssignmentStatus.ACTIVE
-              : NfcAssignmentStatus.PENDING,
-          startsAt,
-          endsAt,
-        },
-      });
+   if (params.skipTtlock !== true) {
+  await ttlockChangeCardPeriod({
+    lockId: Number(ttlockLockId),
+    cardId: Number(c.ttlockCardId),
+    startDate: startsAt.getTime(),
+    endDate: endsAt.getTime(),
+    changeType: 2,
+  });
+}
 
-      if (params.skipTtlock === true) {
-        assignments.push(assignment);
-        continue;
-      }
+assignment = await prisma.nfcAssignment.create({
+  data: {
+    reservationId,
+    nfcCardId: c.id,
+    role,
+    status: NfcAssignmentStatus.ACTIVE,
+    startsAt,
+    endsAt,
+    lastError: null,
+  },
+});
 
-      await ttlockChangeCardPeriod({
-        lockId: Number(ttlockLockId),
-        cardId: Number(c.ttlockCardId),
-        startDate: startsAt.getTime(),
-        endDate: endsAt.getTime(),
-        changeType: 2,
-      });
-
-      const activeAssignment = await prisma.nfcAssignment.update({
-        where: { id: assignment.id },
-        data: {
-          status: NfcAssignmentStatus.ACTIVE,
-          lastError: null,
-        },
-      });
-
-      assignments.push(activeAssignment);
+assignments.push(assignment);
     } catch (e: any) {
       const errMsg = String(e?.message ?? e);
 
@@ -311,37 +298,6 @@ export async function assignNfcCards(
         err: errMsg,
         skipTtlock: Boolean(params.skipTtlock),
       });
-
-      if (assignment?.id) {
-        await prisma.nfcAssignment
-          .update({
-            where: { id: assignment.id },
-            data: {
-              status: NfcAssignmentStatus.FAILED,
-              lastError: errMsg,
-            },
-          })
-          .catch(() => {});
-      } else {
-        await prisma.nfcAssignment
-          .updateMany({
-            where: {
-              reservationId,
-              nfcCardId: c.id,
-              status: {
-                in: [
-                  NfcAssignmentStatus.PENDING,
-                  NfcAssignmentStatus.ACTIVE,
-                ],
-              },
-            },
-            data: {
-              status: NfcAssignmentStatus.FAILED,
-              lastError: errMsg,
-            },
-          })
-          .catch(() => {});
-      }
 
       await prisma.nfcCard
         .update({
