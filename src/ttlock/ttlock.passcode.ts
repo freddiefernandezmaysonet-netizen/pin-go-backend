@@ -154,9 +154,6 @@ export async function ttlockGetPasscode(params: {
 
     // TTLock requiere ventanas por HORA (minutos/segundos en 0)
    
-  start = roundDownToHourMs(start);
-end = roundDownToHourMs(end);
-
 if (end <= start) {
   end = start + 60 * 60 * 1000;
 }
@@ -243,9 +240,6 @@ export async function ttlockChangePasscode(params: {
 
   let start = toMs(Number(params.startDate));
   let end = toMs(Number(params.endDate));
-
-  start = roundDownToHourMs(start);
-  end = roundDownToHourMs(end);
 
   if (end <= start) {
     end = start + 60 * 60 * 1000;
