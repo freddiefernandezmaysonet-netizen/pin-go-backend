@@ -243,12 +243,51 @@ cleaningConfirmRouter.post(
       });
 
       if (!confirmation) {
-        return res.status(404).send("Invalid or expired cleaning confirmation link.");
+        return res
+          .status(404)
+          .send("Invalid or expired cleaning confirmation link.");
       }
 
       if (confirmation.status === "CONFIRMED") {
-        return res.status(409).send("This request was already confirmed.");
+        return res
+          .status(409)
+          .send("This request was already confirmed.");
       }
+
+      const reservation = await prisma.reservation.findUnique({
+        where: {
+          id: confirmation.reservationId,
+        },
+      });
+
+      if (!reservation) {
+        return res
+          .status(404)
+          .send("Reservation not found.");
+      }
+
+      const allAttempts = await prisma.cleaningConfirmation.findMany({
+        where: {
+          reservationId: confirmation.reservationId,
+        },
+        select: {
+          staffMemberId: true,
+        },
+      });
+
+      const excludeStaffIds = allAttempts.map(
+        (a) => a.staffMemberId
+      );
+
+      const { selectNextStaffForProperty } = await import(
+        "../services/staff-selection.service"
+      );
+
+      const nextStaff =
+        await selectNextStaffForProperty({
+          propertyId: confirmation.propertyId,
+          excludeStaffIds,
+        });
 
       await prisma.cleaningConfirmation.update({
         where: { id: confirmation.id },
@@ -257,11 +296,66 @@ cleaningConfirmRouter.post(
         },
       });
 
+      if (!nextStaff) {
+        console.warn(
+          "[CLEANING_CONFIRM_DECLINE] no backup available",
+          {
+            reservationId: confirmation.reservationId,
+            propertyId: confirmation.propertyId,
+            excludeStaffIds,
+          }
+        );
+
+        return res.send(
+          "Cleaning declined. No backup cleaner is currently available."
+        );
+      }
+
+      const crypto = await import("crypto");
+
+      const nextConfirmation =
+        await prisma.cleaningConfirmation.create({
+          data: {
+            reservationId:
+              confirmation.reservationId,
+            propertyId:
+              confirmation.propertyId,
+            staffMemberId: nextStaff.id,
+            token: crypto.randomBytes(32).toString("hex"),
+            status: "PENDING",
+          },
+        });
+
+      console.log(
+        "[CLEANING_CONFIRM_DECLINE] created backup confirmation",
+        {
+          reservationId:
+            confirmation.reservationId,
+          propertyId:
+            confirmation.propertyId,
+          declinedConfirmationId:
+            confirmation.id,
+          nextConfirmationId:
+            nextConfirmation.id,
+          nextStaffId: nextStaff.id,
+        }
+      );
+
       return res.send(
-        "Cleaning declined. Pin&Go will try the next available backup cleaner."
+        "Cleaning declined. Pin&Go will notify the next available backup cleaner."
       );
     } catch (e: any) {
-      return res.status(500).send(e?.message ?? "Failed to decline cleaning.");
+      console.error(
+        "[CLEANING_CONFIRM_DECLINE_ERROR]",
+        e
+      );
+
+      return res
+        .status(500)
+        .send(
+          e?.message ??
+            "Failed to decline cleaning."
+        );
     }
   }
 );
