@@ -209,32 +209,35 @@ cleaningConfirmRouter.post(
       });
 
       if (shouldAssignCleaningNfc) {
-  const staffTtlockCardId = Number(
-    staffMember.ttlockCardRef
+  const staffCardRef = (
+  staffMember.ttlockCardRef ?? ""
+).trim();
+
+if (!staffCardRef) {
+  throw new Error(
+    `Staff member ${staffMember.id} missing ttlockCardRef`
   );
+}
 
-  if (!staffTtlockCardId) {
-    throw new Error(
-      `Staff member ${staffMember.id} missing ttlockCardRef`
-    );
-  }
+const staffCard = await prisma.nfcCard.findFirst({
+  where: {
+    propertyId: confirmation.propertyId,
+    label: staffCardRef,
+  },
+});
 
-  const staffCard = await prisma.nfcCard.findFirst({
-    where: {
-      propertyId: confirmation.propertyId,
-      ttlockCardId: staffTtlockCardId,
-    },
-  });
+if (!staffCard) {
+  throw new Error(
+    `NFC card not found for label=${staffCardRef}`
+  );
+}
 
-  if (!staffCard) {
-    throw new Error(
-      `NFC card not found for ttlockCardId=${staffTtlockCardId}`
-    );
-  }
-
+const cleaningTtlockCardId = Number(
+  staffCard.ttlockCardId
+);
   await ttlockChangeCardPeriod({
     lockId: Number(ttlockLockId),
-    cardId: staffTtlockCardId,
+    cardId: cleaningTtlockCardId,
     startDate: startsAt.getTime(),
     endDate: endsAt.getTime(),
     changeType: 2,
@@ -266,7 +269,7 @@ cleaningConfirmRouter.post(
     {
       reservationId: confirmation.reservationId,
       staffMemberId: staffMember.id,
-      ttlockCardId: staffTtlockCardId,
+      ttlockCardId: cleaningTtlockCardId,
       nfcCardId: staffCard.id,
     }
   );
