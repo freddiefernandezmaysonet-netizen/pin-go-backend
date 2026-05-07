@@ -250,14 +250,6 @@ const isAlarm =
   categoryRaw.includes("siren") ||
   categoryRaw.includes("mal");
 
-// 🔥 FIX: alarma NO usa arrival offset
-if (isAlarm && trigger === "CHECK_IN" && reservationCheckIn) {
-  if (now.getTime() < reservationCheckIn.getTime()) {
-    // todavía no es hora → NO ejecutar
-    continue;
-  }
-}
-
      const result = await tryExecuteDevice({
       source: "GUEST_EXPERIENCE",
       externalId,
