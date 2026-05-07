@@ -254,11 +254,23 @@ export async function ttlockChangePasscode(params: {
     endISO: new Date(end).toISOString(),
   });
 
+console.log("[TTLOCK][PASSCODE_CHANGE][SEND]", {
+  lockId,
+  keyboardPwdId: params.keyboardPwdId,
+  keyboardPwdType: 3,
+  startISO: new Date(start).toISOString(),
+  endISO: new Date(end).toISOString(),
+});
+
   return postForm(`${base}/v3/keyboardPwd/change`, {
     clientId,
     accessToken,
     lockId,
     keyboardPwdId: Number(params.keyboardPwdId),
+     
+    // 🔥 REQUIRED FOR PERIOD PASSCODES
+    keyboardPwdType: 3,
+
     keyboardPwdName: `Pin&Go ${params.keyboardPwdId}`,
     startDate: start,
     endDate: end,
