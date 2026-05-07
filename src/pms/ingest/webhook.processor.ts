@@ -362,9 +362,36 @@ let cleaningConfirmation: {
 } | null = null;
 
 try {
-  const staff = await selectNextStaffForProperty({
-    propertyId: listing.propertyId!,
-  });
+  const existingConfirmedCleaning =
+    await tx.cleaningConfirmation.findFirst({
+      where: {
+        reservationId: reservation.id,
+        status: "CONFIRMED",
+      },
+      orderBy: {
+        createdAt: "desc",
+      },
+    });
+
+  let staff = null;
+
+  if (existingConfirmedCleaning) {
+    staff = await tx.staffMember.findUnique({
+      where: {
+        id: existingConfirmedCleaning.staffMemberId,
+      },
+    });
+
+    console.log("[PMS_CLEANING_RECONFIRM]", {
+      reservationId: reservation.id,
+      existingStaffId:
+        existingConfirmedCleaning.staffMemberId,
+    });
+  } else {
+    staff = await selectNextStaffForProperty({
+      propertyId: listing.propertyId!,
+    });
+  }
 
   console.log("[PMS_CLEANING_STAFF]", {
     reservationId: reservation.id,
@@ -374,16 +401,27 @@ try {
   });
 
   if (staff) {
-    cleaningConfirmation = {
-      reservationId: reservation.id,
-      propertyId: listing.propertyId!,
-      staffMemberId: staff.id,
-    };
+    const existingPending =
+      await tx.cleaningConfirmation.findFirst({
+        where: {
+          reservationId: reservation.id,
+          staffMemberId: staff.id,
+          status: "PENDING",
+        },
+      });
+
+    if (!existingPending) {
+      cleaningConfirmation = {
+        reservationId: reservation.id,
+        propertyId: listing.propertyId!,
+        staffMemberId: staff.id,
+      };
+    }
   }
 } catch (e) {
   console.error("[PMS_CLEANING_SELECT_ERROR]", e);
 }
-
+  
 return {
   reservationId: reservation.id,
   cleaningConfirmation,
