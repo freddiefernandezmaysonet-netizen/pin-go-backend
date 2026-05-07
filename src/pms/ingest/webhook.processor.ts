@@ -446,15 +446,16 @@ if ((result as any).cleaningConfirmation) {
   );
 }
 
- if (
-  (result as any).reservationId &&
-  !(result as any).skipped
-) {
+ if ((result as any).reservationId) {
+  console.log("[PMS][RECONCILE_TRIGGER]", {
+    reservationId: (result as any).reservationId,
+    skipped: (result as any).skipped,
+  });
+
   await reconcileReservation(
     (result as any).reservationId
   );
-}
-    
+}    
     console.log("[pms] processed", {
       eventId: ev.id,
       reservationId: (result as any).reservationId,
