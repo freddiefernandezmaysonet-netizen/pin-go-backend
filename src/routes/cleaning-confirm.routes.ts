@@ -6,7 +6,7 @@ import {
   NfcAssignmentRole,
 } from "@prisma/client";
 
-import { assignNfcCards } from "../services/nfc.service";
+import { ttlockChangeCardPeriod } from "../ttlock/ttlock.card";
 
 const prisma = new PrismaClient();
 
@@ -209,17 +209,68 @@ cleaningConfirmRouter.post(
       });
 
       if (shouldAssignCleaningNfc) {
-        await assignNfcCards(prisma as any, {
-          reservationId: confirmation.reservationId,
-          ttlockLockId,
-          propertyId: confirmation.propertyId,
-          role: NfcAssignmentRole.CLEANING,
-          startsAt,
-          endsAt,
-          count: 1,
-        });
-      }
+  const staffTtlockCardId = Number(
+    staffMember.ttlockCardRef
+  );
 
+  if (!staffTtlockCardId) {
+    throw new Error(
+      `Staff member ${staffMember.id} missing ttlockCardRef`
+    );
+  }
+
+  const staffCard = await prisma.nfcCard.findFirst({
+    where: {
+      propertyId: confirmation.propertyId,
+      ttlockCardId: staffTtlockCardId,
+    },
+  });
+
+  if (!staffCard) {
+    throw new Error(
+      `NFC card not found for ttlockCardId=${staffTtlockCardId}`
+    );
+  }
+
+  await ttlockChangeCardPeriod({
+    lockId: Number(ttlockLockId),
+    cardId: staffTtlockCardId,
+    startDate: startsAt.getTime(),
+    endDate: endsAt.getTime(),
+    changeType: 2,
+  });
+
+  await prisma.nfcAssignment.create({
+    data: {
+      reservationId: confirmation.reservationId,
+      nfcCardId: staffCard.id,
+      role: NfcAssignmentRole.CLEANING,
+      status: "ACTIVE",
+      startsAt,
+      endsAt,
+      lastError: null,
+    },
+  });
+
+  await prisma.nfcCard.update({
+    where: {
+      id: staffCard.id,
+    },
+    data: {
+      status: "ASSIGNED",
+    },
+  });
+
+  console.log(
+    "[CLEANING_CONFIRM] staff NFC activated",
+    {
+      reservationId: confirmation.reservationId,
+      staffMemberId: staffMember.id,
+      ttlockCardId: staffTtlockCardId,
+      nfcCardId: staffCard.id,
+    }
+  );
+}
       return res.send(
         "Cleaning confirmed. Pin&Go will activate your NFC access during the cleaning window."
       );
