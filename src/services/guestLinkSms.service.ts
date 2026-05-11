@@ -40,6 +40,7 @@ export async function sendGuestAccessLinkSms(
       guestPhone: true,
       guestToken: true,
       guestTokenExpiresAt: true,
+      verificationStatus: true,
       property: {
         select: {
           id: true,
@@ -60,6 +61,14 @@ export async function sendGuestAccessLinkSms(
 
   if (!r.guestToken) {
     return { ok: false, skipped: true, error: "No guestToken" };
+  }
+  
+if (r.verificationStatus !== "COMPLETED") {
+    return {
+      ok: false,
+      skipped: true,
+      error: "GUEST_NOT_VERIFIED",
+    };
   }
 
   const link = buildGuestLink(r.guestToken);

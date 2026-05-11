@@ -1,5 +1,6 @@
 import { PrismaClient } from "@prisma/client";
 import { sendSms } from "../integrations/twilio/twilio.client";
+import { buildGuestLink } from "./guestToken";
 
 function toNumber(value: unknown): number | null {
   if (value === null || value === undefined || value === "") return null;
@@ -94,6 +95,7 @@ function buildPreCheckinMessage(input: {
   checkInTime: string;
   address: string | null;
   mapsLink: string | null;
+  verifyLink: string | null;
 }) {
   const guestName = String(input.guestName ?? "").trim();
   const greetingEs = guestName ? `Hola ${guestName},` : "Hola,";
@@ -131,18 +133,33 @@ Exact location:
 ${input.mapsLink}`;
   }
 
+ if (input.verifyLink) {
   es += `
 
-Tu acceso digital será enviado automáticamente al inicio de la ventana de entrada.
+🛡️ Antes de recibir sus accesos digitales, complete su registro previo al check-in:
+
+${input.verifyLink}`;
+}
+
+es += `
+
+Tu acceso digital será enviado automáticamente luego de completar la verificación.
 
 Te esperamos.`;
-
+  
+if (input.verifyLink) {
   en += `
 
-Your digital access will be sent automatically at check-in time.
+🛡️ Before receiving your digital access credentials, please complete your secure pre check-in verification:
+
+${input.verifyLink}`;
+}
+
+en += `
+
+Your digital access will be delivered automatically after verification is completed.
 
 We look forward to your arrival.`;
-
   return `${es}
 
 ---
@@ -173,6 +190,7 @@ export async function sendPreCheckinSms(
         id: true,
         guestName: true,
         guestPhone: true,
+        guestToken: true,
         checkIn: true,
         property: {
           select: {
@@ -197,6 +215,10 @@ export async function sendPreCheckinSms(
 
     const propertyName = r.property?.name ?? "your property";
 
+    const verifyLink = r.guestToken
+      ? buildGuestLink(r.guestToken).replace("/guest/access/", "/guest/verify/")
+      : null;
+    
     const { address, mapsLink } = buildGoogleMapsLink({
       latitude: r.property?.latitude,
       longitude: r.property?.longitude,
@@ -219,6 +241,7 @@ export async function sendPreCheckinSms(
       checkInTime,
       address,
       mapsLink,
+      verifyLink,
     });
 
     const sent = await sendSms(r.guestPhone, body);
