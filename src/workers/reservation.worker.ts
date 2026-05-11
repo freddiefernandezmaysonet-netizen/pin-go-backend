@@ -1285,10 +1285,25 @@ const needsUpdate =
   lastAppliedEnd.getTime() !== g.endsAt.getTime();
 
 if (!needsUpdate) continue;
-      const ttlockLockId =
-        g.lock?.ttlockLockId;
+      const lock = await prisma.lock.findUnique({
+  where: {
+    id: g.lockId,
+  },
+  select: {
+    ttlockLockId: true,
+  },
+});
 
-      if (!ttlockLockId) continue;
+const ttlockLockId = lock?.ttlockLockId;
+
+if (!ttlockLockId) {
+  console.log("[PASSCODE_RESYNC][NO_LOCK]", {
+    grantId: g.id,
+    lockId: g.lockId,
+  });
+
+  continue;
+}
 
       console.log(
         "[PASSCODE_RESYNC][RUN]",
@@ -1306,7 +1321,7 @@ if (!needsUpdate) continue;
             desiredEnd.toISOString(),
         }
       );
-
+   
       await ttlockChangePasscode({
         lockId: Number(ttlockLockId),
         keyboardPwdId: Number(
