@@ -176,7 +176,14 @@ function buildLight(input: BuildInput, warnings: string[]): TuyaCommand[] | null
 }
 
 function buildAC(input: BuildInput, warnings: string[]): TuyaCommand[] | null {
-  const powerFn = findFn(input.functions, ["switch"]);
+  const powerFn = findFn(input.functions, [
+  "switch",
+  "switch_1",
+  "power",
+  "air_switch",
+  "on_off",
+]);
+  
   const tempFn = findFn(input.functions, ["temp_set", "temp"]);
 
   if (!powerFn) return null;
