@@ -1275,14 +1275,16 @@ async function processPasscodeResyncs(now: Date) {
         g.reservation.checkOut
       );
 
-      const needsUpdate =
-        g.startsAt.getTime() !==
-          desiredStart.getTime() ||
-        g.endsAt.getTime() !==
-          desiredEnd.getTime();
+      const lastAppliedStart = g.desiredStartsAt;
+const lastAppliedEnd = g.desiredEndsAt;
 
-      if (!needsUpdate) continue;
+const needsUpdate =
+  !lastAppliedStart ||
+  !lastAppliedEnd ||
+  lastAppliedStart.getTime() !== g.startsAt.getTime() ||
+  lastAppliedEnd.getTime() !== g.endsAt.getTime();
 
+if (!needsUpdate) continue;
       const ttlockLockId =
         g.lock?.ttlockLockId;
 
@@ -1311,21 +1313,20 @@ async function processPasscodeResyncs(now: Date) {
           g.ttlockKeyboardPwdId
         ),
         startDate:
-          desiredStart.getTime(),
+           g.startsAt.getTime(),
         endDate:
-          desiredEnd.getTime(),
+           g.endsAt.getTime(),
       });
 
-      await prisma.accessGrant.update({
-        where: { id: g.id },
-
-        data: {
-          startsAt: desiredStart,
-          endsAt: desiredEnd,
-          lastError: null,
-        },
-      });
-
+     await prisma.accessGrant.update({
+  where: { id: g.id },
+  data: {
+    desiredStartsAt: g.startsAt,
+    desiredEndsAt: g.endsAt,
+    lastAppliedAt: new Date(),
+    lastError: null,
+  },
+});
       console.log(
         "[PASSCODE_RESYNC][OK]",
         {
