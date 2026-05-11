@@ -190,7 +190,13 @@ model Reservation {
   createdAt               DateTime                 @default(now())
   updatedAt               DateTime                 @updatedAt
   guestToken              String?                  @unique
-  guestTokenExpiresAt     DateTime?
+  guestTokenExpiresAt     DateTime?                                                                                                 
+  verificationStatus          String               @default("PENDING")
+  verifiedAt                  DateTime?
+  verificationCompletedByIp   String?
+  verificationUserAgent       String?
+  verificationGuestCount      Int?
+  verificationAcceptedRulesAt DateTime?
   ingestKey               String?                  @unique
   source                  String?
   externalId              String?

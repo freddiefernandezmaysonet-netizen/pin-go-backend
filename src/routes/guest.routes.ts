@@ -242,6 +242,291 @@ export function buildGuestRouter(prisma: PrismaClient) {
     }
   });
 
+   // =====================
+  // GUEST VERIFY PAGE
+  // =====================
+  router.get("/guest/verify/:token", async (req, res) => {
+    try {
+      const token = String(req.params.token ?? "").trim();
+
+      if (!token) {
+        return res.status(400).type("html").send(
+          renderPage({
+            title: "Pin&Go • Verification",
+            badge: { text: "⚠️ Token requerido", tone: "bad" },
+            body: `<p class="muted">Falta el token.</p>`,
+          })
+        );
+      }
+
+      const reservation = await prisma.reservation.findFirst({
+        where: {
+          guestToken: token,
+        },
+        include: {
+          property: true,
+        },
+      });
+
+      if (!reservation) {
+        return res.status(404).type("html").send(
+          renderPage({
+            title: "Pin&Go • Verification",
+            badge: { text: "⛔ Invalid", tone: "bad" },
+            body: `
+              <h1>Link inválido o expirado</h1>
+              <p class="muted">Este enlace ya no es válido.</p>
+            `,
+          })
+        );
+      }
+
+      if (reservation.verificationStatus === "COMPLETED") {
+        return res.status(200).type("html").send(
+          renderPage({
+            title: "Pin&Go • Verification",
+            badge: { text: "✅ Verified", tone: "good" },
+            body: `
+              <h1>Verificación completada</h1>
+
+              <div class="card">
+                <div class="row">
+                  <span class="k">Propiedad</span>
+                  <span class="v">${escapeHtml(
+                    reservation.property?.name ?? "N/A"
+                  )}</span>
+                </div>
+
+                <div class="row">
+                  <span class="k">Guest</span>
+                  <span class="v">${escapeHtml(
+                    reservation.guestName ?? "Guest"
+                  )}</span>
+                </div>
+              </div>
+
+              <p class="muted">
+                Tus accesos serán enviados automáticamente antes del check-in.
+              </p>
+            `,
+          })
+        );
+      }
+
+      return res.status(200).type("html").send(
+        renderPage({
+          title: "Pin&Go • Guest Verification",
+          badge: { text: "🛡️ Verification Required", tone: "warn" },
+          body: `
+            <h1>Complete su registro previo al check-in</h1>
+
+            <p class="sub">
+              Hola <b>${escapeHtml(reservation.guestName ?? "Guest")}</b>
+            </p>
+
+            <div class="card">
+              <div class="row">
+                <span class="k">Propiedad</span>
+                <span class="v">${escapeHtml(
+                  reservation.property?.name ?? "N/A"
+                )}</span>
+              </div>
+
+              <div class="row">
+                <span class="k">Check-in</span>
+                <span class="v">${escapeHtml(
+                  fmtLocal(reservation.checkIn)
+                )}</span>
+              </div>
+
+              <div class="row">
+                <span class="k">Check-out</span>
+                <span class="v">${escapeHtml(
+                  fmtLocal(reservation.checkOut)
+                )}</span>
+              </div>
+            </div>
+
+            <form method="POST">
+              <div class="card">
+                <label class="label">Cantidad de huéspedes</label>
+
+                <input
+                  class="input"
+                  type="number"
+                  name="guestCount"
+                  min="1"
+                  max="20"
+                  required
+                />
+
+                <label class="checkbox">
+                  <input type="checkbox" required />
+                  <span>
+                    Confirmo que soy el huésped autorizado para esta reserva.
+                  </span>
+                </label>
+
+                <button class="btn" type="submit">
+                  Completar verificación
+                </button>
+              </div>
+            </form>
+
+            <div class="footer">
+              <span class="brand">Pin&Go</span>
+              <span class="muted small">
+                Secure Guest Verification
+              </span>
+            </div>
+          `,
+        })
+      );
+    } catch (err: any) {
+      console.error("[guest verify GET]", err);
+
+      return res.status(500).type("html").send(
+        renderPage({
+          title: "Pin&Go • Error",
+          badge: { text: "⚠️ Error", tone: "bad" },
+          body: `<p class="muted">Error cargando verificación.</p>`,
+        })
+      );
+    }
+  });
+ 
+  // =====================
+  // COMPLETE VERIFICATION
+  // =====================
+  router.post("/guest/verify/:token", async (req, res) => {
+    try {
+      const token = String(req.params.token ?? "").trim();
+
+      if (!token) {
+        return res.status(400).type("html").send(
+          renderPage({
+            title: "Pin&Go • Verification",
+            badge: { text: "⚠️ Token requerido", tone: "bad" },
+            body: `<p class="muted">Falta el token.</p>`,
+          })
+        );
+      }
+
+      const reservation = await prisma.reservation.findFirst({
+        where: { guestToken: token },
+        include: { property: true },
+      });
+
+      if (!reservation) {
+        return res.status(404).type("html").send(
+          renderPage({
+            title: "Pin&Go • Verification",
+            badge: { text: "⛔ Invalid", tone: "bad" },
+            body: `
+              <h1>Link inválido o expirado</h1>
+              <p class="muted">Este enlace ya no es válido.</p>
+            `,
+          })
+        );
+      }
+
+      const rawGuestCount = Number(req.body?.guestCount);
+      const guestCount =
+        Number.isFinite(rawGuestCount) && rawGuestCount > 0
+          ? Math.min(Math.floor(rawGuestCount), 20)
+          : null;
+
+      if (!guestCount) {
+        return res.status(400).type("html").send(
+          renderPage({
+            title: "Pin&Go • Verification",
+            badge: { text: "⚠️ Incomplete", tone: "warn" },
+            body: `
+              <h1>Información requerida</h1>
+              <p class="muted">Indica una cantidad válida de huéspedes.</p>
+              <p><a class="link" href="/guest/verify/${encodeURIComponent(token)}">Volver a intentar</a></p>
+            `,
+          })
+        );
+      }
+
+      await prisma.reservation.update({
+        where: { id: reservation.id },
+        data: {
+          verificationStatus: "COMPLETED",
+          verifiedAt: new Date(),
+          verificationCompletedByIp:
+            req.headers["x-forwarded-for"]?.toString()?.split(",")[0]?.trim() ??
+            req.socket.remoteAddress ??
+            null,
+          verificationUserAgent:
+            typeof req.headers["user-agent"] === "string"
+              ? req.headers["user-agent"]
+              : null,
+          verificationGuestCount: guestCount,
+          verificationAcceptedRulesAt: new Date(),
+        },
+      });
+
+      return res.status(200).type("html").send(
+        renderPage({
+          title: "Pin&Go • Verified",
+          badge: { text: "✅ Verified", tone: "good" },
+          body: `
+            <h1>Verificación completada</h1>
+
+            <p class="sub">
+              Gracias <b>${escapeHtml(reservation.guestName ?? "Guest")}</b>.
+              Su registro previo al check-in fue completado correctamente.
+            </p>
+
+            <div class="card">
+              <div class="row">
+                <span class="k">Propiedad</span>
+                <span class="v">${escapeHtml(reservation.property?.name ?? "N/A")}</span>
+              </div>
+
+              <div class="row">
+                <span class="k">Huéspedes</span>
+                <span class="v">${guestCount}</span>
+              </div>
+
+              <div class="row">
+                <span class="k">Estado</span>
+                <span class="v">Verified</span>
+              </div>
+            </div>
+
+            <p class="muted">
+              Sus instrucciones de acceso serán enviadas automáticamente según el horario de check-in.
+            </p>
+
+            <p>
+              <a class="link" href="/guest/${encodeURIComponent(token)}">
+                Ver estado de acceso
+              </a>
+            </p>
+
+            <div class="footer">
+              <span class="brand">Pin&Go</span>
+              <span class="muted small">Secure Guest Verification</span>
+            </div>
+          `,
+        })
+      );
+    } catch (err: any) {
+      console.error("[guest verify POST]", err);
+
+      return res.status(500).type("html").send(
+        renderPage({
+          title: "Pin&Go • Error",
+          badge: { text: "⚠️ Error", tone: "bad" },
+          body: `<p class="muted">Error completando verificación.</p>`,
+        })
+      );
+    }
+  });
+
   // ✅ Alias opcional (si quieres mantener /checkin/:token)
   router.get("/checkin/:token", (req, res) => {
     const token = String(req.params.token ?? "").trim();
@@ -285,10 +570,72 @@ function renderPage(args: {
     .k { color:var(--mut); font-size:13px; }
     .v { font-size:14px; text-align:right; }
     .code { font-weight:800; }
-    .muted { color:var(--mut); }
-    .small { font-size:12px; }
-    .footer { margin-top:18px; display:flex; justify-content:space-between; align-items:center; gap:10px; flex-wrap:wrap; }
-    .brand { font-weight:800; }
+
+.label {
+  display:block;
+  font-size:13px;
+  color:var(--mut);
+  margin-bottom:8px;
+}
+
+.input {
+  width:100%;
+  box-sizing:border-box;
+  padding:12px 14px;
+  border-radius:12px;
+  border:1px solid var(--line);
+  background:#0f1728;
+  color:var(--txt);
+  font-size:16px;
+  margin-bottom:14px;
+  outline:none;
+}
+
+.input:focus {
+  border-color:#2f6df6;
+}
+
+.checkbox {
+  display:flex;
+  align-items:flex-start;
+  gap:10px;
+  color:var(--txt);
+  font-size:14px;
+  line-height:1.4;
+  margin:12px 0 16px;
+}
+
+.checkbox input {
+  margin-top:3px;
+}
+
+.btn {
+  width:100%;
+  border:0;
+  border-radius:12px;
+  padding:13px 14px;
+  background:#2f6df6;
+  color:white;
+  font-weight:800;
+  font-size:15px;
+  cursor:pointer;
+}
+
+.btn:active {
+  transform:translateY(1px);
+}
+
+.link {
+  color:#9dbdff;
+  font-weight:700;
+  text-decoration:none;
+}
+
+.muted { color:var(--mut); }
+.small { font-size:12px; }
+.footer { margin-top:18px; display:flex; justify-content:space-between; align-items:center; gap:10px; flex-wrap:wrap; }
+.brand { font-weight:800; }
+
   </style>
 </head>
 <body>
