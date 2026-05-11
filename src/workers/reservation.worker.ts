@@ -31,6 +31,7 @@ import { expireCleaningNfcAssignments } from "../services/nfc-expire.service";
 import { retryPendingNfcSync } from "../services/nfc-sync.service";
 import { retryNfcAssignments } from "../services/nfc-retry.service";
 import { ttlockChangeCardPeriod, ttlockListCards } from "../ttlock/ttlock.card";
+import { ttlockChangePasscode } from "../ttlock/ttlock.passcode";
 import { NfcCardStatus } from "@prisma/client";
 import { unassignAllNfcForReservation } from "../services/nfc.service";
 import { unassignGuestNfcForReservation } from "../services/nfc.service";
@@ -1235,6 +1236,124 @@ async function processCleaningEnds(now: Date) {
   }
 }
 
+async function processPasscodeResyncs(now: Date) {
+  const grants = await prisma.accessGrant.findMany({
+    where: {
+      type: AccessGrantType.GUEST,
+      method: AccessMethod.PASSCODE_TIMEBOUND,
+
+      status: {
+        in: [AccessStatus.ACTIVE, AccessStatus.PENDING],
+      },
+
+      ttlockKeyboardPwdId: {
+        not: null,
+      },
+
+      reservation: {
+        status: "ACTIVE",
+      },
+    },
+
+    include: {
+      reservation: true,
+      lock: true,
+    },
+
+    take: 50,
+  });
+
+  if (grants.length === 0) return;
+
+  for (const g of grants) {
+    try {
+      const desiredStart = new Date(
+        g.reservation.checkIn
+      );
+
+      const desiredEnd = new Date(
+        g.reservation.checkOut
+      );
+
+      const needsUpdate =
+        g.startsAt.getTime() !==
+          desiredStart.getTime() ||
+        g.endsAt.getTime() !==
+          desiredEnd.getTime();
+
+      if (!needsUpdate) continue;
+
+      const ttlockLockId =
+        g.lock?.ttlockLockId;
+
+      if (!ttlockLockId) continue;
+
+      console.log(
+        "[PASSCODE_RESYNC][RUN]",
+        {
+          grantId: g.id,
+          keyboardPwdId:
+            g.ttlockKeyboardPwdId,
+          oldStart:
+            g.startsAt.toISOString(),
+          oldEnd:
+            g.endsAt.toISOString(),
+          newStart:
+            desiredStart.toISOString(),
+          newEnd:
+            desiredEnd.toISOString(),
+        }
+      );
+
+      await ttlockChangePasscode({
+        lockId: Number(ttlockLockId),
+        keyboardPwdId: Number(
+          g.ttlockKeyboardPwdId
+        ),
+        startDate:
+          desiredStart.getTime(),
+        endDate:
+          desiredEnd.getTime(),
+      });
+
+      await prisma.accessGrant.update({
+        where: { id: g.id },
+
+        data: {
+          startsAt: desiredStart,
+          endsAt: desiredEnd,
+          lastError: null,
+        },
+      });
+
+      console.log(
+        "[PASSCODE_RESYNC][OK]",
+        {
+          grantId: g.id,
+        }
+      );
+    } catch (e: any) {
+      const msg = toErrString(e);
+
+      console.error(
+        "[PASSCODE_RESYNC][FAILED]",
+        {
+          grantId: g.id,
+          err: msg,
+        }
+      );
+
+      await prisma.accessGrant.update({
+        where: { id: g.id },
+
+        data: {
+          lastError: msg,
+        },
+      });
+    }
+  }
+}
+
 // ====== LOOP ======
 let shuttingDown = false;
 
@@ -1243,6 +1362,15 @@ async function tick() {
 
   const now = new Date();
   log('tick', { now: now.toISOString() });
+
+try {
+  await processPasscodeResyncs(now);
+} catch (e) {
+  errLog(
+    "processPasscodeResyncs crashed:",
+    toErrString(e)
+  );
+}
 
   try {
     await processCheckins(now);
