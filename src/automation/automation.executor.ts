@@ -138,6 +138,43 @@ if (params.reservationCheckIn instanceof Date) {
     action: string;
     value?: unknown;
   }) {
+    
+    // 🔥 evitar duplicados del mismo trigger/device
+    if (reservationId) {
+      const existingSuccess =
+        await prisma.automationExecutionLog.findFirst({
+          where: {
+            organizationId,
+            propertyId,
+            reservationId,
+            trigger,
+            source: params.source,
+            externalId: params.externalId,
+            action: params.action,
+            status: "SUCCESS",
+          },
+          select: {
+            id: true,
+          },
+        });
+
+      if (existingSuccess) {
+        console.log("[automation] skipped duplicate execution", {
+          reservationId,
+          trigger,
+          source: params.source,
+          externalId: params.externalId,
+          action: params.action,
+        });
+
+        return {
+          success: false,
+          fallback: false,
+          skipped: true,
+        };
+      }
+    }
+
     const result = await sendTuyaCommand({
       externalId: params.externalId,
       deviceCategory: params.deviceCategory,
