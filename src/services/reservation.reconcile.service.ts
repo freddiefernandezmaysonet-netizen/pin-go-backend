@@ -300,6 +300,15 @@ const cleaningEndsAt = new Date(
       )
         continue;
 
+if (a.role === NfcAssignmentRole.CLEANING) {
+  console.log("[reconcile][cleaning] waiting reconfirmation", {
+    reservationId: reservation.id,
+    nfcAssignmentId: a.id,
+  });
+
+  continue;
+}
+
       const next =
         a.role === NfcAssignmentRole.CLEANING
           ? { startsAt: cleaningStartsAt, endsAt: cleaningEndsAt }
