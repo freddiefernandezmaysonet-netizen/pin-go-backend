@@ -262,6 +262,33 @@ function buildAC(input: BuildInput, warnings: string[]): TuyaCommand[] | null {
   return null;
 }
 
+function buildAlarm(input: BuildInput, warnings: string[]): TuyaCommand[] | null {
+  const fn = findFn(input.functions, ["master_mode"]);
+  if (!fn) return null;
+
+  const meta = parseValues(fn);
+  const allowed = meta?.range ?? [];
+
+  function pick(val: string) {
+    return allowed.includes(val) ? val : null;
+  }
+
+  if (input.action === "DISARM") {
+    const v = pick("disarmed") || pick("off");
+    if (!v) return null;
+    return [{ code: fn.code, value: v }];
+  }
+
+  if (input.action === "ARM") {
+    const v = pick("arm") || pick("armed");
+    if (!v) return null;
+    return [{ code: fn.code, value: v }];
+  }
+
+  warnings.push("ALARM_UNSUPPORTED_ACTION");
+  return null;
+}
+
 // ==========================
 // MAIN
 // ==========================
