@@ -177,64 +177,88 @@ function buildLight(input: BuildInput, warnings: string[]): TuyaCommand[] | null
 
 function buildAC(input: BuildInput, warnings: string[]): TuyaCommand[] | null {
   const powerFn = findFn(input.functions, [
-  "switch",
-  "switch_1",
-  "power",
-  "air_switch",
-  "on_off",
-]);
-  
-  const tempFn = findFn(input.functions, ["temp_set", "temp"]);
+    "switch",
+    "switch_1",
+    "power",
+    "air_switch",
+    "on_off",
+  ]);
 
-  if (!powerFn) return null;
+  const modeFn = findFn(input.functions, ["mode"]);
 
+  const tempFn = findFn(input.functions, [
+    "temp_set",
+    "temp",
+    "cool_temp_set",
+  ]);
+
+  // =========================
+  // TURN ON
+  // =========================
   if (input.action === "TURN_ON") {
-    return [{ code: powerFn.code, value: true }];
+    // prioridad power real
+    if (powerFn) {
+      return [{ code: powerFn.code, value: true }];
+    }
+
+    // fallback thermostats mode-based
+    if (modeFn) {
+      return [{ code: modeFn.code, value: "cool" }];
+    }
+
+    return null;
   }
 
+  // =========================
+  // TURN OFF
+  // =========================
   if (input.action === "TURN_OFF") {
-    return [{ code: powerFn.code, value: false }];
+    if (powerFn) {
+      return [{ code: powerFn.code, value: false }];
+    }
+
+    if (modeFn) {
+      return [{ code: modeFn.code, value: "off" }];
+    }
+
+    return null;
   }
 
+  // =========================
+  // SET TEMPERATURE
+  // =========================
   if (input.action === "SET_TEMPERATURE") {
     if (!tempFn) return null;
 
     const v = asNumber(input.value);
     if (v == null) return null;
 
-    return [
-      { code: powerFn.code, value: true },
-      { code: tempFn.code, value: scaleNumber(v, tempFn) },
-    ];
+    const commands: TuyaCommand[] = [];
+
+    // si existe power real -> prender
+    if (powerFn) {
+      commands.push({
+        code: powerFn.code,
+        value: true,
+      });
+    }
+    // thermostat mode-based
+    else if (modeFn) {
+      commands.push({
+        code: modeFn.code,
+        value: "cool",
+      });
+    }
+
+    commands.push({
+      code: tempFn.code,
+      value: scaleNumber(v, tempFn),
+    });
+
+    return commands;
   }
 
   warnings.push("AC_UNSUPPORTED_ACTION");
-  return null;
-}
-
-function buildAlarm(input: BuildInput, warnings: string[]): TuyaCommand[] | null {
-  const fn = findFn(input.functions, ["master_mode"]);
-  if (!fn) return null;
-
-  const meta = parseValues(fn);
-  const allowed = meta?.range ?? [];
-
-  function pick(val: string) {
-    return allowed.includes(val) ? val : null;
-  }
-
-  if (input.action === "DISARM") {
-    const v = pick("disarmed") || pick("off");
-    if (!v) return null;
-    return [{ code: fn.code, value: v }];
-  }
-
-  if (input.action === "ARM") {
-    const v = pick("arm") || pick("armed");
-    if (!v) return null;
-    return [{ code: fn.code, value: v }];
-  }
-
   return null;
 }
 
