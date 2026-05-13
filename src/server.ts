@@ -74,6 +74,7 @@ import { adminSalesFollowupsRouter } from "./routes/admin.sales-followups.routes
 import { adminDemoRouter } from "./routes/admin.demo.routes";
 import { signupSuccessRouter } from "./routes/public.signup.success.routes";
 import { cleaningConfirmRouter } from "./routes/cleaning-confirm.routes";
+import { teamRouter } from "./routes/team.routes";
 
 const app = express();
 const prisma = new PrismaClient();
@@ -182,6 +183,7 @@ app.get("/ready", async (_req, res) => {
 // =====================
 app.use(signupPublicRoutes);
 app.use(authRouter);
+app.use(teamRouter);
 app.use("/api/onboarding/appointments", onboardingAppointmentsRouter);
 app.use(signupSuccessRouter);
 
