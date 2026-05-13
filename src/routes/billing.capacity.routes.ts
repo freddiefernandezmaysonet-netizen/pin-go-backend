@@ -2,6 +2,7 @@ import { Router } from "express";
 import { PrismaClient } from "@prisma/client";
 import stripe from "../billing/stripe";
 import { requireAuth } from "../middleware/requireAuth";
+import { requireOrgAdmin } from "../middleware/requireOrgAdmin";
 
 const router = Router();
 const prisma = new PrismaClient();
@@ -15,7 +16,11 @@ const prisma = new PrismaClient();
  * - Aplica proration (Stripe cobra solo diferencia)
  * - Bloquea bajar por debajo de locks activas
  */
-router.post("/locks/quantity", requireAuth, async (req, res) => {
+router.post(
+  "/locks/quantity",
+  requireAuth,
+  requireOrgAdmin,
+  async (req, res) => {
   try {
     const user = (req as any).user;
     const orgId = String(user?.orgId ?? "").trim();
@@ -123,8 +128,9 @@ router.post("/locks/quantity", requireAuth, async (req, res) => {
       ok: false,
       error: e?.message ?? "capacity update failed",
     });
-  }
-});
+   }
+ }
+);
 
 /**
  * POST /api/billing/smart/quantity
@@ -135,7 +141,11 @@ router.post("/locks/quantity", requireAuth, async (req, res) => {
  * - Aplica proration
  * - Bloquea bajar por debajo de smart properties activas
  */
-router.post("/smart/quantity", requireAuth, async (req, res) => {
+router.post(
+  "/smart/quantity",
+  requireAuth,
+  requireOrgAdmin,
+  async (req, res) => {
   try {
     const user = (req as any).user;
     const orgId = String(user?.orgId ?? "").trim();
@@ -268,7 +278,8 @@ if (!subFull?.stripeSmartSubscriptionItemId) {
       ok: false,
       error: e?.message ?? "smart capacity update failed",
     });
-  }
-});
+   }
+ }
+);
 
 export default router;

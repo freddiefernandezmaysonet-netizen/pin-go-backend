@@ -1,5 +1,7 @@
 import { Router, type Request, type Response } from "express";
 import Stripe from "stripe";
+import { requireAuth } from "../middleware/requireAuth";
+import { requireOrgAdmin } from "../middleware/requireOrgAdmin";
 
 type PrismaLike = any;
 
@@ -173,7 +175,11 @@ export function buildTuyaBillingRouter(prisma: PrismaLike) {
    * - Stripe checkout
    * - webhook actual / existente persiste la suscripción / item / entitlement
    */
-  router.post("/checkout-session", async (req: Request, res: Response) => {
+  router.post(
+  "/checkout-session",
+  requireAuth,
+  requireOrgAdmin,
+  async (req: Request, res: Response) => {
     try {
       if (!stripe) {
         return res.status(500).json({
@@ -275,7 +281,8 @@ export function buildTuyaBillingRouter(prisma: PrismaLike) {
           error?.message || "Unexpected error while creating Tuya checkout session",
       });
     }
-  });
+  }
+);
 
   return router;
 }

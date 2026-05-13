@@ -2,11 +2,16 @@ import { Router } from "express";
 import { PrismaClient } from "@prisma/client";
 import stripe from "../billing/stripe";
 import { requireAuth } from "../middleware/requireAuth";
+import { requireOrgAdmin } from "../middleware/requireOrgAdmin";
 
 const router = Router();
 const prisma = new PrismaClient();
 
-router.post("/locks/preview", requireAuth, async (req, res) => {
+router.post(
+  "/locks/preview",
+  requireAuth,
+  requireOrgAdmin,
+  async (req, res) => {
   try {
     const user = (req as any).user;
     const orgId = String(user?.orgId ?? "").trim();
@@ -93,10 +98,15 @@ router.post("/locks/preview", requireAuth, async (req, res) => {
       ok: false,
       error: e.message,
     });
+   }
   }
-});
+);
 
-router.post("/smart/preview", requireAuth, async (req, res) => {
+router.post(
+  "/smart/preview",
+  requireAuth,
+  requireOrgAdmin,
+  async (req, res) => {
   try {
     const user = (req as any).user;
     const orgId = String(user?.orgId ?? "").trim();
@@ -183,7 +193,8 @@ router.post("/smart/preview", requireAuth, async (req, res) => {
       ok: false,
       error: e.message,
     });
+   }
   }
-});
+);
 
 export default router;

@@ -1,11 +1,12 @@
 import { Router } from "express";
 import type { PrismaClient } from "@prisma/client";
 import { requireAuth } from "../middleware/requireAuth";
+import { requireOrgAdmin } from "../middleware/requireOrgAdmin";
 
 export function buildBillingOverviewRouter(prisma: PrismaClient) {
   const router = Router();
 
-  router.get("/overview", requireAuth, async (req, res) => {
+  router.get("/overview", requireAuth, requireOrgAdmin, async (req, res) => {
     try {
       const user = (req as any).user;
       const orgId = user.orgId as string;

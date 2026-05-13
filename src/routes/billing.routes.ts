@@ -2,6 +2,7 @@ import express from "express";
 import { PrismaClient } from "@prisma/client";
 import stripe from "../billing/stripe";
 import { requireAuth } from "../middleware/requireAuth";
+import { requireOrgAdmin } from "../middleware/requireOrgAdmin";
 
 export function buildBillingRouter(prisma: PrismaClient) {
   const router = express.Router();
@@ -134,7 +135,11 @@ export function buildBillingRouter(prisma: PrismaClient) {
   ---------------------------------------------------------
   */
 
-  router.post("/locks/checkout-session", requireAuth, async (req, res) => {
+  router.post(
+  "/locks/checkout-session",
+  requireAuth,
+  requireOrgAdmin,
+  async (req, res) => {
     try {
       const user = (req as any).user;
 
@@ -237,7 +242,8 @@ export function buildBillingRouter(prisma: PrismaClient) {
         error: e?.message ?? "locks checkout-session failed",
       });
     }
-  });
+  }
+);
 
   /*
   ---------------------------------------------------------
@@ -245,7 +251,11 @@ export function buildBillingRouter(prisma: PrismaClient) {
   ---------------------------------------------------------
   */
 
-  router.post("/smart/checkout-session", requireAuth, async (req, res) => {
+  router.post(
+  "/smart/checkout-session",
+  requireAuth,
+  requireOrgAdmin,
+  async (req, res) => {
     try {
       const user = (req as any).user;
       const orgId = String(user?.orgId ?? "");
@@ -325,7 +335,8 @@ export function buildBillingRouter(prisma: PrismaClient) {
         error: e?.message ?? "smart checkout-session failed",
       });
     }
-  });
+  }
+);
 
   return router;
 }

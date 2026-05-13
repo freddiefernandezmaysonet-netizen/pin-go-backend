@@ -2,6 +2,7 @@ import express from "express";
 import stripe from "../billing/stripe";
 import { PrismaClient } from "@prisma/client";
 import { requireAuth } from "../middleware/requireAuth";
+import { requireOrgAdmin } from "../middleware/requireOrgAdmin";
 
 export function buildBillingPortalRouter(prisma: PrismaClient) {
   const router = express.Router();
@@ -14,7 +15,7 @@ export function buildBillingPortalRouter(prisma: PrismaClient) {
     throw new Error("Missing APP_URL");
   }
 
-  router.post("/portal", requireAuth, async (req, res) => {
+  router.post("/portal", requireAuth, requireOrgAdmin, async (req, res) => {
     try {
       const user = (req as any).user;
       const orgId = user.orgId;
