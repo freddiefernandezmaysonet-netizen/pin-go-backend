@@ -76,9 +76,15 @@ teamRouter.get("/api/team/users", requireAuth, async (req: any, res) => {
     if (!admin) return;
 
     const users = await prisma.dashboardUser.findMany({
-      where: {
-        organizationId: admin.organizationId,
-      },
+  where: {
+    organizationId: admin.organizationId,
+
+    // 🔒 PLATFORM_ADMIN nunca aparece en Team Management
+    role: {
+      not: DashboardUserRole.PLATFORM_ADMIN,
+    },
+  },
+    
       orderBy: [{ isActive: "desc" }, { createdAt: "asc" }],
       select: {
         id: true,
@@ -213,6 +219,14 @@ teamRouter.patch("/api/team/users/:userId", requireAuth, async (req: any, res) =
       return res.status(404).json({ ok: false, error: "User not found" });
     }
 
+// 🔒 PLATFORM_ADMIN no puede ser manejado desde Team Management
+if (target.role === DashboardUserRole.PLATFORM_ADMIN) {
+  return res.status(403).json({
+    ok: false,
+    error: "Platform admin users cannot be managed",
+  });
+}
+
     const data: {
       fullName?: string | null;
       role?: DashboardUserRole;
@@ -291,15 +305,24 @@ teamRouter.post(
           organizationId: admin.organizationId,
           isActive: true,
         },
-        select: {
-          id: true,
-          email: true,
-        },
+       select: {
+  id: true,
+  email: true,
+  role: true,
+}, 
       });
 
       if (!target) {
         return res.status(404).json({ ok: false, error: "User not found" });
       }
+
+// 🔒 PLATFORM_ADMIN no puede ser manejado desde Team Management
+if (target.role === DashboardUserRole.PLATFORM_ADMIN) {
+  return res.status(403).json({
+    ok: false,
+    error: "Platform admin users cannot be managed",
+  });
+}
 
       const temporaryPassword = makeTemporaryPassword();
       const passwordHash = await bcrypt.hash(temporaryPassword, 12);
