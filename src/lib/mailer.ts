@@ -37,7 +37,7 @@ export async function sendResetPasswordEmail(
     }
 
     console.log("📨 RESEND_API_KEY missing. Using console fallback.");
-    console.log("🔑 RESET LINK:", resetUrl);
+    console.log("✅ RESET PASSWORD EMAIL READY");
 
     return {
       ok: true,
@@ -76,7 +76,7 @@ export async function sendResetPasswordEmail(
       }
 
       console.error("❌ Resend send failed. Using console fallback:", error);
-      console.log("🔑 RESET LINK:", resetUrl);
+      console.log("✅ RESET PASSWORD EMAIL READY");
 
       return {
         ok: true,
@@ -97,7 +97,7 @@ export async function sendResetPasswordEmail(
     }
 
     console.error("❌ Resend exception. Using console fallback:", err);
-    console.log("🔑 RESET LINK:", resetUrl);
+    console.log("✅ RESET PASSWORD EMAIL READY");
 
     return {
       ok: true,
