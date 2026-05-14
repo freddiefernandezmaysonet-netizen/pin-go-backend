@@ -1,10 +1,9 @@
-import { PrismaClient } from "@prisma/client";
+import { prisma } from "../lib/prisma";
 import { ttlockFetchBattery } from "../ttlock/ttlock.deviceBattery";
 import { ttlockFetchGateway } from "../ttlock/ttlock.deviceGateway";
 import { upsertDeviceHealth } from "../services/deviceHealth.service";
 import { computeOperationalRisk } from "../domain/computeOperationalRisk";
 
-const prisma = new PrismaClient();
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 const HOUR_MS = 60 * 60 * 1000;
