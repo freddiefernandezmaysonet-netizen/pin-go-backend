@@ -1,10 +1,8 @@
 import dotenv from "dotenv";
 dotenv.config({ path: "./.env", override: true });
 
-import { PrismaClient } from "@prisma/client";
+import { prisma } from "../lib/prisma";
 import { sendSms } from "../integrations/twilio/twilio.client";
-
-const prisma = new PrismaClient();
 
 const WORKER_NAME = "message.retry.worker";
 const POLL_MS = Number(process.env.MESSAGE_RETRY_POLL_MS ?? 30000);
