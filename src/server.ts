@@ -1,7 +1,7 @@
 import "dotenv/config";
 import express from "express";
 import crypto from "crypto";
-import { PrismaClient } from "@prisma/client";
+import { prisma } from "./lib/prisma";
 import bodyParser from "body-parser";
 import { registerStripeWebhook } from "./webhooks/stripe.webhook";
 import cors from "cors";
@@ -77,7 +77,6 @@ import { cleaningConfirmRouter } from "./routes/cleaning-confirm.routes";
 import { teamRouter } from "./routes/team.routes";
 
 const app = express();
-const prisma = new PrismaClient();
 
 const PORT = Number(process.env.PORT ?? 3000);
 const FRONTEND_ORIGIN = process.env.FRONTEND_ORIGIN;
