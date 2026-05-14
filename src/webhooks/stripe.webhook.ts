@@ -235,6 +235,18 @@ async function safeSyncBySubscriptionId(
   const lockPriceId = String(process.env.STRIPE_PRICE_LOCK_MONTHLY ?? "").trim();
   const smartPriceId = String(process.env.STRIPE_PRICE_SMART_PROPERTY ?? "").trim();
 
+const contract24LockPriceId = String(
+  process.env.STRIPE_PRICE_CONTRACT_24_LOCK ?? ""
+).trim();
+
+const contract24Lock1SmartPriceId = String(
+  process.env.STRIPE_PRICE_CONTRACT_24_LOCK_1_SMART ?? ""
+).trim();
+
+const contract24Lock2SmartPriceId = String(
+  process.env.STRIPE_PRICE_CONTRACT_24_LOCK_2_SMART ?? ""
+).trim();
+  
   if (!lockPriceId) {
     throw new Error("Missing STRIPE_PRICE_LOCK_MONTHLY");
   }
@@ -327,12 +339,42 @@ async function safeSyncBySubscriptionId(
 
   const items = fullSub.items.data;
 
-  const lockItem = items.find((i) => i.price?.id === lockPriceId) ?? null;
-  const smartItem = items.find((i) => i.price?.id === smartPriceId) ?? null;
+  const lockItem =
+  items.find((i) => i.price?.id === lockPriceId) ?? null;
 
-  const lockQty = Number(lockItem?.quantity ?? 0);
-  const smartQty = Number(smartItem?.quantity ?? 0);
+const smartItem =
+  items.find((i) => i.price?.id === smartPriceId) ?? null;
 
+const contract24LockItem =
+  items.find((i) => i.price?.id === contract24LockPriceId) ?? null;
+
+const contract24Lock1SmartItem =
+  items.find((i) => i.price?.id === contract24Lock1SmartPriceId) ?? null;
+
+const contract24Lock2SmartItem =
+  items.find((i) => i.price?.id === contract24Lock2SmartPriceId) ?? null;
+
+let lockQty = Number(lockItem?.quantity ?? 0);
+
+let smartQty = Number(smartItem?.quantity ?? 0);
+
+// 2-year contract: includes 1 lock
+if (contract24LockItem) {
+  lockQty += Number(contract24LockItem.quantity ?? 1);
+}
+
+// 2-year contract: includes 1 lock + smart automation
+if (contract24Lock1SmartItem) {
+  lockQty += Number(contract24Lock1SmartItem.quantity ?? 1);
+  smartQty += Number(contract24Lock1SmartItem.quantity ?? 1);
+}
+
+// 2-year contract: includes 1 lock + 2 smart devices
+// entitlement remains 1 smart property
+if (contract24Lock2SmartItem) {
+  lockQty += Number(contract24Lock2SmartItem.quantity ?? 1);
+  smartQty += Number(contract24Lock2SmartItem.quantity ?? 1);
+}
   const status =
     fullSub.status === "active"
       ? "ACTIVE"
