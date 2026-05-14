@@ -1,12 +1,12 @@
 // src/services/nfc-autoheal.service.ts
-import { PrismaClient } from "@prisma/client";
-import { assignNfcCards } from "./nfc.service";
-
-const prisma = new PrismaClient();
+import { NfcAssignmentStatus, NfcCardStatus } from "@prisma/client";
+import { prisma } from "../lib/prisma";
+import { ttlockChangeCardPeriod } from "../ttlock/ttlock.card";
 
 /**
  * Auto-heal por assignmentId.
- * Principio: no romper nada; re-intentar el flujo existente (assignNfcCards).
+ * Repara un NfcAssignment existente usando su misma tarjeta NFC.
+ * No crea assignments nuevos.
  */
 export async function healNfcAssignment(assignmentId: string) {
   const a = await prisma.nfcAssignment.findUnique({
@@ -17,18 +17,68 @@ export async function healNfcAssignment(assignmentId: string) {
     },
   });
 
-  if (!a) return;
+  if (!a) return { ok: false, reason: "ASSIGNMENT_NOT_FOUND" };
 
-  // Si ya está expirado/terminado, no tocar (ajusta si tienes otros estados finales)
-  // if (a.status === NfcAssignmentStatus.ENDED) return;
+  if (a.status === NfcAssignmentStatus.ENDED) {
+    return { ok: true, skipped: true, reason: "ASSIGNMENT_ENDED" };
+  }
 
-  // Reutiliza tu lógica real (idempotente idealmente)
-  // Si assignNfcCards requiere prisma como 1er arg, usa la línea A.
-  // Si NO lo requiere, usa la línea B.
+  if (!a.NfcCard?.ttlockCardId) {
+    throw new Error("NFC_ASSIGNMENT_MISSING_TTLOCK_CARD_ID");
+  }
 
-  // A) ✅ más probable en tu codebase:
-  throw new Error("healNfcAssignment is not wired: assignNfcCards requires reservation/lock params.");
+  const propertyId =
+    a.NfcCard.propertyId || a.Reservation?.propertyId || null;
 
-  // B) (si te da error de argumentos, cambia a esta):
-  // await assignNfcCards({ assignmentId: a.id });
+  if (!propertyId) {
+    throw new Error("NFC_ASSIGNMENT_MISSING_PROPERTY_ID");
+  }
+
+  const lock = await prisma.lock.findFirst({
+    where: {
+      propertyId,
+      isActive: true,
+      ttlockLockId: { not: null },
+    },
+    select: {
+      id: true,
+      ttlockLockId: true,
+    },
+  });
+
+  if (!lock?.ttlockLockId) {
+    throw new Error(`NO_ACTIVE_TTLOCK_LOCK_FOR_PROPERTY:${propertyId}`);
+  }
+
+  await ttlockChangeCardPeriod({
+    lockId: Number(lock.ttlockLockId),
+    cardId: Number(a.NfcCard.ttlockCardId),
+    startDate: a.startsAt.getTime(),
+    endDate: a.endsAt.getTime(),
+    changeType: 2,
+  });
+
+  await prisma.nfcAssignment.update({
+    where: { id: a.id },
+    data: {
+      status: NfcAssignmentStatus.ACTIVE,
+      lastError: null,
+    },
+  });
+
+  await prisma.nfcCard.update({
+    where: { id: a.nfcCardId },
+    data: {
+      status: NfcCardStatus.ASSIGNED,
+    },
+  });
+
+  return {
+    ok: true,
+    assignmentId: a.id,
+    propertyId,
+    lockId: lock.id,
+    ttlockLockId: lock.ttlockLockId,
+    ttlockCardId: a.NfcCard.ttlockCardId,
+  };
 }
