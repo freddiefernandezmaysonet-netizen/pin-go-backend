@@ -1,5 +1,5 @@
 import crypto from "crypto";
-import { PrismaClient } from "@prisma/client";
+import { prisma } from "../lib/prisma";
 import { processWebhookEventById } from "../pms/ingest/webhook.processor";
 
 type LodgifyBooking = {
@@ -27,8 +27,6 @@ type LodgifyProperty = {
   name?: string | null;
   [key: string]: unknown;
 };
-
-const prisma = new PrismaClient();
 
 const LODGIFY_BASE_URL =
   process.env.LODGIFY_BASE_URL?.trim() || "https://api.lodgify.com";
@@ -309,20 +307,36 @@ const paymentChanged =
   Number((enriched as any)?.total_amount ?? 0) !==
     Number(existingPayload?.total_amount ?? 0);
 
+const guestChanged =
+  String((enriched as any)?.guest?.name ?? "") !==
+    String(existingPayload?.guest?.name ?? "") ||
+  String((enriched as any)?.guest?.email ?? "") !==
+    String(existingPayload?.guest?.email ?? "") ||
+  String((enriched as any)?.guest?.phone ?? "") !==
+    String(existingPayload?.guest?.phone ?? "");
+
+const statusChanged =
+  String((enriched as any)?.status ?? "") !==
+    String(existingPayload?.status ?? "");
+
 const datesChanged =
   String((enriched as any)?.arrival ?? "") !==
     String(existingPayload?.arrival ?? "") ||
   String((enriched as any)?.departure ?? "") !==
     String(existingPayload?.departure ?? "");
 
+const hasMeaningfulChange =
+  paymentChanged || datesChanged || guestChanged || statusChanged;
+
 if (
+  if (
   ev &&
   incomingUpdatedAtMs !== null &&
   existingUpdatedAtMs !== null &&
   incomingUpdatedAtMs < existingUpdatedAtMs &&
-  !paymentChanged &&
-  !datesChanged
+  !hasMeaningfulChange
 ) {
+
   log("skip older/equal snapshot", {
     bookingId,
     incomingUpdatedAt: enriched?.updated_at ?? null,
