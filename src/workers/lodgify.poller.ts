@@ -42,6 +42,8 @@ const PROPERTY_CACHE_TTL_MS = Number(
   process.env.LODGIFY_PROPERTY_CACHE_TTL_MS ?? 10 * 60 * 1000
 );
 
+const DEBUG_WORKERS = process.env.DEBUG_WORKERS === "true";
+
 const propertyCache = new Map<
   string,
   {
@@ -51,9 +53,9 @@ const propertyCache = new Map<
 >();
 
 function log(message: string, meta?: Record<string, unknown>) {
+  if (!DEBUG_WORKERS) return;
   console.log("[lodgify.poller]", message, meta ?? "");
 }
-
 function errLog(message: string, meta?: Record<string, unknown>) {
   console.error("[lodgify.poller]", message, meta ?? "");
 }
