@@ -2,7 +2,6 @@
 import dotenv from "dotenv";
 dotenv.config({ path: "./.env", override: true });
 import {
-  PrismaClient,
   PaymentState,
   AccessStatus,
   AccessMethod,
@@ -13,6 +12,7 @@ import {
   NfcAssignmentStatus,
 } from '@prisma/client';
 
+import { prisma } from "../lib/prisma";
 import { isOrgEntitled } from "../services/billing.entitlement";
 import { activateGrant, deactivateGrant } from "../services/ttlock/ttlock.brain";
 import { assignNfcCards } from "../services/nfc.service";
@@ -38,8 +38,6 @@ import { unassignGuestNfcForReservation } from "../services/nfc.service";
 import { processPendingCleaningConfirmations } from "../services/cleaning-confirmation-dispatch.service";
 
 console.log("[reservation.worker] BOOT", new Date().toISOString());
-
-const prisma = new PrismaClient();
 
 function phoneToPasscode(phone?: string) {
   if (!phone) return null;
