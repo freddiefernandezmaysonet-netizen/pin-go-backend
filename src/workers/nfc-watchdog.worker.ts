@@ -1,9 +1,8 @@
 // src/workers/nfc-watchdog.worker.ts
 import "dotenv/config";
-import { PrismaClient } from "@prisma/client";
+import { prisma } from "../lib/prisma";
 import { healNfcAssignment } from "../services/nfc-autoheal.service";
 
-const prisma = new PrismaClient();
 
 const POLL_MS = Number(process.env.NFC_WATCHDOG_POLL_MS ?? 30_000);
 const BATCH_SIZE = Number(process.env.NFC_WATCHDOG_BATCH_SIZE ?? 20);
