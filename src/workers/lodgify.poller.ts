@@ -328,7 +328,6 @@ const datesChanged =
 const hasMeaningfulChange =
   paymentChanged || datesChanged || guestChanged || statusChanged;
 
-if (
   if (
   ev &&
   incomingUpdatedAtMs !== null &&
