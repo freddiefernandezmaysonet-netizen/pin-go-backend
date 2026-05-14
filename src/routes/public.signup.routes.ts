@@ -17,22 +17,21 @@ const STRIPE_PRICE_LOCK_MONTHLY =
 const STRIPE_PRICE_LOCK_YEARLY =
   process.env.STRIPE_PRICE_LOCK_YEARLY ?? "";
 
-const STRIPE_PRICE_LOCK_24 =
-  process.env.STRIPE_PRICE_LOCK_24 ?? "";
+const STRIPE_PRICE_CONTRACT_24_LOCK =
+  process.env.STRIPE_PRICE_CONTRACT_24_LOCK ?? "";
 
-const STRIPE_PRICE_SMART_24 =
-  process.env.STRIPE_PRICE_SMART_24 ?? "";
+const STRIPE_PRICE_CONTRACT_24_LOCK_1_SMART =
+  process.env.STRIPE_PRICE_CONTRACT_24_LOCK_1_SMART ?? "";
 
-const STRIPE_PRICE_COMPLETE_24 =
-  process.env.STRIPE_PRICE_COMPLETE_24 ?? "";
-
+const STRIPE_PRICE_CONTRACT_24_LOCK_2_SMART =
+  process.env.STRIPE_PRICE_CONTRACT_24_LOCK_2_SMART ?? "";
 type BillingInterval = "monthly" | "yearly";
 
 type ContractOption =
   | "standard"
-  | "contract_24_locks"
-  | "contract_24_smart"
-  | "contract_24_complete";
+  | "contract_24_lock"
+  | "contract_24_lock_1_smart"
+  | "contract_24_lock_2_smart";
 
 type SignupCheckoutBody = {
   email?: string;
@@ -68,24 +67,24 @@ router.post("/api/public/signup-checkout", async (req: Request, res: Response) =
       body.billingInterval === "yearly" ? "yearly" : "monthly";
 
     const contractOption: ContractOption =
-      body.contractOption === "contract_24_locks" ||
-      body.contractOption === "contract_24_smart" ||
-      body.contractOption === "contract_24_complete"
-        ? body.contractOption
-        : "standard";
-
-    const PRICE_ID =
-      contractOption === "contract_24_locks"
-        ? STRIPE_PRICE_LOCK_24
-        : contractOption === "contract_24_smart"
-          ? STRIPE_PRICE_SMART_24
-          : contractOption === "contract_24_complete"
-            ? STRIPE_PRICE_COMPLETE_24
-            : billingInterval === "yearly"
-              ? STRIPE_PRICE_LOCK_YEARLY
-              : STRIPE_PRICE_LOCK_MONTHLY;
-
-    console.log("🧪 signup checkout request", {
+  body.contractOption === "contract_24_lock" ||
+  body.contractOption === "contract_24_lock_1_smart" ||
+  body.contractOption === "contract_24_lock_2_smart"
+    ? body.contractOption
+    : "standard";
+    
+   const PRICE_ID =
+  contractOption === "contract_24_lock"
+    ? STRIPE_PRICE_CONTRACT_24_LOCK
+    : contractOption === "contract_24_lock_1_smart"
+      ? STRIPE_PRICE_CONTRACT_24_LOCK_1_SMART
+      : contractOption === "contract_24_lock_2_smart"
+        ? STRIPE_PRICE_CONTRACT_24_LOCK_2_SMART
+        : billingInterval === "yearly"
+          ? STRIPE_PRICE_LOCK_YEARLY
+          : STRIPE_PRICE_LOCK_MONTHLY;
+    
+  console.log("🧪 signup checkout request", {
       billingInterval,
       contractOption,
       priceId: PRICE_ID,
