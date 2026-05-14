@@ -10,8 +10,29 @@ const router = Router();
 const prisma = new PrismaClient();
 
 const APP_URL = process.env.APP_URL ?? "http://localhost:5173";
-const STRIPE_PRICE_LOCK_MONTHLY = process.env.STRIPE_PRICE_LOCK_MONTHLY ?? "";
-const STRIPE_PRICE_LOCK_YEARLY = process.env.STRIPE_PRICE_LOCK_YEARLY ?? "";
+
+const STRIPE_PRICE_LOCK_MONTHLY =
+  process.env.STRIPE_PRICE_LOCK_MONTHLY ?? "";
+
+const STRIPE_PRICE_LOCK_YEARLY =
+  process.env.STRIPE_PRICE_LOCK_YEARLY ?? "";
+
+const STRIPE_PRICE_LOCK_24 =
+  process.env.STRIPE_PRICE_LOCK_24 ?? "";
+
+const STRIPE_PRICE_SMART_24 =
+  process.env.STRIPE_PRICE_SMART_24 ?? "";
+
+const STRIPE_PRICE_COMPLETE_24 =
+  process.env.STRIPE_PRICE_COMPLETE_24 ?? "";
+
+type BillingInterval = "monthly" | "yearly";
+
+type ContractOption =
+  | "standard"
+  | "contract_24_locks"
+  | "contract_24_smart"
+  | "contract_24_complete";
 
 type SignupCheckoutBody = {
   email?: string;
@@ -20,7 +41,8 @@ type SignupCheckoutBody = {
   organizationName?: string;
   phone?: string;
   locks?: number;
-  billingInterval?: "monthly" | "yearly"; // ✅ ADD
+  billingInterval?: BillingInterval;
+  contractOption?: ContractOption;
 };
 
 function normalizeEmail(email: string) {
@@ -42,16 +64,30 @@ router.post("/api/public/signup-checkout", async (req: Request, res: Response) =
     const phone = body.phone?.trim() || null;
     const locks = Number(body.locks ?? 1);
 
-    // ✅ NUEVO
-    const billingInterval = body.billingInterval === "yearly" ? "yearly" : "monthly";
+    const billingInterval: BillingInterval =
+      body.billingInterval === "yearly" ? "yearly" : "monthly";
+
+    const contractOption: ContractOption =
+      body.contractOption === "contract_24_locks" ||
+      body.contractOption === "contract_24_smart" ||
+      body.contractOption === "contract_24_complete"
+        ? body.contractOption
+        : "standard";
 
     const PRICE_ID =
-      billingInterval === "yearly"
-        ? STRIPE_PRICE_LOCK_YEARLY
-        : STRIPE_PRICE_LOCK_MONTHLY;
+      contractOption === "contract_24_locks"
+        ? STRIPE_PRICE_LOCK_24
+        : contractOption === "contract_24_smart"
+          ? STRIPE_PRICE_SMART_24
+          : contractOption === "contract_24_complete"
+            ? STRIPE_PRICE_COMPLETE_24
+            : billingInterval === "yearly"
+              ? STRIPE_PRICE_LOCK_YEARLY
+              : STRIPE_PRICE_LOCK_MONTHLY;
 
     console.log("🧪 signup checkout request", {
       billingInterval,
+      contractOption,
       priceId: PRICE_ID,
       email,
       organizationName,
@@ -61,7 +97,7 @@ router.post("/api/public/signup-checkout", async (req: Request, res: Response) =
     if (!PRICE_ID) {
       return res.status(500).json({
         ok: false,
-        error: "Missing Stripe price for selected interval",
+        error: "Missing Stripe price for selected subscription",
       });
     }
 
@@ -123,7 +159,7 @@ router.post("/api/public/signup-checkout", async (req: Request, res: Response) =
         organizationName,
         phone,
         requestedLocks: locks,
-        stripePriceId: PRICE_ID, // ✅ dinámico
+        stripePriceId: PRICE_ID,
         status: PendingSignupStatus.PENDING,
         expiresAt,
       },
@@ -135,6 +171,7 @@ router.post("/api/public/signup-checkout", async (req: Request, res: Response) =
       phone: phone ?? undefined,
       metadata: {
         pendingSignupId: pendingSignup.id,
+        contractOption,
       },
     });
 
@@ -143,7 +180,7 @@ router.post("/api/public/signup-checkout", async (req: Request, res: Response) =
       customer: customer.id,
       line_items: [
         {
-          price: PRICE_ID, // ✅ dinámico
+          price: PRICE_ID,
           quantity: locks,
         },
       ],
@@ -153,11 +190,13 @@ router.post("/api/public/signup-checkout", async (req: Request, res: Response) =
         metadata: {
           pendingSignupId: pendingSignup.id,
           flow: "signup_onboarding",
+          contractOption,
         },
       },
       metadata: {
         pendingSignupId: pendingSignup.id,
         flow: "signup_onboarding",
+        contractOption,
       },
     });
 
