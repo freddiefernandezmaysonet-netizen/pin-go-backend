@@ -1,7 +1,6 @@
-import { PrismaClient } from "@prisma/client";
+import { prisma } from "../lib/prisma";
 import { reconcileReservation } from "../services/reservation.reconcile.service";
 
-const prisma = new PrismaClient();
 
 const POLL_MS = Number(process.env.PMS_WATCHDOG_POLL_MS ?? 60_000);
 const BATCH_SIZE = Number(process.env.PMS_WATCHDOG_BATCH_SIZE ?? 20);
