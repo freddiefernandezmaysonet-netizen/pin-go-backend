@@ -1,7 +1,5 @@
-import { PrismaClient } from "@prisma/client";
+import { prisma } from "../lib/prisma";
 import { runAutomation } from "../automation/automation.executor.ts";
-
-const prisma = new PrismaClient();
 
 let shuttingDown = false;
 let tickInProgress = false;
