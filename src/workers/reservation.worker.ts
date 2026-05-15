@@ -1279,8 +1279,8 @@ const lastAppliedEnd = g.desiredEndsAt;
 const needsUpdate =
   !lastAppliedStart ||
   !lastAppliedEnd ||
-  lastAppliedStart.getTime() !== g.startsAt.getTime() ||
-  lastAppliedEnd.getTime() !== g.endsAt.getTime();
+  lastAppliedStart.getTime() !== desiredStart.getTime() ||
+  lastAppliedEnd.getTime() !== desiredEnd.getTime();
 
 if (!needsUpdate) continue;
       const lock = await prisma.lock.findUnique({
@@ -1326,16 +1326,16 @@ if (!ttlockLockId) {
           g.ttlockKeyboardPwdId
         ),
         startDate:
-           g.startsAt.getTime(),
+           desiredStart.getTime(),
         endDate:
-           g.endsAt.getTime(),
+           desiredEnd.getTime(),
       });
 
      await prisma.accessGrant.update({
   where: { id: g.id },
   data: {
-    desiredStartsAt: g.startsAt,
-    desiredEndsAt: g.endsAt,
+    desiredStartsAt: desiredStart,
+    desiredEndsAt: desiredEnd,
     lastAppliedAt: new Date(),
     lastError: null,
   },
