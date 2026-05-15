@@ -164,13 +164,16 @@ console.log("[auth/forgot-password] about to send SMS OTP", {
   phone,
 });
 
-    await sendGuestSms(
-      phone,
-      `Your Pin&Go password reset code is ${code}. This code expires in 10 minutes.`
-    );
+   const smsResult = await sendGuestSms(
+  phone,
+  `Your Pin&Go password reset code is ${code}. This code expires in 10 minutes.`
+);
 
-console.log("[auth/forgot-password] SMS OTP sent");
-
+console.log("[auth/forgot-password] SMS OTP result", {
+  userId: user.id,
+  phone,
+  smsResult,
+});
     return res.json(safeResponse);
   } catch (error) {
     console.error("[auth/forgot-password] ERROR", error);
