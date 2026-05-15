@@ -34,22 +34,28 @@ export async function healNfcAssignment(assignmentId: string) {
     throw new Error("NFC_ASSIGNMENT_MISSING_PROPERTY_ID");
   }
 
-  const lock = await prisma.lock.findFirst({
-    where: {
-      propertyId,
-      isActive: true,
-      ttlockLockId: { not: null },
-    },
-    select: {
-      id: true,
-      ttlockLockId: true,
-    },
+ const lock = await prisma.lock.findFirst({
+  where: {
+    propertyId: assignment.propertyId,
+    isActive: true,
+  },
+  select: {
+    id: true,
+    ttlockLockId: true,
+  },
+});
+
+if (!lock?.ttlockLockId) {
+  console.warn("[nfc.autoheal] skipped: no active TTLock lock", {
+    assignmentId,
+    propertyId: assignment.propertyId,
   });
-
-  if (!lock?.ttlockLockId) {
-    throw new Error(`NO_ACTIVE_TTLOCK_LOCK_FOR_PROPERTY:${propertyId}`);
-  }
-
+  return {
+    ok: false,
+    skipped: true,
+    reason: "NO_ACTIVE_TTLOCK_LOCK",
+  };
+}
   await ttlockChangeCardPeriod({
     lockId: Number(lock.ttlockLockId),
     cardId: Number(a.NfcCard.ttlockCardId),
