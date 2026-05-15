@@ -4,7 +4,27 @@ const enabled = (process.env.GUEST_SMS_ENABLED ?? "true").toLowerCase() === "tru
 
 function normalizePhone(phone?: string | null) {
   if (!phone) return null;
-  return phone.trim();
+
+  const raw = phone.trim();
+  if (!raw) return null;
+
+  if (raw.startsWith("+")) {
+    return `+${raw.replace(/\D/g, "")}`;
+  }
+
+  const digits = raw.replace(/\D/g, "");
+
+  if (!digits) return null;
+
+  if (digits.length === 10) {
+    return `+1${digits}`;
+  }
+
+  if (digits.length === 11 && digits.startsWith("1")) {
+    return `+${digits}`;
+  }
+
+  return `+${digits}`;
 }
 
 export async function sendGuestSms(toRaw: string | null | undefined, message: string) {
