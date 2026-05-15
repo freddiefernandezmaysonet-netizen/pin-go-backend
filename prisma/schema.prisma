@@ -39,7 +39,8 @@ model DashboardUser {
   tokenVersion        Int                  @default(0)
   organization        Organization         @relation(fields: [organizationId], references: [id], onDelete: Cascade)
   passwordResetTokens PasswordResetToken[]
-
+  passwordResetSmsCodes PasswordResetSmsCode[]
+ 
   @@index([organizationId, isActive])
   @@index([organizationId, role])
 }
@@ -54,6 +55,22 @@ model PasswordResetToken {
   user      DashboardUser @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   @@index([userId])
+  @@index([expiresAt])
+}
+
+model PasswordResetSmsCode {
+  id        String   @id @default(cuid())
+  userId    String
+  phone     String
+  codeHash  String
+  expiresAt DateTime
+  usedAt    DateTime?
+  createdAt DateTime @default(now())
+
+  user DashboardUser @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([phone])
   @@index([expiresAt])
 }
 

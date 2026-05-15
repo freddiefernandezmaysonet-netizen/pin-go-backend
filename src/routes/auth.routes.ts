@@ -12,6 +12,7 @@ import {
 import { validatePasswordPolicy } from "../lib/passwordPolicy";
 import {
   forgotPasswordHandler,
+  verifyForgotPasswordCodeHandler,
   resetPasswordHandler,
 } from "../controllers/password.controller";
 
@@ -174,6 +175,10 @@ authRouter.get("/auth/me", async (req, res) => {
 // =======================
 authRouter.post("/auth/forgot-password", forgotPasswordHandler);
 authRouter.post("/auth/reset-password", resetPasswordHandler);
+authRouter.post(
+  "/auth/forgot-password/verify-code",
+  verifyForgotPasswordCodeHandler
+);
 
 // =======================
 // REGISTER ORG

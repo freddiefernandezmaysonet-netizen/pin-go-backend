@@ -8,6 +8,7 @@ import {
 import { validatePasswordPolicy } from "../lib/passwordPolicy";
 import { hashPassword } from "../lib/auth";
 import { sendResetPasswordEmail } from "../lib/mailer";
+import { sendGuestSms } from "../services/sms.service";
 
 const prisma = new PrismaClient();
 
@@ -30,14 +31,56 @@ function getPasswordResetUrl(token: string) {
   throw new Error("Missing PASSWORD_RESET_URL or FRONTEND_ORIGIN");
 }
 
+function generateNumericCode() {
+  return String(Math.floor(100000 + Math.random() * 900000));
+}
+
+function getSmsCodeExpiry(minutes = 10) {
+  return new Date(Date.now() + minutes * 60 * 1000);
+}
+
+function getSafeForgotPasswordResponse() {
+  return {
+    ok: true,
+    message: "If the account exists, a reset code has been sent.",
+  };
+}
+
+async function createAndSendResetEmail(user: {
+  id: string;
+  email: string;
+}) {
+  await prisma.passwordResetToken.deleteMany({
+    where: {
+      userId: user.id,
+      usedAt: null,
+    },
+  });
+
+  const token = generateResetToken();
+  const tokenHash = hashResetToken(token);
+  const expiresAt = getResetTokenExpiry(45);
+
+  await prisma.passwordResetToken.create({
+    data: {
+      userId: user.id,
+      tokenHash,
+      expiresAt,
+    },
+  });
+
+  const resetUrl = getPasswordResetUrl(token);
+
+  await sendResetPasswordEmail({
+    to: user.email,
+    resetUrl,
+  });
+}
+
 export async function forgotPasswordHandler(req: Request, res: Response) {
   try {
     const email = String(req.body?.email ?? "").trim().toLowerCase();
-
-    const safeResponse = {
-      ok: true,
-      message: "If the account exists, a reset link has been sent.",
-    };
+    const safeResponse = getSafeForgotPasswordResponse();
 
     if (!email) {
       return res.json(safeResponse);
@@ -45,37 +88,58 @@ export async function forgotPasswordHandler(req: Request, res: Response) {
 
     const user = await prisma.dashboardUser.findUnique({
       where: { email },
+      select: {
+        id: true,
+        email: true,
+      },
     });
 
     if (!user) {
       return res.json(safeResponse);
     }
 
-    await prisma.passwordResetToken.deleteMany({
+    const pendingSignup = await prisma.pendingSignup.findFirst({
+      where: { email },
+      orderBy: { createdAt: "desc" },
+      select: {
+        phone: true,
+      },
+    });
+
+    const phone = String(pendingSignup?.phone ?? "").trim();
+
+    if (!phone) {
+      console.warn("[auth/forgot-password] No phone found for user", {
+        userId: user.id,
+        email: user.email,
+      });
+
+      return res.json(safeResponse);
+    }
+
+    await prisma.passwordResetSmsCode.deleteMany({
       where: {
         userId: user.id,
         usedAt: null,
       },
     });
 
-    const token = generateResetToken();
-    const tokenHash = hashResetToken(token);
-    const expiresAt = getResetTokenExpiry(45);
+    const code = generateNumericCode();
+    const codeHash = hashResetToken(code);
 
-    await prisma.passwordResetToken.create({
+    await prisma.passwordResetSmsCode.create({
       data: {
         userId: user.id,
-        tokenHash,
-        expiresAt,
+        phone,
+        codeHash,
+        expiresAt: getSmsCodeExpiry(10),
       },
     });
 
-    const resetUrl = getPasswordResetUrl(token);
-
-    await sendResetPasswordEmail({
-      to: user.email,
-      resetUrl,
-    });
+    await sendGuestSms(
+      phone,
+      `Your Pin&Go password reset code is ${code}. This code expires in 10 minutes.`
+    );
 
     return res.json(safeResponse);
   } catch (error) {
@@ -83,6 +147,95 @@ export async function forgotPasswordHandler(req: Request, res: Response) {
     return res.status(500).json({
       ok: false,
       error: "FORGOT_PASSWORD_FAILED",
+    });
+  }
+}
+
+export async function verifyForgotPasswordCodeHandler(
+  req: Request,
+  res: Response
+) {
+  try {
+    const email = String(req.body?.email ?? "").trim().toLowerCase();
+    const code = String(req.body?.code ?? "").trim();
+
+    if (!email || !code) {
+      return res.status(400).json({
+        ok: false,
+        error: "EMAIL_AND_CODE_REQUIRED",
+      });
+    }
+
+    if (!/^\d{6}$/.test(code)) {
+      return res.status(400).json({
+        ok: false,
+        error: "INVALID_CODE_FORMAT",
+      });
+    }
+
+    const user = await prisma.dashboardUser.findUnique({
+      where: { email },
+      select: {
+        id: true,
+        email: true,
+      },
+    });
+
+    if (!user) {
+      return res.status(400).json({
+        ok: false,
+        error: "INVALID_OR_EXPIRED_CODE",
+      });
+    }
+
+    const codeHash = hashResetToken(code);
+
+    const resetCode = await prisma.passwordResetSmsCode.findFirst({
+      where: {
+        userId: user.id,
+        codeHash,
+        usedAt: null,
+        expiresAt: {
+          gt: new Date(),
+        },
+      },
+      orderBy: {
+        createdAt: "desc",
+      },
+    });
+
+    if (!resetCode) {
+      return res.status(400).json({
+        ok: false,
+        error: "INVALID_OR_EXPIRED_CODE",
+      });
+    }
+
+    await prisma.$transaction([
+      prisma.passwordResetSmsCode.update({
+        where: { id: resetCode.id },
+        data: { usedAt: new Date() },
+      }),
+      prisma.passwordResetSmsCode.deleteMany({
+        where: {
+          userId: user.id,
+          usedAt: null,
+          id: { not: resetCode.id },
+        },
+      }),
+    ]);
+
+    await createAndSendResetEmail(user);
+
+    return res.json({
+      ok: true,
+      message: "Code verified. Password reset email sent.",
+    });
+  } catch (error) {
+    console.error("[auth/forgot-password/verify-code] ERROR", error);
+    return res.status(500).json({
+      ok: false,
+      error: "VERIFY_FORGOT_PASSWORD_CODE_FAILED",
     });
   }
 }
