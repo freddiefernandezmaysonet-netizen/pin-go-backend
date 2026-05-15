@@ -36,11 +36,15 @@ export async function sendGuestSms(toRaw: string | null | undefined, message: st
   const accountSid = process.env.TWILIO_ACCOUNT_SID ?? "";
   const apiKey = process.env.TWILIO_API_KEY ?? "";
   const apiSecret = process.env.TWILIO_API_SECRET ?? "";
-  const from = process.env.TWILIO_FROM ?? "";
+  const from =
+  process.env.TWILIO_FROM_NUMBER ??
+  process.env.TWILIO_SMS_FROM ??
+  process.env.TWILIO_FROM ??
+  "";
 
   if (!accountSid || !apiKey || !apiSecret || !from) {
     throw new Error(
-      "Missing Twilio env vars (TWILIO_ACCOUNT_SID/TWILIO_API_KEY/TWILIO_API_SECRET/TWILIO_FROM)"
+      "Missing Twilio env vars (TWILIO_ACCOUNT_SID/TWILIO_API_KEY/TWILIO_API_SECRET/TWILIO_FROM_NUMBER)"
     );
   }
 
