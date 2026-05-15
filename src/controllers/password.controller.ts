@@ -106,9 +106,32 @@ export async function forgotPasswordHandler(req: Request, res: Response) {
       },
     });
 
-    const phone = String(pendingSignup?.phone ?? "").trim();
+   function normalizePhoneToE164(phone: string) {
+  const digits = String(phone ?? "").replace(/\D/g, "");
 
-    if (!phone) {
+  // PR/US local number
+  if (digits.length === 10) {
+    return `+1${digits}`;
+  }
+
+  // already includes country code
+  if (digits.length === 11 && digits.startsWith("1")) {
+    return `+${digits}`;
+  }
+
+  // already E.164
+  if (String(phone).startsWith("+")) {
+    return String(phone).trim();
+  }
+
+  return null;
+}
+
+const rawPhone = String(pendingSignup?.phone ?? "").trim();
+const phone = normalizePhoneToE164(rawPhone);
+
+if (!phone) {
+
       console.warn("[auth/forgot-password] No phone found for user", {
         userId: user.id,
         email: user.email,
