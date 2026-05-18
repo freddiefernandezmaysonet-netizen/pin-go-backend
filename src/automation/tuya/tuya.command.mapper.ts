@@ -224,7 +224,7 @@ function buildInfraredAC(input: BuildInput, warnings: string[]): TuyaCommand[] |
 
     const commands: TuyaCommand[] = [];
 
-    if (powerOnFn) {
+    if (powerFn) {
       commands.push({ code: powerFn.code, value: true });
     }
 
