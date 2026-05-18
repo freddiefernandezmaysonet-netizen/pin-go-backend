@@ -25,6 +25,7 @@ export type AutomationAction =
   | "TURN_ON"
   | "TURN_OFF"
   | "SET_TEMPERATURE"
+  | "SET_COMFORT"
   | "SET_BRIGHTNESS"
   | "OPEN"
   | "CLOSE"
@@ -96,9 +97,7 @@ function parseValues(fn?: TuyaFunction) {
 function findFn(functions: TuyaFunction[] | null | undefined, candidates: string[]) {
   if (!functions) return null;
 
-  const map = new Map(
-    functions.map((f) => [normalize(f.code), f])
-  );
+  const map = new Map(functions.map((f) => [normalize(f.code), f]));
 
   for (const c of candidates) {
     const fn = map.get(normalize(c));
@@ -116,13 +115,39 @@ function scaleNumber(value: number, fn?: TuyaFunction) {
   return Math.round(value * Math.pow(10, scale));
 }
 
+function clamp(value: number, min: number, max: number) {
+  return Math.min(max, Math.max(min, value));
+}
+
+function fahrenheitToCelsiusRounded(value: number) {
+  return Math.round((value - 32) * (5 / 9));
+}
+
+function normalizeInfraredTemperature(value: number) {
+  // Tuya infrared_ac T usa 16–30 Celsius.
+  // Pin&Go UI usualmente guarda Fahrenheit, ej. 72.
+  const celsius = value > 40 ? fahrenheitToCelsiusRounded(value) : Math.round(value);
+  return clamp(celsius, 16, 30);
+}
+
 function resolveAction(value: unknown): AutomationAction | null {
   const action = normalizeUpper(value);
 
   const allowed: AutomationAction[] = [
-    "TURN_ON","TURN_OFF","SET_TEMPERATURE","SET_BRIGHTNESS",
-    "OPEN","CLOSE","LOCK","UNLOCK","ARM","DISARM",
-    "SET_MODE","SET_FAN_SPEED","ACTIVATE_SCENE"
+    "TURN_ON",
+    "TURN_OFF",
+    "SET_TEMPERATURE",
+    "SET_COMFORT",
+    "SET_BRIGHTNESS",
+    "OPEN",
+    "CLOSE",
+    "LOCK",
+    "UNLOCK",
+    "ARM",
+    "DISARM",
+    "SET_MODE",
+    "SET_FAN_SPEED",
+    "ACTIVATE_SCENE",
   ];
 
   return allowed.includes(action as AutomationAction)
@@ -131,13 +156,13 @@ function resolveAction(value: unknown): AutomationAction | null {
 }
 
 // ==========================
-// DEVICE KIND (fallback only)
+// DEVICE KIND
 // ==========================
 
 function resolveDeviceKind(value: unknown): TuyaDeviceKind {
   const v = normalize(value);
 
-  if (v.includes("ac") || v.includes("air")) return "AC";
+  if (v.includes("ac") || v.includes("air") || v.includes("infrared_ac")) return "AC";
   if (v.includes("light") || v.includes("dj")) return "LIGHT";
   if (v.includes("switch")) return "SWITCH";
   if (v.includes("alarm")) return "ALARM";
@@ -175,6 +200,70 @@ function buildLight(input: BuildInput, warnings: string[]): TuyaCommand[] | null
   return null;
 }
 
+function buildInfraredAC(input: BuildInput, warnings: string[]): TuyaCommand[] | null {
+  const powerOnFn = findFn(input.functions, ["PowerOn"]);
+  const powerOffFn = findFn(input.functions, ["PowerOff"]);
+  const tempFn = findFn(input.functions, ["T"]);
+  const modeFn = findFn(input.functions, ["M"]);
+  const fanFn = findFn(input.functions, ["F"]);
+
+  if (input.action === "TURN_ON") {
+    if (!powerOnFn) return null;
+    return [{ code: powerOnFn.code, value: "PowerOn" }];
+  }
+
+  if (input.action === "TURN_OFF") {
+    if (!powerOffFn) return null;
+    return [{ code: powerOffFn.code, value: "PowerOff" }];
+  }
+
+  if (input.action === "SET_TEMPERATURE" || input.action === "SET_COMFORT") {
+    if (!tempFn) return null;
+
+    const v = asNumber(input.value);
+    if (v == null) return null;
+
+    const commands: TuyaCommand[] = [];
+
+    if (powerOnFn) {
+      commands.push({ code: powerOnFn.code, value: "PowerOn" });
+    }
+
+    // Default inicial: M=0. Si en la prueba real no es COOL, lo ajustamos.
+    if (modeFn) {
+      commands.push({ code: modeFn.code, value: 0 });
+    }
+
+    if (fanFn) {
+      commands.push({ code: fanFn.code, value: 0 });
+    }
+
+    commands.push({
+      code: tempFn.code,
+      value: normalizeInfraredTemperature(v),
+    });
+
+    return commands;
+  }
+
+  if (input.action === "SET_MODE") {
+    if (!modeFn) return null;
+    const v = asNumber(input.value);
+    if (v == null) return null;
+    return [{ code: modeFn.code, value: clamp(Math.round(v), 0, 4) }];
+  }
+
+  if (input.action === "SET_FAN_SPEED") {
+    if (!fanFn) return null;
+    const v = asNumber(input.value);
+    if (v == null) return null;
+    return [{ code: fanFn.code, value: clamp(Math.round(v), 0, 3) }];
+  }
+
+  warnings.push("INFRARED_AC_UNSUPPORTED_ACTION");
+  return null;
+}
+
 function buildAC(input: BuildInput, warnings: string[]): TuyaCommand[] | null {
   const powerFn = findFn(input.functions, [
     "switch",
@@ -192,16 +281,11 @@ function buildAC(input: BuildInput, warnings: string[]): TuyaCommand[] | null {
     "cool_temp_set",
   ]);
 
-  // =========================
-  // TURN ON
-  // =========================
   if (input.action === "TURN_ON") {
-    // prioridad power real
     if (powerFn) {
       return [{ code: powerFn.code, value: true }];
     }
 
-    // fallback thermostats mode-based
     if (modeFn) {
       return [{ code: modeFn.code, value: "cool" }];
     }
@@ -209,9 +293,6 @@ function buildAC(input: BuildInput, warnings: string[]): TuyaCommand[] | null {
     return null;
   }
 
-  // =========================
-  // TURN OFF
-  // =========================
   if (input.action === "TURN_OFF") {
     if (powerFn) {
       return [{ code: powerFn.code, value: false }];
@@ -224,10 +305,7 @@ function buildAC(input: BuildInput, warnings: string[]): TuyaCommand[] | null {
     return null;
   }
 
-  // =========================
-  // SET TEMPERATURE
-  // =========================
-  if (input.action === "SET_TEMPERATURE") {
+  if (input.action === "SET_TEMPERATURE" || input.action === "SET_COMFORT") {
     if (!tempFn) return null;
 
     const v = asNumber(input.value);
@@ -235,15 +313,12 @@ function buildAC(input: BuildInput, warnings: string[]): TuyaCommand[] | null {
 
     const commands: TuyaCommand[] = [];
 
-    // si existe power real -> prender
     if (powerFn) {
       commands.push({
         code: powerFn.code,
         value: true,
       });
-    }
-    // thermostat mode-based
-    else if (modeFn) {
+    } else if (modeFn) {
       commands.push({
         code: modeFn.code,
         value: "cool",
@@ -317,11 +392,18 @@ export default function buildTuyaCommands(input: BuildInput): TuyaCommandBuildRe
   const warnings: string[] = [];
   let commands: TuyaCommand[] | null = null;
 
-  // 🔥 PRIORIDAD REAL: functions primero
-  if (findFn(input.functions, ["master_mode"])) {
+  const isInfraredAC =
+    !!findFn(input.functions, ["PowerOn"]) &&
+    !!findFn(input.functions, ["PowerOff"]) &&
+    !!findFn(input.functions, ["T"]);
+
+  if (isInfraredAC) {
+    deviceKind = "AC";
+    commands = buildInfraredAC(input, warnings);
+  } else if (findFn(input.functions, ["master_mode"])) {
     deviceKind = "ALARM";
     commands = buildAlarm(input, warnings);
-  } else if (findFn(input.functions, ["temp_set", "temp"])) {
+  } else if (findFn(input.functions, ["temp_set", "temp", "cool_temp_set"])) {
     deviceKind = "AC";
     commands = buildAC(input, warnings);
   } else if (findFn(input.functions, ["switch_led", "bright_value"])) {
