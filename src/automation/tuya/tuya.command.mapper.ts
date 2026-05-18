@@ -201,23 +201,22 @@ function buildLight(input: BuildInput, warnings: string[]): TuyaCommand[] | null
 }
 
 function buildInfraredAC(input: BuildInput, warnings: string[]): TuyaCommand[] | null {
-  const powerOnFn = findFn(input.functions, ["PowerOn"]);
-  const powerOffFn = findFn(input.functions, ["PowerOff"]);
-  const tempFn = findFn(input.functions, ["T"]);
-  const modeFn = findFn(input.functions, ["M"]);
-  const fanFn = findFn(input.functions, ["F"]);
-
-  if (input.action === "TURN_ON") {
-    if (!powerOnFn) return null;
-    return [{ code: powerOnFn.code, value: "PowerOn" }];
-  }
-
-  if (input.action === "TURN_OFF") {
-    if (!powerOffFn) return null;
-    return [{ code: powerOffFn.code, value: "PowerOff" }];
-  }
-
-  if (input.action === "SET_TEMPERATURE" || input.action === "SET_COMFORT") {
+  const powerFn = findFn(input.functions, ["power", "PowerOn", "PowerOff"]);
+  const tempFn = findFn(input.functions, ["temp", "T"]);
+  const modeFn = findFn(input.functions, ["mode", "M"]);
+  const fanFn = findFn(input.functions, ["wind", "F"]);
+  
+    if (input.action === "TURN_ON") {
+      if (!powerFn) return null;
+      return [{ code: powerFn.code, value: true }];
+    }
+ 
+    if (input.action === "TURN_OFF") {
+      if (!powerFn) return null;
+      return [{ code: powerFn.code, value: false }];
+    }
+  
+    if (input.action === "SET_TEMPERATURE" || input.action === "SET_COMFORT") {
     if (!tempFn) return null;
 
     const v = asNumber(input.value);
@@ -226,7 +225,7 @@ function buildInfraredAC(input: BuildInput, warnings: string[]): TuyaCommand[] |
     const commands: TuyaCommand[] = [];
 
     if (powerOnFn) {
-      commands.push({ code: powerOnFn.code, value: "PowerOn" });
+      commands.push({ code: powerFn.code, value: true });
     }
 
     // Default inicial: M=0. Si en la prueba real no es COOL, lo ajustamos.
