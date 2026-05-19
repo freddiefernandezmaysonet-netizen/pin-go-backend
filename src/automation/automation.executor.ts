@@ -35,15 +35,22 @@ async function sendTuyaCommand(params: {
   }
 
   try {
-    await tuyaRequest({
-      method: "POST",
-      path: `/v1.0/iot-03/devices/${params.externalId}/commands`,
-      accessToken,
-      body: {
-        commands: result.commands,
-      },
-    });
+   const tuyaResp = await tuyaRequest({
+  method: "POST",
+  path: `/v1.0/iot-03/devices/${params.externalId}/commands`,
+  accessToken,
+  body: {
+    commands: result.commands,
+  },
+});
 
+console.log("[tuya command response]", {
+  externalId: params.externalId,
+  deviceCategory: params.deviceCategory,
+  action: params.action,
+  commands: result.commands,
+  tuyaResp,
+});
     return { ok: true };
   } catch (err: any) {
     return {
