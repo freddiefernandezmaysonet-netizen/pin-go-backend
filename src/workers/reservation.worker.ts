@@ -1273,8 +1273,33 @@ async function processPasscodeResyncs(now: Date) {
         g.reservation.checkOut
       );
 
-      const lastAppliedStart = g.desiredStartsAt;
+const lastAppliedStart = g.desiredStartsAt;
 const lastAppliedEnd = g.desiredEndsAt;
+
+const grantAlreadyMatchesReservation =
+  g.startsAt.getTime() === desiredStart.getTime() &&
+  g.endsAt.getTime() === desiredEnd.getTime();
+
+if (!lastAppliedStart || !lastAppliedEnd) {
+  if (grantAlreadyMatchesReservation) {
+    await prisma.accessGrant.update({
+      where: { id: g.id },
+      data: {
+        desiredStartsAt: desiredStart,
+        desiredEndsAt: desiredEnd,
+        lastAppliedAt: new Date(),
+        lastError: null,
+      },
+    });
+
+    console.log("[PASSCODE_RESYNC][BASELINE_SET]", {
+      grantId: g.id,
+      keyboardPwdId: g.ttlockKeyboardPwdId,
+    });
+
+    continue;
+  }
+}
 
 const needsUpdate =
   !lastAppliedStart ||
