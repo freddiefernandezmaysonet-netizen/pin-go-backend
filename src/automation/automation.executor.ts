@@ -19,6 +19,26 @@ async function sendTuyaCommand(params: {
 }) {
   const accessToken = await getValidTuyaAccessToken();
 
+if (params.deviceCategory === "infrared_ac") {
+  try {
+    const remotes = await tuyaRequest({
+      method: "GET",
+      path: `/v2.0/infrareds/${params.externalId}/remotes`,
+      accessToken,
+    });
+
+    console.log("[TUYA][IR][REMOTES]", {
+      infraredId: params.externalId,
+      remotes,
+    });
+  } catch (e: any) {
+    console.error("[TUYA][IR][REMOTES][FAILED]", {
+      infraredId: params.externalId,
+      error: String(e?.message ?? e),
+    });
+  }
+}
+
   const result = buildTuyaCommands({
     deviceProfile: params.deviceProfile,
     deviceKind: params.deviceCategory,
