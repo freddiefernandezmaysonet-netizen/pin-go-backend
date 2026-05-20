@@ -19,7 +19,28 @@ async function sendTuyaCommand(params: {
 }) {
   const accessToken = await getValidTuyaAccessToken();
 
+// =========================
+// TUYA IR DEBUG
+// =========================
 if (params.deviceCategory === "infrared_ac") {
+  try {
+    const categories = await tuyaRequest({
+      method: "GET",
+      path: `/v2.0/infrareds/${params.externalId}/categories`,
+      accessToken,
+    });
+
+    console.log("[TUYA][IR][CATEGORIES]", {
+      infraredId: params.externalId,
+      categories,
+    });
+  } catch (e: any) {
+    console.error("[TUYA][IR][CATEGORIES][FAILED]", {
+      infraredId: params.externalId,
+      error: String(e?.message ?? e),
+    });
+  }
+
   try {
     const remotes = await tuyaRequest({
       method: "GET",
@@ -27,7 +48,7 @@ if (params.deviceCategory === "infrared_ac") {
       accessToken,
     });
 
-    console.log("[TUYA][IR][REMOTES]", {
+    console.log("[TUYA][IR][REMOTES][RAW]", {
       infraredId: params.externalId,
       remotes,
     });
@@ -37,8 +58,25 @@ if (params.deviceCategory === "infrared_ac") {
       error: String(e?.message ?? e),
     });
   }
-}
 
+  try {
+    const acBrands = await tuyaRequest({
+      method: "GET",
+      path: `/v2.0/infrareds/${params.externalId}/categories/5/brands?countryCode=US&page=1&size=1000`,
+      accessToken,
+    });
+
+    console.log("[TUYA][IR][AC_BRANDS]", {
+      infraredId: params.externalId,
+      acBrands,
+    });
+  } catch (e: any) {
+    console.error("[TUYA][IR][AC_BRANDS][FAILED]", {
+      infraredId: params.externalId,
+      error: String(e?.message ?? e),
+    });
+  }
+}
   const result = buildTuyaCommands({
     deviceProfile: params.deviceProfile,
     deviceKind: params.deviceCategory,
