@@ -7,6 +7,8 @@ import buildTuyaCommands from "../automation/tuya/tuya.command.mapper";
 
 const prisma = new PrismaClient();
 
+console.log("[automation.executor] LOADED WITH TUYA COMMAND DEBUG");
+
 async function sendTuyaCommand(params: {
   externalId: string;
   deviceCategory?: string | null;
@@ -33,6 +35,15 @@ async function sendTuyaCommand(params: {
       error: result.error || "TUYA_COMMAND_MAPPING_FAILED",
     };
   }
+
+console.log("[TUYA][COMMANDS][SEND]", {
+  externalId: params.externalId,
+  deviceCategory: params.deviceCategory,
+  deviceProfile: params.deviceProfile,
+  action: params.action,
+  value: params.value,
+  commands: result.commands,
+});
 
   try {
     await tuyaRequest({
