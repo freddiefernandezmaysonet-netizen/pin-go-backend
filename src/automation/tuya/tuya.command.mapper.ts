@@ -203,55 +203,23 @@ function buildLight(input: BuildInput, warnings: string[]): TuyaCommand[] | null
 function buildInfraredAC(input: BuildInput, warnings: string[]): TuyaCommand[] | null {
   const powerOnFn = findFn(input.functions, ["PowerOn"]);
   const powerOffFn = findFn(input.functions, ["PowerOff"]);
-  const tempFn = findFn(input.functions, ["T"]);
   const modeFn = findFn(input.functions, ["M"]);
   const fanFn = findFn(input.functions, ["F"]);
 
-if (input.action === "TURN_ON") {
-  if (!powerOnFn) return null;
-  return [{ code: powerOnFn.code, value: "PowerOn" }];
-}
+  if (input.action === "TURN_ON") {
+    if (!powerOnFn) return null;
+    return [{ code: powerOnFn.code, value: "PowerOn" }];
+  }
 
-if (input.action === "TURN_OFF") {
-  if (!powerOffFn) return null;
-  return [{ code: powerOffFn.code, value: "PowerOff" }];
-}
+  if (input.action === "TURN_OFF") {
+    if (!powerOffFn) return null;
+    return [{ code: powerOffFn.code, value: "PowerOff" }];
+  }
 
   if (input.action === "SET_TEMPERATURE" || input.action === "SET_COMFORT") {
-    if (!tempFn) return null;
+    if (!powerOnFn) return null;
 
-    const v = asNumber(input.value);
-    if (v == null) return null;
-
-    const commands: TuyaCommand[] = [];
-
-    if (powerOnFn) {
-     commands.push({
-  code: powerOnFn.code,
-  value: "PowerOn",
-});
-    }
-
-    if (modeFn) {
-      commands.push({
-        code: modeFn.code,
-        value: 0,
-      });
-    }
-
-    if (fanFn) {
-      commands.push({
-        code: fanFn.code,
-        value: 0,
-      });
-    }
-
-    commands.push({
-      code: tempFn.code,
-      value: normalizeInfraredTemperature(v),
-    });
-
-    return commands;
+    return [{ code: powerOnFn.code, value: "PowerOn" }];
   }
 
   if (input.action === "SET_MODE") {
@@ -273,79 +241,6 @@ if (input.action === "TURN_OFF") {
   }
 
   warnings.push("INFRARED_AC_UNSUPPORTED_ACTION");
-  return null;
-}
-
-function buildAC(input: BuildInput, warnings: string[]): TuyaCommand[] | null {
-  const powerFn = findFn(input.functions, [
-    "switch",
-    "switch_1",
-    "power",
-    "air_switch",
-    "on_off",
-  ]);
-
-  const modeFn = findFn(input.functions, ["mode"]);
-
-  const tempFn = findFn(input.functions, [
-    "temp_set",
-    "temp",
-    "cool_temp_set",
-  ]);
-
-  if (input.action === "TURN_ON") {
-    if (powerFn) {
-      return [{ code: powerFn.code, value: true }];
-    }
-
-    if (modeFn) {
-      return [{ code: modeFn.code, value: "cool" }];
-    }
-
-    return null;
-  }
-
-  if (input.action === "TURN_OFF") {
-    if (powerFn) {
-      return [{ code: powerFn.code, value: false }];
-    }
-
-    if (modeFn) {
-      return [{ code: modeFn.code, value: "off" }];
-    }
-
-    return null;
-  }
-
-  if (input.action === "SET_TEMPERATURE" || input.action === "SET_COMFORT") {
-    if (!tempFn) return null;
-
-    const v = asNumber(input.value);
-    if (v == null) return null;
-
-    const commands: TuyaCommand[] = [];
-
-    if (powerFn) {
-      commands.push({
-        code: powerFn.code,
-        value: true,
-      });
-    } else if (modeFn) {
-      commands.push({
-        code: modeFn.code,
-        value: "cool",
-      });
-    }
-
-    commands.push({
-      code: tempFn.code,
-      value: scaleNumber(v, tempFn),
-    });
-
-    return commands;
-  }
-
-  warnings.push("AC_UNSUPPORTED_ACTION");
   return null;
 }
 
