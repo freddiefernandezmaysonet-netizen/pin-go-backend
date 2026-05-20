@@ -207,15 +207,15 @@ function buildInfraredAC(input: BuildInput, warnings: string[]): TuyaCommand[] |
   const modeFn = findFn(input.functions, ["M"]);
   const fanFn = findFn(input.functions, ["F"]);
 
-  if (input.action === "TURN_ON") {
-    if (!powerOnFn) return null;
-    return [{ code: powerOnFn.code, value: powerOnFn.values ?? "PowerOn" }];
-  }
+if (input.action === "TURN_ON") {
+  if (!powerOnFn) return null;
+  return [{ code: powerOnFn.code, value: "PowerOn" }];
+}
 
-  if (input.action === "TURN_OFF") {
-    if (!powerOffFn) return null;
-    return [{ code: powerOffFn.code, value: powerOffFn.values ?? "PowerOff" }];
-  }
+if (input.action === "TURN_OFF") {
+  if (!powerOffFn) return null;
+  return [{ code: powerOffFn.code, value: "PowerOff" }];
+}
 
   if (input.action === "SET_TEMPERATURE" || input.action === "SET_COMFORT") {
     if (!tempFn) return null;
@@ -226,10 +226,10 @@ function buildInfraredAC(input: BuildInput, warnings: string[]): TuyaCommand[] |
     const commands: TuyaCommand[] = [];
 
     if (powerOnFn) {
-      commands.push({
-        code: powerOnFn.code,
-        value: powerOnFn.values ?? "PowerOn",
-      });
+     commands.push({
+  code: powerOnFn.code,
+  value: "PowerOn",
+});
     }
 
     if (modeFn) {
