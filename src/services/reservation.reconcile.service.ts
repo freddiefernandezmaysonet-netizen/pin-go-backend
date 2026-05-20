@@ -121,11 +121,14 @@ export async function reconcileReservation(reservationId: string) {
   const prevIn = reservation.lastReconciledCheckIn;
   const prevOut = reservation.lastReconciledCheckOut;
 
-  const reservationDatesChanged =
-    !prevIn ||
-    !prevOut ||
-    prevIn.getTime() !== desiredStart.getTime() ||
-    prevOut.getTime() !== desiredEnd.getTime();
+const snapshotMissing = !prevIn || !prevOut;
+
+const reservationDatesChanged =
+  !!prevIn &&
+  !!prevOut &&
+  (prevIn.getTime() !== desiredStart.getTime() ||
+    prevOut.getTime() !== desiredEnd.getTime());
+  
   const guestGrants = grants.filter(
     (g) => g.type === AccessGrantType.GUEST && g.status !== AccessStatus.REVOKED
   );
@@ -180,7 +183,10 @@ const cleaningEndsAt = new Date(
 
   const plan: ChangePlan = {
     reservationId: reservation.id,
-    reason: reservationDatesChanged || grantsNeedUpdate || nfcNeedReschedule ? "DATES_CHANGED" : "NOOP",
+    reason:
+  reservationDatesChanged || grantsNeedUpdate || nfcNeedReschedule
+    ? "DATES_CHANGED"
+    : "NOOP",
     grantsNeedUpdate,
     nfcNeedReschedule,
     hardwareNeedSync,
@@ -190,6 +196,19 @@ const cleaningEndsAt = new Date(
   
   console.log("[reconcile][plan]", plan);
   
+if (snapshotMissing && !grantsNeedUpdate && !nfcNeedReschedule) {
+  await prisma.reservation.update({
+    where: { id: reservation.id },
+    data: {
+      lastReconciledAt: new Date(),
+      lastReconciledCheckIn: desiredStart,
+      lastReconciledCheckOut: desiredEnd,
+    },
+  });
+
+  return;
+}
+
   if (plan.reason === "NOOP") {
   await prisma.reservation.update({
     where: { id: reservation.id },
@@ -234,10 +253,12 @@ console.log("[reconcile][passcode]", {
 });
 
 if (
+  reservationDatesChanged &&
   g.method === "PASSCODE_TIMEBOUND" &&
   g.ttlockKeyboardPwdId &&
   passcodeTtlockLockId
 ) {
+
   try {
    const { ttlockChangePasscode } = await import(
   "../ttlock/ttlock.passcode"
