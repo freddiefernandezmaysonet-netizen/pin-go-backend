@@ -105,15 +105,19 @@ if (!FRONTEND_ORIGIN) {
 // =====================
 // CORS
 // =====================
+const splitEnvOrigins = (value?: string) =>
+  String(value ?? "")
+    .split(",")
+    .map((origin) => origin.trim())
+    .filter(Boolean);
 
 const allowedOrigins = [
-  FRONTEND_ORIGIN,
-  process.env.API_BASE_URL,
-  process.env.PUBLIC_API_BASE_URL,
+  ...splitEnvOrigins(FRONTEND_ORIGIN),
+  ...splitEnvOrigins(process.env.API_BASE_URL),
+  ...splitEnvOrigins(process.env.PUBLIC_API_BASE_URL),
   "http://localhost:5173",
   "http://localhost:4173",
 ].filter(Boolean) as string[];
-
 // =====================
 // LOG SAFE
 // =====================
