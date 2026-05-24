@@ -42,6 +42,13 @@ type SignupCheckoutBody = {
   locks?: number;
   billingInterval?: BillingInterval;
   contractOption?: ContractOption;
+
+  haasSelection?: {
+    plan?: string;
+    lock?: string;
+    smartDevices?: string;
+  };
+
 };
 
 function normalizeEmail(email: string) {
@@ -62,7 +69,8 @@ router.post("/api/public/signup-checkout", async (req: Request, res: Response) =
     const organizationName = String(body.organizationName ?? "").trim();
     const phone = body.phone?.trim() || null;
     const locks = Number(body.locks ?? 1);
-
+    const haasSelection = body.haasSelection ?? null;
+    
     const billingInterval: BillingInterval =
       body.billingInterval === "yearly" ? "yearly" : "monthly";
 
@@ -159,6 +167,16 @@ router.post("/api/public/signup-checkout", async (req: Request, res: Response) =
         phone,
         requestedLocks: locks,
         stripePriceId: PRICE_ID,
+       
+
+        metadata: haasSelection
+          ? {
+              haasSelection,
+              contractOption,
+            }
+          : null,
+       
+
         status: PendingSignupStatus.PENDING,
         expiresAt,
       },
@@ -171,6 +189,10 @@ router.post("/api/public/signup-checkout", async (req: Request, res: Response) =
       metadata: {
         pendingSignupId: pendingSignup.id,
         contractOption,
+
+        haasPlan: haasSelection?.plan ?? "",
+        haasLock: haasSelection?.lock ?? "",
+        haasSmartDevices: haasSelection?.smartDevices ?? "",
       },
     });
 
@@ -186,16 +208,23 @@ router.post("/api/public/signup-checkout", async (req: Request, res: Response) =
       success_url: `${APP_URL}/signup/success?session_id={CHECKOUT_SESSION_ID}`,
       cancel_url: `${APP_URL}/signup/cancel`,
       subscription_data: {
-        metadata: {
-          pendingSignupId: pendingSignup.id,
-          flow: "signup_onboarding",
-          contractOption,
-        },
+       metadata: {
+         pendingSignupId: pendingSignup.id,
+         contractOption,
+
+         haasPlan: haasSelection?.plan ?? "",
+         haasLock: haasSelection?.lock ?? "",
+         haasSmartDevices: haasSelection?.smartDevices ?? "",
+       },
+
       },
-      metadata: {
-        pendingSignupId: pendingSignup.id,
-        flow: "signup_onboarding",
-        contractOption,
+     metadata: {
+       pendingSignupId: pendingSignup.id,
+       contractOption,
+
+       haasPlan: haasSelection?.plan ?? "",
+       haasLock: haasSelection?.lock ?? "",
+       haasSmartDevices: haasSelection?.smartDevices ?? "",
       },
     });
 
