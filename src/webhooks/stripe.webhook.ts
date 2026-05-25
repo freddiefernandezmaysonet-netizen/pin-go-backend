@@ -110,15 +110,16 @@ export function registerStripeWebhook(app: Express) {
 }
 
 async function maybeCompleteSignupOnboarding(session: Stripe.Checkout.Session) {
-  const metadata = session.metadata ?? {};
-  const flow = String(metadata.flow ?? "").trim();
+ const metadata = session.metadata ?? {};
+const flow = String(metadata.flow ?? "").trim();
+const pendingSignupId = String(metadata.pendingSignupId ?? "").trim();
 
-  if (flow !== "signup_onboarding") {
-    return;
-  }
+const isSignupOnboarding =
+  flow === "signup_onboarding" || Boolean(pendingSignupId);
 
-  const pendingSignupId = String(metadata.pendingSignupId ?? "").trim();
-
+if (!isSignupOnboarding) {
+  return;
+}
   if (!pendingSignupId) {
     console.warn("⚠️ signup_onboarding without pendingSignupId", {
       sessionId: session.id,
