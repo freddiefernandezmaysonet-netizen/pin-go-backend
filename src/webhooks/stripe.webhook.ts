@@ -337,44 +337,56 @@ const contract24Lock2SmartPriceId = String(
     where: { organizationId },
   });
 
-  const items = fullSub.items.data;
+const items = fullSub.items.data;
 
-  const lockItem =
+const lockItem =
   items.find((i) => i.price?.id === lockPriceId) ?? null;
 
 const smartItem =
   items.find((i) => i.price?.id === smartPriceId) ?? null;
 
-const contract24LockItem =
-  items.find((i) => i.price?.id === contract24LockPriceId) ?? null;
+const HAAS_LOCK_PRICE_IDS = [
+  process.env.STRIPE_PRICE_HAAS_ESSENTIAL_LOCK_MONTHLY,
+  process.env.STRIPE_PRICE_HAAS_PRO_LOCK_MONTHLY,
+  process.env.STRIPE_PRICE_HAAS_ELITE_LOCK_MONTHLY,
+]
+  .map((v) => String(v ?? "").trim())
+  .filter(Boolean);
 
-const contract24Lock1SmartItem =
-  items.find((i) => i.price?.id === contract24Lock1SmartPriceId) ?? null;
-
-const contract24Lock2SmartItem =
-  items.find((i) => i.price?.id === contract24Lock2SmartPriceId) ?? null;
+const HAAS_SMART_PRICE_IDS = [
+  process.env.STRIPE_PRICE_HAAS_SMART_1_MONTHLY,
+  process.env.STRIPE_PRICE_HAAS_SMART_2_MONTHLY,
+]
+  .map((v) => String(v ?? "").trim())
+  .filter(Boolean);
 
 let lockQty = Number(lockItem?.quantity ?? 0);
-
 let smartQty = Number(smartItem?.quantity ?? 0);
 
-// 2-year contract: includes 1 lock
-if (contract24LockItem) {
-  lockQty += Number(contract24LockItem.quantity ?? 1);
-}
+for (const item of items) {
+  const priceId = String(item.price?.id ?? "").trim();
 
-// 2-year contract: includes 1 lock + smart automation
-if (contract24Lock1SmartItem) {
-  lockQty += Number(contract24Lock1SmartItem.quantity ?? 1);
-  smartQty += Number(contract24Lock1SmartItem.quantity ?? 1);
-}
+  if (priceId === contract24LockPriceId) {
+    lockQty += Number(item.quantity ?? 1);
+  }
 
-// 2-year contract: includes 1 lock + 2 smart devices
-// entitlement remains 1 smart property
-if (contract24Lock2SmartItem) {
-  lockQty += Number(contract24Lock2SmartItem.quantity ?? 1);
-  smartQty += Number(contract24Lock2SmartItem.quantity ?? 1);
+  if (
+    priceId === contract24Lock1SmartPriceId ||
+    priceId === contract24Lock2SmartPriceId
+  ) {
+    lockQty += Number(item.quantity ?? 1);
+    smartQty += Number(item.quantity ?? 1);
+  }
+
+  if (HAAS_LOCK_PRICE_IDS.includes(priceId)) {
+    lockQty += Number(item.quantity ?? 1);
+  }
+
+  if (HAAS_SMART_PRICE_IDS.includes(priceId)) {
+    smartQty += Number(item.quantity ?? 1);
+  }
 }
+ 
   const status =
     fullSub.status === "active"
       ? "ACTIVE"
