@@ -107,13 +107,15 @@ router.post("/api/public/signup-checkout", async (req: Request, res: Response) =
             ? STRIPE_PRICE_HAAS_ELITE_LOCK_MONTHLY
             : "";
 
-    const smartHaasPriceId =
-      haasSelection?.smartDevices === "1"
-        ? STRIPE_PRICE_HAAS_SMART_1_MONTHLY
-        : haasSelection?.smartDevices === "2"
-          ? STRIPE_PRICE_HAAS_SMART_2_MONTHLY
-          : "";
-
+const smartHaasPriceId =
+  haasSelection?.smartDevices === "1" ||
+  haasSelection?.smartDevices === "one"
+    ? STRIPE_PRICE_HAAS_SMART_1_MONTHLY
+    : haasSelection?.smartDevices === "2" ||
+      haasSelection?.smartDevices === "two"
+      ? STRIPE_PRICE_HAAS_SMART_2_MONTHLY
+      : "";
+    
     const PRICE_ID =
       isHaasCheckout
         ? lockHaasPriceId
