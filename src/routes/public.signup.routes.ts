@@ -81,16 +81,73 @@ router.post("/api/public/signup-checkout", async (req: Request, res: Response) =
     ? body.contractOption
     : "standard";
     
-   const PRICE_ID =
-  contractOption === "contract_24_lock"
-    ? STRIPE_PRICE_CONTRACT_24_LOCK
-    : contractOption === "contract_24_lock_1_smart"
-      ? STRIPE_PRICE_CONTRACT_24_LOCK_1_SMART
-      : contractOption === "contract_24_lock_2_smart"
-        ? STRIPE_PRICE_CONTRACT_24_LOCK_2_SMART
-        : billingInterval === "yearly"
-          ? STRIPE_PRICE_LOCK_YEARLY
-          : STRIPE_PRICE_LOCK_MONTHLY;
+    const STRIPE_PRICE_HAAS_ESSENTIAL_LOCK_MONTHLY =
+      process.env.STRIPE_PRICE_HAAS_ESSENTIAL_LOCK_MONTHLY ?? "";
+
+    const STRIPE_PRICE_HAAS_PRO_LOCK_MONTHLY =
+      process.env.STRIPE_PRICE_HAAS_PRO_LOCK_MONTHLY ?? "";
+
+    const STRIPE_PRICE_HAAS_ELITE_LOCK_MONTHLY =
+      process.env.STRIPE_PRICE_HAAS_ELITE_LOCK_MONTHLY ?? "";
+
+    const STRIPE_PRICE_HAAS_SMART_1_MONTHLY =
+      process.env.STRIPE_PRICE_HAAS_SMART_1_MONTHLY ?? "";
+
+    const STRIPE_PRICE_HAAS_SMART_2_MONTHLY =
+      process.env.STRIPE_PRICE_HAAS_SMART_2_MONTHLY ?? "";
+
+    const isHaasCheckout = contractOption !== "standard" && !!haasSelection;
+
+    const lockHaasPriceId =
+      haasSelection?.lock === "essential"
+        ? STRIPE_PRICE_HAAS_ESSENTIAL_LOCK_MONTHLY
+        : haasSelection?.lock === "pro"
+          ? STRIPE_PRICE_HAAS_PRO_LOCK_MONTHLY
+          : haasSelection?.lock === "elite"
+            ? STRIPE_PRICE_HAAS_ELITE_LOCK_MONTHLY
+            : "";
+
+    const smartHaasPriceId =
+      haasSelection?.smartDevices === "1"
+        ? STRIPE_PRICE_HAAS_SMART_1_MONTHLY
+        : haasSelection?.smartDevices === "2"
+          ? STRIPE_PRICE_HAAS_SMART_2_MONTHLY
+          : "";
+
+    const PRICE_ID =
+      isHaasCheckout
+        ? lockHaasPriceId
+        : contractOption === "contract_24_lock"
+          ? STRIPE_PRICE_CONTRACT_24_LOCK
+          : contractOption === "contract_24_lock_1_smart"
+            ? STRIPE_PRICE_CONTRACT_24_LOCK_1_SMART
+            : contractOption === "contract_24_lock_2_smart"
+              ? STRIPE_PRICE_CONTRACT_24_LOCK_2_SMART
+              : billingInterval === "yearly"
+                ? STRIPE_PRICE_LOCK_YEARLY
+                : STRIPE_PRICE_LOCK_MONTHLY;
+
+    const lineItems = isHaasCheckout
+      ? [
+          {
+            price: lockHaasPriceId,
+            quantity: 1,
+          },
+          ...(smartHaasPriceId
+            ? [
+                {
+                 price: smartHaasPriceId,
+                 quantity: 1,
+               },
+             ]
+           : []),
+        ]
+      : [
+      {
+        price: PRICE_ID,
+        quantity: locks,
+      },
+    ]; 
     
   console.log("🧪 signup checkout request", {
       billingInterval,
@@ -199,12 +256,7 @@ router.post("/api/public/signup-checkout", async (req: Request, res: Response) =
     const session = await stripe.checkout.sessions.create({
       mode: "subscription",
       customer: customer.id,
-      line_items: [
-        {
-          price: PRICE_ID,
-          quantity: locks,
-        },
-      ],
+      line_items: lineItems,
       success_url: `${APP_URL}/signup/success?session_id={CHECKOUT_SESSION_ID}`,
       cancel_url: `${APP_URL}/signup/cancel`,
       subscription_data: {
