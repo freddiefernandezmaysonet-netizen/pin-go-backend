@@ -235,26 +235,12 @@ async function safeSyncBySubscriptionId(
   const lockPriceId = String(process.env.STRIPE_PRICE_LOCK_MONTHLY ?? "").trim();
   const smartPriceId = String(process.env.STRIPE_PRICE_SMART_PROPERTY ?? "").trim();
 
-const contract24LockPriceId = String(
-  process.env.STRIPE_PRICE_CONTRACT_24_LOCK ?? ""
-).trim();
-
-const contract24Lock1SmartPriceId = String(
-  process.env.STRIPE_PRICE_CONTRACT_24_LOCK_1_SMART ?? ""
-).trim();
-
-const contract24Lock2SmartPriceId = String(
-  process.env.STRIPE_PRICE_CONTRACT_24_LOCK_2_SMART ?? ""
-).trim();
   
   if (!lockPriceId) {
     throw new Error("Missing STRIPE_PRICE_LOCK_MONTHLY");
   }
 
-  if (!smartPriceId) {
-    throw new Error("Missing STRIPE_PRICE_SMART_PROPERTY");
-  }
-
+  
   let organizationId =
     typeof fullSub.metadata?.organizationId === "string" &&
     fullSub.metadata.organizationId.trim()
@@ -343,7 +329,9 @@ const lockItem =
   items.find((i) => i.price?.id === lockPriceId) ?? null;
 
 const smartItem =
-  items.find((i) => i.price?.id === smartPriceId) ?? null;
+  smartPriceId
+    ? items.find((i) => i.price?.id === smartPriceId) ?? null
+    : null;
 
 const HAAS_LOCK_PRICE_IDS = [
   process.env.STRIPE_PRICE_HAAS_ESSENTIAL_LOCK_MONTHLY,
@@ -366,18 +354,7 @@ let smartQty = Number(smartItem?.quantity ?? 0);
 for (const item of items) {
   const priceId = String(item.price?.id ?? "").trim();
 
-  if (priceId === contract24LockPriceId) {
-    lockQty += Number(item.quantity ?? 1);
-  }
-
-  if (
-    priceId === contract24Lock1SmartPriceId ||
-    priceId === contract24Lock2SmartPriceId
-  ) {
-    lockQty += Number(item.quantity ?? 1);
-    smartQty += Number(item.quantity ?? 1);
-  }
-
+ 
   if (HAAS_LOCK_PRICE_IDS.includes(priceId)) {
     lockQty += Number(item.quantity ?? 1);
   }
