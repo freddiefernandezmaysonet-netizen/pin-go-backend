@@ -156,7 +156,9 @@ router.post("/api/public/signup-checkout", async (req: Request, res: Response) =
       email,
       organizationName,
       locks,
-    });
+      haasSelection,
+      lineItems,
+   });
 
     if (!PRICE_ID) {
       return res.status(500).json({
