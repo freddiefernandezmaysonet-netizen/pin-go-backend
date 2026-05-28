@@ -6,6 +6,26 @@ import stripe from "../billing/stripe";
 import { buildAuthCookie, signAuthToken } from "../lib/auth";
 import { validatePasswordPolicy } from "../lib/passwordPolicy";
 
+function getSaasLocksVolumeCouponId(lockQuantity: number): string | undefined {
+  if (!Number.isFinite(lockQuantity) || lockQuantity <= 0) {
+    return undefined;
+  }
+
+  if (lockQuantity >= 25) {
+    return process.env.STRIPE_SAAS_LOCKS_20_OFF_COUPON_ID;
+  }
+
+  if (lockQuantity >= 10) {
+    return process.env.STRIPE_SAAS_LOCKS_15_OFF_COUPON_ID;
+  }
+
+  if (lockQuantity >= 5) {
+    return process.env.STRIPE_SAAS_LOCKS_10_OFF_COUPON_ID;
+  }
+
+  return undefined;
+}
+
 const router = Router();
 const prisma = new PrismaClient();
 
@@ -150,19 +170,25 @@ const smartHaasPriceId =
         quantity: locks,
       },
     ]; 
-    
+   
+const saasVolumeCouponId =
+  !isHaasCheckout && contractOption === "standard"
+    ? getSaasLocksVolumeCouponId(locks)
+    : undefined;
+ 
   console.log("🧪 signup checkout request", {
-      billingInterval,
-      contractOption,
-      priceId: PRICE_ID,
-      email,
-      organizationName,
-      locks,
-      haasSelection,
-      lineItems,
-   });
-
-    if (!PRICE_ID) {
+  billingInterval,
+  contractOption,
+  priceId: PRICE_ID,
+  email,
+  organizationName,
+  locks,
+  haasSelection,
+  lineItems,
+  saasVolumeCouponId: saasVolumeCouponId ? "SET" : "NOT_SET",
+});
+   
+   if (!PRICE_ID) {
       return res.status(500).json({
         ok: false,
         error: "Missing Stripe price for selected subscription",
@@ -257,10 +283,13 @@ const smartHaasPriceId =
       },
     });
 
-    const session = await stripe.checkout.sessions.create({
-      mode: "subscription",
-      customer: customer.id,
-      line_items: lineItems,
+const session = await stripe.checkout.sessions.create({
+  mode: "subscription",
+  customer: customer.id,
+  line_items: lineItems,
+  discounts: saasVolumeCouponId
+    ? [{ coupon: saasVolumeCouponId }]
+    : undefined,
       success_url: `${APP_URL}/signup/success?session_id={CHECKOUT_SESSION_ID}`,
       cancel_url: `${APP_URL}/signup/cancel`,
       subscription_data: {
