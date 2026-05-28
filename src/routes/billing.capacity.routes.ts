@@ -90,13 +90,14 @@ router.post(
       },
     });
 
-    if (!sub?.stripeSubscriptionId || !sub?.stripeSubscriptionItemId) {
-      return res.status(400).json({
-        ok: false,
-        error: "SUBSCRIPTION_NOT_READY",
-      });
-    }
-
+  if (!sub?.stripeSubscriptionId || !sub?.stripeSubscriptionItemId) {
+  return res.status(400).json({
+    ok: false,
+    error: "HAAS_PLAN_REQUIRES_NEW_CONTRACT",
+    message:
+      "This organization appears to be under a HaaS agreement. Adding more HaaS devices requires a new contract or contract amendment.",
+  });
+} 
     // 4️⃣ traer estado actual desde Stripe
     const currentSub = await stripe.subscriptions.retrieve(
       sub.stripeSubscriptionId
