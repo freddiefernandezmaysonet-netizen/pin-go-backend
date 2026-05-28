@@ -7,7 +7,10 @@ import buildTuyaCommands from "../automation/tuya/tuya.command.mapper";
 
 const prisma = new PrismaClient();
 
-console.log("[automation.executor] LOADED WITH TUYA COMMAND DEBUG");
+const DEBUG_TUYA_IR =
+  process.env.DEBUG_TUYA_IR === "true";
+
+console.log("[automation.executor] initialized");
 
 async function sendTuyaCommand(params: {
   externalId: string;
@@ -22,7 +25,10 @@ async function sendTuyaCommand(params: {
 // =========================
 // TUYA IR DEBUG
 // =========================
-if (params.deviceCategory === "infrared_ac") {
+if (
+  DEBUG_TUYA_IR &&
+  params.deviceCategory === "infrared_ac"
+) {
   try {
     const categories = await tuyaRequest({
       method: "GET",
@@ -94,15 +100,14 @@ if (params.deviceCategory === "infrared_ac") {
     };
   }
 
-console.log("[TUYA][COMMANDS][SEND]", {
-  externalId: params.externalId,
-  deviceCategory: params.deviceCategory,
-  deviceProfile: params.deviceProfile,
-  action: params.action,
-  value: params.value,
-  commands: result.commands,
-});
-
+if (process.env.DEBUG_TUYA === "true") {
+  console.log("[TUYA][COMMANDS][SEND]", {
+    externalId: params.externalId,
+    action: params.action,
+    commandCount: result.commands.length,
+  });
+}
+ 
   try {
     await tuyaRequest({
       method: "POST",
@@ -228,14 +233,15 @@ if (params.reservationCheckIn instanceof Date) {
         });
 
       if (existingSuccess) {
-        console.log("[automation] skipped duplicate execution", {
-          reservationId,
-          trigger,
-          source: params.source,
-          externalId: params.externalId,
-          action: params.action,
-        });
-
+       if (process.env.DEBUG_AUTOMATION === "true") {
+  console.log("[automation] skipped duplicate execution", {
+    reservationId,
+    trigger,
+    source: params.source,
+    externalId: params.externalId,
+    action: params.action,
+  });
+}
         return {
           success: false,
           fallback: false,
@@ -259,7 +265,15 @@ if (params.reservationCheckIn instanceof Date) {
         action: params.action,
       });
 
-      console.log("[automation] executed", params);
+      if (process.env.DEBUG_AUTOMATION === "true") {
+  console.log("[automation] executed", {
+    source: params.source,
+    externalId: params.externalId,
+    deviceName: params.deviceName,
+    deviceCategory: params.deviceCategory,
+    action: params.action,
+  });
+}
 
       await createAutomationExecutionLog({
         organizationId,
@@ -281,7 +295,15 @@ if (params.reservationCheckIn instanceof Date) {
 
     // 🔴 mapping error → NO bloquear fallback
     if (result.type === "MAPPING_FAILED") {
-      console.log("[automation] mapping failed (fallback allowed)", params);
+      if (process.env.DEBUG_AUTOMATION === "true") {
+  console.log("[automation] mapping failed (fallback allowed)", {
+    source: params.source,
+    externalId: params.externalId,
+    deviceName: params.deviceName,
+    deviceCategory: params.deviceCategory,
+    action: params.action,
+  });
+}
       return { success: false, fallback: true };
     }
 
