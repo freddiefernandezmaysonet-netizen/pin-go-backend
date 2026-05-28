@@ -4,6 +4,26 @@ import stripe from "../billing/stripe";
 import { requireAuth } from "../middleware/requireAuth";
 import { requireOrgAdmin } from "../middleware/requireOrgAdmin";
 
+function getSaasLocksVolumeCouponId(lockQuantity: number): string | undefined {
+  if (!Number.isFinite(lockQuantity) || lockQuantity <= 0) {
+    return undefined;
+  }
+
+  if (lockQuantity >= 25) {
+    return process.env.STRIPE_SAAS_LOCKS_20_OFF_COUPON_ID;
+  }
+
+  if (lockQuantity >= 10) {
+    return process.env.STRIPE_SAAS_LOCKS_15_OFF_COUPON_ID;
+  }
+
+  if (lockQuantity >= 5) {
+    return process.env.STRIPE_SAAS_LOCKS_10_OFF_COUPON_ID;
+  }
+
+  return undefined;
+}
+
 export function buildBillingRouter(prisma: PrismaClient) {
   const router = express.Router();
 
@@ -165,6 +185,8 @@ export function buildBillingRouter(prisma: PrismaClient) {
 
       const qty = Number(locks);
 
+      const saasVolumeCouponId = getSaasLocksVolumeCouponId(qty);
+
       if (!Number.isInteger(qty) || qty < 1) {
         return res.status(400).json({
           ok: false,
@@ -208,20 +230,28 @@ export function buildBillingRouter(prisma: PrismaClient) {
       const session = await stripe.checkout.sessions.create({
         mode: "subscription",
         customer: customerId,
+        
+        discounts: saasVolumeCouponId
+          ? [{ coupon: saasVolumeCouponId }]
+          : undefined,
+
         line_items: [
           {
             price: PRICE_LOCKS,
             quantity: qty,
           },
         ],
+        
         success_url: `${APP_URL}/billing/success?session_id={CHECKOUT_SESSION_ID}`,
         cancel_url: `${APP_URL}/billing/cancel`,
         allow_promotion_codes: true,
+        
         subscription_data: {
           metadata: {
             organizationId: orgId,
           },
         },
+        
         metadata: {
           organizationId: orgId,
         },
