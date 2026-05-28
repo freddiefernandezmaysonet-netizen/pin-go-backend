@@ -4,6 +4,26 @@ import stripe from "../billing/stripe";
 import { requireAuth } from "../middleware/requireAuth";
 import { requireOrgAdmin } from "../middleware/requireOrgAdmin";
 
+function getSaasLocksVolumeCouponId(lockQuantity: number): string | undefined {
+  if (!Number.isFinite(lockQuantity) || lockQuantity <= 0) {
+    return undefined;
+  }
+
+  if (lockQuantity >= 25) {
+    return process.env.STRIPE_SAAS_LOCKS_20_OFF_COUPON_ID;
+  }
+
+  if (lockQuantity >= 10) {
+    return process.env.STRIPE_SAAS_LOCKS_15_OFF_COUPON_ID;
+  }
+
+  if (lockQuantity >= 5) {
+    return process.env.STRIPE_SAAS_LOCKS_10_OFF_COUPON_ID;
+  }
+
+  return undefined;
+}
+
 const router = Router();
 const prisma = new PrismaClient();
 
@@ -95,23 +115,24 @@ router.post(
 
     const currentQuantity = lockItem.quantity ?? 0;
 
-    // 5️⃣ actualizar Stripe con quantity TOTAL (no delta)
-    const updated = await stripe.subscriptions.update(
-      sub.stripeSubscriptionId,
-      {
-        items: [
-          {
-            id: sub.stripeSubscriptionItemId,
-            quantity: requestedQuantity,
-          },
-        ],
-        proration_behavior: "create_prorations",
-      }
-    );
+  const saasVolumeCouponId = getSaasLocksVolumeCouponId(requestedQuantity);
 
-    const updatedLockItem = updated.items.data.find(
-      (i: any) => i.id === sub.stripeSubscriptionItemId
-    );
+    // 5️⃣ actualizar Stripe con quantity TOTAL (no delta)
+   const updated = await stripe.subscriptions.update(
+  sub.stripeSubscriptionId,
+  {
+    items: [
+      {
+        id: sub.stripeSubscriptionItemId,
+        quantity: requestedQuantity,
+      },
+    ],
+    discounts: saasVolumeCouponId
+      ? [{ coupon: saasVolumeCouponId }]
+      : [],
+    proration_behavior: "create_prorations",
+  }
+);
 
     const newQuantity = updatedLockItem?.quantity ?? requestedQuantity;
 
@@ -211,13 +232,14 @@ router.post(
 if (!subFull?.stripeSmartSubscriptionItemId) {
   const SMART_PRICE_ID = process.env.STRIPE_PRICE_SMART_PROPERTY!;
 
-  const newItem = await stripe.subscriptionItems.create({
-    subscription: subFull.stripeSubscriptionId,
-    price: SMART_PRICE_ID,
-    quantity: requestedQuantity,
-  });
-
-  await prisma.subscription.update({
+ const newItem = await stripe.subscriptionItems.create({
+  subscription: subFull.stripeSubscriptionId,
+  price: SMART_PRICE_ID,
+  quantity: requestedQuantity,
+  proration_behavior: "create_prorations",
+});
+ 
+ await prisma.subscription.update({
     where: { organizationId: orgId },
     data: {
       stripeSmartSubscriptionItemId: newItem.id,
