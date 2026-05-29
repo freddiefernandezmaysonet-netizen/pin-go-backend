@@ -1,0 +1,330 @@
+import { Router } from "express";
+import { PrismaClient } from "@prisma/client";
+import { checkPropertyAvailability } from "../services/availability.service";
+import stripe from "../billing/stripe";
+
+const prisma = new PrismaClient();
+const publicBookingRouter = Router();
+
+function parseDate(value: unknown) {
+  const date = new Date(String(value ?? ""));
+  if (Number.isNaN(date.getTime())) return null;
+  return date;
+}
+
+publicBookingRouter.get("/:organizationSlug", async (req, res) => {
+  try {
+    const organizationSlug = String(req.params.organizationSlug ?? "").trim();
+
+    if (!organizationSlug) {
+      return res.status(400).json({ ok: false, error: "Missing organizationSlug" });
+    }
+
+    const organization = await prisma.organization.findFirst({
+      where: {
+        slug: organizationSlug,
+        publicBookingEnabled: true,
+      },
+      select: {
+        id: true,
+        name: true,
+        slug: true,
+        properties: {
+          where: {
+            status: "ACTIVE",
+            isPublicBookable: true,
+          },
+          select: {
+            id: true,
+            name: true,
+            slug: true,
+            publicTitle: true,
+            publicDescription: true,
+            publicPhotos: true,
+            baseNightlyRate: true,
+            cleaningFee: true,
+            maxGuests: true,
+            city: true,
+            region: true,
+            country: true,
+            checkInTime: true,
+            checkOutTime: true,
+          },
+          orderBy: {
+            name: "asc",
+          },
+        },
+      },
+    });
+
+    if (!organization) {
+      return res.status(404).json({ ok: false, error: "Public booking site not found" });
+    }
+
+    return res.json({ ok: true, organization });
+  } catch (error: any) {
+    console.error("[public-booking list error]", error?.message ?? error);
+    return res.status(500).json({ ok: false, error: "Failed to load booking site" });
+  }
+});
+
+publicBookingRouter.get("/:organizationSlug/:propertySlug", async (req, res) => {
+  try {
+    const organizationSlug = String(req.params.organizationSlug ?? "").trim();
+    const propertySlug = String(req.params.propertySlug ?? "").trim();
+
+    if (!organizationSlug || !propertySlug) {
+      return res.status(400).json({ ok: false, error: "Missing organizationSlug/propertySlug" });
+    }
+
+    const property = await prisma.property.findFirst({
+      where: {
+        slug: propertySlug,
+        status: "ACTIVE",
+        isPublicBookable: true,
+        organization: {
+          slug: organizationSlug,
+          publicBookingEnabled: true,
+        },
+      },
+      select: {
+        id: true,
+        organizationId: true,
+        name: true,
+        slug: true,
+        publicTitle: true,
+        publicDescription: true,
+        publicPhotos: true,
+        baseNightlyRate: true,
+        cleaningFee: true,
+        maxGuests: true,
+        address1: true,
+        city: true,
+        region: true,
+        country: true,
+        latitude: true,
+        longitude: true,
+        checkInTime: true,
+        checkOutTime: true,
+        timezone: true,
+        organization: {
+          select: {
+            id: true,
+            name: true,
+            slug: true,
+          },
+        },
+      },
+    });
+
+    if (!property) {
+      return res.status(404).json({ ok: false, error: "Public property not found" });
+    }
+
+    return res.json({ ok: true, property });
+  } catch (error: any) {
+    console.error("[public-booking property error]", error?.message ?? error);
+    return res.status(500).json({ ok: false, error: "Failed to load property" });
+  }
+});
+
+publicBookingRouter.post("/check-availability", async (req, res) => {
+  try {
+    const { propertyId, checkIn, checkOut } = req.body ?? {};
+
+    const start = parseDate(checkIn);
+    const end = parseDate(checkOut);
+
+    if (!propertyId || !start || !end) {
+      return res.status(400).json({
+        ok: false,
+        error: "Missing or invalid propertyId/checkIn/checkOut",
+      });
+    }
+
+    const property = await prisma.property.findFirst({
+      where: {
+        id: String(propertyId),
+        status: "ACTIVE",
+        isPublicBookable: true,
+        organization: {
+          publicBookingEnabled: true,
+        },
+      },
+      select: {
+        id: true,
+      },
+    });
+
+    if (!property) {
+      return res.status(404).json({ ok: false, error: "Property not available for public booking" });
+    }
+
+    const availability = await checkPropertyAvailability({
+      propertyId: property.id,
+      checkIn: start,
+      checkOut: end,
+    });
+
+    return res.json({
+      ok: true,
+      available: availability.available,
+      conflict: availability.conflict,
+    });
+  } catch (error: any) {
+    console.error("[public-booking availability error]", error?.message ?? error);
+    return res.status(500).json({ ok: false, error: "Failed to check availability" });
+  }
+});
+
+publicBookingRouter.post("/create-checkout", async (req, res) => {
+  try {
+    const {
+      propertyId,
+      checkIn,
+      checkOut,
+      guestName,
+      guestEmail,
+      guestPhone,
+    } = req.body ?? {};
+
+    const start = parseDate(checkIn);
+    const end = parseDate(checkOut);
+
+    if (!propertyId || !start || !end || !guestName || !guestEmail) {
+      return res.status(400).json({
+        ok: false,
+        error: "Missing or invalid propertyId/checkIn/checkOut/guestName/guestEmail",
+      });
+    }
+
+    const property = await prisma.property.findFirst({
+      where: {
+        id: String(propertyId),
+        status: "ACTIVE",
+        isPublicBookable: true,
+        organization: {
+          publicBookingEnabled: true,
+        },
+      },
+      select: {
+        id: true,
+        organizationId: true,
+        name: true,
+        baseNightlyRate: true,
+        cleaningFee: true,
+        maxGuests: true,
+        organization: {
+          select: {
+            id: true,
+            name: true,
+            slug: true,
+          },
+        },
+      },
+    });
+
+    if (!property) {
+      return res.status(404).json({
+        ok: false,
+        error: "Property not available for public booking",
+      });
+    }
+
+    if (!property.baseNightlyRate) {
+      return res.status(400).json({
+        ok: false,
+        error: "Property is missing baseNightlyRate",
+      });
+    }
+
+    const availability = await checkPropertyAvailability({
+      propertyId: property.id,
+      checkIn: start,
+      checkOut: end,
+    });
+
+    if (!availability.available) {
+      return res.status(409).json({
+        ok: false,
+        error: "Property is not available for the selected dates",
+        conflict: availability.conflict,
+      });
+    }
+
+    const nights = Math.ceil(
+      (end.getTime() - start.getTime()) / (1000 * 60 * 60 * 24)
+    );
+
+    if (!Number.isFinite(nights) || nights <= 0) {
+      return res.status(400).json({
+        ok: false,
+        error: "Invalid number of nights",
+      });
+    }
+
+    const nightlyRate = Number(property.baseNightlyRate);
+    const cleaningFee = property.cleaningFee ? Number(property.cleaningFee) : 0;
+    const totalAmount = nightlyRate * nights + cleaningFee;
+    const totalAmountCents = Math.round(totalAmount * 100);
+
+    if (!Number.isFinite(totalAmountCents) || totalAmountCents <= 0) {
+      return res.status(400).json({
+        ok: false,
+        error: "Invalid booking amount",
+      });
+    }
+
+    const APP_URL = process.env.APP_URL ?? "http://localhost:3000";
+
+    const session = await stripe.checkout.sessions.create({
+      mode: "payment",
+      customer_email: String(guestEmail).trim(),
+      line_items: [
+        {
+          price_data: {
+            currency: "usd",
+            product_data: {
+              name: `${property.publicTitle ?? property.name}`,
+              description: `${nights} night(s) + cleaning fee`,
+            },
+            unit_amount: totalAmountCents,
+          },
+          quantity: 1,
+        },
+      ],
+      success_url: `${APP_URL}/booking/success?session_id={CHECKOUT_SESSION_ID}`,
+      cancel_url: `${APP_URL}/booking/cancel`,
+      metadata: {
+        flow: "direct_booking",
+        organizationId: property.organizationId,
+        propertyId: property.id,
+        checkIn: start.toISOString(),
+        checkOut: end.toISOString(),
+        guestName: String(guestName).trim(),
+        guestEmail: String(guestEmail).trim(),
+        guestPhone: guestPhone ? String(guestPhone).trim() : "",
+        nights: String(nights),
+        nightlyRate: String(nightlyRate),
+        cleaningFee: String(cleaningFee),
+        totalAmount: String(totalAmount),
+      },
+    });
+
+    return res.json({
+      ok: true,
+      checkoutUrl: session.url,
+      sessionId: session.id,
+      totalAmount,
+      currency: "usd",
+      nights,
+    });
+  } catch (error: any) {
+    console.error("[public-booking create-checkout error]", error?.message ?? error);
+    return res.status(500).json({
+      ok: false,
+      error: error?.message ?? "Failed to create checkout",
+    });
+  }
+});
+export default publicBookingRouter;

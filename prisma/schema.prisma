@@ -11,6 +11,8 @@ model Organization {
   id               String          @id @default(cuid())
   name             String
   createdAt        DateTime        @default(now())
+  slug             String?         @unique
+  publicBookingEnabled Boolean     @default(false)
   updatedAt        DateTime        @updatedAt
   stripeCustomerId String?
   dashboardUsers   DashboardUser[]
@@ -78,6 +80,14 @@ model Property {
   id                         String                      @id @default(cuid())
   organizationId             String
   name                       String
+  slug                       String?
+  isPublicBookable           Boolean                     @default(false)
+  publicTitle                String?
+  publicDescription          String?
+  publicPhotos               Json?
+  baseNightlyRate            Decimal?                    @db.Decimal(10,2)
+  cleaningFee                Decimal?                    @db.Decimal(10,2)
+  maxGuests                  Int?
   address1                   String?
   city                       String?
   region                     String?
@@ -101,11 +111,12 @@ model Property {
   automationDevices          PropertyAutomationDevice[]
   automationSettings         PropertyAutomationSettings?
   propertyDevices            PropertyDevice[]
-  propertyStaff            PropertyStaff[]
+  propertyStaff              PropertyStaff[]
   reservations               Reservation[]
 
   @@index([organizationId])
   @@index([organizationId, status])
+  @@unique([organizationId, slug])
 }
 
 model Lock {
@@ -204,12 +215,16 @@ model Reservation {
   checkIn                 DateTime
   checkOut                DateTime
   paymentState            PaymentState             @default(NONE)
+  totalAmount             Decimal?                 @db.Decimal(10,2)
+  currency                String?                  @default("usd")
+  stripeCheckoutSessionId String?                  @unique
+  stripePaymentIntentId   String?
   createdAt               DateTime                 @default(now())
   updatedAt               DateTime                 @updatedAt
   guestToken              String?                  @unique
   guestTokenExpiresAt     DateTime?                                                                                                 
-  verificationStatus          String               @default("PENDING")
-  verifiedAt                  DateTime?
+  verificationStatus      String                   @default("PENDING")
+  verifiedAt              DateTime?
   verificationCompletedByIp   String?
   verificationUserAgent       String?
   verificationGuestCount      Int?

@@ -75,6 +75,7 @@ import { adminDemoRouter } from "./routes/admin.demo.routes";
 import { signupSuccessRouter } from "./routes/public.signup.success.routes";
 import { cleaningConfirmRouter } from "./routes/cleaning-confirm.routes";
 import { teamRouter } from "./routes/team.routes";
+import publicBookingRouter from "./routes/public-booking.routes";
 
 const app = express();
 
@@ -189,6 +190,7 @@ app.use(authRouter);
 app.use(teamRouter);
 app.use("/api/onboarding/appointments", onboardingAppointmentsRouter);
 app.use(signupSuccessRouter);
+app.use("/api/public-booking", publicBookingRouter);
 
 // =====================
 // DEV ROUTES (bloqueadas en producción)

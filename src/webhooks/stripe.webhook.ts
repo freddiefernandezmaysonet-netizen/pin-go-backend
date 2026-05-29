@@ -8,6 +8,7 @@ import {
 } from "@prisma/client";
 import stripe from "../billing/stripe";
 import syncTuyaEntitlementFromStripeEvent from "../billing/stripe/stripe.tuya.entitlement";
+import { handleDirectBookingCheckoutCompleted } from "../services/direct-booking.service";
 
 const prisma = new PrismaClient();
 
@@ -55,6 +56,19 @@ export function registerStripeWebhook(app: Express) {
               subscription: session.subscription,
               metadata: session.metadata ?? null,
             });
+
+           const flow = String(session.metadata?.flow ?? "").trim();
+
+           if (flow === "direct_booking") {
+             const reservation = await handleDirectBookingCheckoutCompleted(session);
+
+             console.log("✅ direct booking reservation completed", {
+               sessionId: session.id,
+               reservationId: reservation?.id ?? null,
+             });
+
+             break;
+           }
 
             await maybeCompleteSignupOnboarding(session);
 
