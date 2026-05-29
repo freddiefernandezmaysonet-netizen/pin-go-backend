@@ -55,6 +55,8 @@ export async function handleDirectBookingCheckoutCompleted(
 
   const checkIn = parseDateMetadata(session, "checkIn");
   const checkOut = parseDateMetadata(session, "checkOut");
+  const checkInRaw = requiredMetadata(session, "checkIn");
+  const checkOutRaw = requiredMetadata(session, "checkOut");
 
   const property = await prisma.property.findFirst({
     where: {
@@ -111,9 +113,9 @@ const ingestResult = await ingestReservation({
   guestPhone,
   roomName: property.name,
 
-  checkIn: checkIn.toISOString(),
-  checkOut: checkOut.toISOString(),
-
+  checkIn: checkInRaw,
+  checkOut: checkOutRaw,
+ 
   paymentState: "PAID",
 
   externalProvider: "PIN_GO_DIRECT",
