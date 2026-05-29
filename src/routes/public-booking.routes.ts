@@ -44,6 +44,8 @@ publicBookingRouter.get("/:organizationSlug", async (req, res) => {
             baseNightlyRate: true,
             cleaningFee: true,
             maxGuests: true,
+            minimumNights: true,
+            maximumNights: true,
             city: true,
             region: true,
             country: true,
@@ -98,6 +100,8 @@ publicBookingRouter.get("/:organizationSlug/:propertySlug", async (req, res) => 
         baseNightlyRate: true,
         cleaningFee: true,
         maxGuests: true,
+        minimumNights: true,
+        maximumNights: true,
         address1: true,
         city: true,
         region: true,
@@ -141,6 +145,23 @@ publicBookingRouter.post("/check-availability", async (req, res) => {
         error: "Missing or invalid propertyId/checkIn/checkOut",
       });
     }
+
+const adultsCount = Number(adults ?? 1);
+const childrenCount = Number(children ?? 0);
+const totalGuests = adultsCount + childrenCount;
+
+if (
+  !Number.isInteger(adultsCount) ||
+  !Number.isInteger(childrenCount) ||
+  adultsCount < 1 ||
+  childrenCount < 0 ||
+  totalGuests < 1
+) {
+  return res.status(400).json({
+    ok: false,
+    error: "Invalid guest count",
+  });
+}
 
     const property = await prisma.property.findFirst({
       where: {
@@ -186,6 +207,8 @@ publicBookingRouter.post("/create-checkout", async (req, res) => {
       guestName,
       guestEmail,
       guestPhone,
+      adults,
+      children,
     } = req.body ?? {};
 
     const start = parseDate(checkIn);
@@ -214,6 +237,8 @@ publicBookingRouter.post("/create-checkout", async (req, res) => {
         baseNightlyRate: true,
         cleaningFee: true,
         maxGuests: true,
+        minimumNights: true,
+        maximumNights: true,
         organization: {
           select: {
             id: true,
@@ -237,6 +262,13 @@ publicBookingRouter.post("/create-checkout", async (req, res) => {
         error: "Property is missing baseNightlyRate",
       });
     }
+
+if (property.maxGuests && totalGuests > property.maxGuests) {
+  return res.status(400).json({
+    ok: false,
+    error: `Maximum guests allowed is ${property.maxGuests}`,
+  });
+}
 
     const availability = await checkPropertyAvailability({
       propertyId: property.id,
@@ -262,6 +294,23 @@ publicBookingRouter.post("/create-checkout", async (req, res) => {
         error: "Invalid number of nights",
       });
     }
+
+if (nights < (property.minimumNights ?? 1)) {
+  return res.status(400).json({
+    ok: false,
+    error: `Minimum stay is ${property.minimumNights} night(s)`,
+  });
+}
+
+if (
+  property.maximumNights &&
+  nights > property.maximumNights
+) {
+  return res.status(400).json({
+    ok: false,
+    error: `Maximum stay is ${property.maximumNights} night(s)`,
+  });
+}
 
     const nightlyRate = Number(property.baseNightlyRate);
     const cleaningFee = property.cleaningFee ? Number(property.cleaningFee) : 0;
@@ -304,6 +353,9 @@ publicBookingRouter.post("/create-checkout", async (req, res) => {
         guestName: String(guestName).trim(),
         guestEmail: String(guestEmail).trim(),
         guestPhone: guestPhone ? String(guestPhone).trim() : "",
+        adults: String(adultsCount),
+        children: String(childrenCount),
+        totalGuests: String(totalGuests),
         nights: String(nights),
         nightlyRate: String(nightlyRate),
         cleaningFee: String(cleaningFee),

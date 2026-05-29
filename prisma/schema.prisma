@@ -88,6 +88,8 @@ model Property {
   baseNightlyRate            Decimal?                    @db.Decimal(10,2)
   cleaningFee                Decimal?                    @db.Decimal(10,2)
   maxGuests                  Int?
+  minimumNights              Int                         @default(1)
+  maximumNights              Int?
   address1                   String?
   city                       String?
   region                     String?

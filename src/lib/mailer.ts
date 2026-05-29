@@ -16,6 +16,29 @@ type SendSalesFollowUpEmailInput = {
   name?: string | null;
 };
 
+type SendDirectBookingGuestConfirmationInput = {
+  to: string;
+  guestName?: string | null;
+  propertyName: string;
+  checkIn: Date;
+  checkOut: Date;
+  totalAmount?: number | null;
+  currency?: string | null;
+};
+
+type SendDirectBookingHostNotificationInput = {
+  to: string;
+  hostName?: string | null;
+  propertyName: string;
+  guestName: string;
+  guestEmail?: string | null;
+  guestPhone?: string | null;
+  checkIn: Date;
+  checkOut: Date;
+  totalAmount?: number | null;
+  currency?: string | null;
+};
+
 function getEmailFrom() {
   if (emailFrom) return emailFrom;
 
@@ -181,6 +204,202 @@ export async function sendSalesFollowUpEmail(
   }
 
   console.log("✅ SALES FOLLOW-UP EMAIL SENT TO:", to);
+
+  return {
+    ok: true,
+    mode: "resend",
+    data,
+  };
+}
+
+function formatBookingDate(date: Date) {
+  return new Intl.DateTimeFormat("en-US", {
+    month: "short",
+    day: "numeric",
+    year: "numeric",
+  }).format(date);
+}
+
+function formatBookingAmount(amount?: number | null, currency?: string | null) {
+  if (!amount || !Number.isFinite(Number(amount))) return "Not available";
+
+  return new Intl.NumberFormat("en-US", {
+    style: "currency",
+    currency: (currency || "usd").toUpperCase(),
+  }).format(Number(amount));
+}
+
+export async function sendDirectBookingGuestConfirmation(
+  input: SendDirectBookingGuestConfirmationInput
+) {
+  const {
+    to,
+    guestName,
+    propertyName,
+    checkIn,
+    checkOut,
+    totalAmount,
+    currency,
+  } = input;
+
+  const safeName = guestName?.trim() || "there";
+
+  if (!resend) {
+    if (isProd) {
+      throw new Error("RESEND_API_KEY missing in production");
+    }
+
+    console.log("📨 RESEND_API_KEY missing. Direct booking guest email fallback.");
+    console.log("TO:", to);
+
+    return {
+      ok: true,
+      mode: "console",
+    };
+  }
+
+  const { data, error } = await resend.emails.send({
+    from: getEmailFrom(),
+    to,
+    subject: `Your reservation is confirmed - ${propertyName}`,
+    html: `
+      <div style="font-family: Arial, sans-serif; color: #111827; line-height: 1.6;">
+        <h2 style="margin-bottom: 8px;">Your reservation is confirmed</h2>
+
+        <p>Hi ${safeName},</p>
+
+        <p>
+          Your reservation for <strong>${propertyName}</strong> has been confirmed.
+        </p>
+
+        <div style="background:#f9fafb;border:1px solid #e5e7eb;border-radius:12px;padding:16px;margin:20px 0;">
+          <p><strong>Check-in:</strong> ${formatBookingDate(checkIn)}</p>
+          <p><strong>Check-out:</strong> ${formatBookingDate(checkOut)}</p>
+          <p><strong>Total paid:</strong> ${formatBookingAmount(totalAmount, currency)}</p>
+        </div>
+
+        <p>
+          You will receive your check-in and access instructions before arrival.
+        </p>
+
+        <p>
+          Thank you,<br />
+          Pin&Go
+        </p>
+
+        <hr style="border: none; border-top: 1px solid #e5e7eb; margin: 24px 0;" />
+
+        <h2 style="margin-bottom: 8px;">Tu reservación está confirmada</h2>
+
+        <p>Hola ${safeName},</p>
+
+        <p>
+          Tu reservación para <strong>${propertyName}</strong> ha sido confirmada.
+        </p>
+
+        <div style="background:#f9fafb;border:1px solid #e5e7eb;border-radius:12px;padding:16px;margin:20px 0;">
+          <p><strong>Check-in:</strong> ${formatBookingDate(checkIn)}</p>
+          <p><strong>Check-out:</strong> ${formatBookingDate(checkOut)}</p>
+          <p><strong>Total pagado:</strong> ${formatBookingAmount(totalAmount, currency)}</p>
+        </div>
+
+        <p>
+          Recibirás las instrucciones de acceso antes de tu llegada.
+        </p>
+
+        <p>
+          Gracias,<br />
+          Pin&Go
+        </p>
+      </div>
+    `,
+  });
+
+  if (error) {
+    throw new Error(`Resend direct booking guest email failed: ${error.message}`);
+  }
+
+  console.log("✅ DIRECT BOOKING GUEST EMAIL SENT TO:", to);
+
+  return {
+    ok: true,
+    mode: "resend",
+    data,
+  };
+}
+
+export async function sendDirectBookingHostNotification(
+  input: SendDirectBookingHostNotificationInput
+) {
+  const {
+    to,
+    hostName,
+    propertyName,
+    guestName,
+    guestEmail,
+    guestPhone,
+    checkIn,
+    checkOut,
+    totalAmount,
+    currency,
+  } = input;
+
+  const safeHostName = hostName?.trim() || "there";
+
+  if (!resend) {
+    if (isProd) {
+      throw new Error("RESEND_API_KEY missing in production");
+    }
+
+    console.log("📨 RESEND_API_KEY missing. Direct booking host email fallback.");
+    console.log("TO:", to);
+
+    return {
+      ok: true,
+      mode: "console",
+    };
+  }
+
+  const { data, error } = await resend.emails.send({
+    from: getEmailFrom(),
+    to,
+    subject: `New direct booking - ${propertyName}`,
+    html: `
+      <div style="font-family: Arial, sans-serif; color: #111827; line-height: 1.6;">
+        <h2 style="margin-bottom: 8px;">New direct booking received</h2>
+
+        <p>Hi ${safeHostName},</p>
+
+        <p>
+          A new direct booking has been completed for <strong>${propertyName}</strong>.
+        </p>
+
+        <div style="background:#f9fafb;border:1px solid #e5e7eb;border-radius:12px;padding:16px;margin:20px 0;">
+          <p><strong>Guest:</strong> ${guestName}</p>
+          <p><strong>Email:</strong> ${guestEmail || "Not provided"}</p>
+          <p><strong>Phone:</strong> ${guestPhone || "Not provided"}</p>
+          <p><strong>Check-in:</strong> ${formatBookingDate(checkIn)}</p>
+          <p><strong>Check-out:</strong> ${formatBookingDate(checkOut)}</p>
+          <p><strong>Total paid:</strong> ${formatBookingAmount(totalAmount, currency)}</p>
+        </div>
+
+        <p>
+          Pin&Go has created the reservation and started the operational flow automatically.
+        </p>
+
+        <p>
+          Best,<br />
+          Pin&Go
+        </p>
+      </div>
+    `,
+  });
+
+  if (error) {
+    throw new Error(`Resend direct booking host email failed: ${error.message}`);
+  }
+
+  console.log("✅ DIRECT BOOKING HOST EMAIL SENT TO:", to);
 
   return {
     ok: true,

@@ -2,6 +2,10 @@ import Stripe from "stripe";
 import { PrismaClient } from "@prisma/client";
 import { checkPropertyAvailability } from "./availability.service";
 import { ingestReservation } from "./ingest.service";
+import {
+  sendDirectBookingGuestConfirmation,
+  sendDirectBookingHostNotification,
+} from "../lib/mailer";
 
 const prisma = new PrismaClient();
 
@@ -69,10 +73,11 @@ export async function handleDirectBookingCheckoutCompleted(
       },
     },
     select: {
-      id: true,
-      name: true,
-      organizationId: true,
-    },
+  id: true,
+  name: true,
+  organizationId: true,
+  },
+
   });
 
   if (!property) {
@@ -132,7 +137,7 @@ const ingestResult = await ingestReservation({
   status: "ACTIVE",
 });
 
-await prisma.reservation.update({
+const updatedReservation = await prisma.reservation.update({
   where: {
     id: ingestResult.reservationId,
   },
@@ -142,7 +147,37 @@ await prisma.reservation.update({
     stripeCheckoutSessionId: session.id,
     stripePaymentIntentId: paymentIntentId,
   },
+  select: {
+    id: true,
+    guestName: true,
+    guestEmail: true,
+    guestPhone: true,
+    checkIn: true,
+    checkOut: true,
+    totalAmount: true,
+    currency: true,
+  },
 });
+
+const amountNumber = updatedReservation.totalAmount
+  ? Number(updatedReservation.totalAmount)
+  : null;
+
+if (updatedReservation.guestEmail) {
+  try {
+    await sendDirectBookingGuestConfirmation({
+      to: updatedReservation.guestEmail,
+      guestName: updatedReservation.guestName,
+      propertyName: property.name,
+      checkIn: updatedReservation.checkIn,
+      checkOut: updatedReservation.checkOut,
+      totalAmount: amountNumber,
+      currency: updatedReservation.currency,
+    });
+  } catch (emailError) {
+    console.error("[DIRECT_BOOKING_GUEST_EMAIL_ERROR]", emailError);
+  }
+}
 
 return {
   id: ingestResult.reservationId,
