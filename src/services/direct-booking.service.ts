@@ -1,10 +1,7 @@
 import Stripe from "stripe";
-import {
-  PaymentState,
-  PrismaClient,
-  ReservationStatus,
-} from "@prisma/client";
+import { PrismaClient } from "@prisma/client";
 import { checkPropertyAvailability } from "./availability.service";
+import { ingestReservation } from "./ingest.service";
 
 const prisma = new PrismaClient();
 
@@ -101,45 +98,52 @@ export async function handleDirectBookingCheckoutCompleted(
   }
 
   const paymentIntentId =
-    typeof session.payment_intent === "string"
-      ? session.payment_intent
-      : session.payment_intent?.id ?? null;
+  typeof session.payment_intent === "string"
+    ? session.payment_intent
+    : session.payment_intent?.id ?? null;
 
-  const reservation = await prisma.reservation.create({
-    data: {
-      propertyId: property.id,
-      guestName,
-      guestEmail,
-      guestPhone,
-      roomName: property.name,
-      checkIn,
-      checkOut,
-      paymentState: PaymentState.PAID,
-      totalAmount,
-      currency: String(session.currency ?? "usd").toLowerCase(),
-      stripeCheckoutSessionId: session.id,
-      stripePaymentIntentId: paymentIntentId,
-      source: "DIRECT_BOOKING",
-      externalProvider: "PIN_GO_DIRECT",
-      externalId: session.id,
-      externalRaw: {
-        stripeCheckoutSessionId: session.id,
-        amountTotal: session.amount_total,
-        currency: session.currency,
-        metadata: session.metadata ?? {},
-      },
-      status: ReservationStatus.ACTIVE,
-    },
-    select: {
-      id: true,
-      propertyId: true,
-      checkIn: true,
-      checkOut: true,
-      status: true,
-      paymentState: true,
-      stripeCheckoutSessionId: true,
-    },
-  });
+const ingestResult = await ingestReservation({
+  source: "DIRECT_BOOKING",
 
-  return reservation;
+  propertyId: property.id,
+  guestName,
+  guestEmail,
+  guestPhone,
+  roomName: property.name,
+
+  checkIn: checkIn.toISOString(),
+  checkOut: checkOut.toISOString(),
+
+  paymentState: "PAID",
+
+  externalProvider: "PIN_GO_DIRECT",
+  externalId: session.id,
+  externalUpdatedAt: new Date().toISOString(),
+  externalRaw: {
+    stripeCheckoutSessionId: session.id,
+    stripePaymentIntentId: paymentIntentId,
+    amountTotal: session.amount_total,
+    currency: session.currency,
+    metadata: session.metadata ?? {},
+  },
+
+  status: "ACTIVE",
+});
+
+await prisma.reservation.update({
+  where: {
+    id: ingestResult.reservationId,
+  },
+  data: {
+    totalAmount,
+    currency: String(session.currency ?? "usd").toLowerCase(),
+    stripeCheckoutSessionId: session.id,
+    stripePaymentIntentId: paymentIntentId,
+  },
+});
+
+return {
+  id: ingestResult.reservationId,
+  stripeCheckoutSessionId: session.id,
+};
 }
