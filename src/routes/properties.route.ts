@@ -29,7 +29,13 @@ export function buildPropertiesRouter(prisma: PrismaClient) {
         },
         orderBy: { createdAt: "desc" },
         include: {
-          _count: {
+  amenities: {
+    orderBy: { name: "asc" },
+  },
+  taxes: {
+    orderBy: { name: "asc" },
+  },
+  _count: {
             select: {
               locks: true,
               reservations: {
@@ -59,6 +65,19 @@ export function buildPropertiesRouter(prisma: PrismaClient) {
           longitude: p.longitude ?? null,
           checkInTime: p.checkInTime ?? "15:00",
           cleaningStartOffsetMinutes: p.cleaningStartOffsetMinutes ?? 0,
+          slug: p.slug ?? null,
+          isPublicBookable: p.isPublicBookable ?? false,
+          publicTitle: p.publicTitle ?? null,
+          publicDescription: p.publicDescription ?? null,
+          publicPhotos: p.publicPhotos ?? null,
+          baseNightlyRate: p.baseNightlyRate ?? null,
+          cleaningFee: p.cleaningFee ?? null,
+          maxGuests: p.maxGuests ?? null,
+          minimumNights: p.minimumNights ?? 1,
+          maximumNights: p.maximumNights ?? null,
+          checkOutTime: p.checkOutTime ?? null,
+          amenities: p.amenities ?? [],
+          taxes: p.taxes ?? [],
         })),
       });
     } catch (error: any) {
