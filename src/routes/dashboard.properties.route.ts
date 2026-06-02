@@ -1,5 +1,5 @@
 import { Router } from "express";
-import { PrismaClient, ReservationStatus } from "@prisma/client";
+import { AmenityFeeType, PrismaClient, ReservationStatus } from "@prisma/client";
 import { requireAuth } from "../middleware/requireAuth";
 
 const prisma = new PrismaClient();
@@ -23,6 +23,23 @@ function parseOptionalCoordinate(value: unknown): number | null {
     return null;
   }
 
+function parseOptionalMoney(value: unknown): number | null {
+  if (value === undefined || value === null || String(value).trim() === "") {
+    return null;
+  }
+
+  const parsed = Number(value);
+  return Number.isFinite(parsed) && parsed >= 0 ? parsed : NaN;
+}
+
+function parseOptionalInt(value: unknown): number | null {
+  if (value === undefined || value === null || String(value).trim() === "") {
+    return null;
+  }
+
+  const parsed = Number(value);
+  return Number.isFinite(parsed) && parsed >= 0 ? Math.trunc(parsed) : NaN;
+}
   const parsed = Number(value);
   return Number.isFinite(parsed) ? parsed : NaN;
 }
@@ -109,7 +126,7 @@ dashboardPropertiesRouter.get(
           id,
           organizationId: orgId,
         },
-        select: {
+          select: {
           id: true,
           name: true,
           address1: true,
@@ -124,7 +141,42 @@ dashboardPropertiesRouter.get(
           cleaningStartOffsetMinutes: true,
           createdAt: true,
           updatedAt: true,
+          slug: true,
+          isPublicBookable: true,
+          publicTitle: true,
+          publicDescription: true,
+          publicPhotos: true,
+          baseNightlyRate: true,
+          cleaningFee: true,
+          maxGuests: true,
+          minimumNights: true,
+          maximumNights: true,
+          checkInTime: true,
+          checkOutTime: true,
+          amenities: {
+          orderBy: { name: "asc" },
+          select: {
+          id: true,
+          name: true,
+          feeType: true,
+          amount: true,
+          isActive: true,
+          createdAt: true,
+          updatedAt: true,
         },
+       },
+         taxes: {
+         orderBy: { name: "asc" },
+         select: {
+         id: true,
+         name: true,
+         percentage: true,
+         isActive: true,
+         createdAt: true,
+         updatedAt: true,
+         },
+        },
+       },
       });
 
       if (!property) {
@@ -168,10 +220,59 @@ dashboardPropertiesRouter.patch(
         cleaningStartOffsetMinutes,
         latitude: latitudeRaw,
         longitude: longitudeRaw,
+        slug,
+        isPublicBookable,
+        publicTitle,
+        publicDescription,
+        publicPhotos,
+        baseNightlyRate: baseNightlyRateRaw,
+        cleaningFee: cleaningFeeRaw,
+        maxGuests: maxGuestsRaw,
+        minimumNights: minimumNightsRaw,
+        maximumNights: maximumNightsRaw,
+        checkInTime,
+        checkOutTime,
       } = req.body ?? {};
 
       const latitude = parseOptionalCoordinate(latitudeRaw);
       const longitude = parseOptionalCoordinate(longitudeRaw);
+const baseNightlyRate = parseOptionalMoney(baseNightlyRateRaw);
+const cleaningFee = parseOptionalMoney(cleaningFeeRaw);
+const maxGuests = parseOptionalInt(maxGuestsRaw);
+const minimumNights = parseOptionalInt(minimumNightsRaw);
+const maximumNights = parseOptionalInt(maximumNightsRaw);
+
+if (Number.isNaN(baseNightlyRate)) {
+  return res.status(400).json({ ok: false, error: "baseNightlyRate must be a valid amount" });
+}
+
+if (Number.isNaN(cleaningFee)) {
+  return res.status(400).json({ ok: false, error: "cleaningFee must be a valid amount" });
+}
+
+if (Number.isNaN(maxGuests)) {
+  return res.status(400).json({ ok: false, error: "maxGuests must be a valid number" });
+}
+
+if (Number.isNaN(minimumNights)) {
+  return res.status(400).json({ ok: false, error: "minimumNights must be a valid number" });
+}
+
+if (Number.isNaN(maximumNights)) {
+  return res.status(400).json({ ok: false, error: "maximumNights must be a valid number" });
+}
+
+if (
+  minimumNights !== null &&
+  maximumNights !== null &&
+  maximumNights > 0 &&
+  minimumNights > maximumNights
+) {
+  return res.status(400).json({
+    ok: false,
+    error: "minimumNights cannot be greater than maximumNights",
+  });
+}
 
       if (Number.isNaN(latitude)) {
         return res.status(400).json({
@@ -309,6 +410,54 @@ dashboardPropertiesRouter.patch(
         data.longitude = longitude;
       }
 
+if (slug !== undefined) {
+  data.slug = String(slug || "").trim() || null;
+}
+
+if (isPublicBookable !== undefined) {
+  data.isPublicBookable = Boolean(isPublicBookable);
+}
+
+if (publicTitle !== undefined) {
+  data.publicTitle = String(publicTitle || "").trim() || null;
+}
+
+if (publicDescription !== undefined) {
+  data.publicDescription = String(publicDescription || "").trim() || null;
+}
+
+if (publicPhotos !== undefined) {
+  data.publicPhotos = Array.isArray(publicPhotos) ? publicPhotos : null;
+}
+
+if (baseNightlyRateRaw !== undefined) {
+  data.baseNightlyRate = baseNightlyRate;
+}
+
+if (cleaningFeeRaw !== undefined) {
+  data.cleaningFee = cleaningFee;
+}
+
+if (maxGuestsRaw !== undefined) {
+  data.maxGuests = maxGuests;
+}
+
+if (minimumNightsRaw !== undefined) {
+  data.minimumNights = minimumNights ?? 1;
+}
+
+if (maximumNightsRaw !== undefined) {
+  data.maximumNights = maximumNights && maximumNights > 0 ? maximumNights : null;
+}
+
+if (checkInTime !== undefined) {
+  data.checkInTime = String(checkInTime || "").trim() || null;
+}
+
+if (checkOutTime !== undefined) {
+  data.checkOutTime = String(checkOutTime || "").trim() || null;
+}
+
       const updated = await prisma.property.update({
         where: { id: existing.id },
         data,
@@ -326,7 +475,42 @@ dashboardPropertiesRouter.patch(
           cleaningDurationMinutes: true,
           cleaningStartOffsetMinutes: true,
           updatedAt: true,
+          slug: true,
+          isPublicBookable: true,
+          publicTitle: true,
+          publicDescription: true,
+          publicPhotos: true,
+          baseNightlyRate: true,
+          cleaningFee: true,
+          maxGuests: true,
+          minimumNights: true,
+          maximumNights: true,
+          checkInTime: true,
+          checkOutTime: true,
+          amenities: {
+            orderBy: { name: "asc" },
+            select: {
+            id: true,
+            name: true,
+            feeType: true,
+            amount: true,
+            isActive: true,
+            createdAt: true,
+            updatedAt: true,
+          },
         },
+        taxes: {
+          orderBy: { name: "asc" },
+          select: {
+            id: true,
+            name: true,
+            percentage: true,
+            isActive: true,
+            createdAt: true,
+            updatedAt: true,
+          },
+         },
+       },
       });
 
       return res.json({

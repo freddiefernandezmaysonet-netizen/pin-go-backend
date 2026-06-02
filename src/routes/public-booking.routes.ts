@@ -2,6 +2,7 @@ import { Router } from "express";
 import { PrismaClient } from "@prisma/client";
 import { checkPropertyAvailability } from "../services/availability.service";
 import stripe from "../billing/stripe";
+import { calculateDirectBookingPricing } from "../services/direct-booking-pricing.service";
 
 const prisma = new PrismaClient();
 const publicBookingRouter = Router();
@@ -312,10 +313,14 @@ if (
   });
 }
 
-    const nightlyRate = Number(property.baseNightlyRate);
-    const cleaningFee = property.cleaningFee ? Number(property.cleaningFee) : 0;
-    const totalAmount = nightlyRate * nights + cleaningFee;
-    const totalAmountCents = Math.round(totalAmount * 100);
+const pricing = await calculateDirectBookingPricing({
+  propertyId: property.id,
+  checkIn: start,
+  checkOut: end,
+});
+
+const totalAmount = pricing.totalAmount;
+const totalAmountCents = pricing.totalAmountCents;
 
     if (!Number.isFinite(totalAmountCents) || totalAmountCents <= 0) {
       return res.status(400).json({
@@ -342,8 +347,8 @@ if (
           quantity: 1,
         },
       ],
-      success_url: `${APP_URL}/booking/success?session_id={CHECKOUT_SESSION_ID}`,
-      cancel_url: `${APP_URL}/booking/cancel`,
+      success_url: `${APP_URL}/booking/success?organization=${property.organization.slug}`,
+      cancel_url: `${APP_URL}/booking/cancel?organization=${property.organization.slug}`,
       metadata: {
         flow: "direct_booking",
         organizationId: property.organizationId,
@@ -357,9 +362,12 @@ if (
         children: String(childrenCount),
         totalGuests: String(totalGuests),
         nights: String(nights),
-        nightlyRate: String(nightlyRate),
-        cleaningFee: String(cleaningFee),
-        totalAmount: String(totalAmount),
+        nightlyRate: String(pricing.nightlyRate),
+        cleaningFee: String(pricing.cleaningFee),
+        amenitiesTotal: String(pricing.amenitiesTotal),
+        taxesTotal: String(pricing.taxesTotal),
+        pricingBreakdown: JSON.stringify(pricing),
+        totalAmount: String(pricing.totalAmount),
       },
     });
 
@@ -367,9 +375,10 @@ if (
       ok: true,
       checkoutUrl: session.url,
       sessionId: session.id,
-      totalAmount,
-      currency: "usd",
-      nights,
+     totalAmount: pricing.totalAmount,
+     currency: pricing.currency,
+     nights: pricing.nights,
+     pricing, 
     });
   } catch (error: any) {
     console.error("[public-booking create-checkout error]", error?.message ?? error);

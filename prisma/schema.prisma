@@ -114,8 +114,10 @@ model Property {
   automationSettings         PropertyAutomationSettings?
   propertyDevices            PropertyDevice[]
   propertyStaff              PropertyStaff[]
+  amenities                  PropertyAmenity[]
+  taxes                      PropertyTax[]
   reservations               Reservation[]
-
+  
   @@index([organizationId])
   @@index([organizationId, status])
   @@unique([organizationId, slug])
@@ -841,6 +843,40 @@ model SalesFollowUp {
   @@index([appointmentId])
 }
 
+model PropertyAmenity {
+  id         String         @id @default(cuid())
+  propertyId String
+  name       String
+  feeType    AmenityFeeType @default(PER_STAY)
+  amount     Decimal?       @db.Decimal(10,2)
+  isActive   Boolean        @default(true)
+  createdAt  DateTime       @default(now())
+  updatedAt  DateTime       @updatedAt
+
+  property Property @relation(fields: [propertyId], references: [id], onDelete: Cascade)
+
+  @@index([propertyId])
+}
+
+model PropertyTax {
+  id         String   @id @default(cuid())
+  propertyId String
+  name       String
+  percentage Decimal  @db.Decimal(5,2)
+  isActive   Boolean  @default(true)
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  property Property @relation(fields: [propertyId], references: [id], onDelete: Cascade)
+
+  @@index([propertyId])
+}
+
+enum AmenityFeeType {
+  PER_STAY
+  PER_NIGHT
+
+}
 enum BookingType {
   ONBOARDING
   DEMO
