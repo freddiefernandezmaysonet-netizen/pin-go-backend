@@ -139,27 +139,10 @@ publicBookingRouter.post("/check-availability", async (req, res) => {
     const start = parseDate(checkIn);
     const end = parseDate(checkOut);
 
-    if (!propertyId || !start || !end) {
-      return res.status(400).json({
-        ok: false,
-        error: "Missing or invalid propertyId/checkIn/checkOut",
-      });
-    }
-
-const adultsCount = Number(adults ?? 1);
-const childrenCount = Number(children ?? 0);
-const totalGuests = adultsCount + childrenCount;
-
-if (
-  !Number.isInteger(adultsCount) ||
-  !Number.isInteger(childrenCount) ||
-  adultsCount < 1 ||
-  childrenCount < 0 ||
-  totalGuests < 1
-) {
+if (!propertyId || !start || !end) {
   return res.status(400).json({
     ok: false,
-    error: "Invalid guest count",
+    error: "Missing or invalid propertyId/checkIn/checkOut",
   });
 }
 
@@ -201,16 +184,33 @@ if (
 publicBookingRouter.post("/create-checkout", async (req, res) => {
   try {
     const {
-      propertyId,
-      checkIn,
-      checkOut,
-      guestName,
-      guestEmail,
-      guestPhone,
-      adults,
-      children,
-    } = req.body ?? {};
+    propertyId,
+    checkIn,
+    checkOut,
+    guestName,
+    guestEmail,
+    guestPhone,
+    adults,
+    children,
+  } = req.body ?? {};
+    
+    const adultsCount = Number(adults ?? 1);
+    const childrenCount = Number(children ?? 0);
+    const totalGuests = adultsCount + childrenCount;
 
+    if (
+      !Number.isInteger(adultsCount) ||
+      !Number.isInteger(childrenCount) ||
+      adultsCount < 1 ||
+      childrenCount < 0 ||
+      totalGuests < 1
+    ) {
+      return res.status(400).json({
+        ok: false,
+        error: "Invalid guest count",
+      });
+    }
+ 
     const start = parseDate(checkIn);
     const end = parseDate(checkOut);
 
