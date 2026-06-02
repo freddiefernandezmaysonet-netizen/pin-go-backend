@@ -23,6 +23,10 @@ function parseOptionalCoordinate(value: unknown): number | null {
     return null;
   }
 
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? parsed : NaN;
+}
+
 function parseOptionalMoney(value: unknown): number | null {
   if (value === undefined || value === null || String(value).trim() === "") {
     return null;
@@ -39,9 +43,6 @@ function parseOptionalInt(value: unknown): number | null {
 
   const parsed = Number(value);
   return Number.isFinite(parsed) && parsed >= 0 ? Math.trunc(parsed) : NaN;
-}
-  const parsed = Number(value);
-  return Number.isFinite(parsed) ? parsed : NaN;
 }
 
 dashboardPropertiesRouter.get(
@@ -523,6 +524,298 @@ if (checkOutTime !== undefined) {
         ok: false,
         error: error?.message ?? "Failed to update property",
       });
+    }
+  }
+);
+
+dashboardPropertiesRouter.post(
+  "/api/dashboard/properties/:id/amenities",
+  requireAuth,
+  async (req, res) => {
+    try {
+      const user = (req as any).user;
+      const orgId = user.orgId as string;
+      const { id } = req.params;
+      const { name, feeType, amount } = req.body ?? {};
+
+      const property = await prisma.property.findFirst({
+        where: { id, organizationId: orgId, status: "ACTIVE" },
+        select: { id: true },
+      });
+
+      if (!property) {
+        return res.status(404).json({ ok: false, error: "Property not found" });
+      }
+
+      const cleanName = String(name || "").trim();
+      const cleanFeeType = String(feeType || "PER_STAY").trim();
+      const parsedAmount = Number(amount ?? 0);
+
+      if (!cleanName) {
+        return res.status(400).json({ ok: false, error: "Amenity name is required" });
+      }
+
+      if (!Object.values(AmenityFeeType).includes(cleanFeeType as AmenityFeeType)) {
+        return res.status(400).json({ ok: false, error: "Invalid amenity feeType" });
+      }
+
+      if (!Number.isFinite(parsedAmount) || parsedAmount < 0) {
+        return res.status(400).json({ ok: false, error: "Amenity amount must be valid" });
+      }
+
+      const item = await prisma.propertyAmenity.create({
+        data: {
+          propertyId: property.id,
+          name: cleanName,
+          feeType: cleanFeeType as AmenityFeeType,
+          amount: parsedAmount,
+        },
+      });
+
+      return res.json({ ok: true, item });
+    } catch (error: any) {
+      console.error("POST amenity error", error);
+      return res.status(500).json({ ok: false, error: error?.message ?? "Failed to create amenity" });
+    }
+  }
+);
+
+dashboardPropertiesRouter.patch(
+  "/api/dashboard/properties/:id/amenities/:amenityId",
+  requireAuth,
+  async (req, res) => {
+    try {
+      const user = (req as any).user;
+      const orgId = user.orgId as string;
+      const { id, amenityId } = req.params;
+      const { name, feeType, amount, isActive } = req.body ?? {};
+
+      const amenity = await prisma.propertyAmenity.findFirst({
+        where: {
+          id: amenityId,
+          propertyId: id,
+          property: { organizationId: orgId },
+        },
+        select: { id: true },
+      });
+
+      if (!amenity) {
+        return res.status(404).json({ ok: false, error: "Amenity not found" });
+      }
+
+      const data: any = {};
+
+      if (name !== undefined) {
+        const cleanName = String(name || "").trim();
+        if (!cleanName) {
+          return res.status(400).json({ ok: false, error: "Amenity name is required" });
+        }
+        data.name = cleanName;
+      }
+
+      if (feeType !== undefined) {
+        const cleanFeeType = String(feeType || "").trim();
+        if (!Object.values(AmenityFeeType).includes(cleanFeeType as AmenityFeeType)) {
+          return res.status(400).json({ ok: false, error: "Invalid amenity feeType" });
+        }
+        data.feeType = cleanFeeType;
+      }
+
+      if (amount !== undefined) {
+        const parsedAmount = Number(amount);
+        if (!Number.isFinite(parsedAmount) || parsedAmount < 0) {
+          return res.status(400).json({ ok: false, error: "Amenity amount must be valid" });
+        }
+        data.amount = parsedAmount;
+      }
+
+      if (isActive !== undefined) {
+        data.isActive = Boolean(isActive);
+      }
+
+      const item = await prisma.propertyAmenity.update({
+        where: { id: amenity.id },
+        data,
+      });
+
+      return res.json({ ok: true, item });
+    } catch (error: any) {
+      console.error("PATCH amenity error", error);
+      return res.status(500).json({ ok: false, error: error?.message ?? "Failed to update amenity" });
+    }
+  }
+);
+
+dashboardPropertiesRouter.delete(
+  "/api/dashboard/properties/:id/amenities/:amenityId",
+  requireAuth,
+  async (req, res) => {
+    try {
+      const user = (req as any).user;
+      const orgId = user.orgId as string;
+      const { id, amenityId } = req.params;
+
+      const amenity = await prisma.propertyAmenity.findFirst({
+        where: {
+          id: amenityId,
+          propertyId: id,
+          property: { organizationId: orgId },
+        },
+        select: { id: true },
+      });
+
+      if (!amenity) {
+        return res.status(404).json({ ok: false, error: "Amenity not found" });
+      }
+
+      await prisma.propertyAmenity.update({
+        where: { id: amenity.id },
+        data: { isActive: false },
+      });
+
+      return res.json({ ok: true });
+    } catch (error: any) {
+      console.error("DELETE amenity error", error);
+      return res.status(500).json({ ok: false, error: error?.message ?? "Failed to delete amenity" });
+    }
+  }
+);
+
+dashboardPropertiesRouter.post(
+  "/api/dashboard/properties/:id/taxes",
+  requireAuth,
+  async (req, res) => {
+    try {
+      const user = (req as any).user;
+      const orgId = user.orgId as string;
+      const { id } = req.params;
+      const { name, percentage } = req.body ?? {};
+
+      const property = await prisma.property.findFirst({
+        where: { id, organizationId: orgId, status: "ACTIVE" },
+        select: { id: true },
+      });
+
+      if (!property) {
+        return res.status(404).json({ ok: false, error: "Property not found" });
+      }
+
+      const cleanName = String(name || "").trim();
+      const parsedPercentage = Number(percentage ?? 0);
+
+      if (!cleanName) {
+        return res.status(400).json({ ok: false, error: "Tax name is required" });
+      }
+
+      if (!Number.isFinite(parsedPercentage) || parsedPercentage < 0 || parsedPercentage > 100) {
+        return res.status(400).json({ ok: false, error: "Tax percentage must be between 0 and 100" });
+      }
+
+      const item = await prisma.propertyTax.create({
+        data: {
+          propertyId: property.id,
+          name: cleanName,
+          percentage: parsedPercentage,
+        },
+      });
+
+      return res.json({ ok: true, item });
+    } catch (error: any) {
+      console.error("POST tax error", error);
+      return res.status(500).json({ ok: false, error: error?.message ?? "Failed to create tax" });
+    }
+  }
+);
+
+dashboardPropertiesRouter.patch(
+  "/api/dashboard/properties/:id/taxes/:taxId",
+  requireAuth,
+  async (req, res) => {
+    try {
+      const user = (req as any).user;
+      const orgId = user.orgId as string;
+      const { id, taxId } = req.params;
+      const { name, percentage, isActive } = req.body ?? {};
+
+      const tax = await prisma.propertyTax.findFirst({
+        where: {
+          id: taxId,
+          propertyId: id,
+          property: { organizationId: orgId },
+        },
+        select: { id: true },
+      });
+
+      if (!tax) {
+        return res.status(404).json({ ok: false, error: "Tax not found" });
+      }
+
+      const data: any = {};
+
+      if (name !== undefined) {
+        const cleanName = String(name || "").trim();
+        if (!cleanName) {
+          return res.status(400).json({ ok: false, error: "Tax name is required" });
+        }
+        data.name = cleanName;
+      }
+
+      if (percentage !== undefined) {
+        const parsedPercentage = Number(percentage);
+        if (!Number.isFinite(parsedPercentage) || parsedPercentage < 0 || parsedPercentage > 100) {
+          return res.status(400).json({ ok: false, error: "Tax percentage must be between 0 and 100" });
+        }
+        data.percentage = parsedPercentage;
+      }
+
+      if (isActive !== undefined) {
+        data.isActive = Boolean(isActive);
+      }
+
+      const item = await prisma.propertyTax.update({
+        where: { id: tax.id },
+        data,
+      });
+
+      return res.json({ ok: true, item });
+    } catch (error: any) {
+      console.error("PATCH tax error", error);
+      return res.status(500).json({ ok: false, error: error?.message ?? "Failed to update tax" });
+    }
+  }
+);
+
+dashboardPropertiesRouter.delete(
+  "/api/dashboard/properties/:id/taxes/:taxId",
+  requireAuth,
+  async (req, res) => {
+    try {
+      const user = (req as any).user;
+      const orgId = user.orgId as string;
+      const { id, taxId } = req.params;
+
+      const tax = await prisma.propertyTax.findFirst({
+        where: {
+          id: taxId,
+          propertyId: id,
+          property: { organizationId: orgId },
+        },
+        select: { id: true },
+      });
+
+      if (!tax) {
+        return res.status(404).json({ ok: false, error: "Tax not found" });
+      }
+
+      await prisma.propertyTax.update({
+        where: { id: tax.id },
+        data: { isActive: false },
+      });
+
+      return res.json({ ok: true });
+    } catch (error: any) {
+      console.error("DELETE tax error", error);
+      return res.status(500).json({ ok: false, error: error?.message ?? "Failed to delete tax" });
     }
   }
 );
