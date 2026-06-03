@@ -112,6 +112,18 @@ publicBookingRouter.get("/:organizationSlug/:propertySlug", async (req, res) => 
         publicPhotos: true,
         baseNightlyRate: true,
         cleaningFee: true,
+        amenities: {
+          where: { isActive: true },
+          orderBy: { name: "asc" },
+          select: {
+            id: true,
+            name: true,
+            description: true,
+            chargeMode: true,
+            feeType: true,
+            amount: true,
+          },
+        },
         maxGuests: true,
         minimumNights: true,
         maximumNights: true,
