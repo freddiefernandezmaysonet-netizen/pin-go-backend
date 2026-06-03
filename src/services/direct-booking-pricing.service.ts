@@ -6,6 +6,7 @@ type CalculateDirectBookingPricingInput = {
   propertyId: string;
   checkIn: Date;
   checkOut: Date;
+  selectedAmenityIds?: string[];
 };
 
 function toMoney(value: unknown) {
@@ -16,6 +17,8 @@ function toMoney(value: unknown) {
 export async function calculateDirectBookingPricing(
   input: CalculateDirectBookingPricingInput
 ) {
+  const selectedAmenityIds = new Set(input.selectedAmenityIds ?? []);
+
   const property = await prisma.property.findUnique({
     where: { id: input.propertyId },
     select: {
@@ -27,6 +30,8 @@ export async function calculateDirectBookingPricing(
         select: {
           id: true,
           name: true,
+          description: true,
+          chargeMode: true,
           feeType: true,
           amount: true,
         },
@@ -68,21 +73,33 @@ export async function calculateDirectBookingPricing(
   const amenityItems = property.amenities.map((amenity) => {
     const baseAmount = toMoney(amenity.amount);
 
-    const amount =
+    const computedAmount =
       amenity.feeType === "PER_NIGHT"
         ? toMoney(baseAmount * nights)
         : baseAmount;
 
+    const isSelected =
+      amenity.chargeMode === "REQUIRED" ||
+      (amenity.chargeMode === "OPTIONAL" && selectedAmenityIds.has(amenity.id));
+
+    const amount = isSelected ? computedAmount : 0;
+
     return {
       id: amenity.id,
       name: amenity.name,
+      description: amenity.description,
+      chargeMode: amenity.chargeMode,
       feeType: amenity.feeType,
       amount,
+      baseAmount,
+      isSelected,
     };
   });
 
+  const chargedAmenityItems = amenityItems.filter((item) => item.amount > 0);
+
   const amenitiesTotal = toMoney(
-    amenityItems.reduce((sum, item) => sum + item.amount, 0)
+    chargedAmenityItems.reduce((sum, item) => sum + item.amount, 0)
   );
 
   const taxableSubtotal = toMoney(
@@ -114,6 +131,7 @@ export async function calculateDirectBookingPricing(
     nightlySubtotal,
     cleaningFee,
     amenities: amenityItems,
+    chargedAmenities: chargedAmenityItems,
     amenitiesTotal,
     taxableSubtotal,
     taxes: taxItems,

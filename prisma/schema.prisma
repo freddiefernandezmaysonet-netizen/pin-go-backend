@@ -844,14 +844,16 @@ model SalesFollowUp {
 }
 
 model PropertyAmenity {
-  id         String         @id @default(cuid())
+  id         String            @id @default(cuid())
   propertyId String
   name       String
-  feeType    AmenityFeeType @default(PER_STAY)
-  amount     Decimal?       @db.Decimal(10,2)
-  isActive   Boolean        @default(true)
-  createdAt  DateTime       @default(now())
-  updatedAt  DateTime       @updatedAt
+  description String?
+  chargeMode  AmenityChargeMode @default(INCLUDED)
+  feeType    AmenityFeeType     @default(PER_STAY)
+  amount     Decimal?           @db.Decimal(10,2)
+  isActive   Boolean            @default(true)
+  createdAt  DateTime           @default(now())
+  updatedAt  DateTime           @updatedAt
 
   property Property @relation(fields: [propertyId], references: [id], onDelete: Cascade)
 
@@ -877,6 +879,13 @@ enum AmenityFeeType {
   PER_NIGHT
 
 }
+
+enum AmenityChargeMode {
+  INCLUDED
+  REQUIRED
+  OPTIONAL
+}
+
 enum BookingType {
   ONBOARDING
   DEMO

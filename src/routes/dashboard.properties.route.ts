@@ -1,6 +1,7 @@
 import { Router } from "express";
-import { AmenityFeeType, PrismaClient, ReservationStatus } from "@prisma/client";
+import { AmenityChargeMode, AmenityFeeType, PrismaClient, ReservationStatus } from "@prisma/client";
 import { requireAuth } from "../middleware/requireAuth";
+
 
 const prisma = new PrismaClient();
 export const dashboardPropertiesRouter = Router();
@@ -161,6 +162,8 @@ dashboardPropertiesRouter.get(
           name: true,
           feeType: true,
           amount: true,
+          description: true,
+          chargeMode: true,
           isActive: true,
           createdAt: true,
           updatedAt: true,
@@ -495,6 +498,8 @@ if (checkOutTime !== undefined) {
             name: true,
             feeType: true,
             amount: true,
+            description: true,
+            chargeMode: true,
             isActive: true,
             createdAt: true,
             updatedAt: true,
@@ -536,8 +541,15 @@ dashboardPropertiesRouter.post(
       const user = (req as any).user;
       const orgId = user.orgId as string;
       const { id } = req.params;
-      const { name, feeType, amount } = req.body ?? {};
+      const { name, description, chargeMode, feeType, amount } = req.body ?? {};
 
+const cleanDescription = String(description || "").trim() || null;
+const cleanChargeMode = String(chargeMode || "INCLUDED").trim();
+
+if (!Object.values(AmenityChargeMode).includes(cleanChargeMode as AmenityChargeMode)) {
+  return res.status(400).json({ ok: false, error: "Invalid amenity chargeMode" });
+}
+      
       const property = await prisma.property.findFirst({
         where: { id, organizationId: orgId, status: "ACTIVE" },
         select: { id: true },
@@ -564,12 +576,14 @@ dashboardPropertiesRouter.post(
       }
 
       const item = await prisma.propertyAmenity.create({
-        data: {
-          propertyId: property.id,
-          name: cleanName,
-          feeType: cleanFeeType as AmenityFeeType,
-          amount: parsedAmount,
-        },
+       data: {
+  propertyId: property.id,
+  name: cleanName,
+  description: cleanDescription,
+  chargeMode: cleanChargeMode as AmenityChargeMode,
+  feeType: cleanFeeType as AmenityFeeType,
+  amount: parsedAmount,
+}, 
       });
 
       return res.json({ ok: true, item });
@@ -588,7 +602,7 @@ dashboardPropertiesRouter.patch(
       const user = (req as any).user;
       const orgId = user.orgId as string;
       const { id, amenityId } = req.params;
-      const { name, feeType, amount, isActive } = req.body ?? {};
+      const { name, description, chargeMode, feeType, amount, isActive } = req.body ?? {};
 
       const amenity = await prisma.propertyAmenity.findFirst({
         where: {
@@ -612,6 +626,20 @@ dashboardPropertiesRouter.patch(
         }
         data.name = cleanName;
       }
+
+if (description !== undefined) {
+  data.description = String(description || "").trim() || null;
+}
+
+if (chargeMode !== undefined) {
+  const cleanChargeMode = String(chargeMode || "").trim();
+
+  if (!Object.values(AmenityChargeMode).includes(cleanChargeMode as AmenityChargeMode)) {
+    return res.status(400).json({ ok: false, error: "Invalid amenity chargeMode" });
+  }
+
+  data.chargeMode = cleanChargeMode as AmenityChargeMode;
+}
 
       if (feeType !== undefined) {
         const cleanFeeType = String(feeType || "").trim();
