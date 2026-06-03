@@ -396,7 +396,6 @@ const totalAmountCents = pricing.totalAmountCents;
         amenitiesTotal: String(pricing.amenitiesTotal),
         selectedAmenityIds: JSON.stringify(cleanSelectedAmenityIds),
         taxesTotal: String(pricing.taxesTotal),
-        pricingBreakdown: JSON.stringify(pricing),
         totalAmount: String(pricing.totalAmount),
       },
     });

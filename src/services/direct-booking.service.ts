@@ -138,8 +138,22 @@ export async function handleDirectBookingCheckoutCompleted(
     ? session.payment_intent
     : session.payment_intent?.id ?? null;
 
+
 const selectedAmenityIds = parseSelectedAmenityIds(session);
-const pricingBreakdown = parsePricingBreakdown(session);
+
+const pricingBreakdown = {
+  currency: String(session.currency ?? "usd").toLowerCase(),
+  nights: Number(session.metadata?.nights ?? 0),
+  nightlyRate: Number(session.metadata?.nightlyRate ?? 0),
+  nightlySubtotal: Number(session.metadata?.nightlySubtotal ?? 0),
+  cleaningFee: Number(session.metadata?.cleaningFee ?? 0),
+  amenitiesTotal: Number(session.metadata?.amenitiesTotal ?? 0),
+  taxableSubtotal: Number(session.metadata?.taxableSubtotal ?? 0),
+  taxesTotal: Number(session.metadata?.taxesTotal ?? 0),
+  totalAmount: Number(session.metadata?.totalAmount ?? totalAmount),
+  totalAmountCents: Number(session.metadata?.totalAmountCents ?? session.amount_total ?? 0),
+  selectedAmenityIds,
+};
 
 const ingestResult = await ingestReservation({
   source: "DIRECT_BOOKING",
