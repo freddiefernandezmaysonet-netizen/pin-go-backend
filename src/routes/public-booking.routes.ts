@@ -56,6 +56,15 @@ publicBookingRouter.get("/:organizationSlug", async (req, res) => {
               amount: true,
            },
          },
+            taxes: {
+              where: { isActive: true },
+              orderBy: { name: "asc" },
+              select: {
+              id: true,
+              name: true,
+              percentage: true,
+           },
+         },
             maxGuests: true,
             minimumNights: true,
             maximumNights: true,
@@ -122,6 +131,15 @@ publicBookingRouter.get("/:organizationSlug/:propertySlug", async (req, res) => 
             chargeMode: true,
             feeType: true,
             amount: true,
+          },
+        },
+       taxes: {
+         where: { isActive: true },
+         orderBy: { name: "asc" },
+         select: {
+         id: true,
+         name: true,
+         percentage: true,
           },
         },
         maxGuests: true,
