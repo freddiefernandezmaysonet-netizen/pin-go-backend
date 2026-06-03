@@ -44,6 +44,18 @@ publicBookingRouter.get("/:organizationSlug", async (req, res) => {
             publicPhotos: true,
             baseNightlyRate: true,
             cleaningFee: true,
+            amenities: {
+              where: { isActive: true },
+              orderBy: { name: "asc" },
+              select: {
+              id: true,
+              name: true,
+              description: true,
+              chargeMode: true,
+              feeType: true,
+              amount: true,
+           },
+         },
             maxGuests: true,
             minimumNights: true,
             maximumNights: true,
@@ -184,17 +196,17 @@ if (!propertyId || !start || !end) {
 
 publicBookingRouter.post("/create-checkout", async (req, res) => {
   try {
-    const {
-    propertyId,
-    checkIn,
-    checkOut,
-    guestName,
-    guestEmail,
-    guestPhone,
-    adults,
-    children,
-  } = req.body ?? {};
-    
+   const {
+   propertyId,
+   checkIn,
+   checkOut,
+   guestName,
+   guestEmail,
+   guestPhone,
+   adults,
+   children,
+   selectedAmenityIds,
+} = req.body ?? {};    
     const adultsCount = Number(adults ?? 1);
     const childrenCount = Number(children ?? 0);
     const totalGuests = adultsCount + childrenCount;
@@ -313,10 +325,15 @@ if (
   });
 }
 
+const cleanSelectedAmenityIds = Array.isArray(selectedAmenityIds)
+  ? selectedAmenityIds.map((id) => String(id)).filter(Boolean)
+  : [];
+
 const pricing = await calculateDirectBookingPricing({
   propertyId: property.id,
   checkIn: start,
   checkOut: end,
+  selectedAmenityIds: cleanSelectedAmenityIds,
 });
 
 const totalAmount = pricing.totalAmount;
@@ -365,6 +382,7 @@ const totalAmountCents = pricing.totalAmountCents;
         nightlyRate: String(pricing.nightlyRate),
         cleaningFee: String(pricing.cleaningFee),
         amenitiesTotal: String(pricing.amenitiesTotal),
+        selectedAmenityIds: JSON.stringify(cleanSelectedAmenityIds),
         taxesTotal: String(pricing.taxesTotal),
         pricingBreakdown: JSON.stringify(pricing),
         totalAmount: String(pricing.totalAmount),
