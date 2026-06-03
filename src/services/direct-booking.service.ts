@@ -2,6 +2,7 @@ import Stripe from "stripe";
 import { PrismaClient } from "@prisma/client";
 import { checkPropertyAvailability } from "./availability.service";
 import { ingestReservation } from "./ingest.service";
+import { calculateDirectBookingPricing } from "./direct-booking-pricing.service";
 import {
   sendDirectBookingGuestConfirmation,
   sendDirectBookingHostNotification,
@@ -141,19 +142,12 @@ export async function handleDirectBookingCheckoutCompleted(
 
 const selectedAmenityIds = parseSelectedAmenityIds(session);
 
-const pricingBreakdown = {
-  currency: String(session.currency ?? "usd").toLowerCase(),
-  nights: Number(session.metadata?.nights ?? 0),
-  nightlyRate: Number(session.metadata?.nightlyRate ?? 0),
-  nightlySubtotal: Number(session.metadata?.nightlySubtotal ?? 0),
-  cleaningFee: Number(session.metadata?.cleaningFee ?? 0),
-  amenitiesTotal: Number(session.metadata?.amenitiesTotal ?? 0),
-  taxableSubtotal: Number(session.metadata?.taxableSubtotal ?? 0),
-  taxesTotal: Number(session.metadata?.taxesTotal ?? 0),
-  totalAmount: Number(session.metadata?.totalAmount ?? totalAmount),
-  totalAmountCents: Number(session.metadata?.totalAmountCents ?? session.amount_total ?? 0),
+const pricingBreakdown = await calculateDirectBookingPricing({
+  propertyId: property.id,
+  checkIn,
+  checkOut,
   selectedAmenityIds,
-};
+});
 
 const ingestResult = await ingestReservation({
   source: "DIRECT_BOOKING",
@@ -188,8 +182,8 @@ const updatedReservation = await prisma.reservation.update({
     id: ingestResult.reservationId,
   },
   data: {
-    totalAmount,
-    currency: String(session.currency ?? "usd").toLowerCase(),
+    totalAmount: pricingBreakdown.totalAmount,
+    currency: pricingBreakdown.currency,
     stripeCheckoutSessionId: session.id,
     stripePaymentIntentId: paymentIntentId,
     selectedAmenityIds,
