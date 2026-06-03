@@ -223,6 +223,8 @@ model Reservation {
   currency                String?                  @default("usd")
   stripeCheckoutSessionId String?                  @unique
   stripePaymentIntentId   String?
+  selectedAmenityIds      String[]                 @default([])
+  pricingBreakdown        Json?
   createdAt               DateTime                 @default(now())
   updatedAt               DateTime                 @updatedAt
   guestToken              String?                  @unique

@@ -30,6 +30,35 @@ function parseDateMetadata(session: Stripe.Checkout.Session, key: string) {
   return date;
 }
 
+function parseSelectedAmenityIds(session: Stripe.Checkout.Session) {
+  const raw = String(session.metadata?.selectedAmenityIds ?? "").trim();
+
+  if (!raw) return [];
+
+  try {
+    const parsed = JSON.parse(raw);
+
+    return Array.isArray(parsed)
+      ? parsed.map((id) => String(id)).filter(Boolean)
+      : [];
+  } catch {
+    return [];
+  }
+}
+
+function parsePricingBreakdown(session: Stripe.Checkout.Session) {
+  const raw = String(session.metadata?.pricingBreakdown ?? "").trim();
+
+  if (!raw) return null;
+
+  try {
+    const parsed = JSON.parse(raw);
+    return parsed && typeof parsed === "object" ? parsed : null;
+  } catch {
+    return null;
+  }
+}
+
 export async function handleDirectBookingCheckoutCompleted(
   session: Stripe.Checkout.Session
 ) {
@@ -109,6 +138,9 @@ export async function handleDirectBookingCheckoutCompleted(
     ? session.payment_intent
     : session.payment_intent?.id ?? null;
 
+const selectedAmenityIds = parseSelectedAmenityIds(session);
+const pricingBreakdown = parsePricingBreakdown(session);
+
 const ingestResult = await ingestReservation({
   source: "DIRECT_BOOKING",
 
@@ -146,6 +178,8 @@ const updatedReservation = await prisma.reservation.update({
     currency: String(session.currency ?? "usd").toLowerCase(),
     stripeCheckoutSessionId: session.id,
     stripePaymentIntentId: paymentIntentId,
+    selectedAmenityIds,
+    pricingBreakdown,
   },
   select: {
     id: true,
