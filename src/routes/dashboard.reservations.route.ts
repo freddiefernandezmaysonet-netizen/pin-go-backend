@@ -117,6 +117,7 @@ dashboardReservationsRouter.get("/api/dashboard/reservations", requireAuth, asyn
         status: true,
         paymentState: true,
         totalAmount: true,
+        currency: true,
         source: true,
         externalProvider: true,
         externalId: true,
@@ -188,6 +189,15 @@ dashboardReservationsRouter.get(
         checkOut: true,
         status: true,
         paymentState: true,
+        totalAmount: true,
+        currency: true,
+        source: true,
+        externalProvider: true,
+        externalId: true,
+        selectedAmenityIds: true,
+        pricingBreakdown: true,
+        stripeCheckoutSessionId: true,
+        stripePaymentIntentId: true,
         property: {
           select: {
             id: true,
