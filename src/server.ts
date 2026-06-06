@@ -76,6 +76,7 @@ import { signupSuccessRouter } from "./routes/public.signup.success.routes";
 import { cleaningConfirmRouter } from "./routes/cleaning-confirm.routes";
 import { teamRouter } from "./routes/team.routes";
 import publicBookingRouter from "./routes/public-booking.routes";
+import { uploadsRouter } from "./routes/uploads.route";
 
 const app = express();
 
@@ -188,6 +189,7 @@ app.get("/ready", async (_req, res) => {
 app.use(signupPublicRoutes);
 app.use(authRouter);
 app.use(teamRouter);
+app.use(uploadsRouter);
 app.use("/api/onboarding/appointments", onboardingAppointmentsRouter);
 app.use(signupSuccessRouter);
 app.use("/api/public-booking", publicBookingRouter);
