@@ -1,6 +1,9 @@
 import { Router } from "express";
 import { PrismaClient } from "@prisma/client";
-import { checkPropertyAvailability } from "../services/availability.service";
+import {
+  checkPropertyAvailability,
+  getPropertyBlockedDateKeys,
+} from "../services/availability.service";
 import stripe from "../billing/stripe";
 import { calculateDirectBookingPricing } from "../services/direct-booking-pricing.service";
 
@@ -172,6 +175,60 @@ publicBookingRouter.get("/:organizationSlug/:propertySlug", async (req, res) => 
   } catch (error: any) {
     console.error("[public-booking property error]", error?.message ?? error);
     return res.status(500).json({ ok: false, error: "Failed to load property" });
+  }
+});
+
+publicBookingRouter.post("/blocked-dates", async (req, res) => {
+  try {
+    const { propertyId, from, to } = req.body ?? {};
+
+    const start = parseDate(from);
+    const end = parseDate(to);
+
+    if (!propertyId || !start || !end) {
+      return res.status(400).json({
+        ok: false,
+        error: "Missing or invalid propertyId/from/to",
+      });
+    }
+
+    const property = await prisma.property.findFirst({
+      where: {
+        id: String(propertyId),
+        status: "ACTIVE",
+        isPublicBookable: true,
+        organization: {
+          publicBookingEnabled: true,
+        },
+      },
+      select: {
+        id: true,
+      },
+    });
+
+    if (!property) {
+      return res.status(404).json({
+        ok: false,
+        error: "Property not available for public booking",
+      });
+    }
+
+    const result = await getPropertyBlockedDateKeys({
+      propertyId: property.id,
+      from: start,
+      to: end,
+    });
+
+    return res.json({
+      ok: true,
+      blockedDates: result.blockedDates,
+    });
+  } catch (error: any) {
+    console.error("[public-booking blocked-dates error]", error?.message ?? error);
+    return res.status(500).json({
+      ok: false,
+      error: "Failed to load blocked dates",
+    });
   }
 });
 
