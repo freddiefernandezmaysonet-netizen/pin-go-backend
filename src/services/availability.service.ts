@@ -15,17 +15,21 @@ function addDays(date: Date, days: number) {
 function eachNightDateKeys(checkIn: Date, checkOut: Date) {
   const dates: string[] = [];
 
-  let cursor = new Date(Date.UTC(
-    checkIn.getUTCFullYear(),
-    checkIn.getUTCMonth(),
-    checkIn.getUTCDate()
-  ));
+  let cursor = new Date(
+    Date.UTC(
+      checkIn.getUTCFullYear(),
+      checkIn.getUTCMonth(),
+      checkIn.getUTCDate()
+    )
+  );
 
-  const end = new Date(Date.UTC(
-    checkOut.getUTCFullYear(),
-    checkOut.getUTCMonth(),
-    checkOut.getUTCDate()
-  ));
+  const end = new Date(
+    Date.UTC(
+      checkOut.getUTCFullYear(),
+      checkOut.getUTCMonth(),
+      checkOut.getUTCDate()
+    )
+  );
 
   while (cursor < end) {
     dates.push(toDateKey(cursor));
@@ -58,7 +62,7 @@ export async function checkPropertyAvailability(input: {
     throw new Error("checkOut must be after checkIn");
   }
 
-  const conflict = await prisma.reservation.findFirst({
+  const reservationConflict = await prisma.reservation.findFirst({
     where: {
       propertyId,
       status: ReservationStatus.ACTIVE,
@@ -77,9 +81,47 @@ export async function checkPropertyAvailability(input: {
     },
   });
 
+  if (reservationConflict) {
+    return {
+      available: false,
+      conflict: {
+        type: "RESERVATION",
+        ...reservationConflict,
+      },
+    };
+  }
+
+  const blockedDateConflict = await prisma.propertyBlockedDate.findFirst({
+    where: {
+      propertyId,
+      startDate: {
+        lt: checkOut,
+      },
+      endDate: {
+        gt: checkIn,
+      },
+    },
+    select: {
+      id: true,
+      startDate: true,
+      endDate: true,
+      reason: true,
+    },
+  });
+
+  if (blockedDateConflict) {
+    return {
+      available: false,
+      conflict: {
+        type: "BLOCKED_DATE",
+        ...blockedDateConflict,
+      },
+    };
+  }
+
   return {
-    available: !conflict,
-    conflict,
+    available: true,
+    conflict: null,
   };
 }
 
@@ -128,10 +170,40 @@ export async function getPropertyBlockedDateKeys(input: {
     },
   });
 
+  const manualBlocks = await prisma.propertyBlockedDate.findMany({
+    where: {
+      propertyId,
+      startDate: {
+        lt: to,
+      },
+      endDate: {
+        gt: from,
+      },
+    },
+    select: {
+      id: true,
+      startDate: true,
+      endDate: true,
+      reason: true,
+    },
+    orderBy: {
+      startDate: "asc",
+    },
+  });
+
   const blockedDateKeys = new Set<string>();
 
   for (const reservation of reservations) {
-    for (const dateKey of eachNightDateKeys(reservation.checkIn, reservation.checkOut)) {
+    for (const dateKey of eachNightDateKeys(
+      reservation.checkIn,
+      reservation.checkOut
+    )) {
+      blockedDateKeys.add(dateKey);
+    }
+  }
+
+  for (const block of manualBlocks) {
+    for (const dateKey of eachNightDateKeys(block.startDate, block.endDate)) {
       blockedDateKeys.add(dateKey);
     }
   }
@@ -139,5 +211,6 @@ export async function getPropertyBlockedDateKeys(input: {
   return {
     blockedDates: Array.from(blockedDateKeys).sort(),
     reservations,
+    manualBlocks,
   };
 }

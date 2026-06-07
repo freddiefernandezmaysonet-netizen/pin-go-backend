@@ -944,3 +944,200 @@ dashboardPropertiesRouter.post(
     }
   }
 );
+
+dashboardPropertiesRouter.get(
+  "/api/dashboard/properties/:id/blocked-dates",
+  requireAuth,
+  async (req, res) => {
+    try {
+      const user = (req as any).user;
+      const orgId = user.orgId as string;
+      const { id } = req.params;
+
+      const property = await prisma.property.findFirst({
+        where: { id, organizationId: orgId, status: "ACTIVE" },
+        select: { id: true },
+      });
+
+      if (!property) {
+        return res.status(404).json({ ok: false, error: "Property not found" });
+      }
+
+      const items = await prisma.propertyBlockedDate.findMany({
+        where: { propertyId: property.id },
+        orderBy: { startDate: "asc" },
+        select: {
+          id: true,
+          propertyId: true,
+          startDate: true,
+          endDate: true,
+          reason: true,
+          createdAt: true,
+          updatedAt: true,
+        },
+      });
+
+      return res.json({ ok: true, items });
+    } catch (error: any) {
+      console.error("GET blocked dates error", error);
+      return res.status(500).json({
+        ok: false,
+        error: error?.message ?? "Failed to load blocked dates",
+      });
+    }
+  }
+);
+
+dashboardPropertiesRouter.post(
+  "/api/dashboard/properties/:id/blocked-dates",
+  requireAuth,
+  async (req, res) => {
+    try {
+      const user = (req as any).user;
+      const orgId = user.orgId as string;
+      const { id } = req.params;
+      const { startDate, endDate, reason } = req.body ?? {};
+
+      const start = new Date(String(startDate ?? ""));
+      const end = new Date(String(endDate ?? ""));
+
+      if (Number.isNaN(start.getTime()) || Number.isNaN(end.getTime())) {
+        return res.status(400).json({
+          ok: false,
+          error: "Invalid startDate/endDate",
+        });
+      }
+
+      if (end <= start) {
+        return res.status(400).json({
+          ok: false,
+          error: "endDate must be after startDate",
+        });
+      }
+
+      const property = await prisma.property.findFirst({
+        where: { id, organizationId: orgId, status: "ACTIVE" },
+        select: { id: true },
+      });
+
+      if (!property) {
+        return res.status(404).json({ ok: false, error: "Property not found" });
+      }
+
+      const reservationConflict = await prisma.reservation.findFirst({
+        where: {
+          propertyId: property.id,
+          status: ReservationStatus.ACTIVE,
+          checkIn: { lt: end },
+          checkOut: { gt: start },
+        },
+        select: {
+          id: true,
+          checkIn: true,
+          checkOut: true,
+          guestName: true,
+        },
+      });
+
+      if (reservationConflict) {
+        return res.status(409).json({
+          ok: false,
+          error: "Blocked date overlaps an existing reservation",
+          conflict: reservationConflict,
+        });
+      }
+
+      const blockedDateConflict = await prisma.propertyBlockedDate.findFirst({
+        where: {
+          propertyId: property.id,
+          startDate: { lt: end },
+          endDate: { gt: start },
+        },
+        select: {
+          id: true,
+          startDate: true,
+          endDate: true,
+          reason: true,
+        },
+      });
+
+      if (blockedDateConflict) {
+        return res.status(409).json({
+          ok: false,
+          error: "Blocked date overlaps an existing blocked date",
+          conflict: blockedDateConflict,
+        });
+      }
+
+      const item = await prisma.propertyBlockedDate.create({
+        data: {
+          propertyId: property.id,
+          startDate: start,
+          endDate: end,
+          reason: String(reason || "").trim() || null,
+        },
+        select: {
+          id: true,
+          propertyId: true,
+          startDate: true,
+          endDate: true,
+          reason: true,
+          createdAt: true,
+          updatedAt: true,
+        },
+      });
+
+      return res.json({ ok: true, item });
+    } catch (error: any) {
+      console.error("POST blocked dates error", error);
+      return res.status(500).json({
+        ok: false,
+        error: error?.message ?? "Failed to create blocked date",
+      });
+    }
+  }
+);
+
+dashboardPropertiesRouter.delete(
+  "/api/dashboard/properties/:id/blocked-dates/:blockedDateId",
+  requireAuth,
+  async (req, res) => {
+    try {
+      const user = (req as any).user;
+      const orgId = user.orgId as string;
+      const { id, blockedDateId } = req.params;
+
+      const blockedDate = await prisma.propertyBlockedDate.findFirst({
+        where: {
+          id: blockedDateId,
+          propertyId: id,
+          property: {
+            organizationId: orgId,
+          },
+        },
+        select: {
+          id: true,
+        },
+      });
+
+      if (!blockedDate) {
+        return res.status(404).json({
+          ok: false,
+          error: "Blocked date not found",
+        });
+      }
+
+      await prisma.propertyBlockedDate.delete({
+        where: { id: blockedDate.id },
+      });
+
+      return res.json({ ok: true });
+    } catch (error: any) {
+      console.error("DELETE blocked date error", error);
+      return res.status(500).json({
+        ok: false,
+        error: error?.message ?? "Failed to delete blocked date",
+      });
+    }
+  }
+);

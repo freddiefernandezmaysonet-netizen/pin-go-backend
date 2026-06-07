@@ -117,6 +117,7 @@ model Property {
   amenities                  PropertyAmenity[]
   taxes                      PropertyTax[]
   reservations               Reservation[]
+  blockedDates              PropertyBlockedDate[]
   
   @@index([organizationId])
   @@index([organizationId, status])
@@ -880,6 +881,25 @@ enum AmenityFeeType {
   PER_STAY
   PER_NIGHT
 
+}
+
+model PropertyBlockedDate {
+  id         String   @id @default(cuid())
+
+  propertyId String
+
+  startDate  DateTime
+  endDate    DateTime
+
+  reason     String?
+
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  property Property @relation(fields: [propertyId], references: [id], onDelete: Cascade)
+
+  @@index([propertyId])
+  @@index([propertyId, startDate, endDate])
 }
 
 enum AmenityChargeMode {

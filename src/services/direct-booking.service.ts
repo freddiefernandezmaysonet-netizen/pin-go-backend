@@ -188,7 +188,7 @@ const updatedReservation = await prisma.reservation.update({
     stripePaymentIntentId: paymentIntentId,
     selectedAmenityIds,
     pricingBreakdown,
-  },
+    },
   select: {
     id: true,
     guestName: true,
