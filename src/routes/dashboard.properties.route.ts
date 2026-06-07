@@ -155,6 +155,11 @@ dashboardPropertiesRouter.get(
           maximumNights: true,
           checkInTime: true,
           checkOutTime: true,
+          organization: {
+            select: {
+              slug: true,
+            },
+          },
           amenities: {
           orderBy: { name: "asc" },
           select: {
@@ -240,11 +245,11 @@ dashboardPropertiesRouter.patch(
 
       const latitude = parseOptionalCoordinate(latitudeRaw);
       const longitude = parseOptionalCoordinate(longitudeRaw);
-const baseNightlyRate = parseOptionalMoney(baseNightlyRateRaw);
-const cleaningFee = parseOptionalMoney(cleaningFeeRaw);
-const maxGuests = parseOptionalInt(maxGuestsRaw);
-const minimumNights = parseOptionalInt(minimumNightsRaw);
-const maximumNights = parseOptionalInt(maximumNightsRaw);
+      const baseNightlyRate = parseOptionalMoney(baseNightlyRateRaw);
+      const cleaningFee = parseOptionalMoney(cleaningFeeRaw);
+      const maxGuests = parseOptionalInt(maxGuestsRaw);
+      const minimumNights = parseOptionalInt(minimumNightsRaw);
+      const maximumNights = parseOptionalInt(maximumNightsRaw);
 
 if (Number.isNaN(baseNightlyRate)) {
   return res.status(400).json({ ok: false, error: "baseNightlyRate must be a valid amount" });
@@ -491,6 +496,11 @@ if (checkOutTime !== undefined) {
           maximumNights: true,
           checkInTime: true,
           checkOutTime: true,
+          organization: {
+            select: {
+              slug: true,
+            },
+          },
           amenities: {
             orderBy: { name: "asc" },
             select: {
