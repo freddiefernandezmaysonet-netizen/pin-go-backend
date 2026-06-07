@@ -77,6 +77,7 @@ import { cleaningConfirmRouter } from "./routes/cleaning-confirm.routes";
 import { teamRouter } from "./routes/team.routes";
 import publicBookingRouter from "./routes/public-booking.routes";
 import { uploadsRouter } from "./routes/uploads.route";
+import { dashboardOrganizationRouter } from "./routes/dashboard.organization.route";
 
 const app = express();
 
@@ -280,6 +281,7 @@ app.use(dashboardAccessRouter);
 app.use(dashboardMetricsRouter);
 app.use(dashboardLocksCapacityRouter);
 app.use(dashboardPmsRouter);
+app.use(dashboardOrganizationRouter);
 
 if (process.env.NODE_ENV !== "production") {
   app.use(devPmsRouter);
