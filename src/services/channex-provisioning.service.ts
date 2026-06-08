@@ -132,40 +132,58 @@ async function createChannexRatePlan(args: {
   channexRoomTypeId: string;
   payload: Record<string, unknown>;
 }) {
-  const resp = await axios.post(
-    `${CHANNEX_API_BASE_URL.replace(/\/+$/, "")}/api/v1/rate_plans`,
-    {
-      rate_plan: {
+  try {
+    const resp = await axios.post(
+      `${CHANNEX_API_BASE_URL.replace(/\/+$/, "")}/api/v1/rate_plans`,
+      {
+        rate_plan: {
+          property_id: args.channexPropertyId,
+          room_type_id: args.channexRoomTypeId,
+          ...args.payload,
+        },
+      },
+      {
+        headers: {
+          Accept: "application/json",
+          "Content-Type": "application/json",
+          "user-api-key": args.apiKey,
+        },
+        timeout: 20000,
+      }
+    );
+
+    const channexRatePlanId =
+      resp.data?.data?.id ??
+      resp.data?.id ??
+      null;
+
+    if (!channexRatePlanId) {
+      throw new Error("CHANNEX_RATE_PLAN_CREATE_RESPONSE_INVALID");
+    }
+
+    return {
+      channexRatePlanId: String(channexRatePlanId),
+      raw: resp.data,
+    };
+  } catch (err: any) {
+    console.error("[channex][create_rate_plan][failed]", {
+      status: err?.response?.status ?? null,
+      data: err?.response?.data ?? null,
+      payload: {
         property_id: args.channexPropertyId,
         room_type_id: args.channexRoomTypeId,
         ...args.payload,
       },
-    },
-    {
-      headers: {
-        Accept: "application/json",
-        "Content-Type": "application/json",
-        "user-api-key": args.apiKey,
-      },
-      timeout: 20000,
-    }
-  );
+      message: err?.message,
+    });
 
-  const channexRatePlanId =
-    resp.data?.data?.id ??
-    resp.data?.id ??
-    null;
-
-  if (!channexRatePlanId) {
-    throw new Error("CHANNEX_RATE_PLAN_CREATE_RESPONSE_INVALID");
+    throw new Error(
+      `CHANNEX_CREATE_RATE_PLAN_FAILED: ${JSON.stringify(
+        err?.response?.data ?? err?.message
+      )}`
+    );
   }
-
-  return {
-    channexRatePlanId: String(channexRatePlanId),
-    raw: resp.data,
-  };
 }
-
 export async function provisionChannexProperty(propertyId: string) {
   const property = await prisma.property.findUnique({
     where: { id: propertyId },
