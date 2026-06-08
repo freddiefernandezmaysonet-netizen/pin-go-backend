@@ -222,7 +222,11 @@ try {
     unavailableDaysCount: unavailableDateKeys.size,
     previewCount: availabilityPreview.length,
     preview: availabilityPreview.slice(0, 14),
+    
+    payloadPreview: availabilityPayload.slice(0, 5),
+    channexResponse: resp.data,
+   
     pushedToChannex: true,
-    channexStatus: resp.status,
-};
+    channexStatus: resp.status,   
+  };
 }
