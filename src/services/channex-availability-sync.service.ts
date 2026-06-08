@@ -170,6 +170,14 @@ export async function syncChannexAvailabilityForProperty(
     };
   });
 
+const apiKey = getChannexApiKey();
+
+const availabilityPayload = availabilityPreview.map((item) => ({
+  date: item.date,
+  room_type_id: channexRoomTypeId,
+  availability: item.availability,
+}));
+
  let resp;
 
 try {
