@@ -173,16 +173,17 @@ export async function syncChannexAvailabilityForProperty(
 const apiKey = getChannexApiKey();
 
 const availabilityPayload = availabilityPreview.map((item) => ({
+  property_id: channexPropertyId,
+  rate_plan_id: channexRatePlanId,
   date: item.date,
-  room_type_id: channexRoomTypeId,
   availability: item.availability,
 }));
-
- let resp;
+ 
+let resp;
 
 try {
   resp = await axios.post(
-    `${CHANNEX_API_BASE_URL.replace(/\/+$/, "")}/api/v1/availability`,
+    `${CHANNEX_API_BASE_URL.replace(/\/+$/, "")}/api/v1/restrictions`,
     {
       values: availabilityPayload,
     },
