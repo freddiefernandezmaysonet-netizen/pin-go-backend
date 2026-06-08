@@ -100,19 +100,19 @@ function toCanonicalReservation(raw: any, fallbackId: string): CanonicalReservat
       fallbackId
     ) ?? fallbackId;
 
-  const externalListingId =
-    firstString(
-      booking?.listing_id,
-      booking?.listingId,
-      booking?.property_id,
-      booking?.propertyId,
-      booking?.room_type_id,
-      booking?.roomTypeId,
-      booking?.room_id,
-      booking?.roomId
-    );
-
-  if (!externalListingId) {
+ const externalListingId =
+  firstString(
+    booking?.room_type_id,
+    booking?.roomTypeId,
+    booking?.room_id,
+    booking?.roomId,
+    booking?.listing_id,
+    booking?.listingId,
+    booking?.property_id,
+    booking?.propertyId
+  );
+ 
+ if (!externalListingId) {
     throw new Error("CHANNEX_MISSING_EXTERNAL_LISTING_ID");
   }
 
