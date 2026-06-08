@@ -2,6 +2,7 @@ import { Router } from "express";
 import { AmenityChargeMode, AmenityFeeType, PrismaClient, ReservationStatus } from "@prisma/client";
 import { requireAuth } from "../middleware/requireAuth";
 import { provisionChannexProperty } from "../services/channex-provisioning.service";
+import { syncChannexAvailabilityForProperty } from "../services/channex-availability-sync.service";
 
 const prisma = new PrismaClient();
 export const dashboardPropertiesRouter = Router();
@@ -590,6 +591,56 @@ dashboardPropertiesRouter.post(
     }
   }
 );
+
+dashboardPropertiesRouter.post(
+  "/api/dashboard/properties/:id/channex/sync-availability",
+  requireAuth,
+  async (req, res) => {
+    try {
+      const user = (req as any).user;
+      const orgId = user.orgId as string;
+      const { id } = req.params;
+
+      const property = await prisma.property.findFirst({
+        where: {
+          id,
+          organizationId: orgId,
+        },
+        select: {
+          id: true,
+        },
+      });
+
+      if (!property) {
+        return res.status(404).json({
+          ok: false,
+          error: "Property not found",
+        });
+      }
+
+      const result =
+        await syncChannexAvailabilityForProperty(property.id);
+
+      return res.json({
+        ok: true,
+        result,
+      });
+    } catch (error: any) {
+      console.error(
+        "POST /api/dashboard/properties/:id/channex/sync-availability error",
+        error
+      );
+
+      return res.status(500).json({
+        ok: false,
+        error:
+          error?.message ??
+          "Failed to sync Channex availability",
+      });
+    }
+  }
+);
+
 
 dashboardPropertiesRouter.post(
   "/api/dashboard/properties/:id/amenities",
