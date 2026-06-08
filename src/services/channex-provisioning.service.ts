@@ -229,7 +229,10 @@ export async function provisionChannexProperty(propertyId: string) {
     address: property.address1,
     city: property.city,
     state: property.region,
-    country: property.country ?? "US",
+    country:
+  String(property.country ?? "").trim().toLowerCase() === "united states"
+    ? "US"
+    : String(property.country ?? "US").trim().toUpperCase(),
     timezone: property.timezone ?? "America/Puerto_Rico",
     latitude:
       property.latitude != null ? Number(property.latitude) : undefined,
