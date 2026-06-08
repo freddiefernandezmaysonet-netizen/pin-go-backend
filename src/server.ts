@@ -141,7 +141,7 @@ console.log("[server] START", {
 // Webhooks PRIMERO
 // =====================
 registerStripeWebhook(app);
-
+app.use("/webhooks", pmsWebhookRouter);
 // =====================
 // Middleware
 // =====================
@@ -253,7 +253,7 @@ if (process.env.NODE_ENV !== "production") {
 app.use("/debug", debugRouter);
 }
 
-app.use("/webhooks", pmsWebhookRouter);
+
 app.use("/api/pms/listings", listingsMappingRouter);
 app.use("/api/org", buildOrgPmsRouter(prisma));
 
