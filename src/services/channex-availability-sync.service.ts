@@ -1,8 +1,21 @@
 import { PrismaClient, PmsProvider } from "@prisma/client";
+import axios from "axios";
 
 const prisma = new PrismaClient();
 
 const DEFAULT_SYNC_DAYS = 365;
+const CHANNEX_API_BASE_URL =
+  process.env.CHANNEX_API_BASE_URL ?? "https://staging.channex.io";
+
+function getChannexApiKey() {
+  const apiKey = String(process.env.CHANNEX_API_KEY ?? "").trim();
+
+  if (!apiKey) {
+    throw new Error("CHANNEX_API_KEY_MISSING");
+  }
+
+  return apiKey;
+}
 
 type ChannexListingMetadata = {
   channexPropertyId?: string;
@@ -157,6 +170,37 @@ export async function syncChannexAvailabilityForProperty(
     };
   });
 
+ let resp;
+
+try {
+  resp = await axios.post(
+    `${CHANNEX_API_BASE_URL.replace(/\/+$/, "")}/api/v1/availability`,
+    {
+      values: availabilityPayload,
+    },
+    {
+      headers: {
+        Accept: "application/json",
+        "Content-Type": "application/json",
+        "user-api-key": apiKey,
+      },
+      timeout: 20000,
+    }
+  );
+} catch (err: any) {
+  console.error("[channex][availability_sync][failed]", {
+    status: err?.response?.status ?? null,
+    data: err?.response?.data ?? null,
+    payloadPreview: availabilityPayload.slice(0, 5),
+    message: err?.message,
+  });
+
+  throw new Error(
+    `CHANNEX_AVAILABILITY_SYNC_FAILED: ${JSON.stringify(
+      err?.response?.data ?? err?.message
+    )}`
+  );
+}
   return {
     ok: true,
     propertyId: property.id,
@@ -170,5 +214,7 @@ export async function syncChannexAvailabilityForProperty(
     unavailableDaysCount: unavailableDateKeys.size,
     previewCount: availabilityPreview.length,
     preview: availabilityPreview.slice(0, 14),
-  };
+    pushedToChannex: true,
+    channexStatus: resp.status,
+};
 }
