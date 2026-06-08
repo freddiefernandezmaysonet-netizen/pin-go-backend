@@ -290,6 +290,13 @@ const channexRatePlan = await createChannexRatePlan({
   channexRoomTypeId: channexRoomType.channexRoomTypeId,
   payload: {
     title: "Standard Rate",
+    options: [
+      {
+        occupancy: property.maxGuests ?? 2,
+        is_primary: true,
+        rate: Number(property.baseNightlyRate ?? 0),
+      },
+    ],
   },
 });
 
