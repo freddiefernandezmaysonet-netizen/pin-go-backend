@@ -45,13 +45,8 @@ function decryptJson(payload: string) {
   return JSON.parse(decrypted);
 }
 
-function getChannexApiKey(credentialsEncrypted: string | null) {
-  if (!credentialsEncrypted) {
-    throw new Error("CHANNEX_MISSING_CREDENTIALS");
-  }
-
-  const creds = decryptJson(credentialsEncrypted);
-  const apiKey = String(creds?.apiKey ?? "").trim();
+function getChannexApiKey() {
+  const apiKey = String(process.env.CHANNEX_API_KEY ?? "").trim();
 
   if (!apiKey) {
     throw new Error("CHANNEX_API_KEY_MISSING");
@@ -59,7 +54,6 @@ function getChannexApiKey(credentialsEncrypted: string | null) {
 
   return apiKey;
 }
-
 async function createChannexProperty(args: {
   apiKey: string;
   payload: Record<string, unknown>;
@@ -181,17 +175,36 @@ export async function provisionChannexProperty(propertyId: string) {
     throw new Error("PROPERTY_NOT_FOUND");
   }
 
-  const connection = await prisma.pmsConnection.findFirst({
-    where: {
+  const connection = await prisma.pmsConnection.upsert({
+  where: {
+    organizationId_provider: {
       organizationId: property.organizationId,
       provider: PmsProvider.CHANNEX,
     },
-  });
-
-  if (!connection) {
-    throw new Error("CHANNEX_CONNECTION_NOT_FOUND");
-  }
-
+  },
+  create: {
+    organizationId: property.organizationId,
+    provider: PmsProvider.CHANNEX,
+    status: "ACTIVE",
+    credentialsEncrypted: null,
+    webhookSecret: null,
+    metadata: {
+      connectionType: "WHITE_LABEL_GLOBAL",
+      managedBy: "PinGo",
+      createdBy: "channex-provisioning.service",
+      createdAt: new Date().toISOString(),
+    },
+  },
+  update: {
+    status: "ACTIVE",
+    metadata: {
+      connectionType: "WHITE_LABEL_GLOBAL",
+      managedBy: "PinGo",
+      updatedBy: "channex-provisioning.service",
+      updatedAt: new Date().toISOString(),
+    },
+  },
+});
   const existingListing = await prisma.pmsListing.findFirst({
     where: {
       connectionId: connection.id,
@@ -208,7 +221,7 @@ export async function provisionChannexProperty(propertyId: string) {
     };
   }
 
-  const apiKey = getChannexApiKey(connection.credentialsEncrypted);
+  const apiKey = getChannexApiKey();
 
   const propertyPayload = {
     title: property.publicTitle ?? property.name,
