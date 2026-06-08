@@ -1036,6 +1036,7 @@ enum PmsProvider {
   HOSTAWAY
   LODGIFY
   GENERIC
+  CHANNEX
 }
 
 enum PmsConnectionStatus {

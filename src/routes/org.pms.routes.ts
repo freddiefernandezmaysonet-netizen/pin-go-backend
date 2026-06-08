@@ -9,6 +9,8 @@ import { requireOrg } from "../middleware/requireOrg";
 const GUESTY_AUTH_URL = "https://open-api.guesty.com/oauth2/token";
 const HOSTAWAY_AUTH_URL = "https://api.hostaway.com/v1/accessTokens";
 const LODGIFY_TEST_URL = "https://api.lodgify.com/v1/countries";
+const CHANNEX_TEST_URL =
+  "https://staging.channex.io/api/v1/properties/options";
 
 const providerSchema = z.nativeEnum(PmsProvider);
 
@@ -124,6 +126,12 @@ function validateProviderCredentials(
     }
   }
 
+  if (data.provider === PmsProvider.CHANNEX) {
+  if (!data.apiKey) {
+    return "PMS_API_KEY_REQUIRED";
+  }
+}
+
   return null;
 }
 
@@ -205,6 +213,23 @@ async function testLodgifyConnection(input: {
     headers: {
       Accept: "application/json",
       "X-ApiKey": input.apiKey,
+    },
+    timeout: 15000,
+  });
+
+  return {
+    ok: resp.status >= 200 && resp.status < 300,
+    status: resp.status,
+  };
+}
+
+async function testChannexConnection(input: {
+  apiKey: string;
+}) {
+  const resp = await axios.get(CHANNEX_TEST_URL, {
+    headers: {
+      Accept: "application/json",
+      "user-api-key": input.apiKey,
     },
     timeout: 15000,
   });
@@ -457,6 +482,47 @@ export function buildOrgPmsRouter(prisma: PrismaClient) {
           });
         }
       }
+
+if (data.provider === PmsProvider.CHANNEX) {
+  try {
+    await testChannexConnection({
+      apiKey: String(data.apiKey),
+    });
+
+    return res.json({
+      ok: true,
+      message: `Connection to ${data.provider} verified successfully.`,
+      checks: {
+        provider: data.provider,
+        hasAccountId: Boolean(data.accountId),
+        hasClientId: Boolean(data.clientId),
+        hasClientSecret: Boolean(data.clientSecret),
+        hasApiKey: Boolean(data.apiKey),
+        hasWebhookSecret: Boolean(data.webhookSecret),
+        tokenIssued: true,
+      },
+    });
+  } catch (err: any) {
+    console.error("Channex test connection failed:", {
+      message: err?.message,
+      responseStatus: err?.response?.status,
+      responseData: err?.response?.data,
+    });
+
+    return res.status(400).json({
+      ok: false,
+      error: "CHANNEX_CONNECTION_TEST_FAILED",
+      details: {
+        message:
+          err?.response?.data?.message ??
+          err?.response?.data?.error ??
+          err?.message ??
+          "Channex authentication failed",
+        responseStatus: err?.response?.status ?? null,
+      },
+    });
+  }
+}
 
       return res.json({
         ok: true,

@@ -5,6 +5,7 @@ import { guestyAdapter } from "./guesty.adapter";
 import { cloudbedsAdapter } from "./cloudbeds.adapter";
 import { hostawayAdapter } from "./hostaway.adapter";
 import { lodgifyAdapter } from "./lodgify.adapter";
+import { channexAdapter } from "./channex.adapter";
 
 export function getAdapter(provider: PmsProvider): PmsAdapter {
   switch (provider) {
@@ -19,6 +20,9 @@ export function getAdapter(provider: PmsProvider): PmsAdapter {
 
     case "LODGIFY":
       return lodgifyAdapter;
+
+    case "CHANNEX":
+      return channexAdapter;
 
     default:
       return {
