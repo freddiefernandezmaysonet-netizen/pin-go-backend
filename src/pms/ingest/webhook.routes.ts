@@ -1,7 +1,6 @@
 import { Router } from "express";
 import { PrismaClient, PmsProvider } from "@prisma/client";
 import { getAdapter } from "../adapters";
-import { readRawBodyMiddleware } from "./webhook.verify";
 import { enqueueProcessWebhookEvent } from "../jobs/job.queue";
 
 const prisma = new PrismaClient();
@@ -16,7 +15,6 @@ export const pmsWebhookRouter = Router();
  */
 pmsWebhookRouter.post(
   "/pms/:provider/:connectionId",
-  readRawBodyMiddleware, // nos deja req.rawBody (Buffer)
   async (req: any, res) => {
     const provider = String(req.params.provider).toUpperCase();
     const connectionId = String(req.params.connectionId);
