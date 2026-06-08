@@ -141,7 +141,6 @@ console.log("[server] START", {
 // Webhooks PRIMERO
 // =====================
 registerStripeWebhook(app);
-app.use("/webhooks", pmsWebhookRouter);
 // =====================
 // Middleware
 // =====================
@@ -165,6 +164,7 @@ app.use(
 );
 
 app.use(bodyParser.urlencoded({ extended: true }));
+app.use("/webhooks", pmsWebhookRouter);
 
 // =====================
 // Health
