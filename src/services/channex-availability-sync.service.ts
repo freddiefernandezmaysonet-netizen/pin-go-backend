@@ -48,6 +48,7 @@ export async function syncChannexAvailabilityForProperty(
       id: true,
       organizationId: true,
       name: true,
+      baseNightlyRate: true,
     },
   });
 
@@ -177,6 +178,7 @@ const availabilityPayload = availabilityPreview.map((item) => ({
   rate_plan_id: channexRatePlanId,
   date: item.date,
   availability: item.availability,
+  rate: Math.max(Number(property.baseNightlyRate ?? 0), 10),
 }));
  
 let resp;
