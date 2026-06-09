@@ -178,7 +178,10 @@ const availabilityPayload = availabilityPreview.map((item) => ({
   rate_plan_id: channexRatePlanId,
   date: item.date,
   availability: item.availability,
-  rate: Math.max(Number(property.baseNightlyRate ?? 0), 10),
+  rate: Math.max(
+  Math.round(Number(property.baseNightlyRate ?? 0) * 100),
+  1000
+),
 }));
  
 let resp;
