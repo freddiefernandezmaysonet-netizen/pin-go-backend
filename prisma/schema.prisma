@@ -82,6 +82,7 @@ model Property {
   name                       String
   slug                       String?
   isPublicBookable           Boolean                     @default(false)
+  distributionEnabled        Boolean                     @default(false)
   publicTitle                String?
   publicDescription          String?
   publicPhotos               Json?

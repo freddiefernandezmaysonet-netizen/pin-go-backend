@@ -146,6 +146,7 @@ dashboardPropertiesRouter.get(
           updatedAt: true,
           slug: true,
           isPublicBookable: true,
+          distributionEnabled: true,
           publicTitle: true,
           publicDescription: true,
           publicPhotos: true,
@@ -232,6 +233,7 @@ dashboardPropertiesRouter.patch(
         longitude: longitudeRaw,
         slug,
         isPublicBookable,
+        distributionEnabled,
         publicTitle,
         publicDescription,
         publicPhotos,
@@ -327,9 +329,11 @@ if (
           organizationId: orgId,
         },
         select: {
-          id: true,
-          status: true,
-        },
+  id: true,
+  status: true,
+  distributionEnabled: true,
+},
+
       });
 
       if (!existing) {
@@ -428,6 +432,10 @@ if (isPublicBookable !== undefined) {
   data.isPublicBookable = Boolean(isPublicBookable);
 }
 
+if (distributionEnabled !== undefined) {
+  data.distributionEnabled = Boolean(distributionEnabled);
+}
+
 if (publicTitle !== undefined) {
   data.publicTitle = String(publicTitle || "").trim() || null;
 }
@@ -487,6 +495,7 @@ if (checkOutTime !== undefined) {
           updatedAt: true,
           slug: true,
           isPublicBookable: true,
+          distributionEnabled: true,
           publicTitle: true,
           publicDescription: true,
           publicPhotos: true,
@@ -1030,10 +1039,29 @@ dashboardPropertiesRouter.post(
         },
       });
 
-      return res.json({
-        ok: true,
-        item: updated,
-      });
+      let distributionSetupResult: any = null;
+
+      const shouldSetupDistribution =
+        distributionEnabled !== undefined &&
+        Boolean(distributionEnabled) === true &&
+        existing.distributionEnabled === false;
+
+      if (shouldSetupDistribution) {
+        const provisionResult = await provisionChannexProperty(updated.id);
+        const syncResult = await syncChannexAvailabilityForProperty(updated.id);
+
+        distributionSetupResult = {
+          provisionResult,
+          syncResult,
+        };
+      }
+
+  return res.json({
+  ok: true,
+  item: updated,
+  distributionSetupResult,
+}); 
+
     } catch (error: any) {
       console.error("POST /api/dashboard/properties/:id/archive error", error);
       return res.status(500).json({
