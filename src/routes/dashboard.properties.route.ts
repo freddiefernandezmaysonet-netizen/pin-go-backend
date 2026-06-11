@@ -1101,7 +1101,7 @@ dashboardPropertiesRouter.get(
   }
 );
 
-dashboardPropertiesRouter.post(
+  dashboardPropertiesRouter.post(
   "/api/dashboard/properties/:id/distribution/enable",
   requireAuth,
   async (req, res) => {
@@ -1129,28 +1129,72 @@ dashboardPropertiesRouter.post(
         });
       }
 
-      const updated = await prisma.property.update({
+      await prisma.property.update({
         where: { id: property.id },
         data: {
-          distributionEnabled: true,
-        },
-        select: {
-          id: true,
-          distributionEnabled: true,
+          distributionStatus: "ENABLING",
+          distributionLastError: null,
         },
       });
 
-      const provisionResult = await provisionChannexProperty(property.id);
-      const syncResult = await syncChannexAvailabilityForProperty(property.id);
+      try {
+        const provisionResult = await provisionChannexProperty(property.id);
+        const syncResult = await syncChannexAvailabilityForProperty(property.id);
 
-      return res.json({
-        ok: true,
-        item: updated,
-        distributionSetupResult: {
-          provisionResult,
-          syncResult,
-        },
-      });
+        const updated = await prisma.property.update({
+          where: { id: property.id },
+          data: {
+            distributionEnabled: true,
+            distributionStatus: "ACTIVE",
+            distributionEnabledAt: new Date(),
+            distributionLastSyncedAt: new Date(),
+            distributionLastError: null,
+          },
+          select: {
+            id: true,
+            distributionEnabled: true,
+            distributionStatus: true,
+            distributionEnabledAt: true,
+            distributionLastSyncedAt: true,
+            distributionLastError: true,
+          },
+        });
+
+        return res.json({
+          ok: true,
+          item: updated,
+          distributionSetupResult: {
+            provisionResult,
+            syncResult,
+          },
+        });
+      } catch (setupError: any) {
+        const updated = await prisma.property.update({
+          where: { id: property.id },
+          data: {
+            distributionEnabled: false,
+            distributionStatus: "FAILED",
+            distributionLastError:
+              setupError?.message ?? "Failed to enable property distribution",
+          },
+          select: {
+            id: true,
+            distributionEnabled: true,
+            distributionStatus: true,
+            distributionEnabledAt: true,
+            distributionLastSyncedAt: true,
+            distributionLastError: true,
+          },
+        });
+
+        return res.status(500).json({
+          ok: false,
+          item: updated,
+          error:
+            setupError?.message ??
+            "Failed to enable property distribution",
+        });
+      }
     } catch (error: any) {
       console.error(
         "POST /api/dashboard/properties/:id/distribution/enable error",
@@ -1165,9 +1209,9 @@ dashboardPropertiesRouter.post(
       });
     }
   }
-);
+);      
 
-dashboardPropertiesRouter.post(
+ dashboardPropertiesRouter.post(
   "/api/dashboard/properties/:id/blocked-dates",
   requireAuth,
   async (req, res) => {

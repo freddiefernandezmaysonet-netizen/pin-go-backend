@@ -83,6 +83,10 @@ model Property {
   slug                       String?
   isPublicBookable           Boolean                     @default(false)
   distributionEnabled        Boolean                     @default(false)
+  distributionStatus         String                      @default("DISABLED")
+  distributionEnabledAt      DateTime?
+  distributionLastSyncedAt   DateTime?
+  distributionLastError      String?
   publicTitle                String?
   publicDescription          String?
   publicPhotos               Json?
