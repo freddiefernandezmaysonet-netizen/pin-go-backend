@@ -1,5 +1,5 @@
 import { Router } from "express";
-import { PrismaClient, Prisma } from "@prisma/client";
+import { PrismaClient, Prisma, PmsProvider } from "@prisma/client";
 import { requireAuth } from "../middleware/requireAuth";
 
 const prisma = new PrismaClient();
@@ -46,6 +46,91 @@ dashboardOrganizationRouter.get(
       console.error("[dashboard/organization:get] ERROR", e);
       return res.status(500).json({
         error: "ORGANIZATION_FETCH_FAILED",
+      });
+    }
+  }
+);
+
+dashboardOrganizationRouter.get(
+  "/api/dashboard/organization/channel-distribution",
+  requireAuth,
+  async (req, res) => {
+    try {
+      const user = (req as any).user;
+      const orgId = user.orgId as string;
+
+      const connection = await prisma.pmsConnection.findUnique({
+        where: {
+          organizationId_provider: {
+            organizationId: orgId,
+            provider: PmsProvider.CHANNEX,
+          },
+        },
+        select: {
+          id: true,
+          status: true,
+          createdAt: true,
+          updatedAt: true,
+          listings: {
+            select: {
+              id: true,
+              propertyId: true,
+              externalListingId: true,
+              metadata: true,
+            },
+          },
+        },
+      });
+
+      const apiBaseUrl =
+        process.env.PUBLIC_API_BASE_URL ??
+        process.env.API_BASE_URL ??
+        "https://api.pin-ngo.com";
+
+      const webhookUrl = connection
+        ? `${String(apiBaseUrl).replace(/\/+$/, "")}/webhooks/pms/CHANNEX/${
+            connection.id
+          }`
+        : null;
+
+      return res.json({
+        ok: true,
+        channelDistribution: {
+          provider: "CHANNEX",
+          connected: Boolean(connection),
+          connectionId: connection?.id ?? null,
+          status: connection?.status ?? "NOT_CONNECTED",
+          webhookConfigured: Boolean(connection),
+          webhookUrl,
+          mappedProperties:
+            connection?.listings.filter((item) => Boolean(item.propertyId))
+              .length ?? 0,
+          connectedChannels: [
+            {
+              name: "Airbnb",
+              status: connection ? "Ready" : "Not connected",
+            },
+            {
+              name: "Booking.com",
+              status: "Coming soon",
+            },
+            {
+              name: "Vrbo",
+              status: "Coming soon",
+            },
+          ],
+          updatedAt: connection?.updatedAt ?? null,
+        },
+      });
+    } catch (e) {
+      console.error(
+        "[dashboard/organization/channel-distribution:get] ERROR",
+        e
+      );
+
+      return res.status(500).json({
+        ok: false,
+        error: "CHANNEL_DISTRIBUTION_FETCH_FAILED",
       });
     }
   }
