@@ -238,11 +238,54 @@ export const channexAdapter: PmsAdapter = {
       payload?.reservation?.unique_id
     );
 
+    const maybeBooking = payloadRoot(body);
+
+    let reservation: CanonicalReservation | undefined;
+
+    try {
+      const booking = extractBooking(maybeBooking);
+
+      const hasInlineReservation =
+        !!firstString(
+          booking?.check_in,
+          booking?.checkIn,
+          booking?.arrival_date,
+          booking?.arrivalDate
+        ) &&
+        !!firstString(
+          booking?.check_out,
+          booking?.checkOut,
+          booking?.departure_date,
+          booking?.departureDate
+        ) &&
+        !!firstString(
+          booking?.room_type_id,
+          booking?.roomTypeId,
+          booking?.room_id,
+          booking?.roomId,
+          booking?.listing_id,
+          booking?.listingId,
+          booking?.property_id,
+          booking?.propertyId
+        );
+
+      if (hasInlineReservation) {
+        reservation = toCanonicalReservation(
+          maybeBooking,
+          externalReservationId ?? externalEventId ?? "unknown"
+        );
+      }
+    } catch {
+      reservation = undefined;
+    }
+
     return {
       eventType,
       externalEventId,
       externalReservationId: externalReservationId ?? undefined,
+      reservation,
     };
+   
   },
 
   fetchReservation: async ({ connection, externalReservationId }) => {
