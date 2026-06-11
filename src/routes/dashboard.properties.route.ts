@@ -539,10 +539,30 @@ if (checkOutTime !== undefined) {
        },
       });
 
+      let distributionSetupResult: any = null;
+
+      const shouldSetupDistribution =
+        distributionEnabled !== undefined &&
+        Boolean(distributionEnabled) === true &&
+        existing.distributionEnabled === false;
+
+      if (shouldSetupDistribution) {
+        const provisionResult = await provisionChannexProperty(updated.id);
+        const syncResult = await syncChannexAvailabilityForProperty(updated.id);
+
+        distributionSetupResult = {
+          provisionResult,
+          syncResult,
+        };
+      }
+
       return res.json({
         ok: true,
         item: updated,
+        distributionSetupResult,
       });
+     
+
     } catch (error: any) {
       console.error("PATCH /api/dashboard/properties/:id error", error);
       return res.status(500).json({
@@ -1039,27 +1059,10 @@ dashboardPropertiesRouter.post(
         },
       });
 
-      let distributionSetupResult: any = null;
-
-      const shouldSetupDistribution =
-        distributionEnabled !== undefined &&
-        Boolean(distributionEnabled) === true &&
-        existing.distributionEnabled === false;
-
-      if (shouldSetupDistribution) {
-        const provisionResult = await provisionChannexProperty(updated.id);
-        const syncResult = await syncChannexAvailabilityForProperty(updated.id);
-
-        distributionSetupResult = {
-          provisionResult,
-          syncResult,
-        };
-      }
-
   return res.json({
   ok: true,
   item: updated,
-  distributionSetupResult,
+  
 }); 
 
     } catch (error: any) {
