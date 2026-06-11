@@ -171,53 +171,93 @@ export async function syncChannexAvailabilityForProperty(
     };
   });
 
-const apiKey = getChannexApiKey();
+  const apiKey = getChannexApiKey();
 
-const availabilityPayload = availabilityPreview.map((item) => ({
-  property_id: channexPropertyId,
-  rate_plan_id: channexRatePlanId,
-  date: item.date,
-  
-  availability: item.availability,
-  available: item.availability === 1,
-  
-  rate: Math.max(
-  Math.round(Number(property.baseNightlyRate ?? 0) * 100),
-  1000
-  ),
-}));
- 
-let resp;
+  const ratesPayload = availabilityPreview.map((item) => ({
+    property_id: channexPropertyId,
+    rate_plan_id: channexRatePlanId,
+    date: item.date,
 
-try {
-  resp = await axios.post(
-    `${CHANNEX_API_BASE_URL.replace(/\/+$/, "")}/api/v1/restrictions`,
-    {
-      values: availabilityPayload,
-    },
-    {
-      headers: {
-        Accept: "application/json",
-        "Content-Type": "application/json",
-        "user-api-key": apiKey,
+    availability: item.availability,
+    available: item.availability === 1,
+
+    rate: Math.max(
+      Math.round(Number(property.baseNightlyRate ?? 0) * 100),
+      1000
+    ),
+  }));
+
+  let ratesResp;
+
+  try {
+    ratesResp = await axios.post(
+      `${CHANNEX_API_BASE_URL.replace(/\/+$/, "")}/api/v1/restrictions`,
+      {
+        values: ratesPayload,
       },
-      timeout: 20000,
-    }
-  );
-} catch (err: any) {
-  console.error("[channex][availability_sync][failed]", {
-    status: err?.response?.status ?? null,
-    data: err?.response?.data ?? null,
-    payloadPreview: availabilityPayload.slice(0, 5),
-    message: err?.message,
-  });
+      {
+        headers: {
+          Accept: "application/json",
+          "Content-Type": "application/json",
+          "user-api-key": apiKey,
+        },
+        timeout: 20000,
+      }
+    );
+  } catch (err: any) {
+    console.error("[channex][rates_sync][failed]", {
+      status: err?.response?.status ?? null,
+      data: err?.response?.data ?? null,
+      payloadPreview: ratesPayload.slice(0, 5),
+      message: err?.message,
+    });
 
-  throw new Error(
-    `CHANNEX_AVAILABILITY_SYNC_FAILED: ${JSON.stringify(
-      err?.response?.data ?? err?.message
-    )}`
-  );
-}
+    throw new Error(
+      `CHANNEX_RATES_SYNC_FAILED: ${JSON.stringify(
+        err?.response?.data ?? err?.message
+      )}`
+    );
+  }
+
+  const channexAvailabilityPayload = availabilityPreview.map((item) => ({
+    property_id: channexPropertyId,
+    room_type_id: channexRoomTypeId,
+    date: item.date,
+    availability: item.availability,
+  }));
+
+  let availabilityResp;
+
+  try {
+    availabilityResp = await axios.post(
+      `${CHANNEX_API_BASE_URL.replace(/\/+$/, "")}/api/v1/availability`,
+      {
+        values: channexAvailabilityPayload,
+      },
+      {
+        headers: {
+          Accept: "application/json",
+          "Content-Type": "application/json",
+          "user-api-key": apiKey,
+        },
+        timeout: 20000,
+      }
+    );
+  } catch (err: any) {
+    console.error("[channex][availability_sync][failed]", {
+      status: err?.response?.status ?? null,
+      data: err?.response?.data ?? null,
+      payloadPreview: channexAvailabilityPayload.slice(0, 5),
+      message: err?.message,
+    });
+
+    throw new Error(
+      `CHANNEX_AVAILABILITY_SYNC_FAILED: ${JSON.stringify(
+        err?.response?.data ?? err?.message
+      )}`
+    );
+  }
+
   return {
     ok: true,
     propertyId: property.id,
@@ -231,11 +271,15 @@ try {
     unavailableDaysCount: unavailableDateKeys.size,
     previewCount: availabilityPreview.length,
     preview: availabilityPreview.slice(0, 14),
-    
-    payloadPreview: availabilityPayload.slice(0, 5),
-    channexResponse: resp.data,
-   
+
+    ratesPayloadPreview: ratesPayload.slice(0, 5),
+    ratesChannexResponse: ratesResp.data,
+    ratesChannexStatus: ratesResp.status,
+
+    availabilityPayloadPreview: channexAvailabilityPayload.slice(0, 5),
+    availabilityChannexResponse: availabilityResp.data,
+    availabilityChannexStatus: availabilityResp.status,
+
     pushedToChannex: true,
-    channexStatus: resp.status,   
   };
 }
