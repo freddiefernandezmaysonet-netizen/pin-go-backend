@@ -539,27 +539,10 @@ if (checkOutTime !== undefined) {
        },
       });
 
-      let distributionSetupResult: any = null;
-
-      const shouldSetupDistribution =
-        distributionEnabled !== undefined &&
-        Boolean(distributionEnabled) === true &&
-        existing.distributionEnabled === false;
-
-      if (shouldSetupDistribution) {
-        const provisionResult = await provisionChannexProperty(updated.id);
-        const syncResult = await syncChannexAvailabilityForProperty(updated.id);
-
-        distributionSetupResult = {
-          provisionResult,
-          syncResult,
-        };
-      }
-
       return res.json({
         ok: true,
         item: updated,
-        distributionSetupResult,
+        
       });
      
 
@@ -1113,6 +1096,72 @@ dashboardPropertiesRouter.get(
       return res.status(500).json({
         ok: false,
         error: error?.message ?? "Failed to load blocked dates",
+      });
+    }
+  }
+);
+
+dashboardPropertiesRouter.post(
+  "/api/dashboard/properties/:id/distribution/enable",
+  requireAuth,
+  async (req, res) => {
+    try {
+      const user = (req as any).user;
+      const orgId = user.orgId as string;
+      const { id } = req.params;
+
+      const property = await prisma.property.findFirst({
+        where: {
+          id,
+          organizationId: orgId,
+          status: "ACTIVE",
+        },
+        select: {
+          id: true,
+          distributionEnabled: true,
+        },
+      });
+
+      if (!property) {
+        return res.status(404).json({
+          ok: false,
+          error: "Property not found",
+        });
+      }
+
+      const updated = await prisma.property.update({
+        where: { id: property.id },
+        data: {
+          distributionEnabled: true,
+        },
+        select: {
+          id: true,
+          distributionEnabled: true,
+        },
+      });
+
+      const provisionResult = await provisionChannexProperty(property.id);
+      const syncResult = await syncChannexAvailabilityForProperty(property.id);
+
+      return res.json({
+        ok: true,
+        item: updated,
+        distributionSetupResult: {
+          provisionResult,
+          syncResult,
+        },
+      });
+    } catch (error: any) {
+      console.error(
+        "POST /api/dashboard/properties/:id/distribution/enable error",
+        error
+      );
+
+      return res.status(500).json({
+        ok: false,
+        error:
+          error?.message ??
+          "Failed to enable property distribution",
       });
     }
   }
