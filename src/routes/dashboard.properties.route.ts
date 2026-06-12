@@ -147,6 +147,10 @@ dashboardPropertiesRouter.get(
           slug: true,
           isPublicBookable: true,
           distributionEnabled: true,
+          distributionStatus: true,
+          distributionEnabledAt: true,
+          distributionLastSyncedAt: true,
+          distributionLastError: true,
           publicTitle: true,
           publicDescription: true,
           publicPhotos: true,
@@ -496,6 +500,10 @@ if (checkOutTime !== undefined) {
           slug: true,
           isPublicBookable: true,
           distributionEnabled: true,
+         distributionStatus: true,
+         distributionEnabledAt: true,
+         distributionLastSyncedAt: true,
+         distributionLastError: true,
           publicTitle: true,
           publicDescription: true,
           publicPhotos: true,
@@ -539,12 +547,49 @@ if (checkOutTime !== undefined) {
        },
       });
 
-      return res.json({
+      let distributionSyncResult: any = null;
+
+      if (updated.distributionStatus === "ACTIVE") {
+        try {
+          distributionSyncResult =
+            await syncChannexAvailabilityForProperty(updated.id);
+
+          await prisma.property.update({
+            where: { id: updated.id },
+            data: {
+              distributionLastSyncedAt: new Date(),
+              distributionLastError: null,
+            },
+          });
+        } catch (syncError: any) {
+          await prisma.property.update({
+            where: { id: updated.id },
+            data: {
+              distributionStatus: "FAILED",
+              distributionLastError:
+                syncError?.message ?? "Failed to sync distribution changes",
+            },
+          });
+
+          return res.status(500).json({
+            ok: false,
+            item: {
+              ...updated,
+              distributionStatus: "FAILED",
+              distributionLastError:
+                syncError?.message ?? "Failed to sync distribution changes",
+            },
+            error:
+              syncError?.message ?? "Failed to sync distribution changes",
+          });
+        }
+      }
+
+           return res.json({
         ok: true,
         item: updated,
-        
-      });
-     
+        distributionSyncResult,
+      });     
 
     } catch (error: any) {
       console.error("PATCH /api/dashboard/properties/:id error", error);
