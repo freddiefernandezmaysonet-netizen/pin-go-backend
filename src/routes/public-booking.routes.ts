@@ -281,6 +281,42 @@ if (!propertyId || !start || !end) {
   }
 });
 
+publicBookingRouter.post("/quote", async (req, res) => {
+  try {
+    const { propertyId, checkIn, checkOut, selectedAmenityIds } = req.body ?? {};
+
+    const start = parseDate(checkIn);
+    const end = parseDate(checkOut);
+
+    if (!propertyId || !start || !end || start >= end) {
+      return res.status(400).json({
+        ok: false,
+        error: "Invalid quote request",
+      });
+    }
+
+    const pricing = await calculateDirectBookingPricing({
+      propertyId: String(propertyId),
+      checkIn: start,
+      checkOut: end,
+      selectedAmenityIds: Array.isArray(selectedAmenityIds)
+        ? selectedAmenityIds.map((id) => String(id)).filter(Boolean)
+        : [],
+    });
+
+    return res.json({
+      ok: true,
+      pricing,
+    });
+  } catch (err) {
+    console.error("public booking quote error", err);
+    return res.status(500).json({
+      ok: false,
+      error: "Unable to calculate quote",
+    });
+  }
+});
+
 publicBookingRouter.post("/create-checkout", async (req, res) => {
   try {
    const {
