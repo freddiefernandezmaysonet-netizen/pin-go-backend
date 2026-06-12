@@ -50,6 +50,7 @@ export async function syncChannexAvailabilityForProperty(
   name: true,
   publicTitle: true,
   maxGuests: true,
+  minimumNights: true,
   baseNightlyRate: true,
 },
   });
@@ -228,7 +229,11 @@ const apiKey = getChannexApiKey();
       Math.round(Number(property.baseNightlyRate ?? 0) * 100),
       1000
     ),
-  }));
+ 
+    min_stay_arrival: property.minimumNights ?? 1,
+    min_stay_through: property.minimumNights ?? 1,
+
+ }));
 
   let ratesResp;
 
