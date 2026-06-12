@@ -44,12 +44,14 @@ export async function syncChannexAvailabilityForProperty(
 ) {
   const property = await prisma.property.findUnique({
     where: { id: propertyId },
-    select: {
-      id: true,
-      organizationId: true,
-      name: true,
-      baseNightlyRate: true,
-    },
+   select: {
+  id: true,
+  organizationId: true,
+  name: true,
+  publicTitle: true,
+  maxGuests: true,
+  baseNightlyRate: true,
+},
   });
 
   if (!property) {
@@ -95,9 +97,50 @@ export async function syncChannexAvailabilityForProperty(
   const channexPropertyId = metadata.channexPropertyId;
   const channexRoomTypeId = listing.externalListingId;
   const channexRatePlanId = metadata.channexRatePlanId;
-
-  if (!channexPropertyId || !channexRoomTypeId || !channexRatePlanId) {
+  
+ if (!channexPropertyId || !channexRoomTypeId || !channexRatePlanId) {
     throw new Error("CHANNEX_LISTING_MAPPING_INCOMPLETE");
+  }
+
+const apiKey = getChannexApiKey();
+ 
+  let roomTypeResp;
+
+  try {
+    roomTypeResp = await axios.put(
+      `${CHANNEX_API_BASE_URL.replace(/\/+$/, "")}/api/v1/room_types/${channexRoomTypeId}`,
+      {
+        room_type: {
+          title: property.publicTitle ?? property.name,
+          count_of_rooms: 1,
+          occ_adults: property.maxGuests ?? 2,
+          occ_children: 0,
+          occ_infants: 0,
+          default_occupancy: property.maxGuests ?? 2,
+        },
+      },
+      {
+        headers: {
+          Accept: "application/json",
+          "Content-Type": "application/json",
+          "user-api-key": apiKey,
+        },
+        timeout: 20000,
+      }
+    );
+  } catch (err: any) {
+    console.error("[channex][room_type_sync][failed]", {
+      status: err?.response?.status ?? null,
+      data: err?.response?.data ?? null,
+      roomTypeId: channexRoomTypeId,
+      message: err?.message,
+    });
+
+    throw new Error(
+      `CHANNEX_ROOM_TYPE_SYNC_FAILED: ${JSON.stringify(
+        err?.response?.data ?? err?.message
+      )}`
+    );
   }
 
   const today = new Date();
@@ -171,7 +214,7 @@ export async function syncChannexAvailabilityForProperty(
     };
   });
 
-  const apiKey = getChannexApiKey();
+  
 
   const ratesPayload = availabilityPreview.map((item) => ({
     property_id: channexPropertyId,
@@ -272,6 +315,8 @@ export async function syncChannexAvailabilityForProperty(
     previewCount: availabilityPreview.length,
     preview: availabilityPreview.slice(0, 14),
 
+    roomTypeChannexResponse: roomTypeResp.data,
+    roomTypeChannexStatus: roomTypeResp.status,
     ratesPayloadPreview: ratesPayload.slice(0, 5),
     ratesChannexResponse: ratesResp.data,
     ratesChannexStatus: ratesResp.status,
