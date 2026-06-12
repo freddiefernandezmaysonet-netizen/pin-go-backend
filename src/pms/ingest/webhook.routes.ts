@@ -6,6 +6,149 @@ import { enqueueProcessWebhookEvent } from "../jobs/job.queue";
 const prisma = new PrismaClient();
 export const pmsWebhookRouter = Router();
 
+async function ingestPmsWebhook(args: {
+  providerEnum: PmsProvider;
+  connectionId: string;
+  headers: any;
+  body: any;
+  rawBody?: Buffer;
+}) {
+  const conn = await prisma.pmsConnection.findUnique({
+    where: { id: args.connectionId },
+  });
+
+  if (!conn) {
+    return {
+      status: 404,
+      body: { ok: false, error: "CONNECTION_NOT_FOUND" },
+    };
+  }
+
+  if (conn.provider !== args.providerEnum) {
+    return {
+      status: 400,
+      body: { ok: false, error: "PROVIDER_MISMATCH" },
+    };
+  }
+
+  const adapter = getAdapter(args.providerEnum);
+
+  if (adapter.verifySignature && conn.webhookSecret) {
+    const ok = adapter.verifySignature({
+      secret: conn.webhookSecret,
+      rawBody: args.rawBody ?? Buffer.from(""),
+      headers: args.headers,
+    });
+
+    if (!ok) {
+      return {
+        status: 401,
+        body: { ok: false, error: "INVALID_SIGNATURE" },
+      };
+    }
+  }
+
+  let parsed;
+
+  try {
+    parsed = adapter.parseWebhook({
+      headers: args.headers,
+      body: args.body,
+    });
+  } catch (e: any) {
+    return {
+      status: 400,
+      body: {
+        ok: false,
+        error: "INVALID_PAYLOAD",
+        detail: String(e?.message ?? e),
+      },
+    };
+  }
+
+  try {
+    const ev = await prisma.webhookEventIngest.create({
+      data: {
+        connectionId: conn.id,
+        provider: args.providerEnum,
+        eventType: parsed.eventType ?? "UNKNOWN",
+        externalEventId: parsed.externalEventId ?? null,
+        payloadRaw: args.body,
+        status: "PENDING",
+      },
+    });
+
+    await enqueueProcessWebhookEvent(ev.id);
+
+    return {
+      status: 200,
+      body: { ok: true, eventId: ev.id },
+    };
+  } catch (e: any) {
+    const msg = String(e?.message ?? e);
+
+    if (
+      msg.toLowerCase().includes("unique") ||
+      msg.toLowerCase().includes("constraint")
+    ) {
+      return {
+        status: 200,
+        body: { ok: true, deduped: true },
+      };
+    }
+
+    return {
+      status: 500,
+      body: {
+        ok: false,
+        error: "STORE_EVENT_FAILED",
+        detail: msg,
+      },
+    };
+  }
+}
+
+pmsWebhookRouter.post("/channex", async (req: any, res) => {
+  try {
+    const connection = await prisma.pmsConnection.findFirst({
+      where: {
+        provider: PmsProvider.CHANNEX,
+        status: "ACTIVE",
+      },
+      orderBy: {
+        createdAt: "asc",
+      },
+      select: {
+        id: true,
+      },
+    });
+
+    if (!connection) {
+      return res.status(500).json({
+        ok: false,
+        error: "CHANNEX_CONNECTION_NOT_FOUND",
+      });
+    }
+
+    const result = await ingestPmsWebhook({
+      providerEnum: PmsProvider.CHANNEX,
+      connectionId: connection.id,
+      headers: req.headers,
+      body: req.body,
+      rawBody: req.rawBody,
+    });
+
+    return res.status(result.status).json(result.body);
+  } catch (error: any) {
+    console.error("POST /webhooks/channex error", error);
+
+    return res.status(500).json({
+      ok: false,
+      error: error?.message ?? "CHANNEX_WEBHOOK_FAILED",
+    });
+  }
+});
+
 /**
  * IMPORTANTE:
  * - Este router debe montarse con middleware que preserve rawBody.
