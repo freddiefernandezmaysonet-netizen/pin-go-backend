@@ -121,12 +121,29 @@ model Property {
   propertyStaff              PropertyStaff[]
   amenities                  PropertyAmenity[]
   taxes                      PropertyTax[]
+  nightlyRates               PropertyNightlyRate[]
   reservations               Reservation[]
-  blockedDates              PropertyBlockedDate[]
+  blockedDates               PropertyBlockedDate[]
   
   @@index([organizationId])
   @@index([organizationId, status])
   @@unique([organizationId, slug])
+}
+
+model PropertyNightlyRate {
+  id         String   @id @default(cuid())
+  propertyId String
+  property   Property @relation(fields: [propertyId], references: [id])
+
+  date       DateTime
+  rate       Decimal  @db.Decimal(10, 2)
+  reason     String?
+
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  @@unique([propertyId, date])
+  @@index([propertyId, date])
 }
 
 model Lock {

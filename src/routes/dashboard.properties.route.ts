@@ -698,6 +698,112 @@ dashboardPropertiesRouter.post(
   }
 );
 
+dashboardPropertiesRouter.get("/:id/nightly-rates", async (req, res) => {
+  try {
+    const propertyId = String(req.params.id);
+
+    const rates = await prisma.propertyNightlyRate.findMany({
+      where: { propertyId },
+      orderBy: { date: "asc" },
+      select: {
+        id: true,
+        date: true,
+        rate: true,
+        reason: true,
+      },
+    });
+
+    return res.json({
+      ok: true,
+      rates: rates.map((rate) => ({
+        id: rate.id,
+        date: rate.date.toISOString().slice(0, 10),
+        rate: Number(rate.rate),
+        reason: rate.reason,
+      })),
+    });
+  } catch (err) {
+    console.error("GET nightly-rates error", err);
+    return res.status(500).json({
+      ok: false,
+      error: "Failed to load nightly rates",
+    });
+  }
+});
+
+dashboardPropertiesRouter.put("/:id/nightly-rates", async (req, res) => {
+  try {
+    const propertyId = String(req.params.id);
+    const rates = Array.isArray(req.body?.rates) ? req.body.rates : [];
+
+    if (!rates.length) {
+      return res.status(400).json({
+        ok: false,
+        error: "rates must be a non-empty array",
+      });
+    }
+
+    const savedRates = [];
+
+    for (const item of rates) {
+      const dateRaw = String(item.date ?? "");
+      const rateNumber = Number(item.rate);
+
+      if (!dateRaw || Number.isNaN(rateNumber) || rateNumber < 0) {
+        return res.status(400).json({
+          ok: false,
+          error: "Each rate must include a valid date and rate",
+        });
+      }
+
+      const date = new Date(`${dateRaw}T00:00:00.000Z`);
+
+      const saved = await prisma.propertyNightlyRate.upsert({
+        where: {
+          propertyId_date: {
+            propertyId,
+            date,
+          },
+        },
+        update: {
+          rate: rateNumber,
+          reason: item.reason ?? "MANUAL_OVERRIDE",
+        },
+        create: {
+          propertyId,
+          date,
+          rate: rateNumber,
+          reason: item.reason ?? "MANUAL_OVERRIDE",
+        },
+        select: {
+          id: true,
+          date: true,
+          rate: true,
+          reason: true,
+        },
+      });
+
+      savedRates.push(saved);
+    }
+
+    return res.json({
+      ok: true,
+      rates: savedRates.map((rate) => ({
+        id: rate.id,
+        date: rate.date.toISOString().slice(0, 10),
+        rate: Number(rate.rate),
+        reason: rate.reason,
+      })),
+    });
+  } catch (err) {
+    console.error("PUT nightly-rates error", err);
+    return res.status(500).json({
+      ok: false,
+      error: "Failed to save nightly rates",
+    });
+  }
+});
+
 
 dashboardPropertiesRouter.post(
   "/api/dashboard/properties/:id/amenities",

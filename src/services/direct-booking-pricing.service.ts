@@ -46,6 +46,21 @@ export async function calculateDirectBookingPricing(
         },
         orderBy: { name: "asc" },
       },
+    
+    nightlyRates: {
+  where: {
+    date: {
+      gte: startOfUtcDay(input.checkIn),
+      lt: startOfUtcDay(input.checkOut),
+    },
+  },
+  select: {
+    date: true,
+    rate: true,
+    reason: true,
+  },
+},
+
     },
   });
 
@@ -66,11 +81,37 @@ export async function calculateDirectBookingPricing(
     throw new Error("Invalid number of nights");
   }
 
-  const nightlyRate = toMoney(property.baseNightlyRate);
-  const cleaningFee = toMoney(property.cleaningFee);
-  const nightlySubtotal = toMoney(nightlyRate * nights);
+  const fallbackNightlyRate = toMoney(property.baseNightlyRate);
+const stayDates = buildStayDates(input.checkIn, nights);
 
-  const amenityItems = property.amenities.map((amenity) => {
+const nightlyRateByDate = new Map(
+  property.nightlyRates.map((item) => [
+    toDateKey(item.date),
+    {
+      rate: toMoney(item.rate),
+      reason: item.reason ?? "CUSTOM_RATE",
+    },
+  ])
+);
+
+const nightlyRates = stayDates.map((date) => {
+  const dateKey = toDateKey(date);
+  const override = nightlyRateByDate.get(dateKey);
+
+  return {
+    date: dateKey,
+    rate: override?.rate ?? fallbackNightlyRate,
+    reason: override?.reason ?? "BASE_RATE",
+  };
+});
+
+const nightlyRate = fallbackNightlyRate;
+const cleaningFee = toMoney(property.cleaningFee);
+const nightlySubtotal = toMoney(
+  nightlyRates.reduce((sum, item) => sum + item.rate, 0)
+);
+  
+const amenityItems = property.amenities.map((amenity) => {
     const baseAmount = toMoney(amenity.amount);
 
     const computedAmount =
@@ -128,6 +169,7 @@ export async function calculateDirectBookingPricing(
     currency: "usd",
     nights,
     nightlyRate,
+    nightlyRates,
     nightlySubtotal,
     cleaningFee,
     amenities: amenityItems,
@@ -139,4 +181,26 @@ export async function calculateDirectBookingPricing(
     totalAmount,
     totalAmountCents: Math.round(totalAmount * 100),
   };
+}
+
+function toDateKey(date: Date) {
+  return date.toISOString().slice(0, 10);
+}
+
+function addDays(date: Date, days: number) {
+  const next = new Date(date);
+  next.setUTCDate(next.getUTCDate() + days);
+  return next;
+}
+
+function startOfUtcDay(date: Date) {
+  return new Date(
+    Date.UTC(date.getUTCFullYear(), date.getUTCMonth(), date.getUTCDate())
+  );
+}
+
+function buildStayDates(checkIn: Date, nights: number) {
+  return Array.from({ length: nights }, (_, index) =>
+    startOfUtcDay(addDays(checkIn, index))
+  );
 }
