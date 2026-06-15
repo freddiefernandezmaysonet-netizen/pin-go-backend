@@ -158,7 +158,7 @@ adminDemoRouter.post(
 );
 
 adminDemoRouter.post(
-  "/api/admin/webhook-events/:id/reprocess",
+  "/api/internal/webhook-events/:id/reprocess"
   async (req, res) => {
     try {
       const { id } = req.params;
