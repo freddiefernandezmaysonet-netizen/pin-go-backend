@@ -156,3 +156,53 @@ adminDemoRouter.post(
     }
   }
 );
+
+adminDemoRouter.post(
+  "/api/admin/webhook-events/:id/reprocess",
+  async (req, res) => {
+    try {
+      const { id } = req.params;
+
+      const existing = await prisma.webhookEventIngest.findUnique({
+        where: { id },
+      });
+
+      if (!existing) {
+        return res.status(404).json({
+          ok: false,
+          error: "WEBHOOK_EVENT_NOT_FOUND",
+        });
+      }
+
+      await prisma.webhookEventIngest.update({
+        where: { id },
+        data: {
+          status: "PENDING",
+          lastError: null,
+          processedAt: null,
+        },
+      });
+
+      await processWebhookEventById(id);
+
+      const processed = await prisma.webhookEventIngest.findUnique({
+        where: { id },
+      });
+
+      return res.json({
+        ok: true,
+        eventId: id,
+        status: processed?.status ?? null,
+        lastError: processed?.lastError ?? null,
+        processedAt: processed?.processedAt ?? null,
+      });
+    } catch (error: any) {
+      console.error("[WEBHOOK_REPROCESS_ERROR]", error);
+
+      return res.status(500).json({
+        ok: false,
+        error: error?.message ?? "WEBHOOK_REPROCESS_FAILED",
+      });
+    }
+  }
+);
