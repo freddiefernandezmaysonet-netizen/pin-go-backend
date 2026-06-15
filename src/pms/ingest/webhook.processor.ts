@@ -127,26 +127,52 @@ const canonicalHash = safeJsonHash({
     const ingestKey = `PMS:${String(ev.provider)}:${conn.id}:${canonical.externalReservationId}`;
     const listingName = (canonical as any).listingName ?? null;
 
-    // 1) Listing
-    let listing = await prisma.pmsListing.upsert({
+        // 1) Listing
+    let listing = await prisma.pmsListing.findUnique({
       where: {
         connectionId_externalListingId: {
           connectionId: conn.id,
           externalListingId: canonical.externalListingId,
         },
       },
-      create: {
-        connectionId: conn.id,
-        externalListingId: canonical.externalListingId,
-        name: listingName,
-        metadata: canonical as any,
-      },
-      update: {
-        name: listingName ?? undefined,
-        metadata: canonical as any,
-      },
     });
 
+    if (!listing && String(ev.provider) === "CHANNEX") {
+      listing = await prisma.pmsListing.findFirst({
+        where: {
+          connectionId: conn.id,
+          metadata: {
+            path: ["channexPropertyId"],
+            equals: canonical.externalListingId,
+          },
+        },
+      });
+    }
+
+    if (!listing) {
+      listing = await prisma.pmsListing.create({
+        data: {
+          connectionId: conn.id,
+          externalListingId: canonical.externalListingId,
+          name: listingName,
+          metadata: canonical as any,
+        },
+      });
+    } else {
+      listing = await prisma.pmsListing.update({
+        where: { id: listing.id },
+        data: {
+          name: listingName ?? listing.name,
+          metadata: {
+            ...(typeof listing.metadata === "object" && listing.metadata
+              ? (listing.metadata as any)
+              : {}),
+            lastCanonicalReservation: canonical as any,
+          },
+        },
+      });
+    }
+   
     // 2) Auto-map
     if (!listing.propertyId) {
       const props = await prisma.property.findMany({

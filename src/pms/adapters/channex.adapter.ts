@@ -124,7 +124,7 @@ function toCanonicalReservation(raw: any, fallbackId: string): CanonicalReservat
       booking?.arrivalDate
     );
 
-  const checkOut =
+   let checkOut =
     firstString(
       booking?.check_out,
       booking?.checkOut,
@@ -132,6 +132,20 @@ function toCanonicalReservation(raw: any, fallbackId: string): CanonicalReservat
       booking?.departureDate
     );
 
+  if (!checkOut) {
+    const nights = Number(
+      booking?.count_of_nights ??
+        booking?.nights ??
+        booking?.number_of_nights ??
+        0
+    );
+
+    if (checkIn && Number.isFinite(nights) && nights > 0) {
+      const checkoutDate = new Date(`${checkIn}T00:00:00.000Z`);
+      checkoutDate.setUTCDate(checkoutDate.getUTCDate() + nights);
+      checkOut = checkoutDate.toISOString().slice(0, 10);
+    }
+  }
   if (!checkIn || !checkOut) {
     throw new Error("CHANNEX_MISSING_DATES");
   }
@@ -252,11 +266,19 @@ export const channexAdapter: PmsAdapter = {
           booking?.arrival_date,
           booking?.arrivalDate
         ) &&
-        !!firstString(
-          booking?.check_out,
-          booking?.checkOut,
-          booking?.departure_date,
-          booking?.departureDate
+                (
+          !!firstString(
+            booking?.check_out,
+            booking?.checkOut,
+            booking?.departure_date,
+            booking?.departureDate
+          ) ||
+          Number(
+            booking?.count_of_nights ??
+              booking?.nights ??
+              booking?.number_of_nights ??
+              0
+          ) > 0
         ) &&
         !!firstString(
           booking?.room_type_id,
