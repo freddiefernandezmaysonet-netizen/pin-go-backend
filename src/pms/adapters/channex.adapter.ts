@@ -100,13 +100,22 @@ function toCanonicalReservation(raw: any, fallbackId: string): CanonicalReservat
       fallbackId
     ) ?? fallbackId;
 
+const primaryRoom =
+  Array.isArray(booking?.rooms) && booking.rooms.length > 0
+    ? booking.rooms[0]
+    : Array.isArray(raw?.rooms) && raw.rooms.length > 0
+      ? raw.rooms[0]
+      : Array.isArray(raw?.data?.attributes?.rooms) && raw.data.attributes.rooms.length > 0
+        ? raw.data.attributes.rooms[0]
+        : null;
+
 const externalListingId =
   firstString(
     booking?.room_type_id,
     booking?.roomTypeId,
 
-    booking?.rooms?.[0]?.room_type_id,
-    booking?.rooms?.[0]?.roomTypeId,
+    primaryRoom?.room_type_id,
+    primaryRoom?.roomTypeId,
 
     booking?.room_id,
     booking?.roomId,
@@ -117,7 +126,6 @@ const externalListingId =
     booking?.property_id,
     booking?.propertyId
   ); 
- 
  if (!externalListingId) {
     throw new Error("CHANNEX_MISSING_EXTERNAL_LISTING_ID");
   }
@@ -286,17 +294,18 @@ export const channexAdapter: PmsAdapter = {
               0
           ) > 0
         ) &&
-        !!firstString(
-          booking?.room_type_id,
-          booking?.roomTypeId,
-          booking?.room_id,
-          booking?.roomId,
-          booking?.listing_id,
-          booking?.listingId,
-          booking?.property_id,
-          booking?.propertyId
-        );
-
+       !!firstString(
+  booking?.room_type_id,
+  booking?.roomTypeId,
+  booking?.rooms?.[0]?.room_type_id,
+  booking?.rooms?.[0]?.roomTypeId,
+  booking?.room_id,
+  booking?.roomId,
+  booking?.listing_id,
+  booking?.listingId,
+  booking?.property_id,
+  booking?.propertyId
+);
       if (hasInlineReservation) {
         reservation = toCanonicalReservation(
           maybeBooking,
