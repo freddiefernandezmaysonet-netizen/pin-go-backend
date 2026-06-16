@@ -700,10 +700,29 @@ dashboardPropertiesRouter.post(
 
 dashboardPropertiesRouter.get("/:id/nightly-rates", async (req, res) => {
   try {
-    const propertyId = String(req.params.id);
+   const propertyId = String(req.params.id);
 
-    const rates = await prisma.propertyNightlyRate.findMany({
-      where: { propertyId },
+const fromRaw = req.query.from;
+const toRaw = req.query.to;
+
+const where: any = {
+  propertyId,
+};
+
+if (fromRaw || toRaw) {
+  where.date = {};
+
+  if (fromRaw) {
+    where.date.gte = new Date(`${String(fromRaw)}T00:00:00.000Z`);
+  }
+
+  if (toRaw) {
+    where.date.lte = new Date(`${String(toRaw)}T23:59:59.999Z`);
+  }
+}
+
+const rates = await prisma.propertyNightlyRate.findMany({
+  where,
       orderBy: { date: "asc" },
       select: {
         id: true,
