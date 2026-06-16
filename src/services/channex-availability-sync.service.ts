@@ -177,6 +177,27 @@ const apiKey = getChannexApiKey();
     },
   });
 
+const nightlyRates = await prisma.propertyNightlyRate.findMany({
+  where: {
+    propertyId: property.id,
+    date: {
+      gte: from,
+      lt: to,
+    },
+  },
+  select: {
+    date: true,
+    rate: true,
+  },
+});
+
+const nightlyRateByDate = new Map(
+  nightlyRates.map((item) => [
+    toDateKey(item.date),
+    Number(item.rate),
+  ])
+);
+
   const unavailableDateKeys = new Set<string>();
 
   for (const reservation of reservations) {
@@ -226,10 +247,15 @@ const apiKey = getChannexApiKey();
     available: item.availability === 1,
 
     rate: Math.max(
-      Math.round(Number(property.baseNightlyRate ?? 0) * 100),
-      1000
-    ),
- 
+  Math.round(
+    Number(
+      nightlyRateByDate.get(item.date) ??
+        property.baseNightlyRate ??
+        0
+    ) * 100
+  ),
+  1000
+), 
     min_stay_arrival: property.minimumNights ?? 1,
     min_stay_through: property.minimumNights ?? 1,
 
