@@ -809,16 +809,41 @@ dashboardPropertiesRouter.put(
       savedRates.push(saved);
     }
 
-    return res.json({
-      ok: true,
-      rates: savedRates.map((rate) => ({
-        id: rate.id,
-        date: rate.date.toISOString().slice(0, 10),
-        rate: Number(rate.rate),
-        reason: rate.reason,
-      })),
-    });
-  } catch (err) {
+   let distributionSyncResult: any = null;
+
+try {
+  distributionSyncResult = await syncChannexAvailabilityForProperty(propertyId);
+
+  await prisma.property.update({
+    where: { id: propertyId },
+    data: {
+      distributionLastSyncedAt: new Date(),
+      distributionLastError: null,
+    },
+  });
+} catch (syncError: any) {
+  console.error("PUT nightly-rates Channex sync error", syncError);
+
+  await prisma.property.update({
+    where: { id: propertyId },
+    data: {
+      distributionLastError:
+        syncError?.message || "Failed to sync Channex after nightly rate update",
+    },
+  });
+}
+
+return res.json({
+  ok: true,
+  rates: savedRates.map((rate) => ({
+    id: rate.id,
+    date: rate.date.toISOString().slice(0, 10),
+    rate: Number(rate.rate),
+    reason: rate.reason,
+  })),
+  distributionSyncResult,
+});
+   } catch (err) {
     console.error("PUT nightly-rates error", err);
     return res.status(500).json({
       ok: false,
@@ -1483,10 +1508,38 @@ dashboardPropertiesRouter.get(
           updatedAt: true,
         },
       });
+     let distributionSyncResult: any = null;
 
-      return res.json({ ok: true, item });
+try {
+  distributionSyncResult = await syncChannexAvailabilityForProperty(property.id);
+
+  await prisma.property.update({
+    where: { id: property.id },
+    data: {
+      distributionLastSyncedAt: new Date(),
+      distributionLastError: null,
+    },
+  });
+} catch (syncError: any) {
+  console.error("POST blocked-dates Channex sync error", syncError);
+
+  await prisma.property.update({
+    where: { id: property.id },
+    data: {
+      distributionLastError:
+        syncError?.message || "Failed to sync Channex after blocked date update",
+    },
+  });
+}
+
+return res.json({
+  ok: true,
+  item,
+  distributionSyncResult,
+});
     } catch (error: any) {
       console.error("POST blocked dates error", error);
+
       return res.status(500).json({
         ok: false,
         error: error?.message ?? "Failed to create blocked date",
@@ -1494,7 +1547,6 @@ dashboardPropertiesRouter.get(
     }
   }
 );
-
 dashboardPropertiesRouter.delete(
   "/api/dashboard/properties/:id/blocked-dates/:blockedDateId",
   requireAuth,
@@ -1525,11 +1577,38 @@ dashboardPropertiesRouter.delete(
       }
 
       await prisma.propertyBlockedDate.delete({
-        where: { id: blockedDate.id },
-      });
+  where: { id: blockedDate.id },
+});
 
-      return res.json({ ok: true });
-    } catch (error: any) {
+let distributionSyncResult: any = null;
+
+try {
+  distributionSyncResult = await syncChannexAvailabilityForProperty(id);
+
+  await prisma.property.update({
+    where: { id },
+    data: {
+      distributionLastSyncedAt: new Date(),
+      distributionLastError: null,
+    },
+  });
+} catch (syncError: any) {
+  console.error("DELETE blocked-dates Channex sync error", syncError);
+
+  await prisma.property.update({
+    where: { id },
+    data: {
+      distributionLastError:
+        syncError?.message || "Failed to sync Channex after blocked date delete",
+    },
+  });
+}
+
+return res.json({
+  ok: true,
+  distributionSyncResult,
+});
+       } catch (error: any) {
       console.error("DELETE blocked date error", error);
       return res.status(500).json({
         ok: false,
