@@ -3,6 +3,7 @@ import { PrismaClient } from "@prisma/client";
 import { checkPropertyAvailability } from "./availability.service";
 import { ingestReservation } from "./ingest.service";
 import { calculateDirectBookingPricing } from "./direct-booking-pricing.service";
+import { syncChannexAvailabilityForProperty } from "./channex-availability-sync.service";
 import {
   sendDirectBookingGuestConfirmation,
   sendDirectBookingHostNotification,
@@ -221,8 +222,31 @@ if (updatedReservation.guestEmail) {
   }
 }
 
+try {
+  await syncChannexAvailabilityForProperty(property.id);
+
+  await prisma.property.update({
+    where: { id: property.id },
+    data: {
+      distributionLastSyncedAt: new Date(),
+      distributionLastError: null,
+    },
+  });
+} catch (syncError: any) {
+  console.error("[DIRECT_BOOKING_CHANNEX_SYNC_ERROR]", syncError);
+
+  await prisma.property.update({
+    where: { id: property.id },
+    data: {
+      distributionLastError:
+        syncError?.message || "Failed to sync Channex after direct booking",
+    },
+  });
+}
+
 return {
   id: ingestResult.reservationId,
   stripeCheckoutSessionId: session.id,
 };
+
 }
