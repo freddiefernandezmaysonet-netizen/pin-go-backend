@@ -252,6 +252,10 @@ const resolvedCheckOut = applyPropertyTime(
 
 const raw = ev.payloadRaw ?? {};
 const rawCanonical = (canonical as any).raw ?? {};
+const reservationAmount =
+  Number(rawCanonical?.amount ?? 0) > 0
+    ? Number(rawCanonical.amount)
+    : null;
 
 const otaName = String(rawCanonical?.ota_name ?? "").trim();
 
@@ -293,6 +297,7 @@ const reservation = await tx.reservation.upsert({
     paymentState,
     externalId: canonical!.externalReservationId,
     externalProvider: String(ev.provider),
+    totalAmount: reservationAmount,
 },
   update: {
     propertyId: listing.propertyId!,
@@ -308,7 +313,8 @@ const reservation = await tx.reservation.upsert({
     paymentState,
     externalId: canonical!.externalReservationId,
     externalProvider: String(ev.provider),
-  },
+    totalAmount: reservationAmount,
+ },
 });
 
       // ACCESS GRANT (CREATE + UPDATE)
