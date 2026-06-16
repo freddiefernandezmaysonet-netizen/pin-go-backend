@@ -698,7 +698,9 @@ dashboardPropertiesRouter.post(
   }
 );
 
-dashboardPropertiesRouter.get("/:id/nightly-rates", async (req, res) => {
+dashboardPropertiesRouter.get(
+  "/api/dashboard/properties/:id/nightly-rates",
+  async (req, res) => {
   try {
    const propertyId = String(req.params.id);
 
@@ -708,6 +710,7 @@ const toRaw = req.query.to;
 const where: any = {
   propertyId,
 };
+
 
 if (fromRaw || toRaw) {
   where.date = {};
@@ -747,21 +750,22 @@ const rates = await prisma.propertyNightlyRate.findMany({
       ok: false,
       error: "Failed to load nightly rates",
     });
-  }
+   }
 });
 
-dashboardPropertiesRouter.put("/:id/nightly-rates", async (req, res) => {
+dashboardPropertiesRouter.put(
+  "/api/dashboard/properties/:id/nightly-rates",
+  async (req, res) => {
   try {
     const propertyId = String(req.params.id);
     const rates = Array.isArray(req.body?.rates) ? req.body.rates : [];
 
     if (!rates.length) {
-      return res.status(400).json({
-        ok: false,
-        error: "rates must be a non-empty array",
-      });
-    }
-
+  return res.status(400).json({
+    ok: false,
+    error: "rates must be a non-empty array",
+  });
+}
     const savedRates = [];
 
     for (const item of rates) {
