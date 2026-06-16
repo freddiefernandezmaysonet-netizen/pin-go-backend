@@ -109,6 +109,8 @@ export async function processWebhookEventById(eventId: string) {
 
    const rawPayload = ev.payloadRaw as any;
 
+const rawCanonicalForHash = (canonical as any).raw ?? {};
+
 const canonicalHash = safeJsonHash({
   status: canonical.status,
   checkIn: canonical.checkIn,
@@ -117,13 +119,17 @@ const canonicalHash = safeJsonHash({
   notes: canonical.notes,
   listingName: (canonical as any).listingName ?? null,
 
-  // payment-sensitive fields
+  // payment/source-sensitive fields
+  ota_name: rawCanonicalForHash?.ota_name ?? null,
+  payment_collect: rawCanonicalForHash?.payment_collect ?? null,
+  amount: rawCanonicalForHash?.amount ?? null,
+
+  // legacy payment fields
   amount_paid: rawPayload?.amount_paid ?? null,
   amount_due: rawPayload?.amount_due ?? null,
   total_amount: rawPayload?.total_amount ?? null,
   transactions: rawPayload?.transactions ?? null,
-});   
-
+});
     const ingestKey = `PMS:${String(ev.provider)}:${conn.id}:${canonical.externalReservationId}`;
     const listingName = (canonical as any).listingName ?? null;
 
