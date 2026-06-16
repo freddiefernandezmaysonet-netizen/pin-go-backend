@@ -245,18 +245,32 @@ const resolvedCheckOut = applyPropertyTime(
     : "ACTIVE";
 
 const raw = ev.payloadRaw ?? {};
+const rawCanonical = (canonical as any).raw ?? {};
 
-const amountPaid = Number((raw as any)?.amount_paid ?? 0);
-const total = Number((raw as any)?.total_amount ?? 0);
+const otaName = String(rawCanonical?.ota_name ?? "").trim();
 
-let paymentState: "PAID" | "PARTIAL" | "NONE" = "NONE";
+const reservationSource =
+  String(ev.provider) === "CHANNEX" && otaName.length > 0
+    ? otaName
+    : String(ev.provider);
 
-if (total > 0 && amountPaid >= total) {
-  paymentState = "PAID";
-} else if (amountPaid > 0) {
-  paymentState = "PARTIAL";
+let paymentState: "PAID" | "NONE" = "NONE";
+
+if (String(ev.provider) === "CHANNEX") {
+  const paymentCollect = String(rawCanonical?.payment_collect ?? "").toLowerCase();
+  const amount = Number(rawCanonical?.amount ?? 0);
+
+  if (paymentCollect === "ota" && amount > 0) {
+    paymentState = "PAID";
+  }
+} else {
+  const amountPaid = Number((raw as any)?.amount_paid ?? 0);
+  const total = Number((raw as any)?.total_amount ?? 0);
+
+  if (total > 0 && amountPaid >= total) {
+    paymentState = "PAID";
+  }
 }
-
 const reservation = await tx.reservation.upsert({
   where: { ingestKey },
   create: {
@@ -269,7 +283,7 @@ const reservation = await tx.reservation.upsert({
     checkOut: resolvedCheckOut,
     status: reservationStatus, // 🔥 FIX
     ingestKey,
-    source: String(ev.provider),
+    source: reservationSource,
     paymentState,
     externalId: canonical!.externalReservationId,
     externalProvider: String(ev.provider),
@@ -284,7 +298,7 @@ const reservation = await tx.reservation.upsert({
     checkOut: resolvedCheckOut,
     status: reservationStatus, // 🔥 FIX
     ingestKey,
-    source: String(ev.provider),
+    source: reservationSource,
     paymentState,
     externalId: canonical!.externalReservationId,
     externalProvider: String(ev.provider),
