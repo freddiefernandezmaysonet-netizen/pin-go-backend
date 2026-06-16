@@ -302,9 +302,7 @@ export const channexAdapter: PmsAdapter = {
   booking?.room_id,
   booking?.roomId,
   booking?.listing_id,
-  booking?.listingId,
-  booking?.property_id,
-  booking?.propertyId
+  booking?.listingId
 );
       if (hasInlineReservation) {
         reservation = toCanonicalReservation(
