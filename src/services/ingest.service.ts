@@ -51,7 +51,28 @@ function buildIngestKey(p: {
   guestEmail?: string | null;
   guestPhone?: string | null;
   roomName?: string | null;
+  checkIn?: Date | string;
+  checkOut?: Date | string;
+  externalProvider?: string | null;
+  externalId?: string | null;
 }) {
+  const externalProvider = norm(p.externalProvider);
+  const externalId = norm(p.externalId);
+
+  if (externalProvider && externalId) {
+    return crypto
+      .createHash("sha1")
+      .update(
+        [
+          norm(p.source ?? "unknown"),
+          p.propertyId,
+          externalProvider,
+          externalId,
+        ].join("|")
+      )
+      .digest("hex");
+  }
+
   const raw = [
     norm(p.source ?? "unknown"),
     p.propertyId,
@@ -59,6 +80,8 @@ function buildIngestKey(p: {
     norm(p.guestPhone),
     norm(p.roomName),
     norm(p.guestName),
+    p.checkIn instanceof Date ? p.checkIn.toISOString() : norm(String(p.checkIn ?? "")),
+    p.checkOut instanceof Date ? p.checkOut.toISOString() : norm(String(p.checkOut ?? "")),
   ].join("|");
 
   return crypto.createHash("sha1").update(raw).digest("hex");
@@ -278,15 +301,19 @@ async function upsertReservation(
     guestTokenExpiresAt: Date;
   }
 ): Promise<{ reservation: any; didChange: boolean }> {
-  const ingestKey = buildIngestKey({
-    source: input.source,
-    propertyId: input.propertyId,
-    guestName: input.guestName,
-    guestEmail: input.guestEmail ?? null,
-    guestPhone: input.guestPhone ?? null,
-    roomName: input.roomName ?? null,
-  });
-
+ const ingestKey = buildIngestKey({
+  source: input.source,
+  propertyId: input.propertyId,
+  guestName: input.guestName,
+  guestEmail: input.guestEmail ?? null,
+  guestPhone: input.guestPhone ?? null,
+  roomName: input.roomName ?? null,
+  checkIn: input.checkIn,
+  checkOut: input.checkOut,
+  externalProvider: input.externalProvider ?? null,
+  externalId: input.externalId ?? null,
+});
+  
   const hasPmsKey = !!(input.externalProvider && input.externalId);
 
   if (hasPmsKey) {
