@@ -1,8 +1,10 @@
 import { Router } from "express";
+import crypto from "crypto";
 import { AmenityChargeMode, AmenityFeeType, PrismaClient, ReservationStatus } from "@prisma/client";
 import { requireAuth } from "../middleware/requireAuth";
 import { provisionChannexProperty } from "../services/channex-provisioning.service";
 import { syncChannexAvailabilityForProperty } from "../services/channex-availability-sync.service";
+import { ingestReservation } from "../services/ingest.service";
 
 const prisma = new PrismaClient();
 export const dashboardPropertiesRouter = Router();
@@ -596,6 +598,134 @@ if (checkOutTime !== undefined) {
       return res.status(500).json({
         ok: false,
         error: error?.message ?? "Failed to update property",
+      });
+    }
+  }
+);
+
+dashboardPropertiesRouter.post(
+  "/api/dashboard/properties/:id/manual-reservations",
+  requireAuth,
+  async (req, res) => {
+    try {
+      const user = (req as any).user;
+      const orgId = user.orgId as string;
+      const { id } = req.params;
+
+      const {
+        guestName,
+        guestEmail,
+        guestPhone,
+        checkIn,
+        checkOut,
+        paymentState,
+      } = req.body ?? {};
+
+      const cleanGuestName = String(guestName || "").trim();
+      const cleanGuestEmail = String(guestEmail || "").trim() || null;
+      const cleanGuestPhone = String(guestPhone || "").trim() || null;
+      const cleanPaymentState = String(paymentState || "NONE").trim();
+
+      if (!cleanGuestName) {
+        return res.status(400).json({
+          ok: false,
+          error: "Guest name is required",
+        });
+      }
+
+      if (!checkIn || !checkOut) {
+        return res.status(400).json({
+          ok: false,
+          error: "checkIn and checkOut are required",
+        });
+      }
+
+      if (!["NONE", "PAID", "PENDING"].includes(cleanPaymentState)) {
+        return res.status(400).json({
+          ok: false,
+          error: "Invalid paymentState",
+        });
+      }
+
+      const property = await prisma.property.findFirst({
+        where: {
+          id,
+          organizationId: orgId,
+          status: "ACTIVE",
+        },
+        select: {
+          id: true,
+          name: true,
+        },
+      });
+
+      if (!property) {
+        return res.status(404).json({
+          ok: false,
+          error: "Property not found",
+        });
+      }
+
+      const result = await ingestReservation({
+        source: "MANUAL",
+        propertyId: property.id,
+        guestName: cleanGuestName,
+        guestEmail: cleanGuestEmail,
+        guestPhone: cleanGuestPhone,
+        roomName: property.name,
+        checkIn: String(checkIn),
+        checkOut: String(checkOut),
+        paymentState: cleanPaymentState as "NONE" | "PAID" | "PENDING",
+        externalProvider: "PIN_GO_MANUAL",
+        externalId: crypto.randomUUID(),
+        externalUpdatedAt: new Date().toISOString(),
+        externalRaw: {
+          createdFrom: "CALENDAR_V2",
+          paymentState: cleanPaymentState,
+        },
+        status: "ACTIVE",
+      });
+
+      let distributionSyncResult: any = null;
+
+      try {
+        distributionSyncResult = await syncChannexAvailabilityForProperty(
+          property.id
+        );
+
+        await prisma.property.update({
+          where: { id: property.id },
+          data: {
+            distributionLastSyncedAt: new Date(),
+            distributionLastError: null,
+          },
+        });
+      } catch (syncError: any) {
+        console.error("POST manual-reservations Channex sync error", syncError);
+
+        await prisma.property.update({
+          where: { id: property.id },
+          data: {
+            distributionLastError:
+              syncError?.message ||
+              "Failed to sync Channex after manual reservation",
+          },
+        });
+      }
+
+      return res.json({
+        ok: true,
+        reservationId: result.reservationId,
+        guestToken: result.guestToken,
+        accessGrantId: result.accessGrantId ?? null,
+        distributionSyncResult,
+      });
+    } catch (error: any) {
+      console.error("POST manual reservation error", error);
+
+      return res.status(500).json({
+        ok: false,
+        error: error?.message ?? "Failed to create manual reservation",
       });
     }
   }
