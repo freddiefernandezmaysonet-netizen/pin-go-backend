@@ -26,6 +26,8 @@ export async function calculateDirectBookingPricing(
       baseNightlyRate: true,
       minimumNightlyRate: true,
       maximumNightlyRate: true,
+      dynamicPricingEnabled: true,
+      weekendMarkupPercent: true,
       cleaningFee: true,
       amenities: {
         where: { isActive: true },
