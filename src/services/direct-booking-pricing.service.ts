@@ -84,11 +84,30 @@ export async function calculateDirectBookingPricing(
   }
 
   const fallbackNightlyRate = toMoney(property.baseNightlyRate);
-  const minimumNightlyRate =
+ const minimumNightlyRate =
   property.minimumNightlyRate != null ? toMoney(property.minimumNightlyRate) : null;
 
 const maximumNightlyRate =
   property.maximumNightlyRate != null ? toMoney(property.maximumNightlyRate) : null;
+
+const dynamicPricingEnabled = Boolean(property.dynamicPricingEnabled);
+const weekendMarkupPercent =
+  property.weekendMarkupPercent != null
+    ? toMoney(property.weekendMarkupPercent)
+    : 0;
+
+function isWeekendNight(date: Date) {
+  const day = date.getUTCDay();
+  return day === 5 || day === 6;
+}
+
+function applyWeekendRule(rate: number, date: Date) {
+  if (!dynamicPricingEnabled) return rate;
+  if (weekendMarkupPercent <= 0) return rate;
+  if (!isWeekendNight(date)) return rate;
+
+  return toMoney(rate * (1 + weekendMarkupPercent / 100));
+}
 
 function applyPricingBounds(rate: number) {
   let finalRate = rate;
@@ -103,11 +122,12 @@ function applyPricingBounds(rate: number) {
 
   return finalRate;
 }
-  const stayDates = buildStayDates(input.checkIn, nights);
 
-  const nightlyRateByDate = new Map(
-    property.nightlyRates.map((item) => [
-     toDateKey(item.date),
+const stayDates = buildStayDates(input.checkIn, nights);
+
+const nightlyRateByDate = new Map(
+  property.nightlyRates.map((item) => [
+    toDateKey(item.date),
     {
       rate: toMoney(item.rate),
       reason: item.reason ?? "CUSTOM_RATE",
@@ -118,11 +138,17 @@ function applyPricingBounds(rate: number) {
 const nightlyRates = stayDates.map((date) => {
   const dateKey = toDateKey(date);
   const override = nightlyRateByDate.get(dateKey);
+  const baseRateForDate = override?.rate ?? fallbackNightlyRate;
+  const weekendAdjustedRate = applyWeekendRule(baseRateForDate, date);
 
   return {
     date: dateKey,
-    rate: applyPricingBounds(override?.rate ?? fallbackNightlyRate),
-    reason: override?.reason ?? "BASE_RATE",
+    rate: applyPricingBounds(weekendAdjustedRate),
+    reason:
+      override?.reason ??
+      (dynamicPricingEnabled && weekendMarkupPercent > 0 && isWeekendNight(date)
+        ? "WEEKEND_RULE"
+        : "BASE_RATE"),
   };
 });
 
@@ -131,7 +157,7 @@ const cleaningFee = toMoney(property.cleaningFee);
 const nightlySubtotal = toMoney(
   nightlyRates.reduce((sum, item) => sum + item.rate, 0)
 );
-  
+
 const amenityItems = property.amenities.map((amenity) => {
     const baseAmount = toMoney(amenity.amount);
 

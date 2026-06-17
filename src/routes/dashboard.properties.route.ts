@@ -149,6 +149,7 @@ dashboardPropertiesRouter.get(
           slug: true,
           isPublicBookable: true,
           distributionEnabled: true,
+          dynamicPricingEnabled: true,
           distributionStatus: true,
           distributionEnabledAt: true,
           distributionLastSyncedAt: true,
@@ -159,6 +160,7 @@ dashboardPropertiesRouter.get(
           baseNightlyRate: true,
           minimumNightlyRate: true,
           maximumNightlyRate: true,
+          weekendMarkupPercent: true,
           cleaningFee: true,
           maxGuests: true,
           minimumNights: true,
@@ -242,6 +244,7 @@ dashboardPropertiesRouter.patch(
   slug,
   isPublicBookable,
   distributionEnabled,
+  dynamicPricingEnabled,
   publicTitle,
   publicDescription,
   publicPhotos,
@@ -261,6 +264,7 @@ const longitude = parseOptionalCoordinate(longitudeRaw);
 const baseNightlyRate = parseOptionalMoney(baseNightlyRateRaw);
 const minimumNightlyRate = parseOptionalMoney(minimumNightlyRateRaw);
 const maximumNightlyRate = parseOptionalMoney(maximumNightlyRateRaw);
+const weekendMarkupPercent = parseOptionalMoney(weekendMarkupPercentRaw);
 const cleaningFee = parseOptionalMoney(cleaningFeeRaw);
 const maxGuests = parseOptionalInt(maxGuestsRaw);
 const minimumNights = parseOptionalInt(minimumNightsRaw);
@@ -277,6 +281,10 @@ if (Number.isNaN(minimumNightlyRate)) {
 if (Number.isNaN(maximumNightlyRate)) {
   return res.status(400).json({ ok: false, error: "maximumNightlyRate must be a valid amount" });
 }
+
+ if (Number.isNaN(weekendMarkupPercent)) {
+    return res.status(400).json({ ok: false, error: "weekendMarkupPercent must be a valid amount" });
+  }
 
 if (
   minimumNightlyRate !== null &&
@@ -466,6 +474,10 @@ if (distributionEnabled !== undefined) {
   data.distributionEnabled = Boolean(distributionEnabled);
 }
 
+if (dynamicPricingEnabled !== undefined) {
+  data.dynamicPricingEnabled = Boolean(dynamicPricingEnabled);
+}
+
 if (publicTitle !== undefined) {
   data.publicTitle = String(publicTitle || "").trim() || null;
 }
@@ -488,6 +500,10 @@ if (minimumNightlyRateRaw !== undefined) {
 
 if (maximumNightlyRateRaw !== undefined) {
   data.maximumNightlyRate = maximumNightlyRate;
+}
+
+if (weekendMarkupPercentRaw !== undefined) {
+  data.weekendMarkupPercent = weekendMarkupPercent;
 }
 
 if (cleaningFeeRaw !== undefined) {
@@ -534,16 +550,18 @@ if (checkOutTime !== undefined) {
           slug: true,
           isPublicBookable: true,
           distributionEnabled: true,
-         distributionStatus: true,
-         distributionEnabledAt: true,
-         distributionLastSyncedAt: true,
-         distributionLastError: true,
+          dynamicPricingEnabled: true,
+          distributionStatus: true,
+          distributionEnabledAt: true,
+          distributionLastSyncedAt: true,
+          distributionLastError: true,
           publicTitle: true,
           publicDescription: true,
           publicPhotos: true,
           baseNightlyRate: true,
           minimumNightlyRate: true,
           maximumNightlyRate: true,
+          weekendMarkupPercent: true,
           cleaningFee: true,
           maxGuests: true,
           minimumNights: true,

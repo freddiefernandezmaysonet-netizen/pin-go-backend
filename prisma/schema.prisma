@@ -93,6 +93,8 @@ model Property {
   baseNightlyRate            Decimal?                    @db.Decimal(10,2)
   minimumNightlyRate         Decimal?                    @db.Decimal(10,2)
   maximumNightlyRate         Decimal?                    @db.Decimal(10,2)
+  dynamicPricingEnabled      Boolean                     @default(false)
+  weekendMarkupPercent       Decimal?                    @db.Decimal(5,2)
   cleaningFee                Decimal?                    @db.Decimal(10,2)
   maxGuests                  Int?
   minimumNights              Int                         @default(1)
