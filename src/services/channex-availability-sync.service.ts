@@ -54,6 +54,8 @@ export async function syncChannexAvailabilityForProperty(
   baseNightlyRate: true,
   minimumNightlyRate: true,
   maximumNightlyRate: true,
+  dynamicPricingEnabled: true,
+  weekendMarkupPercent: true,
 },
   });
 
@@ -238,7 +240,7 @@ const nightlyRateByDate = new Map(
     };
   });
 
-  const minimumNightlyRate =
+ const minimumNightlyRate =
   property.minimumNightlyRate != null
     ? Number(property.minimumNightlyRate)
     : null;
@@ -247,6 +249,28 @@ const maximumNightlyRate =
   property.maximumNightlyRate != null
     ? Number(property.maximumNightlyRate)
     : null;
+
+const dynamicPricingEnabled = Boolean(property.dynamicPricingEnabled);
+
+const weekendMarkupPercent =
+  property.weekendMarkupPercent != null
+    ? Number(property.weekendMarkupPercent)
+    : 0;
+
+function isWeekendNight(dateKey: string) {
+  const date = new Date(`${dateKey}T00:00:00.000Z`);
+  const day = date.getUTCDay();
+
+  return day === 5 || day === 6;
+}
+
+function applyWeekendRule(rate: number, dateKey: string) {
+  if (!dynamicPricingEnabled) return rate;
+  if (weekendMarkupPercent <= 0) return rate;
+  if (!isWeekendNight(dateKey)) return rate;
+
+  return Math.round(rate * (1 + weekendMarkupPercent / 100) * 100) / 100;
+}
 
 function applyPricingBounds(rate: number) {
   let finalRate = rate;
@@ -262,7 +286,17 @@ function applyPricingBounds(rate: number) {
   return finalRate;
 }
 
-  const ratesPayload = availabilityPreview.map((item) => ({
+const ratesPayload = availabilityPreview.map((item) => {
+  const baseRateForDate = Number(
+    nightlyRateByDate.get(item.date) ??
+      property.baseNightlyRate ??
+      0
+  );
+
+  const weekendAdjustedRate = applyWeekendRule(baseRateForDate, item.date);
+  const finalRate = applyPricingBounds(weekendAdjustedRate);
+
+  return {
     property_id: channexPropertyId,
     rate_plan_id: channexRatePlanId,
     date: item.date,
@@ -270,23 +304,13 @@ function applyPricingBounds(rate: number) {
     availability: item.availability,
     available: item.availability === 1,
 
-   rate: Math.max(
-  Math.round(
-    applyPricingBounds(
-      Number(
-        nightlyRateByDate.get(item.date) ??
-          property.baseNightlyRate ??
-          0
-      )
-    ) * 100
-  ),
-  1000
-),
+    rate: Math.max(Math.round(finalRate * 100), 1000),
+
     min_stay_arrival: property.minimumNights ?? 1,
     min_stay_through: property.minimumNights ?? 1,
-
- }));
-
+  };
+});
+  
   let ratesResp;
 
   try {
