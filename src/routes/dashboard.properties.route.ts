@@ -251,6 +251,7 @@ dashboardPropertiesRouter.patch(
   baseNightlyRate: baseNightlyRateRaw,
   minimumNightlyRate: minimumNightlyRateRaw,
   maximumNightlyRate: maximumNightlyRateRaw,
+  weekendMarkupPercent: weekendMarkupPercentRaw,
   cleaningFee: cleaningFeeRaw,
   maxGuests: maxGuestsRaw,
   minimumNights: minimumNightsRaw,
