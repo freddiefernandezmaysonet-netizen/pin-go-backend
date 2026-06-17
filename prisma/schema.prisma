@@ -91,6 +91,8 @@ model Property {
   publicDescription          String?
   publicPhotos               Json?
   baseNightlyRate            Decimal?                    @db.Decimal(10,2)
+  minimumNightlyRate         Decimal?                    @db.Decimal(10,2)
+  maximumNightlyRate         Decimal?                    @db.Decimal(10,2)
   cleaningFee                Decimal?                    @db.Decimal(10,2)
   maxGuests                  Int?
   minimumNights              Int                         @default(1)
