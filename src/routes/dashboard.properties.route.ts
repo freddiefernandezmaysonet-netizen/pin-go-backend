@@ -930,6 +930,32 @@ dashboardPropertiesRouter.put(
     error: "rates must be a non-empty array",
   });
 }
+    const property = await prisma.property.findUnique({
+  where: { id: propertyId },
+  select: {
+    id: true,
+    minimumNightlyRate: true,
+    maximumNightlyRate: true,
+  },
+});
+
+if (!property) {
+  return res.status(404).json({
+    ok: false,
+    error: "Property not found",
+  });
+}
+
+const minimumNightlyRate =
+  property.minimumNightlyRate != null
+    ? Number(property.minimumNightlyRate)
+    : null;
+
+const maximumNightlyRate =
+  property.maximumNightlyRate != null
+    ? Number(property.maximumNightlyRate)
+    : null;
+
     const savedRates = [];
 
     for (const item of rates) {
@@ -942,6 +968,20 @@ dashboardPropertiesRouter.put(
           error: "Each rate must include a valid date and rate",
         });
       }
+
+if (minimumNightlyRate !== null && rateNumber < minimumNightlyRate) {
+  return res.status(400).json({
+    ok: false,
+    error: `Rate cannot be lower than minimumNightlyRate (${minimumNightlyRate})`,
+  });
+}
+
+if (maximumNightlyRate !== null && rateNumber > maximumNightlyRate) {
+  return res.status(400).json({
+    ok: false,
+    error: `Rate cannot be greater than maximumNightlyRate (${maximumNightlyRate})`,
+  });
+}
 
       const date = new Date(`${dateRaw}T00:00:00.000Z`);
 
