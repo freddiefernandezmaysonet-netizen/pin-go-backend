@@ -157,6 +157,8 @@ dashboardPropertiesRouter.get(
           publicDescription: true,
           publicPhotos: true,
           baseNightlyRate: true,
+          minimumNightlyRate: true,
+          maximumNightlyRate: true,
           cleaningFee: true,
           maxGuests: true,
           minimumNights: true,
@@ -226,42 +228,65 @@ dashboardPropertiesRouter.patch(
       const orgId = user.orgId as string;
       const { id } = req.params;
 
-      const {
-        name,
-        address1,
-        city,
-        region,
-        country,
-        timezone,
-        cleaningDurationMinutes,
-        cleaningStartOffsetMinutes,
-        latitude: latitudeRaw,
-        longitude: longitudeRaw,
-        slug,
-        isPublicBookable,
-        distributionEnabled,
-        publicTitle,
-        publicDescription,
-        publicPhotos,
-        baseNightlyRate: baseNightlyRateRaw,
-        cleaningFee: cleaningFeeRaw,
-        maxGuests: maxGuestsRaw,
-        minimumNights: minimumNightsRaw,
-        maximumNights: maximumNightsRaw,
-        checkInTime,
-        checkOutTime,
-      } = req.body ?? {};
+    const {
+  name,
+  address1,
+  city,
+  region,
+  country,
+  timezone,
+  cleaningDurationMinutes,
+  cleaningStartOffsetMinutes,
+  latitude: latitudeRaw,
+  longitude: longitudeRaw,
+  slug,
+  isPublicBookable,
+  distributionEnabled,
+  publicTitle,
+  publicDescription,
+  publicPhotos,
+  baseNightlyRate: baseNightlyRateRaw,
+  minimumNightlyRate: minimumNightlyRateRaw,
+  maximumNightlyRate: maximumNightlyRateRaw,
+  cleaningFee: cleaningFeeRaw,
+  maxGuests: maxGuestsRaw,
+  minimumNights: minimumNightsRaw,
+  maximumNights: maximumNightsRaw,
+  checkInTime,
+  checkOutTime,
+} = req.body ?? {};
 
-      const latitude = parseOptionalCoordinate(latitudeRaw);
-      const longitude = parseOptionalCoordinate(longitudeRaw);
-      const baseNightlyRate = parseOptionalMoney(baseNightlyRateRaw);
-      const cleaningFee = parseOptionalMoney(cleaningFeeRaw);
-      const maxGuests = parseOptionalInt(maxGuestsRaw);
-      const minimumNights = parseOptionalInt(minimumNightsRaw);
-      const maximumNights = parseOptionalInt(maximumNightsRaw);
+const latitude = parseOptionalCoordinate(latitudeRaw);
+const longitude = parseOptionalCoordinate(longitudeRaw);
+const baseNightlyRate = parseOptionalMoney(baseNightlyRateRaw);
+const minimumNightlyRate = parseOptionalMoney(minimumNightlyRateRaw);
+const maximumNightlyRate = parseOptionalMoney(maximumNightlyRateRaw);
+const cleaningFee = parseOptionalMoney(cleaningFeeRaw);
+const maxGuests = parseOptionalInt(maxGuestsRaw);
+const minimumNights = parseOptionalInt(minimumNightsRaw);
+const maximumNights = parseOptionalInt(maximumNightsRaw);
 
 if (Number.isNaN(baseNightlyRate)) {
   return res.status(400).json({ ok: false, error: "baseNightlyRate must be a valid amount" });
+}
+
+if (Number.isNaN(minimumNightlyRate)) {
+  return res.status(400).json({ ok: false, error: "minimumNightlyRate must be a valid amount" });
+}
+
+if (Number.isNaN(maximumNightlyRate)) {
+  return res.status(400).json({ ok: false, error: "maximumNightlyRate must be a valid amount" });
+}
+
+if (
+  minimumNightlyRate !== null &&
+  maximumNightlyRate !== null &&
+  minimumNightlyRate > maximumNightlyRate
+) {
+  return res.status(400).json({
+    ok: false,
+    error: "minimumNightlyRate cannot be greater than maximumNightlyRate",
+  });
 }
 
 if (Number.isNaN(cleaningFee)) {
@@ -291,7 +316,6 @@ if (
     error: "minimumNights cannot be greater than maximumNights",
   });
 }
-
       if (Number.isNaN(latitude)) {
         return res.status(400).json({
           ok: false,
@@ -458,6 +482,14 @@ if (baseNightlyRateRaw !== undefined) {
   data.baseNightlyRate = baseNightlyRate;
 }
 
+if (minimumNightlyRateRaw !== undefined) {
+  data.minimumNightlyRate = minimumNightlyRate;
+}
+
+if (maximumNightlyRateRaw !== undefined) {
+  data.maximumNightlyRate = maximumNightlyRate;
+}
+
 if (cleaningFeeRaw !== undefined) {
   data.cleaningFee = cleaningFee;
 }
@@ -510,6 +542,8 @@ if (checkOutTime !== undefined) {
           publicDescription: true,
           publicPhotos: true,
           baseNightlyRate: true,
+          minimumNightlyRate: true,
+          maximumNightlyRate: true,
           cleaningFee: true,
           maxGuests: true,
           minimumNights: true,
