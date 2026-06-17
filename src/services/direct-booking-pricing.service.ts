@@ -24,6 +24,8 @@ export async function calculateDirectBookingPricing(
     select: {
       id: true,
       baseNightlyRate: true,
+      minimumNightlyRate: true,
+      maximumNightlyRate: true,
       cleaningFee: true,
       amenities: {
         where: { isActive: true },
@@ -82,11 +84,30 @@ export async function calculateDirectBookingPricing(
   }
 
   const fallbackNightlyRate = toMoney(property.baseNightlyRate);
-const stayDates = buildStayDates(input.checkIn, nights);
+  const minimumNightlyRate =
+  property.minimumNightlyRate != null ? toMoney(property.minimumNightlyRate) : null;
 
-const nightlyRateByDate = new Map(
-  property.nightlyRates.map((item) => [
-    toDateKey(item.date),
+const maximumNightlyRate =
+  property.maximumNightlyRate != null ? toMoney(property.maximumNightlyRate) : null;
+
+function applyPricingBounds(rate: number) {
+  let finalRate = rate;
+
+  if (minimumNightlyRate !== null && finalRate < minimumNightlyRate) {
+    finalRate = minimumNightlyRate;
+  }
+
+  if (maximumNightlyRate !== null && finalRate > maximumNightlyRate) {
+    finalRate = maximumNightlyRate;
+  }
+
+  return finalRate;
+}
+  const stayDates = buildStayDates(input.checkIn, nights);
+
+  const nightlyRateByDate = new Map(
+    property.nightlyRates.map((item) => [
+     toDateKey(item.date),
     {
       rate: toMoney(item.rate),
       reason: item.reason ?? "CUSTOM_RATE",
@@ -100,7 +121,7 @@ const nightlyRates = stayDates.map((date) => {
 
   return {
     date: dateKey,
-    rate: override?.rate ?? fallbackNightlyRate,
+    rate: applyPricingBounds(override?.rate ?? fallbackNightlyRate),
     reason: override?.reason ?? "BASE_RATE",
   };
 });

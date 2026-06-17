@@ -52,6 +52,8 @@ export async function syncChannexAvailabilityForProperty(
   maxGuests: true,
   minimumNights: true,
   baseNightlyRate: true,
+  minimumNightlyRate: true,
+  maximumNightlyRate: true,
 },
   });
 
@@ -236,7 +238,29 @@ const nightlyRateByDate = new Map(
     };
   });
 
-  
+  const minimumNightlyRate =
+  property.minimumNightlyRate != null
+    ? Number(property.minimumNightlyRate)
+    : null;
+
+const maximumNightlyRate =
+  property.maximumNightlyRate != null
+    ? Number(property.maximumNightlyRate)
+    : null;
+
+function applyPricingBounds(rate: number) {
+  let finalRate = rate;
+
+  if (minimumNightlyRate !== null && finalRate < minimumNightlyRate) {
+    finalRate = minimumNightlyRate;
+  }
+
+  if (maximumNightlyRate !== null && finalRate > maximumNightlyRate) {
+    finalRate = maximumNightlyRate;
+  }
+
+  return finalRate;
+}
 
   const ratesPayload = availabilityPreview.map((item) => ({
     property_id: channexPropertyId,
@@ -246,16 +270,18 @@ const nightlyRateByDate = new Map(
     availability: item.availability,
     available: item.availability === 1,
 
-    rate: Math.max(
+   rate: Math.max(
   Math.round(
-    Number(
-      nightlyRateByDate.get(item.date) ??
-        property.baseNightlyRate ??
-        0
+    applyPricingBounds(
+      Number(
+        nightlyRateByDate.get(item.date) ??
+          property.baseNightlyRate ??
+          0
+      )
     ) * 100
   ),
   1000
-), 
+),
     min_stay_arrival: property.minimumNights ?? 1,
     min_stay_through: property.minimumNights ?? 1,
 
