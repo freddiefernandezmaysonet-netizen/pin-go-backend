@@ -151,6 +151,9 @@ dashboardPropertiesRouter.get(
           distributionEnabled: true,
           dynamicPricingEnabled: true,
           distributionStatus: true,
+          leadTimePricingEnabled: true,
+          leadTimeLastMinuteDays: true,
+          leadTimeLastMinutePercent: true,
           distributionEnabledAt: true,
           distributionLastSyncedAt: true,
           distributionLastError: true,
@@ -246,6 +249,9 @@ dashboardPropertiesRouter.patch(
   distributionEnabled,
   dynamicPricingEnabled,
   publicTitle,
+  leadTimePricingEnabled,
+  leadTimeLastMinuteDays: leadTimeLastMinuteDaysRaw,
+  leadTimeLastMinutePercent: leadTimeLastMinutePercentRaw,
   publicDescription,
   publicPhotos,
   baseNightlyRate: baseNightlyRateRaw,
@@ -266,6 +272,11 @@ const baseNightlyRate = parseOptionalMoney(baseNightlyRateRaw);
 const minimumNightlyRate = parseOptionalMoney(minimumNightlyRateRaw);
 const maximumNightlyRate = parseOptionalMoney(maximumNightlyRateRaw);
 const weekendMarkupPercent = parseOptionalMoney(weekendMarkupPercentRaw);
+const parsedLeadTimeLastMinuteDays =
+  parseOptionalInt(leadTimeLastMinuteDaysRaw);
+
+const parsedLeadTimeLastMinutePercent =
+  parseOptionalMoney(leadTimeLastMinutePercentRaw);
 const cleaningFee = parseOptionalMoney(cleaningFeeRaw);
 const maxGuests = parseOptionalInt(maxGuestsRaw);
 const minimumNights = parseOptionalInt(minimumNightsRaw);
@@ -286,6 +297,20 @@ if (Number.isNaN(maximumNightlyRate)) {
  if (Number.isNaN(weekendMarkupPercent)) {
     return res.status(400).json({ ok: false, error: "weekendMarkupPercent must be a valid amount" });
   }
+
+if (Number.isNaN(parsedLeadTimeLastMinuteDays)) {
+  return res.status(400).json({
+    ok: false,
+    error: "leadTimeLastMinuteDays must be a valid number",
+  });
+}
+
+if (Number.isNaN(parsedLeadTimeLastMinutePercent)) {
+  return res.status(400).json({
+    ok: false,
+    error: "leadTimeLastMinutePercent must be a valid amount",
+  });
+}
 
 if (
   minimumNightlyRate !== null &&
@@ -479,6 +504,20 @@ if (dynamicPricingEnabled !== undefined) {
   data.dynamicPricingEnabled = Boolean(dynamicPricingEnabled);
 }
 
+if (leadTimePricingEnabled !== undefined) {
+  data.leadTimePricingEnabled = Boolean(leadTimePricingEnabled);
+}
+
+if (leadTimeLastMinuteDaysRaw !== undefined) {
+  data.leadTimeLastMinuteDays =
+    parsedLeadTimeLastMinuteDays ?? 3;
+}
+
+if (leadTimeLastMinutePercentRaw !== undefined) {
+  data.leadTimeLastMinutePercent =
+    parsedLeadTimeLastMinutePercent;
+}
+
 if (publicTitle !== undefined) {
   data.publicTitle = String(publicTitle || "").trim() || null;
 }
@@ -552,6 +591,9 @@ if (checkOutTime !== undefined) {
           isPublicBookable: true,
           distributionEnabled: true,
           dynamicPricingEnabled: true,
+          leadTimePricingEnabled: true,
+          leadTimeLastMinuteDays: true,
+          leadTimeLastMinutePercent: true,
           distributionStatus: true,
           distributionEnabledAt: true,
           distributionLastSyncedAt: true,

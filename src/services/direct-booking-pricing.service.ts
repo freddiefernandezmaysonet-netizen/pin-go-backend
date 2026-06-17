@@ -28,6 +28,9 @@ export async function calculateDirectBookingPricing(
       maximumNightlyRate: true,
       dynamicPricingEnabled: true,
       weekendMarkupPercent: true,
+      leadTimePricingEnabled: true,
+      leadTimeLastMinuteDays: true,
+      leadTimeLastMinutePercent: true,
       cleaningFee: true,
       amenities: {
         where: { isActive: true },
@@ -98,6 +101,18 @@ const weekendMarkupPercent =
     ? toMoney(property.weekendMarkupPercent)
     : 0;
 
+const leadTimePricingEnabled = Boolean(property.leadTimePricingEnabled);
+
+const leadTimeLastMinuteDays =
+  property.leadTimeLastMinuteDays != null
+    ? Number(property.leadTimeLastMinuteDays)
+    : 3;
+
+const leadTimeLastMinutePercent =
+  property.leadTimeLastMinutePercent != null
+    ? toMoney(property.leadTimeLastMinutePercent)
+    : 0;
+
 function isWeekendNight(date: Date) {
   const day = date.getUTCDay();
   return day === 5 || day === 6;
@@ -109,6 +124,30 @@ function applyWeekendRule(rate: number, date: Date) {
   if (!isWeekendNight(date)) return rate;
 
   return toMoney(rate * (1 + weekendMarkupPercent / 100));
+}
+
+function getLeadTimeDays(date: Date) {
+  const today = startOfUtcDay(new Date());
+  const arrivalDate = startOfUtcDay(date);
+
+  return Math.ceil(
+    (arrivalDate.getTime() - today.getTime()) / (1000 * 60 * 60 * 24)
+  );
+}
+
+function applyLeadTimeRule(rate: number, date: Date) {
+  if (!dynamicPricingEnabled) return rate;
+  if (!leadTimePricingEnabled) return rate;
+  if (!Number.isFinite(leadTimeLastMinuteDays)) return rate;
+  if (leadTimeLastMinuteDays <= 0) return rate;
+  if (leadTimeLastMinutePercent === 0) return rate;
+
+  const daysBeforeArrival = getLeadTimeDays(date);
+
+  if (daysBeforeArrival < 0) return rate;
+  if (daysBeforeArrival > leadTimeLastMinuteDays) return rate;
+
+  return toMoney(rate * (1 + leadTimeLastMinutePercent / 100));
 }
 
 function applyPricingBounds(rate: number) {
@@ -141,16 +180,24 @@ const nightlyRates = stayDates.map((date) => {
   const dateKey = toDateKey(date);
   const override = nightlyRateByDate.get(dateKey);
   const baseRateForDate = override?.rate ?? fallbackNightlyRate;
-  const weekendAdjustedRate = applyWeekendRule(baseRateForDate, date);
+const weekendAdjustedRate = applyWeekendRule(baseRateForDate, date);
+const leadTimeAdjustedRate = applyLeadTimeRule(weekendAdjustedRate, date);
 
-  return {
-    date: dateKey,
-    rate: applyPricingBounds(weekendAdjustedRate),
-    reason:
-      override?.reason ??
-      (dynamicPricingEnabled && weekendMarkupPercent > 0 && isWeekendNight(date)
-        ? "WEEKEND_RULE"
-        : "BASE_RATE"),
+return {
+  date: dateKey,
+  rate: applyPricingBounds(leadTimeAdjustedRate),
+   reason:
+  override?.reason ??
+  (dynamicPricingEnabled &&
+  leadTimePricingEnabled &&
+  leadTimeLastMinutePercent !== 0 &&
+  getLeadTimeDays(date) >= 0 &&
+  getLeadTimeDays(date) <= leadTimeLastMinuteDays
+    ? "LEAD_TIME_RULE"
+    : dynamicPricingEnabled && weekendMarkupPercent > 0 && isWeekendNight(date)
+    ? "WEEKEND_RULE"
+    : "BASE_RATE"),
+
   };
 });
 
