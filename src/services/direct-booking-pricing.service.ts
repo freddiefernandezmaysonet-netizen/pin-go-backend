@@ -68,37 +68,6 @@ export async function calculateDirectBookingPricing(
     },
   },
   
-    reservations: {
-  where: {
-    status: ReservationStatus.ACTIVE,
-    checkIn: {
-      lt: startOfUtcDay(input.checkOut),
-    },
-    checkOut: {
-      gt: startOfUtcDay(input.checkIn),
-    },
-  },
-  select: {
-    checkIn: true,
-    checkOut: true,
-  },
-},
-
-blockedDates: {
-  where: {
-    startDate: {
-      lt: startOfUtcDay(input.checkOut),
-    },
-    endDate: {
-      gt: startOfUtcDay(input.checkIn),
-    },
-  },
-  select: {
-    startDate: true,
-    endDate: true,
-  },
-},
-
  select: {
     date: true,
     rate: true,
@@ -125,6 +94,39 @@ blockedDates: {
   if (!Number.isFinite(nights) || nights <= 0) {
     throw new Error("Invalid number of nights");
   }
+
+const occupancyReservations = await prisma.reservation.findMany({
+  where: {
+    propertyId: input.propertyId,
+    status: "ACTIVE",
+    checkIn: {
+      lt: startOfUtcDay(input.checkOut),
+    },
+    checkOut: {
+      gt: startOfUtcDay(input.checkIn),
+    },
+  },
+  select: {
+    checkIn: true,
+    checkOut: true,
+  },
+});
+
+const occupancyBlockedDates = await prisma.propertyBlockedDate.findMany({
+  where: {
+    propertyId: input.propertyId,
+    startDate: {
+      lt: startOfUtcDay(input.checkOut),
+    },
+    endDate: {
+      gt: startOfUtcDay(input.checkIn),
+    },
+  },
+  select: {
+    startDate: true,
+    endDate: true,
+  },
+});
 
   const fallbackNightlyRate = toMoney(property.baseNightlyRate);
  const minimumNightlyRate =
@@ -225,7 +227,7 @@ function getOccupancyPercent() {
 
   const occupiedDates = new Set<string>();
 
-  for (const reservation of property.reservations) {
+  for (const reservation of occupancyReservations) {
     const start = startOfUtcDay(reservation.checkIn);
     const end = startOfUtcDay(reservation.checkOut);
 
@@ -240,7 +242,7 @@ function getOccupancyPercent() {
     }
   }
 
-  for (const blockedDate of property.blockedDates) {
+  for (const blockedDate of occupancyBlockedDates) {
     const start = startOfUtcDay(blockedDate.startDate);
     const end = startOfUtcDay(blockedDate.endDate);
 
