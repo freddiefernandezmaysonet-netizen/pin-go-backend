@@ -31,6 +31,12 @@ export async function calculateDirectBookingPricing(
       leadTimePricingEnabled: true,
       leadTimeLastMinuteDays: true,
       leadTimeLastMinutePercent: true,
+      occupancyPricingEnabled: true,
+      occupancyLookaheadDays: true,
+      occupancyLowThresholdPercent: true,
+      occupancyLowAdjustmentPercent: true,
+      occupancyHighThresholdPercent: true,
+      occupancyHighAdjustmentPercent: true,
       cleaningFee: true,
       amenities: {
         where: { isActive: true },
@@ -61,7 +67,39 @@ export async function calculateDirectBookingPricing(
       lt: startOfUtcDay(input.checkOut),
     },
   },
+  
+    reservations: {
+  where: {
+    status: "ACTIVE",
+    checkIn: {
+      lt: startOfUtcDay(input.checkOut),
+    },
+    checkOut: {
+      gt: startOfUtcDay(input.checkIn),
+    },
+  },
   select: {
+    checkIn: true,
+    checkOut: true,
+  },
+},
+
+blockedDates: {
+  where: {
+    startDate: {
+      lt: startOfUtcDay(input.checkOut),
+    },
+    endDate: {
+      gt: startOfUtcDay(input.checkIn),
+    },
+  },
+  select: {
+    startDate: true,
+    endDate: true,
+  },
+},
+
+ select: {
     date: true,
     rate: true,
     reason: true,
@@ -100,6 +138,33 @@ const weekendMarkupPercent =
   property.weekendMarkupPercent != null
     ? toMoney(property.weekendMarkupPercent)
     : 0;
+
+const occupancyPricingEnabled = Boolean(property.occupancyPricingEnabled);
+
+const occupancyLookaheadDays =
+  property.occupancyLookaheadDays != null
+    ? Number(property.occupancyLookaheadDays)
+    : 30;
+
+const occupancyLowThresholdPercent =
+  property.occupancyLowThresholdPercent != null
+    ? toMoney(property.occupancyLowThresholdPercent)
+    : null;
+
+const occupancyLowAdjustmentPercent =
+  property.occupancyLowAdjustmentPercent != null
+    ? toMoney(property.occupancyLowAdjustmentPercent)
+    : null;
+
+const occupancyHighThresholdPercent =
+  property.occupancyHighThresholdPercent != null
+    ? toMoney(property.occupancyHighThresholdPercent)
+    : null;
+
+const occupancyHighAdjustmentPercent =
+  property.occupancyHighAdjustmentPercent != null
+    ? toMoney(property.occupancyHighAdjustmentPercent)
+    : null;
 
 const leadTimePricingEnabled = Boolean(property.leadTimePricingEnabled);
 
@@ -150,6 +215,75 @@ function applyLeadTimeRule(rate: number, date: Date) {
   return toMoney(rate * (1 + leadTimeLastMinutePercent / 100));
 }
 
+function getOccupancyPercent() {
+  if (!Number.isFinite(occupancyLookaheadDays) || occupancyLookaheadDays <= 0) {
+    return null;
+  }
+
+  const today = startOfUtcDay(new Date());
+  const lookaheadEnd = addDays(today, occupancyLookaheadDays);
+
+  const occupiedDates = new Set<string>();
+
+  for (const reservation of property.reservations) {
+    const start = startOfUtcDay(reservation.checkIn);
+    const end = startOfUtcDay(reservation.checkOut);
+
+    for (
+      let cursor = start;
+      cursor < end && cursor < lookaheadEnd;
+      cursor = addDays(cursor, 1)
+    ) {
+      if (cursor >= today) {
+        occupiedDates.add(toDateKey(cursor));
+      }
+    }
+  }
+
+  for (const blockedDate of property.blockedDates) {
+    const start = startOfUtcDay(blockedDate.startDate);
+    const end = startOfUtcDay(blockedDate.endDate);
+
+    for (
+      let cursor = start;
+      cursor < end && cursor < lookaheadEnd;
+      cursor = addDays(cursor, 1)
+    ) {
+      if (cursor >= today) {
+        occupiedDates.add(toDateKey(cursor));
+      }
+    }
+  }
+
+  return toMoney((occupiedDates.size / occupancyLookaheadDays) * 100);
+}
+
+const occupancyPercent = getOccupancyPercent();
+
+function applyOccupancyRule(rate: number) {
+  if (!dynamicPricingEnabled) return rate;
+  if (!occupancyPricingEnabled) return rate;
+  if (occupancyPercent === null) return rate;
+
+  if (
+    occupancyLowThresholdPercent !== null &&
+    occupancyLowAdjustmentPercent !== null &&
+    occupancyPercent <= occupancyLowThresholdPercent
+  ) {
+    return toMoney(rate * (1 + occupancyLowAdjustmentPercent / 100));
+  }
+
+  if (
+    occupancyHighThresholdPercent !== null &&
+    occupancyHighAdjustmentPercent !== null &&
+    occupancyPercent >= occupancyHighThresholdPercent
+  ) {
+    return toMoney(rate * (1 + occupancyHighAdjustmentPercent / 100));
+  }
+
+  return rate;
+}
+
 function applyPricingBounds(rate: number) {
   let finalRate = rate;
 
@@ -176,28 +310,42 @@ const nightlyRateByDate = new Map(
   ])
 );
 
-const nightlyRates = stayDates.map((date) => {
+  const nightlyRates = stayDates.map((date) => {
   const dateKey = toDateKey(date);
   const override = nightlyRateByDate.get(dateKey);
   const baseRateForDate = override?.rate ?? fallbackNightlyRate;
-const weekendAdjustedRate = applyWeekendRule(baseRateForDate, date);
-const leadTimeAdjustedRate = applyLeadTimeRule(weekendAdjustedRate, date);
+  const weekendAdjustedRate = applyWeekendRule(baseRateForDate, date);
+  const leadTimeAdjustedRate = applyLeadTimeRule(weekendAdjustedRate, date);
+  const occupancyAdjustedRate = applyOccupancyRule(leadTimeAdjustedRate);
 
 return {
   date: dateKey,
-  rate: applyPricingBounds(leadTimeAdjustedRate),
-   reason:
+  rate: applyPricingBounds(occupancyAdjustedRate),
+  reason:
   override?.reason ??
   (dynamicPricingEnabled &&
-  leadTimePricingEnabled &&
-  leadTimeLastMinutePercent !== 0 &&
-  getLeadTimeDays(date) >= 0 &&
-  getLeadTimeDays(date) <= leadTimeLastMinuteDays
+  occupancyPricingEnabled &&
+  occupancyPercent !== null &&
+  occupancyLowThresholdPercent !== null &&
+  occupancyLowAdjustmentPercent !== null &&
+  occupancyPercent <= occupancyLowThresholdPercent
+    ? "OCCUPANCY_LOW_RULE"
+    : dynamicPricingEnabled &&
+      occupancyPricingEnabled &&
+      occupancyPercent !== null &&
+      occupancyHighThresholdPercent !== null &&
+      occupancyHighAdjustmentPercent !== null &&
+      occupancyPercent >= occupancyHighThresholdPercent
+    ? "OCCUPANCY_HIGH_RULE"
+    : dynamicPricingEnabled &&
+      leadTimePricingEnabled &&
+      leadTimeLastMinutePercent !== 0 &&
+      getLeadTimeDays(date) >= 0 &&
+      getLeadTimeDays(date) <= leadTimeLastMinuteDays
     ? "LEAD_TIME_RULE"
     : dynamicPricingEnabled && weekendMarkupPercent > 0 && isWeekendNight(date)
     ? "WEEKEND_RULE"
     : "BASE_RATE"),
-
   };
 });
 

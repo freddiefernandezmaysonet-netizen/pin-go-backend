@@ -163,6 +163,14 @@ dashboardPropertiesRouter.get(
           leadTimePricingEnabled: true,
           leadTimeLastMinuteDays: true,
           leadTimeLastMinutePercent: true,
+
+          occupancyPricingEnabled: true,
+          occupancyLookaheadDays: true,
+          occupancyLowThresholdPercent: true,
+          occupancyLowAdjustmentPercent: true,
+          occupancyHighThresholdPercent: true,
+          occupancyHighAdjustmentPercent: true,
+
           distributionEnabledAt: true,
           distributionLastSyncedAt: true,
           distributionLastError: true,
@@ -261,6 +269,14 @@ dashboardPropertiesRouter.patch(
   leadTimePricingEnabled,
   leadTimeLastMinuteDays: leadTimeLastMinuteDaysRaw,
   leadTimeLastMinutePercent: leadTimeLastMinutePercentRaw,
+
+  occupancyPricingEnabled,
+  occupancyLookaheadDays: occupancyLookaheadDaysRaw,
+  occupancyLowThresholdPercent: occupancyLowThresholdPercentRaw,
+  occupancyLowAdjustmentPercent: occupancyLowAdjustmentPercentRaw,
+  occupancyHighThresholdPercent: occupancyHighThresholdPercentRaw,
+  occupancyHighAdjustmentPercent: occupancyHighAdjustmentPercentRaw,
+
   publicDescription,
   publicPhotos,
   baseNightlyRate: baseNightlyRateRaw,
@@ -286,6 +302,20 @@ const parsedLeadTimeLastMinuteDays =
 
 const parsedLeadTimeLastMinutePercent =
   parseOptionalPercent(leadTimeLastMinutePercentRaw);
+const parsedOccupancyLookaheadDays =
+  parseOptionalInt(occupancyLookaheadDaysRaw);
+
+const parsedOccupancyLowThresholdPercent =
+  parseOptionalPercent(occupancyLowThresholdPercentRaw);
+
+const parsedOccupancyLowAdjustmentPercent =
+  parseOptionalPercent(occupancyLowAdjustmentPercentRaw);
+
+const parsedOccupancyHighThresholdPercent =
+  parseOptionalPercent(occupancyHighThresholdPercentRaw);
+
+const parsedOccupancyHighAdjustmentPercent =
+  parseOptionalPercent(occupancyHighAdjustmentPercentRaw);
 const cleaningFee = parseOptionalMoney(cleaningFeeRaw);
 const maxGuests = parseOptionalInt(maxGuestsRaw);
 const minimumNights = parseOptionalInt(minimumNightsRaw);
@@ -318,6 +348,41 @@ if (Number.isNaN(parsedLeadTimeLastMinutePercent)) {
   return res.status(400).json({
     ok: false,
     error: "leadTimeLastMinutePercent must be a valid amount",
+  });
+}
+
+if (Number.isNaN(parsedOccupancyLookaheadDays)) {
+  return res.status(400).json({
+    ok: false,
+    error: "occupancyLookaheadDays must be a valid number",
+  });
+}
+
+if (Number.isNaN(parsedOccupancyLowThresholdPercent)) {
+  return res.status(400).json({
+    ok: false,
+    error: "occupancyLowThresholdPercent must be a valid percent",
+  });
+}
+
+if (Number.isNaN(parsedOccupancyLowAdjustmentPercent)) {
+  return res.status(400).json({
+    ok: false,
+    error: "occupancyLowAdjustmentPercent must be a valid percent",
+  });
+}
+
+if (Number.isNaN(parsedOccupancyHighThresholdPercent)) {
+  return res.status(400).json({
+    ok: false,
+    error: "occupancyHighThresholdPercent must be a valid percent",
+  });
+}
+
+if (Number.isNaN(parsedOccupancyHighAdjustmentPercent)) {
+  return res.status(400).json({
+    ok: false,
+    error: "occupancyHighAdjustmentPercent must be a valid percent",
   });
 }
 
@@ -527,6 +592,35 @@ if (leadTimeLastMinutePercentRaw !== undefined) {
     parsedLeadTimeLastMinutePercent;
 }
 
+if (occupancyPricingEnabled !== undefined) {
+  data.occupancyPricingEnabled = Boolean(occupancyPricingEnabled);
+}
+
+if (occupancyLookaheadDaysRaw !== undefined) {
+  data.occupancyLookaheadDays =
+    parsedOccupancyLookaheadDays ?? 30;
+}
+
+if (occupancyLowThresholdPercentRaw !== undefined) {
+  data.occupancyLowThresholdPercent =
+    parsedOccupancyLowThresholdPercent;
+}
+
+if (occupancyLowAdjustmentPercentRaw !== undefined) {
+  data.occupancyLowAdjustmentPercent =
+    parsedOccupancyLowAdjustmentPercent;
+}
+
+if (occupancyHighThresholdPercentRaw !== undefined) {
+  data.occupancyHighThresholdPercent =
+    parsedOccupancyHighThresholdPercent;
+}
+
+if (occupancyHighAdjustmentPercentRaw !== undefined) {
+  data.occupancyHighAdjustmentPercent =
+    parsedOccupancyHighAdjustmentPercent;
+}
+
 if (publicTitle !== undefined) {
   data.publicTitle = String(publicTitle || "").trim() || null;
 }
@@ -603,6 +697,14 @@ if (checkOutTime !== undefined) {
           leadTimePricingEnabled: true,
           leadTimeLastMinuteDays: true,
           leadTimeLastMinutePercent: true,
+
+          occupancyPricingEnabled: true,
+          occupancyLookaheadDays: true,
+          occupancyLowThresholdPercent: true,
+          occupancyLowAdjustmentPercent: true,
+          occupancyHighThresholdPercent: true,
+          occupancyHighAdjustmentPercent: true,
+
           distributionStatus: true,
           distributionEnabledAt: true,
           distributionLastSyncedAt: true,
