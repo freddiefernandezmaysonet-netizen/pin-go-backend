@@ -5,6 +5,7 @@ import { requireAuth } from "../middleware/requireAuth";
 import { provisionChannexProperty } from "../services/channex-provisioning.service";
 import { syncChannexAvailabilityForProperty } from "../services/channex-availability-sync.service";
 import { ingestReservation } from "../services/ingest.service";
+import { calculateDirectBookingPricing } from "../services/direct-booking-pricing.service";
 
 const prisma = new PrismaClient();
 export const dashboardPropertiesRouter = Router();
@@ -1037,57 +1038,46 @@ dashboardPropertiesRouter.post(
 dashboardPropertiesRouter.get(
   "/api/dashboard/properties/:id/nightly-rates",
   async (req, res) => {
-  try {
-   const propertyId = String(req.params.id);
+    try {
+      const propertyId = String(req.params.id);
 
-const fromRaw = req.query.from;
-const toRaw = req.query.to;
+      const fromRaw = req.query.from;
+      const toRaw = req.query.to;
 
-const where: any = {
-  propertyId,
-};
+      if (!fromRaw || !toRaw) {
+        return res.status(400).json({
+          ok: false,
+          error: "from and to are required",
+        });
+      }
 
+      const checkIn = new Date(`${String(fromRaw)}T00:00:00.000Z`);
+      const checkOut = new Date(`${String(toRaw)}T00:00:00.000Z`);
 
-if (fromRaw || toRaw) {
-  where.date = {};
+      const pricing = await calculateDirectBookingPricing({
+        propertyId,
+        checkIn,
+        checkOut,
+      });
 
-  if (fromRaw) {
-    where.date.gte = new Date(`${String(fromRaw)}T00:00:00.000Z`);
+      return res.json({
+        ok: true,
+        rates: pricing.nightlyRates.map((rate) => ({
+          id: rate.date,
+          date: rate.date,
+          rate: rate.rate,
+          reason: rate.reason,
+        })),
+      });
+    } catch (err) {
+      console.error("GET nightly-rates error", err);
+      return res.status(500).json({
+        ok: false,
+        error: "Failed to load nightly rates",
+      });
+    }
   }
-
-  if (toRaw) {
-    where.date.lte = new Date(`${String(toRaw)}T23:59:59.999Z`);
-  }
-}
-
-const rates = await prisma.propertyNightlyRate.findMany({
-  where,
-      orderBy: { date: "asc" },
-      select: {
-        id: true,
-        date: true,
-        rate: true,
-        reason: true,
-      },
-    });
-
-    return res.json({
-      ok: true,
-      rates: rates.map((rate) => ({
-        id: rate.id,
-        date: rate.date.toISOString().slice(0, 10),
-        rate: Number(rate.rate),
-        reason: rate.reason,
-      })),
-    });
-  } catch (err) {
-    console.error("GET nightly-rates error", err);
-    return res.status(500).json({
-      ok: false,
-      error: "Failed to load nightly rates",
-    });
-   }
-});
+);
 
 dashboardPropertiesRouter.put(
   "/api/dashboard/properties/:id/nightly-rates",
