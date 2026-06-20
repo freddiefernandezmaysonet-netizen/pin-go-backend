@@ -4,6 +4,9 @@ import { google } from "googleapis";
 import { fromZonedTime, formatInTimeZone } from "date-fns-tz";
 
 const prisma = new PrismaClient();
+const DEFAULT_APPOINTMENT_TIMEZONE =
+  process.env.APPOINTMENT_TIMEZONE || "America/Puerto_Rico";
+
 export const onboardingAppointmentsRouter = Router();
 
 function extractMeetLink(eventData: any): string | null {
@@ -38,7 +41,7 @@ onboardingAppointmentsRouter.get("/availability", async (req, res) => {
     const appointmentTimezone =
       typeof timezone === "string" && timezone.trim()
         ? timezone.trim()
-        : "UTC";
+        : DEFAULT_APPOINTMENT_TIMEZONE;
 
     const today = formatInTimeZone(
       new Date(),
@@ -141,7 +144,7 @@ onboardingAppointmentsRouter.post("/", async (req, res) => {
     const appointmentTimezone =
       typeof timezone === "string" && timezone.trim()
         ? timezone.trim()
-        : "UTC";
+        : DEFAULT_APPOINTMENT_TIMEZONE;
 
     const startDate = fromZonedTime(scheduledAt, appointmentTimezone);
 
