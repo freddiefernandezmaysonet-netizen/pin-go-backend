@@ -319,23 +319,20 @@ const nightlyRateByDate = new Map(
  const weekendEnabled =
   dynamicPricingEnabled && weekendMarkupPercent > 0;
 
-const occupancyAdjustedRate =
-  weekendEnabled && isWeekendNight(date)
-    ? baseRateForDate
-    : applyOccupancyRule(baseRateForDate);
-
-const leadTimeAdjustedRate = applyLeadTimeRule(
-  occupancyAdjustedRate,
-  date
-);
-
-const weekendAdjustedRate = applyWeekendRule(
-  leadTimeAdjustedRate,
-  date
-);
+const finalRateBeforeBounds = override
+  ? baseRateForDate
+  : applyWeekendRule(
+      applyLeadTimeRule(
+        weekendEnabled && isWeekendNight(date)
+          ? baseRateForDate
+          : applyOccupancyRule(baseRateForDate),
+        date
+      ),
+      date
+    );
 return {
   date: dateKey,
-  rate: applyPricingBounds(weekendAdjustedRate),
+  rate: applyPricingBounds(finalRateBeforeBounds),
  reason:
   override?.reason ??
   (dynamicPricingEnabled &&
