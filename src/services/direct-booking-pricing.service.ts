@@ -1,4 +1,4 @@
-import { PrismaClient } from "@prisma/client";
+import { PrismaClient, ReservationStatus } from "@prisma/client";
 
 const prisma = new PrismaClient();
 
@@ -70,7 +70,7 @@ export async function calculateDirectBookingPricing(
   
     reservations: {
   where: {
-    status: "ACTIVE",
+    status: ReservationStatus.ACTIVE,
     checkIn: {
       lt: startOfUtcDay(input.checkOut),
     },
