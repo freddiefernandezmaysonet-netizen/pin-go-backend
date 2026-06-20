@@ -40,6 +40,15 @@ function parseOptionalMoney(value: unknown): number | null {
   return Number.isFinite(parsed) && parsed >= 0 ? parsed : NaN;
 }
 
+function parseOptionalPercent(value: unknown): number | null {
+  if (value === undefined || value === null || String(value).trim() === "") {
+    return null;
+  }
+
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? parsed : NaN;
+}
+
 function parseOptionalInt(value: unknown): number | null {
   if (value === undefined || value === null || String(value).trim() === "") {
     return null;
@@ -276,7 +285,7 @@ const parsedLeadTimeLastMinuteDays =
   parseOptionalInt(leadTimeLastMinuteDaysRaw);
 
 const parsedLeadTimeLastMinutePercent =
-  parseOptionalMoney(leadTimeLastMinutePercentRaw);
+  parseOptionalPercent(leadTimeLastMinutePercentRaw);
 const cleaningFee = parseOptionalMoney(cleaningFeeRaw);
 const maxGuests = parseOptionalInt(maxGuestsRaw);
 const minimumNights = parseOptionalInt(minimumNightsRaw);
