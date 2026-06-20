@@ -316,21 +316,42 @@ const nightlyRateByDate = new Map(
   const dateKey = toDateKey(date);
   const override = nightlyRateByDate.get(dateKey);
   const baseRateForDate = override?.rate ?? fallbackNightlyRate;
-  const weekendAdjustedRate = applyWeekendRule(baseRateForDate, date);
-  const leadTimeAdjustedRate = applyLeadTimeRule(weekendAdjustedRate, date);
-  const occupancyAdjustedRate = applyOccupancyRule(leadTimeAdjustedRate);
+ const weekendEnabled =
+  dynamicPricingEnabled && weekendMarkupPercent > 0;
 
+const occupancyAdjustedRate =
+  weekendEnabled && isWeekendNight(date)
+    ? baseRateForDate
+    : applyOccupancyRule(baseRateForDate);
+
+const leadTimeAdjustedRate = applyLeadTimeRule(
+  occupancyAdjustedRate,
+  date
+);
+
+const weekendAdjustedRate = applyWeekendRule(
+  leadTimeAdjustedRate,
+  date
+);
 return {
   date: dateKey,
-  rate: applyPricingBounds(occupancyAdjustedRate),
-  reason:
+  rate: applyPricingBounds(weekendAdjustedRate),
+ reason:
   override?.reason ??
   (dynamicPricingEnabled &&
-  occupancyPricingEnabled &&
-  occupancyPercent !== null &&
-  occupancyLowThresholdPercent !== null &&
-  occupancyLowAdjustmentPercent !== null &&
-  occupancyPercent <= occupancyLowThresholdPercent
+  leadTimePricingEnabled &&
+  leadTimeLastMinutePercent !== 0 &&
+  getLeadTimeDays(date) >= 0 &&
+  getLeadTimeDays(date) <= leadTimeLastMinuteDays
+    ? "LEAD_TIME_RULE"
+    : dynamicPricingEnabled && weekendMarkupPercent > 0 && isWeekendNight(date)
+    ? "WEEKEND_RULE"
+    : dynamicPricingEnabled &&
+      occupancyPricingEnabled &&
+      occupancyPercent !== null &&
+      occupancyLowThresholdPercent !== null &&
+      occupancyLowAdjustmentPercent !== null &&
+      occupancyPercent <= occupancyLowThresholdPercent
     ? "OCCUPANCY_LOW_RULE"
     : dynamicPricingEnabled &&
       occupancyPricingEnabled &&
@@ -339,14 +360,6 @@ return {
       occupancyHighAdjustmentPercent !== null &&
       occupancyPercent >= occupancyHighThresholdPercent
     ? "OCCUPANCY_HIGH_RULE"
-    : dynamicPricingEnabled &&
-      leadTimePricingEnabled &&
-      leadTimeLastMinutePercent !== 0 &&
-      getLeadTimeDays(date) >= 0 &&
-      getLeadTimeDays(date) <= leadTimeLastMinuteDays
-    ? "LEAD_TIME_RULE"
-    : dynamicPricingEnabled && weekendMarkupPercent > 0 && isWeekendNight(date)
-    ? "WEEKEND_RULE"
     : "BASE_RATE"),
   };
 });
