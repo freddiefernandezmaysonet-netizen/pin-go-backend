@@ -323,9 +323,7 @@ const finalRateBeforeBounds = override
   ? baseRateForDate
   : applyWeekendRule(
       applyLeadTimeRule(
-        weekendEnabled && isWeekendNight(date)
-          ? baseRateForDate
-          : applyOccupancyRule(baseRateForDate),
+        applyOccupancyRule(baseRateForDate),
         date
       ),
       date
