@@ -1,5 +1,6 @@
 import { PrismaClient, PmsProvider } from "@prisma/client";
 import axios from "axios";
+import { calculateDirectBookingPricing } from "./direct-booking-pricing.service";
 
 const prisma = new PrismaClient();
 
@@ -264,37 +265,25 @@ function isWeekendNight(dateKey: string) {
   return day === 5 || day === 6;
 }
 
-function applyWeekendRule(rate: number, dateKey: string) {
-  if (!dynamicPricingEnabled) return rate;
-  if (weekendMarkupPercent <= 0) return rate;
-  if (!isWeekendNight(dateKey)) return rate;
+const pricing = await calculateDirectBookingPricing({
+  propertyId: property.id,
+  checkIn: from,
+  checkOut: to,
+});
 
-  return Math.round(rate * (1 + weekendMarkupPercent / 100) * 100) / 100;
-}
-
-function applyPricingBounds(rate: number) {
-  let finalRate = rate;
-
-  if (minimumNightlyRate !== null && finalRate < minimumNightlyRate) {
-    finalRate = minimumNightlyRate;
-  }
-
-  if (maximumNightlyRate !== null && finalRate > maximumNightlyRate) {
-    finalRate = maximumNightlyRate;
-  }
-
-  return finalRate;
-}
+const dynamicRateByDate = new Map(
+  pricing.nightlyRates.map((item) => [
+    item.date,
+    Number(item.rate),
+  ])
+);
 
 const ratesPayload = availabilityPreview.map((item) => {
-  const baseRateForDate = Number(
-    nightlyRateByDate.get(item.date) ??
+  const finalRate = Number(
+    dynamicRateByDate.get(item.date) ??
       property.baseNightlyRate ??
       0
   );
-
-  const weekendAdjustedRate = applyWeekendRule(baseRateForDate, item.date);
-  const finalRate = applyPricingBounds(weekendAdjustedRate);
 
   return {
     property_id: channexPropertyId,
@@ -309,7 +298,7 @@ const ratesPayload = availabilityPreview.map((item) => {
     min_stay_arrival: property.minimumNights ?? 1,
     min_stay_through: property.minimumNights ?? 1,
   };
-});
+});  
   
   let ratesResp;
 
