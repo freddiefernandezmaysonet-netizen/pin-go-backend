@@ -184,6 +184,25 @@ model PropertySeason {
   @@index([propertyId, isActive])
 }
 
+model MarketSeasonTemplate {
+  id                String   @id @default(cuid())
+  country           String
+  region            String?
+  name              String
+  startMonth        Int
+  startDay          Int
+  endMonth          Int
+  endDay            Int
+  adjustmentPercent Decimal  @db.Decimal(5,2)
+  isActive          Boolean  @default(true)
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+
+  @@index([country])
+  @@index([country, isActive])
+  @@index([country, region])
+}
+
 model Lock {
   id             String          @id @default(cuid())
   ttlockLockId   Int             @unique

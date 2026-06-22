@@ -6,6 +6,8 @@ import { provisionChannexProperty } from "../services/channex-provisioning.servi
 import { syncChannexAvailabilityForProperty } from "../services/channex-availability-sync.service";
 import { ingestReservation } from "../services/ingest.service";
 import { calculateDirectBookingPricing } from "../services/direct-booking-pricing.service";
+import { applyDefaultMarketSeasonsForProperty } from "../services/market-season-template.service";
+import { MARKET_SEASON_CATALOG } from "../data/market-season-catalog";
 
 const prisma = new PrismaClient();
 export const dashboardPropertiesRouter = Router();
@@ -1626,6 +1628,170 @@ dashboardPropertiesRouter.post(
       return res.status(500).json({
         ok: false,
         error: error?.message ?? "Failed to archive property",
+      });
+    }
+  }
+);
+
+dashboardPropertiesRouter.post(
+  "/api/dashboard/properties/:id/seasons/apply-market-defaults",
+  requireAuth,
+  async (req, res) => {
+    try {
+      const user = (req as any).user;
+      const orgId = user.orgId as string;
+      const { id } = req.params;
+
+      const property = await prisma.property.findFirst({
+        where: {
+          id,
+          organizationId: orgId,
+          status: "ACTIVE",
+        },
+        select: { id: true },
+      });
+
+      if (!property) {
+        return res.status(404).json({
+          ok: false,
+          error: "Property not found",
+        });
+      }
+
+      const result = await applyDefaultMarketSeasonsForProperty(property.id);
+
+      let distributionSyncResult: any = null;
+
+      try {
+        distributionSyncResult = await syncChannexAvailabilityForProperty(
+          property.id
+        );
+
+        await prisma.property.update({
+          where: { id: property.id },
+          data: {
+            distributionLastSyncedAt: new Date(),
+            distributionLastError: null,
+          },
+        });
+      } catch (syncError: any) {
+        console.error("POST apply-market-defaults Channex sync error", syncError);
+
+        await prisma.property.update({
+          where: { id: property.id },
+          data: {
+            distributionLastError:
+              syncError?.message ||
+              "Failed to sync Channex after applying market seasons",
+          },
+        });
+      }
+
+      return res.json({
+        ok: true,
+        result,
+        distributionSyncResult,
+      });
+    } catch (error: any) {
+      console.error("POST apply-market-defaults error", error);
+      return res.status(500).json({
+        ok: false,
+        error:
+          error?.message ?? "Failed to apply market default seasons",
+      });
+    }
+  }
+);
+
+dashboardPropertiesRouter.post(
+  "/api/dashboard/market-season-templates/sync-catalog",
+  requireAuth,
+  async (req, res) => {
+    try {
+      let created = 0;
+      let updated = 0;
+      let skipped = 0;
+
+      for (const market of MARKET_SEASON_CATALOG) {
+        for (const season of market.seasons) {
+          const existing = await prisma.marketSeasonTemplate.findFirst({
+            where: {
+              country: market.country,
+              region: market.region,
+              name: season.name,
+            },
+            select: {
+              id: true,
+              startMonth: true,
+              startDay: true,
+              endMonth: true,
+              endDay: true,
+              adjustmentPercent: true,
+              isActive: true,
+            },
+          });
+
+          if (!existing) {
+            await prisma.marketSeasonTemplate.create({
+              data: {
+                country: market.country,
+                region: market.region,
+                name: season.name,
+                startMonth: season.startMonth,
+                startDay: season.startDay,
+                endMonth: season.endMonth,
+                endDay: season.endDay,
+                adjustmentPercent: season.adjustmentPercent,
+                isActive: true,
+              },
+            });
+
+            created += 1;
+            continue;
+          }
+
+          const needsUpdate =
+            Number(existing.startMonth) !== season.startMonth ||
+            Number(existing.startDay) !== season.startDay ||
+            Number(existing.endMonth) !== season.endMonth ||
+            Number(existing.endDay) !== season.endDay ||
+            Number(existing.adjustmentPercent) !==
+              Number(season.adjustmentPercent) ||
+            existing.isActive !== true;
+
+          if (!needsUpdate) {
+            skipped += 1;
+            continue;
+          }
+
+          await prisma.marketSeasonTemplate.update({
+            where: { id: existing.id },
+            data: {
+              startMonth: season.startMonth,
+              startDay: season.startDay,
+              endMonth: season.endMonth,
+              endDay: season.endDay,
+              adjustmentPercent: season.adjustmentPercent,
+              isActive: true,
+            },
+          });
+
+          updated += 1;
+        }
+      }
+
+      return res.json({
+        ok: true,
+        created,
+        updated,
+        skipped,
+      });
+    } catch (error: any) {
+      console.error("POST sync market season catalog error", error);
+      return res.status(500).json({
+        ok: false,
+        error:
+          error?.message ?? "Failed to sync market season catalog",
       });
     }
   }
