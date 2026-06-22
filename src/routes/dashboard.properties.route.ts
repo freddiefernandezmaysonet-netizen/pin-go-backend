@@ -160,6 +160,7 @@ dashboardPropertiesRouter.get(
           isPublicBookable: true,
           distributionEnabled: true,
           dynamicPricingEnabled: true,
+          seasonalPricingEnabled: true,
           distributionStatus: true,
           leadTimePricingEnabled: true,
           leadTimeLastMinuteDays: true,
@@ -266,6 +267,7 @@ dashboardPropertiesRouter.patch(
   isPublicBookable,
   distributionEnabled,
   dynamicPricingEnabled,
+  seasonalPricingEnabled,
   publicTitle,
   leadTimePricingEnabled,
   leadTimeLastMinuteDays: leadTimeLastMinuteDaysRaw,
@@ -579,6 +581,10 @@ if (dynamicPricingEnabled !== undefined) {
   data.dynamicPricingEnabled = Boolean(dynamicPricingEnabled);
 }
 
+if (seasonalPricingEnabled !== undefined) {
+  data.seasonalPricingEnabled = Boolean(seasonalPricingEnabled);
+}
+
 if (leadTimePricingEnabled !== undefined) {
   data.leadTimePricingEnabled = Boolean(leadTimePricingEnabled);
 }
@@ -695,6 +701,7 @@ if (checkOutTime !== undefined) {
           isPublicBookable: true,
           distributionEnabled: true,
           dynamicPricingEnabled: true,
+          seasonalPricingEnabled: true,
           leadTimePricingEnabled: true,
           leadTimeLastMinuteDays: true,
           leadTimeLastMinutePercent: true,
@@ -1619,6 +1626,394 @@ dashboardPropertiesRouter.post(
       return res.status(500).json({
         ok: false,
         error: error?.message ?? "Failed to archive property",
+      });
+    }
+  }
+);
+
+dashboardPropertiesRouter.get(
+  "/api/dashboard/properties/:id/seasons",
+  requireAuth,
+  async (req, res) => {
+    try {
+      const user = (req as any).user;
+      const orgId = user.orgId as string;
+      const { id } = req.params;
+
+      const property = await prisma.property.findFirst({
+        where: { id, organizationId: orgId, status: "ACTIVE" },
+        select: { id: true },
+      });
+
+      if (!property) {
+        return res.status(404).json({ ok: false, error: "Property not found" });
+      }
+
+      const items = await prisma.propertySeason.findMany({
+        where: { propertyId: property.id },
+        orderBy: [
+          { startMonth: "asc" },
+          { startDay: "asc" },
+        ],
+        select: {
+          id: true,
+          propertyId: true,
+          name: true,
+          startMonth: true,
+          startDay: true,
+          endMonth: true,
+          endDay: true,
+          adjustmentPercent: true,
+          isActive: true,
+          source: true,
+          createdAt: true,
+          updatedAt: true,
+        },
+      });
+
+      return res.json({
+        ok: true,
+        items: items.map((item) => ({
+          ...item,
+          adjustmentPercent: Number(item.adjustmentPercent),
+        })),
+      });
+    } catch (error: any) {
+      console.error("GET seasons error", error);
+      return res.status(500).json({
+        ok: false,
+        error: error?.message ?? "Failed to load seasons",
+      });
+    }
+  }
+);
+
+dashboardPropertiesRouter.post(
+  "/api/dashboard/properties/:id/seasons",
+  requireAuth,
+  async (req, res) => {
+    try {
+      const user = (req as any).user;
+      const orgId = user.orgId as string;
+      const { id } = req.params;
+
+      const {
+        name,
+        startMonth,
+        startDay,
+        endMonth,
+        endDay,
+        adjustmentPercent,
+      } = req.body ?? {};
+
+      const cleanName = String(name || "").trim();
+      const parsedStartMonth = Number(startMonth);
+      const parsedStartDay = Number(startDay);
+      const parsedEndMonth = Number(endMonth);
+      const parsedEndDay = Number(endDay);
+      const parsedAdjustmentPercent = Number(adjustmentPercent);
+
+      if (!cleanName) {
+        return res.status(400).json({ ok: false, error: "Season name is required" });
+      }
+
+      if (!Number.isInteger(parsedStartMonth) || parsedStartMonth < 1 || parsedStartMonth > 12) {
+        return res.status(400).json({ ok: false, error: "startMonth must be between 1 and 12" });
+      }
+
+      if (!Number.isInteger(parsedEndMonth) || parsedEndMonth < 1 || parsedEndMonth > 12) {
+        return res.status(400).json({ ok: false, error: "endMonth must be between 1 and 12" });
+      }
+
+      if (!Number.isInteger(parsedStartDay) || parsedStartDay < 1 || parsedStartDay > 31) {
+        return res.status(400).json({ ok: false, error: "startDay must be between 1 and 31" });
+      }
+
+      if (!Number.isInteger(parsedEndDay) || parsedEndDay < 1 || parsedEndDay > 31) {
+        return res.status(400).json({ ok: false, error: "endDay must be between 1 and 31" });
+      }
+
+      if (!Number.isFinite(parsedAdjustmentPercent) || parsedAdjustmentPercent < -100 || parsedAdjustmentPercent > 300) {
+        return res.status(400).json({
+          ok: false,
+          error: "adjustmentPercent must be between -100 and 300",
+        });
+      }
+
+      const property = await prisma.property.findFirst({
+        where: { id, organizationId: orgId, status: "ACTIVE" },
+        select: { id: true },
+      });
+
+      if (!property) {
+        return res.status(404).json({ ok: false, error: "Property not found" });
+      }
+
+      const item = await prisma.propertySeason.create({
+        data: {
+          propertyId: property.id,
+          name: cleanName,
+          startMonth: parsedStartMonth,
+          startDay: parsedStartDay,
+          endMonth: parsedEndMonth,
+          endDay: parsedEndDay,
+          adjustmentPercent: parsedAdjustmentPercent,
+          isActive: true,
+          source: "CUSTOM",
+        },
+        select: {
+          id: true,
+          propertyId: true,
+          name: true,
+          startMonth: true,
+          startDay: true,
+          endMonth: true,
+          endDay: true,
+          adjustmentPercent: true,
+          isActive: true,
+          source: true,
+          createdAt: true,
+          updatedAt: true,
+        },
+      });
+
+      await prisma.property.update({
+        where: { id: property.id },
+        data: { seasonalPricingEnabled: true },
+      });
+
+      let distributionSyncResult: any = null;
+
+      try {
+        distributionSyncResult = await syncChannexAvailabilityForProperty(property.id);
+
+        await prisma.property.update({
+          where: { id: property.id },
+          data: {
+            distributionLastSyncedAt: new Date(),
+            distributionLastError: null,
+          },
+        });
+      } catch (syncError: any) {
+        console.error("POST seasons Channex sync error", syncError);
+
+        await prisma.property.update({
+          where: { id: property.id },
+          data: {
+            distributionLastError:
+              syncError?.message || "Failed to sync Channex after season create",
+          },
+        });
+      }
+
+      return res.json({
+        ok: true,
+        item: {
+          ...item,
+          adjustmentPercent: Number(item.adjustmentPercent),
+        },
+        distributionSyncResult,
+      });
+    } catch (error: any) {
+      console.error("POST seasons error", error);
+      return res.status(500).json({
+        ok: false,
+        error: error?.message ?? "Failed to create season",
+      });
+    }
+  }
+);
+
+dashboardPropertiesRouter.patch(
+  "/api/dashboard/properties/:id/seasons/:seasonId",
+  requireAuth,
+  async (req, res) => {
+    try {
+      const user = (req as any).user;
+      const orgId = user.orgId as string;
+      const { id, seasonId } = req.params;
+
+      const season = await prisma.propertySeason.findFirst({
+        where: {
+          id: seasonId,
+          propertyId: id,
+          property: { organizationId: orgId },
+        },
+        select: { id: true, propertyId: true },
+      });
+
+      if (!season) {
+        return res.status(404).json({ ok: false, error: "Season not found" });
+      }
+
+      const data: any = {};
+
+      if (req.body?.name !== undefined) {
+        const cleanName = String(req.body.name || "").trim();
+        if (!cleanName) {
+          return res.status(400).json({ ok: false, error: "Season name is required" });
+        }
+        data.name = cleanName;
+      }
+
+      for (const field of ["startMonth", "endMonth"]) {
+        if (req.body?.[field] !== undefined) {
+          const value = Number(req.body[field]);
+          if (!Number.isInteger(value) || value < 1 || value > 12) {
+            return res.status(400).json({ ok: false, error: `${field} must be between 1 and 12` });
+          }
+          data[field] = value;
+        }
+      }
+
+      for (const field of ["startDay", "endDay"]) {
+        if (req.body?.[field] !== undefined) {
+          const value = Number(req.body[field]);
+          if (!Number.isInteger(value) || value < 1 || value > 31) {
+            return res.status(400).json({ ok: false, error: `${field} must be between 1 and 31` });
+          }
+          data[field] = value;
+        }
+      }
+
+      if (req.body?.adjustmentPercent !== undefined) {
+        const value = Number(req.body.adjustmentPercent);
+        if (!Number.isFinite(value) || value < -100 || value > 300) {
+          return res.status(400).json({
+            ok: false,
+            error: "adjustmentPercent must be between -100 and 300",
+          });
+        }
+        data.adjustmentPercent = value;
+      }
+
+      if (req.body?.isActive !== undefined) {
+        data.isActive = Boolean(req.body.isActive);
+      }
+
+      const item = await prisma.propertySeason.update({
+        where: { id: season.id },
+        data,
+        select: {
+          id: true,
+          propertyId: true,
+          name: true,
+          startMonth: true,
+          startDay: true,
+          endMonth: true,
+          endDay: true,
+          adjustmentPercent: true,
+          isActive: true,
+          source: true,
+          createdAt: true,
+          updatedAt: true,
+        },
+      });
+
+      let distributionSyncResult: any = null;
+
+      try {
+        distributionSyncResult = await syncChannexAvailabilityForProperty(season.propertyId);
+
+        await prisma.property.update({
+          where: { id: season.propertyId },
+          data: {
+            distributionLastSyncedAt: new Date(),
+            distributionLastError: null,
+          },
+        });
+      } catch (syncError: any) {
+        console.error("PATCH seasons Channex sync error", syncError);
+
+        await prisma.property.update({
+          where: { id: season.propertyId },
+          data: {
+            distributionLastError:
+              syncError?.message || "Failed to sync Channex after season update",
+          },
+        });
+      }
+
+      return res.json({
+        ok: true,
+        item: {
+          ...item,
+          adjustmentPercent: Number(item.adjustmentPercent),
+        },
+        distributionSyncResult,
+      });
+    } catch (error: any) {
+      console.error("PATCH seasons error", error);
+      return res.status(500).json({
+        ok: false,
+        error: error?.message ?? "Failed to update season",
+      });
+    }
+  }
+);
+
+dashboardPropertiesRouter.delete(
+  "/api/dashboard/properties/:id/seasons/:seasonId",
+  requireAuth,
+  async (req, res) => {
+    try {
+      const user = (req as any).user;
+      const orgId = user.orgId as string;
+      const { id, seasonId } = req.params;
+
+      const season = await prisma.propertySeason.findFirst({
+        where: {
+          id: seasonId,
+          propertyId: id,
+          property: { organizationId: orgId },
+        },
+        select: { id: true, propertyId: true },
+      });
+
+      if (!season) {
+        return res.status(404).json({ ok: false, error: "Season not found" });
+      }
+
+      await prisma.propertySeason.update({
+        where: { id: season.id },
+        data: { isActive: false },
+      });
+
+      let distributionSyncResult: any = null;
+
+      try {
+        distributionSyncResult = await syncChannexAvailabilityForProperty(
+          season.propertyId
+        );
+
+        await prisma.property.update({
+          where: { id: season.propertyId },
+          data: {
+            distributionLastSyncedAt: new Date(),
+            distributionLastError: null,
+          },
+        });
+      } catch (syncError: any) {
+        console.error("DELETE seasons Channex sync error", syncError);
+
+        await prisma.property.update({
+          where: { id: season.propertyId },
+          data: {
+            distributionLastError:
+              syncError?.message || "Failed to sync Channex after season delete",
+          },
+        });
+      }
+
+      return res.json({
+        ok: true,
+        distributionSyncResult,
+      });
+    } catch (error: any) {
+      console.error("DELETE seasons error", error);
+      return res.status(500).json({
+        ok: false,
+        error: error?.message ?? "Failed to delete season",
       });
     }
   }
