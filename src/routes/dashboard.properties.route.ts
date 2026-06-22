@@ -1062,12 +1062,13 @@ dashboardPropertiesRouter.get(
 
       return res.json({
         ok: true,
-        rates: pricing.nightlyRates.map((rate) => ({
-          id: rate.date,
-          date: rate.date,
-          rate: rate.rate,
-          reason: rate.reason,
-        })),
+       rates: pricing.nightlyRates.map((rate) => ({
+  id: rate.date,
+  date: rate.date,
+  rate: rate.rate,
+  reason: rate.reason,
+  appliedRules: rate.appliedRules ?? [rate.reason],
+})),
       });
     } catch (err) {
       console.error("GET nightly-rates error", err);

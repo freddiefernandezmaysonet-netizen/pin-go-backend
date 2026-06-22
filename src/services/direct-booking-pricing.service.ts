@@ -312,50 +312,75 @@ const nightlyRateByDate = new Map(
   ])
 );
 
-  const nightlyRates = stayDates.map((date) => {
+ const nightlyRates = stayDates.map((date) => {
   const dateKey = toDateKey(date);
   const override = nightlyRateByDate.get(dateKey);
   const baseRateForDate = override?.rate ?? fallbackNightlyRate;
- const weekendEnabled =
-  dynamicPricingEnabled && weekendMarkupPercent > 0;
 
-const finalRateBeforeBounds = override
-  ? baseRateForDate
-  : applyWeekendRule(
-      applyLeadTimeRule(
-        applyOccupancyRule(baseRateForDate),
-        date
-      ),
-      date
-    );
-return {
-  date: dateKey,
-  rate: applyPricingBounds(finalRateBeforeBounds),
- reason:
-  override?.reason ??
-  (dynamicPricingEnabled &&
-  leadTimePricingEnabled &&
-  leadTimeLastMinutePercent !== 0 &&
-  getLeadTimeDays(date) >= 0 &&
-  getLeadTimeDays(date) <= leadTimeLastMinuteDays
-    ? "LEAD_TIME_RULE"
-    : dynamicPricingEnabled && weekendMarkupPercent > 0 && isWeekendNight(date)
-    ? "WEEKEND_RULE"
-    : dynamicPricingEnabled &&
+  const appliedRules: string[] = [];
+
+  if (override) {
+    appliedRules.push(override.reason ?? "CUSTOM_RATE");
+  } else {
+    if (
+      dynamicPricingEnabled &&
       occupancyPricingEnabled &&
       occupancyPercent !== null &&
       occupancyLowThresholdPercent !== null &&
       occupancyLowAdjustmentPercent !== null &&
       occupancyPercent <= occupancyLowThresholdPercent
-    ? "OCCUPANCY_LOW_RULE"
-    : dynamicPricingEnabled &&
+    ) {
+      appliedRules.push("OCCUPANCY_LOW_RULE");
+    }
+
+    if (
+      dynamicPricingEnabled &&
       occupancyPricingEnabled &&
       occupancyPercent !== null &&
       occupancyHighThresholdPercent !== null &&
       occupancyHighAdjustmentPercent !== null &&
       occupancyPercent >= occupancyHighThresholdPercent
-    ? "OCCUPANCY_HIGH_RULE"
-    : "BASE_RATE"),
+    ) {
+      appliedRules.push("OCCUPANCY_HIGH_RULE");
+    }
+
+    if (
+      dynamicPricingEnabled &&
+      leadTimePricingEnabled &&
+      leadTimeLastMinutePercent !== 0 &&
+      getLeadTimeDays(date) >= 0 &&
+      getLeadTimeDays(date) <= leadTimeLastMinuteDays
+    ) {
+      appliedRules.push("LEAD_TIME_RULE");
+    }
+
+    if (
+      dynamicPricingEnabled &&
+      weekendMarkupPercent > 0 &&
+      isWeekendNight(date)
+    ) {
+      appliedRules.push("WEEKEND_RULE");
+    }
+
+    if (appliedRules.length === 0) {
+      appliedRules.push("BASE_RATE");
+    }
+  }
+
+  const finalRateBeforeBounds = override
+    ? baseRateForDate
+    : applyWeekendRule(
+        applyLeadTimeRule(applyOccupancyRule(baseRateForDate), date),
+        date
+      );
+
+  const finalRate = applyPricingBounds(finalRateBeforeBounds);
+
+  return {
+    date: dateKey,
+    rate: finalRate,
+    reason: appliedRules[0],
+    appliedRules,
   };
 });
 
