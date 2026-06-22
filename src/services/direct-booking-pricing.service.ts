@@ -269,23 +269,15 @@ function isDateInSeason(date: Date, season: {
   endMonth: number;
   endDay: number;
 }) {
-  const year = date.getUTCFullYear();
+  const monthDay = (date.getUTCMonth() + 1) * 100 + date.getUTCDate();
+  const startMonthDay = season.startMonth * 100 + season.startDay;
+  const endMonthDay = season.endMonth * 100 + season.endDay;
 
-  const seasonStart = new Date(
-    Date.UTC(year, season.startMonth - 1, season.startDay)
-  );
-
-  let seasonEnd = new Date(
-    Date.UTC(year, season.endMonth - 1, season.endDay)
-  );
-
-  if (seasonEnd < seasonStart) {
-    seasonEnd = new Date(
-      Date.UTC(year + 1, season.endMonth - 1, season.endDay)
-    );
+  if (startMonthDay <= endMonthDay) {
+    return monthDay >= startMonthDay && monthDay <= endMonthDay;
   }
 
-  return date >= seasonStart && date <= seasonEnd;
+  return monthDay >= startMonthDay || monthDay <= endMonthDay;
 }
 
 function getSeasonForDate(date: Date) {
