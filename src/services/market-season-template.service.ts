@@ -2,6 +2,20 @@ import { PrismaClient } from "@prisma/client";
 
 const prisma = new PrismaClient();
 
+function normalizeMarketRegion(value: unknown) {
+  const raw = String(value || "").trim();
+
+  if (!raw) return "";
+
+  const normalized = raw.toLowerCase();
+
+  if (normalized === "pr" || normalized === "puerto rico") {
+    return "Puerto Rico";
+  }
+
+  return raw;
+}
+
 export async function applyDefaultMarketSeasonsForProperty(propertyId: string) {
   const property = await prisma.property.findUnique({
     where: { id: propertyId },
@@ -26,13 +40,8 @@ export async function applyDefaultMarketSeasonsForProperty(propertyId: string) {
     };
   }
 
-  const region = String(property.region || "").trim();
+  const region = normalizeMarketRegion(property.region);
 
-console.log("[market-seasons] property market", {
-  propertyId: property.id,
-  country,
-  region,
-});
 
 let templates = await prisma.marketSeasonTemplate.findMany({
   where: {
@@ -44,14 +53,6 @@ let templates = await prisma.marketSeasonTemplate.findMany({
     { startMonth: "asc" },
     { startDay: "asc" },
   ],
-});
-
-console.log("[market-seasons] regional templates found", {
-  propertyId: property.id,
-  country,
-  region,
-  count: templates.length,
-  names: templates.map((t) => t.name),
 });
 
 if (templates.length === 0) {
