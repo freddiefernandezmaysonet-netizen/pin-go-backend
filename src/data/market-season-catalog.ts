@@ -13,8 +13,8 @@ export type MarketSeasonCatalogItem = {
 
 export const MARKET_SEASON_CATALOG: MarketSeasonCatalogItem[] = [
   {
-    country: "Puerto Rico",
-    region: null,
+    country: "United States",
+    region: "Puerto Rico",
     seasons: [
       {
         name: "Holiday Peak",

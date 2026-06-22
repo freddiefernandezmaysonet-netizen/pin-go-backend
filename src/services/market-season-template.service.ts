@@ -6,9 +6,10 @@ export async function applyDefaultMarketSeasonsForProperty(propertyId: string) {
   const property = await prisma.property.findUnique({
     where: { id: propertyId },
     select: {
-      id: true,
-      country: true,
-    },
+  id: true,
+  country: true,
+  region: true,
+},
   });
 
   if (!property) {
@@ -25,9 +26,25 @@ export async function applyDefaultMarketSeasonsForProperty(propertyId: string) {
     };
   }
 
-  const templates = await prisma.marketSeasonTemplate.findMany({
+  const region = String(property.region || "").trim();
+
+let templates = await prisma.marketSeasonTemplate.findMany({
+  where: {
+    country,
+    region: region || null,
+    isActive: true,
+  },
+  orderBy: [
+    { startMonth: "asc" },
+    { startDay: "asc" },
+  ],
+});
+
+if (templates.length === 0) {
+  templates = await prisma.marketSeasonTemplate.findMany({
     where: {
       country,
+      region: null,
       isActive: true,
     },
     orderBy: [
@@ -35,7 +52,7 @@ export async function applyDefaultMarketSeasonsForProperty(propertyId: string) {
       { startDay: "asc" },
     ],
   });
-
+}
   if (templates.length === 0) {
     return {
       created: 0,
