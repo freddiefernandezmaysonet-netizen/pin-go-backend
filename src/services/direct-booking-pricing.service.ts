@@ -27,6 +27,7 @@ export async function calculateDirectBookingPricing(
       minimumNightlyRate: true,
       maximumNightlyRate: true,
       dynamicPricingEnabled: true,
+      seasonalPricingEnabled: true,
       weekendMarkupPercent: true,
       leadTimePricingEnabled: true,
       leadTimeLastMinuteDays: true,
