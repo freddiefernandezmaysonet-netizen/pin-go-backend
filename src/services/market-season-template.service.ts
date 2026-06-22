@@ -62,19 +62,55 @@ if (templates.length === 0) {
   }
 
   let created = 0;
+let updated = 0;
+let deactivated = 0;
 
-  for (const template of templates) {
-    const existing = await prisma.propertySeason.findFirst({
-      where: {
-        propertyId: property.id,
-        name: template.name,
-        source: "PIN_GO_DEFAULT",
-      },
-      select: { id: true },
-    });
+const templateNames = new Set(templates.map((template) => template.name));
 
-    if (existing) continue;
+await prisma.propertySeason.updateMany({
+  where: {
+    propertyId: property.id,
+    source: "PIN_GO_DEFAULT",
+    name: {
+      notIn: Array.from(templateNames),
+    },
+    isActive: true,
+  },
+  data: {
+    isActive: false,
+  },
+});
 
+deactivated = await prisma.propertySeason.count({
+  where: {
+    propertyId: property.id,
+    source: "PIN_GO_DEFAULT",
+    name: {
+      notIn: Array.from(templateNames),
+    },
+    isActive: false,
+  },
+});
+
+for (const template of templates) {
+  const existing = await prisma.propertySeason.findFirst({
+    where: {
+      propertyId: property.id,
+      name: template.name,
+      source: "PIN_GO_DEFAULT",
+    },
+    select: {
+      id: true,
+      startMonth: true,
+      startDay: true,
+      endMonth: true,
+      endDay: true,
+      adjustmentPercent: true,
+      isActive: true,
+    },
+  });
+
+  if (!existing) {
     await prisma.propertySeason.create({
       data: {
         propertyId: property.id,
@@ -90,9 +126,34 @@ if (templates.length === 0) {
     });
 
     created += 1;
+    continue;
   }
 
-  if (created > 0) {
+  const needsUpdate =
+    existing.startMonth !== template.startMonth ||
+    existing.startDay !== template.startDay ||
+    existing.endMonth !== template.endMonth ||
+    existing.endDay !== template.endDay ||
+    Number(existing.adjustmentPercent) !== Number(template.adjustmentPercent) ||
+    existing.isActive !== true;
+
+  if (!needsUpdate) continue;
+
+  await prisma.propertySeason.update({
+    where: { id: existing.id },
+    data: {
+      startMonth: template.startMonth,
+      startDay: template.startDay,
+      endMonth: template.endMonth,
+      endDay: template.endDay,
+      adjustmentPercent: template.adjustmentPercent,
+      isActive: true,
+    },
+  });
+
+  updated += 1;
+}
+  if (created > 0 || updated > 0 || deactivated > 0) {
     await prisma.property.update({
       where: { id: property.id },
       data: {
@@ -101,9 +162,12 @@ if (templates.length === 0) {
     });
   }
 
-  return {
-    created,
-    skipped: false,
-    reason: null,
-  };
+return {
+  created,
+  updated,
+  deactivated,
+  skipped: false,
+  reason: null,
+};
+  
 }
