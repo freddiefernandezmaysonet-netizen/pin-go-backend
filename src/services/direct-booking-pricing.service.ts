@@ -370,62 +370,62 @@ const nightlyRateByDate = new Map(
 
   const appliedRules: string[] = [];
 
-  if (override) {
-    appliedRules.push(override.reason ?? "CUSTOM_RATE");
-  } else {
-    if (
-      dynamicPricingEnabled &&
-      occupancyPricingEnabled &&
-      occupancyPercent !== null &&
-      occupancyLowThresholdPercent !== null &&
-      occupancyLowAdjustmentPercent !== null &&
-      occupancyPercent <= occupancyLowThresholdPercent
-    ) {
-      appliedRules.push("OCCUPANCY_LOW_RULE");
-    }
-
-    if (
-      dynamicPricingEnabled &&
-      occupancyPricingEnabled &&
-      occupancyPercent !== null &&
-      occupancyHighThresholdPercent !== null &&
-      occupancyHighAdjustmentPercent !== null &&
-      occupancyPercent >= occupancyHighThresholdPercent
-    ) {
-      appliedRules.push("OCCUPANCY_HIGH_RULE");
-    }
-
-    if (
-      dynamicPricingEnabled &&
-      leadTimePricingEnabled &&
-      leadTimeLastMinutePercent !== 0 &&
-      getLeadTimeDays(date) >= 0 &&
-      getLeadTimeDays(date) <= leadTimeLastMinuteDays
-    ) {
-      appliedRules.push("LEAD_TIME_RULE");
-    }
-
-    if (
-      dynamicPricingEnabled &&
-      weekendMarkupPercent > 0 &&
-      isWeekendNight(date)
-    ) {
-      appliedRules.push("WEEKEND_RULE");
-    }
-
-    if (
-  dynamicPricingEnabled &&
-  property.seasonalPricingEnabled &&
-  getSeasonForDate(date)
-) {
-  appliedRules.push("SEASONAL_RULE");
-}
-
-    if (appliedRules.length === 0) {
-      appliedRules.push("BASE_RATE");
-    }
+if (override) {
+  appliedRules.push(override.reason ?? "CUSTOM_RATE");
+} else {
+  if (
+    dynamicPricingEnabled &&
+    property.seasonalPricingEnabled &&
+    getSeasonForDate(date)
+  ) {
+    appliedRules.push("SEASONAL_RULE");
   }
 
+  if (
+    dynamicPricingEnabled &&
+    occupancyPricingEnabled &&
+    occupancyPercent !== null &&
+    occupancyLowThresholdPercent !== null &&
+    occupancyLowAdjustmentPercent !== null &&
+    occupancyPercent <= occupancyLowThresholdPercent
+  ) {
+    appliedRules.push("OCCUPANCY_LOW_RULE");
+  }
+
+  if (
+    dynamicPricingEnabled &&
+    occupancyPricingEnabled &&
+    occupancyPercent !== null &&
+    occupancyHighThresholdPercent !== null &&
+    occupancyHighAdjustmentPercent !== null &&
+    occupancyPercent >= occupancyHighThresholdPercent
+  ) {
+    appliedRules.push("OCCUPANCY_HIGH_RULE");
+  }
+
+  if (
+    dynamicPricingEnabled &&
+    leadTimePricingEnabled &&
+    leadTimeLastMinutePercent !== 0 &&
+    getLeadTimeDays(date) >= 0 &&
+    getLeadTimeDays(date) <= leadTimeLastMinuteDays
+  ) {
+    appliedRules.push("LEAD_TIME_RULE");
+  }
+
+  if (
+    dynamicPricingEnabled &&
+    weekendMarkupPercent > 0 &&
+    isWeekendNight(date)
+  ) {
+    appliedRules.push("WEEKEND_RULE");
+  }
+
+  if (appliedRules.length === 0) {
+    appliedRules.push("BASE_RATE");
+  }
+}
+ 
   const finalRateBeforeBounds = override
   ? baseRateForDate
   : applyWeekendRule(
