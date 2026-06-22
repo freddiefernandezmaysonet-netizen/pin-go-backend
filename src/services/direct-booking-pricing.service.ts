@@ -242,21 +242,6 @@ function getOccupancyPercent() {
     }
   }
 
-  for (const blockedDate of occupancyBlockedDates) {
-    const start = startOfUtcDay(blockedDate.startDate);
-    const end = startOfUtcDay(blockedDate.endDate);
-
-    for (
-      let cursor = start;
-      cursor < end && cursor < lookaheadEnd;
-      cursor = addDays(cursor, 1)
-    ) {
-      if (cursor >= today) {
-        occupiedDates.add(toDateKey(cursor));
-      }
-    }
-  }
-
   return toMoney((occupiedDates.size / occupancyLookaheadDays) * 100);
 }
 
