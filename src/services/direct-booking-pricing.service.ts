@@ -75,6 +75,21 @@ export async function calculateDirectBookingPricing(
   },
 },
 
+seasons: {
+  where: {
+    isActive: true,
+  },
+  select: {
+    name: true,
+    startMonth: true,
+    startDay: true,
+    endMonth: true,
+    endDay: true,
+    adjustmentPercent: true,
+    source: true,
+  },
+},
+
     },
   });
 
@@ -247,6 +262,57 @@ function getOccupancyPercent() {
 
 const occupancyPercent = getOccupancyPercent();
 
+function isDateInSeason(date: Date, season: {
+  startMonth: number;
+  startDay: number;
+  endMonth: number;
+  endDay: number;
+}) {
+  const year = date.getUTCFullYear();
+
+  const seasonStart = new Date(
+    Date.UTC(year, season.startMonth - 1, season.startDay)
+  );
+
+  let seasonEnd = new Date(
+    Date.UTC(year, season.endMonth - 1, season.endDay)
+  );
+
+  if (seasonEnd < seasonStart) {
+    seasonEnd = new Date(
+      Date.UTC(year + 1, season.endMonth - 1, season.endDay)
+    );
+  }
+
+  return date >= seasonStart && date <= seasonEnd;
+}
+
+function getSeasonForDate(date: Date) {
+  const matchingSeasons = property.seasons.filter((season) =>
+    isDateInSeason(date, season)
+  );
+
+  if (matchingSeasons.length === 0) return null;
+
+  return matchingSeasons.sort((a, b) => {
+    return (
+      Math.abs(Number(b.adjustmentPercent)) -
+      Math.abs(Number(a.adjustmentPercent))
+    );
+  })[0];
+}
+
+function applySeasonalRule(rate: number, date: Date) {
+  if (!dynamicPricingEnabled) return rate;
+  if (!property.seasonalPricingEnabled) return rate;
+
+  const season = getSeasonForDate(date);
+
+  if (!season) return rate;
+
+  return toMoney(rate * (1 + Number(season.adjustmentPercent) / 100));
+}
+
 function applyOccupancyRule(rate: number) {
   if (!dynamicPricingEnabled) return rate;
   if (!occupancyPricingEnabled) return rate;
@@ -347,18 +413,31 @@ const nightlyRateByDate = new Map(
       appliedRules.push("WEEKEND_RULE");
     }
 
+    if (
+  dynamicPricingEnabled &&
+  property.seasonalPricingEnabled &&
+  getSeasonForDate(date)
+) {
+  appliedRules.push("SEASONAL_RULE");
+}
+
     if (appliedRules.length === 0) {
       appliedRules.push("BASE_RATE");
     }
   }
 
   const finalRateBeforeBounds = override
-    ? baseRateForDate
-    : applyWeekendRule(
-        applyLeadTimeRule(applyOccupancyRule(baseRateForDate), date),
+  ? baseRateForDate
+  : applyWeekendRule(
+      applyLeadTimeRule(
+        applyOccupancyRule(
+          applySeasonalRule(baseRateForDate, date)
+        ),
         date
-      );
-
+      ),
+      date
+    );
+  
   const finalRate = applyPricingBounds(finalRateBeforeBounds);
 
   return {

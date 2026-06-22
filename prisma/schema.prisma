@@ -139,6 +139,7 @@ model Property {
   amenities                  PropertyAmenity[]
   taxes                      PropertyTax[]
   nightlyRates               PropertyNightlyRate[]
+  seasons                    PropertySeason[]
   reservations               Reservation[]
   blockedDates               PropertyBlockedDate[]
   
@@ -161,6 +162,26 @@ model PropertyNightlyRate {
 
   @@unique([propertyId, date])
   @@index([propertyId, date])
+}
+
+model PropertySeason {
+  id                String   @id @default(cuid())
+  propertyId        String
+  name              String
+  startMonth        Int
+  startDay          Int
+  endMonth          Int
+  endDay            Int
+  adjustmentPercent Decimal  @db.Decimal(5,2)
+  isActive          Boolean  @default(true)
+  source            String   @default("CUSTOM")
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+
+  property Property @relation(fields: [propertyId], references: [id], onDelete: Cascade)
+
+  @@index([propertyId])
+  @@index([propertyId, isActive])
 }
 
 model Lock {
