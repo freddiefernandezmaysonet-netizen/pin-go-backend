@@ -28,6 +28,12 @@ export async function applyDefaultMarketSeasonsForProperty(propertyId: string) {
 
   const region = String(property.region || "").trim();
 
+console.log("[market-seasons] property market", {
+  propertyId: property.id,
+  country,
+  region,
+});
+
 let templates = await prisma.marketSeasonTemplate.findMany({
   where: {
     country,
@@ -38,6 +44,14 @@ let templates = await prisma.marketSeasonTemplate.findMany({
     { startMonth: "asc" },
     { startDay: "asc" },
   ],
+});
+
+console.log("[market-seasons] regional templates found", {
+  propertyId: property.id,
+  country,
+  region,
+  count: templates.length,
+  names: templates.map((t) => t.name),
 });
 
 if (templates.length === 0) {
