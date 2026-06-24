@@ -36,8 +36,8 @@ export const MARKET_SEASON_CATALOG: MarketSeasonCatalogItem[] = [
         name: "Summer Travel",
         startMonth: 6,
         startDay: 1,
-        endMonth: 8,
-        endDay: 31,
+        endMonth: 7,
+        endDay: 30,
         adjustmentPercent: 15,
       },
       {
