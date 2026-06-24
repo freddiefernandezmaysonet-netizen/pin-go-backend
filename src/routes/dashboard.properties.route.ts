@@ -8,6 +8,7 @@ import { ingestReservation } from "../services/ingest.service";
 import { calculateDirectBookingPricing } from "../services/direct-booking-pricing.service";
 import { applyDefaultMarketSeasonsForProperty } from "../services/market-season-template.service";
 import { MARKET_SEASON_CATALOG } from "../data/market-season-catalog";
+import { provisionProperty } from "../services/property-provisioning.service";
 
 const prisma = new PrismaClient();
 export const dashboardPropertiesRouter = Router();
@@ -471,12 +472,13 @@ if (
           id,
           organizationId: orgId,
         },
-        select: {
+     select: {
   id: true,
   status: true,
   distributionEnabled: true,
+  country: true,
+  region: true,
 },
-
       });
 
       if (!existing) {
@@ -765,6 +767,23 @@ if (checkOutTime !== undefined) {
        },
       });
 
+const marketChanged =
+  updated.country !== existing.country ||
+  updated.region !== existing.region;
+
+let provisioningResult: any = null;
+
+if (marketChanged) {
+  try {
+    provisioningResult = await provisionProperty(updated.id);
+  } catch (provisioningError: any) {
+    console.error("[Provisioning Engine]", {
+      propertyId: updated.id,
+      error: provisioningError?.message ?? provisioningError,
+    });
+  }
+}
+
       let distributionSyncResult: any = null;
 
       if (updated.distributionStatus === "ACTIVE") {
@@ -803,12 +822,12 @@ if (checkOutTime !== undefined) {
         }
       }
 
-           return res.json({
-        ok: true,
-        item: updated,
-        distributionSyncResult,
-      });     
-
+          return res.json({
+  ok: true,
+  item: updated,
+  provisioningResult,
+  distributionSyncResult,
+});
     } catch (error: any) {
       console.error("PATCH /api/dashboard/properties/:id error", error);
       return res.status(500).json({
