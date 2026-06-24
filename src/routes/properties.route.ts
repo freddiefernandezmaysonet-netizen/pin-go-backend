@@ -1,6 +1,7 @@
 import { Router } from "express";
 import type { PrismaClient } from "@prisma/client";
 import { requireAuth } from "../middleware/requireAuth";
+import { provisionProperty } from "../services/property-provisioning.service";
 
 function parseOptionalCoordinate(value: unknown): number | null {
   if (value === undefined || value === null || String(value).trim() === "") {
@@ -174,10 +175,21 @@ const {
         },
       });
 
+let provisioningResult = null;
+
+try {
+  provisioningResult = await provisionProperty(property.id);
+} catch (error: any) {
+  console.error("[Provisioning Engine]", {
+    propertyId: property.id,
+    error: error?.message ?? error,
+  });
+}
       return res.status(201).json({
         ok: true,
         item: property,
-      });
+        provisioningResult,
+     });
     } catch (error: any) {
       console.error("POST /api/properties error:", error);
       return res.status(500).json({
