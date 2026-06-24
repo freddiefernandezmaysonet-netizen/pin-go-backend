@@ -1,6 +1,7 @@
 import { Router } from "express";
 import type { PrismaClient } from "@prisma/client";
 import { requireAuth } from "../middleware/requireAuth";
+import { provisionProperty } from "../services/property-provisioning.service";
 
 function durationFromCheckInTime(checkInTime: "15:00" | "16:00") {
   return checkInTime === "16:00" ? 240 : 180;
@@ -159,13 +160,25 @@ export function buildCreatePropertyRouter(prisma: PrismaClient) {
         },
       });
 
-      return res.status(201).json({
-        ok: true,
-        property: {
-          ...property,
-          checkInTime,
-        },
-      });
+let provisioningResult = null;
+
+try {
+  provisioningResult = await provisionProperty(property.id);
+} catch (error: any) {
+  console.error("[Provisioning Engine]", {
+    propertyId: property.id,
+    error: error?.message ?? error,
+  });
+}
+return res.status(201).json({
+  ok: true,
+  property: {
+    ...property,
+    checkInTime,
+  },
+  provisioningResult,
+});
+     
     } catch (e: any) {
       console.error("create property error:", e?.message ?? e);
       return res.status(500).json({
