@@ -92,7 +92,7 @@ seasons: {
   },
 },
 
-holidayPricing: {
+holidayPricings: {
   where: {
     isActive: true,
   },
@@ -312,7 +312,7 @@ function getSeasonForDate(date: Date) {
 }
 
 function getHolidayForDate(date: Date) {
-  const matchingHolidays = property.holidayPricing.filter((holiday) =>
+  const matchingHolidays = property.holidayPricings.filter((holiday) =>
     isDateInSeason(date, holiday)
   );
 
