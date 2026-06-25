@@ -88,6 +88,24 @@ export async function handleDirectBookingCheckoutCompleted(
   const guestEmail = requiredMetadata(session, "guestEmail");
   const guestPhone = String(session.metadata?.guestPhone ?? "").trim() || null;
 
+  const stayNotificationsConsent =
+  String(session.metadata?.stayNotificationsConsent ?? "").trim() === "true";
+
+const smsConsent =
+  String(session.metadata?.smsConsent ?? "").trim() === "true";
+
+const consentSource =
+  String(session.metadata?.consentSource ?? "").trim() ||
+  "DIRECT_BOOKING_WEB_FORM";
+
+const consentVersion =
+  String(session.metadata?.consentVersion ?? "").trim() ||
+  "stay_notifications_v1";
+
+if (!stayNotificationsConsent || !smsConsent) {
+  throw new Error("DIRECT_BOOKING_SMS_CONSENT_REQUIRED");
+}
+  
   const checkIn = parseDateMetadata(session, "checkIn");
   const checkOut = parseDateMetadata(session, "checkOut");
   const checkInRaw = requiredMetadata(session, "checkIn");
@@ -173,7 +191,14 @@ const ingestResult = await ingestReservation({
     amountTotal: session.amount_total,
     currency: session.currency,
     metadata: session.metadata ?? {},
-  },
+    consent: {
+      stayNotificationsConsent,
+      smsConsent,
+      consentSource,
+      consentVersion,
+      acceptedAt: new Date().toISOString(),
+   },
+ },
 
   status: "ACTIVE",
 });

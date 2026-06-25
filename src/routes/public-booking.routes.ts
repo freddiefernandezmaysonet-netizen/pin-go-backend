@@ -326,6 +326,7 @@ publicBookingRouter.post("/create-checkout", async (req, res) => {
    guestName,
    guestEmail,
    guestPhone,
+   stayNotificationsConsent,
    adults,
    children,
    selectedAmenityIds,
@@ -356,6 +357,13 @@ publicBookingRouter.post("/create-checkout", async (req, res) => {
         error: "Missing or invalid propertyId/checkIn/checkOut/guestName/guestEmail",
       });
     }
+
+    if (stayNotificationsConsent !== true) {
+  return res.status(400).json({
+    ok: false,
+    error: "Stay notifications consent is required.",
+  });
+}
 
     const property = await prisma.property.findFirst({
       where: {
@@ -498,6 +506,10 @@ const totalAmountCents = pricing.totalAmountCents;
         guestName: String(guestName).trim(),
         guestEmail: String(guestEmail).trim(),
         guestPhone: guestPhone ? String(guestPhone).trim() : "",
+        stayNotificationsConsent: "true",
+        smsConsent: "true",
+        consentSource: "DIRECT_BOOKING_WEB_FORM",
+        consentVersion: "stay_notifications_v1",
         adults: String(adultsCount),
         children: String(childrenCount),
         totalGuests: String(totalGuests),
