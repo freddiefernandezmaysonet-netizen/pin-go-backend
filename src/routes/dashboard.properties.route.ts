@@ -592,6 +592,10 @@ if (seasonalPricingEnabled !== undefined) {
   data.seasonalPricingEnabled = Boolean(seasonalPricingEnabled);
 }
 
+if (holidayPricingEnabled !== undefined) {
+  data.holidayPricingEnabled = Boolean(holidayPricingEnabled);
+}
+
 if (leadTimePricingEnabled !== undefined) {
   data.leadTimePricingEnabled = Boolean(leadTimePricingEnabled);
 }
@@ -709,7 +713,7 @@ if (checkOutTime !== undefined) {
           distributionEnabled: true,
           dynamicPricingEnabled: true,
           seasonalPricingEnabled: true,
-          holidayPricingEnabled,
+          holidayPricingEnabled: true,
           leadTimePricingEnabled: true,
           leadTimeLastMinuteDays: true,
           leadTimeLastMinutePercent: true,
