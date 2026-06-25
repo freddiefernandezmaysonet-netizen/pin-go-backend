@@ -1848,6 +1848,7 @@ dashboardPropertiesRouter.get(
           id: true,
           propertyId: true,
           name: true,
+          type: true,
           startMonth: true,
           startDay: true,
           endMonth: true,
@@ -1942,6 +1943,7 @@ dashboardPropertiesRouter.post(
         data: {
           propertyId: property.id,
           name: cleanName,
+          type: "SHOULDER",
           startMonth: parsedStartMonth,
           startDay: parsedStartDay,
           endMonth: parsedEndMonth,
@@ -1954,6 +1956,7 @@ dashboardPropertiesRouter.post(
           id: true,
           propertyId: true,
           name: true,
+          type: true,
           startMonth: true,
           startDay: true,
           endMonth: true,
