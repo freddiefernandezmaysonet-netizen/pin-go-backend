@@ -28,6 +28,7 @@ export async function calculateDirectBookingPricing(
       maximumNightlyRate: true,
       dynamicPricingEnabled: true,
       seasonalPricingEnabled: true,
+      holidayPricingEnabled: true,
       weekendMarkupPercent: true,
       leadTimePricingEnabled: true,
       leadTimeLastMinuteDays: true,
@@ -77,6 +78,21 @@ export async function calculateDirectBookingPricing(
 },
 
 seasons: {
+  where: {
+    isActive: true,
+  },
+  select: {
+    name: true,
+    startMonth: true,
+    startDay: true,
+    endMonth: true,
+    endDay: true,
+    adjustmentPercent: true,
+    source: true,
+  },
+},
+
+holidayPricing: {
   where: {
     isActive: true,
   },
@@ -295,6 +311,21 @@ function getSeasonForDate(date: Date) {
   })[0];
 }
 
+function getHolidayForDate(date: Date) {
+  const matchingHolidays = property.holidayPricing.filter((holiday) =>
+    isDateInSeason(date, holiday)
+  );
+
+  if (matchingHolidays.length === 0) return null;
+
+  return matchingHolidays.sort((a, b) => {
+    return (
+      Math.abs(Number(b.adjustmentPercent)) -
+      Math.abs(Number(a.adjustmentPercent))
+    );
+  })[0];
+}
+
 function applySeasonalRule(rate: number, date: Date) {
   if (!dynamicPricingEnabled) return rate;
   if (!property.seasonalPricingEnabled) return rate;
@@ -304,6 +335,17 @@ function applySeasonalRule(rate: number, date: Date) {
   if (!season) return rate;
 
   return toMoney(rate * (1 + Number(season.adjustmentPercent) / 100));
+}
+
+function applyHolidayRule(rate: number, date: Date) {
+  if (!dynamicPricingEnabled) return rate;
+  if (!property.holidayPricingEnabled) return rate;
+
+  const holiday = getHolidayForDate(date);
+
+  if (!holiday) return rate;
+
+  return toMoney(rate * (1 + Number(holiday.adjustmentPercent) / 100));
 }
 
 function applyOccupancyRule(rate: number) {
@@ -374,6 +416,14 @@ if (override) {
     appliedRules.push("SEASONAL_RULE");
   }
 
+if (
+  dynamicPricingEnabled &&
+  property.holidayPricingEnabled &&
+  getHolidayForDate(date)
+) {
+  appliedRules.push("HOLIDAY_RULE");
+}
+
   if (
     dynamicPricingEnabled &&
     occupancyPricingEnabled &&
@@ -424,14 +474,17 @@ if (override) {
   : applyWeekendRule(
       applyLeadTimeRule(
         applyOccupancyRule(
-          applySeasonalRule(baseRateForDate, date)
+          applyHolidayRule(
+            applySeasonalRule(baseRateForDate, date),
+            date
+          )
         ),
         date
       ),
       date
-    );
-  
-  const finalRate = applyPricingBounds(finalRateBeforeBounds);
+    );  
+ 
+ const finalRate = applyPricingBounds(finalRateBeforeBounds);
 
   return {
     date: dateKey,
