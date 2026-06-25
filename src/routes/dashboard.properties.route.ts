@@ -1727,11 +1727,14 @@ dashboardPropertiesRouter.post(
   requireAuth,
   async (req, res) => {
     try {
-      let created = 0;
-      let updated = 0;
-      let skipped = 0;
-
+     let created = 0;
+     let updated = 0;
+     let skipped = 0;
+     let deactivated = 0;
       for (const market of MARKET_SEASON_CATALOG) {
+        const catalogSeasonNames = new Set(
+  market.seasons.map((season) => season.name)
+);
         for (const season of market.seasons) {
           const existing = await prisma.marketSeasonTemplate.findFirst({
             where: {
@@ -1801,14 +1804,31 @@ dashboardPropertiesRouter.post(
 
           updated += 1;
         }
-      }
+      const deactivateResult = await prisma.marketSeasonTemplate.updateMany({
+  where: {
+    country: market.country,
+    region: market.region ?? null,
+    isActive: true,
+    name: {
+      notIn: Array.from(catalogSeasonNames),
+    },
+  },
+  data: {
+    isActive: false,
+  },
+});
+
+deactivated += deactivateResult.count;
+
+     }
 
       return res.json({
         ok: true,
         created,
         updated,
         skipped,
-      });
+        deactivated,
+     });
     } catch (error: any) {
       console.error("POST sync market season catalog error", error);
       return res.status(500).json({
