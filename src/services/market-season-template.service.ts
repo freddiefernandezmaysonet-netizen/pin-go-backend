@@ -51,12 +51,7 @@ export async function applyDefaultMarketSeasonsForProperty(propertyId: string) {
     throw new Error("PROPERTY_NOT_FOUND");
   }
 
-  console.log("[Market Seasons] property loaded", {
-    propertyId,
-    country: property.country,
-    region: property.region,
-  });
-
+  
   const country = normalizeMarketCountry(property.country);
 
   if (!country) {
@@ -76,12 +71,7 @@ export async function applyDefaultMarketSeasonsForProperty(propertyId: string) {
 
   const region = normalizeMarketRegion(property.region);
 
-  console.log("[Market Seasons] normalized market", {
-    propertyId,
-    country,
-    region,
-  });
-
+  
   let templates = await prisma.marketSeasonTemplate.findMany({
     where: {
       country,
@@ -91,13 +81,7 @@ export async function applyDefaultMarketSeasonsForProperty(propertyId: string) {
     orderBy: [{ startMonth: "asc" }, { startDay: "asc" }],
   });
 
-  console.log("[Market Seasons] regional templates", {
-    propertyId,
-    count: templates.length,
-    country,
-    region: region || null,
-  });
-
+  
   if (templates.length === 0) {
     templates = await prisma.marketSeasonTemplate.findMany({
       where: {
@@ -108,13 +92,7 @@ export async function applyDefaultMarketSeasonsForProperty(propertyId: string) {
       orderBy: [{ startMonth: "asc" }, { startDay: "asc" }],
     });
 
-    console.log("[Market Seasons] fallback country templates", {
-      propertyId,
-      count: templates.length,
-      country,
-      region: null,
-    });
-  }
+     }
 
   if (templates.length === 0) {
     console.log("[Market Seasons] skipped", {
