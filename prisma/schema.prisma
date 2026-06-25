@@ -140,6 +140,7 @@ model Property {
   taxes                      PropertyTax[]
   nightlyRates               PropertyNightlyRate[]
   seasons                    PropertySeason[]
+  holidayPricings            PropertyHolidayPricing[]
   reservations               Reservation[]
   blockedDates               PropertyBlockedDate[]
   
@@ -207,6 +208,27 @@ model MarketSeasonTemplate {
   @@index([country, isActive])
   @@index([country, region])
   @@index([type])
+}
+
+model PropertyHolidayPricing {
+  id                String   @id @default(cuid())
+  propertyId        String
+  name              String
+  startMonth        Int
+  startDay          Int
+  endMonth          Int
+  endDay            Int
+  adjustmentPercent Decimal  @db.Decimal(5,2)
+  isActive          Boolean  @default(true)
+  source            String   @default("PIN_GO_DEFAULT")
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+
+  property Property @relation(fields: [propertyId], references: [id], onDelete: Cascade)
+
+  @@index([propertyId])
+  @@index([propertyId, isActive])
+  @@index([propertyId, source])
 }
 
 model Lock {

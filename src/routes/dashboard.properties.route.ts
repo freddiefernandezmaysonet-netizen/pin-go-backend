@@ -9,6 +9,7 @@ import { calculateDirectBookingPricing } from "../services/direct-booking-pricin
 import { applyDefaultMarketSeasonsForProperty } from "../services/market-season-template.service";
 import { MARKET_SEASON_CATALOG } from "../data/market-season-catalog";
 import { provisionProperty } from "../services/property-provisioning.service";
+import { applyDefaultHolidayPricingForProperty } from "../services/holiday-pricing-template.service";
 
 const prisma = new PrismaClient();
 export const dashboardPropertiesRouter = Router();
@@ -2587,6 +2588,96 @@ return res.json({
       return res.status(500).json({
         ok: false,
         error: error?.message ?? "Failed to delete blocked date",
+      });
+    }
+  }
+);
+dashboardPropertiesRouter.get(
+  "/api/dashboard/properties/:id/holiday-pricing",
+  requireAuth,
+  async (req, res) => {
+    try {
+      const user = (req as any).user;
+      const orgId = user.orgId as string;
+      const { id } = req.params;
+
+      const property = await prisma.property.findFirst({
+        where: { id, organizationId: orgId, status: "ACTIVE" },
+        select: { id: true },
+      });
+
+      if (!property) {
+        return res.status(404).json({ ok: false, error: "Property not found" });
+      }
+
+      const items = await prisma.propertyHolidayPricing.findMany({
+        where: { propertyId: property.id },
+        orderBy: [
+          { startMonth: "asc" },
+          { startDay: "asc" },
+        ],
+        select: {
+          id: true,
+          propertyId: true,
+          name: true,
+          startMonth: true,
+          startDay: true,
+          endMonth: true,
+          endDay: true,
+          adjustmentPercent: true,
+          isActive: true,
+          source: true,
+          createdAt: true,
+          updatedAt: true,
+        },
+      });
+
+      return res.json({
+        ok: true,
+        items: items.map((item) => ({
+          ...item,
+          adjustmentPercent: Number(item.adjustmentPercent),
+        })),
+      });
+    } catch (error: any) {
+      console.error("GET holiday pricing error", error);
+      return res.status(500).json({
+        ok: false,
+        error: error?.message ?? "Failed to load holiday pricing",
+      });
+    }
+  }
+);
+
+dashboardPropertiesRouter.post(
+  "/api/dashboard/properties/:id/holiday-pricing/apply-defaults",
+  requireAuth,
+  async (req, res) => {
+    try {
+      const user = (req as any).user;
+      const orgId = user.orgId as string;
+      const { id } = req.params;
+
+      const property = await prisma.property.findFirst({
+        where: { id, organizationId: orgId, status: "ACTIVE" },
+        select: { id: true },
+      });
+
+      if (!property) {
+        return res.status(404).json({ ok: false, error: "Property not found" });
+      }
+
+      const result = await applyDefaultHolidayPricingForProperty(property.id);
+
+      return res.json({
+        ok: true,
+        result,
+      });
+    } catch (error: any) {
+      console.error("POST apply holiday pricing defaults error", error);
+      return res.status(500).json({
+        ok: false,
+        error: error?.message ?? "Failed to apply holiday pricing defaults",
       });
     }
   }
