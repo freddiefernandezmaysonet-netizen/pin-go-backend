@@ -12,44 +12,59 @@ export type MarketSeasonCatalogItem = {
 };
 
 export const MARKET_SEASON_CATALOG: MarketSeasonCatalogItem[] = [
-  {
-    country: "United States",
-    region: "Puerto Rico",
-    seasons: [
-      {
-        name: "Holiday Peak",
-        startMonth: 12,
-        startDay: 15,
-        endMonth: 4,
-        endDay: 7,
-        adjustmentPercent: 35,
-      },
-      {
-        name: "Spring Break",
-        startMonth: 3,
-        startDay: 1,
-        endMonth: 4,
-        endDay: 15,
-        adjustmentPercent: 20,
-      },
-      {
-        name: "Summer Travel",
-        startMonth: 6,
-        startDay: 1,
-        endMonth: 7,
-        endDay: 30,
-        adjustmentPercent: 15,
-      },
-      {
-        name: "Low Season",
-        startMonth: 8,
-        startDay: 1,
-        endMonth: 11,
-        endDay: 21,
-        adjustmentPercent: -10,
-      },
-    ],
-  },
+ 
+{
+  country: "United States",
+  region: "Puerto Rico",
+  seasons: [
+    {
+      name: "Winter Peak",
+      type: "PEAK",
+      startMonth: 12,
+      startDay: 1,
+      endMonth: 4,
+      endDay: 30,
+      adjustmentPercent: 25,
+    },
+    {
+      name: "Spring Shoulder",
+      type: "SHOULDER",
+      startMonth: 5,
+      startDay: 1,
+      endMonth: 6,
+      endDay: 30,
+      adjustmentPercent: 10,
+    },
+    {
+      name: "Summer Peak",
+      type: "PEAK",
+      startMonth: 7,
+      startDay: 1,
+      endMonth: 7,
+      endDay: 31,
+      adjustmentPercent: 15,
+    },
+    {
+      name: "Late Summer Shoulder",
+      type: "SHOULDER",
+      startMonth: 8,
+      startDay: 1,
+      endMonth: 8,
+      endDay: 31,
+      adjustmentPercent: 5,
+    },
+    {
+      name: "Hurricane / Low Season",
+      type: "LOW",
+      startMonth: 9,
+      startDay: 1,
+      endMonth: 11,
+      endDay: 30,
+      adjustmentPercent: -15,
+    },
+  ],
+},
+
   {
     country: "United States",
     region: null,

@@ -1741,6 +1741,7 @@ dashboardPropertiesRouter.post(
             },
             select: {
               id: true,
+              type: true,
               startMonth: true,
               startDay: true,
               endMonth: true,
@@ -1756,6 +1757,7 @@ dashboardPropertiesRouter.post(
                 country: market.country,
                 region: market.region,
                 name: season.name,
+                type: season.type,
                 startMonth: season.startMonth,
                 startDay: season.startDay,
                 endMonth: season.endMonth,
@@ -1770,6 +1772,7 @@ dashboardPropertiesRouter.post(
           }
 
           const needsUpdate =
+            existing.type !== season.type ||
             Number(existing.startMonth) !== season.startMonth ||
             Number(existing.startDay) !== season.startDay ||
             Number(existing.endMonth) !== season.endMonth ||
@@ -1786,6 +1789,7 @@ dashboardPropertiesRouter.post(
           await prisma.marketSeasonTemplate.update({
             where: { id: existing.id },
             data: {
+              type: season.type,
               startMonth: season.startMonth,
               startDay: season.startDay,
               endMonth: season.endMonth,

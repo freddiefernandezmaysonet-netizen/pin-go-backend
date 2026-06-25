@@ -147,6 +147,7 @@ export async function applyDefaultMarketSeasonsForProperty(propertyId: string) {
         endDay: true,
         adjustmentPercent: true,
         isActive: true,
+        type: true,
       },
     });
 
@@ -161,6 +162,7 @@ export async function applyDefaultMarketSeasonsForProperty(propertyId: string) {
           endDay: template.endDay,
           adjustmentPercent: template.adjustmentPercent,
           isActive: true,
+          type: template.type,
           source: "PIN_GO_DEFAULT",
         },
       });
@@ -175,6 +177,7 @@ export async function applyDefaultMarketSeasonsForProperty(propertyId: string) {
       existing.endMonth !== template.endMonth ||
       existing.endDay !== template.endDay ||
       Number(existing.adjustmentPercent) !== Number(template.adjustmentPercent) ||
+      existing.type !== template.type ||
       existing.isActive !== true;
 
     if (!needsUpdate) continue;
@@ -187,6 +190,7 @@ export async function applyDefaultMarketSeasonsForProperty(propertyId: string) {
         endMonth: template.endMonth,
         endDay: template.endDay,
         adjustmentPercent: template.adjustmentPercent,
+        type: template.type,
         isActive: true,
       },
     });
