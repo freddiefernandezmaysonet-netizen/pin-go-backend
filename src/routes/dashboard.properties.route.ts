@@ -10,6 +10,7 @@ import { applyDefaultMarketSeasonsForProperty } from "../services/market-season-
 import { MARKET_SEASON_CATALOG } from "../data/market-season-catalog";
 import { provisionProperty } from "../services/property-provisioning.service";
 import { applyDefaultHolidayPricingForProperty } from "../services/holiday-pricing-template.service";
+import { createMissionControlSnapshotFromAuditEntries } from "../apms/mission-control.mapper";
 
 const prisma = new PrismaClient();
 export const dashboardPropertiesRouter = Router();
@@ -1066,6 +1067,99 @@ dashboardPropertiesRouter.post(
         error:
           error?.message ??
           "Failed to sync Channex availability",
+      });
+    }
+  }
+);
+
+dashboardPropertiesRouter.get(
+  "/api/dashboard/properties/:id/mission-control",
+  requireAuth,
+  async (req, res) => {
+    try {
+      const user = (req as any).user;
+      const orgId = user.orgId as string;
+      const { id } = req.params;
+
+      const property = await prisma.property.findFirst({
+        where: {
+          id,
+          organizationId: orgId,
+          status: "ACTIVE",
+        },
+        select: {
+          id: true,
+        },
+      });
+
+      if (!property) {
+        return res.status(404).json({
+          ok: false,
+          error: "Property not found",
+        });
+      }
+
+      const fromRaw = req.query.from;
+      const toRaw = req.query.to;
+
+      const today = new Date();
+      const defaultFrom = new Date(
+        Date.UTC(
+          today.getUTCFullYear(),
+          today.getUTCMonth(),
+          today.getUTCDate()
+        )
+      );
+
+      const defaultTo = new Date(defaultFrom);
+      defaultTo.setUTCDate(defaultTo.getUTCDate() + 30);
+
+      const checkIn = fromRaw
+        ? new Date(`${String(fromRaw)}T00:00:00.000Z`)
+        : defaultFrom;
+
+      const checkOut = toRaw
+        ? new Date(`${String(toRaw)}T00:00:00.000Z`)
+        : defaultTo;
+
+      if (
+        Number.isNaN(checkIn.getTime()) ||
+        Number.isNaN(checkOut.getTime()) ||
+        checkOut <= checkIn
+      ) {
+        return res.status(400).json({
+          ok: false,
+          error: "Invalid mission-control date range",
+        });
+      }
+
+      const pricing = await calculateDirectBookingPricing({
+        propertyId: property.id,
+        checkIn,
+        checkOut,
+      });
+
+      const snapshot = createMissionControlSnapshotFromAuditEntries({
+        entityId: property.id,
+        auditEntries: pricing.auditEntries ?? [],
+        generatedAt: new Date(),
+      });
+
+      return res.json({
+        ok: true,
+        item: snapshot,
+        pricingWindow: {
+          from: checkIn.toISOString().slice(0, 10),
+          to: checkOut.toISOString().slice(0, 10),
+        },
+      });
+    } catch (error: any) {
+      console.error("GET mission-control error", error);
+      return res.status(500).json({
+        ok: false,
+        error:
+          error?.message ??
+          "Failed to load property mission control snapshot",
       });
     }
   }
