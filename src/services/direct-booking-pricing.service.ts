@@ -659,7 +659,7 @@ if (
     }
 
     const rateAfterSeasonal = seasonalDecision
-      ? seasonalDecision.newRate
+      ? seasonalDecision.newValue
       : baseRateForDate;
 
     const holidayDecision = createHolidayDecision(rateAfterSeasonal, date);
@@ -669,7 +669,7 @@ if (
     }
 
     const rateAfterHoliday = holidayDecision
-      ? holidayDecision.newRate
+      ? holidayDecision.newValue
       : rateAfterSeasonal;
 
     const occupancyDecision = createOccupancyDecision(rateAfterHoliday);
@@ -679,7 +679,7 @@ if (
     }
 
     const rateAfterOccupancy = occupancyDecision
-      ? occupancyDecision.newRate
+      ? occupancyDecision.newValue
       : rateAfterHoliday;
 
     const leadTimeDecision = createLeadTimeDecision(rateAfterOccupancy, date);
