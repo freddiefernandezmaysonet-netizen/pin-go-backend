@@ -38,10 +38,14 @@ function toReservationAuditDecisionTrace(
   };
 }
 
-function getReservationAuditSummary(decisions: AuditDecisionTrace[]) {
-  const appliedRules = decisions
+function getAppliedRules(decisions: AuditDecisionTrace[]) {
+  return decisions
     .filter((decision) => decision.applied)
     .map((decision) => decision.rule);
+}
+
+function getReservationAuditSummary(decisions: AuditDecisionTrace[]) {
+  const appliedRules = getAppliedRules(decisions);
 
   if (appliedRules.includes("ACTIVE_LOCK_MISSING")) {
     return "Reservation Auto Pilot received the reservation but could not create guest access because no active lock was found.";
@@ -61,9 +65,7 @@ function getReservationAuditSummary(decisions: AuditDecisionTrace[]) {
 function getReservationAuditRecommendedAction(
   decisions: AuditDecisionTrace[]
 ) {
-  const appliedRules = decisions
-    .filter((decision) => decision.applied)
-    .map((decision) => decision.rule);
+  const appliedRules = getAppliedRules(decisions);
 
   if (appliedRules.includes("ACTIVE_LOCK_MISSING")) {
     return "Assign an active smart lock to this property so Pin&Go can create guest access automatically.";
@@ -73,9 +75,7 @@ function getReservationAuditRecommendedAction(
 }
 
 function getReservationAuditSeverity(decisions: AuditDecisionTrace[]) {
-  const appliedRules = decisions
-    .filter((decision) => decision.applied)
-    .map((decision) => decision.rule);
+  const appliedRules = getAppliedRules(decisions);
 
   if (appliedRules.includes("ACTIVE_LOCK_MISSING")) {
     return "WARNING" as const;
@@ -85,9 +85,7 @@ function getReservationAuditSeverity(decisions: AuditDecisionTrace[]) {
 }
 
 function getReservationAuditStatus(decisions: AuditDecisionTrace[]) {
-  const appliedRules = decisions
-    .filter((decision) => decision.applied)
-    .map((decision) => decision.rule);
+  const appliedRules = getAppliedRules(decisions);
 
   if (appliedRules.includes("RESERVATION_FAILED")) {
     return "FAILED" as const;
@@ -110,3 +108,20 @@ export function createReservationAuditEntry(
       `reservation-autopilot:${input.propertyId}:${input.reservationId}`,
     entityType: "RESERVATION",
     entityId: input.reservationId,
+    eventType: "DECISION_APPLIED",
+    status: getReservationAuditStatus(decisions),
+    severity: getReservationAuditSeverity(decisions),
+    summary: getReservationAuditSummary(decisions),
+    startedAt,
+    completedAt,
+    durationMs: Math.max(0, completedAt.getTime() - startedAt.getTime()),
+    reason: input.reason,
+    decisions,
+    recommendedAction: getReservationAuditRecommendedAction(decisions),
+    metadata: {
+      propertyId: input.propertyId,
+      reservationId: input.reservationId,
+      ...input.metadata,
+    },
+  };
+}
