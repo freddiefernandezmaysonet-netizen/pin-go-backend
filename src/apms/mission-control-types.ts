@@ -3,6 +3,8 @@
  * Every dashboard, AI insight and audit should consume these contracts.
  */
 
+import type { AuditEntry, AuditTimeline } from "./audit-types";
+
 export interface FreedomMetrics {
   /**
    * Minutes returned to the host.
@@ -61,4 +63,89 @@ export interface EngineHealth {
   lastExecutionAt?: Date;
 
   message?: string;
+}
+
+export type AutopilotStatus =
+  | "ACTIVE"
+  | "NEEDS_ATTENTION"
+  | "PAUSED"
+  | "ERROR";
+
+export interface MissionControlAction {
+  /**
+   * Human-readable action title.
+   */
+  title: string;
+
+  /**
+   * Optional explanation for why this action matters.
+   */
+  description?: string;
+
+  /**
+   * Engine or area related to this action.
+   */
+  engine?: string;
+
+  /**
+   * Action priority.
+   */
+  priority: "LOW" | "MEDIUM" | "HIGH" | "CRITICAL";
+
+  /**
+   * Whether this requires host intervention.
+   */
+  requiresHumanAction: boolean;
+}
+
+export interface MissionControlSnapshot {
+  /**
+   * Property, reservation or organization being summarized.
+   */
+  entityId: string;
+
+  /**
+   * Current autopilot status.
+   */
+  autopilotStatus: AutopilotStatus;
+
+  /**
+   * Time returned to the host and interventions avoided.
+   */
+  freedomMetrics: FreedomMetrics;
+
+  /**
+   * Autonomy performance.
+   */
+  autonomyScore: AutonomyScore;
+
+  /**
+   * System confidence.
+   */
+  confidenceScore: ConfidenceScore;
+
+  /**
+   * Health by APMS engine.
+   */
+  engineHealth: EngineHealth[];
+
+  /**
+   * Recent audit entries from APMS engines.
+   */
+  recentAuditEntries?: AuditEntry[];
+
+  /**
+   * Full audit timeline when available.
+   */
+  auditTimeline?: AuditTimeline;
+
+  /**
+   * Recommended actions for the host or system.
+   */
+  recommendedActions?: MissionControlAction[];
+
+  /**
+   * Last time this snapshot was calculated.
+   */
+  generatedAt: Date;
 }
