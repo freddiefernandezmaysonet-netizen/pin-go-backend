@@ -541,6 +541,28 @@ function applyPricingBounds(rate: number) {
   return finalRate;
 }
 
+function applyNightlyRateRounding(rate: number) {
+  return Math.round(toMoney(rate));
+}
+
+function createNightlyRateRoundingDecision(
+  rate: number
+): DecisionStep<number> | null {
+  const roundedRate = applyNightlyRateRounding(rate);
+
+  if (roundedRate === toMoney(rate)) {
+    return null;
+  }
+
+  return createPricingDecisionStep({
+    rule: "NIGHTLY_RATE_ROUNDING",
+    label: "Nightly Rate Rounding",
+    previousRate: rate,
+    newRate: roundedRate,
+    adjustmentPercent: null,
+  });
+}
+
 const stayDates = buildStayDates(input.checkIn, nights);
 
 const nightlyRateByDate = new Map(
@@ -639,7 +661,8 @@ if (
       date
     );  
  
-  const finalRate = applyPricingBounds(finalRateBeforeBounds);
+  const boundedRate = applyPricingBounds(finalRateBeforeBounds);
+  const finalRate = applyNightlyRateRounding(boundedRate);
 
   const pricingBreakdown: PricingDecisionStep[] = [
     createPricingDecisionStep({
@@ -697,6 +720,12 @@ if (
     if (weekendDecision) {
       pricingBreakdown.push(weekendDecision);
     }
+  }
+
+  const roundingDecision = createNightlyRateRoundingDecision(boundedRate);
+
+  if (roundingDecision) {
+    pricingBreakdown.push(roundingDecision);
   }
 
   pricingBreakdown.push(
