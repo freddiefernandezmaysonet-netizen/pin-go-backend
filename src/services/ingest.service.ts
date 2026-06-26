@@ -16,7 +16,7 @@ import { log } from "../utils/log";
 import { fromZonedTime } from "date-fns-tz";
 import { selectNextStaffForProperty } from "./staff-selection.service";
 import { createCleaningConfirmation } from "./cleaning-confirmation.service";
-import { createReservationAuditEntry } from "../apms/reservation-audit.mapper";
+//import { createReservationAuditEntry } from "../apms/reservation-audit.mapper";
 
 console.log("[INGEST] running src/services/ingest.service.ts", new Date().toISOString());
 const prisma = new PrismaClient();
@@ -271,105 +271,12 @@ if (result.cleaningConfirmation) {
     await reconcileReservation(result.reservationId);
   }
 
-  const auditEntry = createReservationAuditEntry({
-    reservationId: result.reservationId,
-    propertyId: p.propertyId,
-    reason: result.didChange ? "RESERVATION_CHANGED" : "RESERVATION_UNCHANGED",
-    steps: [
-      {
-        rule: result.didChange
-          ? "RESERVATION_UPSERTED"
-          : "RESERVATION_UNCHANGED",
-        label: result.didChange
-          ? "Reservation Created or Updated"
-          : "Reservation Already Current",
-        applied: true,
-        metadata: {
-          reservationId: result.reservationId,
-          source: p.source ?? null,
-          externalProvider,
-          externalId,
-        },
-      },
-      {
-        rule: "GUEST_TOKEN_ENSURED",
-        label: "Guest Token Ensured",
-        applied: Boolean(result.guestToken),
-        metadata: {
-          reservationId: result.reservationId,
-          guestTokenExpiresAt,
-        },
-      },
-      {
-        rule: result.lockId ? "ACTIVE_LOCK_FOUND" : "ACTIVE_LOCK_MISSING",
-        label: result.lockId ? "Active Lock Found" : "Active Lock Missing",
-        applied: true,
-        metadata: {
-          propertyId: p.propertyId,
-          lockId: result.lockId ?? null,
-        },
-      },
-      {
-        rule: result.accessGrantId
-          ? "ACCESS_GRANT_ENSURED"
-          : "ACCESS_GRANT_SKIPPED",
-        label: result.accessGrantId
-          ? "Guest Access Grant Ensured"
-          : "Guest Access Grant Skipped",
-        applied: Boolean(result.accessGrantId),
-        metadata: {
-          reservationId: result.reservationId,
-          accessGrantId: result.accessGrantId ?? null,
-        },
-      },
-      {
-        rule: result.cleaningConfirmation
-          ? "CLEANING_STAFF_SELECTED"
-          : "CLEANING_STAFF_SKIPPED",
-        label: result.cleaningConfirmation
-          ? "Cleaning Staff Selected"
-          : "Cleaning Staff Skipped",
-        applied: Boolean(result.cleaningConfirmation),
-        metadata: {
-          reservationId: result.reservationId,
-          propertyId: p.propertyId,
-          staffMemberId: result.cleaningConfirmation?.staffMemberId ?? null,
-        },
-      },
-      {
-        rule: result.didChange
-          ? "RESERVATION_RECONCILED"
-          : "RESERVATION_RECONCILE_SKIPPED",
-        label: result.didChange
-          ? "Reservation Reconciled"
-          : "Reservation Reconcile Skipped",
-        applied: result.didChange,
-        metadata: {
-          reservationId: result.reservationId,
-        },
-      },
-    ],
-    metadata: {
-      source: p.source ?? null,
-      externalProvider,
-      externalId,
-      paymentState,
-      checkIn,
-      checkOut,
-      warning: result.warning ?? null,
-    },
-  });
-
   log("ingest.result", {
     reservationId: result.reservationId,
     didChange: result.didChange,
   });
-
-  return {
-    ...result,
-    auditEntry,
-  };
-}
+  return result;
+ }
 async function upsertReservation(
   tx: PrismaClient,
   input: {
