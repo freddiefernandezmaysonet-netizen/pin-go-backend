@@ -1,4 +1,5 @@
 import { PrismaClient, ReservationStatus } from "@prisma/client";
+import type { DecisionStep } from "../apms/decision-types";
 
 const prisma = new PrismaClient();
 
@@ -12,6 +13,35 @@ type CalculateDirectBookingPricingInput = {
 function toMoney(value: unknown) {
   const number = Number(value ?? 0);
   return Math.round(number * 100) / 100;
+}
+
+function createPricingDecisionStep(input: {
+  rule: string;
+  label: string;
+  previousRate: number;
+  newRate: number;
+  adjustmentPercent?: number | null;
+}): DecisionStep<number> {
+  const previousRate = toMoney(input.previousRate);
+  const newRate = toMoney(input.newRate);
+
+  return {
+    engine: "Revenue",
+    rule: input.rule,
+    label: input.label,
+    previousValue: previousRate,
+    newValue: newRate,
+    adjustment: toMoney(newRate - previousRate),
+    adjustmentPercent: input.adjustmentPercent ?? null,
+    confidence: 100,
+    applied: newRate !== previousRate,
+    status: newRate !== previousRate ? "APPLIED" : "SKIPPED",
+    timestamp: new Date(),
+    metadata: {
+      previousRate,
+      newRate,
+    },
+  };
 }
 
 export async function calculateDirectBookingPricing(
@@ -225,6 +255,25 @@ function applyWeekendRule(rate: number, date: Date) {
   return toMoney(rate * (1 + weekendMarkupPercent / 100));
 }
 
+function createWeekendDecision(
+  rate: number,
+  date: Date
+): PricingDecisionStep | null {
+  if (!dynamicPricingEnabled) return null;
+  if (weekendMarkupPercent <= 0) return null;
+  if (!isWeekendNight(date)) return null;
+
+  const newRate = toMoney(rate * (1 + weekendMarkupPercent / 100));
+
+  return createPricingDecisionStep({
+    rule: "WEEKEND_RULE",
+    label: "Weekend Boost",
+    previousRate: rate,
+    newRate,
+    adjustmentPercent: weekendMarkupPercent,
+  });
+}
+
 function getLeadTimeDays(date: Date) {
   const today = startOfUtcDay(new Date());
   const arrivalDate = startOfUtcDay(date);
@@ -247,6 +296,32 @@ function applyLeadTimeRule(rate: number, date: Date) {
   if (daysBeforeArrival > leadTimeLastMinuteDays) return rate;
 
   return toMoney(rate * (1 + leadTimeLastMinutePercent / 100));
+}
+
+function createLeadTimeDecision(
+  rate: number,
+  date: Date
+): PricingDecisionStep | null {
+  if (!dynamicPricingEnabled) return null;
+  if (!leadTimePricingEnabled) return null;
+  if (!Number.isFinite(leadTimeLastMinuteDays)) return null;
+  if (leadTimeLastMinuteDays <= 0) return null;
+  if (leadTimeLastMinutePercent === 0) return null;
+
+  const daysBeforeArrival = getLeadTimeDays(date);
+
+  if (daysBeforeArrival < 0) return null;
+  if (daysBeforeArrival > leadTimeLastMinuteDays) return null;
+
+  const newRate = toMoney(rate * (1 + leadTimeLastMinutePercent / 100));
+
+  return createPricingDecisionStep({
+    rule: "LEAD_TIME_RULE",
+    label: "Lead Time",
+    previousRate: rate,
+    newRate,
+    adjustmentPercent: leadTimeLastMinutePercent,
+  });
 }
 
 function getOccupancyPercent() {
@@ -337,6 +412,26 @@ function applySeasonalRule(rate: number, date: Date) {
   return toMoney(rate * (1 + Number(season.adjustmentPercent) / 100));
 }
 
+function createSeasonalDecision(rate: number, date: Date): PricingDecisionStep | null {
+  if (!dynamicPricingEnabled) return null;
+  if (!property.seasonalPricingEnabled) return null;
+
+  const season = getSeasonForDate(date);
+
+  if (!season) return null;
+
+  const percent = Number(season.adjustmentPercent);
+  const newRate = toMoney(rate * (1 + percent / 100));
+
+  return createPricingDecisionStep({
+    rule: "SEASONAL_RULE",
+    label: season.name || "Seasonal Pricing",
+    previousRate: rate,
+    newRate,
+    adjustmentPercent: percent,
+  });
+}
+
 function applyHolidayRule(rate: number, date: Date) {
   if (!dynamicPricingEnabled) return rate;
   if (!property.holidayPricingEnabled) return rate;
@@ -346,6 +441,26 @@ function applyHolidayRule(rate: number, date: Date) {
   if (!holiday) return rate;
 
   return toMoney(rate * (1 + Number(holiday.adjustmentPercent) / 100));
+}
+
+function createHolidayDecision(rate: number, date: Date): PricingDecisionStep | null {
+  if (!dynamicPricingEnabled) return null;
+  if (!property.holidayPricingEnabled) return null;
+
+  const holiday = getHolidayForDate(date);
+
+  if (!holiday) return null;
+
+  const percent = Number(holiday.adjustmentPercent);
+  const newRate = toMoney(rate * (1 + percent / 100));
+
+  return createPricingDecisionStep({
+    rule: "HOLIDAY_RULE",
+    label: holiday.name || "Holiday Pricing",
+    previousRate: rate,
+    newRate,
+    adjustmentPercent: percent,
+  });
 }
 
 function applyOccupancyRule(rate: number) {
@@ -370,6 +485,46 @@ function applyOccupancyRule(rate: number) {
   }
 
   return rate;
+}
+
+function createOccupancyDecision(rate: number): PricingDecisionStep | null {
+  if (!dynamicPricingEnabled) return null;
+  if (!occupancyPricingEnabled) return null;
+  if (occupancyPercent === null) return null;
+
+  if (
+    occupancyLowThresholdPercent !== null &&
+    occupancyLowAdjustmentPercent !== null &&
+    occupancyPercent <= occupancyLowThresholdPercent
+  ) {
+    const newRate = toMoney(rate * (1 + occupancyLowAdjustmentPercent / 100));
+
+    return createPricingDecisionStep({
+      rule: "OCCUPANCY_LOW_RULE",
+      label: "Low Occupancy",
+      previousRate: rate,
+      newRate,
+      adjustmentPercent: occupancyLowAdjustmentPercent,
+    });
+  }
+
+  if (
+    occupancyHighThresholdPercent !== null &&
+    occupancyHighAdjustmentPercent !== null &&
+    occupancyPercent >= occupancyHighThresholdPercent
+  ) {
+    const newRate = toMoney(rate * (1 + occupancyHighAdjustmentPercent / 100));
+
+    return createPricingDecisionStep({
+      rule: "OCCUPANCY_HIGH_RULE",
+      label: "High Occupancy",
+      previousRate: rate,
+      newRate,
+      adjustmentPercent: occupancyHighAdjustmentPercent,
+    });
+  }
+
+  return null;
 }
 
 function applyPricingBounds(rate: number) {
@@ -484,16 +639,74 @@ if (
       date
     );  
  
- const finalRate = applyPricingBounds(finalRateBeforeBounds);
+  const finalRate = applyPricingBounds(finalRateBeforeBounds);
+
+      const pricingBreakdown: PricingDecisionStep[] = [
+    createPricingDecisionStep({
+      rule: override ? "CUSTOM_RATE" : "BASE_RATE",
+      label: override ? "Manual Override" : "Base Rate",
+      previousRate: baseRateForDate,
+      newRate: baseRateForDate,
+      adjustmentPercent: null,
+    }),
+  ];
+
+  if (!override) {
+    const seasonalDecision = createSeasonalDecision(baseRateForDate, date);
+
+    if (seasonalDecision) {
+      pricingBreakdown.push(seasonalDecision);
+    }
+
+    const rateAfterSeasonal = seasonalDecision
+      ? seasonalDecision.newRate
+      : baseRateForDate;
+
+    const holidayDecision = createHolidayDecision(rateAfterSeasonal, date);
+
+    if (holidayDecision) {
+      pricingBreakdown.push(holidayDecision);
+    }
+
+    const rateAfterHoliday = holidayDecision
+      ? holidayDecision.newRate
+      : rateAfterSeasonal;
+
+    const occupancyDecision = createOccupancyDecision(rateAfterHoliday);
+
+    if (occupancyDecision) {
+      pricingBreakdown.push(occupancyDecision);
+    }
+
+    const rateAfterOccupancy = occupancyDecision
+      ? occupancyDecision.newRate
+      : rateAfterHoliday;
+
+    const leadTimeDecision = createLeadTimeDecision(rateAfterOccupancy, date);
+
+    if (leadTimeDecision) {
+      pricingBreakdown.push(leadTimeDecision);
+    }
+  }
+
+  pricingBreakdown.push(
+    createPricingDecisionStep({
+      rule: "FINAL_RATE",
+      label: "Final Rate",
+      previousRate: baseRateForDate,
+      newRate: finalRate,
+      adjustmentPercent: null,
+    })
+  );
 
   return {
     date: dateKey,
     rate: finalRate,
     reason: appliedRules[0],
     appliedRules,
+    pricingBreakdown,
   };
 });
-
 const nightlyRate = fallbackNightlyRate;
 const cleaningFee = toMoney(property.cleaningFee);
 const nightlySubtotal = toMoney(
