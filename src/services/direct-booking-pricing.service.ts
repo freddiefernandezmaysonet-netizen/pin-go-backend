@@ -611,100 +611,29 @@ const nightlyRateByDate = new Map(
   ])
 );
 
- const nightlyRates = stayDates.map((date) => {
+const nightlyRates = stayDates.map((date) => {
   const dateKey = toDateKey(date);
   const override = nightlyRateByDate.get(dateKey);
   const baseRateForDate = override?.rate ?? fallbackNightlyRate;
 
-  const appliedRules: string[] = [];
-
-if (override) {
-  appliedRules.push(override.reason ?? "CUSTOM_RATE");
-} else {
-  if (
-    dynamicPricingEnabled &&
-    property.seasonalPricingEnabled &&
-    getSeasonForDate(date)
-  ) {
-    appliedRules.push("SEASONAL_RULE");
-  }
-
-if (
-  dynamicPricingEnabled &&
-  property.holidayPricingEnabled &&
-  getHolidayForDate(date)
-) {
-  appliedRules.push("HOLIDAY_RULE");
-}
-
-  if (
-    dynamicPricingEnabled &&
-    occupancyPricingEnabled &&
-    occupancyPercent !== null &&
-    occupancyLowThresholdPercent !== null &&
-    occupancyLowAdjustmentPercent !== null &&
-    occupancyPercent <= occupancyLowThresholdPercent
-  ) {
-    appliedRules.push("OCCUPANCY_LOW_RULE");
-  }
-
-  if (
-    dynamicPricingEnabled &&
-    occupancyPricingEnabled &&
-    occupancyPercent !== null &&
-    occupancyHighThresholdPercent !== null &&
-    occupancyHighAdjustmentPercent !== null &&
-    occupancyPercent >= occupancyHighThresholdPercent
-  ) {
-    appliedRules.push("OCCUPANCY_HIGH_RULE");
-  }
-
-  if (
-    dynamicPricingEnabled &&
-    leadTimePricingEnabled &&
-    leadTimeLastMinutePercent !== 0 &&
-    getLeadTimeDays(date) >= 0 &&
-    getLeadTimeDays(date) <= leadTimeLastMinuteDays
-  ) {
-    appliedRules.push("LEAD_TIME_RULE");
-  }
-
-  if (
-    dynamicPricingEnabled &&
-    weekendMarkupPercent > 0 &&
-    isWeekendNight(date)
-  ) {
-    appliedRules.push("WEEKEND_RULE");
-  }
-
-  if (appliedRules.length === 0) {
-    appliedRules.push("BASE_RATE");
-  }
-}
- 
   const finalRateBeforeBounds = override
-  ? baseRateForDate
-  : applyWeekendRule(
-      applyLeadTimeRule(
-        applyOccupancyRule(
-          applyHolidayRule(
-            applySeasonalRule(baseRateForDate, date),
-            date
-          )
+    ? baseRateForDate
+    : applyWeekendRule(
+        applyLeadTimeRule(
+          applyOccupancyRule(
+            applyHolidayRule(
+              applySeasonalRule(baseRateForDate, date),
+              date
+            )
+          ),
+          date
         ),
         date
-      ),
-      date
-    );  
- 
-   const pricingBoundsResult = getPricingBoundsResult(finalRateBeforeBounds);
+      );
+
   const boundedRate = applyPricingBounds(finalRateBeforeBounds);
-
-  if (pricingBoundsResult.rule) {
-    appliedRules.push(pricingBoundsResult.rule);
-  }
-
   const finalRate = applyNightlyRateRounding(boundedRate);
+
   const pricingBreakdown: PricingDecisionStep[] = [
     createPricingDecisionStep({
       rule: override ? "CUSTOM_RATE" : "BASE_RATE",
@@ -761,7 +690,7 @@ if (
     if (weekendDecision) {
       pricingBreakdown.push(weekendDecision);
     }
-   }
+  }
 
   const pricingBoundsDecision = createPricingBoundsDecision(finalRateBeforeBounds);
 
@@ -770,6 +699,7 @@ if (
   }
 
   const roundingDecision = createNightlyRateRoundingDecision(boundedRate);
+
   if (roundingDecision) {
     pricingBreakdown.push(roundingDecision);
   }
@@ -784,16 +714,33 @@ if (
     })
   );
 
+  const appliedRules = [
+    ...(override ? [override.reason ?? "CUSTOM_RATE"] : []),
+    ...pricingBreakdown
+      .filter(
+        (step) =>
+          step.status === "APPLIED" &&
+          step.rule !== "CUSTOM_RATE" &&
+          step.rule !== "BASE_RATE" &&
+          step.rule !== "FINAL_RATE" &&
+          step.rule !== "NIGHTLY_RATE_ROUNDING"
+      )
+      .map((step) => step.rule),
+  ];
+
+  const normalizedAppliedRules =
+    appliedRules.length > 0 ? Array.from(new Set(appliedRules)) : ["BASE_RATE"];
+
   return {
     date: dateKey,
     rate: finalRate,
-    reason: appliedRules[0],
-    appliedRules,
+    reason: normalizedAppliedRules[0],
+    appliedRules: normalizedAppliedRules,
     pricingBreakdown,
   };
-});
+}); 
 
-     const nightlyRate = fallbackNightlyRate;
+const nightlyRate = fallbackNightlyRate;
 const cleaningFee = toMoney(property.cleaningFee);
 const nightlySubtotal = toMoney(
   nightlyRates.reduce((sum, item) => sum + item.rate, 0)
