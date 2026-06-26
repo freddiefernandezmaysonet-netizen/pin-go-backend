@@ -1,5 +1,7 @@
-import { PrismaClient, ReservationStatus } from "@prisma/client";
+import { PrismaClient } from "@prisma/client";
 import type { DecisionStep } from "../apms/decision-types";
+
+type PricingDecisionStep = DecisionStep<number>;
 
 const prisma = new PrismaClient();
 
@@ -527,18 +529,52 @@ function createOccupancyDecision(rate: number): PricingDecisionStep | null {
   return null;
 }
 
+function getPricingBoundsResult(rate: number): {
+  rate: number;
+  rule: "MINIMUM_NIGHTLY_RATE" | "MAXIMUM_NIGHTLY_RATE" | null;
+  label: string | null;
+} {
+  let boundedRate = toMoney(rate);
+  let rule: "MINIMUM_NIGHTLY_RATE" | "MAXIMUM_NIGHTLY_RATE" | null = null;
+  let label: string | null = null;
+
+  if (minimumNightlyRate !== null && boundedRate < minimumNightlyRate) {
+    boundedRate = minimumNightlyRate;
+    rule = "MINIMUM_NIGHTLY_RATE";
+    label = "Minimum Nightly Rate";
+  }
+
+  if (maximumNightlyRate !== null && boundedRate > maximumNightlyRate) {
+    boundedRate = maximumNightlyRate;
+    rule = "MAXIMUM_NIGHTLY_RATE";
+    label = "Maximum Nightly Rate";
+  }
+
+  return {
+    rate: boundedRate,
+    rule,
+    label,
+  };
+}
+
 function applyPricingBounds(rate: number) {
-  let finalRate = rate;
+  return getPricingBoundsResult(rate).rate;
+}
 
-  if (minimumNightlyRate !== null && finalRate < minimumNightlyRate) {
-    finalRate = minimumNightlyRate;
+function createPricingBoundsDecision(rate: number): PricingDecisionStep | null {
+  const boundsResult = getPricingBoundsResult(rate);
+
+  if (!boundsResult.rule || boundsResult.rate === toMoney(rate)) {
+    return null;
   }
 
-  if (maximumNightlyRate !== null && finalRate > maximumNightlyRate) {
-    finalRate = maximumNightlyRate;
-  }
-
-  return finalRate;
+  return createPricingDecisionStep({
+    rule: boundsResult.rule,
+    label: boundsResult.label ?? "Pricing Guardrail",
+    previousRate: rate,
+    newRate: boundsResult.rate,
+    adjustmentPercent: null,
+  });
 }
 
 function applyNightlyRateRounding(rate: number) {
@@ -661,9 +697,14 @@ if (
       date
     );  
  
+   const pricingBoundsResult = getPricingBoundsResult(finalRateBeforeBounds);
   const boundedRate = applyPricingBounds(finalRateBeforeBounds);
-  const finalRate = applyNightlyRateRounding(boundedRate);
 
+  if (pricingBoundsResult.rule) {
+    appliedRules.push(pricingBoundsResult.rule);
+  }
+
+  const finalRate = applyNightlyRateRounding(boundedRate);
   const pricingBreakdown: PricingDecisionStep[] = [
     createPricingDecisionStep({
       rule: override ? "CUSTOM_RATE" : "BASE_RATE",
@@ -720,10 +761,15 @@ if (
     if (weekendDecision) {
       pricingBreakdown.push(weekendDecision);
     }
+   }
+
+  const pricingBoundsDecision = createPricingBoundsDecision(finalRateBeforeBounds);
+
+  if (pricingBoundsDecision) {
+    pricingBreakdown.push(pricingBoundsDecision);
   }
 
   const roundingDecision = createNightlyRateRoundingDecision(boundedRate);
-
   if (roundingDecision) {
     pricingBreakdown.push(roundingDecision);
   }
