@@ -87,7 +87,48 @@ export interface DecisionStep<TValue = unknown> {
 }
 
 export interface DecisionResult<TValue = unknown> {
+  /**
+   * Optional decision result identifier.
+   */
+  decisionId?: string;
+
+  /**
+   * Engine that produced this result.
+   */
+  engine?: string;
+
+  /**
+   * Overall decision status.
+   */
+  status?: DecisionStatus;
+
+  /**
+   * Ordered decision steps.
+   */
   steps: DecisionStep<TValue>[];
 
+  /**
+   * Final value after all decisions.
+   */
   finalValue: TValue;
+
+  /**
+   * Short human-readable summary.
+   */
+  summary?: string;
+
+  /**
+   * Whether this decision requires host or operator intervention.
+   */
+  requiresHumanIntervention?: boolean;
+
+  /**
+   * Optional explanation or failure reason.
+   */
+  reason?: string;
+
+  /**
+   * Extra engine metadata.
+   */
+  metadata?: Record<string, unknown>;
 }
