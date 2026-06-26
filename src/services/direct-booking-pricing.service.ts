@@ -616,25 +616,7 @@ const nightlyRates = stayDates.map((date) => {
   const override = nightlyRateByDate.get(dateKey);
   const baseRateForDate = override?.rate ?? fallbackNightlyRate;
 
-  const finalRateBeforeBounds = override
-    ? baseRateForDate
-    : applyWeekendRule(
-        applyLeadTimeRule(
-          applyOccupancyRule(
-            applyHolidayRule(
-              applySeasonalRule(baseRateForDate, date),
-              date
-            )
-          ),
-          date
-        ),
-        date
-      );
-
-  const boundedRate = applyPricingBounds(finalRateBeforeBounds);
-  const finalRate = applyNightlyRateRounding(boundedRate);
-
-  const pricingBreakdown: PricingDecisionStep[] = [
+   const pricingBreakdown: PricingDecisionStep[] = [
     createPricingDecisionStep({
       rule: override ? "CUSTOM_RATE" : "BASE_RATE",
       label: override ? "Manual Override" : "Base Rate",
@@ -644,65 +626,68 @@ const nightlyRates = stayDates.map((date) => {
     }),
   ];
 
+  let currentRate = baseRateForDate;
+
   if (!override) {
-    const seasonalDecision = createSeasonalDecision(baseRateForDate, date);
+    const seasonalDecision = createSeasonalDecision(currentRate, date);
 
     if (seasonalDecision) {
       pricingBreakdown.push(seasonalDecision);
+      currentRate = seasonalDecision.newValue;
     }
 
-    const rateAfterSeasonal = seasonalDecision
-      ? seasonalDecision.newValue
-      : baseRateForDate;
-
-    const holidayDecision = createHolidayDecision(rateAfterSeasonal, date);
+    const holidayDecision = createHolidayDecision(currentRate, date);
 
     if (holidayDecision) {
       pricingBreakdown.push(holidayDecision);
+      currentRate = holidayDecision.newValue;
     }
 
-    const rateAfterHoliday = holidayDecision
-      ? holidayDecision.newValue
-      : rateAfterSeasonal;
-
-    const occupancyDecision = createOccupancyDecision(rateAfterHoliday);
+    const occupancyDecision = createOccupancyDecision(currentRate);
 
     if (occupancyDecision) {
       pricingBreakdown.push(occupancyDecision);
+      currentRate = occupancyDecision.newValue;
     }
 
-    const rateAfterOccupancy = occupancyDecision
-      ? occupancyDecision.newValue
-      : rateAfterHoliday;
-
-    const leadTimeDecision = createLeadTimeDecision(rateAfterOccupancy, date);
+    const leadTimeDecision = createLeadTimeDecision(currentRate, date);
 
     if (leadTimeDecision) {
       pricingBreakdown.push(leadTimeDecision);
+      currentRate = leadTimeDecision.newValue;
     }
 
-    const rateAfterLeadTime = leadTimeDecision
-      ? leadTimeDecision.newValue
-      : rateAfterOccupancy;
-
-    const weekendDecision = createWeekendDecision(rateAfterLeadTime, date);
+    const weekendDecision = createWeekendDecision(currentRate, date);
 
     if (weekendDecision) {
       pricingBreakdown.push(weekendDecision);
+      currentRate = weekendDecision.newValue;
     }
   }
+
+  const finalRateBeforeBounds = currentRate;
 
   const pricingBoundsDecision = createPricingBoundsDecision(finalRateBeforeBounds);
 
   if (pricingBoundsDecision) {
     pricingBreakdown.push(pricingBoundsDecision);
+    currentRate = pricingBoundsDecision.newValue;
+  } else {
+    currentRate = applyPricingBounds(currentRate);
   }
+
+  const boundedRate = currentRate;
 
   const roundingDecision = createNightlyRateRoundingDecision(boundedRate);
 
   if (roundingDecision) {
     pricingBreakdown.push(roundingDecision);
+    currentRate = roundingDecision.newValue;
+  } else {
+    currentRate = applyNightlyRateRounding(currentRate);
   }
+
+  const finalRate = currentRate;
 
   pricingBreakdown.push(
     createPricingDecisionStep({
@@ -713,7 +698,7 @@ const nightlyRates = stayDates.map((date) => {
       adjustmentPercent: null,
     })
   );
-
+ 
   const appliedRules = [
     ...(override ? [override.reason ?? "CUSTOM_RATE"] : []),
     ...pricingBreakdown
