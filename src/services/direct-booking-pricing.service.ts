@@ -641,7 +641,7 @@ if (
  
   const finalRate = applyPricingBounds(finalRateBeforeBounds);
 
-      const pricingBreakdown: PricingDecisionStep[] = [
+  const pricingBreakdown: PricingDecisionStep[] = [
     createPricingDecisionStep({
       rule: override ? "CUSTOM_RATE" : "BASE_RATE",
       label: override ? "Manual Override" : "Base Rate",
@@ -687,21 +687,18 @@ if (
     if (leadTimeDecision) {
       pricingBreakdown.push(leadTimeDecision);
     }
-  }
 
     const rateAfterLeadTime = leadTimeDecision
       ? leadTimeDecision.newValue
       : rateAfterOccupancy;
 
-    const weekendDecision = createWeekendDecision(
-      rateAfterLeadTime,
-      date
-     );
+    const weekendDecision = createWeekendDecision(rateAfterLeadTime, date);
 
-     if (weekendDecision) {
-       pricingBreakdown.push(weekendDecision);
-     }
-   }
+    if (weekendDecision) {
+      pricingBreakdown.push(weekendDecision);
+    }
+  }
+
   pricingBreakdown.push(
     createPricingDecisionStep({
       rule: "FINAL_RATE",
@@ -720,7 +717,8 @@ if (
     pricingBreakdown,
   };
 });
-const nightlyRate = fallbackNightlyRate;
+
+     const nightlyRate = fallbackNightlyRate;
 const cleaningFee = toMoney(property.cleaningFee);
 const nightlySubtotal = toMoney(
   nightlyRates.reduce((sum, item) => sum + item.rate, 0)
