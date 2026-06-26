@@ -1,5 +1,6 @@
 import { PrismaClient } from "@prisma/client";
 import type { DecisionStep } from "../apms/decision-types";
+import { createRevenueAuditEntry } from "../apms/revenue-audit.mapper";
 
 type PricingDecisionStep = DecisionStep<number>;
 
@@ -731,6 +732,21 @@ const nightlySubtotal = toMoney(
   nightlyRates.reduce((sum, item) => sum + item.rate, 0)
 );
 
+const auditEntries = nightlyRates.map((item) =>
+  createRevenueAuditEntry({
+    entityId: input.propertyId,
+    decisionId: `revenue-pricing:${input.propertyId}:${item.date}`,
+    pricingBreakdown: item.pricingBreakdown,
+    reason: item.reason,
+    metadata: {
+      propertyId: input.propertyId,
+      date: item.date,
+      rate: item.rate,
+      appliedRules: item.appliedRules,
+      currency: "usd",
+    },
+  })
+);
 const amenityItems = property.amenities.map((amenity) => {
     const baseAmount = toMoney(amenity.amount);
 
@@ -785,22 +801,23 @@ const amenityItems = property.amenities.map((amenity) => {
 
   const totalAmount = toMoney(taxableSubtotal + taxesTotal);
 
-  return {
-    currency: "usd",
-    nights,
-    nightlyRate,
-    nightlyRates,
-    nightlySubtotal,
-    cleaningFee,
-    amenities: amenityItems,
-    chargedAmenities: chargedAmenityItems,
-    amenitiesTotal,
-    taxableSubtotal,
-    taxes: taxItems,
-    taxesTotal,
-    totalAmount,
-    totalAmountCents: Math.round(totalAmount * 100),
-  };
+return {
+  currency: "usd",
+  nights,
+  nightlyRate,
+  nightlyRates,
+  nightlySubtotal,
+  cleaningFee,
+  amenities: amenityItems,
+  chargedAmenities: chargedAmenityItems,
+  amenitiesTotal,
+  taxableSubtotal,
+  taxes: taxItems,
+  taxesTotal,
+  totalAmount,
+  totalAmountCents: Math.round(totalAmount * 100),
+  auditEntries,
+};
 }
 
 function toDateKey(date: Date) {
