@@ -689,19 +689,19 @@ if (
     }
   }
 
-const rateAfterLeadTime = leadTimeDecision
-  ? leadTimeDecision.newValue
-  : rateAfterOccupancy;
+    const rateAfterLeadTime = leadTimeDecision
+      ? leadTimeDecision.newValue
+      : rateAfterOccupancy;
 
-const weekendDecision = createWeekendDecision(
-  rateAfterLeadTime,
-  date
-);
+    const weekendDecision = createWeekendDecision(
+      rateAfterLeadTime,
+      date
+     );
 
-if (weekendDecision) {
-  pricingBreakdown.push(weekendDecision);
-}
-
+     if (weekendDecision) {
+       pricingBreakdown.push(weekendDecision);
+     }
+   }
   pricingBreakdown.push(
     createPricingDecisionStep({
       rule: "FINAL_RATE",
