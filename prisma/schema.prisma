@@ -1003,6 +1003,46 @@ model PropertyBlockedDate {
   @@index([propertyId, startDate, endDate])
 }
 
+model ApmsAuditEntry {
+  id String @id @default(cuid())
+
+  organizationId String?
+  propertyId     String?
+  reservationId  String?
+  entityType     String
+  entityId       String
+
+  engine    String
+  eventType String?
+  status    String
+  severity  String?
+
+  decisionId String @unique
+  summary    String?
+  reason     String?
+
+  decisions         Json?
+  recommendedAction String?
+  metadata          Json?
+
+  startedAt   DateTime?
+  completedAt DateTime?
+  durationMs  Int?
+
+  createdAt DateTime @default(now())
+
+  @@index([organizationId])
+  @@index([propertyId])
+  @@index([reservationId])
+  @@index([entityType, entityId])
+  @@index([engine])
+  @@index([status])
+  @@index([severity])
+  @@index([createdAt])
+  @@index([propertyId, createdAt])
+  @@index([reservationId, createdAt])
+}
+
 enum AmenityFeeType {
   PER_STAY
   PER_NIGHT
