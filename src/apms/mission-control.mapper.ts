@@ -319,7 +319,7 @@ export function createMissionControlSnapshotFromAuditEntries(
     recentAuditEntries: input.auditEntries.slice(-10),
     auditTimeline: {
       entityId: input.entityId,
-      entityType: input.auditEntries[0]?.entityType,
+      entityType: "PROPERTY",
       entries: input.auditEntries,
     },
     recommendedActions,
