@@ -957,13 +957,15 @@ dashboardPropertiesRouter.post(
         });
       }
 
-      return res.json({
+           return res.json({
         ok: true,
         reservationId: result.reservationId,
         guestToken: result.guestToken,
         accessGrantId: result.accessGrantId ?? null,
+        auditEntry: result.auditEntry ?? null,
         distributionSyncResult,
       });
+
     } catch (error: any) {
       console.error("POST manual reservation error", error);
 
