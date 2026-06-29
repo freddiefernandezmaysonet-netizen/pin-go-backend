@@ -503,6 +503,111 @@ if (result.cleaningConfirmation) {
     });
   }
 
+  const cleaningStaffSelected = Boolean(
+    result.cleaningConfirmation?.staffMemberId
+  );
+
+  const cleaningAuditStatus: AuditEntry["status"] =
+    cleaningConfirmationCreated ? "SUCCESS" : "SKIPPED";
+
+  const cleaningAuditSeverity: AuditEntry["severity"] =
+    cleaningConfirmationCreated ? "INFO" : "WARNING";
+
+  const cleaningAuditEventType: AuditEntry["eventType"] =
+    cleaningConfirmationCreated ? "ACTION_COMPLETED" : "DECISION_SKIPPED";
+
+  const cleaningAuditEntry: AuditEntry = {
+    engine: "Cleaning",
+    decisionId: `cleaning-engine:${p.propertyId}:${result.reservationId}`,
+    entityType: "CLEANING",
+    entityId: result.reservationId,
+    eventType: cleaningAuditEventType,
+    status: cleaningAuditStatus,
+    severity: cleaningAuditSeverity,
+    summary: cleaningConfirmationCreated
+      ? "Cleaning Engine prepared cleaning confirmation for the reservation."
+      : cleaningStaffSelected
+      ? "Cleaning Engine selected a cleaner but did not create a cleaning confirmation."
+      : "Cleaning Engine could not prepare cleaning because no cleaner was assigned.",
+    startedAt: new Date(),
+    completedAt: new Date(),
+    durationMs: 0,
+    reason: cleaningConfirmationCreated
+      ? "CLEANING_CONFIRMATION_CREATED"
+      : cleaningStaffSelected
+      ? "CLEANING_CONFIRMATION_SKIPPED"
+      : "CLEANING_STAFF_MISSING",
+    decisions: [
+      {
+        engine: "Cleaning",
+        rule: cleaningStaffSelected
+          ? "CLEANING_STAFF_SELECTED"
+          : "CLEANING_STAFF_MISSING",
+        label: cleaningStaffSelected
+          ? "Cleaning Staff Selected"
+          : "Cleaning Staff Missing",
+        applied: cleaningStaffSelected,
+        adjustment: null,
+        adjustmentPercent: null,
+        confidence: 100,
+        metadata: {
+          propertyId: p.propertyId,
+          reservationId: result.reservationId,
+          staffMemberId:
+            result.cleaningConfirmation?.staffMemberId ?? null,
+        },
+      },
+      {
+        engine: "Cleaning",
+        rule: cleaningConfirmationCreated
+          ? "CLEANING_CONFIRMATION_CREATED"
+          : "CLEANING_CONFIRMATION_MISSING",
+        label: cleaningConfirmationCreated
+          ? "Cleaning Confirmation Created"
+          : "Cleaning Confirmation Missing",
+        applied: cleaningConfirmationCreated,
+        adjustment: null,
+        adjustmentPercent: null,
+        confidence: 100,
+        metadata: {
+          propertyId: p.propertyId,
+          reservationId: result.reservationId,
+          staffMemberId:
+            result.cleaningConfirmation?.staffMemberId ?? null,
+        },
+      },
+    ],
+    recommendedAction: cleaningConfirmationCreated
+      ? undefined
+      : "Assign a cleaner and verify cleaning confirmation for this reservation.",
+    metadata: {
+      propertyId: p.propertyId,
+      reservationId: result.reservationId,
+      staffMemberId:
+        result.cleaningConfirmation?.staffMemberId ?? null,
+      source: p.source ?? null,
+      externalProvider,
+      externalId,
+      checkIn,
+      checkOut,
+    },
+  };
+
+  try {
+    await persistAuditEntry(prisma, cleaningAuditEntry);
+  } catch (auditPersistenceError: any) {
+    console.error("[APMS_CLEANING_AUDIT_PERSIST_ERROR]", {
+      engine: "Cleaning",
+      reservationId: result.reservationId,
+      propertyId: p.propertyId,
+      staffMemberId:
+        result.cleaningConfirmation?.staffMemberId ?? null,
+      error:
+        auditPersistenceError?.message ??
+        auditPersistenceError,
+    });
+  }
+
   log("ingest.result", {
     reservationId: result.reservationId,
     didChange: result.didChange,
