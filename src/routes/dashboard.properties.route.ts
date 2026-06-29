@@ -1167,49 +1167,98 @@ dashboardPropertiesRouter.get(
         }
       }
 
-      const persistedAuditRows = await prisma.apmsAuditEntry.findMany({
-        where: {
-          propertyId: property.id,
-          engine: {
-            not: "Revenue",
-          },
-        },
-        orderBy: {
-          createdAt: "desc",
-        },
-        take: 25,
+           const mapPersistedAuditRowToAuditEntry = (
+        entry: any
+      ): AuditEntry => ({
+        engine: entry.engine,
+        decisionId: entry.decisionId,
+        entityType: entry.entityType as AuditEntry["entityType"],
+        entityId: entry.entityId,
+        eventType: entry.eventType as AuditEntry["eventType"],
+        status: entry.status as AuditEntry["status"],
+        severity: entry.severity as AuditEntry["severity"],
+        summary: entry.summary ?? undefined,
+        startedAt: entry.startedAt ?? entry.createdAt,
+        completedAt: entry.completedAt ?? entry.createdAt,
+        durationMs: entry.durationMs ?? 0,
+        reason: entry.reason ?? undefined,
+        decisions: Array.isArray(entry.decisions)
+          ? (entry.decisions as AuditEntry["decisions"])
+          : undefined,
+        recommendedAction: entry.recommendedAction ?? undefined,
+        metadata:
+          entry.metadata && typeof entry.metadata === "object"
+            ? (entry.metadata as Record<string, unknown>)
+            : undefined,
       });
 
-      const persistedAuditEntries: AuditEntry[] = persistedAuditRows.map(
-        (entry) => ({
-          engine: entry.engine,
-          decisionId: entry.decisionId,
-          entityType: entry.entityType as AuditEntry["entityType"],
-          entityId: entry.entityId,
-          eventType: entry.eventType as AuditEntry["eventType"],
-          status: entry.status as AuditEntry["status"],
-          severity: entry.severity as AuditEntry["severity"],
-          summary: entry.summary ?? undefined,
-          startedAt: entry.startedAt ?? entry.createdAt,
-          completedAt: entry.completedAt ?? entry.createdAt,
-          durationMs: entry.durationMs ?? 0,
-          reason: entry.reason ?? undefined,
-          decisions: Array.isArray(entry.decisions)
-            ? (entry.decisions as AuditEntry["decisions"])
-            : undefined,
-          recommendedAction: entry.recommendedAction ?? undefined,
-          metadata:
-            entry.metadata && typeof entry.metadata === "object"
-              ? (entry.metadata as Record<string, unknown>)
-              : undefined,
+      const persistedNonRevenueAuditRows =
+        await prisma.apmsAuditEntry.findMany({
+          where: {
+            propertyId: property.id,
+            engine: {
+              not: "Revenue",
+            },
+          },
+          orderBy: [
+            {
+              completedAt: "desc",
+            },
+            {
+              createdAt: "desc",
+            },
+          ],
+          take: 25,
+        });
+
+      const persistedRevenueActivityRows =
+        await prisma.apmsAuditEntry.findMany({
+          where: {
+            propertyId: property.id,
+            engine: "Revenue",
+          },
+          orderBy: [
+            {
+              completedAt: "desc",
+            },
+            {
+              createdAt: "desc",
+            },
+          ],
+          take: 6,
+        });
+
+      const persistedNonRevenueAuditEntries: AuditEntry[] =
+        persistedNonRevenueAuditRows.map(
+          mapPersistedAuditRowToAuditEntry
+        );
+
+      const persistedActivityAuditEntries = [
+        ...persistedRevenueActivityRows.map(
+          mapPersistedAuditRowToAuditEntry
+        ),
+        ...persistedNonRevenueAuditEntries,
+      ]
+        .sort((entryA, entryB) => {
+          const entryATime =
+            entryA.completedAt?.getTime() ??
+            entryA.startedAt?.getTime() ??
+            0;
+
+          const entryBTime =
+            entryB.completedAt?.getTime() ??
+            entryB.startedAt?.getTime() ??
+            0;
+
+          return entryBTime - entryATime;
         })
-      );
+        .slice(0, 10);
 
       const auditEntriesByDecisionId = new Map<string, AuditEntry>();
 
       for (const auditEntry of [
         ...revenueAuditEntries,
-        ...persistedAuditEntries,
+        ...persistedNonRevenueAuditEntries,
       ]) {
         if (!auditEntriesByDecisionId.has(auditEntry.decisionId)) {
           auditEntriesByDecisionId.set(
@@ -1223,11 +1272,20 @@ dashboardPropertiesRouter.get(
         auditEntriesByDecisionId.values()
       );
 
-      const snapshot = createMissionControlSnapshotFromAuditEntries({
-        entityId: property.id,
-        auditEntries,
-        generatedAt: new Date(),
-      });   
+      const baseSnapshot =
+        createMissionControlSnapshotFromAuditEntries({
+          entityId: property.id,
+          auditEntries,
+          generatedAt: new Date(),
+        });
+
+      const snapshot = {
+        ...baseSnapshot,
+        recentAuditEntries:
+          persistedActivityAuditEntries.length > 0
+            ? persistedActivityAuditEntries
+            : baseSnapshot.recentAuditEntries,
+      };
       return res.json({
         ok: true,
         item: snapshot,
