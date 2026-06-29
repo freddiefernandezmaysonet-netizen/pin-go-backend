@@ -46,18 +46,101 @@ function auditEntryRequiresHumanAction(entry: AuditEntry) {
   return entry.status === "FAILED" || entry.severity === "CRITICAL";
 }
 
+const recommendedActionPriorityWeight: Record<
+  MissionControlAction["priority"],
+  number
+> = {
+  LOW: 1,
+  MEDIUM: 2,
+  HIGH: 3,
+  CRITICAL: 4,
+};
+
+function getRecommendedActionDedupKey(action: MissionControlAction) {
+  return `${action.engine}:${action.title.trim().toLowerCase()}`;
+}
+
+function shouldReplaceRecommendedAction(
+  currentAction: MissionControlAction,
+  nextAction: MissionControlAction
+) {
+  const currentWeight =
+    recommendedActionPriorityWeight[currentAction.priority] ?? 0;
+
+  const nextWeight =
+    recommendedActionPriorityWeight[nextAction.priority] ?? 0;
+
+  if (nextWeight !== currentWeight) {
+    return nextWeight > currentWeight;
+  }
+
+  if (
+    nextAction.requiresHumanAction !==
+    currentAction.requiresHumanAction
+  ) {
+    return nextAction.requiresHumanAction;
+  }
+
+  return false;
+}
+
 function mapAuditEntriesToRecommendedActions(
   auditEntries: AuditEntry[]
 ): MissionControlAction[] {
-  return auditEntries
-    .filter((entry) => Boolean(entry.recommendedAction))
-    .map((entry) => ({
-      title: entry.recommendedAction ?? "Review APMS recommendation",
+  const recommendedActionsByKey = new Map<
+    string,
+    MissionControlAction
+  >();
+
+  for (const entry of auditEntries) {
+    if (!entry.recommendedAction) continue;
+
+    const action: MissionControlAction = {
+      title: entry.recommendedAction,
       description: entry.summary,
       engine: entry.engine,
       priority: getRecommendedActionPriority(entry),
       requiresHumanAction: auditEntryRequiresHumanAction(entry),
-    }));
+    };
+
+    const dedupKey = getRecommendedActionDedupKey(action);
+    const currentAction = recommendedActionsByKey.get(dedupKey);
+
+    if (
+      !currentAction ||
+      shouldReplaceRecommendedAction(currentAction, action)
+    ) {
+      recommendedActionsByKey.set(dedupKey, action);
+    }
+  }
+
+  return Array.from(recommendedActionsByKey.values()).sort(
+    (actionA, actionB) => {
+      const priorityDifference =
+        (recommendedActionPriorityWeight[actionB.priority] ?? 0) -
+        (recommendedActionPriorityWeight[actionA.priority] ?? 0);
+
+      if (priorityDifference !== 0) {
+        return priorityDifference;
+      }
+
+      if (
+        actionA.requiresHumanAction !== actionB.requiresHumanAction
+      ) {
+        return actionA.requiresHumanAction ? -1 : 1;
+      }
+
+      const engineComparison = actionA.engine.localeCompare(
+        actionB.engine
+      );
+
+      if (engineComparison !== 0) {
+        return engineComparison;
+      }
+
+      return actionA.title.localeCompare(actionB.title);
+    }
+  );
 }
 
 function getAutopilotStatus(
