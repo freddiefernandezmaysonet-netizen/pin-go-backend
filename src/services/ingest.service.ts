@@ -17,6 +17,7 @@ import { fromZonedTime } from "date-fns-tz";
 import { selectNextStaffForProperty } from "./staff-selection.service";
 import { createCleaningConfirmation } from "./cleaning-confirmation.service";
 import { createReservationAuditEntry } from "../apms/reservation-audit.mapper";
+import { persistAuditEntry } from "../apms/audit-persistence.service";
 
 console.log("[INGEST] running src/services/ingest.service.ts", new Date().toISOString());
 const prisma = new PrismaClient();
@@ -389,6 +390,19 @@ if (result.cleaningConfirmation) {
       warning: result.warning ?? null,
     },
   });
+
+  try {
+    await persistAuditEntry(prisma, auditEntry);
+  } catch (auditPersistenceError: any) {
+    console.error("[APMS_AUDIT_PERSIST_ERROR]", {
+      engine: "Reservation",
+      reservationId: result.reservationId,
+      propertyId: p.propertyId,
+      error:
+        auditPersistenceError?.message ??
+        auditPersistenceError,
+    });
+  }
 
   log("ingest.result", {
     reservationId: result.reservationId,
