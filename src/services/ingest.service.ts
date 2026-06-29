@@ -18,6 +18,7 @@ import { selectNextStaffForProperty } from "./staff-selection.service";
 import { createCleaningConfirmation } from "./cleaning-confirmation.service";
 import { createReservationAuditEntry } from "../apms/reservation-audit.mapper";
 import { persistAuditEntry } from "../apms/audit-persistence.service";
+import type { AuditEntry } from "../apms/audit-types";
 
 console.log("[INGEST] running src/services/ingest.service.ts", new Date().toISOString());
 const prisma = new PrismaClient();
@@ -398,6 +399,104 @@ if (result.cleaningConfirmation) {
       engine: "Reservation",
       reservationId: result.reservationId,
       propertyId: p.propertyId,
+      error:
+        auditPersistenceError?.message ??
+        auditPersistenceError,
+    });
+  }
+
+  const accessAuditStatus: AuditEntry["status"] = result.accessGrantId
+    ? "SUCCESS"
+    : result.lockId
+    ? "SKIPPED"
+    : "FAILED";
+
+  const accessAuditSeverity: AuditEntry["severity"] = result.accessGrantId
+    ? "INFO"
+    : "WARNING";
+
+  const accessAuditEventType: AuditEntry["eventType"] = result.accessGrantId
+    ? "DECISION_APPLIED"
+    : result.lockId
+    ? "DECISION_SKIPPED"
+    : "ACTION_FAILED";
+
+  const accessAuditEntry: AuditEntry = {
+    engine: "Access",
+    decisionId: `access-engine:${p.propertyId}:${result.reservationId}`,
+    entityType: "ACCESS",
+    entityId: result.accessGrantId ?? result.reservationId,
+    eventType: accessAuditEventType,
+    status: accessAuditStatus,
+    severity: accessAuditSeverity,
+    summary: result.accessGrantId
+      ? "Access Engine ensured guest access for the reservation."
+      : result.lockId
+      ? "Access Engine found an active lock but did not create a guest access grant."
+      : "Access Engine could not ensure guest access because no active lock was found.",
+    startedAt: new Date(),
+    completedAt: new Date(),
+    durationMs: 0,
+    reason: result.accessGrantId
+      ? "ACCESS_GRANT_ENSURED"
+      : result.lockId
+      ? "ACCESS_GRANT_SKIPPED"
+      : "ACTIVE_LOCK_MISSING",
+    decisions: [
+      {
+        engine: "Access",
+        rule: result.lockId ? "ACTIVE_LOCK_FOUND" : "ACTIVE_LOCK_MISSING",
+        label: result.lockId ? "Active Lock Found" : "Active Lock Missing",
+        applied: Boolean(result.lockId),
+        adjustment: null,
+        adjustmentPercent: null,
+        confidence: 100,
+        metadata: {
+          propertyId: p.propertyId,
+          lockId: result.lockId ?? null,
+        },
+      },
+      {
+        engine: "Access",
+        rule: result.accessGrantId
+          ? "ACCESS_GRANT_ENSURED"
+          : "ACCESS_GRANT_MISSING",
+        label: result.accessGrantId
+          ? "Guest Access Grant Ensured"
+          : "Guest Access Grant Missing",
+        applied: Boolean(result.accessGrantId),
+        adjustment: null,
+        adjustmentPercent: null,
+        confidence: 100,
+        metadata: {
+          reservationId: result.reservationId,
+          accessGrantId: result.accessGrantId ?? null,
+        },
+      },
+    ],
+    recommendedAction: result.accessGrantId
+      ? undefined
+      : "Review lock assignment and guest access grant for this reservation.",
+    metadata: {
+      propertyId: p.propertyId,
+      reservationId: result.reservationId,
+      lockId: result.lockId ?? null,
+      accessGrantId: result.accessGrantId ?? null,
+      source: p.source ?? null,
+      externalProvider,
+      externalId,
+    },
+  };
+
+  try {
+    await persistAuditEntry(prisma, accessAuditEntry);
+  } catch (auditPersistenceError: any) {
+    console.error("[APMS_ACCESS_AUDIT_PERSIST_ERROR]", {
+      engine: "Access",
+      reservationId: result.reservationId,
+      propertyId: p.propertyId,
+      accessGrantId: result.accessGrantId ?? null,
+      lockId: result.lockId ?? null,
       error:
         auditPersistenceError?.message ??
         auditPersistenceError,
