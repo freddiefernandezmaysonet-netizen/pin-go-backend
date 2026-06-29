@@ -12,6 +12,7 @@ import { provisionProperty } from "../services/property-provisioning.service";
 import { applyDefaultHolidayPricingForProperty } from "../services/holiday-pricing-template.service";
 import { createMissionControlSnapshotFromAuditEntries } from "../apms/mission-control.mapper";
 import type { AuditEntry } from "../apms/audit-types";
+import { persistAuditEntry } from "../apms/audit-persistence.service";
 
 const prisma = new PrismaClient();
 export const dashboardPropertiesRouter = Router();
@@ -1136,15 +1137,42 @@ dashboardPropertiesRouter.get(
         });
       }
 
-           const pricing = await calculateDirectBookingPricing({
+             const pricing = await calculateDirectBookingPricing({
         propertyId: property.id,
         checkIn,
         checkOut,
       });
 
+      const revenueAuditEntries = pricing.auditEntries ?? [];
+
+      for (const auditEntry of revenueAuditEntries) {
+        try {
+          await persistAuditEntry(prisma, {
+            ...auditEntry,
+            metadata: {
+              ...(auditEntry.metadata ?? {}),
+              organizationId: orgId,
+              propertyId: property.id,
+            },
+          });
+        } catch (auditPersistenceError: any) {
+          console.error("[APMS_REVENUE_AUDIT_PERSIST_ERROR]", {
+            engine: "Revenue",
+            propertyId: property.id,
+            decisionId: auditEntry.decisionId,
+            error:
+              auditPersistenceError?.message ??
+              auditPersistenceError,
+          });
+        }
+      }
+
       const persistedAuditRows = await prisma.apmsAuditEntry.findMany({
         where: {
           propertyId: property.id,
+          engine: {
+            not: "Revenue",
+          },
         },
         orderBy: {
           createdAt: "desc",
@@ -1177,16 +1205,29 @@ dashboardPropertiesRouter.get(
         })
       );
 
-      const auditEntries = [
-        ...(pricing.auditEntries ?? []),
+      const auditEntriesByDecisionId = new Map<string, AuditEntry>();
+
+      for (const auditEntry of [
+        ...revenueAuditEntries,
         ...persistedAuditEntries,
-      ];
+      ]) {
+        if (!auditEntriesByDecisionId.has(auditEntry.decisionId)) {
+          auditEntriesByDecisionId.set(
+            auditEntry.decisionId,
+            auditEntry
+          );
+        }
+      }
+
+      const auditEntries = Array.from(
+        auditEntriesByDecisionId.values()
+      );
 
       const snapshot = createMissionControlSnapshotFromAuditEntries({
         entityId: property.id,
         auditEntries,
         generatedAt: new Date(),
-      });
+      });   
       return res.json({
         ok: true,
         item: snapshot,
