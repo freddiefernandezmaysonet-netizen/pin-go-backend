@@ -11,6 +11,7 @@ import { MARKET_SEASON_CATALOG } from "../data/market-season-catalog";
 import { provisionProperty } from "../services/property-provisioning.service";
 import { applyDefaultHolidayPricingForProperty } from "../services/holiday-pricing-template.service";
 import { createMissionControlSnapshotFromAuditEntries } from "../apms/mission-control.mapper";
+import type { AuditEntry } from "../apms/audit-types";
 
 const prisma = new PrismaClient();
 export const dashboardPropertiesRouter = Router();
@@ -1135,18 +1136,57 @@ dashboardPropertiesRouter.get(
         });
       }
 
-      const pricing = await calculateDirectBookingPricing({
+           const pricing = await calculateDirectBookingPricing({
         propertyId: property.id,
         checkIn,
         checkOut,
       });
 
-      const snapshot = createMissionControlSnapshotFromAuditEntries({
-        entityId: property.id,
-        auditEntries: pricing.auditEntries ?? [],
-        generatedAt: new Date(),
+      const persistedAuditRows = await prisma.apmsAuditEntry.findMany({
+        where: {
+          propertyId: property.id,
+        },
+        orderBy: {
+          createdAt: "desc",
+        },
+        take: 25,
       });
 
+      const persistedAuditEntries: AuditEntry[] = persistedAuditRows.map(
+        (entry) => ({
+          engine: entry.engine,
+          decisionId: entry.decisionId,
+          entityType: entry.entityType as AuditEntry["entityType"],
+          entityId: entry.entityId,
+          eventType: entry.eventType as AuditEntry["eventType"],
+          status: entry.status as AuditEntry["status"],
+          severity: entry.severity as AuditEntry["severity"],
+          summary: entry.summary ?? undefined,
+          startedAt: entry.startedAt ?? entry.createdAt,
+          completedAt: entry.completedAt ?? entry.createdAt,
+          durationMs: entry.durationMs ?? 0,
+          reason: entry.reason ?? undefined,
+          decisions: Array.isArray(entry.decisions)
+            ? (entry.decisions as AuditEntry["decisions"])
+            : undefined,
+          recommendedAction: entry.recommendedAction ?? undefined,
+          metadata:
+            entry.metadata && typeof entry.metadata === "object"
+              ? (entry.metadata as Record<string, unknown>)
+              : undefined,
+        })
+      );
+
+      const auditEntries = [
+        ...(pricing.auditEntries ?? []),
+        ...persistedAuditEntries,
+      ];
+
+      const snapshot = createMissionControlSnapshotFromAuditEntries({
+        entityId: property.id,
+        auditEntries,
+        generatedAt: new Date(),
+      });
       return res.json({
         ok: true,
         item: snapshot,
