@@ -1,14 +1,17 @@
-import { PrismaClient } from "@prisma/client";
+import type { PrismaClient } from "@prisma/client";
 import type { AuditEntry } from "./audit-types";
 
-const prisma = new PrismaClient();
+type AuditPersistenceClient = Pick<PrismaClient, "apmsAuditEntry">;
 
 function normalizeJsonValue(value: unknown) {
   if (value === undefined) return undefined;
   return value as any;
 }
 
-export async function persistAuditEntry(input: AuditEntry) {
+export async function persistAuditEntry(
+  prisma: AuditPersistenceClient,
+  input: AuditEntry
+) {
   return prisma.apmsAuditEntry.upsert({
     where: {
       decisionId: input.decisionId,
