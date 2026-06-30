@@ -1536,6 +1536,7 @@ dashboardPropertiesRouter.put(
   where: { id: propertyId },
   select: {
     id: true,
+    organizationId: true,
     minimumNightlyRate: true,
     maximumNightlyRate: true,
   },
@@ -1615,7 +1616,16 @@ if (maximumNightlyRate !== null && rateNumber > maximumNightlyRate) {
       savedRates.push(saved);
     }
 
-   let distributionSyncResult: any = null;
+  let distributionSyncResult: any = null;
+
+const distributionStartedAt = new Date();
+const distributionRunId = distributionStartedAt
+  .toISOString()
+  .replace(/[:.]/g, "-");
+
+const changedRateDates = savedRates.map((rate) =>
+  rate.date.toISOString().slice(0, 10)
+);
 
 try {
   distributionSyncResult = await syncChannexAvailabilityForProperty(propertyId);
@@ -1627,6 +1637,107 @@ try {
       distributionLastError: null,
     },
   });
+
+  const distributionCompletedAt = new Date();
+
+  const distributionSyncSucceeded =
+    distributionSyncResult &&
+    typeof distributionSyncResult === "object" &&
+    "ok" in distributionSyncResult
+      ? Boolean((distributionSyncResult as any).ok)
+      : true;
+
+  const distributionAuditEntry: AuditEntry = {
+    engine: "Distribution",
+    decisionId: `distribution-engine:${propertyId}:nightly-rates:${distributionRunId}`,
+    entityType: "DISTRIBUTION",
+    entityId: propertyId,
+    eventType: distributionSyncSucceeded
+      ? "SYNC_COMPLETED"
+      : "SYNC_FAILED",
+    status: distributionSyncSucceeded ? "SUCCESS" : "FAILED",
+    severity: distributionSyncSucceeded ? "INFO" : "WARNING",
+    summary: distributionSyncSucceeded
+      ? "Distribution Engine synchronized channel availability after nightly rate update."
+      : "Distribution Engine could not fully synchronize channel availability after nightly rate update.",
+    startedAt: distributionStartedAt,
+    completedAt: distributionCompletedAt,
+    durationMs:
+      distributionCompletedAt.getTime() - distributionStartedAt.getTime(),
+    reason: distributionSyncSucceeded
+      ? "NIGHTLY_RATE_DISTRIBUTION_SYNC_COMPLETED"
+      : "NIGHTLY_RATE_DISTRIBUTION_SYNC_FAILED",
+    decisions: [
+      {
+        engine: "Distribution",
+        rule: "NIGHTLY_RATE_CHANNEX_AVAILABILITY_SYNC",
+        label: "Nightly Rate Channel Availability Sync",
+        applied: distributionSyncSucceeded,
+        adjustment: null,
+        adjustmentPercent: null,
+        confidence: distributionSyncSucceeded ? 100 : 0,
+        metadata: {
+          organizationId: property.organizationId,
+          propertyId,
+          provider: "CHANNEX",
+          syncType: "AVAILABILITY",
+          trigger: "NIGHTLY_RATE_UPDATE",
+          changedRateDates,
+          ratesCount: savedRates.length,
+          resultOk:
+            distributionSyncResult &&
+            typeof distributionSyncResult === "object" &&
+            "ok" in distributionSyncResult
+              ? (distributionSyncResult as any).ok
+              : null,
+          pushedToChannex:
+            distributionSyncResult &&
+            typeof distributionSyncResult === "object" &&
+            "pushedToChannex" in distributionSyncResult
+              ? (distributionSyncResult as any).pushedToChannex
+              : null,
+        },
+      },
+    ],
+    recommendedAction: distributionSyncSucceeded
+      ? undefined
+      : "Review Channex sync after this nightly rate update.",
+    metadata: {
+      organizationId: property.organizationId,
+      propertyId,
+      provider: "CHANNEX",
+      syncType: "AVAILABILITY",
+      trigger: "NIGHTLY_RATE_UPDATE",
+      changedRateDates,
+      ratesCount: savedRates.length,
+      resultOk:
+        distributionSyncResult &&
+        typeof distributionSyncResult === "object" &&
+        "ok" in distributionSyncResult
+          ? (distributionSyncResult as any).ok
+          : null,
+      pushedToChannex:
+        distributionSyncResult &&
+        typeof distributionSyncResult === "object" &&
+        "pushedToChannex" in distributionSyncResult
+          ? (distributionSyncResult as any).pushedToChannex
+          : null,
+    },
+  };
+
+  try {
+    await persistAuditEntry(prisma, distributionAuditEntry);
+  } catch (auditPersistenceError: any) {
+    console.error("[APMS_DISTRIBUTION_AUTO_SYNC_AUDIT_PERSIST_ERROR]", {
+      engine: "Distribution",
+      propertyId,
+      provider: "CHANNEX",
+      syncType: "AVAILABILITY",
+      trigger: "NIGHTLY_RATE_UPDATE",
+      decisionId: distributionAuditEntry.decisionId,
+      error: auditPersistenceError?.message ?? auditPersistenceError,
+    });
+  }
 } catch (syncError: any) {
   console.error("PUT nightly-rates Channex sync error", syncError);
 
@@ -1634,11 +1745,77 @@ try {
     where: { id: propertyId },
     data: {
       distributionLastError:
-        syncError?.message || "Failed to sync Channex after nightly rate update",
+        syncError?.message ||
+        "Failed to sync Channex after nightly rate update",
     },
   });
-}
 
+  const distributionCompletedAt = new Date();
+
+  const distributionAuditEntry: AuditEntry = {
+    engine: "Distribution",
+    decisionId: `distribution-engine:${propertyId}:nightly-rates:${distributionRunId}`,
+    entityType: "DISTRIBUTION",
+    entityId: propertyId,
+    eventType: "SYNC_FAILED",
+    status: "FAILED",
+    severity: "CRITICAL",
+    summary:
+      "Distribution Engine failed to synchronize channel availability after nightly rate update.",
+    startedAt: distributionStartedAt,
+    completedAt: distributionCompletedAt,
+    durationMs:
+      distributionCompletedAt.getTime() - distributionStartedAt.getTime(),
+    reason: "NIGHTLY_RATE_DISTRIBUTION_SYNC_ERROR",
+    decisions: [
+      {
+        engine: "Distribution",
+        rule: "NIGHTLY_RATE_CHANNEX_AVAILABILITY_SYNC",
+        label: "Nightly Rate Channel Availability Sync",
+        applied: false,
+        adjustment: null,
+        adjustmentPercent: null,
+        confidence: 0,
+        metadata: {
+          organizationId: property.organizationId,
+          propertyId,
+          provider: "CHANNEX",
+          syncType: "AVAILABILITY",
+          trigger: "NIGHTLY_RATE_UPDATE",
+          changedRateDates,
+          ratesCount: savedRates.length,
+          error: syncError?.message ?? String(syncError),
+        },
+      },
+    ],
+    recommendedAction:
+      "Review Channex availability connection and retry the sync after this nightly rate update.",
+    metadata: {
+      organizationId: property.organizationId,
+      propertyId,
+      provider: "CHANNEX",
+      syncType: "AVAILABILITY",
+      trigger: "NIGHTLY_RATE_UPDATE",
+      changedRateDates,
+      ratesCount: savedRates.length,
+      error: syncError?.message ?? String(syncError),
+    },
+  };
+
+  try {
+    await persistAuditEntry(prisma, distributionAuditEntry);
+  } catch (auditPersistenceError: any) {
+    console.error("[APMS_DISTRIBUTION_AUTO_SYNC_AUDIT_PERSIST_ERROR]", {
+      engine: "Distribution",
+      propertyId,
+      provider: "CHANNEX",
+      syncType: "AVAILABILITY",
+      trigger: "NIGHTLY_RATE_UPDATE",
+      decisionId: distributionAuditEntry.decisionId,
+      error: auditPersistenceError?.message ?? auditPersistenceError,
+    });
+  }
+}
 return res.json({
   ok: true,
   rates: savedRates.map((rate) => ({
