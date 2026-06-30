@@ -1243,74 +1243,34 @@ dashboardPropertiesRouter.post(
         const distributionAuditSeverity: AuditEntry["severity"] =
           distributionSyncSucceeded ? "INFO" : "WARNING";
 
-        const distributionAuditEntry: AuditEntry = {
-          engine: "Distribution",
+               const distributionAuditEntry = createDistributionAuditEntry({
+          organizationId: orgId,
+          propertyId: property.id,
           decisionId: `distribution-engine:${property.id}:channex-availability:${distributionRunId}`,
-          entityType: "DISTRIBUTION",
-          entityId: property.id,
+          trigger: "CHANNEX_AVAILABILITY_SYNC",
+          provider: "CHANNEX",
+          syncType: "AVAILABILITY",
+          startedAt: distributionStartedAt,
+          completedAt: distributionCompletedAt,
+          result,
+          status: distributionSyncSucceeded ? "SUCCESS" : "FAILED",
+          severity: distributionSyncSucceeded ? "INFO" : "WARNING",
           eventType: distributionSyncSucceeded
             ? "SYNC_COMPLETED"
             : "SYNC_FAILED",
-          status: distributionAuditStatus,
-          severity: distributionAuditSeverity,
-          summary: distributionSyncSucceeded
-            ? "Distribution Engine synchronized property availability with Channex."
-            : "Distribution Engine could not fully synchronize property availability with Channex.",
-          startedAt: distributionStartedAt,
-          completedAt: distributionCompletedAt,
-          durationMs:
-            distributionCompletedAt.getTime() -
-            distributionStartedAt.getTime(),
           reason: distributionSyncSucceeded
             ? "CHANNEX_AVAILABILITY_SYNC_COMPLETED"
             : "CHANNEX_AVAILABILITY_SYNC_FAILED",
-          decisions: [
-            {
-              engine: "Distribution",
-              rule: "CHANNEX_AVAILABILITY_SYNC",
-              label: "Channex Availability Sync",
-              applied: distributionSyncSucceeded,
-              adjustment: null,
-              adjustmentPercent: null,
-              confidence: distributionSyncSucceeded ? 100 : 0,
-              metadata: {
-                propertyId: property.id,
-                provider: "CHANNEX",
-                syncType: "AVAILABILITY",
-                resultOk:
-                  result && typeof result === "object" && "ok" in result
-                    ? (result as any).ok
-                    : null,
-                pushedToChannex:
-                  result &&
-                  typeof result === "object" &&
-                  "pushedToChannex" in result
-                    ? (result as any).pushedToChannex
-                    : null,
-              },
-            },
-          ],
+          summary: distributionSyncSucceeded
+            ? "Distribution Engine synchronized property availability with Channex."
+            : "Distribution Engine could not fully synchronize property availability with Channex.",
+          rule: "CHANNEX_AVAILABILITY_SYNC",
+          label: "Channex Availability Sync",
           recommendedAction: distributionSyncSucceeded
             ? undefined
             : "Review Channex availability sync result for this property.",
-          metadata: {
-            organizationId: orgId,
-            propertyId: property.id,
-            provider: "CHANNEX",
-            syncType: "AVAILABILITY",
-            resultOk:
-              result && typeof result === "object" && "ok" in result
-                ? (result as any).ok
-                : null,
-            pushedToChannex:
-              result &&
-              typeof result === "object" &&
-              "pushedToChannex" in result
-                ? (result as any).pushedToChannex
-                : null,
-          },
-        };
-
+        });
+       
         try {
           await persistAuditEntry(prisma, distributionAuditEntry);
         } catch (auditPersistenceError: any) {
