@@ -2090,7 +2090,10 @@ dashboardPropertiesRouter.post(
 
       const result = await applyDefaultMarketSeasonsForProperty(property.id);
 
-      let distributionSyncResult: any = null;
+           let distributionSyncResult: any = null;
+
+      const distributionStartedAt = new Date();
+      const distributionDecisionId = `distribution-engine:${property.id}:manual-reservation:${result.reservationId}`;
 
       try {
         distributionSyncResult = await syncChannexAvailabilityForProperty(
@@ -2104,19 +2107,189 @@ dashboardPropertiesRouter.post(
             distributionLastError: null,
           },
         });
+
+        const distributionCompletedAt = new Date();
+
+        const distributionSyncSucceeded =
+          distributionSyncResult &&
+          typeof distributionSyncResult === "object" &&
+          "ok" in distributionSyncResult
+            ? Boolean((distributionSyncResult as any).ok)
+            : true;
+
+        const distributionAuditEntry: AuditEntry = {
+          engine: "Distribution",
+          decisionId: distributionDecisionId,
+          entityType: "DISTRIBUTION",
+          entityId: property.id,
+          eventType: distributionSyncSucceeded
+            ? "SYNC_COMPLETED"
+            : "SYNC_FAILED",
+          status: distributionSyncSucceeded ? "SUCCESS" : "FAILED",
+          severity: distributionSyncSucceeded ? "INFO" : "WARNING",
+          summary: distributionSyncSucceeded
+            ? "Distribution Engine synchronized channel availability after manual reservation."
+            : "Distribution Engine could not fully synchronize channel availability after manual reservation.",
+          startedAt: distributionStartedAt,
+          completedAt: distributionCompletedAt,
+          durationMs:
+            distributionCompletedAt.getTime() -
+            distributionStartedAt.getTime(),
+          reason: distributionSyncSucceeded
+            ? "MANUAL_RESERVATION_AVAILABILITY_SYNC_COMPLETED"
+            : "MANUAL_RESERVATION_AVAILABILITY_SYNC_FAILED",
+          decisions: [
+            {
+              engine: "Distribution",
+              rule: "MANUAL_RESERVATION_CHANNEX_AVAILABILITY_SYNC",
+              label: "Manual Reservation Channel Availability Sync",
+              applied: distributionSyncSucceeded,
+              adjustment: null,
+              adjustmentPercent: null,
+              confidence: distributionSyncSucceeded ? 100 : 0,
+              metadata: {
+                organizationId: orgId,
+                propertyId: property.id,
+                reservationId: result.reservationId,
+                provider: "CHANNEX",
+                syncType: "AVAILABILITY",
+                trigger: "MANUAL_RESERVATION",
+                resultOk:
+                  distributionSyncResult &&
+                  typeof distributionSyncResult === "object" &&
+                  "ok" in distributionSyncResult
+                    ? (distributionSyncResult as any).ok
+                    : null,
+                pushedToChannex:
+                  distributionSyncResult &&
+                  typeof distributionSyncResult === "object" &&
+                  "pushedToChannex" in distributionSyncResult
+                    ? (distributionSyncResult as any).pushedToChannex
+                    : null,
+              },
+            },
+          ],
+          recommendedAction: distributionSyncSucceeded
+            ? undefined
+            : "Review Channex availability sync after this manual reservation.",
+          metadata: {
+            organizationId: orgId,
+            propertyId: property.id,
+            reservationId: result.reservationId,
+            provider: "CHANNEX",
+            syncType: "AVAILABILITY",
+            trigger: "MANUAL_RESERVATION",
+            resultOk:
+              distributionSyncResult &&
+              typeof distributionSyncResult === "object" &&
+              "ok" in distributionSyncResult
+                ? (distributionSyncResult as any).ok
+                : null,
+            pushedToChannex:
+              distributionSyncResult &&
+              typeof distributionSyncResult === "object" &&
+              "pushedToChannex" in distributionSyncResult
+                ? (distributionSyncResult as any).pushedToChannex
+                : null,
+          },
+        };
+
+        try {
+          await persistAuditEntry(prisma, distributionAuditEntry);
+        } catch (auditPersistenceError: any) {
+          console.error("[APMS_DISTRIBUTION_AUTO_SYNC_AUDIT_PERSIST_ERROR]", {
+            engine: "Distribution",
+            propertyId: property.id,
+            reservationId: result.reservationId,
+            provider: "CHANNEX",
+            syncType: "AVAILABILITY",
+            trigger: "MANUAL_RESERVATION",
+            decisionId: distributionAuditEntry.decisionId,
+            error:
+              auditPersistenceError?.message ??
+              auditPersistenceError,
+          });
+        }
       } catch (syncError: any) {
-        console.error("POST apply-market-defaults Channex sync error", syncError);
+        console.error("POST manual-reservations Channex sync error", syncError);
 
         await prisma.property.update({
           where: { id: property.id },
           data: {
             distributionLastError:
               syncError?.message ||
-              "Failed to sync Channex after applying market seasons",
+              "Failed to sync Channex after manual reservation",
           },
         });
-      }
 
+        const distributionCompletedAt = new Date();
+
+        const distributionAuditEntry: AuditEntry = {
+          engine: "Distribution",
+          decisionId: distributionDecisionId,
+          entityType: "DISTRIBUTION",
+          entityId: property.id,
+          eventType: "SYNC_FAILED",
+          status: "FAILED",
+          severity: "CRITICAL",
+          summary:
+            "Distribution Engine failed to synchronize channel availability after manual reservation.",
+          startedAt: distributionStartedAt,
+          completedAt: distributionCompletedAt,
+          durationMs:
+            distributionCompletedAt.getTime() -
+            distributionStartedAt.getTime(),
+          reason: "MANUAL_RESERVATION_AVAILABILITY_SYNC_ERROR",
+          decisions: [
+            {
+              engine: "Distribution",
+              rule: "MANUAL_RESERVATION_CHANNEX_AVAILABILITY_SYNC",
+              label: "Manual Reservation Channel Availability Sync",
+              applied: false,
+              adjustment: null,
+              adjustmentPercent: null,
+              confidence: 0,
+              metadata: {
+                organizationId: orgId,
+                propertyId: property.id,
+                reservationId: result.reservationId,
+                provider: "CHANNEX",
+                syncType: "AVAILABILITY",
+                trigger: "MANUAL_RESERVATION",
+                error: syncError?.message ?? String(syncError),
+              },
+            },
+          ],
+          recommendedAction:
+            "Review Channex availability connection and retry the sync for this reservation.",
+          metadata: {
+            organizationId: orgId,
+            propertyId: property.id,
+            reservationId: result.reservationId,
+            provider: "CHANNEX",
+            syncType: "AVAILABILITY",
+            trigger: "MANUAL_RESERVATION",
+            error: syncError?.message ?? String(syncError),
+          },
+        };
+
+        try {
+          await persistAuditEntry(prisma, distributionAuditEntry);
+        } catch (auditPersistenceError: any) {
+          console.error("[APMS_DISTRIBUTION_AUTO_SYNC_AUDIT_PERSIST_ERROR]", {
+            engine: "Distribution",
+            propertyId: property.id,
+            reservationId: result.reservationId,
+            provider: "CHANNEX",
+            syncType: "AVAILABILITY",
+            trigger: "MANUAL_RESERVATION",
+            decisionId: distributionAuditEntry.decisionId,
+            error:
+              auditPersistenceError?.message ??
+              auditPersistenceError,
+          });
+        }
+      }
       return res.json({
         ok: true,
         result,
