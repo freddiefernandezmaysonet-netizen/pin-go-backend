@@ -934,31 +934,200 @@ dashboardPropertiesRouter.post(
 
       let distributionSyncResult: any = null;
 
-      try {
-        distributionSyncResult = await syncChannexAvailabilityForProperty(
-          property.id
-        );
+const distributionStartedAt = new Date();
+const distributionRunId = distributionStartedAt
+  .toISOString()
+  .replace(/[:.]/g, "-");
 
-        await prisma.property.update({
-          where: { id: property.id },
-          data: {
-            distributionLastSyncedAt: new Date(),
-            distributionLastError: null,
-          },
-        });
-      } catch (syncError: any) {
-        console.error("POST manual-reservations Channex sync error", syncError);
+const distributionDecisionId = `distribution-engine:${id}:blocked-date-delete:${blockedDate.id}:${distributionRunId}`;
 
-        await prisma.property.update({
-          where: { id: property.id },
-          data: {
-            distributionLastError:
-              syncError?.message ||
-              "Failed to sync Channex after manual reservation",
-          },
-        });
-      }
+try {
+  distributionSyncResult = await syncChannexAvailabilityForProperty(id);
 
+  await prisma.property.update({
+    where: { id },
+    data: {
+      distributionLastSyncedAt: new Date(),
+      distributionLastError: null,
+    },
+  });
+
+  const distributionCompletedAt = new Date();
+
+  const distributionSyncSucceeded =
+    distributionSyncResult &&
+    typeof distributionSyncResult === "object" &&
+    "ok" in distributionSyncResult
+      ? Boolean((distributionSyncResult as any).ok)
+      : true;
+
+  const distributionAuditEntry: AuditEntry = {
+    engine: "Distribution",
+    decisionId: distributionDecisionId,
+    entityType: "DISTRIBUTION",
+    entityId: id,
+    eventType: distributionSyncSucceeded
+      ? "SYNC_COMPLETED"
+      : "SYNC_FAILED",
+    status: distributionSyncSucceeded ? "SUCCESS" : "FAILED",
+    severity: distributionSyncSucceeded ? "INFO" : "WARNING",
+    summary: distributionSyncSucceeded
+      ? "Distribution Engine synchronized channel availability after blocked date removal."
+      : "Distribution Engine could not fully synchronize channel availability after blocked date removal.",
+    startedAt: distributionStartedAt,
+    completedAt: distributionCompletedAt,
+    durationMs:
+      distributionCompletedAt.getTime() - distributionStartedAt.getTime(),
+    reason: distributionSyncSucceeded
+      ? "BLOCKED_DATE_DELETE_DISTRIBUTION_SYNC_COMPLETED"
+      : "BLOCKED_DATE_DELETE_DISTRIBUTION_SYNC_FAILED",
+    decisions: [
+      {
+        engine: "Distribution",
+        rule: "BLOCKED_DATE_DELETE_CHANNEX_AVAILABILITY_SYNC",
+        label: "Blocked Date Removal Channel Availability Sync",
+        applied: distributionSyncSucceeded,
+        adjustment: null,
+        adjustmentPercent: null,
+        confidence: distributionSyncSucceeded ? 100 : 0,
+        metadata: {
+          organizationId: orgId,
+          propertyId: id,
+          blockedDateId: blockedDate.id,
+          provider: "CHANNEX",
+          syncType: "AVAILABILITY",
+          trigger: "BLOCKED_DATE_DELETE",
+          resultOk:
+            distributionSyncResult &&
+            typeof distributionSyncResult === "object" &&
+            "ok" in distributionSyncResult
+              ? (distributionSyncResult as any).ok
+              : null,
+          pushedToChannex:
+            distributionSyncResult &&
+            typeof distributionSyncResult === "object" &&
+            "pushedToChannex" in distributionSyncResult
+              ? (distributionSyncResult as any).pushedToChannex
+              : null,
+        },
+      },
+    ],
+    recommendedAction: distributionSyncSucceeded
+      ? undefined
+      : "Review Channex sync after removing this blocked date.",
+    metadata: {
+      organizationId: orgId,
+      propertyId: id,
+      blockedDateId: blockedDate.id,
+      provider: "CHANNEX",
+      syncType: "AVAILABILITY",
+      trigger: "BLOCKED_DATE_DELETE",
+      resultOk:
+        distributionSyncResult &&
+        typeof distributionSyncResult === "object" &&
+        "ok" in distributionSyncResult
+          ? (distributionSyncResult as any).ok
+          : null,
+      pushedToChannex:
+        distributionSyncResult &&
+        typeof distributionSyncResult === "object" &&
+        "pushedToChannex" in distributionSyncResult
+          ? (distributionSyncResult as any).pushedToChannex
+          : null,
+    },
+  };
+
+  try {
+    await persistAuditEntry(prisma, distributionAuditEntry);
+  } catch (auditPersistenceError: any) {
+    console.error("[APMS_DISTRIBUTION_AUTO_SYNC_AUDIT_PERSIST_ERROR]", {
+      engine: "Distribution",
+      propertyId: id,
+      blockedDateId: blockedDate.id,
+      provider: "CHANNEX",
+      syncType: "AVAILABILITY",
+      trigger: "BLOCKED_DATE_DELETE",
+      decisionId: distributionAuditEntry.decisionId,
+      error: auditPersistenceError?.message ?? auditPersistenceError,
+    });
+  }
+} catch (syncError: any) {
+  console.error("DELETE blocked-dates Channex sync error", syncError);
+
+  await prisma.property.update({
+    where: { id },
+    data: {
+      distributionLastError:
+        syncError?.message ||
+        "Failed to sync Channex after blocked date delete",
+    },
+  });
+
+  const distributionCompletedAt = new Date();
+
+  const distributionAuditEntry: AuditEntry = {
+    engine: "Distribution",
+    decisionId: distributionDecisionId,
+    entityType: "DISTRIBUTION",
+    entityId: id,
+    eventType: "SYNC_FAILED",
+    status: "FAILED",
+    severity: "CRITICAL",
+    summary:
+      "Distribution Engine failed to synchronize channel availability after blocked date removal.",
+    startedAt: distributionStartedAt,
+    completedAt: distributionCompletedAt,
+    durationMs:
+      distributionCompletedAt.getTime() - distributionStartedAt.getTime(),
+    reason: "BLOCKED_DATE_DELETE_DISTRIBUTION_SYNC_ERROR",
+    decisions: [
+      {
+        engine: "Distribution",
+        rule: "BLOCKED_DATE_DELETE_CHANNEX_AVAILABILITY_SYNC",
+        label: "Blocked Date Removal Channel Availability Sync",
+        applied: false,
+        adjustment: null,
+        adjustmentPercent: null,
+        confidence: 0,
+        metadata: {
+          organizationId: orgId,
+          propertyId: id,
+          blockedDateId: blockedDate.id,
+          provider: "CHANNEX",
+          syncType: "AVAILABILITY",
+          trigger: "BLOCKED_DATE_DELETE",
+          error: syncError?.message ?? String(syncError),
+        },
+      },
+    ],
+    recommendedAction:
+      "Review Channex availability connection and retry sync after removing this blocked date.",
+    metadata: {
+      organizationId: orgId,
+      propertyId: id,
+      blockedDateId: blockedDate.id,
+      provider: "CHANNEX",
+      syncType: "AVAILABILITY",
+      trigger: "BLOCKED_DATE_DELETE",
+      error: syncError?.message ?? String(syncError),
+    },
+  };
+
+  try {
+    await persistAuditEntry(prisma, distributionAuditEntry);
+  } catch (auditPersistenceError: any) {
+    console.error("[APMS_DISTRIBUTION_AUTO_SYNC_AUDIT_PERSIST_ERROR]", {
+      engine: "Distribution",
+      propertyId: id,
+      blockedDateId: blockedDate.id,
+      provider: "CHANNEX",
+      syncType: "AVAILABILITY",
+      trigger: "BLOCKED_DATE_DELETE",
+      decisionId: distributionAuditEntry.decisionId,
+      error: auditPersistenceError?.message ?? auditPersistenceError,
+    });
+  }
+}
            return res.json({
         ok: true,
         reservationId: result.reservationId,
@@ -3317,30 +3486,210 @@ dashboardPropertiesRouter.delete(
 
 let distributionSyncResult: any = null;
 
+const distributionStartedAt = new Date();
+const distributionDecisionId = `distribution-engine:${property.id}:blocked-date-create:${item.id}`;
+
+const blockedStartDate = item.startDate.toISOString().slice(0, 10);
+const blockedEndDate = item.endDate.toISOString().slice(0, 10);
+
 try {
-  distributionSyncResult = await syncChannexAvailabilityForProperty(id);
+  distributionSyncResult = await syncChannexAvailabilityForProperty(property.id);
 
   await prisma.property.update({
-    where: { id },
+    where: { id: property.id },
     data: {
       distributionLastSyncedAt: new Date(),
       distributionLastError: null,
     },
   });
+
+  const distributionCompletedAt = new Date();
+
+  const distributionSyncSucceeded =
+    distributionSyncResult &&
+    typeof distributionSyncResult === "object" &&
+    "ok" in distributionSyncResult
+      ? Boolean((distributionSyncResult as any).ok)
+      : true;
+
+  const distributionAuditEntry: AuditEntry = {
+    engine: "Distribution",
+    decisionId: distributionDecisionId,
+    entityType: "DISTRIBUTION",
+    entityId: property.id,
+    eventType: distributionSyncSucceeded
+      ? "SYNC_COMPLETED"
+      : "SYNC_FAILED",
+    status: distributionSyncSucceeded ? "SUCCESS" : "FAILED",
+    severity: distributionSyncSucceeded ? "INFO" : "WARNING",
+    summary: distributionSyncSucceeded
+      ? "Distribution Engine synchronized channel availability after blocked date creation."
+      : "Distribution Engine could not fully synchronize channel availability after blocked date creation.",
+    startedAt: distributionStartedAt,
+    completedAt: distributionCompletedAt,
+    durationMs:
+      distributionCompletedAt.getTime() - distributionStartedAt.getTime(),
+    reason: distributionSyncSucceeded
+      ? "BLOCKED_DATE_CREATE_DISTRIBUTION_SYNC_COMPLETED"
+      : "BLOCKED_DATE_CREATE_DISTRIBUTION_SYNC_FAILED",
+    decisions: [
+      {
+        engine: "Distribution",
+        rule: "BLOCKED_DATE_CREATE_CHANNEX_AVAILABILITY_SYNC",
+        label: "Blocked Date Creation Channel Availability Sync",
+        applied: distributionSyncSucceeded,
+        adjustment: null,
+        adjustmentPercent: null,
+        confidence: distributionSyncSucceeded ? 100 : 0,
+        metadata: {
+          organizationId: orgId,
+          propertyId: property.id,
+          blockedDateId: item.id,
+          blockedStartDate,
+          blockedEndDate,
+          provider: "CHANNEX",
+          syncType: "AVAILABILITY",
+          trigger: "BLOCKED_DATE_CREATE",
+          resultOk:
+            distributionSyncResult &&
+            typeof distributionSyncResult === "object" &&
+            "ok" in distributionSyncResult
+              ? (distributionSyncResult as any).ok
+              : null,
+          pushedToChannex:
+            distributionSyncResult &&
+            typeof distributionSyncResult === "object" &&
+            "pushedToChannex" in distributionSyncResult
+              ? (distributionSyncResult as any).pushedToChannex
+              : null,
+        },
+      },
+    ],
+    recommendedAction: distributionSyncSucceeded
+      ? undefined
+      : "Review Channex sync after creating this blocked date.",
+    metadata: {
+      organizationId: orgId,
+      propertyId: property.id,
+      blockedDateId: item.id,
+      blockedStartDate,
+      blockedEndDate,
+      provider: "CHANNEX",
+      syncType: "AVAILABILITY",
+      trigger: "BLOCKED_DATE_CREATE",
+      resultOk:
+        distributionSyncResult &&
+        typeof distributionSyncResult === "object" &&
+        "ok" in distributionSyncResult
+          ? (distributionSyncResult as any).ok
+          : null,
+      pushedToChannex:
+        distributionSyncResult &&
+        typeof distributionSyncResult === "object" &&
+        "pushedToChannex" in distributionSyncResult
+          ? (distributionSyncResult as any).pushedToChannex
+          : null,
+    },
+  };
+
+  try {
+    await persistAuditEntry(prisma, distributionAuditEntry);
+  } catch (auditPersistenceError: any) {
+    console.error("[APMS_DISTRIBUTION_AUTO_SYNC_AUDIT_PERSIST_ERROR]", {
+      engine: "Distribution",
+      propertyId: property.id,
+      blockedDateId: item.id,
+      provider: "CHANNEX",
+      syncType: "AVAILABILITY",
+      trigger: "BLOCKED_DATE_CREATE",
+      decisionId: distributionAuditEntry.decisionId,
+      error: auditPersistenceError?.message ?? auditPersistenceError,
+    });
+  }
 } catch (syncError: any) {
-  console.error("DELETE blocked-dates Channex sync error", syncError);
+  console.error("POST blocked-dates Channex sync error", syncError);
 
   await prisma.property.update({
-    where: { id },
+    where: { id: property.id },
     data: {
       distributionLastError:
-        syncError?.message || "Failed to sync Channex after blocked date delete",
+        syncError?.message ||
+        "Failed to sync Channex after blocked date update",
     },
   });
-}
 
+  const distributionCompletedAt = new Date();
+
+  const distributionAuditEntry: AuditEntry = {
+    engine: "Distribution",
+    decisionId: distributionDecisionId,
+    entityType: "DISTRIBUTION",
+    entityId: property.id,
+    eventType: "SYNC_FAILED",
+    status: "FAILED",
+    severity: "CRITICAL",
+    summary:
+      "Distribution Engine failed to synchronize channel availability after blocked date creation.",
+    startedAt: distributionStartedAt,
+    completedAt: distributionCompletedAt,
+    durationMs:
+      distributionCompletedAt.getTime() - distributionStartedAt.getTime(),
+    reason: "BLOCKED_DATE_CREATE_DISTRIBUTION_SYNC_ERROR",
+    decisions: [
+      {
+        engine: "Distribution",
+        rule: "BLOCKED_DATE_CREATE_CHANNEX_AVAILABILITY_SYNC",
+        label: "Blocked Date Creation Channel Availability Sync",
+        applied: false,
+        adjustment: null,
+        adjustmentPercent: null,
+        confidence: 0,
+        metadata: {
+          organizationId: orgId,
+          propertyId: property.id,
+          blockedDateId: item.id,
+          blockedStartDate,
+          blockedEndDate,
+          provider: "CHANNEX",
+          syncType: "AVAILABILITY",
+          trigger: "BLOCKED_DATE_CREATE",
+          error: syncError?.message ?? String(syncError),
+        },
+      },
+    ],
+    recommendedAction:
+      "Review Channex availability connection and retry sync after creating this blocked date.",
+    metadata: {
+      organizationId: orgId,
+      propertyId: property.id,
+      blockedDateId: item.id,
+      blockedStartDate,
+      blockedEndDate,
+      provider: "CHANNEX",
+      syncType: "AVAILABILITY",
+      trigger: "BLOCKED_DATE_CREATE",
+      error: syncError?.message ?? String(syncError),
+    },
+  };
+
+  try {
+    await persistAuditEntry(prisma, distributionAuditEntry);
+  } catch (auditPersistenceError: any) {
+    console.error("[APMS_DISTRIBUTION_AUTO_SYNC_AUDIT_PERSIST_ERROR]", {
+      engine: "Distribution",
+      propertyId: property.id,
+      blockedDateId: item.id,
+      provider: "CHANNEX",
+      syncType: "AVAILABILITY",
+      trigger: "BLOCKED_DATE_CREATE",
+      decisionId: distributionAuditEntry.decisionId,
+      error: auditPersistenceError?.message ?? auditPersistenceError,
+    });
+  }
+}
 return res.json({
   ok: true,
+  item,
   distributionSyncResult,
 });
        } catch (error: any) {
