@@ -247,8 +247,15 @@ if (updatedReservation.guestEmail) {
   }
 }
 
+const distributionStartedAt = new Date();
+const distributionDecisionId = `distribution-engine:${property.id}:direct-booking:${ingestResult.reservationId}`;
+
+let distributionSyncResult: any = null;
+
 try {
-  await syncChannexAvailabilityForProperty(property.id);
+  distributionSyncResult = await syncChannexAvailabilityForProperty(
+    property.id
+  );
 
   await prisma.property.update({
     where: { id: property.id },
@@ -257,6 +264,106 @@ try {
       distributionLastError: null,
     },
   });
+
+  const distributionCompletedAt = new Date();
+
+  const distributionSyncSucceeded =
+    distributionSyncResult &&
+    typeof distributionSyncResult === "object" &&
+    "ok" in distributionSyncResult
+      ? Boolean((distributionSyncResult as any).ok)
+      : true;
+
+  const distributionAuditEntry: AuditEntry = {
+    engine: "Distribution",
+    decisionId: distributionDecisionId,
+    entityType: "DISTRIBUTION",
+    entityId: property.id,
+    eventType: distributionSyncSucceeded
+      ? "SYNC_COMPLETED"
+      : "SYNC_FAILED",
+    status: distributionSyncSucceeded ? "SUCCESS" : "FAILED",
+    severity: distributionSyncSucceeded ? "INFO" : "WARNING",
+    summary: distributionSyncSucceeded
+      ? "Distribution Engine synchronized channel availability after direct booking reservation."
+      : "Distribution Engine could not fully synchronize channel availability after direct booking reservation.",
+    startedAt: distributionStartedAt,
+    completedAt: distributionCompletedAt,
+    durationMs:
+      distributionCompletedAt.getTime() - distributionStartedAt.getTime(),
+    reason: distributionSyncSucceeded
+      ? "DIRECT_BOOKING_DISTRIBUTION_SYNC_COMPLETED"
+      : "DIRECT_BOOKING_DISTRIBUTION_SYNC_FAILED",
+    decisions: [
+      {
+        engine: "Distribution",
+        rule: "DIRECT_BOOKING_CHANNEX_AVAILABILITY_SYNC",
+        label: "Direct Booking Channel Availability Sync",
+        applied: distributionSyncSucceeded,
+        adjustment: null,
+        adjustmentPercent: null,
+        confidence: distributionSyncSucceeded ? 100 : 0,
+        metadata: {
+          organizationId: property.organizationId,
+          propertyId: property.id,
+          reservationId: ingestResult.reservationId,
+          provider: "CHANNEX",
+          syncType: "AVAILABILITY",
+          trigger: "DIRECT_BOOKING",
+          resultOk:
+            distributionSyncResult &&
+            typeof distributionSyncResult === "object" &&
+            "ok" in distributionSyncResult
+              ? (distributionSyncResult as any).ok
+              : null,
+          pushedToChannex:
+            distributionSyncResult &&
+            typeof distributionSyncResult === "object" &&
+            "pushedToChannex" in distributionSyncResult
+              ? (distributionSyncResult as any).pushedToChannex
+              : null,
+        },
+      },
+    ],
+    recommendedAction: distributionSyncSucceeded
+      ? undefined
+      : "Review Channex sync after this direct booking reservation.",
+    metadata: {
+      organizationId: property.organizationId,
+      propertyId: property.id,
+      reservationId: ingestResult.reservationId,
+      provider: "CHANNEX",
+      syncType: "AVAILABILITY",
+      trigger: "DIRECT_BOOKING",
+      resultOk:
+        distributionSyncResult &&
+        typeof distributionSyncResult === "object" &&
+        "ok" in distributionSyncResult
+          ? (distributionSyncResult as any).ok
+          : null,
+      pushedToChannex:
+        distributionSyncResult &&
+        typeof distributionSyncResult === "object" &&
+        "pushedToChannex" in distributionSyncResult
+          ? (distributionSyncResult as any).pushedToChannex
+          : null,
+    },
+  };
+
+  try {
+    await persistAuditEntry(prisma, distributionAuditEntry);
+  } catch (auditPersistenceError: any) {
+    console.error("[APMS_DISTRIBUTION_AUTO_SYNC_AUDIT_PERSIST_ERROR]", {
+      engine: "Distribution",
+      propertyId: property.id,
+      reservationId: ingestResult.reservationId,
+      provider: "CHANNEX",
+      syncType: "AVAILABILITY",
+      trigger: "DIRECT_BOOKING",
+      decisionId: distributionAuditEntry.decisionId,
+      error: auditPersistenceError?.message ?? auditPersistenceError,
+    });
+  }
 } catch (syncError: any) {
   console.error("[DIRECT_BOOKING_CHANNEX_SYNC_ERROR]", syncError);
 
@@ -267,8 +374,72 @@ try {
         syncError?.message || "Failed to sync Channex after direct booking",
     },
   });
-}
 
+  const distributionCompletedAt = new Date();
+
+  const distributionAuditEntry: AuditEntry = {
+    engine: "Distribution",
+    decisionId: distributionDecisionId,
+    entityType: "DISTRIBUTION",
+    entityId: property.id,
+    eventType: "SYNC_FAILED",
+    status: "FAILED",
+    severity: "CRITICAL",
+    summary:
+      "Distribution Engine failed to synchronize channel availability after direct booking reservation.",
+    startedAt: distributionStartedAt,
+    completedAt: distributionCompletedAt,
+    durationMs:
+      distributionCompletedAt.getTime() - distributionStartedAt.getTime(),
+    reason: "DIRECT_BOOKING_DISTRIBUTION_SYNC_ERROR",
+    decisions: [
+      {
+        engine: "Distribution",
+        rule: "DIRECT_BOOKING_CHANNEX_AVAILABILITY_SYNC",
+        label: "Direct Booking Channel Availability Sync",
+        applied: false,
+        adjustment: null,
+        adjustmentPercent: null,
+        confidence: 0,
+        metadata: {
+          organizationId: property.organizationId,
+          propertyId: property.id,
+          reservationId: ingestResult.reservationId,
+          provider: "CHANNEX",
+          syncType: "AVAILABILITY",
+          trigger: "DIRECT_BOOKING",
+          error: syncError?.message ?? String(syncError),
+        },
+      },
+    ],
+    recommendedAction:
+      "Review Channex availability connection and retry sync after this direct booking reservation.",
+    metadata: {
+      organizationId: property.organizationId,
+      propertyId: property.id,
+      reservationId: ingestResult.reservationId,
+      provider: "CHANNEX",
+      syncType: "AVAILABILITY",
+      trigger: "DIRECT_BOOKING",
+      error: syncError?.message ?? String(syncError),
+    },
+  };
+
+  try {
+    await persistAuditEntry(prisma, distributionAuditEntry);
+  } catch (auditPersistenceError: any) {
+    console.error("[APMS_DISTRIBUTION_AUTO_SYNC_AUDIT_PERSIST_ERROR]", {
+      engine: "Distribution",
+      propertyId: property.id,
+      reservationId: ingestResult.reservationId,
+      provider: "CHANNEX",
+      syncType: "AVAILABILITY",
+      trigger: "DIRECT_BOOKING",
+      decisionId: distributionAuditEntry.decisionId,
+      error: auditPersistenceError?.message ?? auditPersistenceError,
+    });
+  }
+}
 return {
   id: ingestResult.reservationId,
   stripeCheckoutSessionId: session.id,
