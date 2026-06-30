@@ -67,7 +67,9 @@ function toErrorMessage(error: unknown) {
 
 function compactObject(input: Record<string, unknown>) {
   return Object.fromEntries(
-    Object.entries(input).filter(([, value]) => value !== undefined)
+    Object.entries(input).filter(
+      ([, value]) => value !== undefined && value !== null
+    )
   );
 }
 
