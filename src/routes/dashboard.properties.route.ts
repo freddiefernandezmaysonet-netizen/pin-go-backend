@@ -1052,14 +1052,180 @@ dashboardPropertiesRouter.post(
           error: "Property not found",
         });
       }
+            const distributionStartedAt = new Date();
+      const distributionRunId = distributionStartedAt
+        .toISOString()
+        .replace(/[:.]/g, "-");
 
-      const result =
-        await syncChannexAvailabilityForProperty(property.id);
+      try {
+        const result =
+          await syncChannexAvailabilityForProperty(property.id);
 
-      return res.json({
-        ok: true,
-        result,
-      });
+        const distributionCompletedAt = new Date();
+
+        const distributionSyncSucceeded =
+          result && typeof result === "object" && "ok" in result
+            ? Boolean((result as any).ok)
+            : true;
+
+        const distributionAuditStatus: AuditEntry["status"] =
+          distributionSyncSucceeded ? "SUCCESS" : "FAILED";
+
+        const distributionAuditSeverity: AuditEntry["severity"] =
+          distributionSyncSucceeded ? "INFO" : "WARNING";
+
+        const distributionAuditEntry: AuditEntry = {
+          engine: "Distribution",
+          decisionId: `distribution-engine:${property.id}:channex-availability:${distributionRunId}`,
+          entityType: "DISTRIBUTION",
+          entityId: property.id,
+          eventType: distributionSyncSucceeded
+            ? "SYNC_COMPLETED"
+            : "SYNC_FAILED",
+          status: distributionAuditStatus,
+          severity: distributionAuditSeverity,
+          summary: distributionSyncSucceeded
+            ? "Distribution Engine synchronized property availability with Channex."
+            : "Distribution Engine could not fully synchronize property availability with Channex.",
+          startedAt: distributionStartedAt,
+          completedAt: distributionCompletedAt,
+          durationMs:
+            distributionCompletedAt.getTime() -
+            distributionStartedAt.getTime(),
+          reason: distributionSyncSucceeded
+            ? "CHANNEX_AVAILABILITY_SYNC_COMPLETED"
+            : "CHANNEX_AVAILABILITY_SYNC_FAILED",
+          decisions: [
+            {
+              engine: "Distribution",
+              rule: "CHANNEX_AVAILABILITY_SYNC",
+              label: "Channex Availability Sync",
+              applied: distributionSyncSucceeded,
+              adjustment: null,
+              adjustmentPercent: null,
+              confidence: distributionSyncSucceeded ? 100 : 0,
+              metadata: {
+                propertyId: property.id,
+                provider: "CHANNEX",
+                syncType: "AVAILABILITY",
+                resultOk:
+                  result && typeof result === "object" && "ok" in result
+                    ? (result as any).ok
+                    : null,
+                pushedToChannex:
+                  result &&
+                  typeof result === "object" &&
+                  "pushedToChannex" in result
+                    ? (result as any).pushedToChannex
+                    : null,
+              },
+            },
+          ],
+          recommendedAction: distributionSyncSucceeded
+            ? undefined
+            : "Review Channex availability sync result for this property.",
+          metadata: {
+            organizationId: orgId,
+            propertyId: property.id,
+            provider: "CHANNEX",
+            syncType: "AVAILABILITY",
+            resultOk:
+              result && typeof result === "object" && "ok" in result
+                ? (result as any).ok
+                : null,
+            pushedToChannex:
+              result &&
+              typeof result === "object" &&
+              "pushedToChannex" in result
+                ? (result as any).pushedToChannex
+                : null,
+          },
+        };
+
+        try {
+          await persistAuditEntry(prisma, distributionAuditEntry);
+        } catch (auditPersistenceError: any) {
+          console.error("[APMS_DISTRIBUTION_AUDIT_PERSIST_ERROR]", {
+            engine: "Distribution",
+            propertyId: property.id,
+            provider: "CHANNEX",
+            syncType: "AVAILABILITY",
+            decisionId: distributionAuditEntry.decisionId,
+            error:
+              auditPersistenceError?.message ??
+              auditPersistenceError,
+          });
+        }
+
+        return res.json({
+          ok: true,
+          result,
+        });
+      } catch (syncError: any) {
+        const distributionCompletedAt = new Date();
+
+        const distributionAuditEntry: AuditEntry = {
+          engine: "Distribution",
+          decisionId: `distribution-engine:${property.id}:channex-availability:${distributionRunId}`,
+          entityType: "DISTRIBUTION",
+          entityId: property.id,
+          eventType: "SYNC_FAILED",
+          status: "FAILED",
+          severity: "CRITICAL",
+          summary:
+            "Distribution Engine failed to synchronize property availability with Channex.",
+          startedAt: distributionStartedAt,
+          completedAt: distributionCompletedAt,
+          durationMs:
+            distributionCompletedAt.getTime() -
+            distributionStartedAt.getTime(),
+          reason: "CHANNEX_AVAILABILITY_SYNC_ERROR",
+          decisions: [
+            {
+              engine: "Distribution",
+              rule: "CHANNEX_AVAILABILITY_SYNC",
+              label: "Channex Availability Sync",
+              applied: false,
+              adjustment: null,
+              adjustmentPercent: null,
+              confidence: 0,
+              metadata: {
+                propertyId: property.id,
+                provider: "CHANNEX",
+                syncType: "AVAILABILITY",
+                error: syncError?.message ?? String(syncError),
+              },
+            },
+          ],
+          recommendedAction:
+            "Review Channex availability connection and retry the sync.",
+          metadata: {
+            organizationId: orgId,
+            propertyId: property.id,
+            provider: "CHANNEX",
+            syncType: "AVAILABILITY",
+            error: syncError?.message ?? String(syncError),
+          },
+        };
+
+        try {
+          await persistAuditEntry(prisma, distributionAuditEntry);
+        } catch (auditPersistenceError: any) {
+          console.error("[APMS_DISTRIBUTION_AUDIT_PERSIST_ERROR]", {
+            engine: "Distribution",
+            propertyId: property.id,
+            provider: "CHANNEX",
+            syncType: "AVAILABILITY",
+            decisionId: distributionAuditEntry.decisionId,
+            error:
+              auditPersistenceError?.message ??
+              auditPersistenceError,
+          });
+        }
+
+        throw syncError;
+      }
+     
     } catch (error: any) {
       console.error(
         "POST /api/dashboard/properties/:id/channex/sync-availability error",
