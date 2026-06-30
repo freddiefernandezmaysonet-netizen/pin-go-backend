@@ -3,6 +3,8 @@ dotenv.config({ path: "./.env", override: true });
 
 import { prisma } from "../lib/prisma";
 import { syncChannexAvailabilityForProperty } from "../services/channex-availability-sync.service";
+import { persistAuditEntry } from "../apms/audit-persistence.service";
+import type { AuditEntry } from "../apms/audit-types";
 
 const WORKER_NAME = "dynamic-pricing-sync.worker";
 
@@ -50,7 +52,8 @@ async function tick() {
   select: {
     id: true,
     name: true,
-  },
+    organizationId: true,
+ },
   take: BATCH_SIZE,
   orderBy: {
     updatedAt: "asc",
@@ -63,10 +66,16 @@ async function tick() {
     );
 
     for (const property of properties) {
-      try {
-        log(`Syncing ${property.name ?? property.id}...`);
+    const distributionStartedAt = new Date();
+const distributionDateKey = distributionStartedAt
+  .toISOString()
+  .slice(0, 10);
 
-        const result = await syncChannexAvailabilityForProperty(
+const distributionDecisionId = `distribution-engine:${property.id}:dynamic-pricing-worker:${distributionDateKey}`;
+   
+     try {
+        log(`Syncing ${property.name ?? property.id}...`);
+      const result = await syncChannexAvailabilityForProperty(
   property.id,
   WINDOW_DAYS
 );
@@ -80,22 +89,180 @@ if (result?.skipped) {
   continue;
 }
 
-log(`Synced ${property.name ?? property.id}.`);
-      } catch (error) {
-        errLog(
-          `Failed to sync ${property.name ?? property.id}:`,
-          toErrString(error)
-        );
+const distributionCompletedAt = new Date();
 
-        await prisma.property.update({
-          where: {
-            id: property.id,
-          },
-          data: {
-            distributionLastError: toErrString(error),
-          },
-        });
-      }
+const distributionSyncSucceeded =
+  result && typeof result === "object" && "ok" in result
+    ? Boolean((result as any).ok)
+    : true;
+
+const distributionAuditEntry: AuditEntry = {
+  engine: "Distribution",
+  decisionId: distributionDecisionId,
+  entityType: "DISTRIBUTION",
+  entityId: property.id,
+  eventType: distributionSyncSucceeded
+    ? "SYNC_COMPLETED"
+    : "SYNC_FAILED",
+  status: distributionSyncSucceeded ? "SUCCESS" : "FAILED",
+  severity: distributionSyncSucceeded ? "INFO" : "WARNING",
+  summary: distributionSyncSucceeded
+    ? "Distribution Engine synchronized channel availability from the dynamic pricing worker."
+    : "Distribution Engine could not fully synchronize channel availability from the dynamic pricing worker.",
+  startedAt: distributionStartedAt,
+  completedAt: distributionCompletedAt,
+  durationMs:
+    distributionCompletedAt.getTime() - distributionStartedAt.getTime(),
+  reason: distributionSyncSucceeded
+    ? "DYNAMIC_PRICING_WORKER_DISTRIBUTION_SYNC_COMPLETED"
+    : "DYNAMIC_PRICING_WORKER_DISTRIBUTION_SYNC_FAILED",
+  decisions: [
+    {
+      engine: "Distribution",
+      rule: "DYNAMIC_PRICING_WORKER_CHANNEX_AVAILABILITY_SYNC",
+      label: "Dynamic Pricing Worker Channel Availability Sync",
+      applied: distributionSyncSucceeded,
+      adjustment: null,
+      adjustmentPercent: null,
+      confidence: distributionSyncSucceeded ? 100 : 0,
+      metadata: {
+        organizationId: property.organizationId,
+        propertyId: property.id,
+        provider: "CHANNEX",
+        syncType: "AVAILABILITY",
+        trigger: "DYNAMIC_PRICING_WORKER",
+        windowDays: WINDOW_DAYS,
+        resultOk:
+          result && typeof result === "object" && "ok" in result
+            ? (result as any).ok
+            : null,
+        pushedToChannex:
+          result &&
+          typeof result === "object" &&
+          "pushedToChannex" in result
+            ? (result as any).pushedToChannex
+            : null,
+      },
+    },
+  ],
+  recommendedAction: distributionSyncSucceeded
+    ? undefined
+    : "Review Channex sync result from the dynamic pricing worker.",
+  metadata: {
+    organizationId: property.organizationId,
+    propertyId: property.id,
+    provider: "CHANNEX",
+    syncType: "AVAILABILITY",
+    trigger: "DYNAMIC_PRICING_WORKER",
+    windowDays: WINDOW_DAYS,
+    resultOk:
+      result && typeof result === "object" && "ok" in result
+        ? (result as any).ok
+        : null,
+    pushedToChannex:
+      result &&
+      typeof result === "object" &&
+      "pushedToChannex" in result
+        ? (result as any).pushedToChannex
+        : null,
+  },
+};
+
+try {
+  await persistAuditEntry(prisma, distributionAuditEntry);
+} catch (auditPersistenceError: any) {
+  console.error("[APMS_DISTRIBUTION_WORKER_AUDIT_PERSIST_ERROR]", {
+    engine: "Distribution",
+    propertyId: property.id,
+    provider: "CHANNEX",
+    syncType: "AVAILABILITY",
+    trigger: "DYNAMIC_PRICING_WORKER",
+    decisionId: distributionAuditEntry.decisionId,
+    error: auditPersistenceError?.message ?? auditPersistenceError,
+  });
+}
+
+log(`Synced ${property.name ?? property.id}.`);
+     } catch (error) {
+  const distributionCompletedAt = new Date();
+
+  errLog(
+    `Failed to sync ${property.name ?? property.id}:`,
+    toErrString(error)
+  );
+
+  await prisma.property.update({
+    where: {
+      id: property.id,
+    },
+    data: {
+      distributionLastError: toErrString(error),
+    },
+  });
+
+  const distributionAuditEntry: AuditEntry = {
+    engine: "Distribution",
+    decisionId: distributionDecisionId,
+    entityType: "DISTRIBUTION",
+    entityId: property.id,
+    eventType: "SYNC_FAILED",
+    status: "FAILED",
+    severity: "CRITICAL",
+    summary:
+      "Distribution Engine failed to synchronize channel availability from the dynamic pricing worker.",
+    startedAt: distributionStartedAt,
+    completedAt: distributionCompletedAt,
+    durationMs:
+      distributionCompletedAt.getTime() - distributionStartedAt.getTime(),
+    reason: "DYNAMIC_PRICING_WORKER_DISTRIBUTION_SYNC_ERROR",
+    decisions: [
+      {
+        engine: "Distribution",
+        rule: "DYNAMIC_PRICING_WORKER_CHANNEX_AVAILABILITY_SYNC",
+        label: "Dynamic Pricing Worker Channel Availability Sync",
+        applied: false,
+        adjustment: null,
+        adjustmentPercent: null,
+        confidence: 0,
+        metadata: {
+          organizationId: property.organizationId,
+          propertyId: property.id,
+          provider: "CHANNEX",
+          syncType: "AVAILABILITY",
+          trigger: "DYNAMIC_PRICING_WORKER",
+          windowDays: WINDOW_DAYS,
+          error: toErrString(error),
+        },
+      },
+    ],
+    recommendedAction:
+      "Review Channex availability connection and retry the dynamic pricing worker sync.",
+    metadata: {
+      organizationId: property.organizationId,
+      propertyId: property.id,
+      provider: "CHANNEX",
+      syncType: "AVAILABILITY",
+      trigger: "DYNAMIC_PRICING_WORKER",
+      windowDays: WINDOW_DAYS,
+      error: toErrString(error),
+    },
+  };
+
+  try {
+    await persistAuditEntry(prisma, distributionAuditEntry);
+  } catch (auditPersistenceError: any) {
+    console.error("[APMS_DISTRIBUTION_WORKER_AUDIT_PERSIST_ERROR]", {
+      engine: "Distribution",
+      propertyId: property.id,
+      provider: "CHANNEX",
+      syncType: "AVAILABILITY",
+      trigger: "DYNAMIC_PRICING_WORKER",
+      decisionId: distributionAuditEntry.decisionId,
+      error: auditPersistenceError?.message ?? auditPersistenceError,
+    });
+  }
+}  
+     
     }
   } catch (error) {
     errLog("Tick failed:", toErrString(error));
