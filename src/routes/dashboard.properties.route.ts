@@ -67,6 +67,25 @@ function parseOptionalInt(value: unknown): number | null {
   return Number.isFinite(parsed) && parsed >= 0 ? Math.trunc(parsed) : NaN;
 }
 
+const PROPERTY_SEASON_TYPES = ["PEAK", "SHOULDER", "LOW"] as const;
+
+type PropertySeasonType = (typeof PROPERTY_SEASON_TYPES)[number];
+
+function parsePropertySeasonType(
+  value: unknown,
+  fallback: PropertySeasonType = "SHOULDER"
+): PropertySeasonType | null {
+  const cleanValue = String(value ?? fallback)
+    .trim()
+    .toUpperCase();
+
+  if (PROPERTY_SEASON_TYPES.includes(cleanValue as PropertySeasonType)) {
+    return cleanValue as PropertySeasonType;
+  }
+
+  return null;
+}
+
 dashboardPropertiesRouter.get(
   "/api/dashboard/properties",
   requireAuth,
@@ -2546,25 +2565,33 @@ dashboardPropertiesRouter.post(
       const orgId = user.orgId as string;
       const { id } = req.params;
 
-      const {
-        name,
-        startMonth,
-        startDay,
-        endMonth,
-        endDay,
-        adjustmentPercent,
-      } = req.body ?? {};
-
+     const {
+  name,
+  type,
+  startMonth,
+  startDay,
+  endMonth,
+  endDay,
+  adjustmentPercent,
+} = req.body ?? {};
       const cleanName = String(name || "").trim();
       const parsedStartMonth = Number(startMonth);
       const parsedStartDay = Number(startDay);
       const parsedEndMonth = Number(endMonth);
       const parsedEndDay = Number(endDay);
       const parsedAdjustmentPercent = Number(adjustmentPercent);
+      const parsedSeasonType = parsePropertySeasonType(type);
 
       if (!cleanName) {
         return res.status(400).json({ ok: false, error: "Season name is required" });
       }
+
+      if (!parsedSeasonType) {
+  return res.status(400).json({
+    ok: false,
+    error: "type must be PEAK, SHOULDER, or LOW",
+  });
+}
 
       if (!Number.isInteger(parsedStartMonth) || parsedStartMonth < 1 || parsedStartMonth > 12) {
         return res.status(400).json({ ok: false, error: "startMonth must be between 1 and 12" });
@@ -2602,7 +2629,7 @@ dashboardPropertiesRouter.post(
         data: {
           propertyId: property.id,
           name: cleanName,
-          type: "SHOULDER",
+          type: parsedSeasonType,
           startMonth: parsedStartMonth,
           startDay: parsedStartDay,
           endMonth: parsedEndMonth,
