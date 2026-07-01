@@ -2633,30 +2633,145 @@ dashboardPropertiesRouter.post(
         data: { seasonalPricingEnabled: true },
       });
 
-      let distributionSyncResult: any = null;
+     let distributionSyncResult: any = null;
 
-      try {
-        distributionSyncResult = await syncChannexAvailabilityForProperty(property.id);
+const distributionStartedAt = new Date();
+const distributionDecisionId = `distribution-engine:${property.id}:season-create:${item.id}`;
 
-        await prisma.property.update({
-          where: { id: property.id },
-          data: {
-            distributionLastSyncedAt: new Date(),
-            distributionLastError: null,
-          },
-        });
-      } catch (syncError: any) {
-        console.error("POST seasons Channex sync error", syncError);
+try {
+  distributionSyncResult = await syncChannexAvailabilityForProperty(
+    property.id
+  );
 
-        await prisma.property.update({
-          where: { id: property.id },
-          data: {
-            distributionLastError:
-              syncError?.message || "Failed to sync Channex after season create",
-          },
-        });
-      }
+  await prisma.property.update({
+    where: { id: property.id },
+    data: {
+      distributionLastSyncedAt: new Date(),
+      distributionLastError: null,
+    },
+  });
 
+  const distributionCompletedAt = new Date();
+
+  const distributionSyncSucceeded =
+    distributionSyncResult &&
+    typeof distributionSyncResult === "object" &&
+    "ok" in distributionSyncResult
+      ? Boolean((distributionSyncResult as any).ok)
+      : true;
+
+  const distributionAuditEntry = createDistributionAuditEntry({
+    organizationId: orgId,
+    propertyId: property.id,
+    decisionId: distributionDecisionId,
+    trigger: "SEASON_CREATE",
+    provider: "CHANNEX",
+    syncType: "AVAILABILITY",
+    startedAt: distributionStartedAt,
+    completedAt: distributionCompletedAt,
+    result: distributionSyncResult,
+    status: distributionSyncSucceeded ? "SUCCESS" : "FAILED",
+    severity: distributionSyncSucceeded ? "INFO" : "WARNING",
+    eventType: distributionSyncSucceeded ? "SYNC_COMPLETED" : "SYNC_FAILED",
+    reason: distributionSyncSucceeded
+      ? "SEASON_CREATE_DISTRIBUTION_SYNC_COMPLETED"
+      : "SEASON_CREATE_DISTRIBUTION_SYNC_FAILED",
+    summary: distributionSyncSucceeded
+      ? "Distribution Engine synchronized channel availability after seasonal pricing creation."
+      : "Distribution Engine could not fully synchronize channel availability after seasonal pricing creation.",
+    rule: "SEASON_CREATE_CHANNEX_AVAILABILITY_SYNC",
+    label: "Season Creation Channel Availability Sync",
+    recommendedAction: distributionSyncSucceeded
+      ? undefined
+      : "Review Channex sync after creating this season.",
+    metadata: {
+      seasonId: item.id,
+      seasonName: item.name,
+      seasonType: item.type,
+      seasonSource: item.source,
+      adjustmentPercent: Number(item.adjustmentPercent),
+      startMonth: item.startMonth,
+      startDay: item.startDay,
+      endMonth: item.endMonth,
+      endDay: item.endDay,
+    },
+  });
+
+  try {
+    await persistAuditEntry(prisma, distributionAuditEntry);
+  } catch (auditPersistenceError: any) {
+    console.error("[APMS_DISTRIBUTION_AUTO_SYNC_AUDIT_PERSIST_ERROR]", {
+      engine: "Distribution",
+      propertyId: property.id,
+      provider: "CHANNEX",
+      syncType: "AVAILABILITY",
+      trigger: "SEASON_CREATE",
+      seasonId: item.id,
+      decisionId: distributionAuditEntry.decisionId,
+      error: auditPersistenceError?.message ?? auditPersistenceError,
+    });
+  }
+} catch (syncError: any) {
+  console.error("POST seasons Channex sync error", syncError);
+
+  await prisma.property.update({
+    where: { id: property.id },
+    data: {
+      distributionLastError:
+        syncError?.message || "Failed to sync Channex after season create",
+    },
+  });
+
+  const distributionCompletedAt = new Date();
+
+  const distributionAuditEntry = createDistributionAuditEntry({
+    organizationId: orgId,
+    propertyId: property.id,
+    decisionId: distributionDecisionId,
+    trigger: "SEASON_CREATE",
+    provider: "CHANNEX",
+    syncType: "AVAILABILITY",
+    startedAt: distributionStartedAt,
+    completedAt: distributionCompletedAt,
+    error: syncError,
+    status: "FAILED",
+    severity: "CRITICAL",
+    eventType: "SYNC_FAILED",
+    reason: "SEASON_CREATE_DISTRIBUTION_SYNC_ERROR",
+    summary:
+      "Distribution Engine failed to synchronize channel availability after seasonal pricing creation.",
+    rule: "SEASON_CREATE_CHANNEX_AVAILABILITY_SYNC",
+    label: "Season Creation Channel Availability Sync",
+    recommendedAction:
+      "Review Channex availability connection and retry sync after creating this season.",
+    metadata: {
+      seasonId: item.id,
+      seasonName: item.name,
+      seasonType: item.type,
+      seasonSource: item.source,
+      adjustmentPercent: Number(item.adjustmentPercent),
+      startMonth: item.startMonth,
+      startDay: item.startDay,
+      endMonth: item.endMonth,
+      endDay: item.endDay,
+    },
+  });
+
+  try {
+    await persistAuditEntry(prisma, distributionAuditEntry);
+  } catch (auditPersistenceError: any) {
+    console.error("[APMS_DISTRIBUTION_AUTO_SYNC_AUDIT_PERSIST_ERROR]", {
+      engine: "Distribution",
+      propertyId: property.id,
+      provider: "CHANNEX",
+      syncType: "AVAILABILITY",
+      trigger: "SEASON_CREATE",
+      seasonId: item.id,
+      decisionId: distributionAuditEntry.decisionId,
+      error: auditPersistenceError?.message ?? auditPersistenceError,
+    });
+  }
+}
       return res.json({
         ok: true,
         item: {
@@ -2749,6 +2864,7 @@ dashboardPropertiesRouter.patch(
           id: true,
           propertyId: true,
           name: true,
+          type: true,
           startMonth: true,
           startDay: true,
           endMonth: true,
@@ -2761,30 +2877,151 @@ dashboardPropertiesRouter.patch(
         },
       });
 
-      let distributionSyncResult: any = null;
+     let distributionSyncResult: any = null;
 
-      try {
-        distributionSyncResult = await syncChannexAvailabilityForProperty(season.propertyId);
+const distributionStartedAt = new Date();
+const distributionRunId = distributionStartedAt
+  .toISOString()
+  .replace(/[:.]/g, "-");
 
-        await prisma.property.update({
-          where: { id: season.propertyId },
-          data: {
-            distributionLastSyncedAt: new Date(),
-            distributionLastError: null,
-          },
-        });
-      } catch (syncError: any) {
-        console.error("PATCH seasons Channex sync error", syncError);
+const distributionDecisionId = `distribution-engine:${season.propertyId}:season-update:${item.id}:${distributionRunId}`;
 
-        await prisma.property.update({
-          where: { id: season.propertyId },
-          data: {
-            distributionLastError:
-              syncError?.message || "Failed to sync Channex after season update",
-          },
-        });
-      }
+try {
+  distributionSyncResult = await syncChannexAvailabilityForProperty(
+    season.propertyId
+  );
 
+  await prisma.property.update({
+    where: { id: season.propertyId },
+    data: {
+      distributionLastSyncedAt: new Date(),
+      distributionLastError: null,
+    },
+  });
+
+  const distributionCompletedAt = new Date();
+
+  const distributionSyncSucceeded =
+    distributionSyncResult &&
+    typeof distributionSyncResult === "object" &&
+    "ok" in distributionSyncResult
+      ? Boolean((distributionSyncResult as any).ok)
+      : true;
+
+  const distributionAuditEntry = createDistributionAuditEntry({
+    organizationId: orgId,
+    propertyId: season.propertyId,
+    decisionId: distributionDecisionId,
+    trigger: "SEASON_UPDATE",
+    provider: "CHANNEX",
+    syncType: "AVAILABILITY",
+    startedAt: distributionStartedAt,
+    completedAt: distributionCompletedAt,
+    result: distributionSyncResult,
+    status: distributionSyncSucceeded ? "SUCCESS" : "FAILED",
+    severity: distributionSyncSucceeded ? "INFO" : "WARNING",
+    eventType: distributionSyncSucceeded ? "SYNC_COMPLETED" : "SYNC_FAILED",
+    reason: distributionSyncSucceeded
+      ? "SEASON_UPDATE_DISTRIBUTION_SYNC_COMPLETED"
+      : "SEASON_UPDATE_DISTRIBUTION_SYNC_FAILED",
+    summary: distributionSyncSucceeded
+      ? "Distribution Engine synchronized channel availability after seasonal pricing update."
+      : "Distribution Engine could not fully synchronize channel availability after seasonal pricing update.",
+    rule: "SEASON_UPDATE_CHANNEX_AVAILABILITY_SYNC",
+    label: "Season Update Channel Availability Sync",
+    recommendedAction: distributionSyncSucceeded
+      ? undefined
+      : "Review Channex sync after updating this season.",
+    metadata: {
+      seasonId: item.id,
+      seasonName: item.name,
+      seasonType: item.type,
+      seasonSource: item.source,
+      adjustmentPercent: Number(item.adjustmentPercent),
+      startMonth: item.startMonth,
+      startDay: item.startDay,
+      endMonth: item.endMonth,
+      endDay: item.endDay,
+      isActive: item.isActive,
+    },
+  });
+
+  try {
+    await persistAuditEntry(prisma, distributionAuditEntry);
+  } catch (auditPersistenceError: any) {
+    console.error("[APMS_DISTRIBUTION_AUTO_SYNC_AUDIT_PERSIST_ERROR]", {
+      engine: "Distribution",
+      propertyId: season.propertyId,
+      provider: "CHANNEX",
+      syncType: "AVAILABILITY",
+      trigger: "SEASON_UPDATE",
+      seasonId: item.id,
+      decisionId: distributionAuditEntry.decisionId,
+      error: auditPersistenceError?.message ?? auditPersistenceError,
+    });
+  }
+} catch (syncError: any) {
+  console.error("PATCH seasons Channex sync error", syncError);
+
+  await prisma.property.update({
+    where: { id: season.propertyId },
+    data: {
+      distributionLastError:
+        syncError?.message || "Failed to sync Channex after season update",
+    },
+  });
+
+  const distributionCompletedAt = new Date();
+
+  const distributionAuditEntry = createDistributionAuditEntry({
+    organizationId: orgId,
+    propertyId: season.propertyId,
+    decisionId: distributionDecisionId,
+    trigger: "SEASON_UPDATE",
+    provider: "CHANNEX",
+    syncType: "AVAILABILITY",
+    startedAt: distributionStartedAt,
+    completedAt: distributionCompletedAt,
+    error: syncError,
+    status: "FAILED",
+    severity: "CRITICAL",
+    eventType: "SYNC_FAILED",
+    reason: "SEASON_UPDATE_DISTRIBUTION_SYNC_ERROR",
+    summary:
+      "Distribution Engine failed to synchronize channel availability after seasonal pricing update.",
+    rule: "SEASON_UPDATE_CHANNEX_AVAILABILITY_SYNC",
+    label: "Season Update Channel Availability Sync",
+    recommendedAction:
+      "Review Channex availability connection and retry sync after updating this season.",
+    metadata: {
+      seasonId: item.id,
+      seasonName: item.name,
+      seasonType: item.type,
+      seasonSource: item.source,
+      adjustmentPercent: Number(item.adjustmentPercent),
+      startMonth: item.startMonth,
+      startDay: item.startDay,
+      endMonth: item.endMonth,
+      endDay: item.endDay,
+      isActive: item.isActive,
+    },
+  });
+
+  try {
+    await persistAuditEntry(prisma, distributionAuditEntry);
+  } catch (auditPersistenceError: any) {
+    console.error("[APMS_DISTRIBUTION_AUTO_SYNC_AUDIT_PERSIST_ERROR]", {
+      engine: "Distribution",
+      propertyId: season.propertyId,
+      provider: "CHANNEX",
+      syncType: "AVAILABILITY",
+      trigger: "SEASON_UPDATE",
+      seasonId: item.id,
+      decisionId: distributionAuditEntry.decisionId,
+      error: auditPersistenceError?.message ?? auditPersistenceError,
+    });
+  }
+}
       return res.json({
         ok: true,
         item: {
@@ -2825,37 +3062,170 @@ dashboardPropertiesRouter.delete(
         return res.status(404).json({ ok: false, error: "Season not found" });
       }
 
-      await prisma.propertySeason.update({
-        where: { id: season.id },
-        data: { isActive: false },
-      });
+     const item = await prisma.propertySeason.update({
+  where: { id: season.id },
+  data: { isActive: false },
+  select: {
+    id: true,
+    propertyId: true,
+    name: true,
+    type: true,
+    startMonth: true,
+    startDay: true,
+    endMonth: true,
+    endDay: true,
+    adjustmentPercent: true,
+    isActive: true,
+    source: true,
+    createdAt: true,
+    updatedAt: true,
+  },
+});
+     let distributionSyncResult: any = null;
 
-      let distributionSyncResult: any = null;
+const distributionStartedAt = new Date();
+const distributionRunId = distributionStartedAt
+  .toISOString()
+  .replace(/[:.]/g, "-");
 
-      try {
-        distributionSyncResult = await syncChannexAvailabilityForProperty(
-          season.propertyId
-        );
+const distributionDecisionId = `distribution-engine:${season.propertyId}:season-delete:${item.id}:${distributionRunId}`;
 
-        await prisma.property.update({
-          where: { id: season.propertyId },
-          data: {
-            distributionLastSyncedAt: new Date(),
-            distributionLastError: null,
-          },
-        });
-      } catch (syncError: any) {
-        console.error("DELETE seasons Channex sync error", syncError);
+try {
+  distributionSyncResult = await syncChannexAvailabilityForProperty(
+    season.propertyId
+  );
 
-        await prisma.property.update({
-          where: { id: season.propertyId },
-          data: {
-            distributionLastError:
-              syncError?.message || "Failed to sync Channex after season delete",
-          },
-        });
-      }
+  await prisma.property.update({
+    where: { id: season.propertyId },
+    data: {
+      distributionLastSyncedAt: new Date(),
+      distributionLastError: null,
+    },
+  });
 
+  const distributionCompletedAt = new Date();
+
+  const distributionSyncSucceeded =
+    distributionSyncResult &&
+    typeof distributionSyncResult === "object" &&
+    "ok" in distributionSyncResult
+      ? Boolean((distributionSyncResult as any).ok)
+      : true;
+
+  const distributionAuditEntry = createDistributionAuditEntry({
+    organizationId: orgId,
+    propertyId: season.propertyId,
+    decisionId: distributionDecisionId,
+    trigger: "SEASON_DELETE",
+    provider: "CHANNEX",
+    syncType: "AVAILABILITY",
+    startedAt: distributionStartedAt,
+    completedAt: distributionCompletedAt,
+    result: distributionSyncResult,
+    status: distributionSyncSucceeded ? "SUCCESS" : "FAILED",
+    severity: distributionSyncSucceeded ? "INFO" : "WARNING",
+    eventType: distributionSyncSucceeded ? "SYNC_COMPLETED" : "SYNC_FAILED",
+    reason: distributionSyncSucceeded
+      ? "SEASON_DELETE_DISTRIBUTION_SYNC_COMPLETED"
+      : "SEASON_DELETE_DISTRIBUTION_SYNC_FAILED",
+    summary: distributionSyncSucceeded
+      ? "Distribution Engine synchronized channel availability after seasonal pricing removal."
+      : "Distribution Engine could not fully synchronize channel availability after seasonal pricing removal.",
+    rule: "SEASON_DELETE_CHANNEX_AVAILABILITY_SYNC",
+    label: "Season Removal Channel Availability Sync",
+    recommendedAction: distributionSyncSucceeded
+      ? undefined
+      : "Review Channex sync after removing this season.",
+    metadata: {
+      seasonId: item.id,
+      seasonName: item.name,
+      seasonType: item.type,
+      seasonSource: item.source,
+      adjustmentPercent: Number(item.adjustmentPercent),
+      startMonth: item.startMonth,
+      startDay: item.startDay,
+      endMonth: item.endMonth,
+      endDay: item.endDay,
+      isActive: item.isActive,
+    },
+  });
+
+  try {
+    await persistAuditEntry(prisma, distributionAuditEntry);
+  } catch (auditPersistenceError: any) {
+    console.error("[APMS_DISTRIBUTION_AUTO_SYNC_AUDIT_PERSIST_ERROR]", {
+      engine: "Distribution",
+      propertyId: season.propertyId,
+      provider: "CHANNEX",
+      syncType: "AVAILABILITY",
+      trigger: "SEASON_DELETE",
+      seasonId: item.id,
+      decisionId: distributionAuditEntry.decisionId,
+      error: auditPersistenceError?.message ?? auditPersistenceError,
+    });
+  }
+} catch (syncError: any) {
+  console.error("DELETE seasons Channex sync error", syncError);
+
+  await prisma.property.update({
+    where: { id: season.propertyId },
+    data: {
+      distributionLastError:
+        syncError?.message || "Failed to sync Channex after season delete",
+    },
+  });
+
+  const distributionCompletedAt = new Date();
+
+  const distributionAuditEntry = createDistributionAuditEntry({
+    organizationId: orgId,
+    propertyId: season.propertyId,
+    decisionId: distributionDecisionId,
+    trigger: "SEASON_DELETE",
+    provider: "CHANNEX",
+    syncType: "AVAILABILITY",
+    startedAt: distributionStartedAt,
+    completedAt: distributionCompletedAt,
+    error: syncError,
+    status: "FAILED",
+    severity: "CRITICAL",
+    eventType: "SYNC_FAILED",
+    reason: "SEASON_DELETE_DISTRIBUTION_SYNC_ERROR",
+    summary:
+      "Distribution Engine failed to synchronize channel availability after seasonal pricing removal.",
+    rule: "SEASON_DELETE_CHANNEX_AVAILABILITY_SYNC",
+    label: "Season Removal Channel Availability Sync",
+    recommendedAction:
+      "Review Channex availability connection and retry sync after removing this season.",
+    metadata: {
+      seasonId: item.id,
+      seasonName: item.name,
+      seasonType: item.type,
+      seasonSource: item.source,
+      adjustmentPercent: Number(item.adjustmentPercent),
+      startMonth: item.startMonth,
+      startDay: item.startDay,
+      endMonth: item.endMonth,
+      endDay: item.endDay,
+      isActive: item.isActive,
+    },
+  });
+
+  try {
+    await persistAuditEntry(prisma, distributionAuditEntry);
+  } catch (auditPersistenceError: any) {
+    console.error("[APMS_DISTRIBUTION_AUTO_SYNC_AUDIT_PERSIST_ERROR]", {
+      engine: "Distribution",
+      propertyId: season.propertyId,
+      provider: "CHANNEX",
+      syncType: "AVAILABILITY",
+      trigger: "SEASON_DELETE",
+      seasonId: item.id,
+      decisionId: distributionAuditEntry.decisionId,
+      error: auditPersistenceError?.message ?? auditPersistenceError,
+    });
+  }
+}
       return res.json({
         ok: true,
         distributionSyncResult,
