@@ -23,6 +23,253 @@ type MissionControlSnapshotInput = {
   freedomMetrics?: Partial<FreedomMetrics>;
 };
 
+type RecommendedActionV1 = MissionControlAction;
+
+function normalizeAuditValueV1(value: unknown) {
+  return String(value ?? "").trim().toUpperCase();
+}
+
+function getAuditTimestampV1(entry: AuditEntry) {
+  return (
+    entry.completedAt?.getTime?.() ??
+    entry.startedAt?.getTime?.() ??
+    0
+  );
+}
+
+function isActionableAuditEntryV1(entry: AuditEntry) {
+  const status = normalizeAuditValueV1(entry.status);
+  const severity = normalizeAuditValueV1(entry.severity);
+
+  return (
+    status === "FAILED" ||
+    status === "ERROR" ||
+    severity === "WARNING" ||
+    severity === "CRITICAL"
+  );
+}
+
+function getRecommendedActionPriorityV1(
+  entry: AuditEntry
+): MissionControlAction["priority"] {
+  const status = normalizeAuditValueV1(entry.status);
+  const severity = normalizeAuditValueV1(entry.severity);
+
+  if (severity === "CRITICAL") {
+    return "CRITICAL";
+  }
+
+  if (status === "FAILED" || status === "ERROR") {
+    return "HIGH";
+  }
+
+  if (severity === "WARNING") {
+    return "MEDIUM";
+  }
+
+  return "LOW";
+}
+
+function getRecommendedActionSortRankV1(action: RecommendedActionV1) {
+  const priorityRank =
+    action.priority === "CRITICAL"
+      ? 0
+      : action.priority === "HIGH"
+      ? 1
+      : action.priority === "MEDIUM"
+      ? 2
+      : 3;
+
+  const engineRank =
+    action.engine === "Distribution"
+      ? 0
+      : action.engine === "Access"
+      ? 1
+      : action.engine === "Cleaning" || action.engine === "Messaging"
+      ? 2
+      : action.engine === "Revenue"
+      ? 3
+      : action.engine === "Reservation"
+      ? 4
+      : 5;
+
+  return priorityRank * 10 + engineRank;
+}
+
+function getHostFriendlyActionV1(entry: AuditEntry): RecommendedActionV1 {
+  const engine = String(entry.engine ?? "MissionControl");
+  const reason = normalizeAuditValueV1(entry.reason);
+  const priority = getRecommendedActionPriorityV1(entry);
+
+  if (engine === "Distribution") {
+    let description =
+      "Pin&Go could not confirm the latest channel sync. Review the Channex connection and retry sync.";
+
+    if (reason.includes("NIGHTLY_RATE")) {
+      description =
+        "Pin&Go could not confirm the channel sync after a nightly rate update. Review the Channex connection and retry sync.";
+    } else if (reason.includes("BLOCKED_DATE")) {
+      description =
+        "Pin&Go could not confirm the channel sync after a calendar availability change. Review the Channex connection and retry sync.";
+    } else if (reason.includes("MANUAL_RESERVATION")) {
+      description =
+        "Pin&Go could not confirm the channel sync after a reservation update. Review the Channex connection and retry sync.";
+    } else if (reason.includes("SEASON")) {
+      description =
+        "Pin&Go could not confirm the channel sync after a seasonal pricing update. Review the Channex connection and retry sync.";
+    } else if (reason.includes("HOLIDAY")) {
+      description =
+        "Pin&Go could not confirm the channel sync after a holiday pricing update. Review the Channex connection and retry sync.";
+    }
+
+    return {
+      title: "Channel sync needs review",
+      description,
+      engine,
+      priority,
+      requiresHumanAction: true,
+    };
+  }
+
+  if (engine === "Access") {
+    const description = reason.includes("ACTIVE_LOCK_MISSING")
+      ? "Pin&Go could not find an active lock for this reservation. Assign an active lock and verify guest access."
+      : "Pin&Go could not confirm guest access for this reservation. Review the lock and access setup.";
+
+    return {
+      title: "Guest access needs review",
+      description,
+      engine,
+      priority,
+      requiresHumanAction: true,
+    };
+  }
+
+  if (engine === "Cleaning") {
+    const description = reason.includes("CLEANING_STAFF_MISSING")
+      ? "Pin&Go could not assign a cleaner for this reservation. Assign a cleaner and verify the cleaning confirmation."
+      : "Pin&Go could not confirm the cleaning setup for this reservation. Review the cleaner assignment and confirmation.";
+
+    return {
+      title: "Cleaning schedule needs review",
+      description,
+      engine,
+      priority,
+      requiresHumanAction: true,
+    };
+  }
+
+  if (engine === "Messaging") {
+    return {
+      title: "Guest message needs review",
+      description:
+        "Pin&Go could not confirm message delivery. Review guest or staff communication and retry if needed.",
+      engine,
+      priority,
+      requiresHumanAction: true,
+    };
+  }
+
+  if (engine === "Revenue") {
+    return {
+      title: "Pricing guardrail needs review",
+      description:
+        "Pin&Go detected a pricing condition that needs review. Check the property pricing limits and revenue settings.",
+      engine,
+      priority,
+      requiresHumanAction: true,
+    };
+  }
+
+  if (engine === "Reservation") {
+    return {
+      title: "Reservation needs review",
+      description:
+        "Pin&Go detected a reservation issue that needs review. Check reservation details, payment state, access, and operational status.",
+      engine,
+      priority,
+      requiresHumanAction: true,
+    };
+  }
+
+  return {
+    title: "APMS operation needs review",
+    description:
+      "Pin&Go detected an operational issue that needs review in Mission Control.",
+    engine,
+    priority,
+    requiresHumanAction: true,
+  };
+}
+
+function getRecommendedActionDedupKeyV1(
+  action: RecommendedActionV1,
+  entry: AuditEntry
+) {
+  return [
+    action.engine,
+    action.title.trim().toLowerCase(),
+    normalizeAuditValueV1(entry.reason),
+  ].join(":");
+}
+
+function buildRecommendedActionsV1(
+  auditEntries: AuditEntry[]
+): MissionControlAction[] {
+  const actionsByKey = new Map<
+    string,
+    { action: RecommendedActionV1; entry: AuditEntry }
+  >();
+
+  for (const entry of auditEntries) {
+    if (!isActionableAuditEntryV1(entry)) {
+      continue;
+    }
+
+    const action = getHostFriendlyActionV1(entry);
+    const key = getRecommendedActionDedupKeyV1(action, entry);
+    const existing = actionsByKey.get(key);
+
+    if (!existing) {
+      actionsByKey.set(key, { action, entry });
+      continue;
+    }
+
+    const existingRank = getRecommendedActionSortRankV1(existing.action);
+    const nextRank = getRecommendedActionSortRankV1(action);
+
+    if (
+      nextRank < existingRank ||
+      getAuditTimestampV1(entry) > getAuditTimestampV1(existing.entry)
+    ) {
+      actionsByKey.set(key, { action, entry });
+    }
+  }
+
+  const actions = Array.from(actionsByKey.values())
+    .map((item) => item.action)
+    .sort(
+      (actionA, actionB) =>
+        getRecommendedActionSortRankV1(actionA) -
+        getRecommendedActionSortRankV1(actionB)
+    );
+
+  if (actions.length > 0) {
+    return actions;
+  }
+
+  return [
+    {
+      title: "No action needed",
+      description:
+        "Pin&Go handled the latest property operations automatically. No host action is needed right now.",
+      engine: "MissionControl",
+      priority: "LOW",
+      requiresHumanAction: false,
+    },
+  ];
+}
+
 function clampScore(value: number) {
   if (!Number.isFinite(value)) return 0;
   return Math.max(0, Math.min(100, Math.round(value)));
@@ -299,11 +546,9 @@ function getFreedomMetrics(
 export function createMissionControlSnapshotFromAuditEntries(
   input: MissionControlSnapshotInput
 ): MissionControlSnapshot {
-  const recommendedActions = mapAuditEntriesToRecommendedActions(
-    input.auditEntries
-  );
-
-  return {
+  const recommendedActions = buildRecommendedActionsV1(input.auditEntries);
+  
+return {
     entityId: input.entityId,
     autopilotStatus: getAutopilotStatus(
       input.auditEntries,
