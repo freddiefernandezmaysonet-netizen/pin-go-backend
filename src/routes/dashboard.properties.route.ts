@@ -2849,6 +2849,19 @@ dashboardPropertiesRouter.patch(
         data.name = cleanName;
       }
 
+      if (req.body?.type !== undefined) {
+  const parsedSeasonType = parsePropertySeasonType(req.body.type);
+
+  if (!parsedSeasonType) {
+    return res.status(400).json({
+      ok: false,
+      error: "type must be PEAK, SHOULDER, or LOW",
+    });
+  }
+
+  data.type = parsedSeasonType;
+}
+
       for (const field of ["startMonth", "endMonth"]) {
         if (req.body?.[field] !== undefined) {
           const value = Number(req.body[field]);
