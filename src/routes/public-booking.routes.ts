@@ -6,6 +6,7 @@ import {
 } from "../services/availability.service";
 import stripe from "../billing/stripe";
 import { calculateDirectBookingPricing } from "../services/direct-booking-pricing.service";
+import { assertDirectBookingPayoutReady } from "../services/stripe-connect.service";
 
 const prisma = new PrismaClient();
 const publicBookingRouter = Router();
@@ -14,6 +15,30 @@ function parseDate(value: unknown) {
   const date = new Date(String(value ?? ""));
   if (Number.isNaN(date.getTime())) return null;
   return date;
+}
+
+function getDirectBookingPlatformFeeCents(totalAmountCents: number) {
+  const percentRaw = Number(
+    process.env.PINGO_DIRECT_BOOKING_PLATFORM_FEE_PERCENT ?? "0"
+  );
+
+  const fixedCentsRaw = Number(
+    process.env.PINGO_DIRECT_BOOKING_PLATFORM_FEE_FIXED_CENTS ?? "0"
+  );
+
+  const percent = Number.isFinite(percentRaw) ? Math.max(0, percentRaw) : 0;
+  const fixedCents = Number.isFinite(fixedCentsRaw)
+    ? Math.max(0, Math.round(fixedCentsRaw))
+    : 0;
+
+  const percentFeeCents = Math.round(totalAmountCents * (percent / 100));
+  const feeCents = percentFeeCents + fixedCents;
+
+  return Math.min(Math.max(0, feeCents), totalAmountCents);
+}
+
+function toMoneyFromCents(cents: number) {
+  return Number((cents / 100).toFixed(2));
 }
 
 publicBookingRouter.get("/:organizationSlug", async (req, res) => {
@@ -477,11 +502,55 @@ const totalAmountCents = pricing.totalAmountCents;
       });
     }
 
+    let connectedAccountId: string;
+
+    try {
+      const payoutReady = await assertDirectBookingPayoutReady(
+        property.organizationId
+      );
+
+      connectedAccountId = payoutReady.connectedAccountId;
+    } catch (error: any) {
+      if (
+        error?.code === "HOST_PAYOUT_NOT_READY" ||
+        error?.statusCode === 409
+      ) {
+        return res.status(409).json({
+          ok: false,
+          error: error?.code || "HOST_PAYOUT_NOT_READY",
+          message:
+            error?.message ||
+            "Host payout setup is not ready for Direct Booking payments.",
+          payoutStatus: error?.details,
+        });
+      }
+
+      throw error;
+    }
+
+    const platformFeeAmountCents =
+      getDirectBookingPlatformFeeCents(totalAmountCents);
+    const hostPayoutAmountCents = totalAmountCents - platformFeeAmountCents;
+
+    const platformFeeAmount = toMoneyFromCents(platformFeeAmountCents);
+    const hostPayoutAmount = toMoneyFromCents(hostPayoutAmountCents);
+
+    const paymentIntentData: any = {
+      transfer_data: {
+        destination: connectedAccountId,
+      },
+    };
+
+    if (platformFeeAmountCents > 0) {
+      paymentIntentData.application_fee_amount = platformFeeAmountCents;
+    }
+
     const APP_URL = process.env.APP_URL ?? "http://localhost:3000";
 
     const session = await stripe.checkout.sessions.create({
-      mode: "payment",
-      customer_email: String(guestEmail).trim(),
+  mode: "payment",
+  customer_email: String(guestEmail).trim(),
+  payment_intent_data: paymentIntentData,
       line_items: [
         {
           price_data: {
@@ -520,6 +589,12 @@ const totalAmountCents = pricing.totalAmountCents;
         selectedAmenityIds: JSON.stringify(cleanSelectedAmenityIds),
         taxesTotal: String(pricing.taxesTotal),
         totalAmount: String(pricing.totalAmount),
+        stripeConnectedAccountId: connectedAccountId,
+        platformFeeAmount: String(platformFeeAmount),
+        hostPayoutAmount: String(hostPayoutAmount),
+        platformFeeAmountCents: String(platformFeeAmountCents),
+        hostPayoutAmountCents: String(hostPayoutAmountCents),
+        hostPayoutStatus: "ROUTED_TO_CONNECT",
       },
     });
 

@@ -1,5 +1,6 @@
 import Stripe from "stripe";
 import { PrismaClient } from "@prisma/client";
+import stripe from "../billing/stripe";
 import { checkPropertyAvailability } from "./availability.service";
 import { ingestReservation } from "./ingest.service";
 import { calculateDirectBookingPricing } from "./direct-booking-pricing.service";
@@ -58,6 +59,105 @@ function parsePricingBreakdown(session: Stripe.Checkout.Session) {
     return parsed && typeof parsed === "object" ? parsed : null;
   } catch {
     return null;
+  }
+}
+
+function optionalMetadata(session: Stripe.Checkout.Session, key: string) {
+  return String(session.metadata?.[key] ?? "").trim() || null;
+}
+
+function parseOptionalMoneyMetadata(
+  session: Stripe.Checkout.Session,
+  key: string
+) {
+  const raw = optionalMetadata(session, key);
+
+  if (!raw) return null;
+
+  const value = Number(raw);
+
+  if (!Number.isFinite(value) || value < 0) {
+    return null;
+  }
+
+  return Number(value.toFixed(2));
+}
+
+function parseHostPayoutStatus(session: Stripe.Checkout.Session) {
+  const raw = optionalMetadata(session, "hostPayoutStatus");
+
+  const allowedStatuses = new Set([
+    "NOT_APPLICABLE",
+    "BLOCKED",
+    "PENDING_CONNECT",
+    "ROUTED_TO_CONNECT",
+    "PAID_TO_HOST",
+    "FAILED",
+    "REFUNDED",
+  ]);
+
+  if (raw && allowedStatuses.has(raw)) {
+    return raw;
+  }
+
+  return optionalMetadata(session, "stripeConnectedAccountId")
+    ? "ROUTED_TO_CONNECT"
+    : "NOT_APPLICABLE";
+}
+
+async function getStripeFinancialRefs(paymentIntentId: string | null) {
+  const emptyRefs = {
+    stripeChargeId: null as string | null,
+    stripeTransferId: null as string | null,
+    stripeApplicationFeeId: null as string | null,
+  };
+
+  if (!paymentIntentId) {
+    return emptyRefs;
+  }
+
+  try {
+    const paymentIntent = await stripe.paymentIntents.retrieve(paymentIntentId, {
+      expand: [
+        "latest_charge",
+        "latest_charge.transfer",
+        "latest_charge.application_fee",
+      ],
+    });
+
+    const latestCharge = paymentIntent.latest_charge;
+
+    if (!latestCharge) {
+      return emptyRefs;
+    }
+
+    if (typeof latestCharge === "string") {
+      return {
+        ...emptyRefs,
+        stripeChargeId: latestCharge,
+      };
+    }
+
+    const chargeAny = latestCharge as any;
+
+    return {
+      stripeChargeId: latestCharge.id ?? null,
+      stripeTransferId:
+        typeof chargeAny.transfer === "string"
+          ? chargeAny.transfer
+          : chargeAny.transfer?.id ?? null,
+      stripeApplicationFeeId:
+        typeof chargeAny.application_fee === "string"
+          ? chargeAny.application_fee
+          : chargeAny.application_fee?.id ?? null,
+    };
+  } catch (error: any) {
+    console.error("[DIRECT_BOOKING_STRIPE_FINANCIAL_REFS_ERROR]", {
+      paymentIntentId,
+      error: error?.message ?? error,
+    });
+
+    return emptyRefs;
   }
 }
 
@@ -153,14 +253,31 @@ if (!stayNotificationsConsent || !smsConsent) {
     throw new Error("DIRECT_BOOKING_INVALID_TOTAL_AMOUNT");
   }
 
-  const paymentIntentId =
+ const paymentIntentId =
   typeof session.payment_intent === "string"
     ? session.payment_intent
     : session.payment_intent?.id ?? null;
 
+const stripeConnectedAccountId = optionalMetadata(
+  session,
+  "stripeConnectedAccountId"
+);
+
+const platformFeeAmount = parseOptionalMoneyMetadata(
+  session,
+  "platformFeeAmount"
+);
+
+const hostPayoutAmount = parseOptionalMoneyMetadata(
+  session,
+  "hostPayoutAmount"
+);
+
+const hostPayoutStatus = parseHostPayoutStatus(session);
+
+const stripeFinancialRefs = await getStripeFinancialRefs(paymentIntentId);
 
 const selectedAmenityIds = parseSelectedAmenityIds(session);
-
 const pricingBreakdown = await calculateDirectBookingPricing({
   propertyId: property.id,
   checkIn,
@@ -207,24 +324,38 @@ const updatedReservation = await prisma.reservation.update({
   where: {
     id: ingestResult.reservationId,
   },
-  data: {
-    totalAmount: pricingBreakdown.totalAmount,
-    currency: pricingBreakdown.currency,
-    stripeCheckoutSessionId: session.id,
-    stripePaymentIntentId: paymentIntentId,
-    selectedAmenityIds,
-    pricingBreakdown,
-    },
+ data: {
+  totalAmount: pricingBreakdown.totalAmount,
+  currency: pricingBreakdown.currency,
+  stripeCheckoutSessionId: session.id,
+  stripePaymentIntentId: paymentIntentId,
+
+  stripeConnectedAccountId,
+  stripeChargeId: stripeFinancialRefs.stripeChargeId,
+  stripeTransferId: stripeFinancialRefs.stripeTransferId,
+  stripeApplicationFeeId: stripeFinancialRefs.stripeApplicationFeeId,
+  platformFeeAmount,
+  hostPayoutAmount,
+  hostPayoutStatus: hostPayoutStatus as any,
+  hostPayoutLastSyncedAt: new Date(),
+
+  selectedAmenityIds,
+  pricingBreakdown,
+},
   select: {
-    id: true,
-    guestName: true,
-    guestEmail: true,
-    guestPhone: true,
-    checkIn: true,
-    checkOut: true,
-    totalAmount: true,
-    currency: true,
-  },
+  id: true,
+  guestName: true,
+  guestEmail: true,
+  guestPhone: true,
+  checkIn: true,
+  checkOut: true,
+  totalAmount: true,
+  currency: true,
+  stripeConnectedAccountId: true,
+  platformFeeAmount: true,
+  hostPayoutAmount: true,
+  hostPayoutStatus: true,
+},
 });
 
 const amountNumber = updatedReservation.totalAmount
