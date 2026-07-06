@@ -154,7 +154,8 @@ model Property {
   holidayPricings            PropertyHolidayPricing[]
   reservations               Reservation[]
   blockedDates               PropertyBlockedDate[]
-  
+  cancellationPolicies       PropertyCancellationPolicy[]
+
   @@index([organizationId])
   @@index([organizationId, status])
   @@unique([organizationId, slug])
@@ -342,7 +343,6 @@ model Reservation {
   currency                String?                  @default("usd")
   stripeCheckoutSessionId String?                  @unique
   stripePaymentIntentId   String?
-
   // Stripe Connect / Host Payouts V1
   stripeConnectedAccountId String?
   stripeChargeId           String?
@@ -354,7 +354,22 @@ model Reservation {
   hostPayoutFailureReason  String?
   hostPayoutLastSyncedAt   DateTime?
 
+  // Direct Booking Cancellation Policy Engine V1
+  cancellationPolicyId       String?
+  cancellationPolicySnapshot Json?
+  cancellationRequestedAt    DateTime?
+  cancellationRequestedBy    CancellationActor?
+  cancellationEvaluatedAt    DateTime?
+  cancellationEvaluation     Json?
+  cancelledAt                DateTime?
+  cancelledBy                CancellationActor?
+  cancelledByUserId          String?
+  cancellationReason         String?
+  cancellationRefundAmount   Decimal?              @db.Decimal(10,2)
+  cancellationRefundPercent  Decimal?              @db.Decimal(5,2)
+
   selectedAmenityIds      String[]                 @default([])
+  
   pricingBreakdown        Json?
   createdAt               DateTime                 @default(now())
   updatedAt               DateTime                 @updatedAt
@@ -386,10 +401,14 @@ model Reservation {
   NfcAssignment           NfcAssignment[]
   pmsLinks                PmsReservationLink[]
   property                Property                 @relation(fields: [propertyId], references: [id])
+  cancellationPolicy      PropertyCancellationPolicy? @relation(fields: [cancellationPolicyId], references: [id],        onDelete: SetNull)
   staffAssignments        StaffAssignment[]
 
   @@unique([propertyId, externalProvider, externalId])
   @@index([propertyId, checkIn, checkOut])
+  @@index([cancellationPolicyId])
+  @@index([status, cancelledAt])
+  @@index([propertyId, status, checkIn])
 }
 
 model AccessCode {
@@ -1026,6 +1045,47 @@ model PropertyBlockedDate {
   @@index([propertyId, startDate, endDate])
 }
 
+model PropertyCancellationPolicy {
+  id         String   @id @default(cuid())
+  propertyId String
+
+  name        String
+  type        CancellationPolicyType @default(FLEXIBLE)
+  source      String                 @default("CUSTOM")
+  isActive    Boolean                @default(true)
+
+  // Main automation rule
+  guestSelfCancellationEnabled      Boolean @default(true)
+  autoRefundEligibleCancellations   Boolean @default(true)
+  requireHostApprovalOutsidePolicy  Boolean @default(true)
+
+  // Deadline + refund calculation
+  freeCancellationHoursBeforeCheckIn Int     @default(168)
+  refundBasis                         CancellationRefundBasis @default(TOTAL_AMOUNT)
+  refundPercentBeforeDeadline         Decimal @default(100.00) @db.Decimal(5,2)
+  refundPercentAfterDeadline          Decimal @default(0.00)   @db.Decimal(5,2)
+
+  // Fee behavior
+  cleaningFeeRefundable  Boolean @default(true)
+  amenitiesRefundable    Boolean @default(true)
+  taxesRefundable        Boolean @default(true)
+
+  // Future rate strategy
+  nonRefundableDiscountPercent Decimal? @db.Decimal(5,2)
+
+  description String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  property     Property      @relation(fields: [propertyId], references: [id], onDelete: Cascade)
+  reservations Reservation[]
+
+  @@index([propertyId])
+  @@index([propertyId, isActive])
+  @@index([type])
+}
+
 model ApmsAuditEntry {
   id String @id @default(cuid())
 
@@ -1189,6 +1249,29 @@ enum HostPayoutStatus {
   PAID_TO_HOST
   FAILED
   REFUNDED
+}
+
+enum CancellationPolicyType {
+  FLEXIBLE
+  MODERATE
+  FIRM
+  STRICT
+  CUSTOM
+  NON_REFUNDABLE
+}
+
+enum CancellationRefundBasis {
+  TOTAL_AMOUNT
+  NIGHTLY_SUBTOTAL
+  NIGHTLY_PLUS_CLEANING
+  CUSTOM
+}
+
+enum CancellationActor {
+  HOST
+  GUEST
+  SYSTEM
+  PIN_AI
 }
 
 enum NfcCardStatus {

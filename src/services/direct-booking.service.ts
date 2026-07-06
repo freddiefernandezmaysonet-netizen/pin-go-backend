@@ -9,6 +9,7 @@ import {
   sendDirectBookingGuestConfirmation,
   sendDirectBookingHostNotification,
 } from "../lib/mailer";
+import { deserializeCancellationPolicySnapshotFromStripeMetadata } from "./cancellation-policy.service";
 
 const prisma = new PrismaClient();
 
@@ -257,6 +258,28 @@ if (!stayNotificationsConsent || !smsConsent) {
   typeof session.payment_intent === "string"
     ? session.payment_intent
     : session.payment_intent?.id ?? null;
+
+const cancellationPolicySnapshot =
+  deserializeCancellationPolicySnapshotFromStripeMetadata(
+    session.metadata?.cancellationPolicySnapshot
+  );
+
+let cancellationPolicyId: string | null = null;
+
+if (cancellationPolicySnapshot?.policyId) {
+  const existingCancellationPolicy =
+    await prisma.propertyCancellationPolicy.findFirst({
+      where: {
+        id: cancellationPolicySnapshot.policyId,
+        propertyId: property.id,
+      },
+      select: {
+        id: true,
+      },
+    });
+
+  cancellationPolicyId = existingCancellationPolicy?.id ?? null;
+}
 
 const stripeConnectedAccountId = optionalMetadata(
   session,

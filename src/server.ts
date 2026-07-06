@@ -80,6 +80,7 @@ import publicBookingRouter from "./routes/public-booking.routes";
 import { uploadsRouter } from "./routes/uploads.route";
 import { dashboardOrganizationRouter } from "./routes/dashboard.organization.route";
 import { dashboardPayoutsRouter } from "./routes/dashboard-payouts.routes";
+import { dashboardCancellationPolicyRouter } from "./routes/dashboard.cancellation-policy.routes";
 
 const app = express();
 
@@ -285,6 +286,7 @@ app.use(dashboardLocksCapacityRouter);
 app.use(dashboardPmsRouter);
 app.use(dashboardOrganizationRouter);
 app.use(dashboardPayoutsRouter);
+app.use(dashboardCancellationPolicyRouter);
 
 if (process.env.NODE_ENV !== "production") {
   app.use(devPmsRouter);

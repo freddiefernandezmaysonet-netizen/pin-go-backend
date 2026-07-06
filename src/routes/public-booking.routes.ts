@@ -7,6 +7,10 @@ import {
 import stripe from "../billing/stripe";
 import { calculateDirectBookingPricing } from "../services/direct-booking-pricing.service";
 import { assertDirectBookingPayoutReady } from "../services/stripe-connect.service";
+import {
+  buildCancellationPolicySnapshot,
+  serializeCancellationPolicySnapshotForStripeMetadata,
+} from "../services/cancellation-policy.service";
 
 const prisma = new PrismaClient();
 const publicBookingRouter = Router();
@@ -192,11 +196,19 @@ publicBookingRouter.get("/:organizationSlug/:propertySlug", async (req, res) => 
       },
     });
 
-    if (!property) {
-      return res.status(404).json({ ok: false, error: "Public property not found" });
-    }
+   if (!property) {
+  return res.status(404).json({ ok: false, error: "Public property not found" });
+}
 
-    return res.json({ ok: true, property });
+const cancellationPolicy = await buildCancellationPolicySnapshot(property.id);
+
+return res.json({
+  ok: true,
+  property: {
+    ...property,
+    cancellationPolicy,
+  },
+});
   } catch (error: any) {
     console.error("[public-booking property error]", error?.message ?? error);
     return res.status(500).json({ ok: false, error: "Failed to load property" });
@@ -502,8 +514,15 @@ const totalAmountCents = pricing.totalAmountCents;
       });
     }
 
-    let connectedAccountId: string;
+    const cancellationPolicySnapshot =
+      await buildCancellationPolicySnapshot(property.id);
 
+    const cancellationPolicyMetadata =
+      serializeCancellationPolicySnapshotForStripeMetadata(
+        cancellationPolicySnapshot
+      );
+
+    let connectedAccountId: string;
     try {
       const payoutReady = await assertDirectBookingPayoutReady(
         property.organizationId
@@ -589,12 +608,26 @@ const totalAmountCents = pricing.totalAmountCents;
         selectedAmenityIds: JSON.stringify(cleanSelectedAmenityIds),
         taxesTotal: String(pricing.taxesTotal),
         totalAmount: String(pricing.totalAmount),
+        
         stripeConnectedAccountId: connectedAccountId,
         platformFeeAmount: String(platformFeeAmount),
         hostPayoutAmount: String(hostPayoutAmount),
         platformFeeAmountCents: String(platformFeeAmountCents),
         hostPayoutAmountCents: String(hostPayoutAmountCents),
         hostPayoutStatus: "ROUTED_TO_CONNECT",
+        cancellationPolicySnapshot: cancellationPolicyMetadata,
+        cancellationPolicyId: cancellationPolicySnapshot.policyId ?? "",
+        cancellationPolicyName: cancellationPolicySnapshot.name.slice(0, 100),
+        cancellationPolicyType: cancellationPolicySnapshot.type,
+        freeCancellationHoursBeforeCheckIn: String(
+          cancellationPolicySnapshot.freeCancellationHoursBeforeCheckIn
+        ),
+        refundPercentBeforeDeadline: String(
+          cancellationPolicySnapshot.refundPercentBeforeDeadline
+        ),
+        refundPercentAfterDeadline: String(
+          cancellationPolicySnapshot.refundPercentAfterDeadline
+        ),
       },
     });
 
