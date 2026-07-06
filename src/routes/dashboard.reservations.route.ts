@@ -5,6 +5,10 @@ import {
 } from "@prisma/client";
 import { Router } from "express";
 import { requireAuth } from "../middleware/requireAuth";
+import {
+  DirectBookingRefundError,
+  refundDirectBookingReservation,
+} from "../services/direct-booking-refund.service";
 
 const prisma = new PrismaClient();
 export const dashboardReservationsRouter = Router();
@@ -319,5 +323,64 @@ dashboardReservationsRouter.get(
         },
       })),
     });
+  }
+);
+
+dashboardReservationsRouter.post(
+  "/api/dashboard/reservations/:id/refund",
+  requireAuth,
+  async (req, res) => {
+    try {
+      const user = (req as any).user;
+      const orgId = user.orgId as string;
+      const reservationId = String(req.params.id ?? "").trim();
+
+      if (!reservationId) {
+        return res.status(400).json({
+          ok: false,
+          error: "MISSING_RESERVATION_ID",
+          message: "Missing reservation id.",
+        });
+      }
+
+      const reason =
+        typeof req.body?.reason === "string" ? req.body.reason.trim() : "";
+
+      const requestedByUserId =
+        typeof user.id === "string"
+          ? user.id
+          : typeof user.userId === "string"
+          ? user.userId
+          : null;
+
+      const result = await refundDirectBookingReservation({
+        organizationId: orgId,
+        reservationId,
+        reason,
+        refundMode: "FULL",
+        requestedByUserId,
+      });
+
+      return res.json(result);
+    } catch (error: any) {
+      console.error("[DASHBOARD_RESERVATION_REFUND_ERROR]", error);
+
+      if (error instanceof DirectBookingRefundError || error?.code) {
+        return res.status(error?.statusCode || 400).json({
+          ok: false,
+          error: error?.code || "DIRECT_BOOKING_REFUND_ERROR",
+          message:
+            error?.message ||
+            "Unable to refund this direct booking reservation.",
+          details: error?.details,
+        });
+      }
+
+      return res.status(500).json({
+        ok: false,
+        error: "DASHBOARD_RESERVATION_REFUND_ERROR",
+        message: "Unable to refund this direct booking reservation.",
+      });
+    }
   }
 );
