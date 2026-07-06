@@ -15,6 +15,17 @@ model Organization {
   publicBookingEnabled Boolean     @default(false)
   updatedAt        DateTime        @updatedAt
   stripeCustomerId String?
+
+  // Stripe Connect / Host Payouts V1
+  stripeConnectAccountId        String?              @unique
+  stripeConnectStatus           StripeConnectStatus  @default(NOT_CONNECTED)
+  stripeConnectChargesEnabled   Boolean              @default(false)
+  stripeConnectPayoutsEnabled   Boolean              @default(false)
+  stripeConnectDetailsSubmitted Boolean              @default(false)
+  stripeConnectRequirements     Json?
+  stripeConnectDisabledReason   String?
+  stripeConnectLastSyncedAt     DateTime?
+
   dashboardUsers   DashboardUser[]
   deviceHealths    DeviceHealth[]
   lockGroups       LockGroup[]
@@ -331,6 +342,18 @@ model Reservation {
   currency                String?                  @default("usd")
   stripeCheckoutSessionId String?                  @unique
   stripePaymentIntentId   String?
+
+  // Stripe Connect / Host Payouts V1
+  stripeConnectedAccountId String?
+  stripeChargeId           String?
+  stripeTransferId         String?
+  stripeApplicationFeeId   String?
+  platformFeeAmount        Decimal?                @db.Decimal(10,2)
+  hostPayoutAmount         Decimal?                @db.Decimal(10,2)
+  hostPayoutStatus         HostPayoutStatus        @default(NOT_APPLICABLE)
+  hostPayoutFailureReason  String?
+  hostPayoutLastSyncedAt   DateTime?
+
   selectedAmenityIds      String[]                 @default([])
   pricingBreakdown        Json?
   createdAt               DateTime                 @default(now())
@@ -1147,6 +1170,24 @@ enum PropertyStaffRole {
 enum PaymentState {
   NONE
   PAID
+  REFUNDED
+}
+
+enum StripeConnectStatus {
+  NOT_CONNECTED
+  ONBOARDING_REQUIRED
+  PENDING_VERIFICATION
+  READY
+  RESTRICTED
+}
+
+enum HostPayoutStatus {
+  NOT_APPLICABLE
+  BLOCKED
+  PENDING_CONNECT
+  ROUTED_TO_CONNECT
+  PAID_TO_HOST
+  FAILED
   REFUNDED
 }
 

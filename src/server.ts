@@ -49,6 +49,7 @@ import { buildDashboardHealthRouter } from "./routes/dashboard.health.routes";
 import { buildOrgPmsRouter } from "./routes/org.pms.routes";
 import { dashboardPmsRouter } from "./routes/dashboard.pms.route";
 import { devPmsRouter } from "./routes/dev.pms.routes";
+
 import { authRouter } from "./routes/auth.routes";
 import { eventsRouter } from "./routes/events.route";
 import messagesRouter from "./routes/dashboard.messages.routes";
@@ -78,6 +79,7 @@ import { teamRouter } from "./routes/team.routes";
 import publicBookingRouter from "./routes/public-booking.routes";
 import { uploadsRouter } from "./routes/uploads.route";
 import { dashboardOrganizationRouter } from "./routes/dashboard.organization.route";
+import { dashboardPayoutsRouter } from "./routes/dashboard-payouts.routes";
 
 const app = express();
 
@@ -282,6 +284,7 @@ app.use(dashboardMetricsRouter);
 app.use(dashboardLocksCapacityRouter);
 app.use(dashboardPmsRouter);
 app.use(dashboardOrganizationRouter);
+app.use(dashboardPayoutsRouter);
 
 if (process.env.NODE_ENV !== "production") {
   app.use(devPmsRouter);
