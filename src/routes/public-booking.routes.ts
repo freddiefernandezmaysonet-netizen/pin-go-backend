@@ -45,6 +45,24 @@ function toMoneyFromCents(cents: number) {
   return Number((cents / 100).toFixed(2));
 }
 
+function toStripeMetadataValue(value: string, maxLength = 500) {
+  return value.length > maxLength ? value.slice(0, maxLength) : value;
+}
+
+function buildGuestCancellationTermsText(policy: { refundBasis?: string | null }) {
+  const baseText =
+    "I have reviewed and agree to the cancellation terms shown above, including how any eligible refund is calculated.";
+
+  if (
+    policy.refundBasis === "NIGHTLY_SUBTOTAL" ||
+    policy.refundBasis === "NIGHTLY_SUBTOTAL_ONLY"
+  ) {
+    return `${baseText} Refund percentages apply to the nightly subtotal only. Other charges such as cleaning fees, service fees, taxes, add-ons, or other non-nightly charges may not be refundable unless required by law or specifically stated in this policy.`;
+  }
+
+  return baseText;
+}
+
 publicBookingRouter.get("/:organizationSlug", async (req, res) => {
   try {
     const organizationSlug = String(req.params.organizationSlug ?? "").trim();
@@ -364,6 +382,7 @@ publicBookingRouter.post("/create-checkout", async (req, res) => {
    guestEmail,
    guestPhone,
    stayNotificationsConsent,
+   guestAcceptedCancellationTerms,
    adults,
    children,
    selectedAmenityIds,
@@ -402,6 +421,13 @@ publicBookingRouter.post("/create-checkout", async (req, res) => {
   });
 }
 
+if (guestAcceptedCancellationTerms !== true) {
+  return res.status(400).json({
+    ok: false,
+    error: "Cancellation terms acknowledgment is required.",
+  });
+}
+
     const property = await prisma.property.findFirst({
       where: {
         id: String(propertyId),
@@ -415,6 +441,7 @@ publicBookingRouter.post("/create-checkout", async (req, res) => {
         id: true,
         organizationId: true,
         name: true,
+        publicTitle: true,
         baseNightlyRate: true,
         cleaningFee: true,
         maxGuests: true,
@@ -517,9 +544,20 @@ const totalAmountCents = pricing.totalAmountCents;
     const cancellationPolicySnapshot =
       await buildCancellationPolicySnapshot(property.id);
 
+    const guestAcceptedCancellationTermsAt = new Date().toISOString();
+    const guestAcceptedCancellationTermsText =
+      buildGuestCancellationTermsText(cancellationPolicySnapshot);
+
+    const cancellationPolicySnapshotWithGuestAcceptance = {
+      ...cancellationPolicySnapshot,
+      guestAcceptedCancellationTerms: true,
+      guestAcceptedCancellationTermsAt,
+      guestAcceptedCancellationTermsText,
+    };
+
     const cancellationPolicyMetadata =
       serializeCancellationPolicySnapshotForStripeMetadata(
-        cancellationPolicySnapshot
+        cancellationPolicySnapshotWithGuestAcceptance
       );
 
     let connectedAccountId: string;
@@ -615,6 +653,16 @@ const totalAmountCents = pricing.totalAmountCents;
         platformFeeAmountCents: String(platformFeeAmountCents),
         hostPayoutAmountCents: String(hostPayoutAmountCents),
         hostPayoutStatus: "ROUTED_TO_CONNECT",
+        guestAcceptedCancellationTerms: "true",
+        guestAcceptedCancellationTermsAt,
+        guestAcceptedCancellationTermsText: toStripeMetadataValue(
+          guestAcceptedCancellationTermsText
+        ),
+        guestAcceptedCancellationTermsSource: "DIRECT_BOOKING_WEB_FORM",
+        cancellationTermsAckVersion: "cancellation_terms_ack_v1",
+        cancellationPolicyRefundBasis: String(
+          cancellationPolicySnapshot.refundBasis ?? ""
+        ),
         cancellationPolicySnapshot: cancellationPolicyMetadata,
         cancellationPolicyId: cancellationPolicySnapshot.policyId ?? "",
         cancellationPolicyName: cancellationPolicySnapshot.name.slice(0, 100),

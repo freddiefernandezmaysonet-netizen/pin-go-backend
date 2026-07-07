@@ -206,7 +206,44 @@ const consentVersion =
 if (!stayNotificationsConsent || !smsConsent) {
   throw new Error("DIRECT_BOOKING_SMS_CONSENT_REQUIRED");
 }
-  
+
+const cancellationTermsAccepted =
+  String(session.metadata?.guestAcceptedCancellationTerms ?? "").trim() ===
+  "true";
+
+const cancellationTermsAcceptedAtRaw = optionalMetadata(
+  session,
+  "guestAcceptedCancellationTermsAt"
+);
+
+const cancellationTermsAcceptedAt =
+  cancellationTermsAcceptedAtRaw &&
+  !Number.isNaN(new Date(cancellationTermsAcceptedAtRaw).getTime())
+    ? cancellationTermsAcceptedAtRaw
+    : new Date().toISOString();
+
+const cancellationTermsText = optionalMetadata(
+  session,
+  "guestAcceptedCancellationTermsText"
+);
+
+const cancellationTermsSource =
+  optionalMetadata(session, "guestAcceptedCancellationTermsSource") ??
+  "DIRECT_BOOKING_WEB_FORM";
+
+const cancellationTermsAckVersion =
+  optionalMetadata(session, "cancellationTermsAckVersion") ??
+  "cancellation_terms_ack_v1";
+
+const cancellationPolicyRefundBasis = optionalMetadata(
+  session,
+  "cancellationPolicyRefundBasis"
+);
+
+if (!cancellationTermsAccepted || !cancellationTermsText) {
+  throw new Error("DIRECT_BOOKING_CANCELLATION_TERMS_ACK_REQUIRED");
+}
+
   const checkIn = parseDateMetadata(session, "checkIn");
   const checkOut = parseDateMetadata(session, "checkOut");
   const checkInRaw = requiredMetadata(session, "checkIn");
@@ -259,18 +296,42 @@ if (!stayNotificationsConsent || !smsConsent) {
     ? session.payment_intent
     : session.payment_intent?.id ?? null;
 
-const cancellationPolicySnapshot =
+const deserializedCancellationPolicySnapshot =
   deserializeCancellationPolicySnapshotFromStripeMetadata(
     session.metadata?.cancellationPolicySnapshot
   );
 
+const cancellationTermsAcceptance = {
+  accepted: true,
+  acceptedAt: cancellationTermsAcceptedAt,
+  text: cancellationTermsText,
+  source: cancellationTermsSource,
+  version: cancellationTermsAckVersion,
+  refundBasis:
+    (deserializedCancellationPolicySnapshot as any)?.refundBasis ??
+    cancellationPolicyRefundBasis ??
+    null,
+};
+
+const cancellationPolicySnapshot = {
+  ...(deserializedCancellationPolicySnapshot ?? {}),
+  refundBasis: cancellationTermsAcceptance.refundBasis,
+  guestAcceptedCancellationTerms: true,
+  guestAcceptedCancellationTermsAt: cancellationTermsAcceptance.acceptedAt,
+  guestAcceptedCancellationTermsText: cancellationTermsAcceptance.text,
+  guestAcceptedCancellationTermsSource: cancellationTermsAcceptance.source,
+  cancellationTermsAckVersion: cancellationTermsAcceptance.version,
+  cancellationPolicyRefundBasis: cancellationTermsAcceptance.refundBasis,
+  cancellationTermsAcceptance,
+};
+
 let cancellationPolicyId: string | null = null;
 
-if (cancellationPolicySnapshot?.policyId) {
+if ((cancellationPolicySnapshot as any)?.policyId) {
   const existingCancellationPolicy =
     await prisma.propertyCancellationPolicy.findFirst({
       where: {
-        id: cancellationPolicySnapshot.policyId,
+        id: (cancellationPolicySnapshot as any).policyId,
         propertyId: property.id,
       },
       select: {
@@ -338,6 +399,7 @@ const ingestResult = await ingestReservation({
       consentVersion,
       acceptedAt: new Date().toISOString(),
    },
+    cancellationTerms: cancellationTermsAcceptance,
  },
 
   status: "ACTIVE",
@@ -352,7 +414,10 @@ const updatedReservation = await prisma.reservation.update({
   currency: pricingBreakdown.currency,
   stripeCheckoutSessionId: session.id,
   stripePaymentIntentId: paymentIntentId,
-
+  
+  cancellationPolicyId,
+  cancellationPolicySnapshot: cancellationPolicySnapshot as any,
+ 
   stripeConnectedAccountId,
   stripeChargeId: stripeFinancialRefs.stripeChargeId,
   stripeTransferId: stripeFinancialRefs.stripeTransferId,
