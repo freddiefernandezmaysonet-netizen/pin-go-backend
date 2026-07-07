@@ -1073,8 +1073,17 @@ model PropertyCancellationPolicy {
   // Future rate strategy
   nonRefundableDiscountPercent Decimal? @db.Decimal(5,2)
 
-  description String?
+  // Cancellation Policy Engine V1.1
+  // Supports tiered market policies like:
+  // 30+ days before check-in = 100% refund
+  // 14-30 days before check-in = 50% refund
+  // <14 days before check-in = 0% refund
+  refundRules Json?
+  nonRefundableScenarios Json?
+  guestFacingSummary String?
 
+  description String?
+  
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 

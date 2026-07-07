@@ -9,6 +9,20 @@ const prisma = new PrismaClient();
 
 type MoneyInput = unknown;
 
+export type CancellationRefundRule = {
+  minHoursBeforeCheckIn: number;
+  refundPercent: number;
+  label: string;
+  description?: string | null;
+};
+
+export type CancellationNonRefundableScenario =
+  | "EARLY_DEPARTURE"
+  | "DELAYED_ARRIVAL"
+  | "REDUCED_NIGHTS"
+  | "WEATHER_RE_SCHEDULE"
+  | "OTHER";
+
 export type CancellationPolicySnapshot = {
   policyId: string | null;
   name: string;
@@ -21,6 +35,9 @@ export type CancellationPolicySnapshot = {
   refundBasis: CancellationRefundBasis;
   refundPercentBeforeDeadline: number;
   refundPercentAfterDeadline: number;
+  refundRules: CancellationRefundRule[];
+  nonRefundableScenarios: CancellationNonRefundableScenario[];
+  guestFacingSummary: string | null;
   cleaningFeeRefundable: boolean;
   amenitiesRefundable: boolean;
   taxesRefundable: boolean;
@@ -39,6 +56,10 @@ export type CancellationPolicyEvaluation = {
   refundPercent: number;
   refundAmount: number;
   refundAmountCents: number;
+  usesTieredRules: boolean;
+  matchedRefundRule: CancellationRefundRule | null;
+  nonRefundableScenarios: CancellationNonRefundableScenario[];
+  guestFacingSummary: string | null;
   eligibleForGuestSelfCancellation: boolean;
   eligibleForAutoRefund: boolean;
   requiresHostApproval: boolean;
@@ -70,6 +91,9 @@ export type DashboardCancellationPolicyInput = {
   refundBasis?: CancellationRefundBasis;
   refundPercentBeforeDeadline?: number;
   refundPercentAfterDeadline?: number;
+  refundRules?: CancellationRefundRule[];
+  nonRefundableScenarios?: CancellationNonRefundableScenario[];
+  guestFacingSummary?: string | null;
   cleaningFeeRefundable?: boolean;
   amenitiesRefundable?: boolean;
   taxesRefundable?: boolean;
@@ -164,6 +188,137 @@ function getPricingComponents({
   };
 }
 
+const NON_REFUNDABLE_SCENARIO_VALUES = new Set([
+  "EARLY_DEPARTURE",
+  "DELAYED_ARRIVAL",
+  "REDUCED_NIGHTS",
+  "WEATHER_RE_SCHEDULE",
+  "OTHER",
+]);
+
+function normalizeRefundRule(value: unknown): CancellationRefundRule | null {
+  const record = getRecord(value);
+
+  const rawHours = Number(record.minHoursBeforeCheckIn);
+  const rawPercent = Number(record.refundPercent);
+
+  if (!Number.isFinite(rawHours) || rawHours < 0) {
+    return null;
+  }
+
+  if (!Number.isFinite(rawPercent) || rawPercent < 0 || rawPercent > 100) {
+    return null;
+  }
+
+  const minHoursBeforeCheckIn = Math.round(rawHours);
+  const refundPercent = Number(rawPercent.toFixed(2));
+
+  const label =
+    typeof record.label === "string" && record.label.trim()
+      ? record.label.trim().slice(0, 80)
+      : `${refundPercent}% refund`;
+
+  const description =
+    typeof record.description === "string" && record.description.trim()
+      ? record.description.trim().slice(0, 280)
+      : null;
+
+  return {
+    minHoursBeforeCheckIn,
+    refundPercent,
+    label,
+    description,
+  };
+}
+
+function normalizeRefundRules(
+  value: unknown,
+  fallback: CancellationRefundRule[] = []
+): CancellationRefundRule[] {
+  const source = Array.isArray(value) ? value : fallback;
+
+  return source
+    .map(normalizeRefundRule)
+    .filter((rule): rule is CancellationRefundRule => Boolean(rule))
+    .sort(
+      (a, b) => b.minHoursBeforeCheckIn - a.minHoursBeforeCheckIn
+    );
+}
+
+function normalizeNonRefundableScenarios(
+  value: unknown
+): CancellationNonRefundableScenario[] {
+  if (!Array.isArray(value)) return [];
+
+  return value
+    .map((item) => String(item ?? "").trim())
+    .filter((item): item is CancellationNonRefundableScenario =>
+      NON_REFUNDABLE_SCENARIO_VALUES.has(item)
+    );
+}
+
+function getMatchedRefundRule({
+  rules,
+  hoursBeforeCheckIn,
+}: {
+  rules: CancellationRefundRule[];
+  hoursBeforeCheckIn: number;
+}) {
+  return (
+    rules.find(
+      (rule) => hoursBeforeCheckIn >= rule.minHoursBeforeCheckIn
+    ) ?? null
+  );
+}
+
+function getPrimaryFreeCancellationHours(snapshot: CancellationPolicySnapshot) {
+  const fullRefundRule = snapshot.refundRules.find(
+    (rule) => rule.refundPercent >= 100
+  );
+
+  if (fullRefundRule) {
+    return fullRefundRule.minHoursBeforeCheckIn;
+  }
+
+  return snapshot.freeCancellationHoursBeforeCheckIn;
+}
+
+function buildStrictTieredRefundRules(): CancellationRefundRule[] {
+  return [
+    {
+      minHoursBeforeCheckIn: 720,
+      refundPercent: 100,
+      label: "Full refund",
+      description:
+        "Cancel at least 30 days before check-in and receive a 100% refund.",
+    },
+    {
+      minHoursBeforeCheckIn: 336,
+      refundPercent: 50,
+      label: "Partial refund",
+      description:
+        "Cancel between 14 and 30 days before check-in and receive a 50% refund.",
+    },
+    {
+      minHoursBeforeCheckIn: 0,
+      refundPercent: 0,
+      label: "No refund",
+      description:
+        "Cancel less than 14 days before check-in and no refund applies.",
+    },
+  ];
+}
+
+function buildDefaultNonRefundableScenarios(): CancellationNonRefundableScenario[] {
+  return [
+    "EARLY_DEPARTURE",
+    "DELAYED_ARRIVAL",
+    "REDUCED_NIGHTS",
+    "WEATHER_RE_SCHEDULE",
+    "OTHER",
+  ];
+}
+
 function buildDefaultCancellationPolicySnapshot(): CancellationPolicySnapshot {
   return {
     policyId: null,
@@ -177,6 +332,9 @@ function buildDefaultCancellationPolicySnapshot(): CancellationPolicySnapshot {
     refundBasis: CancellationRefundBasis.TOTAL_AMOUNT,
     refundPercentBeforeDeadline: 100,
     refundPercentAfterDeadline: 0,
+    refundRules: [],
+    nonRefundableScenarios: [],
+    guestFacingSummary: null,
     cleaningFeeRefundable: true,
     amenitiesRefundable: true,
     taxesRefundable: true,
@@ -219,6 +377,11 @@ function toCancellationPolicySnapshot(policy: any): CancellationPolicySnapshot {
       policy.refundPercentAfterDeadline,
       0
     ),
+    refundRules: normalizeRefundRules(policy.refundRules, []),
+    nonRefundableScenarios: normalizeNonRefundableScenarios(
+      policy.nonRefundableScenarios
+    ),
+    guestFacingSummary: policy.guestFacingSummary ?? null,
     cleaningFeeRefundable: Boolean(policy.cleaningFeeRefundable),
     amenitiesRefundable: Boolean(policy.amenitiesRefundable),
     taxesRefundable: Boolean(policy.taxesRefundable),
@@ -283,7 +446,13 @@ export function serializeCancellationPolicySnapshotForStripeMetadata(
     tf: snapshot.taxesRefundable,
     nr: snapshot.nonRefundableDiscountPercent,
     at: snapshot.snapshotAt,
-  });
+    rr: snapshot.refundRules.map((rule) => ({
+    h: rule.minHoursBeforeCheckIn,
+    p: rule.refundPercent,
+    l: rule.label.slice(0, 60),
+  })),
+  nrs: snapshot.nonRefundableScenarios,
+});
 }
 
 export function deserializeCancellationPolicySnapshotFromStripeMetadata(
@@ -330,6 +499,18 @@ export function deserializeCancellationPolicySnapshotFromStripeMetadata(
         record.ra,
         fallback.refundPercentAfterDeadline
       ),
+      refundRules: normalizeRefundRules(
+        Array.isArray(record.rr)
+          ? record.rr.map((rule: any) => ({
+              minHoursBeforeCheckIn: rule.h,
+              refundPercent: rule.p,
+              label: rule.l,
+            }))
+          : [],
+        []
+      ),
+      nonRefundableScenarios: normalizeNonRefundableScenarios(record.nrs),
+      guestFacingSummary: null,
       cleaningFeeRefundable: toBoolean(
         record.cf,
         fallback.cleaningFeeRefundable
@@ -440,13 +621,27 @@ function isRefundBasis(value: unknown): value is CancellationRefundBasis {
   );
 }
 
-function getPolicyPresetDefaults(type: CancellationPolicyType) {
+function getPolicyPresetDefaults(type: CancellationPolicyType): {
+  name: string;
+  freeCancellationHoursBeforeCheckIn: number;
+  refundPercentBeforeDeadline: number;
+  refundPercentAfterDeadline: number;
+  refundRules: CancellationRefundRule[];
+  nonRefundableScenarios: CancellationNonRefundableScenario[];
+  guestFacingSummary: string | null;
+  description: string | null;
+} {
   if (type === CancellationPolicyType.MODERATE) {
     return {
       name: "Moderate",
       freeCancellationHoursBeforeCheckIn: 120,
       refundPercentBeforeDeadline: 100,
       refundPercentAfterDeadline: 50,
+      refundRules: [],
+      nonRefundableScenarios: [],
+      guestFacingSummary: null,
+      description:
+        "Guests can cancel for a full refund until 5 days before check-in. After that, a partial refund may apply.",
     };
   }
 
@@ -456,15 +651,29 @@ function getPolicyPresetDefaults(type: CancellationPolicyType) {
       freeCancellationHoursBeforeCheckIn: 168,
       refundPercentBeforeDeadline: 100,
       refundPercentAfterDeadline: 50,
+      refundRules: [],
+      nonRefundableScenarios: [],
+      guestFacingSummary: null,
+      description:
+        "Guests can cancel for a full refund until 7 days before check-in. After that, a partial refund may apply.",
     };
   }
 
   if (type === CancellationPolicyType.STRICT) {
+    const refundRules = buildStrictTieredRefundRules();
+    const nonRefundableScenarios = buildDefaultNonRefundableScenarios();
+
     return {
       name: "Strict",
-      freeCancellationHoursBeforeCheckIn: 336,
-      refundPercentBeforeDeadline: 50,
+      freeCancellationHoursBeforeCheckIn: 720,
+      refundPercentBeforeDeadline: 100,
       refundPercentAfterDeadline: 0,
+      refundRules,
+      nonRefundableScenarios,
+      guestFacingSummary:
+        "Travelers who cancel at least 30 days before check-in will get back 100% of the amount they've paid. If they cancel between 14 and 30 days before check-in, they'll get back 50%. Otherwise, they won't get a refund. No refunds will be made for early departures, delayed arrival, reducing nights, weather-related reschedules, or other post-booking changes.",
+      description:
+        "Cancel at least 30 days before check-in for a 100% refund. Cancel between 14 and 30 days before check-in for a 50% refund. Otherwise, no refund applies.",
     };
   }
 
@@ -474,6 +683,19 @@ function getPolicyPresetDefaults(type: CancellationPolicyType) {
       freeCancellationHoursBeforeCheckIn: 0,
       refundPercentBeforeDeadline: 0,
       refundPercentAfterDeadline: 0,
+      refundRules: [
+        {
+          minHoursBeforeCheckIn: 0,
+          refundPercent: 0,
+          label: "No refund",
+          description: "This reservation is non-refundable after booking.",
+        },
+      ],
+      nonRefundableScenarios: buildDefaultNonRefundableScenarios(),
+      guestFacingSummary:
+        "This reservation is non-refundable. No refunds will be made for early departures, delayed arrival, reducing nights, weather-related reschedules, or other post-booking changes.",
+      description:
+        "This reservation is non-refundable unless the host approves an exception.",
     };
   }
 
@@ -483,6 +705,10 @@ function getPolicyPresetDefaults(type: CancellationPolicyType) {
       freeCancellationHoursBeforeCheckIn: 168,
       refundPercentBeforeDeadline: 100,
       refundPercentAfterDeadline: 0,
+      refundRules: [],
+      nonRefundableScenarios: [],
+      guestFacingSummary: null,
+      description: "Custom cancellation policy configured by the host.",
     };
   }
 
@@ -491,6 +717,11 @@ function getPolicyPresetDefaults(type: CancellationPolicyType) {
     freeCancellationHoursBeforeCheckIn: 168,
     refundPercentBeforeDeadline: 100,
     refundPercentAfterDeadline: 0,
+    refundRules: [],
+    nonRefundableScenarios: [],
+    guestFacingSummary: null,
+    description:
+      "Guests can cancel for a full refund until 7 days before check-in. After that, host approval may be required.",
   };
 }
 
@@ -515,6 +746,11 @@ function serializeDashboardPolicy(policy: any) {
       policy.refundPercentBeforeDeadline
     ),
     refundPercentAfterDeadline: Number(policy.refundPercentAfterDeadline),
+    refundRules: normalizeRefundRules(policy.refundRules, []),
+    nonRefundableScenarios: normalizeNonRefundableScenarios(
+      policy.nonRefundableScenarios
+    ),
+    guestFacingSummary: policy.guestFacingSummary ?? null,
     cleaningFeeRefundable: policy.cleaningFeeRefundable,
     amenitiesRefundable: policy.amenitiesRefundable,
     taxesRefundable: policy.taxesRefundable,
@@ -567,16 +803,32 @@ export function evaluateCancellationPolicy({
   const checkInMs = checkIn.getTime();
   const requestedAtMs = requestedAt.getTime();
 
+  const hoursBeforeCheckIn =
+  (checkInMs - requestedAtMs) / (1000 * 60 * 60);
+
+  const usesTieredRules = snapshot.refundRules.length > 0;
+
+  const matchedRefundRule = usesTieredRules
+    ? getMatchedRefundRule({
+        rules: snapshot.refundRules,
+        hoursBeforeCheckIn,
+      })
+    : null;
+
+  const primaryFreeCancellationHours =
+    getPrimaryFreeCancellationHours(snapshot);
+
   const deadline = new Date(
-    checkInMs - snapshot.freeCancellationHoursBeforeCheckIn * 60 * 60 * 1000
+    checkInMs - primaryFreeCancellationHours * 60 * 60 * 1000
   );
 
   const beforeDeadline = requestedAtMs <= deadline.getTime();
 
-  const refundPercent = beforeDeadline
+  const refundPercent = usesTieredRules
+    ? matchedRefundRule?.refundPercent ?? 0
+    : beforeDeadline
     ? snapshot.refundPercentBeforeDeadline
     : snapshot.refundPercentAfterDeadline;
-
   const {
     totalAmountCents,
     nightlySubtotalCents,
@@ -602,7 +854,8 @@ export function evaluateCancellationPolicy({
     Math.max(0, Math.round(refundableBaseCents * (refundPercent / 100)))
   );
 
-  const outsidePolicy = !beforeDeadline;
+    const outsidePolicy = usesTieredRules ? !matchedRefundRule : !beforeDeadline;
+
   const requiresHostApproval =
     !snapshot.guestSelfCancellationEnabled ||
     (outsidePolicy && snapshot.requireHostApprovalOutsidePolicy);
@@ -614,9 +867,6 @@ export function evaluateCancellationPolicy({
     eligibleForGuestSelfCancellation &&
     snapshot.autoRefundEligibleCancellations &&
     refundAmountCents > 0;
-
-  const hoursBeforeCheckIn =
-    (checkInMs - requestedAtMs) / (1000 * 60 * 60);
 
   const reason = requiresHostApproval
     ? "CANCELLATION_REQUIRES_HOST_APPROVAL"
@@ -639,6 +889,13 @@ export function evaluateCancellationPolicy({
     requiresHostApproval,
     reason,
     actor,
+
+    // Cancellation Policy Engine V1.1
+    usesTieredRules,
+    matchedRefundRule,
+    nonRefundableScenarios: snapshot.nonRefundableScenarios,
+    guestFacingSummary: snapshot.guestFacingSummary,
+
     breakdown: {
       totalAmount: fromCents(totalAmountCents),
       totalAmountCents,
@@ -775,11 +1032,25 @@ export async function upsertDashboardCancellationPolicy({
     ? input.refundBasis
     : existingPolicy?.refundBasis ?? CancellationRefundBasis.TOTAL_AMOUNT;
 
+  const refundRules =
+    input.refundRules !== undefined
+      ? normalizeRefundRules(input.refundRules, [])
+      : existingPolicy
+      ? normalizeRefundRules(existingPolicy.refundRules, [])
+      : presetDefaults.refundRules;
+
+  const nonRefundableScenarios =
+    input.nonRefundableScenarios !== undefined
+      ? normalizeNonRefundableScenarios(input.nonRefundableScenarios)
+      : existingPolicy
+      ? normalizeNonRefundableScenarios(existingPolicy.nonRefundableScenarios)
+      : presetDefaults.nonRefundableScenarios;
+
   const data = {
     propertyId: property.id,
     name: normalizePolicyName(
-      input.name,
-      existingPolicy?.name ?? presetDefaults.name
+    input.name,
+    existingPolicy?.name ?? presetDefaults.name
     ),
     type: requestedType,
     source: "CUSTOM",
@@ -815,6 +1086,15 @@ export async function upsertDashboardCancellationPolicy({
         : presetDefaults.refundPercentBeforeDeadline
     ),
 
+    refundRules: refundRules as any,
+    nonRefundableScenarios: nonRefundableScenarios as any,
+
+    guestFacingSummary: normalizeDescription(
+      input.guestFacingSummary ??
+        existingPolicy?.guestFacingSummary ??
+        presetDefaults.guestFacingSummary
+    ),    
+
     refundPercentAfterDeadline: clampPercent(
       input.refundPercentAfterDeadline,
       existingPolicy
@@ -841,10 +1121,11 @@ export async function upsertDashboardCancellationPolicy({
       input.nonRefundableDiscountPercent ??
         existingPolicy?.nonRefundableDiscountPercent
     ),
-
+    
     description: normalizeDescription(
-      input.description ?? existingPolicy?.description
+  input.description ?? existingPolicy?.description ?? presetDefaults.description
     ),
+    
   };
 
   const policy = existingPolicy
