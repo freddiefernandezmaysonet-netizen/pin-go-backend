@@ -11,6 +11,11 @@ import {
   buildCancellationPolicySnapshot,
   serializeCancellationPolicySnapshotForStripeMetadata,
 } from "../services/cancellation-policy.service";
+import {
+  GuestCancellationError,
+  cancelReservationFromGuestPortal,
+  getGuestCancellationPreview,
+} from "../services/guest-cancellation.service";
 
 const prisma = new PrismaClient();
 const publicBookingRouter = Router();
@@ -62,6 +67,81 @@ function buildGuestCancellationTermsText(policy: { refundBasis?: string | null }
 
   return baseText;
 }
+
+function sendGuestCancellationRouteError({
+  res,
+  error,
+  fallbackMessage,
+  logLabel,
+}: {
+  res: any;
+  error: any;
+  fallbackMessage: string;
+  logLabel: string;
+}) {
+  console.error(logLabel, error?.message ?? error);
+
+  if (error instanceof GuestCancellationError) {
+    return res.status(error.statusCode).json({
+      ok: false,
+      error: error.code,
+      message: error.message,
+      details: error.details ?? null,
+    });
+  }
+
+  return res.status(500).json({
+    ok: false,
+    error: fallbackMessage,
+  });
+}
+
+publicBookingRouter.get(
+  "/manage/:guestToken/cancellation-preview",
+  async (req, res) => {
+    try {
+      const guestToken = String(req.params.guestToken ?? "").trim();
+
+      const preview = await getGuestCancellationPreview({
+        guestToken,
+      });
+
+      return res.json({
+        ok: true,
+        ...preview,
+      });
+    } catch (error: any) {
+      return sendGuestCancellationRouteError({
+        res,
+        error,
+        fallbackMessage: "Failed to load cancellation preview.",
+        logLabel: "[public-booking cancellation-preview error]",
+      });
+    }
+  }
+);
+
+publicBookingRouter.post("/manage/:guestToken/cancel", async (req, res) => {
+  try {
+    const guestToken = String(req.params.guestToken ?? "").trim();
+    const reason =
+      typeof req.body?.reason === "string" ? req.body.reason : null;
+
+    const result = await cancelReservationFromGuestPortal({
+      guestToken,
+      reason,
+    });
+
+    return res.json(result);
+  } catch (error: any) {
+    return sendGuestCancellationRouteError({
+      res,
+      error,
+      fallbackMessage: "Failed to cancel reservation.",
+      logLabel: "[public-booking guest-cancel error]",
+    });
+  }
+});
 
 publicBookingRouter.get("/:organizationSlug", async (req, res) => {
   try {
