@@ -5,10 +5,10 @@ import {
 } from "@prisma/client";
 import { syncChannexAvailabilityForProperty } from "./channex-availability-sync.service";
 import {
-  CancellationPolicySnapshot,
   buildCancellationPolicySnapshot,
   evaluateCancellationPolicy,
 } from "./cancellation-policy.service";
+import type { CancellationPolicySnapshot } from "./cancellation-policy.service";
 import { reconcileReservation } from "./reservation.reconcile.service";
 
 const prisma = new PrismaClient();
