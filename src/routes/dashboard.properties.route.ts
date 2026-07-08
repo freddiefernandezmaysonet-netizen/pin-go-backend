@@ -5,6 +5,7 @@ import { requireAuth } from "../middleware/requireAuth";
 import { provisionChannexProperty } from "../services/channex-provisioning.service";
 import { syncChannexAvailabilityForProperty } from "../services/channex-availability-sync.service";
 import { ingestReservation } from "../services/ingest.service";
+import { auditReservationCompleteFlowSafe } from "../services/reservation-complete-flow-audit.service";
 import { calculateDirectBookingPricing } from "../services/direct-booking-pricing.service";
 import { applyDefaultMarketSeasonsForProperty } from "../services/market-season-template.service";
 import { MARKET_SEASON_CATALOG } from "../data/market-season-catalog";
@@ -1071,6 +1072,27 @@ try {
     });
   }
 }
+
+      const completeFlowAuditResult = await auditReservationCompleteFlowSafe(
+        result.reservationId,
+        prisma
+      );
+
+      if (completeFlowAuditResult) {
+        console.log("[MANUAL_RESERVATION_COMPLETE_FLOW_AUDIT_RESULT]", {
+          reservationId: completeFlowAuditResult.reservationId,
+          propertyId: completeFlowAuditResult.propertyId,
+          organizationId: completeFlowAuditResult.organizationId,
+          completeFlowStatus: completeFlowAuditResult.completeFlowStatus,
+          failedChecks: completeFlowAuditResult.failedChecks.map(
+            (check) => check.rule
+          ),
+          warningChecks: completeFlowAuditResult.warningChecks.map(
+            (check) => check.rule
+          ),
+        });
+      }
+
            return res.json({
         ok: true,
         reservationId: result.reservationId,
