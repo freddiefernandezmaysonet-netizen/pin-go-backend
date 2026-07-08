@@ -1239,6 +1239,7 @@ enum PropertyStaffRole {
 enum PaymentState {
   NONE
   PAID
+  PARTIALLY_REFUNDED
   REFUNDED
 }
 
@@ -1256,6 +1257,7 @@ enum HostPayoutStatus {
   PENDING_CONNECT
   ROUTED_TO_CONNECT
   PAID_TO_HOST
+  PARTIALLY_REFUNDED
   FAILED
   REFUNDED
 }
