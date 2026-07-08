@@ -1,171 +1,81 @@
-import Stripe from "stripe";
-import { randomBytes } from "crypto";
-import { PrismaClient } from "@prisma/client";
-import stripe from "../billing/stripe";
-import { checkPropertyAvailability } from "./availability.service";
-import { ingestReservation } from "./ingest.service";
-import { calculateDirectBookingPricing } from "./direct-booking-pricing.service";
+import {
+  CancellationActor,
+  PrismaClient,
+  ReservationStatus,
+} from "@prisma/client";
 import { syncChannexAvailabilityForProperty } from "./channex-availability-sync.service";
 import {
-  sendDirectBookingGuestConfirmation,
-  sendDirectBookingHostNotification,
-} from "../lib/mailer";
-import { deserializeCancellationPolicySnapshotFromStripeMetadata } from "./cancellation-policy.service";
+  buildCancellationPolicySnapshot,
+  evaluateCancellationPolicy,
+} from "./cancellation-policy.service";
+import type { CancellationPolicySnapshot } from "./cancellation-policy.service";
+import { refundDirectBookingReservation } from "./direct-booking-refund.service";
+import { sendDirectBookingGuestCancellationEmail } from "../lib/mailer";
+import { reconcileReservation } from "./reservation.reconcile.service";
 
 const prisma = new PrismaClient();
 
-function requiredMetadata(session: Stripe.Checkout.Session, key: string) {
-  const value = String(session.metadata?.[key] ?? "").trim();
+export type GuestCancellationPreviewInput = {
+  guestToken: string;
+};
 
-  if (!value) {
-    throw new Error(`Missing direct booking metadata: ${key}`);
-  }
+export type GuestCancellationConfirmInput = {
+  guestToken: string;
+  reason?: string | null;
+};
 
-  return value;
-}
+export class GuestCancellationError extends Error {
+  statusCode: number;
+  code: string;
+  details?: unknown;
 
-function parseDateMetadata(session: Stripe.Checkout.Session, key: string) {
-  const value = requiredMetadata(session, key);
-  const date = new Date(value);
-
-  if (Number.isNaN(date.getTime())) {
-    throw new Error(`Invalid direct booking date metadata: ${key}`);
-  }
-
-  return date;
-}
-
-function parseSelectedAmenityIds(session: Stripe.Checkout.Session) {
-  const raw = String(session.metadata?.selectedAmenityIds ?? "").trim();
-
-  if (!raw) return [];
-
-  try {
-    const parsed = JSON.parse(raw);
-
-    return Array.isArray(parsed)
-      ? parsed.map((id) => String(id)).filter(Boolean)
-      : [];
-  } catch {
-    return [];
+  constructor({
+    code,
+    message,
+    statusCode = 400,
+    details,
+  }: {
+    code: string;
+    message: string;
+    statusCode?: number;
+    details?: unknown;
+  }) {
+    super(message);
+    this.name = "GuestCancellationError";
+    this.code = code;
+    this.statusCode = statusCode;
+    this.details = details;
   }
 }
 
-function parsePricingBreakdown(session: Stripe.Checkout.Session) {
-  const raw = String(session.metadata?.pricingBreakdown ?? "").trim();
-
-  if (!raw) return null;
-
-  try {
-    const parsed = JSON.parse(raw);
-    return parsed && typeof parsed === "object" ? parsed : null;
-  } catch {
-    return null;
-  }
+function normalizeGuestToken(value: unknown) {
+  return String(value ?? "").trim();
 }
 
-function optionalMetadata(session: Stripe.Checkout.Session, key: string) {
-  return String(session.metadata?.[key] ?? "").trim() || null;
-}
+function normalizeReason(value: unknown) {
+  const text = String(value ?? "").trim();
 
-function parseOptionalMoneyMetadata(
-  session: Stripe.Checkout.Session,
-  key: string
-) {
-  const raw = optionalMetadata(session, key);
-
-  if (!raw) return null;
-
-  const value = Number(raw);
-
-  if (!Number.isFinite(value) || value < 0) {
-    return null;
+  if (!text) {
+    return "Guest self-cancellation";
   }
 
-  return Number(value.toFixed(2));
+  return text.slice(0, 500);
 }
 
-function parseHostPayoutStatus(session: Stripe.Checkout.Session) {
-  const raw = optionalMetadata(session, "hostPayoutStatus");
-
-  const allowedStatuses = new Set([
-    "NOT_APPLICABLE",
-    "BLOCKED",
-    "PENDING_CONNECT",
-    "ROUTED_TO_CONNECT",
-    "PAID_TO_HOST",
-    "PARTIALLY_REFUNDED",
-    "FAILED",
-    "REFUNDED",
-  ]);
-
-  if (raw && allowedStatuses.has(raw)) {
-    return raw;
+function normalizeJsonObject(value: unknown) {
+  if (value && typeof value === "object" && !Array.isArray(value)) {
+    return value as Record<string, unknown>;
   }
 
-  return optionalMetadata(session, "stripeConnectedAccountId")
-    ? "ROUTED_TO_CONNECT"
-    : "NOT_APPLICABLE";
+  return {};
 }
 
-async function getStripeFinancialRefs(paymentIntentId: string | null) {
-  const emptyRefs = {
-    stripeChargeId: null as string | null,
-    stripeTransferId: null as string | null,
-    stripeApplicationFeeId: null as string | null,
-  };
+function toNumber(value: unknown) {
+  if (value === null || value === undefined) return null;
 
-  if (!paymentIntentId) {
-    return emptyRefs;
-  }
+  const numberValue = Number(value);
 
-  try {
-    const paymentIntent = await stripe.paymentIntents.retrieve(paymentIntentId, {
-      expand: [
-        "latest_charge",
-        "latest_charge.transfer",
-        "latest_charge.application_fee",
-      ],
-    });
-
-    const latestCharge = paymentIntent.latest_charge;
-
-    if (!latestCharge) {
-      return emptyRefs;
-    }
-
-    if (typeof latestCharge === "string") {
-      return {
-        ...emptyRefs,
-        stripeChargeId: latestCharge,
-      };
-    }
-
-    const chargeAny = latestCharge as any;
-
-    return {
-      stripeChargeId: latestCharge.id ?? null,
-      stripeTransferId:
-        typeof chargeAny.transfer === "string"
-          ? chargeAny.transfer
-          : chargeAny.transfer?.id ?? null,
-      stripeApplicationFeeId:
-        typeof chargeAny.application_fee === "string"
-          ? chargeAny.application_fee
-          : chargeAny.application_fee?.id ?? null,
-    };
-  } catch (error: any) {
-    console.error("[DIRECT_BOOKING_STRIPE_FINANCIAL_REFS_ERROR]", {
-      paymentIntentId,
-      error: error?.message ?? error,
-    });
-
-    return emptyRefs;
-  }
-}
-
-function createGuestToken() {
-  return randomBytes(32).toString("hex");
+  return Number.isFinite(numberValue) ? numberValue : null;
 }
 
 function getAppUrl() {
@@ -174,629 +84,688 @@ function getAppUrl() {
     .replace(/\/+$/, "");
 }
 
-function buildManageReservationUrl(guestToken: string) {
-  return `${getAppUrl()}/booking/manage/${encodeURIComponent(guestToken)}`;
+function buildManageReservationUrl(guestToken: unknown) {
+  const token = normalizeGuestToken(guestToken);
+
+  if (!token) return null;
+
+  return `${getAppUrl()}/booking/manage/${encodeURIComponent(token)}`;
 }
 
-async function getOrCreateReservationGuestToken(reservationId: string) {
-  const existingReservation = await prisma.reservation.findUnique({
-    where: {
-      id: reservationId,
-    },
-    select: {
-      guestToken: true,
-    },
-  });
+function getRefundAmountForEmail({
+  refund,
+  evaluation,
+  refundExecution,
+}: {
+  refund?: unknown;
+  evaluation: ReturnType<typeof evaluateCancellationPolicy>;
+  refundExecution: string;
+}) {
+  const refundRecord = normalizeJsonObject(refund);
 
-  if (existingReservation?.guestToken) {
-    return existingReservation.guestToken;
+  const amountDecimal = toNumber(refundRecord.amountDecimal);
+
+  if (amountDecimal !== null) {
+    return amountDecimal;
   }
 
-  for (let attempt = 0; attempt < 3; attempt += 1) {
-    const guestToken = createGuestToken();
+  const amountCents = toNumber(refundRecord.amountCents);
 
-    try {
-      const updatedReservation = await prisma.reservation.update({
-        where: {
-          id: reservationId,
-        },
-        data: {
-          guestToken,
-        },
-        select: {
-          guestToken: true,
-        },
-      });
-
-      if (updatedReservation.guestToken) {
-        return updatedReservation.guestToken;
-      }
-    } catch (error: any) {
-      if (error?.code !== "P2002") {
-        throw error;
-      }
-    }
+  if (amountCents !== null) {
+    return Number((Math.max(0, Math.round(amountCents)) / 100).toFixed(2));
   }
 
-  throw new Error("DIRECT_BOOKING_GUEST_TOKEN_CREATE_FAILED");
-}
-
-function getCancellationPolicySummaryForEmail(snapshot: any) {
-  const guestFacingSummary = String(snapshot?.guestFacingSummary ?? "").trim();
-
-  if (guestFacingSummary) {
-    return guestFacingSummary;
+  if (refundExecution === "NO_REFUND_DUE") {
+    return 0;
   }
 
-  const description = String(snapshot?.description ?? "").trim();
+  if (refundExecution === "REFUND_PENDING_PROPERTY_WORKFLOW") {
+    return evaluation.refundAmount;
+  }
 
-  return description || null;
+  return evaluation.refundAmount;
 }
 
-function getCancellationRefundRulesForEmail(snapshot: any) {
-  const refundRules = Array.isArray(snapshot?.refundRules)
-    ? snapshot.refundRules
-    : [];
+function getNonRefundableAmountForEmail({
+  reservation,
+  refundAmount,
+}: {
+  reservation: any;
+  refundAmount: number | null;
+}) {
+  const totalAmount = toNumber(reservation.totalAmount);
 
-  return refundRules
-    .map((rule: any) => {
-      const minHoursBeforeCheckIn = Math.max(
-        0,
-        Math.round(Number(rule?.minHoursBeforeCheckIn ?? 0))
-      );
-      const refundPercent = Math.max(
-        0,
-        Math.min(100, Number(rule?.refundPercent ?? 0))
-      );
-      const label = String(
-        rule?.label ?? `${Number(refundPercent.toFixed(2))}% refund`
-      )
-        .trim()
-        .slice(0, 80);
-      const description =
-        typeof rule?.description === "string" && rule.description.trim()
-          ? rule.description.trim().slice(0, 280)
-          : null;
-
-      if (!Number.isFinite(minHoursBeforeCheckIn) || !Number.isFinite(refundPercent)) {
-        return null;
-      }
-
-      return {
-        minHoursBeforeCheckIn,
-        refundPercent: Number(refundPercent.toFixed(2)),
-        label: label || `${Number(refundPercent.toFixed(2))}% refund`,
-        description,
-      };
-    })
-    .filter(
-      (rule): rule is {
-        minHoursBeforeCheckIn: number;
-        refundPercent: number;
-        label: string;
-        description: string | null;
-      } => Boolean(rule)
-    );
-}
-
-export async function handleDirectBookingCheckoutCompleted(
-  session: Stripe.Checkout.Session
-) {
-  if (session.metadata?.flow !== "direct_booking") {
+  if (totalAmount === null || refundAmount === null) {
     return null;
   }
 
-  const existing = await prisma.reservation.findUnique({
-    where: {
-      stripeCheckoutSessionId: session.id,
-    },
-    select: {
-      id: true,
-      stripeCheckoutSessionId: true,
-    },
-  });
+  return Number(Math.max(0, totalAmount - refundAmount).toFixed(2));
+}
 
-  if (existing) {
-    return existing;
+function getRefundStatusForEmail(refund?: unknown) {
+  const refundRecord = normalizeJsonObject(refund);
+  const status = String(refundRecord.status ?? "").trim();
+
+  return status || null;
+}
+
+function getStripeRefundIdForEmail(refund?: unknown) {
+  const refundRecord = normalizeJsonObject(refund);
+  const id = String(refundRecord.id ?? refundRecord.stripeRefundId ?? "").trim();
+
+  return id || null;
+}
+
+function getRefundModeForEmail(refund?: unknown) {
+  const refundRecord = normalizeJsonObject(refund);
+  const refundMode = String(refundRecord.refundMode ?? "").trim();
+
+  return refundMode || null;
+}
+
+async function sendGuestCancellationEmailSafe({
+  reservation,
+  snapshot,
+  evaluation,
+  refundExecution,
+  refund,
+}: {
+  reservation: any;
+  snapshot: CancellationPolicySnapshot;
+  evaluation: ReturnType<typeof evaluateCancellationPolicy>;
+  refundExecution: string;
+  refund?: unknown;
+}) {
+  if (!reservation.guestEmail) {
+    return null;
   }
 
-  const propertyId = requiredMetadata(session, "propertyId");
-  const organizationId = requiredMetadata(session, "organizationId");
-  const guestName = requiredMetadata(session, "guestName");
-  const guestEmail = requiredMetadata(session, "guestEmail");
-  const guestPhone = String(session.metadata?.guestPhone ?? "").trim() || null;
+  const refundAmount = getRefundAmountForEmail({
+    refund,
+    evaluation,
+    refundExecution,
+  });
 
-  const stayNotificationsConsent =
-  String(session.metadata?.stayNotificationsConsent ?? "").trim() === "true";
+  try {
+    return await sendDirectBookingGuestCancellationEmail({
+      to: reservation.guestEmail,
+      guestName: reservation.guestName,
+      propertyName: reservation.property?.name ?? reservation.roomName ?? "Your stay",
+      checkIn: reservation.checkIn,
+      checkOut: reservation.checkOut,
+      propertyTimeZone: reservation.property?.timezone ?? null,
+      totalAmount: reservation.totalAmount ? Number(reservation.totalAmount) : null,
+      currency: reservation.currency,
+      cancelledAt: reservation.cancelledAt ?? new Date(),
+      refundExecution,
+      refundAmount,
+      refundStatus: getRefundStatusForEmail(refund),
+      stripeRefundId: getStripeRefundIdForEmail(refund),
+      refundMode: getRefundModeForEmail(refund),
+      refundBasis: snapshot.refundBasis,
+      nonRefundableAmount: getNonRefundableAmountForEmail({
+        reservation,
+        refundAmount,
+      }),
+      manageReservationUrl: buildManageReservationUrl(reservation.guestToken),
+    });
+  } catch (emailError: any) {
+    console.error("[GUEST_CANCELLATION_EMAIL_ERROR]", {
+      reservationId: reservation.id,
+      guestEmail: reservation.guestEmail,
+      refundExecution,
+      error: emailError?.message ?? emailError,
+    });
 
-const smsConsent =
-  String(session.metadata?.smsConsent ?? "").trim() === "true";
-
-const consentSource =
-  String(session.metadata?.consentSource ?? "").trim() ||
-  "DIRECT_BOOKING_WEB_FORM";
-
-const consentVersion =
-  String(session.metadata?.consentVersion ?? "").trim() ||
-  "stay_notifications_v1";
-
-if (!stayNotificationsConsent || !smsConsent) {
-  throw new Error("DIRECT_BOOKING_SMS_CONSENT_REQUIRED");
+    return null;
+  }
 }
 
-const cancellationTermsAccepted =
-  String(session.metadata?.guestAcceptedCancellationTerms ?? "").trim() ===
-  "true";
-
-const cancellationTermsAcceptedAtRaw = optionalMetadata(
-  session,
-  "guestAcceptedCancellationTermsAt"
-);
-
-const cancellationTermsAcceptedAt =
-  cancellationTermsAcceptedAtRaw &&
-  !Number.isNaN(new Date(cancellationTermsAcceptedAtRaw).getTime())
-    ? cancellationTermsAcceptedAtRaw
-    : new Date().toISOString();
-
-const cancellationTermsText = optionalMetadata(
-  session,
-  "guestAcceptedCancellationTermsText"
-);
-
-const cancellationTermsSource =
-  optionalMetadata(session, "guestAcceptedCancellationTermsSource") ??
-  "DIRECT_BOOKING_WEB_FORM";
-
-const cancellationTermsAckVersion =
-  optionalMetadata(session, "cancellationTermsAckVersion") ??
-  "cancellation_terms_ack_v1";
-
-const cancellationPolicyRefundBasis = optionalMetadata(
-  session,
-  "cancellationPolicyRefundBasis"
-);
-
-if (!cancellationTermsAccepted || !cancellationTermsText) {
-  throw new Error("DIRECT_BOOKING_CANCELLATION_TERMS_ACK_REQUIRED");
+function isDirectBookingReservation(reservation: {
+  source: string | null;
+  externalProvider: string | null;
+  stripeCheckoutSessionId: string | null;
+}) {
+  return (
+    reservation.source === "DIRECT_BOOKING" ||
+    reservation.externalProvider === "PIN_GO_DIRECT" ||
+    Boolean(reservation.stripeCheckoutSessionId)
+  );
 }
 
-  const checkIn = parseDateMetadata(session, "checkIn");
-  const checkOut = parseDateMetadata(session, "checkOut");
-  const checkInRaw = requiredMetadata(session, "checkIn");
-  const checkOutRaw = requiredMetadata(session, "checkOut");
+async function getReservationByGuestToken(guestTokenInput: string) {
+  const guestToken = normalizeGuestToken(guestTokenInput);
 
-  const property = await prisma.property.findFirst({
+  if (!guestToken) {
+    throw new GuestCancellationError({
+      code: "MISSING_GUEST_TOKEN",
+      message: "Missing guest reservation token.",
+      statusCode: 400,
+    });
+  }
+
+  const now = new Date();
+
+  const reservation = await prisma.reservation.findFirst({
     where: {
-      id: propertyId,
-      organizationId,
-      status: "ACTIVE",
-      isPublicBookable: true,
-      organization: {
-        publicBookingEnabled: true,
+      guestToken,
+      OR: [
+        {
+          guestTokenExpiresAt: null,
+        },
+        {
+          guestTokenExpiresAt: {
+            gt: now,
+          },
+        },
+      ],
+    },
+    include: {
+      property: {
+        select: {
+          id: true,
+          name: true,
+          timezone: true,
+          organizationId: true,
+          distributionStatus: true,
+        },
       },
     },
-    select: {
-  id: true,
-  name: true,
-  timezone: true,
-  organizationId: true,
-  },
-
   });
 
-  if (!property) {
-    throw new Error("DIRECT_BOOKING_PROPERTY_NOT_FOUND_OR_NOT_PUBLIC");
+  if (!reservation) {
+    throw new GuestCancellationError({
+      code: "RESERVATION_NOT_FOUND_OR_TOKEN_EXPIRED",
+      message: "Reservation not found or guest link has expired.",
+      statusCode: 404,
+    });
   }
 
-  const availability = await checkPropertyAvailability({
-    propertyId: property.id,
-    checkIn,
-    checkOut,
+  if (!isDirectBookingReservation(reservation)) {
+    throw new GuestCancellationError({
+      code: "NOT_DIRECT_BOOKING_RESERVATION",
+      message: "Only Pin&Go Direct Booking reservations can be managed here.",
+      statusCode: 400,
+    });
+  }
+
+  return reservation;
+}
+
+async function getEffectiveCancellationPolicySnapshot(reservation: {
+  propertyId: string;
+  cancellationPolicySnapshot: unknown;
+}) {
+  if (
+    reservation.cancellationPolicySnapshot &&
+    typeof reservation.cancellationPolicySnapshot === "object" &&
+    !Array.isArray(reservation.cancellationPolicySnapshot)
+  ) {
+    return reservation.cancellationPolicySnapshot as CancellationPolicySnapshot;
+  }
+
+  return buildCancellationPolicySnapshot(reservation.propertyId);
+}
+
+function getGuestCancellationAction(evaluation: {
+  requiresHostApproval: boolean;
+  refundAmountCents: number;
+}) {
+  if (evaluation.requiresHostApproval) {
+    return "HOST_APPROVAL_REQUIRED";
+  }
+
+  if (evaluation.refundAmountCents > 0) {
+    return "CANCELLATION_ALLOWED_REFUND_PENDING";
+  }
+
+  return "CANCELLATION_ALLOWED_NO_REFUND";
+}
+
+function getRecordedRefund(externalRaw: unknown) {
+  const raw = normalizeJsonObject(externalRaw);
+  const refund = normalizeJsonObject(raw.refund);
+  const stripeRefundId = String(refund.stripeRefundId ?? "").trim();
+
+  if (!stripeRefundId) {
+    return null;
+  }
+
+  return {
+    stripeRefundId,
+    status: String(refund.status ?? "").trim() || null,
+    amount:
+      typeof refund.amount === "number"
+        ? refund.amount
+        : Number(refund.amount ?? 0),
+    amountCents:
+      typeof refund.amountCents === "number"
+        ? refund.amountCents
+        : Number(refund.amountCents ?? 0),
+    currency: String(refund.currency ?? "").trim() || null,
+    reason: String(refund.reason ?? "").trim() || null,
+    refundMode: String(refund.refundMode ?? "").trim() || null,
+    refundPercent:
+      typeof refund.refundPercent === "number"
+        ? refund.refundPercent
+        : Number(refund.refundPercent ?? 0),
+    isFullRefund: Boolean(refund.isFullRefund),
+    refundedAt: String(refund.refundedAt ?? "").trim() || null,
+  };
+}
+
+function getRefundExecution({
+  reservation,
+  evaluation,
+}: {
+  reservation: any;
+  evaluation: ReturnType<typeof evaluateCancellationPolicy>;
+}) {
+  const recordedRefund = getRecordedRefund(reservation.externalRaw);
+
+  if (recordedRefund) {
+    return recordedRefund.isFullRefund
+      ? "FULL_REFUND_EXECUTED"
+      : "PARTIAL_REFUND_EXECUTED";
+  }
+
+  if (evaluation.requiresHostApproval) {
+    return "NOT_EXECUTED_HOST_APPROVAL_REQUIRED";
+  }
+
+  if (evaluation.refundAmountCents > 0) {
+    return evaluation.eligibleForAutoRefund
+      ? "AUTO_REFUND_READY"
+      : "REFUND_PENDING_PROPERTY_WORKFLOW";
+  }
+
+  return "NO_REFUND_DUE";
+}
+
+function serializeGuestCancellationPreview({
+  reservation,
+  snapshot,
+  evaluation,
+  refundExecution,
+  refund,
+}: {
+  reservation: any;
+  snapshot: CancellationPolicySnapshot;
+  evaluation: ReturnType<typeof evaluateCancellationPolicy>;
+  refundExecution?: string | null;
+  refund?: unknown;
+}) {
+  const action = getGuestCancellationAction(evaluation);
+
+  return {
+    reservation: {
+      id: reservation.id,
+      propertyName: reservation.property?.name ?? reservation.roomName,
+      guestName: reservation.guestName,
+      guestEmail: reservation.guestEmail,
+      checkIn: reservation.checkIn,
+      checkOut: reservation.checkOut,
+      status: reservation.status,
+      paymentState: reservation.paymentState,
+      totalAmount: reservation.totalAmount
+        ? Number(reservation.totalAmount)
+        : null,
+      currency: reservation.currency,
+      cancelledAt: reservation.cancelledAt,
+    },
+    policy: {
+      name: snapshot.name,
+      type: snapshot.type,
+      refundBasis: snapshot.refundBasis,
+      refundRules: snapshot.refundRules,
+      nonRefundableScenarios: snapshot.nonRefundableScenarios,
+      guestFacingSummary: snapshot.guestFacingSummary,
+      cancellationTermsAcceptance:
+        (snapshot as any).cancellationTermsAcceptance ?? null,
+    },
+    evaluation: {
+      requestedAt: evaluation.requestedAt,
+      checkIn: evaluation.checkIn,
+      freeCancellationDeadline: evaluation.freeCancellationDeadline,
+      hoursBeforeCheckIn: evaluation.hoursBeforeCheckIn,
+      beforeDeadline: evaluation.beforeDeadline,
+      refundPercent: evaluation.refundPercent,
+      refundAmount: evaluation.refundAmount,
+      refundAmountCents: evaluation.refundAmountCents,
+      usesTieredRules: evaluation.usesTieredRules,
+      matchedRefundRule: evaluation.matchedRefundRule,
+      eligibleForGuestSelfCancellation:
+        evaluation.eligibleForGuestSelfCancellation,
+      eligibleForAutoRefund: evaluation.eligibleForAutoRefund,
+      requiresHostApproval: evaluation.requiresHostApproval,
+      reason: evaluation.reason,
+      breakdown: evaluation.breakdown,
+    },
+    action,
+    refundExecution:
+      refundExecution ??
+      getRefundExecution({
+        reservation,
+        evaluation,
+      }),
+    refund: refund ?? getRecordedRefund(reservation.externalRaw),
+  };
+}
+
+export async function getGuestCancellationPreview({
+  guestToken,
+}: GuestCancellationPreviewInput) {
+  const reservation = await getReservationByGuestToken(guestToken);
+  const snapshot = await getEffectiveCancellationPolicySnapshot(reservation);
+
+  const evaluation = evaluateCancellationPolicy({
+    snapshot,
+    checkIn: reservation.checkIn,
+    totalAmount: reservation.totalAmount,
+    pricingBreakdown: reservation.pricingBreakdown,
+    requestedAt: new Date(),
+    actor: CancellationActor.GUEST,
   });
 
-  if (!availability.available) {
-    throw new Error("DIRECT_BOOKING_PROPERTY_NO_LONGER_AVAILABLE");
+  return serializeGuestCancellationPreview({
+    reservation,
+    snapshot,
+    evaluation,
+  });
+}
+
+export async function cancelReservationFromGuestPortal({
+  guestToken,
+  reason,
+}: GuestCancellationConfirmInput) {
+  const reservation = await getReservationByGuestToken(guestToken);
+
+  if (reservation.status === ReservationStatus.CANCELLED) {
+    const snapshot = await getEffectiveCancellationPolicySnapshot(reservation);
+
+    const evaluation = evaluateCancellationPolicy({
+      snapshot,
+      checkIn: reservation.checkIn,
+      totalAmount: reservation.totalAmount,
+      pricingBreakdown: reservation.pricingBreakdown,
+      requestedAt: new Date(),
+      actor: CancellationActor.GUEST,
+    });
+
+    return {
+      ok: true,
+      alreadyCancelled: true,
+      ...serializeGuestCancellationPreview({
+        reservation,
+        snapshot,
+        evaluation,
+      }),
+    };
   }
 
-  const totalAmountRaw =
-    String(session.metadata?.totalAmount ?? "").trim() ||
-    String((session.amount_total ?? 0) / 100);
+  const snapshot = await getEffectiveCancellationPolicySnapshot(reservation);
+  const requestedAt = new Date();
 
-  const totalAmount = Number(totalAmountRaw);
+  const evaluation = evaluateCancellationPolicy({
+    snapshot,
+    checkIn: reservation.checkIn,
+    totalAmount: reservation.totalAmount,
+    pricingBreakdown: reservation.pricingBreakdown,
+    requestedAt,
+    actor: CancellationActor.GUEST,
+  });
 
-  if (!Number.isFinite(totalAmount) || totalAmount <= 0) {
-    throw new Error("DIRECT_BOOKING_INVALID_TOTAL_AMOUNT");
-  }
+  const cancellationReason = normalizeReason(reason);
+  const previousExternalRaw = normalizeJsonObject(reservation.externalRaw);
 
- const paymentIntentId =
-  typeof session.payment_intent === "string"
-    ? session.payment_intent
-    : session.payment_intent?.id ?? null;
-
-const deserializedCancellationPolicySnapshot =
-  deserializeCancellationPolicySnapshotFromStripeMetadata(
-    session.metadata?.cancellationPolicySnapshot
-  );
-
-const cancellationTermsAcceptance = {
-  accepted: true,
-  acceptedAt: cancellationTermsAcceptedAt,
-  text: cancellationTermsText,
-  source: cancellationTermsSource,
-  version: cancellationTermsAckVersion,
-  refundBasis:
-    (deserializedCancellationPolicySnapshot as any)?.refundBasis ??
-    cancellationPolicyRefundBasis ??
-    null,
-};
-
-const cancellationPolicySnapshot = {
-  ...(deserializedCancellationPolicySnapshot ?? {}),
-  refundBasis: cancellationTermsAcceptance.refundBasis,
-  guestAcceptedCancellationTerms: true,
-  guestAcceptedCancellationTermsAt: cancellationTermsAcceptance.acceptedAt,
-  guestAcceptedCancellationTermsText: cancellationTermsAcceptance.text,
-  guestAcceptedCancellationTermsSource: cancellationTermsAcceptance.source,
-  cancellationTermsAckVersion: cancellationTermsAcceptance.version,
-  cancellationPolicyRefundBasis: cancellationTermsAcceptance.refundBasis,
-  cancellationTermsAcceptance,
-};
-
-let cancellationPolicyId: string | null = null;
-
-if ((cancellationPolicySnapshot as any)?.policyId) {
-  const existingCancellationPolicy =
-    await prisma.propertyCancellationPolicy.findFirst({
+  if (evaluation.requiresHostApproval) {
+    await prisma.reservation.update({
       where: {
-        id: (cancellationPolicySnapshot as any).policyId,
-        propertyId: property.id,
+        id: reservation.id,
       },
-      select: {
-        id: true,
+      data: {
+        cancellationRequestedAt: requestedAt,
+        cancellationRequestedBy: CancellationActor.GUEST,
+        cancellationEvaluatedAt: requestedAt,
+        cancellationEvaluation: evaluation as any,
+        cancellationReason,
+        cancellationRefundAmount: evaluation.refundAmount,
+        cancellationRefundPercent: evaluation.refundPercent,
+        externalRaw: {
+          ...previousExternalRaw,
+          guestCancellation: {
+            requestedAt: requestedAt.toISOString(),
+            requestedBy: CancellationActor.GUEST,
+            reason: cancellationReason,
+            action: "HOST_APPROVAL_REQUIRED",
+            refundExecution: "NOT_EXECUTED_HOST_APPROVAL_REQUIRED",
+            evaluation,
+          },
+        },
       },
     });
 
-  cancellationPolicyId = existingCancellationPolicy?.id ?? null;
-}
-
-const stripeConnectedAccountId = optionalMetadata(
-  session,
-  "stripeConnectedAccountId"
-);
-
-const platformFeeAmount = parseOptionalMoneyMetadata(
-  session,
-  "platformFeeAmount"
-);
-
-const hostPayoutAmount = parseOptionalMoneyMetadata(
-  session,
-  "hostPayoutAmount"
-);
-
-const hostPayoutStatus = parseHostPayoutStatus(session);
-
-const stripeFinancialRefs = await getStripeFinancialRefs(paymentIntentId);
-
-const selectedAmenityIds = parseSelectedAmenityIds(session);
-const pricingBreakdown = await calculateDirectBookingPricing({
-  propertyId: property.id,
-  checkIn,
-  checkOut,
-  selectedAmenityIds,
-});
-
-const ingestResult = await ingestReservation({
-  source: "DIRECT_BOOKING",
-
-  propertyId: property.id,
-  guestName,
-  guestEmail,
-  guestPhone,
-  roomName: property.name,
-
-  checkIn: checkInRaw,
-  checkOut: checkOutRaw,
- 
-  paymentState: "PAID",
-
-  externalProvider: "PIN_GO_DIRECT",
-  externalId: session.id,
-  externalUpdatedAt: new Date().toISOString(),
-  externalRaw: {
-    stripeCheckoutSessionId: session.id,
-    stripePaymentIntentId: paymentIntentId,
-    amountTotal: session.amount_total,
-    currency: session.currency,
-    metadata: session.metadata ?? {},
-    consent: {
-      stayNotificationsConsent,
-      smsConsent,
-      consentSource,
-      consentVersion,
-      acceptedAt: new Date().toISOString(),
-   },
-    cancellationTerms: cancellationTermsAcceptance,
- },
-
-  status: "ACTIVE",
-});
-
-const guestToken = await getOrCreateReservationGuestToken(
-  ingestResult.reservationId
-);
-const manageReservationUrl = buildManageReservationUrl(guestToken);
-
-const updatedReservation = await prisma.reservation.update({
-  where: {
-    id: ingestResult.reservationId,
-  },
- data: {
-  totalAmount: pricingBreakdown.totalAmount,
-  currency: pricingBreakdown.currency,
-  stripeCheckoutSessionId: session.id,
-  stripePaymentIntentId: paymentIntentId,
-  
-  cancellationPolicyId,
-  cancellationPolicySnapshot: cancellationPolicySnapshot as any,
- 
-  stripeConnectedAccountId,
-  stripeChargeId: stripeFinancialRefs.stripeChargeId,
-  stripeTransferId: stripeFinancialRefs.stripeTransferId,
-  stripeApplicationFeeId: stripeFinancialRefs.stripeApplicationFeeId,
-  platformFeeAmount,
-  hostPayoutAmount,
-  hostPayoutStatus: hostPayoutStatus as any,
-  hostPayoutLastSyncedAt: new Date(),
-
-  selectedAmenityIds,
-  pricingBreakdown,
-},
-  select: {
-  id: true,
-  guestToken: true,
-  guestName: true,
-  guestEmail: true,
-  guestPhone: true,
-  checkIn: true,
-  checkOut: true,
-  totalAmount: true,
-  currency: true,
-  stripeConnectedAccountId: true,
-  platformFeeAmount: true,
-  hostPayoutAmount: true,
-  hostPayoutStatus: true,
-},
-});
-
-const amountNumber = updatedReservation.totalAmount
-  ? Number(updatedReservation.totalAmount)
-  : null;
-
-if (updatedReservation.guestEmail) {
-  try {
-    await sendDirectBookingGuestConfirmation({
-      to: updatedReservation.guestEmail,
-      guestName: updatedReservation.guestName,
-      propertyName: property.name,
-      checkIn: updatedReservation.checkIn,
-      checkOut: updatedReservation.checkOut,
-      propertyTimeZone: property.timezone,
-      totalAmount: amountNumber,
-      currency: updatedReservation.currency,
-      manageReservationUrl,
-      cancellationPolicyName: (cancellationPolicySnapshot as any).name ?? null,
-      cancellationPolicyType: (cancellationPolicySnapshot as any).type ?? null,
-      cancellationPolicySummary: getCancellationPolicySummaryForEmail(
-        cancellationPolicySnapshot
-      ),
-      refundBasis: (cancellationPolicySnapshot as any).refundBasis ?? null,
-      refundRules: getCancellationRefundRulesForEmail(
-        cancellationPolicySnapshot
-      ),
+    throw new GuestCancellationError({
+      code: "CANCELLATION_REQUIRES_HOST_APPROVAL",
+      message:
+        "This cancellation requires host approval and cannot be completed automatically.",
+      statusCode: 409,
+      details: serializeGuestCancellationPreview({
+        reservation,
+        snapshot,
+        evaluation,
+        refundExecution: "NOT_EXECUTED_HOST_APPROVAL_REQUIRED",
+      }),
     });
-  } catch (emailError) {
-    console.error("[DIRECT_BOOKING_GUEST_EMAIL_ERROR]", emailError);
   }
-}
 
-const distributionStartedAt = new Date();
-const distributionDecisionId = `distribution-engine:${property.id}:direct-booking:${ingestResult.reservationId}`;
+  if (
+    evaluation.eligibleForAutoRefund &&
+    evaluation.refundAmountCents > 0
+  ) {
+    const refundMode =
+      evaluation.refundAmountCents >= evaluation.breakdown.totalAmountCents
+        ? "FULL"
+        : "PARTIAL";
 
-let distributionSyncResult: any = null;
+    try {
+      const refundResult = await refundDirectBookingReservation({
+        organizationId: reservation.property.organizationId,
+        reservationId: reservation.id,
+        reason: cancellationReason,
+        refundMode,
+        refundAmountCents: evaluation.refundAmountCents,
+        refundPercent: evaluation.refundPercent,
+        cancellationEvaluation: evaluation,
+        requestedByUserId: null,
+        requestedByActor: CancellationActor.GUEST,
+      });
 
-try {
-  distributionSyncResult = await syncChannexAvailabilityForProperty(
-    property.id
-  );
+      const updatedReservation = await getReservationByGuestToken(guestToken);
+      const refundExecution =
+        refundMode === "FULL"
+          ? "FULL_REFUND_EXECUTED"
+          : "PARTIAL_REFUND_EXECUTED";
 
-  await prisma.property.update({
-    where: { id: property.id },
+      await sendGuestCancellationEmailSafe({
+        reservation: updatedReservation,
+        snapshot,
+        evaluation,
+        refundExecution,
+        refund: refundResult.refund,
+      });
+
+      return {
+        ok: true,
+        alreadyCancelled: false,
+        ...serializeGuestCancellationPreview({
+          reservation: updatedReservation,
+          snapshot,
+          evaluation,
+          refundExecution,
+          refund: refundResult.refund,
+        }),
+        refundResult,
+      };
+    } catch (error: any) {
+      console.error("[GUEST_CANCELLATION_AUTO_REFUND_ERROR]", {
+        reservationId: reservation.id,
+        propertyId: reservation.propertyId,
+        refundAmountCents: evaluation.refundAmountCents,
+        error: error?.message ?? error,
+      });
+
+      await prisma.reservation
+        .update({
+          where: {
+            id: reservation.id,
+          },
+          data: {
+            cancellationRequestedAt: requestedAt,
+            cancellationRequestedBy: CancellationActor.GUEST,
+            cancellationEvaluatedAt: requestedAt,
+            cancellationEvaluation: evaluation as any,
+            cancellationReason,
+            externalRaw: {
+              ...previousExternalRaw,
+              guestCancellation: {
+                requestedAt: requestedAt.toISOString(),
+                requestedBy: CancellationActor.GUEST,
+                reason: cancellationReason,
+                action: getGuestCancellationAction(evaluation),
+                refundExecution: "AUTO_REFUND_FAILED",
+                refundError: {
+                  code: error?.code ?? "AUTO_REFUND_FAILED",
+                  message: error?.message ?? "Automatic refund failed.",
+                  statusCode: error?.statusCode ?? 500,
+                  details: error?.details ?? null,
+                },
+                evaluation,
+              },
+            },
+          },
+        })
+        .catch(() => {});
+
+      throw new GuestCancellationError({
+        code: "GUEST_AUTO_REFUND_FAILED",
+        message:
+          error?.message ||
+          "Pin&Go could not process the automatic refund for this cancellation.",
+        statusCode: error?.statusCode || 500,
+        details: serializeGuestCancellationPreview({
+          reservation,
+          snapshot,
+          evaluation,
+          refundExecution: "AUTO_REFUND_FAILED",
+        }),
+      });
+    }
+  }
+
+  const cancelledAt = new Date();
+
+  const refundExecution =
+    evaluation.refundAmountCents > 0
+      ? "REFUND_PENDING_PROPERTY_WORKFLOW"
+      : "NO_REFUND_DUE";
+
+  const updatedReservation = await prisma.reservation.update({
+    where: {
+      id: reservation.id,
+    },
     data: {
-      distributionLastSyncedAt: new Date(),
-      distributionLastError: null,
+      status: ReservationStatus.CANCELLED,
+      cancelledAt,
+      cancelledBy: CancellationActor.GUEST,
+      cancelledByUserId: null,
+      cancellationRequestedAt: requestedAt,
+      cancellationRequestedBy: CancellationActor.GUEST,
+      cancellationEvaluatedAt: requestedAt,
+      cancellationEvaluation: evaluation as any,
+      cancellationReason,
+      cancellationRefundAmount: evaluation.refundAmount,
+      cancellationRefundPercent: evaluation.refundPercent,
+      externalRaw: {
+        ...previousExternalRaw,
+        guestCancellation: {
+          requestedAt: requestedAt.toISOString(),
+          cancelledAt: cancelledAt.toISOString(),
+          requestedBy: CancellationActor.GUEST,
+          cancelledBy: CancellationActor.GUEST,
+          reason: cancellationReason,
+          action: getGuestCancellationAction(evaluation),
+          refundExecution,
+          evaluation,
+        },
+      },
+    },
+    include: {
+      property: {
+        select: {
+          id: true,
+          name: true,
+          timezone: true,
+          organizationId: true,
+          distributionStatus: true,
+        },
+      },
     },
   });
 
-  const distributionCompletedAt = new Date();
+  await reconcileReservation(updatedReservation.id);
 
-  const distributionSyncSucceeded =
-    distributionSyncResult &&
-    typeof distributionSyncResult === "object" &&
-    "ok" in distributionSyncResult
-      ? Boolean((distributionSyncResult as any).ok)
-      : true;
-
-  const distributionAuditEntry: AuditEntry = {
-    engine: "Distribution",
-    decisionId: distributionDecisionId,
-    entityType: "DISTRIBUTION",
-    entityId: property.id,
-    eventType: distributionSyncSucceeded
-      ? "SYNC_COMPLETED"
-      : "SYNC_FAILED",
-    status: distributionSyncSucceeded ? "SUCCESS" : "FAILED",
-    severity: distributionSyncSucceeded ? "INFO" : "WARNING",
-    summary: distributionSyncSucceeded
-      ? "Distribution Engine synchronized channel availability after direct booking reservation."
-      : "Distribution Engine could not fully synchronize channel availability after direct booking reservation.",
-    startedAt: distributionStartedAt,
-    completedAt: distributionCompletedAt,
-    durationMs:
-      distributionCompletedAt.getTime() - distributionStartedAt.getTime(),
-    reason: distributionSyncSucceeded
-      ? "DIRECT_BOOKING_DISTRIBUTION_SYNC_COMPLETED"
-      : "DIRECT_BOOKING_DISTRIBUTION_SYNC_FAILED",
-    decisions: [
-      {
-        engine: "Distribution",
-        rule: "DIRECT_BOOKING_CHANNEX_AVAILABILITY_SYNC",
-        label: "Direct Booking Channel Availability Sync",
-        applied: distributionSyncSucceeded,
-        adjustment: null,
-        adjustmentPercent: null,
-        confidence: distributionSyncSucceeded ? 100 : 0,
-        metadata: {
-          organizationId: property.organizationId,
-          propertyId: property.id,
-          reservationId: ingestResult.reservationId,
-          provider: "CHANNEX",
-          syncType: "AVAILABILITY",
-          trigger: "DIRECT_BOOKING",
-          resultOk:
-            distributionSyncResult &&
-            typeof distributionSyncResult === "object" &&
-            "ok" in distributionSyncResult
-              ? (distributionSyncResult as any).ok
-              : null,
-          pushedToChannex:
-            distributionSyncResult &&
-            typeof distributionSyncResult === "object" &&
-            "pushedToChannex" in distributionSyncResult
-              ? (distributionSyncResult as any).pushedToChannex
-              : null,
-        },
-      },
-    ],
-    recommendedAction: distributionSyncSucceeded
-      ? undefined
-      : "Review Channex sync after this direct booking reservation.",
-    metadata: {
-      organizationId: property.organizationId,
-      propertyId: property.id,
-      reservationId: ingestResult.reservationId,
-      provider: "CHANNEX",
-      syncType: "AVAILABILITY",
-      trigger: "DIRECT_BOOKING",
-      resultOk:
-        distributionSyncResult &&
-        typeof distributionSyncResult === "object" &&
-        "ok" in distributionSyncResult
-          ? (distributionSyncResult as any).ok
-          : null,
-      pushedToChannex:
-        distributionSyncResult &&
-        typeof distributionSyncResult === "object" &&
-        "pushedToChannex" in distributionSyncResult
-          ? (distributionSyncResult as any).pushedToChannex
-          : null,
-    },
-  };
+  let distributionSyncResult: unknown = null;
 
   try {
-    await persistAuditEntry(prisma, distributionAuditEntry);
-  } catch (auditPersistenceError: any) {
-    console.error("[APMS_DISTRIBUTION_AUTO_SYNC_AUDIT_PERSIST_ERROR]", {
-      engine: "Distribution",
-      propertyId: property.id,
-      reservationId: ingestResult.reservationId,
-      provider: "CHANNEX",
-      syncType: "AVAILABILITY",
-      trigger: "DIRECT_BOOKING",
-      decisionId: distributionAuditEntry.decisionId,
-      error: auditPersistenceError?.message ?? auditPersistenceError,
+    distributionSyncResult = await syncChannexAvailabilityForProperty(
+      updatedReservation.propertyId
+    );
+
+    await prisma.property.update({
+      where: {
+        id: updatedReservation.propertyId,
+      },
+      data: {
+        distributionLastSyncedAt: new Date(),
+        distributionLastError: null,
+      },
+    });
+  } catch (syncError: any) {
+    console.error("[GUEST_CANCELLATION_CHANNEX_SYNC_ERROR]", {
+      reservationId: updatedReservation.id,
+      propertyId: updatedReservation.propertyId,
+      error: syncError?.message ?? syncError,
+    });
+
+    await prisma.property.update({
+      where: {
+        id: updatedReservation.propertyId,
+      },
+      data: {
+        distributionLastError:
+          syncError?.message ||
+          "Failed to sync Channex after guest cancellation",
+      },
     });
   }
-} catch (syncError: any) {
-  console.error("[DIRECT_BOOKING_CHANNEX_SYNC_ERROR]", syncError);
 
-  await prisma.property.update({
-    where: { id: property.id },
-    data: {
-      distributionLastError:
-        syncError?.message || "Failed to sync Channex after direct booking",
-    },
+  await sendGuestCancellationEmailSafe({
+    reservation: updatedReservation,
+    snapshot,
+    evaluation,
+    refundExecution,
   });
 
-  const distributionCompletedAt = new Date();
-
-  const distributionAuditEntry: AuditEntry = {
-    engine: "Distribution",
-    decisionId: distributionDecisionId,
-    entityType: "DISTRIBUTION",
-    entityId: property.id,
-    eventType: "SYNC_FAILED",
-    status: "FAILED",
-    severity: "CRITICAL",
-    summary:
-      "Distribution Engine failed to synchronize channel availability after direct booking reservation.",
-    startedAt: distributionStartedAt,
-    completedAt: distributionCompletedAt,
-    durationMs:
-      distributionCompletedAt.getTime() - distributionStartedAt.getTime(),
-    reason: "DIRECT_BOOKING_DISTRIBUTION_SYNC_ERROR",
-    decisions: [
-      {
-        engine: "Distribution",
-        rule: "DIRECT_BOOKING_CHANNEX_AVAILABILITY_SYNC",
-        label: "Direct Booking Channel Availability Sync",
-        applied: false,
-        adjustment: null,
-        adjustmentPercent: null,
-        confidence: 0,
-        metadata: {
-          organizationId: property.organizationId,
-          propertyId: property.id,
-          reservationId: ingestResult.reservationId,
-          provider: "CHANNEX",
-          syncType: "AVAILABILITY",
-          trigger: "DIRECT_BOOKING",
-          error: syncError?.message ?? String(syncError),
-        },
-      },
-    ],
-    recommendedAction:
-      "Review Channex availability connection and retry sync after this direct booking reservation.",
-    metadata: {
-      organizationId: property.organizationId,
-      propertyId: property.id,
-      reservationId: ingestResult.reservationId,
-      provider: "CHANNEX",
-      syncType: "AVAILABILITY",
-      trigger: "DIRECT_BOOKING",
-      error: syncError?.message ?? String(syncError),
-    },
+  return {
+    ok: true,
+    alreadyCancelled: false,
+    ...serializeGuestCancellationPreview({
+      reservation: updatedReservation,
+      snapshot,
+      evaluation,
+      refundExecution,
+    }),
+    distributionSyncResult,
   };
-
-  try {
-    await persistAuditEntry(prisma, distributionAuditEntry);
-  } catch (auditPersistenceError: any) {
-    console.error("[APMS_DISTRIBUTION_AUTO_SYNC_AUDIT_PERSIST_ERROR]", {
-      engine: "Distribution",
-      propertyId: property.id,
-      reservationId: ingestResult.reservationId,
-      provider: "CHANNEX",
-      syncType: "AVAILABILITY",
-      trigger: "DIRECT_BOOKING",
-      decisionId: distributionAuditEntry.decisionId,
-      error: auditPersistenceError?.message ?? auditPersistenceError,
-    });
-  }
-}
-return {
-  id: ingestResult.reservationId,
-  stripeCheckoutSessionId: session.id,
-};
-
 }

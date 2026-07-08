@@ -12,7 +12,6 @@ import {
   serializeCancellationPolicySnapshotForStripeMetadata,
 } from "../services/cancellation-policy.service";
 import {
-  GuestCancellationError,
   cancelReservationFromGuestPortal,
   getGuestCancellationPreview,
 } from "../services/guest-cancellation.service";
@@ -286,6 +285,16 @@ function buildGuestCancellationTermsText(policy: { refundBasis?: string | null }
   return baseText;
 }
 
+function isGuestCancellationRouteError(error: any) {
+  return (
+    error &&
+    typeof error === "object" &&
+    error.name === "GuestCancellationError" &&
+    typeof error.code === "string" &&
+    typeof error.statusCode === "number"
+  );
+}
+
 function sendGuestCancellationRouteError({
   res,
   error,
@@ -299,7 +308,7 @@ function sendGuestCancellationRouteError({
 }) {
   console.error(logLabel, error?.message ?? error);
 
-  if (error instanceof GuestCancellationError) {
+  if (isGuestCancellationRouteError(error)) {
     return res.status(error.statusCode).json({
       ok: false,
       error: error.code,
