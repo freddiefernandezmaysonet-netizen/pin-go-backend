@@ -15,6 +15,7 @@ import { createMissionControlSnapshotFromAuditEntries } from "../apms/mission-co
 import type { AuditEntry } from "../apms/audit-types";
 import { persistAuditEntry } from "../apms/audit-persistence.service";
 import { createDistributionAuditEntry } from "../apms/distribution-audit.mapper";
+import { sendManualReservationGuestConfirmation } from "../lib/mailer";
 
 const prisma = new PrismaClient();
 export const dashboardPropertiesRouter = Router();
@@ -85,6 +86,16 @@ function parsePropertySeasonType(
   }
 
   return null;
+}
+
+function getAppUrl() {
+  return String(process.env.APP_URL ?? "http://localhost:3000")
+    .trim()
+    .replace(/\/+$/, "");
+}
+
+function buildManageReservationUrl(guestToken: string) {
+  return `${getAppUrl()}/booking/manage/${encodeURIComponent(guestToken)}`;
 }
 
 dashboardPropertiesRouter.get(
@@ -952,6 +963,30 @@ dashboardPropertiesRouter.post(
         },
         status: "ACTIVE",
       });
+
+const manageReservationUrl = result.guestToken
+  ? buildManageReservationUrl(result.guestToken)
+  : null;
+
+if (cleanGuestEmail) {
+  try {
+    await sendManualReservationGuestConfirmation({
+      to: cleanGuestEmail,
+      guestName: cleanGuestName,
+      propertyName: property.name,
+      checkIn: new Date(String(checkIn)),
+      checkOut: new Date(String(checkOut)),
+      manageReservationUrl,
+    });
+  } catch (emailError: any) {
+    console.error("[MANUAL_RESERVATION_GUEST_EMAIL_ERROR]", {
+      propertyId: property.id,
+      reservationId: result.reservationId,
+      to: cleanGuestEmail,
+      error: emailError?.message ?? emailError,
+    });
+  }
+}
 
      let distributionSyncResult: any = null;
 

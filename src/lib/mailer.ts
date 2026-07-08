@@ -54,6 +54,16 @@ type SendDirectBookingHostNotificationInput = {
   currency?: string | null;
 };
 
+type SendManualReservationGuestConfirmationInput = {
+  to: string;
+  guestName?: string | null;
+  propertyName: string;
+  checkIn: Date;
+  checkOut: Date;
+  propertyTimeZone?: string | null;
+  manageReservationUrl?: string | null;
+};
+
 type SendDirectBookingGuestCancellationEmailInput = {
   to: string;
   guestName?: string | null;
@@ -689,6 +699,124 @@ export async function sendDirectBookingGuestConfirmation(
   }
 
   console.log("✅ DIRECT BOOKING GUEST EMAIL SENT TO:", to);
+
+  return {
+    ok: true,
+    mode: "resend",
+    data,
+  };
+}
+
+export async function sendManualReservationGuestConfirmation(
+  input: SendManualReservationGuestConfirmationInput
+) {
+  const {
+    to,
+    guestName,
+    propertyName,
+    checkIn,
+    checkOut,
+    propertyTimeZone,
+    manageReservationUrl,
+  } = input;
+
+  const safeName = escapeHtml(guestName?.trim() || "there");
+  const safePropertyName = escapeHtml(propertyName);
+  const dateTimeZone = normalizePropertyTimeZone(propertyTimeZone);
+  const manageReservationBlock = renderManageReservationBlock(
+    manageReservationUrl
+  );
+
+  if (!resend) {
+    if (isProd) {
+      throw new Error("RESEND_API_KEY missing in production");
+    }
+
+    console.log("📨 RESEND_API_KEY missing. Manual reservation guest email fallback.");
+    console.log("TO:", to);
+
+    return {
+      ok: true,
+      mode: "console",
+    };
+  }
+
+  const { data, error } = await resend.emails.send({
+    from: getEmailFrom(),
+    to,
+    subject: `Your Pin&Go reservation is confirmed - ${propertyName}`,
+    html: `
+      <div style="font-family: Arial, sans-serif; color: #111827; line-height: 1.6; max-width: 680px; margin: 0 auto;">
+        <div style="background:linear-gradient(135deg,#020617,#1d4ed8);color:#ffffff;border-radius:18px;padding:24px;margin-bottom:20px;">
+          <p style="margin:0 0 8px;font-size:12px;letter-spacing:0.08em;text-transform:uppercase;font-weight:800;">Pin&Go Reservation</p>
+          <h1 style="margin:0;font-size:28px;line-height:1.15;">Your reservation is confirmed</h1>
+          <p style="margin:10px 0 0;color:#dbeafe;">Pin&Go has started the secure stay workflow for your reservation.</p>
+        </div>
+
+        <p>Hi ${safeName},</p>
+
+        <p>
+          Your reservation for <strong>${safePropertyName}</strong> has been confirmed.
+        </p>
+
+        <div style="background:#f9fafb;border:1px solid #e5e7eb;border-radius:14px;padding:16px;margin:20px 0;">
+          <p><strong>Property:</strong> ${safePropertyName}</p>
+          <p><strong>Check-in:</strong> ${formatBookingDate(checkIn, dateTimeZone)}</p>
+          <p><strong>Check-out:</strong> ${formatBookingDate(checkOut, dateTimeZone)}</p>
+        </div>
+
+        ${manageReservationBlock}
+
+        <div style="background:#f0fdf4;border:1px solid #bbf7d0;border-radius:14px;padding:16px;margin:20px 0;color:#14532d;">
+          <h3 style="margin:0 0 8px;">Smart access and check-in</h3>
+          <p style="margin:0;">
+            Your smart access instructions will be delivered according to the property's secure check-in workflow.
+            For security, access details may be delivered closer to check-in or after operational checks are complete.
+          </p>
+        </div>
+
+        <p style="color:#4b5563;">
+          You can use the manage reservation link to review your stay details and self-service options.
+        </p>
+
+        <p>
+          Thank you,<br />
+          Pin&Go
+        </p>
+
+        <hr style="border: none; border-top: 1px solid #e5e7eb; margin: 28px 0;" />
+
+        <h2 style="margin-bottom: 8px;">Tu reservación está confirmada</h2>
+
+        <p>Hola ${safeName},</p>
+
+        <p>
+          Tu reservación para <strong>${safePropertyName}</strong> ha sido confirmada.
+        </p>
+
+        <p>
+          Pin&Go comenzó el flujo seguro de estadía: confirmación de reserva,
+          preparación operacional y acceso inteligente.
+        </p>
+
+        <p>
+          Las instrucciones de acceso inteligente se entregarán según el flujo seguro de check-in de la propiedad.
+          Por seguridad, los detalles de acceso pueden enviarse más cerca del check-in o después de completar validaciones operacionales.
+        </p>
+
+        <p>
+          Gracias,<br />
+          Pin&Go
+        </p>
+      </div>
+    `,
+  });
+
+  if (error) {
+    throw new Error(`Resend manual reservation guest email failed: ${error.message}`);
+  }
+
+  console.log("✅ MANUAL RESERVATION GUEST EMAIL SENT TO:", to);
 
   return {
     ok: true,
