@@ -6,6 +6,7 @@ import { checkPropertyAvailability } from "./availability.service";
 import { ingestReservation } from "./ingest.service";
 import { calculateDirectBookingPricing } from "./direct-booking-pricing.service";
 import { syncChannexAvailabilityForProperty } from "./channex-availability-sync.service";
+import { auditReservationCompleteFlowSafe } from "./reservation-complete-flow-audit.service";
 import {
   sendDirectBookingGuestConfirmation,
   sendDirectBookingHostNotification,
@@ -941,6 +942,23 @@ try {
     });
   }
 }
+
+const completeFlowAuditResult = await auditReservationCompleteFlowSafe(
+  ingestResult.reservationId,
+  prisma
+);
+
+if (completeFlowAuditResult) {
+  console.log("[RESERVATION_COMPLETE_FLOW_AUDIT_RESULT]", {
+    reservationId: completeFlowAuditResult.reservationId,
+    propertyId: completeFlowAuditResult.propertyId,
+    organizationId: completeFlowAuditResult.organizationId,
+    completeFlowStatus: completeFlowAuditResult.completeFlowStatus,
+    failedChecks: completeFlowAuditResult.failedChecks.map((check) => check.rule),
+    warningChecks: completeFlowAuditResult.warningChecks.map((check) => check.rule),
+  });
+}
+
 return {
   id: ingestResult.reservationId,
   stripeCheckoutSessionId: session.id,
