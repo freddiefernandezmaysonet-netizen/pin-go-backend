@@ -10,6 +10,7 @@ import {
 } from "./cancellation-policy.service";
 import type { CancellationPolicySnapshot } from "./cancellation-policy.service";
 import { refundDirectBookingReservation } from "./direct-booking-refund.service";
+import { sendDirectBookingGuestCancellationEmail } from "../lib/mailer";
 import { reconcileReservation } from "./reservation.reconcile.service";
 
 const prisma = new PrismaClient();
@@ -67,6 +68,156 @@ function normalizeJsonObject(value: unknown) {
   }
 
   return {};
+}
+
+function toNumber(value: unknown) {
+  if (value === null || value === undefined) return null;
+
+  const numberValue = Number(value);
+
+  return Number.isFinite(numberValue) ? numberValue : null;
+}
+
+function getAppUrl() {
+  return String(process.env.APP_URL ?? "http://localhost:3000")
+    .trim()
+    .replace(/\/+$/, "");
+}
+
+function buildManageReservationUrl(guestToken: unknown) {
+  const token = normalizeGuestToken(guestToken);
+
+  if (!token) return null;
+
+  return `${getAppUrl()}/booking/manage/${encodeURIComponent(token)}`;
+}
+
+function getRefundAmountForEmail({
+  refund,
+  evaluation,
+  refundExecution,
+}: {
+  refund?: unknown;
+  evaluation: ReturnType<typeof evaluateCancellationPolicy>;
+  refundExecution: string;
+}) {
+  const refundRecord = normalizeJsonObject(refund);
+
+  const amountDecimal = toNumber(refundRecord.amountDecimal);
+
+  if (amountDecimal !== null) {
+    return amountDecimal;
+  }
+
+  const amountCents = toNumber(refundRecord.amountCents);
+
+  if (amountCents !== null) {
+    return Number((Math.max(0, Math.round(amountCents)) / 100).toFixed(2));
+  }
+
+  if (refundExecution === "NO_REFUND_DUE") {
+    return 0;
+  }
+
+  if (refundExecution === "REFUND_PENDING_PROPERTY_WORKFLOW") {
+    return evaluation.refundAmount;
+  }
+
+  return evaluation.refundAmount;
+}
+
+function getNonRefundableAmountForEmail({
+  reservation,
+  refundAmount,
+}: {
+  reservation: any;
+  refundAmount: number | null;
+}) {
+  const totalAmount = toNumber(reservation.totalAmount);
+
+  if (totalAmount === null || refundAmount === null) {
+    return null;
+  }
+
+  return Number(Math.max(0, totalAmount - refundAmount).toFixed(2));
+}
+
+function getRefundStatusForEmail(refund?: unknown) {
+  const refundRecord = normalizeJsonObject(refund);
+  const status = String(refundRecord.status ?? "").trim();
+
+  return status || null;
+}
+
+function getStripeRefundIdForEmail(refund?: unknown) {
+  const refundRecord = normalizeJsonObject(refund);
+  const id = String(refundRecord.id ?? refundRecord.stripeRefundId ?? "").trim();
+
+  return id || null;
+}
+
+function getRefundModeForEmail(refund?: unknown) {
+  const refundRecord = normalizeJsonObject(refund);
+  const refundMode = String(refundRecord.refundMode ?? "").trim();
+
+  return refundMode || null;
+}
+
+async function sendGuestCancellationEmailSafe({
+  reservation,
+  snapshot,
+  evaluation,
+  refundExecution,
+  refund,
+}: {
+  reservation: any;
+  snapshot: CancellationPolicySnapshot;
+  evaluation: ReturnType<typeof evaluateCancellationPolicy>;
+  refundExecution: string;
+  refund?: unknown;
+}) {
+  if (!reservation.guestEmail) {
+    return null;
+  }
+
+  const refundAmount = getRefundAmountForEmail({
+    refund,
+    evaluation,
+    refundExecution,
+  });
+
+  try {
+    return await sendDirectBookingGuestCancellationEmail({
+      to: reservation.guestEmail,
+      guestName: reservation.guestName,
+      propertyName: reservation.property?.name ?? reservation.roomName ?? "Your stay",
+      checkIn: reservation.checkIn,
+      checkOut: reservation.checkOut,
+      totalAmount: reservation.totalAmount ? Number(reservation.totalAmount) : null,
+      currency: reservation.currency,
+      cancelledAt: reservation.cancelledAt ?? new Date(),
+      refundExecution,
+      refundAmount,
+      refundStatus: getRefundStatusForEmail(refund),
+      stripeRefundId: getStripeRefundIdForEmail(refund),
+      refundMode: getRefundModeForEmail(refund),
+      refundBasis: snapshot.refundBasis,
+      nonRefundableAmount: getNonRefundableAmountForEmail({
+        reservation,
+        refundAmount,
+      }),
+      manageReservationUrl: buildManageReservationUrl(reservation.guestToken),
+    });
+  } catch (emailError: any) {
+    console.error("[GUEST_CANCELLATION_EMAIL_ERROR]", {
+      reservationId: reservation.id,
+      guestEmail: reservation.guestEmail,
+      refundExecution,
+      error: emailError?.message ?? emailError,
+    });
+
+    return null;
+  }
 }
 
 function isDirectBookingReservation(reservation: {
@@ -429,6 +580,18 @@ export async function cancelReservationFromGuestPortal({
       });
 
       const updatedReservation = await getReservationByGuestToken(guestToken);
+      const refundExecution =
+        refundMode === "FULL"
+          ? "FULL_REFUND_EXECUTED"
+          : "PARTIAL_REFUND_EXECUTED";
+
+      await sendGuestCancellationEmailSafe({
+        reservation: updatedReservation,
+        snapshot,
+        evaluation,
+        refundExecution,
+        refund: refundResult.refund,
+      });
 
       return {
         ok: true,
@@ -437,10 +600,7 @@ export async function cancelReservationFromGuestPortal({
           reservation: updatedReservation,
           snapshot,
           evaluation,
-          refundExecution:
-            refundMode === "FULL"
-              ? "FULL_REFUND_EXECUTED"
-              : "PARTIAL_REFUND_EXECUTED",
+          refundExecution,
           refund: refundResult.refund,
         }),
         refundResult,
@@ -586,6 +746,13 @@ export async function cancelReservationFromGuestPortal({
       },
     });
   }
+
+  await sendGuestCancellationEmailSafe({
+    reservation: updatedReservation,
+    snapshot,
+    evaluation,
+    refundExecution,
+  });
 
   return {
     ok: true,

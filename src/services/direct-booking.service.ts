@@ -1,4 +1,5 @@
 import Stripe from "stripe";
+import { randomBytes } from "crypto";
 import { PrismaClient } from "@prisma/client";
 import stripe from "../billing/stripe";
 import { checkPropertyAvailability } from "./availability.service";
@@ -93,6 +94,7 @@ function parseHostPayoutStatus(session: Stripe.Checkout.Session) {
     "PENDING_CONNECT",
     "ROUTED_TO_CONNECT",
     "PAID_TO_HOST",
+    "PARTIALLY_REFUNDED",
     "FAILED",
     "REFUNDED",
   ]);
@@ -160,6 +162,121 @@ async function getStripeFinancialRefs(paymentIntentId: string | null) {
 
     return emptyRefs;
   }
+}
+
+function createGuestToken() {
+  return randomBytes(32).toString("hex");
+}
+
+function getAppUrl() {
+  return String(process.env.APP_URL ?? "http://localhost:3000")
+    .trim()
+    .replace(/\/+$/, "");
+}
+
+function buildManageReservationUrl(guestToken: string) {
+  return `${getAppUrl()}/booking/manage/${encodeURIComponent(guestToken)}`;
+}
+
+async function getOrCreateReservationGuestToken(reservationId: string) {
+  const existingReservation = await prisma.reservation.findUnique({
+    where: {
+      id: reservationId,
+    },
+    select: {
+      guestToken: true,
+    },
+  });
+
+  if (existingReservation?.guestToken) {
+    return existingReservation.guestToken;
+  }
+
+  for (let attempt = 0; attempt < 3; attempt += 1) {
+    const guestToken = createGuestToken();
+
+    try {
+      const updatedReservation = await prisma.reservation.update({
+        where: {
+          id: reservationId,
+        },
+        data: {
+          guestToken,
+        },
+        select: {
+          guestToken: true,
+        },
+      });
+
+      if (updatedReservation.guestToken) {
+        return updatedReservation.guestToken;
+      }
+    } catch (error: any) {
+      if (error?.code !== "P2002") {
+        throw error;
+      }
+    }
+  }
+
+  throw new Error("DIRECT_BOOKING_GUEST_TOKEN_CREATE_FAILED");
+}
+
+function getCancellationPolicySummaryForEmail(snapshot: any) {
+  const guestFacingSummary = String(snapshot?.guestFacingSummary ?? "").trim();
+
+  if (guestFacingSummary) {
+    return guestFacingSummary;
+  }
+
+  const description = String(snapshot?.description ?? "").trim();
+
+  return description || null;
+}
+
+function getCancellationRefundRulesForEmail(snapshot: any) {
+  const refundRules = Array.isArray(snapshot?.refundRules)
+    ? snapshot.refundRules
+    : [];
+
+  return refundRules
+    .map((rule: any) => {
+      const minHoursBeforeCheckIn = Math.max(
+        0,
+        Math.round(Number(rule?.minHoursBeforeCheckIn ?? 0))
+      );
+      const refundPercent = Math.max(
+        0,
+        Math.min(100, Number(rule?.refundPercent ?? 0))
+      );
+      const label = String(
+        rule?.label ?? `${Number(refundPercent.toFixed(2))}% refund`
+      )
+        .trim()
+        .slice(0, 80);
+      const description =
+        typeof rule?.description === "string" && rule.description.trim()
+          ? rule.description.trim().slice(0, 280)
+          : null;
+
+      if (!Number.isFinite(minHoursBeforeCheckIn) || !Number.isFinite(refundPercent)) {
+        return null;
+      }
+
+      return {
+        minHoursBeforeCheckIn,
+        refundPercent: Number(refundPercent.toFixed(2)),
+        label: label || `${Number(refundPercent.toFixed(2))}% refund`,
+        description,
+      };
+    })
+    .filter(
+      (rule): rule is {
+        minHoursBeforeCheckIn: number;
+        refundPercent: number;
+        label: string;
+        description: string | null;
+      } => Boolean(rule)
+    );
 }
 
 export async function handleDirectBookingCheckoutCompleted(
@@ -405,6 +522,11 @@ const ingestResult = await ingestReservation({
   status: "ACTIVE",
 });
 
+const guestToken = await getOrCreateReservationGuestToken(
+  ingestResult.reservationId
+);
+const manageReservationUrl = buildManageReservationUrl(guestToken);
+
 const updatedReservation = await prisma.reservation.update({
   where: {
     id: ingestResult.reservationId,
@@ -432,6 +554,7 @@ const updatedReservation = await prisma.reservation.update({
 },
   select: {
   id: true,
+  guestToken: true,
   guestName: true,
   guestEmail: true,
   guestPhone: true,
@@ -460,6 +583,16 @@ if (updatedReservation.guestEmail) {
       checkOut: updatedReservation.checkOut,
       totalAmount: amountNumber,
       currency: updatedReservation.currency,
+      manageReservationUrl,
+      cancellationPolicyName: (cancellationPolicySnapshot as any).name ?? null,
+      cancellationPolicyType: (cancellationPolicySnapshot as any).type ?? null,
+      cancellationPolicySummary: getCancellationPolicySummaryForEmail(
+        cancellationPolicySnapshot
+      ),
+      refundBasis: (cancellationPolicySnapshot as any).refundBasis ?? null,
+      refundRules: getCancellationRefundRulesForEmail(
+        cancellationPolicySnapshot
+      ),
     });
   } catch (emailError) {
     console.error("[DIRECT_BOOKING_GUEST_EMAIL_ERROR]", emailError);
