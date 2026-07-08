@@ -10,7 +10,10 @@ import {
 } from "./cancellation-policy.service";
 import type { CancellationPolicySnapshot } from "./cancellation-policy.service";
 import { refundDirectBookingReservation } from "./direct-booking-refund.service";
-import { sendDirectBookingGuestCancellationEmail } from "../lib/mailer";
+import {
+  sendDirectBookingGuestCancellationEmail,
+  sendDirectBookingHostCancellationNotification,
+} from "../lib/mailer";
 import { reconcileReservation } from "./reservation.reconcile.service";
 
 const prisma = new PrismaClient();
@@ -219,6 +222,166 @@ async function sendGuestCancellationEmailSafe({
 
     return null;
   }
+}
+
+
+type HostCancellationEmailRecipient = {
+  email: string;
+  fullName?: string | null;
+  role?: string | null;
+};
+
+async function getHostCancellationEmailRecipients(
+  organizationId?: string | null
+) {
+  const safeOrganizationId = String(organizationId ?? "").trim();
+
+  if (!safeOrganizationId) {
+    return [] as HostCancellationEmailRecipient[];
+  }
+
+  try {
+    const activeDashboardUsers = await prisma.dashboardUser.findMany({
+      where: {
+        organizationId: safeOrganizationId,
+        isActive: true,
+      },
+      select: {
+        email: true,
+        fullName: true,
+        role: true,
+      },
+      orderBy: {
+        createdAt: "asc",
+      },
+    });
+
+    const orgAdminUsers = activeDashboardUsers.filter(
+      (user) => String(user.role) === "ORG_ADMIN"
+    );
+
+    const preferredRecipients = orgAdminUsers.length
+      ? orgAdminUsers
+      : activeDashboardUsers;
+
+    const seenEmails = new Set<string>();
+    const recipients: HostCancellationEmailRecipient[] = [];
+
+    for (const user of preferredRecipients) {
+      const email = String(user.email ?? "").trim();
+      const emailKey = email.toLowerCase();
+
+      if (!email || seenEmails.has(emailKey)) {
+        continue;
+      }
+
+      seenEmails.add(emailKey);
+      recipients.push({
+        email,
+        fullName: user.fullName,
+        role: String(user.role ?? "").trim() || null,
+      });
+    }
+
+    return recipients;
+  } catch (error: any) {
+    console.error("[HOST_CANCELLATION_EMAIL_RECIPIENTS_ERROR]", {
+      organizationId: safeOrganizationId,
+      error: error?.message ?? error,
+    });
+
+    return [] as HostCancellationEmailRecipient[];
+  }
+}
+
+async function sendHostCancellationEmailSafe({
+  reservation,
+  snapshot,
+  evaluation,
+  refundExecution,
+  refund,
+}: {
+  reservation: any;
+  snapshot: CancellationPolicySnapshot;
+  evaluation: ReturnType<typeof evaluateCancellationPolicy>;
+  refundExecution: string;
+  refund?: unknown;
+}) {
+  const organizationId = String(
+    reservation.property?.organizationId ?? reservation.organizationId ?? ""
+  ).trim();
+
+  const recipients = await getHostCancellationEmailRecipients(organizationId);
+
+  if (!recipients.length) {
+    console.warn("[HOST_CANCELLATION_EMAIL_NO_RECIPIENTS]", {
+      reservationId: reservation.id,
+      propertyId: reservation.propertyId,
+      organizationId: organizationId || null,
+      refundExecution,
+    });
+
+    return null;
+  }
+
+  const refundAmount = getRefundAmountForEmail({
+    refund,
+    evaluation,
+    refundExecution,
+  });
+
+  const results = [];
+
+  for (const recipient of recipients) {
+    try {
+      const result = await sendDirectBookingHostCancellationNotification({
+        to: recipient.email,
+        hostName: recipient.fullName,
+        propertyName:
+          reservation.property?.name ?? reservation.roomName ?? "Your property",
+        guestName: reservation.guestName ?? "Guest",
+        guestEmail: reservation.guestEmail,
+        guestPhone: reservation.guestPhone,
+        checkIn: reservation.checkIn,
+        checkOut: reservation.checkOut,
+        propertyTimeZone: reservation.property?.timezone ?? null,
+        totalAmount: toNumber(reservation.totalAmount),
+        currency: reservation.currency,
+        cancelledAt: reservation.cancelledAt ?? new Date(),
+        refundExecution,
+        refundAmount,
+        refundStatus: getRefundStatusForEmail(refund),
+        stripeRefundId: getStripeRefundIdForEmail(refund),
+        refundMode: getRefundModeForEmail(refund),
+        refundBasis: snapshot.refundBasis,
+        paymentState: reservation.paymentState,
+        hostPayoutStatus: reservation.hostPayoutStatus,
+      });
+
+      results.push({
+        email: recipient.email,
+        ok: true,
+        result,
+      });
+    } catch (emailError: any) {
+      console.error("[HOST_CANCELLATION_EMAIL_ERROR]", {
+        reservationId: reservation.id,
+        propertyId: reservation.propertyId,
+        organizationId: organizationId || null,
+        hostEmail: recipient.email,
+        refundExecution,
+        error: emailError?.message ?? emailError,
+      });
+
+      results.push({
+        email: recipient.email,
+        ok: false,
+        error: emailError?.message ?? String(emailError),
+      });
+    }
+  }
+
+  return results;
 }
 
 function isDirectBookingReservation(reservation: {
@@ -595,6 +758,14 @@ export async function cancelReservationFromGuestPortal({
         refund: refundResult.refund,
       });
 
+      await sendHostCancellationEmailSafe({
+        reservation: updatedReservation,
+        snapshot,
+        evaluation,
+        refundExecution,
+        refund: refundResult.refund,
+      });
+
       return {
         ok: true,
         alreadyCancelled: false,
@@ -751,6 +922,13 @@ export async function cancelReservationFromGuestPortal({
   }
 
   await sendGuestCancellationEmailSafe({
+    reservation: updatedReservation,
+    snapshot,
+    evaluation,
+    refundExecution,
+  });
+
+  await sendHostCancellationEmailSafe({
     reservation: updatedReservation,
     snapshot,
     evaluation,
