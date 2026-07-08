@@ -26,6 +26,224 @@ function parseDate(value: unknown) {
   return date;
 }
 
+function parseDateKey(value: unknown) {
+  const raw = String(value ?? "").trim();
+
+  const dateKeyMatch = raw.match(/^(\d{4})-(\d{2})-(\d{2})/);
+
+  if (dateKeyMatch) {
+    const year = Number(dateKeyMatch[1]);
+    const month = Number(dateKeyMatch[2]);
+    const day = Number(dateKeyMatch[3]);
+
+    const utcDate = new Date(Date.UTC(year, month - 1, day));
+
+    if (
+      utcDate.getUTCFullYear() === year &&
+      utcDate.getUTCMonth() === month - 1 &&
+      utcDate.getUTCDate() === day
+    ) {
+      return `${dateKeyMatch[1]}-${dateKeyMatch[2]}-${dateKeyMatch[3]}`;
+    }
+
+    return null;
+  }
+
+  const parsedDate = parseDate(value);
+
+  return parsedDate ? parsedDate.toISOString().slice(0, 10) : null;
+}
+
+function normalizePropertyTimeZone(value: unknown) {
+  const timezone = String(value ?? "").trim() || "America/Puerto_Rico";
+
+  try {
+    new Intl.DateTimeFormat("en-US", {
+      timeZone: timezone,
+    }).format(new Date());
+
+    return timezone;
+  } catch {
+    return "America/Puerto_Rico";
+  }
+}
+
+function parsePropertyTime(
+  value: unknown,
+  fallback: { hour: number; minute: number }
+) {
+  const raw = String(value ?? "").trim();
+
+  const twentyFourHourMatch = raw.match(/^(\d{1,2}):(\d{2})(?::\d{2})?$/);
+
+  if (twentyFourHourMatch) {
+    const hour = Number(twentyFourHourMatch[1]);
+    const minute = Number(twentyFourHourMatch[2]);
+
+    if (
+      Number.isInteger(hour) &&
+      Number.isInteger(minute) &&
+      hour >= 0 &&
+      hour <= 23 &&
+      minute >= 0 &&
+      minute <= 59
+    ) {
+      return { hour, minute };
+    }
+  }
+
+  const twelveHourMatch = raw.match(/^(\d{1,2})(?::(\d{2}))?\s*(AM|PM)$/i);
+
+  if (twelveHourMatch) {
+    let hour = Number(twelveHourMatch[1]);
+    const minute = twelveHourMatch[2] ? Number(twelveHourMatch[2]) : 0;
+    const period = twelveHourMatch[3].toUpperCase();
+
+    if (
+      Number.isInteger(hour) &&
+      Number.isInteger(minute) &&
+      hour >= 1 &&
+      hour <= 12 &&
+      minute >= 0 &&
+      minute <= 59
+    ) {
+      if (period === "AM" && hour === 12) {
+        hour = 0;
+      }
+
+      if (period === "PM" && hour !== 12) {
+        hour += 12;
+      }
+
+      return { hour, minute };
+    }
+  }
+
+  return fallback;
+}
+
+function getTimeZoneParts(date: Date, timeZone: string) {
+  const formatter = new Intl.DateTimeFormat("en-US", {
+    timeZone,
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+    second: "2-digit",
+    hourCycle: "h23",
+  });
+
+  const parts: Record<string, string> = {};
+
+  for (const part of formatter.formatToParts(date)) {
+    if (part.type !== "literal") {
+      parts[part.type] = part.value;
+    }
+  }
+
+  return {
+    year: Number(parts.year),
+    month: Number(parts.month),
+    day: Number(parts.day),
+    hour: Number(parts.hour),
+    minute: Number(parts.minute),
+    second: Number(parts.second),
+  };
+}
+
+function getTimeZoneOffsetMs(date: Date, timeZone: string) {
+  const parts = getTimeZoneParts(date, timeZone);
+
+  return (
+    Date.UTC(
+      parts.year,
+      parts.month - 1,
+      parts.day,
+      parts.hour,
+      parts.minute,
+      parts.second
+    ) - date.getTime()
+  );
+}
+
+function makeDateFromZonedParts({
+  dateKey,
+  hour,
+  minute,
+  timeZone,
+}: {
+  dateKey: string;
+  hour: number;
+  minute: number;
+  timeZone: string;
+}) {
+  const [yearRaw, monthRaw, dayRaw] = dateKey.split("-");
+  const year = Number(yearRaw);
+  const month = Number(monthRaw);
+  const day = Number(dayRaw);
+  const utcGuessMs = Date.UTC(year, month - 1, day, hour, minute, 0, 0);
+  const utcGuess = new Date(utcGuessMs);
+  const offsetMs = getTimeZoneOffsetMs(utcGuess, timeZone);
+  const adjustedDate = new Date(utcGuessMs - offsetMs);
+  const adjustedOffsetMs = getTimeZoneOffsetMs(adjustedDate, timeZone);
+
+  if (adjustedOffsetMs !== offsetMs) {
+    return new Date(utcGuessMs - adjustedOffsetMs);
+  }
+
+  return adjustedDate;
+}
+
+function formatTimeForMetadata(time: { hour: number; minute: number }) {
+  return `${String(time.hour).padStart(2, "0")}:${String(time.minute).padStart(
+    2,
+    "0"
+  )}`;
+}
+
+function buildPropertyStayDateRange({
+  checkInDateKey,
+  checkOutDateKey,
+  propertyCheckInTime,
+  propertyCheckOutTime,
+  propertyTimeZone,
+}: {
+  checkInDateKey: string;
+  checkOutDateKey: string;
+  propertyCheckInTime?: unknown;
+  propertyCheckOutTime?: unknown;
+  propertyTimeZone?: unknown;
+}) {
+  const timeZone = normalizePropertyTimeZone(propertyTimeZone);
+  const checkInTime = parsePropertyTime(propertyCheckInTime, {
+    hour: 16,
+    minute: 0,
+  });
+  const checkOutTime = parsePropertyTime(propertyCheckOutTime, {
+    hour: 11,
+    minute: 0,
+  });
+
+  return {
+    checkIn: makeDateFromZonedParts({
+      dateKey: checkInDateKey,
+      hour: checkInTime.hour,
+      minute: checkInTime.minute,
+      timeZone,
+    }),
+    checkOut: makeDateFromZonedParts({
+      dateKey: checkOutDateKey,
+      hour: checkOutTime.hour,
+      minute: checkOutTime.minute,
+      timeZone,
+    }),
+    timeZone,
+    checkInTime: formatTimeForMetadata(checkInTime),
+    checkOutTime: formatTimeForMetadata(checkOutTime),
+  };
+}
+
 function getDirectBookingPlatformFeeCents(totalAmountCents: number) {
   const percentRaw = Number(
     process.env.PINGO_DIRECT_BOOKING_PLATFORM_FEE_PERCENT ?? "0"
@@ -203,6 +421,7 @@ publicBookingRouter.get("/:organizationSlug", async (req, res) => {
             country: true,
             checkInTime: true,
             checkOutTime: true,
+            timezone: true,
           },
           orderBy: {
             name: "asc",
@@ -370,16 +589,15 @@ publicBookingRouter.post("/blocked-dates", async (req, res) => {
 publicBookingRouter.post("/check-availability", async (req, res) => {
   try {
     const { propertyId, checkIn, checkOut } = req.body ?? {};
+    const checkInDateKey = parseDateKey(checkIn);
+    const checkOutDateKey = parseDateKey(checkOut);
 
-    const start = parseDate(checkIn);
-    const end = parseDate(checkOut);
-
-if (!propertyId || !start || !end) {
-  return res.status(400).json({
-    ok: false,
-    error: "Missing or invalid propertyId/checkIn/checkOut",
-  });
-}
+    if (!propertyId || !checkInDateKey || !checkOutDateKey) {
+      return res.status(400).json({
+        ok: false,
+        error: "Missing or invalid propertyId/checkIn/checkOut",
+      });
+    }
 
     const property = await prisma.property.findFirst({
       where: {
@@ -392,6 +610,9 @@ if (!propertyId || !start || !end) {
       },
       select: {
         id: true,
+        checkInTime: true,
+        checkOutTime: true,
+        timezone: true,
       },
     });
 
@@ -399,16 +620,36 @@ if (!propertyId || !start || !end) {
       return res.status(404).json({ ok: false, error: "Property not available for public booking" });
     }
 
+    const stayDates = buildPropertyStayDateRange({
+      checkInDateKey,
+      checkOutDateKey,
+      propertyCheckInTime: property.checkInTime,
+      propertyCheckOutTime: property.checkOutTime,
+      propertyTimeZone: property.timezone,
+    });
+
+    if (stayDates.checkIn >= stayDates.checkOut) {
+      return res.status(400).json({
+        ok: false,
+        error: "Check-out must be after check-in",
+      });
+    }
+
     const availability = await checkPropertyAvailability({
       propertyId: property.id,
-      checkIn: start,
-      checkOut: end,
+      checkIn: stayDates.checkIn,
+      checkOut: stayDates.checkOut,
     });
 
     return res.json({
       ok: true,
       available: availability.available,
       conflict: availability.conflict,
+      checkIn: stayDates.checkIn.toISOString(),
+      checkOut: stayDates.checkOut.toISOString(),
+      timezone: stayDates.timeZone,
+      checkInTime: stayDates.checkInTime,
+      checkOutTime: stayDates.checkOutTime,
     });
   } catch (error: any) {
     console.error("[public-booking availability error]", error?.message ?? error);
@@ -419,11 +660,49 @@ if (!propertyId || !start || !end) {
 publicBookingRouter.post("/quote", async (req, res) => {
   try {
     const { propertyId, checkIn, checkOut, selectedAmenityIds } = req.body ?? {};
+    const checkInDateKey = parseDateKey(checkIn);
+    const checkOutDateKey = parseDateKey(checkOut);
 
-    const start = parseDate(checkIn);
-    const end = parseDate(checkOut);
+    if (!propertyId || !checkInDateKey || !checkOutDateKey) {
+      return res.status(400).json({
+        ok: false,
+        error: "Invalid quote request",
+      });
+    }
 
-    if (!propertyId || !start || !end || start >= end) {
+    const property = await prisma.property.findFirst({
+      where: {
+        id: String(propertyId),
+        status: "ACTIVE",
+        isPublicBookable: true,
+        organization: {
+          publicBookingEnabled: true,
+        },
+      },
+      select: {
+        id: true,
+        checkInTime: true,
+        checkOutTime: true,
+        timezone: true,
+      },
+    });
+
+    if (!property) {
+      return res.status(404).json({
+        ok: false,
+        error: "Property not available for public booking",
+      });
+    }
+
+    const stayDates = buildPropertyStayDateRange({
+      checkInDateKey,
+      checkOutDateKey,
+      propertyCheckInTime: property.checkInTime,
+      propertyCheckOutTime: property.checkOutTime,
+      propertyTimeZone: property.timezone,
+    });
+
+    if (stayDates.checkIn >= stayDates.checkOut) {
       return res.status(400).json({
         ok: false,
         error: "Invalid quote request",
@@ -431,9 +710,9 @@ publicBookingRouter.post("/quote", async (req, res) => {
     }
 
     const pricing = await calculateDirectBookingPricing({
-      propertyId: String(propertyId),
-      checkIn: start,
-      checkOut: end,
+      propertyId: property.id,
+      checkIn: stayDates.checkIn,
+      checkOut: stayDates.checkOut,
       selectedAmenityIds: Array.isArray(selectedAmenityIds)
         ? selectedAmenityIds.map((id) => String(id)).filter(Boolean)
         : [],
@@ -442,6 +721,11 @@ publicBookingRouter.post("/quote", async (req, res) => {
     return res.json({
       ok: true,
       pricing,
+      checkIn: stayDates.checkIn.toISOString(),
+      checkOut: stayDates.checkOut.toISOString(),
+      timezone: stayDates.timeZone,
+      checkInTime: stayDates.checkInTime,
+      checkOutTime: stayDates.checkOutTime,
     });
   } catch (err) {
     console.error("public booking quote error", err);
@@ -484,10 +768,10 @@ publicBookingRouter.post("/create-checkout", async (req, res) => {
       });
     }
  
-    const start = parseDate(checkIn);
-    const end = parseDate(checkOut);
+    const checkInDateKey = parseDateKey(checkIn);
+    const checkOutDateKey = parseDateKey(checkOut);
 
-    if (!propertyId || !start || !end || !guestName || !guestEmail) {
+    if (!propertyId || !checkInDateKey || !checkOutDateKey || !guestName || !guestEmail) {
       return res.status(400).json({
         ok: false,
         error: "Missing or invalid propertyId/checkIn/checkOut/guestName/guestEmail",
@@ -527,6 +811,9 @@ if (guestAcceptedCancellationTerms !== true) {
         maxGuests: true,
         minimumNights: true,
         maximumNights: true,
+        checkInTime: true,
+        checkOutTime: true,
+        timezone: true,
         organization: {
           select: {
             id: true,
@@ -558,10 +845,25 @@ if (property.maxGuests && totalGuests > property.maxGuests) {
   });
 }
 
+const stayDates = buildPropertyStayDateRange({
+  checkInDateKey,
+  checkOutDateKey,
+  propertyCheckInTime: property.checkInTime,
+  propertyCheckOutTime: property.checkOutTime,
+  propertyTimeZone: property.timezone,
+});
+
+if (stayDates.checkIn >= stayDates.checkOut) {
+  return res.status(400).json({
+    ok: false,
+    error: "Check-out must be after check-in",
+  });
+}
+
     const availability = await checkPropertyAvailability({
       propertyId: property.id,
-      checkIn: start,
-      checkOut: end,
+      checkIn: stayDates.checkIn,
+      checkOut: stayDates.checkOut,
     });
 
     if (!availability.available) {
@@ -573,7 +875,7 @@ if (property.maxGuests && totalGuests > property.maxGuests) {
     }
 
     const nights = Math.ceil(
-      (end.getTime() - start.getTime()) / (1000 * 60 * 60 * 24)
+      (stayDates.checkOut.getTime() - stayDates.checkIn.getTime()) / (1000 * 60 * 60 * 24)
     );
 
     if (!Number.isFinite(nights) || nights <= 0) {
@@ -606,8 +908,8 @@ const cleanSelectedAmenityIds = Array.isArray(selectedAmenityIds)
 
 const pricing = await calculateDirectBookingPricing({
   propertyId: property.id,
-  checkIn: start,
-  checkOut: end,
+  checkIn: stayDates.checkIn,
+  checkOut: stayDates.checkOut,
   selectedAmenityIds: cleanSelectedAmenityIds,
 });
 
@@ -707,8 +1009,13 @@ const totalAmountCents = pricing.totalAmountCents;
         flow: "direct_booking",
         organizationId: property.organizationId,
         propertyId: property.id,
-        checkIn: String(checkIn).slice(0, 10),
-        checkOut: String(checkOut).slice(0, 10),
+        checkIn: stayDates.checkIn.toISOString(),
+        checkOut: stayDates.checkOut.toISOString(),
+        checkInDate: checkInDateKey,
+        checkOutDate: checkOutDateKey,
+        propertyTimezone: stayDates.timeZone,
+        propertyCheckInTime: stayDates.checkInTime,
+        propertyCheckOutTime: stayDates.checkOutTime,
         guestName: String(guestName).trim(),
         guestEmail: String(guestEmail).trim(),
         guestPhone: guestPhone ? String(guestPhone).trim() : "",
@@ -766,6 +1073,11 @@ const totalAmountCents = pricing.totalAmountCents;
      totalAmount: pricing.totalAmount,
      currency: pricing.currency,
      nights: pricing.nights,
+     checkIn: stayDates.checkIn.toISOString(),
+     checkOut: stayDates.checkOut.toISOString(),
+     timezone: stayDates.timeZone,
+     checkInTime: stayDates.checkInTime,
+     checkOutTime: stayDates.checkOutTime,
      pricing, 
     });
   } catch (error: any) {
