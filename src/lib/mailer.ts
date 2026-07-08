@@ -29,6 +29,7 @@ type SendDirectBookingGuestConfirmationInput = {
   propertyName: string;
   checkIn: Date;
   checkOut: Date;
+  propertyTimeZone?: string | null;
   totalAmount?: number | null;
   currency?: string | null;
   manageReservationUrl?: string | null;
@@ -48,6 +49,7 @@ type SendDirectBookingHostNotificationInput = {
   guestPhone?: string | null;
   checkIn: Date;
   checkOut: Date;
+  propertyTimeZone?: string | null;
   totalAmount?: number | null;
   currency?: string | null;
 };
@@ -58,6 +60,7 @@ type SendDirectBookingGuestCancellationEmailInput = {
   propertyName: string;
   checkIn: Date;
   checkOut: Date;
+  propertyTimeZone?: string | null;
   totalAmount?: number | null;
   currency?: string | null;
   cancelledAt?: Date | string | null;
@@ -80,6 +83,7 @@ type SendDirectBookingHostCancellationNotificationInput = {
   guestPhone?: string | null;
   checkIn: Date;
   checkOut: Date;
+  propertyTimeZone?: string | null;
   totalAmount?: number | null;
   currency?: string | null;
   cancelledAt?: Date | string | null;
@@ -124,27 +128,53 @@ function getSafeUrl(value?: string | null) {
   return url;
 }
 
-function formatBookingDate(date: Date) {
+const DEFAULT_BOOKING_EMAIL_TIME_ZONE = "America/Puerto_Rico";
+
+function normalizePropertyTimeZone(value?: string | null) {
+  const timeZone = String(value ?? "").trim() || DEFAULT_BOOKING_EMAIL_TIME_ZONE;
+
+  try {
+    new Intl.DateTimeFormat("en-US", { timeZone }).format(new Date());
+    return timeZone;
+  } catch {
+    return DEFAULT_BOOKING_EMAIL_TIME_ZONE;
+  }
+}
+
+function formatBookingDate(date: Date, timeZone?: string | null) {
+  const safeTimeZone = normalizePropertyTimeZone(timeZone);
+
   return new Intl.DateTimeFormat("en-US", {
+    timeZone: safeTimeZone,
     month: "short",
     day: "numeric",
     year: "numeric",
+    hour: "numeric",
+    minute: "2-digit",
+    timeZoneName: "short",
   }).format(date);
 }
 
-function formatBookingDateTime(value?: Date | string | null) {
+function formatBookingDateTime(
+  value?: Date | string | null,
+  timeZone?: string | null
+) {
   if (!value) return "Not available";
 
   const date = value instanceof Date ? value : new Date(value);
 
   if (Number.isNaN(date.getTime())) return "Not available";
 
+  const safeTimeZone = normalizePropertyTimeZone(timeZone);
+
   return new Intl.DateTimeFormat("en-US", {
+    timeZone: safeTimeZone,
     month: "short",
     day: "numeric",
     year: "numeric",
     hour: "numeric",
     minute: "2-digit",
+    timeZoneName: "short",
   }).format(date);
 }
 
@@ -538,6 +568,7 @@ export async function sendDirectBookingGuestConfirmation(
     propertyName,
     checkIn,
     checkOut,
+    propertyTimeZone,
     totalAmount,
     currency,
     manageReservationUrl,
@@ -550,6 +581,7 @@ export async function sendDirectBookingGuestConfirmation(
 
   const safeName = escapeHtml(guestName?.trim() || "there");
   const safePropertyName = escapeHtml(propertyName);
+  const dateTimeZone = normalizePropertyTimeZone(propertyTimeZone);
 
   if (!resend) {
     if (isProd) {
@@ -597,8 +629,8 @@ export async function sendDirectBookingGuestConfirmation(
 
         <div style="background:#f9fafb;border:1px solid #e5e7eb;border-radius:14px;padding:16px;margin:20px 0;">
           <p><strong>Property:</strong> ${safePropertyName}</p>
-          <p><strong>Check-in:</strong> ${formatBookingDate(checkIn)}</p>
-          <p><strong>Check-out:</strong> ${formatBookingDate(checkOut)}</p>
+          <p><strong>Check-in:</strong> ${formatBookingDate(checkIn, dateTimeZone)}</p>
+          <p><strong>Check-out:</strong> ${formatBookingDate(checkOut, dateTimeZone)}</p>
           <p><strong>Total paid:</strong> ${formatBookingAmount(totalAmount, currency)}</p>
           <p><strong>Payment status:</strong> Paid</p>
         </div>
@@ -677,6 +709,7 @@ export async function sendDirectBookingHostNotification(
     guestPhone,
     checkIn,
     checkOut,
+    propertyTimeZone,
     totalAmount,
     currency,
   } = input;
@@ -684,6 +717,7 @@ export async function sendDirectBookingHostNotification(
   const safeHostName = escapeHtml(hostName?.trim() || "there");
   const safePropertyName = escapeHtml(propertyName);
   const safeGuestName = escapeHtml(guestName);
+  const dateTimeZone = normalizePropertyTimeZone(propertyTimeZone);
 
   if (!resend) {
     if (isProd) {
@@ -717,8 +751,8 @@ export async function sendDirectBookingHostNotification(
           <p><strong>Guest:</strong> ${safeGuestName}</p>
           <p><strong>Email:</strong> ${escapeHtml(guestEmail || "Not provided")}</p>
           <p><strong>Phone:</strong> ${escapeHtml(guestPhone || "Not provided")}</p>
-          <p><strong>Check-in:</strong> ${formatBookingDate(checkIn)}</p>
-          <p><strong>Check-out:</strong> ${formatBookingDate(checkOut)}</p>
+          <p><strong>Check-in:</strong> ${formatBookingDate(checkIn, dateTimeZone)}</p>
+          <p><strong>Check-out:</strong> ${formatBookingDate(checkOut, dateTimeZone)}</p>
           <p><strong>Total paid:</strong> ${formatBookingAmount(totalAmount, currency)}</p>
         </div>
 
@@ -756,6 +790,7 @@ export async function sendDirectBookingGuestCancellationEmail(
     propertyName,
     checkIn,
     checkOut,
+    propertyTimeZone,
     totalAmount,
     currency,
     cancelledAt,
@@ -771,6 +806,7 @@ export async function sendDirectBookingGuestCancellationEmail(
 
   const safeName = escapeHtml(guestName?.trim() || "there");
   const safePropertyName = escapeHtml(propertyName);
+  const dateTimeZone = normalizePropertyTimeZone(propertyTimeZone);
   const safeStripeRefundId = stripeRefundId ? escapeHtml(stripeRefundId) : null;
   const title = getRefundExecutionTitle(refundExecution);
   const body = getRefundExecutionBody({
@@ -817,9 +853,9 @@ export async function sendDirectBookingGuestCancellationEmail(
 
         <div style="background:#f9fafb;border:1px solid #e5e7eb;border-radius:14px;padding:16px;margin:20px 0;">
           <p><strong>Property:</strong> ${safePropertyName}</p>
-          <p><strong>Check-in:</strong> ${formatBookingDate(checkIn)}</p>
-          <p><strong>Check-out:</strong> ${formatBookingDate(checkOut)}</p>
-          <p><strong>Cancelled at:</strong> ${formatBookingDateTime(cancelledAt)}</p>
+          <p><strong>Check-in:</strong> ${formatBookingDate(checkIn, dateTimeZone)}</p>
+          <p><strong>Check-out:</strong> ${formatBookingDate(checkOut, dateTimeZone)}</p>
+          <p><strong>Cancelled at:</strong> ${formatBookingDateTime(cancelledAt, dateTimeZone)}</p>
           <p><strong>Total paid:</strong> ${formatBookingAmount(totalAmount, currency)}</p>
           <p><strong>Refund amount:</strong> ${formatBookingAmount(refundAmount, currency)}</p>
           <p><strong>Refund basis:</strong> ${escapeHtml(formatRefundBasis(refundBasis))}</p>
@@ -907,6 +943,7 @@ export async function sendDirectBookingHostCancellationNotification(
     guestPhone,
     checkIn,
     checkOut,
+    propertyTimeZone,
     totalAmount,
     currency,
     cancelledAt,
@@ -923,6 +960,7 @@ export async function sendDirectBookingHostCancellationNotification(
   const safeHostName = escapeHtml(hostName?.trim() || "there");
   const safePropertyName = escapeHtml(propertyName);
   const safeGuestName = escapeHtml(guestName);
+  const dateTimeZone = normalizePropertyTimeZone(propertyTimeZone);
   const title = getRefundExecutionTitle(refundExecution);
 
   if (!resend) {
@@ -957,9 +995,9 @@ export async function sendDirectBookingHostCancellationNotification(
           <p><strong>Guest:</strong> ${safeGuestName}</p>
           <p><strong>Email:</strong> ${escapeHtml(guestEmail || "Not provided")}</p>
           <p><strong>Phone:</strong> ${escapeHtml(guestPhone || "Not provided")}</p>
-          <p><strong>Check-in:</strong> ${formatBookingDate(checkIn)}</p>
-          <p><strong>Check-out:</strong> ${formatBookingDate(checkOut)}</p>
-          <p><strong>Cancelled at:</strong> ${formatBookingDateTime(cancelledAt)}</p>
+          <p><strong>Check-in:</strong> ${formatBookingDate(checkIn, dateTimeZone)}</p>
+          <p><strong>Check-out:</strong> ${formatBookingDate(checkOut, dateTimeZone)}</p>
+          <p><strong>Cancelled at:</strong> ${formatBookingDateTime(cancelledAt, dateTimeZone)}</p>
           <p><strong>Total paid:</strong> ${formatBookingAmount(totalAmount, currency)}</p>
           <p><strong>Cancellation result:</strong> ${escapeHtml(title)}</p>
           <p><strong>Refund amount:</strong> ${formatBookingAmount(refundAmount, currency)}</p>

@@ -379,6 +379,7 @@ if (!cancellationTermsAccepted || !cancellationTermsText) {
     select: {
   id: true,
   name: true,
+  timezone: true,
   organizationId: true,
   },
 
@@ -581,6 +582,7 @@ if (updatedReservation.guestEmail) {
       propertyName: property.name,
       checkIn: updatedReservation.checkIn,
       checkOut: updatedReservation.checkOut,
+      propertyTimeZone: property.timezone,
       totalAmount: amountNumber,
       currency: updatedReservation.currency,
       manageReservationUrl,
