@@ -1,4 +1,5 @@
 import {
+  CancellationActor,
   HostPayoutStatus,
   PaymentState,
   PrismaClient,
@@ -10,14 +11,18 @@ import { reconcileReservation } from "./reservation.reconcile.service";
 
 const prisma = new PrismaClient();
 
-export type DirectBookingRefundMode = "FULL";
+export type DirectBookingRefundMode = "FULL" | "PARTIAL";
 
 export type RefundDirectBookingReservationInput = {
   organizationId: string;
   reservationId: string;
   reason?: string;
   refundMode?: DirectBookingRefundMode;
+  refundAmountCents?: number | null;
+  refundPercent?: number | null;
+  cancellationEvaluation?: unknown;
   requestedByUserId?: string | null;
+  requestedByActor?: CancellationActor;
 };
 
 export class DirectBookingRefundError extends Error {
@@ -64,6 +69,10 @@ function toNumber(value: unknown) {
   return Number.isFinite(numberValue) ? numberValue : null;
 }
 
+function toMoneyFromCents(cents: number) {
+  return Number((Math.max(0, Math.round(cents)) / 100).toFixed(2));
+}
+
 function normalizeJsonObject(value: unknown) {
   if (value && typeof value === "object" && !Array.isArray(value)) {
     return value as Record<string, unknown>;
@@ -72,10 +81,89 @@ function normalizeJsonObject(value: unknown) {
   return {};
 }
 
+function normalizeJsonArray(value: unknown) {
+  return Array.isArray(value) ? value : [];
+}
+
 function shouldRefundApplicationFee(platformFeeAmount: unknown) {
   const amount = toNumber(platformFeeAmount);
 
   return Boolean(amount && amount > 0);
+}
+
+function clampRefundPercent(value: unknown, fallback: number) {
+  const numberValue = Number(value);
+
+  if (!Number.isFinite(numberValue)) {
+    return Number(fallback.toFixed(2));
+  }
+
+  return Number(Math.max(0, Math.min(100, numberValue)).toFixed(2));
+}
+
+function getRefundPercentFromCents({
+  refundAmountCents,
+  totalAmountCents,
+}: {
+  refundAmountCents: number;
+  totalAmountCents: number;
+}) {
+  if (!Number.isFinite(totalAmountCents) || totalAmountCents <= 0) {
+    return 0;
+  }
+
+  return Number(((refundAmountCents / totalAmountCents) * 100).toFixed(2));
+}
+
+function getExistingStripeRefundId(externalRaw: unknown) {
+  const raw = normalizeJsonObject(externalRaw);
+  const refund = normalizeJsonObject(raw.refund);
+
+  const refundId = String(refund.stripeRefundId ?? "").trim();
+
+  return refundId || null;
+}
+
+function resolveRefundAmountCents({
+  refundMode,
+  refundAmountCents,
+  totalAmountCents,
+}: {
+  refundMode: DirectBookingRefundMode;
+  refundAmountCents?: number | null;
+  totalAmountCents: number;
+}) {
+  if (refundMode === "FULL") {
+    return totalAmountCents;
+  }
+
+  const amount = Math.round(Number(refundAmountCents ?? 0));
+
+  if (!Number.isFinite(amount) || amount <= 0) {
+    throw new DirectBookingRefundError({
+      code: "INVALID_PARTIAL_REFUND_AMOUNT",
+      message: "Partial refund amount must be greater than zero.",
+      statusCode: 400,
+      details: {
+        refundAmountCents,
+        totalAmountCents,
+      },
+    });
+  }
+
+  if (amount > totalAmountCents) {
+    throw new DirectBookingRefundError({
+      code: "PARTIAL_REFUND_EXCEEDS_TOTAL_AMOUNT",
+      message: "Partial refund amount cannot exceed the reservation total.",
+      statusCode: 400,
+      details: {
+        refundAmountCents: amount,
+        totalAmountCents,
+      },
+    });
+  }
+
+  return amount;
 }
 
 export async function refundDirectBookingReservation({
@@ -83,12 +171,16 @@ export async function refundDirectBookingReservation({
   reservationId,
   reason,
   refundMode = "FULL",
+  refundAmountCents = null,
+  refundPercent = null,
+  cancellationEvaluation,
   requestedByUserId = null,
+  requestedByActor = CancellationActor.HOST,
 }: RefundDirectBookingReservationInput) {
-  if (refundMode !== "FULL") {
+  if (refundMode !== "FULL" && refundMode !== "PARTIAL") {
     throw new DirectBookingRefundError({
       code: "UNSUPPORTED_REFUND_MODE",
-      message: "Refunds & Cancellations V1 only supports full refunds.",
+      message: "Unsupported refund mode.",
       statusCode: 400,
     });
   }
@@ -128,11 +220,21 @@ export async function refundDirectBookingReservation({
     });
   }
 
-  if (reservation.paymentState === PaymentState.REFUNDED) {
+  const existingStripeRefundId = getExistingStripeRefundId(
+    reservation.externalRaw
+  );
+
+  if (
+    reservation.paymentState === PaymentState.REFUNDED ||
+    existingStripeRefundId
+  ) {
     throw new DirectBookingRefundError({
       code: "RESERVATION_ALREADY_REFUNDED",
-      message: "This reservation is already marked as refunded.",
+      message: "This reservation already has a recorded refund.",
       statusCode: 409,
+      details: {
+        stripeRefundId: existingStripeRefundId,
+      },
     });
   }
 
@@ -154,55 +256,139 @@ export async function refundDirectBookingReservation({
     });
   }
 
-  const refundReason = reason?.trim() || "Direct Booking reservation cancelled";
+  const totalAmountCents = Math.round(totalAmount * 100);
+
+  if (!Number.isFinite(totalAmountCents) || totalAmountCents <= 0) {
+    throw new DirectBookingRefundError({
+      code: "INVALID_REFUND_AMOUNT_CENTS",
+      message: "Reservation total amount is invalid for refund.",
+      statusCode: 400,
+    });
+  }
+
+  const resolvedRefundAmountCents = resolveRefundAmountCents({
+    refundMode,
+    refundAmountCents,
+    totalAmountCents,
+  });
+
+  const isFullRefund = resolvedRefundAmountCents >= totalAmountCents;
+  const effectiveRefundMode: DirectBookingRefundMode = isFullRefund
+    ? "FULL"
+    : "PARTIAL";
+
+  const resolvedRefundAmount = toMoneyFromCents(resolvedRefundAmountCents);
+
+  const effectiveRefundPercent =
+    refundPercent !== null && refundPercent !== undefined
+      ? clampRefundPercent(refundPercent, 0)
+      : clampRefundPercent(
+          getRefundPercentFromCents({
+            refundAmountCents: resolvedRefundAmountCents,
+            totalAmountCents,
+          }),
+          0
+        );
+
+  const refundReason =
+    reason?.trim() ||
+    (effectiveRefundMode === "FULL"
+      ? "Direct Booking reservation cancelled with full refund"
+      : "Direct Booking reservation cancelled with partial refund");
+
+  const previousExternalRaw = normalizeJsonObject(reservation.externalRaw);
+  const previousRefunds = normalizeJsonArray(previousExternalRaw.refunds);
+
+  const refundApplicationFee = shouldRefundApplicationFee(
+    reservation.platformFeeAmount
+  );
+
+  const refundIdempotencyKey = `direct-booking-refund:${reservation.id}:${resolvedRefundAmountCents}`;
 
   try {
-    const refund = await stripe.refunds.create({
-      payment_intent: reservation.stripePaymentIntentId,
-      reverse_transfer: true,
-      refund_application_fee: shouldRefundApplicationFee(
-        reservation.platformFeeAmount
-      ),
-      metadata: {
-        platform: "PinGo",
-        product: "Refunds & Cancellations V1",
-        reservationId: reservation.id,
-        propertyId: reservation.propertyId,
-        organizationId,
-        requestedByUserId: requestedByUserId ?? "",
-        reason: refundReason,
+    const refund = await stripe.refunds.create(
+      {
+        payment_intent: reservation.stripePaymentIntentId,
+        amount: resolvedRefundAmountCents,
+        reverse_transfer: true,
+        refund_application_fee: refundApplicationFee,
+        metadata: {
+          platform: "PinGo",
+          product: "Refunds & Cancellations V1.2",
+          reservationId: reservation.id,
+          propertyId: reservation.propertyId,
+          organizationId,
+          requestedByUserId: requestedByUserId ?? "",
+          requestedByActor,
+          reason: refundReason,
+          refundMode: effectiveRefundMode,
+          refundAmountCents: String(resolvedRefundAmountCents),
+          refundAmount: String(resolvedRefundAmount),
+          refundPercent: String(effectiveRefundPercent),
+        },
       },
-    });
+      {
+        idempotencyKey: refundIdempotencyKey,
+      }
+    );
 
-    const previousExternalRaw = normalizeJsonObject(reservation.externalRaw);
+    const refundedAt = new Date();
+
+    const refundRecord = {
+      stripeRefundId: refund.id,
+      status: refund.status,
+      amount: resolvedRefundAmount,
+      amountCents: refund.amount,
+      currency: refund.currency,
+      reason: refundReason,
+      refundMode: effectiveRefundMode,
+      refundPercent: effectiveRefundPercent,
+      isFullRefund,
+      reverseTransfer: true,
+      refundApplicationFee,
+      refundedAt: refundedAt.toISOString(),
+      requestedByUserId,
+      requestedByActor,
+      idempotencyKey: refundIdempotencyKey,
+    };
+
+    const updateData: any = {
+      status: ReservationStatus.CANCELLED,
+      paymentState: isFullRefund
+        ? PaymentState.REFUNDED
+        : PaymentState.PARTIALLY_REFUNDED,
+      hostPayoutStatus: isFullRefund
+        ? HostPayoutStatus.REFUNDED
+        : HostPayoutStatus.PARTIALLY_REFUNDED,
+      hostPayoutFailureReason: null,
+      hostPayoutLastSyncedAt: refundedAt,
+      cancelledAt: reservation.cancelledAt ?? refundedAt,
+      cancelledBy: reservation.cancelledBy ?? requestedByActor,
+      cancelledByUserId: reservation.cancelledByUserId ?? requestedByUserId,
+      cancellationRequestedAt: reservation.cancellationRequestedAt ?? refundedAt,
+      cancellationRequestedBy:
+        reservation.cancellationRequestedBy ?? requestedByActor,
+      cancellationReason: refundReason,
+      cancellationRefundAmount: resolvedRefundAmount,
+      cancellationRefundPercent: effectiveRefundPercent,
+      externalRaw: {
+        ...previousExternalRaw,
+        refund: refundRecord,
+        refunds: [...previousRefunds, refundRecord],
+      },
+    };
+
+    if (cancellationEvaluation !== undefined) {
+      updateData.cancellationEvaluation = cancellationEvaluation as any;
+      updateData.cancellationEvaluatedAt =
+        reservation.cancellationEvaluatedAt ?? refundedAt;
+    }
 
     const updatedReservation = await prisma.reservation.update({
       where: {
         id: reservation.id,
       },
-      data: {
-        status: ReservationStatus.CANCELLED,
-        paymentState: PaymentState.REFUNDED,
-        hostPayoutStatus: HostPayoutStatus.REFUNDED,
-        hostPayoutFailureReason: null,
-        hostPayoutLastSyncedAt: new Date(),
-        externalRaw: {
-          ...previousExternalRaw,
-          refund: {
-            stripeRefundId: refund.id,
-            status: refund.status,
-            amount: refund.amount,
-            currency: refund.currency,
-            reason: refundReason,
-            reverseTransfer: true,
-            refundApplicationFee: shouldRefundApplicationFee(
-              reservation.platformFeeAmount
-            ),
-            refundedAt: new Date().toISOString(),
-            requestedByUserId,
-          },
-        },
-      },
+      data: updateData,
       select: {
         id: true,
         status: true,
@@ -211,6 +397,8 @@ export async function refundDirectBookingReservation({
         totalAmount: true,
         currency: true,
         propertyId: true,
+        cancellationRefundAmount: true,
+        cancellationRefundPercent: true,
       },
     });
 
@@ -262,12 +450,25 @@ export async function refundDirectBookingReservation({
           ? Number(updatedReservation.totalAmount)
           : null,
         currency: updatedReservation.currency,
+        cancellationRefundAmount: updatedReservation.cancellationRefundAmount
+          ? Number(updatedReservation.cancellationRefundAmount)
+          : null,
+        cancellationRefundPercent:
+          updatedReservation.cancellationRefundPercent !== null &&
+          updatedReservation.cancellationRefundPercent !== undefined
+            ? Number(updatedReservation.cancellationRefundPercent)
+            : null,
       },
       refund: {
         id: refund.id,
         status: refund.status,
         amount: refund.amount,
+        amountCents: refund.amount,
+        amountDecimal: resolvedRefundAmount,
         currency: refund.currency,
+        refundMode: effectiveRefundMode,
+        refundPercent: effectiveRefundPercent,
+        isFullRefund,
       },
       distributionSyncResult,
     };
@@ -275,6 +476,8 @@ export async function refundDirectBookingReservation({
     console.error("[DIRECT_BOOKING_REFUND_ERROR]", {
       reservationId,
       paymentIntentId: reservation.stripePaymentIntentId,
+      refundMode,
+      refundAmountCents: resolvedRefundAmountCents,
       error: error?.message ?? error,
     });
 
@@ -300,6 +503,8 @@ export async function refundDirectBookingReservation({
       details: {
         reservationId,
         paymentIntentId: reservation.stripePaymentIntentId,
+        refundMode,
+        refundAmountCents: resolvedRefundAmountCents,
       },
     });
   }

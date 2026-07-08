@@ -9,6 +9,7 @@ import {
   evaluateCancellationPolicy,
 } from "./cancellation-policy.service";
 import type { CancellationPolicySnapshot } from "./cancellation-policy.service";
+import { refundDirectBookingReservation } from "./direct-booking-refund.service";
 import { reconcileReservation } from "./reservation.reconcile.service";
 
 const prisma = new PrismaClient();
@@ -168,14 +169,78 @@ function getGuestCancellationAction(evaluation: {
   return "CANCELLATION_ALLOWED_NO_REFUND";
 }
 
+function getRecordedRefund(externalRaw: unknown) {
+  const raw = normalizeJsonObject(externalRaw);
+  const refund = normalizeJsonObject(raw.refund);
+  const stripeRefundId = String(refund.stripeRefundId ?? "").trim();
+
+  if (!stripeRefundId) {
+    return null;
+  }
+
+  return {
+    stripeRefundId,
+    status: String(refund.status ?? "").trim() || null,
+    amount:
+      typeof refund.amount === "number"
+        ? refund.amount
+        : Number(refund.amount ?? 0),
+    amountCents:
+      typeof refund.amountCents === "number"
+        ? refund.amountCents
+        : Number(refund.amountCents ?? 0),
+    currency: String(refund.currency ?? "").trim() || null,
+    reason: String(refund.reason ?? "").trim() || null,
+    refundMode: String(refund.refundMode ?? "").trim() || null,
+    refundPercent:
+      typeof refund.refundPercent === "number"
+        ? refund.refundPercent
+        : Number(refund.refundPercent ?? 0),
+    isFullRefund: Boolean(refund.isFullRefund),
+    refundedAt: String(refund.refundedAt ?? "").trim() || null,
+  };
+}
+
+function getRefundExecution({
+  reservation,
+  evaluation,
+}: {
+  reservation: any;
+  evaluation: ReturnType<typeof evaluateCancellationPolicy>;
+}) {
+  const recordedRefund = getRecordedRefund(reservation.externalRaw);
+
+  if (recordedRefund) {
+    return recordedRefund.isFullRefund
+      ? "FULL_REFUND_EXECUTED"
+      : "PARTIAL_REFUND_EXECUTED";
+  }
+
+  if (evaluation.requiresHostApproval) {
+    return "NOT_EXECUTED_HOST_APPROVAL_REQUIRED";
+  }
+
+  if (evaluation.refundAmountCents > 0) {
+    return evaluation.eligibleForAutoRefund
+      ? "AUTO_REFUND_READY"
+      : "REFUND_PENDING_PROPERTY_WORKFLOW";
+  }
+
+  return "NO_REFUND_DUE";
+}
+
 function serializeGuestCancellationPreview({
   reservation,
   snapshot,
   evaluation,
+  refundExecution,
+  refund,
 }: {
   reservation: any;
   snapshot: CancellationPolicySnapshot;
   evaluation: ReturnType<typeof evaluateCancellationPolicy>;
+  refundExecution?: string | null;
+  refund?: unknown;
 }) {
   const action = getGuestCancellationAction(evaluation);
 
@@ -225,9 +290,12 @@ function serializeGuestCancellationPreview({
     },
     action,
     refundExecution:
-      evaluation.refundAmountCents > 0
-        ? "REFUND_NOT_EXECUTED_IN_V1"
-        : "NO_REFUND_DUE",
+      refundExecution ??
+      getRefundExecution({
+        reservation,
+        evaluation,
+      }),
+    refund: refund ?? getRecordedRefund(reservation.externalRaw),
   };
 }
 
@@ -333,11 +401,112 @@ export async function cancelReservationFromGuestPortal({
         reservation,
         snapshot,
         evaluation,
+        refundExecution: "NOT_EXECUTED_HOST_APPROVAL_REQUIRED",
       }),
     });
   }
 
+  if (
+    evaluation.eligibleForAutoRefund &&
+    evaluation.refundAmountCents > 0
+  ) {
+    const refundMode =
+      evaluation.refundAmountCents >= evaluation.breakdown.totalAmountCents
+        ? "FULL"
+        : "PARTIAL";
+
+    try {
+      const refundResult = await refundDirectBookingReservation({
+        organizationId: reservation.property.organizationId,
+        reservationId: reservation.id,
+        reason: cancellationReason,
+        refundMode,
+        refundAmountCents: evaluation.refundAmountCents,
+        refundPercent: evaluation.refundPercent,
+        cancellationEvaluation: evaluation,
+        requestedByUserId: null,
+        requestedByActor: CancellationActor.GUEST,
+      });
+
+      const updatedReservation = await getReservationByGuestToken(guestToken);
+
+      return {
+        ok: true,
+        alreadyCancelled: false,
+        ...serializeGuestCancellationPreview({
+          reservation: updatedReservation,
+          snapshot,
+          evaluation,
+          refundExecution:
+            refundMode === "FULL"
+              ? "FULL_REFUND_EXECUTED"
+              : "PARTIAL_REFUND_EXECUTED",
+          refund: refundResult.refund,
+        }),
+        refundResult,
+      };
+    } catch (error: any) {
+      console.error("[GUEST_CANCELLATION_AUTO_REFUND_ERROR]", {
+        reservationId: reservation.id,
+        propertyId: reservation.propertyId,
+        refundAmountCents: evaluation.refundAmountCents,
+        error: error?.message ?? error,
+      });
+
+      await prisma.reservation
+        .update({
+          where: {
+            id: reservation.id,
+          },
+          data: {
+            cancellationRequestedAt: requestedAt,
+            cancellationRequestedBy: CancellationActor.GUEST,
+            cancellationEvaluatedAt: requestedAt,
+            cancellationEvaluation: evaluation as any,
+            cancellationReason,
+            externalRaw: {
+              ...previousExternalRaw,
+              guestCancellation: {
+                requestedAt: requestedAt.toISOString(),
+                requestedBy: CancellationActor.GUEST,
+                reason: cancellationReason,
+                action: getGuestCancellationAction(evaluation),
+                refundExecution: "AUTO_REFUND_FAILED",
+                refundError: {
+                  code: error?.code ?? "AUTO_REFUND_FAILED",
+                  message: error?.message ?? "Automatic refund failed.",
+                  statusCode: error?.statusCode ?? 500,
+                  details: error?.details ?? null,
+                },
+                evaluation,
+              },
+            },
+          },
+        })
+        .catch(() => {});
+
+      throw new GuestCancellationError({
+        code: "GUEST_AUTO_REFUND_FAILED",
+        message:
+          error?.message ||
+          "Pin&Go could not process the automatic refund for this cancellation.",
+        statusCode: error?.statusCode || 500,
+        details: serializeGuestCancellationPreview({
+          reservation,
+          snapshot,
+          evaluation,
+          refundExecution: "AUTO_REFUND_FAILED",
+        }),
+      });
+    }
+  }
+
   const cancelledAt = new Date();
+
+  const refundExecution =
+    evaluation.refundAmountCents > 0
+      ? "REFUND_PENDING_PROPERTY_WORKFLOW"
+      : "NO_REFUND_DUE";
 
   const updatedReservation = await prisma.reservation.update({
     where: {
@@ -364,10 +533,7 @@ export async function cancelReservationFromGuestPortal({
           cancelledBy: CancellationActor.GUEST,
           reason: cancellationReason,
           action: getGuestCancellationAction(evaluation),
-          refundExecution:
-            evaluation.refundAmountCents > 0
-              ? "REFUND_NOT_EXECUTED_IN_V1"
-              : "NO_REFUND_DUE",
+          refundExecution,
           evaluation,
         },
       },
@@ -428,6 +594,7 @@ export async function cancelReservationFromGuestPortal({
       reservation: updatedReservation,
       snapshot,
       evaluation,
+      refundExecution,
     }),
     distributionSyncResult,
   };
