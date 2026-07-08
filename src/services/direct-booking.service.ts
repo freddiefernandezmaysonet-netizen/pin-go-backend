@@ -1,6 +1,6 @@
 import Stripe from "stripe";
 import { randomBytes } from "crypto";
-import { PrismaClient } from "@prisma/client";
+import { DashboardUserRole, PrismaClient } from "@prisma/client";
 import stripe from "../billing/stripe";
 import { checkPropertyAvailability } from "./availability.service";
 import { ingestReservation } from "./ingest.service";
@@ -176,6 +176,144 @@ function getAppUrl() {
 
 function buildManageReservationUrl(guestToken: string) {
   return `${getAppUrl()}/booking/manage/${encodeURIComponent(guestToken)}`;
+}
+
+type HostNotificationRecipient = {
+  email: string;
+  fullName: string | null;
+};
+
+async function getHostNotificationRecipients(organizationId: string) {
+  const adminUsers = await prisma.dashboardUser.findMany({
+    where: {
+      organizationId,
+      isActive: true,
+      role: DashboardUserRole.ORG_ADMIN,
+    },
+    select: {
+      email: true,
+      fullName: true,
+    },
+    orderBy: {
+      createdAt: "asc",
+    },
+  });
+
+  const users =
+    adminUsers.length > 0
+      ? adminUsers
+      : await prisma.dashboardUser.findMany({
+          where: {
+            organizationId,
+            isActive: true,
+          },
+          select: {
+            email: true,
+            fullName: true,
+          },
+          orderBy: {
+            createdAt: "asc",
+          },
+        });
+
+  const seenEmails = new Set<string>();
+  const recipients: HostNotificationRecipient[] = [];
+
+  for (const user of users) {
+    const email = String(user.email ?? "").trim().toLowerCase();
+
+    if (!email || seenEmails.has(email)) {
+      continue;
+    }
+
+    seenEmails.add(email);
+
+    recipients.push({
+      email,
+      fullName: user.fullName,
+    });
+  }
+
+  return recipients;
+}
+
+async function sendDirectBookingHostNotificationSafe({
+  organizationId,
+  propertyId,
+  propertyName,
+  propertyTimeZone,
+  reservation,
+  totalAmount,
+}: {
+  organizationId: string;
+  propertyId: string;
+  propertyName: string;
+  propertyTimeZone?: string | null;
+  reservation: {
+    id: string;
+    guestName: string | null;
+    guestEmail: string | null;
+    guestPhone: string | null;
+    checkIn: Date;
+    checkOut: Date;
+    currency: string | null;
+    hostPayoutStatus: unknown;
+  };
+  totalAmount: number | null;
+}) {
+  const recipients = await getHostNotificationRecipients(organizationId);
+
+  if (recipients.length === 0) {
+    console.warn("[HOST_BOOKING_EMAIL_NO_RECIPIENTS]", {
+      organizationId,
+      propertyId,
+      reservationId: reservation.id,
+    });
+
+    return {
+      ok: true,
+      sent: 0,
+      skipped: true,
+    };
+  }
+
+  let sent = 0;
+
+  for (const recipient of recipients) {
+    try {
+      await sendDirectBookingHostNotification({
+        to: recipient.email,
+        hostName: recipient.fullName,
+        propertyName,
+        guestName: reservation.guestName ?? "Guest",
+        guestEmail: reservation.guestEmail,
+        guestPhone: reservation.guestPhone,
+        checkIn: reservation.checkIn,
+        checkOut: reservation.checkOut,
+        propertyTimeZone,
+        totalAmount,
+        currency: reservation.currency,
+        paymentState: "PAID",
+        hostPayoutStatus: String(reservation.hostPayoutStatus ?? ""),
+      } as any);
+
+      sent += 1;
+    } catch (emailError: any) {
+      console.error("[DIRECT_BOOKING_HOST_EMAIL_ERROR]", {
+        organizationId,
+        propertyId,
+        reservationId: reservation.id,
+        to: recipient.email,
+        error: emailError?.message ?? emailError,
+      });
+    }
+  }
+
+  return {
+    ok: true,
+    sent,
+    skipped: false,
+  };
 }
 
 async function getOrCreateReservationGuestToken(reservationId: string) {
@@ -600,6 +738,15 @@ if (updatedReservation.guestEmail) {
     console.error("[DIRECT_BOOKING_GUEST_EMAIL_ERROR]", emailError);
   }
 }
+
+await sendDirectBookingHostNotificationSafe({
+  organizationId: property.organizationId,
+  propertyId: property.id,
+  propertyName: property.name,
+  propertyTimeZone: property.timezone,
+  reservation: updatedReservation,
+  totalAmount: amountNumber,
+});
 
 const distributionStartedAt = new Date();
 const distributionDecisionId = `distribution-engine:${property.id}:direct-booking:${ingestResult.reservationId}`;
