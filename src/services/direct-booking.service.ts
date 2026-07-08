@@ -7,6 +7,8 @@ import { ingestReservation } from "./ingest.service";
 import { calculateDirectBookingPricing } from "./direct-booking-pricing.service";
 import { syncChannexAvailabilityForProperty } from "./channex-availability-sync.service";
 import { auditReservationCompleteFlowSafe } from "./reservation-complete-flow-audit.service";
+import type { AuditEntry } from "../apms/audit-types";
+import { persistAuditEntry } from "../apms/audit-persistence.service";
 import {
   sendDirectBookingGuestConfirmation,
   sendDirectBookingHostNotification,
