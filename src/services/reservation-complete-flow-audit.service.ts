@@ -636,11 +636,35 @@ export async function auditReservationCompleteFlow(
     };
   }
 
-  const property = reservation.property;
+   const property = reservation.property;
   const organization = property.organization;
   const organizationId = property.organizationId;
   const propertyId = property.id;
   const decisionId = `reservation-complete-flow:${reservation.id}`;
+
+  const auditSource = normalizeText(reservation.source);
+  const auditExternalProvider = normalizeText(reservation.externalProvider);
+
+  const isManualReservation =
+    auditSource === "MANUAL" || auditExternalProvider === "PIN_GO_MANUAL";
+
+  const isDirectBookingReservation =
+    auditSource === "DIRECT_BOOKING" ||
+    auditExternalProvider === "PIN_GO_DIRECT" ||
+    Boolean(reservation.stripeCheckoutSessionId);
+
+  const auditMode = isManualReservation
+    ? "MANUAL_RESERVATION"
+    : isDirectBookingReservation
+    ? "DIRECT_BOOKING"
+    : "OTA_RESERVATION";
+
+  const paymentPaidRequired = isDirectBookingReservation;
+  const stripeRequired = isDirectBookingReservation;
+  const hostPayoutRequired = isDirectBookingReservation;
+  const directBookingMessagingEvidenceRequired = isDirectBookingReservation;
+  const cancellationPolicySnapshotRequired = isDirectBookingReservation;
+
 
   const [
     overlappingActiveReservationCount,
@@ -876,6 +900,7 @@ export async function auditReservationCompleteFlow(
       propertyId,
       organizationId,
       status: reservation.status,
+      auditMode,
       source: reservation.source,
       externalProvider: reservation.externalProvider,
       externalId: reservation.externalId,
@@ -883,41 +908,59 @@ export async function auditReservationCompleteFlow(
     },
   });
 
+  const paymentPaid = reservation.paymentState === PaymentState.PAID;
+  const paymentStateRecorded = Boolean(reservation.paymentState);
+
   addCheck(checks, {
     rule: "PAYMENT_PAID",
-    label: "Payment Paid",
-    status: reservation.paymentState === PaymentState.PAID ? "PASS" : "FAIL",
-    critical: reservation.paymentState !== PaymentState.PAID,
+    label: paymentPaidRequired ? "Payment Paid" : "Payment State Recorded",
+    status: paymentPaidRequired
+      ? paymentPaid
+        ? "PASS"
+        : "FAIL"
+      : paymentStateRecorded
+      ? "PASS"
+      : "WARNING",
+    critical: paymentPaidRequired && !paymentPaid,
+    required: paymentPaidRequired,
     recommendedAction:
-      reservation.paymentState === PaymentState.PAID
-        ? undefined
-        : "Review Stripe payment state before allowing the reservation to proceed.",
+      paymentPaidRequired && !paymentPaid
+        ? "Review Stripe payment state before allowing the reservation to proceed."
+        : undefined,
     metadata: {
+      auditMode,
+      paymentPaidRequired,
       paymentState: reservation.paymentState,
       totalAmount: toNumber(reservation.totalAmount),
       currency: reservation.currency,
     },
   });
-
   addCheck(checks, {
     rule: "STRIPE_CHECKOUT_AND_PAYMENT_INTENT_SAVED",
     label: "Stripe Checkout and Payment Intent Saved",
-    status:
-      reservation.stripeCheckoutSessionId && reservation.stripePaymentIntentId
-        ? "PASS"
-        : "FAIL",
-    critical: !(reservation.stripeCheckoutSessionId && reservation.stripePaymentIntentId),
+       status: !stripeRequired
+      ? "PASS"
+      : reservation.stripeCheckoutSessionId && reservation.stripePaymentIntentId
+      ? "PASS"
+      : "FAIL",
+    critical:
+      stripeRequired &&
+      !(reservation.stripeCheckoutSessionId && reservation.stripePaymentIntentId),
+    required: stripeRequired,
     recommendedAction:
-      reservation.stripeCheckoutSessionId && reservation.stripePaymentIntentId
-        ? undefined
-        : "Review the Stripe webhook persistence. Checkout session or payment intent is missing.",
+      stripeRequired &&
+      !(reservation.stripeCheckoutSessionId && reservation.stripePaymentIntentId)
+        ? "Review the Stripe webhook persistence. Checkout session or payment intent is missing."
+        : undefined,
     metadata: {
       stripeCheckoutSessionId: reservation.stripeCheckoutSessionId,
       stripePaymentIntentId: reservation.stripePaymentIntentId,
       stripeChargeId: reservation.stripeChargeId,
       stripeTransferId: reservation.stripeTransferId,
       stripeApplicationFeeId: reservation.stripeApplicationFeeId,
-    },
+      auditMode,
+      stripeRequired,
+   },
   });
 
   const stripeFinancialRefsComplete = Boolean(
@@ -929,16 +972,23 @@ export async function auditReservationCompleteFlow(
   addCheck(checks, {
     rule: "STRIPE_FINANCIAL_REFERENCES_CAPTURED",
     label: "Stripe Financial References Captured",
-    status: stripeFinancialRefsComplete ? "PASS" : "WARNING",
+        status: !stripeRequired
+      ? "PASS"
+      : stripeFinancialRefsComplete
+      ? "PASS"
+      : "WARNING",
     critical: false,
-    required: false,
-    recommendedAction: stripeFinancialRefsComplete
-      ? undefined
-      : "Stripe payment was stored, but charge, transfer, or application fee references were not fully captured yet.",
+    required: stripeRequired,
+       recommendedAction:
+      stripeRequired && !stripeFinancialRefsComplete
+        ? "Stripe payment was stored, but charge, transfer, or application fee references were not fully captured yet."
+        : undefined,
     metadata: {
       stripeChargeId: reservation.stripeChargeId,
       stripeTransferId: reservation.stripeTransferId,
       stripeApplicationFeeId: reservation.stripeApplicationFeeId,
+      auditMode,
+      stripeRequired,
     },
   });
 
@@ -961,17 +1011,23 @@ export async function auditReservationCompleteFlow(
   addCheck(checks, {
     rule: "HOST_PAYOUT_ROUTE_STATUS",
     label: "Host Payout Route Status",
-    status:
-      organizationPayoutReady && payoutStatusReady && payoutReferenceReady
-        ? "PASS"
-        : organizationPayoutReady
-        ? "FAIL"
-        : "WARNING",
-    critical: false,
+       status: !hostPayoutRequired
+      ? "PASS"
+      : organizationPayoutReady && payoutStatusReady && payoutReferenceReady
+      ? "PASS"
+      : organizationPayoutReady
+      ? "FAIL"
+      : "WARNING",
+    critical:
+      hostPayoutRequired &&
+      organizationPayoutReady &&
+      !(payoutStatusReady && payoutReferenceReady),
+    required: hostPayoutRequired,
     recommendedAction:
-      organizationPayoutReady && payoutStatusReady && payoutReferenceReady
-        ? undefined
-        : "Review Stripe Connect payout routing and host payout status for this reservation.",
+      hostPayoutRequired &&
+      !(organizationPayoutReady && payoutStatusReady && payoutReferenceReady)
+        ? "Review Stripe Connect payout routing and host payout status for this reservation."
+        : undefined,
     metadata: {
       organizationPayoutReady,
       organizationStripeConnectStatus: organization.stripeConnectStatus,
@@ -983,6 +1039,8 @@ export async function auditReservationCompleteFlow(
       platformFeeAmount: toNumber(reservation.platformFeeAmount),
       hostPayoutFailureReason: reservation.hostPayoutFailureReason,
       hostPayoutLastSyncedAt: reservation.hostPayoutLastSyncedAt,
+      auditMode,
+      hostPayoutRequired,
     },
   });
 
@@ -1055,9 +1113,13 @@ export async function auditReservationCompleteFlow(
   addCheck(checks, {
     rule: "GUEST_CONFIRMATION_EMAIL_EVIDENCE",
     label: "Guest Confirmation Email Evidence",
-    status: hasGuestEmailEvidence ? "PASS" : "WARNING",
+        status: !directBookingMessagingEvidenceRequired
+      ? "PASS"
+      : hasGuestEmailEvidence
+      ? "PASS"
+      : "WARNING",
     critical: false,
-    required: false,
+        required: directBookingMessagingEvidenceRequired,
     recommendedAction: hasGuestEmailEvidence
       ? undefined
       : "Guest confirmation email is sent by the Direct Booking flow, but delivery evidence is not persisted yet.",
@@ -1072,16 +1134,25 @@ export async function auditReservationCompleteFlow(
   addCheck(checks, {
     rule: "HOST_RESERVATION_EMAIL_EVIDENCE",
     label: "Host Reservation Email Evidence",
-    status: hasHostEmailEvidence ? "PASS" : "WARNING",
+        status: !directBookingMessagingEvidenceRequired
+      ? "PASS"
+      : hasHostEmailEvidence
+      ? "PASS"
+      : "WARNING",
     critical: false,
-    required: false,
-    recommendedAction: hasHostEmailEvidence
-      ? undefined
-      : "Host reservation email is sent by the Direct Booking flow, but delivery evidence is not persisted yet.",
+    required: directBookingMessagingEvidenceRequired,
+    recommendedAction:
+      directBookingMessagingEvidenceRequired && !hasHostEmailEvidence
+        ? "Host reservation email is sent by the Direct Booking flow, but delivery evidence is not persisted yet."
+        : undefined,
     metadata: {
       hasHostEmailEvidence,
       messageDispatchLogCount: dispatchLogs.length,
       messageLogCount: messageLogs.length,
+      auditMode,
+      directBookingMessagingEvidenceRequired,
+      auditMode,
+      directBookingMessagingEvidenceRequired,
     },
   });
 
@@ -1117,12 +1188,20 @@ export async function auditReservationCompleteFlow(
   addCheck(checks, {
     rule: "CANCELLATION_POLICY_SNAPSHOT_SAVED",
     label: "Cancellation Policy Snapshot Saved",
-    status: snapshotExists && cancellationTermsAccepted ? "PASS" : "FAIL",
-    critical: false,
+       status: !cancellationPolicySnapshotRequired
+      ? "PASS"
+      : snapshotExists && cancellationTermsAccepted
+      ? "PASS"
+      : "FAIL",
+    critical:
+      cancellationPolicySnapshotRequired &&
+      !(snapshotExists && cancellationTermsAccepted),
+    required: cancellationPolicySnapshotRequired,
     recommendedAction:
-      snapshotExists && cancellationTermsAccepted
-        ? undefined
-        : "Review cancellation policy snapshot and guest terms acknowledgment for this reservation.",
+      cancellationPolicySnapshotRequired &&
+      !(snapshotExists && cancellationTermsAccepted)
+        ? "Review cancellation policy snapshot and guest terms acknowledgment for this reservation."
+        : undefined,
     metadata: {
       cancellationPolicyId: reservation.cancellationPolicyId,
       snapshotExists,
@@ -1130,6 +1209,8 @@ export async function auditReservationCompleteFlow(
       snapshotPolicyName: snapshot?.name ?? null,
       snapshotPolicyType: snapshot?.type ?? null,
       snapshotRefundBasis: snapshot?.refundBasis ?? null,
+      auditMode,
+      cancellationPolicySnapshotRequired,
     },
   });
 
