@@ -1317,25 +1317,66 @@ export async function auditReservationCompleteFlow(
     },
   });
 
+  const cleaningConfirmationStatus = normalizeText(
+    latestCleaningConfirmation?.status
+  );
+
+  const cleaningConfirmationPending =
+    cleaningConfirmationStatus === "PENDING";
+
+  const cleaningConfirmationConfirmed =
+    cleaningConfirmationStatus === "CONFIRMED";
+
+  const cleaningConfirmationDeclined =
+    cleaningConfirmationStatus === "DECLINED";
+
   const cleanerAccessReady = Boolean(
     latestStaffAssignment?.accessGrantId ||
       latestStaffAssignment?.accessGrant ||
       staffAccessGrant
   );
 
+  const cleanerAccessWaitingForConfirmation = Boolean(
+    latestCleaningConfirmation &&
+      cleaningConfirmationPending &&
+      !cleanerAccessReady
+  );
+
+  const cleanerAccessRequiredNow = Boolean(
+    !cleaningConfirmationPending &&
+      (cleaningConfirmationConfirmed || staffAssignmentReady)
+  );
+
+  const cleanerAccessCheckStatus: ReservationCompleteFlowCheckStatus =
+    cleanerAccessReady || cleanerAccessWaitingForConfirmation
+      ? "PASS"
+      : cleaningConfirmationDeclined || cleanerAccessRequiredNow
+      ? "FAIL"
+      : "WARNING";
+
+  const cleanerAccessRecommendedAction = cleanerAccessReady
+    ? undefined
+    : cleanerAccessWaitingForConfirmation
+    ? undefined
+    : cleaningConfirmationDeclined
+    ? "Cleaner declined the cleaning confirmation. Assign a backup cleaner and verify access."
+    : cleanerAccessRequiredNow
+    ? "Cleaner has confirmed or is scheduled, but cleaner access was not found. Create or repair cleaner access."
+    : "Verify cleaner confirmation and cleaner access workflow for this reservation.";
+
   addCheck(checks, {
     rule: "CLEANER_ACCESS_CREATED",
-    label: "Cleaner Access Created",
-    status: cleanerAccessReady
-      ? "PASS"
-      : staffAssignmentReady || cleaningConfirmationReady
-      ? "FAIL"
-      : "WARNING",
+    label: "Cleaner Access Lifecycle Valid",
+    status: cleanerAccessCheckStatus,
     critical: false,
-    recommendedAction: cleanerAccessReady
-      ? undefined
-      : "Verify cleaner access for this reservation.",
+    recommendedAction: cleanerAccessRecommendedAction,
     metadata: {
+      cleanerAccessReady,
+      cleanerAccessRequiredNow,
+      cleanerAccessWaitingForConfirmation,
+      cleaningConfirmationStatus: latestCleaningConfirmation?.status ?? null,
+      cleaningConfirmationId: latestCleaningConfirmation?.id ?? null,
+      staffAssignmentReady,
       staffAssignmentId: latestStaffAssignment?.id ?? null,
       staffAssignmentAccessGrantId: latestStaffAssignment?.accessGrantId ?? null,
       linkedAccessGrantId: latestStaffAssignment?.accessGrant?.id ?? null,
