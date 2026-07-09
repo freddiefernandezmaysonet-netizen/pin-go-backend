@@ -1,30 +1,10 @@
 import { Router } from "express";
-import {
-  PrismaClient,
-  StaffAccessMethod,
-  StaffAssignmentStatus,
-  NfcAssignmentRole,
-} from "@prisma/client";
-
-import { ttlockChangeCardPeriod } from "../ttlock/ttlock.card";
+import { PrismaClient } from "@prisma/client";
+import { ensureCleanerNfcAccessForConfirmedCleaning } from "../services/cleaner-access-autopilot.service";
 
 const prisma = new PrismaClient();
 
 export const cleaningConfirmRouter = Router();
-
-function computeCleaningWindowFromProperty(params: {
-  checkOut: Date;
-  cleaningStartOffsetMinutes?: number | null;
-  cleaningDurationMinutes?: number | null;
-}) {
-  const offsetMinutes = params.cleaningStartOffsetMinutes ?? 30;
-  const durationMinutes = params.cleaningDurationMinutes ?? 180;
-
-  const startsAt = new Date(params.checkOut.getTime() + offsetMinutes * 60_000);
-  const endsAt = new Date(startsAt.getTime() + durationMinutes * 60_000);
-
-  return { startsAt, endsAt };
-}
 
 async function loadConfirmationData(token: string) {
   const confirmation = await prisma.cleaningConfirmation.findUnique({
@@ -82,10 +62,34 @@ cleaningConfirmRouter.get("/cleaning/confirm/:token", async (req, res) => {
       return res.status(404).send("Cleaning confirmation data is incomplete.");
     }
 
-    if (confirmation.status === "CONFIRMED") {
-      return res.send("Cleaning already confirmed. Thank you.");
-    }
+   if (confirmation.status === "CONFIRMED") {
+  const cleanerAccessResult =
+    await ensureCleanerNfcAccessForConfirmedCleaning({
+      prisma,
+      reservationId: confirmation.reservationId,
+      confirmationId: confirmation.id,
+      trigger: "CLEANER_CONFIRMATION",
+    });
 
+  if (!cleanerAccessResult.ok) {
+    console.error("[CLEANING_CONFIRM_ALREADY_CONFIRMED_ACCESS_ESCALATED]", {
+      reservationId: confirmation.reservationId,
+      propertyId: confirmation.propertyId,
+      confirmationId: confirmation.id,
+      staffMemberId: confirmation.staffMemberId,
+      reason: cleanerAccessResult.reason,
+      error: cleanerAccessResult.error,
+    });
+
+    return res.status(202).send(
+      "Cleaning already confirmed. Pin&Go could not verify NFC access automatically yet, so the issue was escalated in Mission Control."
+    );
+  }
+
+  return res.send(
+    "Cleaning already confirmed. Pin&Go verified your NFC access for the cleaning window."
+  );
+}
     if (confirmation.status === "DECLINED") {
       return res.send("This cleaning request was already declined.");
     }
@@ -146,134 +150,41 @@ cleaningConfirmRouter.post(
         return res.status(409).send("This request was already declined.");
       }
 
-      const { startsAt, endsAt } = computeCleaningWindowFromProperty({
-        checkOut: reservation.checkOut,
-        cleaningStartOffsetMinutes: reservation.property?.cleaningStartOffsetMinutes,
-        cleaningDurationMinutes: reservation.property?.cleaningDurationMinutes,
-      });
-
-      const lock = reservation.property?.locks?.find(
-        (l: any) => l.isActive && l.ttlockLockId
-      );
-
-      const ttlockLockId = lock?.ttlockLockId ? Number(lock.ttlockLockId) : null;
-
-      if (!ttlockLockId) {
-        return res.status(400).send("No active TTLock lock configured for this property.");
-      }
-
-      let shouldAssignCleaningNfc = false;
-
-      await prisma.$transaction(async (tx) => {
-        await tx.cleaningConfirmation.update({
-          where: { id: confirmation.id },
-          data: {
-            status: "CONFIRMED",
-          },
-        });
-
-        await tx.staffAssignment.upsert({
-          where: {
-            reservationId_staffMemberId: {
-              reservationId: confirmation.reservationId,
-              staffMemberId: confirmation.staffMemberId,
-            },
-          },
-          create: {
-            reservationId: confirmation.reservationId,
-            staffMemberId: confirmation.staffMemberId,
-            method: StaffAccessMethod.NFC_TIMEBOUND,
-            startsAt,
-            endsAt,
-            status: StaffAssignmentStatus.SCHEDULED,
-          },
-          update: {
-            method: StaffAccessMethod.NFC_TIMEBOUND,
-            startsAt,
-            endsAt,
-            status: StaffAssignmentStatus.SCHEDULED,
-            lastError: null,
-          },
-        });
-
-        const existingCleaningNfc = await tx.nfcAssignment.findFirst({
-          where: {
-            reservationId: confirmation.reservationId,
-            role: NfcAssignmentRole.CLEANING,
-          },
-        });
-
-        if (!existingCleaningNfc) {
-          shouldAssignCleaningNfc = true;
-        }
-      });
-
-      if (shouldAssignCleaningNfc) {
-  const staffCardRef = (
-  staffMember.ttlockCardRef ?? ""
-).trim();
-
-if (!staffCardRef) {
-  throw new Error(
-    `Staff member ${staffMember.id} missing ttlockCardRef`
-  );
-}
-
-const staffCard = await prisma.nfcCard.findFirst({
+      await prisma.cleaningConfirmation.update({
   where: {
-    propertyId: confirmation.propertyId,
-    label: staffCardRef,
+    id: confirmation.id,
+  },
+  data: {
+    status: "CONFIRMED",
   },
 });
 
-if (!staffCard) {
-  throw new Error(
-    `NFC card not found for label=${staffCardRef}`
+const cleanerAccessResult =
+  await ensureCleanerNfcAccessForConfirmedCleaning({
+    prisma,
+    reservationId: confirmation.reservationId,
+    confirmationId: confirmation.id,
+    trigger: "CLEANER_CONFIRMATION",
+  });
+
+if (!cleanerAccessResult.ok) {
+  console.error("[CLEANING_CONFIRM_ACCESS_ESCALATED]", {
+    reservationId: confirmation.reservationId,
+    propertyId: confirmation.propertyId,
+    confirmationId: confirmation.id,
+    staffMemberId: confirmation.staffMemberId,
+    reason: cleanerAccessResult.reason,
+    error: cleanerAccessResult.error,
+  });
+
+  return res.status(202).send(
+    "Cleaning confirmed. Pin&Go recorded your availability, but NFC access could not be activated automatically yet. The issue was escalated in Mission Control."
   );
 }
 
-const cleaningTtlockCardId = Number(
-  staffCard.ttlockCardId
+return res.send(
+  "Cleaning confirmed. Pin&Go prepared your NFC access for the cleaning window."
 );
-  await ttlockChangeCardPeriod({
-    lockId: Number(ttlockLockId),
-    cardId: cleaningTtlockCardId,
-    startDate: startsAt.getTime(),
-    endDate: endsAt.getTime(),
-    changeType: 2,
-  });
-
-  await prisma.nfcAssignment.create({
-    data: {
-      reservationId: confirmation.reservationId,
-      nfcCardId: staffCard.id,
-      role: NfcAssignmentRole.CLEANING,
-      status: "ACTIVE",
-      startsAt,
-      endsAt,
-      lastError: null,
-    },
-  });
-
-  await prisma.nfcCard.update({
-    where: {
-      id: staffCard.id,
-    },
-    data: {
-      status: "ASSIGNED",
-    },
-  });
-
-  console.log(
-    "[CLEANING_CONFIRM] staff NFC activated",
-    {
-      reservationId: confirmation.reservationId,
-      staffMemberId: staffMember.id,
-      ttlockCardId: cleaningTtlockCardId,
-      nfcCardId: staffCard.id,
-    }
-  );
-}
       return res.send(
         "Cleaning confirmed. Pin&Go will activate your NFC access during the cleaning window."
       );

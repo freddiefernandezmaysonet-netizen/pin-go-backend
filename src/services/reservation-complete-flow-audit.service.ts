@@ -3,6 +3,8 @@ import {
   AccessMethod,
   AccessStatus,
   HostPayoutStatus,
+  NfcAssignmentRole,
+  NfcAssignmentStatus,
   PaymentState,
   PrismaClient,
   ReservationStatus,
@@ -16,6 +18,7 @@ import type {
   AuditStatus,
 } from "../apms/audit-types";
 import { persistAuditEntry } from "../apms/audit-persistence.service";
+import { ensureCleanerNfcAccessForConfirmedCleaning } from "./cleaner-access-autopilot.service";
 
 const prisma = new PrismaClient();
 
@@ -689,14 +692,15 @@ const guestConfirmationEmailEvidenceRequired =
 
 
   const [
-    overlappingActiveReservationCount,
-    accessGrants,
-    staffAssignments,
-    cleaningConfirmations,
-    dispatchLogs,
-    messageLogs,
-    auditEntries,
-  ] = await Promise.all([
+  overlappingActiveReservationCount,
+  accessGrants,
+  staffAssignments,
+  cleaningConfirmations,
+  cleaningNfcAssignments,
+  dispatchLogs,
+  messageLogs,
+  auditEntries,
+] = await Promise.all([
     db.reservation.count({
       where: {
         id: { not: reservation.id },
@@ -788,6 +792,28 @@ const guestConfirmationEmailEvidenceRequired =
         updatedAt: true,
       },
     }),
+    
+    db.nfcAssignment.findMany({
+  where: {
+    reservationId: reservation.id,
+    role: NfcAssignmentRole.CLEANING,
+  },
+  orderBy: {
+    createdAt: "desc",
+  },
+  select: {
+    id: true,
+    nfcCardId: true,
+    role: true,
+    status: true,
+    startsAt: true,
+    endsAt: true,
+    lastError: true,
+    createdAt: true,
+    updatedAt: true,
+  },
+}),
+
     db.messageDispatchLog.findMany({
       where: {
         reservationId: reservation.id,
@@ -915,17 +941,16 @@ const hasHostEmailEvidence = hasMessageEvidence({
     tokens: ["CLEANING", "CONFIRMATION"],
   }) ||
   dispatchLogs.some((log) => {
-    const type = String(log.type ?? "").trim().toUpperCase();
-    const channel = String(log.channel ?? "").trim().toUpperCase();
-    const status = String(log.status ?? "").trim().toUpperCase();
+    const type = normalizeText(log.type);
+    const channel = normalizeText(log.channel);
+    const status = normalizeText(log.status);
 
     return (
       type === "CLEANING_CONFIRMATION" &&
       channel === "SMS" &&
-      status === "SENT"
+      isSuccessStatus(status)
     );
-  });
-  
+  }); 
   const hasReservationAuditEntry = auditEntries.some(
     (entry) => normalizeText(entry.engine) === "RESERVATION"
   );
@@ -1461,12 +1486,42 @@ const hasHostEmailEvidence = hasMessageEvidence({
   const cleaningConfirmationDeclined =
     cleaningConfirmationStatus === "DECLINED";
 
-  const cleanerAccessReady = Boolean(
-    latestStaffAssignment?.accessGrantId ||
-      latestStaffAssignment?.accessGrant ||
-      staffAccessGrant
-  );
+ const latestCleaningNfcAssignment = cleaningNfcAssignments.find(
+  (assignment) =>
+    normalizeText(assignment.role) === "CLEANING" &&
+    normalizeText(assignment.status) === "ACTIVE"
+);
 
+const cleanerNfcAccessReady = Boolean(
+  latestCleaningNfcAssignment &&
+    normalizeText(latestCleaningNfcAssignment.status) ===
+      NfcAssignmentStatus.ACTIVE
+);
+
+let cleanerAccessReady = Boolean(
+  cleanerNfcAccessReady ||
+    latestStaffAssignment?.accessGrantId ||
+    latestStaffAssignment?.accessGrant ||
+    staffAccessGrant
+);
+
+let cleanerAccessAutopilotResult: Awaited<
+  ReturnType<typeof ensureCleanerNfcAccessForConfirmedCleaning>
+> | null = null;
+
+if (cleaningConfirmationConfirmed && !cleanerAccessReady) {
+  cleanerAccessAutopilotResult =
+    await ensureCleanerNfcAccessForConfirmedCleaning({
+      prisma: db,
+      reservationId: reservation.id,
+      confirmationId: latestCleaningConfirmation?.id ?? null,
+      trigger: "RESERVATION_COMPLETE_FLOW_AUDIT",
+    });
+
+  if (cleanerAccessAutopilotResult.ok) {
+    cleanerAccessReady = true;
+  }
+}
   const cleanerAccessWaitingForConfirmation = Boolean(
     latestCleaningConfirmation &&
       cleaningConfirmationPending &&
@@ -1485,16 +1540,17 @@ const hasHostEmailEvidence = hasMessageEvidence({
       ? "FAIL"
       : "WARNING";
 
-  const cleanerAccessRecommendedAction = cleanerAccessReady
-    ? undefined
-    : cleanerAccessWaitingForConfirmation
-    ? undefined
-    : cleaningConfirmationDeclined
-    ? "Cleaner declined the cleaning confirmation. Assign a backup cleaner and verify access."
-    : cleanerAccessRequiredNow
-    ? "Cleaner has confirmed or is scheduled, but cleaner access was not found. Create or repair cleaner access."
-    : "Verify cleaner confirmation and cleaner access workflow for this reservation.";
-
+ const cleanerAccessRecommendedAction = cleanerAccessReady
+  ? undefined
+  : cleanerAccessWaitingForConfirmation
+  ? undefined
+  : cleaningConfirmationDeclined
+  ? "Cleaner declined the cleaning confirmation. Assign a backup cleaner and verify access."
+  : cleanerAccessAutopilotResult?.escalated
+  ? "Cleaner confirmed availability, but Access Autopilot could not activate NFC access. Review the cleaner card, TTLock mapping, or active lock."
+  : cleanerAccessRequiredNow
+  ? "Cleaner has confirmed or is scheduled, but cleaner access was not found. Create or repair cleaner access."
+  : "Verify cleaner confirmation and cleaner access workflow for this reservation.";
   addCheck(checks, {
     rule: "CLEANER_ACCESS_CREATED",
     label: "Cleaner Access Lifecycle Valid",
@@ -1518,6 +1574,19 @@ const hasHostEmailEvidence = hasMessageEvidence({
         latestStaffAssignment?.accessGrant?.lastError ??
         staffAccessGrant?.lastError ??
         null,
+      cleanerNfcAccessReady,
+      cleaningNfcAssignmentId: latestCleaningNfcAssignment?.id ?? null,
+      cleaningNfcCardId: latestCleaningNfcAssignment?.nfcCardId ?? null,
+      cleaningNfcStatus: latestCleaningNfcAssignment?.status ?? null,
+      cleaningNfcStartsAt: latestCleaningNfcAssignment?.startsAt ?? null,
+      cleaningNfcEndsAt: latestCleaningNfcAssignment?.endsAt ?? null,
+      cleaningNfcLastError: latestCleaningNfcAssignment?.lastError ?? null,
+      cleanerAccessAutopilotAttempted: Boolean(cleanerAccessAutopilotResult),
+      cleanerAccessAutopilotOk: cleanerAccessAutopilotResult?.ok ?? null,
+      cleanerAccessAutopilotReason: cleanerAccessAutopilotResult?.reason ?? null,
+      cleanerAccessAutopilotError: cleanerAccessAutopilotResult?.error ?? null,
+      cleanerAccessAutopilotEscalated:
+      cleanerAccessAutopilotResult?.escalated ?? null,
     },
   });
 
