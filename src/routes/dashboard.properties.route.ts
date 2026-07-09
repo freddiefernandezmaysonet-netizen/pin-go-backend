@@ -964,31 +964,57 @@ dashboardPropertiesRouter.post(
         status: "ACTIVE",
       });
 
-const manageReservationUrl = result.guestToken
-  ? buildManageReservationUrl(result.guestToken)
+const manualReservationForEmail = cleanGuestEmail
+  ? await prisma.reservation.findUnique({
+      where: {
+        id: result.reservationId,
+      },
+      select: {
+        id: true,
+        guestName: true,
+        guestEmail: true,
+        checkIn: true,
+        checkOut: true,
+        guestToken: true,
+        property: {
+          select: {
+            name: true,
+            timezone: true,
+          },
+        },
+      },
+    })
   : null;
 
-if (cleanGuestEmail) {
+const emailGuestToken =
+  manualReservationForEmail?.guestToken ?? result.guestToken ?? null;
+
+const manageReservationUrl = emailGuestToken
+  ? buildManageReservationUrl(emailGuestToken)
+  : null;
+
+if (manualReservationForEmail?.guestEmail) {
   try {
     await sendManualReservationGuestConfirmation({
-      to: cleanGuestEmail,
-      guestName: cleanGuestName,
-      propertyName: property.name,
-      checkIn: new Date(String(checkIn)),
-      checkOut: new Date(String(checkOut)),
+      to: manualReservationForEmail.guestEmail,
+      guestName: manualReservationForEmail.guestName,
+      propertyName: manualReservationForEmail.property.name,
+      checkIn: manualReservationForEmail.checkIn,
+      checkOut: manualReservationForEmail.checkOut,
+      propertyTimeZone: manualReservationForEmail.property.timezone,
       manageReservationUrl,
     });
   } catch (emailError: any) {
     console.error("[MANUAL_RESERVATION_GUEST_EMAIL_ERROR]", {
       propertyId: property.id,
       reservationId: result.reservationId,
-      to: cleanGuestEmail,
+      to: manualReservationForEmail.guestEmail,
       error: emailError?.message ?? emailError,
     });
   }
 }
-
-     let distributionSyncResult: any = null;
+     
+ let distributionSyncResult: any = null;
 
 const distributionStartedAt = new Date();
 const distributionDecisionId = `distribution-engine:${property.id}:manual-reservation:${result.reservationId}`;
