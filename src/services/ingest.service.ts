@@ -16,6 +16,7 @@ import { log } from "../utils/log";
 import { fromZonedTime } from "date-fns-tz";
 import { selectNextStaffForProperty } from "./staff-selection.service";
 import { createCleaningConfirmation } from "./cleaning-confirmation.service";
+import { generateReservationNumber } from "./reservation-number.service";
 import { createReservationAuditEntry } from "../apms/reservation-audit.mapper";
 import { persistAuditEntry } from "../apms/audit-persistence.service";
 import type { AuditEntry } from "../apms/audit-types";
@@ -45,6 +46,7 @@ export type IngestPayload = {
 
 type IngestReservationResult = {
   reservationId: string;
+  reservationNumber: string;
   guestToken: string | null;
   accessGrantId?: string | null;
   lockId?: string | null;
@@ -214,13 +216,14 @@ export async function ingestReservation(p: IngestPayload) {
     });
 
     if (!lock) {
-      return {
-        reservationId: reservation.id,
-        guestToken: ensured.guestToken,
-        warning: `No active lock found for property ${reservation.propertyId}. AccessGrant not created.`,
-        didChange,
-        cleaningConfirmation: null,
-      };
+     return {
+  reservationId: reservation.id,
+  reservationNumber: reservation.reservationNumber,
+  guestToken: ensured.guestToken,
+  warning: `No active lock found for property ${reservation.propertyId}. AccessGrant not created.`,
+  didChange,
+  cleaningConfirmation: null,
+};
     }
 
 console.log("[INGEST_LOCK]", {
@@ -266,13 +269,14 @@ console.log("[INGEST_LOCK]", {
   console.error("[CLEANING_CONFIRMATION_SELECT_ERROR]", e);
 }
     return {
-      reservationId: reservation.id,
-      guestToken: ensured.guestToken,
-      accessGrantId: grant?.id ?? null,
-      lockId: lock.id,
-      didChange,
-      cleaningConfirmation,
-    };
+  reservationId: reservation.id,
+  reservationNumber: reservation.reservationNumber,
+  guestToken: ensured.guestToken,
+  accessGrantId: grant?.id ?? null,
+  lockId: lock.id,
+  didChange,
+  cleaningConfirmation,
+};
   });
 
 console.log("[CLEANING_CONFIRMATION_RESULT]", {
@@ -381,15 +385,16 @@ if (result.cleaningConfirmation) {
         },
       },
     ],
-    metadata: {
-      source: p.source ?? null,
-      externalProvider,
-      externalId,
-      paymentState,
-      checkIn,
-      checkOut,
-      warning: result.warning ?? null,
-    },
+   metadata: {
+  source: p.source ?? null,
+  externalProvider,
+  externalId,
+  paymentState,
+  checkIn,
+  checkOut,
+  reservationNumber: result.reservationNumber,
+  warning: result.warning ?? null,
+},
   });
 
   try {
@@ -477,15 +482,16 @@ if (result.cleaningConfirmation) {
     recommendedAction: result.accessGrantId
       ? undefined
       : "Review lock assignment and guest access grant for this reservation.",
-    metadata: {
-      propertyId: p.propertyId,
-      reservationId: result.reservationId,
-      lockId: result.lockId ?? null,
-      accessGrantId: result.accessGrantId ?? null,
-      source: p.source ?? null,
-      externalProvider,
-      externalId,
-    },
+  metadata: {
+  propertyId: p.propertyId,
+  reservationId: result.reservationId,
+  reservationNumber: result.reservationNumber,
+  lockId: result.lockId ?? null,
+  accessGrantId: result.accessGrantId ?? null,
+  source: p.source ?? null,
+  externalProvider,
+  externalId,
+},
   };
 
   try {
@@ -581,16 +587,17 @@ if (result.cleaningConfirmation) {
       ? undefined
       : "Assign a cleaner and verify cleaning confirmation for this reservation.",
     metadata: {
-      propertyId: p.propertyId,
-      reservationId: result.reservationId,
-      staffMemberId:
-        result.cleaningConfirmation?.staffMemberId ?? null,
-      source: p.source ?? null,
-      externalProvider,
-      externalId,
-      checkIn,
-      checkOut,
-    },
+  propertyId: p.propertyId,
+  reservationId: result.reservationId,
+  reservationNumber: result.reservationNumber,
+  staffMemberId:
+    result.cleaningConfirmation?.staffMemberId ?? null,
+  source: p.source ?? null,
+  externalProvider,
+  externalId,
+  checkIn,
+  checkOut,
+},
   };
 
   try {
@@ -609,10 +616,10 @@ if (result.cleaningConfirmation) {
   }
 
   log("ingest.result", {
-    reservationId: result.reservationId,
-    didChange: result.didChange,
-  });
-
+  reservationId: result.reservationId,
+  reservationNumber: result.reservationNumber,
+  didChange: result.didChange,
+});
   return {
     ...result,
     auditEntry,
@@ -797,8 +804,11 @@ async function upsertReservation(
       return { reservation, didChange: true };
     }
 
+    const reservationNumber = await generateReservationNumber(tx);
+
     const reservation = await tx.reservation.create({
       data: {
+        reservationNumber,
         ingestKey,
         source: input.source ?? null,
 
@@ -830,9 +840,12 @@ async function upsertReservation(
     return { reservation, didChange: true };
   }
 
+  const reservationNumber = await generateReservationNumber(tx);
+
   const reservation = await tx.reservation.upsert({
     where: { ingestKey },
     create: {
+      reservationNumber,
       ingestKey,
       source: input.source ?? null,
 
