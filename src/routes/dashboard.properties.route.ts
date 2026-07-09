@@ -16,6 +16,7 @@ import type { AuditEntry } from "../apms/audit-types";
 import { persistAuditEntry } from "../apms/audit-persistence.service";
 import { createDistributionAuditEntry } from "../apms/distribution-audit.mapper";
 import { sendManualReservationGuestConfirmation } from "../lib/mailer";
+import { sendLoggedEmail } from "../services/email-delivery.service";
 
 const prisma = new PrismaClient();
 export const dashboardPropertiesRouter = Router();
@@ -994,26 +995,52 @@ const manageReservationUrl = emailGuestToken
   : null;
 
 if (manualReservationForEmail?.guestEmail) {
+  const manualReservationGuestEmailInput = {
+    to: manualReservationForEmail.guestEmail,
+    guestName: manualReservationForEmail.guestName,
+    propertyName: manualReservationForEmail.property.name,
+    checkIn: manualReservationForEmail.checkIn,
+    checkOut: manualReservationForEmail.checkOut,
+    propertyTimeZone: manualReservationForEmail.property.timezone,
+    manageReservationUrl,
+  };
+
   try {
-    await sendManualReservationGuestConfirmation({
+    const manualGuestEmailDeliveryResult = await sendLoggedEmail({
+      prisma,
+      type: "MANUAL_RESERVATION_GUEST_CONFIRMATION",
       to: manualReservationForEmail.guestEmail,
-      guestName: manualReservationForEmail.guestName,
-      propertyName: manualReservationForEmail.property.name,
-      checkIn: manualReservationForEmail.checkIn,
-      checkOut: manualReservationForEmail.checkOut,
-      propertyTimeZone: manualReservationForEmail.property.timezone,
-      manageReservationUrl,
+      subject: `Your Pin&Go reservation is confirmed - ${manualReservationForEmail.property.name}`,
+      reservationId: manualReservationForEmail.id,
+      propertyId: property.id,
+      organizationId: orgId,
+      retryPayload: manualReservationGuestEmailInput,
+      send: () =>
+        sendManualReservationGuestConfirmation(
+          manualReservationGuestEmailInput
+        ),
     });
+
+    if (!manualGuestEmailDeliveryResult.ok) {
+      console.error("[MANUAL_RESERVATION_GUEST_EMAIL_DELIVERY_FAILED]", {
+        organizationId: orgId,
+        propertyId: property.id,
+        reservationId: result.reservationId,
+        to: manualReservationForEmail.guestEmail,
+        status: manualGuestEmailDeliveryResult.status,
+        error: manualGuestEmailDeliveryResult.error,
+      });
+    }
   } catch (emailError: any) {
     console.error("[MANUAL_RESERVATION_GUEST_EMAIL_ERROR]", {
+      organizationId: orgId,
       propertyId: property.id,
       reservationId: result.reservationId,
       to: manualReservationForEmail.guestEmail,
       error: emailError?.message ?? emailError,
     });
   }
-}
-     
+}     
  let distributionSyncResult: any = null;
 
 const distributionStartedAt = new Date();
