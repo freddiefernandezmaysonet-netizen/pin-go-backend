@@ -679,6 +679,12 @@ export async function auditReservationCompleteFlow(
   const stripeRequired = isDirectBookingReservation;
   const hostPayoutRequired = isDirectBookingReservation;
   const directBookingMessagingEvidenceRequired = isDirectBookingReservation;
+  const manualReservationMessagingEvidenceRequired =
+  isManualReservation && Boolean(reservation.guestEmail);
+
+const guestConfirmationEmailEvidenceRequired =
+  directBookingMessagingEvidenceRequired ||
+  manualReservationMessagingEvidenceRequired;
   const cancellationPolicySnapshotRequired = isDirectBookingReservation;
 
 
@@ -874,21 +880,33 @@ export async function auditReservationCompleteFlow(
     (entry) => normalizeText(entry.engine) === "DISTRIBUTION"
   );
 
-  const hasGuestEmailEvidence = hasMessageEvidence({
-    auditEntries,
-    dispatchLogs,
-    messageLogs,
-    tokens: ["DIRECT", "BOOKING", "GUEST"],
-    expectedTo: reservation.guestEmail,
-  });
+  const hasDirectBookingGuestEmailEvidence = hasMessageEvidence({
+  auditEntries,
+  dispatchLogs,
+  messageLogs,
+  tokens: ["DIRECT", "BOOKING", "GUEST"],
+  expectedTo: reservation.guestEmail,
+});
 
-  const hasHostEmailEvidence = hasMessageEvidence({
-    auditEntries,
-    dispatchLogs,
-    messageLogs,
-    tokens: ["DIRECT", "BOOKING", "HOST"],
-  });
+const hasManualReservationGuestEmailEvidence = hasMessageEvidence({
+  auditEntries,
+  dispatchLogs,
+  messageLogs,
+  tokens: ["MANUAL", "RESERVATION", "GUEST"],
+  expectedTo: reservation.guestEmail,
+});
 
+const hasGuestEmailEvidence = isManualReservation
+  ? hasManualReservationGuestEmailEvidence
+  : hasDirectBookingGuestEmailEvidence;
+
+const hasHostEmailEvidence = hasMessageEvidence({
+  auditEntries,
+  dispatchLogs,
+  messageLogs,
+  tokens: ["DIRECT", "BOOKING", "HOST"],
+});
+  
   const hasCleanerNotificationEvidence = hasMessageEvidence({
     auditEntries,
     dispatchLogs,
@@ -1148,32 +1166,35 @@ export async function auditReservationCompleteFlow(
     },
   });
 
-  addCheck(checks, {
-    rule: "HOST_RESERVATION_EMAIL_EVIDENCE",
-    label: "Host Reservation Email Evidence",
-        status: !directBookingMessagingEvidenceRequired
-      ? "PASS"
-      : hasHostEmailEvidence
-      ? "PASS"
-      : "WARNING",
-    critical: false,
-    required: directBookingMessagingEvidenceRequired,
-    recommendedAction:
-      directBookingMessagingEvidenceRequired && !hasHostEmailEvidence
-        ? "Host reservation email is sent by the Direct Booking flow, but delivery evidence is not persisted yet."
-        : undefined,
-    metadata: {
-      hasHostEmailEvidence,
-      messageDispatchLogCount: dispatchLogs.length,
-      messageLogCount: messageLogs.length,
-      auditMode,
-      directBookingMessagingEvidenceRequired,
-      auditMode,
-      directBookingMessagingEvidenceRequired,
-    },
-  });
-
-  addCheck(checks, {
+ addCheck(checks, {
+  rule: "GUEST_CONFIRMATION_EMAIL_EVIDENCE",
+  label: "Guest Confirmation Email Evidence",
+  status: !guestConfirmationEmailEvidenceRequired
+    ? "PASS"
+    : hasGuestEmailEvidence
+    ? "PASS"
+    : "WARNING",
+  critical: false,
+  required: guestConfirmationEmailEvidenceRequired,
+  recommendedAction:
+    guestConfirmationEmailEvidenceRequired && !hasGuestEmailEvidence
+      ? "Guest confirmation email delivery evidence is not persisted yet."
+      : undefined,
+  metadata: {
+    auditMode,
+    guestEmail: reservation.guestEmail,
+    hasGuestEmailEvidence,
+    hasDirectBookingGuestEmailEvidence,
+    hasManualReservationGuestEmailEvidence,
+    directBookingMessagingEvidenceRequired,
+    manualReservationMessagingEvidenceRequired,
+    guestConfirmationEmailEvidenceRequired,
+    messageDispatchLogCount: dispatchLogs.length,
+    messageLogCount: messageLogs.length,
+  },
+});
+  
+ addCheck(checks, {
     rule: "GUEST_TOKEN_AND_MANAGE_LINK_READY",
     label: "Guest Token and Manage Reservation Link Ready",
     status: reservation.guestToken ? "PASS" : "FAIL",
