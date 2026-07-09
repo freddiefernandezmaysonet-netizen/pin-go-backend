@@ -883,6 +883,104 @@ if (marketChanged) {
   }
 );
 
+dashboardPropertiesRouter.get(
+  "/api/dashboard/properties/:id/manual-reservations/quote",
+  requireAuth,
+  async (req, res) => {
+    try {
+      const user = (req as any).user;
+      const orgId = user.orgId as string;
+      const { id } = req.params;
+
+      const checkInRaw = String(req.query.checkIn ?? "");
+      const checkOutRaw = String(req.query.checkOut ?? "");
+
+      const checkIn = new Date(`${checkInRaw}T00:00:00.000Z`);
+      const checkOut = new Date(`${checkOutRaw}T00:00:00.000Z`);
+
+      if (
+        !checkInRaw ||
+        !checkOutRaw ||
+        Number.isNaN(checkIn.getTime()) ||
+        Number.isNaN(checkOut.getTime()) ||
+        checkOut <= checkIn
+      ) {
+        return res.status(400).json({
+          ok: false,
+          error: "Invalid quote date range",
+        });
+      }
+
+      const property = await prisma.property.findFirst({
+        where: {
+          id,
+          organizationId: orgId,
+          status: "ACTIVE",
+        },
+        select: {
+          id: true,
+          name: true,
+        },
+      });
+
+      if (!property) {
+        return res.status(404).json({
+          ok: false,
+          error: "Property not found",
+        });
+      }
+
+      const pricing = await calculateDirectBookingPricing({
+        propertyId: property.id,
+        checkIn,
+        checkOut,
+      });
+
+      const totalAmount = Number((pricing as any).totalAmount ?? 0);
+      const currency = String((pricing as any).currency ?? "usd")
+        .trim()
+        .toLowerCase();
+
+      if (!Number.isFinite(totalAmount) || totalAmount < 0) {
+        return res.status(400).json({
+          ok: false,
+          error: "Pin&Go could not calculate this reservation total.",
+        });
+      }
+
+      return res.json({
+        ok: true,
+        item: {
+          propertyId: property.id,
+          propertyName: property.name,
+          checkIn: checkInRaw,
+          checkOut: checkOutRaw,
+          nights: (pricing as any).nights ?? null,
+          currency,
+          nightlySubtotal: Number((pricing as any).nightlySubtotal ?? 0),
+          cleaningFee: Number((pricing as any).cleaningFee ?? 0),
+          amenitiesTotal: Number((pricing as any).amenitiesTotal ?? 0),
+          taxesTotal: Number((pricing as any).taxesTotal ?? 0),
+          taxableSubtotal: Number((pricing as any).taxableSubtotal ?? 0),
+          totalAmount,
+          totalAmountCents: Math.round(totalAmount * 100),
+          nightlyRates: (pricing as any).nightlyRates ?? [],
+          pricingSource: "PIN_GO_PRICING_ENGINE",
+        },
+      });
+    } catch (error: any) {
+      console.error("GET manual reservation quote error", error);
+
+      return res.status(500).json({
+        ok: false,
+        error:
+          error?.message ??
+          "Failed to calculate manual reservation quote",
+      });
+    }
+  }
+);
+
 dashboardPropertiesRouter.post(
   "/api/dashboard/properties/:id/manual-reservations",
   requireAuth,
