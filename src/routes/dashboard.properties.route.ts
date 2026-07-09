@@ -892,36 +892,22 @@ dashboardPropertiesRouter.post(
       const orgId = user.orgId as string;
       const { id } = req.params;
 
-const {
-  guestName,
-  guestEmail,
-  guestPhone,
-  checkIn,
-  checkOut,
-  paymentState,
-  totalAmount,
-  totalPaid,
-  amountPaid,
-  currency,
-} = req.body ?? {};
-     
-     const cleanGuestName = String(guestName || "").trim();
-const cleanGuestEmail = String(guestEmail || "").trim() || null;
-const cleanGuestPhone = String(guestPhone || "").trim() || null;
-const cleanPaymentState = String(paymentState || "NONE").trim().toUpperCase();
+      const {
+        guestName,
+        guestEmail,
+        guestPhone,
+        checkIn,
+        checkOut,
+        paymentState,
+      } = req.body ?? {};
 
-const manualTotalAmountRaw =
-  totalAmount !== undefined
-    ? totalAmount
-    : totalPaid !== undefined
-    ? totalPaid
-    : amountPaid;
+      const cleanGuestName = String(guestName || "").trim();
+      const cleanGuestEmail = String(guestEmail || "").trim() || null;
+      const cleanGuestPhone = String(guestPhone || "").trim() || null;
+      const cleanPaymentState = String(paymentState || "NONE")
+        .trim()
+        .toUpperCase();
 
-const manualTotalAmount = parseOptionalMoney(manualTotalAmountRaw);
-
-const cleanCurrency = String(currency || "usd")
-  .trim()
-  .toLowerCase();
       if (!cleanGuestName) {
         return res.status(400).json({
           ok: false,
@@ -936,36 +922,14 @@ const cleanCurrency = String(currency || "usd")
         });
       }
 
-     if (!["NONE", "PAID"].includes(cleanPaymentState)) {
-  return res.status(400).json({
-    ok: false,
-    error: "Invalid paymentState. Manual reservations currently support NONE or PAID.",
-  });
-}
+      if (!["NONE", "PAID"].includes(cleanPaymentState)) {
+        return res.status(400).json({
+          ok: false,
+          error:
+            "Invalid paymentState. Manual reservations currently support NONE or PAID.",
+        });
+      }
 
-if (Number.isNaN(manualTotalAmount)) {
-  return res.status(400).json({
-    ok: false,
-    error: "totalAmount must be a valid amount",
-  });
-}
-
-if (!/^[a-z]{3}$/.test(cleanCurrency)) {
-  return res.status(400).json({
-    ok: false,
-    error: "currency must be a valid 3-letter currency code",
-  });
-}
-
-if (
-  cleanPaymentState === "PAID" &&
-  (manualTotalAmount === null || manualTotalAmount <= 0)
-) {
-  return res.status(400).json({
-    ok: false,
-    error: "totalAmount is required when paymentState is PAID",
-  });
-}
       const property = await prisma.property.findFirst({
         where: {
           id,
@@ -985,6 +949,70 @@ if (
         });
       }
 
+      const manualCheckIn = new Date(`${String(checkIn)}T00:00:00.000Z`);
+      const manualCheckOut = new Date(`${String(checkOut)}T00:00:00.000Z`);
+
+      if (
+        Number.isNaN(manualCheckIn.getTime()) ||
+        Number.isNaN(manualCheckOut.getTime()) ||
+        manualCheckOut <= manualCheckIn
+      ) {
+        return res.status(400).json({
+          ok: false,
+          error: "Invalid manual reservation dates",
+        });
+      }
+
+      const manualPricing = await calculateDirectBookingPricing({
+        propertyId: property.id,
+        checkIn: manualCheckIn,
+        checkOut: manualCheckOut,
+      });
+
+      const manualTotalAmount = Number(
+        (manualPricing as any).totalAmount ?? 0
+      );
+
+      const manualCurrency = String(
+        (manualPricing as any).currency ?? "usd"
+      )
+        .trim()
+        .toLowerCase();
+
+      if (!Number.isFinite(manualTotalAmount) || manualTotalAmount < 0) {
+        return res.status(400).json({
+          ok: false,
+          error: "Pin&Go could not calculate the manual reservation total.",
+        });
+      }
+
+      if (cleanPaymentState === "PAID" && manualTotalAmount <= 0) {
+        return res.status(400).json({
+          ok: false,
+          error:
+            "Pin&Go calculated a zero total. Review the property pricing before marking this reservation as paid.",
+        });
+      }
+
+      const manualPricingBreakdown = JSON.parse(
+        JSON.stringify({
+          source: "MANUAL_RESERVATION",
+          pricingSource: "PIN_GO_PRICING_ENGINE",
+          paymentState: cleanPaymentState,
+          nights: (manualPricing as any).nights ?? null,
+          nightlyRates: (manualPricing as any).nightlyRates ?? [],
+          nightlySubtotal: (manualPricing as any).nightlySubtotal ?? null,
+          cleaningFee: (manualPricing as any).cleaningFee ?? 0,
+          amenitiesTotal: (manualPricing as any).amenitiesTotal ?? 0,
+          taxesTotal: (manualPricing as any).taxesTotal ?? 0,
+          taxableSubtotal: (manualPricing as any).taxableSubtotal ?? null,
+          totalAmount: manualTotalAmount,
+          totalAmountCents: Math.round(manualTotalAmount * 100),
+          currency: manualCurrency,
+          calculatedAt: new Date().toISOString(),
+        })
+      );
+
       const result = await ingestReservation({
         source: "MANUAL",
         propertyId: property.id,
@@ -998,263 +1026,250 @@ if (
         externalProvider: "PIN_GO_MANUAL",
         externalId: crypto.randomUUID(),
         externalUpdatedAt: new Date().toISOString(),
-       externalRaw: {
-  createdFrom: "CALENDAR_V2",
-  paymentState: cleanPaymentState,
-  totalAmount: manualTotalAmount,
-  currency: cleanCurrency,
-  manualPayment: {
-    paymentState: cleanPaymentState,
-    totalAmount: manualTotalAmount,
-    currency: cleanCurrency,
-    recordedAt: new Date().toISOString(),
-    recordedByUserId:
-      typeof user.id === "string"
-        ? user.id
-        : typeof user.userId === "string"
-        ? user.userId
-        : null,
-  },
-},
+        externalRaw: {
+          createdFrom: "CALENDAR_V2",
+          paymentState: cleanPaymentState,
+          pricingSource: "PIN_GO_PRICING_ENGINE",
+          totalAmount: manualTotalAmount,
+          currency: manualCurrency,
+        },
         status: "ACTIVE",
       });
 
-const manualReservationWithPayment = await prisma.reservation.update({
-  where: {
-    id: result.reservationId,
-  },
-  data: {
-    totalAmount: manualTotalAmount,
-    currency: cleanCurrency,
-    pricingBreakdown:
-      manualTotalAmount !== null
-        ? {
-            source: "MANUAL_RESERVATION",
-            paymentState: cleanPaymentState,
+      const manualReservationWithPricing =
+        await prisma.reservation.update({
+          where: {
+            id: result.reservationId,
+          },
+          data: {
             totalAmount: manualTotalAmount,
-            currency: cleanCurrency,
-            recordedAt: new Date().toISOString(),
+            currency: manualCurrency,
+            pricingBreakdown: manualPricingBreakdown,
+          },
+          select: {
+            id: true,
+            guestName: true,
+            guestEmail: true,
+            checkIn: true,
+            checkOut: true,
+            guestToken: true,
+            totalAmount: true,
+            currency: true,
+            property: {
+              select: {
+                name: true,
+                timezone: true,
+              },
+            },
+          },
+        });
+
+      const manualReservationForEmail = cleanGuestEmail
+        ? manualReservationWithPricing
+        : null;
+
+      const emailGuestToken =
+        manualReservationForEmail?.guestToken ?? result.guestToken ?? null;
+
+      const manageReservationUrl = emailGuestToken
+        ? buildManageReservationUrl(emailGuestToken)
+        : null;
+
+      if (manualReservationForEmail?.guestEmail) {
+        const manualReservationGuestEmailInput = {
+          to: manualReservationForEmail.guestEmail,
+          guestName: manualReservationForEmail.guestName,
+          propertyName: manualReservationForEmail.property.name,
+          checkIn: manualReservationForEmail.checkIn,
+          checkOut: manualReservationForEmail.checkOut,
+          propertyTimeZone: manualReservationForEmail.property.timezone,
+          manageReservationUrl,
+        };
+
+        try {
+          const manualGuestEmailDeliveryResult = await sendLoggedEmail({
+            prisma,
+            type: "MANUAL_RESERVATION_GUEST_CONFIRMATION",
+            to: manualReservationForEmail.guestEmail,
+            subject: `Your Pin&Go reservation is confirmed - ${manualReservationForEmail.property.name}`,
+            reservationId: manualReservationForEmail.id,
+            propertyId: property.id,
+            organizationId: orgId,
+            retryPayload: manualReservationGuestEmailInput,
+            send: () =>
+              sendManualReservationGuestConfirmation(
+                manualReservationGuestEmailInput
+              ),
+          });
+
+          if (!manualGuestEmailDeliveryResult.ok) {
+            console.error("[MANUAL_RESERVATION_GUEST_EMAIL_DELIVERY_FAILED]", {
+              organizationId: orgId,
+              propertyId: property.id,
+              reservationId: result.reservationId,
+              to: manualReservationForEmail.guestEmail,
+              status: manualGuestEmailDeliveryResult.status,
+              error: manualGuestEmailDeliveryResult.error,
+            });
           }
-        : undefined,
-  },
-  select: {
-    id: true,
-    guestName: true,
-    guestEmail: true,
-    checkIn: true,
-    checkOut: true,
-    guestToken: true,
-    totalAmount: true,
-    currency: true,
-    property: {
-      select: {
-        name: true,
-        timezone: true,
-      },
-    },
-  },
-});
+        } catch (emailError: any) {
+          console.error("[MANUAL_RESERVATION_GUEST_EMAIL_ERROR]", {
+            organizationId: orgId,
+            propertyId: property.id,
+            reservationId: result.reservationId,
+            to: manualReservationForEmail.guestEmail,
+            error: emailError?.message ?? emailError,
+          });
+        }
+      }
 
-const manualReservationForEmail = cleanGuestEmail
-  ? manualReservationWithPayment
-  : null;
-const emailGuestToken =
-  manualReservationForEmail?.guestToken ?? result.guestToken ?? null;
+      let distributionSyncResult: any = null;
 
-const manageReservationUrl = emailGuestToken
-  ? buildManageReservationUrl(emailGuestToken)
-  : null;
+      const distributionStartedAt = new Date();
+      const distributionDecisionId = `distribution-engine:${property.id}:manual-reservation:${result.reservationId}`;
 
-if (manualReservationForEmail?.guestEmail) {
-  const manualReservationGuestEmailInput = {
-    to: manualReservationForEmail.guestEmail,
-    guestName: manualReservationForEmail.guestName,
-    propertyName: manualReservationForEmail.property.name,
-    checkIn: manualReservationForEmail.checkIn,
-    checkOut: manualReservationForEmail.checkOut,
-    propertyTimeZone: manualReservationForEmail.property.timezone,
-    manageReservationUrl,
-  };
+      try {
+        distributionSyncResult = await syncChannexAvailabilityForProperty(
+          property.id
+        );
 
-  try {
-    const manualGuestEmailDeliveryResult = await sendLoggedEmail({
-      prisma,
-      type: "MANUAL_RESERVATION_GUEST_CONFIRMATION",
-      to: manualReservationForEmail.guestEmail,
-      subject: `Your Pin&Go reservation is confirmed - ${manualReservationForEmail.property.name}`,
-      reservationId: manualReservationForEmail.id,
-      propertyId: property.id,
-      organizationId: orgId,
-      retryPayload: manualReservationGuestEmailInput,
-      send: () =>
-        sendManualReservationGuestConfirmation(
-          manualReservationGuestEmailInput
-        ),
-    });
+        await prisma.property.update({
+          where: { id: property.id },
+          data: {
+            distributionLastSyncedAt: new Date(),
+            distributionLastError: null,
+          },
+        });
 
-    if (!manualGuestEmailDeliveryResult.ok) {
-      console.error("[MANUAL_RESERVATION_GUEST_EMAIL_DELIVERY_FAILED]", {
-        organizationId: orgId,
-        propertyId: property.id,
-        reservationId: result.reservationId,
-        to: manualReservationForEmail.guestEmail,
-        status: manualGuestEmailDeliveryResult.status,
-        error: manualGuestEmailDeliveryResult.error,
-      });
-    }
-  } catch (emailError: any) {
-    console.error("[MANUAL_RESERVATION_GUEST_EMAIL_ERROR]", {
-      organizationId: orgId,
-      propertyId: property.id,
-      reservationId: result.reservationId,
-      to: manualReservationForEmail.guestEmail,
-      error: emailError?.message ?? emailError,
-    });
-  }
-}     
- let distributionSyncResult: any = null;
+        const distributionCompletedAt = new Date();
 
-const distributionStartedAt = new Date();
-const distributionDecisionId = `distribution-engine:${property.id}:manual-reservation:${result.reservationId}`;
+        const distributionSyncSucceeded =
+          distributionSyncResult &&
+          typeof distributionSyncResult === "object" &&
+          "ok" in distributionSyncResult
+            ? Boolean((distributionSyncResult as any).ok)
+            : true;
 
-try {
-  distributionSyncResult = await syncChannexAvailabilityForProperty(
-    property.id
-  );
+        const distributionAuditEntry = createDistributionAuditEntry({
+          organizationId: orgId,
+          propertyId: property.id,
+          reservationId: result.reservationId,
+          decisionId: distributionDecisionId,
+          trigger: "MANUAL_RESERVATION",
+          provider: "CHANNEX",
+          syncType: "AVAILABILITY",
+          startedAt: distributionStartedAt,
+          completedAt: distributionCompletedAt,
+          result: distributionSyncResult,
+          status: distributionSyncSucceeded ? "SUCCESS" : "FAILED",
+          severity: distributionSyncSucceeded ? "INFO" : "WARNING",
+          eventType: distributionSyncSucceeded
+            ? "SYNC_COMPLETED"
+            : "SYNC_FAILED",
+          reason: distributionSyncSucceeded
+            ? "MANUAL_RESERVATION_AVAILABILITY_SYNC_COMPLETED"
+            : "MANUAL_RESERVATION_AVAILABILITY_SYNC_FAILED",
+          summary: distributionSyncSucceeded
+            ? "Distribution Engine synchronized channel availability after manual reservation."
+            : "Distribution Engine could not fully synchronize channel availability after manual reservation.",
+          rule: "MANUAL_RESERVATION_CHANNEX_AVAILABILITY_SYNC",
+          label: "Manual Reservation Channel Availability Sync",
+          recommendedAction: distributionSyncSucceeded
+            ? undefined
+            : "Review Channex availability sync after this manual reservation.",
+        });
 
-  await prisma.property.update({
-    where: { id: property.id },
-    data: {
-      distributionLastSyncedAt: new Date(),
-      distributionLastError: null,
-    },
-  });
+        try {
+          await persistAuditEntry(prisma, distributionAuditEntry);
+        } catch (auditPersistenceError: any) {
+          console.error("[APMS_DISTRIBUTION_AUTO_SYNC_AUDIT_PERSIST_ERROR]", {
+            engine: "Distribution",
+            propertyId: property.id,
+            reservationId: result.reservationId,
+            provider: "CHANNEX",
+            syncType: "AVAILABILITY",
+            trigger: "MANUAL_RESERVATION",
+            decisionId: distributionAuditEntry.decisionId,
+            error: auditPersistenceError?.message ?? auditPersistenceError,
+          });
+        }
+      } catch (syncError: any) {
+        console.error("POST manual-reservations Channex sync error", syncError);
 
-  const distributionCompletedAt = new Date();
+        await prisma.property.update({
+          where: { id: property.id },
+          data: {
+            distributionLastError:
+              syncError?.message ||
+              "Failed to sync Channex after manual reservation",
+          },
+        });
 
-  const distributionSyncSucceeded =
-    distributionSyncResult &&
-    typeof distributionSyncResult === "object" &&
-    "ok" in distributionSyncResult
-      ? Boolean((distributionSyncResult as any).ok)
-      : true;
+        const distributionCompletedAt = new Date();
 
-  const distributionAuditEntry = createDistributionAuditEntry({
-    organizationId: orgId,
-    propertyId: property.id,
-    reservationId: result.reservationId,
-    decisionId: distributionDecisionId,
-    trigger: "MANUAL_RESERVATION",
-    provider: "CHANNEX",
-    syncType: "AVAILABILITY",
-    startedAt: distributionStartedAt,
-    completedAt: distributionCompletedAt,
-    result: distributionSyncResult,
-    status: distributionSyncSucceeded ? "SUCCESS" : "FAILED",
-    severity: distributionSyncSucceeded ? "INFO" : "WARNING",
-    eventType: distributionSyncSucceeded ? "SYNC_COMPLETED" : "SYNC_FAILED",
-    reason: distributionSyncSucceeded
-      ? "MANUAL_RESERVATION_AVAILABILITY_SYNC_COMPLETED"
-      : "MANUAL_RESERVATION_AVAILABILITY_SYNC_FAILED",
-    summary: distributionSyncSucceeded
-      ? "Distribution Engine synchronized channel availability after manual reservation."
-      : "Distribution Engine could not fully synchronize channel availability after manual reservation.",
-    rule: "MANUAL_RESERVATION_CHANNEX_AVAILABILITY_SYNC",
-    label: "Manual Reservation Channel Availability Sync",
-    recommendedAction: distributionSyncSucceeded
-      ? undefined
-      : "Review Channex availability sync after this manual reservation.",
-  });
+        const distributionAuditEntry = createDistributionAuditEntry({
+          organizationId: orgId,
+          propertyId: property.id,
+          reservationId: result.reservationId,
+          decisionId: distributionDecisionId,
+          trigger: "MANUAL_RESERVATION",
+          provider: "CHANNEX",
+          syncType: "AVAILABILITY",
+          startedAt: distributionStartedAt,
+          completedAt: distributionCompletedAt,
+          error: syncError,
+          status: "FAILED",
+          severity: "CRITICAL",
+          eventType: "SYNC_FAILED",
+          reason: "MANUAL_RESERVATION_AVAILABILITY_SYNC_ERROR",
+          summary:
+            "Distribution Engine failed to synchronize channel availability after manual reservation.",
+          rule: "MANUAL_RESERVATION_CHANNEX_AVAILABILITY_SYNC",
+          label: "Manual Reservation Channel Availability Sync",
+          recommendedAction:
+            "Review Channex availability connection and retry the sync for this reservation.",
+        });
 
-  try {
-    await persistAuditEntry(prisma, distributionAuditEntry);
-  } catch (auditPersistenceError: any) {
-    console.error("[APMS_DISTRIBUTION_AUTO_SYNC_AUDIT_PERSIST_ERROR]", {
-      engine: "Distribution",
-      propertyId: property.id,
-      reservationId: result.reservationId,
-      provider: "CHANNEX",
-      syncType: "AVAILABILITY",
-      trigger: "MANUAL_RESERVATION",
-      decisionId: distributionAuditEntry.decisionId,
-      error: auditPersistenceError?.message ?? auditPersistenceError,
-    });
-  }
-} catch (syncError: any) {
-  console.error("POST manual-reservations Channex sync error", syncError);
-
-  await prisma.property.update({
-    where: { id: property.id },
-    data: {
-      distributionLastError:
-        syncError?.message || "Failed to sync Channex after manual reservation",
-    },
-  });
-
-  const distributionCompletedAt = new Date();
-
-  const distributionAuditEntry = createDistributionAuditEntry({
-    organizationId: orgId,
-    propertyId: property.id,
-    reservationId: result.reservationId,
-    decisionId: distributionDecisionId,
-    trigger: "MANUAL_RESERVATION",
-    provider: "CHANNEX",
-    syncType: "AVAILABILITY",
-    startedAt: distributionStartedAt,
-    completedAt: distributionCompletedAt,
-    error: syncError,
-    status: "FAILED",
-    severity: "CRITICAL",
-    eventType: "SYNC_FAILED",
-    reason: "MANUAL_RESERVATION_AVAILABILITY_SYNC_ERROR",
-    summary:
-      "Distribution Engine failed to synchronize channel availability after manual reservation.",
-    rule: "MANUAL_RESERVATION_CHANNEX_AVAILABILITY_SYNC",
-    label: "Manual Reservation Channel Availability Sync",
-    recommendedAction:
-      "Review Channex availability connection and retry the sync for this reservation.",
-  });
-
-  try {
-    await persistAuditEntry(prisma, distributionAuditEntry);
-  } catch (auditPersistenceError: any) {
-    console.error("[APMS_DISTRIBUTION_AUTO_SYNC_AUDIT_PERSIST_ERROR]", {
-      engine: "Distribution",
-      propertyId: property.id,
-      reservationId: result.reservationId,
-      provider: "CHANNEX",
-      syncType: "AVAILABILITY",
-      trigger: "MANUAL_RESERVATION",
-      decisionId: distributionAuditEntry.decisionId,
-      error: auditPersistenceError?.message ?? auditPersistenceError,
-    });
-  }
-}
+        try {
+          await persistAuditEntry(prisma, distributionAuditEntry);
+        } catch (auditPersistenceError: any) {
+          console.error("[APMS_DISTRIBUTION_AUTO_SYNC_AUDIT_PERSIST_ERROR]", {
+            engine: "Distribution",
+            propertyId: property.id,
+            reservationId: result.reservationId,
+            provider: "CHANNEX",
+            syncType: "AVAILABILITY",
+            trigger: "MANUAL_RESERVATION",
+            decisionId: distributionAuditEntry.decisionId,
+            error: auditPersistenceError?.message ?? auditPersistenceError,
+          });
+        }
+      }
 
       let cleaningConfirmationDispatchResult: any = null;
 
-try {
-  cleaningConfirmationDispatchResult =
-    await dispatchPendingCleaningConfirmationForReservation({
-      prisma,
-      reservationId: result.reservationId,
-    });
+      try {
+        cleaningConfirmationDispatchResult =
+          await dispatchPendingCleaningConfirmationForReservation({
+            prisma,
+            reservationId: result.reservationId,
+          });
 
-  console.log("[MANUAL_RESERVATION_CLEANING_CONFIRMATION_DISPATCH_RESULT]", {
-    reservationId: result.reservationId,
-    sent: cleaningConfirmationDispatchResult?.sent ?? false,
-    skipped: cleaningConfirmationDispatchResult?.skipped ?? false,
-    reason: cleaningConfirmationDispatchResult?.reason ?? null,
-    confirmationId: cleaningConfirmationDispatchResult?.confirmationId ?? null,
-  });
-} catch (cleaningDispatchError: any) {
-  console.error("[MANUAL_RESERVATION_CLEANING_CONFIRMATION_DISPATCH_ERROR]", {
-    reservationId: result.reservationId,
-    propertyId: property.id,
-    error: cleaningDispatchError?.message ?? cleaningDispatchError,
-  });
-}
+        console.log("[MANUAL_RESERVATION_CLEANING_CONFIRMATION_DISPATCH_RESULT]", {
+          reservationId: result.reservationId,
+          sent: cleaningConfirmationDispatchResult?.sent ?? false,
+          skipped: cleaningConfirmationDispatchResult?.skipped ?? false,
+          reason: cleaningConfirmationDispatchResult?.reason ?? null,
+          confirmationId:
+            cleaningConfirmationDispatchResult?.confirmationId ?? null,
+        });
+      } catch (cleaningDispatchError: any) {
+        console.error("[MANUAL_RESERVATION_CLEANING_CONFIRMATION_DISPATCH_ERROR]", {
+          reservationId: result.reservationId,
+          propertyId: property.id,
+          error: cleaningDispatchError?.message ?? cleaningDispatchError,
+        });
+      }
 
       const completeFlowAuditResult = await auditReservationCompleteFlowSafe(
         result.reservationId,
@@ -1276,20 +1291,20 @@ try {
         });
       }
 
-          return res.json({
-  ok: true,
-  reservationId: result.reservationId,
-  guestToken: result.guestToken,
-  accessGrantId: result.accessGrantId ?? null,
-  auditEntry: result.auditEntry ?? null,
-  paymentState: cleanPaymentState,
-  totalAmount:
-    manualReservationWithPayment.totalAmount !== null
-      ? Number(manualReservationWithPayment.totalAmount)
-      : null,
-  currency: manualReservationWithPayment.currency ?? cleanCurrency,
-  distributionSyncResult,
-});
+      return res.json({
+        ok: true,
+        reservationId: result.reservationId,
+        guestToken: result.guestToken,
+        accessGrantId: result.accessGrantId ?? null,
+        auditEntry: result.auditEntry ?? null,
+        paymentState: cleanPaymentState,
+        totalAmount:
+          manualReservationWithPricing.totalAmount !== null
+            ? Number(manualReservationWithPricing.totalAmount)
+            : null,
+        currency: manualReservationWithPricing.currency ?? manualCurrency,
+        distributionSyncResult,
+      });
     } catch (error: any) {
       console.error("POST manual reservation error", error);
 

@@ -535,6 +535,90 @@ function getMissionActionTitleStyle(action: any): CSSProperties {
   return styles.missionActionTitle;
 }
 
+function getMissionActionEngineDisplayLabel(engine: unknown) {
+  const engineName = String(engine ?? "MissionControl");
+
+  if (engineName === "MissionControl") {
+    return "APMS Command Center";
+  }
+
+  return getMissionActivityEngineLabel(engineName);
+}
+
+function getMissionActionLastSignalLabel(action: any) {
+  const engineName = String(action?.engine ?? "");
+  const matchingEngineHealth = missionControlEngineHealth.find(
+    (engineHealth: any) => engineHealth?.engine === engineName
+  );
+
+  const rawDate =
+    matchingEngineHealth?.lastExecutionAt ??
+    missionControlSnapshot?.generatedAt;
+
+  const date = rawDate ? new Date(rawDate) : null;
+
+  if (!date || Number.isNaN(date.getTime())) {
+    return "Live APMS signal";
+  }
+
+  const formattedDate = date.toLocaleString(undefined, {
+    month: "short",
+    day: "numeric",
+    hour: "numeric",
+    minute: "2-digit",
+  });
+
+  if (matchingEngineHealth?.lastExecutionAt) {
+    return `Last ${engineName || "APMS"} signal: ${formattedDate}`;
+  }
+
+  return `Last APMS check: ${formattedDate}`;
+}
+
+function getMissionActionMetaStyle(action: any): CSSProperties {
+  const visualStatus = getMissionActionVisualStatus(action);
+
+  if (visualStatus === "ERROR") {
+    return {
+      ...styles.missionActionMeta,
+      color: "#991b1b",
+    };
+  }
+
+  if (visualStatus === "WARNING") {
+    return {
+      ...styles.missionActionMeta,
+      color: "#92400e",
+    };
+  }
+
+  return styles.missionActionMeta;
+}
+
+function getMissionActionFooterStyle(action: any): CSSProperties {
+  const visualStatus = getMissionActionVisualStatus(action);
+
+  if (visualStatus === "ERROR") {
+    return {
+      ...styles.missionActionFooter,
+      color: "#991b1b",
+      background: "#fee2e2",
+      borderColor: "#fecaca",
+    };
+  }
+
+  if (visualStatus === "WARNING") {
+    return {
+      ...styles.missionActionFooter,
+      color: "#92400e",
+      background: "#fef3c7",
+      borderColor: "#fde68a",
+    };
+  }
+
+  return styles.missionActionFooter;
+}
+
 const autonomyScore = Number(
   missionControlSnapshot?.autonomyScore?.score ?? 100
 );
@@ -795,6 +879,157 @@ function formatMissionEngineTime(engineHealth: any) {
     minute: "2-digit",
   });
 }
+
+function isAutoResolutionEntry(entry: any) {
+  const status = String(entry?.status ?? "").toUpperCase();
+  const severity = String(entry?.severity ?? "").toUpperCase();
+
+  if (status !== "SUCCESS") return false;
+  if (severity === "WARNING" || severity === "CRITICAL") return false;
+  if (!entry?.engine || !entry?.summary) return false;
+
+  return true;
+}
+
+function getAutoResolutionTitle(entry: any) {
+  const engine = String(entry?.engine ?? "");
+  const reason = String(entry?.reason ?? "").toUpperCase();
+  const trigger = String(entry?.metadata?.trigger ?? "").toUpperCase();
+
+  if (
+    trigger === "HOLIDAY_PRICING_UPDATE" ||
+    reason.includes("HOLIDAY_PRICING_UPDATE")
+  ) {
+    return "Holiday pricing synchronized";
+  }
+
+  if (
+    trigger === "SEASON_CREATE" ||
+    trigger === "SEASON_UPDATE" ||
+    trigger === "SEASON_DELETE" ||
+    reason.includes("SEASON")
+  ) {
+    return "Seasonal pricing synchronized";
+  }
+
+  if (
+    trigger === "NIGHTLY_RATE_UPDATE" ||
+    reason.includes("NIGHTLY_RATE")
+  ) {
+    return "Nightly rates synchronized";
+  }
+
+  if (
+    trigger === "BLOCKED_DATE_CREATE" ||
+    reason.includes("BLOCKED_DATE_CREATE")
+  ) {
+    return "Availability block synchronized";
+  }
+
+  if (
+    trigger === "BLOCKED_DATE_DELETE" ||
+    reason.includes("BLOCKED_DATE_DELETE")
+  ) {
+    return "Availability reopened";
+  }
+
+  if (
+    trigger === "MANUAL_RESERVATION" ||
+    reason.includes("MANUAL_RESERVATION")
+  ) {
+    return "Manual reservation synchronized";
+  }
+
+  if (
+    trigger === "DIRECT_BOOKING" ||
+    reason.includes("DIRECT_BOOKING")
+  ) {
+    return "Direct booking processed";
+  }
+
+  if (
+    trigger === "DYNAMIC_PRICING_WORKER" ||
+    reason.includes("DYNAMIC_PRICING_WORKER")
+  ) {
+    return "Autonomous pricing sync completed";
+  }
+
+  if (engine === "Revenue") return "Pricing decision completed";
+  if (engine === "Distribution") return "Channel operation completed";
+  if (engine === "Reservation") return "Reservation workflow completed";
+  if (engine === "Access") return "Access workflow completed";
+  if (engine === "Cleaning") return "Cleaning workflow completed";
+  if (engine === "Messaging") return "Message workflow completed";
+
+  return "APMS operation completed";
+}
+
+function getAutoResolutionDescription(entry: any) {
+  const engine = String(entry?.engine ?? "");
+  const metadata = entry?.metadata ?? {};
+
+  if (engine === "Distribution" && metadata.pushedToChannex === true) {
+    return "Pin&Go confirmed the latest property update was pushed to Channex.";
+  }
+
+  if (engine === "Distribution") {
+    return "Pin&Go completed the latest channel operation successfully.";
+  }
+
+  if (engine === "Revenue") {
+    return "Pin&Go recalculated pricing using the active rules and guardrails.";
+  }
+
+  if (engine === "Reservation") {
+    return "Pin&Go processed the reservation workflow and kept the property timeline updated.";
+  }
+
+  if (engine === "Access") {
+    return "Pin&Go completed the access workflow for this operational step.";
+  }
+
+  if (engine === "Cleaning") {
+    return "Pin&Go completed the cleaning workflow for this reservation window.";
+  }
+
+  if (engine === "Messaging") {
+    return "Pin&Go completed the communication workflow successfully.";
+  }
+
+  return entry?.summary ?? "Pin&Go completed this APMS operation successfully.";
+}
+
+function getAutoResolutionDedupKey(entry: any) {
+  return [
+    entry?.engine ?? "APMS",
+    entry?.metadata?.trigger ?? entry?.reason ?? "",
+    getAutoResolutionTitle(entry),
+    getMissionActivityDetail(entry) ?? "",
+  ]
+    .join(":")
+    .toLowerCase();
+}
+
+const autoResolutionLogItems = [...missionControlRecentAuditEntries]
+  .filter(isAutoResolutionEntry)
+  .sort(
+    (a: any, b: any) =>
+      getMissionActivityTimestamp(b) - getMissionActivityTimestamp(a)
+  )
+  .reduce((items: any[], entry: any) => {
+    const dedupKey = getAutoResolutionDedupKey(entry);
+
+    const alreadyIncluded = items.some(
+      (item) => getAutoResolutionDedupKey(item) === dedupKey
+    );
+
+    if (alreadyIncluded) {
+      return items;
+    }
+
+    return [...items, entry];
+  }, [])
+  .slice(0, 5);
 
 const recentApmsActivities = [...missionControlRecentAuditEntries]
   .filter((entry: any) => entry?.engine && entry?.summary)
@@ -1093,14 +1328,14 @@ const occupancySummary = useMemo(() => {
           method: "POST",
           credentials: "include",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            guestName: manualGuestName.trim(),
-            guestEmail: manualGuestEmail.trim() || null,
-            guestPhone: manualGuestPhone.trim() || null,
-            checkIn: getDateKey(selectedRange.start),
-            checkOut: getDateKey(selectedRange.end ?? selectedRange.start),
-            paymentState: manualPaymentState,
-          }),
+         body: JSON.stringify({
+  guestName: manualGuestName.trim(),
+  guestEmail: manualGuestEmail.trim() || null,
+  guestPhone: manualGuestPhone.trim() || null,
+  checkIn: getDateKey(selectedRange.start),
+  checkOut: getDateKey(selectedRange.end ?? selectedRange.start),
+  paymentState: manualPaymentState,
+ }),
         }
       );
 
@@ -1116,6 +1351,7 @@ const occupancySummary = useMemo(() => {
       setManualGuestEmail("");
       setManualGuestPhone("");
       setManualPaymentState("NONE");
+      setManualTotalPaid("");
       setShowCreateReservationForm(false);
       setSelectedRange({ start: null, end: null });
     } catch (error: any) {
@@ -1370,6 +1606,18 @@ const occupancySummary = useMemo(() => {
           Recommended Action
         </div>
 
+        <div style={styles.missionActionTopMeta}>
+          <span style={styles.missionActionEngineBadge}>
+            {getMissionActionEngineDisplayLabel(
+              primaryMissionControlAction.engine
+            )}
+          </span>
+
+          <span style={styles.missionActionSignal}>
+            {getMissionActionLastSignalLabel(primaryMissionControlAction)}
+          </span>
+        </div>
+
         <div style={styles.missionActionText}>
           {primaryMissionControlAction.title}
         </div>
@@ -1387,22 +1635,21 @@ const occupancySummary = useMemo(() => {
       </div>
     </div>
 
-    <div style={styles.missionActionMeta}>
+    <div style={getMissionActionMetaStyle(primaryMissionControlAction)}>
       {primaryMissionControlAction.description ??
         getMissionActionFooterLabel(primaryMissionControlAction)}
     </div>
 
-    <div
-      style={{
-        marginTop: 8,
-        fontSize: 11,
-        fontWeight: 850,
-        color: primaryMissionControlAction.requiresHumanAction
-          ? "#92400e"
-          : "#166534",
-      }}
-    >
-      {getMissionActionFooterLabel(primaryMissionControlAction)}
+    <div style={styles.missionActionFooterRow}>
+      <div style={getMissionActionFooterStyle(primaryMissionControlAction)}>
+        {getMissionActionFooterLabel(primaryMissionControlAction)}
+      </div>
+
+      <div style={styles.missionActionTrustText}>
+        {primaryMissionControlAction.requiresHumanAction
+          ? "Pin&Go detected a real signal that needs host review."
+          : "Pin&Go is monitoring this property and no host action is needed."}
+      </div>
     </div>
 
     {secondaryMissionControlActions.length > 0 ? (
@@ -1414,11 +1661,17 @@ const occupancySummary = useMemo(() => {
           >
             <div style={styles.missionActionItemTopRow}>
               <div>
-                <div style={styles.missionActionText}>{action.title}</div>
+                <div style={styles.missionActionMiniMeta}>
+                  <span style={styles.missionActionEngineBadge}>
+                    {getMissionActionEngineDisplayLabel(action.engine)}
+                  </span>
 
-                <div style={styles.missionActionEngine}>
-                  {action.engine ?? "APMS"}
+                  <span style={styles.missionActionSignal}>
+                    {getMissionActionLastSignalLabel(action)}
+                  </span>
                 </div>
+
+                <div style={styles.missionActionText}>{action.title}</div>
               </div>
 
               <div
@@ -1433,7 +1686,7 @@ const occupancySummary = useMemo(() => {
               </div>
             </div>
 
-            <div style={styles.missionActionMeta}>
+            <div style={getMissionActionMetaStyle(action)}>
               {action.description ?? getMissionActionFooterLabel(action)}
             </div>
           </div>
@@ -1449,7 +1702,94 @@ const occupancySummary = useMemo(() => {
     ) : null}
   </div>
 ) : null}
- </div>
+     {autoResolutionLogItems.length > 0 ? (
+  <div style={styles.autoResolutionPanel}>
+    <div style={styles.autoResolutionHeader}>
+      <div>
+        <div style={styles.autoResolutionEyebrow}>
+          Auto Resolution Log
+        </div>
+
+        <div style={styles.autoResolutionHeading}>
+          Operations resolved by Pin&Go
+        </div>
+
+        <div style={styles.autoResolutionSubheading}>
+          Autonomous APMS actions completed without host intervention.
+        </div>
+      </div>
+
+      <div style={styles.autoResolutionStats}>
+        <div style={styles.autoResolutionStatCard}>
+          <div style={styles.autoResolutionStatValue}>
+            {autoResolutionLogItems.length}
+          </div>
+          <div style={styles.autoResolutionStatLabel}>
+            Resolved automatically
+          </div>
+        </div>
+
+        <div style={styles.autoResolutionStatCard}>
+          <div style={styles.autoResolutionStatValue}>0</div>
+          <div style={styles.autoResolutionStatLabel}>
+            Host actions required
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div style={styles.autoResolutionTimeline}>
+      {autoResolutionLogItems.map((entry: any, index: number) => (
+        <div
+          key={`${entry.decisionId ?? entry.id ?? index}-auto-resolution`}
+          style={styles.autoResolutionTimelineRow}
+        >
+          <div style={styles.autoResolutionTimelineRail}>
+            <div style={styles.autoResolutionTimelineDot}>✓</div>
+            {index < autoResolutionLogItems.length - 1 ? (
+              <div style={styles.autoResolutionTimelineLine} />
+            ) : null}
+          </div>
+
+          <div style={styles.autoResolutionEnterpriseCard}>
+            <div style={styles.autoResolutionCardTopRow}>
+              <div>
+                <div style={styles.autoResolutionEngineBadge}>
+                  {getMissionActivityEngineLabel(entry.engine)}
+                </div>
+
+                <div style={styles.autoResolutionTitle}>
+                  {getAutoResolutionTitle(entry)}
+                </div>
+              </div>
+
+              <div style={styles.autoResolutionResolvedPill}>
+                Resolved automatically
+              </div>
+            </div>
+
+            <div style={styles.autoResolutionDescription}>
+              {getAutoResolutionDescription(entry)}
+            </div>
+
+            {getMissionActivityDetail(entry) ? (
+              <div style={styles.autoResolutionDetail}>
+                {getMissionActivityDetail(entry)}
+              </div>
+            ) : null}
+
+            <div style={styles.autoResolutionFooter}>
+              <span>APMS execution completed</span>
+              <span>{formatMissionActivityTime(entry)}</span>
+            </div>
+          </div>
+        </div>
+      ))}
+    </div>
+  </div>
+) : null}
+    
+      </div>
        
        <div style={styles.controlCenterCard}>
         <div style={styles.legendColumn}>
@@ -1871,16 +2211,15 @@ const occupancySummary = useMemo(() => {
                 style={styles.inlineActionInput}
               />
 
-              <select
-                value={manualPaymentState}
-                onChange={(e) => setManualPaymentState(e.target.value)}
-                style={styles.inlineActionInput}
-              >
-                <option value="NONE">Payment pending</option>
-                <option value="PAID">Paid manually</option>
-                <option value="PENDING">Pending</option>
-              </select>
-
+             <select
+  value={manualPaymentState}
+  onChange={(e) => setManualPaymentState(e.target.value)}
+  style={styles.inlineActionInput}
+>
+  <option value="NONE">Payment not recorded</option>
+  <option value="PAID">Payment collected manually</option>
+</select>
+          
               <button
                 type="button"
                 onClick={handleCreateManualReservation}
@@ -2381,16 +2720,22 @@ missionProgressFill: {
 missionPanel: {
   margin: 18,
   marginTop: 0,
-  padding: 16,
-  borderRadius: 20,
-  border: "1px solid #e2e8f0",
-  background: "#ffffff",
-  boxShadow: "0 12px 30px rgba(15,23,42,0.04)",
+  padding: 0,
+  borderRadius: 22,
+  border: "1px solid #cbd5e1",
+  background:
+    "linear-gradient(180deg, #ffffff 0%, #f8fafc 100%)",
+  boxShadow: "0 18px 44px rgba(15,23,42,0.08)",
+  overflow: "hidden",
   display: "grid",
-  gap: 14,
+  gap: 0,
 },
 
 missionPanelHeader: {
+  padding: 18,
+  background:
+    "linear-gradient(135deg, #020617 0%, #0f172a 58%, #1e293b 100%)",
+  color: "#ffffff",
   display: "flex",
   justifyContent: "space-between",
   alignItems: "flex-start",
@@ -2398,26 +2743,26 @@ missionPanelHeader: {
 },
 
 missionPanelTitle: {
-  fontSize: 13,
+  fontSize: 11,
   fontWeight: 950,
   textTransform: "uppercase",
-  letterSpacing: "0.08em",
-  color: "#0f172a",
+  letterSpacing: "0.12em",
+  color: "#93c5fd",
 },
 
 missionPanelMeta: {
-  marginTop: 4,
+  marginTop: 7,
   fontSize: 12,
   fontWeight: 750,
-  color: "#64748b",
+  color: "#cbd5e1",
 },
 
 missionEngineGrid: {
+  padding: 18,
   display: "grid",
   gridTemplateColumns: "repeat(auto-fit, minmax(260px, 1fr))",
   gap: 12,
 },
-
 missionEngineCard: {
   padding: 16,
   borderRadius: 18,
@@ -2455,6 +2800,7 @@ missionEngineMessage: {
 },
 
 missionActivityTimeline: {
+  padding: 18,
   display: "grid",
   gap: 10,
 },
@@ -2566,6 +2912,71 @@ missionActionMeta: {
   color: "#166534",
 },
  
+missionActionTopMeta: {
+  marginTop: 10,
+  display: "flex",
+  alignItems: "center",
+  gap: 8,
+  flexWrap: "wrap",
+},
+
+missionActionMiniMeta: {
+  display: "flex",
+  alignItems: "center",
+  gap: 8,
+  flexWrap: "wrap",
+},
+
+missionActionEngineBadge: {
+  display: "inline-flex",
+  alignItems: "center",
+  width: "fit-content",
+  padding: "5px 9px",
+  borderRadius: 999,
+  border: "1px solid #dbeafe",
+  background: "#eff6ff",
+  color: "#1d4ed8",
+  fontSize: 10,
+  fontWeight: 950,
+  textTransform: "uppercase",
+  letterSpacing: "0.07em",
+},
+
+missionActionSignal: {
+  fontSize: 11,
+  fontWeight: 850,
+  color: "#64748b",
+},
+
+missionActionFooterRow: {
+  marginTop: 12,
+  display: "flex",
+  alignItems: "center",
+  justifyContent: "space-between",
+  gap: 12,
+  flexWrap: "wrap",
+},
+
+missionActionFooter: {
+  display: "inline-flex",
+  alignItems: "center",
+  width: "fit-content",
+  padding: "7px 10px",
+  borderRadius: 999,
+  border: "1px solid #bbf7d0",
+  background: "#dcfce7",
+  color: "#166534",
+  fontSize: 11,
+  fontWeight: 950,
+},
+
+missionActionTrustText: {
+  fontSize: 11,
+  lineHeight: 1.35,
+  fontWeight: 850,
+  color: "#64748b",
+},
+
 missionActionList: {
   marginTop: 14,
   display: "grid",
@@ -2601,6 +3012,213 @@ missionActionCount: {
   color: "#475569",
 },
   
+autoResolutionPanel: {
+  margin: 18,
+  marginTop: 0,
+  padding: 0,
+  borderRadius: 22,
+  border: "1px solid #cbd5e1",
+  background:
+    "linear-gradient(180deg, #ffffff 0%, #f8fafc 100%)",
+  boxShadow: "0 18px 44px rgba(15,23,42,0.08)",
+  overflow: "hidden",
+},
+
+autoResolutionHeader: {
+  padding: 18,
+  background:
+    "linear-gradient(135deg, #020617 0%, #0f172a 58%, #1e293b 100%)",
+  color: "#ffffff",
+  display: "flex",
+  alignItems: "flex-start",
+  justifyContent: "space-between",
+  gap: 18,
+},
+
+autoResolutionEyebrow: {
+  fontSize: 11,
+  fontWeight: 950,
+  textTransform: "uppercase",
+  letterSpacing: "0.12em",
+  color: "#86efac",
+},
+
+autoResolutionHeading: {
+  marginTop: 7,
+  fontSize: 20,
+  lineHeight: 1.1,
+  fontWeight: 950,
+  color: "#ffffff",
+},
+
+autoResolutionSubheading: {
+  marginTop: 7,
+  fontSize: 12,
+  lineHeight: 1.45,
+  fontWeight: 750,
+  color: "#cbd5e1",
+},
+
+autoResolutionStats: {
+  display: "grid",
+  gridTemplateColumns: "repeat(2, minmax(110px, 1fr))",
+  gap: 10,
+  minWidth: 260,
+},
+
+autoResolutionStatCard: {
+  padding: 12,
+  borderRadius: 16,
+  border: "1px solid rgba(255,255,255,0.14)",
+  background: "rgba(255,255,255,0.08)",
+  backdropFilter: "blur(10px)",
+},
+
+autoResolutionStatValue: {
+  fontSize: 24,
+  lineHeight: 1,
+  fontWeight: 950,
+  color: "#ffffff",
+},
+
+autoResolutionStatLabel: {
+  marginTop: 6,
+  fontSize: 10,
+  lineHeight: 1.25,
+  fontWeight: 900,
+  textTransform: "uppercase",
+  letterSpacing: "0.06em",
+  color: "#cbd5e1",
+},
+
+autoResolutionTimeline: {
+  padding: 18,
+  display: "grid",
+  gap: 0,
+},
+
+autoResolutionTimelineRow: {
+  display: "grid",
+  gridTemplateColumns: "34px 1fr",
+  gap: 12,
+},
+
+autoResolutionTimelineRail: {
+  display: "grid",
+  justifyItems: "center",
+  gridTemplateRows: "28px 1fr",
+},
+
+autoResolutionTimelineDot: {
+  width: 28,
+  height: 28,
+  borderRadius: 999,
+  background: "#dcfce7",
+  color: "#166534",
+  border: "1px solid #bbf7d0",
+  display: "grid",
+  placeItems: "center",
+  fontSize: 13,
+  fontWeight: 950,
+  boxShadow: "0 0 0 5px #f0fdf4",
+},
+
+autoResolutionTimelineLine: {
+  width: 2,
+  minHeight: 18,
+  background: "#e2e8f0",
+},
+
+autoResolutionEnterpriseCard: {
+  marginBottom: 14,
+  padding: 16,
+  borderRadius: 18,
+  border: "1px solid #e2e8f0",
+  background: "#ffffff",
+  boxShadow: "0 10px 24px rgba(15,23,42,0.05)",
+},
+
+autoResolutionCardTopRow: {
+  display: "flex",
+  alignItems: "flex-start",
+  justifyContent: "space-between",
+  gap: 14,
+},
+
+autoResolutionEngineBadge: {
+  display: "inline-flex",
+  alignItems: "center",
+  width: "fit-content",
+  padding: "5px 9px",
+  borderRadius: 999,
+  border: "1px solid #dbeafe",
+  background: "#eff6ff",
+  color: "#1d4ed8",
+  fontSize: 10,
+  fontWeight: 950,
+  textTransform: "uppercase",
+  letterSpacing: "0.07em",
+},
+
+autoResolutionResolvedPill: {
+  display: "inline-flex",
+  alignItems: "center",
+  justifyContent: "center",
+  padding: "6px 9px",
+  borderRadius: 999,
+  border: "1px solid #bbf7d0",
+  background: "#dcfce7",
+  color: "#166534",
+  fontSize: 10,
+  fontWeight: 950,
+  textTransform: "uppercase",
+  letterSpacing: "0.06em",
+  whiteSpace: "nowrap",
+},
+
+autoResolutionTitle: {
+  marginTop: 9,
+  fontSize: 15,
+  lineHeight: 1.25,
+  fontWeight: 950,
+  color: "#0f172a",
+},
+
+autoResolutionDescription: {
+  marginTop: 9,
+  fontSize: 13,
+  lineHeight: 1.45,
+  fontWeight: 780,
+  color: "#475569",
+},
+
+autoResolutionDetail: {
+  marginTop: 10,
+  width: "fit-content",
+  padding: "6px 9px",
+  borderRadius: 999,
+  background: "#f8fafc",
+  border: "1px solid #e2e8f0",
+  color: "#334155",
+  fontSize: 11,
+  lineHeight: 1.2,
+  fontWeight: 900,
+},
+
+autoResolutionFooter: {
+  marginTop: 12,
+  paddingTop: 10,
+  borderTop: "1px solid #e2e8f0",
+  display: "flex",
+  alignItems: "center",
+  justifyContent: "space-between",
+  gap: 12,
+  flexWrap: "wrap",
+  fontSize: 11,
+  fontWeight: 850,
+  color: "#64748b",
+},
+
   controlCenterCard: {
     marginTop: 24,
     padding: 22,
