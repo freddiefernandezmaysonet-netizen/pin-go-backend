@@ -461,13 +461,14 @@ function hasMessageEvidence(input: {
     status: string;
     createdAt: Date;
   }>;
-  messageLogs: Array<{
-    channel: string;
-    to: string;
-    status: string | null;
-    error: string | null;
-    createdAt: Date;
-  }>;
+ messageLogs: Array<{
+  channel: string;
+  to: string;
+  body: string;
+  status: string | null;
+  error: string | null;
+  createdAt: Date;
+}>;
   tokens: string[];
   expectedTo?: string | null;
 }) {
@@ -498,15 +499,30 @@ function hasMessageEvidence(input: {
   const expectedTo = String(input.expectedTo ?? "").trim().toLowerCase();
 
   const matchingMessageLog = input.messageLogs.some((log) => {
-    const channel = normalizeText(log.channel);
-    const statusOk = isSuccessStatus(log.status);
-    const recipientMatches =
-      !expectedTo || String(log.to ?? "").trim().toLowerCase() === expectedTo;
+  const channel = normalizeText(log.channel);
+  const statusOk = isSuccessStatus(log.status);
+  const recipientMatches =
+    !expectedTo || String(log.to ?? "").trim().toLowerCase() === expectedTo;
 
-    return channel === "EMAIL" && statusOk && recipientMatches;
-  });
+  const searchText = [
+    log.channel,
+    log.to,
+    log.status,
+    log.error,
+    (log as any).body,
+  ]
+    .join(" ")
+    .toUpperCase();
 
-  return matchingMessageLog;
+  return (
+    channel === "EMAIL" &&
+    statusOk &&
+    recipientMatches &&
+    tokens.every((token) => searchText.includes(token))
+  );
+});
+
+return matchingMessageLog;
 }
 
 export async function auditReservationCompleteFlow(
@@ -780,22 +796,23 @@ export async function auditReservationCompleteFlow(
         createdAt: true,
       },
     }),
-    db.messageLog.findMany({
-      where: {
-        reservationId: reservation.id,
-      },
-      orderBy: {
-        createdAt: "desc",
-      },
-      take: 50,
-      select: {
-        channel: true,
-        to: true,
-        status: true,
-        error: true,
-        createdAt: true,
-      },
-    }),
+   db.messageLog.findMany({
+  where: {
+    reservationId: reservation.id,
+  },
+  orderBy: {
+    createdAt: "desc",
+  },
+  take: 50,
+  select: {
+    channel: true,
+    to: true,
+    body: true,
+    status: true,
+    error: true,
+    createdAt: true,
+  },
+}),
     db.apmsAuditEntry.findMany({
       where: {
         reservationId: reservation.id,
