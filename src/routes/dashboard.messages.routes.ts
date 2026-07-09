@@ -6,6 +6,43 @@ import { requireOrg } from "../middleware/requireOrg";
 const prisma = new PrismaClient();
 const router = Router();
 
+function toErrString(e: unknown) {
+  const anyError = e as any;
+
+  if (e instanceof Error) {
+    const code = anyError?.code ? ` code=${anyError.code}` : "";
+    const status = anyError?.status ? ` status=${anyError.status}` : "";
+
+    return `${e.name}: ${e.message}${code}${status}`;
+  }
+
+  return String(e);
+}
+
+function isNonRetryableSmsError(value: unknown) {
+  const error = String(value ?? "").toLowerCase();
+
+  return (
+    error.includes("not a valid phone number") ||
+    error.includes("invalid phone number") ||
+    error.includes("invalid 'to' phone number") ||
+    error.includes("unable to create record") ||
+    error.includes("the 'to' number") ||
+    error.includes("is not a valid") ||
+    error.includes("not sms capable") ||
+    error.includes("not a mobile number") ||
+    error.includes("landline") ||
+    error.includes("unsubscribed") ||
+    error.includes("blacklisted") ||
+    error.includes("recipient is unable to receive") ||
+    error.includes("destination phone number") ||
+    error.includes("twilio error 21211") ||
+    error.includes("twilio error 21614") ||
+    error.includes("21211") ||
+    error.includes("21614")
+  );
+}
+
 // =======================
 // GET messages
 // =======================
@@ -22,13 +59,10 @@ router.get("/messages", requireOrg(prisma), async (req, res) => {
       where: {
         ...(status ? { status } : {}),
         OR: [
-          // ✅ camino nuevo: logs multi-tenant directos
           {
             organizationId: orgId,
             ...(propertyId ? { propertyId } : {}),
           },
-
-          // ✅ fallback seguro: logs viejos sin organizationId/propertyId
           {
             organizationId: null,
             ...(propertyId ? { propertyId: null } : {}),
@@ -103,9 +137,12 @@ router.get("/messages", requireOrg(prisma), async (req, res) => {
 
         return {
           id: item.id,
+          channel: item.channel,
+          provider: item.provider,
           to: item.to,
           body: item.body,
           status: item.status,
+          error: item.error ?? null,
           retryCount: item.retryCount,
           createdAt: item.createdAt,
           reservationId: item.reservationId ?? item.accessGrant?.reservation?.id ?? null,
@@ -136,10 +173,7 @@ router.post("/messages/:id/retry", requireOrg(prisma), async (req, res) => {
       where: {
         id,
         OR: [
-          // ✅ camino nuevo
           { organizationId: orgId },
-
-          // ✅ fallback seguro para logs viejos
           {
             organizationId: null,
             accessGrant: {
@@ -173,8 +207,51 @@ router.post("/messages/:id/retry", requireOrg(prisma), async (req, res) => {
       return res.status(404).json({ ok: false, error: "not_found" });
     }
 
+    const channel = String(msg.channel ?? "").trim().toLowerCase();
+    const status = String(msg.status ?? "").trim().toUpperCase();
+
+    if (channel !== "sms") {
+      return res.status(400).json({
+        ok: false,
+        error: "unsupported_retry_channel",
+        message: "This retry endpoint only supports SMS messages.",
+      });
+    }
+
+    if (status === "FAILED_FINAL") {
+      return res.status(409).json({
+        ok: false,
+        error: "non_retryable_message",
+        message: "This SMS has a non-retryable delivery failure.",
+      });
+    }
+
+    if (status !== "FAILED") {
+      return res.status(400).json({
+        ok: false,
+        error: "invalid_retry_status",
+        message: "Only FAILED SMS messages can be retried.",
+      });
+    }
+
     if (!msg.to || !msg.body) {
       return res.status(400).json({ ok: false, error: "invalid_message" });
+    }
+
+    if (isNonRetryableSmsError(msg.error)) {
+      await prisma.messageLog.update({
+        where: { id: msg.id },
+        data: {
+          status: "FAILED_FINAL",
+          error: msg.error ?? "Non-retryable SMS delivery error",
+        },
+      });
+
+      return res.status(409).json({
+        ok: false,
+        error: "non_retryable_sms_error",
+        message: "This SMS error is permanent and will not be retried.",
+      });
     }
 
     try {
@@ -192,16 +269,22 @@ router.post("/messages/:id/retry", requireOrg(prisma), async (req, res) => {
 
       return res.json({ ok: true });
     } catch (e: any) {
+      const error = toErrString(e);
+      const nonRetryable = isNonRetryableSmsError(error);
+
       await prisma.messageLog.update({
         where: { id: msg.id },
         data: {
-          status: "FAILED",
+          status: nonRetryable ? "FAILED_FINAL" : "FAILED",
           retryCount: { increment: 1 },
-          error: e?.message ?? "retry_failed",
+          error,
         },
       });
 
-      return res.status(500).json({ ok: false, error: "retry_failed" });
+      return res.status(nonRetryable ? 409 : 500).json({
+        ok: false,
+        error: nonRetryable ? "non_retryable_sms_error" : "retry_failed",
+      });
     }
   } catch (e) {
     console.error("[messages retry] error", e);
