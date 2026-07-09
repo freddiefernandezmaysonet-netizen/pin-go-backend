@@ -892,20 +892,36 @@ dashboardPropertiesRouter.post(
       const orgId = user.orgId as string;
       const { id } = req.params;
 
-      const {
-        guestName,
-        guestEmail,
-        guestPhone,
-        checkIn,
-        checkOut,
-        paymentState,
-      } = req.body ?? {};
+const {
+  guestName,
+  guestEmail,
+  guestPhone,
+  checkIn,
+  checkOut,
+  paymentState,
+  totalAmount,
+  totalPaid,
+  amountPaid,
+  currency,
+} = req.body ?? {};
+     
+     const cleanGuestName = String(guestName || "").trim();
+const cleanGuestEmail = String(guestEmail || "").trim() || null;
+const cleanGuestPhone = String(guestPhone || "").trim() || null;
+const cleanPaymentState = String(paymentState || "NONE").trim().toUpperCase();
 
-      const cleanGuestName = String(guestName || "").trim();
-      const cleanGuestEmail = String(guestEmail || "").trim() || null;
-      const cleanGuestPhone = String(guestPhone || "").trim() || null;
-      const cleanPaymentState = String(paymentState || "NONE").trim();
+const manualTotalAmountRaw =
+  totalAmount !== undefined
+    ? totalAmount
+    : totalPaid !== undefined
+    ? totalPaid
+    : amountPaid;
 
+const manualTotalAmount = parseOptionalMoney(manualTotalAmountRaw);
+
+const cleanCurrency = String(currency || "usd")
+  .trim()
+  .toLowerCase();
       if (!cleanGuestName) {
         return res.status(400).json({
           ok: false,
@@ -920,13 +936,36 @@ dashboardPropertiesRouter.post(
         });
       }
 
-      if (!["NONE", "PAID", "PENDING"].includes(cleanPaymentState)) {
-        return res.status(400).json({
-          ok: false,
-          error: "Invalid paymentState",
-        });
-      }
+     if (!["NONE", "PAID"].includes(cleanPaymentState)) {
+  return res.status(400).json({
+    ok: false,
+    error: "Invalid paymentState. Manual reservations currently support NONE or PAID.",
+  });
+}
 
+if (Number.isNaN(manualTotalAmount)) {
+  return res.status(400).json({
+    ok: false,
+    error: "totalAmount must be a valid amount",
+  });
+}
+
+if (!/^[a-z]{3}$/.test(cleanCurrency)) {
+  return res.status(400).json({
+    ok: false,
+    error: "currency must be a valid 3-letter currency code",
+  });
+}
+
+if (
+  cleanPaymentState === "PAID" &&
+  (manualTotalAmount === null || manualTotalAmount <= 0)
+) {
+  return res.status(400).json({
+    ok: false,
+    error: "totalAmount is required when paymentState is PAID",
+  });
+}
       const property = await prisma.property.findFirst({
         where: {
           id,
@@ -955,39 +994,70 @@ dashboardPropertiesRouter.post(
         roomName: property.name,
         checkIn: String(checkIn),
         checkOut: String(checkOut),
-        paymentState: cleanPaymentState as "NONE" | "PAID" | "PENDING",
+        paymentState: cleanPaymentState as "NONE" | "PAID",
         externalProvider: "PIN_GO_MANUAL",
         externalId: crypto.randomUUID(),
         externalUpdatedAt: new Date().toISOString(),
-        externalRaw: {
-          createdFrom: "CALENDAR_V2",
-          paymentState: cleanPaymentState,
-        },
+       externalRaw: {
+  createdFrom: "CALENDAR_V2",
+  paymentState: cleanPaymentState,
+  totalAmount: manualTotalAmount,
+  currency: cleanCurrency,
+  manualPayment: {
+    paymentState: cleanPaymentState,
+    totalAmount: manualTotalAmount,
+    currency: cleanCurrency,
+    recordedAt: new Date().toISOString(),
+    recordedByUserId:
+      typeof user.id === "string"
+        ? user.id
+        : typeof user.userId === "string"
+        ? user.userId
+        : null,
+  },
+},
         status: "ACTIVE",
       });
 
-const manualReservationForEmail = cleanGuestEmail
-  ? await prisma.reservation.findUnique({
-      where: {
-        id: result.reservationId,
-      },
+const manualReservationWithPayment = await prisma.reservation.update({
+  where: {
+    id: result.reservationId,
+  },
+  data: {
+    totalAmount: manualTotalAmount,
+    currency: cleanCurrency,
+    pricingBreakdown:
+      manualTotalAmount !== null
+        ? {
+            source: "MANUAL_RESERVATION",
+            paymentState: cleanPaymentState,
+            totalAmount: manualTotalAmount,
+            currency: cleanCurrency,
+            recordedAt: new Date().toISOString(),
+          }
+        : undefined,
+  },
+  select: {
+    id: true,
+    guestName: true,
+    guestEmail: true,
+    checkIn: true,
+    checkOut: true,
+    guestToken: true,
+    totalAmount: true,
+    currency: true,
+    property: {
       select: {
-        id: true,
-        guestName: true,
-        guestEmail: true,
-        checkIn: true,
-        checkOut: true,
-        guestToken: true,
-        property: {
-          select: {
-            name: true,
-            timezone: true,
-          },
-        },
+        name: true,
+        timezone: true,
       },
-    })
-  : null;
+    },
+  },
+});
 
+const manualReservationForEmail = cleanGuestEmail
+  ? manualReservationWithPayment
+  : null;
 const emailGuestToken =
   manualReservationForEmail?.guestToken ?? result.guestToken ?? null;
 
@@ -1206,15 +1276,20 @@ try {
         });
       }
 
-           return res.json({
-        ok: true,
-        reservationId: result.reservationId,
-        guestToken: result.guestToken,
-        accessGrantId: result.accessGrantId ?? null,
-        auditEntry: result.auditEntry ?? null,
-        distributionSyncResult,
-      });
-
+          return res.json({
+  ok: true,
+  reservationId: result.reservationId,
+  guestToken: result.guestToken,
+  accessGrantId: result.accessGrantId ?? null,
+  auditEntry: result.auditEntry ?? null,
+  paymentState: cleanPaymentState,
+  totalAmount:
+    manualReservationWithPayment.totalAmount !== null
+      ? Number(manualReservationWithPayment.totalAmount)
+      : null,
+  currency: manualReservationWithPayment.currency ?? cleanCurrency,
+  distributionSyncResult,
+});
     } catch (error: any) {
       console.error("POST manual reservation error", error);
 

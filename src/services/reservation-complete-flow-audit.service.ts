@@ -983,30 +983,56 @@ const hasHostEmailEvidence = hasMessageEvidence({
   const paymentPaid = reservation.paymentState === PaymentState.PAID;
   const paymentStateRecorded = Boolean(reservation.paymentState);
 
-  addCheck(checks, {
-    rule: "PAYMENT_PAID",
-    label: paymentPaidRequired ? "Payment Paid" : "Payment State Recorded",
-    status: paymentPaidRequired
-      ? paymentPaid
-        ? "PASS"
-        : "FAIL"
-      : paymentStateRecorded
+  const reservationTotalAmount = toNumber(reservation.totalAmount);
+
+  const manualPaidReservation =
+  isManualReservation && reservation.paymentState === PaymentState.PAID;
+
+  const manualPaymentTotalRecorded =
+    !manualPaidReservation ||
+    (reservationTotalAmount !== null && reservationTotalAmount > 0);
+
+  const paymentCheckStatus = paymentPaidRequired
+    ? paymentPaid
       ? "PASS"
-      : "WARNING",
-    critical: paymentPaidRequired && !paymentPaid,
-    required: paymentPaidRequired,
-    recommendedAction:
-      paymentPaidRequired && !paymentPaid
-        ? "Review Stripe payment state before allowing the reservation to proceed."
-        : undefined,
-    metadata: {
-      auditMode,
-      paymentPaidRequired,
-      paymentState: reservation.paymentState,
-      totalAmount: toNumber(reservation.totalAmount),
-      currency: reservation.currency,
-    },
-  });
+      : "FAIL"
+    : manualPaidReservation
+    ? manualPaymentTotalRecorded
+      ? "PASS"
+      : "WARNING"
+    : paymentStateRecorded
+    ? "PASS"
+    : "WARNING";
+
+  const paymentCheckRecommendedAction =
+    paymentPaidRequired && !paymentPaid
+      ? "Review Stripe payment state before allowing the reservation to proceed."
+      : manualPaidReservation && !manualPaymentTotalRecorded
+      ? "Manual reservation is marked as paid but totalAmount is missing. Record the total paid amount."
+      : undefined;
+ addCheck(checks, {
+  rule: manualPaidReservation
+    ? "MANUAL_PAYMENT_TOTAL_RECORDED"
+    : "PAYMENT_PAID",
+  label: manualPaidReservation
+    ? "Manual Payment Total Recorded"
+    : paymentPaidRequired
+    ? "Payment Paid"
+    : "Payment State Recorded",
+  status: paymentCheckStatus,
+  critical: paymentPaidRequired && !paymentPaid,
+  required: paymentPaidRequired || manualPaidReservation,
+  recommendedAction: paymentCheckRecommendedAction,
+  metadata: {
+    auditMode,
+    paymentPaidRequired,
+    manualPaidReservation,
+    manualPaymentTotalRecorded,
+    paymentState: reservation.paymentState,
+    totalAmount: reservationTotalAmount,
+    currency: reservation.currency,
+  },
+});
   addCheck(checks, {
     rule: "STRIPE_CHECKOUT_AND_PAYMENT_INTENT_SAVED",
     label: "Stripe Checkout and Payment Intent Saved",
