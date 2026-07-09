@@ -283,36 +283,51 @@ async function sendDirectBookingHostNotificationSafe({
 
   let sent = 0;
 
-  for (const recipient of recipients) {
-    try {
-      await sendDirectBookingHostNotification({
-        to: recipient.email,
-        hostName: recipient.fullName,
-        propertyName,
-        guestName: reservation.guestName ?? "Guest",
-        guestEmail: reservation.guestEmail,
-        guestPhone: reservation.guestPhone,
-        checkIn: reservation.checkIn,
-        checkOut: reservation.checkOut,
-        propertyTimeZone,
-        totalAmount,
-        currency: reservation.currency,
-        paymentState: "PAID",
-        hostPayoutStatus: String(reservation.hostPayoutStatus ?? ""),
-      } as any);
+for (const recipient of recipients) {
+  const directBookingHostEmailInput = {
+    to: recipient.email,
+    hostName: recipient.fullName,
+    propertyName,
+    guestName: reservation.guestName ?? "Guest",
+    guestEmail: reservation.guestEmail,
+    guestPhone: reservation.guestPhone,
+    checkIn: reservation.checkIn,
+    checkOut: reservation.checkOut,
+    propertyTimeZone,
+    totalAmount,
+    currency: reservation.currency,
+    paymentState: "PAID",
+    hostPayoutStatus: String(reservation.hostPayoutStatus ?? ""),
+  };
 
-      sent += 1;
-    } catch (emailError: any) {
-      console.error("[DIRECT_BOOKING_HOST_EMAIL_ERROR]", {
-        organizationId,
-        propertyId,
-        reservationId: reservation.id,
-        to: recipient.email,
-        error: emailError?.message ?? emailError,
-      });
-    }
+  const hostEmailDeliveryResult = await sendLoggedEmail({
+    prisma,
+    type: "DIRECT_BOOKING_HOST_NOTIFICATION",
+    to: recipient.email,
+    subject: `New direct booking - ${propertyName}`,
+    reservationId: reservation.id,
+    propertyId,
+    organizationId,
+    retryPayload: directBookingHostEmailInput,
+    send: () =>
+      sendDirectBookingHostNotification(
+        directBookingHostEmailInput as any
+      ),
+  });
+
+  if (hostEmailDeliveryResult.ok) {
+    sent += 1;
+  } else {
+    console.error("[DIRECT_BOOKING_HOST_EMAIL_DELIVERY_FAILED]", {
+      organizationId,
+      propertyId,
+      reservationId: reservation.id,
+      to: recipient.email,
+      status: hostEmailDeliveryResult.status,
+      error: hostEmailDeliveryResult.error,
+    });
   }
-
+}
   return {
     ok: true,
     sent,
