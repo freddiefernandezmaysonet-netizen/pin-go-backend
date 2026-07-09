@@ -907,13 +907,25 @@ const hasHostEmailEvidence = hasMessageEvidence({
   tokens: ["DIRECT", "BOOKING", "HOST"],
 });
   
-  const hasCleanerNotificationEvidence = hasMessageEvidence({
+ const hasCleanerNotificationEvidence =
+  hasMessageEvidence({
     auditEntries,
     dispatchLogs,
     messageLogs,
-    tokens: ["CLEAN"],
-  });
+    tokens: ["CLEANING", "CONFIRMATION"],
+  }) ||
+  dispatchLogs.some((log) => {
+    const type = String(log.type ?? "").trim().toUpperCase();
+    const channel = String(log.channel ?? "").trim().toUpperCase();
+    const status = String(log.status ?? "").trim().toUpperCase();
 
+    return (
+      type === "CLEANING_CONFIRMATION" &&
+      channel === "SMS" &&
+      status === "SENT"
+    );
+  });
+  
   const hasReservationAuditEntry = auditEntries.some(
     (entry) => normalizeText(entry.engine) === "RESERVATION"
   );
