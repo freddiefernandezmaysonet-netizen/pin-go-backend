@@ -37,6 +37,54 @@ function getAuditTimestampV1(entry: AuditEntry) {
   );
 }
 
+function getAuditMetadataValueV1(entry: AuditEntry, key: string) {
+  const metadata = entry.metadata;
+
+  if (!metadata || typeof metadata !== "object") {
+    return null;
+  }
+
+  return (metadata as Record<string, unknown>)[key] ?? null;
+}
+
+function isReservationCompleteFlowAuditEntryV1(entry: AuditEntry) {
+  const engine = String(entry.engine ?? "");
+  const decisionId = String(entry.decisionId ?? "").trim().toLowerCase();
+  const reason = normalizeAuditValueV1(entry.reason);
+  const completeFlowStatus = normalizeAuditValueV1(
+    getAuditMetadataValueV1(entry, "completeFlowStatus")
+  );
+
+  return (
+    engine === "Reservation" &&
+    (decisionId.startsWith("reservation-complete-flow:") ||
+      reason.includes("RESERVATION_COMPLETE_FLOW") ||
+      Boolean(completeFlowStatus))
+  );
+}
+
+function getActiveOperationalAuditEntriesV1(auditEntries: AuditEntry[]) {
+  const latestReservationCompleteFlowAt = auditEntries
+    .filter(isReservationCompleteFlowAuditEntryV1)
+    .reduce(
+      (latestTimestamp, entry) =>
+        Math.max(latestTimestamp, getAuditTimestampV1(entry)),
+      0
+    );
+
+  if (latestReservationCompleteFlowAt <= 0) {
+    return auditEntries;
+  }
+
+  return auditEntries.filter((entry) => {
+    if (!isReservationCompleteFlowAuditEntryV1(entry)) {
+      return true;
+    }
+
+    return getAuditTimestampV1(entry) >= latestReservationCompleteFlowAt;
+  });
+}
+
 function isActionableAuditEntryV1(entry: AuditEntry) {
   const status = normalizeAuditValueV1(entry.status);
   const severity = normalizeAuditValueV1(entry.severity);
@@ -546,26 +594,34 @@ function getFreedomMetrics(
 export function createMissionControlSnapshotFromAuditEntries(
   input: MissionControlSnapshotInput
 ): MissionControlSnapshot {
-  const recommendedActions = buildRecommendedActionsV1(input.auditEntries);
-  
-return {
+  const activeOperationalAuditEntries =
+    getActiveOperationalAuditEntriesV1(input.auditEntries);
+
+  const recommendedActions = buildRecommendedActionsV1(
+    activeOperationalAuditEntries
+  );
+
+  return {
     entityId: input.entityId,
     autopilotStatus: getAutopilotStatus(
-      input.auditEntries,
+      activeOperationalAuditEntries,
       recommendedActions
     ),
     freedomMetrics: getFreedomMetrics(
-      input.auditEntries,
+      activeOperationalAuditEntries,
       input.freedomMetrics
     ),
-    autonomyScore: getAutonomyScore(input.auditEntries, recommendedActions),
-    confidenceScore: getConfidenceScore(input.auditEntries),
-    engineHealth: getEngineHealth(input.auditEntries),
+    autonomyScore: getAutonomyScore(
+      activeOperationalAuditEntries,
+      recommendedActions
+    ),
+    confidenceScore: getConfidenceScore(activeOperationalAuditEntries),
+    engineHealth: getEngineHealth(activeOperationalAuditEntries),
     recentAuditEntries: input.auditEntries.slice(-10),
     auditTimeline: {
       entityId: input.entityId,
       entityType: "PROPERTY",
-      entries: input.auditEntries,
+      entries: activeOperationalAuditEntries,
     },
     recommendedActions,
     generatedAt: input.generatedAt ?? new Date(),
