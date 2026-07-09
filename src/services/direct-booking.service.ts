@@ -7,6 +7,7 @@ import { ingestReservation } from "./ingest.service";
 import { calculateDirectBookingPricing } from "./direct-booking-pricing.service";
 import { syncChannexAvailabilityForProperty } from "./channex-availability-sync.service";
 import { auditReservationCompleteFlowSafe } from "./reservation-complete-flow-audit.service";
+import { sendLoggedEmail } from "./email-delivery.service";
 import type { AuditEntry } from "../apms/audit-types";
 import { persistAuditEntry } from "../apms/audit-persistence.service";
 import {
@@ -716,29 +717,48 @@ const amountNumber = updatedReservation.totalAmount
   : null;
 
 if (updatedReservation.guestEmail) {
-  try {
-    await sendDirectBookingGuestConfirmation({
+  const directBookingGuestEmailInput = {
+    to: updatedReservation.guestEmail,
+    guestName: updatedReservation.guestName,
+    propertyName: property.name,
+    checkIn: updatedReservation.checkIn,
+    checkOut: updatedReservation.checkOut,
+    propertyTimeZone: property.timezone,
+    totalAmount: amountNumber,
+    currency: updatedReservation.currency,
+    manageReservationUrl,
+    cancellationPolicyName: (cancellationPolicySnapshot as any).name ?? null,
+    cancellationPolicyType: (cancellationPolicySnapshot as any).type ?? null,
+    cancellationPolicySummary: getCancellationPolicySummaryForEmail(
+      cancellationPolicySnapshot
+    ),
+    refundBasis: (cancellationPolicySnapshot as any).refundBasis ?? null,
+    refundRules: getCancellationRefundRulesForEmail(
+      cancellationPolicySnapshot
+    ),
+  };
+
+  const guestEmailDeliveryResult = await sendLoggedEmail({
+    prisma,
+    type: "DIRECT_BOOKING_GUEST_CONFIRMATION",
+    to: updatedReservation.guestEmail,
+    subject: `Your Pin&Go reservation is confirmed - ${property.name}`,
+    reservationId: updatedReservation.id,
+    propertyId: property.id,
+    organizationId: property.organizationId,
+    retryPayload: directBookingGuestEmailInput,
+    send: () => sendDirectBookingGuestConfirmation(directBookingGuestEmailInput),
+  });
+
+  if (!guestEmailDeliveryResult.ok) {
+    console.error("[DIRECT_BOOKING_GUEST_EMAIL_DELIVERY_FAILED]", {
+      organizationId: property.organizationId,
+      propertyId: property.id,
+      reservationId: updatedReservation.id,
       to: updatedReservation.guestEmail,
-      guestName: updatedReservation.guestName,
-      propertyName: property.name,
-      checkIn: updatedReservation.checkIn,
-      checkOut: updatedReservation.checkOut,
-      propertyTimeZone: property.timezone,
-      totalAmount: amountNumber,
-      currency: updatedReservation.currency,
-      manageReservationUrl,
-      cancellationPolicyName: (cancellationPolicySnapshot as any).name ?? null,
-      cancellationPolicyType: (cancellationPolicySnapshot as any).type ?? null,
-      cancellationPolicySummary: getCancellationPolicySummaryForEmail(
-        cancellationPolicySnapshot
-      ),
-      refundBasis: (cancellationPolicySnapshot as any).refundBasis ?? null,
-      refundRules: getCancellationRefundRulesForEmail(
-        cancellationPolicySnapshot
-      ),
+      status: guestEmailDeliveryResult.status,
+      error: guestEmailDeliveryResult.error,
     });
-  } catch (emailError) {
-    console.error("[DIRECT_BOOKING_GUEST_EMAIL_ERROR]", emailError);
   }
 }
 
