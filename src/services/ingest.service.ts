@@ -46,7 +46,7 @@ export type IngestPayload = {
 
 type IngestReservationResult = {
   reservationId: string;
-  reservationNumber: string;
+  reservationNumber: string | null;
   guestToken: string | null;
   accessGrantId?: string | null;
   lockId?: string | null;

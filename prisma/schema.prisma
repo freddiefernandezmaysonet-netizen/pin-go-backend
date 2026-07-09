@@ -331,7 +331,7 @@ model Subscription {
 
 model Reservation {
   id                      String                   @id @default(cuid())
-  reservationNumber       String                   @unique
+  reservationNumber       String?                  @unique
   propertyId              String
   guestName               String
   guestEmail              String?
