@@ -17,6 +17,7 @@ import { persistAuditEntry } from "../apms/audit-persistence.service";
 import { createDistributionAuditEntry } from "../apms/distribution-audit.mapper";
 import { sendManualReservationGuestConfirmation } from "../lib/mailer";
 import { sendLoggedEmail } from "../services/email-delivery.service";
+import { dispatchPendingCleaningConfirmationForReservation } from "../services/cleaning-confirmation-dispatch.service";
 
 const prisma = new PrismaClient();
 export const dashboardPropertiesRouter = Router();
@@ -1159,6 +1160,30 @@ try {
       error: auditPersistenceError?.message ?? auditPersistenceError,
     });
   }
+}
+
+      let cleaningConfirmationDispatchResult: any = null;
+
+try {
+  cleaningConfirmationDispatchResult =
+    await dispatchPendingCleaningConfirmationForReservation({
+      prisma,
+      reservationId: result.reservationId,
+    });
+
+  console.log("[MANUAL_RESERVATION_CLEANING_CONFIRMATION_DISPATCH_RESULT]", {
+    reservationId: result.reservationId,
+    sent: cleaningConfirmationDispatchResult?.sent ?? false,
+    skipped: cleaningConfirmationDispatchResult?.skipped ?? false,
+    reason: cleaningConfirmationDispatchResult?.reason ?? null,
+    confirmationId: cleaningConfirmationDispatchResult?.confirmationId ?? null,
+  });
+} catch (cleaningDispatchError: any) {
+  console.error("[MANUAL_RESERVATION_CLEANING_CONFIRMATION_DISPATCH_ERROR]", {
+    reservationId: result.reservationId,
+    propertyId: property.id,
+    error: cleaningDispatchError?.message ?? cleaningDispatchError,
+  });
 }
 
       const completeFlowAuditResult = await auditReservationCompleteFlowSafe(

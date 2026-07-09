@@ -15,6 +15,7 @@ import {
   sendDirectBookingHostNotification,
 } from "../lib/mailer";
 import { deserializeCancellationPolicySnapshotFromStripeMetadata } from "./cancellation-policy.service";
+import { dispatchPendingCleaningConfirmationForReservation } from "./cleaning-confirmation-dispatch.service";
 
 const prisma = new PrismaClient();
 
@@ -978,6 +979,31 @@ try {
       error: auditPersistenceError?.message ?? auditPersistenceError,
     });
   }
+}
+
+let cleaningConfirmationDispatchResult: any = null;
+
+try {
+  cleaningConfirmationDispatchResult =
+    await dispatchPendingCleaningConfirmationForReservation({
+      prisma,
+      reservationId: ingestResult.reservationId,
+    });
+
+  console.log("[DIRECT_BOOKING_CLEANING_CONFIRMATION_DISPATCH_RESULT]", {
+    reservationId: ingestResult.reservationId,
+    sent: cleaningConfirmationDispatchResult?.sent ?? false,
+    skipped: cleaningConfirmationDispatchResult?.skipped ?? false,
+    reason: cleaningConfirmationDispatchResult?.reason ?? null,
+    confirmationId: cleaningConfirmationDispatchResult?.confirmationId ?? null,
+  });
+} catch (cleaningDispatchError: any) {
+  console.error("[DIRECT_BOOKING_CLEANING_CONFIRMATION_DISPATCH_ERROR]", {
+    reservationId: ingestResult.reservationId,
+    propertyId: property.id,
+    organizationId: property.organizationId,
+    error: cleaningDispatchError?.message ?? cleaningDispatchError,
+  });
 }
 
 const completeFlowAuditResult = await auditReservationCompleteFlowSafe(

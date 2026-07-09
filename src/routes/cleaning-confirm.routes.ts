@@ -1,6 +1,7 @@
 import { Router } from "express";
 import { PrismaClient } from "@prisma/client";
 import { ensureCleanerNfcAccessForConfirmedCleaning } from "../services/cleaner-access-autopilot.service";
+import { auditReservationCompleteFlowSafe } from "../services/reservation-complete-flow-audit.service";
 
 const prisma = new PrismaClient();
 
@@ -44,6 +45,35 @@ async function loadConfirmationData(token: string) {
     staffMember,
     invalidData: false,
   };
+}
+
+async function runCompleteFlowAuditAfterCleaningConfirmation(
+  reservationId: string
+) {
+  try {
+    const completeFlowAuditResult =
+      await auditReservationCompleteFlowSafe(reservationId, prisma);
+
+    if (completeFlowAuditResult) {
+      console.log("[CLEANING_CONFIRM_COMPLETE_FLOW_AUDIT_RESULT]", {
+        reservationId: completeFlowAuditResult.reservationId,
+        propertyId: completeFlowAuditResult.propertyId,
+        organizationId: completeFlowAuditResult.organizationId,
+        completeFlowStatus: completeFlowAuditResult.completeFlowStatus,
+        failedChecks: completeFlowAuditResult.failedChecks.map(
+          (check) => check.rule
+        ),
+        warningChecks: completeFlowAuditResult.warningChecks.map(
+          (check) => check.rule
+        ),
+      });
+    }
+  } catch (auditError: any) {
+    console.error("[CLEANING_CONFIRM_COMPLETE_FLOW_AUDIT_ERROR]", {
+      reservationId,
+      error: auditError?.message ?? auditError,
+    });
+  }
 }
 
 // GET /cleaning/confirm/:token
@@ -181,6 +211,10 @@ if (!cleanerAccessResult.ok) {
     "Cleaning confirmed. Pin&Go recorded your availability, but NFC access could not be activated automatically yet. The issue was escalated in Mission Control."
   );
 }
+
+await runCompleteFlowAuditAfterCleaningConfirmation(
+  confirmation.reservationId
+);
 
 return res.send(
   "Cleaning confirmed. Pin&Go prepared your NFC access for the cleaning window."

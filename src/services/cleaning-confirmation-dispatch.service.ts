@@ -310,6 +310,57 @@ async function maybeFallbackCleaningConfirmation(params: {
   };
 }
 
+export async function dispatchPendingCleaningConfirmationForReservation(params: {
+  prisma: PrismaClient;
+  reservationId: string;
+  now?: Date;
+}) {
+  const now = params.now ?? new Date();
+
+  const confirmation = await params.prisma.cleaningConfirmation.findFirst({
+    where: {
+      reservationId: params.reservationId,
+      status: "PENDING",
+    },
+    orderBy: {
+      createdAt: "desc",
+    },
+    select: {
+      id: true,
+      reservationId: true,
+      propertyId: true,
+      staffMemberId: true,
+      token: true,
+    },
+  });
+
+  if (!confirmation) {
+    return {
+      ok: true,
+      skipped: true,
+      sent: false,
+      reason: "pending_cleaning_confirmation_not_found",
+      reservationId: params.reservationId,
+      confirmationId: null,
+    };
+  }
+
+  const result = await sendCleaningConfirmationSms({
+    prisma: params.prisma,
+    confirmation,
+    now,
+  });
+
+  return {
+    ...result,
+    sent: result.ok && !result.skipped,
+    reservationId: confirmation.reservationId,
+    propertyId: confirmation.propertyId,
+    staffMemberId: confirmation.staffMemberId,
+    confirmationId: confirmation.id,
+  };
+}
+
 export async function processPendingCleaningConfirmations(
   prisma: PrismaClient,
   now: Date = new Date()
