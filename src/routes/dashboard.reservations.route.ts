@@ -93,12 +93,13 @@ dashboardReservationsRouter.get("/api/dashboard/reservations", requireAuth, asyn
   }
 
   if (search) {
-    where.OR = [
-      { guestName: { contains: search, mode: "insensitive" } },
-      { guestEmail: { contains: search, mode: "insensitive" } },
-      { roomName: { contains: search, mode: "insensitive" } },
-      { externalId: { contains: search, mode: "insensitive" } },
-    ];
+   where.OR = [
+  { reservationNumber: { contains: search, mode: "insensitive" } },
+  { guestName: { contains: search, mode: "insensitive" } },
+  { guestEmail: { contains: search, mode: "insensitive" } },
+  { roomName: { contains: search, mode: "insensitive" } },
+  { externalId: { contains: search, mode: "insensitive" } },
+];
   }
 
   const skip = (page - 1) * pageSize;
@@ -112,6 +113,7 @@ dashboardReservationsRouter.get("/api/dashboard/reservations", requireAuth, asyn
       take: pageSize,
       select: {
         id: true,
+        reservationNumber: true,
         guestName: true,
         guestEmail: true,
         guestPhone: true,
@@ -146,6 +148,7 @@ dashboardReservationsRouter.get("/api/dashboard/reservations", requireAuth, asyn
     total,
     items: rows.map((r) => ({
       id: r.id,
+      reservationNumber: r.reservationNumber,
       guestName: r.guestName,
       guestEmail: r.guestEmail ?? null,
       roomName: r.roomName ?? null,
@@ -186,6 +189,7 @@ dashboardReservationsRouter.get(
       },
       select: {
         id: true,
+        reservationNumber: true,
         guestName: true,
         guestEmail: true,
         roomName: true,
@@ -262,6 +266,7 @@ dashboardReservationsRouter.get(
 
     return res.json({
       id: reservation.id,
+      reservationNumber: reservation.reservationNumber,
       guestName: reservation.guestName,
       guestEmail: reservation.guestEmail ?? null,
       guestPhone: reservation.guestPhone ?? null,

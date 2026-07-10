@@ -256,6 +256,7 @@ async function sendDirectBookingHostNotificationSafe({
   propertyTimeZone?: string | null;
   reservation: {
     id: string;
+    reservationNumber: string;
     guestName: string | null;
     guestEmail: string | null;
     guestPhone: string | null;
@@ -287,6 +288,7 @@ async function sendDirectBookingHostNotificationSafe({
 for (const recipient of recipients) {
   const directBookingHostEmailInput = {
     to: recipient.email,
+    reservationNumber: reservation.reservationNumber,
     hostName: recipient.fullName,
     propertyName,
     guestName: reservation.guestName ?? "Guest",
@@ -305,7 +307,7 @@ for (const recipient of recipients) {
     prisma,
     type: "DIRECT_BOOKING_HOST_NOTIFICATION",
     to: recipient.email,
-    subject: `New direct booking - ${propertyName}`,
+    subject: `New Reservation #${reservation.reservationNumber} - ${propertyName}`,
     reservationId: reservation.id,
     propertyId,
     organizationId,
@@ -713,6 +715,7 @@ const updatedReservation = await prisma.reservation.update({
 },
   select: {
   id: true,
+  reservationNumber: true,
   guestToken: true,
   guestName: true,
   guestEmail: true,
@@ -735,6 +738,7 @@ const amountNumber = updatedReservation.totalAmount
 if (updatedReservation.guestEmail) {
   const directBookingGuestEmailInput = {
     to: updatedReservation.guestEmail,
+    reservationNumber: updatedReservation.reservationNumber,
     guestName: updatedReservation.guestName,
     propertyName: property.name,
     checkIn: updatedReservation.checkIn,
@@ -758,7 +762,7 @@ if (updatedReservation.guestEmail) {
     prisma,
     type: "DIRECT_BOOKING_GUEST_CONFIRMATION",
     to: updatedReservation.guestEmail,
-    subject: `Your Pin&Go reservation is confirmed - ${property.name}`,
+    subject: `Your Reservation #${updatedReservation.reservationNumber} is confirmed - ${property.name}`,
     reservationId: updatedReservation.id,
     propertyId: property.id,
     organizationId: property.organizationId,

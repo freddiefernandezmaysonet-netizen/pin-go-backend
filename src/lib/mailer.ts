@@ -25,6 +25,7 @@ type CancellationRefundRuleEmailInput = {
 
 type SendDirectBookingGuestConfirmationInput = {
   to: string;
+  reservationNumber: string;
   guestName?: string | null;
   propertyName: string;
   checkIn: Date;
@@ -42,6 +43,7 @@ type SendDirectBookingGuestConfirmationInput = {
 
 type SendDirectBookingHostNotificationInput = {
   to: string;
+  reservationNumber: string;
   hostName?: string | null;
   propertyName: string;
   guestName: string;
@@ -56,6 +58,7 @@ type SendDirectBookingHostNotificationInput = {
 
 type SendManualReservationGuestConfirmationInput = {
   to: string;
+  reservationNumber: string;
   guestName?: string | null;
   propertyName: string;
   checkIn: Date;
@@ -66,6 +69,7 @@ type SendManualReservationGuestConfirmationInput = {
 
 type SendDirectBookingGuestCancellationEmailInput = {
   to: string;
+  reservationNumber: string;
   guestName?: string | null;
   propertyName: string;
   checkIn: Date;
@@ -86,6 +90,7 @@ type SendDirectBookingGuestCancellationEmailInput = {
 
 type SendDirectBookingHostCancellationNotificationInput = {
   to: string;
+  reservationNumber: string;
   hostName?: string | null;
   propertyName: string;
   guestName: string;
@@ -574,6 +579,7 @@ export async function sendDirectBookingGuestConfirmation(
 ) {
   const {
     to,
+    reservationNumber,
     guestName,
     propertyName,
     checkIn,
@@ -589,6 +595,7 @@ export async function sendDirectBookingGuestConfirmation(
     refundRules,
   } = input;
 
+  const safeReservationNumber = escapeHtml(reservationNumber);
   const safeName = escapeHtml(guestName?.trim() || "there");
   const safePropertyName = escapeHtml(propertyName);
   const dateTimeZone = normalizePropertyTimeZone(propertyTimeZone);
@@ -622,15 +629,15 @@ export async function sendDirectBookingGuestConfirmation(
   const { data, error } = await resend.emails.send({
     from: getEmailFrom(),
     to,
-    subject: `Your Pin&Go reservation is confirmed - ${propertyName}`,
+    subject: `Your Reservation #${reservationNumber} is confirmed - ${propertyName}`,
     html: `
       <div style="font-family: Arial, sans-serif; color: #111827; line-height: 1.6; max-width: 680px; margin: 0 auto;">
-        <div style="background:linear-gradient(135deg,#020617,#1d4ed8);color:#ffffff;border-radius:18px;padding:24px;margin-bottom:20px;">
-          <p style="margin:0 0 8px;font-size:12px;letter-spacing:0.08em;text-transform:uppercase;font-weight:800;">Pin&Go Direct Booking</p>
-          <h1 style="margin:0;font-size:28px;line-height:1.15;">Your reservation is confirmed</h1>
-          <p style="margin:10px 0 0;color:#dbeafe;">Pin&Go has started the secure stay workflow for your reservation.</p>
-        </div>
-
+       <div style="background:linear-gradient(135deg,#020617,#1d4ed8);color:#ffffff;border-radius:18px;padding:24px;margin-bottom:20px;">
+  <p style="margin:0 0 8px;font-size:12px;letter-spacing:0.08em;text-transform:uppercase;font-weight:800;">Pin&Go Direct Booking</p>
+  <h1 style="margin:0;font-size:28px;line-height:1.15;">Your reservation is confirmed</h1>
+  <p style="margin:10px 0 0;color:#dbeafe;font-weight:700;">Reservation #${safeReservationNumber}</p>
+  <p style="margin:8px 0 0;color:#dbeafe;">Pin&Go has started the secure stay workflow for your reservation.</p>
+</div>
         <p>Hi ${safeName},</p>
 
         <p>
@@ -638,13 +645,13 @@ export async function sendDirectBookingGuestConfirmation(
         </p>
 
         <div style="background:#f9fafb;border:1px solid #e5e7eb;border-radius:14px;padding:16px;margin:20px 0;">
-          <p><strong>Property:</strong> ${safePropertyName}</p>
-          <p><strong>Check-in:</strong> ${formatBookingDate(checkIn, dateTimeZone)}</p>
-          <p><strong>Check-out:</strong> ${formatBookingDate(checkOut, dateTimeZone)}</p>
-          <p><strong>Total paid:</strong> ${formatBookingAmount(totalAmount, currency)}</p>
-          <p><strong>Payment status:</strong> Paid</p>
-        </div>
-
+  <p><strong>Reservation Number:</strong> #${safeReservationNumber}</p>
+  <p><strong>Property:</strong> ${safePropertyName}</p>
+  <p><strong>Check-in:</strong> ${formatBookingDate(checkIn, dateTimeZone)}</p>
+  <p><strong>Check-out:</strong> ${formatBookingDate(checkOut, dateTimeZone)}</p>
+  <p><strong>Total paid:</strong> ${formatBookingAmount(totalAmount, currency)}</p>
+  <p><strong>Payment status:</strong> Paid</p>
+</div>
         ${manageReservationBlock}
 
         ${cancellationPolicyBlock}
@@ -668,10 +675,11 @@ export async function sendDirectBookingGuestConfirmation(
 
         <hr style="border: none; border-top: 1px solid #e5e7eb; margin: 28px 0;" />
 
-        <h2 style="margin-bottom: 8px;">Tu reservación está confirmada</h2>
+       <h2 style="margin-bottom: 8px;">Tu reservaciÃ³n estÃ¡ confirmada</h2>
 
-        <p>Hola ${safeName},</p>
+<p><strong>Número de reservación:</strong> #${safeReservationNumber}</p>
 
+<p>Hola ${safeName},</p>
         <p>
           Tu reservación para <strong>${safePropertyName}</strong> ha sido confirmada.
         </p>
@@ -712,6 +720,7 @@ export async function sendManualReservationGuestConfirmation(
 ) {
   const {
     to,
+    reservationNumber,
     guestName,
     propertyName,
     checkIn,
@@ -720,6 +729,7 @@ export async function sendManualReservationGuestConfirmation(
     manageReservationUrl,
   } = input;
 
+  const safeReservationNumber = escapeHtml(reservationNumber);
   const safeName = escapeHtml(guestName?.trim() || "there");
   const safePropertyName = escapeHtml(propertyName);
   const dateTimeZone = normalizePropertyTimeZone(propertyTimeZone);
@@ -744,27 +754,27 @@ export async function sendManualReservationGuestConfirmation(
   const { data, error } = await resend.emails.send({
     from: getEmailFrom(),
     to,
-    subject: `Your Pin&Go reservation is confirmed - ${propertyName}`,
+    subject: `Your Reservation #${reservationNumber} is confirmed - ${propertyName}`,
     html: `
       <div style="font-family: Arial, sans-serif; color: #111827; line-height: 1.6; max-width: 680px; margin: 0 auto;">
-        <div style="background:linear-gradient(135deg,#020617,#1d4ed8);color:#ffffff;border-radius:18px;padding:24px;margin-bottom:20px;">
-          <p style="margin:0 0 8px;font-size:12px;letter-spacing:0.08em;text-transform:uppercase;font-weight:800;">Pin&Go Reservation</p>
-          <h1 style="margin:0;font-size:28px;line-height:1.15;">Your reservation is confirmed</h1>
-          <p style="margin:10px 0 0;color:#dbeafe;">Pin&Go has started the secure stay workflow for your reservation.</p>
-        </div>
-
+       <div style="background:linear-gradient(135deg,#020617,#1d4ed8);color:#ffffff;border-radius:18px;padding:24px;margin-bottom:20px;">
+  <p style="margin:0 0 8px;font-size:12px;letter-spacing:0.08em;text-transform:uppercase;font-weight:800;">Pin&Go Reservation</p>
+  <h1 style="margin:0;font-size:28px;line-height:1.15;">Your reservation is confirmed</h1>
+  <p style="margin:10px 0 0;color:#dbeafe;font-weight:700;">Reservation #${safeReservationNumber}</p>
+  <p style="margin:8px 0 0;color:#dbeafe;">Pin&Go has started the secure stay workflow for your reservation.</p>
+</div>
         <p>Hi ${safeName},</p>
 
         <p>
           Your reservation for <strong>${safePropertyName}</strong> has been confirmed.
         </p>
 
-        <div style="background:#f9fafb;border:1px solid #e5e7eb;border-radius:14px;padding:16px;margin:20px 0;">
-          <p><strong>Property:</strong> ${safePropertyName}</p>
-          <p><strong>Check-in:</strong> ${formatBookingDate(checkIn, dateTimeZone)}</p>
-          <p><strong>Check-out:</strong> ${formatBookingDate(checkOut, dateTimeZone)}</p>
-        </div>
-
+       <div style="background:#f9fafb;border:1px solid #e5e7eb;border-radius:14px;padding:16px;margin:20px 0;">
+  <p><strong>Reservation Number:</strong> #${safeReservationNumber}</p>
+  <p><strong>Property:</strong> ${safePropertyName}</p>
+  <p><strong>Check-in:</strong> ${formatBookingDate(checkIn, dateTimeZone)}</p>
+  <p><strong>Check-out:</strong> ${formatBookingDate(checkOut, dateTimeZone)}</p>
+</div>
         ${manageReservationBlock}
 
         <div style="background:#f0fdf4;border:1px solid #bbf7d0;border-radius:14px;padding:16px;margin:20px 0;color:#14532d;">
@@ -786,10 +796,11 @@ export async function sendManualReservationGuestConfirmation(
 
         <hr style="border: none; border-top: 1px solid #e5e7eb; margin: 28px 0;" />
 
-        <h2 style="margin-bottom: 8px;">Tu reservación está confirmada</h2>
+       <h2 style="margin-bottom: 8px;">Tu reservación está confirmada</h2>
 
-        <p>Hola ${safeName},</p>
+<p><strong>Número de reservación:</strong> #${safeReservationNumber}</p>
 
+<p>Hola ${safeName},</p>
         <p>
           Tu reservación para <strong>${safePropertyName}</strong> ha sido confirmada.
         </p>
@@ -830,6 +841,7 @@ export async function sendDirectBookingHostNotification(
 ) {
   const {
     to,
+    reservationNumber,
     hostName,
     propertyName,
     guestName,
@@ -842,6 +854,7 @@ export async function sendDirectBookingHostNotification(
     currency,
   } = input;
 
+  const safeReservationNumber = escapeHtml(reservationNumber);
   const safeHostName = escapeHtml(hostName?.trim() || "there");
   const safePropertyName = escapeHtml(propertyName);
   const safeGuestName = escapeHtml(guestName);
@@ -864,7 +877,7 @@ export async function sendDirectBookingHostNotification(
   const { data, error } = await resend.emails.send({
     from: getEmailFrom(),
     to,
-    subject: `New direct booking - ${propertyName}`,
+    subject: `New Reservation #${reservationNumber} - ${propertyName}`,
     html: `
       <div style="font-family: Arial, sans-serif; color: #111827; line-height: 1.6;">
         <h2 style="margin-bottom: 8px;">New direct booking received</h2>
@@ -876,7 +889,8 @@ export async function sendDirectBookingHostNotification(
         </p>
 
         <div style="background:#f9fafb;border:1px solid #e5e7eb;border-radius:12px;padding:16px;margin:20px 0;">
-          <p><strong>Guest:</strong> ${safeGuestName}</p>
+  <p><strong>Reservation Number:</strong> #${safeReservationNumber}</p>
+  <p><strong>Guest:</strong> ${safeGuestName}</p>
           <p><strong>Email:</strong> ${escapeHtml(guestEmail || "Not provided")}</p>
           <p><strong>Phone:</strong> ${escapeHtml(guestPhone || "Not provided")}</p>
           <p><strong>Check-in:</strong> ${formatBookingDate(checkIn, dateTimeZone)}</p>
@@ -914,6 +928,7 @@ export async function sendDirectBookingGuestCancellationEmail(
 ) {
   const {
     to,
+    reservationNumber,
     guestName,
     propertyName,
     checkIn,
@@ -932,6 +947,7 @@ export async function sendDirectBookingGuestCancellationEmail(
     manageReservationUrl,
   } = input;
 
+  const safeReservationNumber = escapeHtml(reservationNumber);
   const safeName = escapeHtml(guestName?.trim() || "there");
   const safePropertyName = escapeHtml(propertyName);
   const dateTimeZone = normalizePropertyTimeZone(propertyTimeZone);
@@ -964,15 +980,15 @@ export async function sendDirectBookingGuestCancellationEmail(
   const { data, error } = await resend.emails.send({
     from: getEmailFrom(),
     to,
-    subject: `${title} - ${propertyName}`,
+    subject: `${title} - Reservation #${reservationNumber} - ${propertyName}`,
     html: `
       <div style="font-family: Arial, sans-serif; color: #111827; line-height: 1.6; max-width: 680px; margin: 0 auto;">
-        <div style="background:linear-gradient(135deg,#020617,#1d4ed8);color:#ffffff;border-radius:18px;padding:24px;margin-bottom:20px;">
-          <p style="margin:0 0 8px;font-size:12px;letter-spacing:0.08em;text-transform:uppercase;font-weight:800;">Pin&Go Cancellation Update</p>
-          <h1 style="margin:0;font-size:28px;line-height:1.15;">${escapeHtml(title)}</h1>
-          <p style="margin:10px 0 0;color:#dbeafe;">${escapeHtml(body)}</p>
-        </div>
-
+       <div style="background:linear-gradient(135deg,#020617,#1d4ed8);color:#ffffff;border-radius:18px;padding:24px;margin-bottom:20px;">
+  <p style="margin:0 0 8px;font-size:12px;letter-spacing:0.08em;text-transform:uppercase;font-weight:800;">Pin&Go Cancellation Update</p>
+  <h1 style="margin:0;font-size:28px;line-height:1.15;">${escapeHtml(title)}</h1>
+  <p style="margin:10px 0 0;color:#dbeafe;font-weight:700;">Reservation #${safeReservationNumber}</p>
+  <p style="margin:8px 0 0;color:#dbeafe;">${escapeHtml(body)}</p>
+</div>
         <p>Hi ${safeName},</p>
 
         <p>
@@ -980,7 +996,8 @@ export async function sendDirectBookingGuestCancellationEmail(
         </p>
 
         <div style="background:#f9fafb;border:1px solid #e5e7eb;border-radius:14px;padding:16px;margin:20px 0;">
-          <p><strong>Property:</strong> ${safePropertyName}</p>
+  <p><strong>Reservation Number:</strong> #${safeReservationNumber}</p>
+  <p><strong>Property:</strong> ${safePropertyName}</p>
           <p><strong>Check-in:</strong> ${formatBookingDate(checkIn, dateTimeZone)}</p>
           <p><strong>Check-out:</strong> ${formatBookingDate(checkOut, dateTimeZone)}</p>
           <p><strong>Cancelled at:</strong> ${formatBookingDateTime(cancelledAt, dateTimeZone)}</p>
@@ -1025,10 +1042,11 @@ export async function sendDirectBookingGuestCancellationEmail(
 
         <hr style="border: none; border-top: 1px solid #e5e7eb; margin: 28px 0;" />
 
-        <h2 style="margin-bottom: 8px;">Actualización de cancelación</h2>
+       <h2 style="margin-bottom: 8px;">Actualización de cancelación</h2>
 
-        <p>Hola ${safeName},</p>
+<p><strong>Número de reservación:</strong> #${safeReservationNumber}</p>
 
+<p>Hola ${safeName},</p>
         <p>
           Tu reservación para <strong>${safePropertyName}</strong> fue cancelada.
         </p>
@@ -1064,6 +1082,7 @@ export async function sendDirectBookingHostCancellationNotification(
 ) {
   const {
     to,
+    reservationNumber,
     hostName,
     propertyName,
     guestName,
@@ -1085,6 +1104,7 @@ export async function sendDirectBookingHostCancellationNotification(
     hostPayoutStatus,
   } = input;
 
+  const safeReservationNumber = escapeHtml(reservationNumber);
   const safeHostName = escapeHtml(hostName?.trim() || "there");
   const safePropertyName = escapeHtml(propertyName);
   const safeGuestName = escapeHtml(guestName);
@@ -1108,19 +1128,23 @@ export async function sendDirectBookingHostCancellationNotification(
   const { data, error } = await resend.emails.send({
     from: getEmailFrom(),
     to,
-    subject: `Reservation cancelled - ${propertyName}`,
+    subject: `Reservation #${reservationNumber} cancelled - ${propertyName}`,
     html: `
       <div style="font-family: Arial, sans-serif; color: #111827; line-height: 1.6; max-width: 680px; margin: 0 auto;">
         <h2 style="margin-bottom: 8px;">Reservation cancelled</h2>
 
-        <p>Hi ${safeHostName},</p>
+<p style="font-weight:700;color:#1d4ed8;">
+  Reservation #${safeReservationNumber}
+</p>
 
+<p>Hi ${safeHostName},</p>
         <p>
           Pin&Go recorded a guest cancellation for <strong>${safePropertyName}</strong>.
         </p>
 
-        <div style="background:#f9fafb;border:1px solid #e5e7eb;border-radius:14px;padding:16px;margin:20px 0;">
-          <p><strong>Guest:</strong> ${safeGuestName}</p>
+       <div style="background:#f9fafb;border:1px solid #e5e7eb;border-radius:14px;padding:16px;margin:20px 0;">
+  <p><strong>Reservation Number:</strong> #${safeReservationNumber}</p>
+  <p><strong>Guest:</strong> ${safeGuestName}</p>
           <p><strong>Email:</strong> ${escapeHtml(guestEmail || "Not provided")}</p>
           <p><strong>Phone:</strong> ${escapeHtml(guestPhone || "Not provided")}</p>
           <p><strong>Check-in:</strong> ${formatBookingDate(checkIn, dateTimeZone)}</p>

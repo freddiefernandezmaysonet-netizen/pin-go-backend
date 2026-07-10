@@ -1146,6 +1146,7 @@ dashboardPropertiesRouter.post(
           },
           select: {
             id: true,
+            reservationNumber: true,
             guestName: true,
             guestEmail: true,
             checkIn: true,
@@ -1176,6 +1177,7 @@ dashboardPropertiesRouter.post(
       if (manualReservationForEmail?.guestEmail) {
         const manualReservationGuestEmailInput = {
           to: manualReservationForEmail.guestEmail,
+          reservationNumber: manualReservationForEmail.reservationNumber,
           guestName: manualReservationForEmail.guestName,
           propertyName: manualReservationForEmail.property.name,
           checkIn: manualReservationForEmail.checkIn,
@@ -1189,7 +1191,7 @@ dashboardPropertiesRouter.post(
             prisma,
             type: "MANUAL_RESERVATION_GUEST_CONFIRMATION",
             to: manualReservationForEmail.guestEmail,
-            subject: `Your Pin&Go reservation is confirmed - ${manualReservationForEmail.property.name}`,
+            subject: `Your Reservation #${manualReservationForEmail.reservationNumber} is confirmed - ${manualReservationForEmail.property.name}`,
             reservationId: manualReservationForEmail.id,
             propertyId: property.id,
             organizationId: orgId,
@@ -1805,20 +1807,75 @@ dashboardPropertiesRouter.get(
         auditEntriesByDecisionId.values()
       );
 
-      const baseSnapshot =
-        createMissionControlSnapshotFromAuditEntries({
-          entityId: property.id,
-          auditEntries,
-          generatedAt: new Date(),
-        });
+     const baseSnapshot =
+  createMissionControlSnapshotFromAuditEntries({
+    entityId: property.id,
+    auditEntries,
+    generatedAt: new Date(),
+  });
 
-      const snapshot = {
-        ...baseSnapshot,
-        recentAuditEntries:
-          persistedActivityAuditEntries.length > 0
-            ? persistedActivityAuditEntries
-            : baseSnapshot.recentAuditEntries,
-      };
+const recommendedActionReservationIds = Array.from(
+  new Set(
+    (baseSnapshot.recommendedActions ?? [])
+      .map((action) => String(action.reservationId ?? "").trim())
+      .filter(Boolean)
+  )
+);
+
+const recommendedActionReservations =
+  recommendedActionReservationIds.length > 0
+    ? await prisma.reservation.findMany({
+        where: {
+          id: {
+            in: recommendedActionReservationIds,
+          },
+          propertyId: property.id,
+        },
+        select: {
+          id: true,
+          reservationNumber: true,
+          guestName: true,
+        },
+      })
+    : [];
+
+const reservationById = new Map(
+  recommendedActionReservations.map((reservation) => [
+    reservation.id,
+    reservation,
+  ])
+);
+
+const enrichedRecommendedActions = (
+  baseSnapshot.recommendedActions ?? []
+).map((action) => {
+  const reservationId = String(action.reservationId ?? "").trim();
+
+  const linkedReservation = reservationId
+    ? reservationById.get(reservationId)
+    : undefined;
+
+  return {
+    ...action,
+    reservationNumber:
+      linkedReservation?.reservationNumber ??
+      action.reservationNumber ??
+      null,
+    guestName:
+      linkedReservation?.guestName ??
+      action.guestName ??
+      null,
+  };
+});
+
+const snapshot = {
+  ...baseSnapshot,
+  recommendedActions: enrichedRecommendedActions,
+  recentAuditEntries:
+    persistedActivityAuditEntries.length > 0
+      ? persistedActivityAuditEntries
+      : baseSnapshot.recentAuditEntries,
+};
       return res.json({
         ok: true,
         item: snapshot,

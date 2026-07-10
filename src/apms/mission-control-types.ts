@@ -96,8 +96,45 @@ export interface MissionControlAction {
    * Whether this requires host intervention.
    */
   requiresHumanAction: boolean;
-}
 
+  /**
+   * Internal Prisma reservation identifier.
+   *
+   * This value may be used internally to open the Reservation Detail page,
+   * but it must never be displayed to hosts or guests.
+   */
+  reservationId?: string | null;
+
+  /**
+   * Official host-facing and guest-facing reservation reference.
+   */
+  reservationNumber?: string | null;
+
+  /**
+   * Guest related to the operational issue.
+   */
+  guestName?: string | null;
+
+  /**
+   * Host-friendly explanation of the exact operational problem.
+   */
+  issue?: string | null;
+
+  /**
+   * Time of the audit signal that generated or updated the action.
+   */
+  lastSignalAt?: Date | string | null;
+
+  /**
+   * Audit decision that produced this recommended action.
+   */
+  decisionId?: string | null;
+
+  /**
+   * Whether Pin&Go can attempt to resolve the issue automatically.
+   */
+  canAutoResolve?: boolean;
+}
 export interface MissionControlSnapshot {
   /**
    * Property, reservation or organization being summarized.

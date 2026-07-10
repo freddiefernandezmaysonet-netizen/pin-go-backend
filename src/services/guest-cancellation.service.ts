@@ -190,8 +190,9 @@ async function sendGuestCancellationEmailSafe({
   });
 
   try {
-    return await sendDirectBookingGuestCancellationEmail({
+      return await sendDirectBookingGuestCancellationEmail({
       to: reservation.guestEmail,
+      reservationNumber: reservation.reservationNumber,
       guestName: reservation.guestName,
       propertyName: reservation.property?.name ?? reservation.roomName ?? "Your stay",
       checkIn: reservation.checkIn,
@@ -334,9 +335,10 @@ async function sendHostCancellationEmailSafe({
 
   for (const recipient of recipients) {
     try {
-      const result = await sendDirectBookingHostCancellationNotification({
-        to: recipient.email,
-        hostName: recipient.fullName,
+       const result = await sendDirectBookingHostCancellationNotification({
+         to: recipient.email,
+         reservationNumber: reservation.reservationNumber,
+         hostName: recipient.fullName,
         propertyName:
           reservation.property?.name ?? reservation.roomName ?? "Your property",
         guestName: reservation.guestName ?? "Guest",

@@ -144,10 +144,101 @@ function getRecommendedActionSortRankV1(action: RecommendedActionV1) {
   return priorityRank * 10 + engineRank;
 }
 
+function getAuditMetadataStringV2(entry: AuditEntry, key: string) {
+  const value = getAuditMetadataValueV1(entry, key);
+  const text = String(value ?? "").trim();
+
+  return text || null;
+}
+
+function getAuditMetadataBooleanV2(entry: AuditEntry, key: string) {
+  const value = getAuditMetadataValueV1(entry, key);
+
+  if (typeof value === "boolean") {
+    return value;
+  }
+
+  const normalizedValue = String(value ?? "").trim().toLowerCase();
+
+  if (normalizedValue === "true") {
+    return true;
+  }
+
+  if (normalizedValue === "false") {
+    return false;
+  }
+
+  return undefined;
+}
+
+function getRecommendedActionReservationIdV2(entry: AuditEntry) {
+  const metadataReservationId = getAuditMetadataStringV2(
+    entry,
+    "reservationId"
+  );
+
+  if (metadataReservationId) {
+    return metadataReservationId;
+  }
+
+  if (String(entry.entityType ?? "").toUpperCase() === "RESERVATION") {
+    const entityId = String(entry.entityId ?? "").trim();
+
+    return entityId || null;
+  }
+
+  return null;
+}
+
+function getRecommendedActionCanAutoResolveV2(entry: AuditEntry) {
+  return (
+    getAuditMetadataBooleanV2(entry, "canAutoResolve") ??
+    getAuditMetadataBooleanV2(entry, "autoRepairAvailable") ??
+    getAuditMetadataBooleanV2(entry, "autoResolvable")
+  );
+}
+
 function getHostFriendlyActionV1(entry: AuditEntry): RecommendedActionV1 {
   const engine = String(entry.engine ?? "MissionControl");
   const reason = normalizeAuditValueV1(entry.reason);
   const priority = getRecommendedActionPriorityV1(entry);
+
+  const reservationId = getRecommendedActionReservationIdV2(entry);
+  const reservationNumber = getAuditMetadataStringV2(
+    entry,
+    "reservationNumber"
+  );
+  const guestName = getAuditMetadataStringV2(entry, "guestName");
+  const canAutoResolve = getRecommendedActionCanAutoResolveV2(entry);
+
+  const lastSignalAt = entry.completedAt ?? entry.startedAt;
+  const decisionId = String(entry.decisionId ?? "").trim() || null;
+
+  function createAction({
+    title,
+    description,
+    requiresHumanAction = true,
+  }: {
+    title: string;
+    description: string;
+    requiresHumanAction?: boolean;
+  }): RecommendedActionV1 {
+    return {
+      title,
+      description,
+      engine,
+      priority,
+      requiresHumanAction,
+
+      reservationId,
+      reservationNumber,
+      guestName,
+      issue: description,
+      lastSignalAt,
+      decisionId,
+      canAutoResolve,
+    };
+  }
 
   if (engine === "Distribution") {
     let description =
@@ -170,13 +261,10 @@ function getHostFriendlyActionV1(entry: AuditEntry): RecommendedActionV1 {
         "Pin&Go could not confirm the channel sync after a holiday pricing update. Review the Channex connection and retry sync.";
     }
 
-    return {
+    return createAction({
       title: "Channel sync needs review",
       description,
-      engine,
-      priority,
-      requiresHumanAction: true,
-    };
+    });
   }
 
   if (engine === "Access") {
@@ -184,13 +272,10 @@ function getHostFriendlyActionV1(entry: AuditEntry): RecommendedActionV1 {
       ? "Pin&Go could not find an active lock for this reservation. Assign an active lock and verify guest access."
       : "Pin&Go could not confirm guest access for this reservation. Review the lock and access setup.";
 
-    return {
+    return createAction({
       title: "Guest access needs review",
       description,
-      engine,
-      priority,
-      requiresHumanAction: true,
-    };
+    });
   }
 
   if (engine === "Cleaning") {
@@ -198,69 +283,68 @@ function getHostFriendlyActionV1(entry: AuditEntry): RecommendedActionV1 {
       ? "Pin&Go could not assign a cleaner for this reservation. Assign a cleaner and verify the cleaning confirmation."
       : "Pin&Go could not confirm the cleaning setup for this reservation. Review the cleaner assignment and confirmation.";
 
-    return {
+    return createAction({
       title: "Cleaning schedule needs review",
       description,
-      engine,
-      priority,
-      requiresHumanAction: true,
-    };
+    });
   }
 
   if (engine === "Messaging") {
-    return {
+    const description =
+      "Pin&Go could not confirm message delivery. Review guest or staff communication and retry if needed.";
+
+    return createAction({
       title: "Guest message needs review",
-      description:
-        "Pin&Go could not confirm message delivery. Review guest or staff communication and retry if needed.",
-      engine,
-      priority,
-      requiresHumanAction: true,
-    };
+      description,
+    });
   }
 
   if (engine === "Revenue") {
-    return {
+    const description =
+      "Pin&Go detected a pricing condition that needs review. Check the property pricing limits and revenue settings.";
+
+    return createAction({
       title: "Pricing guardrail needs review",
-      description:
-        "Pin&Go detected a pricing condition that needs review. Check the property pricing limits and revenue settings.",
-      engine,
-      priority,
-      requiresHumanAction: true,
-    };
+      description,
+    });
   }
 
   if (engine === "Reservation") {
-    return {
+    const description =
+      "Pin&Go detected a reservation issue that needs review. Check reservation details, payment state, access, and operational status.";
+
+    return createAction({
       title: "Reservation needs review",
-      description:
-        "Pin&Go detected a reservation issue that needs review. Check reservation details, payment state, access, and operational status.",
-      engine,
-      priority,
-      requiresHumanAction: true,
-    };
+      description,
+    });
   }
 
-  return {
+  const description =
+    "Pin&Go detected an operational issue that needs review in Mission Control.";
+
+  return createAction({
     title: "APMS operation needs review",
-    description:
-      "Pin&Go detected an operational issue that needs review in Mission Control.",
-    engine,
-    priority,
-    requiresHumanAction: true,
-  };
+    description,
+  });
 }
 
 function getRecommendedActionDedupKeyV1(
   action: RecommendedActionV1,
   entry: AuditEntry
 ) {
+  const operationalReference =
+    action.reservationNumber ??
+    action.reservationId ??
+    String(entry.entityId ?? "").trim() ??
+    "property";
+
   return [
     action.engine,
+    operationalReference || "property",
     action.title.trim().toLowerCase(),
     normalizeAuditValueV1(entry.reason),
   ].join(":");
 }
-
 function buildRecommendedActionsV1(
   auditEntries: AuditEntry[]
 ): MissionControlAction[] {
