@@ -416,6 +416,12 @@ function buildAuditEntry(input: {
   );
   const passedChecks = input.checks.filter((check) => check.status === "PASS");
 
+const primaryIssueCheck =
+  failedChecks.find((check) => check.critical) ??
+  failedChecks[0] ??
+  warningChecks[0] ??
+  null;
+
   const decisions = input.checks.map(toAuditDecisionTrace);
 
   return {
@@ -442,6 +448,24 @@ function buildAuditEntry(input: {
       propertyId: input.propertyId,
       reservationId: input.reservationId,
       completeFlowStatus: input.completeFlowStatus,
+      
+      primaryIssueRule: primaryIssueCheck?.rule ?? null,
+      primaryIssueTitle: primaryIssueCheck?.label ?? null,
+      primaryIssue:
+      primaryIssueCheck?.metadata?.issue ??
+      primaryIssueCheck?.recommendedAction ??
+      null,
+      primaryOperationalImpact:
+      primaryIssueCheck?.metadata?.operationalImpact ?? null,
+      primaryRecommendedAction:
+      primaryIssueCheck?.recommendedAction ?? null,
+      primaryIssueEngine:
+        String(primaryIssueCheck?.rule ?? "").startsWith("CLEANING_")
+          ? "Cleaning"
+          : "Reservation",
+      canAutoResolve:
+        primaryIssueCheck?.metadata?.canAutoResolve ?? false,
+      
       passedChecks: passedChecks.map((check) => check.rule),
       warningChecks: warningChecks.map((check) => check.rule),
       failedChecks: failedChecks.map((check) => check.rule),
@@ -1511,6 +1535,71 @@ const hasHostEmailEvidence = hasMessageEvidence({
 
   const cleaningConfirmationDeclined =
     cleaningConfirmationStatus === "DECLINED";
+const cleaningConfirmationIssue =
+  cleaningConfirmationPending
+    ? {
+        issueCode: "CLEANING_CONFIRMATION_PENDING",
+        issueTitle: "Cleaning confirmation pending",
+        issue:
+          "The assigned cleaner has not confirmed availability for this turnover.",
+        operationalImpact:
+          "Cleaner access has not been created because confirmation is still pending.",
+        recommendedAction:
+          "Contact the assigned cleaner. If the cleaner cannot accept the turnover, assign a backup cleaner.",
+      }
+    : cleaningConfirmationDeclined
+    ? {
+        issueCode: "CLEANING_CONFIRMATION_DECLINED",
+        issueTitle: "Cleaner declined the turnover",
+        issue:
+          "The assigned cleaner declined the cleaning confirmation for this reservation.",
+        operationalImpact:
+          "The turnover currently has no confirmed cleaner and may not be completed before the next guest arrives.",
+        recommendedAction:
+          "Assign a backup cleaner and verify the new cleaner's confirmation.",
+      }
+    : null;
+
+addCheck(checks, {
+  rule: cleaningConfirmationPending
+    ? "CLEANING_CONFIRMATION_PENDING"
+    : cleaningConfirmationDeclined
+    ? "CLEANING_CONFIRMATION_DECLINED"
+    : "CLEANING_CONFIRMATION_READY",
+  label: cleaningConfirmationPending
+    ? "Cleaning Confirmation Pending"
+    : cleaningConfirmationDeclined
+    ? "Cleaning Confirmation Declined"
+    : "Cleaning Confirmation Ready",
+  status:
+    cleaningConfirmationPending
+      ? "WARNING"
+      : cleaningConfirmationDeclined
+      ? "FAIL"
+      : "PASS",
+  critical: false,
+  required: true,
+  recommendedAction:
+    cleaningConfirmationIssue?.recommendedAction,
+  metadata: {
+    issueCode: cleaningConfirmationIssue?.issueCode ?? null,
+    issueTitle: cleaningConfirmationIssue?.issueTitle ?? null,
+    issue: cleaningConfirmationIssue?.issue ?? null,
+    operationalImpact:
+      cleaningConfirmationIssue?.operationalImpact ?? null,
+    recommendedAction:
+      cleaningConfirmationIssue?.recommendedAction ?? null,
+    cleaningConfirmationId:
+      latestCleaningConfirmation?.id ?? null,
+    cleaningConfirmationStatus:
+      latestCleaningConfirmation?.status ?? null,
+    staffMemberId:
+      latestCleaningConfirmation?.staffMemberId ??
+      latestStaffAssignment?.staffMemberId ??
+      null,
+    canAutoResolve: false,
+  },
+});
 
  const latestCleaningNfcAssignment = cleaningNfcAssignments.find(
   (assignment) =>

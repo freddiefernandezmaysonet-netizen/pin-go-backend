@@ -199,20 +199,73 @@ function getRecommendedActionCanAutoResolveV2(entry: AuditEntry) {
 }
 
 function getHostFriendlyActionV1(entry: AuditEntry): RecommendedActionV1 {
-  const engine = String(entry.engine ?? "MissionControl");
-  const reason = normalizeAuditValueV1(entry.reason);
-  const priority = getRecommendedActionPriorityV1(entry);
+  const reservationId =
+    getRecommendedActionReservationIdV2(entry);
 
-  const reservationId = getRecommendedActionReservationIdV2(entry);
-  const reservationNumber = getAuditMetadataStringV2(
-    entry,
-    "reservationNumber"
+  const reservationNumber =
+    getAuditMetadataStringV2(
+      entry,
+      "reservationNumber"
+    );
+
+  const guestName =
+    getAuditMetadataStringV2(
+      entry,
+      "guestName"
+    );
+
+  const primaryIssueTitle =
+    getAuditMetadataStringV2(
+      entry,
+      "primaryIssueTitle"
+    );
+
+  const primaryIssue =
+    getAuditMetadataStringV2(
+      entry,
+      "primaryIssue"
+    );
+
+  const primaryOperationalImpact =
+    getAuditMetadataStringV2(
+      entry,
+      "primaryOperationalImpact"
+    );
+
+  const primaryRecommendedAction =
+    getAuditMetadataStringV2(
+      entry,
+      "primaryRecommendedAction"
+    );
+
+  const primaryIssueEngine =
+    getAuditMetadataStringV2(
+      entry,
+      "primaryIssueEngine"
+    );
+
+  const canAutoResolve =
+    getRecommendedActionCanAutoResolveV2(entry);
+
+  const engine = String(
+    primaryIssueEngine ??
+      entry.engine ??
+      "MissionControl"
   );
-  const guestName = getAuditMetadataStringV2(entry, "guestName");
-  const canAutoResolve = getRecommendedActionCanAutoResolveV2(entry);
 
-  const lastSignalAt = entry.completedAt ?? entry.startedAt;
-  const decisionId = String(entry.decisionId ?? "").trim() || null;
+  const reason =
+    normalizeAuditValueV1(entry.reason);
+
+  const priority =
+    getRecommendedActionPriorityV1(entry);
+
+  const lastSignalAt =
+    entry.completedAt ??
+    entry.startedAt;
+
+  const decisionId =
+    String(entry.decisionId ?? "").trim() ||
+    null;
 
   function createAction({
     title,
@@ -224,8 +277,14 @@ function getHostFriendlyActionV1(entry: AuditEntry): RecommendedActionV1 {
     requiresHumanAction?: boolean;
   }): RecommendedActionV1 {
     return {
-      title,
-      description,
+      title:
+        primaryIssueTitle ??
+        title,
+
+      description:
+        primaryOperationalImpact ??
+        description,
+
       engine,
       priority,
       requiresHumanAction,
@@ -233,11 +292,32 @@ function getHostFriendlyActionV1(entry: AuditEntry): RecommendedActionV1 {
       reservationId,
       reservationNumber,
       guestName,
-      issue: description,
+
+      issue:
+        primaryIssue ??
+        description,
+
+      recommendedAction:
+        primaryRecommendedAction ??
+        null,
+
       lastSignalAt,
       decisionId,
       canAutoResolve,
     };
+  }
+
+  if (primaryIssueTitle || primaryIssue) {
+    return createAction({
+      title:
+        primaryIssueTitle ??
+        "Operational issue needs review",
+
+      description:
+        primaryOperationalImpact ??
+        primaryIssue ??
+        "Pin&Go detected an operational issue that needs review.",
+    });
   }
 
   if (engine === "Distribution") {
@@ -268,9 +348,10 @@ function getHostFriendlyActionV1(entry: AuditEntry): RecommendedActionV1 {
   }
 
   if (engine === "Access") {
-    const description = reason.includes("ACTIVE_LOCK_MISSING")
-      ? "Pin&Go could not find an active lock for this reservation. Assign an active lock and verify guest access."
-      : "Pin&Go could not confirm guest access for this reservation. Review the lock and access setup.";
+    const description =
+      reason.includes("ACTIVE_LOCK_MISSING")
+        ? "Pin&Go could not find an active lock for this reservation. Assign an active lock and verify guest access."
+        : "Pin&Go could not confirm guest access for this reservation. Review the lock and access setup.";
 
     return createAction({
       title: "Guest access needs review",
@@ -279,9 +360,10 @@ function getHostFriendlyActionV1(entry: AuditEntry): RecommendedActionV1 {
   }
 
   if (engine === "Cleaning") {
-    const description = reason.includes("CLEANING_STAFF_MISSING")
-      ? "Pin&Go could not assign a cleaner for this reservation. Assign a cleaner and verify the cleaning confirmation."
-      : "Pin&Go could not confirm the cleaning setup for this reservation. Review the cleaner assignment and confirmation.";
+    const description =
+      reason.includes("CLEANING_STAFF_MISSING")
+        ? "Pin&Go could not assign a cleaner for this reservation. Assign a cleaner and verify the cleaning confirmation."
+        : "Pin&Go could not confirm the cleaning setup for this reservation. Review the cleaner assignment and confirmation.";
 
     return createAction({
       title: "Cleaning schedule needs review",
@@ -290,41 +372,33 @@ function getHostFriendlyActionV1(entry: AuditEntry): RecommendedActionV1 {
   }
 
   if (engine === "Messaging") {
-    const description =
-      "Pin&Go could not confirm message delivery. Review guest or staff communication and retry if needed.";
-
     return createAction({
       title: "Guest message needs review",
-      description,
+      description:
+        "Pin&Go could not confirm message delivery. Review guest or staff communication and retry if needed.",
     });
   }
 
   if (engine === "Revenue") {
-    const description =
-      "Pin&Go detected a pricing condition that needs review. Check the property pricing limits and revenue settings.";
-
     return createAction({
       title: "Pricing guardrail needs review",
-      description,
+      description:
+        "Pin&Go detected a pricing condition that needs review. Check the property pricing limits and revenue settings.",
     });
   }
 
   if (engine === "Reservation") {
-    const description =
-      "Pin&Go detected a reservation issue that needs review. Check reservation details, payment state, access, and operational status.";
-
     return createAction({
       title: "Reservation needs review",
-      description,
+      description:
+        "Pin&Go detected a reservation issue that needs review. Check reservation details, payment state, access, and operational status.",
     });
   }
 
-  const description =
-    "Pin&Go detected an operational issue that needs review in Mission Control.";
-
   return createAction({
     title: "APMS operation needs review",
-    description,
+    description:
+      "Pin&Go detected an operational issue that needs review in Mission Control.",
   });
 }
 
