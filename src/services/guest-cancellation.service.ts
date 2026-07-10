@@ -564,7 +564,7 @@ function serializeGuestCancellationPreview({
 
   return {
     reservation: {
-      id: reservation.id,
+      reservationNumber: reservation.reservationNumber,
       propertyName: reservation.property?.name ?? reservation.roomName,
       guestName: reservation.guestName,
       guestEmail: reservation.guestEmail,
