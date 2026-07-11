@@ -19,6 +19,8 @@ import type {
 } from "../apms/audit-types";
 import { persistAuditEntry } from "../apms/audit-persistence.service";
 import { ensureCleanerNfcAccessForConfirmedCleaning } from "./cleaner-access-autopilot.service";
+import { upsertOperationalIssue } from "../apms/operational-intelligence.service";
+import { mapReservationCleaningOperationalItems } from "../apms/reservation-operational-intelligence.mapper";
 
 const prisma = new PrismaClient();
 
@@ -564,6 +566,7 @@ export async function auditReservationCompleteFlow(
     select: {
       id: true,
       propertyId: true,
+      reservationNumber: true,
       guestName: true,
       guestEmail: true,
       guestPhone: true,
@@ -1801,7 +1804,7 @@ if (cleaningConfirmationConfirmed && !cleanerAccessReady) {
   const completeFlowStatus = getCompleteFlowStatus(checks);
   const completedAt = new Date();
 
-  const auditEntry = buildAuditEntry({
+   const auditEntry = buildAuditEntry({
     reservationId: reservation.id,
     propertyId,
     organizationId,
@@ -1813,6 +1816,65 @@ if (cleaningConfirmationConfirmed && !cleanerAccessReady) {
   });
 
   const persisted = await persistAuditEntry(db, auditEntry);
+
+  try {
+    const operationalItems =
+      mapReservationCleaningOperationalItems({
+        organizationId,
+        propertyId,
+        reservationId: reservation.id,
+        reservationNumber:
+          reservation.reservationNumber ?? null,
+        guestName: reservation.guestName ?? null,
+
+        cleaningConfirmationId:
+          latestCleaningConfirmation?.id ?? null,
+        cleaningConfirmationStatus:
+          latestCleaningConfirmation?.status ?? null,
+        staffMemberId:
+          latestCleaningConfirmation?.staffMemberId ??
+          latestStaffAssignment?.staffMemberId ??
+          null,
+        cleanerName: null,
+
+        cleanerAccessReady,
+        cleanerAccessAutopilotAttempted:
+          Boolean(cleanerAccessAutopilotResult),
+        cleanerAccessAutopilotOk:
+          cleanerAccessAutopilotResult?.ok ?? null,
+        cleanerAccessAutopilotReason:
+          cleanerAccessAutopilotResult?.reason ?? null,
+        cleanerAccessAutopilotError:
+          cleanerAccessAutopilotResult?.error ?? null,
+        cleanerAccessAutopilotEscalated:
+          cleanerAccessAutopilotResult?.escalated ?? null,
+
+        decisionId,
+        sourceAuditEntryId: persisted.id,
+        signalAt: completedAt,
+      });
+
+    for (const operationalItem of operationalItems) {
+      await upsertOperationalIssue(
+        db,
+        operationalItem
+      );
+    }
+  } catch (operationalIntelligenceError: any) {
+    console.error(
+      "[RESERVATION_OPERATIONAL_INTELLIGENCE_ERROR]",
+      {
+        reservationId: reservation.id,
+        reservationNumber:
+          reservation.reservationNumber ?? null,
+        decisionId,
+        sourceAuditEntryId: persisted.id,
+        error:
+          operationalIntelligenceError?.message ??
+          operationalIntelligenceError,
+      }
+    );
+  }
 
   return {
     reservationId: reservation.id,

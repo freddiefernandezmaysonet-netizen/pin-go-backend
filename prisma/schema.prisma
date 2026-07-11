@@ -1144,11 +1144,185 @@ model ReservationNumberCounter {
   updatedAt DateTime @updatedAt
 }
 
+model OperationalIssue {
+  id String @id @default(cuid())
+
+  // Stable workflow identity used for idempotent upserts.
+  operationalKey String @unique
+  issueCode      String
+
+  title                 String
+  issue                 String
+  operationalImpact     String?
+  recommendedAction     String?
+  nextAutomaticStep     String?
+
+  engine           String
+  severity         OperationalSeverity
+  workflowState    OperationalWorkflowState
+  visibility       OperationalVisibility
+  responsibleActor OperationalActor
+
+  actionRequired Boolean
+  canAutoResolve Boolean
+
+  autoResolveStatus        OperationalAutoResolveStatus @default(NOT_SUPPORTED)
+  autoResolveActionCode    String?
+  autoResolveAttemptCount  Int                          @default(0)
+  lastAutoResolveAttemptAt DateTime?
+  lastAutoResolveError     String?
+
+  // Internal entity references.
+  // These values are used for queries, correlation and navigation.
+  // reservationId must never be displayed to hosts or guests.
+  organizationId String?
+  propertyId     String?
+  reservationId  String?
+
+  guestName     String?
+  staffMemberId String?
+  cleanerName   String?
+
+  // Source audit and engine traceability.
+  decisionId         String?
+  sourceAuditEntryId String?
+  sourceType         OperationalSourceType
+
+  firstDetectedAt DateTime @default(now())
+  lastSignalAt    DateTime @default(now())
+  resolvedAt      DateTime?
+
+  resolutionCode    String?
+  resolutionSummary String?
+  resolutionType    OperationalResolutionType?
+  resolvedBy        OperationalActor?
+
+  reopenedCount Int @default(0)
+
+  actionTarget OperationalActionTarget
+  metadata     Json?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  transitions OperationalIssueTransition[]
+
+  @@index([organizationId])
+  @@index([propertyId])
+  @@index([reservationId])
+  @@index([engine])
+  @@index([issueCode])
+  @@index([workflowState])
+  @@index([visibility])
+  @@index([sourceAuditEntryId])
+  @@index([resolvedAt])
+  @@index([lastSignalAt])
+  @@index([organizationId, visibility, workflowState])
+  @@index([propertyId, visibility, workflowState])
+  @@index([propertyId, lastSignalAt])
+  @@index([reservationId, workflowState])
+}
+
+model OperationalIssueTransition {
+  id String @id @default(cuid())
+
+  issueId        String
+  operationalKey String
+  issueCode      String
+
+  fromWorkflowState OperationalWorkflowState?
+  toWorkflowState   OperationalWorkflowState
+
+  transitionCode    String
+  transitionSummary String
+  transitionedBy    OperationalActor
+
+  sourceType        OperationalSourceType
+  decisionId        String?
+  sourceAuditEntryId String?
+
+  occurredAt DateTime @default(now())
+  metadata   Json?
+
+  issue OperationalIssue @relation(fields: [issueId], references: [id], onDelete: Cascade)
+  
+  @@index([issueId, occurredAt])
+  @@index([operationalKey, occurredAt])
+  @@index([toWorkflowState, occurredAt])
+  @@index([sourceAuditEntryId])
+}
+
 enum AmenityFeeType {
   PER_STAY
   PER_NIGHT
   PER_GUEST
   PER_GUEST_PER_NIGHT
+}
+
+enum OperationalWorkflowState {
+  ACTION_REQUIRED
+  WAITING
+  AUTO_RESOLVING
+  RESOLVED
+}
+
+enum OperationalVisibility {
+  HOST
+  SYSTEM
+  DEVELOPER
+}
+
+enum OperationalActor {
+  HOST
+  PIN_GO
+  PIN_AI
+  GUEST
+  CLEANER
+  STAFF
+  SYSTEM
+  NONE
+}
+
+enum OperationalSeverity {
+  INFO
+  WARNING
+  CRITICAL
+}
+
+enum OperationalAutoResolveStatus {
+  AVAILABLE
+  RUNNING
+  SUCCEEDED
+  FAILED
+  NOT_SUPPORTED
+}
+
+enum OperationalActionTarget {
+  RESERVATION
+  PROPERTY
+  CLEANING
+  ACCESS
+  DISTRIBUTION
+  PAYMENT
+  MESSAGING
+  GUEST
+  STAFF
+  SYSTEM
+}
+
+enum OperationalSourceType {
+  AUDIT_ENTRY
+  ENGINE_EVENT
+  WORKER
+  MANUAL
+  PIN_AI
+}
+
+enum OperationalResolutionType {
+  AUTOMATIC
+  MANUAL
+  EXPIRED
+  SUPERSEDED
 }
 
 enum SeasonType {
