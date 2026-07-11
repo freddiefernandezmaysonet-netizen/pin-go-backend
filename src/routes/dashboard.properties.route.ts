@@ -1727,6 +1727,33 @@ dashboardPropertiesRouter.get(
             : undefined,
       });
 
+            const getAuditEntryReservationId = (
+        entry: AuditEntry
+      ) => {
+        const metadataReservationId =
+          typeof entry.metadata?.reservationId === "string"
+            ? entry.metadata.reservationId.trim()
+            : "";
+
+        if (metadataReservationId) {
+          return metadataReservationId;
+        }
+
+        if (
+          String(entry.entityType ?? "")
+            .trim()
+            .toUpperCase() === "RESERVATION"
+        ) {
+          const entityId = String(
+            entry.entityId ?? ""
+          ).trim();
+
+          return entityId || null;
+        }
+
+        return null;
+      };
+
       const persistedNonRevenueAuditRows =
         await prisma.apmsAuditEntry.findMany({
           where: {
@@ -1803,17 +1830,65 @@ dashboardPropertiesRouter.get(
         }
       }
 
-      const auditEntries = Array.from(
+           const auditEntries = Array.from(
         auditEntriesByDecisionId.values()
       );
 
-     const baseSnapshot =
-  createMissionControlSnapshotFromAuditEntries({
-    entityId: property.id,
-    auditEntries,
-    generatedAt: new Date(),
-  });
+      const auditReservationIds = Array.from(
+        new Set(
+          auditEntries
+            .map(getAuditEntryReservationId)
+            .filter(
+              (reservationId): reservationId is string =>
+                Boolean(reservationId)
+            )
+        )
+      );
 
+      const auditReservations =
+        auditReservationIds.length > 0
+          ? await prisma.reservation.findMany({
+              where: {
+                id: {
+                  in: auditReservationIds,
+                },
+                propertyId: property.id,
+              },
+              select: {
+                id: true,
+                status: true,
+              },
+            })
+          : [];
+
+      const cancelledReservationIds = new Set(
+        auditReservations
+          .filter(
+            (reservation) =>
+              reservation.status ===
+              ReservationStatus.CANCELLED
+          )
+          .map((reservation) => reservation.id)
+      );
+
+      const activeOperationalAuditEntries =
+        auditEntries.filter((entry) => {
+          const reservationId =
+            getAuditEntryReservationId(entry);
+
+          return (
+            !reservationId ||
+            !cancelledReservationIds.has(reservationId)
+          );
+        });
+
+      const baseSnapshot =
+        createMissionControlSnapshotFromAuditEntries({
+          entityId: property.id,
+          auditEntries:
+            activeOperationalAuditEntries,
+          generatedAt: new Date(),
+        });
 const recommendedActionReservationIds = Array.from(
   new Set(
     (baseSnapshot.recommendedActions ?? [])
@@ -1871,9 +1946,21 @@ const enrichedRecommendedActions = (
 const snapshot = {
   ...baseSnapshot,
   recommendedActions: enrichedRecommendedActions,
-  recentAuditEntries:
+   recentAuditEntries:
     persistedActivityAuditEntries.length > 0
-      ? persistedActivityAuditEntries
+      ? persistedActivityAuditEntries.filter(
+          (entry) => {
+            const reservationId =
+              getAuditEntryReservationId(entry);
+
+            return (
+              !reservationId ||
+              !cancelledReservationIds.has(
+                reservationId
+              )
+            );
+          }
+        )
       : baseSnapshot.recentAuditEntries,
 };
       return res.json({
