@@ -3,6 +3,7 @@ import {
   NfcAssignmentStatus,
   NfcCardStatus,
   PrismaClient,
+  ReservationStatus,
   StaffAccessMethod,
   StaffAssignmentStatus,
 } from "@prisma/client";
@@ -37,6 +38,19 @@ function toErrString(error: unknown) {
   }
 
   return String(error);
+}
+
+function buildCancelledReservationSkipResult(): CleanerAccessAutopilotResult {
+  return {
+    ok: true,
+    alreadyReady: false,
+    repaired: false,
+    skipped: true,
+    escalated: false,
+    reason:
+      "RESERVATION_CANCELLED_CLEANER_ACCESS_SKIPPED",
+    error: null,
+  };
 }
 
 function computeCleaningWindowFromProperty(params: {
@@ -366,6 +380,24 @@ export async function ensureCleanerNfcAccessForConfirmedCleaning(input: {
     });
   }
 
+  if (
+    reservation.status ===
+    ReservationStatus.CANCELLED
+  ) {
+    console.log(
+      "[CLEANER_ACCESS_AUTOPILOT] skipped cancelled reservation",
+      {
+        reservationId: reservation.id,
+        propertyId: reservation.propertyId,
+        confirmationId: confirmation.id,
+        staffMemberId: confirmation.staffMemberId,
+        trigger,
+      }
+    );
+
+    return buildCancelledReservationSkipResult();
+  }
+
   const staffMember = await input.prisma.staffMember.findUnique({
     where: {
       id: confirmation.staffMemberId,
@@ -550,6 +582,34 @@ export async function ensureCleanerNfcAccessForConfirmedCleaning(input: {
       recommendedAction:
         "Assign a different cleaner NFC card or review overlapping cleaner access before the cleaning window.",
     });
+  }
+
+    const latestReservationState =
+    await input.prisma.reservation.findUnique({
+      where: {
+        id: confirmation.reservationId,
+      },
+      select: {
+        status: true,
+      },
+    });
+
+  if (
+    latestReservationState?.status ===
+    ReservationStatus.CANCELLED
+  ) {
+    console.log(
+      "[CLEANER_ACCESS_AUTOPILOT] skipped reservation cancelled before TTLock execution",
+      {
+        reservationId: confirmation.reservationId,
+        propertyId: confirmation.propertyId,
+        confirmationId: confirmation.id,
+        staffMemberId: confirmation.staffMemberId,
+        trigger,
+      }
+    );
+
+    return buildCancelledReservationSkipResult();
   }
 
   try {
