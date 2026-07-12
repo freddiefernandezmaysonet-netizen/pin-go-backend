@@ -1889,20 +1889,106 @@ dashboardPropertiesRouter.get(
             activeOperationalAuditEntries,
           generatedAt: new Date(),
         });
-const recommendedActionReservationIds = Array.from(
-  new Set(
-    (baseSnapshot.recommendedActions ?? [])
-      .map((action) => String(action.reservationId ?? "").trim())
-      .filter(Boolean)
-  )
+
+const recentlyResolvedSince = new Date(
+  Date.now() - 7 * 24 * 60 * 60 * 1000
 );
 
-const recommendedActionReservations =
-  recommendedActionReservationIds.length > 0
+const operationalIssueRows =
+  await prisma.operationalIssue.findMany({
+    where: {
+      organizationId: orgId,
+      propertyId: property.id,
+      visibility: "HOST",
+      OR: [
+        {
+          workflowState: {
+            in: [
+              "ACTION_REQUIRED",
+              "WAITING",
+              "AUTO_RESOLVING",
+            ],
+          },
+        },
+        {
+          workflowState: "RESOLVED",
+          resolvedAt: {
+            gte: recentlyResolvedSince,
+          },
+        },
+      ],
+    },
+    orderBy: [
+      {
+        lastSignalAt: "desc",
+      },
+    ],
+    take: 50,
+    select: {
+      issueCode: true,
+
+      title: true,
+      issue: true,
+      operationalImpact: true,
+      recommendedAction: true,
+      nextAutomaticStep: true,
+
+      engine: true,
+      severity: true,
+      workflowState: true,
+      visibility: true,
+      responsibleActor: true,
+
+      actionRequired: true,
+      canAutoResolve: true,
+      autoResolveStatus: true,
+
+      reservationId: true,
+      guestName: true,
+      cleanerName: true,
+
+      firstDetectedAt: true,
+      lastSignalAt: true,
+      resolvedAt: true,
+
+      resolutionCode: true,
+      resolutionSummary: true,
+      resolutionType: true,
+      resolvedBy: true,
+
+      actionTarget: true,
+    },
+  });
+
+const recommendedActionReservationIds = (
+  baseSnapshot.recommendedActions ?? []
+)
+  .map((action) =>
+    String(action.reservationId ?? "").trim()
+  )
+  .filter(Boolean);
+
+const operationalReservationIds =
+  operationalIssueRows
+    .map((item) =>
+      String(item.reservationId ?? "").trim()
+    )
+    .filter(Boolean);
+
+const missionControlReservationIds =
+  Array.from(
+    new Set([
+      ...recommendedActionReservationIds,
+      ...operationalReservationIds,
+    ])
+  );
+
+const missionControlReservations =
+  missionControlReservationIds.length > 0
     ? await prisma.reservation.findMany({
         where: {
           id: {
-            in: recommendedActionReservationIds,
+            in: missionControlReservationIds,
           },
           propertyId: property.id,
         },
@@ -1910,21 +1996,26 @@ const recommendedActionReservations =
           id: true,
           reservationNumber: true,
           guestName: true,
+          status: true,
         },
       })
     : [];
 
 const reservationById = new Map(
-  recommendedActionReservations.map((reservation) => [
-    reservation.id,
-    reservation,
-  ])
+  missionControlReservations.map(
+    (reservation) => [
+      reservation.id,
+      reservation,
+    ]
+  )
 );
 
 const enrichedRecommendedActions = (
   baseSnapshot.recommendedActions ?? []
 ).map((action) => {
-  const reservationId = String(action.reservationId ?? "").trim();
+  const reservationId = String(
+    action.reservationId ?? ""
+  ).trim();
 
   const linkedReservation = reservationId
     ? reservationById.get(reservationId)
@@ -1943,9 +2034,108 @@ const enrichedRecommendedActions = (
   };
 });
 
+const operationalItems =
+  operationalIssueRows
+    .filter((item) => {
+      const reservationId = String(
+        item.reservationId ?? ""
+      ).trim();
+
+      if (!reservationId) {
+        return true;
+      }
+
+      const linkedReservation =
+        reservationById.get(reservationId);
+
+      if (
+        linkedReservation?.status ===
+        ReservationStatus.CANCELLED
+      ) {
+        return (
+          item.workflowState === "RESOLVED"
+        );
+      }
+
+      return true;
+    })
+    .map((item) => {
+      const reservationId = String(
+        item.reservationId ?? ""
+      ).trim();
+
+      const linkedReservation = reservationId
+        ? reservationById.get(reservationId)
+        : undefined;
+
+      return {
+        issueCode: item.issueCode,
+
+        title: item.title,
+        issue: item.issue,
+        operationalImpact:
+          item.operationalImpact,
+        recommendedAction:
+          item.recommendedAction,
+        nextAutomaticStep:
+          item.nextAutomaticStep,
+
+        engine: item.engine,
+        severity: item.severity,
+        workflowState: item.workflowState,
+        visibility: item.visibility,
+        responsibleActor:
+          item.responsibleActor,
+
+        actionRequired:
+          item.actionRequired,
+        canAutoResolve:
+          item.canAutoResolve,
+        autoResolveStatus:
+          item.autoResolveStatus,
+
+        reservationId:
+          reservationId || null,
+        reservationNumber:
+          linkedReservation?.reservationNumber ??
+          null,
+        guestName:
+          linkedReservation?.guestName ??
+          item.guestName ??
+          null,
+        cleanerName:
+          item.cleanerName ?? null,
+
+        firstDetectedAt:
+          item.firstDetectedAt,
+        lastSignalAt:
+          item.lastSignalAt,
+        resolvedAt:
+          item.resolvedAt,
+
+        resolutionCode:
+          item.resolutionCode,
+        resolutionSummary:
+          item.resolutionSummary,
+        resolutionType:
+          item.resolutionType,
+        resolvedBy:
+          item.resolvedBy,
+
+        actionTarget:
+          item.actionTarget,
+
+        openUrl: reservationId
+          ? `/reservations/${reservationId}`
+          : null,
+        secondaryActionUrl: null,
+      };
+    });
 const snapshot = {
   ...baseSnapshot,
-  recommendedActions: enrichedRecommendedActions,
+  recommendedActions:
+    enrichedRecommendedActions,
+  operationalItems,
    recentAuditEntries:
     persistedActivityAuditEntries.length > 0
       ? persistedActivityAuditEntries.filter(
