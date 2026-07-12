@@ -2048,15 +2048,12 @@ const operationalItems =
       const linkedReservation =
         reservationById.get(reservationId);
 
-      if (
+           if (
         linkedReservation?.status ===
         ReservationStatus.CANCELLED
       ) {
-        return (
-          item.workflowState === "RESOLVED"
-        );
+        return false;
       }
-
       return true;
     })
     .map((item) => {
