@@ -13,6 +13,8 @@ import {
 
 import type {
   OperationalActor,
+  OperationalResolutionType,
+  OperationalSourceType,
   OperationalWorkflowState,
   UpsertOperationalItemInput,
 } from "./operational-intelligence-types";
@@ -44,6 +46,22 @@ export type UpsertOperationalIssueInput =
      */
     occurredAt?: Date;
   };
+
+export type ResolveOperationalIssuesForReservationInput = {
+  reservationId: string;
+
+  resolutionCode: string;
+  resolutionSummary: string;
+
+  resolutionType?: OperationalResolutionType;
+  resolvedBy: OperationalActor;
+
+  sourceType: OperationalSourceType;
+  decisionId?: string | null;
+  sourceAuditEntryId?: string | null;
+
+  occurredAt?: Date;
+};
 
 function normalizeRequiredText(value: unknown, fieldName: string) {
   const text = String(value ?? "").trim();
@@ -463,5 +481,139 @@ export async function upsertOperationalIssue(
     }
 
     return operationalIssue;
+  });
+}
+export async function resolveOperationalIssuesForReservation(
+  prisma: PrismaClient,
+  input: ResolveOperationalIssuesForReservationInput
+) {
+  const reservationId = normalizeRequiredText(
+    input.reservationId,
+    "reservationId"
+  );
+
+  const resolutionCode = normalizeRequiredText(
+    input.resolutionCode,
+    "resolutionCode"
+  );
+
+  const resolutionSummary = normalizeRequiredText(
+    input.resolutionSummary,
+    "resolutionSummary"
+  );
+
+  const occurredAt = input.occurredAt ?? new Date();
+
+  const resolutionType =
+    input.resolutionType ?? "SUPERSEDED";
+
+  return prisma.$transaction(async (transaction) => {
+    const activeIssues =
+      await transaction.operationalIssue.findMany({
+        where: {
+          reservationId,
+          workflowState: {
+            not: PrismaOperationalWorkflowState.RESOLVED,
+          },
+        },
+        orderBy: {
+          firstDetectedAt: "asc",
+        },
+      });
+
+    const resolvedIssueIds: string[] = [];
+
+    for (const activeIssue of activeIssues) {
+      const updateResult =
+        await transaction.operationalIssue.updateMany({
+          where: {
+            id: activeIssue.id,
+            workflowState: {
+              not: PrismaOperationalWorkflowState.RESOLVED,
+            },
+          },
+          data: {
+            workflowState:
+              PrismaOperationalWorkflowState.RESOLVED,
+            severity:
+              PrismaOperationalSeverity.INFO,
+            responsibleActor:
+              PrismaOperationalActor.NONE,
+
+            actionRequired: false,
+            autoResolveActionCode: null,
+
+            recommendedAction: null,
+            nextAutomaticStep: null,
+
+            lastSignalAt: occurredAt,
+            resolvedAt: occurredAt,
+
+            resolutionCode,
+            resolutionSummary,
+            resolutionType:
+              resolutionType as PrismaOperationalResolutionType,
+            resolvedBy:
+              input.resolvedBy as PrismaOperationalActor,
+
+            decisionId:
+              normalizeOptionalText(input.decisionId),
+            sourceAuditEntryId:
+              normalizeOptionalText(
+                input.sourceAuditEntryId
+              ),
+            sourceType:
+              input.sourceType as PrismaOperationalSourceType,
+          },
+        });
+
+      if (updateResult.count !== 1) {
+        continue;
+      }
+
+      await transaction.operationalIssueTransition.create({
+        data: {
+          issueId: activeIssue.id,
+          operationalKey:
+            activeIssue.operationalKey,
+          issueCode: activeIssue.issueCode,
+
+          fromWorkflowState:
+            activeIssue.workflowState,
+          toWorkflowState:
+            PrismaOperationalWorkflowState.RESOLVED,
+
+          transitionCode: resolutionCode,
+          transitionSummary: resolutionSummary,
+          transitionedBy:
+            input.resolvedBy as PrismaOperationalActor,
+
+          sourceType:
+            input.sourceType as PrismaOperationalSourceType,
+          decisionId:
+            normalizeOptionalText(input.decisionId),
+          sourceAuditEntryId:
+            normalizeOptionalText(
+              input.sourceAuditEntryId
+            ),
+
+          occurredAt,
+
+          metadata: {
+            reservationId,
+            resolutionType,
+          },
+        },
+      });
+
+      resolvedIssueIds.push(activeIssue.id);
+    }
+
+    return {
+      reservationId,
+      resolvedCount: resolvedIssueIds.length,
+      resolvedIssueIds,
+      occurredAt,
+    };
   });
 }
