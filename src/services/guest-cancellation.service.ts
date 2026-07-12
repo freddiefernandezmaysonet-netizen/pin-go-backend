@@ -15,8 +15,86 @@ import {
   sendDirectBookingHostCancellationNotification,
 } from "../lib/mailer";
 import { reconcileReservation } from "./reservation.reconcile.service";
+import { resolveOperationalIssuesForReservation } from "../apms/operational-intelligence.service";
 
 const prisma = new PrismaClient();
+
+async function finalizeCancelledReservationOperationsSafe(input: {
+  reservationId: string;
+  cancelledAt?: Date | null;
+}) {
+  const occurredAt =
+    input.cancelledAt ?? new Date();
+
+  try {
+    const cancelledConfirmations =
+      await prisma.cleaningConfirmation.updateMany({
+        where: {
+          reservationId: input.reservationId,
+          status: "PENDING",
+        },
+        data: {
+          status: "CANCELLED",
+        },
+      });
+
+    console.log(
+      "[GUEST_CANCELLATION_CLEANING_CONFIRMATIONS_CLOSED]",
+      {
+        reservationId: input.reservationId,
+        closedCount: cancelledConfirmations.count,
+      }
+    );
+  } catch (confirmationError: any) {
+    console.error(
+      "[GUEST_CANCELLATION_CLEANING_CONFIRMATIONS_CLOSE_ERROR]",
+      {
+        reservationId: input.reservationId,
+        error:
+          confirmationError?.message ??
+          confirmationError,
+      }
+    );
+  }
+
+  try {
+    const operationalResolution =
+      await resolveOperationalIssuesForReservation(
+        prisma,
+        {
+          reservationId: input.reservationId,
+          resolutionCode: "RESERVATION_CANCELLED",
+          resolutionSummary:
+            "The reservation was cancelled, so its remaining operational workflows are no longer required.",
+          resolutionType: "SUPERSEDED",
+          resolvedBy: "GUEST",
+          sourceType: "ENGINE_EVENT",
+          decisionId:
+            `guest-cancellation:${input.reservationId}`,
+          occurredAt,
+        }
+      );
+
+    console.log(
+      "[GUEST_CANCELLATION_OPERATIONAL_ISSUES_RESOLVED]",
+      {
+        reservationId: input.reservationId,
+        resolvedCount:
+          operationalResolution.resolvedCount,
+      }
+    );
+  } catch (operationalError: any) {
+    console.error(
+      "[GUEST_CANCELLATION_OPERATIONAL_ISSUES_RESOLVE_ERROR]",
+      {
+        reservationId: input.reservationId,
+        error:
+          operationalError?.message ??
+          operationalError,
+      }
+    );
+  }
+}
 
 export type GuestCancellationPreviewInput = {
   guestToken: string;
@@ -645,8 +723,20 @@ export async function cancelReservationFromGuestPortal({
 }: GuestCancellationConfirmInput) {
   const reservation = await getReservationByGuestToken(guestToken);
 
-  if (reservation.status === ReservationStatus.CANCELLED) {
-    const snapshot = await getEffectiveCancellationPolicySnapshot(reservation);
+   if (
+    reservation.status ===
+    ReservationStatus.CANCELLED
+  ) {
+    await finalizeCancelledReservationOperationsSafe({
+      reservationId: reservation.id,
+      cancelledAt:
+        reservation.cancelledAt ?? new Date(),
+    });
+
+    const snapshot =
+      await getEffectiveCancellationPolicySnapshot(
+        reservation
+      );
 
     const evaluation = evaluateCancellationPolicy({
       snapshot,
@@ -746,7 +836,24 @@ export async function cancelReservationFromGuestPortal({
         requestedByActor: CancellationActor.GUEST,
       });
 
-      const updatedReservation = await getReservationByGuestToken(guestToken);
+           const updatedReservation =
+        await getReservationByGuestToken(
+          guestToken
+        );
+
+      if (
+        updatedReservation.status ===
+        ReservationStatus.CANCELLED
+      ) {
+        await finalizeCancelledReservationOperationsSafe({
+          reservationId:
+            updatedReservation.id,
+          cancelledAt:
+            updatedReservation.cancelledAt ??
+            new Date(),
+        });
+      }
+
       const refundExecution =
         refundMode === "FULL"
           ? "FULL_REFUND_EXECUTED"
@@ -886,10 +993,18 @@ export async function cancelReservationFromGuestPortal({
     },
   });
 
-  await reconcileReservation(updatedReservation.id);
+   await reconcileReservation(
+    updatedReservation.id
+  );
+
+  await finalizeCancelledReservationOperationsSafe({
+    reservationId: updatedReservation.id,
+    cancelledAt:
+      updatedReservation.cancelledAt ??
+      cancelledAt,
+  });
 
   let distributionSyncResult: unknown = null;
-
   try {
     distributionSyncResult = await syncChannexAvailabilityForProperty(
       updatedReservation.propertyId
