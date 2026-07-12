@@ -19,7 +19,10 @@ import type {
 } from "../apms/audit-types";
 import { persistAuditEntry } from "../apms/audit-persistence.service";
 import { ensureCleanerNfcAccessForConfirmedCleaning } from "./cleaner-access-autopilot.service";
-import { upsertOperationalIssue } from "../apms/operational-intelligence.service";
+import {
+  resolveOperationalIssuesForReservation,
+  upsertOperationalIssue,
+} from "../apms/operational-intelligence.service";
 import { mapReservationCleaningOperationalItems } from "../apms/reservation-operational-intelligence.mapper";
 
 const prisma = new PrismaClient();
@@ -594,6 +597,8 @@ export async function auditReservationCompleteFlow(
       externalProvider: true,
       externalId: true,
       status: true,
+      cancelledAt: true,
+      cancelledBy: true,
       lastHardwareSyncAt: true,
       lastReconciledAt: true,
       lastReconciledCheckIn: true,
@@ -682,13 +687,116 @@ export async function auditReservationCompleteFlow(
     };
   }
 
-   const property = reservation.property;
+    const property = reservation.property;
   const organization = property.organization;
   const organizationId = property.organizationId;
   const propertyId = property.id;
-  const decisionId = `reservation-complete-flow:${reservation.id}`;
+  const decisionId =
+    `reservation-complete-flow:${reservation.id}`;
 
-  const auditSource = normalizeText(reservation.source);
+  if (
+    reservation.status ===
+    ReservationStatus.CANCELLED
+  ) {
+    addCheck(checks, {
+      rule: "RESERVATION_CANCELLED_TERMINAL",
+      label: "Reservation Cancelled",
+      status: "PASS",
+      critical: false,
+      required: true,
+      metadata: {
+        reservationId: reservation.id,
+        reservationNumber:
+          reservation.reservationNumber ?? null,
+        propertyId,
+        organizationId,
+        reservationStatus:
+          reservation.status,
+        paymentState:
+          reservation.paymentState,
+        cancelledAt:
+          reservation.cancelledAt ?? null,
+        cancelledBy:
+          reservation.cancelledBy ?? null,
+        terminalWorkflow: true,
+        issue:
+          "The reservation was cancelled and no longer requires operational readiness checks.",
+        operationalImpact:
+          "Payment, cleaning and access readiness checks are no longer applicable to this reservation.",
+        canAutoResolve: true,
+      },
+    });
+
+    const completedAt = new Date();
+    const completeFlowStatus: ReservationCompleteFlowStatus =
+      "READY";
+
+    const auditEntry = buildAuditEntry({
+      reservationId: reservation.id,
+      propertyId,
+      organizationId,
+      completeFlowStatus,
+      checks,
+      startedAt,
+      completedAt,
+      recommendedAction: undefined,
+    });
+
+    const persisted =
+      await persistAuditEntry(db, auditEntry);
+
+    try {
+      await resolveOperationalIssuesForReservation(
+        db,
+        {
+          reservationId: reservation.id,
+          resolutionCode:
+            "RESERVATION_CANCELLED",
+          resolutionSummary:
+            "The reservation was cancelled, so its remaining operational workflows are no longer required.",
+          resolutionType: "SUPERSEDED",
+          resolvedBy: "SYSTEM",
+          sourceType: "AUDIT_ENTRY",
+          decisionId,
+          sourceAuditEntryId: persisted.id,
+          occurredAt:
+            reservation.cancelledAt ??
+            completedAt,
+        }
+      );
+    } catch (operationalError: any) {
+      console.error(
+        "[CANCELLED_RESERVATION_OPERATIONAL_RESOLUTION_ERROR]",
+        {
+          reservationId: reservation.id,
+          reservationNumber:
+            reservation.reservationNumber ??
+            null,
+          decisionId,
+          sourceAuditEntryId:
+            persisted.id,
+          error:
+            operationalError?.message ??
+            operationalError,
+        }
+      );
+    }
+
+    return {
+      reservationId: reservation.id,
+      propertyId,
+      organizationId,
+      completeFlowStatus,
+      auditEntryId: persisted.id,
+      checks,
+      failedChecks: [],
+      warningChecks: [],
+    };
+  }
+
+  const auditSource = normalizeText(
+    reservation.source
+  );
   const auditExternalProvider = normalizeText(reservation.externalProvider);
 
   const isManualReservation =
