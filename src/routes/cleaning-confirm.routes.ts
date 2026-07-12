@@ -1,11 +1,22 @@
 import { Router } from "express";
-import { PrismaClient } from "@prisma/client";
+import {
+  PrismaClient,
+  ReservationStatus,
+} from "@prisma/client";
 import { ensureCleanerNfcAccessForConfirmedCleaning } from "../services/cleaner-access-autopilot.service";
 import { auditReservationCompleteFlowSafe } from "../services/reservation-complete-flow-audit.service";
 
 const prisma = new PrismaClient();
 
 export const cleaningConfirmRouter = Router();
+
+function sendCancelledCleaningRequestResponse(
+  res: any
+) {
+  return res.status(410).send(
+    "This cleaning request is no longer active because the reservation was cancelled. No cleaning or access action is required."
+  );
+}
 
 async function loadConfirmationData(token: string) {
   const confirmation = await prisma.cleaningConfirmation.findUnique({
@@ -88,11 +99,22 @@ cleaningConfirmRouter.get("/cleaning/confirm/:token", async (req, res) => {
 
     const { confirmation, reservation, staffMember, invalidData } = data;
 
-    if (invalidData || !reservation || !staffMember) {
-      return res.status(404).send("Cleaning confirmation data is incomplete.");
+       if (invalidData || !reservation || !staffMember) {
+      return res.status(404).send(
+        "Cleaning confirmation data is incomplete."
+      );
     }
 
-   if (confirmation.status === "CONFIRMED") {
+    if (
+      reservation.status ===
+      ReservationStatus.CANCELLED
+    ) {
+      return sendCancelledCleaningRequestResponse(
+        res
+      );
+    }
+
+    if (confirmation.status === "CONFIRMED") {
   const cleanerAccessResult =
     await ensureCleanerNfcAccessForConfirmedCleaning({
       prisma,
@@ -168,8 +190,19 @@ cleaningConfirmRouter.post(
 
       const { confirmation, reservation, staffMember, invalidData } = data;
 
-      if (invalidData || !reservation || !staffMember) {
-        return res.status(404).send("Cleaning confirmation data is incomplete.");
+          if (invalidData || !reservation || !staffMember) {
+        return res.status(404).send(
+          "Cleaning confirmation data is incomplete."
+        );
+      }
+
+      if (
+        reservation.status ===
+        ReservationStatus.CANCELLED
+      ) {
+        return sendCancelledCleaningRequestResponse(
+          res
+        );
       }
 
       if (confirmation.status === "CONFIRMED") {
@@ -259,10 +292,19 @@ cleaningConfirmRouter.post(
         },
       });
 
-      if (!reservation) {
+            if (!reservation) {
         return res
           .status(404)
           .send("Reservation not found.");
+      }
+
+      if (
+        reservation.status ===
+        ReservationStatus.CANCELLED
+      ) {
+        return sendCancelledCleaningRequestResponse(
+          res
+        );
       }
 
       const allAttempts = await prisma.cleaningConfirmation.findMany({
