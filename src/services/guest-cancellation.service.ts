@@ -16,6 +16,7 @@ import {
 } from "../lib/mailer";
 import { reconcileReservation } from "./reservation.reconcile.service";
 import { resolveOperationalIssuesForReservation } from "../apms/operational-intelligence.service";
+import { auditReservationCompleteFlowSafe } from "./reservation-complete-flow-audit.service";
 
 const prisma = new PrismaClient();
 
@@ -91,6 +92,42 @@ async function finalizeCancelledReservationOperationsSafe(input: {
         error:
           operationalError?.message ??
           operationalError,
+      }
+    );
+  }
+
+  try {
+    const terminalAudit =
+      await auditReservationCompleteFlowSafe(
+        input.reservationId,
+        prisma
+      );
+
+    console.log(
+      "[GUEST_CANCELLATION_TERMINAL_AUDIT_RESULT]",
+      {
+        reservationId: input.reservationId,
+        completeFlowStatus:
+          terminalAudit?.completeFlowStatus ??
+          null,
+        failedChecks:
+          terminalAudit?.failedChecks.map(
+            (check) => check.rule
+          ) ?? [],
+        warningChecks:
+          terminalAudit?.warningChecks.map(
+            (check) => check.rule
+          ) ?? [],
+      }
+    );
+  } catch (auditError: any) {
+    console.error(
+      "[GUEST_CANCELLATION_TERMINAL_AUDIT_ERROR]",
+      {
+        reservationId: input.reservationId,
+        error:
+          auditError?.message ??
+          auditError,
       }
     );
   }
