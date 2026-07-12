@@ -6,6 +6,46 @@
 import type { AuditEntry, AuditTimeline } from "./audit-types";
 import type { OperationalItem } from "./operational-intelligence-types";
 
+/**
+ * Host-safe Operational Intelligence contract.
+ *
+ * Internal OIE identifiers, audit references, automation action codes and
+ * technical metadata must not be returned to the dashboard.
+ *
+ * reservationId remains available only for internal dashboard navigation and
+ * must never be rendered as visible text.
+ */
+export type MissionControlOperationalItem = Pick<
+  OperationalItem,
+  | "issueCode"
+  | "title"
+  | "issue"
+  | "operationalImpact"
+  | "recommendedAction"
+  | "nextAutomaticStep"
+  | "engine"
+  | "severity"
+  | "workflowState"
+  | "visibility"
+  | "responsibleActor"
+  | "actionRequired"
+  | "canAutoResolve"
+  | "autoResolveStatus"
+  | "reservationId"
+  | "reservationNumber"
+  | "guestName"
+  | "cleanerName"
+  | "firstDetectedAt"
+  | "lastSignalAt"
+  | "resolvedAt"
+  | "resolutionCode"
+  | "resolutionSummary"
+  | "resolutionType"
+  | "resolvedBy"
+  | "actionTarget"
+  | "openUrl"
+  | "secondaryActionUrl"
+>;
 export interface FreedomMetrics {
   /**
    * Minutes returned to the host.
@@ -196,7 +236,7 @@ export interface MissionControlSnapshot {
    * Mission Control must render these items by workflowState and must not
    * reinterpret engine names, audit reasons or technical metadata.
    */
-  operationalItems?: OperationalItem[];
+    operationalItems?: MissionControlOperationalItem[];
 
   /**
    * Last time this snapshot was calculated.
