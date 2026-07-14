@@ -1,0 +1,502 @@
+import {
+  PrismaClient,
+} from "@prisma/client";
+import Stripe from "stripe";
+import stripe from "../billing/stripe";
+import {
+  evaluateGuestAccessReadiness,
+} from "./guest-access-readiness.service";
+
+const MAX_IDENTITY_VERIFICATION_ATTEMPTS = 3;
+
+const reservationSelect = {
+  id: true,
+  reservationNumber: true,
+  guestName: true,
+  verificationStatus: true,
+  verifiedAt: true,
+  identityDeclaredLegalName: true,
+  identityVerificationAttempts: true,
+  stripeIdentityVerificationSessionId: true,
+  stripeIdentityVerificationLastEventId: true,
+} as const;
+
+function normalizeNameTokens(value: string) {
+  return String(value ?? "")
+    .normalize("NFD")
+    .replace(/\p{Diacritic}/gu, "")
+    .toLowerCase()
+    .replace(/[^\p{L}\p{N}]+/gu, " ")
+    .trim()
+    .split(/\s+/)
+    .filter(Boolean)
+    .sort();
+}
+
+function namesHaveSameTokens(
+  first: string,
+  second: string
+) {
+  const firstTokens = normalizeNameTokens(first);
+  const secondTokens = normalizeNameTokens(second);
+
+  if (
+    firstTokens.length === 0 ||
+    secondTokens.length === 0 ||
+    firstTokens.length !== secondTokens.length
+  ) {
+    return false;
+  }
+
+  return firstTokens.every(
+    (token, index) =>
+      token === secondTokens[index]
+  );
+}
+
+function reservationNameMatchesVerifiedName(
+  reservationName: string,
+  verifiedName: string
+) {
+  const reservationTokens =
+    normalizeNameTokens(reservationName);
+
+  const verifiedTokens =
+    normalizeNameTokens(verifiedName);
+
+  if (
+    reservationTokens.length === 0 ||
+    verifiedTokens.length === 0
+  ) {
+    return false;
+  }
+
+  return reservationTokens.every((token) =>
+    verifiedTokens.includes(token)
+  );
+}
+
+export async function handleGuestIdentityStripeEvent(
+  prisma: PrismaClient,
+  event: Stripe.Event
+) {
+  if (
+    event.type !== "identity.verification_session.verified" &&
+    event.type !== "identity.verification_session.requires_input"
+  ) {
+    return {
+      handled: false,
+    };
+  }
+
+  const session =
+    event.data.object as Stripe.Identity.VerificationSession;
+
+  const flow = String(
+    session.metadata?.flow ?? ""
+  ).trim();
+
+  if (flow !== "pin_go_direct_booking_guest_identity") {
+    return {
+      handled: false,
+      skipped: true,
+      reason: "IDENTITY_FLOW_NOT_MANAGED_BY_PIN_GO",
+    };
+  }
+
+  let reservation = await prisma.reservation.findUnique({
+    where: {
+      stripeIdentityVerificationSessionId: session.id,
+    },
+    select: reservationSelect,
+  });
+
+  if (!reservation) {
+    const metadataReservationId = String(
+      session.metadata?.reservationId ?? ""
+    ).trim();
+
+    const metadataReservationNumber = String(
+      session.metadata?.reservationNumber ?? ""
+    ).trim();
+
+    if (metadataReservationId && metadataReservationNumber) {
+      const metadataReservation =
+        await prisma.reservation.findFirst({
+          where: {
+            id: metadataReservationId,
+            reservationNumber: metadataReservationNumber,
+          },
+          select: reservationSelect,
+        });
+
+      if (metadataReservation) {
+        await prisma.reservation.update({
+          where: {
+            id: metadataReservation.id,
+          },
+          data: {
+            identityVerificationProvider: "STRIPE_IDENTITY",
+            stripeIdentityVerificationSessionId: session.id,
+          },
+        });
+
+        reservation = metadataReservation;
+      }
+    }
+  }
+
+  if (!reservation) {
+    console.error(
+      "[GUEST_IDENTITY] reservation not resolved for Stripe event",
+      {
+        eventId: event.id,
+        eventType: event.type,
+        verificationSessionId: session.id,
+      }
+    );
+
+    throw new Error(
+      "GUEST_IDENTITY_WEBHOOK_RESERVATION_NOT_RESOLVED"
+    );
+  }
+
+  if (
+    reservation.stripeIdentityVerificationLastEventId ===
+    event.id
+  ) {
+    return {
+      handled: true,
+      skipped: true,
+      reason: "STRIPE_EVENT_ALREADY_PROCESSED",
+      reservationNumber: reservation.reservationNumber,
+    };
+  }
+
+  const eventAt = new Date(event.created * 1000);
+
+  if (
+    event.type ===
+    "identity.verification_session.verified"
+  ) {
+    const verifiedSession =
+      await stripe.identity.verificationSessions.retrieve(
+        session.id,
+        {
+          expand: ["verified_outputs"],
+        }
+      );
+
+    const verifiedFirstName = String(
+      verifiedSession.verified_outputs
+        ?.first_name ?? ""
+    ).trim();
+
+    const verifiedLastName = String(
+      verifiedSession.verified_outputs
+        ?.last_name ?? ""
+    ).trim();
+
+    const verifiedLegalName = [
+      verifiedFirstName,
+      verifiedLastName,
+    ]
+      .filter(Boolean)
+      .join(" ")
+      .trim();
+
+    const declaredLegalName = String(
+      reservation.identityDeclaredLegalName ?? ""
+    ).trim();
+
+    const declaredNameMatches =
+      namesHaveSameTokens(
+        declaredLegalName,
+        verifiedLegalName
+      );
+
+    const bookingNameMatches =
+      reservationNameMatchesVerifiedName(
+        reservation.guestName,
+        verifiedLegalName
+      );
+
+    const identityNameMatches =
+      declaredNameMatches &&
+      bookingNameMatches;
+
+    if (!identityNameMatches) {
+      const updated =
+        await prisma.reservation.updateMany({
+          where: {
+            id: reservation.id,
+            OR: [
+              {
+                stripeIdentityVerificationLastEventId:
+                  null,
+              },
+              {
+                stripeIdentityVerificationLastEventId:
+                  {
+                    not: event.id,
+                  },
+              },
+            ],
+          },
+          data: {
+            verificationStatus:
+              "REVIEW_REQUIRED",
+            identityVerificationProvider:
+              "STRIPE_IDENTITY",
+            stripeIdentityVerificationStatus:
+              session.status,
+            stripeIdentityVerificationLastError:
+              "IDENTITY_NAME_MISMATCH",
+            stripeIdentityVerificationLastEventAt:
+              eventAt,
+            stripeIdentityVerificationLastEventId:
+              event.id,
+            identityVerifiedLegalName:
+              verifiedLegalName || null,
+            identityNameMatchStatus:
+              "REVIEW_REQUIRED",
+          },
+        });
+
+      if (updated.count === 0) {
+        return {
+          handled: true,
+          skipped: true,
+          reason:
+            "STRIPE_EVENT_ALREADY_PROCESSED",
+          reservationNumber:
+            reservation.reservationNumber,
+        };
+      }
+
+      const readiness =
+        await evaluateGuestAccessReadiness(
+          prisma,
+          reservation.id,
+          {
+            persist: true,
+            now: eventAt,
+          }
+        );
+
+      console.warn(
+        "[GUEST_IDENTITY] verified identity name mismatch",
+        {
+          reservationNumber:
+            reservation.reservationNumber,
+          verificationSessionId:
+            session.id,
+          eventId: event.id,
+          declaredNameMatches,
+          bookingNameMatches,
+        }
+      );
+
+      return {
+        handled: true,
+        verified: false,
+        reviewRequired: true,
+        reason: "IDENTITY_NAME_MISMATCH",
+        reservationNumber:
+          reservation.reservationNumber,
+        readiness,
+      };
+    }
+
+    const updated =
+      await prisma.reservation.updateMany({
+        where: {
+          id: reservation.id,
+          OR: [
+            {
+              stripeIdentityVerificationLastEventId:
+                null,
+            },
+            {
+              stripeIdentityVerificationLastEventId:
+                {
+                  not: event.id,
+                },
+            },
+          ],
+        },
+        data: {
+          verificationStatus: "COMPLETED",
+          verifiedAt:
+            reservation.verifiedAt ?? eventAt,
+          identityVerificationProvider:
+            "STRIPE_IDENTITY",
+          stripeIdentityVerificationStatus:
+            session.status,
+          stripeIdentityVerificationLastError:
+            null,
+          stripeIdentityVerificationLastEventAt:
+            eventAt,
+          stripeIdentityVerificationLastEventId:
+            event.id,
+          identityVerifiedLegalName:
+            verifiedLegalName,
+          identityNameMatchStatus: "MATCHED",
+        },
+      });
+
+    if (updated.count === 0) {
+      return {
+        handled: true,
+        skipped: true,
+        reason:
+          "STRIPE_EVENT_ALREADY_PROCESSED",
+        reservationNumber:
+          reservation.reservationNumber,
+      };
+    }
+
+    const readiness =
+      await evaluateGuestAccessReadiness(
+        prisma,
+        reservation.id,
+        {
+          persist: true,
+          now: eventAt,
+        }
+      );
+
+    console.log(
+      "[GUEST_IDENTITY] identity verified and matched",
+      {
+        reservationNumber:
+          reservation.reservationNumber,
+        verificationSessionId: session.id,
+        eventId: event.id,
+        guestAccessReady: readiness.ready,
+        blockers: readiness.blockers,
+      }
+    );
+
+    return {
+      handled: true,
+      verified: true,
+      reservationNumber:
+        reservation.reservationNumber,
+      readiness,
+    };
+  }
+ 
+  if (
+    reservation.verificationStatus === "COMPLETED" &&
+    reservation.verifiedAt
+  ) {
+    console.warn(
+      "[GUEST_IDENTITY] stale requires_input ignored",
+      {
+        reservationNumber:
+          reservation.reservationNumber,
+        verificationSessionId: session.id,
+        eventId: event.id,
+      }
+    );
+
+    return {
+      handled: true,
+      skipped: true,
+      reason:
+        "VERIFICATION_ALREADY_COMPLETED",
+      reservationNumber:
+        reservation.reservationNumber,
+    };
+  }
+
+  const nextAttempts =
+    reservation.identityVerificationAttempts + 1;
+
+  const nextVerificationStatus =
+    nextAttempts >=
+    MAX_IDENTITY_VERIFICATION_ATTEMPTS
+      ? "FAILED"
+      : "REQUIRES_INPUT";
+
+  const updated = await prisma.reservation.updateMany({
+    where: {
+      id: reservation.id,
+      verificationStatus: {
+        not: "COMPLETED",
+      },
+      OR: [
+        {
+          stripeIdentityVerificationLastEventId: null,
+        },
+        {
+          stripeIdentityVerificationLastEventId: {
+            not: event.id,
+          },
+        },
+      ],
+    },
+    data: {
+      verificationStatus: nextVerificationStatus,
+      identityVerificationProvider: "STRIPE_IDENTITY",
+      stripeIdentityVerificationStatus: session.status,
+      stripeIdentityVerificationLastError:
+        session.last_error?.code ??
+        "IDENTITY_VERIFICATION_REQUIRES_INPUT",
+      stripeIdentityVerificationLastEventAt: eventAt,
+      stripeIdentityVerificationLastEventId: event.id,
+      identityVerificationAttempts: {
+        increment: 1,
+      },
+    },
+  });
+
+  if (updated.count === 0) {
+    return {
+      handled: true,
+      skipped: true,
+      reason:
+        "STRIPE_EVENT_ALREADY_PROCESSED_OR_COMPLETED",
+      reservationNumber:
+        reservation.reservationNumber,
+    };
+  }
+
+  const readiness =
+    await evaluateGuestAccessReadiness(
+      prisma,
+      reservation.id,
+      {
+        persist: true,
+        now: eventAt,
+      }
+    );
+
+  console.warn(
+    "[GUEST_IDENTITY] verification requires input",
+    {
+      reservationNumber:
+        reservation.reservationNumber,
+      verificationSessionId: session.id,
+      eventId: event.id,
+      errorCode:
+        session.last_error?.code ?? null,
+      attempts: nextAttempts,
+      maxAttempts:
+        MAX_IDENTITY_VERIFICATION_ATTEMPTS,
+    }
+  );
+
+  return {
+    handled: true,
+    verified: false,
+    requiresInput: true,
+    maxAttemptsReached:
+      nextAttempts >=
+      MAX_IDENTITY_VERIFICATION_ATTEMPTS,
+    reservationNumber:
+      reservation.reservationNumber,
+    readiness,
+  };
+}

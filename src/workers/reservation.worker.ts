@@ -3,6 +3,7 @@ import dotenv from "dotenv";
 dotenv.config({ path: "./.env", override: true });
 import {
   PaymentState,
+  ReservationStatus,
   AccessStatus,
   AccessMethod,
   AccessGrantType,
@@ -21,6 +22,13 @@ import {
   sendCleaningStartSms,
   sendCleaningEndSms,
 } from "../services/messaging.service";
+import {
+  sendLoggedEmail,
+} from "../services/email-delivery.service";
+
+import {
+  sendGuestAccessPasscodeEmail,
+} from "../lib/mailer";
 import { sendGuestAccessLinkSms } from "../services/guestLinkSms.service";
 import { sendPreCheckinSms } from "../services/preCheckinSms.service";
 import { sendCheckoutSms } from "../services/checkoutSms.service";
@@ -29,7 +37,6 @@ import { expireNfcAssignments } from "../services/nfc-expire.service";
 import { expireGuestNfcAssignments } from "../services/nfc-expire.service";
 import { expireCleaningNfcAssignments } from "../services/nfc-expire.service";
 import { retryPendingNfcSync } from "../services/nfc-sync.service";
-import { retryNfcAssignments } from "../services/nfc-retry.service";
 import { ttlockChangeCardPeriod, ttlockListCards } from "../ttlock/ttlock.card";
 import { ttlockChangePasscode } from "../ttlock/ttlock.passcode";
 import { NfcCardStatus } from "@prisma/client";
@@ -219,6 +226,42 @@ function toErrString(e: unknown) {
   return String(e);
 }
 
+function hasGuestSmsConsent(
+  externalRaw: unknown
+): boolean {
+  if (
+    !externalRaw ||
+    typeof externalRaw !== "object" ||
+    Array.isArray(externalRaw)
+  ) {
+    return false;
+  }
+
+  const consent = (
+    externalRaw as Record<string, unknown>
+  ).consent;
+
+  if (
+    !consent ||
+    typeof consent !== "object" ||
+    Array.isArray(consent)
+  ) {
+    return false;
+  }
+
+  const consentRecord =
+    consent as Record<string, unknown>;
+
+  const acceptedAt = String(
+    consentRecord.acceptedAt ?? ""
+  ).trim();
+
+  return (
+    consentRecord.smsConsent === true &&
+    acceptedAt.length > 0
+  );
+}
+
 function maskPasscode(code: string) {
   if (code.length <= 2) return '**';
   return `${code.slice(0, 1)}***${code.slice(-1)}`;
@@ -266,67 +309,78 @@ async function revokeStaffAccess(_assignment: any, _grant: any) {
 // ====== CORE QUERIES (GUEST ONLY) ======
 
 async function fetchDueCheckins(now: Date) {
-  const paymentFilter = ALLOW_UNPAID ? undefined : ({ paymentState: PaymentState.PAID } as const);
-const debug = await prisma.accessGrant.count({
-  where: {
-    type: AccessGrantType.GUEST,
-    status: AccessStatus.PENDING,
-    startsAt: { lte: now },
-    endsAt: { gt: now },
-  },
-});
-log("DEBUG pending grants in-window", { debug });
+  const provisionThrough = new Date(
+    now.getTime() + 2 * 60 * 60 * 1000
+  );
 
-const debugRes = await prisma.reservation.count({
-  where: { checkIn: { lte: now }, checkOut: { gt: now } },
-});
-log("DEBUG reservations in-window", { debugRes });
-
- 
- return prisma.reservation.findMany({
+  return prisma.reservation.findMany({
     where: {
-      checkIn: { lte: now },
-      checkOut: { gt: now },
-      ...(paymentFilter ?? {}),
+      status: ReservationStatus.ACTIVE,
+      paymentState: PaymentState.PAID,
+      checkIn: {
+        lte: provisionThrough,
+      },
+      checkOut: {
+        gt: now,
+      },
       accessGrants: {
         some: {
           type: AccessGrantType.GUEST,
+          method:
+            AccessMethod.PASSCODE_TIMEBOUND,
           status: AccessStatus.PENDING,
-          startsAt: { lte: now },
-          endsAt: { gt: now },
+          startsAt: {
+            lte: provisionThrough,
+          },
+          endsAt: {
+            gt: now,
+          },
         },
         none: {
           type: AccessGrantType.GUEST,
           status: AccessStatus.ACTIVE,
-          startsAt: { lte: now },
-          endsAt: { gt: now },
+          endsAt: {
+            gt: now,
+          },
         },
       },
     },
     take: BATCH_SIZE,
-    orderBy: { checkIn: "asc" },
+    orderBy: {
+      checkIn: "asc",
+    },
     include: {
-      // ✅ NECESARIO para el billing gate (Cambio 2)
-      property: { select: { organizationId: true } },
-
+           property: {
+        select: {
+          organizationId: true,
+          name: true,
+          timezone: true,
+        },
+      },
       accessGrants: {
         where: {
           type: AccessGrantType.GUEST,
+          method:
+            AccessMethod.PASSCODE_TIMEBOUND,
           status: AccessStatus.PENDING,
-          startsAt: { lte: now },
-          endsAt: { gt: now },
+          startsAt: {
+            lte: provisionThrough,
+          },
+          endsAt: {
+            gt: now,
+          },
         },
-        orderBy: { startsAt: "asc" },
+        orderBy: {
+          startsAt: "asc",
+        },
         take: 5,
         include: {
           lock: true,
-          // ✅ removido: reservation.select.guestPhone (usa r.guestPhone)
         },
       },
     },
   });
 }
-
 async function fetchDueCheckouts(now: Date) {
   return prisma.reservation.findMany({
     where: {
@@ -436,240 +490,403 @@ async function ensureStaffGrantForAssignment(a: any) {
 // ====== PROCESSORS ======
 
 async function processCheckins(now: Date) {
-  const reservations = await fetchDueCheckins(now);
-  log('processCheckins result', { count: reservations.length });
+  const reservations =
+    await fetchDueCheckins(now);
+
+  log("processCheckins result", {
+    count: reservations.length,
+  });
 
   if (reservations.length === 0) return;
 
-  log(`Checkins due: ${reservations.length}`);
+  for (const reservation of reservations) {
+    for (const grant of reservation.accessGrants) {
+      if (
+        grant.type !== AccessGrantType.GUEST ||
+        grant.method !==
+          AccessMethod.PASSCODE_TIMEBOUND
+      ) {
+        continue;
+      }
 
-for (const r of reservations) {
-  for (const grant of r.accessGrants) {
-    if (grant.type !== AccessGrantType.GUEST) continue;
+      try {
+        const organizationId =
+          reservation.property?.organizationId;
 
-    try {
-  // Guard-rail: asegura que siga PENDING (NO lo pongas ACTIVE aquí)
-  const locked = await prisma.accessGrant.updateMany({
-    where: { id: grant.id, status: AccessStatus.PENDING },
-    data: { lastError: null },
-  });
+        if (!organizationId) {
+          await prisma.accessGrant.update({
+            where: {
+              id: grant.id,
+            },
+            data: {
+              status: AccessStatus.FAILED,
+              lastError:
+                "Missing reservation.property.organizationId",
+            },
+          });
 
-// 1) Activar grant usando TTLock Brain (maneja TTLock + Prisma)
+          continue;
+        }
 
-  const res = await activateGrant(grant.id);
-  if ((res as any)?.ok === true || (res as any)?.skipped === true) {
-  await prisma.accessGrant.update({ where: { id: grant.id }, data: { lastError: null } });
+        // Billing siempre antes de TTLock.
+        const entitled =
+          await isOrgEntitled(
+            organizationId,
+            now
+          );
 
-// ===== PIN&GO: CLEANING CONFIRMATION FLOW =====
-// Cleaning staff assignment and cleaning NFC are now created only
-// after the cleaner confirms availability from the SMS link.
-// Do NOT auto-create StaffAssignment or CLEANING NfcAssignment here.
-log("Cleaning auto-assignment skipped; waiting for confirmation", {
-  reservationId: r.id,
-});
+        if (!entitled.ok) {
+          await prisma.accessGrant.update({
+            where: {
+              id: grant.id,
+            },
+            data: {
+              status: AccessStatus.SUSPENDED,
+              lastError: `Blocked by billing: ${entitled.reason}`,
+            },
+          });
 
-  // ✅ 2) ACTIVAR NFC (GUEST) por periodo via GATEWAY (changeType=2)
-  try {
-    // 2A) Necesitamos el lockId real TTLock
-    // Opción A: si grant ya trae lock embebido (ideal)
-    // const ttlockLockId = (grant as any)?.lock?.ttlockLockId;
+          continue;
+        }
 
-    // Opción B: lookup rápido por DB (seguro y simple)
-    const lock = await prisma.lock.findUnique({ where: { id: grant.lockId } });
-    const ttlockLockId = lock?.ttlockLockId;
+        // Confirma que el grant todavía está PENDING.
+        const claimed =
+          await prisma.accessGrant.updateMany({
+            where: {
+              id: grant.id,
+              status: AccessStatus.PENDING,
+            },
+            data: {
+              lastError: null,
+            },
+          });
 
-    if (!ttlockLockId) throw new Error("Missing grant.lock.ttlockLockId");
+        if (claimed.count === 0) {
+          continue;
+        }
 
-// 2B) Buscar asignaciones NFC de esa reserva (solo GUEST)
-let assigns = await prisma.nfcAssignment.findMany({
-  where: {
-    reservationId: r.id,
-    role: NfcAssignmentRole.GUEST,
-    status: { in: [NfcAssignmentStatus.ACTIVE, NfcAssignmentStatus.FAILED, NfcAssignmentStatus.ENDED] },
-  },
-  include: { NfcCard: true },
-});
+        // TTLock Brain crea únicamente PASSCODE PERIOD/TIMED.
+        const activation =
+          await activateGrant(grant.id);
 
-const GUEST_CARDS = 2;
+        if (
+          (activation as any)?.ok !== true
+        ) {
+          throw new Error(
+            `GUEST_PASSCODE_ACTIVATION_FAILED:${
+              (activation as any)?.reason ??
+              "UNKNOWN"
+            }`
+          );
+        }
 
-// assigns ya viene del findMany include NfcCard
-if (assigns.length < GUEST_CARDS) {
-  await assignNfcCards(prisma, {
-    reservationId: r.id,
-    ttlockLockId: Number(ttlockLockId),
-    propertyId: String(r.propertyId),
-    role: NfcAssignmentRole.GUEST,
-    startsAt: grant.startsAt,
-    endsAt: grant.endsAt,
-    count: GUEST_CARDS - assigns.length, // ✅ completa hasta 2
-    skipTtlock: true,
-  });
+        const passcodePlain =
+          (activation as any)
+            ?.passcodePlain ?? null;
 
-  assigns = await prisma.nfcAssignment.findMany({
-    where: {
-      reservationId: r.id,
-      role: NfcAssignmentRole.GUEST,
-      status: { in: [NfcAssignmentStatus.ACTIVE, NfcAssignmentStatus.FAILED, NfcAssignmentStatus.ENDED] },
-    },
-    include: { NfcCard: true },
- 
-  });
-}
-
-const cardStatuses = await prisma.nfcCard.findMany({
-  where: { id: { in: assigns.map(x => x.nfcCardId) } },
-  select: { label: true, status: true },
-});
-log("NFC guest card statuses", { reservationId: r.id, cardStatuses });
-
-log("NFC assigns after ensure", {
-  reservationId: r.id,
-  count: assigns.length,
-  cards: assigns.map(x => x.NfcCard?.label),
-});
-
-for (const a of assigns) {
-  const cardId = a.NfcCard?.ttlockCardId;
-  if (!cardId) continue;
-
- console.log("[NFC] TTLOCK changePeriod WILL RUN", {
-  role: a.role,
-  lockId: Number(ttlockLockId),
-  cardId: Number(cardId),
-  start: grant.startsAt.toISOString(),
-  end: grant.endsAt.toISOString(),
-}); 
-
-  try {
-    await ttlockChangeCardPeriod({
-      lockId: Number(ttlockLockId),
-      cardId: Number(cardId),
-      startDate: grant.startsAt.getTime(),
-      endDate: grant.endsAt.getTime(),
-      changeType: 2,
-    });
-
-console.log("[NFC] TTLOCK changePeriod OK", {
-  role: a.role,
-  cardId: Number(cardId),
-});
-  
-   await prisma.$transaction([
-     prisma.nfcAssignment.update({
-       where: { id: a.id },
-       data: { status: NfcAssignmentStatus.ACTIVE, lastError: null },
-     }),
-     prisma.nfcCard.update({
-        where: { id: a.nfcCardId },
-        data: { status: NfcCardStatus.ASSIGNED }, // ✅ ESTA es la clave
-      }),
-    ]);
-  
-  } catch (e: any) {
-    await prisma.nfcAssignment.update({
-      where: { id: a.id },
-      data: { status: NfcAssignmentStatus.FAILED, lastError: String(e?.message ?? e) },
-    });
-    // ✅ sigue con la próxima card
-    continue;
-  }
-}
-
-    log("NFC activated", { reservationId: r.id, count: assigns.length });
-  } catch (e) {
-    const msg = toErrString(e);
-    errLog("NFC activate FAILED", { reservationId: r.id, grantId: grant.id, err: msg });
-
-    // opcional: guarda error en el grant o en assignments
-    await prisma.accessGrant.update({
-      where: { id: grant.id },
-      data: { lastError: `NFC_FAILED: ${msg}` },  
-      });
-  }
-}
-  if (locked.count === 0) continue;
-
-  // ===== CAMBIO 2: BILLING GATE (VA AQUÍ) =====
-  const organizationId = (r as any).property?.organizationId;
-
-  if (!organizationId) {
-    await prisma.accessGrant.update({
-      where: { id: grant.id },
-      data: {
-        status: AccessStatus.FAILED,
-        lastError: "Missing reservation.property.organizationId",
-      },
-    });
-    continue;
-  }
-
-  const entitled = await isOrgEntitled(organizationId, now);
-
-  if (!entitled.ok) {
-    await prisma.accessGrant.update({
-      where: { id: grant.id },
-      data: {
-        status: AccessStatus.SUSPENDED,
-        lastError: `Blocked by billing: ${entitled.reason}`,
-      },
-    });
-    continue; // ⛔ NO TTLOCK
-  }
-  // ===== FIN CAMBIO 2 =====
-
-
-// 3) SMS guest (flag)
-const phone = r.guestPhone;
-const ok = (res as any)?.ok === true;
-const code = (res as any)?.passcodePlain ?? null;
-
-   if (GUEST_SMS_ENABLED) {
-  try {
-    const result = await sendGuestPasscodeSms({
-      prisma,
-      reservationId: r.id,
-      accessGrantId: grant.id,
-      guestName: r.guestName,
-      guestPhone: r.guestPhone,
-      code,
-      validUntil: grant.endsAt,
-    });
-
-    if (result.ok) {
-      log(`Guest SMS sent`, {
-        reservationId: r.id,
-        grantId: grant.id,
-      });
-    } else if (result.skipped) {
-      log(`Guest SMS skipped`, {
-        reservationId: r.id,
-        reason: result.error,
-      });
-    } else {
-      throw new Error(result.error ?? "Unknown SMS error");
-    }
-  } catch (e) {
-    const msg = toErrString(e);
-    errLog(`Guest SMS FAILED for reservation ${r.id} grant ${grant.id} -> ${msg}`);
-
-    await prisma.accessGrant.update({
-      where: { id: grant.id },
-      data: { lastError: `SMS_FAILED: ${msg}` },
-    });
-  }
-} 
-
-  log(`Activated GUEST grant ${grant.id} (reservation ${r.id})`);
-
-  } catch (e) {
-        const msg = toErrString(e);
-
-        await prisma.accessGrant.update({
-          where: { id: grant.id },
-          data: { lastError: msg },
+        await prisma.reservation.update({
+          where: {
+            id: reservation.id,
+          },
+          data: {
+            guestAccessReleaseStatus:
+              "RELEASED",
+            guestAccessReleasedAt:
+              new Date(),
+            guestAccessReleaseLastError:
+              null,
+          },
         });
 
-        errLog(`Activation FAILED grant ${grant.id} (reservation ${r.id}) -> ${msg}`);
+        log("Guest passcode activated", {
+          reservationNumber:
+            reservation.reservationNumber ??
+            null,
+          reservationId: reservation.id,
+          accessGrantId: grant.id,
+          method:
+            AccessMethod.PASSCODE_TIMEBOUND,
+          startsAt:
+            grant.startsAt.toISOString(),
+          endsAt:
+            grant.endsAt.toISOString(),
+        });
+
+        // NFC es complementario y solamente aplica
+        // cuando el host eligió PASSCODE_PLUS_NFC.
+        if (
+          reservation.guestAccessModeSnapshot ===
+          "PASSCODE_PLUS_NFC"
+        ) {
+          try {
+            const existingAssignments =
+              await prisma.nfcAssignment.findMany({
+                where: {
+                  reservationId:
+                    reservation.id,
+                  role:
+                    NfcAssignmentRole.GUEST,
+                  status: {
+                    in: [
+                      NfcAssignmentStatus.SCHEDULED,
+                      NfcAssignmentStatus.PROVISIONING,
+                      NfcAssignmentStatus.ACTIVE,
+                      NfcAssignmentStatus.FAILED,
+                    ],
+                  },
+                },
+                select: {
+                  id: true,
+                },
+              });
+
+            const guestCardCount = 2;
+            const cardsNeeded = Math.max(
+              guestCardCount -
+                existingAssignments.length,
+              0
+            );
+
+            if (cardsNeeded > 0) {
+              await assignNfcCards(prisma, {
+                reservationId:
+                  reservation.id,
+                ttlockLockId: Number(
+                  grant.lock.ttlockLockId
+                ),
+                propertyId:
+                  reservation.propertyId,
+                role:
+                  NfcAssignmentRole.GUEST,
+                startsAt: grant.startsAt,
+                endsAt: grant.endsAt,
+                count: cardsNeeded,
+                skipTtlock: true,
+              });
+            }
+
+            log("Guest NFC scheduled", {
+              reservationNumber:
+                reservation.reservationNumber ??
+                null,
+              reservationId:
+                reservation.id,
+              requiredCards: guestCardCount,
+              existingCards:
+                existingAssignments.length,
+              scheduledCards: cardsNeeded,
+            });
+          } catch (error) {
+            errLog(
+              "Guest NFC scheduling FAILED",
+              {
+                reservationNumber:
+                  reservation.reservationNumber ??
+                  null,
+                reservationId:
+                  reservation.id,
+                accessGrantId: grant.id,
+                error:
+                  toErrString(error),
+              }
+            );
+          }
+        }
+
+               const reservationNumber =
+          reservation.reservationNumber ??
+          "Pending";
+
+        const emailSubject =
+          `Your Pin&Go access is ready - Reservation #${reservationNumber}`;
+
+        const emailDeliveryResult =
+          await sendLoggedEmail({
+            prisma,
+            type: "GUEST_ACCESS_PASSCODE",
+            to: reservation.guestEmail,
+            subject: emailSubject,
+            reservationId: reservation.id,
+            propertyId:
+              reservation.propertyId,
+            organizationId:
+              reservation.property.organizationId,
+
+            // No guardar el passcode en logs.
+            retryPayload: {
+              reservationNumber,
+              accessGrantId: grant.id,
+              validFrom:
+                grant.startsAt.toISOString(),
+              validUntil:
+                grant.endsAt.toISOString(),
+            },
+
+            send: async () => {
+              if (!passcodePlain) {
+                throw new Error(
+                  "GUEST_PASSCODE_MISSING_FOR_EMAIL"
+                );
+              }
+
+              return sendGuestAccessPasscodeEmail({
+                to: String(
+                  reservation.guestEmail ?? ""
+                ),
+                reservationNumber,
+                guestName:
+                  reservation.guestName,
+                propertyName:
+                  reservation.property.name,
+                passcode:
+                  String(passcodePlain),
+                unlockKey:
+                  grant.unlockKey ?? "#",
+                validFrom:
+                  grant.startsAt,
+                validUntil:
+                  grant.endsAt,
+                propertyTimeZone:
+                  reservation.property.timezone,
+              });
+            },
+          });
+
+        if (emailDeliveryResult.ok) {
+          log("Guest access email sent", {
+            reservationNumber:
+              reservation.reservationNumber ??
+              null,
+            reservationId:
+              reservation.id,
+            accessGrantId: grant.id,
+          });
+        } else {
+          const emailError =
+            emailDeliveryResult.error ??
+            "Guest access email was not delivered";
+
+          errLog(
+            "Guest access email FAILED",
+            {
+              reservationNumber:
+                reservation.reservationNumber ??
+                null,
+              reservationId:
+                reservation.id,
+              accessGrantId: grant.id,
+              status:
+                emailDeliveryResult.status,
+              error: emailError,
+            }
+          );
+
+          await prisma.reservation.update({
+            where: {
+              id: reservation.id,
+            },
+            data: {
+              guestAccessReleaseLastError:
+                `EMAIL_DELIVERY_FAILED:${emailError}`,
+            },
+          });
+        }
+
+        const guestSmsConsent =
+          hasGuestSmsConsent(
+            reservation.externalRaw
+          );
+
+                if (
+          GUEST_SMS_ENABLED &&
+          guestSmsConsent
+        ) {
+          try {
+            const result =
+              await sendGuestPasscodeSms({
+                prisma,
+                reservationId:
+                  reservation.id,
+                accessGrantId: grant.id,
+                guestName:
+                  reservation.guestName,
+                guestPhone:
+                  reservation.guestPhone,
+                code: passcodePlain,
+                validUntil: grant.endsAt,
+              });
+
+            if (result.ok) {
+              log("Guest SMS sent", {
+                reservationNumber:
+                  reservation.reservationNumber ??
+                  null,
+                reservationId:
+                  reservation.id,
+                accessGrantId: grant.id,
+              });
+            } else if (result.skipped) {
+              log("Guest SMS skipped", {
+                reservationNumber:
+                  reservation.reservationNumber ??
+                  null,
+                reason: result.error,
+              });
+            } else {
+              throw new Error(
+                result.error ??
+                  "Unknown SMS error"
+              );
+            }
+                  } catch (error) {
+            errLog("Guest SMS FAILED", {
+              reservationNumber:
+                reservation.reservationNumber ??
+                null,
+              reservationId:
+                reservation.id,
+              accessGrantId: grant.id,
+              error: toErrString(error),
+            });
+          }
+        } else {
+          log("Guest SMS skipped", {
+            reservationNumber:
+              reservation.reservationNumber ??
+              null,
+            reservationId:
+              reservation.id,
+            accessGrantId: grant.id,
+            reason: !GUEST_SMS_ENABLED
+              ? "GUEST_SMS_DISABLED"
+              : "SMS_CONSENT_NOT_GRANTED",
+          });
+        }
+      } catch (error) {
+        const message =
+          toErrString(error);
+
+        await prisma.accessGrant.update({
+          where: {
+            id: grant.id,
+          },
+          data: {
+            lastError: message,
+          },
+        });
+
+        errLog(
+          "Guest activation FAILED",
+          {
+            reservationNumber:
+              reservation.reservationNumber ??
+              null,
+            reservationId:
+              reservation.id,
+            accessGrantId: grant.id,
+            error: message,
+          }
+        );
       }
     }
   }
@@ -780,7 +997,7 @@ try {
 
     await prisma.nfcCard.updateMany({
       where: {
-        assignments: {
+        NfcAssignment: {
           some: {
             reservationId: r.id,
             role: NfcAssignmentRole.GUEST,
@@ -895,258 +1112,206 @@ try {
 // ---- Cleaning processors ----
 
 async function processCleaningActivations(now: Date) {
-  const assignments = await fetchDueCleaningAssignments(now);
-  log('processCleaningActivations result', { count: assignments.length });
+  const assignments =
+    await fetchDueCleaningAssignments(now);
+
+  log("processCleaningActivations result", {
+    count: assignments.length,
+  });
 
   if (assignments.length === 0) return;
 
-  for (const a of assignments) {
+  for (const assignment of assignments) {
     try {
-      // Guard-rail: lock SCHEDULED -> ACTIVE (idempotente)
-      const locked = await prisma.staffAssignment.updateMany({
-        where: { id: a.id, status: StaffAssignmentStatus.SCHEDULED },
-        data: { status: StaffAssignmentStatus.ACTIVE, lastError: null },
-      });
+      const activeCleaningNfc =
+        await prisma.nfcAssignment.findFirst({
+          where: {
+            reservationId:
+              assignment.reservationId,
+            role: NfcAssignmentRole.CLEANING,
+            status: NfcAssignmentStatus.ACTIVE,
+            startsAt: {
+              lte: now,
+            },
+            endsAt: {
+              gt: now,
+            },
+          },
+          include: {
+            NfcCard: true,
+          },
+          orderBy: {
+            createdAt: "desc",
+          },
+        });
 
-      if (locked.count === 0) continue;
+      if (!activeCleaningNfc) {
+        const latestCleaningNfc =
+          await prisma.nfcAssignment.findFirst({
+            where: {
+              reservationId:
+                assignment.reservationId,
+              role: NfcAssignmentRole.CLEANING,
+            },
+            select: {
+              status: true,
+              lastError: true,
+              retryCount: true,
+            },
+            orderBy: {
+              createdAt: "desc",
+            },
+          });
 
-      const grant = await ensureStaffGrantForAssignment(a);
+        throw new Error(
+          latestCleaningNfc
+            ? `CLEANING_NFC_NOT_ACTIVE:status=${latestCleaningNfc.status};retryCount=${latestCleaningNfc.retryCount};error=${latestCleaningNfc.lastError ?? "none"}`
+            : "CLEANING_NFC_ASSIGNMENT_NOT_FOUND"
+        );
+      }
 
-      // Guard-rail grant: solo PENDING -> (seguimos) y luego lo ponemos ACTIVE
-      const grantLocked = await prisma.accessGrant.updateMany({
-        where: { id: grant.id, status: AccessStatus.PENDING },
-        data: { lastError: null },
-      });
+      const claimed =
+        await prisma.staffAssignment.updateMany({
+          where: {
+            id: assignment.id,
+            status:
+              StaffAssignmentStatus.SCHEDULED,
+          },
+          data: {
+            status: StaffAssignmentStatus.ACTIVE,
+            lastError: null,
+          },
+        });
 
-      if (grantLocked.count === 0) {
-        log('Cleaning activation skipped (grant not PENDING)', { grantId: grant.id });
+      if (claimed.count === 0) {
         continue;
       }
 
-// ✅ PIN&GO: ACTIVAR NFC CLEANING EN EL MOMENTO (checkout + offset)
-try {
-  // lock TTLock id
-  const lockIdTt = a.accessGrant?.lock?.ttlockLockId
-    ? Number(a.accessGrant.lock.ttlockLockId)
-    : Number((await prisma.lock.findFirst({
-        where: { propertyId: a.reservation.propertyId, isActive: true },
-        orderBy: { createdAt: "asc" },
-        select: { ttlockLockId: true },
-      }))?.ttlockLockId);
+      const grant =
+        await ensureStaffGrantForAssignment(
+          assignment
+        );
 
-  if (!lockIdTt) throw new Error("Missing ttlockLockId for cleaning activation");
-
-  // buscamos la(s) tarjeta(s) CLEANING pre-asignada(s) a esta reserva
-  const cleanAssigns = await prisma.nfcAssignment.findMany({
-    where: {
-      reservationId: a.reservationId,
-      role: NfcAssignmentRole.CLEANING,
-      // si tu pre-assign la deja ACTIVE, esto basta:
-      status: NfcAssignmentStatus.ACTIVE,
-    },
-    include: { NfcCard: true },
-    orderBy: { createdAt: "asc" },
-    take: 1, // Pin&Go: 1 cleaning
-  });
-
-  if (cleanAssigns.length === 0) {
-    throw new Error("No CLEANING NfcAssignment ACTIVE found to activate");
-  }
-
-  const na = cleanAssigns[0];
-  const cardId = na.NfcCard?.ttlockCardId;
-  if (!cardId) throw new Error("Cleaning assignment missing NfcCard.ttlockCardId");
-
-  // ⚠️ usa la ventana de cleaning (StaffAssignment), NO la del guest grant
-  const startMs = new Date(a.startsAt).getTime();
-  const endMs = new Date(a.endsAt).getTime();
-
-  await ttlockChangeCardPeriod({
-    lockId: lockIdTt,
-    cardId: Number(cardId),
-    startDate: startMs,
-    endDate: endMs,
-    changeType: 2,
-  });
-
-  await prisma.nfcAssignment.update({
-    where: { id: na.id },
-    data: { lastError: null }, // status se queda ACTIVE
-  });
-
-  log("Cleaning NFC activated", {
-    reservationId: a.reservationId,
-    card: na.NfcCard?.label,
-    lockIdTt,
-    start: new Date(startMs).toISOString(),
-    end: new Date(endMs).toISOString(),
-  });
-} catch (e: any) {
-  const msg = toErrString(e);
-  errLog("Cleaning NFC activation FAILED", { staffAssignmentId: a.id, err: msg });
-
-  // deja StaffAssignment ACTIVE pero con error para debug/retry
-  await prisma.staffAssignment.update({
-    where: { id: a.id },
-    data: { lastError: `CLEANING_NFC_FAILED: ${msg}` },
-  }).catch(() => {});
-}
-
-/*
-      const payload = await activateGrant(grant, r.guestPhone ?? undefined);
-
-      await prisma.accessGrant.update({
-        where: { id: grant.id },
-        data: {
-          status: AccessStatus.ACTIVE,
-          lastError: null,
-          ttlockPayload: payload?.ttlockPayload ?? grant.ttlockPayload ?? null,
-          ttlockRefId: payload?.ttlockRefId ?? grant.ttlockRefId ?? null,
-        },
-      });
-*/
-     if (grantLocked.count === 0) {
-       log('Cleaning activation skipped (grant not PENDING)', { grantId: grant.id });
-       continue;
-     }
-
-     // ✅ ===== PIN&GO CLEANING NFC ACTIVATION =====
-      try {
-
-        const lock = await prisma.lock.findUnique({
-          where: { id: grant.lockId },
-        });
-
-        const ttlockLockId = lock?.ttlockLockId;
-        if (!ttlockLockId) throw new Error("Missing ttlockLockId");
-
-        const reservationId = a.reservationId;
-        const propertyId = a.propertyId;
-
-        const cleaningStart = new Date(a.startsAt);
-        const cleaningEnd   = new Date(a.endsAt);
-
-        let assigns = await prisma.nfcAssignment.findMany({
+      const activatedGrant =
+        await prisma.accessGrant.updateMany({
           where: {
-            reservationId,
-            role: NfcAssignmentRole.CLEANING,
-            status: {
-              in: [
-                NfcAssignmentStatus.ACTIVE,
-                NfcAssignmentStatus.FAILED,
-                NfcAssignmentStatus.ENDED,
-              ],
-            },
+            id: grant.id,
+            status: AccessStatus.PENDING,
           },
-          include: { NfcCard: true },
+          data: {
+            status: AccessStatus.ACTIVE,
+            ttlockRefId: String(
+              activeCleaningNfc.NfcCard
+                .ttlockCardId
+            ),
+            lastError: null,
+          },
         });
 
-        const CLEANING_CARDS = 1;
-
-        if (assigns.length < CLEANING_CARDS) {
-          await assignNfcCards(prisma, {
-            reservationId,
-            ttlockLockId: Number(ttlockLockId),
-            propertyId: String(propertyId),
-            role: NfcAssignmentRole.CLEANING,
-            startsAt: cleaningStart,
-            endsAt: cleaningEnd,
-            count: CLEANING_CARDS - assigns.length,
-            skipTtlock: false,
-          });
-
-          assigns = await prisma.nfcAssignment.findMany({
+      if (activatedGrant.count === 0) {
+        const currentGrant =
+          await prisma.accessGrant.findUnique({
             where: {
-              reservationId,
-              role: NfcAssignmentRole.CLEANING,
+              id: grant.id,
             },
-            include: { NfcCard: true },
+            select: {
+              status: true,
+            },
           });
+
+        if (
+          currentGrant?.status !==
+          AccessStatus.ACTIVE
+        ) {
+          throw new Error(
+            `CLEANING_ACCESS_GRANT_NOT_ACTIVATABLE:${currentGrant?.status ?? "NOT_FOUND"}`
+          );
         }
-
-        for (const na of assigns) {
-         const cardId = na.NfcCard?.ttlockCardId;
-         if (!cardId) continue;
-
-         await ttlockChangeCardPeriod({
-           lockId: Number(ttlockLockId),
-           cardId: Number(cardId),
-           startDate: cleaningStart.getTime(),
-           endDate: cleaningEnd.getTime(),
-           changeType: 2,
-         });
-
-         await prisma.nfcAssignment.update({
-           where: { id: na.id },
-           data: {
-             status: NfcAssignmentStatus.ACTIVE,
-             lastError: null,
-           },
-        });
       }
 
-      log("NFC cleaning activated", {
-        reservationId,
-        count: assigns.length,
-      });
+      if (CLEANING_SMS_ENABLED) {
+        try {
+          const result =
+            await sendCleaningStartSms({
+              prisma,
+              accessGrantId: grant.id,
+              phoneE164:
+                assignment.staffMember?.phoneE164,
+              staffName:
+                assignment.staffMember?.fullName,
+              propertyName:
+                assignment.reservation?.property
+                  ?.name,
+              roomName:
+                assignment.reservation?.roomName,
+              startsAt: assignment.startsAt,
+              endsAt: assignment.endsAt,
+            });
 
-    } catch (e) {
-      const msg = toErrString(e);
-      errLog("NFC cleaning activate FAILED", {
-        staffAssignmentId: a.id,
-        grantId: grant.id,
-        err: msg,
-      });
-    }
+          if (result.ok) {
+            log("Cleaning SMS sent (START)", {
+              assignmentId: assignment.id,
+            });
+          } else if (result.skipped) {
+            log("Cleaning SMS skipped (START)", {
+              assignmentId: assignment.id,
+              reason: result.error,
+            });
+          } else {
+            throw new Error(
+              result.error ??
+                "Unknown SMS error"
+            );
+          }
+        } catch (error) {
+          errLog(
+            `Cleaning SMS START FAILED assignment ${assignment.id} -> ${toErrString(error)}`
+          );
+        }
+      }
 
-     if (CLEANING_SMS_ENABLED) {
-  try {
-    const result = await sendCleaningStartSms({
-      prisma,
-      accessGrantId: a.accessGrantId ?? null,
-      phoneE164: a.staffMember?.phoneE164,
-      staffName: a.staffMember?.fullName,
-      propertyName: a.reservation?.property?.name,
-      roomName: a.reservation?.roomName,
-      startsAt: a.startsAt,
-      endsAt: a.endsAt,
-    });
-
-    if (result.ok) {
-      log(`Cleaning SMS sent (START)`, { assignmentId: a.id });
-    } else if (result.skipped) {
-      log(`Cleaning SMS skipped (START)`, {
-        assignmentId: a.id,
-        reason: result.error,
+      log("Cleaning assignment ACTIVE", {
+        reservationNumber:
+          assignment.reservation
+            ?.reservationNumber ?? null,
+        reservationId:
+          assignment.reservationId,
+        staffAssignmentId: assignment.id,
+        accessGrantId: grant.id,
+        nfcAssignmentId:
+          activeCleaningNfc.id,
+        nfcCardLabel:
+          activeCleaningNfc.NfcCard?.label ??
+          null,
       });
-    } else {
-      throw new Error(result.error ?? "Unknown SMS error");
-    }
-  } catch (e) {
-    errLog(`Cleaning SMS START FAILED assignment ${a.id} -> ${toErrString(e)}`);
-  }
-}   
-     
-      log(
-        `Cleaning ACTIVE assignment ${a.id} -> grant ${grant.id} (reservation ${a.reservationId})`
-      );
-    } catch (e) {
-      const msg = toErrString(e);
+    } catch (error) {
+      const message = toErrString(error);
 
       await prisma.staffAssignment.update({
-        where: { id: a.id },
+        where: {
+          id: assignment.id,
+        },
         data: {
           status: StaffAssignmentStatus.FAILED,
-          lastError: msg,
-          retryCount: { increment: 1 },
+          lastError: message,
+          retryCount: {
+            increment: 1,
+          },
         },
       });
 
-      errLog(`Cleaning activation FAILED assignment ${a.id} -> ${msg}`);
+      errLog("Cleaning activation FAILED", {
+        reservationNumber:
+          assignment.reservation
+            ?.reservationNumber ?? null,
+        reservationId:
+          assignment.reservationId,
+        staffAssignmentId: assignment.id,
+        error: message,
+      });
     }
   }
 }
-
 async function processCleaningEnds(now: Date) {
   const assignments = await fetchDueCleaningEnds(now);
   log('processCleaningEnds result', { count: assignments.length });
@@ -1395,99 +1560,168 @@ if (!ttlockLockId) {
 
 // ====== LOOP ======
 let shuttingDown = false;
+let tickRunning = false;
 
 async function tick() {
   if (shuttingDown) return;
 
-  const now = new Date();
-  log('tick', { now: now.toISOString() });
-
-try {
-  await processPasscodeResyncs(now);
-} catch (e) {
-  errLog(
-    "processPasscodeResyncs crashed:",
-    toErrString(e)
-  );
-}
-
-  try {
-    await processCheckins(now);
-    await processPreCheckinMessages(now);
-  } catch (e) {
-    errLog('runCheckins crashed:', toErrString(e));
+  if (tickRunning) {
+    log("Tick skipped because the previous cycle is still running");
+    return;
   }
 
-try {
-  const r = await retryPendingNfcSync(prisma, now);
-  if (r.activated > 0) log("nfc-retry", r);
-} catch (e) {
-  errLog("nfc-retry crashed:", toErrString(e));
-}
+  tickRunning = true;
 
   try {
-    await processGuestLinkReminders(now);
-  } catch (e) {
-    errLog("runGuestLinkReminders crashed:", toErrString(e));
-  }
+    const now = new Date();
 
-  try {
-    await processCheckouts(now);
-  } catch (e) {
-    errLog('runCheckouts crashed:', toErrString(e));
-  }
+    log("tick", {
+      now: now.toISOString(),
+    });
 
- /*
-try {
-  const r = await retryNfcAssignments(prisma, now);
-  if (r.activated || r.retired) log("nfc-retry", r);
-} catch (e) {
-  errLog("nfc-retry crashed:", toErrString(e));
-}
-*/
-/*
-  try {
-    const r = await expireNfcAssignments(prisma, now);
-    if (r.expired > 0) log("nfc-expire", { ended: r.expired });
-  } catch (e) {
-    errLog("nfc-expire crashed:", toErrString(e));
-  }
-*/
+    try {
+      await processPasscodeResyncs(now);
+    } catch (e) {
+      errLog(
+        "processPasscodeResyncs crashed:",
+        toErrString(e)
+      );
+    }
 
-try {
-  const r = await expireGuestNfcAssignments(prisma, now);
-  if (r.count > 0) log("processGuestEnds (NFC) result", r);
-} catch (e) {
-  errLog("processGuestEnds (NFC) crashed", { err: toErrString(e) });
-}
+    try {
+      await processCheckins(now);
+      await processPreCheckinMessages(now);
+    } catch (e) {
+      errLog(
+        "runCheckins crashed:",
+        toErrString(e)
+      );
+    }
 
-try {
-  const r = await expireCleaningNfcAssignments(prisma, now);
-  if (r.count > 0) log("processCleaningEnds (NFC) result", r);
-} catch (e) {
-  errLog("processCleaningEnds (NFC) crashed", { err: toErrString(e) });
-}
+    try {
+      const result = await retryPendingNfcSync(
+        prisma,
+        now
+      );
 
-try {
-  const r = await processPendingCleaningConfirmations(prisma, now);
-  if (r.sent > 0) log("processPendingCleaningConfirmations result", r);
-} catch (e) {
-  errLog("processPendingCleaningConfirmations crashed", {
-    err: toErrString(e),
-  });
-}
+      if (
+        result.scheduled > 0 ||
+        result.retried > 0 ||
+        result.activated > 0 ||
+        result.failed > 0
+      ) {
+        log("nfc-provisioning", result);
+      }
+    } catch (e) {
+      errLog(
+        "nfc-provisioning crashed:",
+        toErrString(e)
+      );
+    }
 
-  // Limpieza (STAFF) corre en su propio carril
-  try {
-    await processCleaningActivations(now);
-  } catch (e) {
-    errLog('runCleaningActivations crashed:', toErrString(e));
-  }
+    try {
+      await processGuestLinkReminders(now);
+    } catch (e) {
+      errLog(
+        "runGuestLinkReminders crashed:",
+        toErrString(e)
+      );
+    }
 
-  try {
-    await processCleaningEnds(now);
-  } catch (e) {
-    errLog('runCleaningEnds crashed:', toErrString(e));
+    try {
+      await processCheckouts(now);
+    } catch (e) {
+      errLog(
+        "runCheckouts crashed:",
+        toErrString(e)
+      );
+    }
+
+    try {
+      const result = await expireGuestNfcAssignments(
+        prisma,
+        now
+      );
+
+      if (result.count > 0) {
+        log(
+          "processGuestEnds (NFC) result",
+          result
+        );
+      }
+    } catch (e) {
+      errLog(
+        "processGuestEnds (NFC) crashed",
+        {
+          err: toErrString(e),
+        }
+      );
+    }
+
+    try {
+      const result =
+        await expireCleaningNfcAssignments(
+          prisma,
+          now
+        );
+
+      if (result.count > 0) {
+        log(
+          "processCleaningEnds (NFC) result",
+          result
+        );
+      }
+    } catch (e) {
+      errLog(
+        "processCleaningEnds (NFC) crashed",
+        {
+          err: toErrString(e),
+        }
+      );
+    }
+
+    try {
+      const result =
+        await processPendingCleaningConfirmations(
+          prisma,
+          now
+        );
+
+      if (result.sent > 0) {
+        log(
+          "processPendingCleaningConfirmations result",
+          result
+        );
+      }
+    } catch (e) {
+      errLog(
+        "processPendingCleaningConfirmations crashed",
+        {
+          err: toErrString(e),
+        }
+      );
+    }
+
+    // Limpieza (STAFF) corre en su propio carril.
+    try {
+      await processCleaningActivations(now);
+    } catch (e) {
+      errLog(
+        "runCleaningActivations crashed:",
+        toErrString(e)
+      );
+    }
+
+    try {
+      await processCleaningEnds(now);
+    } catch (e) {
+      errLog(
+        "runCleaningEnds crashed:",
+        toErrString(e)
+      );
+    }
+  } finally {
+    tickRunning = false;
   }
 }
 

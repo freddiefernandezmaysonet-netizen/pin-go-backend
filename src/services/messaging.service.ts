@@ -164,6 +164,24 @@ During your stay, continuous access may be available via NFC cards.
 ${en}`;
 }
 
+export function buildCleaningStartSmsBody(params: {
+  staffName?: string | null;
+  propertyName?: string | null;
+  roomName?: string | null;
+  startsAt: Date;
+  endsAt: Date;
+}): string {
+  return (
+    `Pin&Go - Limpieza INICIADA\n` +
+    `Asignado: ${cleanEnv(params.staffName) ?? "Staff"}\n` +
+    `Propiedad: ${cleanEnv(params.propertyName) ?? "N/A"}\n` +
+    `Unidad: ${cleanEnv(params.roomName) ?? "N/A"}\n` +
+    `Inicio: ${fmtUtc(params.startsAt)}\n` +
+    `Fin: ${fmtUtc(params.endsAt)}\n` +
+    `Su tarjeta NFC esta activa unicamente durante esta ventana.`
+  );
+}
+
 export function buildCleaningEndSmsBody(params: {
   staffName?: string | null;
   propertyName?: string | null;

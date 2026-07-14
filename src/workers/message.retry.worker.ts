@@ -3,6 +3,13 @@ dotenv.config({ path: "./.env", override: true });
 
 import { prisma } from "../lib/prisma";
 import { sendSms } from "../integrations/twilio/twilio.client";
+import {
+  decryptAccessCode,
+} from "../services/access-code-crypto.service";
+
+import {
+  sendGuestAccessPasscodeEmail,
+} from "../lib/mailer";
 
 const WORKER_NAME = "message.retry.worker";
 const POLL_MS = Number(process.env.MESSAGE_RETRY_POLL_MS ?? 30000);
@@ -20,6 +27,69 @@ function errLog(...args: any[]) {
 function toErrString(e: unknown) {
   if (e instanceof Error) return `${e.name}: ${e.message}`;
   return String(e);
+}
+
+function parseGuestAccessEmailRetryPayload(
+  body: string
+): {
+  accessGrantId: string;
+} | null {
+  try {
+    const parsed = JSON.parse(body);
+
+    if (
+      parsed?.kind !==
+        "PIN_GO_EMAIL_DELIVERY" ||
+      parsed?.type !==
+        "GUEST_ACCESS_PASSCODE"
+    ) {
+      return null;
+    }
+
+    const accessGrantId = String(
+      parsed?.retryPayload
+        ?.accessGrantId ?? ""
+    ).trim();
+
+    if (!accessGrantId) {
+      return null;
+    }
+
+    return {
+      accessGrantId,
+    };
+  } catch {
+    return null;
+  }
+}
+
+function isNonRetryableAccessEmailError(
+  value: unknown
+) {
+  const error = String(
+    value ?? ""
+  ).toUpperCase();
+
+  return (
+    error.includes(
+      "GUEST_ACCESS_EMAIL_RETRY_PAYLOAD_MISSING"
+    ) ||
+    error.includes(
+      "GUEST_ACCESS_GRANT_NOT_FOUND"
+    ) ||
+    error.includes(
+      "GUEST_ACCESS_CODE_NOT_FOUND"
+    ) ||
+    error.includes(
+      "GUEST_ACCESS_CODE_ENCRYPTED_VALUE_MISSING"
+    ) ||
+    error.includes(
+      "GUEST_ACCESS_RESERVATION_NOT_FOUND"
+    ) ||
+    error.includes(
+      "GUEST_ACCESS_EMAIL_DESTINATION_MISSING"
+    )
+  );
 }
 
 function isNonRetryableSmsError(value: unknown) {
@@ -144,15 +214,312 @@ async function processRetries() {
   }
 }
 
+async function processGuestAccessEmailRetries() {
+  const failedEmailMessages =
+    await prisma.messageLog.findMany({
+      where: {
+        channel: "email",
+        provider: "resend",
+        status: "FAILED",
+        retryCount: {
+          lt: MAX_RETRIES,
+        },
+        body: {
+          contains:
+            '"type":"GUEST_ACCESS_PASSCODE"',
+        },
+      },
+      take: BATCH_SIZE,
+      orderBy: {
+        createdAt: "asc",
+      },
+    });
+
+  if (
+    failedEmailMessages.length === 0
+  ) {
+    return;
+  }
+
+  log("Retry batch", {
+    channel: "email",
+    type: "GUEST_ACCESS_PASSCODE",
+    count:
+      failedEmailMessages.length,
+  });
+
+  for (
+    const message of
+    failedEmailMessages
+  ) {
+    try {
+      const retryPayload =
+        parseGuestAccessEmailRetryPayload(
+          message.body
+        );
+
+      if (!retryPayload) {
+        throw new Error(
+          "GUEST_ACCESS_EMAIL_RETRY_PAYLOAD_MISSING"
+        );
+      }
+
+      const grant =
+        await prisma.accessGrant.findUnique({
+          where: {
+            id: retryPayload.accessGrantId,
+          },
+          include: {
+            secureAccessCode: true,
+            reservation: {
+              include: {
+                property: {
+                  select: {
+                    id: true,
+                    organizationId: true,
+                    name: true,
+                    timezone: true,
+                  },
+                },
+              },
+            },
+          },
+        });
+
+      if (!grant) {
+        throw new Error(
+          "GUEST_ACCESS_GRANT_NOT_FOUND"
+        );
+      }
+
+      if (!grant.secureAccessCode) {
+        throw new Error(
+          "GUEST_ACCESS_CODE_NOT_FOUND"
+        );
+      }
+
+      if (
+        !grant.secureAccessCode
+          .accessCodeEnc
+      ) {
+        throw new Error(
+          "GUEST_ACCESS_CODE_ENCRYPTED_VALUE_MISSING"
+        );
+      }
+
+      if (!grant.reservation) {
+        throw new Error(
+          "GUEST_ACCESS_RESERVATION_NOT_FOUND"
+        );
+      }
+
+      const guestEmail = String(
+        grant.reservation.guestEmail ??
+          ""
+      ).trim();
+
+      if (!guestEmail) {
+        throw new Error(
+          "GUEST_ACCESS_EMAIL_DESTINATION_MISSING"
+        );
+      }
+
+      const passcode =
+        decryptAccessCode(
+          grant.secureAccessCode
+            .accessCodeEnc
+        );
+
+      const reservationNumber =
+        grant.reservation
+          .reservationNumber ??
+        "Pending";
+
+      const sent =
+        await sendGuestAccessPasscodeEmail({
+          to: guestEmail,
+          reservationNumber,
+          guestName:
+            grant.reservation.guestName,
+          propertyName:
+            grant.reservation.property
+              .name,
+          passcode,
+          unlockKey:
+            grant.unlockKey ?? "#",
+          validFrom:
+            grant.startsAt,
+          validUntil:
+            grant.endsAt,
+          propertyTimeZone:
+            grant.reservation.property
+              .timezone,
+        });
+
+      const providerMessageId =
+        (sent as any)?.data?.id ??
+        (sent as any)?.id ??
+        null;
+
+      await prisma.messageLog.update({
+        where: {
+          id: message.id,
+        },
+        data: {
+          status: "SENT",
+          providerMessageId,
+          retryCount: {
+            increment: 1,
+          },
+          error: null,
+        },
+      });
+
+      try {
+        await prisma.messageDispatchLog.create({
+          data: {
+            reservationId:
+              grant.reservation.id,
+            type:
+              "GUEST_ACCESS_PASSCODE",
+            channel: "email",
+            status: "SENT",
+          },
+        });
+      } catch (dispatchLogError) {
+        errLog(
+          "Email retry dispatch log failed",
+          {
+            messageId: message.id,
+            reservationNumber:
+              grant.reservation
+                .reservationNumber ??
+              null,
+            error:
+              toErrString(
+                dispatchLogError
+              ),
+          }
+        );
+      }
+
+      await prisma.reservation.update({
+        where: {
+          id: grant.reservation.id,
+        },
+        data: {
+          guestAccessReleaseLastError:
+            null,
+        },
+      });
+
+      log(
+        "Guest access email retry success",
+        {
+          messageId: message.id,
+          reservationNumber:
+            grant.reservation
+              .reservationNumber ??
+            null,
+          retryCount:
+            message.retryCount + 1,
+        }
+      );
+    } catch (error) {
+      const errorMessage =
+        toErrString(error);
+
+      const nextRetryCount =
+        message.retryCount + 1;
+
+      const nonRetryable =
+        isNonRetryableAccessEmailError(
+          errorMessage
+        );
+
+      const finalFailure =
+        nonRetryable ||
+        nextRetryCount >= MAX_RETRIES;
+
+      try {
+        await prisma.messageLog.update({
+          where: {
+            id: message.id,
+          },
+          data: {
+            status: finalFailure
+              ? "FAILED_FINAL"
+              : "FAILED",
+            retryCount: {
+              increment: 1,
+            },
+            error: errorMessage,
+          },
+        });
+      } catch (updateError) {
+        errLog(
+          "Guest access email retry update failed",
+          {
+            messageId: message.id,
+            error:
+              toErrString(updateError),
+          }
+        );
+      }
+
+      errLog(
+        finalFailure
+          ? "Guest access email retry stopped"
+          : "Guest access email retry failed",
+        {
+          messageId: message.id,
+          retryCount: nextRetryCount,
+          error: errorMessage,
+        }
+      );
+    }
+  }
+}
+
 let shuttingDown = false;
+let tickRunning = false;
 
 async function tick() {
   if (shuttingDown) return;
 
+  if (tickRunning) {
+    log(
+      "Tick skipped because the previous retry cycle is still running"
+    );
+    return;
+  }
+
+  tickRunning = true;
+
   try {
-    await processRetries();
-  } catch (e) {
-    errLog("processRetries crashed", { err: toErrString(e) });
+    try {
+      await processRetries();
+    } catch (e) {
+      errLog(
+        "processRetries crashed",
+        {
+          err: toErrString(e),
+        }
+      );
+    }
+
+    try {
+      await processGuestAccessEmailRetries();
+    } catch (e) {
+      errLog(
+        "processGuestAccessEmailRetries crashed",
+        {
+          err: toErrString(e),
+        }
+      );
+    }
+  } finally {
+    tickRunning = false;
   }
 }
 

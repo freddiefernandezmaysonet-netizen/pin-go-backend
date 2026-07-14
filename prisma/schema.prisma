@@ -53,7 +53,7 @@ model DashboardUser {
   organization        Organization         @relation(fields: [organizationId], references: [id], onDelete: Cascade)
   passwordResetTokens PasswordResetToken[]
   passwordResetSmsCodes PasswordResetSmsCode[]
- 
+
   @@index([organizationId, isActive])
   @@index([organizationId, role])
 }
@@ -143,6 +143,7 @@ model Property {
   deviceHealths              DeviceHealth[]
   locks                      Lock[]
   organization               Organization                @relation(fields: [organizationId], references: [id])
+  guestAccessMode            GuestAccessMode             @default(PASSCODE_ONLY)
   automationDevices          PropertyAutomationDevice[]
   automationSettings         PropertyAutomationSettings?
   propertyDevices            PropertyDevice[]
@@ -155,6 +156,8 @@ model Property {
   reservations               Reservation[]
   blockedDates               PropertyBlockedDate[]
   cancellationPolicies       PropertyCancellationPolicy[]
+  guestAgreements            PropertyGuestAgreement[]
+
 
   @@index([organizationId])
   @@index([organizationId, status])
@@ -366,31 +369,56 @@ model Reservation {
   cancelledBy                CancellationActor?
   cancelledByUserId          String?
   cancellationReason         String?
-  cancellationRefundAmount   Decimal?              @db.Decimal(10,2)
-  cancellationRefundPercent  Decimal?              @db.Decimal(5,2)
+  cancellationRefundAmount   Decimal?               @db.Decimal(10,2)
+  cancellationRefundPercent  Decimal?               @db.Decimal(5,2)
 
-  selectedAmenityIds      String[]                 @default([])
-  
+  selectedAmenityIds      String[]                  @default([])
+
   pricingBreakdown        Json?
-  createdAt               DateTime                 @default(now())
-  updatedAt               DateTime                 @updatedAt
-  guestToken              String?                  @unique
-  guestTokenExpiresAt     DateTime?                                                                                                 
-  verificationStatus      String                   @default("PENDING")
-  verifiedAt              DateTime?
-  verificationCompletedByIp   String?
-  verificationUserAgent       String?
-  verificationGuestCount      Int?
-  verificationAcceptedRulesAt DateTime?
-  ingestKey               String?                  @unique
-  source                  String?
-  externalId              String?
-  externalProvider        String?
-  externalRaw             Json?
-  externalUpdatedAt       DateTime?
-  lastIngestError         String?
-  lastIngestedAt          DateTime?
-  status                  ReservationStatus        @default(ACTIVE)
+  createdAt               DateTime                  @default(now())
+  updatedAt               DateTime                  @updatedAt
+  guestToken              String?                   @unique
+  guestTokenExpiresAt     DateTime?
+  verificationStatus                    String      @default("PENDING")
+  verifiedAt                            DateTime?
+  verificationCompletedByIp             String?
+  verificationUserAgent                 String?
+  verificationGuestCount                Int?
+  verificationAcceptedRulesAt           DateTime?
+
+  // Direct Booking Guest Identity Verification
+  identityVerificationProvider           String?
+  stripeIdentityVerificationSessionId    String?     @unique
+  stripeIdentityVerificationStatus       String?
+  stripeIdentityVerificationLastError    String?
+  stripeIdentityVerificationLastEventAt  DateTime?
+  stripeIdentityVerificationLastEventId  String?
+  identityVerificationAttempts           Int         @default(0)
+  identityVerificationConsentAt          DateTime?
+  identityDeclaredLegalName              String?
+  identityVerifiedLegalName              String?
+  identityNameMatchStatus                String?
+
+   // Direct Booking Protection fee snapshot
+  directBookingProtectionFeeAmount       Decimal?    @db.Decimal(10, 2)
+  identityVerificationProviderCostAmount Decimal?    @db.Decimal(10, 2)
+  guestAccessModeSnapshot      GuestAccessMode       @default(PASSCODE_ONLY)
+  guestAgreementSnapshot       Json?
+  guestAgreementAcceptance     Json?
+  guestAgreementSignedAt       DateTime?
+  guestAccessReleaseStatus     GuestAccessReleaseStatus @default(BLOCKED)
+  guestAccessEligibleAt        DateTime?
+  guestAccessReleasedAt        DateTime?
+  guestAccessReleaseLastError  String?
+  ingestKey                    String?                  @unique
+  source                       String?
+  externalId                   String?
+  externalProvider             String?
+  externalRaw                  Json?
+  externalUpdatedAt            DateTime?
+  lastIngestError              String?
+  lastIngestedAt               DateTime?
+  status                       ReservationStatus        @default(ACTIVE)
   lastHardwareSyncAt      DateTime?
   lastReconciledAt        DateTime?
   lastReconciledCheckIn   DateTime?
@@ -401,8 +429,8 @@ model Reservation {
   messageDispatchLogs     MessageDispatchLog[]
   NfcAssignment           NfcAssignment[]
   pmsLinks                PmsReservationLink[]
-  property                Property                 @relation(fields: [propertyId], references: [id])
-  cancellationPolicy      PropertyCancellationPolicy? @relation(fields: [cancellationPolicyId], references: [id],        onDelete: SetNull)
+  property                Property                    @relation(fields: [propertyId], references: [id])
+  cancellationPolicy      PropertyCancellationPolicy? @relation(fields: [cancellationPolicyId], references: [id],         onDelete: SetNull)
   staffAssignments        StaffAssignment[]
 
   @@unique([propertyId, externalProvider, externalId])
@@ -413,18 +441,21 @@ model Reservation {
 }
 
 model AccessCode {
-  id               String   @id @default(cuid())
+  id               String       @id @default(cuid())
   lockId           Int
+  accessGrantId    String?      @unique
   method           String
   keyboardPwdId    String?
   startDate        BigInt
   endDate          BigInt
   phone            String?
-  createdAt        DateTime @default(now())
+  createdAt        DateTime     @default(now())
   accessCodeEnc    String?
   accessCodeHash   String
   accessCodeMasked String
   expiresAt        DateTime
+
+  accessGrant AccessGrant? @relation(fields: [accessGrantId], references: [id], onDelete: Cascade)
 
   @@index([lockId, createdAt])
   @@index([expiresAt])
@@ -463,6 +494,7 @@ model AccessGrant {
   reservation                Reservation?     @relation(fields: [reservationId], references: [id])
   staffMember                StaffMember?     @relation(fields: [staffMemberId], references: [id])
   messages                   MessageLog[]
+  secureAccessCode           AccessCode?
   staffAssignment            StaffAssignment?
 
   @@index([lockId, status, startsAt, endsAt])
@@ -733,6 +765,9 @@ model NfcAssignment {
   startsAt      DateTime
   endsAt        DateTime
   lastError     String?
+  retryCount             Int       @default(0)
+  provisioningStartedAt  DateTime?
+  provisionedAt          DateTime?
   createdAt     DateTime            @default(now())
   updatedAt     DateTime            @updatedAt
   NfcCard       NfcCard             @relation(fields: [nfcCardId], references: [id])
@@ -1084,7 +1119,7 @@ model PropertyCancellationPolicy {
   guestFacingSummary String?
 
   description String?
-  
+
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
@@ -1134,6 +1169,26 @@ model ApmsAuditEntry {
   @@index([createdAt])
   @@index([propertyId, createdAt])
   @@index([reservationId, createdAt])
+}
+
+model PropertyGuestAgreement {
+  id                           String   @id @default(cuid())
+  propertyId                   String
+  version                      String
+  title                        String
+  agreementText                String
+  rules                        Json?
+  guestFacingSummary           String?
+  requiresIdentityVerification Boolean  @default(true)
+  requiresAgreementSignature   Boolean  @default(true)
+  isActive                     Boolean  @default(true)
+  createdAt                    DateTime @default(now())
+  updatedAt                    DateTime @updatedAt
+
+ property Property @relation(fields: [propertyId], references: [id], onDelete: Cascade)
+
+@@unique([propertyId, version])
+  @@index([propertyId, isActive])
 }
 
 model ReservationNumberCounter {
@@ -1245,7 +1300,7 @@ model OperationalIssueTransition {
   metadata   Json?
 
   issue OperationalIssue @relation(fields: [issueId], references: [id], onDelete: Cascade)
-  
+
   @@index([issueId, occurredAt])
   @@index([operationalKey, occurredAt])
   @@index([toWorkflowState, occurredAt])
@@ -1476,14 +1531,26 @@ enum NfcCardStatus {
 }
 
 enum NfcAssignmentStatus {
+  SCHEDULED
+  PROVISIONING
   ACTIVE
   ENDED
   FAILED
 }
-
 enum NfcAssignmentRole {
   GUEST
   CLEANING
+}
+
+enum GuestAccessMode {
+  PASSCODE_ONLY
+  PASSCODE_PLUS_NFC
+}
+
+enum GuestAccessReleaseStatus {
+  BLOCKED
+  ELIGIBLE
+  RELEASED
 }
 
 enum DeviceHealthStatus {

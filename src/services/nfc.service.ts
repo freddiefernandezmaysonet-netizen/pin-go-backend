@@ -16,7 +16,7 @@ type AssignParams = {
   reservationId: string;
   ttlockLockId: number;
   propertyId: string;
-  role: Prisma.NfcAssignmentRole; // "GUEST" | "CLEANING"
+  role: NfcAssignmentRole; // "GUEST" | "CLEANING"
   startsAt: Date;
   endsAt: Date;
   count: number;
@@ -279,7 +279,10 @@ assignment = await prisma.nfcAssignment.create({
     reservationId,
     nfcCardId: c.id,
     role,
-    status: NfcAssignmentStatus.ACTIVE,
+    status:
+  params.skipTtlock === true
+    ? NfcAssignmentStatus.SCHEDULED
+    : NfcAssignmentStatus.ACTIVE,
     startsAt,
     endsAt,
     lastError: null,

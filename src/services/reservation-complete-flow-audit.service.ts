@@ -453,7 +453,7 @@ const primaryIssueCheck =
       propertyId: input.propertyId,
       reservationId: input.reservationId,
       completeFlowStatus: input.completeFlowStatus,
-      
+
       primaryIssueRule: primaryIssueCheck?.rule ?? null,
       primaryIssueTitle: primaryIssueCheck?.label ?? null,
       primaryIssue:
@@ -470,7 +470,7 @@ const primaryIssueCheck =
           : "Reservation",
       canAutoResolve:
         primaryIssueCheck?.metadata?.canAutoResolve ?? false,
-      
+
       passedChecks: passedChecks.map((check) => check.rule),
       warningChecks: warningChecks.map((check) => check.rule),
       failedChecks: failedChecks.map((check) => check.rule),
@@ -927,7 +927,7 @@ const guestConfirmationEmailEvidenceRequired =
         updatedAt: true,
       },
     }),
-    
+
     db.nfcAssignment.findMany({
   where: {
     reservationId: reservation.id,
@@ -1067,7 +1067,7 @@ const hasHostEmailEvidence = hasMessageEvidence({
   messageLogs,
   tokens: ["DIRECT", "BOOKING", "HOST"],
 });
-  
+
  const hasCleanerNotificationEvidence =
   hasMessageEvidence({
     auditEntries,
@@ -1085,7 +1085,7 @@ const hasHostEmailEvidence = hasMessageEvidence({
       channel === "SMS" &&
       isSuccessStatus(status)
     );
-  }); 
+  });
   const hasReservationAuditEntry = auditEntries.some(
     (entry) => normalizeText(entry.engine) === "RESERVATION"
   );
@@ -1391,7 +1391,7 @@ const hasHostEmailEvidence = hasMessageEvidence({
     messageLogCount: messageLogs.length,
   },
 });
-  
+
  addCheck(checks, {
     rule: "GUEST_TOKEN_AND_MANAGE_LINK_READY",
     label: "Guest Token and Manage Reservation Link Ready",
@@ -1712,42 +1712,74 @@ addCheck(checks, {
   },
 });
 
- const latestCleaningNfcAssignment = cleaningNfcAssignments.find(
-  (assignment) =>
-    normalizeText(assignment.role) === "CLEANING" &&
-    normalizeText(assignment.status) === "ACTIVE"
-);
+  const latestCleaningNfcAssignment =
+    cleaningNfcAssignments.find(
+      (assignment) =>
+        normalizeText(assignment.role) === "CLEANING"
+    );
 
-const cleanerNfcAccessReady = Boolean(
-  latestCleaningNfcAssignment &&
-    normalizeText(latestCleaningNfcAssignment.status) ===
-      NfcAssignmentStatus.ACTIVE
-);
+  const cleaningNfcStatus = normalizeText(
+    latestCleaningNfcAssignment?.status
+  );
 
-let cleanerAccessReady = Boolean(
-  cleanerNfcAccessReady ||
+  const cleanerNfcScheduled =
+    cleaningNfcStatus ===
+    NfcAssignmentStatus.SCHEDULED;
+
+  const cleanerNfcProvisioning =
+    cleaningNfcStatus ===
+    NfcAssignmentStatus.PROVISIONING;
+
+  const cleanerNfcAccessReady =
+    cleaningNfcStatus ===
+    NfcAssignmentStatus.ACTIVE;
+
+  const cleanerNfcFailed =
+    cleaningNfcStatus ===
+    NfcAssignmentStatus.FAILED;
+
+  let cleanerNfcLifecycleValid = Boolean(
+    cleanerNfcScheduled ||
+      cleanerNfcProvisioning ||
+      cleanerNfcAccessReady
+  );
+
+  const legacyCleanerAccessReady = Boolean(
     latestStaffAssignment?.accessGrantId ||
-    latestStaffAssignment?.accessGrant ||
-    staffAccessGrant
-);
+      latestStaffAssignment?.accessGrant ||
+      staffAccessGrant
+  );
 
-let cleanerAccessAutopilotResult: Awaited<
-  ReturnType<typeof ensureCleanerNfcAccessForConfirmedCleaning>
-> | null = null;
+  let cleanerAccessReady = Boolean(
+    cleanerNfcLifecycleValid ||
+      legacyCleanerAccessReady
+  );
 
-if (cleaningConfirmationConfirmed && !cleanerAccessReady) {
-  cleanerAccessAutopilotResult =
-    await ensureCleanerNfcAccessForConfirmedCleaning({
-      prisma: db,
-      reservationId: reservation.id,
-      confirmationId: latestCleaningConfirmation?.id ?? null,
-      trigger: "RESERVATION_COMPLETE_FLOW_AUDIT",
-    });
+  let cleanerAccessAutopilotResult: Awaited<
+    ReturnType<
+      typeof ensureCleanerNfcAccessForConfirmedCleaning
+    >
+  > | null = null;
 
-  if (cleanerAccessAutopilotResult.ok) {
-    cleanerAccessReady = true;
+  if (
+    cleaningConfirmationConfirmed &&
+    !cleanerNfcLifecycleValid
+  ) {
+    cleanerAccessAutopilotResult =
+      await ensureCleanerNfcAccessForConfirmedCleaning({
+        prisma: db,
+        reservationId: reservation.id,
+        confirmationId:
+          latestCleaningConfirmation?.id ?? null,
+        trigger: "RESERVATION_COMPLETE_FLOW_AUDIT",
+      });
+
+    if (cleanerAccessAutopilotResult.ok) {
+      cleanerNfcLifecycleValid = true;
+      cleanerAccessReady = true;
+    }
   }
-}
+
   const cleanerAccessWaitingForConfirmation = Boolean(
     latestCleaningConfirmation &&
       cleaningConfirmationPending &&
@@ -1756,28 +1788,44 @@ if (cleaningConfirmationConfirmed && !cleanerAccessReady) {
 
   const cleanerAccessRequiredNow = Boolean(
     !cleaningConfirmationPending &&
-      (cleaningConfirmationConfirmed || staffAssignmentReady)
+      (cleaningConfirmationConfirmed ||
+        staffAssignmentReady)
   );
 
-  const cleanerAccessCheckStatus: ReservationCompleteFlowCheckStatus =
-    cleanerAccessReady || cleanerAccessWaitingForConfirmation
+  const cleanerAccessCheckStatus:
+    ReservationCompleteFlowCheckStatus =
+    cleanerNfcFailed
+      ? "FAIL"
+      : cleanerNfcProvisioning
+      ? "WARNING"
+      : cleanerAccessReady ||
+        cleanerAccessWaitingForConfirmation
       ? "PASS"
-      : cleaningConfirmationDeclined || cleanerAccessRequiredNow
+      : cleaningConfirmationDeclined ||
+        cleanerAccessRequiredNow
       ? "FAIL"
       : "WARNING";
 
- const cleanerAccessRecommendedAction = cleanerAccessReady
-  ? undefined
-  : cleanerAccessWaitingForConfirmation
-  ? undefined
-  : cleaningConfirmationDeclined
-  ? "Cleaner declined the cleaning confirmation. Assign a backup cleaner and verify access."
-  : cleanerAccessAutopilotResult?.escalated
-  ? "Cleaner confirmed availability, but Access Autopilot could not activate NFC access. Review the cleaner card, TTLock mapping, or active lock."
-  : cleanerAccessRequiredNow
-  ? "Cleaner has confirmed or is scheduled, but cleaner access was not found. Create or repair cleaner access."
-  : "Verify cleaner confirmation and cleaner access workflow for this reservation.";
-  addCheck(checks, {
+  const cleanerAccessRecommendedAction =
+    cleanerNfcAccessReady
+      ? undefined
+      : cleanerNfcScheduled
+      ? undefined
+      : cleanerNfcProvisioning
+      ? "Cleaner NFC access is currently being provisioned. Verify that it becomes ACTIVE before the cleaning window begins."
+      : cleanerNfcFailed
+      ? "Cleaner NFC provisioning failed. Review the assignment error, TTLock gateway, cleaner card mapping, and retry status."
+      : cleanerAccessWaitingForConfirmation
+      ? undefined
+      : cleaningConfirmationDeclined
+      ? "Cleaner declined the cleaning confirmation. Assign a backup cleaner and verify access."
+      : cleanerAccessAutopilotResult?.escalated
+      ? "Cleaner confirmed availability, but Access Autopilot could not schedule NFC access. Review the cleaner card mapping or active lock."
+      : cleanerAccessRequiredNow
+      ? "Cleaner has confirmed or is scheduled, but cleaner NFC access was not found. Create or repair cleaner access."
+      : "Verify cleaner confirmation and cleaner access workflow for this reservation.";
+
+ addCheck(checks, {
     rule: "CLEANER_ACCESS_CREATED",
     label: "Cleaner Access Lifecycle Valid",
     status: cleanerAccessCheckStatus,
@@ -1801,6 +1849,11 @@ if (cleaningConfirmationConfirmed && !cleanerAccessReady) {
         staffAccessGrant?.lastError ??
         null,
       cleanerNfcAccessReady,
+      cleanerNfcLifecycleValid,
+      cleanerNfcScheduled,
+      cleanerNfcProvisioning,
+      cleanerNfcFailed,
+      legacyCleanerAccessReady,
       cleaningNfcAssignmentId: latestCleaningNfcAssignment?.id ?? null,
       cleaningNfcCardId: latestCleaningNfcAssignment?.nfcCardId ?? null,
       cleaningNfcStatus: latestCleaningNfcAssignment?.status ?? null,

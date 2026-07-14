@@ -1,13 +1,11 @@
 import {
   NfcAssignmentRole,
   NfcAssignmentStatus,
-  NfcCardStatus,
   PrismaClient,
   ReservationStatus,
   StaffAccessMethod,
   StaffAssignmentStatus,
 } from "@prisma/client";
-import { ttlockChangeCardPeriod } from "../ttlock/ttlock.card";
 import { persistAuditEntry } from "../apms/audit-persistence.service";
 import type { AuditEntry } from "../apms/audit-types";
 
@@ -436,51 +434,66 @@ export async function ensureCleanerNfcAccessForConfirmedCleaning(input: {
     endsAt,
   });
 
-  const existingCleaningNfc = await input.prisma.nfcAssignment.findFirst({
-    where: {
-      reservationId: confirmation.reservationId,
-      role: NfcAssignmentRole.CLEANING,
-      status: NfcAssignmentStatus.ACTIVE,
+ const existingCleaningNfc = await input.prisma.nfcAssignment.findFirst({
+  where: {
+    reservationId: confirmation.reservationId,
+    role: NfcAssignmentRole.CLEANING,
+    status: {
+      in: [
+        NfcAssignmentStatus.SCHEDULED,
+        NfcAssignmentStatus.PROVISIONING,
+        NfcAssignmentStatus.ACTIVE,
+      ],
     },
-    orderBy: {
-      createdAt: "desc",
-    },
-  });
+  },
+  orderBy: {
+    createdAt: "desc",
+  },
+});
 
-  if (existingCleaningNfc) {
-    await persistCleanerAccessAuditEntry({
-      prisma: input.prisma,
-      organizationId: reservation.property.organizationId,
-      propertyId: confirmation.propertyId,
-      reservationId: confirmation.reservationId,
-      confirmationId: confirmation.id,
-      staffMemberId: confirmation.staffMemberId,
-      nfcAssignmentId: existingCleaningNfc.id,
-      nfcCardId: existingCleaningNfc.nfcCardId,
-      trigger,
-      status: "SUCCESS",
-      severity: "INFO",
-      eventType: "DECISION_APPLIED",
-      reason: "CLEANER_NFC_ACCESS_ALREADY_ACTIVE",
-      summary:
-        "Access Autopilot verified existing cleaner NFC access for the confirmed cleaning assignment.",
-    });
-
-    return {
-      ok: true,
-      alreadyReady: true,
-      repaired: false,
-      skipped: false,
-      escalated: false,
-      reason: "CLEANER_NFC_ACCESS_ALREADY_ACTIVE",
-      nfcAssignmentId: existingCleaningNfc.id,
-      error: null,
-    };
-  }
 
   const lock = reservation.property.locks.find(
     (item) => item.isActive && item.ttlockLockId
   );
+
+if (existingCleaningNfc) {
+  const alreadyActive =
+    existingCleaningNfc.status === NfcAssignmentStatus.ACTIVE;
+
+  const existingReason = alreadyActive
+    ? "CLEANER_NFC_ACCESS_ALREADY_ACTIVE"
+    : "CLEANER_NFC_ACCESS_ALREADY_SCHEDULED";
+
+  await persistCleanerAccessAuditEntry({
+    prisma: input.prisma,
+    organizationId: reservation.property.organizationId,
+    propertyId: confirmation.propertyId,
+    reservationId: confirmation.reservationId,
+    confirmationId: confirmation.id,
+    staffMemberId: confirmation.staffMemberId,
+    nfcAssignmentId: existingCleaningNfc.id,
+    nfcCardId: existingCleaningNfc.nfcCardId,
+    trigger,
+    status: "SUCCESS",
+    severity: "INFO",
+    eventType: "DECISION_APPLIED",
+    reason: existingReason,
+    summary: alreadyActive
+      ? "Access Autopilot verified existing active cleaner NFC access for the confirmed cleaning assignment."
+      : "Access Autopilot verified that cleaner NFC access is scheduled for provisioning before the cleaning window.",
+  });
+
+  return {
+    ok: true,
+    alreadyReady: true,
+    repaired: false,
+    skipped: false,
+    escalated: false,
+    reason: existingReason,
+    nfcAssignmentId: existingCleaningNfc.id,
+    error: null,
+  };
+}
 
   const ttlockLockId = lock?.ttlockLockId ? Number(lock.ttlockLockId) : null;
 
@@ -550,7 +563,13 @@ export async function ensureCleanerNfcAccessForConfirmedCleaning(input: {
   const overlappingAssignment = await input.prisma.nfcAssignment.findFirst({
     where: {
       nfcCardId: staffCard.id,
-      status: NfcAssignmentStatus.ACTIVE,
+      status: {
+  in: [
+    NfcAssignmentStatus.SCHEDULED,
+    NfcAssignmentStatus.PROVISIONING,
+    NfcAssignmentStatus.ACTIVE,
+  ],
+},
       reservationId: {
         not: confirmation.reservationId,
       },
@@ -584,127 +603,119 @@ export async function ensureCleanerNfcAccessForConfirmedCleaning(input: {
     });
   }
 
-    const latestReservationState =
-    await input.prisma.reservation.findUnique({
-      where: {
-        id: confirmation.reservationId,
-      },
-      select: {
-        status: true,
-      },
-    });
+  const latestReservationState =
+  await input.prisma.reservation.findUnique({
+    where: {
+      id: confirmation.reservationId,
+    },
+    select: {
+      status: true,
+    },
+  });
 
-  if (
-    latestReservationState?.status ===
-    ReservationStatus.CANCELLED
-  ) {
-    console.log(
-      "[CLEANER_ACCESS_AUTOPILOT] skipped reservation cancelled before TTLock execution",
-      {
-        reservationId: confirmation.reservationId,
-        propertyId: confirmation.propertyId,
-        confirmationId: confirmation.id,
-        staffMemberId: confirmation.staffMemberId,
-        trigger,
-      }
-    );
+if (
+  latestReservationState?.status ===
+  ReservationStatus.CANCELLED
+) {
+  console.log(
+    "[CLEANER_ACCESS_AUTOPILOT] skipped reservation cancelled before scheduling",
+    {
+      reservationId: confirmation.reservationId,
+      propertyId: confirmation.propertyId,
+      confirmationId: confirmation.id,
+      staffMemberId: confirmation.staffMemberId,
+      trigger,
+    }
+  );
 
-    return buildCancelledReservationSkipResult();
-  }
+  return buildCancelledReservationSkipResult();
+}
 
-  try {
-    await ttlockChangeCardPeriod({
-      lockId: ttlockLockId,
-      cardId: Number(staffCard.ttlockCardId),
-      startDate: startsAt.getTime(),
-      endDate: endsAt.getTime(),
-      changeType: 2,
-    });
-
-    const nfcAssignment = await input.prisma.nfcAssignment.create({
+try {
+  const nfcAssignment =
+    await input.prisma.nfcAssignment.create({
       data: {
         reservationId: confirmation.reservationId,
         nfcCardId: staffCard.id,
         role: NfcAssignmentRole.CLEANING,
-        status: NfcAssignmentStatus.ACTIVE,
+        status: NfcAssignmentStatus.SCHEDULED,
         startsAt,
         endsAt,
         lastError: null,
+        retryCount: 0,
+        provisioningStartedAt: null,
+        provisionedAt: null,
       },
     });
 
-    await input.prisma.nfcCard.update({
-      where: {
-        id: staffCard.id,
-      },
-      data: {
-        status: NfcCardStatus.ASSIGNED,
-      },
-    });
+  await markStaffAssignmentScheduled({
+    prisma: input.prisma,
+    reservationId: confirmation.reservationId,
+    staffMemberId: confirmation.staffMemberId,
+    startsAt,
+    endsAt,
+  });
 
-    await markStaffAssignmentScheduled({
-      prisma: input.prisma,
-      reservationId: confirmation.reservationId,
-      staffMemberId: confirmation.staffMemberId,
-      startsAt,
-      endsAt,
-    });
+  await persistCleanerAccessAuditEntry({
+    prisma: input.prisma,
+    organizationId: reservation.property.organizationId,
+    propertyId: confirmation.propertyId,
+    reservationId: confirmation.reservationId,
+    confirmationId: confirmation.id,
+    staffMemberId: confirmation.staffMemberId,
+    nfcAssignmentId: nfcAssignment.id,
+    nfcCardId: staffCard.id,
+    trigger,
+    status: "SUCCESS",
+    severity: "INFO",
+    eventType: "DECISION_APPLIED",
+    reason: "CLEANER_NFC_ACCESS_SCHEDULED",
+    summary:
+      "Access Autopilot scheduled cleaner NFC access for provisioning two hours before the cleaning window.",
+  });
 
-    await persistCleanerAccessAuditEntry({
-      prisma: input.prisma,
-      organizationId: reservation.property.organizationId,
-      propertyId: confirmation.propertyId,
-      reservationId: confirmation.reservationId,
-      confirmationId: confirmation.id,
-      staffMemberId: confirmation.staffMemberId,
-      nfcAssignmentId: nfcAssignment.id,
-      nfcCardId: staffCard.id,
-      trigger,
-      status: "SUCCESS",
-      severity: "INFO",
-      eventType: "ACTION_COMPLETED",
-      reason: "CLEANER_NFC_ACCESS_REPAIRED",
-      summary:
-        "Access Autopilot created cleaner NFC access for the confirmed cleaning assignment.",
-    });
-
-    console.log("[CLEANER_ACCESS_AUTOPILOT] cleaner NFC access ensured", {
+  console.log(
+    "[CLEANER_ACCESS_AUTOPILOT] cleaner NFC access scheduled",
+    {
       reservationId: confirmation.reservationId,
       propertyId: confirmation.propertyId,
       confirmationId: confirmation.id,
       staffMemberId: confirmation.staffMemberId,
       nfcAssignmentId: nfcAssignment.id,
       nfcCardId: staffCard.id,
+      startsAt: startsAt.toISOString(),
+      endsAt: endsAt.toISOString(),
       trigger,
-    });
+    }
+  );
 
-    return {
-      ok: true,
-      alreadyReady: false,
-      repaired: true,
-      skipped: false,
-      escalated: false,
-      reason: "CLEANER_NFC_ACCESS_REPAIRED",
-      nfcAssignmentId: nfcAssignment.id,
-      error: null,
-    };
-  } catch (error) {
-    const errorMessage = toErrString(error);
+  return {
+    ok: true,
+    alreadyReady: false,
+    repaired: true,
+    skipped: false,
+    escalated: false,
+    reason: "CLEANER_NFC_ACCESS_SCHEDULED",
+    nfcAssignmentId: nfcAssignment.id,
+    error: null,
+  };
+} catch (error) {
+  const errorMessage = toErrString(error);
 
-    return failWithEscalation({
-      prisma: input.prisma,
-      organizationId: reservation.property.organizationId,
-      propertyId: confirmation.propertyId,
-      reservationId: confirmation.reservationId,
-      confirmationId: confirmation.id,
-      staffMemberId: confirmation.staffMemberId,
-      startsAt,
-      endsAt,
-      trigger,
-      reason: "CLEANER_NFC_ACCESS_REPAIR_FAILED",
-      error: errorMessage,
-      recommendedAction:
-        "Review TTLock/NFC cleaner access. Pin&Go could not activate cleaner NFC access automatically.",
-    });
-  }
+  return failWithEscalation({
+    prisma: input.prisma,
+    organizationId: reservation.property.organizationId,
+    propertyId: confirmation.propertyId,
+    reservationId: confirmation.reservationId,
+    confirmationId: confirmation.id,
+    staffMemberId: confirmation.staffMemberId,
+    startsAt,
+    endsAt,
+    trigger,
+    reason: "CLEANER_NFC_ACCESS_SCHEDULING_FAILED",
+    error: errorMessage,
+    recommendedAction:
+      "Review the cleaner card mapping and schedule cleaner NFC access before the cleaning window.",
+  });
+ }
 }

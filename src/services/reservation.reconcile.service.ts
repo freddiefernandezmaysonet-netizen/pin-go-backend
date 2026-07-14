@@ -330,10 +330,10 @@ if (a.role === NfcAssignmentRole.CLEANING) {
   continue;
 }
 
-      const next =
-        a.role === NfcAssignmentRole.CLEANING
-          ? { startsAt: cleaningStartsAt, endsAt: cleaningEndsAt }
-          : { startsAt: a.startsAt, endsAt: desiredEnd };
+      const next = {
+  startsAt: a.startsAt,
+  endsAt: desiredEnd,
+};
 
       const changed =
         a.startsAt.getTime() !== next.startsAt.getTime() ||

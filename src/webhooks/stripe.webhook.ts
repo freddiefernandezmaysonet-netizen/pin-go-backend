@@ -9,6 +9,9 @@ import {
 import stripe from "../billing/stripe";
 import syncTuyaEntitlementFromStripeEvent from "../billing/stripe/stripe.tuya.entitlement";
 import { handleDirectBookingCheckoutCompleted } from "../services/direct-booking.service";
+import {
+  handleGuestIdentityStripeEvent,
+} from "../services/guest-identity-webhook.service";
 
 const prisma = new PrismaClient();
 
@@ -97,6 +100,30 @@ export function registerStripeWebhook(app: Express) {
             await safeSyncBySubscriptionId(sub.id, {
               source: event.type,
             });
+
+            break;
+          }
+
+                    case "identity.verification_session.verified":
+          case "identity.verification_session.requires_input": {
+            const identityResult =
+              await handleGuestIdentityStripeEvent(
+                prisma,
+                event
+              );
+
+            console.log(
+              "[STRIPE_WEBHOOK] guest identity event processed",
+              {
+                eventId: event.id,
+                eventType: event.type,
+                handled: identityResult.handled,
+                reservationNumber:
+                  "reservationNumber" in identityResult
+                    ? identityResult.reservationNumber
+                    : null,
+              }
+            );
 
             break;
           }

@@ -40,6 +40,9 @@ import { meRouter } from "./routes/me.route";
 import { dashboardRouter } from "./routes/dashboard.route";
 import { dashboardReservationsRouter } from "./routes/dashboard.reservations.route";
 import { dashboardPropertiesRouter } from "./routes/dashboard.properties.route";
+import {
+  dashboardGuestAccessSettingsRouter,
+} from "./routes/dashboard.guest-access-settings.routes";
 import { dashboardLocksRouter } from "./routes/dashboard.locks.route";
 import { dashboardAccessRouter } from "./routes/dashboard.access.route";
 import { dashboardMetricsRouter } from "./routes/dashboard.metrics.route";
@@ -279,6 +282,7 @@ app.use(adminDemoRouter);
 app.use(dashboardRouter);
 app.use(dashboardReservationsRouter);
 app.use(dashboardPropertiesRouter);
+app.use(dashboardGuestAccessSettingsRouter);
 app.use(dashboardLocksRouter);
 app.use(dashboardAccessRouter);
 app.use(dashboardMetricsRouter);

@@ -1,4 +1,6 @@
-import jwt from "jsonwebtoken";
+import jwt, {
+  type SignOptions,
+} from "jsonwebtoken";
 import bcrypt from "bcryptjs";
 
 export type AuthTokenPayload = {
@@ -10,7 +12,9 @@ export type AuthTokenPayload = {
 };
 
 const JWT_SECRET = process.env.JWT_SECRET;
-const JWT_EXPIRES_IN = process.env.JWT_EXPIRES_IN ?? "7d";
+const JWT_EXPIRES_IN = (
+  process.env.JWT_EXPIRES_IN ?? "7d"
+) as SignOptions["expiresIn"];
 const AUTH_COOKIE_NAME = process.env.AUTH_COOKIE_NAME ?? "pingo_token";
 const COOKIE_DOMAIN = process.env.COOKIE_DOMAIN;
 

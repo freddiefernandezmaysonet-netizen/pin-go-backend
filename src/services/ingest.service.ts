@@ -7,6 +7,7 @@ import {
   StaffAccessMethod,
   StaffAssignmentStatus,
   ReservationStatus,
+  GuestAccessMode,
 } from "@prisma/client";
 
 import crypto from "crypto";
@@ -20,6 +21,7 @@ import { generateReservationNumber } from "./reservation-number.service";
 import { createReservationAuditEntry } from "../apms/reservation-audit.mapper";
 import { persistAuditEntry } from "../apms/audit-persistence.service";
 import type { AuditEntry } from "../apms/audit-types";
+import { ensureReservationGuestAgreementSnapshot } from "./guest-agreement.service";
 
 console.log("[INGEST] running src/services/ingest.service.ts", new Date().toISOString());
 const prisma = new PrismaClient();
@@ -136,6 +138,7 @@ export async function ingestReservation(p: IngestPayload) {
     select: {
       checkInTime: true,
       timezone: true,
+      guestAccessMode: true,
     },
   });
 
@@ -191,6 +194,9 @@ export async function ingestReservation(p: IngestPayload) {
       source: p.source,
 
       propertyId: p.propertyId,
+      guestAccessModeSnapshot:
+      property?.guestAccessMode ??
+      GuestAccessMode.PASSCODE_ONLY,
       guestName: p.guestName,
       guestEmail: p.guestEmail ?? null,
       guestPhone: p.guestPhone ?? null,
@@ -289,6 +295,21 @@ let cleaningConfirmationCreated = false;
 if (result.cleaningConfirmation) {
   await createCleaningConfirmation(result.cleaningConfirmation);
   cleaningConfirmationCreated = true;
+}
+
+const guestAgreementSnapshotResult =
+  await ensureReservationGuestAgreementSnapshot(
+    prisma,
+    result.reservationId
+  );
+
+if (!guestAgreementSnapshotResult.ok) {
+  console.warn("[GUEST_AGREEMENT_SNAPSHOT_MISSING]", {
+    reservationId: result.reservationId,
+    reservationNumber: result.reservationNumber,
+    propertyId: p.propertyId,
+    reason: guestAgreementSnapshotResult.reason,
+  });
 }
 
   if (result.didChange) {
@@ -632,11 +653,12 @@ async function upsertReservation(
     source?: string;
 
     propertyId: string;
+    
     guestName: string;
     guestEmail?: string | null;
     guestPhone?: string | null;
     roomName?: string | null;
-
+    guestAccessModeSnapshot: GuestAccessMode;
     externalProvider?: string | null;
     externalId?: string | null;
     externalUpdatedAt?: Date | null;
@@ -813,6 +835,8 @@ async function upsertReservation(
         source: input.source ?? null,
 
         propertyId: input.propertyId,
+        guestAccessModeSnapshot:
+          input.guestAccessModeSnapshot,
         guestName: input.guestName,
         guestEmail: input.guestEmail ?? null,
         guestPhone: input.guestPhone ?? null,
@@ -850,6 +874,8 @@ async function upsertReservation(
       source: input.source ?? null,
 
       propertyId: input.propertyId,
+      guestAccessModeSnapshot:
+        input.guestAccessModeSnapshot,
       guestName: input.guestName,
       guestEmail: input.guestEmail ?? null,
       guestPhone: input.guestPhone ?? null,
