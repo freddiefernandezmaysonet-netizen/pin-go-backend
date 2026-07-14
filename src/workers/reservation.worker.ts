@@ -70,133 +70,287 @@ const TTLOCK_DELETE_TYPE = Number(process.env.TTLOCK_DELETE_TYPE ?? 2);
 const WORKER_NAME = 'reservation.worker';
 const POLL_MS = Number(process.env.RESERVATION_WORKER_POLL_MS ?? 10_000);
 const BATCH_SIZE = Number(process.env.RESERVATION_WORKER_BATCH_SIZE ?? 20);
-const REMINDER_ON = process.env.GUEST_LINK_SMS_REMINDER === "1";
-const REMINDER_HOURS = Number(process.env.GUEST_LINK_REMINDER_HOURS ?? 24);
-async function processGuestLinkReminders(now: Date) {
+const REMINDER_ON =
+  process.env.GUEST_LINK_SMS_REMINDER ===
+  "1";
+
+const REMINDER_HOURS = Number(
+  process.env.GUEST_LINK_REMINDER_HOURS ??
+    24
+);
+
+async function processGuestLinkReminders(
+  now: Date
+) {
   if (!REMINDER_ON) return;
 
-  const from = new Date(now.getTime() + (REMINDER_HOURS - 1) * 60 * 60 * 1000);
-  const to   = new Date(now.getTime() + (REMINDER_HOURS + 1) * 60 * 60 * 1000);
-  
-  const upcoming = await prisma.reservation.findMany({
-    where: {
-      checkIn: { gte: from, lte: to },
-      paymentState: PaymentState.PAID,
-      guestToken: { not: null },
-      guestPhone: { not: null },
+  const from = new Date(
+    now.getTime() +
+      (REMINDER_HOURS - 1) *
+        60 *
+        60 *
+        1000
+  );
 
-      // ✅ no enviar dos veces (idempotente por tipo)
-      guestLinkReminderLogs: { none: { kind: "CHECKIN_LINK" } },
-    },
-    take: 50,
-    orderBy: { checkIn: "asc" },
+  const to = new Date(
+    now.getTime() +
+      (REMINDER_HOURS + 1) *
+        60 *
+        60 *
+        1000
+  );
 
-    // ✅ necesitamos guestPhone para guardar 'to'
-    select: { id: true, guestPhone: true },
-  });
+  const upcoming =
+    await prisma.reservation.findMany({
+      where: {
+        checkIn: {
+          gte: from,
+          lte: to,
+        },
+        paymentState:
+          PaymentState.PAID,
+        guestToken: {
+          not: null,
+        },
+        guestPhone: {
+          not: null,
+        },
+        guestLinkReminderLogs: {
+          none: {
+            kind: "CHECKIN_LINK",
+          },
+        },
+      },
+      take: 50,
+      orderBy: {
+        checkIn: "asc",
+      },
+      select: {
+        id: true,
+        reservationNumber: true,
+        guestPhone: true,
+        externalRaw: true,
+      },
+    });
 
-  if (upcoming.length === 0) return;
+  if (upcoming.length === 0) {
+    return;
+  }
 
-  log("processGuestLinkReminders", { count: upcoming.length });
+  log(
+    "processGuestLinkReminders",
+    {
+      count: upcoming.length,
+    }
+  );
 
-  for (const r of upcoming) {
+  for (const reservation of upcoming) {
+    if (
+      !hasGuestSmsConsent(
+        reservation.externalRaw
+      )
+    ) {
+      log(
+        "Guest link reminder skipped",
+        {
+          reservationNumber:
+            reservation.reservationNumber ??
+            null,
+          reservationId:
+            reservation.id,
+          reason:
+            "SMS_CONSENT_NOT_GRANTED",
+        }
+      );
+
+      continue;
+    }
+
     try {
-      // 1️⃣ Crear el log primero (para no spamear) + idempotencia por unique(reservationId, kind)
       await prisma.guestLinkReminderLog.upsert({
         where: {
           reservationId_kind: {
-            reservationId: r.id,
+            reservationId:
+              reservation.id,
             kind: "CHECKIN_LINK",
           },
         },
         create: {
-          reservationId: r.id,
+          reservationId:
+            reservation.id,
           kind: "CHECKIN_LINK",
           channel: "sms",
-          to: r.guestPhone ?? "unknown",
+          to:
+            reservation.guestPhone ??
+            "unknown",
           provider: "twilio",
-          status: "FAILED", // por defecto (safe)
+          status: "FAILED",
         },
-        update: {}, // si ya existe, no hace nada
+        update: {},
       });
 
-      // 2️⃣ Intentar enviar el SMS
-      const sent = await sendGuestAccessLinkSms(prisma, r.id, "REMINDER");
+      const sent =
+        await sendGuestAccessLinkSms(
+          prisma,
+          reservation.id,
+          "REMINDER"
+        );
 
-      // 3️⃣ Actualizar resultado
       await prisma.guestLinkReminderLog.update({
         where: {
           reservationId_kind: {
-            reservationId: r.id,
+            reservationId:
+              reservation.id,
             kind: "CHECKIN_LINK",
           },
         },
         data: {
-          status: sent?.ok === true ? "SENT" : "FAILED",
-          error: sent?.ok === true ? null : "SMS not confirmed",
+          status:
+            sent?.ok === true
+              ? "SENT"
+              : "FAILED",
+          error:
+            sent?.ok === true
+              ? null
+              : sent?.error ??
+                "SMS not confirmed",
         },
       });
 
-      log(sent?.ok === true ? "Reminder SENT" : "Reminder FAILED", {
-        reservationId: r.id,
-      });
-    } catch (e) {
-      errLog("Reminder crashed", {
-        reservationId: r.id,
-        err: toErrString(e),
-      });
+      log(
+        sent?.ok === true
+          ? "Reminder SENT"
+          : "Reminder FAILED",
+        {
+          reservationNumber:
+            reservation.reservationNumber ??
+            null,
+          reservationId:
+            reservation.id,
+        }
+      );
+    } catch (error) {
+      const errorMessage =
+        toErrString(error);
 
-      // 4️⃣ Marcar FAILED si explotó
+      errLog(
+        "Reminder crashed",
+        {
+          reservationNumber:
+            reservation.reservationNumber ??
+            null,
+          reservationId:
+            reservation.id,
+          error: errorMessage,
+        }
+      );
+
       try {
         await prisma.guestLinkReminderLog.update({
           where: {
             reservationId_kind: {
-              reservationId: r.id,
+              reservationId:
+                reservation.id,
               kind: "CHECKIN_LINK",
             },
           },
           data: {
             status: "FAILED",
-            error: toErrString(e),
+            error: errorMessage,
           },
         });
-      } catch {}
+      } catch {
+        // No bloquear el worker por un fallo del log.
+      }
     }
   }
-} 
+}
 
-async function processPreCheckinMessages(now: Date) {
-  const TWO_HOURS = 2 * 60 * 60 * 1000;
+async function processPreCheckinMessages(
+  now: Date
+) {
+  const TWO_HOURS =
+    2 * 60 * 60 * 1000;
 
-  const upcoming = await prisma.reservation.findMany({
-    where: {
-      checkIn: {
-        gt: now,
-        lte: new Date(now.getTime() + TWO_HOURS),
+  const upcoming =
+    await prisma.reservation.findMany({
+      where: {
+        checkIn: {
+          gt: now,
+          lte: new Date(
+            now.getTime() + TWO_HOURS
+          ),
+        },
+        paymentState:
+          PaymentState.PAID,
+        guestPhone: {
+          not: null,
+        },
+        status:
+          ReservationStatus.ACTIVE,
       },
-      paymentState: PaymentState.PAID,
-      guestPhone: { not: null },
-      status: "ACTIVE",
-    },
-    select: {
-      id: true,
-    },
-    take: 50,
-    orderBy: { checkIn: "asc" },
-  });
+      select: {
+        id: true,
+        reservationNumber: true,
+        externalRaw: true,
+      },
+      take: 50,
+      orderBy: {
+        checkIn: "asc",
+      },
+    });
 
-  if (upcoming.length === 0) return;
+  if (upcoming.length === 0) {
+    return;
+  }
 
-  log("processPreCheckinMessages", { count: upcoming.length });
+  log(
+    "processPreCheckinMessages",
+    {
+      count: upcoming.length,
+    }
+  );
 
-  for (const r of upcoming) {
+  for (const reservation of upcoming) {
+    if (
+      !hasGuestSmsConsent(
+        reservation.externalRaw
+      )
+    ) {
+      log(
+        "Pre-checkin SMS skipped",
+        {
+          reservationNumber:
+            reservation.reservationNumber ??
+            null,
+          reservationId:
+            reservation.id,
+          reason:
+            "SMS_CONSENT_NOT_GRANTED",
+        }
+      );
+
+      continue;
+    }
+
     try {
-      await sendPreCheckinSms(prisma, r.id);
-    } catch (e) {
-      errLog("Pre-checkin crashed", {
-        reservationId: r.id,
-        err: toErrString(e),
-      });
+      await sendPreCheckinSms(
+        prisma,
+        reservation.id
+      );
+    } catch (error) {
+      errLog(
+        "Pre-checkin crashed",
+        {
+          reservationNumber:
+            reservation.reservationNumber ??
+            null,
+          reservationId:
+            reservation.id,
+          error:
+            toErrString(error),
+        }
+      );
     }
   }
 }
