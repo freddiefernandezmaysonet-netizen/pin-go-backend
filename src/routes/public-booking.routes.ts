@@ -787,13 +787,6 @@ publicBookingRouter.post("/create-checkout", async (req, res) => {
       });
     }
 
-    if (stayNotificationsConsent !== true) {
-  return res.status(400).json({
-    ok: false,
-    error: "Stay notifications consent is required.",
-  });
-}
-
 if (guestAcceptedCancellationTerms !== true) {
   return res.status(400).json({
     ok: false,
@@ -1028,8 +1021,8 @@ const totalAmountCents = pricing.totalAmountCents;
         guestName: String(guestName).trim(),
         guestEmail: String(guestEmail).trim(),
         guestPhone: guestPhone ? String(guestPhone).trim() : "",
-        stayNotificationsConsent: "true",
-        smsConsent: "true",
+        stayNotificationsConsent: String(stayNotificationsConsent === true),
+        smsConsent: String(stayNotificationsConsent === true),
         consentSource: "DIRECT_BOOKING_WEB_FORM",
         consentVersion: "stay_notifications_v1",
         adults: String(adultsCount),

@@ -1,6 +1,10 @@
 import Stripe from "stripe";
 import { randomBytes } from "crypto";
-import { DashboardUserRole, PrismaClient } from "@prisma/client";
+import {
+  DashboardUserRole,
+  Prisma,
+  PrismaClient,
+} from "@prisma/client";
 import stripe from "../billing/stripe";
 import { checkPropertyAvailability } from "./availability.service";
 import { ingestReservation } from "./ingest.service";
@@ -480,10 +484,6 @@ const consentVersion =
   String(session.metadata?.consentVersion ?? "").trim() ||
   "stay_notifications_v1";
 
-if (!stayNotificationsConsent || !smsConsent) {
-  throw new Error("DIRECT_BOOKING_SMS_CONSENT_REQUIRED");
-}
-
 const cancellationTermsAccepted =
   String(session.metadata?.guestAcceptedCancellationTerms ?? "").trim() ===
   "true";
@@ -670,13 +670,13 @@ const ingestResult = await ingestReservation({
     amountTotal: session.amount_total,
     currency: session.currency,
     metadata: session.metadata ?? {},
-    consent: {
-      stayNotificationsConsent,
-      smsConsent,
-      consentSource,
-      consentVersion,
-      acceptedAt: new Date().toISOString(),
-   },
+   consent: {
+  stayNotificationsConsent,
+  smsConsent,
+  consentSource,
+  consentVersion,
+  acceptedAt: smsConsent ? new Date().toISOString() : null,
+},
     cancellationTerms: cancellationTermsAcceptance,
  },
 
@@ -687,6 +687,10 @@ const guestToken = await getOrCreateReservationGuestToken(
   ingestResult.reservationId
 );
 const manageReservationUrl = buildManageReservationUrl(guestToken);
+
+const pricingBreakdownJson = JSON.parse(
+  JSON.stringify(pricingBreakdown)
+) as Prisma.InputJsonValue;
 
 const updatedReservation = await prisma.reservation.update({
   where: {
@@ -711,7 +715,7 @@ const updatedReservation = await prisma.reservation.update({
   hostPayoutLastSyncedAt: new Date(),
 
   selectedAmenityIds,
-  pricingBreakdown,
+  pricingBreakdown: pricingBreakdownJson,
 },
   select: {
   id: true,
