@@ -9,6 +9,9 @@ import {
 import {
   evaluateGuestAccessReadiness,
 } from "../services/guest-access-readiness.service";
+import {
+  ensureReservationGuestAgreementSnapshot,
+} from "../services/guest-agreement.service";
 
 /* =====================
    Utils
@@ -564,11 +567,46 @@ export function buildGuestRouter(prisma: PrismaClient) {
             );
         }
 
+                let agreementSnapshot: unknown =
+          reservation.guestAgreementSnapshot;
+
+        if (!agreementSnapshot) {
+          const captureResult =
+            await ensureReservationGuestAgreementSnapshot(
+              prisma,
+              reservation.id
+            );
+
+          if (
+            captureResult.ok &&
+            captureResult.snapshot
+          ) {
+            agreementSnapshot =
+              captureResult.snapshot;
+
+            console.log(
+              "[GUEST_VERIFICATION] agreement snapshot captured",
+              {
+                reservationNumber:
+                  reservation.reservationNumber ??
+                  null,
+                propertyId:
+                  reservation.propertyId,
+                agreementVersion:
+                  (
+                    captureResult.snapshot as {
+                      version?: string;
+                    }
+                  ).version ?? null,
+              }
+            );
+          }
+        }
+
         const agreement =
           readGuestAgreementSnapshot(
-            reservation.guestAgreementSnapshot
+            agreementSnapshot
           );
-
         if (!agreement) {
           console.error(
             "[GUEST_VERIFICATION] agreement snapshot missing",
