@@ -305,25 +305,58 @@ function getRefundExecutionBody({
   return "Pin&Go recorded the cancellation according to the reservation cancellation policy.";
 }
 
-function renderManageReservationBlock(manageReservationUrl?: string | null) {
-  const safeManageReservationUrl = getSafeUrl(manageReservationUrl);
+function renderManageReservationBlock(
+  manageReservationUrl?: string | null
+) {
+  const safeManageReservationUrl =
+    getSafeUrl(
+      manageReservationUrl
+    );
 
-  if (!safeManageReservationUrl) return "";
+  if (!safeManageReservationUrl) {
+    return "";
+  }
 
-  const escapedUrl = escapeHtml(safeManageReservationUrl);
+  const escapedUrl =
+    escapeHtml(
+      safeManageReservationUrl
+    );
 
   return `
-    <p style="margin: 24px 0;">
-      <a href="${escapedUrl}" style="display:inline-block;background:#2563eb;color:#ffffff;text-decoration:none;padding:13px 18px;border-radius:12px;font-weight:800;">
+    <div style="background:#eff6ff;border:1px solid #bfdbfe;border-radius:16px;padding:20px;margin:22px 0;">
+      <h3 style="margin:0 0 8px;color:#1e3a8a;">
         Manage your reservation
-      </a>
-    </p>
+      </h3>
 
-    <p style="margin: 0 0 18px; color:#6b7280; font-size:13px; line-height:1.5;">
-      Use this secure link to review your reservation, cancellation terms, and self-service options:
-      <br />
-      <a href="${escapedUrl}" style="color:#2563eb;">${escapedUrl}</a>
-    </p>
+      <h3 style="margin:0 0 14px;color:#1e40af;">
+        Administre su reservaci&oacute;n
+      </h3>
+
+      <p style="margin:0 0 16px;color:#1e40af;">
+        Review your stay details, cancellation terms, refund eligibility, and available self-service options.
+        Revise los detalles de su estad&iacute;a, los t&eacute;rminos de cancelaci&oacute;n, la elegibilidad de reembolso y las opciones disponibles.
+      </p>
+
+      <p style="margin:0 0 18px;">
+        <a
+          href="${escapedUrl}"
+          style="display:inline-block;background:#2563eb;color:#ffffff;text-decoration:none;padding:13px 18px;border-radius:12px;font-weight:800;"
+        >
+          Manage reservation / Administrar reservaci&oacute;n
+        </a>
+      </p>
+
+      <p style="margin:0;color:#475569;font-size:13px;">
+        Secure link / Enlace seguro:
+        <br />
+        <a
+          href="${escapedUrl}"
+          style="color:#2563eb;word-break:break-all;"
+        >
+          ${escapedUrl}
+        </a>
+      </p>
+    </div>
   `;
 }
 
@@ -338,44 +371,93 @@ function renderCancellationPolicyBlock({
   cancellationPolicyType?: string | null;
   cancellationPolicySummary?: string | null;
   refundBasis?: string | null;
-  refundRules?: CancellationRefundRuleEmailInput[] | null;
+  refundRules?:
+    | CancellationRefundRuleEmailInput[]
+    | null;
 }) {
   const hasPolicyContent =
     cancellationPolicyName ||
     cancellationPolicyType ||
     cancellationPolicySummary ||
     refundBasis ||
-    (Array.isArray(refundRules) && refundRules.length > 0);
+    (Array.isArray(refundRules) &&
+      refundRules.length > 0);
 
-  if (!hasPolicyContent) return "";
+  if (!hasPolicyContent) {
+    return "";
+  }
 
-  const safeRules = Array.isArray(refundRules) ? refundRules : [];
+  const safeRules =
+    Array.isArray(refundRules)
+      ? refundRules
+      : [];
+
+  const refundBasisLabel =
+    refundBasis ===
+      "NIGHTLY_SUBTOTAL" ||
+    refundBasis ===
+      "NIGHTLY_SUBTOTAL_ONLY"
+      ? "Nightly subtotal only / Solo subtotal de noches"
+      : refundBasis ===
+        "NIGHTLY_PLUS_CLEANING"
+      ? "Nightly subtotal and eligible cleaning fee / Noches y cargo de limpieza elegible"
+      : refundBasis ===
+        "TOTAL_AMOUNT"
+      ? "Eligible total amount / Total elegible"
+      : refundBasis
+      ? `${formatRefundBasis(
+          refundBasis
+        )} / Seg\u00fan la base configurada`
+      : null;
 
   return `
     <div style="background:#f8fafc;border:1px solid #dbeafe;border-radius:14px;padding:16px;margin:20px 0;">
-      <h3 style="margin:0 0 10px;color:#111827;font-size:16px;">Cancellation terms</h3>
+      <h3 style="margin:0 0 8px;color:#111827;">
+        Cancellation &amp; refund policy
+      </h3>
+
+      <h3 style="margin:0 0 12px;color:#374151;">
+        Pol&iacute;tica de cancelaci&oacute;n y reembolso
+      </h3>
 
       ${
-        cancellationPolicyName || cancellationPolicyType
-          ? `<p style="margin:0 0 8px;"><strong>Policy:</strong> ${escapeHtml(
-              cancellationPolicyName || cancellationPolicyType || "Configured by host"
-            )}</p>`
+        cancellationPolicyName ||
+        cancellationPolicyType
+          ? `
+            <p style="margin:0 0 8px;">
+              <strong>Policy / Pol&iacute;tica:</strong>
+              ${escapeHtml(
+                cancellationPolicyName ||
+                  cancellationPolicyType ||
+                  "Configured by host"
+              )}
+            </p>
+          `
           : ""
       }
 
       ${
-        refundBasis
-          ? `<p style="margin:0 0 8px;"><strong>Refund basis:</strong> ${escapeHtml(
-              formatRefundBasis(refundBasis)
-            )}</p>`
+        refundBasisLabel
+          ? `
+            <p style="margin:0 0 8px;">
+              <strong>Refund basis / Base del reembolso:</strong>
+              ${escapeHtml(
+                refundBasisLabel
+              )}
+            </p>
+          `
           : ""
       }
 
       ${
         cancellationPolicySummary
-          ? `<p style="margin:10px 0;color:#374151;">${escapeHtml(
-              cancellationPolicySummary
-            )}</p>`
+          ? `
+            <p style="margin:10px 0;color:#374151;">
+              ${escapeHtml(
+                cancellationPolicySummary
+              )}
+            </p>
+          `
           : ""
       }
 
@@ -383,26 +465,53 @@ function renderCancellationPolicyBlock({
         safeRules.length > 0
           ? `
             <div style="margin-top:12px;">
+              <p style="margin:0 0 8px;font-weight:800;">
+                Refund schedule / Calendario de reembolso
+              </p>
+
               ${safeRules
-                .map(
-                  (rule) => `
+                .map((rule) => {
+                  const daysBeforeCheckIn =
+                    Math.max(
+                      0,
+                      Math.ceil(
+                        Number(
+                          rule.minHoursBeforeCheckIn
+                        ) / 24
+                      )
+                    );
+
+                  return `
                     <div style="background:#ffffff;border:1px solid #e5e7eb;border-radius:12px;padding:12px;margin-top:8px;">
                       <p style="margin:0;font-weight:800;color:#111827;">
-                        ${escapeHtml(rule.label)} — ${escapeHtml(rule.refundPercent)}%
+                        ${escapeHtml(
+                          rule.label
+                        )}
+                        &mdash;
+                        ${escapeHtml(
+                          rule.refundPercent
+                        )}%
                       </p>
+
                       <p style="margin:4px 0 0;color:#4b5563;font-size:13px;">
-                        ${escapeHtml(formatCancellationWindow(rule.minHoursBeforeCheckIn))}
+                        ${daysBeforeCheckIn}+ days before check-in /
+                        ${daysBeforeCheckIn}+ d&iacute;as antes del check-in
                       </p>
+
                       ${
                         rule.description
-                          ? `<p style="margin:6px 0 0;color:#6b7280;font-size:13px;">${escapeHtml(
-                              rule.description
-                            )}</p>`
+                          ? `
+                            <p style="margin:6px 0 0;color:#6b7280;font-size:13px;">
+                              ${escapeHtml(
+                                rule.description
+                              )}
+                            </p>
+                          `
                           : ""
                       }
                     </div>
-                  `
-                )
+                  `;
+                })
                 .join("")}
             </div>
           `
@@ -410,11 +519,20 @@ function renderCancellationPolicyBlock({
       }
 
       ${
-        refundBasis === "NIGHTLY_SUBTOTAL"
+        refundBasis ===
+          "NIGHTLY_SUBTOTAL" ||
+        refundBasis ===
+          "NIGHTLY_SUBTOTAL_ONLY"
           ? `
-            <p style="margin:12px 0 0;color:#92400e;background:#fffbeb;border:1px solid #fde68a;border-radius:10px;padding:10px;font-size:13px;">
-              Refund percentages apply to the nightly subtotal only. Other charges such as cleaning fees, service fees, taxes, add-ons, or other non-nightly charges may not be refundable unless required by law or specifically stated in this policy.
-            </p>
+            <div style="margin:12px 0 0;color:#92400e;background:#fffbeb;border:1px solid #fde68a;border-radius:10px;padding:10px;font-size:13px;">
+              <p style="margin:0 0 8px;">
+                Refund percentages apply only to the nightly subtotal. Cleaning fees, service fees, taxes, add-ons, and other non-nightly charges may not be refundable unless required by law or specifically stated in the policy.
+              </p>
+
+              <p style="margin:0;">
+                Los porcentajes de reembolso aplican solamente al subtotal de noches. Los cargos de limpieza, servicio, impuestos, complementos y otros cargos que no correspondan a noches pueden no ser reembolsables, salvo que la ley o la pol&iacute;tica indiquen lo contrario.
+              </p>
+            </div>
           `
           : ""
       }
@@ -523,55 +641,138 @@ export async function sendSalesFollowUpEmail(
     };
   }
 
-  const { data, error } = await resend.emails.send({
-    from: getEmailFrom(),
-    to,
-    subject: "Following up on your Pin&Go demo",
-    html: `
-      <div style="font-family: Arial, sans-serif; color: #111827; line-height: 1.6;">
-        <h2 style="margin-bottom: 8px;">Following up on your Pin&Go demo</h2>
+  const { data, error } =
+    await resend.emails.send({
+      from: getEmailFrom(),
+      to,
+      subject:
+        `Reservation confirmed / Reservaci\u00f3n confirmada #${reservationNumber} - ${propertyName}`,
+      html: `
+        <div style="font-family:Arial,sans-serif;color:#111827;line-height:1.6;max-width:680px;margin:0 auto;">
+          <div style="background:linear-gradient(135deg,#020617,#1d4ed8);color:#ffffff;border-radius:18px;padding:24px;margin-bottom:20px;">
+            <p style="margin:0 0 8px;font-size:12px;letter-spacing:0.08em;text-transform:uppercase;font-weight:800;">
+              Pin&amp;Go Direct Booking
+            </p>
 
-        <p>Hi ${safeName},</p>
+            <h1 style="margin:0;font-size:28px;line-height:1.15;">
+              Your reservation is confirmed
+            </h1>
 
-        <p>
-          Thank you for booking a Pin&Go demo. I wanted to follow up and see
-          if you had any questions or if you would like help getting started.
-        </p>
+            <h2 style="margin:8px 0 0;font-size:22px;line-height:1.2;">
+              Su reservaci&oacute;n est&aacute; confirmada
+            </h2>
 
-        <p>
-          Pin&Go helps short-term rental operators automate guest access,
-          PMS sync, messaging, and smart property automation.
-        </p>
+            <p style="margin:10px 0 0;color:#dbeafe;font-weight:700;">
+              Reservation / Reservaci&oacute;n #${safeReservationNumber}
+            </p>
 
-        <p>
-          Best,<br />
-          Pin&Go Team
-        </p>
+            <p style="margin:8px 0 0;color:#dbeafe;">
+              Pin&amp;Go has started the secure stay workflow.
+              Pin&amp;Go ha iniciado el flujo seguro de estad&iacute;a.
+            </p>
+          </div>
 
-        <hr style="border: none; border-top: 1px solid #e5e7eb; margin: 24px 0;" />
+          <p>
+            Hi / Hola ${safeName},
+          </p>
 
-        <h2 style="margin-bottom: 8px;">Seguimiento de tu demo de Pin&Go</h2>
+          <p>
+            Your reservation for <strong>${safePropertyName}</strong> is confirmed and paid.
+            Su reservaci&oacute;n para <strong>${safePropertyName}</strong> est&aacute; confirmada y pagada.
+          </p>
 
-        <p>Hola ${safeName},</p>
+          <div style="background:#f9fafb;border:1px solid #e5e7eb;border-radius:14px;padding:16px;margin:20px 0;">
+            <p>
+              <strong>Reservation Number / N&uacute;mero de reservaci&oacute;n:</strong>
+              #${safeReservationNumber}
+            </p>
 
-        <p>
-          Gracias por agendar una demo de Pin&Go. Quería darte seguimiento
-          para saber si tienes alguna pregunta o si deseas ayuda para comenzar.
-        </p>
+            <p>
+              <strong>Property / Propiedad:</strong>
+              ${safePropertyName}
+            </p>
 
-        <p>
-          Pin&Go ayuda a operadores de rentas a corto plazo a automatizar
-          accesos, sincronización con PMS, mensajería y automatización
-          inteligente de propiedades.
-        </p>
+            <p>
+              <strong>Check-in / Entrada:</strong>
+              ${formatBookingDate(
+                checkIn,
+                dateTimeZone
+              )}
+            </p>
 
-        <p>
-          Saludos,<br />
-          Equipo de Pin&Go
-        </p>
-      </div>
-    `,
-  });
+            <p>
+              <strong>Check-out / Salida:</strong>
+              ${formatBookingDate(
+                checkOut,
+                dateTimeZone
+              )}
+            </p>
+
+            <p>
+              <strong>Total paid / Total pagado:</strong>
+              ${formatBookingAmount(
+                totalAmount,
+                currency
+              )}
+            </p>
+
+            <p>
+              <strong>Payment status / Estado del pago:</strong>
+              Paid / Pagado
+            </p>
+          </div>
+
+          ${manageReservationBlock}
+
+          ${cancellationPolicyBlock}
+
+          <div style="background:#fffbeb;border:1px solid #fde68a;border-radius:14px;padding:16px;margin:20px 0;color:#92400e;">
+            <h3 style="margin:0 0 8px;">
+              Secure pre-check-in / Registro seguro
+            </h3>
+
+            <p style="margin:0 0 10px;">
+              Complete identity verification, review the property rules, and sign the guest agreement before digital access is released.
+            </p>
+
+            <p style="margin:0;">
+              Complete la verificaci&oacute;n de identidad, revise las reglas de la propiedad y firme el acuerdo del hu&eacute;sped antes de recibir el acceso digital.
+            </p>
+          </div>
+
+          <div style="background:#f0fdf4;border:1px solid #bbf7d0;border-radius:14px;padding:16px;margin:20px 0;color:#14532d;">
+            <h3 style="margin:0 0 8px;">
+              Smart access / Acceso inteligente
+            </h3>
+
+            <p style="margin:0 0 10px;">
+              Your smart-access instructions will be delivered according to the property&apos;s secure check-in workflow. Access details may be sent closer to check-in after operational checks are complete.
+            </p>
+
+            <p style="margin:0;">
+              Las instrucciones de acceso inteligente se entregar&aacute;n seg&uacute;n el flujo seguro de check-in de la propiedad. Los detalles pueden enviarse m&aacute;s cerca del check-in, despu&eacute;s de completar las validaciones operacionales.
+            </p>
+          </div>
+
+          <p style="color:#4b5563;">
+            Use the Manage Reservation link to review stay details, cancellation terms, refund eligibility, and available self-service options.
+            Utilice el enlace Administrar reservaci&oacute;n para revisar la estad&iacute;a, los t&eacute;rminos de cancelaci&oacute;n, la elegibilidad de reembolso y las opciones disponibles.
+          </p>
+
+          <p>
+            Thank you / Gracias,<br />
+            Pin&amp;Go
+          </p>
+
+          <hr style="border:none;border-top:1px solid #e5e7eb;margin:28px 0;" />
+
+          <p style="color:#6b7280;font-size:12px;">
+            This is a transactional message regarding your reservation.
+            Este es un mensaje transaccional relacionado con su reservaci&oacute;n.
+          </p>
+        </div>
+      `,
+    });
 
   if (error) {
     throw new Error(`Resend sales follow-up failed: ${error.message}`);
@@ -629,6 +830,12 @@ export async function sendDirectBookingGuestConfirmation(
   const manageReservationBlock = renderManageReservationBlock(
     manageReservationUrl
   );
+
+   if (!manageReservationBlock) {
+    throw new Error(
+      "Direct booking manage reservation URL is missing or invalid"
+    );
+  }
 
   const cancellationPolicyBlock = renderCancellationPolicyBlock({
     cancellationPolicyName,
@@ -773,11 +980,19 @@ export async function sendManualReservationGuestConfirmation(
   const verificationBlock = `
     <div style="background:#eff6ff;border:1px solid #bfdbfe;border-radius:16px;padding:20px;margin:22px 0;">
       <h2 style="margin:0 0 8px;color:#1e3a8a;">
-        Complete your secure pre-check-in
+        Secure pre-check-in required
       </h2>
 
+      <h3 style="margin:0 0 14px;color:#1e40af;">
+        Registro seguro requerido
+      </h3>
+
+      <p style="margin:0 0 10px;color:#1e40af;">
+        Before Pin&amp;Go releases your digital access, complete identity verification, review and accept the property rules and cancellation/refund policy, and sign the guest agreement.
+      </p>
+
       <p style="margin:0 0 16px;color:#1e40af;">
-        Before Pin&Go releases your digital access, complete identity verification, review the property rules, and sign the guest agreement.
+        Antes de que Pin&amp;Go entregue su acceso digital, complete la verificaci&oacute;n de identidad, revise y acepte las reglas de la propiedad y la pol&iacute;tica de cancelaci&oacute;n/reembolso, y firme el acuerdo del hu&eacute;sped.
       </p>
 
       <p style="margin:0 0 18px;">
@@ -785,26 +1000,19 @@ export async function sendManualReservationGuestConfirmation(
           href="${safeVerificationUrl}"
           style="display:inline-block;background:#2563eb;color:#ffffff;text-decoration:none;padding:13px 18px;border-radius:12px;font-weight:800;"
         >
-          Complete secure pre-check-in
+          Complete secure pre-check-in / Complete el registro seguro
         </a>
       </p>
 
-      <p style="margin:0 0 18px;color:#475569;font-size:13px;">
-        Secure link:
+      <p style="margin:0;color:#475569;font-size:13px;">
+        Secure link / Enlace seguro:
         <br />
-        <a href="${safeVerificationUrl}" style="color:#2563eb;">
+        <a
+          href="${safeVerificationUrl}"
+          style="color:#2563eb;word-break:break-all;"
+        >
           ${safeVerificationUrl}
         </a>
-      </p>
-
-      <hr style="border:none;border-top:1px solid #bfdbfe;margin:20px 0;" />
-
-      <h2 style="margin:0 0 8px;color:#1e3a8a;">
-        Complete su registro seguro
-      </h2>
-
-      <p style="margin:0;color:#1e40af;">
-                  Antes de que Pin&amp;Go entregue su acceso digital, complete la verificaci&oacute;n de identidad, revise las reglas de la propiedad y firme el acuerdo del hu&eacute;sped.
       </p>
     </div>
   `;
@@ -822,75 +1030,127 @@ export async function sendManualReservationGuestConfirmation(
     };
   }
 
-  const { data, error } = await resend.emails.send({
-    from: getEmailFrom(),
-    to,
-    subject: `Your Reservation #${reservationNumber} is confirmed - ${propertyName}`,
-    html: `
-      <div style="font-family: Arial, sans-serif; color: #111827; line-height: 1.6; max-width: 680px; margin: 0 auto;">
-       <div style="background:linear-gradient(135deg,#020617,#1d4ed8);color:#ffffff;border-radius:18px;padding:24px;margin-bottom:20px;">
-  <p style="margin:0 0 8px;font-size:12px;letter-spacing:0.08em;text-transform:uppercase;font-weight:800;">Pin&Go Reservation</p>
-  <h1 style="margin:0;font-size:28px;line-height:1.15;">Your reservation is confirmed</h1>
-  <p style="margin:10px 0 0;color:#dbeafe;font-weight:700;">Reservation #${safeReservationNumber}</p>
-  <p style="margin:8px 0 0;color:#dbeafe;">Pin&Go has started the secure stay workflow for your reservation.</p>
-</div>
-        <p>Hi ${safeName},</p>
+    const { data, error } =
+    await resend.emails.send({
+      from: getEmailFrom(),
+      to,
+      subject:
+        `Reservation / Reservaci\u00f3n #${reservationNumber} - Secure pre-check-in required - ${propertyName}`,
+      html: `
+        <div style="font-family:Arial,sans-serif;color:#111827;line-height:1.6;max-width:680px;margin:0 auto;">
+          <div style="background:linear-gradient(135deg,#020617,#1d4ed8);color:#ffffff;border-radius:18px;padding:24px;margin-bottom:20px;">
+            <p style="margin:0 0 8px;font-size:12px;letter-spacing:0.08em;text-transform:uppercase;font-weight:800;">
+              Pin&amp;Go Reservation / Reservaci&oacute;n
+            </p>
 
-        <p>
-          Your reservation for <strong>${safePropertyName}</strong> has been confirmed.
-        </p>
+            <h1 style="margin:0;font-size:28px;line-height:1.15;">
+              Reservation created
+            </h1>
 
-       <div style="background:#f9fafb;border:1px solid #e5e7eb;border-radius:14px;padding:16px;margin:20px 0;">
-  <p><strong>Reservation Number:</strong> #${safeReservationNumber}</p>
-  <p><strong>Property:</strong> ${safePropertyName}</p>
-  <p><strong>Check-in:</strong> ${formatBookingDate(checkIn, dateTimeZone)}</p>
-  <p><strong>Check-out:</strong> ${formatBookingDate(checkOut, dateTimeZone)}</p>
-</div>
+            <h2 style="margin:8px 0 0;font-size:22px;line-height:1.2;">
+              Reservaci&oacute;n creada
+            </h2>
 
-        ${verificationBlock}
+            <p style="margin:10px 0 0;color:#dbeafe;font-weight:700;">
+              Reservation / Reservaci&oacute;n #${safeReservationNumber}
+            </p>
 
- <div style="background:#f0fdf4;border:1px solid #bbf7d0;border-radius:14px;padding:16px;margin:20px 0;color:#14532d;">
-          <h3 style="margin:0 0 8px;">Smart access and check-in</h3>
-          <p style="margin:0;">
-            Your smart access instructions will be delivered according to the property's secure check-in workflow.
-            For security, access details may be delivered closer to check-in or after operational checks are complete.
+            <p style="margin:8px 0 0;color:#dbeafe;">
+              Secure pre-check-in must be completed before digital access can be released.
+              Debe completar el registro seguro antes de recibir el acceso digital.
+            </p>
+          </div>
+
+          <p>
+            Hi / Hola ${safeName},
+          </p>
+
+          <p>
+            Your reservation for <strong>${safePropertyName}</strong> has been created.
+            Su reservaci&oacute;n para <strong>${safePropertyName}</strong> ha sido creada.
+          </p>
+
+          <div style="background:#f9fafb;border:1px solid #e5e7eb;border-radius:14px;padding:16px;margin:20px 0;">
+            <p>
+              <strong>Reservation Number / N&uacute;mero de reservaci&oacute;n:</strong>
+              #${safeReservationNumber}
+            </p>
+
+            <p>
+              <strong>Property / Propiedad:</strong>
+              ${safePropertyName}
+            </p>
+
+            <p>
+              <strong>Check-in / Entrada:</strong>
+              ${formatBookingDate(
+                checkIn,
+                dateTimeZone
+              )}
+            </p>
+
+            <p>
+              <strong>Check-out / Salida:</strong>
+              ${formatBookingDate(
+                checkOut,
+                dateTimeZone
+              )}
+            </p>
+          </div>
+
+          ${verificationBlock}
+
+          <div style="background:#fffbeb;border:1px solid #fde68a;border-radius:14px;padding:16px;margin:20px 0;color:#92400e;">
+            <h3 style="margin:0 0 8px;">
+              Required steps / Pasos requeridos
+            </h3>
+
+            <ul style="margin:0;padding-left:22px;">
+              <li>
+                Identity verification / Verificaci&oacute;n de identidad
+              </li>
+              <li>
+                Guest agreement and property rules / Acuerdo del hu&eacute;sped y reglas de la propiedad
+              </li>
+              <li>
+                Cancellation and refund policy acceptance / Aceptaci&oacute;n de la pol&iacute;tica de cancelaci&oacute;n y reembolso
+              </li>
+            </ul>
+
+            <p style="margin:12px 0 0;">
+              SMS updates are optional and are not required to complete the reservation.
+              Las actualizaciones por SMS son opcionales y no son necesarias para completar la reservaci&oacute;n.
+            </p>
+          </div>
+
+          <div style="background:#f0fdf4;border:1px solid #bbf7d0;border-radius:14px;padding:16px;margin:20px 0;color:#14532d;">
+            <h3 style="margin:0 0 8px;">
+              Smart access / Acceso inteligente
+            </h3>
+
+            <p style="margin:0 0 10px;">
+              Digital access remains protected until the secure pre-check-in requirements are completed. Access instructions may be delivered closer to check-in after operational checks are complete.
+            </p>
+
+            <p style="margin:0;">
+              El acceso digital permanecer&aacute; protegido hasta completar los requisitos del registro seguro. Las instrucciones de acceso pueden enviarse m&aacute;s cerca del check-in, despu&eacute;s de completar las validaciones operacionales.
+            </p>
+          </div>
+
+          <p>
+            Thank you / Gracias,<br />
+            Pin&amp;Go
+          </p>
+
+          <hr style="border:none;border-top:1px solid #e5e7eb;margin:28px 0;" />
+
+          <p style="color:#6b7280;font-size:12px;">
+            This is a transactional message regarding your reservation.
+            Este es un mensaje transaccional relacionado con su reservaci&oacute;n.
           </p>
         </div>
-
-               <p style="color:#4b5563;">
-          Your digital access will remain blocked until the secure pre-check-in requirements are completed.
-        </p>
-        <p>
-          Thank you,<br />
-          Pin&Go
-        </p>
-
-        <hr style="border: none; border-top: 1px solid #e5e7eb; margin: 28px 0;" />
-
-       <h2 style="margin-bottom: 8px;">Tu reservación está confirmada</h2>
-
-<p><strong>Número de reservación:</strong> #${safeReservationNumber}</p>
-
-<p>Hola ${safeName},</p>
-        <p>
-          Tu reservación para <strong>${safePropertyName}</strong> ha sido confirmada.
-        </p>
-
-              <p>
-                    Utilice el bot&oacute;n de registro seguro incluido arriba para verificar su identidad, aceptar las reglas y firmar el acuerdo antes de recibir el acceso digital.
-        </p>
-        <p>
-          Las instrucciones de acceso inteligente se entregarán según el flujo seguro de check-in de la propiedad.
-          Por seguridad, los detalles de acceso pueden enviarse más cerca del check-in o después de completar validaciones operacionales.
-        </p>
-
-        <p>
-          Gracias,<br />
-          Pin&Go
-        </p>
-      </div>
-    `,
-  });
+      `,
+    });
 
   if (error) {
     throw new Error(`Resend manual reservation guest email failed: ${error.message}`);
