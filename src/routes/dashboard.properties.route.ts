@@ -90,14 +90,22 @@ function parsePropertySeasonType(
   return null;
 }
 
-function getAppUrl() {
-  return String(process.env.APP_URL ?? "http://localhost:3000")
+function getPublicApiUrl() {
+  return String(
+    process.env.PUBLIC_API_BASE_URL ??
+      process.env.API_BASE_URL ??
+      "http://localhost:3000"
+  )
     .trim()
     .replace(/\/+$/, "");
 }
 
-function buildManageReservationUrl(guestToken: string) {
-  return `${getAppUrl()}/booking/manage/${encodeURIComponent(guestToken)}`;
+function buildGuestVerificationUrl(
+  guestToken: string
+) {
+  return `${getPublicApiUrl()}/guest/verify/${encodeURIComponent(
+    guestToken
+  )}`;
 }
 
 dashboardPropertiesRouter.get(
@@ -1167,60 +1175,132 @@ dashboardPropertiesRouter.post(
         ? manualReservationWithPricing
         : null;
 
-      const emailGuestToken =
-        manualReservationForEmail?.guestToken ?? result.guestToken ?? null;
+          const emailGuestToken =
+        manualReservationForEmail?.guestToken ??
+        result.guestToken ??
+        null;
 
-      const manageReservationUrl = emailGuestToken
-        ? buildManageReservationUrl(emailGuestToken)
-        : null;
+      const verificationUrl =
+        emailGuestToken
+          ? buildGuestVerificationUrl(
+              emailGuestToken
+            )
+          : null;
 
-      if (manualReservationForEmail?.guestEmail) {
+      if (
+        manualReservationForEmail?.guestEmail &&
+        verificationUrl
+      ) {
         const manualReservationGuestEmailInput = {
-          to: manualReservationForEmail.guestEmail,
-          reservationNumber: manualReservationForEmail.reservationNumber,
-          guestName: manualReservationForEmail.guestName,
-          propertyName: manualReservationForEmail.property.name,
-          checkIn: manualReservationForEmail.checkIn,
-          checkOut: manualReservationForEmail.checkOut,
-          propertyTimeZone: manualReservationForEmail.property.timezone,
-          manageReservationUrl,
+          to:
+            manualReservationForEmail.guestEmail,
+          reservationNumber:
+            manualReservationForEmail.reservationNumber,
+          guestName:
+            manualReservationForEmail.guestName,
+          propertyName:
+            manualReservationForEmail.property.name,
+          checkIn:
+            manualReservationForEmail.checkIn,
+          checkOut:
+            manualReservationForEmail.checkOut,
+          propertyTimeZone:
+            manualReservationForEmail.property.timezone,
+          verificationUrl,
         };
 
         try {
-          const manualGuestEmailDeliveryResult = await sendLoggedEmail({
-            prisma,
-            type: "MANUAL_RESERVATION_GUEST_CONFIRMATION",
-            to: manualReservationForEmail.guestEmail,
-            subject: `Your Reservation #${manualReservationForEmail.reservationNumber} is confirmed - ${manualReservationForEmail.property.name}`,
-            reservationId: manualReservationForEmail.id,
-            propertyId: property.id,
-            organizationId: orgId,
-            retryPayload: manualReservationGuestEmailInput,
-            send: () =>
-              sendManualReservationGuestConfirmation(
-                manualReservationGuestEmailInput
-              ),
-          });
-
-          if (!manualGuestEmailDeliveryResult.ok) {
-            console.error("[MANUAL_RESERVATION_GUEST_EMAIL_DELIVERY_FAILED]", {
-              organizationId: orgId,
+          const manualGuestEmailDeliveryResult =
+            await sendLoggedEmail({
+              prisma,
+              type:
+                "MANUAL_RESERVATION_GUEST_CONFIRMATION",
+              to:
+                manualReservationForEmail.guestEmail,
+              subject:
+                `Your Reservation #${manualReservationForEmail.reservationNumber} is confirmed - ${manualReservationForEmail.property.name}`,
+              reservationId:
+                manualReservationForEmail.id,
               propertyId: property.id,
-              reservationId: result.reservationId,
-              to: manualReservationForEmail.guestEmail,
-              status: manualGuestEmailDeliveryResult.status,
-              error: manualGuestEmailDeliveryResult.error,
+              organizationId: orgId,
+
+              // No guardamos el token del huésped
+              // dentro del registro de mensajes.
+              retryPayload: {
+                reservationNumber:
+                  manualReservationForEmail.reservationNumber,
+                guestName:
+                  manualReservationForEmail.guestName,
+                propertyName:
+                  manualReservationForEmail.property.name,
+                checkIn:
+                  manualReservationForEmail.checkIn,
+                checkOut:
+                  manualReservationForEmail.checkOut,
+                propertyTimeZone:
+                  manualReservationForEmail.property.timezone,
+              },
+
+              send: () =>
+                sendManualReservationGuestConfirmation(
+                  manualReservationGuestEmailInput
+                ),
             });
+
+          if (
+            !manualGuestEmailDeliveryResult.ok
+          ) {
+            console.error(
+              "[MANUAL_RESERVATION_GUEST_EMAIL_DELIVERY_FAILED]",
+              {
+                organizationId: orgId,
+                propertyId: property.id,
+                reservationId:
+                  result.reservationId,
+                to:
+                  manualReservationForEmail.guestEmail,
+                status:
+                  manualGuestEmailDeliveryResult.status,
+                error:
+                  manualGuestEmailDeliveryResult.error,
+              }
+            );
           }
         } catch (emailError: any) {
-          console.error("[MANUAL_RESERVATION_GUEST_EMAIL_ERROR]", {
+          console.error(
+            "[MANUAL_RESERVATION_GUEST_EMAIL_ERROR]",
+            {
+              organizationId: orgId,
+              propertyId: property.id,
+              reservationId:
+                result.reservationId,
+              to:
+                manualReservationForEmail.guestEmail,
+              error:
+                emailError?.message ??
+                emailError,
+            }
+          );
+        }
+      }
+
+      if (
+        manualReservationForEmail?.guestEmail &&
+        !verificationUrl
+      ) {
+        console.error(
+          "[MANUAL_RESERVATION_GUEST_EMAIL_SKIPPED]",
+          {
             organizationId: orgId,
             propertyId: property.id,
-            reservationId: result.reservationId,
-            to: manualReservationForEmail.guestEmail,
-            error: emailError?.message ?? emailError,
-          });
-        }
+            reservationId:
+              manualReservationForEmail.id,
+            reservationNumber:
+              manualReservationForEmail.reservationNumber,
+            reason:
+              "GUEST_VERIFICATION_TOKEN_MISSING",
+          }
+        );
       }
 
       let distributionSyncResult: any = null;

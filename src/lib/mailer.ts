@@ -76,7 +76,7 @@ type SendManualReservationGuestConfirmationInput = {
   checkIn: Date;
   checkOut: Date;
   propertyTimeZone?: string | null;
-  manageReservationUrl?: string | null;
+  verificationUrl: string;
 };
 
 type SendDirectBookingGuestCancellationEmailInput = {
@@ -738,17 +738,76 @@ export async function sendManualReservationGuestConfirmation(
     checkIn,
     checkOut,
     propertyTimeZone,
-    manageReservationUrl,
+    verificationUrl,
   } = input;
 
-  const safeReservationNumber = escapeHtml(reservationNumber);
-  const safeName = escapeHtml(guestName?.trim() || "there");
-  const safePropertyName = escapeHtml(propertyName);
-  const dateTimeZone = normalizePropertyTimeZone(propertyTimeZone);
-  const manageReservationBlock = renderManageReservationBlock(
-    manageReservationUrl
+  const safeReservationNumber =
+    escapeHtml(reservationNumber);
+
+  const safeName = escapeHtml(
+    guestName?.trim() || "there"
   );
 
+  const safePropertyName =
+    escapeHtml(propertyName);
+
+  const dateTimeZone =
+    normalizePropertyTimeZone(
+      propertyTimeZone
+    );
+
+  const normalizedVerificationUrl =
+    getSafeUrl(verificationUrl);
+
+  if (!normalizedVerificationUrl) {
+    throw new Error(
+      "Manual reservation verification URL is missing or invalid"
+    );
+  }
+
+  const safeVerificationUrl =
+    escapeHtml(
+      normalizedVerificationUrl
+    );
+
+  const verificationBlock = `
+    <div style="background:#eff6ff;border:1px solid #bfdbfe;border-radius:16px;padding:20px;margin:22px 0;">
+      <h2 style="margin:0 0 8px;color:#1e3a8a;">
+        Complete your secure pre-check-in
+      </h2>
+
+      <p style="margin:0 0 16px;color:#1e40af;">
+        Before Pin&Go releases your digital access, complete identity verification, review the property rules, and sign the guest agreement.
+      </p>
+
+      <p style="margin:0 0 18px;">
+        <a
+          href="${safeVerificationUrl}"
+          style="display:inline-block;background:#2563eb;color:#ffffff;text-decoration:none;padding:13px 18px;border-radius:12px;font-weight:800;"
+        >
+          Complete secure pre-check-in
+        </a>
+      </p>
+
+      <p style="margin:0 0 18px;color:#475569;font-size:13px;">
+        Secure link:
+        <br />
+        <a href="${safeVerificationUrl}" style="color:#2563eb;">
+          ${safeVerificationUrl}
+        </a>
+      </p>
+
+      <hr style="border:none;border-top:1px solid #bfdbfe;margin:20px 0;" />
+
+      <h2 style="margin:0 0 8px;color:#1e3a8a;">
+        Complete su registro seguro
+      </h2>
+
+      <p style="margin:0;color:#1e40af;">
+                  Antes de que Pin&amp;Go entregue su acceso digital, complete la verificaci&oacute;n de identidad, revise las reglas de la propiedad y firme el acuerdo del hu&eacute;sped.
+      </p>
+    </div>
+  `;
   if (!resend) {
     if (isProd) {
       throw new Error("RESEND_API_KEY missing in production");
@@ -787,9 +846,10 @@ export async function sendManualReservationGuestConfirmation(
   <p><strong>Check-in:</strong> ${formatBookingDate(checkIn, dateTimeZone)}</p>
   <p><strong>Check-out:</strong> ${formatBookingDate(checkOut, dateTimeZone)}</p>
 </div>
-        ${manageReservationBlock}
 
-        <div style="background:#f0fdf4;border:1px solid #bbf7d0;border-radius:14px;padding:16px;margin:20px 0;color:#14532d;">
+        ${verificationBlock}
+
+ <div style="background:#f0fdf4;border:1px solid #bbf7d0;border-radius:14px;padding:16px;margin:20px 0;color:#14532d;">
           <h3 style="margin:0 0 8px;">Smart access and check-in</h3>
           <p style="margin:0;">
             Your smart access instructions will be delivered according to the property's secure check-in workflow.
@@ -797,10 +857,9 @@ export async function sendManualReservationGuestConfirmation(
           </p>
         </div>
 
-        <p style="color:#4b5563;">
-          You can use the manage reservation link to review your stay details and self-service options.
+               <p style="color:#4b5563;">
+          Your digital access will remain blocked until the secure pre-check-in requirements are completed.
         </p>
-
         <p>
           Thank you,<br />
           Pin&Go
@@ -817,11 +876,9 @@ export async function sendManualReservationGuestConfirmation(
           Tu reservación para <strong>${safePropertyName}</strong> ha sido confirmada.
         </p>
 
-        <p>
-          Pin&Go comenzó el flujo seguro de estadía: confirmación de reserva,
-          preparación operacional y acceso inteligente.
+              <p>
+                    Utilice el bot&oacute;n de registro seguro incluido arriba para verificar su identidad, aceptar las reglas y firmar el acuerdo antes de recibir el acceso digital.
         </p>
-
         <p>
           Las instrucciones de acceso inteligente se entregarán según el flujo seguro de check-in de la propiedad.
           Por seguridad, los detalles de acceso pueden enviarse más cerca del check-in o después de completar validaciones operacionales.
