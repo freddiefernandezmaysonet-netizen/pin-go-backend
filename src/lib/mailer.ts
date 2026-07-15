@@ -49,6 +49,7 @@ type SendDirectBookingGuestConfirmationInput = {
   totalAmount?: number | null;
   currency?: string | null;
   manageReservationUrl?: string | null;
+  verificationUrl?: string | null;
   cancellationPolicyName?: string | null;
   cancellationPolicyType?: string | null;
   cancellationPolicySummary?: string | null;
@@ -749,6 +750,7 @@ export async function sendDirectBookingGuestConfirmation(
     totalAmount,
     currency,
     manageReservationUrl,
+    verificationUrl,
     cancellationPolicyName,
     cancellationPolicyType,
     cancellationPolicySummary,
@@ -800,54 +802,141 @@ export async function sendDirectBookingGuestConfirmation(
       refundRules,
     });
 
-  const verificationBlock = `
-    <div
-      style="
-        background:#fffbeb;
-        border:1px solid #fde68a;
-        border-radius:14px;
-        padding:18px;
-        margin:20px 0;
-        color:#92400e;
-      "
-    >
-      <div lang="en">
-        <h3 style="margin:0 0 8px;">
-          Secure pre-check-in
-        </h3>
+ const safeVerificationUrl =
+  getSafeUrl(verificationUrl);
 
-        <p style="margin:0;">
-          Complete identity verification,
-          review the property rules, and sign
-          the guest agreement before digital
-          access is released.
-        </p>
-      </div>
+if (!safeVerificationUrl) {
+  throw new Error(
+    "Direct booking verification URL is missing or invalid"
+  );
+}
 
-      <hr
+const verificationBlock = `
+      <div
         style="
-          border:none;
-          border-top:1px solid #fde68a;
-          margin:16px 0;
+          background:#eff6ff;
+          border:1px solid #bfdbfe;
+          border-radius:16px;
+          padding:20px;
+          margin:22px 0;
         "
-      />
+      >
+        <div lang="en">
+          <p
+            style="
+              margin:0 0 6px;
+              color:#1d4ed8;
+              font-size:12px;
+              font-weight:800;
+              letter-spacing:0.08em;
+              text-transform:uppercase;
+            "
+          >
+            Action required
+          </p>
 
-      <div lang="es">
-        <h3 style="margin:0 0 8px;">
-          Registro seguro
-        </h3>
+          <h2
+            style="
+              margin:0 0 10px;
+              color:#1e3a8a;
+            "
+          >
+            Complete secure pre-check-in
+          </h2>
 
-        <p style="margin:0;">
-          Complete la verificaci&oacute;n de
-          identidad, revise las reglas de la
-          propiedad y firme el acuerdo del
-          hu&eacute;sped antes de recibir el
-          acceso digital.
+          <p
+            style="
+              margin:0 0 16px;
+              color:#1e40af;
+            "
+          >
+            Complete identity verification,
+            review and accept the property
+            rules and cancellation policy,
+            and sign the guest agreement
+            before digital access is released.
+          </p>
+        </div>
+
+        <div lang="es">
+          <p
+            style="
+              margin:0 0 6px;
+              color:#1d4ed8;
+              font-size:12px;
+              font-weight:800;
+              letter-spacing:0.08em;
+              text-transform:uppercase;
+            "
+          >
+            Acci&oacute;n requerida
+          </p>
+
+          <h2
+            style="
+              margin:0 0 10px;
+              color:#1e3a8a;
+            "
+          >
+            Complete el registro seguro
+          </h2>
+
+          <p
+            style="
+              margin:0 0 18px;
+              color:#1e40af;
+            "
+          >
+            Complete la verificaci&oacute;n de
+            identidad, revise y acepte las reglas
+            de la propiedad y la pol&iacute;tica de
+            cancelaci&oacute;n, y firme el acuerdo
+            del hu&eacute;sped antes de recibir el
+            acceso digital.
+          </p>
+        </div>
+
+        <p style="margin:0 0 18px;">
+          <a
+            href="${escapeHtml(safeVerificationUrl)}"
+            style="
+              display:inline-block;
+              background:#2563eb;
+              color:#ffffff;
+              text-decoration:none;
+              padding:14px 20px;
+              border-radius:12px;
+              font-weight:800;
+            "
+          >
+            Complete pre-check-in /
+            Completar registro seguro
+          </a>
+        </p>
+
+        <p
+          style="
+            margin:0;
+            color:#475569;
+            font-size:13px;
+          "
+        >
+          Secure verification link /
+          Enlace seguro de verificaci&oacute;n:
+          <br />
+
+          <a
+            href="${escapeHtml(safeVerificationUrl)}"
+            style="
+              color:#2563eb;
+              word-break:break-all;
+            "
+          >
+            ${escapeHtml(safeVerificationUrl)}
+          </a>
         </p>
       </div>
-    </div>
-  `;
-
+   `;
   const formattedTotalPaid =
     totalAmount !== null &&
     totalAmount !== undefined &&

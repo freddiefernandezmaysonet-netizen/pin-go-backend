@@ -23,6 +23,24 @@ import { dispatchPendingCleaningConfirmationForReservation } from "./cleaning-co
 
 const prisma = new PrismaClient();
 
+function getPublicApiUrl() {
+  return String(
+    process.env.PUBLIC_API_BASE_URL ??
+      process.env.API_BASE_URL ??
+      "http://localhost:3000"
+  )
+    .trim()
+    .replace(/\/+$/, "");
+}
+
+function buildGuestVerificationUrl(
+  guestToken: string
+) {
+  return `${getPublicApiUrl()}/guest/verify/${encodeURIComponent(
+    guestToken
+  )}`;
+}
+
 function requiredMetadata(session: Stripe.Checkout.Session, key: string) {
   const value = String(session.metadata?.[key] ?? "").trim();
 
@@ -739,6 +757,13 @@ const amountNumber = updatedReservation.totalAmount
   ? Number(updatedReservation.totalAmount)
   : null;
 
+const verificationUrl =
+  updatedReservation.guestToken
+    ? buildGuestVerificationUrl(
+        updatedReservation.guestToken
+      )
+    : null;
+
 if (updatedReservation.guestEmail) {
   const directBookingGuestEmailInput = {
     to: updatedReservation.guestEmail,
@@ -751,6 +776,7 @@ if (updatedReservation.guestEmail) {
     totalAmount: amountNumber,
     currency: updatedReservation.currency,
     manageReservationUrl,
+    verificationUrl,
     cancellationPolicyName: (cancellationPolicySnapshot as any).name ?? null,
     cancellationPolicyType: (cancellationPolicySnapshot as any).type ?? null,
     cancellationPolicySummary: getCancellationPolicySummaryForEmail(
