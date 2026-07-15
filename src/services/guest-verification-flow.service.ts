@@ -445,7 +445,8 @@ export async function completeGuestAgreementAndStartIdentity(
             input.userAgent,
         }
       : {}),
-
+  };
+  
   await prisma.reservation.update({
     where: {
       id: reservation.id,
