@@ -1,6 +1,12 @@
 import { Router } from "express";
 import crypto from "crypto";
-import { AmenityChargeMode, AmenityFeeType, PrismaClient, ReservationStatus } from "@prisma/client";
+import {
+  AmenityChargeMode,
+  AmenityFeeType,
+  Prisma,
+  PrismaClient,
+  ReservationStatus,
+} from "@prisma/client";
 import { requireAuth } from "../middleware/requireAuth";
 import { provisionChannexProperty } from "../services/channex-provisioning.service";
 import { syncChannexAvailabilityForProperty } from "../services/channex-availability-sync.service";
@@ -18,6 +24,9 @@ import { createDistributionAuditEntry } from "../apms/distribution-audit.mapper"
 import { sendManualReservationGuestConfirmation } from "../lib/mailer";
 import { sendLoggedEmail } from "../services/email-delivery.service";
 import { dispatchPendingCleaningConfirmationForReservation } from "../services/cleaning-confirmation-dispatch.service";
+import {
+  buildCancellationPolicySnapshot,
+} from "../services/cancellation-policy.service";
 
 const prisma = new PrismaClient();
 export const dashboardPropertiesRouter = Router();
@@ -1118,6 +1127,10 @@ dashboardPropertiesRouter.post(
           calculatedAt: new Date().toISOString(),
         })
       );
+        const cancellationPolicySnapshot =
+        await buildCancellationPolicySnapshot(
+          property.id
+        );
 
       const result = await ingestReservation({
         source: "MANUAL",
@@ -1148,9 +1161,17 @@ dashboardPropertiesRouter.post(
             id: result.reservationId,
           },
           data: {
-            totalAmount: manualTotalAmount,
-            currency: manualCurrency,
-            pricingBreakdown: manualPricingBreakdown,
+            totalAmount:
+              manualTotalAmount,
+            currency:
+              manualCurrency,
+            pricingBreakdown:
+              manualPricingBreakdown,
+            cancellationPolicyId:
+              cancellationPolicySnapshot.policyId ??
+              null,
+            cancellationPolicySnapshot:
+              cancellationPolicySnapshot as unknown as Prisma.InputJsonValue,
           },
           select: {
             id: true,
