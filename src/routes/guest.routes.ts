@@ -28,14 +28,45 @@ function escapeHtml(s: string) {
     .replaceAll("'", "&#039;");
 }
 
-function fmtLocal(d: Date) {
+function fmtLocal(
+  d: Date,
+  timeZone?: string | null
+) {
+  const normalizedTimeZone =
+    String(timeZone ?? "").trim() ||
+    "UTC";
+
   try {
-    return new Date(d).toLocaleString();
+    return new Intl.DateTimeFormat(
+      "en-US",
+      {
+        timeZone:
+          normalizedTimeZone,
+        month: "numeric",
+        day: "numeric",
+        year: "numeric",
+        hour: "numeric",
+        minute: "2-digit",
+        hour12: true,
+        timeZoneName: "short",
+      }
+    ).format(new Date(d));
   } catch {
-    return String(d);
+    return new Intl.DateTimeFormat(
+      "en-US",
+      {
+        timeZone: "UTC",
+        month: "numeric",
+        day: "numeric",
+        year: "numeric",
+        hour: "numeric",
+        minute: "2-digit",
+        hour12: true,
+        timeZoneName: "short",
+      }
+    ).format(new Date(d));
   }
 }
-
 type GuestAgreementSnapshotView = {
   agreementId: string;
   version: string;
@@ -328,7 +359,10 @@ export function buildGuestRouter(prisma: PrismaClient) {
           <div class="card">
             <div class="row"><span class="k">Propiedad</span><span class="v">${escapeHtml(reservation.property?.name ?? "N/A")}</span></div>
             <div class="row"><span class="k">Puerta</span><span class="v">${escapeHtml(lockName)}</span></div>
-            <div class="row"><span class="k">Check-out</span><span class="v">${escapeHtml(fmtLocal(checkOut))}</span></div>
+            <div class="row"><span class="k">Check-out</span><span class="v">${escapeHtml(fmtLocal(
+  checkOut,
+  reservation.property?.timezone
+))}</span></div>
           </div>
           <p class="muted">Si necesitas extender el acceso, contacta al host.</p>
         `;
@@ -342,7 +376,12 @@ export function buildGuestRouter(prisma: PrismaClient) {
           <div class="card">
             <div class="row"><span class="k">Propiedad</span><span class="v">${escapeHtml(reservation.property?.name ?? "N/A")}</span></div>
             <div class="row"><span class="k">Puerta</span><span class="v">${escapeHtml(lockName)}</span></div>
-            <div class="row"><span class="k">Válido hasta</span><span class="v">${escapeHtml(fmtLocal(active.endsAt))}</span></div>
+            <div class="row"><span class="k">Válido hasta</span><span class="v">${escapeHtml(
+  fmtLocal(
+    active.endsAt,
+    reservation.property?.timezone
+  )
+)}</span></div>
           </div>
 
           <div class="card">
@@ -363,8 +402,16 @@ export function buildGuestRouter(prisma: PrismaClient) {
           headline = "Tu acceso se activará en el check-in";
           bodyHtml = `
             <div class="card">
-              <div class="row"><span class="k">Check-in</span><span class="v">${escapeHtml(fmtLocal(checkIn))}</span></div>
-              <div class="row"><span class="k">Check-out</span><span class="v">${escapeHtml(fmtLocal(checkOut))}</span></div>
+              <div class="row"><span class="k">Check-in</span><span class="v">${escapeHtml(
+  fmtLocal(
+    checkIn,
+    reservation.property?.timezone
+  )
+)}</span></div>
+              <div class="row"><span class="k">Check-out</span><span class="v">${escapeHtml(fmtLocal(
+  checkOut,
+  reservation.property?.timezone
+))}</span></div>
             </div>
             <p class="muted">Vuelve a abrir este enlace cerca del check-in.</p>
           `;
@@ -916,17 +963,19 @@ export function buildGuestRouter(prisma: PrismaClient) {
                   <div class="row">
                     <span class="k">Check-in</span>
                     <span class="v">${escapeHtml(
-                      fmtLocal(
-                        reservation.checkIn
-                      )
+                     fmtLocal(
+  reservation.checkIn,
+  reservation.property?.timezone
+)
                     )}</span>
                   </div>
                   <div class="row">
                     <span class="k">Check-out</span>
                     <span class="v">${escapeHtml(
-                      fmtLocal(
-                        reservation.checkOut
-                      )
+                     fmtLocal(
+  reservation.checkOut,
+  reservation.property?.timezone
+)
                     )}</span>
                   </div>
                 </div>
