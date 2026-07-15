@@ -1238,8 +1238,8 @@ dashboardPropertiesRouter.post(
                 "MANUAL_RESERVATION_GUEST_CONFIRMATION",
               to:
                 manualReservationForEmail.guestEmail,
-              subject:
-                `Your Reservation #${manualReservationForEmail.reservationNumber} is confirmed - ${manualReservationForEmail.property.name}`,
+             subject:
+  `Reservation / Reservaci\u00f3n #${manualReservationForEmail.reservationNumber} - Secure pre-check-in required - ${manualReservationForEmail.property.name}`,
               reservationId:
                 manualReservationForEmail.id,
               propertyId: property.id,

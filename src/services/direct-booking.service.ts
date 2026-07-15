@@ -766,7 +766,8 @@ if (updatedReservation.guestEmail) {
     prisma,
     type: "DIRECT_BOOKING_GUEST_CONFIRMATION",
     to: updatedReservation.guestEmail,
-    subject: `Your Reservation #${updatedReservation.reservationNumber} is confirmed - ${property.name}`,
+    subject:
+  `Reservation confirmed / Reservaci\u00f3n confirmada #${updatedReservation.reservationNumber} - ${property.name}`,
     reservationId: updatedReservation.id,
     propertyId: property.id,
     organizationId: property.organizationId,
