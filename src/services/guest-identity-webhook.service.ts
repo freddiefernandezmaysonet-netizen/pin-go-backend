@@ -500,3 +500,156 @@ export async function handleGuestIdentityStripeEvent(
     readiness,
   };
 }
+
+export async function reconcileGuestIdentityVerificationSession(
+  prisma: PrismaClient,
+  reservationId: string
+) {
+  const reservation =
+    await prisma.reservation.findUnique({
+      where: {
+        id: reservationId,
+      },
+      select: {
+        id: true,
+        reservationNumber: true,
+        verificationStatus: true,
+        verifiedAt: true,
+        stripeIdentityVerificationSessionId:
+          true,
+      },
+    });
+
+  if (!reservation) {
+    throw new Error(
+      "GUEST_IDENTITY_RECONCILIATION_RESERVATION_NOT_FOUND"
+    );
+  }
+
+  if (
+    reservation.verificationStatus ===
+      "COMPLETED" &&
+    reservation.verifiedAt
+  ) {
+    return {
+      handled: true,
+      alreadyCompleted: true,
+      status: "verified",
+      reservationNumber:
+        reservation.reservationNumber,
+    };
+  }
+
+  const verificationSessionId =
+    reservation.stripeIdentityVerificationSessionId;
+
+  if (!verificationSessionId) {
+    return {
+      handled: false,
+      skipped: true,
+      reason:
+        "GUEST_IDENTITY_VERIFICATION_SESSION_MISSING",
+      reservationNumber:
+        reservation.reservationNumber,
+    };
+  }
+
+  const session =
+    await stripe.identity.verificationSessions.retrieve(
+      verificationSessionId
+    );
+
+  if (
+    session.status === "verified" ||
+    session.status === "requires_input"
+  ) {
+    const eventType =
+      session.status === "verified"
+        ? "identity.verification_session.verified"
+        : "identity.verification_session.requires_input";
+
+    const reconciliationEvent = {
+      id:
+        `identity-reconciliation:${session.id}:${session.status}`,
+      object: "event",
+      api_version: "2023-10-16",
+      created: Math.floor(
+        Date.now() / 1000
+      ),
+      data: {
+        object: session,
+      },
+      livemode: true,
+      pending_webhooks: 0,
+      request: {
+        id: null,
+        idempotency_key: null,
+      },
+      type: eventType,
+    } as unknown as Stripe.Event;
+
+    return handleGuestIdentityStripeEvent(
+      prisma,
+      reconciliationEvent
+    );
+  }
+
+  if (session.status === "canceled") {
+    const reconciliationEvent = {
+      id:
+        `identity-reconciliation:${session.id}:canceled`,
+      object: "event",
+      api_version: "2023-10-16",
+      created: Math.floor(
+        Date.now() / 1000
+      ),
+      data: {
+        object: session,
+      },
+      livemode: true,
+      pending_webhooks: 0,
+      request: {
+        id: null,
+        idempotency_key: null,
+      },
+
+      // El procesador existente convierte
+      // requires_input en una acción recuperable.
+      type:
+        "identity.verification_session.requires_input",
+    } as unknown as Stripe.Event;
+
+    return handleGuestIdentityStripeEvent(
+      prisma,
+      reconciliationEvent
+    );
+  }
+
+  await prisma.reservation.updateMany({
+    where: {
+      id: reservation.id,
+      verificationStatus: {
+        not: "COMPLETED",
+      },
+    },
+    data: {
+      verificationStatus: "IN_PROGRESS",
+      identityVerificationProvider:
+        "STRIPE_IDENTITY",
+      stripeIdentityVerificationStatus:
+        session.status,
+      stripeIdentityVerificationLastError:
+        session.last_error?.code ?? null,
+      stripeIdentityVerificationLastEventAt:
+        new Date(),
+    },
+  });
+
+  return {
+    handled: true,
+    processing: true,
+    status: session.status,
+    reservationNumber:
+      reservation.reservationNumber,
+  };
+}

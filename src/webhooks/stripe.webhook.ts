@@ -11,6 +11,7 @@ import syncTuyaEntitlementFromStripeEvent from "../billing/stripe/stripe.tuya.en
 import { handleDirectBookingCheckoutCompleted } from "../services/direct-booking.service";
 import {
   handleGuestIdentityStripeEvent,
+  reconcileGuestIdentityVerificationSession,
 } from "../services/guest-identity-webhook.service";
 
 const prisma = new PrismaClient();
@@ -104,7 +105,58 @@ export function registerStripeWebhook(app: Express) {
             break;
           }
 
-                    case "identity.verification_session.verified":
+                    case "identity.verification_session.processing":
+          case "identity.verification_session.canceled": {
+            const identitySession =
+              event.data.object as
+                Stripe.Identity.VerificationSession;
+
+            const reservationId = String(
+              identitySession.metadata
+                ?.reservationId ?? ""
+            ).trim();
+
+            if (!reservationId) {
+              console.warn(
+                "[STRIPE_WEBHOOK] guest identity event skipped",
+                {
+                  eventId: event.id,
+                  eventType: event.type,
+                  verificationSessionId:
+                    identitySession.id,
+                  reason:
+                    "RESERVATION_ID_METADATA_MISSING",
+                }
+              );
+
+              break;
+            }
+
+            const identityResult =
+              await reconcileGuestIdentityVerificationSession(
+                prisma,
+                reservationId
+              );
+
+            console.log(
+              "[STRIPE_WEBHOOK] guest identity state reconciled",
+              {
+                eventId: event.id,
+                eventType: event.type,
+                verificationSessionId:
+                  identitySession.id,
+                reservationNumber:
+                  "reservationNumber" in
+                  identityResult
+                    ? identityResult.reservationNumber
+                    : null,
+              }
+            );
+
+            break;
+          }
+
+          case "identity.verification_session.verified":
           case "identity.verification_session.requires_input": {
             const identityResult =
               await handleGuestIdentityStripeEvent(
