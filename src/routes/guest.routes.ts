@@ -186,6 +186,175 @@ function renderAgreementRules(rules: unknown) {
   `;
 }
 
+type CancellationPolicyView = {
+  name: string;
+  type: string;
+  refundBasis: string;
+  guestFacingSummary: string | null;
+  refundRules: unknown[];
+  cancellationAccepted: boolean;
+};
+
+function readJsonObject(
+  value: unknown
+): Record<string, unknown> {
+  if (
+    !value ||
+    typeof value !== "object" ||
+    Array.isArray(value)
+  ) {
+    return {};
+  }
+
+  return value as Record<
+    string,
+    unknown
+  >;
+}
+
+function readCancellationPolicyView(
+  value: unknown
+): CancellationPolicyView | null {
+  const snapshot =
+    readJsonObject(value);
+
+  if (
+    typeof snapshot.name !== "string" ||
+    typeof snapshot.type !== "string" ||
+    typeof snapshot.refundBasis !==
+      "string"
+  ) {
+    return null;
+  }
+
+  const acceptance =
+    readJsonObject(
+      snapshot.cancellationTermsAcceptance
+    );
+
+  return {
+    name: snapshot.name,
+    type: snapshot.type,
+    refundBasis:
+      snapshot.refundBasis,
+    guestFacingSummary:
+      typeof snapshot.guestFacingSummary ===
+      "string"
+        ? snapshot.guestFacingSummary
+        : null,
+    refundRules:
+      Array.isArray(snapshot.refundRules)
+        ? snapshot.refundRules
+        : [],
+    cancellationAccepted:
+      acceptance.accepted === true,
+  };
+}
+
+function hasRecordedSmsConsent(
+  externalRaw: unknown
+) {
+  const raw =
+    readJsonObject(externalRaw);
+
+  const consent =
+    readJsonObject(raw.consent);
+
+  return consent.smsConsent === true;
+}
+
+function formatRefundBasis(
+  value: string
+) {
+  switch (value) {
+    case "NIGHTLY_SUBTOTAL":
+    case "NIGHTLY_SUBTOTAL_ONLY":
+      return "Nightly subtotal only / Solo subtotal de noches";
+
+    case "NIGHTLY_PLUS_CLEANING":
+      return "Nightly subtotal and eligible cleaning fee / Noches y cargo de limpieza elegible";
+
+    case "TOTAL_AMOUNT":
+      return "Eligible total amount / Total elegible";
+
+    default:
+      return "As described in the policy / Según se describe en la política";
+  }
+}
+
+function renderCancellationRefundRules(
+  rules: unknown[]
+) {
+  if (rules.length === 0) {
+    return `
+      <p class="muted small">
+        Refund eligibility follows the policy summary shown for this reservation.
+        La elegibilidad del reembolso sigue el resumen de política mostrado para esta reservación.
+      </p>
+    `;
+  }
+
+  const items = rules
+    .map((value) => {
+      const rule =
+        readJsonObject(value);
+
+      const refundPercent =
+        Number(rule.refundPercent);
+
+      if (
+        !Number.isFinite(
+          refundPercent
+        )
+      ) {
+        return "";
+      }
+
+      const minHours =
+        Number(
+          rule.minHoursBeforeCheckIn
+        );
+
+      const timing =
+        Number.isFinite(minHours)
+          ? `${Math.max(
+              0,
+              Math.ceil(
+                minHours / 24
+              )
+            )}+ days before check-in / días antes del check-in`
+          : "According to policy timing / Según el plazo de la política";
+
+      const label =
+        typeof rule.label ===
+        "string"
+          ? rule.label
+          : "";
+
+      return `
+        <li>
+          <strong>${escapeHtml(
+            `${refundPercent}%`
+          )}</strong>
+          — ${escapeHtml(timing)}
+          ${
+            label
+              ? ` — ${escapeHtml(
+                  label
+                )}`
+              : ""
+          }
+        </li>
+      `;
+    })
+    .filter(Boolean)
+    .join("");
+
+  return items
+    ? `<ul class="rules">${items}</ul>`
+    : "";
+}
+
 function getGuestReturnUrl(
   req: Request,
   token: string
@@ -697,6 +866,73 @@ export function buildGuestRouter(prisma: PrismaClient) {
             );
         }
 
+                const cancellationPolicy =
+          readCancellationPolicyView(
+            reservation
+              .cancellationPolicySnapshot
+          );
+
+        if (!cancellationPolicy) {
+          console.error(
+            "[GUEST_VERIFICATION] cancellation policy snapshot missing",
+            {
+              reservationNumber:
+                reservation.reservationNumber,
+              propertyId:
+                reservation.propertyId,
+            }
+          );
+
+          return res
+            .status(409)
+            .type("html")
+            .send(
+              renderPage({
+                title:
+                  "Pin&Go • Guest Verification",
+                badge: {
+                  text:
+                    "Configuración pendiente",
+                  tone: "bad",
+                },
+                body: `
+                  <h1>Cancellation policy unavailable</h1>
+                  <h2>Política de cancelación no disponible</h2>
+
+                  <div class="card">
+                    <div class="row">
+                      <span class="k">Reservation / Reserva</span>
+                      <span class="v">${escapeHtml(
+                        reservationReference
+                      )}</span>
+                    </div>
+                  </div>
+
+                  <p class="muted">
+                    Pin&Go cannot continue until the cancellation and refund terms for this reservation are available.
+                    Pin&Go no puede continuar hasta que estén disponibles los términos de cancelación y reembolso de esta reservación.
+                  </p>
+                `,
+              })
+            );
+        }
+
+        const cancellationAlreadyAccepted =
+          cancellationPolicy
+            .cancellationAccepted;
+
+        const smsAlreadyConsented =
+          hasRecordedSmsConsent(
+            reservation.externalRaw
+          );
+
+        const guestHasPhone =
+          Boolean(
+            String(
+              reservation.guestPhone ??
+                ""
+            ).trim()
+          );
         const maxGuests =
           reservation.property?.maxGuests;
 
@@ -1009,12 +1245,73 @@ export function buildGuestRouter(prisma: PrismaClient) {
                     )}
                   </div>
                 </div>
-
-                <div class="card">
-                  <h2>Reglas de la propiedad</h2>
+                  <div class="card">
+                  <h2>
+                    Property Rules / Reglas de la propiedad
+                  </h2>
                   ${renderAgreementRules(
                     agreement.rules
                   )}
+                </div>
+
+                <div class="card">
+                  <h2>
+                    Cancellation & Refund Policy
+                  </h2>
+                  <h3>
+                    Política de cancelación y reembolso
+                  </h3>
+
+                  <p>
+                    <strong>${escapeHtml(
+                      cancellationPolicy.name
+                    )}</strong>
+                  </p>
+
+                  ${
+                    cancellationPolicy.guestFacingSummary
+                      ? `
+                        <p>
+                          ${renderMultilineText(
+                            cancellationPolicy.guestFacingSummary
+                          )}
+                        </p>
+                      `
+                      : ""
+                  }
+
+                  <div class="row">
+                    <span class="k">
+                      Refund basis / Base del reembolso
+                    </span>
+                    <span class="v">
+                      ${escapeHtml(
+                        formatRefundBasis(
+                          cancellationPolicy.refundBasis
+                        )
+                      )}
+                    </span>
+                  </div>
+
+                  ${renderCancellationRefundRules(
+                    cancellationPolicy.refundRules
+                  )}
+
+                  ${
+                    cancellationAlreadyAccepted
+                      ? `
+                        <p class="muted small">
+                          ✓ Cancellation terms acceptance already recorded.
+                          Aceptación de los términos de cancelación ya registrada.
+                        </p>
+                      `
+                      : `
+                        <p class="muted small">
+                          You must review and accept these terms before continuing.
+                          Debe revisar y aceptar estos términos antes de continuar.
+                        </p>
+                      `
+                  }
                 </div>
 
                 <form
@@ -1114,6 +1411,90 @@ export function buildGuestRouter(prisma: PrismaClient) {
                       </span>
                     </label>
 
+                                        ${
+                      !cancellationAlreadyAccepted
+                        ? `
+                          <label class="checkbox">
+                            <input
+                              type="checkbox"
+                              name="cancellationTermsAccepted"
+                              value="yes"
+                              required
+                            />
+                            <span>
+                              I have reviewed and agree to the cancellation and refund policy shown above, including how any eligible refund is calculated.
+                              He revisado y acepto la política de cancelación y reembolso mostrada arriba, incluyendo cómo se calcula cualquier reembolso elegible.
+                            </span>
+                          </label>
+                        `
+                        : ""
+                    }
+
+                    ${
+                      smsAlreadyConsented
+                        ? `
+                          <div class="card">
+                            <p class="muted small">
+                              ✓ SMS consent is already recorded for this reservation.
+                              El consentimiento SMS ya está registrado para esta reservación.
+                            </p>
+                          </div>
+                        `
+                        : guestHasPhone
+                        ? `
+                          <div class="card">
+                            <h3>
+                              Pin&Go Smart Stay SMS Updates (Optional)
+                            </h3>
+
+                            <label class="checkbox">
+                              <input
+                                type="checkbox"
+                                name="smsConsent"
+                                value="yes"
+                              />
+                              <span>
+                                I agree to receive transactional SMS messages from PIN&GO LLC about this reservation, including booking updates, smart-lock access codes, check-in instructions, check-out reminders, and property alerts.
+                                Acepto recibir mensajes SMS transaccionales de PIN&GO LLC relacionados con esta reservación, incluyendo actualizaciones, códigos de acceso, instrucciones de check-in, recordatorios de check-out y alertas de la propiedad.
+                              </span>
+                            </label>
+
+                            <p class="muted small">
+                              Optional. Consent is not a condition of the reservation. Message frequency varies. Message and data rates may apply. Reply STOP to opt out and HELP for assistance.
+                              Opcional. El consentimiento no es una condición de la reservación. La frecuencia de mensajes varía. Pueden aplicar cargos por mensajes y datos. Responda STOP para cancelar y HELP para recibir ayuda.
+                            </p>
+
+                            <p class="muted small">
+                              <a
+                                class="link"
+                                href="https://app.pin-ngo.com/legal/terms"
+                                target="_blank"
+                                rel="noopener noreferrer"
+                              >
+                                Terms / Términos
+                              </a>
+                              ·
+                              <a
+                                class="link"
+                                href="https://app.pin-ngo.com/legal/privacy"
+                                target="_blank"
+                                rel="noopener noreferrer"
+                              >
+                                Privacy / Privacidad
+                              </a>
+                            </p>
+                          </div>
+                        `
+                        : `
+                          <div class="card">
+                            <p class="muted small">
+                              No phone number is registered for this reservation, so Pin&Go will use email for stay communications.
+                              No hay un número telefónico registrado para esta reservación, por lo que Pin&Go utilizará el correo electrónico para las comunicaciones de la estadía.
+                            </p>
+                          </div>
+                        `
+                    }
+
                     <p class="muted small">
                       Si no puede utilizar la verificación automática, contacte al host para solicitar una alternativa de revisión.
                     </p>
@@ -1208,6 +1589,13 @@ export function buildGuestRouter(prisma: PrismaClient) {
               identityConsentAccepted:
                 req.body
                   ?.identityConsentAccepted ===
+                "yes",
+              cancellationTermsAccepted:
+                req.body
+                  ?.cancellationTermsAccepted ===
+                "yes",
+              smsConsent:
+                req.body?.smsConsent ===
                 "yes",
               ipAddress: getRequestIp(req),
               userAgent:

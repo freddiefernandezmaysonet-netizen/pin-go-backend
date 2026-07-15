@@ -7,6 +7,9 @@ import {
 import {
   createGuestIdentityVerificationSession,
 } from "./guest-identity-verification.service";
+import {
+  buildGuestCancellationTermsText,
+} from "./cancellation-policy.service";
 
 type AgreementSnapshot = {
   agreementId: string;
@@ -70,6 +73,55 @@ function cleanLegalName(value: unknown) {
     .trim();
 }
 
+function readJsonObject(
+  value: unknown
+): Record<string, unknown> {
+  if (
+    !value ||
+    typeof value !== "object" ||
+    Array.isArray(value)
+  ) {
+    return {};
+  }
+
+  return {
+    ...(value as Record<
+      string,
+      unknown
+    >),
+  };
+}
+
+function readExistingSmsConsent(
+  externalRaw: unknown
+) {
+  const raw =
+    readJsonObject(externalRaw);
+
+  const consent =
+    readJsonObject(raw.consent);
+
+  return consent.smsConsent === true;
+}
+
+function readExistingCancellationAcceptance(
+  cancellationPolicySnapshot: unknown
+) {
+  const snapshot =
+    readJsonObject(
+      cancellationPolicySnapshot
+    );
+
+  const acceptance =
+    readJsonObject(
+      snapshot.cancellationTermsAcceptance
+    );
+
+  return acceptance.accepted === true
+    ? acceptance
+    : null;
+}
+
 export async function completeGuestAgreementAndStartIdentity(
   prisma: PrismaClient,
   input: {
@@ -80,6 +132,8 @@ export async function completeGuestAgreementAndStartIdentity(
     agreementAccepted: boolean;
     rulesAccepted: boolean;
     identityConsentAccepted: boolean;
+    cancellationTermsAccepted: boolean;
+    smsConsent: boolean;
     ipAddress?: string | null;
     userAgent?: string | null;
     returnUrl: string;
@@ -106,6 +160,9 @@ export async function completeGuestAgreementAndStartIdentity(
       reservationNumber: true,
       propertyId: true,
       guestName: true,
+      guestPhone: true,
+      externalRaw: true,
+      cancellationPolicySnapshot: true,
       checkOut: true,
       paymentState: true,
       status: true,
@@ -203,6 +260,35 @@ export async function completeGuestAgreementAndStartIdentity(
     );
   }
 
+   const cancellationPolicySnapshot =
+    readJsonObject(
+      reservation.cancellationPolicySnapshot
+    );
+
+  if (
+    Object.keys(
+      cancellationPolicySnapshot
+    ).length === 0
+  ) {
+    throw new Error(
+      "GUEST_VERIFICATION_CANCELLATION_POLICY_SNAPSHOT_MISSING"
+    );
+  }
+
+  const existingCancellationAcceptance =
+    readExistingCancellationAcceptance(
+      cancellationPolicySnapshot
+    );
+
+  if (
+    !existingCancellationAcceptance &&
+    !input.cancellationTermsAccepted
+  ) {
+    throw new Error(
+      "GUEST_VERIFICATION_CANCELLATION_TERMS_REQUIRED"
+    );
+  }
+
   const snapshot = parseAgreementSnapshot(
     reservation.guestAgreementSnapshot
   );
@@ -219,29 +305,146 @@ export async function completeGuestAgreementAndStartIdentity(
     );
   }
 
-  const acceptedAt = now.toISOString();
+  if (
+    input.smsConsent &&
+    !reservation.guestPhone
+  ) {
+    throw new Error(
+      "GUEST_VERIFICATION_SMS_PHONE_REQUIRED"
+    );
+  }
 
-  const acceptance = {
+  const acceptedAt =
+    now.toISOString();
+
+  const cancellationTermsAcceptance =
+    existingCancellationAcceptance ?? {
+      accepted: true,
+      acceptedAt,
+      text:
+        buildGuestCancellationTermsText(
+          cancellationPolicySnapshot
+        ),
+      source:
+        "MANUAL_SECURE_PRECHECKIN_FORM",
+      version:
+        "cancellation_terms_ack_v1",
+      refundBasis:
+        typeof cancellationPolicySnapshot.refundBasis ===
+        "string"
+          ? cancellationPolicySnapshot.refundBasis
+          : null,
+    };
+
+  const acceptedCancellationPolicySnapshot =
+    {
+      ...cancellationPolicySnapshot,
+      guestAcceptedCancellationTerms:
+        true,
+      guestAcceptedCancellationTermsAt:
+        cancellationTermsAcceptance.acceptedAt,
+      guestAcceptedCancellationTermsText:
+        cancellationTermsAcceptance.text,
+      guestAcceptedCancellationTermsSource:
+        cancellationTermsAcceptance.source,
+      cancellationTermsAckVersion:
+        cancellationTermsAcceptance.version,
+      cancellationTermsAcceptance,
+    };
+
+  const existingExternalRaw =
+    readJsonObject(
+      reservation.externalRaw
+    );
+
+  const existingConsent =
+    readJsonObject(
+      existingExternalRaw.consent
+    );
+
+  const previouslyConsented =
+    readExistingSmsConsent(
+      existingExternalRaw
+    );
+
+  const effectiveSmsConsent =
+    previouslyConsented ||
+    input.smsConsent;
+
+  const consentSource =
+    previouslyConsented &&
+    typeof existingConsent.consentSource ===
+      "string"
+      ? existingConsent.consentSource
+      : "MANUAL_SECURE_PRECHECKIN_FORM";
+
+  const consentAcceptedAt =
+    previouslyConsented &&
+    typeof existingConsent.acceptedAt ===
+      "string"
+      ? existingConsent.acceptedAt
+      : effectiveSmsConsent
+      ? acceptedAt
+      : null;
+
+  const updatedExternalRaw = {
+    ...existingExternalRaw,
+    consent: {
+      ...existingConsent,
+      stayNotificationsConsent:
+        effectiveSmsConsent,
+      smsConsent:
+        effectiveSmsConsent,
+      consentSource,
+      consentVersion:
+        "stay_notifications_v1",
+      acceptedAt:
+        consentAcceptedAt,
+    },
+    cancellationTerms:
+      cancellationTermsAcceptance,
+  };
+
+   const acceptance = {
     accepted: true,
     acceptedAt,
-    source: "GUEST_PRECHECKIN_PORTAL",
-    agreementId: snapshot.agreementId,
-    agreementVersion: snapshot.version,
-    agreementTitle: snapshot.title,
-    agreementCapturedAt: snapshot.capturedAt,
+    source:
+      "GUEST_PRECHECKIN_PORTAL",
+    agreementId:
+      snapshot.agreementId,
+    agreementVersion:
+      snapshot.version,
+    agreementTitle:
+      snapshot.title,
+    agreementCapturedAt:
+      snapshot.capturedAt,
     legalName,
-    guestCount: input.guestCount,
-    authorizedGuestAccepted: true,
-    agreementAccepted: true,
-    rulesAccepted: true,
-    identityConsentAccepted: true,
+    guestCount:
+      input.guestCount,
+    authorizedGuestAccepted:
+      true,
+    agreementAccepted:
+      true,
+    rulesAccepted:
+      true,
+    identityConsentAccepted:
+      true,
+    cancellationTermsAccepted:
+      true,
+    smsConsent:
+      effectiveSmsConsent,
     ...(input.ipAddress
-      ? { ipAddress: input.ipAddress }
+      ? {
+          ipAddress:
+            input.ipAddress,
+        }
       : {}),
     ...(input.userAgent
-      ? { userAgent: input.userAgent }
+      ? {
+          userAgent:
+            input.userAgent,
+        }
       : {}),
-  };
 
   await prisma.reservation.update({
     where: {
@@ -253,14 +456,19 @@ export async function completeGuestAgreementAndStartIdentity(
         input.ipAddress ?? null,
       verificationUserAgent:
         input.userAgent ?? null,
-      verificationAcceptedRulesAt: now,
+      verificationAcceptedRulesAt:
+        now,
+      cancellationPolicySnapshot:
+        acceptedCancellationPolicySnapshot as unknown as Prisma.InputJsonValue,
 
-      guestAgreementAcceptance:
+      externalRaw:
+        updatedExternalRaw as unknown as Prisma.InputJsonValue,
+        guestAgreementAcceptance:
         acceptance as unknown as Prisma.InputJsonValue,
 
       guestAgreementSignedAt:
-        reservation.guestAgreementSignedAt ?? now,
-
+        reservation.guestAgreementSignedAt ??
+        now,
       identityDeclaredLegalName: legalName,
       identityVerificationConsentAt:
         reservation.identityVerificationConsentAt ?? now,
