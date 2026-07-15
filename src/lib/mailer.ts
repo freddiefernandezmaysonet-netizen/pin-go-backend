@@ -624,15 +624,26 @@ export async function sendResetPasswordEmail(
 export async function sendSalesFollowUpEmail(
   input: SendSalesFollowUpEmailInput
 ) {
-  const { to, name } = input;
-  const safeName = escapeHtml(name?.trim() || "there");
+  const {
+    to,
+    name,
+  } = input;
+
+  const safeName =
+    escapeHtml(
+      name?.trim() || "there"
+    );
 
   if (!resend) {
     if (isProd) {
-      throw new Error("RESEND_API_KEY missing in production");
+      throw new Error(
+        "RESEND_API_KEY missing in production"
+      );
     }
 
-    console.log("📨 RESEND_API_KEY missing. Sales follow-up fallback.");
+    console.log(
+      "RESEND_API_KEY missing. Sales follow-up fallback."
+    );
     console.log("TO:", to);
 
     return {
@@ -642,6 +653,127 @@ export async function sendSalesFollowUpEmail(
   }
 
   const { data, error } =
+    await resend.emails.send({
+      from: getEmailFrom(),
+      to,
+      subject:
+        "Pin&Go demo follow-up / Seguimiento de demo",
+      html: `
+        <div style="font-family:Arial,sans-serif;color:#111827;line-height:1.6;max-width:680px;margin:0 auto;">
+          <h2 style="margin-bottom:8px;">
+            Following up on your Pin&amp;Go demo
+          </h2>
+
+          <h2 style="margin-bottom:16px;">
+            Seguimiento de su demo de Pin&amp;Go
+          </h2>
+
+          <p>
+            Hi / Hola ${safeName},
+          </p>
+
+          <p>
+            Thank you for booking a Pin&amp;Go demo. We wanted to follow up and see if you have any questions or would like help getting started.
+          </p>
+
+          <p>
+            Gracias por agendar una demo de Pin&amp;Go. Queremos darle seguimiento para saber si tiene alguna pregunta o desea ayuda para comenzar.
+          </p>
+
+          <p>
+            Pin&amp;Go helps short-term rental operators automate guest access, PMS synchronization, messaging, and smart-property operations.
+          </p>
+
+          <p>
+            Pin&amp;Go ayuda a los operadores de alquileres a corto plazo a automatizar el acceso de hu&eacute;spedes, la sincronizaci&oacute;n con PMS, la mensajer&iacute;a y las operaciones inteligentes de la propiedad.
+          </p>
+
+          <p>
+            Best / Saludos,<br />
+            Pin&amp;Go Team / Equipo Pin&amp;Go
+          </p>
+        </div>
+      `,
+    });
+
+  if (error) {
+    throw new Error(
+      `Resend sales follow-up failed: ${error.message}`
+    );
+  }
+
+  console.log(
+    "SALES FOLLOW-UP EMAIL SENT TO:",
+    to
+  );
+
+  return {
+    ok: true,
+    mode: "resend",
+    data,
+  };
+}
+
+
+export async function sendDirectBookingGuestConfirmation(
+  input: SendDirectBookingGuestConfirmationInput
+) {
+  const {
+    to,
+    reservationNumber,
+    guestName,
+    propertyName,
+    checkIn,
+    checkOut,
+    propertyTimeZone,
+    totalAmount,
+    currency,
+    manageReservationUrl,
+    cancellationPolicyName,
+    cancellationPolicyType,
+    cancellationPolicySummary,
+    refundBasis,
+    refundRules,
+  } = input;
+
+  const safeReservationNumber = escapeHtml(reservationNumber);
+  const safeName = escapeHtml(guestName?.trim() || "there");
+  const safePropertyName = escapeHtml(propertyName);
+  const dateTimeZone = normalizePropertyTimeZone(propertyTimeZone);
+
+  if (!resend) {
+    if (isProd) {
+      throw new Error("RESEND_API_KEY missing in production");
+    }
+
+    console.log("📨 RESEND_API_KEY missing. Direct booking guest email fallback.");
+    console.log("TO:", to);
+
+    return {
+      ok: true,
+      mode: "console",
+    };
+  }
+
+  const manageReservationBlock = renderManageReservationBlock(
+    manageReservationUrl
+  );
+
+   if (!manageReservationBlock) {
+    throw new Error(
+      "Direct booking manage reservation URL is missing or invalid"
+    );
+  }
+
+  const cancellationPolicyBlock = renderCancellationPolicyBlock({
+    cancellationPolicyName,
+    cancellationPolicyType,
+    cancellationPolicySummary,
+    refundBasis,
+    refundRules,
+  });
+
+    const { data, error } =
     await resend.emails.send({
       from: getEmailFrom(),
       to,
@@ -773,154 +905,6 @@ export async function sendSalesFollowUpEmail(
         </div>
       `,
     });
-
-  if (error) {
-    throw new Error(`Resend sales follow-up failed: ${error.message}`);
-  }
-
-  console.log("✅ SALES FOLLOW-UP EMAIL SENT TO:", to);
-
-  return {
-    ok: true,
-    mode: "resend",
-    data,
-  };
-}
-
-export async function sendDirectBookingGuestConfirmation(
-  input: SendDirectBookingGuestConfirmationInput
-) {
-  const {
-    to,
-    reservationNumber,
-    guestName,
-    propertyName,
-    checkIn,
-    checkOut,
-    propertyTimeZone,
-    totalAmount,
-    currency,
-    manageReservationUrl,
-    cancellationPolicyName,
-    cancellationPolicyType,
-    cancellationPolicySummary,
-    refundBasis,
-    refundRules,
-  } = input;
-
-  const safeReservationNumber = escapeHtml(reservationNumber);
-  const safeName = escapeHtml(guestName?.trim() || "there");
-  const safePropertyName = escapeHtml(propertyName);
-  const dateTimeZone = normalizePropertyTimeZone(propertyTimeZone);
-
-  if (!resend) {
-    if (isProd) {
-      throw new Error("RESEND_API_KEY missing in production");
-    }
-
-    console.log("📨 RESEND_API_KEY missing. Direct booking guest email fallback.");
-    console.log("TO:", to);
-
-    return {
-      ok: true,
-      mode: "console",
-    };
-  }
-
-  const manageReservationBlock = renderManageReservationBlock(
-    manageReservationUrl
-  );
-
-   if (!manageReservationBlock) {
-    throw new Error(
-      "Direct booking manage reservation URL is missing or invalid"
-    );
-  }
-
-  const cancellationPolicyBlock = renderCancellationPolicyBlock({
-    cancellationPolicyName,
-    cancellationPolicyType,
-    cancellationPolicySummary,
-    refundBasis,
-    refundRules,
-  });
-
-  const { data, error } = await resend.emails.send({
-    from: getEmailFrom(),
-    to,
-    subject: `Your Reservation #${reservationNumber} is confirmed - ${propertyName}`,
-    html: `
-      <div style="font-family: Arial, sans-serif; color: #111827; line-height: 1.6; max-width: 680px; margin: 0 auto;">
-       <div style="background:linear-gradient(135deg,#020617,#1d4ed8);color:#ffffff;border-radius:18px;padding:24px;margin-bottom:20px;">
-  <p style="margin:0 0 8px;font-size:12px;letter-spacing:0.08em;text-transform:uppercase;font-weight:800;">Pin&Go Direct Booking</p>
-  <h1 style="margin:0;font-size:28px;line-height:1.15;">Your reservation is confirmed</h1>
-  <p style="margin:10px 0 0;color:#dbeafe;font-weight:700;">Reservation #${safeReservationNumber}</p>
-  <p style="margin:8px 0 0;color:#dbeafe;">Pin&Go has started the secure stay workflow for your reservation.</p>
-</div>
-        <p>Hi ${safeName},</p>
-
-        <p>
-          Your reservation for <strong>${safePropertyName}</strong> has been confirmed.
-        </p>
-
-        <div style="background:#f9fafb;border:1px solid #e5e7eb;border-radius:14px;padding:16px;margin:20px 0;">
-  <p><strong>Reservation Number:</strong> #${safeReservationNumber}</p>
-  <p><strong>Property:</strong> ${safePropertyName}</p>
-  <p><strong>Check-in:</strong> ${formatBookingDate(checkIn, dateTimeZone)}</p>
-  <p><strong>Check-out:</strong> ${formatBookingDate(checkOut, dateTimeZone)}</p>
-  <p><strong>Total paid:</strong> ${formatBookingAmount(totalAmount, currency)}</p>
-  <p><strong>Payment status:</strong> Paid</p>
-</div>
-        ${manageReservationBlock}
-
-        ${cancellationPolicyBlock}
-
-        <div style="background:#f0fdf4;border:1px solid #bbf7d0;border-radius:14px;padding:16px;margin:20px 0;color:#14532d;">
-          <h3 style="margin:0 0 8px;">Smart access and check-in</h3>
-          <p style="margin:0;">
-            Your smart access instructions will be delivered according to the property's secure check-in workflow.
-            For security, access details may be delivered closer to check-in or after operational checks are complete.
-          </p>
-        </div>
-
-        <p style="color:#4b5563;">
-          You can use the manage reservation link to review your stay details, cancellation terms, and self-service options.
-        </p>
-
-        <p>
-          Thank you,<br />
-          Pin&Go
-        </p>
-
-        <hr style="border: none; border-top: 1px solid #e5e7eb; margin: 28px 0;" />
-
-       <h2 style="margin-bottom: 8px;">Tu reservaciÃ³n estÃ¡ confirmada</h2>
-
-<p><strong>Número de reservación:</strong> #${safeReservationNumber}</p>
-
-<p>Hola ${safeName},</p>
-        <p>
-          Tu reservación para <strong>${safePropertyName}</strong> ha sido confirmada.
-        </p>
-
-        <p>
-          Pin&Go comenzó el flujo seguro de estadía: confirmación de reserva,
-          manejo de términos de cancelación, preparación operacional y acceso inteligente.
-        </p>
-
-        <p>
-          Las instrucciones de acceso inteligente se entregarán según el flujo seguro de check-in de la propiedad.
-          Por seguridad, los detalles de acceso pueden enviarse más cerca del check-in o después de completar validaciones operacionales.
-        </p>
-
-        <p>
-          Gracias,<br />
-          Pin&Go
-        </p>
-      </div>
-    `,
-  });
-
   if (error) {
     throw new Error(`Resend direct booking guest email failed: ${error.message}`);
   }
