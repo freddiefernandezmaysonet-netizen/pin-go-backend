@@ -200,6 +200,7 @@ app.use(uploadsRouter);
 app.use("/api/onboarding/appointments", onboardingAppointmentsRouter);
 app.use(signupSuccessRouter);
 app.use("/api/public-booking", publicBookingRouter);
+app.use(cleaningConfirmRouter);
 
 // =====================
 // DEV ROUTES (bloqueadas en producción)
@@ -304,7 +305,7 @@ app.use(orgTuyaRoutes);
 
 app.use("/staff", buildStaffRouter(prisma));
 app.use("/", buildCleaningRouter(prisma));
-app.use(cleaningConfirmRouter);
+
 
 // =====================
 // Debug protegido
