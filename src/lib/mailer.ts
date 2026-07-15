@@ -1,4 +1,7 @@
 import { Resend } from "resend";
+import {
+  buildGuestReservationEmail,
+} from "./email-templates/guestReservationEmail";
 
 const resendApiKey = String(process.env.RESEND_API_KEY ?? "").trim();
 const emailFrom = String(process.env.EMAIL_FROM ?? "").trim();
@@ -175,6 +178,24 @@ function formatBookingDate(date: Date, timeZone?: string | null) {
     timeZone: safeTimeZone,
     month: "short",
     day: "numeric",
+    year: "numeric",
+    hour: "numeric",
+    minute: "2-digit",
+    timeZoneName: "short",
+  }).format(date);
+}
+
+function formatBookingDateEs(
+  date: Date,
+  timeZone?: string | null
+) {
+  const safeTimeZone =
+    normalizePropertyTimeZone(timeZone);
+
+  return new Intl.DateTimeFormat("es-PR", {
+    timeZone: safeTimeZone,
+    day: "numeric",
+    month: "long",
     year: "numeric",
     hour: "numeric",
     minute: "2-digit",
@@ -714,7 +735,6 @@ export async function sendSalesFollowUpEmail(
   };
 }
 
-
 export async function sendDirectBookingGuestConfirmation(
   input: SendDirectBookingGuestConfirmationInput
 ) {
@@ -736,17 +756,22 @@ export async function sendDirectBookingGuestConfirmation(
     refundRules,
   } = input;
 
-  const safeReservationNumber = escapeHtml(reservationNumber);
-  const safeName = escapeHtml(guestName?.trim() || "there");
-  const safePropertyName = escapeHtml(propertyName);
-  const dateTimeZone = normalizePropertyTimeZone(propertyTimeZone);
+  const dateTimeZone =
+    normalizePropertyTimeZone(
+      propertyTimeZone
+    );
 
   if (!resend) {
     if (isProd) {
-      throw new Error("RESEND_API_KEY missing in production");
+      throw new Error(
+        "RESEND_API_KEY missing in production"
+      );
     }
 
-    console.log("📨 RESEND_API_KEY missing. Direct booking guest email fallback.");
+    console.log(
+      "📨 RESEND_API_KEY missing. Direct booking guest email fallback."
+    );
+
     console.log("TO:", to);
 
     return {
@@ -755,161 +780,154 @@ export async function sendDirectBookingGuestConfirmation(
     };
   }
 
-  const manageReservationBlock = renderManageReservationBlock(
-    manageReservationUrl
-  );
+  const manageReservationBlock =
+    renderManageReservationBlock(
+      manageReservationUrl
+    );
 
-   if (!manageReservationBlock) {
+  if (!manageReservationBlock) {
     throw new Error(
       "Direct booking manage reservation URL is missing or invalid"
     );
   }
 
-  const cancellationPolicyBlock = renderCancellationPolicyBlock({
-    cancellationPolicyName,
-    cancellationPolicyType,
-    cancellationPolicySummary,
-    refundBasis,
-    refundRules,
-  });
+  const cancellationPolicyBlock =
+    renderCancellationPolicyBlock({
+      cancellationPolicyName,
+      cancellationPolicyType,
+      cancellationPolicySummary,
+      refundBasis,
+      refundRules,
+    });
 
-    const { data, error } =
+  const verificationBlock = `
+    <div
+      style="
+        background:#fffbeb;
+        border:1px solid #fde68a;
+        border-radius:14px;
+        padding:18px;
+        margin:20px 0;
+        color:#92400e;
+      "
+    >
+      <div lang="en">
+        <h3 style="margin:0 0 8px;">
+          Secure pre-check-in
+        </h3>
+
+        <p style="margin:0;">
+          Complete identity verification,
+          review the property rules, and sign
+          the guest agreement before digital
+          access is released.
+        </p>
+      </div>
+
+      <hr
+        style="
+          border:none;
+          border-top:1px solid #fde68a;
+          margin:16px 0;
+        "
+      />
+
+      <div lang="es">
+        <h3 style="margin:0 0 8px;">
+          Registro seguro
+        </h3>
+
+        <p style="margin:0;">
+          Complete la verificaci&oacute;n de
+          identidad, revise las reglas de la
+          propiedad y firme el acuerdo del
+          hu&eacute;sped antes de recibir el
+          acceso digital.
+        </p>
+      </div>
+    </div>
+  `;
+
+  const formattedTotalPaid =
+    totalAmount !== null &&
+    totalAmount !== undefined &&
+    Number.isFinite(
+      Number(totalAmount)
+    )
+      ? formatBookingAmount(
+          totalAmount,
+          currency
+        )
+      : undefined;
+
+  const emailHtml =
+    buildGuestReservationEmail({
+      mode: "DIRECT_BOOKING",
+
+      reservationNumber,
+      guestName,
+      propertyName,
+
+      checkInEn:
+        formatBookingDate(
+          checkIn,
+          dateTimeZone
+        ),
+
+      checkInEs:
+        formatBookingDateEs(
+          checkIn,
+          dateTimeZone
+        ),
+
+      checkOutEn:
+        formatBookingDate(
+          checkOut,
+          dateTimeZone
+        ),
+
+      checkOutEs:
+        formatBookingDateEs(
+          checkOut,
+          dateTimeZone
+        ),
+
+      totalPaid:
+        formattedTotalPaid,
+
+      paymentStatusEn:
+        "Paid",
+
+      paymentStatusEs:
+        "Pagado",
+
+      verificationBlock,
+      manageReservationBlock,
+      cancellationPolicyBlock,
+    });
+
+  const { data, error } =
     await resend.emails.send({
       from: getEmailFrom(),
+
       to,
+
       subject:
-        `Reservation confirmed / Reservaci\u00f3n confirmada #${reservationNumber} - ${propertyName}`,
-      html: `
-        <div style="font-family:Arial,sans-serif;color:#111827;line-height:1.6;max-width:680px;margin:0 auto;">
-          <div style="background:linear-gradient(135deg,#020617,#1d4ed8);color:#ffffff;border-radius:18px;padding:24px;margin-bottom:20px;">
-            <p style="margin:0 0 8px;font-size:12px;letter-spacing:0.08em;text-transform:uppercase;font-weight:800;">
-              Pin&amp;Go Direct Booking
-            </p>
+        `Reservation Confirmed | Reservaci\u00f3n Confirmada #${reservationNumber} - ${propertyName}`,
 
-            <h1 style="margin:0;font-size:28px;line-height:1.15;">
-              Your reservation is confirmed
-            </h1>
-
-            <h2 style="margin:8px 0 0;font-size:22px;line-height:1.2;">
-              Su reservaci&oacute;n est&aacute; confirmada
-            </h2>
-
-            <p style="margin:10px 0 0;color:#dbeafe;font-weight:700;">
-              Reservation / Reservaci&oacute;n #${safeReservationNumber}
-            </p>
-
-            <p style="margin:8px 0 0;color:#dbeafe;">
-              Pin&amp;Go has started the secure stay workflow.
-              Pin&amp;Go ha iniciado el flujo seguro de estad&iacute;a.
-            </p>
-          </div>
-
-          <p>
-            Hi / Hola ${safeName},
-          </p>
-
-          <p>
-            Your reservation for <strong>${safePropertyName}</strong> is confirmed and paid.
-            Su reservaci&oacute;n para <strong>${safePropertyName}</strong> est&aacute; confirmada y pagada.
-          </p>
-
-          <div style="background:#f9fafb;border:1px solid #e5e7eb;border-radius:14px;padding:16px;margin:20px 0;">
-            <p>
-              <strong>Reservation Number / N&uacute;mero de reservaci&oacute;n:</strong>
-              #${safeReservationNumber}
-            </p>
-
-            <p>
-              <strong>Property / Propiedad:</strong>
-              ${safePropertyName}
-            </p>
-
-            <p>
-              <strong>Check-in / Entrada:</strong>
-              ${formatBookingDate(
-                checkIn,
-                dateTimeZone
-              )}
-            </p>
-
-            <p>
-              <strong>Check-out / Salida:</strong>
-              ${formatBookingDate(
-                checkOut,
-                dateTimeZone
-              )}
-            </p>
-
-            <p>
-              <strong>Total paid / Total pagado:</strong>
-              ${formatBookingAmount(
-                totalAmount,
-                currency
-              )}
-            </p>
-
-            <p>
-              <strong>Payment status / Estado del pago:</strong>
-              Paid / Pagado
-            </p>
-          </div>
-
-          ${manageReservationBlock}
-
-          ${cancellationPolicyBlock}
-
-          <div style="background:#fffbeb;border:1px solid #fde68a;border-radius:14px;padding:16px;margin:20px 0;color:#92400e;">
-            <h3 style="margin:0 0 8px;">
-              Secure pre-check-in / Registro seguro
-            </h3>
-
-            <p style="margin:0 0 10px;">
-              Complete identity verification, review the property rules, and sign the guest agreement before digital access is released.
-            </p>
-
-            <p style="margin:0;">
-              Complete la verificaci&oacute;n de identidad, revise las reglas de la propiedad y firme el acuerdo del hu&eacute;sped antes de recibir el acceso digital.
-            </p>
-          </div>
-
-          <div style="background:#f0fdf4;border:1px solid #bbf7d0;border-radius:14px;padding:16px;margin:20px 0;color:#14532d;">
-            <h3 style="margin:0 0 8px;">
-              Smart access / Acceso inteligente
-            </h3>
-
-            <p style="margin:0 0 10px;">
-              Your smart-access instructions will be delivered according to the property&apos;s secure check-in workflow. Access details may be sent closer to check-in after operational checks are complete.
-            </p>
-
-            <p style="margin:0;">
-              Las instrucciones de acceso inteligente se entregar&aacute;n seg&uacute;n el flujo seguro de check-in de la propiedad. Los detalles pueden enviarse m&aacute;s cerca del check-in, despu&eacute;s de completar las validaciones operacionales.
-            </p>
-          </div>
-
-          <p style="color:#4b5563;">
-            Use the Manage Reservation link to review stay details, cancellation terms, refund eligibility, and available self-service options.
-            Utilice el enlace Administrar reservaci&oacute;n para revisar la estad&iacute;a, los t&eacute;rminos de cancelaci&oacute;n, la elegibilidad de reembolso y las opciones disponibles.
-          </p>
-
-          <p>
-            Thank you / Gracias,<br />
-            Pin&amp;Go
-          </p>
-
-          <hr style="border:none;border-top:1px solid #e5e7eb;margin:28px 0;" />
-
-          <p style="color:#6b7280;font-size:12px;">
-            This is a transactional message regarding your reservation.
-            Este es un mensaje transaccional relacionado con su reservaci&oacute;n.
-          </p>
-        </div>
-      `,
+      html: emailHtml,
     });
+
   if (error) {
-    throw new Error(`Resend direct booking guest email failed: ${error.message}`);
+    throw new Error(
+      `Resend direct booking guest email failed: ${error.message}`
+    );
   }
 
-  console.log("✅ DIRECT BOOKING GUEST EMAIL SENT TO:", to);
+  console.log(
+    "✅ DIRECT BOOKING GUEST EMAIL SENT TO:",
+    to
+  );
 
   return {
     ok: true,
