@@ -1184,6 +1184,26 @@ export async function getActiveCancellationPolicyForProperty(
   });
 }
 
+export function buildGuestCancellationTermsText(
+  policy: {
+    refundBasis?: string | null;
+  }
+) {
+  const baseText =
+    "I have reviewed and agree to the cancellation terms shown above, including how any eligible refund is calculated.";
+
+  if (
+    policy.refundBasis ===
+      "NIGHTLY_SUBTOTAL" ||
+    policy.refundBasis ===
+      "NIGHTLY_SUBTOTAL_ONLY"
+  ) {
+    return `${baseText} Refund percentages apply to the nightly subtotal only. Other charges such as cleaning fees, service fees, taxes, add-ons, or other non-nightly charges may not be refundable unless required by law or specifically stated in this policy.`;
+  }
+
+  return baseText;
+}
+
 export async function buildCancellationPolicySnapshot(propertyId: string) {
   const policy = await getActiveCancellationPolicyForProperty(propertyId);
 

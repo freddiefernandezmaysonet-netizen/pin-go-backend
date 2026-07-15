@@ -9,6 +9,7 @@ import { calculateDirectBookingPricing } from "../services/direct-booking-pricin
 import { assertDirectBookingPayoutReady } from "../services/stripe-connect.service";
 import {
   buildCancellationPolicySnapshot,
+  buildGuestCancellationTermsText,
   serializeCancellationPolicySnapshotForStripeMetadata,
 } from "../services/cancellation-policy.service";
 import {
@@ -269,20 +270,6 @@ function toMoneyFromCents(cents: number) {
 
 function toStripeMetadataValue(value: string, maxLength = 500) {
   return value.length > maxLength ? value.slice(0, maxLength) : value;
-}
-
-function buildGuestCancellationTermsText(policy: { refundBasis?: string | null }) {
-  const baseText =
-    "I have reviewed and agree to the cancellation terms shown above, including how any eligible refund is calculated.";
-
-  if (
-    policy.refundBasis === "NIGHTLY_SUBTOTAL" ||
-    policy.refundBasis === "NIGHTLY_SUBTOTAL_ONLY"
-  ) {
-    return `${baseText} Refund percentages apply to the nightly subtotal only. Other charges such as cleaning fees, service fees, taxes, add-ons, or other non-nightly charges may not be refundable unless required by law or specifically stated in this policy.`;
-  }
-
-  return baseText;
 }
 
 function isGuestCancellationRouteError(error: any) {
