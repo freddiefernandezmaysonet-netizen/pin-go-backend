@@ -15,7 +15,10 @@ export type EnsureGuestJourneyResult = {
 
 type GuestJourneyTransactionClient = Pick<
   Prisma.TransactionClient,
-  "reservation" | "guestJourney" | "apmsAuditEntry"
+  | "reservation"
+  | "guestJourney"
+  | "accessGrant"
+  | "apmsAuditEntry"
 >;
 
 export async function ensureGuestJourneyForConfirmedReservation(
@@ -376,6 +379,256 @@ export async function completeGuestJourneyVerification(
     journeyId: journey.id,
     currentState:
       GuestJourneyState.VERIFICATION_COMPLETED,
+    transitioned: true,
+  };
+}
+
+export type ScheduleGuestJourneyAccessResult = {
+  journeyId: string;
+  currentState: GuestJourneyState;
+  transitioned: boolean;
+};
+
+export async function scheduleGuestJourneyAccess(
+  tx: GuestJourneyTransactionClient,
+  reservationId: string,
+  accessGrantId: string
+): Promise<ScheduleGuestJourneyAccessResult> {
+  const cleanReservationId = reservationId.trim();
+  const cleanAccessGrantId = accessGrantId.trim();
+
+  if (!cleanReservationId) {
+    throw new Error("reservationId is required");
+  }
+
+  if (!cleanAccessGrantId) {
+    throw new Error("accessGrantId is required");
+  }
+
+  const reservation = await tx.reservation.findUnique({
+    where: {
+      id: cleanReservationId,
+    },
+    select: {
+      id: true,
+      status: true,
+      propertyId: true,
+      guestAccessReleaseStatus: true,
+      guestAccessReleasedAt: true,
+      property: {
+        select: {
+          organizationId: true,
+        },
+      },
+    },
+  });
+
+  if (!reservation) {
+    throw new Error(
+      `Cannot schedule Guest Journey access. Reservation ${cleanReservationId} was not found.`
+    );
+  }
+
+  if (reservation.status !== ReservationStatus.ACTIVE) {
+    throw new Error(
+      `Cannot schedule Guest Journey access for reservation ${cleanReservationId} with status ${reservation.status}.`
+    );
+  }
+
+  if (
+    reservation.guestAccessReleaseStatus !== "RELEASED" ||
+    !reservation.guestAccessReleasedAt
+  ) {
+    throw new Error(
+      `Cannot schedule Guest Journey access for reservation ${cleanReservationId} without released access evidence.`
+    );
+  }
+
+  const accessGrant = await tx.accessGrant.findFirst({
+    where: {
+      id: cleanAccessGrantId,
+      reservationId: reservation.id,
+      type: "GUEST",
+      method: "PASSCODE_TIMEBOUND",
+      status: "ACTIVE",
+    },
+    select: {
+      id: true,
+      ttlockKeyboardPwdId: true,
+      lastAppliedAt: true,
+      startsAt: true,
+      endsAt: true,
+      secureAccessCode: {
+        select: {
+          id: true,
+          keyboardPwdId: true,
+          expiresAt: true,
+        },
+      },
+    },
+  });
+
+  if (!accessGrant) {
+    throw new Error(
+      `Cannot schedule Guest Journey access. Active guest grant ${cleanAccessGrantId} was not found.`
+    );
+  }
+
+  if (
+    !accessGrant.ttlockKeyboardPwdId ||
+    !accessGrant.secureAccessCode
+  ) {
+    throw new Error(
+      `Cannot schedule Guest Journey access. Grant ${cleanAccessGrantId} does not contain complete passcode evidence.`
+    );
+  }
+
+  const journey = await tx.guestJourney.findUnique({
+    where: {
+      reservationId: reservation.id,
+    },
+    select: {
+      id: true,
+      currentState: true,
+    },
+  });
+
+  if (!journey) {
+    throw new Error(
+      `Cannot schedule Guest Journey access. Journey for reservation ${cleanReservationId} was not found.`
+    );
+  }
+
+  if (
+    journey.currentState ===
+      GuestJourneyState.ACCESS_SCHEDULED ||
+    journey.currentState ===
+      GuestJourneyState.READY_FOR_ARRIVAL
+  ) {
+    return {
+      journeyId: journey.id,
+      currentState: journey.currentState,
+      transitioned: false,
+    };
+  }
+
+  if (
+    journey.currentState !==
+    GuestJourneyState.VERIFICATION_COMPLETED
+  ) {
+    throw new Error(
+      `Invalid Guest Journey transition from ${journey.currentState} to ${GuestJourneyState.ACCESS_SCHEDULED}.`
+    );
+  }
+
+  const transitionStartedAt =
+    reservation.guestAccessReleasedAt;
+
+  const transitionResult =
+    await tx.guestJourney.updateMany({
+      where: {
+        id: journey.id,
+        currentState:
+          GuestJourneyState.VERIFICATION_COMPLETED,
+      },
+      data: {
+        currentState:
+          GuestJourneyState.ACCESS_SCHEDULED,
+        stateChangedAt: transitionStartedAt,
+        accessScheduledAt: transitionStartedAt,
+      },
+    });
+
+  if (transitionResult.count === 0) {
+    const currentJourney =
+      await tx.guestJourney.findUniqueOrThrow({
+        where: {
+          id: journey.id,
+        },
+        select: {
+          id: true,
+          currentState: true,
+        },
+      });
+
+    return {
+      journeyId: currentJourney.id,
+      currentState: currentJourney.currentState,
+      transitioned: false,
+    };
+  }
+
+  const transitionCompletedAt = new Date();
+
+  const auditEntry: AuditEntry = {
+    engine: "Guest Journey",
+    decisionId:
+      `guest-journey:${journey.id}:` +
+      "verification-completed-to-access-scheduled",
+    entityType: "RESERVATION",
+    entityId: reservation.id,
+    eventType: "DECISION_APPLIED",
+    status: "SUCCESS",
+    severity: "INFO",
+    summary:
+      "Guest Journey advanced to access scheduled.",
+    reason:
+      "The Access Engine successfully provisioned and persisted the guest passcode.",
+    startedAt: transitionStartedAt,
+    completedAt: transitionCompletedAt,
+    durationMs: Math.max(
+      0,
+      transitionCompletedAt.getTime() -
+        transitionStartedAt.getTime()
+    ),
+    decisions: [
+      {
+        engine: "Guest Journey",
+        rule:
+          "VERIFICATION_COMPLETED_TO_ACCESS_SCHEDULED",
+        label: "Confirm Guest Access Scheduling",
+        previousValue:
+          GuestJourneyState.VERIFICATION_COMPLETED,
+        newValue:
+          GuestJourneyState.ACCESS_SCHEDULED,
+        applied: true,
+        metadata: {
+          journeyId: journey.id,
+          reservationId: reservation.id,
+          accessGrantId: accessGrant.id,
+          accessCodeId:
+            accessGrant.secureAccessCode.id,
+          keyboardPwdId:
+            accessGrant.ttlockKeyboardPwdId,
+        },
+      },
+    ],
+    metadata: {
+      journeyId: journey.id,
+      reservationId: reservation.id,
+      propertyId: reservation.propertyId,
+      organizationId:
+        reservation.property.organizationId,
+      accessGrantId: accessGrant.id,
+      accessCodeId:
+        accessGrant.secureAccessCode.id,
+      fromState:
+        GuestJourneyState.VERIFICATION_COMPLETED,
+      toState:
+        GuestJourneyState.ACCESS_SCHEDULED,
+      accessScheduledAt:
+        reservation.guestAccessReleasedAt,
+      grantStartsAt: accessGrant.startsAt,
+      grantEndsAt: accessGrant.endsAt,
+    },
+  };
+
+  await persistAuditEntry(tx, auditEntry);
+
+  return {
+    journeyId: journey.id,
+    currentState:
+      GuestJourneyState.ACCESS_SCHEDULED,
     transitioned: true,
   };
 }

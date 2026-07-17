@@ -11,8 +11,9 @@ import {
   StaffAccessMethod,
   NfcAssignmentRole,
   NfcAssignmentStatus,
-} from '@prisma/client';
-
+  GuestJourneyState,
+  GuestAccessReleaseStatus,
+} from "@prisma/client";
 import { prisma } from "../lib/prisma";
 import { isOrgEntitled } from "../services/billing.entitlement";
 import { activateGrant, deactivateGrant } from "../services/ttlock/ttlock.brain";
@@ -43,6 +44,7 @@ import { NfcCardStatus } from "@prisma/client";
 import { unassignAllNfcForReservation } from "../services/nfc.service";
 import { unassignGuestNfcForReservation } from "../services/nfc.service";
 import { processPendingCleaningConfirmations } from "../services/cleaning-confirmation-dispatch.service";
+import { scheduleGuestJourneyAccess } from "../services/guest-journey.service";
 
 console.log("[reservation.worker] BOOT", new Date().toISOString());
 
@@ -643,6 +645,206 @@ async function ensureStaffGrantForAssignment(a: any) {
 
 // ====== PROCESSORS ======
 
+async function processGuestAccessReleaseRepairs(
+  now: Date
+) {
+  const grants =
+    await prisma.accessGrant.findMany({
+      where: {
+        type: AccessGrantType.GUEST,
+        method:
+          AccessMethod.PASSCODE_TIMEBOUND,
+        status: AccessStatus.ACTIVE,
+        ttlockKeyboardPwdId: {
+          not: null,
+        },
+        secureAccessCode: {
+          isNot: null,
+        },
+        reservation: {
+          is: {
+            status:
+              ReservationStatus.ACTIVE,
+            checkOut: {
+              gt: now,
+            },
+            guestJourney: {
+              is: {
+                currentState: {
+                  in: [
+                    GuestJourneyState
+                      .VERIFICATION_COMPLETED,
+                    GuestJourneyState
+                      .ACCESS_SCHEDULED,
+                    GuestJourneyState
+                      .READY_FOR_ARRIVAL,
+                  ],
+                },
+              },
+            },
+          },
+        },
+        OR: [
+          {
+            reservation: {
+              is: {
+                guestAccessReleaseStatus: {
+                  not:
+                    GuestAccessReleaseStatus
+                      .RELEASED,
+                },
+              },
+            },
+          },
+          {
+            reservation: {
+              is: {
+                guestAccessReleasedAt:
+                  null,
+              },
+            },
+          },
+          {
+            reservation: {
+              is: {
+                guestJourney: {
+                  is: {
+                    currentState:
+                      GuestJourneyState
+                        .VERIFICATION_COMPLETED,
+                  },
+                },
+              },
+            },
+          },
+        ],
+      },
+      take: BATCH_SIZE,
+      orderBy: {
+        lastAppliedAt: "asc",
+      },
+      select: {
+        id: true,
+        reservationId: true,
+        lastAppliedAt: true,
+        reservation: {
+          select: {
+            id: true,
+            reservationNumber: true,
+            guestAccessReleasedAt: true,
+          },
+        },
+      },
+    });
+
+  if (grants.length === 0) {
+    return;
+  }
+
+  log(
+    "Guest access release repairs found",
+    {
+      count: grants.length,
+    }
+  );
+
+  for (const grant of grants) {
+    if (
+      !grant.reservationId ||
+      !grant.reservation
+    ) {
+      continue;
+    }
+
+    try {
+      const accessReleasedAt =
+        grant.reservation
+          .guestAccessReleasedAt ??
+        grant.lastAppliedAt ??
+        now;
+
+      const guestJourneyResult =
+        await prisma.$transaction(
+          async (tx) => {
+            await tx.reservation.update({
+              where: {
+                id: grant.reservation!.id,
+              },
+              data: {
+                guestAccessReleaseStatus:
+                  GuestAccessReleaseStatus
+                    .RELEASED,
+                guestAccessReleasedAt:
+                  accessReleasedAt,
+                guestAccessReleaseLastError:
+                  null,
+              },
+            });
+
+            return scheduleGuestJourneyAccess(
+              tx,
+              grant.reservation!.id,
+              grant.id
+            );
+          }
+        );
+
+      await prisma.accessGrant.update({
+        where: {
+          id: grant.id,
+        },
+        data: {
+          lastError: null,
+        },
+      });
+
+      log(
+        "Guest access release repaired",
+        {
+          reservationNumber:
+            grant.reservation
+              .reservationNumber ?? null,
+          reservationId:
+            grant.reservation.id,
+          accessGrantId: grant.id,
+          guestJourneyState:
+            guestJourneyResult.currentState,
+          guestJourneyTransitioned:
+            guestJourneyResult.transitioned,
+        }
+      );
+    } catch (error) {
+      const message =
+        toErrString(error);
+
+      await prisma.accessGrant
+        .update({
+          where: {
+            id: grant.id,
+          },
+          data: {
+            lastError:
+              `GUEST_ACCESS_RELEASE_REPAIR_FAILED:${message}`,
+          },
+        })
+        .catch(() => {});
+
+      errLog(
+        "Guest access release repair FAILED",
+        {
+          reservationNumber:
+            grant.reservation
+              .reservationNumber ?? null,
+          reservationId:
+            grant.reservation.id,
+          accessGrantId: grant.id,
+          error: message,
+        }
+      );
+    }
+  }
+}
+
 async function processCheckins(now: Date) {
   const reservations =
     await fetchDueCheckins(now);
@@ -738,24 +940,35 @@ async function processCheckins(now: Date) {
           (activation as any)
             ?.passcodePlain ?? null;
 
-        await prisma.reservation.update({
-          where: {
-            id: reservation.id,
-          },
-          data: {
-            guestAccessReleaseStatus:
-              "RELEASED",
-            guestAccessReleasedAt:
-              new Date(),
-            guestAccessReleaseLastError:
-              null,
-          },
-        });
+        const accessReleasedAt = new Date();
 
+        const guestJourneyAccessResult =
+          await prisma.$transaction(async (tx) => {
+            await tx.reservation.update({
+              where: {
+                id: reservation.id,
+              },
+              data: {
+                guestAccessReleaseStatus:
+                  "RELEASED",
+                guestAccessReleasedAt:
+                  accessReleasedAt,
+                guestAccessReleaseLastError:
+                  null,
+              },
+            });
+
+            return scheduleGuestJourneyAccess(
+              tx,
+              reservation.id,
+              grant.id
+            );
+          });
+        
         log("Guest passcode activated", {
           reservationNumber:
-            reservation.reservationNumber ??
-            null,
+            reservation.reservationNumber ??  
+              null, 
           reservationId: reservation.id,
           accessGrantId: grant.id,
           method:
@@ -764,6 +977,10 @@ async function processCheckins(now: Date) {
             grant.startsAt.toISOString(),
           endsAt:
             grant.endsAt.toISOString(),
+          guestJourneyState:
+            guestJourneyAccessResult.currentState,
+          guestJourneyTransitioned:
+            guestJourneyAccessResult.transitioned,
         });
 
         // NFC es complementario y solamente aplica
@@ -1742,6 +1959,17 @@ async function tick() {
       );
     }
 
+     try {
+      await processGuestAccessReleaseRepairs(
+        now
+      );
+    } catch (e) {
+      errLog(
+        "processGuestAccessReleaseRepairs crashed:",
+        toErrString(e)
+      );
+    }
+
     try {
       await processCheckins(now);
       await processPreCheckinMessages(now);
@@ -1751,7 +1979,6 @@ async function tick() {
         toErrString(e)
       );
     }
-
     try {
       const result = await retryPendingNfcSync(
         prisma,
