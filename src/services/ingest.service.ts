@@ -22,6 +22,7 @@ import { createReservationAuditEntry } from "../apms/reservation-audit.mapper";
 import { persistAuditEntry } from "../apms/audit-persistence.service";
 import type { AuditEntry } from "../apms/audit-types";
 import { ensureReservationGuestAgreementSnapshot } from "./guest-agreement.service";
+import { ensureGuestJourneyForConfirmedReservation } from "./guest-journey.service";
 
 console.log("[INGEST] running src/services/ingest.service.ts", new Date().toISOString());
 const prisma = new PrismaClient();
@@ -213,7 +214,12 @@ export async function ingestReservation(p: IngestPayload) {
       externalRaw: p.externalRaw ?? null,
       status: p.status ?? undefined,
     });
-
+   
+    await ensureGuestJourneyForConfirmedReservation(
+      tx as any,
+      reservation.id
+    );
+ 
     const ensured = await ensureGuestToken(tx as any, reservation.id, guestTokenExpiresAt);
 
     const lock = await tx.lock.findFirst({

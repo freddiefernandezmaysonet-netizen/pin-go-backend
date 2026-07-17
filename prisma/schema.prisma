@@ -429,6 +429,7 @@ model Reservation {
   messageDispatchLogs     MessageDispatchLog[]
   NfcAssignment           NfcAssignment[]
   pmsLinks                PmsReservationLink[]
+  guestJourney            GuestJourney?
   property                Property                    @relation(fields: [propertyId], references: [id])
   cancellationPolicy      PropertyCancellationPolicy? @relation(fields: [cancellationPolicyId], references: [id],         onDelete: SetNull)
   staffAssignments        StaffAssignment[]
@@ -438,6 +439,26 @@ model Reservation {
   @@index([cancellationPolicyId])
   @@index([status, cancelledAt])
   @@index([propertyId, status, checkIn])
+}
+
+model GuestJourney {
+  id            String            @id @default(cuid())
+  reservationId String            @unique
+  currentState  GuestJourneyState @default(RESERVATION_CONFIRMED)
+
+  stateChangedAt DateTime @default(now())
+
+  verificationCompletedAt DateTime?
+  accessScheduledAt        DateTime?
+  readyForArrivalAt        DateTime?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  reservation Reservation @relation(fields: [reservationId], references: [id], onDelete: Cascade)
+  
+  @@index([currentState])
+  @@index([stateChangedAt])
 }
 
 model AccessCode {
@@ -1431,6 +1452,14 @@ enum SubscriptionStatus {
   UNPAID
   INCOMPLETE
   INCOMPLETE_EXPIRED
+}
+
+enum GuestJourneyState {
+  RESERVATION_CONFIRMED
+  VERIFICATION_PENDING
+  VERIFICATION_COMPLETED
+  ACCESS_SCHEDULED
+  READY_FOR_ARRIVAL
 }
 
 enum ReservationStatus {
