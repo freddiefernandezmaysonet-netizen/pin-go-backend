@@ -6,6 +6,7 @@ import stripe from "../billing/stripe";
 import {
   evaluateGuestAccessReadiness,
 } from "./guest-access-readiness.service";
+import { completeGuestJourneyVerification } from "./guest-journey.service";
 
 const MAX_IDENTITY_VERIFICATION_ATTEMPTS = 3;
 
@@ -308,44 +309,64 @@ export async function handleGuestIdentityStripeEvent(
       };
     }
 
-    const updated =
-      await prisma.reservation.updateMany({
-        where: {
-          id: reservation.id,
-          OR: [
-            {
-              stripeIdentityVerificationLastEventId:
-                null,
-            },
-            {
-              stripeIdentityVerificationLastEventId:
+      const verificationCompletion =
+      await prisma.$transaction(async (tx) => {
+        const updated =
+          await tx.reservation.updateMany({
+            where: {
+              id: reservation.id,
+              OR: [
                 {
-                  not: event.id,
+                  stripeIdentityVerificationLastEventId:
+                    null,
                 },
+                {
+                  stripeIdentityVerificationLastEventId:
+                    {
+                      not: event.id,
+                    },
+                },
+              ],
             },
-          ],
-        },
-        data: {
-          verificationStatus: "COMPLETED",
-          verifiedAt:
-            reservation.verifiedAt ?? eventAt,
-          identityVerificationProvider:
-            "STRIPE_IDENTITY",
-          stripeIdentityVerificationStatus:
-            session.status,
-          stripeIdentityVerificationLastError:
-            null,
-          stripeIdentityVerificationLastEventAt:
-            eventAt,
-          stripeIdentityVerificationLastEventId:
-            event.id,
-          identityVerifiedLegalName:
-            verifiedLegalName,
-          identityNameMatchStatus: "MATCHED",
-        },
+            data: {
+              verificationStatus: "COMPLETED",
+              verifiedAt:
+                reservation.verifiedAt ?? eventAt,
+              identityVerificationProvider:
+                "STRIPE_IDENTITY",
+              stripeIdentityVerificationStatus:
+                session.status,
+              stripeIdentityVerificationLastError:
+                null,
+              stripeIdentityVerificationLastEventAt:
+                eventAt,
+              stripeIdentityVerificationLastEventId:
+                event.id,
+              identityVerifiedLegalName:
+                verifiedLegalName,
+              identityNameMatchStatus: "MATCHED",
+            },
+          });
+
+        if (updated.count === 0) {
+          return {
+            skipped: true as const,
+          };
+        }
+
+        const guestJourneyResult =
+          await completeGuestJourneyVerification(
+            tx,
+            reservation.id
+          );
+
+        return {
+          skipped: false as const,
+          guestJourneyResult,
+        };
       });
 
-    if (updated.count === 0) {
+    if (verificationCompletion.skipped) {
       return {
         handled: true,
         skipped: true,
@@ -355,6 +376,9 @@ export async function handleGuestIdentityStripeEvent(
           reservation.reservationNumber,
       };
     }
+
+    const guestJourneyResult =
+      verificationCompletion.guestJourneyResult;
 
     const readiness =
       await evaluateGuestAccessReadiness(
@@ -371,10 +395,17 @@ export async function handleGuestIdentityStripeEvent(
       {
         reservationNumber:
           reservation.reservationNumber,
-        verificationSessionId: session.id,
+        verificationSessionId:
+          session.id,
         eventId: event.id,
-        guestAccessReady: readiness.ready,
-        blockers: readiness.blockers,
+        guestJourneyState:
+          guestJourneyResult.currentState,
+        guestJourneyTransitioned:
+          guestJourneyResult.transitioned,
+        guestAccessReady:
+          readiness.ready,
+        blockers:
+          readiness.blockers,
       }
     );
 
@@ -384,9 +415,7 @@ export async function handleGuestIdentityStripeEvent(
       reservationNumber:
         reservation.reservationNumber,
       readiness,
-    };
-  }
- 
+    }; 
   if (
     reservation.verificationStatus === "COMPLETED" &&
     reservation.verifiedAt
