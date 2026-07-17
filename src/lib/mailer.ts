@@ -1805,3 +1805,213 @@ export async function sendGuestAccessPasscodeEmail(
     data,
   };
 }
+
+export type SendGuestVerificationReminderEmailInput = {
+  to: string;
+  reservationNumber: string;
+  guestName?: string | null;
+  propertyName: string;
+  checkIn: Date;
+  propertyTimeZone?: string | null;
+  verificationUrl: string;
+};
+
+export async function sendGuestVerificationReminderEmail(
+  input: SendGuestVerificationReminderEmailInput
+) {
+  const {
+    to,
+    reservationNumber,
+    guestName,
+    propertyName,
+    checkIn,
+    propertyTimeZone,
+    verificationUrl,
+  } = input;
+
+  const safeReservationNumber =
+    escapeHtml(reservationNumber);
+
+  const safeGuestName =
+    escapeHtml(
+      guestName?.trim() || "Guest"
+    );
+
+  const safePropertyName =
+    escapeHtml(propertyName);
+
+  const normalizedVerificationUrl =
+    getSafeUrl(verificationUrl);
+
+  if (!normalizedVerificationUrl) {
+    throw new Error(
+      "Guest verification reminder URL is missing or invalid"
+    );
+  }
+
+  const safeVerificationUrl =
+    escapeHtml(normalizedVerificationUrl);
+
+  const dateTimeZone =
+    normalizePropertyTimeZone(
+      propertyTimeZone
+    );
+
+  const formattedCheckIn =
+    formatBookingDateTime(
+      checkIn,
+      dateTimeZone
+    );
+
+  if (!resend) {
+    if (isProd) {
+      throw new Error(
+        "RESEND_API_KEY missing in production"
+      );
+    }
+
+    console.log(
+      "RESEND_API_KEY missing. Guest verification reminder fallback.",
+      {
+        to,
+        reservationNumber,
+      }
+    );
+
+    return {
+      ok: true,
+      mode: "console",
+    };
+  }
+
+  const { data, error } =
+    await resend.emails.send({
+      from: getEmailFrom(),
+      to,
+      subject:
+        `Action required / Acción requerida - Reservation #${reservationNumber}`,
+      html: `
+        <div style="font-family:Arial,sans-serif;color:#111827;line-height:1.6;max-width:680px;margin:0 auto;">
+          <div style="background:linear-gradient(135deg,#020617,#1d4ed8);color:#ffffff;border-radius:18px;padding:24px;margin-bottom:20px;">
+            <p style="margin:0 0 8px;font-size:12px;letter-spacing:0.08em;text-transform:uppercase;font-weight:800;">
+              Pin&amp;Go Guest Services
+            </p>
+
+            <h1 style="margin:0;font-size:28px;line-height:1.15;">
+              Secure pre-check-in still required
+            </h1>
+
+            <h2 style="margin:8px 0 0;font-size:22px;line-height:1.2;">
+              Registro seguro aún requerido
+            </h2>
+
+            <p style="margin:12px 0 0;color:#dbeafe;font-weight:700;">
+              Reservation #${safeReservationNumber}
+            </p>
+          </div>
+
+          <p>
+            Hi ${safeGuestName},
+          </p>
+
+          <p>
+            Your stay at
+            <strong>${safePropertyName}</strong>
+            is approaching.
+          </p>
+
+          <p>
+            Your scheduled check-in is:
+            <strong>${escapeHtml(formattedCheckIn)}</strong>
+          </p>
+
+          <div style="background:#eff6ff;border:1px solid #bfdbfe;border-radius:16px;padding:20px;margin:22px 0;">
+            <p style="margin:0 0 14px;color:#1e40af;">
+              Complete identity verification, review and accept the property rules and cancellation policy, and sign the guest agreement before Pin&amp;Go can release your digital access.
+            </p>
+
+            <p style="margin:0 0 18px;">
+              <a
+                href="${safeVerificationUrl}"
+                style="display:inline-block;background:#2563eb;color:#ffffff;text-decoration:none;padding:14px 20px;border-radius:12px;font-weight:800;"
+              >
+                Complete secure pre-check-in
+              </a>
+            </p>
+
+            <p style="margin:0;color:#475569;font-size:13px;">
+              Secure link:
+              <br />
+              <a
+                href="${safeVerificationUrl}"
+                style="color:#2563eb;word-break:break-all;"
+              >
+                ${safeVerificationUrl}
+              </a>
+            </p>
+          </div>
+
+          <hr style="border:none;border-top:1px solid #e5e7eb;margin:28px 0;" />
+
+          <p>
+            Hola ${safeGuestName},
+          </p>
+
+          <p>
+            Su estadía en
+            <strong>${safePropertyName}</strong>
+            se aproxima.
+          </p>
+
+          <p>
+            Su check-in está programado para:
+            <strong>${escapeHtml(formattedCheckIn)}</strong>
+          </p>
+
+          <div style="background:#eff6ff;border:1px solid #bfdbfe;border-radius:16px;padding:20px;margin:22px 0;">
+            <p style="margin:0 0 14px;color:#1e40af;">
+              Complete la verificación de identidad, revise y acepte las reglas de la propiedad y la política de cancelación, y firme el acuerdo del huésped antes de que Pin&amp;Go pueda entregar su acceso digital.
+            </p>
+
+            <p style="margin:0 0 18px;">
+              <a
+                href="${safeVerificationUrl}"
+                style="display:inline-block;background:#2563eb;color:#ffffff;text-decoration:none;padding:14px 20px;border-radius:12px;font-weight:800;"
+              >
+                Completar registro seguro
+              </a>
+            </p>
+
+            <p style="margin:0;color:#475569;font-size:13px;">
+              Enlace seguro:
+              <br />
+              <a
+                href="${safeVerificationUrl}"
+                style="color:#2563eb;word-break:break-all;"
+              >
+                ${safeVerificationUrl}
+              </a>
+            </p>
+          </div>
+
+          <p style="color:#475569;font-size:13px;">
+            This automated message was sent by Pin&amp;Go Guest Services.
+            <br />
+            Este mensaje automático fue enviado por Pin&amp;Go Guest Services.
+          </p>
+        </div>
+      `,
+    });
+
+  if (error) {
+    throw new Error(
+      `Guest verification reminder email failed: ${error.message}`
+    );
+  }
+
+  return {
+    ok: true,
+    mode: "resend",
+    data,
+  };
+}

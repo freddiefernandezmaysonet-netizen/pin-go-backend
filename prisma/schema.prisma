@@ -1420,6 +1420,7 @@ enum BookingType {
 
 enum ReminderKind {
   CHECKIN_LINK
+  VERIFICATION_REMINDER
 }
 
 enum PersonRole {

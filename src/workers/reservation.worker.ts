@@ -26,7 +26,9 @@ import {
 import {
   sendLoggedEmail,
 } from "../services/email-delivery.service";
-
+import {
+  sendGuestVerificationReminder,
+} from "../services/guest-verification-reminder.service";
 import {
   sendGuestAccessPasscodeEmail,
 } from "../lib/mailer";
@@ -268,6 +270,132 @@ async function processGuestLinkReminders(
       } catch {
         // No bloquear el worker por un fallo del log.
       }
+    }
+  }
+}
+
+async function processGuestVerificationReminders(
+  now: Date
+) {
+  const reminderFrom = new Date(
+    now.getTime() +
+      (REMINDER_HOURS - 1) *
+        60 *
+        60 *
+        1000
+  );
+
+  const reminderTo = new Date(
+    now.getTime() +
+      (REMINDER_HOURS + 1) *
+        60 *
+        60 *
+        1000
+  );
+
+  const reservations =
+    await prisma.reservation.findMany({
+      where: {
+        status:
+          ReservationStatus.ACTIVE,
+        checkIn: {
+          gte: reminderFrom,
+          lte: reminderTo,
+        },
+        checkOut: {
+          gt: now,
+        },
+        guestToken: {
+          not: null,
+        },
+        guestJourney: {
+          is: {
+            currentState:
+              GuestJourneyState
+                .VERIFICATION_PENDING,
+          },
+        },
+        OR: [
+          {
+            guestLinkReminderLogs: {
+              none: {
+                kind:
+                  "VERIFICATION_REMINDER",
+              },
+            },
+          },
+          {
+            guestLinkReminderLogs: {
+              some: {
+                kind:
+                  "VERIFICATION_REMINDER",
+                status: "FAILED",
+              },
+            },
+          },
+        ],
+      },
+      take: BATCH_SIZE,
+      orderBy: {
+        checkIn: "asc",
+      },
+      select: {
+        id: true,
+        reservationNumber: true,
+      },
+    });
+
+  if (reservations.length === 0) {
+    return;
+  }
+
+  log(
+    "processGuestVerificationReminders",
+    {
+      count: reservations.length,
+    }
+  );
+
+  for (const reservation of reservations) {
+    try {
+      const result =
+        await sendGuestVerificationReminder(
+          prisma,
+          reservation.id
+        );
+
+      log(
+        "Guest verification reminder processed",
+        {
+          reservationNumber:
+            reservation.reservationNumber ??
+            null,
+          reservationId:
+            reservation.id,
+          reminderStatus:
+            result.reminderStatus,
+          emailStatus:
+            result.emailStatus,
+          smsStatus:
+            result.smsStatus,
+          skippedReason:
+            result.skippedReason ??
+            null,
+        }
+      );
+    } catch (error) {
+      errLog(
+        "Guest verification reminder FAILED",
+        {
+          reservationNumber:
+            reservation.reservationNumber ??
+            null,
+          reservationId:
+            reservation.id,
+          error:
+            toErrString(error),
+        }
+      );
     }
   }
 }
@@ -2027,6 +2155,17 @@ async function tick() {
         toErrString(e)
       );
     }
+
+        try {
+          await processGuestVerificationReminders(
+            now
+          );
+        } catch (e) {
+          errLog(
+            "processGuestVerificationReminders crashed:",
+            toErrString(e)
+          );
+        }
 
     try {
       await processCheckouts(now);
