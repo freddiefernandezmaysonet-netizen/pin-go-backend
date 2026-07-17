@@ -3,6 +3,7 @@ import crypto from "crypto";
 import {
   AmenityChargeMode,
   AmenityFeeType,
+  GuestJourneyState,
   Prisma,
   PrismaClient,
   ReservationStatus,
@@ -18,6 +19,9 @@ import { MARKET_SEASON_CATALOG } from "../data/market-season-catalog";
 import { provisionProperty } from "../services/property-provisioning.service";
 import { applyDefaultHolidayPricingForProperty } from "../services/holiday-pricing-template.service";
 import { createMissionControlSnapshotFromAuditEntries } from "../apms/mission-control.mapper";
+import type {
+  GuestJourneyEngineMetrics,
+} from "../apms/mission-control-types";
 import type { AuditEntry } from "../apms/audit-types";
 import { persistAuditEntry } from "../apms/audit-persistence.service";
 import { createDistributionAuditEntry } from "../apms/distribution-audit.mapper";
@@ -1991,6 +1995,78 @@ dashboardPropertiesRouter.get(
           generatedAt: new Date(),
         });
 
+      const guestJourneyMeasurementAt =
+        new Date();
+
+      const guestJourneyRows =
+        await prisma.guestJourney.findMany({
+          where: {
+            reservation: {
+              is: {
+                propertyId: property.id,
+                status:
+                  ReservationStatus.ACTIVE,
+                checkOut: {
+                  gt: guestJourneyMeasurementAt,
+                },
+              },
+            },
+          },
+          select: {
+            currentState: true,
+          },
+        });
+
+      const countGuestJourneyState = (
+        state: GuestJourneyState
+      ) =>
+        guestJourneyRows.filter(
+          (journey) =>
+            journey.currentState === state
+        ).length;
+
+      const activeGuestJourneys =
+        guestJourneyRows.length;
+
+      const readyForArrival =
+        countGuestJourneyState(
+          GuestJourneyState.READY_FOR_ARRIVAL
+        );
+
+      const guestJourneyStateMetrics = {
+        activeReservations:
+          activeGuestJourneys,
+        reservationConfirmed:
+          countGuestJourneyState(
+            GuestJourneyState
+              .RESERVATION_CONFIRMED
+          ),
+        verificationPending:
+          countGuestJourneyState(
+            GuestJourneyState
+              .VERIFICATION_PENDING
+          ),
+        verificationCompleted:
+          countGuestJourneyState(
+            GuestJourneyState
+              .VERIFICATION_COMPLETED
+          ),
+        accessScheduled:
+          countGuestJourneyState(
+            GuestJourneyState
+              .ACCESS_SCHEDULED
+          ),
+        readyForArrival,
+        completionRate:
+          activeGuestJourneys > 0
+            ? Math.round(
+                (readyForArrival /
+                  activeGuestJourneys) *
+                  100
+              )
+            : 100,
+      };
+
 const recentlyResolvedSince = new Date(
   Date.now() - 7 * 24 * 60 * 60 * 1000
 );
@@ -2229,11 +2305,31 @@ const operationalItems =
         secondaryActionUrl: null,
       };
     });
-const snapshot = {
-  ...baseSnapshot,
-  recommendedActions:
-    enrichedRecommendedActions,
-  operationalItems,
+
+      const hostInterventionRequired =
+        operationalItems.filter(
+          (item) =>
+            item.engine ===
+              "Guest Journey" &&
+            item.workflowState ===
+              "ACTION_REQUIRED" &&
+            item.actionRequired === true &&
+            item.responsibleActor ===
+              "HOST"
+        ).length;
+
+      const guestJourneyMetrics:
+        GuestJourneyEngineMetrics = {
+        ...guestJourneyStateMetrics,
+        hostInterventionRequired,
+      };
+
+      const snapshot = {
+        ...baseSnapshot,
+        guestJourneyMetrics,
+        recommendedActions:
+          enrichedRecommendedActions,
+        operationalItems,
    recentAuditEntries:
     persistedActivityAuditEntries.length > 0
       ? persistedActivityAuditEntries.filter(

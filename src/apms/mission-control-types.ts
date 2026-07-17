@@ -181,6 +181,49 @@ export interface MissionControlAction {
   canAutoResolve?: boolean;
 }
 
+export interface GuestJourneyEngineMetrics {
+  /**
+   * Active reservations included in the Guest Journey measurement.
+   */
+  activeReservations: number;
+
+  /**
+   * Active reservations whose journey remains at the initial confirmed state.
+   */
+  reservationConfirmed: number;
+
+  /**
+   * Guests who still need to complete secure pre-check-in.
+   */
+  verificationPending: number;
+
+  /**
+   * Guests who completed verification but whose access is not scheduled yet.
+   */
+  verificationCompleted: number;
+
+  /**
+   * Guests whose digital access has been scheduled.
+   */
+  accessScheduled: number;
+
+  /**
+   * Guests fully ready for arrival.
+   */
+  readyForArrival: number;
+
+  /**
+   * Percentage of active journeys that reached READY_FOR_ARRIVAL.
+   * Range: 0-100.
+   */
+  completionRate: number;
+
+  /**
+   * Open Guest Journey issues that explicitly require host action.
+   */
+  hostInterventionRequired: number;
+}
+
 export interface MissionControlSnapshot {
   /**
    * Property, reservation or organization being summarized.
@@ -211,6 +254,11 @@ export interface MissionControlSnapshot {
    * Health by APMS engine.
    */
   engineHealth: EngineHealth[];
+   
+  /**
+   * Current Guest Journey operational state for this property.
+   */
+  guestJourneyMetrics?: GuestJourneyEngineMetrics;
 
   /**
    * Recent audit entries from APMS engines.
