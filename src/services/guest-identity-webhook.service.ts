@@ -310,7 +310,7 @@ export async function handleGuestIdentityStripeEvent(
     }
 
       const verificationCompletion =
-      await prisma.$transaction(async (tx) => {
+        await prisma.$transaction(async (tx) => {
         const updated =
           await tx.reservation.updateMany({
             where: {
@@ -416,6 +416,8 @@ export async function handleGuestIdentityStripeEvent(
         reservation.reservationNumber,
       readiness,
     }; 
+  }
+
   if (
     reservation.verificationStatus === "COMPLETED" &&
     reservation.verifiedAt
@@ -501,7 +503,7 @@ export async function handleGuestIdentityStripeEvent(
         now: eventAt,
       }
     );
-
+  
   console.warn(
     "[GUEST_IDENTITY] verification requires input",
     {
@@ -548,7 +550,7 @@ export async function reconcileGuestIdentityVerificationSession(
           true,
       },
     });
-
+  
   if (!reservation) {
     throw new Error(
       "GUEST_IDENTITY_RECONCILIATION_RESERVATION_NOT_FOUND"
