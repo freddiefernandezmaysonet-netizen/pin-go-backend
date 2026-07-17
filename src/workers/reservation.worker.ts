@@ -44,7 +44,11 @@ import { NfcCardStatus } from "@prisma/client";
 import { unassignAllNfcForReservation } from "../services/nfc.service";
 import { unassignGuestNfcForReservation } from "../services/nfc.service";
 import { processPendingCleaningConfirmations } from "../services/cleaning-confirmation-dispatch.service";
-import { scheduleGuestJourneyAccess } from "../services/guest-journey.service";
+import {
+  markGuestJourneyReadyForArrival,
+  scheduleGuestJourneyAccess,
+} from "../services/guest-journey.service";
+
 
 console.log("[reservation.worker] BOOT", new Date().toISOString());
 
@@ -965,6 +969,17 @@ async function processCheckins(now: Date) {
             );
           });
         
+        const guestJourneyReadyResult =
+          await prisma.$transaction(
+            async (tx) =>
+              markGuestJourneyReadyForArrival(
+                tx,
+                reservation.id,
+                grant.id,
+                accessReleasedAt
+              )
+          );
+
         log("Guest passcode activated", {
           reservationNumber:
             reservation.reservationNumber ??  
@@ -981,6 +996,10 @@ async function processCheckins(now: Date) {
             guestJourneyAccessResult.currentState,
           guestJourneyTransitioned:
             guestJourneyAccessResult.transitioned,
+          readyForArrivalState:
+            guestJourneyReadyResult.currentState,
+          readyForArrivalTransitioned:
+            guestJourneyReadyResult.transitioned,
         });
 
         // NFC es complementario y solamente aplica

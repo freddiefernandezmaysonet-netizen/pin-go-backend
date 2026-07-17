@@ -632,3 +632,261 @@ export async function scheduleGuestJourneyAccess(
     transitioned: true,
   };
 }
+
+export type MarkGuestJourneyReadyForArrivalResult = {
+  journeyId: string;
+  currentState: GuestJourneyState;
+  transitioned: boolean;
+};
+
+export async function markGuestJourneyReadyForArrival(
+  tx: GuestJourneyTransactionClient,
+  reservationId: string,
+  accessGrantId: string,
+  now: Date = new Date()
+): Promise<MarkGuestJourneyReadyForArrivalResult> {
+  const cleanReservationId = reservationId.trim();
+  const cleanAccessGrantId = accessGrantId.trim();
+
+  if (!cleanReservationId) {
+    throw new Error("reservationId is required");
+  }
+
+  if (!cleanAccessGrantId) {
+    throw new Error("accessGrantId is required");
+  }
+
+  const reservation = await tx.reservation.findUnique({
+    where: {
+      id: cleanReservationId,
+    },
+    select: {
+      id: true,
+      status: true,
+      propertyId: true,
+      checkIn: true,
+      checkOut: true,
+      guestAccessReleaseStatus: true,
+      guestAccessReleasedAt: true,
+      property: {
+        select: {
+          organizationId: true,
+        },
+      },
+    },
+  });
+
+  if (!reservation) {
+    throw new Error(
+      `Cannot mark Guest Journey ready for arrival. Reservation ${cleanReservationId} was not found.`
+    );
+  }
+
+  if (reservation.status !== ReservationStatus.ACTIVE) {
+    throw new Error(
+      `Cannot mark Guest Journey ready for arrival for reservation ${cleanReservationId} with status ${reservation.status}.`
+    );
+  }
+
+  if (
+    reservation.guestAccessReleaseStatus !== "RELEASED" ||
+    !reservation.guestAccessReleasedAt
+  ) {
+    throw new Error(
+      `Cannot mark Guest Journey ready for arrival for reservation ${cleanReservationId} without released access evidence.`
+    );
+  }
+
+  const readyWindowOpensAt = new Date(
+    reservation.checkIn.getTime() -
+      2 * 60 * 60 * 1000
+  );
+
+  if (now.getTime() < readyWindowOpensAt.getTime()) {
+    throw new Error(
+      `Cannot mark Guest Journey ready for arrival before ${readyWindowOpensAt.toISOString()}.`
+    );
+  }
+
+  if (reservation.checkOut.getTime() <= now.getTime()) {
+    throw new Error(
+      `Cannot mark Guest Journey ready for arrival after the stay has ended.`
+    );
+  }
+
+  const accessGrant = await tx.accessGrant.findFirst({
+    where: {
+      id: cleanAccessGrantId,
+      reservationId: reservation.id,
+      type: "GUEST",
+      method: "PASSCODE_TIMEBOUND",
+      status: "ACTIVE",
+    },
+    select: {
+      id: true,
+      ttlockKeyboardPwdId: true,
+      startsAt: true,
+      endsAt: true,
+      secureAccessCode: {
+        select: {
+          id: true,
+        },
+      },
+    },
+  });
+
+  if (
+    !accessGrant ||
+    !accessGrant.ttlockKeyboardPwdId ||
+    !accessGrant.secureAccessCode
+  ) {
+    throw new Error(
+      `Cannot mark Guest Journey ready for arrival without complete active access evidence.`
+    );
+  }
+
+  const journey = await tx.guestJourney.findUnique({
+    where: {
+      reservationId: reservation.id,
+    },
+    select: {
+      id: true,
+      currentState: true,
+    },
+  });
+
+  if (!journey) {
+    throw new Error(
+      `Cannot mark Guest Journey ready for arrival. Journey for reservation ${cleanReservationId} was not found.`
+    );
+  }
+
+  if (
+    journey.currentState ===
+    GuestJourneyState.READY_FOR_ARRIVAL
+  ) {
+    return {
+      journeyId: journey.id,
+      currentState: journey.currentState,
+      transitioned: false,
+    };
+  }
+
+  if (
+    journey.currentState !==
+    GuestJourneyState.ACCESS_SCHEDULED
+  ) {
+    throw new Error(
+      `Invalid Guest Journey transition from ${journey.currentState} to ${GuestJourneyState.READY_FOR_ARRIVAL}.`
+    );
+  }
+
+  const transitionStartedAt = now;
+
+  const transitionResult =
+    await tx.guestJourney.updateMany({
+      where: {
+        id: journey.id,
+        currentState:
+          GuestJourneyState.ACCESS_SCHEDULED,
+      },
+      data: {
+        currentState:
+          GuestJourneyState.READY_FOR_ARRIVAL,
+        stateChangedAt: transitionStartedAt,
+        readyForArrivalAt: transitionStartedAt,
+      },
+    });
+
+  if (transitionResult.count === 0) {
+    const currentJourney =
+      await tx.guestJourney.findUniqueOrThrow({
+        where: {
+          id: journey.id,
+        },
+        select: {
+          id: true,
+          currentState: true,
+        },
+      });
+
+    return {
+      journeyId: currentJourney.id,
+      currentState: currentJourney.currentState,
+      transitioned: false,
+    };
+  }
+
+  const transitionCompletedAt = new Date();
+
+  const auditEntry: AuditEntry = {
+    engine: "Guest Journey",
+    decisionId:
+      `guest-journey:${journey.id}:` +
+      "access-scheduled-to-ready-for-arrival",
+    entityType: "RESERVATION",
+    entityId: reservation.id,
+    eventType: "DECISION_APPLIED",
+    status: "SUCCESS",
+    severity: "INFO",
+    summary:
+      "Guest Journey advanced to ready for arrival.",
+    reason:
+      "The guest access was provisioned and the two-hour arrival readiness window opened.",
+    startedAt: transitionStartedAt,
+    completedAt: transitionCompletedAt,
+    durationMs: Math.max(
+      0,
+      transitionCompletedAt.getTime() -
+        transitionStartedAt.getTime()
+    ),
+    decisions: [
+      {
+        engine: "Guest Journey",
+        rule:
+          "ACCESS_SCHEDULED_TO_READY_FOR_ARRIVAL",
+        label:
+          "Confirm Guest Ready for Arrival",
+        previousValue:
+          GuestJourneyState.ACCESS_SCHEDULED,
+        newValue:
+          GuestJourneyState.READY_FOR_ARRIVAL,
+        applied: true,
+        metadata: {
+          journeyId: journey.id,
+          reservationId: reservation.id,
+          accessGrantId: accessGrant.id,
+          readyWindowOpensAt,
+        },
+      },
+    ],
+    metadata: {
+      journeyId: journey.id,
+      reservationId: reservation.id,
+      propertyId: reservation.propertyId,
+      organizationId:
+        reservation.property.organizationId,
+      accessGrantId: accessGrant.id,
+      accessCodeId:
+        accessGrant.secureAccessCode.id,
+      fromState:
+        GuestJourneyState.ACCESS_SCHEDULED,
+      toState:
+        GuestJourneyState.READY_FOR_ARRIVAL,
+      readyForArrivalAt:
+        transitionStartedAt,
+      readyWindowOpensAt,
+      checkIn: reservation.checkIn,
+      checkOut: reservation.checkOut,
+    },
+  };
+
+  await persistAuditEntry(tx, auditEntry);
+
+  return {
+    journeyId: journey.id,
+    currentState:
+      GuestJourneyState.READY_FOR_ARRIVAL,
+    transitioned: true,
+  };
+}
