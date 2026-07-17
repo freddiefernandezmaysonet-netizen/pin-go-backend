@@ -127,6 +127,7 @@ dashboardGuestAccessSettingsRouter.get(
             name: true,
             maxGuests: true,
             guestAccessMode: true,
+            cleaningNfcEnabled: true,
             guestAgreements: {
               where: {
                 isActive: true,
@@ -172,6 +173,8 @@ dashboardGuestAccessSettingsRouter.get(
           maxGuests: property.maxGuests,
           guestAccessMode:
             property.guestAccessMode,
+          cleaningNfcEnabled:
+            property.cleaningNfcEnabled,
           configured:
             Boolean(activeAgreement) &&
             Number.isInteger(
@@ -215,6 +218,9 @@ dashboardGuestAccessSettingsRouter.put(
       )
         .trim()
         .toUpperCase();
+
+            const cleaningNfcEnabled =
+        req.body?.cleaningNfcEnabled === true;
 
       if (
         requestedMode !==
@@ -269,6 +275,7 @@ dashboardGuestAccessSettingsRouter.put(
                   name: true,
                   maxGuests: true,
                   guestAccessMode: true,
+                  cleaningNfcEnabled: true,
                 },
               });
 
@@ -328,12 +335,14 @@ dashboardGuestAccessSettingsRouter.put(
                 data: {
                   guestAccessMode:
                     requestedMode as GuestAccessMode,
+                  cleaningNfcEnabled,
                 },
                 select: {
                   id: true,
                   name: true,
                   maxGuests: true,
                   guestAccessMode: true,
+                  cleaningNfcEnabled: true,
                 },
               });
 
@@ -404,6 +413,8 @@ dashboardGuestAccessSettingsRouter.put(
           organizationId,
           guestAccessMode:
             result.property.guestAccessMode,
+          cleaningNfcEnabled:
+            result.property.cleaningNfcEnabled,
           agreementVersion:
             result.activeAgreement.version,
           newVersionCreated:
@@ -422,12 +433,14 @@ dashboardGuestAccessSettingsRouter.put(
             result.property.maxGuests,
           guestAccessMode:
             result.property.guestAccessMode,
+          cleaningNfcEnabled:
+            result.property.cleaningNfcEnabled,
           configured: true,
           activeAgreement:
             result.activeAgreement,
-          newVersionCreated:
-            result.newVersionCreated,
         },
+        newVersionCreated:
+          result.newVersionCreated,
       });
     } catch (error: any) {
       const code = String(

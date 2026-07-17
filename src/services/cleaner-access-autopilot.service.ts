@@ -378,7 +378,7 @@ export async function ensureCleanerNfcAccessForConfirmedCleaning(input: {
     });
   }
 
-  if (
+   if (
     reservation.status ===
     ReservationStatus.CANCELLED
   ) {
@@ -394,6 +394,29 @@ export async function ensureCleanerNfcAccessForConfirmedCleaning(input: {
     );
 
     return buildCancelledReservationSkipResult();
+  }
+
+  if (!reservation.property.cleaningNfcEnabled) {
+    console.log(
+      "[CLEANER_ACCESS_AUTOPILOT] skipped because cleaning NFC is disabled",
+      {
+        reservationId: reservation.id,
+        propertyId: reservation.propertyId,
+        confirmationId: confirmation.id,
+        staffMemberId: confirmation.staffMemberId,
+        trigger,
+      }
+    );
+
+    return {
+      ok: true,
+      alreadyReady: false,
+      repaired: false,
+      skipped: true,
+      escalated: false,
+      reason: "CLEANER_NFC_DISABLED_FOR_PROPERTY",
+      error: null,
+    };
   }
 
   const staffMember = await input.prisma.staffMember.findUnique({

@@ -144,6 +144,7 @@ model Property {
   locks                      Lock[]
   organization               Organization                @relation(fields: [organizationId], references: [id])
   guestAccessMode            GuestAccessMode             @default(PASSCODE_ONLY)
+  cleaningNfcEnabled         Boolean                     @default(false)
   automationDevices          PropertyAutomationDevice[]
   automationSettings         PropertyAutomationSettings?
   propertyDevices            PropertyDevice[]
