@@ -198,9 +198,6 @@ const staleProvisioningBefore = new Date(
         where: {
           propertyId,
           isActive: true,
-          ttlockLockId: {
-            not: null,
-          },
         },
         orderBy: {
           createdAt: "asc",
@@ -209,7 +206,6 @@ const staleProvisioningBefore = new Date(
           ttlockLockId: true,
         },
       });
-
       const ttlockLockId = Number(
         lock?.ttlockLockId ?? 0
       );
