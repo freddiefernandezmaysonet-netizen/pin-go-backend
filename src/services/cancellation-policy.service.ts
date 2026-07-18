@@ -4,6 +4,11 @@ import {
   CancellationRefundBasis,
   PrismaClient,
 } from "@prisma/client";
+import {
+  renderCancellationPolicy,
+  type CancellationPolicyModel,
+  type RenderedCancellationPolicy,
+} from "./cancellation-policy-renderer";
 
 const prisma = new PrismaClient();
 
@@ -1184,24 +1189,61 @@ export async function getActiveCancellationPolicyForProperty(
   });
 }
 
+function toCancellationPolicyRendererModel(
+  snapshot: CancellationPolicySnapshot
+): CancellationPolicyModel {
+  return {
+    type: snapshot.type,
+    refundBasis: snapshot.refundBasis,
+    refundRules: snapshot.refundRules.map((rule) => ({
+      minHoursBeforeCheckIn: rule.minHoursBeforeCheckIn,
+      refundPercent: rule.refundPercent,
+    })),
+    nonRefundableScenarios: [...snapshot.nonRefundableScenarios],
+    guestSelfCancellationEnabled:
+      snapshot.guestSelfCancellationEnabled,
+    autoRefundEligibleCancellations:
+      snapshot.autoRefundEligibleCancellations,
+    requireHostApprovalOutsidePolicy:
+      snapshot.requireHostApprovalOutsidePolicy,
+    cleaningFeeRefundable: snapshot.cleaningFeeRefundable,
+    amenitiesRefundable: snapshot.amenitiesRefundable,
+    taxesRefundable: snapshot.taxesRefundable,
+  };
+}
+
+export function renderCancellationPolicySnapshot({
+  snapshot,
+  preferredLanguage,
+  checkIn,
+}: {
+  snapshot: CancellationPolicySnapshot;
+  preferredLanguage?: string | null;
+  checkIn?: Date | string | null;
+}): RenderedCancellationPolicy {
+  return renderCancellationPolicy({
+    policy: toCancellationPolicyRendererModel(snapshot),
+    preferredLanguage,
+    checkIn,
+  });
+}
+
 export function buildGuestCancellationTermsText(
-  policy: {
-    refundBasis?: string | null;
-  }
+  policy: CancellationPolicySnapshot,
+  preferredLanguage?: string | null
 ) {
-  const baseText =
-    "I have reviewed and agree to the cancellation terms shown above, including how any eligible refund is calculated.";
+  const renderedPolicy = renderCancellationPolicySnapshot({
+    snapshot: policy,
+    preferredLanguage,
+  });
 
-  if (
-    policy.refundBasis ===
-      "NIGHTLY_SUBTOTAL" ||
-    policy.refundBasis ===
-      "NIGHTLY_SUBTOTAL_ONLY"
-  ) {
-    return `${baseText} Refund percentages apply to the nightly subtotal only. Other charges such as cleaning fees, service fees, taxes, add-ons, or other non-nightly charges may not be refundable unless required by law or specifically stated in this policy.`;
-  }
-
-  return baseText;
+  return [
+    renderedPolicy.acceptanceText,
+    renderedPolicy.refundBasisDisclosure,
+    renderedPolicy.feeDisclosure,
+  ]
+    .filter(Boolean)
+    .join(" ");
 }
 
 export async function buildCancellationPolicySnapshot(propertyId: string) {

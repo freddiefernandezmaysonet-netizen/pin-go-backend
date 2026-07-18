@@ -10,6 +10,7 @@ import { assertDirectBookingPayoutReady } from "../services/stripe-connect.servi
 import {
   buildCancellationPolicySnapshot,
   buildGuestCancellationTermsText,
+  renderCancellationPolicySnapshot,
   serializeCancellationPolicySnapshotForStripeMetadata,
 } from "../services/cancellation-policy.service";
 import {
@@ -527,13 +528,28 @@ publicBookingRouter.get("/:organizationSlug/:propertySlug", async (req, res) => 
   return res.status(404).json({ ok: false, error: "Public property not found" });
 }
 
-const cancellationPolicy = await buildCancellationPolicySnapshot(property.id);
+const cancellationPolicy =
+  await buildCancellationPolicySnapshot(property.id);
+
+const preferredLanguage =
+  String(req.query.lang ?? "")
+    .trim()
+    .toLowerCase() === "es"
+    ? "es"
+    : "en";
+
+const cancellationPolicyPresentation =
+  renderCancellationPolicySnapshot({
+    snapshot: cancellationPolicy,
+    preferredLanguage,
+  });
 
 return res.json({
   ok: true,
   property: {
     ...property,
     cancellationPolicy,
+    cancellationPolicyPresentation,
   },
 });
   } catch (error: any) {
@@ -755,6 +771,7 @@ publicBookingRouter.post("/create-checkout", async (req, res) => {
    guestName,
    guestEmail,
    guestPhone,
+   preferredLanguage,
    stayNotificationsConsent,
    guestAcceptedCancellationTerms,
    guestAcceptedSecurePreCheckinRequirement,
@@ -762,6 +779,14 @@ publicBookingRouter.post("/create-checkout", async (req, res) => {
    children,
    selectedAmenityIds,
 } = req.body ?? {};    
+    
+    const normalizedPreferredLanguage =
+      String(preferredLanguage ?? "")
+        .trim()
+        .toLowerCase() === "es"
+        ? "es"
+        : "en";
+   
     const adultsCount = Number(adults ?? 1);
     const childrenCount = Number(children ?? 0);
     const totalGuests = adultsCount + childrenCount;
@@ -938,8 +963,11 @@ const totalAmountCents = pricing.totalAmountCents;
       await buildCancellationPolicySnapshot(property.id);
 
    const guestAcceptedCancellationTermsAt = new Date().toISOString();
-const guestAcceptedCancellationTermsText =
-  buildGuestCancellationTermsText(cancellationPolicySnapshot);
+   const guestAcceptedCancellationTermsText =
+     buildGuestCancellationTermsText(
+       cancellationPolicySnapshot,
+       normalizedPreferredLanguage
+     );
 
 const guestAcceptedSecurePreCheckinRequirementAt =
   new Date().toISOString();
@@ -1004,6 +1032,7 @@ const guestAcceptedSecurePreCheckinRequirementText =
 
     const session = await stripe.checkout.sessions.create({
   mode: "payment",
+  locale: normalizedPreferredLanguage,
   customer_email: String(guestEmail).trim(),
   payment_intent_data: paymentIntentData,
       line_items: [
@@ -1023,6 +1052,7 @@ const guestAcceptedSecurePreCheckinRequirementText =
       cancel_url: `${APP_URL}/booking/cancel?organization=${property.organization.slug}`,
       metadata: {
         flow: "direct_booking",
+        preferredLanguage: normalizedPreferredLanguage,
         organizationId: property.organizationId,
         propertyId: property.id,
         checkIn: stayDates.checkIn.toISOString(),
