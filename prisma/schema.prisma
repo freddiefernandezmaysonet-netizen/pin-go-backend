@@ -340,6 +340,7 @@ model Reservation {
   guestName               String
   guestEmail              String?
   guestPhone              String?
+  preferredLanguage       String                   @default("en")
   roomName                String?
   checkIn                 DateTime
   checkOut                DateTime

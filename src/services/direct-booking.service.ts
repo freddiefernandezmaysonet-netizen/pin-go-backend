@@ -486,36 +486,43 @@ export async function handleDirectBookingCheckoutCompleted(
   const organizationId = requiredMetadata(session, "organizationId");
   const guestName = requiredMetadata(session, "guestName");
   const guestEmail = requiredMetadata(session, "guestEmail");
-  const guestPhone = String(session.metadata?.guestPhone ?? "").trim() || null;
-
+  const guestPhone = 
+    String(session.metadata?.guestPhone ?? "").trim() || null;
+  const preferredLanguage =
+    String(session.metadata?.preferredLanguage ?? "")
+      .trim()
+      .toLowerCase() === "es"
+      ? "es"
+      : "en";
+  
   const stayNotificationsConsent =
-  String(session.metadata?.stayNotificationsConsent ?? "").trim() === "true";
+    String(session.metadata?.stayNotificationsConsent ?? "").trim() === "true";
 
-const smsConsent =
-  String(session.metadata?.smsConsent ?? "").trim() === "true";
+  const smsConsent =
+    String(session.metadata?.smsConsent ?? "").trim() === "true";
 
-const consentSource =
-  String(session.metadata?.consentSource ?? "").trim() ||
-  "DIRECT_BOOKING_WEB_FORM";
+  const consentSource =
+    String(session.metadata?.consentSource ?? "").trim() ||
+    "DIRECT_BOOKING_WEB_FORM";
 
-const consentVersion =
-  String(session.metadata?.consentVersion ?? "").trim() ||
-  "stay_notifications_v1";
+  const consentVersion =
+    String(session.metadata?.consentVersion ?? "").trim() ||
+    "stay_notifications_v1";
 
-const cancellationTermsAccepted =
-  String(session.metadata?.guestAcceptedCancellationTerms ?? "").trim() ===
-  "true";
+  const cancellationTermsAccepted =
+    String(session.metadata?.guestAcceptedCancellationTerms ?? "").trim() ===
+    "true";
 
-const cancellationTermsAcceptedAtRaw = optionalMetadata(
-  session,
-  "guestAcceptedCancellationTermsAt"
-);
+  const cancellationTermsAcceptedAtRaw = optionalMetadata(
+    session,
+    "guestAcceptedCancellationTermsAt"
+  );
 
-const cancellationTermsAcceptedAt =
-  cancellationTermsAcceptedAtRaw &&
-  !Number.isNaN(new Date(cancellationTermsAcceptedAtRaw).getTime())
-    ? cancellationTermsAcceptedAtRaw
-    : new Date().toISOString();
+  const cancellationTermsAcceptedAt =
+    cancellationTermsAcceptedAtRaw &&
+    !Number.isNaN(new Date(cancellationTermsAcceptedAtRaw).getTime())
+      ? cancellationTermsAcceptedAtRaw
+      : new Date().toISOString();
 
 const cancellationTermsText = optionalMetadata(
   session,
@@ -722,6 +729,7 @@ const ingestResult = await ingestReservation({
   guestName,
   guestEmail,
   guestPhone,
+  preferredLanguage,
   roomName: property.name,
 
   checkIn: checkInRaw,

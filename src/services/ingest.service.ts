@@ -34,6 +34,7 @@ export type IngestPayload = {
   guestName: string;
   guestEmail?: string | null;
   guestPhone?: string | null;
+  preferredLanguage?: string | null;
   roomName?: string | null;
 
   checkIn: string;
@@ -146,7 +147,8 @@ export async function ingestReservation(p: IngestPayload) {
   const propertyCheckInTime = property?.checkInTime ?? "15:00";
   const propertyCheckOutTime = "11:00";
   const propertyTimeZone = property?.timezone ?? "America/Puerto_Rico";
-
+  
+  
   const checkIn =
     typeof p.checkIn === "string"
       ? isDateOnly(p.checkIn)
@@ -160,6 +162,13 @@ export async function ingestReservation(p: IngestPayload) {
         ? buildLocalDateFromDateOnly(p.checkOut, propertyCheckOutTime, propertyTimeZone)
         : new Date(p.checkOut)
       : new Date(p.checkOut);
+
+   const preferredLanguage =
+    String(p.preferredLanguage ?? "")
+      .trim()
+      .toLowerCase() === "es"
+      ? "es"
+      : "en";
 
   if (isNaN(checkIn.getTime())) throw new Error("Invalid checkIn");
   if (isNaN(checkOut.getTime())) throw new Error("Invalid checkOut");
@@ -201,6 +210,7 @@ export async function ingestReservation(p: IngestPayload) {
       guestName: p.guestName,
       guestEmail: p.guestEmail ?? null,
       guestPhone: p.guestPhone ?? null,
+      preferredLanguage,
       roomName: p.roomName ?? null,
 
       checkIn,
@@ -663,6 +673,7 @@ async function upsertReservation(
     guestName: string;
     guestEmail?: string | null;
     guestPhone?: string | null;
+    preferredLanguage: string;
     roomName?: string | null;
     guestAccessModeSnapshot: GuestAccessMode;
     externalProvider?: string | null;
@@ -770,6 +781,7 @@ async function upsertReservation(
           guestName: input.guestName,
           guestEmail: input.guestEmail ?? null,
           guestPhone: input.guestPhone ?? null,
+          preferredLanguage: input.preferredLanguage,
           roomName: input.roomName ?? null,
 
           externalUpdatedAt: input.externalUpdatedAt ?? undefined,
@@ -809,6 +821,7 @@ async function upsertReservation(
           guestName: input.guestName,
           guestEmail: input.guestEmail ?? null,
           guestPhone: input.guestPhone ?? null,
+          preferredLanguage: input.preferredLanguage,
           roomName: input.roomName ?? null,
 
           externalUpdatedAt: input.externalUpdatedAt ?? undefined,
@@ -846,6 +859,7 @@ async function upsertReservation(
         guestName: input.guestName,
         guestEmail: input.guestEmail ?? null,
         guestPhone: input.guestPhone ?? null,
+        preferredLanguage: input.preferredLanguage,
         roomName: input.roomName ?? null,
 
         externalProvider: input.externalProvider!,
@@ -885,6 +899,7 @@ async function upsertReservation(
       guestName: input.guestName,
       guestEmail: input.guestEmail ?? null,
       guestPhone: input.guestPhone ?? null,
+      preferredLanguage: input.preferredLanguage,
       roomName: input.roomName ?? null,
 
       externalProvider: input.externalProvider ?? null,
@@ -910,6 +925,7 @@ async function upsertReservation(
       guestName: input.guestName,
       guestEmail: input.guestEmail ?? null,
       guestPhone: input.guestPhone ?? null,
+      preferredLanguage: input.preferredLanguage,
       roomName: input.roomName ?? null,
 
       externalUpdatedAt: input.externalUpdatedAt ?? undefined,
