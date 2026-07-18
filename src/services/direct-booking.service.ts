@@ -535,10 +535,53 @@ const cancellationPolicyRefundBasis = optionalMetadata(
   "cancellationPolicyRefundBasis"
 );
 
+const securePreCheckinDisclosureAccepted =
+  String(
+    session.metadata?.guestAcceptedSecurePreCheckinRequirement ?? ""
+  ).trim() === "true";
+
+const securePreCheckinDisclosureAcceptedAtRaw = optionalMetadata(
+  session,
+  "guestAcceptedSecurePreCheckinRequirementAt"
+);
+
+const securePreCheckinDisclosureAcceptedAt =
+  securePreCheckinDisclosureAcceptedAtRaw &&
+  !Number.isNaN(
+    new Date(securePreCheckinDisclosureAcceptedAtRaw).getTime()
+  )
+    ? securePreCheckinDisclosureAcceptedAtRaw
+    : new Date().toISOString();
+
+const securePreCheckinDisclosureText = optionalMetadata(
+  session,
+  "guestAcceptedSecurePreCheckinRequirementText"
+);
+
+const securePreCheckinDisclosureVersion =
+  optionalMetadata(
+    session,
+    "guestAcceptedSecurePreCheckinRequirementVersion"
+  ) ?? "secure_precheckin_disclosure_v1";
+
+const securePreCheckinDisclosureSource =
+  optionalMetadata(
+    session,
+    "guestAcceptedSecurePreCheckinRequirementSource"
+  ) ?? "DIRECT_BOOKING_WEB_FORM";
+
 if (!cancellationTermsAccepted || !cancellationTermsText) {
   throw new Error("DIRECT_BOOKING_CANCELLATION_TERMS_ACK_REQUIRED");
 }
 
+if (
+  !securePreCheckinDisclosureAccepted ||
+  !securePreCheckinDisclosureText
+) {
+  throw new Error(
+    "DIRECT_BOOKING_SECURE_PRECHECKIN_DISCLOSURE_ACK_REQUIRED"
+  );
+}
   const checkIn = parseDateMetadata(session, "checkIn");
   const checkOut = parseDateMetadata(session, "checkOut");
   const checkInRaw = requiredMetadata(session, "checkIn");
@@ -597,6 +640,14 @@ const deserializedCancellationPolicySnapshot =
     session.metadata?.cancellationPolicySnapshot
   );
 
+const securePreCheckinDisclosureAcceptance = {
+  accepted: true,
+  acceptedAt: securePreCheckinDisclosureAcceptedAt,
+  text: securePreCheckinDisclosureText,
+  version: securePreCheckinDisclosureVersion,
+  source: securePreCheckinDisclosureSource,
+};
+
 const cancellationTermsAcceptance = {
   accepted: true,
   acceptedAt: cancellationTermsAcceptedAt,
@@ -608,7 +659,6 @@ const cancellationTermsAcceptance = {
     cancellationPolicyRefundBasis ??
     null,
 };
-
 const cancellationPolicySnapshot = {
   ...(deserializedCancellationPolicySnapshot ?? {}),
   refundBasis: cancellationTermsAcceptance.refundBasis,
@@ -719,10 +769,11 @@ const updatedReservation = await prisma.reservation.update({
   currency: pricingBreakdown.currency,
   stripeCheckoutSessionId: session.id,
   stripePaymentIntentId: paymentIntentId,
-  
+
   cancellationPolicyId,
   cancellationPolicySnapshot: cancellationPolicySnapshot as any,
- 
+  securePreCheckinDisclosureAcceptance:
+    securePreCheckinDisclosureAcceptance as any, 
   stripeConnectedAccountId,
   stripeChargeId: stripeFinancialRefs.stripeChargeId,
   stripeTransferId: stripeFinancialRefs.stripeTransferId,

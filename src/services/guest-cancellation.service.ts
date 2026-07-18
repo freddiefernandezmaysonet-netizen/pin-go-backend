@@ -210,6 +210,21 @@ function buildManageReservationUrl(guestToken: unknown) {
   return `${getAppUrl()}/booking/manage/${encodeURIComponent(token)}`;
 }
 
+function buildSecurePreCheckinUrl(guestToken: unknown) {
+  const token = normalizeGuestToken(guestToken);
+
+  if (!token) return null;
+
+  const publicApiBaseUrl = String(
+    process.env.PUBLIC_API_BASE_URL ??
+      process.env.API_BASE_URL ??
+      "http://localhost:3000"
+  )
+    .trim()
+    .replace(/\/+$/, "");
+
+  return `${publicApiBaseUrl}/guest/verify/${encodeURIComponent(token)}`;
+}
 function getRefundAmountForEmail({
   refund,
   evaluation,
@@ -678,21 +693,33 @@ function serializeGuestCancellationPreview({
   const action = getGuestCancellationAction(evaluation);
 
   return {
-    reservation: {
-      reservationNumber: reservation.reservationNumber,
-      propertyName: reservation.property?.name ?? reservation.roomName,
-      guestName: reservation.guestName,
-      guestEmail: reservation.guestEmail,
-      checkIn: reservation.checkIn,
-      checkOut: reservation.checkOut,
-      status: reservation.status,
-      paymentState: reservation.paymentState,
-      totalAmount: reservation.totalAmount
-        ? Number(reservation.totalAmount)
-        : null,
-      currency: reservation.currency,
-      cancelledAt: reservation.cancelledAt,
-    },
+reservation: {
+  reservationNumber: reservation.reservationNumber,
+  propertyName: reservation.property?.name ?? reservation.roomName,
+  guestName: reservation.guestName,
+  guestEmail: reservation.guestEmail,
+  checkIn: reservation.checkIn,
+  checkOut: reservation.checkOut,
+  status: reservation.status,
+  paymentState: reservation.paymentState,
+  totalAmount: reservation.totalAmount
+    ? Number(reservation.totalAmount)
+    : null,
+  currency: reservation.currency,
+  cancelledAt: reservation.cancelledAt,
+},
+
+securePreCheckin: {
+  url: buildSecurePreCheckinUrl(reservation.guestToken),
+  verificationStatus: reservation.verificationStatus,
+  identityVerificationStatus:
+    reservation.stripeIdentityVerificationStatus,
+  guestAgreementSignedAt: reservation.guestAgreementSignedAt,
+  accessReleaseStatus: reservation.guestAccessReleaseStatus,
+  completed:
+    reservation.verificationStatus === "COMPLETED" &&
+    Boolean(reservation.guestAgreementSignedAt),
+},
     policy: {
       name: snapshot.name,
       type: snapshot.type,

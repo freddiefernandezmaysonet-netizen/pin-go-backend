@@ -20,6 +20,20 @@ import {
 const prisma = new PrismaClient();
 const publicBookingRouter = Router();
 
+const SECURE_PRECHECKIN_DISCLOSURE_VERSION =
+  "secure_precheckin_disclosure_v1";
+
+const SECURE_PRECHECKIN_DISCLOSURE_SOURCE =
+  "DIRECT_BOOKING_WEB_FORM";
+
+const SECURE_PRECHECKIN_DISCLOSURE_TEXT =
+  "Secure Pre-check-in is required before access credentials are released. " +
+  "The primary guest must complete Identity Check and accept the Guest Agreement. " +
+  "Payment may confirm the reservation, but it does not complete these requirements or release access credentials. " +
+  "El Registro Seguro es obligatorio antes de que se liberen las credenciales de acceso. " +
+  "El huésped principal debe completar la Verificación de Identidad y aceptar el Acuerdo del Huésped. " +
+  "El pago puede confirmar la reservación, pero no completa estos requisitos ni libera las credenciales de acceso.";
+
 function parseDate(value: unknown) {
   const date = new Date(String(value ?? ""));
   if (Number.isNaN(date.getTime())) return null;
@@ -743,6 +757,7 @@ publicBookingRouter.post("/create-checkout", async (req, res) => {
    guestPhone,
    stayNotificationsConsent,
    guestAcceptedCancellationTerms,
+   guestAcceptedSecurePreCheckinRequirement,
    adults,
    children,
    selectedAmenityIds,
@@ -781,6 +796,13 @@ if (guestAcceptedCancellationTerms !== true) {
   });
 }
 
+if (guestAcceptedSecurePreCheckinRequirement !== true) {
+  return res.status(400).json({
+    ok: false,
+    error:
+      "Secure Pre-check-in requirement acknowledgment is required.",
+  });
+}
     const property = await prisma.property.findFirst({
       where: {
         id: String(propertyId),
@@ -915,10 +937,15 @@ const totalAmountCents = pricing.totalAmountCents;
     const cancellationPolicySnapshot =
       await buildCancellationPolicySnapshot(property.id);
 
-    const guestAcceptedCancellationTermsAt = new Date().toISOString();
-    const guestAcceptedCancellationTermsText =
-      buildGuestCancellationTermsText(cancellationPolicySnapshot);
+   const guestAcceptedCancellationTermsAt = new Date().toISOString();
+const guestAcceptedCancellationTermsText =
+  buildGuestCancellationTermsText(cancellationPolicySnapshot);
 
+const guestAcceptedSecurePreCheckinRequirementAt =
+  new Date().toISOString();
+
+const guestAcceptedSecurePreCheckinRequirementText =
+  SECURE_PRECHECKIN_DISCLOSURE_TEXT;
     const cancellationPolicySnapshotWithGuestAcceptance = {
       ...cancellationPolicySnapshot,
       guestAcceptedCancellationTerms: true,
@@ -1012,6 +1039,16 @@ const totalAmountCents = pricing.totalAmountCents;
         smsConsent: String(stayNotificationsConsent === true),
         consentSource: "DIRECT_BOOKING_WEB_FORM",
         consentVersion: "stay_notifications_v1",
+
+        guestAcceptedSecurePreCheckinRequirement: "true",
+        guestAcceptedSecurePreCheckinRequirementAt,
+        guestAcceptedSecurePreCheckinRequirementText: toStripeMetadataValue(
+          guestAcceptedSecurePreCheckinRequirementText
+        ),
+        guestAcceptedSecurePreCheckinRequirementVersion:
+          SECURE_PRECHECKIN_DISCLOSURE_VERSION,
+        guestAcceptedSecurePreCheckinRequirementSource:
+          SECURE_PRECHECKIN_DISCLOSURE_SOURCE,
         adults: String(adultsCount),
         children: String(childrenCount),
         totalGuests: String(totalGuests),

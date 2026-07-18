@@ -403,10 +403,11 @@ model Reservation {
    // Direct Booking Protection fee snapshot
   directBookingProtectionFeeAmount       Decimal?    @db.Decimal(10, 2)
   identityVerificationProviderCostAmount Decimal?    @db.Decimal(10, 2)
-  guestAccessModeSnapshot      GuestAccessMode       @default(PASSCODE_ONLY)
-  guestAgreementSnapshot       Json?
-  guestAgreementAcceptance     Json?
-  guestAgreementSignedAt       DateTime?
+  guestAccessModeSnapshot                    GuestAccessMode @default(PASSCODE_ONLY)
+  securePreCheckinDisclosureAcceptance       Json?
+  guestAgreementSnapshot                     Json?
+  guestAgreementAcceptance                   Json?
+  guestAgreementSignedAt                     DateTime?
   guestAccessReleaseStatus     GuestAccessReleaseStatus @default(BLOCKED)
   guestAccessEligibleAt        DateTime?
   guestAccessReleasedAt        DateTime?
