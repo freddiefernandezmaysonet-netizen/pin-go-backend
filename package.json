@@ -14,7 +14,8 @@
     "worker:dynamic-pricing-sync": "tsx src/workers/dynamic-pricing-sync.worker.ts",
     "prisma:migrate": "prisma migrate dev",
     "prisma:studio": "prisma studio",
-    "seed": "tsx prisma/seed/seed.ts"
+    "seed": "tsx prisma/seed/seed.ts",
+    "postinstall": "prisma generate"
   },
   "dependencies": {
     "@prisma/client": "^6.19.2",
