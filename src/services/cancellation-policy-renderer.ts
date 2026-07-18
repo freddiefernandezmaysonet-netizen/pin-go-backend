@@ -582,19 +582,22 @@ function normalizeRules(
 
 function renderRule({
   rule,
-  nextRule,
+  index,
+  rules,
   languagePack,
 }: {
   rule: CancellationPolicyRule;
-  nextRule: CancellationPolicyRule | null;
+  index: number;
+  rules: CancellationPolicyRule[];
   languagePack: CancellationPolicyLanguagePack;
 }): {
   renderedRule: RenderedCancellationRule;
   timelineItem: RenderedCancellationTimelineItem;
 } {
   const minimumHours = normalizeHours(rule.minHoursBeforeCheckIn);
-  const maximumHours = nextRule
-    ? normalizeHours(nextRule.minHoursBeforeCheckIn)
+  const previousRule = index > 0 ? rules[index - 1] : null;
+  const maximumHours = previousRule
+    ? normalizeHours(previousRule.minHoursBeforeCheckIn)
     : null;
 
   const minimumWindow = formatWindow(minimumHours, languagePack);
@@ -611,36 +614,34 @@ function renderRule({
   let windowLabel: string;
   let description: string;
 
-  if (minimumHours <= 0 && maximumHours === null) {
+  if (rules.length === 1 && minimumHours <= 0) {
     windowLabel = languagePack.afterBooking;
     description = languagePack.ruleDescriptions.afterBooking(refundPhrase);
-  } else if (maximumWindow === null) {
-    windowLabel =
-      languagePack.atLeastBeforeCheckIn(minimumWindow);
-
+  } else if (index === 0) {
+    windowLabel = languagePack.atLeastBeforeCheckIn(minimumWindow);
     description = languagePack.ruleDescriptions.atLeast(
       minimumWindow,
       refundPhrase
     );
-  } else if (minimumHours <= 0) {
-    windowLabel =
-      languagePack.lessThanBeforeCheckIn(maximumWindow);
-
+  } else if (minimumHours <= 0 && maximumWindow) {
+    windowLabel = languagePack.lessThanBeforeCheckIn(maximumWindow);
     description = languagePack.ruleDescriptions.lessThan(
       maximumWindow,
       refundPhrase
     );
-  } else {
+  } else if (maximumWindow) {
     windowLabel = languagePack.betweenBeforeCheckIn(
       minimumWindow,
       maximumWindow
     );
-
     description = languagePack.ruleDescriptions.between(
       minimumWindow,
       maximumWindow,
       refundPhrase
     );
+  } else {
+    windowLabel = languagePack.afterBooking;
+    description = languagePack.ruleDescriptions.afterBooking(refundPhrase);
   }
 
   const title = formatRefundTitle(
@@ -753,11 +754,10 @@ export function renderCancellationPolicy({
   const timeline: RenderedCancellationTimelineItem[] = [];
 
   normalizedRules.forEach((rule, index) => {
-    const nextRule = normalizedRules[index + 1] ?? null;
-
     const rendered = renderRule({
       rule,
-      nextRule,
+      index,
+      rules: normalizedRules,
       languagePack,
     });
 
