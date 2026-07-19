@@ -1119,7 +1119,14 @@ const guestAcceptedSecurePreCheckinRequirementText =
           quantity: 1,
         },
       ],
-      success_url: `${APP_URL}/booking/success?organization=${property.organization.slug}`,
+      success_url:
+        `${APP_URL}/booking/success?organization=${encodeURIComponent(
+          property.organization.slug
+        )}&identityCheck=${
+          identityVerificationRequired
+            ? "required"
+            : "optional"
+        }`,
       cancel_url: `${APP_URL}/booking/cancel?organization=${property.organization.slug}`,
       metadata: {
         flow: "direct_booking",
