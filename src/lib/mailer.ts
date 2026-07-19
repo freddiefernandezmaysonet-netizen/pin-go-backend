@@ -56,6 +56,7 @@ type SendDirectBookingGuestConfirmationInput = {
   currency?: string | null;
   manageReservationUrl?: string | null;
   verificationUrl?: string | null;
+  identityVerificationRequired?: boolean;
   cancellationPolicyName?: string | null;
   cancellationPolicyType?: string | null;
   cancellationPolicySummary?: string | null;
@@ -768,6 +769,7 @@ export async function sendDirectBookingGuestConfirmation(
     currency,
     manageReservationUrl,
     verificationUrl,
+    identityVerificationRequired = true,
     cancellationPolicyName,
     cancellationPolicyType,
     cancellationPolicySummary,
@@ -883,8 +885,12 @@ const verificationBlock = `
             "
           >
             ${isSpanish
-              ? "Complete la verificaci&oacute;n de identidad, revise y acepte las reglas de la propiedad y la pol&iacute;tica de cancelaci&oacute;n, y firme el acuerdo del hu&eacute;sped antes de recibir el acceso digital."
-              : "Complete identity verification, review and accept the property rules and cancellation policy, and sign the guest agreement before digital access is released."}
+              ? identityVerificationRequired
+                ? "Complete la verificaci&oacute;n de identidad, revise y acepte las reglas de la propiedad y la pol&iacute;tica de cancelaci&oacute;n, y firme el acuerdo del hu&eacute;sped antes de recibir el acceso digital."
+                : "Revise y acepte las reglas de la propiedad y la pol&iacute;tica de cancelaci&oacute;n, y firme el acuerdo del hu&eacute;sped antes de recibir el acceso digital. Esta reservaci&oacute;n no requiere documento ni selfie."
+              : identityVerificationRequired
+                ? "Complete identity verification, review and accept the property rules and cancellation policy, and sign the guest agreement before digital access is released."
+                : "Review and accept the property rules and cancellation policy, and sign the guest agreement before digital access is released. This reservation does not require a document or selfie."}
           </p>
         </div>
 
@@ -912,7 +918,15 @@ const verificationBlock = `
             font-size:13px;
           "
         >
-          ${isSpanish ? "Enlace seguro de verificaci&oacute;n" : "Secure verification link"}:
+          ${
+            isSpanish
+              ? identityVerificationRequired
+                ? "Enlace seguro de verificaci&oacute;n"
+                : "Enlace de registro seguro"
+              : identityVerificationRequired
+                ? "Secure verification link"
+                : "Secure registration link"
+          }:
           <br />
 
           <a

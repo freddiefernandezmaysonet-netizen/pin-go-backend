@@ -163,6 +163,7 @@ export async function sendGuestVerificationReminder(
         preferredLanguage: true,
         guestToken: true,
         externalRaw: true,
+        guestAgreementSnapshot: true,
         verificationStatus: true,
         guestJourney: {
           select: {
@@ -189,6 +190,23 @@ export async function sendGuestVerificationReminder(
   const language = resolveGuestLanguage(
     reservation.preferredLanguage
   );
+
+  const guestAgreementSnapshot =
+    reservation.guestAgreementSnapshot &&
+    typeof reservation.guestAgreementSnapshot ===
+      "object" &&
+    !Array.isArray(
+      reservation.guestAgreementSnapshot
+    )
+      ? (reservation.guestAgreementSnapshot as Record<
+          string,
+          unknown
+        >)
+      : null;
+
+  const identityVerificationRequired =
+    guestAgreementSnapshot
+      ?.requiresIdentityVerification !== false;
 
   if (
     reservation.status !==
@@ -219,9 +237,22 @@ export async function sendGuestVerificationReminder(
     };
   }
 
+  if (!identityVerificationRequired) {
+    return {
+      reservationId: reservation.id,
+      reminderStatus: "SKIPPED",
+      emailStatus: "SKIPPED",
+      smsStatus: "SKIPPED",
+      skippedReason:
+        "IDENTITY_VERIFICATION_NOT_REQUIRED",
+    };
+  }
+
   if (
     reservation.verificationStatus ===
-    "COMPLETED"
+      "COMPLETED" ||
+    reservation.verificationStatus ===
+      "NOT_REQUIRED"
   ) {
     return {
       reservationId: reservation.id,

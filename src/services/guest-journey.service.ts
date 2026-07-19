@@ -222,6 +222,8 @@ export async function completeGuestJourneyVerification(
       propertyId: true,
       verificationStatus: true,
       verifiedAt: true,
+      guestAgreementSnapshot: true,
+      guestAgreementSignedAt: true,
       property: {
         select: {
           organizationId: true,
@@ -242,14 +244,31 @@ export async function completeGuestJourneyVerification(
     );
   }
 
-  if (
-    reservation.verificationStatus !== "COMPLETED" ||
-    !reservation.verifiedAt
-  ) {
+  const agreementSnapshot =
+    reservation.guestAgreementSnapshot &&
+    typeof reservation.guestAgreementSnapshot === "object" &&
+    !Array.isArray(reservation.guestAgreementSnapshot)
+      ? (reservation.guestAgreementSnapshot as Record<string, unknown>)
+      : null;
+  const requiresIdentityVerification =
+    agreementSnapshot?.requiresIdentityVerification !== false;
+  const identityCompleted =
+    reservation.verificationStatus === "COMPLETED" &&
+    Boolean(reservation.verifiedAt);
+  const identityNotRequired =
+    !requiresIdentityVerification &&
+    reservation.verificationStatus === "NOT_REQUIRED" &&
+    Boolean(reservation.guestAgreementSignedAt);
+
+  if (!identityCompleted && !identityNotRequired) {
     throw new Error(
       `Cannot complete Guest Journey verification for reservation ${cleanReservationId} without completed verification evidence.`
     );
   }
+
+  const verificationCompletedAt = identityCompleted
+    ? reservation.verifiedAt!
+    : reservation.guestAgreementSignedAt!;
 
   const journey = await tx.guestJourney.findUnique({
     where: {
@@ -297,7 +316,7 @@ export async function completeGuestJourneyVerification(
     data: {
       currentState: GuestJourneyState.VERIFICATION_COMPLETED,
       stateChangedAt: transitionStartedAt,
-      verificationCompletedAt: reservation.verifiedAt,
+      verificationCompletedAt,
     },
   });
 
@@ -335,7 +354,9 @@ export async function completeGuestJourneyVerification(
     summary:
       "Guest Journey advanced to verification completed.",
     reason:
-      "The guest successfully completed the required identity verification.",
+      identityCompleted
+        ? "The guest successfully completed the required identity verification."
+        : "Identity verification was not required by the reservation agreement snapshot, and the guest completed the required agreements.",
     startedAt: transitionStartedAt,
     completedAt: transitionCompletedAt,
     durationMs:
@@ -356,6 +377,8 @@ export async function completeGuestJourneyVerification(
           journeyId: journey.id,
           reservationId: reservation.id,
           verifiedAt: reservation.verifiedAt,
+          identityVerificationRequired: requiresIdentityVerification,
+          identityVerificationStatus: reservation.verificationStatus,
         },
       },
     ],
@@ -370,6 +393,8 @@ export async function completeGuestJourneyVerification(
       toState:
         GuestJourneyState.VERIFICATION_COMPLETED,
       verifiedAt: reservation.verifiedAt,
+      identityVerificationRequired: requiresIdentityVerification,
+      identityVerificationStatus: reservation.verificationStatus,
     },
   };
 

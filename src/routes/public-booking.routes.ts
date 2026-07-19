@@ -6,7 +6,9 @@ import {
 } from "../services/availability.service";
 import stripe from "../billing/stripe";
 import { calculateDirectBookingPricing } from "../services/direct-booking-pricing.service";
+import { calculateDirectBookingConnectFee } from "../services/direct-booking-connect-fee.service";
 import { assertDirectBookingPayoutReady } from "../services/stripe-connect.service";
+import { getActivePropertyGuestAgreement } from "../services/guest-agreement.service";
 import {
   buildCancellationPolicySnapshot,
   buildGuestCancellationTermsText,
@@ -27,13 +29,25 @@ const SECURE_PRECHECKIN_DISCLOSURE_VERSION =
 const SECURE_PRECHECKIN_DISCLOSURE_SOURCE =
   "DIRECT_BOOKING_WEB_FORM";
 
-const SECURE_PRECHECKIN_DISCLOSURE_TEXT =
-  "Secure Pre-check-in is required before access credentials are released. " +
-  "The primary guest must complete Identity Check and accept the Guest Agreement. " +
-  "Payment may confirm the reservation, but it does not complete these requirements or release access credentials. " +
-  "El Registro Seguro es obligatorio antes de que se liberen las credenciales de acceso. " +
-  "El huésped principal debe completar la Verificación de Identidad y aceptar el Acuerdo del Huésped. " +
-  "El pago puede confirmar la reservación, pero no completa estos requisitos ni libera las credenciales de acceso.";
+function buildSecurePrecheckinDisclosureText(
+  identityVerificationRequired: boolean
+) {
+  const identityRequirement = identityVerificationRequired
+    ? "The primary guest must complete Identity Check and accept the Guest Agreement. "
+    : "The primary guest must accept the Guest Agreement. Identity Check is not required for this reservation. ";
+  const identityRequirementEs = identityVerificationRequired
+    ? "El huésped principal debe completar la Verificación de Identidad y aceptar el Acuerdo del Huésped. "
+    : "El huésped principal debe aceptar el Acuerdo del Huésped. Esta reservación no requiere Verificación de Identidad. ";
+
+  return (
+    "Secure Pre-check-in is required before access credentials are released. " +
+    identityRequirement +
+    "Payment may confirm the reservation, but it does not complete these requirements or release access credentials. " +
+    "El Registro Seguro es obligatorio antes de que se liberen las credenciales de acceso. " +
+    identityRequirementEs +
+    "El pago puede confirmar la reservación, pero no completa estos requisitos ni libera las credenciales de acceso."
+  );
+}
 
 function parseDate(value: unknown) {
   const date = new Date(String(value ?? ""));
@@ -277,6 +291,18 @@ function getDirectBookingPlatformFeeCents(totalAmountCents: number) {
   const feeCents = percentFeeCents + fixedCents;
 
   return Math.min(Math.max(0, feeCents), totalAmountCents);
+}
+
+function getIdentityCheckFeeCents() {
+  const rawAmount = Number(
+    process.env.DIRECT_BOOKING_PROTECTION_FEE_AMOUNT ?? "2.50"
+  );
+
+  if (!Number.isFinite(rawAmount) || rawAmount < 0) {
+    throw new Error("DIRECT_BOOKING_PROTECTION_FEE_AMOUNT_INVALID");
+  }
+
+  return Math.round(rawAmount * 100);
 }
 
 function toMoneyFromCents(cents: number) {
@@ -531,6 +557,12 @@ publicBookingRouter.get("/:organizationSlug/:propertySlug", async (req, res) => 
 const cancellationPolicy =
   await buildCancellationPolicySnapshot(property.id);
 
+const activeGuestAgreement =
+  await getActivePropertyGuestAgreement(
+    prisma,
+    property.id
+  );
+
 const preferredLanguage =
   String(req.query.lang ?? "")
     .trim()
@@ -550,6 +582,12 @@ return res.json({
     ...property,
     cancellationPolicy,
     cancellationPolicyPresentation,
+    guestAccessSettings: {
+      configured: Boolean(activeGuestAgreement),
+      requiresIdentityVerification:
+        activeGuestAgreement
+          ?.requiresIdentityVerification ?? true,
+    },
   },
 });
   } catch (error: any) {
@@ -962,6 +1000,21 @@ const totalAmountCents = pricing.totalAmountCents;
     const cancellationPolicySnapshot =
       await buildCancellationPolicySnapshot(property.id);
 
+    const activeGuestAgreement =
+      await getActivePropertyGuestAgreement(prisma, property.id);
+
+    if (!activeGuestAgreement) {
+      return res.status(409).json({
+        ok: false,
+        error: "GUEST_ACCESS_SETTINGS_NOT_CONFIGURED",
+        message:
+          "Secure Guest Access must be configured before this property can accept Direct Booking payments.",
+      });
+    }
+
+    const identityVerificationRequired =
+      activeGuestAgreement.requiresIdentityVerification;
+
    const guestAcceptedCancellationTermsAt = new Date().toISOString();
    const guestAcceptedCancellationTermsText =
      buildGuestCancellationTermsText(
@@ -973,7 +1026,9 @@ const guestAcceptedSecurePreCheckinRequirementAt =
   new Date().toISOString();
 
 const guestAcceptedSecurePreCheckinRequirementText =
-  SECURE_PRECHECKIN_DISCLOSURE_TEXT;
+  buildSecurePrecheckinDisclosureText(
+    identityVerificationRequired
+  );
     const cancellationPolicySnapshotWithGuestAcceptance = {
       ...cancellationPolicySnapshot,
       guestAcceptedCancellationTerms: true,
@@ -1011,10 +1066,26 @@ const guestAcceptedSecurePreCheckinRequirementText =
       throw error;
     }
 
-    const platformFeeAmountCents =
+    const basePlatformFeeAmountCents =
       getDirectBookingPlatformFeeCents(totalAmountCents);
-    const hostPayoutAmountCents = totalAmountCents - platformFeeAmountCents;
+    const connectFee = calculateDirectBookingConnectFee({
+      totalAmountCents,
+      basePlatformFeeAmountCents,
+      identityCheckFeeAmountCents: identityVerificationRequired
+        ? getIdentityCheckFeeCents()
+        : 0,
+    });
+    const directBookingProtectionFeeAmountCents =
+      connectFee.identityCheckFeeAmountCents;
+    const platformFeeAmountCents = connectFee.platformFeeAmountCents;
+    const hostPayoutAmountCents = connectFee.hostPayoutAmountCents;
 
+    const basePlatformFeeAmount = toMoneyFromCents(
+      basePlatformFeeAmountCents
+    );
+    const directBookingProtectionFeeAmount = toMoneyFromCents(
+      directBookingProtectionFeeAmountCents
+    );
     const platformFeeAmount = toMoneyFromCents(platformFeeAmountCents);
     const hostPayoutAmount = toMoneyFromCents(hostPayoutAmountCents);
 
@@ -1048,7 +1119,14 @@ const guestAcceptedSecurePreCheckinRequirementText =
           quantity: 1,
         },
       ],
-      success_url: `${APP_URL}/booking/success?organization=${property.organization.slug}`,
+      success_url:
+        `${APP_URL}/booking/success?organization=${encodeURIComponent(
+          property.organization.slug
+        )}&identityCheck=${
+          identityVerificationRequired
+            ? "required"
+            : "optional"
+        }`,
       cancel_url: `${APP_URL}/booking/cancel?organization=${property.organization.slug}`,
       metadata: {
         flow: "direct_booking",
@@ -1057,8 +1135,6 @@ const guestAcceptedSecurePreCheckinRequirementText =
         propertyId: property.id,
         checkIn: stayDates.checkIn.toISOString(),
         checkOut: stayDates.checkOut.toISOString(),
-        checkInDate: checkInDateKey,
-        checkOutDate: checkOutDateKey,
         propertyTimezone: stayDates.timeZone,
         propertyCheckInTime: stayDates.checkInTime,
         propertyCheckOutTime: stayDates.checkOutTime,
@@ -1066,7 +1142,6 @@ const guestAcceptedSecurePreCheckinRequirementText =
         guestEmail: String(guestEmail).trim(),
         guestPhone: guestPhone ? String(guestPhone).trim() : "",
         stayNotificationsConsent: String(stayNotificationsConsent === true),
-        smsConsent: String(stayNotificationsConsent === true),
         consentSource: "DIRECT_BOOKING_WEB_FORM",
         consentVersion: "stay_notifications_v1",
 
@@ -1089,6 +1164,11 @@ const guestAcceptedSecurePreCheckinRequirementText =
         totalAmount: String(pricing.totalAmount),
         
         stripeConnectedAccountId: connectedAccountId,
+        basePlatformFeeAmount: String(basePlatformFeeAmount),
+        directBookingProtectionFeeAmount: String(
+          directBookingProtectionFeeAmount
+        ),
+        identityVerificationRequired: String(identityVerificationRequired),
         platformFeeAmount: String(platformFeeAmount),
         hostPayoutAmount: String(hostPayoutAmount),
         hostPayoutStatus: "ROUTED_TO_CONNECT",

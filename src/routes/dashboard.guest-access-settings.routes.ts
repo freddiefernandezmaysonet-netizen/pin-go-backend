@@ -219,8 +219,21 @@ dashboardGuestAccessSettingsRouter.put(
         .trim()
         .toUpperCase();
 
-            const cleaningNfcEnabled =
+      const cleaningNfcEnabled =
         req.body?.cleaningNfcEnabled === true;
+
+      if (
+        req.body?.requiresIdentityVerification !== undefined &&
+        typeof req.body.requiresIdentityVerification !== "boolean"
+      ) {
+        return res.status(400).json({
+          ok: false,
+          error: "IDENTITY_VERIFICATION_REQUIREMENT_INVALID",
+        });
+      }
+
+      const requiresIdentityVerification =
+        req.body?.requiresIdentityVerification !== false;
 
       if (
         requestedMode !==
@@ -322,7 +335,7 @@ dashboardGuestAccessSettingsRouter.put(
               ) &&
               activeAgreement
                 ?.requiresIdentityVerification ===
-                true &&
+                requiresIdentityVerification &&
               activeAgreement
                 ?.requiresAgreementSignature ===
                 true;
@@ -388,7 +401,7 @@ dashboardGuestAccessSettingsRouter.put(
                     rules,
                     guestFacingSummary,
                     requiresIdentityVerification:
-                      true,
+                      requiresIdentityVerification,
                     requiresAgreementSignature:
                       true,
                     isActive: true,
@@ -415,6 +428,8 @@ dashboardGuestAccessSettingsRouter.put(
             result.property.guestAccessMode,
           cleaningNfcEnabled:
             result.property.cleaningNfcEnabled,
+          requiresIdentityVerification:
+            result.activeAgreement.requiresIdentityVerification,
           agreementVersion:
             result.activeAgreement.version,
           newVersionCreated:

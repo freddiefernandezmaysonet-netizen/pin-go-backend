@@ -57,6 +57,7 @@ export async function createGuestIdentityVerificationSession(
 
       verificationStatus: true,
       verifiedAt: true,
+      guestAgreementSnapshot: true,
 
       identityVerificationConsentAt: true,
       identityDeclaredLegalName: true,
@@ -89,6 +90,28 @@ export async function createGuestIdentityVerificationSession(
 
   if (reservation.checkOut.getTime() <= Date.now()) {
     throw new Error("GUEST_IDENTITY_STAY_ALREADY_ENDED");
+  }
+
+  const guestAgreementSnapshot =
+    reservation.guestAgreementSnapshot &&
+    typeof reservation.guestAgreementSnapshot ===
+      "object" &&
+    !Array.isArray(
+      reservation.guestAgreementSnapshot
+    )
+      ? (reservation.guestAgreementSnapshot as Record<
+          string,
+          unknown
+        >)
+      : null;
+
+  if (
+    guestAgreementSnapshot
+      ?.requiresIdentityVerification === false
+  ) {
+    throw new Error(
+      "GUEST_IDENTITY_VERIFICATION_NOT_REQUIRED"
+    );
   }
 
   if (!reservation.identityVerificationConsentAt) {
