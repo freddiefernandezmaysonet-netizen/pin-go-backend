@@ -336,10 +336,12 @@ export async function sendGuestPasscodeSms(
   const language = resolveGuestLanguage(reservation?.preferredLanguage);
 
   const body = buildGuestPasscodeSmsBody({
-    guestName,
+    ...(guestName !== undefined ? { guestName } : {}),
     code: String(code),
     validUntil,
-    timezone: reservation?.property?.timezone,
+    ...(reservation?.property?.timezone !== undefined
+      ? { timezone: reservation.property.timezone }
+      : {}),
     language,
   });
 
