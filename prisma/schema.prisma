@@ -354,6 +354,7 @@ model Reservation {
   stripeChargeId           String?
   stripeTransferId         String?
   stripeApplicationFeeId   String?
+  basePlatformFeeAmount    Decimal?                @db.Decimal(10,2)
   platformFeeAmount        Decimal?                @db.Decimal(10,2)
   hostPayoutAmount         Decimal?                @db.Decimal(10,2)
   hostPayoutStatus         HostPayoutStatus        @default(NOT_APPLICABLE)
@@ -403,6 +404,7 @@ model Reservation {
 
    // Direct Booking Protection fee snapshot
   directBookingProtectionFeeAmount       Decimal?    @db.Decimal(10, 2)
+  identityVerificationRequiredSnapshot   Boolean?
   identityVerificationProviderCostAmount Decimal?    @db.Decimal(10, 2)
   guestAccessModeSnapshot                    GuestAccessMode @default(PASSCODE_ONLY)
   securePreCheckinDisclosureAcceptance       Json?
