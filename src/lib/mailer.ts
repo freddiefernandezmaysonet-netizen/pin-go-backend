@@ -1586,12 +1586,15 @@ export async function sendGuestAccessPasscodeEmail(
     validFrom,
     validUntil,
     propertyTimeZone,
+    preferredLanguage,
   } = input;
+  const language = resolveGuestLanguage(preferredLanguage);
+  const isSpanish = language === "es";
 
   const safeReservationNumber =
     escapeHtml(reservationNumber);
   const safeGuestName = escapeHtml(
-    guestName?.trim() || "Guest"
+    guestName?.trim() || (isSpanish ? "Huésped" : "Guest")
   );
   const safePropertyName =
     escapeHtml(propertyName);
@@ -1628,34 +1631,34 @@ export async function sendGuestAccessPasscodeEmail(
       from: getEmailFrom(),
       to,
       subject:
-        `Your Pin&Go access is ready - Reservation #${reservationNumber}`,
+        `${isSpanish ? "Su acceso Pin&Go está listo - Reservación" : "Your Pin&Go access is ready - Reservation"} #${reservationNumber}`,
       html: `
         <div style="font-family:Arial,sans-serif;color:#111827;line-height:1.6;max-width:680px;margin:0 auto;">
           <div style="background:linear-gradient(135deg,#020617,#1d4ed8);color:#ffffff;border-radius:18px;padding:24px;margin-bottom:20px;">
             <p style="margin:0 0 8px;font-size:12px;letter-spacing:0.08em;text-transform:uppercase;font-weight:800;">
-              Pin&Go Secure Access
+              ${isSpanish ? "Acceso seguro Pin&Go" : "Pin&Go Secure Access"}
             </p>
 
             <h1 style="margin:0;font-size:28px;line-height:1.15;">
-              Your access is ready
+              ${isSpanish ? "Su acceso está listo" : "Your access is ready"}
             </h1>
 
             <p style="margin:10px 0 0;color:#dbeafe;font-weight:700;">
-              Reservation #${safeReservationNumber}
+              ${isSpanish ? "Reservación" : "Reservation"} #${safeReservationNumber}
             </p>
           </div>
 
-          <p>Hi ${safeGuestName},</p>
+          <p>${isSpanish ? "Hola" : "Hi"} ${safeGuestName},</p>
 
           <p>
-            Your temporary access for
+            ${isSpanish ? "Su acceso temporal para" : "Your temporary access for"}
             <strong>${safePropertyName}</strong>
-            is ready.
+            ${isSpanish ? "está listo." : "is ready."}
           </p>
 
           <div style="background:#f8fafc;border:1px solid #cbd5e1;border-radius:16px;padding:20px;margin:22px 0;text-align:center;">
             <p style="margin:0 0 8px;color:#475569;font-size:13px;font-weight:700;text-transform:uppercase;letter-spacing:0.08em;">
-              Access code
+              ${isSpanish ? "Código de acceso" : "Access code"}
             </p>
 
             <p style="margin:0;font-size:34px;font-weight:800;letter-spacing:0.16em;color:#0f172a;">
@@ -1665,62 +1668,34 @@ export async function sendGuestAccessPasscodeEmail(
 
           <div style="background:#eff6ff;border:1px solid #bfdbfe;border-radius:14px;padding:16px;margin:20px 0;">
             <p style="margin:0 0 8px;">
-              <strong>Valid from:</strong>
+              <strong>${isSpanish ? "Válido desde" : "Valid from"}:</strong>
               ${formatBookingDateTime(
                 validFrom,
-                dateTimeZone
+                dateTimeZone,
+                language
               )}
             </p>
 
             <p style="margin:0 0 8px;">
-              <strong>Valid until:</strong>
+              <strong>${isSpanish ? "Válido hasta" : "Valid until"}:</strong>
               ${formatBookingDateTime(
                 validUntil,
-                dateTimeZone
+                dateTimeZone,
+                language
               )}
             </p>
 
             <p style="margin:0;">
-              Enter the code on the keypad and press
+              ${isSpanish ? "Ingrese el código en el teclado y presione" : "Enter the code on the keypad and press"}
               <strong>${safeUnlockKey}</strong>
-              to unlock.
+              ${isSpanish ? "para abrir." : "to unlock."}
             </p>
           </div>
 
           <p>
-            This access credential is personal. Do not
-            share it with anyone who is not included in
-            your reservation.
-          </p>
-
-          <hr style="border:none;border-top:1px solid #e5e7eb;margin:28px 0;" />
-
-          <h2 style="margin-bottom:8px;">
-            Su acceso está listo
-          </h2>
-
-          <p>Hola ${safeGuestName},</p>
-
-          <p>
-            Su código temporal para
-            <strong>${safePropertyName}</strong>
-            es:
-          </p>
-
-          <p style="font-size:30px;font-weight:800;letter-spacing:0.14em;color:#0f172a;">
-            ${safePasscode}
-          </p>
-
-          <p>
-            Ingrese el código en el teclado y presione
-            <strong>${safeUnlockKey}</strong>
-            para abrir.
-          </p>
-
-          <p>
-            Esta credencial es personal y no debe
-            compartirse con personas que no estén
-            incluidas en su reservación.
+            ${isSpanish
+              ? "Esta credencial es personal y no debe compartirse con personas que no estén incluidas en su reservación."
+              : "This access credential is personal. Do not share it with anyone who is not included in your reservation."}
           </p>
 
           <p>
