@@ -242,20 +242,24 @@ function formatBookingAmount(
   }).format(Number(amount));
 }
 
-function formatRefundBasis(value?: string | null) {
+function formatRefundBasis(
+  value?: string | null,
+  language: GuestLanguage = "en"
+) {
+  const isSpanish = language === "es";
   if (value === "NIGHTLY_SUBTOTAL") {
-    return "Nightly subtotal only";
+    return isSpanish ? "Solo subtotal de noches" : "Nightly subtotal only";
   }
 
   if (value === "NIGHTLY_PLUS_CLEANING") {
-    return "Nightly subtotal + cleaning fee";
+    return isSpanish ? "Subtotal de noches + limpieza" : "Nightly subtotal + cleaning fee";
   }
 
   if (value === "CUSTOM") {
-    return "Custom refundable base";
+    return isSpanish ? "Base reembolsable personalizada" : "Custom refundable base";
   }
 
-  return "Total reservation amount";
+  return isSpanish ? "Importe total de la reservación" : "Total reservation amount";
 }
 
 function formatCancellationWindow(hours: number) {
@@ -272,28 +276,32 @@ function formatCancellationWindow(hours: number) {
   return `${hours} hour${hours === 1 ? "" : "s"} or more before check-in`;
 }
 
-function getRefundExecutionTitle(value?: string | null) {
+function getRefundExecutionTitle(
+  value?: string | null,
+  language: GuestLanguage = "en"
+) {
+  const isSpanish = language === "es";
   if (value === "FULL_REFUND_EXECUTED") {
-    return "Refund processed";
+    return isSpanish ? "Reembolso procesado" : "Refund processed";
   }
 
   if (value === "PARTIAL_REFUND_EXECUTED") {
-    return "Partial refund processed";
+    return isSpanish ? "Reembolso parcial procesado" : "Partial refund processed";
   }
 
   if (value === "NO_REFUND_DUE") {
-    return "Reservation cancelled with no refund";
+    return isSpanish ? "Reservación cancelada sin reembolso" : "Reservation cancelled with no refund";
   }
 
   if (value === "REFUND_PENDING_PROPERTY_WORKFLOW") {
-    return "Refund pending property workflow";
+    return isSpanish ? "Reembolso pendiente del proceso de la propiedad" : "Refund pending property workflow";
   }
 
   if (value === "HOST_APPROVAL_REQUIRED") {
-    return "Host approval required";
+    return isSpanish ? "Se requiere aprobación del anfitrión" : "Host approval required";
   }
 
-  return "Cancellation recorded";
+  return isSpanish ? "Cancelación registrada" : "Cancellation recorded";
 }
 
 function getRefundExecutionBody({
@@ -301,32 +309,45 @@ function getRefundExecutionBody({
   refundAmount,
   currency,
   refundBasis,
+  language = "en",
 }: {
   refundExecution?: string | null;
   refundAmount?: number | null;
   currency?: string | null;
   refundBasis?: string | null;
+  language?: GuestLanguage;
 }) {
-  const amountLabel = formatBookingAmount(refundAmount, currency);
-  const basisLabel = formatRefundBasis(refundBasis);
+  const isSpanish = language === "es";
+  const amountLabel = formatBookingAmount(refundAmount, currency, language);
+  const basisLabel = formatRefundBasis(refundBasis, language);
 
   if (refundExecution === "FULL_REFUND_EXECUTED") {
-    return `Pin&Go cancelled the reservation and submitted the eligible refund of ${amountLabel} through Stripe.`;
+    return isSpanish
+      ? `Pin&Go canceló la reservación y envió el reembolso elegible de ${amountLabel} mediante Stripe.`
+      : `Pin&Go cancelled the reservation and submitted the eligible refund of ${amountLabel} through Stripe.`;
   }
 
   if (refundExecution === "PARTIAL_REFUND_EXECUTED") {
-    return `Pin&Go cancelled the reservation and submitted the eligible partial refund of ${amountLabel} through Stripe. The refund was calculated using: ${basisLabel}.`;
+    return isSpanish
+      ? `Pin&Go canceló la reservación y envió el reembolso parcial elegible de ${amountLabel} mediante Stripe. El cálculo utilizó: ${basisLabel}.`
+      : `Pin&Go cancelled the reservation and submitted the eligible partial refund of ${amountLabel} through Stripe. The refund was calculated using: ${basisLabel}.`;
   }
 
   if (refundExecution === "NO_REFUND_DUE") {
-    return "Pin&Go cancelled the reservation. No refund is due according to the cancellation policy accepted at booking.";
+    return isSpanish
+      ? "Pin&Go canceló la reservación. No corresponde un reembolso según la política aceptada al reservar."
+      : "Pin&Go cancelled the reservation. No refund is due according to the cancellation policy accepted at booking.";
   }
 
   if (refundExecution === "REFUND_PENDING_PROPERTY_WORKFLOW") {
-    return `Pin&Go cancelled the reservation and recorded the eligible refund amount of ${amountLabel}. The property refund workflow will complete the next step.`;
+    return isSpanish
+      ? `Pin&Go canceló la reservación y registró el reembolso elegible de ${amountLabel}. El proceso de la propiedad completará el próximo paso.`
+      : `Pin&Go cancelled the reservation and recorded the eligible refund amount of ${amountLabel}. The property refund workflow will complete the next step.`;
   }
 
-  return "Pin&Go recorded the cancellation according to the reservation cancellation policy.";
+  return isSpanish
+    ? "Pin&Go registró la cancelación según la política de la reservación."
+    : "Pin&Go recorded the cancellation according to the reservation cancellation policy.";
 }
 
 function renderManageReservationBlock(
@@ -1300,22 +1321,29 @@ export async function sendDirectBookingGuestCancellationEmail(
     refundBasis,
     nonRefundableAmount,
     manageReservationUrl,
+    preferredLanguage,
   } = input;
+  const language = resolveGuestLanguage(preferredLanguage);
+  const isSpanish = language === "es";
 
   const safeReservationNumber = escapeHtml(reservationNumber);
-  const safeName = escapeHtml(guestName?.trim() || "there");
+  const safeName = escapeHtml(
+    guestName?.trim() || (isSpanish ? "Huésped" : "there")
+  );
   const safePropertyName = escapeHtml(propertyName);
   const dateTimeZone = normalizePropertyTimeZone(propertyTimeZone);
   const safeStripeRefundId = stripeRefundId ? escapeHtml(stripeRefundId) : null;
-  const title = getRefundExecutionTitle(refundExecution);
+  const title = getRefundExecutionTitle(refundExecution, language);
   const body = getRefundExecutionBody({
     refundExecution,
     refundAmount,
     currency,
     refundBasis,
+    language,
   });
   const manageReservationBlock = renderManageReservationBlock(
-    manageReservationUrl
+    manageReservationUrl,
+    language
   );
 
   if (!resend) {
@@ -1335,84 +1363,66 @@ export async function sendDirectBookingGuestCancellationEmail(
   const { data, error } = await resend.emails.send({
     from: getEmailFrom(),
     to,
-    subject: `${title} - Reservation #${reservationNumber} - ${propertyName}`,
+    subject: `${title} - ${isSpanish ? "Reservación" : "Reservation"} #${reservationNumber} - ${propertyName}`,
     html: `
       <div style="font-family: Arial, sans-serif; color: #111827; line-height: 1.6; max-width: 680px; margin: 0 auto;">
        <div style="background:linear-gradient(135deg,#020617,#1d4ed8);color:#ffffff;border-radius:18px;padding:24px;margin-bottom:20px;">
-  <p style="margin:0 0 8px;font-size:12px;letter-spacing:0.08em;text-transform:uppercase;font-weight:800;">Pin&Go Cancellation Update</p>
+  <p style="margin:0 0 8px;font-size:12px;letter-spacing:0.08em;text-transform:uppercase;font-weight:800;">${isSpanish ? "Actualización de cancelación Pin&Go" : "Pin&Go Cancellation Update"}</p>
   <h1 style="margin:0;font-size:28px;line-height:1.15;">${escapeHtml(title)}</h1>
-  <p style="margin:10px 0 0;color:#dbeafe;font-weight:700;">Reservation #${safeReservationNumber}</p>
+  <p style="margin:10px 0 0;color:#dbeafe;font-weight:700;">${isSpanish ? "Reservación" : "Reservation"} #${safeReservationNumber}</p>
   <p style="margin:8px 0 0;color:#dbeafe;">${escapeHtml(body)}</p>
 </div>
-        <p>Hi ${safeName},</p>
+        <p>${isSpanish ? "Hola" : "Hi"} ${safeName},</p>
 
         <p>
-          Your reservation for <strong>${safePropertyName}</strong> has been cancelled.
+          ${isSpanish ? "Su reservación para" : "Your reservation for"} <strong>${safePropertyName}</strong> ${isSpanish ? "fue cancelada." : "has been cancelled."}
         </p>
 
         <div style="background:#f9fafb;border:1px solid #e5e7eb;border-radius:14px;padding:16px;margin:20px 0;">
-  <p><strong>Reservation Number:</strong> #${safeReservationNumber}</p>
-  <p><strong>Property:</strong> ${safePropertyName}</p>
-          <p><strong>Check-in:</strong> ${formatBookingDate(checkIn, dateTimeZone)}</p>
-          <p><strong>Check-out:</strong> ${formatBookingDate(checkOut, dateTimeZone)}</p>
-          <p><strong>Cancelled at:</strong> ${formatBookingDateTime(cancelledAt, dateTimeZone)}</p>
-          <p><strong>Total paid:</strong> ${formatBookingAmount(totalAmount, currency)}</p>
-          <p><strong>Refund amount:</strong> ${formatBookingAmount(refundAmount, currency)}</p>
-          <p><strong>Refund basis:</strong> ${escapeHtml(formatRefundBasis(refundBasis))}</p>
+  <p><strong>${isSpanish ? "Número de reservación" : "Reservation number"}:</strong> #${safeReservationNumber}</p>
+  <p><strong>${isSpanish ? "Propiedad" : "Property"}:</strong> ${safePropertyName}</p>
+          <p><strong>${isSpanish ? "Entrada" : "Check-in"}:</strong> ${formatBookingDate(checkIn, dateTimeZone, language)}</p>
+          <p><strong>${isSpanish ? "Salida" : "Check-out"}:</strong> ${formatBookingDate(checkOut, dateTimeZone, language)}</p>
+          <p><strong>${isSpanish ? "Cancelada el" : "Cancelled at"}:</strong> ${formatBookingDateTime(cancelledAt, dateTimeZone, language)}</p>
+          <p><strong>${isSpanish ? "Total pagado" : "Total paid"}:</strong> ${formatBookingAmount(totalAmount, currency, language)}</p>
+          <p><strong>${isSpanish ? "Importe del reembolso" : "Refund amount"}:</strong> ${formatBookingAmount(refundAmount, currency, language)}</p>
+          <p><strong>${isSpanish ? "Base del reembolso" : "Refund basis"}:</strong> ${escapeHtml(formatRefundBasis(refundBasis, language))}</p>
           ${
             nonRefundableAmount !== null && nonRefundableAmount !== undefined
-              ? `<p><strong>Non-refundable / remaining charges:</strong> ${formatBookingAmount(
+              ? `<p><strong>${isSpanish ? "Cargos no reembolsables o restantes" : "Non-refundable / remaining charges"}:</strong> ${formatBookingAmount(
                   nonRefundableAmount,
-                  currency
+                  currency,
+                  language
                 )}</p>`
               : ""
           }
           ${
             refundMode
-              ? `<p><strong>Refund mode:</strong> ${escapeHtml(refundMode)}</p>`
+              ? `<p><strong>${isSpanish ? "Modalidad del reembolso" : "Refund mode"}:</strong> ${escapeHtml(refundMode)}</p>`
               : ""
           }
           ${
             refundStatus
-              ? `<p><strong>Refund status:</strong> ${escapeHtml(refundStatus)}</p>`
+              ? `<p><strong>${isSpanish ? "Estado del reembolso" : "Refund status"}:</strong> ${escapeHtml(refundStatus)}</p>`
               : ""
           }
           ${
             safeStripeRefundId
-              ? `<p><strong>Stripe refund ID:</strong> ${safeStripeRefundId}</p>`
+              ? `<p><strong>${isSpanish ? "ID de reembolso de Stripe" : "Stripe refund ID"}:</strong> ${safeStripeRefundId}</p>`
               : ""
           }
         </div>
 
         <div style="background:#fffbeb;border:1px solid #fde68a;border-radius:14px;padding:14px;margin:20px 0;color:#92400e;">
-          Refund timing can depend on Stripe, your card issuer, and your bank. Any non-refundable charges remain subject to the cancellation terms accepted at booking.
+          ${isSpanish
+            ? "El tiempo del reembolso puede depender de Stripe, del emisor de su tarjeta y de su banco. Los cargos no reembolsables permanecen sujetos a los términos aceptados al reservar."
+            : "Refund timing can depend on Stripe, your card issuer, and your bank. Any non-refundable charges remain subject to the cancellation terms accepted at booking."}
         </div>
 
         ${manageReservationBlock}
 
         <p>
-          Thank you,<br />
-          Pin&Go
-        </p>
-
-        <hr style="border: none; border-top: 1px solid #e5e7eb; margin: 28px 0;" />
-
-       <h2 style="margin-bottom: 8px;">Actualización de cancelación</h2>
-
-<p><strong>Número de reservación:</strong> #${safeReservationNumber}</p>
-
-<p>Hola ${safeName},</p>
-        <p>
-          Tu reservación para <strong>${safePropertyName}</strong> fue cancelada.
-        </p>
-
-        <p>
-          Pin&Go evaluó los términos aceptados al momento de reservar y registró
-          el resultado de cancelación y reembolso correspondiente.
-        </p>
-
-        <p>
-          Gracias,<br />
+          ${isSpanish ? "Gracias" : "Thank you"},<br />
           Pin&Go
         </p>
       </div>
