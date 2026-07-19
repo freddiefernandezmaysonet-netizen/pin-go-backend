@@ -1,16 +1,27 @@
 import { PrismaClient } from "@prisma/client";
 import { sendSms } from "../integrations/twilio/twilio.client";
+import {
+  getGuestIntlLocale,
+  resolveGuestLanguage,
+  type GuestLanguage,
+} from "./guest-language.service";
 
 function buildCheckoutMessage(input: {
   guestName?: string | null;
   propertyName: string;
   checkoutTime: string;
+  language: GuestLanguage;
 }) {
   const guestName = String(input.guestName ?? "").trim();
-  const greetingEs = guestName ? `Hola ${guestName},` : "Hola,";
-  const greetingEn = guestName ? `Hi ${guestName},` : "Hi,";
+  const isSpanish = input.language === "es";
+  const greeting = guestName
+    ? `${isSpanish ? "Hola" : "Hi"} ${guestName},`
+    : isSpanish
+      ? "Hola,"
+      : "Hi,";
 
-  const es = `${greetingEs}
+  if (isSpanish) {
+    return `${greeting}
 
 Tu check-out de ${input.propertyName} ha sido procesado correctamente a las ${input.checkoutTime}.
 
@@ -20,8 +31,9 @@ Antes de salir:
 
 Gracias por tu estadía.
 Te esperamos nuevamente.`;
+  }
 
-  const en = `${greetingEn}
+  return `${greeting}
 
 Your check-out from ${input.propertyName} has been completed at ${input.checkoutTime}.
 
@@ -31,12 +43,6 @@ Before leaving:
 
 Thank you for your stay.
 We hope to host you again.`;
-
-  return `${es}
-
----
-
-${en}`;
 }
 
 export async function sendCheckoutSms(
@@ -63,6 +69,7 @@ export async function sendCheckoutSms(
         id: true,
         guestName: true,
         guestPhone: true,
+        preferredLanguage: true,
         checkOut: true,
         property: {
           select: {
@@ -81,7 +88,9 @@ export async function sendCheckoutSms(
 
     const propertyName = r.property?.name ?? "your property";
 
-   const checkoutTime = new Intl.DateTimeFormat("en-US", {
+    const language = resolveGuestLanguage(r.preferredLanguage);
+
+   const checkoutTime = new Intl.DateTimeFormat(getGuestIntlLocale(language), {
   timeZone: r.property?.timezone ?? "UTC",
   hour: "2-digit",
   minute: "2-digit",
@@ -92,6 +101,7 @@ export async function sendCheckoutSms(
       guestName: r.guestName,
       propertyName,
       checkoutTime,
+      language,
     });
 
     const sent = await sendSms(r.guestPhone, body);
