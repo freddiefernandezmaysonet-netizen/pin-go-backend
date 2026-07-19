@@ -26,6 +26,7 @@ type SendSalesFollowUpEmailInput = {
 
 type SendGuestAccessPasscodeEmailInput = {
   to: string;
+  replyTo?: string | null;
   reservationNumber: string;
   guestName?: string | null;
   propertyName: string;
@@ -46,6 +47,7 @@ type CancellationRefundRuleEmailInput = {
 
 type SendDirectBookingGuestConfirmationInput = {
   to: string;
+  replyTo?: string | null;
   reservationNumber: string;
   guestName?: string | null;
   propertyName: string;
@@ -82,6 +84,7 @@ type SendDirectBookingHostNotificationInput = {
 
 type SendManualReservationGuestConfirmationInput = {
   to: string;
+  replyTo?: string | null;
   reservationNumber: string;
   guestName?: string | null;
   propertyName: string;
@@ -94,6 +97,7 @@ type SendManualReservationGuestConfirmationInput = {
 
 type SendDirectBookingGuestCancellationEmailInput = {
   to: string;
+  replyTo?: string | null;
   reservationNumber: string;
   guestName?: string | null;
   propertyName: string;
@@ -759,6 +763,7 @@ export async function sendDirectBookingGuestConfirmation(
 ) {
   const {
     to,
+    replyTo,
     reservationNumber,
     guestName,
     propertyName,
@@ -980,6 +985,7 @@ const verificationBlock = `
       from: getEmailFrom(),
 
       to,
+      ...(replyTo ? { replyTo } : {}),
 
       subject:
         `${isSpanish ? "Reservación confirmada" : "Reservation confirmed"} #${reservationNumber} - ${propertyName}`,
@@ -1010,6 +1016,7 @@ export async function sendManualReservationGuestConfirmation(
 ) {
   const {
     to,
+    replyTo,
     reservationNumber,
     guestName,
     propertyName,
@@ -1102,6 +1109,7 @@ export async function sendManualReservationGuestConfirmation(
     await resend.emails.send({
       from: getEmailFrom(),
       to,
+      ...(replyTo ? { replyTo } : {}),
       subject:
         `${isSpanish ? "Reservación - Registro seguro requerido" : "Reservation - Secure pre-check-in required"} #${reservationNumber} - ${propertyName}`,
       html: `
@@ -1323,6 +1331,7 @@ export async function sendDirectBookingGuestCancellationEmail(
 ) {
   const {
     to,
+    replyTo,
     reservationNumber,
     guestName,
     propertyName,
@@ -1382,6 +1391,7 @@ export async function sendDirectBookingGuestCancellationEmail(
   const { data, error } = await resend.emails.send({
     from: getEmailFrom(),
     to,
+    ...(replyTo ? { replyTo } : {}),
     subject: `${title} - ${isSpanish ? "Reservación" : "Reservation"} #${reservationNumber} - ${propertyName}`,
     html: `
       <div style="font-family: Arial, sans-serif; color: #111827; line-height: 1.6; max-width: 680px; margin: 0 auto;">
@@ -1597,6 +1607,7 @@ export async function sendGuestAccessPasscodeEmail(
 ) {
   const {
     to,
+    replyTo,
     reservationNumber,
     guestName,
     propertyName,
@@ -1649,6 +1660,7 @@ export async function sendGuestAccessPasscodeEmail(
     await resend.emails.send({
       from: getEmailFrom(),
       to,
+      ...(replyTo ? { replyTo } : {}),
       subject:
         `${isSpanish ? "Su acceso Pin&Go está listo - Reservación" : "Your Pin&Go access is ready - Reservation"} #${reservationNumber}`,
       html: `
@@ -1747,6 +1759,7 @@ export async function sendGuestAccessPasscodeEmail(
 
 export type SendGuestVerificationReminderEmailInput = {
   to: string;
+  replyTo?: string | null;
   reservationNumber: string;
   guestName?: string | null;
   propertyName: string;
@@ -1761,6 +1774,7 @@ export async function sendGuestVerificationReminderEmail(
 ) {
   const {
     to,
+    replyTo,
     reservationNumber,
     guestName,
     propertyName,
@@ -1832,6 +1846,7 @@ export async function sendGuestVerificationReminderEmail(
     await resend.emails.send({
       from: getEmailFrom(),
       to,
+      ...(replyTo ? { replyTo } : {}),
       subject:
         `${isSpanish ? "Acción requerida - Reservación" : "Action required - Reservation"} #${reservationNumber}`,
       html: `
