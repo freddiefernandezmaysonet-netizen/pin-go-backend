@@ -1093,8 +1093,6 @@ const guestAcceptedSecurePreCheckinRequirementText =
         stripeConnectedAccountId: connectedAccountId,
         platformFeeAmount: String(platformFeeAmount),
         hostPayoutAmount: String(hostPayoutAmount),
-        platformFeeAmountCents: String(platformFeeAmountCents),
-        hostPayoutAmountCents: String(hostPayoutAmountCents),
         hostPayoutStatus: "ROUTED_TO_CONNECT",
         guestAcceptedCancellationTerms: "true",
         guestAcceptedCancellationTermsAt,
