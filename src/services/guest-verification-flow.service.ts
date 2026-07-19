@@ -10,6 +10,8 @@ import {
 import {
   buildGuestCancellationTermsText,
 } from "./cancellation-policy.service";
+import { completeGuestJourneyVerification } from "./guest-journey.service";
+import { evaluateGuestAccessReadiness } from "./guest-access-readiness.service";
 
 type AgreementSnapshot = {
   agreementId: string;
@@ -254,12 +256,6 @@ export async function completeGuestAgreementAndStartIdentity(
     );
   }
 
-  if (!input.identityConsentAccepted) {
-    throw new Error(
-      "GUEST_VERIFICATION_IDENTITY_CONSENT_REQUIRED"
-    );
-  }
-
    const cancellationPolicySnapshot =
     readJsonObject(
       reservation.cancellationPolicySnapshot
@@ -302,6 +298,15 @@ export async function completeGuestAgreementAndStartIdentity(
   if (snapshot.propertyId !== reservation.propertyId) {
     throw new Error(
       "GUEST_VERIFICATION_AGREEMENT_PROPERTY_MISMATCH"
+    );
+  }
+
+  if (
+    snapshot.requiresIdentityVerification &&
+    !input.identityConsentAccepted
+  ) {
+    throw new Error(
+      "GUEST_VERIFICATION_IDENTITY_CONSENT_REQUIRED"
     );
   }
 
@@ -428,7 +433,9 @@ export async function completeGuestAgreementAndStartIdentity(
     rulesAccepted:
       true,
     identityConsentAccepted:
-      true,
+      snapshot.requiresIdentityVerification
+        ? input.identityConsentAccepted
+        : false,
     cancellationTermsAccepted:
       true,
     smsConsent:
@@ -471,10 +478,51 @@ export async function completeGuestAgreementAndStartIdentity(
         reservation.guestAgreementSignedAt ??
         now,
       identityDeclaredLegalName: legalName,
-      identityVerificationConsentAt:
-        reservation.identityVerificationConsentAt ?? now,
+      ...(snapshot.requiresIdentityVerification
+        ? {
+            identityVerificationConsentAt:
+              reservation.identityVerificationConsentAt ?? now,
+          }
+        : {
+            verificationStatus: "NOT_REQUIRED",
+            verifiedAt: null,
+            identityVerificationConsentAt: null,
+          }),
     },
   });
+
+  if (!snapshot.requiresIdentityVerification) {
+    const guestJourney = await completeGuestJourneyVerification(
+      prisma,
+      reservation.id
+    );
+    const readiness = await evaluateGuestAccessReadiness(
+      prisma,
+      reservation.id,
+      {
+        persist: true,
+        now,
+      }
+    );
+
+    return {
+      ok: true,
+      reservationNumber: reservation.reservationNumber,
+      agreementVersion: snapshot.version,
+      identitySession: {
+        ok: true,
+        alreadyVerified: false,
+        reused: false,
+        notRequired: true,
+        reservationNumber: reservation.reservationNumber,
+        verificationSessionId: null,
+        status: "not_required",
+        url: null,
+      },
+      guestJourney,
+      readiness,
+    };
+  }
 
   const identitySession =
     await createGuestIdentityVerificationSession(
