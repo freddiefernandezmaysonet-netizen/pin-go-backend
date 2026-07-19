@@ -32,6 +32,7 @@ import { resolveGuestLanguage } from "../services/guest-language.service";
 import {
   buildCancellationPolicySnapshot,
 } from "../services/cancellation-policy.service";
+import { resolveOrganizationGuestReplyTo } from "../services/organization-guest-email.service";
 
 const prisma = new PrismaClient();
 export const dashboardPropertiesRouter = Router();
@@ -1222,9 +1223,16 @@ dashboardPropertiesRouter.post(
         manualReservationForEmail?.guestEmail &&
         verificationUrl
       ) {
+        const guestReplyTo =
+          await resolveOrganizationGuestReplyTo(
+            prisma,
+            orgId
+          );
+
         const manualReservationGuestEmailInput = {
           to:
             manualReservationForEmail.guestEmail,
+          replyTo: guestReplyTo.email,
           reservationNumber:
             manualReservationForEmail.reservationNumber,
           guestName:
