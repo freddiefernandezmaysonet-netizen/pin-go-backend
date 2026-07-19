@@ -993,13 +993,16 @@ export async function sendManualReservationGuestConfirmation(
     checkOut,
     propertyTimeZone,
     verificationUrl,
+    preferredLanguage,
   } = input;
+  const language = resolveGuestLanguage(preferredLanguage);
+  const isSpanish = language === "es";
 
   const safeReservationNumber =
     escapeHtml(reservationNumber);
 
   const safeName = escapeHtml(
-    guestName?.trim() || "there"
+    guestName?.trim() || (isSpanish ? "Huésped" : "there")
   );
 
   const safePropertyName =
@@ -1027,19 +1030,13 @@ export async function sendManualReservationGuestConfirmation(
   const verificationBlock = `
     <div style="background:#eff6ff;border:1px solid #bfdbfe;border-radius:16px;padding:20px;margin:22px 0;">
       <h2 style="margin:0 0 8px;color:#1e3a8a;">
-        Secure pre-check-in required
+        ${isSpanish ? "Registro seguro requerido" : "Secure pre-check-in required"}
       </h2>
 
-      <h3 style="margin:0 0 14px;color:#1e40af;">
-        Registro seguro requerido
-      </h3>
-
       <p style="margin:0 0 10px;color:#1e40af;">
-        Before Pin&amp;Go releases your digital access, complete identity verification, review and accept the property rules and cancellation/refund policy, and sign the guest agreement.
-      </p>
-
-      <p style="margin:0 0 16px;color:#1e40af;">
-        Antes de que Pin&amp;Go entregue su acceso digital, complete la verificaci&oacute;n de identidad, revise y acepte las reglas de la propiedad y la pol&iacute;tica de cancelaci&oacute;n/reembolso, y firme el acuerdo del hu&eacute;sped.
+        ${isSpanish
+          ? "Antes de que Pin&amp;Go entregue su acceso digital, complete la verificaci&oacute;n de identidad, revise y acepte las reglas de la propiedad y la pol&iacute;tica de cancelaci&oacute;n/reembolso, y firme el acuerdo del hu&eacute;sped."
+          : "Before Pin&amp;Go releases your digital access, complete identity verification, review and accept the property rules and cancellation/refund policy, and sign the guest agreement."}
       </p>
 
       <p style="margin:0 0 18px;">
@@ -1047,12 +1044,12 @@ export async function sendManualReservationGuestConfirmation(
           href="${safeVerificationUrl}"
           style="display:inline-block;background:#2563eb;color:#ffffff;text-decoration:none;padding:13px 18px;border-radius:12px;font-weight:800;"
         >
-          Complete secure pre-check-in / Complete el registro seguro
+          ${isSpanish ? "Complete el registro seguro" : "Complete secure pre-check-in"}
         </a>
       </p>
 
       <p style="margin:0;color:#475569;font-size:13px;">
-        Secure link / Enlace seguro:
+        ${isSpanish ? "Enlace seguro" : "Secure link"}:
         <br />
         <a
           href="${safeVerificationUrl}"
@@ -1082,65 +1079,63 @@ export async function sendManualReservationGuestConfirmation(
       from: getEmailFrom(),
       to,
       subject:
-        `Reservation / Reservaci\u00f3n #${reservationNumber} - Secure pre-check-in required - ${propertyName}`,
+        `${isSpanish ? "Reservación - Registro seguro requerido" : "Reservation - Secure pre-check-in required"} #${reservationNumber} - ${propertyName}`,
       html: `
         <div style="font-family:Arial,sans-serif;color:#111827;line-height:1.6;max-width:680px;margin:0 auto;">
           <div style="background:linear-gradient(135deg,#020617,#1d4ed8);color:#ffffff;border-radius:18px;padding:24px;margin-bottom:20px;">
             <p style="margin:0 0 8px;font-size:12px;letter-spacing:0.08em;text-transform:uppercase;font-weight:800;">
-              Pin&amp;Go Reservation / Reservaci&oacute;n
+              ${isSpanish ? "Reservación Pin&amp;Go" : "Pin&amp;Go Reservation"}
             </p>
 
             <h1 style="margin:0;font-size:28px;line-height:1.15;">
-              Reservation created
+              ${isSpanish ? "Reservación creada" : "Reservation created"}
             </h1>
 
-            <h2 style="margin:8px 0 0;font-size:22px;line-height:1.2;">
-              Reservaci&oacute;n creada
-            </h2>
-
             <p style="margin:10px 0 0;color:#dbeafe;font-weight:700;">
-              Reservation / Reservaci&oacute;n #${safeReservationNumber}
+              ${isSpanish ? "Reservación" : "Reservation"} #${safeReservationNumber}
             </p>
 
             <p style="margin:8px 0 0;color:#dbeafe;">
-              Secure pre-check-in must be completed before digital access can be released.
-              Debe completar el registro seguro antes de recibir el acceso digital.
+              ${isSpanish
+                ? "Debe completar el registro seguro antes de recibir el acceso digital."
+                : "Secure pre-check-in must be completed before digital access can be released."}
             </p>
           </div>
 
           <p>
-            Hi / Hola ${safeName},
+            ${isSpanish ? "Hola" : "Hi"} ${safeName},
           </p>
 
           <p>
-            Your reservation for <strong>${safePropertyName}</strong> has been created.
-            Su reservaci&oacute;n para <strong>${safePropertyName}</strong> ha sido creada.
+            ${isSpanish ? "Su reservación para" : "Your reservation for"} <strong>${safePropertyName}</strong> ${isSpanish ? "ha sido creada." : "has been created."}
           </p>
 
           <div style="background:#f9fafb;border:1px solid #e5e7eb;border-radius:14px;padding:16px;margin:20px 0;">
             <p>
-              <strong>Reservation Number / N&uacute;mero de reservaci&oacute;n:</strong>
+              <strong>${isSpanish ? "Número de reservación" : "Reservation number"}:</strong>
               #${safeReservationNumber}
             </p>
 
             <p>
-              <strong>Property / Propiedad:</strong>
+              <strong>${isSpanish ? "Propiedad" : "Property"}:</strong>
               ${safePropertyName}
             </p>
 
             <p>
-              <strong>Check-in / Entrada:</strong>
+              <strong>${isSpanish ? "Entrada" : "Check-in"}:</strong>
               ${formatBookingDate(
                 checkIn,
-                dateTimeZone
+                dateTimeZone,
+                language
               )}
             </p>
 
             <p>
-              <strong>Check-out / Salida:</strong>
+              <strong>${isSpanish ? "Salida" : "Check-out"}:</strong>
               ${formatBookingDate(
                 checkOut,
-                dateTimeZone
+                dateTimeZone,
+                language
               )}
             </p>
           </div>
@@ -1149,51 +1144,51 @@ export async function sendManualReservationGuestConfirmation(
 
           <div style="background:#fffbeb;border:1px solid #fde68a;border-radius:14px;padding:16px;margin:20px 0;color:#92400e;">
             <h3 style="margin:0 0 8px;">
-              Required steps / Pasos requeridos
+              ${isSpanish ? "Pasos requeridos" : "Required steps"}
             </h3>
 
             <ul style="margin:0;padding-left:22px;">
               <li>
-                Identity verification / Verificaci&oacute;n de identidad
+                ${isSpanish ? "Verificaci&oacute;n de identidad" : "Identity verification"}
               </li>
               <li>
-                Guest agreement and property rules / Acuerdo del hu&eacute;sped y reglas de la propiedad
+                ${isSpanish ? "Acuerdo del hu&eacute;sped y reglas de la propiedad" : "Guest agreement and property rules"}
               </li>
               <li>
-                Cancellation and refund policy acceptance / Aceptaci&oacute;n de la pol&iacute;tica de cancelaci&oacute;n y reembolso
+                ${isSpanish ? "Aceptaci&oacute;n de la pol&iacute;tica de cancelaci&oacute;n y reembolso" : "Cancellation and refund policy acceptance"}
               </li>
             </ul>
 
             <p style="margin:12px 0 0;">
-              SMS updates are optional and are not required to complete the reservation.
-              Las actualizaciones por SMS son opcionales y no son necesarias para completar la reservaci&oacute;n.
+              ${isSpanish
+                ? "Las actualizaciones por SMS son opcionales y no son necesarias para completar la reservaci&oacute;n."
+                : "SMS updates are optional and are not required to complete the reservation."}
             </p>
           </div>
 
           <div style="background:#f0fdf4;border:1px solid #bbf7d0;border-radius:14px;padding:16px;margin:20px 0;color:#14532d;">
             <h3 style="margin:0 0 8px;">
-              Smart access / Acceso inteligente
+              ${isSpanish ? "Acceso inteligente" : "Smart access"}
             </h3>
 
-            <p style="margin:0 0 10px;">
-              Digital access remains protected until the secure pre-check-in requirements are completed. Access instructions may be delivered closer to check-in after operational checks are complete.
-            </p>
-
             <p style="margin:0;">
-              El acceso digital permanecer&aacute; protegido hasta completar los requisitos del registro seguro. Las instrucciones de acceso pueden enviarse m&aacute;s cerca del check-in, despu&eacute;s de completar las validaciones operacionales.
+              ${isSpanish
+                ? "El acceso digital permanecer&aacute; protegido hasta completar los requisitos del registro seguro. Las instrucciones de acceso pueden enviarse m&aacute;s cerca del check-in, despu&eacute;s de completar las validaciones operacionales."
+                : "Digital access remains protected until the secure pre-check-in requirements are completed. Access instructions may be delivered closer to check-in after operational checks are complete."}
             </p>
           </div>
 
           <p>
-            Thank you / Gracias,<br />
+            ${isSpanish ? "Gracias" : "Thank you"},<br />
             Pin&amp;Go
           </p>
 
           <hr style="border:none;border-top:1px solid #e5e7eb;margin:28px 0;" />
 
           <p style="color:#6b7280;font-size:12px;">
-            This is a transactional message regarding your reservation.
-            Este es un mensaje transaccional relacionado con su reservaci&oacute;n.
+            ${isSpanish
+              ? "Este es un mensaje transaccional relacionado con su reservaci&oacute;n."
+              : "This is a transactional message regarding your reservation."}
           </p>
         </div>
       `,
