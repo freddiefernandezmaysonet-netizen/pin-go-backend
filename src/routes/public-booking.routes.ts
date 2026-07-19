@@ -7,7 +7,6 @@ import {
 import stripe from "../billing/stripe";
 import { calculateDirectBookingPricing } from "../services/direct-booking-pricing.service";
 import { assertDirectBookingPayoutReady } from "../services/stripe-connect.service";
-import { getActivePropertyGuestAgreement } from "../services/guest-agreement.service";
 import {
   buildCancellationPolicySnapshot,
   buildGuestCancellationTermsText,
@@ -975,11 +974,7 @@ const totalAmountCents = pricing.totalAmountCents;
     const cancellationPolicySnapshot =
       await buildCancellationPolicySnapshot(property.id);
 
-    const activeGuestAgreement =
-      await getActivePropertyGuestAgreement(prisma, property.id);
-
-    const identityVerificationRequired =
-      activeGuestAgreement?.requiresIdentityVerification === true;
+    const identityVerificationRequired = true;
 
    const guestAcceptedCancellationTermsAt = new Date().toISOString();
    const guestAcceptedCancellationTermsText =
