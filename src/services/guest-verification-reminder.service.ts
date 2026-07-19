@@ -9,6 +9,10 @@ import {
   sendGuestVerificationReminderEmail,
 } from "../lib/mailer";
 import { sendLoggedEmail } from "./email-delivery.service";
+import {
+  resolveGuestLanguage,
+  type GuestLanguage,
+} from "./guest-language.service";
 
 export type SendGuestVerificationReminderResult = {
   reservationId: string;
@@ -88,33 +92,35 @@ function buildVerificationReminderSms(input: {
   propertyName: string;
   reservationNumber: string;
   verificationUrl: string;
+  language: GuestLanguage;
 }) {
   const guestName =
     String(input.guestName ?? "").trim();
 
-  const greetingEn = guestName
-    ? `Hi ${guestName},`
-    : "Hi,";
+  const isSpanish = input.language === "es";
+  const greeting = guestName
+    ? `${isSpanish ? "Hola" : "Hi"} ${guestName},`
+    : isSpanish
+      ? "Hola,"
+      : "Hi,";
 
-  const greetingEs = guestName
-    ? `Hola ${guestName},`
-    : "Hola,";
-
-  return `${greetingEn}
-
-Action required for reservation #${input.reservationNumber} at ${input.propertyName}.
-
-Please complete your secure pre-check-in before Pin&Go can release your digital access:
-
-${input.verificationUrl}
-
----
-
-${greetingEs}
+  if (isSpanish) {
+    return `${greeting}
 
 Acción requerida para la reservación #${input.reservationNumber} en ${input.propertyName}.
 
 Complete su registro seguro antes de que Pin&Go pueda entregar su acceso digital:
+
+${input.verificationUrl}
+
+Pin&Go Guest Services`;
+  }
+
+  return `${greeting}
+
+Action required for reservation #${input.reservationNumber} at ${input.propertyName}.
+
+Please complete your secure pre-check-in before Pin&Go can release your digital access:
 
 ${input.verificationUrl}
 
@@ -154,6 +160,7 @@ export async function sendGuestVerificationReminder(
         guestName: true,
         guestEmail: true,
         guestPhone: true,
+        preferredLanguage: true,
         guestToken: true,
         externalRaw: true,
         verificationStatus: true,
@@ -178,6 +185,10 @@ export async function sendGuestVerificationReminder(
       "GUEST_VERIFICATION_REMINDER_RESERVATION_NOT_FOUND"
     );
   }
+
+  const language = resolveGuestLanguage(
+    reservation.preferredLanguage
+  );
 
   if (
     reservation.status !==
@@ -277,8 +288,8 @@ export async function sendGuestVerificationReminder(
 
   if (reservation.guestEmail) {
     const subject =
-      `Action required / Acción requerida - ` +
-      `Reservation #${reservation.reservationNumber ?? "Pending"}`;
+      `${language === "es" ? "Acción requerida - Reservación" : "Action required - Reservation"} ` +
+      `#${reservation.reservationNumber ?? "Pending"}`;
 
     const emailResult =
       await sendLoggedEmail({
@@ -307,6 +318,7 @@ export async function sendGuestVerificationReminder(
             reservation.checkIn,
           propertyTimeZone:
             reservation.property.timezone,
+          preferredLanguage: language,
         },
 
         send: () =>
@@ -325,6 +337,7 @@ export async function sendGuestVerificationReminder(
             propertyTimeZone:
               reservation.property.timezone,
             verificationUrl,
+            preferredLanguage: language,
           }),
       });
 
@@ -355,6 +368,7 @@ export async function sendGuestVerificationReminder(
           reservation.reservationNumber ??
           "Pending",
         verificationUrl,
+        language,
       });
 
     try {
@@ -557,9 +571,8 @@ export async function sendGuestVerificationReminder(
     reminderStatus,
     emailStatus,
     smsStatus,
-    skippedReason:
-      noChannelAvailable
-        ? "NO_AVAILABLE_CHANNEL"
-        : undefined,
+    ...(noChannelAvailable
+      ? { skippedReason: "NO_AVAILABLE_CHANNEL" }
+      : {}),
   };
 }

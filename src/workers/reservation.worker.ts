@@ -36,6 +36,7 @@ import { sendGuestAccessLinkSms } from "../services/guestLinkSms.service";
 import { sendPreCheckinSms } from "../services/preCheckinSms.service";
 import { sendCheckoutSms } from "../services/checkoutSms.service";
 import { sendCleaningReadySms } from "../services/cleaningReadySms.service";
+import { resolveGuestLanguage } from "../services/guest-language.service";
 import { expireNfcAssignments } from "../services/nfc-expire.service";
 import { expireGuestNfcAssignments } from "../services/nfc-expire.service";
 import { expireCleaningNfcAssignments } from "../services/nfc-expire.service";
@@ -1211,12 +1212,15 @@ async function processCheckins(now: Date) {
           }
         }
 
-               const reservationNumber =
+        const reservationNumber =
           reservation.reservationNumber ??
           "Pending";
+        const guestLanguage = resolveGuestLanguage(
+          reservation.preferredLanguage
+        );
 
         const emailSubject =
-          `Your Pin&Go access is ready - Reservation #${reservationNumber}`;
+          `${guestLanguage === "es" ? "Su acceso Pin&Go está listo - Reservación" : "Your Pin&Go access is ready - Reservation"} #${reservationNumber}`;
 
         const emailDeliveryResult =
           await sendLoggedEmail({
@@ -1238,6 +1242,8 @@ async function processCheckins(now: Date) {
                 grant.startsAt.toISOString(),
               validUntil:
                 grant.endsAt.toISOString(),
+              preferredLanguage:
+                guestLanguage,
             },
 
             send: async () => {
@@ -1266,6 +1272,8 @@ async function processCheckins(now: Date) {
                   grant.endsAt,
                 propertyTimeZone:
                   reservation.property.timezone,
+                preferredLanguage:
+                  guestLanguage,
               });
             },
           });

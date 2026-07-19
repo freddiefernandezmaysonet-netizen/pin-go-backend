@@ -1,5 +1,10 @@
 import { PrismaClient } from "@prisma/client";
 import { sendSms } from "../integrations/twilio/twilio.client";
+import {
+  getGuestIntlLocale,
+  resolveGuestLanguage,
+  type GuestLanguage,
+} from "./guest-language.service";
 
 type SmsSendResult = {
   ok: boolean;
@@ -96,8 +101,12 @@ function maskSensitiveBody(body: string): string {
   return masked;
 }
 
-function fmtWithTimezone(d: Date, timezone?: string): string {
-  return new Intl.DateTimeFormat("en-US", {
+function fmtWithTimezone(
+  d: Date,
+  timezone?: string,
+  language: GuestLanguage = "en"
+): string {
+  return new Intl.DateTimeFormat(getGuestIntlLocale(language), {
     timeZone: timezone ?? "UTC",
     year: "numeric",
     month: "2-digit",
@@ -117,11 +126,18 @@ export function buildGuestPasscodeSmsBody(params: {
   code: string;
   validUntil: Date;
   timezone?: string;
+  language: GuestLanguage;
 }): string {
-  const guestName = params.guestName ?? "Guest";
-  const validUntil = fmtWithTimezone(params.validUntil, params.timezone);
+  const isSpanish = params.language === "es";
+  const guestName = params.guestName ?? (isSpanish ? "Huésped" : "Guest");
+  const validUntil = fmtWithTimezone(
+    params.validUntil,
+    params.timezone,
+    params.language
+  );
 
-  const es = `🔐 Pin&Go Access
+  if (isSpanish) {
+    return `🔐 Acceso Pin&Go
 
 Hola ${guestName},
 
@@ -138,8 +154,9 @@ ${validUntil}
 Durante tu estadía, el acceso continuo estará disponible mediante tarjetas NFC.
 
 — Pin&Go`;
+  }
 
-  const en = `🔐 Pin&Go Access
+  return `🔐 Pin&Go Access
 
 Hi ${guestName},
 
@@ -156,12 +173,6 @@ ${validUntil}
 During your stay, continuous access may be available via NFC cards.
 
 — Pin&Go`;
-
-  return `${es}
-
----
-
-${en}`;
 }
 
 export function buildCleaningStartSmsBody(params: {
@@ -313,6 +324,7 @@ export async function sendGuestPasscodeSms(
   const reservation = await prisma.reservation.findUnique({
     where: { id: reservationId },
     select: {
+      preferredLanguage: true,
       property: {
         select: {
           timezone: true,
@@ -321,11 +333,16 @@ export async function sendGuestPasscodeSms(
     },
   });
 
+  const language = resolveGuestLanguage(reservation?.preferredLanguage);
+
   const body = buildGuestPasscodeSmsBody({
-    guestName,
+    ...(guestName !== undefined ? { guestName } : {}),
     code: String(code),
     validUntil,
-    timezone: reservation?.property?.timezone,
+    ...(reservation?.property?.timezone !== undefined
+      ? { timezone: reservation.property.timezone }
+      : {}),
+    language,
   });
 
   return sendLoggedSms({

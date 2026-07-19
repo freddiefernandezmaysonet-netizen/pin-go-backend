@@ -28,6 +28,7 @@ import { createDistributionAuditEntry } from "../apms/distribution-audit.mapper"
 import { sendManualReservationGuestConfirmation } from "../lib/mailer";
 import { sendLoggedEmail } from "../services/email-delivery.service";
 import { dispatchPendingCleaningConfirmationForReservation } from "../services/cleaning-confirmation-dispatch.service";
+import { resolveGuestLanguage } from "../services/guest-language.service";
 import {
   buildCancellationPolicySnapshot,
 } from "../services/cancellation-policy.service";
@@ -1018,6 +1019,7 @@ dashboardPropertiesRouter.post(
         checkIn,
         checkOut,
         paymentState,
+        preferredLanguage,
       } = req.body ?? {};
 
       const cleanGuestName = String(guestName || "").trim();
@@ -1026,6 +1028,7 @@ dashboardPropertiesRouter.post(
       const cleanPaymentState = String(paymentState || "NONE")
         .trim()
         .toUpperCase();
+      const guestLanguage = resolveGuestLanguage(preferredLanguage);
 
       if (!cleanGuestName) {
         return res.status(400).json({
@@ -1142,6 +1145,7 @@ dashboardPropertiesRouter.post(
         guestName: cleanGuestName,
         guestEmail: cleanGuestEmail,
         guestPhone: cleanGuestPhone,
+        preferredLanguage: guestLanguage,
         roomName: property.name,
         checkIn: String(checkIn),
         checkOut: String(checkOut),
@@ -1155,6 +1159,7 @@ dashboardPropertiesRouter.post(
           pricingSource: "PIN_GO_PRICING_ENGINE",
           totalAmount: manualTotalAmount,
           currency: manualCurrency,
+          preferredLanguage: guestLanguage,
         },
         status: "ACTIVE",
       });
@@ -1182,6 +1187,7 @@ dashboardPropertiesRouter.post(
             reservationNumber: true,
             guestName: true,
             guestEmail: true,
+            preferredLanguage: true,
             checkIn: true,
             checkOut: true,
             guestToken: true,
@@ -1232,6 +1238,8 @@ dashboardPropertiesRouter.post(
           propertyTimeZone:
             manualReservationForEmail.property.timezone,
           verificationUrl,
+          preferredLanguage:
+            manualReservationForEmail.preferredLanguage,
         };
 
         try {
@@ -1243,7 +1251,7 @@ dashboardPropertiesRouter.post(
               to:
                 manualReservationForEmail.guestEmail,
              subject:
-  `Reservation / Reservaci\u00f3n #${manualReservationForEmail.reservationNumber} - Secure pre-check-in required - ${manualReservationForEmail.property.name}`,
+                `${guestLanguage === "es" ? "Reservación - Registro seguro requerido" : "Reservation - Secure pre-check-in required"} #${manualReservationForEmail.reservationNumber} - ${manualReservationForEmail.property.name}`,
               reservationId:
                 manualReservationForEmail.id,
               propertyId: property.id,
@@ -1264,6 +1272,8 @@ dashboardPropertiesRouter.post(
                   manualReservationForEmail.checkOut,
                 propertyTimeZone:
                   manualReservationForEmail.property.timezone,
+                preferredLanguage:
+                  manualReservationForEmail.preferredLanguage,
               },
 
               send: () =>

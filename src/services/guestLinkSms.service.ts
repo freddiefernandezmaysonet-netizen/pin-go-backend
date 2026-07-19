@@ -1,6 +1,7 @@
 import { PrismaClient } from "@prisma/client";
 import { sendSms } from "../integrations/twilio/twilio.client";
 import { buildGuestLink } from "./guestToken";
+import { resolveGuestLanguage } from "./guest-language.service";
 
 function toErrString(e: unknown) {
   if (e instanceof Error) return `${e.name}: ${e.message}`;
@@ -38,6 +39,7 @@ export async function sendGuestAccessLinkSms(
       id: true,
       guestName: true,
       guestPhone: true,
+      preferredLanguage: true,
       guestToken: true,
       guestTokenExpiresAt: true,
       verificationStatus: true,
@@ -74,24 +76,27 @@ if (r.verificationStatus !== "COMPLETED") {
   const link = buildGuestLink(r.guestToken);
   const propertyName = r.property?.name ?? "your property";
   const guestName = (r.guestName ?? "").trim();
+  const language = resolveGuestLanguage(r.preferredLanguage);
+  const isSpanish = language === "es";
 
-  const greetingEs = guestName ? `Hola ${guestName},` : "Hola,";
-  const greetingEn = guestName ? `Hi ${guestName},` : "Hi,";
+  const greeting = guestName
+    ? `${isSpanish ? "Hola" : "Hi"} ${guestName},`
+    : isSpanish
+      ? "Hola,"
+      : "Hi,";
 
-  const introEs =
-    reason === "PAID"
+  const intro = isSpanish
+    ? reason === "PAID"
       ? `Tu reserva en ${propertyName} ha sido confirmada.`
-      : `Te recordamos tu check-in en ${propertyName}.`;
-
-  const introEn =
-    reason === "PAID"
+      : `Te recordamos tu check-in en ${propertyName}.`
+    : reason === "PAID"
       ? `Your reservation at ${propertyName} has been confirmed.`
       : `Reminder: your check-in at ${propertyName} is coming up.`;
 
-  // ✅ MENSAJE BILINGÜE COMPLETO
-  const es = `${greetingEs}
+  const body = isSpanish
+    ? `${greeting}
 
-${introEs}
+${intro}
 
 🔐 Acceso a tu estadía:
 ${link}
@@ -104,11 +109,10 @@ Utiliza este enlace para generar tu código de acceso temporal.
 
 Este enlace es personal y no debe compartirse.
 
-Si tienes algún inconveniente, responde a este mensaje.`;
+Si tienes algún inconveniente, responde a este mensaje.`
+    : `${greeting}
 
-  const en = `${greetingEn}
-
-${introEn}
+${intro}
 
 🔐 Access to your stay:
 ${link}
@@ -122,12 +126,6 @@ Use this link to generate your temporary access code.
 This link is personal and should not be shared.
 
 If you have any issues, reply to this message.`;
-
-  const body = `${es}
-
----
-
-${en}`;
 
   const safeBody = maskSensitiveBody(body);
 

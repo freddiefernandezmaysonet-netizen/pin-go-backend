@@ -354,6 +354,8 @@ async function processGuestAccessEmailRetries() {
           propertyTimeZone:
             grant.reservation.property
               .timezone,
+          preferredLanguage:
+            grant.reservation.preferredLanguage,
         });
 
       const providerMessageId =
