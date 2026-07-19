@@ -71,8 +71,7 @@ const EMAIL_COPY: Record<
   },
 
   MANUAL: {
-    badge:
-      "Pin&amp;Go Reservation / Reservaci&oacute;n",
+    badge: "Pin&amp;Go",
 
     titleEn:
       "Your reservation was created",
