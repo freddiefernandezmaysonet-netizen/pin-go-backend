@@ -10,6 +10,7 @@ import {
 import {
   sendGuestAccessPasscodeEmail,
 } from "../lib/mailer";
+import { resolveOrganizationGuestReplyTo } from "../services/organization-guest-email.service";
 
 const WORKER_NAME = "message.retry.worker";
 const POLL_MS = Number(process.env.MESSAGE_RETRY_POLL_MS ?? 30000);
@@ -335,9 +336,17 @@ async function processGuestAccessEmailRetries() {
           .reservationNumber ??
         "Pending";
 
+      const guestReplyTo =
+        await resolveOrganizationGuestReplyTo(
+          prisma,
+          grant.reservation.property
+            .organizationId
+        );
+
       const sent =
         await sendGuestAccessPasscodeEmail({
           to: guestEmail,
+          replyTo: guestReplyTo.email,
           reservationNumber,
           guestName:
             grant.reservation.guestName,
