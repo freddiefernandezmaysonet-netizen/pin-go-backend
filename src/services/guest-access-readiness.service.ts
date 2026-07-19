@@ -84,10 +84,20 @@ export async function evaluateGuestAccessReadiness(
     blockers.push("PAYMENT_NOT_PAID");
   }
 
-  if (
-    reservation.verificationStatus !== "COMPLETED" ||
-    !reservation.verifiedAt
-  ) {
+  const agreementSnapshot =
+    reservation.guestAgreementSnapshot &&
+    typeof reservation.guestAgreementSnapshot === "object" &&
+    !Array.isArray(reservation.guestAgreementSnapshot)
+      ? (reservation.guestAgreementSnapshot as Record<string, unknown>)
+      : null;
+  const requiresIdentityVerification =
+    agreementSnapshot?.requiresIdentityVerification !== false;
+  const identityRequirementSatisfied = requiresIdentityVerification
+    ? reservation.verificationStatus === "COMPLETED" &&
+      Boolean(reservation.verifiedAt)
+    : reservation.verificationStatus === "NOT_REQUIRED";
+
+  if (!identityRequirementSatisfied) {
     blockers.push("GUEST_IDENTITY_NOT_VERIFIED");
   }
 
