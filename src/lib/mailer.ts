@@ -816,11 +816,21 @@ export async function sendDirectBookingGuestConfirmation(
 
   const cancellationPolicyBlock =
     renderCancellationPolicyBlock({
-      cancellationPolicyName,
-      cancellationPolicyType,
-      cancellationPolicySummary,
-      refundBasis,
-      refundRules,
+      ...(cancellationPolicyName !== undefined
+        ? { cancellationPolicyName }
+        : {}),
+      ...(cancellationPolicyType !== undefined
+        ? { cancellationPolicyType }
+        : {}),
+      ...(cancellationPolicySummary !== undefined
+        ? { cancellationPolicySummary }
+        : {}),
+      ...(refundBasis !== undefined
+        ? { refundBasis }
+        : {}),
+      ...(refundRules !== undefined
+        ? { refundRules }
+        : {}),
       language,
     });
 
@@ -1330,10 +1340,10 @@ export async function sendDirectBookingGuestCancellationEmail(
   const safeStripeRefundId = stripeRefundId ? escapeHtml(stripeRefundId) : null;
   const title = getRefundExecutionTitle(refundExecution, language);
   const body = getRefundExecutionBody({
-    refundExecution,
-    refundAmount,
-    currency,
-    refundBasis,
+    ...(refundExecution !== undefined ? { refundExecution } : {}),
+    ...(refundAmount !== undefined ? { refundAmount } : {}),
+    ...(currency !== undefined ? { currency } : {}),
+    ...(refundBasis !== undefined ? { refundBasis } : {}),
     language,
   });
   const manageReservationBlock = renderManageReservationBlock(
