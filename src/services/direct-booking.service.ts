@@ -713,6 +713,19 @@ const platformFeeAmount = parseOptionalMoneyMetadata(
   "platformFeeAmount"
 );
 
+const basePlatformFeeAmount = parseOptionalMoneyMetadata(
+  session,
+  "basePlatformFeeAmount"
+);
+
+const directBookingProtectionFeeAmount = parseOptionalMoneyMetadata(
+  session,
+  "directBookingProtectionFeeAmount"
+);
+
+const identityVerificationRequiredSnapshot =
+  optionalMetadata(session, "identityVerificationRequired") === "true";
+
 const hostPayoutAmount = parseOptionalMoneyMetadata(
   session,
   "hostPayoutAmount"
@@ -794,10 +807,13 @@ const updatedReservation = await prisma.reservation.update({
   stripeChargeId: stripeFinancialRefs.stripeChargeId,
   stripeTransferId: stripeFinancialRefs.stripeTransferId,
   stripeApplicationFeeId: stripeFinancialRefs.stripeApplicationFeeId,
+  basePlatformFeeAmount,
   platformFeeAmount,
   hostPayoutAmount,
   hostPayoutStatus: hostPayoutStatus as any,
   hostPayoutLastSyncedAt: new Date(),
+  directBookingProtectionFeeAmount,
+  identityVerificationRequiredSnapshot,
 
   selectedAmenityIds,
   pricingBreakdown: pricingBreakdownJson,
@@ -814,6 +830,7 @@ const updatedReservation = await prisma.reservation.update({
   totalAmount: true,
   currency: true,
   stripeConnectedAccountId: true,
+  basePlatformFeeAmount: true,
   platformFeeAmount: true,
   hostPayoutAmount: true,
   hostPayoutStatus: true,
