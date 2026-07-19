@@ -29,13 +29,25 @@ const SECURE_PRECHECKIN_DISCLOSURE_VERSION =
 const SECURE_PRECHECKIN_DISCLOSURE_SOURCE =
   "DIRECT_BOOKING_WEB_FORM";
 
-const SECURE_PRECHECKIN_DISCLOSURE_TEXT =
-  "Secure Pre-check-in is required before access credentials are released. " +
-  "The primary guest must complete Identity Check and accept the Guest Agreement. " +
-  "Payment may confirm the reservation, but it does not complete these requirements or release access credentials. " +
-  "El Registro Seguro es obligatorio antes de que se liberen las credenciales de acceso. " +
-  "El huésped principal debe completar la Verificación de Identidad y aceptar el Acuerdo del Huésped. " +
-  "El pago puede confirmar la reservación, pero no completa estos requisitos ni libera las credenciales de acceso.";
+function buildSecurePrecheckinDisclosureText(
+  identityVerificationRequired: boolean
+) {
+  const identityRequirement = identityVerificationRequired
+    ? "The primary guest must complete Identity Check and accept the Guest Agreement. "
+    : "The primary guest must accept the Guest Agreement. Identity Check is not required for this reservation. ";
+  const identityRequirementEs = identityVerificationRequired
+    ? "El huésped principal debe completar la Verificación de Identidad y aceptar el Acuerdo del Huésped. "
+    : "El huésped principal debe aceptar el Acuerdo del Huésped. Esta reservación no requiere Verificación de Identidad. ";
+
+  return (
+    "Secure Pre-check-in is required before access credentials are released. " +
+    identityRequirement +
+    "Payment may confirm the reservation, but it does not complete these requirements or release access credentials. " +
+    "El Registro Seguro es obligatorio antes de que se liberen las credenciales de acceso. " +
+    identityRequirementEs +
+    "El pago puede confirmar la reservación, pero no completa estos requisitos ni libera las credenciales de acceso."
+  );
+}
 
 function parseDate(value: unknown) {
   const date = new Date(String(value ?? ""));
@@ -1002,7 +1014,9 @@ const guestAcceptedSecurePreCheckinRequirementAt =
   new Date().toISOString();
 
 const guestAcceptedSecurePreCheckinRequirementText =
-  SECURE_PRECHECKIN_DISCLOSURE_TEXT;
+  buildSecurePrecheckinDisclosureText(
+    identityVerificationRequired
+  );
     const cancellationPolicySnapshotWithGuestAcceptance = {
       ...cancellationPolicySnapshot,
       guestAcceptedCancellationTerms: true,
