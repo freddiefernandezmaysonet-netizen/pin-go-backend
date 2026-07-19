@@ -6,6 +6,7 @@ import {
 } from "../services/availability.service";
 import stripe from "../billing/stripe";
 import { calculateDirectBookingPricing } from "../services/direct-booking-pricing.service";
+import { calculateDirectBookingConnectFee } from "../services/direct-booking-connect-fee.service";
 import { assertDirectBookingPayoutReady } from "../services/stripe-connect.service";
 import {
   buildCancellationPolicySnapshot,
@@ -1027,15 +1028,17 @@ const guestAcceptedSecurePreCheckinRequirementText =
 
     const basePlatformFeeAmountCents =
       getDirectBookingPlatformFeeCents(totalAmountCents);
-    const directBookingProtectionFeeAmountCents = identityVerificationRequired
-      ? Math.min(
-          getIdentityCheckFeeCents(),
-          Math.max(0, totalAmountCents - basePlatformFeeAmountCents)
-        )
-      : 0;
-    const platformFeeAmountCents =
-      basePlatformFeeAmountCents + directBookingProtectionFeeAmountCents;
-    const hostPayoutAmountCents = totalAmountCents - platformFeeAmountCents;
+    const connectFee = calculateDirectBookingConnectFee({
+      totalAmountCents,
+      basePlatformFeeAmountCents,
+      identityCheckFeeAmountCents: identityVerificationRequired
+        ? getIdentityCheckFeeCents()
+        : 0,
+    });
+    const directBookingProtectionFeeAmountCents =
+      connectFee.identityCheckFeeAmountCents;
+    const platformFeeAmountCents = connectFee.platformFeeAmountCents;
+    const hostPayoutAmountCents = connectFee.hostPayoutAmountCents;
 
     const basePlatformFeeAmount = toMoneyFromCents(
       basePlatformFeeAmountCents
