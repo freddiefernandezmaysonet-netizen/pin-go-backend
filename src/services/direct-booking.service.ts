@@ -834,6 +834,7 @@ const updatedReservation = await prisma.reservation.update({
   platformFeeAmount: true,
   hostPayoutAmount: true,
   hostPayoutStatus: true,
+  identityVerificationRequiredSnapshot: true,
 },
 });
 
@@ -861,6 +862,9 @@ if (updatedReservation.guestEmail) {
     currency: updatedReservation.currency,
     manageReservationUrl,
     verificationUrl,
+    identityVerificationRequired:
+      updatedReservation
+        .identityVerificationRequiredSnapshot !== false,
     cancellationPolicyName: (cancellationPolicySnapshot as any).name ?? null,
     cancellationPolicyType: (cancellationPolicySnapshot as any).type ?? null,
     cancellationPolicySummary: getCancellationPolicySummaryForEmail(
