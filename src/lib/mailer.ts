@@ -2,6 +2,11 @@ import { Resend } from "resend";
 import {
   buildGuestReservationEmail,
 } from "./email-templates/guestReservationEmail";
+import {
+  getGuestIntlLocale,
+  resolveGuestLanguage,
+  type GuestLanguage,
+} from "../services/guest-language.service";
 
 const resendApiKey = String(process.env.RESEND_API_KEY ?? "").trim();
 const emailFrom = String(process.env.EMAIL_FROM ?? "").trim();
@@ -29,6 +34,7 @@ type SendGuestAccessPasscodeEmailInput = {
   validFrom: Date;
   validUntil: Date;
   propertyTimeZone?: string | null;
+  preferredLanguage?: string | null;
 };
 
 type CancellationRefundRuleEmailInput = {
@@ -55,6 +61,7 @@ type SendDirectBookingGuestConfirmationInput = {
   cancellationPolicySummary?: string | null;
   refundBasis?: string | null;
   refundRules?: CancellationRefundRuleEmailInput[] | null;
+  preferredLanguage?: string | null;
 };
 
 type SendDirectBookingHostNotificationInput = {
@@ -81,6 +88,7 @@ type SendManualReservationGuestConfirmationInput = {
   checkOut: Date;
   propertyTimeZone?: string | null;
   verificationUrl: string;
+  preferredLanguage?: string | null;
 };
 
 type SendDirectBookingGuestCancellationEmailInput = {
@@ -102,6 +110,7 @@ type SendDirectBookingGuestCancellationEmailInput = {
   refundBasis?: string | null;
   nonRefundableAmount?: number | null;
   manageReservationUrl?: string | null;
+  preferredLanguage?: string | null;
 };
 
 type SendDirectBookingHostCancellationNotificationInput = {
@@ -172,31 +181,17 @@ function normalizePropertyTimeZone(value?: string | null) {
   }
 }
 
-function formatBookingDate(date: Date, timeZone?: string | null) {
+function formatBookingDate(
+  date: Date,
+  timeZone?: string | null,
+  language: GuestLanguage = "en"
+) {
   const safeTimeZone = normalizePropertyTimeZone(timeZone);
 
-  return new Intl.DateTimeFormat("en-US", {
+  return new Intl.DateTimeFormat(getGuestIntlLocale(language), {
     timeZone: safeTimeZone,
     month: "short",
     day: "numeric",
-    year: "numeric",
-    hour: "numeric",
-    minute: "2-digit",
-    timeZoneName: "short",
-  }).format(date);
-}
-
-function formatBookingDateEs(
-  date: Date,
-  timeZone?: string | null
-) {
-  const safeTimeZone =
-    normalizePropertyTimeZone(timeZone);
-
-  return new Intl.DateTimeFormat("es-PR", {
-    timeZone: safeTimeZone,
-    day: "numeric",
-    month: "long",
     year: "numeric",
     hour: "numeric",
     minute: "2-digit",
@@ -206,17 +201,20 @@ function formatBookingDateEs(
 
 function formatBookingDateTime(
   value?: Date | string | null,
-  timeZone?: string | null
+  timeZone?: string | null,
+  language: GuestLanguage = "en"
 ) {
-  if (!value) return "Not available";
+  if (!value) return language === "es" ? "No disponible" : "Not available";
 
   const date = value instanceof Date ? value : new Date(value);
 
-  if (Number.isNaN(date.getTime())) return "Not available";
+  if (Number.isNaN(date.getTime())) {
+    return language === "es" ? "No disponible" : "Not available";
+  }
 
   const safeTimeZone = normalizePropertyTimeZone(timeZone);
 
-  return new Intl.DateTimeFormat("en-US", {
+  return new Intl.DateTimeFormat(getGuestIntlLocale(language), {
     timeZone: safeTimeZone,
     month: "short",
     day: "numeric",
@@ -227,12 +225,16 @@ function formatBookingDateTime(
   }).format(date);
 }
 
-function formatBookingAmount(amount?: number | null, currency?: string | null) {
+function formatBookingAmount(
+  amount?: number | null,
+  currency?: string | null,
+  language: GuestLanguage = "en"
+) {
   if (amount === null || amount === undefined || !Number.isFinite(Number(amount))) {
-    return "Not available";
+    return language === "es" ? "No disponible" : "Not available";
   }
 
-  return new Intl.NumberFormat("en-US", {
+  return new Intl.NumberFormat(getGuestIntlLocale(language), {
     style: "currency",
     currency: (currency || "usd").toUpperCase(),
     minimumFractionDigits: 2,
@@ -328,7 +330,8 @@ function getRefundExecutionBody({
 }
 
 function renderManageReservationBlock(
-  manageReservationUrl?: string | null
+  manageReservationUrl?: string | null,
+  language: GuestLanguage = "en"
 ) {
   const safeManageReservationUrl =
     getSafeUrl(
@@ -343,20 +346,18 @@ function renderManageReservationBlock(
     escapeHtml(
       safeManageReservationUrl
     );
+  const isSpanish = language === "es";
 
   return `
     <div style="background:#eff6ff;border:1px solid #bfdbfe;border-radius:16px;padding:20px;margin:22px 0;">
       <h3 style="margin:0 0 8px;color:#1e3a8a;">
-        Manage your reservation
-      </h3>
-
-      <h3 style="margin:0 0 14px;color:#1e40af;">
-        Administre su reservaci&oacute;n
+        ${isSpanish ? "Administre su reservaci&oacute;n" : "Manage your reservation"}
       </h3>
 
       <p style="margin:0 0 16px;color:#1e40af;">
-        Review your stay details, cancellation terms, refund eligibility, and available self-service options.
-        Revise los detalles de su estad&iacute;a, los t&eacute;rminos de cancelaci&oacute;n, la elegibilidad de reembolso y las opciones disponibles.
+        ${isSpanish
+          ? "Revise los detalles de su estad&iacute;a, los t&eacute;rminos de cancelaci&oacute;n, la elegibilidad de reembolso y las opciones disponibles."
+          : "Review your stay details, cancellation terms, refund eligibility, and available self-service options."}
       </p>
 
       <p style="margin:0 0 18px;">
@@ -364,12 +365,12 @@ function renderManageReservationBlock(
           href="${escapedUrl}"
           style="display:inline-block;background:#2563eb;color:#ffffff;text-decoration:none;padding:13px 18px;border-radius:12px;font-weight:800;"
         >
-          Manage reservation / Administrar reservaci&oacute;n
+          ${isSpanish ? "Administrar reservaci&oacute;n" : "Manage reservation"}
         </a>
       </p>
 
       <p style="margin:0;color:#475569;font-size:13px;">
-        Secure link / Enlace seguro:
+        ${isSpanish ? "Enlace seguro" : "Secure link"}:
         <br />
         <a
           href="${escapedUrl}"
@@ -388,6 +389,7 @@ function renderCancellationPolicyBlock({
   cancellationPolicySummary,
   refundBasis,
   refundRules,
+  language = "en",
 }: {
   cancellationPolicyName?: string | null;
   cancellationPolicyType?: string | null;
@@ -396,7 +398,9 @@ function renderCancellationPolicyBlock({
   refundRules?:
     | CancellationRefundRuleEmailInput[]
     | null;
+  language?: GuestLanguage;
 }) {
+  const isSpanish = language === "es";
   const hasPolicyContent =
     cancellationPolicyName ||
     cancellationPolicyType ||
@@ -419,27 +423,21 @@ function renderCancellationPolicyBlock({
       "NIGHTLY_SUBTOTAL" ||
     refundBasis ===
       "NIGHTLY_SUBTOTAL_ONLY"
-      ? "Nightly subtotal only / Solo subtotal de noches"
+      ? isSpanish ? "Solo subtotal de noches" : "Nightly subtotal only"
       : refundBasis ===
         "NIGHTLY_PLUS_CLEANING"
-      ? "Nightly subtotal and eligible cleaning fee / Noches y cargo de limpieza elegible"
+      ? isSpanish ? "Noches y cargo de limpieza elegible" : "Nightly subtotal and eligible cleaning fee"
       : refundBasis ===
         "TOTAL_AMOUNT"
-      ? "Eligible total amount / Total elegible"
+      ? isSpanish ? "Total elegible" : "Eligible total amount"
       : refundBasis
-      ? `${formatRefundBasis(
-          refundBasis
-        )} / Seg\u00fan la base configurada`
+      ? isSpanish ? "Según la base configurada" : formatRefundBasis(refundBasis)
       : null;
 
   return `
     <div style="background:#f8fafc;border:1px solid #dbeafe;border-radius:14px;padding:16px;margin:20px 0;">
       <h3 style="margin:0 0 8px;color:#111827;">
-        Cancellation &amp; refund policy
-      </h3>
-
-      <h3 style="margin:0 0 12px;color:#374151;">
-        Pol&iacute;tica de cancelaci&oacute;n y reembolso
+        ${isSpanish ? "Pol&iacute;tica de cancelaci&oacute;n y reembolso" : "Cancellation &amp; refund policy"}
       </h3>
 
       ${
@@ -447,11 +445,11 @@ function renderCancellationPolicyBlock({
         cancellationPolicyType
           ? `
             <p style="margin:0 0 8px;">
-              <strong>Policy / Pol&iacute;tica:</strong>
+              <strong>${isSpanish ? "Pol&iacute;tica" : "Policy"}:</strong>
               ${escapeHtml(
                 cancellationPolicyName ||
                   cancellationPolicyType ||
-                  "Configured by host"
+                  (isSpanish ? "Configurada por el anfitri&oacute;n" : "Configured by host")
               )}
             </p>
           `
@@ -462,7 +460,7 @@ function renderCancellationPolicyBlock({
         refundBasisLabel
           ? `
             <p style="margin:0 0 8px;">
-              <strong>Refund basis / Base del reembolso:</strong>
+              <strong>${isSpanish ? "Base del reembolso" : "Refund basis"}:</strong>
               ${escapeHtml(
                 refundBasisLabel
               )}
@@ -488,7 +486,7 @@ function renderCancellationPolicyBlock({
           ? `
             <div style="margin-top:12px;">
               <p style="margin:0 0 8px;font-weight:800;">
-                Refund schedule / Calendario de reembolso
+                ${isSpanish ? "Calendario de reembolso" : "Refund schedule"}
               </p>
 
               ${safeRules
@@ -516,8 +514,8 @@ function renderCancellationPolicyBlock({
                       </p>
 
                       <p style="margin:4px 0 0;color:#4b5563;font-size:13px;">
-                        ${daysBeforeCheckIn}+ days before check-in /
-                        ${daysBeforeCheckIn}+ d&iacute;as antes del check-in
+                        ${daysBeforeCheckIn}+
+                        ${isSpanish ? "d&iacute;as antes del check-in" : "days before check-in"}
                       </p>
 
                       ${
@@ -547,12 +545,10 @@ function renderCancellationPolicyBlock({
           "NIGHTLY_SUBTOTAL_ONLY"
           ? `
             <div style="margin:12px 0 0;color:#92400e;background:#fffbeb;border:1px solid #fde68a;border-radius:10px;padding:10px;font-size:13px;">
-              <p style="margin:0 0 8px;">
-                Refund percentages apply only to the nightly subtotal. Cleaning fees, service fees, taxes, add-ons, and other non-nightly charges may not be refundable unless required by law or specifically stated in the policy.
-              </p>
-
               <p style="margin:0;">
-                Los porcentajes de reembolso aplican solamente al subtotal de noches. Los cargos de limpieza, servicio, impuestos, complementos y otros cargos que no correspondan a noches pueden no ser reembolsables, salvo que la ley o la pol&iacute;tica indiquen lo contrario.
+                ${isSpanish
+                  ? "Los porcentajes de reembolso aplican solamente al subtotal de noches. Los cargos de limpieza, servicio, impuestos, complementos y otros cargos que no correspondan a noches pueden no ser reembolsables, salvo que la ley o la pol&iacute;tica indiquen lo contrario."
+                  : "Refund percentages apply only to the nightly subtotal. Cleaning fees, service fees, taxes, add-ons, and other non-nightly charges may not be refundable unless required by law or specifically stated in the policy."}
               </p>
             </div>
           `
@@ -756,7 +752,10 @@ export async function sendDirectBookingGuestConfirmation(
     cancellationPolicySummary,
     refundBasis,
     refundRules,
+    preferredLanguage,
   } = input;
+  const language = resolveGuestLanguage(preferredLanguage);
+  const isSpanish = language === "es";
 
   const dateTimeZone =
     normalizePropertyTimeZone(
@@ -784,7 +783,8 @@ export async function sendDirectBookingGuestConfirmation(
 
   const manageReservationBlock =
     renderManageReservationBlock(
-      manageReservationUrl
+      manageReservationUrl,
+      language
     );
 
   if (!manageReservationBlock) {
@@ -800,6 +800,7 @@ export async function sendDirectBookingGuestConfirmation(
       cancellationPolicySummary,
       refundBasis,
       refundRules,
+      language,
     });
 
  const safeVerificationUrl =
@@ -821,7 +822,7 @@ const verificationBlock = `
           margin:22px 0;
         "
       >
-        <div lang="en">
+        <div lang="${language}">
           <p
             style="
               margin:0 0 6px;
@@ -832,7 +833,7 @@ const verificationBlock = `
               text-transform:uppercase;
             "
           >
-            Action required
+            ${isSpanish ? "Acci&oacute;n requerida" : "Action required"}
           </p>
 
           <h2
@@ -841,7 +842,7 @@ const verificationBlock = `
               color:#1e3a8a;
             "
           >
-            Complete secure pre-check-in
+            ${isSpanish ? "Complete el registro seguro" : "Complete secure pre-check-in"}
           </h2>
 
           <p
@@ -850,49 +851,9 @@ const verificationBlock = `
               color:#1e40af;
             "
           >
-            Complete identity verification,
-            review and accept the property
-            rules and cancellation policy,
-            and sign the guest agreement
-            before digital access is released.
-          </p>
-        </div>
-
-        <div lang="es">
-          <p
-            style="
-              margin:0 0 6px;
-              color:#1d4ed8;
-              font-size:12px;
-              font-weight:800;
-              letter-spacing:0.08em;
-              text-transform:uppercase;
-            "
-          >
-            Acci&oacute;n requerida
-          </p>
-
-          <h2
-            style="
-              margin:0 0 10px;
-              color:#1e3a8a;
-            "
-          >
-            Complete el registro seguro
-          </h2>
-
-          <p
-            style="
-              margin:0 0 18px;
-              color:#1e40af;
-            "
-          >
-            Complete la verificaci&oacute;n de
-            identidad, revise y acepte las reglas
-            de la propiedad y la pol&iacute;tica de
-            cancelaci&oacute;n, y firme el acuerdo
-            del hu&eacute;sped antes de recibir el
-            acceso digital.
+            ${isSpanish
+              ? "Complete la verificaci&oacute;n de identidad, revise y acepte las reglas de la propiedad y la pol&iacute;tica de cancelaci&oacute;n, y firme el acuerdo del hu&eacute;sped antes de recibir el acceso digital."
+              : "Complete identity verification, review and accept the property rules and cancellation policy, and sign the guest agreement before digital access is released."}
           </p>
         </div>
 
@@ -909,8 +870,7 @@ const verificationBlock = `
               font-weight:800;
             "
           >
-            Complete pre-check-in /
-            Completar registro seguro
+            ${isSpanish ? "Completar registro seguro" : "Complete pre-check-in"}
           </a>
         </p>
 
@@ -921,8 +881,7 @@ const verificationBlock = `
             font-size:13px;
           "
         >
-          Secure verification link /
-          Enlace seguro de verificaci&oacute;n:
+          ${isSpanish ? "Enlace seguro de verificaci&oacute;n" : "Secure verification link"}:
           <br />
 
           <a
@@ -945,7 +904,8 @@ const verificationBlock = `
     )
       ? formatBookingAmount(
           totalAmount,
-          currency
+          currency,
+          language
         )
       : undefined;
 
@@ -956,39 +916,14 @@ const verificationBlock = `
       reservationNumber,
       guestName,
       propertyName,
-
-      checkInEn:
-        formatBookingDate(
-          checkIn,
-          dateTimeZone
-        ),
-
-      checkInEs:
-        formatBookingDateEs(
-          checkIn,
-          dateTimeZone
-        ),
-
-      checkOutEn:
-        formatBookingDate(
-          checkOut,
-          dateTimeZone
-        ),
-
-      checkOutEs:
-        formatBookingDateEs(
-          checkOut,
-          dateTimeZone
-        ),
+      language,
+      checkIn: formatBookingDate(checkIn, dateTimeZone, language),
+      checkOut: formatBookingDate(checkOut, dateTimeZone, language),
 
       totalPaid:
         formattedTotalPaid,
 
-      paymentStatusEn:
-        "Paid",
-
-      paymentStatusEs:
-        "Pagado",
+      paymentStatus: isSpanish ? "Pagado" : "Paid",
 
       verificationBlock,
       manageReservationBlock,
@@ -1002,7 +937,7 @@ const verificationBlock = `
       to,
 
       subject:
-        `Reservation Confirmed | Reservaci\u00f3n Confirmada #${reservationNumber} - ${propertyName}`,
+        `${isSpanish ? "Reservación confirmada" : "Reservation confirmed"} #${reservationNumber} - ${propertyName}`,
 
       html: emailHtml,
     });
