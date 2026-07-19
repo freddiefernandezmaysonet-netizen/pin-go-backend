@@ -13,6 +13,7 @@ model Organization {
   createdAt        DateTime        @default(now())
   slug             String?         @unique
   publicBookingEnabled Boolean     @default(false)
+  guestCommunicationEmail String?
   updatedAt        DateTime        @updatedAt
   stripeCustomerId String?
 
