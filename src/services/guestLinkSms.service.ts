@@ -42,6 +42,7 @@ export async function sendGuestAccessLinkSms(
       preferredLanguage: true,
       guestToken: true,
       guestTokenExpiresAt: true,
+      guestAgreementSnapshot: true,
       verificationStatus: true,
       property: {
         select: {
@@ -64,8 +65,26 @@ export async function sendGuestAccessLinkSms(
   if (!r.guestToken) {
     return { ok: false, skipped: true, error: "No guestToken" };
   }
-  
-if (r.verificationStatus !== "COMPLETED") {
+  const guestAgreementSnapshot =
+    r.guestAgreementSnapshot &&
+    typeof r.guestAgreementSnapshot === "object" &&
+    !Array.isArray(r.guestAgreementSnapshot)
+      ? (r.guestAgreementSnapshot as Record<
+          string,
+          unknown
+        >)
+      : null;
+
+  const identityVerificationRequired =
+    guestAgreementSnapshot
+      ?.requiresIdentityVerification !== false;
+
+  const identityRequirementSatisfied =
+    identityVerificationRequired
+      ? r.verificationStatus === "COMPLETED"
+      : r.verificationStatus === "NOT_REQUIRED";
+
+  if (!identityRequirementSatisfied) {
     return {
       ok: false,
       skipped: true,
