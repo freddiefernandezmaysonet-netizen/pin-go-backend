@@ -7,6 +7,7 @@ import {
 import stripe from "../billing/stripe";
 import { calculateDirectBookingPricing } from "../services/direct-booking-pricing.service";
 import { assertDirectBookingPayoutReady } from "../services/stripe-connect.service";
+import { getActivePropertyGuestAgreement } from "../services/guest-agreement.service";
 import {
   buildCancellationPolicySnapshot,
   buildGuestCancellationTermsText,
@@ -277,6 +278,18 @@ function getDirectBookingPlatformFeeCents(totalAmountCents: number) {
   const feeCents = percentFeeCents + fixedCents;
 
   return Math.min(Math.max(0, feeCents), totalAmountCents);
+}
+
+function getIdentityCheckFeeCents() {
+  const rawAmount = Number(
+    process.env.DIRECT_BOOKING_PROTECTION_FEE_AMOUNT ?? "2.50"
+  );
+
+  if (!Number.isFinite(rawAmount) || rawAmount < 0) {
+    throw new Error("DIRECT_BOOKING_PROTECTION_FEE_AMOUNT_INVALID");
+  }
+
+  return Math.round(rawAmount * 100);
 }
 
 function toMoneyFromCents(cents: number) {
@@ -962,6 +975,12 @@ const totalAmountCents = pricing.totalAmountCents;
     const cancellationPolicySnapshot =
       await buildCancellationPolicySnapshot(property.id);
 
+    const activeGuestAgreement =
+      await getActivePropertyGuestAgreement(prisma, property.id);
+
+    const identityVerificationRequired =
+      activeGuestAgreement?.requiresIdentityVerification === true;
+
    const guestAcceptedCancellationTermsAt = new Date().toISOString();
    const guestAcceptedCancellationTermsText =
      buildGuestCancellationTermsText(
@@ -1011,10 +1030,24 @@ const guestAcceptedSecurePreCheckinRequirementText =
       throw error;
     }
 
-    const platformFeeAmountCents =
+    const basePlatformFeeAmountCents =
       getDirectBookingPlatformFeeCents(totalAmountCents);
+    const directBookingProtectionFeeAmountCents = identityVerificationRequired
+      ? Math.min(
+          getIdentityCheckFeeCents(),
+          Math.max(0, totalAmountCents - basePlatformFeeAmountCents)
+        )
+      : 0;
+    const platformFeeAmountCents =
+      basePlatformFeeAmountCents + directBookingProtectionFeeAmountCents;
     const hostPayoutAmountCents = totalAmountCents - platformFeeAmountCents;
 
+    const basePlatformFeeAmount = toMoneyFromCents(
+      basePlatformFeeAmountCents
+    );
+    const directBookingProtectionFeeAmount = toMoneyFromCents(
+      directBookingProtectionFeeAmountCents
+    );
     const platformFeeAmount = toMoneyFromCents(platformFeeAmountCents);
     const hostPayoutAmount = toMoneyFromCents(hostPayoutAmountCents);
 
@@ -1057,8 +1090,6 @@ const guestAcceptedSecurePreCheckinRequirementText =
         propertyId: property.id,
         checkIn: stayDates.checkIn.toISOString(),
         checkOut: stayDates.checkOut.toISOString(),
-        checkInDate: checkInDateKey,
-        checkOutDate: checkOutDateKey,
         propertyTimezone: stayDates.timeZone,
         propertyCheckInTime: stayDates.checkInTime,
         propertyCheckOutTime: stayDates.checkOutTime,
@@ -1066,7 +1097,6 @@ const guestAcceptedSecurePreCheckinRequirementText =
         guestEmail: String(guestEmail).trim(),
         guestPhone: guestPhone ? String(guestPhone).trim() : "",
         stayNotificationsConsent: String(stayNotificationsConsent === true),
-        smsConsent: String(stayNotificationsConsent === true),
         consentSource: "DIRECT_BOOKING_WEB_FORM",
         consentVersion: "stay_notifications_v1",
 
@@ -1089,6 +1119,11 @@ const guestAcceptedSecurePreCheckinRequirementText =
         totalAmount: String(pricing.totalAmount),
         
         stripeConnectedAccountId: connectedAccountId,
+        basePlatformFeeAmount: String(basePlatformFeeAmount),
+        directBookingProtectionFeeAmount: String(
+          directBookingProtectionFeeAmount
+        ),
+        identityVerificationRequired: String(identityVerificationRequired),
         platformFeeAmount: String(platformFeeAmount),
         hostPayoutAmount: String(hostPayoutAmount),
         hostPayoutStatus: "ROUTED_TO_CONNECT",
