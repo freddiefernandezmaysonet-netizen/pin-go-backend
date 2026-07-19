@@ -853,6 +853,7 @@ if (updatedReservation.guestEmail) {
     refundRules: getCancellationRefundRulesForEmail(
       cancellationPolicySnapshot
     ),
+    preferredLanguage,
   };
 
   const guestEmailDeliveryResult = await sendLoggedEmail({
@@ -860,7 +861,7 @@ if (updatedReservation.guestEmail) {
     type: "DIRECT_BOOKING_GUEST_CONFIRMATION",
     to: updatedReservation.guestEmail,
     subject:
-  `Reservation confirmed / Reservaci\u00f3n confirmada #${updatedReservation.reservationNumber} - ${property.name}`,
+      `${preferredLanguage === "es" ? "Reservación confirmada" : "Reservation confirmed"} #${updatedReservation.reservationNumber} - ${property.name}`,
     reservationId: updatedReservation.id,
     propertyId: property.id,
     organizationId: property.organizationId,
