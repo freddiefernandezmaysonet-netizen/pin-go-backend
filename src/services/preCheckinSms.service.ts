@@ -1,6 +1,11 @@
 import { PrismaClient } from "@prisma/client";
 import { sendSms } from "../integrations/twilio/twilio.client";
 import { buildGuestLink } from "./guestToken";
+import {
+  getGuestIntlLocale,
+  resolveGuestLanguage,
+  type GuestLanguage,
+} from "./guest-language.service";
 
 function toNumber(value: unknown): number | null {
   if (value === null || value === undefined || value === "") return null;
@@ -96,75 +101,43 @@ function buildPreCheckinMessage(input: {
   address: string | null;
   mapsLink: string | null;
   verifyLink: string | null;
+  language: GuestLanguage;
 }) {
   const guestName = String(input.guestName ?? "").trim();
-  const greetingEs = guestName ? `Hola ${guestName},` : "Hola,";
-  const greetingEn = guestName ? `Hi ${guestName},` : "Hi,";
+  const isSpanish = input.language === "es";
+  const greeting = guestName
+    ? `${isSpanish ? "Hola" : "Hi"} ${guestName},`
+    : isSpanish
+      ? "Hola,"
+      : "Hi,";
 
-  let es = `${greetingEs}
-
-Tu check-in en ${input.propertyName} está programado para hoy a las ${input.checkInTime}.`;
-
-  let en = `${greetingEn}
-
-Your check-in at ${input.propertyName} is scheduled for today at ${input.checkInTime}.`;
+  let message = isSpanish
+    ? `${greeting}\n\nTu check-in en ${input.propertyName} está programado para hoy a las ${input.checkInTime}.`
+    : `${greeting}\n\nYour check-in at ${input.propertyName} is scheduled for today at ${input.checkInTime}.`;
 
   if (input.address) {
-    es += `
-
-Dirección:
-${input.address}`;
-
-    en += `
-
-Address:
-${input.address}`;
+    message += isSpanish
+      ? `\n\nDirección:\n${input.address}`
+      : `\n\nAddress:\n${input.address}`;
   }
 
   if (input.mapsLink) {
-    es += `
-
-Ubicación exacta:
-${input.mapsLink}`;
-
-    en += `
-
-Exact location:
-${input.mapsLink}`;
+    message += isSpanish
+      ? `\n\nUbicación exacta:\n${input.mapsLink}`
+      : `\n\nExact location:\n${input.mapsLink}`;
   }
 
- if (input.verifyLink) {
-  es += `
+  if (input.verifyLink) {
+    message += isSpanish
+      ? `\n\n🛡️ Antes de recibir sus accesos digitales, complete su registro previo al check-in:\n\n${input.verifyLink}`
+      : `\n\n🛡️ Before receiving your digital access credentials, please complete your secure pre-check-in verification:\n\n${input.verifyLink}`;
+  }
 
-🛡️ Antes de recibir sus accesos digitales, complete su registro previo al check-in:
+  message += isSpanish
+    ? "\n\nTu acceso digital será enviado automáticamente luego de completar la verificación.\n\nTe esperamos."
+    : "\n\nYour digital access will be delivered automatically after verification is completed.\n\nWe look forward to your arrival.";
 
-${input.verifyLink}`;
-}
-
-es += `
-
-Tu acceso digital será enviado automáticamente luego de completar la verificación.
-
-Te esperamos.`;
-  
-if (input.verifyLink) {
-  en += `
-
-🛡️ Before receiving your digital access credentials, please complete your secure pre check-in verification:
-
-${input.verifyLink}`;
-}
-
-en += `
-
-Your digital access will be delivered automatically after verification is completed.
-
-We look forward to your arrival.`;
-  return `${es}
-
----
-
-${en}`;
+  return message;
 }
 
 export async function sendPreCheckinSms(
@@ -190,6 +163,7 @@ export async function sendPreCheckinSms(
         id: true,
         guestName: true,
         guestPhone: true,
+        preferredLanguage: true,
         guestToken: true,
         checkIn: true,
         property: {
@@ -228,7 +202,9 @@ export async function sendPreCheckinSms(
       country: r.property?.country,
     });
 
-   const checkInTime = new Intl.DateTimeFormat("en-US", {
+    const language = resolveGuestLanguage(r.preferredLanguage);
+
+   const checkInTime = new Intl.DateTimeFormat(getGuestIntlLocale(language), {
   timeZone: r.property?.timezone ?? "UTC",
   hour: "2-digit",
   minute: "2-digit",
@@ -242,6 +218,7 @@ export async function sendPreCheckinSms(
       address,
       mapsLink,
       verifyLink,
+      language,
     });
 
     const sent = await sendSms(r.guestPhone, body);
