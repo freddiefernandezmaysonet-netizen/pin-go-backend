@@ -8,6 +8,7 @@ import stripe from "../billing/stripe";
 import { calculateDirectBookingPricing } from "../services/direct-booking-pricing.service";
 import { calculateDirectBookingConnectFee } from "../services/direct-booking-connect-fee.service";
 import { assertDirectBookingPayoutReady } from "../services/stripe-connect.service";
+import { getActivePropertyGuestAgreement } from "../services/guest-agreement.service";
 import {
   buildCancellationPolicySnapshot,
   buildGuestCancellationTermsText,
@@ -975,7 +976,20 @@ const totalAmountCents = pricing.totalAmountCents;
     const cancellationPolicySnapshot =
       await buildCancellationPolicySnapshot(property.id);
 
-    const identityVerificationRequired = true;
+    const activeGuestAgreement =
+      await getActivePropertyGuestAgreement(prisma, property.id);
+
+    if (!activeGuestAgreement) {
+      return res.status(409).json({
+        ok: false,
+        error: "GUEST_ACCESS_SETTINGS_NOT_CONFIGURED",
+        message:
+          "Secure Guest Access must be configured before this property can accept Direct Booking payments.",
+      });
+    }
+
+    const identityVerificationRequired =
+      activeGuestAgreement.requiresIdentityVerification;
 
    const guestAcceptedCancellationTermsAt = new Date().toISOString();
    const guestAcceptedCancellationTermsText =
