@@ -20,6 +20,7 @@ import {
 } from "../lib/mailer";
 import { deserializeCancellationPolicySnapshotFromStripeMetadata } from "./cancellation-policy.service";
 import { dispatchPendingCleaningConfirmationForReservation } from "./cleaning-confirmation-dispatch.service";
+import { resolveOrganizationGuestReplyTo } from "./organization-guest-email.service";
 
 const prisma = new PrismaClient();
 
@@ -850,8 +851,15 @@ const verificationUrl =
     : null;
 
 if (updatedReservation.guestEmail) {
+  const guestReplyTo =
+    await resolveOrganizationGuestReplyTo(
+      prisma,
+      property.organizationId
+    );
+
   const directBookingGuestEmailInput = {
     to: updatedReservation.guestEmail,
+    replyTo: guestReplyTo.email,
     reservationNumber: updatedReservation.reservationNumber,
     guestName: updatedReservation.guestName,
     propertyName: property.name,
