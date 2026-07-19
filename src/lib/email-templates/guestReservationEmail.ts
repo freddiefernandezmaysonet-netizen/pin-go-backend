@@ -1,3 +1,5 @@
+import type { GuestLanguage } from "../../services/guest-language.service";
+
 export type GuestReservationEmailMode =
   | "DIRECT_BOOKING"
   | "MANUAL";
@@ -7,15 +9,12 @@ export interface GuestReservationEmailInput {
   reservationNumber: string;
   guestName?: string | null;
   propertyName: string;
-
-  checkInEn: string;
-  checkInEs: string;
-  checkOutEn: string;
-  checkOutEs: string;
+  language: GuestLanguage;
+  checkIn: string;
+  checkOut: string;
 
   totalPaid?: string | null;
-  paymentStatusEn?: string | null;
-  paymentStatusEs?: string | null;
+  paymentStatus?: string | null;
 
   /**
    * Estos bloques deben ser generados internamente por Pin&Go.
@@ -154,6 +153,14 @@ export function buildGuestReservationEmail(
 ): string {
   const copy =
     EMAIL_COPY[input.mode];
+  const isSpanish = input.language === "es";
+  const title = isSpanish ? copy.titleEs : copy.titleEn;
+  const subtitle = isSpanish ? copy.subtitleEs : copy.subtitleEn;
+  const badge = input.mode === "MANUAL"
+    ? isSpanish
+      ? "Reservaci&oacute;n Pin&amp;Go"
+      : "Pin&amp;Go Reservation"
+    : copy.badge;
 
   const reservationNumber =
     escapeHtml(
@@ -165,36 +172,20 @@ export function buildGuestReservationEmail(
       input.propertyName
     );
 
-  const guestNameEn =
+  const guestName =
     escapeHtml(
       input.guestName?.trim() ||
-        "Guest"
+        (isSpanish ? "Huésped" : "Guest")
     );
 
-  const guestNameEs =
+  const checkIn =
     escapeHtml(
-      input.guestName?.trim() ||
-        "Huésped"
+      input.checkIn
     );
 
-  const checkInEn =
+  const checkOut =
     escapeHtml(
-      input.checkInEn
-    );
-
-  const checkInEs =
-    escapeHtml(
-      input.checkInEs
-    );
-
-  const checkOutEn =
-    escapeHtml(
-      input.checkOutEn
-    );
-
-  const checkOutEs =
-    escapeHtml(
-      input.checkOutEs
+      input.checkOut
     );
 
   const totalPaid =
@@ -204,55 +195,28 @@ export function buildGuestReservationEmail(
         )
       : null;
 
-  const paymentStatusEn =
-    input.paymentStatusEn
+  const paymentStatus =
+    input.paymentStatus
       ? escapeHtml(
-          input.paymentStatusEn
+          input.paymentStatus
         )
       : null;
 
-  const paymentStatusEs =
-    input.paymentStatusEs
-      ? escapeHtml(
-          input.paymentStatusEs
-        )
-      : null;
-
-  const paymentRowsEn = `
+  const paymentRows = `
     ${
       totalPaid
         ? renderDetailRow(
-            "Total paid",
+            isSpanish ? "Total pagado" : "Total paid",
             totalPaid
           )
         : ""
     }
 
     ${
-      paymentStatusEn
+      paymentStatus
         ? renderDetailRow(
-            "Payment status",
-            paymentStatusEn
-          )
-        : ""
-    }
-  `;
-
-  const paymentRowsEs = `
-    ${
-      totalPaid
-        ? renderDetailRow(
-            "Total pagado",
-            totalPaid
-          )
-        : ""
-    }
-
-    ${
-      paymentStatusEs
-        ? renderDetailRow(
-            "Estado del pago",
-            paymentStatusEs
+            isSpanish ? "Estado del pago" : "Payment status",
+            paymentStatus
           )
         : ""
     }
@@ -276,7 +240,7 @@ export function buildGuestReservationEmail(
   return `
     <!doctype html>
 
-    <html lang="en">
+    <html lang="${input.language}">
       <head>
         <meta charset="utf-8" />
 
@@ -286,8 +250,7 @@ export function buildGuestReservationEmail(
         />
 
         <title>
-          ${copy.titleEn} |
-          ${copy.titleEs}
+          ${title}
         </title>
       </head>
 
@@ -307,8 +270,7 @@ export function buildGuestReservationEmail(
             color:transparent;
           "
         >
-          ${copy.titleEn} /
-          ${copy.titleEs}
+          ${title}
           #${reservationNumber}
         </div>
 
@@ -344,7 +306,7 @@ export function buildGuestReservationEmail(
                 font-weight:800;
               "
             >
-              ${copy.badge}
+              ${badge}
             </p>
 
             <h1
@@ -354,18 +316,8 @@ export function buildGuestReservationEmail(
                 line-height:1.15;
               "
             >
-              ${copy.titleEn}
+              ${title}
             </h1>
-
-            <h2
-              style="
-                margin:8px 0 0;
-                font-size:22px;
-                line-height:1.2;
-              "
-            >
-              ${copy.titleEs}
-            </h2>
 
             <p
               style="
@@ -374,8 +326,7 @@ export function buildGuestReservationEmail(
                 font-weight:700;
               "
             >
-              Reservation /
-              Reservaci&oacute;n
+              ${isSpanish ? "Reservaci&oacute;n" : "Reservation"}
               #${reservationNumber}
             </p>
 
@@ -385,23 +336,12 @@ export function buildGuestReservationEmail(
                 color:#dbeafe;
               "
             >
-              ${copy.subtitleEn}
-            </p>
-
-            <p
-              style="
-                margin:4px 0 0;
-                color:#dbeafe;
-              "
-            >
-              ${copy.subtitleEs}
+              ${subtitle}
             </p>
           </div>
 
-          <!-- ENGLISH -->
-
           <div
-            lang="en"
+            lang="${input.language}"
             style="
               background:#ffffff;
               border:1px solid #e2e8f0;
@@ -420,15 +360,15 @@ export function buildGuestReservationEmail(
                 text-transform:uppercase;
               "
             >
-              English
+              ${isSpanish ? "Espa&ntilde;ol" : "English"}
             </p>
 
             <p style="margin:0 0 14px;">
-              Hello ${guestNameEn},
+              ${isSpanish ? "Hola" : "Hello"} ${guestName},
             </p>
 
             <p style="margin:0 0 18px;">
-              ${copy.introEn(
+              ${(isSpanish ? copy.introEs : copy.introEn)(
                 propertyName
               )}
             </p>
@@ -446,26 +386,28 @@ export function buildGuestReservationEmail(
               "
             >
               ${renderDetailRow(
-                "Reservation number",
+                isSpanish
+                  ? "N&uacute;mero de reservaci&oacute;n"
+                  : "Reservation number",
                 `#${reservationNumber}`
               )}
 
               ${renderDetailRow(
-                "Property",
+                isSpanish ? "Propiedad" : "Property",
                 propertyName
               )}
 
               ${renderDetailRow(
-                "Check-in",
-                checkInEn
+                isSpanish ? "Entrada" : "Check-in",
+                checkIn
               )}
 
               ${renderDetailRow(
-                "Check-out",
-                checkOutEn
+                isSpanish ? "Salida" : "Check-out",
+                checkOut
               )}
 
-              ${paymentRowsEn}
+              ${paymentRows}
             </table>
 
             <p
@@ -475,94 +417,10 @@ export function buildGuestReservationEmail(
               "
             >
               <strong>
-                Next step:
+                ${isSpanish ? "Pr&oacute;ximo paso:" : "Next step:"}
               </strong>
 
-              ${copy.nextStepEn}
-            </p>
-          </div>
-
-          <!-- ESPAÑOL -->
-
-          <div
-            lang="es"
-            style="
-              background:#ffffff;
-              border:1px solid #e2e8f0;
-              border-radius:16px;
-              padding:20px;
-              margin:20px 0;
-            "
-          >
-            <p
-              style="
-                margin:0 0 6px;
-                color:#2563eb;
-                font-size:12px;
-                font-weight:800;
-                letter-spacing:0.08em;
-                text-transform:uppercase;
-              "
-            >
-              Espa&ntilde;ol
-            </p>
-
-            <p style="margin:0 0 14px;">
-              Hola ${guestNameEs},
-            </p>
-
-            <p style="margin:0 0 18px;">
-              ${copy.introEs(
-                propertyName
-              )}
-            </p>
-
-            <table
-              role="presentation"
-              width="100%"
-              cellspacing="0"
-              cellpadding="0"
-              style="
-                border-collapse:collapse;
-                background:#f8fafc;
-                border:1px solid #e2e8f0;
-                border-radius:12px;
-              "
-            >
-              ${renderDetailRow(
-                "N&uacute;mero de reservaci&oacute;n",
-                `#${reservationNumber}`
-              )}
-
-              ${renderDetailRow(
-                "Propiedad",
-                propertyName
-              )}
-
-              ${renderDetailRow(
-                "Entrada",
-                checkInEs
-              )}
-
-              ${renderDetailRow(
-                "Salida",
-                checkOutEs
-              )}
-
-              ${paymentRowsEs}
-            </table>
-
-            <p
-              style="
-                margin:18px 0 0;
-                color:#475569;
-              "
-            >
-              <strong>
-                Pr&oacute;ximo paso:
-              </strong>
-
-              ${copy.nextStepEs}
+              ${isSpanish ? copy.nextStepEs : copy.nextStepEn}
             </p>
           </div>
 
@@ -584,51 +442,19 @@ export function buildGuestReservationEmail(
               color:#14532d;
             "
           >
-            <div lang="en">
+            <div lang="${input.language}">
               <h3
                 style="
                   margin:0 0 8px;
                 "
               >
-                Smart access
+                ${isSpanish ? "Acceso inteligente" : "Smart access"}
               </h3>
 
               <p style="margin:0;">
-                Digital access remains
-                protected until the
-                property's secure check-in
-                requirements and operational
-                checks are complete. Access
-                instructions may be delivered
-                closer to check-in.
-              </p>
-            </div>
-
-            <hr
-              style="
-                border:none;
-                border-top:1px solid #bbf7d0;
-                margin:16px 0;
-              "
-            />
-
-            <div lang="es">
-              <h3
-                style="
-                  margin:0 0 8px;
-                "
-              >
-                Acceso inteligente
-              </h3>
-
-              <p style="margin:0;">
-                El acceso digital permanecer&aacute;
-                protegido hasta completar los
-                requisitos de registro seguro y
-                las validaciones operacionales
-                de la propiedad. Las instrucciones
-                de acceso pueden enviarse m&aacute;s
-                cerca de la entrada.
+                ${isSpanish
+                  ? "El acceso digital permanecer&aacute; protegido hasta completar los requisitos de registro seguro y las validaciones operacionales de la propiedad. Las instrucciones de acceso pueden enviarse m&aacute;s cerca de la entrada."
+                  : "Digital access remains protected until the property's secure check-in requirements and operational checks are complete. Access instructions may be delivered closer to check-in."}
               </p>
             </div>
           </div>
@@ -636,21 +462,11 @@ export function buildGuestReservationEmail(
           <!-- SIGNATURE -->
 
           <div
-            lang="en"
+            lang="${input.language}"
             style="margin-top:24px;"
           >
             <p style="margin:0;">
-              Thank you,<br />
-              Pin&amp;Go
-            </p>
-          </div>
-
-          <div
-            lang="es"
-            style="margin-top:18px;"
-          >
-            <p style="margin:0;">
-              Gracias,<br />
+              ${isSpanish ? "Gracias" : "Thank you"},<br />
               Pin&amp;Go
             </p>
           </div>
@@ -670,13 +486,9 @@ export function buildGuestReservationEmail(
               font-size:12px;
             "
           >
-            This is a transactional message
-            regarding your reservation.
-
-            <br />
-
-            Este es un mensaje transaccional
-            relacionado con su reservaci&oacute;n.
+            ${isSpanish
+              ? "Este es un mensaje transaccional relacionado con su reservaci&oacute;n."
+              : "This is a transactional message regarding your reservation."}
           </p>
         </div>
       </body>
