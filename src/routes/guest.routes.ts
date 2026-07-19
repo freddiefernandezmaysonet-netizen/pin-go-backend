@@ -866,6 +866,9 @@ export function buildGuestRouter(prisma: PrismaClient) {
             );
         }
 
+        const identityVerificationRequired =
+          agreement.requiresIdentityVerification !== false;
+
                 const cancellationPolicy =
           readCancellationPolicyView(
             reservation
@@ -962,6 +965,7 @@ export function buildGuestRouter(prisma: PrismaClient) {
         }
 
         if (
+          identityVerificationRequired &&
           reservation.verificationStatus ===
           "REVIEW_REQUIRED"
         ) {
@@ -997,11 +1001,18 @@ export function buildGuestRouter(prisma: PrismaClient) {
             );
         }
 
-        if (
-          reservation.verificationStatus ===
-            "COMPLETED" &&
-          reservation.verifiedAt
-        ) {
+        const identityRequirementCompleted =
+          identityVerificationRequired
+            ? reservation.verificationStatus ===
+                "COMPLETED" &&
+              Boolean(reservation.verifiedAt)
+            : reservation.verificationStatus ===
+                "NOT_REQUIRED" &&
+              Boolean(
+                reservation.guestAgreementSignedAt
+              );
+
+        if (identityRequirementCompleted) {
           const readiness =
             await evaluateGuestAccessReadiness(
               prisma,
@@ -1018,10 +1029,12 @@ export function buildGuestRouter(prisma: PrismaClient) {
             .send(
               renderPage({
                 title:
-                  "Pin&Go • Verification Complete",
+                  "Pin&Go • Registration Complete",
                 badge: {
                   text: readiness.ready
-                    ? "Verificación completada"
+                    ? identityVerificationRequired
+                      ? "Verificación completada"
+                      : "Registro completado"
                     : "Procesando requisitos",
                   tone: readiness.ready
                     ? "good"
@@ -1050,7 +1063,11 @@ export function buildGuestRouter(prisma: PrismaClient) {
                     </div>
                     <div class="row">
                       <span class="k">Identidad</span>
-                      <span class="v">Verificada</span>
+                      <span class="v">${
+                        identityVerificationRequired
+                          ? "Verificada"
+                          : "No requerida"
+                      }</span>
                     </div>
                     <div class="row">
                       <span class="k">Acuerdo</span>
@@ -1083,6 +1100,7 @@ export function buildGuestRouter(prisma: PrismaClient) {
           "returned";
 
         if (
+          identityVerificationRequired &&
           returnedFromIdentity &&
           reservation.verificationStatus ===
             "IN_PROGRESS"
@@ -1168,9 +1186,12 @@ export function buildGuestRouter(prisma: PrismaClient) {
               title:
                 "Pin&Go • Guest Verification",
               badge: {
-                text:
-                  "Verificación requerida",
-                tone: "warn",
+                text: identityVerificationRequired
+                  ? "Verificación requerida"
+                  : "Registro seguro",
+                tone: identityVerificationRequired
+                  ? "warn"
+                  : "good",
               },
               body: `
                 <h1>Complete su registro previo al check-in</h1>
@@ -1337,7 +1358,11 @@ export function buildGuestRouter(prisma: PrismaClient) {
                     />
 
                     <p class="input-help">
-                      Escríbalo como aparece en el documento oficial que utilizará.
+                      ${
+                        identityVerificationRequired
+                          ? "Escríbalo como aparece en el documento oficial que utilizará."
+                          : "Escriba el nombre completo de la persona que acepta el acuerdo de alojamiento."
+                      }
                     </p>
 
                     <label class="label">
@@ -1399,17 +1424,23 @@ export function buildGuestRouter(prisma: PrismaClient) {
                       </span>
                     </label>
 
-                    <label class="checkbox">
-                      <input
-                        type="checkbox"
-                        name="identityConsentAccepted"
-                        value="yes"
-                        required
-                      />
-                      <span>
-                        Autorizo la verificación de mi documento oficial y selfie mediante Stripe Identity para confirmar que soy el huésped autorizado. Pin&Go no almacenará las imágenes del documento ni de la selfie.
-                      </span>
-                    </label>
+                    ${
+                      identityVerificationRequired
+                        ? `
+                          <label class="checkbox">
+                            <input
+                              type="checkbox"
+                              name="identityConsentAccepted"
+                              value="yes"
+                              required
+                            />
+                            <span>
+                              Autorizo la verificación de mi documento oficial y selfie mediante Stripe Identity para confirmar que soy el huésped autorizado. Pin&Go no almacenará las imágenes del documento ni de la selfie.
+                            </span>
+                          </label>
+                        `
+                        : ""
+                    }
 
                                         ${
                       !cancellationAlreadyAccepted
@@ -1495,15 +1526,25 @@ export function buildGuestRouter(prisma: PrismaClient) {
                         `
                     }
 
-                    <p class="muted small">
-                      Si no puede utilizar la verificación automática, contacte al host para solicitar una alternativa de revisión.
-                    </p>
+                    ${
+                      identityVerificationRequired
+                        ? `
+                          <p class="muted small">
+                            Si no puede utilizar la verificación automática, contacte al host para solicitar una alternativa de revisión.
+                          </p>
+                        `
+                        : ""
+                    }
 
                     <button
                       class="btn"
                       type="submit"
                     >
-                      Aceptar y verificar identidad
+                      ${
+                        identityVerificationRequired
+                          ? "Aceptar y verificar identidad"
+                          : "Aceptar y completar registro"
+                      }
                     </button>
                   </div>
                 </form>
@@ -1513,7 +1554,11 @@ export function buildGuestRouter(prisma: PrismaClient) {
                     Pin&Go
                   </span>
                   <span class="muted small">
-                    Secure Guest Verification
+                    ${
+                      identityVerificationRequired
+                        ? "Secure Guest Verification"
+                        : "Secure Guest Registration"
+                    }
                   </span>
                 </div>
               `,
