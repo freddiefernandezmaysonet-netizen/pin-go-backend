@@ -13,6 +13,7 @@ import {
   resolveGuestLanguage,
   type GuestLanguage,
 } from "./guest-language.service";
+import { resolveOrganizationGuestReplyTo } from "./organization-guest-email.service";
 
 export type SendGuestVerificationReminderResult = {
   reservationId: string;
@@ -318,6 +319,12 @@ export async function sendGuestVerificationReminder(
   const errors: string[] = [];
 
   if (reservation.guestEmail) {
+    const guestReplyTo =
+      await resolveOrganizationGuestReplyTo(
+        prisma,
+        reservation.property.organizationId
+      );
+
     const subject =
       `${language === "es" ? "Acción requerida - Reservación" : "Action required - Reservation"} ` +
       `#${reservation.reservationNumber ?? "Pending"}`;
@@ -356,6 +363,7 @@ export async function sendGuestVerificationReminder(
           sendGuestVerificationReminderEmail({
             to:
               reservation.guestEmail!,
+            replyTo: guestReplyTo.email,
             reservationNumber:
               reservation.reservationNumber ??
               "Pending",
