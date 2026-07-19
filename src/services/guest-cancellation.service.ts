@@ -17,6 +17,7 @@ import {
 import { reconcileReservation } from "./reservation.reconcile.service";
 import { resolveOperationalIssuesForReservation } from "../apms/operational-intelligence.service";
 import { auditReservationCompleteFlowSafe } from "./reservation-complete-flow-audit.service";
+import { resolveOrganizationGuestReplyTo } from "./organization-guest-email.service";
 
 const prisma = new PrismaClient();
 
@@ -320,8 +321,15 @@ async function sendGuestCancellationEmailSafe({
   });
 
   try {
+    const guestReplyTo =
+      await resolveOrganizationGuestReplyTo(
+        prisma,
+        reservation.property.organizationId
+      );
+
       return await sendDirectBookingGuestCancellationEmail({
       to: reservation.guestEmail,
+      replyTo: guestReplyTo.email,
       reservationNumber: reservation.reservationNumber,
       guestName: reservation.guestName,
       propertyName: reservation.property?.name ?? reservation.roomName ?? "Your stay",
