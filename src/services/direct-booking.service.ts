@@ -544,13 +544,17 @@ const cancellationPolicyRefundBasis = optionalMetadata(
 
 const securePreCheckinDisclosureAccepted =
   String(
-    session.metadata?.guestAcceptedSecurePreCheckinRequirement ?? ""
+    session.metadata?.securePrecheckinAccepted ??
+      session.metadata?.guestAcceptedSecurePreCheckinRequirement ??
+      ""
   ).trim() === "true";
 
-const securePreCheckinDisclosureAcceptedAtRaw = optionalMetadata(
-  session,
-  "guestAcceptedSecurePreCheckinRequirementAt"
-);
+const securePreCheckinDisclosureAcceptedAtRaw =
+  optionalMetadata(session, "securePrecheckinAcceptedAt") ??
+  optionalMetadata(
+    session,
+    "guestAcceptedSecurePreCheckinRequirementAt"
+  );
 
 const securePreCheckinDisclosureAcceptedAt =
   securePreCheckinDisclosureAcceptedAtRaw &&
@@ -560,18 +564,22 @@ const securePreCheckinDisclosureAcceptedAt =
     ? securePreCheckinDisclosureAcceptedAtRaw
     : new Date().toISOString();
 
-const securePreCheckinDisclosureText = optionalMetadata(
-  session,
-  "guestAcceptedSecurePreCheckinRequirementText"
-);
+const securePreCheckinDisclosureText =
+  optionalMetadata(session, "securePrecheckinText") ??
+  optionalMetadata(
+    session,
+    "guestAcceptedSecurePreCheckinRequirementText"
+  );
 
 const securePreCheckinDisclosureVersion =
+  optionalMetadata(session, "securePrecheckinVersion") ??
   optionalMetadata(
     session,
     "guestAcceptedSecurePreCheckinRequirementVersion"
   ) ?? "secure_precheckin_disclosure_v1";
 
 const securePreCheckinDisclosureSource =
+  optionalMetadata(session, "securePrecheckinSource") ??
   optionalMetadata(
     session,
     "guestAcceptedSecurePreCheckinRequirementSource"

@@ -1070,15 +1070,13 @@ const guestAcceptedSecurePreCheckinRequirementText =
         consentSource: "DIRECT_BOOKING_WEB_FORM",
         consentVersion: "stay_notifications_v1",
 
-        guestAcceptedSecurePreCheckinRequirement: "true",
-        guestAcceptedSecurePreCheckinRequirementAt,
-        guestAcceptedSecurePreCheckinRequirementText: toStripeMetadataValue(
+        securePrecheckinAccepted: "true",
+        securePrecheckinAcceptedAt: guestAcceptedSecurePreCheckinRequirementAt,
+        securePrecheckinText: toStripeMetadataValue(
           guestAcceptedSecurePreCheckinRequirementText
         ),
-        guestAcceptedSecurePreCheckinRequirementVersion:
-          SECURE_PRECHECKIN_DISCLOSURE_VERSION,
-        guestAcceptedSecurePreCheckinRequirementSource:
-          SECURE_PRECHECKIN_DISCLOSURE_SOURCE,
+        securePrecheckinVersion: SECURE_PRECHECKIN_DISCLOSURE_VERSION,
+        securePrecheckinSource: SECURE_PRECHECKIN_DISCLOSURE_SOURCE,
         adults: String(adultsCount),
         children: String(childrenCount),
         totalGuests: String(totalGuests),
