@@ -557,6 +557,12 @@ publicBookingRouter.get("/:organizationSlug/:propertySlug", async (req, res) => 
 const cancellationPolicy =
   await buildCancellationPolicySnapshot(property.id);
 
+const activeGuestAgreement =
+  await getActivePropertyGuestAgreement(
+    prisma,
+    property.id
+  );
+
 const preferredLanguage =
   String(req.query.lang ?? "")
     .trim()
@@ -576,6 +582,12 @@ return res.json({
     ...property,
     cancellationPolicy,
     cancellationPolicyPresentation,
+    guestAccessSettings: {
+      configured: Boolean(activeGuestAgreement),
+      requiresIdentityVerification:
+        activeGuestAgreement
+          ?.requiresIdentityVerification ?? true,
+    },
   },
 });
   } catch (error: any) {
