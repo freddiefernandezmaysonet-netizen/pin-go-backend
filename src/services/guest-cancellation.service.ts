@@ -342,6 +342,7 @@ async function sendGuestCancellationEmailSafe({
         refundAmount,
       }),
       manageReservationUrl: buildManageReservationUrl(reservation.guestToken),
+      preferredLanguage: reservation.preferredLanguage,
     });
   } catch (emailError: any) {
     console.error("[GUEST_CANCELLATION_EMAIL_ERROR]", {
