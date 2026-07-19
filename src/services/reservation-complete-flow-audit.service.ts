@@ -584,11 +584,14 @@ export async function auditReservationCompleteFlow(
       stripeChargeId: true,
       stripeTransferId: true,
       stripeApplicationFeeId: true,
+      basePlatformFeeAmount: true,
       platformFeeAmount: true,
       hostPayoutAmount: true,
       hostPayoutStatus: true,
       hostPayoutFailureReason: true,
       hostPayoutLastSyncedAt: true,
+      directBookingProtectionFeeAmount: true,
+      identityVerificationRequiredSnapshot: true,
       cancellationPolicyId: true,
       cancellationPolicySnapshot: true,
       guestToken: true,
@@ -1241,6 +1244,52 @@ const hasHostEmailEvidence = hasMessageEvidence({
     reservation.stripeConnectedAccountId && toNumber(reservation.hostPayoutAmount) !== null
   );
 
+  const totalAmount = toNumber(reservation.totalAmount);
+  const basePlatformFeeAmount = toNumber(reservation.basePlatformFeeAmount);
+  const identityFeeAmount = toNumber(
+    reservation.directBookingProtectionFeeAmount
+  );
+  const platformFeeAmount = toNumber(reservation.platformFeeAmount);
+  const hostPayoutAmount = toNumber(reservation.hostPayoutAmount);
+  const hasConnectFeeSnapshot =
+    reservation.identityVerificationRequiredSnapshot !== null;
+  const connectFeeBreakdownValid =
+    !hasConnectFeeSnapshot ||
+    (totalAmount !== null &&
+      basePlatformFeeAmount !== null &&
+      identityFeeAmount !== null &&
+      platformFeeAmount !== null &&
+      hostPayoutAmount !== null &&
+      Math.abs(
+        basePlatformFeeAmount + identityFeeAmount - platformFeeAmount
+      ) < 0.01 &&
+      Math.abs(platformFeeAmount + hostPayoutAmount - totalAmount) < 0.01 &&
+      (reservation.identityVerificationRequiredSnapshot
+        ? identityFeeAmount > 0
+        : identityFeeAmount === 0));
+
+  addCheck(checks, {
+    rule: "IDENTITY_CHECK_CONNECT_FEE_BREAKDOWN",
+    label: "Identity Check Connect Fee Breakdown",
+    status: connectFeeBreakdownValid ? "PASS" : "FAIL",
+    critical: hasConnectFeeSnapshot && !connectFeeBreakdownValid,
+    required: hasConnectFeeSnapshot,
+    recommendedAction:
+      hasConnectFeeSnapshot && !connectFeeBreakdownValid
+        ? "Review the Identity Check fee, total application fee, and host payout snapshots for this reservation."
+        : undefined,
+    metadata: {
+      identityVerificationRequired:
+        reservation.identityVerificationRequiredSnapshot,
+      basePlatformFeeAmount,
+      identityFeeAmount,
+      platformFeeAmount,
+      hostPayoutAmount,
+      totalAmount,
+      auditMode,
+    },
+  });
+
   addCheck(checks, {
     rule: "HOST_PAYOUT_ROUTE_STATUS",
     label: "Host Payout Route Status",
@@ -1268,8 +1317,10 @@ const hasHostEmailEvidence = hasMessageEvidence({
       organizationPayoutsEnabled: organization.stripeConnectPayoutsEnabled,
       reservationStripeConnectedAccountId: reservation.stripeConnectedAccountId,
       hostPayoutStatus: reservation.hostPayoutStatus,
-      hostPayoutAmount: toNumber(reservation.hostPayoutAmount),
-      platformFeeAmount: toNumber(reservation.platformFeeAmount),
+      hostPayoutAmount,
+      platformFeeAmount,
+      basePlatformFeeAmount,
+      identityFeeAmount,
       hostPayoutFailureReason: reservation.hostPayoutFailureReason,
       hostPayoutLastSyncedAt: reservation.hostPayoutLastSyncedAt,
       auditMode,
