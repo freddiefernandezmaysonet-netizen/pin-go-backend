@@ -37,6 +37,7 @@ import { sendPreCheckinSms } from "../services/preCheckinSms.service";
 import { sendCheckoutSms } from "../services/checkoutSms.service";
 import { sendCleaningReadySms } from "../services/cleaningReadySms.service";
 import { resolveGuestLanguage } from "../services/guest-language.service";
+import { resolveOrganizationGuestReplyTo } from "../services/organization-guest-email.service";
 import { expireNfcAssignments } from "../services/nfc-expire.service";
 import { expireGuestNfcAssignments } from "../services/nfc-expire.service";
 import { expireCleaningNfcAssignments } from "../services/nfc-expire.service";
@@ -1222,6 +1223,12 @@ async function processCheckins(now: Date) {
         const emailSubject =
           `${guestLanguage === "es" ? "Su acceso Pin&Go está listo - Reservación" : "Your Pin&Go access is ready - Reservation"} #${reservationNumber}`;
 
+        const guestReplyTo =
+          await resolveOrganizationGuestReplyTo(
+            prisma,
+            reservation.property.organizationId
+          );
+
         const emailDeliveryResult =
           await sendLoggedEmail({
             prisma,
@@ -1257,6 +1264,7 @@ async function processCheckins(now: Date) {
                 to: String(
                   reservation.guestEmail ?? ""
                 ),
+                replyTo: guestReplyTo.email,
                 reservationNumber,
                 guestName:
                   reservation.guestName,
