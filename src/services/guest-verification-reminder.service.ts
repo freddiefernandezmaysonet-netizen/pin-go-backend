@@ -571,9 +571,8 @@ export async function sendGuestVerificationReminder(
     reminderStatus,
     emailStatus,
     smsStatus,
-    skippedReason:
-      noChannelAvailable
-        ? "NO_AVAILABLE_CHANNEL"
-        : undefined,
+    ...(noChannelAvailable
+      ? { skippedReason: "NO_AVAILABLE_CHANNEL" }
+      : {}),
   };
 }
