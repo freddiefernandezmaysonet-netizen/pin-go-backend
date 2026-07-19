@@ -1280,6 +1280,7 @@ export async function sendDirectBookingHostNotification(
   const { data, error } = await resend.emails.send({
     from: getEmailFrom(),
     to,
+    ...(guestEmail ? { replyTo: guestEmail } : {}),
     subject: `New Reservation #${reservationNumber} - ${propertyName}`,
     html: `
       <div style="font-family: Arial, sans-serif; color: #111827; line-height: 1.6;">
@@ -1522,6 +1523,7 @@ export async function sendDirectBookingHostCancellationNotification(
   const { data, error } = await resend.emails.send({
     from: getEmailFrom(),
     to,
+    ...(guestEmail ? { replyTo: guestEmail } : {}),
     subject: `Reservation #${reservationNumber} cancelled - ${propertyName}`,
     html: `
       <div style="font-family: Arial, sans-serif; color: #111827; line-height: 1.6; max-width: 680px; margin: 0 auto;">
