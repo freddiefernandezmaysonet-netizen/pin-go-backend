@@ -713,12 +713,20 @@ reservation: {
 securePreCheckin: {
   url: buildSecurePreCheckinUrl(reservation.guestToken),
   verificationStatus: reservation.verificationStatus,
+  identityVerificationRequired:
+    reservation
+      .identityVerificationRequiredSnapshot !== false,
   identityVerificationStatus:
     reservation.stripeIdentityVerificationStatus,
   guestAgreementSignedAt: reservation.guestAgreementSignedAt,
   accessReleaseStatus: reservation.guestAccessReleaseStatus,
   completed:
-    reservation.verificationStatus === "COMPLETED" &&
+    (reservation
+      .identityVerificationRequiredSnapshot === false
+      ? reservation.verificationStatus ===
+        "NOT_REQUIRED"
+      : reservation.verificationStatus ===
+        "COMPLETED") &&
     Boolean(reservation.guestAgreementSignedAt),
 },
     policy: {
