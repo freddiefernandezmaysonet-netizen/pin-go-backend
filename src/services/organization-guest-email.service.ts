@@ -4,7 +4,6 @@ import {
 } from "@prisma/client";
 
 export type GuestReplyToSource =
-  | "ORGANIZATION_SETTING"
   | "PRIMARY_ADMIN"
   | "PIN_GO_SUPPORT";
 
@@ -35,7 +34,6 @@ export async function resolveOrganizationGuestReplyTo(
         id: cleanOrganizationId,
       },
       select: {
-        guestCommunicationEmail: true,
         dashboardUsers: {
           where: {
             isActive: true,
@@ -61,17 +59,6 @@ export async function resolveOrganizationGuestReplyTo(
     throw new Error(
       "GUEST_REPLY_TO_ORGANIZATION_NOT_FOUND"
     );
-  }
-
-  const configuredEmail = normalizeEmail(
-    organization.guestCommunicationEmail
-  );
-
-  if (configuredEmail) {
-    return {
-      email: configuredEmail,
-      source: "ORGANIZATION_SETTING",
-    };
   }
 
   const primaryAdminEmail = normalizeEmail(

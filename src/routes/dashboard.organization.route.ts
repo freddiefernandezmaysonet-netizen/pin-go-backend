@@ -14,17 +14,6 @@ function normalizeSlug(value: unknown) {
     .replace(/^-|-$/g, "");
 }
 
-function normalizeEmail(value: unknown) {
-  return String(value ?? "").trim().toLowerCase();
-}
-
-function isValidEmail(value: string) {
-  return (
-    value.length <= 254 &&
-    /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value)
-  );
-}
-
 dashboardOrganizationRouter.get(
   "/api/dashboard/organization",
   requireAuth,
@@ -40,23 +29,7 @@ dashboardOrganizationRouter.get(
           name: true,
           slug: true,
           publicBookingEnabled: true,
-          guestCommunicationEmail: true,
           updatedAt: true,
-          dashboardUsers: {
-            where: {
-              isActive: true,
-              role: {
-                in: ["ORG_ADMIN", "ADMIN"],
-              },
-            },
-            orderBy: {
-              createdAt: "asc",
-            },
-            take: 1,
-            select: {
-              email: true,
-            },
-          },
         },
       });
 
@@ -67,21 +40,7 @@ dashboardOrganizationRouter.get(
       }
 
       return res.json({
-        organization: {
-          id: organization.id,
-          name: organization.name,
-          slug: organization.slug,
-          publicBookingEnabled:
-            organization.publicBookingEnabled,
-          guestCommunicationEmail:
-            organization.guestCommunicationEmail ??
-            organization.dashboardUsers[0]?.email ??
-            null,
-          guestCommunicationEmailConfigured: Boolean(
-            organization.guestCommunicationEmail
-          ),
-          updatedAt: organization.updatedAt,
-        },
+        organization,
       });
     } catch (e) {
       console.error("[dashboard/organization:get] ERROR", e);
@@ -188,8 +147,6 @@ dashboardOrganizationRouter.patch(
       const nameRaw = req.body?.name;
       const slugRaw = req.body?.slug;
       const publicBookingEnabledRaw = req.body?.publicBookingEnabled;
-      const guestCommunicationEmailRaw =
-        req.body?.guestCommunicationEmail;
 
       const data: Prisma.OrganizationUpdateInput = {};
 
@@ -251,29 +208,6 @@ dashboardOrganizationRouter.patch(
         data.publicBookingEnabled = Boolean(publicBookingEnabledRaw);
       }
 
-      if (guestCommunicationEmailRaw !== undefined) {
-        const guestCommunicationEmail = normalizeEmail(
-          guestCommunicationEmailRaw
-        );
-
-        if (!guestCommunicationEmail) {
-          return res.status(400).json({
-            error:
-              "GUEST_COMMUNICATION_EMAIL_REQUIRED",
-          });
-        }
-
-        if (!isValidEmail(guestCommunicationEmail)) {
-          return res.status(400).json({
-            error:
-              "GUEST_COMMUNICATION_EMAIL_INVALID",
-          });
-        }
-
-        data.guestCommunicationEmail =
-          guestCommunicationEmail;
-      }
-
       if (Object.keys(data).length === 0) {
         return res.status(400).json({
           error: "NO_ORGANIZATION_FIELDS_TO_UPDATE",
@@ -288,19 +222,12 @@ dashboardOrganizationRouter.patch(
           name: true,
           slug: true,
           publicBookingEnabled: true,
-          guestCommunicationEmail: true,
           updatedAt: true,
         },
       });
 
       return res.json({
-        organization: {
-          ...organization,
-          guestCommunicationEmailConfigured:
-            Boolean(
-              organization.guestCommunicationEmail
-            ),
-        },
+        organization,
       });
     } catch (e) {
       console.error("[dashboard/organization:patch] ERROR", e);
