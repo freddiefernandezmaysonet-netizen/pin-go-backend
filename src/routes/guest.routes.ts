@@ -67,6 +67,7 @@ function fmtLocal(
     ).format(new Date(d));
   }
 }
+
 type GuestAgreementSnapshotView = {
   agreementId: string;
   version: string;
@@ -74,6 +75,7 @@ type GuestAgreementSnapshotView = {
   agreementText: string;
   rules: unknown;
   guestFacingSummary: string | null;
+  requiresIdentityVerification: boolean;
 };
 
 function readGuestAgreementSnapshot(
@@ -108,6 +110,8 @@ function readGuestAgreementSnapshot(
       typeof snapshot.guestFacingSummary === "string"
         ? snapshot.guestFacingSummary
         : null,
+    requiresIdentityVerification:
+      snapshot.requiresIdentityVerification !== false,
   };
 }
 
