@@ -87,17 +87,6 @@ function normalizeRules(value: unknown) {
     );
   }
 
-function normalizeOptionalRules(value: unknown) {
-  if (
-    value === undefined ||
-    value === null
-  ) {
-    return null;
-  }
-
-  return normalizeRules(value);
-}
-
   let serialized: string;
 
   try {
@@ -117,11 +106,20 @@ function normalizeOptionalRules(value: unknown) {
     );
   }
 
-  const parsed = JSON.parse(
+  return JSON.parse(
     serialized
   ) as Prisma.InputJsonValue;
+}
 
-  return parsed;
+function normalizeOptionalRules(value: unknown) {
+  if (
+    value === undefined ||
+    value === null
+  ) {
+    return null;
+  }
+
+  return normalizeRules(value);
 }
 
 function jsonEquals(
@@ -439,13 +437,7 @@ const rulesEs =
   activeAgreement
     ?.requiresAgreementSignature ===
     true;
-              activeAgreement
-                ?.requiresIdentityVerification ===
-                requiresIdentityVerification &&
-              activeAgreement
-                ?.requiresAgreementSignature ===
-                true;
-
+             
             const updatedProperty =
               await tx.property.update({
                 where: {
