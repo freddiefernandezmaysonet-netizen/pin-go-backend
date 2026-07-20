@@ -28,6 +28,21 @@ function escapeHtml(s: string) {
     .replaceAll("'", "&#039;");
 }
 
+type GuestLanguage = "en" | "es";
+
+function resolveGuestLanguage(
+  value: string | null | undefined
+): GuestLanguage {
+  const normalized = String(value ?? "")
+    .trim()
+    .toLowerCase();
+
+  return normalized === "es" ||
+    normalized.startsWith("es-")
+    ? "es"
+    : "en";
+}
+
 function fmtLocal(
   d: Date,
   timeZone?: string | null
@@ -156,7 +171,10 @@ function ruleToText(value: unknown) {
   return "";
 }
 
-function renderAgreementRules(rules: unknown) {
+function renderAgreementRules(
+  rules: unknown,
+  language: GuestLanguage
+) {
   const items = Array.isArray(rules)
     ? rules
         .map(ruleToText)
@@ -173,7 +191,11 @@ function renderAgreementRules(rules: unknown) {
   if (items.length === 0) {
     return `
       <p class="muted">
-        No hay reglas adicionales fuera del acuerdo.
+        ${
+          language === "es"
+            ? "No hay reglas adicionales fuera del acuerdo."
+            : "There are no additional rules outside the agreement."
+        }
       </p>
     `;
   }
@@ -268,32 +290,45 @@ function hasRecordedSmsConsent(
 }
 
 function formatRefundBasis(
-  value: string
+  value: string,
+  language: GuestLanguage
 ) {
   switch (value) {
     case "NIGHTLY_SUBTOTAL":
     case "NIGHTLY_SUBTOTAL_ONLY":
-      return "Nightly subtotal only / Solo subtotal de noches";
+      return language === "es"
+        ? "Solo subtotal de noches"
+        : "Nightly subtotal only";
 
     case "NIGHTLY_PLUS_CLEANING":
-      return "Nightly subtotal and eligible cleaning fee / Noches y cargo de limpieza elegible";
+      return language === "es"
+        ? "Subtotal de noches y cargo de limpieza elegible"
+        : "Nightly subtotal and eligible cleaning fee";
 
     case "TOTAL_AMOUNT":
-      return "Eligible total amount / Total elegible";
+      return language === "es"
+        ? "Total elegible"
+        : "Eligible total amount";
 
     default:
-      return "As described in the policy / Según se describe en la política";
+      return language === "es"
+        ? "Según se describe en la política"
+        : "As described in the policy";
   }
 }
 
 function renderCancellationRefundRules(
-  rules: unknown[]
+  rules: unknown[],
+  language: GuestLanguage
 ) {
   if (rules.length === 0) {
     return `
       <p class="muted small">
-        Refund eligibility follows the policy summary shown for this reservation.
-        La elegibilidad del reembolso sigue el resumen de política mostrado para esta reservación.
+        ${
+          language === "es"
+            ? "La elegibilidad del reembolso sigue el resumen de la política mostrado para esta reservación."
+            : "Refund eligibility follows the policy summary shown for this reservation."
+        }
       </p>
     `;
   }
@@ -321,14 +356,22 @@ function renderCancellationRefundRules(
 
       const timing =
         Number.isFinite(minHours)
-          ? `${Math.max(
-              0,
-              Math.ceil(
-                minHours / 24
-              )
-            )}+ days before check-in / días antes del check-in`
-          : "According to policy timing / Según el plazo de la política";
-
+          ? language === "es"
+            ? `${Math.max(
+                0,
+                Math.ceil(
+                  minHours / 24
+                )
+              )}+ días antes del check-in`
+            : `${Math.max(
+                0,
+                Math.ceil(
+                  minHours / 24
+                )
+              )}+ days before check-in`
+          : language === "es"
+          ? "Según el plazo de la política"
+          : "According to policy timing";
       const label =
         typeof rule.label ===
         "string"
@@ -720,6 +763,12 @@ export function buildGuestRouter(prisma: PrismaClient) {
             );
         }
 
+        const language = resolveGuestLanguage(
+          reservation.preferredLanguage
+        );
+
+        const isSpanish = language === "es";
+
         const reservationReference =
           reservation.reservationNumber ??
           "No disponible";
@@ -744,7 +793,9 @@ export function buildGuestRouter(prisma: PrismaClient) {
                   <h1>Verificación no disponible</h1>
                   <div class="card">
                     <div class="row">
-                      <span class="k">Reserva</span>
+                      <span class="k">
+                      ${isSpanish ? "Reservación" : "Reservation"}
+                    </span>
                       <span class="v">${escapeHtml(
                         reservationReference
                       )}</span>
@@ -903,12 +954,19 @@ export function buildGuestRouter(prisma: PrismaClient) {
                   tone: "bad",
                 },
                 body: `
-                  <h1>Cancellation policy unavailable</h1>
-                  <h2>Política de cancelación no disponible</h2>
+                  <h1>
+                    ${
+                      isSpanish
+                        ? "Política de cancelación no disponible"
+                        : "Cancellation policy unavailable"
+                    }
+                  </h1>
 
                   <div class="card">
                     <div class="row">
-                      <span class="k">Reservation / Reserva</span>
+                      <span class="k">
+                        ${isSpanish ? "Reservación" : "Reservation"}
+                      </span>
                       <span class="v">${escapeHtml(
                         reservationReference
                       )}</span>
@@ -916,8 +974,11 @@ export function buildGuestRouter(prisma: PrismaClient) {
                   </div>
 
                   <p class="muted">
-                    Pin&Go cannot continue until the cancellation and refund terms for this reservation are available.
-                    Pin&Go no puede continuar hasta que estén disponibles los términos de cancelación y reembolso de esta reservación.
+                    ${
+                      isSpanish
+                        ? "Pin&Go no puede continuar hasta que estén disponibles los términos de cancelación y reembolso de esta reservación."
+                        : "Pin&Go cannot continue until the cancellation and refund terms for this reservation are available."
+                    }
                   </p>
                 `,
               })
@@ -1059,7 +1120,9 @@ export function buildGuestRouter(prisma: PrismaClient) {
                       )}</span>
                     </div>
                     <div class="row">
-                      <span class="k">Propiedad</span>
+                      <span class="k">
+                      ${isSpanish ? "Propiedad" : "Property"}
+                    </span>
                       <span class="v">${escapeHtml(
                         reservation.property?.name ??
                           "N/A"
@@ -1187,21 +1250,32 @@ export function buildGuestRouter(prisma: PrismaClient) {
           .type("html")
           .send(
             renderPage({
-              title:
-                "Pin&Go • Guest Verification",
+              title: isSpanish
+                ? "Pin&Go • Verificación del huésped"
+                : "Pin&Go • Guest Verification",
               badge: {
                 text: identityVerificationRequired
-                  ? "Verificación requerida"
-                  : "Registro seguro",
+                  ? isSpanish
+                    ? "Verificación requerida"
+                    : "Verification required"
+                  : isSpanish
+                  ? "Registro seguro"
+                  : "Secure registration",
                 tone: identityVerificationRequired
                   ? "warn"
                   : "good",
               },
               body: `
-                <h1>Complete su registro previo al check-in</h1>
+                <h1>
+                  ${
+                    isSpanish
+                      ? "Complete su registro previo al check-in"
+                      : "Complete your pre-check-in registration"
+                  }
+                </h1>
 
                 <p class="sub">
-                  Hola <b>${escapeHtml(
+                  ${isSpanish ? "Hola" : "Hello"} <b>${escapeHtml(
                     reservation.guestName ??
                       "Guest"
                   )}</b>
@@ -1260,7 +1334,7 @@ export function buildGuestRouter(prisma: PrismaClient) {
                     agreement.title
                   )}</h2>
                   <p class="muted small">
-                    Versión ${escapeHtml(
+                    ${isSpanish ? "Versión" : "Version"} ${escapeHtml(
                       agreement.version
                     )}
                   </p>
@@ -1272,21 +1346,22 @@ export function buildGuestRouter(prisma: PrismaClient) {
                 </div>
                   <div class="card">
                   <h2>
-                    Property Rules / Reglas de la propiedad
+                    ${isSpanish
+                      ? "Reglas de la propiedad"
+                      : "Property Rules"}
                   </h2>
                   ${renderAgreementRules(
-                    agreement.rules
+                    agreement.rules,
+                    language
                   )}
                 </div>
 
                 <div class="card">
                   <h2>
-                    Cancellation & Refund Policy
+                    ${isSpanish
+                      ? "Política de cancelación y reembolso"
+                      : "Cancellation & Refund Policy"}
                   </h2>
-                  <h3>
-                    Política de cancelación y reembolso
-                  </h3>
-
                   <p>
                     <strong>${escapeHtml(
                       cancellationPolicy.name
@@ -1307,35 +1382,44 @@ export function buildGuestRouter(prisma: PrismaClient) {
 
                   <div class="row">
                     <span class="k">
-                      Refund basis / Base del reembolso
+                     ${isSpanish
+                       ? "Base del reembolso"
+                       : "Refund basis"}
                     </span>
                     <span class="v">
                       ${escapeHtml(
                         formatRefundBasis(
-                          cancellationPolicy.refundBasis
+                          cancellationPolicy.refundBasis,
+                          language
                         )
                       )}
                     </span>
                   </div>
 
                   ${renderCancellationRefundRules(
-                    cancellationPolicy.refundRules
+                    cancellationPolicy.refundRules,
+                    language
                   )}
-
                   ${
-                    cancellationAlreadyAccepted
-                      ? `
-                        <p class="muted small">
-                          ✓ Cancellation terms acceptance already recorded.
-                          Aceptación de los términos de cancelación ya registrada.
-                        </p>
-                      `
-                      : `
-                        <p class="muted small">
-                          You must review and accept these terms before continuing.
-                          Debe revisar y aceptar estos términos antes de continuar.
-                        </p>
-                      `
+                   cancellationAlreadyAccepted
+                     ? `
+                         <p class="muted small">
+                           ${
+                             isSpanish
+                               ? "✓ La aceptación de los términos de cancelación ya está registrada."
+                               : "✓ Cancellation terms acceptance is already recorded."
+                           }
+                         </p>
+                       `
+                     : `
+      <p class="muted small">
+        ${
+          isSpanish
+            ? "Debe revisar y aceptar estos términos antes de continuar."
+            : "You must review and accept these terms before continuing."
+        }
+      </p>
+    `
                   }
                 </div>
 
@@ -1347,7 +1431,9 @@ export function buildGuestRouter(prisma: PrismaClient) {
                 >
                   <div class="card">
                     <label class="label">
-                      Nombre legal completo
+                      ${isSpanish
+                        ? "Nombre legal completo"
+                        : "Full legal name"}
                     </label>
 
                     <input
@@ -1364,13 +1450,19 @@ export function buildGuestRouter(prisma: PrismaClient) {
                     <p class="input-help">
                       ${
                         identityVerificationRequired
-                          ? "Escríbalo como aparece en el documento oficial que utilizará."
-                          : "Escriba el nombre completo de la persona que acepta el acuerdo de alojamiento."
+                          ? isSpanish
+                            ? "Escríbalo exactamente como aparece en el documento oficial que utilizará."
+                            : "Enter it exactly as it appears on the official document you will use."
+                          : isSpanish
+                          ? "Escriba el nombre completo de la persona que acepta el acuerdo de alojamiento."
+                          : "Enter the full name of the person accepting the accommodation agreement."
                       }
                     </p>
 
                     <label class="label">
-                      Cantidad total de huéspedes
+                      ${isSpanish
+                        ? "Cantidad total de huéspedes"
+                        : "Total number of guests"}
                     </label>
 
                     <input
@@ -1385,9 +1477,15 @@ export function buildGuestRouter(prisma: PrismaClient) {
                     />
 
                     <p class="input-help">
-                      Capacidad máxima: ${Number(
-                        maxGuests
-                      )} huéspedes.
+                      ${
+                        isSpanish
+                          ? `Capacidad máxima: ${Number(
+                              maxGuests
+                            )} huéspedes.`
+                          : `Maximum occupancy: ${Number(
+                              maxGuests
+                            )} guests.`
+                      }
                     </p>
 
                     <label class="checkbox">
@@ -1398,10 +1496,13 @@ export function buildGuestRouter(prisma: PrismaClient) {
                         required
                       />
                       <span>
-                        Confirmo que soy el huésped autorizado de esta reserva y que la información suministrada es correcta.
+                        ${
+                          isSpanish
+                            ? "Confirmo que soy el huésped autorizado de esta reservación y que la información suministrada es correcta."
+                            : "I confirm that I am the authorized guest for this reservation and that the information provided is accurate."
+                        }
                       </span>
                     </label>
-
                     <label class="checkbox">
                       <input
                         type="checkbox"
@@ -1410,9 +1511,15 @@ export function buildGuestRouter(prisma: PrismaClient) {
                         required
                       />
                       <span>
-                        He leído y acepto el acuerdo de alojamiento versión ${escapeHtml(
-                          agreement.version
-                        )}.
+                        ${
+                          isSpanish
+                            ? `He leído y acepto el acuerdo de alojamiento versión ${escapeHtml(
+                                agreement.version
+                              )}.`
+                            : `I have read and accept accommodation agreement version ${escapeHtml(
+                                agreement.version
+                              )}.`
+                        }
                       </span>
                     </label>
 
@@ -1424,7 +1531,11 @@ export function buildGuestRouter(prisma: PrismaClient) {
                         required
                       />
                       <span>
-                        He leído y acepto las reglas de la propiedad.
+                        ${
+                          isSpanish
+                            ? "He leído y acepto las reglas de la propiedad."
+                            : "I have read and accept the property rules."
+                        }
                       </span>
                     </label>
 
@@ -1439,14 +1550,18 @@ export function buildGuestRouter(prisma: PrismaClient) {
                               required
                             />
                             <span>
-                              Autorizo la verificación de mi documento oficial y selfie mediante Stripe Identity para confirmar que soy el huésped autorizado. Pin&Go no almacenará las imágenes del documento ni de la selfie.
+                              ${
+                                isSpanish
+                                  ? "Autorizo la verificación de mi documento oficial y selfie mediante Stripe Identity para confirmar que soy el huésped autorizado. Pin&Go no almacenará las imágenes del documento ni de la selfie."
+                                  : "I authorize verification of my official document and selfie through Stripe Identity to confirm that I am the authorized guest. Pin&Go will not store images of the document or selfie."
+                              }
                             </span>
                           </label>
                         `
                         : ""
                     }
 
-                                        ${
+                    ${
                       !cancellationAlreadyAccepted
                         ? `
                           <label class="checkbox">
@@ -1457,8 +1572,11 @@ export function buildGuestRouter(prisma: PrismaClient) {
                               required
                             />
                             <span>
-                              I have reviewed and agree to the cancellation and refund policy shown above, including how any eligible refund is calculated.
-                              He revisado y acepto la política de cancelación y reembolso mostrada arriba, incluyendo cómo se calcula cualquier reembolso elegible.
+                              ${
+                                isSpanish
+                                  ? "He revisado y acepto la política de cancelación y reembolso mostrada arriba, incluyendo cómo se calcula cualquier reembolso elegible."
+                                  : "I have reviewed and agree to the cancellation and refund policy shown above, including how any eligible refund is calculated."
+                              }
                             </span>
                           </label>
                         `
@@ -1470,8 +1588,11 @@ export function buildGuestRouter(prisma: PrismaClient) {
                         ? `
                           <div class="card">
                             <p class="muted small">
-                              ✓ SMS consent is already recorded for this reservation.
-                              El consentimiento SMS ya está registrado para esta reservación.
+                              ${
+                                isSpanish
+                                  ? "✓ El consentimiento SMS ya está registrado para esta reservación."
+                                  : "✓ SMS consent is already recorded for this reservation."
+                              }
                             </p>
                           </div>
                         `
@@ -1479,7 +1600,11 @@ export function buildGuestRouter(prisma: PrismaClient) {
                         ? `
                           <div class="card">
                             <h3>
-                              Pin&Go Smart Stay SMS Updates (Optional)
+                              ${
+                                isSpanish
+                                  ? "Actualizaciones SMS de Pin&Go Smart Stay (Opcional)"
+                                  : "Pin&Go Smart Stay SMS Updates (Optional)"
+                              }
                             </h3>
 
                             <label class="checkbox">
@@ -1489,14 +1614,20 @@ export function buildGuestRouter(prisma: PrismaClient) {
                                 value="yes"
                               />
                               <span>
-                                I agree to receive transactional SMS messages from PIN&GO LLC about this reservation, including booking updates, smart-lock access codes, check-in instructions, check-out reminders, and property alerts.
-                                Acepto recibir mensajes SMS transaccionales de PIN&GO LLC relacionados con esta reservación, incluyendo actualizaciones, códigos de acceso, instrucciones de check-in, recordatorios de check-out y alertas de la propiedad.
+                                ${
+                                  isSpanish
+                                    ? "Acepto recibir mensajes SMS transaccionales de PIN&GO LLC relacionados con esta reservación, incluyendo actualizaciones, códigos de acceso, instrucciones de check-in, recordatorios de check-out y alertas de la propiedad."
+                                    : "I agree to receive transactional SMS messages from PIN&GO LLC about this reservation, including booking updates, smart-lock access codes, check-in instructions, check-out reminders, and property alerts."
+                                }
                               </span>
                             </label>
 
                             <p class="muted small">
-                              Optional. Consent is not a condition of the reservation. Message frequency varies. Message and data rates may apply. Reply STOP to opt out and HELP for assistance.
-                              Opcional. El consentimiento no es una condición de la reservación. La frecuencia de mensajes varía. Pueden aplicar cargos por mensajes y datos. Responda STOP para cancelar y HELP para recibir ayuda.
+                              ${
+                                isSpanish
+                                  ? "Opcional. El consentimiento no es una condición de la reservación. La frecuencia de mensajes varía. Pueden aplicar cargos por mensajes y datos. Responda STOP para cancelar y HELP para recibir ayuda."
+                                  : "Optional. Consent is not a condition of the reservation. Message frequency varies. Message and data rates may apply. Reply STOP to opt out and HELP for assistance."
+                              }
                             </p>
 
                             <p class="muted small">
@@ -1506,7 +1637,7 @@ export function buildGuestRouter(prisma: PrismaClient) {
                                 target="_blank"
                                 rel="noopener noreferrer"
                               >
-                                Terms / Términos
+                                ${isSpanish ? "Términos" : "Terms"}
                               </a>
                               ·
                               <a
@@ -1515,7 +1646,7 @@ export function buildGuestRouter(prisma: PrismaClient) {
                                 target="_blank"
                                 rel="noopener noreferrer"
                               >
-                                Privacy / Privacidad
+                                ${isSpanish ? "Privacidad" : "Privacy"}
                               </a>
                             </p>
                           </div>
@@ -1523,8 +1654,11 @@ export function buildGuestRouter(prisma: PrismaClient) {
                         : `
                           <div class="card">
                             <p class="muted small">
-                              No phone number is registered for this reservation, so Pin&Go will use email for stay communications.
-                              No hay un número telefónico registrado para esta reservación, por lo que Pin&Go utilizará el correo electrónico para las comunicaciones de la estadía.
+                              ${
+                                isSpanish
+                                  ? "No hay un número telefónico registrado para esta reservación, por lo que Pin&Go utilizará el correo electrónico para las comunicaciones de la estadía."
+                                  : "No phone number is registered for this reservation, so Pin&Go will use email for stay communications."
+                              }
                             </p>
                           </div>
                         `
@@ -1534,7 +1668,11 @@ export function buildGuestRouter(prisma: PrismaClient) {
                       identityVerificationRequired
                         ? `
                           <p class="muted small">
-                            Si no puede utilizar la verificación automática, contacte al host para solicitar una alternativa de revisión.
+                            ${
+                              isSpanish
+                                ? "Si no puede utilizar la verificación automática, contacte al host para solicitar una alternativa de revisión."
+                                : "If you cannot use automatic verification, contact the host to request an alternative review."
+                            }
                           </p>
                         `
                         : ""
@@ -1546,8 +1684,12 @@ export function buildGuestRouter(prisma: PrismaClient) {
                     >
                       ${
                         identityVerificationRequired
-                          ? "Aceptar y verificar identidad"
-                          : "Aceptar y completar registro"
+                          ? isSpanish
+                            ? "Aceptar y verificar identidad"
+                            : "Accept and verify identity"
+                          : isSpanish
+                          ? "Aceptar y completar registro"
+                          : "Accept and complete registration"
                       }
                     </button>
                   </div>
@@ -1560,7 +1702,11 @@ export function buildGuestRouter(prisma: PrismaClient) {
                   <span class="muted small">
                     ${
                       identityVerificationRequired
-                        ? "Secure Guest Verification"
+                        ? isSpanish
+                          ? "Verificación segura del huésped"
+                          : "Secure Guest Verification"
+                        : isSpanish
+                        ? "Registro seguro del huésped"
                         : "Secure Guest Registration"
                     }
                   </span>
