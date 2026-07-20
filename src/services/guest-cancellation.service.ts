@@ -7,6 +7,7 @@ import { syncChannexAvailabilityForProperty } from "./channex-availability-sync.
 import {
   buildCancellationPolicySnapshot,
   evaluateCancellationPolicy,
+  renderCancellationPolicySnapshot,
 } from "./cancellation-policy.service";
 import type { CancellationPolicySnapshot } from "./cancellation-policy.service";
 import { refundDirectBookingReservation } from "./direct-booking-refund.service";
@@ -701,6 +702,14 @@ function serializeGuestCancellationPreview({
 }) {
   const action = getGuestCancellationAction(evaluation);
 
+  const policyPresentation =
+    renderCancellationPolicySnapshot({
+      snapshot,
+      preferredLanguage:
+        reservation.preferredLanguage,
+      checkIn: reservation.checkIn,
+    });
+
   return {
 reservation: {
   reservationNumber: reservation.reservationNumber,
@@ -737,15 +746,20 @@ securePreCheckin: {
         "COMPLETED") &&
     Boolean(reservation.guestAgreementSignedAt),
 },
-    policy: {
+       policy: {
       name: snapshot.name,
       type: snapshot.type,
       refundBasis: snapshot.refundBasis,
       refundRules: snapshot.refundRules,
-      nonRefundableScenarios: snapshot.nonRefundableScenarios,
-      guestFacingSummary: snapshot.guestFacingSummary,
+      nonRefundableScenarios:
+        snapshot.nonRefundableScenarios,
+      guestFacingSummary:
+        snapshot.guestFacingSummary,
       cancellationTermsAcceptance:
-        (snapshot as any).cancellationTermsAcceptance ?? null,
+        (snapshot as any)
+          .cancellationTermsAcceptance ?? null,
+
+      presentation: policyPresentation,
     },
     evaluation: {
       requestedAt: evaluation.requestedAt,
