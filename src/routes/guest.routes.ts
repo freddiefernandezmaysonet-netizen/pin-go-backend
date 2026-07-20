@@ -15,6 +15,14 @@ import {
 import {
   reconcileGuestIdentityVerificationSession,
 } from "../services/guest-identity-webhook.service";
+import {
+  renderCancellationPolicySnapshot,
+  type CancellationPolicySnapshot,
+} from "../services/cancellation-policy.service";
+
+import type {
+  RenderedCancellationPolicy,
+} from "../services/cancellation-policy-renderer";
 
 /* =====================
    Utils
@@ -213,11 +221,7 @@ function renderAgreementRules(
 }
 
 type CancellationPolicyView = {
-  name: string;
-  type: string;
-  refundBasis: string;
-  guestFacingSummary: string | null;
-  refundRules: unknown[];
+  presentation: RenderedCancellationPolicy;
   cancellationAccepted: boolean;
 };
 
@@ -239,42 +243,41 @@ function readJsonObject(
 }
 
 function readCancellationPolicyView(
-  value: unknown
+  value: unknown,
+  preferredLanguage: GuestLanguage,
+  checkIn: Date
 ): CancellationPolicyView | null {
-  const snapshot =
-    readJsonObject(value);
+  const snapshot = readJsonObject(value);
 
   if (
     typeof snapshot.name !== "string" ||
     typeof snapshot.type !== "string" ||
-    typeof snapshot.refundBasis !==
-      "string"
+    typeof snapshot.refundBasis !== "string"
   ) {
     return null;
   }
 
-  const acceptance =
-    readJsonObject(
-      snapshot.cancellationTermsAcceptance
+  const acceptance = readJsonObject(
+    snapshot.cancellationTermsAcceptance
+  );
+
+  try {
+    return {
+      presentation: renderCancellationPolicySnapshot({
+        snapshot: snapshot as unknown as CancellationPolicySnapshot,
+        preferredLanguage,
+        checkIn,
+      }),
+      cancellationAccepted: acceptance.accepted === true,
+    };
+  } catch (error) {
+    console.error(
+      "[GUEST_VERIFICATION] cancellation policy render failed",
+      error
     );
 
-  return {
-    name: snapshot.name,
-    type: snapshot.type,
-    refundBasis:
-      snapshot.refundBasis,
-    guestFacingSummary:
-      typeof snapshot.guestFacingSummary ===
-      "string"
-        ? snapshot.guestFacingSummary
-        : null,
-    refundRules:
-      Array.isArray(snapshot.refundRules)
-        ? snapshot.refundRules
-        : [],
-    cancellationAccepted:
-      acceptance.accepted === true,
-  };
+    return null;
+  }
 }
 
 function hasRecordedSmsConsent(
@@ -289,117 +292,35 @@ function hasRecordedSmsConsent(
   return consent.smsConsent === true;
 }
 
-function formatRefundBasis(
-  value: string,
-  language: GuestLanguage
-) {
-  switch (value) {
-    case "NIGHTLY_SUBTOTAL":
-    case "NIGHTLY_SUBTOTAL_ONLY":
-      return language === "es"
-        ? "Solo subtotal de noches"
-        : "Nightly subtotal only";
-
-    case "NIGHTLY_PLUS_CLEANING":
-      return language === "es"
-        ? "Subtotal de noches y cargo de limpieza elegible"
-        : "Nightly subtotal and eligible cleaning fee";
-
-    case "TOTAL_AMOUNT":
-      return language === "es"
-        ? "Total elegible"
-        : "Eligible total amount";
-
-    default:
-      return language === "es"
-        ? "Según se describe en la política"
-        : "As described in the policy";
-  }
-}
-
 function renderCancellationRefundRules(
-  rules: unknown[],
-  language: GuestLanguage
+  rules: RenderedCancellationPolicy["rules"]
 ) {
   if (rules.length === 0) {
-    return `
-      <p class="muted small">
-        ${
-          language === "es"
-            ? "La elegibilidad del reembolso sigue el resumen de la política mostrado para esta reservación."
-            : "Refund eligibility follows the policy summary shown for this reservation."
-        }
-      </p>
-    `;
+    return "";
   }
 
   const items = rules
-    .map((value) => {
-      const rule =
-        readJsonObject(value);
-
-      const refundPercent =
-        Number(rule.refundPercent);
-
-      if (
-        !Number.isFinite(
-          refundPercent
-        )
-      ) {
-        return "";
-      }
-
-      const minHours =
-        Number(
-          rule.minHoursBeforeCheckIn
-        );
-
-      const timing =
-        Number.isFinite(minHours)
-          ? language === "es"
-            ? `${Math.max(
-                0,
-                Math.ceil(
-                  minHours / 24
-                )
-              )}+ días antes del check-in`
-            : `${Math.max(
-                0,
-                Math.ceil(
-                  minHours / 24
-                )
-              )}+ days before check-in`
-          : language === "es"
-          ? "Según el plazo de la política"
-          : "According to policy timing";
-      const label =
-        typeof rule.label ===
-        "string"
-          ? rule.label
-          : "";
-
-      return `
+    .map(
+      (rule) => `
         <li>
           <strong>${escapeHtml(
-            `${refundPercent}%`
+            rule.label
           )}</strong>
-          — ${escapeHtml(timing)}
-          ${
-            label
-              ? ` — ${escapeHtml(
-                  label
-                )}`
-              : ""
-          }
+          — ${escapeHtml(
+            rule.windowLabel
+          )}
+
+          <p class="muted small">
+            ${escapeHtml(
+              rule.description
+            )}
+          </p>
         </li>
-      `;
-    })
-    .filter(Boolean)
+      `
+    )
     .join("");
 
-  return items
-    ? `<ul class="rules">${items}</ul>`
-    : "";
+  return `<ul class="rules">${items}</ul>`;
 }
 
 function getGuestReturnUrl(
@@ -924,12 +845,14 @@ export function buildGuestRouter(prisma: PrismaClient) {
         const identityVerificationRequired =
           agreement.requiresIdentityVerification !== false;
 
-                const cancellationPolicy =
+        const cancellationPolicy =
           readCancellationPolicyView(
             reservation
-              .cancellationPolicySnapshot
+              .cancellationPolicySnapshot,
+            language,
+            reservation.checkIn
           );
-
+        
         if (!cancellationPolicy) {
           console.error(
             "[GUEST_VERIFICATION] cancellation policy snapshot missing",
@@ -985,11 +908,14 @@ export function buildGuestRouter(prisma: PrismaClient) {
             );
         }
 
-        const cancellationAlreadyAccepted =
-          cancellationPolicy
-            .cancellationAccepted;
+       const cancellationAlreadyAccepted =
+         cancellationPolicy
+           .cancellationAccepted;
 
-        const smsAlreadyConsented =
+       const cancellationPolicyPresentation =
+         cancellationPolicy.presentation;
+
+       const smsAlreadyConsented =
           hasRecordedSmsConsent(
             reservation.externalRaw
           );
@@ -1362,44 +1288,40 @@ export function buildGuestRouter(prisma: PrismaClient) {
                       ? "Política de cancelación y reembolso"
                       : "Cancellation & Refund Policy"}
                   </h2>
-                  <p>
-                    <strong>${escapeHtml(
-                      cancellationPolicy.name
-                    )}</strong>
-                  </p>
+                  
+                 <p>
+  <strong>${escapeHtml(
+    cancellationPolicyPresentation.title
+  )}</strong>
+</p>
 
-                  ${
-                    cancellationPolicy.guestFacingSummary
-                      ? `
-                        <p>
-                          ${renderMultilineText(
-                            cancellationPolicy.guestFacingSummary
-                          )}
-                        </p>
-                      `
-                      : ""
-                  }
+<p>
+  ${renderMultilineText(
+    cancellationPolicyPresentation.summary
+  )}
+</p>
 
-                  <div class="row">
-                    <span class="k">
-                     ${isSpanish
-                       ? "Base del reembolso"
-                       : "Refund basis"}
-                    </span>
-                    <span class="v">
-                      ${escapeHtml(
-                        formatRefundBasis(
-                          cancellationPolicy.refundBasis,
-                          language
-                        )
-                      )}
-                    </span>
-                  </div>
+<div class="row">
+  <span class="k">
+    ${
+      isSpanish
+        ? "Base del reembolso"
+        : "Refund basis"
+    }
+  </span>
 
-                  ${renderCancellationRefundRules(
-                    cancellationPolicy.refundRules,
-                    language
-                  )}
+  <span class="v">
+    ${renderMultilineText(
+      cancellationPolicyPresentation
+        .refundBasisDisclosure
+    )}
+  </span>
+</div>
+
+${renderCancellationRefundRules(
+  cancellationPolicyPresentation.rules
+)}
+
                   ${
                    cancellationAlreadyAccepted
                      ? `
