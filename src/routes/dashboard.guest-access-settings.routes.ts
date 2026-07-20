@@ -31,6 +31,28 @@ function cleanRequiredText(
   return text;
 }
 
+function cleanOptionalRequiredText(
+  value: unknown,
+  field: string,
+  minLength: number,
+  maxLength: number
+) {
+  if (
+    value === undefined ||
+    value === null ||
+    String(value).trim() === ""
+  ) {
+    return null;
+  }
+
+  return cleanRequiredText(
+    value,
+    field,
+    minLength,
+    maxLength
+  );
+}
+
 function cleanOptionalText(
   value: unknown,
   maxLength: number
@@ -64,6 +86,17 @@ function normalizeRules(value: unknown) {
       "GUEST_AGREEMENT_RULES_INVALID"
     );
   }
+
+function normalizeOptionalRules(value: unknown) {
+  if (
+    value === undefined ||
+    value === null
+  ) {
+    return null;
+  }
+
+  return normalizeRules(value);
+}
 
   let serialized: string;
 
@@ -143,6 +176,14 @@ dashboardGuestAccessSettingsRouter.get(
                 agreementText: true,
                 rules: true,
                 guestFacingSummary: true,
+                titleEn: true,
+                titleEs: true,
+                agreementTextEn: true,
+                agreementTextEs: true,
+                rulesEn: true,
+                rulesEs: true,
+                guestFacingSummaryEn: true,
+                guestFacingSummaryEs: true,
                 requiresIdentityVerification:
                   true,
                 requiresAgreementSignature:
@@ -248,31 +289,69 @@ dashboardGuestAccessSettingsRouter.put(
         });
       }
 
-      const title = cleanRequiredText(
-        req.body?.title,
-        "GUEST_AGREEMENT_TITLE",
-        3,
-        160
-      );
+     const legacyTitle = cleanRequiredText(
+  req.body?.titleEn ?? req.body?.title,
+  "GUEST_AGREEMENT_TITLE_EN",
+  3,
+  160
+);
 
-      const agreementText =
-        cleanRequiredText(
-          req.body?.agreementText,
-          "GUEST_AGREEMENT_TEXT",
-          50,
-          20000
-        );
+const legacyAgreementText =
+  cleanRequiredText(
+    req.body?.agreementTextEn ??
+      req.body?.agreementText,
+    "GUEST_AGREEMENT_TEXT_EN",
+    50,
+    20000
+  );
 
-      const guestFacingSummary =
-        cleanOptionalText(
-          req.body?.guestFacingSummary,
-          1000
-        );
+const legacyGuestFacingSummary =
+  cleanOptionalText(
+    req.body?.guestFacingSummaryEn ??
+      req.body?.guestFacingSummary,
+    1000
+  );
 
-      const rules = normalizeRules(
-        req.body?.rules
-      );
+const legacyRules = normalizeRules(
+  req.body?.rulesEn ?? req.body?.rules
+);
 
+const titleEn = legacyTitle;
+
+const agreementTextEn =
+  legacyAgreementText;
+
+const guestFacingSummaryEn =
+  legacyGuestFacingSummary;
+
+const rulesEn = legacyRules;
+
+const titleEs =
+  cleanOptionalRequiredText(
+    req.body?.titleEs,
+    "GUEST_AGREEMENT_TITLE_ES",
+    3,
+    160
+  );
+
+const agreementTextEs =
+  cleanOptionalRequiredText(
+    req.body?.agreementTextEs,
+    "GUEST_AGREEMENT_TEXT_ES",
+    50,
+    20000
+  );
+
+const guestFacingSummaryEs =
+  cleanOptionalText(
+    req.body?.guestFacingSummaryEs,
+    1000
+  );
+
+const rulesEs =
+  normalizeOptionalRules(
+    req.body?.rulesEs
+  );
       const result =
         await prisma.$transaction(
           async (tx) => {
@@ -322,17 +401,44 @@ dashboardGuestAccessSettingsRouter.put(
                 }
               );
 
-            const agreementUnchanged =
-              Boolean(activeAgreement) &&
-              activeAgreement?.title === title &&
-              activeAgreement?.agreementText ===
-                agreementText &&
-              activeAgreement?.guestFacingSummary ===
-                guestFacingSummary &&
-              jsonEquals(
-                activeAgreement?.rules,
-                rules
-              ) &&
+           const agreementUnchanged =
+  Boolean(activeAgreement) &&
+  activeAgreement?.title ===
+    legacyTitle &&
+  activeAgreement?.agreementText ===
+    legacyAgreementText &&
+  activeAgreement?.guestFacingSummary ===
+    legacyGuestFacingSummary &&
+  jsonEquals(
+    activeAgreement?.rules,
+    legacyRules
+  ) &&
+  activeAgreement?.titleEn ===
+    titleEn &&
+  activeAgreement?.titleEs ===
+    titleEs &&
+  activeAgreement?.agreementTextEn ===
+    agreementTextEn &&
+  activeAgreement?.agreementTextEs ===
+    agreementTextEs &&
+  activeAgreement?.guestFacingSummaryEn ===
+    guestFacingSummaryEn &&
+  activeAgreement?.guestFacingSummaryEs ===
+    guestFacingSummaryEs &&
+  jsonEquals(
+    activeAgreement?.rulesEn,
+    rulesEn
+  ) &&
+  jsonEquals(
+    activeAgreement?.rulesEs,
+    rulesEs
+  ) &&
+  activeAgreement
+    ?.requiresIdentityVerification ===
+    requiresIdentityVerification &&
+  activeAgreement
+    ?.requiresAgreementSignature ===
+    true;
               activeAgreement
                 ?.requiresIdentityVerification ===
                 requiresIdentityVerification &&
@@ -393,13 +499,27 @@ dashboardGuestAccessSettingsRouter.put(
             const createdAgreement =
               await tx.propertyGuestAgreement.create(
                 {
-                  data: {
-                    propertyId,
-                    version,
-                    title,
-                    agreementText,
-                    rules,
-                    guestFacingSummary,
+                   data: {
+                     propertyId,
+                     version,
+
+                     // Legacy compatibility fields.
+                     title: legacyTitle,
+                     agreementText:
+                       legacyAgreementText,
+                     rules: legacyRules,
+                     guestFacingSummary:
+                       legacyGuestFacingSummary,
+
+                    // Localized agreement fields.
+                    titleEn,
+                    titleEs,
+                    agreementTextEn,
+                    agreementTextEs,
+                    rulesEn,
+                    rulesEs,
+                    guestFacingSummaryEn,
+                    guestFacingSummaryEs,
                     requiresIdentityVerification:
                       requiresIdentityVerification,
                     requiresAgreementSignature:

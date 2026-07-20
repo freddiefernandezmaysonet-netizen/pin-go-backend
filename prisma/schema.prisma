@@ -1205,6 +1205,14 @@ model PropertyGuestAgreement {
   agreementText                String
   rules                        Json?
   guestFacingSummary           String?
+  titleEn                      String?
+  titleEs                      String?
+  agreementTextEn              String?
+  agreementTextEs              String?
+  rulesEn                      Json?
+  rulesEs                      Json?
+  guestFacingSummaryEn         String?
+  guestFacingSummaryEs         String?
   requiresIdentityVerification Boolean  @default(true)
   requiresAgreementSignature   Boolean  @default(true)
   isActive                     Boolean  @default(true)
@@ -1213,7 +1221,7 @@ model PropertyGuestAgreement {
 
  property Property @relation(fields: [propertyId], references: [id], onDelete: Cascade)
 
-@@unique([propertyId, version])
+ @@unique([propertyId, version])
   @@index([propertyId, isActive])
 }
 
