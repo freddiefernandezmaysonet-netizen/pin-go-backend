@@ -5,9 +5,25 @@ import { selectNextStaffForProperty } from "./staff-selection.service";
 
 const DISPATCH_TYPE = "CLEANING_CONFIRMATION";
 const SEND_START_HOUR = 8;
-const SEND_END_HOUR = 17;
+const SEND_END_HOUR = 18;
 const FAILED_RETRY_COOLDOWN_MINUTES = 15;
-const FALLBACK_AFTER_MINUTES = 60;
+const FALLBACK_AFTER_MINUTES = 120;
+
+async function isCleaningNfcEnabledForProperty(
+  prisma: PrismaClient,
+  propertyId: string
+) {
+  const property = await prisma.property.findUnique({
+    where: {
+      id: propertyId,
+    },
+    select: {
+      cleaningNfcEnabled: true,
+    },
+  });
+
+  return property?.cleaningNfcEnabled === true;
+}
 
 function isWithinCleaningMessageHours(timeZone: string, now: Date) {
   const parts = new Intl.DateTimeFormat("en-US", {
@@ -45,6 +61,31 @@ async function sendCleaningConfirmationSms(params: {
   now: Date;
 }) {
   const { prisma, confirmation, now } = params;
+
+  const cleaningNfcEnabled =
+  await isCleaningNfcEnabledForProperty(
+    prisma,
+    confirmation.propertyId
+  );
+
+if (!cleaningNfcEnabled) {
+  console.log(
+    "[CLEANING_CONFIRMATION_DISPATCH] skipped because cleaning NFC is disabled",
+    {
+      confirmationId: confirmation.id,
+      reservationId: confirmation.reservationId,
+      propertyId: confirmation.propertyId,
+      staffMemberId: confirmation.staffMemberId,
+      reason: "CLEANING_NFC_DISABLED",
+    }
+  );
+
+  return {
+    ok: true,
+    skipped: true,
+    reason: "cleaning_nfc_disabled",
+  };
+}
 
   const [reservation, staff] = await Promise.all([
     prisma.reservation.findUnique({
@@ -200,6 +241,30 @@ async function maybeFallbackCleaningConfirmation(params: {
   now: Date;
 }) {
   const { prisma, confirmation, now } = params;
+
+  const cleaningNfcEnabled =
+  await isCleaningNfcEnabledForProperty(
+    prisma,
+    confirmation.propertyId
+  );
+
+if (!cleaningNfcEnabled) {
+  console.log(
+    "[CLEANING_CONFIRMATION_FALLBACK] skipped because cleaning NFC is disabled",
+    {
+      confirmationId: confirmation.id,
+      reservationId: confirmation.reservationId,
+      propertyId: confirmation.propertyId,
+      staffMemberId: confirmation.staffMemberId,
+      reason: "CLEANING_NFC_DISABLED",
+    }
+  );
+
+  return {
+    fallbackCreated: false,
+    reason: "cleaning_nfc_disabled",
+  };
+}
 
   const confirmed = await prisma.cleaningConfirmation.findFirst({
     where: {
@@ -397,6 +462,11 @@ export async function processPendingCleaningConfirmations(
         confirmation,
         now,
       });
+
+      if (fallbackResult.reason === "cleaning_nfc_disabled") {
+        skippedCount++;
+        continue;
+      }
 
       if (fallbackResult.reason === "already_confirmed") {
         skippedCount++;

@@ -18,6 +18,14 @@ function sendCancelledCleaningRequestResponse(
   );
 }
 
+function sendCleaningNfcDisabledResponse(
+  res: any
+) {
+  return res.status(410).send(
+    "This cleaning access request is no longer active because Cleaning NFC is disabled for this property. No confirmation or access action is required."
+  );
+}
+
 async function loadConfirmationData(token: string) {
   const confirmation = await prisma.cleaningConfirmation.findUnique({
     where: { token },
@@ -114,6 +122,25 @@ cleaningConfirmRouter.get("/cleaning/confirm/:token", async (req, res) => {
       );
     }
 
+   if (
+  reservation.property?.cleaningNfcEnabled !== true
+) {
+  console.log(
+    "[CLEANING_CONFIRM_VIEW_SKIPPED]",
+    {
+      reservationId: reservation.id,
+      propertyId: reservation.propertyId,
+      confirmationId: confirmation.id,
+      staffMemberId: confirmation.staffMemberId,
+      reason: "CLEANING_NFC_DISABLED",
+    }
+  );
+
+  return sendCleaningNfcDisabledResponse(
+    res
+  );
+}
+
     if (confirmation.status === "CONFIRMED") {
   const cleanerAccessResult =
     await ensureCleanerNfcAccessForConfirmedCleaning({
@@ -205,6 +232,26 @@ cleaningConfirmRouter.post(
         );
       }
 
+     if (
+  reservation.property?.cleaningNfcEnabled !== true
+) {
+  console.log(
+    "[CLEANING_CONFIRM_ACTION_SKIPPED]",
+    {
+      reservationId: reservation.id,
+      propertyId: reservation.propertyId,
+      confirmationId: confirmation.id,
+      staffMemberId: confirmation.staffMemberId,
+      action: "CONFIRM",
+      reason: "CLEANING_NFC_DISABLED",
+    }
+  );
+
+  return sendCleaningNfcDisabledResponse(
+    res
+  );
+}
+
       if (confirmation.status === "CONFIRMED") {
         return res.send("Cleaning already confirmed. Thank you.");
       }
@@ -230,6 +277,27 @@ const cleanerAccessResult =
     trigger: "CLEANER_CONFIRMATION",
   });
 
+if (
+  cleanerAccessResult.skipped &&
+  cleanerAccessResult.reason ===
+    "CLEANING_NFC_DISABLED"
+) {
+  console.log(
+    "[CLEANING_CONFIRM_ACCESS_SKIPPED]",
+    {
+      reservationId: confirmation.reservationId,
+      propertyId: confirmation.propertyId,
+      confirmationId: confirmation.id,
+      staffMemberId: confirmation.staffMemberId,
+      reason: cleanerAccessResult.reason,
+    }
+  );
+
+  return sendCleaningNfcDisabledResponse(
+    res
+  );
+}
+
 if (!cleanerAccessResult.ok) {
   console.error("[CLEANING_CONFIRM_ACCESS_ESCALATED]", {
     reservationId: confirmation.reservationId,
@@ -252,9 +320,7 @@ await runCompleteFlowAuditAfterCleaningConfirmation(
 return res.send(
   "Cleaning confirmed. Pin&Go prepared your NFC access for the cleaning window."
 );
-      return res.send(
-        "Cleaning confirmed. Pin&Go will activate your NFC access during the cleaning window."
-      );
+     
     } catch (e: any) {
       console.error("[CLEANING_CONFIRM_CONFIRM_ERROR]", e);
 
@@ -286,12 +352,15 @@ cleaningConfirmRouter.post(
           .send("This request was already confirmed.");
       }
 
-      const reservation = await prisma.reservation.findUnique({
-        where: {
-          id: confirmation.reservationId,
-        },
-      });
-
+     const reservation =
+  await prisma.reservation.findUnique({
+    where: {
+      id: confirmation.reservationId,
+    },
+    include: {
+      property: true,
+    },
+  });
             if (!reservation) {
         return res
           .status(404)
@@ -306,6 +375,26 @@ cleaningConfirmRouter.post(
           res
         );
       }
+
+      if (
+  reservation.property?.cleaningNfcEnabled !== true
+) {
+  console.log(
+    "[CLEANING_CONFIRM_ACTION_SKIPPED]",
+    {
+      reservationId: reservation.id,
+      propertyId: reservation.propertyId,
+      confirmationId: confirmation.id,
+      staffMemberId: confirmation.staffMemberId,
+      action: "DECLINE",
+      reason: "CLEANING_NFC_DISABLED",
+    }
+  );
+
+  return sendCleaningNfcDisabledResponse(
+    res
+  );
+}
 
       const allAttempts = await prisma.cleaningConfirmation.findMany({
         where: {

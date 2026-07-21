@@ -136,14 +136,15 @@ function buildLocalDateFromDateOnly(
 
 export async function ingestReservation(p: IngestPayload) {
   const property = await prisma.property.findUnique({
-    where: { id: p.propertyId },
-    select: {
-      checkInTime: true,
-      timezone: true,
-      guestAccessMode: true,
-    },
-  });
-
+  where: { id: p.propertyId },
+  select: {
+    checkInTime: true,
+    timezone: true,
+    guestAccessMode: true,
+    cleaningNfcEnabled: true,
+  },
+});
+  
   const propertyCheckInTime = property?.checkInTime ?? "15:00";
   const propertyCheckOutTime = "11:00";
   const propertyTimeZone = property?.timezone ?? "America/Puerto_Rico";
@@ -262,34 +263,45 @@ console.log("[INGEST_LOCK]", {
       endsAt: reservation.checkOut,
     });
 
-    let cleaningConfirmation: {
-      reservationId: string;
-      propertyId: string;
-      staffMemberId: string;
-    } | null = null;
+   let cleaningConfirmation: {
+  reservationId: string;
+  propertyId: string;
+  staffMemberId: string;
+} | null = null;
 
+if (property?.cleaningNfcEnabled === true) {
   try {
-  const staff = await selectNextStaffForProperty({
-    propertyId: reservation.propertyId,
-  });
+    const staff = await selectNextStaffForProperty({
+      propertyId: reservation.propertyId,
+    });
 
-  console.log("[CLEANING_STAFF_SELECTED]", {
-    reservationId: reservation.id,
-    propertyId: reservation.propertyId,
-    staffId: staff?.id ?? null,
-    staffPhone: staff?.phoneE164 ?? null,
-  });
-
-  if (staff) {
-    cleaningConfirmation = {
+    console.log("[CLEANING_STAFF_SELECTED]", {
       reservationId: reservation.id,
       propertyId: reservation.propertyId,
-      staffMemberId: staff.id,
-    };
+      staffId: staff?.id ?? null,
+      staffPhone: staff?.phoneE164 ?? null,
+      cleaningNfcEnabled: true,
+    });
+
+    if (staff) {
+      cleaningConfirmation = {
+        reservationId: reservation.id,
+        propertyId: reservation.propertyId,
+        staffMemberId: staff.id,
+      };
+    }
+  } catch (e) {
+    console.error("[CLEANING_CONFIRMATION_SELECT_ERROR]", e);
   }
-} catch (e) {
-  console.error("[CLEANING_CONFIRMATION_SELECT_ERROR]", e);
-}
+} else {
+  console.log("[CLEANING_CONFIRMATION_SKIPPED]", {
+    reservationId: reservation.id,
+    propertyId: reservation.propertyId,
+    reason: "CLEANING_NFC_DISABLED",
+    cleaningNfcEnabled: property?.cleaningNfcEnabled ?? false,
+  });
+}   
+
     return {
   reservationId: reservation.id,
   reservationNumber: reservation.reservationNumber,
