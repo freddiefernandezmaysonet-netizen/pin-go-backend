@@ -7,6 +7,9 @@ import {
   resolveGuestLanguage,
   type GuestLanguage,
 } from "../services/guest-language.service";
+import type {
+  RenderedCancellationPolicy,
+} from "../services/cancellation-policy-renderer";
 
 const resendApiKey = String(process.env.RESEND_API_KEY ?? "").trim();
 const emailFrom = String(process.env.EMAIL_FROM ?? "").trim();
@@ -64,6 +67,11 @@ type SendDirectBookingGuestConfirmationInput = {
   cancellationPolicySummary?: string | null;
   refundBasis?: string | null;
   refundRules?: CancellationRefundRuleEmailInput[] | null;
+
+  cancellationPolicyPresentation?:
+    | RenderedCancellationPolicy
+    | null;
+
   preferredLanguage?: string | null;
 };
 
@@ -415,6 +423,7 @@ function renderCancellationPolicyBlock({
   cancellationPolicySummary,
   refundBasis,
   refundRules,
+  cancellationPolicyPresentation,
   language = "en",
 }: {
   cancellationPolicyName?: string | null;
@@ -424,64 +433,100 @@ function renderCancellationPolicyBlock({
   refundRules?:
     | CancellationRefundRuleEmailInput[]
     | null;
+
+  cancellationPolicyPresentation?:
+    | RenderedCancellationPolicy
+    | null;
+
   language?: GuestLanguage;
 }) {
-  const isSpanish = language === "es";
+  const presentation =
+    cancellationPolicyPresentation ??
+    null;
+
+  const resolvedLanguage =
+    presentation?.language ??
+    language;
+
+  const isSpanish =
+    resolvedLanguage === "es";
+
   const hasPolicyContent =
+    Boolean(presentation) ||
     cancellationPolicyName ||
     cancellationPolicyType ||
     cancellationPolicySummary ||
     refundBasis ||
     (Array.isArray(refundRules) &&
       refundRules.length > 0);
-
   if (!hasPolicyContent) {
     return "";
   }
 
+  const displayedPolicyName =
+    presentation?.title ??
+    cancellationPolicyName ??
+    cancellationPolicyType ??
+    (
+      isSpanish
+        ? "Configurada por el anfitrión"
+        : "Configured by host"
+    );
+
+  const displayedPolicySummary =
+    presentation?.summary ??
+    cancellationPolicySummary ??
+    null;
+
   const safeRules =
-    Array.isArray(refundRules)
-      ? refundRules
-      : [];
+    presentation?.rules ??
+    (
+      Array.isArray(refundRules)
+        ? refundRules
+        : []
+    );
 
   const refundBasisLabel =
-    refundBasis ===
-      "NIGHTLY_SUBTOTAL" ||
-    refundBasis ===
-      "NIGHTLY_SUBTOTAL_ONLY"
-      ? isSpanish ? "Solo subtotal de noches" : "Nightly subtotal only"
-      : refundBasis ===
-        "NIGHTLY_PLUS_CLEANING"
-      ? isSpanish ? "Noches y cargo de limpieza elegible" : "Nightly subtotal and eligible cleaning fee"
-      : refundBasis ===
-        "TOTAL_AMOUNT"
-      ? isSpanish ? "Total elegible" : "Eligible total amount"
-      : refundBasis
-      ? isSpanish ? "Según la base configurada" : formatRefundBasis(refundBasis)
-      : null;
-
+    presentation?.refundBasisDisclosure ??
+    (
+      refundBasis ===
+        "NIGHTLY_SUBTOTAL" ||
+      refundBasis ===
+        "NIGHTLY_SUBTOTAL_ONLY"
+        ? isSpanish
+          ? "Solo subtotal de noches"
+          : "Nightly subtotal only"
+        : refundBasis ===
+          "NIGHTLY_PLUS_CLEANING"
+        ? isSpanish
+          ? "Noches y cargo de limpieza elegible"
+          : "Nightly subtotal and eligible cleaning fee"
+        : refundBasis ===
+          "TOTAL_AMOUNT"
+        ? isSpanish
+          ? "Total elegible"
+          : "Eligible total amount"
+        : refundBasis
+        ? isSpanish
+          ? "Según la base configurada"
+          : formatRefundBasis(refundBasis)
+        : null
+    );
   return `
     <div style="background:#f8fafc;border:1px solid #dbeafe;border-radius:14px;padding:16px;margin:20px 0;">
       <h3 style="margin:0 0 8px;color:#111827;">
         ${isSpanish ? "Pol&iacute;tica de cancelaci&oacute;n y reembolso" : "Cancellation &amp; refund policy"}
       </h3>
 
-      ${
-        cancellationPolicyName ||
-        cancellationPolicyType
-          ? `
-            <p style="margin:0 0 8px;">
-              <strong>${isSpanish ? "Pol&iacute;tica" : "Policy"}:</strong>
-              ${escapeHtml(
-                cancellationPolicyName ||
-                  cancellationPolicyType ||
-                  (isSpanish ? "Configurada por el anfitri&oacute;n" : "Configured by host")
-              )}
-            </p>
-          `
-          : ""
-      }
+        <p style="margin:0 0 8px;">
+        <strong>
+          ${isSpanish ? "Pol&iacute;tica" : "Policy"}:
+        </strong>
 
+        ${escapeHtml(
+          displayedPolicyName
+        )}
+      </p>
       ${
         refundBasisLabel
           ? `
@@ -495,12 +540,12 @@ function renderCancellationPolicyBlock({
           : ""
       }
 
-      ${
-        cancellationPolicySummary
+     ${
+        displayedPolicySummary
           ? `
             <p style="margin:10px 0;color:#374151;">
               ${escapeHtml(
-                cancellationPolicySummary
+                displayedPolicySummary
               )}
             </p>
           `
@@ -512,11 +557,23 @@ function renderCancellationPolicyBlock({
           ? `
             <div style="margin-top:12px;">
               <p style="margin:0 0 8px;font-weight:800;">
-                ${isSpanish ? "Calendario de reembolso" : "Refund schedule"}
+                ${
+                  isSpanish
+                    ? "Calendario de reembolso"
+                    : "Refund schedule"
+                }
               </p>
 
               ${safeRules
                 .map((rule) => {
+                  const renderedWindowLabel =
+                    "windowLabel" in rule &&
+                    typeof rule.windowLabel ===
+                      "string" &&
+                    rule.windowLabel.trim()
+                      ? rule.windowLabel
+                      : null;
+
                   const daysBeforeCheckIn =
                     Math.max(
                       0,
@@ -526,6 +583,21 @@ function renderCancellationPolicyBlock({
                         ) / 24
                       )
                     );
+
+                  const fallbackWindowLabel =
+                    Number(
+                      rule.minHoursBeforeCheckIn
+                    ) > 0
+                      ? isSpanish
+                        ? `${daysBeforeCheckIn}+ días antes del check-in`
+                        : `${daysBeforeCheckIn}+ days before check-in`
+                      : isSpanish
+                      ? "Después de la última ventana de reembolso"
+                      : "After the final refund window";
+
+                  const displayedWindowLabel =
+                    renderedWindowLabel ??
+                    fallbackWindowLabel;
 
                   return `
                     <div style="background:#ffffff;border:1px solid #e5e7eb;border-radius:12px;padding:12px;margin-top:8px;">
@@ -540,8 +612,9 @@ function renderCancellationPolicyBlock({
                       </p>
 
                       <p style="margin:4px 0 0;color:#4b5563;font-size:13px;">
-                        ${daysBeforeCheckIn}+
-                        ${isSpanish ? "d&iacute;as antes del check-in" : "days before check-in"}
+                        ${escapeHtml(
+                          displayedWindowLabel
+                        )}
                       </p>
 
                       ${
@@ -565,10 +638,27 @@ function renderCancellationPolicyBlock({
       }
 
       ${
-        refundBasis ===
-          "NIGHTLY_SUBTOTAL" ||
-        refundBasis ===
-          "NIGHTLY_SUBTOTAL_ONLY"
+        presentation?.feeDisclosure
+          ? `
+            <div style="margin:12px 0 0;color:#475569;background:#ffffff;border:1px solid #e5e7eb;border-radius:10px;padding:10px;font-size:13px;">
+              <p style="margin:0;">
+                ${escapeHtml(
+                  presentation.feeDisclosure
+                )}
+              </p>
+            </div>
+          `
+          : ""
+      }
+
+      ${
+        !presentation &&
+        (
+          refundBasis ===
+            "NIGHTLY_SUBTOTAL" ||
+          refundBasis ===
+            "NIGHTLY_SUBTOTAL_ONLY"
+        )
           ? `
             <div style="margin:12px 0 0;color:#92400e;background:#fffbeb;border:1px solid #fde68a;border-radius:10px;padding:10px;font-size:13px;">
               <p style="margin:0;">
@@ -780,6 +870,7 @@ export async function sendDirectBookingGuestConfirmation(
     cancellationPolicySummary,
     refundBasis,
     refundRules,
+    cancellationPolicyPresentation,
     preferredLanguage,
   } = input;
   const language = resolveGuestLanguage(preferredLanguage);
@@ -838,9 +929,14 @@ export async function sendDirectBookingGuestConfirmation(
       ...(refundRules !== undefined
         ? { refundRules }
         : {}),
+      ...(cancellationPolicyPresentation !==
+      undefined
+        ? {
+            cancellationPolicyPresentation,
+          }
+        : {}),
       language,
     });
-
  const safeVerificationUrl =
   getSafeUrl(verificationUrl);
 

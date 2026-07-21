@@ -18,7 +18,10 @@ import {
   sendDirectBookingGuestConfirmation,
   sendDirectBookingHostNotification,
 } from "../lib/mailer";
-import { deserializeCancellationPolicySnapshotFromStripeMetadata } from "./cancellation-policy.service";
+import {
+  deserializeCancellationPolicySnapshotFromStripeMetadata,
+  renderCancellationPolicySnapshot,
+} from "./cancellation-policy.service";
 import { dispatchPendingCleaningConfirmationForReservation } from "./cleaning-confirmation-dispatch.service";
 import { resolveOrganizationGuestReplyTo } from "./organization-guest-email.service";
 
@@ -687,6 +690,16 @@ const cancellationPolicySnapshot = {
   cancellationTermsAcceptance,
 };
 
+const cancellationPolicyPresentation =
+  deserializedCancellationPolicySnapshot
+    ? renderCancellationPolicySnapshot({
+        snapshot:
+          deserializedCancellationPolicySnapshot,
+        preferredLanguage,
+        checkIn,
+      })
+    : null;
+
 let cancellationPolicyId: string | null = null;
 
 if ((cancellationPolicySnapshot as any)?.policyId) {
@@ -873,15 +886,29 @@ if (updatedReservation.guestEmail) {
     identityVerificationRequired:
       updatedReservation
         .identityVerificationRequiredSnapshot !== false,
-    cancellationPolicyName: (cancellationPolicySnapshot as any).name ?? null,
-    cancellationPolicyType: (cancellationPolicySnapshot as any).type ?? null,
-    cancellationPolicySummary: getCancellationPolicySummaryForEmail(
-      cancellationPolicySnapshot
-    ),
-    refundBasis: (cancellationPolicySnapshot as any).refundBasis ?? null,
-    refundRules: getCancellationRefundRulesForEmail(
-      cancellationPolicySnapshot
-    ),
+    cancellationPolicyName:
+      (cancellationPolicySnapshot as any).name ??
+      null,
+
+    cancellationPolicyType:
+      (cancellationPolicySnapshot as any).type ??
+      null,
+
+    cancellationPolicySummary:
+      getCancellationPolicySummaryForEmail(
+        cancellationPolicySnapshot
+      ),
+
+    refundBasis: 
+      (cancellationPolicySnapshot as any)
+         .refundBasis ?? null,
+     
+    refundRules: 
+      getCancellationRefundRulesForEmail(
+        cancellationPolicySnapshot
+      ),
+    
+    cancellationPolicyPresentation,
     preferredLanguage,
   };
 
