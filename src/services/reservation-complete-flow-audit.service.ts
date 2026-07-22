@@ -616,6 +616,9 @@ export async function auditReservationCompleteFlow(
           timezone: true,
           checkInTime: true,
           checkOutTime: true,
+          
+          cleaningNfcEnabled: true,
+
           distributionEnabled: true,
           distributionStatus: true,
           distributionLastSyncedAt: true,
@@ -1013,6 +1016,9 @@ const guestConfirmationEmailEvidenceRequired =
   const safeTimeZone = normalizePropertyTimeZone(property.timezone);
   const checkInTime = normalizeTime(property.checkInTime, DEFAULT_CHECK_IN_TIME);
   const checkOutTime = normalizeTime(property.checkOutTime, DEFAULT_CHECK_OUT_TIME);
+
+  const cleaningAccessRequired =
+  property.cleaningNfcEnabled === true;
 
   const expectedCheckIn = buildZonedDateFromDateAndTime(
     getLocalDateString(reservation.checkIn, safeTimeZone),
@@ -1661,18 +1667,24 @@ const hasHostEmailEvidence = hasMessageEvidence({
   addCheck(checks, {
     rule: "CLEANING_TASK_CREATED",
     label: "Cleaning Task Created",
-    status:
-      staffAssignmentReady || cleaningConfirmationReady
-        ? "PASS"
-        : latestStaffAssignment || latestCleaningConfirmation
-        ? "FAIL"
-        : "WARNING",
+   status:
+  !cleaningAccessRequired
+    ? "PASS"
+    : staffAssignmentReady || cleaningConfirmationReady
+    ? "PASS"
+    : latestStaffAssignment || latestCleaningConfirmation
+    ? "FAIL"
+    : "WARNING",
     critical: false,
-    recommendedAction:
-      staffAssignmentReady || cleaningConfirmationReady
-        ? undefined
-        : "Assign a cleaner and verify cleaning confirmation for this reservation.",
+    required: cleaningAccessRequired,
+  recommendedAction:
+  cleaningAccessRequired &&
+  !(staffAssignmentReady || cleaningConfirmationReady)
+    ? "Assign a cleaner and verify cleaning confirmation for this reservation."
+    : undefined,
     metadata: {
+      cleaningAccessRequired,
+      cleaningNfcEnabled: property.cleaningNfcEnabled,
       staffAssignmentId: latestStaffAssignment?.id ?? null,
       staffAssignmentStatus: latestStaffAssignment?.status ?? null,
       staffMemberId:
@@ -1723,27 +1735,40 @@ const cleaningConfirmationIssue =
     : null;
 
 addCheck(checks, {
-  rule: cleaningConfirmationPending
-    ? "CLEANING_CONFIRMATION_PENDING"
+ rule: !cleaningAccessRequired
+  ? "CLEANING_CONFIRMATION_NOT_REQUIRED"
+  : cleaningConfirmationPending
+  ? "CLEANING_CONFIRMATION_PENDING"
+  : cleaningConfirmationDeclined
+  ? "CLEANING_CONFIRMATION_DECLINED"
+  : "CLEANING_CONFIRMATION_READY",
+ label: !cleaningAccessRequired
+  ? "Cleaning Confirmation Not Required"
+  : cleaningConfirmationPending
+  ? "Cleaning Confirmation Pending"
+  : cleaningConfirmationDeclined
+  ? "Cleaning Confirmation Declined"
+  : "Cleaning Confirmation Ready",
+ status:
+  !cleaningAccessRequired
+    ? "PASS"
+    : cleaningConfirmationPending
+    ? "WARNING"
     : cleaningConfirmationDeclined
-    ? "CLEANING_CONFIRMATION_DECLINED"
-    : "CLEANING_CONFIRMATION_READY",
-  label: cleaningConfirmationPending
-    ? "Cleaning Confirmation Pending"
-    : cleaningConfirmationDeclined
-    ? "Cleaning Confirmation Declined"
-    : "Cleaning Confirmation Ready",
-  status:
-    cleaningConfirmationPending
-      ? "WARNING"
-      : cleaningConfirmationDeclined
-      ? "FAIL"
-      : "PASS",
+    ? "FAIL"
+    : "PASS",
   critical: false,
-  required: true,
+  required: cleaningAccessRequired,
   recommendedAction:
-    cleaningConfirmationIssue?.recommendedAction,
+  cleaningAccessRequired
+    ? cleaningConfirmationIssue?.recommendedAction
+    : undefined,
   metadata: {
+    cleaningAccessRequired,
+    cleaningNfcEnabled: property.cleaningNfcEnabled,
+
+    issueCode: cleaningConfirmationIssue?.issueCode ?? null,
+    issueTitle: cleaningConfirmationIssue?.issueTitle ?? null,
     issueCode: cleaningConfirmationIssue?.issueCode ?? null,
     issueTitle: cleaningConfirmationIssue?.issueTitle ?? null,
     issue: cleaningConfirmationIssue?.issue ?? null,
@@ -1759,7 +1784,7 @@ addCheck(checks, {
       latestCleaningConfirmation?.staffMemberId ??
       latestStaffAssignment?.staffMemberId ??
       null,
-    canAutoResolve: false,
+    canAutoResolve: !cleaningAccessRequired,
   },
 });
 
@@ -1812,10 +1837,11 @@ addCheck(checks, {
     >
   > | null = null;
 
-  if (
-    cleaningConfirmationConfirmed &&
-    !cleanerNfcLifecycleValid
-  ) {
+ if (
+  cleaningAccessRequired &&
+  cleaningConfirmationConfirmed &&
+  !cleanerNfcLifecycleValid
+) {
     cleanerAccessAutopilotResult =
       await ensureCleanerNfcAccessForConfirmedCleaning({
         prisma: db,
@@ -1843,22 +1869,25 @@ addCheck(checks, {
         staffAssignmentReady)
   );
 
-  const cleanerAccessCheckStatus:
-    ReservationCompleteFlowCheckStatus =
-    cleanerNfcFailed
-      ? "FAIL"
-      : cleanerNfcProvisioning
-      ? "WARNING"
-      : cleanerAccessReady ||
-        cleanerAccessWaitingForConfirmation
-      ? "PASS"
-      : cleaningConfirmationDeclined ||
-        cleanerAccessRequiredNow
-      ? "FAIL"
-      : "WARNING";
-
+ const cleanerAccessCheckStatus:
+  ReservationCompleteFlowCheckStatus =
+  !cleaningAccessRequired
+    ? "PASS"
+    : cleanerNfcFailed
+    ? "FAIL"
+    : cleanerNfcProvisioning
+    ? "WARNING"
+    : cleanerAccessReady ||
+      cleanerAccessWaitingForConfirmation
+    ? "PASS"
+    : cleaningConfirmationDeclined ||
+      cleanerAccessRequiredNow
+    ? "FAIL"
+    : "WARNING";
   const cleanerAccessRecommendedAction =
-    cleanerNfcAccessReady
+  !cleaningAccessRequired
+    ? undefined
+    : cleanerNfcAccessReady
       ? undefined
       : cleanerNfcScheduled
       ? undefined
@@ -1881,8 +1910,12 @@ addCheck(checks, {
     label: "Cleaner Access Lifecycle Valid",
     status: cleanerAccessCheckStatus,
     critical: false,
+    required: cleaningAccessRequired,
     recommendedAction: cleanerAccessRecommendedAction,
     metadata: {
+      cleaningAccessRequired,
+      cleaningNfcEnabled: property.cleaningNfcEnabled,
+      
       cleanerAccessReady,
       cleanerAccessRequiredNow,
       cleanerAccessWaitingForConfirmation,
@@ -1923,13 +1956,21 @@ addCheck(checks, {
   addCheck(checks, {
     rule: "CLEANER_NOTIFICATION_EVIDENCE",
     label: "Cleaner Notification Evidence",
-    status: hasCleanerNotificationEvidence ? "PASS" : "WARNING",
+    status:
+      !cleaningAccessRequired ||
+      hasCleanerNotificationEvidence
+        ? "PASS"
+        : "WARNING",
     critical: false,
-    required: false,
-    recommendedAction: hasCleanerNotificationEvidence
-      ? undefined
-      : "Cleaner notification evidence is not persisted yet. Verify cleaner communication if this stay is near check-in.",
+    required: cleaningAccessRequired,
+   recommendedAction:
+     cleaningAccessRequired &&
+        !hasCleanerNotificationEvidence
+        ? "Cleaner notification evidence is not persisted yet. Verify cleaner communication if this stay is near check-in."
+        : undefined,
     metadata: {
+      cleaningAccessRequired,
+      cleaningNfcEnabled: property.cleaningNfcEnabled,
       hasCleanerNotificationEvidence,
       messageDispatchLogCount: dispatchLogs.length,
       messageLogCount: messageLogs.length,
