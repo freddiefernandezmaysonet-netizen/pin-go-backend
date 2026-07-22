@@ -48,7 +48,8 @@ type CleaningSmsArgs = {
   roomName?: string | null;
   startsAt: Date;
   endsAt: Date;
-
+  timezone?: string | null;
+  
   reservationId?: string | null;
   propertyId?: string | null;
   organizationId?: string | null;
@@ -117,10 +118,6 @@ function fmtWithTimezone(
   }).format(new Date(d));
 }
 
-function fmtUtc(d: Date): string {
-  return new Date(d).toISOString().replace("T", " ").slice(0, 16) + " UTC";
-}
-
 export function buildGuestPasscodeSmsBody(params: {
   guestName?: string | null;
   code: string;
@@ -181,14 +178,23 @@ export function buildCleaningStartSmsBody(params: {
   roomName?: string | null;
   startsAt: Date;
   endsAt: Date;
+  timezone?: string | null;
 }): string {
   return (
     `Pin&Go - Limpieza INICIADA\n` +
     `Asignado: ${cleanEnv(params.staffName) ?? "Staff"}\n` +
     `Propiedad: ${cleanEnv(params.propertyName) ?? "N/A"}\n` +
     `Unidad: ${cleanEnv(params.roomName) ?? "N/A"}\n` +
-    `Inicio: ${fmtUtc(params.startsAt)}\n` +
-    `Fin: ${fmtUtc(params.endsAt)}\n` +
+    `Inicio: ${fmtWithTimezone(
+      params.startsAt,
+      params.timezone ?? "America/Puerto_Rico",
+      "es"
+      )}\n` +
+     `Fin: ${fmtWithTimezone(
+       params.endsAt,
+       params.timezone ?? "America/Puerto_Rico",
+       "es"
+     )}\n` +
     `Su tarjeta NFC esta activa unicamente durante esta ventana.`
   );
 }
@@ -198,13 +204,18 @@ export function buildCleaningEndSmsBody(params: {
   propertyName?: string | null;
   roomName?: string | null;
   endsAt: Date;
+  timezone?: string | null;
 }): string {
   return (
     `Pin&Go ✅ Limpieza FINALIZADA\n` +
     `Asignado: ${cleanEnv(params.staffName) ?? "Staff"}\n` +
     `Propiedad: ${cleanEnv(params.propertyName) ?? "N/A"}\n` +
     `Unidad: ${cleanEnv(params.roomName) ?? "N/A"}\n` +
-    `Fin: ${fmtUtc(params.endsAt)}\n` +
+    `Fin: ${fmtWithTimezone(
+      params.endsAt,
+      params.timezone ?? "America/Puerto_Rico",
+      "es"
+    )}\n` +
     `Acceso expiró automáticamente.`
   );
 }
@@ -366,7 +377,8 @@ export async function sendCleaningStartSms(
     roomName: args.roomName,
     startsAt: args.startsAt,
     endsAt: args.endsAt,
-  });
+    timezone: args.timezone,
+ });
 
   return sendLoggedSms({
     prisma: args.prisma,
@@ -390,7 +402,8 @@ export async function sendCleaningEndSms(
     propertyName: args.propertyName,
     roomName: args.roomName,
     endsAt: args.endsAt,
-  });
+    timezone: args.timezone,
+ });
 
   return sendLoggedSms({
     prisma: args.prisma,
