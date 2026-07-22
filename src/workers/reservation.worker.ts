@@ -1780,7 +1780,10 @@ async function processCleaningActivations(now: Date) {
                 assignment.reservation?.roomName,
               startsAt: assignment.startsAt,
               endsAt: assignment.endsAt,
-            });
+              timezone:
+                assignment.reservation?.property
+                  ?.timezone,
+          });
 
           if (result.ok) {
             log("Cleaning SMS sent (START)", {
@@ -1893,7 +1896,8 @@ async function processCleaningEnds(now: Date) {
       propertyName: a.reservation?.property?.name,
       roomName: a.reservation?.roomName,
       endsAt: a.endsAt,
-    });
+      timezone: a.reservation?.property?.timezone,
+   });
 
     if (result.ok) {
       log(`Cleaning SMS sent (END)`, { assignmentId: a.id });
