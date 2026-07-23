@@ -17,6 +17,12 @@ import {
 import { prisma } from "../lib/prisma";
 import { isOrgEntitled } from "../services/billing.entitlement";
 import { activateGrant, deactivateGrant } from "../services/ttlock/ttlock.brain";
+import {
+  ACCESS_RECOVERY_OPERATION,
+  claimAccessRecoveryAttempt,
+  recordAccessRecoveryFailure,
+  recordAccessRecoverySuccess,
+} from "../services/access-recovery.service";
 import { assignNfcCards } from "../services/nfc.service";
 import {
   sendGuestPasscodeSms,
@@ -1497,16 +1503,69 @@ async function activateGuestNfcAssignmentsForReservation(params: {
       if (grant.type !== AccessGrantType.GUEST) continue;
 
       try {
-        // Guard-rail: asegura que siga ACTIVE
-        const locked = await prisma.accessGrant.updateMany({
-          where: { id: grant.id, status: AccessStatus.ACTIVE },
-          data: { lastError: null },
-        });
+       const recoveryClaim =
+  await claimAccessRecoveryAttempt({
+    prisma,
+    accessGrantId: grant.id,
+    operation:
+      ACCESS_RECOVERY_OPERATION.REVOKE,
+    now,
+  });
 
-        if (locked.count === 0) continue;
-      
+if (!recoveryClaim.claimed) {
+  log("Guest access revoke skipped by recovery policy", {
+    reservationNumber:
+      r.reservationNumber ?? null,
+    reservationId: r.id,
+    accessGrantId: grant.id,
+    reason: recoveryClaim.reason,
+    nextAttemptAt:
+      "nextAttemptAt" in recoveryClaim
+        ? recoveryClaim.nextAttemptAt?.toISOString() ??
+          null
+        : null,
+  });
+
+  continue;
+}
         // 1) Revocar usando TTLock Brain (maneja TTLock + Prisma)
-await deactivateGrant(grant.id);
+try {
+  await deactivateGrant(grant.id);
+
+  await recordAccessRecoverySuccess({
+    prisma,
+    accessGrantId: grant.id,
+  });
+
+  log("Guest access revoked", {
+    reservationNumber: r.reservationNumber ?? null,
+    reservationId: r.id,
+    accessGrantId: grant.id,
+    recoveryAttempt: recoveryClaim.attemptCount,
+  });
+} catch (error) {
+  const recovery = await recordAccessRecoveryFailure({
+    prisma,
+    accessGrantId: grant.id,
+    operation: ACCESS_RECOVERY_OPERATION.REVOKE,
+    attemptCount: recoveryClaim.attemptCount,
+    error,
+    now,
+  });
+
+  errLog("Guest access revocation FAILED", {
+    reservationNumber: r.reservationNumber ?? null,
+    reservationId: r.id,
+    accessGrantId: grant.id,
+    attemptCount: recovery.attemptCount,
+    exhausted: recovery.exhausted,
+    nextAttemptAt:
+      recovery.nextAttemptAt?.toISOString() ?? null,
+    error: recovery.lastError,
+  });
+
+  continue;
+}
 
 try {
   const lock = await prisma.lock.findUnique({ where: { id: grant.lockId } });
@@ -1545,12 +1604,6 @@ try {
   errLog("NFC revoke failed", { reservationId: r.id, err: toErrString(e) });
 }
 
-// 2) Limpia error si quedó alguno (opcional, safe)
-await prisma.accessGrant.update({
-  where: { id: grant.id },
-  data: { lastError: null },
-});
-
 try {
   await sendCheckoutSms(prisma, r.id);
 } catch (e) {
@@ -1569,21 +1622,15 @@ try {
   });
 }
      log(`Revoked GUEST grant ${grant.id} (reservation ${r.id})`);
-      } catch (e) {
-        const msg = toErrString(e);
-
-        // ⚠️ NO pongas FAILED aquí: deja ACTIVE para reintento
-        await prisma.accessGrant.update({
-          where: { id: grant.id },
-          data: { lastError: msg },
-        });
-
-        errLog(`Deactivation FAILED grant ${grant.id} (reservation ${r.id}) -> ${msg}`);
-      }
-    }
-  }
+     } catch (e) {
+  errLog("Guest checkout post-revocation flow FAILED", {
+    reservationNumber: r.reservationNumber ?? null,
+    reservationId: r.id,
+    accessGrantId: grant.id,
+    error: toErrString(e),
+  });
 }
-
+  
     async function revokeGuestNfcAssignmentsForReservation(params: {
   reservationId: string;
   lockIdTtlock: number;
