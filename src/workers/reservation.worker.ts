@@ -1527,7 +1527,9 @@ async function processCheckouts(now: Date) {
             accessGrantId: grant.id,
             operation:
               ACCESS_RECOVERY_OPERATION.REVOKE,
+            now,
           });
+
         if (!recoveryClaim.claimed) {
           /*
            * No registrar cada RECOVERY_NOT_DUE:
