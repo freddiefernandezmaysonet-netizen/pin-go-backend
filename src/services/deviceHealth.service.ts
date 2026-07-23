@@ -62,11 +62,22 @@ type UpsertDeviceHealthInput = {
   lastSeenAt?: Date | null;
   source?: string | null;
   rawPayload?: unknown;
+
   batteryLastCheckedAt?: Date | null;
+  batteryLastSuccessfulAt?: Date | null;
+  batteryLastFailedAt?: Date | null;
+  batteryLastError?: string | null;
+  batteryRawPayload?: unknown;
+  batteryProviderResponseAt?: Date | null;
   batteryNextCheckAt?: Date | null;
 
+  gatewayRssi?: number | null;
   gatewayLastCheckedAt?: Date | null;
   gatewayLastSuccessfulAt?: Date | null;
+  gatewayLastFailedAt?: Date | null;
+  gatewayLastError?: string | null;
+  gatewayRawPayload?: unknown;
+  gatewayProviderResponseAt?: Date | null;
   gatewayNextCheckAt?: Date | null;
   gatewayDisconnectedSince?: Date | null;
   gatewayCheckReservationId?: string | null;
@@ -78,7 +89,7 @@ type UpsertDeviceHealthInput = {
   gatewayCriticalAlertSentAt?: Date | null;
   gatewayCriticalAlertRecipients?: unknown;
   gatewayCriticalAlertLastError?: string | null;
-  
+
   healthOverrideStatus?: DeviceHealthStatus;
   healthOverrideMessage?: string;
 };
@@ -166,7 +177,26 @@ export async function upsertDeviceHealth(
         input.batteryLastCheckedAt ?? null,
       batteryNextCheckAt:
         input.batteryNextCheckAt ?? null,
-
+      batteryLastSuccessfulAt:
+        input.batteryLastSuccessfulAt ?? null,
+      batteryLastFailedAt:
+        input.batteryLastFailedAt ?? null,
+      batteryLastError:
+        input.batteryLastError ?? null,
+      batteryRawPayload:
+        input.batteryRawPayload as any,
+      batteryProviderResponseAt:
+        input.batteryProviderResponseAt ?? null,
+      gatewayRssi:
+        input.gatewayRssi ?? null,
+      gatewayLastFailedAt:
+        input.gatewayLastFailedAt ?? null,
+      gatewayLastError:
+        input.gatewayLastError ?? null,
+      gatewayRawPayload:
+        input.gatewayRawPayload as any,
+      gatewayProviderResponseAt:
+        input.gatewayProviderResponseAt ?? null,
       gatewayLastCheckedAt:
         input.gatewayLastCheckedAt ?? null,
       gatewayLastSuccessfulAt:
@@ -177,7 +207,6 @@ export async function upsertDeviceHealth(
         input.gatewayDisconnectedSince ?? null,
       gatewayCheckReservationId:
         input.gatewayCheckReservationId ?? null,
-
       gatewayCriticalAlertReservationId:
         input.gatewayCriticalAlertReservationId ?? null,
       gatewayCriticalAlertStatus:
@@ -216,7 +245,46 @@ export async function upsertDeviceHealth(
         input.batteryNextCheckAt !== undefined
           ? input.batteryNextCheckAt
           : undefined,
-
+      batteryLastSuccessfulAt:
+        input.batteryLastSuccessfulAt !== undefined
+          ? input.batteryLastSuccessfulAt
+          : undefined,
+      batteryLastFailedAt:
+        input.batteryLastFailedAt !== undefined
+          ? input.batteryLastFailedAt
+          : undefined,
+      batteryLastError:
+        input.batteryLastError !== undefined
+          ? input.batteryLastError
+          : undefined,
+      batteryRawPayload:
+        input.batteryRawPayload !== undefined
+          ? (input.batteryRawPayload as any)
+          : undefined,
+      batteryProviderResponseAt:
+        input.batteryProviderResponseAt !== undefined
+          ? input.batteryProviderResponseAt
+          : undefined,
+      gatewayRssi:
+        input.gatewayRssi !== undefined
+          ? input.gatewayRssi
+          : undefined,
+      gatewayLastFailedAt:
+        input.gatewayLastFailedAt !== undefined
+          ? input.gatewayLastFailedAt
+          : undefined,
+      gatewayLastError:
+        input.gatewayLastError !== undefined
+          ? input.gatewayLastError
+          : undefined,
+      gatewayRawPayload:
+        input.gatewayRawPayload !== undefined
+          ? (input.gatewayRawPayload as any)
+          : undefined,
+      gatewayProviderResponseAt:
+        input.gatewayProviderResponseAt !== undefined
+          ? input.gatewayProviderResponseAt
+          : undefined,
       gatewayLastCheckedAt:
         input.gatewayLastCheckedAt !== undefined
           ? input.gatewayLastCheckedAt
@@ -237,7 +305,6 @@ export async function upsertDeviceHealth(
         input.gatewayCheckReservationId !== undefined
           ? input.gatewayCheckReservationId
           : undefined,
-
       gatewayCriticalAlertReservationId:
         input.gatewayCriticalAlertReservationId !== undefined
           ? input.gatewayCriticalAlertReservationId

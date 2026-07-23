@@ -613,13 +613,27 @@ model DeviceHealth {
   // Battery scheduling
   batteryLastCheckedAt DateTime?
   batteryNextCheckAt   DateTime?
-
+  
+  // Battery telemetry persistence
+  batteryLastSuccessfulAt   DateTime?
+  batteryLastFailedAt       DateTime?
+  batteryLastError          String?
+  batteryRawPayload         Json?
+  batteryProviderResponseAt DateTime?
+ 
   // Gateway readiness scheduling
   gatewayLastCheckedAt       DateTime?
   gatewayLastSuccessfulAt    DateTime?
   gatewayNextCheckAt         DateTime?
   gatewayDisconnectedSince   DateTime?
   gatewayCheckReservationId  String?
+
+  // Gateway telemetry persistence
+  gatewayRssi               Int?
+  gatewayLastFailedAt       DateTime?
+  gatewayLastError          String?
+  gatewayRawPayload         Json?
+  gatewayProviderResponseAt DateTime?
 
   // Critical host alert lifecycle
   gatewayCriticalAlertReservationId String?

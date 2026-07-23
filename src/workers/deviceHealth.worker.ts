@@ -7,8 +7,14 @@ import {
   supersedeGatewayReadinessIssue,
 } from "../services/device-health-alert.service";
 import { upsertDeviceHealth } from "../services/deviceHealth.service";
-import { ttlockFetchBattery } from "../ttlock/ttlock.deviceBattery";
-import { ttlockFetchGateway } from "../ttlock/ttlock.deviceGateway";
+import {
+  TTLockBatteryError,
+  ttlockFetchBattery,
+} from "../ttlock/ttlock.deviceBattery";
+import {
+  TTLockGatewayError,
+  ttlockFetchGateway,
+} from "../ttlock/ttlock.deviceGateway";
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 const HOUR_MS = 60 * 60 * 1000;
@@ -20,10 +26,10 @@ const BATTERY_WEEKLY_INTERVAL_MS =
   7 * DAY_MS;
 
 const BATTERY_MONITORING_THRESHOLD =
-  40;
+  30;
 
 const BATTERY_CRITICAL_THRESHOLD =
-  30;
+  20;
 
 const GATEWAY_WINDOW_MS =
   24 * HOUR_MS;
@@ -431,6 +437,14 @@ export async function runDeviceHealthWorker() {
               battery,
               batteryLastCheckedAt:
                 now,
+              batteryLastSuccessfulAt:
+                response.providerResponseAt,
+              batteryLastError:
+                null,
+              batteryRawPayload:
+                response.raw,
+              batteryProviderResponseAt:
+                response.providerResponseAt,
               batteryNextCheckAt,
               lastSyncAt:
                 now,
@@ -459,13 +473,25 @@ export async function runDeviceHealthWorker() {
             }
           );
         } catch (error) {
+          const batteryError =
+            error instanceof TTLockBatteryError
+              ? error.details
+              : null;
+
           const {
             errcode,
             errmsg,
           } =
-            getTtlockErrorInfo(
-              error
-            );
+            batteryError
+              ? {
+                  errcode:
+                    batteryError.errcode,
+                  errmsg:
+                    batteryError.message,
+                }
+              : getTtlockErrorInfo(
+                  error
+                );
 
           const batteryNextCheckAt =
             calculateBatteryFailureNextCheckAt({
@@ -482,6 +508,18 @@ export async function runDeviceHealthWorker() {
                 lock.id,
               batteryLastCheckedAt:
                 now,
+              batteryLastFailedAt:
+                now,
+              batteryLastError:
+                errmsg,
+              batteryRawPayload:
+                batteryError?.rawPayload !== null &&
+                batteryError?.rawPayload !== undefined
+                  ? batteryError.rawPayload
+                  : undefined,
+              batteryProviderResponseAt:
+                batteryError?.providerResponseAt ??
+                undefined,
               batteryNextCheckAt,
               lastSyncAt:
                 now,
@@ -493,6 +531,12 @@ export async function runDeviceHealthWorker() {
                 ttlockError: {
                   errcode,
                   errmsg,
+                  timedOut:
+                    batteryError?.timedOut ??
+                    false,
+                  httpStatus:
+                    batteryError?.httpStatus ??
+                    null,
                 },
               },
             }
@@ -598,12 +642,20 @@ export async function runDeviceHealthWorker() {
                     lock.id,
                   gatewayConnected:
                     true,
+                  gatewayRssi:
+                    response.gatewayRssi,
                   isOnline:
                     true,
                   gatewayLastCheckedAt:
                     now,
                   gatewayLastSuccessfulAt:
-                    now,
+                    response.providerResponseAt,
+                  gatewayLastError:
+                    null,
+                  gatewayRawPayload:
+                    response.raw,
+                  gatewayProviderResponseAt:
+                    response.providerResponseAt,
                   gatewayNextCheckAt:
                     null,
                   gatewayDisconnectedSince:
@@ -694,8 +746,18 @@ export async function runDeviceHealthWorker() {
                     lock.id,
                   gatewayConnected:
                     false,
+                  gatewayRssi:
+                    response.gatewayRssi,
                   gatewayLastCheckedAt:
                     now,
+                  gatewayLastSuccessfulAt:
+                    response.providerResponseAt,
+                  gatewayLastError:
+                    null,
+                  gatewayRawPayload:
+                    response.raw,
+                  gatewayProviderResponseAt:
+                    response.providerResponseAt,
                   gatewayNextCheckAt:
                     nextCheckAt,
                   gatewayDisconnectedSince:
@@ -808,13 +870,25 @@ export async function runDeviceHealthWorker() {
               }
             }
           } catch (error) {
+            const gatewayError =
+              error instanceof TTLockGatewayError
+                ? error.details
+                : null;
+
             const {
               errcode,
               errmsg,
             } =
-              getTtlockErrorInfo(
-                error
-              );
+              gatewayError
+                ? {
+                    errcode:
+                      gatewayError.errcode,
+                    errmsg:
+                      gatewayError.message,
+                  }
+                : getTtlockErrorInfo(
+                    error
+                  );
 
             const nextCheckAt =
               calculateGatewayNextCheckAt({
@@ -834,6 +908,18 @@ export async function runDeviceHealthWorker() {
                     : null,
                 gatewayLastCheckedAt:
                   now,
+                gatewayLastFailedAt:
+                  now,
+                gatewayLastError:
+                  errmsg,
+                gatewayRawPayload:
+                  gatewayError?.rawPayload !== null &&
+                  gatewayError?.rawPayload !== undefined
+                    ? gatewayError.rawPayload
+                    : undefined,
+                gatewayProviderResponseAt:
+                  gatewayError?.providerResponseAt ??
+                  undefined,
                 gatewayNextCheckAt:
                   nextCheckAt,
                 gatewayDisconnectedSince:
@@ -852,6 +938,12 @@ export async function runDeviceHealthWorker() {
                   ttlockError: {
                     errcode,
                     errmsg,
+                    timedOut:
+                      gatewayError?.timedOut ??
+                      false,
+                    httpStatus:
+                      gatewayError?.httpStatus ??
+                      null,
                   },
                 },
                 ...(
