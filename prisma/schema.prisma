@@ -506,6 +506,13 @@ model AccessGrant {
   linkedStripeCustomerId     String?
   linkedStripeSubscriptionId String?
   lastError                  String?
+  
+  recoveryOperation          String?
+  recoveryAttemptCount       Int              @default(0)
+  recoveryLastAttemptAt      DateTime?
+  recoveryNextAttemptAt      DateTime?
+  recoveryExhaustedAt        DateTime?
+  
   createdAt                  DateTime         @default(now())
   updatedAt                  DateTime         @updatedAt
   staffMemberId              String?
@@ -528,6 +535,7 @@ model AccessGrant {
   @@index([reservationId, status])
   @@index([type, staffMemberId])
   @@index([reservationId, method, type])
+  @@index([status, recoveryOperation, recoveryNextAttemptAt, recoveryExhaustedAt])
 }
 
 model StripeEventLog {
