@@ -90,6 +90,15 @@ type SendDirectBookingHostNotificationInput = {
   currency?: string | null;
 };
 
+export type SendDeviceGatewayCriticalAlertEmailInput = {
+  to: string[];
+  propertyName: string;
+  lockName: string;
+  reservationNumber?: string | null;
+  checkIn: Date;
+  propertyTimeZone?: string | null;
+};
+
 type SendManualReservationGuestConfirmationInput = {
   to: string;
   replyTo?: string | null;
@@ -2025,5 +2034,150 @@ export async function sendGuestVerificationReminderEmail(
     ok: true,
     mode: "resend",
     data,
+  };
+}
+
+export async function sendDeviceGatewayCriticalAlertEmail(
+  input: SendDeviceGatewayCriticalAlertEmailInput
+) {
+  const recipients = Array.from(
+    new Set(
+      input.to
+        .map((email) => String(email ?? "").trim().toLowerCase())
+        .filter(Boolean)
+    )
+  );
+
+  if (recipients.length === 0) {
+    throw new Error(
+      "Device gateway critical alert requires at least one recipient"
+    );
+  }
+
+  const safePropertyName = escapeHtml(input.propertyName);
+  const safeLockName = escapeHtml(input.lockName);
+  const safeReservationNumber = input.reservationNumber
+    ? escapeHtml(input.reservationNumber)
+    : null;
+
+  const formattedCheckIn = formatBookingDateTime(
+    input.checkIn,
+    input.propertyTimeZone,
+    "en"
+  );
+
+  if (!resend) {
+    if (isProd) {
+      throw new Error(
+        "RESEND_API_KEY missing in production"
+      );
+    }
+
+    console.log(
+      "RESEND_API_KEY missing. Device gateway critical alert fallback.",
+      {
+        to: recipients,
+        propertyName: input.propertyName,
+        lockName: input.lockName,
+        reservationNumber:
+          input.reservationNumber ?? null,
+      }
+    );
+
+    return {
+      ok: true,
+      mode: "console" as const,
+      providerMessageId: null,
+      recipients,
+    };
+  }
+
+  const { data, error } =
+    await resend.emails.send({
+      from: getEmailFrom(),
+      to: recipients,
+      subject:
+        "CRITICAL / CRÍTICO: Gateway offline before guest check-in",
+      html: `
+        <div style="font-family:Arial,sans-serif;color:#111827;line-height:1.6;max-width:680px;margin:0 auto;">
+          <div style="background:#7f1d1d;color:#ffffff;border-radius:18px;padding:24px;margin-bottom:20px;">
+            <p style="margin:0 0 8px;font-size:12px;letter-spacing:0.08em;text-transform:uppercase;font-weight:800;">
+              Pin&amp;Go Mission Control
+            </p>
+
+            <h1 style="margin:0;font-size:28px;line-height:1.15;">
+              Gateway offline / Gateway desconectado
+            </h1>
+          </div>
+
+          <p>
+            Pin&amp;Go detected that the gateway for
+            <strong>${safePropertyName}</strong>
+            remains offline less than six hours before guest check-in.
+          </p>
+
+          <p>
+            Pin&amp;Go detectó que el gateway de
+            <strong>${safePropertyName}</strong>
+            continúa desconectado a menos de seis horas del check-in.
+          </p>
+
+          <div style="background:#fef2f2;border:1px solid #fecaca;border-radius:16px;padding:20px;margin:22px 0;">
+            <p style="margin:0 0 8px;">
+              <strong>Lock / Cerradura:</strong>
+              ${safeLockName}
+            </p>
+
+            ${
+              safeReservationNumber
+                ? `
+                  <p style="margin:0 0 8px;">
+                    <strong>Reservation / Reservación:</strong>
+                    #${safeReservationNumber}
+                  </p>
+                `
+                : ""
+            }
+
+            <p style="margin:0;">
+              <strong>Check-in:</strong>
+              ${escapeHtml(formattedCheckIn)}
+            </p>
+          </div>
+
+          <h2 style="font-size:18px;margin-bottom:8px;">
+            Required action / Acción requerida
+          </h2>
+
+          <p>
+            Restore gateway connectivity immediately to preserve remote
+            access automation.
+          </p>
+
+          <p>
+            Restaure inmediatamente la conexión del gateway para preservar
+            la automatización remota de acceso.
+          </p>
+
+          <p style="color:#475569;font-size:13px;">
+            Pin&amp;Go will continue checking the gateway every hour.<br />
+            Pin&amp;Go continuará verificando el gateway cada hora.
+          </p>
+        </div>
+      `,
+    });
+
+  if (error) {
+    throw new Error(
+      `Device gateway critical alert email failed: ${error.message}`
+    );
+  }
+
+  return {
+    ok: true,
+    mode: "resend" as const,
+    providerMessageId:
+      data?.id ?? null,
+    recipients,
   };
 }
