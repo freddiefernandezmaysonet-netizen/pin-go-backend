@@ -1490,145 +1490,369 @@ async function activateGuestNfcAssignmentsForReservation(params: {
   return { ok: true, activated };
 }
 
- async function processCheckouts(now: Date) {
-  const reservations = await fetchDueCheckouts(now);
-  log('processCheckouts result', { count: reservations.length });
+async function processCheckouts(now: Date) {
+  const reservations =
+    await fetchDueCheckouts(now);
 
-  if (reservations.length === 0) return;
+  log("processCheckouts result", {
+    count: reservations.length,
+  });
+
+  if (reservations.length === 0) {
+    return;
+  }
 
   log(`Checkouts due: ${reservations.length}`);
 
-  for (const r of reservations) {
-    for (const grant of r.accessGrants) {
-      if (grant.type !== AccessGrantType.GUEST) continue;
+  for (const reservation of reservations) {
+    for (const grant of reservation.accessGrants) {
+      if (
+        grant.type !== AccessGrantType.GUEST
+      ) {
+        continue;
+      }
 
       try {
-       const recoveryClaim =
-  await claimAccessRecoveryAttempt({
-    prisma,
-    accessGrantId: grant.id,
-    operation:
-      ACCESS_RECOVERY_OPERATION.REVOKE,
-    now,
-  });
+        /*
+         * El Recovery Engine decide si este grant
+         * puede volver a llamar TTLock ahora.
+         *
+         * Cuando el backoff no ha vencido o el
+         * presupuesto se agotó, no se hace ninguna
+         * llamada remota.
+         */
+        const recoveryClaim =
+          await claimAccessRecoveryAttempt({
+            prisma,
+            accessGrantId: grant.id,
+            operation:
+              ACCESS_RECOVERY_OPERATION.REVOKE,
+            now,
+          });
 
-if (!recoveryClaim.claimed) {
-  log("Guest access revoke skipped by recovery policy", {
-    reservationNumber:
-      r.reservationNumber ?? null,
-    reservationId: r.id,
-    accessGrantId: grant.id,
-    reason: recoveryClaim.reason,
-    nextAttemptAt:
-      "nextAttemptAt" in recoveryClaim
-        ? recoveryClaim.nextAttemptAt?.toISOString() ??
-          null
-        : null,
-  });
+        if (!recoveryClaim.claimed) {
+          /*
+           * No registrar cada RECOVERY_NOT_DUE:
+           * el worker corre cada 10 segundos y eso
+           * produciría miles de logs innecesarios.
+           *
+           * El estado queda persistido en Prisma.
+           */
+          continue;
+        }
 
-  continue;
-}
-        // 1) Revocar usando TTLock Brain (maneja TTLock + Prisma)
-try {
-  await deactivateGrant(grant.id);
+        /*
+         * Revocación del passcode.
+         *
+         * deactivateGrant() es quien:
+         * - llama TTLock;
+         * - marca el AccessGrant como REVOKED
+         *   cuando TTLock confirma la operación.
+         */
+        try {
+          await deactivateGrant(grant.id);
+        } catch (deactivationError) {
+          try {
+            const recovery =
+              await recordAccessRecoveryFailure({
+                prisma,
+                accessGrantId: grant.id,
+                operation:
+                  ACCESS_RECOVERY_OPERATION
+                    .REVOKE,
+                attemptCount:
+                  recoveryClaim.attemptCount,
+                error: deactivationError,
 
-  await recordAccessRecoverySuccess({
-    prisma,
-    accessGrantId: grant.id,
-  });
+                /*
+                 * El backoff comienza desde el
+                 * momento real del fallo, no desde
+                 * el inicio general del tick.
+                 */
+                now: new Date(),
+              });
 
-  log("Guest access revoked", {
-    reservationNumber: r.reservationNumber ?? null,
-    reservationId: r.id,
-    accessGrantId: grant.id,
-    recoveryAttempt: recoveryClaim.attemptCount,
-  });
-} catch (error) {
-  const recovery = await recordAccessRecoveryFailure({
-    prisma,
-    accessGrantId: grant.id,
-    operation: ACCESS_RECOVERY_OPERATION.REVOKE,
-    attemptCount: recoveryClaim.attemptCount,
-    error,
-    now,
-  });
+            errLog(
+              "Guest access revocation FAILED",
+              {
+                reservationNumber:
+                  reservation.reservationNumber ??
+                  null,
+                reservationId:
+                  reservation.id,
+                accessGrantId: grant.id,
+                attemptCount:
+                  recovery.attemptCount,
+                recoveryStateApplied:
+                  recovery.applied,
+                exhausted:
+                  recovery.exhausted,
+                nextAttemptAt:
+                  recovery.nextAttemptAt
+                    ?.toISOString() ?? null,
+                error: recovery.lastError,
+              }
+            );
+          } catch (
+            recoveryPersistenceError
+          ) {
+            /*
+             * El claim mantiene un lease temporal.
+             * Si guardar el fallo también falla,
+             * el grant no se ejecutará nuevamente
+             * hasta que expire ese lease.
+             */
+            errLog(
+              "Guest access revocation failure could not be persisted",
+              {
+                reservationNumber:
+                  reservation
+                    .reservationNumber ?? null,
+                reservationId:
+                  reservation.id,
+                accessGrantId: grant.id,
+                attemptCount:
+                  recoveryClaim.attemptCount,
+                deactivationError:
+                  toErrString(
+                    deactivationError
+                  ),
+                recoveryPersistenceError:
+                  toErrString(
+                    recoveryPersistenceError
+                  ),
+              }
+            );
+          }
 
-  errLog("Guest access revocation FAILED", {
-    reservationNumber: r.reservationNumber ?? null,
-    reservationId: r.id,
-    accessGrantId: grant.id,
-    attemptCount: recovery.attemptCount,
-    exhausted: recovery.exhausted,
-    nextAttemptAt:
-      recovery.nextAttemptAt?.toISOString() ?? null,
-    error: recovery.lastError,
-  });
+          /*
+           * No ejecutar NFC, checkout SMS ni
+           * cleaning-ready como si la revocación
+           * hubiese terminado correctamente.
+           */
+          continue;
+        }
 
-  continue;
-}
+        /*
+         * TTLock y deactivateGrant terminaron.
+         * Limpiamos exclusivamente la memoria del
+         * ciclo de recuperación.
+         */
+        try {
+          const recoverySuccess =
+            await recordAccessRecoverySuccess({
+              prisma,
+              accessGrantId: grant.id,
+            });
 
-try {
-  const lock = await prisma.lock.findUnique({ where: { id: grant.lockId } });
-  const ttlockLockId = lock?.ttlockLockId;
+          if (!recoverySuccess.applied) {
+            errLog(
+              "Guest access recovery success was not applied",
+              {
+                reservationNumber:
+                  reservation
+                    .reservationNumber ?? null,
+                reservationId:
+                  reservation.id,
+                accessGrantId: grant.id,
+                recoveryAttempt:
+                  recoveryClaim.attemptCount,
+              }
+            );
 
-  if (ttlockLockId) {
-    // ✅ SOLO GUEST (NO tocar CLEANING)
-    await unassignGuestNfcForReservation(prisma, {
-      reservationId: r.id,
-      ttlockLockId: Number(ttlockLockId),
-    });
-  } else {
-    // ✅ mínimo: cerrar SOLO GUEST en DB si no tenemos ttlockLockId
-    await prisma.nfcAssignment.updateMany({
-      where: {
-        reservationId: r.id,
-        role: NfcAssignmentRole.GUEST,
-        status: NfcAssignmentStatus.ACTIVE,
-      },
-      data: { status: NfcAssignmentStatus.ENDED, lastError: null },
-    });
+            /*
+             * El resultado esperado después de
+             * deactivateGrant es REVOKED.
+             * Si el reset no aplicó, no seguimos
+             * suponiendo que el lifecycle local
+             * quedó confirmado.
+             */
+            continue;
+          }
+        } catch (recoveryCleanupError) {
+          /*
+           * deactivateGrant ya confirmó la
+           * revocación y marcó REVOKED.
+           *
+           * Un fallo al limpiar los metadatos de
+           * recovery no debe volver a llamar TTLock
+           * ni convertir la revocación en fallo.
+           */
+          errLog(
+            "Guest access revoked but recovery cleanup FAILED",
+            {
+              reservationNumber:
+                reservation.reservationNumber ??
+                null,
+              reservationId:
+                reservation.id,
+              accessGrantId: grant.id,
+              recoveryAttempt:
+                recoveryClaim.attemptCount,
+              error:
+                toErrString(
+                  recoveryCleanupError
+                ),
+            }
+          );
+        }
 
-    await prisma.nfcCard.updateMany({
-      where: {
-        NfcAssignment: {
-          some: {
-            reservationId: r.id,
-            role: NfcAssignmentRole.GUEST,
-          },
-        },
-      },
-      data: { status: NfcCardStatus.AVAILABLE },
-    });
+        log("Guest access revoked", {
+          reservationNumber:
+            reservation.reservationNumber ??
+            null,
+          reservationId: reservation.id,
+          accessGrantId: grant.id,
+          recoveryAttempt:
+            recoveryClaim.attemptCount,
+        });
+
+        /*
+         * Guest NFC es complementario.
+         *
+         * fetchDueCheckouts ya incluye la relación
+         * lock, por lo que no necesitamos otra
+         * consulta prisma.lock.findUnique().
+         */
+        try {
+          const ttlockLockId =
+            grant.lock?.ttlockLockId;
+
+          if (ttlockLockId) {
+            await unassignGuestNfcForReservation(
+              prisma,
+              {
+                reservationId:
+                  reservation.id,
+                ttlockLockId:
+                  Number(ttlockLockId),
+              }
+            );
+          } else {
+            /*
+             * Conserva el comportamiento existente:
+             * cerrar únicamente Guest NFC en DB
+             * cuando el lock remoto no está
+             * disponible.
+             */
+            await prisma.nfcAssignment.updateMany({
+              where: {
+                reservationId:
+                  reservation.id,
+                role:
+                  NfcAssignmentRole.GUEST,
+                status:
+                  NfcAssignmentStatus.ACTIVE,
+              },
+              data: {
+                status:
+                  NfcAssignmentStatus.ENDED,
+                lastError: null,
+              },
+            });
+
+            await prisma.nfcCard.updateMany({
+              where: {
+                NfcAssignment: {
+                  some: {
+                    reservationId:
+                      reservation.id,
+                    role:
+                      NfcAssignmentRole.GUEST,
+                  },
+                },
+              },
+              data: {
+                status:
+                  NfcCardStatus.AVAILABLE,
+              },
+            });
+          }
+        } catch (nfcError) {
+          errLog("NFC revoke failed", {
+            reservationNumber:
+              reservation.reservationNumber ??
+              null,
+            reservationId:
+              reservation.id,
+            accessGrantId: grant.id,
+            error: toErrString(nfcError),
+          });
+        }
+
+        try {
+          await sendCheckoutSms(
+            prisma,
+            reservation.id
+          );
+        } catch (checkoutSmsError) {
+          errLog("Checkout SMS failed", {
+            reservationNumber:
+              reservation.reservationNumber ??
+              null,
+            reservationId:
+              reservation.id,
+            accessGrantId: grant.id,
+            error:
+              toErrString(checkoutSmsError),
+          });
+        }
+
+        try {
+          await sendCleaningReadySms(
+            prisma,
+            reservation.id
+          );
+        } catch (cleaningReadyError) {
+          errLog(
+            "Cleaning READY SMS failed",
+            {
+              reservationNumber:
+                reservation
+                  .reservationNumber ?? null,
+              reservationId:
+                reservation.id,
+              accessGrantId: grant.id,
+              error:
+                toErrString(
+                  cleaningReadyError
+                ),
+            }
+          );
+        }
+
+        log("Guest checkout completed", {
+          reservationNumber:
+            reservation.reservationNumber ??
+            null,
+          reservationId:
+            reservation.id,
+          accessGrantId: grant.id,
+        });
+      } catch (checkoutError) {
+        /*
+         * Fallo inesperado de orquestación.
+         *
+         * No escribir lastError directamente aquí:
+         * la política de recuperación es la única
+         * propietaria de los fallos de revocación.
+         */
+        errLog(
+          "Guest checkout orchestration FAILED",
+          {
+            reservationNumber:
+              reservation.reservationNumber ??
+              null,
+            reservationId:
+              reservation.id,
+            accessGrantId: grant.id,
+            error:
+              toErrString(checkoutError),
+          }
+        );
+      }
+    }
   }
-} catch (e: any) {
-  errLog("NFC revoke failed", { reservationId: r.id, err: toErrString(e) });
-}
-
-try {
-  await sendCheckoutSms(prisma, r.id);
-} catch (e) {
-  errLog("Checkout SMS failed", {
-    reservationId: r.id,
-    err: toErrString(e),
-  });
-}
-      
- try {
-  await sendCleaningReadySms(prisma, r.id);
-} catch (e) {
-  errLog("Cleaning READY SMS failed", {
-    reservationId: r.id,
-    err: toErrString(e),
-  });
-}
-     log(`Revoked GUEST grant ${grant.id} (reservation ${r.id})`);
-     } catch (e) {
-  errLog("Guest checkout post-revocation flow FAILED", {
-    reservationNumber: r.reservationNumber ?? null,
-    reservationId: r.id,
-    accessGrantId: grant.id,
-    error: toErrString(e),
-  });
 }
   
     async function revokeGuestNfcAssignmentsForReservation(params: {
