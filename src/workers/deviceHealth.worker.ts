@@ -19,9 +19,6 @@ const BATTERY_MONTHLY_INTERVAL_MS =
 const BATTERY_WEEKLY_INTERVAL_MS =
   7 * DAY_MS;
 
-const BATTERY_FAILURE_RETRY_MS =
-  DAY_MS;
-
 const BATTERY_MONITORING_THRESHOLD =
   40;
 
@@ -71,6 +68,48 @@ function getLockDisplayName(lock: {
     lock.locationLabel?.trim() ||
     lock.ttlockLockName?.trim() ||
     "Property lock"
+  );
+}
+
+function calculateBatteryFailureNextCheckAt(input: {
+  now: Date;
+  checkIn?: Date | null;
+}) {
+  /*
+   * Sin una reservación operativa dentro de 24 horas,
+   * no existe urgencia para repetir la telemetría.
+   */
+  if (!input.checkIn) {
+    return new Date(
+      input.now.getTime() + DAY_MS
+    );
+  }
+
+  const hoursToCheckIn =
+    (input.checkIn.getTime() -
+      input.now.getTime()) /
+    HOUR_MS;
+
+  /*
+   * La frecuencia aumenta únicamente cuando existe
+   * riesgo operacional para una llegada próxima.
+   */
+  if (hoursToCheckIn > 12) {
+    return new Date(
+      input.now.getTime() +
+        4 * HOUR_MS
+    );
+  }
+
+  if (hoursToCheckIn > 6) {
+    return new Date(
+      input.now.getTime() +
+        2 * HOUR_MS
+    );
+  }
+
+  return new Date(
+    input.now.getTime() + HOUR_MS
   );
 }
 
@@ -189,26 +228,32 @@ async function closePreviousGatewayWorkflow(input: {
     prisma,
     organizationId:
       input.lock.property.organizationId,
-    propertyId: input.lock.propertyId,
+    propertyId:
+      input.lock.propertyId,
     reservationId:
       previousReservation.id,
     reservationNumber:
       previousReservation.reservationNumber,
-    lockId: input.lock.id,
+    lockId:
+      input.lock.id,
     lockName:
       getLockDisplayName(input.lock),
     propertyName:
       input.lock.property.name,
     reason,
-    occurredAt: input.now,
+    occurredAt:
+      input.now,
   });
 }
 
 export async function runDeviceHealthWorker() {
   const now = new Date();
-  const windowEnd = new Date(
-    now.getTime() + GATEWAY_WINDOW_MS
-  );
+
+  const windowEnd =
+    new Date(
+      now.getTime() +
+        GATEWAY_WINDOW_MS
+    );
 
   let batteryCalls = 0;
   let gatewayCalls = 0;
@@ -217,7 +262,8 @@ export async function runDeviceHealthWorker() {
   console.log(
     "DeviceHealth worker starting",
     {
-      startedAt: now.toISOString(),
+      startedAt:
+        now.toISOString(),
     }
   );
 
@@ -307,7 +353,8 @@ export async function runDeviceHealthWorker() {
   console.log(
     "DeviceHealth active locks loaded",
     {
-      activeLocks: locks.length,
+      activeLocks:
+        locks.length,
       reservationsInside24Hours:
         upcomingReservations.length,
     }
@@ -337,7 +384,9 @@ export async function runDeviceHealthWorker() {
       /*
        * BATTERY SCHEDULER
        *
-       * Completely independent from gateway.
+       * La batería opera con calendario propio.
+       * Una comprobación de gateway nunca ejecuta
+       * automáticamente una consulta de batería.
        */
       const batteryDue =
         !existingHealth ||
@@ -368,24 +417,32 @@ export async function runDeviceHealthWorker() {
               ? BATTERY_WEEKLY_INTERVAL_MS
               : BATTERY_MONTHLY_INTERVAL_MS;
 
+          const batteryNextCheckAt =
+            new Date(
+              now.getTime() +
+                nextInterval
+            );
+
           await upsertDeviceHealth(
             prisma,
             {
-              lockId: lock.id,
+              lockId:
+                lock.id,
               battery,
-              batteryLastCheckedAt: now,
-              batteryNextCheckAt:
-                new Date(
-                  now.getTime() +
-                    nextInterval
-                ),
-              lastSyncAt: now,
-              lastSeenAt: now,
-              source: "WORKER",
+              batteryLastCheckedAt:
+                now,
+              batteryNextCheckAt,
+              lastSyncAt:
+                now,
+              lastSeenAt:
+                now,
+              source:
+                "WORKER",
               rawPayload: {
                 telemetryType:
                   "BATTERY",
-                battery: response.raw,
+                battery:
+                  response.raw,
               },
             }
           );
@@ -393,13 +450,12 @@ export async function runDeviceHealthWorker() {
           console.log(
             "DeviceHealth battery checked",
             {
-              lockId: lock.id,
+              lockId:
+                lock.id,
               battery,
               nextCheckAt:
-                new Date(
-                  now.getTime() +
-                    nextInterval
-                ).toISOString(),
+                batteryNextCheckAt
+                  .toISOString(),
             }
           );
         } catch (error) {
@@ -407,21 +463,30 @@ export async function runDeviceHealthWorker() {
             errcode,
             errmsg,
           } =
-            getTtlockErrorInfo(error);
+            getTtlockErrorInfo(
+              error
+            );
+
+          const batteryNextCheckAt =
+            calculateBatteryFailureNextCheckAt({
+              now,
+              checkIn:
+                reservation?.checkIn ??
+                null,
+            });
 
           await upsertDeviceHealth(
             prisma,
             {
-              lockId: lock.id,
+              lockId:
+                lock.id,
               batteryLastCheckedAt:
                 now,
-              batteryNextCheckAt:
-                new Date(
-                  now.getTime() +
-                    BATTERY_FAILURE_RETRY_MS
-                ),
-              lastSyncAt: now,
-              source: "WORKER",
+              batteryNextCheckAt,
+              lastSyncAt:
+                now,
+              source:
+                "WORKER",
               rawPayload: {
                 telemetryType:
                   "BATTERY",
@@ -436,14 +501,17 @@ export async function runDeviceHealthWorker() {
           console.warn(
             "DeviceHealth battery check failed",
             {
-              lockId: lock.id,
+              lockId:
+                lock.id,
+              reservationNumber:
+                reservation
+                  ?.reservationNumber ??
+                null,
               errcode,
               errmsg,
               nextCheckAt:
-                new Date(
-                  now.getTime() +
-                    BATTERY_FAILURE_RETRY_MS
-                ).toISOString(),
+                batteryNextCheckAt
+                  .toISOString(),
             }
           );
         }
@@ -452,8 +520,8 @@ export async function runDeviceHealthWorker() {
       /*
        * GATEWAY SCHEDULER
        *
-       * No reservation inside 24h:
-       * no TTLock gateway call.
+       * Sin reservación ACTIVE dentro de 24 horas:
+       * cero llamadas TTLock de gateway.
        */
       if (!reservation) {
         if (
@@ -463,7 +531,9 @@ export async function runDeviceHealthWorker() {
           await upsertDeviceHealth(
             prisma,
             {
-              lockId: lock.id,
+              lockId:
+                lock.id,
+
               gatewayNextCheckAt:
                 null,
               gatewayCheckReservationId:
@@ -524,9 +594,12 @@ export async function runDeviceHealthWorker() {
               await upsertDeviceHealth(
                 prisma,
                 {
-                  lockId: lock.id,
-                  gatewayConnected: true,
-                  isOnline: true,
+                  lockId:
+                    lock.id,
+                  gatewayConnected:
+                    true,
+                  isOnline:
+                    true,
                   gatewayLastCheckedAt:
                     now,
                   gatewayLastSuccessfulAt:
@@ -553,9 +626,12 @@ export async function runDeviceHealthWorker() {
                   gatewayCriticalAlertLastError:
                     null,
 
-                  lastSyncAt: now,
-                  lastSeenAt: now,
-                  source: "WORKER",
+                  lastSyncAt:
+                    now,
+                  lastSeenAt:
+                    now,
+                  source:
+                    "WORKER",
                   rawPayload: {
                     telemetryType:
                       "GATEWAY",
@@ -578,21 +654,24 @@ export async function runDeviceHealthWorker() {
                   reservationNumber:
                     reservation
                       .reservationNumber,
-                  lockId: lock.id,
+                  lockId:
+                    lock.id,
                   lockName:
                     getLockDisplayName(
                       lock
                     ),
                   propertyName:
                     lock.property.name,
-                  occurredAt: now,
+                  occurredAt:
+                    now,
                 }
               );
 
               console.log(
                 "DeviceHealth gateway readiness certified",
                 {
-                  lockId: lock.id,
+                  lockId:
+                    lock.id,
                   reservationNumber:
                     reservation
                       .reservationNumber,
@@ -611,7 +690,8 @@ export async function runDeviceHealthWorker() {
               await upsertDeviceHealth(
                 prisma,
                 {
-                  lockId: lock.id,
+                  lockId:
+                    lock.id,
                   gatewayConnected:
                     false,
                   gatewayLastCheckedAt:
@@ -624,8 +704,10 @@ export async function runDeviceHealthWorker() {
                     now,
                   gatewayCheckReservationId:
                     reservation.id,
-                  lastSyncAt: now,
-                  source: "WORKER",
+                  lastSyncAt:
+                    now,
+                  source:
+                    "WORKER",
                   rawPayload: {
                     telemetryType:
                       "GATEWAY",
@@ -643,28 +725,27 @@ export async function runDeviceHealthWorker() {
               if (
                 hoursToCheckIn <= 6
               ) {
+                const deviceHealthId =
+                  existingHealth?.id ??
+                  (
+                    await prisma
+                      .deviceHealth
+                      .findUniqueOrThrow({
+                        where: {
+                          lockId:
+                            lock.id,
+                        },
+                        select: {
+                          id: true,
+                        },
+                      })
+                  ).id;
+
                 const alert =
                   await sendGatewayCriticalHostAlert(
                     {
                       prisma,
-                      deviceHealthId:
-                        existingHealth
-                          ?.id ??
-                        (
-                          await prisma
-                            .deviceHealth
-                            .findUniqueOrThrow(
-                              {
-                                where: {
-                                  lockId:
-                                    lock.id,
-                                },
-                                select: {
-                                  id: true,
-                                },
-                              }
-                            )
-                        ).id,
+                      deviceHealthId,
                       organizationId:
                         lock.property
                           .organizationId,
@@ -675,7 +756,8 @@ export async function runDeviceHealthWorker() {
                       reservationNumber:
                         reservation
                           .reservationNumber,
-                      lockId: lock.id,
+                      lockId:
+                        lock.id,
                       lockName:
                         getLockDisplayName(
                           lock
@@ -708,7 +790,8 @@ export async function runDeviceHealthWorker() {
                     reservationNumber:
                       reservation
                         .reservationNumber,
-                    lockId: lock.id,
+                    lockId:
+                      lock.id,
                     lockName:
                       getLockDisplayName(
                         lock
@@ -718,7 +801,8 @@ export async function runDeviceHealthWorker() {
                     checkIn:
                       reservation.checkIn,
                     nextCheckAt,
-                    occurredAt: now,
+                    occurredAt:
+                      now,
                   }
                 );
               }
@@ -728,7 +812,9 @@ export async function runDeviceHealthWorker() {
               errcode,
               errmsg,
             } =
-              getTtlockErrorInfo(error);
+              getTtlockErrorInfo(
+                error
+              );
 
             const nextCheckAt =
               calculateGatewayNextCheckAt({
@@ -740,7 +826,8 @@ export async function runDeviceHealthWorker() {
             await upsertDeviceHealth(
               prisma,
               {
-                lockId: lock.id,
+                lockId:
+                  lock.id,
                 gatewayConnected:
                   errcode === -2012
                     ? false
@@ -755,8 +842,10 @@ export async function runDeviceHealthWorker() {
                   now,
                 gatewayCheckReservationId:
                   reservation.id,
-                lastSyncAt: now,
-                source: "WORKER",
+                lastSyncAt:
+                  now,
+                source:
+                  "WORKER",
                 rawPayload: {
                   telemetryType:
                     "GATEWAY",
@@ -765,15 +854,17 @@ export async function runDeviceHealthWorker() {
                     errmsg,
                   },
                 },
-                ...(errcode === -2018 ||
-                errcode === 1
-                  ? {
-                      healthOverrideStatus:
-                        "UNKNOWN" as const,
-                      healthOverrideMessage:
-                        "Pin&Go could not validate gateway connectivity.",
-                    }
-                  : {}),
+                ...(
+                  errcode === -2018 ||
+                  errcode === 1
+                    ? {
+                        healthOverrideStatus:
+                          "UNKNOWN" as const,
+                        healthOverrideMessage:
+                          "Pin&Go could not validate gateway connectivity.",
+                      }
+                    : {}
+                ),
               }
             );
 
@@ -782,12 +873,15 @@ export async function runDeviceHealthWorker() {
                 now.getTime()) /
               HOUR_MS;
 
-            if (hoursToCheckIn <= 6) {
+            if (
+              hoursToCheckIn <= 6
+            ) {
               const currentHealth =
                 await prisma.deviceHealth
                   .findUniqueOrThrow({
                     where: {
-                      lockId: lock.id,
+                      lockId:
+                        lock.id,
                     },
                     select: {
                       id: true,
@@ -810,7 +904,8 @@ export async function runDeviceHealthWorker() {
                     reservationNumber:
                       reservation
                         .reservationNumber,
-                    lockId: lock.id,
+                    lockId:
+                      lock.id,
                     lockName:
                       getLockDisplayName(
                         lock
@@ -843,7 +938,8 @@ export async function runDeviceHealthWorker() {
                   reservationNumber:
                     reservation
                       .reservationNumber,
-                  lockId: lock.id,
+                  lockId:
+                    lock.id,
                   lockName:
                     getLockDisplayName(
                       lock
@@ -853,7 +949,8 @@ export async function runDeviceHealthWorker() {
                   checkIn:
                     reservation.checkIn,
                   nextCheckAt,
-                  occurredAt: now,
+                  occurredAt:
+                    now,
                 }
               );
             }
@@ -861,14 +958,16 @@ export async function runDeviceHealthWorker() {
             console.warn(
               "DeviceHealth gateway check failed",
               {
-                lockId: lock.id,
+                lockId:
+                  lock.id,
                 reservationNumber:
                   reservation
                     .reservationNumber,
                 errcode,
                 errmsg,
                 nextCheckAt:
-                  nextCheckAt.toISOString(),
+                  nextCheckAt
+                    .toISOString(),
               }
             );
           }
@@ -878,7 +977,8 @@ export async function runDeviceHealthWorker() {
       const latestHealth =
         await prisma.deviceHealth.findUnique({
           where: {
-            lockId: lock.id,
+            lockId:
+              lock.id,
           },
           select: {
             healthStatus: true,
@@ -893,20 +993,26 @@ export async function runDeviceHealthWorker() {
       }
 
       const nextCheckInAt =
-        reservation?.checkIn ?? null;
+        reservation?.checkIn ??
+        null;
 
       const risk =
         computeOperationalRisk({
           healthStatus:
-            latestHealth.healthStatus,
+            latestHealth
+              .healthStatus,
           battery:
-            latestHealth.battery,
+            latestHealth
+              .battery,
           gatewayConnected:
-            latestHealth.gatewayConnected,
+            latestHealth
+              .gatewayConnected,
           lastSeenAt:
-            latestHealth.lastSeenAt,
+            latestHealth
+              .lastSeenAt,
           nextCheckInAt,
-          hasActiveAccess: false,
+          hasActiveAccess:
+            false,
         });
 
       if (
@@ -919,7 +1025,9 @@ export async function runDeviceHealthWorker() {
             now.getTime()) /
           HOUR_MS;
 
-        if (hoursToCheckIn <= 6) {
+        if (
+          hoursToCheckIn <= 6
+        ) {
           risk.operationalRisk =
             "CRITICAL";
           risk.operationalMessage =
@@ -952,7 +1060,8 @@ export async function runDeviceHealthWorker() {
 
       await prisma.deviceHealth.update({
         where: {
-          lockId: lock.id,
+          lockId:
+            lock.id,
         },
         data: {
           operationalRisk:
@@ -962,15 +1071,18 @@ export async function runDeviceHealthWorker() {
           recommendedAction:
             risk.recommendedAction,
           nextCheckInAt,
-          hasActiveAccess: false,
-          riskCalculatedAt: now,
+          hasActiveAccess:
+            false,
+          riskCalculatedAt:
+            now,
         },
       });
     } catch (error) {
       console.error(
         "DeviceHealth worker failed for lock",
         {
-          lockId: lock.id,
+          lockId:
+            lock.id,
           error:
             error instanceof Error
               ? error.stack ||
@@ -984,7 +1096,8 @@ export async function runDeviceHealthWorker() {
   console.log(
     "DeviceHealth worker finished",
     {
-      activeLocks: locks.length,
+      activeLocks:
+        locks.length,
       batteryCalls,
       gatewayCalls,
       criticalEmailsSent,
