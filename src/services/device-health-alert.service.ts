@@ -408,6 +408,108 @@ export async function resolveGatewayReadinessIssue(
   );
 }
 
+export async function supersedeGatewayReadinessIssue(
+  input: {
+    prisma: PrismaClient;
+    organizationId: string;
+    propertyId: string;
+    reservationId: string;
+    reservationNumber?: string | null;
+    lockId: string;
+    lockName: string;
+    propertyName: string;
+    reason:
+      | "RESERVATION_CANCELLED"
+      | "RESERVATION_ENDED"
+      | "RESERVATION_REPLACED";
+    occurredAt?: Date;
+  }
+) {
+  const occurredAt =
+    input.occurredAt ?? new Date();
+
+  return upsertOperationalIssue(
+    input.prisma,
+    {
+      operationalKey:
+        buildOperationalKey({
+          lockId: input.lockId,
+          reservationId:
+            input.reservationId,
+        }),
+
+      issueCode:
+        "DEVICE_GATEWAY_MONITORING_SUPERSEDED",
+
+      title:
+        "Gateway readiness monitoring closed",
+
+      issue:
+        `Pin&Go stopped gateway readiness monitoring for ${input.propertyName} because the reservation is no longer operational.`,
+
+      operationalImpact: null,
+      recommendedAction: null,
+      nextAutomaticStep: null,
+
+      engine: "ACCESS",
+
+      severity: "INFO",
+      workflowState: "RESOLVED",
+      visibility: "SYSTEM",
+      responsibleActor: "NONE",
+
+      actionRequired: false,
+
+      canAutoResolve: true,
+      autoResolveStatus: "SUCCEEDED",
+      autoResolveActionCode: null,
+
+      organizationId:
+        input.organizationId,
+      propertyId:
+        input.propertyId,
+      reservationId:
+        input.reservationId,
+      reservationNumber:
+        input.reservationNumber ?? null,
+
+      sourceType: "WORKER",
+
+      resolutionCode:
+        "RESERVATION_NO_LONGER_OPERATIONAL",
+
+      resolutionSummary:
+        "Pin&Go closed gateway readiness monitoring because the associated reservation no longer requires access preparation.",
+
+      resolutionType: "SUPERSEDED",
+      resolvedBy: "PIN_GO",
+      resolvedAt: occurredAt,
+
+      actionTarget: "ACCESS",
+
+      metadata: {
+        lockId: input.lockId,
+        lockName: input.lockName,
+        propertyName:
+          input.propertyName,
+        reason: input.reason,
+        supersededAt:
+          occurredAt.toISOString(),
+      },
+
+      transitionCode:
+        "DEVICE_GATEWAY_MONITORING_SUPERSEDED",
+
+      transitionSummary:
+        "The reservation became non-operational and the gateway readiness workflow was closed.",
+
+      transitionedBy: "PIN_GO",
+      occurredAt,
+      lastSignalAt: occurredAt,
+    }
+  );
+}
+
 export async function sendGatewayCriticalHostAlert(
   input: {
     prisma: PrismaClient;
