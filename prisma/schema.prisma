@@ -610,6 +610,25 @@ model DeviceHealth {
   operationalRisk    OperationalRiskLevel @default(UNKNOWN)
   recommendedAction  String?
   riskCalculatedAt   DateTime?
+  // Battery scheduling
+  batteryLastCheckedAt DateTime?
+  batteryNextCheckAt   DateTime?
+
+  // Gateway readiness scheduling
+  gatewayLastCheckedAt       DateTime?
+  gatewayLastSuccessfulAt    DateTime?
+  gatewayNextCheckAt         DateTime?
+  gatewayDisconnectedSince   DateTime?
+  gatewayCheckReservationId  String?
+
+  // Critical host alert lifecycle
+  gatewayCriticalAlertReservationId String?
+  gatewayCriticalAlertStatus        String?
+  gatewayCriticalAlertAttemptCount  Int       @default(0)
+  gatewayCriticalAlertLastAttemptAt DateTime?
+  gatewayCriticalAlertSentAt        DateTime?
+  gatewayCriticalAlertRecipients    Json?
+  gatewayCriticalAlertLastError     String?
   lock               Lock                 @relation(fields: [lockId], references: [id], onDelete: Cascade)
   organization       Organization         @relation(fields: [organizationId], references: [id], onDelete: Cascade)
   property           Property?            @relation(fields: [propertyId], references: [id])
@@ -620,6 +639,10 @@ model DeviceHealth {
   @@index([operationalRisk])
   @@index([lastSeenAt])
   @@index([nextCheckInAt])
+  @@index([batteryNextCheckAt])
+  @@index([gatewayNextCheckAt])
+  @@index([gatewayCheckReservationId])
+  @@index([gatewayCriticalAlertReservationId, gatewayCriticalAlertStatus])
 }
 
 model ManagerAssignment {

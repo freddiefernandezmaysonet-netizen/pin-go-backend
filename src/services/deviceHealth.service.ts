@@ -62,7 +62,23 @@ type UpsertDeviceHealthInput = {
   lastSeenAt?: Date | null;
   source?: string | null;
   rawPayload?: unknown;
+  batteryLastCheckedAt?: Date | null;
+  batteryNextCheckAt?: Date | null;
 
+  gatewayLastCheckedAt?: Date | null;
+  gatewayLastSuccessfulAt?: Date | null;
+  gatewayNextCheckAt?: Date | null;
+  gatewayDisconnectedSince?: Date | null;
+  gatewayCheckReservationId?: string | null;
+
+  gatewayCriticalAlertReservationId?: string | null;
+  gatewayCriticalAlertStatus?: string | null;
+  gatewayCriticalAlertAttemptCount?: number;
+  gatewayCriticalAlertLastAttemptAt?: Date | null;
+  gatewayCriticalAlertSentAt?: Date | null;
+  gatewayCriticalAlertRecipients?: unknown;
+  gatewayCriticalAlertLastError?: string | null;
+  
   healthOverrideStatus?: DeviceHealthStatus;
   healthOverrideMessage?: string;
 };
@@ -146,6 +162,36 @@ export async function upsertDeviceHealth(
 
       source: input.source ?? null,
       rawPayload: input.rawPayload as any,
+      batteryLastCheckedAt:
+        input.batteryLastCheckedAt ?? null,
+      batteryNextCheckAt:
+        input.batteryNextCheckAt ?? null,
+
+      gatewayLastCheckedAt:
+        input.gatewayLastCheckedAt ?? null,
+      gatewayLastSuccessfulAt:
+        input.gatewayLastSuccessfulAt ?? null,
+      gatewayNextCheckAt:
+        input.gatewayNextCheckAt ?? null,
+      gatewayDisconnectedSince:
+        input.gatewayDisconnectedSince ?? null,
+      gatewayCheckReservationId:
+        input.gatewayCheckReservationId ?? null,
+
+      gatewayCriticalAlertReservationId:
+        input.gatewayCriticalAlertReservationId ?? null,
+      gatewayCriticalAlertStatus:
+        input.gatewayCriticalAlertStatus ?? null,
+      gatewayCriticalAlertAttemptCount:
+        input.gatewayCriticalAlertAttemptCount ?? 0,
+      gatewayCriticalAlertLastAttemptAt:
+        input.gatewayCriticalAlertLastAttemptAt ?? null,
+      gatewayCriticalAlertSentAt:
+        input.gatewayCriticalAlertSentAt ?? null,
+      gatewayCriticalAlertRecipients:
+        input.gatewayCriticalAlertRecipients as any,
+      gatewayCriticalAlertLastError:
+        input.gatewayCriticalAlertLastError ?? null,
 
       healthStatus,
       healthMessage,
@@ -162,7 +208,65 @@ export async function upsertDeviceHealth(
 
       source: input.source ?? existing?.source ?? undefined,
       rawPayload: input.rawPayload as any,
+      batteryLastCheckedAt:
+        input.batteryLastCheckedAt !== undefined
+          ? input.batteryLastCheckedAt
+          : undefined,
+      batteryNextCheckAt:
+        input.batteryNextCheckAt !== undefined
+          ? input.batteryNextCheckAt
+          : undefined,
 
+      gatewayLastCheckedAt:
+        input.gatewayLastCheckedAt !== undefined
+          ? input.gatewayLastCheckedAt
+          : undefined,
+      gatewayLastSuccessfulAt:
+        input.gatewayLastSuccessfulAt !== undefined
+          ? input.gatewayLastSuccessfulAt
+          : undefined,
+      gatewayNextCheckAt:
+        input.gatewayNextCheckAt !== undefined
+          ? input.gatewayNextCheckAt
+          : undefined,
+      gatewayDisconnectedSince:
+        input.gatewayDisconnectedSince !== undefined
+          ? input.gatewayDisconnectedSince
+          : undefined,
+      gatewayCheckReservationId:
+        input.gatewayCheckReservationId !== undefined
+          ? input.gatewayCheckReservationId
+          : undefined,
+
+      gatewayCriticalAlertReservationId:
+        input.gatewayCriticalAlertReservationId !== undefined
+          ? input.gatewayCriticalAlertReservationId
+          : undefined,
+      gatewayCriticalAlertStatus:
+        input.gatewayCriticalAlertStatus !== undefined
+          ? input.gatewayCriticalAlertStatus
+          : undefined,
+      gatewayCriticalAlertAttemptCount:
+        input.gatewayCriticalAlertAttemptCount !== undefined
+          ? input.gatewayCriticalAlertAttemptCount
+          : undefined,
+      gatewayCriticalAlertLastAttemptAt:
+        input.gatewayCriticalAlertLastAttemptAt !== undefined
+          ? input.gatewayCriticalAlertLastAttemptAt
+          : undefined,
+      gatewayCriticalAlertSentAt:
+        input.gatewayCriticalAlertSentAt !== undefined
+          ? input.gatewayCriticalAlertSentAt
+          : undefined,
+      gatewayCriticalAlertRecipients:
+        input.gatewayCriticalAlertRecipients !== undefined
+          ? (input.gatewayCriticalAlertRecipients as any)
+          : undefined,
+      gatewayCriticalAlertLastError:
+        input.gatewayCriticalAlertLastError !== undefined
+          ? input.gatewayCriticalAlertLastError
+          : undefined,
+      
       healthStatus,
       healthMessage,
     },
