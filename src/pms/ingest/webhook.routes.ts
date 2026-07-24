@@ -110,7 +110,7 @@ async function ingestPmsWebhook(args: {
 
 pmsWebhookRouter.post("/channex", async (req: any, res) => {
   try {
-    const connection = await prisma.pmsConnection.findFirst({
+    const connections = await prisma.pmsConnection.findMany({
       where: {
         provider: PmsProvider.CHANNEX,
         status: "ACTIVE",
@@ -118,10 +118,29 @@ pmsWebhookRouter.post("/channex", async (req: any, res) => {
       orderBy: {
         createdAt: "asc",
       },
+      take: 2,
       select: {
         id: true,
       },
     });
+
+    if (connections.length === 0) {
+      return res.status(500).json({
+        ok: false,
+        error: "CHANNEX_CONNECTION_NOT_FOUND",
+      });
+    }
+
+    if (connections.length > 1) {
+      return res.status(409).json({
+        ok: false,
+        error: "CHANNEX_CONNECTION_AMBIGUOUS",
+        message:
+          "Use the tenant-scoped /webhooks/pms/CHANNEX/:connectionId endpoint.",
+      });
+    }
+
+    const connection = connections[0];
 
     if (!connection) {
       return res.status(500).json({
