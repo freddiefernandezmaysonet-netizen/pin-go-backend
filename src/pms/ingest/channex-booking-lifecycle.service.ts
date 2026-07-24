@@ -126,6 +126,39 @@ async function persistLifecycleAudit(args: {
   });
 }
 
+async function persistRejectedCancellation(args: {
+  organizationId: string;
+  propertyId: string;
+  reservationId: string | null;
+  eventId: string;
+  revision: ChannexBookingRevision;
+  startedAt: Date;
+}) {
+  const completedAt = new Date();
+
+  await persistLifecycleAudit({
+    decisionId: `distribution-engine:channex-revision:${args.revision.identity.revisionId}:persisted`,
+    eventType: "ACTION_FAILED",
+    status: "FAILED",
+    severity: "CRITICAL",
+    summary:
+      "Pin&Go Connect could not apply the booking cancellation to the active stay.",
+    reason: "CHANNEX_CANCELLATION_NOT_APPLIED",
+    startedAt: args.startedAt,
+    completedAt,
+    organizationId: args.organizationId,
+    propertyId: args.propertyId,
+    reservationId: args.reservationId,
+    eventId: args.eventId,
+    revision: args.revision,
+    applied: false,
+    rule: "CHANNEX_BOOKING_CANCELLATION_PERSISTENCE",
+    label: "Pin&Go Connect Booking Cancellation",
+    recommendedAction:
+      "Review the active stay cancellation before acknowledging the channel revision.",
+  });
+}
+
 async function resolveListing(args: {
   connectionId: string;
   revision: ChannexBookingRevision;
@@ -266,10 +299,30 @@ async function processRevision(args: {
     select: {
       id: true,
       externalUpdatedAt: true,
+      lastIngestError: true,
     },
   });
 
   let reservationId = existingReservation?.id ?? null;
+  const cancellationWasRejected =
+    args.revision.reservation.status === "CANCELLED" &&
+    existingReservation?.lastIngestError === "CANCEL_REJECTED_ACTIVE_STAY";
+
+  if (cancellationWasRejected) {
+    await persistRejectedCancellation({
+      organizationId: args.organizationId,
+      propertyId: listing.propertyId!,
+      reservationId,
+      eventId: args.eventId,
+      revision: args.revision,
+      startedAt: lifecycleStartedAt,
+    });
+
+    throw new Error(
+      `CHANNEX_CANCELLATION_NOT_APPLIED:${args.revision.identity.revisionId}`
+    );
+  }
+
   const isOlderOrSame = Boolean(
     existingReservation?.externalUpdatedAt &&
       insertedAt.getTime() <= existingReservation.externalUpdatedAt.getTime()
@@ -329,9 +382,7 @@ async function processRevision(args: {
       where: { id: result.reservationId },
       select: {
         id: true,
-        status: true,
         lastIngestError: true,
-        externalUpdatedAt: true,
       },
     });
 
@@ -346,28 +397,13 @@ async function processRevision(args: {
       persistedReservation.lastIngestError === "CANCEL_REJECTED_ACTIVE_STAY";
 
     if (cancellationRejected) {
-      const completedAt = new Date();
-
-      await persistLifecycleAudit({
-        decisionId: `distribution-engine:channex-revision:${args.revision.identity.revisionId}:persisted`,
-        eventType: "ACTION_FAILED",
-        status: "FAILED",
-        severity: "CRITICAL",
-        summary:
-          "Pin&Go Connect could not apply the booking cancellation to the active stay.",
-        reason: "CHANNEX_CANCELLATION_NOT_APPLIED",
-        startedAt: lifecycleStartedAt,
-        completedAt,
+      await persistRejectedCancellation({
         organizationId: args.organizationId,
         propertyId: listing.propertyId!,
         reservationId,
         eventId: args.eventId,
         revision: args.revision,
-        applied: false,
-        rule: "CHANNEX_BOOKING_CANCELLATION_PERSISTENCE",
-        label: "Pin&Go Connect Booking Cancellation",
-        recommendedAction:
-          "Review the active stay cancellation before acknowledging the channel revision.",
+        startedAt: lifecycleStartedAt,
       });
 
       throw new Error(
