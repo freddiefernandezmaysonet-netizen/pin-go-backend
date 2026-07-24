@@ -77,6 +77,11 @@ test("returns exactly eight engines in canonical order", () => {
   );
   assert.equal(model.counts.disabled, 0);
   assert.equal(model.needsHostAction, false);
+  assert.equal(model.hostActionCount, 0);
+  assert.equal(model.autoResolvingCount, 0);
+  assert.deepEqual(model.hostActions, []);
+  assert.deepEqual(model.automaticWork, []);
+  assert.deepEqual(model.recentResolutions, []);
 });
 
 test("automatic work remains blue even when configuration is disabled", () => {
@@ -106,6 +111,11 @@ test("automatic work remains blue even when configuration is disabled", () => {
         responsibleActor: "PIN_GO",
         nextAutomaticStep:
           "Pin&Go will retry the revoke in five minutes.",
+        actionTarget: "ACCESS",
+        reservationId: "reservation-1",
+        reservationNumber: "PG-1001",
+        propertyId: "property-1",
+        guestName: "Test Guest",
         lastSignalAt:
           "2026-07-24T11:59:00.000Z",
         nextAttemptAt:
@@ -120,8 +130,11 @@ test("automatic work remains blue even when configuration is disabled", () => {
   const access = model.engines.find(
     (engine) => engine.engineId === "ACCESS"
   );
+  const automaticWork =
+    model.automaticWork[0];
 
   assert.ok(access);
+  assert.ok(automaticWork);
   assert.equal(
     access.state,
     "AUTO_RESOLVING"
@@ -134,6 +147,21 @@ test("automatic work remains blue even when configuration is disabled", () => {
   assert.equal(access.maxAttempts, 7);
   assert.equal(access.exhausted, false);
   assert.equal(model.needsHostAction, false);
+  assert.equal(model.hostActionCount, 0);
+  assert.equal(model.autoResolvingCount, 1);
+  assert.equal(model.hostActions.length, 0);
+  assert.equal(model.automaticWork.length, 1);
+  assert.equal(
+    automaticWork.engineId,
+    "ACCESS"
+  );
+  assert.equal(
+    automaticWork.reservationNumber,
+    "PG-1001"
+  );
+  assert.equal(automaticWork.attempt, 2);
+  assert.equal(automaticWork.maxAttempts, 7);
+  assert.equal(automaticWork.exhausted, false);
 });
 
 test("host action overrides automatic work and disabled configuration", () => {
@@ -177,6 +205,11 @@ test("host action overrides automatic work and disabled configuration", () => {
         workflowState: "ACTION_REQUIRED",
         actionRequired: true,
         responsibleActor: "HOST",
+        recommendedAction:
+          "Authorize the next recovery action.",
+        actionTarget: "ACCESS",
+        reservationId: "reservation-2",
+        propertyId: "property-1",
         lastSignalAt:
           "2026-07-24T11:59:00.000Z",
         attempt: 7,
@@ -189,8 +222,10 @@ test("host action overrides automatic work and disabled configuration", () => {
   const access = model.engines.find(
     (engine) => engine.engineId === "ACCESS"
   );
+  const hostAction = model.hostActions[0];
 
   assert.ok(access);
+  assert.ok(hostAction);
   assert.equal(
     access.state,
     "HOST_ACTION_REQUIRED"
@@ -203,9 +238,25 @@ test("host action overrides automatic work and disabled configuration", () => {
   assert.equal(access.exhausted, true);
   assert.equal(model.needsHostAction, true);
   assert.equal(model.hostActionCount, 1);
+  assert.equal(model.autoResolvingCount, 1);
+  assert.equal(model.hostActions.length, 1);
+  assert.equal(model.automaticWork.length, 1);
+  assert.equal(
+    hostAction.issueCode,
+    "ACCESS_REVOKE_RECOVERY_EXHAUSTED"
+  );
+  assert.equal(hostAction.engineId, "ACCESS");
+  assert.equal(hostAction.exhausted, true);
+  assert.equal(
+    hostAction.recommendedAction,
+    "Authorize the next recovery action."
+  );
+  assert.equal("issueId" in hostAction, false);
+  assert.equal("operationalKey" in hostAction, false);
+  assert.equal("metadata" in hostAction, false);
 });
 
-test("resolved issues do not change current engine state", () => {
+test("resolved issues do not change current engine state and remain in recent history", () => {
   const model = buildModel({
     operationalItems: [
       {
@@ -218,8 +269,16 @@ test("resolved issues do not change current engine state", () => {
         workflowState: "RESOLVED",
         actionRequired: false,
         responsibleActor: "NONE",
+        actionTarget: "ACCESS",
+        propertyId: "property-1",
         lastSignalAt:
           "2026-07-24T11:50:00.000Z",
+        resolvedAt:
+          "2026-07-24T11:51:00.000Z",
+        resolutionSummary:
+          "Gateway connectivity was restored automatically.",
+        resolutionType: "AUTOMATIC",
+        exhausted: true,
       },
     ],
   });
@@ -228,8 +287,11 @@ test("resolved issues do not change current engine state", () => {
     (engine) =>
       engine.engineId === "DEVICE_HEALTH"
   );
+  const recentResolution =
+    model.recentResolutions[0];
 
   assert.ok(deviceHealth);
+  assert.ok(recentResolution);
   assert.equal(
     deviceHealth.state,
     "HEALTHY"
@@ -238,6 +300,22 @@ test("resolved issues do not change current engine state", () => {
     deviceHealth.activeIssueCount,
     0
   );
+  assert.equal(model.hostActions.length, 0);
+  assert.equal(model.automaticWork.length, 0);
+  assert.equal(model.recentResolutions.length, 1);
+  assert.equal(
+    recentResolution.engineId,
+    "DEVICE_HEALTH"
+  );
+  assert.equal(
+    recentResolution.resolvedAt,
+    "2026-07-24T11:51:00.000Z"
+  );
+  assert.equal(
+    recentResolution.resolutionType,
+    "AUTOMATIC"
+  );
+  assert.equal(recentResolution.exhausted, false);
 });
 
 test("normalizes legacy Messaging and Distribution engine names", () => {
@@ -293,5 +371,91 @@ test("normalizes legacy Messaging and Distribution engine names", () => {
   assert.equal(
     distribution.state,
     "HOST_ACTION_REQUIRED"
+  );
+  assert.equal(
+    model.automaticWork[0]?.engineId,
+    "COMMUNICATIONS"
+  );
+  assert.equal(
+    model.hostActions[0]?.engineId,
+    "DISTRIBUTION_PMS"
+  );
+});
+
+test("orders active and resolved workflow collections by latest signal", () => {
+  const model = buildModel({
+    operationalItems: [
+      {
+        issueCode: "CLEANING_WAITING_OLD",
+        title: "Older cleaning wait",
+        issue: "Waiting for a cleaner.",
+        engine: "Cleaning",
+        workflowState: "WAITING",
+        actionRequired: false,
+        responsibleActor: "CLEANER",
+        nextAutomaticStep:
+          "Pin&Go will continue the cleaning workflow.",
+        lastSignalAt:
+          "2026-07-24T10:00:00.000Z",
+      },
+      {
+        issueCode: "COMMUNICATION_RETRY_NEW",
+        title: "Newer communication retry",
+        issue: "Retrying a message.",
+        engine: "Communications",
+        workflowState: "AUTO_RESOLVING",
+        actionRequired: false,
+        responsibleActor: "PIN_GO",
+        nextAutomaticStep:
+          "Pin&Go will retry the message.",
+        lastSignalAt:
+          "2026-07-24T11:00:00.000Z",
+      },
+      {
+        issueCode: "REVENUE_RESOLVED_OLD",
+        title: "Older revenue resolution",
+        issue: "Revenue decision completed.",
+        engine: "Revenue",
+        workflowState: "RESOLVED",
+        actionRequired: false,
+        responsibleActor: "NONE",
+        lastSignalAt:
+          "2026-07-23T10:00:00.000Z",
+        resolvedAt:
+          "2026-07-23T10:01:00.000Z",
+      },
+      {
+        issueCode: "FINANCIAL_RESOLVED_NEW",
+        title: "Newer financial resolution",
+        issue: "Financial workflow completed.",
+        engine: "Financial",
+        workflowState: "RESOLVED",
+        actionRequired: false,
+        responsibleActor: "NONE",
+        lastSignalAt:
+          "2026-07-24T09:00:00.000Z",
+        resolvedAt:
+          "2026-07-24T09:01:00.000Z",
+      },
+    ],
+  });
+
+  assert.deepEqual(
+    model.automaticWork.map(
+      (item) => item.issueCode
+    ),
+    [
+      "COMMUNICATION_RETRY_NEW",
+      "CLEANING_WAITING_OLD",
+    ]
+  );
+  assert.deepEqual(
+    model.recentResolutions.map(
+      (item) => item.issueCode
+    ),
+    [
+      "FINANCIAL_RESOLVED_NEW",
+      "REVENUE_RESOLVED_OLD",
+    ]
   );
 });
