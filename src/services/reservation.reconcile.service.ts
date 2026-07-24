@@ -39,25 +39,125 @@ export async function reconcileReservation(reservationId: string) {
   // CANCELLED → revoke everything immediately
   // --------------------------------------------------
   if (reservation.status === ReservationStatus.CANCELLED) {
+    const accessRevokeFailures: Array<{
+      grantId: string;
+      error: string;
+    }> = [];
+
     for (const grant of grants) {
-      if (
-        grant.status === AccessStatus.ACTIVE ||
-        grant.status === AccessStatus.PENDING
-      ) {
-        try {
-          await deactivateGrant(grant.id);
-        } catch (e) {
-          console.error("TTLock revoke failed", e);
+      let currentStatus = grant.status;
+
+      if (currentStatus === AccessStatus.PENDING) {
+        const locallyRevoked =
+          await prisma.accessGrant.updateMany({
+            where: {
+              id: grant.id,
+              status: AccessStatus.PENDING,
+            },
+            data: {
+              status: AccessStatus.REVOKED,
+              revokedReason: "CANCELLED_BY_PMS",
+              lastError: null,
+            },
+          });
+
+        if (locallyRevoked.count === 1) {
+          continue;
         }
 
-        await prisma.accessGrant.update({
-          where: { id: grant.id },
-          data: {
+        const currentGrant =
+          await prisma.accessGrant.findUnique({
+            where: {
+              id: grant.id,
+            },
+            select: {
+              status: true,
+            },
+          });
+
+        currentStatus =
+          currentGrant?.status ??
+          currentStatus;
+      }
+
+      if (currentStatus !== AccessStatus.ACTIVE) {
+        continue;
+      }
+
+      try {
+        const deactivationResult =
+          await deactivateGrant(grant.id);
+
+        if (
+          (deactivationResult as any)?.ok !== true
+        ) {
+          const currentGrant =
+            await prisma.accessGrant.findUnique({
+              where: {
+                id: grant.id,
+              },
+              select: {
+                status: true,
+              },
+            });
+
+          if (
+            currentGrant?.status !==
+            AccessStatus.REVOKED
+          ) {
+            throw new Error(
+              `ACCESS_REVOKE_NOT_CONFIRMED:${
+                (deactivationResult as any)
+                  ?.reason ?? "UNKNOWN"
+              }`
+            );
+          }
+        }
+
+        await prisma.accessGrant.updateMany({
+          where: {
+            id: grant.id,
             status: AccessStatus.REVOKED,
+          },
+          data: {
             revokedReason: "CANCELLED_BY_PMS",
             lastError: null,
           },
         });
+      } catch (e) {
+        const errorMessage =
+          e instanceof Error
+            ? e.message
+            : String(e);
+
+        await prisma.accessGrant
+          .updateMany({
+            where: {
+              id: grant.id,
+              status: AccessStatus.ACTIVE,
+            },
+            data: {
+              lastError:
+                `CANCELLED_REVOKE_FAILED: ${errorMessage}`,
+            },
+          })
+          .catch(() => {});
+
+        accessRevokeFailures.push({
+          grantId: grant.id,
+          error: errorMessage,
+        });
+
+        console.error(
+          "TTLock revoke failed during PMS cancellation",
+          {
+            reservationId:
+              reservation.id,
+            accessGrantId:
+              grant.id,
+            error: errorMessage,
+          }
+        );
       }
     }
 
@@ -101,6 +201,14 @@ export async function reconcileReservation(reservationId: string) {
           },
         }).catch(() => {});
       }
+    }
+
+    if (accessRevokeFailures.length > 0) {
+      throw new Error(
+        `PMS_CANCELLATION_ACCESS_REVOKE_FAILED:${accessRevokeFailures
+          .map((failure) => failure.grantId)
+          .join(",")}`
+      );
     }
 
     // opcional enterprise: marca reconciled
@@ -163,7 +271,7 @@ const cleaningStartsAt = new Date(
 
 const cleaningEndsAt = new Date(
   cleaningStartsAt.getTime() + cleaningDurationMin * 60_000
-);     
+);    
 
       return (
         a.startsAt.getTime() !== cleaningStartsAt.getTime() ||
@@ -269,13 +377,13 @@ await ttlockChangePasscode({
   keyboardPwdId: Number(g.ttlockKeyboardPwdId),
   startDate: desiredStart.getTime(),
   endDate: desiredEnd.getTime(),
-});    
+});   
  } catch (e: any) {
      console.error("[reconcile][passcode][FAILED]", {
     reservationId: reservation.id,
     grantId: g.id,
     error: String(e?.message ?? e),
-  });       
+  });      
 
           await prisma.accessGrant.update({
             where: { id: g.id },
@@ -312,7 +420,7 @@ const cleaningStartsAt = new Date(
 
 const cleaningEndsAt = new Date(
   cleaningStartsAt.getTime() + cleaningDurationMin * 60_000
-);   
+);  
 
     for (const a of nfcAssignments) {
       if (
