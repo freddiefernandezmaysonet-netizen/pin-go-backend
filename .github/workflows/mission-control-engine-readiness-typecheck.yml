@@ -73,3 +73,6 @@ jobs:
               --log-level=warning \
               --outfile="$output_file"
           done
+
+      - name: Run Mission Control contract tests
+        run: npx tsx --test src/apms/__tests__/mission-control-read-model.test.ts
