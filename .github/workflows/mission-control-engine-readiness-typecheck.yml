@@ -88,6 +88,7 @@ jobs:
             src/services/__tests__/communications-operational.test.ts \
             src/services/__tests__/device-health-operational.test.ts \
             src/services/__tests__/guest-journey-operational.test.ts \
+            src/services/__tests__/pms-ingest-recovery.test.ts \
             src/services/__tests__/stripe-connect-status.test.ts
 
       - name: Retain Mission Control review artifact
@@ -120,6 +121,7 @@ jobs:
             src/services/device-health-operational.service.ts
             src/services/deviceHealth.service.ts
             src/services/guest-journey-operational.service.ts
+            src/services/pms-ingest-recovery.service.ts
             src/services/reservation.reconcile.service.ts
             src/services/stripe-connect.service.ts
             src/services/__tests__/access-recovery-operational.test.ts
@@ -127,6 +129,7 @@ jobs:
             src/services/__tests__/communications-operational.test.ts
             src/services/__tests__/device-health-operational.test.ts
             src/services/__tests__/guest-journey-operational.test.ts
+            src/services/__tests__/pms-ingest-recovery.test.ts
             src/services/__tests__/stripe-connect-status.test.ts
             src/workers/lodgify.poller.ts
             src/workers/message.retry.worker.ts
