@@ -5,6 +5,7 @@ import type {
 export interface FinancialMissionControlInput {
   publicBookingEnabled: boolean;
   activeDirectBookingCount: number;
+  stripePlatformConfigured: boolean;
   stripeConnectAccountId?: string | null;
   stripeConnectStatus: string;
   stripeConnectChargesEnabled: boolean;
@@ -38,12 +39,7 @@ function isFinancialApplicable(
 ) {
   return (
     input.publicBookingEnabled ||
-    input.activeDirectBookingCount > 0 ||
-    Boolean(
-      cleanText(
-        input.stripeConnectAccountId
-      )
-    )
+    input.activeDirectBookingCount > 0
   );
 }
 
@@ -118,6 +114,23 @@ export function mapFinancialMissionControlOperationalItems(
     input.stripeConnectAccountId
   );
   const signalAt = getSignalAt(input);
+
+  if (!input.stripePlatformConfigured) {
+    return [
+      buildHostActionItem({
+        issueCode:
+          "FINANCIAL_STRIPE_PLATFORM_NOT_CONFIGURED",
+        title:
+          "Stripe platform configuration is missing",
+        issue:
+          "Direct Booking financial workflows are enabled, but Pin&Go cannot process Stripe operations without platform credentials.",
+        recommendedAction:
+          "Configure the Stripe platform credentials before accepting or refunding Direct Booking payments.",
+        lastSignalAt: signalAt,
+      }),
+    ];
+  }
+
   const payoutReady = Boolean(
     accountId &&
     status === "READY" &&
@@ -139,7 +152,7 @@ export function mapFinancialMissionControlOperationalItems(
         issue:
           "Stripe is reviewing the host payout account. No host action is required while verification remains pending.",
         nextAutomaticStep:
-          "Pin&Go will reflect the next synchronized Stripe verification status automatically.",
+          "Pin&Go will consume the next Stripe Connect account update and refresh Mission Control automatically.",
         lastSignalAt: signalAt,
       }),
     ];
@@ -226,7 +239,7 @@ export function mapFinancialMissionControlOperationalItems(
       issue:
         "Pin&Go does not yet have a conclusive Stripe payout status for this organization.",
       nextAutomaticStep:
-        "Pin&Go will reflect the next synchronized Stripe payout status automatically.",
+        "Pin&Go will consume the next Stripe Connect account update and refresh Mission Control automatically.",
       lastSignalAt: signalAt,
     }),
   ];
