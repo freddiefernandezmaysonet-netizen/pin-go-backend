@@ -74,10 +74,11 @@ jobs:
               --outfile="$output_file"
           done
 
-      - name: Run Mission Control and Access recovery tests
+      - name: Run Mission Control Engine tests
         run: |
           npx tsx --test \
             src/apms/__tests__/mission-control-read-model.test.ts \
+            src/apms/__tests__/device-health-ownership.test.ts \
             src/services/__tests__/access-recovery-operational.test.ts
 
       - name: Retain Mission Control review artifact
@@ -90,6 +91,8 @@ jobs:
             src/apms/engine-operational-contract.ts
             src/apms/mission-control-read-model.ts
             src/apms/mission-control.service.ts
+            src/apms/__tests__/mission-control-read-model.test.ts
+            src/apms/__tests__/device-health-ownership.test.ts
             src/routes/dashboard.mission-control.route.ts
             src/server.ts
             src/services/access-recovery-operational.service.ts
