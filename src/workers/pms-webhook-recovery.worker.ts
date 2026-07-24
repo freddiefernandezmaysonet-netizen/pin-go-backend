@@ -1,6 +1,6 @@
 import "dotenv/config";
 import { prisma } from "../lib/prisma";
-import { processWebhookEventById } from "../pms/ingest/webhook.processor";
+import { dispatchPmsWebhookEventById } from "../pms/ingest/webhook.dispatcher";
 
 const POLL_MS = Number(
   process.env.PMS_WEBHOOK_RECOVERY_POLL_MS ?? 60_000
@@ -159,7 +159,7 @@ async function tick() {
         attempts: event.attempts,
       });
 
-      await processWebhookEventById(event.id);
+      await dispatchPmsWebhookEventById(event.id);
     }
   } catch (error) {
     logError("tick failed", error);
