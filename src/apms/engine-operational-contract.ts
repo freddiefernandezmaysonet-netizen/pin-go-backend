@@ -1,5 +1,7 @@
 import type {
+  OperationalActionTarget,
   OperationalActor,
+  OperationalResolutionType,
   OperationalWorkflowState,
 } from "./operational-intelligence-types";
 
@@ -105,6 +107,39 @@ export interface MissionControlEngineSnapshot {
   evidenceRefs: MissionControlEvidenceRef[];
 }
 
+export interface MissionControlWorkflowSummary {
+  issueCode: string;
+  engineId: ApmsEngineId;
+  workflowState: OperationalWorkflowState;
+
+  title: string;
+  issue: string;
+  recommendedAction?: string | null;
+  nextAutomaticStep?: string | null;
+
+  responsibleActor: OperationalActor;
+  actionTarget?: OperationalActionTarget | null;
+
+  reservationId?: string | null;
+  reservationNumber?: string | null;
+  propertyId?: string | null;
+  guestName?: string | null;
+  cleanerName?: string | null;
+
+  lastSignalAt: Date | string;
+  nextAttemptAt?: Date | string | null;
+  attempt?: number | null;
+  maxAttempts?: number | null;
+  exhausted: boolean;
+}
+
+export interface MissionControlResolvedWorkflowSummary
+  extends MissionControlWorkflowSummary {
+  resolvedAt: Date | string;
+  resolutionSummary?: string | null;
+  resolutionType?: OperationalResolutionType | null;
+}
+
 export interface MissionControlStateCounts {
   healthy: number;
   autoResolving: number;
@@ -124,6 +159,9 @@ export interface MissionControlReadModelV1 {
 
   counts: MissionControlStateCounts;
   engines: MissionControlEngineSnapshot[];
+  hostActions: MissionControlWorkflowSummary[];
+  automaticWork: MissionControlWorkflowSummary[];
+  recentResolutions: MissionControlResolvedWorkflowSummary[];
 }
 
 export interface MissionControlOperationalSignal {
