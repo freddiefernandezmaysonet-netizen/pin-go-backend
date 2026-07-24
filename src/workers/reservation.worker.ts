@@ -61,6 +61,9 @@ import {
 import {
   reconcileGuestJourneyOperationalIssues,
 } from "../services/guest-journey-operational.service";
+import {
+  processPmsIngestRecovery,
+} from "../services/pms-ingest-recovery.service";
 
 
 console.log("[reservation.worker] BOOT", new Date().toISOString());
@@ -91,6 +94,10 @@ const POLL_MS = Number(process.env.RESERVATION_WORKER_POLL_MS ?? 10_000);
 const BATCH_SIZE = Number(process.env.RESERVATION_WORKER_BATCH_SIZE ?? 20);
 const GUEST_JOURNEY_OPERATIONAL_POLL_MS = Number(
   process.env.GUEST_JOURNEY_OPERATIONAL_POLL_MS ??
+    60_000
+);
+const PMS_INGEST_RECOVERY_POLL_MS = Number(
+  process.env.PMS_INGEST_RECOVERY_POLL_MS ??
     60_000
 );
 const REMINDER_ON =
@@ -2378,6 +2385,7 @@ if (!ttlockLockId) {
 let shuttingDown = false;
 let tickRunning = false;
 let guestJourneyOperationalNextRunAt = 0;
+let pmsIngestRecoveryNextRunAt = 0;
 
 async function processGuestJourneyOperationalReconciliation(
   now: Date
@@ -2405,6 +2413,38 @@ async function processGuestJourneyOperationalReconciliation(
   ) {
     log(
       "guest-journey-operational",
+      result
+    );
+  }
+}
+
+async function processPmsIngestRecoveryCycle(
+  now: Date
+) {
+  if (
+    now.getTime() <
+    pmsIngestRecoveryNextRunAt
+  ) {
+    return;
+  }
+
+  pmsIngestRecoveryNextRunAt =
+    now.getTime() +
+    PMS_INGEST_RECOVERY_POLL_MS;
+
+  const result =
+    await processPmsIngestRecovery(
+      prisma,
+      now
+    );
+
+  if (
+    result.staleReleased > 0 ||
+    result.scanned > 0 ||
+    result.failed > 0
+  ) {
+    log(
+      "pms-ingest-recovery",
       result
     );
   }
@@ -2464,6 +2504,17 @@ async function tick() {
     } catch (e) {
       errLog(
         "guest-journey-operational crashed:",
+        toErrString(e)
+      );
+    }
+
+    try {
+      await processPmsIngestRecoveryCycle(
+        now
+      );
+    } catch (e) {
+      errLog(
+        "pms-ingest-recovery crashed:",
         toErrString(e)
       );
     }
