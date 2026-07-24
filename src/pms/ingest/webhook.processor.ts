@@ -365,14 +365,6 @@ const reservation = await tx.reservation.upsert({
       }
 
       if (isCancelledStatus(normalizedStatus)) {
-        await tx.accessGrant.updateMany({
-          where: {
-            reservationId: reservation.id,
-            status: { in: ["PENDING", "ACTIVE"] as any },
-          },
-          data: { status: "REVOKED" },
-        });
-
         return {
           reservationId: reservation.id,
           cancelled: true,
@@ -507,7 +499,7 @@ if ((result as any).cleaningConfirmation) {
   await reconcileReservation(
     (result as any).reservationId
   );
-}    
+}   
     console.log("[pms] processed", {
       eventId: ev.id,
       reservationId: (result as any).reservationId,
