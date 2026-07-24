@@ -79,6 +79,7 @@ jobs:
           npx tsx --test \
             src/apms/__tests__/mission-control-read-model.test.ts \
             src/apms/__tests__/device-health-ownership.test.ts \
+            src/apms/__tests__/financial-mission-control.adapter.test.ts \
             src/services/__tests__/access-recovery-operational.test.ts
 
       - name: Retain Mission Control review artifact
@@ -89,10 +90,12 @@ jobs:
           if-no-files-found: error
           path: |
             src/apms/engine-operational-contract.ts
+            src/apms/financial-mission-control.adapter.ts
             src/apms/mission-control-read-model.ts
             src/apms/mission-control.service.ts
             src/apms/__tests__/mission-control-read-model.test.ts
             src/apms/__tests__/device-health-ownership.test.ts
+            src/apms/__tests__/financial-mission-control.adapter.test.ts
             src/routes/dashboard.mission-control.route.ts
             src/server.ts
             src/services/access-recovery-operational.service.ts
