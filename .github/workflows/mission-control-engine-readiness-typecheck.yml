@@ -96,9 +96,12 @@ jobs:
             src/apms/financial-mission-control.adapter.ts
             src/apms/mission-control-read-model.ts
             src/apms/mission-control.service.ts
+            src/apms/reservation-operational-intelligence.mapper.ts
             src/apms/__tests__/mission-control-read-model.test.ts
             src/apms/__tests__/device-health-ownership.test.ts
             src/apms/__tests__/financial-mission-control.adapter.test.ts
+            src/pms/ingest/webhook.processor.ts
+            src/pms/ingest/webhook.routes.ts
             src/routes/cleaning-confirm.routes.ts
             src/routes/dashboard.mission-control.route.ts
             src/server.ts
@@ -109,8 +112,10 @@ jobs:
             src/services/communications-operational.service.ts
             src/services/device-health-operational.service.ts
             src/services/deviceHealth.service.ts
+            src/services/reservation.reconcile.service.ts
             src/services/__tests__/access-recovery-operational.test.ts
             src/services/__tests__/cleaning-operational.test.ts
             src/services/__tests__/communications-operational.test.ts
             src/services/__tests__/device-health-operational.test.ts
+            src/workers/lodgify.poller.ts
             src/workers/message.retry.worker.ts
