@@ -127,4 +127,5 @@ jobs:
             src/services/__tests__/stripe-connect-status.test.ts
             src/workers/lodgify.poller.ts
             src/workers/message.retry.worker.ts
+            src/workers/reservation.worker.ts
             src/webhooks/stripe.webhook.ts
