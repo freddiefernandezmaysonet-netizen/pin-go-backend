@@ -402,6 +402,11 @@ const activeReservations = await prisma.reservation.findMany({
   where: {
     externalProvider: "LODGIFY",
     status: "ACTIVE",
+    pmsLinks: {
+      some: {
+        connectionId: connection.id,
+      },
+    },
   },
   select: {
     externalId: true,
