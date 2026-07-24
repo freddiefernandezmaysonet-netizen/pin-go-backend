@@ -1,4 +1,4 @@
-import { processWebhookEventById } from "../ingest/webhook.processor";
+import { dispatchPmsWebhookEventById } from "../ingest/webhook.dispatcher";
 
 export async function enqueueProcessWebhookEvent(eventId: string) {
   console.log("[pms] enqueueProcessWebhookEvent", { eventId });
@@ -6,8 +6,12 @@ export async function enqueueProcessWebhookEvent(eventId: string) {
   setImmediate(() => {
     console.log("[pms] setImmediate fired", { eventId });
 
-    processWebhookEventById(eventId).catch((e) => {
-      console.error("[pms] processWebhookEvent failed", eventId, e?.message ?? e);
+    dispatchPmsWebhookEventById(eventId).catch((e) => {
+      console.error(
+        "[pms] dispatchPmsWebhookEvent failed",
+        eventId,
+        e?.message ?? e
+      );
     });
   });
 }
