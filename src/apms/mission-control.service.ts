@@ -17,6 +17,9 @@ import type {
   MissionControlEngineReadiness,
   MissionControlOperationalProjection,
 } from "./mission-control-read-model";
+import {
+  mapFinancialMissionControlOperationalItems,
+} from "./financial-mission-control.adapter";
 
 const RECENT_RESOLUTION_WINDOW_MS =
   7 * 24 * 60 * 60 * 1000;
@@ -171,10 +174,12 @@ function dependency(input: {
 function buildReadiness(input: {
   organization: {
     publicBookingEnabled: boolean;
+    updatedAt: Date;
     stripeConnectAccountId: string | null;
     stripeConnectStatus: string;
     stripeConnectChargesEnabled: boolean;
     stripeConnectPayoutsEnabled: boolean;
+    stripeConnectDisabledReason: string | null;
     stripeConnectLastSyncedAt: Date | null;
     ttlockAuth: {
       accessToken: string | null;
@@ -184,6 +189,7 @@ function buildReadiness(input: {
     } | null;
     properties: Array<{
       id: string;
+      isPublicBookable: boolean;
       cleaningNfcEnabled: boolean;
       distributionEnabled: boolean;
       dynamicPricingEnabled: boolean;
@@ -364,14 +370,16 @@ function buildReadiness(input: {
         property.baseNightlyRate !== null
     );
 
-  const financialApplicable =
-    input.organization
-      .publicBookingEnabled ||
-    input.activeDirectBookingCount > 0 ||
-    Boolean(
-      input.organization
-        .stripeConnectAccountId
+  const directBookingEnabled =
+    input.organization.publicBookingEnabled &&
+    activeProperties.some(
+      (property) =>
+        property.isPublicBookable
     );
+
+  const financialApplicable =
+    directBookingEnabled ||
+    input.activeDirectBookingCount > 0;
 
   const stripeConnectReady =
     input.organization
@@ -784,10 +792,12 @@ export async function getOrganizationMissionControl(
       select: {
         id: true,
         publicBookingEnabled: true,
+        updatedAt: true,
         stripeConnectAccountId: true,
         stripeConnectStatus: true,
         stripeConnectChargesEnabled: true,
         stripeConnectPayoutsEnabled: true,
+        stripeConnectDisabledReason: true,
         stripeConnectLastSyncedAt: true,
         ttlockAuth: {
           select: {
@@ -803,6 +813,7 @@ export async function getOrganizationMissionControl(
           },
           select: {
             id: true,
+            isPublicBookable: true,
             cleaningNfcEnabled: true,
             distributionEnabled: true,
             dynamicPricingEnabled: true,
@@ -1177,6 +1188,58 @@ export async function getOrganizationMissionControl(
           ),
       };
     });
+
+  const directBookingEnabled =
+    organization.publicBookingEnabled &&
+    organization.properties.some(
+      (property) =>
+        property.isPublicBookable
+    );
+
+  const persistedFinancialIssueCodes =
+    new Set(
+      operationalItems
+        .filter(
+          (item) =>
+            normalizeApmsEngineId(
+              item.engine
+            ) === "FINANCIAL"
+        )
+        .map((item) => item.issueCode)
+    );
+
+  const financialOperationalItems =
+    mapFinancialMissionControlOperationalItems({
+      publicBookingEnabled:
+        directBookingEnabled,
+      activeDirectBookingCount,
+      stripePlatformConfigured:
+        hasEnvironmentValues([
+          "STRIPE_SECRET_KEY",
+        ]),
+      stripeConnectAccountId:
+        organization.stripeConnectAccountId,
+      stripeConnectStatus:
+        organization.stripeConnectStatus,
+      stripeConnectChargesEnabled:
+        organization.stripeConnectChargesEnabled,
+      stripeConnectPayoutsEnabled:
+        organization.stripeConnectPayoutsEnabled,
+      stripeConnectDisabledReason:
+        organization.stripeConnectDisabledReason,
+      stripeConnectLastSyncedAt:
+        organization.stripeConnectLastSyncedAt,
+      signalAt: organization.updatedAt,
+    }).filter(
+      (item) =>
+        !persistedFinancialIssueCodes.has(
+          item.issueCode
+        )
+    );
+
+  operationalItems.push(
+    ...financialOperationalItems
+  );
 
   const readiness = buildReadiness({
     organization,
