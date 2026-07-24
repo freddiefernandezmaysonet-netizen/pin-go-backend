@@ -324,6 +324,57 @@ async function processRevision(args: {
     });
 
     reservationId = result.reservationId;
+
+    const persistedReservation = await prisma.reservation.findUnique({
+      where: { id: result.reservationId },
+      select: {
+        id: true,
+        status: true,
+        lastIngestError: true,
+        externalUpdatedAt: true,
+      },
+    });
+
+    if (!persistedReservation) {
+      throw new Error(
+        `CHANNEX_RESERVATION_NOT_FOUND_AFTER_INGEST:${result.reservationId}`
+      );
+    }
+
+    const cancellationRejected =
+      args.revision.reservation.status === "CANCELLED" &&
+      persistedReservation.lastIngestError === "CANCEL_REJECTED_ACTIVE_STAY";
+
+    if (cancellationRejected) {
+      const completedAt = new Date();
+
+      await persistLifecycleAudit({
+        decisionId: `distribution-engine:channex-revision:${args.revision.identity.revisionId}:persisted`,
+        eventType: "ACTION_FAILED",
+        status: "FAILED",
+        severity: "CRITICAL",
+        summary:
+          "Pin&Go Connect could not apply the booking cancellation to the active stay.",
+        reason: "CHANNEX_CANCELLATION_NOT_APPLIED",
+        startedAt: lifecycleStartedAt,
+        completedAt,
+        organizationId: args.organizationId,
+        propertyId: listing.propertyId!,
+        reservationId,
+        eventId: args.eventId,
+        revision: args.revision,
+        applied: false,
+        rule: "CHANNEX_BOOKING_CANCELLATION_PERSISTENCE",
+        label: "Pin&Go Connect Booking Cancellation",
+        recommendedAction:
+          "Review the active stay cancellation before acknowledging the channel revision.",
+      });
+
+      throw new Error(
+        `CHANNEX_CANCELLATION_NOT_APPLIED:${args.revision.identity.revisionId}`
+      );
+    }
+
     const completedAt = new Date();
 
     await persistLifecycleAudit({
@@ -349,7 +400,48 @@ async function processRevision(args: {
   }
 
   const ackStartedAt = new Date();
-  await args.acknowledge(args.revision.identity.revisionId);
+
+  try {
+    await args.acknowledge(args.revision.identity.revisionId);
+  } catch (error: any) {
+    const ackCompletedAt = new Date();
+    const ackError = String(error?.message ?? error);
+
+    try {
+      await persistLifecycleAudit({
+        decisionId: `distribution-engine:channex-revision:${args.revision.identity.revisionId}:ack`,
+        eventType: "ACTION_FAILED",
+        status: "FAILED",
+        severity: "WARNING",
+        summary:
+          "Pin&Go Connect persisted the booking revision but could not acknowledge it.",
+        reason: "CHANNEX_REVISION_ACK_FAILED",
+        startedAt: ackStartedAt,
+        completedAt: ackCompletedAt,
+        organizationId: args.organizationId,
+        propertyId: listing.propertyId!,
+        reservationId,
+        eventId: args.eventId,
+        revision: args.revision,
+        applied: false,
+        rule: "CHANNEX_BOOKING_REVISION_ACK",
+        label: "Pin&Go Connect Booking Acknowledgement",
+        recommendedAction:
+          "Pin&Go will retry the booking acknowledgement automatically.",
+      });
+    } catch (auditError: any) {
+      console.error("[CHANNEX_ACK_AUDIT_PERSIST_FAILED]", {
+        revisionId: args.revision.identity.revisionId,
+        eventId: args.eventId,
+        error: String(auditError?.message ?? auditError),
+      });
+    }
+
+    throw new Error(
+      `CHANNEX_REVISION_ACK_FAILED:${args.revision.identity.revisionId}:${ackError}`
+    );
+  }
+
   const ackCompletedAt = new Date();
 
   await persistLifecycleAudit({
