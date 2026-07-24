@@ -118,6 +118,28 @@ function isNonRetryableSmsError(value: unknown) {
 }
 
 async function processRetries() {
+  const finalizedExhaustedSmsMessages =
+    await prisma.messageLog.updateMany({
+      where: {
+        channel: "sms",
+        status: "FAILED",
+        retryCount: {
+          gte: MAX_RETRIES,
+        },
+      },
+      data: {
+        status: "FAILED_FINAL",
+      },
+    });
+
+  if (finalizedExhaustedSmsMessages.count > 0) {
+    errLog("SMS retry budget reconciled", {
+      finalizedCount:
+        finalizedExhaustedSmsMessages.count,
+      maxRetries: MAX_RETRIES,
+    });
+  }
+
   const failedSmsMessages = await prisma.messageLog.findMany({
     where: {
       channel: "sms",
@@ -182,12 +204,18 @@ async function processRetries() {
     } catch (e) {
       const err = toErrString(e);
       const nonRetryable = isNonRetryableSmsError(err);
+      const nextRetryCount = msg.retryCount + 1;
+      const finalFailure =
+        nonRetryable ||
+        nextRetryCount >= MAX_RETRIES;
 
       try {
         await prisma.messageLog.update({
           where: { id: msg.id },
           data: {
-            status: nonRetryable ? "FAILED_FINAL" : "FAILED",
+            status: finalFailure
+              ? "FAILED_FINAL"
+              : "FAILED",
             retryCount: { increment: 1 },
             error: err,
           },
@@ -199,15 +227,20 @@ async function processRetries() {
         });
       }
 
-      if (nonRetryable) {
-        errLog("SMS retry stopped after non-retryable Twilio error", {
+      if (finalFailure) {
+        errLog("SMS retry stopped", {
           id: msg.id,
           to: msg.to,
+          retryCount: nextRetryCount,
+          reason: nonRetryable
+            ? "NON_RETRYABLE_ERROR"
+            : "RETRY_BUDGET_EXHAUSTED",
           err,
         });
       } else {
         errLog("SMS retry failed", {
           id: msg.id,
+          retryCount: nextRetryCount,
           err,
         });
       }
