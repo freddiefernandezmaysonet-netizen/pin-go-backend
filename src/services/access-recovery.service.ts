@@ -3,6 +3,11 @@ import {
   PrismaClient,
 } from "@prisma/client";
 
+import {
+  recordAccessRecoveryOperationalFailure,
+  resolveAccessRecoveryOperationalIssue,
+} from "./access-recovery-operational.service";
+
 export const ACCESS_RECOVERY_OPERATION = {
   REVOKE: "REVOKE",
 } as const;
@@ -306,8 +311,46 @@ export async function recordAccessRecoveryFailure(input: {
       },
     });
 
+  const applied = updated.count === 1;
+
+  if (applied) {
+    try {
+      await recordAccessRecoveryOperationalFailure({
+        prisma: input.prisma,
+        accessGrantId:
+          input.accessGrantId,
+        operation: input.operation,
+        attemptCount:
+          input.attemptCount,
+        maxAttempts:
+          MAX_TOTAL_ATTEMPTS,
+        lastError,
+        nextAttemptAt,
+        exhausted,
+        occurredAt: now,
+      });
+    } catch (operationalError) {
+      console.error(
+        "[ACCESS_RECOVERY_OPERATIONAL_FAILURE]",
+        {
+          accessGrantId:
+            input.accessGrantId,
+          operation: input.operation,
+          attemptCount:
+            input.attemptCount,
+          exhausted,
+          error:
+            operationalError instanceof Error
+              ? operationalError.stack ||
+                operationalError.message
+              : String(operationalError),
+        }
+      );
+    }
+  }
+
   return {
-    applied: updated.count === 1,
+    applied,
     exhausted,
     nextAttemptAt,
     attemptCount: input.attemptCount,
@@ -318,7 +361,10 @@ export async function recordAccessRecoveryFailure(input: {
 export async function recordAccessRecoverySuccess(input: {
   prisma: PrismaClient;
   accessGrantId: string;
+  now?: Date;
 }) {
+  const now = input.now ?? new Date();
+
   /**
    * deactivateGrant() marca primero el grant como
    * REVOKED. Solo entonces limpiamos recovery.
@@ -339,7 +385,37 @@ export async function recordAccessRecoverySuccess(input: {
       },
     });
 
+  const applied = updated.count === 1;
+
+  if (applied) {
+    try {
+      await resolveAccessRecoveryOperationalIssue({
+        prisma: input.prisma,
+        accessGrantId:
+          input.accessGrantId,
+        operation:
+          ACCESS_RECOVERY_OPERATION.REVOKE,
+        occurredAt: now,
+      });
+    } catch (operationalError) {
+      console.error(
+        "[ACCESS_RECOVERY_OPERATIONAL_RESOLUTION_FAILURE]",
+        {
+          accessGrantId:
+            input.accessGrantId,
+          operation:
+            ACCESS_RECOVERY_OPERATION.REVOKE,
+          error:
+            operationalError instanceof Error
+              ? operationalError.stack ||
+                operationalError.message
+              : String(operationalError),
+        }
+      );
+    }
+  }
+
   return {
-    applied: updated.count === 1,
+    applied,
   };
 }
