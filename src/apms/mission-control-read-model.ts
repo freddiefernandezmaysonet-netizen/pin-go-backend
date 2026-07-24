@@ -4,7 +4,7 @@ import {
   getMissionControlStateCounts,
   isAutomaticWorkSignal,
   isHostActionSignal,
-  normalizeApmsEngineId,
+  resolveApmsOperationalEngineId,
   resolveMissionControlEngineState,
 } from "./engine-operational-contract";
 import type {
@@ -393,9 +393,11 @@ export function buildMissionControlReadModel(
     NormalizedOperationalProjection[] = [];
 
   for (const item of input.operationalItems) {
-    const engineId = normalizeApmsEngineId(
-      item.engine
-    );
+    const engineId =
+      resolveApmsOperationalEngineId({
+        engine: item.engine,
+        issueCode: item.issueCode,
+      });
 
     if (!engineId) {
       continue;
