@@ -81,6 +81,7 @@ jobs:
             src/apms/__tests__/device-health-ownership.test.ts \
             src/apms/__tests__/financial-mission-control.adapter.test.ts \
             src/services/__tests__/access-recovery-operational.test.ts \
+            src/services/__tests__/communications-operational.test.ts \
             src/services/__tests__/device-health-operational.test.ts
 
       - name: Retain Mission Control review artifact
@@ -101,7 +102,10 @@ jobs:
             src/server.ts
             src/services/access-recovery-operational.service.ts
             src/services/access-recovery.service.ts
+            src/services/communications-operational.service.ts
             src/services/device-health-operational.service.ts
             src/services/deviceHealth.service.ts
             src/services/__tests__/access-recovery-operational.test.ts
+            src/services/__tests__/communications-operational.test.ts
             src/services/__tests__/device-health-operational.test.ts
+            src/workers/message.retry.worker.ts
