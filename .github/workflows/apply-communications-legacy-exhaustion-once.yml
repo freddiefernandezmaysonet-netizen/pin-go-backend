@@ -1,0 +1,207 @@
+name: Apply Communications Legacy Exhaustion Once
+
+on:
+  push:
+    branches:
+      - agent/mission-control-engine-readiness-v1-backend
+    paths:
+      - ".github/workflows/apply-communications-legacy-exhaustion-once.yml"
+
+permissions:
+  contents: write
+
+concurrency:
+  group: mission-control-communications-one-shot
+  cancel-in-progress: false
+
+jobs:
+  apply:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - name: Checkout exact sprint branch
+        uses: actions/checkout@v4
+        with:
+          ref: agent/mission-control-engine-readiness-v1-backend
+          fetch-depth: 2
+
+      - name: Verify immutable starting point
+        shell: bash
+        run: |
+          set -euo pipefail
+          expected_parent="1bcf811b90f694091a17498458572364a13103db"
+          expected_worker_blob="7575206541f3e7868982825b1752771dc18c43fe"
+          workflow_path=".github/workflows/apply-communications-legacy-exhaustion-once.yml"
+
+          test "$(git rev-parse HEAD^)" = "$expected_parent"
+          test "$(git hash-object src/workers/message.retry.worker.ts)" = "$expected_worker_blob"
+          test "$(git diff --name-only HEAD^ HEAD)" = "$workflow_path"
+          test -z "$(git status --porcelain)"
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+        env:
+          DATABASE_URL: postgresql://postgres:postgres@localhost:5432/pingo
+
+      - name: Apply exact worker change
+        shell: bash
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          from pathlib import Path
+
+          path = Path("src/workers/message.retry.worker.ts")
+          text = path.read_text()
+
+          old = '''async function processRetries() {
+            const finalizedExhaustedSmsMessages =
+              await prisma.messageLog.updateMany({
+                where: {
+                  channel: "sms",
+                  status: "FAILED",
+                  retryCount: {
+                    gte: MAX_RETRIES,
+                  },
+                },
+                data: {
+                  status: "FAILED_FINAL",
+                },
+              });
+
+            if (finalizedExhaustedSmsMessages.count > 0) {
+              errLog("SMS retry budget reconciled", {
+                finalizedCount:
+                  finalizedExhaustedSmsMessages.count,
+                maxRetries: MAX_RETRIES,
+              });
+            }
+
+            const failedSmsMessages = await prisma.messageLog.findMany({
+          '''
+
+          new = '''async function processRetries() {
+            const exhaustedSmsMessages =
+              await prisma.messageLog.findMany({
+                where: {
+                  channel: "sms",
+                  status: "FAILED",
+                  retryCount: {
+                    gte: MAX_RETRIES,
+                  },
+                },
+                take: BATCH_SIZE,
+                orderBy: {
+                  createdAt: "asc",
+                },
+              });
+
+            let finalizedExhaustedCount = 0;
+
+            for (const message of exhaustedSmsMessages) {
+              const occurredAt = new Date();
+
+              const finalized =
+                await prisma.messageLog.updateMany({
+                  where: {
+                    id: message.id,
+                    status: "FAILED",
+                    retryCount: {
+                      gte: MAX_RETRIES,
+                    },
+                  },
+                  data: {
+                    status: "FAILED_FINAL",
+                  },
+                });
+
+              if (finalized.count !== 1) {
+                continue;
+              }
+
+              finalizedExhaustedCount += 1;
+
+              await recordCommunicationFailureSafe({
+                messageId: message.id,
+                channel: "sms",
+                messageType: "SMS",
+                reservationId:
+                  message.reservationId ?? null,
+                propertyId:
+                  message.propertyId ?? null,
+                organizationId:
+                  message.organizationId ?? null,
+                retryCount: message.retryCount,
+                error:
+                  message.error ??
+                  "SMS retry budget exhausted",
+                failureKind:
+                  "RETRY_BUDGET_EXHAUSTED",
+                occurredAt,
+              });
+            }
+
+            if (finalizedExhaustedCount > 0) {
+              errLog("SMS retry budget reconciled", {
+                finalizedCount:
+                  finalizedExhaustedCount,
+                maxRetries: MAX_RETRIES,
+              });
+            }
+
+            const failedSmsMessages = await prisma.messageLog.findMany({
+          '''
+
+          if text.count(old) != 1:
+              raise SystemExit("Expected Communications block was not found exactly once")
+
+          path.write_text(text.replace(old, new, 1))
+          PY
+
+          test "$(git diff --name-only)" = "src/workers/message.retry.worker.ts"
+          git diff --check
+
+      - name: Compile and test Communications
+        run: |
+          npx --yes esbuild@0.28.1 src/workers/message.retry.worker.ts \
+            --bundle \
+            --platform=node \
+            --format=esm \
+            --target=node22 \
+            --packages=external \
+            --log-level=warning \
+            --outfile=/tmp/message-retry-worker.mjs
+
+          npx tsx --test \
+            src/services/__tests__/communications-operational.test.ts
+
+      - name: Commit only the worker
+        shell: bash
+        run: |
+          set -euo pipefail
+          branch="agent/mission-control-engine-readiness-v1-backend"
+
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add src/workers/message.retry.worker.ts
+          git diff --cached --check
+          git commit -m "fix: surface exhausted legacy SMS retries"
+          git push origin HEAD:"$branch"
+
+      - name: Remove this one-shot workflow
+        shell: bash
+        run: |
+          set -euo pipefail
+          branch="agent/mission-control-engine-readiness-v1-backend"
+          workflow_path=".github/workflows/apply-communications-legacy-exhaustion-once.yml"
+
+          git rm "$workflow_path"
+          git commit -m "chore: remove communications one-shot workflow"
+          git push origin HEAD:"$branch"
