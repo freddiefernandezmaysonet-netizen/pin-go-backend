@@ -5,10 +5,50 @@ import {
 } from "@prisma/client";
 import { ensureCleanerNfcAccessForConfirmedCleaning } from "../services/cleaner-access-autopilot.service";
 import { auditReservationCompleteFlowSafe } from "../services/reservation-complete-flow-audit.service";
+import {
+  synchronizeCleaningCoverageOperationalIssue,
+} from "../services/cleaning-operational.service";
+import type {
+  CleaningCoverageOperationalState,
+} from "../services/cleaning-operational.service";
 
 const prisma = new PrismaClient();
 
 export const cleaningConfirmRouter = Router();
+
+async function synchronizeCleaningCoverageSafe(input: {
+  reservationId: string;
+  confirmationId?: string | null;
+  staffMemberId?: string | null;
+  state: CleaningCoverageOperationalState;
+  attemptedCleanerCount?: number | null;
+  reason?: string | null;
+  occurredAt: Date;
+}) {
+  try {
+    await synchronizeCleaningCoverageOperationalIssue({
+      prisma,
+      ...input,
+    });
+  } catch (operationalError) {
+    console.error(
+      "[CLEANING_CONFIRM_OPERATIONAL_SYNC_ERROR]",
+      {
+        reservationId: input.reservationId,
+        confirmationId:
+          input.confirmationId ?? null,
+        staffMemberId:
+          input.staffMemberId ?? null,
+        state: input.state,
+        error:
+          operationalError instanceof Error
+            ? operationalError.stack ||
+              operationalError.message
+            : String(operationalError),
+      }
+    );
+  }
+}
 
 function sendCancelledCleaningRequestResponse(
   res: any
@@ -117,6 +157,15 @@ cleaningConfirmRouter.get("/cleaning/confirm/:token", async (req, res) => {
       reservation.status ===
       ReservationStatus.CANCELLED
     ) {
+      await synchronizeCleaningCoverageSafe({
+        reservationId: reservation.id,
+        confirmationId: confirmation.id,
+        staffMemberId: confirmation.staffMemberId,
+        state: "SUPERSEDED",
+        reason: "RESERVATION_CANCELLED",
+        occurredAt: new Date(),
+      });
+
       return sendCancelledCleaningRequestResponse(
         res
       );
@@ -136,12 +185,30 @@ cleaningConfirmRouter.get("/cleaning/confirm/:token", async (req, res) => {
     }
   );
 
+  await synchronizeCleaningCoverageSafe({
+    reservationId: reservation.id,
+    confirmationId: confirmation.id,
+    staffMemberId: confirmation.staffMemberId,
+    state: "SUPERSEDED",
+    reason: "CLEANING_NFC_DISABLED",
+    occurredAt: new Date(),
+  });
+
   return sendCleaningNfcDisabledResponse(
     res
   );
 }
 
     if (confirmation.status === "CONFIRMED") {
+  await synchronizeCleaningCoverageSafe({
+    reservationId: confirmation.reservationId,
+    confirmationId: confirmation.id,
+    staffMemberId: confirmation.staffMemberId,
+    state: "CONFIRMED",
+    reason: "CLEANER_ALREADY_CONFIRMED",
+    occurredAt: new Date(),
+  });
+
   const cleanerAccessResult =
     await ensureCleanerNfcAccessForConfirmedCleaning({
       prisma,
@@ -227,6 +294,15 @@ cleaningConfirmRouter.post(
         reservation.status ===
         ReservationStatus.CANCELLED
       ) {
+        await synchronizeCleaningCoverageSafe({
+          reservationId: reservation.id,
+          confirmationId: confirmation.id,
+          staffMemberId: confirmation.staffMemberId,
+          state: "SUPERSEDED",
+          reason: "RESERVATION_CANCELLED",
+          occurredAt: new Date(),
+        });
+
         return sendCancelledCleaningRequestResponse(
           res
         );
@@ -247,12 +323,30 @@ cleaningConfirmRouter.post(
     }
   );
 
+  await synchronizeCleaningCoverageSafe({
+    reservationId: reservation.id,
+    confirmationId: confirmation.id,
+    staffMemberId: confirmation.staffMemberId,
+    state: "SUPERSEDED",
+    reason: "CLEANING_NFC_DISABLED",
+    occurredAt: new Date(),
+  });
+
   return sendCleaningNfcDisabledResponse(
     res
   );
 }
 
       if (confirmation.status === "CONFIRMED") {
+        await synchronizeCleaningCoverageSafe({
+          reservationId: confirmation.reservationId,
+          confirmationId: confirmation.id,
+          staffMemberId: confirmation.staffMemberId,
+          state: "CONFIRMED",
+          reason: "CLEANER_ALREADY_CONFIRMED",
+          occurredAt: new Date(),
+        });
+
         return res.send("Cleaning already confirmed. Thank you.");
       }
 
@@ -260,14 +354,55 @@ cleaningConfirmRouter.post(
         return res.status(409).send("This request was already declined.");
       }
 
-      await prisma.cleaningConfirmation.update({
-  where: {
-    id: confirmation.id,
-  },
-  data: {
-    status: "CONFIRMED",
-  },
-});
+      const confirmedAt = new Date();
+      const confirmationClaim =
+        await prisma.cleaningConfirmation.updateMany({
+          where: {
+            id: confirmation.id,
+            status: "PENDING",
+          },
+          data: {
+            status: "CONFIRMED",
+          },
+        });
+
+      if (confirmationClaim.count === 0) {
+        const currentConfirmation =
+          await prisma.cleaningConfirmation.findUnique({
+            where: {
+              id: confirmation.id,
+            },
+            select: {
+              status: true,
+            },
+          });
+
+        if (currentConfirmation?.status === "CONFIRMED") {
+          await synchronizeCleaningCoverageSafe({
+            reservationId: confirmation.reservationId,
+            confirmationId: confirmation.id,
+            staffMemberId: confirmation.staffMemberId,
+            state: "CONFIRMED",
+            reason: "CLEANER_ALREADY_CONFIRMED",
+            occurredAt: confirmedAt,
+          });
+
+          return res.send("Cleaning already confirmed. Thank you.");
+        }
+
+        return res.status(409).send(
+          "This cleaning request is no longer pending."
+        );
+      }
+
+      await synchronizeCleaningCoverageSafe({
+        reservationId: confirmation.reservationId,
+        confirmationId: confirmation.id,
+        staffMemberId: confirmation.staffMemberId,
+        state: "CONFIRMED",
+        reason: "CLEANER_CONFIRMED",
+        occurredAt: confirmedAt,
+      });
 
 const cleanerAccessResult =
   await ensureCleanerNfcAccessForConfirmedCleaning({
@@ -352,6 +487,12 @@ cleaningConfirmRouter.post(
           .send("This request was already confirmed.");
       }
 
+      if (confirmation.status === "DECLINED") {
+        return res.send(
+          "This cleaning request was already declined."
+        );
+      }
+
      const reservation =
   await prisma.reservation.findUnique({
     where: {
@@ -371,6 +512,15 @@ cleaningConfirmRouter.post(
         reservation.status ===
         ReservationStatus.CANCELLED
       ) {
+        await synchronizeCleaningCoverageSafe({
+          reservationId: reservation.id,
+          confirmationId: confirmation.id,
+          staffMemberId: confirmation.staffMemberId,
+          state: "SUPERSEDED",
+          reason: "RESERVATION_CANCELLED",
+          occurredAt: new Date(),
+        });
+
         return sendCancelledCleaningRequestResponse(
           res
         );
@@ -391,10 +541,53 @@ cleaningConfirmRouter.post(
     }
   );
 
+  await synchronizeCleaningCoverageSafe({
+    reservationId: reservation.id,
+    confirmationId: confirmation.id,
+    staffMemberId: confirmation.staffMemberId,
+    state: "SUPERSEDED",
+    reason: "CLEANING_NFC_DISABLED",
+    occurredAt: new Date(),
+  });
+
   return sendCleaningNfcDisabledResponse(
     res
   );
 }
+
+      const declinedAt = new Date();
+      const declineClaim =
+        await prisma.cleaningConfirmation.updateMany({
+          where: {
+            id: confirmation.id,
+            status: "PENDING",
+          },
+          data: {
+            status: "DECLINED",
+          },
+        });
+
+      if (declineClaim.count === 0) {
+        const currentConfirmation =
+          await prisma.cleaningConfirmation.findUnique({
+            where: {
+              id: confirmation.id,
+            },
+            select: {
+              status: true,
+            },
+          });
+
+        if (currentConfirmation?.status === "DECLINED") {
+          return res.send(
+            "This cleaning request was already declined."
+          );
+        }
+
+        return res.status(409).send(
+          "This cleaning request is no longer pending."
+        );
+      }
 
       const allAttempts = await prisma.cleaningConfirmation.findMany({
         where: {
@@ -419,14 +612,17 @@ cleaningConfirmRouter.post(
           excludeStaffIds,
         });
 
-      await prisma.cleaningConfirmation.update({
-        where: { id: confirmation.id },
-        data: {
-          status: "DECLINED",
-        },
-      });
-
       if (!nextStaff) {
+        await synchronizeCleaningCoverageSafe({
+          reservationId: confirmation.reservationId,
+          confirmationId: confirmation.id,
+          staffMemberId: confirmation.staffMemberId,
+          state: "NO_BACKUP_AVAILABLE",
+          attemptedCleanerCount: excludeStaffIds.length,
+          reason: "CLEANER_DECLINED_NO_BACKUP",
+          occurredAt: declinedAt,
+        });
+
         console.warn(
           "[CLEANING_CONFIRM_DECLINE] no backup available",
           {
@@ -455,6 +651,16 @@ cleaningConfirmRouter.post(
             status: "PENDING",
           },
         });
+
+      await synchronizeCleaningCoverageSafe({
+        reservationId: confirmation.reservationId,
+        confirmationId: nextConfirmation.id,
+        staffMemberId: nextStaff.id,
+        state: "BACKUP_ASSIGNED",
+        attemptedCleanerCount: excludeStaffIds.length,
+        reason: "CLEANER_DECLINED_BACKUP_ASSIGNED",
+        occurredAt: declinedAt,
+      });
 
       console.log(
         "[CLEANING_CONFIRM_DECLINE] created backup confirmation",
