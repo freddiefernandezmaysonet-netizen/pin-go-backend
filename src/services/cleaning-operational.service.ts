@@ -252,8 +252,6 @@ export async function synchronizeCleaningCoverageOperationalIssue(
   const reservationSuperseded =
     context.reservation.status ===
       ReservationStatus.CANCELLED ||
-    context.reservation.checkOut <=
-      occurredAt ||
     context.reservation.property
       .cleaningNfcEnabled !== true;
 
@@ -273,7 +271,7 @@ export async function synchronizeCleaningCoverageOperationalIssue(
         resolutionCode:
           "CLEANING_COVERAGE_NO_LONGER_REQUIRED",
         resolutionSummary:
-          "Pin&Go closed cleaner coverage because the reservation ended, was cancelled, or cleaning NFC was disabled.",
+          "Pin&Go closed cleaner coverage because the reservation was cancelled or cleaning NFC was disabled.",
         resolutionType: "SUPERSEDED",
         resolvedBy: "PIN_GO",
       },
