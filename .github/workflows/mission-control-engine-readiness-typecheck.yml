@@ -82,6 +82,7 @@ jobs:
             src/apms/__tests__/device-health-ownership.test.ts \
             src/apms/__tests__/financial-mission-control.adapter.test.ts \
             src/apms/__tests__/financial-mission-control-read-model.test.ts \
+            src/pms/__tests__/webhook-claim.test.ts \
             src/services/__tests__/access-recovery-operational.test.ts \
             src/services/__tests__/cleaning-operational.test.ts \
             src/services/__tests__/communications-operational.test.ts \
@@ -107,6 +108,7 @@ jobs:
             src/apms/__tests__/financial-mission-control-read-model.test.ts
             src/pms/ingest/webhook.processor.ts
             src/pms/ingest/webhook.routes.ts
+            src/pms/__tests__/webhook-claim.test.ts
             src/routes/cleaning-confirm.routes.ts
             src/routes/dashboard.mission-control.route.ts
             src/server.ts
