@@ -406,12 +406,17 @@ export function mapReservationCleaningOperationalItems(
 ): UpsertOperationalIssueInput[] {
   const items: UpsertOperationalIssueInput[] = [];
 
-  const cleaningConfirmationItem =
-    buildCleaningConfirmationOperationalItem(input);
-
-  if (cleaningConfirmationItem) {
-    items.push(cleaningConfirmationItem);
-  }
+  /*
+   * Cleaning confirmation coverage is now published synchronously by the
+   * Cleaning Engine using one stable workflow per reservation. Keeping the
+   * audit-derived confirmation item here would create a second issue per
+   * confirmation attempt and could turn a recoverable decline red before the
+   * automatic backup path is exhausted.
+   *
+   * Cleaner access remains mapped here because the complete-flow audit is the
+   * compatibility source for Access Autopilot outcomes.
+   */
+  void buildCleaningConfirmationOperationalItem;
 
   const cleanerAccessItem =
     buildCleanerAccessOperationalItem(input);
