@@ -193,6 +193,35 @@ function toCanonicalReservation(
     throw new Error("CHANNEX_MISSING_DATES");
   }
 
+  const timezone = firstString(booking?.timezone, booking?.time_zone);
+  const guestName = firstString(
+    booking?.guest_name,
+    booking?.guestName,
+    booking?.customer?.name,
+    booking?.guest?.name
+  );
+  const guestEmail = firstString(
+    booking?.guest_email,
+    booking?.guestEmail,
+    booking?.customer?.email,
+    booking?.guest?.email
+  );
+  const guestPhone = firstString(
+    booking?.guest_phone,
+    booking?.guestPhone,
+    booking?.customer?.phone,
+    booking?.guest?.phone
+  );
+  const adults =
+    Number(booking?.adults ?? booking?.occupancy?.adults ?? 0) || null;
+  const children =
+    Number(booking?.children ?? booking?.occupancy?.children ?? 0) || null;
+  const notes = firstString(
+    booking?.notes,
+    booking?.remarks,
+    booking?.special_request
+  );
+
   return {
     provider: "CHANNEX",
     externalReservationId,
@@ -211,44 +240,17 @@ function toCanonicalReservation(
     ),
     checkIn,
     checkOut,
-    timezone: firstString(booking?.timezone, booking?.time_zone) ?? undefined,
+    ...(timezone ? { timezone } : {}),
     guest: {
-      name:
-        firstString(
-          booking?.guest_name,
-          booking?.guestName,
-          booking?.customer?.name,
-          booking?.guest?.name
-        ) ?? undefined,
-      email:
-        firstString(
-          booking?.guest_email,
-          booking?.guestEmail,
-          booking?.customer?.email,
-          booking?.guest?.email
-        ) ?? undefined,
-      phone:
-        firstString(
-          booking?.guest_phone,
-          booking?.guestPhone,
-          booking?.customer?.phone,
-          booking?.guest?.phone
-        ) ?? undefined,
+      ...(guestName ? { name: guestName } : {}),
+      ...(guestEmail ? { email: guestEmail } : {}),
+      ...(guestPhone ? { phone: guestPhone } : {}),
     },
     party: {
-      adults:
-        Number(booking?.adults ?? booking?.occupancy?.adults ?? 0) ||
-        undefined,
-      children:
-        Number(booking?.children ?? booking?.occupancy?.children ?? 0) ||
-        undefined,
+      ...(adults !== null ? { adults } : {}),
+      ...(children !== null ? { children } : {}),
     },
-    notes:
-      firstString(
-        booking?.notes,
-        booking?.remarks,
-        booking?.special_request
-      ) ?? undefined,
+    ...(notes ? { notes } : {}),
     raw: booking,
   };
 }
@@ -368,43 +370,45 @@ export const channexAdapter: PmsAdapter = {
     return {
       eventType,
       externalEventId,
-      externalReservationId: bookingId ?? undefined,
-      bookingRevision: propertyId
+      ...(bookingId ? { externalReservationId: bookingId } : {}),
+      ...(propertyId
         ? {
-            revisionId: revisionId ?? undefined,
-            bookingId: bookingId ?? undefined,
-            bookingUniqueId:
-              firstString(
-                body?.unique_id,
-                body?.uniqueId,
-                payloadAttributes?.unique_id,
-                payloadAttributes?.uniqueId
-              ) ?? null,
-            otaReservationCode:
-              firstString(
-                body?.ota_reservation_code,
-                body?.otaReservationCode,
-                payloadAttributes?.ota_reservation_code,
-                payloadAttributes?.otaReservationCode
-              ) ?? null,
-            propertyId,
-            liveFeedEventId: liveFeedEventId ?? null,
-            systemId:
-              firstString(
-                body?.system_id,
-                body?.systemId,
-                payloadAttributes?.system_id,
-                payloadAttributes?.systemId
-              ) ?? null,
-            insertedAt:
-              firstString(
-                body?.inserted_at,
-                body?.insertedAt,
-                payloadAttributes?.inserted_at,
-                payloadAttributes?.insertedAt
-              ) ?? null,
+            bookingRevision: {
+              ...(revisionId ? { revisionId } : {}),
+              ...(bookingId ? { bookingId } : {}),
+              bookingUniqueId:
+                firstString(
+                  body?.unique_id,
+                  body?.uniqueId,
+                  payloadAttributes?.unique_id,
+                  payloadAttributes?.uniqueId
+                ) ?? null,
+              otaReservationCode:
+                firstString(
+                  body?.ota_reservation_code,
+                  body?.otaReservationCode,
+                  payloadAttributes?.ota_reservation_code,
+                  payloadAttributes?.otaReservationCode
+                ) ?? null,
+              propertyId,
+              liveFeedEventId: liveFeedEventId ?? null,
+              systemId:
+                firstString(
+                  body?.system_id,
+                  body?.systemId,
+                  payloadAttributes?.system_id,
+                  payloadAttributes?.systemId
+                ) ?? null,
+              insertedAt:
+                firstString(
+                  body?.inserted_at,
+                  body?.insertedAt,
+                  payloadAttributes?.inserted_at,
+                  payloadAttributes?.insertedAt
+                ) ?? null,
+            },
           }
-        : undefined,
+        : {}),
     };
   },
 
