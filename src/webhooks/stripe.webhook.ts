@@ -13,6 +13,9 @@ import {
   handleGuestIdentityStripeEvent,
   reconcileGuestIdentityVerificationSession,
 } from "../services/guest-identity-webhook.service";
+import {
+  syncConnectAccountStatusFromWebhook,
+} from "../services/stripe-connect.service";
 
 const prisma = new PrismaClient();
 
@@ -82,6 +85,35 @@ export function registerStripeWebhook(app: Express) {
                 session,
               });
             }
+
+            break;
+          }
+
+          case "account.updated": {
+            const account =
+              event.data.object as Stripe.Account;
+            const occurredAt = new Date(
+              event.created * 1000
+            );
+            const payoutStatus =
+              await syncConnectAccountStatusFromWebhook(
+                account,
+                occurredAt
+              );
+
+            console.log(
+              "[STRIPE_CONNECT_ACCOUNT_STATUS_SYNCED]",
+              {
+                eventId: event.id,
+                accountId: account.id,
+                organizationId:
+                  payoutStatus?.organizationId ?? null,
+                status:
+                  payoutStatus?.status ?? null,
+                handled: Boolean(payoutStatus),
+                livemode: event.livemode,
+              }
+            );
 
             break;
           }
