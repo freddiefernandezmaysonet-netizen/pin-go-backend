@@ -13,6 +13,7 @@ on:
       - ".github/workflows/mission-control-engine-readiness-typecheck.yml"
   workflow_dispatch:
 
+# Certification may read and compile repository contents, but never mutate them.
 permissions:
   contents: read
 
