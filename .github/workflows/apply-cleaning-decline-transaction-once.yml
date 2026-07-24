@@ -1,0 +1,330 @@
+name: Apply Cleaning Decline Transaction Once
+
+on:
+  push:
+    branches:
+      - agent/mission-control-engine-readiness-v1-backend
+    paths:
+      - ".github/workflows/apply-cleaning-decline-transaction-once.yml"
+
+permissions:
+  contents: write
+
+concurrency:
+  group: mission-control-cleaning-decline-one-shot
+  cancel-in-progress: false
+
+jobs:
+  apply:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - name: Checkout exact sprint branch
+        uses: actions/checkout@v4
+        with:
+          ref: agent/mission-control-engine-readiness-v1-backend
+          fetch-depth: 2
+
+      - name: Verify immutable starting point
+        shell: bash
+        run: |
+          set -euo pipefail
+          expected_parent="a9091bdaaaa4c74cc19f43c2f2930e712d416690"
+          expected_route_blob="3b9d9fcebb086354702472b87306728050baf6bf"
+          workflow_path=".github/workflows/apply-cleaning-decline-transaction-once.yml"
+
+          test "$(git rev-parse HEAD^)" = "$expected_parent"
+          test "$(git hash-object src/routes/cleaning-confirm.routes.ts)" = "$expected_route_blob"
+          test "$(git diff --name-only HEAD^ HEAD)" = "$workflow_path"
+          test -z "$(git status --porcelain)"
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+        env:
+          DATABASE_URL: postgresql://postgres:postgres@localhost:5432/pingo
+
+      - name: Apply exact route change
+        shell: bash
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          from pathlib import Path
+
+          path = Path("src/routes/cleaning-confirm.routes.ts")
+          text = path.read_text()
+
+          old = '''      const declinedAt = new Date();
+                const declineClaim =
+                  await prisma.cleaningConfirmation.updateMany({
+                    where: {
+                      id: confirmation.id,
+                      status: "PENDING",
+                    },
+                    data: {
+                      status: "DECLINED",
+                    },
+                  });
+
+                if (declineClaim.count === 0) {
+                  const currentConfirmation =
+                    await prisma.cleaningConfirmation.findUnique({
+                      where: {
+                        id: confirmation.id,
+                      },
+                      select: {
+                        status: true,
+                      },
+                    });
+
+                  if (currentConfirmation?.status === "DECLINED") {
+                    return res.send(
+                      "This cleaning request was already declined."
+                    );
+                  }
+
+                  return res.status(409).send(
+                    "This cleaning request is no longer pending."
+                  );
+                }
+
+                const allAttempts = await prisma.cleaningConfirmation.findMany({
+                  where: {
+                    reservationId: confirmation.reservationId,
+                  },
+                  select: {
+                    staffMemberId: true,
+                  },
+                });
+
+                const excludeStaffIds = allAttempts.map(
+                  (a) => a.staffMemberId
+                );
+
+                const { selectNextStaffForProperty } = await import(
+                  "../services/staff-selection.service"
+                );
+
+                const nextStaff =
+                  await selectNextStaffForProperty({
+                    propertyId: confirmation.propertyId,
+                    excludeStaffIds,
+                  });
+
+                if (!nextStaff) {
+          '''
+
+          new = '''      const declinedAt = new Date();
+                const allAttempts =
+                  await prisma.cleaningConfirmation.findMany({
+                    where: {
+                      reservationId: confirmation.reservationId,
+                    },
+                    select: {
+                      staffMemberId: true,
+                    },
+                  });
+
+                const excludeStaffIds = allAttempts.map(
+                  (attempt) => attempt.staffMemberId
+                );
+
+                const { selectNextStaffForProperty } = await import(
+                  "../services/staff-selection.service"
+                );
+
+                const nextStaff =
+                  await selectNextStaffForProperty({
+                    propertyId: confirmation.propertyId,
+                    excludeStaffIds,
+                  });
+
+                const crypto = nextStaff
+                  ? await import("crypto")
+                  : null;
+
+                const declineResult =
+                  await prisma.$transaction(async (tx) => {
+                    const declineClaim =
+                      await tx.cleaningConfirmation.updateMany({
+                        where: {
+                          id: confirmation.id,
+                          status: "PENDING",
+                        },
+                        data: {
+                          status: "DECLINED",
+                        },
+                      });
+
+                    if (declineClaim.count === 0) {
+                      return {
+                        claimed: false as const,
+                        nextConfirmation: null,
+                      };
+                    }
+
+                    if (!nextStaff || !crypto) {
+                      return {
+                        claimed: true as const,
+                        nextConfirmation: null,
+                      };
+                    }
+
+                    const existingPendingOther =
+                      await tx.cleaningConfirmation.findFirst({
+                        where: {
+                          reservationId:
+                            confirmation.reservationId,
+                          status: "PENDING",
+                          id: {
+                            not: confirmation.id,
+                          },
+                        },
+                        orderBy: {
+                          createdAt: "desc",
+                        },
+                      });
+
+                    if (existingPendingOther) {
+                      return {
+                        claimed: true as const,
+                        nextConfirmation:
+                          existingPendingOther,
+                      };
+                    }
+
+                    const nextConfirmation =
+                      await tx.cleaningConfirmation.create({
+                        data: {
+                          reservationId:
+                            confirmation.reservationId,
+                          propertyId:
+                            confirmation.propertyId,
+                          staffMemberId: nextStaff.id,
+                          token: crypto.randomBytes(32).toString("hex"),
+                          status: "PENDING",
+                        },
+                      });
+
+                    return {
+                      claimed: true as const,
+                      nextConfirmation,
+                    };
+                  });
+
+                if (!declineResult.claimed) {
+                  const currentConfirmation =
+                    await prisma.cleaningConfirmation.findUnique({
+                      where: {
+                        id: confirmation.id,
+                      },
+                      select: {
+                        status: true,
+                      },
+                    });
+
+                  if (currentConfirmation?.status === "DECLINED") {
+                    return res.send(
+                      "This cleaning request was already declined."
+                    );
+                  }
+
+                  return res.status(409).send(
+                    "This cleaning request is no longer pending."
+                  );
+                }
+
+                if (!nextStaff) {
+          '''
+
+          old_two = '''      const crypto = await import("crypto");
+
+                const nextConfirmation =
+                  await prisma.cleaningConfirmation.create({
+                    data: {
+                      reservationId:
+                        confirmation.reservationId,
+                      propertyId:
+                        confirmation.propertyId,
+                      staffMemberId: nextStaff.id,
+                      token: crypto.randomBytes(32).toString("hex"),
+                      status: "PENDING",
+                    },
+                  });
+
+                await synchronizeCleaningCoverageSafe({
+                  reservationId: confirmation.reservationId,
+                  confirmationId: nextConfirmation.id,
+                  staffMemberId: nextStaff.id,
+          '''
+
+          new_two = '''      const nextConfirmation =
+                  declineResult.nextConfirmation;
+
+                if (!nextConfirmation) {
+                  throw new Error(
+                    "CLEANING_BACKUP_CONFIRMATION_NOT_CREATED"
+                  );
+                }
+
+                await synchronizeCleaningCoverageSafe({
+                  reservationId: confirmation.reservationId,
+                  confirmationId: nextConfirmation.id,
+                  staffMemberId: nextConfirmation.staffMemberId,
+          '''
+
+          if text.count(old) != 1 or text.count(old_two) != 1:
+              raise SystemExit("Expected cleaning decline blocks were not found exactly once")
+
+          path.write_text(
+              text.replace(old, new, 1).replace(old_two, new_two, 1)
+          )
+          PY
+
+          test "$(git diff --name-only)" = "src/routes/cleaning-confirm.routes.ts"
+          git diff --check
+
+      - name: Compile and test Cleaning
+        run: |
+          npx --yes esbuild@0.28.1 src/routes/cleaning-confirm.routes.ts \
+            --bundle \
+            --platform=node \
+            --format=esm \
+            --target=node22 \
+            --packages=external \
+            --log-level=warning \
+            --outfile=/tmp/cleaning-confirm-routes.mjs
+
+          npx tsx --test \
+            src/services/__tests__/cleaning-operational.test.ts
+
+      - name: Commit only the route
+        shell: bash
+        run: |
+          set -euo pipefail
+          branch="agent/mission-control-engine-readiness-v1-backend"
+
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add src/routes/cleaning-confirm.routes.ts
+          git diff --cached --check
+          git commit -m "fix: make cleaning decline fallback transactional"
+          git push origin HEAD:"$branch"
+
+      - name: Remove this one-shot workflow
+        shell: bash
+        run: |
+          set -euo pipefail
+          branch="agent/mission-control-engine-readiness-v1-backend"
+          workflow_path=".github/workflows/apply-cleaning-decline-transaction-once.yml"
+
+          git rm "$workflow_path"
+          git commit -m "chore: remove cleaning decline one-shot workflow"
+          git push origin HEAD:"$branch"
