@@ -84,7 +84,8 @@ jobs:
             src/services/__tests__/cleaning-operational.test.ts \
             src/services/__tests__/communications-operational.test.ts \
             src/services/__tests__/device-health-operational.test.ts \
-            src/services/__tests__/guest-journey-operational.test.ts
+            src/services/__tests__/guest-journey-operational.test.ts \
+            src/services/__tests__/stripe-connect-status.test.ts
 
       - name: Retain Mission Control review artifact
         uses: actions/upload-artifact@v4
@@ -115,10 +116,13 @@ jobs:
             src/services/deviceHealth.service.ts
             src/services/guest-journey-operational.service.ts
             src/services/reservation.reconcile.service.ts
+            src/services/stripe-connect.service.ts
             src/services/__tests__/access-recovery-operational.test.ts
             src/services/__tests__/cleaning-operational.test.ts
             src/services/__tests__/communications-operational.test.ts
             src/services/__tests__/device-health-operational.test.ts
             src/services/__tests__/guest-journey-operational.test.ts
+            src/services/__tests__/stripe-connect-status.test.ts
             src/workers/lodgify.poller.ts
             src/workers/message.retry.worker.ts
+            src/webhooks/stripe.webhook.ts
