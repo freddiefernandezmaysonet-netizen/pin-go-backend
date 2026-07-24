@@ -71,16 +71,69 @@ function applyPropertyTime(
   return fromZonedTime(localDateTime, timezone);
 }
 
+export async function claimWebhookEventForProcessing(
+  db: PrismaClient,
+  eventId: string
+) {
+  const event =
+    await db.webhookEventIngest.findUnique({
+      where: {
+        id: eventId,
+      },
+    });
+
+  if (!event) {
+    return {
+      claimed: false as const,
+      reason: "EVENT_NOT_FOUND" as const,
+      event: null,
+    };
+  }
+
+  const claim =
+    await db.webhookEventIngest.updateMany({
+      where: {
+        id: event.id,
+        status: {
+          in: ["PENDING", "FAILED"],
+        },
+      },
+      data: {
+        status: "PROCESSING",
+        attempts: {
+          increment: 1,
+        },
+      },
+    });
+
+  if (claim.count !== 1) {
+    return {
+      claimed: false as const,
+      reason:
+        "EVENT_ALREADY_CLAIMED_OR_TERMINAL" as const,
+      event: null,
+    };
+  }
+
+  return {
+    claimed: true as const,
+    reason: "EVENT_CLAIMED" as const,
+    event,
+  };
+}
+
 export async function processWebhookEventById(eventId: string) {
-  const ev = await prisma.webhookEventIngest.findUnique({ where: { id: eventId } });
-  if (!ev) return;
+  const claim =
+    await claimWebhookEventForProcessing(
+      prisma,
+      eventId
+    );
 
-  if (ev.status === "PROCESSED" || ev.status === "PROCESSING") return;
+  if (!claim.claimed) {
+    return;
+  }
 
-  await prisma.webhookEventIngest.update({
-    where: { id: ev.id },
-    data: { status: "PROCESSING", attempts: { increment: 1 } },
-  });
+  const ev = claim.event;
 
   try {
     const conn = await prisma.pmsConnection.findUnique({ where: { id: ev.connectionId } });
