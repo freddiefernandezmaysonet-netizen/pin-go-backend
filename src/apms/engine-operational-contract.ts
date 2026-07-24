@@ -177,6 +177,11 @@ export interface ResolveMissionControlEngineStateInput {
   activeSignals: MissionControlOperationalSignal[];
 }
 
+export interface ResolveApmsOperationalEngineInput {
+  engine: unknown;
+  issueCode?: unknown;
+}
+
 const ENGINE_ALIASES: Record<string, ApmsEngineId> = {
   GUESTJOURNEY: "GUEST_JOURNEY",
   GUEST_JOURNEY: "GUEST_JOURNEY",
@@ -197,6 +202,12 @@ const ENGINE_ALIASES: Record<string, ApmsEngineId> = {
   PAYMENT: "FINANCIAL",
   PAYOUTS: "FINANCIAL",
 };
+
+const DEVICE_HEALTH_ISSUE_PREFIXES = [
+  "DEVICE_GATEWAY_",
+  "DEVICE_BATTERY_",
+  "DEVICE_HEALTH_",
+] as const;
 
 function normalizeEngineAlias(value: unknown) {
   return String(value ?? "")
@@ -221,6 +232,33 @@ export function normalizeApmsEngineId(
     ENGINE_ALIASES[normalized.replace(/_/g, "")] ??
     null
   );
+}
+
+/**
+ * Resolves the operational owner of a persisted issue.
+ *
+ * Older gateway readiness producers stored their issue under Access because
+ * gateway availability affects remote access. Mission Control must still
+ * attribute those workflows to Device Health, which owns telemetry and
+ * connectivity recovery. The issue code is therefore authoritative for these
+ * known legacy signals while every other workflow keeps its persisted engine.
+ */
+export function resolveApmsOperationalEngineId(
+  input: ResolveApmsOperationalEngineInput
+): ApmsEngineId | null {
+  const normalizedIssueCode =
+    normalizeEngineAlias(input.issueCode);
+
+  if (
+    DEVICE_HEALTH_ISSUE_PREFIXES.some(
+      (prefix) =>
+        normalizedIssueCode.startsWith(prefix)
+    )
+  ) {
+    return "DEVICE_HEALTH";
+  }
+
+  return normalizeApmsEngineId(input.engine);
 }
 
 export function isHostActionSignal(
