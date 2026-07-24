@@ -276,6 +276,8 @@ async function processRevision(args: {
   acknowledge: (revisionId: string) => Promise<void>;
 }) {
   const lifecycleStartedAt = new Date();
+  const persistenceDecisionId =
+    `distribution-engine:channex-revision:${args.revision.identity.revisionId}:persisted`;
   const listing = await resolveListing({
     connectionId: args.connectionId,
     revision: args.revision,
@@ -288,20 +290,26 @@ async function processRevision(args: {
     );
   }
 
-  const existingReservation = await prisma.reservation.findUnique({
-    where: {
-      propertyId_externalProvider_externalId: {
-        propertyId: listing.propertyId!,
-        externalProvider: "CHANNEX",
-        externalId: args.revision.identity.bookingId,
+  const [existingReservation, existingPersistenceAudit] = await Promise.all([
+    prisma.reservation.findUnique({
+      where: {
+        propertyId_externalProvider_externalId: {
+          propertyId: listing.propertyId!,
+          externalProvider: "CHANNEX",
+          externalId: args.revision.identity.bookingId,
+        },
       },
-    },
-    select: {
-      id: true,
-      externalUpdatedAt: true,
-      lastIngestError: true,
-    },
-  });
+      select: {
+        id: true,
+        externalUpdatedAt: true,
+        lastIngestError: true,
+      },
+    }),
+    prisma.apmsAuditEntry.findUnique({
+      where: { decisionId: persistenceDecisionId },
+      select: { status: true },
+    }),
+  ]);
 
   let reservationId = existingReservation?.id ?? null;
   const cancellationWasRejected =
@@ -329,27 +337,29 @@ async function processRevision(args: {
   );
 
   if (isOlderOrSame) {
-    const completedAt = new Date();
+    if (existingPersistenceAudit?.status !== "SUCCESS") {
+      const completedAt = new Date();
 
-    await persistLifecycleAudit({
-      decisionId: `distribution-engine:channex-revision:${args.revision.identity.revisionId}:persisted`,
-      eventType: "DECISION_SKIPPED",
-      status: "SKIPPED",
-      severity: "INFO",
-      summary:
-        "Pin&Go Connect ignored an older or already persisted booking revision.",
-      reason: "CHANNEX_REVISION_SUPERSEDED_OR_ALREADY_PERSISTED",
-      startedAt: lifecycleStartedAt,
-      completedAt,
-      organizationId: args.organizationId,
-      propertyId: listing.propertyId!,
-      reservationId,
-      eventId: args.eventId,
-      revision: args.revision,
-      applied: false,
-      rule: "CHANNEX_REVISION_CHRONOLOGY_GUARD",
-      label: "Booking Revision Chronology Guard",
-    });
+      await persistLifecycleAudit({
+        decisionId: persistenceDecisionId,
+        eventType: "DECISION_SKIPPED",
+        status: "SKIPPED",
+        severity: "INFO",
+        summary:
+          "Pin&Go Connect ignored an older or already persisted booking revision.",
+        reason: "CHANNEX_REVISION_SUPERSEDED_OR_ALREADY_PERSISTED",
+        startedAt: lifecycleStartedAt,
+        completedAt,
+        organizationId: args.organizationId,
+        propertyId: listing.propertyId!,
+        reservationId,
+        eventId: args.eventId,
+        revision: args.revision,
+        applied: false,
+        rule: "CHANNEX_REVISION_CHRONOLOGY_GUARD",
+        label: "Booking Revision Chronology Guard",
+      });
+    }
   } else {
     const result = await ingestReservation({
       source: resolveReservationSource(args.revision),
@@ -414,7 +424,7 @@ async function processRevision(args: {
     const completedAt = new Date();
 
     await persistLifecycleAudit({
-      decisionId: `distribution-engine:channex-revision:${args.revision.identity.revisionId}:persisted`,
+      decisionId: persistenceDecisionId,
       eventType: "ACTION_COMPLETED",
       status: "SUCCESS",
       severity: "INFO",
