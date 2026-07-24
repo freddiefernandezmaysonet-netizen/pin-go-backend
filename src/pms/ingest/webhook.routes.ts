@@ -1,10 +1,52 @@
 import { Router } from "express";
 import { PrismaClient, PmsProvider } from "@prisma/client";
 import { getAdapter } from "../adapters";
+import type { ParseWebhookResult } from "../adapters/types";
 import { enqueueProcessWebhookEvent } from "../jobs/job.queue";
 
 const prisma = new PrismaClient();
 export const pmsWebhookRouter = Router();
+
+async function resolveChannexConnectionId(propertyId: string) {
+  const listingCandidates = await prisma.pmsListing.findMany({
+    where: {
+      metadata: {
+        path: ["channexPropertyId"],
+        equals: propertyId,
+      },
+    },
+    select: {
+      connectionId: true,
+    },
+    take: 3,
+  });
+
+  const connectionIds = Array.from(
+    new Set(listingCandidates.map((listing) => listing.connectionId))
+  );
+
+  if (connectionIds.length === 0) {
+    return null;
+  }
+
+  const activeConnections = await prisma.pmsConnection.findMany({
+    where: {
+      id: { in: connectionIds },
+      provider: PmsProvider.CHANNEX,
+      status: "ACTIVE",
+    },
+    select: {
+      id: true,
+    },
+    take: 2,
+  });
+
+  if (activeConnections.length > 1) {
+    throw new Error(`CHANNEX_PROPERTY_MAPPING_AMBIGUOUS:${propertyId}`);
+  }
+
+  return activeConnections[0]?.id ?? null;
+}
 
 async function ingestPmsWebhook(args: {
   providerEnum: PmsProvider;
@@ -12,6 +54,7 @@ async function ingestPmsWebhook(args: {
   headers: any;
   body: any;
   rawBody?: Buffer;
+  parsed?: ParseWebhookResult;
 }) {
   const conn = await prisma.pmsConnection.findUnique({
     where: { id: args.connectionId },
@@ -48,13 +91,15 @@ async function ingestPmsWebhook(args: {
     }
   }
 
-  let parsed;
+  let parsed: ParseWebhookResult;
 
   try {
-    parsed = adapter.parseWebhook({
-      headers: args.headers,
-      body: args.body,
-    });
+    parsed =
+      args.parsed ??
+      adapter.parseWebhook({
+        headers: args.headers,
+        body: args.body,
+      });
   } catch (e: any) {
     return {
       status: 400,
@@ -66,13 +111,16 @@ async function ingestPmsWebhook(args: {
     };
   }
 
+  const externalEventId =
+    parsed.externalEventId ?? parsed.bookingRevision?.revisionId ?? null;
+
   try {
     const ev = await prisma.webhookEventIngest.create({
       data: {
         connectionId: conn.id,
         provider: args.providerEnum,
         eventType: parsed.eventType ?? "UNKNOWN",
-        externalEventId: parsed.externalEventId ?? null,
+        externalEventId,
         payloadRaw: args.body,
         status: "PENDING",
       },
@@ -110,32 +158,68 @@ async function ingestPmsWebhook(args: {
 
 pmsWebhookRouter.post("/channex", async (req: any, res) => {
   try {
-    const connection = await prisma.pmsConnection.findFirst({
-      where: {
-        provider: PmsProvider.CHANNEX,
-        status: "ACTIVE",
-      },
-      orderBy: {
-        createdAt: "asc",
-      },
-      select: {
-        id: true,
-      },
-    });
+    const adapter = getAdapter(PmsProvider.CHANNEX);
+    let parsed: ParseWebhookResult;
 
-    if (!connection) {
-      return res.status(500).json({
+    try {
+      parsed = adapter.parseWebhook({
+        headers: req.headers,
+        body: req.body,
+      });
+    } catch (error: any) {
+      return res.status(400).json({
         ok: false,
-        error: "CHANNEX_CONNECTION_NOT_FOUND",
+        error: "INVALID_PAYLOAD",
+        detail: String(error?.message ?? error),
+      });
+    }
+
+    const propertyId = String(
+      parsed.bookingRevision?.propertyId ?? ""
+    ).trim();
+
+    if (!propertyId) {
+      return res.status(400).json({
+        ok: false,
+        error: "CHANNEX_PROPERTY_ID_REQUIRED",
+      });
+    }
+
+    let connectionId: string | null;
+
+    try {
+      connectionId = await resolveChannexConnectionId(propertyId);
+    } catch (error: any) {
+      if (
+        String(error?.message ?? error).startsWith(
+          "CHANNEX_PROPERTY_MAPPING_AMBIGUOUS:"
+        )
+      ) {
+        return res.status(409).json({
+          ok: false,
+          error: "CHANNEX_PROPERTY_MAPPING_AMBIGUOUS",
+          propertyId,
+        });
+      }
+
+      throw error;
+    }
+
+    if (!connectionId) {
+      return res.status(404).json({
+        ok: false,
+        error: "CHANNEX_PROPERTY_MAPPING_NOT_FOUND",
+        propertyId,
       });
     }
 
     const result = await ingestPmsWebhook({
       providerEnum: PmsProvider.CHANNEX,
-      connectionId: connection.id,
+      connectionId,
       headers: req.headers,
       body: req.body,
       rawBody: req.rawBody,
+      parsed,
     });
 
     return res.status(result.status).json(result.body);
