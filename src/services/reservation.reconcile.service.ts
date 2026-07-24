@@ -43,11 +43,40 @@ export async function reconcileReservation(reservationId: string) {
       grantId: string;
       error: string;
     }> = [];
+    const nfcRevokeFailures: Array<{
+      assignmentId: string;
+      error: string;
+    }> = [];
 
     for (const grant of grants) {
       let currentStatus = grant.status;
 
       if (currentStatus === AccessStatus.PENDING) {
+        if (grant.ttlockKeyboardPwdId) {
+          const errorMessage =
+            "PENDING_GRANT_HAS_REMOTE_PASSCODE_REQUIRES_RECONCILIATION";
+
+          await prisma.accessGrant
+            .updateMany({
+              where: {
+                id: grant.id,
+                status: AccessStatus.PENDING,
+              },
+              data: {
+                lastError:
+                  `CANCELLED_REVOKE_FAILED: ${errorMessage}`,
+              },
+            })
+            .catch(() => {});
+
+          accessRevokeFailures.push({
+            grantId: grant.id,
+            error: errorMessage,
+          });
+
+          continue;
+        }
+
         const locallyRevoked =
           await prisma.accessGrant.updateMany({
             where: {
@@ -173,18 +202,32 @@ export async function reconcileReservation(reservationId: string) {
         const ttlockLockId = lock?.ttlockLockId
           ? Number(lock.ttlockLockId)
           : null;
+        const ttlockCardId =
+          a.NfcCard?.ttlockCardId
+            ? Number(a.NfcCard.ttlockCardId)
+            : null;
 
-        if (ttlockLockId && a.NfcCard?.ttlockCardId) {
-          const nowMs = Date.now();
-
-          await ttlockChangeCardPeriod({
-            lockId: ttlockLockId,
-            cardId: Number(a.NfcCard.ttlockCardId),
-            startDate: nowMs - 60_000,
-            endDate: nowMs - 30_000,
-            changeType: 2,
-          });
+        if (!ttlockLockId) {
+          throw new Error(
+            "CANCELLED_NFC_ACTIVE_LOCK_MISSING"
+          );
         }
+
+        if (!ttlockCardId) {
+          throw new Error(
+            "CANCELLED_NFC_TTLOCK_CARD_ID_MISSING"
+          );
+        }
+
+        const nowMs = Date.now();
+
+        await ttlockChangeCardPeriod({
+          lockId: ttlockLockId,
+          cardId: ttlockCardId,
+          startDate: nowMs - 60_000,
+          endDate: nowMs - 30_000,
+          changeType: 2,
+        });
 
         await prisma.nfcAssignment.update({
           where: { id: a.id },
@@ -194,19 +237,32 @@ export async function reconcileReservation(reservationId: string) {
           },
         });
       } catch (e: any) {
+        const errorMessage =
+          String(e?.message ?? e);
+
         await prisma.nfcAssignment.update({
           where: { id: a.id },
           data: {
-            lastError: `CANCELLED_REVOKE_FAILED: ${String(e?.message ?? e)}`,
+            lastError: `CANCELLED_REVOKE_FAILED: ${errorMessage}`,
           },
         }).catch(() => {});
+
+        nfcRevokeFailures.push({
+          assignmentId: a.id,
+          error: errorMessage,
+        });
       }
     }
 
-    if (accessRevokeFailures.length > 0) {
+    if (
+      accessRevokeFailures.length > 0 ||
+      nfcRevokeFailures.length > 0
+    ) {
       throw new Error(
-        `PMS_CANCELLATION_ACCESS_REVOKE_FAILED:${accessRevokeFailures
+        `PMS_CANCELLATION_HARDWARE_REVOKE_FAILED:access=${accessRevokeFailures
           .map((failure) => failure.grantId)
+          .join(",")};nfc=${nfcRevokeFailures
+          .map((failure) => failure.assignmentId)
           .join(",")}`
       );
     }
@@ -271,7 +327,7 @@ const cleaningStartsAt = new Date(
 
 const cleaningEndsAt = new Date(
   cleaningStartsAt.getTime() + cleaningDurationMin * 60_000
-);    
+);     
 
       return (
         a.startsAt.getTime() !== cleaningStartsAt.getTime() ||
@@ -377,13 +433,13 @@ await ttlockChangePasscode({
   keyboardPwdId: Number(g.ttlockKeyboardPwdId),
   startDate: desiredStart.getTime(),
   endDate: desiredEnd.getTime(),
-});   
+});    
  } catch (e: any) {
      console.error("[reconcile][passcode][FAILED]", {
     reservationId: reservation.id,
     grantId: g.id,
     error: String(e?.message ?? e),
-  });      
+  });       
 
           await prisma.accessGrant.update({
             where: { id: g.id },
@@ -420,7 +476,7 @@ const cleaningStartsAt = new Date(
 
 const cleaningEndsAt = new Date(
   cleaningStartsAt.getTime() + cleaningDurationMin * 60_000
-);  
+);   
 
     for (const a of nfcAssignments) {
       if (
