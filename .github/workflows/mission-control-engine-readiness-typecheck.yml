@@ -14,6 +14,7 @@ on:
   workflow_dispatch:
 
 # Certification may read and compile repository contents, but never mutate them.
+# This checkpoint includes the durable PMS recovery worker integration.
 permissions:
   contents: read
 
