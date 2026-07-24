@@ -39,12 +39,18 @@ export type ChannexBookingWebhookEventType =
 
 export type ChannexBookingRevisionIdentity = {
   revisionId: string;
-  bookingId?: string | null;
+  bookingId: string;
   bookingUniqueId?: string | null;
   otaReservationCode?: string | null;
   propertyId: string;
   liveFeedEventId?: string | null;
   insertedAt?: string | null;
+};
+
+export type ChannexBookingRevision = {
+  identity: ChannexBookingRevisionIdentity;
+  reservation: CanonicalReservation;
+  raw: any;
 };
 
 export type ParseWebhookResult = {
@@ -57,7 +63,10 @@ export type ParseWebhookResult = {
 
   // Channex booking lifecycle identity. These identifiers are intentionally
   // separated so a booking ID can never be used as a revision ID.
-  bookingRevision?: ChannexBookingRevisionIdentity;
+  bookingRevision?: Partial<ChannexBookingRevisionIdentity> & {
+    revisionId: string;
+    propertyId: string;
+  };
 };
 
 export type PmsAdapterConnection = {
@@ -93,7 +102,11 @@ export interface PmsAdapter {
   fetchBookingRevision?: (args: {
     connection: PmsAdapterConnection;
     revisionId: string;
-  }) => Promise<CanonicalReservation>;
+  }) => Promise<ChannexBookingRevision>;
+
+  fetchBookingRevisionFeed?: (args: {
+    connection: PmsAdapterConnection;
+  }) => Promise<ChannexBookingRevision[]>;
 
   acknowledgeBookingRevision?: (args: {
     connection: PmsAdapterConnection;
