@@ -110,7 +110,9 @@ function serializeStripeJson(value: unknown) {
   return JSON.parse(JSON.stringify(value));
 }
 
-function mapStripeAccountStatus(account: Stripe.Account): StripeConnectStatus {
+export function mapStripeAccountStatus(
+  account: Stripe.Account
+): StripeConnectStatus {
   const disabledReason = account.requirements?.disabled_reason;
 
   if (disabledReason) {
@@ -125,7 +127,7 @@ function mapStripeAccountStatus(account: Stripe.Account): StripeConnectStatus {
     return STRIPE_CONNECT_STATUS.ONBOARDING_REQUIRED;
   }
 
-    return STRIPE_CONNECT_STATUS.PENDING_VERIFICATION; 
+  return STRIPE_CONNECT_STATUS.PENDING_VERIFICATION;
 }
 
 function toOrganizationPayoutStatus(
@@ -153,7 +155,8 @@ function toOrganizationPayoutStatus(
 
 async function updateOrganizationFromStripeAccount(
   organizationId: string,
-  account: Stripe.Account
+  account: Stripe.Account,
+  syncedAt: Date = new Date()
 ) {
   const status = mapStripeAccountStatus(account);
 
@@ -167,11 +170,102 @@ async function updateOrganizationFromStripeAccount(
       stripeConnectDetailsSubmitted: Boolean(account.details_submitted),
       stripeConnectRequirements: serializeStripeJson(account.requirements),
       stripeConnectDisabledReason: account.requirements?.disabled_reason ?? null,
-      stripeConnectLastSyncedAt: new Date(),
+      stripeConnectLastSyncedAt: syncedAt,
     },
   });
 
   return toOrganizationPayoutStatus(organization);
+}
+
+function getAccountMetadataOrganizationId(
+  account: Stripe.Account
+) {
+  const organizationId = String(
+    account.metadata?.organizationId ?? ""
+  ).trim();
+
+  return organizationId || null;
+}
+
+export async function syncConnectAccountStatusFromWebhook(
+  account: Stripe.Account,
+  occurredAt: Date = new Date()
+) {
+  const organizationByAccount =
+    await prisma.organization.findUnique({
+      where: {
+        stripeConnectAccountId: account.id,
+      },
+    });
+
+  if (organizationByAccount) {
+    return updateOrganizationFromStripeAccount(
+      organizationByAccount.id,
+      account,
+      occurredAt
+    );
+  }
+
+  const metadataOrganizationId =
+    getAccountMetadataOrganizationId(account);
+
+  if (!metadataOrganizationId) {
+    console.warn(
+      "[STRIPE_CONNECT_ACCOUNT_WEBHOOK_SKIPPED]",
+      {
+        accountId: account.id,
+        reason:
+          "ORGANIZATION_REFERENCE_NOT_FOUND",
+      }
+    );
+
+    return null;
+  }
+
+  const organizationByMetadata =
+    await prisma.organization.findUnique({
+      where: {
+        id: metadataOrganizationId,
+      },
+    });
+
+  if (!organizationByMetadata) {
+    console.warn(
+      "[STRIPE_CONNECT_ACCOUNT_WEBHOOK_SKIPPED]",
+      {
+        accountId: account.id,
+        organizationId:
+          metadataOrganizationId,
+        reason: "ORGANIZATION_NOT_FOUND",
+      }
+    );
+
+    return null;
+  }
+
+  if (
+    organizationByMetadata.stripeConnectAccountId &&
+    organizationByMetadata.stripeConnectAccountId !== account.id
+  ) {
+    console.error(
+      "[STRIPE_CONNECT_ACCOUNT_WEBHOOK_OWNERSHIP_MISMATCH]",
+      {
+        accountId: account.id,
+        organizationId:
+          organizationByMetadata.id,
+        configuredAccountId:
+          organizationByMetadata.stripeConnectAccountId,
+      }
+    );
+
+    return null;
+  }
+
+  return updateOrganizationFromStripeAccount(
+    organizationByMetadata.id,
+    account,
+    occurredAt
+  );
 }
 
 async function getOrganizationForConnect(organizationId: string) {
