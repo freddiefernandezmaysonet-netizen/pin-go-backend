@@ -76,3 +76,16 @@ jobs:
 
       - name: Run Mission Control contract tests
         run: npx tsx --test src/apms/__tests__/mission-control-read-model.test.ts
+
+      - name: Retain Mission Control review artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: mission-control-review-${{ github.sha }}
+          retention-days: 7
+          if-no-files-found: error
+          path: |
+            src/apms/engine-operational-contract.ts
+            src/apms/mission-control-read-model.ts
+            src/apms/mission-control.service.ts
+            src/routes/dashboard.mission-control.route.ts
+            src/server.ts
