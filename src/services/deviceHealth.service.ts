@@ -1,5 +1,9 @@
 import { PrismaClient, DeviceHealthStatus } from "@prisma/client";
 
+import {
+  synchronizeDeviceHealthOperationalIssues,
+} from "./device-health-operational.service";
+
 const LOW_BATTERY_THRESHOLD = 30;
 const OFFLINE_MINUTES = 24 * 60;
 
@@ -103,9 +107,13 @@ export async function upsertDeviceHealth(
     select: {
       id: true,
       propertyId: true,
+      isActive: true,
+      locationLabel: true,
+      ttlockLockName: true,
       property: {
         select: {
           id: true,
+          name: true,
           organizationId: true,
         },
       },
@@ -155,7 +163,7 @@ export async function upsertDeviceHealth(
   const healthMessage =
     input.healthOverrideMessage ?? computedHealth.healthMessage;
 
-  return prisma.deviceHealth.upsert({
+  const deviceHealth = await prisma.deviceHealth.upsert({
     where: { lockId: input.lockId },
 
     create: {
@@ -338,4 +346,55 @@ export async function upsertDeviceHealth(
       healthMessage,
     },
   });
+
+  try {
+    await synchronizeDeviceHealthOperationalIssues({
+      prisma,
+      organizationId:
+        lock.property.organizationId,
+      propertyId: lock.property.id,
+      propertyName: lock.property.name,
+      lockId: lock.id,
+      lockName:
+        lock.locationLabel?.trim() ||
+        lock.ttlockLockName?.trim() ||
+        "Property lock",
+      lockIsActive: lock.isActive,
+
+      battery: deviceHealth.battery,
+      batteryLastCheckedAt:
+        deviceHealth.batteryLastCheckedAt,
+      batteryLastSuccessfulAt:
+        deviceHealth.batteryLastSuccessfulAt,
+      batteryLastFailedAt:
+        deviceHealth.batteryLastFailedAt,
+      batteryLastError:
+        deviceHealth.batteryLastError,
+      batteryNextCheckAt:
+        deviceHealth.batteryNextCheckAt,
+
+      occurredAt:
+        input.batteryLastCheckedAt ??
+        input.lastSyncAt ??
+        input.lastEventAt ??
+        new Date(),
+    });
+  } catch (operationalError) {
+    console.error(
+      "[DEVICE_HEALTH_OPERATIONAL_SYNC_ERROR]",
+      {
+        lockId: lock.id,
+        propertyId: lock.property.id,
+        organizationId:
+          lock.property.organizationId,
+        error:
+          operationalError instanceof Error
+            ? operationalError.stack ||
+              operationalError.message
+            : String(operationalError),
+      }
+    );
+  }
+
+  return deviceHealth;
 }
