@@ -13,9 +13,13 @@ import type {
   MissionControlEngineSnapshot,
   MissionControlEvidenceRef,
   MissionControlReadModelV1,
+  MissionControlResolvedWorkflowSummary,
+  MissionControlWorkflowSummary,
 } from "./engine-operational-contract";
 import type {
+  OperationalActionTarget,
   OperationalActor,
+  OperationalResolutionType,
   OperationalWorkflowState,
 } from "./operational-intelligence-types";
 
@@ -40,8 +44,18 @@ export interface MissionControlOperationalProjection {
   workflowState: OperationalWorkflowState;
   actionRequired: boolean;
   responsibleActor: OperationalActor;
+  recommendedAction?: string | null;
   nextAutomaticStep?: string | null;
+  actionTarget?: OperationalActionTarget | null;
+  reservationId?: string | null;
+  reservationNumber?: string | null;
+  propertyId?: string | null;
+  guestName?: string | null;
+  cleanerName?: string | null;
   lastSignalAt: Date | string;
+  resolvedAt?: Date | string | null;
+  resolutionSummary?: string | null;
+  resolutionType?: OperationalResolutionType | null;
   nextAttemptAt?: Date | string | null;
   attempt?: number | null;
   maxAttempts?: number | null;
@@ -57,6 +71,11 @@ export interface BuildMissionControlReadModelInput {
   >;
   operationalItems: MissionControlOperationalProjection[];
 }
+
+type NormalizedOperationalProjection = {
+  engineId: ApmsEngineId;
+  item: MissionControlOperationalProjection;
+};
 
 function getTimestamp(value: Date | string | null | undefined) {
   if (!value) {
@@ -80,6 +99,20 @@ function sortByLatestSignal(
   return (
     getTimestamp(right.lastSignalAt) -
     getTimestamp(left.lastSignalAt)
+  );
+}
+
+function sortByLatestResolution(
+  left: MissionControlOperationalProjection,
+  right: MissionControlOperationalProjection
+) {
+  return (
+    getTimestamp(
+      right.resolvedAt ?? right.lastSignalAt
+    ) -
+    getTimestamp(
+      left.resolvedAt ?? left.lastSignalAt
+    )
   );
 }
 
@@ -115,6 +148,91 @@ function getIssueEvidenceRefs(
   }));
 }
 
+function isHostActionItem(
+  item: MissionControlOperationalProjection
+) {
+  return isHostActionSignal({
+    workflowState: item.workflowState,
+    actionRequired: item.actionRequired,
+    responsibleActor: item.responsibleActor,
+  });
+}
+
+function isAutomaticWorkItem(
+  item: MissionControlOperationalProjection
+) {
+  return isAutomaticWorkSignal({
+    workflowState: item.workflowState,
+    actionRequired: item.actionRequired,
+    responsibleActor: item.responsibleActor,
+  });
+}
+
+function toWorkflowSummary(
+  engineId: ApmsEngineId,
+  item: MissionControlOperationalProjection
+): MissionControlWorkflowSummary {
+  return {
+    issueCode: item.issueCode,
+    engineId,
+    workflowState: item.workflowState,
+
+    title: item.title,
+    issue: item.issue,
+    recommendedAction:
+      item.recommendedAction ?? null,
+    nextAutomaticStep:
+      item.nextAutomaticStep ?? null,
+
+    responsibleActor:
+      item.responsibleActor,
+    actionTarget:
+      item.actionTarget ?? null,
+
+    reservationId:
+      item.reservationId ?? null,
+    reservationNumber:
+      item.reservationNumber ?? null,
+    propertyId:
+      item.propertyId ?? null,
+    guestName:
+      item.guestName ?? null,
+    cleanerName:
+      item.cleanerName ?? null,
+
+    lastSignalAt: item.lastSignalAt,
+    nextAttemptAt:
+      item.nextAttemptAt ?? null,
+    attempt:
+      item.attempt ?? null,
+    maxAttempts:
+      item.maxAttempts ?? null,
+    exhausted:
+      isHostActionItem(item) &&
+      item.exhausted === true,
+  };
+}
+
+function toResolvedWorkflowSummary(
+  engineId: ApmsEngineId,
+  item: MissionControlOperationalProjection
+): MissionControlResolvedWorkflowSummary {
+  return {
+    ...toWorkflowSummary(
+      engineId,
+      item
+    ),
+    resolvedAt:
+      item.resolvedAt ??
+      item.lastSignalAt,
+    resolutionSummary:
+      item.resolutionSummary ?? null,
+    resolutionType:
+      item.resolutionType ?? null,
+    exhausted: false,
+  };
+}
+
 function buildEngineSnapshot(input: {
   engineId: ApmsEngineId;
   readiness: MissionControlEngineReadiness;
@@ -140,20 +258,12 @@ function buildEngineSnapshot(input: {
     activeSignals: signals,
   });
 
-  const hostItems = activeItems.filter((item) =>
-    isHostActionSignal({
-      workflowState: item.workflowState,
-      actionRequired: item.actionRequired,
-      responsibleActor: item.responsibleActor,
-    })
+  const hostItems = activeItems.filter(
+    isHostActionItem
   );
 
-  const automaticItems = activeItems.filter((item) =>
-    isAutomaticWorkSignal({
-      workflowState: item.workflowState,
-      actionRequired: item.actionRequired,
-      responsibleActor: item.responsibleActor,
-    })
+  const automaticItems = activeItems.filter(
+    isAutomaticWorkItem
   );
 
   const primaryHostIssue = getPrimaryIssue(
@@ -279,6 +389,9 @@ export function buildMissionControlReadModel(
     );
   }
 
+  const normalizedOperationalItems:
+    NormalizedOperationalProjection[] = [];
+
   for (const item of input.operationalItems) {
     const engineId = normalizeApmsEngineId(
       item.engine
@@ -291,6 +404,10 @@ export function buildMissionControlReadModel(
     operationalItemsByEngine
       .get(engineId)
       ?.push(item);
+    normalizedOperationalItems.push({
+      engineId,
+      item,
+    });
   }
 
   const engines = APMS_ENGINE_IDS.map(
@@ -306,22 +423,73 @@ export function buildMissionControlReadModel(
       })
   );
 
+  const hostActions =
+    normalizedOperationalItems
+      .filter(
+        ({ item }) =>
+          item.workflowState !== "RESOLVED" &&
+          isHostActionItem(item)
+      )
+      .sort((left, right) =>
+        sortByLatestSignal(
+          left.item,
+          right.item
+        )
+      )
+      .map(({ engineId, item }) =>
+        toWorkflowSummary(
+          engineId,
+          item
+        )
+      );
+
+  const automaticWork =
+    normalizedOperationalItems
+      .filter(
+        ({ item }) =>
+          item.workflowState !== "RESOLVED" &&
+          isAutomaticWorkItem(item)
+      )
+      .sort((left, right) =>
+        sortByLatestSignal(
+          left.item,
+          right.item
+        )
+      )
+      .map(({ engineId, item }) =>
+        toWorkflowSummary(
+          engineId,
+          item
+        )
+      );
+
+  const recentResolutions =
+    normalizedOperationalItems
+      .filter(
+        ({ item }) =>
+          item.workflowState === "RESOLVED"
+      )
+      .sort((left, right) =>
+        sortByLatestResolution(
+          left.item,
+          right.item
+        )
+      )
+      .map(({ engineId, item }) =>
+        toResolvedWorkflowSummary(
+          engineId,
+          item
+        )
+      );
+
   const counts =
     getMissionControlStateCounts(
       engines
     );
-  const hostActionCount = engines.reduce(
-    (total, engine) =>
-      total + engine.hostActionCount,
-    0
-  );
+  const hostActionCount =
+    hostActions.length;
   const autoResolvingCount =
-    engines.reduce(
-      (total, engine) =>
-        total +
-        engine.autoResolvingCount,
-      0
-    );
+    automaticWork.length;
 
   return {
     schemaVersion: 1,
@@ -341,5 +509,8 @@ export function buildMissionControlReadModel(
 
     counts,
     engines,
+    hostActions,
+    automaticWork,
+    recentResolutions,
   };
 }
