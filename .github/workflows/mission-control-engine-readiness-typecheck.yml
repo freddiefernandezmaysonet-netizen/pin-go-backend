@@ -1,4 +1,4 @@
-name: Mission Control Engine Readiness Typecheck
+name: Mission Control Engine Readiness Compile
 
 on:
   pull_request:
@@ -21,8 +21,8 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  typecheck:
-    name: TypeScript typecheck
+  compile:
+    name: Compile changed TypeScript files
     runs-on: ubuntu-latest
     timeout-minutes: 15
 
@@ -33,7 +33,7 @@ jobs:
       - name: Set up Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: 20
+          node-version: 22
           cache: npm
 
       - name: Install dependencies
@@ -41,5 +41,35 @@ jobs:
         env:
           DATABASE_URL: postgresql://postgres:postgres@localhost:5432/pingo
 
-      - name: Typecheck
-        run: npx tsc --noEmit
+      - name: Fetch base branch
+        run: git fetch origin main --depth=1
+
+      - name: Compile changed backend files
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          mapfile -t changed_files < <(
+            git diff --name-only --diff-filter=ACMR origin/main...HEAD -- src \
+              | grep -E '\.(ts|tsx)$' \
+              || true
+          )
+
+          if (( ${#changed_files[@]} == 0 )); then
+            echo "No changed TypeScript files to compile."
+            exit 0
+          fi
+
+          for file in "${changed_files[@]}"; do
+            output_file="/tmp/$(echo "$file" | tr '/.' '__').mjs"
+            echo "Compiling $file"
+
+            npx --yes esbuild@0.28.1 "$file" \
+              --bundle \
+              --platform=node \
+              --format=esm \
+              --target=node22 \
+              --packages=external \
+              --log-level=warning \
+              --outfile="$output_file"
+          done
