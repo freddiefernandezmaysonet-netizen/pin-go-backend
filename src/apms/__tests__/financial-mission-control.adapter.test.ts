@@ -20,6 +20,7 @@ function createInput(
   return {
     publicBookingEnabled: true,
     activeDirectBookingCount: 0,
+    stripePlatformConfigured: true,
     stripeConnectAccountId:
       "acct_test_ready",
     stripeConnectStatus: "READY",
@@ -51,6 +52,28 @@ test("returns no workflow when Financial is not applicable", () => {
   assert.deepEqual(items, []);
 });
 
+test("keeps Financial not applicable when an unused Connect account remains stored", () => {
+  const items =
+    mapFinancialMissionControlOperationalItems(
+      createInput({
+        publicBookingEnabled: false,
+        activeDirectBookingCount: 0,
+        stripeConnectAccountId:
+          "acct_unused",
+        stripeConnectStatus:
+          "RESTRICTED",
+        stripeConnectChargesEnabled:
+          false,
+        stripeConnectPayoutsEnabled:
+          false,
+        stripeConnectDisabledReason:
+          "requirements.past_due",
+      })
+    );
+
+  assert.deepEqual(items, []);
+});
+
 test("returns no workflow when Stripe payouts are fully ready", () => {
   const items =
     mapFinancialMissionControlOperationalItems(
@@ -58,6 +81,29 @@ test("returns no workflow when Stripe payouts are fully ready", () => {
     );
 
   assert.deepEqual(items, []);
+});
+
+test("maps missing Stripe platform credentials to host action", () => {
+  const items =
+    mapFinancialMissionControlOperationalItems(
+      createInput({
+        stripePlatformConfigured: false,
+      })
+    );
+
+  assert.equal(items.length, 1);
+  assert.equal(
+    items[0]?.issueCode,
+    "FINANCIAL_STRIPE_PLATFORM_NOT_CONFIGURED"
+  );
+  assert.equal(
+    items[0]?.workflowState,
+    "ACTION_REQUIRED"
+  );
+  assert.equal(
+    items[0]?.responsibleActor,
+    "HOST"
+  );
 });
 
 test("maps pending verification to automatic waiting without host action", () => {
