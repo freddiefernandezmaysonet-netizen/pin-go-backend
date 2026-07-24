@@ -329,21 +329,49 @@ async function synchronizeBatteryLevelWorkflow(
       input.lockId
     );
 
-  const batteryLow =
-    input.lockIsActive &&
-    input.battery !== null &&
-    input.battery <
-      LOW_BATTERY_THRESHOLD;
+  if (!input.lockIsActive) {
+    return resolveExistingWorkflow({
+      prisma: input.prisma,
+      operationalKey,
+      issueCode:
+        "DEVICE_BATTERY_MONITORING_SUPERSEDED",
+      title:
+        "Lock battery monitoring closed",
+      issue:
+        `Pin&Go closed battery monitoring because ${input.lockName} is inactive.`,
+      resolutionCode:
+        "DEVICE_LOCK_INACTIVE",
+      resolutionSummary:
+        "Pin&Go closed the battery workflow because the lock is inactive.",
+      organizationId:
+        input.organizationId,
+      propertyId: input.propertyId,
+      lockId: input.lockId,
+      lockName: input.lockName,
+      propertyName:
+        input.propertyName,
+      battery: input.battery,
+      occurredAt,
+    });
+  }
 
-  if (batteryLow) {
+  if (input.battery === null) {
+    return {
+      applied: false as const,
+      reason:
+        "BATTERY_LEVEL_UNKNOWN" as const,
+    };
+  }
+
+  const battery = Number(input.battery);
+
+  if (battery < LOW_BATTERY_THRESHOLD) {
     const reservation =
       await loadOperationalReservation(
         input,
         occurredAt
       );
 
-    const battery =
-      Number(input.battery);
     const critical =
       battery <
       CRITICAL_BATTERY_THRESHOLD;
@@ -363,7 +391,7 @@ async function synchronizeBatteryLevelWorkflow(
             `${input.lockName} at ${input.propertyName} reports ${battery}% battery.`,
           operationalImpact:
             reservation
-              ? `A guest stay is active or begins within 24 hours, and lock reliability may be affected.`
+              ? "A guest stay is active or begins within 24 hours, and lock reliability may be affected."
               : "Lock reliability may be affected if the batteries are not replaced.",
           recommendedAction:
             "Replace the lock batteries and allow Pin&Go to confirm the new battery level.",
@@ -452,32 +480,22 @@ async function synchronizeBatteryLevelWorkflow(
     prisma: input.prisma,
     operationalKey,
     issueCode:
-      input.lockIsActive
-        ? "DEVICE_BATTERY_LEVEL_HEALTHY"
-        : "DEVICE_BATTERY_MONITORING_SUPERSEDED",
+      "DEVICE_BATTERY_LEVEL_HEALTHY",
     title:
-      input.lockIsActive
-        ? "Lock battery level restored"
-        : "Lock battery monitoring closed",
+      "Lock battery level restored",
     issue:
-      input.lockIsActive
-        ? `Pin&Go confirmed that ${input.lockName} is no longer below the battery replacement threshold.`
-        : `Pin&Go closed battery monitoring because ${input.lockName} is inactive.`,
+      `Pin&Go confirmed that ${input.lockName} is no longer below the battery replacement threshold.`,
     resolutionCode:
-      input.lockIsActive
-        ? "DEVICE_BATTERY_REPLACED"
-        : "DEVICE_LOCK_INACTIVE",
+      "DEVICE_BATTERY_REPLACED",
     resolutionSummary:
-      input.lockIsActive
-        ? "Pin&Go confirmed the lock battery returned to a healthy level."
-        : "Pin&Go closed the battery workflow because the lock is inactive.",
+      "Pin&Go confirmed the lock battery returned to a healthy level.",
     organizationId:
       input.organizationId,
     propertyId: input.propertyId,
     lockId: input.lockId,
     lockName: input.lockName,
     propertyName: input.propertyName,
-    battery: input.battery,
+    battery,
     occurredAt,
   });
 }
