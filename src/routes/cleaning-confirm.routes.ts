@@ -556,18 +556,104 @@ cleaningConfirmRouter.post(
 }
 
       const declinedAt = new Date();
-      const declineClaim =
-        await prisma.cleaningConfirmation.updateMany({
+      const allAttempts =
+        await prisma.cleaningConfirmation.findMany({
           where: {
-            id: confirmation.id,
-            status: "PENDING",
+            reservationId: confirmation.reservationId,
           },
-          data: {
-            status: "DECLINED",
+          select: {
+            staffMemberId: true,
           },
         });
 
-      if (declineClaim.count === 0) {
+      const excludeStaffIds = allAttempts.map(
+        (attempt) => attempt.staffMemberId
+      );
+
+      const { selectNextStaffForProperty } = await import(
+        "../services/staff-selection.service"
+      );
+
+      const nextStaff =
+        await selectNextStaffForProperty({
+          propertyId: confirmation.propertyId,
+          excludeStaffIds,
+        });
+
+      const crypto = nextStaff
+        ? await import("crypto")
+        : null;
+
+      const declineResult =
+        await prisma.$transaction(async (tx) => {
+          const declineClaim =
+            await tx.cleaningConfirmation.updateMany({
+              where: {
+                id: confirmation.id,
+                status: "PENDING",
+              },
+              data: {
+                status: "DECLINED",
+              },
+            });
+
+          if (declineClaim.count === 0) {
+            return {
+              claimed: false as const,
+              nextConfirmation: null,
+            };
+          }
+
+          if (!nextStaff || !crypto) {
+            return {
+              claimed: true as const,
+              nextConfirmation: null,
+            };
+          }
+
+          const existingPendingOther =
+            await tx.cleaningConfirmation.findFirst({
+              where: {
+                reservationId:
+                  confirmation.reservationId,
+                status: "PENDING",
+                id: {
+                  not: confirmation.id,
+                },
+              },
+              orderBy: {
+                createdAt: "desc",
+              },
+            });
+
+          if (existingPendingOther) {
+            return {
+              claimed: true as const,
+              nextConfirmation:
+                existingPendingOther,
+            };
+          }
+
+          const nextConfirmation =
+            await tx.cleaningConfirmation.create({
+              data: {
+                reservationId:
+                  confirmation.reservationId,
+                propertyId:
+                  confirmation.propertyId,
+                staffMemberId: nextStaff.id,
+                token: crypto.randomBytes(32).toString("hex"),
+                status: "PENDING",
+              },
+            });
+
+          return {
+            claimed: true as const,
+            nextConfirmation,
+          };
+        });
+
+      if (!declineResult.claimed) {
         const currentConfirmation =
           await prisma.cleaningConfirmation.findUnique({
             where: {
@@ -588,29 +674,6 @@ cleaningConfirmRouter.post(
           "This cleaning request is no longer pending."
         );
       }
-
-      const allAttempts = await prisma.cleaningConfirmation.findMany({
-        where: {
-          reservationId: confirmation.reservationId,
-        },
-        select: {
-          staffMemberId: true,
-        },
-      });
-
-      const excludeStaffIds = allAttempts.map(
-        (a) => a.staffMemberId
-      );
-
-      const { selectNextStaffForProperty } = await import(
-        "../services/staff-selection.service"
-      );
-
-      const nextStaff =
-        await selectNextStaffForProperty({
-          propertyId: confirmation.propertyId,
-          excludeStaffIds,
-        });
 
       if (!nextStaff) {
         await synchronizeCleaningCoverageSafe({
@@ -637,25 +700,19 @@ cleaningConfirmRouter.post(
         );
       }
 
-      const crypto = await import("crypto");
-
       const nextConfirmation =
-        await prisma.cleaningConfirmation.create({
-          data: {
-            reservationId:
-              confirmation.reservationId,
-            propertyId:
-              confirmation.propertyId,
-            staffMemberId: nextStaff.id,
-            token: crypto.randomBytes(32).toString("hex"),
-            status: "PENDING",
-          },
-        });
+        declineResult.nextConfirmation;
+
+      if (!nextConfirmation) {
+        throw new Error(
+          "CLEANING_BACKUP_CONFIRMATION_NOT_CREATED"
+        );
+      }
 
       await synchronizeCleaningCoverageSafe({
         reservationId: confirmation.reservationId,
         confirmationId: nextConfirmation.id,
-        staffMemberId: nextStaff.id,
+        staffMemberId: nextConfirmation.staffMemberId,
         state: "BACKUP_ASSIGNED",
         attemptedCleanerCount: excludeStaffIds.length,
         reason: "CLEANER_DECLINED_BACKUP_ASSIGNED",
