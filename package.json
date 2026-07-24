@@ -12,6 +12,7 @@
     "worker:message-retry": "tsx src/workers/message.retry.worker.ts",
     "worker:lodgify": "tsx src/workers/lodgify.poller.ts",
     "worker:dynamic-pricing-sync": "tsx src/workers/dynamic-pricing-sync.worker.ts",
+    "worker:pms-webhook-recovery": "tsx src/workers/pms-webhook-recovery.worker.ts",
     "prisma:migrate": "prisma migrate dev",
     "prisma:studio": "prisma studio",
     "seed": "tsx prisma/seed/seed.ts",
