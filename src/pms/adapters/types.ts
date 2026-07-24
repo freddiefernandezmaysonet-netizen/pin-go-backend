@@ -11,7 +11,7 @@ export type CanonicalReservation = {
   listingName?: string | null;
   status: CanonicalReservationStatus;
 
-  checkIn: string;  // ISO
+  checkIn: string; // ISO
   checkOut: string; // ISO
   timezone?: string;
 
@@ -30,37 +30,73 @@ export type CanonicalReservation = {
   raw?: any; // optional normalized slice for debugging (not stored unless you want)
 };
 
+export type ChannexBookingWebhookEventType =
+  | "booking"
+  | "booking_new"
+  | "booking_modification"
+  | "booking_cancellation"
+  | "non_acked_booking";
+
+export type ChannexBookingRevisionIdentity = {
+  revisionId: string;
+  bookingId?: string | null;
+  bookingUniqueId?: string | null;
+  otaReservationCode?: string | null;
+  propertyId: string;
+  liveFeedEventId?: string | null;
+  insertedAt?: string | null;
+};
+
 export type ParseWebhookResult = {
   eventType: string;
   externalEventId?: string | null;
 
-  // Some providers include full reservation data; others only IDs
+  // Some providers include full reservation data; others only IDs.
   reservation?: CanonicalReservation;
-  externalReservationId?: string; // if only ID
+  externalReservationId?: string;
+
+  // Channex booking lifecycle identity. These identifiers are intentionally
+  // separated so a booking ID can never be used as a revision ID.
+  bookingRevision?: ChannexBookingRevisionIdentity;
+};
+
+export type PmsAdapterConnection = {
+  id?: string;
+  credentialsEncrypted?: string | null;
+  metadata?: any;
 };
 
 export interface PmsAdapter {
   provider: string;
 
-  // Validate signature if provider supports it
+  // Validate signature if provider supports it.
   verifySignature?: (args: {
     secret: string;
     rawBody: Buffer;
     headers: Record<string, string | string[] | undefined>;
   }) => boolean;
 
-  // Parse webhook payload into canonical info or externalReservationId
+  // Parse webhook payload into canonical info or provider-specific identity.
   parseWebhook: (args: {
     headers: Record<string, string | string[] | undefined>;
     body: any;
   }) => ParseWebhookResult;
 
-  // Optional: fetch full reservation by ID (API pull)
+  // Optional: fetch full reservation by stable provider reservation ID.
   fetchReservation?: (args: {
-    connection: {
-      credentialsEncrypted?: string | null;
-      metadata?: any;
-    };
+    connection: PmsAdapterConnection;
     externalReservationId: string;
   }) => Promise<CanonicalReservation>;
+
+  // Channex-specific booking revision lifecycle operations. Other adapters do
+  // not need to implement these optional methods.
+  fetchBookingRevision?: (args: {
+    connection: PmsAdapterConnection;
+    revisionId: string;
+  }) => Promise<CanonicalReservation>;
+
+  acknowledgeBookingRevision?: (args: {
+    connection: PmsAdapterConnection;
+    revisionId: string;
+  }) => Promise<void>;
 }
