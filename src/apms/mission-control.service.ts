@@ -22,6 +22,7 @@ const RECENT_RESOLUTION_WINDOW_MS =
   7 * 24 * 60 * 60 * 1000;
 
 const MAX_RECENT_RESOLUTIONS = 100;
+const MAX_ACTIVE_ISSUES = 250;
 
 export class MissionControlOrganizationNotFoundError extends Error {
   readonly code =
@@ -237,11 +238,7 @@ function buildReadiness(input: {
     );
 
   const revenueProperties =
-    activeProperties.filter(
-      (property) =>
-        property.dynamicPricingEnabled ||
-        property.autonomousPricingEnabled
-    );
+    activeProperties;
 
   const distributionProperties =
     activeProperties.filter(
@@ -370,7 +367,19 @@ function buildReadiness(input: {
   const financialApplicable =
     input.organization
       .publicBookingEnabled ||
-    input.activeDirectBookingCount > 0;
+    input.activeDirectBookingCount > 0 ||
+    Boolean(
+      input.organization
+        .stripeConnectAccountId
+    );
+
+  const stripeConnectReady =
+    input.organization
+      .stripeConnectStatus === "READY" &&
+    input.organization
+      .stripeConnectChargesEnabled &&
+    input.organization
+      .stripeConnectPayoutsEnabled;
 
   const financialConfigured =
     financialApplicable &&
@@ -378,7 +387,8 @@ function buildReadiness(input: {
     Boolean(
       input.organization
         .stripeConnectAccountId
-    );
+    ) &&
+    stripeConnectReady;
 
   const ttlockDependency = dependency({
     code: "TTLOCK_AUTH",
@@ -629,17 +639,31 @@ function buildReadiness(input: {
         configured: revenueConfigured,
         applicable: revenueApplicable,
         reasonCode: !revenueApplicable
-          ? "REVENUE_DISABLED"
+          ? "REVENUE_NOT_APPLICABLE"
           : revenueConfigured
           ? "REVENUE_CONFIGURED"
           : "REVENUE_NOT_CONFIGURED",
         summary: !revenueApplicable
-          ? "Autonomous or dynamic pricing is disabled for all active properties."
+          ? "No active property currently requires revenue pricing."
           : revenueConfigured
-          ? "Revenue pricing guardrails have a base nightly rate for every enabled property."
-          : "Revenue requires a base nightly rate for every enabled property.",
+          ? "Revenue pricing guardrails have a base nightly rate for every active property."
+          : "Revenue requires a base nightly rate for every active property.",
         staleAt: null,
-        dependencies: [],
+        dependencies: [
+          dependency({
+            code: "BASE_NIGHTLY_RATE",
+            state: revenueConfigured
+              ? "AVAILABLE"
+              : revenueApplicable
+              ? "UNAVAILABLE"
+              : "NOT_APPLICABLE",
+            summary: revenueConfigured
+              ? "Every active property has a base nightly rate."
+              : revenueApplicable
+              ? "One or more active properties are missing a base nightly rate."
+              : "Revenue pricing is not applicable.",
+          }),
+        ],
       }
     ),
 
@@ -674,24 +698,14 @@ function buildReadiness(input: {
           }),
           dependency({
             code: "STRIPE_CONNECT",
-            state:
-              input.organization
-                .stripeConnectStatus ===
-                "READY" &&
-              input.organization
-                .stripeConnectChargesEnabled &&
-              input.organization
-                .stripeConnectPayoutsEnabled
-                ? "AVAILABLE"
-                : financialApplicable
-                ? "DEGRADED"
-                : "NOT_APPLICABLE",
-            summary:
-              input.organization
-                .stripeConnectStatus ===
-                "READY"
-                ? "The host payout account is ready."
-                : `The host payout account is ${input.organization.stripeConnectStatus.toLowerCase().replace(/_/g, " ")}.`,
+            state: stripeConnectReady
+              ? "AVAILABLE"
+              : financialApplicable
+              ? "DEGRADED"
+              : "NOT_APPLICABLE",
+            summary: stripeConnectReady
+              ? "The host payout account is ready."
+              : `The host payout account is ${input.organization.stripeConnectStatus.toLowerCase().replace(/_/g, " ")}.`,
             lastCheckedAt:
               input.organization
                 .stripeConnectLastSyncedAt,
@@ -928,6 +942,7 @@ export async function getOrganizationMissionControl(
           lastSignalAt: "desc",
         },
       ],
+      take: MAX_ACTIVE_ISSUES,
       select: {
         id: true,
         issueCode: true,
@@ -998,8 +1013,18 @@ export async function getOrganizationMissionControl(
     }),
     prisma.apmsAuditEntry.findMany({
       where: {
-        organizationId,
         status: "SUCCESS",
+        OR: [
+          {
+            organizationId,
+          },
+          {
+            organizationId: null,
+            propertyId: {
+              in: propertyIds,
+            },
+          },
+        ],
       },
       orderBy: [
         {
@@ -1127,6 +1152,7 @@ export async function getOrganizationMissionControl(
         nextAttemptAt:
           readMetadataDate(metadata, [
             "nextAttemptAt",
+            "nextCheckAt",
             "recoveryNextAttemptAt",
           ]),
         attempt:
@@ -1142,7 +1168,13 @@ export async function getOrganizationMissionControl(
           readMetadataBoolean(metadata, [
             "exhausted",
             "recoveryExhausted",
-          ]),
+          ]) ||
+          Boolean(
+            readMetadataDate(metadata, [
+              "exhaustedAt",
+              "recoveryExhaustedAt",
+            ])
+          ),
       };
     });
 
