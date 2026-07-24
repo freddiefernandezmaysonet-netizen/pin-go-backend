@@ -499,7 +499,7 @@ if ((result as any).cleaningConfirmation) {
   await reconcileReservation(
     (result as any).reservationId
   );
-}   
+}    
     console.log("[pms] processed", {
       eventId: ev.id,
       reservationId: (result as any).reservationId,
