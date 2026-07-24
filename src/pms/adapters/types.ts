@@ -44,6 +44,7 @@ export type ChannexBookingRevisionIdentity = {
   otaReservationCode?: string | null;
   propertyId: string;
   liveFeedEventId?: string | null;
+  systemId?: string | null;
   insertedAt?: string | null;
 };
 
@@ -61,10 +62,10 @@ export type ParseWebhookResult = {
   reservation?: CanonicalReservation;
   externalReservationId?: string;
 
-  // Channex booking lifecycle identity. These identifiers are intentionally
-  // separated so a booking ID can never be used as a revision ID.
+  // Channex booking lifecycle signal. A webhook can provide a concrete
+  // revision ID or only a property ID, in which case the Feed is the recovery
+  // source. Booking, revision and source-message identifiers stay separate.
   bookingRevision?: Partial<ChannexBookingRevisionIdentity> & {
-    revisionId: string;
     propertyId: string;
   };
 };
