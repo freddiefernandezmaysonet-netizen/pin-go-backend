@@ -209,8 +209,8 @@ function isNonRetryableSmsError(value: unknown) {
 }
 
 async function processRetries() {
-  const finalizedExhaustedSmsMessages =
-    await prisma.messageLog.updateMany({
+  const exhaustedSmsMessages =
+    await prisma.messageLog.findMany({
       where: {
         channel: "sms",
         status: "FAILED",
@@ -218,15 +218,61 @@ async function processRetries() {
           gte: MAX_RETRIES,
         },
       },
-      data: {
-        status: "FAILED_FINAL",
+      take: BATCH_SIZE,
+      orderBy: {
+        createdAt: "asc",
       },
     });
 
-  if (finalizedExhaustedSmsMessages.count > 0) {
+  let finalizedExhaustedCount = 0;
+
+  for (const message of exhaustedSmsMessages) {
+    const occurredAt = new Date();
+
+    const finalized =
+      await prisma.messageLog.updateMany({
+        where: {
+          id: message.id,
+          status: "FAILED",
+          retryCount: {
+            gte: MAX_RETRIES,
+          },
+        },
+        data: {
+          status: "FAILED_FINAL",
+        },
+      });
+
+    if (finalized.count !== 1) {
+      continue;
+    }
+
+    finalizedExhaustedCount += 1;
+
+    await recordCommunicationFailureSafe({
+      messageId: message.id,
+      channel: "sms",
+      messageType: "SMS",
+      reservationId:
+        message.reservationId ?? null,
+      propertyId:
+        message.propertyId ?? null,
+      organizationId:
+        message.organizationId ?? null,
+      retryCount: message.retryCount,
+      error:
+        message.error ??
+        "SMS retry budget exhausted",
+      failureKind:
+        "RETRY_BUDGET_EXHAUSTED",
+      occurredAt,
+    });
+  }
+
+  if (finalizedExhaustedCount > 0) {
     errLog("SMS retry budget reconciled", {
       finalizedCount:
-        finalizedExhaustedSmsMessages.count,
+        finalizedExhaustedCount,
       maxRetries: MAX_RETRIES,
     });
   }
