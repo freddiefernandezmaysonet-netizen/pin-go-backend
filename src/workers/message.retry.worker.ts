@@ -6,6 +6,10 @@ import { sendSms } from "../integrations/twilio/twilio.client";
 import {
   decryptAccessCode,
 } from "../services/access-code-crypto.service";
+import {
+  recordCommunicationDeliveryFailure,
+  resolveCommunicationDeliveryIssue,
+} from "../services/communications-operational.service";
 
 import {
   sendGuestAccessPasscodeEmail,
@@ -28,6 +32,93 @@ function errLog(...args: any[]) {
 function toErrString(e: unknown) {
   if (e instanceof Error) return `${e.name}: ${e.message}`;
   return String(e);
+}
+
+type CommunicationLifecycleContext = {
+  messageId: string;
+  channel: "sms" | "email";
+  messageType: string;
+  reservationId: string | null;
+  propertyId: string | null;
+  organizationId: string | null;
+};
+
+async function recordCommunicationFailureSafe(
+  input: CommunicationLifecycleContext & {
+    retryCount: number;
+    error: unknown;
+    failureKind:
+      | "RETRYABLE"
+      | "NON_RETRYABLE"
+      | "RETRY_BUDGET_EXHAUSTED";
+    nextAttemptAt?: Date | null;
+    occurredAt: Date;
+  }
+) {
+  try {
+    await recordCommunicationDeliveryFailure({
+      prisma,
+      messageId: input.messageId,
+      channel: input.channel,
+      messageType: input.messageType,
+      reservationId: input.reservationId,
+      propertyId: input.propertyId,
+      organizationId: input.organizationId,
+      retryCount: input.retryCount,
+      maxRetries: MAX_RETRIES,
+      error: input.error,
+      failureKind: input.failureKind,
+      nextAttemptAt:
+        input.nextAttemptAt ?? null,
+      occurredAt: input.occurredAt,
+    });
+  } catch (operationalError) {
+    errLog(
+      "Communications operational failure could not be persisted",
+      {
+        messageId: input.messageId,
+        channel: input.channel,
+        messageType: input.messageType,
+        retryCount: input.retryCount,
+        failureKind: input.failureKind,
+        error:
+          toErrString(operationalError),
+      }
+    );
+  }
+}
+
+async function resolveCommunicationIssueSafe(
+  input: CommunicationLifecycleContext & {
+    retryCount: number;
+    occurredAt: Date;
+  }
+) {
+  try {
+    await resolveCommunicationDeliveryIssue({
+      prisma,
+      messageId: input.messageId,
+      channel: input.channel,
+      messageType: input.messageType,
+      reservationId: input.reservationId,
+      propertyId: input.propertyId,
+      organizationId: input.organizationId,
+      retryCount: input.retryCount,
+      occurredAt: input.occurredAt,
+    });
+  } catch (operationalError) {
+    errLog(
+      "Communications operational resolution could not be persisted",
+      {
+        messageId: input.messageId,
+        channel: input.channel,
+        messageType: input.messageType,
+        retryCount: input.retryCount,
+        error:
+          toErrString(operationalError),
+      }
+    );
+  }
 }
 
 function parseGuestAccessEmailRetryPayload(
@@ -167,12 +258,33 @@ async function processRetries() {
       });
 
       if (isNonRetryableSmsError(msg.error)) {
+        const occurredAt = new Date();
+        const nonRetryableError =
+          msg.error ??
+          "Non-retryable SMS delivery error";
+
         await prisma.messageLog.update({
           where: { id: msg.id },
           data: {
             status: "FAILED_FINAL",
-            error: msg.error ?? "Non-retryable SMS delivery error",
+            error: nonRetryableError,
           },
+        });
+
+        await recordCommunicationFailureSafe({
+          messageId: msg.id,
+          channel: "sms",
+          messageType: "SMS",
+          reservationId:
+            msg.reservationId ?? null,
+          propertyId:
+            msg.propertyId ?? null,
+          organizationId:
+            msg.organizationId ?? null,
+          retryCount: msg.retryCount,
+          error: nonRetryableError,
+          failureKind: "NON_RETRYABLE",
+          occurredAt,
         });
 
         errLog("SMS retry stopped: non-retryable error", {
@@ -186,6 +298,7 @@ async function processRetries() {
       }
 
       const sent = await sendSms(msg.to, msg.body);
+      const resolvedAt = new Date();
 
       await prisma.messageLog.update({
         where: { id: msg.id },
@@ -195,6 +308,20 @@ async function processRetries() {
           retryCount: { increment: 1 },
           error: null,
         },
+      });
+
+      await resolveCommunicationIssueSafe({
+        messageId: msg.id,
+        channel: "sms",
+        messageType: "SMS",
+        reservationId:
+          msg.reservationId ?? null,
+        propertyId:
+          msg.propertyId ?? null,
+        organizationId:
+          msg.organizationId ?? null,
+        retryCount: msg.retryCount + 1,
+        occurredAt: resolvedAt,
       });
 
       log("SMS retry success", {
@@ -208,6 +335,8 @@ async function processRetries() {
       const finalFailure =
         nonRetryable ||
         nextRetryCount >= MAX_RETRIES;
+      const occurredAt = new Date();
+      let stateApplied = false;
 
       try {
         await prisma.messageLog.update({
@@ -220,10 +349,38 @@ async function processRetries() {
             error: err,
           },
         });
+        stateApplied = true;
       } catch (updateErr) {
         errLog("SMS retry update failed", {
           id: msg.id,
           err: toErrString(updateErr),
+        });
+      }
+
+      if (stateApplied) {
+        await recordCommunicationFailureSafe({
+          messageId: msg.id,
+          channel: "sms",
+          messageType: "SMS",
+          reservationId:
+            msg.reservationId ?? null,
+          propertyId:
+            msg.propertyId ?? null,
+          organizationId:
+            msg.organizationId ?? null,
+          retryCount: nextRetryCount,
+          error: err,
+          failureKind: nonRetryable
+            ? "NON_RETRYABLE"
+            : finalFailure
+            ? "RETRY_BUDGET_EXHAUSTED"
+            : "RETRYABLE",
+          nextAttemptAt: finalFailure
+            ? null
+            : new Date(
+                occurredAt.getTime() + POLL_MS
+              ),
+          occurredAt,
         });
       }
 
@@ -404,6 +561,7 @@ async function processGuestAccessEmailRetries() {
         (sent as any)?.data?.id ??
         (sent as any)?.id ??
         null;
+      const resolvedAt = new Date();
 
       await prisma.messageLog.update({
         where: {
@@ -417,6 +575,23 @@ async function processGuestAccessEmailRetries() {
           },
           error: null,
         },
+      });
+
+      await resolveCommunicationIssueSafe({
+        messageId: message.id,
+        channel: "email",
+        messageType:
+          "GUEST_ACCESS_PASSCODE",
+        reservationId:
+          grant.reservation.id,
+        propertyId:
+          grant.reservation.property.id,
+        organizationId:
+          grant.reservation.property
+            .organizationId,
+        retryCount:
+          message.retryCount + 1,
+        occurredAt: resolvedAt,
       });
 
       try {
@@ -484,6 +659,8 @@ async function processGuestAccessEmailRetries() {
       const finalFailure =
         nonRetryable ||
         nextRetryCount >= MAX_RETRIES;
+      const occurredAt = new Date();
+      let stateApplied = false;
 
       try {
         await prisma.messageLog.update({
@@ -500,6 +677,7 @@ async function processGuestAccessEmailRetries() {
             error: errorMessage,
           },
         });
+        stateApplied = true;
       } catch (updateError) {
         errLog(
           "Guest access email retry update failed",
@@ -509,6 +687,34 @@ async function processGuestAccessEmailRetries() {
               toErrString(updateError),
           }
         );
+      }
+
+      if (stateApplied) {
+        await recordCommunicationFailureSafe({
+          messageId: message.id,
+          channel: "email",
+          messageType:
+            "GUEST_ACCESS_PASSCODE",
+          reservationId:
+            message.reservationId ?? null,
+          propertyId:
+            message.propertyId ?? null,
+          organizationId:
+            message.organizationId ?? null,
+          retryCount: nextRetryCount,
+          error: errorMessage,
+          failureKind: nonRetryable
+            ? "NON_RETRYABLE"
+            : finalFailure
+            ? "RETRY_BUDGET_EXHAUSTED"
+            : "RETRYABLE",
+          nextAttemptAt: finalFailure
+            ? null
+            : new Date(
+                occurredAt.getTime() + POLL_MS
+              ),
+          occurredAt,
+        });
       }
 
       errLog(
