@@ -74,8 +74,11 @@ jobs:
               --outfile="$output_file"
           done
 
-      - name: Run Mission Control contract tests
-        run: npx tsx --test src/apms/__tests__/mission-control-read-model.test.ts
+      - name: Run Mission Control and Access recovery tests
+        run: |
+          npx tsx --test \
+            src/apms/__tests__/mission-control-read-model.test.ts \
+            src/services/__tests__/access-recovery-operational.test.ts
 
       - name: Retain Mission Control review artifact
         uses: actions/upload-artifact@v4
@@ -89,3 +92,6 @@ jobs:
             src/apms/mission-control.service.ts
             src/routes/dashboard.mission-control.route.ts
             src/server.ts
+            src/services/access-recovery-operational.service.ts
+            src/services/access-recovery.service.ts
+            src/services/__tests__/access-recovery-operational.test.ts
