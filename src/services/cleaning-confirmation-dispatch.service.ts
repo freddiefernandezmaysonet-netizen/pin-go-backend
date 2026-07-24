@@ -2,12 +2,54 @@ import { PrismaClient } from "@prisma/client";
 import crypto from "crypto";
 import { sendSms } from "../integrations/twilio/twilio.client";
 import { selectNextStaffForProperty } from "./staff-selection.service";
+import {
+  synchronizeCleaningCoverageOperationalIssue,
+} from "./cleaning-operational.service";
+import type {
+  CleaningCoverageOperationalState,
+} from "./cleaning-operational.service";
 
 const DISPATCH_TYPE = "CLEANING_CONFIRMATION";
 const SEND_START_HOUR = 8;
 const SEND_END_HOUR = 18;
 const FAILED_RETRY_COOLDOWN_MINUTES = 15;
 const FALLBACK_AFTER_MINUTES = 120;
+
+async function synchronizeCleaningCoverageSafe(input: {
+  prisma: PrismaClient;
+  reservationId: string;
+  confirmationId?: string | null;
+  staffMemberId?: string | null;
+  state: CleaningCoverageOperationalState;
+  attemptedCleanerCount?: number | null;
+  nextAttemptAt?: Date | null;
+  error?: string | null;
+  reason?: string | null;
+  occurredAt: Date;
+}) {
+  try {
+    await synchronizeCleaningCoverageOperationalIssue(
+      input
+    );
+  } catch (operationalError) {
+    console.error(
+      "[CLEANING_COVERAGE_OPERATIONAL_SYNC_ERROR]",
+      {
+        reservationId: input.reservationId,
+        confirmationId:
+          input.confirmationId ?? null,
+        staffMemberId:
+          input.staffMemberId ?? null,
+        state: input.state,
+        error:
+          operationalError instanceof Error
+            ? operationalError.stack ||
+              operationalError.message
+            : String(operationalError),
+      }
+    );
+  }
+}
 
 async function isCleaningNfcEnabledForProperty(
   prisma: PrismaClient,
@@ -80,6 +122,16 @@ if (!cleaningNfcEnabled) {
     }
   );
 
+  await synchronizeCleaningCoverageSafe({
+    prisma,
+    reservationId: confirmation.reservationId,
+    confirmationId: confirmation.id,
+    staffMemberId: confirmation.staffMemberId,
+    state: "SUPERSEDED",
+    reason: "CLEANING_NFC_DISABLED",
+    occurredAt: now,
+  });
+
   return {
     ok: true,
     skipped: true,
@@ -104,6 +156,16 @@ if (!cleaningNfcEnabled) {
   const timezone = reservation.property?.timezone ?? "America/Puerto_Rico";
 
   if (!isWithinCleaningMessageHours(timezone, now)) {
+    await synchronizeCleaningCoverageSafe({
+      prisma,
+      reservationId: confirmation.reservationId,
+      confirmationId: confirmation.id,
+      staffMemberId: confirmation.staffMemberId,
+      state: "DISPATCH_RETRY_SCHEDULED",
+      reason: "OUTSIDE_ALLOWED_HOURS",
+      occurredAt: now,
+    });
+
     return { ok: false, skipped: true, reason: "outside_allowed_hours" };
   }
 
@@ -121,6 +183,20 @@ if (!cleaningNfcEnabled) {
   });
 
   if (recentFailed) {
+    await synchronizeCleaningCoverageSafe({
+      prisma,
+      reservationId: confirmation.reservationId,
+      confirmationId: confirmation.id,
+      staffMemberId: confirmation.staffMemberId,
+      state: "DISPATCH_RETRY_SCHEDULED",
+      nextAttemptAt: new Date(
+        recentFailed.createdAt.getTime() +
+          FAILED_RETRY_COOLDOWN_MINUTES * 60_000
+      ),
+      reason: "RECENT_FAILED_SMS",
+      occurredAt: now,
+    });
+
     return { ok: false, skipped: true, reason: "recent_failed_sms" };
   }
 
@@ -140,6 +216,20 @@ if (!cleaningNfcEnabled) {
   });
 
   if (alreadySentForThisConfirmation) {
+    await synchronizeCleaningCoverageSafe({
+      prisma,
+      reservationId: confirmation.reservationId,
+      confirmationId: confirmation.id,
+      staffMemberId: confirmation.staffMemberId,
+      state: "WAITING_FOR_CLEANER",
+      nextAttemptAt: new Date(
+        alreadySentForThisConfirmation.createdAt.getTime() +
+          FALLBACK_AFTER_MINUTES * 60_000
+      ),
+      reason: "ALREADY_SENT_FOR_CONFIRMATION",
+      occurredAt: now,
+    });
+
     return { ok: true, skipped: true, reason: "already_sent_for_confirmation" };
   }
 
@@ -216,6 +306,20 @@ if (!cleaningNfcEnabled) {
     },
   });
 
+  await synchronizeCleaningCoverageSafe({
+    prisma,
+    reservationId: confirmation.reservationId,
+    confirmationId: confirmation.id,
+    staffMemberId: confirmation.staffMemberId,
+    state: "WAITING_FOR_CLEANER",
+    nextAttemptAt: new Date(
+      now.getTime() +
+        FALLBACK_AFTER_MINUTES * 60_000
+    ),
+    reason: "CONFIRMATION_SMS_SENT",
+    occurredAt: now,
+  });
+
   console.log("[CLEANING_CONFIRMATION_DISPATCH] sms sent", {
     confirmationId: confirmation.id,
     reservationId: confirmation.reservationId,
@@ -260,6 +364,16 @@ if (!cleaningNfcEnabled) {
     }
   );
 
+  await synchronizeCleaningCoverageSafe({
+    prisma,
+    reservationId: confirmation.reservationId,
+    confirmationId: confirmation.id,
+    staffMemberId: confirmation.staffMemberId,
+    state: "SUPERSEDED",
+    reason: "CLEANING_NFC_DISABLED",
+    occurredAt: now,
+  });
+
   return {
     fallbackCreated: false,
     reason: "cleaning_nfc_disabled",
@@ -274,6 +388,16 @@ if (!cleaningNfcEnabled) {
   });
 
   if (confirmed) {
+    await synchronizeCleaningCoverageSafe({
+      prisma,
+      reservationId: confirmation.reservationId,
+      confirmationId: confirmed.id,
+      staffMemberId: confirmed.staffMemberId,
+      state: "CONFIRMED",
+      reason: "CLEANER_CONFIRMED",
+      occurredAt: now,
+    });
+
     return { fallbackCreated: false, reason: "already_confirmed" };
   }
 
@@ -300,6 +424,17 @@ if (!cleaningNfcEnabled) {
   );
 
   if (now < expiresAt) {
+    await synchronizeCleaningCoverageSafe({
+      prisma,
+      reservationId: confirmation.reservationId,
+      confirmationId: confirmation.id,
+      staffMemberId: confirmation.staffMemberId,
+      state: "WAITING_FOR_CLEANER",
+      nextAttemptAt: expiresAt,
+      reason: "CONFIRMATION_PENDING",
+      occurredAt: now,
+    });
+
     return { fallbackCreated: false, reason: "not_expired_yet" };
   }
 
@@ -312,6 +447,16 @@ if (!cleaningNfcEnabled) {
   });
 
   if (existingPendingOther) {
+    await synchronizeCleaningCoverageSafe({
+      prisma,
+      reservationId: confirmation.reservationId,
+      confirmationId: existingPendingOther.id,
+      staffMemberId: existingPendingOther.staffMemberId,
+      state: "BACKUP_ASSIGNED",
+      reason: "ANOTHER_PENDING_CONFIRMATION_EXISTS",
+      occurredAt: now,
+    });
+
     return { fallbackCreated: false, reason: "another_pending_exists" };
   }
 
@@ -339,6 +484,17 @@ if (!cleaningNfcEnabled) {
   });
 
   if (!nextStaff) {
+    await synchronizeCleaningCoverageSafe({
+      prisma,
+      reservationId: confirmation.reservationId,
+      confirmationId: confirmation.id,
+      staffMemberId: confirmation.staffMemberId,
+      state: "NO_BACKUP_AVAILABLE",
+      attemptedCleanerCount: excludeStaffIds.length,
+      reason: "NO_BACKUP_AVAILABLE",
+      occurredAt: now,
+    });
+
     console.warn("[CLEANING_CONFIRMATION_FALLBACK] no backup staff available", {
       reservationId: confirmation.reservationId,
       propertyId: confirmation.propertyId,
@@ -359,6 +515,17 @@ if (!cleaningNfcEnabled) {
       token,
       status: "PENDING",
     },
+  });
+
+  await synchronizeCleaningCoverageSafe({
+    prisma,
+    reservationId: confirmation.reservationId,
+    confirmationId: nextConfirmation.id,
+    staffMemberId: nextStaff.id,
+    state: "BACKUP_ASSIGNED",
+    attemptedCleanerCount: excludeStaffIds.length,
+    reason: "FALLBACK_CREATED",
+    occurredAt: now,
   });
 
   console.log("[CLEANING_CONFIRMATION_FALLBACK] created backup confirmation", {
@@ -526,6 +693,21 @@ export async function processPendingCleaningConfirmations(
           },
         })
         .catch(() => {});
+
+      await synchronizeCleaningCoverageSafe({
+        prisma,
+        reservationId: confirmation.reservationId,
+        confirmationId: confirmation.id,
+        staffMemberId: confirmation.staffMemberId,
+        state: "DISPATCH_RETRY_SCHEDULED",
+        nextAttemptAt: new Date(
+          now.getTime() +
+            FAILED_RETRY_COOLDOWN_MINUTES * 60_000
+        ),
+        error: e?.message ?? String(e),
+        reason: "CONFIRMATION_SMS_FAILED",
+        occurredAt: now,
+      });
 
       skippedCount++;
     }
