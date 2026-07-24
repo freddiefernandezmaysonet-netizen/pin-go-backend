@@ -84,6 +84,7 @@ import { uploadsRouter } from "./routes/uploads.route";
 import { dashboardOrganizationRouter } from "./routes/dashboard.organization.route";
 import { dashboardPayoutsRouter } from "./routes/dashboard-payouts.routes";
 import { dashboardCancellationPolicyRouter } from "./routes/dashboard.cancellation-policy.routes";
+import { dashboardMissionControlRouter } from "./routes/dashboard.mission-control.route";
 
 const app = express();
 
@@ -281,6 +282,7 @@ app.use(adminSalesFollowupsRouter);
 app.use(adminDemoRouter);
 
 app.use(dashboardRouter);
+app.use(dashboardMissionControlRouter);
 app.use(dashboardReservationsRouter);
 app.use(dashboardPropertiesRouter);
 app.use(dashboardGuestAccessSettingsRouter);
