@@ -6,6 +6,7 @@ on:
       - recovery/distribution-engine-v2-channex-lifecycle
   pull_request:
     paths:
+      - "src/config/runtime-startup.contract.test.ts"
       - "src/pms/adapters/channex.adapter.ts"
       - "src/pms/adapters/channex.adapter.test.ts"
       - "src/pms/adapters/types.ts"
