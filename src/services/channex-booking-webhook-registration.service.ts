@@ -76,6 +76,23 @@ function getChannexWebhookAttributes(responseData: unknown) {
   return asRecord(data.attributes ?? root.attributes);
 }
 
+function getChannexWebhookPropertyId(responseData: unknown) {
+  const root = asRecord(responseData);
+  const data = asRecord(root.data);
+  const attributes = asRecord(data.attributes ?? root.attributes);
+  const relationships = asRecord(data.relationships ?? root.relationships);
+  const propertyRelationship = asRecord(relationships.property);
+  const propertyData = asRecord(propertyRelationship.data);
+
+  return (
+    asString(attributes.property_id) ??
+    asString(asRecord(attributes.property).id) ??
+    asString(propertyData.id) ??
+    asString(data.property_id) ??
+    asString(root.property_id)
+  );
+}
+
 export function assertVerifiedChannexWebhook(args: {
   responseData: unknown;
   webhookId: string;
@@ -85,7 +102,7 @@ export function assertVerifiedChannexWebhook(args: {
   const responseWebhookId = getChannexWebhookId(args.responseData);
   const attributes = getChannexWebhookAttributes(args.responseData);
   const callbackUrl = asString(attributes.callback_url);
-  const propertyId = asString(attributes.property_id);
+  const propertyId = getChannexWebhookPropertyId(args.responseData);
   const eventMask = asString(attributes.event_mask);
   const isActive = attributes.is_active;
   const sendData = attributes.send_data;
