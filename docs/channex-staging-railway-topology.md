@@ -29,15 +29,21 @@ Purpose:
 Start command:
 
 ```bash
-npm run dev
+npm start
 ```
 
-For a persistent staging service, Railway may use the repository's normal API start command if one is configured outside the repository. The command must start only `src/server.ts`; it must not start the Channex recovery worker inside the API process.
+The repository contract guarantees that `npm start` starts only `src/server.ts`. It must not start the Channex recovery worker inside the API process.
 
 Replicas:
 
 - one API replica during initial certification;
 - API scaling can be evaluated later because event claiming is atomic, but it is not part of this certification.
+
+Health checks:
+
+- liveness: `GET /health`;
+- readiness, including database connectivity: `GET /ready`;
+- Railway health-check path should be `/ready`.
 
 Public domain:
 
@@ -72,6 +78,8 @@ Replicas:
 - do not autoscale;
 - do not run this command in the API service;
 - do not mount it inside another worker.
+
+The worker must not have a public domain or Railway HTTP health check. Its readiness evidence is the boot log and continuous poll activity.
 
 ### 3. PostgreSQL Staging
 
@@ -166,13 +174,14 @@ Before registration:
 ## Activation order
 
 1. Deploy PostgreSQL staging.
-2. Deploy API Staging from the PR branch.
-3. Confirm API health and HTTPS domain.
-4. Deploy one Recovery Worker Staging replica from the same commit.
-5. Confirm worker boot log shows the intended poll and retry settings.
-6. Execute the webhook registration command.
-7. Send an unauthenticated synthetic request and confirm HTTP 401.
-8. Begin the lifecycle protocol in `docs/channex-staging-booking-lifecycle-certification.md`.
+2. Deploy API Staging from the PR branch with start command `npm start`.
+3. Configure Railway health check path `/ready` and confirm HTTP 200.
+4. Confirm the API public HTTPS domain.
+5. Deploy one Recovery Worker Staging replica from the same commit.
+6. Confirm worker boot log shows the intended poll and retry settings.
+7. Execute the webhook registration command.
+8. Send an unauthenticated synthetic request and confirm HTTP 401.
+9. Begin the lifecycle protocol in `docs/channex-staging-booking-lifecycle-certification.md`.
 
 ## Expected API behavior
 
@@ -212,6 +221,7 @@ For every scenario retain sanitized evidence of:
 - API and worker service names;
 - API and worker start commands;
 - replica counts;
+- API `/health` and `/ready` responses;
 - non-secret environment variable names and values;
 - webhook registration result without secrets;
 - Channex revision ID, booking ID and property ID;
@@ -235,6 +245,7 @@ Stop certification immediately if:
 - more than one recovery worker replica is running;
 - Channex events are executed inside the API process;
 - an unauthenticated webhook is accepted;
+- `/ready` does not confirm database connectivity;
 - ACK occurs before reservation persistence;
 - a failed active-stay cancellation is ACKed;
 - production data or credentials appear in staging.
