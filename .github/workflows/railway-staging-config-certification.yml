@@ -1,0 +1,45 @@
+name: Railway Staging Config Certification
+
+on:
+  push:
+    branches:
+      - recovery/distribution-engine-v2-channex-lifecycle
+    paths:
+      - "railway.api.json"
+      - "railway.pms-webhook-recovery.json"
+      - "src/config/railway-staging.contract.test.ts"
+      - "package.json"
+      - "package-lock.json"
+      - ".github/workflows/railway-staging-config-certification.yml"
+  pull_request:
+    paths:
+      - "railway.api.json"
+      - "railway.pms-webhook-recovery.json"
+      - "src/config/railway-staging.contract.test.ts"
+      - "package.json"
+      - "package-lock.json"
+      - ".github/workflows/railway-staging-config-certification.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  railway-staging-config:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Use Node.js 22
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+
+      - name: Install locked dependencies
+        run: npm ci --silent --no-audit --no-fund
+
+      - name: Validate Railway staging service separation
+        run: npm run test:railway-staging-contract
