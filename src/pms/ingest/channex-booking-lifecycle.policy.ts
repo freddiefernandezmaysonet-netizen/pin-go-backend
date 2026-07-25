@@ -60,15 +60,19 @@ export function classifyChannexRevisionLifecycle(args: {
     return "REJECT_CANCELLATION";
   }
 
-  if (
-    isChannexRevisionOlderOrSame({
-      incomingInsertedAt: args.incomingInsertedAt,
-      currentExternalUpdatedAt: args.currentExternalUpdatedAt,
-    })
-  ) {
-    return args.existingPersistenceAuditStatus === "SUCCESS"
-      ? "PRESERVE_PERSISTED_SUCCESS"
-      : "MARK_SUPERSEDED";
+  const incomingTime = args.incomingInsertedAt.getTime();
+  const currentTime = args.currentExternalUpdatedAt?.getTime();
+
+  if (currentTime !== undefined) {
+    if (incomingTime < currentTime) {
+      return "MARK_SUPERSEDED";
+    }
+
+    if (incomingTime === currentTime) {
+      return args.existingPersistenceAuditStatus === "SUCCESS"
+        ? "PRESERVE_PERSISTED_SUCCESS"
+        : "INGEST";
+    }
   }
 
   return "INGEST";
