@@ -20,9 +20,12 @@ on:
       - "src/pms/ingest/pms-webhook-recovery.policy.test.ts"
       - "src/pms/ingest/webhook.dispatcher.ts"
       - "src/pms/ingest/webhook.routes.ts"
+      - "src/pms/ingest/webhook.routes.test.ts"
       - "src/pms/jobs/job.queue.ts"
       - "src/pms/jobs/pms-webhook-execution.policy.ts"
       - "src/pms/jobs/pms-webhook-execution.policy.test.ts"
+      - "src/workers/pms-webhook-recovery.config.ts"
+      - "src/workers/pms-webhook-recovery.config.test.ts"
       - "src/workers/pms-webhook-recovery.worker.ts"
       - "src/apms/distribution-lifecycle-read-model.service.ts"
       - "src/routes/dashboard.distribution-mission-control.middleware.ts"
@@ -80,6 +83,9 @@ jobs:
 
       - name: Load authenticated webhook routes
         run: npx tsx -e "import('./src/pms/ingest/webhook.routes.ts').then((m) => { if (typeof m.pmsWebhookRouter !== 'function') process.exit(1); })"
+
+      - name: Load recovery worker config
+        run: npx tsx -e "import('./src/workers/pms-webhook-recovery.config.ts').then((m) => { if (typeof m.resolvePmsWebhookRecoveryConfig !== 'function') process.exit(1); })"
 
       - name: Load staging webhook registration service
         run: npx tsx -e "import('./src/services/channex-booking-webhook-registration.service.ts').then((m) => { if (typeof m.configureChannexBookingWebhookForStaging !== 'function') process.exit(1); })"
