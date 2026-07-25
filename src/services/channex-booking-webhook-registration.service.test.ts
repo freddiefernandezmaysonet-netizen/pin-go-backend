@@ -21,11 +21,18 @@ function webhookResponse(webhookId: string) {
       id: webhookId,
       type: "webhook",
       attributes: {
-        property_id: channexPropertyId,
         callback_url: callbackUrl,
         event_mask: "booking",
         is_active: true,
         send_data: false,
+      },
+      relationships: {
+        property: {
+          data: {
+            id: channexPropertyId,
+            type: "property",
+          },
+        },
       },
     },
   };
@@ -157,7 +164,7 @@ test("booking webhook payload is pull-trigger only and authenticated", () => {
   });
 });
 
-test("verification requires the complete webhook representation", () => {
+test("verification accepts the property relationship returned by Channex", () => {
   assert.doesNotThrow(() =>
     assertVerifiedChannexWebhook({
       responseData: webhookResponse("webhook-001"),
@@ -166,7 +173,24 @@ test("verification requires the complete webhook representation", () => {
       channexPropertyId,
     })
   );
+});
 
+test("verification preserves property_id attribute compatibility", () => {
+  const response = webhookResponse("webhook-001");
+  delete (response.data as any).relationships;
+  (response.data.attributes as any).property_id = channexPropertyId;
+
+  assert.doesNotThrow(() =>
+    assertVerifiedChannexWebhook({
+      responseData: response,
+      webhookId: "webhook-001",
+      callbackUrl,
+      channexPropertyId,
+    })
+  );
+});
+
+test("verification requires the complete webhook representation", () => {
   assert.throws(
     () =>
       assertVerifiedChannexWebhook({
