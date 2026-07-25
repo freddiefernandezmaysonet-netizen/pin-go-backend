@@ -27,6 +27,9 @@ jobs:
   booking-lifecycle-certification:
     runs-on: ubuntu-latest
     timeout-minutes: 10
+    env:
+      CHANNEX_API_KEY: test-api-key
+      CHANNEX_API_BASE_URL: https://staging.channex.io
 
     steps:
       - name: Checkout repository
@@ -41,8 +44,17 @@ jobs:
       - name: Install locked dependencies
         run: npm ci --silent
 
-      - name: Run Channex booking lifecycle certification tests
-        env:
-          CHANNEX_API_KEY: test-api-key
-          CHANNEX_API_BASE_URL: https://staging.channex.io
-        run: npm run test:channex-certification
+      - name: Run adapter and lifecycle policy tests
+        run: npm run test:channex-adapter && npm run test:channex-lifecycle-policy
+
+      - name: Load booking lifecycle service
+        run: npx tsx -e "import('./src/pms/ingest/channex-booking-lifecycle.service.ts').then((m) => { if (typeof m.processChannexBookingWebhookEventById !== 'function') process.exit(1); })"
+
+      - name: Load webhook dispatcher
+        run: npx tsx -e "import('./src/pms/ingest/webhook.dispatcher.ts').then((m) => { if (typeof m.processPmsWebhookEventById !== 'function') process.exit(1); })"
+
+      - name: Load Distribution lifecycle read model
+        run: npx tsx -e "import('./src/apms/distribution-lifecycle-read-model.service.ts').then((m) => { if (typeof m.getDistributionLifecycleSnapshot !== 'function') process.exit(1); })"
+
+      - name: Load Distribution Mission Control middleware
+        run: npx tsx -e "import('./src/routes/dashboard.distribution-mission-control.middleware.ts').then((m) => { if (typeof m.dashboardDistributionMissionControlMiddleware !== 'function') process.exit(1); })"
