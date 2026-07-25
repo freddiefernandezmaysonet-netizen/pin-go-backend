@@ -76,11 +76,13 @@ function getChannexWebhookAttributes(responseData: unknown) {
   return asRecord(data.attributes ?? root.attributes);
 }
 
-function assertVerifiedWebhook(args: {
+export function assertVerifiedChannexWebhook(args: {
   responseData: unknown;
+  webhookId: string;
   callbackUrl: string;
   channexPropertyId: string;
 }) {
+  const responseWebhookId = getChannexWebhookId(args.responseData);
   const attributes = getChannexWebhookAttributes(args.responseData);
   const callbackUrl = asString(attributes.callback_url);
   const propertyId = asString(attributes.property_id);
@@ -88,48 +90,76 @@ function assertVerifiedWebhook(args: {
   const isActive = attributes.is_active;
   const sendData = attributes.send_data;
 
-  if (callbackUrl && callbackUrl !== args.callbackUrl) {
+  if (!responseWebhookId) {
+    throw new Error("CHANNEX_WEBHOOK_VERIFICATION_ID_MISSING");
+  }
+
+  if (responseWebhookId !== args.webhookId) {
+    throw new Error("CHANNEX_WEBHOOK_VERIFICATION_ID_MISMATCH");
+  }
+
+  if (!callbackUrl) {
+    throw new Error("CHANNEX_WEBHOOK_VERIFICATION_CALLBACK_MISSING");
+  }
+
+  if (callbackUrl !== args.callbackUrl) {
     throw new Error("CHANNEX_WEBHOOK_VERIFICATION_CALLBACK_MISMATCH");
   }
 
-  if (propertyId && propertyId !== args.channexPropertyId) {
+  if (!propertyId) {
+    throw new Error("CHANNEX_WEBHOOK_VERIFICATION_PROPERTY_MISSING");
+  }
+
+  if (propertyId !== args.channexPropertyId) {
     throw new Error("CHANNEX_WEBHOOK_VERIFICATION_PROPERTY_MISMATCH");
   }
 
-  if (eventMask && eventMask !== CHANNEX_WEBHOOK_EVENT_MASK) {
+  if (!eventMask) {
+    throw new Error("CHANNEX_WEBHOOK_VERIFICATION_EVENT_MASK_MISSING");
+  }
+
+  if (eventMask !== CHANNEX_WEBHOOK_EVENT_MASK) {
     throw new Error("CHANNEX_WEBHOOK_VERIFICATION_EVENT_MASK_MISMATCH");
   }
 
-  if (isActive === false) {
+  if (isActive !== true) {
     throw new Error("CHANNEX_WEBHOOK_VERIFICATION_INACTIVE");
   }
 
-  if (sendData === true) {
+  if (sendData !== false) {
     throw new Error("CHANNEX_WEBHOOK_VERIFICATION_SEND_DATA_ENABLED");
   }
 }
 
 async function persistWebhookMetadata(args: {
-  listingId: string;
-  listingMetadata: Record<string, unknown>;
+  listings: Array<{
+    id: string;
+    metadata: unknown;
+  }>;
   webhookId: string;
   callbackUrl: string;
   verified: boolean;
 }) {
-  await prisma.pmsListing.update({
-    where: { id: args.listingId },
-    data: {
-      metadata: {
-        ...args.listingMetadata,
-        channexBookingWebhookId: args.webhookId,
-        channexBookingWebhookEventMask: CHANNEX_WEBHOOK_EVENT_MASK,
-        channexBookingWebhookSendData: CHANNEX_WEBHOOK_SEND_DATA,
-        channexBookingWebhookCallbackUrl: args.callbackUrl,
-        channexBookingWebhookVerified: args.verified,
-        channexBookingWebhookConfiguredAt: new Date().toISOString(),
-      },
-    },
-  });
+  const configuredAt = new Date().toISOString();
+
+  await Promise.all(
+    args.listings.map((listing) =>
+      prisma.pmsListing.update({
+        where: { id: listing.id },
+        data: {
+          metadata: {
+            ...asRecord(listing.metadata),
+            channexBookingWebhookId: args.webhookId,
+            channexBookingWebhookEventMask: CHANNEX_WEBHOOK_EVENT_MASK,
+            channexBookingWebhookSendData: CHANNEX_WEBHOOK_SEND_DATA,
+            channexBookingWebhookCallbackUrl: args.callbackUrl,
+            channexBookingWebhookVerified: args.verified,
+            channexBookingWebhookConfiguredAt: configuredAt,
+          },
+        },
+      })
+    )
+  );
 }
 
 export async function configureChannexBookingWebhookForStaging(args: {
@@ -185,29 +215,6 @@ export async function configureChannexBookingWebhookForStaging(args: {
     throw new Error("CHANNEX_PROPERTY_MAPPING_AMBIGUOUS");
   }
 
-  const listing =
-    listings.find((item) => {
-      const metadata = asRecord(item.metadata);
-      return Boolean(
-        asString(metadata.channexBookingWebhookId) &&
-          asString(metadata.channexPropertyId)
-      );
-    }) ??
-    listings.find((item) =>
-      Boolean(asString(asRecord(item.metadata).channexPropertyId))
-    );
-
-  if (!listing) {
-    throw new Error("CHANNEX_PROPERTY_ID_MISSING_FROM_LISTING");
-  }
-
-  const listingMetadata = asRecord(listing.metadata);
-  const channexPropertyId = asString(listingMetadata.channexPropertyId);
-
-  if (!channexPropertyId) {
-    throw new Error("CHANNEX_PROPERTY_ID_MISSING_FROM_LISTING");
-  }
-
   const mappedPropertyIds = Array.from(
     new Set(
       listings
@@ -217,22 +224,41 @@ export async function configureChannexBookingWebhookForStaging(args: {
   );
 
   if (
-    mappedPropertyIds.length > 1 ||
-    (mappedPropertyIds.length === 1 &&
-      mappedPropertyIds[0] !== channexPropertyId)
+    mappedPropertyIds.length !== 1 ||
+    listings.some(
+      (item) => !asString(asRecord(item.metadata).channexPropertyId)
+    )
   ) {
-    throw new Error("CHANNEX_PROPERTY_MAPPING_AMBIGUOUS");
+    throw new Error(
+      mappedPropertyIds.length > 1
+        ? "CHANNEX_PROPERTY_MAPPING_AMBIGUOUS"
+        : "CHANNEX_PROPERTY_ID_MISSING_FROM_LISTING"
+    );
   }
 
-  const existingWebhookId = asString(
-    listingMetadata.channexBookingWebhookId
+  const channexPropertyId = mappedPropertyIds[0]!;
+  const existingWebhookIds = Array.from(
+    new Set(
+      listings
+        .map((item) =>
+          asString(asRecord(item.metadata).channexBookingWebhookId)
+        )
+        .filter((value): value is string => Boolean(value))
+    )
   );
-  const existingSecret = asString(listing.connection.webhookSecret);
+
+  if (existingWebhookIds.length > 1) {
+    throw new Error("CHANNEX_WEBHOOK_MAPPING_AMBIGUOUS");
+  }
+
+  const existingWebhookId = existingWebhookIds[0] ?? null;
+  const connection = listings[0]!.connection;
+  const existingSecret = asString(connection.webhookSecret);
   const webhookSecret = existingSecret ?? generateChannexWebhookSecret();
 
   if (!existingSecret) {
     await prisma.pmsConnection.update({
-      where: { id: listing.connection.id },
+      where: { id: connection.id },
       data: { webhookSecret },
     });
   }
@@ -262,6 +288,13 @@ export async function configureChannexBookingWebhookForStaging(args: {
         }
       );
       operation = "UPDATED";
+
+      await persistWebhookMetadata({
+        listings,
+        webhookId,
+        callbackUrl,
+        verified: false,
+      });
     } catch (error: any) {
       if (error?.response?.status !== 404) {
         throw error;
@@ -291,8 +324,7 @@ export async function configureChannexBookingWebhookForStaging(args: {
     }
 
     await persistWebhookMetadata({
-      listingId: listing.id,
-      listingMetadata,
+      listings,
       webhookId,
       callbackUrl,
       verified: false,
@@ -307,15 +339,15 @@ export async function configureChannexBookingWebhookForStaging(args: {
     }
   );
 
-  assertVerifiedWebhook({
+  assertVerifiedChannexWebhook({
     responseData: verification.data,
+    webhookId,
     callbackUrl,
     channexPropertyId,
   });
 
   await persistWebhookMetadata({
-    listingId: listing.id,
-    listingMetadata,
+    listings,
     webhookId,
     callbackUrl,
     verified: true,
