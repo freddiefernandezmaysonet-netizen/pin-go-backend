@@ -14,38 +14,25 @@ async function resolveChannexConnectionId(propertyId: string) {
         path: ["channexPropertyId"],
         equals: propertyId,
       },
+      connection: {
+        is: {
+          provider: PmsProvider.CHANNEX,
+          status: "ACTIVE",
+        },
+      },
     },
+    distinct: ["connectionId"],
     select: {
       connectionId: true,
-    },
-    take: 3,
-  });
-
-  const connectionIds = Array.from(
-    new Set(listingCandidates.map((listing) => listing.connectionId))
-  );
-
-  if (connectionIds.length === 0) {
-    return null;
-  }
-
-  const activeConnections = await prisma.pmsConnection.findMany({
-    where: {
-      id: { in: connectionIds },
-      provider: PmsProvider.CHANNEX,
-      status: "ACTIVE",
-    },
-    select: {
-      id: true,
     },
     take: 2,
   });
 
-  if (activeConnections.length > 1) {
+  if (listingCandidates.length > 1) {
     throw new Error(`CHANNEX_PROPERTY_MAPPING_AMBIGUOUS:${propertyId}`);
   }
 
-  return activeConnections[0]?.id ?? null;
+  return listingCandidates[0]?.connectionId ?? null;
 }
 
 async function ingestPmsWebhook(args: {
