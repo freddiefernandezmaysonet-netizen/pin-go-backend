@@ -1,4 +1,5 @@
 import "dotenv/config";
+import { PmsProvider } from "@prisma/client";
 import { prisma } from "../lib/prisma";
 import { dispatchPmsWebhookEventById } from "../pms/ingest/webhook.dispatcher";
 
@@ -41,6 +42,7 @@ async function markExhaustedEvents(now: Date) {
 
   const exhausted = await prisma.webhookEventIngest.updateMany({
     where: {
+      provider: PmsProvider.CHANNEX,
       attempts: { gte: MAX_ATTEMPTS },
       OR: [
         { status: "FAILED" },
@@ -70,6 +72,7 @@ async function recoverStaleProcessingEvent(args: {
   const released = await prisma.webhookEventIngest.updateMany({
     where: {
       id: args.eventId,
+      provider: PmsProvider.CHANNEX,
       status: "PROCESSING",
       updatedAt: { lte: args.staleProcessingCutoff },
       attempts: { lt: MAX_ATTEMPTS },
@@ -103,6 +106,7 @@ async function tick() {
 
     const events = await prisma.webhookEventIngest.findMany({
       where: {
+        provider: PmsProvider.CHANNEX,
         attempts: { lt: MAX_ATTEMPTS },
         OR: [
           {
