@@ -11,7 +11,7 @@ test("Channex booking lifecycle service loads", async () => {
 
 test("PMS webhook dispatcher loads", async () => {
   const module = await import("./webhook.dispatcher");
-  assert.equal(typeof module.processPmsWebhookEventById, "function");
+  assert.equal(typeof module.dispatchPmsWebhookEventById, "function");
 });
 
 test("Distribution lifecycle read model loads", async () => {
