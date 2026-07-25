@@ -17,14 +17,14 @@ function uniqueStrings(values: Array<string | null | undefined>) {
   );
 }
 
-function toMissionControlDistributionView(
+export function toMissionControlDistributionView(
   snapshot: DistributionLifecycleSnapshot
 ) {
   const revisionItems = snapshot.revisions.map((revision) => ({
     reference:
       revision.otaReservationCode ??
-      revision.bookingUniqueId ??
-      revision.revisionReference,
+      revision.bookingReference ??
+      revision.revisionId,
     persistenceStatus: revision.persistenceStatus,
     acknowledgementStatus: revision.acknowledgementStatus,
     eventStatus: revision.eventStatus,
@@ -38,7 +38,7 @@ function toMissionControlDistributionView(
   }));
 
   const unresolvedItems = snapshot.unresolvedEvents.map((event) => ({
-    reference: event.revisionReference ?? event.eventReference,
+    reference: event.revisionId ?? event.eventType,
     persistenceStatus: "PENDING" as const,
     acknowledgementStatus: "PENDING" as const,
     eventStatus: event.eventStatus,
