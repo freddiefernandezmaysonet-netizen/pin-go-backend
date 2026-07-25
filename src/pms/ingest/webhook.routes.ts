@@ -240,6 +240,7 @@ pmsWebhookRouter.post("/channex", async (req: any, res) => {
  * IMPORTANTE:
  * - Este router debe montarse con middleware que preserve rawBody.
  * - Usamos connectionId en la URL para resolver el tenant sin ambigüedad.
+ * - Channex no puede usar esta ruta; su único ingreso permitido es /webhooks/channex.
  *
  * POST /webhooks/pms/:provider/:connectionId
  */
@@ -254,6 +255,13 @@ pmsWebhookRouter.post(
       | undefined;
     if (!providerEnum) {
       return res.status(400).json({ ok: false, error: "UNKNOWN_PROVIDER" });
+    }
+
+    if (providerEnum === PmsProvider.CHANNEX) {
+      return res.status(410).json({
+        ok: false,
+        error: "CHANNEX_LEGACY_WEBHOOK_ROUTE_DISABLED",
+      });
     }
 
     const conn = await prisma.pmsConnection.findUnique({
