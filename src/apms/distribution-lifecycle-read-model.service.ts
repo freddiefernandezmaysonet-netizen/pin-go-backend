@@ -98,11 +98,12 @@ export async function getDistributionLifecycleSnapshot(args: {
     where: {
       propertyId: property.id,
       connection: {
-        provider: PmsProvider.CHANNEX,
+        is: {
+          provider: PmsProvider.CHANNEX,
+        },
       },
     },
     select: {
-      id: true,
       metadata: true,
       connection: {
         select: {
@@ -137,7 +138,7 @@ export async function getDistributionLifecycleSnapshot(args: {
   const listingMetadata = asRecord(listing.metadata);
   const channexPropertyId = asString(listingMetadata.channexPropertyId);
 
-  const propertyPayloadFilters = channexPropertyId
+  const propertyPayloadFilters: any[] = channexPropertyId
     ? [
         { payloadRaw: { path: ["property_id"], equals: channexPropertyId } },
         { payloadRaw: { path: ["propertyId"], equals: channexPropertyId } },
@@ -185,11 +186,7 @@ export async function getDistributionLifecycleSnapshot(args: {
       select: {
         decisionId: true,
         status: true,
-        severity: true,
-        eventType: true,
         reason: true,
-        summary: true,
-        recommendedAction: true,
         metadata: true,
         completedAt: true,
         createdAt: true,
@@ -221,10 +218,8 @@ export async function getDistributionLifecycleSnapshot(args: {
 
   type RevisionState = {
     revisionId: string;
-    bookingId: string | null;
-    bookingUniqueId: string | null;
+    bookingReference: string | null;
     otaReservationCode: string | null;
-    reservationId: string | null;
     webhookEventId: string | null;
     insertedAt: string | null;
     persistenceStatus: "PENDING" | "PERSISTED" | "SUPERSEDED" | "FAILED";
@@ -243,10 +238,11 @@ export async function getDistributionLifecycleSnapshot(args: {
 
     const current = revisionsById.get(revisionId) ?? {
       revisionId,
-      bookingId: asString(metadata.bookingId),
-      bookingUniqueId: asString(metadata.bookingUniqueId),
+      bookingReference:
+        asString(metadata.otaReservationCode) ??
+        asString(metadata.bookingUniqueId) ??
+        asString(metadata.bookingId),
       otaReservationCode: asString(metadata.otaReservationCode),
-      reservationId: asString(metadata.reservationId),
       webhookEventId: asString(metadata.webhookEventId),
       insertedAt: asString(metadata.insertedAt),
       persistenceStatus: "PENDING" as const,
@@ -312,8 +308,10 @@ export async function getDistributionLifecycleSnapshot(args: {
         nextAutomaticAction !== "NONE" &&
         nextAutomaticAction !== "RECOVERY_EXHAUSTED";
 
+      const { webhookEventId: _webhookEventId, ...publicRevision } = revision;
+
       return {
-        ...revision,
+        ...publicRevision,
         eventStatus,
         attempts,
         errorCode,
@@ -329,7 +327,7 @@ export async function getDistributionLifecycleSnapshot(args: {
     );
 
   const referencedEventIds = new Set(
-    revisions
+    Array.from(revisionsById.values())
       .map((revision) => revision.webhookEventId)
       .filter((eventId): eventId is string => Boolean(eventId))
   );
@@ -352,7 +350,6 @@ export async function getDistributionLifecycleSnapshot(args: {
       });
 
       return {
-        eventId: event.id,
         eventType: event.eventType,
         revisionId: event.externalEventId,
         eventStatus: event.status,
