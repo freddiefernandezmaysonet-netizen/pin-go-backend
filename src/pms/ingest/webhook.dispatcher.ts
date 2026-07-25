@@ -16,7 +16,31 @@ export async function dispatchPmsWebhookEventById(eventId: string) {
   }
 
   if (event.provider === PmsProvider.CHANNEX) {
-    return processChannexBookingWebhookEventById(eventId);
+    try {
+      return await processChannexBookingWebhookEventById(eventId);
+    } catch (error: any) {
+      const message = String(error?.message ?? error);
+
+      if (message.startsWith("CHANNEX_FEED_NO_PENDING_REVISIONS:")) {
+        await prisma.webhookEventIngest.update({
+          where: { id: eventId },
+          data: {
+            status: "PROCESSED",
+            processedAt: new Date(),
+            lastError: null,
+          },
+        });
+
+        return {
+          found: true,
+          processed: true,
+          revisionCount: 0,
+          emptyFeed: true,
+        };
+      }
+
+      throw error;
+    }
   }
 
   await processWebhookEventById(eventId);
