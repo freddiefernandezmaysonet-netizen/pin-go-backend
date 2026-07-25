@@ -1,14 +1,32 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { getDistributionLifecycleSnapshot } from "../../apms/distribution-lifecycle-read-model.service";
-import { dashboardDistributionMissionControlMiddleware } from "../../routes/dashboard.distribution-mission-control.middleware";
-import { processChannexBookingWebhookEventById } from "./channex-booking-lifecycle.service";
-import { processPmsWebhookEventById } from "./webhook.dispatcher";
+test("Channex booking lifecycle service loads", async () => {
+  const module = await import("./channex-booking-lifecycle.service");
+  assert.equal(
+    typeof module.processChannexBookingWebhookEventById,
+    "function"
+  );
+});
 
-test("Channex lifecycle runtime modules load with expected exports", () => {
-  assert.equal(typeof processChannexBookingWebhookEventById, "function");
-  assert.equal(typeof processPmsWebhookEventById, "function");
-  assert.equal(typeof getDistributionLifecycleSnapshot, "function");
-  assert.equal(typeof dashboardDistributionMissionControlMiddleware, "function");
+test("PMS webhook dispatcher loads", async () => {
+  const module = await import("./webhook.dispatcher");
+  assert.equal(typeof module.processPmsWebhookEventById, "function");
+});
+
+test("Distribution lifecycle read model loads", async () => {
+  const module = await import(
+    "../../apms/distribution-lifecycle-read-model.service"
+  );
+  assert.equal(typeof module.getDistributionLifecycleSnapshot, "function");
+});
+
+test("Distribution Mission Control middleware loads", async () => {
+  const module = await import(
+    "../../routes/dashboard.distribution-mission-control.middleware"
+  );
+  assert.equal(
+    typeof module.dashboardDistributionMissionControlMiddleware,
+    "function"
+  );
 });
