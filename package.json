@@ -4,6 +4,7 @@
   "private": true,
   "type": "module",
   "scripts": {
+    "start": "tsx src/server.ts",
     "dev": "tsx watch src/server.ts",
     "worker": "tsx src/workers/worker.ts",
     "worker:reservation": "tsx src/workers/reservation.worker.ts",
@@ -20,8 +21,9 @@
     "test:pms-webhook-execution-policy": "tsx --test src/pms/jobs/pms-webhook-execution.policy.test.ts",
     "test:channex-webhook-auth": "tsx --test src/pms/ingest/channex-webhook-auth.test.ts",
     "test:channex-webhook-registration": "tsx --test src/services/channex-booking-webhook-registration.service.test.ts",
+    "test:runtime-startup-contract": "tsx --test src/config/runtime-startup.contract.test.ts",
     "test:channex-runtime-import": "tsx --test src/pms/ingest/channex-runtime-import.smoke.test.ts",
-    "test:channex-certification": "npm run test:channex-adapter && npm run test:channex-lifecycle-policy && npm run test:pms-webhook-recovery-policy && npm run test:pms-webhook-execution-policy && npm run test:channex-webhook-auth && npm run test:channex-webhook-registration && npm run test:channex-runtime-import",
+    "test:channex-certification": "npm run test:channex-adapter && npm run test:channex-lifecycle-policy && npm run test:pms-webhook-recovery-policy && npm run test:pms-webhook-execution-policy && npm run test:channex-webhook-auth && npm run test:channex-webhook-registration && npm run test:runtime-startup-contract && npm run test:channex-runtime-import",
     "prisma:migrate": "prisma migrate dev",
     "prisma:studio": "prisma studio",
     "seed": "tsx prisma/seed/seed.ts",
