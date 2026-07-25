@@ -2,6 +2,7 @@ import "dotenv/config";
 import { PmsProvider } from "@prisma/client";
 import { prisma } from "../lib/prisma";
 import { dispatchPmsWebhookEventById } from "../pms/ingest/webhook.dispatcher";
+import { processRecoverableWebhookBatch } from "../pms/ingest/pms-webhook-recovery.policy";
 
 const POLL_MS = Number(
   process.env.PMS_WEBHOOK_RECOVERY_POLL_MS ?? 60_000
@@ -143,29 +144,24 @@ async function tick() {
       });
     }
 
-    for (const event of events) {
-      if (event.status === "PROCESSING") {
-        const released = await recoverStaleProcessingEvent({
-          eventId: event.id,
+    const batchResult = await processRecoverableWebhookBatch({
+      events,
+      releaseStaleProcessingEvent: async (eventId) =>
+        recoverStaleProcessingEvent({
+          eventId,
           staleProcessingCutoff,
+        }),
+      dispatchEvent: dispatchPmsWebhookEventById,
+      onEventStart: (event) => {
+        log("processing recoverable event", {
+          eventId: event.id,
+          provider: event.provider,
+          eventType: event.eventType,
+          previousStatus: event.status,
+          attempts: event.attempts,
         });
-
-        if (!released) {
-          continue;
-        }
-      }
-
-      log("processing recoverable event", {
-        eventId: event.id,
-        provider: event.provider,
-        eventType: event.eventType,
-        previousStatus: event.status,
-        attempts: event.attempts,
-      });
-
-      try {
-        await dispatchPmsWebhookEventById(event.id);
-      } catch (error) {
+      },
+      onEventError: (event, error) => {
         console.error("[pms.webhook.recovery] event processing failed", {
           eventId: event.id,
           provider: event.provider,
@@ -173,7 +169,11 @@ async function tick() {
           attempts: event.attempts,
           error: error instanceof Error ? error.message : String(error),
         });
-      }
+      },
+    });
+
+    if (events.length > 0) {
+      log("batch completed", batchResult);
     }
   } catch (error) {
     logError("tick failed", error);
