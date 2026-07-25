@@ -159,7 +159,17 @@ async function tick() {
         attempts: event.attempts,
       });
 
-      await dispatchPmsWebhookEventById(event.id);
+      try {
+        await dispatchPmsWebhookEventById(event.id);
+      } catch (error) {
+        console.error("[pms.webhook.recovery] event processing failed", {
+          eventId: event.id,
+          provider: event.provider,
+          eventType: event.eventType,
+          attempts: event.attempts,
+          error: error instanceof Error ? error.message : String(error),
+        });
+      }
     }
   } catch (error) {
     logError("tick failed", error);
