@@ -51,7 +51,7 @@ jobs:
         run: npx tsx -e "import('./src/pms/ingest/channex-booking-lifecycle.service.ts').then((m) => { if (typeof m.processChannexBookingWebhookEventById !== 'function') process.exit(1); })"
 
       - name: Load webhook dispatcher
-        run: npx tsx -e "import('./src/pms/ingest/webhook.dispatcher.ts').then((m) => { if (typeof m.processPmsWebhookEventById !== 'function') process.exit(1); })"
+        run: npx tsx -e "import('./src/pms/ingest/webhook.dispatcher.ts').then((m) => { if (typeof m.dispatchPmsWebhookEventById !== 'function') process.exit(1); })"
 
       - name: Load Distribution lifecycle read model
         run: npx tsx -e "import('./src/apms/distribution-lifecycle-read-model.service.ts').then((m) => { if (typeof m.getDistributionLifecycleSnapshot !== 'function') process.exit(1); })"
