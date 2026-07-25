@@ -67,7 +67,7 @@ jobs:
           cache: npm
 
       - name: Install locked dependencies
-        run: npm ci --silent
+        run: npm ci --silent --no-audit --no-fund
 
       - name: Run focused booking lifecycle tests
         run: npm run test:channex-certification
