@@ -24,6 +24,9 @@ on:
       - "src/apms/distribution-lifecycle-read-model.service.ts"
       - "src/routes/dashboard.distribution-mission-control.middleware.ts"
       - "src/routes/dashboard.route.ts"
+      - "src/services/channex-booking-webhook-registration.service.ts"
+      - "src/services/channex-booking-webhook-registration.service.test.ts"
+      - "src/scripts/configure-channex-staging-booking-webhook.ts"
       - "package.json"
       - "package-lock.json"
       - ".github/workflows/channex-adapter-certification.yml"
@@ -63,6 +66,9 @@ jobs:
 
       - name: Load authenticated webhook routes
         run: npx tsx -e "import('./src/pms/ingest/webhook.routes.ts').then((m) => { if (typeof m.pmsWebhookRouter !== 'function') process.exit(1); })"
+
+      - name: Load staging webhook registration service
+        run: npx tsx -e "import('./src/services/channex-booking-webhook-registration.service.ts').then((m) => { if (typeof m.configureChannexBookingWebhookForStaging !== 'function') process.exit(1); })"
 
       - name: Load Distribution lifecycle read model
         run: npx tsx -e "import('./src/apms/distribution-lifecycle-read-model.service.ts').then((m) => { if (typeof m.getDistributionLifecycleSnapshot !== 'function') process.exit(1); })"
