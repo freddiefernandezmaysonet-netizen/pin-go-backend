@@ -13,9 +13,15 @@ on:
       - "src/pms/ingest/channex-booking-lifecycle.policy.test.ts"
       - "src/pms/ingest/channex-booking-lifecycle.service.ts"
       - "src/pms/ingest/channex-runtime-import.smoke.test.ts"
+      - "src/pms/ingest/pms-webhook-recovery.policy.ts"
+      - "src/pms/ingest/pms-webhook-recovery.policy.test.ts"
       - "src/pms/ingest/webhook.dispatcher.ts"
+      - "src/pms/ingest/webhook.routes.ts"
+      - "src/pms/jobs/job.queue.ts"
+      - "src/workers/pms-webhook-recovery.worker.ts"
       - "src/apms/distribution-lifecycle-read-model.service.ts"
       - "src/routes/dashboard.distribution-mission-control.middleware.ts"
+      - "src/routes/dashboard.route.ts"
       - "package.json"
       - "package-lock.json"
       - ".github/workflows/channex-adapter-certification.yml"
@@ -44,8 +50,8 @@ jobs:
       - name: Install locked dependencies
         run: npm ci --silent
 
-      - name: Run adapter and lifecycle policy tests
-        run: npm run test:channex-adapter && npm run test:channex-lifecycle-policy
+      - name: Run focused booking lifecycle tests
+        run: npm run test:channex-certification
 
       - name: Load booking lifecycle service
         run: npx tsx -e "import('./src/pms/ingest/channex-booking-lifecycle.service.ts').then((m) => { if (typeof m.processChannexBookingWebhookEventById !== 'function') process.exit(1); })"
