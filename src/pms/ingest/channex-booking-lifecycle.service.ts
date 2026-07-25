@@ -1,13 +1,19 @@
 import { PmsProvider } from "@prisma/client";
-import { prisma } from "../../lib/prisma";
 import { persistAuditEntry } from "../../apms/audit-persistence.service";
 import type { AuditEntry } from "../../apms/audit-types";
+import { prisma } from "../../lib/prisma";
 import { ingestReservation } from "../../services/ingest.service";
 import { getAdapter } from "../adapters";
 import type {
   ChannexBookingRevision,
   ParseWebhookResult,
 } from "../adapters/types";
+import {
+  classifyChannexRevisionLifecycle,
+  isChannexCancellationRejected,
+  parseChannexInsertedAt,
+  sortChannexRevisionsOldestFirst,
+} from "./channex-booking-lifecycle.policy";
 
 function asRecord(value: unknown): Record<string, unknown> {
   return value && typeof value === "object" && !Array.isArray(value)
@@ -21,7 +27,9 @@ function asString(value: unknown): string | null {
   return normalized.length > 0 ? normalized : null;
 }
 
-function resolvePaymentState(revision: ChannexBookingRevision): "PAID" | "NONE" {
+function resolvePaymentState(
+  revision: ChannexBookingRevision
+): "PAID" | "NONE" {
   const raw = asRecord(revision.reservation.raw);
   const paymentCollect = String(raw.payment_collect ?? "")
     .trim()
@@ -82,6 +90,14 @@ async function persistLifecycleAudit(args: {
   label: string;
   recommendedAction?: string;
 }) {
+  const metadata = buildRevisionMetadata({
+    organizationId: args.organizationId,
+    propertyId: args.propertyId,
+    reservationId: args.reservationId,
+    eventId: args.eventId,
+    revision: args.revision,
+  });
+
   await persistAuditEntry(prisma, {
     engine: "Distribution",
     decisionId: args.decisionId,
@@ -104,25 +120,13 @@ async function persistLifecycleAudit(args: {
         confidence: 100,
         adjustment: null,
         adjustmentPercent: null,
-        metadata: buildRevisionMetadata({
-          organizationId: args.organizationId,
-          propertyId: args.propertyId,
-          reservationId: args.reservationId,
-          eventId: args.eventId,
-          revision: args.revision,
-        }),
+        metadata,
       },
     ],
     ...(args.recommendedAction
       ? { recommendedAction: args.recommendedAction }
       : {}),
-    metadata: buildRevisionMetadata({
-      organizationId: args.organizationId,
-      propertyId: args.propertyId,
-      reservationId: args.reservationId,
-      eventId: args.eventId,
-      revision: args.revision,
-    }),
+    metadata,
   });
 }
 
@@ -134,8 +138,6 @@ async function persistRejectedCancellation(args: {
   revision: ChannexBookingRevision;
   startedAt: Date;
 }) {
-  const completedAt = new Date();
-
   await persistLifecycleAudit({
     decisionId: `distribution-engine:channex-revision:${args.revision.identity.revisionId}:persisted`,
     eventType: "ACTION_FAILED",
@@ -145,7 +147,7 @@ async function persistRejectedCancellation(args: {
       "Pin&Go Connect could not apply the booking cancellation to the active stay.",
     reason: "CHANNEX_CANCELLATION_NOT_APPLIED",
     startedAt: args.startedAt,
-    completedAt,
+    completedAt: new Date(),
     organizationId: args.organizationId,
     propertyId: args.propertyId,
     reservationId: args.reservationId,
@@ -240,10 +242,7 @@ async function getRevisions(args: {
       adapter,
       connection,
       revisions: [
-        await adapter.fetchBookingRevision({
-          connection,
-          revisionId,
-        }),
+        await adapter.fetchBookingRevision({ connection, revisionId }),
       ],
     };
   }
@@ -252,8 +251,7 @@ async function getRevisions(args: {
     throw new Error("CHANNEX_PROPERTY_ID_REQUIRED_FOR_FEED_RECOVERY");
   }
 
-  const feed = await adapter.fetchBookingRevisionFeed({ connection });
-  const revisions = feed.filter(
+  const revisions = (await adapter.fetchBookingRevisionFeed({ connection })).filter(
     (revision) => revision.identity.propertyId === propertyId
   );
 
@@ -261,11 +259,123 @@ async function getRevisions(args: {
     throw new Error(`CHANNEX_FEED_NO_PENDING_REVISIONS:${propertyId}`);
   }
 
-  return {
-    adapter,
-    connection,
-    revisions,
-  };
+  return { adapter, connection, revisions };
+}
+
+async function rejectCancellation(args: {
+  organizationId: string;
+  propertyId: string;
+  reservationId: string | null;
+  eventId: string;
+  revision: ChannexBookingRevision;
+  startedAt: Date;
+}) {
+  await persistRejectedCancellation(args);
+  throw new Error(
+    `CHANNEX_CANCELLATION_NOT_APPLIED:${args.revision.identity.revisionId}`
+  );
+}
+
+async function persistSupersededRevision(args: {
+  persistenceDecisionId: string;
+  lifecycleStartedAt: Date;
+  organizationId: string;
+  propertyId: string;
+  reservationId: string | null;
+  eventId: string;
+  revision: ChannexBookingRevision;
+}) {
+  await persistLifecycleAudit({
+    decisionId: args.persistenceDecisionId,
+    eventType: "DECISION_SKIPPED",
+    status: "SKIPPED",
+    severity: "INFO",
+    summary:
+      "Pin&Go Connect ignored an older or already persisted booking revision.",
+    reason: "CHANNEX_REVISION_SUPERSEDED_OR_ALREADY_PERSISTED",
+    startedAt: args.lifecycleStartedAt,
+    completedAt: new Date(),
+    organizationId: args.organizationId,
+    propertyId: args.propertyId,
+    reservationId: args.reservationId,
+    eventId: args.eventId,
+    revision: args.revision,
+    applied: false,
+    rule: "CHANNEX_REVISION_CHRONOLOGY_GUARD",
+    label: "Booking Revision Chronology Guard",
+  });
+}
+
+async function acknowledgeRevision(args: {
+  organizationId: string;
+  propertyId: string;
+  reservationId: string | null;
+  eventId: string;
+  revision: ChannexBookingRevision;
+  acknowledge: (revisionId: string) => Promise<void>;
+}) {
+  const ackStartedAt = new Date();
+  const decisionId =
+    `distribution-engine:channex-revision:${args.revision.identity.revisionId}:ack`;
+
+  try {
+    await args.acknowledge(args.revision.identity.revisionId);
+  } catch (error: any) {
+    const ackError = String(error?.message ?? error);
+
+    try {
+      await persistLifecycleAudit({
+        decisionId,
+        eventType: "ACTION_FAILED",
+        status: "FAILED",
+        severity: "WARNING",
+        summary:
+          "Pin&Go Connect persisted the booking revision but could not acknowledge it.",
+        reason: "CHANNEX_REVISION_ACK_FAILED",
+        startedAt: ackStartedAt,
+        completedAt: new Date(),
+        organizationId: args.organizationId,
+        propertyId: args.propertyId,
+        reservationId: args.reservationId,
+        eventId: args.eventId,
+        revision: args.revision,
+        applied: false,
+        rule: "CHANNEX_BOOKING_REVISION_ACK",
+        label: "Pin&Go Connect Booking Acknowledgement",
+        recommendedAction:
+          "Pin&Go will retry the booking acknowledgement automatically.",
+      });
+    } catch (auditError: any) {
+      console.error("[CHANNEX_ACK_AUDIT_PERSIST_FAILED]", {
+        revisionId: args.revision.identity.revisionId,
+        eventId: args.eventId,
+        error: String(auditError?.message ?? auditError),
+      });
+    }
+
+    throw new Error(
+      `CHANNEX_REVISION_ACK_FAILED:${args.revision.identity.revisionId}:${ackError}`
+    );
+  }
+
+  await persistLifecycleAudit({
+    decisionId,
+    eventType: "ACTION_COMPLETED",
+    status: "SUCCESS",
+    severity: "INFO",
+    summary: "Pin&Go Connect acknowledged the persisted booking revision.",
+    reason: "CHANNEX_REVISION_ACKNOWLEDGED",
+    startedAt: ackStartedAt,
+    completedAt: new Date(),
+    organizationId: args.organizationId,
+    propertyId: args.propertyId,
+    reservationId: args.reservationId,
+    eventId: args.eventId,
+    revision: args.revision,
+    applied: true,
+    rule: "CHANNEX_BOOKING_REVISION_ACK",
+    label: "Pin&Go Connect Booking Acknowledgement",
+  });
 }
 
 async function processRevision(args: {
@@ -282,9 +392,11 @@ async function processRevision(args: {
     connectionId: args.connectionId,
     revision: args.revision,
   });
-  const insertedAt = new Date(args.revision.identity.insertedAt ?? "");
 
-  if (Number.isNaN(insertedAt.getTime())) {
+  let insertedAt: Date;
+  try {
+    insertedAt = parseChannexInsertedAt(args.revision.identity.insertedAt);
+  } catch {
     throw new Error(
       `CHANNEX_REVISION_INVALID_INSERTED_AT:${args.revision.identity.revisionId}`
     );
@@ -294,7 +406,7 @@ async function processRevision(args: {
     prisma.reservation.findUnique({
       where: {
         propertyId_externalProvider_externalId: {
-          propertyId: listing.propertyId!,
+          propertyId: listing.propertyId,
           externalProvider: "CHANNEX",
           externalId: args.revision.identity.bookingId,
         },
@@ -312,58 +424,48 @@ async function processRevision(args: {
   ]);
 
   let reservationId = existingReservation?.id ?? null;
-  const cancellationWasRejected =
-    args.revision.reservation.status === "CANCELLED" &&
-    existingReservation?.lastIngestError === "CANCEL_REJECTED_ACTIVE_STAY";
+  const lifecycleAction = classifyChannexRevisionLifecycle({
+    incomingStatus: args.revision.reservation.status,
+    incomingInsertedAt: insertedAt,
+    currentExternalUpdatedAt: existingReservation?.externalUpdatedAt,
+    lastIngestError: existingReservation?.lastIngestError,
+    existingPersistenceAuditStatus:
+      existingPersistenceAudit?.status === "SUCCESS"
+        ? "SUCCESS"
+        : existingPersistenceAudit?.status === "FAILED"
+          ? "FAILED"
+          : existingPersistenceAudit?.status === "SKIPPED"
+            ? "SKIPPED"
+            : null,
+  });
 
-  if (cancellationWasRejected) {
-    await persistRejectedCancellation({
+  if (lifecycleAction === "REJECT_CANCELLATION") {
+    await rejectCancellation({
       organizationId: args.organizationId,
-      propertyId: listing.propertyId!,
+      propertyId: listing.propertyId,
       reservationId,
       eventId: args.eventId,
       revision: args.revision,
       startedAt: lifecycleStartedAt,
     });
-
-    throw new Error(
-      `CHANNEX_CANCELLATION_NOT_APPLIED:${args.revision.identity.revisionId}`
-    );
   }
 
-  const isOlderOrSame = Boolean(
-    existingReservation?.externalUpdatedAt &&
-      insertedAt.getTime() <= existingReservation.externalUpdatedAt.getTime()
-  );
+  if (lifecycleAction === "MARK_SUPERSEDED") {
+    await persistSupersededRevision({
+      persistenceDecisionId,
+      lifecycleStartedAt,
+      organizationId: args.organizationId,
+      propertyId: listing.propertyId,
+      reservationId,
+      eventId: args.eventId,
+      revision: args.revision,
+    });
+  }
 
-  if (isOlderOrSame) {
-    if (existingPersistenceAudit?.status !== "SUCCESS") {
-      const completedAt = new Date();
-
-      await persistLifecycleAudit({
-        decisionId: persistenceDecisionId,
-        eventType: "DECISION_SKIPPED",
-        status: "SKIPPED",
-        severity: "INFO",
-        summary:
-          "Pin&Go Connect ignored an older or already persisted booking revision.",
-        reason: "CHANNEX_REVISION_SUPERSEDED_OR_ALREADY_PERSISTED",
-        startedAt: lifecycleStartedAt,
-        completedAt,
-        organizationId: args.organizationId,
-        propertyId: listing.propertyId!,
-        reservationId,
-        eventId: args.eventId,
-        revision: args.revision,
-        applied: false,
-        rule: "CHANNEX_REVISION_CHRONOLOGY_GUARD",
-        label: "Booking Revision Chronology Guard",
-      });
-    }
-  } else {
+  if (lifecycleAction === "INGEST") {
     const result = await ingestReservation({
       source: resolveReservationSource(args.revision),
-      propertyId: listing.propertyId!,
+      propertyId: listing.propertyId,
       guestName: args.revision.reservation.guest?.name ?? "Guest",
       guestEmail: args.revision.reservation.guest?.email ?? null,
       guestPhone: args.revision.reservation.guest?.phone ?? null,
@@ -390,10 +492,7 @@ async function processRevision(args: {
 
     const persistedReservation = await prisma.reservation.findUnique({
       where: { id: result.reservationId },
-      select: {
-        id: true,
-        lastIngestError: true,
-      },
+      select: { lastIngestError: true },
     });
 
     if (!persistedReservation) {
@@ -402,26 +501,21 @@ async function processRevision(args: {
       );
     }
 
-    const cancellationRejected =
-      args.revision.reservation.status === "CANCELLED" &&
-      persistedReservation.lastIngestError === "CANCEL_REJECTED_ACTIVE_STAY";
-
-    if (cancellationRejected) {
-      await persistRejectedCancellation({
+    if (
+      isChannexCancellationRejected({
+        incomingStatus: args.revision.reservation.status,
+        lastIngestError: persistedReservation.lastIngestError,
+      })
+    ) {
+      await rejectCancellation({
         organizationId: args.organizationId,
-        propertyId: listing.propertyId!,
+        propertyId: listing.propertyId,
         reservationId,
         eventId: args.eventId,
         revision: args.revision,
         startedAt: lifecycleStartedAt,
       });
-
-      throw new Error(
-        `CHANNEX_CANCELLATION_NOT_APPLIED:${args.revision.identity.revisionId}`
-      );
     }
-
-    const completedAt = new Date();
 
     await persistLifecycleAudit({
       decisionId: persistenceDecisionId,
@@ -433,9 +527,9 @@ async function processRevision(args: {
         ? "CHANNEX_REVISION_PERSISTED"
         : "CHANNEX_REVISION_ALREADY_CURRENT",
       startedAt: lifecycleStartedAt,
-      completedAt,
+      completedAt: new Date(),
       organizationId: args.organizationId,
-      propertyId: listing.propertyId!,
+      propertyId: listing.propertyId,
       reservationId,
       eventId: args.eventId,
       revision: args.revision,
@@ -445,68 +539,13 @@ async function processRevision(args: {
     });
   }
 
-  const ackStartedAt = new Date();
-
-  try {
-    await args.acknowledge(args.revision.identity.revisionId);
-  } catch (error: any) {
-    const ackCompletedAt = new Date();
-    const ackError = String(error?.message ?? error);
-
-    try {
-      await persistLifecycleAudit({
-        decisionId: `distribution-engine:channex-revision:${args.revision.identity.revisionId}:ack`,
-        eventType: "ACTION_FAILED",
-        status: "FAILED",
-        severity: "WARNING",
-        summary:
-          "Pin&Go Connect persisted the booking revision but could not acknowledge it.",
-        reason: "CHANNEX_REVISION_ACK_FAILED",
-        startedAt: ackStartedAt,
-        completedAt: ackCompletedAt,
-        organizationId: args.organizationId,
-        propertyId: listing.propertyId!,
-        reservationId,
-        eventId: args.eventId,
-        revision: args.revision,
-        applied: false,
-        rule: "CHANNEX_BOOKING_REVISION_ACK",
-        label: "Pin&Go Connect Booking Acknowledgement",
-        recommendedAction:
-          "Pin&Go will retry the booking acknowledgement automatically.",
-      });
-    } catch (auditError: any) {
-      console.error("[CHANNEX_ACK_AUDIT_PERSIST_FAILED]", {
-        revisionId: args.revision.identity.revisionId,
-        eventId: args.eventId,
-        error: String(auditError?.message ?? auditError),
-      });
-    }
-
-    throw new Error(
-      `CHANNEX_REVISION_ACK_FAILED:${args.revision.identity.revisionId}:${ackError}`
-    );
-  }
-
-  const ackCompletedAt = new Date();
-
-  await persistLifecycleAudit({
-    decisionId: `distribution-engine:channex-revision:${args.revision.identity.revisionId}:ack`,
-    eventType: "ACTION_COMPLETED",
-    status: "SUCCESS",
-    severity: "INFO",
-    summary: "Pin&Go Connect acknowledged the persisted booking revision.",
-    reason: "CHANNEX_REVISION_ACKNOWLEDGED",
-    startedAt: ackStartedAt,
-    completedAt: ackCompletedAt,
+  await acknowledgeRevision({
     organizationId: args.organizationId,
-    propertyId: listing.propertyId!,
+    propertyId: listing.propertyId,
     reservationId,
     eventId: args.eventId,
     revision: args.revision,
-    applied: true,
-    rule: "CHANNEX_BOOKING_REVISION_ACK",
-    label: "Pin&Go Connect Booking Acknowledgement",
+    acknowledge: args.acknowledge,
   });
 }
 
@@ -556,19 +595,12 @@ export async function processChannexBookingWebhookEventById(eventId: string) {
     }
 
     const adapter = getAdapter(PmsProvider.CHANNEX);
-    const parsed = adapter.parseWebhook({
-      headers: {},
-      body: event.payloadRaw,
-    });
+    const parsed = adapter.parseWebhook({ headers: {}, body: event.payloadRaw });
     const lifecycle = await getRevisions({
       parsed,
       connection: event.connection,
     });
-    const revisions = [...lifecycle.revisions].sort((left, right) => {
-      const leftTime = new Date(left.identity.insertedAt ?? "").getTime();
-      const rightTime = new Date(right.identity.insertedAt ?? "").getTime();
-      return leftTime - rightTime;
-    });
+    const revisions = sortChannexRevisionsOldestFirst(lifecycle.revisions);
 
     for (const revision of revisions) {
       await processRevision({
