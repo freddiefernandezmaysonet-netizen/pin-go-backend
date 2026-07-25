@@ -57,7 +57,7 @@ test("active-stay cancellation rejection is detected", () => {
   );
 });
 
-test("chronology guard treats equal timestamps as already processed", () => {
+test("chronology guard treats equal timestamps as already persisted data", () => {
   const insertedAt = new Date("2026-07-24T12:00:00.000Z");
 
   assert.equal(
@@ -92,6 +92,19 @@ test("ACK retry preserves prior persistence success", () => {
       existingPersistenceAuditStatus: "SUCCESS",
     }),
     "PRESERVE_PERSISTED_SUCCESS"
+  );
+});
+
+test("equal timestamp without persistence success is re-ingested for crash recovery", () => {
+  assert.equal(
+    classifyChannexRevisionLifecycle({
+      incomingStatus: "CONFIRMED",
+      incomingInsertedAt: new Date("2026-07-24T12:00:00.000Z"),
+      currentExternalUpdatedAt: new Date("2026-07-24T12:00:00.000Z"),
+      lastIngestError: null,
+      existingPersistenceAuditStatus: null,
+    }),
+    "INGEST"
   );
 });
 
