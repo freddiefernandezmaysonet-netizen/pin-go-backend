@@ -3,25 +3,9 @@ import { PmsProvider } from "@prisma/client";
 import { prisma } from "../lib/prisma";
 import { dispatchPmsWebhookEventById } from "../pms/ingest/webhook.dispatcher";
 import { processRecoverableWebhookBatch } from "../pms/ingest/pms-webhook-recovery.policy";
+import { resolvePmsWebhookRecoveryConfig } from "./pms-webhook-recovery.config";
 
-const POLL_MS = Number(
-  process.env.PMS_WEBHOOK_RECOVERY_POLL_MS ?? 60_000
-);
-const BATCH_SIZE = Number(
-  process.env.PMS_WEBHOOK_RECOVERY_BATCH_SIZE ?? 20
-);
-const MAX_ATTEMPTS = Number(
-  process.env.PMS_WEBHOOK_RECOVERY_MAX_ATTEMPTS ?? 8
-);
-const PENDING_MIN_AGE_MS = Number(
-  process.env.PMS_WEBHOOK_RECOVERY_PENDING_MIN_AGE_MS ?? 30_000
-);
-const RETRY_DELAY_MS = Number(
-  process.env.PMS_WEBHOOK_RECOVERY_RETRY_DELAY_MS ?? 60_000
-);
-const STALE_PROCESSING_MS = Number(
-  process.env.PMS_WEBHOOK_RECOVERY_STALE_PROCESSING_MS ?? 10 * 60_000
-);
+const config = resolvePmsWebhookRecoveryConfig();
 
 let interval: NodeJS.Timeout | null = null;
 let tickRunning = false;
@@ -38,13 +22,13 @@ function logError(message: string, error: unknown) {
 
 async function markExhaustedEvents(now: Date) {
   const staleProcessingCutoff = new Date(
-    now.getTime() - STALE_PROCESSING_MS
+    now.getTime() - config.staleProcessingMs
   );
 
   const exhausted = await prisma.webhookEventIngest.updateMany({
     where: {
       provider: PmsProvider.CHANNEX,
-      attempts: { gte: MAX_ATTEMPTS },
+      attempts: { gte: config.maxAttempts },
       OR: [
         { status: "FAILED" },
         {
@@ -61,7 +45,7 @@ async function markExhaustedEvents(now: Date) {
   if (exhausted.count > 0) {
     log("marked exhausted events dead", {
       count: exhausted.count,
-      maxAttempts: MAX_ATTEMPTS,
+      maxAttempts: config.maxAttempts,
     });
   }
 }
@@ -76,7 +60,7 @@ async function recoverStaleProcessingEvent(args: {
       provider: PmsProvider.CHANNEX,
       status: "PROCESSING",
       updatedAt: { lte: args.staleProcessingCutoff },
-      attempts: { lt: MAX_ATTEMPTS },
+      attempts: { lt: config.maxAttempts },
     },
     data: {
       status: "FAILED",
@@ -97,10 +81,12 @@ async function tick() {
 
   try {
     const now = new Date();
-    const pendingCutoff = new Date(now.getTime() - PENDING_MIN_AGE_MS);
-    const retryCutoff = new Date(now.getTime() - RETRY_DELAY_MS);
+    const pendingCutoff = new Date(
+      now.getTime() - config.pendingMinAgeMs
+    );
+    const retryCutoff = new Date(now.getTime() - config.retryDelayMs);
     const staleProcessingCutoff = new Date(
-      now.getTime() - STALE_PROCESSING_MS
+      now.getTime() - config.staleProcessingMs
     );
 
     await markExhaustedEvents(now);
@@ -108,7 +94,7 @@ async function tick() {
     const events = await prisma.webhookEventIngest.findMany({
       where: {
         provider: PmsProvider.CHANNEX,
-        attempts: { lt: MAX_ATTEMPTS },
+        attempts: { lt: config.maxAttempts },
         OR: [
           {
             status: "PENDING",
@@ -128,7 +114,7 @@ async function tick() {
         { receivedAt: "asc" },
         { createdAt: "asc" },
       ],
-      take: BATCH_SIZE,
+      take: config.batchSize,
       select: {
         id: true,
         provider: true,
@@ -196,17 +182,10 @@ function stop(signal: string) {
 }
 
 async function start() {
-  log("boot", {
-    pollMs: POLL_MS,
-    batchSize: BATCH_SIZE,
-    maxAttempts: MAX_ATTEMPTS,
-    pendingMinAgeMs: PENDING_MIN_AGE_MS,
-    retryDelayMs: RETRY_DELAY_MS,
-    staleProcessingMs: STALE_PROCESSING_MS,
-  });
+  log("boot", config);
 
   await tick();
-  interval = setInterval(() => void tick(), POLL_MS);
+  interval = setInterval(() => void tick(), config.pollMs);
 }
 
 process.once("SIGTERM", () => stop("SIGTERM"));
