@@ -1,0 +1,41 @@
+name: Channex Adapter Certification
+
+on:
+  push:
+    branches:
+      - recovery/distribution-engine-v2-channex-lifecycle
+  pull_request:
+    paths:
+      - "src/pms/adapters/channex.adapter.ts"
+      - "src/pms/adapters/channex.adapter.test.ts"
+      - "src/pms/adapters/types.ts"
+      - "package.json"
+      - "package-lock.json"
+      - ".github/workflows/channex-adapter-certification.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  adapter-certification:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Use Node.js 22
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+
+      - name: Install locked dependencies
+        run: npm ci
+
+      - name: Run Channex adapter certification tests
+        env:
+          CHANNEX_API_KEY: test-api-key
+          CHANNEX_API_BASE_URL: https://staging.channex.io
+        run: npm run test:channex-adapter
