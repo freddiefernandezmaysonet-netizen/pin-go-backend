@@ -13,6 +13,8 @@ on:
       - "src/pms/ingest/channex-booking-lifecycle.policy.test.ts"
       - "src/pms/ingest/channex-booking-lifecycle.service.ts"
       - "src/pms/ingest/channex-runtime-import.smoke.test.ts"
+      - "src/pms/ingest/channex-webhook-auth.ts"
+      - "src/pms/ingest/channex-webhook-auth.test.ts"
       - "src/pms/ingest/pms-webhook-recovery.policy.ts"
       - "src/pms/ingest/pms-webhook-recovery.policy.test.ts"
       - "src/pms/ingest/webhook.dispatcher.ts"
@@ -58,6 +60,9 @@ jobs:
 
       - name: Load webhook dispatcher
         run: npx tsx -e "import('./src/pms/ingest/webhook.dispatcher.ts').then((m) => { if (typeof m.dispatchPmsWebhookEventById !== 'function') process.exit(1); })"
+
+      - name: Load authenticated webhook routes
+        run: npx tsx -e "import('./src/pms/ingest/webhook.routes.ts').then((m) => { if (typeof m.pmsWebhookRouter !== 'function') process.exit(1); })"
 
       - name: Load Distribution lifecycle read model
         run: npx tsx -e "import('./src/apms/distribution-lifecycle-read-model.service.ts').then((m) => { if (typeof m.getDistributionLifecycleSnapshot !== 'function') process.exit(1); })"
