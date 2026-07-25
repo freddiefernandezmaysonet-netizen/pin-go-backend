@@ -36,13 +36,21 @@ function isHostActionError(code: string | null) {
   ].includes(code ?? "");
 }
 
-function getNextAutomaticAction(args: {
+export function getNextAutomaticAction(args: {
   persistenceStatus: string;
   acknowledgementStatus: string;
   eventStatus: string | null;
   attempts: number;
   errorCode: string | null;
 }) {
+  if (
+    (args.persistenceStatus === "PERSISTED" ||
+      args.persistenceStatus === "SUPERSEDED") &&
+    args.acknowledgementStatus === "SENT"
+  ) {
+    return "NONE";
+  }
+
   if (isHostActionError(args.errorCode)) {
     return "WAITING_FOR_HOST_REVIEW";
   }
@@ -289,9 +297,14 @@ export async function getDistributionLifecycleSnapshot(args: {
 
   const revisions = Array.from(revisionsById.values())
     .map((revision) => {
-      const event = revision.webhookEventId
-        ? eventById.get(revision.webhookEventId) ?? null
-        : null;
+      const terminalHealthy =
+        (revision.persistenceStatus === "PERSISTED" ||
+          revision.persistenceStatus === "SUPERSEDED") &&
+        revision.acknowledgementStatus === "SENT";
+      const event =
+        !terminalHealthy && revision.webhookEventId
+          ? eventById.get(revision.webhookEventId) ?? null
+          : null;
       const errorCode = toPublicErrorCode(event?.lastError);
       const attempts = event?.attempts ?? 0;
       const eventStatus = event?.status ?? null;
@@ -357,6 +370,7 @@ export async function getDistributionLifecycleSnapshot(args: {
         errorCode,
         recoverable:
           !hostActionRequired &&
+          nextAutomaticAction !== "NONE" &&
           nextAutomaticAction !== "RECOVERY_EXHAUSTED",
         hostActionRequired,
         nextAutomaticAction,
