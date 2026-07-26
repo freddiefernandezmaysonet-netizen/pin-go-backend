@@ -56,6 +56,7 @@ type IngestReservationResult = {
   lockId?: string | null;
   warning?: string;
   didChange: boolean;
+  cancelled?: boolean;
   cleaningConfirmation?: {
     reservationId: string;
     propertyId: string;
@@ -225,12 +226,23 @@ export async function ingestReservation(p: IngestPayload) {
       externalRaw: p.externalRaw ?? null,
       status: p.status ?? undefined,
     });
+
+    if (reservation.status === ReservationStatus.CANCELLED) {
+      return {
+        reservationId: reservation.id,
+        reservationNumber: reservation.reservationNumber,
+        guestToken: reservation.guestToken ?? null,
+        didChange,
+        cancelled: true,
+        cleaningConfirmation: null,
+      };
+    }
    
     await ensureGuestJourneyForConfirmedReservation(
       tx as any,
       reservation.id
     );
- 
+  
     const ensured = await ensureGuestToken(tx as any, reservation.id, guestTokenExpiresAt);
 
     const lock = await tx.lock.findFirst({
@@ -312,6 +324,84 @@ if (property?.cleaningNfcEnabled === true) {
   cleaningConfirmation,
 };
   });
+
+if (result.cancelled) {
+  if (result.didChange) {
+    await reconcileReservation(result.reservationId);
+  }
+
+  const auditEntry = createReservationAuditEntry({
+    reservationId: result.reservationId,
+    propertyId: p.propertyId,
+    reason: result.didChange
+      ? "RESERVATION_CANCELLED"
+      : "CANCELLATION_ALREADY_CURRENT",
+    steps: [
+      {
+        rule: result.didChange
+          ? "RESERVATION_CANCELLED"
+          : "CANCELLATION_ALREADY_CURRENT",
+        label: result.didChange
+          ? "Reservation Cancelled"
+          : "Cancellation Already Current",
+        applied: result.didChange,
+        metadata: {
+          reservationId: result.reservationId,
+          source: p.source ?? null,
+          externalProvider,
+          externalId,
+        },
+      },
+      {
+        rule: result.didChange
+          ? "CANCELLATION_RECONCILED"
+          : "CANCELLATION_RECONCILE_SKIPPED",
+        label: result.didChange
+          ? "Cancellation Reconciled"
+          : "Cancellation Reconcile Skipped",
+        applied: result.didChange,
+        metadata: {
+          reservationId: result.reservationId,
+        },
+      },
+    ],
+    metadata: {
+      source: p.source ?? null,
+      externalProvider,
+      externalId,
+      paymentState,
+      checkIn,
+      checkOut,
+      reservationNumber: result.reservationNumber,
+      status: ReservationStatus.CANCELLED,
+    },
+  });
+
+  try {
+    await persistAuditEntry(prisma, auditEntry);
+  } catch (auditPersistenceError: any) {
+    console.error("[APMS_CANCELLATION_AUDIT_PERSIST_ERROR]", {
+      engine: "Reservation",
+      reservationId: result.reservationId,
+      propertyId: p.propertyId,
+      error:
+        auditPersistenceError?.message ??
+        auditPersistenceError,
+    });
+  }
+
+  log("ingest.result", {
+    reservationId: result.reservationId,
+    reservationNumber: result.reservationNumber,
+    didChange: result.didChange,
+    cancelled: true,
+  });
+
+  return {
+    ...result,
+    auditEntry,
+  };
+}
 
 console.log("[CLEANING_CONFIRMATION_RESULT]", {
   reservationId: result.reservationId,
