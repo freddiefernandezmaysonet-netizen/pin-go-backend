@@ -161,14 +161,14 @@ export async function processChannexGlobalBookingRevisionFeed(args: {
         : left.sourceId.localeCompare(right.sourceId);
     });
 
-    const seenRevisionIds = new Set<string>();
+    const completedRevisionIds = new Set<string>();
 
     for (const item of fetched) {
       const revisionId = normalizeString(item.revision.identity.revisionId) ?? "";
       const propertyId = normalizeString(item.revision.identity.propertyId) ?? "";
       const insertedAt = normalizeString(item.revision.identity.insertedAt);
 
-      if (seenRevisionIds.has(revisionId)) {
+      if (completedRevisionIds.has(revisionId)) {
         revisionResults.push({
           sourceId: item.sourceId,
           revisionId,
@@ -178,8 +178,6 @@ export async function processChannexGlobalBookingRevisionFeed(args: {
         });
         continue;
       }
-
-      seenRevisionIds.add(revisionId);
 
       if (getRevisionTimestamp(item.revision) === null) {
         revisionResults.push({
@@ -272,6 +270,7 @@ export async function processChannexGlobalBookingRevisionFeed(args: {
         continue;
       }
 
+      completedRevisionIds.add(revisionId);
       revisionResults.push({
         sourceId: item.sourceId,
         revisionId,
