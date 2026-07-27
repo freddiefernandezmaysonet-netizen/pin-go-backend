@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { readFile } from "node:fs/promises";
 import test from "node:test";
 import type { ChannexGlobalFeedExecutionResult } from "../pms/ingest/channex-global-feed.service";
 import {
@@ -11,6 +12,12 @@ const config = {
   leaseMs: 600_000,
   maxSourcesPerRun: 25,
   maxRevisionsPerRun: 500,
+};
+
+const enabledActivation = {
+  enabled: true,
+  source: "EXPLICIT" as const,
+  rawValue: "true",
 };
 
 function completedResult(
@@ -64,6 +71,17 @@ function logger() {
   return { value, info, errors };
 }
 
+test("worker factory requires an explicit activation contract", async () => {
+  const source = await readFile(
+    new URL("./channex-global-feed.worker.ts", import.meta.url),
+    "utf8"
+  );
+
+  assert.match(source, /activation:\s*ChannexGlobalFeedActivation;/);
+  assert.doesNotMatch(source, /activation\?:\s*ChannexGlobalFeedActivation/);
+  assert.doesNotMatch(source, /programmatic-default/);
+});
+
 test("start runs immediately and schedules polling with the configured interval", async () => {
   let runCalls = 0;
   let scheduledDelay: number | null = null;
@@ -72,6 +90,7 @@ test("start runs immediately and schedules polling with the configured interval"
   const logs = logger();
 
   const worker = createChannexGlobalFeedWorker({
+    activation: enabledActivation,
     config,
     logger: logs.value,
     runOnce: async () => {
@@ -102,6 +121,7 @@ test("scheduled callback starts another tick", async () => {
   let scheduledCallback: (() => void) | null = null;
 
   const worker = createChannexGlobalFeedWorker({
+    activation: enabledActivation,
     config,
     runOnce: async () => {
       runCalls += 1;
@@ -128,6 +148,7 @@ test("does not overlap ticks when a previous run is still active", async () => {
   const logs = logger();
 
   const worker = createChannexGlobalFeedWorker({
+    activation: enabledActivation,
     config,
     logger: logs.value,
     runOnce: async () => {
@@ -161,6 +182,7 @@ test("stop clears polling and waits for the active tick before disconnecting", a
   const fakeHandle = {} as NodeJS.Timeout;
 
   const worker = createChannexGlobalFeedWorker({
+    activation: enabledActivation,
     config,
     runOnce: async () => {
       lifecycle.push("run-started");
@@ -202,6 +224,7 @@ test("stop clears an already scheduled interval", async () => {
   let cleared = 0;
 
   const worker = createChannexGlobalFeedWorker({
+    activation: enabledActivation,
     config,
     runOnce: async () => completedResult(),
     disconnect: async () => undefined,
@@ -222,6 +245,7 @@ test("disconnect executes only once across repeated stop calls", async () => {
   let disconnectCalls = 0;
 
   const worker = createChannexGlobalFeedWorker({
+    activation: enabledActivation,
     config,
     runOnce: async () => completedResult(),
     disconnect: async () => {
@@ -242,6 +266,7 @@ test("tick failures are logged and do not reject the scheduler", async () => {
   const logs = logger();
 
   const worker = createChannexGlobalFeedWorker({
+    activation: enabledActivation,
     config,
     logger: logs.value,
     runOnce: async () => {
@@ -267,6 +292,7 @@ test("start is idempotent and does not schedule a second interval", async () => 
   const logs = logger();
 
   const worker = createChannexGlobalFeedWorker({
+    activation: enabledActivation,
     config,
     logger: logs.value,
     runOnce: async () => {
@@ -298,6 +324,7 @@ test("ticks are skipped once shutdown begins", async () => {
   let runCalls = 0;
 
   const worker = createChannexGlobalFeedWorker({
+    activation: enabledActivation,
     config,
     runOnce: async () => {
       runCalls += 1;
