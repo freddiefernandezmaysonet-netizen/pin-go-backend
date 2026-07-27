@@ -4,6 +4,7 @@ import { buildStagingRuntimeFingerprint } from "./staging-runtime-fingerprint.po
 
 export type ChannexGlobalFeedStagingPreflightInput = {
   nodeEnv: string | null;
+  runtimeRole?: string | null;
   databaseUrl: string | null;
   channexApiKey: string | null;
   pmsCredentialsSecret: string | null;
@@ -94,6 +95,7 @@ export function buildChannexGlobalFeedStagingPreflight(
     railwayGitRepoName: input.railwayGitRepoName,
   });
 
+  const runtimeRole = normalize(input.runtimeRole);
   const databaseUrl = normalize(input.databaseUrl);
   const channexApiKey = normalize(input.channexApiKey);
   const pmsCredentialsSecret = normalize(input.pmsCredentialsSecret);
@@ -104,8 +106,8 @@ export function buildChannexGlobalFeedStagingPreflight(
   const checks: ChannexGlobalFeedStagingPreflightCheck[] = [
     {
       code: "RUNTIME_ROLE_GLOBAL_FEED_WORKER",
-      passed: runtimeFingerprint.role === "GLOBAL_FEED_WORKER",
-      detail: runtimeFingerprint.role,
+      passed: runtimeRole === "GLOBAL_FEED_WORKER",
+      detail: runtimeRole ?? "missing",
     },
     {
       code: "ACTIVATION_DISABLED",
