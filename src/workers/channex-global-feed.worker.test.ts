@@ -311,3 +311,77 @@ test("ticks are skipped once shutdown begins", async () => {
 
   assert.equal(runCalls, 0);
 });
+
+test("disabled worker starts idle without running or scheduling Feed polling", async () => {
+  let runCalls = 0;
+  let intervalCalls = 0;
+  let disconnectCalls = 0;
+  const logs = logger();
+
+  const worker = createChannexGlobalFeedWorker({
+    activation: {
+      enabled: false,
+      source: "DEFAULT_DISABLED",
+      rawValue: null,
+    },
+    config,
+    logger: logs.value,
+    runOnce: async () => {
+      runCalls += 1;
+      return completedResult();
+    },
+    disconnect: async () => {
+      disconnectCalls += 1;
+    },
+    setIntervalFn: (() => {
+      intervalCalls += 1;
+      return {} as NodeJS.Timeout;
+    }) as typeof setInterval,
+    clearIntervalFn: (() => undefined) as typeof clearInterval,
+  });
+
+  await worker.start();
+
+  assert.equal(runCalls, 0);
+  assert.equal(intervalCalls, 0);
+  assert.equal(worker.isRunning(), false);
+  assert.equal(
+    logs.info.some(
+      (entry) => entry.message === "worker idle because activation is disabled"
+    ),
+    true
+  );
+
+  await worker.stop("SIGTERM");
+  assert.equal(disconnectCalls, 1);
+});
+
+test("disabled worker blocks manual ticks", async () => {
+  let runCalls = 0;
+  const logs = logger();
+
+  const worker = createChannexGlobalFeedWorker({
+    activation: {
+      enabled: false,
+      source: "EXPLICIT",
+      rawValue: "false",
+    },
+    config,
+    logger: logs.value,
+    runOnce: async () => {
+      runCalls += 1;
+      return completedResult();
+    },
+    disconnect: async () => undefined,
+  });
+
+  await worker.tick();
+
+  assert.equal(runCalls, 0);
+  assert.equal(
+    logs.info.some(
+      (entry) => entry.message === "tick skipped because worker activation is disabled"
+    ),
+    true
+  );
+});
