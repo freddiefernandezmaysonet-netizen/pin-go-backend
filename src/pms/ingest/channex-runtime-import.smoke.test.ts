@@ -1,8 +1,17 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-test("Channex booking lifecycle service loads", async () => {
+test("Channex booking lifecycle service exposes shared persistence and ACK boundaries", async () => {
   const module = await import("./channex-booking-lifecycle.service");
+
+  assert.equal(
+    typeof module.persistChannexBookingRevision,
+    "function"
+  );
+  assert.equal(
+    typeof module.acknowledgePersistedChannexBookingRevision,
+    "function"
+  );
   assert.equal(
     typeof module.processChannexBookingWebhookEventById,
     "function"
