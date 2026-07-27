@@ -332,6 +332,105 @@ test("deduplicates the same revision returned by multiple credential sources", a
   assert.equal(lease.releasedCount(), 1);
 });
 
+test("retries a duplicate revision from another source after persistence fails", async () => {
+  const lease = defaultLease();
+  const duplicate = revision({
+    revisionId: "revision-persistence-fallback",
+    propertyId: "property-a",
+    insertedAt: "2026-07-01T01:00:00.000Z",
+  });
+  const operations: string[] = [];
+
+  const result = await processChannexGlobalBookingRevisionFeed({
+    sources: [
+      { sourceId: "source-a", fetchRevisions: async () => [duplicate] },
+      { sourceId: "source-b", fetchRevisions: async () => [duplicate] },
+    ],
+    acquireRunLease: lease.acquireRunLease,
+    releaseRunLease: lease.releaseRunLease,
+    resolveTarget: async ({ revision }) => ({
+      kind: "RESOLVED",
+      target: target(revision.identity.propertyId),
+    }),
+    persistRevision: async ({ sourceId }) => {
+      operations.push(`persist:${sourceId}`);
+      if (sourceId === "source-a") {
+        throw new Error("source-a persistence unavailable");
+      }
+    },
+    acknowledgeRevision: async ({ sourceId }) => {
+      operations.push(`ack:${sourceId}`);
+    },
+  });
+
+  assert.deepEqual(operations, [
+    "persist:source-a",
+    "persist:source-b",
+    "ack:source-b",
+  ]);
+  assert.deepEqual(
+    result.revisions.map((item) => [item.sourceId, item.outcome]),
+    [
+      ["source-a", "PERSISTENCE_FAILED"],
+      ["source-b", "ACKNOWLEDGED"],
+    ]
+  );
+  assert.equal(result.acknowledgedRevisionCount, 1);
+  assert.equal(result.failedRevisionCount, 1);
+  assert.equal(result.duplicateRevisionCount, 0);
+  assert.equal(lease.releasedCount(), 1);
+});
+
+test("retries a duplicate revision from another source after acknowledgement fails", async () => {
+  const lease = defaultLease();
+  const duplicate = revision({
+    revisionId: "revision-ack-fallback",
+    propertyId: "property-a",
+    insertedAt: "2026-07-01T01:00:00.000Z",
+  });
+  const operations: string[] = [];
+
+  const result = await processChannexGlobalBookingRevisionFeed({
+    sources: [
+      { sourceId: "source-a", fetchRevisions: async () => [duplicate] },
+      { sourceId: "source-b", fetchRevisions: async () => [duplicate] },
+    ],
+    acquireRunLease: lease.acquireRunLease,
+    releaseRunLease: lease.releaseRunLease,
+    resolveTarget: async ({ revision }) => ({
+      kind: "RESOLVED",
+      target: target(revision.identity.propertyId),
+    }),
+    persistRevision: async ({ sourceId }) => {
+      operations.push(`persist:${sourceId}`);
+    },
+    acknowledgeRevision: async ({ sourceId }) => {
+      operations.push(`ack:${sourceId}`);
+      if (sourceId === "source-a") {
+        throw new Error("source-a ACK unavailable");
+      }
+    },
+  });
+
+  assert.deepEqual(operations, [
+    "persist:source-a",
+    "ack:source-a",
+    "persist:source-b",
+    "ack:source-b",
+  ]);
+  assert.deepEqual(
+    result.revisions.map((item) => [item.sourceId, item.outcome]),
+    [
+      ["source-a", "ACKNOWLEDGEMENT_FAILED"],
+      ["source-b", "ACKNOWLEDGED"],
+    ]
+  );
+  assert.equal(result.acknowledgedRevisionCount, 1);
+  assert.equal(result.failedRevisionCount, 1);
+  assert.equal(result.duplicateRevisionCount, 0);
+  assert.equal(lease.releasedCount(), 1);
+});
+
 test("rejects an invalid insertedAt without resolving, persisting, or acknowledging", async () => {
   const lease = defaultLease();
   let resolutionCalls = 0;
