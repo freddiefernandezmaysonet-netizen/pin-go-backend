@@ -2,7 +2,10 @@ import "dotenv/config";
 import { PmsProvider } from "@prisma/client";
 import { prisma } from "../lib/prisma";
 import { dispatchPmsWebhookEventById } from "../pms/ingest/webhook.dispatcher";
-import { processRecoverableWebhookBatch } from "../pms/ingest/pms-webhook-recovery.policy";
+import {
+  CHANNEX_RECOVERABLE_EVENT_TYPES,
+  processRecoverableWebhookBatch,
+} from "../pms/ingest/pms-webhook-recovery.policy";
 import { resolvePmsWebhookRecoveryConfig } from "./pms-webhook-recovery.config";
 
 const config = resolvePmsWebhookRecoveryConfig();
@@ -28,6 +31,7 @@ async function markExhaustedEvents(now: Date) {
   const exhausted = await prisma.webhookEventIngest.updateMany({
     where: {
       provider: PmsProvider.CHANNEX,
+      eventType: { in: [...CHANNEX_RECOVERABLE_EVENT_TYPES] },
       attempts: { gte: config.maxAttempts },
       OR: [
         { status: "FAILED" },
@@ -58,6 +62,7 @@ async function recoverStaleProcessingEvent(args: {
     where: {
       id: args.eventId,
       provider: PmsProvider.CHANNEX,
+      eventType: { in: [...CHANNEX_RECOVERABLE_EVENT_TYPES] },
       status: "PROCESSING",
       updatedAt: { lte: args.staleProcessingCutoff },
       attempts: { lt: config.maxAttempts },
@@ -94,6 +99,7 @@ async function tick() {
     const events = await prisma.webhookEventIngest.findMany({
       where: {
         provider: PmsProvider.CHANNEX,
+        eventType: { in: [...CHANNEX_RECOVERABLE_EVENT_TYPES] },
         attempts: { lt: config.maxAttempts },
         OR: [
           {
