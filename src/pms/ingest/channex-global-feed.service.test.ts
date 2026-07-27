@@ -166,7 +166,9 @@ test("groups connections with the same credentials into one Feed source", async 
         ];
       },
       persist: async (input) => {
-        operations.push(`persist:${input.connectionId}:${input.revision.identity.revisionId}`);
+        operations.push(
+          `persist:${input.connectionId}:${input.revision.identity.revisionId}`
+        );
         return {
           correlationId: input.correlationId,
           organizationId: input.organizationId,
@@ -375,6 +377,84 @@ test("selects the oldest revisions globally and reports truncation", async () =>
   assert.equal(result.selectedRevisionCount, 2);
   assert.equal(result.truncatedRevisionCount, 1);
   assert.equal(result.fetchedRevisionCount, 2);
+});
+
+test("preserves all credential copies inside a one-revision logical budget", async () => {
+  const operations: string[] = [];
+  let persistenceAttempts = 0;
+  const connections = [
+    connection({
+      id: "connection-a",
+      credentialsEncrypted: "credentials-a",
+      mappings: [
+        { propertyId: "pin-go-a", channexPropertyId: "shared-property" },
+      ],
+    }),
+    connection({
+      id: "connection-b",
+      credentialsEncrypted: "credentials-b",
+      mappings: [
+        { propertyId: "pin-go-b", channexPropertyId: "shared-property" },
+      ],
+    }),
+  ];
+
+  const result = await executeChannexGlobalFeedOnce({
+    config: {
+      ...defaultConfig,
+      maxRevisionsPerRun: 1,
+    },
+    dependencies: dependencies({
+      connections: async () => connections,
+      fetch: async () => [
+        revision({
+          revisionId: "revision-fallback",
+          propertyId: "shared-property",
+          insertedAt: "2026-07-01T01:00:00.000Z",
+        }),
+      ],
+      persist: async (input) => {
+        persistenceAttempts += 1;
+        operations.push(`persist:${input.connectionId}`);
+
+        if (persistenceAttempts === 1) {
+          throw new Error("first credential source persistence failed");
+        }
+
+        return {
+          correlationId: input.correlationId,
+          organizationId: input.organizationId,
+          propertyId:
+            input.connectionId === "connection-a" ? "pin-go-a" : "pin-go-b",
+          reservationId: "reservation-fallback",
+          revision: input.revision,
+        };
+      },
+      acknowledge: async ({ connection: sourceConnection }) => {
+        operations.push(`ack:${sourceConnection.id}`);
+      },
+    }),
+  });
+
+  assert.equal(result.discoveredRevisionCount, 2);
+  assert.equal(result.selectedRevisionCount, 2);
+  assert.equal(result.truncatedRevisionCount, 0);
+  assert.equal(result.fetchedRevisionCount, 2);
+  assert.equal(result.acknowledgedRevisionCount, 1);
+  assert.equal(result.failedRevisionCount, 1);
+  assert.equal(result.duplicateRevisionCount, 0);
+  assert.deepEqual(
+    result.revisions.map((item) => item.outcome),
+    ["PERSISTENCE_FAILED", "ACKNOWLEDGED"]
+  );
+  assert.equal(operations.length, 3);
+  assert.match(operations[0] ?? "", /^persist:connection-[ab]$/);
+  assert.match(operations[1] ?? "", /^persist:connection-[ab]$/);
+  assert.notEqual(operations[0], operations[1]);
+  assert.equal(
+    operations[2],
+    (operations[1] ?? "").replace("persist:", "ack:")
+  );
 });
 
 test("isolates a failed credential source and processes a healthy source", async () => {
