@@ -11,9 +11,16 @@ It does not authorize:
 - production API keys;
 - production properties;
 - real guest personal data;
-- multiple recovery-worker replicas.
+- multiple recovery-worker replicas;
+- multiple Global Feed Worker replicas;
+- enabling the independent Channex Global Feed Worker;
+- querying the real Global Feed through that independent worker.
 
-## Certification target
+The webhook-driven booking lifecycle and the independent Global Feed Worker are separate certification scopes.
+
+## Certification targets
+
+### A. Webhook-driven booking lifecycle
 
 Validate the complete lifecycle:
 
@@ -22,12 +29,28 @@ Channex booking event
 → authenticated Pin&Go webhook
 → durable WebhookEventIngest
 → independent recovery worker
-→ Booking Revision pull or Feed recovery
+→ exact Booking Revision pull or property-scoped Feed recovery
 → canonical Reservation persistence
 → Distribution audit
 → Channex revision ACK
 → Mission Control observability
 ```
+
+### B. Independent Global Feed Worker while disabled
+
+Validate the separately deployable runtime without allowing Feed execution:
+
+```text
+Railway service boot
+→ runtime identity validation
+→ explicit activation gate false
+→ worker remains Online but idle
+→ no first tick
+→ no Global Feed request
+→ no database mutation
+```
+
+The independent Global Feed Worker does not participate in the new-booking, modification, cancellation, persistence-before-ACK or deduplication scenarios in this document while it is disabled.
 
 ## Official behavior represented by this implementation
 
@@ -35,15 +58,25 @@ Channex booking event
 - The webhook is a trigger; Pin&Go does not treat webhook order as booking order.
 - `send_data=false` delivers a minimal trigger containing `event`, `user_id` and `property_id`.
 - Pin&Go pulls the specific Booking Revision when a revision ID is available.
-- Pin&Go uses the Booking Revision Feed when the webhook contains only the property ID.
-- Feed results are processed oldest-first.
+- The recovery worker may use the Booking Revision Feed when a webhook-triggered event contains only the property ID.
+- Recovery-worker Feed results are processed oldest-first.
 - ACK is sent only after Pin&Go has persisted the revision.
+- The independent Global Feed Worker is a separate runtime and remains blocked by `CHANNEX_GLOBAL_FEED_ENABLED=false` during this certification.
+- A successful disabled-worker preflight does not authorize a real Global Feed request.
 
 ## Required staging topology
 
-Use an isolated staging database and two independent services built from PR #24.
+Use an isolated staging database and three independent runtime services built from draft PR #24.
+
+All three runtimes must use the intended branch and current head commit.
 
 ### API service
+
+Service name:
+
+```text
+pin-go-api-staging
+```
 
 Runs the regular Pin&Go API and exposes:
 
@@ -52,7 +85,27 @@ POST /webhooks/channex
 GET /api/dashboard/properties/:id/mission-control
 ```
 
+Start command:
+
+```bash
+npm start
+```
+
+Runtime role:
+
+```text
+PIN_GO_RUNTIME_ROLE=API
+```
+
+The API stores the durable event and hands execution to the recovery worker. It must not execute the independent recovery loop or the Global Feed Worker.
+
 ### Recovery worker service
+
+Service name:
+
+```text
+pin-go-pms-webhook-recovery-staging
+```
 
 Run exactly one replica:
 
@@ -60,19 +113,116 @@ Run exactly one replica:
 npm run worker:pms-webhook-recovery
 ```
 
+Runtime role:
+
+```text
+PIN_GO_RUNTIME_ROLE=RECOVERY_WORKER
+```
+
 Do not mount this command inside the API service or another worker.
+
+This is the only worker authorized to execute the webhook-driven lifecycle scenarios in this protocol.
+
+### Independent Global Feed Worker service
+
+Service name:
+
+```text
+pin-go-channex-global-feed-staging
+```
+
+Run exactly one replica:
+
+```bash
+npm run worker:channex-global-feed
+```
+
+Runtime role and mandatory activation gate:
+
+```text
+PIN_GO_RUNTIME_ROLE=GLOBAL_FEED_WORKER
+CHANNEX_GLOBAL_FEED_ENABLED=false
+```
+
+Required behavior:
+
+- service reaches Railway Online or Active state;
+- boot log reports `activationEnabled: false`;
+- log contains `worker idle because activation is disabled`;
+- `tick completed` is absent;
+- `tick failed` is absent;
+- no real Global Feed request occurs.
+
+The service must have no public domain and no HTTP health check.
 
 ### Required shared configuration
 
-Both services must use the same staging database and compatible values for:
+The runtimes must use the same isolated staging database and compatible values for:
 
 ```text
 DATABASE_URL
 PMS_CREDENTIALS_SECRET
+CHANNEX_API_KEY
 CHANNEX_API_BASE_URL=https://staging.channex.io
+NODE_ENV=staging
 ```
 
-The worker must have access to the Channex staging API key through the existing Pin&Go credential contract.
+The Global Feed Worker must receive secrets through Railway Reference Variables instead of copied secret values:
+
+```text
+DATABASE_URL=${{Postgres-Staging.DATABASE_URL}}
+CHANNEX_API_KEY=${{pin-go-api-staging.CHANNEX_API_KEY}}
+PMS_CREDENTIALS_SECRET=${{pin-go-api-staging.PMS_CREDENTIALS_SECRET}}
+```
+
+A value such as `Postgres-Staging.DATABASE_URL` without the `${{...}}` syntax is literal text, not a valid resolved reference.
+
+When the API and a worker use different textual PostgreSQL URLs, a URL hash alone is not sufficient to prove different databases. Use a sanitized, read-only physical-database identity fingerprint to confirm the same PostgreSQL server and database.
+
+## Boundary between the two Feed paths
+
+This protocol uses two distinct concepts that must not be conflated:
+
+1. **Webhook recovery Feed path:** the recovery worker may query the Booking Revision Feed as part of processing a durable webhook event that only identifies the property. This path is part of the certified booking lifecycle.
+2. **Independent Global Feed Worker:** a dedicated polling runtime intended for future global recovery. It remains disabled and has not queried the real Feed during this certification.
+
+Evidence from one path must never be presented as evidence that the other path was activated.
+
+## Disabled Global Feed Worker preflight
+
+Run only from a trusted console or SSH command attached to:
+
+```text
+pin-go-channex-global-feed-staging
+```
+
+Command:
+
+```bash
+npm run channex:staging:check-global-feed-preflight
+```
+
+Required sanitized result:
+
+```text
+status=READY_DISABLED
+safeToCreateServiceDisabled=true
+networkCallsPerformed=false
+databaseQueriesPerformed=false
+failedChecks=[]
+```
+
+Every check must pass:
+
+- runtime role is `GLOBAL_FEED_WORKER`;
+- activation is explicitly disabled;
+- `DATABASE_URL`, `CHANNEX_API_KEY` and `PMS_CREDENTIALS_SECRET` are configured;
+- Channex URL is HTTPS and scoped to `staging.channex.io`;
+- Railway environment is `staging-channex-certification`;
+- Railway service is `pin-go-channex-global-feed-staging`;
+- repository and branch match the certification topology.
+
+The preflight must not call Channex, query the database or print raw secrets.
 
 ## Staging data preconditions
 
@@ -185,8 +335,8 @@ Create a new staging OTA booking for the mapped property.
 1. Channex calls the authenticated Pin&Go webhook.
 2. API returns HTTP 200 after durable event storage.
 3. `WebhookEventIngest` becomes `PENDING`.
-4. The independent worker claims it as `PROCESSING`.
-5. Pin&Go pulls the Booking Revision or Feed.
+4. The independent recovery worker claims it as `PROCESSING`.
+5. Pin&Go pulls the Booking Revision or uses the webhook recovery Feed path.
 6. A single Reservation is created using the stable Channex booking ID.
 7. `Reservation.externalUpdatedAt` equals the revision `inserted_at`.
 8. Distribution persistence audit becomes `SUCCESS`.
@@ -205,7 +355,8 @@ Create a new staging OTA booking for the mapped property.
 - no duplicate AccessGrant caused by retry;
 - persistence audit present;
 - ACK audit present;
-- Mission Control reports no host action required.
+- Mission Control reports no host action required;
+- independent Global Feed Worker remains disabled and does not participate.
 
 ## Scenario 2 — Booking modification
 
@@ -218,7 +369,8 @@ Modify dates or guest details on the same staging booking.
 - `externalUpdatedAt` advances to the modification revision timestamp;
 - access dates are reconciled through the canonical ingestion path;
 - the modification revision receives ACK only after persistence;
-- Mission Control returns the revision as acknowledged.
+- Mission Control returns the revision as acknowledged;
+- independent Global Feed Worker remains disabled and does not participate.
 
 ## Scenario 3 — Booking cancellation before stay start
 
@@ -231,7 +383,8 @@ Cancel the staging booking before check-in.
 - applicable downstream access reconciliation runs through canonical ingestion;
 - persistence audit is `SUCCESS`;
 - ACK audit is `SUCCESS`;
-- webhook event is `PROCESSED`.
+- webhook event is `PROCESSED`;
+- independent Global Feed Worker remains disabled and does not participate.
 
 ## Scenario 4 — Cancellation rejected for an active stay
 
@@ -254,7 +407,7 @@ Generate two modifications and deliver or process the newer signal before the ol
 
 ### PASS criteria
 
-- Feed processing is oldest-first;
+- webhook recovery Feed processing is oldest-first;
 - a revision older than `Reservation.externalUpdatedAt` cannot overwrite current reservation state;
 - an already persisted revision can still complete ACK recovery;
 - final reservation state matches the newest revision;
@@ -266,11 +419,12 @@ After all revisions have been acknowledged, send the same authenticated property
 
 ### PASS criteria
 
-- Pin&Go queries the Feed;
+- the recovery worker queries the webhook recovery Feed path;
 - an empty property Feed is treated as an idempotent success;
 - event becomes `PROCESSED` with zero revisions;
 - the event does not consume all recovery attempts;
-- Mission Control does not create a false incident.
+- Mission Control does not create a false incident;
+- this test does not activate the independent Global Feed Worker.
 
 ## Scenario 7 — API restart before worker processing
 
@@ -283,15 +437,15 @@ After all revisions have been acknowledged, send the same authenticated property
 ### PASS criteria
 
 - the stored event survives API restart;
-- the worker processes the event without another webhook;
+- the recovery worker processes the event without another webhook;
 - reservation persistence and ACK complete normally.
 
-## Scenario 8 — Worker interruption during processing
+## Scenario 8 — Recovery-worker interruption during processing
 
-1. Allow the worker to claim an event as `PROCESSING`.
-2. Stop the worker before completion.
+1. Allow the recovery worker to claim an event as `PROCESSING`.
+2. Stop the recovery worker before completion.
 3. Wait past `PMS_WEBHOOK_RECOVERY_STALE_PROCESSING_MS`.
-4. Restart the worker.
+4. Restart the recovery worker.
 
 ### PASS criteria
 
@@ -336,6 +490,39 @@ Use controlled staging-only network fault injection that allows the revision fet
 - ACK audit becomes `SUCCESS`;
 - event becomes `PROCESSED`.
 
+## Disabled Global Feed Worker certification
+
+This is an independent certification step and does not replace any lifecycle scenario above.
+
+### Required checks
+
+1. Confirm exactly one `pin-go-channex-global-feed-staging` replica.
+2. Confirm the service uses the same repository, branch and commit intended for the staging run.
+3. Confirm `NODE_ENV=staging`.
+4. Confirm `PIN_GO_RUNTIME_ROLE=GLOBAL_FEED_WORKER`.
+5. Confirm `CHANNEX_GLOBAL_FEED_ENABLED=false` with explicit source.
+6. Confirm Reference Variables resolve without exposing values.
+7. Confirm the worker and API resolve to the same physical staging PostgreSQL database.
+8. Confirm the worker receives the same `CHANNEX_API_KEY` and `PMS_CREDENTIALS_SECRET` as the API using sanitized fingerprints.
+9. Confirm both use `https://staging.channex.io`.
+10. Run the disabled preflight and require `READY_DISABLED` with no failed checks.
+11. Confirm `worker idle because activation is disabled`.
+12. Confirm no `tick completed` and no `tick failed`.
+
+### PASS criteria
+
+```text
+serviceOnline=true
+activationEnabled=false
+activationSource=EXPLICIT
+preflightStatus=READY_DISABLED
+safeToCreateServiceDisabled=true
+networkCallsPerformed=false
+databaseQueriesPerformed=false
+failedChecks=[]
+realGlobalFeedConsulted=false
+```
+
 ## Mission Control verification
 
 Request:
@@ -353,9 +540,11 @@ Validate `item.distributionLifecycle`:
 - exhausted or host-owned failures appear under `actionRequired`;
 - references use OTA or booking references, not internal event IDs.
 
+The disabled Global Feed Worker should not create a Mission Control incident because it performs no tick and no Feed request.
+
 ## Evidence package
 
-Capture the following for each scenario, redacting secrets and guest PII:
+Capture the following for each lifecycle scenario, redacting secrets and guest PII:
 
 - UTC start and completion timestamps;
 - Pin&Go property ID;
@@ -369,15 +558,38 @@ Capture the following for each scenario, redacting secrets and guest PII:
 - `externalUpdatedAt`;
 - Distribution persistence audit decision ID and status;
 - Distribution ACK audit decision ID and status;
-- Channex Feed state before and after ACK;
+- webhook recovery Feed state before and after ACK;
 - Mission Control lifecycle summary;
-- worker logs for recovery scenarios;
+- recovery-worker logs for recovery scenarios;
 - HTTP status for authentication tests.
+
+Capture the following separately for the disabled Global Feed Worker:
+
+- service name;
+- branch and commit SHA;
+- start command;
+- replica count;
+- runtime role;
+- `CHANNEX_GLOBAL_FEED_ENABLED=false` without exposing unrelated variables;
+- Reference Variable source mappings without resolved secret values;
+- sanitized physical-database identity match with the API;
+- matching sanitized fingerprints for `CHANNEX_API_KEY` and `PMS_CREDENTIALS_SECRET`;
+- Channex base host `staging.channex.io`;
+- preflight status `READY_DISABLED`;
+- `safeToCreateServiceDisabled=true`;
+- `networkCallsPerformed=false`;
+- `databaseQueriesPerformed=false`;
+- `failedChecks=[]`;
+- boot log `worker idle because activation is disabled`;
+- absence of `tick completed` and `tick failed`;
+- explicit statement that the real Global Feed was not consulted.
 
 Never include:
 
 - API keys;
+- database URLs;
 - webhook secret values;
+- encryption secret values;
 - encrypted credentials;
 - payment card data;
 - complete guest contact information.
@@ -386,11 +598,11 @@ Never include:
 
 ### PASS
 
-All mandatory scenarios succeed and no reservation, ACK, tenant-routing or security invariant is violated.
+All mandatory webhook lifecycle scenarios succeed, the disabled Global Feed Worker certification passes, and no reservation, ACK, tenant-routing, activation or security invariant is violated.
 
 ### PASS WITH OBSERVATIONS
 
-Core lifecycle succeeds, but a non-blocking operational observation remains documented with an owner and follow-up.
+Core lifecycle and disabled-worker safety succeed, but a non-blocking operational observation remains documented with an owner and follow-up.
 
 ### FAIL — CERTIFICATION BLOCKED
 
@@ -401,11 +613,17 @@ Any of the following occurs:
 - duplicate reservation for the same stable booking ID;
 - older revision overwrites newer state;
 - unauthenticated webhook is accepted;
-- worker loses a durable event;
-- one failed event blocks the rest of the batch;
+- recovery worker loses a durable event;
+- one failed event blocks the rest of the recovery batch;
 - a rejected cancellation receives ACK;
-- secrets appear in logs or API responses;
-- another PMS provider is modified by the Channex recovery worker.
+- another PMS provider is modified by the Channex recovery worker;
+- the independent Global Feed Worker starts enabled;
+- the independent Global Feed Worker performs a tick while disabled;
+- the disabled preflight performs a network call or database query;
+- the disabled preflight returns anything other than `READY_DISABLED`;
+- a Reference Variable remains unresolved or is stored as literal service-variable text;
+- participating runtimes do not resolve to the same physical staging database;
+- secrets appear in logs, command output or API responses.
 
 ## Production gate
 
@@ -413,8 +631,20 @@ Production remains blocked until:
 
 - this protocol is completed against Channex staging;
 - evidence is reviewed;
+- focused CI remains green;
+- the read-only production schema preflight is completed and reviewed;
 - PR #24 is no longer draft;
 - merge is explicitly authorized;
-- a single independent recovery-worker service is configured;
+- a single independent recovery-worker service is configured for production;
 - production webhook registration is designed and separately approved;
 - rollback and monitoring procedures are documented.
+
+The independent Global Feed Worker has an additional separate gate. It must remain disabled until:
+
+- a dedicated activation protocol is reviewed;
+- explicit authorization is given for a controlled real staging Feed consultation;
+- activation scope, polling limits, ACK behavior, rollback and monitoring are approved;
+- the controlled staging Feed consultation passes;
+- production activation receives a separate explicit authorization.
+
+Completion of the webhook booking lifecycle certification does not authorize enabling the independent Global Feed Worker.
