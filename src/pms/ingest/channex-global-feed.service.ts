@@ -180,9 +180,28 @@ function selectOldestRevisions(args: {
       : left.sourceId.localeCompare(right.sourceId);
   });
 
+  const selectedRevisionIds = new Set<string>();
+  const selected: typeof allRevisions = [];
+
+  for (const item of allRevisions) {
+    const revisionId = asString(item.revision.identity.revisionId) ?? "";
+
+    if (selectedRevisionIds.has(revisionId)) {
+      selected.push(item);
+      continue;
+    }
+
+    if (selectedRevisionIds.size >= args.maxRevisionsPerRun) {
+      continue;
+    }
+
+    selectedRevisionIds.add(revisionId);
+    selected.push(item);
+  }
+
   return {
     discoveredRevisionCount: allRevisions.length,
-    selected: allRevisions.slice(0, args.maxRevisionsPerRun),
+    selected,
   };
 }
 
@@ -208,7 +227,6 @@ function buildTargetCandidates(sources: CredentialSource[]) {
           propertyId,
           connectionId: connection.id,
         });
-
         candidates.set(lookupKey, byTarget);
       }
     }
