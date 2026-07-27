@@ -16,6 +16,18 @@ async function readJson(path: string) {
   };
 }
 
+function assertIndependentWorkerConfig(args: {
+  config: Awaited<ReturnType<typeof readJson>>;
+  startCommand: string;
+}) {
+  assert.equal(args.config.build?.builder, "RAILPACK");
+  assert.equal(args.config.deploy?.startCommand, args.startCommand);
+  assert.equal(args.config.deploy?.healthcheckPath, undefined);
+  assert.equal(args.config.deploy?.healthcheckTimeout, undefined);
+  assert.equal(args.config.deploy?.restartPolicyType, "ON_FAILURE");
+  assert.equal(args.config.deploy?.restartPolicyMaxRetries, 10);
+}
+
 test("Railway API config starts only the API and uses DB readiness", async () => {
   const config = await readJson("../../railway.api.json");
 
@@ -32,25 +44,34 @@ test("Railway recovery worker config remains an independent non-HTTP service", a
     "../../railway.pms-webhook-recovery.json"
   );
 
-  assert.equal(config.build?.builder, "RAILPACK");
-  assert.equal(
-    config.deploy?.startCommand,
-    "npm run worker:pms-webhook-recovery"
-  );
-  assert.equal(config.deploy?.healthcheckPath, undefined);
-  assert.equal(config.deploy?.healthcheckTimeout, undefined);
-  assert.equal(config.deploy?.restartPolicyType, "ON_FAILURE");
-  assert.equal(config.deploy?.restartPolicyMaxRetries, 10);
+  assertIndependentWorkerConfig({
+    config,
+    startCommand: "npm run worker:pms-webhook-recovery",
+  });
 });
 
-test("Railway API and worker cannot share a start command", async () => {
+test("Railway global Channex Feed worker config remains an independent non-HTTP service", async () => {
+  const config = await readJson("../../railway.channex-global-feed.json");
+
+  assertIndependentWorkerConfig({
+    config,
+    startCommand: "npm run worker:channex-global-feed",
+  });
+});
+
+test("Railway API and workers use distinct start commands", async () => {
   const apiConfig = await readJson("../../railway.api.json");
-  const workerConfig = await readJson(
+  const recoveryWorkerConfig = await readJson(
     "../../railway.pms-webhook-recovery.json"
   );
-
-  assert.notEqual(
-    apiConfig.deploy?.startCommand,
-    workerConfig.deploy?.startCommand
+  const globalFeedWorkerConfig = await readJson(
+    "../../railway.channex-global-feed.json"
   );
+  const commands = [
+    apiConfig.deploy?.startCommand,
+    recoveryWorkerConfig.deploy?.startCommand,
+    globalFeedWorkerConfig.deploy?.startCommand,
+  ];
+
+  assert.equal(new Set(commands).size, commands.length);
 });
