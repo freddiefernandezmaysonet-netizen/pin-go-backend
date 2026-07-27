@@ -18,6 +18,11 @@ test("Channex booking lifecycle service exposes shared persistence and ACK bound
   );
 });
 
+test("Global Channex booking revision Feed service exposes one-shot execution", async () => {
+  const module = await import("./channex-global-feed.service");
+  assert.equal(typeof module.runChannexGlobalFeedOnce, "function");
+});
+
 test("PMS webhook dispatcher loads", async () => {
   const module = await import("./webhook.dispatcher");
   assert.equal(typeof module.dispatchPmsWebhookEventById, "function");
