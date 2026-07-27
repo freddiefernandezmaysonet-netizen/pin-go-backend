@@ -15,6 +15,14 @@ import {
   sortChannexRevisionsOldestFirst,
 } from "./channex-booking-lifecycle.policy";
 
+export type PersistedChannexBookingRevision = {
+  correlationId: string;
+  organizationId: string;
+  propertyId: string;
+  reservationId: string | null;
+  revision: ChannexBookingRevision;
+};
+
 function asRecord(value: unknown): Record<string, unknown> {
   return value && typeof value === "object" && !Array.isArray(value)
     ? (value as Record<string, unknown>)
@@ -378,13 +386,12 @@ async function acknowledgeRevision(args: {
   });
 }
 
-async function processRevision(args: {
-  eventId: string;
+export async function persistChannexBookingRevision(args: {
+  correlationId: string;
   organizationId: string;
   connectionId: string;
   revision: ChannexBookingRevision;
-  acknowledge: (revisionId: string) => Promise<void>;
-}) {
+}): Promise<PersistedChannexBookingRevision> {
   const lifecycleStartedAt = new Date();
   const persistenceDecisionId =
     `distribution-engine:channex-revision:${args.revision.identity.revisionId}:persisted`;
@@ -444,7 +451,7 @@ async function processRevision(args: {
       organizationId: args.organizationId,
       propertyId: listing.propertyId,
       reservationId,
-      eventId: args.eventId,
+      eventId: args.correlationId,
       revision: args.revision,
       startedAt: lifecycleStartedAt,
     });
@@ -457,7 +464,7 @@ async function processRevision(args: {
       organizationId: args.organizationId,
       propertyId: listing.propertyId,
       reservationId,
-      eventId: args.eventId,
+      eventId: args.correlationId,
       revision: args.revision,
     });
   }
@@ -511,7 +518,7 @@ async function processRevision(args: {
         organizationId: args.organizationId,
         propertyId: listing.propertyId,
         reservationId,
-        eventId: args.eventId,
+        eventId: args.correlationId,
         revision: args.revision,
         startedAt: lifecycleStartedAt,
       });
@@ -531,7 +538,7 @@ async function processRevision(args: {
       organizationId: args.organizationId,
       propertyId: listing.propertyId,
       reservationId,
-      eventId: args.eventId,
+      eventId: args.correlationId,
       revision: args.revision,
       applied: result.didChange,
       rule: "CHANNEX_BOOKING_REVISION_PERSISTENCE",
@@ -539,11 +546,25 @@ async function processRevision(args: {
     });
   }
 
-  await acknowledgeRevision({
+  return {
+    correlationId: args.correlationId,
     organizationId: args.organizationId,
     propertyId: listing.propertyId,
     reservationId,
-    eventId: args.eventId,
+    revision: args.revision,
+  };
+}
+
+export async function acknowledgePersistedChannexBookingRevision(
+  args: PersistedChannexBookingRevision & {
+    acknowledge: (revisionId: string) => Promise<void>;
+  }
+) {
+  await acknowledgeRevision({
+    organizationId: args.organizationId,
+    propertyId: args.propertyId,
+    reservationId: args.reservationId,
+    eventId: args.correlationId,
     revision: args.revision,
     acknowledge: args.acknowledge,
   });
@@ -603,11 +624,15 @@ export async function processChannexBookingWebhookEventById(eventId: string) {
     const revisions = sortChannexRevisionsOldestFirst(lifecycle.revisions);
 
     for (const revision of revisions) {
-      await processRevision({
-        eventId: event.id,
+      const persisted = await persistChannexBookingRevision({
+        correlationId: event.id,
         organizationId: event.connection.organizationId,
         connectionId: event.connection.id,
         revision,
+      });
+
+      await acknowledgePersistedChannexBookingRevision({
+        ...persisted,
         acknowledge: async (revisionId) => {
           await lifecycle.adapter.acknowledgeBookingRevision!({
             connection: lifecycle.connection,
