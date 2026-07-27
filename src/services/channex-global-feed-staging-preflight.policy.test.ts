@@ -4,6 +4,7 @@ import { buildChannexGlobalFeedStagingPreflight } from "./channex-global-feed-st
 
 const common = {
   nodeEnv: "staging",
+  runtimeRole: "GLOBAL_FEED_WORKER",
   databaseUrl: "postgresql://user:database-secret@staging-db:5432/pingo",
   channexApiKey: "channex-secret-key",
   pmsCredentialsSecret: "pms-secret",
@@ -33,6 +34,42 @@ test("declares a correctly scoped disabled staging service ready", () => {
   assert.equal(result.runtimeFingerprint.role, "GLOBAL_FEED_WORKER");
   assert.equal(result.credentialScope.channexBaseUrlHost, "staging.channex.io");
   assert.equal(result.credentialScope.credentialScopeFingerprint?.length, 24);
+});
+
+test("blocks an incorrect runtime role", () => {
+  const result = buildChannexGlobalFeedStagingPreflight({
+    ...common,
+    runtimeRole: "API",
+  });
+
+  assert.equal(result.status, "BLOCKED");
+  assert.equal(result.safeToCreateServiceDisabled, false);
+  assert.equal(
+    result.failedChecks.some(
+      (check) =>
+        check.code === "RUNTIME_ROLE_GLOBAL_FEED_WORKER" &&
+        check.detail === "API"
+    ),
+    true
+  );
+});
+
+test("blocks a missing runtime role", () => {
+  const result = buildChannexGlobalFeedStagingPreflight({
+    ...common,
+    runtimeRole: null,
+  });
+
+  assert.equal(result.status, "BLOCKED");
+  assert.equal(result.safeToCreateServiceDisabled, false);
+  assert.equal(
+    result.failedChecks.some(
+      (check) =>
+        check.code === "RUNTIME_ROLE_GLOBAL_FEED_WORKER" &&
+        check.detail === "missing"
+    ),
+    true
+  );
 });
 
 test("never includes raw secrets in serialized output", () => {
