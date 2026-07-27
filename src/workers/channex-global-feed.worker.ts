@@ -43,18 +43,14 @@ function errorMessage(error: unknown) {
 
 export function createChannexGlobalFeedWorker(args: {
   config: ChannexGlobalFeedConfig;
-  activation?: ChannexGlobalFeedActivation;
+  activation: ChannexGlobalFeedActivation;
   runOnce?: typeof runChannexGlobalFeedOnce;
   disconnect?: () => Promise<void>;
   logger?: ChannexGlobalFeedWorkerLogger;
   setIntervalFn?: typeof setInterval;
   clearIntervalFn?: typeof clearInterval;
 }): ChannexGlobalFeedWorkerController {
-  const activation = args.activation ?? {
-    enabled: true,
-    source: "EXPLICIT" as const,
-    rawValue: "programmatic-default",
-  };
+  const activation = args.activation;
   const runOnce = args.runOnce ?? runChannexGlobalFeedOnce;
   const disconnect = args.disconnect ?? (() => prisma.$disconnect());
   const logger = args.logger ?? defaultLogger();
