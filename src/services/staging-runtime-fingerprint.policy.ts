@@ -1,6 +1,9 @@
 import crypto from "node:crypto";
 
-export type StagingRuntimeRole = "API" | "RECOVERY_WORKER";
+export type StagingRuntimeRole =
+  | "API"
+  | "RECOVERY_WORKER"
+  | "GLOBAL_FEED_WORKER";
 
 export type StagingRuntimeFingerprintInput = {
   role: StagingRuntimeRole;
