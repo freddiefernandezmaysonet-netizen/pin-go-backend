@@ -109,13 +109,22 @@ export async function runChannexGlobalFeedStagingOnce(
 
   try {
     const result = await runOnce({ config: ONE_SHOT_CONFIG });
+    const acknowledgedResults = result.revisions.filter(
+      (revision) => revision.outcome === "ACKNOWLEDGED"
+    );
 
     const success =
       result.status === "COMPLETED" &&
+      result.connectionCount >= 1 &&
       result.credentialSourceCount === 1 &&
-      result.selectedRevisionCount <= 1 &&
+      result.discoveredRevisionCount >= 1 &&
+      result.selectedRevisionCount === 1 &&
+      result.acknowledgedRevisionCount === 1 &&
+      acknowledgedResults.length === 1 &&
       result.failedSourceCount === 0 &&
-      result.failedRevisionCount === 0;
+      result.failedRevisionCount === 0 &&
+      result.duplicateRevisionCount === 0 &&
+      result.emptyFeed === false;
 
     printJson(success ? log : logError, {
       provider: "PIN_GO_CONNECT",
