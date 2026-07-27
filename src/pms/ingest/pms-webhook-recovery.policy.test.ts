@@ -1,6 +1,10 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { processRecoverableWebhookBatch } from "./pms-webhook-recovery.policy";
+import {
+  CHANNEX_RECOVERABLE_EVENT_TYPES,
+  isRecoverableChannexBookingEventType,
+  processRecoverableWebhookBatch,
+} from "./pms-webhook-recovery.policy";
 
 const events = [
   {
@@ -18,6 +22,34 @@ const events = [
     attempts: 0,
   },
 ];
+
+test("only Channex booking lifecycle events are recoverable", () => {
+  assert.deepEqual([...CHANNEX_RECOVERABLE_EVENT_TYPES], [
+    "booking",
+    "booking_new",
+    "booking_modification",
+    "booking_cancellation",
+    "non_acked_booking",
+  ]);
+
+  for (const eventType of CHANNEX_RECOVERABLE_EVENT_TYPES) {
+    assert.equal(isRecoverableChannexBookingEventType(eventType), true);
+    assert.equal(
+      isRecoverableChannexBookingEventType(eventType.toUpperCase()),
+      true
+    );
+  }
+
+  for (const eventType of [
+    "ari",
+    "test",
+    "updated_channel",
+    "booking_revision",
+    "",
+  ]) {
+    assert.equal(isRecoverableChannexBookingEventType(eventType), false);
+  }
+});
 
 test("one failed event does not block later events in the batch", async () => {
   const dispatched: string[] = [];
