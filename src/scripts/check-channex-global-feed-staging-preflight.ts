@@ -4,6 +4,7 @@ import { buildChannexGlobalFeedStagingPreflight } from "../services/channex-glob
 try {
   const report = buildChannexGlobalFeedStagingPreflight({
     nodeEnv: process.env.NODE_ENV ?? null,
+    runtimeRole: process.env.PIN_GO_RUNTIME_ROLE ?? null,
     databaseUrl: process.env.DATABASE_URL ?? null,
     channexApiKey: process.env.CHANNEX_API_KEY ?? null,
     pmsCredentialsSecret: process.env.PMS_CREDENTIALS_SECRET ?? null,
