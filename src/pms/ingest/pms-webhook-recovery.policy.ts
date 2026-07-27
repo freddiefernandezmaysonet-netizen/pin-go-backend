@@ -1,3 +1,21 @@
+export const CHANNEX_RECOVERABLE_EVENT_TYPES = [
+  "booking",
+  "booking_new",
+  "booking_modification",
+  "booking_cancellation",
+  "non_acked_booking",
+] as const;
+
+const CHANNEX_RECOVERABLE_EVENT_TYPE_SET = new Set<string>(
+  CHANNEX_RECOVERABLE_EVENT_TYPES
+);
+
+export function isRecoverableChannexBookingEventType(eventType: string) {
+  return CHANNEX_RECOVERABLE_EVENT_TYPE_SET.has(
+    String(eventType ?? "").trim().toLowerCase()
+  );
+}
+
 export type RecoverableWebhookEvent = {
   id: string;
   provider: string;
