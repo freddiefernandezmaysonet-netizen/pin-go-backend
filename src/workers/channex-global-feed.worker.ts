@@ -3,9 +3,15 @@ import { pathToFileURL } from "node:url";
 import { prisma } from "../lib/prisma";
 import { runChannexGlobalFeedOnce } from "../pms/ingest/channex-global-feed.service";
 import {
+  resolveChannexGlobalFeedActivation,
+  type ChannexGlobalFeedActivation,
+} from "./channex-global-feed.activation";
+import {
   resolveChannexGlobalFeedConfig,
   type ChannexGlobalFeedConfig,
 } from "./channex-global-feed.config";
+
+const DISABLED_WORKER_KEEPALIVE_MS = 24 * 60 * 60_000;
 
 export type ChannexGlobalFeedWorkerLogger = {
   info: (message: string, metadata?: Record<string, unknown>) => void;
@@ -37,12 +43,18 @@ function errorMessage(error: unknown) {
 
 export function createChannexGlobalFeedWorker(args: {
   config: ChannexGlobalFeedConfig;
+  activation?: ChannexGlobalFeedActivation;
   runOnce?: typeof runChannexGlobalFeedOnce;
   disconnect?: () => Promise<void>;
   logger?: ChannexGlobalFeedWorkerLogger;
   setIntervalFn?: typeof setInterval;
   clearIntervalFn?: typeof clearInterval;
 }): ChannexGlobalFeedWorkerController {
+  const activation = args.activation ?? {
+    enabled: true,
+    source: "EXPLICIT" as const,
+    rawValue: "programmatic-default",
+  };
   const runOnce = args.runOnce ?? runChannexGlobalFeedOnce;
   const disconnect = args.disconnect ?? (() => prisma.$disconnect());
   const logger = args.logger ?? defaultLogger();
@@ -62,6 +74,14 @@ export function createChannexGlobalFeedWorker(args: {
   };
 
   const tick = async () => {
+    if (!activation.enabled) {
+      logger.info("tick skipped because worker activation is disabled", {
+        activationSource: activation.source,
+        activationRawValue: activation.rawValue,
+      });
+      return;
+    }
+
     if (stopping) {
       logger.info("tick skipped because shutdown is in progress");
       return;
@@ -111,7 +131,20 @@ export function createChannexGlobalFeedWorker(args: {
     }
 
     started = true;
-    logger.info("boot", args.config);
+    logger.info("boot", {
+      ...args.config,
+      activationEnabled: activation.enabled,
+      activationSource: activation.source,
+      activationRawValue: activation.rawValue,
+    });
+
+    if (!activation.enabled) {
+      logger.info("worker idle because activation is disabled", {
+        activationSource: activation.source,
+        activationRawValue: activation.rawValue,
+      });
+      return;
+    }
 
     await tick();
 
@@ -167,16 +200,22 @@ function isDirectExecution() {
 
 async function runWorkerProcess() {
   const logger = defaultLogger();
-  const config = resolveChannexGlobalFeedConfig();
-  const worker = createChannexGlobalFeedWorker({ config, logger });
+  let worker: ChannexGlobalFeedWorkerController | null = null;
+  let idleKeepAlive: NodeJS.Timeout | null = null;
   let exitStarted = false;
 
   const shutdown = (signal: string, exitCode: number) => {
     if (exitStarted) return;
     exitStarted = true;
 
-    void worker
-      .stop(signal)
+    if (idleKeepAlive) {
+      clearInterval(idleKeepAlive);
+      idleKeepAlive = null;
+    }
+
+    const stopPromise = worker ? worker.stop(signal) : prisma.$disconnect();
+
+    void stopPromise
       .then(() => process.exit(exitCode))
       .catch((error) => {
         logger.error("shutdown failed", {
@@ -191,7 +230,19 @@ async function runWorkerProcess() {
   process.once("SIGINT", () => shutdown("SIGINT", 0));
 
   try {
+    const activation = resolveChannexGlobalFeedActivation();
+    const config = resolveChannexGlobalFeedConfig();
+    worker = createChannexGlobalFeedWorker({
+      activation,
+      config,
+      logger,
+    });
+
     await worker.start();
+
+    if (!activation.enabled) {
+      idleKeepAlive = setInterval(() => undefined, DISABLED_WORKER_KEEPALIVE_MS);
+    }
   } catch (error) {
     logger.error("boot failed", {
       error: errorMessage(error),
