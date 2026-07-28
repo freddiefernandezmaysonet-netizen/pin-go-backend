@@ -50,6 +50,9 @@
     "seed": "tsx prisma/seed/seed.ts",
     "postinstall": "prisma generate"
   },
+  "prisma": {
+    "schema": "./prisma"
+  },
   "dependencies": {
     "@prisma/client": "6.19.3",
     "@tanstack/react-query": "^5.90.21",
