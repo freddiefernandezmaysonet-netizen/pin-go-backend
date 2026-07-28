@@ -119,6 +119,11 @@ function normalizeIncrementalScope(
     const dateFrom = dateKeys[0];
     const dateToExclusive = addUtcDays(dateKeys[dateKeys.length - 1], 1);
 
+    assertWithinActiveHorizon({
+      from: dateFrom,
+      toExclusive: dateToExclusive,
+    });
+
     return {
       syncMode: "INCREMENTAL",
       scope: "EXACT_DATES",
