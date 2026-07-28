@@ -1,11 +1,12 @@
 import crypto from "node:crypto";
-import { formatInTimeZone, fromZonedTime } from "date-fns-tz";
+import { formatInTimeZone } from "date-fns-tz";
 
 import {
   CHANNEX_ARI_FULL_SYNC_DAYS,
   addUtcDays,
   assertDateKey,
   assertPayloadWithinLimit,
+  countRangeDays,
   normalizeDateKeys,
 } from "./channex-ari-lifecycle.policy";
 
@@ -34,6 +35,8 @@ export type ChannexAriAvailabilitySnapshot = {
   dateToExclusive: string;
   unavailableDateKeys: string[];
 };
+
+type AvailabilityRangeSource = "RESERVATION" | "BLOCK";
 
 function requireText(value: unknown, errorCode: string): string {
   const normalized = String(value ?? "").trim();
@@ -66,7 +69,7 @@ function assertValidTimezone(timezone: string): string {
 
 function normalizeRanges(
   ranges: ChannexAriAvailabilityRange[],
-  source: "RESERVATION" | "BLOCK"
+  source: AvailabilityRangeSource
 ): ChannexAriAvailabilityRange[] {
   return ranges.map((range, index) => {
     const startsAt = new Date(range.startsAt);
@@ -88,29 +91,54 @@ function normalizeRanges(
   });
 }
 
-function buildLocalNightInterval(dateKey: string, timezone: string) {
-  const from = assertDateKey(dateKey);
-  const toExclusive = addUtcDays(from, 1);
-
-  const startsAt = fromZonedTime(`${from}T00:00:00`, timezone);
-  const endsAt = fromZonedTime(`${toExclusive}T00:00:00`, timezone);
-
-  if (
-    Number.isNaN(startsAt.getTime()) ||
-    Number.isNaN(endsAt.getTime()) ||
-    endsAt <= startsAt
-  ) {
-    throw new Error("CHANNEX_ARI_LOCAL_NIGHT_INTERVAL_INVALID");
-  }
-
-  return { startsAt, endsAt };
+function toPropertyDateKey(date: Date, timezone: string): string {
+  return assertDateKey(formatInTimeZone(date, timezone, "yyyy-MM-dd"));
 }
 
-function overlaps(
-  night: ChannexAriAvailabilityRange,
-  occupied: ChannexAriAvailabilityRange
-): boolean {
-  return occupied.startsAt < night.endsAt && occupied.endsAt > night.startsAt;
+function addDateRangeToSet(input: {
+  target: Set<string>;
+  from: string;
+  toExclusive: string;
+  errorCode: string;
+}): void {
+  if (input.toExclusive <= input.from) {
+    throw new Error(input.errorCode);
+  }
+
+  for (
+    let dateKey = input.from;
+    dateKey < input.toExclusive;
+    dateKey = addUtcDays(dateKey, 1)
+  ) {
+    input.target.add(dateKey);
+  }
+}
+
+function buildOccupiedDateKeySet(input: {
+  ranges: ChannexAriAvailabilityRange[];
+  source: AvailabilityRangeSource;
+  timezone: string;
+}): Set<string> {
+  const occupiedDateKeys = new Set<string>();
+  const normalizedRanges = normalizeRanges(input.ranges, input.source);
+
+  normalizedRanges.forEach((range, index) => {
+    const from = toPropertyDateKey(range.startsAt, input.timezone);
+    let toExclusive = toPropertyDateKey(range.endsAt, input.timezone);
+
+    if (input.source === "BLOCK" && toExclusive <= from) {
+      toExclusive = addUtcDays(from, 1);
+    }
+
+    addDateRangeToSet({
+      target: occupiedDateKeys,
+      from,
+      toExclusive,
+      errorCode: `CHANNEX_ARI_${input.source}_${index}_LOCAL_RANGE_INVALID`,
+    });
+  });
+
+  return occupiedDateKeys;
 }
 
 function canonicalJson(value: unknown): string {
@@ -148,26 +176,32 @@ export function buildChannexAriAvailabilitySnapshot(input: {
   const dateToExclusive = addUtcDays(dateKeys[dateKeys.length - 1], 1);
 
   if (
-    Math.round(
-      (new Date(`${dateToExclusive}T00:00:00.000Z`).getTime() -
-        new Date(`${dateFrom}T00:00:00.000Z`).getTime()) /
-        (24 * 60 * 60 * 1000)
-    ) > CHANNEX_ARI_FULL_SYNC_DAYS
+    countRangeDays({
+      from: dateFrom,
+      toExclusive: dateToExclusive,
+    }) > CHANNEX_ARI_FULL_SYNC_DAYS
   ) {
     throw new Error("CHANNEX_ARI_AVAILABILITY_SCOPE_EXCEEDS_HORIZON");
   }
 
-  const activeReservationRanges = normalizeRanges(
-    input.activeReservationRanges ?? [],
-    "RESERVATION"
-  );
-  const blockedRanges = normalizeRanges(input.blockedRanges ?? [], "BLOCK");
-  const occupiedRanges = [...activeReservationRanges, ...blockedRanges];
+  const reservationDateKeys = buildOccupiedDateKeySet({
+    ranges: input.activeReservationRanges ?? [],
+    source: "RESERVATION",
+    timezone,
+  });
+  const blockedDateKeys = buildOccupiedDateKeySet({
+    ranges: input.blockedRanges ?? [],
+    source: "BLOCK",
+    timezone,
+  });
+  const unavailableSet = new Set<string>([
+    ...reservationDateKeys,
+    ...blockedDateKeys,
+  ]);
   const unavailableDateKeys: string[] = [];
 
   const values: ChannexAriAvailabilityValue[] = dateKeys.map((dateKey) => {
-    const night = buildLocalNightInterval(dateKey, timezone);
-    const unavailable = occupiedRanges.some((range) => overlaps(night, range));
+    const unavailable = unavailableSet.has(dateKey);
 
     if (unavailable) {
       unavailableDateKeys.push(dateKey);
