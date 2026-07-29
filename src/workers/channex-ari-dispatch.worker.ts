@@ -2,6 +2,10 @@ import {
   runChannexAriDispatchCycle,
   type ChannexAriDispatchCycleDb,
 } from "../pms/outbound/channex-ari-dispatch-cycle.service";
+import {
+  runChannexAriOutboundCycle,
+  type ChannexAriOutboundCycleDb,
+} from "../pms/outbound/channex-ari-outbound-cycle.service";
 import type { ChannexAriDispatchActivation } from "./channex-ari-dispatch.activation";
 import type { ChannexAriDispatchConfig } from "./channex-ari-dispatch.config";
 
@@ -26,6 +30,7 @@ export type CreateChannexAriDispatchWorkerInput = {
   globalApiKey?: string;
   baseUrl?: string;
   runCycle?: typeof runChannexAriDispatchCycle;
+  runOutboundCycle?: typeof runChannexAriOutboundCycle;
   disconnect?: () => Promise<void>;
   logger?: ChannexAriDispatchWorkerLogger;
   clock?: () => Date;
@@ -63,10 +68,26 @@ function readClock(clock: () => Date): Date {
   return now;
 }
 
+function materializationMetadata(materialization: Record<string, any>) {
+  return {
+    materializationOutcome: materialization.outcome,
+    ...(Number.isSafeInteger(materialization.claimedCount)
+      ? { materializationClaimedCount: materialization.claimedCount }
+      : {}),
+    ...(Number.isSafeInteger(materialization.supersededCount)
+      ? { materializationSupersededCount: materialization.supersededCount }
+      : {}),
+    ...(typeof materialization.errorCode === "string"
+      ? { materializationErrorCode: materialization.errorCode }
+      : {}),
+  };
+}
+
 export function createChannexAriDispatchWorker(
   input: CreateChannexAriDispatchWorkerInput
 ): ChannexAriDispatchWorkerController {
-  const runCycle = input.runCycle ?? runChannexAriDispatchCycle;
+  const legacyRunCycle = input.runCycle;
+  const runOutboundCycle = input.runOutboundCycle ?? runChannexAriOutboundCycle;
   const disconnect = input.disconnect ?? (async () => undefined);
   const logger = input.logger ?? defaultLogger();
   const clock = input.clock ?? (() => new Date());
@@ -106,29 +127,54 @@ export function createChannexAriDispatchWorker(
 
     currentTick = (async () => {
       try {
-        const cycleStartedAt = readClock(clock);
-        const result = await runCycle({
-          db: input.db,
-          selection: {
-            now: cycleStartedAt,
-            limit: input.config.selectionLimit,
-            candidateScanLimit: input.config.candidateScanLimit,
-          },
+        if (legacyRunCycle) {
+          const cycleStartedAt = readClock(clock);
+          const result = await legacyRunCycle({
+            db: input.db,
+            selection: {
+              now: cycleStartedAt,
+              limit: input.config.selectionLimit,
+              candidateScanLimit: input.config.candidateScanLimit,
+            },
+            credentialsSecret: input.credentialsSecret,
+            globalApiKey: input.globalApiKey,
+            baseUrl: input.baseUrl,
+            timeoutMs: input.config.timeoutMs,
+            jitterMs: input.config.jitterMs,
+            leaseMs: input.config.leaseMs,
+            completionReserveMs: input.config.completionReserveMs,
+            clock,
+          });
+
+          logger.info("tick completed", {
+            selectedCount: result.batch.selectedCount,
+            recoveredCount: result.batch.recoveredCount,
+            executedCount: result.batch.executedCount,
+            failedCount: result.batch.failedCount,
+          });
+          return;
+        }
+
+        const result = await runOutboundCycle({
+          db: input.db as ChannexAriOutboundCycleDb,
+          selectionLimit: input.config.selectionLimit,
+          candidateScanLimit: input.config.candidateScanLimit,
+          leaseMs: input.config.leaseMs,
+          timeoutMs: input.config.timeoutMs,
+          completionReserveMs: input.config.completionReserveMs,
+          jitterMs: input.config.jitterMs,
           credentialsSecret: input.credentialsSecret,
           globalApiKey: input.globalApiKey,
           baseUrl: input.baseUrl,
-          timeoutMs: input.config.timeoutMs,
-          jitterMs: input.config.jitterMs,
-          leaseMs: input.config.leaseMs,
-          completionReserveMs: input.config.completionReserveMs,
           clock,
         });
 
         logger.info("tick completed", {
-          selectedCount: result.batch.selectedCount,
-          recoveredCount: result.batch.recoveredCount,
-          executedCount: result.batch.executedCount,
-          failedCount: result.batch.failedCount,
+          selectedCount: result.dispatch.batch.selectedCount,
+          recoveredCount: result.dispatch.batch.recoveredCount,
+          executedCount: result.dispatch.batch.executedCount,
+          failedCount: result.dispatch.batch.failedCount,
+          ...materializationMetadata(result.materialization as Record<string, any>),
         });
       } catch (error) {
         logger.error("tick failed", {
