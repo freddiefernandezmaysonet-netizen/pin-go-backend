@@ -1,0 +1,197 @@
+name: Apply Ingest ARI Wiring
+
+on:
+  push:
+    branches:
+      - sprint/distribution-engine-channex-outbound-ari-v1
+    paths:
+      - .github/workflows/apply-ingest-ari-wiring.yml
+
+permissions:
+  contents: write
+
+jobs:
+  apply-ingest-ari-wiring:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout branch
+        uses: actions/checkout@v4
+        with:
+          ref: sprint/distribution-engine-channex-outbound-ari-v1
+          fetch-depth: 0
+
+      - name: Use Node.js 22
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Apply exact ingest producer patch
+        shell: bash
+        run: |
+          python3 <<'PY'
+          from pathlib import Path
+
+          path = Path("src/services/ingest.service.ts")
+          text = path.read_text(encoding="utf-8")
+
+          replacements = [
+              (
+                  'import { fromZonedTime } from "date-fns-tz";',
+                  'import { formatInTimeZone, fromZonedTime } from "date-fns-tz";',
+              ),
+              (
+                  'import { ensureGuestJourneyForConfirmedReservation } from "./guest-journey.service";\n',
+                  'import { ensureGuestJourneyForConfirmedReservation } from "./guest-journey.service";\nimport { persistChannexAriReservationIntent } from "../pms/outbound/channex-ari-reservation-producer.service";\n',
+              ),
+              (
+                  '  select: {\n    checkInTime: true,\n    timezone: true,\n    guestAccessMode: true,\n    cleaningNfcEnabled: true,\n  },\n});\n  \n  const propertyCheckInTime',
+                  '  select: {\n    organizationId: true,\n    checkInTime: true,\n    timezone: true,\n    guestAccessMode: true,\n    cleaningNfcEnabled: true,\n    distributionEnabled: true,\n    distributionStatus: true,\n  },\n});\n\n  if (!property) {\n    throw new Error("Property not found");\n  }\n  \n  const propertyCheckInTime',
+              ),
+              (
+                  '    const result: IngestReservationResult = await prisma.$transaction(async (tx) => {\n    const { reservation, didChange } = await upsertReservation(tx as any, {',
+                  '''    const result: IngestReservationResult = await prisma.$transaction(async (tx) => {
+    const ingestKey = buildIngestKey({
+      source: p.source,
+      propertyId: p.propertyId,
+      guestName: p.guestName,
+      guestEmail: p.guestEmail ?? null,
+      guestPhone: p.guestPhone ?? null,
+      roomName: p.roomName ?? null,
+      checkIn,
+      checkOut,
+      externalProvider,
+      externalId,
+    });
+
+    let previousReservation: {
+      checkIn: Date;
+      checkOut: Date;
+      status: ReservationStatus;
+    } | null = null;
+
+    if (externalProvider && externalId) {
+      previousReservation = await tx.reservation.findUnique({
+        where: {
+          propertyId_externalProvider_externalId: {
+            propertyId: p.propertyId,
+            externalProvider,
+            externalId,
+          },
+        },
+        select: {
+          checkIn: true,
+          checkOut: true,
+          status: true,
+        },
+      });
+    }
+
+    if (!previousReservation) {
+      previousReservation = await tx.reservation.findUnique({
+        where: { ingestKey },
+        select: {
+          checkIn: true,
+          checkOut: true,
+          status: true,
+        },
+      });
+    }
+
+    const { reservation, didChange } = await upsertReservation(tx as any, {''',
+              ),
+              (
+                  '      status: p.status ?? undefined,\n    });\n\n    if (reservation.status === ReservationStatus.CANCELLED) {',
+                  '''      status: p.status ?? undefined,
+    });
+
+    if (
+      didChange &&
+      property.distributionEnabled &&
+      property.distributionStatus === "ACTIVE"
+    ) {
+      const currentStatus =
+        reservation.status === ReservationStatus.ACTIVE
+          ? "ACTIVE"
+          : reservation.status === ReservationStatus.CANCELLED
+          ? "CANCELLED"
+          : null;
+      const previousStatus =
+        previousReservation?.status === ReservationStatus.ACTIVE
+          ? "ACTIVE"
+          : previousReservation?.status === ReservationStatus.CANCELLED
+          ? "CANCELLED"
+          : null;
+
+      if (currentStatus) {
+        const ariNow = new Date();
+
+        await persistChannexAriReservationIntent({
+          db: tx as any,
+          organizationId: property.organizationId,
+          propertyId: reservation.propertyId,
+          reservationId: reservation.id,
+          previous:
+            previousReservation && previousStatus
+              ? {
+                  checkIn: previousReservation.checkIn,
+                  checkOut: previousReservation.checkOut,
+                  status: previousStatus,
+                }
+              : null,
+          current: {
+            checkIn: reservation.checkIn,
+            checkOut: reservation.checkOut,
+            status: currentStatus,
+          },
+          propertyTimezone: propertyTimeZone,
+          todayDateKey: formatInTimeZone(
+            ariNow,
+            propertyTimeZone,
+            "yyyy-MM-dd"
+          ),
+          now: ariNow,
+        });
+      }
+    }
+
+    if (reservation.status === ReservationStatus.CANCELLED) {''',
+              ),
+          ]
+
+          for old, new in replacements:
+              count = text.count(old)
+              if count != 1:
+                  raise SystemExit(
+                      f"Expected exactly one match, found {count}: {old[:120]!r}"
+                  )
+              text = text.replace(old, new, 1)
+
+          path.write_text(text, encoding="utf-8")
+          PY
+
+          git diff --check -- src/services/ingest.service.ts
+          git diff -- src/services/ingest.service.ts
+
+      - name: Install locked dependencies
+        run: npm ci
+
+      - name: Load canonical ingest service
+        run: npx tsx -e "import('./src/services/ingest.service.ts')"
+
+      - name: Run Channex certification suite
+        run: npm run test:channex-certification
+
+      - name: Commit certified ingest wiring
+        shell: bash
+        run: |
+          if git diff --quiet -- src/services/ingest.service.ts; then
+            echo "No ingest change was produced."
+            exit 1
+          fi
+
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add src/services/ingest.service.ts
+          git commit -m "feat: wire reservation availability outbox"
+          git push origin HEAD:sprint/distribution-engine-channex-outbound-ari-v1
