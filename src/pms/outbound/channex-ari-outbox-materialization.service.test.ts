@@ -42,7 +42,7 @@ function claimedEvent(overrides: Record<string, unknown> = {}) {
   return event({
     status: "CLAIMED",
     materializationAttemptCount: 1,
-    claimedAt: NOW,
+    claimedAt: AVAILABLE_AT,
     claimToken: CLAIM_TOKEN,
     claimExpiresAt: CLAIM_EXPIRES_AT,
     ...overrides,
@@ -256,9 +256,18 @@ test("rolls back selection when the seed disappears or a claim CAS loses", async
 test("validates claim input before opening a transaction", async () => {
   const scenarios: Array<[Record<string, unknown>, RegExp]> = [
     [{ claimToken: "" }, /CHANNEX_ARI_OUTBOX_CLAIM_TOKEN_REQUIRED/],
-    [{ claimToken: CLAIM_TOKEN, limit: 0 }, /CHANNEX_ARI_OUTBOX_CLAIM_BATCH_LIMIT_INVALID/],
-    [{ claimToken: CLAIM_TOKEN, limit: 501 }, /CHANNEX_ARI_OUTBOX_CLAIM_BATCH_LIMIT_INVALID/],
-    [{ claimToken: CLAIM_TOKEN, now: new Date("invalid") }, /CHANNEX_ARI_OUTBOX_CLAIM_NOW_INVALID/],
+    [
+      { claimToken: CLAIM_TOKEN, limit: 0 },
+      /CHANNEX_ARI_OUTBOX_CLAIM_BATCH_LIMIT_INVALID/,
+    ],
+    [
+      { claimToken: CLAIM_TOKEN, limit: 501 },
+      /CHANNEX_ARI_OUTBOX_CLAIM_BATCH_LIMIT_INVALID/,
+    ],
+    [
+      { claimToken: CLAIM_TOKEN, now: new Date("invalid") },
+      /CHANNEX_ARI_OUTBOX_CLAIM_NOW_INVALID/,
+    ],
   ];
 
   for (const [input, error] of scenarios) {
