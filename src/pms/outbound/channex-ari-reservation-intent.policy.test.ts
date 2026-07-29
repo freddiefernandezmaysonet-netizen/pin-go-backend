@@ -5,6 +5,7 @@ import {
   buildChannexAriReservationIntent,
   type ChannexAriReservationAvailabilitySnapshot,
 } from "./channex-ari-reservation-intent.policy";
+import { persistChannexAriReservationIntent } from "./channex-ari-reservation-producer.service";
 
 function snapshot(input: {
   checkIn: string;
@@ -16,6 +17,25 @@ function snapshot(input: {
     checkOut: new Date(input.checkOut),
     status: input.status ?? "ACTIVE",
   };
+}
+
+function createDbMock() {
+  const writes: Array<{ data: Record<string, unknown> }> = [];
+
+  const db = {
+    distributionOutboxEvent: {
+      create: async (args: { data: Record<string, unknown> }) => {
+        writes.push(args);
+
+        return {
+          id: `outbox-${writes.length}`,
+          ...args.data,
+        };
+      },
+    },
+  } as any;
+
+  return { db, writes };
 }
 
 test("creates Availability intent for a new active reservation", () => {
@@ -197,6 +217,67 @@ test("returns null for a newly ingested reservation already cancelled", () => {
   });
 
   assert.equal(intent, null);
+});
+
+test("persists the reservation Availability intent through the transaction client", async () => {
+  const { db, writes } = createDbMock();
+  const now = new Date("2026-07-28T12:00:00.000Z");
+
+  const result = await persistChannexAriReservationIntent({
+    db,
+    organizationId: "org-1",
+    propertyId: "property-1",
+    reservationId: "reservation-1",
+    current: snapshot({
+      checkIn: "2026-08-01T19:00:00.000Z",
+      checkOut: "2026-08-04T15:00:00.000Z",
+    }),
+    propertyTimezone: "America/Puerto_Rico",
+    todayDateKey: "2026-07-28",
+    now,
+  });
+
+  assert.equal(result?.id, "outbox-1");
+  assert.equal(writes.length, 1);
+  assert.deepEqual(writes[0].data, {
+    organizationId: "org-1",
+    propertyId: "property-1",
+    provider: "CHANNEX",
+    messageKind: "AVAILABILITY",
+    syncMode: "INCREMENTAL",
+    scope: "EXACT_DATES",
+    dateFrom: new Date("2026-08-01T00:00:00.000Z"),
+    dateToExclusive: new Date("2026-08-04T00:00:00.000Z"),
+    dateKeys: ["2026-08-01", "2026-08-02", "2026-08-03"],
+    trigger: "RESERVATION_CREATED",
+    sourceEntityType: "RESERVATION",
+    sourceEntityId: "reservation-1",
+    correlationId: null,
+    status: "PENDING",
+    availableAt: new Date("2026-07-28T12:00:30.000Z"),
+  });
+});
+
+test("does not persist an outbox event when occupied nights are unchanged", async () => {
+  const { db, writes } = createDbMock();
+  const unchanged = snapshot({
+    checkIn: "2026-08-01T19:00:00.000Z",
+    checkOut: "2026-08-04T15:00:00.000Z",
+  });
+
+  const result = await persistChannexAriReservationIntent({
+    db,
+    organizationId: "org-1",
+    propertyId: "property-1",
+    reservationId: "reservation-1",
+    previous: unchanged,
+    current: unchanged,
+    propertyTimezone: "America/Puerto_Rico",
+    todayDateKey: "2026-07-28",
+  });
+
+  assert.equal(result, null);
+  assert.equal(writes.length, 0);
 });
 
 test("rejects invalid timezone, status and local stay range", () => {
