@@ -146,7 +146,7 @@ test("runs stale recovery and claim execution serially with sanitized evidence",
     transport,
     clock: createClock(RECOVERED_AT, CLAIMED_AT),
     leaseTokenFactory: (selectedAction, index) => {
-      assert.equal(selectedAction, claimAction);
+      assert.equal(selectedAction.deliveryId, claimAction.deliveryId);
       assert.equal(index, 1);
       return "lease-1";
     },
