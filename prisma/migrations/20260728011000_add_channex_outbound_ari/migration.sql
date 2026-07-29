@@ -76,7 +76,13 @@ CREATE TABLE "DistributionOutboxEvent" (
     "correlationId" TEXT,
     "status" "DistributionOutboxStatus" NOT NULL DEFAULT 'PENDING',
     "availableAt" TIMESTAMP(3) NOT NULL,
+    "materializationAttemptCount" INTEGER NOT NULL DEFAULT 0,
     "claimedAt" TIMESTAMP(3),
+    "claimToken" TEXT,
+    "claimExpiresAt" TIMESTAMP(3),
+    "lastErrorCode" TEXT,
+    "lastErrorSummary" TEXT,
+    "deadAt" TIMESTAMP(3),
     "deliveryId" TEXT,
     "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
     "updatedAt" TIMESTAMP(3) NOT NULL,
@@ -144,10 +150,16 @@ CREATE INDEX "ChannexAriDelivery_connectionId_listingId_idx" ON "ChannexAriDeliv
 CREATE INDEX "DistributionOutboxEvent_status_availableAt_idx" ON "DistributionOutboxEvent"("status", "availableAt");
 
 -- CreateIndex
+CREATE INDEX "DistributionOutboxEvent_status_claimExpiresAt_idx" ON "DistributionOutboxEvent"("status", "claimExpiresAt");
+
+-- CreateIndex
 CREATE INDEX "DistributionOutboxEvent_propertyId_messageKind_status_idx" ON "DistributionOutboxEvent"("propertyId", "messageKind", "status");
 
 -- CreateIndex
 CREATE INDEX "DistributionOutboxEvent_correlationId_idx" ON "DistributionOutboxEvent"("correlationId");
+
+-- CreateIndex
+CREATE INDEX "DistributionOutboxEvent_claimToken_idx" ON "DistributionOutboxEvent"("claimToken");
 
 -- CreateIndex
 CREATE INDEX "DistributionOutboxEvent_deliveryId_idx" ON "DistributionOutboxEvent"("deliveryId");
