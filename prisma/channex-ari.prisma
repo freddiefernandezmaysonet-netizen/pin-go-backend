@@ -40,32 +40,40 @@ enum ChannexAriAttemptOutcome {
 }
 
 model DistributionOutboxEvent {
-  id               String                   @id @default(cuid())
-  organizationId   String
-  propertyId       String
-  provider         PmsProvider              @default(CHANNEX)
-  messageKind      ChannexAriMessageKind
-  syncMode         ChannexAriSyncMode
-  scope            ChannexAriScope
-  dateFrom         DateTime?                @db.Date
-  dateToExclusive  DateTime?                @db.Date
-  dateKeys         String[]                 @default([])
-  trigger          String
-  sourceEntityType String?
-  sourceEntityId   String?
-  correlationId    String?
-  status           DistributionOutboxStatus @default(PENDING)
-  availableAt      DateTime
-  claimedAt        DateTime?
-  deliveryId       String?
-  createdAt        DateTime                 @default(now())
-  updatedAt        DateTime                 @updatedAt
+  id                          String                   @id @default(cuid())
+  organizationId              String
+  propertyId                  String
+  provider                    PmsProvider              @default(CHANNEX)
+  messageKind                 ChannexAriMessageKind
+  syncMode                    ChannexAriSyncMode
+  scope                       ChannexAriScope
+  dateFrom                    DateTime?                @db.Date
+  dateToExclusive             DateTime?                @db.Date
+  dateKeys                    String[]                 @default([])
+  trigger                     String
+  sourceEntityType            String?
+  sourceEntityId              String?
+  correlationId               String?
+  status                      DistributionOutboxStatus @default(PENDING)
+  availableAt                 DateTime
+  materializationAttemptCount Int                      @default(0)
+  claimedAt                   DateTime?
+  claimToken                  String?
+  claimExpiresAt              DateTime?
+  lastErrorCode               String?
+  lastErrorSummary            String?
+  deadAt                      DateTime?
+  deliveryId                  String?
+  createdAt                   DateTime                 @default(now())
+  updatedAt                   DateTime                 @updatedAt
 
   delivery ChannexAriDelivery? @relation(fields: [deliveryId], references: [id], onDelete: SetNull)
 
   @@index([status, availableAt])
+  @@index([status, claimExpiresAt])
   @@index([propertyId, messageKind, status])
   @@index([correlationId])
+  @@index([claimToken])
   @@index([deliveryId])
   @@index([organizationId, propertyId])
 }
