@@ -144,6 +144,12 @@ export type GuestCancellationConfirmInput = {
   reason?: string | null;
 };
 
+export type GuestReservationManagementPhase =
+  | "PRE_STAY"
+  | "IN_STAY"
+  | "POST_STAY"
+  | "CANCELLED";
+
 export class GuestCancellationError extends Error {
   statusCode: number;
   code: string;
@@ -180,6 +186,34 @@ function normalizeReason(value: unknown) {
   }
 
   return text.slice(0, 500);
+}
+
+export function classifyGuestReservationManagementPhase({
+  status,
+  requestedAt,
+  checkIn,
+  checkOut,
+}: {
+  status: ReservationStatus;
+  requestedAt: Date;
+  checkIn: Date;
+  checkOut: Date;
+}): GuestReservationManagementPhase {
+  if (status === ReservationStatus.CANCELLED) {
+    return "CANCELLED";
+  }
+
+  const requestedAtTime = requestedAt.getTime();
+
+  if (requestedAtTime < checkIn.getTime()) {
+    return "PRE_STAY";
+  }
+
+  if (requestedAtTime < checkOut.getTime()) {
+    return "IN_STAY";
+  }
+
+  return "POST_STAY";
 }
 
 function normalizeJsonObject(value: unknown) {
@@ -691,16 +725,23 @@ function serializeGuestCancellationPreview({
   reservation,
   snapshot,
   evaluation,
+  managementPhase = "PRE_STAY",
   refundExecution,
   refund,
 }: {
   reservation: any;
   snapshot: CancellationPolicySnapshot;
   evaluation: ReturnType<typeof evaluateCancellationPolicy>;
+  managementPhase?: GuestReservationManagementPhase;
   refundExecution?: string | null;
   refund?: unknown;
 }) {
-  const action = getGuestCancellationAction(evaluation);
+  const action =
+    managementPhase === "IN_STAY"
+      ? "EARLY_DEPARTURE_REQUIRED"
+      : managementPhase === "POST_STAY"
+        ? "STAY_ALREADY_COMPLETED"
+        : getGuestCancellationAction(evaluation);
 
   const policyPresentation =
     renderCancellationPolicySnapshot({
@@ -711,6 +752,9 @@ function serializeGuestCancellationPreview({
     });
 
   return {
+    managementPhase,
+    cancellationAllowed: managementPhase === "PRE_STAY",
+    alreadyCancelled: managementPhase === "CANCELLED",
 reservation: {
   reservationNumber: reservation.reservationNumber,
   propertyName: reservation.property?.name ?? reservation.roomName,
@@ -794,6 +838,30 @@ export async function getGuestCancellationPreview({
   guestToken,
 }: GuestCancellationPreviewInput) {
   const reservation = await getReservationByGuestToken(guestToken);
+  const requestedAt = new Date();
+  const managementPhase = classifyGuestReservationManagementPhase({
+    status: reservation.status,
+    requestedAt,
+    checkIn: reservation.checkIn,
+    checkOut: reservation.checkOut,
+  });
+
+  if (managementPhase === "IN_STAY") {
+    return {
+      managementPhase,
+      cancellationAllowed: false,
+      action: "EARLY_DEPARTURE_REQUIRED",
+    };
+  }
+
+  if (managementPhase === "POST_STAY") {
+    return {
+      managementPhase,
+      cancellationAllowed: false,
+      action: "STAY_ALREADY_COMPLETED",
+    };
+  }
+
   const snapshot = await getEffectiveCancellationPolicySnapshot(reservation);
 
   const evaluation = evaluateCancellationPolicy({
@@ -801,7 +869,7 @@ export async function getGuestCancellationPreview({
     checkIn: reservation.checkIn,
     totalAmount: reservation.totalAmount,
     pricingBreakdown: reservation.pricingBreakdown,
-    requestedAt: new Date(),
+    requestedAt,
     actor: CancellationActor.GUEST,
   });
 
@@ -809,6 +877,7 @@ export async function getGuestCancellationPreview({
     reservation,
     snapshot,
     evaluation,
+    managementPhase,
   });
 }
 
@@ -817,17 +886,15 @@ export async function cancelReservationFromGuestPortal({
   reason,
 }: GuestCancellationConfirmInput) {
   const reservation = await getReservationByGuestToken(guestToken);
+  const requestedAt = new Date();
+  const managementPhase = classifyGuestReservationManagementPhase({
+    status: reservation.status,
+    requestedAt,
+    checkIn: reservation.checkIn,
+    checkOut: reservation.checkOut,
+  });
 
-   if (
-    reservation.status ===
-    ReservationStatus.CANCELLED
-  ) {
-    await finalizeCancelledReservationOperationsSafe({
-      reservationId: reservation.id,
-      cancelledAt:
-        reservation.cancelledAt ?? new Date(),
-    });
-
+   if (managementPhase === "CANCELLED") {
     const snapshot =
       await getEffectiveCancellationPolicySnapshot(
         reservation
@@ -838,7 +905,7 @@ export async function cancelReservationFromGuestPortal({
       checkIn: reservation.checkIn,
       totalAmount: reservation.totalAmount,
       pricingBreakdown: reservation.pricingBreakdown,
-      requestedAt: new Date(),
+      requestedAt,
       actor: CancellationActor.GUEST,
     });
 
@@ -849,12 +916,12 @@ export async function cancelReservationFromGuestPortal({
         reservation,
         snapshot,
         evaluation,
+        managementPhase,
       }),
     };
   }
 
   const snapshot = await getEffectiveCancellationPolicySnapshot(reservation);
-  const requestedAt = new Date();
 
   const evaluation = evaluateCancellationPolicy({
     snapshot,
@@ -864,6 +931,36 @@ export async function cancelReservationFromGuestPortal({
     requestedAt,
     actor: CancellationActor.GUEST,
   });
+
+  if (managementPhase === "IN_STAY") {
+    throw new GuestCancellationError({
+      code: "EARLY_DEPARTURE_REQUIRED",
+      message:
+        "This stay has already started and requires the early departure workflow.",
+      statusCode: 409,
+      details: serializeGuestCancellationPreview({
+        reservation,
+        snapshot,
+        evaluation,
+        managementPhase,
+      }),
+    });
+  }
+
+  if (managementPhase === "POST_STAY") {
+    throw new GuestCancellationError({
+      code: "STAY_ALREADY_COMPLETED",
+      message:
+        "This stay has already been completed and can no longer be cancelled.",
+      statusCode: 409,
+      details: serializeGuestCancellationPreview({
+        reservation,
+        snapshot,
+        evaluation,
+        managementPhase,
+      }),
+    });
+  }
 
   const cancellationReason = normalizeReason(reason);
   const previousExternalRaw = normalizeJsonObject(reservation.externalRaw);
