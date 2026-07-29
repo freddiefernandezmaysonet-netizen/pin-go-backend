@@ -5,6 +5,7 @@ export const CHANNEX_ARI_OUTBOX_DEFAULT_CLAIM_LEASE_MS = 2 * 60_000;
 export const CHANNEX_ARI_OUTBOX_MIN_CLAIM_LEASE_MS = 30_000;
 export const CHANNEX_ARI_OUTBOX_MAX_CLAIM_LEASE_MS = 5 * 60_000;
 export const CHANNEX_ARI_OUTBOX_MAX_ERROR_SUMMARY_LENGTH = 512;
+export const CHANNEX_ARI_OUTBOX_MAX_CLAIM_TOKEN_LENGTH = 128;
 
 export type ChannexAriOutboxMaterializationStatus =
   | "PENDING"
@@ -33,8 +34,12 @@ function requireText(value: unknown, errorCode: string): string {
   return normalized;
 }
 
-function assertValidDate(value: Date, errorCode: string): Date {
-  const normalized = new Date(value);
+function assertValidDate(value: unknown, errorCode: string): Date {
+  if (value === null || value === undefined || value === "") {
+    throw new Error(errorCode);
+  }
+
+  const normalized = new Date(value as Date | string | number);
 
   if (Number.isNaN(normalized.getTime())) {
     throw new Error(errorCode);
@@ -66,6 +71,22 @@ function normalizeLeaseMs(value?: number): number {
   }
 
   return leaseMs;
+}
+
+function normalizeClaimToken(value: unknown): string {
+  const claimToken = requireText(
+    value,
+    "CHANNEX_ARI_OUTBOX_MATERIALIZATION_CLAIM_TOKEN_REQUIRED"
+  );
+
+  if (
+    claimToken.length > CHANNEX_ARI_OUTBOX_MAX_CLAIM_TOKEN_LENGTH ||
+    /[\u0000-\u001F\u007F\s]/.test(claimToken)
+  ) {
+    throw new Error("CHANNEX_ARI_OUTBOX_MATERIALIZATION_CLAIM_TOKEN_INVALID");
+  }
+
+  return claimToken;
 }
 
 function normalizeErrorCode(value: unknown): string {
@@ -117,20 +138,16 @@ function assertMatchingClaim(input: {
   claimToken: string;
 }): {
   attemptCount: number;
+  availableAt: Date;
+  claimedAt: Date;
   claimExpiresAt: Date;
 } {
   if (input.state.status !== "CLAIMED") {
     throw new Error("CHANNEX_ARI_OUTBOX_MATERIALIZATION_CLAIMED_REQUIRED");
   }
 
-  const stateToken = requireText(
-    input.state.claimToken,
-    "CHANNEX_ARI_OUTBOX_MATERIALIZATION_CLAIM_TOKEN_MISSING"
-  );
-  const expectedToken = requireText(
-    input.claimToken,
-    "CHANNEX_ARI_OUTBOX_MATERIALIZATION_CLAIM_TOKEN_REQUIRED"
-  );
+  const stateToken = normalizeClaimToken(input.state.claimToken);
+  const expectedToken = normalizeClaimToken(input.claimToken);
 
   if (stateToken !== expectedToken) {
     throw new Error("CHANNEX_ARI_OUTBOX_MATERIALIZATION_CLAIM_TOKEN_MISMATCH");
@@ -140,12 +157,28 @@ function assertMatchingClaim(input: {
     throw new Error("CHANNEX_ARI_OUTBOX_MATERIALIZATION_DELIVERY_PRESENT");
   }
 
+  const availableAt = assertValidDate(
+    input.state.availableAt,
+    "CHANNEX_ARI_OUTBOX_AVAILABLE_AT_INVALID"
+  );
+  const claimedAt = assertValidDate(
+    input.state.claimedAt,
+    "CHANNEX_ARI_OUTBOX_MATERIALIZATION_CLAIMED_AT_INVALID"
+  );
+  const claimExpiresAt = assertValidDate(
+    input.state.claimExpiresAt,
+    "CHANNEX_ARI_OUTBOX_MATERIALIZATION_CLAIM_EXPIRES_AT_INVALID"
+  );
+
+  if (claimExpiresAt.getTime() <= claimedAt.getTime()) {
+    throw new Error("CHANNEX_ARI_OUTBOX_MATERIALIZATION_CLAIM_WINDOW_INVALID");
+  }
+
   return {
     attemptCount: assertAttemptCount(input.state.materializationAttemptCount),
-    claimExpiresAt: assertValidDate(
-      input.state.claimExpiresAt as Date,
-      "CHANNEX_ARI_OUTBOX_MATERIALIZATION_CLAIM_EXPIRES_AT_INVALID"
-    ),
+    availableAt,
+    claimedAt,
+    claimExpiresAt,
   };
 }
 
@@ -167,10 +200,7 @@ export function buildChannexAriOutboxMaterializationClaim(input: {
     input.claimedAt,
     "CHANNEX_ARI_OUTBOX_CLAIMED_AT_INVALID"
   );
-  const claimToken = requireText(
-    input.claimToken,
-    "CHANNEX_ARI_OUTBOX_CLAIM_TOKEN_REQUIRED"
-  );
+  const claimToken = normalizeClaimToken(input.claimToken);
   const leaseMs = normalizeLeaseMs(input.leaseMs);
 
   if (availableAt.getTime() > claimedAt.getTime()) {
@@ -214,6 +244,10 @@ export function buildChannexAriOutboxMaterializationFailure(input: {
   const errorCode = normalizeErrorCode(input.errorCode);
   const errorSummary = normalizeErrorSummary(input.errorSummary);
 
+  if (failedAt.getTime() < claim.claimedAt.getTime()) {
+    throw new Error("CHANNEX_ARI_OUTBOX_MATERIALIZATION_CLOCK_MOVED_BACKWARD");
+  }
+
   if (failedAt.getTime() >= claim.claimExpiresAt.getTime()) {
     throw new Error("CHANNEX_ARI_OUTBOX_MATERIALIZATION_CLAIM_EXPIRED");
   }
@@ -225,7 +259,7 @@ export function buildChannexAriOutboxMaterializationFailure(input: {
   if (dead) {
     return {
       status: "DEAD" as const,
-      availableAt: input.state.availableAt,
+      availableAt: claim.availableAt,
       claimedAt: null,
       claimToken: null,
       claimExpiresAt: null,
@@ -265,12 +299,17 @@ export function buildChannexAriOutboxStaleClaimRecovery(input: {
   const attemptCount = assertAttemptCount(
     input.state.materializationAttemptCount
   );
-  requireText(
-    input.state.claimToken,
-    "CHANNEX_ARI_OUTBOX_STALE_CLAIM_TOKEN_REQUIRED"
+  normalizeClaimToken(input.state.claimToken);
+  const availableAt = assertValidDate(
+    input.state.availableAt,
+    "CHANNEX_ARI_OUTBOX_AVAILABLE_AT_INVALID"
+  );
+  const claimedAt = assertValidDate(
+    input.state.claimedAt,
+    "CHANNEX_ARI_OUTBOX_STALE_CLAIMED_AT_INVALID"
   );
   const claimExpiresAt = assertValidDate(
-    input.state.claimExpiresAt as Date,
+    input.state.claimExpiresAt,
     "CHANNEX_ARI_OUTBOX_STALE_CLAIM_EXPIRES_AT_INVALID"
   );
   const recoveredAt = assertValidDate(
@@ -282,6 +321,10 @@ export function buildChannexAriOutboxStaleClaimRecovery(input: {
     throw new Error("CHANNEX_ARI_OUTBOX_STALE_DELIVERY_PRESENT");
   }
 
+  if (claimExpiresAt.getTime() <= claimedAt.getTime()) {
+    throw new Error("CHANNEX_ARI_OUTBOX_STALE_CLAIM_WINDOW_INVALID");
+  }
+
   if (claimExpiresAt.getTime() > recoveredAt.getTime()) {
     throw new Error("CHANNEX_ARI_OUTBOX_CLAIM_NOT_STALE");
   }
@@ -289,7 +332,7 @@ export function buildChannexAriOutboxStaleClaimRecovery(input: {
   if (attemptCount >= CHANNEX_ARI_OUTBOX_MAX_MATERIALIZATION_ATTEMPTS) {
     return {
       status: "DEAD" as const,
-      availableAt: input.state.availableAt,
+      availableAt,
       claimedAt: null,
       claimToken: null,
       claimExpiresAt: null,
