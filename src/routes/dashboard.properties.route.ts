@@ -4623,19 +4623,72 @@ dashboardPropertiesRouter.post(
       const { id } = req.params;
 
       const property = await prisma.property.findFirst({
-        where: { id, organizationId: orgId, status: "ACTIVE" },
-        select: { id: true },
+        where: {
+          id,
+          organizationId: orgId,
+          status: "ACTIVE",
+        },
+        select: {
+          id: true,
+          timezone: true,
+          distributionEnabled: true,
+          distributionStatus: true,
+        },
       });
 
       if (!property) {
-        return res.status(404).json({ ok: false, error: "Property not found" });
+        return res.status(404).json({
+          ok: false,
+          error: "Property not found",
+        });
       }
 
-      const result = await applyDefaultHolidayPricingForProperty(property.id);
+      const mutationAt = new Date();
+      const result = await prisma.$transaction(async (tx) => {
+        const appliedResult = await applyDefaultHolidayPricingForProperty(
+          property.id,
+          tx
+        );
+        const holidayDefaultsChanged =
+          appliedResult.created > 0 ||
+          appliedResult.updated > 0 ||
+          appliedResult.deactivated > 0;
+
+        if (
+          holidayDefaultsChanged &&
+          property.distributionEnabled === true &&
+          property.distributionStatus === "ACTIVE"
+        ) {
+          const propertyTimezone =
+            property.timezone ?? "America/Puerto_Rico";
+          const todayDateKey = formatInTimeZone(
+            mutationAt,
+            propertyTimezone,
+            "yyyy-MM-dd"
+          );
+
+          await createChannexAriOutboxEvent(tx, {
+            organizationId: orgId,
+            propertyId: property.id,
+            messageKind: "RATES_RESTRICTIONS",
+            trigger: "HOLIDAY_PRICING_DEFAULTS",
+            syncMode: "INCREMENTAL",
+            dateRange: buildFullSyncRange(todayDateKey),
+            sourceEntityType: "PROPERTY",
+            sourceEntityId: property.id,
+            now: mutationAt,
+          });
+        }
+
+        return appliedResult;
+      });
+
+      let distributionSyncResult: any = null;
 
       return res.json({
         ok: true,
         result,
+        distributionSyncResult,
       });
     } catch (error: any) {
       console.error("POST apply holiday pricing defaults error", error);
