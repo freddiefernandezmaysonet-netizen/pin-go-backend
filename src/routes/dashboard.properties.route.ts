@@ -3901,7 +3901,7 @@ dashboardPropertiesRouter.get(
   }
 );      
 
- dashboardPropertiesRouter.post(
+dashboardPropertiesRouter.post(
   "/api/dashboard/properties/:id/blocked-dates",
   requireAuth,
   async (req, res) => {
@@ -3930,7 +3930,11 @@ dashboardPropertiesRouter.get(
 
       const property = await prisma.property.findFirst({
         where: { id, organizationId: orgId, status: "ACTIVE" },
-        select: { id: true },
+        select: {
+          id: true,
+          distributionEnabled: true,
+          distributionStatus: true,
+        },
       });
 
       if (!property) {
@@ -3982,159 +3986,56 @@ dashboardPropertiesRouter.get(
         });
       }
 
-      const item = await prisma.propertyBlockedDate.create({
-        data: {
-          propertyId: property.id,
-          startDate: start,
-          endDate: end,
-          reason: String(reason || "").trim() || null,
-        },
-        select: {
-          id: true,
-          propertyId: true,
-          startDate: true,
-          endDate: true,
-          reason: true,
-          createdAt: true,
-          updatedAt: true,
-        },
+      const mutationAt = new Date();
+      const item = await prisma.$transaction(async (tx) => {
+        const blockedDate = await tx.propertyBlockedDate.create({
+          data: {
+            propertyId: property.id,
+            startDate: start,
+            endDate: end,
+            reason: String(reason || "").trim() || null,
+          },
+          select: {
+            id: true,
+            propertyId: true,
+            startDate: true,
+            endDate: true,
+            reason: true,
+            createdAt: true,
+            updatedAt: true,
+          },
+        });
+
+        if (
+          property.distributionEnabled === true &&
+          property.distributionStatus === "ACTIVE"
+        ) {
+          await createChannexAriOutboxEvent(tx, {
+            organizationId: orgId,
+            propertyId: property.id,
+            messageKind: "AVAILABILITY",
+            trigger: "BLOCKED_DATE_CREATE",
+            syncMode: "INCREMENTAL",
+            dateRange: {
+              from: blockedDate.startDate.toISOString().slice(0, 10),
+              toExclusive: blockedDate.endDate.toISOString().slice(0, 10),
+            },
+            sourceEntityType: "PROPERTY_BLOCKED_DATE",
+            sourceEntityId: blockedDate.id,
+            now: mutationAt,
+          });
+        }
+
+        return blockedDate;
       });
-  let distributionSyncResult: any = null;
 
-const distributionStartedAt = new Date();
-const distributionDecisionId = `distribution-engine:${property.id}:blocked-date-create:${item.id}`;
+      let distributionSyncResult: any = null;
 
-const blockedStartDate = item.startDate.toISOString().slice(0, 10);
-const blockedEndDate = item.endDate.toISOString().slice(0, 10);
-
-try {
-  distributionSyncResult = await syncChannexAvailabilityForProperty(
-    property.id
-  );
-
-  await prisma.property.update({
-    where: { id: property.id },
-    data: {
-      distributionLastSyncedAt: new Date(),
-      distributionLastError: null,
-    },
-  });
-
-  const distributionCompletedAt = new Date();
-
-  const distributionSyncSucceeded =
-    distributionSyncResult &&
-    typeof distributionSyncResult === "object" &&
-    "ok" in distributionSyncResult
-      ? Boolean((distributionSyncResult as any).ok)
-      : true;
-
-  const distributionAuditEntry = createDistributionAuditEntry({
-    organizationId: orgId,
-    propertyId: property.id,
-    blockedDateId: item.id,
-    decisionId: distributionDecisionId,
-    trigger: "BLOCKED_DATE_CREATE",
-    provider: "CHANNEX",
-    syncType: "AVAILABILITY",
-    startedAt: distributionStartedAt,
-    completedAt: distributionCompletedAt,
-    result: distributionSyncResult,
-    status: distributionSyncSucceeded ? "SUCCESS" : "FAILED",
-    severity: distributionSyncSucceeded ? "INFO" : "WARNING",
-    eventType: distributionSyncSucceeded ? "SYNC_COMPLETED" : "SYNC_FAILED",
-    reason: distributionSyncSucceeded
-      ? "BLOCKED_DATE_CREATE_DISTRIBUTION_SYNC_COMPLETED"
-      : "BLOCKED_DATE_CREATE_DISTRIBUTION_SYNC_FAILED",
-    summary: distributionSyncSucceeded
-      ? "Distribution Engine synchronized channel availability after blocked date creation."
-      : "Distribution Engine could not fully synchronize channel availability after blocked date creation.",
-    rule: "BLOCKED_DATE_CREATE_CHANNEX_AVAILABILITY_SYNC",
-    label: "Blocked Date Creation Channel Availability Sync",
-    recommendedAction: distributionSyncSucceeded
-      ? undefined
-      : "Review Channex sync after creating this blocked date.",
-    metadata: {
-      blockedStartDate,
-      blockedEndDate,
-    },
-  });
-
-  try {
-    await persistAuditEntry(prisma, distributionAuditEntry);
-  } catch (auditPersistenceError: any) {
-    console.error("[APMS_DISTRIBUTION_AUTO_SYNC_AUDIT_PERSIST_ERROR]", {
-      engine: "Distribution",
-      propertyId: property.id,
-      blockedDateId: item.id,
-      provider: "CHANNEX",
-      syncType: "AVAILABILITY",
-      trigger: "BLOCKED_DATE_CREATE",
-      decisionId: distributionAuditEntry.decisionId,
-      error: auditPersistenceError?.message ?? auditPersistenceError,
-    });
-  }
-} catch (syncError: any) {
-  console.error("POST blocked-dates Channex sync error", syncError);
-
-  await prisma.property.update({
-    where: { id: property.id },
-    data: {
-      distributionLastError:
-        syncError?.message ||
-        "Failed to sync Channex after blocked date update",
-    },
-  });
-
-  const distributionCompletedAt = new Date();
-
-  const distributionAuditEntry = createDistributionAuditEntry({
-    organizationId: orgId,
-    propertyId: property.id,
-    blockedDateId: item.id,
-    decisionId: distributionDecisionId,
-    trigger: "BLOCKED_DATE_CREATE",
-    provider: "CHANNEX",
-    syncType: "AVAILABILITY",
-    startedAt: distributionStartedAt,
-    completedAt: distributionCompletedAt,
-    error: syncError,
-    status: "FAILED",
-    severity: "CRITICAL",
-    eventType: "SYNC_FAILED",
-    reason: "BLOCKED_DATE_CREATE_DISTRIBUTION_SYNC_ERROR",
-    summary:
-      "Distribution Engine failed to synchronize channel availability after blocked date creation.",
-    rule: "BLOCKED_DATE_CREATE_CHANNEX_AVAILABILITY_SYNC",
-    label: "Blocked Date Creation Channel Availability Sync",
-    recommendedAction:
-      "Review Channex availability connection and retry sync after creating this blocked date.",
-    metadata: {
-      blockedStartDate,
-      blockedEndDate,
-    },
-  });
-
-  try {
-    await persistAuditEntry(prisma, distributionAuditEntry);
-  } catch (auditPersistenceError: any) {
-    console.error("[APMS_DISTRIBUTION_AUTO_SYNC_AUDIT_PERSIST_ERROR]", {
-      engine: "Distribution",
-      propertyId: property.id,
-      blockedDateId: item.id,
-      provider: "CHANNEX",
-      syncType: "AVAILABILITY",
-      trigger: "BLOCKED_DATE_CREATE",
-      decisionId: distributionAuditEntry.decisionId,
-      error: auditPersistenceError?.message ?? auditPersistenceError,
-    });
-  }
-} 
-return res.json({
-  ok: true,
-  item,
-  distributionSyncResult,
-});
+      return res.json({
+        ok: true,
+        item,
+        distributionSyncResult,
+      });
     } catch (error: any) {
       console.error("POST blocked dates error", error);
 
