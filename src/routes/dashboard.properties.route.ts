@@ -4417,24 +4417,6 @@ dashboardPropertiesRouter.patch(
         select: {
           id: true,
           propertyId: true,
-        },
-      });
-
-      if (!holidayPricing) {
-        return res.status(404).json({
-          ok: false,
-          error: "Holiday pricing not found",
-        });
-      }
-
-      const item = await prisma.propertyHolidayPricing.update({
-        where: { id: holidayPricing.id },
-        data: {
-          adjustmentPercent: parsedAdjustmentPercent,
-        },
-        select: {
-          id: true,
-          propertyId: true,
           name: true,
           startMonth: true,
           startDay: true,
@@ -4445,155 +4427,94 @@ dashboardPropertiesRouter.patch(
           source: true,
           createdAt: true,
           updatedAt: true,
+          property: {
+            select: {
+              timezone: true,
+              distributionEnabled: true,
+              distributionStatus: true,
+            },
+          },
         },
       });
 
-      let distributionSyncResult: any = null;
-
-      const distributionStartedAt = new Date();
-      const distributionRunId = distributionStartedAt
-        .toISOString()
-        .replace(/[:.]/g, "-");
-
-      const distributionDecisionId = `distribution-engine:${holidayPricing.propertyId}:holiday-pricing-update:${item.id}:${distributionRunId}`;
-
-      try {
-        distributionSyncResult = await syncChannexAvailabilityForProperty(
-          holidayPricing.propertyId
-        );
-
-        await prisma.property.update({
-          where: { id: holidayPricing.propertyId },
-          data: {
-            distributionLastSyncedAt: new Date(),
-            distributionLastError: null,
-          },
+      if (!holidayPricing) {
+        return res.status(404).json({
+          ok: false,
+          error: "Holiday pricing not found",
         });
-
-        const distributionCompletedAt = new Date();
-
-        const distributionSyncSucceeded =
-          distributionSyncResult &&
-          typeof distributionSyncResult === "object" &&
-          "ok" in distributionSyncResult
-            ? Boolean((distributionSyncResult as any).ok)
-            : true;
-
-        const distributionAuditEntry = createDistributionAuditEntry({
-          organizationId: orgId,
-          propertyId: holidayPricing.propertyId,
-          decisionId: distributionDecisionId,
-          trigger: "HOLIDAY_PRICING_UPDATE",
-          provider: "CHANNEX",
-          syncType: "AVAILABILITY",
-          startedAt: distributionStartedAt,
-          completedAt: distributionCompletedAt,
-          result: distributionSyncResult,
-          status: distributionSyncSucceeded ? "SUCCESS" : "FAILED",
-          severity: distributionSyncSucceeded ? "INFO" : "WARNING",
-          eventType: distributionSyncSucceeded
-            ? "SYNC_COMPLETED"
-            : "SYNC_FAILED",
-          reason: distributionSyncSucceeded
-            ? "HOLIDAY_PRICING_UPDATE_DISTRIBUTION_SYNC_COMPLETED"
-            : "HOLIDAY_PRICING_UPDATE_DISTRIBUTION_SYNC_FAILED",
-          summary: distributionSyncSucceeded
-            ? "Distribution Engine synchronized channel availability after holiday pricing update."
-            : "Distribution Engine could not fully synchronize channel availability after holiday pricing update.",
-          rule: "HOLIDAY_PRICING_UPDATE_CHANNEX_AVAILABILITY_SYNC",
-          label: "Holiday Pricing Update Channel Availability Sync",
-          recommendedAction: distributionSyncSucceeded
-            ? undefined
-            : "Review Channex sync after updating this holiday pricing rule.",
-          metadata: {
-            holidayPricingId: item.id,
-            holidayName: item.name,
-            holidaySource: item.source,
-            adjustmentPercent: Number(item.adjustmentPercent),
-            startMonth: item.startMonth,
-            startDay: item.startDay,
-            endMonth: item.endMonth,
-            endDay: item.endDay,
-            isActive: item.isActive,
-          },
-        });
-
-        try {
-          await persistAuditEntry(prisma, distributionAuditEntry);
-        } catch (auditPersistenceError: any) {
-          console.error("[APMS_DISTRIBUTION_AUTO_SYNC_AUDIT_PERSIST_ERROR]", {
-            engine: "Distribution",
-            propertyId: holidayPricing.propertyId,
-            provider: "CHANNEX",
-            syncType: "AVAILABILITY",
-            trigger: "HOLIDAY_PRICING_UPDATE",
-            holidayPricingId: item.id,
-            decisionId: distributionAuditEntry.decisionId,
-            error: auditPersistenceError?.message ?? auditPersistenceError,
-          });
-        }
-      } catch (syncError: any) {
-        console.error("PATCH holiday-pricing Channex sync error", syncError);
-
-        await prisma.property.update({
-          where: { id: holidayPricing.propertyId },
-          data: {
-            distributionLastError:
-              syncError?.message ||
-              "Failed to sync Channex after holiday pricing update",
-          },
-        });
-
-        const distributionCompletedAt = new Date();
-
-        const distributionAuditEntry = createDistributionAuditEntry({
-          organizationId: orgId,
-          propertyId: holidayPricing.propertyId,
-          decisionId: distributionDecisionId,
-          trigger: "HOLIDAY_PRICING_UPDATE",
-          provider: "CHANNEX",
-          syncType: "AVAILABILITY",
-          startedAt: distributionStartedAt,
-          completedAt: distributionCompletedAt,
-          error: syncError,
-          status: "FAILED",
-          severity: "CRITICAL",
-          eventType: "SYNC_FAILED",
-          reason: "HOLIDAY_PRICING_UPDATE_DISTRIBUTION_SYNC_ERROR",
-          summary:
-            "Distribution Engine failed to synchronize channel availability after holiday pricing update.",
-          rule: "HOLIDAY_PRICING_UPDATE_CHANNEX_AVAILABILITY_SYNC",
-          label: "Holiday Pricing Update Channel Availability Sync",
-          recommendedAction:
-            "Review Channex availability connection and retry sync after updating this holiday pricing rule.",
-          metadata: {
-            holidayPricingId: item.id,
-            holidayName: item.name,
-            holidaySource: item.source,
-            adjustmentPercent: Number(item.adjustmentPercent),
-            startMonth: item.startMonth,
-            startDay: item.startDay,
-            endMonth: item.endMonth,
-            endDay: item.endDay,
-            isActive: item.isActive,
-          },
-        });
-
-        try {
-          await persistAuditEntry(prisma, distributionAuditEntry);
-        } catch (auditPersistenceError: any) {
-          console.error("[APMS_DISTRIBUTION_AUTO_SYNC_AUDIT_PERSIST_ERROR]", {
-            engine: "Distribution",
-            propertyId: holidayPricing.propertyId,
-            provider: "CHANNEX",
-            syncType: "AVAILABILITY",
-            trigger: "HOLIDAY_PRICING_UPDATE",
-            holidayPricingId: item.id,
-            decisionId: distributionAuditEntry.decisionId,
-            error: auditPersistenceError?.message ?? auditPersistenceError,
-          });
-        }
       }
+
+      const holidayPricingChanged =
+        Number(holidayPricing.adjustmentPercent) !== parsedAdjustmentPercent;
+      const mutationAt = new Date();
+
+      const item = holidayPricingChanged
+        ? await prisma.$transaction(async (tx) => {
+            const updatedHolidayPricing =
+              await tx.propertyHolidayPricing.update({
+                where: { id: holidayPricing.id },
+                data: {
+                  adjustmentPercent: parsedAdjustmentPercent,
+                },
+                select: {
+                  id: true,
+                  propertyId: true,
+                  name: true,
+                  startMonth: true,
+                  startDay: true,
+                  endMonth: true,
+                  endDay: true,
+                  adjustmentPercent: true,
+                  isActive: true,
+                  source: true,
+                  createdAt: true,
+                  updatedAt: true,
+                },
+              });
+
+            if (
+              holidayPricing.property.distributionEnabled === true &&
+              holidayPricing.property.distributionStatus === "ACTIVE"
+            ) {
+              const propertyTimezone =
+                holidayPricing.property.timezone ?? "America/Puerto_Rico";
+              const todayDateKey = formatInTimeZone(
+                mutationAt,
+                propertyTimezone,
+                "yyyy-MM-dd"
+              );
+
+              await createChannexAriOutboxEvent(tx, {
+                organizationId: orgId,
+                propertyId: holidayPricing.propertyId,
+                messageKind: "RATES_RESTRICTIONS",
+                trigger: "HOLIDAY_PRICING_UPDATE",
+                syncMode: "INCREMENTAL",
+                dateRange: buildFullSyncRange(todayDateKey),
+                sourceEntityType: "PROPERTY_HOLIDAY_PRICING",
+                sourceEntityId: updatedHolidayPricing.id,
+                now: mutationAt,
+              });
+            }
+
+            return updatedHolidayPricing;
+          })
+        : {
+            id: holidayPricing.id,
+            propertyId: holidayPricing.propertyId,
+            name: holidayPricing.name,
+            startMonth: holidayPricing.startMonth,
+            startDay: holidayPricing.startDay,
+            endMonth: holidayPricing.endMonth,
+            endDay: holidayPricing.endDay,
+            adjustmentPercent: holidayPricing.adjustmentPercent,
+            isActive: holidayPricing.isActive,
+            source: holidayPricing.source,
+            createdAt: holidayPricing.createdAt,
+            updatedAt: holidayPricing.updatedAt,
+          };
+
+      let distributionSyncResult: any = null;
 
       return res.json({
         ok: true,
@@ -4612,7 +4533,6 @@ dashboardPropertiesRouter.patch(
     }
   }
 );
-
 dashboardPropertiesRouter.post(
   "/api/dashboard/properties/:id/holiday-pricing/apply-defaults",
   requireAuth,
