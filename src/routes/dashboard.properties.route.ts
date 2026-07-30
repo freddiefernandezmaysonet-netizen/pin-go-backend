@@ -3259,15 +3259,15 @@ dashboardPropertiesRouter.post(
       const orgId = user.orgId as string;
       const { id } = req.params;
 
-     const {
-  name,
-  type,
-  startMonth,
-  startDay,
-  endMonth,
-  endDay,
-  adjustmentPercent,
-} = req.body ?? {};
+      const {
+        name,
+        type,
+        startMonth,
+        startDay,
+        endMonth,
+        endDay,
+        adjustmentPercent,
+      } = req.body ?? {};
       const cleanName = String(name || "").trim();
       const parsedStartMonth = Number(startMonth);
       const parsedStartDay = Number(startDay);
@@ -3277,33 +3277,68 @@ dashboardPropertiesRouter.post(
       const parsedSeasonType = parsePropertySeasonType(type);
 
       if (!cleanName) {
-        return res.status(400).json({ ok: false, error: "Season name is required" });
+        return res.status(400).json({
+          ok: false,
+          error: "Season name is required",
+        });
       }
 
       if (!parsedSeasonType) {
-  return res.status(400).json({
-    ok: false,
-    error: "type must be PEAK, SHOULDER, or LOW",
-  });
-}
-
-      if (!Number.isInteger(parsedStartMonth) || parsedStartMonth < 1 || parsedStartMonth > 12) {
-        return res.status(400).json({ ok: false, error: "startMonth must be between 1 and 12" });
+        return res.status(400).json({
+          ok: false,
+          error: "type must be PEAK, SHOULDER, or LOW",
+        });
       }
 
-      if (!Number.isInteger(parsedEndMonth) || parsedEndMonth < 1 || parsedEndMonth > 12) {
-        return res.status(400).json({ ok: false, error: "endMonth must be between 1 and 12" });
+      if (
+        !Number.isInteger(parsedStartMonth) ||
+        parsedStartMonth < 1 ||
+        parsedStartMonth > 12
+      ) {
+        return res.status(400).json({
+          ok: false,
+          error: "startMonth must be between 1 and 12",
+        });
       }
 
-      if (!Number.isInteger(parsedStartDay) || parsedStartDay < 1 || parsedStartDay > 31) {
-        return res.status(400).json({ ok: false, error: "startDay must be between 1 and 31" });
+      if (
+        !Number.isInteger(parsedEndMonth) ||
+        parsedEndMonth < 1 ||
+        parsedEndMonth > 12
+      ) {
+        return res.status(400).json({
+          ok: false,
+          error: "endMonth must be between 1 and 12",
+        });
       }
 
-      if (!Number.isInteger(parsedEndDay) || parsedEndDay < 1 || parsedEndDay > 31) {
-        return res.status(400).json({ ok: false, error: "endDay must be between 1 and 31" });
+      if (
+        !Number.isInteger(parsedStartDay) ||
+        parsedStartDay < 1 ||
+        parsedStartDay > 31
+      ) {
+        return res.status(400).json({
+          ok: false,
+          error: "startDay must be between 1 and 31",
+        });
       }
 
-      if (!Number.isFinite(parsedAdjustmentPercent) || parsedAdjustmentPercent < -100 || parsedAdjustmentPercent > 300) {
+      if (
+        !Number.isInteger(parsedEndDay) ||
+        parsedEndDay < 1 ||
+        parsedEndDay > 31
+      ) {
+        return res.status(400).json({
+          ok: false,
+          error: "endDay must be between 1 and 31",
+        });
+      }
+
+      if (
+        !Number.isFinite(parsedAdjustmentPercent) ||
+        parsedAdjustmentPercent < -100 ||
+        parsedAdjustmentPercent > 300
+      ) {
         return res.status(400).json({
           ok: false,
           error: "adjustmentPercent must be between -100 and 300",
@@ -3311,188 +3346,93 @@ dashboardPropertiesRouter.post(
       }
 
       const property = await prisma.property.findFirst({
-        where: { id, organizationId: orgId, status: "ACTIVE" },
-        select: { id: true },
-      });
-
-      if (!property) {
-        return res.status(404).json({ ok: false, error: "Property not found" });
-      }
-
-      const item = await prisma.propertySeason.create({
-        data: {
-          propertyId: property.id,
-          name: cleanName,
-          type: parsedSeasonType,
-          startMonth: parsedStartMonth,
-          startDay: parsedStartDay,
-          endMonth: parsedEndMonth,
-          endDay: parsedEndDay,
-          adjustmentPercent: parsedAdjustmentPercent,
-          isActive: true,
-          source: "CUSTOM",
+        where: {
+          id,
+          organizationId: orgId,
+          status: "ACTIVE",
         },
         select: {
           id: true,
-          propertyId: true,
-          name: true,
-          type: true,
-          startMonth: true,
-          startDay: true,
-          endMonth: true,
-          endDay: true,
-          adjustmentPercent: true,
-          isActive: true,
-          source: true,
-          createdAt: true,
-          updatedAt: true,
+          timezone: true,
+          distributionEnabled: true,
+          distributionStatus: true,
         },
       });
 
-      await prisma.property.update({
-        where: { id: property.id },
-        data: { seasonalPricingEnabled: true },
+      if (!property) {
+        return res.status(404).json({
+          ok: false,
+          error: "Property not found",
+        });
+      }
+
+      const mutationAt = new Date();
+      const item = await prisma.$transaction(async (tx) => {
+        const createdSeason = await tx.propertySeason.create({
+          data: {
+            propertyId: property.id,
+            name: cleanName,
+            type: parsedSeasonType,
+            startMonth: parsedStartMonth,
+            startDay: parsedStartDay,
+            endMonth: parsedEndMonth,
+            endDay: parsedEndDay,
+            adjustmentPercent: parsedAdjustmentPercent,
+            isActive: true,
+            source: "CUSTOM",
+          },
+          select: {
+            id: true,
+            propertyId: true,
+            name: true,
+            type: true,
+            startMonth: true,
+            startDay: true,
+            endMonth: true,
+            endDay: true,
+            adjustmentPercent: true,
+            isActive: true,
+            source: true,
+            createdAt: true,
+            updatedAt: true,
+          },
+        });
+
+        await tx.property.update({
+          where: { id: property.id },
+          data: { seasonalPricingEnabled: true },
+        });
+
+        if (
+          property.distributionEnabled === true &&
+          property.distributionStatus === "ACTIVE"
+        ) {
+          const propertyTimezone =
+            property.timezone ?? "America/Puerto_Rico";
+          const todayDateKey = formatInTimeZone(
+            mutationAt,
+            propertyTimezone,
+            "yyyy-MM-dd"
+          );
+
+          await createChannexAriOutboxEvent(tx, {
+            organizationId: orgId,
+            propertyId: property.id,
+            messageKind: "RATES_RESTRICTIONS",
+            trigger: "SEASON_CREATE",
+            syncMode: "INCREMENTAL",
+            dateRange: buildFullSyncRange(todayDateKey),
+            sourceEntityType: "PROPERTY_SEASON",
+            sourceEntityId: createdSeason.id,
+            now: mutationAt,
+          });
+        }
+
+        return createdSeason;
       });
 
-     let distributionSyncResult: any = null;
+      let distributionSyncResult: any = null;
 
-const distributionStartedAt = new Date();
-const distributionDecisionId = `distribution-engine:${property.id}:season-create:${item.id}`;
-
-try {
-  distributionSyncResult = await syncChannexAvailabilityForProperty(
-    property.id
-  );
-
-  await prisma.property.update({
-    where: { id: property.id },
-    data: {
-      distributionLastSyncedAt: new Date(),
-      distributionLastError: null,
-    },
-  });
-
-  const distributionCompletedAt = new Date();
-
-  const distributionSyncSucceeded =
-    distributionSyncResult &&
-    typeof distributionSyncResult === "object" &&
-    "ok" in distributionSyncResult
-      ? Boolean((distributionSyncResult as any).ok)
-      : true;
-
-  const distributionAuditEntry = createDistributionAuditEntry({
-    organizationId: orgId,
-    propertyId: property.id,
-    decisionId: distributionDecisionId,
-    trigger: "SEASON_CREATE",
-    provider: "CHANNEX",
-    syncType: "AVAILABILITY",
-    startedAt: distributionStartedAt,
-    completedAt: distributionCompletedAt,
-    result: distributionSyncResult,
-    status: distributionSyncSucceeded ? "SUCCESS" : "FAILED",
-    severity: distributionSyncSucceeded ? "INFO" : "WARNING",
-    eventType: distributionSyncSucceeded ? "SYNC_COMPLETED" : "SYNC_FAILED",
-    reason: distributionSyncSucceeded
-      ? "SEASON_CREATE_DISTRIBUTION_SYNC_COMPLETED"
-      : "SEASON_CREATE_DISTRIBUTION_SYNC_FAILED",
-    summary: distributionSyncSucceeded
-      ? "Distribution Engine synchronized channel availability after seasonal pricing creation."
-      : "Distribution Engine could not fully synchronize channel availability after seasonal pricing creation.",
-    rule: "SEASON_CREATE_CHANNEX_AVAILABILITY_SYNC",
-    label: "Season Creation Channel Availability Sync",
-    recommendedAction: distributionSyncSucceeded
-      ? undefined
-      : "Review Channex sync after creating this season.",
-    metadata: {
-      seasonId: item.id,
-      seasonName: item.name,
-      seasonType: item.type,
-      seasonSource: item.source,
-      adjustmentPercent: Number(item.adjustmentPercent),
-      startMonth: item.startMonth,
-      startDay: item.startDay,
-      endMonth: item.endMonth,
-      endDay: item.endDay,
-    },
-  });
-
-  try {
-    await persistAuditEntry(prisma, distributionAuditEntry);
-  } catch (auditPersistenceError: any) {
-    console.error("[APMS_DISTRIBUTION_AUTO_SYNC_AUDIT_PERSIST_ERROR]", {
-      engine: "Distribution",
-      propertyId: property.id,
-      provider: "CHANNEX",
-      syncType: "AVAILABILITY",
-      trigger: "SEASON_CREATE",
-      seasonId: item.id,
-      decisionId: distributionAuditEntry.decisionId,
-      error: auditPersistenceError?.message ?? auditPersistenceError,
-    });
-  }
-} catch (syncError: any) {
-  console.error("POST seasons Channex sync error", syncError);
-
-  await prisma.property.update({
-    where: { id: property.id },
-    data: {
-      distributionLastError:
-        syncError?.message || "Failed to sync Channex after season create",
-    },
-  });
-
-  const distributionCompletedAt = new Date();
-
-  const distributionAuditEntry = createDistributionAuditEntry({
-    organizationId: orgId,
-    propertyId: property.id,
-    decisionId: distributionDecisionId,
-    trigger: "SEASON_CREATE",
-    provider: "CHANNEX",
-    syncType: "AVAILABILITY",
-    startedAt: distributionStartedAt,
-    completedAt: distributionCompletedAt,
-    error: syncError,
-    status: "FAILED",
-    severity: "CRITICAL",
-    eventType: "SYNC_FAILED",
-    reason: "SEASON_CREATE_DISTRIBUTION_SYNC_ERROR",
-    summary:
-      "Distribution Engine failed to synchronize channel availability after seasonal pricing creation.",
-    rule: "SEASON_CREATE_CHANNEX_AVAILABILITY_SYNC",
-    label: "Season Creation Channel Availability Sync",
-    recommendedAction:
-      "Review Channex availability connection and retry sync after creating this season.",
-    metadata: {
-      seasonId: item.id,
-      seasonName: item.name,
-      seasonType: item.type,
-      seasonSource: item.source,
-      adjustmentPercent: Number(item.adjustmentPercent),
-      startMonth: item.startMonth,
-      startDay: item.startDay,
-      endMonth: item.endMonth,
-      endDay: item.endDay,
-    },
-  });
-
-  try {
-    await persistAuditEntry(prisma, distributionAuditEntry);
-  } catch (auditPersistenceError: any) {
-    console.error("[APMS_DISTRIBUTION_AUTO_SYNC_AUDIT_PERSIST_ERROR]", {
-      engine: "Distribution",
-      propertyId: property.id,
-      provider: "CHANNEX",
-      syncType: "AVAILABILITY",
-      trigger: "SEASON_CREATE",
-      seasonId: item.id,
-      decisionId: distributionAuditEntry.decisionId,
-      error: auditPersistenceError?.message ?? auditPersistenceError,
-    });
-  }
-}
       return res.json({
         ok: true,
         item: {
