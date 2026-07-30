@@ -3001,7 +3001,12 @@ dashboardPropertiesRouter.post(
           organizationId: orgId,
           status: "ACTIVE",
         },
-        select: { id: true },
+        select: {
+          id: true,
+          timezone: true,
+          distributionEnabled: true,
+          distributionStatus: true,
+        },
       });
 
       if (!property) {
@@ -3011,133 +3016,48 @@ dashboardPropertiesRouter.post(
         });
       }
 
-      const result = await applyDefaultMarketSeasonsForProperty(property.id);
-    let distributionSyncResult: any = null;
+      const mutationAt = new Date();
+      const result = await prisma.$transaction(async (tx) => {
+        const appliedResult = await applyDefaultMarketSeasonsForProperty(
+          property.id,
+          tx
+        );
+        const seasonDefaultsChanged =
+          appliedResult.created > 0 ||
+          appliedResult.updated > 0 ||
+          appliedResult.deactivated > 0;
 
-const distributionStartedAt = new Date();
-const distributionRunId = distributionStartedAt
-  .toISOString()
-  .replace(/[:.]/g, "-");
+        if (
+          seasonDefaultsChanged &&
+          property.distributionEnabled === true &&
+          property.distributionStatus === "ACTIVE"
+        ) {
+          const propertyTimezone =
+            property.timezone ?? "America/Puerto_Rico";
+          const todayDateKey = formatInTimeZone(
+            mutationAt,
+            propertyTimezone,
+            "yyyy-MM-dd"
+          );
 
-const distributionDecisionId = `distribution-engine:${property.id}:market-season-defaults:${distributionRunId}`;
+          await createChannexAriOutboxEvent(tx, {
+            organizationId: orgId,
+            propertyId: property.id,
+            messageKind: "RATES_RESTRICTIONS",
+            trigger: "MARKET_SEASON_DEFAULTS",
+            syncMode: "INCREMENTAL",
+            dateRange: buildFullSyncRange(todayDateKey),
+            sourceEntityType: "PROPERTY",
+            sourceEntityId: property.id,
+            now: mutationAt,
+          });
+        }
 
-try {
-  distributionSyncResult = await syncChannexAvailabilityForProperty(
-    property.id
-  );
+        return appliedResult;
+      });
 
-  await prisma.property.update({
-    where: { id: property.id },
-    data: {
-      distributionLastSyncedAt: new Date(),
-      distributionLastError: null,
-    },
-  });
+      let distributionSyncResult: any = null;
 
-  const distributionCompletedAt = new Date();
-
-  const distributionSyncSucceeded =
-    distributionSyncResult &&
-    typeof distributionSyncResult === "object" &&
-    "ok" in distributionSyncResult
-      ? Boolean((distributionSyncResult as any).ok)
-      : true;
-
-  const distributionAuditEntry = createDistributionAuditEntry({
-    organizationId: orgId,
-    propertyId: property.id,
-    decisionId: distributionDecisionId,
-    trigger: "MARKET_SEASON_DEFAULTS",
-    provider: "CHANNEX",
-    syncType: "AVAILABILITY",
-    startedAt: distributionStartedAt,
-    completedAt: distributionCompletedAt,
-    result: distributionSyncResult,
-    status: distributionSyncSucceeded ? "SUCCESS" : "FAILED",
-    severity: distributionSyncSucceeded ? "INFO" : "WARNING",
-    eventType: distributionSyncSucceeded ? "SYNC_COMPLETED" : "SYNC_FAILED",
-    reason: distributionSyncSucceeded
-      ? "MARKET_SEASON_DEFAULTS_DISTRIBUTION_SYNC_COMPLETED"
-      : "MARKET_SEASON_DEFAULTS_DISTRIBUTION_SYNC_FAILED",
-    summary: distributionSyncSucceeded
-      ? "Distribution Engine synchronized channel availability after market season defaults were applied."
-      : "Distribution Engine could not fully synchronize channel availability after market season defaults were applied.",
-    rule: "MARKET_SEASON_DEFAULTS_CHANNEX_AVAILABILITY_SYNC",
-    label: "Market Season Defaults Channel Availability Sync",
-    recommendedAction: distributionSyncSucceeded
-      ? undefined
-      : "Review Channex sync after applying market season defaults.",
-    metadata: {
-      seasonDefaultsApplied: true,
-    },
-  });
-
-  try {
-    await persistAuditEntry(prisma, distributionAuditEntry);
-  } catch (auditPersistenceError: any) {
-    console.error("[APMS_DISTRIBUTION_AUTO_SYNC_AUDIT_PERSIST_ERROR]", {
-      engine: "Distribution",
-      propertyId: property.id,
-      provider: "CHANNEX",
-      syncType: "AVAILABILITY",
-      trigger: "MARKET_SEASON_DEFAULTS",
-      decisionId: distributionAuditEntry.decisionId,
-      error: auditPersistenceError?.message ?? auditPersistenceError,
-    });
-  }
-} catch (syncError: any) {
-  console.error("POST apply-market-defaults Channex sync error", syncError);
-
-  await prisma.property.update({
-    where: { id: property.id },
-    data: {
-      distributionLastError:
-        syncError?.message ||
-        "Failed to sync Channex after applying market season defaults",
-    },
-  });
-
-  const distributionCompletedAt = new Date();
-
-  const distributionAuditEntry = createDistributionAuditEntry({
-    organizationId: orgId,
-    propertyId: property.id,
-    decisionId: distributionDecisionId,
-    trigger: "MARKET_SEASON_DEFAULTS",
-    provider: "CHANNEX",
-    syncType: "AVAILABILITY",
-    startedAt: distributionStartedAt,
-    completedAt: distributionCompletedAt,
-    error: syncError,
-    status: "FAILED",
-    severity: "CRITICAL",
-    eventType: "SYNC_FAILED",
-    reason: "MARKET_SEASON_DEFAULTS_DISTRIBUTION_SYNC_ERROR",
-    summary:
-      "Distribution Engine failed to synchronize channel availability after market season defaults were applied.",
-    rule: "MARKET_SEASON_DEFAULTS_CHANNEX_AVAILABILITY_SYNC",
-    label: "Market Season Defaults Channel Availability Sync",
-    recommendedAction:
-      "Review Channex availability connection and retry sync after applying market season defaults.",
-    metadata: {
-      seasonDefaultsApplied: true,
-    },
-  });
-
-  try {
-    await persistAuditEntry(prisma, distributionAuditEntry);
-  } catch (auditPersistenceError: any) {
-    console.error("[APMS_DISTRIBUTION_AUTO_SYNC_AUDIT_PERSIST_ERROR]", {
-      engine: "Distribution",
-      propertyId: property.id,
-      provider: "CHANNEX",
-      syncType: "AVAILABILITY",
-      trigger: "MARKET_SEASON_DEFAULTS",
-      decisionId: distributionAuditEntry.decisionId,
-      error: auditPersistenceError?.message ?? auditPersistenceError,
-    });
-  }
-}   
       return res.json({
         ok: true,
         result,
