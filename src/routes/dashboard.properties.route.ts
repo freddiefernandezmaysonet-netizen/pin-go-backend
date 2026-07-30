@@ -2405,248 +2405,182 @@ pricingBreakdown: rate.pricingBreakdown ?? [],
 
 dashboardPropertiesRouter.put(
   "/api/dashboard/properties/:id/nightly-rates",
+  requireAuth,
   async (req, res) => {
-  try {
-    const propertyId = String(req.params.id);
-    const rates = Array.isArray(req.body?.rates) ? req.body.rates : [];
+    try {
+      const user = (req as any).user;
+      const orgId = user.orgId as string;
+      const propertyId = String(req.params.id);
+      const rates = Array.isArray(req.body?.rates) ? req.body.rates : [];
 
-    if (!rates.length) {
-  return res.status(400).json({
-    ok: false,
-    error: "rates must be a non-empty array",
-  });
-}
-    const property = await prisma.property.findUnique({
-  where: { id: propertyId },
-  select: {
-    id: true,
-    organizationId: true,
-    minimumNightlyRate: true,
-    maximumNightlyRate: true,
-  },
-});
-
-if (!property) {
-  return res.status(404).json({
-    ok: false,
-    error: "Property not found",
-  });
-}
-
-const minimumNightlyRate =
-  property.minimumNightlyRate != null
-    ? Number(property.minimumNightlyRate)
-    : null;
-
-const maximumNightlyRate =
-  property.maximumNightlyRate != null
-    ? Number(property.maximumNightlyRate)
-    : null;
-
-    const savedRates = [];
-
-    for (const item of rates) {
-      const dateRaw = String(item.date ?? "");
-      const rateNumber = Number(item.rate);
-
-      if (!dateRaw || Number.isNaN(rateNumber) || rateNumber < 0) {
+      if (!rates.length) {
         return res.status(400).json({
           ok: false,
-          error: "Each rate must include a valid date and rate",
+          error: "rates must be a non-empty array",
         });
       }
 
-if (minimumNightlyRate !== null && rateNumber < minimumNightlyRate) {
-  return res.status(400).json({
-    ok: false,
-    error: `Rate cannot be lower than minimumNightlyRate (${minimumNightlyRate})`,
-  });
-}
-
-if (maximumNightlyRate !== null && rateNumber > maximumNightlyRate) {
-  return res.status(400).json({
-    ok: false,
-    error: `Rate cannot be greater than maximumNightlyRate (${maximumNightlyRate})`,
-  });
-}
-
-      const date = new Date(`${dateRaw}T00:00:00.000Z`);
-
-      const saved = await prisma.propertyNightlyRate.upsert({
+      const property = await prisma.property.findFirst({
         where: {
-          propertyId_date: {
-            propertyId,
-            date,
-          },
-        },
-        update: {
-          rate: rateNumber,
-          reason: item.reason ?? "MANUAL_OVERRIDE",
-        },
-        create: {
-          propertyId,
-          date,
-          rate: rateNumber,
-          reason: item.reason ?? "MANUAL_OVERRIDE",
+          id: propertyId,
+          organizationId: orgId,
+          status: "ACTIVE",
         },
         select: {
           id: true,
-          date: true,
-          rate: true,
-          reason: true,
+          distributionEnabled: true,
+          distributionStatus: true,
+          minimumNightlyRate: true,
+          maximumNightlyRate: true,
         },
       });
 
-      savedRates.push(saved);
+      if (!property) {
+        return res.status(404).json({
+          ok: false,
+          error: "Property not found",
+        });
+      }
+
+      const minimumNightlyRate =
+        property.minimumNightlyRate != null
+          ? Number(property.minimumNightlyRate)
+          : null;
+      const maximumNightlyRate =
+        property.maximumNightlyRate != null
+          ? Number(property.maximumNightlyRate)
+          : null;
+      const normalizedRates: Array<{
+        dateKey: string;
+        date: Date;
+        rate: number;
+        reason: string;
+      }> = [];
+
+      for (const item of rates) {
+        const dateRaw = String(item.date ?? "").trim();
+        const rateNumber = Number(item.rate);
+        const parsedDate = new Date(`${dateRaw}T00:00:00.000Z`);
+        const dateKeyIsValid =
+          /^\d{4}-\d{2}-\d{2}$/.test(dateRaw) &&
+          !Number.isNaN(parsedDate.getTime()) &&
+          parsedDate.toISOString().slice(0, 10) === dateRaw;
+
+        if (
+          !dateKeyIsValid ||
+          !Number.isFinite(rateNumber) ||
+          rateNumber < 0
+        ) {
+          return res.status(400).json({
+            ok: false,
+            error: "Each rate must include a valid YYYY-MM-DD date and rate",
+          });
+        }
+
+        if (
+          minimumNightlyRate !== null &&
+          rateNumber < minimumNightlyRate
+        ) {
+          return res.status(400).json({
+            ok: false,
+            error: `Rate cannot be lower than minimumNightlyRate (${minimumNightlyRate})`,
+          });
+        }
+
+        if (
+          maximumNightlyRate !== null &&
+          rateNumber > maximumNightlyRate
+        ) {
+          return res.status(400).json({
+            ok: false,
+            error: `Rate cannot be greater than maximumNightlyRate (${maximumNightlyRate})`,
+          });
+        }
+
+        normalizedRates.push({
+          dateKey: dateRaw,
+          date: parsedDate,
+          rate: rateNumber,
+          reason:
+            String(item.reason ?? "MANUAL_OVERRIDE").trim() ||
+            "MANUAL_OVERRIDE",
+        });
+      }
+
+      const mutationAt = new Date();
+      const savedRates = await prisma.$transaction(async (tx) => {
+        const persistedRates = [];
+
+        for (const item of normalizedRates) {
+          const saved = await tx.propertyNightlyRate.upsert({
+            where: {
+              propertyId_date: {
+                propertyId,
+                date: item.date,
+              },
+            },
+            update: {
+              rate: item.rate,
+              reason: item.reason,
+            },
+            create: {
+              propertyId,
+              date: item.date,
+              rate: item.rate,
+              reason: item.reason,
+            },
+            select: {
+              id: true,
+              date: true,
+              rate: true,
+              reason: true,
+            },
+          });
+
+          persistedRates.push(saved);
+        }
+
+        if (
+          property.distributionEnabled === true &&
+          property.distributionStatus === "ACTIVE"
+        ) {
+          await createChannexAriOutboxEvent(tx, {
+            organizationId: orgId,
+            propertyId,
+            messageKind: "RATES_RESTRICTIONS",
+            trigger: "NIGHTLY_RATE_UPDATE",
+            syncMode: "INCREMENTAL",
+            dateKeys: normalizedRates.map((item) => item.dateKey),
+            sourceEntityType: "PROPERTY",
+            sourceEntityId: propertyId,
+            now: mutationAt,
+          });
+        }
+
+        return persistedRates;
+      });
+
+      let distributionSyncResult: any = null;
+
+      return res.json({
+        ok: true,
+        rates: savedRates.map((rate) => ({
+          id: rate.id,
+          date: rate.date.toISOString().slice(0, 10),
+          rate: Number(rate.rate),
+          reason: rate.reason,
+        })),
+        distributionSyncResult,
+      });
+    } catch (err) {
+      console.error("PUT nightly-rates error", err);
+      return res.status(500).json({
+        ok: false,
+        error: "Failed to save nightly rates",
+      });
     }
-
-  let distributionSyncResult: any = null;
-
-const distributionStartedAt = new Date();
-const distributionRunId = distributionStartedAt
-  .toISOString()
-  .replace(/[:.]/g, "-");
-
-const distributionDecisionId = `distribution-engine:${propertyId}:nightly-rates:${distributionRunId}`;
-
-const changedRateDates = savedRates.map((rate) =>
-  rate.date.toISOString().slice(0, 10)
+  }
 );
-
-try {
-  distributionSyncResult = await syncChannexAvailabilityForProperty(propertyId);
-
-  await prisma.property.update({
-    where: { id: propertyId },
-    data: {
-      distributionLastSyncedAt: new Date(),
-      distributionLastError: null,
-    },
-  });
-
-  const distributionCompletedAt = new Date();
-
-  const distributionSyncSucceeded =
-    distributionSyncResult &&
-    typeof distributionSyncResult === "object" &&
-    "ok" in distributionSyncResult
-      ? Boolean((distributionSyncResult as any).ok)
-      : true;
-
- const distributionAuditEntry = createDistributionAuditEntry({
-  organizationId: property.organizationId,
-  propertyId,
-  decisionId: distributionDecisionId,
-  trigger: "NIGHTLY_RATE_UPDATE",
-  provider: "CHANNEX",
-  syncType: "AVAILABILITY",
-  startedAt: distributionStartedAt,
-  completedAt: distributionCompletedAt,
-  result: distributionSyncResult,
-  status: distributionSyncSucceeded ? "SUCCESS" : "FAILED",
-  severity: distributionSyncSucceeded ? "INFO" : "WARNING",
-  eventType: distributionSyncSucceeded ? "SYNC_COMPLETED" : "SYNC_FAILED",
-  reason: distributionSyncSucceeded
-    ? "NIGHTLY_RATE_DISTRIBUTION_SYNC_COMPLETED"
-    : "NIGHTLY_RATE_DISTRIBUTION_SYNC_FAILED",
-  summary: distributionSyncSucceeded
-    ? "Distribution Engine synchronized channel availability after nightly rate update."
-    : "Distribution Engine could not fully synchronize channel availability after nightly rate update.",
-  rule: "NIGHTLY_RATE_CHANNEX_AVAILABILITY_SYNC",
-  label: "Nightly Rate Channel Availability Sync",
-  recommendedAction: distributionSyncSucceeded
-    ? undefined
-    : "Review Channex sync after this nightly rate update.",
-  metadata: {
-    changedRateDates,
-    ratesCount: savedRates.length,
-  },
-});
-  try {
-    await persistAuditEntry(prisma, distributionAuditEntry);
-  } catch (auditPersistenceError: any) {
-    console.error("[APMS_DISTRIBUTION_AUTO_SYNC_AUDIT_PERSIST_ERROR]", {
-      engine: "Distribution",
-      propertyId,
-      provider: "CHANNEX",
-      syncType: "AVAILABILITY",
-      trigger: "NIGHTLY_RATE_UPDATE",
-      decisionId: distributionAuditEntry.decisionId,
-      error: auditPersistenceError?.message ?? auditPersistenceError,
-    });
-  }
-} catch (syncError: any) {
-  console.error("PUT nightly-rates Channex sync error", syncError);
-
-  await prisma.property.update({
-    where: { id: propertyId },
-    data: {
-      distributionLastError:
-        syncError?.message ||
-        "Failed to sync Channex after nightly rate update",
-    },
-  });
-
-  const distributionCompletedAt = new Date();
-
-const distributionAuditEntry = createDistributionAuditEntry({
-  organizationId: property.organizationId,
-  propertyId,
-  decisionId: distributionDecisionId,
-  trigger: "NIGHTLY_RATE_UPDATE",
-  provider: "CHANNEX",
-  syncType: "AVAILABILITY",
-  startedAt: distributionStartedAt,
-  completedAt: distributionCompletedAt,
-  error: syncError,
-  status: "FAILED",
-  severity: "CRITICAL",
-  eventType: "SYNC_FAILED",
-  reason: "NIGHTLY_RATE_DISTRIBUTION_SYNC_ERROR",
-  summary:
-    "Distribution Engine failed to synchronize channel availability after nightly rate update.",
-  rule: "NIGHTLY_RATE_CHANNEX_AVAILABILITY_SYNC",
-  label: "Nightly Rate Channel Availability Sync",
-  recommendedAction:
-    "Review Channex availability connection and retry the sync after this nightly rate update.",
-  metadata: {
-    changedRateDates,
-    ratesCount: savedRates.length,
-  },
-});
-  try {
-    await persistAuditEntry(prisma, distributionAuditEntry);
-  } catch (auditPersistenceError: any) {
-    console.error("[APMS_DISTRIBUTION_AUTO_SYNC_AUDIT_PERSIST_ERROR]", {
-      engine: "Distribution",
-      propertyId,
-      provider: "CHANNEX",
-      syncType: "AVAILABILITY",
-      trigger: "NIGHTLY_RATE_UPDATE",
-      decisionId: distributionAuditEntry.decisionId,
-      error: auditPersistenceError?.message ?? auditPersistenceError,
-    });
-  }
-}
-return res.json({
-  ok: true,
-  rates: savedRates.map((rate) => ({
-    id: rate.id,
-    date: rate.date.toISOString().slice(0, 10),
-    rate: Number(rate.rate),
-    reason: rate.reason,
-  })),
-  distributionSyncResult,
-});
-   } catch (err) {
-    console.error("PUT nightly-rates error", err);
-    return res.status(500).json({
-      ok: false,
-      error: "Failed to save nightly rates",
-    });
-  }
-});
-
 
 dashboardPropertiesRouter.post(
   "/api/dashboard/properties/:id/amenities",
