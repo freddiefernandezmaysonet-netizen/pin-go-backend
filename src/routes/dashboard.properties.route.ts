@@ -1,5 +1,6 @@
 import { Router } from "express";
 import crypto from "crypto";
+import { formatInTimeZone } from "date-fns-tz";
 import {
   AmenityChargeMode,
   AmenityFeeType,
@@ -33,6 +34,8 @@ import {
   buildCancellationPolicySnapshot,
 } from "../services/cancellation-policy.service";
 import { resolveOrganizationGuestReplyTo } from "../services/organization-guest-email.service";
+import { createChannexAriOutboxEvent } from "../pms/outbound/channex-ari-outbox.service";
+import { buildFullSyncRange } from "../pms/outbound/channex-ari-lifecycle.policy";
 
 const prisma = new PrismaClient();
 export const dashboardPropertiesRouter = Router();
@@ -84,6 +87,65 @@ function parseOptionalInt(value: unknown): number | null {
 
   const parsed = Number(value);
   return Number.isFinite(parsed) && parsed >= 0 ? Math.trunc(parsed) : NaN;
+}
+
+const PROPERTY_ARI_BOOLEAN_FIELDS = [
+  "dynamicPricingEnabled",
+  "seasonalPricingEnabled",
+  "holidayPricingEnabled",
+  "leadTimePricingEnabled",
+  "occupancyPricingEnabled",
+] as const;
+
+const PROPERTY_ARI_NUMBER_FIELDS = [
+  "baseNightlyRate",
+  "minimumNightlyRate",
+  "maximumNightlyRate",
+  "weekendMarkupPercent",
+  "leadTimeLastMinuteDays",
+  "leadTimeLastMinutePercent",
+  "occupancyLookaheadDays",
+  "occupancyLowThresholdPercent",
+  "occupancyLowAdjustmentPercent",
+  "occupancyHighThresholdPercent",
+  "occupancyHighAdjustmentPercent",
+  "minimumNights",
+  "maximumNights",
+] as const;
+
+function toComparablePropertyNumber(value: unknown): number | null {
+  if (value === null || value === undefined || value === "") {
+    return null;
+  }
+
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? parsed : null;
+}
+
+function hasPropertyAriConfigurationChanged(
+  existing: Record<string, unknown>,
+  data: Record<string, unknown>
+): boolean {
+  for (const field of PROPERTY_ARI_BOOLEAN_FIELDS) {
+    if (
+      Object.prototype.hasOwnProperty.call(data, field) &&
+      Boolean(data[field]) !== Boolean(existing[field])
+    ) {
+      return true;
+    }
+  }
+
+  for (const field of PROPERTY_ARI_NUMBER_FIELDS) {
+    if (
+      Object.prototype.hasOwnProperty.call(data, field) &&
+      toComparablePropertyNumber(data[field]) !==
+        toComparablePropertyNumber(existing[field])
+    ) {
+      return true;
+    }
+  }
+
+  return false;
 }
 
 const PROPERTY_SEASON_TYPES = ["PEAK", "SHOULDER", "LOW"] as const;
@@ -539,8 +601,28 @@ if (
   id: true,
   status: true,
   distributionEnabled: true,
+  distributionStatus: true,
+  timezone: true,
   country: true,
   region: true,
+  dynamicPricingEnabled: true,
+  seasonalPricingEnabled: true,
+  holidayPricingEnabled: true,
+  leadTimePricingEnabled: true,
+  leadTimeLastMinuteDays: true,
+  leadTimeLastMinutePercent: true,
+  occupancyPricingEnabled: true,
+  occupancyLookaheadDays: true,
+  occupancyLowThresholdPercent: true,
+  occupancyLowAdjustmentPercent: true,
+  occupancyHighThresholdPercent: true,
+  occupancyHighAdjustmentPercent: true,
+  baseNightlyRate: true,
+  minimumNightlyRate: true,
+  maximumNightlyRate: true,
+  weekendMarkupPercent: true,
+  minimumNights: true,
+  maximumNights: true,
 },
       });
 
@@ -555,6 +637,17 @@ if (
         return res.status(400).json({
           ok: false,
           error: "Cannot edit an archived property",
+        });
+      }
+
+      if (
+        distributionEnabled !== undefined &&
+        Boolean(distributionEnabled) !== existing.distributionEnabled
+      ) {
+        return res.status(400).json({
+          ok: false,
+          error:
+            "distributionEnabled must be changed through the dedicated distribution lifecycle",
         });
       }
 
@@ -638,10 +731,6 @@ if (slug !== undefined) {
 
 if (isPublicBookable !== undefined) {
   data.isPublicBookable = Boolean(isPublicBookable);
-}
-
-if (distributionEnabled !== undefined) {
-  data.distributionEnabled = Boolean(distributionEnabled);
 }
 
 if (dynamicPricingEnabled !== undefined) {
@@ -751,7 +840,15 @@ if (checkOutTime !== undefined) {
   data.checkOutTime = String(checkOutTime || "").trim() || null;
 }
 
-      const updated = await prisma.property.update({
+      const ariConfigurationChanged =
+        hasPropertyAriConfigurationChanged(
+          existing as unknown as Record<string, unknown>,
+          data
+        );
+      const propertyMutationAt = new Date();
+
+      const updated = await prisma.$transaction(async (tx) => {
+        const persistedProperty = await tx.property.update({
         where: { id: existing.id },
         data,
         select: {
@@ -833,6 +930,37 @@ if (checkOutTime !== undefined) {
           },
          },
        },
+        });
+
+        if (
+          ariConfigurationChanged &&
+          existing.distributionEnabled === true &&
+          existing.distributionStatus === "ACTIVE"
+        ) {
+          const propertyTimezone =
+            persistedProperty.timezone ??
+            existing.timezone ??
+            "America/Puerto_Rico";
+          const todayDateKey = formatInTimeZone(
+            propertyMutationAt,
+            propertyTimezone,
+            "yyyy-MM-dd"
+          );
+
+          await createChannexAriOutboxEvent(tx, {
+            organizationId: orgId,
+            propertyId: persistedProperty.id,
+            messageKind: "RATES_RESTRICTIONS",
+            trigger: "PROPERTY_CONFIGURATION_UPDATED",
+            syncMode: "INCREMENTAL",
+            dateRange: buildFullSyncRange(todayDateKey),
+            sourceEntityType: "PROPERTY",
+            sourceEntityId: persistedProperty.id,
+            now: propertyMutationAt,
+          });
+        }
+
+        return persistedProperty;
       });
 
 const marketChanged =
@@ -853,42 +981,6 @@ if (marketChanged) {
 }
 
       let distributionSyncResult: any = null;
-
-      if (updated.distributionStatus === "ACTIVE") {
-        try {
-          distributionSyncResult =
-            await syncChannexAvailabilityForProperty(updated.id);
-
-          await prisma.property.update({
-            where: { id: updated.id },
-            data: {
-              distributionLastSyncedAt: new Date(),
-              distributionLastError: null,
-            },
-          });
-        } catch (syncError: any) {
-          await prisma.property.update({
-            where: { id: updated.id },
-            data: {
-              distributionStatus: "FAILED",
-              distributionLastError:
-                syncError?.message ?? "Failed to sync distribution changes",
-            },
-          });
-
-          return res.status(500).json({
-            ok: false,
-            item: {
-              ...updated,
-              distributionStatus: "FAILED",
-              distributionLastError:
-                syncError?.message ?? "Failed to sync distribution changes",
-            },
-            error:
-              syncError?.message ?? "Failed to sync distribution changes",
-          });
-        }
-      }
 
           return res.json({
   ok: true,
