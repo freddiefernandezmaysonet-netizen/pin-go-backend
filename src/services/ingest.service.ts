@@ -14,7 +14,7 @@ import crypto from "crypto";
 import { computeCleaningWindowPR } from "../services/cleaningWindow.service";
 import { reconcileReservation } from "./reservation.reconcile.service";
 import { log } from "../utils/log";
-import { fromZonedTime } from "date-fns-tz";
+import { formatInTimeZone, fromZonedTime } from "date-fns-tz";
 import { selectNextStaffForProperty } from "./staff-selection.service";
 import { createCleaningConfirmation } from "./cleaning-confirmation.service";
 import { generateReservationNumber } from "./reservation-number.service";
@@ -23,6 +23,7 @@ import { persistAuditEntry } from "../apms/audit-persistence.service";
 import type { AuditEntry } from "../apms/audit-types";
 import { ensureReservationGuestAgreementSnapshot } from "./guest-agreement.service";
 import { ensureGuestJourneyForConfirmedReservation } from "./guest-journey.service";
+import { persistChannexAriReservationIntent } from "../pms/outbound/channex-ari-reservation-producer.service";
 
 console.log("[INGEST] running src/services/ingest.service.ts", new Date().toISOString());
 const prisma = new PrismaClient();
@@ -202,6 +203,53 @@ export async function ingestReservation(p: IngestPayload) {
   const externalId = (p.externalId ?? "").trim() || null;
 
     const result: IngestReservationResult = await prisma.$transaction(async (tx) => {
+    const ingestKey = buildIngestKey({
+      source: p.source,
+      propertyId: p.propertyId,
+      guestName: p.guestName,
+      guestEmail: p.guestEmail ?? null,
+      guestPhone: p.guestPhone ?? null,
+      roomName: p.roomName ?? null,
+      checkIn,
+      checkOut,
+      externalProvider,
+      externalId,
+    });
+
+    let previousReservation: {
+      checkIn: Date;
+      checkOut: Date;
+      status: ReservationStatus;
+    } | null = null;
+
+    if (externalProvider && externalId) {
+      previousReservation = await tx.reservation.findUnique({
+        where: {
+          propertyId_externalProvider_externalId: {
+            propertyId: p.propertyId,
+            externalProvider,
+            externalId,
+          },
+        },
+        select: {
+          checkIn: true,
+          checkOut: true,
+          status: true,
+        },
+      });
+    }
+
+    if (!previousReservation) {
+      previousReservation = await tx.reservation.findUnique({
+        where: { ingestKey },
+        select: {
+          checkIn: true,
+          checkOut: true,
+          status: true,
+        },
+      });
+    }
+
     const { reservation, didChange } = await upsertReservation(tx as any, {
       source: p.source,
 
@@ -226,6 +274,69 @@ export async function ingestReservation(p: IngestPayload) {
       externalRaw: p.externalRaw ?? null,
       status: p.status ?? undefined,
     });
+
+    if (didChange) {
+      const distributionContext = await tx.property.findUnique({
+        where: { id: reservation.propertyId },
+        select: {
+          organizationId: true,
+          timezone: true,
+          distributionEnabled: true,
+          distributionStatus: true,
+        },
+      });
+
+      if (
+        distributionContext?.distributionEnabled === true &&
+        distributionContext.distributionStatus === "ACTIVE"
+      ) {
+        const currentStatus =
+          reservation.status === ReservationStatus.ACTIVE
+            ? "ACTIVE"
+            : reservation.status === ReservationStatus.CANCELLED
+            ? "CANCELLED"
+            : null;
+        const previousStatus =
+          previousReservation?.status === ReservationStatus.ACTIVE
+            ? "ACTIVE"
+            : previousReservation?.status === ReservationStatus.CANCELLED
+            ? "CANCELLED"
+            : null;
+
+        if (currentStatus) {
+          const ariNow = new Date();
+          const distributionTimezone =
+            distributionContext.timezone ?? propertyTimeZone;
+
+          await persistChannexAriReservationIntent({
+            db: tx as any,
+            organizationId: distributionContext.organizationId,
+            propertyId: reservation.propertyId,
+            reservationId: reservation.id,
+            previous:
+              previousReservation && previousStatus
+                ? {
+                    checkIn: previousReservation.checkIn,
+                    checkOut: previousReservation.checkOut,
+                    status: previousStatus,
+                  }
+                : null,
+            current: {
+              checkIn: reservation.checkIn,
+              checkOut: reservation.checkOut,
+              status: currentStatus,
+            },
+            propertyTimezone: distributionTimezone,
+            todayDateKey: formatInTimeZone(
+              ariNow,
+              distributionTimezone,
+              "yyyy-MM-dd"
+            ),
+            now: ariNow,
+          });
+        }
+      }
+    }
 
     if (reservation.status === ReservationStatus.CANCELLED) {
       return {
