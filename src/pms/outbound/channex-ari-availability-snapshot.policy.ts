@@ -1,4 +1,4 @@
-import crypto from "node:crypto";
+import { calculateChannexAriCanonicalJsonIntegrity } from "./channex-ari-canonical-json.policy";
 import { formatInTimeZone } from "date-fns-tz";
 
 import {
@@ -141,9 +141,6 @@ function buildOccupiedDateKeySet(input: {
   return occupiedDateKeys;
 }
 
-function canonicalJson(value: unknown): string {
-  return JSON.stringify(value);
-}
 
 export function buildChannexAriAvailabilitySnapshot(input: {
   channexPropertyId: string;
@@ -216,12 +213,17 @@ export function buildChannexAriAvailabilitySnapshot(input: {
   });
 
   const payload: ChannexAriAvailabilityPayload = { values };
-  const serialized = canonicalJson(payload);
+  const integrity =
+    calculateChannexAriCanonicalJsonIntegrity(payload);
   const payloadBytes = assertPayloadWithinLimit(payload);
-  const payloadHash = crypto
-    .createHash("sha256")
-    .update(serialized)
-    .digest("hex");
+
+  if (payloadBytes !== integrity.payloadBytes) {
+    throw new Error(
+      "CHANNEX_ARI_AVAILABILITY_PAYLOAD_BYTES_MISMATCH"
+    );
+  }
+
+  const payloadHash = integrity.payloadHash;
 
   return {
     payload,

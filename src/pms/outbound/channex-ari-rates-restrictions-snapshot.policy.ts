@@ -1,4 +1,7 @@
-import crypto from "node:crypto";
+import {
+  calculateChannexAriCanonicalJsonIntegrity,
+  stringifyChannexAriCanonicalJson,
+} from "./channex-ari-canonical-json.policy";
 
 import {
   CHANNEX_ARI_FULL_SYNC_DAYS,
@@ -99,15 +102,15 @@ function assertNonNegativeInteger(value: number, index: number): number {
   return value;
 }
 
-function canonicalJson(value: unknown): string {
-  return JSON.stringify(value);
-}
 
 function sameCanonicalValue(
   left: Omit<ChannexAriRatesRestrictionsValue, "property_id" | "rate_plan_id">,
   right: Omit<ChannexAriRatesRestrictionsValue, "property_id" | "rate_plan_id">
 ): boolean {
-  return canonicalJson(left) === canonicalJson(right);
+  return (
+    stringifyChannexAriCanonicalJson(left) ===
+    stringifyChannexAriCanonicalJson(right)
+  );
 }
 
 export function buildChannexAriRatesRestrictionsSnapshot(input: {
@@ -202,12 +205,17 @@ export function buildChannexAriRatesRestrictionsSnapshot(input: {
     })
   );
   const payload: ChannexAriRatesRestrictionsPayload = { values };
-  const serialized = canonicalJson(payload);
+  const integrity =
+    calculateChannexAriCanonicalJsonIntegrity(payload);
   const payloadBytes = assertPayloadWithinLimit(payload);
-  const payloadHash = crypto
-    .createHash("sha256")
-    .update(serialized)
-    .digest("hex");
+
+  if (payloadBytes !== integrity.payloadBytes) {
+    throw new Error(
+      "CHANNEX_ARI_RATES_RESTRICTIONS_PAYLOAD_BYTES_MISMATCH"
+    );
+  }
+
+  const payloadHash = integrity.payloadHash;
 
   return {
     payload,

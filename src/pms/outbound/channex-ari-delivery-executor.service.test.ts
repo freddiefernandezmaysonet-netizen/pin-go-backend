@@ -1,6 +1,7 @@
-import crypto from "node:crypto";
 import assert from "node:assert/strict";
 import test from "node:test";
+
+import { calculateChannexAriCanonicalJsonIntegrity } from "./channex-ari-canonical-json.policy";
 
 import {
   CHANNEX_ARI_EXECUTOR_COMPLETION_RESERVE_MS,
@@ -29,13 +30,14 @@ function payload() {
 }
 
 function payloadEvidence(value = payload()) {
-  const serialized = JSON.stringify(value);
+  const integrity =
+    calculateChannexAriCanonicalJsonIntegrity(value);
 
   return {
     payload: value,
-    payloadHash: crypto.createHash("sha256").update(serialized).digest("hex"),
+    payloadHash: integrity.payloadHash,
     payloadValueCount: value.values.length,
-    payloadBytes: Buffer.byteLength(serialized, "utf8"),
+    payloadBytes: integrity.payloadBytes,
   };
 }
 
@@ -83,6 +85,74 @@ function createClock(...dates: Date[]) {
   };
 }
 
+test("accepts canonical integrity after PostgreSQL JSONB reorders object keys", async () => {
+  const original = payload();
+  const integrity =
+    calculateChannexAriCanonicalJsonIntegrity(original);
+  const postgresJsonbPayload = {
+    values: [
+      {
+        date: "2026-08-01",
+        property_id: "channex-property-1",
+        availability: 1,
+        room_type_id: "room-type-1",
+      },
+    ],
+  };
+  const delivery = claimedDelivery({
+    payload: postgresJsonbPayload,
+    payloadHash: integrity.payloadHash,
+    payloadValueCount: 1,
+    payloadBytes: integrity.payloadBytes,
+  });
+  let sendCount = 0;
+  let completeCount = 0;
+
+  await executeClaimedChannexAriDelivery({
+    db: {} as any,
+    delivery,
+    apiKey: API_KEY,
+    clock: createClock(STARTED_AT, COMPLETED_AT),
+    send: (async (input: any) => {
+      sendCount += 1;
+
+      assert.deepEqual(
+        input.payload,
+        postgresJsonbPayload
+      );
+
+      return {
+        endpoint: "/api/v1/availability",
+        url: "https://staging.example.test/api/v1/availability",
+        payloadBytes: integrity.payloadBytes,
+        evidence: {
+          httpStatus: 200,
+          taskId: "task-jsonb-round-trip",
+          warningCount: 0,
+          retryAfterMs: null,
+          responseMeta: {
+            endpoint: "/api/v1/availability",
+            method: "POST",
+            messageKind: "AVAILABILITY",
+            payloadBytes: integrity.payloadBytes,
+          },
+        },
+      };
+    }) as any,
+    complete: (async () => {
+      completeCount += 1;
+
+      return {
+        retryClass: "SUCCESS",
+        exhausted: false,
+        deliveryUpdate: { status: "SENT" },
+      } as any;
+    }) as any,
+  });
+
+  assert.equal(sendCount, 1);
+  assert.equal(completeCount, 1);
+});
 test("orchestrates send then completion for a claimed delivery", async () => {
   const delivery = claimedDelivery();
   const calls: string[] = [];

@@ -1,4 +1,4 @@
-import crypto from "node:crypto";
+import { calculateChannexAriCanonicalJsonIntegrity } from "./channex-ari-canonical-json.policy";
 import type { Prisma } from "@prisma/client";
 
 import {
@@ -160,8 +160,9 @@ function assertPayloadIntegrity(input: {
     throw new Error("CHANNEX_ARI_EXECUTOR_VALUE_COUNT_MISMATCH");
   }
 
-  const serialized = JSON.stringify(input.payload);
-  const payloadBytes = Buffer.byteLength(serialized, "utf8");
+  const integrity =
+    calculateChannexAriCanonicalJsonIntegrity(input.payload);
+  const payloadBytes = integrity.payloadBytes;
 
   if (
     !Number.isSafeInteger(input.payloadBytes) ||
@@ -184,10 +185,7 @@ function assertPayloadIntegrity(input: {
     throw new Error("CHANNEX_ARI_EXECUTOR_PAYLOAD_HASH_INVALID");
   }
 
-  const actualHash = crypto
-    .createHash("sha256")
-    .update(serialized)
-    .digest("hex");
+  const actualHash = integrity.payloadHash;
 
   if (actualHash !== payloadHash) {
     throw new Error("CHANNEX_ARI_EXECUTOR_PAYLOAD_HASH_MISMATCH");

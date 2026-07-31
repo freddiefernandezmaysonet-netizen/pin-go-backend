@@ -1,3 +1,4 @@
+import { stringifyChannexAriCanonicalJson } from "./channex-ari-canonical-json.policy";
 export const CHANNEX_ARI_FULL_SYNC_DAYS = 500;
 export const CHANNEX_ARI_MAX_REQUEST_BYTES = 10 * 1024 * 1024;
 export const CHANNEX_ARI_MIN_SAME_KIND_SPACING_MS = 6_500;
@@ -188,7 +189,8 @@ export function getRetryDelayMs(input: {
 }
 
 export function assertPayloadWithinLimit(payload: unknown): number {
-  const payloadBytes = Buffer.byteLength(JSON.stringify(payload), "utf8");
+  const serialized = stringifyChannexAriCanonicalJson(payload);
+  const payloadBytes = Buffer.byteLength(serialized, "utf8");
 
   if (payloadBytes <= 0) {
     throw new Error("CHANNEX_ARI_EMPTY_PAYLOAD");
