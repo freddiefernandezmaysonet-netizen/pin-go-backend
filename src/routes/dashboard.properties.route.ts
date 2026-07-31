@@ -3791,7 +3791,7 @@ dashboardPropertiesRouter.get(
   }
 );
 
-  dashboardPropertiesRouter.post(
+dashboardPropertiesRouter.post(
   "/api/dashboard/properties/:id/distribution/enable",
   requireAuth,
   async (req, res) => {
@@ -3808,7 +3808,12 @@ dashboardPropertiesRouter.get(
         },
         select: {
           id: true,
+          timezone: true,
           distributionEnabled: true,
+          distributionStatus: true,
+          distributionEnabledAt: true,
+          distributionLastSyncedAt: true,
+          distributionLastError: true,
         },
       });
 
@@ -3816,6 +3821,28 @@ dashboardPropertiesRouter.get(
         return res.status(404).json({
           ok: false,
           error: "Property not found",
+        });
+      }
+
+      if (
+        property.distributionEnabled === true &&
+        property.distributionStatus === "ACTIVE"
+      ) {
+        return res.json({
+          ok: true,
+          item: {
+            id: property.id,
+            distributionEnabled: property.distributionEnabled,
+            distributionStatus: property.distributionStatus,
+            distributionEnabledAt: property.distributionEnabledAt,
+            distributionLastSyncedAt: property.distributionLastSyncedAt,
+            distributionLastError: property.distributionLastError,
+          },
+          alreadyEnabled: true,
+          distributionSetupResult: {
+            provisionResult: null,
+            syncResult: null,
+          },
         });
       }
 
@@ -3829,26 +3856,94 @@ dashboardPropertiesRouter.get(
 
       try {
         const provisionResult = await provisionChannexProperty(property.id);
-        const syncResult = await syncChannexAvailabilityForProperty(property.id);
+        const mutationAt = new Date();
+        const propertyTimezone =
+          property.timezone ?? "America/Puerto_Rico";
+        const todayDateKey = formatInTimeZone(
+          mutationAt,
+          propertyTimezone,
+          "yyyy-MM-dd"
+        );
+        const fullSyncCorrelationId =
+          `distribution-enablement:${property.id}:${crypto.randomUUID()}`;
 
-        const updated = await prisma.property.update({
-          where: { id: property.id },
-          data: {
-            distributionEnabled: true,
-            distributionStatus: "ACTIVE",
-            distributionEnabledAt: new Date(),
-            distributionLastSyncedAt: new Date(),
-            distributionLastError: null,
-          },
-          select: {
-            id: true,
-            distributionEnabled: true,
-            distributionStatus: true,
-            distributionEnabledAt: true,
-            distributionLastSyncedAt: true,
-            distributionLastError: true,
-          },
+        const updated = await prisma.$transaction(async (tx) => {
+          await createChannexAriOutboxEvent(tx, {
+            organizationId: orgId,
+            propertyId: property.id,
+            messageKind: "AVAILABILITY",
+            syncMode: "FULL",
+            trigger: "DISTRIBUTION_ENABLEMENT",
+            sourceEntityType: "PROPERTY",
+            sourceEntityId: property.id,
+            correlationId: fullSyncCorrelationId,
+            todayDateKey,
+            now: mutationAt,
+            coalesceMs: 0,
+          });
+
+          await createChannexAriOutboxEvent(tx, {
+            organizationId: orgId,
+            propertyId: property.id,
+            messageKind: "RATES_RESTRICTIONS",
+            syncMode: "FULL",
+            trigger: "DISTRIBUTION_ENABLEMENT",
+            sourceEntityType: "PROPERTY",
+            sourceEntityId: property.id,
+            correlationId: fullSyncCorrelationId,
+            todayDateKey,
+            now: mutationAt,
+            coalesceMs: 0,
+          });
+
+          const existingAriState =
+            await tx.channexAriPropertyState.findUnique({
+              where: { propertyId: property.id },
+              select: { organizationId: true },
+            });
+
+          if (
+            existingAriState &&
+            existingAriState.organizationId !== orgId
+          ) {
+            throw new Error(
+              "CHANNEX_ARI_PROPERTY_STATE_TENANT_MISMATCH"
+            );
+          }
+
+          await tx.channexAriPropertyState.upsert({
+            where: { propertyId: property.id },
+            create: {
+              propertyId: property.id,
+              organizationId: orgId,
+              lastFullSyncRequestedAt: mutationAt,
+            },
+            update: {
+              lastFullSyncRequestedAt: mutationAt,
+            },
+          });
+
+          return tx.property.update({
+            where: { id: property.id },
+            data: {
+              distributionEnabled: true,
+              distributionStatus: "ACTIVE",
+              distributionEnabledAt: mutationAt,
+              distributionLastSyncedAt: null,
+              distributionLastError: null,
+            },
+            select: {
+              id: true,
+              distributionEnabled: true,
+              distributionStatus: true,
+              distributionEnabledAt: true,
+              distributionLastSyncedAt: true,
+              distributionLastError: true,
+            },
+          });
         });
+
+        const syncResult: any = null;
 
         return res.json({
           ok: true,
@@ -3899,8 +3994,7 @@ dashboardPropertiesRouter.get(
       });
     }
   }
-);      
-
+);
 dashboardPropertiesRouter.post(
   "/api/dashboard/properties/:id/blocked-dates",
   requireAuth,
