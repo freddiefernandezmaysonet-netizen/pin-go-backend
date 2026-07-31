@@ -2950,6 +2950,8 @@ dashboardPropertiesRouter.post(
           id: true,
           name: true,
           status: true,
+          distributionEnabled: true,
+          distributionStatus: true,
           reservations: {
             where: {
               status: ReservationStatus.ACTIVE,
@@ -2975,6 +2977,17 @@ dashboardPropertiesRouter.post(
         return res.json({
           ok: true,
           alreadyArchived: true,
+        });
+      }
+
+      if (
+        property.distributionEnabled === true ||
+        property.distributionStatus !== "DISABLED"
+      ) {
+        return res.status(409).json({
+          ok: false,
+          error:
+            "Distribution must be disconnected before archiving this property",
         });
       }
 
