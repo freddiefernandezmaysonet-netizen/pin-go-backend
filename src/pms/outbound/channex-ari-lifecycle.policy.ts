@@ -145,7 +145,6 @@ export function classifyChannexAriAttempt(input: {
   }
 
   const status = Number(input.httpStatus ?? 0);
-  const taskId = String(input.taskId ?? "").trim();
   const warningCount = Math.max(0, Number(input.warningCount ?? 0));
 
   if (status === 429 || status >= 500) {
@@ -153,7 +152,7 @@ export function classifyChannexAriAttempt(input: {
   }
 
   if (status >= 200 && status < 300) {
-    if (!taskId || warningCount > 0) {
+    if (warningCount > 0) {
       return "TERMINAL";
     }
 

@@ -121,7 +121,7 @@ test("records Rates & Restrictions Full Sync completion timestamps", () => {
   });
 });
 
-test("treats a success HTTP response without task ID as terminal", () => {
+test("treats a success HTTP response without task ID as SENT", () => {
   const result = buildChannexAriAttemptCompletion({
     delivery: delivery(),
     attempt: attempt(),
@@ -133,16 +133,40 @@ test("treats a success HTTP response without task ID as terminal", () => {
     completedAt: COMPLETED_AT,
   });
 
-  assert.equal(result.retryClass, "TERMINAL");
-  assert.equal(result.deliveryUpdate.status, "DEAD");
-  assert.equal(result.deliveryUpdate.lastErrorCode, "CHANNEX_ARI_TASK_ID_MISSING");
-  assert.equal(
-    result.deliveryUpdate.lastErrorSummary,
-    "Channex returned success HTTP status without a task ID."
-  );
-  assert.equal(result.attemptUpdate.outcome, "TERMINAL_FAILURE");
-  assert.equal(result.attemptUpdate.channexTaskId, null);
-  assert.deepEqual(result.propertyStateUpdate, {});
+  assert.equal(result.retryClass, "SUCCESS");
+  assert.equal(result.exhausted, false);
+  assert.equal(result.retryDelayMs, null);
+  assert.deepEqual(result.deliveryUpdate, {
+    status: "SENT",
+    nextAttemptAt: null,
+    leaseToken: null,
+    leaseExpiresAt: null,
+    channexTaskId: null,
+    httpStatus: 200,
+    warningCount: 0,
+    lastErrorCode: null,
+    lastErrorSummary: null,
+    sentAt: COMPLETED_AT,
+  });
+  assert.deepEqual(result.attemptUpdate, {
+    outcome: "SUCCESS",
+    completedAt: COMPLETED_AT,
+    durationMs: 2_500,
+    httpStatus: 200,
+    channexTaskId: null,
+    warningCount: 0,
+    retryAfterMs: null,
+    errorCode: null,
+    responseMeta: {
+      retryClass: "SUCCESS",
+      networkError: false,
+      timedOut: false,
+      leaseExpiresAt: LEASE_EXPIRES_AT.toISOString(),
+    },
+  });
+  assert.deepEqual(result.propertyStateUpdate, {
+    lastSuccessfulAvailabilityAt: COMPLETED_AT,
+  });
 });
 
 test("treats rejected-value warnings as terminal even with task ID", () => {

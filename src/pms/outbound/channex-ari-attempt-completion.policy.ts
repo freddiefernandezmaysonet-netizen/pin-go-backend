@@ -166,14 +166,6 @@ function defaultErrorCode(input: {
     input.httpStatus != null &&
     input.httpStatus >= 200 &&
     input.httpStatus < 300 &&
-    !input.taskId
-  ) {
-    return "CHANNEX_ARI_TASK_ID_MISSING";
-  }
-  if (
-    input.httpStatus != null &&
-    input.httpStatus >= 200 &&
-    input.httpStatus < 300 &&
     input.warningCount > 0
   ) {
     return "CHANNEX_ARI_REJECTED_VALUE_WARNING";
@@ -200,14 +192,6 @@ function defaultErrorSummary(input: {
   if (input.httpStatus === 429) return "Channex rate-limited the ARI request.";
   if (input.httpStatus != null && input.httpStatus >= 500) {
     return `Channex returned retryable HTTP ${input.httpStatus}.`;
-  }
-  if (
-    input.httpStatus != null &&
-    input.httpStatus >= 200 &&
-    input.httpStatus < 300 &&
-    !input.taskId
-  ) {
-    return "Channex returned success HTTP status without a task ID.";
   }
   if (
     input.httpStatus != null &&

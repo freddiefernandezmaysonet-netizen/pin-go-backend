@@ -107,7 +107,7 @@ test("classifies Channex ARI attempt outcomes", () => {
       taskId: null,
       warningCount: 0,
     }),
-    "TERMINAL"
+    "SUCCESS"
   );
 
   assert.equal(
