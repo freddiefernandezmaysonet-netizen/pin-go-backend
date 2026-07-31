@@ -1571,9 +1571,13 @@ dashboardPropertiesRouter.post(
         where: {
           id,
           organizationId: orgId,
+          status: "ACTIVE",
         },
         select: {
           id: true,
+          timezone: true,
+          distributionEnabled: true,
+          distributionStatus: true,
         },
       });
 
@@ -1583,112 +1587,144 @@ dashboardPropertiesRouter.post(
           error: "Property not found",
         });
       }
-            const distributionStartedAt = new Date();
-      const distributionRunId = distributionStartedAt
-        .toISOString()
-        .replace(/[:.]/g, "-");
+
+      if (
+        property.distributionEnabled !== true ||
+        property.distributionStatus !== "ACTIVE"
+      ) {
+        return res.status(409).json({
+          ok: false,
+          error: "Property distribution must be ACTIVE before requesting a Full Sync",
+        });
+      }
+
+      const requestedAt = new Date();
+      const propertyTimezone =
+        property.timezone ?? "America/Puerto_Rico";
+      const todayDateKey = formatInTimeZone(
+        requestedAt,
+        propertyTimezone,
+        "yyyy-MM-dd"
+      );
+      const correlationId =
+        `manual-full-sync:${property.id}:${crypto.randomUUID()}`;
+      const fullSyncGuardMs = 24 * 60 * 60 * 1000;
 
       try {
-        const result =
-          await syncChannexAvailabilityForProperty(property.id);
+        const result = await prisma.$transaction(
+          async (tx) => {
+            const existingAriState =
+              await tx.channexAriPropertyState.findUnique({
+                where: { propertyId: property.id },
+                select: {
+                  organizationId: true,
+                  lastFullSyncRequestedAt: true,
+                },
+              });
 
-        const distributionCompletedAt = new Date();
+            if (
+              existingAriState &&
+              existingAriState.organizationId !== orgId
+            ) {
+              throw new Error(
+                "CHANNEX_ARI_PROPERTY_STATE_TENANT_MISMATCH"
+              );
+            }
 
-        const distributionSyncSucceeded =
-          result && typeof result === "object" && "ok" in result
-            ? Boolean((result as any).ok)
-            : true;
+            if (existingAriState?.lastFullSyncRequestedAt) {
+              const retryAt = new Date(
+                existingAriState.lastFullSyncRequestedAt.getTime() +
+                  fullSyncGuardMs
+              );
 
-       
-               const distributionAuditEntry = createDistributionAuditEntry({
-          organizationId: orgId,
-          propertyId: property.id,
-          decisionId: `distribution-engine:${property.id}:channex-availability:${distributionRunId}`,
-          trigger: "CHANNEX_AVAILABILITY_SYNC",
-          provider: "CHANNEX",
-          syncType: "AVAILABILITY",
-          startedAt: distributionStartedAt,
-          completedAt: distributionCompletedAt,
-          result,
-          status: distributionSyncSucceeded ? "SUCCESS" : "FAILED",
-          severity: distributionSyncSucceeded ? "INFO" : "WARNING",
-          eventType: distributionSyncSucceeded
-            ? "SYNC_COMPLETED"
-            : "SYNC_FAILED",
-          reason: distributionSyncSucceeded
-            ? "CHANNEX_AVAILABILITY_SYNC_COMPLETED"
-            : "CHANNEX_AVAILABILITY_SYNC_FAILED",
-          summary: distributionSyncSucceeded
-            ? "Distribution Engine synchronized property availability with Channex."
-            : "Distribution Engine could not fully synchronize property availability with Channex.",
-          rule: "CHANNEX_AVAILABILITY_SYNC",
-          label: "Channex Availability Sync",
-          recommendedAction: distributionSyncSucceeded
-            ? undefined
-            : "Review Channex availability sync result for this property.",
-        });
-       
-        try {
-          await persistAuditEntry(prisma, distributionAuditEntry);
-        } catch (auditPersistenceError: any) {
-          console.error("[APMS_DISTRIBUTION_AUDIT_PERSIST_ERROR]", {
-            engine: "Distribution",
-            propertyId: property.id,
-            provider: "CHANNEX",
-            syncType: "AVAILABILITY",
-            decisionId: distributionAuditEntry.decisionId,
-            error:
-              auditPersistenceError?.message ??
-              auditPersistenceError,
-          });
-        }
+              if (retryAt.getTime() > requestedAt.getTime()) {
+                const guardError = new Error(
+                  "CHANNEX_ARI_FULL_SYNC_GUARD_ACTIVE"
+                );
+                (guardError as any).retryAt = retryAt;
+                throw guardError;
+              }
+            }
+
+            await createChannexAriOutboxEvent(tx, {
+              organizationId: orgId,
+              propertyId: property.id,
+              messageKind: "AVAILABILITY",
+              syncMode: "FULL",
+              trigger: "MANUAL_FULL_SYNC",
+              sourceEntityType: "PROPERTY",
+              sourceEntityId: property.id,
+              correlationId,
+              todayDateKey,
+              now: requestedAt,
+              coalesceMs: 0,
+            });
+
+            await createChannexAriOutboxEvent(tx, {
+              organizationId: orgId,
+              propertyId: property.id,
+              messageKind: "RATES_RESTRICTIONS",
+              syncMode: "FULL",
+              trigger: "MANUAL_FULL_SYNC",
+              sourceEntityType: "PROPERTY",
+              sourceEntityId: property.id,
+              correlationId,
+              todayDateKey,
+              now: requestedAt,
+              coalesceMs: 0,
+            });
+
+            await tx.channexAriPropertyState.upsert({
+              where: { propertyId: property.id },
+              create: {
+                propertyId: property.id,
+                organizationId: orgId,
+                lastFullSyncRequestedAt: requestedAt,
+              },
+              update: {
+                lastFullSyncRequestedAt: requestedAt,
+              },
+            });
+
+            return {
+              queued: true,
+              syncMode: "FULL",
+              correlationId,
+              requestedAt,
+              messageKinds: [
+                "AVAILABILITY",
+                "RATES_RESTRICTIONS",
+              ],
+            };
+          },
+          {
+            isolationLevel:
+              Prisma.TransactionIsolationLevel.Serializable,
+          }
+        );
 
         return res.json({
           ok: true,
           result,
         });
-      } catch (syncError: any) {
-        const distributionCompletedAt = new Date();
-
-       const distributionAuditEntry = createDistributionAuditEntry({
-  organizationId: orgId,
-  propertyId: property.id,
-  decisionId: `distribution-engine:${property.id}:channex-availability:${distributionRunId}`,
-  trigger: "CHANNEX_AVAILABILITY_SYNC",
-  provider: "CHANNEX",
-  syncType: "AVAILABILITY",
-  startedAt: distributionStartedAt,
-  completedAt: distributionCompletedAt,
-  error: syncError,
-  status: "FAILED",
-  severity: "CRITICAL",
-  eventType: "SYNC_FAILED",
-  reason: "CHANNEX_AVAILABILITY_SYNC_ERROR",
-  summary:
-    "Distribution Engine failed to synchronize property availability with Channex.",
-  rule: "CHANNEX_AVAILABILITY_SYNC",
-  label: "Channex Availability Sync",
-  recommendedAction:
-    "Review Channex availability connection and retry the sync.",
-});
-        try {
-          await persistAuditEntry(prisma, distributionAuditEntry);
-        } catch (auditPersistenceError: any) {
-          console.error("[APMS_DISTRIBUTION_AUDIT_PERSIST_ERROR]", {
-            engine: "Distribution",
-            propertyId: property.id,
-            provider: "CHANNEX",
-            syncType: "AVAILABILITY",
-            decisionId: distributionAuditEntry.decisionId,
+      } catch (syncRequestError: any) {
+        if (
+          syncRequestError?.message ===
+          "CHANNEX_ARI_FULL_SYNC_GUARD_ACTIVE"
+        ) {
+          return res.status(409).json({
+            ok: false,
             error:
-              auditPersistenceError?.message ??
-              auditPersistenceError,
+              "A Full Sync was already requested within the last 24 hours",
+            retryAt:
+              syncRequestError?.retryAt instanceof Date
+                ? syncRequestError.retryAt.toISOString()
+                : null,
           });
         }
 
-        throw syncError;
+        throw syncRequestError;
       }
-     
     } catch (error: any) {
       console.error(
         "POST /api/dashboard/properties/:id/channex/sync-availability error",
@@ -1699,12 +1735,11 @@ dashboardPropertiesRouter.post(
         ok: false,
         error:
           error?.message ??
-          "Failed to sync Channex availability",
+          "Failed to request Channex Full Sync",
       });
     }
   }
 );
-
 dashboardPropertiesRouter.get(
   "/api/dashboard/properties/:id/mission-control",
   requireAuth,
