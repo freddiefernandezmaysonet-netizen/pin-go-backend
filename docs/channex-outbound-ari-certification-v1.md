@@ -561,3 +561,196 @@ Target lifecycle defined: PASS
 Implementation authorized: NOT YET
 Production authorized: NO
 ```
+
+## Staging Certification Closure — 2026-08-01
+
+### Verdict
+
+```text
+Environment: staging-channex-certification
+Service: pin-go-channex-ari-dispatch-staging
+Certified commit: 49b64b0facd2f29d09d67a9a10beaa98edc6d0bb
+Incremental Availability: PASS
+Incremental Rates & Restrictions: PASS
+Production authorized: NO
+PR merge authorized: NO
+```
+
+This section supplements the original Blueprint and preserves its audit history, architecture, unsupported capabilities and safety boundaries.
+
+### Certified scope
+
+The controlled staging certification validated the frozen V1 mapping:
+
+```text
+1 Pin&Go property
+→ 1 Channex property
+→ 1 Channex Room Type
+→ 1 Channex Rate Plan
+```
+
+| Capability | Result |
+| --- | --- |
+| Single-date Availability | PASS |
+| Single-date nightly rate | PASS |
+| `min_stay_arrival` | PASS |
+| `min_stay_through` | PASS |
+| `max_stay` | PASS |
+| Endpoint separation | PASS |
+| Durable outbox, delivery and attempt evidence | PASS |
+| Worker-disabled controlled execution | PASS |
+| Channex Inventory UI verification | PASS |
+| Production isolation | PASS |
+
+### Certified mapping
+
+```text
+Organization: cms0zipf70000pf6n7is2ncwr
+Property: cms0zipff0002pf6n5h3d500k
+Connection: cms0zipfl0004pf6n5i0z6oxt
+Listing: cms0zipfr0006pf6nu8tzzbr9
+Channex property: 1d699e11-593c-4a3d-b66a-28741759e82f
+Room Type: 31a7161d-cd47-4f38-b5f4-4b9e11d4e6f9
+Rate Plan: daa6211c-bd9b-455f-b526-4136550b9a92
+```
+
+### Availability evidence
+
+```text
+Date: 2026-08-01
+Availability: 1
+Outbox: cms994ncl0000mq6u73znfdoi
+Delivery: cms99isgf0000mq9llewlwxbk
+Payload hash: f0ace7d0bced24091e03da1b1be318a03a6084e518b3af83ff3079e94bff343f
+Payload bytes: 158
+Successful POST request: GMd8RwYnKAejphMBBoxh
+Verification GET request: GMd9UhrHgARqtF4BDGkB
+HTTP status: 200
+Warnings: 0
+lastSuccessfulAvailabilityAt: 2026-07-31T21:13:41.865Z
+```
+
+The delivery preserves two attempts. The successful second attempt was reconciled after the earlier task-ID requirement was proven to cause a false terminal classification.
+
+### Rates & Restrictions evidence
+
+```text
+Date: 2026-08-01
+Outbox: cmsahbbgu0000qi6r9q8uby7x
+Delivery: cmsahbbh00001qi6rit97uyvj
+Attempt: cmsahmp5e0001qi9cv35km83s
+POST request: GMe16SGz3-xC5YgBUith
+Payload hash: f8207002046d11820da1031d3095fd94f941f42577f1141ed7463074ed79d740
+Payload bytes: 209
+HTTP status: 200
+Warnings: 0
+Attempt outcome: SUCCESS
+lastSuccessfulRatesAt: 2026-08-01T14:49:50.298Z
+Channex Inventory UI: PASS — user confirmed
+```
+
+Certified values:
+
+```json
+{
+  "date": "2026-08-01",
+  "rate": 10000,
+  "min_stay_arrival": 1,
+  "min_stay_through": 1,
+  "max_stay": 0
+}
+```
+
+### Certified monetary-unit contract
+
+Pin&Go Revenue produces rates in major currency units. Channex Rates & Restrictions requires integer minor units.
+
+```text
+100.00 major units × 100 = 10000 minor units
+minorUnits = Math.round(majorUnits * 100)
+```
+
+The result must be a positive safe integer. Two earlier deliveries using `"100"` and `"100.00"` remain as historical evidence. Both returned HTTP 200 with zero warnings, but only the integer minor-unit payload produced the required effective Inventory UI value.
+
+### Certified response-success policy
+
+A missing task ID does not independently invalidate an exchange that returns:
+
+```text
+HTTP status: 2xx
+warningCount: 0
+```
+
+Certified rule:
+
+```text
+2xx + zero warnings → SUCCESS
+```
+
+Rejected-value warnings remain authoritative.
+
+### Final closure state
+
+```text
+Total ARI deliveries: 4
+Availability deliveries: 1
+Rates & Restrictions deliveries: 3
+Total attempts: 5
+Total outbox events: 4
+Outbox events MERGED: 4
+Unsafe or pending deliveries: 0
+Active leases: 0
+Pending retries: 0
+Worker enabled: NO
+baseNightlyRate: null
+```
+
+The temporary staging value `baseNightlyRate = 100.00` was removed after certification. All delivery, attempt, outbox, payload-hash and property-success evidence remained preserved.
+
+### Not certified by this closure
+
+```text
+500-day Full Sync
+exactly two real Full Sync requests
+multi-date staging updates
+half-year staging updates
+rate-limit load testing
+live 429, timeout or 5xx injection
+duplicate-worker contention
+permanent worker activation
+production migrations
+production deployment
+production Channex traffic
+```
+
+The following capabilities remain unsupported in V1 unless implemented later:
+
+```text
+multiple physical units per property
+multiple independent rate plans per property
+stop_sell
+closed_to_arrival
+closed_to_departure
+```
+
+### Authorization boundary
+
+This staging PASS does not authorize merging or retargeting PR #26, merging PR #24, executing Full Sync, permanently activating the worker, deploying to production or calling production Channex.
+
+Any such step requires a separate audit, execution protocol and explicit authorization.
+
+### Updated sprint status
+
+```text
+Blueprint retained: YES
+Incremental Availability staging: PASS
+Incremental Rates & Restrictions staging: PASS
+Minor-unit rate contract: PASS
+Channex Inventory UI verification: PASS
+Temporary staging configuration removed: PASS
+Final read-only closure audit: PASS
+Full Sync staging execution: NOT YET
+Permanent worker activation: NOT AUTHORIZED
+Production authorized: NO
+PR merge authorized: NO
+```
