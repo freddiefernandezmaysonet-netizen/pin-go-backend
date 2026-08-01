@@ -172,7 +172,7 @@ test("reads a timezone-aware availability snapshot from reservations and blocks"
   });
 });
 
-test("reads Revenue output for exact dates without Distribution rounding or unit conversion", async () => {
+test("serializes Revenue currency amounts as fixed two-decimal strings without unit conversion", async () => {
   const mock = createDb();
   const selectedPlan = plan({
     messageKind: "RATES_RESTRICTIONS",
@@ -217,7 +217,7 @@ test("reads Revenue output for exact dates without Distribution rounding or unit
       property_id: "channex-property-1",
       rate_plan_id: "rate-plan-1",
       date: "2026-08-03",
-      rate: "185",
+      rate: "185.00",
       min_stay_arrival: 2,
       min_stay_through: 2,
       max_stay: 14,

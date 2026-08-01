@@ -160,7 +160,7 @@ function normalizeRevenueRate(value: unknown, dateKey: string): ChannexAriRate {
     throw new Error(`CHANNEX_ARI_REVENUE_RATE_INVALID:${dateKey}`);
   }
 
-  const normalized = String(value);
+  const normalized = value.toFixed(2);
 
   if (!/^\d+(?:\.\d+)?$/.test(normalized)) {
     throw new Error(`CHANNEX_ARI_REVENUE_RATE_INVALID:${dateKey}`);
