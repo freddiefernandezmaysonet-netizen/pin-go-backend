@@ -10,6 +10,7 @@ export type ChannexAriAttemptCompletionTransaction = Pick<
   | "channexAriDelivery"
   | "channexAriDeliveryAttempt"
   | "channexAriPropertyState"
+  | "distributionOutboxEvent"
 >;
 
 export type ChannexAriAttemptCompletionDb = {
@@ -63,6 +64,152 @@ function hasPropertyStateUpdate(value: Record<string, unknown>): boolean {
   return Object.keys(value).length > 0;
 }
 
+// CHANNEX_ARI_CORRELATED_FULL_SYNC_PAIR_COMPLETION_V1
+
+type ChannexAriFullSyncPairMessageKind =
+  | "AVAILABILITY"
+  | "RATES_RESTRICTIONS";
+
+function getChannexAriFullSyncSiblingMessageKind(
+  messageKind: ChannexAriFullSyncPairMessageKind
+): ChannexAriFullSyncPairMessageKind {
+  return messageKind === "AVAILABILITY"
+    ? "RATES_RESTRICTIONS"
+    : "AVAILABILITY";
+}
+
+async function hasSentCorrelatedFullSyncSibling(
+  tx: ChannexAriAttemptCompletionTransaction,
+  input: {
+    deliveryId: string;
+    organizationId: string;
+    propertyId: string;
+    messageKind: ChannexAriFullSyncPairMessageKind;
+  }
+): Promise<boolean> {
+  const outboxDelegate = (
+    tx as ChannexAriAttemptCompletionTransaction & {
+      distributionOutboxEvent?: {
+        findMany?: (args: unknown) => Promise<any[]>;
+      };
+    }
+  ).distributionOutboxEvent;
+
+  /*
+   * Some pre-existing isolated unit mocks do not yet expose the
+   * outbox delegate. They cannot prove aggregate completion.
+   */
+  if (
+    !outboxDelegate ||
+    typeof outboxDelegate.findMany !== "function"
+  ) {
+    return false;
+  }
+
+  const currentOutboxRows =
+    await outboxDelegate.findMany({
+      where: {
+        id: { not: "" },
+        organizationId: input.organizationId,
+        propertyId: input.propertyId,
+        provider: "CHANNEX",
+        messageKind: input.messageKind,
+        syncMode: "FULL",
+        status: "MERGED",
+        deliveryId: input.deliveryId,
+        correlationId: { not: null },
+      },
+      orderBy: {
+        id: "asc",
+      },
+      take: 2,
+      select: {
+        correlationId: true,
+      },
+    });
+
+  if (currentOutboxRows.length !== 1) {
+    return false;
+  }
+
+  const correlationId =
+    String(
+      currentOutboxRows[0]?.correlationId ?? ""
+    ).trim();
+
+  if (!correlationId) {
+    return false;
+  }
+
+  const siblingMessageKind =
+    getChannexAriFullSyncSiblingMessageKind(
+      input.messageKind
+    );
+
+  const siblingOutboxRows =
+    await outboxDelegate.findMany({
+      where: {
+        organizationId: input.organizationId,
+        propertyId: input.propertyId,
+        provider: "CHANNEX",
+        messageKind: siblingMessageKind,
+        syncMode: "FULL",
+        status: "MERGED",
+        correlationId,
+        deliveryId: { not: null },
+      },
+      orderBy: {
+        id: "asc",
+      },
+      take: 2,
+      select: {
+        deliveryId: true,
+      },
+    });
+
+  if (siblingOutboxRows.length !== 1) {
+    return false;
+  }
+
+  const siblingDeliveryId =
+    String(
+      siblingOutboxRows[0]?.deliveryId ?? ""
+    ).trim();
+
+  if (
+    !siblingDeliveryId ||
+    siblingDeliveryId === input.deliveryId
+  ) {
+    return false;
+  }
+
+  const siblingDelivery =
+    await tx.channexAriDelivery.findUnique({
+      where: {
+        id: siblingDeliveryId,
+      },
+      select: {
+        id: true,
+        organizationId: true,
+        propertyId: true,
+        messageKind: true,
+        syncMode: true,
+        status: true,
+      },
+    });
+
+  return Boolean(
+    siblingDelivery &&
+      siblingDelivery.organizationId ===
+        input.organizationId &&
+      siblingDelivery.propertyId ===
+        input.propertyId &&
+      siblingDelivery.messageKind ===
+        siblingMessageKind &&
+      siblingDelivery.syncMode === "FULL" &&
+      siblingDelivery.status === "SENT"
+  );
+}
 export async function completeChannexAriDeliveryAttempt(
   db: ChannexAriAttemptCompletionDb,
   input: CompleteChannexAriDeliveryAttemptInput
@@ -202,20 +349,52 @@ export async function completeChannexAriDeliveryAttempt(
         throw new Error("CHANNEX_ARI_COMPLETION_ATTEMPT_RACE");
       }
 
-      const propertyStateUpdate = completion.propertyStateUpdate as Record<
+      const propertyStateUpdate: Record<
         string,
         unknown
-      >;
+      > = {
+        ...completion.propertyStateUpdate,
+      };
+
+      /*
+       * A single successful FULL delivery is not an aggregate
+       * Full Sync completion. The policy-level timestamp is removed
+       * and restored only after the correlated sibling is SENT.
+       */
+      delete propertyStateUpdate.lastFullSyncCompletedAt;
+
+      if (
+        completion.retryClass === "SUCCESS" &&
+        delivery.syncMode === "FULL" &&
+        await hasSentCorrelatedFullSyncSibling(
+          tx,
+          {
+            deliveryId: delivery.id,
+            organizationId:
+              delivery.organizationId,
+            propertyId:
+              delivery.propertyId,
+            messageKind:
+              delivery.messageKind,
+          }
+        )
+      ) {
+        propertyStateUpdate.lastFullSyncCompletedAt =
+          completedAt;
+      }
 
       if (hasPropertyStateUpdate(propertyStateUpdate)) {
         await tx.channexAriPropertyState.upsert({
-          where: { propertyId: delivery.propertyId },
+          where: {
+            propertyId: delivery.propertyId,
+          },
           create: {
             propertyId: delivery.propertyId,
-            organizationId: delivery.organizationId,
-            ...completion.propertyStateUpdate,
+            organizationId:
+              delivery.organizationId,
+            ...propertyStateUpdate,
           },
-          update: completion.propertyStateUpdate,
+          update: propertyStateUpdate,
         });
       }
 
@@ -231,7 +410,7 @@ export async function completeChannexAriDeliveryAttempt(
         retryDelayMs: completion.retryDelayMs,
         deliveryUpdate: completion.deliveryUpdate,
         attemptUpdate: completion.attemptUpdate,
-        propertyStateUpdate: completion.propertyStateUpdate,
+        propertyStateUpdate,
       };
     },
     { isolationLevel: "Serializable" }

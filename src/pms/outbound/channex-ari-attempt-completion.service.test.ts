@@ -269,33 +269,46 @@ test("persists a successful attempt and Availability success timestamp atomicall
   assert.equal(result.attemptUpdate.outcome, "SUCCESS");
 });
 
-test("persists a Rates Full Sync success with both durable timestamps", async () => {
-  const mock = createMockDb({
-    delivery: processingDelivery({
-      messageKind: "RATES_RESTRICTIONS",
-      syncMode: "FULL",
-    }),
-  });
+test(
+  "does not mark aggregate Full Sync complete from an isolated Rates success without correlated outbox evidence",
+  async () => {
+    const mock = createMockDb({
+      delivery: processingDelivery({
+        messageKind: "RATES_RESTRICTIONS",
+        syncMode: "FULL",
+      }),
+    });
 
-  const result = await completeChannexAriDeliveryAttempt(mock.db as any, {
-    deliveryId: "delivery-1",
-    leaseToken: "lease-1",
-    evidence: {
-      httpStatus: 202,
-      taskId: "task-full",
-    },
-    completedAt: COMPLETED_AT,
-  });
+    const result =
+      await completeChannexAriDeliveryAttempt(
+        mock.db as any,
+        {
+          deliveryId: "delivery-1",
+          leaseToken: "lease-1",
+          evidence: {
+            httpStatus: 202,
+            taskId: "task-full",
+          },
+          completedAt: COMPLETED_AT,
+        }
+      );
 
-  assert.deepEqual(result.propertyStateUpdate, {
-    lastSuccessfulRatesAt: COMPLETED_AT,
-    lastFullSyncCompletedAt: COMPLETED_AT,
-  });
-  assert.deepEqual(mock.state.propertyUpsertArgs[0].update, {
-    lastSuccessfulRatesAt: COMPLETED_AT,
-    lastFullSyncCompletedAt: COMPLETED_AT,
-  });
-});
+    const expectedPropertyStateUpdate = {
+      lastSuccessfulRatesAt:
+        COMPLETED_AT,
+    };
+
+    assert.deepEqual(
+      result.propertyStateUpdate,
+      expectedPropertyStateUpdate
+    );
+
+    assert.deepEqual(
+      mock.state.propertyUpsertArgs[0].update,
+      expectedPropertyStateUpdate
+    );
+  }
+);
 
 test("persists a retryable 429 with Retry-After and rate-limit evidence", async () => {
   const existingPause = new Date("2026-07-28T12:10:00.000Z");
@@ -582,3 +595,502 @@ test("validates required identifiers and completion timestamp before opening a t
     assert.equal(mock.state.deliveryUpdateArgs.length, 0);
   }
 });
+
+// FULL_SYNC_CORRELATED_PAIR_COMPLETION_CONTRACT_V1
+
+type FullSyncPairMessageKind =
+  | "AVAILABILITY"
+  | "RATES_RESTRICTIONS";
+
+type FullSyncPairSiblingStatus =
+  | "READY"
+  | "SENT";
+
+type FullSyncPairOutboxRow = {
+  id: string;
+  organizationId: string;
+  propertyId: string;
+  provider: "CHANNEX";
+  messageKind: FullSyncPairMessageKind;
+  syncMode: "FULL";
+  status: "MERGED";
+  correlationId: string;
+  deliveryId: string;
+};
+
+function matchesFullSyncPairWhere(
+  row: Record<string, unknown>,
+  where: Record<string, any> | undefined
+): boolean {
+  if (!where) return true;
+
+  if (
+    Array.isArray(where.AND) &&
+    !where.AND.every((item: Record<string, any>) =>
+      matchesFullSyncPairWhere(row, item)
+    )
+  ) {
+    return false;
+  }
+
+  if (
+    Array.isArray(where.OR) &&
+    !where.OR.some((item: Record<string, any>) =>
+      matchesFullSyncPairWhere(row, item)
+    )
+  ) {
+    return false;
+  }
+
+  for (const [key, expected] of Object.entries(where)) {
+    if (key === "AND" || key === "OR") {
+      continue;
+    }
+
+    const actual = row[key];
+
+    if (
+      expected &&
+      typeof expected === "object" &&
+      !Array.isArray(expected)
+    ) {
+      if (
+        Array.isArray(expected.in) &&
+        !expected.in.includes(actual)
+      ) {
+        return false;
+      }
+
+      if (
+        Object.prototype.hasOwnProperty.call(
+          expected,
+          "not"
+        ) &&
+        actual === expected.not
+      ) {
+        return false;
+      }
+
+      continue;
+    }
+
+    if (actual !== expected) {
+      return false;
+    }
+  }
+
+  return true;
+}
+
+function createCorrelatedFullSyncCompletionMockDb(input: {
+  completingMessageKind: FullSyncPairMessageKind;
+  siblingStatus: FullSyncPairSiblingStatus;
+  sameCorrelation: boolean;
+}) {
+  const siblingMessageKind: FullSyncPairMessageKind =
+    input.completingMessageKind === "AVAILABILITY"
+      ? "RATES_RESTRICTIONS"
+      : "AVAILABILITY";
+
+  const targetDeliveryId =
+    input.completingMessageKind === "AVAILABILITY"
+      ? "delivery-full-availability"
+      : "delivery-full-rates";
+
+  const siblingDeliveryId =
+    siblingMessageKind === "AVAILABILITY"
+      ? "delivery-full-availability"
+      : "delivery-full-rates";
+
+  const targetCorrelationId =
+    "full-sync-correlation-1";
+
+  const siblingCorrelationId =
+    input.sameCorrelation
+      ? targetCorrelationId
+      : "full-sync-correlation-other";
+
+  const targetDelivery = {
+    ...processingDelivery({
+      id: targetDeliveryId,
+      messageKind: input.completingMessageKind,
+      syncMode: "FULL",
+      status: "PROCESSING",
+      attemptCount: 1,
+      leaseToken: "lease-full-sync-pair",
+      leaseExpiresAt: LEASE_EXPIRES_AT,
+    }),
+    sentAt: null,
+    deadAt: null,
+  };
+
+  const siblingDelivery = {
+    ...processingDelivery({
+      id: siblingDeliveryId,
+      messageKind: siblingMessageKind,
+      syncMode: "FULL",
+      status: input.siblingStatus,
+      attemptCount:
+        input.siblingStatus === "SENT" ? 1 : 0,
+      leaseToken: null,
+      leaseExpiresAt: null,
+    }),
+    sentAt:
+      input.siblingStatus === "SENT"
+        ? new Date(COMPLETED_AT.getTime() - 1_000)
+        : null,
+    deadAt: null,
+  };
+
+  const deliveries = [
+    targetDelivery,
+    siblingDelivery,
+  ];
+
+  const outboxRows: FullSyncPairOutboxRow[] = [
+    {
+      id: "outbox-full-target",
+      organizationId: "org-1",
+      propertyId: "property-1",
+      provider: "CHANNEX",
+      messageKind: input.completingMessageKind,
+      syncMode: "FULL",
+      status: "MERGED",
+      correlationId: targetCorrelationId,
+      deliveryId: targetDeliveryId,
+    },
+    {
+      id: "outbox-full-sibling",
+      organizationId: "org-1",
+      propertyId: "property-1",
+      provider: "CHANNEX",
+      messageKind: siblingMessageKind,
+      syncMode: "FULL",
+      status: "MERGED",
+      correlationId: siblingCorrelationId,
+      deliveryId: siblingDeliveryId,
+    },
+  ];
+
+  const state = {
+    isolationLevel: null as string | null,
+    deliveryFindArgs: [] as any[],
+    deliveryFindManyArgs: [] as any[],
+    deliveryFindFirstArgs: [] as any[],
+    deliveryUpdateArgs: [] as any[],
+    attemptFindArgs: [] as any[],
+    attemptUpdateArgs: [] as any[],
+    propertyFindArgs: [] as any[],
+    propertyUpsertArgs: [] as any[],
+    outboxFindManyArgs: [] as any[],
+    outboxFindFirstArgs: [] as any[],
+  };
+
+  const tx = {
+    channexAriDelivery: {
+      findUnique: async (args: any) => {
+        state.deliveryFindArgs.push(args);
+
+        return (
+          deliveries.find((row) =>
+            matchesFullSyncPairWhere(
+              row as Record<string, unknown>,
+              args?.where
+            )
+          ) ?? null
+        );
+      },
+
+      findFirst: async (args: any) => {
+        state.deliveryFindFirstArgs.push(args);
+
+        return (
+          deliveries.find((row) =>
+            matchesFullSyncPairWhere(
+              row as Record<string, unknown>,
+              args?.where
+            )
+          ) ?? null
+        );
+      },
+
+      findMany: async (args: any) => {
+        state.deliveryFindManyArgs.push(args);
+
+        return deliveries.filter((row) =>
+          matchesFullSyncPairWhere(
+            row as Record<string, unknown>,
+            args?.where
+          )
+        );
+      },
+
+      updateMany: async (args: any) => {
+        state.deliveryUpdateArgs.push(args);
+        return { count: 1 };
+      },
+    },
+
+    channexAriDeliveryAttempt: {
+      findUnique: async (args: any) => {
+        state.attemptFindArgs.push(args);
+
+        return {
+          ...inFlightAttempt({
+            id: "attempt-full-sync-pair",
+            attemptNumber: 1,
+          }),
+        };
+      },
+
+      updateMany: async (args: any) => {
+        state.attemptUpdateArgs.push(args);
+        return { count: 1 };
+      },
+    },
+
+    channexAriPropertyState: {
+      findUnique: async (args: any) => {
+        state.propertyFindArgs.push(args);
+
+        return {
+          ...propertyState(),
+          lastSuccessfulAvailabilityAt: null,
+          lastSuccessfulRatesAt: null,
+          lastFullSyncRequestedAt: null,
+          lastFullSyncCompletedAt: null,
+        };
+      },
+
+      upsert: async (args: any) => {
+        state.propertyUpsertArgs.push(args);
+
+        return {
+          propertyId: args.create.propertyId,
+          organizationId:
+            args.create.organizationId,
+          ...args.update,
+        };
+      },
+    },
+
+    distributionOutboxEvent: {
+      findFirst: async (args: any) => {
+        state.outboxFindFirstArgs.push(args);
+
+        return (
+          outboxRows.find((row) =>
+            matchesFullSyncPairWhere(
+              row as Record<string, unknown>,
+              args?.where
+            )
+          ) ?? null
+        );
+      },
+
+      findMany: async (args: any) => {
+        state.outboxFindManyArgs.push(args);
+
+        return outboxRows.filter((row) =>
+          matchesFullSyncPairWhere(
+            row as Record<string, unknown>,
+            args?.where
+          )
+        );
+      },
+    },
+  };
+
+  return {
+    db: {
+      $transaction: async (
+        callback: (transaction: any) => Promise<any>,
+        options?: {
+          isolationLevel?: string;
+        }
+      ) => {
+        state.isolationLevel =
+          options?.isolationLevel ?? null;
+
+        return callback(tx);
+      },
+    },
+    state,
+    targetDeliveryId,
+  };
+}
+
+async function completeCorrelatedFullSyncScenario(input: {
+  completingMessageKind: FullSyncPairMessageKind;
+  siblingStatus: FullSyncPairSiblingStatus;
+  sameCorrelation: boolean;
+}) {
+  const mock =
+    createCorrelatedFullSyncCompletionMockDb(input);
+
+  const result =
+    await completeChannexAriDeliveryAttempt(
+      mock.db as any,
+      {
+        deliveryId:
+          mock.targetDeliveryId,
+        leaseToken:
+          "lease-full-sync-pair",
+        evidence: {
+          httpStatus: 200,
+          warningCount: 0,
+        },
+        completedAt:
+          COMPLETED_AT,
+      }
+    );
+
+  return {
+    mock,
+    result,
+  };
+}
+
+test(
+  "does not mark the aggregate Full Sync complete when Availability succeeds before correlated Rates",
+  async () => {
+    const { mock, result } =
+      await completeCorrelatedFullSyncScenario({
+        completingMessageKind:
+          "AVAILABILITY",
+        siblingStatus: "READY",
+        sameCorrelation: true,
+      });
+
+    const expectedPropertyUpdate = {
+      lastSuccessfulAvailabilityAt:
+        COMPLETED_AT,
+    };
+
+    assert.deepEqual(
+      result.propertyStateUpdate,
+      expectedPropertyUpdate
+    );
+
+    assert.deepEqual(
+      mock.state.propertyUpsertArgs[0].update,
+      expectedPropertyUpdate
+    );
+  }
+);
+
+test(
+  "does not mark the aggregate Full Sync complete when Rates succeeds before correlated Availability",
+  async () => {
+    const { mock, result } =
+      await completeCorrelatedFullSyncScenario({
+        completingMessageKind:
+          "RATES_RESTRICTIONS",
+        siblingStatus: "READY",
+        sameCorrelation: true,
+      });
+
+    const expectedPropertyUpdate = {
+      lastSuccessfulRatesAt:
+        COMPLETED_AT,
+    };
+
+    assert.deepEqual(
+      result.propertyStateUpdate,
+      expectedPropertyUpdate
+    );
+
+    assert.deepEqual(
+      mock.state.propertyUpsertArgs[0].update,
+      expectedPropertyUpdate
+    );
+  }
+);
+
+test(
+  "marks the aggregate Full Sync complete when Availability finishes after correlated Rates is SENT",
+  async () => {
+    const { mock, result } =
+      await completeCorrelatedFullSyncScenario({
+        completingMessageKind:
+          "AVAILABILITY",
+        siblingStatus: "SENT",
+        sameCorrelation: true,
+      });
+
+    const expectedPropertyUpdate = {
+      lastSuccessfulAvailabilityAt:
+        COMPLETED_AT,
+      lastFullSyncCompletedAt:
+        COMPLETED_AT,
+    };
+
+    assert.deepEqual(
+      result.propertyStateUpdate,
+      expectedPropertyUpdate
+    );
+
+    assert.deepEqual(
+      mock.state.propertyUpsertArgs[0].update,
+      expectedPropertyUpdate
+    );
+  }
+);
+
+test(
+  "marks the aggregate Full Sync complete when Rates finishes after correlated Availability is SENT",
+  async () => {
+    const { mock, result } =
+      await completeCorrelatedFullSyncScenario({
+        completingMessageKind:
+          "RATES_RESTRICTIONS",
+        siblingStatus: "SENT",
+        sameCorrelation: true,
+      });
+
+    const expectedPropertyUpdate = {
+      lastSuccessfulRatesAt:
+        COMPLETED_AT,
+      lastFullSyncCompletedAt:
+        COMPLETED_AT,
+    };
+
+    assert.deepEqual(
+      result.propertyStateUpdate,
+      expectedPropertyUpdate
+    );
+
+    assert.deepEqual(
+      mock.state.propertyUpsertArgs[0].update,
+      expectedPropertyUpdate
+    );
+  }
+);
+
+test(
+  "does not combine SENT Full Sync deliveries that belong to different correlations",
+  async () => {
+    const { mock, result } =
+      await completeCorrelatedFullSyncScenario({
+        completingMessageKind:
+          "RATES_RESTRICTIONS",
+        siblingStatus: "SENT",
+        sameCorrelation: false,
+      });
+
+    const expectedPropertyUpdate = {
+      lastSuccessfulRatesAt:
+        COMPLETED_AT,
+    };
+
+    assert.deepEqual(
+      result.propertyStateUpdate,
+      expectedPropertyUpdate
+    );
+
+    assert.deepEqual(
+      mock.state.propertyUpsertArgs[0].update,
+      expectedPropertyUpdate
+    );
+  }
+);
