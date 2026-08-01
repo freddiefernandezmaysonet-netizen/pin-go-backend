@@ -172,7 +172,7 @@ test("reads a timezone-aware availability snapshot from reservations and blocks"
   });
 });
 
-test("serializes Revenue currency amounts as fixed two-decimal strings without unit conversion", async () => {
+test("serializes Revenue currency amounts as integer minor units without changing Revenue prices", async () => {
   const mock = createDb();
   const selectedPlan = plan({
     messageKind: "RATES_RESTRICTIONS",
@@ -208,7 +208,7 @@ test("serializes Revenue currency amounts as fixed two-decimal strings without u
       property_id: "channex-property-1",
       rate_plan_id: "rate-plan-1",
       date: "2026-08-01",
-      rate: "159.99",
+      rate: 15999,
       min_stay_arrival: 2,
       min_stay_through: 2,
       max_stay: 14,
@@ -217,7 +217,7 @@ test("serializes Revenue currency amounts as fixed two-decimal strings without u
       property_id: "channex-property-1",
       rate_plan_id: "rate-plan-1",
       date: "2026-08-03",
-      rate: "185.00",
+      rate: 18500,
       min_stay_arrival: 2,
       min_stay_through: 2,
       max_stay: 14,
@@ -256,9 +256,9 @@ test("expands a date-range plan and defaults max stay to zero", async () => {
       maxStay: value.max_stay,
     })),
     [
-      { date: "2026-08-01", rate: "110.00", maxStay: 0 },
-      { date: "2026-08-02", rate: "120.00", maxStay: 0 },
-      { date: "2026-08-03", rate: "130.00", maxStay: 0 },
+      { date: "2026-08-01", rate: 11000, maxStay: 0 },
+      { date: "2026-08-02", rate: 12000, maxStay: 0 },
+      { date: "2026-08-03", rate: 13000, maxStay: 0 },
     ]
   );
 });

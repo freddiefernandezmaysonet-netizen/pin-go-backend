@@ -146,6 +146,8 @@ function assertPlanMappingAlignment(input: {
 }
 
 function normalizeRevenueRate(value: unknown, dateKey: string): ChannexAriRate {
+  let majorUnits: number;
+
   if (typeof value === "string") {
     const normalized = value.trim();
 
@@ -153,20 +155,24 @@ function normalizeRevenueRate(value: unknown, dateKey: string): ChannexAriRate {
       throw new Error(`CHANNEX_ARI_REVENUE_RATE_INVALID:${dateKey}`);
     }
 
-    return normalized;
-  }
-
-  if (typeof value !== "number" || !Number.isFinite(value) || value <= 0) {
+    majorUnits = Number(normalized);
+  } else if (typeof value === "number") {
+    majorUnits = value;
+  } else {
     throw new Error(`CHANNEX_ARI_REVENUE_RATE_INVALID:${dateKey}`);
   }
 
-  const normalized = value.toFixed(2);
-
-  if (!/^\d+(?:\.\d+)?$/.test(normalized)) {
+  if (!Number.isFinite(majorUnits) || majorUnits <= 0) {
     throw new Error(`CHANNEX_ARI_REVENUE_RATE_INVALID:${dateKey}`);
   }
 
-  return normalized;
+  const minorUnits = Math.round(majorUnits * 100);
+
+  if (!Number.isSafeInteger(minorUnits) || minorUnits <= 0) {
+    throw new Error(`CHANNEX_ARI_REVENUE_RATE_INVALID:${dateKey}`);
+  }
+
+  return minorUnits;
 }
 
 export async function readChannexAriSnapshot(
