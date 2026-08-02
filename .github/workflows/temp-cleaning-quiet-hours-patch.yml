@@ -1,0 +1,170 @@
+name: Temporary Cleaning Quiet Hours Patch
+
+on:
+  push:
+    branches:
+      - agent/mission-control-engine-readiness-v1-backend
+    paths:
+      - ".github/workflows/temp-cleaning-quiet-hours-patch.yml"
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout branch
+        uses: actions/checkout@v4
+        with:
+          ref: agent/mission-control-engine-readiness-v1-backend
+          fetch-depth: 0
+
+      - name: Apply exact patch
+        shell: bash
+        run: |
+          python <<'PY'
+          from pathlib import Path
+
+          path = Path("src/services/cleaning-confirmation-dispatch.service.ts")
+          text = path.read_text()
+
+          old_helper = '''function isWithinCleaningMessageHours(timeZone: string, now: Date) {
+            const parts = new Intl.DateTimeFormat("en-US", {
+              timeZone,
+              hour: "2-digit",
+              hour12: false,
+            }).formatToParts(now);
+
+            const hour = Number(parts.find((p) => p.type === "hour")?.value ?? "0");
+
+            return hour >= SEND_START_HOUR && hour < SEND_END_HOUR;
+          }
+          '''
+
+          new_helper = '''function getZonedDateTimeParts(timeZone: string, date: Date) {
+            const parts = new Intl.DateTimeFormat("en-US", {
+              timeZone,
+              year: "numeric",
+              month: "2-digit",
+              day: "2-digit",
+              hour: "2-digit",
+              minute: "2-digit",
+              second: "2-digit",
+              hour12: false,
+            }).formatToParts(date);
+
+            const get = (type: Intl.DateTimeFormatPartTypes) =>
+              Number(parts.find((part) => part.type === type)?.value ?? "0");
+
+            return {
+              year: get("year"),
+              month: get("month"),
+              day: get("day"),
+              hour: get("hour"),
+              minute: get("minute"),
+              second: get("second"),
+            };
+          }
+
+          function isWithinCleaningMessageHours(timeZone: string, now: Date) {
+            const { hour } = getZonedDateTimeParts(timeZone, now);
+
+            return hour >= SEND_START_HOUR && hour < SEND_END_HOUR;
+          }
+
+          function zonedDateTimeToUtc(params: {
+            timeZone: string;
+            year: number;
+            month: number;
+            day: number;
+            hour: number;
+            minute?: number;
+            second?: number;
+          }) {
+            const localUtc = Date.UTC(
+              params.year,
+              params.month - 1,
+              params.day,
+              params.hour,
+              params.minute ?? 0,
+              params.second ?? 0
+            );
+            let candidate = localUtc;
+
+            for (let attempt = 0; attempt < 3; attempt++) {
+              const parts = getZonedDateTimeParts(
+                params.timeZone,
+                new Date(candidate)
+              );
+              const representedAsUtc = Date.UTC(
+                parts.year,
+                parts.month - 1,
+                parts.day,
+                parts.hour,
+                parts.minute,
+                parts.second
+              );
+              candidate = localUtc - (representedAsUtc - candidate);
+            }
+
+            return new Date(candidate);
+          }
+
+          function getNextCleaningMessageAttemptAt(timeZone: string, now: Date) {
+            const local = getZonedDateTimeParts(timeZone, now);
+            const localDate = new Date(
+              Date.UTC(local.year, local.month - 1, local.day)
+            );
+
+            if (local.hour >= SEND_END_HOUR) {
+              localDate.setUTCDate(localDate.getUTCDate() + 1);
+            }
+
+            return zonedDateTimeToUtc({
+              timeZone,
+              year: localDate.getUTCFullYear(),
+              month: localDate.getUTCMonth() + 1,
+              day: localDate.getUTCDate(),
+              hour: SEND_START_HOUR,
+            });
+          }
+          '''
+
+          old_branch = '''      state: "DISPATCH_RETRY_SCHEDULED",
+              reason: "OUTSIDE_ALLOWED_HOURS",
+              occurredAt: now,
+          '''
+
+          new_branch = '''      state: "DISPATCH_RETRY_SCHEDULED",
+              nextAttemptAt: getNextCleaningMessageAttemptAt(timezone, now),
+              reason: "OUTSIDE_ALLOWED_HOURS",
+              occurredAt: now,
+          '''
+
+          if text.count(old_helper) != 1:
+              raise SystemExit(f"expected helper marker once, found {text.count(old_helper)}")
+          if text.count(old_branch) != 1:
+              raise SystemExit(f"expected quiet-hours marker once, found {text.count(old_branch)}")
+
+          text = text.replace(old_helper, new_helper, 1)
+          text = text.replace(old_branch, new_branch, 1)
+          path.write_text(text)
+          PY
+
+      - name: Validate targeted diff
+        shell: bash
+        run: |
+          git diff --check
+          git diff -- src/services/cleaning-confirmation-dispatch.service.ts
+          test "$(git diff --name-only | wc -l)" -eq 1
+          test "$(git diff --name-only)" = "src/services/cleaning-confirmation-dispatch.service.ts"
+
+      - name: Commit patch
+        shell: bash
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add src/services/cleaning-confirmation-dispatch.service.ts
+          git commit -m "fix: schedule cleaning dispatch after quiet hours"
+          git push origin HEAD:agent/mission-control-engine-readiness-v1-backend
