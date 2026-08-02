@@ -85,6 +85,7 @@ jobs:
             src/apms/__tests__/financial-mission-control-read-model.test.ts \
             src/pms/__tests__/webhook-claim.test.ts \
             src/services/__tests__/access-recovery-operational.test.ts \
+            src/services/__tests__/cleaning-confirmation-dispatch.test.ts \
             src/services/__tests__/cleaning-operational.test.ts \
             src/services/__tests__/communications-operational.test.ts \
             src/services/__tests__/device-health-operational.test.ts \
@@ -126,6 +127,7 @@ jobs:
             src/services/reservation.reconcile.service.ts
             src/services/stripe-connect.service.ts
             src/services/__tests__/access-recovery-operational.test.ts
+            src/services/__tests__/cleaning-confirmation-dispatch.test.ts
             src/services/__tests__/cleaning-operational.test.ts
             src/services/__tests__/communications-operational.test.ts
             src/services/__tests__/device-health-operational.test.ts
