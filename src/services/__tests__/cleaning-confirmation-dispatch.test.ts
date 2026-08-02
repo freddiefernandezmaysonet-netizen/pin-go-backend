@@ -267,7 +267,7 @@ test("keeps cleaner dispatch under Pin&Go ownership outside allowed hours", asyn
   );
   assert.equal(
     issue.metadata.nextAttemptAt,
-    null
+    "2026-08-02T12:00:00.000Z"
   );
   assert.equal(
     issue.metadata.exhausted,
