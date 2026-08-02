@@ -528,3 +528,165 @@ test("rejects invalid configuration and payload before transport", async () => {
 
   assert.equal(mock.calls.length, 0);
 });
+
+// CHANNEX_ARI_BENIGN_SINGULAR_WARNING_CONTRACT_V1
+
+test(
+  "does not classify singular warning Success as rejected-value evidence",
+  async () => {
+    const mock = createMockTransport(async () => ({
+      status: 200,
+      data: {
+        success: true,
+        warning: "Success",
+        message: "Success",
+      },
+      headers: {
+        "x-request-id":
+          "request-benign-singular-warning",
+      },
+    }));
+
+    const result =
+      await sendChannexAriHttpRequest({
+        messageKind:
+          "RATES_RESTRICTIONS",
+        payload:
+          restrictionsPayload(),
+        apiKey:
+          API_KEY,
+        baseUrl:
+          "https://staging.example.test",
+        receivedAt:
+          RECEIVED_AT,
+        transport:
+          mock.transport,
+      });
+
+    assert.equal(
+      result.evidence.httpStatus,
+      200
+    );
+
+    assert.equal(
+      result.evidence.warningCount,
+      0
+    );
+
+    assert.equal(
+      result.evidence.errorCode,
+      null
+    );
+
+    assert.equal(
+      result.evidence.errorSummary,
+      null
+    );
+  }
+);
+
+test(
+  "preserves structured warnings arrays as rejected-value evidence",
+  async () => {
+    const mock = createMockTransport(async () => ({
+      status: 200,
+      data: {
+        warnings: [
+          {
+            field: "rate",
+            date: "2026-08-22",
+          },
+        ],
+        code: "VALUE_REJECTED",
+        message:
+          "One ARI value was rejected.",
+      },
+    }));
+
+    const result =
+      await sendChannexAriHttpRequest({
+        messageKind:
+          "RATES_RESTRICTIONS",
+        payload:
+          restrictionsPayload(),
+        apiKey:
+          API_KEY,
+        baseUrl:
+          "https://staging.example.test",
+        receivedAt:
+          RECEIVED_AT,
+        transport:
+          mock.transport,
+      });
+
+    assert.equal(
+      result.evidence.warningCount,
+      1
+    );
+
+    assert.equal(
+      result.evidence.errorCode,
+      "VALUE_REJECTED"
+    );
+
+    assert.equal(
+      result.evidence.errorSummary,
+      "One ARI value was rejected."
+    );
+  }
+);
+
+test(
+  "preserves rejected_values arrays as rejected-value evidence",
+  async () => {
+    const mock = createMockTransport(async () => ({
+      status: 200,
+      data: {
+        rejected_values: [
+          {
+            field: "rate",
+            date: "2026-08-22",
+          },
+          {
+            field: "max_stay",
+            date: "2026-08-23",
+          },
+        ],
+        code: "VALUE_REJECTED",
+        message:
+          "Two ARI values were rejected.",
+      },
+    }));
+
+    const result =
+      await sendChannexAriHttpRequest({
+        messageKind:
+          "RATES_RESTRICTIONS",
+        payload:
+          restrictionsPayload(),
+        apiKey:
+          API_KEY,
+        baseUrl:
+          "https://staging.example.test",
+        receivedAt:
+          RECEIVED_AT,
+        transport:
+          mock.transport,
+      });
+
+    assert.equal(
+      result.evidence.warningCount,
+      2
+    );
+
+    assert.equal(
+      result.evidence.errorCode,
+      "VALUE_REJECTED"
+    );
+
+    assert.equal(
+      result.evidence.errorSummary,
+      "Two ARI values were rejected."
+    );
+  }
+);

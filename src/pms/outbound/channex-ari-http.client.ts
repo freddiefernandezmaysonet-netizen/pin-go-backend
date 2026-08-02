@@ -243,6 +243,23 @@ function countContainer(value: unknown): number {
   return record ? Object.keys(record).length : 0;
 }
 
+// CHANNEX_ARI_BENIGN_SINGULAR_WARNING_FIX_V1
+
+function countWarningEvidence(input: {
+  key: string;
+  value: unknown;
+}): number {
+  if (
+    input.key === "warning" &&
+    typeof input.value === "string" &&
+    input.value.trim().toLowerCase() === "success"
+  ) {
+    return 0;
+  }
+
+  return countContainer(input.value);
+}
+
 function extractWarningCount(body: unknown): number {
   const counts: number[] = [];
 
@@ -255,7 +272,12 @@ function extractWarningCount(body: unknown): number {
       "rejected_values",
       "rejectedValues",
     ]) {
-      counts.push(countContainer(root[key]));
+      counts.push(
+        countWarningEvidence({
+          key,
+          value: root[key],
+        })
+      );
     }
   }
 
