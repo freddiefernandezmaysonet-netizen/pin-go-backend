@@ -476,3 +476,148 @@ test("supersedes existing coverage when the reservation is cancelled", async () 
     "SUPERSEDED"
   );
 });
+
+test("keeps a failed cleaner notification retry under Pin&Go ownership", async () => {
+  const harness =
+    createPrismaHarness();
+  const nextAttemptAt = new Date(
+    "2026-07-24T12:15:00.000Z"
+  );
+
+  await synchronizeCleaningCoverageOperationalIssue({
+    prisma: harness.prisma,
+    reservationId: "reservation-1",
+    confirmationId: "confirmation-1",
+    staffMemberId: "cleaner-1",
+    state: "DISPATCH_RETRY_SCHEDULED",
+    nextAttemptAt,
+    error: "Twilio temporarily unavailable",
+    reason: "CONFIRMATION_SMS_FAILED",
+    occurredAt: new Date(
+      "2026-07-24T12:00:00.000Z"
+    ),
+  });
+
+  const issue = getOnlyIssue(
+    harness.issues
+  );
+
+  assert.equal(
+    issue.issueCode,
+    "CLEANING_CONFIRMATION_DISPATCH_RETRY_SCHEDULED"
+  );
+  assert.equal(
+    issue.workflowState,
+    "WAITING"
+  );
+  assert.equal(
+    issue.responsibleActor,
+    "PIN_GO"
+  );
+  assert.equal(issue.actionRequired, false);
+  assert.equal(issue.canAutoResolve, true);
+  assert.equal(
+    issue.autoResolveActionCode,
+    "RETRY_CLEANER_NOTIFICATION"
+  );
+  assert.equal(
+    issue.metadata.nextAttemptAt,
+    nextAttemptAt.toISOString()
+  );
+  assert.equal(
+    issue.metadata.exhausted,
+    false
+  );
+  assert.equal(
+    issue.metadata.lastError,
+    "Twilio temporarily unavailable"
+  );
+});
+
+test("supersedes existing coverage when cleaning NFC is disabled", async () => {
+  const harness =
+    createPrismaHarness();
+
+  await synchronizeCleaningCoverageOperationalIssue({
+    prisma: harness.prisma,
+    reservationId: "reservation-1",
+    confirmationId: "confirmation-1",
+    staffMemberId: "cleaner-1",
+    state: "WAITING_FOR_CLEANER",
+    occurredAt: new Date(
+      "2026-07-24T12:00:00.000Z"
+    ),
+  });
+
+  const waitingIssue = getOnlyIssue(
+    harness.issues
+  );
+
+  harness.reservation.property
+    .cleaningNfcEnabled = false;
+
+  await synchronizeCleaningCoverageOperationalIssue({
+    prisma: harness.prisma,
+    reservationId: "reservation-1",
+    confirmationId: "confirmation-1",
+    staffMemberId: "cleaner-1",
+    state: "WAITING_FOR_CLEANER",
+    reason: "CLEANING_NFC_DISABLED",
+    occurredAt: new Date(
+      "2026-07-24T12:30:00.000Z"
+    ),
+  });
+
+  const supersededIssue = getOnlyIssue(
+    harness.issues
+  );
+
+  assert.equal(
+    supersededIssue.id,
+    waitingIssue.id
+  );
+  assert.equal(
+    supersededIssue.issueCode,
+    "CLEANING_COVERAGE_SUPERSEDED"
+  );
+  assert.equal(
+    supersededIssue.workflowState,
+    "RESOLVED"
+  );
+  assert.equal(
+    supersededIssue.resolutionType,
+    "SUPERSEDED"
+  );
+  assert.equal(
+    supersededIssue.resolvedBy,
+    "PIN_GO"
+  );
+});
+
+test("does not create an orphan resolution when no coverage workflow exists", async () => {
+  const harness =
+    createPrismaHarness();
+
+  const result =
+    await synchronizeCleaningCoverageOperationalIssue({
+      prisma: harness.prisma,
+      reservationId: "reservation-1",
+      confirmationId: "confirmation-1",
+      staffMemberId: "cleaner-1",
+      state: "CONFIRMED",
+      occurredAt: new Date(
+        "2026-07-24T12:00:00.000Z"
+      ),
+    });
+
+  assert.deepEqual(result, {
+    applied: false,
+    reason:
+      "OPERATIONAL_ISSUE_NOT_FOUND",
+  });
+  assert.equal(harness.issues.size, 0);
+  assert.equal(
+    harness.transitions.length,
+    0
+  );
+});
