@@ -12,7 +12,12 @@ type StoredIssue = Record<string, any> & {
   operationalKey: string;
 };
 
-function createPrismaHarness(now: Date) {
+function createPrismaHarness(
+  now: Date,
+  options: {
+    recentFailedSms?: boolean;
+  } = {}
+) {
   const issues = new Map<string, StoredIssue>();
   const transitions: Array<Record<string, any>> = [];
   const failedAt = new Date(
@@ -119,10 +124,13 @@ function createPrismaHarness(now: Date) {
       findFirst: async () => null,
     },
     messageDispatchLog: {
-      findFirst: async () => ({
-        id: "dispatch-failed-1",
-        createdAt: failedAt,
-      }),
+      findFirst: async () =>
+        options.recentFailedSms === false
+          ? null
+          : {
+              id: "dispatch-failed-1",
+              createdAt: failedAt,
+            },
     },
     operationalIssue: {
       findUnique: async (args: any) =>
@@ -202,6 +210,64 @@ test("keeps a recent failed cleaner SMS under Pin&Go retry ownership", async () 
       harness.failedAt.getTime() +
         15 * 60_000
     ).toISOString()
+  );
+  assert.equal(
+    issue.metadata.exhausted,
+    false
+  );
+  assert.equal(
+    harness.transitions.length,
+    1
+  );
+});
+
+test("keeps cleaner dispatch under Pin&Go ownership outside allowed hours", async () => {
+  const now = new Date(
+    "2026-08-02T07:00:00.000Z"
+  );
+  const harness = createPrismaHarness(now, {
+    recentFailedSms: false,
+  });
+
+  const result =
+    await processPendingCleaningConfirmations(
+      harness.prisma,
+      now
+    );
+
+  assert.deepEqual(result, {
+    processed: 1,
+    sent: 0,
+    skipped: 1,
+    fallbackCreated: 0,
+    expired: 0,
+  });
+
+  const issue = getOnlyIssue(
+    harness.issues
+  );
+
+  assert.equal(
+    issue.issueCode,
+    "CLEANING_CONFIRMATION_DISPATCH_RETRY_SCHEDULED"
+  );
+  assert.equal(issue.workflowState, "WAITING");
+  assert.equal(
+    issue.responsibleActor,
+    "PIN_GO"
+  );
+  assert.equal(issue.actionRequired, false);
+  assert.equal(
+    issue.autoResolveActionCode,
+    "RETRY_CLEANER_NOTIFICATION"
+  );
+  assert.equal(
+    issue.metadata.reason,
+    "OUTSIDE_ALLOWED_HOURS"
+  );
+  assert.equal(
+    issue.metadata.nextAttemptAt,
+    null
   );
   assert.equal(
     issue.metadata.exhausted,
