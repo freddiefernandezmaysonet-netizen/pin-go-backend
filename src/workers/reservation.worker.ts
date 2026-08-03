@@ -38,7 +38,6 @@ import {
 import {
   sendGuestAccessPasscodeEmail,
 } from "../lib/mailer";
-import { sendGuestAccessLinkSms } from "../services/guestLinkSms.service";
 import { sendPreCheckinSms } from "../services/preCheckinSms.service";
 import { sendCheckoutSms } from "../services/checkoutSms.service";
 import { sendCleaningReadySms } from "../services/cleaningReadySms.service";
@@ -86,201 +85,10 @@ const TTLOCK_DELETE_TYPE = Number(process.env.TTLOCK_DELETE_TYPE ?? 2);
 const WORKER_NAME = 'reservation.worker';
 const POLL_MS = Number(process.env.RESERVATION_WORKER_POLL_MS ?? 10_000);
 const BATCH_SIZE = Number(process.env.RESERVATION_WORKER_BATCH_SIZE ?? 20);
-const REMINDER_ON =
-  process.env.GUEST_LINK_SMS_REMINDER ===
-  "1";
-
 const REMINDER_HOURS = Number(
   process.env.GUEST_LINK_REMINDER_HOURS ??
     24
 );
-
-async function processGuestLinkReminders(
-  now: Date
-) {
-  if (!REMINDER_ON) return;
-
-  const from = new Date(
-    now.getTime() +
-      (REMINDER_HOURS - 1) *
-        60 *
-        60 *
-        1000
-  );
-
-  const to = new Date(
-    now.getTime() +
-      (REMINDER_HOURS + 1) *
-        60 *
-        60 *
-        1000
-  );
-
-  const upcoming =
-    await prisma.reservation.findMany({
-      where: {
-        checkIn: {
-          gte: from,
-          lte: to,
-        },
-        paymentState:
-          PaymentState.PAID,
-        guestToken: {
-          not: null,
-        },
-        guestPhone: {
-          not: null,
-        },
-        guestLinkReminderLogs: {
-          none: {
-            kind: "CHECKIN_LINK",
-          },
-        },
-      },
-      take: 50,
-      orderBy: {
-        checkIn: "asc",
-      },
-      select: {
-        id: true,
-        reservationNumber: true,
-        guestPhone: true,
-        externalRaw: true,
-      },
-    });
-
-  if (upcoming.length === 0) {
-    return;
-  }
-
-  log(
-    "processGuestLinkReminders",
-    {
-      count: upcoming.length,
-    }
-  );
-
-  for (const reservation of upcoming) {
-    if (
-      !hasGuestSmsConsent(
-        reservation.externalRaw
-      )
-    ) {
-      log(
-        "Guest link reminder skipped",
-        {
-          reservationNumber:
-            reservation.reservationNumber ??
-            null,
-          reservationId:
-            reservation.id,
-          reason:
-            "SMS_CONSENT_NOT_GRANTED",
-        }
-      );
-
-      continue;
-    }
-
-    try {
-      await prisma.guestLinkReminderLog.upsert({
-        where: {
-          reservationId_kind: {
-            reservationId:
-              reservation.id,
-            kind: "CHECKIN_LINK",
-          },
-        },
-        create: {
-          reservationId:
-            reservation.id,
-          kind: "CHECKIN_LINK",
-          channel: "sms",
-          to:
-            reservation.guestPhone ??
-            "unknown",
-          provider: "twilio",
-          status: "FAILED",
-        },
-        update: {},
-      });
-
-      const sent =
-        await sendGuestAccessLinkSms(
-          prisma,
-          reservation.id,
-          "REMINDER"
-        );
-
-      await prisma.guestLinkReminderLog.update({
-        where: {
-          reservationId_kind: {
-            reservationId:
-              reservation.id,
-            kind: "CHECKIN_LINK",
-          },
-        },
-        data: {
-          status:
-            sent?.ok === true
-              ? "SENT"
-              : "FAILED",
-          error:
-            sent?.ok === true
-              ? null
-              : sent?.error ??
-                "SMS not confirmed",
-        },
-      });
-
-      log(
-        sent?.ok === true
-          ? "Reminder SENT"
-          : "Reminder FAILED",
-        {
-          reservationNumber:
-            reservation.reservationNumber ??
-            null,
-          reservationId:
-            reservation.id,
-        }
-      );
-    } catch (error) {
-      const errorMessage =
-        toErrString(error);
-
-      errLog(
-        "Reminder crashed",
-        {
-          reservationNumber:
-            reservation.reservationNumber ??
-            null,
-          reservationId:
-            reservation.id,
-          error: errorMessage,
-        }
-      );
-
-      try {
-        await prisma.guestLinkReminderLog.update({
-          where: {
-            reservationId_kind: {
-              reservationId:
-                reservation.id,
-              kind: "CHECKIN_LINK",
-            },
-          },
-          data: {
-            status: "FAILED",
-            error: errorMessage,
-          },
-        });
-      } catch {
-        // No bloquear el worker por un fallo del log.
-      }
-    }
-  }
-}
 
 async function processGuestVerificationReminders(
   now: Date
@@ -2434,15 +2242,6 @@ async function tick() {
     } catch (e) {
       errLog(
         "nfc-provisioning crashed:",
-        toErrString(e)
-      );
-    }
-
-    try {
-      await processGuestLinkReminders(now);
-    } catch (e) {
-      errLog(
-        "runGuestLinkReminders crashed:",
         toErrString(e)
       );
     }
