@@ -109,7 +109,6 @@ type SendManualReservationGuestConfirmationInput = {
   checkOut: Date;
   propertyTimeZone?: string | null;
   verificationUrl: string;
-  manageReservationUrl?: string | null;
   preferredLanguage?: string | null;
 };
 
@@ -1130,7 +1129,6 @@ export async function sendManualReservationGuestConfirmation(
     checkOut,
     propertyTimeZone,
     verificationUrl,
-    manageReservationUrl,
     preferredLanguage,
   } = input;
   const language = resolveGuestLanguage(preferredLanguage);
@@ -1198,11 +1196,6 @@ export async function sendManualReservationGuestConfirmation(
       </p>
     </div>
   `;
-  const manageReservationBlock =
-    renderManageReservationBlock(
-      manageReservationUrl,
-      language
-    );
   if (!resend) {
     if (isProd) {
       throw new Error("RESEND_API_KEY missing in production");
@@ -1285,8 +1278,6 @@ export async function sendManualReservationGuestConfirmation(
           </div>
 
           ${verificationBlock}
-
-          ${manageReservationBlock}
 
           <div style="background:#fffbeb;border:1px solid #fde68a;border-radius:14px;padding:16px;margin:20px 0;color:#92400e;">
             <h3 style="margin:0 0 8px;">
