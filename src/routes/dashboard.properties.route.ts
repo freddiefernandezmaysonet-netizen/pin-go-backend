@@ -123,22 +123,6 @@ function buildGuestVerificationUrl(
   )}`;
 }
 
-function getAppUrl() {
-  return String(
-    process.env.APP_URL ?? "http://localhost:3000"
-  )
-    .trim()
-    .replace(/\/+$/, "");
-}
-
-function buildManageReservationUrl(
-  guestToken: string
-) {
-  return `${getAppUrl()}/booking/manage/${encodeURIComponent(
-    guestToken
-  )}`;
-}
-
 dashboardPropertiesRouter.get(
   "/api/dashboard/properties",
   requireAuth,
@@ -1235,13 +1219,6 @@ dashboardPropertiesRouter.post(
             )
           : null;
 
-      const manageReservationUrl =
-        emailGuestToken
-          ? buildManageReservationUrl(
-              emailGuestToken
-            )
-          : null;
-
       if (
         manualReservationForEmail?.guestEmail &&
         verificationUrl
@@ -1269,7 +1246,6 @@ dashboardPropertiesRouter.post(
           propertyTimeZone:
             manualReservationForEmail.property.timezone,
           verificationUrl,
-          manageReservationUrl,
           preferredLanguage:
             manualReservationForEmail.preferredLanguage,
         };
