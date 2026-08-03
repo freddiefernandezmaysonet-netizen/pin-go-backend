@@ -294,7 +294,21 @@ function responseRoots(body: unknown): UnknownRecord[] {
 }
 
 function extractTaskId(body: unknown): string | null {
+  const bodyRecord = asRecord(body);
+  const data = bodyRecord?.data;
   const roots = responseRoots(body);
+
+  const arrayTaskId = Array.isArray(data)
+    ? firstString(
+        ...data
+          .map((item) => asRecord(item))
+          .filter((item): item is UnknownRecord => Boolean(item))
+          .filter(
+            (item) => asString(item.type)?.toLowerCase() === "task"
+          )
+          .map((item) => item.id)
+      )
+    : null;
 
   return firstString(
     ...roots.flatMap((root) => [
@@ -303,7 +317,8 @@ function extractTaskId(body: unknown): string | null {
       root.task_uuid,
       root.taskUuid,
     ]),
-    asRecord(asRecord(body)?.data)?.id
+    asRecord(data)?.id,
+    arrayTaskId
   );
 }
 

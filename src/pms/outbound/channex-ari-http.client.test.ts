@@ -153,6 +153,57 @@ test("posts Availability with the certified endpoint, headers and limits", async
   assert.equal(JSON.stringify(result).includes(API_KEY), false);
 });
 
+test("extracts the task ID from the Channex task resource array", async () => {
+  const payload = availabilityPayload();
+
+  const responseBody = {
+    data: [
+      {
+        id: "60d10993-1013-4ff2-815f-5cf3e0322901",
+        type: "task",
+      },
+    ],
+    meta: {
+      message: "Success",
+    },
+  };
+
+  const mock = createMockTransport(async () => ({
+    status: 200,
+    data: responseBody,
+    headers: {
+      "x-request-id": "request-task-array-1",
+      "content-type": "application/json; charset=utf-8",
+    },
+  }));
+
+  const result = await sendChannexAriHttpRequest({
+    messageKind: "AVAILABILITY",
+    payload,
+    apiKey: API_KEY,
+    baseUrl: "https://staging.example.test",
+    receivedAt: RECEIVED_AT,
+    transport: mock.transport,
+  });
+
+  assert.equal(mock.calls.length, 1);
+  assert.equal(result.evidence.httpStatus, 200);
+  assert.equal(result.evidence.warningCount, 0);
+  assert.equal(
+    result.evidence.taskId,
+    "60d10993-1013-4ff2-815f-5cf3e0322901"
+  );
+  assert.equal(
+    result.evidence.responseMeta.rawResponseText,
+    JSON.stringify(responseBody)
+  );
+  assert.equal(
+    result.evidence.responseMeta.requestId,
+    "request-task-array-1"
+  );
+  assert.equal(JSON.stringify(result).includes(API_KEY), false);
+});
+
 test("posts Rates & Restrictions independently with custom timeout", async () => {
   const payload = restrictionsPayload();
   const mock = createMockTransport(async () => ({
