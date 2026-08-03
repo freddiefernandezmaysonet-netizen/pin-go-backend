@@ -199,7 +199,13 @@ function headerSource(headers: unknown): UnknownRecord | null {
 }
 
 function serializeHeaderValue(value: unknown): string | null {
-  if (value == null) return null;
+  if (
+    value == null ||
+    typeof value === "function" ||
+    typeof value === "symbol"
+  ) {
+    return null;
+  }
   if (Array.isArray(value)) {
     const normalized = value.map((item) => String(item)).join(", ").trim();
     return normalized || null;

@@ -141,6 +141,11 @@ test("posts Availability with the certified endpoint, headers and limits", async
         payloadBytes,
         responseDataType: "object",
         retryAfterHeaderPresent: false,
+        receivedAt: RECEIVED_AT.toISOString(),
+        responseHeaders: {
+          "x-request-id": "request-availability-1",
+        },
+        rawResponseText: '{"data":{"id":"task-availability-1"}}',
         requestId: "request-availability-1",
       },
     },
@@ -190,9 +195,85 @@ test("posts Rates & Restrictions independently with custom timeout", async () =>
     payloadBytes: Buffer.byteLength(JSON.stringify(payload), "utf8"),
     responseDataType: "object",
     retryAfterHeaderPresent: false,
+    receivedAt: RECEIVED_AT.toISOString(),
+    responseHeaders: {},
+    rawResponseText: '{"task_id":"task-restrictions-1"}',
     requestId: "request-restrictions-1",
   });
 });
+
+test(
+  "retains the complete ARI response while excluding sensitive response headers",
+  async () => {
+    const payload = restrictionsPayload();
+
+    const mock = createMockTransport(async () => ({
+      status: 200,
+      data: {
+        task_id: "task-sensitive-headers-1",
+        meta: {
+          message: "Success",
+        },
+      },
+      headers: {
+        "content-type": "application/json",
+        "x-request-id": "request-sensitive-headers-1",
+        authorization: "Bearer must-not-leak",
+        "proxy-authorization": "Proxy must-not-leak",
+        cookie: "session=must-not-leak",
+        "set-cookie": "session=must-not-leak",
+        "user-api-key": "must-not-leak",
+        "x-api-key": "must-not-leak",
+        get(name: string) {
+          return name.toLowerCase() === "x-request-id"
+            ? "request-sensitive-headers-1"
+            : null;
+        },
+      },
+    }));
+
+    const result = await sendChannexAriHttpRequest({
+      messageKind: "RATES_RESTRICTIONS",
+      payload,
+      apiKey: API_KEY,
+      baseUrl: "https://staging.example.test",
+      receivedAt: RECEIVED_AT,
+      transport: mock.transport,
+    });
+
+    const responseMeta = result.evidence.responseMeta as Record<
+      string,
+      unknown
+    >;
+
+    assert.equal(result.evidence.httpStatus, 200);
+    assert.equal(result.evidence.taskId, "task-sensitive-headers-1");
+
+    assert.deepEqual(responseMeta.responseHeaders, {
+      "content-type": "application/json",
+      "x-request-id": "request-sensitive-headers-1",
+    });
+
+    assert.equal(
+      responseMeta.rawResponseText,
+      '{"task_id":"task-sensitive-headers-1","meta":{"message":"Success"}}'
+    );
+
+    assert.equal(responseMeta.receivedAt, RECEIVED_AT.toISOString());
+    assert.equal(
+      responseMeta.requestId,
+      "request-sensitive-headers-1"
+    );
+
+    assert.deepEqual(mock.calls[0].data, payload);
+
+    const serializedEvidence = JSON.stringify(result.evidence);
+
+    assert.equal(serializedEvidence.includes("must-not-leak"), false);
+    assert.equal(serializedEvidence.includes(API_KEY), false);
+    assert.equal(serializedEvidence.includes('"get"'), false);
+  }
+);
 
 test("preserves rejected-value warnings from an HTTP 200 response", async () => {
   const mock = createMockTransport(async () => ({
@@ -270,6 +351,13 @@ test("normalizes HTTP 429 with numeric Retry-After and public error evidence", a
     ),
     responseDataType: "object",
     retryAfterHeaderPresent: true,
+    receivedAt: RECEIVED_AT.toISOString(),
+    responseHeaders: {
+      "retry-after": "180",
+      "x-correlation-id": "correlation-429",
+    },
+    rawResponseText:
+      '{"errors":[{"code":"RATE_LIMITED","detail":"Slow down and retry later."}]}',
     requestId: "correlation-429",
   });
 });
