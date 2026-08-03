@@ -3,7 +3,7 @@ import {
   PrismaClient,
   ReservationStatus,
 } from "@prisma/client";
-import { syncChannexAvailabilityForProperty } from "./channex-availability-sync.service";
+import { formatInTimeZone } from "date-fns-tz";
 import {
   buildCancellationPolicySnapshot,
   evaluateCancellationPolicy,
@@ -19,6 +19,7 @@ import { reconcileReservation } from "./reservation.reconcile.service";
 import { resolveOperationalIssuesForReservation } from "../apms/operational-intelligence.service";
 import { auditReservationCompleteFlowSafe } from "./reservation-complete-flow-audit.service";
 import { resolveOrganizationGuestReplyTo } from "./organization-guest-email.service";
+import { persistChannexAriReservationIntent } from "../pms/outbound/channex-ari-reservation-producer.service";
 
 const prisma = new PrismaClient();
 
@@ -1045,50 +1046,169 @@ export async function cancelReservationFromGuestPortal({
       ? "REFUND_PENDING_PROPERTY_WORKFLOW"
       : "NO_REFUND_DUE";
 
-  const updatedReservation = await prisma.reservation.update({
-    where: {
-      id: reservation.id,
-    },
-    data: {
-      status: ReservationStatus.CANCELLED,
-      cancelledAt,
-      cancelledBy: CancellationActor.GUEST,
-      cancelledByUserId: null,
-      cancellationRequestedAt: requestedAt,
-      cancellationRequestedBy: CancellationActor.GUEST,
-      cancellationEvaluatedAt: requestedAt,
-      cancellationEvaluation: evaluation as any,
-      cancellationReason,
-      cancellationRefundAmount: evaluation.refundAmount,
-      cancellationRefundPercent: evaluation.refundPercent,
-      externalRaw: {
-        ...previousExternalRaw,
-        guestCancellation: {
-          requestedAt: requestedAt.toISOString(),
-          cancelledAt: cancelledAt.toISOString(),
-          requestedBy: CancellationActor.GUEST,
-          cancelledBy: CancellationActor.GUEST,
-          reason: cancellationReason,
-          action: getGuestCancellationAction(evaluation),
-          refundExecution,
-          evaluation,
+  const cancellationResult = await prisma.$transaction(async (tx) => {
+    const currentReservation = await tx.reservation.findUnique({
+      where: {
+        id: reservation.id,
+      },
+      include: {
+        property: {
+          select: {
+            id: true,
+            name: true,
+            timezone: true,
+            organizationId: true,
+            distributionEnabled: true,
+            distributionStatus: true,
+          },
         },
       },
-    },
-    include: {
-      property: {
-        select: {
-          id: true,
-          name: true,
-          timezone: true,
-          organizationId: true,
-          distributionStatus: true,
+    });
+
+    if (!currentReservation) {
+      throw new GuestCancellationError({
+        code: "RESERVATION_NOT_FOUND",
+        message: "Reservation not found.",
+        statusCode: 404,
+      });
+    }
+
+    if (currentReservation.status === ReservationStatus.CANCELLED) {
+      return {
+        reservation: currentReservation,
+        didCancel: false,
+      };
+    }
+
+    const currentExternalRaw = normalizeJsonObject(
+      currentReservation.externalRaw
+    );
+
+    const cancellationUpdate = await tx.reservation.updateMany({
+      where: {
+        id: currentReservation.id,
+        status: ReservationStatus.ACTIVE,
+      },
+      data: {
+        status: ReservationStatus.CANCELLED,
+        cancelledAt,
+        cancelledBy: CancellationActor.GUEST,
+        cancelledByUserId: null,
+        cancellationRequestedAt: requestedAt,
+        cancellationRequestedBy: CancellationActor.GUEST,
+        cancellationEvaluatedAt: requestedAt,
+        cancellationEvaluation: evaluation as any,
+        cancellationReason,
+        cancellationRefundAmount: evaluation.refundAmount,
+        cancellationRefundPercent: evaluation.refundPercent,
+        externalRaw: {
+          ...currentExternalRaw,
+          guestCancellation: {
+            requestedAt: requestedAt.toISOString(),
+            cancelledAt: cancelledAt.toISOString(),
+            requestedBy: CancellationActor.GUEST,
+            cancelledBy: CancellationActor.GUEST,
+            reason: cancellationReason,
+            action: getGuestCancellationAction(evaluation),
+            refundExecution,
+            evaluation,
+          },
         },
       },
-    },
+    });
+
+    const persistedReservation = await tx.reservation.findUnique({
+      where: {
+        id: currentReservation.id,
+      },
+      include: {
+        property: {
+          select: {
+            id: true,
+            name: true,
+            timezone: true,
+            organizationId: true,
+            distributionEnabled: true,
+            distributionStatus: true,
+          },
+        },
+      },
+    });
+
+    if (!persistedReservation) {
+      throw new GuestCancellationError({
+        code: "RESERVATION_NOT_FOUND",
+        message: "Reservation not found.",
+        statusCode: 404,
+      });
+    }
+
+    if (cancellationUpdate.count === 0) {
+      return {
+        reservation: persistedReservation,
+        didCancel: false,
+      };
+    }
+
+    if (
+      persistedReservation.property.distributionEnabled === true &&
+      persistedReservation.property.distributionStatus === "ACTIVE"
+    ) {
+      const propertyTimezone =
+        persistedReservation.property.timezone ?? "America/Puerto_Rico";
+
+      await persistChannexAriReservationIntent({
+        db: tx,
+        organizationId: persistedReservation.property.organizationId,
+        propertyId: persistedReservation.propertyId,
+        reservationId: persistedReservation.id,
+        previous: {
+          checkIn: currentReservation.checkIn,
+          checkOut: currentReservation.checkOut,
+          status: "ACTIVE",
+        },
+        current: {
+          checkIn: persistedReservation.checkIn,
+          checkOut: persistedReservation.checkOut,
+          status: "CANCELLED",
+        },
+        propertyTimezone,
+        todayDateKey: formatInTimeZone(
+          cancelledAt,
+          propertyTimezone,
+          "yyyy-MM-dd"
+        ),
+        now: cancelledAt,
+      });
+    }
+
+    return {
+      reservation: persistedReservation,
+      didCancel: true,
+    };
   });
 
-   await reconcileReservation(
+  const updatedReservation = cancellationResult.reservation;
+
+  if (!cancellationResult.didCancel) {
+    await finalizeCancelledReservationOperationsSafe({
+      reservationId: updatedReservation.id,
+      cancelledAt: updatedReservation.cancelledAt ?? cancelledAt,
+    });
+
+    return {
+      ok: true,
+      alreadyCancelled: true,
+      ...serializeGuestCancellationPreview({
+        reservation: updatedReservation,
+        snapshot,
+        evaluation,
+        refundExecution,
+      }),
+    };
+  }
+
+  await reconcileReservation(
     updatedReservation.id
   );
 
@@ -1098,40 +1218,6 @@ export async function cancelReservationFromGuestPortal({
       updatedReservation.cancelledAt ??
       cancelledAt,
   });
-
-  let distributionSyncResult: unknown = null;
-  try {
-    distributionSyncResult = await syncChannexAvailabilityForProperty(
-      updatedReservation.propertyId
-    );
-
-    await prisma.property.update({
-      where: {
-        id: updatedReservation.propertyId,
-      },
-      data: {
-        distributionLastSyncedAt: new Date(),
-        distributionLastError: null,
-      },
-    });
-  } catch (syncError: any) {
-    console.error("[GUEST_CANCELLATION_CHANNEX_SYNC_ERROR]", {
-      reservationId: updatedReservation.id,
-      propertyId: updatedReservation.propertyId,
-      error: syncError?.message ?? syncError,
-    });
-
-    await prisma.property.update({
-      where: {
-        id: updatedReservation.propertyId,
-      },
-      data: {
-        distributionLastError:
-          syncError?.message ||
-          "Failed to sync Channex after guest cancellation",
-      },
-    });
-  }
 
   await sendGuestCancellationEmailSafe({
     reservation: updatedReservation,
@@ -1156,6 +1242,6 @@ export async function cancelReservationFromGuestPortal({
       evaluation,
       refundExecution,
     }),
-    distributionSyncResult,
+    distributionSyncResult: null,
   };
 }
