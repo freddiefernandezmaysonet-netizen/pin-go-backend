@@ -10,7 +10,6 @@ import cors from "cors";
 import { pmsWebhookRouter } from "./pms/ingest/webhook.routes";
 import { buildTTLockRouter } from "./routes/ttlock.routes";
 import { buildReservationRouter } from "./routes/reservation.routes";
-import { buildAccessRouter } from "./routes/access.routes";
 import { reservationsRouter } from "./routes/reservations.routes";
 import { buildGuestRouter } from "./routes/guest.routes";
 import { buildBillingRouter } from "./routes/billing.routes";
@@ -230,7 +229,6 @@ app.use(dashboardAlertsRouter);
 
 app.use("/ttlock", buildTTLockRouter(prisma));
 app.use("/reservation", buildReservationRouter(prisma));
-app.use("/access", buildAccessRouter(prisma));
 app.use("/reservations", reservationsRouter);
 
 app.use("/billing", buildBillingRouter(prisma));
