@@ -14,6 +14,14 @@ import type { ReopenOperationalIssueInput } from "./operational-intelligence.ser
 const reopenInput = {
   operationalKey: "reservation:res_123:guest-access",
   workflowState: "AUTO_RESOLVING",
+  severity: "WARNING",
+  responsibleActor: "PIN_GO",
+  actionRequired: false,
+  recommendedAction: null,
+  nextAutomaticStep: "Retry guest access credential delivery.",
+  canAutoResolve: true,
+  autoResolveStatus: "RUNNING",
+  autoResolveActionCode: "RETRY_GUEST_ACCESS_DELIVERY",
   reopenCode: "GUEST_ACCESS_FAILURE_RECURRED",
   reopenSummary: "Guest access failed again after the issue was resolved.",
   reopenedBy: "PIN_GO",
@@ -44,6 +52,20 @@ test("accepts the complete explicit reopen contract", () => {
     "reservation:res_123:guest-access"
   );
   assert.equal(reopenInput.workflowState, "AUTO_RESOLVING");
+  assert.equal(reopenInput.severity, "WARNING");
+  assert.equal(reopenInput.responsibleActor, "PIN_GO");
+  assert.equal(reopenInput.actionRequired, false);
+  assert.equal(reopenInput.recommendedAction, null);
+  assert.equal(
+    reopenInput.nextAutomaticStep,
+    "Retry guest access credential delivery."
+  );
+  assert.equal(reopenInput.canAutoResolve, true);
+  assert.equal(reopenInput.autoResolveStatus, "RUNNING");
+  assert.equal(
+    reopenInput.autoResolveActionCode,
+    "RETRY_GUEST_ACCESS_DELIVERY"
+  );
   assert.equal(
     reopenInput.reopenCode,
     "GUEST_ACCESS_FAILURE_RECURRED"
