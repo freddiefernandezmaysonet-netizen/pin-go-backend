@@ -18,6 +18,7 @@ import type {
   OperationalWorkflowState,
   UpsertOperationalItemInput,
 } from "./operational-intelligence-types";
+import { requireOperationalTransition } from "./operational-transition-policy.js";
 
 export type UpsertOperationalIssueInput =
   UpsertOperationalItemInput & {
@@ -266,11 +267,9 @@ export async function upsertOperationalIssue(
         },
       });
 
-    const reopeningIssue = Boolean(
-      currentIssue &&
-        currentIssue.workflowState ===
-          PrismaOperationalWorkflowState.RESOLVED &&
-        input.workflowState !== "RESOLVED"
+    requireOperationalTransition(
+      currentIssue?.workflowState ?? null,
+      input.workflowState
     );
 
     const createTransition = shouldCreateTransition(
@@ -436,12 +435,6 @@ export async function upsertOperationalIssue(
             input.resolvedBy
               ? (input.resolvedBy as PrismaOperationalActor)
               : null,
-
-          reopenedCount: reopeningIssue
-            ? {
-                increment: 1,
-              }
-            : undefined,
 
           actionTarget:
             input.actionTarget as PrismaOperationalActionTarget,
