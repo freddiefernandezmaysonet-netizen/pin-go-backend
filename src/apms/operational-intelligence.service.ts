@@ -263,6 +263,83 @@ function validateOperationalState(input: UpsertOperationalIssueInput) {
   }
 }
 
+function validateReopenOperationalState(
+  input: ReopenOperationalIssueInput
+) {
+  const workflowState =
+    input.workflowState as OperationalWorkflowState;
+
+  if (workflowState === "RESOLVED") {
+    throw new ApmsOperationalReopenTargetInvalidError(
+      workflowState
+    );
+  }
+
+  if (
+    workflowState === "ACTION_REQUIRED" &&
+    input.actionRequired !== true
+  ) {
+    throw new Error(
+      "ACTION_REQUIRED operational issues must require human action."
+    );
+  }
+
+  if (
+    workflowState !== "ACTION_REQUIRED" &&
+    input.actionRequired !== false
+  ) {
+    throw new Error(
+      `${workflowState} operational issues cannot require human action.`
+    );
+  }
+
+  if (
+    workflowState === "ACTION_REQUIRED" &&
+    !normalizeOptionalText(input.recommendedAction)
+  ) {
+    throw new Error(
+      "ACTION_REQUIRED operational issues require a recommendedAction."
+    );
+  }
+
+  if (
+    (workflowState === "WAITING" ||
+      workflowState === "AUTO_RESOLVING") &&
+    !normalizeOptionalText(input.nextAutomaticStep)
+  ) {
+    throw new Error(
+      `${workflowState} operational issues require a nextAutomaticStep.`
+    );
+  }
+
+  if (
+    workflowState === "AUTO_RESOLVING" &&
+    input.canAutoResolve !== true
+  ) {
+    throw new Error(
+      "AUTO_RESOLVING operational issues must support auto-resolution."
+    );
+  }
+
+  if (
+    input.canAutoResolve === false &&
+    input.autoResolveStatus !== "NOT_SUPPORTED"
+  ) {
+    throw new Error(
+      "Issues without auto-resolution support must use NOT_SUPPORTED."
+    );
+  }
+
+  if (
+    input.canAutoResolve === true &&
+    input.autoResolveStatus === "NOT_SUPPORTED"
+  ) {
+    throw new Error(
+      "Auto-resolvable issues cannot use NOT_SUPPORTED."
+    );
+  }
+}
+
 function shouldCreateTransition(
   current:
     | {
@@ -548,6 +625,172 @@ export async function upsertOperationalIssue(
     return operationalIssue;
   });
 }
+
+export async function reopenOperationalIssue(
+  prisma: PrismaClient,
+  input: ReopenOperationalIssueInput
+) {
+  validateReopenOperationalState(input);
+
+  const operationalKey = normalizeRequiredText(
+    input.operationalKey,
+    "operationalKey"
+  );
+
+  const reopenCode = normalizeRequiredText(
+    input.reopenCode,
+    "reopenCode"
+  );
+
+  const reopenSummary = normalizeRequiredText(
+    input.reopenSummary,
+    "reopenSummary"
+  );
+
+  const occurredAt = input.occurredAt ?? new Date();
+
+  return prisma.$transaction(async (transaction) => {
+    const currentIssue =
+      await transaction.operationalIssue.findUnique({
+        where: {
+          operationalKey,
+        },
+      });
+
+    if (!currentIssue) {
+      throw new ApmsOperationalIssueNotFoundError(
+        operationalKey
+      );
+    }
+
+    if (
+      currentIssue.workflowState !==
+      PrismaOperationalWorkflowState.RESOLVED
+    ) {
+      throw new ApmsOperationalReopenSourceNotResolvedError(
+        operationalKey,
+        currentIssue.workflowState
+      );
+    }
+
+    const updateResult =
+      await transaction.operationalIssue.updateMany({
+        where: {
+          id: currentIssue.id,
+          workflowState:
+            PrismaOperationalWorkflowState.RESOLVED,
+        },
+        data: {
+          workflowState:
+            input.workflowState as PrismaOperationalWorkflowState,
+          severity:
+            input.severity as PrismaOperationalSeverity,
+          responsibleActor:
+            input.responsibleActor as PrismaOperationalActor,
+
+          actionRequired: input.actionRequired,
+          recommendedAction:
+            normalizeOptionalText(input.recommendedAction),
+          nextAutomaticStep:
+            normalizeOptionalText(input.nextAutomaticStep),
+
+          canAutoResolve: input.canAutoResolve,
+          autoResolveStatus:
+            input.autoResolveStatus as PrismaOperationalAutoResolveStatus,
+          autoResolveActionCode:
+            normalizeOptionalText(input.autoResolveActionCode),
+
+          lastSignalAt: occurredAt,
+          resolvedAt: null,
+          resolutionCode: null,
+          resolutionSummary: null,
+          resolutionType: null,
+          resolvedBy: null,
+
+          reopenedCount: {
+            increment: 1,
+          },
+
+          decisionId:
+            normalizeOptionalText(input.decisionId),
+          sourceAuditEntryId:
+            normalizeOptionalText(input.sourceAuditEntryId),
+          sourceType:
+            input.sourceType as PrismaOperationalSourceType,
+
+          ...(input.metadata !== undefined
+            ? { metadata: normalizeJsonValue(input.metadata) }
+            : {}),
+        },
+      });
+
+    if (updateResult.count !== 1) {
+      const latestIssue =
+        await transaction.operationalIssue.findUnique({
+          where: {
+            operationalKey,
+          },
+        });
+
+      if (!latestIssue) {
+        throw new ApmsOperationalIssueNotFoundError(
+          operationalKey
+        );
+      }
+
+      throw new ApmsOperationalReopenSourceNotResolvedError(
+        operationalKey,
+        latestIssue.workflowState
+      );
+    }
+
+    await transaction.operationalIssueTransition.create({
+      data: {
+        issueId: currentIssue.id,
+        operationalKey,
+        issueCode: currentIssue.issueCode,
+
+        fromWorkflowState:
+          PrismaOperationalWorkflowState.RESOLVED,
+        toWorkflowState:
+          input.workflowState as PrismaOperationalWorkflowState,
+
+        transitionCode: reopenCode,
+        transitionSummary: reopenSummary,
+        transitionedBy:
+          input.reopenedBy as PrismaOperationalActor,
+
+        sourceType:
+          input.sourceType as PrismaOperationalSourceType,
+        decisionId:
+          normalizeOptionalText(input.decisionId),
+        sourceAuditEntryId:
+          normalizeOptionalText(input.sourceAuditEntryId),
+
+        occurredAt,
+        ...(input.metadata !== undefined
+          ? { metadata: normalizeJsonValue(input.metadata) }
+          : {}),
+      },
+    });
+
+    const reopenedIssue =
+      await transaction.operationalIssue.findUnique({
+        where: {
+          operationalKey,
+        },
+      });
+
+    if (!reopenedIssue) {
+      throw new ApmsOperationalIssueNotFoundError(
+        operationalKey
+      );
+    }
+
+    return reopenedIssue;
+  });
+}
+
 export async function resolveOperationalIssuesForReservation(
   prisma: PrismaClient,
   input: ResolveOperationalIssuesForReservationInput
