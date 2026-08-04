@@ -15,6 +15,9 @@ on:
       - "src/apms/audit-types.ts"
       - "src/apms/audit-persistence.service.ts"
       - "src/apms/audit-persistence.service.test.ts"
+      - "src/apms/operational-intelligence-types.ts"
+      - "src/apms/operational-transition-policy.ts"
+      - "src/apms/operational-transition-policy.test.ts"
   pull_request:
     branches:
       - main
@@ -29,6 +32,9 @@ on:
       - "src/apms/audit-types.ts"
       - "src/apms/audit-persistence.service.ts"
       - "src/apms/audit-persistence.service.test.ts"
+      - "src/apms/operational-intelligence-types.ts"
+      - "src/apms/operational-transition-policy.ts"
+      - "src/apms/operational-transition-policy.test.ts"
   workflow_dispatch:
 
 permissions:
@@ -58,6 +64,9 @@ jobs:
 
       - name: Run immutable audit persistence tests
         run: npm run test:audit-persistence
+
+      - name: Run operational transition policy tests
+        run: npm run test:operational-transition-policy
 
       - name: Run TypeScript typecheck
         run: npx tsc --project tsconfig.engine-catalog.json --noEmit
