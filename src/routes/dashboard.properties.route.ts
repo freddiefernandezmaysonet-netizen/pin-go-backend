@@ -2297,14 +2297,39 @@ const operationalItems =
       };
     });
 
+      const currentOperationalState = operationalItems.filter(
+        (item) => item.workflowState !== "RESOLVED"
+      );
+
+      const hostActionQueue = operationalItems.filter(
+        (item) =>
+          item.workflowState === "ACTION_REQUIRED" &&
+          item.visibility === "HOST" &&
+          item.actionRequired === true
+      );
+
+      const waitingItems = operationalItems.filter(
+        (item) => item.workflowState === "WAITING"
+      );
+
+      const autoResolvingItems = operationalItems.filter(
+        (item) => item.workflowState === "AUTO_RESOLVING"
+      );
+
+      const recentlyResolved = operationalItems.filter(
+        (item) => item.workflowState === "RESOLVED"
+      );
+
       const hostInterventionRequired =
         operationalItems.filter(
           (item) =>
             item.engine ===
-              "Guest Journey" &&
+              "GUEST_JOURNEY" &&
             item.workflowState ===
               "ACTION_REQUIRED" &&
             item.actionRequired === true &&
+            item.visibility ===
+              "HOST" &&
             item.responsibleActor ===
               "HOST"
         ).length;
@@ -2315,29 +2340,37 @@ const operationalItems =
         hostInterventionRequired,
       };
 
+      const activityHistory =
+        persistedActivityAuditEntries.length > 0
+          ? persistedActivityAuditEntries.filter(
+              (entry) => {
+                const reservationId =
+                  getAuditEntryReservationId(entry);
+
+                return (
+                  !reservationId ||
+                  !cancelledReservationIds.has(
+                    reservationId
+                  )
+                );
+              }
+            )
+          : baseSnapshot.recentAuditEntries ?? [];
+
       const snapshot = {
         ...baseSnapshot,
         guestJourneyMetrics,
         recommendedActions:
           enrichedRecommendedActions,
         operationalItems,
-   recentAuditEntries:
-    persistedActivityAuditEntries.length > 0
-      ? persistedActivityAuditEntries.filter(
-          (entry) => {
-            const reservationId =
-              getAuditEntryReservationId(entry);
-
-            return (
-              !reservationId ||
-              !cancelledReservationIds.has(
-                reservationId
-              )
-            );
-          }
-        )
-      : baseSnapshot.recentAuditEntries,
-};
+        currentOperationalState,
+        hostActionQueue,
+        waitingItems,
+        autoResolvingItems,
+        recentlyResolved,
+        activityHistory,
+        recentAuditEntries: activityHistory,
+      };
       return res.json({
         ok: true,
         item: snapshot,
