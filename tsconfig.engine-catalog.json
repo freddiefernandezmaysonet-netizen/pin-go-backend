@@ -9,6 +9,9 @@
     "src/apms/engine-catalog.test.ts",
     "src/apms/audit-types.ts",
     "src/apms/audit-persistence.service.ts",
-    "src/apms/audit-persistence.service.test.ts"
+    "src/apms/audit-persistence.service.test.ts",
+    "src/apms/operational-intelligence-types.ts",
+    "src/apms/operational-transition-policy.ts",
+    "src/apms/operational-transition-policy.test.ts"
   ]
 }
