@@ -16,8 +16,8 @@ const reopenInput = {
   workflowState: "AUTO_RESOLVING",
   reopenCode: "GUEST_ACCESS_FAILURE_RECURRED",
   reopenSummary: "Guest access failed again after the issue was resolved.",
-  reopenedBy: "ACCESS_ENGINE",
-  sourceType: "ENGINE",
+  reopenedBy: "PIN_GO",
+  sourceType: "ENGINE_EVENT",
   decisionId: "decision_reopen_123",
   sourceAuditEntryId: "audit_reopen_123",
   occurredAt: new Date("2026-08-04T14:30:00.000Z"),
@@ -48,8 +48,8 @@ test("accepts the complete explicit reopen contract", () => {
     reopenInput.reopenCode,
     "GUEST_ACCESS_FAILURE_RECURRED"
   );
-  assert.equal(reopenInput.reopenedBy, "ACCESS_ENGINE");
-  assert.equal(reopenInput.sourceType, "ENGINE");
+  assert.equal(reopenInput.reopenedBy, "PIN_GO");
+  assert.equal(reopenInput.sourceType, "ENGINE_EVENT");
   assert.equal(reopenInput.metadata.attempt, 2);
 });
 
