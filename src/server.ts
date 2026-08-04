@@ -9,7 +9,6 @@ import cors from "cors";
 // Routers (NO TOCAR)
 import { pmsWebhookRouter } from "./pms/ingest/webhook.routes";
 import { buildTTLockRouter } from "./routes/ttlock.routes";
-import { buildReservationRouter } from "./routes/reservation.routes";
 import { reservationsRouter } from "./routes/reservations.routes";
 import { buildGuestRouter } from "./routes/guest.routes";
 import { buildBillingRouter } from "./routes/billing.routes";
@@ -228,7 +227,6 @@ app.use(buildDeviceGatewayRouter(prisma));
 app.use(dashboardAlertsRouter);
 
 app.use("/ttlock", buildTTLockRouter(prisma));
-app.use("/reservation", buildReservationRouter(prisma));
 app.use("/reservations", reservationsRouter);
 
 app.use("/billing", buildBillingRouter(prisma));
