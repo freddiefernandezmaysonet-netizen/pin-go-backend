@@ -20,6 +20,65 @@ import type {
 } from "./operational-intelligence-types.js";
 import { requireOperationalTransition } from "./operational-transition-policy.js";
 
+export const APMS_OPERATIONAL_ISSUE_NOT_FOUND =
+  "APMS_OPERATIONAL_ISSUE_NOT_FOUND";
+
+export const APMS_OPERATIONAL_REOPEN_SOURCE_NOT_RESOLVED =
+  "APMS_OPERATIONAL_REOPEN_SOURCE_NOT_RESOLVED";
+
+export const APMS_OPERATIONAL_REOPEN_TARGET_INVALID =
+  "APMS_OPERATIONAL_REOPEN_TARGET_INVALID";
+
+export class ApmsOperationalIssueNotFoundError extends Error {
+  readonly code = APMS_OPERATIONAL_ISSUE_NOT_FOUND;
+
+  constructor(readonly operationalKey: string) {
+    super(`${APMS_OPERATIONAL_ISSUE_NOT_FOUND}: ${operationalKey}`);
+    this.name = "ApmsOperationalIssueNotFoundError";
+  }
+}
+
+export class ApmsOperationalReopenSourceNotResolvedError extends Error {
+  readonly code = APMS_OPERATIONAL_REOPEN_SOURCE_NOT_RESOLVED;
+
+  constructor(
+    readonly operationalKey: string,
+    readonly workflowState: OperationalWorkflowState
+  ) {
+    super(
+      `${APMS_OPERATIONAL_REOPEN_SOURCE_NOT_RESOLVED}: ${operationalKey} is ${workflowState}`
+    );
+    this.name = "ApmsOperationalReopenSourceNotResolvedError";
+  }
+}
+
+export class ApmsOperationalReopenTargetInvalidError extends Error {
+  readonly code = APMS_OPERATIONAL_REOPEN_TARGET_INVALID;
+
+  constructor(readonly workflowState: OperationalWorkflowState) {
+    super(
+      `${APMS_OPERATIONAL_REOPEN_TARGET_INVALID}: ${workflowState}`
+    );
+    this.name = "ApmsOperationalReopenTargetInvalidError";
+  }
+}
+
+export type ReopenOperationalIssueInput = {
+  operationalKey: string;
+  workflowState: Exclude<OperationalWorkflowState, "RESOLVED">;
+
+  reopenCode: string;
+  reopenSummary: string;
+  reopenedBy: OperationalActor;
+
+  sourceType: OperationalSourceType;
+  decisionId?: string | null;
+  sourceAuditEntryId?: string | null;
+
+  occurredAt?: Date;
+  metadata?: Record<string, unknown>;
+};
+
 export type UpsertOperationalIssueInput =
   UpsertOperationalItemInput & {
     /**
