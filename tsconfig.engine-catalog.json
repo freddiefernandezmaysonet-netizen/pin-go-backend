@@ -12,6 +12,7 @@
     "src/apms/audit-persistence.service.test.ts",
     "src/apms/operational-intelligence-types.ts",
     "src/apms/operational-transition-policy.ts",
-    "src/apms/operational-transition-policy.test.ts"
+    "src/apms/operational-transition-policy.test.ts",
+    "src/apms/operational-intelligence.service.ts"
   ]
 }
