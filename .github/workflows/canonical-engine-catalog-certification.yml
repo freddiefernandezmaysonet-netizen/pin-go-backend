@@ -10,17 +10,11 @@ on:
       - "package-lock.json"
       - "tsconfig.json"
       - "tsconfig.engine-catalog.json"
-      - "src/apms/engine-catalog.ts"
-      - "src/apms/engine-catalog.test.ts"
-      - "src/apms/audit-types.ts"
-      - "src/apms/audit-persistence.service.ts"
-      - "src/apms/audit-persistence.service.test.ts"
-      - "src/apms/operational-intelligence-types.ts"
-      - "src/apms/operational-transition-policy.ts"
-      - "src/apms/operational-transition-policy.test.ts"
-      - "src/apms/operational-intelligence.service.ts"
-      - "src/apms/operational-intelligence.reopen-contract.test.ts"
-      - "src/apms/operational-intelligence.reopen.service.test.ts"
+      - "src/apms/**"
+      - "src/routes/dashboard.properties.route.ts"
+      - "src/routes/guest.routes.ts"
+      - "src/routes/org.tuya.routes.ts"
+
   pull_request:
     branches:
       - main
@@ -30,17 +24,11 @@ on:
       - "package-lock.json"
       - "tsconfig.json"
       - "tsconfig.engine-catalog.json"
-      - "src/apms/engine-catalog.ts"
-      - "src/apms/engine-catalog.test.ts"
-      - "src/apms/audit-types.ts"
-      - "src/apms/audit-persistence.service.ts"
-      - "src/apms/audit-persistence.service.test.ts"
-      - "src/apms/operational-intelligence-types.ts"
-      - "src/apms/operational-transition-policy.ts"
-      - "src/apms/operational-transition-policy.test.ts"
-      - "src/apms/operational-intelligence.service.ts"
-      - "src/apms/operational-intelligence.reopen-contract.test.ts"
-      - "src/apms/operational-intelligence.reopen.service.test.ts"
+      - "src/apms/**"
+      - "src/routes/dashboard.properties.route.ts"
+      - "src/routes/guest.routes.ts"
+      - "src/routes/org.tuya.routes.ts"
+
   workflow_dispatch:
 
 permissions:
@@ -48,7 +36,7 @@ permissions:
 
 jobs:
   certify:
-    name: Operational Contract Tests and Typecheck
+    name: Canonical Operational Contract
     runs-on: ubuntu-latest
     timeout-minutes: 10
 
@@ -65,20 +53,5 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
-      - name: Run canonical Engine catalog tests
-        run: npm run test:engine-catalog
-
-      - name: Run immutable audit persistence tests
-        run: npm run test:audit-persistence
-
-      - name: Run operational transition policy tests
-        run: npm run test:operational-transition-policy
-
-      - name: Run operational reopen contract tests
-        run: npm run test:operational-reopen-contract
-
-      - name: Run operational reopen service tests
-        run: npm run test:operational-reopen-service
-
-      - name: Run TypeScript typecheck
-        run: npx tsc --project tsconfig.engine-catalog.json --noEmit
+      - name: Run canonical operational contract certification
+        run: npm run test:canonical-operational-contract
