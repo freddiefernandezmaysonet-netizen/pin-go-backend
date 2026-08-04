@@ -15,6 +15,7 @@
     "test:engine-catalog": "tsx --test src/apms/engine-catalog.test.ts",
     "test:audit-persistence": "tsx --test src/apms/audit-persistence.service.test.ts",
     "test:operational-transition-policy": "tsx --test src/apms/operational-transition-policy.test.ts",
+    "test:operational-reopen-contract": "tsx --test src/apms/operational-intelligence.reopen-contract.test.ts",
     "prisma:migrate": "prisma migrate dev",
     "prisma:studio": "prisma studio",
     "seed": "tsx prisma/seed/seed.ts",
