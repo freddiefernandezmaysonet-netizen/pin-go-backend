@@ -1795,35 +1795,6 @@ dashboardPropertiesRouter.get(
         });
       }
 
-             const pricing = await calculateDirectBookingPricing({
-        propertyId: property.id,
-        checkIn,
-        checkOut,
-      });
-
-      const revenueAuditEntries = pricing.auditEntries ?? [];
-
-      for (const auditEntry of revenueAuditEntries) {
-        try {
-          await persistAuditEntry(prisma, {
-            ...auditEntry,
-            metadata: {
-              ...(auditEntry.metadata ?? {}),
-              organizationId: orgId,
-              propertyId: property.id,
-            },
-          });
-        } catch (auditPersistenceError: any) {
-          console.error("[APMS_REVENUE_AUDIT_PERSIST_ERROR]", {
-            engine: "Revenue",
-            propertyId: property.id,
-            decisionId: auditEntry.decisionId,
-            error:
-              auditPersistenceError?.message ??
-              auditPersistenceError,
-          });
-        }
-      }
 
            const mapPersistedAuditRowToAuditEntry = (
         entry: any
@@ -1942,7 +1913,9 @@ dashboardPropertiesRouter.get(
       const auditEntriesByDecisionId = new Map<string, AuditEntry>();
 
       for (const auditEntry of [
-        ...revenueAuditEntries,
+        ...persistedRevenueActivityRows.map(
+          mapPersistedAuditRowToAuditEntry
+        ),
         ...persistedNonRevenueAuditEntries,
       ]) {
         if (!auditEntriesByDecisionId.has(auditEntry.decisionId)) {
