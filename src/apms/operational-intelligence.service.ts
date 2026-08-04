@@ -13,11 +13,82 @@ import {
 
 import type {
   OperationalActor,
+  OperationalAutoResolveStatus,
   OperationalResolutionType,
+  OperationalSeverity,
   OperationalSourceType,
   OperationalWorkflowState,
   UpsertOperationalItemInput,
-} from "./operational-intelligence-types";
+} from "./operational-intelligence-types.js";
+import { requireOperationalTransition } from "./operational-transition-policy.js";
+
+export const APMS_OPERATIONAL_ISSUE_NOT_FOUND =
+  "APMS_OPERATIONAL_ISSUE_NOT_FOUND";
+
+export const APMS_OPERATIONAL_REOPEN_SOURCE_NOT_RESOLVED =
+  "APMS_OPERATIONAL_REOPEN_SOURCE_NOT_RESOLVED";
+
+export const APMS_OPERATIONAL_REOPEN_TARGET_INVALID =
+  "APMS_OPERATIONAL_REOPEN_TARGET_INVALID";
+
+export class ApmsOperationalIssueNotFoundError extends Error {
+  readonly code = APMS_OPERATIONAL_ISSUE_NOT_FOUND;
+
+  constructor(readonly operationalKey: string) {
+    super(`${APMS_OPERATIONAL_ISSUE_NOT_FOUND}: ${operationalKey}`);
+    this.name = "ApmsOperationalIssueNotFoundError";
+  }
+}
+
+export class ApmsOperationalReopenSourceNotResolvedError extends Error {
+  readonly code = APMS_OPERATIONAL_REOPEN_SOURCE_NOT_RESOLVED;
+
+  constructor(
+    readonly operationalKey: string,
+    readonly workflowState: OperationalWorkflowState
+  ) {
+    super(
+      `${APMS_OPERATIONAL_REOPEN_SOURCE_NOT_RESOLVED}: ${operationalKey} is ${workflowState}`
+    );
+    this.name = "ApmsOperationalReopenSourceNotResolvedError";
+  }
+}
+
+export class ApmsOperationalReopenTargetInvalidError extends Error {
+  readonly code = APMS_OPERATIONAL_REOPEN_TARGET_INVALID;
+
+  constructor(readonly workflowState: OperationalWorkflowState) {
+    super(
+      `${APMS_OPERATIONAL_REOPEN_TARGET_INVALID}: ${workflowState}`
+    );
+    this.name = "ApmsOperationalReopenTargetInvalidError";
+  }
+}
+
+export type ReopenOperationalIssueInput = {
+  operationalKey: string;
+  workflowState: Exclude<OperationalWorkflowState, "RESOLVED">;
+
+  severity: OperationalSeverity;
+  responsibleActor: OperationalActor;
+  actionRequired: boolean;
+  recommendedAction?: string | null;
+  nextAutomaticStep?: string | null;
+  canAutoResolve: boolean;
+  autoResolveStatus: OperationalAutoResolveStatus;
+  autoResolveActionCode?: string | null;
+
+  reopenCode: string;
+  reopenSummary: string;
+  reopenedBy: OperationalActor;
+
+  sourceType: OperationalSourceType;
+  decisionId?: string | null;
+  sourceAuditEntryId?: string | null;
+
+  occurredAt?: Date;
+  metadata?: Record<string, unknown>;
+};
 
 export type UpsertOperationalIssueInput =
   UpsertOperationalItemInput & {
@@ -95,12 +166,8 @@ function normalizeDate(value: Date | string | null | undefined) {
 }
 
 function normalizeJsonValue(
-  value: Record<string, unknown> | undefined
-): Prisma.InputJsonValue | undefined {
-  if (value === undefined) {
-    return undefined;
-  }
-
+  value: Record<string, unknown>
+): Prisma.InputJsonValue {
   return value as Prisma.InputJsonValue;
 }
 
@@ -196,6 +263,83 @@ function validateOperationalState(input: UpsertOperationalIssueInput) {
   }
 }
 
+function validateReopenOperationalState(
+  input: ReopenOperationalIssueInput
+) {
+  const workflowState =
+    input.workflowState as OperationalWorkflowState;
+
+  if (workflowState === "RESOLVED") {
+    throw new ApmsOperationalReopenTargetInvalidError(
+      workflowState
+    );
+  }
+
+  if (
+    workflowState === "ACTION_REQUIRED" &&
+    input.actionRequired !== true
+  ) {
+    throw new Error(
+      "ACTION_REQUIRED operational issues must require human action."
+    );
+  }
+
+  if (
+    workflowState !== "ACTION_REQUIRED" &&
+    input.actionRequired !== false
+  ) {
+    throw new Error(
+      `${workflowState} operational issues cannot require human action.`
+    );
+  }
+
+  if (
+    workflowState === "ACTION_REQUIRED" &&
+    !normalizeOptionalText(input.recommendedAction)
+  ) {
+    throw new Error(
+      "ACTION_REQUIRED operational issues require a recommendedAction."
+    );
+  }
+
+  if (
+    (workflowState === "WAITING" ||
+      workflowState === "AUTO_RESOLVING") &&
+    !normalizeOptionalText(input.nextAutomaticStep)
+  ) {
+    throw new Error(
+      `${workflowState} operational issues require a nextAutomaticStep.`
+    );
+  }
+
+  if (
+    workflowState === "AUTO_RESOLVING" &&
+    input.canAutoResolve !== true
+  ) {
+    throw new Error(
+      "AUTO_RESOLVING operational issues must support auto-resolution."
+    );
+  }
+
+  if (
+    input.canAutoResolve === false &&
+    input.autoResolveStatus !== "NOT_SUPPORTED"
+  ) {
+    throw new Error(
+      "Issues without auto-resolution support must use NOT_SUPPORTED."
+    );
+  }
+
+  if (
+    input.canAutoResolve === true &&
+    input.autoResolveStatus === "NOT_SUPPORTED"
+  ) {
+    throw new Error(
+      "Auto-resolvable issues cannot use NOT_SUPPORTED."
+    );
+  }
+}
+
 function shouldCreateTransition(
   current:
     | {
@@ -266,11 +410,9 @@ export async function upsertOperationalIssue(
         },
       });
 
-    const reopeningIssue = Boolean(
-      currentIssue &&
-        currentIssue.workflowState ===
-          PrismaOperationalWorkflowState.RESOLVED &&
-        input.workflowState !== "RESOLVED"
+    requireOperationalTransition(
+      currentIssue?.workflowState ?? null,
+      input.workflowState
     );
 
     const createTransition = shouldCreateTransition(
@@ -362,7 +504,9 @@ export async function upsertOperationalIssue(
           actionTarget:
             input.actionTarget as PrismaOperationalActionTarget,
 
-          metadata: normalizeJsonValue(input.metadata),
+          ...(input.metadata !== undefined
+            ? { metadata: normalizeJsonValue(input.metadata) }
+            : {}),
         },
 
         update: {
@@ -437,16 +581,12 @@ export async function upsertOperationalIssue(
               ? (input.resolvedBy as PrismaOperationalActor)
               : null,
 
-          reopenedCount: reopeningIssue
-            ? {
-                increment: 1,
-              }
-            : undefined,
-
           actionTarget:
             input.actionTarget as PrismaOperationalActionTarget,
 
-          metadata: normalizeJsonValue(input.metadata),
+          ...(input.metadata !== undefined
+            ? { metadata: normalizeJsonValue(input.metadata) }
+            : {}),
         },
       });
 
@@ -475,7 +615,9 @@ export async function upsertOperationalIssue(
             normalizeOptionalText(input.sourceAuditEntryId),
 
           occurredAt,
-          metadata: normalizeJsonValue(input.metadata),
+          ...(input.metadata !== undefined
+            ? { metadata: normalizeJsonValue(input.metadata) }
+            : {}),
         },
       });
     }
@@ -483,6 +625,172 @@ export async function upsertOperationalIssue(
     return operationalIssue;
   });
 }
+
+export async function reopenOperationalIssue(
+  prisma: PrismaClient,
+  input: ReopenOperationalIssueInput
+) {
+  validateReopenOperationalState(input);
+
+  const operationalKey = normalizeRequiredText(
+    input.operationalKey,
+    "operationalKey"
+  );
+
+  const reopenCode = normalizeRequiredText(
+    input.reopenCode,
+    "reopenCode"
+  );
+
+  const reopenSummary = normalizeRequiredText(
+    input.reopenSummary,
+    "reopenSummary"
+  );
+
+  const occurredAt = input.occurredAt ?? new Date();
+
+  return prisma.$transaction(async (transaction) => {
+    const currentIssue =
+      await transaction.operationalIssue.findUnique({
+        where: {
+          operationalKey,
+        },
+      });
+
+    if (!currentIssue) {
+      throw new ApmsOperationalIssueNotFoundError(
+        operationalKey
+      );
+    }
+
+    if (
+      currentIssue.workflowState !==
+      PrismaOperationalWorkflowState.RESOLVED
+    ) {
+      throw new ApmsOperationalReopenSourceNotResolvedError(
+        operationalKey,
+        currentIssue.workflowState
+      );
+    }
+
+    const updateResult =
+      await transaction.operationalIssue.updateMany({
+        where: {
+          id: currentIssue.id,
+          workflowState:
+            PrismaOperationalWorkflowState.RESOLVED,
+        },
+        data: {
+          workflowState:
+            input.workflowState as PrismaOperationalWorkflowState,
+          severity:
+            input.severity as PrismaOperationalSeverity,
+          responsibleActor:
+            input.responsibleActor as PrismaOperationalActor,
+
+          actionRequired: input.actionRequired,
+          recommendedAction:
+            normalizeOptionalText(input.recommendedAction),
+          nextAutomaticStep:
+            normalizeOptionalText(input.nextAutomaticStep),
+
+          canAutoResolve: input.canAutoResolve,
+          autoResolveStatus:
+            input.autoResolveStatus as PrismaOperationalAutoResolveStatus,
+          autoResolveActionCode:
+            normalizeOptionalText(input.autoResolveActionCode),
+
+          lastSignalAt: occurredAt,
+          resolvedAt: null,
+          resolutionCode: null,
+          resolutionSummary: null,
+          resolutionType: null,
+          resolvedBy: null,
+
+          reopenedCount: {
+            increment: 1,
+          },
+
+          decisionId:
+            normalizeOptionalText(input.decisionId),
+          sourceAuditEntryId:
+            normalizeOptionalText(input.sourceAuditEntryId),
+          sourceType:
+            input.sourceType as PrismaOperationalSourceType,
+
+          ...(input.metadata !== undefined
+            ? { metadata: normalizeJsonValue(input.metadata) }
+            : {}),
+        },
+      });
+
+    if (updateResult.count !== 1) {
+      const latestIssue =
+        await transaction.operationalIssue.findUnique({
+          where: {
+            operationalKey,
+          },
+        });
+
+      if (!latestIssue) {
+        throw new ApmsOperationalIssueNotFoundError(
+          operationalKey
+        );
+      }
+
+      throw new ApmsOperationalReopenSourceNotResolvedError(
+        operationalKey,
+        latestIssue.workflowState
+      );
+    }
+
+    await transaction.operationalIssueTransition.create({
+      data: {
+        issueId: currentIssue.id,
+        operationalKey,
+        issueCode: currentIssue.issueCode,
+
+        fromWorkflowState:
+          PrismaOperationalWorkflowState.RESOLVED,
+        toWorkflowState:
+          input.workflowState as PrismaOperationalWorkflowState,
+
+        transitionCode: reopenCode,
+        transitionSummary: reopenSummary,
+        transitionedBy:
+          input.reopenedBy as PrismaOperationalActor,
+
+        sourceType:
+          input.sourceType as PrismaOperationalSourceType,
+        decisionId:
+          normalizeOptionalText(input.decisionId),
+        sourceAuditEntryId:
+          normalizeOptionalText(input.sourceAuditEntryId),
+
+        occurredAt,
+        ...(input.metadata !== undefined
+          ? { metadata: normalizeJsonValue(input.metadata) }
+          : {}),
+      },
+    });
+
+    const reopenedIssue =
+      await transaction.operationalIssue.findUnique({
+        where: {
+          operationalKey,
+        },
+      });
+
+    if (!reopenedIssue) {
+      throw new ApmsOperationalIssueNotFoundError(
+        operationalKey
+      );
+    }
+
+    return reopenedIssue;
+  });
+}
+
 export async function resolveOperationalIssuesForReservation(
   prisma: PrismaClient,
   input: ResolveOperationalIssuesForReservationInput
@@ -524,6 +832,11 @@ export async function resolveOperationalIssuesForReservation(
     const resolvedIssueIds: string[] = [];
 
     for (const activeIssue of activeIssues) {
+      requireOperationalTransition(
+        activeIssue.workflowState,
+        "RESOLVED"
+      );
+
       const updateResult =
         await transaction.operationalIssue.updateMany({
           where: {

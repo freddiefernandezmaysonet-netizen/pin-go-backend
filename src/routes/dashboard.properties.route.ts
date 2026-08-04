@@ -22,6 +22,7 @@ import { createMissionControlSnapshotFromAuditEntries } from "../apms/mission-co
 import type {
   GuestJourneyEngineMetrics,
 } from "../apms/mission-control-types";
+import { projectMissionControlOperationalState } from "../apms/mission-control-projection";
 import type { AuditEntry } from "../apms/audit-types";
 import { persistAuditEntry } from "../apms/audit-persistence.service";
 import { createDistributionAuditEntry } from "../apms/distribution-audit.mapper";
@@ -1795,35 +1796,6 @@ dashboardPropertiesRouter.get(
         });
       }
 
-             const pricing = await calculateDirectBookingPricing({
-        propertyId: property.id,
-        checkIn,
-        checkOut,
-      });
-
-      const revenueAuditEntries = pricing.auditEntries ?? [];
-
-      for (const auditEntry of revenueAuditEntries) {
-        try {
-          await persistAuditEntry(prisma, {
-            ...auditEntry,
-            metadata: {
-              ...(auditEntry.metadata ?? {}),
-              organizationId: orgId,
-              propertyId: property.id,
-            },
-          });
-        } catch (auditPersistenceError: any) {
-          console.error("[APMS_REVENUE_AUDIT_PERSIST_ERROR]", {
-            engine: "Revenue",
-            propertyId: property.id,
-            decisionId: auditEntry.decisionId,
-            error:
-              auditPersistenceError?.message ??
-              auditPersistenceError,
-          });
-        }
-      }
 
            const mapPersistedAuditRowToAuditEntry = (
         entry: any
@@ -1942,7 +1914,9 @@ dashboardPropertiesRouter.get(
       const auditEntriesByDecisionId = new Map<string, AuditEntry>();
 
       for (const auditEntry of [
-        ...revenueAuditEntries,
+        ...persistedRevenueActivityRows.map(
+          mapPersistedAuditRowToAuditEntry
+        ),
         ...persistedNonRevenueAuditEntries,
       ]) {
         if (!auditEntriesByDecisionId.has(auditEntry.decisionId)) {
@@ -2089,71 +2063,84 @@ const recentlyResolvedSince = new Date(
   Date.now() - 7 * 24 * 60 * 60 * 1000
 );
 
-const operationalIssueRows =
-  await prisma.operationalIssue.findMany({
-    where: {
-      organizationId: orgId,
-      propertyId: property.id,
-      visibility: "HOST",
-      OR: [
-        {
-          workflowState: {
-            in: [
-              "ACTION_REQUIRED",
-              "WAITING",
-              "AUTO_RESOLVING",
-            ],
-          },
+const operationalIssueSelect = {
+  issueCode: true,
+
+  title: true,
+  issue: true,
+  operationalImpact: true,
+  recommendedAction: true,
+  nextAutomaticStep: true,
+
+  engine: true,
+  severity: true,
+  workflowState: true,
+  visibility: true,
+  responsibleActor: true,
+
+  actionRequired: true,
+  canAutoResolve: true,
+  autoResolveStatus: true,
+
+  reservationId: true,
+  guestName: true,
+  cleanerName: true,
+
+  firstDetectedAt: true,
+  lastSignalAt: true,
+  resolvedAt: true,
+
+  resolutionCode: true,
+  resolutionSummary: true,
+  resolutionType: true,
+  resolvedBy: true,
+
+  actionTarget: true,
+} as const;
+
+const [activeOperationalIssueRows, recentlyResolvedIssueRows] =
+  await Promise.all([
+    prisma.operationalIssue.findMany({
+      where: {
+        organizationId: orgId,
+        propertyId: property.id,
+        visibility: "HOST",
+        workflowState: {
+          in: [
+            "ACTION_REQUIRED",
+            "WAITING",
+            "AUTO_RESOLVING",
+          ],
         },
-        {
-          workflowState: "RESOLVED",
-          resolvedAt: {
-            gte: recentlyResolvedSince,
-          },
-        },
-      ],
-    },
-    orderBy: [
-      {
+      },
+      orderBy: {
         lastSignalAt: "desc",
       },
-    ],
-    take: 50,
-    select: {
-      issueCode: true,
+      take: 50,
+      select: operationalIssueSelect,
+    }),
+    prisma.operationalIssue.findMany({
+      where: {
+        organizationId: orgId,
+        propertyId: property.id,
+        visibility: "HOST",
+        workflowState: "RESOLVED",
+        resolvedAt: {
+          gte: recentlyResolvedSince,
+        },
+      },
+      orderBy: {
+        resolvedAt: "desc",
+      },
+      take: 50,
+      select: operationalIssueSelect,
+    }),
+  ]);
 
-      title: true,
-      issue: true,
-      operationalImpact: true,
-      recommendedAction: true,
-      nextAutomaticStep: true,
-
-      engine: true,
-      severity: true,
-      workflowState: true,
-      visibility: true,
-      responsibleActor: true,
-
-      actionRequired: true,
-      canAutoResolve: true,
-      autoResolveStatus: true,
-
-      reservationId: true,
-      guestName: true,
-      cleanerName: true,
-
-      firstDetectedAt: true,
-      lastSignalAt: true,
-      resolvedAt: true,
-
-      resolutionCode: true,
-      resolutionSummary: true,
-      resolutionType: true,
-      resolvedBy: true,
-
-      actionTarget: true,
-    },
-  });
+const operationalIssueRows = [
+  ...activeOperationalIssueRows,
+  ...recentlyResolvedIssueRows,
+];
 
 const recommendedActionReservationIds = (
   baseSnapshot.recommendedActions ?? []
@@ -2324,14 +2311,24 @@ const operationalItems =
       };
     });
 
+      const {
+        currentOperationalState,
+        hostActionQueue,
+        waitingItems,
+        autoResolvingItems,
+        recentlyResolved,
+      } = projectMissionControlOperationalState(operationalItems);
+
       const hostInterventionRequired =
         operationalItems.filter(
           (item) =>
             item.engine ===
-              "Guest Journey" &&
+              "GUEST_JOURNEY" &&
             item.workflowState ===
               "ACTION_REQUIRED" &&
             item.actionRequired === true &&
+            item.visibility ===
+              "HOST" &&
             item.responsibleActor ===
               "HOST"
         ).length;
@@ -2342,29 +2339,37 @@ const operationalItems =
         hostInterventionRequired,
       };
 
+      const activityHistory =
+        persistedActivityAuditEntries.length > 0
+          ? persistedActivityAuditEntries.filter(
+              (entry) => {
+                const reservationId =
+                  getAuditEntryReservationId(entry);
+
+                return (
+                  !reservationId ||
+                  !cancelledReservationIds.has(
+                    reservationId
+                  )
+                );
+              }
+            )
+          : baseSnapshot.recentAuditEntries ?? [];
+
       const snapshot = {
         ...baseSnapshot,
         guestJourneyMetrics,
         recommendedActions:
           enrichedRecommendedActions,
         operationalItems,
-   recentAuditEntries:
-    persistedActivityAuditEntries.length > 0
-      ? persistedActivityAuditEntries.filter(
-          (entry) => {
-            const reservationId =
-              getAuditEntryReservationId(entry);
-
-            return (
-              !reservationId ||
-              !cancelledReservationIds.has(
-                reservationId
-              )
-            );
-          }
-        )
-      : baseSnapshot.recentAuditEntries,
-};
+        currentOperationalState,
+        hostActionQueue,
+        waitingItems,
+        autoResolvingItems,
+        recentlyResolved,
+        activityHistory,
+        recentAuditEntries: activityHistory,
+      };
       return res.json({
         ok: true,
         item: snapshot,

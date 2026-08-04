@@ -475,58 +475,6 @@ router.get("/api/org/tuya/devices", async (req: AuthedRequest, res: Response) =>
 
         const deviceProfile = detectDeviceProfile(functions);
 
-        console.log("[org.tuya.devices] persist debug", {
-  externalDeviceId,
-  functionCodes: functions.map((f) => String(f?.code ?? "").trim().toLowerCase()),
-  detectedProfile: deviceProfile,
-});
-       
-    console.log("[org.tuya.devices] about to persist", {
-  externalDeviceId,
-  deviceProfile,
-  functionsLength: functions.length,
-});
-
-      try {
-          await prisma.propertyAutomationDevice.updateMany({
-            where: {
-              organizationId: orgId,
-              provider: "TUYA",
-              externalDeviceId,
-            },
-            data: {
-              deviceProfile,
-              tuyaFunctions: functions as any,
-              profileSource: "AUTO_CAPABILITIES",
-              profileDetectedAt: new Date(),
-            },
-          });
-        } catch (err) {
-          console.warn("[org.tuya.devices] failed to persist device profile", {
-            externalDeviceId,
-            error: String((err as any)?.message ?? err),
-          });
-        }
-
-const persistResult = await prisma.propertyAutomationDevice.updateMany({
-  where: {
-    organizationId: orgId,
-    provider: "TUYA",
-    externalDeviceId,
-  },
-  data: {
-    deviceProfile,
-    tuyaFunctions: functions as any,
-    profileSource: "AUTO_CAPABILITIES",
-    profileDetectedAt: new Date(),
-  },
-});
-
-console.log("[org.tuya.devices] persist result", {
-  externalDeviceId,
-  persistResult,
-});
-
         return {
           externalDeviceId,
           deviceName: resolvedName,

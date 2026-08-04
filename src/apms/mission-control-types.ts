@@ -287,6 +287,37 @@ export interface MissionControlSnapshot {
     operationalItems?: MissionControlOperationalItem[];
 
   /**
+   * Canonical current operational truth, excluding terminal history.
+   */
+  currentOperationalState?: MissionControlOperationalItem[];
+
+  /**
+   * Host queue. Only HOST-visible ACTION_REQUIRED issues whose
+   * actionRequired flag is true may appear here.
+   */
+  hostActionQueue?: MissionControlOperationalItem[];
+
+  /**
+   * Active operational issues waiting for an external event or window.
+   */
+  waitingItems?: MissionControlOperationalItem[];
+
+  /**
+   * Active operational issues currently being resolved autonomously.
+   */
+  autoResolvingItems?: MissionControlOperationalItem[];
+
+  /**
+   * Operational issues resolved within the projection's recent window.
+   */
+  recentlyResolved?: MissionControlOperationalItem[];
+
+  /**
+   * Immutable APMS audit evidence used as operational activity history.
+   */
+  activityHistory?: AuditEntry[];
+
+  /**
    * Last time this snapshot was calculated.
    */
   generatedAt: Date;

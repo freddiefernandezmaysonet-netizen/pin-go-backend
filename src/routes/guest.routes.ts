@@ -13,9 +13,6 @@ import {
   ensureReservationGuestAgreementSnapshot,
 } from "../services/guest-agreement.service";
 import {
-  reconcileGuestIdentityVerificationSession,
-} from "../services/guest-identity-webhook.service";
-import {
   renderCancellationPolicySnapshot,
   type CancellationPolicySnapshot,
 } from "../services/cancellation-policy.service";
@@ -1098,36 +1095,6 @@ export function buildGuestRouter(prisma: PrismaClient) {
           reservation.verificationStatus ===
             "IN_PROGRESS"
         ) {
-            try {
-            const reconciliation =
-              await reconcileGuestIdentityVerificationSession(
-                prisma,
-                reservation.id
-              );
-
-            if (
-              (reconciliation as any)
-                ?.processing !== true
-            ) {
-              return res.redirect(
-                `/guest/verify/${encodeURIComponent(
-                  token
-                )}?identity=returned`
-              );
-            }
-          } catch (error: any) {
-            console.error(
-              "[GUEST_IDENTITY] return reconciliation failed",
-              {
-                reservationNumber:
-                  reservation.reservationNumber,
-                verificationSessionId:
-                  reservation.stripeIdentityVerificationSessionId,
-                error:
-                  error?.message ?? error,
-              }
-            );
-          }
             return res
             .status(200)
             .type("html")

@@ -1,0 +1,25 @@
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "types": ["node"],
+    "noEmit": true,
+    "module": "ESNext",
+    "moduleResolution": "Bundler"
+  },
+  "include": [
+    "src/apms/engine-catalog.ts",
+    "src/apms/engine-catalog.test.ts",
+    "src/apms/audit-types.ts",
+    "src/apms/audit-persistence.service.ts",
+    "src/apms/audit-persistence.service.test.ts",
+    "src/apms/operational-intelligence-types.ts",
+    "src/apms/operational-transition-policy.ts",
+    "src/apms/operational-transition-policy.test.ts",
+    "src/apms/operational-intelligence.service.ts",
+    "src/apms/operational-intelligence.reopen-contract.test.ts",
+    "src/apms/operational-intelligence.reopen.service.test.ts",
+    "src/apms/mission-control-types.ts",
+    "src/apms/mission-control-projection.ts",
+    "src/apms/mission-control-projection.test.ts"
+  ]
+}
