@@ -22,6 +22,7 @@ import { createMissionControlSnapshotFromAuditEntries } from "../apms/mission-co
 import type {
   GuestJourneyEngineMetrics,
 } from "../apms/mission-control-types";
+import { projectMissionControlOperationalState } from "../apms/mission-control-projection";
 import type { AuditEntry } from "../apms/audit-types";
 import { persistAuditEntry } from "../apms/audit-persistence.service";
 import { createDistributionAuditEntry } from "../apms/distribution-audit.mapper";
@@ -2310,28 +2311,13 @@ const operationalItems =
       };
     });
 
-      const currentOperationalState = operationalItems.filter(
-        (item) => item.workflowState !== "RESOLVED"
-      );
-
-      const hostActionQueue = operationalItems.filter(
-        (item) =>
-          item.workflowState === "ACTION_REQUIRED" &&
-          item.visibility === "HOST" &&
-          item.actionRequired === true
-      );
-
-      const waitingItems = operationalItems.filter(
-        (item) => item.workflowState === "WAITING"
-      );
-
-      const autoResolvingItems = operationalItems.filter(
-        (item) => item.workflowState === "AUTO_RESOLVING"
-      );
-
-      const recentlyResolved = operationalItems.filter(
-        (item) => item.workflowState === "RESOLVED"
-      );
+      const {
+        currentOperationalState,
+        hostActionQueue,
+        waitingItems,
+        autoResolvingItems,
+        recentlyResolved,
+      } = projectMissionControlOperationalState(operationalItems);
 
       const hostInterventionRequired =
         operationalItems.filter(
