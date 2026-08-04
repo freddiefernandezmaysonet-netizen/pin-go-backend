@@ -1,4 +1,4 @@
-name: Canonical Engine Catalog Certification
+name: Canonical Operational Contract Certification
 
 on:
   push:
@@ -12,6 +12,9 @@ on:
       - "tsconfig.engine-catalog.json"
       - "src/apms/engine-catalog.ts"
       - "src/apms/engine-catalog.test.ts"
+      - "src/apms/audit-types.ts"
+      - "src/apms/audit-persistence.service.ts"
+      - "src/apms/audit-persistence.service.test.ts"
   pull_request:
     branches:
       - main
@@ -23,6 +26,9 @@ on:
       - "tsconfig.engine-catalog.json"
       - "src/apms/engine-catalog.ts"
       - "src/apms/engine-catalog.test.ts"
+      - "src/apms/audit-types.ts"
+      - "src/apms/audit-persistence.service.ts"
+      - "src/apms/audit-persistence.service.test.ts"
   workflow_dispatch:
 
 permissions:
@@ -30,7 +36,7 @@ permissions:
 
 jobs:
   certify:
-    name: Engine Catalog Test and Typecheck
+    name: Operational Contract Tests and Typecheck
     runs-on: ubuntu-latest
     timeout-minutes: 10
 
@@ -49,6 +55,9 @@ jobs:
 
       - name: Run canonical Engine catalog tests
         run: npm run test:engine-catalog
+
+      - name: Run immutable audit persistence tests
+        run: npm run test:audit-persistence
 
       - name: Run TypeScript typecheck
         run: npx tsc --project tsconfig.engine-catalog.json --noEmit
