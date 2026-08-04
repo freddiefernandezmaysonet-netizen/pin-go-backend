@@ -20,6 +20,7 @@ on:
       - "src/apms/operational-transition-policy.test.ts"
       - "src/apms/operational-intelligence.service.ts"
       - "src/apms/operational-intelligence.reopen-contract.test.ts"
+      - "src/apms/operational-intelligence.reopen.service.test.ts"
   pull_request:
     branches:
       - main
@@ -39,6 +40,7 @@ on:
       - "src/apms/operational-transition-policy.test.ts"
       - "src/apms/operational-intelligence.service.ts"
       - "src/apms/operational-intelligence.reopen-contract.test.ts"
+      - "src/apms/operational-intelligence.reopen.service.test.ts"
   workflow_dispatch:
 
 permissions:
@@ -74,6 +76,9 @@ jobs:
 
       - name: Run operational reopen contract tests
         run: npm run test:operational-reopen-contract
+
+      - name: Run operational reopen service tests
+        run: npm run test:operational-reopen-service
 
       - name: Run TypeScript typecheck
         run: npx tsc --project tsconfig.engine-catalog.json --noEmit
