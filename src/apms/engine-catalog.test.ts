@@ -8,7 +8,7 @@ import {
   isCanonicalEngineId,
   normalizeCanonicalEngineId,
   requireCanonicalEngineId,
-} from "./engine-catalog";
+} from "./engine-catalog.js";
 
 const EXPECTED_ENGINE_IDS = [
   "GUEST_JOURNEY",
