@@ -17,7 +17,7 @@ import type {
   OperationalSourceType,
   OperationalWorkflowState,
   UpsertOperationalItemInput,
-} from "./operational-intelligence-types";
+} from "./operational-intelligence-types.js";
 import { requireOperationalTransition } from "./operational-transition-policy.js";
 
 export type UpsertOperationalIssueInput =
@@ -96,12 +96,8 @@ function normalizeDate(value: Date | string | null | undefined) {
 }
 
 function normalizeJsonValue(
-  value: Record<string, unknown> | undefined
-): Prisma.InputJsonValue | undefined {
-  if (value === undefined) {
-    return undefined;
-  }
-
+  value: Record<string, unknown>
+): Prisma.InputJsonValue {
   return value as Prisma.InputJsonValue;
 }
 
@@ -361,7 +357,9 @@ export async function upsertOperationalIssue(
           actionTarget:
             input.actionTarget as PrismaOperationalActionTarget,
 
-          metadata: normalizeJsonValue(input.metadata),
+          ...(input.metadata !== undefined
+            ? { metadata: normalizeJsonValue(input.metadata) }
+            : {}),
         },
 
         update: {
@@ -439,7 +437,9 @@ export async function upsertOperationalIssue(
           actionTarget:
             input.actionTarget as PrismaOperationalActionTarget,
 
-          metadata: normalizeJsonValue(input.metadata),
+          ...(input.metadata !== undefined
+            ? { metadata: normalizeJsonValue(input.metadata) }
+            : {}),
         },
       });
 
@@ -468,7 +468,9 @@ export async function upsertOperationalIssue(
             normalizeOptionalText(input.sourceAuditEntryId),
 
           occurredAt,
-          metadata: normalizeJsonValue(input.metadata),
+          ...(input.metadata !== undefined
+            ? { metadata: normalizeJsonValue(input.metadata) }
+            : {}),
         },
       });
     }
