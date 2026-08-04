@@ -2062,71 +2062,84 @@ const recentlyResolvedSince = new Date(
   Date.now() - 7 * 24 * 60 * 60 * 1000
 );
 
-const operationalIssueRows =
-  await prisma.operationalIssue.findMany({
-    where: {
-      organizationId: orgId,
-      propertyId: property.id,
-      visibility: "HOST",
-      OR: [
-        {
-          workflowState: {
-            in: [
-              "ACTION_REQUIRED",
-              "WAITING",
-              "AUTO_RESOLVING",
-            ],
-          },
+const operationalIssueSelect = {
+  issueCode: true,
+
+  title: true,
+  issue: true,
+  operationalImpact: true,
+  recommendedAction: true,
+  nextAutomaticStep: true,
+
+  engine: true,
+  severity: true,
+  workflowState: true,
+  visibility: true,
+  responsibleActor: true,
+
+  actionRequired: true,
+  canAutoResolve: true,
+  autoResolveStatus: true,
+
+  reservationId: true,
+  guestName: true,
+  cleanerName: true,
+
+  firstDetectedAt: true,
+  lastSignalAt: true,
+  resolvedAt: true,
+
+  resolutionCode: true,
+  resolutionSummary: true,
+  resolutionType: true,
+  resolvedBy: true,
+
+  actionTarget: true,
+} as const;
+
+const [activeOperationalIssueRows, recentlyResolvedIssueRows] =
+  await Promise.all([
+    prisma.operationalIssue.findMany({
+      where: {
+        organizationId: orgId,
+        propertyId: property.id,
+        visibility: "HOST",
+        workflowState: {
+          in: [
+            "ACTION_REQUIRED",
+            "WAITING",
+            "AUTO_RESOLVING",
+          ],
         },
-        {
-          workflowState: "RESOLVED",
-          resolvedAt: {
-            gte: recentlyResolvedSince,
-          },
-        },
-      ],
-    },
-    orderBy: [
-      {
+      },
+      orderBy: {
         lastSignalAt: "desc",
       },
-    ],
-    take: 50,
-    select: {
-      issueCode: true,
+      take: 50,
+      select: operationalIssueSelect,
+    }),
+    prisma.operationalIssue.findMany({
+      where: {
+        organizationId: orgId,
+        propertyId: property.id,
+        visibility: "HOST",
+        workflowState: "RESOLVED",
+        resolvedAt: {
+          gte: recentlyResolvedSince,
+        },
+      },
+      orderBy: {
+        resolvedAt: "desc",
+      },
+      take: 50,
+      select: operationalIssueSelect,
+    }),
+  ]);
 
-      title: true,
-      issue: true,
-      operationalImpact: true,
-      recommendedAction: true,
-      nextAutomaticStep: true,
-
-      engine: true,
-      severity: true,
-      workflowState: true,
-      visibility: true,
-      responsibleActor: true,
-
-      actionRequired: true,
-      canAutoResolve: true,
-      autoResolveStatus: true,
-
-      reservationId: true,
-      guestName: true,
-      cleanerName: true,
-
-      firstDetectedAt: true,
-      lastSignalAt: true,
-      resolvedAt: true,
-
-      resolutionCode: true,
-      resolutionSummary: true,
-      resolutionType: true,
-      resolvedBy: true,
-
-      actionTarget: true,
-    },
-  });
+const operationalIssueRows = [
+  ...activeOperationalIssueRows,
+  ...recentlyResolvedIssueRows,
+];
 
 const recommendedActionReservationIds = (
   baseSnapshot.recommendedActions ?? []
