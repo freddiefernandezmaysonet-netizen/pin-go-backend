@@ -6,6 +6,9 @@
   },
   "include": [
     "src/apms/engine-catalog.ts",
-    "src/apms/engine-catalog.test.ts"
+    "src/apms/engine-catalog.test.ts",
+    "src/apms/audit-types.ts",
+    "src/apms/audit-persistence.service.ts",
+    "src/apms/audit-persistence.service.test.ts"
   ]
 }
