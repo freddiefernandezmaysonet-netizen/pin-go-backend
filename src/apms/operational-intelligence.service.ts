@@ -13,7 +13,9 @@ import {
 
 import type {
   OperationalActor,
+  OperationalAutoResolveStatus,
   OperationalResolutionType,
+  OperationalSeverity,
   OperationalSourceType,
   OperationalWorkflowState,
   UpsertOperationalItemInput,
@@ -66,6 +68,15 @@ export class ApmsOperationalReopenTargetInvalidError extends Error {
 export type ReopenOperationalIssueInput = {
   operationalKey: string;
   workflowState: Exclude<OperationalWorkflowState, "RESOLVED">;
+
+  severity: OperationalSeverity;
+  responsibleActor: OperationalActor;
+  actionRequired: boolean;
+  recommendedAction?: string | null;
+  nextAutomaticStep?: string | null;
+  canAutoResolve: boolean;
+  autoResolveStatus: OperationalAutoResolveStatus;
+  autoResolveActionCode?: string | null;
 
   reopenCode: string;
   reopenSummary: string;
