@@ -14,6 +14,7 @@
     "src/apms/operational-transition-policy.ts",
     "src/apms/operational-transition-policy.test.ts",
     "src/apms/operational-intelligence.service.ts",
-    "src/apms/operational-intelligence.reopen-contract.test.ts"
+    "src/apms/operational-intelligence.reopen-contract.test.ts",
+    "src/apms/operational-intelligence.reopen.service.test.ts"
   ]
 }
