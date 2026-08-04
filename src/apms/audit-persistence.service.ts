@@ -17,10 +17,7 @@ export class ApmsAuditDecisionIdConflictError extends Error {
   }
 }
 
-function normalizeJsonValue(
-  value: unknown
-): Prisma.InputJsonValue | undefined {
-  if (value === undefined) return undefined;
+function normalizeJsonValue(value: unknown): Prisma.InputJsonValue {
   return value as Prisma.InputJsonValue;
 }
 
@@ -49,9 +46,13 @@ function buildCreateData(
     decisionId: input.decisionId,
     summary: input.summary ?? null,
     reason: input.reason ?? null,
-    decisions: normalizeJsonValue(input.decisions),
+    ...(input.decisions !== undefined
+      ? { decisions: normalizeJsonValue(input.decisions) }
+      : {}),
     recommendedAction: input.recommendedAction ?? null,
-    metadata: normalizeJsonValue(input.metadata),
+    ...(input.metadata !== undefined
+      ? { metadata: normalizeJsonValue(input.metadata) }
+      : {}),
     startedAt: input.startedAt ?? null,
     completedAt: input.completedAt ?? null,
     durationMs: input.durationMs ?? null,
