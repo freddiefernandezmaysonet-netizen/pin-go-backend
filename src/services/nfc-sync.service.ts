@@ -125,6 +125,9 @@ const staleProvisioningBefore = new Date(
       where: {
         id: assignment.id,
         status: previousStatus,
+        retryCount: assignment.retryCount,
+        provisioningStartedAt:
+          assignment.provisioningStartedAt,
       },
       data: {
         status: NfcAssignmentStatus.PROVISIONING,
