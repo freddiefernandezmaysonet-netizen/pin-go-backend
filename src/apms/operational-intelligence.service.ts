@@ -403,6 +403,11 @@ export async function upsertOperationalIssue(
       : null;
 
   return prisma.$transaction(async (transaction) => {
+    await transaction.$executeRawUnsafe(
+      "SELECT pg_advisory_xact_lock(hashtextextended($1, 0))",
+      operationalKey
+    );
+
     const currentIssue =
       await transaction.operationalIssue.findUnique({
         where: {
