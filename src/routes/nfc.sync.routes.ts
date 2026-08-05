@@ -1,5 +1,6 @@
 import { Router } from "express";
 import { PrismaClient } from "@prisma/client";
+import { requireAuth } from "../middleware/requireAuth";
 import {
   refreshNfcPoolFromTTLock,
   dedupeNfcCards,
@@ -10,7 +11,7 @@ import { getPropertyTtlockAccessToken } from "../services/ttlock/ttlock.org-auth
 export default function buildNfcSyncRouter(prisma: PrismaClient) {
   const router = Router();
 
-  router.get("/cards", async (req, res) => {
+  router.get("/cards", requireAuth, async (req, res) => {
     try {
       const propertyId = String(req.query.propertyId ?? "");
 
@@ -46,7 +47,7 @@ export default function buildNfcSyncRouter(prisma: PrismaClient) {
     }
   });
 
-  router.get("/stats", async (req, res) => {
+  router.get("/stats", requireAuth, async (req, res) => {
     try {
       const propertyId = String(req.query.propertyId ?? "");
 
@@ -74,7 +75,7 @@ export default function buildNfcSyncRouter(prisma: PrismaClient) {
     }
   });
 
-  router.post("/sync", async (req, res) => {
+  router.post("/sync", requireAuth, async (req, res) => {
     try {
       const { propertyId, ttlockLockId } = req.body ?? {};
 
@@ -129,7 +130,7 @@ export default function buildNfcSyncRouter(prisma: PrismaClient) {
     }
   });
 
-  router.post("/dedupe", async (req, res) => {
+  router.post("/dedupe", requireAuth, async (req, res) => {
     try {
       const { propertyId } = req.body ?? {};
 
