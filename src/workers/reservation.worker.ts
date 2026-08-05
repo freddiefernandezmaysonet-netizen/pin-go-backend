@@ -23,6 +23,11 @@ import {
   recordAccessRecoveryFailure,
   recordAccessRecoverySuccess,
 } from "../services/access-recovery.service";
+import {
+  markGuestPasscodeRevocationRecovering,
+  escalateGuestPasscodeRevocationExhausted,
+  resolveGuestPasscodeRevocationIssue,
+} from "../services/access-recovery-operational.service";
 import { assignNfcCards } from "../services/nfc.service";
 import {
   sendGuestPasscodeSms,
@@ -1361,6 +1366,9 @@ async function processCheckouts(now: Date) {
           await deactivateGrant(grant.id);
         } catch (deactivationError) {
           try {
+            const recoveryFailureAt =
+              new Date();
+
             const recovery =
               await recordAccessRecoveryFailure({
                 prisma,
@@ -1377,7 +1385,7 @@ async function processCheckouts(now: Date) {
                  * momento real del fallo, no desde
                  * el inicio general del tick.
                  */
-                now: new Date(),
+                now: recoveryFailureAt,
               });
 
             errLog(
@@ -1401,6 +1409,70 @@ async function processCheckouts(now: Date) {
                 error: recovery.lastError,
               }
             );
+
+            if (recovery.applied) {
+              try {
+                const operationalContext = {
+                  prisma,
+                  organizationId:
+                    reservation.property
+                      ?.organizationId ?? null,
+                  propertyId:
+                    reservation.propertyId ?? null,
+                  reservationId:
+                    reservation.id,
+                  reservationNumber:
+                    reservation.reservationNumber ??
+                    null,
+                  guestName:
+                    reservation.guestName ?? null,
+                  accessGrantId: grant.id,
+                  accessGrantStatus:
+                    AccessStatus.ACTIVE,
+                  attemptCount:
+                    recovery.attemptCount,
+                  error: recovery.lastError,
+                  nextRetryAt:
+                    recovery.nextAttemptAt,
+                  exhaustedAt:
+                    recovery.exhausted
+                      ? recoveryFailureAt
+                      : null,
+                  occurredAt: recoveryFailureAt,
+                };
+
+                if (recovery.exhausted) {
+                  await escalateGuestPasscodeRevocationExhausted(
+                    operationalContext
+                  );
+                } else {
+                  await markGuestPasscodeRevocationRecovering(
+                    operationalContext
+                  );
+                }
+              } catch (operationalError) {
+                errLog(
+                  "Guest access revocation operational signal FAILED",
+                  {
+                    reservationNumber:
+                      reservation
+                        .reservationNumber ?? null,
+                    reservationId:
+                      reservation.id,
+                    accessGrantId: grant.id,
+                    attemptCount:
+                      recovery.attemptCount,
+                    exhausted:
+                      recovery.exhausted,
+                    error:
+                      toErrString(
+                        operationalError
+                      ),
+                  }
+                );
+              }
+            }
+
           } catch (
             recoveryPersistenceError
           ) {
@@ -1477,6 +1549,50 @@ async function processCheckouts(now: Date) {
              */
             continue;
           }
+          try {
+            await resolveGuestPasscodeRevocationIssue({
+              prisma,
+              organizationId:
+                reservation.property
+                  ?.organizationId ?? null,
+              propertyId:
+                reservation.propertyId ?? null,
+              reservationId:
+                reservation.id,
+              reservationNumber:
+                reservation.reservationNumber ??
+                null,
+              guestName:
+                reservation.guestName ?? null,
+              accessGrantId: grant.id,
+              accessGrantStatus:
+                AccessStatus.REVOKED,
+              attemptCount: 0,
+              error: null,
+              nextRetryAt: null,
+              exhaustedAt: null,
+              occurredAt: new Date(),
+            });
+          } catch (operationalResolutionError) {
+            errLog(
+              "Guest access revocation operational resolution FAILED",
+              {
+                reservationNumber:
+                  reservation
+                    .reservationNumber ?? null,
+                reservationId:
+                  reservation.id,
+                accessGrantId: grant.id,
+                recoveryAttempt:
+                  recoveryClaim.attemptCount,
+                error:
+                  toErrString(
+                    operationalResolutionError
+                  ),
+              }
+            );
+          }
+
         } catch (recoveryCleanupError) {
           /*
            * deactivateGrant ya confirmó la
