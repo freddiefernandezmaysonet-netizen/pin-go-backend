@@ -8,6 +8,11 @@ import {
 } from "@prisma/client";
 import { ttlockChangeCardPeriod } from "../ttlock/ttlock.card";
 import { getOrgTtlockAccessToken } from "./ttlock/ttlock.org-auth";
+import {
+  escalateNfcProvisioningFailure,
+  markNfcProvisioningRecovering,
+  resolveNfcProvisioningIssue,
+} from "./nfc-provisioning-operational.service";
 
 const PROVISION_AHEAD_MS = 2 * 60 * 60 * 1000;
 const MAX_RETRY_COUNT = 5;
@@ -277,6 +282,45 @@ const staleProvisioningBefore = new Date(
         }),
       ]);
 
+      try {
+        await resolveNfcProvisioningIssue({
+          prisma,
+          organizationId:
+            assignment.Reservation.property
+              .organizationId,
+          propertyId:
+            assignment.Reservation.propertyId,
+          reservationId:
+            assignment.reservationId,
+          reservationNumber:
+            assignment.Reservation
+              .reservationNumber,
+          guestName:
+            assignment.Reservation.guestName,
+          nfcAssignmentId: assignment.id,
+          nfcCardId: assignment.nfcCardId,
+          role: assignment.role,
+          assignmentStatus:
+            NfcAssignmentStatus.ACTIVE,
+          attemptCount:
+            assignment.retryCount + 1,
+          error: null,
+          retryable: false,
+          exhausted: false,
+          occurredAt: new Date(),
+        });
+      } catch (operationalError) {
+        console.error(
+          "[nfc.provisioning.operational] resolve failed",
+          {
+            assignmentId: assignment.id,
+            error: toErrString(
+              operationalError
+            ),
+          }
+        );
+      }
+
       activated++;
     } catch (error) {
       failed++;
@@ -296,6 +340,60 @@ const staleProvisioningBefore = new Date(
             : errorMessage,
         },
       });
+
+      const attemptCount =
+        assignment.retryCount + 1;
+      const exhausted =
+        retryable &&
+        attemptCount >= MAX_RETRY_COUNT;
+
+      try {
+        const operationalInput = {
+          prisma,
+          organizationId:
+            assignment.Reservation.property
+              .organizationId,
+          propertyId:
+            assignment.Reservation.propertyId,
+          reservationId:
+            assignment.reservationId,
+          reservationNumber:
+            assignment.Reservation
+              .reservationNumber,
+          guestName:
+            assignment.Reservation.guestName,
+          nfcAssignmentId: assignment.id,
+          nfcCardId: assignment.nfcCardId,
+          role: assignment.role,
+          assignmentStatus:
+            NfcAssignmentStatus.FAILED,
+          attemptCount,
+          error: errorMessage,
+          retryable,
+          exhausted,
+          occurredAt: new Date(),
+        };
+
+        if (retryable && !exhausted) {
+          await markNfcProvisioningRecovering(
+            operationalInput
+          );
+        } else {
+          await escalateNfcProvisioningFailure(
+            operationalInput
+          );
+        }
+      } catch (operationalError) {
+        console.error(
+          "[nfc.provisioning.operational] failure transition failed",
+          {
+            assignmentId: assignment.id,
+            error: toErrString(
+              operationalError
+            ),
+          }
+        );
+      }
     }
   }
 
