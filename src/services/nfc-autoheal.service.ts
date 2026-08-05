@@ -36,7 +36,7 @@ export async function healNfcAssignment(assignmentId: string) {
 
  const lock = await prisma.lock.findFirst({
   where: {
-    propertyId: assignment.propertyId,
+    propertyId: propertyId,
     isActive: true,
   },
   select: {
@@ -48,7 +48,7 @@ export async function healNfcAssignment(assignmentId: string) {
 if (!lock?.ttlockLockId) {
   console.warn("[nfc.autoheal] skipped: no active TTLock lock", {
     assignmentId,
-    propertyId: assignment.propertyId,
+    propertyId: propertyId,
   });
   return {
     ok: false,
