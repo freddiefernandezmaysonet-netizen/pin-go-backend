@@ -8,9 +8,6 @@ import cors from "cors";
 
 // Routers (NO TOCAR)
 import { pmsWebhookRouter } from "./pms/ingest/webhook.routes";
-import { buildTTLockRouter } from "./routes/ttlock.routes";
-import { buildReservationRouter } from "./routes/reservation.routes";
-import { buildAccessRouter } from "./routes/access.routes";
 import { reservationsRouter } from "./routes/reservations.routes";
 import { buildGuestRouter } from "./routes/guest.routes";
 import { buildBillingRouter } from "./routes/billing.routes";
@@ -21,8 +18,6 @@ import ingestRoutes from "./routes/ingest.routes";
 import { buildStaffRouter } from "./routes/staff.routes";
 import { buildCleaningRouter } from "./routes/cleaning.routes";
 import adminReactivateRoutes from "./routes/admin.reactivate.routes";
-import { buildAccessNfcRouter } from "./routes/access.nfc.routes";
-import { buildAdminNfcRouter } from "./routes/admin.nfc.routes";
 import buildNfcSyncRouter from "./routes/nfc.sync.routes";
 import { buildPropertySettingsRouter } from "./routes/property.settings.routes";
 import { buildPropertiesRouter } from "./routes/properties.route";
@@ -228,9 +223,6 @@ app.use(buildDeviceBatteryRouter(prisma));
 app.use(buildDeviceGatewayRouter(prisma));
 app.use(dashboardAlertsRouter);
 
-app.use("/ttlock", buildTTLockRouter(prisma));
-app.use("/reservation", buildReservationRouter(prisma));
-app.use("/access", buildAccessRouter(prisma));
 app.use("/reservations", reservationsRouter);
 
 app.use("/billing", buildBillingRouter(prisma));
@@ -244,8 +236,6 @@ app.use("/api/properties", buildPropertyAutomationRouter(prisma));
 
 app.use("/api/admin", adminReactivateRoutes);
 
-app.use("/access/nfc", buildAccessNfcRouter(prisma));
-app.use("/dev", buildAdminNfcRouter(prisma));
 app.use("/access/nfc", buildNfcSyncRouter(prisma));
 
 app.use("/api/admin/properties", buildPropertySettingsRouter(prisma));
