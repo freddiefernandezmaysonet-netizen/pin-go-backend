@@ -108,40 +108,52 @@ export async function expireGuestNfcAssignments(prisma: PrismaClient, now: Date)
 
   for (const a of due) {
     const nowMs = now.getTime();
-    let lastError: string | null = null;
 
     try {
       // busca un lock TTLock desde los grants de esa reserva
       const lockIdTt =
         a.Reservation.accessGrants.find((g: any) => g?.lock?.ttlockLockId)?.lock?.ttlockLockId;
 
-      if (lockIdTt && a.NfcCard?.ttlockCardId) {
-        await ttlockChangeCardPeriod({
-          lockId: Number(lockIdTt),
-          cardId: Number(a.NfcCard.ttlockCardId),
-          startDate: nowMs - 60_000,
-          endDate: nowMs - 30_000,
-          changeType: 2,
-        });
+      if (!lockIdTt) {
+        throw new Error("GUEST_NFC_TTLOCK_LOCK_REF_MISSING");
       }
+
+      if (!a.NfcCard?.ttlockCardId) {
+        throw new Error("GUEST_NFC_TTLOCK_CARD_REF_MISSING");
+      }
+
+      await ttlockChangeCardPeriod({
+        lockId: Number(lockIdTt),
+        cardId: Number(a.NfcCard.ttlockCardId),
+        startDate: nowMs - 60_000,
+        endDate: nowMs - 30_000,
+        changeType: 2,
+      });
+
+      await prisma.$transaction([
+        prisma.nfcAssignment.update({
+          where: { id: a.id },
+          data: {
+            status: NfcAssignmentStatus.ENDED,
+            lastError: null,
+          },
+        }),
+        prisma.nfcCard.update({
+          where: { id: a.nfcCardId },
+          data: { status: NfcCardStatus.AVAILABLE },
+        }),
+      ]);
+
+      ended++;
     } catch (e: any) {
-      // ⚠️ NO rompas el tick; solo registra el error
-      lastError = `TTLOCK_EXPIRE_GUEST_FAILED: ${String(e?.message ?? e)}`;
-    }
-
-    // ✅ DB SIEMPRE: ENDED + AVAILABLE
-    await prisma.$transaction([
-      prisma.nfcAssignment.update({
+      await prisma.nfcAssignment.update({
         where: { id: a.id },
-        data: { status: NfcAssignmentStatus.ENDED, lastError },
-      }),
-      prisma.nfcCard.update({
-        where: { id: a.nfcCardId },
-        data: { status: NfcCardStatus.AVAILABLE },
-      }),
-    ]);
-
-    ended++;
+        data: {
+          status: NfcAssignmentStatus.FAILED,
+          lastError: `TTLOCK_EXPIRE_GUEST_FAILED: ${String(e?.message ?? e)}`,
+        },
+      }).catch(() => {});
+    }
   }
 
   return { count: ended, totalDue: due.length };
