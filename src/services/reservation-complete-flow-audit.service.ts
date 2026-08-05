@@ -876,6 +876,18 @@ const guestConfirmationEmailEvidenceRequired =
         lastAppliedAt: true,
         revokedReason: true,
         staffMemberId: true,
+        secureAccessCode: {
+          select: {
+            id: true,
+            keyboardPwdId: true,
+            startDate: true,
+            endDate: true,
+            accessCodeEnc: true,
+            accessCodeHash: true,
+            accessCodeMasked: true,
+            expiresAt: true,
+          },
+        },
         lock: {
           select: {
             id: true,
@@ -1583,10 +1595,52 @@ const hasHostEmailEvidence = hasMessageEvidence({
         guestAccessGrant.lastError)
   );
 
-  const guestAccessPendingOrActive = Boolean(
+  const guestAccessPending = Boolean(
     guestAccessGrant &&
-      (guestAccessGrant.status === AccessStatus.PENDING ||
-        guestAccessGrant.status === AccessStatus.ACTIVE)
+      guestAccessGrant.status === AccessStatus.PENDING
+  );
+
+  const guestAccessActive = Boolean(
+    guestAccessGrant &&
+      guestAccessGrant.status === AccessStatus.ACTIVE
+  );
+
+  const secureAccessCode =
+    guestAccessGrant?.secureAccessCode ?? null;
+
+  const ttlockPasscodePayload =
+    (guestAccessGrant?.ttlockPayload as any)?.passcode ??
+    null;
+
+  const activePasscodeEvidenceComplete = Boolean(
+    guestAccessGrant &&
+      guestAccessActive &&
+      Number.isInteger(
+        guestAccessGrant.ttlockKeyboardPwdId
+      ) &&
+      Number(guestAccessGrant.ttlockKeyboardPwdId) > 0 &&
+      secureAccessCode &&
+      String(secureAccessCode.accessCodeEnc ?? "").trim() &&
+      String(secureAccessCode.accessCodeHash ?? "").trim() &&
+      String(secureAccessCode.accessCodeMasked ?? "").trim() &&
+      secureAccessCode.keyboardPwdId ===
+        String(guestAccessGrant.ttlockKeyboardPwdId) &&
+      secureAccessCode.accessCodeMasked ===
+        guestAccessGrant.accessCodeMasked &&
+      secureAccessCode.startDate ===
+        BigInt(guestAccessGrant.startsAt.getTime()) &&
+      secureAccessCode.endDate ===
+        BigInt(guestAccessGrant.endsAt.getTime()) &&
+      secureAccessCode.expiresAt.getTime() ===
+        guestAccessGrant.endsAt.getTime() &&
+      guestAccessGrant.desiredStartsAt?.getTime() ===
+        guestAccessGrant.startsAt.getTime() &&
+      guestAccessGrant.desiredEndsAt?.getTime() ===
+        guestAccessGrant.endsAt.getTime() &&
+      Boolean(guestAccessGrant.lastAppliedAt) &&
+      Boolean(ttlockPasscodePayload) &&
+      String(ttlockPasscodePayload.keyboardPwdId ?? "") ===
+        String(guestAccessGrant.ttlockKeyboardPwdId)
   );
 
   const stayAlreadyEnded = Date.now() > reservation.checkOut.getTime();
@@ -1597,24 +1651,32 @@ const hasHostEmailEvidence = hasMessageEvidence({
       stayAlreadyEnded
   );
 
+  const guestAccessLifecycleValid = Boolean(
+    guestAccessPending ||
+      activePasscodeEvidenceComplete ||
+      guestAccessRevokedAfterStay
+  );
+
   addCheck(checks, {
     rule: "TTLOCK_PASSCODE_CREATED_OR_PENDING",
     label: "TTLock Passcode Created or Pending Correctly",
     status:
       guestAccessGrant &&
       !guestAccessFailed &&
-      (guestAccessPendingOrActive || guestAccessRevokedAfterStay)
+      guestAccessLifecycleValid
         ? "PASS"
         : "FAIL",
     critical:
       !guestAccessGrant ||
       guestAccessFailed ||
-      (!guestAccessPendingOrActive && !guestAccessRevokedAfterStay),
+      !guestAccessLifecycleValid,
     recommendedAction:
       guestAccessGrant &&
       !guestAccessFailed &&
-      (guestAccessPendingOrActive || guestAccessRevokedAfterStay)
+      guestAccessLifecycleValid
         ? undefined
+        : guestAccessActive
+        ? "Guest passcode is ACTIVE but its secure operational evidence is incomplete or inconsistent."
         : "Review TTLock passcode creation for this reservation.",
     metadata: {
       accessGrantId: guestAccessGrant?.id ?? null,
@@ -1624,6 +1686,15 @@ const hasHostEmailEvidence = hasMessageEvidence({
       ttlockKeyboardPwdId: guestAccessGrant?.ttlockKeyboardPwdId ?? null,
       ttlockKeyId: guestAccessGrant?.ttlockKeyId ?? null,
       hasTtlockPayload: Boolean(guestAccessGrant?.ttlockPayload),
+      hasTtlockPasscodePayload: Boolean(ttlockPasscodePayload),
+      hasSecureAccessCode: Boolean(secureAccessCode),
+      hasEncryptedAccessCode: Boolean(
+        secureAccessCode?.accessCodeEnc
+      ),
+      hasAccessCodeHash: Boolean(
+        secureAccessCode?.accessCodeHash
+      ),
+      activePasscodeEvidenceComplete,
       lastError: guestAccessGrant?.lastError ?? null,
       lastAppliedAt: guestAccessGrant?.lastAppliedAt ?? null,
     },
