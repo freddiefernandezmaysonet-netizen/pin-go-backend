@@ -218,6 +218,14 @@ const staleProvisioningBefore = new Date(
           "ACTIVE_TTLOCK_LOCK_NOT_FOUND"
         );
       }
+      if (
+        assignment.NfcCard.status !==
+        NfcCardStatus.ASSIGNED
+      ) {
+        throw new Error(
+          `NFC_CARD_NOT_ASSIGNED:${assignment.NfcCard.status}`
+        );
+      }
 
       const ttlockCardId = Number(
         assignment.NfcCard.ttlockCardId
