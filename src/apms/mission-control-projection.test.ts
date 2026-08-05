@@ -373,3 +373,89 @@ test("preserves complete resolution explainability only in recently resolved his
     new Date("2026-08-05T21:15:00.000Z")
   );
 });
+test("returns No action needed for a mixed operational state with no genuine host action", () => {
+  const waiting = createItem({
+    issueCode: "CLEANER_CONFIRMATION_PENDING",
+    workflowState: "WAITING",
+    visibility: "HOST",
+    responsibleActor: "CLEANER",
+    actionRequired: false,
+    nextAutomaticStep:
+      "Pin&Go is waiting for the cleaner response.",
+  });
+
+  const autoResolving = createItem({
+    issueCode: "OTA_SYNC_RETRYING",
+    workflowState: "AUTO_RESOLVING",
+    visibility: "HOST",
+    responsibleActor: "PIN_GO",
+    actionRequired: false,
+    canAutoResolve: true,
+    autoResolveStatus: "RUNNING",
+    nextAutomaticStep:
+      "Pin&Go will retry the synchronization.",
+  });
+
+  const resolved = createItem({
+    issueCode: "ACCESS_RECOVERED",
+    workflowState: "RESOLVED",
+    visibility: "HOST",
+    responsibleActor: "NONE",
+    actionRequired: false,
+    autoResolveStatus: "SUCCEEDED",
+    resolvedAt:
+      new Date("2026-08-05T21:15:00.000Z"),
+    resolutionCode:
+      "ACCESS_RETRY_SUCCEEDED",
+    resolutionSummary:
+      "Pin&Go restored and verified guest access.",
+    resolutionType: "AUTOMATIC",
+    resolvedBy: "PIN_GO",
+  });
+
+  const systemIssue = createItem({
+    issueCode: "INTERNAL_SYSTEM_WARNING",
+    workflowState: "ACTION_REQUIRED",
+    visibility: "SYSTEM",
+    responsibleActor: "PIN_GO",
+    actionRequired: true,
+  });
+
+  const developerIssue = createItem({
+    issueCode: "INTERNAL_DEVELOPER_WARNING",
+    workflowState: "ACTION_REQUIRED",
+    visibility: "DEVELOPER",
+    responsibleActor: "PIN_GO",
+    actionRequired: true,
+  });
+
+  const projection =
+    projectMissionControlOperationalState([
+      waiting,
+      autoResolving,
+      resolved,
+      systemIssue,
+      developerIssue,
+    ]);
+
+  assert.deepEqual(
+    projection.hostActionQueue,
+    []
+  );
+
+  assert.deepEqual(
+    mapHostActionQueueToRecommendedActions(
+      projection.hostActionQueue
+    ),
+    [
+      {
+        title: "No action needed",
+        description:
+          "Pin&Go handled the latest property operations automatically. No host action is needed right now.",
+        engine: "MissionControl",
+        priority: "LOW",
+        requiresHumanAction: false,
+      },
+    ]
+  );
+});
