@@ -18,7 +18,6 @@ import ingestRoutes from "./routes/ingest.routes";
 import { buildStaffRouter } from "./routes/staff.routes";
 import { buildCleaningRouter } from "./routes/cleaning.routes";
 import adminReactivateRoutes from "./routes/admin.reactivate.routes";
-import { buildAccessNfcRouter } from "./routes/access.nfc.routes";
 import { buildAdminNfcRouter } from "./routes/admin.nfc.routes";
 import buildNfcSyncRouter from "./routes/nfc.sync.routes";
 import { buildPropertySettingsRouter } from "./routes/property.settings.routes";
@@ -238,7 +237,6 @@ app.use("/api/properties", buildPropertyAutomationRouter(prisma));
 
 app.use("/api/admin", adminReactivateRoutes);
 
-app.use("/access/nfc", buildAccessNfcRouter(prisma));
 app.use("/dev", buildAdminNfcRouter(prisma));
 app.use("/access/nfc", buildNfcSyncRouter(prisma));
 
