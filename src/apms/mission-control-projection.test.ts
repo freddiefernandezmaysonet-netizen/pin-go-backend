@@ -278,3 +278,98 @@ test("returns only No action needed when the canonical host queue is empty", () 
     ]
   );
 });
+test("preserves complete resolution explainability only in recently resolved history", () => {
+  const resolved = createItem({
+    issueCode:
+      "GUEST_ACCESS_AUTOMATICALLY_RESOLVED",
+    title:
+      "Guest access recovered automatically",
+    issue:
+      "The original credential provisioning attempt failed.",
+    operationalImpact:
+      "Access was temporarily at risk.",
+    recommendedAction: null,
+    nextAutomaticStep: null,
+    engine: "ACCESS",
+    severity: "INFO",
+    workflowState: "RESOLVED",
+    visibility: "HOST",
+    responsibleActor: "NONE",
+    actionRequired: false,
+    canAutoResolve: true,
+    autoResolveStatus: "SUCCEEDED",
+    resolvedAt:
+      new Date("2026-08-05T21:15:00.000Z"),
+    resolutionCode:
+      "ACCESS_RETRY_SUCCEEDED",
+    resolutionSummary:
+      "Pin&Go retried the credential operation and verified that guest access is active.",
+    resolutionType: "AUTOMATIC",
+    resolvedBy: "PIN_GO",
+  });
+
+  const projection =
+    projectMissionControlOperationalState([
+      resolved,
+    ]);
+
+  assert.deepEqual(
+    projection.currentOperationalState,
+    []
+  );
+
+  assert.deepEqual(
+    projection.hostActionQueue,
+    []
+  );
+
+  assert.deepEqual(
+    projection.waitingItems,
+    []
+  );
+
+  assert.deepEqual(
+    projection.autoResolvingItems,
+    []
+  );
+
+  assert.equal(
+    projection.recentlyResolved.length,
+    1
+  );
+
+  assert.deepEqual(
+    projection.recentlyResolved[0],
+    resolved
+  );
+
+  assert.equal(
+    projection.recentlyResolved[0]
+      .resolutionCode,
+    "ACCESS_RETRY_SUCCEEDED"
+  );
+
+  assert.equal(
+    projection.recentlyResolved[0]
+      .resolutionSummary,
+    "Pin&Go retried the credential operation and verified that guest access is active."
+  );
+
+  assert.equal(
+    projection.recentlyResolved[0]
+      .resolutionType,
+    "AUTOMATIC"
+  );
+
+  assert.equal(
+    projection.recentlyResolved[0]
+      .resolvedBy,
+    "PIN_GO"
+  );
+
+  assert.deepEqual(
+    projection.recentlyResolved[0]
+      .resolvedAt,
+    new Date("2026-08-05T21:15:00.000Z")
+  );
+});
