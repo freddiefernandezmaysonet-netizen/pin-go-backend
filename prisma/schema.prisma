@@ -456,6 +456,10 @@ model GuestJourney {
   verificationCompletedAt DateTime?
   accessScheduledAt        DateTime?
   readyForArrivalAt        DateTime?
+  stayActiveAt             DateTime?
+  checkoutDueAt            DateTime?
+  completedAt              DateTime?
+  cancelledAt              DateTime?
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -1519,6 +1523,10 @@ enum GuestJourneyState {
   VERIFICATION_COMPLETED
   ACCESS_SCHEDULED
   READY_FOR_ARRIVAL
+  STAY_ACTIVE
+  CHECKOUT_DUE
+  JOURNEY_COMPLETED
+  JOURNEY_CANCELLED
 }
 
 enum ReservationStatus {

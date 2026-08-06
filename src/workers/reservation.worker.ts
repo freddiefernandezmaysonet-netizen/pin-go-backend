@@ -54,7 +54,11 @@ import { unassignAllNfcForReservation } from "../services/nfc.service";
 import { unassignGuestNfcForReservation } from "../services/nfc.service";
 import { processPendingCleaningConfirmations } from "../services/cleaning-confirmation-dispatch.service";
 import {
+  cancelGuestJourney,
+  completeGuestJourney,
   markGuestJourneyReadyForArrival,
+  markGuestJourneyStayActive,
+  markGuestJourneyCheckoutDue,
   scheduleGuestJourneyAccess,
 } from "../services/guest-journey.service";
 
@@ -1298,6 +1302,234 @@ async function activateGuestNfcAssignmentsForReservation(params: {
   return { ok: true, activated };
 }
 
+async function processGuestJourneyCancellations(
+  now: Date
+) {
+  const reservations =
+    await prisma.reservation.findMany({
+      where: {
+        status:
+          ReservationStatus.CANCELLED,
+        guestJourney: {
+          is: {
+            currentState: {
+              notIn: [
+                GuestJourneyState
+                  .JOURNEY_CANCELLED,
+                GuestJourneyState
+                  .JOURNEY_COMPLETED,
+              ],
+            },
+          },
+        },
+      },
+      select: {
+        id: true,
+        reservationNumber: true,
+      },
+      take: BATCH_SIZE,
+      orderBy: {
+        updatedAt: "asc",
+      },
+    });
+
+  if (reservations.length === 0) {
+    return;
+  }
+
+  log(
+    "processGuestJourneyCancellations",
+    {
+      count: reservations.length,
+    }
+  );
+
+  for (const reservation of reservations) {
+    try {
+      const result =
+        await prisma.$transaction(
+          async (tx) =>
+            cancelGuestJourney(
+              tx,
+              reservation.id,
+              now
+            )
+        );
+
+      log(
+        "Guest Journey cancellation processed",
+        {
+          reservationNumber:
+            reservation.reservationNumber ??
+            null,
+          reservationId:
+            reservation.id,
+          currentState:
+            result.currentState,
+          transitioned:
+            result.transitioned,
+        }
+      );
+    } catch (error) {
+      errLog(
+        "Guest Journey cancellation FAILED",
+        {
+          reservationNumber:
+            reservation.reservationNumber ??
+            null,
+          reservationId:
+            reservation.id,
+          error:
+            toErrString(error),
+        }
+      );
+    }
+  }
+}
+async function processGuestJourneyStayStarts(
+  now: Date
+) {
+  const reservations =
+    await prisma.reservation.findMany({
+      where: {
+        status: ReservationStatus.ACTIVE,
+        checkIn: {
+          lte: now,
+        },
+        checkOut: {
+          gt: now,
+        },
+        guestAccessReleaseStatus:
+          GuestAccessReleaseStatus.RELEASED,
+        guestAccessReleasedAt: {
+          not: null,
+        },
+        guestJourney: {
+          is: {
+            currentState:
+              GuestJourneyState.READY_FOR_ARRIVAL,
+          },
+        },
+      },
+      select: {
+        id: true,
+        reservationNumber: true,
+      },
+      take: BATCH_SIZE,
+      orderBy: {
+        checkIn: "asc",
+      },
+    });
+
+  if (reservations.length === 0) {
+    return;
+  }
+
+  log("processGuestJourneyStayStarts", {
+    count: reservations.length,
+  });
+
+  for (const reservation of reservations) {
+    try {
+      const result =
+        await prisma.$transaction(
+          async (tx) =>
+            markGuestJourneyStayActive(
+              tx,
+              reservation.id,
+              now
+            )
+        );
+
+      log("Guest Journey stay start processed", {
+        reservationNumber:
+          reservation.reservationNumber ?? null,
+        reservationId: reservation.id,
+        currentState: result.currentState,
+        transitioned: result.transitioned,
+      });
+    } catch (error) {
+      errLog(
+        "Guest Journey stay start FAILED",
+        {
+          reservationNumber:
+            reservation.reservationNumber ?? null,
+          reservationId: reservation.id,
+          error: toErrString(error),
+        }
+      );
+    }
+  }
+}
+
+async function processGuestJourneyCheckoutDue(
+  now: Date
+) {
+  const reservations =
+    await prisma.reservation.findMany({
+      where: {
+        status: ReservationStatus.ACTIVE,
+        checkOut: {
+          lte: now,
+        },
+        guestJourney: {
+          is: {
+            currentState:
+              GuestJourneyState.STAY_ACTIVE,
+          },
+        },
+      },
+      select: {
+        id: true,
+        reservationNumber: true,
+      },
+      take: BATCH_SIZE,
+      orderBy: {
+        checkOut: "asc",
+      },
+    });
+
+  if (reservations.length === 0) {
+    return;
+  }
+
+  log("processGuestJourneyCheckoutDue", {
+    count: reservations.length,
+  });
+
+  for (const reservation of reservations) {
+    try {
+      const result =
+        await prisma.$transaction(
+          async (tx) =>
+            markGuestJourneyCheckoutDue(
+              tx,
+              reservation.id,
+              now
+            )
+        );
+
+      log("Guest Journey checkout due processed", {
+        reservationNumber:
+          reservation.reservationNumber ?? null,
+        reservationId: reservation.id,
+        currentState: result.currentState,
+        transitioned: result.transitioned,
+      });
+    } catch (error) {
+      errLog(
+        "Guest Journey checkout due FAILED",
+        {
+          reservationNumber:
+            reservation.reservationNumber ?? null,
+          reservationId: reservation.id,
+          error: toErrString(error),
+        }
+      );
+    }
+  }
+}
+
 async function processCheckouts(now: Date) {
   const reservations =
     await fetchDueCheckouts(now);
@@ -1663,6 +1895,99 @@ async function processCheckouts(now: Date) {
   }
 }
   
+async function processGuestJourneyCompletions(
+  now: Date
+) {
+  const completionCandidates =
+    await prisma.reservation.findMany({
+      where: {
+        checkOut: {
+          lte: now,
+        },
+        guestJourney: {
+          is: {
+            currentState:
+              GuestJourneyState.CHECKOUT_DUE,
+          },
+        },
+        accessGrants: {
+          some: {
+            type: AccessGrantType.GUEST,
+          },
+          none: {
+            type: AccessGrantType.GUEST,
+            status: {
+              not: AccessStatus.REVOKED,
+            },
+          },
+        },
+        NfcAssignment: {
+          none: {
+            role: NfcAssignmentRole.GUEST,
+            status: {
+              in: [
+                NfcAssignmentStatus.SCHEDULED,
+                NfcAssignmentStatus.ACTIVE,
+                NfcAssignmentStatus.FAILED,
+              ],
+            },
+          },
+        },
+      },
+      select: {
+        id: true,
+        reservationNumber: true,
+      },
+      take: BATCH_SIZE,
+      orderBy: {
+        checkOut: "asc",
+      },
+    });
+
+  if (completionCandidates.length === 0) {
+    return;
+  }
+
+  log("processGuestJourneyCompletions", {
+    count: completionCandidates.length,
+  });
+
+  for (
+    const reservation of
+    completionCandidates
+  ) {
+    try {
+      const result =
+        await prisma.$transaction(
+          async (tx) =>
+            completeGuestJourney(
+              tx,
+              reservation.id,
+              now
+            )
+        );
+
+      log("Guest Journey completion processed", {
+        reservationNumber:
+          reservation.reservationNumber ?? null,
+        reservationId: reservation.id,
+        currentState: result.currentState,
+        transitioned: result.transitioned,
+      });
+    } catch (error) {
+      errLog(
+        "Guest Journey completion FAILED",
+        {
+          reservationNumber:
+            reservation.reservationNumber ?? null,
+          reservationId: reservation.id,
+          error: toErrString(error),
+        }
+      );
+    }
+  }
+}
+
     async function revokeGuestNfcAssignmentsForReservation(params: {
   reservationId: string;
   lockIdTtlock: number;
@@ -2217,6 +2542,16 @@ async function tick() {
     }
 
     try {
+      await processGuestJourneyCancellations(
+        now
+      );
+    } catch (e) {
+      errLog(
+        "processGuestJourneyCancellations crashed:",
+        toErrString(e)
+      );
+    }
+    try {
       await processCheckins(now);
       await processPreCheckinMessages(now);
     } catch (e) {
@@ -2256,12 +2591,44 @@ async function tick() {
             toErrString(e)
           );
         }
+    try {
+      await processGuestJourneyStayStarts(
+        now
+      );
+    } catch (e) {
+      errLog(
+        "processGuestJourneyStayStarts crashed:",
+        toErrString(e)
+      );
+    }
+
+    try {
+      await processGuestJourneyCheckoutDue(
+        now
+      );
+    } catch (e) {
+      errLog(
+        "processGuestJourneyCheckoutDue crashed:",
+        toErrString(e)
+      );
+    }
 
     try {
       await processCheckouts(now);
     } catch (e) {
       errLog(
         "runCheckouts crashed:",
+        toErrString(e)
+      );
+    }
+
+    try {
+      await processGuestJourneyCompletions(
+        now
+      );
+    } catch (e) {
+      errLog(
+        "processGuestJourneyCompletions crashed:",
         toErrString(e)
       );
     }
