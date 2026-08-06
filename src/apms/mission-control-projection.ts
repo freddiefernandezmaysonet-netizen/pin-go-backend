@@ -1,4 +1,5 @@
 import type {
+  MissionControlAction,
   MissionControlOperationalItem,
 } from "./mission-control-types";
 
@@ -47,4 +48,67 @@ export function projectMissionControlOperationalState(
       (item) => item.workflowState === "RESOLVED"
     ),
   };
+}
+
+function mapOperationalSeverityToActionPriority(
+  severity: MissionControlOperationalItem["severity"]
+): MissionControlAction["priority"] {
+  if (severity === "CRITICAL") {
+    return "CRITICAL";
+  }
+
+  if (severity === "WARNING") {
+    return "HIGH";
+  }
+
+  return "LOW";
+}
+
+/**
+ * Preserves the legacy recommendedActions response contract while deriving
+ * every host action exclusively from the canonical OperationalIssue current
+ * state projection.
+ */
+export function mapHostActionQueueToRecommendedActions(
+  hostActionQueue: readonly MissionControlOperationalItem[]
+): MissionControlAction[] {
+  if (hostActionQueue.length === 0) {
+    return [
+      {
+        title: "No action needed",
+        description:
+          "Pin&Go handled the latest property operations automatically. No host action is needed right now.",
+        engine: "MissionControl",
+        priority: "LOW",
+        requiresHumanAction: false,
+      },
+    ];
+  }
+
+  return hostActionQueue.map((item) => ({
+    title: item.title,
+    description:
+      item.operationalImpact ??
+      item.issue,
+    engine: item.engine,
+    priority:
+      mapOperationalSeverityToActionPriority(
+        item.severity
+      ),
+    requiresHumanAction: true,
+    reservationId:
+      item.reservationId ?? null,
+    reservationNumber:
+      item.reservationNumber ?? null,
+    guestName:
+      item.guestName ?? null,
+    issue:
+      item.issue ?? null,
+    lastSignalAt:
+      item.lastSignalAt ?? null,
+    recommendedAction:
+      item.recommendedAction ?? null,
+    canAutoResolve:
+      item.canAutoResolve,
+  }));
 }

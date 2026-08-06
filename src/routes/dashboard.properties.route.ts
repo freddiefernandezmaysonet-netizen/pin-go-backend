@@ -22,7 +22,10 @@ import { createMissionControlSnapshotFromAuditEntries } from "../apms/mission-co
 import type {
   GuestJourneyEngineMetrics,
 } from "../apms/mission-control-types";
-import { projectMissionControlOperationalState } from "../apms/mission-control-projection";
+import {
+  mapHostActionQueueToRecommendedActions,
+  projectMissionControlOperationalState,
+} from "../apms/mission-control-projection";
 import type { AuditEntry } from "../apms/audit-types";
 import { persistAuditEntry } from "../apms/audit-persistence.service";
 import { createDistributionAuditEntry } from "../apms/distribution-audit.mapper";
@@ -2142,14 +2145,6 @@ const operationalIssueRows = [
   ...recentlyResolvedIssueRows,
 ];
 
-const recommendedActionReservationIds = (
-  baseSnapshot.recommendedActions ?? []
-)
-  .map((action) =>
-    String(action.reservationId ?? "").trim()
-  )
-  .filter(Boolean);
-
 const operationalReservationIds =
   operationalIssueRows
     .map((item) =>
@@ -2159,10 +2154,7 @@ const operationalReservationIds =
 
 const missionControlReservationIds =
   Array.from(
-    new Set([
-      ...recommendedActionReservationIds,
-      ...operationalReservationIds,
-    ])
+    new Set(operationalReservationIds)
   );
 
 const missionControlReservations =
@@ -2191,30 +2183,6 @@ const reservationById = new Map(
     ]
   )
 );
-
-const enrichedRecommendedActions = (
-  baseSnapshot.recommendedActions ?? []
-).map((action) => {
-  const reservationId = String(
-    action.reservationId ?? ""
-  ).trim();
-
-  const linkedReservation = reservationId
-    ? reservationById.get(reservationId)
-    : undefined;
-
-  return {
-    ...action,
-    reservationNumber:
-      linkedReservation?.reservationNumber ??
-      action.reservationNumber ??
-      null,
-    guestName:
-      linkedReservation?.guestName ??
-      action.guestName ??
-      null,
-  };
-});
 
 const operationalItems =
   operationalIssueRows
@@ -2360,7 +2328,9 @@ const operationalItems =
         ...baseSnapshot,
         guestJourneyMetrics,
         recommendedActions:
-          enrichedRecommendedActions,
+          mapHostActionQueueToRecommendedActions(
+            hostActionQueue
+          ),
         operationalItems,
         currentOperationalState,
         hostActionQueue,
