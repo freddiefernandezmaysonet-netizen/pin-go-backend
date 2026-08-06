@@ -16,6 +16,8 @@ on:
       - "src/services/guest-journey-coordination-intent.service.test.ts"
       - "src/services/guest-journey-evidence.service.ts"
       - "src/services/guest-journey-evidence.service.test.ts"
+      - "src/services/guest-journey-reconciler.service.ts"
+      - "src/services/guest-journey-reconciler.service.test.ts"
       - "src/services/guest-journey.service.ts"
       - "src/services/guest-journey.service.test.ts"
       - "src/services/guest-journey-terminal-lifecycle.test.ts"
@@ -37,6 +39,8 @@ on:
       - "src/services/guest-journey-coordination-intent.service.test.ts"
       - "src/services/guest-journey-evidence.service.ts"
       - "src/services/guest-journey-evidence.service.test.ts"
+      - "src/services/guest-journey-reconciler.service.ts"
+      - "src/services/guest-journey-reconciler.service.test.ts"
       - "src/services/guest-journey.service.ts"
       - "src/services/guest-journey.service.test.ts"
       - "src/services/guest-journey-terminal-lifecycle.test.ts"
@@ -84,7 +88,8 @@ jobs:
             src/services/guest-journey-cancelled-initialization.test.ts \
             src/services/guest-journey-evaluator.test.ts \
             src/services/guest-journey-coordination-intent.service.test.ts \
-            src/services/guest-journey-evidence.service.test.ts
+            src/services/guest-journey-evidence.service.test.ts \
+            src/services/guest-journey-reconciler.service.test.ts
 
       - name: Run focused Guest Journey TypeScript build
         run: |
@@ -103,6 +108,8 @@ jobs:
             src/services/guest-journey-coordination-intent.service.test.ts \
             src/services/guest-journey-evidence.service.ts \
             src/services/guest-journey-evidence.service.test.ts \
+            src/services/guest-journey-reconciler.service.ts \
+            src/services/guest-journey-reconciler.service.test.ts \
             src/services/guest-journey.service.ts \
             src/services/guest-journey.service.test.ts \
             src/services/guest-journey-terminal-lifecycle.test.ts \
