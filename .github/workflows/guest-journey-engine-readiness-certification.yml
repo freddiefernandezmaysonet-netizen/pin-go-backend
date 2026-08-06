@@ -8,6 +8,12 @@ on:
       - ".github/workflows/guest-journey-engine-readiness-certification.yml"
       - "prisma/schema.prisma"
       - "prisma/migrations/20260806021200_extend_guest_journey_terminal_lifecycle/**"
+      - "prisma/migrations/20260806135300_add_guest_journey_coordination_intents/**"
+      - "src/services/guest-journey-contract.ts"
+      - "src/services/guest-journey-evaluator.ts"
+      - "src/services/guest-journey-evaluator.test.ts"
+      - "src/services/guest-journey-coordination-intent.service.ts"
+      - "src/services/guest-journey-coordination-intent.service.test.ts"
       - "src/services/guest-journey.service.ts"
       - "src/services/guest-journey.service.test.ts"
       - "src/services/guest-journey-terminal-lifecycle.test.ts"
@@ -21,6 +27,12 @@ on:
       - ".github/workflows/guest-journey-engine-readiness-certification.yml"
       - "prisma/schema.prisma"
       - "prisma/migrations/20260806021200_extend_guest_journey_terminal_lifecycle/**"
+      - "prisma/migrations/20260806135300_add_guest_journey_coordination_intents/**"
+      - "src/services/guest-journey-contract.ts"
+      - "src/services/guest-journey-evaluator.ts"
+      - "src/services/guest-journey-evaluator.test.ts"
+      - "src/services/guest-journey-coordination-intent.service.ts"
+      - "src/services/guest-journey-coordination-intent.service.test.ts"
       - "src/services/guest-journey.service.ts"
       - "src/services/guest-journey.service.test.ts"
       - "src/services/guest-journey-terminal-lifecycle.test.ts"
@@ -60,12 +72,14 @@ jobs:
       - name: Generate Prisma Client
         run: npx prisma generate --schema prisma/schema.prisma
 
-      - name: Run Guest Journey lifecycle tests
+      - name: Run Guest Journey readiness tests
         run: |
           npx tsx --test \
             src/services/guest-journey.service.test.ts \
             src/services/guest-journey-terminal-lifecycle.test.ts \
-            src/services/guest-journey-cancelled-initialization.test.ts
+            src/services/guest-journey-cancelled-initialization.test.ts \
+            src/services/guest-journey-evaluator.test.ts \
+            src/services/guest-journey-coordination-intent.service.test.ts
 
       - name: Run focused Guest Journey TypeScript build
         run: |
@@ -77,6 +91,11 @@ jobs:
             --strict \
             --skipLibCheck \
             --types node \
+            src/services/guest-journey-contract.ts \
+            src/services/guest-journey-evaluator.ts \
+            src/services/guest-journey-evaluator.test.ts \
+            src/services/guest-journey-coordination-intent.service.ts \
+            src/services/guest-journey-coordination-intent.service.test.ts \
             src/services/guest-journey.service.ts \
             src/services/guest-journey.service.test.ts \
             src/services/guest-journey-terminal-lifecycle.test.ts \
