@@ -11,6 +11,7 @@ on:
       - "src/services/guest-journey.service.ts"
       - "src/services/guest-journey.service.test.ts"
       - "src/services/guest-journey-terminal-lifecycle.test.ts"
+      - "src/services/guest-journey-cancelled-initialization.test.ts"
       - "src/workers/reservation.worker.ts"
 
   pull_request:
@@ -23,6 +24,7 @@ on:
       - "src/services/guest-journey.service.ts"
       - "src/services/guest-journey.service.test.ts"
       - "src/services/guest-journey-terminal-lifecycle.test.ts"
+      - "src/services/guest-journey-cancelled-initialization.test.ts"
       - "src/workers/reservation.worker.ts"
 
   workflow_dispatch:
@@ -62,7 +64,8 @@ jobs:
         run: |
           npx tsx --test \
             src/services/guest-journey.service.test.ts \
-            src/services/guest-journey-terminal-lifecycle.test.ts
+            src/services/guest-journey-terminal-lifecycle.test.ts \
+            src/services/guest-journey-cancelled-initialization.test.ts
 
       - name: Run focused Guest Journey TypeScript build
         run: |
@@ -76,4 +79,5 @@ jobs:
             --types node \
             src/services/guest-journey.service.ts \
             src/services/guest-journey.service.test.ts \
-            src/services/guest-journey-terminal-lifecycle.test.ts
+            src/services/guest-journey-terminal-lifecycle.test.ts \
+            src/services/guest-journey-cancelled-initialization.test.ts
