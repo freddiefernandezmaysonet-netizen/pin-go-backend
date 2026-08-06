@@ -1791,3 +1791,178 @@ export async function cancelGuestJourney(
     transitioned: true,
   };
 }
+export type EnsureCancelledGuestJourneyResult = {
+  journeyId: string;
+  currentState: GuestJourneyState;
+  created: boolean;
+  transitioned: boolean;
+};
+
+export async function ensureGuestJourneyForCancelledReservation(
+  tx: GuestJourneyTransactionClient,
+  reservationId: string,
+  now: Date = new Date()
+): Promise<EnsureCancelledGuestJourneyResult> {
+  const cleanReservationId = reservationId.trim();
+
+  if (!cleanReservationId) {
+    throw new Error("reservationId is required");
+  }
+
+  const reservation = await tx.reservation.findUnique({
+    where: {
+      id: cleanReservationId,
+    },
+    select: {
+      id: true,
+      status: true,
+      propertyId: true,
+      cancelledAt: true,
+      cancelledBy: true,
+      cancellationReason: true,
+      externalProvider: true,
+      externalUpdatedAt: true,
+      updatedAt: true,
+      property: {
+        select: {
+          organizationId: true,
+        },
+      },
+    },
+  });
+
+  if (!reservation) {
+    throw new Error(
+      `Cannot initialize cancelled Guest Journey. Reservation ${cleanReservationId} was not found.`
+    );
+  }
+
+  if (
+    reservation.status !==
+    ReservationStatus.CANCELLED
+  ) {
+    throw new Error(
+      `Cannot initialize cancelled Guest Journey for reservation ${cleanReservationId} with status ${reservation.status}.`
+    );
+  }
+
+  const cancellationEffectiveAt =
+    reservation.cancelledAt ??
+    reservation.externalUpdatedAt ??
+    reservation.updatedAt ??
+    now;
+
+  const creationResult =
+    await tx.guestJourney.createMany({
+      data: {
+        reservationId: reservation.id,
+        currentState:
+          GuestJourneyState.JOURNEY_CANCELLED,
+        stateChangedAt:
+          cancellationEffectiveAt,
+        cancelledAt:
+          cancellationEffectiveAt,
+      },
+      skipDuplicates: true,
+    });
+
+  const journey =
+    await tx.guestJourney.findUniqueOrThrow({
+      where: {
+        reservationId: reservation.id,
+      },
+      select: {
+        id: true,
+        currentState: true,
+      },
+    });
+
+  if (creationResult.count === 0) {
+    const cancellationResult =
+      await cancelGuestJourney(
+        tx,
+        reservation.id,
+        now
+      );
+
+    return {
+      ...cancellationResult,
+      created: false,
+    };
+  }
+
+  const auditEntry: AuditEntry = {
+    engine: "Guest Journey",
+    decisionId:
+      `guest-journey:${journey.id}:` +
+      "cancelled-reservation-initialization",
+    entityType: "RESERVATION",
+    entityId: reservation.id,
+    eventType: "DECISION_APPLIED",
+    status: "SUCCESS",
+    severity: "INFO",
+    summary:
+      "Cancelled Guest Journey initialized.",
+    reason:
+      "The reservation was first observed in its canonical cancelled state, so no non-terminal guest lifecycle stages were synthesized.",
+    startedAt: cancellationEffectiveAt,
+    completedAt: cancellationEffectiveAt,
+    durationMs: 0,
+    decisions: [
+      {
+        engine: "Guest Journey",
+        rule:
+          "CANCELLED_RESERVATION_INITIALIZED_AS_JOURNEY_CANCELLED",
+        label:
+          "Initialize Cancelled Guest Journey",
+        previousValue: null,
+        newValue:
+          GuestJourneyState.JOURNEY_CANCELLED,
+        applied: true,
+        metadata: {
+          journeyId: journey.id,
+          reservationId: reservation.id,
+          reservationStatus:
+            reservation.status,
+          cancelledBy:
+            reservation.cancelledBy,
+        },
+      },
+    ],
+    metadata: {
+      journeyId: journey.id,
+      reservationId: reservation.id,
+      propertyId: reservation.propertyId,
+      organizationId:
+        reservation.property.organizationId,
+      fromState: null,
+      toState:
+        GuestJourneyState.JOURNEY_CANCELLED,
+      initializationMode:
+        "DIRECT_TERMINAL_INITIALIZATION",
+      cancellationEffectiveAt,
+      reservationCancelledAt:
+        reservation.cancelledAt,
+      reservationCancelledBy:
+        reservation.cancelledBy,
+      cancellationReason:
+        reservation.cancellationReason,
+      externalProvider:
+        reservation.externalProvider,
+      externalUpdatedAt:
+        reservation.externalUpdatedAt,
+      accessClosureOwnedBy:
+        "Access Engine",
+    },
+  };
+
+  await persistAuditEntry(tx, auditEntry);
+
+  return {
+    journeyId: journey.id,
+    currentState:
+      GuestJourneyState.JOURNEY_CANCELLED,
+    created: true,
+    transitioned: true,
+  };
+}

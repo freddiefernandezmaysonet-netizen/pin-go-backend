@@ -54,8 +54,8 @@ import { unassignAllNfcForReservation } from "../services/nfc.service";
 import { unassignGuestNfcForReservation } from "../services/nfc.service";
 import { processPendingCleaningConfirmations } from "../services/cleaning-confirmation-dispatch.service";
 import {
-  cancelGuestJourney,
   completeGuestJourney,
+  ensureGuestJourneyForCancelledReservation,
   markGuestJourneyReadyForArrival,
   markGuestJourneyStayActive,
   markGuestJourneyCheckoutDue,
@@ -1310,18 +1310,27 @@ async function processGuestJourneyCancellations(
       where: {
         status:
           ReservationStatus.CANCELLED,
-        guestJourney: {
-          is: {
-            currentState: {
-              notIn: [
-                GuestJourneyState
-                  .JOURNEY_CANCELLED,
-                GuestJourneyState
-                  .JOURNEY_COMPLETED,
-              ],
+        OR: [
+          {
+            guestJourney: {
+              is: null,
             },
           },
-        },
+          {
+            guestJourney: {
+              is: {
+                currentState: {
+                  notIn: [
+                    GuestJourneyState
+                      .JOURNEY_CANCELLED,
+                    GuestJourneyState
+                      .JOURNEY_COMPLETED,
+                  ],
+                },
+              },
+            },
+          },
+        ],
       },
       select: {
         id: true,
@@ -1349,7 +1358,7 @@ async function processGuestJourneyCancellations(
       const result =
         await prisma.$transaction(
           async (tx) =>
-            cancelGuestJourney(
+            ensureGuestJourneyForCancelledReservation(
               tx,
               reservation.id,
               now
