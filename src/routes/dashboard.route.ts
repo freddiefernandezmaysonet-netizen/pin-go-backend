@@ -1,9 +1,12 @@
 import { Router } from "express";
 import { PrismaClient, ReservationStatus } from "@prisma/client";
 import { requireAuth } from "../middleware/requireAuth";
+import { dashboardDistributionMissionControlMiddleware } from "./dashboard.distribution-mission-control.middleware";
 
 const prisma = new PrismaClient();
 export const dashboardRouter = Router();
+
+dashboardRouter.use(dashboardDistributionMissionControlMiddleware);
 
 // MVP: "today" en UTC (luego lo hacemos por timezone de property)
 function startEndOfTodayUTC() {

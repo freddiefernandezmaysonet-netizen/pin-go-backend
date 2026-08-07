@@ -1,9 +1,24 @@
 import crypto from "crypto";
 import axios from "axios";
-import type { CanonicalReservation, PmsAdapter } from "./types";
+import type {
+  CanonicalReservation,
+  ChannexBookingRevision,
+  ChannexBookingWebhookEventType,
+  PmsAdapter,
+  PmsAdapterConnection,
+} from "./types";
 
 const CHANNEX_API_BASE_URL =
   process.env.CHANNEX_API_BASE_URL ?? "https://staging.channex.io";
+const CHANNEX_REQUEST_TIMEOUT_MS = 15_000;
+
+const CHANNEX_BOOKING_EVENTS = new Set<ChannexBookingWebhookEventType>([
+  "booking",
+  "booking_new",
+  "booking_modification",
+  "booking_cancellation",
+  "non_acked_booking",
+]);
 
 function asString(value: unknown): string | null {
   if (value == null) return null;
@@ -27,12 +42,11 @@ function getEncryptionKey() {
 
 function decryptJson(encryptedValue: string): any {
   const raw = Buffer.from(encryptedValue, "base64");
-
   const iv = raw.subarray(0, 12);
   const tag = raw.subarray(12, 28);
   const encrypted = raw.subarray(28);
-
   const decipher = crypto.createDecipheriv("aes-256-gcm", getEncryptionKey(), iv);
+
   decipher.setAuthTag(tag);
 
   const decrypted = Buffer.concat([
@@ -43,9 +57,7 @@ function decryptJson(encryptedValue: string): any {
   return JSON.parse(decrypted.toString("utf8"));
 }
 
-function getChannexApiKey(connection: {
-  credentialsEncrypted?: string | null;
-}) {
+function getChannexApiKey(connection: PmsAdapterConnection) {
   if (connection.credentialsEncrypted) {
     const creds = decryptJson(connection.credentialsEncrypted);
     const apiKey = asString(creds?.apiKey);
@@ -58,93 +70,109 @@ function getChannexApiKey(connection: {
   throw new Error("CHANNEX_NO_API_KEY");
 }
 
+function getChannexBaseUrl() {
+  return CHANNEX_API_BASE_URL.replace(/\/+$/, "");
+}
+
+function getChannexHeaders(connection: PmsAdapterConnection) {
+  return {
+    Accept: "application/json",
+    "Content-Type": "application/json",
+    "user-api-key": getChannexApiKey(connection),
+  };
+}
+
 function payloadRoot(body: any) {
   return body?.payload ?? body?.data ?? body;
 }
 
+function normalizeWebhookEventType(value: unknown) {
+  return String(value ?? "booking").trim().toLowerCase();
+}
+
 function normalizeStatus(value: unknown): CanonicalReservation["status"] {
-  const status = String(value ?? "").toUpperCase();
+  const status = String(value ?? "").trim().toUpperCase();
 
   if (["CANCELLED", "CANCELED"].includes(status)) return "CANCELLED";
-  if (["INQUIRY"].includes(status)) return "INQUIRY";
+  if (status === "INQUIRY") return "INQUIRY";
   if (["HOLD", "HELD"].includes(status)) return "HOLD";
 
   return "CONFIRMED";
 }
 
-function extractBooking(raw: any) {
+function extractResource(raw: any) {
   const data = raw?.data ?? raw;
   const attributes = data?.attributes ?? data;
 
-  return (
-    attributes?.booking ??
-    attributes?.reservation ??
-    attributes?.revision ??
-    attributes ??
-    data
-  );
+  return {
+    resourceId: firstString(data?.id, attributes?.booking_revision_id),
+    attributes:
+      attributes?.booking_revision ??
+      attributes?.revision ??
+      attributes?.booking ??
+      attributes,
+  };
 }
 
-function toCanonicalReservation(raw: any, fallbackId: string): CanonicalReservation {
-  const booking = extractBooking(raw);
+function extractBooking(raw: any) {
+  return extractResource(raw).attributes;
+}
 
-  const externalReservationId =
-    firstString(
-      booking?.booking_id,
-      booking?.bookingId,
-      booking?.reservation_id,
-      booking?.reservationId,
-      booking?.unique_id,
-      booking?.id,
-      raw?.data?.id,
-      fallbackId
-    ) ?? fallbackId;
-
-const primaryRoom =
-  Array.isArray(booking?.rooms) && booking.rooms.length > 0
-    ? booking.rooms[0]
-    : Array.isArray(raw?.rooms) && raw.rooms.length > 0
-      ? raw.rooms[0]
-      : Array.isArray(raw?.data?.attributes?.rooms) && raw.data.attributes.rooms.length > 0
-        ? raw.data.attributes.rooms[0]
-        : null;
-
-const externalListingId =
-  firstString(
-    booking?.room_type_id,
-    booking?.roomTypeId,
-
-    primaryRoom?.room_type_id,
-    primaryRoom?.roomTypeId,
-
-    booking?.room_id,
-    booking?.roomId,
-
-    booking?.listing_id,
-    booking?.listingId,
-
-    booking?.property_id,
-    booking?.propertyId
-  ); 
- if (!externalListingId) {
-    throw new Error("CHANNEX_MISSING_EXTERNAL_LISTING_ID");
+function getPrimaryRoom(raw: any, booking: any) {
+  if (Array.isArray(booking?.rooms) && booking.rooms.length > 0) {
+    return booking.rooms[0];
   }
 
-  const checkIn =
-    firstString(
-      booking?.check_in,
-      booking?.checkIn,
-      booking?.arrival_date,
-      booking?.arrivalDate
-    );
+  if (Array.isArray(raw?.rooms) && raw.rooms.length > 0) {
+    return raw.rooms[0];
+  }
 
-   let checkOut =
-    firstString(
-      booking?.check_out,
-      booking?.checkOut,
-      booking?.departure_date,
-      booking?.departureDate
-    );
+  if (
+    Array.isArray(raw?.data?.attributes?.rooms) &&
+    raw.data.attributes.rooms.length > 0
+  ) {
+    return raw.data.attributes.rooms[0];
+  }
+
+  return null;
+}
+
+function toCanonicalReservation(
+  raw: any,
+  fallbackBookingId: string
+): CanonicalReservation {
+  const booking = extractBooking(raw);
+  const primaryRoom = getPrimaryRoom(raw, booking);
+  const externalReservationId =
+    firstString(booking?.booking_id, booking?.bookingId, fallbackBookingId) ??
+    fallbackBookingId;
+  const externalListingId = firstString(
+    primaryRoom?.room_type_id,
+    primaryRoom?.roomTypeId,
+    booking?.room_type_id,
+    booking?.roomTypeId
+  );
+
+  if (!externalListingId) {
+    throw new Error("CHANNEX_MISSING_ROOM_TYPE_ID");
+  }
+
+  const checkIn = firstString(
+    booking?.arrival_date,
+    booking?.arrivalDate,
+    primaryRoom?.checkin_date,
+    primaryRoom?.checkInDate,
+    booking?.check_in,
+    booking?.checkIn
+  );
+  let checkOut = firstString(
+    booking?.departure_date,
+    booking?.departureDate,
+    primaryRoom?.checkout_date,
+    primaryRoom?.checkOutDate,
+    booking?.check_out,
+    booking?.checkOut
+  );
 
   if (!checkOut) {
     const nights = Number(
@@ -160,9 +188,39 @@ const externalListingId =
       checkOut = checkoutDate.toISOString().slice(0, 10);
     }
   }
+
   if (!checkIn || !checkOut) {
     throw new Error("CHANNEX_MISSING_DATES");
   }
+
+  const timezone = firstString(booking?.timezone, booking?.time_zone);
+  const guestName = firstString(
+    booking?.guest_name,
+    booking?.guestName,
+    booking?.customer?.name,
+    booking?.guest?.name
+  );
+  const guestEmail = firstString(
+    booking?.guest_email,
+    booking?.guestEmail,
+    booking?.customer?.email,
+    booking?.guest?.email
+  );
+  const guestPhone = firstString(
+    booking?.guest_phone,
+    booking?.guestPhone,
+    booking?.customer?.phone,
+    booking?.guest?.phone
+  );
+  const adults =
+    Number(booking?.adults ?? booking?.occupancy?.adults ?? 0) || null;
+  const children =
+    Number(booking?.children ?? booking?.occupancy?.children ?? 0) || null;
+  const notes = firstString(
+    booking?.notes,
+    booking?.remarks,
+    booking?.special_request
+  );
 
   return {
     provider: "CHANNEX",
@@ -170,50 +228,85 @@ const externalListingId =
     externalListingId,
     listingName:
       firstString(
-        booking?.listing_name,
-        booking?.listingName,
-        booking?.property_name,
-        booking?.propertyName,
+        primaryRoom?.room_type_name,
+        primaryRoom?.roomTypeName,
         booking?.room_type_name,
-        booking?.roomTypeName
+        booking?.roomTypeName,
+        booking?.property_name,
+        booking?.propertyName
       ) ?? null,
     status: normalizeStatus(
       booking?.status ?? booking?.booking_status ?? booking?.state
     ),
     checkIn,
     checkOut,
-    timezone: firstString(booking?.timezone, booking?.time_zone) ?? undefined,
+    ...(timezone ? { timezone } : {}),
     guest: {
-      name:
-        firstString(
-          booking?.guest_name,
-          booking?.guestName,
-          booking?.customer?.name,
-          booking?.guest?.name
-        ) ?? undefined,
-      email:
-        firstString(
-          booking?.guest_email,
-          booking?.guestEmail,
-          booking?.customer?.email,
-          booking?.guest?.email
-        ) ?? undefined,
-      phone:
-        firstString(
-          booking?.guest_phone,
-          booking?.guestPhone,
-          booking?.customer?.phone,
-          booking?.guest?.phone
-        ) ?? undefined,
+      ...(guestName ? { name: guestName } : {}),
+      ...(guestEmail ? { email: guestEmail } : {}),
+      ...(guestPhone ? { phone: guestPhone } : {}),
     },
     party: {
-      adults: Number(booking?.adults ?? booking?.occupancy?.adults ?? 0) || undefined,
-      children:
-        Number(booking?.children ?? booking?.occupancy?.children ?? 0) || undefined,
+      ...(adults !== null ? { adults } : {}),
+      ...(children !== null ? { children } : {}),
     },
-    notes: firstString(booking?.notes, booking?.remarks, booking?.special_request) ?? undefined,
+    ...(notes ? { notes } : {}),
     raw: booking,
   };
+}
+
+function toChannexBookingRevision(raw: any): ChannexBookingRevision {
+  const { resourceId, attributes } = extractResource(raw);
+  const revisionId = firstString(
+    resourceId,
+    attributes?.booking_revision_id,
+    attributes?.revision_id
+  );
+  const bookingId = firstString(attributes?.booking_id, attributes?.bookingId);
+  const propertyId = firstString(
+    attributes?.property_id,
+    attributes?.propertyId
+  );
+  const insertedAt = firstString(
+    attributes?.inserted_at,
+    attributes?.insertedAt
+  );
+
+  if (!revisionId) throw new Error("CHANNEX_REVISION_MISSING_REVISION_ID");
+  if (!bookingId) throw new Error("CHANNEX_REVISION_MISSING_BOOKING_ID");
+  if (!propertyId) throw new Error("CHANNEX_REVISION_MISSING_PROPERTY_ID");
+  if (!insertedAt) throw new Error("CHANNEX_REVISION_MISSING_INSERTED_AT");
+
+  return {
+    identity: {
+      revisionId,
+      bookingId,
+      bookingUniqueId:
+        firstString(attributes?.unique_id, attributes?.uniqueId) ?? null,
+      otaReservationCode:
+        firstString(
+          attributes?.ota_reservation_code,
+          attributes?.otaReservationCode
+        ) ?? null,
+      propertyId,
+      liveFeedEventId:
+        firstString(
+          attributes?.live_feed_event_id,
+          attributes?.liveFeedEventId
+        ) ?? null,
+      systemId:
+        firstString(attributes?.system_id, attributes?.systemId) ?? null,
+      insertedAt,
+    },
+    reservation: toCanonicalReservation(raw, bookingId),
+    raw,
+  };
+}
+
+function extractRevisionList(raw: any) {
+  if (Array.isArray(raw?.data)) return raw.data;
+  if (Array.isArray(raw)) return raw;
+  return [];
 }
 
 export const channexAdapter: PmsAdapter = {
@@ -221,8 +314,8 @@ export const channexAdapter: PmsAdapter = {
 
   parseWebhook: ({ body }) => {
     const payload = payloadRoot(body);
-
-    const eventType =
+    const payloadAttributes = payload?.attributes ?? payload;
+    const eventType = normalizeWebhookEventType(
       firstString(
         body?.event,
         body?.eventType,
@@ -230,114 +323,148 @@ export const channexAdapter: PmsAdapter = {
         payload?.event,
         payload?.eventType,
         payload?.type
-      ) ?? "BOOKING";
-
-    const externalEventId = firstString(
-      body?.id,
-      body?.eventId,
-      body?.event_id,
-      payload?.id,
-      payload?.eventId,
-      payload?.event_id
+      )
     );
-
-    const externalReservationId = firstString(
+    const isBookingEvent = CHANNEX_BOOKING_EVENTS.has(
+      eventType as ChannexBookingWebhookEventType
+    );
+    const revisionId = firstString(
       body?.booking_revision_id,
       body?.bookingRevisionId,
+      body?.revision_id,
+      body?.revisionId,
       body?.booking_revision?.id,
-      payload?.booking_revision_id,
-      payload?.bookingRevisionId,
-      payload?.booking_revision?.id,
+      payloadAttributes?.booking_revision_id,
+      payloadAttributes?.bookingRevisionId,
+      payloadAttributes?.revision_id,
+      payloadAttributes?.revisionId,
+      payloadAttributes?.booking_revision?.id,
+      isBookingEvent ? payload?.id : null
+    );
+    const propertyId = firstString(
+      body?.property_id,
+      body?.propertyId,
+      payloadAttributes?.property_id,
+      payloadAttributes?.propertyId
+    );
+    const bookingId = firstString(
       body?.booking_id,
       body?.bookingId,
-      body?.reservation_id,
-      body?.reservationId,
-      body?.unique_id,
-      payload?.booking_id,
-      payload?.bookingId,
-      payload?.reservation_id,
-      payload?.reservationId,
-      payload?.unique_id,
-      payload?.booking?.id,
-      payload?.booking?.booking_id,
-      payload?.booking?.unique_id,
-      payload?.reservation?.id,
-      payload?.reservation?.booking_id,
-      payload?.reservation?.unique_id
+      payloadAttributes?.booking_id,
+      payloadAttributes?.bookingId
     );
-
-    const maybeBooking = payloadRoot(body);
-
-    let reservation: CanonicalReservation | undefined;
-
-    try {
-      const booking = extractBooking(maybeBooking);
-
-      const hasInlineReservation =
-        !!firstString(
-          booking?.check_in,
-          booking?.checkIn,
-          booking?.arrival_date,
-          booking?.arrivalDate
-        ) &&
-                (
-          !!firstString(
-            booking?.check_out,
-            booking?.checkOut,
-            booking?.departure_date,
-            booking?.departureDate
-          ) ||
-          Number(
-            booking?.count_of_nights ??
-              booking?.nights ??
-              booking?.number_of_nights ??
-              0
-          ) > 0
-        ) &&
-       !!firstString(
-  booking?.room_type_id,
-  booking?.roomTypeId,
-  booking?.rooms?.[0]?.room_type_id,
-  booking?.rooms?.[0]?.roomTypeId,
-  booking?.room_id,
-  booking?.roomId,
-  booking?.listing_id,
-  booking?.listingId
-);
-      if (hasInlineReservation) {
-        reservation = toCanonicalReservation(
-          maybeBooking,
-          externalReservationId ?? externalEventId ?? "unknown"
-        );
-      }
-    } catch {
-      reservation = undefined;
-    }
+    const liveFeedEventId = firstString(
+      body?.live_feed_event_id,
+      body?.liveFeedEventId,
+      payloadAttributes?.live_feed_event_id,
+      payloadAttributes?.liveFeedEventId
+    );
+    const externalEventId = firstString(
+      body?.event_id,
+      body?.eventId,
+      payloadAttributes?.event_id,
+      payloadAttributes?.eventId,
+      liveFeedEventId
+    );
 
     return {
       eventType,
       externalEventId,
-      externalReservationId: externalReservationId ?? undefined,
-      reservation,
+      ...(bookingId ? { externalReservationId: bookingId } : {}),
+      ...(propertyId
+        ? {
+            bookingRevision: {
+              ...(revisionId ? { revisionId } : {}),
+              ...(bookingId ? { bookingId } : {}),
+              bookingUniqueId:
+                firstString(
+                  body?.unique_id,
+                  body?.uniqueId,
+                  payloadAttributes?.unique_id,
+                  payloadAttributes?.uniqueId
+                ) ?? null,
+              otaReservationCode:
+                firstString(
+                  body?.ota_reservation_code,
+                  body?.otaReservationCode,
+                  payloadAttributes?.ota_reservation_code,
+                  payloadAttributes?.otaReservationCode
+                ) ?? null,
+              propertyId,
+              liveFeedEventId: liveFeedEventId ?? null,
+              systemId:
+                firstString(
+                  body?.system_id,
+                  body?.systemId,
+                  payloadAttributes?.system_id,
+                  payloadAttributes?.systemId
+                ) ?? null,
+              insertedAt:
+                firstString(
+                  body?.inserted_at,
+                  body?.insertedAt,
+                  payloadAttributes?.inserted_at,
+                  payloadAttributes?.insertedAt
+                ) ?? null,
+            },
+          }
+        : {}),
     };
-   
   },
 
   fetchReservation: async ({ connection, externalReservationId }) => {
-    const apiKey = getChannexApiKey(connection);
-    const baseUrl = CHANNEX_API_BASE_URL.replace(/\/+$/, "");
-
-    const resp = await axios.get(
-      `${baseUrl}/api/v1/booking_revisions/${externalReservationId}`,
+    const response = await axios.get(
+      `${getChannexBaseUrl()}/api/v1/bookings/${encodeURIComponent(
+        externalReservationId
+      )}`,
       {
-        headers: {
-          Accept: "application/json",
-          "user-api-key": apiKey,
-        },
-        timeout: 15000,
+        headers: getChannexHeaders(connection),
+        timeout: CHANNEX_REQUEST_TIMEOUT_MS,
       }
     );
 
-    return toCanonicalReservation(resp.data, externalReservationId);
+    return toCanonicalReservation(response.data, externalReservationId);
+  },
+
+  fetchBookingRevision: async ({ connection, revisionId }) => {
+    const response = await axios.get(
+      `${getChannexBaseUrl()}/api/v1/booking_revisions/${encodeURIComponent(
+        revisionId
+      )}`,
+      {
+        headers: getChannexHeaders(connection),
+        timeout: CHANNEX_REQUEST_TIMEOUT_MS,
+      }
+    );
+
+    return toChannexBookingRevision(response.data);
+  },
+
+  fetchBookingRevisionFeed: async ({ connection }) => {
+    const response = await axios.get(
+      `${getChannexBaseUrl()}/api/v1/booking_revisions/feed`,
+      {
+        headers: getChannexHeaders(connection),
+        params: {
+          "order[inserted_at]": "asc",
+        },
+        timeout: CHANNEX_REQUEST_TIMEOUT_MS,
+      }
+    );
+
+    return extractRevisionList(response.data).map(toChannexBookingRevision);
+  },
+
+  acknowledgeBookingRevision: async ({ connection, revisionId }) => {
+    await axios.post(
+      `${getChannexBaseUrl()}/api/v1/booking_revisions/${encodeURIComponent(
+        revisionId
+      )}/ack`,
+      {},
+      {
+        headers: getChannexHeaders(connection),
+        timeout: CHANNEX_REQUEST_TIMEOUT_MS,
+      }
+    );
   },
 };

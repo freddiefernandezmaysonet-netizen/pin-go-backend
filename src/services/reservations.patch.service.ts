@@ -1,6 +1,14 @@
 import type { Request, Response } from 'express';
-import { PrismaClient, AccessStatus, AccessMethod } from '@prisma/client';
-import { TTLockClient } from "../integrations/ttlock/ttlock.client";
+import {
+  AccessMethod,
+  AccessStatus,
+  CancellationActor,
+  PrismaClient,
+  ReservationStatus,
+} from '@prisma/client';
+import { formatInTimeZone } from 'date-fns-tz';
+import { ttlockDeletePasscode } from '../integrations/ttlock/ttlock.passcode';
+import { persistChannexAriReservationIntent } from '../pms/outbound/channex-ari-reservation-producer.service';
 
 const prisma = new PrismaClient();
 
@@ -10,7 +18,7 @@ type PatchBody =
   | { action: 'UPDATE_GUEST'; guestName?: string; guestEmail?: string; guestPhone?: string }
   | Record<string, any>;
 
-async function revokeGrantInProvider(grant: any) {
+async function revokeGrantInProvider(grant: any, organizationId: string) {
   // Solo implementado para PASSCODE_TIMEBOUND (keyboardPwd)
   if (grant.method !== AccessMethod.PASSCODE_TIMEBOUND) return;
 
@@ -21,9 +29,10 @@ async function revokeGrantInProvider(grant: any) {
     throw new Error('ttlockKeyboardPwdId missing for PASSCODE_TIMEBOUND');
   }
 
-  await ttlockPost<any>('/v3/keyboardPwd/delete', {
-    lockId: grant.lock.ttlockLockId,
-    keyboardPwdId: grant.ttlockKeyboardPwdId,
+  await ttlockDeletePasscode({
+    ttlockLockId: grant.lock.ttlockLockId,
+    passcodeId: grant.ttlockKeyboardPwdId,
+    organizationId,
   });
 }
 
@@ -36,6 +45,11 @@ export async function patchReservationHandler(req: Request, res: Response) {
     const reservation = await prisma.reservation.findUnique({
       where: { id },
       include: {
+        property: {
+          select: {
+            organizationId: true,
+          },
+        },
         accessGrants: {
           include: { lock: true },
           orderBy: { createdAt: 'desc' },
@@ -69,15 +83,107 @@ export async function patchReservationHandler(req: Request, res: Response) {
       });
     }
 
+    if (action === 'CANCEL') {
+      const cancelledAt = new Date();
+
+      await prisma.$transaction(async (tx) => {
+        const currentReservation = await tx.reservation.findUnique({
+          where: { id },
+          include: {
+            property: {
+              select: {
+                organizationId: true,
+                timezone: true,
+                distributionEnabled: true,
+                distributionStatus: true,
+              },
+            },
+          },
+        });
+
+        if (!currentReservation) {
+          throw new Error('Reservation not found');
+        }
+
+        if (currentReservation.status === ReservationStatus.CANCELLED) {
+          return;
+        }
+
+        const cancellationUpdate = await tx.reservation.updateMany({
+          where: {
+            id,
+            status: ReservationStatus.ACTIVE,
+          },
+          data: {
+            status: ReservationStatus.CANCELLED,
+            cancelledAt,
+            cancelledBy: CancellationActor.HOST,
+            cancelledByUserId: null,
+            cancellationRequestedAt: cancelledAt,
+            cancellationRequestedBy: CancellationActor.HOST,
+            cancellationReason: 'Legacy host cancellation',
+          },
+        });
+
+        if (cancellationUpdate.count === 0) {
+          return;
+        }
+
+        if (
+          currentReservation.property.distributionEnabled === true &&
+          currentReservation.property.distributionStatus === 'ACTIVE'
+        ) {
+          const propertyTimezone =
+            currentReservation.property.timezone ?? 'America/Puerto_Rico';
+
+          await persistChannexAriReservationIntent({
+            db: tx,
+            organizationId: currentReservation.property.organizationId,
+            propertyId: currentReservation.propertyId,
+            reservationId: currentReservation.id,
+            previous: {
+              checkIn: currentReservation.checkIn,
+              checkOut: currentReservation.checkOut,
+              status: 'ACTIVE',
+            },
+            current: {
+              checkIn: currentReservation.checkIn,
+              checkOut: currentReservation.checkOut,
+              status: 'CANCELLED',
+            },
+            propertyTimezone,
+            todayDateKey: formatInTimeZone(
+              cancelledAt,
+              propertyTimezone,
+              'yyyy-MM-dd'
+            ),
+            now: cancelledAt,
+          });
+        }
+      });
+    }
+
     // 3) Revocar todos los grants ACTIVE de esa reserva
     const activeGrants = reservation.accessGrants.filter((g) => g.status === AccessStatus.ACTIVE);
 
     if (activeGrants.length === 0) {
+      const refreshed = await prisma.reservation.findUnique({
+        where: { id },
+        include: {
+          property: true,
+          accessGrants: {
+            include: { lock: true },
+            orderBy: { createdAt: 'desc' },
+          },
+        },
+      });
+
       return res.json({
         ok: true,
         action,
         message: 'No ACTIVE grants to revoke',
         revokedCount: 0,
+        reservation: refreshed,
       });
     }
 
@@ -87,7 +193,7 @@ export async function patchReservationHandler(req: Request, res: Response) {
     for (const grant of activeGrants) {
       try {
         // Revocar en TTLock si aplica
-        await revokeGrantInProvider(grant);
+        await revokeGrantInProvider(grant, reservation.property.organizationId);
 
         // Marcar como REVOKED (idempotente: solo si sigue ACTIVE)
         const upd = await prisma.accessGrant.updateMany({

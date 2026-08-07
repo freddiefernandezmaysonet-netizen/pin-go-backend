@@ -1,6 +1,11 @@
-import { PrismaClient } from "@prisma/client";
+import { Prisma, PrismaClient } from "@prisma/client";
 
 const prisma = new PrismaClient();
+
+type MarketSeasonTemplateDb = Pick<
+  Prisma.TransactionClient,
+  "property" | "marketSeasonTemplate" | "propertySeason"
+>;
 
 function normalizeMarketCountry(value: unknown) {
   const raw = String(value || "").trim();
@@ -37,8 +42,11 @@ function normalizeMarketRegion(value: unknown) {
   return raw;
 }
 
-export async function applyDefaultMarketSeasonsForProperty(propertyId: string) {
-  const property = await prisma.property.findUnique({
+export async function applyDefaultMarketSeasonsForProperty(
+  propertyId: string,
+  db: MarketSeasonTemplateDb = prisma
+) {
+  const property = await db.property.findUnique({
     where: { id: propertyId },
     select: {
       id: true,
@@ -72,7 +80,7 @@ export async function applyDefaultMarketSeasonsForProperty(propertyId: string) {
   const region = normalizeMarketRegion(property.region);
 
   
-  let templates = await prisma.marketSeasonTemplate.findMany({
+  let templates = await db.marketSeasonTemplate.findMany({
     where: {
       country,
       region: region || null,
@@ -83,7 +91,7 @@ export async function applyDefaultMarketSeasonsForProperty(propertyId: string) {
 
   
   if (templates.length === 0) {
-    templates = await prisma.marketSeasonTemplate.findMany({
+    templates = await db.marketSeasonTemplate.findMany({
       where: {
         country,
         region: null,
@@ -116,7 +124,7 @@ export async function applyDefaultMarketSeasonsForProperty(propertyId: string) {
 
   const templateNames = new Set(templates.map((template) => template.name));
 
-  const deactivateResult = await prisma.propertySeason.updateMany({
+  const deactivateResult = await db.propertySeason.updateMany({
     where: {
       propertyId: property.id,
       source: "PIN_GO_DEFAULT",
@@ -133,7 +141,7 @@ export async function applyDefaultMarketSeasonsForProperty(propertyId: string) {
   const deactivated = deactivateResult.count;
 
   for (const template of templates) {
-    const existing = await prisma.propertySeason.findFirst({
+    const existing = await db.propertySeason.findFirst({
       where: {
         propertyId: property.id,
         name: template.name,
@@ -152,7 +160,7 @@ export async function applyDefaultMarketSeasonsForProperty(propertyId: string) {
     });
 
     if (!existing) {
-      await prisma.propertySeason.create({
+      await db.propertySeason.create({
         data: {
           propertyId: property.id,
           name: template.name,
@@ -182,7 +190,7 @@ export async function applyDefaultMarketSeasonsForProperty(propertyId: string) {
 
     if (!needsUpdate) continue;
 
-    await prisma.propertySeason.update({
+    await db.propertySeason.update({
       where: { id: existing.id },
       data: {
         startMonth: template.startMonth,
@@ -199,7 +207,7 @@ export async function applyDefaultMarketSeasonsForProperty(propertyId: string) {
   }
 
   if (created > 0 || updated > 0 || deactivated > 0) {
-    await prisma.property.update({
+    await db.property.update({
       where: { id: property.id },
       data: {
         seasonalPricingEnabled: true,
