@@ -1075,7 +1075,7 @@ model OnboardingAppointment {
   email           String
   phone           String?
   topic           String?
-n  status          String   @default("REQUESTED")
+  status          String   @default("REQUESTED")
   googleEventId   String?
   googleMeetLink             String?
   remoteAssistanceRequested  Boolean  @default(false)
