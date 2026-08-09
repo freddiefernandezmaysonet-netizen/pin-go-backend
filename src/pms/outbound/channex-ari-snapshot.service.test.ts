@@ -67,6 +67,7 @@ function createDb(input: {
   property?: any;
   reservations?: any[];
   blockedDates?: any[];
+  nightlyRates?: any[];
 } = {}) {
   const calls: Array<{ model: string; args: any }> = [];
 
@@ -88,6 +89,12 @@ function createDb(input: {
         findMany: async (args: any) => {
           calls.push({ model: "blockedDate", args });
           return input.blockedDates ?? [];
+        },
+      },
+      propertyNightlyRate: {
+        findMany: async (args: any) => {
+          calls.push({ model: "nightlyRate", args });
+          return input.nightlyRates ?? [];
         },
       },
     } as any,
@@ -223,7 +230,10 @@ test("serializes Revenue currency amounts as integer minor units without changin
       max_stay: 14,
     },
   ]);
-  assert.deepEqual(mock.calls.map((call) => call.model), ["property"]);
+  assert.deepEqual(mock.calls.map((call) => call.model), [
+    "property",
+    "nightlyRate",
+  ]);
 });
 
 test("certification #2 preserves a rate-only change through snapshot materialization", async () => {
@@ -254,6 +264,79 @@ test("certification #2 preserves a rate-only change through snapshot materializa
       rate: 15999,
     },
   ]);
+});
+
+test("resolves nightly stay restriction overrides by date with property fallback", async () => {
+  const mock = createDb({
+    property: property({ minimumNights: 2, maximumNights: 14 }),
+    nightlyRates: [
+      {
+        date: new Date("2026-08-01T00:00:00.000Z"),
+        minimumNights: 3,
+        maximumNights: null,
+      },
+      {
+        date: new Date("2026-08-03T00:00:00.000Z"),
+        minimumNights: null,
+        maximumNights: 7,
+      },
+    ],
+  });
+  const selectedPlan = plan({
+    messageKind: "RATES_RESTRICTIONS",
+    dateFrom: "2026-08-01",
+    dateToExclusive: "2026-08-04",
+    dateKeys: ["2026-08-01", "2026-08-03"],
+    changedFields: ["minStayArrival", "minStayThrough", "maxStay"],
+  } as any);
+
+  const result = await readChannexAriSnapshot(mock.db, {
+    plan: selectedPlan,
+    mapping: mapping(),
+    calculatePricing: (async () =>
+      pricingResult([
+        { date: "2026-08-01", rate: 150 },
+        { date: "2026-08-02", rate: 160 },
+        { date: "2026-08-03", rate: 170 },
+      ])) as any,
+  });
+
+  assert.equal(result.messageKind, "RATES_RESTRICTIONS");
+  assert.deepEqual(result.data.payload.values, [
+    {
+      property_id: "channex-property-1",
+      rate_plan_id: "rate-plan-1",
+      date: "2026-08-01",
+      min_stay_arrival: 3,
+      min_stay_through: 3,
+      max_stay: 14,
+    },
+    {
+      property_id: "channex-property-1",
+      rate_plan_id: "rate-plan-1",
+      date: "2026-08-03",
+      min_stay_arrival: 2,
+      min_stay_through: 2,
+      max_stay: 7,
+    },
+  ]);
+  assert.deepEqual(mock.calls[1], {
+    model: "nightlyRate",
+    args: {
+      where: {
+        propertyId: "property-1",
+        date: {
+          gte: new Date("2026-08-01T00:00:00.000Z"),
+          lt: new Date("2026-08-04T00:00:00.000Z"),
+        },
+      },
+      select: {
+        date: true,
+        minimumNights: true,
+        maximumNights: true,
+      },
+    },
+  });
 });
 
 test("expands a date-range plan and defaults max stay to zero", async () => {
