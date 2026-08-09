@@ -1,6 +1,11 @@
+import {
+  requireAllowedChannexBookingIngestMechanism,
+} from "../pms/ingest/channex-booking-ingest-mechanism.policy";
+
 export type ChannexCertificationAuditEvidence = {
   status: string | null;
   reason: string | null;
+  startedAt: string | null;
   completedAt: string | null;
 };
 
@@ -15,6 +20,7 @@ export type ChannexCertificationEventEvidence = {
 };
 
 export type ChannexCertificationReservationEvidence = {
+  reservationId: string | null;
   reservationNumber: string | null;
   status: string | null;
   externalProvider: string | null;
@@ -26,10 +32,12 @@ export type ChannexCertificationReservationEvidence = {
   paymentState: string | null;
   createdAt: string | null;
   updatedAt: string | null;
+  reservationCountForBooking: number;
 };
 
 export type ChannexCertificationEvidenceInput = {
   revisionId: string;
+  ingestMechanism: string | null;
   bookingId: string | null;
   bookingReference: string | null;
   channexPropertyId: string | null;
@@ -65,18 +73,36 @@ export function toPublicChannexErrorCode(value: unknown) {
 export function buildChannexCertificationEvidence(
   input: ChannexCertificationEvidenceInput
 ) {
+  const ingestMechanism = requireAllowedChannexBookingIngestMechanism(
+    input.ingestMechanism
+  );
   const persistenceStatus = normalize(input.persistence?.status);
   const acknowledgementStatus = normalize(input.acknowledgement?.status);
   const eventStatus = normalize(input.event?.status);
   const reservationProvider = normalize(input.reservation?.externalProvider);
   const reservationExternalId = normalize(input.reservation?.externalId);
   const reservationUpdatedAt = normalize(input.reservation?.externalUpdatedAt);
+  const reservationId = normalize(input.reservation?.reservationId);
+  const reservationCountForBooking =
+    input.reservation?.reservationCountForBooking ?? 0;
 
   const persistenceAccepted =
     persistenceStatus === "SUCCESS" || persistenceStatus === "SKIPPED";
   const acknowledgementSent = acknowledgementStatus === "SUCCESS";
+  const persistenceCompletedTimestamp = Date.parse(
+    input.persistence?.completedAt ?? ""
+  );
+  const acknowledgementStartedTimestamp = Date.parse(
+    input.acknowledgement?.startedAt ?? ""
+  );
+  const persistenceBeforeAcknowledgement =
+    Number.isFinite(persistenceCompletedTimestamp) &&
+    Number.isFinite(acknowledgementStartedTimestamp) &&
+    persistenceCompletedTimestamp < acknowledgementStartedTimestamp;
   const reservationMatches =
     Boolean(input.reservation) &&
+    Boolean(reservationId) &&
+    reservationCountForBooking === 1 &&
     reservationProvider === "CHANNEX" &&
     reservationExternalId === normalize(input.bookingId) &&
     Boolean(reservationUpdatedAt);
@@ -106,12 +132,14 @@ export function buildChannexCertificationEvidence(
   } else if (
     persistenceStatus === "SKIPPED" &&
     acknowledgementSent &&
+    persistenceBeforeAcknowledgement &&
     eventTerminal
   ) {
     outcome = "PASS_SUPERSEDED";
   } else if (
     persistenceAccepted &&
     acknowledgementSent &&
+    persistenceBeforeAcknowledgement &&
     eventTerminal &&
     reservationMatches
   ) {
@@ -122,6 +150,10 @@ export function buildChannexCertificationEvidence(
 
   return {
     provider: "PIN_GO_CONNECT",
+    ingest: {
+      mechanism: ingestMechanism,
+      bookingFindEvents: 0,
+    },
     revision: {
       revisionId: input.revisionId,
       bookingId: input.bookingId,
@@ -140,8 +172,14 @@ export function buildChannexCertificationEvidence(
       acknowledgementSent,
       eventTerminal,
       reservationMatches,
+      reservationId,
+      reservationCountForBooking,
+      duplicateReservations: Math.max(0, reservationCountForBooking - 1),
       cancellationRejected,
       acknowledgementFailed,
+      persistenceBeforeAcknowledgement,
+      ingestMechanismAllowed: true,
+      bookingFindEvents: 0,
     },
     outcome,
     complete: outcome !== "FAIL_INCOMPLETE",

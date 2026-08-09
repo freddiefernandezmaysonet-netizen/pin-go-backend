@@ -67,7 +67,9 @@ type NormalizedDeliveryInput = {
 
 type DeliveryPayloadValue = Record<string, unknown> & {
   property_id: string;
-  date: string;
+  date?: string;
+  date_from?: string;
+  date_to?: string;
 };
 
 type DeliveryPayload = {
@@ -384,10 +386,24 @@ function validateAvailabilityValue(input: {
   value: DeliveryPayloadValue;
   index: number;
   mapping: ChannexAriDeliveryMapping;
-}): string {
+}): string[] {
+  const hasDate = "date" in input.value;
+  const hasDateFrom = "date_from" in input.value;
+  const hasDateTo = "date_to" in input.value;
+
   assertExactObjectKeys(
     input.value,
-    ["property_id", "room_type_id", "date", "availability"],
+    hasDate && !hasDateFrom && !hasDateTo
+      ? ["property_id", "room_type_id", "date", "availability"]
+      : !hasDate && hasDateFrom && hasDateTo
+        ? [
+            "property_id",
+            "room_type_id",
+            "date_from",
+            "date_to",
+            "availability",
+          ]
+        : [],
     `CHANNEX_ARI_DELIVERY_AVAILABILITY_${input.index}_FIELDS_INVALID`
   );
 
@@ -409,28 +425,70 @@ function validateAvailabilityValue(input: {
     );
   }
 
-  return assertDateKey(
-    String(input.value.date ?? ""),
-    `availability_${input.index}_date`
+  if (hasDate) {
+    return [
+      assertDateKey(
+        String(input.value.date ?? ""),
+        `availability_${input.index}_date`
+      ),
+    ];
+  }
+
+  const dateFrom = assertDateKey(
+    String(input.value.date_from ?? ""),
+    `availability_${input.index}_date_from`
   );
+  const dateTo = assertDateKey(
+    String(input.value.date_to ?? ""),
+    `availability_${input.index}_date_to`
+  );
+
+  if (dateTo < dateFrom) {
+    throw new Error(
+      `CHANNEX_ARI_DELIVERY_AVAILABILITY_${input.index}_RANGE_INVALID`
+    );
+  }
+
+  return expandRange(dateFrom, addUtcDays(dateTo, 1));
 }
 
 function validateRatesRestrictionsValue(input: {
   value: DeliveryPayloadValue;
   index: number;
   mapping: ChannexAriDeliveryMapping;
-}): string {
+  syncMode: "INCREMENTAL" | "FULL";
+}): string[] {
+  const hasDate = "date" in input.value;
+  const hasDateFrom = "date_from" in input.value;
+  const hasDateTo = "date_to" in input.value;
+  const dateKeys =
+    hasDate && !hasDateFrom && !hasDateTo
+      ? ["date"]
+      : !hasDate && hasDateFrom && hasDateTo
+        ? ["date_from", "date_to"]
+        : [];
+  const baseKeys = ["property_id", "rate_plan_id", ...dateKeys];
+  const supportedChangedKeys = [
+    "rate",
+    "min_stay_arrival",
+    "min_stay_through",
+    "max_stay",
+  ];
+  const presentChangedKeys = supportedChangedKeys.filter(
+    (key) => key in input.value
+  );
+
+  if (input.syncMode === "INCREMENTAL" && presentChangedKeys.length === 0) {
+    throw new Error(
+      `CHANNEX_ARI_DELIVERY_RATES_${input.index}_CHANGED_FIELDS_REQUIRED`
+    );
+  }
+
   assertExactObjectKeys(
     input.value,
-    [
-      "property_id",
-      "rate_plan_id",
-      "date",
-      "rate",
-      "min_stay_arrival",
-      "min_stay_through",
-      "max_stay",
-    ],
+    input.syncMode === "FULL"
+      ? [...baseKeys, ...supportedChangedKeys]
+      : [...baseKeys, ...presentChangedKeys],
     `CHANNEX_ARI_DELIVERY_RATES_${input.index}_FIELDS_INVALID`
   );
 
@@ -446,36 +504,70 @@ function validateRatesRestrictionsValue(input: {
     );
   }
 
-  assertPositiveRate(input.value.rate, input.index);
-  const minStayArrival = assertPositiveInteger(
-    input.value.min_stay_arrival,
-    "MIN_STAY_ARRIVAL",
-    input.index
-  );
-  const minStayThrough = assertPositiveInteger(
-    input.value.min_stay_through,
-    "MIN_STAY_THROUGH",
-    input.index
-  );
-  const maxStay = assertNonNegativeInteger(
-    input.value.max_stay,
-    "MAX_STAY",
-    input.index
-  );
+  if ("rate" in input.value) {
+    assertPositiveRate(input.value.rate, input.index);
+  }
+  const minStayArrival =
+    "min_stay_arrival" in input.value
+      ? assertPositiveInteger(
+          input.value.min_stay_arrival,
+          "MIN_STAY_ARRIVAL",
+          input.index
+        )
+      : null;
+  const minStayThrough =
+    "min_stay_through" in input.value
+      ? assertPositiveInteger(
+          input.value.min_stay_through,
+          "MIN_STAY_THROUGH",
+          input.index
+        )
+      : null;
+  const maxStay =
+    "max_stay" in input.value
+      ? assertNonNegativeInteger(
+          input.value.max_stay,
+          "MAX_STAY",
+          input.index
+        )
+      : null;
 
   if (
+    maxStay !== null &&
     maxStay > 0 &&
-    (maxStay < minStayArrival || maxStay < minStayThrough)
+    ((minStayArrival !== null && maxStay < minStayArrival) ||
+      (minStayThrough !== null && maxStay < minStayThrough))
   ) {
     throw new Error(
       `CHANNEX_ARI_DELIVERY_MAX_STAY_${input.index}_BELOW_MINIMUM`
     );
   }
 
-  return assertDateKey(
-    String(input.value.date ?? ""),
-    `rates_${input.index}_date`
+  if (hasDate) {
+    return [
+      assertDateKey(
+        String(input.value.date ?? ""),
+        `rates_${input.index}_date`
+      ),
+    ];
+  }
+
+  const dateFrom = assertDateKey(
+    String(input.value.date_from ?? ""),
+    `rates_${input.index}_date_from`
   );
+  const dateTo = assertDateKey(
+    String(input.value.date_to ?? ""),
+    `rates_${input.index}_date_to`
+  );
+
+  if (dateTo < dateFrom) {
+    throw new Error(
+      `CHANNEX_ARI_DELIVERY_RATES_${input.index}_RANGE_INVALID`
+    );
+  }
+
+  return expandRange(dateFrom, addUtcDays(dateTo, 1));
 }
 
 function validateSnapshot(input: {
@@ -495,7 +587,7 @@ function validateSnapshot(input: {
   }
 
   const payload = getPayload(input.snapshot);
-  const payloadDates = payload.values.map((value, index) =>
+  const payloadDates = payload.values.flatMap((value, index) =>
     input.snapshot.messageKind === "AVAILABILITY"
       ? validateAvailabilityValue({
           value,
@@ -506,6 +598,7 @@ function validateSnapshot(input: {
           value,
           index,
           mapping: input.mapping,
+          syncMode: input.plan.syncMode,
         })
   );
   const canonicalPayloadDates = normalizeDateKeys(payloadDates);

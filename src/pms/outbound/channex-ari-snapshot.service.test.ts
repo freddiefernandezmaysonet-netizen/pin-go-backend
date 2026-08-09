@@ -226,6 +226,36 @@ test("serializes Revenue currency amounts as integer minor units without changin
   assert.deepEqual(mock.calls.map((call) => call.model), ["property"]);
 });
 
+test("certification #2 preserves a rate-only change through snapshot materialization", async () => {
+  const mock = createDb({
+    property: property({ minimumNights: 3, maximumNights: 14 }),
+  });
+  const selectedPlan = plan({
+    messageKind: "RATES_RESTRICTIONS",
+    dateFrom: "2026-11-01",
+    dateToExclusive: "2026-11-02",
+    dateKeys: ["2026-11-01"],
+    changedFields: ["rate"],
+  } as any);
+
+  const result = await readChannexAriSnapshot(mock.db, {
+    plan: selectedPlan,
+    mapping: mapping(),
+    calculatePricing: (async () =>
+      pricingResult([{ date: "2026-11-01", rate: 159.99 }])) as any,
+  });
+
+  assert.equal(result.messageKind, "RATES_RESTRICTIONS");
+  assert.deepEqual(result.data.payload.values, [
+    {
+      property_id: "channex-property-1",
+      rate_plan_id: "rate-plan-1",
+      date: "2026-11-01",
+      rate: 15999,
+    },
+  ]);
+});
+
 test("expands a date-range plan and defaults max stay to zero", async () => {
   const mock = createDb({
     property: property({ minimumNights: 1, maximumNights: null }),
@@ -343,6 +373,22 @@ test("rejects invalid plan and mapping alignment before database access", async 
       }),
       selectedMapping: mapping(),
       error: /CHANNEX_ARI_SNAPSHOT_FULL_PLAN_INVALID/,
+    },
+    {
+      selectedPlan: plan({
+        messageKind: "RATES_RESTRICTIONS",
+        syncMode: "FULL",
+        scope: "FULL_HORIZON",
+        dateFrom: "2026-08-01",
+        dateToExclusive: addUtcDays(
+          "2026-08-01",
+          CHANNEX_ARI_FULL_SYNC_DAYS
+        ),
+        dateKeys: [],
+        changedFields: ["rate"],
+      } as any),
+      selectedMapping: mapping(),
+      error: /CHANNEX_ARI_SNAPSHOT_FULL_CHANGED_FIELDS_NOT_ALLOWED/,
     },
   ];
 

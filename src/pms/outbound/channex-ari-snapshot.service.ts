@@ -19,6 +19,7 @@ import {
 } from "./channex-ari-lifecycle.policy";
 import {
   buildChannexAriRatesRestrictionsSnapshot,
+  type ChannexAriRatesRestrictionsChangedField,
   type ChannexAriRate,
 } from "./channex-ari-rates-restrictions-snapshot.policy";
 
@@ -145,6 +146,26 @@ function assertPlanMappingAlignment(input: {
   }
 }
 
+function resolveRatesRestrictionsChangedFields(
+  plan: ChannexAriCoalescingPlan
+): ChannexAriRatesRestrictionsChangedField[] | undefined {
+  const changedFields = (
+    plan as ChannexAriCoalescingPlan & {
+      changedFields?: ChannexAriRatesRestrictionsChangedField[];
+    }
+  ).changedFields;
+
+  if (plan.syncMode === "FULL") {
+    if (changedFields !== undefined) {
+      throw new Error("CHANNEX_ARI_SNAPSHOT_FULL_CHANGED_FIELDS_NOT_ALLOWED");
+    }
+
+    return undefined;
+  }
+
+  return changedFields;
+}
+
 function normalizeRevenueRate(value: unknown, dateKey: string): ChannexAriRate {
   let majorUnits: number;
 
@@ -191,6 +212,10 @@ export async function readChannexAriSnapshot(
   assertPlanMappingAlignment({ plan: input.plan, mapping: input.mapping });
 
   const dateKeys = resolvePlanDateKeys(input.plan);
+  const ratesRestrictionsChangedFields =
+    input.plan.messageKind === "RATES_RESTRICTIONS"
+      ? resolveRatesRestrictionsChangedFields(input.plan)
+      : undefined;
   const dateFrom = dateKeys[0];
   const dateToExclusive = addUtcDays(dateKeys[dateKeys.length - 1], 1);
   const property = await db.property.findFirst({
@@ -340,6 +365,7 @@ export async function readChannexAriSnapshot(
     data: buildChannexAriRatesRestrictionsSnapshot({
       channexPropertyId: input.mapping.channexPropertyId,
       channexRatePlanId: input.mapping.channexRatePlanId,
+      changedFields: ratesRestrictionsChangedFields,
       values,
     }),
   };

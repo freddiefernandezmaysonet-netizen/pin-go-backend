@@ -221,6 +221,26 @@ test("falls back to an incremental partition without correlation filtering", asy
   assert.equal(result.events.length, 1);
 });
 
+test("certification #2 selects persisted delta semantics when claiming the outbox", async () => {
+  const seed = event({
+    messageKind: "RATES_RESTRICTIONS",
+    changedFields: ["rate"],
+  });
+  const mock = createDb({
+    findFirstResults: [null, seed],
+    findManyResults: [[seed]],
+  });
+
+  const result = await claimNextChannexAriOutboxBatch(mock.db, {
+    claimToken: CLAIM_TOKEN,
+    now: NOW,
+  });
+
+  assert.equal(mock.calls.findFirst[1].select.changedFields, true);
+  assert.equal(mock.calls.findMany[0].select.changedFields, true);
+  assert.deepEqual(result.events[0].changedFields, ["rate"]);
+});
+
 test("rolls back selection when the seed disappears or a claim CAS loses", async () => {
   const seed = event();
   const missingSeed = createDb({

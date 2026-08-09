@@ -21,7 +21,7 @@ const VALID_ENV: NodeJS.ProcessEnv = {
   RAILWAY_SERVICE_NAME: "pin-go-channex-global-feed-staging",
   RAILWAY_SERVICE_ID: "service-global-feed",
   RAILWAY_GIT_COMMIT_SHA: "a".repeat(40),
-  RAILWAY_GIT_BRANCH: "recovery/distribution-engine-v2-channex-lifecycle",
+  RAILWAY_GIT_BRANCH: "sprint/distribution-engine-channex-outbound-ari-v1",
   RAILWAY_GIT_REPO_OWNER: "freddiefernandezmaysonet-netizen",
   RAILWAY_GIT_REPO_NAME: "pin-go-backend",
 };

@@ -15,12 +15,26 @@ export type ChannexAriAvailabilityRange = {
   endsAt: Date;
 };
 
-export type ChannexAriAvailabilityValue = {
+type ChannexAriAvailabilityValueBase = {
   property_id: string;
   room_type_id: string;
-  date: string;
   availability: 0 | 1;
 };
+
+export type ChannexAriAvailabilityValue =
+  ChannexAriAvailabilityValueBase &
+    (
+      | {
+          date: string;
+          date_from?: never;
+          date_to?: never;
+        }
+      | {
+          date?: never;
+          date_from: string;
+          date_to: string;
+        }
+    );
 
 export type ChannexAriAvailabilityPayload = {
   values: ChannexAriAvailabilityValue[];
@@ -197,7 +211,7 @@ export function buildChannexAriAvailabilitySnapshot(input: {
   ]);
   const unavailableDateKeys: string[] = [];
 
-  const values: ChannexAriAvailabilityValue[] = dateKeys.map((dateKey) => {
+  const dailyValues = dateKeys.map((dateKey) => {
     const unavailable = unavailableSet.has(dateKey);
 
     if (unavailable) {
@@ -205,12 +219,46 @@ export function buildChannexAriAvailabilitySnapshot(input: {
     }
 
     return {
-      property_id: channexPropertyId,
-      room_type_id: channexRoomTypeId,
       date: dateKey,
-      availability: unavailable ? 0 : 1,
+      availability: (unavailable ? 0 : 1) as 0 | 1,
     };
   });
+  const values: ChannexAriAvailabilityValue[] = [];
+
+  for (let index = 0; index < dailyValues.length; ) {
+    const first = dailyValues[index];
+    let lastIndex = index;
+
+    while (
+      lastIndex + 1 < dailyValues.length &&
+      dailyValues[lastIndex + 1].availability === first.availability &&
+      dailyValues[lastIndex + 1].date ===
+        addUtcDays(dailyValues[lastIndex].date, 1)
+    ) {
+      lastIndex += 1;
+    }
+
+    const identity = {
+      property_id: channexPropertyId,
+      room_type_id: channexRoomTypeId,
+    };
+
+    values.push(
+      lastIndex === index
+        ? {
+            ...identity,
+            date: first.date,
+            availability: first.availability,
+          }
+        : {
+            ...identity,
+            date_from: first.date,
+            date_to: dailyValues[lastIndex].date,
+            availability: first.availability,
+          }
+    );
+    index = lastIndex + 1;
+  }
 
   const payload: ChannexAriAvailabilityPayload = { values };
   const integrity =

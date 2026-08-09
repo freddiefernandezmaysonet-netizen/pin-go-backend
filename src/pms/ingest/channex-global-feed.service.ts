@@ -19,6 +19,10 @@ import {
   persistChannexBookingRevision,
 } from "./channex-booking-lifecycle.service";
 import {
+  requireAllowedChannexBookingIngestMechanism,
+  type ChannexBookingIngestMechanism,
+} from "./channex-booking-ingest-mechanism.policy";
+import {
   processChannexGlobalBookingRevisionFeed,
   type ChannexGlobalFeedRunResult,
   type ChannexGlobalFeedSource,
@@ -27,6 +31,8 @@ import {
 
 const CHANNEX_GLOBAL_FEED_LEASE_KEY =
   "pin-go:channex-global-booking-revision-feed:v1";
+const CHANNEX_GLOBAL_FEED_INGEST_MECHANISM =
+  requireAllowedChannexBookingIngestMechanism("BOOKING_REVISION_FEED");
 
 export type ActiveChannexConnection = {
   id: string;
@@ -76,6 +82,7 @@ export type ChannexGlobalFeedExecutionDependencies = {
     organizationId: string;
     connectionId: string;
     revision: ChannexBookingRevision;
+    ingestMechanism: ChannexBookingIngestMechanism;
   }) => Promise<PersistedRevision>;
   acknowledgeBookingRevision: (args: {
     sourceId: string;
@@ -376,6 +383,7 @@ export async function executeChannexGlobalFeedOnce(args: {
           organizationId: target.organizationId,
           connectionId: target.connectionId,
           revision,
+          ingestMechanism: CHANNEX_GLOBAL_FEED_INGEST_MECHANISM,
         });
 
         if (

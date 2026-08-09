@@ -50,6 +50,7 @@ model DistributionOutboxEvent {
   dateFrom                    DateTime?                @db.Date
   dateToExclusive             DateTime?                @db.Date
   dateKeys                    String[]                 @default([])
+  changedFields               String[]                 @default([])
   trigger                     String
   sourceEntityType            String?
   sourceEntityId              String?
