@@ -25,7 +25,7 @@ import {
 
 export type ChannexAriSnapshotDb = Pick<
   Prisma.TransactionClient,
-  "property" | "reservation" | "propertyBlockedDate"
+  "property" | "reservation" | "propertyBlockedDate" | "propertyNightlyRate"
 >;
 
 export type ReadChannexAriSnapshotInput = {
@@ -316,6 +316,27 @@ export async function readChannexAriSnapshot(
     throw new Error("CHANNEX_ARI_SNAPSHOT_MAXIMUM_NIGHTS_INVALID");
   }
 
+  const nightlyRestrictionOverrides = await db.propertyNightlyRate.findMany({
+    where: {
+      propertyId,
+      date: {
+        gte: toDatabaseDate(dateFrom),
+        lt: toDatabaseDate(dateToExclusive),
+      },
+    },
+    select: {
+      date: true,
+      minimumNights: true,
+      maximumNights: true,
+    },
+  });
+  const restrictionOverrideByDate = new Map(
+    nightlyRestrictionOverrides.map((item) => [
+      item.date.toISOString().slice(0, 10),
+      item,
+    ])
+  );
+
   const calculatePricing = input.calculatePricing ?? calculateDirectBookingPricing;
   const pricing = await calculatePricing({
     propertyId,
@@ -351,12 +372,25 @@ export async function readChannexAriSnapshot(
       throw new Error(`CHANNEX_ARI_REVENUE_DATE_MISSING:${date}`);
     }
 
+    const nightlyOverride = restrictionOverrideByDate.get(date);
+    const minimumNights = nightlyOverride?.minimumNights ?? property.minimumNights;
+    const effectiveMaximumNights =
+      nightlyOverride?.maximumNights ?? property.maximumNights ?? 0;
+
+    if (!Number.isSafeInteger(minimumNights) || minimumNights < 1) {
+      throw new Error(`CHANNEX_ARI_SNAPSHOT_MINIMUM_NIGHTS_INVALID:${date}`);
+    }
+
+    if (!Number.isSafeInteger(effectiveMaximumNights) || effectiveMaximumNights < 0) {
+      throw new Error(`CHANNEX_ARI_SNAPSHOT_MAXIMUM_NIGHTS_INVALID:${date}`);
+    }
+
     return {
       date,
       rate,
-      minStayArrival: property.minimumNights,
-      minStayThrough: property.minimumNights,
-      maxStay: maximumNights,
+      minStayArrival: minimumNights,
+      minStayThrough: minimumNights,
+      maxStay: effectiveMaximumNights,
     };
   });
 
