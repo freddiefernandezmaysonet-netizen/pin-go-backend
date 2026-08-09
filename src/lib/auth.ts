@@ -18,6 +18,13 @@ const JWT_EXPIRES_IN = (
 const AUTH_COOKIE_NAME = process.env.AUTH_COOKIE_NAME ?? "pingo_token";
 const COOKIE_DOMAIN = process.env.COOKIE_DOMAIN;
 
+type AuthCookieSameSite = "Lax" | "Strict" | "None";
+
+type AuthCookiePolicy = {
+  sameSite: AuthCookieSameSite;
+  secure: boolean;
+};
+
 function getJwtSecret() {
   const value = String(JWT_SECRET ?? "").trim();
 
@@ -31,6 +38,47 @@ function getJwtSecret() {
 function getCookieDomain() {
   const value = String(COOKIE_DOMAIN ?? "").trim();
   return value || null;
+}
+
+function resolveAuthCookieSameSite(isProd: boolean): AuthCookieSameSite {
+  const raw = String(process.env.AUTH_COOKIE_SAME_SITE ?? "").trim();
+
+  if (!raw) {
+    return isProd ? "None" : "Lax";
+  }
+
+  const normalized = raw.toLowerCase();
+
+  if (normalized === "lax") return "Lax";
+  if (normalized === "strict") return "Strict";
+  if (normalized === "none") return "None";
+
+  throw new Error("AUTH_COOKIE_SAME_SITE_INVALID");
+}
+
+function resolveAuthCookieSecure(isProd: boolean): boolean {
+  const raw = String(process.env.AUTH_COOKIE_SECURE ?? "").trim();
+
+  if (!raw) {
+    return isProd;
+  }
+
+  if (raw === "true") return true;
+  if (raw === "false") return false;
+
+  throw new Error("AUTH_COOKIE_SECURE_INVALID");
+}
+
+function resolveAuthCookiePolicy(): AuthCookiePolicy {
+  const isProd = process.env.NODE_ENV === "production";
+  const sameSite = resolveAuthCookieSameSite(isProd);
+  const secure = resolveAuthCookieSecure(isProd);
+
+  if (sameSite === "None" && !secure) {
+    throw new Error("AUTH_COOKIE_SAME_SITE_NONE_REQUIRES_SECURE");
+  }
+
+  return { sameSite, secure };
 }
 
 export function getAuthCookieName() {
@@ -141,7 +189,7 @@ export function extractTokenFromRequest(req: {
 
 export function buildAuthCookie(token: string) {
   const isProd = process.env.NODE_ENV === "production";
-  const sameSite = isProd ? "None" : "Lax";
+  const { sameSite, secure } = resolveAuthCookiePolicy();
   const cookieDomain = getCookieDomain();
 
   const parts = [
@@ -152,7 +200,7 @@ export function buildAuthCookie(token: string) {
     `Max-Age=${7 * 24 * 60 * 60}`,
   ];
 
-  if (isProd) {
+  if (secure) {
     parts.push("Secure");
   }
 
@@ -165,7 +213,7 @@ export function buildAuthCookie(token: string) {
 
 export function buildClearAuthCookie() {
   const isProd = process.env.NODE_ENV === "production";
-  const sameSite = isProd ? "None" : "Lax";
+  const { sameSite, secure } = resolveAuthCookiePolicy();
   const cookieDomain = getCookieDomain();
 
   const parts = [
@@ -176,7 +224,7 @@ export function buildClearAuthCookie() {
     "Max-Age=0",
   ];
 
-  if (isProd) {
+  if (secure) {
     parts.push("Secure");
   }
 
