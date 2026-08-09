@@ -50,6 +50,15 @@ export type SendChannexAriHttpRequestResult = {
 
 type UnknownRecord = Record<string, unknown>;
 
+const SENSITIVE_RESPONSE_HEADER_NAMES = new Set([
+  "authorization",
+  "proxy-authorization",
+  "cookie",
+  "set-cookie",
+  "user-api-key",
+  "x-api-key",
+]);
+
 function asRecord(value: unknown): UnknownRecord | null {
   if (!value || typeof value !== "object" || Array.isArray(value)) return null;
   return value as UnknownRecord;
@@ -98,7 +107,7 @@ function normalizeBaseUrl(value?: string): string {
     throw new Error("CHANNEX_ARI_HTTP_BASE_URL_INVALID");
   }
 
-  if (!['http:', 'https:'].includes(parsed.protocol)) {
+  if (!["http:", "https:"].includes(parsed.protocol)) {
     throw new Error("CHANNEX_ARI_HTTP_BASE_URL_INVALID");
   }
 
@@ -175,6 +184,76 @@ function getHeader(headers: unknown, name: string): string | null {
   return null;
 }
 
+function headerSource(headers: unknown): UnknownRecord | null {
+  if (!headers) return null;
+
+  const toJson = (headers as { toJSON?: unknown }).toJSON;
+
+  if (typeof toJson === "function") {
+    const serialized = toJson.call(headers);
+    const record = asRecord(serialized);
+    if (record) return record;
+  }
+
+  return asRecord(headers);
+}
+
+function serializeHeaderValue(value: unknown): string | null {
+  if (
+    value == null ||
+    typeof value === "function" ||
+    typeof value === "symbol"
+  ) {
+    return null;
+  }
+  if (Array.isArray(value)) {
+    const normalized = value.map((item) => String(item)).join(", ").trim();
+    return normalized || null;
+  }
+
+  if (typeof value === "object") {
+    try {
+      const normalized = JSON.stringify(value);
+      return normalized || null;
+    } catch {
+      return "[unserializable]";
+    }
+  }
+
+  return asString(value);
+}
+
+function sanitizeResponseHeaders(headers: unknown): Record<string, string> {
+  const source = headerSource(headers);
+  if (!source) return {};
+
+  const sanitized: Record<string, string> = {};
+
+  for (const [key, value] of Object.entries(source)) {
+    const normalizedKey = key.trim().toLowerCase();
+    if (!normalizedKey || SENSITIVE_RESPONSE_HEADER_NAMES.has(normalizedKey)) {
+      continue;
+    }
+
+    const normalizedValue = serializeHeaderValue(value);
+    if (normalizedValue) sanitized[normalizedKey] = normalizedValue;
+  }
+
+  return sanitized;
+}
+
+function serializeRawResponseText(value: unknown): string {
+  if (typeof value === "string") return value;
+  if (value === undefined) return "";
+
+  try {
+    const serialized = JSON.stringify(value);
+    return serialized === undefined ? "" : serialized;
+  } catch {
+    return "[unserializable response body]";
+  }
+}
+
 function normalizeHttpStatus(value: unknown): number {
   const status = Number(value);
 
@@ -215,7 +294,21 @@ function responseRoots(body: unknown): UnknownRecord[] {
 }
 
 function extractTaskId(body: unknown): string | null {
+  const bodyRecord = asRecord(body);
+  const data = bodyRecord?.data;
   const roots = responseRoots(body);
+
+  const arrayTaskId = Array.isArray(data)
+    ? firstString(
+        ...data
+          .map((item) => asRecord(item))
+          .filter((item): item is UnknownRecord => Boolean(item))
+          .filter(
+            (item) => asString(item.type)?.toLowerCase() === "task"
+          )
+          .map((item) => item.id)
+      )
+    : null;
 
   return firstString(
     ...roots.flatMap((root) => [
@@ -224,7 +317,8 @@ function extractTaskId(body: unknown): string | null {
       root.task_uuid,
       root.taskUuid,
     ]),
-    asRecord(asRecord(body)?.data)?.id
+    asRecord(data)?.id,
+    arrayTaskId
   );
 }
 
@@ -243,6 +337,23 @@ function countContainer(value: unknown): number {
   return record ? Object.keys(record).length : 0;
 }
 
+// CHANNEX_ARI_BENIGN_SINGULAR_WARNING_FIX_V1
+
+function countWarningEvidence(input: {
+  key: string;
+  value: unknown;
+}): number {
+  if (
+    input.key === "warning" &&
+    typeof input.value === "string" &&
+    input.value.trim().toLowerCase() === "success"
+  ) {
+    return 0;
+  }
+
+  return countContainer(input.value);
+}
+
 function extractWarningCount(body: unknown): number {
   const counts: number[] = [];
 
@@ -255,7 +366,12 @@ function extractWarningCount(body: unknown): number {
       "rejected_values",
       "rejectedValues",
     ]) {
-      counts.push(countContainer(root[key]));
+      counts.push(
+        countWarningEvidence({
+          key,
+          value: root[key],
+        })
+      );
     }
   }
 
@@ -325,6 +441,8 @@ function buildHttpEvidence(input: {
     getHeader(input.response.headers, "cf-ray")
   );
   const warningCount = extractWarningCount(input.response.data);
+  const responseHeaders = sanitizeResponseHeaders(input.response.headers);
+  const rawResponseText = serializeRawResponseText(input.response.data);
 
   return {
     httpStatus,
@@ -346,6 +464,9 @@ function buildHttpEvidence(input: {
       payloadBytes: input.payloadBytes,
       responseDataType: responseDataType(input.response.data),
       retryAfterHeaderPresent: Boolean(retryAfterHeader),
+      receivedAt: input.receivedAt.toISOString(),
+      responseHeaders,
+      rawResponseText,
       ...(requestId ? { requestId } : {}),
     },
   };
