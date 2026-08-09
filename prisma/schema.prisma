@@ -41,17 +41,17 @@ model Organization {
 model DashboardUser {
   id                  String               @id @default(cuid())
   organizationId      String
-  email                String               @unique
-  passwordHash         String
-  fullName             String?
-  role                 DashboardUserRole    @default(ORG_ADMIN)
+  email               String               @unique
+  passwordHash        String
+  fullName            String?
+  role                DashboardUserRole    @default(ORG_ADMIN)
   isActive             Boolean              @default(true)
   lastLoginAt          DateTime?
   createdAt            DateTime             @default(now())
   updatedAt            DateTime             @updatedAt
   tokenVersion         Int                  @default(0)
   organization         Organization         @relation(fields: [organizationId], references: [id], onDelete: Cascade)
-  passwordResetTokens  PasswordResetToken[]
+  passwordResetTokens PasswordResetToken[]
   passwordResetSmsCodes PasswordResetSmsCode[]
 
   @@index([organizationId, isActive])
@@ -166,18 +166,18 @@ model Property {
 }
 
 model PropertyNightlyRate {
-  id            String   @id @default(cuid())
-  propertyId    String
-  property      Property @relation(fields: [propertyId], references: [id])
+  id         String   @id @default(cuid())
+  propertyId String
+  property   Property @relation(fields: [propertyId], references: [id])
 
-  date          DateTime
-  rate          Decimal  @db.Decimal(10, 2)
+  date       DateTime
+  rate       Decimal  @db.Decimal(10, 2)
   minimumNights Int?
   maximumNights Int?
-  reason        String?
+  reason     String?
 
-  createdAt     DateTime @default(now())
-  updatedAt     DateTime @updatedAt
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
 
   @@unique([propertyId, date])
   @@index([propertyId, date])
@@ -1075,7 +1075,7 @@ model OnboardingAppointment {
   email           String
   phone           String?
   topic           String?
-  status           String   @default("REQUESTED")
+n  status          String   @default("REQUESTED")
   googleEventId   String?
   googleMeetLink             String?
   remoteAssistanceRequested  Boolean  @default(false)
