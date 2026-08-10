@@ -67,7 +67,7 @@ function createDb(input: {
   property?: any;
   reservations?: any[];
   blockedDates?: any[];
-  nightlyRates?: any[];
+  nightlyRestrictions?: any[];
 } = {}) {
   const calls: Array<{ model: string; args: any }> = [];
 
@@ -91,10 +91,10 @@ function createDb(input: {
           return input.blockedDates ?? [];
         },
       },
-      propertyNightlyRate: {
+      propertyNightlyRestriction: {
         findMany: async (args: any) => {
-          calls.push({ model: "nightlyRate", args });
-          return input.nightlyRates ?? [];
+          calls.push({ model: "nightlyRestriction", args });
+          return input.nightlyRestrictions ?? [];
         },
       },
     } as any,
@@ -232,7 +232,7 @@ test("serializes Revenue currency amounts as integer minor units without changin
   ]);
   assert.deepEqual(mock.calls.map((call) => call.model), [
     "property",
-    "nightlyRate",
+    "nightlyRestriction",
   ]);
 });
 
@@ -269,7 +269,7 @@ test("certification #2 preserves a rate-only change through snapshot materializa
 test("resolves nightly stay restriction overrides by date with property fallback", async () => {
   const mock = createDb({
     property: property({ minimumNights: 2, maximumNights: 14 }),
-    nightlyRates: [
+    nightlyRestrictions: [
       {
         date: new Date("2026-08-01T00:00:00.000Z"),
         minimumNights: 3,
@@ -321,7 +321,7 @@ test("resolves nightly stay restriction overrides by date with property fallback
     },
   ]);
   assert.deepEqual(mock.calls[1], {
-    model: "nightlyRate",
+    model: "nightlyRestriction",
     args: {
       where: {
         propertyId: "property-1",
