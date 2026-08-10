@@ -1,13 +1,9 @@
 import { Router } from "express";
-import { PrismaClient } from "@prisma/client";
+import type { PrismaClient } from "@prisma/client";
 
 import { requireAuth } from "../middleware/requireAuth";
 import { createChannexAriOutboxEvent } from "../pms/outbound/channex-ari-outbox.service";
 import type { ChannexAriRatesRestrictionsChangedField } from "../pms/outbound/channex-ari-rates-restrictions-snapshot.policy";
-
-const prisma = new PrismaClient();
-
-export const dashboardCalendarOverridesRouter = Router();
 
 type NormalizedCalendarOverride = {
   dateKey: string;
@@ -68,7 +64,10 @@ function calendarOverrideShape(input: {
     .join("|");
 }
 
-dashboardCalendarOverridesRouter.put(
+export function buildDashboardCalendarOverridesRouter(prisma: PrismaClient) {
+const router = Router();
+
+router.put(
   "/api/dashboard/properties/:id/calendar-overrides",
   requireAuth,
   async (req, res) => {
@@ -423,3 +422,6 @@ dashboardCalendarOverridesRouter.put(
     }
   }
 );
+
+return router;
+}
