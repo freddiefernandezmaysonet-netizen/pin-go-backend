@@ -25,7 +25,7 @@ import {
 
 export type ChannexAriSnapshotDb = Pick<
   Prisma.TransactionClient,
-  "property" | "reservation" | "propertyBlockedDate" | "propertyNightlyRate"
+  "property" | "reservation" | "propertyBlockedDate" | "propertyNightlyRestriction"
 >;
 
 export type ReadChannexAriSnapshotInput = {
@@ -316,7 +316,7 @@ export async function readChannexAriSnapshot(
     throw new Error("CHANNEX_ARI_SNAPSHOT_MAXIMUM_NIGHTS_INVALID");
   }
 
-  const nightlyRestrictionOverrides = await db.propertyNightlyRate.findMany({
+  const nightlyRestrictionOverrides = await db.propertyNightlyRestriction.findMany({
     where: {
       propertyId,
       date: {
