@@ -152,6 +152,7 @@ model Property {
   amenities                  PropertyAmenity[]
   taxes                      PropertyTax[]
   nightlyRates               PropertyNightlyRate[]
+  nightlyRestrictions        PropertyNightlyRestriction[]
   seasons                    PropertySeason[]
   holidayPricings            PropertyHolidayPricing[]
   reservations               Reservation[]
@@ -172,12 +173,27 @@ model PropertyNightlyRate {
 
   date       DateTime
   rate       Decimal  @db.Decimal(10, 2)
-  minimumNights Int?
-  maximumNights Int?
   reason     String?
 
   createdAt  DateTime @default(now())
   updatedAt  DateTime @updatedAt
+
+  @@unique([propertyId, date])
+  @@index([propertyId, date])
+}
+
+model PropertyNightlyRestriction {
+  id            String   @id @default(cuid())
+  propertyId    String
+  date          DateTime
+  minimumNights Int?
+  maximumNights Int?
+  source        String   @default("MANUAL")
+  reason        String?
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  property Property @relation(fields: [propertyId], references: [id], onDelete: Cascade)
 
   @@unique([propertyId, date])
   @@index([propertyId, date])
