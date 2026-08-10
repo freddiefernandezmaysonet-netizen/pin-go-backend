@@ -54,6 +54,20 @@ function parsePositiveInteger(value: unknown): number | null {
   return parsed;
 }
 
+function calendarOverrideShape(input: {
+  hasRate: boolean;
+  hasMinimumNights: boolean;
+  hasMaximumNights: boolean;
+}): string {
+  return [
+    input.hasRate ? "rate" : "",
+    input.hasMinimumNights ? "minimumNights" : "",
+    input.hasMaximumNights ? "maximumNights" : "",
+  ]
+    .filter(Boolean)
+    .join("|");
+}
+
 dashboardCalendarOverridesRouter.put(
   "/api/dashboard/properties/:id/calendar-overrides",
   requireAuth,
@@ -108,6 +122,7 @@ dashboardCalendarOverridesRouter.put(
       const normalized: NormalizedCalendarOverride[] = [];
       const seenDateKeys = new Set<string>();
       const changedFields = new Set<ChannexAriRatesRestrictionsChangedField>();
+      let expectedShape: string | null = null;
 
       for (const rawItem of overrides) {
         const parsedDate = parseDateKey(rawItem?.date);
@@ -139,6 +154,22 @@ dashboardCalendarOverridesRouter.put(
           });
         }
 
+        const currentShape = calendarOverrideShape({
+          hasRate,
+          hasMinimumNights,
+          hasMaximumNights,
+        });
+
+        if (expectedShape === null) {
+          expectedShape = currentShape;
+        } else if (currentShape !== expectedShape) {
+          return res.status(400).json({
+            ok: false,
+            error:
+              "All calendar overrides in one operation must include the same fields",
+          });
+        }
+
         let rate: number | null = null;
         let minimumNights: number | null = null;
         let maximumNights: number | null = null;
@@ -146,7 +177,7 @@ dashboardCalendarOverridesRouter.put(
         if (hasRate) {
           rate = Number(rawItem.rate);
 
-          if (!Number.isFinite(rate) || rate < 0) {
+          if (!Number.isFinite(rate) || rate <= 0) {
             return res.status(400).json({
               ok: false,
               error: `Invalid rate for ${parsedDate.dateKey}`,
