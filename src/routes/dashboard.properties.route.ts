@@ -3863,19 +3863,52 @@ dashboardPropertiesRouter.post(
           `distribution-enablement:${property.id}:${crypto.randomUUID()}`;
 
         const updated = await prisma.$transaction(async (tx) => {
-          await createChannexAriOutboxEvent(tx, {
-            organizationId: orgId,
-            propertyId: property.id,
-            messageKind: "AVAILABILITY",
-            syncMode: "FULL",
-            trigger: "DISTRIBUTION_ENABLEMENT",
-            sourceEntityType: "PROPERTY",
-            sourceEntityId: property.id,
-            correlationId: fullSyncCorrelationId,
-            todayDateKey,
-            now: mutationAt,
-            coalesceMs: 0,
-          });
+          const existingAriState =
+            await tx.channexAriPropertyState.findUnique({
+              where: { propertyId: property.id },
+              select: {
+                organizationId: true,
+                lastFullSyncRequestedAt: true,
+              },
+            });
+
+          if (
+            existingAriState &&
+            existingAriState.organizationId !== orgId
+          ) {
+            throw new Error(
+              "CHANNEX_ARI_PROPERTY_STATE_TENANT_MISMATCH"
+            );
+          }
+
+         const fullSyncGuardMs = 24 * 60 * 60 * 1000;
+
+           if (existingAriState?.lastFullSyncRequestedAt) {
+             const retryAt = new Date(
+               existingAriState.lastFullSyncRequestedAt.getTime() +
+                 fullSyncGuardMs
+              );
+
+              if (retryAt.getTime() > mutationAt.getTime()) {
+                 throw new Error(
+                   "CHANNEX_ARI_FULL_SYNC_GUARD_ACTIVE"
+               );
+             }
+           }
+
+           await createChannexAriOutboxEvent(tx, {
+           organizationId: orgId,
+           propertyId: property.id,
+           messageKind: "AVAILABILITY",
+           syncMode: "FULL",
+           trigger: "DISTRIBUTION_ENABLEMENT",
+           sourceEntityType: "PROPERTY",
+           sourceEntityId: property.id,
+           correlationId: fullSyncCorrelationId,
+           todayDateKey,
+           now: mutationAt,
+           coalesceMs: 0,
+         });
 
           await createChannexAriOutboxEvent(tx, {
             organizationId: orgId,
@@ -3890,21 +3923,6 @@ dashboardPropertiesRouter.post(
             now: mutationAt,
             coalesceMs: 0,
           });
-
-          const existingAriState =
-            await tx.channexAriPropertyState.findUnique({
-              where: { propertyId: property.id },
-              select: { organizationId: true },
-            });
-
-          if (
-            existingAriState &&
-            existingAriState.organizationId !== orgId
-          ) {
-            throw new Error(
-              "CHANNEX_ARI_PROPERTY_STATE_TENANT_MISMATCH"
-            );
-          }
 
           await tx.channexAriPropertyState.upsert({
             where: { propertyId: property.id },
