@@ -52,6 +52,7 @@ the current official Channex contract, Channex wins.
 | `CODE_PASS` | The current HEAD implementation is covered by passing automated tests. |
 | `MOCK_PASS` | The current HEAD produces the expected local contract without a Channex call. |
 | `STAGING_EVIDENCE_IMPORTED` | Sanitized evidence from the exact current HEAD and frozen mapping is present in this ledger. |
+| `STAGING_EVIDENCE_SOURCE_SHA_PENDING` | Sanitized staging evidence is imported, but the exact deployed source SHA at execution time is not yet proven. |
 | `PASS_BY_CHANNEX_EMAIL` | Channex explicitly accepted the result in the rejection email. |
 | `SKIPPED_BY_CHANNEX_EMAIL` | Channex explicitly accepted omission of the test in the rejection email. |
 | `UI_EXECUTION_CONFIRMED_EVIDENCE_PENDING` | The user confirmed execution from the staging UI, but exact Task/request evidence is not yet stored in the repository. |
@@ -119,26 +120,88 @@ database migration state.
 ## Rejection regression matrix
 
 The user confirmed that the certification steps were recreated from the real
-Pin&Go staging UI. This closes the question of whether the work was merely a
-Postman or manual-script simulation. The exact sanitized request/Task evidence
-from those UI executions has not yet been imported into the repository, so the
-rows remain `UI_EXECUTION_CONFIRMED_EVIDENCE_PENDING` rather than PASS or FAIL.
+Pin&Go staging UI. Sanitized ARI delivery and booking lifecycle evidence was
+then imported read-only from `Postgres-Staging` on 2026-08-11. The source SHA
+active for each 2026-08-09/10 execution is not directly persisted in those
+records, so imported rows remain `STAGING_EVIDENCE_SOURCE_SHA_PENDING` rather
+than `STAGING_EVIDENCE_IMPORTED` or external PASS.
 
 | Test | Channex contract / rejection result | Current HEAD local evidence | Staging/Channex evidence status | Required closure evidence |
 | --- | --- | --- | --- | --- |
 | #1 Full Data Update | 500 days; exactly one Availability and one Rates & Restrictions request. Rejection email: passed. | `CODE_PASS`, `MOCK_PASS` | `PASS_BY_CHANNEX_EMAIL`; new execution evidence not imported | Preserve accepted Task/request IDs if available; do not repeat unless Channex requires it. |
-| #2 Single Date / Single Rate | One `2026-11-22` rate delta for the frozen rate plan; no unrelated restrictions. Rejection warned that the old request was snapshot-shaped. | `CODE_PASS`, `MOCK_PASS` | `UI_EXECUTION_CONFIRMED_EVIDENCE_PENDING` | Exact `/api/v1/restrictions` body, request ID, Task ID/2xx response, warnings=0 and verification. |
+| #2 Single Date / Single Rate | One `2026-11-22` rate delta for the frozen rate plan; no unrelated restrictions. Rejection warned that the old request was snapshot-shaped. | `CODE_PASS`, `MOCK_PASS` | `STAGING_EVIDENCE_SOURCE_SHA_PENDING`; corrected rate-only request imported | Prove deployed source SHA and resulting Channex value; exclude the older snapshot-shaped attempt. |
 | #3 Single Date / Multiple Rates | Rejection email accepted omission because Pin&Go has one room type/rate plan. | Contract fixture present | `SKIPPED_BY_CHANNEX_EMAIL` | Preserve the rejection email as skip authority. |
-| #4 Multiple Date Update | Mandatory for vacation rentals; one rate update for `2026-11-01..2026-11-10` on the single rate plan. | `CODE_PASS`, `MOCK_PASS` | `UI_EXECUTION_CONFIRMED_EVIDENCE_PENDING` | One exact request, compacted inclusive range, request/Task evidence, warnings=0 and no extra call. |
-| #5 Min Stay | Mandatory because Pin&Go supports Min Stay; one update for `2026-11-23` on the single rate plan. | `CODE_PASS`, `MOCK_PASS` | `UI_EXECUTION_CONFIRMED_EVIDENCE_PENDING` | Exact changed Min Stay fields only, frozen rate plan, request/Task evidence and verification. |
+| #4 Multiple Date Update | Mandatory for vacation rentals; one rate update for `2026-11-01..2026-11-10` on the single rate plan. | `CODE_PASS`, `MOCK_PASS` | `STAGING_EVIDENCE_SOURCE_SHA_PENDING`; one rate-only range request imported | Prove deployed source SHA and resulting Channex values. |
+| #5 Min Stay | Mandatory because Pin&Go supports Min Stay; one update for `2026-11-23` on the single rate plan. | `CODE_PASS`, `MOCK_PASS` | `STAGING_EVIDENCE_SOURCE_SHA_PENDING`; Min Stay-only request imported | Prove deployed source SHA and resulting Channex values. |
 | #6 Stop Sell | Rejection email accepted omission because Pin&Go does not support Stop Sell. | Contract fixture present | `SKIPPED_BY_CHANNEX_EMAIL` | Preserve the rejection email as skip authority. |
-| #7 Multiple Restrictions | Mandatory for Pin&Go's supported restriction subset; one request for the single rate plan. | `CODE_PASS`, `MOCK_PASS` | `UI_EXECUTION_CONFIRMED_EVIDENCE_PENDING` | Exact supported fields requested from the UI, no falsely declared CTA/CTD/Stop Sell, request/Task evidence and verification. |
-| #8 Half-year Update | One update covering `2026-12-01..2027-05-01` for the single rate plan. | `CODE_PASS`, `MOCK_PASS` | `UI_EXECUTION_CONFIRMED_EVIDENCE_PENDING` | Exact compacted inclusive range, rate/Min Stay fields, request/Task evidence, warnings=0 and no extra call. |
-| #9 Single Date Availability | Frozen Room Type; vacation-rental value accepted by the rejection feedback as `1` or hotel scenario value `7`, never the prior wrong mapping. | `CODE_PASS`, `MOCK_PASS` with availability `1` | `UI_EXECUTION_CONFIRMED_EVIDENCE_PENDING` | Exact `/api/v1/availability` body, frozen Room Type, official date/value, request/Task evidence and verification. |
-| #10 Multiple Date Availability | Frozen Room Type; merged `date_from/date_to` sequence, not repeated single-date objects. | `CODE_PASS`, `MOCK_PASS` with `2026-11-10..2026-11-16`, availability `1` | `UI_EXECUTION_CONFIRMED_EVIDENCE_PENDING` | Exact compacted body, request/Task evidence, warnings=0 and verification. |
-| #11 Booking Receiving | NEW/MODIFICATION/CANCELLATION through webhook/Booking Revision Feed; persist before ACK; no Booking Find. | `CODE_PASS`, `MOCK_PASS` | `UI_EXECUTION_CONFIRMED_EVIDENCE_PENDING`; historical Feed PASS exists on older commit | Three new revision IDs, webhook delivery `notes.success=true`, one stable booking/reservation identity, persistence/ACK timestamps, ACK success and `booking_find=0`. |
+| #7 Multiple Restrictions | Mandatory for Pin&Go's supported restriction subset; one request for the single rate plan. | `CODE_PASS`, `MOCK_PASS` | `STAGING_EVIDENCE_SOURCE_SHA_PENDING`; exact supported restriction subset imported | Prove deployed source SHA and resulting Channex values. |
+| #8 Half-year Update | One update covering `2026-12-01..2027-05-01` for the single rate plan. | `CODE_PASS`, `MOCK_PASS` | `STAGING_EVIDENCE_SOURCE_SHA_PENDING`; exact half-year request imported | Prove deployed source SHA and resulting Channex values. |
+| #9 Single Date Availability | Frozen Room Type; vacation-rental value accepted by the rejection feedback as `1` or hotel scenario value `7`, never the prior wrong mapping. | `CODE_PASS`, `MOCK_PASS` with availability `1` | `STAGING_EVIDENCE_SOURCE_SHA_PENDING`; exact date/value/mapping imported | Prove deployed source SHA and resulting Channex value. |
+| #10 Multiple Date Availability | Frozen Room Type; merged `date_from/date_to` sequence, not repeated single-date objects. | `CODE_PASS`, `MOCK_PASS` with `2026-11-10..2026-11-16`, availability `1` | `STAGING_EVIDENCE_SOURCE_SHA_PENDING`; final corrected compacted request imported | Prove deployed source SHA and resulting Channex values; exclude earlier availability-zero attempts. |
+| #11 Booking Receiving | NEW/MODIFICATION/CANCELLATION through webhook/Booking Revision Feed; persist before ACK; no Booking Find. | `CODE_PASS`, `MOCK_PASS` | Partial staging evidence imported: three Feed revisions, one reservation, persist-before-ACK and `booking_find=0`; `notes.success` and explicit lifecycle labels remain `NO_CONFIRMADO` | Obtain Channex delivery `notes.success=true`, direct NEW/MOD/CANCEL classification, source SHA and PMS screenshot. |
 | #12 Rate Limits | 10 Restrictions/min/property, 10 Availability/min/property, 20 ARI total; queue, batching and exponential backoff. | `CODE_PASS`, `MOCK_PASS` | Current workflow tests PASS; real load test not required by the form unless Channex requests it | Current limiter/queue evidence and affirmative form response. |
 | #13 Update Logic | Change-only normal updates; no timer Full Sync; Full Sync no more than once per 24 hours when required. | `CODE_PASS`, `MOCK_PASS` | Current workflow tests PASS | Outbox delta evidence and 24-hour Full Sync policy evidence. |
+
+## Imported staging evidence — 2026-08-09/10 UI executions
+
+Source: read-only SQL in Railway `staging-channex-certification` /
+`Postgres-Staging`, collected 2026-08-11. Frozen property, Channex property,
+Room Type and Rate Plan IDs matched the manifest. Every listed ARI delivery was
+`SENT`, HTTP 200, with warning count 0.
+
+| Test | Delivery ID | Attempt ID | Request ID | Channex Task ID | Sanitized exact values |
+| --- | --- | --- | --- | --- | --- |
+| #2 corrected | `cmsm2im280000p3gi3zabwywi` | `cmsm2tyfb0001p3qwb72diyhd` | `GMozOnejTzv7HicBFsMB` | `507ca70e-9265-4b2e-8125-a7426483f3d1` | `date=2026-11-22`, `rate=33300`; no restriction fields |
+| #4 | `cmsm3fin30000p30uycbaysgf` | `cmsm3j7dh0001p35kf1dklvuc` | `GMo0TL1PMTXiz1IBGPfh` | `dfdb43b6-5685-494d-b278-00a1f582be7f` | `date_from=2026-11-01`, `date_to=2026-11-10`, `rate=24100` |
+| #5 | `cmsncuagv0000lb18fbvto30t` | `cmsncuai10002lb18xa154l31` | `GMp5gycvZscjtSwAJYXh` | `0597e4e5-6661-44a8-a090-1211d6633c5a` | `date=2026-11-23`, `min_stay_arrival=3`, `min_stay_through=3` only |
+| #7 | `cmsnf48vc0000pj18komptqmw` | `cmsnf49080002pj18kf3cnpjo` | `GMp8_XgjOi3ZtVwAMSWB` | `7ee8acc2-bf07-42df-8054-2b392572ca08` | `2026-11-01..2026-11-10`, Min Stay `1`, Max Stay `4`; no rate/CTA/CTD/Stop Sell |
+| #8 | `cmsngc7m50000s218vo7231cc` | `cmsngc7o50002s218qtgjvuuw` | `GMp-2wcvzFA00o8ANzch` | `967e0b74-5aea-469f-8bda-ec6dfe24b2fc` | `2026-12-01..2027-05-01`, `rate=43200`, Min Stay `2` |
+| #9 | `cmsnk1yii0000om18054ywjbv` | `cmsnk1ym00002om18ay37ug5a` | `GMqEh-5ak0uwyt8AS3qB` | `7cfe7ea9-d6b6-4889-98f8-32db796fe51c` | `date=2026-11-21`, `availability=1`, frozen Room Type |
+| #10 corrected | `cmsnmmxof0000t6183ijo7o9l` | `cmsnmmxsq0002t61844buz6aj` | `GMqIefBNzBW9aooAUlwh` | `0bb3db50-498a-4cc8-bce1-00aeb7cd1050` | one merged range `2026-11-10..2026-11-16`, `availability=1`, frozen Room Type |
+
+An older #2 delivery from 2026-08-07 carried `max_stay` and Min Stay fields
+and must not be submitted as the corrected delta. Earlier #10 attempts carried
+availability `0`; only the final corrected delivery above matches the frozen
+scenario. No evidence row is promoted to external PASS without Channex review.
+
+### Imported booking lifecycle evidence
+
+```text
+Channex booking ID: 10f76863-615f-4780-9c2e-23b0e78c4c93
+Pin&Go reservation: cmsnnsf670002rv18wnq4ykg6 / PG-2026-000004
+Reservation count for booking: 1
+Final reservation status: CANCELLED
+Ingest mechanism for all three revisions: BOOKING_REVISION_FEED
+Event status for all three revisions: PROCESSED
+Persist audit status for all three revisions: SUCCESS
+ACK audit status for all three revisions: SUCCESS
+booking_find matches in ApmsAuditEntry: 0
+booking_find matches in WebhookEventIngest: 0
+
+Revision 18a424dc-7cdd-4308-97b0-fcaf09251591
+  persistence completed: 2026-08-10 20:03:15.064 UTC
+  ACK started:           2026-08-10 20:03:15.076 UTC
+  ACK completed:         2026-08-10 20:03:15.298 UTC
+  persistence before ACK: 12 ms
+
+Revision 341565e3-f86c-4a33-acf8-ee9df5b1bff3
+  persistence completed: 2026-08-10 20:22:15.843 UTC
+  ACK started:           2026-08-10 20:22:15.853 UTC
+  ACK completed:         2026-08-10 20:22:16.070 UTC
+  persistence before ACK: 10 ms
+
+Revision b72b71d8-aec0-459d-887a-d52f271e91d5
+  persistence completed: 2026-08-10 20:27:16.039 UTC
+  ACK started:           2026-08-10 20:27:16.050 UTC
+  ACK completed:         2026-08-10 20:27:16.249 UTC
+  persistence before ACK: 11 ms
+```
+
+The sequence is consistent with NEW, MODIFICATION and CANCELLATION because one
+reservation was created, updated and finally cancelled. The lifecycle label is
+not stored directly in the imported rows, so that classification remains an
+inference. Channex webhook delivery `notes.success=true` is also not stored in
+Postgres and remains `NO_CONFIRMADO`.
 
 ## Historical staging evidence retained
 
