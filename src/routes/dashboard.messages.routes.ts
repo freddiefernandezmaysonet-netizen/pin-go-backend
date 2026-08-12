@@ -43,6 +43,39 @@ function isNonRetryableSmsError(value: unknown) {
   );
 }
 
+function getMessageReadModel(channel: string, body: string) {
+  const fallback = {
+    subject: null,
+    messageType: null,
+    displayBody: body,
+  };
+
+  if (channel !== "email") {
+    return fallback;
+  }
+
+  try {
+    const parsed = JSON.parse(body);
+
+    if (parsed?.kind !== "PIN_GO_EMAIL_DELIVERY") {
+      return fallback;
+    }
+
+    const subject =
+      typeof parsed.subject === "string" && parsed.subject.trim() ? parsed.subject : null;
+    const messageType =
+      typeof parsed.type === "string" && parsed.type.trim() ? parsed.type : null;
+
+    return {
+      subject,
+      messageType,
+      displayBody: subject ?? body,
+    };
+  } catch {
+    return fallback;
+  }
+}
+
 // =======================
 // GET messages
 // =======================
@@ -127,6 +160,7 @@ router.get("/messages", requireOrg(prisma), async (req, res) => {
 
     res.json({
       items: items.map((item) => {
+        const readModel = getMessageReadModel(item.channel, item.body);
         const resolvedPropertyId =
           item.propertyId ?? item.accessGrant?.reservation?.propertyId ?? null;
 
@@ -141,6 +175,9 @@ router.get("/messages", requireOrg(prisma), async (req, res) => {
           provider: item.provider,
           to: item.to,
           body: item.body,
+          subject: readModel.subject,
+          messageType: readModel.messageType,
+          displayBody: readModel.displayBody,
           status: item.status,
           error: item.error ?? null,
           retryCount: item.retryCount,
