@@ -40,8 +40,9 @@ function buildGoogleMapsLink(input: {
   String(input.region ?? "").toLowerCase().includes("puerto rico") ||
   String(input.country ?? "").toLowerCase() === "puerto rico";
 
-const addressParts = [
-  input.address1,
+const formattedAddress = String(input.address1 ?? "").trim();
+
+const fallbackAddressParts = [
   input.city,
   input.region,
   isPuertoRico ? null : input.country,
@@ -51,7 +52,8 @@ const addressParts = [
     .map((part) => String(part).trim())
     .filter(Boolean);
 
-  const address = addressParts.length > 0 ? addressParts.join(", ") : null;
+  const address = formattedAddress ||
+    (fallbackAddressParts.length > 0 ? fallbackAddressParts.join(", ") : null);
 
   // 🔧 parsing más tolerante
   const lat =
