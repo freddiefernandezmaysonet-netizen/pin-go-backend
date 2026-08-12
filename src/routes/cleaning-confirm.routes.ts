@@ -26,6 +26,14 @@ function sendCleaningNfcDisabledResponse(
   );
 }
 
+function sendExpiredCleaningRequestResponse(
+  res: any
+) {
+  return res.status(410).send(
+    "This cleaning request is no longer active because Pin&Go assigned it to another cleaner. No action is required."
+  );
+}
+
 async function loadConfirmationData(token: string) {
   const confirmation = await prisma.cleaningConfirmation.findUnique({
     where: { token },
@@ -141,6 +149,10 @@ cleaningConfirmRouter.get("/cleaning/confirm/:token", async (req, res) => {
   );
 }
 
+    if (confirmation.status === "EXPIRED") {
+      return sendExpiredCleaningRequestResponse(res);
+    }
+
     if (confirmation.status === "CONFIRMED") {
   const cleanerAccessResult =
     await ensureCleanerNfcAccessForConfirmedCleaning({
@@ -252,6 +264,10 @@ cleaningConfirmRouter.post(
   );
 }
 
+      if (confirmation.status === "EXPIRED") {
+        return sendExpiredCleaningRequestResponse(res);
+      }
+
       if (confirmation.status === "CONFIRMED") {
         return res.send("Cleaning already confirmed. Thank you.");
       }
@@ -260,14 +276,39 @@ cleaningConfirmRouter.post(
         return res.status(409).send("This request was already declined.");
       }
 
-      await prisma.cleaningConfirmation.update({
-  where: {
-    id: confirmation.id,
-  },
-  data: {
-    status: "CONFIRMED",
-  },
-});
+      const confirmTransition =
+        await prisma.cleaningConfirmation.updateMany({
+          where: {
+            id: confirmation.id,
+            status: "PENDING",
+          },
+          data: {
+            status: "CONFIRMED",
+          },
+        });
+
+      if (confirmTransition.count !== 1) {
+        const currentConfirmation =
+          await prisma.cleaningConfirmation.findUnique({
+            where: { id: confirmation.id },
+          });
+
+        if (currentConfirmation?.status === "EXPIRED") {
+          return sendExpiredCleaningRequestResponse(res);
+        }
+
+        if (currentConfirmation?.status === "CONFIRMED") {
+          return res.send("Cleaning already confirmed. Thank you.");
+        }
+
+        if (currentConfirmation?.status === "DECLINED") {
+          return res.status(409).send("This request was already declined.");
+        }
+
+        return res.status(409).send(
+          "This cleaning request could not be confirmed because it is no longer actionable."
+        );
+      }
 
 const cleanerAccessResult =
   await ensureCleanerNfcAccessForConfirmedCleaning({
@@ -396,6 +437,46 @@ cleaningConfirmRouter.post(
   );
 }
 
+      if (confirmation.status === "EXPIRED") {
+        return sendExpiredCleaningRequestResponse(res);
+      }
+
+      const declineTransition =
+        await prisma.cleaningConfirmation.updateMany({
+          where: {
+            id: confirmation.id,
+            status: "PENDING",
+          },
+          data: {
+            status: "DECLINED",
+          },
+        });
+
+      if (declineTransition.count !== 1) {
+        const currentConfirmation =
+          await prisma.cleaningConfirmation.findUnique({
+            where: { id: confirmation.id },
+          });
+
+        if (currentConfirmation?.status === "EXPIRED") {
+          return sendExpiredCleaningRequestResponse(res);
+        }
+
+        if (currentConfirmation?.status === "CONFIRMED") {
+          return res
+            .status(409)
+            .send("This request was already confirmed.");
+        }
+
+        if (currentConfirmation?.status === "DECLINED") {
+          return res.send("This cleaning request was already declined.");
+        }
+
+        return res.status(409).send(
+          "This cleaning request could not be declined because it is no longer actionable."
+        );
+      }
+
       const allAttempts = await prisma.cleaningConfirmation.findMany({
         where: {
           reservationId: confirmation.reservationId,
@@ -418,13 +499,6 @@ cleaningConfirmRouter.post(
           propertyId: confirmation.propertyId,
           excludeStaffIds,
         });
-
-      await prisma.cleaningConfirmation.update({
-        where: { id: confirmation.id },
-        data: {
-          status: "DECLINED",
-        },
-      });
 
       if (!nextStaff) {
         console.warn(
