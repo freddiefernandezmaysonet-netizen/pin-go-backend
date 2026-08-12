@@ -258,6 +258,104 @@ dashboardPropertiesRouter.get(
 );
 
 dashboardPropertiesRouter.get(
+  "/api/dashboard/location/timezone",
+  requireAuth,
+  async (req, res) => {
+    const rawLat = req.query.lat;
+    const rawLng = req.query.lng;
+
+    if (
+      rawLat === undefined ||
+      rawLng === undefined ||
+      String(rawLat).trim() === "" ||
+      String(rawLng).trim() === ""
+    ) {
+      return res.status(400).json({
+        ok: false,
+        error: "lat_and_lng_are_required",
+      });
+    }
+
+    const latitude = Number(rawLat);
+    const longitude = Number(rawLng);
+
+    if (!Number.isFinite(latitude) || !Number.isFinite(longitude)) {
+      return res.status(400).json({
+        ok: false,
+        error: "lat_and_lng_must_be_finite_numbers",
+      });
+    }
+
+    if (latitude < -90 || latitude > 90) {
+      return res.status(400).json({
+        ok: false,
+        error: "lat_must_be_between_-90_and_90",
+      });
+    }
+
+    if (longitude < -180 || longitude > 180) {
+      return res.status(400).json({
+        ok: false,
+        error: "lng_must_be_between_-180_and_180",
+      });
+    }
+
+    const apiKey = String(process.env.GOOGLE_MAPS_SERVER_API_KEY ?? "").trim();
+
+    if (!apiKey) {
+      return res.status(503).json({
+        ok: false,
+        error: "timezone_service_unavailable",
+      });
+    }
+
+    try {
+      const params = new URLSearchParams({
+        location: `${latitude},${longitude}`,
+        timestamp: String(Math.floor(Date.now() / 1000)),
+        key: apiKey,
+      });
+      const response = await fetch(
+        `https://maps.googleapis.com/maps/api/timezone/json?${params.toString()}`
+      );
+      const data: any = await response.json();
+      const timezone =
+        typeof data?.timeZoneId === "string" && data.timeZoneId.trim()
+          ? data.timeZoneId
+          : null;
+
+      if (response.ok && data?.status === "OK" && timezone) {
+        return res.json({ ok: true, timezone });
+      }
+
+      console.error("Google Time Zone API lookup failed", {
+        status: String(data?.status ?? `HTTP_${response.status}`),
+        errorMessage:
+          typeof data?.errorMessage === "string" ? data.errorMessage : undefined,
+        latitude,
+        longitude,
+      });
+
+      return res.status(502).json({
+        ok: false,
+        error: "timezone_lookup_failed",
+      });
+    } catch (error) {
+      console.error("Google Time Zone API request failed", {
+        errorType: error instanceof Error ? error.name : typeof error,
+        latitude,
+        longitude,
+      });
+
+      return res.status(502).json({
+        ok: false,
+        error: "timezone_lookup_failed",
+      });
+    }
+  }
+);
+
+dashboardPropertiesRouter.get(
   "/api/dashboard/properties/:id",
   requireAuth,
   async (req, res) => {
