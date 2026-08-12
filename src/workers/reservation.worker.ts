@@ -219,8 +219,8 @@ async function processGuestVerificationReminders(
 async function processPreCheckinMessages(
   now: Date
 ) {
-  const TWO_HOURS =
-    2 * 60 * 60 * 1000;
+  const FOUR_HOURS =
+    4 * 60 * 60 * 1000;
 
   const upcoming =
     await prisma.reservation.findMany({
@@ -228,7 +228,7 @@ async function processPreCheckinMessages(
         checkIn: {
           gt: now,
           lte: new Date(
-            now.getTime() + TWO_HOURS
+            now.getTime() + FOUR_HOURS
           ),
         },
         paymentState:
