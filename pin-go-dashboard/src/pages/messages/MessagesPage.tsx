@@ -4,8 +4,12 @@ const API_BASE = import.meta.env.VITE_API_BASE ?? "http://localhost:3000";
 
 type MessageRow = {
   id: string;
+  channel?: string | null;
   to: string;
   body: string;
+  subject?: string | null;
+  messageType?: string | null;
+  displayBody?: string | null;
   status?: string | null;
   retryCount: number;
   createdAt: string;
@@ -23,6 +27,12 @@ type PropertyOption = {
   id: string;
   name: string;
 };
+
+function getDisplayBody(message: MessageRow) {
+  return typeof message.displayBody === "string" && message.displayBody.trim()
+    ? message.displayBody
+    : message.body;
+}
 
 function Stat({ title, value }: { title: string; value: number }) {
   return (
@@ -387,7 +397,9 @@ export default function MessagesPage() {
                         fontSize: 13,
                       }}
                     >
-                      {m.body.length > 220 ? `${m.body.slice(0, 220)}...` : m.body}
+                      {getDisplayBody(m).length > 220
+                        ? `${getDisplayBody(m).slice(0, 220)}...`
+                        : getDisplayBody(m)}
                     </td>
 
                     <td style={td}>
