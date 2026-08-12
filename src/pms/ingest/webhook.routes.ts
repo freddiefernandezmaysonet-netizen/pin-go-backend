@@ -1,10 +1,40 @@
 import { Router } from "express";
 import { PrismaClient, PmsProvider } from "@prisma/client";
 import { getAdapter } from "../adapters";
+import type { ParseWebhookResult } from "../adapters/types";
 import { enqueueProcessWebhookEvent } from "../jobs/job.queue";
+import { verifyChannexWebhookSecret } from "./channex-webhook-auth";
 
 const prisma = new PrismaClient();
 export const pmsWebhookRouter = Router();
+
+async function resolveChannexConnection(propertyId: string) {
+  const activeConnections = await prisma.pmsConnection.findMany({
+    where: {
+      provider: PmsProvider.CHANNEX,
+      status: "ACTIVE",
+      listings: {
+        some: {
+          metadata: {
+            path: ["channexPropertyId"],
+            equals: propertyId,
+          },
+        },
+      },
+    },
+    select: {
+      id: true,
+      webhookSecret: true,
+    },
+    take: 2,
+  });
+
+  if (activeConnections.length > 1) {
+    throw new Error(`CHANNEX_PROPERTY_MAPPING_AMBIGUOUS:${propertyId}`);
+  }
+
+  return activeConnections[0] ?? null;
+}
 
 async function ingestPmsWebhook(args: {
   providerEnum: PmsProvider;
@@ -12,6 +42,7 @@ async function ingestPmsWebhook(args: {
   headers: any;
   body: any;
   rawBody?: Buffer;
+  parsed?: ParseWebhookResult;
 }) {
   const conn = await prisma.pmsConnection.findUnique({
     where: { id: args.connectionId },
@@ -48,13 +79,15 @@ async function ingestPmsWebhook(args: {
     }
   }
 
-  let parsed;
+  let parsed: ParseWebhookResult;
 
   try {
-    parsed = adapter.parseWebhook({
-      headers: args.headers,
-      body: args.body,
-    });
+    parsed =
+      args.parsed ??
+      adapter.parseWebhook({
+        headers: args.headers,
+        body: args.body,
+      });
   } catch (e: any) {
     return {
       status: 400,
@@ -66,13 +99,16 @@ async function ingestPmsWebhook(args: {
     };
   }
 
+  const externalEventId =
+    parsed.externalEventId ?? parsed.bookingRevision?.revisionId ?? null;
+
   try {
     const ev = await prisma.webhookEventIngest.create({
       data: {
         connectionId: conn.id,
         provider: args.providerEnum,
         eventType: parsed.eventType ?? "UNKNOWN",
-        externalEventId: parsed.externalEventId ?? null,
+        externalEventId,
         payloadRaw: args.body,
         status: "PENDING",
       },
@@ -110,23 +146,73 @@ async function ingestPmsWebhook(args: {
 
 pmsWebhookRouter.post("/channex", async (req: any, res) => {
   try {
-    const connection = await prisma.pmsConnection.findFirst({
-      where: {
-        provider: PmsProvider.CHANNEX,
-        status: "ACTIVE",
-      },
-      orderBy: {
-        createdAt: "asc",
-      },
-      select: {
-        id: true,
-      },
-    });
+    const adapter = getAdapter(PmsProvider.CHANNEX);
+    let parsed: ParseWebhookResult;
+
+    try {
+      parsed = adapter.parseWebhook({
+        headers: req.headers,
+        body: req.body,
+      });
+    } catch (error: any) {
+      return res.status(400).json({
+        ok: false,
+        error: "INVALID_PAYLOAD",
+        detail: String(error?.message ?? error),
+      });
+    }
+
+    const propertyId = String(
+      parsed.bookingRevision?.propertyId ?? ""
+    ).trim();
+
+    if (!propertyId) {
+      return res.status(400).json({
+        ok: false,
+        error: "CHANNEX_PROPERTY_ID_REQUIRED",
+      });
+    }
+
+    let connection: {
+      id: string;
+      webhookSecret: string | null;
+    } | null;
+
+    try {
+      connection = await resolveChannexConnection(propertyId);
+    } catch (error: any) {
+      if (
+        String(error?.message ?? error).startsWith(
+          "CHANNEX_PROPERTY_MAPPING_AMBIGUOUS:"
+        )
+      ) {
+        return res.status(409).json({
+          ok: false,
+          error: "CHANNEX_PROPERTY_MAPPING_AMBIGUOUS",
+          propertyId,
+        });
+      }
+
+      throw error;
+    }
 
     if (!connection) {
-      return res.status(500).json({
+      return res.status(404).json({
         ok: false,
-        error: "CHANNEX_CONNECTION_NOT_FOUND",
+        error: "CHANNEX_PROPERTY_MAPPING_NOT_FOUND",
+        propertyId,
+      });
+    }
+
+    if (
+      !verifyChannexWebhookSecret({
+        expectedSecret: connection.webhookSecret,
+        headers: req.headers,
+      })
+    ) {
+      return res.status(401).json({
+        ok: false,
+        error: "INVALID_WEBHOOK_AUTHENTICATION",
       });
     }
 
@@ -136,6 +222,7 @@ pmsWebhookRouter.post("/channex", async (req: any, res) => {
       headers: req.headers,
       body: req.body,
       rawBody: req.rawBody,
+      parsed,
     });
 
     return res.status(result.status).json(result.body);
@@ -153,6 +240,7 @@ pmsWebhookRouter.post("/channex", async (req: any, res) => {
  * IMPORTANTE:
  * - Este router debe montarse con middleware que preserve rawBody.
  * - Usamos connectionId en la URL para resolver el tenant sin ambigüedad.
+ * - Channex no puede usar esta ruta; su único ingreso permitido es /webhooks/channex.
  *
  * POST /webhooks/pms/:provider/:connectionId
  */
@@ -162,16 +250,30 @@ pmsWebhookRouter.post(
     const provider = String(req.params.provider).toUpperCase();
     const connectionId = String(req.params.connectionId);
 
-    // 1) Validar provider enum
-    const providerEnum = (PmsProvider as any)[provider] as PmsProvider | undefined;
-    if (!providerEnum) return res.status(400).json({ ok: false, error: "UNKNOWN_PROVIDER" });
+    const providerEnum = (PmsProvider as any)[provider] as
+      | PmsProvider
+      | undefined;
+    if (!providerEnum) {
+      return res.status(400).json({ ok: false, error: "UNKNOWN_PROVIDER" });
+    }
 
-    // 2) Buscar conexión
-    const conn = await prisma.pmsConnection.findUnique({ where: { id: connectionId } });
-    if (!conn) return res.status(404).json({ ok: false, error: "CONNECTION_NOT_FOUND" });
-    if (conn.provider !== providerEnum) return res.status(400).json({ ok: false, error: "PROVIDER_MISMATCH" });
+    if (providerEnum === PmsProvider.CHANNEX) {
+      return res.status(410).json({
+        ok: false,
+        error: "CHANNEX_LEGACY_WEBHOOK_ROUTE_DISABLED",
+      });
+    }
 
-    // 3) Signature verify (si aplica)
+    const conn = await prisma.pmsConnection.findUnique({
+      where: { id: connectionId },
+    });
+    if (!conn) {
+      return res.status(404).json({ ok: false, error: "CONNECTION_NOT_FOUND" });
+    }
+    if (conn.provider !== providerEnum) {
+      return res.status(400).json({ ok: false, error: "PROVIDER_MISMATCH" });
+    }
+
     const adapter = getAdapter(providerEnum);
     if (adapter.verifySignature && conn.webhookSecret) {
       const ok = adapter.verifySignature({
@@ -179,19 +281,25 @@ pmsWebhookRouter.post(
         rawBody: req.rawBody ?? Buffer.from(""),
         headers: req.headers,
       });
-      if (!ok) return res.status(401).json({ ok: false, error: "INVALID_SIGNATURE" });
+      if (!ok) {
+        return res.status(401).json({ ok: false, error: "INVALID_SIGNATURE" });
+      }
     }
 
-    // 4) Parse para sacar eventType/externalEventId si existe
     let parsed;
     try {
-      parsed = adapter.parseWebhook({ headers: req.headers, body: req.body });
+      parsed = adapter.parseWebhook({
+        headers: req.headers,
+        body: req.body,
+      });
     } catch (e: any) {
-      return res.status(400).json({ ok: false, error: "INVALID_PAYLOAD", detail: String(e?.message ?? e) });
+      return res.status(400).json({
+        ok: false,
+        error: "INVALID_PAYLOAD",
+        detail: String(e?.message ?? e),
+      });
     }
 
-    // 5) Guardar evento crudo (event store)
-    // Nota: externalEventId es unique con connectionId; si viene duplicado, Prisma lanzará error y lo tratamos como OK (idempotente)
     try {
       const ev = await prisma.webhookEventIngest.create({
         data: {
@@ -204,17 +312,22 @@ pmsWebhookRouter.post(
         },
       });
 
-      // 6) Enqueue async
       await enqueueProcessWebhookEvent(ev.id);
 
       return res.json({ ok: true });
     } catch (e: any) {
       const msg = String(e?.message ?? e);
-      // Dedupe por unique (connectionId, externalEventId)
-      if (msg.toLowerCase().includes("unique") || msg.toLowerCase().includes("constraint")) {
+      if (
+        msg.toLowerCase().includes("unique") ||
+        msg.toLowerCase().includes("constraint")
+      ) {
         return res.json({ ok: true, deduped: true });
       }
-      return res.status(500).json({ ok: false, error: "STORE_EVENT_FAILED", detail: msg });
+      return res.status(500).json({
+        ok: false,
+        error: "STORE_EVENT_FAILED",
+        detail: msg,
+      });
     }
   }
 );

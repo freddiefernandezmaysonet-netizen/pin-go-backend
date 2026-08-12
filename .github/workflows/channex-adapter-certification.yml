@@ -1,0 +1,103 @@
+name: Channex Booking Lifecycle Certification
+
+on:
+  push:
+    branches:
+      - recovery/distribution-engine-v2-channex-lifecycle
+  pull_request:
+    paths:
+      - "src/config/runtime-startup.contract.test.ts"
+      - "src/pms/adapters/channex.adapter.ts"
+      - "src/pms/adapters/channex.adapter.test.ts"
+      - "src/pms/adapters/types.ts"
+      - "src/pms/ingest/channex-booking-lifecycle.policy.ts"
+      - "src/pms/ingest/channex-booking-lifecycle.policy.test.ts"
+      - "src/pms/ingest/channex-booking-lifecycle.service.ts"
+      - "src/pms/ingest/channex-runtime-import.smoke.test.ts"
+      - "src/pms/ingest/channex-webhook-auth.ts"
+      - "src/pms/ingest/channex-webhook-auth.test.ts"
+      - "src/pms/ingest/pms-webhook-recovery.policy.ts"
+      - "src/pms/ingest/pms-webhook-recovery.policy.test.ts"
+      - "src/pms/ingest/webhook.dispatcher.ts"
+      - "src/pms/ingest/webhook.routes.ts"
+      - "src/pms/ingest/webhook.routes.test.ts"
+      - "src/pms/jobs/job.queue.ts"
+      - "src/pms/jobs/pms-webhook-execution.policy.ts"
+      - "src/pms/jobs/pms-webhook-execution.policy.test.ts"
+      - "src/workers/pms-webhook-recovery.config.ts"
+      - "src/workers/pms-webhook-recovery.config.test.ts"
+      - "src/workers/pms-webhook-recovery.worker.ts"
+      - "src/apms/distribution-lifecycle-read-model.service.ts"
+      - "src/routes/dashboard.distribution-mission-control.middleware.ts"
+      - "src/routes/dashboard.route.ts"
+      - "src/services/channex-booking-webhook-registration.service.ts"
+      - "src/services/channex-booking-webhook-registration.service.test.ts"
+      - "src/services/channex-staging-readiness.policy.ts"
+      - "src/services/channex-staging-readiness.policy.test.ts"
+      - "src/services/channex-staging-readiness.service.ts"
+      - "src/services/channex-certification-evidence.policy.ts"
+      - "src/services/channex-certification-evidence.policy.test.ts"
+      - "src/services/channex-certification-evidence.service.ts"
+      - "src/scripts/configure-channex-staging-booking-webhook.ts"
+      - "src/scripts/check-channex-staging-readiness.ts"
+      - "src/scripts/collect-channex-certification-evidence.ts"
+      - "package.json"
+      - "package-lock.json"
+      - ".github/workflows/channex-adapter-certification.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  booking-lifecycle-certification:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      CHANNEX_API_KEY: test-api-key
+      CHANNEX_API_BASE_URL: https://staging.channex.io
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Use Node.js 22
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+
+      - name: Install locked dependencies
+        run: npm ci --silent --no-audit --no-fund
+
+      - name: Run focused booking lifecycle tests
+        run: npm run test:channex-certification
+
+      - name: Load booking lifecycle service
+        run: npx tsx -e "import('./src/pms/ingest/channex-booking-lifecycle.service.ts').then((m) => { if (typeof m.processChannexBookingWebhookEventById !== 'function') process.exit(1); })"
+
+      - name: Load webhook dispatcher
+        run: npx tsx -e "import('./src/pms/ingest/webhook.dispatcher.ts').then((m) => { if (typeof m.dispatchPmsWebhookEventById !== 'function') process.exit(1); })"
+
+      - name: Load API worker handoff queue
+        run: npx tsx -e "import('./src/pms/jobs/job.queue.ts').then((m) => { if (typeof m.enqueueProcessWebhookEvent !== 'function') process.exit(1); })"
+
+      - name: Load authenticated webhook routes
+        run: npx tsx -e "import('./src/pms/ingest/webhook.routes.ts').then((m) => { if (typeof m.pmsWebhookRouter !== 'function') process.exit(1); })"
+
+      - name: Load recovery worker config
+        run: npx tsx -e "import('./src/workers/pms-webhook-recovery.config.ts').then((m) => { if (typeof m.resolvePmsWebhookRecoveryConfig !== 'function') process.exit(1); })"
+
+      - name: Load staging webhook registration service
+        run: npx tsx -e "import('./src/services/channex-booking-webhook-registration.service.ts').then((m) => { if (typeof m.configureChannexBookingWebhookForStaging !== 'function') process.exit(1); })"
+
+      - name: Load staging readiness service
+        run: npx tsx -e "import('./src/services/channex-staging-readiness.service.ts').then((m) => { if (typeof m.getChannexStagingReadinessReport !== 'function') process.exit(1); })"
+
+      - name: Load certification evidence collector
+        run: npx tsx -e "import('./src/services/channex-certification-evidence.service.ts').then((m) => { if (typeof m.collectChannexCertificationEvidence !== 'function') process.exit(1); })"
+
+      - name: Load Distribution lifecycle read model
+        run: npx tsx -e "import('./src/apms/distribution-lifecycle-read-model.service.ts').then((m) => { if (typeof m.getDistributionLifecycleSnapshot !== 'function') process.exit(1); })"
+
+      - name: Load Distribution Mission Control middleware
+        run: npx tsx -e "import('./src/routes/dashboard.distribution-mission-control.middleware.ts').then((m) => { if (typeof m.dashboardDistributionMissionControlMiddleware !== 'function') process.exit(1); })"
