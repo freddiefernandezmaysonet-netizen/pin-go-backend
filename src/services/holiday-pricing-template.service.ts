@@ -1,7 +1,11 @@
-import { PrismaClient } from "@prisma/client";
+import { Prisma, PrismaClient } from "@prisma/client";
 import { HOLIDAY_PRICING_CATALOG } from "../data/holiday-pricing-catalog";
 
 const prisma = new PrismaClient();
+type HolidayPricingTemplateDb = Pick<
+  Prisma.TransactionClient,
+  "property" | "propertyHolidayPricing"
+>;
 
 function normalizeMarketCountry(value: unknown) {
   const raw = String(value || "").trim();
@@ -38,8 +42,11 @@ function normalizeMarketRegion(value: unknown) {
   return raw;
 }
 
-export async function applyDefaultHolidayPricingForProperty(propertyId: string) {
-  const property = await prisma.property.findUnique({
+export async function applyDefaultHolidayPricingForProperty(
+  propertyId: string,
+  db: HolidayPricingTemplateDb = prisma
+) {
+  const property = await db.property.findUnique({
     where: { id: propertyId },
     select: {
       id: true,
@@ -91,7 +98,7 @@ export async function applyDefaultHolidayPricingForProperty(propertyId: string) 
 
   const holidayNames = new Set(market.holidays.map((holiday) => holiday.name));
 
-  const deactivateResult = await prisma.propertyHolidayPricing.updateMany({
+  const deactivateResult = await db.propertyHolidayPricing.updateMany({
     where: {
       propertyId: property.id,
       source: "PIN_GO_DEFAULT",
@@ -108,7 +115,7 @@ export async function applyDefaultHolidayPricingForProperty(propertyId: string) 
   const deactivated = deactivateResult.count;
 
   for (const holiday of market.holidays) {
-    const existing = await prisma.propertyHolidayPricing.findFirst({
+    const existing = await db.propertyHolidayPricing.findFirst({
       where: {
         propertyId: property.id,
         name: holiday.name,
@@ -126,7 +133,7 @@ export async function applyDefaultHolidayPricingForProperty(propertyId: string) 
     });
 
     if (!existing) {
-      await prisma.propertyHolidayPricing.create({
+      await db.propertyHolidayPricing.create({
         data: {
           propertyId: property.id,
           name: holiday.name,
@@ -154,7 +161,7 @@ export async function applyDefaultHolidayPricingForProperty(propertyId: string) 
 
     if (!needsUpdate) continue;
 
-    await prisma.propertyHolidayPricing.update({
+    await db.propertyHolidayPricing.update({
       where: { id: existing.id },
       data: {
         startMonth: holiday.startMonth,
@@ -170,7 +177,7 @@ export async function applyDefaultHolidayPricingForProperty(propertyId: string) 
   }
 
   if (created > 0 || updated > 0 || deactivated > 0) {
-    await prisma.property.update({
+    await db.property.update({
       where: { id: property.id },
       data: {
         holidayPricingEnabled: true,

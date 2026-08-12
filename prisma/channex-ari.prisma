@@ -1,0 +1,166 @@
+enum ChannexAriMessageKind {
+  AVAILABILITY
+  RATES_RESTRICTIONS
+}
+
+enum ChannexAriSyncMode {
+  INCREMENTAL
+  FULL
+}
+
+enum ChannexAriScope {
+  EXACT_DATES
+  DATE_RANGE
+  FULL_HORIZON
+}
+
+enum DistributionOutboxStatus {
+  PENDING
+  CLAIMED
+  MERGED
+  SUPERSEDED
+  DEAD
+}
+
+enum ChannexAriDeliveryStatus {
+  READY
+  PROCESSING
+  RETRY_WAIT
+  SENT
+  DEAD
+  SUPERSEDED
+}
+
+enum ChannexAriAttemptOutcome {
+  IN_FLIGHT
+  SUCCESS
+  RETRYABLE_FAILURE
+  TERMINAL_FAILURE
+  UNKNOWN_AFTER_LEASE
+}
+
+model DistributionOutboxEvent {
+  id                          String                   @id @default(cuid())
+  organizationId              String
+  propertyId                  String
+  provider                    PmsProvider              @default(CHANNEX)
+  messageKind                 ChannexAriMessageKind
+  syncMode                    ChannexAriSyncMode
+  scope                       ChannexAriScope
+  dateFrom                    DateTime?                @db.Date
+  dateToExclusive             DateTime?                @db.Date
+  dateKeys                    String[]                 @default([])
+  trigger                     String
+  sourceEntityType            String?
+  sourceEntityId              String?
+  correlationId               String?
+  status                      DistributionOutboxStatus @default(PENDING)
+  availableAt                 DateTime
+  materializationAttemptCount Int                      @default(0)
+  claimedAt                   DateTime?
+  claimToken                  String?
+  claimExpiresAt              DateTime?
+  lastErrorCode               String?
+  lastErrorSummary            String?
+  deadAt                      DateTime?
+  deliveryId                  String?
+  createdAt                   DateTime                 @default(now())
+  updatedAt                   DateTime                 @updatedAt
+
+  delivery ChannexAriDelivery? @relation(fields: [deliveryId], references: [id], onDelete: SetNull)
+
+  @@index([status, availableAt])
+  @@index([status, claimExpiresAt])
+  @@index([propertyId, messageKind, status])
+  @@index([correlationId])
+  @@index([claimToken])
+  @@index([deliveryId])
+  @@index([organizationId, propertyId])
+}
+
+model ChannexAriDelivery {
+  id                    String                   @id @default(cuid())
+  organizationId        String
+  propertyId            String
+  connectionId          String
+  listingId             String
+  messageKind           ChannexAriMessageKind
+  syncMode              ChannexAriSyncMode
+  scope                 ChannexAriScope
+  dateFrom              DateTime?                @db.Date
+  dateToExclusive       DateTime?                @db.Date
+  dateKeys              String[]                 @default([])
+  status                ChannexAriDeliveryStatus @default(READY)
+  payload               Json
+  payloadHash           String
+  payloadValueCount     Int
+  payloadBytes          Int
+  attemptCount          Int                      @default(0)
+  nextAttemptAt         DateTime?
+  leaseToken            String?
+  leaseExpiresAt        DateTime?
+  channexTaskId         String?
+  httpStatus            Int?
+  warningCount          Int                      @default(0)
+  lastErrorCode         String?
+  lastErrorSummary      String?
+  queuedAt              DateTime                 @default(now())
+  processingStartedAt   DateTime?
+  sentAt                DateTime?
+  deadAt                DateTime?
+  createdAt             DateTime                 @default(now())
+  updatedAt             DateTime                 @updatedAt
+
+  outboxEvents DistributionOutboxEvent[]
+  attempts     ChannexAriDeliveryAttempt[]
+
+  @@index([status, nextAttemptAt])
+  @@index([propertyId, messageKind, status])
+  @@index([leaseExpiresAt])
+  @@index([channexTaskId])
+  @@index([organizationId, propertyId])
+  @@index([connectionId, listingId])
+}
+
+model ChannexAriDeliveryAttempt {
+  id             String                    @id @default(cuid())
+  deliveryId     String
+  attemptNumber  Int
+  outcome        ChannexAriAttemptOutcome  @default(IN_FLIGHT)
+  startedAt      DateTime                  @default(now())
+  completedAt    DateTime?
+  durationMs     Int?
+  httpStatus     Int?
+  channexTaskId  String?
+  warningCount   Int                       @default(0)
+  retryAfterMs   Int?
+  errorCode      String?
+  responseMeta   Json?
+  createdAt      DateTime                  @default(now())
+
+  delivery ChannexAriDelivery @relation(fields: [deliveryId], references: [id], onDelete: Cascade)
+
+  @@unique([deliveryId, attemptNumber])
+  @@index([deliveryId, startedAt])
+  @@index([outcome, startedAt])
+}
+
+model ChannexAriPropertyState {
+  propertyId                     String   @id
+  organizationId                 String
+  availabilityNextAllowedAt      DateTime?
+  ratesNextAllowedAt             DateTime?
+  pausedUntil                    DateTime?
+  lastRateLimitAt                DateTime?
+  lastSuccessfulAvailabilityAt   DateTime?
+  lastSuccessfulRatesAt          DateTime?
+  lastFullSyncRequestedAt        DateTime?
+  lastFullSyncCompletedAt        DateTime?
+  createdAt                      DateTime @default(now())
+  updatedAt                      DateTime @updatedAt
+
+  @@index([organizationId])
+  @@index([pausedUntil])
+  @@index([availabilityNextAllowedAt])
+  @@index([ratesNextAllowedAt])
+}

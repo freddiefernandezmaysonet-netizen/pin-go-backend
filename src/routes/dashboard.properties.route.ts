@@ -1,5 +1,6 @@
 import { Router } from "express";
 import crypto from "crypto";
+import { formatInTimeZone } from "date-fns-tz";
 import {
   AmenityChargeMode,
   AmenityFeeType,
@@ -37,6 +38,8 @@ import {
   buildCancellationPolicySnapshot,
 } from "../services/cancellation-policy.service";
 import { resolveOrganizationGuestReplyTo } from "../services/organization-guest-email.service";
+import { createChannexAriOutboxEvent } from "../pms/outbound/channex-ari-outbox.service";
+import { buildFullSyncRange } from "../pms/outbound/channex-ari-lifecycle.policy";
 
 const prisma = new PrismaClient();
 export const dashboardPropertiesRouter = Router();
@@ -88,6 +91,65 @@ function parseOptionalInt(value: unknown): number | null {
 
   const parsed = Number(value);
   return Number.isFinite(parsed) && parsed >= 0 ? Math.trunc(parsed) : NaN;
+}
+
+const PROPERTY_ARI_BOOLEAN_FIELDS = [
+  "dynamicPricingEnabled",
+  "seasonalPricingEnabled",
+  "holidayPricingEnabled",
+  "leadTimePricingEnabled",
+  "occupancyPricingEnabled",
+] as const;
+
+const PROPERTY_ARI_NUMBER_FIELDS = [
+  "baseNightlyRate",
+  "minimumNightlyRate",
+  "maximumNightlyRate",
+  "weekendMarkupPercent",
+  "leadTimeLastMinuteDays",
+  "leadTimeLastMinutePercent",
+  "occupancyLookaheadDays",
+  "occupancyLowThresholdPercent",
+  "occupancyLowAdjustmentPercent",
+  "occupancyHighThresholdPercent",
+  "occupancyHighAdjustmentPercent",
+  "minimumNights",
+  "maximumNights",
+] as const;
+
+function toComparablePropertyNumber(value: unknown): number | null {
+  if (value === null || value === undefined || value === "") {
+    return null;
+  }
+
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? parsed : null;
+}
+
+function hasPropertyAriConfigurationChanged(
+  existing: Record<string, unknown>,
+  data: Record<string, unknown>
+): boolean {
+  for (const field of PROPERTY_ARI_BOOLEAN_FIELDS) {
+    if (
+      Object.prototype.hasOwnProperty.call(data, field) &&
+      Boolean(data[field]) !== Boolean(existing[field])
+    ) {
+      return true;
+    }
+  }
+
+  for (const field of PROPERTY_ARI_NUMBER_FIELDS) {
+    if (
+      Object.prototype.hasOwnProperty.call(data, field) &&
+      toComparablePropertyNumber(data[field]) !==
+        toComparablePropertyNumber(existing[field])
+    ) {
+      return true;
+    }
+  }
+
+  return false;
 }
 
 const PROPERTY_SEASON_TYPES = ["PEAK", "SHOULDER", "LOW"] as const;
@@ -543,8 +605,28 @@ if (
   id: true,
   status: true,
   distributionEnabled: true,
+  distributionStatus: true,
+  timezone: true,
   country: true,
   region: true,
+  dynamicPricingEnabled: true,
+  seasonalPricingEnabled: true,
+  holidayPricingEnabled: true,
+  leadTimePricingEnabled: true,
+  leadTimeLastMinuteDays: true,
+  leadTimeLastMinutePercent: true,
+  occupancyPricingEnabled: true,
+  occupancyLookaheadDays: true,
+  occupancyLowThresholdPercent: true,
+  occupancyLowAdjustmentPercent: true,
+  occupancyHighThresholdPercent: true,
+  occupancyHighAdjustmentPercent: true,
+  baseNightlyRate: true,
+  minimumNightlyRate: true,
+  maximumNightlyRate: true,
+  weekendMarkupPercent: true,
+  minimumNights: true,
+  maximumNights: true,
 },
       });
 
@@ -559,6 +641,17 @@ if (
         return res.status(400).json({
           ok: false,
           error: "Cannot edit an archived property",
+        });
+      }
+
+      if (
+        distributionEnabled !== undefined &&
+        Boolean(distributionEnabled) !== existing.distributionEnabled
+      ) {
+        return res.status(400).json({
+          ok: false,
+          error:
+            "distributionEnabled must be changed through the dedicated distribution lifecycle",
         });
       }
 
@@ -642,10 +735,6 @@ if (slug !== undefined) {
 
 if (isPublicBookable !== undefined) {
   data.isPublicBookable = Boolean(isPublicBookable);
-}
-
-if (distributionEnabled !== undefined) {
-  data.distributionEnabled = Boolean(distributionEnabled);
 }
 
 if (dynamicPricingEnabled !== undefined) {
@@ -755,7 +844,15 @@ if (checkOutTime !== undefined) {
   data.checkOutTime = String(checkOutTime || "").trim() || null;
 }
 
-      const updated = await prisma.property.update({
+      const ariConfigurationChanged =
+        hasPropertyAriConfigurationChanged(
+          existing as unknown as Record<string, unknown>,
+          data
+        );
+      const propertyMutationAt = new Date();
+
+      const updated = await prisma.$transaction(async (tx) => {
+        const persistedProperty = await tx.property.update({
         where: { id: existing.id },
         data,
         select: {
@@ -837,6 +934,37 @@ if (checkOutTime !== undefined) {
           },
          },
        },
+        });
+
+        if (
+          ariConfigurationChanged &&
+          existing.distributionEnabled === true &&
+          existing.distributionStatus === "ACTIVE"
+        ) {
+          const propertyTimezone =
+            persistedProperty.timezone ??
+            existing.timezone ??
+            "America/Puerto_Rico";
+          const todayDateKey = formatInTimeZone(
+            propertyMutationAt,
+            propertyTimezone,
+            "yyyy-MM-dd"
+          );
+
+          await createChannexAriOutboxEvent(tx, {
+            organizationId: orgId,
+            propertyId: persistedProperty.id,
+            messageKind: "RATES_RESTRICTIONS",
+            trigger: "PROPERTY_CONFIGURATION_UPDATED",
+            syncMode: "INCREMENTAL",
+            dateRange: buildFullSyncRange(todayDateKey),
+            sourceEntityType: "PROPERTY",
+            sourceEntityId: persistedProperty.id,
+            now: propertyMutationAt,
+          });
+        }
+
+        return persistedProperty;
       });
 
 const marketChanged =
@@ -857,42 +985,6 @@ if (marketChanged) {
 }
 
       let distributionSyncResult: any = null;
-
-      if (updated.distributionStatus === "ACTIVE") {
-        try {
-          distributionSyncResult =
-            await syncChannexAvailabilityForProperty(updated.id);
-
-          await prisma.property.update({
-            where: { id: updated.id },
-            data: {
-              distributionLastSyncedAt: new Date(),
-              distributionLastError: null,
-            },
-          });
-        } catch (syncError: any) {
-          await prisma.property.update({
-            where: { id: updated.id },
-            data: {
-              distributionStatus: "FAILED",
-              distributionLastError:
-                syncError?.message ?? "Failed to sync distribution changes",
-            },
-          });
-
-          return res.status(500).json({
-            ok: false,
-            item: {
-              ...updated,
-              distributionStatus: "FAILED",
-              distributionLastError:
-                syncError?.message ?? "Failed to sync distribution changes",
-            },
-            error:
-              syncError?.message ?? "Failed to sync distribution changes",
-          });
-        }
-      }
 
           return res.json({
   ok: true,
@@ -1352,127 +1444,6 @@ dashboardPropertiesRouter.post(
 
       let distributionSyncResult: any = null;
 
-      const distributionStartedAt = new Date();
-      const distributionDecisionId = `distribution-engine:${property.id}:manual-reservation:${result.reservationId}`;
-
-      try {
-        distributionSyncResult = await syncChannexAvailabilityForProperty(
-          property.id
-        );
-
-        await prisma.property.update({
-          where: { id: property.id },
-          data: {
-            distributionLastSyncedAt: new Date(),
-            distributionLastError: null,
-          },
-        });
-
-        const distributionCompletedAt = new Date();
-
-        const distributionSyncSucceeded =
-          distributionSyncResult &&
-          typeof distributionSyncResult === "object" &&
-          "ok" in distributionSyncResult
-            ? Boolean((distributionSyncResult as any).ok)
-            : true;
-
-        const distributionAuditEntry = createDistributionAuditEntry({
-          organizationId: orgId,
-          propertyId: property.id,
-          reservationId: result.reservationId,
-          decisionId: distributionDecisionId,
-          trigger: "MANUAL_RESERVATION",
-          provider: "CHANNEX",
-          syncType: "AVAILABILITY",
-          startedAt: distributionStartedAt,
-          completedAt: distributionCompletedAt,
-          result: distributionSyncResult,
-          status: distributionSyncSucceeded ? "SUCCESS" : "FAILED",
-          severity: distributionSyncSucceeded ? "INFO" : "WARNING",
-          eventType: distributionSyncSucceeded
-            ? "SYNC_COMPLETED"
-            : "SYNC_FAILED",
-          reason: distributionSyncSucceeded
-            ? "MANUAL_RESERVATION_AVAILABILITY_SYNC_COMPLETED"
-            : "MANUAL_RESERVATION_AVAILABILITY_SYNC_FAILED",
-          summary: distributionSyncSucceeded
-            ? "Distribution Engine synchronized channel availability after manual reservation."
-            : "Distribution Engine could not fully synchronize channel availability after manual reservation.",
-          rule: "MANUAL_RESERVATION_CHANNEX_AVAILABILITY_SYNC",
-          label: "Manual Reservation Channel Availability Sync",
-          recommendedAction: distributionSyncSucceeded
-            ? undefined
-            : "Review Channex availability sync after this manual reservation.",
-        });
-
-        try {
-          await persistAuditEntry(prisma, distributionAuditEntry);
-        } catch (auditPersistenceError: any) {
-          console.error("[APMS_DISTRIBUTION_AUTO_SYNC_AUDIT_PERSIST_ERROR]", {
-            engine: "Distribution",
-            propertyId: property.id,
-            reservationId: result.reservationId,
-            provider: "CHANNEX",
-            syncType: "AVAILABILITY",
-            trigger: "MANUAL_RESERVATION",
-            decisionId: distributionAuditEntry.decisionId,
-            error: auditPersistenceError?.message ?? auditPersistenceError,
-          });
-        }
-      } catch (syncError: any) {
-        console.error("POST manual-reservations Channex sync error", syncError);
-
-        await prisma.property.update({
-          where: { id: property.id },
-          data: {
-            distributionLastError:
-              syncError?.message ||
-              "Failed to sync Channex after manual reservation",
-          },
-        });
-
-        const distributionCompletedAt = new Date();
-
-        const distributionAuditEntry = createDistributionAuditEntry({
-          organizationId: orgId,
-          propertyId: property.id,
-          reservationId: result.reservationId,
-          decisionId: distributionDecisionId,
-          trigger: "MANUAL_RESERVATION",
-          provider: "CHANNEX",
-          syncType: "AVAILABILITY",
-          startedAt: distributionStartedAt,
-          completedAt: distributionCompletedAt,
-          error: syncError,
-          status: "FAILED",
-          severity: "CRITICAL",
-          eventType: "SYNC_FAILED",
-          reason: "MANUAL_RESERVATION_AVAILABILITY_SYNC_ERROR",
-          summary:
-            "Distribution Engine failed to synchronize channel availability after manual reservation.",
-          rule: "MANUAL_RESERVATION_CHANNEX_AVAILABILITY_SYNC",
-          label: "Manual Reservation Channel Availability Sync",
-          recommendedAction:
-            "Review Channex availability connection and retry the sync for this reservation.",
-        });
-
-        try {
-          await persistAuditEntry(prisma, distributionAuditEntry);
-        } catch (auditPersistenceError: any) {
-          console.error("[APMS_DISTRIBUTION_AUTO_SYNC_AUDIT_PERSIST_ERROR]", {
-            engine: "Distribution",
-            propertyId: property.id,
-            reservationId: result.reservationId,
-            provider: "CHANNEX",
-            syncType: "AVAILABILITY",
-            trigger: "MANUAL_RESERVATION",
-            decisionId: distributionAuditEntry.decisionId,
-            error: auditPersistenceError?.message ?? auditPersistenceError,
-          });
-        }
-      }
-
       let cleaningConfirmationDispatchResult: any = null;
 
       try {
@@ -1604,9 +1575,13 @@ dashboardPropertiesRouter.post(
         where: {
           id,
           organizationId: orgId,
+          status: "ACTIVE",
         },
         select: {
           id: true,
+          timezone: true,
+          distributionEnabled: true,
+          distributionStatus: true,
         },
       });
 
@@ -1616,112 +1591,144 @@ dashboardPropertiesRouter.post(
           error: "Property not found",
         });
       }
-            const distributionStartedAt = new Date();
-      const distributionRunId = distributionStartedAt
-        .toISOString()
-        .replace(/[:.]/g, "-");
+
+      if (
+        property.distributionEnabled !== true ||
+        property.distributionStatus !== "ACTIVE"
+      ) {
+        return res.status(409).json({
+          ok: false,
+          error: "Property distribution must be ACTIVE before requesting a Full Sync",
+        });
+      }
+
+      const requestedAt = new Date();
+      const propertyTimezone =
+        property.timezone ?? "America/Puerto_Rico";
+      const todayDateKey = formatInTimeZone(
+        requestedAt,
+        propertyTimezone,
+        "yyyy-MM-dd"
+      );
+      const correlationId =
+        `manual-full-sync:${property.id}:${crypto.randomUUID()}`;
+      const fullSyncGuardMs = 24 * 60 * 60 * 1000;
 
       try {
-        const result =
-          await syncChannexAvailabilityForProperty(property.id);
+        const result = await prisma.$transaction(
+          async (tx) => {
+            const existingAriState =
+              await tx.channexAriPropertyState.findUnique({
+                where: { propertyId: property.id },
+                select: {
+                  organizationId: true,
+                  lastFullSyncRequestedAt: true,
+                },
+              });
 
-        const distributionCompletedAt = new Date();
+            if (
+              existingAriState &&
+              existingAriState.organizationId !== orgId
+            ) {
+              throw new Error(
+                "CHANNEX_ARI_PROPERTY_STATE_TENANT_MISMATCH"
+              );
+            }
 
-        const distributionSyncSucceeded =
-          result && typeof result === "object" && "ok" in result
-            ? Boolean((result as any).ok)
-            : true;
+            if (existingAriState?.lastFullSyncRequestedAt) {
+              const retryAt = new Date(
+                existingAriState.lastFullSyncRequestedAt.getTime() +
+                  fullSyncGuardMs
+              );
 
-       
-               const distributionAuditEntry = createDistributionAuditEntry({
-          organizationId: orgId,
-          propertyId: property.id,
-          decisionId: `distribution-engine:${property.id}:channex-availability:${distributionRunId}`,
-          trigger: "CHANNEX_AVAILABILITY_SYNC",
-          provider: "CHANNEX",
-          syncType: "AVAILABILITY",
-          startedAt: distributionStartedAt,
-          completedAt: distributionCompletedAt,
-          result,
-          status: distributionSyncSucceeded ? "SUCCESS" : "FAILED",
-          severity: distributionSyncSucceeded ? "INFO" : "WARNING",
-          eventType: distributionSyncSucceeded
-            ? "SYNC_COMPLETED"
-            : "SYNC_FAILED",
-          reason: distributionSyncSucceeded
-            ? "CHANNEX_AVAILABILITY_SYNC_COMPLETED"
-            : "CHANNEX_AVAILABILITY_SYNC_FAILED",
-          summary: distributionSyncSucceeded
-            ? "Distribution Engine synchronized property availability with Channex."
-            : "Distribution Engine could not fully synchronize property availability with Channex.",
-          rule: "CHANNEX_AVAILABILITY_SYNC",
-          label: "Channex Availability Sync",
-          recommendedAction: distributionSyncSucceeded
-            ? undefined
-            : "Review Channex availability sync result for this property.",
-        });
-       
-        try {
-          await persistAuditEntry(prisma, distributionAuditEntry);
-        } catch (auditPersistenceError: any) {
-          console.error("[APMS_DISTRIBUTION_AUDIT_PERSIST_ERROR]", {
-            engine: "Distribution",
-            propertyId: property.id,
-            provider: "CHANNEX",
-            syncType: "AVAILABILITY",
-            decisionId: distributionAuditEntry.decisionId,
-            error:
-              auditPersistenceError?.message ??
-              auditPersistenceError,
-          });
-        }
+              if (retryAt.getTime() > requestedAt.getTime()) {
+                const guardError = new Error(
+                  "CHANNEX_ARI_FULL_SYNC_GUARD_ACTIVE"
+                );
+                (guardError as any).retryAt = retryAt;
+                throw guardError;
+              }
+            }
+
+            await createChannexAriOutboxEvent(tx, {
+              organizationId: orgId,
+              propertyId: property.id,
+              messageKind: "AVAILABILITY",
+              syncMode: "FULL",
+              trigger: "MANUAL_FULL_SYNC",
+              sourceEntityType: "PROPERTY",
+              sourceEntityId: property.id,
+              correlationId,
+              todayDateKey,
+              now: requestedAt,
+              coalesceMs: 0,
+            });
+
+            await createChannexAriOutboxEvent(tx, {
+              organizationId: orgId,
+              propertyId: property.id,
+              messageKind: "RATES_RESTRICTIONS",
+              syncMode: "FULL",
+              trigger: "MANUAL_FULL_SYNC",
+              sourceEntityType: "PROPERTY",
+              sourceEntityId: property.id,
+              correlationId,
+              todayDateKey,
+              now: requestedAt,
+              coalesceMs: 0,
+            });
+
+            await tx.channexAriPropertyState.upsert({
+              where: { propertyId: property.id },
+              create: {
+                propertyId: property.id,
+                organizationId: orgId,
+                lastFullSyncRequestedAt: requestedAt,
+              },
+              update: {
+                lastFullSyncRequestedAt: requestedAt,
+              },
+            });
+
+            return {
+              queued: true,
+              syncMode: "FULL",
+              correlationId,
+              requestedAt,
+              messageKinds: [
+                "AVAILABILITY",
+                "RATES_RESTRICTIONS",
+              ],
+            };
+          },
+          {
+            isolationLevel:
+              Prisma.TransactionIsolationLevel.Serializable,
+          }
+        );
 
         return res.json({
           ok: true,
           result,
         });
-      } catch (syncError: any) {
-        const distributionCompletedAt = new Date();
-
-       const distributionAuditEntry = createDistributionAuditEntry({
-  organizationId: orgId,
-  propertyId: property.id,
-  decisionId: `distribution-engine:${property.id}:channex-availability:${distributionRunId}`,
-  trigger: "CHANNEX_AVAILABILITY_SYNC",
-  provider: "CHANNEX",
-  syncType: "AVAILABILITY",
-  startedAt: distributionStartedAt,
-  completedAt: distributionCompletedAt,
-  error: syncError,
-  status: "FAILED",
-  severity: "CRITICAL",
-  eventType: "SYNC_FAILED",
-  reason: "CHANNEX_AVAILABILITY_SYNC_ERROR",
-  summary:
-    "Distribution Engine failed to synchronize property availability with Channex.",
-  rule: "CHANNEX_AVAILABILITY_SYNC",
-  label: "Channex Availability Sync",
-  recommendedAction:
-    "Review Channex availability connection and retry the sync.",
-});
-        try {
-          await persistAuditEntry(prisma, distributionAuditEntry);
-        } catch (auditPersistenceError: any) {
-          console.error("[APMS_DISTRIBUTION_AUDIT_PERSIST_ERROR]", {
-            engine: "Distribution",
-            propertyId: property.id,
-            provider: "CHANNEX",
-            syncType: "AVAILABILITY",
-            decisionId: distributionAuditEntry.decisionId,
+      } catch (syncRequestError: any) {
+        if (
+          syncRequestError?.message ===
+          "CHANNEX_ARI_FULL_SYNC_GUARD_ACTIVE"
+        ) {
+          return res.status(409).json({
+            ok: false,
             error:
-              auditPersistenceError?.message ??
-              auditPersistenceError,
+              "A Full Sync was already requested within the last 24 hours",
+            retryAt:
+              syncRequestError?.retryAt instanceof Date
+                ? syncRequestError.retryAt.toISOString()
+                : null,
           });
         }
 
-        throw syncError;
+        throw syncRequestError;
       }
-     
     } catch (error: any) {
       console.error(
         "POST /api/dashboard/properties/:id/channex/sync-availability error",
@@ -1732,12 +1739,11 @@ dashboardPropertiesRouter.post(
         ok: false,
         error:
           error?.message ??
-          "Failed to sync Channex availability",
+          "Failed to request Channex Full Sync",
       });
     }
   }
 );
-
 dashboardPropertiesRouter.get(
   "/api/dashboard/properties/:id/mission-control",
   requireAuth,
@@ -2409,248 +2415,182 @@ pricingBreakdown: rate.pricingBreakdown ?? [],
 
 dashboardPropertiesRouter.put(
   "/api/dashboard/properties/:id/nightly-rates",
+  requireAuth,
   async (req, res) => {
-  try {
-    const propertyId = String(req.params.id);
-    const rates = Array.isArray(req.body?.rates) ? req.body.rates : [];
+    try {
+      const user = (req as any).user;
+      const orgId = user.orgId as string;
+      const propertyId = String(req.params.id);
+      const rates = Array.isArray(req.body?.rates) ? req.body.rates : [];
 
-    if (!rates.length) {
-  return res.status(400).json({
-    ok: false,
-    error: "rates must be a non-empty array",
-  });
-}
-    const property = await prisma.property.findUnique({
-  where: { id: propertyId },
-  select: {
-    id: true,
-    organizationId: true,
-    minimumNightlyRate: true,
-    maximumNightlyRate: true,
-  },
-});
-
-if (!property) {
-  return res.status(404).json({
-    ok: false,
-    error: "Property not found",
-  });
-}
-
-const minimumNightlyRate =
-  property.minimumNightlyRate != null
-    ? Number(property.minimumNightlyRate)
-    : null;
-
-const maximumNightlyRate =
-  property.maximumNightlyRate != null
-    ? Number(property.maximumNightlyRate)
-    : null;
-
-    const savedRates = [];
-
-    for (const item of rates) {
-      const dateRaw = String(item.date ?? "");
-      const rateNumber = Number(item.rate);
-
-      if (!dateRaw || Number.isNaN(rateNumber) || rateNumber < 0) {
+      if (!rates.length) {
         return res.status(400).json({
           ok: false,
-          error: "Each rate must include a valid date and rate",
+          error: "rates must be a non-empty array",
         });
       }
 
-if (minimumNightlyRate !== null && rateNumber < minimumNightlyRate) {
-  return res.status(400).json({
-    ok: false,
-    error: `Rate cannot be lower than minimumNightlyRate (${minimumNightlyRate})`,
-  });
-}
-
-if (maximumNightlyRate !== null && rateNumber > maximumNightlyRate) {
-  return res.status(400).json({
-    ok: false,
-    error: `Rate cannot be greater than maximumNightlyRate (${maximumNightlyRate})`,
-  });
-}
-
-      const date = new Date(`${dateRaw}T00:00:00.000Z`);
-
-      const saved = await prisma.propertyNightlyRate.upsert({
+      const property = await prisma.property.findFirst({
         where: {
-          propertyId_date: {
-            propertyId,
-            date,
-          },
-        },
-        update: {
-          rate: rateNumber,
-          reason: item.reason ?? "MANUAL_OVERRIDE",
-        },
-        create: {
-          propertyId,
-          date,
-          rate: rateNumber,
-          reason: item.reason ?? "MANUAL_OVERRIDE",
+          id: propertyId,
+          organizationId: orgId,
+          status: "ACTIVE",
         },
         select: {
           id: true,
-          date: true,
-          rate: true,
-          reason: true,
+          distributionEnabled: true,
+          distributionStatus: true,
+          minimumNightlyRate: true,
+          maximumNightlyRate: true,
         },
       });
 
-      savedRates.push(saved);
+      if (!property) {
+        return res.status(404).json({
+          ok: false,
+          error: "Property not found",
+        });
+      }
+
+      const minimumNightlyRate =
+        property.minimumNightlyRate != null
+          ? Number(property.minimumNightlyRate)
+          : null;
+      const maximumNightlyRate =
+        property.maximumNightlyRate != null
+          ? Number(property.maximumNightlyRate)
+          : null;
+      const normalizedRates: Array<{
+        dateKey: string;
+        date: Date;
+        rate: number;
+        reason: string;
+      }> = [];
+
+      for (const item of rates) {
+        const dateRaw = String(item.date ?? "").trim();
+        const rateNumber = Number(item.rate);
+        const parsedDate = new Date(`${dateRaw}T00:00:00.000Z`);
+        const dateKeyIsValid =
+          /^\d{4}-\d{2}-\d{2}$/.test(dateRaw) &&
+          !Number.isNaN(parsedDate.getTime()) &&
+          parsedDate.toISOString().slice(0, 10) === dateRaw;
+
+        if (
+          !dateKeyIsValid ||
+          !Number.isFinite(rateNumber) ||
+          rateNumber < 0
+        ) {
+          return res.status(400).json({
+            ok: false,
+            error: "Each rate must include a valid YYYY-MM-DD date and rate",
+          });
+        }
+
+        if (
+          minimumNightlyRate !== null &&
+          rateNumber < minimumNightlyRate
+        ) {
+          return res.status(400).json({
+            ok: false,
+            error: `Rate cannot be lower than minimumNightlyRate (${minimumNightlyRate})`,
+          });
+        }
+
+        if (
+          maximumNightlyRate !== null &&
+          rateNumber > maximumNightlyRate
+        ) {
+          return res.status(400).json({
+            ok: false,
+            error: `Rate cannot be greater than maximumNightlyRate (${maximumNightlyRate})`,
+          });
+        }
+
+        normalizedRates.push({
+          dateKey: dateRaw,
+          date: parsedDate,
+          rate: rateNumber,
+          reason:
+            String(item.reason ?? "MANUAL_OVERRIDE").trim() ||
+            "MANUAL_OVERRIDE",
+        });
+      }
+
+      const mutationAt = new Date();
+      const savedRates = await prisma.$transaction(async (tx) => {
+        const persistedRates = [];
+
+        for (const item of normalizedRates) {
+          const saved = await tx.propertyNightlyRate.upsert({
+            where: {
+              propertyId_date: {
+                propertyId,
+                date: item.date,
+              },
+            },
+            update: {
+              rate: item.rate,
+              reason: item.reason,
+            },
+            create: {
+              propertyId,
+              date: item.date,
+              rate: item.rate,
+              reason: item.reason,
+            },
+            select: {
+              id: true,
+              date: true,
+              rate: true,
+              reason: true,
+            },
+          });
+
+          persistedRates.push(saved);
+        }
+
+        if (
+          property.distributionEnabled === true &&
+          property.distributionStatus === "ACTIVE"
+        ) {
+          await createChannexAriOutboxEvent(tx, {
+            organizationId: orgId,
+            propertyId,
+            messageKind: "RATES_RESTRICTIONS",
+            trigger: "NIGHTLY_RATE_UPDATE",
+            syncMode: "INCREMENTAL",
+            dateKeys: normalizedRates.map((item) => item.dateKey),
+            sourceEntityType: "PROPERTY",
+            sourceEntityId: propertyId,
+            now: mutationAt,
+          });
+        }
+
+        return persistedRates;
+      });
+
+      let distributionSyncResult: any = null;
+
+      return res.json({
+        ok: true,
+        rates: savedRates.map((rate) => ({
+          id: rate.id,
+          date: rate.date.toISOString().slice(0, 10),
+          rate: Number(rate.rate),
+          reason: rate.reason,
+        })),
+        distributionSyncResult,
+      });
+    } catch (err) {
+      console.error("PUT nightly-rates error", err);
+      return res.status(500).json({
+        ok: false,
+        error: "Failed to save nightly rates",
+      });
     }
-
-  let distributionSyncResult: any = null;
-
-const distributionStartedAt = new Date();
-const distributionRunId = distributionStartedAt
-  .toISOString()
-  .replace(/[:.]/g, "-");
-
-const distributionDecisionId = `distribution-engine:${propertyId}:nightly-rates:${distributionRunId}`;
-
-const changedRateDates = savedRates.map((rate) =>
-  rate.date.toISOString().slice(0, 10)
+  }
 );
-
-try {
-  distributionSyncResult = await syncChannexAvailabilityForProperty(propertyId);
-
-  await prisma.property.update({
-    where: { id: propertyId },
-    data: {
-      distributionLastSyncedAt: new Date(),
-      distributionLastError: null,
-    },
-  });
-
-  const distributionCompletedAt = new Date();
-
-  const distributionSyncSucceeded =
-    distributionSyncResult &&
-    typeof distributionSyncResult === "object" &&
-    "ok" in distributionSyncResult
-      ? Boolean((distributionSyncResult as any).ok)
-      : true;
-
- const distributionAuditEntry = createDistributionAuditEntry({
-  organizationId: property.organizationId,
-  propertyId,
-  decisionId: distributionDecisionId,
-  trigger: "NIGHTLY_RATE_UPDATE",
-  provider: "CHANNEX",
-  syncType: "AVAILABILITY",
-  startedAt: distributionStartedAt,
-  completedAt: distributionCompletedAt,
-  result: distributionSyncResult,
-  status: distributionSyncSucceeded ? "SUCCESS" : "FAILED",
-  severity: distributionSyncSucceeded ? "INFO" : "WARNING",
-  eventType: distributionSyncSucceeded ? "SYNC_COMPLETED" : "SYNC_FAILED",
-  reason: distributionSyncSucceeded
-    ? "NIGHTLY_RATE_DISTRIBUTION_SYNC_COMPLETED"
-    : "NIGHTLY_RATE_DISTRIBUTION_SYNC_FAILED",
-  summary: distributionSyncSucceeded
-    ? "Distribution Engine synchronized channel availability after nightly rate update."
-    : "Distribution Engine could not fully synchronize channel availability after nightly rate update.",
-  rule: "NIGHTLY_RATE_CHANNEX_AVAILABILITY_SYNC",
-  label: "Nightly Rate Channel Availability Sync",
-  recommendedAction: distributionSyncSucceeded
-    ? undefined
-    : "Review Channex sync after this nightly rate update.",
-  metadata: {
-    changedRateDates,
-    ratesCount: savedRates.length,
-  },
-});
-  try {
-    await persistAuditEntry(prisma, distributionAuditEntry);
-  } catch (auditPersistenceError: any) {
-    console.error("[APMS_DISTRIBUTION_AUTO_SYNC_AUDIT_PERSIST_ERROR]", {
-      engine: "Distribution",
-      propertyId,
-      provider: "CHANNEX",
-      syncType: "AVAILABILITY",
-      trigger: "NIGHTLY_RATE_UPDATE",
-      decisionId: distributionAuditEntry.decisionId,
-      error: auditPersistenceError?.message ?? auditPersistenceError,
-    });
-  }
-} catch (syncError: any) {
-  console.error("PUT nightly-rates Channex sync error", syncError);
-
-  await prisma.property.update({
-    where: { id: propertyId },
-    data: {
-      distributionLastError:
-        syncError?.message ||
-        "Failed to sync Channex after nightly rate update",
-    },
-  });
-
-  const distributionCompletedAt = new Date();
-
-const distributionAuditEntry = createDistributionAuditEntry({
-  organizationId: property.organizationId,
-  propertyId,
-  decisionId: distributionDecisionId,
-  trigger: "NIGHTLY_RATE_UPDATE",
-  provider: "CHANNEX",
-  syncType: "AVAILABILITY",
-  startedAt: distributionStartedAt,
-  completedAt: distributionCompletedAt,
-  error: syncError,
-  status: "FAILED",
-  severity: "CRITICAL",
-  eventType: "SYNC_FAILED",
-  reason: "NIGHTLY_RATE_DISTRIBUTION_SYNC_ERROR",
-  summary:
-    "Distribution Engine failed to synchronize channel availability after nightly rate update.",
-  rule: "NIGHTLY_RATE_CHANNEX_AVAILABILITY_SYNC",
-  label: "Nightly Rate Channel Availability Sync",
-  recommendedAction:
-    "Review Channex availability connection and retry the sync after this nightly rate update.",
-  metadata: {
-    changedRateDates,
-    ratesCount: savedRates.length,
-  },
-});
-  try {
-    await persistAuditEntry(prisma, distributionAuditEntry);
-  } catch (auditPersistenceError: any) {
-    console.error("[APMS_DISTRIBUTION_AUTO_SYNC_AUDIT_PERSIST_ERROR]", {
-      engine: "Distribution",
-      propertyId,
-      provider: "CHANNEX",
-      syncType: "AVAILABILITY",
-      trigger: "NIGHTLY_RATE_UPDATE",
-      decisionId: distributionAuditEntry.decisionId,
-      error: auditPersistenceError?.message ?? auditPersistenceError,
-    });
-  }
-}
-return res.json({
-  ok: true,
-  rates: savedRates.map((rate) => ({
-    id: rate.id,
-    date: rate.date.toISOString().slice(0, 10),
-    rate: Number(rate.rate),
-    reason: rate.reason,
-  })),
-  distributionSyncResult,
-});
-   } catch (err) {
-    console.error("PUT nightly-rates error", err);
-    return res.status(500).json({
-      ok: false,
-      error: "Failed to save nightly rates",
-    });
-  }
-});
-
 
 dashboardPropertiesRouter.post(
   "/api/dashboard/properties/:id/amenities",
@@ -2985,6 +2925,8 @@ dashboardPropertiesRouter.post(
           id: true,
           name: true,
           status: true,
+          distributionEnabled: true,
+          distributionStatus: true,
           reservations: {
             where: {
               status: ReservationStatus.ACTIVE,
@@ -3010,6 +2952,17 @@ dashboardPropertiesRouter.post(
         return res.json({
           ok: true,
           alreadyArchived: true,
+        });
+      }
+
+      if (
+        property.distributionEnabled === true ||
+        property.distributionStatus !== "DISABLED"
+      ) {
+        return res.status(409).json({
+          ok: false,
+          error:
+            "Distribution must be disconnected before archiving this property",
         });
       }
 
@@ -3071,7 +3024,12 @@ dashboardPropertiesRouter.post(
           organizationId: orgId,
           status: "ACTIVE",
         },
-        select: { id: true },
+        select: {
+          id: true,
+          timezone: true,
+          distributionEnabled: true,
+          distributionStatus: true,
+        },
       });
 
       if (!property) {
@@ -3081,133 +3039,48 @@ dashboardPropertiesRouter.post(
         });
       }
 
-      const result = await applyDefaultMarketSeasonsForProperty(property.id);
-    let distributionSyncResult: any = null;
+      const mutationAt = new Date();
+      const result = await prisma.$transaction(async (tx) => {
+        const appliedResult = await applyDefaultMarketSeasonsForProperty(
+          property.id,
+          tx
+        );
+        const seasonDefaultsChanged =
+          appliedResult.created > 0 ||
+          appliedResult.updated > 0 ||
+          appliedResult.deactivated > 0;
 
-const distributionStartedAt = new Date();
-const distributionRunId = distributionStartedAt
-  .toISOString()
-  .replace(/[:.]/g, "-");
+        if (
+          seasonDefaultsChanged &&
+          property.distributionEnabled === true &&
+          property.distributionStatus === "ACTIVE"
+        ) {
+          const propertyTimezone =
+            property.timezone ?? "America/Puerto_Rico";
+          const todayDateKey = formatInTimeZone(
+            mutationAt,
+            propertyTimezone,
+            "yyyy-MM-dd"
+          );
 
-const distributionDecisionId = `distribution-engine:${property.id}:market-season-defaults:${distributionRunId}`;
+          await createChannexAriOutboxEvent(tx, {
+            organizationId: orgId,
+            propertyId: property.id,
+            messageKind: "RATES_RESTRICTIONS",
+            trigger: "MARKET_SEASON_DEFAULTS",
+            syncMode: "INCREMENTAL",
+            dateRange: buildFullSyncRange(todayDateKey),
+            sourceEntityType: "PROPERTY",
+            sourceEntityId: property.id,
+            now: mutationAt,
+          });
+        }
 
-try {
-  distributionSyncResult = await syncChannexAvailabilityForProperty(
-    property.id
-  );
+        return appliedResult;
+      });
 
-  await prisma.property.update({
-    where: { id: property.id },
-    data: {
-      distributionLastSyncedAt: new Date(),
-      distributionLastError: null,
-    },
-  });
+      let distributionSyncResult: any = null;
 
-  const distributionCompletedAt = new Date();
-
-  const distributionSyncSucceeded =
-    distributionSyncResult &&
-    typeof distributionSyncResult === "object" &&
-    "ok" in distributionSyncResult
-      ? Boolean((distributionSyncResult as any).ok)
-      : true;
-
-  const distributionAuditEntry = createDistributionAuditEntry({
-    organizationId: orgId,
-    propertyId: property.id,
-    decisionId: distributionDecisionId,
-    trigger: "MARKET_SEASON_DEFAULTS",
-    provider: "CHANNEX",
-    syncType: "AVAILABILITY",
-    startedAt: distributionStartedAt,
-    completedAt: distributionCompletedAt,
-    result: distributionSyncResult,
-    status: distributionSyncSucceeded ? "SUCCESS" : "FAILED",
-    severity: distributionSyncSucceeded ? "INFO" : "WARNING",
-    eventType: distributionSyncSucceeded ? "SYNC_COMPLETED" : "SYNC_FAILED",
-    reason: distributionSyncSucceeded
-      ? "MARKET_SEASON_DEFAULTS_DISTRIBUTION_SYNC_COMPLETED"
-      : "MARKET_SEASON_DEFAULTS_DISTRIBUTION_SYNC_FAILED",
-    summary: distributionSyncSucceeded
-      ? "Distribution Engine synchronized channel availability after market season defaults were applied."
-      : "Distribution Engine could not fully synchronize channel availability after market season defaults were applied.",
-    rule: "MARKET_SEASON_DEFAULTS_CHANNEX_AVAILABILITY_SYNC",
-    label: "Market Season Defaults Channel Availability Sync",
-    recommendedAction: distributionSyncSucceeded
-      ? undefined
-      : "Review Channex sync after applying market season defaults.",
-    metadata: {
-      seasonDefaultsApplied: true,
-    },
-  });
-
-  try {
-    await persistAuditEntry(prisma, distributionAuditEntry);
-  } catch (auditPersistenceError: any) {
-    console.error("[APMS_DISTRIBUTION_AUTO_SYNC_AUDIT_PERSIST_ERROR]", {
-      engine: "Distribution",
-      propertyId: property.id,
-      provider: "CHANNEX",
-      syncType: "AVAILABILITY",
-      trigger: "MARKET_SEASON_DEFAULTS",
-      decisionId: distributionAuditEntry.decisionId,
-      error: auditPersistenceError?.message ?? auditPersistenceError,
-    });
-  }
-} catch (syncError: any) {
-  console.error("POST apply-market-defaults Channex sync error", syncError);
-
-  await prisma.property.update({
-    where: { id: property.id },
-    data: {
-      distributionLastError:
-        syncError?.message ||
-        "Failed to sync Channex after applying market season defaults",
-    },
-  });
-
-  const distributionCompletedAt = new Date();
-
-  const distributionAuditEntry = createDistributionAuditEntry({
-    organizationId: orgId,
-    propertyId: property.id,
-    decisionId: distributionDecisionId,
-    trigger: "MARKET_SEASON_DEFAULTS",
-    provider: "CHANNEX",
-    syncType: "AVAILABILITY",
-    startedAt: distributionStartedAt,
-    completedAt: distributionCompletedAt,
-    error: syncError,
-    status: "FAILED",
-    severity: "CRITICAL",
-    eventType: "SYNC_FAILED",
-    reason: "MARKET_SEASON_DEFAULTS_DISTRIBUTION_SYNC_ERROR",
-    summary:
-      "Distribution Engine failed to synchronize channel availability after market season defaults were applied.",
-    rule: "MARKET_SEASON_DEFAULTS_CHANNEX_AVAILABILITY_SYNC",
-    label: "Market Season Defaults Channel Availability Sync",
-    recommendedAction:
-      "Review Channex availability connection and retry sync after applying market season defaults.",
-    metadata: {
-      seasonDefaultsApplied: true,
-    },
-  });
-
-  try {
-    await persistAuditEntry(prisma, distributionAuditEntry);
-  } catch (auditPersistenceError: any) {
-    console.error("[APMS_DISTRIBUTION_AUTO_SYNC_AUDIT_PERSIST_ERROR]", {
-      engine: "Distribution",
-      propertyId: property.id,
-      provider: "CHANNEX",
-      syncType: "AVAILABILITY",
-      trigger: "MARKET_SEASON_DEFAULTS",
-      decisionId: distributionAuditEntry.decisionId,
-      error: auditPersistenceError?.message ?? auditPersistenceError,
-    });
-  }
-}   
       return res.json({
         ok: true,
         result,
@@ -3409,15 +3282,15 @@ dashboardPropertiesRouter.post(
       const orgId = user.orgId as string;
       const { id } = req.params;
 
-     const {
-  name,
-  type,
-  startMonth,
-  startDay,
-  endMonth,
-  endDay,
-  adjustmentPercent,
-} = req.body ?? {};
+      const {
+        name,
+        type,
+        startMonth,
+        startDay,
+        endMonth,
+        endDay,
+        adjustmentPercent,
+      } = req.body ?? {};
       const cleanName = String(name || "").trim();
       const parsedStartMonth = Number(startMonth);
       const parsedStartDay = Number(startDay);
@@ -3427,33 +3300,68 @@ dashboardPropertiesRouter.post(
       const parsedSeasonType = parsePropertySeasonType(type);
 
       if (!cleanName) {
-        return res.status(400).json({ ok: false, error: "Season name is required" });
+        return res.status(400).json({
+          ok: false,
+          error: "Season name is required",
+        });
       }
 
       if (!parsedSeasonType) {
-  return res.status(400).json({
-    ok: false,
-    error: "type must be PEAK, SHOULDER, or LOW",
-  });
-}
-
-      if (!Number.isInteger(parsedStartMonth) || parsedStartMonth < 1 || parsedStartMonth > 12) {
-        return res.status(400).json({ ok: false, error: "startMonth must be between 1 and 12" });
+        return res.status(400).json({
+          ok: false,
+          error: "type must be PEAK, SHOULDER, or LOW",
+        });
       }
 
-      if (!Number.isInteger(parsedEndMonth) || parsedEndMonth < 1 || parsedEndMonth > 12) {
-        return res.status(400).json({ ok: false, error: "endMonth must be between 1 and 12" });
+      if (
+        !Number.isInteger(parsedStartMonth) ||
+        parsedStartMonth < 1 ||
+        parsedStartMonth > 12
+      ) {
+        return res.status(400).json({
+          ok: false,
+          error: "startMonth must be between 1 and 12",
+        });
       }
 
-      if (!Number.isInteger(parsedStartDay) || parsedStartDay < 1 || parsedStartDay > 31) {
-        return res.status(400).json({ ok: false, error: "startDay must be between 1 and 31" });
+      if (
+        !Number.isInteger(parsedEndMonth) ||
+        parsedEndMonth < 1 ||
+        parsedEndMonth > 12
+      ) {
+        return res.status(400).json({
+          ok: false,
+          error: "endMonth must be between 1 and 12",
+        });
       }
 
-      if (!Number.isInteger(parsedEndDay) || parsedEndDay < 1 || parsedEndDay > 31) {
-        return res.status(400).json({ ok: false, error: "endDay must be between 1 and 31" });
+      if (
+        !Number.isInteger(parsedStartDay) ||
+        parsedStartDay < 1 ||
+        parsedStartDay > 31
+      ) {
+        return res.status(400).json({
+          ok: false,
+          error: "startDay must be between 1 and 31",
+        });
       }
 
-      if (!Number.isFinite(parsedAdjustmentPercent) || parsedAdjustmentPercent < -100 || parsedAdjustmentPercent > 300) {
+      if (
+        !Number.isInteger(parsedEndDay) ||
+        parsedEndDay < 1 ||
+        parsedEndDay > 31
+      ) {
+        return res.status(400).json({
+          ok: false,
+          error: "endDay must be between 1 and 31",
+        });
+      }
+
+      if (
+        !Number.isFinite(parsedAdjustmentPercent) ||
+        parsedAdjustmentPercent < -100 ||
+        parsedAdjustmentPercent > 300
+      ) {
         return res.status(400).json({
           ok: false,
           error: "adjustmentPercent must be between -100 and 300",
@@ -3461,188 +3369,93 @@ dashboardPropertiesRouter.post(
       }
 
       const property = await prisma.property.findFirst({
-        where: { id, organizationId: orgId, status: "ACTIVE" },
-        select: { id: true },
-      });
-
-      if (!property) {
-        return res.status(404).json({ ok: false, error: "Property not found" });
-      }
-
-      const item = await prisma.propertySeason.create({
-        data: {
-          propertyId: property.id,
-          name: cleanName,
-          type: parsedSeasonType,
-          startMonth: parsedStartMonth,
-          startDay: parsedStartDay,
-          endMonth: parsedEndMonth,
-          endDay: parsedEndDay,
-          adjustmentPercent: parsedAdjustmentPercent,
-          isActive: true,
-          source: "CUSTOM",
+        where: {
+          id,
+          organizationId: orgId,
+          status: "ACTIVE",
         },
         select: {
           id: true,
-          propertyId: true,
-          name: true,
-          type: true,
-          startMonth: true,
-          startDay: true,
-          endMonth: true,
-          endDay: true,
-          adjustmentPercent: true,
-          isActive: true,
-          source: true,
-          createdAt: true,
-          updatedAt: true,
+          timezone: true,
+          distributionEnabled: true,
+          distributionStatus: true,
         },
       });
 
-      await prisma.property.update({
-        where: { id: property.id },
-        data: { seasonalPricingEnabled: true },
+      if (!property) {
+        return res.status(404).json({
+          ok: false,
+          error: "Property not found",
+        });
+      }
+
+      const mutationAt = new Date();
+      const item = await prisma.$transaction(async (tx) => {
+        const createdSeason = await tx.propertySeason.create({
+          data: {
+            propertyId: property.id,
+            name: cleanName,
+            type: parsedSeasonType,
+            startMonth: parsedStartMonth,
+            startDay: parsedStartDay,
+            endMonth: parsedEndMonth,
+            endDay: parsedEndDay,
+            adjustmentPercent: parsedAdjustmentPercent,
+            isActive: true,
+            source: "CUSTOM",
+          },
+          select: {
+            id: true,
+            propertyId: true,
+            name: true,
+            type: true,
+            startMonth: true,
+            startDay: true,
+            endMonth: true,
+            endDay: true,
+            adjustmentPercent: true,
+            isActive: true,
+            source: true,
+            createdAt: true,
+            updatedAt: true,
+          },
+        });
+
+        await tx.property.update({
+          where: { id: property.id },
+          data: { seasonalPricingEnabled: true },
+        });
+
+        if (
+          property.distributionEnabled === true &&
+          property.distributionStatus === "ACTIVE"
+        ) {
+          const propertyTimezone =
+            property.timezone ?? "America/Puerto_Rico";
+          const todayDateKey = formatInTimeZone(
+            mutationAt,
+            propertyTimezone,
+            "yyyy-MM-dd"
+          );
+
+          await createChannexAriOutboxEvent(tx, {
+            organizationId: orgId,
+            propertyId: property.id,
+            messageKind: "RATES_RESTRICTIONS",
+            trigger: "SEASON_CREATE",
+            syncMode: "INCREMENTAL",
+            dateRange: buildFullSyncRange(todayDateKey),
+            sourceEntityType: "PROPERTY_SEASON",
+            sourceEntityId: createdSeason.id,
+            now: mutationAt,
+          });
+        }
+
+        return createdSeason;
       });
 
-     let distributionSyncResult: any = null;
+      let distributionSyncResult: any = null;
 
-const distributionStartedAt = new Date();
-const distributionDecisionId = `distribution-engine:${property.id}:season-create:${item.id}`;
-
-try {
-  distributionSyncResult = await syncChannexAvailabilityForProperty(
-    property.id
-  );
-
-  await prisma.property.update({
-    where: { id: property.id },
-    data: {
-      distributionLastSyncedAt: new Date(),
-      distributionLastError: null,
-    },
-  });
-
-  const distributionCompletedAt = new Date();
-
-  const distributionSyncSucceeded =
-    distributionSyncResult &&
-    typeof distributionSyncResult === "object" &&
-    "ok" in distributionSyncResult
-      ? Boolean((distributionSyncResult as any).ok)
-      : true;
-
-  const distributionAuditEntry = createDistributionAuditEntry({
-    organizationId: orgId,
-    propertyId: property.id,
-    decisionId: distributionDecisionId,
-    trigger: "SEASON_CREATE",
-    provider: "CHANNEX",
-    syncType: "AVAILABILITY",
-    startedAt: distributionStartedAt,
-    completedAt: distributionCompletedAt,
-    result: distributionSyncResult,
-    status: distributionSyncSucceeded ? "SUCCESS" : "FAILED",
-    severity: distributionSyncSucceeded ? "INFO" : "WARNING",
-    eventType: distributionSyncSucceeded ? "SYNC_COMPLETED" : "SYNC_FAILED",
-    reason: distributionSyncSucceeded
-      ? "SEASON_CREATE_DISTRIBUTION_SYNC_COMPLETED"
-      : "SEASON_CREATE_DISTRIBUTION_SYNC_FAILED",
-    summary: distributionSyncSucceeded
-      ? "Distribution Engine synchronized channel availability after seasonal pricing creation."
-      : "Distribution Engine could not fully synchronize channel availability after seasonal pricing creation.",
-    rule: "SEASON_CREATE_CHANNEX_AVAILABILITY_SYNC",
-    label: "Season Creation Channel Availability Sync",
-    recommendedAction: distributionSyncSucceeded
-      ? undefined
-      : "Review Channex sync after creating this season.",
-    metadata: {
-      seasonId: item.id,
-      seasonName: item.name,
-      seasonType: item.type,
-      seasonSource: item.source,
-      adjustmentPercent: Number(item.adjustmentPercent),
-      startMonth: item.startMonth,
-      startDay: item.startDay,
-      endMonth: item.endMonth,
-      endDay: item.endDay,
-    },
-  });
-
-  try {
-    await persistAuditEntry(prisma, distributionAuditEntry);
-  } catch (auditPersistenceError: any) {
-    console.error("[APMS_DISTRIBUTION_AUTO_SYNC_AUDIT_PERSIST_ERROR]", {
-      engine: "Distribution",
-      propertyId: property.id,
-      provider: "CHANNEX",
-      syncType: "AVAILABILITY",
-      trigger: "SEASON_CREATE",
-      seasonId: item.id,
-      decisionId: distributionAuditEntry.decisionId,
-      error: auditPersistenceError?.message ?? auditPersistenceError,
-    });
-  }
-} catch (syncError: any) {
-  console.error("POST seasons Channex sync error", syncError);
-
-  await prisma.property.update({
-    where: { id: property.id },
-    data: {
-      distributionLastError:
-        syncError?.message || "Failed to sync Channex after season create",
-    },
-  });
-
-  const distributionCompletedAt = new Date();
-
-  const distributionAuditEntry = createDistributionAuditEntry({
-    organizationId: orgId,
-    propertyId: property.id,
-    decisionId: distributionDecisionId,
-    trigger: "SEASON_CREATE",
-    provider: "CHANNEX",
-    syncType: "AVAILABILITY",
-    startedAt: distributionStartedAt,
-    completedAt: distributionCompletedAt,
-    error: syncError,
-    status: "FAILED",
-    severity: "CRITICAL",
-    eventType: "SYNC_FAILED",
-    reason: "SEASON_CREATE_DISTRIBUTION_SYNC_ERROR",
-    summary:
-      "Distribution Engine failed to synchronize channel availability after seasonal pricing creation.",
-    rule: "SEASON_CREATE_CHANNEX_AVAILABILITY_SYNC",
-    label: "Season Creation Channel Availability Sync",
-    recommendedAction:
-      "Review Channex availability connection and retry sync after creating this season.",
-    metadata: {
-      seasonId: item.id,
-      seasonName: item.name,
-      seasonType: item.type,
-      seasonSource: item.source,
-      adjustmentPercent: Number(item.adjustmentPercent),
-      startMonth: item.startMonth,
-      startDay: item.startDay,
-      endMonth: item.endMonth,
-      endDay: item.endDay,
-    },
-  });
-
-  try {
-    await persistAuditEntry(prisma, distributionAuditEntry);
-  } catch (auditPersistenceError: any) {
-    console.error("[APMS_DISTRIBUTION_AUTO_SYNC_AUDIT_PERSIST_ERROR]", {
-      engine: "Distribution",
-      propertyId: property.id,
-      provider: "CHANNEX",
-      syncType: "AVAILABILITY",
-      trigger: "SEASON_CREATE",
-      seasonId: item.id,
-      decisionId: distributionAuditEntry.decisionId,
-      error: auditPersistenceError?.message ?? auditPersistenceError,
-    });
-  }
-}
       return res.json({
         ok: true,
         item: {
@@ -3676,11 +3489,35 @@ dashboardPropertiesRouter.patch(
           propertyId: id,
           property: { organizationId: orgId },
         },
-        select: { id: true, propertyId: true },
+        select: {
+          id: true,
+          propertyId: true,
+          name: true,
+          type: true,
+          startMonth: true,
+          startDay: true,
+          endMonth: true,
+          endDay: true,
+          adjustmentPercent: true,
+          isActive: true,
+          source: true,
+          createdAt: true,
+          updatedAt: true,
+          property: {
+            select: {
+              timezone: true,
+              distributionEnabled: true,
+              distributionStatus: true,
+            },
+          },
+        },
       });
 
       if (!season) {
-        return res.status(404).json({ ok: false, error: "Season not found" });
+        return res.status(404).json({
+          ok: false,
+          error: "Season not found",
+        });
       }
 
       const data: any = {};
@@ -3688,29 +3525,35 @@ dashboardPropertiesRouter.patch(
       if (req.body?.name !== undefined) {
         const cleanName = String(req.body.name || "").trim();
         if (!cleanName) {
-          return res.status(400).json({ ok: false, error: "Season name is required" });
+          return res.status(400).json({
+            ok: false,
+            error: "Season name is required",
+          });
         }
         data.name = cleanName;
       }
 
       if (req.body?.type !== undefined) {
-  const parsedSeasonType = parsePropertySeasonType(req.body.type);
+        const parsedSeasonType = parsePropertySeasonType(req.body.type);
 
-  if (!parsedSeasonType) {
-    return res.status(400).json({
-      ok: false,
-      error: "type must be PEAK, SHOULDER, or LOW",
-    });
-  }
+        if (!parsedSeasonType) {
+          return res.status(400).json({
+            ok: false,
+            error: "type must be PEAK, SHOULDER, or LOW",
+          });
+        }
 
-  data.type = parsedSeasonType;
-}
+        data.type = parsedSeasonType;
+      }
 
       for (const field of ["startMonth", "endMonth"]) {
         if (req.body?.[field] !== undefined) {
           const value = Number(req.body[field]);
           if (!Number.isInteger(value) || value < 1 || value > 12) {
-            return res.status(400).json({ ok: false, error: `${field} must be between 1 and 12` });
+            return res.status(400).json({
+              ok: false,
+              error: `${field} must be between 1 and 12`,
+            });
           }
           data[field] = value;
         }
@@ -3720,7 +3563,10 @@ dashboardPropertiesRouter.patch(
         if (req.body?.[field] !== undefined) {
           const value = Number(req.body[field]);
           if (!Number.isInteger(value) || value < 1 || value > 31) {
-            return res.status(400).json({ ok: false, error: `${field} must be between 1 and 31` });
+            return res.status(400).json({
+              ok: false,
+              error: `${field} must be between 1 and 31`,
+            });
           }
           data[field] = value;
         }
@@ -3741,171 +3587,81 @@ dashboardPropertiesRouter.patch(
         data.isActive = Boolean(req.body.isActive);
       }
 
-      const item = await prisma.propertySeason.update({
-        where: { id: season.id },
-        data,
-        select: {
-          id: true,
-          propertyId: true,
-          name: true,
-          type: true,
-          startMonth: true,
-          startDay: true,
-          endMonth: true,
-          endDay: true,
-          adjustmentPercent: true,
-          isActive: true,
-          source: true,
-          createdAt: true,
-          updatedAt: true,
-        },
-      });
+      const seasonChanged =
+        (data.name !== undefined && season.name !== data.name) ||
+        (data.type !== undefined && season.type !== data.type) ||
+        (data.startMonth !== undefined &&
+          season.startMonth !== data.startMonth) ||
+        (data.startDay !== undefined &&
+          season.startDay !== data.startDay) ||
+        (data.endMonth !== undefined && season.endMonth !== data.endMonth) ||
+        (data.endDay !== undefined && season.endDay !== data.endDay) ||
+        (data.adjustmentPercent !== undefined &&
+          Number(season.adjustmentPercent) !==
+            Number(data.adjustmentPercent)) ||
+        (data.isActive !== undefined &&
+          season.isActive !== data.isActive);
 
-     let distributionSyncResult: any = null;
+      const {
+        property: propertyDistribution,
+        ...currentSeason
+      } = season;
+      const mutationAt = new Date();
 
-const distributionStartedAt = new Date();
-const distributionRunId = distributionStartedAt
-  .toISOString()
-  .replace(/[:.]/g, "-");
+      const item = seasonChanged
+        ? await prisma.$transaction(async (tx) => {
+            const updatedSeason = await tx.propertySeason.update({
+              where: { id: season.id },
+              data,
+              select: {
+                id: true,
+                propertyId: true,
+                name: true,
+                type: true,
+                startMonth: true,
+                startDay: true,
+                endMonth: true,
+                endDay: true,
+                adjustmentPercent: true,
+                isActive: true,
+                source: true,
+                createdAt: true,
+                updatedAt: true,
+              },
+            });
 
-const distributionDecisionId = `distribution-engine:${season.propertyId}:season-update:${item.id}:${distributionRunId}`;
+            if (
+              propertyDistribution.distributionEnabled === true &&
+              propertyDistribution.distributionStatus === "ACTIVE"
+            ) {
+              const propertyTimezone =
+                propertyDistribution.timezone ??
+                "America/Puerto_Rico";
+              const todayDateKey = formatInTimeZone(
+                mutationAt,
+                propertyTimezone,
+                "yyyy-MM-dd"
+              );
 
-try {
-  distributionSyncResult = await syncChannexAvailabilityForProperty(
-    season.propertyId
-  );
+              await createChannexAriOutboxEvent(tx, {
+                organizationId: orgId,
+                propertyId: season.propertyId,
+                messageKind: "RATES_RESTRICTIONS",
+                trigger: "SEASON_UPDATE",
+                syncMode: "INCREMENTAL",
+                dateRange: buildFullSyncRange(todayDateKey),
+                sourceEntityType: "PROPERTY_SEASON",
+                sourceEntityId: updatedSeason.id,
+                now: mutationAt,
+              });
+            }
 
-  await prisma.property.update({
-    where: { id: season.propertyId },
-    data: {
-      distributionLastSyncedAt: new Date(),
-      distributionLastError: null,
-    },
-  });
+            return updatedSeason;
+          })
+        : currentSeason;
 
-  const distributionCompletedAt = new Date();
+      let distributionSyncResult: any = null;
 
-  const distributionSyncSucceeded =
-    distributionSyncResult &&
-    typeof distributionSyncResult === "object" &&
-    "ok" in distributionSyncResult
-      ? Boolean((distributionSyncResult as any).ok)
-      : true;
-
-  const distributionAuditEntry = createDistributionAuditEntry({
-    organizationId: orgId,
-    propertyId: season.propertyId,
-    decisionId: distributionDecisionId,
-    trigger: "SEASON_UPDATE",
-    provider: "CHANNEX",
-    syncType: "AVAILABILITY",
-    startedAt: distributionStartedAt,
-    completedAt: distributionCompletedAt,
-    result: distributionSyncResult,
-    status: distributionSyncSucceeded ? "SUCCESS" : "FAILED",
-    severity: distributionSyncSucceeded ? "INFO" : "WARNING",
-    eventType: distributionSyncSucceeded ? "SYNC_COMPLETED" : "SYNC_FAILED",
-    reason: distributionSyncSucceeded
-      ? "SEASON_UPDATE_DISTRIBUTION_SYNC_COMPLETED"
-      : "SEASON_UPDATE_DISTRIBUTION_SYNC_FAILED",
-    summary: distributionSyncSucceeded
-      ? "Distribution Engine synchronized channel availability after seasonal pricing update."
-      : "Distribution Engine could not fully synchronize channel availability after seasonal pricing update.",
-    rule: "SEASON_UPDATE_CHANNEX_AVAILABILITY_SYNC",
-    label: "Season Update Channel Availability Sync",
-    recommendedAction: distributionSyncSucceeded
-      ? undefined
-      : "Review Channex sync after updating this season.",
-    metadata: {
-      seasonId: item.id,
-      seasonName: item.name,
-      seasonType: item.type,
-      seasonSource: item.source,
-      adjustmentPercent: Number(item.adjustmentPercent),
-      startMonth: item.startMonth,
-      startDay: item.startDay,
-      endMonth: item.endMonth,
-      endDay: item.endDay,
-      isActive: item.isActive,
-    },
-  });
-
-  try {
-    await persistAuditEntry(prisma, distributionAuditEntry);
-  } catch (auditPersistenceError: any) {
-    console.error("[APMS_DISTRIBUTION_AUTO_SYNC_AUDIT_PERSIST_ERROR]", {
-      engine: "Distribution",
-      propertyId: season.propertyId,
-      provider: "CHANNEX",
-      syncType: "AVAILABILITY",
-      trigger: "SEASON_UPDATE",
-      seasonId: item.id,
-      decisionId: distributionAuditEntry.decisionId,
-      error: auditPersistenceError?.message ?? auditPersistenceError,
-    });
-  }
-} catch (syncError: any) {
-  console.error("PATCH seasons Channex sync error", syncError);
-
-  await prisma.property.update({
-    where: { id: season.propertyId },
-    data: {
-      distributionLastError:
-        syncError?.message || "Failed to sync Channex after season update",
-    },
-  });
-
-  const distributionCompletedAt = new Date();
-
-  const distributionAuditEntry = createDistributionAuditEntry({
-    organizationId: orgId,
-    propertyId: season.propertyId,
-    decisionId: distributionDecisionId,
-    trigger: "SEASON_UPDATE",
-    provider: "CHANNEX",
-    syncType: "AVAILABILITY",
-    startedAt: distributionStartedAt,
-    completedAt: distributionCompletedAt,
-    error: syncError,
-    status: "FAILED",
-    severity: "CRITICAL",
-    eventType: "SYNC_FAILED",
-    reason: "SEASON_UPDATE_DISTRIBUTION_SYNC_ERROR",
-    summary:
-      "Distribution Engine failed to synchronize channel availability after seasonal pricing update.",
-    rule: "SEASON_UPDATE_CHANNEX_AVAILABILITY_SYNC",
-    label: "Season Update Channel Availability Sync",
-    recommendedAction:
-      "Review Channex availability connection and retry sync after updating this season.",
-    metadata: {
-      seasonId: item.id,
-      seasonName: item.name,
-      seasonType: item.type,
-      seasonSource: item.source,
-      adjustmentPercent: Number(item.adjustmentPercent),
-      startMonth: item.startMonth,
-      startDay: item.startDay,
-      endMonth: item.endMonth,
-      endDay: item.endDay,
-      isActive: item.isActive,
-    },
-  });
-
-  try {
-    await persistAuditEntry(prisma, distributionAuditEntry);
-  } catch (auditPersistenceError: any) {
-    console.error("[APMS_DISTRIBUTION_AUTO_SYNC_AUDIT_PERSIST_ERROR]", {
-      engine: "Distribution",
-      propertyId: season.propertyId,
-      provider: "CHANNEX",
-      syncType: "AVAILABILITY",
-      trigger: "SEASON_UPDATE",
-      seasonId: item.id,
-      decisionId: distributionAuditEntry.decisionId,
-      error: auditPersistenceError?.message ?? auditPersistenceError,
-    });
-  }
-}
       return res.json({
         ok: true,
         item: {
@@ -3939,177 +3695,68 @@ dashboardPropertiesRouter.delete(
           propertyId: id,
           property: { organizationId: orgId },
         },
-        select: { id: true, propertyId: true },
+        select: {
+          id: true,
+          propertyId: true,
+          isActive: true,
+          property: {
+            select: {
+              timezone: true,
+              distributionEnabled: true,
+              distributionStatus: true,
+            },
+          },
+        },
       });
 
       if (!season) {
-        return res.status(404).json({ ok: false, error: "Season not found" });
+        return res.status(404).json({
+          ok: false,
+          error: "Season not found",
+        });
       }
 
-     const item = await prisma.propertySeason.update({
-  where: { id: season.id },
-  data: { isActive: false },
-  select: {
-    id: true,
-    propertyId: true,
-    name: true,
-    type: true,
-    startMonth: true,
-    startDay: true,
-    endMonth: true,
-    endDay: true,
-    adjustmentPercent: true,
-    isActive: true,
-    source: true,
-    createdAt: true,
-    updatedAt: true,
-  },
-});
-     let distributionSyncResult: any = null;
+      if (season.isActive) {
+        const mutationAt = new Date();
 
-const distributionStartedAt = new Date();
-const distributionRunId = distributionStartedAt
-  .toISOString()
-  .replace(/[:.]/g, "-");
+        await prisma.$transaction(async (tx) => {
+          const deactivatedSeason = await tx.propertySeason.update({
+            where: { id: season.id },
+            data: { isActive: false },
+            select: {
+              id: true,
+            },
+          });
 
-const distributionDecisionId = `distribution-engine:${season.propertyId}:season-delete:${item.id}:${distributionRunId}`;
+          if (
+            season.property.distributionEnabled === true &&
+            season.property.distributionStatus === "ACTIVE"
+          ) {
+            const propertyTimezone =
+              season.property.timezone ?? "America/Puerto_Rico";
+            const todayDateKey = formatInTimeZone(
+              mutationAt,
+              propertyTimezone,
+              "yyyy-MM-dd"
+            );
 
-try {
-  distributionSyncResult = await syncChannexAvailabilityForProperty(
-    season.propertyId
-  );
+            await createChannexAriOutboxEvent(tx, {
+              organizationId: orgId,
+              propertyId: season.propertyId,
+              messageKind: "RATES_RESTRICTIONS",
+              trigger: "SEASON_DELETE",
+              syncMode: "INCREMENTAL",
+              dateRange: buildFullSyncRange(todayDateKey),
+              sourceEntityType: "PROPERTY_SEASON",
+              sourceEntityId: deactivatedSeason.id,
+              now: mutationAt,
+            });
+          }
+        });
+      }
 
-  await prisma.property.update({
-    where: { id: season.propertyId },
-    data: {
-      distributionLastSyncedAt: new Date(),
-      distributionLastError: null,
-    },
-  });
+      let distributionSyncResult: any = null;
 
-  const distributionCompletedAt = new Date();
-
-  const distributionSyncSucceeded =
-    distributionSyncResult &&
-    typeof distributionSyncResult === "object" &&
-    "ok" in distributionSyncResult
-      ? Boolean((distributionSyncResult as any).ok)
-      : true;
-
-  const distributionAuditEntry = createDistributionAuditEntry({
-    organizationId: orgId,
-    propertyId: season.propertyId,
-    decisionId: distributionDecisionId,
-    trigger: "SEASON_DELETE",
-    provider: "CHANNEX",
-    syncType: "AVAILABILITY",
-    startedAt: distributionStartedAt,
-    completedAt: distributionCompletedAt,
-    result: distributionSyncResult,
-    status: distributionSyncSucceeded ? "SUCCESS" : "FAILED",
-    severity: distributionSyncSucceeded ? "INFO" : "WARNING",
-    eventType: distributionSyncSucceeded ? "SYNC_COMPLETED" : "SYNC_FAILED",
-    reason: distributionSyncSucceeded
-      ? "SEASON_DELETE_DISTRIBUTION_SYNC_COMPLETED"
-      : "SEASON_DELETE_DISTRIBUTION_SYNC_FAILED",
-    summary: distributionSyncSucceeded
-      ? "Distribution Engine synchronized channel availability after seasonal pricing removal."
-      : "Distribution Engine could not fully synchronize channel availability after seasonal pricing removal.",
-    rule: "SEASON_DELETE_CHANNEX_AVAILABILITY_SYNC",
-    label: "Season Removal Channel Availability Sync",
-    recommendedAction: distributionSyncSucceeded
-      ? undefined
-      : "Review Channex sync after removing this season.",
-    metadata: {
-      seasonId: item.id,
-      seasonName: item.name,
-      seasonType: item.type,
-      seasonSource: item.source,
-      adjustmentPercent: Number(item.adjustmentPercent),
-      startMonth: item.startMonth,
-      startDay: item.startDay,
-      endMonth: item.endMonth,
-      endDay: item.endDay,
-      isActive: item.isActive,
-    },
-  });
-
-  try {
-    await persistAuditEntry(prisma, distributionAuditEntry);
-  } catch (auditPersistenceError: any) {
-    console.error("[APMS_DISTRIBUTION_AUTO_SYNC_AUDIT_PERSIST_ERROR]", {
-      engine: "Distribution",
-      propertyId: season.propertyId,
-      provider: "CHANNEX",
-      syncType: "AVAILABILITY",
-      trigger: "SEASON_DELETE",
-      seasonId: item.id,
-      decisionId: distributionAuditEntry.decisionId,
-      error: auditPersistenceError?.message ?? auditPersistenceError,
-    });
-  }
-} catch (syncError: any) {
-  console.error("DELETE seasons Channex sync error", syncError);
-
-  await prisma.property.update({
-    where: { id: season.propertyId },
-    data: {
-      distributionLastError:
-        syncError?.message || "Failed to sync Channex after season delete",
-    },
-  });
-
-  const distributionCompletedAt = new Date();
-
-  const distributionAuditEntry = createDistributionAuditEntry({
-    organizationId: orgId,
-    propertyId: season.propertyId,
-    decisionId: distributionDecisionId,
-    trigger: "SEASON_DELETE",
-    provider: "CHANNEX",
-    syncType: "AVAILABILITY",
-    startedAt: distributionStartedAt,
-    completedAt: distributionCompletedAt,
-    error: syncError,
-    status: "FAILED",
-    severity: "CRITICAL",
-    eventType: "SYNC_FAILED",
-    reason: "SEASON_DELETE_DISTRIBUTION_SYNC_ERROR",
-    summary:
-      "Distribution Engine failed to synchronize channel availability after seasonal pricing removal.",
-    rule: "SEASON_DELETE_CHANNEX_AVAILABILITY_SYNC",
-    label: "Season Removal Channel Availability Sync",
-    recommendedAction:
-      "Review Channex availability connection and retry sync after removing this season.",
-    metadata: {
-      seasonId: item.id,
-      seasonName: item.name,
-      seasonType: item.type,
-      seasonSource: item.source,
-      adjustmentPercent: Number(item.adjustmentPercent),
-      startMonth: item.startMonth,
-      startDay: item.startDay,
-      endMonth: item.endMonth,
-      endDay: item.endDay,
-      isActive: item.isActive,
-    },
-  });
-
-  try {
-    await persistAuditEntry(prisma, distributionAuditEntry);
-  } catch (auditPersistenceError: any) {
-    console.error("[APMS_DISTRIBUTION_AUTO_SYNC_AUDIT_PERSIST_ERROR]", {
-      engine: "Distribution",
-      propertyId: season.propertyId,
-      provider: "CHANNEX",
-      syncType: "AVAILABILITY",
-      trigger: "SEASON_DELETE",
-      seasonId: item.id,
-      decisionId: distributionAuditEntry.decisionId,
-      error: auditPersistenceError?.message ?? auditPersistenceError,
-    });
-  }
-}
       return res.json({
         ok: true,
         distributionSyncResult,
@@ -4167,7 +3814,7 @@ dashboardPropertiesRouter.get(
   }
 );
 
-  dashboardPropertiesRouter.post(
+dashboardPropertiesRouter.post(
   "/api/dashboard/properties/:id/distribution/enable",
   requireAuth,
   async (req, res) => {
@@ -4184,7 +3831,12 @@ dashboardPropertiesRouter.get(
         },
         select: {
           id: true,
+          timezone: true,
           distributionEnabled: true,
+          distributionStatus: true,
+          distributionEnabledAt: true,
+          distributionLastSyncedAt: true,
+          distributionLastError: true,
         },
       });
 
@@ -4192,6 +3844,28 @@ dashboardPropertiesRouter.get(
         return res.status(404).json({
           ok: false,
           error: "Property not found",
+        });
+      }
+
+      if (
+        property.distributionEnabled === true &&
+        property.distributionStatus === "ACTIVE"
+      ) {
+        return res.json({
+          ok: true,
+          item: {
+            id: property.id,
+            distributionEnabled: property.distributionEnabled,
+            distributionStatus: property.distributionStatus,
+            distributionEnabledAt: property.distributionEnabledAt,
+            distributionLastSyncedAt: property.distributionLastSyncedAt,
+            distributionLastError: property.distributionLastError,
+          },
+          alreadyEnabled: true,
+          distributionSetupResult: {
+            provisionResult: null,
+            syncResult: null,
+          },
         });
       }
 
@@ -4205,26 +3879,94 @@ dashboardPropertiesRouter.get(
 
       try {
         const provisionResult = await provisionChannexProperty(property.id);
-        const syncResult = await syncChannexAvailabilityForProperty(property.id);
+        const mutationAt = new Date();
+        const propertyTimezone =
+          property.timezone ?? "America/Puerto_Rico";
+        const todayDateKey = formatInTimeZone(
+          mutationAt,
+          propertyTimezone,
+          "yyyy-MM-dd"
+        );
+        const fullSyncCorrelationId =
+          `distribution-enablement:${property.id}:${crypto.randomUUID()}`;
 
-        const updated = await prisma.property.update({
-          where: { id: property.id },
-          data: {
-            distributionEnabled: true,
-            distributionStatus: "ACTIVE",
-            distributionEnabledAt: new Date(),
-            distributionLastSyncedAt: new Date(),
-            distributionLastError: null,
-          },
-          select: {
-            id: true,
-            distributionEnabled: true,
-            distributionStatus: true,
-            distributionEnabledAt: true,
-            distributionLastSyncedAt: true,
-            distributionLastError: true,
-          },
+        const updated = await prisma.$transaction(async (tx) => {
+          await createChannexAriOutboxEvent(tx, {
+            organizationId: orgId,
+            propertyId: property.id,
+            messageKind: "AVAILABILITY",
+            syncMode: "FULL",
+            trigger: "DISTRIBUTION_ENABLEMENT",
+            sourceEntityType: "PROPERTY",
+            sourceEntityId: property.id,
+            correlationId: fullSyncCorrelationId,
+            todayDateKey,
+            now: mutationAt,
+            coalesceMs: 0,
+          });
+
+          await createChannexAriOutboxEvent(tx, {
+            organizationId: orgId,
+            propertyId: property.id,
+            messageKind: "RATES_RESTRICTIONS",
+            syncMode: "FULL",
+            trigger: "DISTRIBUTION_ENABLEMENT",
+            sourceEntityType: "PROPERTY",
+            sourceEntityId: property.id,
+            correlationId: fullSyncCorrelationId,
+            todayDateKey,
+            now: mutationAt,
+            coalesceMs: 0,
+          });
+
+          const existingAriState =
+            await tx.channexAriPropertyState.findUnique({
+              where: { propertyId: property.id },
+              select: { organizationId: true },
+            });
+
+          if (
+            existingAriState &&
+            existingAriState.organizationId !== orgId
+          ) {
+            throw new Error(
+              "CHANNEX_ARI_PROPERTY_STATE_TENANT_MISMATCH"
+            );
+          }
+
+          await tx.channexAriPropertyState.upsert({
+            where: { propertyId: property.id },
+            create: {
+              propertyId: property.id,
+              organizationId: orgId,
+              lastFullSyncRequestedAt: mutationAt,
+            },
+            update: {
+              lastFullSyncRequestedAt: mutationAt,
+            },
+          });
+
+          return tx.property.update({
+            where: { id: property.id },
+            data: {
+              distributionEnabled: true,
+              distributionStatus: "ACTIVE",
+              distributionEnabledAt: mutationAt,
+              distributionLastSyncedAt: null,
+              distributionLastError: null,
+            },
+            select: {
+              id: true,
+              distributionEnabled: true,
+              distributionStatus: true,
+              distributionEnabledAt: true,
+              distributionLastSyncedAt: true,
+              distributionLastError: true,
+            },
+          });
         });
+
+        const syncResult: any = null;
 
         return res.json({
           ok: true,
@@ -4275,9 +4017,8 @@ dashboardPropertiesRouter.get(
       });
     }
   }
-);      
-
- dashboardPropertiesRouter.post(
+);
+dashboardPropertiesRouter.post(
   "/api/dashboard/properties/:id/blocked-dates",
   requireAuth,
   async (req, res) => {
@@ -4306,7 +4047,11 @@ dashboardPropertiesRouter.get(
 
       const property = await prisma.property.findFirst({
         where: { id, organizationId: orgId, status: "ACTIVE" },
-        select: { id: true },
+        select: {
+          id: true,
+          distributionEnabled: true,
+          distributionStatus: true,
+        },
       });
 
       if (!property) {
@@ -4358,159 +4103,56 @@ dashboardPropertiesRouter.get(
         });
       }
 
-      const item = await prisma.propertyBlockedDate.create({
-        data: {
-          propertyId: property.id,
-          startDate: start,
-          endDate: end,
-          reason: String(reason || "").trim() || null,
-        },
-        select: {
-          id: true,
-          propertyId: true,
-          startDate: true,
-          endDate: true,
-          reason: true,
-          createdAt: true,
-          updatedAt: true,
-        },
+      const mutationAt = new Date();
+      const item = await prisma.$transaction(async (tx) => {
+        const blockedDate = await tx.propertyBlockedDate.create({
+          data: {
+            propertyId: property.id,
+            startDate: start,
+            endDate: end,
+            reason: String(reason || "").trim() || null,
+          },
+          select: {
+            id: true,
+            propertyId: true,
+            startDate: true,
+            endDate: true,
+            reason: true,
+            createdAt: true,
+            updatedAt: true,
+          },
+        });
+
+        if (
+          property.distributionEnabled === true &&
+          property.distributionStatus === "ACTIVE"
+        ) {
+          await createChannexAriOutboxEvent(tx, {
+            organizationId: orgId,
+            propertyId: property.id,
+            messageKind: "AVAILABILITY",
+            trigger: "BLOCKED_DATE_CREATE",
+            syncMode: "INCREMENTAL",
+            dateRange: {
+              from: blockedDate.startDate.toISOString().slice(0, 10),
+              toExclusive: blockedDate.endDate.toISOString().slice(0, 10),
+            },
+            sourceEntityType: "PROPERTY_BLOCKED_DATE",
+            sourceEntityId: blockedDate.id,
+            now: mutationAt,
+          });
+        }
+
+        return blockedDate;
       });
-  let distributionSyncResult: any = null;
 
-const distributionStartedAt = new Date();
-const distributionDecisionId = `distribution-engine:${property.id}:blocked-date-create:${item.id}`;
+      let distributionSyncResult: any = null;
 
-const blockedStartDate = item.startDate.toISOString().slice(0, 10);
-const blockedEndDate = item.endDate.toISOString().slice(0, 10);
-
-try {
-  distributionSyncResult = await syncChannexAvailabilityForProperty(
-    property.id
-  );
-
-  await prisma.property.update({
-    where: { id: property.id },
-    data: {
-      distributionLastSyncedAt: new Date(),
-      distributionLastError: null,
-    },
-  });
-
-  const distributionCompletedAt = new Date();
-
-  const distributionSyncSucceeded =
-    distributionSyncResult &&
-    typeof distributionSyncResult === "object" &&
-    "ok" in distributionSyncResult
-      ? Boolean((distributionSyncResult as any).ok)
-      : true;
-
-  const distributionAuditEntry = createDistributionAuditEntry({
-    organizationId: orgId,
-    propertyId: property.id,
-    blockedDateId: item.id,
-    decisionId: distributionDecisionId,
-    trigger: "BLOCKED_DATE_CREATE",
-    provider: "CHANNEX",
-    syncType: "AVAILABILITY",
-    startedAt: distributionStartedAt,
-    completedAt: distributionCompletedAt,
-    result: distributionSyncResult,
-    status: distributionSyncSucceeded ? "SUCCESS" : "FAILED",
-    severity: distributionSyncSucceeded ? "INFO" : "WARNING",
-    eventType: distributionSyncSucceeded ? "SYNC_COMPLETED" : "SYNC_FAILED",
-    reason: distributionSyncSucceeded
-      ? "BLOCKED_DATE_CREATE_DISTRIBUTION_SYNC_COMPLETED"
-      : "BLOCKED_DATE_CREATE_DISTRIBUTION_SYNC_FAILED",
-    summary: distributionSyncSucceeded
-      ? "Distribution Engine synchronized channel availability after blocked date creation."
-      : "Distribution Engine could not fully synchronize channel availability after blocked date creation.",
-    rule: "BLOCKED_DATE_CREATE_CHANNEX_AVAILABILITY_SYNC",
-    label: "Blocked Date Creation Channel Availability Sync",
-    recommendedAction: distributionSyncSucceeded
-      ? undefined
-      : "Review Channex sync after creating this blocked date.",
-    metadata: {
-      blockedStartDate,
-      blockedEndDate,
-    },
-  });
-
-  try {
-    await persistAuditEntry(prisma, distributionAuditEntry);
-  } catch (auditPersistenceError: any) {
-    console.error("[APMS_DISTRIBUTION_AUTO_SYNC_AUDIT_PERSIST_ERROR]", {
-      engine: "Distribution",
-      propertyId: property.id,
-      blockedDateId: item.id,
-      provider: "CHANNEX",
-      syncType: "AVAILABILITY",
-      trigger: "BLOCKED_DATE_CREATE",
-      decisionId: distributionAuditEntry.decisionId,
-      error: auditPersistenceError?.message ?? auditPersistenceError,
-    });
-  }
-} catch (syncError: any) {
-  console.error("POST blocked-dates Channex sync error", syncError);
-
-  await prisma.property.update({
-    where: { id: property.id },
-    data: {
-      distributionLastError:
-        syncError?.message ||
-        "Failed to sync Channex after blocked date update",
-    },
-  });
-
-  const distributionCompletedAt = new Date();
-
-  const distributionAuditEntry = createDistributionAuditEntry({
-    organizationId: orgId,
-    propertyId: property.id,
-    blockedDateId: item.id,
-    decisionId: distributionDecisionId,
-    trigger: "BLOCKED_DATE_CREATE",
-    provider: "CHANNEX",
-    syncType: "AVAILABILITY",
-    startedAt: distributionStartedAt,
-    completedAt: distributionCompletedAt,
-    error: syncError,
-    status: "FAILED",
-    severity: "CRITICAL",
-    eventType: "SYNC_FAILED",
-    reason: "BLOCKED_DATE_CREATE_DISTRIBUTION_SYNC_ERROR",
-    summary:
-      "Distribution Engine failed to synchronize channel availability after blocked date creation.",
-    rule: "BLOCKED_DATE_CREATE_CHANNEX_AVAILABILITY_SYNC",
-    label: "Blocked Date Creation Channel Availability Sync",
-    recommendedAction:
-      "Review Channex availability connection and retry sync after creating this blocked date.",
-    metadata: {
-      blockedStartDate,
-      blockedEndDate,
-    },
-  });
-
-  try {
-    await persistAuditEntry(prisma, distributionAuditEntry);
-  } catch (auditPersistenceError: any) {
-    console.error("[APMS_DISTRIBUTION_AUTO_SYNC_AUDIT_PERSIST_ERROR]", {
-      engine: "Distribution",
-      propertyId: property.id,
-      blockedDateId: item.id,
-      provider: "CHANNEX",
-      syncType: "AVAILABILITY",
-      trigger: "BLOCKED_DATE_CREATE",
-      decisionId: distributionAuditEntry.decisionId,
-      error: auditPersistenceError?.message ?? auditPersistenceError,
-    });
-  }
-} 
-return res.json({
-  ok: true,
-  item,
-  distributionSyncResult,
-});
+      return res.json({
+        ok: true,
+        item,
+        distributionSyncResult,
+      });
     } catch (error: any) {
       console.error("POST blocked dates error", error);
 
@@ -4538,12 +4180,18 @@ dashboardPropertiesRouter.delete(
             organizationId: orgId,
           },
         },
-       select: {
-  id: true,
-  propertyId: true,
-  startDate: true,
-  endDate: true,
-}, 
+        select: {
+          id: true,
+          propertyId: true,
+          startDate: true,
+          endDate: true,
+          property: {
+            select: {
+              distributionEnabled: true,
+              distributionStatus: true,
+            },
+          },
+        },
       });
 
       if (!blockedDate) {
@@ -4553,145 +4201,49 @@ dashboardPropertiesRouter.delete(
         });
       }
 
-      await prisma.propertyBlockedDate.delete({
-  where: { id: blockedDate.id },
-});
-let distributionSyncResult: any = null;
+      const mutationAt = new Date();
+      const item = await prisma.$transaction(async (tx) => {
+        const deletedBlockedDate = await tx.propertyBlockedDate.delete({
+          where: { id: blockedDate.id },
+          select: {
+            id: true,
+            propertyId: true,
+            startDate: true,
+            endDate: true,
+          },
+        });
 
-const distributionStartedAt = new Date();
-const distributionDecisionId = `distribution-engine:${id}:blocked-date-delete:${blockedDate.id}`;
+        if (
+          blockedDate.property.distributionEnabled === true &&
+          blockedDate.property.distributionStatus === "ACTIVE"
+        ) {
+          await createChannexAriOutboxEvent(tx, {
+            organizationId: orgId,
+            propertyId: deletedBlockedDate.propertyId,
+            messageKind: "AVAILABILITY",
+            trigger: "BLOCKED_DATE_DELETE",
+            syncMode: "INCREMENTAL",
+            dateRange: {
+              from: deletedBlockedDate.startDate.toISOString().slice(0, 10),
+              toExclusive: deletedBlockedDate.endDate.toISOString().slice(0, 10),
+            },
+            sourceEntityType: "PROPERTY_BLOCKED_DATE",
+            sourceEntityId: deletedBlockedDate.id,
+            now: mutationAt,
+          });
+        }
 
-const blockedStartDate = blockedDate.startDate.toISOString().slice(0, 10);
-const blockedEndDate = blockedDate.endDate.toISOString().slice(0, 10);
+        return deletedBlockedDate;
+      });
 
-try {
-  distributionSyncResult = await syncChannexAvailabilityForProperty(id);
+      let distributionSyncResult: any = null;
 
-  await prisma.property.update({
-    where: { id },
-    data: {
-      distributionLastSyncedAt: new Date(),
-      distributionLastError: null,
-    },
-  });
-
-  const distributionCompletedAt = new Date();
-
-  const distributionSyncSucceeded =
-    distributionSyncResult &&
-    typeof distributionSyncResult === "object" &&
-    "ok" in distributionSyncResult
-      ? Boolean((distributionSyncResult as any).ok)
-      : true;
-
-  const distributionAuditEntry = createDistributionAuditEntry({
-    organizationId: orgId,
-    propertyId: id,
-    blockedDateId: blockedDate.id,
-    decisionId: distributionDecisionId,
-    trigger: "BLOCKED_DATE_DELETE",
-    provider: "CHANNEX",
-    syncType: "AVAILABILITY",
-    startedAt: distributionStartedAt,
-    completedAt: distributionCompletedAt,
-    result: distributionSyncResult,
-    status: distributionSyncSucceeded ? "SUCCESS" : "FAILED",
-    severity: distributionSyncSucceeded ? "INFO" : "WARNING",
-    eventType: distributionSyncSucceeded ? "SYNC_COMPLETED" : "SYNC_FAILED",
-    reason: distributionSyncSucceeded
-      ? "BLOCKED_DATE_DELETE_DISTRIBUTION_SYNC_COMPLETED"
-      : "BLOCKED_DATE_DELETE_DISTRIBUTION_SYNC_FAILED",
-    summary: distributionSyncSucceeded
-      ? "Distribution Engine synchronized channel availability after blocked date removal."
-      : "Distribution Engine could not fully synchronize channel availability after blocked date removal.",
-    rule: "BLOCKED_DATE_DELETE_CHANNEX_AVAILABILITY_SYNC",
-    label: "Blocked Date Removal Channel Availability Sync",
-    recommendedAction: distributionSyncSucceeded
-      ? undefined
-      : "Review Channex sync after removing this blocked date.",
-    metadata: {
-      blockedStartDate,
-      blockedEndDate,
-    },
-  });
-
-  try {
-    await persistAuditEntry(prisma, distributionAuditEntry);
-  } catch (auditPersistenceError: any) {
-    console.error("[APMS_DISTRIBUTION_AUTO_SYNC_AUDIT_PERSIST_ERROR]", {
-      engine: "Distribution",
-      propertyId: id,
-      blockedDateId: blockedDate.id,
-      provider: "CHANNEX",
-      syncType: "AVAILABILITY",
-      trigger: "BLOCKED_DATE_DELETE",
-      decisionId: distributionAuditEntry.decisionId,
-      error: auditPersistenceError?.message ?? auditPersistenceError,
-    });
-  }
-} catch (syncError: any) {
-  console.error("DELETE blocked-dates Channex sync error", syncError);
-
-  await prisma.property.update({
-    where: { id },
-    data: {
-      distributionLastError:
-        syncError?.message ||
-        "Failed to sync Channex after blocked date delete",
-    },
-  });
-
-  const distributionCompletedAt = new Date();
-
-  const distributionAuditEntry = createDistributionAuditEntry({
-    organizationId: orgId,
-    propertyId: id,
-    blockedDateId: blockedDate.id,
-    decisionId: distributionDecisionId,
-    trigger: "BLOCKED_DATE_DELETE",
-    provider: "CHANNEX",
-    syncType: "AVAILABILITY",
-    startedAt: distributionStartedAt,
-    completedAt: distributionCompletedAt,
-    error: syncError,
-    status: "FAILED",
-    severity: "CRITICAL",
-    eventType: "SYNC_FAILED",
-    reason: "BLOCKED_DATE_DELETE_DISTRIBUTION_SYNC_ERROR",
-    summary:
-      "Distribution Engine failed to synchronize channel availability after blocked date removal.",
-    rule: "BLOCKED_DATE_DELETE_CHANNEX_AVAILABILITY_SYNC",
-    label: "Blocked Date Removal Channel Availability Sync",
-    recommendedAction:
-      "Review Channex availability connection and retry sync after removing this blocked date.",
-    metadata: {
-      blockedStartDate,
-      blockedEndDate,
-    },
-  });
-
-  try {
-    await persistAuditEntry(prisma, distributionAuditEntry);
-  } catch (auditPersistenceError: any) {
-    console.error("[APMS_DISTRIBUTION_AUTO_SYNC_AUDIT_PERSIST_ERROR]", {
-      engine: "Distribution",
-      propertyId: id,
-      blockedDateId: blockedDate.id,
-      provider: "CHANNEX",
-      syncType: "AVAILABILITY",
-      trigger: "BLOCKED_DATE_DELETE",
-      decisionId: distributionAuditEntry.decisionId,
-      error: auditPersistenceError?.message ?? auditPersistenceError,
-    });
-  }
-}
-
-return res.json({
-  ok: true,
-  item: blockedDate,
-  distributionSyncResult,
-});
-       } catch (error: any) {
+      return res.json({
+        ok: true,
+        item,
+        distributionSyncResult,
+      });
+    } catch (error: any) {
       console.error("DELETE blocked date error", error);
       return res.status(500).json({
         ok: false,
@@ -4700,7 +4252,6 @@ return res.json({
     }
   }
 );
-
 dashboardPropertiesRouter.get(
   "/api/dashboard/properties/:id/holiday-pricing",
   requireAuth,
@@ -4793,24 +4344,6 @@ dashboardPropertiesRouter.patch(
         select: {
           id: true,
           propertyId: true,
-        },
-      });
-
-      if (!holidayPricing) {
-        return res.status(404).json({
-          ok: false,
-          error: "Holiday pricing not found",
-        });
-      }
-
-      const item = await prisma.propertyHolidayPricing.update({
-        where: { id: holidayPricing.id },
-        data: {
-          adjustmentPercent: parsedAdjustmentPercent,
-        },
-        select: {
-          id: true,
-          propertyId: true,
           name: true,
           startMonth: true,
           startDay: true,
@@ -4821,155 +4354,94 @@ dashboardPropertiesRouter.patch(
           source: true,
           createdAt: true,
           updatedAt: true,
+          property: {
+            select: {
+              timezone: true,
+              distributionEnabled: true,
+              distributionStatus: true,
+            },
+          },
         },
       });
 
-      let distributionSyncResult: any = null;
-
-      const distributionStartedAt = new Date();
-      const distributionRunId = distributionStartedAt
-        .toISOString()
-        .replace(/[:.]/g, "-");
-
-      const distributionDecisionId = `distribution-engine:${holidayPricing.propertyId}:holiday-pricing-update:${item.id}:${distributionRunId}`;
-
-      try {
-        distributionSyncResult = await syncChannexAvailabilityForProperty(
-          holidayPricing.propertyId
-        );
-
-        await prisma.property.update({
-          where: { id: holidayPricing.propertyId },
-          data: {
-            distributionLastSyncedAt: new Date(),
-            distributionLastError: null,
-          },
+      if (!holidayPricing) {
+        return res.status(404).json({
+          ok: false,
+          error: "Holiday pricing not found",
         });
-
-        const distributionCompletedAt = new Date();
-
-        const distributionSyncSucceeded =
-          distributionSyncResult &&
-          typeof distributionSyncResult === "object" &&
-          "ok" in distributionSyncResult
-            ? Boolean((distributionSyncResult as any).ok)
-            : true;
-
-        const distributionAuditEntry = createDistributionAuditEntry({
-          organizationId: orgId,
-          propertyId: holidayPricing.propertyId,
-          decisionId: distributionDecisionId,
-          trigger: "HOLIDAY_PRICING_UPDATE",
-          provider: "CHANNEX",
-          syncType: "AVAILABILITY",
-          startedAt: distributionStartedAt,
-          completedAt: distributionCompletedAt,
-          result: distributionSyncResult,
-          status: distributionSyncSucceeded ? "SUCCESS" : "FAILED",
-          severity: distributionSyncSucceeded ? "INFO" : "WARNING",
-          eventType: distributionSyncSucceeded
-            ? "SYNC_COMPLETED"
-            : "SYNC_FAILED",
-          reason: distributionSyncSucceeded
-            ? "HOLIDAY_PRICING_UPDATE_DISTRIBUTION_SYNC_COMPLETED"
-            : "HOLIDAY_PRICING_UPDATE_DISTRIBUTION_SYNC_FAILED",
-          summary: distributionSyncSucceeded
-            ? "Distribution Engine synchronized channel availability after holiday pricing update."
-            : "Distribution Engine could not fully synchronize channel availability after holiday pricing update.",
-          rule: "HOLIDAY_PRICING_UPDATE_CHANNEX_AVAILABILITY_SYNC",
-          label: "Holiday Pricing Update Channel Availability Sync",
-          recommendedAction: distributionSyncSucceeded
-            ? undefined
-            : "Review Channex sync after updating this holiday pricing rule.",
-          metadata: {
-            holidayPricingId: item.id,
-            holidayName: item.name,
-            holidaySource: item.source,
-            adjustmentPercent: Number(item.adjustmentPercent),
-            startMonth: item.startMonth,
-            startDay: item.startDay,
-            endMonth: item.endMonth,
-            endDay: item.endDay,
-            isActive: item.isActive,
-          },
-        });
-
-        try {
-          await persistAuditEntry(prisma, distributionAuditEntry);
-        } catch (auditPersistenceError: any) {
-          console.error("[APMS_DISTRIBUTION_AUTO_SYNC_AUDIT_PERSIST_ERROR]", {
-            engine: "Distribution",
-            propertyId: holidayPricing.propertyId,
-            provider: "CHANNEX",
-            syncType: "AVAILABILITY",
-            trigger: "HOLIDAY_PRICING_UPDATE",
-            holidayPricingId: item.id,
-            decisionId: distributionAuditEntry.decisionId,
-            error: auditPersistenceError?.message ?? auditPersistenceError,
-          });
-        }
-      } catch (syncError: any) {
-        console.error("PATCH holiday-pricing Channex sync error", syncError);
-
-        await prisma.property.update({
-          where: { id: holidayPricing.propertyId },
-          data: {
-            distributionLastError:
-              syncError?.message ||
-              "Failed to sync Channex after holiday pricing update",
-          },
-        });
-
-        const distributionCompletedAt = new Date();
-
-        const distributionAuditEntry = createDistributionAuditEntry({
-          organizationId: orgId,
-          propertyId: holidayPricing.propertyId,
-          decisionId: distributionDecisionId,
-          trigger: "HOLIDAY_PRICING_UPDATE",
-          provider: "CHANNEX",
-          syncType: "AVAILABILITY",
-          startedAt: distributionStartedAt,
-          completedAt: distributionCompletedAt,
-          error: syncError,
-          status: "FAILED",
-          severity: "CRITICAL",
-          eventType: "SYNC_FAILED",
-          reason: "HOLIDAY_PRICING_UPDATE_DISTRIBUTION_SYNC_ERROR",
-          summary:
-            "Distribution Engine failed to synchronize channel availability after holiday pricing update.",
-          rule: "HOLIDAY_PRICING_UPDATE_CHANNEX_AVAILABILITY_SYNC",
-          label: "Holiday Pricing Update Channel Availability Sync",
-          recommendedAction:
-            "Review Channex availability connection and retry sync after updating this holiday pricing rule.",
-          metadata: {
-            holidayPricingId: item.id,
-            holidayName: item.name,
-            holidaySource: item.source,
-            adjustmentPercent: Number(item.adjustmentPercent),
-            startMonth: item.startMonth,
-            startDay: item.startDay,
-            endMonth: item.endMonth,
-            endDay: item.endDay,
-            isActive: item.isActive,
-          },
-        });
-
-        try {
-          await persistAuditEntry(prisma, distributionAuditEntry);
-        } catch (auditPersistenceError: any) {
-          console.error("[APMS_DISTRIBUTION_AUTO_SYNC_AUDIT_PERSIST_ERROR]", {
-            engine: "Distribution",
-            propertyId: holidayPricing.propertyId,
-            provider: "CHANNEX",
-            syncType: "AVAILABILITY",
-            trigger: "HOLIDAY_PRICING_UPDATE",
-            holidayPricingId: item.id,
-            decisionId: distributionAuditEntry.decisionId,
-            error: auditPersistenceError?.message ?? auditPersistenceError,
-          });
-        }
       }
+
+      const holidayPricingChanged =
+        Number(holidayPricing.adjustmentPercent) !== parsedAdjustmentPercent;
+      const mutationAt = new Date();
+
+      const item = holidayPricingChanged
+        ? await prisma.$transaction(async (tx) => {
+            const updatedHolidayPricing =
+              await tx.propertyHolidayPricing.update({
+                where: { id: holidayPricing.id },
+                data: {
+                  adjustmentPercent: parsedAdjustmentPercent,
+                },
+                select: {
+                  id: true,
+                  propertyId: true,
+                  name: true,
+                  startMonth: true,
+                  startDay: true,
+                  endMonth: true,
+                  endDay: true,
+                  adjustmentPercent: true,
+                  isActive: true,
+                  source: true,
+                  createdAt: true,
+                  updatedAt: true,
+                },
+              });
+
+            if (
+              holidayPricing.property.distributionEnabled === true &&
+              holidayPricing.property.distributionStatus === "ACTIVE"
+            ) {
+              const propertyTimezone =
+                holidayPricing.property.timezone ?? "America/Puerto_Rico";
+              const todayDateKey = formatInTimeZone(
+                mutationAt,
+                propertyTimezone,
+                "yyyy-MM-dd"
+              );
+
+              await createChannexAriOutboxEvent(tx, {
+                organizationId: orgId,
+                propertyId: holidayPricing.propertyId,
+                messageKind: "RATES_RESTRICTIONS",
+                trigger: "HOLIDAY_PRICING_UPDATE",
+                syncMode: "INCREMENTAL",
+                dateRange: buildFullSyncRange(todayDateKey),
+                sourceEntityType: "PROPERTY_HOLIDAY_PRICING",
+                sourceEntityId: updatedHolidayPricing.id,
+                now: mutationAt,
+              });
+            }
+
+            return updatedHolidayPricing;
+          })
+        : {
+            id: holidayPricing.id,
+            propertyId: holidayPricing.propertyId,
+            name: holidayPricing.name,
+            startMonth: holidayPricing.startMonth,
+            startDay: holidayPricing.startDay,
+            endMonth: holidayPricing.endMonth,
+            endDay: holidayPricing.endDay,
+            adjustmentPercent: holidayPricing.adjustmentPercent,
+            isActive: holidayPricing.isActive,
+            source: holidayPricing.source,
+            createdAt: holidayPricing.createdAt,
+            updatedAt: holidayPricing.updatedAt,
+          };
+
+      let distributionSyncResult: any = null;
 
       return res.json({
         ok: true,
@@ -4988,7 +4460,6 @@ dashboardPropertiesRouter.patch(
     }
   }
 );
-
 dashboardPropertiesRouter.post(
   "/api/dashboard/properties/:id/holiday-pricing/apply-defaults",
   requireAuth,
@@ -4999,19 +4470,72 @@ dashboardPropertiesRouter.post(
       const { id } = req.params;
 
       const property = await prisma.property.findFirst({
-        where: { id, organizationId: orgId, status: "ACTIVE" },
-        select: { id: true },
+        where: {
+          id,
+          organizationId: orgId,
+          status: "ACTIVE",
+        },
+        select: {
+          id: true,
+          timezone: true,
+          distributionEnabled: true,
+          distributionStatus: true,
+        },
       });
 
       if (!property) {
-        return res.status(404).json({ ok: false, error: "Property not found" });
+        return res.status(404).json({
+          ok: false,
+          error: "Property not found",
+        });
       }
 
-      const result = await applyDefaultHolidayPricingForProperty(property.id);
+      const mutationAt = new Date();
+      const result = await prisma.$transaction(async (tx) => {
+        const appliedResult = await applyDefaultHolidayPricingForProperty(
+          property.id,
+          tx
+        );
+        const holidayDefaultsChanged =
+          appliedResult.created > 0 ||
+          appliedResult.updated > 0 ||
+          appliedResult.deactivated > 0;
+
+        if (
+          holidayDefaultsChanged &&
+          property.distributionEnabled === true &&
+          property.distributionStatus === "ACTIVE"
+        ) {
+          const propertyTimezone =
+            property.timezone ?? "America/Puerto_Rico";
+          const todayDateKey = formatInTimeZone(
+            mutationAt,
+            propertyTimezone,
+            "yyyy-MM-dd"
+          );
+
+          await createChannexAriOutboxEvent(tx, {
+            organizationId: orgId,
+            propertyId: property.id,
+            messageKind: "RATES_RESTRICTIONS",
+            trigger: "HOLIDAY_PRICING_DEFAULTS",
+            syncMode: "INCREMENTAL",
+            dateRange: buildFullSyncRange(todayDateKey),
+            sourceEntityType: "PROPERTY",
+            sourceEntityId: property.id,
+            now: mutationAt,
+          });
+        }
+
+        return appliedResult;
+      });
+
+      let distributionSyncResult: any = null;
 
       return res.json({
         ok: true,
         result,
+        distributionSyncResult,
       });
     } catch (error: any) {
       console.error("POST apply holiday pricing defaults error", error);

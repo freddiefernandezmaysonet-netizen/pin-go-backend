@@ -5,9 +5,10 @@ import {
   PrismaClient,
   ReservationStatus,
 } from "@prisma/client";
+import { formatInTimeZone } from "date-fns-tz";
 import stripe from "../billing/stripe";
-import { syncChannexAvailabilityForProperty } from "./channex-availability-sync.service";
 import { reconcileReservation } from "./reservation.reconcile.service";
+import { persistChannexAriReservationIntent } from "../pms/outbound/channex-ari-reservation-producer.service";
 
 const prisma = new PrismaClient();
 
@@ -197,7 +198,9 @@ export async function refundDirectBookingReservation({
         select: {
           id: true,
           name: true,
+          timezone: true,
           organizationId: true,
+          distributionEnabled: true,
           distributionStatus: true,
         },
       },
@@ -384,60 +387,63 @@ export async function refundDirectBookingReservation({
         reservation.cancellationEvaluatedAt ?? refundedAt;
     }
 
-    const updatedReservation = await prisma.reservation.update({
-      where: {
-        id: reservation.id,
-      },
-      data: updateData,
-      select: {
-        id: true,
-        status: true,
-        paymentState: true,
-        hostPayoutStatus: true,
-        totalAmount: true,
-        currency: true,
-        propertyId: true,
-        cancellationRefundAmount: true,
-        cancellationRefundPercent: true,
-      },
+    const updatedReservation = await prisma.$transaction(async (tx) => {
+      const persistedReservation = await tx.reservation.update({
+        where: {
+          id: reservation.id,
+        },
+        data: updateData,
+        select: {
+          id: true,
+          status: true,
+          paymentState: true,
+          hostPayoutStatus: true,
+          totalAmount: true,
+          currency: true,
+          propertyId: true,
+          checkIn: true,
+          checkOut: true,
+          cancellationRefundAmount: true,
+          cancellationRefundPercent: true,
+        },
+      });
+
+      if (
+        reservation.property.distributionEnabled === true &&
+        reservation.property.distributionStatus === "ACTIVE"
+      ) {
+        const propertyTimezone =
+          reservation.property.timezone ?? "America/Puerto_Rico";
+
+        await persistChannexAriReservationIntent({
+          db: tx,
+          organizationId: reservation.property.organizationId,
+          propertyId: persistedReservation.propertyId,
+          reservationId: persistedReservation.id,
+          previous: {
+            checkIn: reservation.checkIn,
+            checkOut: reservation.checkOut,
+            status: reservation.status,
+          },
+          current: {
+            checkIn: persistedReservation.checkIn,
+            checkOut: persistedReservation.checkOut,
+            status: persistedReservation.status,
+          },
+          propertyTimezone,
+          todayDateKey: formatInTimeZone(
+            refundedAt,
+            propertyTimezone,
+            "yyyy-MM-dd"
+          ),
+          now: refundedAt,
+        });
+      }
+
+      return persistedReservation;
     });
 
     await reconcileReservation(reservation.id);
-
-    let distributionSyncResult: unknown = null;
-
-    try {
-      distributionSyncResult = await syncChannexAvailabilityForProperty(
-        reservation.propertyId
-      );
-
-      await prisma.property.update({
-        where: {
-          id: reservation.propertyId,
-        },
-        data: {
-          distributionLastSyncedAt: new Date(),
-          distributionLastError: null,
-        },
-      });
-    } catch (syncError: any) {
-      console.error("[DIRECT_BOOKING_REFUND_CHANNEX_SYNC_ERROR]", {
-        reservationId: reservation.id,
-        propertyId: reservation.propertyId,
-        error: syncError?.message ?? syncError,
-      });
-
-      await prisma.property.update({
-        where: {
-          id: reservation.propertyId,
-        },
-        data: {
-          distributionLastError:
-            syncError?.message ||
-            "Failed to sync Channex after direct booking refund",
-        },
-      });
-    }
 
     return {
       ok: true,
@@ -470,7 +476,7 @@ export async function refundDirectBookingReservation({
         refundPercent: effectiveRefundPercent,
         isFullRefund,
       },
-      distributionSyncResult,
+      distributionSyncResult: null,
     };
   } catch (error: any) {
     console.error("[DIRECT_BOOKING_REFUND_ERROR]", {

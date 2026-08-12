@@ -1,6 +1,8 @@
 import crypto from "crypto";
-import { PrismaClient, AccessStatus, PaymentState, AccessMethod } from "@prisma/client";
+import { PrismaClient, AccessStatus, PaymentState, AccessMethod, ReservationStatus } from "@prisma/client";
 import type { Request, Response } from "express";
+import { formatInTimeZone } from "date-fns-tz";
+import { persistChannexAriReservationIntent } from "../pms/outbound/channex-ari-reservation-producer.service";
 
 const prisma = new PrismaClient();
 
@@ -71,6 +73,50 @@ export async function createReservationHandler(req: Request, res: Response) {
           unlockKey: "#",
         },
       });
+
+      const distributionContext = await tx.property.findUnique({
+        where: { id: reservation.propertyId },
+        select: {
+          organizationId: true,
+          timezone: true,
+          distributionEnabled: true,
+          distributionStatus: true,
+        },
+      });
+
+      if (
+        distributionContext?.distributionEnabled === true &&
+        distributionContext.distributionStatus === "ACTIVE"
+      ) {
+        const currentStatus =
+          reservation.status === ReservationStatus.ACTIVE ? "ACTIVE" : null;
+
+        if (currentStatus) {
+          const ariNow = new Date();
+          const propertyTimezone =
+            distributionContext.timezone ?? "America/Puerto_Rico";
+
+          await persistChannexAriReservationIntent({
+            db: tx,
+            organizationId: distributionContext.organizationId,
+            propertyId: reservation.propertyId,
+            reservationId: reservation.id,
+            previous: null,
+            current: {
+              checkIn: reservation.checkIn,
+              checkOut: reservation.checkOut,
+              status: currentStatus,
+            },
+            propertyTimezone,
+            todayDateKey: formatInTimeZone(
+              ariNow,
+              propertyTimezone,
+              "yyyy-MM-dd"
+            ),
+            now: ariNow,
+          });
+        }
+      }
 
       return { reservation, accessGrant };
     });

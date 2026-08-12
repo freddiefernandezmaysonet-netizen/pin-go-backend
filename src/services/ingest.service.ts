@@ -1,4 +1,4 @@
-import {
+﻿import {
   PrismaClient,
   PaymentState,
   AccessGrantType,
@@ -14,7 +14,7 @@ import crypto from "crypto";
 import { computeCleaningWindowPR } from "../services/cleaningWindow.service";
 import { reconcileReservation } from "./reservation.reconcile.service";
 import { log } from "../utils/log";
-import { fromZonedTime } from "date-fns-tz";
+import { formatInTimeZone, fromZonedTime } from "date-fns-tz";
 import { selectNextStaffForProperty } from "./staff-selection.service";
 import { createCleaningConfirmation } from "./cleaning-confirmation.service";
 import { generateReservationNumber } from "./reservation-number.service";
@@ -23,6 +23,7 @@ import { persistAuditEntry } from "../apms/audit-persistence.service";
 import type { AuditEntry } from "../apms/audit-types";
 import { ensureReservationGuestAgreementSnapshot } from "./guest-agreement.service";
 import { ensureGuestJourneyForConfirmedReservation } from "./guest-journey.service";
+import { persistChannexAriReservationIntent } from "../pms/outbound/channex-ari-reservation-producer.service";
 
 console.log("[INGEST] running src/services/ingest.service.ts", new Date().toISOString());
 const prisma = new PrismaClient();
@@ -56,6 +57,7 @@ type IngestReservationResult = {
   lockId?: string | null;
   warning?: string;
   didChange: boolean;
+  cancelled?: boolean;
   cleaningConfirmation?: {
     reservationId: string;
     propertyId: string;
@@ -144,12 +146,12 @@ export async function ingestReservation(p: IngestPayload) {
     cleaningNfcEnabled: true,
   },
 });
-  
+
   const propertyCheckInTime = property?.checkInTime ?? "15:00";
   const propertyCheckOutTime = "11:00";
   const propertyTimeZone = property?.timezone ?? "America/Puerto_Rico";
-  
-  
+
+
   const checkIn =
     typeof p.checkIn === "string"
       ? isDateOnly(p.checkIn)
@@ -201,6 +203,53 @@ export async function ingestReservation(p: IngestPayload) {
   const externalId = (p.externalId ?? "").trim() || null;
 
     const result: IngestReservationResult = await prisma.$transaction(async (tx) => {
+    const ingestKey = buildIngestKey({
+      source: p.source,
+      propertyId: p.propertyId,
+      guestName: p.guestName,
+      guestEmail: p.guestEmail ?? null,
+      guestPhone: p.guestPhone ?? null,
+      roomName: p.roomName ?? null,
+      checkIn,
+      checkOut,
+      externalProvider,
+      externalId,
+    });
+
+    let previousReservation: {
+      checkIn: Date;
+      checkOut: Date;
+      status: ReservationStatus;
+    } | null = null;
+
+    if (externalProvider && externalId) {
+      previousReservation = await tx.reservation.findUnique({
+        where: {
+          propertyId_externalProvider_externalId: {
+            propertyId: p.propertyId,
+            externalProvider,
+            externalId,
+          },
+        },
+        select: {
+          checkIn: true,
+          checkOut: true,
+          status: true,
+        },
+      });
+    }
+
+    if (!previousReservation) {
+      previousReservation = await tx.reservation.findUnique({
+        where: { ingestKey },
+        select: {
+          checkIn: true,
+          checkOut: true,
+          status: true,
+        },
+      });
+    }
+
     const { reservation, didChange } = await upsertReservation(tx as any, {
       source: p.source,
 
@@ -225,12 +274,86 @@ export async function ingestReservation(p: IngestPayload) {
       externalRaw: p.externalRaw ?? null,
       status: p.status ?? undefined,
     });
-   
+
+    if (didChange) {
+      const distributionContext = await tx.property.findUnique({
+        where: { id: reservation.propertyId },
+        select: {
+          organizationId: true,
+          timezone: true,
+          distributionEnabled: true,
+          distributionStatus: true,
+        },
+      });
+
+      if (
+        distributionContext?.distributionEnabled === true &&
+        distributionContext.distributionStatus === "ACTIVE"
+      ) {
+        const currentStatus =
+          reservation.status === ReservationStatus.ACTIVE
+            ? "ACTIVE"
+            : reservation.status === ReservationStatus.CANCELLED
+            ? "CANCELLED"
+            : null;
+        const previousStatus =
+          previousReservation?.status === ReservationStatus.ACTIVE
+            ? "ACTIVE"
+            : previousReservation?.status === ReservationStatus.CANCELLED
+            ? "CANCELLED"
+            : null;
+
+        if (currentStatus) {
+          const ariNow = new Date();
+          const distributionTimezone =
+            distributionContext.timezone ?? propertyTimeZone;
+
+          await persistChannexAriReservationIntent({
+            db: tx as any,
+            organizationId: distributionContext.organizationId,
+            propertyId: reservation.propertyId,
+            reservationId: reservation.id,
+            previous:
+              previousReservation && previousStatus
+                ? {
+                    checkIn: previousReservation.checkIn,
+                    checkOut: previousReservation.checkOut,
+                    status: previousStatus,
+                  }
+                : null,
+            current: {
+              checkIn: reservation.checkIn,
+              checkOut: reservation.checkOut,
+              status: currentStatus,
+            },
+            propertyTimezone: distributionTimezone,
+            todayDateKey: formatInTimeZone(
+              ariNow,
+              distributionTimezone,
+              "yyyy-MM-dd"
+            ),
+            now: ariNow,
+          });
+        }
+      }
+    }
+
+    if (reservation.status === ReservationStatus.CANCELLED) {
+      return {
+        reservationId: reservation.id,
+        reservationNumber: reservation.reservationNumber,
+        guestToken: reservation.guestToken ?? null,
+        didChange,
+        cancelled: true,
+        cleaningConfirmation: null,
+      };
+    }
+
     await ensureGuestJourneyForConfirmedReservation(
       tx as any,
       reservation.id
     );
- 
+
     const ensured = await ensureGuestToken(tx as any, reservation.id, guestTokenExpiresAt);
 
     const lock = await tx.lock.findFirst({
@@ -300,7 +423,7 @@ if (property?.cleaningNfcEnabled === true) {
     reason: "CLEANING_NFC_DISABLED",
     cleaningNfcEnabled: property?.cleaningNfcEnabled ?? false,
   });
-}   
+}
 
     return {
   reservationId: reservation.id,
@@ -312,6 +435,84 @@ if (property?.cleaningNfcEnabled === true) {
   cleaningConfirmation,
 };
   });
+
+if (result.cancelled) {
+  if (result.didChange) {
+    await reconcileReservation(result.reservationId);
+  }
+
+  const auditEntry = createReservationAuditEntry({
+    reservationId: result.reservationId,
+    propertyId: p.propertyId,
+    reason: result.didChange
+      ? "RESERVATION_CANCELLED"
+      : "CANCELLATION_ALREADY_CURRENT",
+    steps: [
+      {
+        rule: result.didChange
+          ? "RESERVATION_CANCELLED"
+          : "CANCELLATION_ALREADY_CURRENT",
+        label: result.didChange
+          ? "Reservation Cancelled"
+          : "Cancellation Already Current",
+        applied: result.didChange,
+        metadata: {
+          reservationId: result.reservationId,
+          source: p.source ?? null,
+          externalProvider,
+          externalId,
+        },
+      },
+      {
+        rule: result.didChange
+          ? "CANCELLATION_RECONCILED"
+          : "CANCELLATION_RECONCILE_SKIPPED",
+        label: result.didChange
+          ? "Cancellation Reconciled"
+          : "Cancellation Reconcile Skipped",
+        applied: result.didChange,
+        metadata: {
+          reservationId: result.reservationId,
+        },
+      },
+    ],
+    metadata: {
+      source: p.source ?? null,
+      externalProvider,
+      externalId,
+      paymentState,
+      checkIn,
+      checkOut,
+      reservationNumber: result.reservationNumber,
+      status: ReservationStatus.CANCELLED,
+    },
+  });
+
+  try {
+    await persistAuditEntry(prisma, auditEntry);
+  } catch (auditPersistenceError: any) {
+    console.error("[APMS_CANCELLATION_AUDIT_PERSIST_ERROR]", {
+      engine: "Reservation",
+      reservationId: result.reservationId,
+      propertyId: p.propertyId,
+      error:
+        auditPersistenceError?.message ??
+        auditPersistenceError,
+    });
+  }
+
+  log("ingest.result", {
+    reservationId: result.reservationId,
+    reservationNumber: result.reservationNumber,
+    didChange: result.didChange,
+    cancelled: true,
+  });
+
+  return {
+    ...result,
+    auditEntry,
+  };
+}
 
 console.log("[CLEANING_CONFIRMATION_RESULT]", {
   reservationId: result.reservationId,
@@ -343,7 +544,7 @@ if (!guestAgreementSnapshotResult.ok) {
   if (result.didChange) {
     await reconcileReservation(result.reservationId);
   }
- 
+
   const auditEntry = createReservationAuditEntry({
     reservationId: result.reservationId,
     propertyId: p.propertyId,
@@ -681,7 +882,7 @@ async function upsertReservation(
     source?: string;
 
     propertyId: string;
-    
+
     guestName: string;
     guestEmail?: string | null;
     guestPhone?: string | null;
@@ -712,7 +913,7 @@ async function upsertReservation(
   externalProvider: input.externalProvider ?? null,
   externalId: input.externalId ?? null,
 });
-  
+
   const hasPmsKey = !!(input.externalProvider && input.externalId);
 
   if (hasPmsKey) {
