@@ -225,12 +225,29 @@ async function processPreCheckinMessages(
   const upcoming =
     await prisma.reservation.findMany({
       where: {
-        checkIn: {
-          gt: now,
-          lte: new Date(
-            now.getTime() + FOUR_HOURS
-          ),
-        },
+        OR: [
+          {
+            checkIn: {
+              gt: now,
+              lte: new Date(
+                now.getTime() + FOUR_HOURS
+              ),
+            },
+          },
+          {
+            checkIn: {
+              lte: now,
+            },
+            checkOut: {
+              gt: now,
+            },
+            createdAt: {
+              gte:
+                prisma.reservation.fields
+                  .checkIn,
+            },
+          },
+        ],
         paymentState:
           PaymentState.PAID,
         guestPhone: {
