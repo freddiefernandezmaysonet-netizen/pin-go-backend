@@ -7,7 +7,10 @@ import { formatInTimeZone } from "date-fns-tz";
 import { resolveOperationalIssuesForReservation } from "../apms/operational-intelligence.service";
 import { persistChannexAriReservationIntent } from "../pms/outbound/channex-ari-reservation-producer.service";
 import { auditReservationCompleteFlowSafe } from "./reservation-complete-flow-audit.service";
+import { sendLoggedEmail } from "./email-delivery.service";
+import { resolveOrganizationGuestReplyTo } from "./organization-guest-email.service";
 import { reconcileReservation } from "./reservation.reconcile.service";
+import { sendManualReservationGuestCancellationEmail } from "../lib/mailer";
 
 const prisma = new PrismaClient();
 
@@ -119,6 +122,112 @@ async function finalizeManualCancellationOperationsSafe(input: {
     });
 
     console.error("[HOST_MANUAL_CANCELLATION_CLEANING_CLOSE_ERROR]", {
+      reservationId: input.reservationId,
+      error: error?.message ?? error,
+    });
+  }
+
+  try {
+    const reservation = await prisma.reservation.findUnique({
+      where: {
+        id: input.reservationId,
+      },
+      select: {
+        id: true,
+        reservationNumber: true,
+        guestName: true,
+        guestEmail: true,
+        preferredLanguage: true,
+        checkIn: true,
+        checkOut: true,
+        cancelledAt: true,
+        cancellationReason: true,
+        propertyId: true,
+        property: {
+          select: {
+            name: true,
+            timezone: true,
+            organizationId: true,
+          },
+        },
+      },
+    });
+
+    if (reservation?.guestEmail) {
+      const replyTo = await resolveOrganizationGuestReplyTo(
+        prisma,
+        reservation.property.organizationId
+      );
+      const reservationNumber =
+        reservation.reservationNumber ?? reservation.id;
+      const preferredLanguage = reservation.preferredLanguage;
+      const isSpanish =
+        String(preferredLanguage ?? "")
+          .trim()
+          .toLowerCase()
+          .startsWith("es");
+      const emailInput = {
+        to: reservation.guestEmail,
+        replyTo: replyTo.email,
+        reservationNumber,
+        guestName: reservation.guestName,
+        propertyName: reservation.property.name,
+        checkIn: reservation.checkIn,
+        checkOut: reservation.checkOut,
+        propertyTimeZone: reservation.property.timezone,
+        cancelledAt:
+          reservation.cancelledAt ?? input.cancelledAt,
+        reason:
+          reservation.cancellationReason ??
+          "Cancelled by host",
+        preferredLanguage,
+      };
+
+      const emailResult = await sendLoggedEmail({
+        prisma,
+        type: "MANUAL_RESERVATION_GUEST_CANCELLATION",
+        to: reservation.guestEmail,
+        subject: isSpanish
+          ? `Reservación #${reservationNumber} cancelada - ${reservation.property.name}`
+          : `Reservation #${reservationNumber} cancelled - ${reservation.property.name}`,
+        reservationId: reservation.id,
+        propertyId: reservation.propertyId,
+        organizationId: reservation.property.organizationId,
+        retryPayload: {
+          reservationNumber,
+          guestName: reservation.guestName,
+          propertyName: reservation.property.name,
+          checkIn: reservation.checkIn.toISOString(),
+          checkOut: reservation.checkOut.toISOString(),
+          propertyTimeZone: reservation.property.timezone,
+          cancelledAt: (
+            reservation.cancelledAt ?? input.cancelledAt
+          ).toISOString(),
+          reason:
+            reservation.cancellationReason ??
+            "Cancelled by host",
+          preferredLanguage,
+        },
+        send: () =>
+          sendManualReservationGuestCancellationEmail(
+            emailInput
+          ),
+      });
+
+      if (!emailResult.ok) {
+        throw new Error(
+          emailResult.error ??
+            "Manual reservation cancellation email was not delivered."
+        );
+      }
+    }
+  } catch (error: any) {
+    errors.push({
+      operation: "GUEST_CANCELLATION_EMAIL",
+      message: String(error?.message ?? error),
+    });
+
+    console.error("[HOST_MANUAL_CANCELLATION_GUEST_EMAIL_ERROR]", {
       reservationId: input.reservationId,
       error: error?.message ?? error,
     });
