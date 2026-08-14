@@ -2,6 +2,7 @@ import {
   PrismaClient,
   ReservationStatus,
   AccessGrantType,
+  PaymentState,
 } from "@prisma/client";
 import { Router } from "express";
 import { requireAuth } from "../middleware/requireAuth";
@@ -37,6 +38,14 @@ function clamp(n: number, min: number, max: number) {
   return Math.max(min, Math.min(max, n));
 }
 
+const SOURCE_FILTER_ALIASES: Record<string, string[]> = {
+  PIN_GO_DIRECT: ["DIRECT_BOOKING", "PIN_GO_DIRECT"],
+  PIN_GO_MANUAL: ["MANUAL", "PIN_GO_MANUAL"],
+  AIRBNB: ["AIRBNB", "AIR_BNB"],
+  VRBO: ["VRBO"],
+  BOOKING_COM: ["BOOKING_COM", "BOOKINGCOM", "BOOKING.COM"],
+};
+
 
 dashboardReservationsRouter.get("/api/dashboard/reservations", requireAuth, async (req, res) => {
   const user = (req as any).user;
@@ -46,6 +55,16 @@ dashboardReservationsRouter.get("/api/dashboard/reservations", requireAuth, asyn
     typeof req.query.propertyId === "string" ? req.query.propertyId : undefined;
   const statusQ =
     typeof req.query.status === "string" ? req.query.status : undefined;
+  const operationalStatusQ =
+    typeof req.query.operationalStatus === "string"
+      ? req.query.operationalStatus
+      : undefined;
+  const paymentStateQ =
+    typeof req.query.paymentState === "string"
+      ? req.query.paymentState
+      : undefined;
+  const sourceQ =
+    typeof req.query.source === "string" ? req.query.source.trim() : "";
   const fromQ = typeof req.query.from === "string" ? req.query.from : undefined;
   const toQ = typeof req.query.to === "string" ? req.query.to : undefined;
   const search =
@@ -62,6 +81,20 @@ dashboardReservationsRouter.get("/api/dashboard/reservations", requireAuth, asyn
       : statusQ === "CANCELLED"
       ? ReservationStatus.CANCELLED
       : undefined;
+
+  const operationalStatus =
+    operationalStatusQ === "UPCOMING" ||
+    operationalStatusQ === "IN_HOUSE" ||
+    operationalStatusQ === "CHECKED_OUT" ||
+    operationalStatusQ === "CANCELLED"
+      ? operationalStatusQ
+      : undefined;
+
+  const paymentState = Object.values(PaymentState).includes(
+    paymentStateQ as PaymentState
+  )
+    ? (paymentStateQ as PaymentState)
+    : undefined;
 
   const from = fromQ ? new Date(fromQ) : undefined;
   const to = toQ ? new Date(toQ) : undefined;
@@ -84,7 +117,37 @@ dashboardReservationsRouter.get("/api/dashboard/reservations", requireAuth, asyn
   };
 
   if (propertyId) where.propertyId = propertyId;
-  if (status) where.status = status;
+
+  if (operationalStatus === "CANCELLED") {
+    where.status = ReservationStatus.CANCELLED;
+  } else if (operationalStatus) {
+    const now = new Date();
+
+    where.status = ReservationStatus.ACTIVE;
+
+    if (operationalStatus === "UPCOMING") {
+      where.checkIn = { gt: now };
+    } else if (operationalStatus === "IN_HOUSE") {
+      where.checkIn = { lte: now };
+      where.checkOut = { gt: now };
+    } else if (operationalStatus === "CHECKED_OUT") {
+      where.checkOut = { lte: now };
+    }
+  } else if (status) {
+    where.status = status;
+  }
+
+  if (paymentState) {
+    where.paymentState = paymentState;
+  }
+
+  if (sourceQ) {
+    const sourceAliases = SOURCE_FILTER_ALIASES[sourceQ.toUpperCase()];
+
+    where.source = sourceAliases
+      ? { in: sourceAliases, mode: "insensitive" }
+      : { equals: sourceQ, mode: "insensitive" };
+  }
 
   if (from || to) {
     where.AND = [];
