@@ -5,11 +5,18 @@ import {
   AccessGrantType,
   NfcAssignmentStatus,
   NfcAssignmentRole,
+  StaffAccessMethod,
+  StaffAssignmentStatus,
 } from "@prisma/client";
 
 import { deactivateGrant } from "../services/ttlock/ttlock.brain";
 import { ttlockChangeCardPeriod } from "../ttlock/ttlock.card";
 import { log } from "../utils/log";
+import { createCleaningConfirmation } from "./cleaning-confirmation.service";
+import {
+  dispatchPendingCleaningConfirmationForReservation,
+} from "./cleaning-confirmation-dispatch.service";
+import { selectNextStaffForProperty } from "./staff-selection.service";
 
 type ChangePlan = {
   reservationId: string;
@@ -128,6 +135,24 @@ const reservationDatesChanged =
   !!prevOut &&
   (prevIn.getTime() !== desiredStart.getTime() ||
     prevOut.getTime() !== desiredEnd.getTime());
+
+  const cleaningReconfirmationNeeded =
+    reservationDatesChanged &&
+    reservation.property?.cleaningNfcEnabled === true;
+
+  const previousCleaningConfirmation = cleaningReconfirmationNeeded
+    ? await prisma.cleaningConfirmation.findFirst({
+        where: {
+          reservationId: reservation.id,
+          status: {
+            in: ["PENDING", "CONFIRMED"],
+          },
+        },
+        orderBy: {
+          updatedAt: "desc",
+        },
+      })
+    : null;
   
   const guestGrants = grants.filter(
     (g) => g.type === AccessGrantType.GUEST && g.status !== AccessStatus.REVOKED
@@ -151,6 +176,10 @@ const reservationDatesChanged =
     if (a.role === NfcAssignmentRole.GUEST) {
       return a.endsAt.getTime() !== desiredEnd.getTime();
     } else {
+      if (reservationDatesChanged) {
+        return true;
+      }
+
        const cleaningOffsetMin =
   reservation.property?.cleaningStartOffsetMinutes ?? 30;
 
@@ -322,10 +351,49 @@ const cleaningEndsAt = new Date(
         continue;
 
 if (a.role === NfcAssignmentRole.CLEANING) {
-  console.log("[reconcile][cleaning] waiting reconfirmation", {
-    reservationId: reservation.id,
-    nfcAssignmentId: a.id,
-  });
+  try {
+    if (a.status === NfcAssignmentStatus.ACTIVE) {
+      if (!ttlockLockId || !a.NfcCard?.ttlockCardId) {
+        throw new Error(
+          "Active cleaner NFC cannot be revoked because TTLock identifiers are missing."
+        );
+      }
+
+      const nowMs = Date.now();
+
+      await ttlockChangeCardPeriod({
+        lockId: ttlockLockId,
+        cardId: Number(a.NfcCard.ttlockCardId),
+        startDate: nowMs - 60_000,
+        endDate: nowMs - 30_000,
+        changeType: 2,
+      });
+    }
+
+    await prisma.nfcAssignment.update({
+      where: { id: a.id },
+      data: {
+        status: NfcAssignmentStatus.ENDED,
+        lastError: null,
+      },
+    });
+
+    console.log("[reconcile][cleaning] previous NFC ended for reconfirmation", {
+      reservationId: reservation.id,
+      nfcAssignmentId: a.id,
+    });
+  } catch (e: any) {
+    await prisma.nfcAssignment.update({
+      where: { id: a.id },
+      data: {
+        lastError: `CLEANING_RECONFIRMATION_REVOKE_FAILED: ${String(
+          e?.message ?? e
+        )}`,
+      },
+    });
+
+    throw e;
+  }
 
   continue;
 }
@@ -380,6 +448,79 @@ if (a.role === NfcAssignmentRole.CLEANING) {
     }
   }
 
+  if (cleaningReconfirmationNeeded) {
+    await prisma.staffAssignment.updateMany({
+      where: {
+        reservationId: reservation.id,
+        method: StaffAccessMethod.NFC_TIMEBOUND,
+        status: {
+          in: [
+            StaffAssignmentStatus.SCHEDULED,
+            StaffAssignmentStatus.ACTIVE,
+          ],
+        },
+      },
+      data: {
+        status: StaffAssignmentStatus.CANCELLED,
+        lastError: null,
+      },
+    });
+
+    await prisma.cleaningConfirmation.updateMany({
+      where: {
+        reservationId: reservation.id,
+        status: {
+          in: ["PENDING", "CONFIRMED"],
+        },
+      },
+      data: {
+        status: "EXPIRED",
+      },
+    });
+
+    const selectedCleaner = previousCleaningConfirmation
+      ? { id: previousCleaningConfirmation.staffMemberId }
+      : await selectNextStaffForProperty({
+          propertyId: reservation.propertyId,
+        });
+
+    if (selectedCleaner) {
+      const confirmation = await createCleaningConfirmation({
+        reservationId: reservation.id,
+        propertyId: reservation.propertyId,
+        staffMemberId: selectedCleaner.id,
+      });
+
+      try {
+        const dispatchResult =
+          await dispatchPendingCleaningConfirmationForReservation({
+            prisma,
+            reservationId: reservation.id,
+          });
+
+        console.log("[reconcile][cleaning] reconfirmation prepared", {
+          reservationId: reservation.id,
+          confirmationId: confirmation?.id ?? null,
+          sent: dispatchResult.sent,
+          skipped: dispatchResult.skipped,
+          reason: dispatchResult.reason ?? null,
+        });
+      } catch (e: any) {
+        console.error("[reconcile][cleaning] reconfirmation dispatch failed", {
+          reservationId: reservation.id,
+          confirmationId: confirmation?.id ?? null,
+          error: String(e?.message ?? e),
+        });
+      }
+    } else {
+      console.warn("[reconcile][cleaning] reconfirmation skipped", {
+        reservationId: reservation.id,
+        propertyId: reservation.propertyId,
+        reason: "CLEANER_NOT_FOUND",
+      });
+    }
+  }
+
   // 3) Mark reconciled
   await prisma.reservation.update({
   where: { id: reservation.id },
@@ -391,4 +532,4 @@ if (a.role === NfcAssignmentRole.CLEANING) {
     },
   });
 
-} 
+}
