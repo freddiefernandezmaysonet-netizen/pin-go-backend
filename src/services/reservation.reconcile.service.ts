@@ -53,24 +53,57 @@ export async function reconcileReservation(reservationId: string) {
       ) {
         try {
           await deactivateGrant(grant.id);
-        } catch (e) {
-          console.error("TTLock revoke failed", e);
-        }
 
-        await prisma.accessGrant.update({
-          where: { id: grant.id },
-          data: {
-            status: AccessStatus.REVOKED,
-            revokedReason: "CANCELLED_BY_PMS",
-            lastError: null,
-          },
-        });
+          await prisma.accessGrant.update({
+            where: { id: grant.id },
+            data: {
+              status: AccessStatus.REVOKED,
+              revokedReason: "CANCELLED_BY_PMS",
+              lastError: null,
+            },
+          });
+        } catch (e: any) {
+          const revokeError =
+            `CANCELLED_REVOKE_FAILED: ${String(e?.message ?? e)}`;
+
+          console.error("TTLock revoke failed", {
+            reservationId: reservation.id,
+            accessGrantId: grant.id,
+            error: e?.message ?? e,
+          });
+
+          await prisma.accessGrant
+            .update({
+              where: { id: grant.id },
+              data: {
+                lastError: revokeError,
+              },
+            })
+            .catch(() => {});
+        }
       }
     }
 
-    // 🔥 CANCELLED → revoke NFC assignments immediately
+    // CANCELLED → close scheduled NFC and revoke programmed NFC immediately.
     for (const a of reservation.NfcAssignment ?? []) {
-      if (a.status !== NfcAssignmentStatus.ACTIVE) continue;
+      if (a.status === NfcAssignmentStatus.SCHEDULED) {
+        await prisma.nfcAssignment.update({
+          where: { id: a.id },
+          data: {
+            status: NfcAssignmentStatus.ENDED,
+            lastError: null,
+          },
+        });
+
+        continue;
+      }
+
+      if (
+        a.status !== NfcAssignmentStatus.ACTIVE &&
+        a.status !== NfcAssignmentStatus.PROVISIONING
+      ) {
+        continue;
+      }
 
       try {
         const lock = reservation.property?.locks?.find(
@@ -101,12 +134,15 @@ export async function reconcileReservation(reservationId: string) {
           },
         });
       } catch (e: any) {
-        await prisma.nfcAssignment.update({
-          where: { id: a.id },
-          data: {
-            lastError: `CANCELLED_REVOKE_FAILED: ${String(e?.message ?? e)}`,
-          },
-        }).catch(() => {});
+        await prisma.nfcAssignment
+          .update({
+            where: { id: a.id },
+            data: {
+              lastError:
+                `CANCELLED_REVOKE_FAILED: ${String(e?.message ?? e)}`,
+            },
+          })
+          .catch(() => {});
       }
     }
 
