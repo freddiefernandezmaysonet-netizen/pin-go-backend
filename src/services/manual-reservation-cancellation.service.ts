@@ -11,6 +11,7 @@ import { sendLoggedEmail } from "./email-delivery.service";
 import { resolveOrganizationGuestReplyTo } from "./organization-guest-email.service";
 import { reconcileReservation } from "./reservation.reconcile.service";
 import { sendManualReservationGuestCancellationEmail } from "../lib/mailer";
+import { notifyCleanerOfManualReservationCancellation } from "./manual-reservation-cleaner-cancellation-notification.service";
 
 const prisma = new PrismaClient();
 
@@ -125,6 +126,37 @@ async function finalizeManualCancellationOperationsSafe(input: {
       reservationId: input.reservationId,
       error: error?.message ?? error,
     });
+  }
+
+  try {
+    const cleanerNotification =
+      await notifyCleanerOfManualReservationCancellation({
+        reservationId: input.reservationId,
+        prisma,
+      });
+
+    if (
+      !cleanerNotification.ok &&
+      !cleanerNotification.skipped
+    ) {
+      throw new Error(
+        cleanerNotification.error ??
+          "Cleaner cancellation notification failed."
+      );
+    }
+  } catch (error: any) {
+    errors.push({
+      operation: "CLEANER_CANCELLATION_NOTIFICATION",
+      message: String(error?.message ?? error),
+    });
+
+    console.error(
+      "[HOST_MANUAL_CANCELLATION_CLEANER_NOTIFICATION_ERROR]",
+      {
+        reservationId: input.reservationId,
+        error: error?.message ?? error,
+      }
+    );
   }
 
   try {
