@@ -255,3 +255,83 @@ test("idempotent cancellation returns before guest communication finalization", 
     /sendManualReservationGuestCancellationEmail/
   );
 });
+
+test("cleaner cancellation notification runs after cleaning closure and before guest email", async () => {
+  const source = await readManualCancellationService();
+  const cleaningClose = source.indexOf(
+    "await prisma.cleaningConfirmation.updateMany"
+  );
+  const cleanerNotification = source.indexOf(
+    "await notifyCleanerOfManualReservationCancellation"
+  );
+  const guestEmail = source.indexOf(
+    "const reservation = await prisma.reservation.findUnique",
+    cleanerNotification
+  );
+
+  assert.notEqual(cleaningClose, -1);
+  assert.notEqual(cleanerNotification, -1);
+  assert.notEqual(guestEmail, -1);
+  assert.ok(cleaningClose < cleanerNotification);
+  assert.ok(cleanerNotification < guestEmail);
+});
+
+test("cleaner notification skips are non-blocking and real failures are recorded", async () => {
+  const source = await readManualCancellationService();
+  const cleanerStart = source.indexOf(
+    "const cleanerNotification ="
+  );
+  const guestEmailStart = source.indexOf(
+    "const reservation = await prisma.reservation.findUnique",
+    cleanerStart
+  );
+
+  assert.notEqual(cleanerStart, -1);
+  assert.notEqual(guestEmailStart, -1);
+
+  const cleanerBlock = source.slice(
+    cleanerStart,
+    guestEmailStart
+  );
+
+  assert.match(
+    cleanerBlock,
+    /!cleanerNotification\.ok &&\s*!cleanerNotification\.skipped/
+  );
+  assert.match(
+    cleanerBlock,
+    /operation:\s*"CLEANER_CANCELLATION_NOTIFICATION"/
+  );
+  assert.match(
+    cleanerBlock,
+    /Cleaner cancellation notification failed/
+  );
+});
+
+test("idempotent cancellation does not replay cleaner notification", async () => {
+  const source = await readManualCancellationService();
+  const idempotentStart = source.indexOf(
+    "if (!cancellationResult.didCancel)"
+  );
+  const finalizationCall = source.indexOf(
+    "await finalizeManualCancellationOperationsSafe",
+    idempotentStart
+  );
+
+  assert.notEqual(idempotentStart, -1);
+  assert.notEqual(finalizationCall, -1);
+
+  const idempotentBranch = source.slice(
+    idempotentStart,
+    finalizationCall
+  );
+
+  assert.match(
+    idempotentBranch,
+    /alreadyCancelled:\s*true/
+  );
+  assert.doesNotMatch(
+    idempotentBranch,
+    /notifyCleanerOfManualReservationCancellation/
+  );
+});
