@@ -9,6 +9,7 @@ import {
 
 import {
   sendGuestAccessPasscodeEmail,
+  sendManualReservationGuestCancellationEmail,
 } from "../lib/mailer";
 import { resolveOrganizationGuestReplyTo } from "../services/organization-guest-email.service";
 
@@ -90,6 +91,19 @@ function isNonRetryableAccessEmailError(
     error.includes(
       "GUEST_ACCESS_EMAIL_DESTINATION_MISSING"
     )
+  );
+}
+
+function isNonRetryableManualCancellationEmailError(
+  value: unknown
+) {
+  const error = String(value ?? "").toUpperCase();
+
+  return (
+    error.includes("MANUAL_CANCELLATION_RESERVATION_ID_MISSING") ||
+    error.includes("MANUAL_CANCELLATION_RESERVATION_NOT_FOUND") ||
+    error.includes("MANUAL_CANCELLATION_RESERVATION_SCOPE_INVALID") ||
+    error.includes("MANUAL_CANCELLATION_EMAIL_DESTINATION_MISSING")
   );
 }
 
@@ -492,6 +506,188 @@ async function processGuestAccessEmailRetries() {
   }
 }
 
+async function processManualCancellationEmailRetries() {
+  const failedEmailMessages = await prisma.messageLog.findMany({
+    where: {
+      channel: "email",
+      provider: "resend",
+      status: "FAILED",
+      retryCount: {
+        lt: MAX_RETRIES,
+      },
+      body: {
+        contains: '"type":"MANUAL_RESERVATION_GUEST_CANCELLATION"',
+      },
+    },
+    take: BATCH_SIZE,
+    orderBy: {
+      createdAt: "asc",
+    },
+  });
+
+  if (failedEmailMessages.length === 0) {
+    return;
+  }
+
+  log("Retry batch", {
+    channel: "email",
+    type: "MANUAL_RESERVATION_GUEST_CANCELLATION",
+    count: failedEmailMessages.length,
+  });
+
+  for (const message of failedEmailMessages) {
+    try {
+      const reservationId = String(message.reservationId ?? "").trim();
+
+      if (!reservationId) {
+        throw new Error("MANUAL_CANCELLATION_RESERVATION_ID_MISSING");
+      }
+
+      const reservation = await prisma.reservation.findFirst({
+        where: {
+          id: reservationId,
+          ...(message.propertyId
+            ? { propertyId: message.propertyId }
+            : {}),
+          ...(message.organizationId
+            ? {
+                property: {
+                  organizationId: message.organizationId,
+                },
+              }
+            : {}),
+        },
+        include: {
+          property: {
+            select: {
+              organizationId: true,
+              name: true,
+              timezone: true,
+            },
+          },
+        },
+      });
+
+      if (!reservation) {
+        throw new Error("MANUAL_CANCELLATION_RESERVATION_NOT_FOUND");
+      }
+
+      if (
+        reservation.source !== "MANUAL" ||
+        reservation.externalProvider !== "PIN_GO_MANUAL" ||
+        reservation.status !== "CANCELLED"
+      ) {
+        throw new Error("MANUAL_CANCELLATION_RESERVATION_SCOPE_INVALID");
+      }
+
+      const guestEmail = String(reservation.guestEmail ?? "").trim();
+
+      if (!guestEmail || guestEmail !== message.to.trim()) {
+        throw new Error("MANUAL_CANCELLATION_EMAIL_DESTINATION_MISSING");
+      }
+
+      const guestReplyTo = await resolveOrganizationGuestReplyTo(
+        prisma,
+        reservation.property.organizationId
+      );
+
+      const sent = await sendManualReservationGuestCancellationEmail({
+        to: guestEmail,
+        replyTo: guestReplyTo.email,
+        reservationNumber: reservation.reservationNumber ?? reservation.id,
+        guestName: reservation.guestName,
+        propertyName: reservation.property.name,
+        checkIn: reservation.checkIn,
+        checkOut: reservation.checkOut,
+        propertyTimeZone: reservation.property.timezone,
+        cancelledAt: reservation.cancelledAt ?? reservation.updatedAt,
+        reason: reservation.cancellationReason ?? "Cancelled by host",
+        preferredLanguage: reservation.preferredLanguage,
+      });
+
+      const providerMessageId =
+        (sent as any)?.data?.id ??
+        (sent as any)?.providerMessageId ??
+        (sent as any)?.id ??
+        null;
+
+      await prisma.messageLog.update({
+        where: {
+          id: message.id,
+        },
+        data: {
+          status: "SENT",
+          providerMessageId,
+          retryCount: {
+            increment: 1,
+          },
+          error: null,
+        },
+      });
+
+      try {
+        await prisma.messageDispatchLog.create({
+          data: {
+            reservationId: reservation.id,
+            type: "MANUAL_RESERVATION_GUEST_CANCELLATION",
+            channel: "email",
+            status: "SENT",
+          },
+        });
+      } catch (dispatchLogError) {
+        errLog("Manual cancellation email retry dispatch log failed", {
+          messageId: message.id,
+          reservationNumber: reservation.reservationNumber ?? null,
+          error: toErrString(dispatchLogError),
+        });
+      }
+
+      log("Manual cancellation email retry success", {
+        messageId: message.id,
+        reservationNumber: reservation.reservationNumber ?? null,
+        retryCount: message.retryCount + 1,
+      });
+    } catch (error) {
+      const errorMessage = toErrString(error);
+      const nextRetryCount = message.retryCount + 1;
+      const finalFailure =
+        isNonRetryableManualCancellationEmailError(errorMessage) ||
+        nextRetryCount >= MAX_RETRIES;
+
+      try {
+        await prisma.messageLog.update({
+          where: {
+            id: message.id,
+          },
+          data: {
+            status: finalFailure ? "FAILED_FINAL" : "FAILED",
+            retryCount: {
+              increment: 1,
+            },
+            error: errorMessage,
+          },
+        });
+      } catch (updateError) {
+        errLog("Manual cancellation email retry update failed", {
+          messageId: message.id,
+          error: toErrString(updateError),
+        });
+      }
+
+      errLog(
+        finalFailure
+          ? "Manual cancellation email retry stopped"
+          : "Manual cancellation email retry failed",
+        {
+          messageId: message.id,
+          retryCount: nextRetryCount,
+          error: errorMessage,
+        }
+      );
+    }
+  }
+}
+
 let shuttingDown = false;
 let tickRunning = false;
 
@@ -524,6 +720,17 @@ async function tick() {
     } catch (e) {
       errLog(
         "processGuestAccessEmailRetries crashed",
+        {
+          err: toErrString(e),
+        }
+      );
+    }
+
+    try {
+      await processManualCancellationEmailRetries();
+    } catch (e) {
+      errLog(
+        "processManualCancellationEmailRetries crashed",
         {
           err: toErrString(e),
         }

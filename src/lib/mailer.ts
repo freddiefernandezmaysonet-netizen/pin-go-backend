@@ -112,6 +112,20 @@ type SendManualReservationGuestConfirmationInput = {
   preferredLanguage?: string | null;
 };
 
+type SendManualReservationGuestCancellationEmailInput = {
+  to: string;
+  replyTo?: string | null;
+  reservationNumber: string;
+  guestName?: string | null;
+  propertyName: string;
+  checkIn: Date;
+  checkOut: Date;
+  propertyTimeZone?: string | null;
+  cancelledAt: Date | string;
+  reason: string;
+  preferredLanguage?: string | null;
+};
+
 type SendDirectBookingGuestCancellationEmailInput = {
   to: string;
   replyTo?: string | null;
@@ -2179,5 +2193,136 @@ export async function sendDeviceGatewayCriticalAlertEmail(
     providerMessageId:
       data?.id ?? null,
     recipients,
+  };
+}
+
+export async function sendManualReservationGuestCancellationEmail(
+  input: SendManualReservationGuestCancellationEmailInput
+) {
+  const {
+    to,
+    replyTo,
+    reservationNumber,
+    guestName,
+    propertyName,
+    checkIn,
+    checkOut,
+    propertyTimeZone,
+    cancelledAt,
+    reason,
+    preferredLanguage,
+  } = input;
+
+  const language = resolveGuestLanguage(preferredLanguage);
+  const isSpanish = language === "es";
+  const dateTimeZone = normalizePropertyTimeZone(propertyTimeZone);
+  const safeReservationNumber = escapeHtml(reservationNumber);
+  const safeGuestName = escapeHtml(
+    guestName || (isSpanish ? "huésped" : "guest")
+  );
+  const safePropertyName = escapeHtml(propertyName);
+  const safeReason = escapeHtml(reason);
+  const title = isSpanish
+    ? "Su reservación fue cancelada"
+    : "Your reservation was cancelled";
+  const subject = isSpanish
+    ? `Reservación #${reservationNumber} cancelada - ${propertyName}`
+    : `Reservation #${reservationNumber} cancelled - ${propertyName}`;
+
+  if (!resend) {
+    if (isProd) {
+      throw new Error("RESEND_API_KEY missing in production");
+    }
+
+    console.log(
+      "📨 RESEND_API_KEY missing. Manual reservation guest cancellation fallback."
+    );
+    console.log("TO:", to);
+
+    return {
+      ok: true,
+      mode: "console" as const,
+      providerMessageId: null,
+    };
+  }
+
+  const { data, error } = await resend.emails.send({
+    from: getEmailFrom(),
+    to,
+    ...(replyTo ? { replyTo } : {}),
+    subject,
+    html: `
+      <div style="font-family:Arial,sans-serif;color:#111827;line-height:1.6;max-width:680px;margin:0 auto;">
+        <div style="background:linear-gradient(135deg,#020617,#1d4ed8);color:#ffffff;border-radius:18px;padding:24px;margin-bottom:20px;">
+          <p style="margin:0 0 8px;font-size:12px;letter-spacing:0.08em;text-transform:uppercase;font-weight:800;">
+            ${isSpanish ? "Actualización de Pin&Go" : "Pin&Go update"}
+          </p>
+          <h1 style="margin:0;font-size:28px;line-height:1.15;">
+            ${escapeHtml(title)}
+          </h1>
+          <p style="margin:10px 0 0;color:#dbeafe;font-weight:700;">
+            ${isSpanish ? "Reservación" : "Reservation"} #${safeReservationNumber}
+          </p>
+        </div>
+
+        <p>${isSpanish ? "Hola" : "Hi"} ${safeGuestName},</p>
+
+        <p>
+          ${isSpanish
+            ? `El anfitrión canceló su reservación para <strong>${safePropertyName}</strong>.`
+            : `The host cancelled your reservation for <strong>${safePropertyName}</strong>.`}
+        </p>
+
+        <div style="background:#f9fafb;border:1px solid #e5e7eb;border-radius:14px;padding:16px;margin:20px 0;">
+          <p>
+            <strong>${isSpanish ? "Número de reservación" : "Reservation number"}:</strong>
+            #${safeReservationNumber}
+          </p>
+          <p>
+            <strong>${isSpanish ? "Propiedad" : "Property"}:</strong>
+            ${safePropertyName}
+          </p>
+          <p>
+            <strong>${isSpanish ? "Entrada" : "Check-in"}:</strong>
+            ${formatBookingDate(checkIn, dateTimeZone, language)}
+          </p>
+          <p>
+            <strong>${isSpanish ? "Salida" : "Check-out"}:</strong>
+            ${formatBookingDate(checkOut, dateTimeZone, language)}
+          </p>
+          <p>
+            <strong>${isSpanish ? "Cancelada el" : "Cancelled at"}:</strong>
+            ${formatBookingDateTime(cancelledAt, dateTimeZone, language)}
+          </p>
+          <p>
+            <strong>${isSpanish ? "Motivo" : "Reason"}:</strong>
+            ${safeReason}
+          </p>
+        </div>
+
+        <p>
+          ${isSpanish
+            ? "Si necesita información adicional, responda a este correo para comunicarse con el anfitrión."
+            : "If you need additional information, reply to this email to contact the host."}
+        </p>
+
+        <p>
+          ${isSpanish ? "Gracias" : "Thank you"},<br />
+          Pin&amp;Go
+        </p>
+      </div>
+    `,
+  });
+
+  if (error) {
+    throw new Error(
+      `Manual reservation guest cancellation email failed: ${error.message}`
+    );
+  }
+
+  return {
+    ok: true,
+    mode: "resend" as const,
+    providerMessageId: data?.id ?? null,
   };
 }

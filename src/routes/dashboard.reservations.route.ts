@@ -10,6 +10,10 @@ import {
   DirectBookingRefundError,
   refundDirectBookingReservation,
 } from "../services/direct-booking-refund.service";
+import {
+  cancelManualReservationByHost,
+  ManualReservationCancellationError,
+} from "../services/manual-reservation-cancellation.service";
 
 const prisma = new PrismaClient();
 export const dashboardReservationsRouter = Router();
@@ -391,6 +395,67 @@ dashboardReservationsRouter.get(
         },
       })),
     });
+  }
+);
+
+dashboardReservationsRouter.post(
+  "/api/dashboard/reservations/:id/cancel-manual",
+  requireAuth,
+  async (req, res) => {
+    try {
+      const user = (req as any).user;
+      const organizationId = String(user.orgId ?? "").trim();
+      const reservationId = String(req.params.id ?? "").trim();
+      const requestedByUserId = String(
+        user.id ?? user.userId ?? ""
+      ).trim();
+      const reason =
+        typeof req.body?.reason === "string" ? req.body.reason : "";
+
+      if (!requestedByUserId) {
+        return res.status(401).json({
+          ok: false,
+          error: "AUTHENTICATED_USER_ID_REQUIRED",
+          message: "Authenticated user id is required.",
+        });
+      }
+
+      const result = await cancelManualReservationByHost({
+        organizationId,
+        reservationId,
+        reason,
+        requestedByUserId,
+      });
+
+      return res.json(result);
+    } catch (error: any) {
+      console.error(
+        "[DASHBOARD_MANUAL_RESERVATION_CANCELLATION_ERROR]",
+        error
+      );
+
+      if (
+        error instanceof ManualReservationCancellationError ||
+        error?.code
+      ) {
+        return res.status(error?.statusCode || 400).json({
+          ok: false,
+          error:
+            error?.code ||
+            "MANUAL_RESERVATION_CANCELLATION_ERROR",
+          message:
+            error?.message ||
+            "Unable to cancel this manual reservation.",
+          details: error?.details,
+        });
+      }
+
+      return res.status(500).json({
+        ok: false,
+        error: "MANUAL_RESERVATION_CANCELLATION_ERROR",
+        message: "Unable to cancel this manual reservation.",
+      });
+    }
   }
 );
 
