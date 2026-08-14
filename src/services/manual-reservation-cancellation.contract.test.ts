@@ -149,12 +149,12 @@ test("operational finalization uses canonical reservation lifecycle services", a
   assert.doesNotMatch(source, /ttlockDeletePasscode/);
 });
 
-test("pending cleaning confirmations close without inventing a refund", async () => {
+test("active cleaning confirmations close without inventing a refund", async () => {
   const source = await readManualCancellationService();
 
   assert.match(
     source,
-    /cleaningConfirmation\.updateMany\(\{[\s\S]*?reservationId:\s*input\.reservationId[\s\S]*?status:\s*"PENDING"[\s\S]*?status:\s*"CANCELLED"/
+    /cleaningConfirmation\.updateMany\(\{[\s\S]*?reservationId:\s*input\.reservationId[\s\S]*?status:\s*\{[\s\S]*?in:\s*\["PENDING", "CONFIRMED"\][\s\S]*?status:\s*"CANCELLED"/
   );
   assert.doesNotMatch(source, /refundDirectBookingReservation/);
   assert.doesNotMatch(source, /refundAmount/);
