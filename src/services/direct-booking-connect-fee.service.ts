@@ -40,10 +40,53 @@ export function calculateDirectBookingConnectFee(input: {
   };
 }
 
+export function calculateDirectBookingModificationConnectFee(input: {
+  additionalChargeAmountCents: number;
+  platformFeePercent: number;
+}) {
+  const additionalChargeAmountCents = normalizeCents(
+    input.additionalChargeAmountCents,
+    "DIRECT_BOOKING_MODIFICATION_CHARGE_AMOUNT_INVALID"
+  );
+  const platformFeePercent = normalizePercent(
+    input.platformFeePercent,
+    "DIRECT_BOOKING_MODIFICATION_PLATFORM_FEE_PERCENT_INVALID"
+  );
+
+  if (additionalChargeAmountCents <= 0) {
+    throw new Error("DIRECT_BOOKING_MODIFICATION_CHARGE_AMOUNT_INVALID");
+  }
+
+  const incrementalBasePlatformFeeAmountCents = Math.round(
+    additionalChargeAmountCents * (platformFeePercent / 100)
+  );
+  const split = calculateDirectBookingConnectFee({
+    totalAmountCents: additionalChargeAmountCents,
+    basePlatformFeeAmountCents: incrementalBasePlatformFeeAmountCents,
+    identityCheckFeeAmountCents: 0,
+  });
+
+  return {
+    additionalChargeAmountCents,
+    platformFeePercent,
+    additionalPlatformFeeAmountCents: split.platformFeeAmountCents,
+    additionalHostPayoutAmountCents: split.hostPayoutAmountCents,
+    identityCheckFeeAmountCents: 0,
+  };
+}
+
 function normalizeCents(value: number, errorCode: string) {
   if (!Number.isFinite(value) || value < 0) {
     throw new Error(errorCode);
   }
 
   return Math.round(value);
+}
+
+function normalizePercent(value: number, errorCode: string) {
+  if (!Number.isFinite(value) || value < 0) {
+    throw new Error(errorCode);
+  }
+
+  return value;
 }

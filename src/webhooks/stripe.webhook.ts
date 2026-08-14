@@ -9,6 +9,7 @@ import {
 import stripe from "../billing/stripe";
 import syncTuyaEntitlementFromStripeEvent from "../billing/stripe/stripe.tuya.entitlement";
 import { handleDirectBookingCheckoutCompleted } from "../services/direct-booking.service";
+import { handleGuestReservationModificationCheckoutPaid } from "../services/guest-reservation-modification-payment.service";
 import {
   handleGuestIdentityStripeEvent,
   reconcileGuestIdentityVerificationSession,
@@ -74,6 +75,32 @@ export function registerStripeWebhook(app: Express) {
              break;
            }
 
+           if (flow === "direct_booking_reservation_modification") {
+             if (session.payment_status !== "paid") {
+               console.log("⏳ reservation modification payment pending", {
+                 sessionId: session.id,
+                 modificationId:
+                   session.metadata?.reservationModificationId ?? null,
+                 paymentStatus: session.payment_status,
+               });
+
+               break;
+             }
+
+             const result =
+               await handleGuestReservationModificationCheckoutPaid(session);
+
+             console.log("✅ reservation modification payment completed", {
+               sessionId: session.id,
+               modificationId:
+                 session.metadata?.reservationModificationId ?? null,
+               paymentReplay:
+                 "paymentReplay" in result ? result.paymentReplay : null,
+             });
+
+             break;
+           }
+
             await maybeCompleteSignupOnboarding(session);
 
             if (session.subscription) {
@@ -82,6 +109,29 @@ export function registerStripeWebhook(app: Express) {
                 session,
               });
             }
+
+            break;
+          }
+
+          case "checkout.session.async_payment_succeeded": {
+            const session = event.data.object as Stripe.Checkout.Session;
+            const flow = String(session.metadata?.flow ?? "").trim();
+
+            if (flow !== "direct_booking_reservation_modification") {
+              console.log("ℹ️ Stripe event ignored:", event.type);
+              break;
+            }
+
+            const result =
+              await handleGuestReservationModificationCheckoutPaid(session);
+
+            console.log("✅ asynchronous reservation modification payment completed", {
+              sessionId: session.id,
+              modificationId:
+                session.metadata?.reservationModificationId ?? null,
+              paymentReplay:
+                "paymentReplay" in result ? result.paymentReplay : null,
+            });
 
             break;
           }

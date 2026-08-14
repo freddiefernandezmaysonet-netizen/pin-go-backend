@@ -346,6 +346,8 @@ model Reservation {
   checkOut                DateTime
   paymentState            PaymentState             @default(NONE)
   totalAmount             Decimal?                 @db.Decimal(10,2)
+  amountCollected         Decimal                  @default(0) @db.Decimal(10,2)
+  amountRefunded          Decimal                  @default(0) @db.Decimal(10,2)
   currency                String?                  @default("usd")
   stripeCheckoutSessionId String?                  @unique
   stripePaymentIntentId   String?
@@ -376,6 +378,8 @@ model Reservation {
   cancellationRefundPercent  Decimal?               @db.Decimal(5,2)
 
   selectedAmenityIds      String[]                  @default([])
+  adults                  Int                       @default(1)
+  children                Int                       @default(0)
 
   pricingBreakdown        Json?
   createdAt               DateTime                  @default(now())
@@ -438,12 +442,73 @@ model Reservation {
   property                Property                    @relation(fields: [propertyId], references: [id])
   cancellationPolicy      PropertyCancellationPolicy? @relation(fields: [cancellationPolicyId], references: [id],         onDelete: SetNull)
   staffAssignments        StaffAssignment[]
+  modifications           ReservationModification[]
 
   @@unique([propertyId, externalProvider, externalId])
   @@index([propertyId, checkIn, checkOut])
   @@index([cancellationPolicyId])
   @@index([status, cancelledAt])
   @@index([propertyId, status, checkIn])
+}
+
+model ReservationModification {
+  id                         String                                  @id @default(cuid())
+  reservationId              String
+  clientRequestId            String
+  requestFingerprint         String
+  status                     ReservationModificationStatus
+  financialAction            ReservationModificationFinancialAction
+  requestedBy                CancellationActor                       @default(GUEST)
+  requestSource              String                                  @default("GUEST_MANAGE_RESERVATION")
+  baseReservationUpdatedAt   DateTime
+
+  currentCheckIn             DateTime
+  currentCheckOut            DateTime
+  proposedCheckIn            DateTime
+  proposedCheckOut           DateTime
+  currentAdults              Int
+  currentChildren            Int
+  proposedAdults             Int
+  proposedChildren           Int
+  currentSelectedAmenityIds  String[]                                @default([])
+  proposedSelectedAmenityIds String[]                                @default([])
+
+  currentPricing             Json
+  proposedPricing            Json
+  reductionPolicy            Json?
+  guestConfirmation          Json?
+  currentTotalAmount         Decimal                                 @db.Decimal(10,2)
+  proposedTotalAmount        Decimal                                 @db.Decimal(10,2)
+  amountDifference           Decimal                                 @db.Decimal(10,2)
+  additionalChargeAmount     Decimal                                 @default(0) @db.Decimal(10,2)
+  additionalPlatformFeeAmount Decimal                                @default(0) @db.Decimal(10,2)
+  additionalHostPayoutAmount Decimal                                 @default(0) @db.Decimal(10,2)
+  currency                   String                                  @default("usd")
+
+  stripeConnectedAccountId  String?
+  stripeCheckoutSessionId    String?                                 @unique
+  stripePaymentIntentId      String?                                 @unique
+  stripeChargeId             String?                                 @unique
+  stripeTransferId           String?                                 @unique
+  stripeApplicationFeeId     String?                                 @unique
+  stripePaymentStatus        String?
+  checkoutExpiresAt          DateTime?
+
+  failureCode                String?
+  failureMessage             String?
+  failureDetails             Json?
+  appliedAt                  DateTime?
+  expiredAt                  DateTime?
+  cancelledAt                DateTime?
+  createdAt                  DateTime                                @default(now())
+  updatedAt                  DateTime                                @updatedAt
+
+  reservation               Reservation                             @relation(fields: [reservationId], references: [id], onDelete: Cascade)
+
+  @@unique([reservationId, clientRequestId])
+  @@index([reservationId, status])
+  @@index([status, checkoutExpiresAt])
+  @@index([proposedCheckIn, proposedCheckOut, status])
 }
 
 model GuestJourney {
@@ -1567,6 +1632,24 @@ enum PaymentState {
   PAID
   PARTIALLY_REFUNDED
   REFUNDED
+}
+
+enum ReservationModificationStatus {
+  AWAITING_PAYMENT
+  PAYMENT_PROCESSING
+  PAYMENT_FAILED
+  HOST_APPROVAL_REQUIRED
+  APPLYING
+  APPLIED
+  EXPIRED
+  CANCELLED
+}
+
+enum ReservationModificationFinancialAction {
+  ADDITIONAL_PAYMENT_REQUIRED
+  NO_PAYMENT_REQUIRED
+  NO_REFUND_DUE_CONFIRMATION_REQUIRED
+  REDUCTION_REVIEW_REQUIRED
 }
 
 enum StripeConnectStatus {

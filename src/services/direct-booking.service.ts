@@ -113,6 +113,27 @@ function parseOptionalMoneyMetadata(
   return Number(value.toFixed(2));
 }
 
+function parseGuestCountsMetadata(session: Stripe.Checkout.Session) {
+  const adultsRaw = optionalMetadata(session, "adults");
+  const childrenRaw = optionalMetadata(session, "children");
+  const adults = adultsRaw === null ? 1 : Number(adultsRaw);
+  const children = childrenRaw === null ? 0 : Number(childrenRaw);
+
+  if (
+    !Number.isInteger(adults) ||
+    !Number.isInteger(children) ||
+    adults < 1 ||
+    children < 0
+  ) {
+    throw new Error("DIRECT_BOOKING_INVALID_GUEST_COUNT_METADATA");
+  }
+
+  return {
+    adults,
+    children,
+  };
+}
+
 function parseHostPayoutStatus(session: Stripe.Checkout.Session) {
   const raw = optionalMetadata(session, "hostPayoutStatus");
 
@@ -646,6 +667,21 @@ if (
     throw new Error("DIRECT_BOOKING_INVALID_TOTAL_AMOUNT");
   }
 
+  const amountCollectedCents =
+    typeof session.amount_total === "number"
+      ? session.amount_total
+      : Math.round(totalAmount * 100);
+
+  if (
+    !Number.isInteger(amountCollectedCents) ||
+    amountCollectedCents <= 0
+  ) {
+    throw new Error("DIRECT_BOOKING_INVALID_COLLECTED_AMOUNT");
+  }
+
+  const amountCollected = Number((amountCollectedCents / 100).toFixed(2));
+  const guestCounts = parseGuestCountsMetadata(session);
+
  const paymentIntentId =
   typeof session.payment_intent === "string"
     ? session.payment_intent
@@ -806,6 +842,10 @@ const updatedReservation = await prisma.reservation.update({
   },
  data: {
   totalAmount: pricingBreakdown.totalAmount,
+  amountCollected,
+  amountRefunded: 0,
+  adults: guestCounts.adults,
+  children: guestCounts.children,
   currency: pricingBreakdown.currency,
   stripeCheckoutSessionId: session.id,
   stripePaymentIntentId: paymentIntentId,
