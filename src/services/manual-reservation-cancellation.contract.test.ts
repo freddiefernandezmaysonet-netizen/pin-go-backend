@@ -159,3 +159,99 @@ test("pending cleaning confirmations close without inventing a refund", async ()
   assert.doesNotMatch(source, /refundDirectBookingReservation/);
   assert.doesNotMatch(source, /refundAmount/);
 });
+
+test("new manual cancellation sends the guest email through logged delivery", async () => {
+  const source = await readManualCancellationService();
+  const finalizationStart = source.indexOf(
+    "async function finalizeManualCancellationOperationsSafe"
+  );
+  const cancellationFunctionStart = source.indexOf(
+    "export async function cancelManualReservationByHost",
+    finalizationStart
+  );
+  const finalization = source.slice(
+    finalizationStart,
+    cancellationFunctionStart
+  );
+
+  assert.match(
+    finalization,
+    /if \(reservation\?\.guestEmail\)/
+  );
+  assert.match(
+    finalization,
+    /resolveOrganizationGuestReplyTo\(/
+  );
+  assert.match(
+    finalization,
+    /sendLoggedEmail\(\{[\s\S]*?type:\s*"MANUAL_RESERVATION_GUEST_CANCELLATION"/
+  );
+  assert.match(
+    finalization,
+    /sendManualReservationGuestCancellationEmail\(/
+  );
+  assert.match(
+    finalization,
+    /operation:\s*"GUEST_CANCELLATION_EMAIL"/
+  );
+});
+
+test("guest cancellation retry payload contains no token or financial fields", async () => {
+  const source = await readManualCancellationService();
+  const retryStart = source.indexOf(
+    "type: \"MANUAL_RESERVATION_GUEST_CANCELLATION\""
+  );
+  const sendStart = source.indexOf(
+    "send: () =>",
+    retryStart
+  );
+
+  assert.notEqual(retryStart, -1);
+  assert.notEqual(sendStart, -1);
+
+  const loggedDelivery = source.slice(
+    retryStart,
+    sendStart
+  );
+
+  assert.match(loggedDelivery, /retryPayload:/);
+  assert.match(loggedDelivery, /reservationNumber/);
+  assert.match(loggedDelivery, /preferredLanguage/);
+  assert.doesNotMatch(loggedDelivery, /guestToken/);
+  assert.doesNotMatch(loggedDelivery, /stripe/i);
+  assert.doesNotMatch(loggedDelivery, /refund/i);
+  assert.doesNotMatch(loggedDelivery, /paymentState/);
+});
+
+test("idempotent cancellation returns before guest communication finalization", async () => {
+  const source = await readManualCancellationService();
+  const idempotentStart = source.indexOf(
+    "if (!cancellationResult.didCancel)"
+  );
+  const finalizationCall = source.indexOf(
+    "await finalizeManualCancellationOperationsSafe",
+    idempotentStart
+  );
+
+  assert.notEqual(idempotentStart, -1);
+  assert.notEqual(finalizationCall, -1);
+
+  const idempotentBranch = source.slice(
+    idempotentStart,
+    finalizationCall
+  );
+
+  assert.match(
+    idempotentBranch,
+    /alreadyCancelled:\s*true/
+  );
+  assert.match(idempotentBranch, /skipped:\s*true/);
+  assert.doesNotMatch(
+    idempotentBranch,
+    /sendLoggedEmail/
+  );
+  assert.doesNotMatch(
+    idempotentBranch,
+    /sendManualReservationGuestCancellationEmail/
+  );
+});
