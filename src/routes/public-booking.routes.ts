@@ -1,5 +1,5 @@
 import { Router } from "express";
-import { PrismaClient } from "@prisma/client";
+import { PrismaClient, ReservationModificationStatus } from "@prisma/client";
 import {
   checkPropertyAvailability,
   getPropertyBlockedDateKeys,
@@ -19,6 +19,13 @@ import {
   cancelReservationFromGuestPortal,
   getGuestCancellationPreview,
 } from "../services/guest-cancellation.service";
+import {
+  confirmGuestReservationModification,
+  getGuestReservationModificationOptions,
+  getGuestReservationModificationPreview,
+} from "../services/guest-reservation-modification.service";
+import { createGuestReservationModificationCheckout } from "../services/guest-reservation-modification-checkout.service";
+import { applyGuestReservationModification } from "../services/guest-reservation-modification-apply.service";
 
 const prisma = new PrismaClient();
 const publicBookingRouter = Router();
@@ -350,6 +357,233 @@ function sendGuestCancellationRouteError({
     error: fallbackMessage,
   });
 }
+
+function isGuestReservationModificationRouteError(error: any) {
+  return (
+    error &&
+    typeof error === "object" &&
+    error.name === "GuestReservationModificationError" &&
+    typeof error.code === "string" &&
+    typeof error.statusCode === "number"
+  );
+}
+
+function sendGuestReservationModificationRouteError({
+  res,
+  error,
+  fallbackMessage,
+  logLabel,
+}: {
+  res: any;
+  error: any;
+  fallbackMessage: string;
+  logLabel: string;
+}) {
+  console.error(logLabel, error?.message ?? error);
+
+  if (isGuestReservationModificationRouteError(error)) {
+    return res.status(error.statusCode).json({
+      ok: false,
+      error: error.code,
+      message: error.message,
+      details: error.details ?? null,
+    });
+  }
+
+  return res.status(500).json({
+    ok: false,
+    error: fallbackMessage,
+  });
+}
+
+publicBookingRouter.get(
+  "/manage/:guestToken/modification-options",
+  async (req, res) => {
+    try {
+      const guestToken = String(req.params.guestToken ?? "").trim();
+      const options = await getGuestReservationModificationOptions({
+        guestToken,
+      });
+
+      return res.json({
+        ok: true,
+        ...options,
+      });
+    } catch (error: any) {
+      return sendGuestReservationModificationRouteError({
+        res,
+        error,
+        fallbackMessage: "Failed to load reservation modification options.",
+        logLabel: "[public-booking modification-options error]",
+      });
+    }
+  }
+);
+
+publicBookingRouter.post(
+  "/manage/:guestToken/modification-preview",
+  async (req, res) => {
+    try {
+      const guestToken = String(req.params.guestToken ?? "").trim();
+      const checkInDateKey = parseDateKey(req.body?.checkIn);
+      const checkOutDateKey = parseDateKey(req.body?.checkOut);
+
+      if (!checkInDateKey || !checkOutDateKey) {
+        return res.status(400).json({
+          ok: false,
+          error: "INVALID_STAY_DATES",
+          message: "Missing or invalid check-in/check-out dates.",
+        });
+      }
+
+      if (!Array.isArray(req.body?.selectedAmenityIds)) {
+        return res.status(400).json({
+          ok: false,
+          error: "INVALID_SELECTED_AMENITIES",
+          message: "selectedAmenityIds must be an array.",
+        });
+      }
+
+      const options = await getGuestReservationModificationOptions({
+        guestToken,
+      });
+      const stayDates = buildPropertyStayDateRange({
+        checkInDateKey,
+        checkOutDateKey,
+        propertyCheckInTime: options.property.checkInTime,
+        propertyCheckOutTime: options.property.checkOutTime,
+        propertyTimeZone: options.property.timezone,
+      });
+      const preview = await getGuestReservationModificationPreview({
+        guestToken,
+        checkIn: stayDates.checkIn,
+        checkOut: stayDates.checkOut,
+        adults: Number(req.body?.adults),
+        children: Number(req.body?.children),
+        selectedAmenityIds: req.body.selectedAmenityIds,
+      });
+
+      return res.json({
+        ok: true,
+        ...preview,
+      });
+    } catch (error: any) {
+      return sendGuestReservationModificationRouteError({
+        res,
+        error,
+        fallbackMessage: "Failed to preview reservation modification.",
+        logLabel: "[public-booking modification-preview error]",
+      });
+    }
+  }
+);
+
+publicBookingRouter.post(
+  "/manage/:guestToken/modification-confirm",
+  async (req, res) => {
+    try {
+      const guestToken = String(req.params.guestToken ?? "").trim();
+      const checkInDateKey = parseDateKey(req.body?.checkIn);
+      const checkOutDateKey = parseDateKey(req.body?.checkOut);
+
+      if (!checkInDateKey || !checkOutDateKey) {
+        return res.status(400).json({
+          ok: false,
+          error: "INVALID_STAY_DATES",
+          message: "Missing or invalid check-in/check-out dates.",
+        });
+      }
+
+      if (!Array.isArray(req.body?.selectedAmenityIds)) {
+        return res.status(400).json({
+          ok: false,
+          error: "INVALID_SELECTED_AMENITIES",
+          message: "selectedAmenityIds must be an array.",
+        });
+      }
+
+      const options = await getGuestReservationModificationOptions({
+        guestToken,
+      });
+      const stayDates = buildPropertyStayDateRange({
+        checkInDateKey,
+        checkOutDateKey,
+        propertyCheckInTime: options.property.checkInTime,
+        propertyCheckOutTime: options.property.checkOutTime,
+        propertyTimeZone: options.property.timezone,
+      });
+      const result = await confirmGuestReservationModification({
+        guestToken,
+        clientRequestId: String(req.body?.clientRequestId ?? "").trim(),
+        checkIn: stayDates.checkIn,
+        checkOut: stayDates.checkOut,
+        adults: Number(req.body?.adults),
+        children: Number(req.body?.children),
+        selectedAmenityIds: req.body.selectedAmenityIds,
+        acceptNoRefundReduction:
+          req.body?.acceptNoRefundReduction === true,
+      });
+
+      if (
+        result.modification.status ===
+        ReservationModificationStatus.APPLYING
+      ) {
+        const applied = await applyGuestReservationModification({
+          modificationId: result.modification.id,
+        });
+
+        return res.json({
+          ...result,
+          idempotentReplay:
+            result.idempotentReplay || applied.idempotentReplay,
+          datesChanged: applied.datesChanged,
+          ariIntentCreated: applied.ariIntentCreated,
+          modification: {
+            ...result.modification,
+            ...applied.modification,
+            nextAction: "NONE",
+          },
+          reservation: applied.reservation,
+        });
+      }
+
+      return res.json(result);
+    } catch (error: any) {
+      return sendGuestReservationModificationRouteError({
+        res,
+        error,
+        fallbackMessage: "Failed to confirm reservation modification.",
+        logLabel: "[public-booking modification-confirm error]",
+      });
+    }
+  }
+);
+
+publicBookingRouter.post(
+  "/manage/:guestToken/modification-checkout",
+  async (req, res) => {
+    try {
+      const guestToken = String(req.params.guestToken ?? "").trim();
+      const modificationId = String(
+        req.body?.modificationId ?? ""
+      ).trim();
+      const result = await createGuestReservationModificationCheckout({
+        guestToken,
+        modificationId,
+      });
+
+      return res.json(result);
+    } catch (error: any) {
+      return sendGuestReservationModificationRouteError({
+        res,
+        error,
+        fallbackMessage:
+          "Failed to create reservation modification payment Checkout.",
+        logLabel: "[public-booking modification-checkout error]",
+      });
+    }
+  }
+);
 
 publicBookingRouter.get(
   "/manage/:guestToken/cancellation-preview",

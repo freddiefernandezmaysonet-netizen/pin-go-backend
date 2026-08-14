@@ -1,4 +1,8 @@
-import { PrismaClient, ReservationStatus } from "@prisma/client";
+import {
+  PrismaClient,
+  ReservationModificationStatus,
+  ReservationStatus,
+} from "@prisma/client";
 
 const prisma = new PrismaClient();
 
@@ -43,8 +47,16 @@ export async function checkPropertyAvailability(input: {
   propertyId: string;
   checkIn: Date;
   checkOut: Date;
+  excludeReservationId?: string;
+  excludeReservationModificationId?: string;
 }) {
-  const { propertyId, checkIn, checkOut } = input;
+  const {
+    propertyId,
+    checkIn,
+    checkOut,
+    excludeReservationId,
+    excludeReservationModificationId,
+  } = input;
 
   if (!propertyId) {
     throw new Error("propertyId is required");
@@ -66,6 +78,9 @@ export async function checkPropertyAvailability(input: {
     where: {
       propertyId,
       status: ReservationStatus.ACTIVE,
+      ...(excludeReservationId
+        ? { id: { not: excludeReservationId } }
+        : {}),
       checkIn: {
         lt: checkOut,
       },
@@ -87,6 +102,53 @@ export async function checkPropertyAvailability(input: {
       conflict: {
         type: "RESERVATION",
         ...reservationConflict,
+      },
+    };
+  }
+
+  const now = new Date();
+  const modificationHoldConflict =
+    await prisma.reservationModification.findFirst({
+      where: {
+        ...(excludeReservationModificationId
+          ? { id: { not: excludeReservationModificationId } }
+          : {}),
+        reservation: {
+          propertyId,
+        },
+        proposedCheckIn: {
+          lt: checkOut,
+        },
+        proposedCheckOut: {
+          gt: checkIn,
+        },
+        OR: [
+          {
+            status: ReservationModificationStatus.PAYMENT_PROCESSING,
+          },
+          {
+            status: ReservationModificationStatus.AWAITING_PAYMENT,
+            checkoutExpiresAt: {
+              gt: now,
+            },
+          },
+        ],
+      },
+      select: {
+        id: true,
+        proposedCheckIn: true,
+        proposedCheckOut: true,
+        status: true,
+        checkoutExpiresAt: true,
+      },
+    });
+
+  if (modificationHoldConflict) {
+    return {
+      available: false,
+      conflict: {
+        type: "RESERVATION_MODIFICATION_HOLD",
+        ...modificationHoldConflict,
       },
     };
   }
@@ -129,8 +191,16 @@ export async function getPropertyBlockedDateKeys(input: {
   propertyId: string;
   from: Date;
   to: Date;
+  excludeReservationId?: string;
+  excludeReservationModificationId?: string;
 }) {
-  const { propertyId, from, to } = input;
+  const {
+    propertyId,
+    from,
+    to,
+    excludeReservationId,
+    excludeReservationModificationId,
+  } = input;
 
   if (!propertyId) {
     throw new Error("propertyId is required");
@@ -152,6 +222,9 @@ export async function getPropertyBlockedDateKeys(input: {
     where: {
       propertyId,
       status: ReservationStatus.ACTIVE,
+      ...(excludeReservationId
+        ? { id: { not: excludeReservationId } }
+        : {}),
       checkIn: {
         lt: to,
       },
@@ -167,6 +240,45 @@ export async function getPropertyBlockedDateKeys(input: {
     },
     orderBy: {
       checkIn: "asc",
+    },
+  });
+
+  const now = new Date();
+  const modificationHolds = await prisma.reservationModification.findMany({
+    where: {
+      ...(excludeReservationModificationId
+        ? { id: { not: excludeReservationModificationId } }
+        : {}),
+      reservation: {
+        propertyId,
+      },
+      proposedCheckIn: {
+        lt: to,
+      },
+      proposedCheckOut: {
+        gt: from,
+      },
+      OR: [
+        {
+          status: ReservationModificationStatus.PAYMENT_PROCESSING,
+        },
+        {
+          status: ReservationModificationStatus.AWAITING_PAYMENT,
+          checkoutExpiresAt: {
+            gt: now,
+          },
+        },
+      ],
+    },
+    select: {
+      id: true,
+      proposedCheckIn: true,
+      proposedCheckOut: true,
+      status: true,
+      checkoutExpiresAt: true,
+    },
+    orderBy: {
+      proposedCheckIn: "asc",
     },
   });
 
@@ -202,6 +314,15 @@ export async function getPropertyBlockedDateKeys(input: {
     }
   }
 
+  for (const hold of modificationHolds) {
+    for (const dateKey of eachNightDateKeys(
+      hold.proposedCheckIn,
+      hold.proposedCheckOut
+    )) {
+      blockedDateKeys.add(dateKey);
+    }
+  }
+
   for (const block of manualBlocks) {
     for (const dateKey of eachNightDateKeys(block.startDate, block.endDate)) {
       blockedDateKeys.add(dateKey);
@@ -211,6 +332,7 @@ export async function getPropertyBlockedDateKeys(input: {
   return {
     blockedDates: Array.from(blockedDateKeys).sort(),
     reservations,
+    modificationHolds,
     manualBlocks,
   };
 }

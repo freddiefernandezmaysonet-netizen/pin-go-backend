@@ -11,6 +11,7 @@ type CalculateDirectBookingPricingInput = {
   checkIn: Date;
   checkOut: Date;
   selectedAmenityIds?: string[];
+  excludeReservationId?: string;
 };
 
 function toMoney(value: unknown) {
@@ -164,6 +165,9 @@ const occupancyReservations = await prisma.reservation.findMany({
   where: {
     propertyId: input.propertyId,
     status: "ACTIVE",
+    ...(input.excludeReservationId
+      ? { id: { not: input.excludeReservationId } }
+      : {}),
     checkIn: {
       lt: startOfUtcDay(input.checkOut),
     },
