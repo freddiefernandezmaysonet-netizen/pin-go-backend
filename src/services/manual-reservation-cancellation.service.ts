@@ -110,7 +110,9 @@ async function finalizeManualCancellationOperationsSafe(input: {
     await prisma.cleaningConfirmation.updateMany({
       where: {
         reservationId: input.reservationId,
-        status: "PENDING",
+        status: {
+          in: ["PENDING", "CONFIRMED"],
+        },
       },
       data: {
         status: "CANCELLED",
