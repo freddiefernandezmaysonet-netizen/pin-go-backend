@@ -1317,6 +1317,7 @@ dashboardPropertiesRouter.post(
           pricingSource: "PIN_GO_PRICING_ENGINE",
           paymentState: cleanPaymentState,
           nights: (manualPricing as any).nights ?? null,
+          nightlyRate: (manualPricing as any).nightlyRate ?? null,
           nightlyRates: (manualPricing as any).nightlyRates ?? [],
           nightlySubtotal: (manualPricing as any).nightlySubtotal ?? null,
           cleaningFee: (manualPricing as any).cleaningFee ?? 0,
