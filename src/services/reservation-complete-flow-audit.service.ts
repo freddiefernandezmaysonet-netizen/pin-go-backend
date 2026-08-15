@@ -407,6 +407,7 @@ function toAuditDecisionTrace(
 
 function buildAuditEntry(input: {
   reservationId: string;
+  decisionId?: string;
   propertyId: string | null;
   organizationId: string | null;
   completeFlowStatus: ReservationCompleteFlowStatus;
@@ -431,7 +432,9 @@ const primaryIssueCheck =
 
   return {
     engine: "Reservation",
-    decisionId: `reservation-complete-flow:${input.reservationId}`,
+    decisionId:
+      input.decisionId ??
+      `reservation-complete-flow:${input.reservationId}`,
     entityType: "RESERVATION",
     entityId: input.reservationId,
     eventType:
@@ -704,6 +707,11 @@ export async function auditReservationCompleteFlow(
     reservation.status ===
     ReservationStatus.CANCELLED
   ) {
+    const terminalDecisionId =
+      `reservation-complete-flow-cancelled:${reservation.id}`;
+    const terminalOccurredAt =
+      reservation.cancelledAt ?? reservation.updatedAt;
+
     addCheck(checks, {
       rule: "RESERVATION_CANCELLED_TERMINAL",
       label: "Reservation Cancelled",
@@ -733,18 +741,18 @@ export async function auditReservationCompleteFlow(
       },
     });
 
-    const completedAt = new Date();
     const completeFlowStatus: ReservationCompleteFlowStatus =
       "READY";
 
     const auditEntry = buildAuditEntry({
       reservationId: reservation.id,
+      decisionId: terminalDecisionId,
       propertyId,
       organizationId,
       completeFlowStatus,
       checks,
-      startedAt,
-      completedAt,
+      startedAt: terminalOccurredAt,
+      completedAt: terminalOccurredAt,
       recommendedAction: undefined,
     });
 
@@ -763,11 +771,9 @@ export async function auditReservationCompleteFlow(
           resolutionType: "SUPERSEDED",
           resolvedBy: "SYSTEM",
           sourceType: "AUDIT_ENTRY",
-          decisionId,
+          decisionId: terminalDecisionId,
           sourceAuditEntryId: persisted.id,
-          occurredAt:
-            reservation.cancelledAt ??
-            completedAt,
+          occurredAt: terminalOccurredAt,
         }
       );
     } catch (operationalError: any) {
@@ -778,7 +784,7 @@ export async function auditReservationCompleteFlow(
           reservationNumber:
             reservation.reservationNumber ??
             null,
-          decisionId,
+          decisionId: terminalDecisionId,
           sourceAuditEntryId:
             persisted.id,
           error:
