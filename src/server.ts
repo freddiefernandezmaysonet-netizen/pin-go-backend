@@ -71,7 +71,11 @@ import ttlockDisconnectRoutes from "./routes/org/ttlock.disconnect.routes";
 import { onboardingAppointmentsRouter } from "./routes/onboarding.appointments.routes";
 import { adminSalesFollowupsRouter } from "./routes/admin.sales-followups.routes";
 import { adminDemoRouter } from "./routes/admin.demo.routes";
+import { adminBrandingRouter } from "./routes/admin.branding.routes";
+import { organizationBrandingRouter } from "./routes/organization.branding.routes";
 import { signupSuccessRouter } from "./routes/public.signup.success.routes";
+import { publicOrganizationInvitationRouter } from "./routes/public.organization-invitation.routes";
+import { publicBrandContextRouter } from "./routes/public.brand-context.routes";
 import { cleaningConfirmRouter } from "./routes/cleaning-confirm.routes";
 import { teamRouter } from "./routes/team.routes";
 import publicBookingRouter from "./routes/public-booking.routes";
@@ -194,6 +198,8 @@ app.use(teamRouter);
 app.use(uploadsRouter);
 app.use("/api/onboarding/appointments", onboardingAppointmentsRouter);
 app.use(signupSuccessRouter);
+app.use(publicOrganizationInvitationRouter);
+app.use(publicBrandContextRouter);
 app.use("/api/public-booking", publicBookingRouter);
 app.use(cleaningConfirmRouter);
 
@@ -245,6 +251,8 @@ app.use("/api/admin", adminUsageRoutes);
 app.use("/api/admin", adminCapacityRoutes);
 app.use("/api/admin", adminSubscriptionRoutes);
 app.use("/api/internal", adminFinancialRoutes);
+app.use(adminBrandingRouter);
+app.use(organizationBrandingRouter);
 
 if (process.env.NODE_ENV !== "production") {
 app.use("/debug", debugRouter);
