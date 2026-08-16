@@ -11,6 +11,10 @@ export type AuthTokenPayload = {
   tokenVersion: number;
 };
 
+export type AuthCookieOptions = {
+  requestOrigin?: string | null;
+};
+
 const JWT_SECRET = process.env.JWT_SECRET;
 const JWT_EXPIRES_IN = (
   process.env.JWT_EXPIRES_IN ?? "7d"
@@ -28,9 +32,68 @@ function getJwtSecret() {
   return value;
 }
 
-function getCookieDomain() {
+function getSecureOriginHostname(
+  rawOrigin: string | null | undefined
+): string | null {
+  const origin = String(rawOrigin ?? "").trim();
+  if (!origin) return null;
+
+  try {
+    const parsed = new URL(origin);
+    if (
+      parsed.protocol !== "https:" ||
+      parsed.username ||
+      parsed.password ||
+      parsed.pathname !== "/" ||
+      parsed.search ||
+      parsed.hash
+    ) {
+      return null;
+    }
+
+    return parsed.hostname.toLowerCase().replace(/\.$/, "");
+  } catch {
+    return null;
+  }
+}
+
+function normalizeCookieDomainForComparison(
+  rawDomain: string
+): string | null {
+  const normalized = rawDomain
+    .trim()
+    .toLowerCase()
+    .replace(/^\./, "")
+    .replace(/\.$/, "");
+
+  if (!normalized || normalized.includes("..")) return null;
+
+  try {
+    const parsed = new URL(`https://${normalized}`);
+    return parsed.hostname === normalized && !parsed.port
+      ? normalized
+      : null;
+  } catch {
+    return null;
+  }
+}
+
+function getCookieDomain(requestOrigin?: string | null) {
   const value = String(COOKIE_DOMAIN ?? "").trim();
-  return value || null;
+  if (!value) return null;
+
+  const hasRequestOrigin = Boolean(String(requestOrigin ?? "").trim());
+  if (!hasRequestOrigin) return value;
+
+  const requestHostname = getSecureOriginHostname(requestOrigin);
+  const cookieHostname = normalizeCookieDomainForComparison(value);
+  if (!requestHostname || !cookieHostname) return null;
+
+  const belongsToCookieDomain =
+    requestHostname === cookieHostname ||
+    requestHostname.endsWith(`.${cookieHostname}`);
+
+  return belongsToCookieDomain ? value : null;
 }
 
 export function getAuthCookieName() {
@@ -139,10 +202,13 @@ export function extractTokenFromRequest(req: {
   return cookieToken ?? null;
 }
 
-export function buildAuthCookie(token: string) {
+export function buildAuthCookie(
+  token: string,
+  options: AuthCookieOptions = {}
+) {
   const isProd = process.env.NODE_ENV === "production";
   const sameSite = isProd ? "None" : "Lax";
-  const cookieDomain = getCookieDomain();
+  const cookieDomain = getCookieDomain(options.requestOrigin);
 
   const parts = [
     `${getAuthCookieName()}=${encodeURIComponent(token)}`,
@@ -163,10 +229,12 @@ export function buildAuthCookie(token: string) {
   return parts.join("; ");
 }
 
-export function buildClearAuthCookie() {
+export function buildClearAuthCookie(
+  options: AuthCookieOptions = {}
+) {
   const isProd = process.env.NODE_ENV === "production";
   const sameSite = isProd ? "None" : "Lax";
-  const cookieDomain = getCookieDomain();
+  const cookieDomain = getCookieDomain(options.requestOrigin);
 
   const parts = [
     `${getAuthCookieName()}=`,

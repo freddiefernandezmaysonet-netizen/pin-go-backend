@@ -8,6 +8,8 @@
     "exactOptionalPropertyTypes": false
   },
   "include": [
+    "src/lib/auth.ts",
+    "src/lib/auth-cookie-domain.policy.test.ts",
     "src/services/branding/brand-policy.ts",
     "src/services/branding/brand-policy.test.ts",
     "src/services/branding/published-brand-context.service.ts",
