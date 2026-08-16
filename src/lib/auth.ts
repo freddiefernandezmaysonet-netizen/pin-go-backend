@@ -21,6 +21,18 @@ const JWT_EXPIRES_IN = (
 ) as SignOptions["expiresIn"];
 const AUTH_COOKIE_NAME = process.env.AUTH_COOKIE_NAME ?? "pingo_token";
 const COOKIE_DOMAIN = process.env.COOKIE_DOMAIN;
+const BRAND_HOSTNAME_HEADER = "x-pin-go-brand-hostname";
+const STANDARD_PIN_GO_AUTH_HOSTNAMES = new Set([
+  "app.pin-ngo.com",
+  "api.pin-ngo.com",
+  "pin-ngo.com",
+  "www.pin-ngo.com",
+  "localhost",
+  "127.0.0.1",
+]);
+
+type AuthCookieScope = "STANDARD" | "BRAND";
+type RequestCookieScope = AuthCookieScope | "INVALID" | "UNSPECIFIED";
 
 function getJwtSecret() {
   const value = String(JWT_SECRET ?? "").trim();
@@ -37,6 +49,11 @@ function getSecureOriginHostname(
 ): string | null {
   const origin = String(rawOrigin ?? "").trim();
   if (!origin) return null;
+
+  const authority = origin
+    .replace(/^https:\/\//i, "")
+    .replace(/\/$/, "");
+  if (authority.includes(":")) return null;
 
   try {
     const parsed = new URL(origin);
@@ -55,6 +72,131 @@ function getSecureOriginHostname(
   } catch {
     return null;
   }
+}
+
+function getRequestOriginHostname(
+  rawOrigin: string | null | undefined
+): string | null {
+  const origin = String(rawOrigin ?? "").trim();
+  if (!origin) return null;
+
+  try {
+    const parsed = new URL(origin);
+    const hostname = parsed.hostname.toLowerCase().replace(/\.$/, "");
+    const secureOrigin = parsed.protocol === "https:";
+    const localDevelopmentOrigin =
+      parsed.protocol === "http:" &&
+      (hostname === "localhost" || hostname === "127.0.0.1");
+    const authority = origin
+      .replace(/^[a-z]+:\/\//i, "")
+      .replace(/\/$/, "");
+
+    if (
+      (!secureOrigin && !localDevelopmentOrigin) ||
+      (secureOrigin && authority.includes(":")) ||
+      parsed.username ||
+      parsed.password ||
+      parsed.pathname !== "/" ||
+      parsed.search ||
+      parsed.hash
+    ) {
+      return null;
+    }
+
+    return hostname;
+  } catch {
+    return null;
+  }
+}
+
+function normalizeRequestHostname(
+  rawHostname: string | null | undefined
+): string | null {
+  const hostname = String(rawHostname ?? "")
+    .trim()
+    .toLowerCase()
+    .replace(/\.$/, "");
+  if (
+    !hostname ||
+    hostname.length > 253 ||
+    hostname.includes(",") ||
+    hostname.includes(":") ||
+    hostname.includes("/") ||
+    hostname.includes("\\") ||
+    hostname.includes("@") ||
+    /\s/.test(hostname)
+  ) {
+    return null;
+  }
+
+  if (hostname === "localhost" || hostname === "127.0.0.1") {
+    return hostname;
+  }
+
+  const labels = hostname.split(".");
+  if (labels.length < 2) return null;
+  if (
+    labels.some(
+      (label) =>
+        !label ||
+        label.length > 63 ||
+        !/^[a-z0-9-]+$/.test(label) ||
+        label.startsWith("-") ||
+        label.endsWith("-")
+    )
+  ) {
+    return null;
+  }
+
+  return hostname;
+}
+
+function cookieScopeForHostname(hostname: string): AuthCookieScope {
+  return STANDARD_PIN_GO_AUTH_HOSTNAMES.has(hostname)
+    ? "STANDARD"
+    : "BRAND";
+}
+
+function cookieScopeForOrigin(
+  requestOrigin: string | null | undefined
+): AuthCookieScope {
+  if (!String(requestOrigin ?? "").trim()) return "STANDARD";
+
+  const hostname = getRequestOriginHostname(requestOrigin);
+  return hostname ? cookieScopeForHostname(hostname) : "BRAND";
+}
+
+function getHeaderValue(
+  headers: Record<string, unknown>,
+  name: string
+): string | null {
+  const value = headers[name] ?? headers[name.toLowerCase()];
+  return typeof value === "string" ? value : null;
+}
+
+function requestCookieScope(
+  headers: Record<string, unknown>
+): RequestCookieScope {
+  const rawOrigin = getHeaderValue(headers, "origin");
+  if (rawOrigin !== null) {
+    const originHostname = getRequestOriginHostname(rawOrigin);
+    return originHostname
+      ? cookieScopeForHostname(originHostname)
+      : "INVALID";
+  }
+
+  const rawBrandHostname = getHeaderValue(
+    headers,
+    BRAND_HOSTNAME_HEADER
+  );
+  if (rawBrandHostname !== null) {
+    const brandHostname = normalizeRequestHostname(rawBrandHostname);
+    return brandHostname
+      ? cookieScopeForHostname(brandHostname)
+      : "INVALID";
+  }
+
+  return "UNSPECIFIED";
 }
 
 function normalizeCookieDomainForComparison(
@@ -98,6 +240,12 @@ function getCookieDomain(requestOrigin?: string | null) {
 
 export function getAuthCookieName() {
   return AUTH_COOKIE_NAME;
+}
+
+export function getBrandAuthCookieName() {
+  return process.env.NODE_ENV === "production"
+    ? "__Host-pingo_brand_token"
+    : "pingo_brand_token";
 }
 
 export function signAuthToken(payload: AuthTokenPayload) {
@@ -197,9 +345,20 @@ export function extractTokenFromRequest(req: {
       : null;
 
   const cookies = parseCookieHeader(cookieHeader);
-  const cookieToken = cookies[getAuthCookieName()];
+  const scope = requestCookieScope(headers);
+  if (scope === "INVALID") return null;
+  if (scope === "BRAND") {
+    return cookies[getBrandAuthCookieName()] ?? null;
+  }
+  if (scope === "STANDARD") {
+    return cookies[getAuthCookieName()] ?? null;
+  }
 
-  return cookieToken ?? null;
+  return (
+    cookies[getBrandAuthCookieName()] ??
+    cookies[getAuthCookieName()] ??
+    null
+  );
 }
 
 export function buildAuthCookie(
@@ -208,10 +367,18 @@ export function buildAuthCookie(
 ) {
   const isProd = process.env.NODE_ENV === "production";
   const sameSite = isProd ? "None" : "Lax";
-  const cookieDomain = getCookieDomain(options.requestOrigin);
+  const cookieScope = cookieScopeForOrigin(options.requestOrigin);
+  const cookieDomain =
+    cookieScope === "STANDARD"
+      ? getCookieDomain(options.requestOrigin)
+      : null;
+  const cookieName =
+    cookieScope === "BRAND"
+      ? getBrandAuthCookieName()
+      : getAuthCookieName();
 
   const parts = [
-    `${getAuthCookieName()}=${encodeURIComponent(token)}`,
+    `${cookieName}=${encodeURIComponent(token)}`,
     "Path=/",
     "HttpOnly",
     `SameSite=${sameSite}`,
@@ -234,10 +401,18 @@ export function buildClearAuthCookie(
 ) {
   const isProd = process.env.NODE_ENV === "production";
   const sameSite = isProd ? "None" : "Lax";
-  const cookieDomain = getCookieDomain(options.requestOrigin);
+  const cookieScope = cookieScopeForOrigin(options.requestOrigin);
+  const cookieDomain =
+    cookieScope === "STANDARD"
+      ? getCookieDomain(options.requestOrigin)
+      : null;
+  const cookieName =
+    cookieScope === "BRAND"
+      ? getBrandAuthCookieName()
+      : getAuthCookieName();
 
   const parts = [
-    `${getAuthCookieName()}=`,
+    `${cookieName}=`,
     "Path=/",
     "HttpOnly",
     `SameSite=${sameSite}`,
