@@ -1,0 +1,34 @@
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "types": ["node"],
+    "noEmit": true,
+    "module": "ESNext",
+    "moduleResolution": "Bundler",
+    "exactOptionalPropertyTypes": false
+  },
+  "include": [
+    "src/services/branding/brand-policy.ts",
+    "src/services/branding/brand-policy.test.ts",
+    "src/services/branding/published-brand-context.service.ts",
+    "src/services/branding/published-brand-context.service.test.ts",
+    "src/services/branding/brand-management.service.ts",
+    "src/services/branding/brand-management.service.test.ts",
+    "src/services/branding/brand-review.service.ts",
+    "src/services/branding/brand-review.service.test.ts",
+    "src/services/branding/organization-invitation.service.ts",
+    "src/services/branding/organization-invitation.service.test.ts",
+    "src/services/branding/enterprise-brand-onboarding.service.ts",
+    "src/services/branding/enterprise-brand-onboarding.service.test.ts",
+    "src/routes/admin.branding.routes.ts",
+    "src/routes/admin.branding.routes.test.ts",
+    "src/routes/organization.branding.routes.ts",
+    "src/routes/organization.branding.routes.test.ts",
+    "src/routes/public.organization-invitation.routes.ts",
+    "src/routes/public.organization-invitation.routes.test.ts",
+    "src/routes/public.brand-context.routes.ts",
+    "src/routes/public.brand-context.routes.test.ts",
+    "src/routes/uploads.route.ts",
+    "src/routes/uploads.route.test.ts"
+  ]
+}

@@ -185,6 +185,7 @@ test("app.pin-ngo.com always returns standard Pin&Go without database reads", as
           faviconUrl: null,
           primaryColor: null,
           onPrimaryColor: null,
+          organizationSlug: null,
           version: null,
           poweredByPinGo: true,
         },
@@ -278,7 +279,11 @@ test("published custom hostname returns only its safe visual identity", async ()
         forwardedHost: "Portal.Casa-Azul.Example:443",
       });
       assert.equal(response.status, 200);
-      assert.deepEqual(await response.json(), {
+      const body = (await response.json()) as {
+        ok: boolean;
+        data: Record<string, unknown>;
+      };
+      assert.deepEqual(body, {
         ok: true,
         data: {
           kind: "CUSTOM_BRAND",
@@ -289,10 +294,12 @@ test("published custom hostname returns only its safe visual identity", async ()
             "https://cdn.example.com/brands/casa-azul-favicon.png",
           primaryColor: "#155EEF",
           onPrimaryColor: "#FFFFFF",
+          organizationSlug: "casa-azul",
           version: 3,
           poweredByPinGo: true,
         },
       });
+      assert.equal("organizationId" in body.data, false);
     }
   );
 

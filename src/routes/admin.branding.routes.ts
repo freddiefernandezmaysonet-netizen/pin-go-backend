@@ -4,6 +4,7 @@ import {
   type RequestHandler,
   type Response,
 } from "express";
+import { prisma } from "../lib/prisma.js";
 import { requireAuth } from "../middleware/requireAuth.js";
 import {
   BrandManagementError,
@@ -304,6 +305,106 @@ function platformAdminAction(
     }
   };
 }
+
+adminBrandingRouter.get(
+  "/api/internal/admin/branding/organizations/:organizationId/status",
+  requireAuth,
+  platformAdminAction(async (req, res, actor) => {
+    const manager = await prisma.dashboardUser.findUnique({
+      where: { id: actor.userId },
+      select: { role: true, isActive: true },
+    });
+
+    if (!manager?.isActive || manager.role !== "PLATFORM_ADMIN") {
+      res.status(403).json({
+        ok: false,
+        error: "PLATFORM_ADMIN_REQUIRED",
+      });
+      return;
+    }
+
+    const organization = await prisma.organization.findUnique({
+      where: { id: routeParameter(req, "organizationId") },
+      select: {
+        id: true,
+        name: true,
+        slug: true,
+        createdAt: true,
+        brandProfile: {
+          select: {
+            id: true,
+            organizationId: true,
+            experienceType: true,
+            status: true,
+            activeRevisionId: true,
+            activeDomainId: true,
+            createdAt: true,
+            updatedAt: true,
+            revisions: {
+              orderBy: { version: "desc" },
+              take: 20,
+              select: {
+                id: true,
+                version: true,
+                displayName: true,
+                logoUrl: true,
+                faviconUrl: true,
+                primaryColor: true,
+                approvalStatus: true,
+                approvedAt: true,
+                rejectedAt: true,
+                rejectionReason: true,
+                createdAt: true,
+                updatedAt: true,
+              },
+            },
+            domains: {
+              orderBy: { createdAt: "desc" },
+              take: 20,
+              select: {
+                id: true,
+                hostname: true,
+                type: true,
+                status: true,
+                provider: true,
+                providerDomainId: true,
+                verifiedAt: true,
+                activatedAt: true,
+                retiredAt: true,
+                redirectUntil: true,
+                createdAt: true,
+                updatedAt: true,
+              },
+            },
+          },
+        },
+        organizationInvitations: {
+          orderBy: { createdAt: "desc" },
+          take: 20,
+          select: {
+            id: true,
+            email: true,
+            role: true,
+            expiresAt: true,
+            acceptedAt: true,
+            revokedAt: true,
+            createdAt: true,
+          },
+        },
+      },
+    });
+
+    if (!organization) {
+      res.status(404).json({
+        ok: false,
+        error: "ADMIN_BRANDING_ORGANIZATION_NOT_FOUND",
+      });
+      return;
+    }
+
+    res.json({ ok: true, data: { organization } });
+  })
+);
 
 adminBrandingRouter.post(
   "/api/internal/admin/branding/enterprise-onboarding",

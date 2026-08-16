@@ -21,6 +21,7 @@ function publicContext(context: PublishedBrandContext) {
     faviconUrl: context.faviconUrl,
     primaryColor: context.primaryColor,
     onPrimaryColor: context.onPrimaryColor,
+    organizationSlug: context.organizationSlug,
     version: context.version,
     poweredByPinGo: context.poweredByPinGo,
   };

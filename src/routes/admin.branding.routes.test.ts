@@ -25,6 +25,12 @@ type MutablePrisma = {
     operation: (transaction: unknown) => Promise<unknown>,
     options?: unknown
   ) => Promise<unknown>;
+  dashboardUser: {
+    findUnique: (...args: unknown[]) => Promise<unknown>;
+  };
+  organization: {
+    findUnique: (...args: unknown[]) => Promise<unknown>;
+  };
 };
 
 const mutablePrisma = prisma as unknown as MutablePrisma;
@@ -39,6 +45,28 @@ async function withTransactionStub<T>(
     return await action();
   } finally {
     mutablePrisma.$transaction = originalTransaction;
+  }
+}
+
+async function withStatusReadStubs<T>(
+  input: {
+    dashboardUserFindUnique: (...args: unknown[]) => Promise<unknown>;
+    organizationFindUnique: (...args: unknown[]) => Promise<unknown>;
+  },
+  action: () => Promise<T>
+): Promise<T> {
+  const originalDashboardUserFindUnique =
+    mutablePrisma.dashboardUser.findUnique;
+  const originalOrganizationFindUnique =
+    mutablePrisma.organization.findUnique;
+  mutablePrisma.dashboardUser.findUnique = input.dashboardUserFindUnique;
+  mutablePrisma.organization.findUnique = input.organizationFindUnique;
+
+  try {
+    return await action();
+  } finally {
+    mutablePrisma.dashboardUser.findUnique = originalDashboardUserFindUnique;
+    mutablePrisma.organization.findUnique = originalOrganizationFindUnique;
   }
 }
 
@@ -113,7 +141,7 @@ function validIdentity() {
   };
 }
 
-test("router exposes only the ten approved internal operations", () => {
+test("router exposes only the eleven approved internal operations", () => {
   const layers = (
     adminBrandingRouter as unknown as { stack: RouterLayer[] }
   ).stack;
@@ -128,6 +156,7 @@ test("router exposes only the ten approved internal operations", () => {
     });
 
   assert.deepEqual(surface, [
+    "GET /api/internal/admin/branding/organizations/:organizationId/status",
     "POST /api/internal/admin/branding/enterprise-onboarding",
     "POST /api/internal/admin/branding/organizations/:organizationId/initialize",
     "POST /api/internal/admin/branding/profiles/:brandProfileId/revisions",
@@ -180,6 +209,192 @@ test("organization roles are rejected even with an authenticated session", async
       error: "PLATFORM_ADMIN_REQUIRED",
     });
   }
+});
+
+test("organization role cannot read enterprise branding status", async () => {
+  const response = await requestRoute(
+    "/api/internal/admin/branding/organizations/organization-a/status",
+    { method: "GET" },
+    {
+      id: "org-admin-a",
+      orgId: "organization-a",
+      role: "ORG_ADMIN",
+    }
+  );
+
+  assert.equal(response.status, 403);
+  assert.deepEqual(await response.json(), {
+    ok: false,
+    error: "PLATFORM_ADMIN_REQUIRED",
+  });
+});
+
+test("active PLATFORM_ADMIN reads safe enterprise branding status", async () => {
+  let organizationQuery: unknown;
+
+  await withStatusReadStubs(
+    {
+      dashboardUserFindUnique: async () => ({
+        role: "PLATFORM_ADMIN",
+        isActive: true,
+      }),
+      organizationFindUnique: async (...args) => {
+        organizationQuery = args[0];
+        return {
+          id: "organization-a",
+          name: "Casa Azul Management",
+          slug: "casa-azul-management",
+          createdAt: new Date("2026-08-15T20:00:00.000Z"),
+          brandProfile: {
+            id: "brand-profile-a",
+            organizationId: "organization-a",
+            experienceType: "ENTERPRISE_BRANDED",
+            status: "DRAFT",
+            activeRevisionId: null,
+            activeDomainId: null,
+            createdAt: new Date("2026-08-15T20:00:00.000Z"),
+            updatedAt: new Date("2026-08-15T20:00:00.000Z"),
+            revisions: [
+              {
+                id: "brand-revision-a",
+                version: 1,
+                displayName: "Casa Azul Management",
+                logoUrl: "https://cdn.example.com/logo.png",
+                faviconUrl: "https://cdn.example.com/favicon.png",
+                primaryColor: "#155EEF",
+                approvalStatus: "DRAFT",
+                approvedAt: null,
+                rejectedAt: null,
+                rejectionReason: null,
+                createdAt: new Date("2026-08-15T20:00:00.000Z"),
+                updatedAt: new Date("2026-08-15T20:00:00.000Z"),
+              },
+            ],
+            domains: [
+              {
+                id: "brand-domain-a",
+                hostname: "portal.casa-azul.example",
+                type: "CUSTOM_DOMAIN",
+                status: "PENDING_CONFIGURATION",
+                provider: "VERCEL",
+                providerDomainId: null,
+                verifiedAt: null,
+                activatedAt: null,
+                retiredAt: null,
+                redirectUntil: null,
+                createdAt: new Date("2026-08-15T20:00:00.000Z"),
+                updatedAt: new Date("2026-08-15T20:00:00.000Z"),
+              },
+            ],
+          },
+          organizationInvitations: [
+            {
+              id: "invitation-a",
+              email: "owner@casa-azul.example",
+              role: "ORG_ADMIN",
+              expiresAt: new Date("2026-08-18T20:00:00.000Z"),
+              acceptedAt: null,
+              revokedAt: null,
+              createdAt: new Date("2026-08-15T20:00:00.000Z"),
+            },
+          ],
+        };
+      },
+    },
+    async () => {
+      const response = await requestRoute(
+        "/api/internal/admin/branding/organizations/organization-a/status",
+        { method: "GET" },
+        platformAdmin()
+      );
+
+      assert.equal(response.status, 200);
+      const body = (await response.json()) as {
+        ok: boolean;
+        data: {
+          organization: {
+            id: string;
+            organizationInvitations: Array<Record<string, unknown>>;
+          };
+        };
+      };
+      assert.equal(body.ok, true);
+      assert.equal(body.data.organization.id, "organization-a");
+      assert.equal(
+        body.data.organization.organizationInvitations[0]?.email,
+        "owner@casa-azul.example"
+      );
+      assert.equal(JSON.stringify(body).includes("tokenHash"), false);
+    }
+  );
+
+  const invitationSelect = (
+    organizationQuery as {
+      select: {
+        organizationInvitations: {
+          select: Record<string, boolean>;
+        };
+      };
+    }
+  ).select.organizationInvitations.select;
+  assert.equal("tokenHash" in invitationSelect, false);
+});
+
+test("inactive PLATFORM_ADMIN cannot read branding status", async () => {
+  let organizationReads = 0;
+
+  await withStatusReadStubs(
+    {
+      dashboardUserFindUnique: async () => ({
+        role: "PLATFORM_ADMIN",
+        isActive: false,
+      }),
+      organizationFindUnique: async () => {
+        organizationReads += 1;
+        return null;
+      },
+    },
+    async () => {
+      const response = await requestRoute(
+        "/api/internal/admin/branding/organizations/organization-a/status",
+        { method: "GET" },
+        platformAdmin()
+      );
+
+      assert.equal(response.status, 403);
+      assert.deepEqual(await response.json(), {
+        ok: false,
+        error: "PLATFORM_ADMIN_REQUIRED",
+      });
+    }
+  );
+
+  assert.equal(organizationReads, 0);
+});
+
+test("branding status returns 404 for an unknown organization", async () => {
+  await withStatusReadStubs(
+    {
+      dashboardUserFindUnique: async () => ({
+        role: "PLATFORM_ADMIN",
+        isActive: true,
+      }),
+      organizationFindUnique: async () => null,
+    },
+    async () => {
+      const response = await requestRoute(
+        "/api/internal/admin/branding/organizations/missing/status",
+        { method: "GET" },
+        platformAdmin()
+      );
+
+      assert.equal(response.status, 404);
+      assert.deepEqual(await response.json(), {
+        ok: false,
+        error: "ADMIN_BRANDING_ORGANIZATION_NOT_FOUND",
+      });
+    }
+  );
 });
 
 test("enterprise onboarding validates required fields before opening a transaction", async () => {
