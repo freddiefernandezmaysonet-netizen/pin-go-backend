@@ -30,6 +30,7 @@ type MutablePrisma = {
   };
   organization: {
     findUnique: (...args: unknown[]) => Promise<unknown>;
+    findMany: (...args: unknown[]) => Promise<unknown>;
   };
 };
 
@@ -67,6 +68,27 @@ async function withStatusReadStubs<T>(
   } finally {
     mutablePrisma.dashboardUser.findUnique = originalDashboardUserFindUnique;
     mutablePrisma.organization.findUnique = originalOrganizationFindUnique;
+  }
+}
+
+async function withSearchReadStubs<T>(
+  input: {
+    dashboardUserFindUnique: (...args: unknown[]) => Promise<unknown>;
+    organizationFindMany: (...args: unknown[]) => Promise<unknown>;
+  },
+  action: () => Promise<T>
+): Promise<T> {
+  const originalDashboardUserFindUnique =
+    mutablePrisma.dashboardUser.findUnique;
+  const originalOrganizationFindMany = mutablePrisma.organization.findMany;
+  mutablePrisma.dashboardUser.findUnique = input.dashboardUserFindUnique;
+  mutablePrisma.organization.findMany = input.organizationFindMany;
+
+  try {
+    return await action();
+  } finally {
+    mutablePrisma.dashboardUser.findUnique = originalDashboardUserFindUnique;
+    mutablePrisma.organization.findMany = originalOrganizationFindMany;
   }
 }
 
@@ -141,7 +163,7 @@ function validIdentity() {
   };
 }
 
-test("router exposes only the eleven approved internal operations", () => {
+test("router exposes only the thirteen approved internal operations", () => {
   const layers = (
     adminBrandingRouter as unknown as { stack: RouterLayer[] }
   ).stack;
@@ -156,6 +178,8 @@ test("router exposes only the eleven approved internal operations", () => {
     });
 
   assert.deepEqual(surface, [
+    "GET /api/internal/admin/branding/organizations/search",
+    "GET /api/internal/admin/branding/organizations/by-slug/:organizationSlug/status",
     "GET /api/internal/admin/branding/organizations/:organizationId/status",
     "POST /api/internal/admin/branding/enterprise-onboarding",
     "POST /api/internal/admin/branding/organizations/:organizationId/initialize",
@@ -227,6 +251,148 @@ test("organization role cannot read enterprise branding status", async () => {
     ok: false,
     error: "PLATFORM_ADMIN_REQUIRED",
   });
+});
+
+test("active PLATFORM_ADMIN searches organizations without exposing database ids", async () => {
+  let organizationQuery: unknown;
+
+  await withSearchReadStubs(
+    {
+      dashboardUserFindUnique: async () => ({
+        role: "PLATFORM_ADMIN",
+        isActive: true,
+      }),
+      organizationFindMany: async (...args) => {
+        organizationQuery = args[0];
+        return [
+          {
+            name: "Remanso de Paz Property Management LLc",
+            slug: "remansodepaz",
+            brandProfile: null,
+            _count: { properties: 1 },
+          },
+        ];
+      },
+    },
+    async () => {
+      const response = await requestRoute(
+        "/api/internal/admin/branding/organizations/search?query=Remanso",
+        { method: "GET" },
+        platformAdmin()
+      );
+
+      assert.equal(response.status, 200);
+      const body = await response.json();
+      assert.deepEqual(body, {
+        ok: true,
+        data: {
+          organizations: [
+            {
+              name: "Remanso de Paz Property Management LLc",
+              slug: "remansodepaz",
+              propertyCount: 1,
+              brandStatus: null,
+            },
+          ],
+        },
+      });
+      assert.equal(JSON.stringify(body).includes("organization-a"), false);
+      assert.equal(JSON.stringify(body).includes('"id"'), false);
+    }
+  );
+
+  assert.deepEqual(
+    (
+      organizationQuery as {
+        where: { OR: Array<Record<string, unknown>> };
+        take: number;
+      }
+    ).where.OR,
+    [
+      { name: { contains: "Remanso", mode: "insensitive" } },
+      { slug: { contains: "remanso", mode: "insensitive" } },
+    ]
+  );
+  assert.equal(
+    (organizationQuery as { take: number }).take,
+    20
+  );
+});
+
+test("organization search rejects an unsafe query before organization reads", async () => {
+  let organizationReads = 0;
+
+  await withSearchReadStubs(
+    {
+      dashboardUserFindUnique: async () => ({
+        role: "PLATFORM_ADMIN",
+        isActive: true,
+      }),
+      organizationFindMany: async () => {
+        organizationReads += 1;
+        return [];
+      },
+    },
+    async () => {
+      const response = await requestRoute(
+        "/api/internal/admin/branding/organizations/search?query=a",
+        { method: "GET" },
+        platformAdmin()
+      );
+
+      assert.equal(response.status, 400);
+      assert.deepEqual(await response.json(), {
+        ok: false,
+        error: "ADMIN_BRANDING_INPUT_INVALID",
+        field: "query",
+        message: "query must contain between 2 and 100 characters.",
+      });
+    }
+  );
+
+  assert.equal(organizationReads, 0);
+});
+
+test("active PLATFORM_ADMIN opens branding status by public organization slug", async () => {
+  let organizationQuery: unknown;
+
+  await withStatusReadStubs(
+    {
+      dashboardUserFindUnique: async () => ({
+        role: "PLATFORM_ADMIN",
+        isActive: true,
+      }),
+      organizationFindUnique: async (...args) => {
+        organizationQuery = args[0];
+        return {
+          id: "organization-a",
+          name: "Remanso de Paz Property Management LLc",
+          slug: "remansodepaz",
+          createdAt: new Date("2026-08-15T20:00:00.000Z"),
+          brandProfile: null,
+          organizationInvitations: [],
+        };
+      },
+    },
+    async () => {
+      const response = await requestRoute(
+        "/api/internal/admin/branding/organizations/by-slug/remansodepaz/status",
+        { method: "GET" },
+        platformAdmin()
+      );
+
+      assert.equal(response.status, 200);
+      const body = (await response.json()) as {
+        data: { organization: { slug: string } };
+      };
+      assert.equal(body.data.organization.slug, "remansodepaz");
+    }
+  );
+
+  assert.deepEqual(
+    (organizationQuery as { where: Record<string, unknown> }).where,
+    { slug: "remansodepaz" }
+  );
 });
 
 test("active PLATFORM_ADMIN reads safe enterprise branding status", async () => {

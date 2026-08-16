@@ -70,6 +70,74 @@ const DOMAIN_STATUSES = new Set<BrandDomainStatus>([
   "RETIRED",
 ]);
 
+const ADMIN_BRANDING_ORGANIZATION_SELECT = {
+  id: true,
+  name: true,
+  slug: true,
+  createdAt: true,
+  brandProfile: {
+    select: {
+      id: true,
+      organizationId: true,
+      experienceType: true,
+      status: true,
+      activeRevisionId: true,
+      activeDomainId: true,
+      createdAt: true,
+      updatedAt: true,
+      revisions: {
+        orderBy: { version: "desc" as const },
+        take: 20,
+        select: {
+          id: true,
+          version: true,
+          displayName: true,
+          logoUrl: true,
+          faviconUrl: true,
+          primaryColor: true,
+          approvalStatus: true,
+          approvedAt: true,
+          rejectedAt: true,
+          rejectionReason: true,
+          createdAt: true,
+          updatedAt: true,
+        },
+      },
+      domains: {
+        orderBy: { createdAt: "desc" as const },
+        take: 20,
+        select: {
+          id: true,
+          hostname: true,
+          type: true,
+          status: true,
+          provider: true,
+          providerDomainId: true,
+          verifiedAt: true,
+          activatedAt: true,
+          retiredAt: true,
+          redirectUntil: true,
+          createdAt: true,
+          updatedAt: true,
+        },
+      },
+    },
+  },
+  organizationInvitations: {
+    orderBy: { createdAt: "desc" as const },
+    take: 20,
+    select: {
+      id: true,
+      email: true,
+      role: true,
+      expiresAt: true,
+      acceptedAt: true,
+      revokedAt: true,
+      createdAt: true,
+    },
+  },
+} as const;
+
 export const adminBrandingRouter = Router();
 
 adminBrandingRouter.use((_req, res, next) => {
@@ -101,6 +169,17 @@ function routeParameter(req: Request, name: string): string {
     throw new AdminBrandingRouteInputError(
       name,
       `${name} is required.`
+    );
+  }
+  return value;
+}
+
+function queryString(req: Request, field: string): string {
+  const value = req.query[field];
+  if (typeof value !== "string") {
+    throw new AdminBrandingRouteInputError(
+      field,
+      `${field} must be a string.`
     );
   }
   return value;
@@ -306,16 +385,106 @@ function platformAdminAction(
   };
 }
 
+async function activePlatformAdmin(
+  actor: AuthenticatedPlatformAdmin
+): Promise<boolean> {
+  const manager = await prisma.dashboardUser.findUnique({
+    where: { id: actor.userId },
+    select: { role: true, isActive: true },
+  });
+  return Boolean(manager?.isActive && manager.role === "PLATFORM_ADMIN");
+}
+
+adminBrandingRouter.get(
+  "/api/internal/admin/branding/organizations/search",
+  requireAuth,
+  platformAdminAction(async (req, res, actor) => {
+    if (!(await activePlatformAdmin(actor))) {
+      res.status(403).json({
+        ok: false,
+        error: "PLATFORM_ADMIN_REQUIRED",
+      });
+      return;
+    }
+
+    const query = queryString(req, "query").trim();
+    if (query.length < 2 || query.length > 100) {
+      throw new AdminBrandingRouteInputError(
+        "query",
+        "query must contain between 2 and 100 characters."
+      );
+    }
+
+    const organizations = await prisma.organization.findMany({
+      where: {
+        slug: { not: null },
+        OR: [
+          { name: { contains: query, mode: "insensitive" } },
+          { slug: { contains: query.toLowerCase(), mode: "insensitive" } },
+        ],
+      },
+      orderBy: [{ name: "asc" }, { createdAt: "asc" }],
+      take: 20,
+      select: {
+        name: true,
+        slug: true,
+        brandProfile: {
+          select: { status: true },
+        },
+        _count: {
+          select: { properties: true },
+        },
+      },
+    });
+
+    res.json({
+      ok: true,
+      data: {
+        organizations: organizations.map((organization) => ({
+          name: organization.name,
+          slug: organization.slug,
+          propertyCount: organization._count.properties,
+          brandStatus: organization.brandProfile?.status ?? null,
+        })),
+      },
+    });
+  })
+);
+
+adminBrandingRouter.get(
+  "/api/internal/admin/branding/organizations/by-slug/:organizationSlug/status",
+  requireAuth,
+  platformAdminAction(async (req, res, actor) => {
+    if (!(await activePlatformAdmin(actor))) {
+      res.status(403).json({
+        ok: false,
+        error: "PLATFORM_ADMIN_REQUIRED",
+      });
+      return;
+    }
+
+    const organization = await prisma.organization.findUnique({
+      where: { slug: routeParameter(req, "organizationSlug") },
+      select: ADMIN_BRANDING_ORGANIZATION_SELECT,
+    });
+
+    if (!organization) {
+      res.status(404).json({
+        ok: false,
+        error: "ADMIN_BRANDING_ORGANIZATION_NOT_FOUND",
+      });
+      return;
+    }
+
+    res.json({ ok: true, data: { organization } });
+  })
+);
+
 adminBrandingRouter.get(
   "/api/internal/admin/branding/organizations/:organizationId/status",
   requireAuth,
   platformAdminAction(async (req, res, actor) => {
-    const manager = await prisma.dashboardUser.findUnique({
-      where: { id: actor.userId },
-      select: { role: true, isActive: true },
-    });
-
-    if (!manager?.isActive || manager.role !== "PLATFORM_ADMIN") {
+    if (!(await activePlatformAdmin(actor))) {
       res.status(403).json({
         ok: false,
         error: "PLATFORM_ADMIN_REQUIRED",
@@ -325,73 +494,7 @@ adminBrandingRouter.get(
 
     const organization = await prisma.organization.findUnique({
       where: { id: routeParameter(req, "organizationId") },
-      select: {
-        id: true,
-        name: true,
-        slug: true,
-        createdAt: true,
-        brandProfile: {
-          select: {
-            id: true,
-            organizationId: true,
-            experienceType: true,
-            status: true,
-            activeRevisionId: true,
-            activeDomainId: true,
-            createdAt: true,
-            updatedAt: true,
-            revisions: {
-              orderBy: { version: "desc" },
-              take: 20,
-              select: {
-                id: true,
-                version: true,
-                displayName: true,
-                logoUrl: true,
-                faviconUrl: true,
-                primaryColor: true,
-                approvalStatus: true,
-                approvedAt: true,
-                rejectedAt: true,
-                rejectionReason: true,
-                createdAt: true,
-                updatedAt: true,
-              },
-            },
-            domains: {
-              orderBy: { createdAt: "desc" },
-              take: 20,
-              select: {
-                id: true,
-                hostname: true,
-                type: true,
-                status: true,
-                provider: true,
-                providerDomainId: true,
-                verifiedAt: true,
-                activatedAt: true,
-                retiredAt: true,
-                redirectUntil: true,
-                createdAt: true,
-                updatedAt: true,
-              },
-            },
-          },
-        },
-        organizationInvitations: {
-          orderBy: { createdAt: "desc" },
-          take: 20,
-          select: {
-            id: true,
-            email: true,
-            role: true,
-            expiresAt: true,
-            acceptedAt: true,
-            revokedAt: true,
-            createdAt: true,
-          },
-        },
-      },
+      select: ADMIN_BRANDING_ORGANIZATION_SELECT,
     });
 
     if (!organization) {
