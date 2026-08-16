@@ -1,14 +1,21 @@
 import { Router, type Request } from "express";
 import {
+  isPinGoStandardHostname,
+  normalizeBrandHostname,
   resolvePublishedBrandContextByHostname,
   type PublishedBrandContext,
 } from "../services/branding/published-brand-context.service.js";
 
 export const publicBrandContextRouter = Router();
 
+const BRAND_PROXY_HOSTNAME_HEADER = "x-pin-go-brand-hostname";
+
 publicBrandContextRouter.use((_req, res, next) => {
   res.setHeader("Cache-Control", "no-store");
-  res.setHeader("Vary", "Host, X-Forwarded-Host");
+  res.setHeader(
+    "Vary",
+    "Host, X-Forwarded-Host, X-Pin-Go-Brand-Hostname"
+  );
   res.setHeader("X-Content-Type-Options", "nosniff");
   next();
 });
@@ -28,11 +35,23 @@ function publicContext(context: PublishedBrandContext) {
 }
 
 function rawRequestHostname(req: Request): string {
-  return (
+  const proxyHostname =
     req.get("x-forwarded-host") ??
     req.get("host") ??
-    req.hostname
-  );
+    req.hostname;
+  const requestedBrandHostname = req.get(BRAND_PROXY_HOSTNAME_HEADER);
+
+  if (!requestedBrandHostname) return proxyHostname;
+
+  const normalizedProxyHostname = normalizeBrandHostname(proxyHostname);
+  if (
+    !normalizedProxyHostname ||
+    !isPinGoStandardHostname(normalizedProxyHostname)
+  ) {
+    return proxyHostname;
+  }
+
+  return requestedBrandHostname;
 }
 
 publicBrandContextRouter.get(

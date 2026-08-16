@@ -68,6 +68,7 @@ async function closeServer(server: Server): Promise<void> {
 async function requestRoute(input: {
   host: string;
   forwardedHost?: string;
+  brandHostname?: string;
   path?: string;
 }): Promise<Response> {
   const app = express();
@@ -88,6 +89,9 @@ async function requestRoute(input: {
           Connection: "close",
           ...(input.forwardedHost
             ? { "X-Forwarded-Host": input.forwardedHost }
+            : {}),
+          ...(input.brandHostname
+            ? { "X-Pin-Go-Brand-Hostname": input.brandHostname }
             : {}),
         },
       }
@@ -173,7 +177,8 @@ test("app.pin-ngo.com always returns standard Pin&Go without database reads", as
     async () => {
       const response = await requestRoute({
         host: "api.pin-ngo.com",
-        forwardedHost: "app.pin-ngo.com",
+        forwardedHost: "api.pin-ngo.com",
+        brandHostname: "app.pin-ngo.com",
       });
       assert.equal(response.status, 200);
       assert.deepEqual(await response.json(), {
@@ -193,7 +198,7 @@ test("app.pin-ngo.com always returns standard Pin&Go without database reads", as
       assert.equal(response.headers.get("cache-control"), "no-store");
       assert.equal(
         response.headers.get("vary"),
-        "Host, X-Forwarded-Host"
+        "Host, X-Forwarded-Host, X-Pin-Go-Brand-Hostname"
       );
     }
   );
@@ -276,7 +281,8 @@ test("published custom hostname returns only its safe visual identity", async ()
     async () => {
       const response = await requestRoute({
         host: "api.pin-ngo.com",
-        forwardedHost: "Portal.Casa-Azul.Example:443",
+        forwardedHost: "api.pin-ngo.com",
+        brandHostname: "Portal.Casa-Azul.Example:443",
       });
       assert.equal(response.status, 200);
       const body = (await response.json()) as {
@@ -311,6 +317,66 @@ test("published custom hostname returns only its safe visual identity", async ()
     (profileQuery as { where: unknown }).where,
     { activeDomainId: "brand-domain-a" }
   );
+});
+
+test("proxy hostname header cannot override a direct custom hostname", async () => {
+  let domainQuery: unknown;
+
+  await withBrandResolverStubs(
+    {
+      enabled: true,
+      domainFindUnique: async (...args) => {
+        domainQuery = args[0];
+        return null;
+      },
+    },
+    async () => {
+      const response = await requestRoute({
+        host: "api.pin-ngo.com",
+        forwardedHost: "untrusted.example.com",
+        brandHostname: "portal.casa-azul.example",
+      });
+      assert.equal(response.status, 404);
+      assert.deepEqual(await response.json(), {
+        ok: false,
+        error: "BRAND_DOMAIN_UNAVAILABLE",
+      });
+    }
+  );
+
+  assert.deepEqual(
+    (domainQuery as { where: unknown }).where,
+    { hostname: "untrusted.example.com" }
+  );
+});
+
+test("ambiguous proxy hostname header is rejected without database reads", async () => {
+  let databaseReads = 0;
+
+  await withBrandResolverStubs(
+    {
+      enabled: true,
+      domainFindUnique: async () => {
+        databaseReads += 1;
+        return null;
+      },
+    },
+    async () => {
+      const response = await requestRoute({
+        host: "api.pin-ngo.com",
+        forwardedHost: "api.pin-ngo.com",
+        brandHostname:
+          "portal.casa-azul.example, other.casa-azul.example",
+      });
+      assert.equal(response.status, 404);
+      assert.deepEqual(await response.json(), {
+        ok: false,
+        error: "BRAND_DOMAIN_UNAVAILABLE",
+      });
+    }
+  );
+
+  assert.equal(databaseReads, 0);
 });
 
 test("ambiguous forwarded hostname is rejected without database reads", async () => {
