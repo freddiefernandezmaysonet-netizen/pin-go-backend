@@ -83,6 +83,7 @@ import { uploadsRouter } from "./routes/uploads.route";
 import { dashboardOrganizationRouter } from "./routes/dashboard.organization.route";
 import { dashboardPayoutsRouter } from "./routes/dashboard-payouts.routes";
 import { dashboardCancellationPolicyRouter } from "./routes/dashboard.cancellation-policy.routes";
+import { isPublishedBrandOriginAllowed } from "./services/branding/published-brand-origin.policy.js";
 
 const app = express();
 
@@ -154,7 +155,18 @@ app.use(
     origin(origin, callback) {
       if (!origin) return callback(null, true);
       if (allowedOrigins.includes(origin)) return callback(null, true);
-      return callback(new Error("Not allowed by CORS"));
+
+      void isPublishedBrandOriginAllowed(origin)
+        .then((allowed) => {
+          if (allowed) return callback(null, true);
+          return callback(new Error("Not allowed by CORS"));
+        })
+        .catch((error) => {
+          console.error("[CORS_BRAND_ORIGIN_CHECK_FAILED]", {
+            name: error instanceof Error ? error.name : "UnknownError",
+          });
+          callback(new Error("Not allowed by CORS"));
+        });
     },
     credentials: true,
   })

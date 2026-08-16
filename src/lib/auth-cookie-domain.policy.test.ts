@@ -36,22 +36,45 @@ test("authentication cookies isolate custom domains without changing Pin&Go sess
     const customCookie = configuredAuth.buildAuthCookie("test-token", {
       requestOrigin: "https://portal.casa-azul.example",
     });
+    const managedBrandCookie = configuredAuth.buildAuthCookie(
+      "test-token",
+      {
+        requestOrigin: "https://remansodepaz.pin-ngo.com",
+      }
+    );
     const deceptiveCookie = configuredAuth.buildAuthCookie("test-token", {
       requestOrigin: "https://pin-ngo.com.evil.example",
     });
     const insecureCookie = configuredAuth.buildAuthCookie("test-token", {
       requestOrigin: "http://app.pin-ngo.com",
     });
+    const alternatePortCookie = configuredAuth.buildAuthCookie(
+      "test-token",
+      {
+        requestOrigin: "https://app.pin-ngo.com:444",
+      }
+    );
     const customClearCookie = configuredAuth.buildClearAuthCookie({
       requestOrigin: "https://portal.casa-azul.example",
     });
 
     assert.match(legacyCookie, /Domain=\.pin-ngo\.com/);
+    assert.match(legacyCookie, /^pingo_token=/);
     assert.match(standardCookie, /Domain=\.pin-ngo\.com/);
+    assert.match(standardCookie, /^pingo_token=/);
     assert.doesNotMatch(customCookie, /Domain=/);
+    assert.match(customCookie, /^__Host-pingo_brand_token=/);
+    assert.doesNotMatch(managedBrandCookie, /Domain=/);
+    assert.match(
+      managedBrandCookie,
+      /^__Host-pingo_brand_token=/
+    );
     assert.doesNotMatch(deceptiveCookie, /Domain=/);
     assert.doesNotMatch(insecureCookie, /Domain=/);
+    assert.doesNotMatch(alternatePortCookie, /Domain=/);
+    assert.match(alternatePortCookie, /^__Host-pingo_brand_token=/);
     assert.doesNotMatch(customClearCookie, /Domain=/);
+    assert.match(customClearCookie, /^__Host-pingo_brand_token=/);
     assert.match(customCookie, /HttpOnly/);
     assert.match(customCookie, /SameSite=None/);
     assert.match(customCookie, /Secure/);
@@ -76,6 +99,97 @@ test("authentication cookies isolate custom domains without changing Pin&Go sess
   } finally {
     restoreEnvironmentVariable("NODE_ENV", originalNodeEnv);
     restoreEnvironmentVariable("COOKIE_DOMAIN", originalCookieDomain);
+  }
+});
+
+test("authentication selects the cookie that belongs to the visible hostname", async () => {
+  const originalNodeEnv = process.env.NODE_ENV;
+
+  try {
+    process.env.NODE_ENV = "production";
+    const configuredAuth = await import(
+      new URL(
+        `./auth.ts?cookie-selection=${Date.now()}`,
+        import.meta.url
+      ).href
+    );
+    const cookies =
+      "pingo_token=standard-token; " +
+      "__Host-pingo_brand_token=brand-token";
+
+    assert.equal(
+      configuredAuth.extractTokenFromRequest({
+        headers: {
+          cookie: cookies,
+          origin: "https://remansodepaz.pin-ngo.com",
+          "x-pin-go-brand-hostname": "app.pin-ngo.com",
+        },
+      }),
+      "brand-token"
+    );
+    assert.equal(
+      configuredAuth.extractTokenFromRequest({
+        headers: {
+          cookie: cookies,
+          "x-pin-go-brand-hostname": "remansodepaz.pin-ngo.com",
+        },
+      }),
+      "brand-token"
+    );
+    assert.equal(
+      configuredAuth.extractTokenFromRequest({
+        headers: {
+          cookie: cookies,
+          origin: "https://app.pin-ngo.com",
+        },
+      }),
+      "standard-token"
+    );
+    assert.equal(
+      configuredAuth.extractTokenFromRequest({
+        headers: {
+          cookie: cookies,
+          "x-pin-go-brand-hostname": "app.pin-ngo.com",
+        },
+      }),
+      "standard-token"
+    );
+    assert.equal(
+      configuredAuth.extractTokenFromRequest({
+        headers: { cookie: cookies },
+      }),
+      "brand-token"
+    );
+    assert.equal(
+      configuredAuth.extractTokenFromRequest({
+        headers: {
+          cookie: cookies,
+          origin: "https://app.pin-ngo.com,https://evil.example",
+        },
+      }),
+      null
+    );
+    assert.equal(
+      configuredAuth.extractTokenFromRequest({
+        headers: {
+          cookie: cookies,
+          "x-pin-go-brand-hostname": "app.pin-ngo.com,evil.example",
+        },
+      }),
+      null
+    );
+    assert.equal(
+      configuredAuth.extractTokenFromRequest({
+        headers: {
+          authorization: "Bearer bearer-token",
+          cookie: cookies,
+          origin: "https://remansodepaz.pin-ngo.com",
+        },
+      }),
+      "bearer-token"
+    );
+  } finally {
+    restoreEnvironmentVariable("NODE_ENV", originalNodeEnv);
   }
 });
 

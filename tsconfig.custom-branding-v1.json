@@ -14,6 +14,8 @@
     "src/services/branding/brand-policy.test.ts",
     "src/services/branding/published-brand-context.service.ts",
     "src/services/branding/published-brand-context.service.test.ts",
+    "src/services/branding/published-brand-origin.policy.ts",
+    "src/services/branding/published-brand-origin.policy.test.ts",
     "src/services/branding/brand-management.service.ts",
     "src/services/branding/brand-management.service.test.ts",
     "src/services/branding/brand-review.service.ts",
