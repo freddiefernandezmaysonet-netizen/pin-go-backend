@@ -88,6 +88,7 @@ authRouter.post("/auth/login", async (req, res) => {
         orgId: user.organizationId,
         role: user.role,
         organizationName: user.organization?.name ?? null,
+        organizationSlug: user.organization?.slug ?? null,
       },
     });
   } catch (e) {
@@ -137,6 +138,7 @@ authRouter.get("/auth/me", async (req, res) => {
         organization: {
           select: {
             name: true,
+            slug: true,
           },
         },
       },
