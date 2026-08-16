@@ -36,6 +36,8 @@ model Organization {
   staffMembers     StaffMember[]
   subscriptions    Subscription?
   ttlockAuth       TTLockAuth?
+  brandProfile            BrandProfile?
+  organizationInvitations OrganizationInvitation[]
 }
 
 model DashboardUser {
@@ -53,6 +55,12 @@ model DashboardUser {
   organization        Organization         @relation(fields: [organizationId], references: [id], onDelete: Cascade)
   passwordResetTokens PasswordResetToken[]
   passwordResetSmsCodes PasswordResetSmsCode[]
+  brandRevisionsCreated           BrandRevision[]          @relation("BrandRevisionCreatedBy")
+  brandRevisionsApproved          BrandRevision[]          @relation("BrandRevisionApprovedBy")
+  brandRevisionsRejected          BrandRevision[]          @relation("BrandRevisionRejectedBy")
+  brandDomainsCreated             BrandDomain[]            @relation("BrandDomainCreatedBy")
+  organizationInvitationsCreated  OrganizationInvitation[] @relation("OrganizationInvitationCreatedBy")
+  organizationInvitationsAccepted OrganizationInvitation[] @relation("OrganizationInvitationAcceptedBy")
 
   @@index([organizationId, isActive])
   @@index([organizationId, role])
@@ -85,6 +93,106 @@ model PasswordResetSmsCode {
   @@index([userId])
   @@index([phone])
   @@index([expiresAt])
+}
+
+model BrandProfile {
+  id               String              @id @default(cuid())
+  organizationId   String              @unique
+  experienceType   BrandExperienceType @default(STANDARD)
+  status           BrandProfileStatus  @default(DRAFT)
+  activeRevisionId String?             @unique
+  activeDomainId   String?             @unique
+  createdAt        DateTime            @default(now())
+  updatedAt        DateTime            @updatedAt
+
+  organization   Organization    @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  activeRevision BrandRevision?  @relation("BrandProfileActiveRevision", fields: [activeRevisionId], references: [id], onDelete: SetNull)
+  activeDomain   BrandDomain?    @relation("BrandProfileActiveDomain", fields: [activeDomainId], references: [id], onDelete: SetNull)
+  revisions      BrandRevision[] @relation("BrandProfileRevisions")
+  domains        BrandDomain[]   @relation("BrandProfileDomains")
+
+  @@index([experienceType, status])
+}
+
+model BrandRevision {
+  id               String                      @id @default(cuid())
+  brandProfileId   String
+  version          Int
+  displayName      String
+  logoUrl          String
+  logoPublicId     String
+  faviconUrl       String
+  faviconPublicId  String
+  primaryColor     String                      @db.VarChar(7)
+  approvalStatus   BrandRevisionApprovalStatus @default(DRAFT)
+  createdByUserId  String?
+  approvedByUserId String?
+  approvedAt       DateTime?
+  rejectedByUserId String?
+  rejectedAt       DateTime?
+  rejectionReason  String?
+  createdAt        DateTime                    @default(now())
+  updatedAt        DateTime                    @updatedAt
+
+  brandProfile     BrandProfile   @relation("BrandProfileRevisions", fields: [brandProfileId], references: [id], onDelete: Cascade)
+  activeForProfile BrandProfile?  @relation("BrandProfileActiveRevision")
+  createdBy        DashboardUser? @relation("BrandRevisionCreatedBy", fields: [createdByUserId], references: [id], onDelete: SetNull)
+  approvedBy       DashboardUser? @relation("BrandRevisionApprovedBy", fields: [approvedByUserId], references: [id], onDelete: SetNull)
+  rejectedBy       DashboardUser? @relation("BrandRevisionRejectedBy", fields: [rejectedByUserId], references: [id], onDelete: SetNull)
+
+  @@unique([brandProfileId, version])
+  @@index([brandProfileId, approvalStatus])
+  @@index([createdByUserId])
+  @@index([approvedByUserId])
+  @@index([rejectedByUserId])
+}
+
+model BrandDomain {
+  id               String              @id @default(cuid())
+  brandProfileId   String
+  hostname         String              @unique @db.VarChar(253)
+  type             BrandDomainType
+  status           BrandDomainStatus   @default(PENDING_CONFIGURATION)
+  provider         BrandDomainProvider @default(VERCEL)
+  providerDomainId String?             @unique
+  verifiedAt       DateTime?
+  activatedAt      DateTime?
+  retiredAt        DateTime?
+  redirectUntil    DateTime?
+  createdByUserId  String?
+  createdAt        DateTime            @default(now())
+  updatedAt        DateTime            @updatedAt
+
+  brandProfile     BrandProfile   @relation("BrandProfileDomains", fields: [brandProfileId], references: [id], onDelete: Cascade)
+  activeForProfile BrandProfile?  @relation("BrandProfileActiveDomain")
+  createdBy        DashboardUser? @relation("BrandDomainCreatedBy", fields: [createdByUserId], references: [id], onDelete: SetNull)
+
+  @@index([brandProfileId, status])
+  @@index([createdByUserId])
+  @@index([status, redirectUntil])
+}
+
+model OrganizationInvitation {
+  id              String            @id @default(cuid())
+  organizationId  String
+  email           String            @db.VarChar(320)
+  role            DashboardUserRole @default(ORG_ADMIN)
+  tokenHash       String            @unique
+  expiresAt       DateTime
+  acceptedAt      DateTime?
+  revokedAt       DateTime?
+  createdByUserId String?
+  acceptedUserId  String?
+  createdAt       DateTime          @default(now())
+
+  organization Organization   @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  createdBy    DashboardUser? @relation("OrganizationInvitationCreatedBy", fields: [createdByUserId], references: [id], onDelete: SetNull)
+  acceptedUser DashboardUser? @relation("OrganizationInvitationAcceptedBy", fields: [acceptedUserId], references: [id], onDelete: SetNull)
+
+  @@index([organizationId, email])
+  @@index([expiresAt])
+  @@index([createdByUserId])
+  @@index([acceptedUserId])
 }
 
 model Property {
@@ -1566,6 +1674,42 @@ enum DashboardUserRole {
   MEMBER
   PLATFORM_ADMIN
   ORG_ADMIN
+}
+
+enum BrandExperienceType {
+  STANDARD
+  ENTERPRISE_BRANDED
+}
+
+enum BrandProfileStatus {
+  DRAFT
+  ACTIVE
+  SUSPENDED
+}
+
+enum BrandRevisionApprovalStatus {
+  DRAFT
+  PENDING_APPROVAL
+  APPROVED
+  REJECTED
+}
+
+enum BrandDomainType {
+  PINNGO_SUBDOMAIN
+  CUSTOM_DOMAIN
+}
+
+enum BrandDomainStatus {
+  PENDING_CONFIGURATION
+  PENDING_DNS
+  VERIFYING
+  ACTIVE
+  FAILED
+  RETIRED
+}
+
+enum BrandDomainProvider {
+  VERCEL
 }
 
 enum SubscriptionStatus {

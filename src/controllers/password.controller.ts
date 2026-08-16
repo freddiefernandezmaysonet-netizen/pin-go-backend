@@ -9,10 +9,11 @@ import { validatePasswordPolicy } from "../lib/passwordPolicy";
 import { hashPassword } from "../lib/auth";
 import { sendResetPasswordEmail } from "../lib/mailer";
 import { sendGuestSms } from "../services/sms.service";
+import { resolvePublishedBrandContextByHostname } from "../services/branding/published-brand-context.service";
 
 const prisma = new PrismaClient();
 
-function getPasswordResetUrl(token: string) {
+function getConfiguredPasswordResetUrl(token: string) {
   const explicitResetUrl = String(process.env.PASSWORD_RESET_URL ?? "").trim();
   const frontendOrigin = String(process.env.FRONTEND_ORIGIN ?? "").trim();
 
@@ -31,6 +32,58 @@ function getPasswordResetUrl(token: string) {
   throw new Error("Missing PASSWORD_RESET_URL or FRONTEND_ORIGIN");
 }
 
+function getSecureOriginHostname(
+  rawOrigin: string | null | undefined
+): string | null {
+  const origin = String(rawOrigin ?? "").trim();
+  if (!origin) return null;
+
+  try {
+    const parsed = new URL(origin);
+    if (
+      parsed.protocol !== "https:" ||
+      parsed.username ||
+      parsed.password ||
+      parsed.pathname !== "/" ||
+      parsed.search ||
+      parsed.hash
+    ) {
+      return null;
+    }
+
+    return parsed.hostname;
+  } catch {
+    return null;
+  }
+}
+
+async function getPasswordResetUrl(params: {
+  token: string;
+  organizationId: string;
+  requestOrigin: string | null | undefined;
+}) {
+  const hostname = getSecureOriginHostname(params.requestOrigin);
+
+  if (hostname) {
+    try {
+      const context = await resolvePublishedBrandContextByHostname(hostname);
+      if (
+        context.kind === "CUSTOM_BRAND" &&
+        context.organizationId === params.organizationId
+      ) {
+        return `https://${context.customDomain}/reset-password?token=${encodeURIComponent(params.token)}`;
+      }
+    } catch (error) {
+      console.warn("[auth/reset-password-url] Custom domain resolution failed", {
+        hostname,
+        name: error instanceof Error ? error.name : "UnknownError",
+      });
+    }
+  }
+
+  return getConfiguredPasswordResetUrl(params.token);
+}
+
 function generateNumericCode() {
   return String(Math.floor(100000 + Math.random() * 900000));
 }
@@ -46,10 +99,14 @@ function getSafeForgotPasswordResponse() {
   };
 }
 
-async function createAndSendResetEmail(user: {
-  id: string;
-  email: string;
-}) {
+async function createAndSendResetEmail(
+  user: {
+    id: string;
+    email: string;
+    organizationId: string;
+  },
+  requestOrigin: string | null | undefined
+) {
   await prisma.passwordResetToken.deleteMany({
     where: {
       userId: user.id,
@@ -69,7 +126,11 @@ async function createAndSendResetEmail(user: {
     },
   });
 
-  const resetUrl = getPasswordResetUrl(token);
+  const resetUrl = await getPasswordResetUrl({
+    token,
+    organizationId: user.organizationId,
+    requestOrigin,
+  });
 
   await sendResetPasswordEmail({
     to: user.email,
@@ -201,6 +262,7 @@ export async function verifyForgotPasswordCodeHandler(
       select: {
         id: true,
         email: true,
+        organizationId: true,
       },
     });
 
@@ -248,7 +310,7 @@ export async function verifyForgotPasswordCodeHandler(
       }),
     ]);
 
-    await createAndSendResetEmail(user);
+    await createAndSendResetEmail(user, req.get("origin"));
 
     return res.json({
       ok: true,

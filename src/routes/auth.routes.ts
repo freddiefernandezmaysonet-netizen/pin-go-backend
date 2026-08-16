@@ -78,7 +78,12 @@ authRouter.post("/auth/login", async (req, res) => {
     });
 
     // ✅ Cookie PRODUCTION READY
-    res.setHeader("Set-Cookie", buildAuthCookie(token));
+    res.setHeader(
+      "Set-Cookie",
+      buildAuthCookie(token, {
+        requestOrigin: req.get("origin"),
+      })
+    );
 
     return res.json({
       ok: true,
@@ -88,6 +93,7 @@ authRouter.post("/auth/login", async (req, res) => {
         orgId: user.organizationId,
         role: user.role,
         organizationName: user.organization?.name ?? null,
+        organizationSlug: user.organization?.slug ?? null,
       },
     });
   } catch (e) {
@@ -99,9 +105,14 @@ authRouter.post("/auth/login", async (req, res) => {
 // =======================
 // LOGOUT
 // =======================
-authRouter.post("/auth/logout", async (_req, res) => {
+authRouter.post("/auth/logout", async (req, res) => {
   // ✅ Limpieza correcta de cookie
-  res.setHeader("Set-Cookie", buildClearAuthCookie());
+  res.setHeader(
+    "Set-Cookie",
+    buildClearAuthCookie({
+      requestOrigin: req.get("origin"),
+    })
+  );
   return res.json({ ok: true });
 });
 
@@ -121,7 +132,12 @@ authRouter.get("/auth/me", async (req, res) => {
     try {
       payload = verifyAuthToken(token);
     } catch {
-      res.setHeader("Set-Cookie", buildClearAuthCookie());
+      res.setHeader(
+        "Set-Cookie",
+        buildClearAuthCookie({
+          requestOrigin: req.get("origin"),
+        })
+      );
       return res.status(401).json({ error: "INVALID_TOKEN" });
     }
 
@@ -137,13 +153,19 @@ authRouter.get("/auth/me", async (req, res) => {
         organization: {
           select: {
             name: true,
+            slug: true,
           },
         },
       },
     });
 
     if (!user) {
-      res.setHeader("Set-Cookie", buildClearAuthCookie());
+      res.setHeader(
+        "Set-Cookie",
+        buildClearAuthCookie({
+          requestOrigin: req.get("origin"),
+        })
+      );
       return res.status(401).json({ error: "USER_NOT_FOUND" });
     }
 
@@ -152,7 +174,12 @@ authRouter.get("/auth/me", async (req, res) => {
     }
 
     if (user.tokenVersion !== payload.tokenVersion) {
-      res.setHeader("Set-Cookie", buildClearAuthCookie());
+      res.setHeader(
+        "Set-Cookie",
+        buildClearAuthCookie({
+          requestOrigin: req.get("origin"),
+        })
+      );
       return res.status(401).json({ error: "SESSION_EXPIRED" });
     }
 
@@ -272,7 +299,12 @@ authRouter.post("/api/auth/register-organization", async (req, res) => {
     });
 
     // ✅ Cookie consistente con login
-    res.setHeader("Set-Cookie", buildAuthCookie(token));
+    res.setHeader(
+      "Set-Cookie",
+      buildAuthCookie(token, {
+        requestOrigin: req.get("origin"),
+      })
+    );
 
     return res.status(201).json({
       ok: true,
