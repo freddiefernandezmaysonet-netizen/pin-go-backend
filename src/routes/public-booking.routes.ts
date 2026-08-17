@@ -26,6 +26,7 @@ import {
 } from "../services/guest-reservation-modification.service";
 import { createGuestReservationModificationCheckout } from "../services/guest-reservation-modification-checkout.service";
 import { applyGuestReservationModification } from "../services/guest-reservation-modification-apply.service";
+import { resolveOrganizationGuestReplyTo } from "../services/organization-guest-email.service";
 
 const prisma = new PrismaClient();
 const publicBookingRouter = Router();
@@ -797,6 +798,12 @@ const activeGuestAgreement =
     property.id
   );
 
+const organizationContact =
+  await resolveOrganizationGuestReplyTo(
+    prisma,
+    property.organizationId
+  );
+
 const preferredLanguage =
   String(req.query.lang ?? "")
     .trim()
@@ -821,6 +828,10 @@ return res.json({
       requiresIdentityVerification:
         activeGuestAgreement
           ?.requiresIdentityVerification ?? true,
+    },
+    organization: {
+      ...property.organization,
+      contactEmail: organizationContact.email,
     },
   },
 });
