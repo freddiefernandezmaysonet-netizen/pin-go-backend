@@ -208,6 +208,7 @@ model Property {
   distributionLastError      String?
   publicTitle                String?
   publicDescription          String?
+  publicDescriptionEs        String?
   publicPhotos               Json?
   baseNightlyRate            Decimal?                    @db.Decimal(10,2)
   minimumNightlyRate         Decimal?                    @db.Decimal(10,2)
