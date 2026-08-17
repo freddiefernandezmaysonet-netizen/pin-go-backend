@@ -3,6 +3,7 @@ import { PrismaClient, PmsProvider } from "@prisma/client";
 import { requireAuth } from "../middleware/requireAuth";
 import { processWebhookEventById } from "../pms/ingest/webhook.processor";
 import { completeInternalDemoSecurePrecheckin } from "../services/internal-demo-secure-precheckin.service";
+import { dispatchPendingCleaningConfirmationForReservation } from "../services/cleaning-confirmation-dispatch.service";
 
 const prisma = new PrismaClient();
 export const adminDemoRouter = Router();
@@ -234,6 +235,7 @@ adminDemoRouter.post(
       });
 
       let securePrecheckin = null;
+      let cleaningConfirmationDispatch: any = null;
 
       if (
         reservation &&
@@ -281,6 +283,48 @@ adminDemoRouter.post(
               `Demo secure pre-check-in failed: ${message}`,
           });
         }
+
+        try {
+          cleaningConfirmationDispatch =
+            await dispatchPendingCleaningConfirmationForReservation({
+              prisma,
+              reservationId: reservation.id,
+            });
+
+          console.log(
+            "[DEMO_CLEANING_CONFIRMATION_DISPATCH_RESULT]",
+            {
+              reservationId: reservation.id,
+              sent:
+                cleaningConfirmationDispatch?.sent ?? false,
+              skipped:
+                cleaningConfirmationDispatch?.skipped ?? false,
+              reason:
+                cleaningConfirmationDispatch?.reason ?? null,
+              confirmationId:
+                cleaningConfirmationDispatch?.confirmationId ?? null,
+            }
+          );
+        } catch (error: any) {
+          const message = String(
+            error?.message ?? error
+          );
+
+          console.error(
+            "[DEMO_CLEANING_CONFIRMATION_DISPATCH_ERROR]",
+            {
+              reservationId: reservation.id,
+              error: message,
+            }
+          );
+
+          cleaningConfirmationDispatch = {
+            sent: false,
+            skipped: false,
+            reason: "DISPATCH_FAILED",
+            error: message,
+          };
+        }
       }
 
       return res.json({
@@ -308,6 +352,7 @@ adminDemoRouter.post(
               cleanPreferredLanguage,
           },
           securePrecheckin,
+          cleaningConfirmationDispatch,
           message: "Demo pipeline executed",
         },
       });
