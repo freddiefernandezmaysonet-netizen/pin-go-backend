@@ -35,6 +35,7 @@
     "test:brand-asset-upload": "tsx --test src/routes/uploads.route.test.ts",
     "test:enterprise-brand-onboarding": "tsx --test src/services/branding/enterprise-brand-onboarding.service.test.ts",
     "test:organization-guest-email": "tsx --test src/services/organization-guest-email.service.test.ts",
+    "test:internal-demo-secure-precheckin": "tsx --test src/services/internal-demo-secure-precheckin.service.test.ts",
     "test:custom-branding-v1-types": "tsc -p tsconfig.custom-branding-v1.json",
     "test:custom-branding-v1": "npm run test:brand-policy && npm run test:published-brand-context && npm run test:published-brand-origin && npm run test:auth-cookie-domain && npm run test:brand-management && npm run test:brand-review && npm run test:organization-invitation && npm run test:admin-branding-routes && npm run test:organization-branding-routes && npm run test:public-organization-invitation-routes && npm run test:public-brand-context-routes && npm run test:brand-asset-upload && npm run test:enterprise-brand-onboarding && npm run test:custom-branding-v1-types",
     "prisma:migrate": "prisma migrate dev",
