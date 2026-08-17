@@ -1,4 +1,5 @@
 import {
+  GuestAccessMode,
   Prisma,
   PrismaClient,
 } from "@prisma/client";
@@ -17,6 +18,8 @@ import {
 
 const INTERNAL_DEMO_SOURCE =
   "INTERNAL_DEMO_CENTER";
+const INTERNAL_DEMO_GUEST_ACCESS_MODE =
+  GuestAccessMode.PASSCODE_PLUS_NFC;
 
 type InternalDemoActor = {
   userId: string;
@@ -256,6 +259,8 @@ export async function completeInternalDemoSecurePrecheckin(
       },
       data: {
         preferredLanguage,
+        guestAccessModeSnapshot:
+          INTERNAL_DEMO_GUEST_ACCESS_MODE,
         externalRaw: {
           ...existingExternalRaw,
           consent: {
@@ -366,6 +371,8 @@ export async function completeInternalDemoSecurePrecheckin(
             requiresIdentityVerification,
             preferredLanguage,
             smsConsent,
+            guestAccessMode:
+              INTERNAL_DEMO_GUEST_ACCESS_MODE,
           },
         },
       ],
@@ -382,6 +389,8 @@ export async function completeInternalDemoSecurePrecheckin(
         source: INTERNAL_DEMO_SOURCE,
         preferredLanguage,
         smsConsent,
+        guestAccessMode:
+          INTERNAL_DEMO_GUEST_ACCESS_MODE,
         simulated: true,
         demoOnly: true,
       },

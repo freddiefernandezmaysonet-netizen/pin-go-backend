@@ -108,7 +108,7 @@ function buildHarness(input?: {
         reservationId: reservation.id,
         reservationNumber: "PG-2026-DEMO",
         propertyId: reservation.propertyId,
-        guestAccessMode: "PASSCODE_ONLY",
+        guestAccessMode: "PASSCODE_PLUS_NFC",
         releaseStatus: readiness.ready
           ? "ELIGIBLE"
           : "BLOCKED",
@@ -158,6 +158,10 @@ test("controlled demo records simulated verification evidence and remains access
   assert.equal(result.simulated, true);
   assert.equal(result.source, "INTERNAL_DEMO_CENTER");
   assert.equal(result.readiness.ready, true);
+  assert.equal(
+    result.readiness.guestAccessMode,
+    "PASSCODE_PLUS_NFC"
+  );
   assert.equal(harness.calls.transaction, 1);
   assert.equal(harness.calls.ensureJourney, 1);
   assert.equal(harness.calls.ensureSnapshot, 1);
@@ -169,6 +173,10 @@ test("controlled demo records simulated verification evidence and remains access
   assert.equal(update.where.id, "reservation-demo-1");
   assert.equal(update.data.verificationStatus, "COMPLETED");
   assert.equal(update.data.preferredLanguage, "es");
+  assert.equal(
+    update.data.guestAccessModeSnapshot,
+    "PASSCODE_PLUS_NFC"
+  );
   assert.deepEqual(
     update.data.externalRaw.consent,
     {
@@ -207,6 +215,10 @@ test("controlled demo records simulated verification evidence and remains access
   assert.equal(audit.metadata.actorUserId, "platform-user-1");
   assert.equal(audit.metadata.preferredLanguage, "es");
   assert.equal(audit.metadata.smsConsent, true);
+  assert.equal(
+    audit.metadata.guestAccessMode,
+    "PASSCODE_PLUS_NFC"
+  );
   assert.equal(audit.metadata.demoOnly, true);
 });
 
