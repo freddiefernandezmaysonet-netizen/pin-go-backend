@@ -390,11 +390,35 @@ test("Demo Center invokes secure pre-check-in only for a processed demo reservat
     source,
     /DEMO_SECURE_PRECHECKIN_FAILED:/
   );
+  assert.match(
+    source,
+    /dispatchPendingCleaningConfirmationForReservation\(\{\s*prisma,\s*reservationId:\s*reservation\.id,?\s*\}\)/
+  );
+  assert.match(
+    source,
+    /cleaningConfirmationDispatch,\s*message:\s*"Demo pipeline executed"/
+  );
   assert.ok(
     source.indexOf("processWebhookEventById(event.id)") <
       source.indexOf(
         "await completeInternalDemoSecurePrecheckin"
       )
+  );
+  assert.ok(
+    source.indexOf(
+      "await completeInternalDemoSecurePrecheckin"
+    ) <
+      source.indexOf(
+        "await dispatchPendingCleaningConfirmationForReservation"
+      )
+  );
+  const cleaningDispatchCall = source.match(
+    /dispatchPendingCleaningConfirmationForReservation\(\{[\s\S]*?\}\)/
+  )?.[0];
+  assert.ok(cleaningDispatchCall);
+  assert.doesNotMatch(
+    cleaningDispatchCall,
+    /smsConsent|hasSmsConsent/
   );
   assert.doesNotMatch(
     serviceSource,
