@@ -42,6 +42,18 @@ function clamp(n: number, min: number, max: number) {
   return Math.max(min, Math.min(max, n));
 }
 
+function startEndOfTodayUTC() {
+  const now = new Date();
+  const start = new Date(
+    Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate(), 0, 0, 0)
+  );
+  const end = new Date(
+    Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate() + 1, 0, 0, 0)
+  );
+
+  return { start, end };
+}
+
 const SOURCE_FILTER_ALIASES: Record<string, string[]> = {
   PIN_GO_DIRECT: ["DIRECT_BOOKING", "PIN_GO_DIRECT"],
   PIN_GO_MANUAL: ["MANUAL", "PIN_GO_MANUAL"],
@@ -89,6 +101,7 @@ dashboardReservationsRouter.get("/api/dashboard/reservations", requireAuth, asyn
   const operationalStatus =
     operationalStatusQ === "UPCOMING" ||
     operationalStatusQ === "IN_HOUSE" ||
+    operationalStatusQ === "CHECKOUTS_TODAY" ||
     operationalStatusQ === "CHECKED_OUT" ||
     operationalStatusQ === "CANCELLED"
       ? operationalStatusQ
@@ -134,6 +147,9 @@ dashboardReservationsRouter.get("/api/dashboard/reservations", requireAuth, asyn
     } else if (operationalStatus === "IN_HOUSE") {
       where.checkIn = { lte: now };
       where.checkOut = { gt: now };
+    } else if (operationalStatus === "CHECKOUTS_TODAY") {
+      const { start, end } = startEndOfTodayUTC();
+      where.checkOut = { gte: start, lt: end };
     } else if (operationalStatus === "CHECKED_OUT") {
       where.checkOut = { lte: now };
     }
