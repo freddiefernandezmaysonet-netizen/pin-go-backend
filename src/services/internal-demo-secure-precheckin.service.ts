@@ -68,6 +68,10 @@ export async function completeInternalDemoSecurePrecheckin(
   input: {
     reservationId: string;
     actor: InternalDemoActor;
+    delivery?: {
+      preferredLanguage?: "es" | "en";
+      smsConsent?: boolean;
+    };
     now?: Date;
   },
   dependencies: InternalDemoDependencies =
@@ -110,6 +114,7 @@ export async function completeInternalDemoSecurePrecheckin(
         externalProvider: true,
         guestName: true,
         propertyId: true,
+        externalRaw: true,
         property: {
           select: {
             organizationId: true,
@@ -146,6 +151,30 @@ export async function completeInternalDemoSecurePrecheckin(
 
   const now = input.now ?? new Date();
   const acceptedAt = now.toISOString();
+  const preferredLanguage =
+    input.delivery?.preferredLanguage === "es"
+      ? "es"
+      : "en";
+  const smsConsent =
+    input.delivery?.smsConsent === true;
+  const existingExternalRaw =
+    reservation.externalRaw &&
+    typeof reservation.externalRaw === "object" &&
+    !Array.isArray(reservation.externalRaw)
+      ? (reservation.externalRaw as Record<
+          string,
+          unknown
+        >)
+      : {};
+  const existingConsent =
+    existingExternalRaw.consent &&
+    typeof existingExternalRaw.consent === "object" &&
+    !Array.isArray(existingExternalRaw.consent)
+      ? (existingExternalRaw.consent as Record<
+          string,
+          unknown
+        >)
+      : {};
 
   return prisma.$transaction(async (tx) => {
     await dependencies.ensureGuestJourney(
@@ -226,6 +255,23 @@ export async function completeInternalDemoSecurePrecheckin(
         id: reservation.id,
       },
       data: {
+        preferredLanguage,
+        externalRaw: {
+          ...existingExternalRaw,
+          consent: {
+            ...existingConsent,
+            stayNotificationsConsent:
+              smsConsent,
+            smsConsent,
+            consentSource:
+              INTERNAL_DEMO_SOURCE,
+            consentVersion:
+              "stay_notifications_v1",
+            acceptedAt: smsConsent
+              ? acceptedAt
+              : null,
+          },
+        } as Prisma.InputJsonValue,
         verificationStatus:
           requiresIdentityVerification
             ? "COMPLETED"
@@ -318,6 +364,8 @@ export async function completeInternalDemoSecurePrecheckin(
             simulated: true,
             demoOnly: true,
             requiresIdentityVerification,
+            preferredLanguage,
+            smsConsent,
           },
         },
       ],
@@ -332,6 +380,8 @@ export async function completeInternalDemoSecurePrecheckin(
         actorEmail:
           input.actor.email ?? null,
         source: INTERNAL_DEMO_SOURCE,
+        preferredLanguage,
+        smsConsent,
         simulated: true,
         demoOnly: true,
       },

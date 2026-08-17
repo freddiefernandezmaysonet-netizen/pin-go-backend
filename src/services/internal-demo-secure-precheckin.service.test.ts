@@ -38,6 +38,7 @@ function buildHarness(input?: {
         : input.externalProvider,
     guestName: "Pin&Go Demo Guest",
     propertyId: "property-1",
+    externalRaw: null,
     property: {
       organizationId: "organization-1",
     },
@@ -145,6 +146,10 @@ test("controlled demo records simulated verification evidence and remains access
       {
         reservationId: "reservation-demo-1",
         actor: harness.actor,
+        delivery: {
+          preferredLanguage: "es",
+          smsConsent: true,
+        },
         now,
       },
       harness.dependencies
@@ -163,6 +168,19 @@ test("controlled demo records simulated verification evidence and remains access
   const update = harness.calls.updates[0];
   assert.equal(update.where.id, "reservation-demo-1");
   assert.equal(update.data.verificationStatus, "COMPLETED");
+  assert.equal(update.data.preferredLanguage, "es");
+  assert.deepEqual(
+    update.data.externalRaw.consent,
+    {
+      stayNotificationsConsent: true,
+      smsConsent: true,
+      consentSource:
+        "INTERNAL_DEMO_CENTER",
+      consentVersion:
+        "stay_notifications_v1",
+      acceptedAt: now.toISOString(),
+    }
+  );
   assert.equal(
     update.data.identityVerificationProvider,
     "INTERNAL_DEMO_CENTER"
@@ -187,6 +205,8 @@ test("controlled demo records simulated verification evidence and remains access
     "internal-demo-secure-precheckin:reservation-demo-1"
   );
   assert.equal(audit.metadata.actorUserId, "platform-user-1");
+  assert.equal(audit.metadata.preferredLanguage, "es");
+  assert.equal(audit.metadata.smsConsent, true);
   assert.equal(audit.metadata.demoOnly, true);
 });
 
@@ -209,6 +229,15 @@ test("controlled demo respects properties where identity verification is not req
   assert.equal(update.data.verificationStatus, "NOT_REQUIRED");
   assert.equal(update.data.verifiedAt, null);
   assert.equal(update.data.identityVerificationProvider, null);
+  assert.equal(update.data.preferredLanguage, "en");
+  assert.equal(
+    update.data.externalRaw.consent.smsConsent,
+    false
+  );
+  assert.equal(
+    update.data.externalRaw.consent.acceptedAt,
+    null
+  );
   assert.equal(
     update.data.guestAgreementAcceptance.identityConsentAccepted,
     false
@@ -328,6 +357,22 @@ test("Demo Center invokes secure pre-check-in only for a processed demo reservat
   assert.match(
     source,
     /userId:\s*user\.id[\s\S]*organizationId:\s*user\.orgId[\s\S]*role:\s*user\.role/
+  );
+  assert.match(
+    source,
+    /delivery:\s*\{\s*preferredLanguage:\s*cleanPreferredLanguage,\s*smsConsent:\s*hasSmsConsent/
+  );
+  assert.match(
+    source,
+    /email:\s*\{\s*enabled:\s*true,\s*to:\s*cleanGuestEmail/
+  );
+  assert.match(
+    source,
+    /sms:\s*\{\s*enabled:\s*hasSmsConsent/
+  );
+  assert.doesNotMatch(
+    source,
+    /demo@pingo\.com|\+17876768198/
   );
   assert.match(
     source,
