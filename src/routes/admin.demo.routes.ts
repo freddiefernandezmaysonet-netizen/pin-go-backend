@@ -2,6 +2,7 @@ import { Router } from "express";
 import { PrismaClient, PmsProvider } from "@prisma/client";
 import { requireAuth } from "../middleware/requireAuth";
 import { processWebhookEventById } from "../pms/ingest/webhook.processor";
+import { completeInternalDemoSecurePrecheckin } from "../services/internal-demo-secure-precheckin.service";
 
 const prisma = new PrismaClient();
 export const adminDemoRouter = Router();
@@ -27,7 +28,7 @@ adminDemoRouter.post(
     try {
       if (!assertPlatformAdmin(req, res)) return;
 
-      const user = req.user;
+      const user = (req as any).user;
       const orgId = user.orgId as string;
 
       const { checkIn, checkOut } = req.body ?? {};
@@ -133,6 +134,50 @@ adminDemoRouter.post(
         },
       });
 
+      let securePrecheckin = null;
+
+      if (
+        reservation &&
+        processedEvent?.status === "PROCESSED"
+      ) {
+        try {
+          securePrecheckin =
+            await completeInternalDemoSecurePrecheckin(
+              prisma,
+              {
+                reservationId: reservation.id,
+                actor: {
+                  userId: user.id,
+                  organizationId: user.orgId,
+                  email: user.email ?? null,
+                  role: user.role,
+                },
+              }
+            );
+        } catch (error: any) {
+          const message = String(
+            error?.message ?? error
+          );
+
+          await prisma.webhookEventIngest.update({
+            where: {
+              id: event.id,
+            },
+            data: {
+              status: "FAILED",
+              lastError:
+                `DEMO_SECURE_PRECHECKIN_FAILED:${message}`,
+            },
+          });
+
+          return res.status(409).json({
+            ok: false,
+            error:
+              `Demo secure pre-check-in failed: ${message}`,
+          });
+        }
+      }
+
       return res.json({
         ok: true,
         data: {
@@ -143,6 +188,7 @@ adminDemoRouter.post(
           checkIn: checkInDate.toISOString(),
           checkOut: checkOutDate.toISOString(),
           paymentState: "PAID",
+          securePrecheckin,
           message: "Demo pipeline executed",
         },
       });
