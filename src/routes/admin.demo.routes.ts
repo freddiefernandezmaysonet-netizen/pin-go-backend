@@ -31,12 +31,95 @@ adminDemoRouter.post(
       const user = (req as any).user;
       const orgId = user.orgId as string;
 
-      const { checkIn, checkOut } = req.body ?? {};
+      const {
+        checkIn,
+        checkOut,
+        guestName,
+        guestEmail,
+        guestPhone,
+        preferredLanguage,
+        smsConsent,
+      } = req.body ?? {};
+
+      const cleanGuestName = String(
+        guestName ?? ""
+      ).trim();
+      const cleanGuestEmail = String(
+        guestEmail ?? ""
+      )
+        .trim()
+        .toLowerCase();
+      const cleanGuestPhone = String(
+        guestPhone ?? ""
+      ).trim();
+      const cleanPreferredLanguage =
+        preferredLanguage === "es"
+          ? "es"
+          : preferredLanguage === "en"
+          ? "en"
+          : null;
+      const hasSmsConsent =
+        smsConsent === true;
 
       if (!checkIn || !checkOut) {
         return res.status(400).json({
           ok: false,
           error: "Missing checkIn/checkOut",
+        });
+      }
+
+      if (
+        !cleanGuestName ||
+        cleanGuestName.length > 120
+      ) {
+        return res.status(400).json({
+          ok: false,
+          error:
+            "Guest name is required and must not exceed 120 characters",
+        });
+      }
+
+      if (
+        !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(
+          cleanGuestEmail
+        ) ||
+        cleanGuestEmail.length > 254
+      ) {
+        return res.status(400).json({
+          ok: false,
+          error: "A valid guest email is required",
+        });
+      }
+
+      if (
+        cleanGuestPhone &&
+        !/^\+[1-9]\d{7,14}$/.test(
+          cleanGuestPhone
+        )
+      ) {
+        return res.status(400).json({
+          ok: false,
+          error:
+            "Guest phone must use E.164 format, for example +17875550123",
+        });
+      }
+
+      if (
+        hasSmsConsent &&
+        !cleanGuestPhone
+      ) {
+        return res.status(400).json({
+          ok: false,
+          error:
+            "Guest phone is required when SMS consent is enabled",
+        });
+      }
+
+      if (!cleanPreferredLanguage) {
+        return res.status(400).json({
+          ok: false,
+          error:
+            "Preferred language must be es or en",
         });
       }
 
@@ -74,6 +157,8 @@ adminDemoRouter.post(
 
       const externalId = `DEMO-${Date.now()}`;
 
+      const demoCreatedAt =
+        new Date().toISOString();
       const payload = {
         event: "booking_change",
         booking_id: externalId,
@@ -85,9 +170,10 @@ adminDemoRouter.post(
         arrival: checkInDate.toISOString(),
         departure: checkOutDate.toISOString(),
 
-        guest_name: "Pin&Go Demo Guest",
-        guest_email: "demo@pingo.com",
-        guest_phone: "+17876768198",
+        guest_name: cleanGuestName,
+        guest_email: cleanGuestEmail,
+        guest_phone:
+          cleanGuestPhone || null,
 
         status: "Booked",
 
@@ -95,8 +181,21 @@ adminDemoRouter.post(
         total_amount: 100,
         amount_due: 0,
 
-        updated_at: new Date().toISOString(),
-        created_at: new Date().toISOString(),
+        updated_at: demoCreatedAt,
+        created_at: demoCreatedAt,
+
+        consent: {
+          stayNotificationsConsent:
+            hasSmsConsent,
+          smsConsent: hasSmsConsent,
+          consentSource:
+            "INTERNAL_DEMO_CENTER",
+          consentVersion:
+            "stay_notifications_v1",
+          acceptedAt: hasSmsConsent
+            ? demoCreatedAt
+            : null,
+        },
 
         demo: true,
         created_by: user.email ?? user.id,
@@ -152,6 +251,12 @@ adminDemoRouter.post(
                   email: user.email ?? null,
                   role: user.role,
                 },
+                delivery: {
+                  preferredLanguage:
+                    cleanPreferredLanguage,
+                  smsConsent:
+                    hasSmsConsent,
+                },
               }
             );
         } catch (error: any) {
@@ -188,6 +293,20 @@ adminDemoRouter.post(
           checkIn: checkInDate.toISOString(),
           checkOut: checkOutDate.toISOString(),
           paymentState: "PAID",
+          delivery: {
+            email: {
+              enabled: true,
+              to: cleanGuestEmail,
+            },
+            sms: {
+              enabled: hasSmsConsent,
+              to: hasSmsConsent
+                ? cleanGuestPhone
+                : null,
+            },
+            preferredLanguage:
+              cleanPreferredLanguage,
+          },
           securePrecheckin,
           message: "Demo pipeline executed",
         },
