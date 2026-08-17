@@ -407,6 +407,7 @@ dashboardPropertiesRouter.get(
           distributionLastError: true,
           publicTitle: true,
           publicDescription: true,
+          publicDescriptionEs: true,
           publicPhotos: true,
           baseNightlyRate: true,
           minimumNightlyRate: true,
@@ -511,6 +512,7 @@ dashboardPropertiesRouter.patch(
   occupancyHighAdjustmentPercent: occupancyHighAdjustmentPercentRaw,
 
   publicDescription,
+  publicDescriptionEs,
   publicPhotos,
   baseNightlyRate: baseNightlyRateRaw,
   minimumNightlyRate: minimumNightlyRateRaw,
@@ -898,6 +900,10 @@ if (publicDescription !== undefined) {
   data.publicDescription = String(publicDescription || "").trim() || null;
 }
 
+if (publicDescriptionEs !== undefined) {
+  data.publicDescriptionEs = String(publicDescriptionEs || "").trim() || null;
+}
+
 if (publicPhotos !== undefined) {
   data.publicPhotos = Array.isArray(publicPhotos) ? publicPhotos : null;
 }
@@ -990,6 +996,7 @@ if (checkOutTime !== undefined) {
           distributionLastError: true,
           publicTitle: true,
           publicDescription: true,
+          publicDescriptionEs: true,
           publicPhotos: true,
           baseNightlyRate: true,
           minimumNightlyRate: true,
