@@ -7,12 +7,20 @@ import { resolveOrganizationGuestReplyTo } from "./organization-guest-email.serv
 function prismaStub(input: {
   organization: { dashboardUsers: Array<{ email: string }> } | null;
   onQuery?: (query: unknown) => void;
+  activeOrganizationUser?: { email: string } | null;
+  onActiveUserQuery?: (query: unknown) => void;
 }) {
   return {
     organization: {
       findUnique: async (query: unknown) => {
         input.onQuery?.(query);
         return input.organization;
+      },
+    },
+    dashboardUser: {
+      findFirst: async (query: unknown) => {
+        input.onActiveUserQuery?.(query);
+        return input.activeOrganizationUser ?? null;
       },
     },
   } as unknown as PrismaClient;
@@ -52,10 +60,40 @@ test("guest contact uses the first active organization administrator", async () 
   });
 });
 
-test("guest contact safely falls back when no active administrator exists", async () => {
+test("guest contact uses the first active organization user when no administrator exists", async () => {
+  let query: unknown;
   const result = await resolveOrganizationGuestReplyTo(
     prismaStub({
       organization: { dashboardUsers: [] },
+      activeOrganizationUser: {
+        email: "PERSONAL@EXAMPLE.COM",
+      },
+      onActiveUserQuery: (value) => {
+        query = value;
+      },
+    }),
+    "organization-1"
+  );
+
+  assert.deepEqual(result, {
+    email: "personal@example.com",
+    source: "ACTIVE_ORGANIZATION_USER",
+  });
+  assert.deepEqual(query, {
+    where: {
+      organizationId: "organization-1",
+      isActive: true,
+    },
+    orderBy: { createdAt: "asc" },
+    select: { email: true },
+  });
+});
+
+test("guest contact safely falls back when no active organization user exists", async () => {
+  const result = await resolveOrganizationGuestReplyTo(
+    prismaStub({
+      organization: { dashboardUsers: [] },
+      activeOrganizationUser: null,
     }),
     "organization-1"
   );

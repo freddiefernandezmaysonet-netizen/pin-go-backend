@@ -5,6 +5,7 @@ import {
 
 export type GuestReplyToSource =
   | "PRIMARY_ADMIN"
+  | "ACTIVE_ORGANIZATION_USER"
   | "PIN_GO_SUPPORT";
 
 export type OrganizationGuestReplyTo = {
@@ -69,6 +70,30 @@ export async function resolveOrganizationGuestReplyTo(
     return {
       email: primaryAdminEmail,
       source: "PRIMARY_ADMIN",
+    };
+  }
+
+  const activeOrganizationUser =
+    await prisma.dashboardUser.findFirst({
+      where: {
+        organizationId: cleanOrganizationId,
+        isActive: true,
+      },
+      orderBy: {
+        createdAt: "asc",
+      },
+      select: {
+        email: true,
+      },
+    });
+
+  const activeOrganizationUserEmail =
+    normalizeEmail(activeOrganizationUser?.email);
+
+  if (activeOrganizationUserEmail) {
+    return {
+      email: activeOrganizationUserEmail,
+      source: "ACTIVE_ORGANIZATION_USER",
     };
   }
 
