@@ -21,6 +21,7 @@
     "test:operational-auto-close": "tsx --test src/apms/operational-intelligence.auto-close.service.test.ts",
     "test:mission-control-projection": "tsx --test src/apms/mission-control-projection.test.ts",
     "test:canonical-operational-contract": "npm run test:engine-catalog && npm run test:audit-persistence && npm run test:operational-transition-policy && npm run test:operational-reopen-contract && npm run test:operational-reopen-service && npm run test:operational-deduplication && npm run test:operational-auto-close && npm run test:mission-control-projection && tsc -p tsconfig.engine-catalog.json",
+    "test:guest-journey-enterprise-contract": "tsx --test src/services/guest-journey-enterprise-contract.test.ts",
     "test:brand-policy": "tsx --test src/services/branding/brand-policy.test.ts",
     "test:published-brand-context": "tsx --test src/services/branding/published-brand-context.service.test.ts",
     "test:published-brand-origin": "tsx --test src/services/branding/published-brand-origin.policy.test.ts",
