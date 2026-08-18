@@ -632,6 +632,13 @@ export function evaluateCanonicalGuestJourney(
         ?.secureAccessCodePresent
     );
 
+  const canonicalGrantMatchesReservationWindow =
+    Boolean(canonicalGrant) &&
+    canonicalGrant!.startsAt.getTime() ===
+      evidence.reservation.checkIn.getTime() &&
+    canonicalGrant!.endsAt.getTime() ===
+      evidence.reservation.checkOut.getTime();
+
   const accessEligibilitySatisfied =
     evidence.access.releaseStatus ===
       GuestAccessReleaseStatus
@@ -650,7 +657,8 @@ export function evaluateCanonicalGuestJourney(
     Boolean(canonicalGrant) &&
     canonicalGrantActive &&
     canonicalGrantUsesPasscode &&
-    canonicalGrantHasSecureEvidence;
+    canonicalGrantHasSecureEvidence &&
+    canonicalGrantMatchesReservationWindow;
 
   const unresolvedGuestNfcCount =
     evidence.access
@@ -1171,6 +1179,33 @@ export function evaluateCanonicalGuestJourney(
         accessGrantId:
           canonicalGrant?.id ??
           null,
+      },
+    });
+  }
+
+  if (
+    canonicalGrantActive &&
+    canonicalGrantUsesPasscode &&
+    !canonicalGrantMatchesReservationWindow
+  ) {
+    addInconsistency({
+      code:
+        "ACCESS_WINDOW_MISMATCH",
+      reason:
+        "The active canonical Guest Access grant does not exactly match the reservation window.",
+      severity: "CRITICAL",
+      repairableByPinGo: true,
+      metadata: {
+        accessGrantId:
+          canonicalGrant?.id ?? null,
+        grantStartsAt:
+          canonicalGrant?.startsAt ?? null,
+        grantEndsAt:
+          canonicalGrant?.endsAt ?? null,
+        reservationCheckIn:
+          evidence.reservation.checkIn,
+        reservationCheckOut:
+          evidence.reservation.checkOut,
       },
     });
   }

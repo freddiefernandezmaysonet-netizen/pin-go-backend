@@ -133,9 +133,7 @@ function createReservationEvidence(
         method:
           AccessMethod.PASSCODE_TIMEBOUND,
         status: AccessStatus.ACTIVE,
-        startsAt: new Date(
-          "2026-08-10T14:00:00.000Z"
-        ),
+        startsAt: CHECK_IN,
         endsAt: CHECK_OUT,
         ttlockKeyboardPwdId: 123456,
         secureAccessCode: {
@@ -166,6 +164,7 @@ function createReservationEvidence(
 
 function createMockClient(input?: {
   organizationId?: string;
+  auditCreateError?: unknown;
   candidates?: Array<{
     id: string;
     propertyId: string;
@@ -220,6 +219,9 @@ function createMockClient(input?: {
       },
       create: async (args: any) => {
         calls.auditCreate.push(args);
+        if (input?.auditCreateError) {
+          throw input.auditCreateError;
+        }
         const created = {
           id: `audit-${
             calls.auditCreate.length
@@ -375,6 +377,90 @@ test(
       1
     );
     assert.equal(calls.auditCreate.length, 1);
+  }
+);
+
+test(
+  "treats a concurrent audit unique conflict as deduplicated",
+  async () => {
+    const concurrentConflict =
+      Object.assign(
+        new Error(
+          "Unique constraint failed"
+        ),
+        {
+          code: "P2002",
+          meta: {
+            target: ["decisionId"],
+          },
+        }
+      );
+    const { prisma, calls } =
+      createMockClient({
+        auditCreateError:
+          concurrentConflict,
+      });
+
+    const metrics =
+      await runGuestJourneyShadowCycle(
+        prisma,
+        enabledConfig(),
+        { now: NOW }
+      );
+
+    assert.equal(metrics.errors, 0);
+    assert.equal(
+      metrics.auditCreated,
+      0
+    );
+    assert.equal(
+      metrics.auditDeduplicated,
+      1
+    );
+    assert.equal(
+      calls.auditCreate.length,
+      1
+    );
+  }
+);
+
+test(
+  "does not hide an unrelated audit unique conflict",
+  async () => {
+    const unrelatedConflict =
+      Object.assign(
+        new Error(
+          "Unique constraint failed"
+        ),
+        {
+          code: "P2002",
+          meta: {
+            target: ["id"],
+          },
+        }
+      );
+    const { prisma } =
+      createMockClient({
+        auditCreateError:
+          unrelatedConflict,
+      });
+
+    const metrics =
+      await runGuestJourneyShadowCycle(
+        prisma,
+        enabledConfig(),
+        { now: NOW }
+      );
+
+    assert.equal(metrics.errors, 1);
+    assert.equal(
+      metrics.auditDeduplicated,
+      0
+    );
+    assert.equal(
+      metrics.errorCodeCounts.P2002,
+      1
+    );
   }
 );
 

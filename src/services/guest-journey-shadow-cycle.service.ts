@@ -447,8 +447,10 @@ async function persistShadowAudit(
     return "CREATED";
   } catch (error) {
     if (
-      error instanceof
-      ApmsAuditDecisionIdConflictError
+      error instanceof ApmsAuditDecisionIdConflictError ||
+      isPrismaDecisionIdUniqueConstraintError(
+        error
+      )
     ) {
       return "DEDUPLICATED";
     }
@@ -458,17 +460,57 @@ async function persistShadowAudit(
 }
 
 function toErrorCode(error: unknown): string {
-  const message =
-    error instanceof Error
+  const structuredCode =
+    error &&
+    typeof error === "object" &&
+    "code" in error &&
+    typeof (error as { code?: unknown })
+      .code === "string"
+      ? (error as { code: string }).code
+      : null;
+  const source =
+    structuredCode ??
+    (error instanceof Error
       ? error.message
-      : String(error);
-  const code = message
+      : String(error));
+  const code = source
     .split(":", 1)[0]
     .trim()
     .replace(/[^A-Z0-9_]/gi, "_")
     .toUpperCase();
 
   return code || "UNKNOWN_ERROR";
+}
+
+function isPrismaDecisionIdUniqueConstraintError(
+  error: unknown
+): boolean {
+  if (
+    !error ||
+    typeof error !== "object" ||
+    !("code" in error) ||
+    (error as { code?: unknown }).code !==
+      "P2002"
+  ) {
+    return false;
+  }
+
+  const target = (
+    error as {
+      meta?: {
+        target?: unknown;
+      };
+    }
+  ).meta?.target;
+  const targets = Array.isArray(target)
+    ? target
+    : [target];
+
+  return targets.some((value) =>
+    String(value ?? "")
+      .toLowerCase()
+      .includes("decisionid")
+  );
 }
 
 export async function runGuestJourneyShadowCycle(

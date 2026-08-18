@@ -260,9 +260,7 @@ function completedAccessOverrides(): Pick<
           AccessMethod.PASSCODE_TIMEBOUND,
 
         startsAt:
-          new Date(
-            "2026-08-10T14:00:00.000Z"
-          ),
+          CHECK_IN,
 
         endsAt: CHECK_OUT,
 
@@ -1110,11 +1108,27 @@ test(
     );
     const access =
       completedAccessOverrides();
+    const canonicalGrant =
+      access.access!
+        .canonicalGuestGrant!;
+    const dstAccess = {
+      ...access,
+      access: {
+        ...access.access,
+        canonicalGuestGrant: {
+          ...canonicalGrant,
+          startsAt: new Date(
+            checkIn.getTime()
+          ),
+          endsAt: checkOut,
+        },
+      },
+    };
 
     const beforeWindow =
       evaluateCanonicalGuestJourney(
         createEvidence({
-          ...access,
+          ...dstAccess,
           evaluatedAt: new Date(
             checkIn.getTime() -
               2 * 60 * 60 * 1000 -
@@ -1130,7 +1144,7 @@ test(
     const atWindow =
       evaluateCanonicalGuestJourney(
         createEvidence({
-          ...access,
+          ...dstAccess,
           evaluatedAt: new Date(
             checkIn.getTime() -
               2 * 60 * 60 * 1000
@@ -1224,11 +1238,120 @@ test(
     );
     assert.equal(
       modified.expectedState,
-      GuestJourneyState.ACCESS_SCHEDULED
+      GuestJourneyState
+        .VERIFICATION_COMPLETED
+    );
+    assert.ok(
+      inconsistencyCodes(
+        modified
+      ).includes(
+        "ACCESS_WINDOW_MISMATCH"
+      )
+    );
+    assert.ok(
+      intentTypes(modified).includes(
+        "REQUEST_ACCESS_PROVISIONING"
+      )
     );
     assert.notEqual(
       original.evidenceFingerprint,
       modified.evidenceFingerprint
+    );
+  }
+);
+
+test(
+  "rejects an active passcode that starts after reservation check-in",
+  () => {
+    const completedAccess =
+      completedAccessOverrides();
+    const canonicalGrant =
+      completedAccess.access!
+        .canonicalGuestGrant!;
+
+    const evaluation =
+      evaluateCanonicalGuestJourney(
+        createEvidence({
+          ...completedAccess,
+          evaluatedAt: new Date(
+            "2026-08-10T14:30:00.000Z"
+          ),
+          access: {
+            ...completedAccess.access,
+            canonicalGuestGrant: {
+              ...canonicalGrant,
+              startsAt: new Date(
+                "2026-08-10T16:30:00.000Z"
+              ),
+            },
+          },
+        })
+      );
+
+    assert.equal(
+      evaluation.expectedState,
+      GuestJourneyState
+        .VERIFICATION_COMPLETED
+    );
+    assert.ok(
+      blockerCodes(
+        evaluation
+      ).includes(
+        "ACCESS_NOT_PROVISIONED"
+      )
+    );
+    assert.ok(
+      inconsistencyCodes(
+        evaluation
+      ).includes(
+        "ACCESS_WINDOW_MISMATCH"
+      )
+    );
+    assert.ok(
+      intentTypes(evaluation).includes(
+        "REQUEST_ACCESS_PROVISIONING"
+      )
+    );
+  }
+);
+
+test(
+  "rejects an active passcode that outlives a shortened reservation",
+  () => {
+    const completedAccess =
+      completedAccessOverrides();
+
+    const evaluation =
+      evaluateCanonicalGuestJourney(
+        createEvidence({
+          ...completedAccess,
+          evaluatedAt: new Date(
+            "2026-08-10T14:30:00.000Z"
+          ),
+          reservation: {
+            checkOut: new Date(
+              "2026-08-11T15:00:00.000Z"
+            ),
+          },
+        })
+      );
+
+    assert.equal(
+      evaluation.expectedState,
+      GuestJourneyState
+        .VERIFICATION_COMPLETED
+    );
+    assert.ok(
+      inconsistencyCodes(
+        evaluation
+      ).includes(
+        "ACCESS_WINDOW_MISMATCH"
+      )
+    );
+    assert.ok(
+      intentTypes(evaluation).includes(
+        "REQUEST_ACCESS_PROVISIONING"
+      )
     );
   }
 );
