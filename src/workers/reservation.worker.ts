@@ -57,6 +57,12 @@ import {
   markGuestJourneyReadyForArrival,
   scheduleGuestJourneyAccess,
 } from "../services/guest-journey.service";
+import {
+  resolveGuestJourneyShadowConfig,
+} from "../services/guest-journey-shadow.config";
+import {
+  runGuestJourneyShadowCycle,
+} from "../services/guest-journey-shadow-cycle.service";
 
 
 console.log("[reservation.worker] BOOT", new Date().toISOString());
@@ -85,6 +91,10 @@ const TTLOCK_DELETE_TYPE = Number(process.env.TTLOCK_DELETE_TYPE ?? 2);
 const WORKER_NAME = 'reservation.worker';
 const POLL_MS = Number(process.env.RESERVATION_WORKER_POLL_MS ?? 10_000);
 const BATCH_SIZE = Number(process.env.RESERVATION_WORKER_BATCH_SIZE ?? 20);
+const GUEST_JOURNEY_SHADOW_CONFIG =
+  resolveGuestJourneyShadowConfig();
+let guestJourneyShadowCursor:
+  string | null = null;
 const REMINDER_HOURS = Number(
   process.env.GUEST_LINK_REMINDER_HOURS ??
     24
@@ -2366,6 +2376,33 @@ async function tick() {
         toErrString(e)
       );
     }
+
+    if (GUEST_JOURNEY_SHADOW_CONFIG.enabled) {
+      try {
+        const shadowMetrics =
+          await runGuestJourneyShadowCycle(
+            prisma,
+            GUEST_JOURNEY_SHADOW_CONFIG,
+            {
+              now,
+              cursor:
+                guestJourneyShadowCursor,
+            }
+          );
+
+        guestJourneyShadowCursor =
+          shadowMetrics.nextCursor;
+        log(
+          "guest-journey-shadow",
+          shadowMetrics
+        );
+      } catch (e) {
+        errLog(
+          "guest-journey-shadow crashed:",
+          toErrString(e)
+        );
+      }
+    }
   } finally {
     tickRunning = false;
   }
@@ -2378,6 +2415,13 @@ async function start() {
   log(
     `SMS flags: guest=${GUEST_SMS_ENABLED ? 'on' : 'off'} cleaning=${
       CLEANING_SMS_ENABLED ? 'on' : 'off'
+    }`
+  );
+  log(
+    `Guest Journey shadow: ${
+      GUEST_JOURNEY_SHADOW_CONFIG.enabled
+        ? "on"
+        : "off"
     }`
   );
 

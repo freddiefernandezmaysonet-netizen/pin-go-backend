@@ -1,0 +1,65 @@
+name: Guest Journey Enterprise E2 Shadow Certification
+
+on:
+  push:
+    branches:
+      - agent/apms-enterprise-guest-journey-e2-shadow
+    paths:
+      - ".github/workflows/guest-journey-enterprise-e2-certification.yml"
+      - "package.json"
+      - "prisma/schema.prisma"
+      - "src/apms/**"
+      - "src/services/guest-journey-**"
+      - "src/workers/reservation.worker.ts"
+      - "tsconfig.guest-journey-enterprise-e2.json"
+
+  pull_request:
+    branches:
+      - main
+    paths:
+      - ".github/workflows/guest-journey-enterprise-e2-certification.yml"
+      - "package.json"
+      - "prisma/schema.prisma"
+      - "src/apms/**"
+      - "src/services/guest-journey-**"
+      - "src/workers/reservation.worker.ts"
+      - "tsconfig.guest-journey-enterprise-e2.json"
+
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  certify:
+    name: Read-only evidence and shadow evaluator
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Validate Prisma schema
+        run: npx prisma validate --schema prisma/schema.prisma
+
+      - name: Generate Prisma Client
+        run: npx prisma generate --schema prisma/schema.prisma
+
+      - name: Certify Guest Journey E2 shadow
+        run: npm run test:guest-journey-enterprise-e2-shadow
+
+      - name: Preserve canonical APMS operational contract
+        run: npm run test:canonical-operational-contract
+
+      - name: Focused Guest Journey E2 TypeScript build
+        run: npx tsc -p tsconfig.guest-journey-enterprise-e2.json
