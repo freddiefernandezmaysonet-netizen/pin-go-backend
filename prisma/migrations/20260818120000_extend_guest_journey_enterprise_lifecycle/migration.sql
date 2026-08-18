@@ -1,0 +1,20 @@
+-- APMS Enterprise Guest Journey E1
+-- Additive only: no existing state or column is removed or rewritten.
+
+ALTER TYPE "GuestJourneyState"
+ADD VALUE IF NOT EXISTS 'STAY_ACTIVE';
+
+ALTER TYPE "GuestJourneyState"
+ADD VALUE IF NOT EXISTS 'CHECKOUT_DUE';
+
+ALTER TYPE "GuestJourneyState"
+ADD VALUE IF NOT EXISTS 'JOURNEY_COMPLETED';
+
+ALTER TYPE "GuestJourneyState"
+ADD VALUE IF NOT EXISTS 'JOURNEY_CANCELLED';
+
+ALTER TABLE "GuestJourney"
+ADD COLUMN "stayActiveAt" TIMESTAMP(3),
+ADD COLUMN "checkoutDueAt" TIMESTAMP(3),
+ADD COLUMN "completedAt" TIMESTAMP(3),
+ADD COLUMN "cancelledAt" TIMESTAMP(3);
