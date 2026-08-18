@@ -147,7 +147,7 @@ test("keeps E1 migrations additive and canonical", () => {
   }
 });
 
-test("does not activate the enterprise Guest Journey runtime in E1", () => {
+test("keeps E2 shadow default-off and excludes state reconciliation or owner execution", () => {
   const reservationWorker = readFileSync(
     new URL(
       "../workers/reservation.worker.ts",
@@ -156,8 +156,29 @@ test("does not activate the enterprise Guest Journey runtime in E1", () => {
     "utf8"
   );
 
+  assert.match(
+    reservationWorker,
+    /resolveGuestJourneyShadowConfig/
+  );
+  assert.match(
+    reservationWorker,
+    /GUEST_JOURNEY_SHADOW_CONFIG\.enabled/
+  );
   assert.doesNotMatch(
     reservationWorker,
-    /guest-journey-(?:contract|evaluator|evidence|reconciler|coordination-intent|compliance-intent)/
+    /guest-journey-(?:reconciler|coordination-intent|compliance-intent)/
+  );
+
+  const shadowConfig = readFileSync(
+    new URL(
+      "./guest-journey-shadow.config.ts",
+      import.meta.url
+    ),
+    "utf8"
+  );
+
+  assert.match(
+    shadowConfig,
+    /if \(!value\) \{\s*return false;/
   );
 });
