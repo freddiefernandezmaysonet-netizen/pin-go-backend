@@ -147,7 +147,7 @@ test("keeps E1 migrations additive and canonical", () => {
   }
 });
 
-test("keeps E2 shadow default-off and excludes state reconciliation or owner execution", () => {
+test("keeps E2 shadow and E3 internal reconciliation independently default-off", () => {
   const reservationWorker = readFileSync(
     new URL(
       "../workers/reservation.worker.ts",
@@ -164,6 +164,18 @@ test("keeps E2 shadow default-off and excludes state reconciliation or owner exe
     reservationWorker,
     /GUEST_JOURNEY_SHADOW_CONFIG\.enabled/
   );
+  assert.match(
+    reservationWorker,
+    /resolveGuestJourneyInternalReconcileConfig/
+  );
+  assert.match(
+    reservationWorker,
+    /runGuestJourneyEngineCycle/
+  );
+  assert.match(
+    reservationWorker,
+    /GUEST_JOURNEY_INTERNAL_RECONCILE_CONFIG\s*\.enabled/
+  );
   assert.doesNotMatch(
     reservationWorker,
     /guest-journey-(?:reconciler|coordination-intent|compliance-intent)/
@@ -179,6 +191,20 @@ test("keeps E2 shadow default-off and excludes state reconciliation or owner exe
 
   assert.match(
     shadowConfig,
+    /if \(!value\) \{\s*return false;/
+  );
+
+  const internalReconcileConfig =
+    readFileSync(
+      new URL(
+        "./guest-journey-internal-reconcile.config.ts",
+        import.meta.url
+      ),
+      "utf8"
+    );
+
+  assert.match(
+    internalReconcileConfig,
     /if \(!value\) \{\s*return false;/
   );
 });
