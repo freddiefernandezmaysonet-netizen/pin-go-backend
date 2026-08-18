@@ -1,0 +1,99 @@
+name: Guest Journey Enterprise E1 Certification
+
+on:
+  push:
+    branches:
+      - agent/apms-enterprise-guest-journey-e1-contract-schema
+    paths:
+      - ".github/workflows/guest-journey-enterprise-e1-certification.yml"
+      - "package.json"
+      - "prisma/schema.prisma"
+      - "prisma/migrations/20260818120000_extend_guest_journey_enterprise_lifecycle/**"
+      - "prisma/migrations/20260818121000_add_guest_journey_enterprise_intents/**"
+      - "src/apms/engine-catalog.ts"
+      - "src/services/guest-journey-contract.ts"
+      - "src/services/guest-journey-enterprise-contract.test.ts"
+
+  pull_request:
+    branches:
+      - main
+    paths:
+      - ".github/workflows/guest-journey-enterprise-e1-certification.yml"
+      - "package.json"
+      - "prisma/schema.prisma"
+      - "prisma/migrations/20260818120000_extend_guest_journey_enterprise_lifecycle/**"
+      - "prisma/migrations/20260818121000_add_guest_journey_enterprise_intents/**"
+      - "src/apms/engine-catalog.ts"
+      - "src/services/guest-journey-contract.ts"
+      - "src/services/guest-journey-enterprise-contract.test.ts"
+
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  DATABASE_URL: postgresql://postgres:postgres@127.0.0.1:5432/pingo_e1_ci
+
+jobs:
+  certify:
+    name: Contract and additive schema
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: pingo_e1_ci
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d pingo_e1_ci"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Validate Prisma schema
+        run: npx prisma validate --schema prisma/schema.prisma
+
+      - name: Generate Prisma Client
+        run: npx prisma generate --schema prisma/schema.prisma
+
+      - name: Apply complete migration history to empty PostgreSQL
+        run: npx prisma migrate deploy --schema prisma/schema.prisma
+
+      - name: Certify Guest Journey E1 contract
+        run: npm run test:guest-journey-enterprise-contract
+
+      - name: Preserve canonical APMS operational contract
+        run: npm run test:canonical-operational-contract
+
+      - name: Focused Guest Journey E1 TypeScript build
+        run: |
+          npx tsc \
+            --noEmit \
+            --module preserve \
+            --moduleResolution bundler \
+            --target esnext \
+            --strict \
+            --skipLibCheck \
+            --types node \
+            src/apms/engine-catalog.ts \
+            src/services/guest-journey-contract.ts \
+            src/services/guest-journey-enterprise-contract.test.ts
