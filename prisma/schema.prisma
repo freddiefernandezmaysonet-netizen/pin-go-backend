@@ -548,6 +548,7 @@ model Reservation {
   NfcAssignment           NfcAssignment[]
   pmsLinks                PmsReservationLink[]
   guestJourney            GuestJourney?
+  guestJourneyCoordinationIntents GuestJourneyCoordinationIntent[]
   property                Property                    @relation(fields: [propertyId], references: [id])
   cancellationPolicy      PropertyCancellationPolicy? @relation(fields: [cancellationPolicyId], references: [id],         onDelete: SetNull)
   staffAssignments        StaffAssignment[]
@@ -630,14 +631,63 @@ model GuestJourney {
   verificationCompletedAt DateTime?
   accessScheduledAt        DateTime?
   readyForArrivalAt        DateTime?
+  stayActiveAt             DateTime?
+  checkoutDueAt            DateTime?
+  completedAt              DateTime?
+  cancelledAt              DateTime?
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  reservation Reservation @relation(fields: [reservationId], references: [id], onDelete: Cascade)
-  
+  reservation        Reservation                        @relation(fields: [reservationId], references: [id], onDelete: Cascade)
+  coordinationIntents GuestJourneyCoordinationIntent[]
+
   @@index([currentState])
   @@index([stateChangedAt])
+}
+
+model GuestJourneyCoordinationIntent {
+  id            String @id @default(cuid())
+  intentKey     String @unique
+  reservationId String
+  journeyId     String
+
+  contractVersion     String @default("guest_journey_coordination_intent_v1")
+  intentType          String
+  targetEngine        String
+  reasonCode          String
+  expectedOutcomeCode String
+  evidenceFingerprint String
+  payload             Json?
+
+  status GuestJourneyCoordinationIntentStatus @default(PENDING)
+
+  claimCount     Int       @default(0)
+  leaseToken     String?
+  claimedAt      DateTime?
+  leaseExpiresAt DateTime?
+  lastAttemptAt  DateTime?
+  nextActionAt   DateTime?
+
+  succeededAt  DateTime?
+  exhaustedAt  DateTime?
+  supersededAt DateTime?
+
+  outcomeEvidenceFingerprint String?
+  lastError                  String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  reservation Reservation  @relation(fields: [reservationId], references: [id], onDelete: Cascade)
+  journey     GuestJourney @relation(fields: [journeyId], references: [id], onDelete: Cascade)
+
+  @@index([reservationId, status])
+  @@index([journeyId, status])
+  @@index([targetEngine, status, nextActionAt])
+  @@index([status, leaseExpiresAt])
+  @@index([intentType, status])
+  @@index([evidenceFingerprint])
 }
 
 model AccessCode {
@@ -1729,6 +1779,20 @@ enum GuestJourneyState {
   VERIFICATION_COMPLETED
   ACCESS_SCHEDULED
   READY_FOR_ARRIVAL
+  STAY_ACTIVE
+  CHECKOUT_DUE
+  JOURNEY_COMPLETED
+  JOURNEY_CANCELLED
+}
+
+enum GuestJourneyCoordinationIntentStatus {
+  PENDING
+  CLAIMED
+  WAITING_FOR_EVIDENCE
+  RETRYABLE
+  SUCCEEDED
+  EXHAUSTED
+  SUPERSEDED
 }
 
 enum ReservationStatus {
