@@ -632,6 +632,8 @@ export function evaluateCanonicalGuestJourney(
         ?.secureAccessCodePresent
     );
 
+  // Access is canonical only when both persisted boundaries match
+  // the current reservation after any date modification.
   const canonicalGrantMatchesReservationWindow =
     Boolean(canonicalGrant) &&
     canonicalGrant!.startsAt.getTime() ===
