@@ -40,6 +40,7 @@ import { meRouter } from "./routes/me.route";
 import { dashboardRouter } from "./routes/dashboard.route";
 import { dashboardReservationsRouter } from "./routes/dashboard.reservations.route";
 import { dashboardPropertiesRouter } from "./routes/dashboard.properties.route";
+import { buildDashboardChannexFullSyncCertificationRouter } from "./routes/dashboard.channex-full-sync-certification.route";
 import { buildDashboardCalendarOverridesRouter } from "./routes/dashboard.calendar-overrides.route";
 import {
   dashboardGuestAccessSettingsRouter,
@@ -92,14 +93,8 @@ const PORT = Number(process.env.PORT ?? 3000);
 const FRONTEND_ORIGIN = process.env.FRONTEND_ORIGIN;
 const ENABLE_DEV_AUTH = process.env.ENABLE_DEV_AUTH === "true";
 
-// =====================
-// 🔒 CRÍTICO PRODUCCIÓN
-// =====================
 app.set("trust proxy", 1);
 
-// =====================
-// ENV VALIDATION (mínima)
-// =====================
 if (!process.env.DATABASE_URL) {
   throw new Error("❌ DATABASE_URL missing");
 }
@@ -112,9 +107,6 @@ if (!FRONTEND_ORIGIN) {
   throw new Error("❌ FRONTEND_ORIGIN missing");
 }
 
-// =====================
-// CORS
-// =====================
 const splitEnvOrigins = (value?: string) =>
   String(value ?? "")
     .split(",")
@@ -128,9 +120,7 @@ const allowedOrigins = [
   "http://localhost:5173",
   "http://localhost:4173",
 ].filter(Boolean) as string[];
-// =====================
-// LOG SAFE
-// =====================
+
 console.log("[server] ENV CHECK", {
   nodeEnv: process.env.NODE_ENV,
   database: process.env.DATABASE_URL ? "SET" : "MISSING",
@@ -144,13 +134,8 @@ console.log("[server] START", {
   env: process.env.NODE_ENV,
 });
 
-// =====================
-// Webhooks PRIMERO
-// =====================
 registerStripeWebhook(app);
-// =====================
-// Middleware
-// =====================
+
 app.use(
   cors({
     origin(origin, callback) {
@@ -173,14 +158,10 @@ app.use(
 app.use(bodyParser.urlencoded({ extended: true }));
 app.use("/webhooks", pmsWebhookRouter);
 
-// =====================
-// Health
-// =====================
 app.get("/health", (_req, res) => {
   res.json({ ok: true });
 });
 
-// ✅ readiness real (DB)
 app.get("/ready", async (_req, res) => {
   try {
     await prisma.$queryRaw`SELECT 1`;
@@ -191,9 +172,6 @@ app.get("/ready", async (_req, res) => {
   }
 });
 
-// =====================
-// Public routes
-// =====================
 app.use(signupPublicRoutes);
 app.use(authRouter);
 app.use(teamRouter);
@@ -203,9 +181,6 @@ app.use(signupSuccessRouter);
 app.use("/api/public-booking", publicBookingRouter);
 app.use(cleaningConfirmRouter);
 
-// =====================
-// DEV ROUTES (bloqueadas en producción)
-// =====================
 if (process.env.NODE_ENV !== "production") {
   app.get("/api/dev/test-open", (_req, res) => {
     res.json({ ok: true });
@@ -216,9 +191,6 @@ if (process.env.NODE_ENV !== "production") {
   });
 }
 
-// =====================
-// Core
-// =====================
 app.use(meRouter);
 app.use(orgTtlockStatusRouter);
 app.use(buildGuestRouter(prisma));
@@ -258,9 +230,8 @@ app.use("/api/admin", adminSubscriptionRoutes);
 app.use("/api/internal", adminFinancialRoutes);
 
 if (process.env.NODE_ENV !== "production") {
-app.use("/debug", debugRouter);
+  app.use("/debug", debugRouter);
 }
-
 
 app.use("/api/pms/listings", listingsMappingRouter);
 app.use("/api/org", buildOrgPmsRouter(prisma));
@@ -283,6 +254,7 @@ app.use(adminDemoRouter);
 
 app.use(dashboardRouter);
 app.use(dashboardReservationsRouter);
+app.use(buildDashboardChannexFullSyncCertificationRouter(prisma));
 app.use(dashboardPropertiesRouter);
 app.use(buildDashboardCalendarOverridesRouter(prisma));
 app.use(dashboardGuestAccessSettingsRouter);
@@ -308,10 +280,6 @@ app.use(orgTuyaRoutes);
 app.use("/staff", buildStaffRouter(prisma));
 app.use("/", buildCleaningRouter(prisma));
 
-
-// =====================
-// Debug protegido
-// =====================
 if (process.env.NODE_ENV !== "production") {
   app.get("/debug/locks", async (_req, res) => {
     const locks = await prisma.lock.findMany({
@@ -355,9 +323,6 @@ if (process.env.NODE_ENV !== "production") {
   });
 }
 
-// =====================
-// Crash handling
-// =====================
 process.on("unhandledRejection", (err) => {
   console.error("UNHANDLED REJECTION", err);
 });
@@ -368,9 +333,6 @@ process.on("uncaughtException", (err) => {
 
 export default app;
 
-// =====================
-// Start server
-// =====================
 app.listen(PORT, () => {
   console.log(`🚀 Pin&Go API running on port ${PORT}`);
 });
