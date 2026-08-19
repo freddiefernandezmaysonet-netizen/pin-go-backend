@@ -23,6 +23,7 @@ function claimedEvent(overrides: Record<string, unknown> = {}) {
     dateFrom: new Date("2026-08-01T00:00:00.000Z"),
     dateToExclusive: new Date("2026-08-02T00:00:00.000Z"),
     dateKeys: ["2026-08-01"],
+    changedFields: [],
     correlationId: null,
     status: "CLAIMED" as const,
     availableAt: new Date("2026-07-29T13:59:00.000Z"),
@@ -241,6 +242,63 @@ test("coalesces a claimed incremental event and creates one fenced delivery", as
   assert.equal(result.supersededCount, 0);
   assert.equal(result.delivery.delivery.id, "delivery-1");
   assert.equal(JSON.stringify(result).includes(CLAIM_TOKEN), false);
+});
+
+test("certification #2 preserves a claimed rate-only delta through materialization", async () => {
+  const event = claimedEvent({
+    messageKind: "RATES_RESTRICTIONS",
+    changedFields: ["rate"],
+  });
+  const plans: any[] = [];
+  const db = {
+    distributionOutboxEvent: {
+      findMany: async () => {
+        throw new Error("SUPERSESSION_QUERY_NOT_EXPECTED");
+      },
+    },
+  } as any;
+
+  const result = await materializeNextChannexAriOutboxBatch({
+    db,
+    now: STARTED_AT,
+    clock: createClock(MATERIALIZED_AT),
+    claimTokenFactory: () => CLAIM_TOKEN,
+    recover: (async () => ({
+      recoveredCount: 0,
+      pendingCount: 0,
+      deadCount: 0,
+    })) as any,
+    claim: (async () => ({
+      claimToken: CLAIM_TOKEN,
+      claimedAt: STARTED_AT,
+      claimExpiresAt: event.claimExpiresAt,
+      events: [event],
+    })) as any,
+    resolveMapping: (async () => mapping()) as any,
+    readSnapshot: (async (_receivedDb: any, input: any) => {
+      plans.push(input.plan);
+      return snapshot();
+    }) as any,
+    createDelivery: (async (_receivedDb: any, input: any) => {
+      plans.push(input.delivery.plan);
+      return {
+        delivery: { id: "delivery-rate-only" },
+        reused: false,
+        mergedEventCount: 1,
+        supersededEventCount: 0,
+        claimFence: {
+          mode: "FRESH",
+          eventCount: 1,
+          materializedAt: MATERIALIZED_AT,
+        },
+      };
+    }) as any,
+  });
+
+  assert.equal(result.outcome, "MATERIALIZED");
+  assert.equal(plans.length, 2);
+  assert.deepEqual(plans[0].changedFields, ["rate"]);
+  assert.deepEqual(plans[1].changedFields, ["rate"]);
 });
 
 test("a FULL plan supersedes only covered, unclaimed incrementals older than the snapshot", async () => {

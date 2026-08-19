@@ -4,7 +4,9 @@ import {
   AccessGrantType,
 } from "@prisma/client";
 import { Router } from "express";
+import { formatInTimeZone } from "date-fns-tz";
 import { requireAuth } from "../middleware/requireAuth";
+import { persistChannexAriReservationIntent } from "../pms/outbound/channex-ari-reservation-producer.service";
 import {
   DirectBookingRefundError,
   refundDirectBookingReservation,
@@ -35,6 +37,14 @@ function toInt(v: any, def: number) {
 
 function clamp(n: number, min: number, max: number) {
   return Math.max(min, Math.min(max, n));
+}
+
+function parseReservationDate(value: unknown) {
+  const normalized = String(value ?? "").trim();
+  if (!normalized) return null;
+
+  const date = new Date(normalized);
+  return Number.isNaN(date.getTime()) ? null : date;
 }
 
 
@@ -192,6 +202,7 @@ dashboardReservationsRouter.get(
         reservationNumber: true,
         guestName: true,
         guestEmail: true,
+        guestPhone: true,
         roomName: true,
         checkIn: true,
         checkOut: true,
@@ -328,6 +339,235 @@ dashboardReservationsRouter.get(
         },
       })),
     });
+  }
+);
+
+dashboardReservationsRouter.patch(
+  "/api/dashboard/reservations/:id/dates",
+  requireAuth,
+  async (req, res) => {
+    try {
+      const user = (req as any).user;
+      const orgId = String(user.orgId ?? "").trim();
+      const reservationId = String(req.params.id ?? "").trim();
+      const proposedCheckIn = parseReservationDate(req.body?.checkIn);
+      const proposedCheckOut = parseReservationDate(req.body?.checkOut);
+      const requestedAt = new Date();
+
+      if (!reservationId) {
+        return res.status(400).json({
+          ok: false,
+          error: "MISSING_RESERVATION_ID",
+          message: "Missing reservation id.",
+        });
+      }
+
+      if (!proposedCheckIn || !proposedCheckOut || proposedCheckOut <= proposedCheckIn) {
+        return res.status(400).json({
+          ok: false,
+          error: "INVALID_RESERVATION_DATES",
+          message: "Check-in and check-out dates are invalid.",
+        });
+      }
+
+      if (proposedCheckIn <= requestedAt) {
+        return res.status(409).json({
+          ok: false,
+          error: "RESERVATION_DATE_CHANGE_REQUIRES_FUTURE_STAY",
+          message: "Reservation dates must remain in the future.",
+        });
+      }
+
+      const result = await prisma.$transaction(async (tx) => {
+        const reservation = await tx.reservation.findFirst({
+          where: {
+            id: reservationId,
+            property: {
+              organizationId: orgId,
+            },
+          },
+          select: {
+            id: true,
+            source: true,
+            status: true,
+            checkIn: true,
+            checkOut: true,
+            propertyId: true,
+            property: {
+              select: {
+                organizationId: true,
+                timezone: true,
+                distributionEnabled: true,
+                distributionStatus: true,
+              },
+            },
+          },
+        });
+
+        if (!reservation) {
+          return {
+            kind: "NOT_FOUND" as const,
+          };
+        }
+
+        if (reservation.status !== ReservationStatus.ACTIVE) {
+          return {
+            kind: "NOT_ACTIVE" as const,
+          };
+        }
+
+        if (String(reservation.source ?? "").toUpperCase() !== "MANUAL") {
+          return {
+            kind: "NOT_MANUAL" as const,
+          };
+        }
+
+        if (
+          reservation.checkIn.getTime() === proposedCheckIn.getTime() &&
+          reservation.checkOut.getTime() === proposedCheckOut.getTime()
+        ) {
+          return {
+            kind: "UNCHANGED" as const,
+            reservation,
+          };
+        }
+
+        const conflictingReservation = await tx.reservation.findFirst({
+          where: {
+            id: { not: reservation.id },
+            propertyId: reservation.propertyId,
+            status: ReservationStatus.ACTIVE,
+            checkIn: { lt: proposedCheckOut },
+            checkOut: { gt: proposedCheckIn },
+          },
+          select: { id: true },
+        });
+
+        if (conflictingReservation) {
+          return {
+            kind: "CONFLICT" as const,
+          };
+        }
+
+        const previous = {
+          checkIn: reservation.checkIn,
+          checkOut: reservation.checkOut,
+          status: "ACTIVE" as const,
+        };
+
+        const updated = await tx.reservation.update({
+          where: { id: reservation.id },
+          data: {
+            checkIn: proposedCheckIn,
+            checkOut: proposedCheckOut,
+          },
+          select: {
+            id: true,
+            reservationNumber: true,
+            checkIn: true,
+            checkOut: true,
+            status: true,
+          },
+        });
+
+        if (
+          reservation.property.distributionEnabled === true &&
+          reservation.property.distributionStatus === "ACTIVE"
+        ) {
+          const propertyTimezone =
+            reservation.property.timezone ?? "America/Puerto_Rico";
+          const todayDateKey = formatInTimeZone(
+            requestedAt,
+            propertyTimezone,
+            "yyyy-MM-dd"
+          );
+
+          await persistChannexAriReservationIntent({
+            db: tx,
+            organizationId: reservation.property.organizationId,
+            propertyId: reservation.propertyId,
+            reservationId: reservation.id,
+            previous,
+            current: {
+              checkIn: updated.checkIn,
+              checkOut: updated.checkOut,
+              status: "ACTIVE",
+            },
+            propertyTimezone,
+            todayDateKey,
+            now: requestedAt,
+            coalesceMs: 0,
+          });
+        }
+
+        return {
+          kind: "UPDATED" as const,
+          reservation: updated,
+        };
+      });
+
+      if (result.kind === "NOT_FOUND") {
+        return res.status(404).json({
+          ok: false,
+          error: "RESERVATION_NOT_FOUND",
+          message: "Reservation not found.",
+        });
+      }
+
+      if (result.kind === "NOT_ACTIVE") {
+        return res.status(409).json({
+          ok: false,
+          error: "RESERVATION_NOT_ACTIVE",
+          message: "Only active reservations can be moved.",
+        });
+      }
+
+      if (result.kind === "NOT_MANUAL") {
+        return res.status(409).json({
+          ok: false,
+          error: "MANUAL_RESERVATION_REQUIRED",
+          message: "This date-change action is limited to manual reservations.",
+        });
+      }
+
+      if (result.kind === "CONFLICT") {
+        return res.status(409).json({
+          ok: false,
+          error: "PROPERTY_NOT_AVAILABLE",
+          message: "The property is not available for the selected dates.",
+        });
+      }
+
+      if (result.kind === "UNCHANGED") {
+        return res.json({
+          ok: true,
+          changed: false,
+          reservation: {
+            id: result.reservation.id,
+            checkIn: result.reservation.checkIn.toISOString(),
+            checkOut: result.reservation.checkOut.toISOString(),
+          },
+        });
+      }
+
+      return res.json({
+        ok: true,
+        changed: true,
+        reservation: {
+          id: result.reservation.id,
+          reservationNumber: result.reservation.reservationNumber,
+          checkIn: result.reservation.checkIn.toISOString(),
+          checkOut: result.reservation.checkOut.toISOString(),
+        },
+      });
+    } catch (error: any) {
+      console.error("[DASHBOARD_RESERVATION_DATE_CHANGE_ERROR]", error);
+      return res.status(500).json({
+        ok: false,
+        error: "DASHBOARD_RESERVATION_DATE_CHANGE_ERROR",
+        message: "Unable to update reservation dates.",
+      });
+    }
   }
 );
 

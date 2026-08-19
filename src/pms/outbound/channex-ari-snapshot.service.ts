@@ -19,12 +19,13 @@ import {
 } from "./channex-ari-lifecycle.policy";
 import {
   buildChannexAriRatesRestrictionsSnapshot,
+  type ChannexAriRatesRestrictionsChangedField,
   type ChannexAriRate,
 } from "./channex-ari-rates-restrictions-snapshot.policy";
 
 export type ChannexAriSnapshotDb = Pick<
   Prisma.TransactionClient,
-  "property" | "reservation" | "propertyBlockedDate"
+  "property" | "reservation" | "propertyBlockedDate" | "propertyNightlyRestriction"
 >;
 
 export type ReadChannexAriSnapshotInput = {
@@ -145,6 +146,26 @@ function assertPlanMappingAlignment(input: {
   }
 }
 
+function resolveRatesRestrictionsChangedFields(
+  plan: ChannexAriCoalescingPlan
+): ChannexAriRatesRestrictionsChangedField[] | undefined {
+  const changedFields = (
+    plan as ChannexAriCoalescingPlan & {
+      changedFields?: ChannexAriRatesRestrictionsChangedField[];
+    }
+  ).changedFields;
+
+  if (plan.syncMode === "FULL") {
+    if (changedFields !== undefined) {
+      throw new Error("CHANNEX_ARI_SNAPSHOT_FULL_CHANGED_FIELDS_NOT_ALLOWED");
+    }
+
+    return undefined;
+  }
+
+  return changedFields;
+}
+
 function normalizeRevenueRate(value: unknown, dateKey: string): ChannexAriRate {
   let majorUnits: number;
 
@@ -191,6 +212,10 @@ export async function readChannexAriSnapshot(
   assertPlanMappingAlignment({ plan: input.plan, mapping: input.mapping });
 
   const dateKeys = resolvePlanDateKeys(input.plan);
+  const ratesRestrictionsChangedFields =
+    input.plan.messageKind === "RATES_RESTRICTIONS"
+      ? resolveRatesRestrictionsChangedFields(input.plan)
+      : undefined;
   const dateFrom = dateKeys[0];
   const dateToExclusive = addUtcDays(dateKeys[dateKeys.length - 1], 1);
   const property = await db.property.findFirst({
@@ -291,6 +316,27 @@ export async function readChannexAriSnapshot(
     throw new Error("CHANNEX_ARI_SNAPSHOT_MAXIMUM_NIGHTS_INVALID");
   }
 
+  const nightlyRestrictionOverrides = await db.propertyNightlyRestriction.findMany({
+    where: {
+      propertyId,
+      date: {
+        gte: toDatabaseDate(dateFrom),
+        lt: toDatabaseDate(dateToExclusive),
+      },
+    },
+    select: {
+      date: true,
+      minimumNights: true,
+      maximumNights: true,
+    },
+  });
+  const restrictionOverrideByDate = new Map(
+    nightlyRestrictionOverrides.map((item) => [
+      item.date.toISOString().slice(0, 10),
+      item,
+    ])
+  );
+
   const calculatePricing = input.calculatePricing ?? calculateDirectBookingPricing;
   const pricing = await calculatePricing({
     propertyId,
@@ -326,12 +372,25 @@ export async function readChannexAriSnapshot(
       throw new Error(`CHANNEX_ARI_REVENUE_DATE_MISSING:${date}`);
     }
 
+    const nightlyOverride = restrictionOverrideByDate.get(date);
+    const minimumNights = nightlyOverride?.minimumNights ?? property.minimumNights;
+    const effectiveMaximumNights =
+      nightlyOverride?.maximumNights ?? property.maximumNights ?? 0;
+
+    if (!Number.isSafeInteger(minimumNights) || minimumNights < 1) {
+      throw new Error(`CHANNEX_ARI_SNAPSHOT_MINIMUM_NIGHTS_INVALID:${date}`);
+    }
+
+    if (!Number.isSafeInteger(effectiveMaximumNights) || effectiveMaximumNights < 0) {
+      throw new Error(`CHANNEX_ARI_SNAPSHOT_MAXIMUM_NIGHTS_INVALID:${date}`);
+    }
+
     return {
       date,
       rate,
-      minStayArrival: property.minimumNights,
-      minStayThrough: property.minimumNights,
-      maxStay: maximumNights,
+      minStayArrival: minimumNights,
+      minStayThrough: minimumNights,
+      maxStay: effectiveMaximumNights,
     };
   });
 
@@ -340,6 +399,7 @@ export async function readChannexAriSnapshot(
     data: buildChannexAriRatesRestrictionsSnapshot({
       channexPropertyId: input.mapping.channexPropertyId,
       channexRatePlanId: input.mapping.channexRatePlanId,
+      changedFields: ratesRestrictionsChangedFields,
       values,
     }),
   };

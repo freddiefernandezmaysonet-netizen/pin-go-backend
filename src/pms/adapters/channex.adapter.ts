@@ -412,20 +412,6 @@ export const channexAdapter: PmsAdapter = {
     };
   },
 
-  fetchReservation: async ({ connection, externalReservationId }) => {
-    const response = await axios.get(
-      `${getChannexBaseUrl()}/api/v1/bookings/${encodeURIComponent(
-        externalReservationId
-      )}`,
-      {
-        headers: getChannexHeaders(connection),
-        timeout: CHANNEX_REQUEST_TIMEOUT_MS,
-      }
-    );
-
-    return toCanonicalReservation(response.data, externalReservationId);
-  },
-
   fetchBookingRevision: async ({ connection, revisionId }) => {
     const response = await axios.get(
       `${getChannexBaseUrl()}/api/v1/booking_revisions/${encodeURIComponent(

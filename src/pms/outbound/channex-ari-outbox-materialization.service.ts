@@ -21,6 +21,7 @@ const OUTBOX_EVENT_SELECT = {
   dateFrom: true,
   dateToExclusive: true,
   dateKeys: true,
+  changedFields: true,
   correlationId: true,
   status: true,
   availableAt: true,

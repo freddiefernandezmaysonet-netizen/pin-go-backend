@@ -45,12 +45,12 @@ model DashboardUser {
   passwordHash        String
   fullName            String?
   role                DashboardUserRole    @default(ORG_ADMIN)
-  isActive            Boolean              @default(true)
-  lastLoginAt         DateTime?
-  createdAt           DateTime             @default(now())
-  updatedAt           DateTime             @updatedAt
-  tokenVersion        Int                  @default(0)
-  organization        Organization         @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  isActive             Boolean              @default(true)
+  lastLoginAt          DateTime?
+  createdAt            DateTime             @default(now())
+  updatedAt            DateTime             @updatedAt
+  tokenVersion         Int                  @default(0)
+  organization         Organization         @relation(fields: [organizationId], references: [id], onDelete: Cascade)
   passwordResetTokens PasswordResetToken[]
   passwordResetSmsCodes PasswordResetSmsCode[]
 
@@ -152,6 +152,7 @@ model Property {
   amenities                  PropertyAmenity[]
   taxes                      PropertyTax[]
   nightlyRates               PropertyNightlyRate[]
+  nightlyRestrictions        PropertyNightlyRestriction[]
   seasons                    PropertySeason[]
   holidayPricings            PropertyHolidayPricing[]
   reservations               Reservation[]
@@ -176,6 +177,23 @@ model PropertyNightlyRate {
 
   createdAt  DateTime @default(now())
   updatedAt  DateTime @updatedAt
+
+  @@unique([propertyId, date])
+  @@index([propertyId, date])
+}
+
+model PropertyNightlyRestriction {
+  id            String   @id @default(cuid())
+  propertyId    String
+  date          DateTime
+  minimumNights Int?
+  maximumNights Int?
+  source        String   @default("MANUAL")
+  reason        String?
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  property Property @relation(fields: [propertyId], references: [id], onDelete: Cascade)
 
   @@unique([propertyId, date])
   @@index([propertyId, date])

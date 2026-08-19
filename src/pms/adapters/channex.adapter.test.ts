@@ -130,32 +130,8 @@ test("fetchBookingRevision uses only the revision endpoint", async () => {
   }
 });
 
-test("fetchReservation uses the stable booking endpoint", async () => {
-  process.env.CHANNEX_API_KEY = "test-api-key";
-
-  const originalGet = axios.get;
-  let requestedUrl = "";
-
-  axios.get = (async (url: string) => {
-    requestedUrl = url;
-    return { data: REVISION_FIXTURE };
-  }) as typeof axios.get;
-
-  try {
-    const fetchReservation = requireAdapterMethod(
-      channexAdapter.fetchReservation,
-      "fetchReservation"
-    );
-    const result = await fetchReservation({
-      connection: {},
-      externalReservationId: "booking-001",
-    });
-
-    assert.match(requestedUrl, /\/api\/v1\/bookings\/booking-001$/);
-    assert.equal(result.externalReservationId, "booking-001");
-  } finally {
-    axios.get = originalGet;
-  }
+test("Channex adapter does not expose Booking Find or booking-by-id", () => {
+  assert.equal(channexAdapter.fetchReservation, undefined);
 });
 
 test("Feed requests oldest revisions first", async () => {

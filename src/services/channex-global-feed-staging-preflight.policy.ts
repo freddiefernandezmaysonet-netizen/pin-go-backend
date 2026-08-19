@@ -36,7 +36,7 @@ export type ChannexGlobalFeedStagingPreflightCheck = {
 const DEFAULT_EXPECTATIONS = {
   environmentName: "staging-channex-certification",
   serviceName: "pin-go-channex-global-feed-staging",
-  branch: "recovery/distribution-engine-v2-channex-lifecycle",
+  branch: "sprint/distribution-engine-channex-outbound-ari-v1",
   repository: "freddiefernandezmaysonet-netizen/pin-go-backend",
   channexHost: "staging.channex.io",
 };

@@ -90,6 +90,7 @@ function dependencies(args: {
         propertyId: `pin-go-${input.revision.identity.propertyId}`,
         reservationId: `reservation-${input.revision.identity.revisionId}`,
         revision: input.revision,
+        ingestMechanism: input.ingestMechanism,
       };
     },
     acknowledgeBookingRevision: async (input) => {
@@ -166,6 +167,7 @@ test("groups connections with the same credentials into one Feed source", async 
         ];
       },
       persist: async (input) => {
+        assert.equal(input.ingestMechanism, "BOOKING_REVISION_FEED");
         operations.push(
           `persist:${input.connectionId}:${input.revision.identity.revisionId}`
         );
@@ -178,6 +180,7 @@ test("groups connections with the same credentials into one Feed source", async 
               : "pin-go-b",
           reservationId: `reservation-${input.revision.identity.revisionId}`,
           revision: input.revision,
+          ingestMechanism: input.ingestMechanism,
         };
       },
       acknowledge: async ({ persisted }) => {
@@ -242,6 +245,7 @@ test("isolates identical Channex property IDs between credential sources", async
           propertyId,
           reservationId: `reservation-${input.revision.identity.revisionId}`,
           revision: input.revision,
+          ingestMechanism: input.ingestMechanism,
         };
       },
     }),
@@ -294,6 +298,7 @@ test("marks duplicate mappings inside the same credential source as ambiguous", 
           propertyId: "unexpected",
           reservationId: null,
           revision: input.revision,
+          ingestMechanism: input.ingestMechanism,
         };
       },
       acknowledge: async () => {
@@ -367,6 +372,7 @@ test("selects the oldest revisions globally and reports truncation", async () =>
               : "pin-go-b",
           reservationId: `reservation-${input.revision.identity.revisionId}`,
           revision: input.revision,
+          ingestMechanism: input.ingestMechanism,
         };
       },
     }),
@@ -428,6 +434,7 @@ test("preserves all credential copies inside a one-revision logical budget", asy
             input.connectionId === "connection-a" ? "pin-go-a" : "pin-go-b",
           reservationId: "reservation-fallback",
           revision: input.revision,
+          ingestMechanism: input.ingestMechanism,
         };
       },
       acknowledge: async ({ connection: sourceConnection }) => {
@@ -498,6 +505,7 @@ test("isolates a failed credential source and processes a healthy source", async
         propertyId: "pin-go-healthy",
         reservationId: "reservation-healthy",
         revision: input.revision,
+        ingestMechanism: input.ingestMechanism,
       }),
     }),
   });
@@ -568,6 +576,7 @@ test("does not ACK when persistence resolves to a different target", async () =>
         propertyId: "different-property",
         reservationId: "reservation-a",
         revision: input.revision,
+        ingestMechanism: input.ingestMechanism,
       }),
       acknowledge: async () => {
         acknowledgeCalls += 1;

@@ -42,6 +42,7 @@ export async function collectChannexCertificationEvidence(args: {
         status: true,
         reason: true,
         metadata: true,
+        startedAt: true,
         completedAt: true,
         createdAt: true,
       },
@@ -52,6 +53,7 @@ export async function collectChannexCertificationEvidence(args: {
         status: true,
         reason: true,
         metadata: true,
+        startedAt: true,
         completedAt: true,
         createdAt: true,
       },
@@ -64,6 +66,23 @@ export async function collectChannexCertificationEvidence(args: {
 
   const persistenceMetadata = asRecord(persistenceAudit?.metadata);
   const acknowledgementMetadata = asRecord(acknowledgementAudit?.metadata);
+  const persistenceIngestMechanism = asString(
+    persistenceMetadata.ingestMechanism
+  );
+  const acknowledgementIngestMechanism = asString(
+    acknowledgementMetadata.ingestMechanism
+  );
+
+  if (
+    persistenceIngestMechanism &&
+    acknowledgementIngestMechanism &&
+    persistenceIngestMechanism !== acknowledgementIngestMechanism
+  ) {
+    throw new Error(
+      `CHANNEX_BOOKING_INGEST_MECHANISM_MISMATCH:${revisionId}`
+    );
+  }
+
   const metadata =
     Object.keys(persistenceMetadata).length > 0
       ? persistenceMetadata
@@ -79,7 +98,7 @@ export async function collectChannexCertificationEvidence(args: {
   const webhookEventId = asString(metadata.webhookEventId);
   const insertedAt = asString(metadata.insertedAt);
 
-  const [event, reservation] = await Promise.all([
+  const [event, reservation, reservationCountForBooking] = await Promise.all([
     webhookEventId
       ? prisma.webhookEventIngest.findUnique({
           where: { id: webhookEventId },
@@ -104,6 +123,7 @@ export async function collectChannexCertificationEvidence(args: {
             },
           },
           select: {
+            id: true,
             reservationNumber: true,
             status: true,
             externalProvider: true,
@@ -118,6 +138,15 @@ export async function collectChannexCertificationEvidence(args: {
           },
         })
       : Promise.resolve(null),
+    propertyId && bookingId
+      ? prisma.reservation.count({
+          where: {
+            propertyId,
+            externalProvider: "CHANNEX",
+            externalId: bookingId,
+          },
+        })
+      : Promise.resolve(0),
   ]);
 
   let missionControl = null;
@@ -158,6 +187,7 @@ export async function collectChannexCertificationEvidence(args: {
 
   return buildChannexCertificationEvidence({
     revisionId,
+    ingestMechanism: persistenceIngestMechanism,
     bookingId,
     bookingReference,
     channexPropertyId,
@@ -167,6 +197,7 @@ export async function collectChannexCertificationEvidence(args: {
       ? {
           status: persistenceAudit.status,
           reason: persistenceAudit.reason,
+          startedAt: toIso(persistenceAudit.startedAt),
           completedAt: toIso(
             persistenceAudit.completedAt ?? persistenceAudit.createdAt
           ),
@@ -176,6 +207,7 @@ export async function collectChannexCertificationEvidence(args: {
       ? {
           status: acknowledgementAudit.status,
           reason: acknowledgementAudit.reason,
+          startedAt: toIso(acknowledgementAudit.startedAt),
           completedAt: toIso(
             acknowledgementAudit.completedAt ?? acknowledgementAudit.createdAt
           ),
@@ -194,6 +226,7 @@ export async function collectChannexCertificationEvidence(args: {
       : null,
     reservation: reservation
       ? {
+          reservationId: reservation.id,
           reservationNumber: reservation.reservationNumber,
           status: reservation.status,
           externalProvider: reservation.externalProvider,
@@ -205,6 +238,7 @@ export async function collectChannexCertificationEvidence(args: {
           paymentState: reservation.paymentState,
           createdAt: toIso(reservation.createdAt),
           updatedAt: toIso(reservation.updatedAt),
+          reservationCountForBooking,
         }
       : null,
     missionControl,

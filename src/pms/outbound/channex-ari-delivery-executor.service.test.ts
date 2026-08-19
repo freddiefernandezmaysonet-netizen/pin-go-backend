@@ -153,6 +153,103 @@ test("accepts canonical integrity after PostgreSQL JSONB reorders object keys", 
   assert.equal(sendCount, 1);
   assert.equal(completeCount, 1);
 });
+
+test("certification #10 preserves a compacted Availability range through execution", async () => {
+  const compactedPayload = {
+    values: [
+      {
+        property_id: "certification-property",
+        room_type_id: "31a7161d-cd47-4f38-b5f4-4b9e11d4e6f9",
+        date_from: "2026-11-10",
+        date_to: "2026-11-16",
+        availability: 1,
+      },
+    ],
+  };
+  const delivery = claimedDelivery(payloadEvidence(compactedPayload));
+  const sentPayloads: unknown[] = [];
+
+  const result = await executeClaimedChannexAriDelivery({
+    db: {} as any,
+    delivery,
+    apiKey: API_KEY,
+    clock: createClock(STARTED_AT, COMPLETED_AT),
+    send: (async (input: any) => {
+      sentPayloads.push(input.payload);
+      return {
+        endpoint: "/api/v1/availability",
+        url: "https://staging.example.test/api/v1/availability",
+        payloadBytes: delivery.payloadBytes,
+        evidence: {
+          httpStatus: 200,
+          taskId: "task-range-1",
+          warningCount: 0,
+          retryAfterMs: null,
+          responseMeta: {},
+        },
+      };
+    }) as any,
+    complete: (async () => ({
+      retryClass: "SUCCESS",
+      exhausted: false,
+      deliveryUpdate: { status: "SENT" },
+    })) as any,
+  });
+
+  assert.deepEqual(sentPayloads, [compactedPayload]);
+  assert.equal(result.delivery.payloadValueCount, 1);
+});
+
+test("certification #4 preserves a compacted rate-only range through execution", async () => {
+  const compactedPayload = {
+    values: [
+      {
+        property_id: "1d699e11-593c-4a3d-b66a-28741759e82f",
+        rate_plan_id: "daa6211c-bd9b-455f-b526-4136550b9a92",
+        date_from: "2026-11-01",
+        date_to: "2026-11-10",
+        rate: 24100,
+      },
+    ],
+  };
+  const delivery = claimedDelivery({
+    messageKind: "RATES_RESTRICTIONS",
+    ...payloadEvidence(compactedPayload),
+  });
+  const sentPayloads: unknown[] = [];
+
+  const result = await executeClaimedChannexAriDelivery({
+    db: {} as any,
+    delivery,
+    apiKey: API_KEY,
+    clock: createClock(STARTED_AT, COMPLETED_AT),
+    send: (async (input: any) => {
+      sentPayloads.push(input.payload);
+      return {
+        endpoint: "/api/v1/restrictions",
+        url: "https://staging.example.test/api/v1/restrictions",
+        payloadBytes: delivery.payloadBytes,
+        evidence: {
+          httpStatus: 200,
+          taskId: "task-rate-range-1",
+          warningCount: 0,
+          retryAfterMs: null,
+          responseMeta: {},
+        },
+      };
+    }) as any,
+    complete: (async () => ({
+      retryClass: "SUCCESS",
+      exhausted: false,
+      deliveryUpdate: { status: "SENT" },
+    })) as any,
+  });
+
+  assert.deepEqual(sentPayloads, [compactedPayload]);
+  assert.equal(result.delivery.messageKind, "RATES_RESTRICTIONS");
+  assert.equal(result.delivery.payloadValueCount, 1);
+});
+
 test("orchestrates send then completion for a claimed delivery", async () => {
   const delivery = claimedDelivery();
   const calls: string[] = [];

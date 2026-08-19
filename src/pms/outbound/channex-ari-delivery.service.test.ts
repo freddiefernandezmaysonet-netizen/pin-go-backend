@@ -260,7 +260,7 @@ test("creates one immutable READY Availability delivery and merges claimed outbo
   ]);
   assert.equal(delivery.payloadHash, availabilitySnapshot.payloadHash);
   assert.equal(delivery.payloadBytes, availabilitySnapshot.payloadBytes);
-  assert.equal(delivery.payloadValueCount, 3);
+  assert.equal(delivery.payloadValueCount, 2);
   assert.equal(delivery.attemptCount, 0);
   assert.deepEqual(delivery.nextAttemptAt, QUEUED_AT);
   assert.deepEqual(delivery.queuedAt, QUEUED_AT);
@@ -371,6 +371,111 @@ test("persists a canonical Rates & Restrictions delivery", async () => {
   assert.equal(mock.state.rows[0].status, "MERGED");
 });
 
+test("certification #2 persists a one-date rate-only delta", async () => {
+  const event = buildExactEvent({
+    id: "certification-rate-event-1",
+    messageKind: "RATES_RESTRICTIONS",
+    dateKeys: ["2026-11-01"],
+    correlationId: "certification-test-2",
+  });
+  const plan = buildChannexAriCoalescingPlan({
+    events: [event],
+    snapshotAt: SNAPSHOT_AT,
+  });
+  const snapshot = buildChannexAriRatesRestrictionsSnapshot({
+    channexPropertyId: "channex-property-1",
+    channexRatePlanId: "rate-plan-1",
+    changedFields: ["rate"],
+    values: [
+      {
+        date: "2026-11-01",
+        rate: 15999,
+        minStayArrival: 3,
+        minStayThrough: 3,
+        maxStay: 14,
+      },
+    ],
+  });
+  const mock = createMockDb([
+    buildOutboxRow({
+      id: "certification-rate-event-1",
+      messageKind: "RATES_RESTRICTIONS",
+    }),
+  ]);
+
+  const result = await createChannexAriDelivery(mock.db as any, {
+    plan,
+    mapping: buildMapping(),
+    snapshot: {
+      messageKind: "RATES_RESTRICTIONS",
+      data: snapshot,
+    },
+    queuedAt: QUEUED_AT,
+  });
+
+  assert.equal(result.reused, false);
+  assert.equal(mock.state.deliveryCreateCalls, 1);
+  assert.deepEqual(result.delivery.payload, {
+    values: [
+      {
+        property_id: "channex-property-1",
+        rate_plan_id: "rate-plan-1",
+        date: "2026-11-01",
+        rate: 15999,
+      },
+    ],
+  });
+  assert.equal(mock.state.rows[0].status, "MERGED");
+});
+
+test("certification #4 persists one rate-only range covering ten dates", async () => {
+  const dateKeys = Array.from({ length: 10 }, (_, index) =>
+    addUtcDays("2026-11-01", index)
+  );
+  const event = buildExactEvent({
+    id: "certification-rate-range-event-1",
+    messageKind: "RATES_RESTRICTIONS",
+    dateKeys,
+    correlationId: "certification-test-4",
+  });
+  const plan = buildChannexAriCoalescingPlan({
+    events: [event],
+    snapshotAt: SNAPSHOT_AT,
+  });
+  const snapshot = buildChannexAriRatesRestrictionsSnapshot({
+    channexPropertyId: "channex-property-1",
+    channexRatePlanId: "rate-plan-1",
+    changedFields: ["rate"],
+    values: dateKeys.map((date) => ({
+      date,
+      rate: 24100,
+      minStayArrival: 1,
+      minStayThrough: 1,
+      maxStay: 0,
+    })),
+  });
+  const mock = createMockDb([
+    buildOutboxRow({
+      id: event.id,
+      messageKind: "RATES_RESTRICTIONS",
+    }),
+  ]);
+
+  const result = await createChannexAriDelivery(mock.db as any, {
+    plan,
+    mapping: buildMapping(),
+    snapshot: {
+      messageKind: "RATES_RESTRICTIONS",
+      data: snapshot,
+    },
+    queuedAt: QUEUED_AT,
+  });
+
+  assert.equal(result.delivery.payloadValueCount, 1);
+  assert.deepEqual(result.delivery.dateKeys, dateKeys);
+  assert.deepEqual(result.delivery.payload, snapshot.payload);
+});
+
 test("Full Sync merges its claimed intent and supersedes covered pending incrementals", async () => {
   const fullEvent = buildFullEvent({ id: "full-event-1" });
   const plan = buildChannexAriCoalescingPlan({
@@ -413,7 +518,7 @@ test("Full Sync merges its claimed intent and supersedes covered pending increme
   assert.equal(result.mergedEventCount, 1);
   assert.equal(result.supersededEventCount, 1);
   assert.equal(result.delivery.syncMode, "FULL");
-  assert.equal(result.delivery.payloadValueCount, 500);
+  assert.equal(result.delivery.payloadValueCount, 1);
   assert.deepEqual(
     mock.state.rows.map((row) => ({ id: row.id, status: row.status })),
     [

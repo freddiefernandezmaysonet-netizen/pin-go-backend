@@ -249,6 +249,7 @@ test("persists the reservation Availability intent through the transaction clien
     dateFrom: new Date("2026-08-01T00:00:00.000Z"),
     dateToExclusive: new Date("2026-08-04T00:00:00.000Z"),
     dateKeys: ["2026-08-01", "2026-08-02", "2026-08-03"],
+    changedFields: [],
     trigger: "RESERVATION_CREATED",
     sourceEntityType: "RESERVATION",
     sourceEntityId: "reservation-1",

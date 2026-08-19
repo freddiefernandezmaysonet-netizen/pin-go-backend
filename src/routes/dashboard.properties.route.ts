@@ -36,6 +36,7 @@ import {
 import { resolveOrganizationGuestReplyTo } from "../services/organization-guest-email.service";
 import { createChannexAriOutboxEvent } from "../pms/outbound/channex-ari-outbox.service";
 import { buildFullSyncRange } from "../pms/outbound/channex-ari-lifecycle.policy";
+import { resolveChannexAriPropertyChangedFields } from "../pms/outbound/channex-ari-property-change.policy";
 
 const prisma = new PrismaClient();
 export const dashboardPropertiesRouter = Router();
@@ -87,65 +88,6 @@ function parseOptionalInt(value: unknown): number | null {
 
   const parsed = Number(value);
   return Number.isFinite(parsed) && parsed >= 0 ? Math.trunc(parsed) : NaN;
-}
-
-const PROPERTY_ARI_BOOLEAN_FIELDS = [
-  "dynamicPricingEnabled",
-  "seasonalPricingEnabled",
-  "holidayPricingEnabled",
-  "leadTimePricingEnabled",
-  "occupancyPricingEnabled",
-] as const;
-
-const PROPERTY_ARI_NUMBER_FIELDS = [
-  "baseNightlyRate",
-  "minimumNightlyRate",
-  "maximumNightlyRate",
-  "weekendMarkupPercent",
-  "leadTimeLastMinuteDays",
-  "leadTimeLastMinutePercent",
-  "occupancyLookaheadDays",
-  "occupancyLowThresholdPercent",
-  "occupancyLowAdjustmentPercent",
-  "occupancyHighThresholdPercent",
-  "occupancyHighAdjustmentPercent",
-  "minimumNights",
-  "maximumNights",
-] as const;
-
-function toComparablePropertyNumber(value: unknown): number | null {
-  if (value === null || value === undefined || value === "") {
-    return null;
-  }
-
-  const parsed = Number(value);
-  return Number.isFinite(parsed) ? parsed : null;
-}
-
-function hasPropertyAriConfigurationChanged(
-  existing: Record<string, unknown>,
-  data: Record<string, unknown>
-): boolean {
-  for (const field of PROPERTY_ARI_BOOLEAN_FIELDS) {
-    if (
-      Object.prototype.hasOwnProperty.call(data, field) &&
-      Boolean(data[field]) !== Boolean(existing[field])
-    ) {
-      return true;
-    }
-  }
-
-  for (const field of PROPERTY_ARI_NUMBER_FIELDS) {
-    if (
-      Object.prototype.hasOwnProperty.call(data, field) &&
-      toComparablePropertyNumber(data[field]) !==
-        toComparablePropertyNumber(existing[field])
-    ) {
-      return true;
-    }
-  }
-
-  return false;
 }
 
 const PROPERTY_SEASON_TYPES = ["PEAK", "SHOULDER", "LOW"] as const;
@@ -840,11 +782,10 @@ if (checkOutTime !== undefined) {
   data.checkOutTime = String(checkOutTime || "").trim() || null;
 }
 
-      const ariConfigurationChanged =
-        hasPropertyAriConfigurationChanged(
-          existing as unknown as Record<string, unknown>,
-          data
-        );
+      const ariChangedFields = resolveChannexAriPropertyChangedFields({
+        existing: existing as unknown as Record<string, unknown>,
+        changes: data,
+      });
       const propertyMutationAt = new Date();
 
       const updated = await prisma.$transaction(async (tx) => {
@@ -933,7 +874,7 @@ if (checkOutTime !== undefined) {
         });
 
         if (
-          ariConfigurationChanged &&
+          ariChangedFields.length > 0 &&
           existing.distributionEnabled === true &&
           existing.distributionStatus === "ACTIVE"
         ) {
@@ -954,6 +895,7 @@ if (checkOutTime !== undefined) {
             trigger: "PROPERTY_CONFIGURATION_UPDATED",
             syncMode: "INCREMENTAL",
             dateRange: buildFullSyncRange(todayDateKey),
+            changedFields: ariChangedFields,
             sourceEntityType: "PROPERTY",
             sourceEntityId: persistedProperty.id,
             now: propertyMutationAt,
@@ -2586,6 +2528,7 @@ dashboardPropertiesRouter.put(
             trigger: "NIGHTLY_RATE_UPDATE",
             syncMode: "INCREMENTAL",
             dateKeys: normalizedRates.map((item) => item.dateKey),
+            changedFields: ["rate"],
             sourceEntityType: "PROPERTY",
             sourceEntityId: propertyId,
             now: mutationAt,
@@ -3095,6 +3038,7 @@ dashboardPropertiesRouter.post(
             trigger: "MARKET_SEASON_DEFAULTS",
             syncMode: "INCREMENTAL",
             dateRange: buildFullSyncRange(todayDateKey),
+            changedFields: ["rate"],
             sourceEntityType: "PROPERTY",
             sourceEntityId: property.id,
             now: mutationAt,
@@ -3470,6 +3414,7 @@ dashboardPropertiesRouter.post(
             trigger: "SEASON_CREATE",
             syncMode: "INCREMENTAL",
             dateRange: buildFullSyncRange(todayDateKey),
+            changedFields: ["rate"],
             sourceEntityType: "PROPERTY_SEASON",
             sourceEntityId: createdSeason.id,
             now: mutationAt,
@@ -3675,6 +3620,7 @@ dashboardPropertiesRouter.patch(
                 trigger: "SEASON_UPDATE",
                 syncMode: "INCREMENTAL",
                 dateRange: buildFullSyncRange(todayDateKey),
+                changedFields: ["rate"],
                 sourceEntityType: "PROPERTY_SEASON",
                 sourceEntityId: updatedSeason.id,
                 now: mutationAt,
@@ -3772,6 +3718,7 @@ dashboardPropertiesRouter.delete(
               trigger: "SEASON_DELETE",
               syncMode: "INCREMENTAL",
               dateRange: buildFullSyncRange(todayDateKey),
+              changedFields: ["rate"],
               sourceEntityType: "PROPERTY_SEASON",
               sourceEntityId: deactivatedSeason.id,
               now: mutationAt,
@@ -3916,19 +3863,52 @@ dashboardPropertiesRouter.post(
           `distribution-enablement:${property.id}:${crypto.randomUUID()}`;
 
         const updated = await prisma.$transaction(async (tx) => {
-          await createChannexAriOutboxEvent(tx, {
-            organizationId: orgId,
-            propertyId: property.id,
-            messageKind: "AVAILABILITY",
-            syncMode: "FULL",
-            trigger: "DISTRIBUTION_ENABLEMENT",
-            sourceEntityType: "PROPERTY",
-            sourceEntityId: property.id,
-            correlationId: fullSyncCorrelationId,
-            todayDateKey,
-            now: mutationAt,
-            coalesceMs: 0,
-          });
+          const existingAriState =
+            await tx.channexAriPropertyState.findUnique({
+              where: { propertyId: property.id },
+              select: {
+                organizationId: true,
+                lastFullSyncRequestedAt: true,
+              },
+            });
+
+          if (
+            existingAriState &&
+            existingAriState.organizationId !== orgId
+          ) {
+            throw new Error(
+              "CHANNEX_ARI_PROPERTY_STATE_TENANT_MISMATCH"
+            );
+          }
+
+         const fullSyncGuardMs = 24 * 60 * 60 * 1000;
+
+           if (existingAriState?.lastFullSyncRequestedAt) {
+             const retryAt = new Date(
+               existingAriState.lastFullSyncRequestedAt.getTime() +
+                 fullSyncGuardMs
+              );
+
+              if (retryAt.getTime() > mutationAt.getTime()) {
+                 throw new Error(
+                   "CHANNEX_ARI_FULL_SYNC_GUARD_ACTIVE"
+               );
+             }
+           }
+
+           await createChannexAriOutboxEvent(tx, {
+           organizationId: orgId,
+           propertyId: property.id,
+           messageKind: "AVAILABILITY",
+           syncMode: "FULL",
+           trigger: "DISTRIBUTION_ENABLEMENT",
+           sourceEntityType: "PROPERTY",
+           sourceEntityId: property.id,
+           correlationId: fullSyncCorrelationId,
+           todayDateKey,
+           now: mutationAt,
+           coalesceMs: 0,
+         });
 
           await createChannexAriOutboxEvent(tx, {
             organizationId: orgId,
@@ -3943,21 +3923,6 @@ dashboardPropertiesRouter.post(
             now: mutationAt,
             coalesceMs: 0,
           });
-
-          const existingAriState =
-            await tx.channexAriPropertyState.findUnique({
-              where: { propertyId: property.id },
-              select: { organizationId: true },
-            });
-
-          if (
-            existingAriState &&
-            existingAriState.organizationId !== orgId
-          ) {
-            throw new Error(
-              "CHANNEX_ARI_PROPERTY_STATE_TENANT_MISMATCH"
-            );
-          }
 
           await tx.channexAriPropertyState.upsert({
             where: { propertyId: property.id },
@@ -4443,6 +4408,7 @@ dashboardPropertiesRouter.patch(
                 trigger: "HOLIDAY_PRICING_UPDATE",
                 syncMode: "INCREMENTAL",
                 dateRange: buildFullSyncRange(todayDateKey),
+                changedFields: ["rate"],
                 sourceEntityType: "PROPERTY_HOLIDAY_PRICING",
                 sourceEntityId: updatedHolidayPricing.id,
                 now: mutationAt,
@@ -4546,6 +4512,7 @@ dashboardPropertiesRouter.post(
             trigger: "HOLIDAY_PRICING_DEFAULTS",
             syncMode: "INCREMENTAL",
             dateRange: buildFullSyncRange(todayDateKey),
+            changedFields: ["rate"],
             sourceEntityType: "PROPERTY",
             sourceEntityId: property.id,
             now: mutationAt,

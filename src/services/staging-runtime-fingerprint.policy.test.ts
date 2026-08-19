@@ -13,7 +13,7 @@ const common = {
   railwayEnvironmentName: "staging",
   railwayEnvironmentId: "environment-001",
   railwayGitCommitSha: "a".repeat(40),
-  railwayGitBranch: "recovery/distribution-engine-v2-channex-lifecycle",
+  railwayGitBranch: "sprint/distribution-engine-channex-outbound-ari-v1",
   railwayGitRepoOwner: "freddiefernandezmaysonet-netizen",
   railwayGitRepoName: "pin-go-backend",
 };

@@ -9,6 +9,7 @@ import {
 function baseInput(): ChannexCertificationEvidenceInput {
   return {
     revisionId: "revision-001",
+    ingestMechanism: "BOOKING_REVISION_FEED",
     bookingId: "booking-001",
     bookingReference: "OTA-001",
     channexPropertyId: "channex-property-001",
@@ -17,11 +18,13 @@ function baseInput(): ChannexCertificationEvidenceInput {
     persistence: {
       status: "SUCCESS",
       reason: "CHANNEX_REVISION_PERSISTED",
+      startedAt: "2026-07-25T10:00:01.000Z",
       completedAt: "2026-07-25T10:00:02.000Z",
     },
     acknowledgement: {
       status: "SUCCESS",
       reason: "CHANNEX_REVISION_ACKNOWLEDGED",
+      startedAt: "2026-07-25T10:00:02.500Z",
       completedAt: "2026-07-25T10:00:03.000Z",
     },
     event: {
@@ -34,6 +37,7 @@ function baseInput(): ChannexCertificationEvidenceInput {
       updatedAt: "2026-07-25T10:00:03.000Z",
     },
     reservation: {
+      reservationId: "reservation-001",
       reservationNumber: "PG-2026-000100",
       status: "ACTIVE",
       externalProvider: "CHANNEX",
@@ -45,6 +49,7 @@ function baseInput(): ChannexCertificationEvidenceInput {
       paymentState: "PAID",
       createdAt: "2026-07-25T10:00:01.000Z",
       updatedAt: "2026-07-25T10:00:02.000Z",
+      reservationCountForBooking: 1,
     },
     missionControl: {
       persistenceStatus: "PERSISTED",
@@ -63,7 +68,86 @@ test("successful persistence, ACK and reservation correlation produce PASS", () 
   assert.equal(evidence.outcome, "PASS");
   assert.equal(evidence.complete, true);
   assert.equal(evidence.verification.reservationMatches, true);
+  assert.equal(evidence.verification.reservationId, "reservation-001");
+  assert.equal(evidence.verification.reservationCountForBooking, 1);
+  assert.equal(evidence.verification.duplicateReservations, 0);
   assert.equal(evidence.verification.acknowledgementSent, true);
+  assert.equal(
+    evidence.verification.persistenceBeforeAcknowledgement,
+    true
+  );
+  assert.equal(evidence.ingest.mechanism, "BOOKING_REVISION_FEED");
+  assert.equal(evidence.ingest.bookingFindEvents, 0);
+  assert.equal(evidence.verification.ingestMechanismAllowed, true);
+  assert.equal(evidence.verification.bookingFindEvents, 0);
+});
+
+test("ACK before persistence completion cannot produce PASS", () => {
+  const input = baseInput();
+  input.acknowledgement = {
+    ...input.acknowledgement!,
+    startedAt: "2026-07-25T10:00:01.500Z",
+  };
+
+  const evidence = buildChannexCertificationEvidence(input);
+
+  assert.equal(evidence.outcome, "FAIL_INCOMPLETE");
+  assert.equal(
+    evidence.verification.persistenceBeforeAcknowledgement,
+    false
+  );
+});
+
+test("ACK simultaneous with persistence completion cannot produce PASS", () => {
+  const input = baseInput();
+  input.acknowledgement = {
+    ...input.acknowledgement!,
+    startedAt: input.persistence!.completedAt,
+  };
+
+  const evidence = buildChannexCertificationEvidence(input);
+
+  assert.equal(evidence.outcome, "FAIL_INCOMPLETE");
+  assert.equal(
+    evidence.verification.persistenceBeforeAcknowledgement,
+    false
+  );
+});
+
+test("missing ACK start timestamp cannot produce PASS", () => {
+  const input = baseInput();
+  input.acknowledgement = {
+    ...input.acknowledgement!,
+    startedAt: null,
+  };
+
+  const evidence = buildChannexCertificationEvidence(input);
+
+  assert.equal(evidence.outcome, "FAIL_INCOMPLETE");
+  assert.equal(
+    evidence.verification.persistenceBeforeAcknowledgement,
+    false
+  );
+});
+
+test("Booking Find classification aborts certification evidence", () => {
+  const input = baseInput();
+  input.ingestMechanism = "booking_received_via_booking_find";
+
+  assert.throws(
+    () => buildChannexCertificationEvidence(input),
+    /CHANNEX_BOOKING_FIND_FORBIDDEN:BOOKING_RECEIVED_VIA_BOOKING_FIND/
+  );
+});
+
+test("missing ingest mechanism aborts certification evidence", () => {
+  const input = baseInput();
+  input.ingestMechanism = null;
+
+  assert.throws(
+    () => buildChannexCertificationEvidence(input),
+    /CHANNEX_BOOKING_INGEST_MECHANISM_UNSUPPORTED:MISSING/
+  );
 });
 
 test("superseded revision with ACK and terminal event produces PASS_SUPERSEDED", () => {
@@ -71,6 +155,7 @@ test("superseded revision with ACK and terminal event produces PASS_SUPERSEDED",
   input.persistence = {
     status: "SKIPPED",
     reason: "CHANNEX_REVISION_SUPERSEDED_OR_ALREADY_PERSISTED",
+    startedAt: "2026-07-25T10:00:01.000Z",
     completedAt: "2026-07-25T10:00:02.000Z",
   };
   input.reservation = null;
@@ -86,6 +171,7 @@ test("failed ACK remains pending automatic recovery", () => {
   input.acknowledgement = {
     status: "FAILED",
     reason: "CHANNEX_REVISION_ACK_FAILED",
+    startedAt: "2026-07-25T10:00:02.500Z",
     completedAt: "2026-07-25T10:00:03.000Z",
   };
   input.event = {
@@ -113,6 +199,7 @@ test("active-stay cancellation rejection requires action and no ACK", () => {
   input.persistence = {
     status: "FAILED",
     reason: "CHANNEX_CANCELLATION_NOT_APPLIED",
+    startedAt: "2026-07-25T10:00:01.000Z",
     completedAt: "2026-07-25T10:00:02.000Z",
   };
   input.acknowledgement = null;
@@ -149,6 +236,21 @@ test("missing reservation correlation produces FAIL_INCOMPLETE", () => {
 
   assert.equal(evidence.outcome, "FAIL_INCOMPLETE");
   assert.equal(evidence.complete, false);
+});
+
+test("duplicate reservations for one Channex booking cannot produce PASS", () => {
+  const input = baseInput();
+  input.reservation = {
+    ...input.reservation!,
+    reservationCountForBooking: 2,
+  };
+
+  const evidence = buildChannexCertificationEvidence(input);
+
+  assert.equal(evidence.outcome, "FAIL_INCOMPLETE");
+  assert.equal(evidence.verification.reservationMatches, false);
+  assert.equal(evidence.verification.reservationCountForBooking, 2);
+  assert.equal(evidence.verification.duplicateReservations, 1);
 });
 
 test("internal Channex errors are converted to Pin&Go Connect codes", () => {
