@@ -1,0 +1,14 @@
+model PropertyNightlyRestriction {
+  id            String   @id @default(cuid())
+  propertyId    String
+  date          DateTime
+  minimumNights Int?
+  maximumNights Int?
+  source        String   @default("MANUAL")
+  reason        String?
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  @@unique([propertyId, date])
+  @@index([propertyId, date])
+}
