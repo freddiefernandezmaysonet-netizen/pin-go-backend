@@ -91,6 +91,39 @@ test("unions exact dates deterministically and preserves correlation evidence", 
   });
 });
 
+test("certification deltas union changed fields deterministically", () => {
+  const plan = buildChannexAriCoalescingPlan({
+    snapshotAt: SNAPSHOT_AT,
+    events: [
+      incrementalEvent({
+        id: "restriction-event",
+        messageKind: "RATES_RESTRICTIONS",
+        dateFrom: "2026-11-02",
+        dateToExclusive: "2026-11-03",
+        dateKeys: ["2026-11-02"],
+        changedFields: ["minStayThrough", "minStayArrival"],
+        createdAt: new Date("2026-07-28T11:58:02.000Z"),
+      } as any),
+      incrementalEvent({
+        id: "rate-event",
+        messageKind: "RATES_RESTRICTIONS",
+        dateFrom: "2026-11-01",
+        dateToExclusive: "2026-11-02",
+        dateKeys: ["2026-11-01"],
+        changedFields: ["rate"],
+        createdAt: new Date("2026-07-28T11:58:01.000Z"),
+      } as any),
+    ],
+  });
+
+  assert.deepEqual((plan as any).changedFields, [
+    "rate",
+    "minStayArrival",
+    "minStayThrough",
+  ]);
+  assert.deepEqual(plan.mergedEventIds, ["rate-event", "restriction-event"]);
+});
+
 test("keeps one merged DATE_RANGE for overlapping and adjacent ranges", () => {
   const plan = buildChannexAriCoalescingPlan({
     snapshotAt: SNAPSHOT_AT,

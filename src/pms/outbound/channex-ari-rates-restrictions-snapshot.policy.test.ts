@@ -107,6 +107,173 @@ test("builds a canonical Rates & Restrictions-only payload", () => {
   }
 });
 
+test("certification #2 emits a rate-only delta for one date and one rate plan", () => {
+  const snapshot = buildChannexAriRatesRestrictionsSnapshot({
+    channexPropertyId: "certification-property-1",
+    channexRatePlanId: "certification-rate-plan-1",
+    changedFields: ["rate"],
+    values: [
+      {
+        date: "2026-11-01",
+        rate: 15999,
+        minStayArrival: 3,
+        minStayThrough: 3,
+        maxStay: 14,
+      },
+    ],
+  } as any);
+
+  assert.equal(snapshot.payload.values.length, 1);
+  assert.deepEqual(snapshot.payload.values[0], {
+    property_id: "certification-property-1",
+    rate_plan_id: "certification-rate-plan-1",
+    date: "2026-11-01",
+    rate: 15999,
+  });
+
+  const value = snapshot.payload.values[0] as Record<string, unknown>;
+  assert.equal("min_stay_arrival" in value, false);
+  assert.equal("min_stay_through" in value, false);
+  assert.equal("max_stay" in value, false);
+  assert.equal("stop_sell" in value, false);
+  assert.equal("closed_to_arrival" in value, false);
+  assert.equal("closed_to_departure" in value, false);
+});
+
+test("certification #4 compacts the first official interval into one rate-only range", () => {
+  const snapshot = buildChannexAriRatesRestrictionsSnapshot({
+    channexPropertyId: "1d699e11-593c-4a3d-b66a-28741759e82f",
+    channexRatePlanId: "daa6211c-bd9b-455f-b526-4136550b9a92",
+    changedFields: ["rate"],
+    values: Array.from({ length: 10 }, (_, index) => ({
+      date: addUtcDays("2026-11-01", index),
+      rate: 24100,
+      minStayArrival: 1,
+      minStayThrough: 1,
+      maxStay: 0,
+    })),
+  });
+
+  assert.deepEqual(snapshot.payload.values, [
+    {
+      property_id: "1d699e11-593c-4a3d-b66a-28741759e82f",
+      rate_plan_id: "daa6211c-bd9b-455f-b526-4136550b9a92",
+      date_from: "2026-11-01",
+      date_to: "2026-11-10",
+      rate: 24100,
+    },
+  ]);
+  assert.equal(snapshot.payloadValueCount, 1);
+});
+
+test("certification #5 emits one single-date Min Stay-only update", () => {
+  const snapshot = buildChannexAriRatesRestrictionsSnapshot({
+    channexPropertyId: "1d699e11-593c-4a3d-b66a-28741759e82f",
+    channexRatePlanId: "daa6211c-bd9b-455f-b526-4136550b9a92",
+    changedFields: ["minStayArrival", "minStayThrough"],
+    values: [
+      {
+        date: "2026-11-23",
+        rate: 99999,
+        minStayArrival: 3,
+        minStayThrough: 3,
+        maxStay: 14,
+      },
+    ],
+  });
+
+  assert.deepEqual(snapshot.payload.values, [
+    {
+      property_id: "1d699e11-593c-4a3d-b66a-28741759e82f",
+      rate_plan_id: "daa6211c-bd9b-455f-b526-4136550b9a92",
+      date: "2026-11-23",
+      min_stay_arrival: 3,
+      min_stay_through: 3,
+    },
+  ]);
+  const value = snapshot.payload.values[0] as Record<string, unknown>;
+  assert.equal("rate" in value, false);
+  assert.equal("max_stay" in value, false);
+  assert.equal("stop_sell" in value, false);
+  assert.equal("closed_to_arrival" in value, false);
+  assert.equal("closed_to_departure" in value, false);
+  assert.equal(snapshot.payloadValueCount, 1);
+});
+
+test("certification #7 emits one range with exactly Pin&Go's supported restrictions", () => {
+  const snapshot = buildChannexAriRatesRestrictionsSnapshot({
+    channexPropertyId: "1d699e11-593c-4a3d-b66a-28741759e82f",
+    channexRatePlanId: "daa6211c-bd9b-455f-b526-4136550b9a92",
+    changedFields: ["minStayArrival", "minStayThrough", "maxStay"],
+    values: Array.from({ length: 10 }, (_, index) => ({
+      date: addUtcDays("2026-11-01", index),
+      rate: 99999,
+      minStayArrival: 1,
+      minStayThrough: 1,
+      maxStay: 4,
+    })),
+  });
+
+  assert.deepEqual(snapshot.payload.values, [
+    {
+      property_id: "1d699e11-593c-4a3d-b66a-28741759e82f",
+      rate_plan_id: "daa6211c-bd9b-455f-b526-4136550b9a92",
+      date_from: "2026-11-01",
+      date_to: "2026-11-10",
+      min_stay_arrival: 1,
+      min_stay_through: 1,
+      max_stay: 4,
+    },
+  ]);
+  const value = snapshot.payload.values[0] as Record<string, unknown>;
+  assert.equal("rate" in value, false);
+  assert.equal("stop_sell" in value, false);
+  assert.equal("closed_to_arrival" in value, false);
+  assert.equal("closed_to_departure" in value, false);
+  assert.equal(snapshot.payloadValueCount, 1);
+});
+
+test("certification #8 emits one rate and Min Stay range for the official half-year interval", () => {
+  const dates: string[] = [];
+
+  for (
+    let date = "2026-12-01";
+    date <= "2027-05-01";
+    date = addUtcDays(date, 1)
+  ) {
+    dates.push(date);
+  }
+
+  const snapshot = buildChannexAriRatesRestrictionsSnapshot({
+    channexPropertyId: "1d699e11-593c-4a3d-b66a-28741759e82f",
+    channexRatePlanId: "daa6211c-bd9b-455f-b526-4136550b9a92",
+    changedFields: ["rate", "minStayArrival", "minStayThrough"],
+    values: dates.map((date) => ({
+      date,
+      rate: 43200,
+      minStayArrival: 2,
+      minStayThrough: 2,
+      maxStay: 99,
+    })),
+  });
+
+  assert.deepEqual(snapshot.payload.values, [
+    {
+      property_id: "1d699e11-593c-4a3d-b66a-28741759e82f",
+      rate_plan_id: "daa6211c-bd9b-455f-b526-4136550b9a92",
+      date_from: "2026-12-01",
+      date_to: "2027-05-01",
+      rate: 43200,
+      min_stay_arrival: 2,
+      min_stay_through: 2,
+    },
+  ]);
+  assert.equal("max_stay" in snapshot.payload.values[0], false);
+  assert.equal(snapshot.payloadValueCount, 1);
+  assert.equal(snapshot.dateFrom, "2026-12-01");
+  assert.equal(snapshot.dateToExclusive, "2027-05-02");
+});
+
 test("preserves Revenue output without rounding or imposing a Distribution minimum", () => {
   const snapshot = buildChannexAriRatesRestrictionsSnapshot({
     channexPropertyId: "property-1",

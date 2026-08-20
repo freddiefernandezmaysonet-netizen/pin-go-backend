@@ -65,6 +65,7 @@ test("creates a normalized incremental exact-date Availability intent", async ()
     dateFrom: new Date("2026-08-01T00:00:00.000Z"),
     dateToExclusive: new Date("2026-08-04T00:00:00.000Z"),
     dateKeys: ["2026-08-01", "2026-08-03"],
+    changedFields: [],
     trigger: "RESERVATION_CREATED",
     sourceEntityType: "RESERVATION",
     sourceEntityId: "reservation-1",
@@ -96,6 +97,7 @@ test("creates an incremental date-range Rates & Restrictions intent", async () =
   assert.equal(writes[0].data.scope, "DATE_RANGE");
   assert.equal(writes[0].data.syncMode, "INCREMENTAL");
   assert.deepEqual(writes[0].data.dateKeys, []);
+  assert.deepEqual(writes[0].data.changedFields, []);
   assert.deepEqual(
     writes[0].data.dateFrom,
     new Date("2026-09-01T00:00:00.000Z")
@@ -108,6 +110,23 @@ test("creates an incremental date-range Rates & Restrictions intent", async () =
     writes[0].data.availableAt,
     new Date("2026-07-28T12:01:00.000Z")
   );
+});
+
+test("certification #2 persists rate-only delta semantics in the outbox", async () => {
+  const { db, writes } = createDbMock();
+
+  await createChannexAriOutboxEvent(db, {
+    organizationId: "org-1",
+    propertyId: "property-1",
+    messageKind: "RATES_RESTRICTIONS",
+    trigger: "NIGHTLY_RATE_UPDATE",
+    dateKeys: ["2026-11-01"],
+    changedFields: ["rate"],
+    now: new Date("2026-07-28T12:00:00.000Z"),
+  } as any);
+
+  assert.equal(writes.length, 1);
+  assert.deepEqual(writes[0].data.changedFields, ["rate"]);
 });
 
 test("creates an immediate exact 500-day Full Sync intent", async () => {
@@ -137,6 +156,7 @@ test("creates an immediate exact 500-day Full Sync intent", async () => {
     dateFrom: new Date("2026-07-28T00:00:00.000Z"),
     dateToExclusive: new Date("2027-12-10T00:00:00.000Z"),
     dateKeys: [],
+    changedFields: [],
     trigger: "DISTRIBUTION_ENABLEMENT",
     sourceEntityType: null,
     sourceEntityId: null,
@@ -170,6 +190,46 @@ test("requires exactly one incremental scope", async () => {
       },
     },
     /CHANNEX_ARI_INCREMENTAL_SCOPE_REQUIRED/
+  );
+});
+
+test("rejects delta masks outside incremental Rates & Restrictions", async () => {
+  await assertRejectsWithoutWrite(
+    {
+      organizationId: "org-1",
+      propertyId: "property-1",
+      messageKind: "AVAILABILITY",
+      trigger: "RESERVATION_CREATED",
+      dateKeys: ["2026-08-01"],
+      changedFields: ["rate"],
+    } as any,
+    /CHANNEX_ARI_AVAILABILITY_CHANGED_FIELDS_NOT_ALLOWED/
+  );
+
+  await assertRejectsWithoutWrite(
+    {
+      organizationId: "org-1",
+      propertyId: "property-1",
+      messageKind: "RATES_RESTRICTIONS",
+      syncMode: "FULL",
+      trigger: "MANUAL_RECOVERY",
+      correlationId: "full-sync-3",
+      todayDateKey: "2026-07-28",
+      changedFields: ["rate"],
+    } as any,
+    /CHANNEX_ARI_FULL_SYNC_CHANGED_FIELDS_NOT_ALLOWED/
+  );
+
+  await assertRejectsWithoutWrite(
+    {
+      organizationId: "org-1",
+      propertyId: "property-1",
+      messageKind: "RATES_RESTRICTIONS",
+      trigger: "NIGHTLY_RATE_UPDATE",
+      dateKeys: ["2026-08-01"],
+      changedFields: ["rate", "rate"],
+    } as any,
+    /CHANNEX_ARI_CHANGED_FIELDS_INVALID/
   );
 });
 
