@@ -1,0 +1,9 @@
+model ChannexPropertyConfig {
+  id           String   @id @default(cuid())
+  propertyId   String   @unique
+  propertyType String
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  @@index([propertyType])
+}
