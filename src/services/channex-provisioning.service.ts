@@ -7,6 +7,19 @@ const prisma = new PrismaClient();
 const CHANNEX_API_BASE_URL =
   process.env.CHANNEX_API_BASE_URL ?? "https://staging.channex.io";
 
+const CHANNEX_PROPERTY_TYPES = new Set([
+  "apartment",
+  "holiday_home",
+  "villa",
+  "chalet",
+  "country_house",
+  "guest_house",
+  "hotel",
+  "hostel",
+  "motel",
+  "resort",
+]);
+
 function getEncryptionKey() {
   const secret = process.env.PMS_CREDENTIALS_SECRET ?? "";
   if (!secret) {
@@ -54,6 +67,21 @@ function getChannexApiKey() {
 
   return apiKey;
 }
+
+function requireChannexPropertyType(value: unknown): string {
+  const propertyType = String(value ?? "").trim().toLowerCase();
+
+  if (!propertyType) {
+    throw new Error("CHANNEX_PROPERTY_TYPE_REQUIRED");
+  }
+
+  if (!CHANNEX_PROPERTY_TYPES.has(propertyType)) {
+    throw new Error("CHANNEX_PROPERTY_TYPE_INVALID");
+  }
+
+  return propertyType;
+}
+
 async function createChannexProperty(args: {
   apiKey: string;
   payload: Record<string, unknown>;
@@ -73,10 +101,7 @@ async function createChannexProperty(args: {
     }
   );
 
-  const channexPropertyId =
-    resp.data?.data?.id ??
-    resp.data?.id ??
-    null;
+  const channexPropertyId = resp.data?.data?.id ?? resp.data?.id ?? null;
 
   if (!channexPropertyId) {
     throw new Error("CHANNEX_PROPERTY_CREATE_RESPONSE_INVALID");
@@ -111,10 +136,7 @@ async function createChannexRoomType(args: {
     }
   );
 
-  const channexRoomTypeId =
-    resp.data?.data?.id ??
-    resp.data?.id ??
-    null;
+  const channexRoomTypeId = resp.data?.data?.id ?? resp.data?.id ?? null;
 
   if (!channexRoomTypeId) {
     throw new Error("CHANNEX_ROOM_TYPE_CREATE_RESPONSE_INVALID");
@@ -152,10 +174,7 @@ async function createChannexRatePlan(args: {
       }
     );
 
-    const channexRatePlanId =
-      resp.data?.data?.id ??
-      resp.data?.id ??
-      null;
+    const channexRatePlanId = resp.data?.data?.id ?? resp.data?.id ?? null;
 
     if (!channexRatePlanId) {
       throw new Error("CHANNEX_RATE_PLAN_CREATE_RESPONSE_INVALID");
@@ -184,6 +203,7 @@ async function createChannexRatePlan(args: {
     );
   }
 }
+
 export async function provisionChannexProperty(propertyId: string) {
   const property = await prisma.property.findUnique({
     where: { id: propertyId },
@@ -193,36 +213,43 @@ export async function provisionChannexProperty(propertyId: string) {
     throw new Error("PROPERTY_NOT_FOUND");
   }
 
+  const propertyConfig = await prisma.channexPropertyConfig.findUnique({
+    where: { propertyId: property.id },
+    select: { propertyType: true },
+  });
+  const propertyType = requireChannexPropertyType(propertyConfig?.propertyType);
+
   const connection = await prisma.pmsConnection.upsert({
-  where: {
-    organizationId_provider: {
+    where: {
+      organizationId_provider: {
+        organizationId: property.organizationId,
+        provider: PmsProvider.CHANNEX,
+      },
+    },
+    create: {
       organizationId: property.organizationId,
       provider: PmsProvider.CHANNEX,
+      status: "ACTIVE",
+      credentialsEncrypted: null,
+      webhookSecret: null,
+      metadata: {
+        connectionType: "WHITE_LABEL_GLOBAL",
+        managedBy: "PinGo",
+        createdBy: "channex-provisioning.service",
+        createdAt: new Date().toISOString(),
+      },
     },
-  },
-  create: {
-    organizationId: property.organizationId,
-    provider: PmsProvider.CHANNEX,
-    status: "ACTIVE",
-    credentialsEncrypted: null,
-    webhookSecret: null,
-    metadata: {
-      connectionType: "WHITE_LABEL_GLOBAL",
-      managedBy: "PinGo",
-      createdBy: "channex-provisioning.service",
-      createdAt: new Date().toISOString(),
+    update: {
+      status: "ACTIVE",
+      metadata: {
+        connectionType: "WHITE_LABEL_GLOBAL",
+        managedBy: "PinGo",
+        updatedBy: "channex-provisioning.service",
+        updatedAt: new Date().toISOString(),
+      },
     },
-  },
-  update: {
-    status: "ACTIVE",
-    metadata: {
-      connectionType: "WHITE_LABEL_GLOBAL",
-      managedBy: "PinGo",
-      updatedBy: "channex-provisioning.service",
-      updatedAt: new Date().toISOString(),
-    },
-  },
-});
+  });
+
   const existingListing = await prisma.pmsListing.findFirst({
     where: {
       connectionId: connection.id,
@@ -248,23 +275,16 @@ export async function provisionChannexProperty(propertyId: string) {
     city: property.city,
     state: property.region,
     country:
-  String(property.country ?? "").trim().toLowerCase() === "united states"
-    ? "US"
-    : String(property.country ?? "US").trim().toUpperCase(),
+      String(property.country ?? "").trim().toLowerCase() === "united states"
+        ? "US"
+        : String(property.country ?? "US").trim().toUpperCase(),
     timezone: property.timezone ?? "America/Puerto_Rico",
     latitude:
       property.latitude != null ? Number(property.latitude) : undefined,
     longitude:
       property.longitude != null ? Number(property.longitude) : undefined,
-    // Pin&Go currently provisions short-term/vacation-rental inventory.
-    // Channex recommends "apartment" for vacation rentals so billing is
-    // classified correctly. More granular Pin&Go property types can map here
-    // later without changing the Channex billing family.
-    property_type: "apartment",
+    property_type: propertyType,
     settings: {
-      // Channex-recommended Auto Availability settings for a connected PMS:
-      // confirmation ON; modification/cancellation OFF so Pin&Go remains the
-      // source of truth for absolute availability after lifecycle changes.
       allow_availability_autoupdate_on_confirmation: true,
       allow_availability_autoupdate_on_modification: false,
       allow_availability_autoupdate_on_cancellation: false,
@@ -293,53 +313,43 @@ export async function provisionChannexProperty(propertyId: string) {
     payload: propertyPayload,
   });
 
-const channexRoomType = await createChannexRoomType({
-  apiKey,
-  channexPropertyId: channexProperty.channexPropertyId,
-  payload: roomTypePayload,
-});
+  const channexRoomType = await createChannexRoomType({
+    apiKey,
+    channexPropertyId: channexProperty.channexPropertyId,
+    payload: roomTypePayload,
+  });
 
-const channexRatePlan = await createChannexRatePlan({
-  apiKey,
-  channexPropertyId: channexProperty.channexPropertyId,
-  channexRoomTypeId: channexRoomType.channexRoomTypeId,
-  payload: {
-    title: "Standard Rate",
-    options: [
-      {
-        occupancy: property.maxGuests ?? 2,
-        is_primary: true,
-        rate: Number(property.baseNightlyRate ?? 0),
-      },
-    ],
-  },
-});
-
-const listing = await prisma.pmsListing.create({
-  data: {
-    connectionId: connection.id,
-    propertyId: property.id,
-
-    externalListingId:
-      channexRoomType.channexRoomTypeId,
-
-    name:
-      property.publicTitle ??
-      property.name,
-
-    metadata: {
-      provider: "CHANNEX",
-      channexPropertyId:
-        channexProperty.channexPropertyId,
-
-      channexRatePlanId:
-        channexRatePlan.channexRatePlanId,
-
-      provisionedAt:
-        new Date().toISOString(),
+  const channexRatePlan = await createChannexRatePlan({
+    apiKey,
+    channexPropertyId: channexProperty.channexPropertyId,
+    channexRoomTypeId: channexRoomType.channexRoomTypeId,
+    payload: {
+      title: "Standard Rate",
+      options: [
+        {
+          occupancy: property.maxGuests ?? 2,
+          is_primary: true,
+          rate: Number(property.baseNightlyRate ?? 0),
+        },
+      ],
     },
-  },
-});
+  });
+
+  const listing = await prisma.pmsListing.create({
+    data: {
+      connectionId: connection.id,
+      propertyId: property.id,
+      externalListingId: channexRoomType.channexRoomTypeId,
+      name: property.publicTitle ?? property.name,
+      metadata: {
+        provider: "CHANNEX",
+        channexPropertyId: channexProperty.channexPropertyId,
+        channexRatePlanId: channexRatePlan.channexRatePlanId,
+        channexPropertyType: propertyType,
+        provisionedAt: new Date().toISOString(),
+      },
+    },
+  });
 
   return {
     ok: true,
@@ -347,8 +357,7 @@ const listing = await prisma.pmsListing.create({
     listingId: listing.id,
     channexPropertyId: channexProperty.channexPropertyId,
     channexRoomTypeId: channexRoomType.channexRoomTypeId,
-    channexRatePlanId:
-    channexRatePlan.channexRatePlanId,
+    channexRatePlanId: channexRatePlan.channexRatePlanId,
     propertyPayload,
     roomTypePayload,
     ratePlanPayload,
