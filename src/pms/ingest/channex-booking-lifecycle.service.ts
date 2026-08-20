@@ -14,6 +14,10 @@ import {
   parseChannexInsertedAt,
   sortChannexRevisionsOldestFirst,
 } from "./channex-booking-lifecycle.policy";
+import {
+  requireAllowedChannexBookingIngestMechanism,
+  type ChannexBookingIngestMechanism,
+} from "./channex-booking-ingest-mechanism.policy";
 
 export type PersistedChannexBookingRevision = {
   correlationId: string;
@@ -21,6 +25,7 @@ export type PersistedChannexBookingRevision = {
   propertyId: string;
   reservationId: string | null;
   revision: ChannexBookingRevision;
+  ingestMechanism: ChannexBookingIngestMechanism;
 };
 
 function asRecord(value: unknown): Record<string, unknown> {
@@ -60,6 +65,7 @@ function buildRevisionMetadata(args: {
   reservationId?: string | null;
   eventId: string;
   revision: ChannexBookingRevision;
+  ingestMechanism: ChannexBookingIngestMechanism;
 }) {
   return {
     organizationId: args.organizationId,
@@ -76,6 +82,7 @@ function buildRevisionMetadata(args: {
     liveFeedEventId: args.revision.identity.liveFeedEventId ?? null,
     systemId: args.revision.identity.systemId ?? null,
     insertedAt: args.revision.identity.insertedAt ?? null,
+    ingestMechanism: args.ingestMechanism,
   };
 }
 
@@ -93,6 +100,7 @@ async function persistLifecycleAudit(args: {
   reservationId?: string | null;
   eventId: string;
   revision: ChannexBookingRevision;
+  ingestMechanism: ChannexBookingIngestMechanism;
   applied: boolean;
   rule: string;
   label: string;
@@ -104,6 +112,7 @@ async function persistLifecycleAudit(args: {
     reservationId: args.reservationId,
     eventId: args.eventId,
     revision: args.revision,
+    ingestMechanism: args.ingestMechanism,
   });
 
   await persistAuditEntry(prisma, {
@@ -144,6 +153,7 @@ async function persistRejectedCancellation(args: {
   reservationId: string | null;
   eventId: string;
   revision: ChannexBookingRevision;
+  ingestMechanism: ChannexBookingIngestMechanism;
   startedAt: Date;
 }) {
   await persistLifecycleAudit({
@@ -161,6 +171,7 @@ async function persistRejectedCancellation(args: {
     reservationId: args.reservationId,
     eventId: args.eventId,
     revision: args.revision,
+    ingestMechanism: args.ingestMechanism,
     applied: false,
     rule: "CHANNEX_BOOKING_CANCELLATION_PERSISTENCE",
     label: "Pin&Go Connect Booking Cancellation",
@@ -249,6 +260,9 @@ async function getRevisions(args: {
     return {
       adapter,
       connection,
+      ingestMechanism: requireAllowedChannexBookingIngestMechanism(
+        "BOOKING_REVISION_BY_ID"
+      ),
       revisions: [
         await adapter.fetchBookingRevision({ connection, revisionId }),
       ],
@@ -267,7 +281,14 @@ async function getRevisions(args: {
     throw new Error(`CHANNEX_FEED_NO_PENDING_REVISIONS:${propertyId}`);
   }
 
-  return { adapter, connection, revisions };
+  return {
+    adapter,
+    connection,
+    ingestMechanism: requireAllowedChannexBookingIngestMechanism(
+      "BOOKING_REVISION_FEED"
+    ),
+    revisions,
+  };
 }
 
 async function rejectCancellation(args: {
@@ -276,6 +297,7 @@ async function rejectCancellation(args: {
   reservationId: string | null;
   eventId: string;
   revision: ChannexBookingRevision;
+  ingestMechanism: ChannexBookingIngestMechanism;
   startedAt: Date;
 }) {
   await persistRejectedCancellation(args);
@@ -292,6 +314,7 @@ async function persistSupersededRevision(args: {
   reservationId: string | null;
   eventId: string;
   revision: ChannexBookingRevision;
+  ingestMechanism: ChannexBookingIngestMechanism;
 }) {
   await persistLifecycleAudit({
     decisionId: args.persistenceDecisionId,
@@ -308,6 +331,7 @@ async function persistSupersededRevision(args: {
     reservationId: args.reservationId,
     eventId: args.eventId,
     revision: args.revision,
+    ingestMechanism: args.ingestMechanism,
     applied: false,
     rule: "CHANNEX_REVISION_CHRONOLOGY_GUARD",
     label: "Booking Revision Chronology Guard",
@@ -320,6 +344,7 @@ async function acknowledgeRevision(args: {
   reservationId: string | null;
   eventId: string;
   revision: ChannexBookingRevision;
+  ingestMechanism: ChannexBookingIngestMechanism;
   acknowledge: (revisionId: string) => Promise<void>;
 }) {
   const ackStartedAt = new Date();
@@ -347,6 +372,7 @@ async function acknowledgeRevision(args: {
         reservationId: args.reservationId,
         eventId: args.eventId,
         revision: args.revision,
+        ingestMechanism: args.ingestMechanism,
         applied: false,
         rule: "CHANNEX_BOOKING_REVISION_ACK",
         label: "Pin&Go Connect Booking Acknowledgement",
@@ -380,6 +406,7 @@ async function acknowledgeRevision(args: {
     reservationId: args.reservationId,
     eventId: args.eventId,
     revision: args.revision,
+    ingestMechanism: args.ingestMechanism,
     applied: true,
     rule: "CHANNEX_BOOKING_REVISION_ACK",
     label: "Pin&Go Connect Booking Acknowledgement",
@@ -391,8 +418,12 @@ export async function persistChannexBookingRevision(args: {
   organizationId: string;
   connectionId: string;
   revision: ChannexBookingRevision;
+  ingestMechanism: ChannexBookingIngestMechanism;
 }): Promise<PersistedChannexBookingRevision> {
   const lifecycleStartedAt = new Date();
+  const ingestMechanism = requireAllowedChannexBookingIngestMechanism(
+    args.ingestMechanism
+  );
   const persistenceDecisionId =
     `distribution-engine:channex-revision:${args.revision.identity.revisionId}:persisted`;
   const listing = await resolveListing({
@@ -453,6 +484,7 @@ export async function persistChannexBookingRevision(args: {
       reservationId,
       eventId: args.correlationId,
       revision: args.revision,
+      ingestMechanism,
       startedAt: lifecycleStartedAt,
     });
   }
@@ -466,6 +498,7 @@ export async function persistChannexBookingRevision(args: {
       reservationId,
       eventId: args.correlationId,
       revision: args.revision,
+      ingestMechanism,
     });
   }
 
@@ -520,6 +553,7 @@ export async function persistChannexBookingRevision(args: {
         reservationId,
         eventId: args.correlationId,
         revision: args.revision,
+        ingestMechanism,
         startedAt: lifecycleStartedAt,
       });
     }
@@ -540,6 +574,7 @@ export async function persistChannexBookingRevision(args: {
       reservationId,
       eventId: args.correlationId,
       revision: args.revision,
+      ingestMechanism,
       applied: result.didChange,
       rule: "CHANNEX_BOOKING_REVISION_PERSISTENCE",
       label: "Pin&Go Connect Booking Persistence",
@@ -552,6 +587,7 @@ export async function persistChannexBookingRevision(args: {
     propertyId: listing.propertyId,
     reservationId,
     revision: args.revision,
+    ingestMechanism,
   };
 }
 
@@ -566,6 +602,7 @@ export async function acknowledgePersistedChannexBookingRevision(
     reservationId: args.reservationId,
     eventId: args.correlationId,
     revision: args.revision,
+    ingestMechanism: args.ingestMechanism,
     acknowledge: args.acknowledge,
   });
 }
@@ -629,6 +666,7 @@ export async function processChannexBookingWebhookEventById(eventId: string) {
         organizationId: event.connection.organizationId,
         connectionId: event.connection.id,
         revision,
+        ingestMechanism: lifecycle.ingestMechanism,
       });
 
       await acknowledgePersistedChannexBookingRevision({
