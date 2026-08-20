@@ -256,6 +256,21 @@ export async function provisionChannexProperty(propertyId: string) {
       property.latitude != null ? Number(property.latitude) : undefined,
     longitude:
       property.longitude != null ? Number(property.longitude) : undefined,
+    // Pin&Go currently provisions short-term/vacation-rental inventory.
+    // Channex recommends "apartment" for vacation rentals so billing is
+    // classified correctly. More granular Pin&Go property types can map here
+    // later without changing the Channex billing family.
+    property_type: "apartment",
+    settings: {
+      // Channex-recommended Auto Availability settings for a connected PMS:
+      // confirmation ON; modification/cancellation OFF so Pin&Go remains the
+      // source of truth for absolute availability after lifecycle changes.
+      allow_availability_autoupdate_on_confirmation: true,
+      allow_availability_autoupdate_on_modification: false,
+      allow_availability_autoupdate_on_cancellation: false,
+      min_stay_type: "both",
+      state_length: 500,
+    },
   };
 
   const roomTypePayload = {
