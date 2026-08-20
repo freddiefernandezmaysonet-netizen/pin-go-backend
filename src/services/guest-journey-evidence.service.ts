@@ -199,7 +199,7 @@ const reservationEvidenceSelect = {
       },
     ],
 
-    take: 100,
+    take: 101,
 
     select: {
       id: true,
@@ -815,6 +815,16 @@ export async function loadGuestJourneyEvidence(
   ) {
     throw new Error(
       `GUEST_JOURNEY_EVIDENCE_SCOPE_MISMATCH:${cleanReservationId}`
+    );
+  }
+
+  if (
+    reservation
+      .guestJourneyCoordinationIntents
+      .length > 100
+  ) {
+    throw new Error(
+      `GUEST_JOURNEY_EVIDENCE_ACTIVE_INTENT_LIMIT_EXCEEDED:${cleanReservationId}`
     );
   }
 

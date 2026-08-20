@@ -24,6 +24,7 @@
     "test:guest-journey-enterprise-contract": "tsx --test src/services/guest-journey-enterprise-contract.test.ts",
     "test:guest-journey-enterprise-e2-shadow": "tsx --test src/services/guest-journey-enterprise-contract.test.ts src/services/guest-journey-evidence.service.test.ts src/services/guest-journey-evaluator.test.ts src/services/guest-journey-shadow.config.test.ts src/services/guest-journey-shadow-cycle.service.test.ts",
     "test:guest-journey-enterprise-e3-reconciler": "node --import tsx --test src/services/guest-journey-enterprise-contract.test.ts src/services/guest-journey-internal-reconcile.config.test.ts src/services/guest-journey-reconciler.service.test.ts src/services/guest-journey-engine-cycle.service.test.ts",
+    "test:guest-journey-enterprise-e4-coordination": "node --import tsx --test src/services/guest-journey-enterprise-contract.test.ts src/services/guest-journey-coordination-intent-key.test.ts src/services/guest-journey-coordination.config.test.ts src/services/guest-journey-coordination-intent.service.test.ts src/services/guest-journey-coordination-cycle.service.test.ts",
     "test:brand-policy": "tsx --test src/services/branding/brand-policy.test.ts",
     "test:published-brand-context": "tsx --test src/services/branding/published-brand-context.service.test.ts",
     "test:published-brand-origin": "tsx --test src/services/branding/published-brand-origin.policy.test.ts",

@@ -15,6 +15,9 @@ import {
   getCanonicalGuestJourneyStateRank,
   isTerminalGuestJourneyState,
 } from "./guest-journey-contract";
+import {
+  buildGuestJourneyCoordinationIntentKeyFromProposal,
+} from "./guest-journey-coordination-intent-key";
 
 import type {
   CanonicalJourneyEvaluation,
@@ -486,14 +489,17 @@ export function evaluateCanonicalGuestJourney(
     intent:
       ProposedJourneyCoordinationIntent
   ) => {
+    const intentKey =
+      buildGuestJourneyCoordinationIntentKeyFromProposal(
+        evidence.reservation.id,
+        evidenceFingerprint,
+        intent
+      );
     const matchingActiveIntent =
       evidence.activeIntents.some(
         (existingIntent) =>
-          existingIntent.intentType ===
-            intent.intentType &&
-          existingIntent
-            .evidenceFingerprint ===
-            evidenceFingerprint &&
+          existingIntent.intentKey ===
+            intentKey &&
           ACTIVE_INTENT_STATUSES.has(
             existingIntent.status
           )
@@ -503,20 +509,8 @@ export function evaluateCanonicalGuestJourney(
       return;
     }
 
-    const key = [
-      intent.intentType,
-      intent.targetEngine,
-      intent.reasonCode,
-      intent.expectedOutcomeCode,
-      JSON.stringify(
-        stableNormalize(
-          intent.payload ?? {}
-        )
-      ),
-    ].join(":");
-
     proposedIntents.set(
-      key,
+      intentKey,
       intent
     );
   };

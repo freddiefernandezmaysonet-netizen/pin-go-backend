@@ -69,6 +69,12 @@ import {
 import {
   runGuestJourneyEngineCycle,
 } from "../services/guest-journey-engine-cycle.service";
+import {
+  resolveGuestJourneyCoordinationConfig,
+} from "../services/guest-journey-coordination.config";
+import {
+  runGuestJourneyCoordinationCycle,
+} from "../services/guest-journey-coordination-cycle.service";
 
 
 console.log("[reservation.worker] BOOT", new Date().toISOString());
@@ -104,6 +110,10 @@ let guestJourneyShadowCursor:
 const GUEST_JOURNEY_INTERNAL_RECONCILE_CONFIG =
   resolveGuestJourneyInternalReconcileConfig();
 let guestJourneyInternalReconcileCursor:
+  string | null = null;
+const GUEST_JOURNEY_COORDINATION_CONFIG =
+  resolveGuestJourneyCoordinationConfig();
+let guestJourneyCoordinationCursor:
   string | null = null;
 const REMINDER_HOURS = Number(
   process.env.GUEST_LINK_REMINDER_HOURS ??
@@ -2443,6 +2453,36 @@ async function tick() {
         );
       }
     }
+
+    if (
+      GUEST_JOURNEY_COORDINATION_CONFIG
+        .enabled
+    ) {
+      try {
+        const coordinationMetrics =
+          await runGuestJourneyCoordinationCycle(
+            prisma,
+            GUEST_JOURNEY_COORDINATION_CONFIG,
+            {
+              now,
+              cursor:
+                guestJourneyCoordinationCursor,
+            }
+          );
+
+        guestJourneyCoordinationCursor =
+          coordinationMetrics.nextCursor;
+        log(
+          "guest-journey-coordination-intents",
+          coordinationMetrics
+        );
+      } catch (e) {
+        errLog(
+          "guest-journey-coordination-intents crashed:",
+          toErrString(e)
+        );
+      }
+    }
   } finally {
     tickRunning = false;
   }
@@ -2467,6 +2507,14 @@ async function start() {
   log(
     `Guest Journey internal reconcile: ${
       GUEST_JOURNEY_INTERNAL_RECONCILE_CONFIG
+        .enabled
+        ? "on"
+        : "off"
+    }`
+  );
+  log(
+    `Guest Journey coordination intents: ${
+      GUEST_JOURNEY_COORDINATION_CONFIG
         .enabled
         ? "on"
         : "off"
