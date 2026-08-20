@@ -5,6 +5,7 @@ import { formatInTimeZone } from "date-fns-tz";
 
 import { requireAuth } from "../middleware/requireAuth";
 import { createChannexAriOutboxEvent } from "../pms/outbound/channex-ari-outbox.service";
+import { buildDashboardCalendarOverridesRouter } from "./dashboard.calendar-overrides.route";
 
 export function buildDashboardChannexFullSyncRouter(prisma: PrismaClient) {
   const router = Router();
@@ -204,6 +205,8 @@ export function buildDashboardChannexFullSyncRouter(prisma: PrismaClient) {
       }
     }
   );
+
+  router.use(buildDashboardCalendarOverridesRouter(prisma));
 
   return router;
 }
