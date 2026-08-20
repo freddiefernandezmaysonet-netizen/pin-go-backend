@@ -4,15 +4,20 @@ on:
   push:
     branches:
       - recovery/distribution-engine-v2-channex-lifecycle
+      - release/channex-production-readiness
   pull_request:
     paths:
       - "src/config/runtime-startup.contract.test.ts"
       - "src/pms/adapters/channex.adapter.ts"
       - "src/pms/adapters/channex.adapter.test.ts"
       - "src/pms/adapters/types.ts"
+      - "src/pms/ingest/channex-booking-ingest-mechanism.policy.ts"
+      - "src/pms/ingest/channex-booking-ingest-mechanism.policy.test.ts"
       - "src/pms/ingest/channex-booking-lifecycle.policy.ts"
       - "src/pms/ingest/channex-booking-lifecycle.policy.test.ts"
       - "src/pms/ingest/channex-booking-lifecycle.service.ts"
+      - "src/pms/ingest/channex-global-feed.service.ts"
+      - "src/pms/ingest/channex-global-feed.service.test.ts"
       - "src/pms/ingest/channex-runtime-import.smoke.test.ts"
       - "src/pms/ingest/channex-webhook-auth.ts"
       - "src/pms/ingest/channex-webhook-auth.test.ts"
@@ -24,9 +29,15 @@ on:
       - "src/pms/jobs/job.queue.ts"
       - "src/pms/jobs/pms-webhook-execution.policy.ts"
       - "src/pms/jobs/pms-webhook-execution.policy.test.ts"
+      - "src/pms/outbound/channex-ari-*.ts"
+      - "src/routes/dashboard.calendar-overrides.route.ts"
+      - "src/routes/dashboard.calendar-overrides.route.test.ts"
+      - "src/routes/dashboard.channex-full-sync.route.ts"
       - "src/workers/pms-webhook-recovery.config.ts"
       - "src/workers/pms-webhook-recovery.config.test.ts"
       - "src/workers/pms-webhook-recovery.worker.ts"
+      - "src/workers/channex-global-feed.*"
+      - "src/workers/channex-ari-dispatch.*"
       - "src/apms/distribution-lifecycle-read-model.service.ts"
       - "src/routes/dashboard.distribution-mission-control.middleware.ts"
       - "src/routes/dashboard.route.ts"
@@ -41,6 +52,8 @@ on:
       - "src/scripts/configure-channex-staging-booking-webhook.ts"
       - "src/scripts/check-channex-staging-readiness.ts"
       - "src/scripts/collect-channex-certification-evidence.ts"
+      - "prisma/*.prisma"
+      - "prisma/migrations/**"
       - "package.json"
       - "package-lock.json"
       - ".github/workflows/channex-adapter-certification.yml"
@@ -51,8 +64,9 @@ permissions:
 jobs:
   booking-lifecycle-certification:
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 15
     env:
+      DATABASE_URL: postgresql://test:test@localhost:5432/pingo_ci
       CHANNEX_API_KEY: test-api-key
       CHANNEX_API_BASE_URL: https://staging.channex.io
 
@@ -69,8 +83,18 @@ jobs:
       - name: Install locked dependencies
         run: npm ci --silent --no-audit --no-fund
 
-      - name: Run focused booking lifecycle tests
+      - name: Validate Prisma schema folder
+        run: npx prisma validate --schema ./prisma
+
+      - name: Run focused Channex certification suite
         run: npm run test:channex-certification
+
+      - name: Run production-readiness delta tests
+        run: >-
+          npx tsx --test
+          src/pms/ingest/channex-booking-ingest-mechanism.policy.test.ts
+          src/pms/outbound/channex-ari-property-change.policy.test.ts
+          src/routes/dashboard.calendar-overrides.route.test.ts
 
       - name: Load booking lifecycle service
         run: npx tsx -e "import('./src/pms/ingest/channex-booking-lifecycle.service.ts').then((m) => { if (typeof m.processChannexBookingWebhookEventById !== 'function') process.exit(1); })"
@@ -84,8 +108,17 @@ jobs:
       - name: Load authenticated webhook routes
         run: npx tsx -e "import('./src/pms/ingest/webhook.routes.ts').then((m) => { if (typeof m.pmsWebhookRouter !== 'function') process.exit(1); })"
 
+      - name: Load canonical Channex dashboard routes
+        run: npx tsx -e "import('./src/routes/dashboard.channex-full-sync.route.ts').then((m) => { if (typeof m.buildDashboardChannexFullSyncRouter !== 'function') process.exit(1); })"
+
       - name: Load recovery worker config
         run: npx tsx -e "import('./src/workers/pms-webhook-recovery.config.ts').then((m) => { if (typeof m.resolvePmsWebhookRecoveryConfig !== 'function') process.exit(1); })"
+
+      - name: Load Global Feed worker
+        run: npx tsx -e "import('./src/workers/channex-global-feed.worker.ts').then((m) => { if (typeof m.createChannexGlobalFeedWorker !== 'function') process.exit(1); })"
+
+      - name: Load ARI dispatch worker
+        run: npx tsx -e "import('./src/workers/channex-ari-dispatch.worker.ts').then((m) => { if (typeof m.createChannexAriDispatchWorker !== 'function') process.exit(1); })"
 
       - name: Load staging webhook registration service
         run: npx tsx -e "import('./src/services/channex-booking-webhook-registration.service.ts').then((m) => { if (typeof m.configureChannexBookingWebhookForStaging !== 'function') process.exit(1); })"
