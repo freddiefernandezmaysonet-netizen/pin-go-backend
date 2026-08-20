@@ -57,7 +57,7 @@ import { buildOrgTtlockSyncRouter } from "./routes/org.ttlock.sync.router";
 import { buildOrgLocksSwapRouter } from "./routes/org.locks.swap.router";
 import { buildOrgTtlockInventoryRouter } from "./routes/org.ttlock.inventory.router";
 import { buildOrgLocksActivateV2Router } from "./routes/org.locks.activate.v2.router";
-import { buildOrgTtlockConnectV2Router } from "./routes/org.locks.connect.v2.router";
+import { buildOrgTtlockConnectV2Router } from "./routes/org.ttlock.connect.v2.router";
 import { buildBillingOverviewRouter } from "./routes/billing.overview.route";
 import { orgTtlockStatusRouter } from "./routes/org.ttlock.status.route";
 import signupPublicRoutes from "./routes/public.signup.routes";
