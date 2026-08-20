@@ -36,17 +36,54 @@ async function resolveChannexConnection(propertyId: string) {
   return activeConnections[0] ?? null;
 }
 
-async function ingestPmsWebhook(args: {
-  providerEnum: PmsProvider;
-  connectionId: string;
-  headers: any;
-  body: any;
-  rawBody?: Buffer;
-  parsed?: ParseWebhookResult;
-}) {
-  const conn = await prisma.pmsConnection.findUnique({
-    where: { id: args.connectionId },
-  });
+type IngestPmsWebhookDependencies = {
+  findConnection: (connectionId: string) => Promise<{
+    id: string;
+    provider: PmsProvider;
+    webhookSecret: string | null;
+  } | null>;
+  createEvent: (data: {
+    connectionId: string;
+    provider: PmsProvider;
+    eventType: string;
+    externalEventId: string | null;
+    payloadRaw: any;
+    status: "PENDING";
+  }) => Promise<{ id: string }>;
+  enqueueEvent: (eventId: string) => Promise<void>;
+};
+
+const defaultIngestPmsWebhookDependencies: IngestPmsWebhookDependencies = {
+  findConnection: (connectionId) =>
+    prisma.pmsConnection.findUnique({
+      where: { id: connectionId },
+      select: {
+        id: true,
+        provider: true,
+        webhookSecret: true,
+      },
+    }),
+  createEvent: (data) =>
+    prisma.webhookEventIngest.create({
+      data,
+      select: { id: true },
+    }),
+  enqueueEvent: enqueueProcessWebhookEvent,
+};
+
+export async function ingestPmsWebhook(
+  args: {
+    providerEnum: PmsProvider;
+    connectionId: string;
+    headers: any;
+    body: any;
+    rawBody?: Buffer;
+    parsed?: ParseWebhookResult;
+  },
+  dependencies: IngestPmsWebhookDependencies =
+    defaultIngestPmsWebhookDependencies
+) {
+  const conn = await dependencies.findConnection(args.connectionId);
 
   if (!conn) {
     return {
@@ -103,18 +140,23 @@ async function ingestPmsWebhook(args: {
     parsed.externalEventId ?? parsed.bookingRevision?.revisionId ?? null;
 
   try {
-    const ev = await prisma.webhookEventIngest.create({
-      data: {
-        connectionId: conn.id,
-        provider: args.providerEnum,
-        eventType: parsed.eventType ?? "UNKNOWN",
-        externalEventId,
-        payloadRaw: args.body,
-        status: "PENDING",
-      },
+    const ev = await dependencies.createEvent({
+      connectionId: conn.id,
+      provider: args.providerEnum,
+      eventType: parsed.eventType ?? "UNKNOWN",
+      externalEventId,
+      payloadRaw: args.body,
+      status: "PENDING",
     });
 
-    await enqueueProcessWebhookEvent(ev.id);
+    if (args.providerEnum === PmsProvider.CHANNEX) {
+      return {
+        status: 200,
+        body: { ok: true, eventId: ev.id },
+      };
+    }
+
+    await dependencies.enqueueEvent(ev.id);
 
     return {
       status: 200,
