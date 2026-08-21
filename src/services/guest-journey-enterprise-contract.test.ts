@@ -147,7 +147,7 @@ test("keeps E1 migrations additive and canonical", () => {
   }
 });
 
-test("keeps E2 shadow and E3 internal reconciliation independently default-off", () => {
+test("keeps E2 shadow, E3 reconciliation and E4 coordination independently default-off", () => {
   const reservationWorker = readFileSync(
     new URL(
       "../workers/reservation.worker.ts",
@@ -178,7 +178,19 @@ test("keeps E2 shadow and E3 internal reconciliation independently default-off",
   );
   assert.doesNotMatch(
     reservationWorker,
-    /guest-journey-(?:reconciler|coordination-intent|compliance-intent)/
+    /materializeGuestJourneyCoordinationIntents\s*\(/
+  );
+  assert.match(
+    reservationWorker,
+    /resolveGuestJourneyCoordinationConfig/
+  );
+  assert.match(
+    reservationWorker,
+    /runGuestJourneyCoordinationCycle/
+  );
+  assert.match(
+    reservationWorker,
+    /GUEST_JOURNEY_COORDINATION_CONFIG\s*\.enabled/
   );
 
   const shadowConfig = readFileSync(
@@ -205,6 +217,20 @@ test("keeps E2 shadow and E3 internal reconciliation independently default-off",
 
   assert.match(
     internalReconcileConfig,
+    /if \(!value\) \{\s*return false;/
+  );
+
+  const coordinationConfig =
+    readFileSync(
+      new URL(
+        "./guest-journey-coordination.config.ts",
+        import.meta.url
+      ),
+      "utf8"
+    );
+
+  assert.match(
+    coordinationConfig,
     /if \(!value\) \{\s*return false;/
   );
 });

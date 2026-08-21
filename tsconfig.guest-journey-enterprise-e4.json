@@ -1,0 +1,27 @@
+{
+  "compilerOptions": {
+    "noEmit": true,
+    "module": "preserve",
+    "moduleResolution": "bundler",
+    "target": "esnext",
+    "strict": true,
+    "skipLibCheck": true,
+    "types": ["node"]
+  },
+  "include": [
+    "src/apms/audit-persistence.service.ts",
+    "src/apms/audit-types.ts",
+    "src/apms/engine-catalog.ts",
+    "src/services/guest-journey-contract.ts",
+    "src/services/guest-journey-evaluator.ts",
+    "src/services/guest-journey-evidence.service.ts",
+    "src/services/guest-journey-coordination-intent-key.ts",
+    "src/services/guest-journey-coordination-intent-key.test.ts",
+    "src/services/guest-journey-coordination.config.ts",
+    "src/services/guest-journey-coordination.config.test.ts",
+    "src/services/guest-journey-coordination-intent.service.ts",
+    "src/services/guest-journey-coordination-intent.service.test.ts",
+    "src/services/guest-journey-coordination-cycle.service.ts",
+    "src/services/guest-journey-coordination-cycle.service.test.ts"
+  ]
+}
