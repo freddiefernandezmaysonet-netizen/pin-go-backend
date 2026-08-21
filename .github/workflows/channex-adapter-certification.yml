@@ -8,6 +8,8 @@ on:
   pull_request:
     paths:
       - "src/config/runtime-startup.contract.test.ts"
+      - "src/lib/iana-timezone.ts"
+      - "src/lib/iana-timezone.test.ts"
       - "src/pms/adapters/channex.adapter.ts"
       - "src/pms/adapters/channex.adapter.test.ts"
       - "src/pms/adapters/types.ts"
@@ -33,6 +35,9 @@ on:
       - "src/routes/dashboard.calendar-overrides.route.ts"
       - "src/routes/dashboard.calendar-overrides.route.test.ts"
       - "src/routes/dashboard.channex-full-sync.route.ts"
+      - "src/routes/properties.create.route.ts"
+      - "src/services/channex-provisioning.service.ts"
+      - "src/services/channex-property-timezone.contract.test.ts"
       - "src/workers/pms-webhook-recovery.config.ts"
       - "src/workers/pms-webhook-recovery.config.test.ts"
       - "src/workers/pms-webhook-recovery.worker.ts"
@@ -95,6 +100,18 @@ jobs:
           src/pms/ingest/channex-booking-ingest-mechanism.policy.test.ts
           src/pms/outbound/channex-ari-property-change.policy.test.ts
           src/routes/dashboard.calendar-overrides.route.test.ts
+
+      - name: Certify property timezone invariant
+        run: >-
+          npx tsx --test
+          src/lib/iana-timezone.test.ts
+          src/services/channex-property-timezone.contract.test.ts
+
+      - name: Load property creation route
+        run: npx tsx -e "import('./src/routes/properties.create.route.ts').then((m) => { if (typeof m.buildCreatePropertyRouter !== 'function') process.exit(1); })"
+
+      - name: Load Channex provisioning service
+        run: npx tsx -e "import('./src/services/channex-provisioning.service.ts').then((m) => { if (typeof m.provisionChannexProperty !== 'function') process.exit(1); })"
 
       - name: Load booking lifecycle service
         run: npx tsx -e "import('./src/pms/ingest/channex-booking-lifecycle.service.ts').then((m) => { if (typeof m.processChannexBookingWebhookEventById !== 'function') process.exit(1); })"
