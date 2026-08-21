@@ -3,9 +3,18 @@ import { Prisma, type PrismaClient } from "@prisma/client";
 import { Router } from "express";
 import { formatInTimeZone } from "date-fns-tz";
 
+import { requireIanaTimezone } from "../lib/iana-timezone";
 import { requireAuth } from "../middleware/requireAuth";
 import { createChannexAriOutboxEvent } from "../pms/outbound/channex-ari-outbox.service";
 import { buildDashboardCalendarOverridesRouter } from "./dashboard.calendar-overrides.route";
+
+export function resolveFullSyncTodayDateKey(
+  requestedAt: Date,
+  propertyTimezone: unknown
+): string {
+  const timezone = requireIanaTimezone(propertyTimezone);
+  return formatInTimeZone(requestedAt, timezone, "yyyy-MM-dd");
+}
 
 export function buildDashboardChannexFullSyncRouter(prisma: PrismaClient) {
   const router = Router();
@@ -52,12 +61,9 @@ export function buildDashboardChannexFullSyncRouter(prisma: PrismaClient) {
         }
 
         const requestedAt = new Date();
-        const propertyTimezone =
-          property.timezone ?? "America/Puerto_Rico";
-        const todayDateKey = formatInTimeZone(
+        const todayDateKey = resolveFullSyncTodayDateKey(
           requestedAt,
-          propertyTimezone,
-          "yyyy-MM-dd"
+          property.timezone
         );
         const correlationId =
           `manual-full-sync:${property.id}:${crypto.randomUUID()}`;
@@ -188,6 +194,16 @@ export function buildDashboardChannexFullSyncRouter(prisma: PrismaClient) {
             ok: false,
             error: "A Full Sync is already in progress for this property",
             correlationId: error?.correlationId ?? null,
+          });
+        }
+
+        if (
+          error?.message === "PROPERTY_TIMEZONE_REQUIRED" ||
+          error?.message === "PROPERTY_TIMEZONE_INVALID"
+        ) {
+          return res.status(409).json({
+            ok: false,
+            error: error.message,
           });
         }
 
