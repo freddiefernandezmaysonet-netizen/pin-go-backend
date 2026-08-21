@@ -38,3 +38,17 @@ test("ARI Availability resolves timezone from the property record", () => {
     /property\.timezone\s*\?\?\s*["']America\/Puerto_Rico["']/
   );
 });
+
+test("Channex Full Sync requires the property's validated timezone without a Puerto Rico fallback", () => {
+  const source = readSource("../routes/dashboard.channex-full-sync.route.ts");
+
+  assert.match(source, /requireIanaTimezone\(propertyTimezone\)/);
+  assert.match(
+    source,
+    /resolveFullSyncTodayDateKey\(\s*requestedAt,\s*property\.timezone\s*\)/
+  );
+  assert.doesNotMatch(
+    source,
+    /property\.timezone\s*\?\?\s*["']America\/Puerto_Rico["']/
+  );
+});
