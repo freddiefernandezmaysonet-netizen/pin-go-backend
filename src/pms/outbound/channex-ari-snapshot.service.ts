@@ -1,4 +1,5 @@
 import type { Prisma } from "@prisma/client";
+import { fromZonedTime } from "date-fns-tz";
 
 import { calculateDirectBookingPricing } from "../../services/direct-booking-pricing.service";
 import {
@@ -46,6 +47,44 @@ function requireText(value: unknown, errorCode: string): string {
 
 function toDatabaseDate(dateKey: string): Date {
   return new Date(`${assertDateKey(dateKey)}T00:00:00.000Z`);
+}
+
+function normalizeBlockedDateBoundaryForPropertyTimezone(
+  value: Date,
+  propertyTimezone: string
+): Date {
+  const boundary = new Date(value);
+
+  if (Number.isNaN(boundary.getTime())) {
+    return boundary;
+  }
+
+  const isDateOnlyUtcBoundary =
+    boundary.getUTCHours() === 0 &&
+    boundary.getUTCMinutes() === 0 &&
+    boundary.getUTCSeconds() === 0 &&
+    boundary.getUTCMilliseconds() === 0;
+
+  if (!isDateOnlyUtcBoundary) {
+    return boundary;
+  }
+
+  const dateKey = boundary.toISOString().slice(0, 10);
+
+  try {
+    const normalized = fromZonedTime(
+      `${dateKey}T00:00:00.000`,
+      propertyTimezone
+    );
+
+    if (Number.isNaN(normalized.getTime())) {
+      throw new Error("invalid_timezone");
+    }
+
+    return normalized;
+  } catch {
+    throw new Error("CHANNEX_ARI_PROPERTY_TIMEZONE_INVALID");
+  }
 }
 
 function sameStringArray(left: string[], right: string[]): boolean {
@@ -284,8 +323,14 @@ export async function readChannexAriSnapshot(
       }));
     const blockedRanges: ChannexAriAvailabilityRange[] = blockedDates.map(
       (blockedDate) => ({
-        startsAt: blockedDate.startDate,
-        endsAt: blockedDate.endDate,
+        startsAt: normalizeBlockedDateBoundaryForPropertyTimezone(
+          blockedDate.startDate,
+          propertyTimezone
+        ),
+        endsAt: normalizeBlockedDateBoundaryForPropertyTimezone(
+          blockedDate.endDate,
+          propertyTimezone
+        ),
       })
     );
 
