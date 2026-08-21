@@ -23,6 +23,7 @@ export type GuestJourneyCoordinationCycleMetrics = {
   journeyMissing: number;
   intentsProposed: number;
   intentsCreated: number;
+  intentsReactivated: number;
   intentsDeduplicated: number;
   intentsSuperseded: number;
   activeClaimsPreserved: number;
@@ -296,6 +297,7 @@ export async function runGuestJourneyCoordinationCycle(
     journeyMissing: 0,
     intentsProposed: 0,
     intentsCreated: 0,
+    intentsReactivated: 0,
     intentsDeduplicated: 0,
     intentsSuperseded: 0,
     activeClaimsPreserved: 0,
@@ -367,6 +369,8 @@ export async function runGuestJourneyCoordinationCycle(
         result.proposed;
       metrics.intentsCreated +=
         result.created;
+      metrics.intentsReactivated +=
+        result.reactivated;
       metrics.intentsDeduplicated +=
         result.deduplicated;
       metrics.intentsSuperseded +=

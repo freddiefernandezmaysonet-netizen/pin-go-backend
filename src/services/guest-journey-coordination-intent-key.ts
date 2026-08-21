@@ -123,7 +123,9 @@ export function normalizeGuestJourneyCoordinationPayload(
   }
 
   if (keys.length === 0) {
-    return null;
+    throw new Error(
+      "GUEST_JOURNEY_COORDINATION_COMMUNICATION_PAYLOAD_REQUIRED"
+    );
   }
 
   if (

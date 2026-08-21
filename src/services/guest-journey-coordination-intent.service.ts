@@ -39,6 +39,7 @@ export type GuestJourneyCoordinationActionCode =
   | "NO_ACTION"
   | "JOURNEY_MISSING"
   | "CREATE_COORDINATION_INTENT"
+  | "REACTIVATE_SUPERSEDED_INTENT"
   | "SUPERSEDE_OBSOLETE_INTENT"
   | "PRESERVE_ACTIVE_CLAIM"
   | "COMPARE_AND_SET_LOST";
@@ -57,6 +58,7 @@ export type GuestJourneyCoordinationResult = {
   evaluation: CanonicalJourneyEvaluation;
   proposed: number;
   created: number;
+  reactivated: number;
   deduplicated: number;
   superseded: number;
   activeClaimsPreserved: number;
@@ -183,11 +185,14 @@ function buildAuditEntry(input: {
   propertyId: string;
   now: Date;
   createdKeys: string[];
+  reactivatedKeys: string[];
   supersededKeys: string[];
 }): AuditEntry {
   const mutations = {
     createdKeys:
       [...input.createdKeys].sort(),
+    reactivatedKeys:
+      [...input.reactivatedKeys].sort(),
     supersededKeys:
       [...input.supersededKeys].sort(),
   };
@@ -212,7 +217,7 @@ function buildAuditEntry(input: {
     status: "SUCCESS",
     severity: "INFO",
     summary:
-      `Guest Journey materialized ${input.createdKeys.length} and superseded ${input.supersededKeys.length} coordination intent(s).`,
+      `Guest Journey materialized ${input.createdKeys.length}, reactivated ${input.reactivatedKeys.length}, and superseded ${input.supersededKeys.length} coordination intent(s).`,
     reason:
       "Canonical evidence required durable coordination with owner Engines; only the intent boundary was mutated.",
     startedAt: input.now,
@@ -228,6 +233,21 @@ function buildAuditEntry(input: {
             "Supersede obsolete coordination intent",
           previousValue: "ACTIVE",
           newValue: "SUPERSEDED",
+          applied: true,
+          metadata: {
+            intentKey,
+          },
+        })
+      ),
+      ...input.reactivatedKeys.map(
+        (intentKey) => ({
+          engine: "GUEST_JOURNEY" as const,
+          rule:
+            "REACTIVATE_SUPERSEDED_COORDINATION_INTENT",
+          label:
+            "Reactivate superseded coordination intent",
+          previousValue: "SUPERSEDED",
+          newValue: "PENDING",
           applied: true,
           metadata: {
             intentKey,
@@ -332,6 +352,7 @@ async function createIntent(
   }
 ): Promise<{
   created: boolean;
+  reactivated: boolean;
   intentKey: string;
 }> {
   const intentKey =
@@ -384,8 +405,53 @@ async function createIntent(
         skipDuplicates: true,
       });
 
+  if (result.count === 1) {
+    return {
+      created: true,
+      reactivated: false,
+      intentKey,
+    };
+  }
+
+  const reactivated =
+    await tx
+      .guestJourneyCoordinationIntent
+      .updateMany({
+        where: {
+          intentKey,
+          reservationId:
+            input.reservationId,
+          journeyId: input.journeyId,
+          evidenceFingerprint:
+            input.evaluation
+              .evidenceFingerprint,
+          status:
+            GuestJourneyCoordinationIntentStatus
+              .SUPERSEDED,
+        },
+        data: {
+          status:
+            GuestJourneyCoordinationIntentStatus
+              .PENDING,
+          claimCount: 0,
+          leaseToken: null,
+          claimedAt: null,
+          leaseExpiresAt: null,
+          lastAttemptAt: null,
+          nextActionAt: input.now,
+          succeededAt: null,
+          exhaustedAt: null,
+          supersededAt: null,
+          outcomeEvidenceFingerprint:
+            null,
+          lastError: null,
+        },
+      });
+
   return {
-    created: result.count === 1,
+    created: false,
+    reactivated:
+      reactivated.count === 1,
     intentKey,
   };
 }
@@ -459,6 +525,7 @@ export async function materializeGuestJourneyCoordinationIntentsInTransaction(
           .requiredCoordinationIntents
           .length,
       created: 0,
+      reactivated: 0,
       deduplicated: 0,
       superseded: 0,
       activeClaimsPreserved: 0,
@@ -540,6 +607,7 @@ export async function materializeGuestJourneyCoordinationIntentsInTransaction(
   }
 
   const createdKeys: string[] = [];
+  const reactivatedKeys: string[] = [];
   let deduplicated = 0;
 
   for (const planned of plannedIntents) {
@@ -588,6 +656,21 @@ export async function materializeGuestJourneyCoordinationIntentsInTransaction(
         targetEngine:
           intent.targetEngine,
       });
+    } else if (materialized.reactivated) {
+      reactivatedKeys.push(
+        materialized.intentKey
+      );
+      actions.push({
+        code:
+          "REACTIVATE_SUPERSEDED_INTENT",
+        detail:
+          "E4 safely reactivated an exact superseded intent after its evidence became current again.",
+        intentKey:
+          materialized.intentKey,
+        intentType: intent.intentType,
+        targetEngine:
+          intent.targetEngine,
+      });
     } else {
       deduplicated += 1;
     }
@@ -595,6 +678,7 @@ export async function materializeGuestJourneyCoordinationIntentsInTransaction(
 
   if (
     createdKeys.length > 0 ||
+    reactivatedKeys.length > 0 ||
     supersededKeys.length > 0
   ) {
     await dependencies.persistAudit(
@@ -609,6 +693,7 @@ export async function materializeGuestJourneyCoordinationIntentsInTransaction(
             .propertyId,
         now: evaluatedAt,
         createdKeys,
+        reactivatedKeys,
         supersededKeys,
       })
     );
@@ -632,6 +717,8 @@ export async function materializeGuestJourneyCoordinationIntentsInTransaction(
       evaluation
         .requiredCoordinationIntents.length,
     created: createdKeys.length,
+    reactivated:
+      reactivatedKeys.length,
     deduplicated,
     superseded:
       supersededKeys.length,
@@ -639,6 +726,7 @@ export async function materializeGuestJourneyCoordinationIntentsInTransaction(
     compareAndSetLost,
     coordinationIntentWrites:
       createdKeys.length +
+      reactivatedKeys.length +
       supersededKeys.length,
     operationalIssueWrites: 0,
     ownerEngineExecutions: 0,

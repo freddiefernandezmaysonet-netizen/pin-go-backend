@@ -107,6 +107,15 @@ test(
       () =>
         normalizeGuestJourneyCoordinationPayload(
           "REQUEST_COMMUNICATION_RETRY",
+          undefined
+        ),
+      /COMMUNICATION_PAYLOAD_REQUIRED/
+    );
+
+    assert.throws(
+      () =>
+        normalizeGuestJourneyCoordinationPayload(
+          "REQUEST_COMMUNICATION_RETRY",
           {
             communicationType:
               "ACCESS_READY",

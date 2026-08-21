@@ -96,6 +96,7 @@ function materializationResult(
     },
     proposed: 2,
     created: 1,
+    reactivated: 0,
     deduplicated: 1,
     superseded: 1,
     activeClaimsPreserved: 0,
@@ -247,6 +248,10 @@ test(
     assert.equal(metrics.evaluated, 2);
     assert.equal(metrics.intentsProposed, 4);
     assert.equal(metrics.intentsCreated, 2);
+    assert.equal(
+      metrics.intentsReactivated,
+      0
+    );
     assert.equal(
       metrics.intentsDeduplicated,
       2

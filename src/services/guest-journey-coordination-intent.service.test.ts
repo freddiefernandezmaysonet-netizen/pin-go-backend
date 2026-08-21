@@ -186,8 +186,12 @@ function createFakeDatabase(input: {
   evaluation:
     CanonicalJourneyEvaluation;
   updateCount?: number;
+  reactivationCount?: number;
+  existingKeys?: string[];
 }) {
-  const createdKeys = new Set<string>();
+  const createdKeys = new Set<string>(
+    input.existingKeys ?? []
+  );
   const createCalls: unknown[] = [];
   const updateCalls: unknown[] = [];
   const audits: AuditEntry[] = [];
@@ -216,13 +220,16 @@ function createFakeDatabase(input: {
         createdKeys.add(intentKey);
         return { count: 1 };
       },
-      updateMany: async (
-        args: unknown
-      ) => {
+      updateMany: async (args: {
+        where?: {
+          intentKey?: unknown;
+        };
+      }) => {
         updateCalls.push(args);
         return {
-          count:
-            input.updateCount ?? 1,
+          count: args.where?.intentKey
+            ? input.reactivationCount ?? 0
+            : input.updateCount ?? 1,
         };
       },
     },
@@ -409,6 +416,93 @@ test(
       1
     );
     assert.equal(database.audits.length, 1);
+  }
+);
+
+test(
+  "reactivates an exact superseded intent when its evidence becomes current again",
+  async () => {
+    const required = proposedIntent();
+    const intentKey =
+      buildGuestJourneyCoordinationIntentKeyFromProposal(
+        "reservation-1",
+        CURRENT_FINGERPRINT,
+        required
+      );
+    const database = createFakeDatabase({
+      evidence: evidence(),
+      evaluation: evaluation([required]),
+      existingKeys: [intentKey],
+      reactivationCount: 1,
+    });
+    const result =
+      await materializeGuestJourneyCoordinationIntentsInTransaction(
+        database.tx,
+        "reservation-1",
+        NOW,
+        SCOPE,
+        database.dependencies
+      );
+
+    assert.equal(result.created, 0);
+    assert.equal(result.reactivated, 1);
+    assert.equal(result.deduplicated, 0);
+    assert.equal(
+      result.coordinationIntentWrites,
+      1
+    );
+    assert.deepEqual(
+      result.actions.map(
+        (action) => action.code
+      ),
+      ["REACTIVATE_SUPERSEDED_INTENT"]
+    );
+    assert.equal(
+      database.updateCalls.length,
+      1
+    );
+    const reactivationCall =
+      database.updateCalls[0] as {
+        where: {
+          intentKey: string;
+          status:
+            GuestJourneyCoordinationIntentStatus;
+        };
+        data: {
+          status:
+            GuestJourneyCoordinationIntentStatus;
+          claimCount: number;
+          supersededAt: Date | null;
+        };
+      };
+    assert.equal(
+      reactivationCall.where.intentKey,
+      intentKey
+    );
+    assert.equal(
+      reactivationCall.where.status,
+      GuestJourneyCoordinationIntentStatus
+        .SUPERSEDED
+    );
+    assert.equal(
+      reactivationCall.data.status,
+      GuestJourneyCoordinationIntentStatus
+        .PENDING
+    );
+    assert.equal(
+      reactivationCall.data.claimCount,
+      0
+    );
+    assert.equal(
+      reactivationCall.data.supersededAt,
+      null
+    );
+    assert.equal(database.audits.length, 1);
+    assert.deepEqual(
+      database.audits[0]?.metadata
+        ?.reactivatedKeys,
+      [intentKey]
+    );
   }
 );
 
