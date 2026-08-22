@@ -35,6 +35,7 @@ on:
       - "src/routes/dashboard.calendar-overrides.route.ts"
       - "src/routes/dashboard.calendar-overrides.route.test.ts"
       - "src/routes/dashboard.channex-full-sync.route.ts"
+      - "src/routes/dashboard.channex-full-sync.route.test.ts"
       - "src/routes/properties.create.route.ts"
       - "src/services/channex-provisioning.service.ts"
       - "src/services/channex-property-timezone.contract.test.ts"
@@ -99,7 +100,10 @@ jobs:
           npx tsx --test
           src/pms/ingest/channex-booking-ingest-mechanism.policy.test.ts
           src/pms/outbound/channex-ari-property-change.policy.test.ts
+          src/pms/outbound/channex-ari-dispatch.serialization-retry.test.ts
+          src/pms/outbound/channex-ari-fenced-delivery.serialization-retry.test.ts
           src/routes/dashboard.calendar-overrides.route.test.ts
+          src/routes/dashboard.channex-full-sync.route.test.ts
 
       - name: Certify property timezone invariant
         run: >-
