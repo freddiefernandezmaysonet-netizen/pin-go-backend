@@ -32,6 +32,9 @@ export type RecoverStaleChannexAriDeliveryInput = {
   jitterMs?: number;
 };
 
+const CHANNEX_ARI_CLAIM_SERIALIZATION_MAX_RETRIES = 2;
+const CHANNEX_ARI_CLAIM_SERIALIZATION_RETRY_BASE_MS = 10;
+
 function requireText(value: unknown, errorCode: string): string {
   const normalized = String(value ?? "").trim();
 
@@ -69,6 +72,31 @@ function assertPropertyStateTenant(input: {
   }
 }
 
+function isPrismaSerializationConflict(error: unknown): boolean {
+  if (!error || typeof error !== "object") return false;
+
+  const code =
+    "code" in error && typeof error.code === "string" ? error.code : null;
+
+  if (code === "P2034") return true;
+
+  const message =
+    "message" in error && typeof error.message === "string"
+      ? error.message
+      : "";
+
+  return /transaction failed due to a write conflict or a deadlock/i.test(
+    message
+  );
+}
+
+async function waitForClaimSerializationRetry(retryNumber: number) {
+  const delayMs =
+    CHANNEX_ARI_CLAIM_SERIALIZATION_RETRY_BASE_MS * retryNumber;
+
+  await new Promise<void>((resolve) => setTimeout(resolve, delayMs));
+}
+
 export async function claimChannexAriDelivery(
   db: ChannexAriDispatchDb,
   input: ClaimChannexAriDeliveryInput
@@ -83,118 +111,141 @@ export async function claimChannexAriDelivery(
   );
   const now = assertValidNow(input.now);
 
-  return db.$transaction(
-    async (tx) => {
-      const delivery = await tx.channexAriDelivery.findUnique({
-        where: { id: deliveryId },
-        select: {
-          id: true,
-          organizationId: true,
-          propertyId: true,
-          connectionId: true,
-          listingId: true,
-          messageKind: true,
-          status: true,
-          payload: true,
-          payloadHash: true,
-          payloadValueCount: true,
-          payloadBytes: true,
-          attemptCount: true,
-          nextAttemptAt: true,
-          leaseToken: true,
-          leaseExpiresAt: true,
-        },
-      });
+  const runClaimTransaction = () =>
+    db.$transaction(
+      async (tx) => {
+        const delivery = await tx.channexAriDelivery.findUnique({
+          where: { id: deliveryId },
+          select: {
+            id: true,
+            organizationId: true,
+            propertyId: true,
+            connectionId: true,
+            listingId: true,
+            messageKind: true,
+            status: true,
+            payload: true,
+            payloadHash: true,
+            payloadValueCount: true,
+            payloadBytes: true,
+            attemptCount: true,
+            nextAttemptAt: true,
+            leaseToken: true,
+            leaseExpiresAt: true,
+          },
+        });
 
-      if (!delivery) {
-        throw new Error("CHANNEX_ARI_DISPATCH_DELIVERY_NOT_FOUND");
+        if (!delivery) {
+          throw new Error("CHANNEX_ARI_DISPATCH_DELIVERY_NOT_FOUND");
+        }
+
+        const propertyState = await tx.channexAriPropertyState.findUnique({
+          where: { propertyId: delivery.propertyId },
+          select: {
+            organizationId: true,
+            pausedUntil: true,
+            availabilityNextAllowedAt: true,
+            ratesNextAllowedAt: true,
+          },
+        });
+
+        assertPropertyStateTenant({
+          state: propertyState,
+          organizationId: delivery.organizationId,
+        });
+
+        const claim = buildChannexAriDispatchClaim({
+          delivery: {
+            status: delivery.status,
+            messageKind: delivery.messageKind,
+            attemptCount: delivery.attemptCount,
+            nextAttemptAt: delivery.nextAttemptAt,
+            leaseToken: delivery.leaseToken,
+            leaseExpiresAt: delivery.leaseExpiresAt,
+          },
+          propertyState: propertyState ?? undefined,
+          now,
+          leaseToken,
+          leaseMs: input.leaseMs,
+        });
+
+        const claimed = await tx.channexAriDelivery.updateMany({
+          where: {
+            id: delivery.id,
+            status: delivery.status,
+            attemptCount: delivery.attemptCount,
+            nextAttemptAt: delivery.nextAttemptAt,
+            leaseToken: null,
+            leaseExpiresAt: null,
+          },
+          data: claim.deliveryUpdate,
+        });
+
+        if (claimed.count !== 1) {
+          throw new Error("CHANNEX_ARI_DISPATCH_CLAIM_RACE");
+        }
+
+        const attempt = await tx.channexAriDeliveryAttempt.create({
+          data: {
+            deliveryId: delivery.id,
+            ...claim.attemptCreate,
+          },
+        });
+
+        await tx.channexAriPropertyState.upsert({
+          where: { propertyId: delivery.propertyId },
+          create: {
+            propertyId: delivery.propertyId,
+            organizationId: delivery.organizationId,
+            ...claim.propertyStateUpdate,
+          },
+          update: claim.propertyStateUpdate,
+        });
+
+        return {
+          delivery: {
+            id: delivery.id,
+            organizationId: delivery.organizationId,
+            propertyId: delivery.propertyId,
+            connectionId: delivery.connectionId,
+            listingId: delivery.listingId,
+            messageKind: delivery.messageKind,
+            status: claim.deliveryUpdate.status,
+            payload: delivery.payload,
+            payloadHash: delivery.payloadHash,
+            payloadValueCount: delivery.payloadValueCount,
+            payloadBytes: delivery.payloadBytes,
+            attemptCount: claim.deliveryUpdate.attemptCount,
+            leaseToken: claim.deliveryUpdate.leaseToken,
+            leaseExpiresAt: claim.deliveryUpdate.leaseExpiresAt,
+          },
+          attempt,
+        };
+      },
+      { isolationLevel: "Serializable" }
+    );
+
+  for (
+    let retryNumber = 0;
+    retryNumber <= CHANNEX_ARI_CLAIM_SERIALIZATION_MAX_RETRIES;
+    retryNumber += 1
+  ) {
+    try {
+      return await runClaimTransaction();
+    } catch (error) {
+      if (!isPrismaSerializationConflict(error)) {
+        throw error;
       }
 
-      const propertyState = await tx.channexAriPropertyState.findUnique({
-        where: { propertyId: delivery.propertyId },
-        select: {
-          organizationId: true,
-          pausedUntil: true,
-          availabilityNextAllowedAt: true,
-          ratesNextAllowedAt: true,
-        },
-      });
-
-      assertPropertyStateTenant({
-        state: propertyState,
-        organizationId: delivery.organizationId,
-      });
-
-      const claim = buildChannexAriDispatchClaim({
-        delivery: {
-          status: delivery.status,
-          messageKind: delivery.messageKind,
-          attemptCount: delivery.attemptCount,
-          nextAttemptAt: delivery.nextAttemptAt,
-          leaseToken: delivery.leaseToken,
-          leaseExpiresAt: delivery.leaseExpiresAt,
-        },
-        propertyState: propertyState ?? undefined,
-        now,
-        leaseToken,
-        leaseMs: input.leaseMs,
-      });
-
-      const claimed = await tx.channexAriDelivery.updateMany({
-        where: {
-          id: delivery.id,
-          status: delivery.status,
-          attemptCount: delivery.attemptCount,
-          nextAttemptAt: delivery.nextAttemptAt,
-          leaseToken: null,
-          leaseExpiresAt: null,
-        },
-        data: claim.deliveryUpdate,
-      });
-
-      if (claimed.count !== 1) {
-        throw new Error("CHANNEX_ARI_DISPATCH_CLAIM_RACE");
+      if (retryNumber === CHANNEX_ARI_CLAIM_SERIALIZATION_MAX_RETRIES) {
+        throw new Error("CHANNEX_ARI_DISPATCH_SERIALIZATION_RETRY_EXHAUSTED");
       }
 
-      const attempt = await tx.channexAriDeliveryAttempt.create({
-        data: {
-          deliveryId: delivery.id,
-          ...claim.attemptCreate,
-        },
-      });
+      await waitForClaimSerializationRetry(retryNumber + 1);
+    }
+  }
 
-      await tx.channexAriPropertyState.upsert({
-        where: { propertyId: delivery.propertyId },
-        create: {
-          propertyId: delivery.propertyId,
-          organizationId: delivery.organizationId,
-          ...claim.propertyStateUpdate,
-        },
-        update: claim.propertyStateUpdate,
-      });
-
-      return {
-        delivery: {
-          id: delivery.id,
-          organizationId: delivery.organizationId,
-          propertyId: delivery.propertyId,
-          connectionId: delivery.connectionId,
-          listingId: delivery.listingId,
-          messageKind: delivery.messageKind,
-          status: claim.deliveryUpdate.status,
-          payload: delivery.payload,
-          payloadHash: delivery.payloadHash,
-          payloadValueCount: delivery.payloadValueCount,
-          payloadBytes: delivery.payloadBytes,
-          attemptCount: claim.deliveryUpdate.attemptCount,
-          leaseToken: claim.deliveryUpdate.leaseToken,
-          leaseExpiresAt: claim.deliveryUpdate.leaseExpiresAt,
-        },
-        attempt,
-      };
-    },
-    { isolationLevel: "Serializable" }
-  );
+  throw new Error("CHANNEX_ARI_DISPATCH_SERIALIZATION_RETRY_EXHAUSTED");
 }
 
 export async function recoverStaleChannexAriDeliveryLease(
