@@ -22,6 +22,9 @@ import type {
 import {
   evaluateCanonicalGuestJourney,
 } from "./guest-journey-evaluator";
+import {
+  buildGuestJourneyCoordinationIntentKeyFromProposal,
+} from "./guest-journey-coordination-intent-key";
 
 type EvidenceOverrides = {
   evaluatedAt?: Date;
@@ -906,6 +909,21 @@ test(
       evaluateCanonicalGuestJourney(
         createEvidence()
       );
+    const proposed =
+      initial.requiredCoordinationIntents
+        .find(
+          (intent) =>
+            intent.intentType ===
+            "REQUEST_GUEST_VERIFICATION"
+        );
+
+    assert.ok(proposed);
+    const intentKey =
+      buildGuestJourneyCoordinationIntentKeyFromProposal(
+        "reservation-1",
+        initial.evidenceFingerprint,
+        proposed
+      );
 
     const evaluation =
       evaluateCanonicalGuestJourney(
@@ -913,8 +931,7 @@ test(
           activeIntents: [
             {
               id: "intent-1",
-              intentKey:
-                "guest-journey-intent-1",
+              intentKey,
 
               intentType:
                 "REQUEST_GUEST_VERIFICATION",
@@ -1468,6 +1485,158 @@ test(
         (intent) => allowed.has(intent.targetEngine)
       ),
       true
+    );
+  }
+);
+
+test(
+  "keeps distinct failed communications as distinct coordination intents",
+  () => {
+    const evidence = createEvidence({
+      communications: {
+        signals: [
+          {
+            communicationType:
+              "PRECHECKIN_INVITATION",
+            channel: "email",
+            status: "FAILED",
+            retryCount: 1,
+            lastError: "email unavailable",
+          },
+          {
+            communicationType:
+              "PRECHECKIN_INVITATION",
+            channel: "sms",
+            status: "FAILED",
+            retryCount: 1,
+            lastError: "sms unavailable",
+          },
+        ],
+      },
+    });
+    const evaluation =
+      evaluateCanonicalGuestJourney(
+        evidence
+      );
+    const retries =
+      evaluation
+        .requiredCoordinationIntents
+        .filter(
+          (intent) =>
+            intent.intentType ===
+            "REQUEST_COMMUNICATION_RETRY"
+        );
+
+    assert.equal(retries.length, 2);
+    assert.deepEqual(
+      retries.map(
+        (intent) => intent.payload?.channel
+      ).sort(),
+      ["email", "sms"]
+    );
+  }
+);
+
+test(
+  "suppresses only the exact active intent key",
+  () => {
+    const signals = [
+      {
+        communicationType:
+          "PRECHECKIN_INVITATION",
+        channel: "email",
+        status: "FAILED",
+        retryCount: 1,
+        lastError: "email unavailable",
+      },
+      {
+        communicationType:
+          "PRECHECKIN_INVITATION",
+        channel: "sms",
+        status: "FAILED",
+        retryCount: 1,
+        lastError: "sms unavailable",
+      },
+    ];
+    const first =
+      evaluateCanonicalGuestJourney(
+        createEvidence({
+          communications: {
+            signals,
+          },
+        })
+      );
+    const emailIntent =
+      first.requiredCoordinationIntents
+        .find(
+          (intent) =>
+            intent.intentType ===
+              "REQUEST_COMMUNICATION_RETRY" &&
+            intent.payload?.channel ===
+              "email"
+        );
+
+    assert.ok(emailIntent);
+
+    const activeIntentKey =
+      buildGuestJourneyCoordinationIntentKeyFromProposal(
+        "reservation-1",
+        first.evidenceFingerprint,
+        emailIntent
+      );
+    const second =
+      evaluateCanonicalGuestJourney(
+        createEvidence({
+          communications: {
+            signals,
+          },
+          activeIntents: [
+            {
+              id: "intent-email",
+              intentKey:
+                activeIntentKey,
+              intentType:
+                emailIntent.intentType,
+              targetEngine:
+                emailIntent.targetEngine,
+              status: "PENDING",
+              reasonCode:
+                emailIntent.reasonCode,
+              expectedOutcomeCode:
+                emailIntent
+                  .expectedOutcomeCode,
+              evidenceFingerprint:
+                first
+                  .evidenceFingerprint,
+              outcomeEvidenceFingerprint:
+                null,
+              claimCount: 0,
+              leaseExpiresAt: null,
+              nextActionAt: null,
+              succeededAt: null,
+              exhaustedAt: null,
+              supersededAt: null,
+              lastError: null,
+            },
+          ],
+        })
+      );
+    const remainingRetries =
+      second.requiredCoordinationIntents
+        .filter(
+          (intent) =>
+            intent.intentType ===
+            "REQUEST_COMMUNICATION_RETRY"
+        );
+
+    assert.equal(
+      remainingRetries.length,
+      1
+    );
+    assert.equal(
+      remainingRetries[0]
+        ?.payload?.channel,
+      "sms"
     );
   }
 );

@@ -1126,6 +1126,43 @@ test(
 );
 
 test(
+  "fails closed when active intent evidence exceeds the bounded contract",
+  async () => {
+    const reservation =
+      createBaseReservation();
+    const template =
+      reservation
+        .guestJourneyCoordinationIntents[0];
+
+    reservation
+      .guestJourneyCoordinationIntents =
+      Array.from(
+        { length: 101 },
+        (_, index) => ({
+          ...template,
+          id: `intent-${index}`,
+          intentKey:
+            `intent-key-${index}`,
+        })
+      );
+
+    const { tx } =
+      createMockTransaction({
+        reservation,
+      });
+
+    await assert.rejects(
+      loadGuestJourneyEvidence(
+        tx,
+        "reservation-1",
+        NOW
+      ),
+      /ACTIVE_INTENT_LIMIT_EXCEEDED/
+    );
+  }
+);
+
+test(
   "rejects an invalid evaluation time before querying persistence",
   async () => {
     const {
