@@ -7,6 +7,8 @@ import {
 } from "./channex-ari-delivery.service";
 
 const MAX_CLAIM_TOKEN_LENGTH = 128;
+const CHANNEX_ARI_FENCED_DELIVERY_SERIALIZATION_MAX_RETRIES = 2;
+const CHANNEX_ARI_FENCED_DELIVERY_SERIALIZATION_RETRY_BASE_MS = 10;
 
 type ChannexAriFencedDeliveryTransaction = Pick<
   Prisma.TransactionClient,
@@ -95,6 +97,31 @@ function requireValidExpiry(value: Date | null, materializedAt: Date): Date {
   return expiresAt;
 }
 
+function isPrismaSerializationConflict(error: unknown): boolean {
+  if (!error || typeof error !== "object") return false;
+
+  const code =
+    "code" in error && typeof error.code === "string" ? error.code : null;
+
+  if (code === "P2034") return true;
+
+  const message =
+    "message" in error && typeof error.message === "string"
+      ? error.message
+      : "";
+
+  return /transaction failed due to a write conflict or a deadlock/i.test(
+    message
+  );
+}
+
+async function waitForSerializationRetry(retryNumber: number) {
+  const delayMs =
+    CHANNEX_ARI_FENCED_DELIVERY_SERIALIZATION_RETRY_BASE_MS * retryNumber;
+
+  await new Promise<void>((resolve) => setTimeout(resolve, delayMs));
+}
+
 export async function createFencedChannexAriDelivery(
   db: ChannexAriFencedDeliveryDb,
   input: CreateFencedChannexAriDeliveryInput
@@ -106,95 +133,125 @@ export async function createFencedChannexAriDelivery(
   );
   const createDelivery = input.createDelivery ?? createChannexAriDelivery;
 
-  return db.$transaction(
-    async (tx) => {
-      const rows = await tx.distributionOutboxEvent.findMany({
-        where: { id: { in: mergedEventIds } },
-        orderBy: { id: "asc" },
-        select: {
-          id: true,
-          status: true,
-          claimToken: true,
-          claimExpiresAt: true,
-          deliveryId: true,
-        },
-      });
-
-      if (rows.length !== mergedEventIds.length) {
-        throw new Error("CHANNEX_ARI_FENCED_DELIVERY_EVENT_NOT_FOUND");
-      }
-
-      const rowById = new Map(rows.map((row) => [row.id, row]));
-      const orderedRows = mergedEventIds.map((eventId) => rowById.get(eventId)!);
-      const freshClaim = orderedRows.every(
-        (row) => row.status === "CLAIMED" && !row.deliveryId
-      );
-      const persistedDelivery = orderedRows.every(
-        (row) => row.status === "MERGED" && Boolean(row.deliveryId)
-      );
-
-      if (!freshClaim && !persistedDelivery) {
-        throw new Error("CHANNEX_ARI_FENCED_DELIVERY_EVENT_STATE_CONFLICT");
-      }
-
-      if (freshClaim) {
-        for (const row of orderedRows) {
-          if (row.claimToken !== claimToken) {
-            throw new Error("CHANNEX_ARI_FENCED_DELIVERY_CLAIM_TOKEN_MISMATCH");
-          }
-
-          requireValidExpiry(row.claimExpiresAt, materializedAt);
-        }
-
-        const fenced = await tx.distributionOutboxEvent.updateMany({
-          where: {
-            id: { in: mergedEventIds },
-            status: "CLAIMED",
-            claimToken,
-            claimExpiresAt: { gt: materializedAt },
-            deliveryId: null,
+  const runTransaction = () =>
+    db.$transaction(
+      async (tx) => {
+        const rows = await tx.distributionOutboxEvent.findMany({
+          where: { id: { in: mergedEventIds } },
+          orderBy: { id: "asc" },
+          select: {
+            id: true,
+            status: true,
+            claimToken: true,
+            claimExpiresAt: true,
+            deliveryId: true,
           },
-          data: { claimToken },
         });
 
-        if (fenced.count !== mergedEventIds.length) {
-          throw new Error("CHANNEX_ARI_FENCED_DELIVERY_CLAIM_RACE");
+        if (rows.length !== mergedEventIds.length) {
+          throw new Error("CHANNEX_ARI_FENCED_DELIVERY_EVENT_NOT_FOUND");
         }
+
+        const rowById = new Map(rows.map((row) => [row.id, row]));
+        const orderedRows = mergedEventIds.map((eventId) => rowById.get(eventId)!);
+        const freshClaim = orderedRows.every(
+          (row) => row.status === "CLAIMED" && !row.deliveryId
+        );
+        const persistedDelivery = orderedRows.every(
+          (row) => row.status === "MERGED" && Boolean(row.deliveryId)
+        );
+
+        if (!freshClaim && !persistedDelivery) {
+          throw new Error("CHANNEX_ARI_FENCED_DELIVERY_EVENT_STATE_CONFLICT");
+        }
+
+        if (freshClaim) {
+          for (const row of orderedRows) {
+            if (row.claimToken !== claimToken) {
+              throw new Error("CHANNEX_ARI_FENCED_DELIVERY_CLAIM_TOKEN_MISMATCH");
+            }
+
+            requireValidExpiry(row.claimExpiresAt, materializedAt);
+          }
+
+          const fenced = await tx.distributionOutboxEvent.updateMany({
+            where: {
+              id: { in: mergedEventIds },
+              status: "CLAIMED",
+              claimToken,
+              claimExpiresAt: { gt: materializedAt },
+              deliveryId: null,
+            },
+            data: { claimToken },
+          });
+
+          if (fenced.count !== mergedEventIds.length) {
+            throw new Error("CHANNEX_ARI_FENCED_DELIVERY_CLAIM_RACE");
+          }
+        }
+
+        const nestedDb: ChannexAriDeliveryDb = {
+          $transaction: async (callback) => callback(tx),
+        };
+        const result = await createDelivery(nestedDb, {
+          ...input.delivery,
+          queuedAt: input.delivery.queuedAt ?? materializedAt,
+        });
+        const cleared = await tx.distributionOutboxEvent.updateMany({
+          where: {
+            id: { in: mergedEventIds },
+            status: "MERGED",
+            deliveryId: result.delivery.id,
+          },
+          data: {
+            claimedAt: null,
+            claimToken: null,
+            claimExpiresAt: null,
+          },
+        });
+
+        if (cleared.count !== mergedEventIds.length) {
+          throw new Error("CHANNEX_ARI_FENCED_DELIVERY_FINALIZE_RACE");
+        }
+
+        return {
+          ...result,
+          claimFence: {
+            mode: freshClaim ? ("FRESH" as const) : ("IDEMPOTENT" as const),
+            eventCount: mergedEventIds.length,
+            materializedAt,
+          },
+        };
+      },
+      { isolationLevel: "Serializable" }
+    );
+
+  for (
+    let retryNumber = 0;
+    retryNumber <= CHANNEX_ARI_FENCED_DELIVERY_SERIALIZATION_MAX_RETRIES;
+    retryNumber += 1
+  ) {
+    try {
+      return await runTransaction();
+    } catch (error) {
+      if (!isPrismaSerializationConflict(error)) {
+        throw error;
       }
 
-      const nestedDb: ChannexAriDeliveryDb = {
-        $transaction: async (callback) => callback(tx),
-      };
-      const result = await createDelivery(nestedDb, {
-        ...input.delivery,
-        queuedAt: input.delivery.queuedAt ?? materializedAt,
-      });
-      const cleared = await tx.distributionOutboxEvent.updateMany({
-        where: {
-          id: { in: mergedEventIds },
-          status: "MERGED",
-          deliveryId: result.delivery.id,
-        },
-        data: {
-          claimedAt: null,
-          claimToken: null,
-          claimExpiresAt: null,
-        },
-      });
-
-      if (cleared.count !== mergedEventIds.length) {
-        throw new Error("CHANNEX_ARI_FENCED_DELIVERY_FINALIZE_RACE");
+      if (
+        retryNumber ===
+        CHANNEX_ARI_FENCED_DELIVERY_SERIALIZATION_MAX_RETRIES
+      ) {
+        throw new Error(
+          "CHANNEX_ARI_FENCED_DELIVERY_SERIALIZATION_RETRY_EXHAUSTED"
+        );
       }
 
-      return {
-        ...result,
-        claimFence: {
-          mode: freshClaim ? ("FRESH" as const) : ("IDEMPOTENT" as const),
-          eventCount: mergedEventIds.length,
-          materializedAt,
-        },
-      };
-    },
-    { isolationLevel: "Serializable" }
+      await waitForSerializationRetry(retryNumber + 1);
+    }
+  }
+
+  throw new Error(
+    "CHANNEX_ARI_FENCED_DELIVERY_SERIALIZATION_RETRY_EXHAUSTED"
   );
 }
