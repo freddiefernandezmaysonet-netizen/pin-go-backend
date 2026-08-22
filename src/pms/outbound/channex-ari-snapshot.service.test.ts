@@ -179,6 +179,73 @@ test("reads a timezone-aware availability snapshot from reservations and blocks"
   });
 });
 
+test("normalizes date-only blocked dates to the Puerto Rico property calendar", async () => {
+  const mock = createDb({
+    blockedDates: [
+      {
+        startDate: new Date("2027-12-15T00:00:00.000Z"),
+        endDate: new Date("2027-12-16T00:00:00.000Z"),
+      },
+    ],
+  });
+  const selectedPlan = plan({
+    scope: "DATE_RANGE",
+    dateFrom: "2027-12-15",
+    dateToExclusive: "2027-12-16",
+    dateKeys: [],
+  });
+
+  const result = await readChannexAriSnapshot(mock.db, {
+    plan: selectedPlan,
+    mapping: mapping(),
+  });
+
+  assert.equal(result.messageKind, "AVAILABILITY");
+  assert.deepEqual(result.data.unavailableDateKeys, ["2027-12-15"]);
+  assert.deepEqual(result.data.payload.values, [
+    {
+      property_id: "channex-property-1",
+      room_type_id: "room-type-1",
+      date: "2027-12-15",
+      availability: 0,
+    },
+  ]);
+});
+
+test("preserves timezone-aware blocked boundaries for a positive-offset property", async () => {
+  const mock = createDb({
+    property: property({ timezone: "Europe/Madrid" }),
+    blockedDates: [
+      {
+        startDate: new Date("2027-12-14T23:00:00.000Z"),
+        endDate: new Date("2027-12-15T23:00:00.000Z"),
+      },
+    ],
+  });
+  const selectedPlan = plan({
+    scope: "DATE_RANGE",
+    dateFrom: "2027-12-15",
+    dateToExclusive: "2027-12-16",
+    dateKeys: [],
+  });
+
+  const result = await readChannexAriSnapshot(mock.db, {
+    plan: selectedPlan,
+    mapping: mapping(),
+  });
+
+  assert.equal(result.messageKind, "AVAILABILITY");
+  assert.deepEqual(result.data.unavailableDateKeys, ["2027-12-15"]);
+  assert.deepEqual(result.data.payload.values, [
+    {
+      property_id: "channex-property-1",
+      room_type_id: "room-type-1",
+      date: "2027-12-15",
+      availability: 0,
+    },
+  ]);
+});
+
 test("serializes Revenue currency amounts as integer minor units without changing Revenue prices", async () => {
   const mock = createDb();
   const selectedPlan = plan({

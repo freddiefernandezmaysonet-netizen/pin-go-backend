@@ -1,6 +1,7 @@
 import crypto from "crypto";
 import axios from "axios";
 import { PrismaClient, PmsProvider } from "@prisma/client";
+import { requireIanaTimezone } from "../lib/iana-timezone";
 
 const prisma = new PrismaClient();
 
@@ -213,6 +214,11 @@ export async function provisionChannexProperty(propertyId: string) {
     throw new Error("PROPERTY_NOT_FOUND");
   }
 
+  const propertyTimezone = requireIanaTimezone(property.timezone, {
+    required: "CHANNEX_PROPERTY_TIMEZONE_REQUIRED",
+    invalid: "CHANNEX_PROPERTY_TIMEZONE_INVALID",
+  });
+
   const propertyConfig = await prisma.channexPropertyConfig.findUnique({
     where: { propertyId: property.id },
     select: { propertyType: true },
@@ -278,7 +284,7 @@ export async function provisionChannexProperty(propertyId: string) {
       String(property.country ?? "").trim().toLowerCase() === "united states"
         ? "US"
         : String(property.country ?? "US").trim().toUpperCase(),
-    timezone: property.timezone ?? "America/Puerto_Rico",
+    timezone: propertyTimezone,
     latitude:
       property.latitude != null ? Number(property.latitude) : undefined,
     longitude:
