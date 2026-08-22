@@ -111,6 +111,21 @@ jobs:
           src/lib/iana-timezone.test.ts
           src/services/channex-property-timezone.contract.test.ts
 
+      - name: Certify Guest Journey E1 contract compatibility
+        run: npm run test:guest-journey-enterprise-contract
+
+      - name: Certify Guest Journey E2 shadow compatibility
+        run: npm run test:guest-journey-enterprise-e2-shadow
+
+      - name: Certify Guest Journey E3 reconciler compatibility
+        run: npm run test:guest-journey-enterprise-e3-reconciler
+
+      - name: Certify Guest Journey E4 coordination compatibility
+        run: npm run test:guest-journey-enterprise-e4-coordination
+
+      - name: Certify canonical APMS operational contract compatibility
+        run: npm run test:canonical-operational-contract
+
       - name: Load property creation route
         run: npx tsx -e "import('./src/routes/properties.create.route.ts').then((m) => { if (typeof m.buildCreatePropertyRouter !== 'function') process.exit(1); })"
 
