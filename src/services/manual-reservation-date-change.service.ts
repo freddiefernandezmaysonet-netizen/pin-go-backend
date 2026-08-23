@@ -16,6 +16,10 @@ function buildPropertyDate(value: string, time: string, timezone: string) {
   return fromZonedTime(localDateTime, timezone);
 }
 
+function roundMoney(value: number) {
+  return Math.round(value * 100) / 100;
+}
+
 export class ManualReservationDateChangeError extends Error {
   statusCode: number;
   code: string;
@@ -30,12 +34,11 @@ export class ManualReservationDateChangeError extends Error {
   }
 }
 
-export async function changeManualReservationDatesByHost(input: {
+async function prepareManualReservationDateChange(input: {
   organizationId: string;
   reservationId: string;
   checkInDate: string;
   checkOutDate: string;
-  requestedByUserId: string;
 }) {
   if (!isDateOnly(input.checkInDate) || !isDateOnly(input.checkOutDate)) {
     throw new ManualReservationDateChangeError("INVALID_RESERVATION_DATES", "Check-in and check-out must use YYYY-MM-DD.", 400);
@@ -50,6 +53,7 @@ export async function changeManualReservationDatesByHost(input: {
       status: true,
       checkIn: true,
       checkOut: true,
+      updatedAt: true,
       totalAmount: true,
       currency: true,
       propertyId: true,
@@ -107,44 +111,120 @@ export async function changeManualReservationDatesByHost(input: {
   const currentTotal = reservation.totalAmount == null ? null : Number(reservation.totalAmount);
   if (!Number.isFinite(proposedTotal) || proposedTotal < 0) throw new ManualReservationDateChangeError("MANUAL_RESERVATION_PRICING_INVALID", "Pin&Go could not calculate a valid total for the proposed dates.", 409);
 
+  return {
+    reservation,
+    timezone,
+    proposedCheckIn,
+    proposedCheckOut,
+    pricing,
+    proposedTotal: roundMoney(proposedTotal),
+    currentTotal: currentTotal == null ? null : roundMoney(currentTotal),
+    currency,
+  };
+}
+
+export async function previewManualReservationDateChangeByHost(input: {
+  organizationId: string;
+  reservationId: string;
+  checkInDate: string;
+  checkOutDate: string;
+}) {
+  const prepared = await prepareManualReservationDateChange(input);
+  const nights = Number((prepared.pricing as any).nights ?? 0);
+
+  return {
+    ok: true,
+    preview: {
+      reservationUpdatedAt: prepared.reservation.updatedAt.toISOString(),
+      current: {
+        checkIn: prepared.reservation.checkIn.toISOString(),
+        checkOut: prepared.reservation.checkOut.toISOString(),
+        totalAmount: prepared.currentTotal,
+        currency: prepared.currency,
+      },
+      proposed: {
+        checkIn: prepared.proposedCheckIn.toISOString(),
+        checkOut: prepared.proposedCheckOut.toISOString(),
+        nights,
+        totalAmount: prepared.proposedTotal,
+        currency: prepared.currency,
+      },
+      difference: prepared.currentTotal == null ? null : roundMoney(prepared.proposedTotal - prepared.currentTotal),
+      paymentHandledOutsidePinGo: true,
+    },
+  };
+}
+
+export async function changeManualReservationDatesByHost(input: {
+  organizationId: string;
+  reservationId: string;
+  checkInDate: string;
+  checkOutDate: string;
+  requestedByUserId: string;
+  expectedReservationUpdatedAt: string;
+  expectedProposedTotalAmount: number;
+}) {
+  if (!input.expectedReservationUpdatedAt || !Number.isFinite(Number(input.expectedProposedTotalAmount))) {
+    throw new ManualReservationDateChangeError("DATE_CHANGE_PREVIEW_REQUIRED", "Review the proposed reservation change before confirming.", 409);
+  }
+
+  const prepared = await prepareManualReservationDateChange(input);
+
+  if (prepared.reservation.updatedAt.toISOString() !== input.expectedReservationUpdatedAt) {
+    throw new ManualReservationDateChangeError("RESERVATION_CHANGED_REVIEW_REQUIRED", "The reservation changed after the preview. Review the change again before confirming.", 409);
+  }
+
+  if (roundMoney(Number(input.expectedProposedTotalAmount)) !== prepared.proposedTotal) {
+    throw new ManualReservationDateChangeError("PRICING_CHANGED_REVIEW_REQUIRED", "Pricing changed after the preview. Review the updated total before confirming.", 409, {
+      proposedTotalAmount: prepared.proposedTotal,
+      currency: prepared.currency,
+    });
+  }
+
   const requestedAt = new Date();
-  const previous = { checkIn: reservation.checkIn, checkOut: reservation.checkOut, status: "ACTIVE" as const };
+  const previous = { checkIn: prepared.reservation.checkIn, checkOut: prepared.reservation.checkOut, status: "ACTIVE" as const };
   const pricingBreakdown = JSON.parse(JSON.stringify({
     source: "MANUAL_RESERVATION_DATE_CHANGE",
     pricingSource: "PIN_GO_PRICING_ENGINE",
     paymentHandledOutsidePinGo: true,
-    nights: (pricing as any).nights ?? null,
-    nightlyRates: (pricing as any).nightlyRates ?? [],
-    nightlySubtotal: (pricing as any).nightlySubtotal ?? null,
-    cleaningFee: (pricing as any).cleaningFee ?? 0,
-    amenitiesTotal: (pricing as any).amenitiesTotal ?? 0,
-    taxesTotal: (pricing as any).taxesTotal ?? 0,
-    taxableSubtotal: (pricing as any).taxableSubtotal ?? null,
-    previousTotalAmount: currentTotal,
-    totalAmount: proposedTotal,
-    totalAmountCents: Math.round(proposedTotal * 100),
-    currency,
+    nights: (prepared.pricing as any).nights ?? null,
+    nightlyRates: (prepared.pricing as any).nightlyRates ?? [],
+    nightlySubtotal: (prepared.pricing as any).nightlySubtotal ?? null,
+    cleaningFee: (prepared.pricing as any).cleaningFee ?? 0,
+    amenitiesTotal: (prepared.pricing as any).amenitiesTotal ?? 0,
+    taxesTotal: (prepared.pricing as any).taxesTotal ?? 0,
+    taxableSubtotal: (prepared.pricing as any).taxableSubtotal ?? null,
+    previousTotalAmount: prepared.currentTotal,
+    totalAmount: prepared.proposedTotal,
+    totalAmountCents: Math.round(prepared.proposedTotal * 100),
+    currency: prepared.currency,
     calculatedAt: requestedAt.toISOString(),
     requestedByUserId: input.requestedByUserId,
   }));
 
   const updated = await prisma.$transaction(async (tx) => {
     const row = await tx.reservation.update({
-      where: { id: reservation.id },
-      data: { checkIn: proposedCheckIn, checkOut: proposedCheckOut, totalAmount: proposedTotal, currency, pricingBreakdown },
+      where: { id: prepared.reservation.id },
+      data: {
+        checkIn: prepared.proposedCheckIn,
+        checkOut: prepared.proposedCheckOut,
+        totalAmount: prepared.proposedTotal,
+        currency: prepared.currency,
+        pricingBreakdown,
+      },
       select: { id: true, reservationNumber: true, checkIn: true, checkOut: true, totalAmount: true, currency: true },
     });
 
-    if (reservation.property.distributionEnabled === true && reservation.property.distributionStatus === "ACTIVE") {
+    if (prepared.reservation.property.distributionEnabled === true && prepared.reservation.property.distributionStatus === "ACTIVE") {
       await persistChannexAriReservationIntent({
         db: tx,
-        organizationId: reservation.property.organizationId,
-        propertyId: reservation.propertyId,
-        reservationId: reservation.id,
+        organizationId: prepared.reservation.property.organizationId,
+        propertyId: prepared.reservation.propertyId,
+        reservationId: prepared.reservation.id,
         previous,
         current: { checkIn: row.checkIn, checkOut: row.checkOut, status: "ACTIVE" },
-        propertyTimezone: timezone,
-        todayDateKey: formatInTimeZone(requestedAt, timezone, "yyyy-MM-dd"),
+        propertyTimezone: prepared.timezone,
+        todayDateKey: formatInTimeZone(requestedAt, prepared.timezone, "yyyy-MM-dd"),
         now: requestedAt,
         coalesceMs: 0,
       });
@@ -152,7 +232,7 @@ export async function changeManualReservationDatesByHost(input: {
     return row;
   });
 
-  await reconcileReservation(reservation.id);
+  await reconcileReservation(prepared.reservation.id);
 
   return {
     ok: true,
@@ -161,14 +241,14 @@ export async function changeManualReservationDatesByHost(input: {
       reservationNumber: updated.reservationNumber,
       checkIn: updated.checkIn.toISOString(),
       checkOut: updated.checkOut.toISOString(),
-      totalAmount: Number(updated.totalAmount ?? proposedTotal),
-      currency: updated.currency ?? currency,
+      totalAmount: Number(updated.totalAmount ?? prepared.proposedTotal),
+      currency: updated.currency ?? prepared.currency,
     },
     pricing: {
-      currentTotalAmount: currentTotal,
-      proposedTotalAmount: proposedTotal,
-      difference: currentTotal == null ? null : Math.round((proposedTotal - currentTotal) * 100) / 100,
-      currency,
+      currentTotalAmount: prepared.currentTotal,
+      proposedTotalAmount: prepared.proposedTotal,
+      difference: prepared.currentTotal == null ? null : roundMoney(prepared.proposedTotal - prepared.currentTotal),
+      currency: prepared.currency,
       paymentHandledOutsidePinGo: true,
     },
   };
