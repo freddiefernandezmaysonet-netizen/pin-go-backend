@@ -1,0 +1,87 @@
+name: Guest Journey Enterprise E6 Mission Control Certification
+
+on:
+  push:
+    branches:
+      - agent/apms-enterprise-guest-journey-e6-mission-control-bridge
+    paths:
+      - ".github/workflows/guest-journey-enterprise-e6-certification.yml"
+      - "package.json"
+      - "src/apms/**"
+      - "src/services/guest-journey-**"
+      - "src/workers/reservation.worker.ts"
+      - "tsconfig.guest-journey-enterprise-e2.json"
+      - "tsconfig.guest-journey-enterprise-e3.json"
+      - "tsconfig.guest-journey-enterprise-e4.json"
+      - "tsconfig.guest-journey-enterprise-e5.json"
+      - "tsconfig.guest-journey-enterprise-e6.json"
+
+  pull_request:
+    branches:
+      - main
+    paths:
+      - ".github/workflows/guest-journey-enterprise-e6-certification.yml"
+      - "package.json"
+      - "src/apms/**"
+      - "src/services/guest-journey-**"
+      - "src/workers/reservation.worker.ts"
+      - "tsconfig.guest-journey-enterprise-e6.json"
+
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  DATABASE_URL: postgresql://postgres:postgres@127.0.0.1:5432/pingo_e6_ci
+
+jobs:
+  certify:
+    name: Durable Mission Control bridge — no owner effects
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 2
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Validate Prisma schema
+        run: npx prisma validate --schema prisma/schema.prisma
+
+      - name: Generate Prisma Client
+        run: npx prisma generate --schema prisma/schema.prisma
+
+      - name: Certify Guest Journey E6 Mission Control bridge
+        run: npm run test:guest-journey-enterprise-e6-mission-control
+
+      - name: Preserve Guest Journey E5 owner runtime certification
+        run: npm run test:guest-journey-enterprise-e5-owner-runtime
+
+      - name: Preserve Guest Journey E4 coordination certification
+        run: npm run test:guest-journey-enterprise-e4-coordination
+
+      - name: Preserve Guest Journey E3 reconciliation certification
+        run: npm run test:guest-journey-enterprise-e3-reconciler
+
+      - name: Preserve Guest Journey E2 shadow certification
+        run: npm run test:guest-journey-enterprise-e2-shadow
+
+      - name: Preserve canonical APMS operational contract
+        run: npm run test:canonical-operational-contract
+
+      - name: Focused Guest Journey E6 TypeScript build
+        run: npx tsc -p tsconfig.guest-journey-enterprise-e6.json
+
+      - name: Verify patch integrity
+        run: git diff --check HEAD^ HEAD
