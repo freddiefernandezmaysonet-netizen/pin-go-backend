@@ -33,9 +33,9 @@ test("manual date change preview recalculates canonical pricing without mutating
   const previewStart = source.indexOf("export async function previewManualReservationDateChangeByHost");
   const confirmStart = source.indexOf("export async function changeManualReservationDatesByHost");
   const previewBody = source.slice(previewStart, confirmStart);
-  assert.doesNotMatch(previewBody, /\.reservation\.update/);
-  assert.doesNotMatch(previewBody, /persistChannexIntent/);
-  assert.doesNotMatch(previewBody, /\.reconcile\(/);
+  assert.doesNotMatch(previewBody, /\breservation\.update\s*\(/);
+  assert.doesNotMatch(previewBody, /persistChannexIntent\s*\(/);
+  assert.doesNotMatch(previewBody, /\.reconcile\s*\(/);
 });
 
 test("confirmation is fenced by reservation version and reviewed proposed total", async () => {
