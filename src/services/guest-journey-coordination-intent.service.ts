@@ -73,6 +73,7 @@ export type GuestJourneyCoordinationTransactionClient =
   Pick<
     Prisma.TransactionClient,
     | "reservation"
+    | "messageLog"
     | "guestJourneyCoordinationIntent"
     | "apmsAuditEntry"
   >;

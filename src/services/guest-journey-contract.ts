@@ -33,6 +33,12 @@ export const GUEST_JOURNEY_OWNER_RUNTIME_VERSION =
 export const GUEST_JOURNEY_MISSION_CONTROL_BRIDGE_VERSION =
   "guest_journey_mission_control_bridge_v1" as const;
 
+export const GUEST_JOURNEY_COMMUNICATIONS_OWNER_VERSION =
+  "guest_journey_communications_owner_v1" as const;
+
+export const GUEST_JOURNEY_COMMUNICATIONS_HANDLER_CODE =
+  "COMMUNICATION_RETRY_V1" as const;
+
 export const GUEST_JOURNEY_MISSION_CONTROL_OPERATIONAL_ISSUE_CODE =
   "GUEST_JOURNEY_OWNER_RUNTIME_STATUS" as const;
 
@@ -224,6 +230,7 @@ export type ProposedJourneyCoordinationIntent = {
 };
 
 export type GuestJourneyCommunicationSignal = {
+  messageLogId: string | null;
   communicationType: string;
   channel: string;
   status: string;

@@ -64,6 +64,7 @@ export type GuestJourneyReconcilerTransactionClient =
     Prisma.TransactionClient,
     | "$executeRaw"
     | "reservation"
+    | "messageLog"
     | "guestJourney"
     | "apmsAuditEntry"
   >;

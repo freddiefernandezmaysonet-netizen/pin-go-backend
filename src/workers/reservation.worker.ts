@@ -87,6 +87,12 @@ import {
 import {
   runGuestJourneyMissionControlCycle,
 } from "../services/guest-journey-mission-control-cycle.service";
+import {
+  resolveGuestJourneyCommunicationsOwnerConfig,
+} from "../services/guest-journey-communications-owner.config";
+import {
+  runGuestJourneyCommunicationsOwnerCycle,
+} from "../services/guest-journey-communications-owner-cycle.service";
 
 
 console.log("[reservation.worker] BOOT", new Date().toISOString());
@@ -133,6 +139,8 @@ const GUEST_JOURNEY_MISSION_CONTROL_CONFIG =
   resolveGuestJourneyMissionControlConfig();
 let guestJourneyMissionControlCursor:
   string | null = null;
+const GUEST_JOURNEY_COMMUNICATIONS_OWNER_CONFIG =
+  resolveGuestJourneyCommunicationsOwnerConfig();
 const REMINDER_HOURS = Number(
   process.env.GUEST_LINK_REMINDER_HOURS ??
     24
@@ -2556,6 +2564,30 @@ async function tick() {
         );
       }
     }
+
+    if (
+      GUEST_JOURNEY_COMMUNICATIONS_OWNER_CONFIG
+        .enabled
+    ) {
+      try {
+        const communicationsMetrics =
+          await runGuestJourneyCommunicationsOwnerCycle(
+            prisma,
+            GUEST_JOURNEY_COMMUNICATIONS_OWNER_CONFIG,
+            { now }
+          );
+
+        log(
+          "guest-journey-communications-owner",
+          communicationsMetrics
+        );
+      } catch (e) {
+        errLog(
+          "guest-journey-communications-owner crashed:",
+          toErrString(e)
+        );
+      }
+    }
   } finally {
     tickRunning = false;
   }
@@ -2605,6 +2637,13 @@ async function start() {
     `Guest Journey Mission Control bridge: ${
       GUEST_JOURNEY_MISSION_CONTROL_CONFIG
         .enabled
+        ? "on"
+        : "off"
+    }`
+  );
+  log(
+    `Guest Journey communications owner: ${
+      GUEST_JOURNEY_COMMUNICATIONS_OWNER_CONFIG.enabled
         ? "on"
         : "off"
     }`

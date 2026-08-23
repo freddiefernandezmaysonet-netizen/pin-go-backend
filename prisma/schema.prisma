@@ -950,11 +950,13 @@ model MessageLog {
   organizationId    String?
   propertyId        String?
   reservationId     String?
+  communicationType String?
   accessGrant       AccessGrant? @relation(fields: [accessGrantId], references: [id])
 
   @@index([channel, to, createdAt])
   @@index([accessGrantId])
   @@index([reservationId])
+  @@index([reservationId, communicationType, channel, status, createdAt])
   @@index([propertyId])
   @@index([organizationId])
   @@index([status, retryCount, createdAt])

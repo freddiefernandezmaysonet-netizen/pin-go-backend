@@ -246,8 +246,18 @@ type ReservationEvidenceRecord =
 export type GuestJourneyEvidenceTransactionClient =
   Pick<
     Prisma.TransactionClient,
-    "reservation"
+    "reservation" | "messageLog"
   >;
+
+type CommunicationMessageEvidence = {
+  id: string;
+  communicationType: string | null;
+  channel: string;
+  status: string | null;
+  retryCount: number;
+  error: string | null;
+  createdAt: Date;
+};
 
 export type GuestJourneyEvidenceScope = {
   organizationId: string;
@@ -523,12 +533,44 @@ function mapActiveIntent(
 
 function mapDispatchSignals(
   reservation:
-    ReservationEvidenceRecord
+    ReservationEvidenceRecord,
+  messages:
+    CommunicationMessageEvidence[]
 ): GuestJourneyCommunicationSignal[] {
   const latestByTypeAndChannel = new Map<
     string,
     GuestJourneyCommunicationSignal
   >();
+
+  for (const message of messages) {
+    const communicationType =
+      readNonEmptyString(
+        message.communicationType
+      );
+    const channel =
+      readNonEmptyString(message.channel);
+
+    if (!communicationType || !channel) {
+      continue;
+    }
+
+    const key = `${communicationType}:${channel}`;
+
+    if (latestByTypeAndChannel.has(key)) {
+      continue;
+    }
+
+    latestByTypeAndChannel.set(key, {
+      messageLogId: message.id,
+      communicationType,
+      channel,
+      status:
+        readNonEmptyString(message.status) ??
+        "UNKNOWN",
+      retryCount: message.retryCount,
+      lastError: message.error,
+    });
+  }
 
   for (const log of reservation.messageDispatchLogs) {
     const communicationType =
@@ -544,6 +586,7 @@ function mapDispatchSignals(
     }
 
     latestByTypeAndChannel.set(key, {
+      messageLogId: null,
       communicationType:
         communicationType,
 
@@ -791,15 +834,42 @@ export async function loadGuestJourneyEvidence(
       "now"
     );
 
-  const reservation =
-    await tx.reservation.findUnique({
+  const [reservation, communicationMessages] =
+    await Promise.all([
+      tx.reservation.findUnique({
       where: {
         id: cleanReservationId,
       },
 
       select:
         reservationEvidenceSelect,
-    });
+      }),
+      (tx as Partial<
+        GuestJourneyEvidenceTransactionClient
+      >).messageLog?.findMany({
+        where: {
+          reservationId:
+            cleanReservationId,
+          communicationType: {
+            not: null,
+          },
+        },
+        orderBy: [
+          { createdAt: "desc" },
+          { id: "desc" },
+        ],
+        take: 100,
+        select: {
+          id: true,
+          communicationType: true,
+          channel: true,
+          status: true,
+          retryCount: true,
+          error: true,
+          createdAt: true,
+        },
+      }) ?? Promise.resolve([]),
+    ]);
 
   if (!reservation) {
     throw new Error(
@@ -835,7 +905,10 @@ export async function loadGuestJourneyEvidence(
     );
 
   const communicationSignals =
-    mapDispatchSignals(reservation);
+    mapDispatchSignals(
+      reservation,
+      communicationMessages
+    );
 
   return {
     contractVersion:

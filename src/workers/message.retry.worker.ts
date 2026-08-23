@@ -12,11 +12,28 @@ import {
   sendManualReservationGuestCancellationEmail,
 } from "../lib/mailer";
 import { resolveOrganizationGuestReplyTo } from "../services/organization-guest-email.service";
+import {
+  isGuestJourneyCommunicationsOwnerScope,
+  resolveGuestJourneyCommunicationsOwnerConfig,
+} from "../services/guest-journey-communications-owner.config";
 
 const WORKER_NAME = "message.retry.worker";
 const POLL_MS = Number(process.env.MESSAGE_RETRY_POLL_MS ?? 30000);
 const MAX_RETRIES = Number(process.env.MESSAGE_MAX_RETRIES ?? 3);
 const BATCH_SIZE = Number(process.env.MESSAGE_RETRY_BATCH_SIZE ?? 20);
+const GUEST_JOURNEY_COMMUNICATIONS_OWNER_CONFIG =
+  resolveGuestJourneyCommunicationsOwnerConfig();
+
+function yieldsToGuestJourneyCommunicationsOwner(message: {
+  organizationId?: string | null;
+  propertyId?: string | null;
+  communicationType?: string | null;
+}): boolean {
+  return isGuestJourneyCommunicationsOwnerScope(
+    GUEST_JOURNEY_COMMUNICATIONS_OWNER_CONFIG,
+    message
+  );
+}
 
 function log(...args: any[]) {
   console.log(`[${new Date().toISOString()}] [${WORKER_NAME}]`, ...args);
@@ -151,6 +168,13 @@ async function processRetries() {
 
   for (const msg of failedSmsMessages) {
     try {
+      if (yieldsToGuestJourneyCommunicationsOwner(msg)) {
+        log("SMS retry yielded to Guest Journey COMMUNICATIONS owner", {
+          id: msg.id,
+          communicationType: msg.communicationType,
+        });
+        continue;
+      }
       log("Retrying SMS message", {
         id: msg.id,
         to: msg.to,
@@ -268,6 +292,13 @@ async function processGuestAccessEmailRetries() {
     failedEmailMessages
   ) {
     try {
+      if (yieldsToGuestJourneyCommunicationsOwner(message)) {
+        log("Email retry yielded to Guest Journey COMMUNICATIONS owner", {
+          id: message.id,
+          communicationType: message.communicationType,
+        });
+        continue;
+      }
       const retryPayload =
         parseGuestAccessEmailRetryPayload(
           message.body
@@ -537,6 +568,13 @@ async function processManualCancellationEmailRetries() {
 
   for (const message of failedEmailMessages) {
     try {
+      if (yieldsToGuestJourneyCommunicationsOwner(message)) {
+        log("Email retry yielded to Guest Journey COMMUNICATIONS owner", {
+          id: message.id,
+          communicationType: message.communicationType,
+        });
+        continue;
+      }
       const reservationId = String(message.reservationId ?? "").trim();
 
       if (!reservationId) {

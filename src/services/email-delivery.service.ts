@@ -160,6 +160,7 @@ async function createMessageLogSafe(args: {
         reservationId: args.reservationId,
         propertyId: args.propertyId ?? null,
         organizationId: args.organizationId ?? null,
+        communicationType: args.type,
       },
     });
   } catch (error) {

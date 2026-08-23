@@ -28,7 +28,9 @@ import type {
 
 export type GuestJourneyShadowClient = Pick<
   PrismaClient,
-  "reservation" | "apmsAuditEntry"
+  | "reservation"
+  | "messageLog"
+  | "apmsAuditEntry"
 >;
 
 export type GuestJourneyShadowMetrics = {

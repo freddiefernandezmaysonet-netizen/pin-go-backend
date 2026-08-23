@@ -110,6 +110,8 @@ function buildEvidenceFingerprint(
   const communicationSignals =
     [...evidence.communications.signals]
       .map((signal) => ({
+        messageLogId:
+          signal.messageLogId,
         communicationType:
           signal.communicationType,
         channel: signal.channel,
@@ -1512,6 +1514,12 @@ export function evaluateCanonicalGuestJourney(
       expectedOutcomeCode:
         "COMMUNICATION_DELIVERY_FINAL",
       payload: {
+        ...(communicationSignal.messageLogId
+          ? {
+              messageLogId:
+                communicationSignal.messageLogId,
+            }
+          : {}),
         communicationType:
           communicationSignal
             .communicationType,
