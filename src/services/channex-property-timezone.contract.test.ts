@@ -34,7 +34,7 @@ test("Channex Full Sync requires the property's validated timezone without a Pue
   assert.doesNotMatch(source, /property\.timezone\s*\?\?\s*["']America\/Puerto_Rico["']/);
 });
 
-test("manual reservation date changes use property timezone, preview fencing, canonical pricing, Channex intent, and reconciliation", () => {
+test("manual reservation date changes use property timezone, preview fencing, canonical runtime dependencies, Channex intent, and reconciliation", () => {
   const source = readSource("./manual-reservation-date-change.service.ts");
   assert.match(source, /fromZonedTime/);
   assert.match(source, /property\.checkInTime/);
@@ -44,9 +44,12 @@ test("manual reservation date changes use property timezone, preview fencing, ca
   assert.match(source, /previewManualReservationDateChangeByHost/);
   assert.match(source, /expectedReservationUpdatedAt/);
   assert.match(source, /expectedProposedTotalAmount/);
-  assert.match(source, /calculateDirectBookingPricing/);
+  assert.match(source, /calculatePricing:\s*calculateDirectBookingPricing/);
+  assert.match(source, /dependencies\.calculatePricing/);
   assert.match(source, /excludeReservationId:\s*reservation\.id/);
-  assert.match(source, /persistChannexAriReservationIntent/);
-  assert.match(source, /await reconcileReservation\(prepared\.reservation\.id\)/);
+  assert.match(source, /persistChannexIntent:\s*persistChannexAriReservationIntent/);
+  assert.match(source, /dependencies\.persistChannexIntent/);
+  assert.match(source, /reconcile:\s*reconcileReservation/);
+  assert.match(source, /await dependencies\.reconcile\(prepared\.reservation\.id\)/);
   assert.match(source, /paymentHandledOutsidePinGo:\s*true/);
 });
