@@ -50,6 +50,14 @@ export class ManualReservationDateChangeError extends Error {
   }
 }
 
+function reservationChangedReviewRequired() {
+  return new ManualReservationDateChangeError(
+    "RESERVATION_CHANGED_REVIEW_REQUIRED",
+    "The reservation changed after the preview. Review the change again before confirming.",
+    409,
+  );
+}
+
 async function prepareManualReservationDateChange(input: {
   organizationId: string;
   reservationId: string;
@@ -187,7 +195,7 @@ export async function changeManualReservationDatesByHost(input: {
   const prepared = await prepareManualReservationDateChange(input, dependencies);
 
   if (prepared.reservation.updatedAt.toISOString() !== input.expectedReservationUpdatedAt) {
-    throw new ManualReservationDateChangeError("RESERVATION_CHANGED_REVIEW_REQUIRED", "The reservation changed after the preview. Review the change again before confirming.", 409);
+    throw reservationChangedReviewRequired();
   }
 
   if (roundMoney(Number(input.expectedProposedTotalAmount)) !== prepared.proposedTotal) {
@@ -219,8 +227,11 @@ export async function changeManualReservationDatesByHost(input: {
   }));
 
   const updated = await dependencies.prisma.$transaction(async (tx: any) => {
-    const row = await tx.reservation.update({
-      where: { id: prepared.reservation.id },
+    const fencedUpdate = await tx.reservation.updateMany({
+      where: {
+        id: prepared.reservation.id,
+        updatedAt: prepared.reservation.updatedAt,
+      },
       data: {
         checkIn: prepared.proposedCheckIn,
         checkOut: prepared.proposedCheckOut,
@@ -228,8 +239,20 @@ export async function changeManualReservationDatesByHost(input: {
         currency: prepared.currency,
         pricingBreakdown,
       },
+    });
+
+    if (fencedUpdate.count !== 1) {
+      throw reservationChangedReviewRequired();
+    }
+
+    const row = await tx.reservation.findUnique({
+      where: { id: prepared.reservation.id },
       select: { id: true, reservationNumber: true, checkIn: true, checkOut: true, totalAmount: true, currency: true },
     });
+
+    if (!row) {
+      throw reservationChangedReviewRequired();
+    }
 
     if (prepared.reservation.property.distributionEnabled === true && prepared.reservation.property.distributionStatus === "ACTIVE") {
       await dependencies.persistChannexIntent({
