@@ -9,6 +9,8 @@ import {
   GUEST_JOURNEY_COORDINATION_INTENT_TYPES,
   GUEST_JOURNEY_COORDINATION_INTENT_VERSION,
   GUEST_JOURNEY_ACCESS_EVALUATION_HANDLER_CODE,
+  GUEST_JOURNEY_MISSION_CONTROL_BRIDGE_VERSION,
+  GUEST_JOURNEY_MISSION_CONTROL_OPERATIONAL_ISSUE_CODE,
   GUEST_JOURNEY_OWNER_RUNTIME_VERSION,
   GUEST_JOURNEY_TARGET_ENGINES,
   TERMINAL_GUEST_JOURNEY_STATES,
@@ -155,6 +157,17 @@ test("pins the E5 owner runtime to ACCESS evaluation only", () => {
   );
 });
 
+test("pins the E6 Mission Control bridge contract without expanding owner execution", () => {
+  assert.equal(
+    GUEST_JOURNEY_MISSION_CONTROL_BRIDGE_VERSION,
+    "guest_journey_mission_control_bridge_v1"
+  );
+  assert.equal(
+    GUEST_JOURNEY_MISSION_CONTROL_OPERATIONAL_ISSUE_CODE,
+    "GUEST_JOURNEY_OWNER_RUNTIME_STATUS"
+  );
+});
+
 test("keeps E1 migrations additive and canonical", () => {
   const combined = lifecycleMigration + "\n" + intentMigration;
 
@@ -184,7 +197,7 @@ test("keeps E1 migrations additive and canonical", () => {
   }
 });
 
-test("keeps E2 shadow, E3 reconciliation, E4 coordination and E5 owner runtime independently default-off", () => {
+test("keeps E2 shadow through E6 Mission Control independently default-off", () => {
   const reservationWorker = readFileSync(
     new URL(
       "../workers/reservation.worker.ts",
@@ -241,6 +254,18 @@ test("keeps E2 shadow, E3 reconciliation, E4 coordination and E5 owner runtime i
     reservationWorker,
     /GUEST_JOURNEY_OWNER_RUNTIME_CONFIG\s*\.enabled/
   );
+  assert.match(
+    reservationWorker,
+    /resolveGuestJourneyMissionControlConfig/
+  );
+  assert.match(
+    reservationWorker,
+    /runGuestJourneyMissionControlCycle/
+  );
+  assert.match(
+    reservationWorker,
+    /GUEST_JOURNEY_MISSION_CONTROL_CONFIG\s*\.enabled/
+  );
 
   const shadowConfig = readFileSync(
     new URL(
@@ -295,6 +320,75 @@ test("keeps E2 shadow, E3 reconciliation, E4 coordination and E5 owner runtime i
   assert.match(
     ownerRuntimeConfig,
     /if \(!value\) return false;/
+  );
+
+  const missionControlConfig =
+    readFileSync(
+      new URL(
+        "./guest-journey-mission-control.config.ts",
+        import.meta.url
+      ),
+      "utf8"
+    );
+
+  assert.match(
+    missionControlConfig,
+    /if \(!value\) return false;/
+  );
+});
+
+test("keeps E6 free of credential, provider, messaging and payment execution", () => {
+  const bridge = readFileSync(
+    new URL(
+      "./guest-journey-mission-control-bridge.service.ts",
+      import.meta.url
+    ),
+    "utf8"
+  );
+  const cycle = readFileSync(
+    new URL(
+      "./guest-journey-mission-control-cycle.service.ts",
+      import.meta.url
+    ),
+    "utf8"
+  );
+  const combined = bridge + "\n" + cycle;
+
+  for (const forbiddenImport of [
+    "ttlock",
+    "mailer",
+    "messaging.service",
+    "email-delivery",
+    "twilio",
+    "stripe",
+    "activateGrant",
+    "deactivateGrant",
+    "sendGuest",
+  ]) {
+    assert.doesNotMatch(
+      combined,
+      new RegExp(
+        `(?:from|import\\()[^\\n]*${forbiddenImport}`,
+        "i"
+      )
+    );
+  }
+
+  assert.doesNotMatch(
+    combined,
+    /ownerEngineExecutions:\s*[1-9]/
+  );
+  assert.doesNotMatch(
+    combined,
+    /credentialWrites:\s*[1-9]/
+  );
+  assert.doesNotMatch(
+    combined,
+    /messageSends:\s*[1-9]/
+  );
+  assert.doesNotMatch(
+    combined,
+    /paymentCalls:\s*[1-9]/
   );
 });
 

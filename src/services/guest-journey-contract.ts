@@ -30,6 +30,12 @@ export const GUEST_JOURNEY_COORDINATION_INTENT_VERSION =
 export const GUEST_JOURNEY_OWNER_RUNTIME_VERSION =
   "guest_journey_owner_runtime_v1" as const;
 
+export const GUEST_JOURNEY_MISSION_CONTROL_BRIDGE_VERSION =
+  "guest_journey_mission_control_bridge_v1" as const;
+
+export const GUEST_JOURNEY_MISSION_CONTROL_OPERATIONAL_ISSUE_CODE =
+  "GUEST_JOURNEY_OWNER_RUNTIME_STATUS" as const;
+
 export const GUEST_JOURNEY_ACCESS_EVALUATION_HANDLER_CODE =
   "ACCESS_EVALUATION_V1" as const;
 

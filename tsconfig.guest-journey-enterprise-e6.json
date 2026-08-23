@@ -1,0 +1,24 @@
+{
+  "compilerOptions": {
+    "noEmit": true,
+    "module": "preserve",
+    "moduleResolution": "bundler",
+    "target": "esnext",
+    "strict": true,
+    "skipLibCheck": true,
+    "types": ["node"]
+  },
+  "include": [
+    "src/apms/operational-intelligence-types.ts",
+    "src/apms/operational-intelligence.service.ts",
+    "src/apms/operational-transition-policy.ts",
+    "src/services/guest-journey-contract.ts",
+    "src/services/guest-journey-owner-runtime.config.ts",
+    "src/services/guest-journey-mission-control.config.ts",
+    "src/services/guest-journey-mission-control.config.test.ts",
+    "src/services/guest-journey-mission-control-bridge.service.ts",
+    "src/services/guest-journey-mission-control-bridge.service.test.ts",
+    "src/services/guest-journey-mission-control-cycle.service.ts",
+    "src/services/guest-journey-mission-control-cycle.service.test.ts"
+  ]
+}

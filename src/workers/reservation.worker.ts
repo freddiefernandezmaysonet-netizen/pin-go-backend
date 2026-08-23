@@ -81,6 +81,12 @@ import {
 import {
   runGuestJourneyOwnerRuntimeCycle,
 } from "../services/guest-journey-owner-runtime-cycle.service";
+import {
+  resolveGuestJourneyMissionControlConfig,
+} from "../services/guest-journey-mission-control.config";
+import {
+  runGuestJourneyMissionControlCycle,
+} from "../services/guest-journey-mission-control-cycle.service";
 
 
 console.log("[reservation.worker] BOOT", new Date().toISOString());
@@ -123,6 +129,10 @@ let guestJourneyCoordinationCursor:
   string | null = null;
 const GUEST_JOURNEY_OWNER_RUNTIME_CONFIG =
   resolveGuestJourneyOwnerRuntimeConfig();
+const GUEST_JOURNEY_MISSION_CONTROL_CONFIG =
+  resolveGuestJourneyMissionControlConfig();
+let guestJourneyMissionControlCursor:
+  string | null = null;
 const REMINDER_HOURS = Number(
   process.env.GUEST_LINK_REMINDER_HOURS ??
     24
@@ -2515,6 +2525,37 @@ async function tick() {
         );
       }
     }
+
+    if (
+      GUEST_JOURNEY_MISSION_CONTROL_CONFIG
+        .enabled
+    ) {
+      try {
+        const missionControlMetrics =
+          await runGuestJourneyMissionControlCycle(
+            prisma,
+            GUEST_JOURNEY_MISSION_CONTROL_CONFIG,
+            GUEST_JOURNEY_OWNER_RUNTIME_CONFIG,
+            {
+              now,
+              cursor:
+                guestJourneyMissionControlCursor,
+            }
+          );
+
+        guestJourneyMissionControlCursor =
+          missionControlMetrics.nextCursor;
+        log(
+          "guest-journey-mission-control-bridge",
+          missionControlMetrics
+        );
+      } catch (e) {
+        errLog(
+          "guest-journey-mission-control-bridge crashed:",
+          toErrString(e)
+        );
+      }
+    }
   } finally {
     tickRunning = false;
   }
@@ -2555,6 +2596,14 @@ async function start() {
   log(
     `Guest Journey owner runtime: ${
       GUEST_JOURNEY_OWNER_RUNTIME_CONFIG
+        .enabled
+        ? "on"
+        : "off"
+    }`
+  );
+  log(
+    `Guest Journey Mission Control bridge: ${
+      GUEST_JOURNEY_MISSION_CONTROL_CONFIG
         .enabled
         ? "on"
         : "off"
