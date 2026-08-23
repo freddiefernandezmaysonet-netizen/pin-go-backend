@@ -1,0 +1,47 @@
+name: Manual Reservation Date Change Certification
+
+on:
+  pull_request:
+    paths:
+      - "src/services/manual-reservation-date-change.service.ts"
+      - "src/services/manual-reservation-date-change.contract.test.ts"
+      - "src/routes/dashboard.manual-reservation-date-change.route.ts"
+      - "src/routes/dashboard.manual-reservation-date-change.route.test.ts"
+      - "src/routes/dashboard.route.ts"
+      - "src/services/direct-booking-pricing.service.ts"
+      - "src/services/reservation.reconcile.service.ts"
+      - "src/pms/outbound/channex-ari-reservation-producer.service.ts"
+      - ".github/workflows/manual-reservation-date-change-certification.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  certify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      DATABASE_URL: postgresql://test:test@localhost:5432/pingo_ci
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+      - name: Use Node.js 22
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+      - name: Install locked dependencies
+        run: npm ci --silent --no-audit --no-fund
+      - name: Validate Prisma schema
+        run: npx prisma validate --schema ./prisma
+      - name: Certify manual reservation date change contract
+        run: >-
+          npx tsx --test
+          src/services/manual-reservation-date-change.contract.test.ts
+          src/routes/dashboard.manual-reservation-date-change.route.test.ts
+      - name: Load hardened service
+        run: >-
+          npx tsx -e "import('./src/services/manual-reservation-date-change.service.ts').then((m) => {
+          if (typeof m.previewManualReservationDateChangeByHost !== 'function') process.exit(1);
+          if (typeof m.changeManualReservationDatesByHost !== 'function') process.exit(1);
+          })"
