@@ -6,6 +6,22 @@ import { persistChannexAriReservationIntent } from "../pms/outbound/channex-ari-
 
 const prisma = new PrismaClient();
 
+export type ManualReservationDateChangeDependencies = {
+  prisma: any;
+  calculatePricing: typeof calculateDirectBookingPricing;
+  reconcile: typeof reconcileReservation;
+  persistChannexIntent: typeof persistChannexAriReservationIntent;
+  now: () => Date;
+};
+
+const defaultDependencies: ManualReservationDateChangeDependencies = {
+  prisma,
+  calculatePricing: calculateDirectBookingPricing,
+  reconcile: reconcileReservation,
+  persistChannexIntent: persistChannexAriReservationIntent,
+  now: () => new Date(),
+};
+
 function isDateOnly(value: unknown): value is string {
   return typeof value === "string" && /^\d{4}-\d{2}-\d{2}$/.test(value.trim());
 }
@@ -39,12 +55,12 @@ async function prepareManualReservationDateChange(input: {
   reservationId: string;
   checkInDate: string;
   checkOutDate: string;
-}) {
+}, dependencies: ManualReservationDateChangeDependencies = defaultDependencies) {
   if (!isDateOnly(input.checkInDate) || !isDateOnly(input.checkOutDate)) {
     throw new ManualReservationDateChangeError("INVALID_RESERVATION_DATES", "Check-in and check-out must use YYYY-MM-DD.", 400);
   }
 
-  const reservation = await prisma.reservation.findFirst({
+  const reservation = await dependencies.prisma.reservation.findFirst({
     where: { id: input.reservationId, property: { organizationId: input.organizationId } },
     select: {
       id: true,
@@ -84,9 +100,9 @@ async function prepareManualReservationDateChange(input: {
   if (Number.isNaN(proposedCheckIn.getTime()) || Number.isNaN(proposedCheckOut.getTime()) || proposedCheckOut <= proposedCheckIn) {
     throw new ManualReservationDateChangeError("INVALID_RESERVATION_DATES", "Check-in and check-out dates are invalid.", 400);
   }
-  if (proposedCheckIn <= new Date()) throw new ManualReservationDateChangeError("RESERVATION_DATE_CHANGE_REQUIRES_FUTURE_STAY", "Reservation dates must remain in the future.", 409);
+  if (proposedCheckIn <= dependencies.now()) throw new ManualReservationDateChangeError("RESERVATION_DATE_CHANGE_REQUIRES_FUTURE_STAY", "Reservation dates must remain in the future.", 409);
 
-  const conflictingReservation = await prisma.reservation.findFirst({
+  const conflictingReservation = await dependencies.prisma.reservation.findFirst({
     where: {
       id: { not: reservation.id },
       propertyId: reservation.propertyId,
@@ -98,7 +114,7 @@ async function prepareManualReservationDateChange(input: {
   });
   if (conflictingReservation) throw new ManualReservationDateChangeError("RESERVATION_DATE_CHANGE_CONFLICT", "The proposed dates conflict with another active reservation.", 409, { conflictingReservationId: conflictingReservation.id });
 
-  const pricing = await calculateDirectBookingPricing({
+  const pricing = await dependencies.calculatePricing({
     propertyId: reservation.propertyId,
     checkIn: proposedCheckIn,
     checkOut: proposedCheckOut,
@@ -128,8 +144,8 @@ export async function previewManualReservationDateChangeByHost(input: {
   reservationId: string;
   checkInDate: string;
   checkOutDate: string;
-}) {
-  const prepared = await prepareManualReservationDateChange(input);
+}, dependencies: ManualReservationDateChangeDependencies = defaultDependencies) {
+  const prepared = await prepareManualReservationDateChange(input, dependencies);
   const nights = Number((prepared.pricing as any).nights ?? 0);
 
   return {
@@ -163,12 +179,12 @@ export async function changeManualReservationDatesByHost(input: {
   requestedByUserId: string;
   expectedReservationUpdatedAt: string;
   expectedProposedTotalAmount: number;
-}) {
+}, dependencies: ManualReservationDateChangeDependencies = defaultDependencies) {
   if (!input.expectedReservationUpdatedAt || !Number.isFinite(Number(input.expectedProposedTotalAmount))) {
     throw new ManualReservationDateChangeError("DATE_CHANGE_PREVIEW_REQUIRED", "Review the proposed reservation change before confirming.", 409);
   }
 
-  const prepared = await prepareManualReservationDateChange(input);
+  const prepared = await prepareManualReservationDateChange(input, dependencies);
 
   if (prepared.reservation.updatedAt.toISOString() !== input.expectedReservationUpdatedAt) {
     throw new ManualReservationDateChangeError("RESERVATION_CHANGED_REVIEW_REQUIRED", "The reservation changed after the preview. Review the change again before confirming.", 409);
@@ -181,7 +197,7 @@ export async function changeManualReservationDatesByHost(input: {
     });
   }
 
-  const requestedAt = new Date();
+  const requestedAt = dependencies.now();
   const previous = { checkIn: prepared.reservation.checkIn, checkOut: prepared.reservation.checkOut, status: "ACTIVE" as const };
   const pricingBreakdown = JSON.parse(JSON.stringify({
     source: "MANUAL_RESERVATION_DATE_CHANGE",
@@ -202,7 +218,7 @@ export async function changeManualReservationDatesByHost(input: {
     requestedByUserId: input.requestedByUserId,
   }));
 
-  const updated = await prisma.$transaction(async (tx) => {
+  const updated = await dependencies.prisma.$transaction(async (tx: any) => {
     const row = await tx.reservation.update({
       where: { id: prepared.reservation.id },
       data: {
@@ -216,7 +232,7 @@ export async function changeManualReservationDatesByHost(input: {
     });
 
     if (prepared.reservation.property.distributionEnabled === true && prepared.reservation.property.distributionStatus === "ACTIVE") {
-      await persistChannexAriReservationIntent({
+      await dependencies.persistChannexIntent({
         db: tx,
         organizationId: prepared.reservation.property.organizationId,
         propertyId: prepared.reservation.propertyId,
@@ -232,7 +248,7 @@ export async function changeManualReservationDatesByHost(input: {
     return row;
   });
 
-  await reconcileReservation(prepared.reservation.id);
+  await dependencies.reconcile(prepared.reservation.id);
 
   return {
     ok: true,
