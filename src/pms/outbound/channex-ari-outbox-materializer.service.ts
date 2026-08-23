@@ -184,7 +184,11 @@ export async function materializeNextChannexAriOutboxBatch(
 
   try {
     const plan = buildPlan({
-      events: claimed.events as unknown as ChannexAriCoalescingEvent[],
+      events: claimed.events.map((event) => ({
+        ...event,
+        changedFields:
+          event.changedFields.length > 0 ? event.changedFields : undefined,
+      })) as unknown as ChannexAriCoalescingEvent[],
       snapshotAt: startedAt,
     });
     const mapping = await resolveMapping(

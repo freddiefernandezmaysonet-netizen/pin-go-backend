@@ -21,15 +21,32 @@ export type ChannexAriRatesRestrictionsSourceValue = {
   maxStay: number;
 };
 
-export type ChannexAriRatesRestrictionsValue = {
+export type ChannexAriRatesRestrictionsChangedField =
+  | "rate"
+  | "minStayArrival"
+  | "minStayThrough"
+  | "maxStay";
+
+type ChannexAriRatesRestrictionsFields = {
   property_id: string;
   rate_plan_id: string;
-  date: string;
-  rate: ChannexAriRate;
-  min_stay_arrival: number;
-  min_stay_through: number;
-  max_stay: number;
+  rate?: ChannexAriRate;
+  min_stay_arrival?: number;
+  min_stay_through?: number;
+  max_stay?: number;
 };
+
+export type ChannexAriRatesRestrictionsValue =
+  ChannexAriRatesRestrictionsFields &
+    (
+      | { date: string; date_from?: never; date_to?: never }
+      | { date?: never; date_from: string; date_to: string }
+    );
+
+type NormalizedChannexAriRatesRestrictionsValue = Omit<
+  ChannexAriRatesRestrictionsFields,
+  "property_id" | "rate_plan_id"
+> & { date: string };
 
 export type ChannexAriRatesRestrictionsPayload = {
   values: ChannexAriRatesRestrictionsValue[];
@@ -102,10 +119,38 @@ function assertNonNegativeInteger(value: number, index: number): number {
   return value;
 }
 
+const ALL_CHANGED_FIELDS: ChannexAriRatesRestrictionsChangedField[] = [
+  "rate",
+  "minStayArrival",
+  "minStayThrough",
+  "maxStay",
+];
+
+function normalizeChangedFields(
+  changedFields: ChannexAriRatesRestrictionsChangedField[] | undefined
+): ChannexAriRatesRestrictionsChangedField[] {
+  if (changedFields === undefined) return [...ALL_CHANGED_FIELDS];
+
+  if (!Array.isArray(changedFields) || changedFields.length === 0) {
+    throw new Error("CHANNEX_ARI_CHANGED_FIELDS_REQUIRED");
+  }
+
+  const normalized = Array.from(new Set(changedFields));
+
+  if (
+    normalized.length !== changedFields.length ||
+    normalized.some((field) => !ALL_CHANGED_FIELDS.includes(field))
+  ) {
+    throw new Error("CHANNEX_ARI_CHANGED_FIELDS_INVALID");
+  }
+
+  return ALL_CHANGED_FIELDS.filter((field) => normalized.includes(field));
+}
+
 
 function sameCanonicalValue(
-  left: Omit<ChannexAriRatesRestrictionsValue, "property_id" | "rate_plan_id">,
-  right: Omit<ChannexAriRatesRestrictionsValue, "property_id" | "rate_plan_id">
+  left: NormalizedChannexAriRatesRestrictionsValue,
+  right: NormalizedChannexAriRatesRestrictionsValue
 ): boolean {
   return (
     stringifyChannexAriCanonicalJson(left) ===
@@ -113,9 +158,23 @@ function sameCanonicalValue(
   );
 }
 
+function sameChangedFields(
+  left: NormalizedChannexAriRatesRestrictionsValue,
+  right: NormalizedChannexAriRatesRestrictionsValue
+): boolean {
+  const { date: _leftDate, ...leftFields } = left;
+  const { date: _rightDate, ...rightFields } = right;
+
+  return (
+    stringifyChannexAriCanonicalJson(leftFields) ===
+    stringifyChannexAriCanonicalJson(rightFields)
+  );
+}
+
 export function buildChannexAriRatesRestrictionsSnapshot(input: {
   channexPropertyId: string;
   channexRatePlanId: string;
+  changedFields?: ChannexAriRatesRestrictionsChangedField[];
   values: ChannexAriRatesRestrictionsSourceValue[];
 }): ChannexAriRatesRestrictionsSnapshot {
   const channexPropertyId = requireText(
@@ -131,39 +190,59 @@ export function buildChannexAriRatesRestrictionsSnapshot(input: {
     throw new Error("CHANNEX_ARI_RATES_RESTRICTIONS_VALUES_REQUIRED");
   }
 
+  const changedFields = normalizeChangedFields(input.changedFields);
+
   const normalizedByDate = new Map<
     string,
-    Omit<ChannexAriRatesRestrictionsValue, "property_id" | "rate_plan_id">
+    NormalizedChannexAriRatesRestrictionsValue
   >();
 
   input.values.forEach((sourceValue, index) => {
     const date = assertDateKey(sourceValue.date, `value_${index}`);
-    const rate = assertValidRate(sourceValue.rate, index);
-    const minStayArrival = assertPositiveInteger(
-      sourceValue.minStayArrival,
-      "MIN_STAY_ARRIVAL",
-      index
-    );
-    const minStayThrough = assertPositiveInteger(
-      sourceValue.minStayThrough,
-      "MIN_STAY_THROUGH",
-      index
-    );
-    const maxStay = assertNonNegativeInteger(sourceValue.maxStay, index);
+    const includesRate = changedFields.includes("rate");
+    const includesMinStayArrival = changedFields.includes("minStayArrival");
+    const includesMinStayThrough = changedFields.includes("minStayThrough");
+    const includesMaxStay = changedFields.includes("maxStay");
+    const rate = includesRate
+      ? assertValidRate(sourceValue.rate, index)
+      : undefined;
+    const minStayArrival = includesMinStayArrival
+      ? assertPositiveInteger(
+          sourceValue.minStayArrival,
+          "MIN_STAY_ARRIVAL",
+          index
+        )
+      : undefined;
+    const minStayThrough = includesMinStayThrough
+      ? assertPositiveInteger(
+          sourceValue.minStayThrough,
+          "MIN_STAY_THROUGH",
+          index
+        )
+      : undefined;
+    const maxStay = includesMaxStay
+      ? assertNonNegativeInteger(sourceValue.maxStay, index)
+      : undefined;
 
     if (
+      maxStay !== undefined &&
       maxStay > 0 &&
-      (maxStay < minStayArrival || maxStay < minStayThrough)
+      ((minStayArrival !== undefined && maxStay < minStayArrival) ||
+        (minStayThrough !== undefined && maxStay < minStayThrough))
     ) {
       throw new Error(`CHANNEX_ARI_MAX_STAY_${index}_BELOW_MINIMUM`);
     }
 
     const normalizedValue = {
       date,
-      rate,
-      min_stay_arrival: minStayArrival,
-      min_stay_through: minStayThrough,
-      max_stay: maxStay,
+      ...(rate !== undefined ? { rate } : {}),
+      ...(minStayArrival !== undefined
+        ? { min_stay_arrival: minStayArrival }
+        : {}),
+      ...(minStayThrough !== undefined
+        ? { min_stay_through: minStayThrough }
+        : {}),
+      ...(maxStay !== undefined ? { max_stay: maxStay } : {}),
     };
     const existing = normalizedByDate.get(date);
 
@@ -197,13 +276,39 @@ export function buildChannexAriRatesRestrictionsSnapshot(input: {
     throw new Error("CHANNEX_ARI_RATES_RESTRICTIONS_SCOPE_EXCEEDS_HORIZON");
   }
 
-  const values: ChannexAriRatesRestrictionsValue[] = normalizedValues.map(
-    (value) => ({
+  const values: ChannexAriRatesRestrictionsValue[] = [];
+
+  for (let index = 0; index < normalizedValues.length; ) {
+    const first = normalizedValues[index];
+    let lastIndex = index;
+
+    while (
+      lastIndex + 1 < normalizedValues.length &&
+      normalizedValues[lastIndex + 1].date ===
+        addUtcDays(normalizedValues[lastIndex].date, 1) &&
+      sameChangedFields(first, normalizedValues[lastIndex + 1])
+    ) {
+      lastIndex += 1;
+    }
+
+    const { date, ...changedValues } = first;
+    const identity = {
       property_id: channexPropertyId,
       rate_plan_id: channexRatePlanId,
-      ...value,
-    })
-  );
+    };
+
+    values.push(
+      lastIndex === index
+        ? { ...identity, date, ...changedValues }
+        : {
+            ...identity,
+            date_from: date,
+            date_to: normalizedValues[lastIndex].date,
+            ...changedValues,
+          }
+    );
+    index = lastIndex + 1;
+  }
   const payload: ChannexAriRatesRestrictionsPayload = { values };
   const integrity =
     calculateChannexAriCanonicalJsonIntegrity(payload);

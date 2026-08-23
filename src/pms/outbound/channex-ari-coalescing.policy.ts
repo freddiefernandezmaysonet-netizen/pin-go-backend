@@ -9,6 +9,7 @@ import {
   type ChannexAriMessageKind,
   type ChannexAriSyncMode,
 } from "./channex-ari-lifecycle.policy";
+import type { ChannexAriRatesRestrictionsChangedField } from "./channex-ari-rates-restrictions-snapshot.policy";
 
 export type ChannexAriOutboxScope =
   | "EXACT_DATES"
@@ -26,6 +27,7 @@ export type ChannexAriCoalescingEvent = {
   dateFrom: Date | string | null;
   dateToExclusive: Date | string | null;
   dateKeys: string[];
+  changedFields?: ChannexAriRatesRestrictionsChangedField[];
   correlationId?: string | null;
   availableAt: Date;
   createdAt: Date;
@@ -41,6 +43,7 @@ export type ChannexAriCoalescingPlan = {
   dateFrom: string;
   dateToExclusive: string;
   dateKeys: string[];
+  changedFields?: ChannexAriRatesRestrictionsChangedField[];
   correlationId: string | null;
   correlationIds: string[];
   mergedEventIds: string[];
@@ -71,6 +74,46 @@ function requireText(value: unknown, errorCode: string): string {
 function normalizeOptionalText(value: unknown): string | null {
   const normalized = String(value ?? "").trim();
   return normalized || null;
+}
+
+const CHANNEX_ARI_CHANGED_FIELD_ORDER: ChannexAriRatesRestrictionsChangedField[] = [
+  "rate",
+  "minStayArrival",
+  "minStayThrough",
+  "maxStay",
+];
+
+function normalizeChangedFields(input: {
+  messageKind: ChannexAriMessageKind;
+  syncMode: ChannexAriSyncMode;
+  changedFields: ChannexAriRatesRestrictionsChangedField[] | undefined;
+}): ChannexAriRatesRestrictionsChangedField[] | undefined {
+  if (input.changedFields === undefined) return undefined;
+
+  if (input.messageKind !== "RATES_RESTRICTIONS") {
+    throw new Error("CHANNEX_ARI_AVAILABILITY_CHANGED_FIELDS_NOT_ALLOWED");
+  }
+
+  if (input.syncMode === "FULL") {
+    throw new Error("CHANNEX_ARI_FULL_SYNC_CHANGED_FIELDS_NOT_ALLOWED");
+  }
+
+  if (!Array.isArray(input.changedFields) || input.changedFields.length === 0) {
+    throw new Error("CHANNEX_ARI_CHANGED_FIELDS_REQUIRED");
+  }
+
+  const unique = Array.from(new Set(input.changedFields));
+
+  if (
+    unique.length !== input.changedFields.length ||
+    unique.some((field) => !CHANNEX_ARI_CHANGED_FIELD_ORDER.includes(field))
+  ) {
+    throw new Error("CHANNEX_ARI_CHANGED_FIELDS_INVALID");
+  }
+
+  return CHANNEX_ARI_CHANGED_FIELD_ORDER.filter((field) =>
+    unique.includes(field)
+  );
 }
 
 function assertValidInstant(value: Date, errorCode: string): Date {
@@ -154,6 +197,11 @@ function normalizeEvent(event: ChannexAriCoalescingEvent): NormalizedEvent {
   }
 
   const dateKeys = normalizeDateKeys(event.dateKeys ?? []);
+  const changedFields = normalizeChangedFields({
+    messageKind: event.messageKind,
+    syncMode: event.syncMode,
+    changedFields: event.changedFields,
+  });
 
   if (event.syncMode === "FULL") {
     if (event.scope !== "FULL_HORIZON") {
@@ -200,6 +248,7 @@ function normalizeEvent(event: ChannexAriCoalescingEvent): NormalizedEvent {
     dateFrom,
     dateToExclusive,
     dateKeys,
+    ...(changedFields !== undefined ? { changedFields } : {}),
     availableAt,
     createdAt,
   };
@@ -289,6 +338,14 @@ function buildIncrementalPlan(input: {
   const mergedRanges = mergeDateRanges(ranges);
   const canRemainRange = !hasExactDateScope && mergedRanges.length === 1;
   const correlationIds = normalizeDateKeys([]) as string[];
+  const everyEventHasChangedFields = input.events.every(
+    (event) => event.changedFields !== undefined
+  );
+  const changedFields = everyEventHasChangedFields
+    ? CHANNEX_ARI_CHANGED_FIELD_ORDER.filter((field) =>
+        input.events.some((event) => event.changedFields?.includes(field))
+      )
+    : undefined;
 
   for (const event of input.events) {
     const correlationId = normalizeOptionalText(event.correlationId);
@@ -310,6 +367,7 @@ function buildIncrementalPlan(input: {
     dateFrom,
     dateToExclusive,
     dateKeys: canRemainRange ? [] : dateKeys,
+    ...(changedFields !== undefined ? { changedFields } : {}),
     correlationId: correlationIds.length === 1 ? correlationIds[0] : null,
     correlationIds,
     mergedEventIds: input.events.map((event) => event.id),

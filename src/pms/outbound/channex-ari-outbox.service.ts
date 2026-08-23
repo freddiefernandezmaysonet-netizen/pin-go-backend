@@ -12,6 +12,7 @@ import {
   type ChannexAriMessageKind,
   type ChannexAriSyncMode,
 } from "./channex-ari-lifecycle.policy";
+import type { ChannexAriRatesRestrictionsChangedField } from "./channex-ari-rates-restrictions-snapshot.policy";
 
 type ChannexAriOutboxDb = Pick<
   Prisma.TransactionClient,
@@ -36,6 +37,7 @@ type ChannexAriOutboxBaseInput = ChannexAriOutboxSource & {
 export type CreateIncrementalChannexAriOutboxEventInput =
   ChannexAriOutboxBaseInput & {
     syncMode?: "INCREMENTAL";
+    changedFields?: ChannexAriRatesRestrictionsChangedField[];
     dateKeys?: string[];
     dateRange?: ChannexAriDateRange;
     todayDateKey?: never;
@@ -47,6 +49,7 @@ export type CreateFullChannexAriOutboxEventInput =
     todayDateKey: string;
     dateKeys?: never;
     dateRange?: never;
+    changedFields?: never;
     coalesceMs?: 0;
   };
 
@@ -217,6 +220,46 @@ function validateMessageKind(
   return value;
 }
 
+const CHANNEX_ARI_CHANGED_FIELD_ORDER: ChannexAriRatesRestrictionsChangedField[] = [
+  "rate",
+  "minStayArrival",
+  "minStayThrough",
+  "maxStay",
+];
+
+function normalizeChangedFields(input: {
+  messageKind: ChannexAriMessageKind;
+  syncMode: ChannexAriSyncMode;
+  changedFields?: ChannexAriRatesRestrictionsChangedField[];
+}): ChannexAriRatesRestrictionsChangedField[] {
+  if (input.changedFields === undefined) return [];
+
+  if (input.messageKind !== "RATES_RESTRICTIONS") {
+    throw new Error("CHANNEX_ARI_AVAILABILITY_CHANGED_FIELDS_NOT_ALLOWED");
+  }
+
+  if (input.syncMode === "FULL") {
+    throw new Error("CHANNEX_ARI_FULL_SYNC_CHANGED_FIELDS_NOT_ALLOWED");
+  }
+
+  if (!Array.isArray(input.changedFields) || input.changedFields.length === 0) {
+    throw new Error("CHANNEX_ARI_CHANGED_FIELDS_REQUIRED");
+  }
+
+  const unique = Array.from(new Set(input.changedFields));
+
+  if (
+    unique.length !== input.changedFields.length ||
+    unique.some((field) => !CHANNEX_ARI_CHANGED_FIELD_ORDER.includes(field))
+  ) {
+    throw new Error("CHANNEX_ARI_CHANGED_FIELDS_INVALID");
+  }
+
+  return CHANNEX_ARI_CHANGED_FIELD_ORDER.filter((field) =>
+    unique.includes(field)
+  );
+}
+
 export async function createChannexAriOutboxEvent(
   db: ChannexAriOutboxDb,
   input: CreateChannexAriOutboxEventInput
@@ -236,6 +279,11 @@ export async function createChannexAriOutboxEvent(
   const correlationId = normalizeOptionalText(input.correlationId);
   const now = assertValidNow(input.now);
   const normalizedScope = normalizeScope(input);
+  const changedFields = normalizeChangedFields({
+    messageKind,
+    syncMode: normalizedScope.syncMode,
+    changedFields: input.changedFields,
+  });
   const availableAt = resolveAvailableAt({
     now,
     syncMode: normalizedScope.syncMode,
@@ -261,6 +309,7 @@ export async function createChannexAriOutboxEvent(
       dateFrom: toDatabaseDate(normalizedScope.dateFrom),
       dateToExclusive: toDatabaseDate(normalizedScope.dateToExclusive),
       dateKeys: normalizedScope.dateKeys,
+      changedFields,
       trigger,
       sourceEntityType,
       sourceEntityId,

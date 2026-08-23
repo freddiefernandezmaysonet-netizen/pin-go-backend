@@ -21,25 +21,14 @@ test("builds a canonical Availability-only payload", () => {
       {
         property_id: "property-1",
         room_type_id: "room-1",
-        date: "2026-08-01",
-        availability: 1,
-      },
-      {
-        property_id: "property-1",
-        room_type_id: "room-1",
-        date: "2026-08-02",
-        availability: 1,
-      },
-      {
-        property_id: "property-1",
-        room_type_id: "room-1",
-        date: "2026-08-03",
+        date_from: "2026-08-01",
+        date_to: "2026-08-03",
         availability: 1,
       },
     ],
   });
   assert.deepEqual(snapshot.unavailableDateKeys, []);
-  assert.equal(snapshot.payloadValueCount, 3);
+  assert.equal(snapshot.payloadValueCount, 1);
   assert.equal(snapshot.dateFrom, "2026-08-01");
   assert.equal(snapshot.dateToExclusive, "2026-08-04");
   assert.ok(snapshot.payloadBytes > 0);
@@ -49,7 +38,8 @@ test("builds a canonical Availability-only payload", () => {
     assert.deepEqual(Object.keys(value), [
       "property_id",
       "room_type_id",
-      "date",
+      "date_from",
+      "date_to",
       "availability",
     ]);
   }
@@ -80,9 +70,75 @@ test("keeps the reservation checkout date available", () => {
     "2026-08-03",
   ]);
   assert.deepEqual(
-    snapshot.payload.values.map((value) => value.availability),
-    [0, 0, 0, 1]
+    snapshot.payload.values,
+    [
+      {
+        property_id: "property-1",
+        room_type_id: "room-1",
+        date_from: "2026-08-01",
+        date_to: "2026-08-03",
+        availability: 0,
+      },
+      {
+        property_id: "property-1",
+        room_type_id: "room-1",
+        date: "2026-08-04",
+        availability: 1,
+      },
+    ]
   );
+});
+
+test("certification #9 emits one open single-unit date for the frozen room type", () => {
+  const snapshot = buildChannexAriAvailabilitySnapshot({
+    channexPropertyId: "1d699e11-593c-4a3d-b66a-28741759e82f",
+    channexRoomTypeId: "31a7161d-cd47-4f38-b5f4-4b9e11d4e6f9",
+    propertyTimezone: "America/Puerto_Rico",
+    dateKeys: ["2026-11-21"],
+  });
+
+  assert.deepEqual(snapshot.payload.values, [
+    {
+      property_id: "1d699e11-593c-4a3d-b66a-28741759e82f",
+      room_type_id: "31a7161d-cd47-4f38-b5f4-4b9e11d4e6f9",
+      date: "2026-11-21",
+      availability: 1,
+    },
+  ]);
+  const value = snapshot.payload.values[0] as Record<string, unknown>;
+  assert.equal("date_from" in value, false);
+  assert.equal("date_to" in value, false);
+  assert.equal(snapshot.payloadValueCount, 1);
+});
+
+test("certification #10 merges consecutive equal availability using inclusive date ranges", () => {
+  const snapshot = buildChannexAriAvailabilitySnapshot({
+    channexPropertyId: "1d699e11-593c-4a3d-b66a-28741759e82f",
+    channexRoomTypeId: "31a7161d-cd47-4f38-b5f4-4b9e11d4e6f9",
+    propertyTimezone: "America/Puerto_Rico",
+    dateKeys: [
+      "2026-11-10",
+      "2026-11-11",
+      "2026-11-12",
+      "2026-11-13",
+      "2026-11-14",
+      "2026-11-15",
+      "2026-11-16",
+    ],
+  });
+
+  assert.deepEqual(snapshot.payload.values, [
+    {
+      property_id: "1d699e11-593c-4a3d-b66a-28741759e82f",
+      room_type_id: "31a7161d-cd47-4f38-b5f4-4b9e11d4e6f9",
+      date_from: "2026-11-10",
+      date_to: "2026-11-16",
+      availability: 1,
+    },
+  ]);
+  assert.equal(snapshot.payloadValueCount, 1);
+  assert.equal(snapshot.dateFrom, "2026-11-10");
+  assert.equal(snapshot.dateToExclusive, "2026-11-17");
 });
 
 test("uses the property timezone rather than UTC calendar slices", () => {
@@ -139,7 +195,15 @@ test("combines active reservations and manual blocks without double counting", (
     "2026-08-04",
     "2026-08-05",
   ]);
-  assert.equal(snapshot.payload.values.length, 5);
+  assert.deepEqual(snapshot.payload.values, [
+    {
+      property_id: "property-1",
+      room_type_id: "room-1",
+      date_from: "2026-08-01",
+      date_to: "2026-08-05",
+      availability: 0,
+    },
+  ]);
 });
 
 test("preserves a partial same-day manual block", () => {
@@ -208,7 +272,16 @@ test("accepts exactly 500 contiguous dates", () => {
     dateKeys: buildDateKeys("2026-07-28", 500),
   });
 
-  assert.equal(snapshot.payloadValueCount, 500);
+  assert.equal(snapshot.payloadValueCount, 1);
+  assert.deepEqual(snapshot.payload.values, [
+    {
+      property_id: "property-1",
+      room_type_id: "room-1",
+      date_from: "2026-07-28",
+      date_to: "2027-12-09",
+      availability: 1,
+    },
+  ]);
   assert.equal(snapshot.dateFrom, "2026-07-28");
   assert.equal(snapshot.dateToExclusive, "2027-12-10");
 });

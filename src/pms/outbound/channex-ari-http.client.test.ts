@@ -153,6 +153,41 @@ test("posts Availability with the certified endpoint, headers and limits", async
   assert.equal(JSON.stringify(result).includes(API_KEY), false);
 });
 
+test("certification #10 sends compacted Availability ranges without transforming the body", async () => {
+  const payload = {
+    values: [
+      {
+        property_id: "certification-property",
+        room_type_id: "31a7161d-cd47-4f38-b5f4-4b9e11d4e6f9",
+        date_from: "2026-11-10",
+        date_to: "2026-11-16",
+        availability: 1,
+      },
+    ],
+  };
+  const mock = createMockTransport(async () => ({
+    status: 200,
+    data: { data: [{ id: "task-range-1", type: "task" }] },
+  }));
+
+  await sendChannexAriHttpRequest({
+    messageKind: "AVAILABILITY",
+    payload,
+    apiKey: API_KEY,
+    baseUrl: "https://staging.example.test",
+    receivedAt: RECEIVED_AT,
+    transport: mock.transport,
+  });
+
+  assert.equal(mock.calls.length, 1);
+  assert.equal(
+    mock.calls[0].url,
+    "https://staging.example.test/api/v1/availability"
+  );
+  assert.deepEqual(mock.calls[0].data, payload);
+  assert.equal("date" in (mock.calls[0].data as any).values[0], false);
+});
+
 test("extracts the task ID from the Channex task resource array", async () => {
   const payload = availabilityPayload();
 
@@ -251,6 +286,43 @@ test("posts Rates & Restrictions independently with custom timeout", async () =>
     rawResponseText: '{"task_id":"task-restrictions-1"}',
     requestId: "request-restrictions-1",
   });
+});
+
+test("certification #4 sends one compacted rate-only range without transforming the body", async () => {
+  const payload = {
+    values: [
+      {
+        property_id: "1d699e11-593c-4a3d-b66a-28741759e82f",
+        rate_plan_id: "daa6211c-bd9b-455f-b526-4136550b9a92",
+        date_from: "2026-11-01",
+        date_to: "2026-11-10",
+        rate: 24100,
+      },
+    ],
+  };
+  const mock = createMockTransport(async () => ({
+    status: 200,
+    data: { data: [{ id: "task-rate-range-1", type: "task" }] },
+  }));
+
+  await sendChannexAriHttpRequest({
+    messageKind: "RATES_RESTRICTIONS",
+    payload,
+    apiKey: API_KEY,
+    baseUrl: "https://staging.example.test",
+    receivedAt: RECEIVED_AT,
+    transport: mock.transport,
+  });
+
+  assert.equal(mock.calls.length, 1);
+  assert.equal(
+    mock.calls[0].url,
+    "https://staging.example.test/api/v1/restrictions"
+  );
+  assert.deepEqual(mock.calls[0].data, payload);
+  assert.equal("date" in (mock.calls[0].data as any).values[0], false);
+  assert.equal("min_stay_arrival" in (mock.calls[0].data as any).values[0], false);
+  assert.equal("max_stay" in (mock.calls[0].data as any).values[0], false);
 });
 
 test(

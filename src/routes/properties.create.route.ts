@@ -1,5 +1,6 @@
 import { Router } from "express";
 import type { PrismaClient } from "@prisma/client";
+import { requireIanaTimezone } from "../lib/iana-timezone";
 import { requireAuth } from "../middleware/requireAuth";
 import { provisionProperty } from "../services/property-provisioning.service";
 
@@ -40,10 +41,19 @@ export function buildCreatePropertyRouter(prisma: PrismaClient) {
         req.body?.region != null ? String(req.body.region).trim() : null;
       const country =
         req.body?.country != null ? String(req.body.country).trim() : null;
-      const timezone =
-        req.body?.timezone != null
-          ? String(req.body.timezone).trim()
-          : "America/Puerto_Rico";
+
+      let timezone: string;
+      try {
+        timezone = requireIanaTimezone(req.body?.timezone);
+      } catch (error: any) {
+        return res.status(400).json({
+          ok: false,
+          error:
+            error?.message === "PROPERTY_TIMEZONE_REQUIRED"
+              ? "Property timezone is required"
+              : "Property timezone must be a valid IANA timezone",
+        });
+      }
 
       const latitudeRaw = req.body?.latitude;
       const longitudeRaw = req.body?.longitude;
@@ -160,25 +170,25 @@ export function buildCreatePropertyRouter(prisma: PrismaClient) {
         },
       });
 
-let provisioningResult = null;
+      let provisioningResult = null;
 
-try {
-  provisioningResult = await provisionProperty(property.id);
-} catch (error: any) {
-  console.error("[Provisioning Engine]", {
-    propertyId: property.id,
-    error: error?.message ?? error,
-  });
-}
-return res.status(201).json({
-  ok: true,
-  property: {
-    ...property,
-    checkInTime,
-  },
-  provisioningResult,
-});
-     
+      try {
+        provisioningResult = await provisionProperty(property.id);
+      } catch (error: any) {
+        console.error("[Provisioning Engine]", {
+          propertyId: property.id,
+          error: error?.message ?? error,
+        });
+      }
+
+      return res.status(201).json({
+        ok: true,
+        property: {
+          ...property,
+          checkInTime,
+        },
+        provisioningResult,
+      });
     } catch (e: any) {
       console.error("create property error:", e?.message ?? e);
       return res.status(500).json({
