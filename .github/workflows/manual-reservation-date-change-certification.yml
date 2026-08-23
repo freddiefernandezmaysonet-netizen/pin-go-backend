@@ -5,6 +5,7 @@ on:
     paths:
       - "src/services/manual-reservation-date-change.service.ts"
       - "src/services/manual-reservation-date-change.contract.test.ts"
+      - "src/services/manual-reservation-date-change.behavior.test.ts"
       - "src/routes/dashboard.manual-reservation-date-change.route.ts"
       - "src/routes/dashboard.manual-reservation-date-change.route.test.ts"
       - "src/routes/dashboard.route.ts"
@@ -39,6 +40,8 @@ jobs:
           npx tsx --test
           src/services/manual-reservation-date-change.contract.test.ts
           src/routes/dashboard.manual-reservation-date-change.route.test.ts
+      - name: Certify preview and confirmation behavior
+        run: npx tsx --test src/services/manual-reservation-date-change.behavior.test.ts
       - name: Load hardened service
         run: >-
           npx tsx -e "import('./src/services/manual-reservation-date-change.service.ts').then((m) => {
