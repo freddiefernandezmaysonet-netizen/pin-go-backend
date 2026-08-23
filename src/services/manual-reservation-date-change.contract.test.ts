@@ -15,19 +15,27 @@ test("manual date change is property-timezone aware and uses configured stay tim
   assert.doesNotMatch(source, /-04:00/);
 });
 
+test("runtime dependencies remain wired to canonical pricing, Channex intent, and reconciliation services", async () => {
+  const source = await read("./manual-reservation-date-change.service.ts");
+  assert.match(source, /calculatePricing:\s*calculateDirectBookingPricing/);
+  assert.match(source, /persistChannexIntent:\s*persistChannexAriReservationIntent/);
+  assert.match(source, /reconcile:\s*reconcileReservation/);
+  assert.match(source, /prisma,\s*\n\s*calculatePricing/);
+});
+
 test("manual date change preview recalculates canonical pricing without mutating the reservation", async () => {
   const source = await read("./manual-reservation-date-change.service.ts");
   assert.match(source, /previewManualReservationDateChangeByHost/);
   assert.match(source, /prepareManualReservationDateChange/);
-  assert.match(source, /calculateDirectBookingPricing/);
+  assert.match(source, /dependencies\.calculatePricing/);
   assert.match(source, /excludeReservationId:\s*reservation\.id/);
   assert.match(source, /paymentHandledOutsidePinGo:\s*true/);
   const previewStart = source.indexOf("export async function previewManualReservationDateChangeByHost");
   const confirmStart = source.indexOf("export async function changeManualReservationDatesByHost");
   const previewBody = source.slice(previewStart, confirmStart);
-  assert.doesNotMatch(previewBody, /prisma\.reservation\.update/);
-  assert.doesNotMatch(previewBody, /persistChannexAriReservationIntent/);
-  assert.doesNotMatch(previewBody, /reconcileReservation/);
+  assert.doesNotMatch(previewBody, /\.reservation\.update/);
+  assert.doesNotMatch(previewBody, /persistChannexIntent/);
+  assert.doesNotMatch(previewBody, /\.reconcile\(/);
 });
 
 test("confirmation is fenced by reservation version and reviewed proposed total", async () => {
@@ -41,9 +49,9 @@ test("confirmation is fenced by reservation version and reviewed proposed total"
 
 test("confirmed manual date change preserves Channex availability intent and operational reconciliation", async () => {
   const source = await read("./manual-reservation-date-change.service.ts");
-  assert.match(source, /persistChannexAriReservationIntent/);
+  assert.match(source, /dependencies\.persistChannexIntent/);
   assert.match(source, /propertyTimezone:\s*prepared\.timezone/);
-  assert.match(source, /await reconcileReservation\(prepared\.reservation\.id\)/);
+  assert.match(source, /await dependencies\.reconcile\(prepared\.reservation\.id\)/);
   assert.match(source, /totalAmount:\s*prepared\.proposedTotal/);
   assert.match(source, /pricingBreakdown/);
 });
