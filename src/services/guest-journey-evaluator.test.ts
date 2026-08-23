@@ -985,6 +985,8 @@ test(
           communications: {
             signals: [
               {
+                messageLogId:
+                  "message-precheckin-email",
                 communicationType:
                   "PRECHECKIN_INVITATION",
 
@@ -1018,6 +1020,8 @@ test(
   "produces a stable fingerprint regardless of communication signal ordering",
   () => {
     const firstSignal = {
+      messageLogId:
+        "message-precheckin-email",
       communicationType:
         "PRECHECKIN_INVITATION",
 
@@ -1028,6 +1032,8 @@ test(
     };
 
     const secondSignal = {
+      messageLogId:
+        "message-verification-sms",
       communicationType:
         "VERIFICATION_REMINDER",
 
@@ -1458,6 +1464,8 @@ test(
           communications: {
             signals: [
               {
+                messageLogId:
+                  "message-precheckin-sms",
                 communicationType:
                   "PRECHECKIN",
                 channel: "sms",
@@ -1496,6 +1504,8 @@ test(
       communications: {
         signals: [
           {
+            messageLogId:
+              "message-precheckin-email",
             communicationType:
               "PRECHECKIN_INVITATION",
             channel: "email",
@@ -1504,6 +1514,8 @@ test(
             lastError: "email unavailable",
           },
           {
+            messageLogId:
+              "message-precheckin-sms",
             communicationType:
               "PRECHECKIN_INVITATION",
             channel: "sms",
@@ -1542,6 +1554,8 @@ test(
   () => {
     const signals = [
       {
+        messageLogId:
+          "message-precheckin-email",
         communicationType:
           "PRECHECKIN_INVITATION",
         channel: "email",
@@ -1550,6 +1564,8 @@ test(
         lastError: "email unavailable",
       },
       {
+        messageLogId:
+          "message-precheckin-sms",
         communicationType:
           "PRECHECKIN_INVITATION",
         channel: "sms",

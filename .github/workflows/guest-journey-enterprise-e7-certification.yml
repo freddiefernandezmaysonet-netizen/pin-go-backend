@@ -39,4 +39,6 @@ jobs:
           npx esbuild src/workers/reservation.worker.ts --bundle --platform=node --packages=external --outfile=/tmp/reservation.worker.e7.js
           npx esbuild src/workers/message.retry.worker.ts --bundle --platform=node --packages=external --outfile=/tmp/message.retry.worker.e7.js
       - name: Verify Prisma schema without applying migrations
+        env:
+          DATABASE_URL: postgresql://ci:ci@127.0.0.1:5432/pin_go_e7_schema_validation
         run: npx prisma validate
