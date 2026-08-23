@@ -9,6 +9,9 @@ import {
   GUEST_JOURNEY_COORDINATION_INTENT_TYPES,
   GUEST_JOURNEY_COORDINATION_INTENT_VERSION,
   GUEST_JOURNEY_ACCESS_EVALUATION_HANDLER_CODE,
+  GUEST_JOURNEY_ACCESS_OWNER_VERSION,
+  GUEST_JOURNEY_ACCESS_PROVISIONING_HANDLER_CODE,
+  GUEST_JOURNEY_ACCESS_REVOCATION_HANDLER_CODE,
   GUEST_JOURNEY_COMMUNICATIONS_HANDLER_CODE,
   GUEST_JOURNEY_COMMUNICATIONS_OWNER_VERSION,
   GUEST_JOURNEY_MISSION_CONTROL_BRIDGE_VERSION,
@@ -207,6 +210,54 @@ test("pins E7 to the canonical COMMUNICATIONS owner and additive delivery eviden
   assert.match(
     legacyRetryWorker,
     /retry yielded to Guest Journey COMMUNICATIONS owner/
+  );
+});
+
+test("pins E8 to canonical ACCESS provisioning and revocation only", () => {
+  assert.equal(
+    GUEST_JOURNEY_ACCESS_OWNER_VERSION,
+    "guest_journey_access_owner_v1"
+  );
+  assert.equal(
+    GUEST_JOURNEY_ACCESS_PROVISIONING_HANDLER_CODE,
+    "ACCESS_PROVISIONING_V1"
+  );
+  assert.equal(
+    GUEST_JOURNEY_ACCESS_REVOCATION_HANDLER_CODE,
+    "ACCESS_REVOCATION_CHECK_V1"
+  );
+
+  const adapter = readFileSync(
+    new URL(
+      "./guest-journey-access-owner-adapter.service.ts",
+      import.meta.url
+    ),
+    "utf8"
+  );
+  assert.match(adapter, /activateGrant/);
+  assert.match(adapter, /deactivateGrant/);
+  assert.match(adapter, /claimAccessRecoveryAttempt/);
+  assert.match(adapter, /recordAccessRecoveryFailure/);
+  assert.match(adapter, /recordAccessRecoverySuccess/);
+  assert.doesNotMatch(
+    adapter,
+    /ttlock(?:Get|Create|Delete|Change|Fetch|List)[A-Za-z]+\s*\(/
+  );
+
+  const worker = readFileSync(
+    new URL("../workers/reservation.worker.ts", import.meta.url),
+    "utf8"
+  );
+  assert.match(worker, /resolveGuestJourneyAccessOwnerConfig/);
+  assert.match(worker, /runGuestJourneyAccessOwnerCycle/);
+  assert.match(worker, /isGuestJourneyAccessOwnerScope/);
+  assert.match(
+    worker,
+    /legacy guest access provisioning yielded to Guest Journey ACCESS owner/
+  );
+  assert.match(
+    worker,
+    /legacy guest access revocation yielded to Guest Journey ACCESS owner/
   );
 });
 

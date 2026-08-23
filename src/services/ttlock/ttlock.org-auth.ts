@@ -108,7 +108,7 @@ export async function getOrgTtlockAccessToken(
     expiresAtMs > now + 5 * 60 * 1000;
 
   if (stillValid) {
-    return auth.accessToken;
+    return auth.accessToken!;
   }
 
   /**

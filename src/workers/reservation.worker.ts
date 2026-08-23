@@ -93,6 +93,13 @@ import {
 import {
   runGuestJourneyCommunicationsOwnerCycle,
 } from "../services/guest-journey-communications-owner-cycle.service";
+import {
+  isGuestJourneyAccessOwnerScope,
+  resolveGuestJourneyAccessOwnerConfig,
+} from "../services/guest-journey-access-owner.config";
+import {
+  runGuestJourneyAccessOwnerCycle,
+} from "../services/guest-journey-access-owner-cycle.service";
 
 
 console.log("[reservation.worker] BOOT", new Date().toISOString());
@@ -141,6 +148,8 @@ let guestJourneyMissionControlCursor:
   string | null = null;
 const GUEST_JOURNEY_COMMUNICATIONS_OWNER_CONFIG =
   resolveGuestJourneyCommunicationsOwnerConfig();
+const GUEST_JOURNEY_ACCESS_OWNER_CONFIG =
+  resolveGuestJourneyAccessOwnerConfig();
 const REMINDER_HOURS = Number(
   process.env.GUEST_LINK_REMINDER_HOURS ??
     24
@@ -886,6 +895,29 @@ async function processCheckins(now: Date) {
         continue;
       }
 
+      if (
+        isGuestJourneyAccessOwnerScope(
+          GUEST_JOURNEY_ACCESS_OWNER_CONFIG,
+          {
+            organizationId:
+              reservation.property
+                ?.organizationId,
+            propertyId:
+              reservation.propertyId,
+          }
+        )
+      ) {
+        log(
+          "legacy guest access provisioning yielded to Guest Journey ACCESS owner",
+          {
+            reservationId:
+              reservation.id,
+            accessGrantId: grant.id,
+          }
+        );
+        continue;
+      }
+
       try {
         const organizationId =
           reservation.property?.organizationId;
@@ -1390,6 +1422,29 @@ async function processCheckouts(now: Date) {
       if (
         grant.type !== AccessGrantType.GUEST
       ) {
+        continue;
+      }
+
+      if (
+        isGuestJourneyAccessOwnerScope(
+          GUEST_JOURNEY_ACCESS_OWNER_CONFIG,
+          {
+            organizationId:
+              reservation.property
+                ?.organizationId,
+            propertyId:
+              reservation.propertyId,
+          }
+        )
+      ) {
+        log(
+          "legacy guest access revocation yielded to Guest Journey ACCESS owner",
+          {
+            reservationId:
+              reservation.id,
+            accessGrantId: grant.id,
+          }
+        );
         continue;
       }
 
@@ -2588,6 +2643,29 @@ async function tick() {
         );
       }
     }
+
+    if (
+      GUEST_JOURNEY_ACCESS_OWNER_CONFIG.enabled
+    ) {
+      try {
+        const accessOwnerMetrics =
+          await runGuestJourneyAccessOwnerCycle(
+            prisma,
+            GUEST_JOURNEY_ACCESS_OWNER_CONFIG,
+            { now }
+          );
+
+        log(
+          "guest-journey-access-owner",
+          accessOwnerMetrics
+        );
+      } catch (e) {
+        errLog(
+          "guest-journey-access-owner crashed:",
+          toErrString(e)
+        );
+      }
+    }
   } finally {
     tickRunning = false;
   }
@@ -2644,6 +2722,13 @@ async function start() {
   log(
     `Guest Journey communications owner: ${
       GUEST_JOURNEY_COMMUNICATIONS_OWNER_CONFIG.enabled
+        ? "on"
+        : "off"
+    }`
+  );
+  log(
+    `Guest Journey access owner: ${
+      GUEST_JOURNEY_ACCESS_OWNER_CONFIG.enabled
         ? "on"
         : "off"
     }`
