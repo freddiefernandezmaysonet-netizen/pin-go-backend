@@ -681,6 +681,7 @@ model GuestJourneyCoordinationIntent {
 
   reservation Reservation  @relation(fields: [reservationId], references: [id], onDelete: Cascade)
   journey     GuestJourney @relation(fields: [journeyId], references: [id], onDelete: Cascade)
+  attempts    GuestJourneyCoordinationIntentAttempt[]
 
   @@index([reservationId, status])
   @@index([journeyId, status])
@@ -688,6 +689,45 @@ model GuestJourneyCoordinationIntent {
   @@index([status, leaseExpiresAt])
   @@index([intentType, status])
   @@index([evidenceFingerprint])
+}
+
+enum GuestJourneyCoordinationAttemptOutcome {
+  IN_FLIGHT
+  LEASE_EXPIRED
+  WAITING_FOR_EVIDENCE
+  RETRYABLE
+  SUCCEEDED
+  EXHAUSTED
+}
+
+model GuestJourneyCoordinationIntentAttempt {
+  id                       String @id @default(cuid())
+  intentId                 String
+  attemptNumber            Int
+  targetEngine             String
+  intentType               String
+  handlerCode              String
+  leaseTokenFingerprint    String
+  inputEvidenceFingerprint String
+
+  outcome GuestJourneyCoordinationAttemptOutcome @default(IN_FLIGHT)
+
+  startedAt     DateTime
+  leaseExpiresAt DateTime
+  completedAt   DateTime?
+
+  outcomeEvidenceFingerprint String?
+  errorCode                  String?
+  errorDetail                String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  intent GuestJourneyCoordinationIntent @relation(fields: [intentId], references: [id], onDelete: Cascade)
+
+  @@unique([intentId, attemptNumber])
+  @@index([outcome, leaseExpiresAt])
+  @@index([targetEngine, intentType, outcome])
 }
 
 model AccessCode {

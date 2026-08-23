@@ -1,0 +1,29 @@
+{
+  "compilerOptions": {
+    "noEmit": true,
+    "module": "preserve",
+    "moduleResolution": "bundler",
+    "target": "esnext",
+    "strict": true,
+    "skipLibCheck": true,
+    "types": ["node"]
+  },
+  "include": [
+    "src/apms/audit-persistence.service.ts",
+    "src/apms/audit-types.ts",
+    "src/apms/engine-catalog.ts",
+    "src/services/guest-access-readiness.service.ts",
+    "src/services/guest-access-readiness.service.test.ts",
+    "src/services/guest-journey-contract.ts",
+    "src/services/guest-journey-evaluator.ts",
+    "src/services/guest-journey-evidence.service.ts",
+    "src/services/guest-journey-owner-runtime.config.ts",
+    "src/services/guest-journey-owner-runtime.config.test.ts",
+    "src/services/guest-journey-owner-runtime.service.ts",
+    "src/services/guest-journey-owner-runtime.service.test.ts",
+    "src/services/guest-journey-access-evaluation-handler.service.ts",
+    "src/services/guest-journey-access-evaluation-handler.service.test.ts",
+    "src/services/guest-journey-owner-runtime-cycle.service.ts",
+    "src/services/guest-journey-owner-runtime-cycle.service.test.ts"
+  ]
+}

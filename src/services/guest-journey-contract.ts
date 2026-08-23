@@ -27,6 +27,12 @@ export const CANONICAL_GUEST_JOURNEY_EVALUATOR_VERSION =
 export const GUEST_JOURNEY_COORDINATION_INTENT_VERSION =
   "guest_journey_coordination_intent_v1" as const;
 
+export const GUEST_JOURNEY_OWNER_RUNTIME_VERSION =
+  "guest_journey_owner_runtime_v1" as const;
+
+export const GUEST_JOURNEY_ACCESS_EVALUATION_HANDLER_CODE =
+  "ACCESS_EVALUATION_V1" as const;
+
 /**
  * Normal forward lifecycle.
  *
