@@ -34,6 +34,10 @@ export async function evaluateGuestAccessReadiness(
   options?: {
     persist?: boolean;
     now?: Date;
+    expectedScope?: {
+      organizationId: string;
+      propertyId: string;
+    };
   }
 ): Promise<GuestAccessReadinessResult> {
   const now = options?.now ?? new Date();
@@ -63,11 +67,30 @@ export async function evaluateGuestAccessReadiness(
       guestAccessModeSnapshot: true,
       guestAccessReleaseStatus: true,
       guestAccessEligibleAt: true,
+      property: {
+        select: {
+          organizationId: true,
+        },
+      },
     },
   });
 
   if (!reservation) {
     throw new Error("GUEST_ACCESS_RESERVATION_NOT_FOUND");
+  }
+
+  if (
+    options?.expectedScope &&
+    (
+      reservation.propertyId !==
+        options.expectedScope.propertyId ||
+      reservation.property.organizationId !==
+        options.expectedScope.organizationId
+    )
+  ) {
+    throw new Error(
+      "GUEST_ACCESS_EVALUATION_SCOPE_MISMATCH"
+    );
   }
 
   const blockers: GuestAccessBlocker[] = [];
@@ -127,20 +150,44 @@ export async function evaluateGuestAccessReadiness(
     : GuestAccessReleaseStatus.BLOCKED;
 
   if (persist) {
-    await prisma.reservation.update({
-      where: {
-        id: reservation.id,
-      },
-      data: {
-        guestAccessReleaseStatus: releaseStatus,
-        guestAccessEligibleAt: ready
-          ? reservation.guestAccessEligibleAt ?? now
-          : null,
-        guestAccessReleaseLastError: ready
-          ? null
-          : blockers.join(","),
-      },
-    });
+    const data = {
+      guestAccessReleaseStatus: releaseStatus,
+      guestAccessEligibleAt: ready
+        ? reservation.guestAccessEligibleAt ?? now
+        : null,
+      guestAccessReleaseLastError: ready
+        ? null
+        : blockers.join(","),
+    };
+
+    if (options?.expectedScope) {
+      const persisted =
+        await prisma.reservation.updateMany({
+          where: {
+            id: reservation.id,
+            propertyId:
+              options.expectedScope.propertyId,
+            property: {
+              organizationId:
+                options.expectedScope.organizationId,
+            },
+          },
+          data,
+        });
+
+      if (persisted.count !== 1) {
+        throw new Error(
+          "GUEST_ACCESS_EVALUATION_SCOPE_CHANGED"
+        );
+      }
+    } else {
+      await prisma.reservation.update({
+        where: {
+          id: reservation.id,
+        },
+        data,
+      });
+    }
   }
 
   return {

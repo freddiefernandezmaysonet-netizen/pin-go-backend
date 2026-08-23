@@ -75,6 +75,12 @@ import {
 import {
   runGuestJourneyCoordinationCycle,
 } from "../services/guest-journey-coordination-cycle.service";
+import {
+  resolveGuestJourneyOwnerRuntimeConfig,
+} from "../services/guest-journey-owner-runtime.config";
+import {
+  runGuestJourneyOwnerRuntimeCycle,
+} from "../services/guest-journey-owner-runtime-cycle.service";
 
 
 console.log("[reservation.worker] BOOT", new Date().toISOString());
@@ -115,6 +121,8 @@ const GUEST_JOURNEY_COORDINATION_CONFIG =
   resolveGuestJourneyCoordinationConfig();
 let guestJourneyCoordinationCursor:
   string | null = null;
+const GUEST_JOURNEY_OWNER_RUNTIME_CONFIG =
+  resolveGuestJourneyOwnerRuntimeConfig();
 const REMINDER_HOURS = Number(
   process.env.GUEST_LINK_REMINDER_HOURS ??
     24
@@ -2483,6 +2491,30 @@ async function tick() {
         );
       }
     }
+
+    if (
+      GUEST_JOURNEY_OWNER_RUNTIME_CONFIG
+        .enabled
+    ) {
+      try {
+        const ownerRuntimeMetrics =
+          await runGuestJourneyOwnerRuntimeCycle(
+            prisma,
+            GUEST_JOURNEY_OWNER_RUNTIME_CONFIG,
+            { now }
+          );
+
+        log(
+          "guest-journey-owner-runtime",
+          ownerRuntimeMetrics
+        );
+      } catch (e) {
+        errLog(
+          "guest-journey-owner-runtime crashed:",
+          toErrString(e)
+        );
+      }
+    }
   } finally {
     tickRunning = false;
   }
@@ -2515,6 +2547,14 @@ async function start() {
   log(
     `Guest Journey coordination intents: ${
       GUEST_JOURNEY_COORDINATION_CONFIG
+        .enabled
+        ? "on"
+        : "off"
+    }`
+  );
+  log(
+    `Guest Journey owner runtime: ${
+      GUEST_JOURNEY_OWNER_RUNTIME_CONFIG
         .enabled
         ? "on"
         : "off"
