@@ -33,7 +33,7 @@ test("manual date change preview recalculates canonical pricing without mutating
   const previewStart = source.indexOf("export async function previewManualReservationDateChangeByHost");
   const confirmStart = source.indexOf("export async function changeManualReservationDatesByHost");
   const previewBody = source.slice(previewStart, confirmStart);
-  assert.doesNotMatch(previewBody, /\breservation\.update\s*\(/);
+  assert.doesNotMatch(previewBody, /\breservation\.update(?:Many)?\s*\(/);
   assert.doesNotMatch(previewBody, /persistChannexIntent\s*\(/);
   assert.doesNotMatch(previewBody, /\.reconcile\s*\(/);
 });
@@ -45,6 +45,24 @@ test("confirmation is fenced by reservation version and reviewed proposed total"
   assert.match(source, /RESERVATION_CHANGED_REVIEW_REQUIRED/);
   assert.match(source, /PRICING_CHANGED_REVIEW_REQUIRED/);
   assert.match(source, /DATE_CHANGE_PREVIEW_REQUIRED/);
+});
+
+test("confirmation uses an atomic id-and-updatedAt compare-and-swap before side effects", async () => {
+  const source = await read("./manual-reservation-date-change.service.ts");
+  assert.match(source, /tx\.reservation\.updateMany/);
+  assert.match(source, /where:\s*\{\s*id:\s*prepared\.reservation\.id,\s*updatedAt:\s*prepared\.reservation\.updatedAt/);
+  assert.match(source, /if \(fencedUpdate\.count !== 1\)/);
+  assert.match(source, /throw reservationChangedReviewRequired\(\)/);
+  assert.match(source, /tx\.reservation\.findUnique/);
+  assert.doesNotMatch(source, /tx\.reservation\.update\s*\(/);
+
+  const transactionStart = source.indexOf("const updated = await dependencies.prisma.$transaction");
+  const channexStart = source.indexOf("await dependencies.persistChannexIntent", transactionStart);
+  const casStart = source.indexOf("await tx.reservation.updateMany", transactionStart);
+  const countFence = source.indexOf("if (fencedUpdate.count !== 1)", transactionStart);
+  assert.ok(transactionStart >= 0 && casStart > transactionStart);
+  assert.ok(countFence > casStart);
+  assert.ok(channexStart > countFence);
 });
 
 test("confirmed manual date change preserves Channex availability intent and operational reconciliation", async () => {
