@@ -49,6 +49,7 @@ export async function sendCheckoutSms(
   prisma: PrismaClient,
   reservationId: string
 ) {
+  let retryBody: string | null = null;
   try {
     // ✅ idempotencia real: solo bloquear si ya fue enviado exitosamente
     const existing = await prisma.messageDispatchLog.findFirst({
@@ -103,6 +104,7 @@ export async function sendCheckoutSms(
       checkoutTime,
       language,
     });
+    retryBody = body;
 
     const sent = await sendSms(r.guestPhone, body);
 
@@ -118,6 +120,7 @@ export async function sendCheckoutSms(
         reservationId: r.id,
         propertyId: r.property?.id ?? null,
         organizationId: r.property?.organizationId ?? null,
+        communicationType: "CHECKOUT",
       },
     });
 
@@ -155,7 +158,7 @@ export async function sendCheckoutSms(
             channel: "sms",
             to: r.guestPhone,
             from: process.env.TWILIO_FROM_NUMBER ?? null,
-            body: "[CHECKOUT SMS FAILED BEFORE LOG BODY COULD BE PERSISTED]",
+            body: retryBody ?? "[CHECKOUT SMS FAILED BEFORE LOG BODY COULD BE PERSISTED]",
             provider: "twilio",
             providerMessageId: null,
             status: "FAILED",
@@ -163,6 +166,7 @@ export async function sendCheckoutSms(
             reservationId: r.id,
             propertyId: r.property?.id ?? null,
             organizationId: r.property?.organizationId ?? null,
+            communicationType: "CHECKOUT",
           },
         });
       }

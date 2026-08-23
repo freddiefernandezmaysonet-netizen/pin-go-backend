@@ -88,7 +88,7 @@ function maskVerificationUrl(
   );
 }
 
-function buildVerificationReminderSms(input: {
+export function buildVerificationReminderSms(input: {
   guestName?: string | null;
   propertyName: string;
   reservationNumber: string;
@@ -441,6 +441,8 @@ export async function sendGuestVerificationReminder(
           organizationId:
             reservation.property
               .organizationId,
+          communicationType:
+            "GUEST_VERIFICATION_REMINDER",
         },
       });
 
@@ -489,6 +491,8 @@ export async function sendGuestVerificationReminder(
             organizationId:
               reservation.property
                 .organizationId,
+            communicationType:
+              "GUEST_VERIFICATION_REMINDER",
           },
         })
         .catch(() => {});

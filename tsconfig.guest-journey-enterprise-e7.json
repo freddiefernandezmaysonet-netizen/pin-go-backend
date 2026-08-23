@@ -1,0 +1,32 @@
+{
+  "compilerOptions": {
+    "noEmit": true,
+    "module": "preserve",
+    "moduleResolution": "bundler",
+    "target": "esnext",
+    "strict": true,
+    "skipLibCheck": true,
+    "types": ["node"]
+  },
+  "include": [
+    "src/apms/audit-types.ts",
+    "src/apms/audit-persistence.service.ts",
+    "src/apms/operational-intelligence-types.ts",
+    "src/apms/operational-intelligence.service.ts",
+    "src/apms/operational-transition-policy.ts",
+    "src/services/guest-journey-contract.ts",
+    "src/services/guest-journey-evidence.service.ts",
+    "src/services/guest-journey-evaluator.ts",
+    "src/services/email-delivery.service.ts",
+    "src/services/messaging.service.ts",
+    "src/services/preCheckinSms.service.ts",
+    "src/services/checkoutSms.service.ts",
+    "src/services/guest-verification-reminder.service.ts",
+    "src/services/guest-journey-communications-owner.config.ts",
+    "src/services/guest-journey-communications-owner-runtime.service.ts",
+    "src/services/guest-journey-communications-delivery-adapter.service.ts",
+    "src/services/guest-journey-communications-mission-control.service.ts",
+    "src/services/guest-journey-communications-owner-cycle.service.ts",
+    "src/services/guest-journey-communications-*.test.ts"
+  ]
+}

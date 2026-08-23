@@ -146,6 +146,7 @@ export async function sendPreCheckinSms(
   prisma: PrismaClient,
   reservationId: string
 ) {
+  let retryBody: string | null = null;
   try {
     const existing = await prisma.messageDispatchLog.findFirst({
       where: {
@@ -222,6 +223,7 @@ export async function sendPreCheckinSms(
       verifyLink,
       language,
     });
+    retryBody = body;
 
     const sent = await sendSms(r.guestPhone, body);
 
@@ -237,6 +239,7 @@ export async function sendPreCheckinSms(
         reservationId: r.id,
         propertyId: r.property?.id ?? null,
         organizationId: r.property?.organizationId ?? null,
+        communicationType: "PRECHECKIN",
       },
     });
 
@@ -274,7 +277,7 @@ export async function sendPreCheckinSms(
             channel: "sms",
             to: r.guestPhone,
             from: process.env.TWILIO_FROM_NUMBER ?? null,
-            body: "[PRECHECKIN SMS FAILED BEFORE LOG BODY COULD BE PERSISTED]",
+            body: retryBody ?? "[PRECHECKIN SMS FAILED BEFORE LOG BODY COULD BE PERSISTED]",
             provider: "twilio",
             providerMessageId: null,
             status: "FAILED",
@@ -282,6 +285,7 @@ export async function sendPreCheckinSms(
             reservationId: r.id,
             propertyId: r.property?.id ?? null,
             organizationId: r.property?.organizationId ?? null,
+            communicationType: "PRECHECKIN",
           },
         });
       }

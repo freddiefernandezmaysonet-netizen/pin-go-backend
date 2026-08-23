@@ -41,6 +41,7 @@ const EVIDENCE_FINGERPRINT =
 
 type MockOptions = {
   reservation?: Record<string, any> | null;
+  messageLogs?: Record<string, any>[];
 };
 
 function createBaseReservation(): Record<string, any> {
@@ -399,6 +400,8 @@ function createMockTransaction(
   const calls = {
     reservationFindUnique:
       [] as any[],
+    messageLogFindMany:
+      [] as any[],
   };
 
   const reservation =
@@ -416,6 +419,12 @@ function createMockTransaction(
           .push(args);
 
         return reservation;
+      },
+    },
+    messageLog: {
+      findMany: async (args: any) => {
+        calls.messageLogFindMany.push(args);
+        return options.messageLogs ?? [];
       },
     },
   };
@@ -938,6 +947,7 @@ test(
       evidence.communications.signals,
       [
         {
+          messageLogId: null,
           communicationType:
             "PRECHECKIN",
 
@@ -979,6 +989,59 @@ test(
       "from" in dispatchSelection.select,
       false
     );
+  }
+);
+
+test(
+  "correlates typed failed delivery evidence to an exact MessageLog without exposing recipient or body",
+  async () => {
+    const reservation = createBaseReservation();
+    reservation.messageDispatchLogs = [];
+    const { tx, calls } = createMockTransaction({
+      reservation,
+      messageLogs: [
+        {
+          id: "message-typed-1",
+          communicationType: "PRECHECKIN",
+          channel: "sms",
+          status: "FAILED",
+          retryCount: 2,
+          error: "provider unavailable",
+          createdAt: NOW,
+        },
+      ],
+    });
+
+    const evidence = await loadGuestJourneyEvidence(
+      tx,
+      "reservation-1",
+      NOW
+    );
+
+    assert.deepEqual(evidence.communications.signals, [
+      {
+        messageLogId: "message-typed-1",
+        communicationType: "PRECHECKIN",
+        channel: "sms",
+        status: "FAILED",
+        retryCount: 2,
+        lastError: "provider unavailable",
+      },
+    ]);
+    assert.deepEqual(
+      calls.messageLogFindMany[0].select,
+      {
+        id: true,
+        communicationType: true,
+        channel: true,
+        status: true,
+        retryCount: true,
+        error: true,
+        createdAt: true,
+      }
+    );
+    assert.equal("to" in calls.messageLogFindMany[0].select, false);
+    assert.equal("body" in calls.messageLogFindMany[0].select, false);
   }
 );
 

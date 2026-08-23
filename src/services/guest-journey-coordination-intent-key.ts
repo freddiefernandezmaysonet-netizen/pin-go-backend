@@ -13,6 +13,7 @@ import type {
 } from "./guest-journey-contract";
 
 const SAFE_PAYLOAD_KEYS = new Set([
+  "messageLogId",
   "communicationType",
   "channel",
 ]);
@@ -50,6 +51,23 @@ function requireSafeIdentifier(
     );
   }
 
+  return cleanValue;
+}
+
+function requireSafeOpaqueId(
+  value: unknown,
+  fieldName: string
+): string {
+  const cleanValue = String(value ?? "").trim();
+  if (
+    !cleanValue ||
+    cleanValue.length > 191 ||
+    !/^[A-Za-z0-9_-]+$/.test(cleanValue)
+  ) {
+    throw new Error(
+      `GUEST_JOURNEY_COORDINATION_PAYLOAD_${fieldName.toUpperCase()}_INVALID`
+    );
+  }
   return cleanValue;
 }
 
@@ -129,9 +147,10 @@ export function normalizeGuestJourneyCoordinationPayload(
   }
 
   if (
-    keys.length !== 2 ||
+    (keys.length !== 2 && keys.length !== 3) ||
     !keys.includes("communicationType") ||
-    !keys.includes("channel")
+    !keys.includes("channel") ||
+    (keys.length === 3 && !keys.includes("messageLogId"))
   ) {
     throw new Error(
       "GUEST_JOURNEY_COORDINATION_COMMUNICATION_PAYLOAD_INCOMPLETE"
@@ -139,6 +158,14 @@ export function normalizeGuestJourneyCoordinationPayload(
   }
 
   return {
+    ...(source.messageLogId !== undefined && source.messageLogId !== null
+      ? {
+          messageLogId: requireSafeOpaqueId(
+            source.messageLogId,
+            "messageLogId"
+          ),
+        }
+      : {}),
     communicationType:
       requireSafeIdentifier(
         source.communicationType,

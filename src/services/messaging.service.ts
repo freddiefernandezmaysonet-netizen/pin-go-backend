@@ -27,6 +27,7 @@ type SendLoggedSmsArgs = {
   provider?: "twilio";
   channel?: "sms";
   maskBodyForLog?: boolean;
+  communicationType?: string | null;
 };
 
 type GuestPasscodeSmsArgs = {
@@ -232,6 +233,7 @@ export async function sendLoggedSms(args: SendLoggedSmsArgs): Promise<SmsSendRes
     provider = "twilio",
     channel = "sms",
     maskBodyForLog = false,
+    communicationType = null,
   } = args;
 
   const phone = cleanEnv(to);
@@ -261,6 +263,7 @@ export async function sendLoggedSms(args: SendLoggedSmsArgs): Promise<SmsSendRes
         reservationId,
         propertyId,
         organizationId,
+        communicationType,
       },
     });
 
@@ -288,6 +291,7 @@ export async function sendLoggedSms(args: SendLoggedSmsArgs): Promise<SmsSendRes
           reservationId,
           propertyId,
           organizationId,
+          communicationType,
         },
       });
     } catch {
@@ -350,7 +354,7 @@ export async function sendGuestPasscodeSms(
     ...(guestName !== undefined ? { guestName } : {}),
     code: String(code),
     validUntil,
-    ...(reservation?.property?.timezone !== undefined
+    ...(reservation?.property?.timezone
       ? { timezone: reservation.property.timezone }
       : {}),
     language,
@@ -365,6 +369,7 @@ export async function sendGuestPasscodeSms(
     provider: "twilio",
     channel: "sms",
     maskBodyForLog: true,
+    communicationType: "GUEST_ACCESS_PASSCODE",
   });
 }
 

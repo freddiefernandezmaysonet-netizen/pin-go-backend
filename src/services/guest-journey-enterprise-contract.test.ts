@@ -9,6 +9,8 @@ import {
   GUEST_JOURNEY_COORDINATION_INTENT_TYPES,
   GUEST_JOURNEY_COORDINATION_INTENT_VERSION,
   GUEST_JOURNEY_ACCESS_EVALUATION_HANDLER_CODE,
+  GUEST_JOURNEY_COMMUNICATIONS_HANDLER_CODE,
+  GUEST_JOURNEY_COMMUNICATIONS_OWNER_VERSION,
   GUEST_JOURNEY_MISSION_CONTROL_BRIDGE_VERSION,
   GUEST_JOURNEY_MISSION_CONTROL_OPERATIONAL_ISSUE_CODE,
   GUEST_JOURNEY_OWNER_RUNTIME_VERSION,
@@ -38,6 +40,14 @@ const intentMigration = readFileSync(
 const ownerRuntimeMigration = readFileSync(
   new URL(
     "../../prisma/migrations/20260822020000_add_guest_journey_owner_runtime/migration.sql",
+    import.meta.url
+  ),
+  "utf8"
+);
+
+const communicationsEvidenceMigration = readFileSync(
+  new URL(
+    "../../prisma/migrations/20260823040000_add_guest_journey_communication_evidence/migration.sql",
     import.meta.url
   ),
   "utf8"
@@ -168,6 +178,38 @@ test("pins the E6 Mission Control bridge contract without expanding owner execut
   );
 });
 
+test("pins E7 to the canonical COMMUNICATIONS owner and additive delivery evidence", () => {
+  assert.equal(
+    GUEST_JOURNEY_COMMUNICATIONS_OWNER_VERSION,
+    "guest_journey_communications_owner_v1"
+  );
+  assert.equal(
+    GUEST_JOURNEY_COMMUNICATIONS_HANDLER_CODE,
+    "COMMUNICATION_RETRY_V1"
+  );
+  assert.match(
+    communicationsEvidenceMigration,
+    /ADD COLUMN "communicationType" TEXT/
+  );
+  assert.doesNotMatch(
+    communicationsEvidenceMigration,
+    /\bDROP\s+(?:TABLE|COLUMN|TYPE|INDEX)\b|\bDELETE\s+FROM\b|\bTRUNCATE\b/i
+  );
+
+  const legacyRetryWorker = readFileSync(
+    new URL("../workers/message.retry.worker.ts", import.meta.url),
+    "utf8"
+  );
+  assert.match(
+    legacyRetryWorker,
+    /yieldsToGuestJourneyCommunicationsOwner/
+  );
+  assert.match(
+    legacyRetryWorker,
+    /retry yielded to Guest Journey COMMUNICATIONS owner/
+  );
+});
+
 test("keeps E1 migrations additive and canonical", () => {
   const combined = lifecycleMigration + "\n" + intentMigration;
 
@@ -197,7 +239,7 @@ test("keeps E1 migrations additive and canonical", () => {
   }
 });
 
-test("keeps E2 shadow through E6 Mission Control independently default-off", () => {
+test("keeps E2 shadow through E7 Communications independently default-off", () => {
   const reservationWorker = readFileSync(
     new URL(
       "../workers/reservation.worker.ts",
@@ -266,6 +308,18 @@ test("keeps E2 shadow through E6 Mission Control independently default-off", () 
     reservationWorker,
     /GUEST_JOURNEY_MISSION_CONTROL_CONFIG\s*\.enabled/
   );
+  assert.match(
+    reservationWorker,
+    /resolveGuestJourneyCommunicationsOwnerConfig/
+  );
+  assert.match(
+    reservationWorker,
+    /runGuestJourneyCommunicationsOwnerCycle/
+  );
+  assert.match(
+    reservationWorker,
+    /GUEST_JOURNEY_COMMUNICATIONS_OWNER_CONFIG\s*\.enabled/
+  );
 
   const shadowConfig = readFileSync(
     new URL(
@@ -333,6 +387,18 @@ test("keeps E2 shadow through E6 Mission Control independently default-off", () 
 
   assert.match(
     missionControlConfig,
+    /if \(!value\) return false;/
+  );
+
+  const communicationsConfig = readFileSync(
+    new URL(
+      "./guest-journey-communications-owner.config.ts",
+      import.meta.url
+    ),
+    "utf8"
+  );
+  assert.match(
+    communicationsConfig,
     /if \(!value\) return false;/
   );
 });

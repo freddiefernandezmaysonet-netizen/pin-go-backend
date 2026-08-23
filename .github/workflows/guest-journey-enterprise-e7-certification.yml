@@ -1,0 +1,42 @@
+name: Guest Journey Enterprise E7 Communications Certification
+
+on:
+  pull_request:
+    paths:
+      - "prisma/schema.prisma"
+      - "prisma/migrations/20260823040000_add_guest_journey_communication_evidence/**"
+      - "src/services/guest-journey-*"
+      - "src/services/email-delivery.service.ts"
+      - "src/services/messaging.service.ts"
+      - "src/services/preCheckinSms.service.ts"
+      - "src/services/checkoutSms.service.ts"
+      - "src/services/guest-verification-reminder.service.ts"
+      - "src/workers/reservation.worker.ts"
+      - "src/workers/message.retry.worker.ts"
+      - "tsconfig.guest-journey-enterprise-e7.json"
+      - "package.json"
+      - ".github/workflows/guest-journey-enterprise-e7-certification.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  certify-e7-communications-owner:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npx prisma generate
+      - run: npm run test:guest-journey-enterprise-e7-communications
+      - name: Bundle worker integration boundaries
+        run: |
+          npx esbuild src/workers/reservation.worker.ts --bundle --platform=node --packages=external --outfile=/tmp/reservation.worker.e7.js
+          npx esbuild src/workers/message.retry.worker.ts --bundle --platform=node --packages=external --outfile=/tmp/message.retry.worker.e7.js
+      - name: Verify Prisma schema without applying migrations
+        run: npx prisma validate
