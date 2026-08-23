@@ -52,3 +52,18 @@ test("Channex Full Sync requires the property's validated timezone without a Pue
     /property\.timezone\s*\?\?\s*["']America\/Puerto_Rico["']/
   );
 });
+
+test("manual reservation date changes use property timezone, canonical pricing, Channex intent, and reconciliation", () => {
+  const source = readSource("./manual-reservation-date-change.service.ts");
+
+  assert.match(source, /fromZonedTime/);
+  assert.match(source, /property\.checkInTime/);
+  assert.match(source, /property\.checkOutTime/);
+  assert.match(source, /PROPERTY_TIMEZONE_REQUIRED/);
+  assert.doesNotMatch(source, /-04:00/);
+  assert.match(source, /calculateDirectBookingPricing/);
+  assert.match(source, /excludeReservationId:\s*reservation\.id/);
+  assert.match(source, /persistChannexAriReservationIntent/);
+  assert.match(source, /await reconcileReservation\(reservation\.id\)/);
+  assert.match(source, /paymentHandledOutsidePinGo:\s*true/);
+});
