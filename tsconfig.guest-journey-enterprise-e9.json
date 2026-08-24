@@ -1,0 +1,25 @@
+{
+  "compilerOptions": {
+    "noEmit": true,
+    "module": "preserve",
+    "moduleResolution": "bundler",
+    "target": "esnext",
+    "strict": true,
+    "skipLibCheck": true,
+    "types": ["node"]
+  },
+  "include": [
+    "src/apms/audit-types.ts",
+    "src/apms/audit-persistence.service.ts",
+    "src/apms/operational-intelligence-types.ts",
+    "src/apms/operational-intelligence.service.ts",
+    "src/apms/operational-transition-policy.ts",
+    "src/services/guest-journey-contract.ts",
+    "src/services/guest-journey-financial-owner.config.ts",
+    "src/services/guest-journey-financial-owner-runtime.service.ts",
+    "src/services/guest-journey-financial-evaluation-adapter.service.ts",
+    "src/services/guest-journey-financial-owner-mission-control.service.ts",
+    "src/services/guest-journey-financial-owner-cycle.service.ts",
+    "src/services/guest-journey-financial-*.test.ts"
+  ]
+}
