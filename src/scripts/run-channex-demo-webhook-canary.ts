@@ -26,6 +26,12 @@ type CanaryDependencies = {
   disconnect?: () => Promise<void>;
 };
 
+type CleanupState = {
+  remoteWebhookDeleted: boolean;
+  listingRestored: boolean;
+  connectionRestored: boolean;
+};
+
 function asRecord(value: unknown): JsonRecord {
   return value && typeof value === "object" && !Array.isArray(value)
     ? (value as JsonRecord)
@@ -61,7 +67,6 @@ function headers(apiKey: string) {
 
 async function readJsonResponse(response: Response) {
   const text = await response.text();
-
   if (!text) return null;
 
   try {
@@ -124,6 +129,24 @@ async function fetchJsonWithTimeout(args: {
   }
 }
 
+async function fetchWithTimeout(args: {
+  fetchImpl: typeof fetch;
+  url: string;
+  init: RequestInit;
+}) {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
+
+  try {
+    return await args.fetchImpl(args.url, {
+      ...args.init,
+      signal: controller.signal,
+    });
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
 async function findDemoListing(prismaClient: any) {
   const listings = await prismaClient.pmsListing.findMany({
     where: {
@@ -166,6 +189,80 @@ async function findDemoListing(prismaClient: any) {
   return { listing, channexPropertyId };
 }
 
+async function cleanupCanary(args: {
+  prismaClient: any;
+  fetchImpl: typeof fetch;
+  apiBaseUrl: string;
+  apiKey: string;
+  remoteWebhookId: string | null;
+  listingId: string | null;
+  connectionId: string | null;
+  originalMetadata: unknown;
+  originalWebhookSecret: string | null;
+  strict: boolean;
+}): Promise<CleanupState> {
+  const state: CleanupState = {
+    remoteWebhookDeleted: args.remoteWebhookId == null,
+    listingRestored: args.listingId == null,
+    connectionRestored: args.connectionId == null,
+  };
+  const failures: string[] = [];
+
+  if (args.remoteWebhookId) {
+    try {
+      const response = await fetchWithTimeout({
+        fetchImpl: args.fetchImpl,
+        url: `${args.apiBaseUrl}/api/v1/webhooks/${encodeURIComponent(
+          args.remoteWebhookId
+        )}`,
+        init: {
+          method: "DELETE",
+          headers: headers(args.apiKey),
+        },
+      });
+
+      if (!response.ok && response.status !== 404) {
+        throw new Error(`HTTP_${response.status}`);
+      }
+      state.remoteWebhookDeleted = true;
+    } catch {
+      failures.push("REMOTE_WEBHOOK_DELETE");
+    }
+  }
+
+  if (args.listingId) {
+    try {
+      await args.prismaClient.pmsListing.update({
+        where: { id: args.listingId },
+        data: { metadata: args.originalMetadata },
+      });
+      state.listingRestored = true;
+    } catch {
+      failures.push("LISTING_RESTORE");
+    }
+  }
+
+  if (args.connectionId) {
+    try {
+      await args.prismaClient.pmsConnection.update({
+        where: { id: args.connectionId },
+        data: { webhookSecret: args.originalWebhookSecret },
+      });
+      state.connectionRestored = true;
+    } catch {
+      failures.push("CONNECTION_RESTORE");
+    }
+  }
+
+  if (args.strict && failures.length > 0) {
+    throw new Error(
+      `CHANNEX_DEMO_WEBHOOK_CANARY_CLEANUP_FAILED:${failures.join("_")}`
+    );
+  }
+
+  return state;
+}
+
 export async function runChannexDemoWebhookCanary(
   env: NodeJS.ProcessEnv = process.env,
   dependencies: CanaryDependencies = {}
@@ -178,14 +275,20 @@ export async function runChannexDemoWebhookCanary(
   const logError = dependencies.logError ?? console.error;
   const disconnect = dependencies.disconnect ?? (() => prisma.$disconnect());
 
+  let apiKey = "";
+  let apiBaseUrl = "";
   let remoteWebhookId: string | null = null;
   let listingId: string | null = null;
   let connectionId: string | null = null;
   let originalMetadata: unknown = null;
   let originalWebhookSecret: string | null = null;
+  let cleanupComplete = false;
 
   try {
-    const { apiKey, apiBaseUrl, callbackUrl } = validateEnv(env);
+    const validated = validateEnv(env);
+    apiKey = validated.apiKey;
+    apiBaseUrl = validated.apiBaseUrl;
+    const callbackUrl = validated.callbackUrl;
     const { listing, channexPropertyId } = await findDemoListing(prismaClient);
 
     listingId = listing.id;
@@ -267,8 +370,29 @@ export async function runChannexDemoWebhookCanary(
       },
     });
 
-    const reservationCountAfter = await prismaClient.reservation.count();
+    const reservationCountDuringCanary = await prismaClient.reservation.count();
+    if (reservationCountDuringCanary !== reservationCountBefore) {
+      throw new Error("CHANNEX_DEMO_WEBHOOK_CANARY_RESERVATION_DELTA_DETECTED");
+    }
 
+    const cleanup = await cleanupCanary({
+      prismaClient,
+      fetchImpl,
+      apiBaseUrl,
+      apiKey,
+      remoteWebhookId,
+      listingId,
+      connectionId,
+      originalMetadata,
+      originalWebhookSecret,
+      strict: true,
+    });
+    cleanupComplete = true;
+    remoteWebhookId = null;
+    listingId = null;
+    connectionId = null;
+
+    const reservationCountAfter = await prismaClient.reservation.count();
     if (reservationCountAfter !== reservationCountBefore) {
       throw new Error("CHANNEX_DEMO_WEBHOOK_CANARY_RESERVATION_DELTA_DETECTED");
     }
@@ -288,84 +412,50 @@ export async function runChannexDemoWebhookCanary(
       },
       remoteWebhookCreated: true,
       remoteWebhookVerified: true,
-      localTemporaryMetadataApplied: true,
       callbackDeliveryAttempted: false,
       callbackDeliveryReason:
         "CHANNEX_WEBHOOK_TEST_ENDPOINT_DOES_NOT_PROVE_PIN_GO_AUTHENTICATED_DELIVERY",
-      syntheticEventStoredAsPending: false,
-      syntheticEventDeleted: false,
       reservationDelta: 0,
+      cleanup,
       workersActivated: false,
       appChannexTouched: false,
     });
 
     return 0;
   } catch (error) {
+    let cleanup: CleanupState | null = null;
+
+    if (!cleanupComplete && apiBaseUrl && apiKey) {
+      cleanup = await cleanupCanary({
+        prismaClient,
+        fetchImpl,
+        apiBaseUrl,
+        apiKey,
+        remoteWebhookId,
+        listingId,
+        connectionId,
+        originalMetadata,
+        originalWebhookSecret,
+        strict: false,
+      });
+    }
+
     printJson(logError, {
       provider: "PIN_GO_CONNECT",
       executionMode: "CHANNEX_DEMO_WEBHOOK_CANARY",
       status: "FAILED_SAFE",
       errorCode: safeErrorCode(error),
-      remoteWebhookCleanupAttempted: Boolean(remoteWebhookId),
+      cleanup,
       workersActivated: false,
       appChannexTouched: false,
     });
 
     return 1;
   } finally {
-    const envApiKey = asString(env.CHANNEX_API_KEY);
-    const envBase = asString(env.CHANNEX_API_BASE_URL || "https://staging.channex.io");
-
-    if (remoteWebhookId && envApiKey) {
-      try {
-        const apiBaseUrl = normalizeChannexStagingBaseUrl(envBase);
-        await fetchImpl(
-          `${apiBaseUrl}/api/v1/webhooks/${encodeURIComponent(remoteWebhookId)}`,
-          {
-            method: "DELETE",
-            headers: headers(envApiKey),
-          }
-        );
-      } catch {
-        // Remote cleanup is best-effort; local state is restored below regardless.
-      }
-    }
-
-    if (listingId) {
-      await prismaClient.pmsListing
-        .update({
-          where: { id: listingId },
-          data: { metadata: originalMetadata },
-        })
-        .catch(() => undefined);
-    }
-
-    if (connectionId) {
-      await prismaClient.pmsConnection
-        .update({
-          where: { id: connectionId },
-          data: { webhookSecret: originalWebhookSecret },
-        })
-        .catch(() => undefined);
-    }
-
     await disconnect().catch(() => undefined);
   }
 }
 
 function isDirectExecution() {
   const entrypoint = process.argv[1];
-  if (!entrypoint) return false;
-
-  try {
-    return pathToFileURL(entrypoint).href === import.meta.url;
-  } catch {
-    return false;
-  }
-}
-
-if (isDirectExecution()) {
-  void runChannexDemoWebhookCanary().then((exitCode) => {
-    process.exitCode = exitCode;
-  });
-}
+  if (!entry
