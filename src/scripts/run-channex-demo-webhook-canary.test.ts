@@ -50,6 +50,46 @@ function parseJsonLog(entries: unknown[]) {
   return JSON.parse(entries[0] as string) as Record<string, any>;
 }
 
+function demoListing() {
+  return {
+    id: "listing-demo",
+    propertyId: "property-demo",
+    name: "Pin&Go Demo Property",
+    metadata: { channexPropertyId },
+    connection: {
+      id: "connection-001",
+      webhookSecret: null,
+    },
+  };
+}
+
+function prismaMock(args: {
+  listings?: any[];
+  reservationCounts?: number[];
+  connectionUpdates?: unknown[];
+  listingUpdates?: unknown[];
+}) {
+  const counts = [...(args.reservationCounts ?? [7, 7])];
+  return {
+    pmsListing: {
+      findMany: async () => args.listings ?? [demoListing()],
+      update: async (input: unknown) => {
+        args.listingUpdates?.push(input);
+        return input;
+      },
+    },
+    pmsConnection: {
+      update: async (input: unknown) => {
+        args.connectionUpdates?.push(input);
+        return input;
+      },
+    },
+    reservation: {
+      count: async () => counts.shift() ?? 7,
+    },
+  };
+}
+
 test("blocks before database or network work without explicit confirmation", async () => {
   let findManyCalled = false;
   let fetchCalled = false;
@@ -97,79 +137,94 @@ test("blocks before database or network work without explicit confirmation", asy
   assert.equal(output.appChannexTouched, false);
 });
 
-test("executes the demo-property webhook canary and restores local state", async () => {
+test("blocks app.channex.io before database or network work", async () => {
+  let findManyCalled = false;
+  let fetchCalled = false;
+  const errors: unknown[] = [];
+
+  const exitCode = await runChannexDemoWebhookCanary(
+    {
+      ...VALID_ENV,
+      CHANNEX_API_BASE_URL: "https://app.channex.io",
+    },
+    {
+      prisma: {
+        pmsListing: {
+          findMany: async () => {
+            findManyCalled = true;
+            return [];
+          },
+        },
+      },
+      fetch: (async () => {
+        fetchCalled = true;
+        return jsonResponse({});
+      }) as any,
+      disconnect: async () => undefined,
+      log: () => undefined,
+      logError: (value) => errors.push(value),
+    }
+  );
+
+  assert.equal(exitCode, 1);
+  assert.equal(findManyCalled, false);
+  assert.equal(fetchCalled, false);
+  assert.equal(parseJsonLog(errors).status, "FAILED_SAFE");
+});
+
+test("requires exactly one active Pin&Go Demo Property listing", async () => {
+  const errors: unknown[] = [];
+  let fetchCalled = false;
+
+  const exitCode = await runChannexDemoWebhookCanary(VALID_ENV, {
+    prisma: prismaMock({ listings: [] }),
+    fetch: (async () => {
+      fetchCalled = true;
+      return jsonResponse({});
+    }) as any,
+    disconnect: async () => undefined,
+    log: () => undefined,
+    logError: (value) => errors.push(value),
+  });
+
+  assert.equal(exitCode, 1);
+  assert.equal(fetchCalled, false);
+  assert.equal(
+    parseJsonLog(errors).errorCode,
+    "CHANNEX_DEMO_WEBHOOK_CANARY_LISTING_NOT_FOUND"
+  );
+});
+
+test("registers and verifies only the demo webhook then restores local and remote state", async () => {
   const originalMetadata = { channexPropertyId };
   const connectionUpdates: unknown[] = [];
   const listingUpdates: unknown[] = [];
-  const eventDeletes: unknown[] = [];
-  const fetchCalls: Array<{ url: string; method: string }> = [];
+  const fetchCalls: Array<{ url: string; method: string; body?: string }> = [];
   const logs: unknown[] = [];
   const errors: unknown[] = [];
-  const startedAt = new Date("2026-08-24T00:00:00.000Z");
-
-  const prisma = {
-    pmsListing: {
-      findMany: async () => [
-        {
-          id: "listing-demo",
-          propertyId: "property-demo",
-          name: "Pin&Go Demo Property",
-          metadata: originalMetadata,
-          connection: {
-            id: "connection-001",
-            webhookSecret: null,
-          },
-        },
-      ],
-      update: async (input: unknown) => {
-        listingUpdates.push(input);
-        return input;
-      },
-    },
-    pmsConnection: {
-      update: async (input: unknown) => {
-        connectionUpdates.push(input);
-        return input;
-      },
-    },
-    reservation: {
-      count: async () => 7,
-    },
-    webhookEventIngest: {
-      findUnique: async () => ({
-        id: "event-001",
-        connectionId: "connection-001",
-        provider: "CHANNEX",
-        eventType: "booking",
-        status: "PENDING",
-        attempts: 0,
-        createdAt: startedAt,
-        payloadRaw: { property_id: channexPropertyId },
-      }),
-      findMany: async () => [],
-      deleteMany: async (input: unknown) => {
-        eventDeletes.push(input);
-        return { count: 1 };
-      },
-    },
-  };
 
   const fetchImpl = (async (url: string, init?: RequestInit) => {
-    fetchCalls.push({ url, method: String(init?.method ?? "GET") });
+    fetchCalls.push({
+      url,
+      method: String(init?.method ?? "GET"),
+      body: typeof init?.body === "string" ? init.body : undefined,
+    });
 
     if (url.endsWith("/api/v1/webhooks") && init?.method === "POST") {
       return jsonResponse(webhookResponse("webhook-001"), 201);
     }
 
-    if (url.endsWith("/api/v1/webhooks/webhook-001") && init?.method === "GET") {
+    if (
+      url.endsWith("/api/v1/webhooks/webhook-001") &&
+      init?.method === "GET"
+    ) {
       return jsonResponse(webhookResponse("webhook-001"));
     }
 
-    if (url.endsWith("/api/v1/webhooks/test") && init?.method === "POST") {
-      return jsonResponse({ ok: true, eventId: "event-001" });
-    }
-
-    if (url.endsWith("/api/v1/webhooks/webhook-001") && init?.method === "DELETE") {
+    if (
+      url.endsWith("/api/v1/webhooks/webhook-001") &&
+      init?.method === "DELETE"
+    ) {
       return jsonResponse({ ok: true });
     }
 
@@ -177,11 +232,15 @@ test("executes the demo-property webhook canary and restores local state", async
   }) as any;
 
   const exitCode = await runChannexDemoWebhookCanary(VALID_ENV, {
-    prisma,
+    prisma: prismaMock({
+      listings: [{ ...demoListing(), metadata: originalMetadata }],
+      reservationCounts: [7, 7],
+      connectionUpdates,
+      listingUpdates,
+    }),
     fetch: fetchImpl,
-    now: () => startedAt,
+    now: () => new Date("2026-08-24T00:00:00.000Z"),
     generateSecret: () => "temporary-secret",
-    sleep: async () => undefined,
     disconnect: async () => undefined,
     log: (value) => logs.push(value),
     logError: (value) => errors.push(value),
@@ -191,33 +250,44 @@ test("executes the demo-property webhook canary and restores local state", async
   assert.equal(errors.length, 0);
 
   const output = parseJsonLog(logs);
-  assert.equal(output.status, "PASS");
+  assert.equal(output.status, "PASS_REMOTE_WEBHOOK_REGISTRATION");
   assert.equal(output.property.listingName, "Pin&Go Demo Property");
+  assert.equal(output.remoteWebhookCreated, true);
   assert.equal(output.remoteWebhookVerified, true);
-  assert.equal(output.syntheticEventStoredAsPending, true);
-  assert.equal(output.syntheticEventDeleted, true);
+  assert.equal(output.callbackDeliveryAttempted, false);
+  assert.equal(output.syntheticEventStoredAsPending, false);
   assert.equal(output.reservationDelta, 0);
   assert.equal(output.workersActivated, false);
   assert.equal(output.appChannexTouched, false);
 
-  assert.deepEqual(fetchCalls, [
-    {
-      url: "https://staging.channex.io/api/v1/webhooks",
-      method: "POST",
-    },
-    {
-      url: "https://staging.channex.io/api/v1/webhooks/webhook-001",
-      method: "GET",
-    },
-    {
-      url: "https://staging.channex.io/api/v1/webhooks/test",
-      method: "POST",
-    },
-    {
-      url: "https://staging.channex.io/api/v1/webhooks/webhook-001",
-      method: "DELETE",
-    },
-  ]);
+  assert.deepEqual(
+    fetchCalls.map(({ url, method }) => ({ url, method })),
+    [
+      {
+        url: "https://staging.channex.io/api/v1/webhooks",
+        method: "POST",
+      },
+      {
+        url: "https://staging.channex.io/api/v1/webhooks/webhook-001",
+        method: "GET",
+      },
+      {
+        url: "https://staging.channex.io/api/v1/webhooks/webhook-001",
+        method: "DELETE",
+      },
+    ]
+  );
+
+  const createBody = JSON.parse(fetchCalls[0]!.body!);
+  assert.equal(createBody.webhook.property_id, channexPropertyId);
+  assert.equal(createBody.webhook.callback_url, callbackUrl);
+  assert.equal(createBody.webhook.event_mask, "booking");
+  assert.equal(createBody.webhook.send_data, false);
+  assert.equal(createBody.webhook.is_active, true);
+  assert.equal(
+    createBody.webhook.headers["x-pin-go-webhook-secret"],
+    "temporary-secret"
+  );
 
   assert.equal(connectionUpdates.length, 2);
   assert.deepEqual((connectionUpdates[0] as any).data, {
@@ -237,68 +307,40 @@ test("executes the demo-property webhook canary and restores local state", async
     true
   );
   assert.deepEqual((listingUpdates[1] as any).data.metadata, originalMetadata);
-  assert.equal(eventDeletes.length, 1);
 
   const serialized = JSON.stringify({ output, connectionUpdates, listingUpdates });
   assert.equal(serialized.includes("channex-secret-key"), false);
   assert.equal(serialized.includes("temporary-secret"), false);
 });
 
-test("restores state when the Channex test callback does not produce an event", async () => {
+test("restores state when remote verification fails", async () => {
   const originalMetadata = { channexPropertyId };
   const connectionUpdates: unknown[] = [];
   const listingUpdates: unknown[] = [];
   const errors: unknown[] = [];
-
-  const prisma = {
-    pmsListing: {
-      findMany: async () => [
-        {
-          id: "listing-demo",
-          propertyId: "property-demo",
-          name: "Pin&Go Demo Property",
-          metadata: originalMetadata,
-          connection: {
-            id: "connection-001",
-            webhookSecret: null,
-          },
-        },
-      ],
-      update: async (input: unknown) => {
-        listingUpdates.push(input);
-        return input;
-      },
-    },
-    pmsConnection: {
-      update: async (input: unknown) => {
-        connectionUpdates.push(input);
-        return input;
-      },
-    },
-    reservation: {
-      count: async () => 7,
-    },
-    webhookEventIngest: {
-      findUnique: async () => null,
-      findMany: async () => [],
-      deleteMany: async () => ({ count: 0 }),
-    },
-  };
+  const fetchCalls: Array<{ url: string; method: string }> = [];
 
   const fetchImpl = (async (url: string, init?: RequestInit) => {
+    fetchCalls.push({ url, method: String(init?.method ?? "GET") });
+
     if (url.endsWith("/api/v1/webhooks") && init?.method === "POST") {
       return jsonResponse(webhookResponse("webhook-001"), 201);
     }
 
-    if (url.endsWith("/api/v1/webhooks/webhook-001") && init?.method === "GET") {
-      return jsonResponse(webhookResponse("webhook-001"));
+    if (
+      url.endsWith("/api/v1/webhooks/webhook-001") &&
+      init?.method === "GET"
+    ) {
+      const bad = webhookResponse("webhook-001");
+      bad.data.attributes.callback_url =
+        "https://wrong.example.com/webhooks/channex";
+      return jsonResponse(bad);
     }
 
-    if (url.endsWith("/api/v1/webhooks/test") && init?.method === "POST") {
-      return jsonResponse({ ok: true });
-    }
-
-    if (url.endsWith("/api/v1/webhooks/webhook-001") && init?.method === "DELETE") {
+    if (
+      url.endsWith("/api/v1/webhooks/webhook-001") &&
+      init?.method === "DELETE"
+    ) {
       return jsonResponse({ ok: true });
     }
 
@@ -306,31 +348,37 @@ test("restores state when the Channex test callback does not produce an event", 
   }) as any;
 
   const exitCode = await runChannexDemoWebhookCanary(VALID_ENV, {
-    prisma,
+    prisma: prismaMock({
+      listings: [{ ...demoListing(), metadata: originalMetadata }],
+      connectionUpdates,
+      listingUpdates,
+    }),
     fetch: fetchImpl,
-    now: () => new Date("2026-08-24T00:00:00.000Z"),
     generateSecret: () => "temporary-secret",
-    sleep: async () => undefined,
     disconnect: async () => undefined,
     log: () => undefined,
     logError: (value) => errors.push(value),
   });
 
   assert.equal(exitCode, 1);
-
-  const output = parseJsonLog(errors);
-  assert.equal(output.status, "FAILED_SAFE");
-  assert.equal(
-    output.errorCode,
-    "CHANNEX_DEMO_WEBHOOK_CANARY_SYNTHETIC_EVENT_NOT_FOUND"
+  assert.equal(parseJsonLog(errors).status, "FAILED_SAFE");
+  assert.deepEqual(
+    fetchCalls.map(({ url, method }) => ({ url, method })),
+    [
+      {
+        url: "https://staging.channex.io/api/v1/webhooks",
+        method: "POST",
+      },
+      {
+        url: "https://staging.channex.io/api/v1/webhooks/webhook-001",
+        method: "GET",
+      },
+      {
+        url: "https://staging.channex.io/api/v1/webhooks/webhook-001",
+        method: "DELETE",
+      },
+    ]
   );
-  assert.equal(output.workersActivated, false);
-  assert.equal(output.appChannexTouched, false);
-
-  assert.equal(connectionUpdates.length, 2);
-  assert.deepEqual((connectionUpdates[1] as any).data, {
-    webhookSecret: null,
-  });
-  assert.equal(listingUpdates.length, 2);
-  assert.deepEqual((listingUpdates[1] as any).data.metadata, originalMetadata);
+  assert.equal(connectionUpdates.length, 0);
+  assert.equal(listingUpdates.length, 0);
 });
