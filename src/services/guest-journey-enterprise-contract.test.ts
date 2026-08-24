@@ -259,6 +259,57 @@ test("pins E8 to canonical ACCESS provisioning and revocation only", () => {
     worker,
     /legacy guest access revocation yielded to Guest Journey ACCESS owner/
   );
+
+  const accessGrantExpireWorker = readFileSync(
+    new URL("../workers/access-grant-expire.worker.ts", import.meta.url),
+    "utf8"
+  );
+  assert.match(
+    accessGrantExpireWorker,
+    /resolveGuestJourneyAccessOwnerConfig/
+  );
+  assert.match(
+    accessGrantExpireWorker,
+    /isGuestJourneyAccessOwnerScope/
+  );
+  assert.match(
+    accessGrantExpireWorker,
+    /type:\s*true/
+  );
+  assert.match(
+    accessGrantExpireWorker,
+    /legacy guest access yielded to E8/
+  );
+
+  const passcodeExpireWorker = readFileSync(
+    new URL("../workers/passcode-expire.worker.ts", import.meta.url),
+    "utf8"
+  );
+  assert.match(
+    passcodeExpireWorker,
+    /resolveGuestJourneyAccessOwnerConfig/
+  );
+  assert.match(
+    passcodeExpireWorker,
+    /isGuestJourneyAccessOwnerScope/
+  );
+  assert.match(
+    passcodeExpireWorker,
+    /yieldedToE8/
+  );
+
+  const accessNfcRoutes = readFileSync(
+    new URL("../routes/access.nfc.routes.ts", import.meta.url),
+    "utf8"
+  );
+  assert.match(
+    accessNfcRoutes,
+    /resolveGuestJourneyAccessOwnerConfig/
+  );
+  assert.match(
+    accessNfcRoutes,
+    /GUEST_NFC_OWNED_BY_GUEST_JOURNEY_ACCESS_OWNER/
+  );
 });
 
 test("keeps E1 migrations additive and canonical", () => {

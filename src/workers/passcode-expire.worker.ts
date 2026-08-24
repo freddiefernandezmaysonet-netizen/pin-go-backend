@@ -1,6 +1,13 @@
 import "dotenv/config";
 import { prisma } from "../lib/prisma";
 import { ttlockDeleteKeyboardPwd } from "../ttlock/ttlock.service"; // ✅ AJUSTA si tu función está en otro path
+import {
+  isGuestJourneyAccessOwnerScope,
+  resolveGuestJourneyAccessOwnerConfig,
+} from "../services/guest-journey-access-owner.config";
+
+const GUEST_JOURNEY_ACCESS_OWNER_CONFIG =
+  resolveGuestJourneyAccessOwnerConfig();
 
 // helper: errores TTLock tipo "ya no existe"
 function isNotFoundLike(err: any) {
@@ -17,11 +24,42 @@ async function tick() {
       status: "ACTIVE",
       endsAt: { lte: now },
     },
-    include: { lock: true },
+    include: {
+      lock: true,
+      reservation: {
+        select: {
+          propertyId: true,
+          property: {
+            select: {
+              organizationId: true,
+            },
+          },
+        },
+      },
+    },
     take: 50,
   });
 
+  let yieldedToAccessOwner = 0;
+
   for (const g of grants) {
+    if (
+      g.type === "GUEST" &&
+      isGuestJourneyAccessOwnerScope(
+        GUEST_JOURNEY_ACCESS_OWNER_CONFIG,
+        {
+          organizationId:
+            g.reservation?.property
+              .organizationId,
+          propertyId:
+            g.reservation?.propertyId,
+        }
+      )
+    ) {
+      yieldedToAccessOwner++;
+      continue;
+    }
+
     try {
       // 1) Revocar en TTLock si existe keyboardPwdId
       if (g.ttlockKeyboardPwdId && g.lock?.ttlockLockId) {
@@ -55,7 +93,10 @@ async function tick() {
   }
 
   if (grants.length > 0) {
-    console.log(`[passcode-expire] processed=${grants.length} at=${now.toISOString()}`);
+    console.log(
+      `[passcode-expire] processed=${grants.length} ` +
+        `yieldedToE8=${yieldedToAccessOwner} at=${now.toISOString()}`
+    );
   }
 }
 
