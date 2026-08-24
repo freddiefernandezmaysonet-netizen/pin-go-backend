@@ -5,6 +5,7 @@ on:
     paths:
       - "src/scripts/run-channex-demo-webhook-canary.ts"
       - "src/scripts/run-channex-demo-webhook-canary.test.ts"
+      - "src/scripts/run-channex-demo-webhook-canary.cleanup.test.ts"
       - "src/services/channex-booking-webhook-registration.service.ts"
       - "src/services/channex-booking-webhook-registration.service.test.ts"
       - ".github/workflows/channex-demo-webhook-canary-certification.yml"
@@ -35,3 +36,4 @@ jobs:
           npx tsx --test
           src/services/channex-booking-webhook-registration.service.test.ts
           src/scripts/run-channex-demo-webhook-canary.test.ts
+          src/scripts/run-channex-demo-webhook-canary.cleanup.test.ts
