@@ -14,9 +14,11 @@ import {
   GUEST_JOURNEY_ACCESS_REVOCATION_HANDLER_CODE,
   GUEST_JOURNEY_COMMUNICATIONS_HANDLER_CODE,
   GUEST_JOURNEY_COMMUNICATIONS_OWNER_VERSION,
+  GUEST_JOURNEY_FINANCIAL_OWNER_VERSION,
   GUEST_JOURNEY_MISSION_CONTROL_BRIDGE_VERSION,
   GUEST_JOURNEY_MISSION_CONTROL_OPERATIONAL_ISSUE_CODE,
   GUEST_JOURNEY_OWNER_RUNTIME_VERSION,
+  GUEST_JOURNEY_PAYMENT_EVALUATION_HANDLER_CODE,
   GUEST_JOURNEY_TARGET_ENGINES,
   TERMINAL_GUEST_JOURNEY_STATES,
   getCanonicalGuestJourneyStateRank,
@@ -309,6 +311,57 @@ test("pins E8 to canonical ACCESS provisioning and revocation only", () => {
   assert.match(
     accessNfcRoutes,
     /GUEST_NFC_OWNED_BY_GUEST_JOURNEY_ACCESS_OWNER/
+  );
+});
+
+test("pins E9 to read-only FINANCIAL payment evaluation only", () => {
+  assert.equal(
+    GUEST_JOURNEY_FINANCIAL_OWNER_VERSION,
+    "guest_journey_financial_owner_v1"
+  );
+  assert.equal(
+    GUEST_JOURNEY_PAYMENT_EVALUATION_HANDLER_CODE,
+    "PAYMENT_EVALUATION_V1"
+  );
+
+  const runtime = readFileSync(
+    new URL(
+      "./guest-journey-financial-owner-runtime.service.ts",
+      import.meta.url
+    ),
+    "utf8"
+  );
+  assert.match(runtime, /targetEngine:\s*"FINANCIAL"/);
+  assert.match(runtime, /REQUEST_PAYMENT_EVALUATION/);
+  assert.match(runtime, /PAYMENT_STATE_RESOLVED/);
+  assert.doesNotMatch(runtime, /REQUEST_ACCESS_|REQUEST_COMMUNICATION|REQUEST_GUEST_VERIFICATION|REQUEST_REQUIREMENTS_SNAPSHOT/);
+
+  const adapter = readFileSync(
+    new URL(
+      "./guest-journey-financial-evaluation-adapter.service.ts",
+      import.meta.url
+    ),
+    "utf8"
+  );
+  assert.doesNotMatch(
+    adapter,
+    /from\s+["'][^"']*(stripe|ttlock|messaging|mailer|access|nfc)[^"']*["']/
+  );
+  assert.doesNotMatch(
+    adapter,
+    /\b(createCheckout|createPayment|charge|refund|transfer|activateGrant|deactivateGrant|sendSms|sendEmail|sendGuest|ttlock)[A-Za-z]*\s*\(/
+  );
+  assert.match(adapter, /providerCalls:\s*0/);
+
+  const worker = readFileSync(
+    new URL("../workers/reservation.worker.ts", import.meta.url),
+    "utf8"
+  );
+  assert.match(worker, /resolveGuestJourneyFinancialOwnerConfig/);
+  assert.match(worker, /runGuestJourneyFinancialOwnerCycle/);
+  assert.match(
+    worker,
+    /GUEST_JOURNEY_FINANCIAL_OWNER_CONFIG\.enabled/
   );
 });
 

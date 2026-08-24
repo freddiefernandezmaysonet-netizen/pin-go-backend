@@ -1,0 +1,36 @@
+name: Guest Journey Enterprise E9 Financial Owner Certification
+
+on:
+  pull_request:
+    paths:
+      - "src/services/guest-journey-financial-*"
+      - "src/services/guest-journey-contract.ts"
+      - "src/services/guest-journey-enterprise-contract.test.ts"
+      - "src/workers/reservation.worker.ts"
+      - "tsconfig.guest-journey-enterprise-e9.json"
+      - "package.json"
+      - ".github/workflows/guest-journey-enterprise-e9-certification.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  certify-e9-financial-owner:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npx prisma generate
+      - run: npm run test:guest-journey-enterprise-e9-financial-owner
+      - name: Bundle reservation worker integration boundary
+        run: npx esbuild src/workers/reservation.worker.ts --bundle --platform=node --packages=external --outfile=/tmp/reservation.worker.e9.js
+      - name: Verify Prisma schema without applying migrations
+        env:
+          DATABASE_URL: postgresql://ci:ci@127.0.0.1:5432/pin_go_e9_schema_validation
+        run: npx prisma validate
