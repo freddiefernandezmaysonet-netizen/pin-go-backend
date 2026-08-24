@@ -106,6 +106,12 @@ import {
 import {
   runGuestJourneyFinancialOwnerCycle,
 } from "../services/guest-journey-financial-owner-cycle.service";
+import {
+  resolveGuestJourneyComplianceOwnerConfig,
+} from "../services/guest-journey-compliance-owner.config";
+import {
+  runGuestJourneyComplianceOwnerCycle,
+} from "../services/guest-journey-compliance-owner-cycle.service";
 
 
 console.log("[reservation.worker] BOOT", new Date().toISOString());
@@ -158,6 +164,8 @@ const GUEST_JOURNEY_ACCESS_OWNER_CONFIG =
   resolveGuestJourneyAccessOwnerConfig();
 const GUEST_JOURNEY_FINANCIAL_OWNER_CONFIG =
   resolveGuestJourneyFinancialOwnerConfig();
+const GUEST_JOURNEY_COMPLIANCE_OWNER_CONFIG =
+  resolveGuestJourneyComplianceOwnerConfig();
 const REMINDER_HOURS = Number(
   process.env.GUEST_LINK_REMINDER_HOURS ??
     24
@@ -2697,6 +2705,29 @@ async function tick() {
         );
       }
     }
+
+    if (
+      GUEST_JOURNEY_COMPLIANCE_OWNER_CONFIG.enabled
+    ) {
+      try {
+        const complianceOwnerMetrics =
+          await runGuestJourneyComplianceOwnerCycle(
+            prisma,
+            GUEST_JOURNEY_COMPLIANCE_OWNER_CONFIG,
+            { now }
+          );
+
+        log(
+          "guest-journey-compliance-owner",
+          complianceOwnerMetrics
+        );
+      } catch (e) {
+        errLog(
+          "guest-journey-compliance-owner crashed:",
+          toErrString(e)
+        );
+      }
+    }
   } finally {
     tickRunning = false;
   }
@@ -2767,6 +2798,13 @@ async function start() {
   log(
     `Guest Journey financial owner: ${
       GUEST_JOURNEY_FINANCIAL_OWNER_CONFIG.enabled
+        ? "on"
+        : "off"
+    }`
+  );
+  log(
+    `Guest Journey compliance owner: ${
+      GUEST_JOURNEY_COMPLIANCE_OWNER_CONFIG.enabled
         ? "on"
         : "off"
     }`

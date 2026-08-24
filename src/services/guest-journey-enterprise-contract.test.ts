@@ -14,11 +14,14 @@ import {
   GUEST_JOURNEY_ACCESS_REVOCATION_HANDLER_CODE,
   GUEST_JOURNEY_COMMUNICATIONS_HANDLER_CODE,
   GUEST_JOURNEY_COMMUNICATIONS_OWNER_VERSION,
+  GUEST_JOURNEY_COMPLIANCE_OWNER_VERSION,
   GUEST_JOURNEY_FINANCIAL_OWNER_VERSION,
+  GUEST_JOURNEY_GUEST_VERIFICATION_HANDLER_CODE,
   GUEST_JOURNEY_MISSION_CONTROL_BRIDGE_VERSION,
   GUEST_JOURNEY_MISSION_CONTROL_OPERATIONAL_ISSUE_CODE,
   GUEST_JOURNEY_OWNER_RUNTIME_VERSION,
   GUEST_JOURNEY_PAYMENT_EVALUATION_HANDLER_CODE,
+  GUEST_JOURNEY_REQUIREMENTS_SNAPSHOT_HANDLER_CODE,
   GUEST_JOURNEY_TARGET_ENGINES,
   TERMINAL_GUEST_JOURNEY_STATES,
   getCanonicalGuestJourneyStateRank,
@@ -362,6 +365,62 @@ test("pins E9 to read-only FINANCIAL payment evaluation only", () => {
   assert.match(
     worker,
     /GUEST_JOURNEY_FINANCIAL_OWNER_CONFIG\.enabled/
+  );
+});
+
+test("pins E10 to bounded COMPLIANCE requirements and verification only", () => {
+  assert.equal(
+    GUEST_JOURNEY_COMPLIANCE_OWNER_VERSION,
+    "guest_journey_compliance_owner_v1"
+  );
+  assert.equal(
+    GUEST_JOURNEY_REQUIREMENTS_SNAPSHOT_HANDLER_CODE,
+    "REQUIREMENTS_SNAPSHOT_V1"
+  );
+  assert.equal(
+    GUEST_JOURNEY_GUEST_VERIFICATION_HANDLER_CODE,
+    "GUEST_VERIFICATION_V1"
+  );
+
+  const runtime = readFileSync(
+    new URL(
+      "./guest-journey-compliance-owner-runtime.service.ts",
+      import.meta.url
+    ),
+    "utf8"
+  );
+  assert.match(runtime, /targetEngine:\s*"COMPLIANCE"/);
+  assert.match(runtime, /REQUEST_REQUIREMENTS_SNAPSHOT/);
+  assert.match(runtime, /REQUEST_GUEST_VERIFICATION/);
+  assert.doesNotMatch(runtime, /REQUEST_ACCESS_|REQUEST_COMMUNICATION|REQUEST_PAYMENT_EVALUATION/);
+
+  const adapter = readFileSync(
+    new URL(
+      "./guest-journey-compliance-owner-adapter.service.ts",
+      import.meta.url
+    ),
+    "utf8"
+  );
+  assert.doesNotMatch(
+    adapter,
+    /from\s+["'][^"']*(stripe|ttlock|messaging|mailer|access|nfc)[^"']*["']/
+  );
+  assert.doesNotMatch(
+    adapter,
+    /\b(createGuestIdentityVerificationSession|verificationSessions\.create|createCheckout|createPayment|charge|refund|transfer|activateGrant|deactivateGrant|sendSms|sendEmail|sendGuest|ttlock)[A-Za-z]*\s*\(/
+  );
+  assert.match(adapter, /providerCalls:\s*0/);
+  assert.match(adapter, /externalSideEffects:\s*0/);
+
+  const worker = readFileSync(
+    new URL("../workers/reservation.worker.ts", import.meta.url),
+    "utf8"
+  );
+  assert.match(worker, /resolveGuestJourneyComplianceOwnerConfig/);
+  assert.match(worker, /runGuestJourneyComplianceOwnerCycle/);
+  assert.match(
+    worker,
+    /GUEST_JOURNEY_COMPLIANCE_OWNER_CONFIG\.enabled/
   );
 });
 

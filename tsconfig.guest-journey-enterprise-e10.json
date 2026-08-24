@@ -1,0 +1,32 @@
+{
+  "compilerOptions": {
+    "noEmit": true,
+    "module": "preserve",
+    "moduleResolution": "bundler",
+    "target": "esnext",
+    "strict": true,
+    "skipLibCheck": true,
+    "types": ["node"]
+  },
+  "include": [
+    "src/apms/audit-types.ts",
+    "src/apms/audit-persistence.service.ts",
+    "src/apms/operational-intelligence-types.ts",
+    "src/apms/operational-intelligence.service.ts",
+    "src/apms/operational-transition-policy.ts",
+    "src/services/cancellation-policy.service.ts",
+    "src/services/guest-agreement.service.ts",
+    "src/services/guest-journey-contract.ts",
+    "src/services/guest-journey-enterprise-contract.test.ts",
+    "src/services/guest-journey-compliance-owner.config.ts",
+    "src/services/guest-journey-compliance-owner.config.test.ts",
+    "src/services/guest-journey-compliance-owner-runtime.service.ts",
+    "src/services/guest-journey-compliance-owner-runtime.service.test.ts",
+    "src/services/guest-journey-compliance-owner-adapter.service.ts",
+    "src/services/guest-journey-compliance-owner-adapter.service.test.ts",
+    "src/services/guest-journey-compliance-owner-mission-control.service.ts",
+    "src/services/guest-journey-compliance-owner-mission-control.service.test.ts",
+    "src/services/guest-journey-compliance-owner-cycle.service.ts",
+    "src/services/guest-journey-compliance-owner-cycle.service.test.ts"
+  ]
+}
