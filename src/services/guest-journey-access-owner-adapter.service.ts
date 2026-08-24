@@ -27,6 +27,12 @@ import {
   activateGrant,
   deactivateGrant,
 } from "./ttlock/ttlock.brain";
+import {
+  assertOrgTtlockAuthConfigured,
+} from "./ttlock/ttlock.org-auth";
+import {
+  isGuestJourneyAccessClosureSatisfied,
+} from "./guest-journey-contract";
 import type {
   AccessOwnerCompletion,
   ClaimedAccessIntent,
@@ -41,6 +47,7 @@ type AdapterDependencies = {
   assignNfc: typeof assignNfcCards;
   unassignGuestNfc: typeof unassignGuestNfcForReservation;
   isEntitled: typeof isOrgEntitled;
+  assertTenantProviderAuth: typeof assertOrgTtlockAuthConfigured;
 };
 
 const DEFAULT_DEPENDENCIES: AdapterDependencies = {
@@ -52,6 +59,7 @@ const DEFAULT_DEPENDENCIES: AdapterDependencies = {
   assignNfc: assignNfcCards,
   unassignGuestNfc: unassignGuestNfcForReservation,
   isEntitled: isOrgEntitled,
+  assertTenantProviderAuth: assertOrgTtlockAuthConfigured,
 };
 
 const reservationSelect = {
@@ -219,7 +227,12 @@ function closureSatisfied(snapshot: any): boolean {
   const guestGrantsRevoked = snapshot.accessGrants.filter((grant: any) =>
     grant.status === AccessStatus.REVOKED
   ).length;
-  return guestGrantsRevoked > 0 && guestGrantsOpen === 0 && activeNfc(snapshot) === 0;
+  return isGuestJourneyAccessClosureSatisfied({
+    releaseStatus: snapshot.guestAccessReleaseStatus,
+    guestGrantsOpen,
+    guestGrantsRevoked,
+    unresolvedGuestNfcCount: activeNfc(snapshot),
+  });
 }
 
 async function executeProvisioning(
@@ -319,6 +332,22 @@ async function executeProvisioning(
       kind: "WAITING_FOR_EVIDENCE",
       errorCode: "ACCESS_PROVISIONING_REFENCE_LOST",
       errorDetail: "Reservation, eligibility, method, status, or access window changed before provider execution.",
+      accessGrantIds: [grant.id],
+      outcomeEvidenceFingerprint: evidenceFingerprint(snapshot),
+    };
+  }
+
+  try {
+    await dependencies.assertTenantProviderAuth(
+      prisma,
+      claim.organizationId
+    );
+  } catch (error) {
+    const normalized = normalizedError(error);
+    return {
+      kind: "WAITING_FOR_EVIDENCE",
+      errorCode: "ACCESS_TENANT_TTLOCK_AUTH_MISSING",
+      errorDetail: normalized.detail,
       accessGrantIds: [grant.id],
       outcomeEvidenceFingerprint: evidenceFingerprint(snapshot),
     };
@@ -501,6 +530,22 @@ async function executeRevocation(
     }
 
     try {
+      await dependencies.assertTenantProviderAuth(
+        prisma,
+        claim.organizationId
+      );
+    } catch (error) {
+      const normalized = normalizedError(error);
+      return {
+        kind: "WAITING_FOR_EVIDENCE",
+        errorCode: "ACCESS_TENANT_TTLOCK_AUTH_MISSING",
+        errorDetail: normalized.detail,
+        accessGrantIds: grantIds,
+        outcomeEvidenceFingerprint: evidenceFingerprint(snapshot),
+      };
+    }
+
+    try {
       await withProviderTimeout(
         dependencies.deactivate(grant.id),
         providerTimeoutMs
@@ -555,6 +600,21 @@ async function executeRevocation(
         kind: "AMBIGUOUS",
         errorCode: "ACCESS_NFC_REVOCATION_LOCK_EVIDENCE_MISSING",
         errorDetail: "Guest NFC remains open without a canonical TTLock lock identifier.",
+        accessGrantIds: grantIds,
+        outcomeEvidenceFingerprint: evidenceFingerprint(snapshot),
+      };
+    }
+    try {
+      await dependencies.assertTenantProviderAuth(
+        prisma,
+        claim.organizationId
+      );
+    } catch (error) {
+      const normalized = normalizedError(error);
+      return {
+        kind: "WAITING_FOR_EVIDENCE",
+        errorCode: "ACCESS_TENANT_TTLOCK_AUTH_MISSING",
+        errorDetail: normalized.detail,
         accessGrantIds: grantIds,
         outcomeEvidenceFingerprint: evidenceFingerprint(snapshot),
       };

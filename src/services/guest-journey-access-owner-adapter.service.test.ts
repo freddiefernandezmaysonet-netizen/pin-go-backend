@@ -101,6 +101,7 @@ function provisioningDependencies(
 ) {
   return {
     isEntitled: async () => ({ ok: true, reason: "ENTITLED" }),
+    assertTenantProviderAuth: async () => undefined,
     activate: async (grantId: string) => {
       assert.equal(grantId, "grant-1");
       state.accessGrants[0].status = AccessStatus.ACTIVE;
@@ -249,6 +250,35 @@ test("E8 preserves canonical billing entitlement before activateGrant", async ()
   assert.equal(result.providerCalls, 0);
 });
 
+test("E8 blocks provisioning before activateGrant when tenant TTLock auth is missing", async () => {
+  const state = snapshot();
+  let calls = 0;
+  const result = await executeGuestJourneyAccessOwnerAdapter(
+    fakePrisma(state),
+    claim(),
+    {
+      now,
+      provisionLeadMs: 2 * 60 * 60_000,
+      providerTimeoutMs: 100,
+      dependencies: provisioningDependencies(state, {
+        assertTenantProviderAuth: async () => {
+          throw new Error("TTLockAuth not configured for this organization");
+        },
+        activate: async () => { calls += 1; return { ok: true }; },
+      }),
+    }
+  );
+  assert.equal(result.completion.kind, "WAITING_FOR_EVIDENCE");
+  if (result.completion.kind === "WAITING_FOR_EVIDENCE") {
+    assert.equal(
+      result.completion.errorCode,
+      "ACCESS_TENANT_TTLOCK_AUTH_MISSING"
+    );
+  }
+  assert.equal(calls, 0);
+  assert.equal(result.providerCalls, 0);
+});
+
 test("E8 fences an ambiguous provisioning result and never requests automatic replay", async () => {
   const state = snapshot();
   const result = await executeGuestJourneyAccessOwnerAdapter(
@@ -319,6 +349,7 @@ function revocationDependencies(
   overrides: Record<string, unknown> = {}
 ) {
   return {
+    assertTenantProviderAuth: async () => undefined,
     claimRecovery: async () => ({
       claimed: true,
       attemptCount: 1,
@@ -379,6 +410,63 @@ test("E8 revokes through canonical recovery and deactivateGrant boundaries", asy
   assert.equal(successCalls, 1);
 });
 
+test("E8 closes never-released zero-grant access without provider calls", async () => {
+  const state = snapshot({
+    releaseStatus: GuestAccessReleaseStatus.ELIGIBLE,
+    checkOut: new Date("2026-08-23T11:00:00.000Z"),
+  });
+  state.accessGrants = [];
+  let calls = 0;
+  const result = await executeGuestJourneyAccessOwnerAdapter(
+    fakePrisma(state),
+    claim("REQUEST_ACCESS_REVOCATION_CHECK"),
+    {
+      now,
+      provisionLeadMs: 2 * 60 * 60_000,
+      providerTimeoutMs: 100,
+      dependencies: revocationDependencies(state, {
+        deactivate: async () => { calls += 1; return { ok: true }; },
+        unassignGuestNfc: async () => {
+          calls += 1;
+          return { ended: 0, totalActive: 0 };
+        },
+      }),
+    }
+  );
+  assert.equal(result.completion.kind, "SUCCEEDED");
+  if (result.completion.kind === "SUCCEEDED") {
+    assert.equal(result.completion.action, "ALREADY_SATISFIED");
+  }
+  assert.equal(calls, 0);
+  assert.equal(result.providerCalls, 0);
+});
+
+test("E8 keeps released zero-grant access ambiguous instead of closing by absence", async () => {
+  const state = snapshot({
+    releaseStatus: GuestAccessReleaseStatus.RELEASED,
+    checkOut: new Date("2026-08-23T11:00:00.000Z"),
+  });
+  state.accessGrants = [];
+  const result = await executeGuestJourneyAccessOwnerAdapter(
+    fakePrisma(state),
+    claim("REQUEST_ACCESS_REVOCATION_CHECK"),
+    {
+      now,
+      provisionLeadMs: 2 * 60 * 60_000,
+      providerTimeoutMs: 100,
+      dependencies: revocationDependencies(state),
+    }
+  );
+  assert.equal(result.completion.kind, "AMBIGUOUS");
+  if (result.completion.kind === "AMBIGUOUS") {
+    assert.equal(
+      result.completion.errorCode,
+      "ACCESS_CLOSURE_EVIDENCE_INCOMPLETE"
+    );
+  }
+  assert.equal(result.providerCalls, 0);
+});
+
 test("E8 honors canonical recovery backoff without calling deactivateGrant", async () => {
   const state = snapshot({
     grantStatus: AccessStatus.ACTIVE,
@@ -411,6 +499,39 @@ test("E8 honors canonical recovery backoff without calling deactivateGrant", asy
   assert.equal(calls, 0);
 });
 
+test("E8 blocks revocation before deactivateGrant when tenant TTLock auth is missing", async () => {
+  const state = snapshot({
+    grantStatus: AccessStatus.ACTIVE,
+    releaseStatus: GuestAccessReleaseStatus.RELEASED,
+    checkOut: new Date("2026-08-23T11:00:00.000Z"),
+  });
+  let calls = 0;
+  const result = await executeGuestJourneyAccessOwnerAdapter(
+    fakePrisma(state),
+    claim("REQUEST_ACCESS_REVOCATION_CHECK"),
+    {
+      now,
+      provisionLeadMs: 2 * 60 * 60_000,
+      providerTimeoutMs: 100,
+      dependencies: revocationDependencies(state, {
+        assertTenantProviderAuth: async () => {
+          throw new Error("TTLockAuth not configured for this organization");
+        },
+        deactivate: async () => { calls += 1; return { ok: true }; },
+      }),
+    }
+  );
+  assert.equal(result.completion.kind, "WAITING_FOR_EVIDENCE");
+  if (result.completion.kind === "WAITING_FOR_EVIDENCE") {
+    assert.equal(
+      result.completion.errorCode,
+      "ACCESS_TENANT_TTLOCK_AUTH_MISSING"
+    );
+  }
+  assert.equal(calls, 0);
+  assert.equal(result.providerCalls, 0);
+});
+
 test("E8 closes complementary guest NFC through the existing canonical service", async () => {
   const state = snapshot({
     grantStatus: AccessStatus.ACTIVE,
@@ -437,6 +558,43 @@ test("E8 closes complementary guest NFC through the existing canonical service",
   );
   assert.equal(result.completion.kind, "SUCCEEDED");
   assert.equal(nfcCalls, 1);
+});
+
+test("E8 blocks NFC revocation before unassign when tenant TTLock auth is missing", async () => {
+  const state = snapshot({
+    grantStatus: AccessStatus.REVOKED,
+    releaseStatus: GuestAccessReleaseStatus.RELEASED,
+    checkOut: new Date("2026-08-23T11:00:00.000Z"),
+    nfcStatus: NfcAssignmentStatus.ACTIVE,
+  });
+  let nfcCalls = 0;
+  const result = await executeGuestJourneyAccessOwnerAdapter(
+    fakePrisma(state),
+    claim("REQUEST_ACCESS_REVOCATION_CHECK"),
+    {
+      now,
+      provisionLeadMs: 2 * 60 * 60_000,
+      providerTimeoutMs: 100,
+      dependencies: revocationDependencies(state, {
+        assertTenantProviderAuth: async () => {
+          throw new Error("TTLockAuth not configured for this organization");
+        },
+        unassignGuestNfc: async () => {
+          nfcCalls += 1;
+          return { ended: 1, totalActive: 1 };
+        },
+      }),
+    }
+  );
+  assert.equal(result.completion.kind, "WAITING_FOR_EVIDENCE");
+  if (result.completion.kind === "WAITING_FOR_EVIDENCE") {
+    assert.equal(
+      result.completion.errorCode,
+      "ACCESS_TENANT_TTLOCK_AUTH_MISSING"
+    );
+  }
+  assert.equal(nfcCalls, 0);
+  assert.equal(result.providerCalls, 0);
 });
 
 test("E8 fences an ambiguous revocation and records canonical recovery failure", async () => {

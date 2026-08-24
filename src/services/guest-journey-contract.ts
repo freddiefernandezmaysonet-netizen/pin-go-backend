@@ -87,6 +87,22 @@ export function isTerminalGuestJourneyState(
   );
 }
 
+export function isGuestJourneyAccessClosureSatisfied(input: {
+  releaseStatus: GuestAccessReleaseStatus;
+  guestGrantsOpen: number;
+  guestGrantsRevoked: number;
+  unresolvedGuestNfcCount: number;
+}): boolean {
+  return (
+    input.guestGrantsOpen === 0 &&
+    input.unresolvedGuestNfcCount === 0 &&
+    (
+      input.guestGrantsRevoked > 0 ||
+      input.releaseStatus !== GuestAccessReleaseStatus.RELEASED
+    )
+  );
+}
+
 export function getCanonicalGuestJourneyStateRank(
   state: GuestJourneyState
 ): number | null {

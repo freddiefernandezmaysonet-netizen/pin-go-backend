@@ -756,6 +756,127 @@ test(
 );
 
 test(
+  "treats never-released zero-grant access as closed after checkout",
+  () => {
+    const verified =
+      completedVerificationOverrides();
+
+    const evaluation =
+      evaluateCanonicalGuestJourney(
+        createEvidence({
+          ...verified,
+
+          evaluatedAt:
+            new Date(
+              "2026-08-12T16:00:00.000Z"
+            ),
+
+          access: {
+            releaseStatus:
+              GuestAccessReleaseStatus
+                .ELIGIBLE,
+
+            eligibleAt:
+              new Date(
+                "2026-08-02T14:06:00.000Z"
+              ),
+
+            releasedAt: null,
+            canonicalGuestGrant: null,
+            canonicalGuestGrantCandidateCount:
+              0,
+            guestGrantsOpen: 0,
+            guestGrantsRevoked: 0,
+            guestNfcScheduled: 0,
+            guestNfcProvisioning: 0,
+            guestNfcActive: 0,
+            guestNfcFailed: 0,
+          },
+        })
+      );
+
+    assert.equal(
+      evaluation.expectedState,
+      GuestJourneyState
+        .JOURNEY_COMPLETED
+    );
+    assert.equal(
+      evaluation.outcomeEvidence
+        .accessClosureSatisfied,
+      true
+    );
+    assert.equal(
+      intentTypes(evaluation).includes(
+        "REQUEST_ACCESS_REVOCATION_CHECK"
+      ),
+      false
+    );
+  }
+);
+
+test(
+  "keeps released zero-grant access fail-safe after checkout",
+  () => {
+    const verified =
+      completedVerificationOverrides();
+
+    const evaluation =
+      evaluateCanonicalGuestJourney(
+        createEvidence({
+          ...verified,
+
+          evaluatedAt:
+            new Date(
+              "2026-08-12T16:00:00.000Z"
+            ),
+
+          access: {
+            releaseStatus:
+              GuestAccessReleaseStatus
+                .RELEASED,
+
+            releasedAt:
+              ACCESS_RELEASED_AT,
+
+            canonicalGuestGrant: null,
+            canonicalGuestGrantCandidateCount:
+              0,
+            guestGrantsOpen: 0,
+            guestGrantsRevoked: 0,
+            guestNfcScheduled: 0,
+            guestNfcProvisioning: 0,
+            guestNfcActive: 0,
+            guestNfcFailed: 0,
+          },
+        })
+      );
+
+    assert.equal(
+      evaluation.expectedState,
+      GuestJourneyState
+        .CHECKOUT_DUE
+    );
+    assert.equal(
+      evaluation.outcomeEvidence
+        .accessClosureSatisfied,
+      false
+    );
+    assert.ok(
+      intentTypes(evaluation).includes(
+        "REQUEST_ACCESS_REVOCATION_CHECK"
+      )
+    );
+    assert.ok(
+      inconsistencyCodes(
+        evaluation
+      ).includes(
+        "RELEASED_FLAG_WITHOUT_ACTIVE_ACCESS"
+      )
+    );
+  }
+);
+
+test(
   "cancellation takes precedence without retaining irrelevant verification blockers",
   () => {
     const evaluation =

@@ -13,6 +13,7 @@ import {
   CANONICAL_GUEST_JOURNEY_EVALUATOR_VERSION,
   GUEST_JOURNEY_EVIDENCE_CONTRACT_VERSION,
   getCanonicalGuestJourneyStateRank,
+  isGuestJourneyAccessClosureSatisfied,
   isTerminalGuestJourneyState,
 } from "./guest-journey-contract";
 import {
@@ -669,11 +670,15 @@ export function evaluateCanonicalGuestJourney(
       .guestNfcFailed;
 
   const accessClosureSatisfied =
-    evidence.access
-      .guestGrantsRevoked > 0 &&
-    evidence.access
-      .guestGrantsOpen === 0 &&
-    unresolvedGuestNfcCount === 0;
+    isGuestJourneyAccessClosureSatisfied({
+      releaseStatus:
+        evidence.access.releaseStatus,
+      guestGrantsOpen:
+        evidence.access.guestGrantsOpen,
+      guestGrantsRevoked:
+        evidence.access.guestGrantsRevoked,
+      unresolvedGuestNfcCount,
+    });
 
   if (reservationActive) {
     satisfiedRequirements.push(
