@@ -42,7 +42,7 @@
     "test:admin-branding-routes": "tsx --test src/routes/admin.branding.routes.test.ts",
     "test:organization-branding-routes": "tsx --test src/routes/organization.branding.routes.test.ts",
     "test:public-organization-invitation-routes": "tsx --test src/routes/public.organization-invitation.routes.test.ts",
-    "test:public-brand-context-routes": "tsx --test src/routes/public-brand-context.routes.test.ts",
+    "test:public-brand-context-routes": "tsx --test src/routes/public.brand-context.routes.test.ts",
     "test:brand-asset-upload": "tsx --test src/routes/uploads.route.test.ts",
     "test:enterprise-brand-onboarding": "tsx --test src/services/branding/enterprise-brand-onboarding.service.test.ts",
     "test:organization-guest-email": "tsx --test src/services/organization-guest-email.service.test.ts",
