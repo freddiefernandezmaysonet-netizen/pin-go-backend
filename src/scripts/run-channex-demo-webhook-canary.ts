@@ -24,7 +24,6 @@ type CanaryDependencies = {
   log?: (value: unknown) => void;
   logError?: (value: unknown) => void;
   disconnect?: () => Promise<void>;
-  sleep?: (ms: number) => Promise<void>;
 };
 
 function asRecord(value: unknown): JsonRecord {
@@ -76,39 +75,6 @@ function getWebhookId(responseData: unknown) {
   const root = asRecord(responseData);
   const data = asRecord(root.data);
   return asString(data.id) || asString(root.id);
-}
-
-function findEventId(value: unknown, depth = 0): string | null {
-  if (depth > 6 || value == null) return null;
-
-  if (typeof value === "string") {
-    try {
-      return findEventId(JSON.parse(value), depth + 1);
-    } catch {
-      return null;
-    }
-  }
-
-  if (Array.isArray(value)) {
-    for (const item of value) {
-      const found = findEventId(item, depth + 1);
-      if (found) return found;
-    }
-    return null;
-  }
-
-  if (typeof value === "object") {
-    const record = value as JsonRecord;
-    const explicit = asString(record.eventId) || asString(record.event_id);
-    if (explicit) return explicit;
-
-    for (const nested of Object.values(record)) {
-      const found = findEventId(nested, depth + 1);
-      if (found) return found;
-    }
-  }
-
-  return null;
 }
 
 function validateEnv(env: NodeJS.ProcessEnv) {
@@ -189,80 +155,15 @@ async function findDemoListing(prismaClient: any) {
   }
 
   const listing = listings[0]!;
-  const channexPropertyId = asString(asRecord(listing.metadata).channexPropertyId);
+  const channexPropertyId = asString(
+    asRecord(listing.metadata).channexPropertyId
+  );
 
   if (!channexPropertyId) {
     throw new Error("CHANNEX_DEMO_WEBHOOK_CANARY_CHANNEX_PROPERTY_ID_MISSING");
   }
 
   return { listing, channexPropertyId };
-}
-
-async function findSyntheticEvent(args: {
-  prismaClient: any;
-  connectionId: string;
-  channexPropertyId: string;
-  startedAt: Date;
-  eventId: string | null;
-  sleep: (ms: number) => Promise<void>;
-}) {
-  for (let attempt = 0; attempt < 20; attempt += 1) {
-    if (args.eventId) {
-      const found = await args.prismaClient.webhookEventIngest.findUnique({
-        where: { id: args.eventId },
-        select: {
-          id: true,
-          connectionId: true,
-          provider: true,
-          eventType: true,
-          status: true,
-          attempts: true,
-          createdAt: true,
-          payloadRaw: true,
-        },
-      });
-
-      if (found) return found;
-    }
-
-    const rows = await args.prismaClient.webhookEventIngest.findMany({
-      where: {
-        connectionId: args.connectionId,
-        provider: "CHANNEX",
-        createdAt: { gte: args.startedAt },
-      },
-      orderBy: { createdAt: "desc" },
-      take: 10,
-      select: {
-        id: true,
-        connectionId: true,
-        provider: true,
-        eventType: true,
-        status: true,
-        attempts: true,
-        createdAt: true,
-        payloadRaw: true,
-      },
-    });
-
-    const matches = rows.filter((row: any) => {
-      const payload = asRecord(row.payloadRaw);
-      return (
-        asString(payload.property_id) === args.channexPropertyId ||
-        asString(payload.propertyId) === args.channexPropertyId
-      );
-    });
-
-    if (matches.length > 1) {
-      throw new Error("CHANNEX_DEMO_WEBHOOK_CANARY_SYNTHETIC_EVENT_AMBIGUOUS");
-    }
-
-    if (matches.length === 1) return matches[0]!;
-
-    await args.sleep(500);
-  }
-
-  return null;
 }
 
 export async function runChannexDemoWebhookCanary(
@@ -276,19 +177,17 @@ export async function runChannexDemoWebhookCanary(
   const log = dependencies.log ?? console.log;
   const logError = dependencies.logError ?? console.error;
   const disconnect = dependencies.disconnect ?? (() => prisma.$disconnect());
-  const sleep = dependencies.sleep ?? ((ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms)));
 
   let remoteWebhookId: string | null = null;
-  let syntheticEventId: string | null = null;
   let listingId: string | null = null;
   let connectionId: string | null = null;
   let originalMetadata: unknown = null;
   let originalWebhookSecret: string | null = null;
-  let startedAt: Date | null = null;
 
   try {
     const { apiKey, apiBaseUrl, callbackUrl } = validateEnv(env);
     const { listing, channexPropertyId } = await findDemoListing(prismaClient);
+
     listingId = listing.id;
     connectionId = listing.connection.id;
     originalMetadata = listing.metadata;
@@ -314,7 +213,9 @@ export async function runChannexDemoWebhookCanary(
     });
 
     if (!createResult.response.ok) {
-      throw new Error(`CHANNEX_DEMO_WEBHOOK_CANARY_CREATE_FAILED:${createResult.response.status}`);
+      throw new Error(
+        `CHANNEX_DEMO_WEBHOOK_CANARY_CREATE_FAILED:${createResult.response.status}`
+      );
     }
 
     remoteWebhookId = getWebhookId(createResult.body);
@@ -324,7 +225,9 @@ export async function runChannexDemoWebhookCanary(
 
     const verifyResult = await fetchJsonWithTimeout({
       fetchImpl,
-      url: `${apiBaseUrl}/api/v1/webhooks/${encodeURIComponent(remoteWebhookId)}`,
+      url: `${apiBaseUrl}/api/v1/webhooks/${encodeURIComponent(
+        remoteWebhookId
+      )}`,
       init: {
         method: "GET",
         headers: requestHeaders,
@@ -332,7 +235,9 @@ export async function runChannexDemoWebhookCanary(
     });
 
     if (!verifyResult.response.ok) {
-      throw new Error(`CHANNEX_DEMO_WEBHOOK_CANARY_VERIFY_FETCH_FAILED:${verifyResult.response.status}`);
+      throw new Error(
+        `CHANNEX_DEMO_WEBHOOK_CANARY_VERIFY_FETCH_FAILED:${verifyResult.response.status}`
+      );
     }
 
     assertVerifiedChannexWebhook({
@@ -362,60 +267,6 @@ export async function runChannexDemoWebhookCanary(
       },
     });
 
-    startedAt = now();
-    const testResult = await fetchJsonWithTimeout({
-      fetchImpl,
-      url: `${apiBaseUrl}/api/v1/webhooks/test`,
-      init: {
-        method: "POST",
-        headers: requestHeaders,
-        body: JSON.stringify({ callback_url: callbackUrl }),
-      },
-    });
-
-    if (!testResult.response.ok) {
-      throw new Error(`CHANNEX_DEMO_WEBHOOK_CANARY_TEST_CALLBACK_FAILED:${testResult.response.status}`);
-    }
-
-    const syntheticEvent = await findSyntheticEvent({
-      prismaClient,
-      connectionId,
-      channexPropertyId,
-      startedAt,
-      eventId: findEventId(testResult.body),
-      sleep,
-    });
-
-    if (!syntheticEvent) {
-      throw new Error("CHANNEX_DEMO_WEBHOOK_CANARY_SYNTHETIC_EVENT_NOT_FOUND");
-    }
-
-    syntheticEventId = syntheticEvent.id;
-
-    if (
-      syntheticEvent.connectionId !== connectionId ||
-      syntheticEvent.provider !== "CHANNEX" ||
-      syntheticEvent.status !== "PENDING" ||
-      syntheticEvent.attempts !== 0 ||
-      syntheticEvent.createdAt < startedAt
-    ) {
-      throw new Error("CHANNEX_DEMO_WEBHOOK_CANARY_SYNTHETIC_EVENT_INVALID");
-    }
-
-    const deleted = await prismaClient.webhookEventIngest.deleteMany({
-      where: {
-        id: syntheticEventId,
-        status: "PENDING",
-        attempts: 0,
-        createdAt: { gte: startedAt },
-      },
-    });
-
-    if (deleted.count !== 1) {
-      throw new Error("CHANNEX_DEMO_WEBHOOK_CANARY_SYNTHETIC_EVENT_CLEANUP_FAILED");
-    }
-
-    syntheticEventId = null;
     const reservationCountAfter = await prismaClient.reservation.count();
 
     if (reservationCountAfter !== reservationCountBefore) {
@@ -425,7 +276,7 @@ export async function runChannexDemoWebhookCanary(
     printJson(log, {
       provider: "PIN_GO_CONNECT",
       executionMode: "CHANNEX_DEMO_WEBHOOK_CANARY",
-      status: "PASS",
+      status: "PASS_REMOTE_WEBHOOK_REGISTRATION",
       property: {
         listingName: DEMO_LISTING_NAME,
         propertyId: listing.propertyId,
@@ -435,9 +286,14 @@ export async function runChannexDemoWebhookCanary(
         host: new URL(callbackUrl).hostname,
         path: new URL(callbackUrl).pathname,
       },
+      remoteWebhookCreated: true,
       remoteWebhookVerified: true,
-      syntheticEventStoredAsPending: true,
-      syntheticEventDeleted: true,
+      localTemporaryMetadataApplied: true,
+      callbackDeliveryAttempted: false,
+      callbackDeliveryReason:
+        "CHANNEX_WEBHOOK_TEST_ENDPOINT_DOES_NOT_PROVE_PIN_GO_AUTHENTICATED_DELIVERY",
+      syntheticEventStoredAsPending: false,
+      syntheticEventDeleted: false,
       reservationDelta: 0,
       workersActivated: false,
       appChannexTouched: false,
@@ -450,7 +306,6 @@ export async function runChannexDemoWebhookCanary(
       executionMode: "CHANNEX_DEMO_WEBHOOK_CANARY",
       status: "FAILED_SAFE",
       errorCode: safeErrorCode(error),
-      syntheticEventCleanupAttempted: Boolean(syntheticEventId),
       remoteWebhookCleanupAttempted: Boolean(remoteWebhookId),
       workersActivated: false,
       appChannexTouched: false,
@@ -458,31 +313,21 @@ export async function runChannexDemoWebhookCanary(
 
     return 1;
   } finally {
-    if (syntheticEventId && startedAt) {
-      await prismaClient.webhookEventIngest
-        .deleteMany({
-          where: {
-            id: syntheticEventId,
-            status: "PENDING",
-            attempts: 0,
-            createdAt: { gte: startedAt },
-          },
-        })
-        .catch(() => undefined);
-    }
-
     const envApiKey = asString(env.CHANNEX_API_KEY);
     const envBase = asString(env.CHANNEX_API_BASE_URL || "https://staging.channex.io");
 
     if (remoteWebhookId && envApiKey) {
       try {
         const apiBaseUrl = normalizeChannexStagingBaseUrl(envBase);
-        await fetchImpl(`${apiBaseUrl}/api/v1/webhooks/${encodeURIComponent(remoteWebhookId)}`, {
-          method: "DELETE",
-          headers: headers(envApiKey),
-        });
+        await fetchImpl(
+          `${apiBaseUrl}/api/v1/webhooks/${encodeURIComponent(remoteWebhookId)}`,
+          {
+            method: "DELETE",
+            headers: headers(envApiKey),
+          }
+        );
       } catch {
-        // Cleanup is best-effort; DB state is restored below regardless.
+        // Remote cleanup is best-effort; local state is restored below regardless.
       }
     }
 
