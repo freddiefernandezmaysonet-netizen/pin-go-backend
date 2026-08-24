@@ -1,0 +1,36 @@
+name: Guest Journey Enterprise E10 Compliance Owner Certification
+
+on:
+  pull_request:
+    paths:
+      - "src/services/guest-journey-compliance-*"
+      - "src/services/guest-journey-contract.ts"
+      - "src/services/guest-journey-enterprise-contract.test.ts"
+      - "src/workers/reservation.worker.ts"
+      - "tsconfig.guest-journey-enterprise-e10.json"
+      - "package.json"
+      - ".github/workflows/guest-journey-enterprise-e10-certification.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  certify-e10-compliance-owner:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npx prisma generate
+      - run: npm run test:guest-journey-enterprise-e10-compliance-owner
+      - name: Bundle reservation worker integration boundary
+        run: npx esbuild src/workers/reservation.worker.ts --bundle --platform=node --packages=external --outfile=/tmp/reservation.worker.e10.js
+      - name: Verify Prisma schema without applying migrations
+        env:
+          DATABASE_URL: postgresql://ci:ci@127.0.0.1:5432/pin_go_e10_schema_validation
+        run: npx prisma validate
