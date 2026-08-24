@@ -46,10 +46,7 @@ function safeErrorCode(error: unknown) {
   const message = error instanceof Error ? error.message : String(error);
   const normalized = message.trim();
 
-  if (/^[A-Z0-9_:-]{1,200}$/.test(normalized)) {
-    return normalized;
-  }
-
+  if (/^[A-Z0-9_:-]{1,200}$/.test(normalized)) return normalized;
   return "CHANNEX_DEMO_WEBHOOK_CANARY_FAILED";
 }
 
@@ -68,7 +65,6 @@ function headers(apiKey: string) {
 async function readJsonResponse(response: Response) {
   const text = await response.text();
   if (!text) return null;
-
   try {
     return JSON.parse(text);
   } catch {
@@ -83,10 +79,7 @@ function getWebhookId(responseData: unknown) {
 }
 
 function validateEnv(env: NodeJS.ProcessEnv) {
-  const confirmation = asString(
-    env.CHANNEX_DEMO_WEBHOOK_CANARY_CONFIRMATION
-  );
-
+  const confirmation = asString(env.CHANNEX_DEMO_WEBHOOK_CANARY_CONFIRMATION);
   if (confirmation !== CONFIRMATION) {
     throw new Error("CHANNEX_DEMO_WEBHOOK_CANARY_CONFIRMATION_REQUIRED");
   }
@@ -97,7 +90,6 @@ function validateEnv(env: NodeJS.ProcessEnv) {
   const apiBaseUrl = normalizeChannexStagingBaseUrl(
     asString(env.CHANNEX_API_BASE_URL || "https://staging.channex.io")
   );
-
   const callbackUrl = normalizeChannexWebhookCallbackUrl(
     asString(env.CHANNEX_DEMO_WEBHOOK_CANARY_CALLBACK_URL || DEFAULT_CALLBACK_URL)
   );
@@ -116,14 +108,12 @@ async function fetchJsonWithTimeout(args: {
 }) {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
-
   try {
     const response = await args.fetchImpl(args.url, {
       ...args.init,
       signal: controller.signal,
     });
-    const body = await readJsonResponse(response);
-    return { response, body };
+    return { response, body: await readJsonResponse(response) };
   } finally {
     clearTimeout(timer);
   }
@@ -136,7 +126,6 @@ async function fetchWithTimeout(args: {
 }) {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
-
   try {
     return await args.fetchImpl(args.url, {
       ...args.init,
@@ -151,20 +140,10 @@ async function findDemoListing(prismaClient: any) {
   const listings = await prismaClient.pmsListing.findMany({
     where: {
       name: DEMO_LISTING_NAME,
-      connection: {
-        is: {
-          provider: "CHANNEX",
-          status: "ACTIVE",
-        },
-      },
+      connection: { is: { provider: "CHANNEX", status: "ACTIVE" } },
     },
     include: {
-      connection: {
-        select: {
-          id: true,
-          webhookSecret: true,
-        },
-      },
+      connection: { select: { id: true, webhookSecret: true } },
     },
     take: 2,
   });
@@ -172,20 +151,15 @@ async function findDemoListing(prismaClient: any) {
   if (listings.length === 0) {
     throw new Error("CHANNEX_DEMO_WEBHOOK_CANARY_LISTING_NOT_FOUND");
   }
-
   if (listings.length > 1) {
     throw new Error("CHANNEX_DEMO_WEBHOOK_CANARY_LISTING_AMBIGUOUS");
   }
 
   const listing = listings[0]!;
-  const channexPropertyId = asString(
-    asRecord(listing.metadata).channexPropertyId
-  );
-
+  const channexPropertyId = asString(asRecord(listing.metadata).channexPropertyId);
   if (!channexPropertyId) {
     throw new Error("CHANNEX_DEMO_WEBHOOK_CANARY_CHANNEX_PROPERTY_ID_MISSING");
   }
-
   return { listing, channexPropertyId };
 }
 
@@ -212,15 +186,9 @@ async function cleanupCanary(args: {
     try {
       const response = await fetchWithTimeout({
         fetchImpl: args.fetchImpl,
-        url: `${args.apiBaseUrl}/api/v1/webhooks/${encodeURIComponent(
-          args.remoteWebhookId
-        )}`,
-        init: {
-          method: "DELETE",
-          headers: headers(args.apiKey),
-        },
+        url: `${args.apiBaseUrl}/api/v1/webhooks/${encodeURIComponent(args.remoteWebhookId)}`,
+        init: { method: "DELETE", headers: headers(args.apiKey) },
       });
-
       if (!response.ok && response.status !== 404) {
         throw new Error(`HTTP_${response.status}`);
       }
@@ -259,7 +227,6 @@ async function cleanupCanary(args: {
       `CHANNEX_DEMO_WEBHOOK_CANARY_CLEANUP_FAILED:${failures.join("_")}`
     );
   }
-
   return state;
 }
 
@@ -282,6 +249,8 @@ export async function runChannexDemoWebhookCanary(
   let connectionId: string | null = null;
   let originalMetadata: unknown = null;
   let originalWebhookSecret: string | null = null;
+  let listingMutated = false;
+  let connectionMutated = false;
   let cleanupComplete = false;
 
   try {
@@ -314,7 +283,6 @@ export async function runChannexDemoWebhookCanary(
         body: JSON.stringify(payload),
       },
     });
-
     if (!createResult.response.ok) {
       throw new Error(
         `CHANNEX_DEMO_WEBHOOK_CANARY_CREATE_FAILED:${createResult.response.status}`
@@ -328,15 +296,9 @@ export async function runChannexDemoWebhookCanary(
 
     const verifyResult = await fetchJsonWithTimeout({
       fetchImpl,
-      url: `${apiBaseUrl}/api/v1/webhooks/${encodeURIComponent(
-        remoteWebhookId
-      )}`,
-      init: {
-        method: "GET",
-        headers: requestHeaders,
-      },
+      url: `${apiBaseUrl}/api/v1/webhooks/${encodeURIComponent(remoteWebhookId)}`,
+      init: { method: "GET", headers: requestHeaders },
     });
-
     if (!verifyResult.response.ok) {
       throw new Error(
         `CHANNEX_DEMO_WEBHOOK_CANARY_VERIFY_FETCH_FAILED:${verifyResult.response.status}`
@@ -354,6 +316,7 @@ export async function runChannexDemoWebhookCanary(
       where: { id: connectionId },
       data: { webhookSecret },
     });
+    connectionMutated = true;
 
     await prismaClient.pmsListing.update({
       where: { id: listingId },
@@ -369,6 +332,7 @@ export async function runChannexDemoWebhookCanary(
         },
       },
     });
+    listingMutated = true;
 
     const reservationCountDuringCanary = await prismaClient.reservation.count();
     if (reservationCountDuringCanary !== reservationCountBefore) {
@@ -415,16 +379,16 @@ export async function runChannexDemoWebhookCanary(
       callbackDeliveryAttempted: false,
       callbackDeliveryReason:
         "CHANNEX_WEBHOOK_TEST_ENDPOINT_DOES_NOT_PROVE_PIN_GO_AUTHENTICATED_DELIVERY",
+      syntheticEventStoredAsPending: false,
+      syntheticEventDeleted: false,
       reservationDelta: 0,
       cleanup,
       workersActivated: false,
       appChannexTouched: false,
     });
-
     return 0;
   } catch (error) {
     let cleanup: CleanupState | null = null;
-
     if (!cleanupComplete && apiBaseUrl && apiKey) {
       cleanup = await cleanupCanary({
         prismaClient,
@@ -432,8 +396,8 @@ export async function runChannexDemoWebhookCanary(
         apiBaseUrl,
         apiKey,
         remoteWebhookId,
-        listingId,
-        connectionId,
+        listingId: listingMutated ? listingId : null,
+        connectionId: connectionMutated ? connectionId : null,
         originalMetadata,
         originalWebhookSecret,
         strict: false,
@@ -447,28 +411,3 @@ export async function runChannexDemoWebhookCanary(
       errorCode: safeErrorCode(error),
       cleanup,
       workersActivated: false,
-      appChannexTouched: false,
-    });
-
-    return 1;
-  } finally {
-    await disconnect().catch(() => undefined);
-  }
-}
-
-function isDirectExecution() {
-  const entrypoint = process.argv[1];
-  if (!entrypoint) return false;
-
-  try {
-    return pathToFileURL(entrypoint).href === import.meta.url;
-  } catch {
-    return false;
-  }
-}
-
-if (isDirectExecution()) {
-  void runChannexDemoWebhookCanary().then((exitCode) => {
-    process.exitCode = exitCode;
-  });
-}
