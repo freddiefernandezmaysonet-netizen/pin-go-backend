@@ -39,6 +39,15 @@ export const GUEST_JOURNEY_COMMUNICATIONS_OWNER_VERSION =
 export const GUEST_JOURNEY_COMMUNICATIONS_HANDLER_CODE =
   "COMMUNICATION_RETRY_V1" as const;
 
+export const GUEST_JOURNEY_ACCESS_OWNER_VERSION =
+  "guest_journey_access_owner_v1" as const;
+
+export const GUEST_JOURNEY_ACCESS_PROVISIONING_HANDLER_CODE =
+  "ACCESS_PROVISIONING_V1" as const;
+
+export const GUEST_JOURNEY_ACCESS_REVOCATION_HANDLER_CODE =
+  "ACCESS_REVOCATION_CHECK_V1" as const;
+
 export const GUEST_JOURNEY_MISSION_CONTROL_OPERATIONAL_ISSUE_CODE =
   "GUEST_JOURNEY_OWNER_RUNTIME_STATUS" as const;
 
@@ -75,6 +84,22 @@ export function isTerminalGuestJourneyState(
 ): boolean {
   return TERMINAL_GUEST_JOURNEY_STATES.some(
     (terminalState) => terminalState === state
+  );
+}
+
+export function isGuestJourneyAccessClosureSatisfied(input: {
+  releaseStatus: GuestAccessReleaseStatus;
+  guestGrantsOpen: number;
+  guestGrantsRevoked: number;
+  unresolvedGuestNfcCount: number;
+}): boolean {
+  return (
+    input.guestGrantsOpen === 0 &&
+    input.unresolvedGuestNfcCount === 0 &&
+    (
+      input.guestGrantsRevoked > 0 ||
+      input.releaseStatus !== GuestAccessReleaseStatus.RELEASED
+    )
   );
 }
 

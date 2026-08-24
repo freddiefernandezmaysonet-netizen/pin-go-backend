@@ -1,10 +1,16 @@
 import "dotenv/config";
 import { prisma } from "../lib/prisma";
-import { AccessStatus } from "@prisma/client";
+import { AccessGrantType, AccessStatus } from "@prisma/client";
 import { activateGrant, deactivateGrant } from "../services/ttlock/ttlock.brain";
+import {
+  isGuestJourneyAccessOwnerScope,
+  resolveGuestJourneyAccessOwnerConfig,
+} from "../services/guest-journey-access-owner.config";
 
 const POLL_MS = Number(process.env.ACCESS_GRANT_EXPIRE_POLL_MS ?? 30_000);
 const BATCH_SIZE = Number(process.env.ACCESS_GRANT_EXPIRE_BATCH_SIZE ?? 50);
+const GUEST_JOURNEY_ACCESS_OWNER_CONFIG =
+  resolveGuestJourneyAccessOwnerConfig();
 
 function toErrString(e: unknown) {
   if (e instanceof Error) return e.message;
@@ -22,14 +28,45 @@ async function tick() {
       endsAt: { gt: now },
  
    },
-    select: { id: true },
+    select: {
+      id: true,
+      type: true,
+      reservation: {
+        select: {
+          propertyId: true,
+          property: {
+            select: {
+              organizationId: true,
+            },
+          },
+        },
+      },
+    },
     take: BATCH_SIZE,
   });
 
   let activatedOk = 0;
   let activatedFail = 0;
+  let yieldedToAccessOwner = 0;
 
   for (const g of dueToActivate) {
+    if (
+      g.type === AccessGrantType.GUEST &&
+      isGuestJourneyAccessOwnerScope(
+        GUEST_JOURNEY_ACCESS_OWNER_CONFIG,
+        {
+          organizationId:
+            g.reservation?.property
+              .organizationId,
+          propertyId:
+            g.reservation?.propertyId,
+        }
+      )
+    ) {
+      yieldedToAccessOwner++;
+      continue;
+    }
+
     try {
       await activateGrant(g.id);
       activatedOk++;
@@ -54,7 +91,20 @@ async function tick() {
       endsAt: { lte: now },
 
     },
-    select: { id: true },
+    select: {
+      id: true,
+      type: true,
+      reservation: {
+        select: {
+          propertyId: true,
+          property: {
+            select: {
+              organizationId: true,
+            },
+          },
+        },
+      },
+    },
     take: BATCH_SIZE,
   });
 
@@ -62,6 +112,23 @@ async function tick() {
   let deactivatedFail = 0;
 
   for (const g of dueToDeactivate) {
+    if (
+      g.type === AccessGrantType.GUEST &&
+      isGuestJourneyAccessOwnerScope(
+        GUEST_JOURNEY_ACCESS_OWNER_CONFIG,
+        {
+          organizationId:
+            g.reservation?.property
+              .organizationId,
+          propertyId:
+            g.reservation?.propertyId,
+        }
+      )
+    ) {
+      yieldedToAccessOwner++;
+      continue;
+    }
+
     try {
       await deactivateGrant(g.id);
       deactivatedOk++;
@@ -82,7 +149,8 @@ async function tick() {
   if (dueToActivate.length || dueToDeactivate.length) {
     console.log(
       `[access-grant-expire] activate: ok=${activatedOk} fail=${activatedFail} | ` +
-        `deactivate: ok=${deactivatedOk} fail=${deactivatedFail}`
+        `deactivate: ok=${deactivatedOk} fail=${deactivatedFail} | ` +
+        `legacy guest access yielded to E8=${yieldedToAccessOwner}`
     );
   }
 }

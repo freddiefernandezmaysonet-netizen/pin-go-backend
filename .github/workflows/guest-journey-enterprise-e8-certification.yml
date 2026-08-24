@@ -1,0 +1,39 @@
+name: Guest Journey Enterprise E8 Access Owner Certification
+
+on:
+  pull_request:
+    paths:
+      - "src/services/guest-journey-access-owner-*"
+      - "src/services/guest-journey-contract.ts"
+      - "src/services/guest-journey-enterprise-contract.test.ts"
+      - "src/services/access-recovery.service.ts"
+      - "src/services/nfc.service.ts"
+      - "src/services/ttlock/ttlock.brain.ts"
+      - "src/workers/reservation.worker.ts"
+      - "tsconfig.guest-journey-enterprise-e8.json"
+      - "package.json"
+      - ".github/workflows/guest-journey-enterprise-e8-certification.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  certify-e8-access-owner:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npx prisma generate
+      - run: npm run test:guest-journey-enterprise-e8-access-owner
+      - name: Bundle reservation worker integration boundary
+        run: npx esbuild src/workers/reservation.worker.ts --bundle --platform=node --packages=external --outfile=/tmp/reservation.worker.e8.js
+      - name: Verify Prisma schema without applying migrations
+        env:
+          DATABASE_URL: postgresql://ci:ci@127.0.0.1:5432/pin_go_e8_schema_validation
+        run: npx prisma validate

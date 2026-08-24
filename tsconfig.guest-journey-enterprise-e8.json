@@ -1,0 +1,28 @@
+{
+  "compilerOptions": {
+    "noEmit": true,
+    "module": "preserve",
+    "moduleResolution": "bundler",
+    "target": "esnext",
+    "strict": true,
+    "skipLibCheck": true,
+    "types": ["node"]
+  },
+  "include": [
+    "src/apms/audit-types.ts",
+    "src/apms/audit-persistence.service.ts",
+    "src/apms/operational-intelligence-types.ts",
+    "src/apms/operational-intelligence.service.ts",
+    "src/apms/operational-transition-policy.ts",
+    "src/services/guest-journey-contract.ts",
+    "src/services/access-recovery.service.ts",
+    "src/services/nfc.service.ts",
+    "src/services/ttlock/ttlock.brain.ts",
+    "src/services/guest-journey-access-owner.config.ts",
+    "src/services/guest-journey-access-owner-runtime.service.ts",
+    "src/services/guest-journey-access-owner-adapter.service.ts",
+    "src/services/guest-journey-access-owner-mission-control.service.ts",
+    "src/services/guest-journey-access-owner-cycle.service.ts",
+    "src/services/guest-journey-access-owner-*.test.ts"
+  ]
+}

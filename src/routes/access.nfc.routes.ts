@@ -9,9 +9,15 @@ import {
 } from "../services/nfc.service";
 
 import { computeCleaningWindow } from "../services/cleaning-window.service";
+import {
+  isGuestJourneyAccessOwnerScope,
+  resolveGuestJourneyAccessOwnerConfig,
+} from "../services/guest-journey-access-owner.config";
 
 export function buildAccessNfcRouter(prisma: PrismaClient) {
   const router = Router();
+  const guestJourneyAccessOwnerConfig =
+    resolveGuestJourneyAccessOwnerConfig();
 
   /**
    * POST /access/nfc/assign
@@ -25,7 +31,20 @@ export function buildAccessNfcRouter(prisma: PrismaClient) {
         return res.status(400).json({ ok: false, error: "Missing reservationId, ttlockLockId" });
       }
 
-      const reservation = await prisma.reservation.findUnique({ where: { id: String(reservationId) } });
+      const reservation = await prisma.reservation.findUnique({
+        where: { id: String(reservationId) },
+        select: {
+          id: true,
+          propertyId: true,
+          checkIn: true,
+          checkOut: true,
+          property: {
+            select: {
+              organizationId: true,
+            },
+          },
+        },
+      });
       if (!reservation) return res.status(404).json({ ok: false, error: "Reservation not found" });
  
      const property = await prisma.property.findUnique({
@@ -46,6 +65,28 @@ if (!property) return res.status(404).json({ ok: false, error: "Property not fou
 
       if (gCount < 0 || cCount < 0) {
         return res.status(400).json({ ok: false, error: "guestCount/cleaningCount must be >= 0" });
+      }
+
+      if (
+        gCount > 0 &&
+        isGuestJourneyAccessOwnerScope(
+          guestJourneyAccessOwnerConfig,
+          {
+            organizationId:
+              reservation.property
+                .organizationId,
+            propertyId:
+              reservation.propertyId,
+          }
+        )
+      ) {
+        return res.status(409).json({
+          ok: false,
+          error:
+            "GUEST_NFC_OWNED_BY_GUEST_JOURNEY_ACCESS_OWNER",
+          note:
+            "Guest NFC assignment is governed by the Guest Journey ACCESS owner for this canary scope.",
+        });
       }
 
     // 0) Idempotencia: si ya existen assignments ACTIVE para esta reserva, no crear duplicados
@@ -175,8 +216,40 @@ return res.json({
         return res.status(400).json({ ok: false, error: "Missing reservationId, ttlockLockId" });
       }
 
-      const reservation = await prisma.reservation.findUnique({ where: { id: String(reservationId) } });
+      const reservation = await prisma.reservation.findUnique({
+        where: { id: String(reservationId) },
+        select: {
+          id: true,
+          propertyId: true,
+          property: {
+            select: {
+              organizationId: true,
+            },
+          },
+        },
+      });
       if (!reservation) return res.status(404).json({ ok: false, error: "Reservation not found" });
+
+      if (
+        isGuestJourneyAccessOwnerScope(
+          guestJourneyAccessOwnerConfig,
+          {
+            organizationId:
+              reservation.property
+                .organizationId,
+            propertyId:
+              reservation.propertyId,
+          }
+        )
+      ) {
+        return res.status(409).json({
+          ok: false,
+          error:
+            "GUEST_NFC_OWNED_BY_GUEST_JOURNEY_ACCESS_OWNER",
+          note:
+            "This legacy NFC unassign route can affect guest NFC and is governed by the Guest Journey ACCESS owner for this canary scope.",
+        });
+      }
 
       const result = await unassignAllNfcForReservation(prisma, {
         reservationId: reservation.id,

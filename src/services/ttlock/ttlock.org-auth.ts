@@ -37,6 +37,26 @@
 import { PrismaClient } from "@prisma/client";
 import { ttlockRefreshAccessToken } from "../../ttlock/ttlock.service";
 
+export async function assertOrgTtlockAuthConfigured(
+  prisma: PrismaClient,
+  organizationId: string
+): Promise<void> {
+  if (!organizationId) {
+    throw new Error("TTLockAuth: Missing organizationId");
+  }
+
+  const auth = await prisma.tTLockAuth.findUnique({
+    where: { organizationId },
+    select: { organizationId: true },
+  });
+
+  if (!auth) {
+    throw new Error(
+      "TTLockAuth not configured for this organization"
+    );
+  }
+}
+
 /**
  * Obtiene un accessToken válido de TTLock para una organización.
  *
@@ -108,7 +128,7 @@ export async function getOrgTtlockAccessToken(
     expiresAtMs > now + 5 * 60 * 1000;
 
   if (stillValid) {
-    return auth.accessToken;
+    return auth.accessToken!;
   }
 
   /**
