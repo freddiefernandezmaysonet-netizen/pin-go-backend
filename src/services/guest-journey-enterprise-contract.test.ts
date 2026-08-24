@@ -27,6 +27,10 @@ import {
   getCanonicalGuestJourneyStateRank,
   isTerminalGuestJourneyState,
 } from "./guest-journey-contract.js";
+import {
+  GUEST_JOURNEY_ACTIVATION_CONTROL_PLANE_VERSION,
+  GUEST_JOURNEY_ACTIVATION_PROFILES,
+} from "./guest-journey-activation-control-plane.service.js";
 import { isCanonicalEngineId } from "../apms/engine-catalog.js";
 
 const lifecycleMigration = readFileSync(
@@ -421,6 +425,66 @@ test("pins E10 to bounded COMPLIANCE requirements and verification only", () => 
   assert.match(
     worker,
     /GUEST_JOURNEY_COMPLIANCE_OWNER_CONFIG\.enabled/
+  );
+});
+
+test("pins E11 to APMS activation validation only", () => {
+  assert.equal(
+    GUEST_JOURNEY_ACTIVATION_CONTROL_PLANE_VERSION,
+    "guest_journey_activation_control_plane_v1"
+  );
+  assert.deepEqual(
+    GUEST_JOURNEY_ACTIVATION_PROFILES,
+    [
+      "off",
+      "shadow_only",
+      "observe",
+      "mission_control_only",
+      "execute_non_provider",
+      "execute_access_canary",
+      "full_canary",
+    ]
+  );
+
+  const controlPlane = readFileSync(
+    new URL(
+      "./guest-journey-activation-control-plane.service.ts",
+      import.meta.url
+    ),
+    "utf8"
+  );
+  assert.match(
+    controlPlane,
+    /GUEST_JOURNEY_APMS_ACTIVATION_PROFILE/
+  );
+  assert.match(
+    controlPlane,
+    /GUEST_JOURNEY_APMS_ACTIVATION_PROFILE_INVALID/
+  );
+  assert.match(
+    controlPlane,
+    /GUEST_JOURNEY_APMS_ACTIVATION_SCOPE_MISMATCH/
+  );
+  assert.match(
+    controlPlane,
+    /GUEST_JOURNEY_APMS_ACTIVATION_DEPENDENCY_MISSING/
+  );
+  assert.doesNotMatch(
+    controlPlane,
+    /\bPrismaClient\b|prisma\.|\$transaction|from\s+["'][^"']*(stripe|ttlock|twilio|channex|mailer|messaging)[^"']*["']/
+  );
+  assert.doesNotMatch(
+    controlPlane,
+    /\b(create|update|delete|upsert|send|charge|refund|transfer|activateGrant|deactivateGrant|ttlock|fetch|axios|stripe)[A-Za-z]*\s*\(/
+  );
+
+  const worker = readFileSync(
+    new URL("../workers/reservation.worker.ts", import.meta.url),
+    "utf8"
+  );
+  assert.doesNotMatch(
+    worker,
+    /resolveGuestJourneyActivationControlPlaneConfig/
   );
 });
 

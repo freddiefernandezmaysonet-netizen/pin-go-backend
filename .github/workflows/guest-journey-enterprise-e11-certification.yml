@@ -1,0 +1,33 @@
+name: Guest Journey Enterprise E11 Activation Control Plane Certification
+
+on:
+  pull_request:
+    paths:
+      - "src/services/guest-journey-activation-control-plane*"
+      - "src/services/guest-journey-*.config.ts"
+      - "src/services/guest-journey-enterprise-contract.test.ts"
+      - "tsconfig.guest-journey-enterprise-e11.json"
+      - "package.json"
+      - ".github/workflows/guest-journey-enterprise-e11-certification.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  certify-e11-activation-control-plane:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npx prisma generate
+      - run: npm run test:guest-journey-enterprise-e11-activation-control-plane
+      - name: Verify Prisma schema without applying migrations
+        env:
+          DATABASE_URL: postgresql://ci:ci@127.0.0.1:5432/pin_go_e11_schema_validation
+        run: npx prisma validate
