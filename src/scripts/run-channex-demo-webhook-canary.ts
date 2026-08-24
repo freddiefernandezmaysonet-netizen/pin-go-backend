@@ -458,4 +458,17 @@ export async function runChannexDemoWebhookCanary(
 
 function isDirectExecution() {
   const entrypoint = process.argv[1];
-  if (!entry
+  if (!entrypoint) return false;
+
+  try {
+    return pathToFileURL(entrypoint).href === import.meta.url;
+  } catch {
+    return false;
+  }
+}
+
+if (isDirectExecution()) {
+  void runChannexDemoWebhookCanary().then((exitCode) => {
+    process.exitCode = exitCode;
+  });
+}
