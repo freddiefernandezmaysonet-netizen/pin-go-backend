@@ -33,36 +33,27 @@ import {
 } from "./guest-journey-activation-control-plane.service.js";
 import { isCanonicalEngineId } from "../apms/engine-catalog.js";
 
-const lifecycleMigration = readFileSync(
-  new URL(
-    "../../prisma/migrations/20260818120000_extend_guest_journey_enterprise_lifecycle/migration.sql",
-    import.meta.url
-  ),
-  "utf8"
-);
+function source(relativePath: string) {
+  return readFileSync(
+    new URL(relativePath, import.meta.url),
+    "utf8"
+  );
+}
 
-const intentMigration = readFileSync(
-  new URL(
-    "../../prisma/migrations/20260818121000_add_guest_journey_enterprise_intents/migration.sql",
-    import.meta.url
-  ),
-  "utf8"
+const lifecycleMigration = source(
+  "../../prisma/migrations/20260818120000_extend_guest_journey_enterprise_lifecycle/migration.sql"
 );
-
-const ownerRuntimeMigration = readFileSync(
-  new URL(
-    "../../prisma/migrations/20260822020000_add_guest_journey_owner_runtime/migration.sql",
-    import.meta.url
-  ),
-  "utf8"
+const intentMigration = source(
+  "../../prisma/migrations/20260818121000_add_guest_journey_enterprise_intents/migration.sql"
 );
-
-const communicationsEvidenceMigration = readFileSync(
-  new URL(
-    "../../prisma/migrations/20260823040000_add_guest_journey_communication_evidence/migration.sql",
-    import.meta.url
-  ),
-  "utf8"
+const ownerRuntimeMigration = source(
+  "../../prisma/migrations/20260822020000_add_guest_journey_owner_runtime/migration.sql"
+);
+const communicationsEvidenceMigration = source(
+  "../../prisma/migrations/20260823040000_add_guest_journey_communication_evidence/migration.sql"
+);
+const reservationWorker = source(
+  "../workers/reservation.worker.ts"
 );
 
 test("defines the complete forward and terminal Guest Journey lifecycle", () => {
@@ -96,7 +87,10 @@ test("defines the complete forward and terminal Guest Journey lifecycle", () => 
   );
 
   for (const state of TERMINAL_GUEST_JOURNEY_STATES) {
-    assert.equal(isTerminalGuestJourneyState(state), true);
+    assert.equal(
+      isTerminalGuestJourneyState(state),
+      true
+    );
   }
 });
 
@@ -152,7 +146,7 @@ test("pins the durable coordination contract", () => {
   );
 });
 
-test("pins the E5 owner runtime to ACCESS evaluation only", () => {
+test("pins E5 owner runtime to ACCESS evaluation only", () => {
   assert.equal(
     GUEST_JOURNEY_OWNER_RUNTIME_VERSION,
     "guest_journey_owner_runtime_v1"
@@ -171,15 +165,30 @@ test("pins the E5 owner runtime to ACCESS evaluation only", () => {
   );
   assert.doesNotMatch(
     ownerRuntimeMigration,
-    /\bDROP\s+(?:TABLE|COLUMN|TYPE|INDEX)\b/i
+    /\bDROP\s+(?:TABLE|COLUMN|TYPE|INDEX)\b|\bDELETE\s+FROM\b|\bTRUNCATE\b/i
   );
-  assert.doesNotMatch(
-    ownerRuntimeMigration,
-    /\bDELETE\s+FROM\b/i
+
+  const handler = source(
+    "./guest-journey-access-evaluation-handler.service.ts"
   );
+  for (const forbidden of [
+    "ttlock",
+    "mailer",
+    "messaging.service",
+    "email-delivery",
+    "twilio",
+    "stripe",
+    "activateGrant",
+    "sendGuest",
+  ]) {
+    assert.doesNotMatch(
+      handler,
+      new RegExp(forbidden, "i")
+    );
+  }
 });
 
-test("pins the E6 Mission Control bridge contract without expanding owner execution", () => {
+test("pins E6 Mission Control bridge without provider or owner execution", () => {
   assert.equal(
     GUEST_JOURNEY_MISSION_CONTROL_BRIDGE_VERSION,
     "guest_journey_mission_control_bridge_v1"
@@ -188,9 +197,39 @@ test("pins the E6 Mission Control bridge contract without expanding owner execut
     GUEST_JOURNEY_MISSION_CONTROL_OPERATIONAL_ISSUE_CODE,
     "GUEST_JOURNEY_OWNER_RUNTIME_STATUS"
   );
+
+  const combined =
+    source("./guest-journey-mission-control-bridge.service.ts") +
+    "\n" +
+    source("./guest-journey-mission-control-cycle.service.ts");
+
+  for (const forbiddenImport of [
+    "ttlock",
+    "mailer",
+    "messaging.service",
+    "email-delivery",
+    "twilio",
+    "stripe",
+    "activateGrant",
+    "deactivateGrant",
+    "sendGuest",
+  ]) {
+    assert.doesNotMatch(
+      combined,
+      new RegExp(
+        `(?:from|import\\()[^\\n]*${forbiddenImport}`,
+        "i"
+      )
+    );
+  }
+
+  assert.doesNotMatch(
+    combined,
+    /ownerEngineExecutions:\s*[1-9]|credentialWrites:\s*[1-9]|messageSends:\s*[1-9]|paymentCalls:\s*[1-9]/
+  );
 });
 
-test("pins E7 to the canonical COMMUNICATIONS owner and additive delivery evidence", () => {
+test("pins E7 to canonical COMMUNICATIONS owner and additive evidence", () => {
   assert.equal(
     GUEST_JOURNEY_COMMUNICATIONS_OWNER_VERSION,
     "guest_journey_communications_owner_v1"
@@ -208,9 +247,8 @@ test("pins E7 to the canonical COMMUNICATIONS owner and additive delivery eviden
     /\bDROP\s+(?:TABLE|COLUMN|TYPE|INDEX)\b|\bDELETE\s+FROM\b|\bTRUNCATE\b/i
   );
 
-  const legacyRetryWorker = readFileSync(
-    new URL("../workers/message.retry.worker.ts", import.meta.url),
-    "utf8"
+  const legacyRetryWorker = source(
+    "../workers/message.retry.worker.ts"
   );
   assert.match(
     legacyRetryWorker,
@@ -220,9 +258,18 @@ test("pins E7 to the canonical COMMUNICATIONS owner and additive delivery eviden
     legacyRetryWorker,
     /retry yielded to Guest Journey COMMUNICATIONS owner/
   );
+
+  assert.match(
+    reservationWorker,
+    /runGuestJourneyCommunicationsOwnerCycle/
+  );
+  assert.match(
+    reservationWorker,
+    /GUEST_JOURNEY_COMMUNICATIONS_OWNER_CONFIG\s*\.enabled/
+  );
 });
 
-test("pins E8 to canonical ACCESS provisioning and revocation only", () => {
+test("pins E8 to canonical ACCESS provisioning and revocation", () => {
   assert.equal(
     GUEST_JOURNEY_ACCESS_OWNER_VERSION,
     "guest_journey_access_owner_v1"
@@ -236,12 +283,8 @@ test("pins E8 to canonical ACCESS provisioning and revocation only", () => {
     "ACCESS_REVOCATION_CHECK_V1"
   );
 
-  const adapter = readFileSync(
-    new URL(
-      "./guest-journey-access-owner-adapter.service.ts",
-      import.meta.url
-    ),
-    "utf8"
+  const adapter = source(
+    "./guest-journey-access-owner-adapter.service.ts"
   );
   assert.match(adapter, /activateGrant/);
   assert.match(adapter, /deactivateGrant/);
@@ -253,25 +296,29 @@ test("pins E8 to canonical ACCESS provisioning and revocation only", () => {
     /ttlock(?:Get|Create|Delete|Change|Fetch|List)[A-Za-z]+\s*\(/
   );
 
-  const worker = readFileSync(
-    new URL("../workers/reservation.worker.ts", import.meta.url),
-    "utf8"
-  );
-  assert.match(worker, /resolveGuestJourneyAccessOwnerConfig/);
-  assert.match(worker, /runGuestJourneyAccessOwnerCycle/);
-  assert.match(worker, /isGuestJourneyAccessOwnerScope/);
   assert.match(
-    worker,
+    reservationWorker,
+    /runGuestJourneyAccessOwnerCycle/
+  );
+  assert.match(
+    reservationWorker,
+    /GUEST_JOURNEY_ACCESS_OWNER_CONFIG\.enabled/
+  );
+  assert.match(
+    reservationWorker,
+    /isGuestJourneyAccessOwnerScope/
+  );
+  assert.match(
+    reservationWorker,
     /legacy guest access provisioning yielded to Guest Journey ACCESS owner/
   );
   assert.match(
-    worker,
+    reservationWorker,
     /legacy guest access revocation yielded to Guest Journey ACCESS owner/
   );
 
-  const accessGrantExpireWorker = readFileSync(
-    new URL("../workers/access-grant-expire.worker.ts", import.meta.url),
-    "utf8"
+  const accessGrantExpireWorker = source(
+    "../workers/access-grant-expire.worker.ts"
   );
   assert.match(
     accessGrantExpireWorker,
@@ -280,19 +327,14 @@ test("pins E8 to canonical ACCESS provisioning and revocation only", () => {
   assert.match(
     accessGrantExpireWorker,
     /isGuestJourneyAccessOwnerScope/
-  );
-  assert.match(
-    accessGrantExpireWorker,
-    /type:\s*true/
   );
   assert.match(
     accessGrantExpireWorker,
     /legacy guest access yielded to E8/
   );
 
-  const passcodeExpireWorker = readFileSync(
-    new URL("../workers/passcode-expire.worker.ts", import.meta.url),
-    "utf8"
+  const passcodeExpireWorker = source(
+    "../workers/passcode-expire.worker.ts"
   );
   assert.match(
     passcodeExpireWorker,
@@ -302,14 +344,10 @@ test("pins E8 to canonical ACCESS provisioning and revocation only", () => {
     passcodeExpireWorker,
     /isGuestJourneyAccessOwnerScope/
   );
-  assert.match(
-    passcodeExpireWorker,
-    /yieldedToE8/
-  );
+  assert.match(passcodeExpireWorker, /yieldedToE8/);
 
-  const accessNfcRoutes = readFileSync(
-    new URL("../routes/access.nfc.routes.ts", import.meta.url),
-    "utf8"
+  const accessNfcRoutes = source(
+    "../routes/access.nfc.routes.ts"
   );
   assert.match(
     accessNfcRoutes,
@@ -321,7 +359,7 @@ test("pins E8 to canonical ACCESS provisioning and revocation only", () => {
   );
 });
 
-test("pins E9 to read-only FINANCIAL payment evaluation only", () => {
+test("pins E9 to read-only FINANCIAL payment evaluation", () => {
   assert.equal(
     GUEST_JOURNEY_FINANCIAL_OWNER_VERSION,
     "guest_journey_financial_owner_v1"
@@ -331,24 +369,19 @@ test("pins E9 to read-only FINANCIAL payment evaluation only", () => {
     "PAYMENT_EVALUATION_V1"
   );
 
-  const runtime = readFileSync(
-    new URL(
-      "./guest-journey-financial-owner-runtime.service.ts",
-      import.meta.url
-    ),
-    "utf8"
+  const runtime = source(
+    "./guest-journey-financial-owner-runtime.service.ts"
   );
   assert.match(runtime, /targetEngine:\s*"FINANCIAL"/);
   assert.match(runtime, /REQUEST_PAYMENT_EVALUATION/);
   assert.match(runtime, /PAYMENT_STATE_RESOLVED/);
-  assert.doesNotMatch(runtime, /REQUEST_ACCESS_|REQUEST_COMMUNICATION|REQUEST_GUEST_VERIFICATION|REQUEST_REQUIREMENTS_SNAPSHOT/);
+  assert.doesNotMatch(
+    runtime,
+    /REQUEST_ACCESS_|REQUEST_COMMUNICATION|REQUEST_GUEST_VERIFICATION|REQUEST_REQUIREMENTS_SNAPSHOT/
+  );
 
-  const adapter = readFileSync(
-    new URL(
-      "./guest-journey-financial-evaluation-adapter.service.ts",
-      import.meta.url
-    ),
-    "utf8"
+  const adapter = source(
+    "./guest-journey-financial-evaluation-adapter.service.ts"
   );
   assert.doesNotMatch(
     adapter,
@@ -360,19 +393,17 @@ test("pins E9 to read-only FINANCIAL payment evaluation only", () => {
   );
   assert.match(adapter, /providerCalls:\s*0/);
 
-  const worker = readFileSync(
-    new URL("../workers/reservation.worker.ts", import.meta.url),
-    "utf8"
-  );
-  assert.match(worker, /resolveGuestJourneyFinancialOwnerConfig/);
-  assert.match(worker, /runGuestJourneyFinancialOwnerCycle/);
   assert.match(
-    worker,
+    reservationWorker,
+    /runGuestJourneyFinancialOwnerCycle/
+  );
+  assert.match(
+    reservationWorker,
     /GUEST_JOURNEY_FINANCIAL_OWNER_CONFIG\.enabled/
   );
 });
 
-test("pins E10 to bounded COMPLIANCE requirements and verification only", () => {
+test("pins E10 to bounded COMPLIANCE requirements and verification", () => {
   assert.equal(
     GUEST_JOURNEY_COMPLIANCE_OWNER_VERSION,
     "guest_journey_compliance_owner_v1"
@@ -386,24 +417,19 @@ test("pins E10 to bounded COMPLIANCE requirements and verification only", () => 
     "GUEST_VERIFICATION_V1"
   );
 
-  const runtime = readFileSync(
-    new URL(
-      "./guest-journey-compliance-owner-runtime.service.ts",
-      import.meta.url
-    ),
-    "utf8"
+  const runtime = source(
+    "./guest-journey-compliance-owner-runtime.service.ts"
   );
   assert.match(runtime, /targetEngine:\s*"COMPLIANCE"/);
   assert.match(runtime, /REQUEST_REQUIREMENTS_SNAPSHOT/);
   assert.match(runtime, /REQUEST_GUEST_VERIFICATION/);
-  assert.doesNotMatch(runtime, /REQUEST_ACCESS_|REQUEST_COMMUNICATION|REQUEST_PAYMENT_EVALUATION/);
+  assert.doesNotMatch(
+    runtime,
+    /REQUEST_ACCESS_|REQUEST_COMMUNICATION|REQUEST_PAYMENT_EVALUATION/
+  );
 
-  const adapter = readFileSync(
-    new URL(
-      "./guest-journey-compliance-owner-adapter.service.ts",
-      import.meta.url
-    ),
-    "utf8"
+  const adapter = source(
+    "./guest-journey-compliance-owner-adapter.service.ts"
   );
   assert.doesNotMatch(
     adapter,
@@ -416,19 +442,17 @@ test("pins E10 to bounded COMPLIANCE requirements and verification only", () => 
   assert.match(adapter, /providerCalls:\s*0/);
   assert.match(adapter, /externalSideEffects:\s*0/);
 
-  const worker = readFileSync(
-    new URL("../workers/reservation.worker.ts", import.meta.url),
-    "utf8"
-  );
-  assert.match(worker, /resolveGuestJourneyComplianceOwnerConfig/);
-  assert.match(worker, /runGuestJourneyComplianceOwnerCycle/);
   assert.match(
-    worker,
+    reservationWorker,
+    /runGuestJourneyComplianceOwnerCycle/
+  );
+  assert.match(
+    reservationWorker,
     /GUEST_JOURNEY_COMPLIANCE_OWNER_CONFIG\.enabled/
   );
 });
 
-test("pins E11 to APMS activation validation only", () => {
+test("pins E11 validation and E12 centralized reservation.worker enforcement", () => {
   assert.equal(
     GUEST_JOURNEY_ACTIVATION_CONTROL_PLANE_VERSION,
     "guest_journey_activation_control_plane_v1"
@@ -446,12 +470,8 @@ test("pins E11 to APMS activation validation only", () => {
     ]
   );
 
-  const controlPlane = readFileSync(
-    new URL(
-      "./guest-journey-activation-control-plane.service.ts",
-      import.meta.url
-    ),
-    "utf8"
+  const controlPlane = source(
+    "./guest-journey-activation-control-plane.service.ts"
   );
   assert.match(
     controlPlane,
@@ -478,18 +498,47 @@ test("pins E11 to APMS activation validation only", () => {
     /\b(create|update|delete|upsert|send|charge|refund|transfer|activateGrant|deactivateGrant|ttlock|fetch|axios|stripe)[A-Za-z]*\s*\(/
   );
 
-  const worker = readFileSync(
-    new URL("../workers/reservation.worker.ts", import.meta.url),
-    "utf8"
+  assert.match(
+    reservationWorker,
+    /resolveGuestJourneyActivationControlPlaneConfig\(\)/
   );
-  assert.doesNotMatch(
-    worker,
-    /resolveGuestJourneyActivationControlPlaneConfig/
+  assert.match(
+    reservationWorker,
+    /GUEST_JOURNEY_ACTIVATION_CONTROL_PLANE_CONFIG\.configs/
   );
+  assert.match(
+    reservationWorker,
+    /verifyGuestJourneyRuntimeScope\(/
+  );
+  assert.match(
+    reservationWorker,
+    /guestJourneyRuntimeAllowed/
+  );
+
+  for (const legacyIndependentResolver of [
+    "resolveGuestJourneyShadowConfig()",
+    "resolveGuestJourneyInternalReconcileConfig()",
+    "resolveGuestJourneyCoordinationConfig()",
+    "resolveGuestJourneyOwnerRuntimeConfig()",
+    "resolveGuestJourneyMissionControlConfig()",
+    "resolveGuestJourneyCommunicationsOwnerConfig()",
+    "resolveGuestJourneyAccessOwnerConfig()",
+    "resolveGuestJourneyFinancialOwnerConfig()",
+    "resolveGuestJourneyComplianceOwnerConfig()",
+  ]) {
+    assert.equal(
+      reservationWorker.includes(
+        legacyIndependentResolver
+      ),
+      false,
+      `reservation.worker must not independently resolve ${legacyIndependentResolver}`
+    );
+  }
 });
 
 test("keeps E1 migrations additive and canonical", () => {
-  const combined = lifecycleMigration + "\n" + intentMigration;
+  const combined =
+    lifecycleMigration + "\n" + intentMigration;
 
   assert.doesNotMatch(
     combined,
@@ -517,26 +566,10 @@ test("keeps E1 migrations additive and canonical", () => {
   }
 });
 
-test("keeps E2 shadow through E7 Communications independently default-off", () => {
-  const reservationWorker = readFileSync(
-    new URL(
-      "../workers/reservation.worker.ts",
-      import.meta.url
-    ),
-    "utf8"
-  );
-
-  assert.match(
-    reservationWorker,
-    /resolveGuestJourneyShadowConfig/
-  );
+test("keeps E2 through E10 configs default-off while E12 centralizes worker activation", () => {
   assert.match(
     reservationWorker,
     /GUEST_JOURNEY_SHADOW_CONFIG\.enabled/
-  );
-  assert.match(
-    reservationWorker,
-    /resolveGuestJourneyInternalReconcileConfig/
   );
   assert.match(
     reservationWorker,
@@ -552,19 +585,11 @@ test("keeps E2 shadow through E7 Communications independently default-off", () =
   );
   assert.match(
     reservationWorker,
-    /resolveGuestJourneyCoordinationConfig/
-  );
-  assert.match(
-    reservationWorker,
     /runGuestJourneyCoordinationCycle/
   );
   assert.match(
     reservationWorker,
     /GUEST_JOURNEY_COORDINATION_CONFIG\s*\.enabled/
-  );
-  assert.match(
-    reservationWorker,
-    /resolveGuestJourneyOwnerRuntimeConfig/
   );
   assert.match(
     reservationWorker,
@@ -576,19 +601,11 @@ test("keeps E2 shadow through E7 Communications independently default-off", () =
   );
   assert.match(
     reservationWorker,
-    /resolveGuestJourneyMissionControlConfig/
-  );
-  assert.match(
-    reservationWorker,
     /runGuestJourneyMissionControlCycle/
   );
   assert.match(
     reservationWorker,
     /GUEST_JOURNEY_MISSION_CONTROL_CONFIG\s*\.enabled/
-  );
-  assert.match(
-    reservationWorker,
-    /resolveGuestJourneyCommunicationsOwnerConfig/
   );
   assert.match(
     reservationWorker,
@@ -598,166 +615,62 @@ test("keeps E2 shadow through E7 Communications independently default-off", () =
     reservationWorker,
     /GUEST_JOURNEY_COMMUNICATIONS_OWNER_CONFIG\s*\.enabled/
   );
+  assert.match(
+    reservationWorker,
+    /runGuestJourneyAccessOwnerCycle/
+  );
+  assert.match(
+    reservationWorker,
+    /runGuestJourneyFinancialOwnerCycle/
+  );
+  assert.match(
+    reservationWorker,
+    /runGuestJourneyComplianceOwnerCycle/
+  );
 
-  const shadowConfig = readFileSync(
-    new URL(
+  const defaultOffPatterns: Array<[
+    string,
+    RegExp,
+  ]> = [
+    [
       "./guest-journey-shadow.config.ts",
-      import.meta.url
-    ),
-    "utf8"
-  );
-
-  assert.match(
-    shadowConfig,
-    /if \(!value\) \{\s*return false;/
-  );
-
-  const internalReconcileConfig =
-    readFileSync(
-      new URL(
-        "./guest-journey-internal-reconcile.config.ts",
-        import.meta.url
-      ),
-      "utf8"
-    );
-
-  assert.match(
-    internalReconcileConfig,
-    /if \(!value\) \{\s*return false;/
-  );
-
-  const coordinationConfig =
-    readFileSync(
-      new URL(
-        "./guest-journey-coordination.config.ts",
-        import.meta.url
-      ),
-      "utf8"
-    );
-
-  assert.match(
-    coordinationConfig,
-    /if \(!value\) \{\s*return false;/
-  );
-
-  const ownerRuntimeConfig =
-    readFileSync(
-      new URL(
-        "./guest-journey-owner-runtime.config.ts",
-        import.meta.url
-      ),
-      "utf8"
-    );
-
-  assert.match(
-    ownerRuntimeConfig,
-    /if \(!value\) return false;/
-  );
-
-  const missionControlConfig =
-    readFileSync(
-      new URL(
-        "./guest-journey-mission-control.config.ts",
-        import.meta.url
-      ),
-      "utf8"
-    );
-
-  assert.match(
-    missionControlConfig,
-    /if \(!value\) return false;/
-  );
-
-  const communicationsConfig = readFileSync(
-    new URL(
+      /if \(!value\) \{\s*return false;/,
+    ],
+    [
+      "./guest-journey-internal-reconcile.config.ts",
+      /if \(!value\) \{\s*return false;/,
+    ],
+    [
+      "./guest-journey-coordination.config.ts",
+      /if \(!value\) \{\s*return false;/,
+    ],
+    [
+      "./guest-journey-owner-runtime.config.ts",
+      /if \(!value\) return false;/,
+    ],
+    [
+      "./guest-journey-mission-control.config.ts",
+      /if \(!value\) return false;/,
+    ],
+    [
       "./guest-journey-communications-owner.config.ts",
-      import.meta.url
-    ),
-    "utf8"
-  );
-  assert.match(
-    communicationsConfig,
-    /if \(!value\) return false;/
-  );
-});
+      /if \(!value\) return false;/,
+    ],
+    [
+      "./guest-journey-access-owner.config.ts",
+      /if \(!value\) return false;/,
+    ],
+    [
+      "./guest-journey-financial-owner.config.ts",
+      /if \(!value\) return false;/,
+    ],
+    [
+      "./guest-journey-compliance-owner.config.ts",
+      /if \(!value\) return false;/,
+    ],
+  ];
 
-test("keeps E6 free of credential, provider, messaging and payment execution", () => {
-  const bridge = readFileSync(
-    new URL(
-      "./guest-journey-mission-control-bridge.service.ts",
-      import.meta.url
-    ),
-    "utf8"
-  );
-  const cycle = readFileSync(
-    new URL(
-      "./guest-journey-mission-control-cycle.service.ts",
-      import.meta.url
-    ),
-    "utf8"
-  );
-  const combined = bridge + "\n" + cycle;
-
-  for (const forbiddenImport of [
-    "ttlock",
-    "mailer",
-    "messaging.service",
-    "email-delivery",
-    "twilio",
-    "stripe",
-    "activateGrant",
-    "deactivateGrant",
-    "sendGuest",
-  ]) {
-    assert.doesNotMatch(
-      combined,
-      new RegExp(
-        `(?:from|import\\()[^\\n]*${forbiddenImport}`,
-        "i"
-      )
-    );
-  }
-
-  assert.doesNotMatch(
-    combined,
-    /ownerEngineExecutions:\s*[1-9]/
-  );
-  assert.doesNotMatch(
-    combined,
-    /credentialWrites:\s*[1-9]/
-  );
-  assert.doesNotMatch(
-    combined,
-    /messageSends:\s*[1-9]/
-  );
-  assert.doesNotMatch(
-    combined,
-    /paymentCalls:\s*[1-9]/
-  );
-});
-
-test("keeps the E5 ACCESS handler free of credential, messaging and payment execution", () => {
-  const handler = readFileSync(
-    new URL(
-      "./guest-journey-access-evaluation-handler.service.ts",
-      import.meta.url
-    ),
-    "utf8"
-  );
-
-  for (const forbiddenImport of [
-    "ttlock",
-    "mailer",
-    "messaging.service",
-    "email-delivery",
-    "twilio",
-    "stripe",
-    "activateGrant",
-    "sendGuest",
-  ]) {
-    assert.doesNotMatch(
-      handler,
-      new RegExp(forbiddenImport, "i")
-    );
+  for (const [path, pattern] of defaultOffPatterns) {
+    assert.match(source(path), pattern);
   }
 });

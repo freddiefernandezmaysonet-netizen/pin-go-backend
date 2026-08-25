@@ -1,4 +1,6 @@
 import type {
+  AutopilotStatus,
+  EngineHealth,
   MissionControlAction,
   MissionControlOperationalItem,
 } from "./mission-control-types";
@@ -9,6 +11,11 @@ export interface MissionControlOperationalProjection {
   waitingItems: MissionControlOperationalItem[];
   autoResolvingItems: MissionControlOperationalItem[];
   recentlyResolved: MissionControlOperationalItem[];
+}
+
+export interface MissionControlCurrentStateSummary {
+  autopilotStatus: AutopilotStatus;
+  engineHealth: EngineHealth[];
 }
 
 /**
@@ -47,6 +54,124 @@ export function projectMissionControlOperationalState(
     recentlyResolved: operationalItems.filter(
       (item) => item.workflowState === "RESOLVED"
     ),
+  };
+}
+
+function asDate(value: Date | string | null | undefined) {
+  if (value instanceof Date) {
+    return value;
+  }
+
+  if (!value) {
+    return undefined;
+  }
+
+  const parsed = new Date(value);
+  return Number.isNaN(parsed.getTime())
+    ? undefined
+    : parsed;
+}
+
+function getOperationalTimestamp(
+  item: MissionControlOperationalItem
+) {
+  return (
+    asDate(item.lastSignalAt)?.getTime() ??
+    asDate(item.firstDetectedAt)?.getTime() ??
+    0
+  );
+}
+
+/**
+ * E12 current-state cutover.
+ *
+ * Current autopilot/engine health is derived exclusively from unresolved
+ * OperationalIssue projections. ApmsAuditEntry is historical evidence and
+ * must not revive a resolved issue or keep Mission Control in a stale warning
+ * state.
+ */
+export function deriveMissionControlCurrentStateSummary(
+  currentOperationalState: readonly MissionControlOperationalItem[]
+): MissionControlCurrentStateSummary {
+  const activeItems = currentOperationalState.filter(
+    (item) => item.workflowState !== "RESOLVED"
+  );
+
+  const hasCritical = activeItems.some(
+    (item) => item.severity === "CRITICAL"
+  );
+  const hasHostAction = activeItems.some(
+    (item) =>
+      item.workflowState === "ACTION_REQUIRED" &&
+      item.visibility === "HOST" &&
+      item.actionRequired === true
+  );
+
+  const autopilotStatus: AutopilotStatus = hasCritical
+    ? "ERROR"
+    : hasHostAction
+    ? "NEEDS_ATTENTION"
+    : "ACTIVE";
+
+  const byEngine = new Map<
+    string,
+    MissionControlOperationalItem[]
+  >();
+
+  for (const item of activeItems) {
+    const engine = String(item.engine ?? "").trim();
+    if (!engine) {
+      continue;
+    }
+
+    const entries = byEngine.get(engine) ?? [];
+    entries.push(item);
+    byEngine.set(engine, entries);
+  }
+
+  const engineHealth: EngineHealth[] = Array.from(
+    byEngine.entries()
+  )
+    .map(([engine, entries]) => {
+      const ordered = [...entries].sort(
+        (left, right) =>
+          getOperationalTimestamp(right) -
+          getOperationalTimestamp(left)
+      );
+      const latest = ordered[0];
+      const critical = entries.some(
+        (item) => item.severity === "CRITICAL"
+      );
+      const lastExecutionAt =
+        asDate(latest?.lastSignalAt) ??
+        asDate(latest?.firstDetectedAt);
+      const message =
+        latest?.operationalImpact ??
+        latest?.issue ??
+        latest?.title;
+
+      const health: EngineHealth = {
+        engine,
+        status: critical ? "ERROR" : "WARNING",
+      };
+
+      if (lastExecutionAt) {
+        health.lastExecutionAt = lastExecutionAt;
+      }
+
+      if (message) {
+        health.message = message;
+      }
+
+      return health;
+    })
+    .sort((left, right) =>
+      left.engine.localeCompare(right.engine)
+    );
+
+  return {
+    autopilotStatus,
+    engineHealth,
   };
 }
 

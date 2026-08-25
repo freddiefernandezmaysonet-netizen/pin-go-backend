@@ -58,60 +58,41 @@ import {
   scheduleGuestJourneyAccess,
 } from "../services/guest-journey.service";
 import {
-  resolveGuestJourneyShadowConfig,
-} from "../services/guest-journey-shadow.config";
-import {
   runGuestJourneyShadowCycle,
 } from "../services/guest-journey-shadow-cycle.service";
-import {
-  resolveGuestJourneyInternalReconcileConfig,
-} from "../services/guest-journey-internal-reconcile.config";
 import {
   runGuestJourneyEngineCycle,
 } from "../services/guest-journey-engine-cycle.service";
 import {
-  resolveGuestJourneyCoordinationConfig,
-} from "../services/guest-journey-coordination.config";
-import {
   runGuestJourneyCoordinationCycle,
 } from "../services/guest-journey-coordination-cycle.service";
-import {
-  resolveGuestJourneyOwnerRuntimeConfig,
-} from "../services/guest-journey-owner-runtime.config";
 import {
   runGuestJourneyOwnerRuntimeCycle,
 } from "../services/guest-journey-owner-runtime-cycle.service";
 import {
-  resolveGuestJourneyMissionControlConfig,
-} from "../services/guest-journey-mission-control.config";
-import {
   runGuestJourneyMissionControlCycle,
 } from "../services/guest-journey-mission-control-cycle.service";
-import {
-  resolveGuestJourneyCommunicationsOwnerConfig,
-} from "../services/guest-journey-communications-owner.config";
 import {
   runGuestJourneyCommunicationsOwnerCycle,
 } from "../services/guest-journey-communications-owner-cycle.service";
 import {
   isGuestJourneyAccessOwnerScope,
-  resolveGuestJourneyAccessOwnerConfig,
 } from "../services/guest-journey-access-owner.config";
 import {
   runGuestJourneyAccessOwnerCycle,
 } from "../services/guest-journey-access-owner-cycle.service";
 import {
-  resolveGuestJourneyFinancialOwnerConfig,
-} from "../services/guest-journey-financial-owner.config";
-import {
   runGuestJourneyFinancialOwnerCycle,
 } from "../services/guest-journey-financial-owner-cycle.service";
 import {
-  resolveGuestJourneyComplianceOwnerConfig,
-} from "../services/guest-journey-compliance-owner.config";
-import {
   runGuestJourneyComplianceOwnerCycle,
 } from "../services/guest-journey-compliance-owner-cycle.service";
+import {
+  resolveGuestJourneyActivationControlPlaneConfig,
+} from "../services/guest-journey-activation-control-plane.service";
+import {
+  verifyGuestJourneyRuntimeScope,
+} from "../services/guest-journey-runtime-enforcement.service";
 
 
 console.log("[reservation.worker] BOOT", new Date().toISOString());
@@ -140,32 +121,32 @@ const TTLOCK_DELETE_TYPE = Number(process.env.TTLOCK_DELETE_TYPE ?? 2);
 const WORKER_NAME = 'reservation.worker';
 const POLL_MS = Number(process.env.RESERVATION_WORKER_POLL_MS ?? 10_000);
 const BATCH_SIZE = Number(process.env.RESERVATION_WORKER_BATCH_SIZE ?? 20);
-const GUEST_JOURNEY_SHADOW_CONFIG =
-  resolveGuestJourneyShadowConfig();
+
+// E12: resolve the complete E11 profile once at boot. Any incoherent profile,
+// dependency graph, or stage scope throws here and the worker fails closed
+// before any APMS Guest Journey stage can execute.
+const GUEST_JOURNEY_ACTIVATION_CONTROL_PLANE_CONFIG =
+  resolveGuestJourneyActivationControlPlaneConfig();
+const {
+  shadow: GUEST_JOURNEY_SHADOW_CONFIG,
+  internalReconcile: GUEST_JOURNEY_INTERNAL_RECONCILE_CONFIG,
+  coordination: GUEST_JOURNEY_COORDINATION_CONFIG,
+  ownerRuntime: GUEST_JOURNEY_OWNER_RUNTIME_CONFIG,
+  missionControl: GUEST_JOURNEY_MISSION_CONTROL_CONFIG,
+  communicationsOwner: GUEST_JOURNEY_COMMUNICATIONS_OWNER_CONFIG,
+  accessOwner: GUEST_JOURNEY_ACCESS_OWNER_CONFIG,
+  financialOwner: GUEST_JOURNEY_FINANCIAL_OWNER_CONFIG,
+  complianceOwner: GUEST_JOURNEY_COMPLIANCE_OWNER_CONFIG,
+} = GUEST_JOURNEY_ACTIVATION_CONTROL_PLANE_CONFIG.configs;
+
 let guestJourneyShadowCursor:
   string | null = null;
-const GUEST_JOURNEY_INTERNAL_RECONCILE_CONFIG =
-  resolveGuestJourneyInternalReconcileConfig();
 let guestJourneyInternalReconcileCursor:
   string | null = null;
-const GUEST_JOURNEY_COORDINATION_CONFIG =
-  resolveGuestJourneyCoordinationConfig();
 let guestJourneyCoordinationCursor:
   string | null = null;
-const GUEST_JOURNEY_OWNER_RUNTIME_CONFIG =
-  resolveGuestJourneyOwnerRuntimeConfig();
-const GUEST_JOURNEY_MISSION_CONTROL_CONFIG =
-  resolveGuestJourneyMissionControlConfig();
 let guestJourneyMissionControlCursor:
   string | null = null;
-const GUEST_JOURNEY_COMMUNICATIONS_OWNER_CONFIG =
-  resolveGuestJourneyCommunicationsOwnerConfig();
-const GUEST_JOURNEY_ACCESS_OWNER_CONFIG =
-  resolveGuestJourneyAccessOwnerConfig();
-const GUEST_JOURNEY_FINANCIAL_OWNER_CONFIG =
-  resolveGuestJourneyFinancialOwnerConfig();
-const GUEST_JOURNEY_COMPLIANCE_OWNER_CONFIG =
-  resolveGuestJourneyComplianceOwnerConfig();
 const REMINDER_HOURS = Number(
   process.env.GUEST_LINK_REMINDER_HOURS ??
     24
@@ -1997,8 +1978,7 @@ async function processCleaningActivations(now: Date) {
               staffName:
                 assignment.staffMember?.fullName,
               propertyName:
-                assignment.reservation?.property
-                  ?.name,
+                assignment.reservation?.property?.name,
               roomName:
                 assignment.reservation?.roomName,
               startsAt: assignment.startsAt,
@@ -2494,238 +2474,271 @@ async function tick() {
       );
     }
 
-    if (GUEST_JOURNEY_SHADOW_CONFIG.enabled) {
-      try {
-        const shadowMetrics =
-          await runGuestJourneyShadowCycle(
-            prisma,
-            GUEST_JOURNEY_SHADOW_CONFIG,
-            {
-              now,
-              cursor:
-                guestJourneyShadowCursor,
-            }
-          );
+    // E12: every E2-E10 APMS stage shares one read-only tenant/property
+    // preflight. A runtime-scope failure blocks the whole APMS block for this
+    // tick instead of permitting a partially enabled profile to execute.
+    let guestJourneyRuntimeAllowed =
+      GUEST_JOURNEY_ACTIVATION_CONTROL_PLANE_CONFIG.profile === "off";
 
-        guestJourneyShadowCursor =
-          shadowMetrics.nextCursor;
-        log(
-          "guest-journey-shadow",
-          shadowMetrics
+    try {
+      const runtimePreflight =
+        await verifyGuestJourneyRuntimeScope(
+          prisma,
+          GUEST_JOURNEY_ACTIVATION_CONTROL_PLANE_CONFIG
         );
-      } catch (e) {
-        errLog(
-          "guest-journey-shadow crashed:",
-          toErrString(e)
+
+      guestJourneyRuntimeAllowed =
+        runtimePreflight.reason === "PROFILE_OFF" ||
+        runtimePreflight.enforced;
+
+      if (runtimePreflight.enforced) {
+        log(
+          "guest-journey-runtime-enforcement",
+          runtimePreflight
         );
       }
+    } catch (e) {
+      guestJourneyRuntimeAllowed = false;
+      errLog(
+        "guest-journey-runtime-enforcement blocked APMS stages:",
+        toErrString(e)
+      );
     }
 
-    if (
-      GUEST_JOURNEY_INTERNAL_RECONCILE_CONFIG
-        .enabled
-    ) {
-      try {
-        const reconcileMetrics =
-          await runGuestJourneyEngineCycle(
-            prisma,
-            GUEST_JOURNEY_INTERNAL_RECONCILE_CONFIG,
-            {
-              now,
-              cursor:
-                guestJourneyInternalReconcileCursor,
-            }
-          );
+    if (guestJourneyRuntimeAllowed) {
+      if (GUEST_JOURNEY_SHADOW_CONFIG.enabled) {
+        try {
+          const shadowMetrics =
+            await runGuestJourneyShadowCycle(
+              prisma,
+              GUEST_JOURNEY_SHADOW_CONFIG,
+              {
+                now,
+                cursor:
+                  guestJourneyShadowCursor,
+              }
+            );
 
-        guestJourneyInternalReconcileCursor =
-          reconcileMetrics.nextCursor;
-        log(
-          "guest-journey-internal-reconcile",
-          reconcileMetrics
-        );
-      } catch (e) {
-        errLog(
-          "guest-journey-internal-reconcile crashed:",
-          toErrString(e)
-        );
+          guestJourneyShadowCursor =
+            shadowMetrics.nextCursor;
+          log(
+            "guest-journey-shadow",
+            shadowMetrics
+          );
+        } catch (e) {
+          errLog(
+            "guest-journey-shadow crashed:",
+            toErrString(e)
+          );
+        }
       }
-    }
 
-    if (
-      GUEST_JOURNEY_COORDINATION_CONFIG
-        .enabled
-    ) {
-      try {
-        const coordinationMetrics =
-          await runGuestJourneyCoordinationCycle(
-            prisma,
-            GUEST_JOURNEY_COORDINATION_CONFIG,
-            {
-              now,
-              cursor:
-                guestJourneyCoordinationCursor,
-            }
+      if (
+        GUEST_JOURNEY_INTERNAL_RECONCILE_CONFIG
+          .enabled
+      ) {
+        try {
+          const reconcileMetrics =
+            await runGuestJourneyEngineCycle(
+              prisma,
+              GUEST_JOURNEY_INTERNAL_RECONCILE_CONFIG,
+              {
+                now,
+                cursor:
+                  guestJourneyInternalReconcileCursor,
+              }
+            );
+
+          guestJourneyInternalReconcileCursor =
+            reconcileMetrics.nextCursor;
+          log(
+            "guest-journey-internal-reconcile",
+            reconcileMetrics
           );
-
-        guestJourneyCoordinationCursor =
-          coordinationMetrics.nextCursor;
-        log(
-          "guest-journey-coordination-intents",
-          coordinationMetrics
-        );
-      } catch (e) {
-        errLog(
-          "guest-journey-coordination-intents crashed:",
-          toErrString(e)
-        );
+        } catch (e) {
+          errLog(
+            "guest-journey-internal-reconcile crashed:",
+            toErrString(e)
+          );
+        }
       }
-    }
 
-    if (
-      GUEST_JOURNEY_OWNER_RUNTIME_CONFIG
-        .enabled
-    ) {
-      try {
-        const ownerRuntimeMetrics =
-          await runGuestJourneyOwnerRuntimeCycle(
-            prisma,
-            GUEST_JOURNEY_OWNER_RUNTIME_CONFIG,
-            { now }
+      if (
+        GUEST_JOURNEY_COORDINATION_CONFIG
+          .enabled
+      ) {
+        try {
+          const coordinationMetrics =
+            await runGuestJourneyCoordinationCycle(
+              prisma,
+              GUEST_JOURNEY_COORDINATION_CONFIG,
+              {
+                now,
+                cursor:
+                  guestJourneyCoordinationCursor,
+              }
+            );
+
+          guestJourneyCoordinationCursor =
+            coordinationMetrics.nextCursor;
+          log(
+            "guest-journey-coordination-intents",
+            coordinationMetrics
           );
-
-        log(
-          "guest-journey-owner-runtime",
-          ownerRuntimeMetrics
-        );
-      } catch (e) {
-        errLog(
-          "guest-journey-owner-runtime crashed:",
-          toErrString(e)
-        );
+        } catch (e) {
+          errLog(
+            "guest-journey-coordination-intents crashed:",
+            toErrString(e)
+          );
+        }
       }
-    }
 
-    if (
-      GUEST_JOURNEY_MISSION_CONTROL_CONFIG
-        .enabled
-    ) {
-      try {
-        const missionControlMetrics =
-          await runGuestJourneyMissionControlCycle(
-            prisma,
-            GUEST_JOURNEY_MISSION_CONTROL_CONFIG,
-            GUEST_JOURNEY_OWNER_RUNTIME_CONFIG,
-            {
-              now,
-              cursor:
-                guestJourneyMissionControlCursor,
-            }
+      if (
+        GUEST_JOURNEY_OWNER_RUNTIME_CONFIG
+          .enabled
+      ) {
+        try {
+          const ownerRuntimeMetrics =
+            await runGuestJourneyOwnerRuntimeCycle(
+              prisma,
+              GUEST_JOURNEY_OWNER_RUNTIME_CONFIG,
+              { now }
+            );
+
+          log(
+            "guest-journey-owner-runtime",
+            ownerRuntimeMetrics
           );
-
-        guestJourneyMissionControlCursor =
-          missionControlMetrics.nextCursor;
-        log(
-          "guest-journey-mission-control-bridge",
-          missionControlMetrics
-        );
-      } catch (e) {
-        errLog(
-          "guest-journey-mission-control-bridge crashed:",
-          toErrString(e)
-        );
+        } catch (e) {
+          errLog(
+            "guest-journey-owner-runtime crashed:",
+            toErrString(e)
+          );
+        }
       }
-    }
 
-    if (
-      GUEST_JOURNEY_COMMUNICATIONS_OWNER_CONFIG
-        .enabled
-    ) {
-      try {
-        const communicationsMetrics =
-          await runGuestJourneyCommunicationsOwnerCycle(
-            prisma,
-            GUEST_JOURNEY_COMMUNICATIONS_OWNER_CONFIG,
-            { now }
+      if (
+        GUEST_JOURNEY_MISSION_CONTROL_CONFIG
+          .enabled
+      ) {
+        try {
+          const missionControlMetrics =
+            await runGuestJourneyMissionControlCycle(
+              prisma,
+              GUEST_JOURNEY_MISSION_CONTROL_CONFIG,
+              GUEST_JOURNEY_OWNER_RUNTIME_CONFIG,
+              {
+                now,
+                cursor:
+                  guestJourneyMissionControlCursor,
+              }
+            );
+
+          guestJourneyMissionControlCursor =
+            missionControlMetrics.nextCursor;
+          log(
+            "guest-journey-mission-control-bridge",
+            missionControlMetrics
           );
-
-        log(
-          "guest-journey-communications-owner",
-          communicationsMetrics
-        );
-      } catch (e) {
-        errLog(
-          "guest-journey-communications-owner crashed:",
-          toErrString(e)
-        );
+        } catch (e) {
+          errLog(
+            "guest-journey-mission-control-bridge crashed:",
+            toErrString(e)
+          );
+        }
       }
-    }
 
-    if (
-      GUEST_JOURNEY_ACCESS_OWNER_CONFIG.enabled
-    ) {
-      try {
-        const accessOwnerMetrics =
-          await runGuestJourneyAccessOwnerCycle(
-            prisma,
-            GUEST_JOURNEY_ACCESS_OWNER_CONFIG,
-            { now }
+      if (
+        GUEST_JOURNEY_COMMUNICATIONS_OWNER_CONFIG
+          .enabled
+      ) {
+        try {
+          const communicationsMetrics =
+            await runGuestJourneyCommunicationsOwnerCycle(
+              prisma,
+              GUEST_JOURNEY_COMMUNICATIONS_OWNER_CONFIG,
+              { now }
+            );
+
+          log(
+            "guest-journey-communications-owner",
+            communicationsMetrics
           );
-
-        log(
-          "guest-journey-access-owner",
-          accessOwnerMetrics
-        );
-      } catch (e) {
-        errLog(
-          "guest-journey-access-owner crashed:",
-          toErrString(e)
-        );
+        } catch (e) {
+          errLog(
+            "guest-journey-communications-owner crashed:",
+            toErrString(e)
+          );
+        }
       }
-    }
 
-    if (
-      GUEST_JOURNEY_FINANCIAL_OWNER_CONFIG.enabled
-    ) {
-      try {
-        const financialOwnerMetrics =
-          await runGuestJourneyFinancialOwnerCycle(
-            prisma,
-            GUEST_JOURNEY_FINANCIAL_OWNER_CONFIG,
-            { now }
+      if (
+        GUEST_JOURNEY_ACCESS_OWNER_CONFIG.enabled
+      ) {
+        try {
+          const accessOwnerMetrics =
+            await runGuestJourneyAccessOwnerCycle(
+              prisma,
+              GUEST_JOURNEY_ACCESS_OWNER_CONFIG,
+              { now }
+            );
+
+          log(
+            "guest-journey-access-owner",
+            accessOwnerMetrics
           );
-
-        log(
-          "guest-journey-financial-owner",
-          financialOwnerMetrics
-        );
-      } catch (e) {
-        errLog(
-          "guest-journey-financial-owner crashed:",
-          toErrString(e)
-        );
+        } catch (e) {
+          errLog(
+            "guest-journey-access-owner crashed:",
+            toErrString(e)
+          );
+        }
       }
-    }
 
-    if (
-      GUEST_JOURNEY_COMPLIANCE_OWNER_CONFIG.enabled
-    ) {
-      try {
-        const complianceOwnerMetrics =
-          await runGuestJourneyComplianceOwnerCycle(
-            prisma,
-            GUEST_JOURNEY_COMPLIANCE_OWNER_CONFIG,
-            { now }
+      if (
+        GUEST_JOURNEY_FINANCIAL_OWNER_CONFIG.enabled
+      ) {
+        try {
+          const financialOwnerMetrics =
+            await runGuestJourneyFinancialOwnerCycle(
+              prisma,
+              GUEST_JOURNEY_FINANCIAL_OWNER_CONFIG,
+              { now }
+            );
+
+          log(
+            "guest-journey-financial-owner",
+            financialOwnerMetrics
           );
+        } catch (e) {
+          errLog(
+            "guest-journey-financial-owner crashed:",
+            toErrString(e)
+          );
+        }
+      }
 
-        log(
-          "guest-journey-compliance-owner",
-          complianceOwnerMetrics
-        );
-      } catch (e) {
-        errLog(
-          "guest-journey-compliance-owner crashed:",
-          toErrString(e)
-        );
+      if (
+        GUEST_JOURNEY_COMPLIANCE_OWNER_CONFIG.enabled
+      ) {
+        try {
+          const complianceOwnerMetrics =
+            await runGuestJourneyComplianceOwnerCycle(
+              prisma,
+              GUEST_JOURNEY_COMPLIANCE_OWNER_CONFIG,
+              { now }
+            );
+
+          log(
+            "guest-journey-compliance-owner",
+            complianceOwnerMetrics
+          );
+        } catch (e) {
+          errLog(
+            "guest-journey-compliance-owner crashed:",
+            toErrString(e)
+          );
+        }
       }
     }
   } finally {
@@ -2742,6 +2755,16 @@ async function start() {
       CLEANING_SMS_ENABLED ? 'on' : 'off'
     }`
   );
+  log("Guest Journey E11/E12 activation", {
+    version:
+      GUEST_JOURNEY_ACTIVATION_CONTROL_PLANE_CONFIG.version,
+    profile:
+      GUEST_JOURNEY_ACTIVATION_CONTROL_PLANE_CONFIG.profile,
+    enabledStages:
+      GUEST_JOURNEY_ACTIVATION_CONTROL_PLANE_CONFIG.enabledStages,
+    scope:
+      GUEST_JOURNEY_ACTIVATION_CONTROL_PLANE_CONFIG.scope,
+  });
   log(
     `Guest Journey shadow: ${
       GUEST_JOURNEY_SHADOW_CONFIG.enabled
@@ -2847,4 +2870,4 @@ void start().catch((e) => {
 });
    
   
- 
+

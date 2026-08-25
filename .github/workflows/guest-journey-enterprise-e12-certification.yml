@@ -1,0 +1,48 @@
+name: Guest Journey Enterprise E12 Runtime Enforcement Certification
+
+on:
+  pull_request:
+    paths:
+      - "src/workers/reservation.worker.ts"
+      - "src/services/guest-journey-activation-control-plane*"
+      - "src/services/guest-journey-runtime-enforcement*"
+      - "src/services/guest-journey-*.config.ts"
+      - "src/apms/mission-control-projection.ts"
+      - "src/apms/mission-control-current-state.e12.test.ts"
+      - "src/routes/dashboard.mission-control-current-state.e12.middleware*"
+      - "src/server.ts"
+      - "src/services/guest-journey-enterprise-contract.test.ts"
+      - "tsconfig.guest-journey-enterprise-e12.json"
+      - ".github/workflows/guest-journey-enterprise-e12-certification.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  certify-e12-runtime-enforcement:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npx prisma generate
+      - name: Certify E11 activation profile plus E12 runtime/current-state cutover
+        run: >-
+          node --import tsx --test
+          src/services/guest-journey-enterprise-contract.test.ts
+          src/services/guest-journey-activation-control-plane.service.test.ts
+          src/services/guest-journey-runtime-enforcement.service.test.ts
+          src/services/guest-journey-runtime-enforcement.contract.test.ts
+          src/apms/mission-control-current-state.e12.test.ts
+          src/routes/dashboard.mission-control-current-state.e12.middleware.test.ts
+      - name: Type-check E12 isolated contract
+        run: npx tsc -p tsconfig.guest-journey-enterprise-e12.json
+      - name: Verify Prisma schema without applying migrations
+        env:
+          DATABASE_URL: postgresql://ci:ci@127.0.0.1:5432/pin_go_e12_schema_validation
+        run: npx prisma validate
