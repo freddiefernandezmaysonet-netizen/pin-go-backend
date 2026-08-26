@@ -9,7 +9,9 @@ on:
       - "src/services/guest-journey-*.config.ts"
       - "src/apms/mission-control-projection.ts"
       - "src/apms/mission-control-current-state.e12.test.ts"
-      - "src/routes/dashboard.mission-control-current-state.e12.middleware*"
+      - "src/services/guest-journey-runtime-state*"
+      - "src/apms/mission-control-runtime-health.e13*"
+      - "src/routes/dashboard.properties.route.ts"
       - "src/server.ts"
       - "src/services/guest-journey-enterprise-contract.test.ts"
       - "tsconfig.guest-journey-enterprise-e12.json"
@@ -39,7 +41,8 @@ jobs:
           src/services/guest-journey-runtime-enforcement.service.test.ts
           src/services/guest-journey-runtime-enforcement.contract.test.ts
           src/apms/mission-control-current-state.e12.test.ts
-          src/routes/dashboard.mission-control-current-state.e12.middleware.test.ts
+          src/services/guest-journey-runtime-state.service.test.ts
+          src/apms/mission-control-runtime-health.e13.test.ts
       - name: Type-check E12 isolated contract
         run: npx tsc -p tsconfig.guest-journey-enterprise-e12.json
       - name: Verify Prisma schema without applying migrations

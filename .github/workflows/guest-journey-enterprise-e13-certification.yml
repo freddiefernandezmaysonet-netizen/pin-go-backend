@@ -1,0 +1,79 @@
+name: Guest Journey Enterprise E13 Runtime Truth Certification
+
+on:
+  pull_request:
+    branches:
+      - main
+    paths:
+      - "prisma/schema.prisma"
+      - "prisma/migrations/20260825120000_add_apms_runtime_truth/**"
+      - "src/workers/reservation.worker.ts"
+      - "src/services/guest-journey-activation-control-plane*"
+      - "src/services/guest-journey-runtime-enforcement*"
+      - "src/services/guest-journey-runtime-state*"
+      - "src/apms/mission-control-runtime-health.e13*"
+      - "src/routes/dashboard.properties.route.ts"
+      - "src/server.ts"
+      - "src/services/guest-journey-enterprise-contract.test.ts"
+      - "src/services/guest-journey-e13-runtime-truth.contract.test.ts"
+      - "package.json"
+      - "tsconfig.guest-journey-enterprise-e13.json"
+      - ".github/workflows/guest-journey-enterprise-e13-certification.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  DATABASE_URL: postgresql://ci:ci@127.0.0.1:5432/pin_go_e13_schema_validation
+
+jobs:
+  certify-e13-runtime-truth:
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - name: Install dependencies
+        run: npm ci
+      - name: Generate Prisma Client without connecting to a database
+        run: npx prisma generate --schema prisma/schema.prisma
+      - name: Validate Prisma schema without applying migrations
+        run: npx prisma validate --schema prisma/schema.prisma
+      - name: Validate additive migration shape without applying it
+        run: |
+          npx prisma migrate diff \
+            --from-empty \
+            --to-schema-datamodel prisma/schema.prisma \
+            --script > /tmp/e13-schema.sql
+          grep -q 'ApmsRuntimeState' /tmp/e13-schema.sql
+          grep -q 'ApmsRuntimeState' prisma/migrations/20260825120000_add_apms_runtime_truth/migration.sql
+          ! grep -Eiq '(DROP|TRUNCATE|DELETE[[:space:]]+FROM)' prisma/migrations/20260825120000_add_apms_runtime_truth/migration.sql
+      - name: Certify E13 runtime truth and native Mission Control
+        run: npm run test:guest-journey-enterprise-e13-runtime-truth
+      - name: Bundle reservation worker and API wiring
+        run: |
+          npx esbuild src/workers/reservation.worker.ts --bundle --platform=node --packages=external --outfile=/tmp/reservation.worker.e13.js
+          npx esbuild src/server.ts --bundle --platform=node --packages=external --outfile=/tmp/server.e13.js
+      - name: Regress E2 through E6
+        run: |
+          npm run test:guest-journey-enterprise-e2-shadow
+          npm run test:guest-journey-enterprise-e3-reconciler
+          npm run test:guest-journey-enterprise-e4-coordination
+          npm run test:guest-journey-enterprise-e5-owner-runtime
+          npm run test:guest-journey-enterprise-e6-mission-control
+      - name: Regress E7 through E12
+        run: |
+          npm run test:guest-journey-enterprise-e7-communications
+          npm run test:guest-journey-enterprise-e8-access-owner
+          npm run test:guest-journey-enterprise-e9-financial-owner
+          npm run test:guest-journey-enterprise-e10-compliance-owner
+          npm run test:guest-journey-enterprise-e11-activation-control-plane
+          npm run test:guest-journey-enterprise-e12-runtime-enforcement
+      - name: Preserve canonical operational contract
+        run: npm run test:canonical-operational-contract
+      - name: Patch integrity
+        run: git diff --check origin/main...HEAD

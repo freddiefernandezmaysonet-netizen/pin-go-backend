@@ -89,10 +89,14 @@ import {
 } from "../services/guest-journey-compliance-owner-cycle.service";
 import {
   resolveGuestJourneyActivationControlPlaneConfig,
+  type GuestJourneyActivationControlPlaneConfig,
 } from "../services/guest-journey-activation-control-plane.service";
 import {
-  verifyGuestJourneyRuntimeScope,
-} from "../services/guest-journey-runtime-enforcement.service";
+  evaluateGuestJourneyRuntimeTick,
+  initializeGuestJourneyRuntimeState,
+  recordGuestJourneyRuntimeHeartbeat,
+  type GuestJourneyRuntimeContext,
+} from "../services/guest-journey-runtime-state.service";
 
 
 console.log("[reservation.worker] BOOT", new Date().toISOString());
@@ -122,12 +126,16 @@ const WORKER_NAME = 'reservation.worker';
 const POLL_MS = Number(process.env.RESERVATION_WORKER_POLL_MS ?? 10_000);
 const BATCH_SIZE = Number(process.env.RESERVATION_WORKER_BATCH_SIZE ?? 20);
 
-// E12: resolve the complete E11 profile once at boot. Any incoherent profile,
-// dependency graph, or stage scope throws here and the worker fails closed
-// before any APMS Guest Journey stage can execute.
-const GUEST_JOURNEY_ACTIVATION_CONTROL_PLANE_CONFIG =
-  resolveGuestJourneyActivationControlPlaneConfig();
-const {
+// E13 resolves the real E11 control plane during controlled async startup so
+// invalid profiles can be recorded durably. This deterministic empty-env
+// profile is only a safe in-memory fallback; it never activates an APMS stage.
+const GUEST_JOURNEY_SAFE_OFF_CONFIG =
+  resolveGuestJourneyActivationControlPlaneConfig({});
+
+let GUEST_JOURNEY_ACTIVATION_CONTROL_PLANE_CONFIG:
+  GuestJourneyActivationControlPlaneConfig =
+    GUEST_JOURNEY_SAFE_OFF_CONFIG;
+let {
   shadow: GUEST_JOURNEY_SHADOW_CONFIG,
   internalReconcile: GUEST_JOURNEY_INTERNAL_RECONCILE_CONFIG,
   coordination: GUEST_JOURNEY_COORDINATION_CONFIG,
@@ -137,7 +145,34 @@ const {
   accessOwner: GUEST_JOURNEY_ACCESS_OWNER_CONFIG,
   financialOwner: GUEST_JOURNEY_FINANCIAL_OWNER_CONFIG,
   complianceOwner: GUEST_JOURNEY_COMPLIANCE_OWNER_CONFIG,
-} = GUEST_JOURNEY_ACTIVATION_CONTROL_PLANE_CONFIG.configs;
+} = GUEST_JOURNEY_SAFE_OFF_CONFIG.configs;
+let guestJourneyRuntimeContext:
+  GuestJourneyRuntimeContext | null = null;
+
+function applyGuestJourneyActivationConfig(
+  config: GuestJourneyActivationControlPlaneConfig
+) {
+  GUEST_JOURNEY_ACTIVATION_CONTROL_PLANE_CONFIG =
+    config;
+  GUEST_JOURNEY_SHADOW_CONFIG =
+    config.configs.shadow;
+  GUEST_JOURNEY_INTERNAL_RECONCILE_CONFIG =
+    config.configs.internalReconcile;
+  GUEST_JOURNEY_COORDINATION_CONFIG =
+    config.configs.coordination;
+  GUEST_JOURNEY_OWNER_RUNTIME_CONFIG =
+    config.configs.ownerRuntime;
+  GUEST_JOURNEY_MISSION_CONTROL_CONFIG =
+    config.configs.missionControl;
+  GUEST_JOURNEY_COMMUNICATIONS_OWNER_CONFIG =
+    config.configs.communicationsOwner;
+  GUEST_JOURNEY_ACCESS_OWNER_CONFIG =
+    config.configs.accessOwner;
+  GUEST_JOURNEY_FINANCIAL_OWNER_CONFIG =
+    config.configs.financialOwner;
+  GUEST_JOURNEY_COMPLIANCE_OWNER_CONFIG =
+    config.configs.complianceOwner;
+}
 
 let guestJourneyShadowCursor:
   string | null = null;
@@ -2320,6 +2355,28 @@ async function tick() {
       now: now.toISOString(),
     });
 
+    if (guestJourneyRuntimeContext) {
+      try {
+        const heartbeatPersisted =
+          await recordGuestJourneyRuntimeHeartbeat(
+            prisma,
+            guestJourneyRuntimeContext,
+            now
+          );
+
+        if (!heartbeatPersisted) {
+          errLog(
+            "guest-journey-runtime heartbeat unavailable; APMS stages will remain fail-closed"
+          );
+        }
+      } catch (e) {
+        errLog(
+          "guest-journey-runtime heartbeat failed; APMS stages will remain fail-closed:",
+          toErrString(e)
+        );
+      }
+    }
+
     try {
       await processPasscodeResyncs(now);
     } catch (e) {
@@ -2474,34 +2531,50 @@ async function tick() {
       );
     }
 
-    // E12: every E2-E10 APMS stage shares one read-only tenant/property
-    // preflight. A runtime-scope failure blocks the whole APMS block for this
-    // tick instead of permitting a partially enabled profile to execute.
-    let guestJourneyRuntimeAllowed =
-      GUEST_JOURNEY_ACTIVATION_CONTROL_PLANE_CONFIG.profile === "off";
+    // E13: every E2-E10 stage shares one durable heartbeat/preflight truth.
+    // Any invalid configuration, missing runtime record, or scope failure
+    // blocks only the enterprise APMS block; legacy reservation work above
+    // continues unchanged.
+    let guestJourneyRuntimeAllowed = false;
 
-    try {
-      const runtimePreflight =
-        await verifyGuestJourneyRuntimeScope(
-          prisma,
-          GUEST_JOURNEY_ACTIVATION_CONTROL_PLANE_CONFIG
-        );
+    if (guestJourneyRuntimeContext) {
+      try {
+        const runtimeResult =
+          await evaluateGuestJourneyRuntimeTick(
+            prisma,
+            guestJourneyRuntimeContext,
+            { now }
+          );
 
-      guestJourneyRuntimeAllowed =
-        runtimePreflight.reason === "PROFILE_OFF" ||
-        runtimePreflight.enforced;
+        guestJourneyRuntimeAllowed =
+          runtimeResult.allowed;
 
-      if (runtimePreflight.enforced) {
         log(
-          "guest-journey-runtime-enforcement",
-          runtimePreflight
+          "guest-journey-runtime-truth",
+          {
+            status: runtimeResult.status,
+            preflightStatus:
+              runtimeResult.preflightStatus,
+            profile:
+              GUEST_JOURNEY_ACTIVATION_CONTROL_PLANE_CONFIG.profile,
+            enabledStageCount:
+              GUEST_JOURNEY_ACTIVATION_CONTROL_PLANE_CONFIG.enabledStages.length,
+            statePersisted:
+              runtimeResult.statePersisted,
+            errorCode:
+              runtimeResult.error?.code ?? null,
+          }
+        );
+      } catch (e) {
+        guestJourneyRuntimeAllowed = false;
+        errLog(
+          "guest-journey-runtime-truth blocked APMS stages:",
+          toErrString(e)
         );
       }
-    } catch (e) {
-      guestJourneyRuntimeAllowed = false;
+    } else {
       errLog(
-        "guest-journey-runtime-enforcement blocked APMS stages:",
-        toErrString(e)
+        "guest-journey-runtime-truth unavailable; APMS stages remain fail-closed"
       );
     }
 
@@ -2747,6 +2820,15 @@ async function tick() {
 }
 
 async function start() {
+  guestJourneyRuntimeContext =
+    await initializeGuestJourneyRuntimeState(
+      prisma,
+      process.env
+    );
+  applyGuestJourneyActivationConfig(
+    guestJourneyRuntimeContext.config
+  );
+
   log(
     `Starting. poll=${POLL_MS}ms batch=${BATCH_SIZE} allow_unpaid=${ALLOW_UNPAID ? 'yes' : 'no'}`
   );
@@ -2755,15 +2837,21 @@ async function start() {
       CLEANING_SMS_ENABLED ? 'on' : 'off'
     }`
   );
-  log("Guest Journey E11/E12 activation", {
+  log("Guest Journey E11-E13 activation", {
     version:
       GUEST_JOURNEY_ACTIVATION_CONTROL_PLANE_CONFIG.version,
     profile:
       GUEST_JOURNEY_ACTIVATION_CONTROL_PLANE_CONFIG.profile,
     enabledStages:
       GUEST_JOURNEY_ACTIVATION_CONTROL_PLANE_CONFIG.enabledStages,
-    scope:
-      GUEST_JOURNEY_ACTIVATION_CONTROL_PLANE_CONFIG.scope,
+    organizationScopeCount:
+      guestJourneyRuntimeContext.snapshot.organizationScopeCount,
+    propertyScopeCount:
+      guestJourneyRuntimeContext.snapshot.propertyScopeCount,
+    configurationValid:
+      guestJourneyRuntimeContext.configurationValid,
+    runtimeStatePersisted:
+      Boolean(guestJourneyRuntimeContext.stateId),
   });
   log(
     `Guest Journey shadow: ${
@@ -2833,10 +2921,6 @@ async function start() {
     }`
   );
 
-  log(
-  "ENV DATABASE_URL =",
-  process.env.DATABASE_URL ? process.env.DATABASE_URL : "❌ UNDEFINED"
-);
 
   // Primer tick inmediato
   await tick();
