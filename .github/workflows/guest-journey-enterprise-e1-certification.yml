@@ -76,16 +76,7 @@ jobs:
         run: npx prisma generate --schema prisma/schema.prisma
 
       - name: Apply complete migration history to empty PostgreSQL
-        if: github.head_ref != 'agent/apms-enterprise-guest-journey-e13-runtime-truth' && github.ref_name != 'agent/apms-enterprise-guest-journey-e13-runtime-truth'
         run: npx prisma migrate deploy --schema prisma/schema.prisma
-
-      - name: Validate E13 migration history without applying migrations
-        if: github.head_ref == 'agent/apms-enterprise-guest-journey-e13-runtime-truth' || github.ref_name == 'agent/apms-enterprise-guest-journey-e13-runtime-truth'
-        run: >-
-          npx prisma migrate diff
-          --from-empty
-          --to-schema-datamodel prisma/schema.prisma
-          --script
 
       - name: Certify Guest Journey E1 contract
         run: npm run test:guest-journey-enterprise-contract

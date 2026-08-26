@@ -203,14 +203,28 @@ export function deriveMissionControlNativeHealth(
       runtime.status === "ERROR" ||
       runtime.preflightStatus === "FAILED"
   );
+  const currentHealthIssues =
+    input.allVisibilityCurrentIssues.filter(
+      (issue) => {
+        const runtimeFailureIssue =
+          issue.issueCode ===
+            "GUEST_JOURNEY_RUNTIME_BLOCKED" &&
+          issue.engine === "GUEST_JOURNEY";
+
+        return (
+          !runtimeFailureIssue ||
+          runtimeFailure
+        );
+      }
+    );
   const hasCriticalIssue =
-    input.allVisibilityCurrentIssues.some(
+    currentHealthIssues.some(
       (issue) =>
         issue.workflowState !== "RESOLVED" &&
         issue.severity === "CRITICAL"
     );
   const hasHostAction =
-    input.allVisibilityCurrentIssues.some(
+    currentHealthIssues.some(
       (issue) =>
         issue.workflowState ===
           "ACTION_REQUIRED" &&
@@ -255,7 +269,7 @@ export function deriveMissionControlNativeHealth(
       : "ACTIVE";
 
   const issueHealth = projectCurrentIssueHealth(
-    input.allVisibilityCurrentIssues
+    currentHealthIssues
   );
   const latestRuntime =
     applicableFreshRuntimes[0] ??

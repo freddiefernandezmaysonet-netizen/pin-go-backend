@@ -94,7 +94,6 @@ import {
 import {
   evaluateGuestJourneyRuntimeTick,
   initializeGuestJourneyRuntimeState,
-  recordGuestJourneyRuntimeHeartbeat,
   type GuestJourneyRuntimeContext,
 } from "../services/guest-journey-runtime-state.service";
 
@@ -2354,28 +2353,6 @@ async function tick() {
     log("tick", {
       now: now.toISOString(),
     });
-
-    if (guestJourneyRuntimeContext) {
-      try {
-        const heartbeatPersisted =
-          await recordGuestJourneyRuntimeHeartbeat(
-            prisma,
-            guestJourneyRuntimeContext,
-            now
-          );
-
-        if (!heartbeatPersisted) {
-          errLog(
-            "guest-journey-runtime heartbeat unavailable; APMS stages will remain fail-closed"
-          );
-        }
-      } catch (e) {
-        errLog(
-          "guest-journey-runtime heartbeat failed; APMS stages will remain fail-closed:",
-          toErrString(e)
-        );
-      }
-    }
 
     try {
       await processPasscodeResyncs(now);

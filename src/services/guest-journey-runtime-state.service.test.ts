@@ -13,6 +13,7 @@ import {
   evaluateGuestJourneyRuntimeTick,
   hashGuestJourneyRuntimeScopeId,
   initializeGuestJourneyRuntimeState,
+  isGuestJourneyRuntimeFailureRecoveryEligible,
   isGuestJourneyRuntimeScopeMatch,
   recordGuestJourneyRuntimeHeartbeat,
 } from "./guest-journey-runtime-state.service";
@@ -411,5 +412,86 @@ test("E13 hashed scope membership supports property and organization canaries", 
       }
     ),
     false
+  );
+});
+
+
+test("E13 shared runtime issue recovers only after all failed replicas are stale or absent", async () => {
+  const queries: any[] = [];
+  let freshFailureCount = 1;
+  const prisma = {
+    apmsRuntimeState: {
+      async count(args: any) {
+        queries.push(args);
+        return freshFailureCount;
+      },
+    },
+  } as unknown as PrismaClient;
+  const now = new Date(
+    "2026-08-25T12:00:00.000Z"
+  );
+  const identity =
+    buildGuestJourneyRuntimeIdentity(
+      {
+        NODE_ENV: "test",
+        RAILWAY_SERVICE_NAME:
+          "reservation-worker",
+      },
+      "boot-recovery"
+    );
+
+  assert.equal(
+    await isGuestJourneyRuntimeFailureRecoveryEligible(
+      prisma,
+      identity,
+      now
+    ),
+    false
+  );
+
+  freshFailureCount = 0;
+
+  assert.equal(
+    await isGuestJourneyRuntimeFailureRecoveryEligible(
+      prisma,
+      identity,
+      now
+    ),
+    true
+  );
+
+  assert.equal(queries.length, 2);
+  assert.equal(
+    queries[0].where.runtimeName,
+    "GUEST_JOURNEY"
+  );
+  assert.equal(
+    queries[0].where.environment,
+    "test"
+  );
+  assert.equal(
+    queries[0].where.serviceName,
+    "reservation-worker"
+  );
+  assert.equal(
+    queries[0].where.lastHeartbeatAt.gte.toISOString(),
+    "2026-08-25T11:59:00.000Z"
+  );
+  assert.deepEqual(
+    queries[0].where.OR,
+    [
+      {
+        status: {
+          in: [
+            ApmsRuntimeStatus.BLOCKED,
+            ApmsRuntimeStatus.ERROR,
+          ],
+        },
+      },
+      {
+        preflightStatus:
+          ApmsRuntimePreflightStatus.FAILED,
+      },
+    ]
   );
 });

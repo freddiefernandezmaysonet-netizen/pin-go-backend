@@ -453,6 +453,44 @@ async function persistRuntimeFailureIssue(
   return issue;
 }
 
+export async function isGuestJourneyRuntimeFailureRecoveryEligible(
+  prisma: Pick<PrismaClient, "apmsRuntimeState">,
+  identity: GuestJourneyRuntimeIdentity,
+  now: Date,
+  staleAfterMs: number = GUEST_JOURNEY_RUNTIME_STALE_AFTER_MS
+): Promise<boolean> {
+  const freshFrom = new Date(
+    now.getTime() - staleAfterMs
+  );
+  const freshFailureCount =
+    await prisma.apmsRuntimeState.count({
+      where: {
+        runtimeName: identity.runtimeName,
+        environment: identity.environment,
+        serviceName: identity.serviceName,
+        lastHeartbeatAt: {
+          gte: freshFrom,
+        },
+        OR: [
+          {
+            status: {
+              in: [
+                ApmsRuntimeStatus.BLOCKED,
+                ApmsRuntimeStatus.ERROR,
+              ],
+            },
+          },
+          {
+            preflightStatus:
+              ApmsRuntimePreflightStatus.FAILED,
+          },
+        ],
+      },
+    });
+
+  return freshFailureCount === 0;
+}
+
 async function resolveRuntimeFailureIssue(
   prisma: PrismaClient,
   context: GuestJourneyRuntimeContext,
@@ -464,6 +502,17 @@ async function resolveRuntimeFailureIssue(
     select: { id: true, workflowState: true },
   });
   if (!existing || existing.workflowState === "RESOLVED") return existing;
+
+  const recoveryEligible =
+    await isGuestJourneyRuntimeFailureRecoveryEligible(
+      prisma,
+      context.identity,
+      now
+    );
+
+  if (!recoveryEligible) {
+    return existing;
+  }
 
   const issue = await upsertOperationalIssue(prisma, {
     operationalKey,

@@ -284,3 +284,79 @@ test("E13 ignores resolved/history-only issues for current health", () => {
     "HEALTHY"
   );
 });
+
+
+test("E13 stale runtime issue preserves evidence but current health becomes PAUSED", () => {
+  const result = derive({
+    runtimeRows: [
+      runtime({
+        lastHeartbeatAt: new Date(
+          NOW.getTime() - 61_000
+        ),
+      }),
+    ],
+    issues: [
+      issue({
+        issueCode:
+          "GUEST_JOURNEY_RUNTIME_BLOCKED",
+        visibility: "DEVELOPER",
+        severity: "CRITICAL",
+        workflowState:
+          "ACTION_REQUIRED",
+        actionRequired: true,
+        canAutoResolve: false,
+        autoResolveStatus:
+          "NOT_SUPPORTED",
+      }),
+    ],
+  });
+
+  assert.equal(
+    result.autopilotStatus,
+    "PAUSED"
+  );
+  assert.equal(
+    result.engineHealth.find(
+      (entry) =>
+        entry.engine === "GUEST_JOURNEY"
+    )?.status,
+    "WARNING"
+  );
+});
+
+test("E13 fresh failed runtime and its durable issue remain ERROR", () => {
+  const result = derive({
+    runtimeRows: [
+      runtime({
+        status: "BLOCKED",
+        preflightStatus: "FAILED",
+      }),
+    ],
+    issues: [
+      issue({
+        issueCode:
+          "GUEST_JOURNEY_RUNTIME_BLOCKED",
+        visibility: "DEVELOPER",
+        severity: "CRITICAL",
+        workflowState:
+          "ACTION_REQUIRED",
+        actionRequired: true,
+        canAutoResolve: false,
+        autoResolveStatus:
+          "NOT_SUPPORTED",
+      }),
+    ],
+  });
+
+  assert.equal(
+    result.autopilotStatus,
+    "ERROR"
+  );
+  assert.equal(
+    result.engineHealth.find(
+      (entry) =>
+        entry.engine === "GUEST_JOURNEY"
+    )?.status,
+    "ERROR"
+  );
+});

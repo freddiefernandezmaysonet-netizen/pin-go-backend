@@ -215,3 +215,43 @@ test("E13 certification never applies migrations or calls providers", () => {
     /migrate deploy|migrate dev|db push|TTLock|Stripe|Twilio|Channex/i
   );
 });
+
+
+test("E13 pre-merge hardening pins replica recovery, heartbeat ordering, stale health, and full ephemeral migrations", () => {
+  const e1Workflow = source(
+    "../../.github/workflows/guest-journey-enterprise-e1-certification.yml"
+  );
+
+  assert.match(
+    runtimeService,
+    /isGuestJourneyRuntimeFailureRecoveryEligible/
+  );
+  assert.match(
+    runtimeService,
+    /lastHeartbeatAt:\s*\{\s*gte:\s*freshFrom/
+  );
+  assert.match(
+    runtimeService,
+    /if \(!recoveryEligible\) \{\s*return existing;/
+  );
+  assert.doesNotMatch(
+    worker,
+    /recordGuestJourneyRuntimeHeartbeat/
+  );
+  assert.match(
+    healthProjection,
+    /const currentHealthIssues =/
+  );
+  assert.match(
+    healthProjection,
+    /GUEST_JOURNEY_RUNTIME_BLOCKED/
+  );
+  assert.match(
+    e1Workflow,
+    /npx prisma migrate deploy --schema prisma\/schema\.prisma/
+  );
+  assert.doesNotMatch(
+    e1Workflow,
+    /Validate E13 migration history without applying migrations/
+  );
+});
