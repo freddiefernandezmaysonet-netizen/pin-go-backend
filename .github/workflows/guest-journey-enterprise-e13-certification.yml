@@ -1,4 +1,5 @@
 name: Guest Journey Enterprise E13 Runtime Truth Certification
+# Final-head certification marker after authorized pre-merge hardening.
 
 on:
   pull_request:
