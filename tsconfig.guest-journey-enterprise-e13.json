@@ -5,6 +5,7 @@
     "moduleResolution": "bundler",
     "target": "esnext",
     "strict": true,
+    "exactOptionalPropertyTypes": true,
     "skipLibCheck": true,
     "types": ["node"]
   },
@@ -19,13 +20,15 @@
     "src/services/guest-journey-financial-owner.config.ts",
     "src/services/guest-journey-compliance-owner.config.ts",
     "src/services/guest-journey-activation-control-plane.service.ts",
-    "src/services/guest-journey-activation-control-plane.service.test.ts",
     "src/services/guest-journey-runtime-enforcement.service.ts",
-    "src/services/guest-journey-runtime-enforcement.service.test.ts",
-    "src/services/guest-journey-runtime-enforcement.contract.test.ts",
+    "src/services/guest-journey-runtime-state.service.ts",
+    "src/services/guest-journey-runtime-state.service.test.ts",
+    "src/apms/operational-intelligence-types.ts",
+    "src/apms/operational-transition-policy.ts",
+    "src/apms/operational-intelligence.service.ts",
     "src/apms/mission-control-types.ts",
     "src/apms/mission-control-projection.ts",
-    "src/apms/mission-control-current-state.e12.test.ts",
-    "src/services/guest-journey-enterprise-contract.test.ts"
+    "src/apms/mission-control-runtime-health.e13.ts",
+    "src/apms/mission-control-runtime-health.e13.test.ts"
   ]
 }

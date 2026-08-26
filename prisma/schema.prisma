@@ -1605,7 +1605,8 @@ model OperationalIssue {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  transitions OperationalIssueTransition[]
+  transitions  OperationalIssueTransition[]
+  runtimeStates ApmsRuntimeState[]
 
   @@index([organizationId])
   @@index([propertyId])
@@ -1621,6 +1622,57 @@ model OperationalIssue {
   @@index([propertyId, visibility, workflowState])
   @@index([propertyId, lastSignalAt])
   @@index([reservationId, workflowState])
+}
+
+
+model ApmsRuntimeState {
+  id String @id @default(cuid())
+
+  runtimeKey String @unique
+  runtimeName String
+  environment String
+  serviceName String
+  instanceId String
+  bootId String
+
+  deploymentSha String?
+  deploymentId  String?
+
+  controlPlaneVersion String?
+  activationProfile   String?
+  enabledStages       Json
+
+  configFingerprint String @db.VarChar(64)
+  scopeFingerprint  String @db.VarChar(64)
+
+  organizationScopeHashes Json
+  propertyScopeHashes     Json
+  organizationScopeCount  Int @default(0)
+  propertyScopeCount      Int @default(0)
+
+  status          ApmsRuntimeStatus          @default(STARTING)
+  preflightStatus ApmsRuntimePreflightStatus @default(PENDING)
+
+  lastPreflightAt           DateTime?
+  lastPreflightErrorCode    String?
+  lastPreflightErrorMessage String?
+
+  startedAt       DateTime @default(now())
+  lastHeartbeatAt DateTime @default(now())
+
+  operationalIssueId String?
+  operationalIssue   OperationalIssue? @relation(fields: [operationalIssueId], references: [id], onDelete: SetNull)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([runtimeName, environment, serviceName, bootId])
+  @@index([runtimeName, environment, serviceName, lastHeartbeatAt])
+  @@index([runtimeName, environment, status, lastHeartbeatAt])
+  @@index([configFingerprint, lastHeartbeatAt])
+  @@index([scopeFingerprint, lastHeartbeatAt])
+  @@index([bootId])
+  @@index([operationalIssueId])
 }
 
 model OperationalIssueTransition {
@@ -1657,6 +1709,21 @@ enum AmenityFeeType {
   PER_NIGHT
   PER_GUEST
   PER_GUEST_PER_NIGHT
+}
+
+enum ApmsRuntimeStatus {
+  OFF
+  STARTING
+  ACTIVE
+  BLOCKED
+  ERROR
+}
+
+enum ApmsRuntimePreflightStatus {
+  NOT_REQUIRED
+  PENDING
+  PASSED
+  FAILED
 }
 
 enum OperationalWorkflowState {

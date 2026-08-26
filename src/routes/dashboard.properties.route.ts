@@ -27,6 +27,13 @@ import {
   mapHostActionQueueToRecommendedActions,
   projectMissionControlOperationalState,
 } from "../apms/mission-control-projection";
+import {
+  deriveMissionControlNativeHealth,
+} from "../apms/mission-control-runtime-health.e13";
+import {
+  GUEST_JOURNEY_RUNTIME_NAME,
+  GUEST_JOURNEY_RUNTIME_SERVICE_NAME,
+} from "../services/guest-journey-runtime-state.service";
 import type { AuditEntry } from "../apms/audit-types";
 import { persistAuditEntry } from "../apms/audit-persistence.service";
 import { createDistributionAuditEntry } from "../apms/distribution-audit.mapper";
@@ -2213,44 +2220,117 @@ const operationalIssueSelect = {
   actionTarget: true,
 } as const;
 
-const [activeOperationalIssueRows, recentlyResolvedIssueRows] =
-  await Promise.all([
-    prisma.operationalIssue.findMany({
-      where: {
-        organizationId: orgId,
-        propertyId: property.id,
-        visibility: "HOST",
-        workflowState: {
-          in: [
-            "ACTION_REQUIRED",
-            "WAITING",
-            "AUTO_RESOLVING",
-          ],
+const runtimeEnvironment = String(
+  process.env.RAILWAY_ENVIRONMENT_NAME ??
+    process.env.NODE_ENV ??
+    "development"
+).trim() || "development";
+
+const [
+  activeOperationalIssueRows,
+  recentlyResolvedIssueRows,
+  allVisibilityCurrentIssueRows,
+  guestJourneyRuntimeRows,
+] = await Promise.all([
+  prisma.operationalIssue.findMany({
+    where: {
+      organizationId: orgId,
+      propertyId: property.id,
+      visibility: "HOST",
+      workflowState: {
+        in: [
+          "ACTION_REQUIRED",
+          "WAITING",
+          "AUTO_RESOLVING",
+        ],
+      },
+    },
+    orderBy: {
+      lastSignalAt: "desc",
+    },
+    take: 50,
+    select: operationalIssueSelect,
+  }),
+  prisma.operationalIssue.findMany({
+    where: {
+      organizationId: orgId,
+      propertyId: property.id,
+      visibility: "HOST",
+      workflowState: "RESOLVED",
+      resolvedAt: {
+        gte: recentlyResolvedSince,
+      },
+    },
+    orderBy: {
+      resolvedAt: "desc",
+    },
+    take: 50,
+    select: operationalIssueSelect,
+  }),
+  prisma.operationalIssue.findMany({
+    where: {
+      workflowState: {
+        in: [
+          "ACTION_REQUIRED",
+          "WAITING",
+          "AUTO_RESOLVING",
+        ],
+      },
+      OR: [
+        {
+          organizationId: orgId,
+          propertyId: property.id,
         },
-      },
-      orderBy: {
-        lastSignalAt: "desc",
-      },
-      take: 50,
-      select: operationalIssueSelect,
-    }),
-    prisma.operationalIssue.findMany({
-      where: {
-        organizationId: orgId,
-        propertyId: property.id,
-        visibility: "HOST",
-        workflowState: "RESOLVED",
-        resolvedAt: {
-          gte: recentlyResolvedSince,
+        {
+          organizationId: orgId,
+          propertyId: null,
         },
-      },
-      orderBy: {
-        resolvedAt: "desc",
-      },
-      take: 50,
-      select: operationalIssueSelect,
-    }),
-  ]);
+        {
+          organizationId: null,
+          propertyId: property.id,
+        },
+        {
+          organizationId: null,
+          propertyId: null,
+          engine: "GUEST_JOURNEY",
+          issueCode:
+            "GUEST_JOURNEY_RUNTIME_BLOCKED",
+        },
+      ],
+    },
+    orderBy: {
+      lastSignalAt: "desc",
+    },
+    take: 100,
+    select: operationalIssueSelect,
+  }),
+  prisma.apmsRuntimeState.findMany({
+    where: {
+      runtimeName:
+        GUEST_JOURNEY_RUNTIME_NAME,
+      environment: runtimeEnvironment,
+      serviceName:
+        GUEST_JOURNEY_RUNTIME_SERVICE_NAME,
+    },
+    orderBy: {
+      lastHeartbeatAt: "desc",
+    },
+    take: 20,
+    select: {
+      runtimeName: true,
+      environment: true,
+      serviceName: true,
+      activationProfile: true,
+      configFingerprint: true,
+      scopeFingerprint: true,
+      organizationScopeHashes: true,
+      propertyScopeHashes: true,
+      status: true,
+      preflightStatus: true,
+      lastHeartbeatAt: true,
+    },
+  }),
+]);
 
 const operationalIssueRows = [
   ...activeOperationalIssueRows,
@@ -2258,7 +2338,10 @@ const operationalIssueRows = [
 ];
 
 const operationalReservationIds =
-  operationalIssueRows
+  [
+    ...operationalIssueRows,
+    ...allVisibilityCurrentIssueRows,
+  ]
     .map((item) =>
       String(item.reservationId ?? "").trim()
     )
@@ -2296,8 +2379,12 @@ const reservationById = new Map(
   )
 );
 
-const operationalItems =
-  operationalIssueRows
+const mapOperationalIssueRows = (
+  rows: Array<
+    (typeof operationalIssueRows)[number]
+  >
+) =>
+  rows
     .filter((item) => {
       const reservationId = String(
         item.reservationId ?? ""
@@ -2310,26 +2397,21 @@ const operationalItems =
       const linkedReservation =
         reservationById.get(reservationId);
 
-           if (
-        linkedReservation?.status ===
+      return (
+        linkedReservation?.status !==
         ReservationStatus.CANCELLED
-      ) {
-        return false;
-      }
-      return true;
+      );
     })
     .map((item) => {
       const reservationId = String(
         item.reservationId ?? ""
       ).trim();
-
       const linkedReservation = reservationId
         ? reservationById.get(reservationId)
         : undefined;
 
       return {
         issueCode: item.issueCode,
-
         title: item.title,
         issue: item.issue,
         operationalImpact:
@@ -2338,21 +2420,18 @@ const operationalItems =
           item.recommendedAction,
         nextAutomaticStep:
           item.nextAutomaticStep,
-
         engine: item.engine,
         severity: item.severity,
         workflowState: item.workflowState,
         visibility: item.visibility,
         responsibleActor:
           item.responsibleActor,
-
         actionRequired:
           item.actionRequired,
         canAutoResolve:
           item.canAutoResolve,
         autoResolveStatus:
           item.autoResolveStatus,
-
         reservationId:
           reservationId || null,
         reservationNumber:
@@ -2364,14 +2443,12 @@ const operationalItems =
           null,
         cleanerName:
           item.cleanerName ?? null,
-
         firstDetectedAt:
           item.firstDetectedAt,
         lastSignalAt:
           item.lastSignalAt,
         resolvedAt:
           item.resolvedAt,
-
         resolutionCode:
           item.resolutionCode,
         resolutionSummary:
@@ -2380,16 +2457,24 @@ const operationalItems =
           item.resolutionType,
         resolvedBy:
           item.resolvedBy,
-
         actionTarget:
           item.actionTarget,
-
         openUrl: reservationId
           ? `/reservations/${reservationId}`
           : null,
         secondaryActionUrl: null,
       };
     });
+
+const operationalItems =
+  mapOperationalIssueRows(
+    operationalIssueRows
+  );
+
+const allVisibilityCurrentItems =
+  mapOperationalIssueRows(
+    allVisibilityCurrentIssueRows
+  );
 
       const {
         currentOperationalState,
@@ -2398,6 +2483,17 @@ const operationalItems =
         autoResolvingItems,
         recentlyResolved,
       } = projectMissionControlOperationalState(operationalItems);
+
+      const nativeHealth =
+        deriveMissionControlNativeHealth({
+          runtimeRows:
+            guestJourneyRuntimeRows,
+          allVisibilityCurrentIssues:
+            allVisibilityCurrentItems,
+          organizationId: orgId,
+          propertyId: property.id,
+          now: new Date(),
+        });
 
       const hostInterventionRequired =
         operationalItems.filter(
@@ -2438,6 +2534,12 @@ const operationalItems =
 
       const snapshot = {
         ...baseSnapshot,
+        // E13 native current health. Runtime state and every OperationalIssue
+        // visibility participate in health; only HOST items are exposed.
+        autopilotStatus:
+          nativeHealth.autopilotStatus,
+        engineHealth:
+          nativeHealth.engineHealth,
         guestJourneyMetrics,
         recommendedActions:
           mapHostActionQueueToRecommendedActions(

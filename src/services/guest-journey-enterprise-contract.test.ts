@@ -452,7 +452,7 @@ test("pins E10 to bounded COMPLIANCE requirements and verification", () => {
   );
 });
 
-test("pins E11 validation and E12 centralized reservation.worker enforcement", () => {
+test("pins E11 validation and E13 durable reservation.worker enforcement", () => {
   assert.equal(
     GUEST_JOURNEY_ACTIVATION_CONTROL_PLANE_VERSION,
     "guest_journey_activation_control_plane_v1"
@@ -500,19 +500,23 @@ test("pins E11 validation and E12 centralized reservation.worker enforcement", (
 
   assert.match(
     reservationWorker,
-    /resolveGuestJourneyActivationControlPlaneConfig\(\)/
+    /initializeGuestJourneyRuntimeState\(/
   );
   assert.match(
     reservationWorker,
-    /GUEST_JOURNEY_ACTIVATION_CONTROL_PLANE_CONFIG\.configs/
+    /evaluateGuestJourneyRuntimeTick\(/
   );
   assert.match(
     reservationWorker,
-    /verifyGuestJourneyRuntimeScope\(/
+    /GUEST_JOURNEY_ACTIVATION_CONTROL_PLANE_CONFIG\.enabledStages/
   );
   assert.match(
     reservationWorker,
     /guestJourneyRuntimeAllowed/
+  );
+  assert.doesNotMatch(
+    reservationWorker,
+    /resolveGuestJourneyActivationControlPlaneConfig\(\)\s*;/
   );
 
   for (const legacyIndependentResolver of [
@@ -566,7 +570,7 @@ test("keeps E1 migrations additive and canonical", () => {
   }
 });
 
-test("keeps E2 through E10 configs default-off while E12 centralizes worker activation", () => {
+test("keeps E2 through E10 configs default-off while E13 persists runtime truth", () => {
   assert.match(
     reservationWorker,
     /GUEST_JOURNEY_SHADOW_CONFIG\.enabled/

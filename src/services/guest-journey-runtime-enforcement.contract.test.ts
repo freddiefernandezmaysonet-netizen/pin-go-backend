@@ -10,30 +10,30 @@ const serverSource = readFileSync(
   new URL("../server.ts", import.meta.url),
   "utf8"
 );
-const cutoverSource = readFileSync(
+const propertyRouteSource = readFileSync(
   new URL(
-    "../routes/dashboard.mission-control-current-state.e12.middleware.ts",
+    "../routes/dashboard.properties.route.ts",
     import.meta.url
   ),
   "utf8"
 );
 
-test("E12 reservation.worker consumes the E11 activation control plane", () => {
+test("E12 enforcement remains centralized under the E13 durable runtime gate", () => {
   assert.match(
     workerSource,
-    /resolveGuestJourneyActivationControlPlaneConfig\(\)/
+    /initializeGuestJourneyRuntimeState\(/
   );
   assert.match(
     workerSource,
-    /GUEST_JOURNEY_ACTIVATION_CONTROL_PLANE_CONFIG\.configs/
-  );
-  assert.match(
-    workerSource,
-    /verifyGuestJourneyRuntimeScope\(/
+    /evaluateGuestJourneyRuntimeTick\(/
   );
   assert.match(
     workerSource,
     /guestJourneyRuntimeAllowed/
+  );
+  assert.match(
+    workerSource,
+    /GUEST_JOURNEY_ACTIVATION_CONTROL_PLANE_CONFIG\.enabledStages/
   );
 
   for (const legacyResolver of [
@@ -55,34 +55,40 @@ test("E12 reservation.worker consumes the E11 activation control plane", () => {
   }
 });
 
-test("E12 registers the Mission Control current-state cutover before the legacy property router", () => {
-  const cutoverIndex = serverSource.indexOf(
-    "app.use(missionControlCurrentStateCutoverMiddleware);"
-  );
-  const propertyRouterIndex = serverSource.indexOf(
-    "app.use(dashboardPropertiesRouter);"
-  );
-
-  assert.ok(cutoverIndex >= 0);
-  assert.ok(propertyRouterIndex >= 0);
-  assert.ok(cutoverIndex < propertyRouterIndex);
-});
-
-test("E12 current-state cutover derives current fields from currentOperationalState and preserves audit history", () => {
-  assert.match(
-    cutoverSource,
-    /deriveMissionControlCurrentStateSummary/
-  );
-  assert.match(
-    cutoverSource,
-    /currentOperationalState/
-  );
-  assert.match(
-    cutoverSource,
-    /ApmsAuditEntry remains in/
+test("E13 removes the transitional E12 response middleware", () => {
+  assert.doesNotMatch(
+    serverSource,
+    /missionControlCurrentStateCutoverMiddleware/
   );
   assert.doesNotMatch(
-    cutoverSource,
-    /apmsAuditEntry\.(findMany|findFirst)/
+    serverSource,
+    /dashboard\.mission-control-current-state\.e12\.middleware/
+  );
+});
+
+test("Mission Control now derives current health natively from runtime truth and OperationalIssue", () => {
+  assert.match(
+    propertyRouteSource,
+    /deriveMissionControlNativeHealth/
+  );
+  assert.match(
+    propertyRouteSource,
+    /prisma\.apmsRuntimeState\.findMany/
+  );
+  assert.match(
+    propertyRouteSource,
+    /allVisibilityCurrentIssueRows/
+  );
+  assert.match(
+    propertyRouteSource,
+    /visibility:\s*"HOST"/
+  );
+  assert.match(
+    propertyRouteSource,
+    /autopilotStatus:\s*\n\s*nativeHealth\.autopilotStatus/
+  );
+  assert.match(
+    propertyRouteSource,
+    /engineHealth:\s*\n\s*nativeHealth\.engineHealth/
   );
 });

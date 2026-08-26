@@ -35,7 +35,6 @@ import { meRouter } from "./routes/me.route";
 import { dashboardRouter } from "./routes/dashboard.route";
 import { dashboardReservationsRouter } from "./routes/dashboard.reservations.route";
 import { dashboardPropertiesRouter } from "./routes/dashboard.properties.route";
-import { missionControlCurrentStateCutoverMiddleware } from "./routes/dashboard.mission-control-current-state.e12.middleware";
 import { buildDashboardChannexFullSyncRouter } from "./routes/dashboard.channex-full-sync.route";
 import {
   dashboardGuestAccessSettingsRouter,
@@ -295,7 +294,6 @@ app.use(adminDemoRouter);
 app.use(dashboardRouter);
 app.use(dashboardReservationsRouter);
 app.use(buildDashboardChannexFullSyncRouter(prisma));
-app.use(missionControlCurrentStateCutoverMiddleware);
 app.use(dashboardPropertiesRouter);
 app.use(dashboardGuestAccessSettingsRouter);
 app.use(dashboardLocksRouter);
