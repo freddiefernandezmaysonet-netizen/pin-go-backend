@@ -3,11 +3,11 @@ import { readFileSync } from "node:fs";
 import test from "node:test";
 
 const SOURCE_FILES = [
-  "guest-access-admission-fence.policy.e14.js",
-  "guest-access-admission-fence.service.e14.js",
-  "guest-access-readiness-mission-control.policy.e14.js",
-  "guest-access-readiness-mission-control.service.e14.js",
-  "guest-access-admission-safety-cycle.e14.js",
+  "guest-access-admission-fence.policy.e14.ts",
+  "guest-access-admission-fence.service.e14.ts",
+  "guest-access-readiness-mission-control.policy.e14.ts",
+  "guest-access-readiness-mission-control.service.e14.ts",
+  "guest-access-admission-safety-cycle.e14.ts",
 ];
 
 test("E14 source has no direct provider client import or invocation", () => {
@@ -38,7 +38,7 @@ test("E14 source has no direct provider client import or invocation", () => {
 test("E14 reuses AccessGrant recovery fields and adds no schema dependency", () => {
   const source = readFileSync(
     new URL(
-      "guest-access-admission-fence.service.e14.js",
+      "guest-access-admission-fence.service.e14.ts",
       import.meta.url
     ),
     "utf8"
@@ -61,7 +61,7 @@ test("E14 reuses AccessGrant recovery fields and adds no schema dependency", () 
 test("unknown physical-boundary failures fail closed as ambiguous", () => {
   const policy = readFileSync(
     new URL(
-      "guest-access-admission-fence.policy.e14.js",
+      "guest-access-admission-fence.policy.e14.ts",
       import.meta.url
     ),
     "utf8"
@@ -80,14 +80,14 @@ test("unknown physical-boundary failures fail closed as ambiguous", () => {
 test("Mission Control represents bounded recovery and refreshes reopened issue details", () => {
   const policy = readFileSync(
     new URL(
-      "guest-access-readiness-mission-control.policy.e14.js",
+      "guest-access-readiness-mission-control.policy.e14.ts",
       import.meta.url
     ),
     "utf8"
   );
   const service = readFileSync(
     new URL(
-      "guest-access-readiness-mission-control.service.e14.js",
+      "guest-access-readiness-mission-control.service.e14.ts",
       import.meta.url
     ),
     "utf8"
