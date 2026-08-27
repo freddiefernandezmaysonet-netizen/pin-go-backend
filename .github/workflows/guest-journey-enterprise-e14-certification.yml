@@ -51,4 +51,6 @@ jobs:
             --outfile=/tmp/reservation.worker.e14.js
 
       - name: Prisma schema remains unchanged and valid
+        env:
+          DATABASE_URL: postgresql://pin_go_e14_ci:pin_go_e14_ci@127.0.0.1:5432/pin_go_e14_ci?schema=public
         run: npx prisma validate --schema ./prisma
