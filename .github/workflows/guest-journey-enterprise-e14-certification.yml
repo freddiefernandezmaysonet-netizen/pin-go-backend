@@ -1,0 +1,54 @@
+name: Guest Journey Enterprise E14 Access Admission Certification
+
+on:
+  pull_request:
+    paths:
+      - "src/e14/**"
+      - "src/workers/reservation.worker.ts"
+      - "src/services/guest-access-readiness.service.ts"
+      - "src/apms/operational-intelligence.service.ts"
+      - "src/apms/mission-control-runtime-health.e13.ts"
+      - "tsconfig.guest-journey-enterprise-e14.json"
+      - ".github/workflows/guest-journey-enterprise-e14-certification.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  certify-e14-access-admission:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - run: npm ci
+      - run: npx prisma generate
+
+      - name: E14 focused behavior and safety tests
+        run: |
+          node --import tsx --test \
+            src/e14/guest-access-admission-fence.e14.test.ts \
+            src/e14/guest-access-readiness-mission-control.e14.test.ts \
+            src/e14/guest-access-e14-structural.e14.test.ts \
+            src/e14/guest-access-worker-integration.e14.test.ts
+
+      - name: E14 focused TypeScript
+        run: npx tsc -p tsconfig.guest-journey-enterprise-e14.json
+
+      - name: Reservation worker integration boundary
+        run: |
+          npx esbuild src/workers/reservation.worker.ts \
+            --bundle \
+            --platform=node \
+            --packages=external \
+            --outfile=/tmp/reservation.worker.e14.js
+
+      - name: Prisma schema remains unchanged and valid
+        run: npx prisma validate --schema ./prisma

@@ -96,6 +96,19 @@ import {
   initializeGuestJourneyRuntimeState,
   type GuestJourneyRuntimeContext,
 } from "../services/guest-journey-runtime-state.service";
+import {
+  evaluateGuestAccessReadiness,
+} from "../services/guest-access-readiness.service";
+import {
+  guestAccessProvisionClaimableWhere,
+} from "../e14/guest-access-admission-fence.policy.e14";
+import {
+  executeGuestAccessProvisioningWithFence,
+} from "../e14/guest-access-admission-fence.service.e14";
+import {
+  GUEST_ACCESS_ADMISSION_SAFETY_INTERVAL_MS,
+  runGuestAccessAdmissionSafetyCycle,
+} from "../e14/guest-access-admission-safety-cycle.e14";
 
 
 console.log("[reservation.worker] BOOT", new Date().toISOString());
@@ -124,6 +137,12 @@ const TTLOCK_DELETE_TYPE = Number(process.env.TTLOCK_DELETE_TYPE ?? 2);
 const WORKER_NAME = 'reservation.worker';
 const POLL_MS = Number(process.env.RESERVATION_WORKER_POLL_MS ?? 10_000);
 const BATCH_SIZE = Number(process.env.RESERVATION_WORKER_BATCH_SIZE ?? 20);
+const GUEST_ACCESS_PROVISION_OWNER_ID = [
+  WORKER_NAME,
+  process.env.RAILWAY_REPLICA_ID ??
+    process.env.RAILWAY_DEPLOYMENT_ID ??
+    String(process.pid),
+].join(":");
 
 // E13 resolves the real E11 control plane during controlled async startup so
 // invalid profiles can be recorded durably. This deterministic empty-env
@@ -534,6 +553,8 @@ async function fetchDueCheckins(now: Date) {
     where: {
       status: ReservationStatus.ACTIVE,
       paymentState: PaymentState.PAID,
+      guestAccessReleaseStatus:
+        GuestAccessReleaseStatus.ELIGIBLE,
       checkIn: {
         lte: provisionThrough,
       },
@@ -552,6 +573,7 @@ async function fetchDueCheckins(now: Date) {
           endsAt: {
             gt: now,
           },
+          ...guestAccessProvisionClaimableWhere(now),
         },
         none: {
           type: AccessGrantType.GUEST,
@@ -586,6 +608,7 @@ async function fetchDueCheckins(now: Date) {
           endsAt: {
             gt: now,
           },
+          ...guestAccessProvisionClaimableWhere(now),
         },
         orderBy: {
           startsAt: "asc",
@@ -989,34 +1012,67 @@ async function processCheckins(now: Date) {
           continue;
         }
 
-        // Confirma que el grant todavía está PENDING.
-        const claimed =
-          await prisma.accessGrant.updateMany({
-            where: {
-              id: grant.id,
-              status: AccessStatus.PENDING,
-            },
-            data: {
-              lastError: null,
-            },
-          });
+        const fencedActivation =
+          await executeGuestAccessProvisioningWithFence(
+            prisma,
+            {
+              accessGrantId: grant.id,
+              reservationId: reservation.id,
+              ownerId:
+                GUEST_ACCESS_PROVISION_OWNER_ID,
+              evaluateReadiness:
+                async (
+                  reservationId,
+                  evaluatedAt
+                ) =>
+                  evaluateGuestAccessReadiness(
+                    prisma,
+                    reservationId,
+                    {
+                      persist: true,
+                      now: evaluatedAt,
+                      expectedScope: {
+                        organizationId,
+                        propertyId:
+                          reservation.propertyId,
+                      },
+                    }
+                  ),
+              executePhysical: () =>
+                activateGrant(grant.id),
+            }
+          );
 
-        if (claimed.count === 0) {
+        if (
+          fencedActivation.status !==
+          "SUCCEEDED"
+        ) {
+          log(
+            "Guest access provisioning deferred by E14",
+            {
+              reservationNumber:
+                reservation.reservationNumber ?? null,
+              reservationId: reservation.id,
+              accessGrantId: grant.id,
+              status: fencedActivation.status,
+              reason: fencedActivation.reason,
+            }
+          );
           continue;
         }
 
-        // TTLock Brain crea únicamente PASSCODE PERIOD/TIMED.
         const activation =
-          await activateGrant(grant.id);
+          fencedActivation.activation as any;
 
-        if (
-          (activation as any)?.ok !== true
-        ) {
-          throw new Error(
-            `GUEST_PASSCODE_ACTIVATION_FAILED:${
-              (activation as any)?.reason ??
-              "UNKNOWN"
-            }`
+        if (!fencedActivation.fenceCleared) {
+          errLog(
+            "Guest access activation succeeded but E14 fence cleanup lost CAS",
+            {
+              reservationId: reservation.id,
+              accessGrantId: grant.id,
+              attemptCount:
+                fencedActivation.attemptCount,
+            }
           );
         }
 
@@ -2336,6 +2392,7 @@ if (!ttlockLockId) {
 // ====== LOOP ======
 let shuttingDown = false;
 let tickRunning = false;
+let lastGuestAccessAdmissionSafetyAt = 0;
 
 async function tick() {
   if (shuttingDown) return;
@@ -2372,6 +2429,41 @@ async function tick() {
         "processGuestAccessReleaseRepairs crashed:",
         toErrString(e)
       );
+    }
+
+    if (
+      now.getTime() -
+        lastGuestAccessAdmissionSafetyAt >=
+      GUEST_ACCESS_ADMISSION_SAFETY_INTERVAL_MS
+    ) {
+      // Bound retries even when the read-only safety cycle itself fails.
+      // A transient database error must not create a new 10-second hot loop.
+      lastGuestAccessAdmissionSafetyAt =
+        now.getTime();
+
+      try {
+        const safetyResult =
+          await runGuestAccessAdmissionSafetyCycle(
+            prisma,
+            { now }
+          );
+
+        if (
+          safetyResult.operationalIssueWrites > 0 ||
+          safetyResult.staleFenceRecovery.scanned > 0 ||
+          safetyResult.failed > 0
+        ) {
+          log(
+            "guest-access-admission-safety-e14",
+            safetyResult
+          );
+        }
+      } catch (e) {
+        errLog(
+          "guest-access-admission-safety-e14 crashed:",
+          toErrString(e)
+        );
+      }
     }
 
     try {
