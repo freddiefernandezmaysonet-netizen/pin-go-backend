@@ -100,6 +100,9 @@ import {
   evaluateGuestAccessReadiness,
 } from "../services/guest-access-readiness.service";
 import {
+  resolveGuestAccessAdmissionE14Config,
+} from "../e14/guest-access-admission-fence.config.e14";
+import {
   guestAccessProvisionClaimableWhere,
 } from "../e14/guest-access-admission-fence.policy.e14";
 import {
@@ -137,6 +140,10 @@ const TTLOCK_DELETE_TYPE = Number(process.env.TTLOCK_DELETE_TYPE ?? 2);
 const WORKER_NAME = 'reservation.worker';
 const POLL_MS = Number(process.env.RESERVATION_WORKER_POLL_MS ?? 10_000);
 const BATCH_SIZE = Number(process.env.RESERVATION_WORKER_BATCH_SIZE ?? 20);
+const GUEST_ACCESS_ADMISSION_E14_CONFIG =
+  resolveGuestAccessAdmissionE14Config(
+    process.env
+  );
 const GUEST_ACCESS_PROVISION_OWNER_ID = [
   WORKER_NAME,
   process.env.RAILWAY_REPLICA_ID ??
@@ -553,8 +560,12 @@ async function fetchDueCheckins(now: Date) {
     where: {
       status: ReservationStatus.ACTIVE,
       paymentState: PaymentState.PAID,
-      guestAccessReleaseStatus:
-        GuestAccessReleaseStatus.ELIGIBLE,
+      ...(GUEST_ACCESS_ADMISSION_E14_CONFIG.enabled
+        ? {
+            guestAccessReleaseStatus:
+              GuestAccessReleaseStatus.ELIGIBLE,
+          }
+        : {}),
       checkIn: {
         lte: provisionThrough,
       },
@@ -573,7 +584,9 @@ async function fetchDueCheckins(now: Date) {
           endsAt: {
             gt: now,
           },
-          ...guestAccessProvisionClaimableWhere(now),
+          ...(GUEST_ACCESS_ADMISSION_E14_CONFIG.enabled
+            ? guestAccessProvisionClaimableWhere(now)
+            : {}),
         },
         none: {
           type: AccessGrantType.GUEST,
@@ -608,7 +621,9 @@ async function fetchDueCheckins(now: Date) {
           endsAt: {
             gt: now,
           },
-          ...guestAccessProvisionClaimableWhere(now),
+          ...(GUEST_ACCESS_ADMISSION_E14_CONFIG.enabled
+            ? guestAccessProvisionClaimableWhere(now)
+            : {}),
         },
         orderBy: {
           startsAt: "asc",
@@ -1012,68 +1027,105 @@ async function processCheckins(now: Date) {
           continue;
         }
 
-        const fencedActivation =
-          await executeGuestAccessProvisioningWithFence(
-            prisma,
-            {
-              accessGrantId: grant.id,
-              reservationId: reservation.id,
-              ownerId:
-                GUEST_ACCESS_PROVISION_OWNER_ID,
-              evaluateReadiness:
-                async (
-                  reservationId,
-                  evaluatedAt
-                ) =>
-                  evaluateGuestAccessReadiness(
-                    prisma,
+        let activation: any;
+
+        if (GUEST_ACCESS_ADMISSION_E14_CONFIG.enabled) {
+          const fencedActivation =
+            await executeGuestAccessProvisioningWithFence(
+              prisma,
+              {
+                accessGrantId: grant.id,
+                reservationId: reservation.id,
+                ownerId:
+                  GUEST_ACCESS_PROVISION_OWNER_ID,
+                evaluateReadiness:
+                  async (
                     reservationId,
-                    {
-                      persist: true,
-                      now: evaluatedAt,
-                      expectedScope: {
-                        organizationId,
-                        propertyId:
-                          reservation.propertyId,
-                      },
-                    }
-                  ),
-              executePhysical: () =>
-                activateGrant(grant.id),
-            }
-          );
+                    evaluatedAt
+                  ) =>
+                    evaluateGuestAccessReadiness(
+                      prisma,
+                      reservationId,
+                      {
+                        persist: true,
+                        now: evaluatedAt,
+                        expectedScope: {
+                          organizationId,
+                          propertyId:
+                            reservation.propertyId,
+                        },
+                      }
+                    ),
+                executePhysical: () =>
+                  activateGrant(grant.id),
+              }
+            );
 
-        if (
-          fencedActivation.status !==
-          "SUCCEEDED"
-        ) {
-          log(
-            "Guest access provisioning deferred by E14",
-            {
-              reservationNumber:
-                reservation.reservationNumber ?? null,
-              reservationId: reservation.id,
-              accessGrantId: grant.id,
-              status: fencedActivation.status,
-              reason: fencedActivation.reason,
-            }
-          );
-          continue;
-        }
+          if (
+            fencedActivation.status !==
+            "SUCCEEDED"
+          ) {
+            log(
+              "Guest access provisioning deferred by E14",
+              {
+                reservationNumber:
+                  reservation.reservationNumber ?? null,
+                reservationId: reservation.id,
+                accessGrantId: grant.id,
+                status: fencedActivation.status,
+                reason: fencedActivation.reason,
+              }
+            );
+            continue;
+          }
 
-        const activation =
-          fencedActivation.activation as any;
+          activation =
+            fencedActivation.activation as any;
 
-        if (!fencedActivation.fenceCleared) {
-          errLog(
-            "Guest access activation succeeded but E14 fence cleanup lost CAS",
-            {
-              reservationId: reservation.id,
-              accessGrantId: grant.id,
-              attemptCount:
-                fencedActivation.attemptCount,
-            }
-          );
+          if (!fencedActivation.fenceCleared) {
+            errLog(
+              "Guest access activation succeeded but E14 fence cleanup lost CAS",
+              {
+                reservationId: reservation.id,
+                accessGrantId: grant.id,
+                attemptCount:
+                  fencedActivation.attemptCount,
+              }
+            );
+          }
+
+        } else {
+          // Confirma que el grant todavía está PENDING.
+          const claimed =
+            await prisma.accessGrant.updateMany({
+              where: {
+                id: grant.id,
+                status: AccessStatus.PENDING,
+              },
+              data: {
+                lastError: null,
+              },
+            });
+
+          if (claimed.count === 0) {
+            continue;
+          }
+
+          // TTLock Brain crea únicamente PASSCODE PERIOD/TIMED.
+          activation =
+            await activateGrant(grant.id);
+
+          if (
+            (activation as any)?.ok !== true
+          ) {
+            throw new Error(
+              `GUEST_PASSCODE_ACTIVATION_FAILED:${
+                (activation as any)?.reason ??
+                "UNKNOWN"
+              }`
+            );
+          }
+
         }
 
         const passcodePlain =
@@ -2432,6 +2484,7 @@ async function tick() {
     }
 
     if (
+      GUEST_ACCESS_ADMISSION_E14_CONFIG.enabled &&
       now.getTime() -
         lastGuestAccessAdmissionSafetyAt >=
       GUEST_ACCESS_ADMISSION_SAFETY_INTERVAL_MS

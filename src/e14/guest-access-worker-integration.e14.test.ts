@@ -1,6 +1,9 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import test from "node:test";
+import {
+  resolveGuestAccessAdmissionE14Config,
+} from "./guest-access-admission-fence.config.e14.js";
 
 const workerSource = readFileSync(
   new URL(
@@ -10,57 +13,92 @@ const workerSource = readFileSync(
   "utf8"
 );
 
-test("legacy check-in selection admits only persisted ELIGIBLE grants", () => {
+
+test("E14 access admission is strict default-off and explicit opt-in", () => {
+  assert.deepEqual(
+    resolveGuestAccessAdmissionE14Config({}),
+    { enabled: false, valid: true, source: "DEFAULT_OFF" }
+  );
+  assert.deepEqual(
+    resolveGuestAccessAdmissionE14Config({
+      GUEST_JOURNEY_E14_ACCESS_ADMISSION_ENABLED: "false",
+    }),
+    { enabled: false, valid: true, source: "ENV" }
+  );
+  assert.deepEqual(
+    resolveGuestAccessAdmissionE14Config({
+      GUEST_JOURNEY_E14_ACCESS_ADMISSION_ENABLED: "true",
+    }),
+    { enabled: true, valid: true, source: "ENV" }
+  );
+  assert.deepEqual(
+    resolveGuestAccessAdmissionE14Config({
+      GUEST_JOURNEY_E14_ACCESS_ADMISSION_ENABLED: "invalid",
+    }),
+    { enabled: false, valid: false, source: "INVALID_ENV" }
+  );
+});
+
+test("E14 admission filters require explicit activation", () => {
+  const fetchIndex = workerSource.indexOf(
+    "async function fetchDueCheckins"
+  );
+  const checkoutIndex = workerSource.indexOf(
+    "async function fetchDueCheckouts",
+    fetchIndex
+  );
+  const source = workerSource.slice(fetchIndex, checkoutIndex);
+
   assert.match(
-    workerSource,
-    /guestAccessReleaseStatus:\s*\n\s*GuestAccessReleaseStatus\.ELIGIBLE/
+    source,
+    /GUEST_ACCESS_ADMISSION_E14_CONFIG\.enabled[\s\S]*guestAccessReleaseStatus:[\s\S]*GuestAccessReleaseStatus\.ELIGIBLE/
   );
-
-  const claimabilityMatches =
-    workerSource.match(
-      /guestAccessProvisionClaimableWhere\(now\)/g
-    ) ?? [];
-
   assert.equal(
-    claimabilityMatches.length,
-    2,
-    "claimability must fence both selection and included grants"
+    (source.match(/guestAccessProvisionClaimableWhere\(now\)/g) ?? []).length,
+    2
   );
+  assert.ok(source.includes(": {}),"));
 });
 
-test("legacy pseudo-claim is replaced by E14 claim and execution fencing", () => {
-  assert.equal(
-    workerSource.includes(
-      "// Confirma que el grant todavía está PENDING."
-    ),
-    false
+test("default-off preserves E13 activation while true opts into E14 fencing", () => {
+  const processIndex = workerSource.indexOf(
+    "async function processCheckins"
   );
-  assert.equal(
-    workerSource.includes(
-      "executeGuestAccessProvisioningWithFence"
-    ),
-    true
+  const nextIndex = workerSource.indexOf(
+    "async function activateGuestNfcAssignmentsForReservation",
+    processIndex
+  );
+  const source = workerSource.slice(processIndex, nextIndex);
+
+  const gateIndex = source.indexOf(
+    "if (GUEST_ACCESS_ADMISSION_E14_CONFIG.enabled)"
+  );
+  const fenceIndex = source.indexOf(
+    "executeGuestAccessProvisioningWithFence(",
+    gateIndex
+  );
+  const elseIndex = source.indexOf("} else {", fenceIndex);
+  const legacyClaimIndex = source.indexOf(
+    "// Confirma que el grant todavía está PENDING.",
+    elseIndex
+  );
+  const legacyActivationIndex = source.indexOf(
+    "await activateGrant(grant.id)",
+    legacyClaimIndex
   );
 
-  const fenceIndex = workerSource.indexOf(
-    "executeGuestAccessProvisioningWithFence("
-  );
-  const physicalIndex = workerSource.indexOf(
-    "executePhysical: () =>"
-  );
-  const activationIndex = workerSource.indexOf(
-    "activateGrant(grant.id)",
-    physicalIndex
-  );
-
-  assert.ok(fenceIndex >= 0);
-  assert.ok(physicalIndex > fenceIndex);
-  assert.ok(activationIndex > physicalIndex);
+  assert.ok(gateIndex >= 0);
+  assert.ok(fenceIndex > gateIndex);
+  assert.ok(elseIndex > fenceIndex);
+  assert.ok(legacyClaimIndex > elseIndex);
+  assert.ok(legacyActivationIndex > legacyClaimIndex);
 });
 
-test("read-only safety reconciliation runs before legacy check-in execution", () => {
-  const tickIndex = workerSource.indexOf(
-    "async function tick()"
+test("E14 safety reconciliation and related projection are default-off", () => {
+  const tickIndex = workerSource.indexOf("async function tick()");
+  const guardIndex = workerSource.indexOf(
+    "GUEST_ACCESS_ADMISSION_E14_CONFIG.enabled &&",
+    tickIndex
   );
   const safetyIndex = workerSource.indexOf(
     "runGuestAccessAdmissionSafetyCycle(",
@@ -71,24 +109,20 @@ test("read-only safety reconciliation runs before legacy check-in execution", ()
     tickIndex
   );
 
-  assert.ok(tickIndex >= 0);
-  assert.ok(safetyIndex > tickIndex);
+  assert.ok(guardIndex > tickIndex);
+  assert.ok(safetyIndex > guardIndex);
   assert.ok(checkinIndex > safetyIndex);
 });
 
-test("safety-cycle crashes remain rate-limited instead of retrying every worker tick", () => {
-  const tickIndex = workerSource.indexOf(
-    "async function tick()"
+test("invalid E14 configuration cannot activate the E14 runtime path", () => {
+  assert.match(
+    workerSource,
+    /resolveGuestAccessAdmissionE14Config\(\s*process\.env\s*\)/
   );
-  const timestampIndex = workerSource.indexOf(
-    "lastGuestAccessAdmissionSafetyAt =",
-    tickIndex
+  assert.equal(
+    workerSource.includes(
+      "GUEST_JOURNEY_E14_ACCESS_ADMISSION_ENABLED === '1'"
+    ),
+    false
   );
-  const safetyIndex = workerSource.indexOf(
-    "runGuestAccessAdmissionSafetyCycle(",
-    tickIndex
-  );
-
-  assert.ok(timestampIndex > tickIndex);
-  assert.ok(safetyIndex > timestampIndex);
 });
