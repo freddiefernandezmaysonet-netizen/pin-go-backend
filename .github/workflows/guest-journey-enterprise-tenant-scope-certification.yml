@@ -1,0 +1,72 @@
+name: Guest Journey Enterprise Multi-Tenant Scope Certification
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - "src/services/guest-journey-tenant-property-scope.policy*"
+      - "src/services/guest-journey-*.config*"
+      - "src/services/guest-journey-*-cycle.service*"
+      - "src/services/guest-journey-*-runtime.service*"
+      - "src/workers/reservation.worker.ts"
+      - "src/workers/message.retry.worker.ts"
+      - "src/workers/access-grant-expire.worker.ts"
+      - "src/workers/passcode-expire.worker.ts"
+      - "src/routes/access.nfc.routes.ts"
+      - "tsconfig.guest-journey-enterprise-tenant-scope.json"
+      - ".github/workflows/guest-journey-enterprise-tenant-scope-certification.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  DATABASE_URL: postgresql://ci:ci@127.0.0.1:5432/pin_go_tenant_scope_validation
+
+jobs:
+  certify-multi-tenant-scope:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npx prisma generate --schema prisma/schema.prisma
+      - name: Hierarchical scope contract
+        run: |
+          node --import tsx --test src/services/guest-journey-tenant-property-scope.policy.test.ts
+          npx tsc -p tsconfig.guest-journey-enterprise-tenant-scope.json
+      - name: APMS stage regressions
+        run: |
+          npm run test:guest-journey-enterprise-e2-shadow
+          npm run test:guest-journey-enterprise-e3-reconciler
+          npm run test:guest-journey-enterprise-e4-coordination
+          npm run test:guest-journey-enterprise-e5-owner-runtime
+          npm run test:guest-journey-enterprise-e6-mission-control
+          npm run test:guest-journey-enterprise-e7-communications
+          npm run test:guest-journey-enterprise-e8-access-owner
+          npm run test:guest-journey-enterprise-e9-financial-owner
+          npm run test:guest-journey-enterprise-e10-compliance-owner
+          npm run test:guest-journey-enterprise-e11-activation-control-plane
+          npm run test:guest-journey-enterprise-e12-runtime-enforcement
+          npm run test:guest-journey-enterprise-e13-runtime-truth
+      - name: E14 regression
+        run: |
+          node --import tsx --test src/e14/guest-access-reservation-target.e14.test.ts src/e14/guest-access-admission-fence.e14.test.ts src/e14/guest-access-reservation-singleton-fence.e14.test.ts src/e14/guest-access-readiness-mission-control.e14.test.ts src/e14/guest-access-e14-structural.e14.test.ts src/e14/guest-access-worker-integration.e14.test.ts
+          npx tsc -p tsconfig.guest-journey-enterprise-e14.json
+      - name: Legacy yield bundles
+        run: |
+          npx esbuild src/workers/reservation.worker.ts --bundle --platform=node --packages=external --outfile=/tmp/reservation.worker.scope.js
+          npx esbuild src/workers/message.retry.worker.ts --bundle --platform=node --packages=external --outfile=/tmp/message.retry.worker.scope.js
+          npx esbuild src/workers/access-grant-expire.worker.ts --bundle --platform=node --packages=external --outfile=/tmp/access-grant-expire.worker.scope.js
+          npx esbuild src/workers/passcode-expire.worker.ts --bundle --platform=node --packages=external --outfile=/tmp/passcode-expire.worker.scope.js
+          npx esbuild src/routes/access.nfc.routes.ts --bundle --platform=node --packages=external --outfile=/tmp/access.nfc.routes.scope.js
+      - name: Schema and patch integrity
+        run: |
+          npx prisma validate --schema prisma/schema.prisma
+          git diff --check origin/main...HEAD
