@@ -1003,6 +1003,9 @@ async function processCheckins(now: Date) {
             },
           });
 
+          if (GUEST_ACCESS_ADMISSION_E14_CONFIG.enabled) {
+            break;
+          }
           continue;
         }
 
@@ -1024,6 +1027,9 @@ async function processCheckins(now: Date) {
             },
           });
 
+          if (GUEST_ACCESS_ADMISSION_E14_CONFIG.enabled) {
+            break;
+          }
           continue;
         }
 
@@ -1076,7 +1082,7 @@ async function processCheckins(now: Date) {
                 reason: fencedActivation.reason,
               }
             );
-            continue;
+            break;
           }
 
           activation =
@@ -1454,6 +1460,11 @@ async function processCheckins(now: Date) {
               : "SMS_CONSENT_NOT_GRANTED",
           });
         }
+
+        // E14.1 reservation singleton outcome complete.
+        if (GUEST_ACCESS_ADMISSION_E14_CONFIG.enabled) {
+          break;
+        }
       } catch (error) {
         const message =
           toErrString(error);
@@ -1479,6 +1490,11 @@ async function processCheckins(now: Date) {
             error: message,
           }
         );
+
+        // E14.1 reservation singleton orchestration failed.
+        if (GUEST_ACCESS_ADMISSION_E14_CONFIG.enabled) {
+          break;
+        }
       }
     }
   }
