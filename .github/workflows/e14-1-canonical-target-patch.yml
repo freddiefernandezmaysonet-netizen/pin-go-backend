@@ -1,3 +1,4 @@
+# Controlled retrigger after the Git-data fast-forward did not emit this push gate.
 name: E14.1 Canonical Target Worker Patch Gate
 
 on:
