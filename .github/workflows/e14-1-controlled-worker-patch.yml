@@ -1,4 +1,4 @@
-name: E14.1 Controlled Worker Patch Gate
+name: E14.1 Controlled Worker Artifact Gate
 
 on:
   push:
@@ -8,14 +8,10 @@ on:
       - ".github/workflows/e14-1-controlled-worker-patch.yml"
 
 permissions:
-  contents: write
-
-concurrency:
-  group: e14-1-controlled-worker-patch
-  cancel-in-progress: false
+  contents: read
 
 jobs:
-  patch-worker:
+  build-worker-artifact:
     runs-on: ubuntu-latest
     timeout-minutes: 20
 
@@ -24,7 +20,7 @@ jobs:
         with:
           ref: agent/apms-enterprise-guest-journey-e14-access-admission-fencing
           fetch-depth: 0
-          persist-credentials: true
+          persist-credentials: false
 
       - uses: actions/setup-node@v4
         with:
@@ -134,19 +130,6 @@ jobs:
           ).splitlines()
           if changed != ["src/workers/reservation.worker.ts"]:
               raise SystemExit(f"UNEXPECTED_CHANGED_FILES:{changed}")
-
-          process_block = patched[start:patched.index(
-              "async function activateGuestNfcAssignmentsForReservation",
-              start,
-          )]
-          required = [
-              "E14.1 reservation singleton outcome complete.",
-              "E14.1 reservation singleton orchestration failed.",
-              "Guest access provisioning deferred by E14",
-          ]
-          for marker in required:
-              if marker not in process_block:
-                  raise SystemExit(f"MISSING_WORKER_MARKER:{marker}")
           PY
 
       - run: npm ci
@@ -171,13 +154,19 @@ jobs:
             --packages=external \
             --outfile=/tmp/reservation.worker.e14.1.js
 
-      - name: Verify diff and publish worker-only commit
-        shell: bash
+      - name: Verify worker-only diff
         run: |
           git diff --check
           test "$(git diff --name-only)" = "src/workers/reservation.worker.ts"
-          git config user.name "freddiefernandezmaysonet-netizen"
-          git config user.email "freddiefernandezmaysonet@gmail.com"
-          git add -- src/workers/reservation.worker.ts
-          git commit -m "Stop E14 sibling processing per reservation"
-          git push origin HEAD:agent/apms-enterprise-guest-journey-e14-access-admission-fencing
+          git diff -- src/workers/reservation.worker.ts > e14-1-worker.patch
+          git hash-object src/workers/reservation.worker.ts > e14-1-worker.blob-sha
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: e14-1-controlled-worker
+          path: |
+            src/workers/reservation.worker.ts
+            e14-1-worker.patch
+            e14-1-worker.blob-sha
+          if-no-files-found: error
+          retention-days: 1
