@@ -1,3 +1,8 @@
+import {
+  assertGuestJourneyTenantPropertyScope,
+  buildGuestJourneyCoordinationIntentScopeWhere,
+} from "./guest-journey-tenant-property-scope.policy";
+
 import { randomBytes } from "node:crypto";
 
 import {
@@ -53,9 +58,11 @@ const DEFAULT_DEPENDENCIES: CycleDependencies = {
 };
 
 function validateConfig(config: GuestJourneyFinancialOwnerConfig): void {
-  if (config.enabled && config.organizationIds.length === 0 && config.propertyIds.length === 0) {
-    throw new Error("GUEST_JOURNEY_FINANCIAL_OWNER_SCOPE_REQUIRED");
-  }
+  assertGuestJourneyTenantPropertyScope({
+    enabled: config.enabled,
+    scope: config,
+    errorCode: "GUEST_JOURNEY_FINANCIAL_OWNER_SCOPE_REQUIRED",
+  });
 }
 
 async function selectCandidates(
@@ -66,20 +73,15 @@ async function selectCandidates(
   id: string;
   reservation: { propertyId: string; property: { organizationId: string } };
 }>> {
-  const scopeFilters = [
-    ...(config.organizationIds.length > 0 ? [{
-      reservation: { is: { property: { is: { organizationId: { in: config.organizationIds } } } } },
-    }] : []),
-    ...(config.propertyIds.length > 0 ? [{
-      reservation: { is: { propertyId: { in: config.propertyIds } } },
-    }] : []),
-  ];
+
   return prisma.guestJourneyCoordinationIntent.findMany({
     where: {
       targetEngine: "FINANCIAL",
       intentType: "REQUEST_PAYMENT_EVALUATION",
       AND: [
-        { OR: scopeFilters },
+        buildGuestJourneyCoordinationIntentScopeWhere(
+          config
+        ),
         {
           OR: [
             {

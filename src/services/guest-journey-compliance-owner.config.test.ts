@@ -47,12 +47,16 @@ test("E10 Compliance Owner normalizes canary scope and bounded controls", () => 
   assert.equal(config.retryBaseMs, 120_000);
   assert.equal(isGuestJourneyComplianceOwnerScope(config, {
     organizationId: "org-1",
-    propertyId: "property-x",
+    propertyId: "property-2",
   }), true);
+  assert.equal(isGuestJourneyComplianceOwnerScope(config, {
+    organizationId: "org-1",
+    propertyId: "property-x",
+  }), false);
   assert.equal(isGuestJourneyComplianceOwnerScope(config, {
     organizationId: "org-x",
     propertyId: "property-2",
-  }), true);
+  }), false);
 });
 
 for (const [name, value] of [

@@ -43,6 +43,7 @@ test("E9 Financial Owner normalizes canary scope and bounded controls", () => {
   assert.equal(config.retryBaseMs, 120_000);
   assert.equal(isGuestJourneyFinancialOwnerScope(config, {
     organizationId: "org-1",
+    propertyId: "property-2",
   }), true);
   assert.equal(isGuestJourneyFinancialOwnerScope(config, {
     propertyId: "other-property",

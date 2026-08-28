@@ -1,3 +1,7 @@
+import {
+  assertGuestJourneyTenantPropertyScope,
+} from "./guest-journey-tenant-property-scope.policy";
+
 export type GuestJourneyMissionControlConfig = {
   enabled: boolean;
   batchSize: number;
@@ -89,15 +93,15 @@ export function resolveGuestJourneyMissionControlConfig(
     env.GUEST_JOURNEY_MISSION_CONTROL_BRIDGE_PROPERTY_IDS
   );
 
-  if (
-    enabled &&
-    organizationIds.length === 0 &&
-    propertyIds.length === 0
-  ) {
-    throw new Error(
-      "GUEST_JOURNEY_MISSION_CONTROL_BRIDGE_SCOPE_REQUIRED: enable at least one organization or property"
-    );
-  }
+  assertGuestJourneyTenantPropertyScope({
+    enabled,
+    scope: {
+      organizationIds,
+      propertyIds,
+    },
+    errorCode:
+      "GUEST_JOURNEY_MISSION_CONTROL_BRIDGE_SCOPE_REQUIRED: enable at least one organization tenant",
+  });
 
   return {
     enabled,

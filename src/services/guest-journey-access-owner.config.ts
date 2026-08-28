@@ -1,3 +1,8 @@
+import {
+  assertGuestJourneyTenantPropertyScope,
+  isGuestJourneyTenantPropertyScope,
+} from "./guest-journey-tenant-property-scope.policy";
+
 export const GUEST_JOURNEY_ACCESS_PROVISION_LEAD_MS =
   2 * 60 * 60 * 1000;
 
@@ -65,11 +70,15 @@ export function resolveGuestJourneyAccessOwnerConfig(
     env.GUEST_JOURNEY_ACCESS_OWNER_PROPERTY_IDS
   );
 
-  if (enabled && organizationIds.length === 0 && propertyIds.length === 0) {
-    throw new Error(
-      "GUEST_JOURNEY_ACCESS_OWNER_SCOPE_REQUIRED: enable at least one organization or property"
-    );
-  }
+  assertGuestJourneyTenantPropertyScope({
+    enabled,
+    scope: {
+      organizationIds,
+      propertyIds,
+    },
+    errorCode:
+      "GUEST_JOURNEY_ACCESS_OWNER_SCOPE_REQUIRED: enable at least one organization tenant",
+  });
 
   return {
     enabled,
@@ -122,10 +131,8 @@ export function isGuestJourneyAccessOwnerScope(
   }
 ): boolean {
   if (!config.enabled) return false;
-  const organizationId = String(input.organizationId ?? "").trim();
-  const propertyId = String(input.propertyId ?? "").trim();
-  return (
-    (organizationId.length > 0 && config.organizationIds.includes(organizationId)) ||
-    (propertyId.length > 0 && config.propertyIds.includes(propertyId))
+  return isGuestJourneyTenantPropertyScope(
+    config,
+    input
   );
 }

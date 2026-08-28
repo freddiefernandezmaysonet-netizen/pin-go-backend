@@ -1,4 +1,9 @@
 import {
+  assertGuestJourneyTenantPropertyScope,
+  buildGuestJourneyReservationScopeWhere,
+} from "./guest-journey-tenant-property-scope.policy";
+
+import {
   Prisma,
   PrismaClient,
   ReservationStatus,
@@ -105,15 +110,11 @@ function requireSafeConfig(
     );
   }
 
-  if (
-    config.enabled &&
-    config.organizationIds.length === 0 &&
-    config.propertyIds.length === 0
-  ) {
-    throw new Error(
-      "GUEST_JOURNEY_INTERNAL_RECONCILE_SCOPE_REQUIRED"
-    );
-  }
+  assertGuestJourneyTenantPropertyScope({
+    enabled: config.enabled,
+    scope: config,
+    errorCode: "GUEST_JOURNEY_INTERNAL_RECONCILE_SCOPE_REQUIRED",
+  });
 }
 
 function buildCandidateWhere(input: {
@@ -129,39 +130,11 @@ function buildCandidateWhere(input: {
     input.now.getTime() +
       input.config.horizonDays * DAY_MS
   );
-  const scopes:
-    Prisma.ReservationWhereInput[] = [];
-
-  if (
-    input.config.propertyIds.length > 0
-  ) {
-    scopes.push({
-      propertyId: {
-        in: input.config.propertyIds,
-      },
-    });
-  }
-
-  if (
-    input.config.organizationIds.length > 0
-  ) {
-    scopes.push({
-      property: {
-        is: {
-          organizationId: {
-            in:
-              input.config.organizationIds,
-          },
-        },
-      },
-    });
-  }
-
   return {
     AND: [
-      {
-        OR: scopes,
-      },
+      buildGuestJourneyReservationScopeWhere(
+        input.config
+      ),
       {
         OR: [
           {

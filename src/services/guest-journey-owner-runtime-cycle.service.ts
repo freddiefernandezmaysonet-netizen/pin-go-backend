@@ -1,4 +1,9 @@
 import {
+  assertGuestJourneyTenantPropertyScope,
+  buildGuestJourneyCoordinationIntentScopeWhere,
+} from "./guest-journey-tenant-property-scope.policy";
+
+import {
   randomBytes,
 } from "node:crypto";
 
@@ -76,15 +81,11 @@ function requireSafeConfig(
   config:
     GuestJourneyOwnerRuntimeConfig
 ): void {
-  if (
-    config.enabled &&
-    config.organizationIds.length === 0 &&
-    config.propertyIds.length === 0
-  ) {
-    throw new Error(
-      "GUEST_JOURNEY_OWNER_RUNTIME_SCOPE_REQUIRED"
-    );
-  }
+  assertGuestJourneyTenantPropertyScope({
+    enabled: config.enabled,
+    scope: config,
+    errorCode: "GUEST_JOURNEY_OWNER_RUNTIME_SCOPE_REQUIRED",
+  });
 }
 
 function incrementError(
@@ -109,38 +110,7 @@ async function selectCandidates(
     GuestJourneyOwnerRuntimeConfig,
   now: Date
 ): Promise<Array<{ id: string }>> {
-  const scopeFilters = [
-    ...(config.organizationIds.length > 0
-      ? [
-          {
-            reservation: {
-              is: {
-                property: {
-                  is: {
-                    organizationId: {
-                      in: config.organizationIds,
-                    },
-                  },
-                },
-              },
-            },
-          },
-        ]
-      : []),
-    ...(config.propertyIds.length > 0
-      ? [
-          {
-            reservation: {
-              is: {
-                propertyId: {
-                  in: config.propertyIds,
-                },
-              },
-            },
-          },
-        ]
-      : []),
-  ];
+
 
   return prisma
     .guestJourneyCoordinationIntent
@@ -150,9 +120,9 @@ async function selectCandidates(
         intentType:
           "REQUEST_ACCESS_EVALUATION",
         AND: [
-          {
-            OR: scopeFilters,
-          },
+          buildGuestJourneyCoordinationIntentScopeWhere(
+          config
+        ),
           {
             OR: [
               {

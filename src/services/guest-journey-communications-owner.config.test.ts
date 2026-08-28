@@ -90,3 +90,27 @@ test("the legacy retry worker yields only typed messages inside the active E7 ca
     communicationType: "PRECHECKIN",
   }), false);
 });
+
+
+test("E7 property subsets require both tenant and property membership", () => {
+  const scoped = resolveGuestJourneyCommunicationsOwnerConfig({
+    GUEST_JOURNEY_COMMUNICATIONS_EXECUTE: "true",
+    GUEST_JOURNEY_COMMUNICATIONS_ORGANIZATION_IDS: "org-1",
+    GUEST_JOURNEY_COMMUNICATIONS_PROPERTY_IDS: "property-1",
+  });
+  assert.equal(isGuestJourneyCommunicationsOwnerScope(scoped, {
+    organizationId: "org-1",
+    propertyId: "property-1",
+    communicationType: "PRECHECKIN",
+  }), true);
+  assert.equal(isGuestJourneyCommunicationsOwnerScope(scoped, {
+    organizationId: "org-1",
+    propertyId: "property-2",
+    communicationType: "PRECHECKIN",
+  }), false);
+  assert.equal(isGuestJourneyCommunicationsOwnerScope(scoped, {
+    organizationId: "org-2",
+    propertyId: "property-1",
+    communicationType: "PRECHECKIN",
+  }), false);
+});

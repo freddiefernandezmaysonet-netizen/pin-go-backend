@@ -47,6 +47,7 @@ test("E8 normalizes canary scope and bounded execution controls", () => {
   assert.equal(config.providerTimeoutMs, 45_000);
   assert.equal(isGuestJourneyAccessOwnerScope(config, {
     organizationId: "org-1",
+    propertyId: "property-2",
   }), true);
   assert.equal(isGuestJourneyAccessOwnerScope(config, {
     propertyId: "other-property",

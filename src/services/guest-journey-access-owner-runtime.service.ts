@@ -1,3 +1,7 @@
+import {
+  isGuestJourneyTenantPropertyScope,
+} from "./guest-journey-tenant-property-scope.policy";
+
 import { createHash } from "node:crypto";
 
 import {
@@ -124,8 +128,13 @@ function scopeAllows(
   propertyId: string,
   scope: AccessOwnerScope
 ): boolean {
-  return scope.organizationIds.includes(organizationId) ||
-    scope.propertyIds.includes(propertyId);
+  return isGuestJourneyTenantPropertyScope(
+    scope,
+    {
+      organizationId,
+      propertyId,
+    }
+  );
 }
 
 export function normalizeAccessOwnerError(error: unknown): {

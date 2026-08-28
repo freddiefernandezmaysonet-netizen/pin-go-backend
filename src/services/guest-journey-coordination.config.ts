@@ -1,3 +1,7 @@
+import {
+  assertGuestJourneyTenantPropertyScope,
+} from "./guest-journey-tenant-property-scope.policy";
+
 export type GuestJourneyCoordinationConfig = {
   enabled: boolean;
   batchSize: number;
@@ -99,15 +103,15 @@ export function resolveGuestJourneyCoordinationConfig(
     env.GUEST_JOURNEY_COORDINATION_INTENTS_PROPERTY_IDS
   );
 
-  if (
-    enabled &&
-    organizationIds.length === 0 &&
-    propertyIds.length === 0
-  ) {
-    throw new Error(
-      "GUEST_JOURNEY_COORDINATION_INTENTS_SCOPE_REQUIRED: enable at least one organization or property"
-    );
-  }
+  assertGuestJourneyTenantPropertyScope({
+    enabled,
+    scope: {
+      organizationIds,
+      propertyIds,
+    },
+    errorCode:
+      "GUEST_JOURNEY_COORDINATION_INTENTS_SCOPE_REQUIRED: enable at least one organization tenant",
+  });
 
   return {
     enabled,

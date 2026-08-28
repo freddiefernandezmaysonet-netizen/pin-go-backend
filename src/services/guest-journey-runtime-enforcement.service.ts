@@ -1,3 +1,7 @@
+import {
+  assertGuestJourneyTenantPropertyScope,
+} from "./guest-journey-tenant-property-scope.policy";
+
 import type { GuestJourneyActivationControlPlaneConfig } from "./guest-journey-activation-control-plane.service";
 
 export const GUEST_JOURNEY_RUNTIME_ENFORCEMENT_VERSION =
@@ -84,14 +88,15 @@ export async function verifyGuestJourneyRuntimeScope(
     };
   }
 
-  if (
-    organizationIds.length === 0 &&
-    propertyIds.length === 0
-  ) {
-    throw new Error(
-      "GUEST_JOURNEY_RUNTIME_SCOPE_REQUIRED: enabled activation profiles require tenant/property scope"
-    );
-  }
+  assertGuestJourneyTenantPropertyScope({
+    enabled: true,
+    scope: {
+      organizationIds,
+      propertyIds,
+    },
+    errorCode:
+      "GUEST_JOURNEY_RUNTIME_ORGANIZATION_SCOPE_REQUIRED: enabled activation profiles require organization tenant scope",
+  });
 
   const [organizations, properties] = await Promise.all([
     organizationIds.length > 0
