@@ -101,6 +101,31 @@ test("default-off preserves E13 activation while true opts into E14 fencing", ()
   assert.ok(legacyActivationIndex > legacyClaimIndex);
 });
 
+test("E14.1 selects the canonical reservation-window target before entering the grant loop", () => {
+  const processIndex = workerSource.indexOf(
+    "async function processCheckins"
+  );
+  const nextIndex = workerSource.indexOf(
+    "async function activateGuestNfcAssignmentsForReservation",
+    processIndex
+  );
+  const source = workerSource.slice(processIndex, nextIndex);
+
+  const selectorIndex = source.indexOf(
+    "selectGuestAccessReservationTarget("
+  );
+  const loopIndex = source.indexOf(
+    "for (const grant of accessGrantsToProcess)"
+  );
+
+  assert.match(
+    source,
+    /const accessGrantsToProcess =[\s\S]*GUEST_ACCESS_ADMISSION_E14_CONFIG\.enabled[\s\S]*selectGuestAccessReservationTarget\([\s\S]*reservation\.accessGrants[\s\S]*checkIn: reservation\.checkIn[\s\S]*checkOut: reservation\.checkOut[\s\S]*: reservation\.accessGrants;/
+  );
+  assert.ok(selectorIndex >= 0);
+  assert.ok(loopIndex > selectorIndex);
+});
+
 test("E14 safety reconciliation and related projection are default-off", () => {
   const tickIndex = workerSource.indexOf("async function tick()");
   const guardIndex = workerSource.indexOf(
