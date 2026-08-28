@@ -1,4 +1,5 @@
 name: APMS Tenant Property Scope Patch Gate
+# Retrigger after correcting the Owner Runtime selector anchor.
 
 on:
   push:
