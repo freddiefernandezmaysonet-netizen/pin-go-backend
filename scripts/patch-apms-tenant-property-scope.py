@@ -163,6 +163,7 @@ CONFIG_VALIDATION_PATTERN = (
     r'throw new Error\(\s*"[^"]+"\s*\);\s*\}'
 )
 
+
 for path, (error_code, helper_name, config_type) in CONFIGS.items():
     names = ["assertGuestJourneyTenantPropertyScope"]
     if helper_name:
@@ -204,6 +205,7 @@ for path, (error_code, helper_name, config_type) in CONFIGS.items():
 }}''',
         )
 
+# E11 activation control plane.
 control_plane = "src/services/guest-journey-activation-control-plane.service.ts"
 insert_policy_import(control_plane, ["assertGuestJourneyTenantPropertyScope"])
 replace_function(
@@ -238,6 +240,7 @@ new_scope_gate = '''  assertGuestJourneyTenantPropertyScope({
 text = replace_once(text, old_scope_gate, new_scope_gate, "control plane organization-rooted scope")
 save(control_plane, text)
 
+# E12 read-only preflight.
 runtime_enforcement = "src/services/guest-journey-runtime-enforcement.service.ts"
 insert_policy_import(runtime_enforcement, ["assertGuestJourneyTenantPropertyScope"])
 text = load(runtime_enforcement)
@@ -269,6 +272,7 @@ CYCLE_VALIDATION_PATTERN = (
     r'config\.propertyIds\.length === 0\s*\) \{\s*'
     r'throw new Error\(\s*"(?P<error>[^"]+)"\s*\);\s*\}'
 )
+
 
 
 def patch_cycle_validation(path: str) -> None:
@@ -360,6 +364,7 @@ for path in INTENT_CYCLES:
     )
     save(path, text)
 
+# Mission Control has a named filter builder rather than a local scopeFilters array.
 mission_cycle = "src/services/guest-journey-mission-control-cycle.service.ts"
 insert_policy_import(
     mission_cycle,
@@ -389,26 +394,57 @@ CLAIM_FILES = [
 
 for path in CLAIM_FILES:
     insert_policy_import(path, ["isGuestJourneyTenantPropertyScope"])
-    text = load(path)
-    start, end = function_bounds(text, "scopeAllows")
-    original = text[start:end]
-    signature_end = original.find("{")
-    require(signature_end >= 0, f"{path}: scopeAllows body missing")
-    signature = original[:signature_end]
-    replacement = (
-        signature
-        + '''{
+
+replace_function(
+    "src/services/guest-journey-owner-runtime.service.ts",
+    "scopeAllows",
+    '''function scopeAllows(input: {
+  organizationId: string;
+  propertyId: string;
+  scope: GuestJourneyOwnerRuntimeScope;
+}): boolean {
   return isGuestJourneyTenantPropertyScope(
-    scope,
+    input.scope,
     {
-      organizationId,
-      propertyId,
+      organizationId: input.organizationId,
+      propertyId: input.propertyId,
     }
   );
-}'''
-    )
-    save(path, text[:start] + replacement + text[end:])
+}''',
+)
 
+CLAIM_SCOPE_TYPES = {
+    "src/services/guest-journey-communications-owner-runtime.service.ts":
+        "CommunicationsOwnerScope",
+    "src/services/guest-journey-access-owner-runtime.service.ts":
+        "AccessOwnerScope",
+    "src/services/guest-journey-financial-owner-runtime.service.ts":
+        "FinancialOwnerScope",
+    "src/services/guest-journey-compliance-owner-runtime.service.ts":
+        "ComplianceOwnerScope",
+}
+
+for path, scope_type in CLAIM_SCOPE_TYPES.items():
+    replace_function(
+        path,
+        "scopeAllows",
+        f'''function scopeAllows(
+  organizationId: string,
+  propertyId: string,
+  scope: {scope_type}
+): boolean {{
+  return isGuestJourneyTenantPropertyScope(
+    scope,
+    {{
+      organizationId,
+      propertyId,
+    }}
+  );
+}}''',
+    )
+
+# Existing positive config tests used organization-only input even when a property
+# subset was configured. Require the matching property as part of the positive case.
 for path in [
     "src/services/guest-journey-access-owner.config.test.ts",
     "src/services/guest-journey-financial-owner.config.test.ts",
@@ -483,6 +519,7 @@ test("E7 property subsets require both tenant and property membership", () => {
 '''
 save(communications_test, text)
 
+# Structural proof that every authorized surface was patched.
 required_markers = {
     **{
         path: "assertGuestJourneyTenantPropertyScope"
