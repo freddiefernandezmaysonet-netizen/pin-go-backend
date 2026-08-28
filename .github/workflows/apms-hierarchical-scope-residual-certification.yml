@@ -150,16 +150,15 @@ jobs:
                   raise SystemExit(f"FORBIDDEN_RESIDUAL_CHANGE:{path}")
           PY
 
-      - name: Remove temporary residual machinery
+      - name: Restore workflow transport boundary and remove patch script
         shell: bash
         run: |
           set -euo pipefail
-          git rm -- \
-            scripts/patch-apms-hierarchical-scope-residuals.py \
-            .github/workflows/apms-hierarchical-scope-residual-certification.yml
+          git checkout -- .github/workflows/guest-journey-enterprise-tenant-scope-certification.yml
+          git rm -- scripts/patch-apms-hierarchical-scope-residuals.py
           git diff --check
 
-      - name: Verify exact certified residual inventory
+      - name: Verify exact code transport inventory
         shell: bash
         run: |
           set -euo pipefail
@@ -168,7 +167,7 @@ jobs:
 
           parent = "49025a46c1272e410cf74b341ac9dc4a75c23cca"
           expected = {
-              ".github/workflows/guest-journey-enterprise-tenant-scope-certification.yml",
+              ".github/workflows/apms-hierarchical-scope-residual-certification.yml",
               "src/apms/mission-control-runtime-health.e13.test.ts",
               "src/services/guest-journey-mission-control-cycle.service.test.ts",
               "src/services/guest-journey-mission-control-cycle.service.ts",
@@ -180,19 +179,18 @@ jobs:
               ["git", "diff", "--name-only", parent],
               text=True,
           ).splitlines())
-          print("CERTIFIED_RESIDUAL_CHANGED=" + ",".join(sorted(changed)))
+          print("CERTIFIED_CODE_TRANSPORT_CHANGED=" + ",".join(sorted(changed)))
           if changed != expected:
               raise SystemExit(
-                  f"UNEXPECTED_CERTIFIED_RESIDUAL_SCOPE expected={sorted(expected)} actual={sorted(changed)}"
+                  f"UNEXPECTED_CERTIFIED_CODE_TRANSPORT expected={sorted(expected)} actual={sorted(changed)}"
               )
           PY
 
-      - name: Stage exact certified residual files
+      - name: Stage exact certified code files
         shell: bash
         run: |
           set -euo pipefail
           git add -- \
-            .github/workflows/guest-journey-enterprise-tenant-scope-certification.yml \
             src/apms/mission-control-runtime-health.e13.test.ts \
             src/services/guest-journey-mission-control-cycle.service.test.ts \
             src/services/guest-journey-mission-control-cycle.service.ts \
@@ -201,7 +199,7 @@ jobs:
             src/services/guest-journey-tenant-property-scope.policy.test.ts
           git diff --cached --check
 
-      - name: Commit certified residual fix
+      - name: Commit certified residual code fix
         shell: bash
         run: |
           set -euo pipefail
@@ -209,7 +207,7 @@ jobs:
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git commit -m "Close hierarchical APMS scope residuals"
 
-      - name: Push certified residual fix
+      - name: Push certified residual code fix
         shell: bash
         run: |
           set -euo pipefail
