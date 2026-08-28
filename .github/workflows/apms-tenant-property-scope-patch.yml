@@ -117,7 +117,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          npx prisma validate --schema prisma/schema.prisma
+          DATABASE_URL='postgresql://ci:ci@127.0.0.1:5432/pin_go_scope_schema_validation' npx prisma validate --schema prisma/schema.prisma
           git diff --check
           python - <<'PY'
           import subprocess
