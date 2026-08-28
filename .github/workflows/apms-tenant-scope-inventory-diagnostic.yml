@@ -1,0 +1,61 @@
+name: APMS Tenant Scope Inventory Diagnostic
+
+on:
+  push:
+    branches:
+      - agent/apms-enterprise-tenant-property-scope-integrity
+    paths:
+      - ".github/workflows/apms-tenant-scope-inventory-diagnostic.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  inventory:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: agent/apms-enterprise-tenant-property-scope-integrity
+          fetch-depth: 0
+
+      - name: Apply patch and record exact inventory
+        shell: bash
+        run: |
+          set -euo pipefail
+          python scripts/patch-apms-tenant-property-scope.py
+          python - <<'PY'
+          import json
+          import subprocess
+          from pathlib import Path
+
+          base = "f2aae7ea3c1895073c177ca2aa3491cd8b9a2e80"
+          actual = sorted(set(subprocess.check_output(
+              ["git", "diff", "--name-only", base],
+              text=True,
+          ).splitlines()))
+          Path("/tmp/apms-scope-inventory.json").write_text(
+              json.dumps({
+                  "base": base,
+                  "actual_count": len(actual),
+                  "actual": actual,
+              }, indent=2) + "\n",
+              encoding="utf-8",
+          )
+          Path("/tmp/apms-scope-inventory.txt").write_text(
+              "\n".join(actual) + "\n",
+              encoding="utf-8",
+          )
+          print(json.dumps({"actual_count": len(actual), "actual": actual}, indent=2))
+          PY
+
+      - name: Upload inventory
+        uses: actions/upload-artifact@v4
+        with:
+          name: apms-tenant-scope-inventory
+          path: |
+            /tmp/apms-scope-inventory.json
+            /tmp/apms-scope-inventory.txt
+          if-no-files-found: error
+          retention-days: 1
