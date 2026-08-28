@@ -34,6 +34,7 @@ jobs:
       - name: E14 focused behavior and safety tests
         run: |
           node --import tsx --test \
+            src/e14/guest-access-reservation-target.e14.test.ts \
             src/e14/guest-access-admission-fence.e14.test.ts \
             src/e14/guest-access-reservation-singleton-fence.e14.test.ts \
             src/e14/guest-access-readiness-mission-control.e14.test.ts \
