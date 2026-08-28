@@ -109,6 +109,9 @@ import {
   executeGuestAccessProvisioningWithFence,
 } from "../e14/guest-access-admission-fence.service.e14";
 import {
+  selectGuestAccessReservationTarget,
+} from "../e14/guest-access-reservation-target.e14";
+import {
   GUEST_ACCESS_ADMISSION_SAFETY_INTERVAL_MS,
   runGuestAccessAdmissionSafetyCycle,
 } from "../e14/guest-access-admission-safety-cycle.e14";
@@ -955,7 +958,23 @@ async function processCheckins(now: Date) {
   if (reservations.length === 0) return;
 
   for (const reservation of reservations) {
-    for (const grant of reservation.accessGrants) {
+    const accessGrantsToProcess =
+      GUEST_ACCESS_ADMISSION_E14_CONFIG.enabled
+        ? (() => {
+            const target =
+              selectGuestAccessReservationTarget(
+                reservation.accessGrants,
+                {
+                  checkIn: reservation.checkIn,
+                  checkOut: reservation.checkOut,
+                }
+              );
+
+            return target ? [target] : [];
+          })()
+        : reservation.accessGrants;
+
+    for (const grant of accessGrantsToProcess) {
       if (
         grant.type !== AccessGrantType.GUEST ||
         grant.method !==
