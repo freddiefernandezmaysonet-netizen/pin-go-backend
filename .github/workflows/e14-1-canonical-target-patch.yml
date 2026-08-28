@@ -70,6 +70,17 @@ jobs:
               raise SystemExit("CANONICAL_TARGET_IMPORT_ANCHOR_INVALID")
           source = source.replace(import_anchor, import_replacement, 1)
 
+          function_anchor = "async function processCheckins(now: Date) {"
+          next_function_anchor = "\nasync function processCheckouts"
+          if source.count(function_anchor) != 1:
+              raise SystemExit("PROCESS_CHECKINS_FUNCTION_ANCHOR_INVALID")
+
+          function_start = source.index(function_anchor)
+          function_end = source.find(next_function_anchor, function_start)
+          if function_end < 0:
+              raise SystemExit("PROCESS_CHECKINS_END_ANCHOR_INVALID")
+
+          process_checkins = source[function_start:function_end]
           loop_anchor = (
               "  for (const reservation of reservations) {\n"
               "    for (const grant of reservation.accessGrants) {"
@@ -95,9 +106,18 @@ jobs:
               "    for (const grant of accessGrantsToProcess) {"
           )
 
-          if source.count(loop_anchor) != 1:
+          if process_checkins.count(loop_anchor) != 1:
               raise SystemExit("PROCESS_CHECKINS_LOOP_ANCHOR_INVALID")
-          source = source.replace(loop_anchor, loop_replacement, 1)
+          process_checkins = process_checkins.replace(
+              loop_anchor,
+              loop_replacement,
+              1,
+          )
+          source = (
+              source[:function_start]
+              + process_checkins
+              + source[function_end:]
+          )
 
           required = [
               "selectGuestAccessReservationTarget(",
