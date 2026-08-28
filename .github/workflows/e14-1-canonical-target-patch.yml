@@ -1,0 +1,149 @@
+name: E14.1 Canonical Target Worker Patch Gate
+
+on:
+  push:
+    branches:
+      - agent/apms-enterprise-guest-journey-e14-access-admission-fencing
+    paths:
+      - ".github/workflows/e14-1-canonical-target-patch.yml"
+
+permissions:
+  contents: write
+
+concurrency:
+  group: e14-1-canonical-target-worker-patch
+  cancel-in-progress: false
+
+jobs:
+  patch-worker:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: agent/apms-enterprise-guest-journey-e14-access-admission-fencing
+          fetch-depth: 0
+          persist-credentials: true
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Apply exact canonical-target worker patch
+        shell: bash
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          import subprocess
+
+          path = Path("src/workers/reservation.worker.ts")
+          source = path.read_text(encoding="utf-8")
+
+          expected_blob = "b7b0a4587c3e18f29c26573d2992341842143166"
+          actual_blob = subprocess.check_output(
+              ["git", "hash-object", str(path)], text=True
+          ).strip()
+          if actual_blob != expected_blob:
+              raise SystemExit(
+                  f"WORKER_BLOB_MISMATCH expected={expected_blob} actual={actual_blob}"
+              )
+
+          import_anchor = '''import {
+            executeGuestAccessProvisioningWithFence,
+          } from "../e14/guest-access-admission-fence.service.e14";
+          import {
+            GUEST_ACCESS_ADMISSION_SAFETY_INTERVAL_MS,'''
+          import_replacement = '''import {
+            executeGuestAccessProvisioningWithFence,
+          } from "../e14/guest-access-admission-fence.service.e14";
+          import {
+            selectGuestAccessReservationTarget,
+          } from "../e14/guest-access-reservation-target.e14";
+          import {
+            GUEST_ACCESS_ADMISSION_SAFETY_INTERVAL_MS,'''
+
+          if source.count(import_anchor) != 1:
+              raise SystemExit("CANONICAL_TARGET_IMPORT_ANCHOR_INVALID")
+          source = source.replace(import_anchor, import_replacement, 1)
+
+          loop_anchor = '''  for (const reservation of reservations) {
+            for (const grant of reservation.accessGrants) {'''
+          loop_replacement = '''  for (const reservation of reservations) {
+            const accessGrantsToProcess =
+              GUEST_ACCESS_ADMISSION_E14_CONFIG.enabled
+                ? (() => {
+                    const target =
+                      selectGuestAccessReservationTarget(
+                        reservation.accessGrants,
+                        {
+                          checkIn: reservation.checkIn,
+                          checkOut: reservation.checkOut,
+                        }
+                      );
+
+                    return target ? [target] : [];
+                  })()
+                : reservation.accessGrants;
+
+            for (const grant of accessGrantsToProcess) {'''
+
+          if source.count(loop_anchor) != 1:
+              raise SystemExit("PROCESS_CHECKINS_LOOP_ANCHOR_INVALID")
+          source = source.replace(loop_anchor, loop_replacement, 1)
+
+          required = [
+              "selectGuestAccessReservationTarget(",
+              "const accessGrantsToProcess =",
+              "for (const grant of accessGrantsToProcess)",
+              "E14.1 reservation singleton outcome complete.",
+          ]
+          for marker in required:
+              if marker not in source:
+                  raise SystemExit(f"MISSING_WORKER_MARKER:{marker}")
+
+          path.write_text(source, encoding="utf-8")
+
+          changed = subprocess.check_output(
+              ["git", "diff", "--name-only"], text=True
+          ).splitlines()
+          if changed != ["src/workers/reservation.worker.ts"]:
+              raise SystemExit(f"UNEXPECTED_CHANGED_FILES:{changed}")
+          PY
+
+      - run: npm ci
+      - run: npx prisma generate
+
+      - name: Canonical-target behavior and E14 regression tests
+        run: |
+          node --import tsx --test \
+            src/e14/guest-access-reservation-target.e14.test.ts \
+            src/e14/guest-access-admission-fence.e14.test.ts \
+            src/e14/guest-access-reservation-singleton-fence.e14.test.ts \
+            src/e14/guest-access-readiness-mission-control.e14.test.ts \
+            src/e14/guest-access-e14-structural.e14.test.ts \
+            src/e14/guest-access-worker-integration.e14.test.ts
+
+      - name: E14 strict TypeScript
+        run: npx tsc -p tsconfig.guest-journey-enterprise-e14.json
+
+      - name: Reservation worker bundle boundary
+        run: |
+          npx esbuild src/workers/reservation.worker.ts \
+            --bundle \
+            --platform=node \
+            --packages=external \
+            --outfile=/tmp/reservation.worker.e14.1.js
+
+      - name: Verify and publish worker-only correction
+        shell: bash
+        run: |
+          git diff --check
+          test "$(git diff --name-only)" = "src/workers/reservation.worker.ts"
+          git config user.name "freddiefernandezmaysonet-netizen"
+          git config user.email "freddiefernandezmaysonet@gmail.com"
+          git add -- src/workers/reservation.worker.ts
+          git commit -m "Select canonical E14 grant before reservation loop"
+          git push origin HEAD:agent/apms-enterprise-guest-journey-e14-access-admission-fencing
