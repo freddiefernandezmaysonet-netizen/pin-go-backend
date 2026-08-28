@@ -151,7 +151,7 @@ jobs:
           import subprocess
 
           changed = subprocess.check_output(
-              ["git", "diff", "--name-only"], text=True
+              ["git", "diff", "--name-only", "HEAD"], text=True
           ).splitlines()
           expected = {
               ".github/workflows/e14-1-sibling-truncation-patch.yml",
