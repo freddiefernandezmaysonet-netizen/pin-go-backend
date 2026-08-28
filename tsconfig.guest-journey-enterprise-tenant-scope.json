@@ -1,0 +1,41 @@
+{
+  "compilerOptions": {
+    "noEmit": true,
+    "module": "preserve",
+    "moduleResolution": "bundler",
+    "target": "esnext",
+    "strict": true,
+    "exactOptionalPropertyTypes": true,
+    "skipLibCheck": true,
+    "types": ["node"]
+  },
+  "include": [
+    "src/services/guest-journey-tenant-property-scope.policy.ts",
+    "src/services/guest-journey-tenant-property-scope.policy.test.ts",
+    "src/services/guest-journey-shadow.config.ts",
+    "src/services/guest-journey-internal-reconcile.config.ts",
+    "src/services/guest-journey-coordination.config.ts",
+    "src/services/guest-journey-owner-runtime.config.ts",
+    "src/services/guest-journey-mission-control.config.ts",
+    "src/services/guest-journey-communications-owner.config.ts",
+    "src/services/guest-journey-access-owner.config.ts",
+    "src/services/guest-journey-financial-owner.config.ts",
+    "src/services/guest-journey-compliance-owner.config.ts",
+    "src/services/guest-journey-activation-control-plane.service.ts",
+    "src/services/guest-journey-runtime-enforcement.service.ts",
+    "src/services/guest-journey-shadow-cycle.service.ts",
+    "src/services/guest-journey-engine-cycle.service.ts",
+    "src/services/guest-journey-coordination-cycle.service.ts",
+    "src/services/guest-journey-owner-runtime-cycle.service.ts",
+    "src/services/guest-journey-mission-control-cycle.service.ts",
+    "src/services/guest-journey-communications-owner-cycle.service.ts",
+    "src/services/guest-journey-access-owner-cycle.service.ts",
+    "src/services/guest-journey-financial-owner-cycle.service.ts",
+    "src/services/guest-journey-compliance-owner-cycle.service.ts",
+    "src/services/guest-journey-owner-runtime.service.ts",
+    "src/services/guest-journey-communications-owner-runtime.service.ts",
+    "src/services/guest-journey-access-owner-runtime.service.ts",
+    "src/services/guest-journey-financial-owner-runtime.service.ts",
+    "src/services/guest-journey-compliance-owner-runtime.service.ts"
+  ]
+}
