@@ -8,6 +8,8 @@ on:
       - "src/services/guest-journey-*.config*"
       - "src/services/guest-journey-*-cycle.service*"
       - "src/services/guest-journey-*-runtime.service*"
+      - "src/services/guest-journey-runtime-state.service*"
+      - "src/apms/mission-control-runtime-health.e13*"
       - "src/workers/reservation.worker.ts"
       - "src/workers/message.retry.worker.ts"
       - "src/workers/access-grant-expire.worker.ts"
