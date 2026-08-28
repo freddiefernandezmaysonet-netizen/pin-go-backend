@@ -126,6 +126,26 @@ test("E14.1 selects the canonical reservation-window target before entering the 
   assert.ok(loopIndex > selectorIndex);
 });
 
+test("E14 removes the five-grant fetch truncation while default-off retains it", () => {
+  const fetchIndex = workerSource.indexOf(
+    "async function fetchDueCheckins"
+  );
+  const checkoutIndex = workerSource.indexOf(
+    "async function fetchDueCheckouts",
+    fetchIndex
+  );
+  const source = workerSource.slice(fetchIndex, checkoutIndex);
+
+  assert.match(
+    source,
+    /orderBy:\s*\{\s*startsAt:\s*"asc",\s*\},\s*\.\.\.\(GUEST_ACCESS_ADMISSION_E14_CONFIG\.enabled\s*\?\s*\{\}\s*:\s*\{\s*take:\s*5\s*\}\),\s*include:/
+  );
+  assert.equal(
+    source.includes("\n        take: 5,\n        include: {"),
+    false
+  );
+});
+
 test("E14 safety reconciliation and related projection are default-off", () => {
   const tickIndex = workerSource.indexOf("async function tick()");
   const guardIndex = workerSource.indexOf(
