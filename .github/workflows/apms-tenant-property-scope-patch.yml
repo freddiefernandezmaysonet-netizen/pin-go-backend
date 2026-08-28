@@ -1,5 +1,5 @@
 name: APMS Tenant Property Scope Patch Gate
-# Retrigger after correcting the Owner Runtime selector anchor.
+# Retrigger after aligning owner scope regression tests with the hierarchy.
 
 on:
   push:
@@ -7,6 +7,7 @@ on:
       - agent/apms-enterprise-tenant-property-scope-integrity
     paths:
       - ".github/workflows/apms-tenant-property-scope-patch.yml"
+      - "scripts/patch-apms-tenant-property-scope.py"
 
 permissions:
   contents: write
