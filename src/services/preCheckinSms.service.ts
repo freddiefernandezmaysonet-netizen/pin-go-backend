@@ -1,11 +1,27 @@
 import { PrismaClient } from "@prisma/client";
 import { sendSms } from "../integrations/twilio/twilio.client";
-import { buildGuestLink } from "./guestToken";
 import {
   getGuestIntlLocale,
   resolveGuestLanguage,
   type GuestLanguage,
 } from "./guest-language.service";
+
+function getPublicApiUrl() {
+  return String(
+    process.env.PUBLIC_API_BASE_URL ??
+      process.env.API_BASE_URL ??
+      "http://localhost:3000"
+  )
+    .trim()
+    .replace(/\/+$/, "");
+}
+
+function buildGuestVerificationUrl(token: string) {
+  return (
+    `${getPublicApiUrl()}/guest/verify/` +
+    encodeURIComponent(token)
+  );
+}
 
 function toNumber(value: unknown): number | null {
   if (value === null || value === undefined || value === "") return null;
@@ -193,7 +209,7 @@ export async function sendPreCheckinSms(
     const propertyName = r.property?.name ?? "your property";
 
     const verifyLink = r.guestToken
-      ? buildGuestLink(r.guestToken).replace("/guest/access/", "/guest/verify/")
+      ? buildGuestVerificationUrl(r.guestToken)
       : null;
     
     const { address, mapsLink } = buildGoogleMapsLink({
