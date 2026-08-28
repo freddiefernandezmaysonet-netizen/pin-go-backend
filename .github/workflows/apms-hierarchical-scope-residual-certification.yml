@@ -125,6 +125,7 @@ jobs:
               "src/apms/mission-control-runtime-health.e13.test.ts",
               "src/services/guest-journey-mission-control-cycle.service.test.ts",
               "src/services/guest-journey-mission-control-cycle.service.ts",
+              "src/services/guest-journey-runtime-state.service.test.ts",
               "src/services/guest-journey-runtime-state.service.ts",
               "src/services/guest-journey-tenant-property-scope.policy.test.ts",
           }
@@ -167,6 +168,7 @@ jobs:
               "src/apms/mission-control-runtime-health.e13.test.ts",
               "src/services/guest-journey-mission-control-cycle.service.test.ts",
               "src/services/guest-journey-mission-control-cycle.service.ts",
+              "src/services/guest-journey-runtime-state.service.test.ts",
               "src/services/guest-journey-runtime-state.service.ts",
               "src/services/guest-journey-tenant-property-scope.policy.test.ts",
           }
