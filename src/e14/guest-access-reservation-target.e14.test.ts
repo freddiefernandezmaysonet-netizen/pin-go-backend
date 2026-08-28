@@ -85,3 +85,31 @@ test("empty reservation grant set has no execution target", () => {
     null
   );
 });
+
+test("canonical current-window grant is selected beyond the legacy fifth position", () => {
+  const stale = Array.from({ length: 6 }, (_, index) =>
+    candidate(
+      `grant-stale-${index + 1}`,
+      new Date(
+        CHECK_IN.getTime() -
+          (index + 1) * 24 * 60 * 60_000
+      ),
+      new Date(
+        CHECK_OUT.getTime() -
+          (index + 1) * 24 * 60 * 60_000
+      )
+    )
+  );
+  const canonical = candidate(
+    "grant-canonical-seventh",
+    new Date(CHECK_IN),
+    new Date(CHECK_OUT)
+  );
+
+  const selected = selectGuestAccessReservationTarget(
+    [...stale, canonical],
+    { checkIn: CHECK_IN, checkOut: CHECK_OUT }
+  );
+
+  assert.equal(selected?.id, "grant-canonical-seventh");
+});
