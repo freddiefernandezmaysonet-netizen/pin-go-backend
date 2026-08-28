@@ -1,0 +1,184 @@
+name: E14.1 Controlled Worker Patch Gate
+
+on:
+  push:
+    branches:
+      - agent/apms-enterprise-guest-journey-e14-access-admission-fencing
+    paths:
+      - ".github/workflows/e14-1-controlled-worker-patch.yml"
+
+permissions:
+  contents: write
+
+concurrency:
+  group: e14-1-controlled-worker-patch
+  cancel-in-progress: false
+
+jobs:
+  patch-worker:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: agent/apms-enterprise-guest-journey-e14-access-admission-fencing
+          fetch-depth: 0
+          persist-credentials: true
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Apply exact E14.1 worker-only patch
+        shell: bash
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          import subprocess
+
+          path = Path("src/workers/reservation.worker.ts")
+          source = path.read_text(encoding="utf-8")
+
+          expected_blob = "673517173f597a9b05c4dab445162e2578eed8a1"
+          actual_blob = subprocess.check_output(
+              ["git", "hash-object", str(path)], text=True
+          ).strip()
+          if actual_blob != expected_blob:
+              raise SystemExit(
+                  f"WORKER_BLOB_MISMATCH expected={expected_blob} actual={actual_blob}"
+              )
+
+          start = source.index("async function processCheckins(now: Date)")
+          end = source.index(
+              "async function activateGuestNfcAssignmentsForReservation",
+              start,
+          )
+          block = source[start:end]
+
+          deferred_marker = '"Guest access provisioning deferred by E14"'
+          deferred_index = block.index(deferred_marker)
+          continue_index = block.index("            continue;", deferred_index)
+          activation_index = block.index(
+              "          activation =", continue_index
+          )
+          if continue_index > activation_index:
+              raise SystemExit("E14_DEFERRED_CONTINUE_NOT_BEFORE_ACTIVATION")
+          block = (
+              block[:continue_index]
+              + "            break;"
+              + block[continue_index + len("            continue;"):]
+          )
+
+          missing_org_old = '''          continue;
+        }
+
+        // Billing siempre antes de TTLock.'''
+          missing_org_new = '''          if (GUEST_ACCESS_ADMISSION_E14_CONFIG.enabled) {
+            break;
+          }
+          continue;
+        }
+
+        // Billing siempre antes de TTLock.'''
+          if block.count(missing_org_old) != 1:
+              raise SystemExit("MISSING_ORG_ANCHOR_COUNT_INVALID")
+          block = block.replace(missing_org_old, missing_org_new, 1)
+
+          billing_old = '''          continue;
+        }
+
+        let activation: any;'''
+          billing_new = '''          if (GUEST_ACCESS_ADMISSION_E14_CONFIG.enabled) {
+            break;
+          }
+          continue;
+        }
+
+        let activation: any;'''
+          if block.count(billing_old) != 1:
+              raise SystemExit("BILLING_ANCHOR_COUNT_INVALID")
+          block = block.replace(billing_old, billing_new, 1)
+
+          sms_marker = '          log("Guest SMS skipped", {'
+          sms_index = block.rindex(sms_marker)
+          catch_index = block.index("      } catch (error) {", sms_index)
+          success_guard = '''
+        // E14.1 reservation singleton outcome complete.
+        if (GUEST_ACCESS_ADMISSION_E14_CONFIG.enabled) {
+          break;
+        }
+'''
+          block = block[:catch_index] + success_guard + block[catch_index:]
+
+          catch_marker = '          "Guest activation FAILED",'
+          catch_marker_index = block.index(catch_marker, catch_index)
+          errlog_end = block.index("        );", catch_marker_index) + len("        );")
+          catch_guard = '''
+
+        // E14.1 reservation singleton orchestration failed.
+        if (GUEST_ACCESS_ADMISSION_E14_CONFIG.enabled) {
+          break;
+        }'''
+          block = block[:errlog_end] + catch_guard + block[errlog_end:]
+
+          patched = source[:start] + block + source[end:]
+          if patched == source:
+              raise SystemExit("WORKER_PATCH_EMPTY")
+
+          path.write_text(patched, encoding="utf-8")
+
+          changed = subprocess.check_output(
+              ["git", "diff", "--name-only"], text=True
+          ).splitlines()
+          if changed != ["src/workers/reservation.worker.ts"]:
+              raise SystemExit(f"UNEXPECTED_CHANGED_FILES:{changed}")
+
+          process_block = patched[start:patched.index(
+              "async function activateGuestNfcAssignmentsForReservation",
+              start,
+          )]
+          required = [
+              "E14.1 reservation singleton outcome complete.",
+              "E14.1 reservation singleton orchestration failed.",
+              "Guest access provisioning deferred by E14",
+          ]
+          for marker in required:
+              if marker not in process_block:
+                  raise SystemExit(f"MISSING_WORKER_MARKER:{marker}")
+          PY
+
+      - run: npm ci
+      - run: npx prisma generate
+
+      - name: Existing E14 behavior and safety tests
+        run: |
+          node --import tsx --test \
+            src/e14/guest-access-admission-fence.e14.test.ts \
+            src/e14/guest-access-readiness-mission-control.e14.test.ts \
+            src/e14/guest-access-e14-structural.e14.test.ts \
+            src/e14/guest-access-worker-integration.e14.test.ts
+
+      - name: E14 strict TypeScript
+        run: npx tsc -p tsconfig.guest-journey-enterprise-e14.json
+
+      - name: Reservation worker bundle boundary
+        run: |
+          npx esbuild src/workers/reservation.worker.ts \
+            --bundle \
+            --platform=node \
+            --packages=external \
+            --outfile=/tmp/reservation.worker.e14.1.js
+
+      - name: Verify diff and publish worker-only commit
+        shell: bash
+        run: |
+          git diff --check
+          test "$(git diff --name-only)" = "src/workers/reservation.worker.ts"
+          git config user.name "freddiefernandezmaysonet-netizen"
+          git config user.email "freddiefernandezmaysonet@gmail.com"
+          git add -- src/workers/reservation.worker.ts
+          git commit -m "Stop E14 sibling processing per reservation"
+          git push origin HEAD:agent/apms-enterprise-guest-journey-e14-access-admission-fencing
