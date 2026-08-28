@@ -38,7 +38,6 @@ jobs:
         run: |
           set -euo pipefail
           BASE=f2aae7ea3c1895073c177ca2aa3491cd8b9a2e80
-          EXPECTED_PARENT=49025a46c1272e410cf74b341ac9dc4a75c23cca
           git merge-base --is-ancestor "$BASE" HEAD
           test "$(git merge-base "$BASE" HEAD)" = "$BASE"
           python - <<'PY'
@@ -129,7 +128,7 @@ jobs:
               "src/services/guest-journey-runtime-state.service.ts",
               "src/services/guest-journey-tenant-property-scope.policy.test.ts",
           }
-          changed = set(subprocess.check_output(
+          committed = set(subprocess.check_output(
               ["git", "diff", "--name-only", f"{parent}...HEAD"],
               text=True,
           ).splitlines())
@@ -137,28 +136,33 @@ jobs:
               ["git", "diff", "--name-only", parent],
               text=True,
           ).splitlines())
-          effective = changed | working
+          effective = committed | working
           if effective != expected:
               raise SystemExit(
                   f"UNEXPECTED_RESIDUAL_FINAL_SCOPE expected={sorted(expected)} actual={sorted(effective)}"
               )
-
-          forbidden = [
-              "prisma/schema.prisma",
-              "package.json",
-              "package-lock.json",
-          ]
           for path in effective:
-              if path in forbidden or path.startswith("prisma/migrations/") or "railway" in path.lower():
+              if (
+                  path in {"prisma/schema.prisma", "package.json", "package-lock.json"}
+                  or path.startswith("prisma/migrations/")
+                  or "railway" in path.lower()
+              ):
                   raise SystemExit(f"FORBIDDEN_RESIDUAL_CHANGE:{path}")
           PY
 
-      - name: Publish certified residual fix and remove temporary machinery
+      - name: Remove temporary residual machinery
         shell: bash
         run: |
           set -euo pipefail
-          git rm -- scripts/patch-apms-hierarchical-scope-residuals.py .github/workflows/apms-hierarchical-scope-residual-certification.yml
+          git rm -- \
+            scripts/patch-apms-hierarchical-scope-residuals.py \
+            .github/workflows/apms-hierarchical-scope-residual-certification.yml
           git diff --check
+
+      - name: Verify exact certified residual inventory
+        shell: bash
+        run: |
+          set -euo pipefail
           python - <<'PY'
           import subprocess
 
@@ -176,14 +180,37 @@ jobs:
               ["git", "diff", "--name-only", parent],
               text=True,
           ).splitlines())
+          print("CERTIFIED_RESIDUAL_CHANGED=" + ",".join(sorted(changed)))
           if changed != expected:
               raise SystemExit(
                   f"UNEXPECTED_CERTIFIED_RESIDUAL_SCOPE expected={sorted(expected)} actual={sorted(changed)}"
               )
-          for path in sorted(changed):
-              subprocess.check_call(["git", "add", "--", path])
           PY
+
+      - name: Stage exact certified residual files
+        shell: bash
+        run: |
+          set -euo pipefail
+          git add -- \
+            .github/workflows/guest-journey-enterprise-tenant-scope-certification.yml \
+            src/apms/mission-control-runtime-health.e13.test.ts \
+            src/services/guest-journey-mission-control-cycle.service.test.ts \
+            src/services/guest-journey-mission-control-cycle.service.ts \
+            src/services/guest-journey-runtime-state.service.test.ts \
+            src/services/guest-journey-runtime-state.service.ts \
+            src/services/guest-journey-tenant-property-scope.policy.test.ts
+          git diff --cached --check
+
+      - name: Commit certified residual fix
+        shell: bash
+        run: |
+          set -euo pipefail
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git commit -m "Close hierarchical APMS scope residuals"
+
+      - name: Push certified residual fix
+        shell: bash
+        run: |
+          set -euo pipefail
           git push origin HEAD:agent/apms-enterprise-tenant-property-scope-integrity
