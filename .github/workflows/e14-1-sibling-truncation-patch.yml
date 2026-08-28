@@ -93,11 +93,13 @@ jobs:
               "...(GUEST_ACCESS_ADMISSION_E14_CONFIG.enabled",
               "? {}",
               ": { take: 5 }),",
-              "selectGuestAccessReservationTarget(",
           ]
           for marker in required:
               if marker not in fetch_due_checkins:
                   raise SystemExit(f"MISSING_WORKER_MARKER:{marker}")
+
+          if "selectGuestAccessReservationTarget(" not in source:
+              raise SystemExit("CANONICAL_TARGET_SELECTOR_MISSING")
 
           if "\n        take: 5,\n        include: {" in fetch_due_checkins:
               raise SystemExit("UNCONDITIONAL_FIVE_GRANT_LIMIT_REMAINS")
