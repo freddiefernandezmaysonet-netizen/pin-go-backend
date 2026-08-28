@@ -524,6 +524,30 @@ test(
       );
     }
 
+    const missionControlCycle = read(
+      "./guest-journey-mission-control-cycle.service.ts"
+    );
+    assert.match(
+      missionControlCycle,
+      /isGuestJourneyTenantPropertyScope/
+    );
+
+    const runtimeState = read(
+      "./guest-journey-runtime-state.service.ts"
+    );
+    assert.match(
+      runtimeState,
+      /if \(!organizationMatches\) return false/
+    );
+    assert.match(
+      runtimeState,
+      /if \(propertyHashes\.length === 0\) return true/
+    );
+    assert.doesNotMatch(
+      runtimeState,
+      /organizationHashes\.includes\([\s\S]{0,180}\|\|[\s\S]{0,180}propertyHashes\.includes/
+    );
+
     const ownerConfigs = [
       "guest-journey-access-owner.config.ts",
       "guest-journey-financial-owner.config.ts",

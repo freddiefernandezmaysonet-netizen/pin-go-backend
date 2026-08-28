@@ -1,6 +1,7 @@
 import {
   assertGuestJourneyTenantPropertyScope,
   buildGuestJourneyCoordinationIntentScopeWhere,
+  isGuestJourneyTenantPropertyScope,
 } from "./guest-journey-tenant-property-scope.policy";
 
 import {
@@ -218,17 +219,14 @@ function isOwnerRuntimeEnabledForIntent(input: {
     return false;
   }
 
-  return (
-    input.ownerRuntimeConfig
-      .organizationIds.includes(
-        input.intent.reservation
-          .property.organizationId
-      ) ||
-    input.ownerRuntimeConfig
-      .propertyIds.includes(
-        input.intent.reservation
-          .propertyId
-      )
+  return isGuestJourneyTenantPropertyScope(
+    input.ownerRuntimeConfig,
+    {
+      organizationId:
+        input.intent.reservation.property.organizationId,
+      propertyId:
+        input.intent.reservation.propertyId,
+    }
   );
 }
 
