@@ -1,0 +1,145 @@
+import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
+import test from "node:test";
+
+const SOURCE_FILES = [
+  "guest-access-admission-fence.policy.e14.ts",
+  "guest-access-admission-fence.single-grant.e14.ts",
+  "guest-access-admission-fence.service.e14.ts",
+  "guest-access-reservation-singleton-fence.e14.ts",
+  "guest-access-readiness-mission-control.policy.e14.ts",
+  "guest-access-readiness-mission-control.service.e14.ts",
+  "guest-access-admission-safety-cycle.e14.ts",
+];
+
+test("E14 source has no direct provider client import or invocation", () => {
+  const source = SOURCE_FILES
+    .map((name) =>
+      readFileSync(new URL(name, import.meta.url), "utf8")
+    )
+    .join("\n")
+    .toLowerCase();
+
+  for (const forbidden of [
+    "ttlockgetpasscode",
+    "ttlockdeletepasscode",
+    "stripe.",
+    "twilio",
+    "channex",
+    "axios.",
+    "fetch(",
+  ]) {
+    assert.equal(
+      source.includes(forbidden),
+      false,
+      `unexpected provider boundary: ${forbidden}`
+    );
+  }
+});
+
+test("E14 reuses AccessGrant recovery fields and adds no schema dependency", () => {
+  const source = readFileSync(
+    new URL(
+      "guest-access-reservation-singleton-fence.e14.ts",
+      import.meta.url
+    ),
+    "utf8"
+  );
+
+  for (const field of [
+    "recoveryOperation",
+    "recoveryAttemptCount",
+    "recoveryLastAttemptAt",
+    "recoveryNextAttemptAt",
+    "recoveryExhaustedAt",
+  ]) {
+    assert.equal(source.includes(field), true);
+  }
+
+  assert.equal(source.includes("provisioningLeaseToken"), false);
+  assert.equal(source.includes("prisma/migrations"), false);
+});
+
+test("unknown physical-boundary failures fail closed as ambiguous", () => {
+  const policy = readFileSync(
+    new URL(
+      "guest-access-admission-fence.policy.e14.ts",
+      import.meta.url
+    ),
+    "utf8"
+  );
+
+  assert.match(
+    policy,
+    /GUEST_ACCESS_PROVISION_SAFE_TO_RETRY/
+  );
+  assert.match(
+    policy,
+    /\? "RETRYABLE"\s*:\s*"AMBIGUOUS"/
+  );
+});
+
+test("Mission Control represents bounded recovery and refreshes reopened issue details", () => {
+  const policy = readFileSync(
+    new URL(
+      "guest-access-readiness-mission-control.policy.e14.ts",
+      import.meta.url
+    ),
+    "utf8"
+  );
+  const service = readFileSync(
+    new URL(
+      "guest-access-readiness-mission-control.service.e14.ts",
+      import.meta.url
+    ),
+    "utf8"
+  );
+
+  assert.match(
+    policy,
+    /GUEST_ACCESS_PROVISIONING_RECOVERY/
+  );
+  assert.match(policy, /AUTO_RESOLVING/);
+
+  const reopenIndex = service.indexOf(
+    "await reopenOperationalIssue("
+  );
+  const refreshIndex = service.indexOf(
+    "await persistActiveProjection(",
+    reopenIndex
+  );
+
+  assert.ok(reopenIndex >= 0);
+  assert.ok(refreshIndex > reopenIndex);
+});
+
+test("E14.1 locks the Reservation row before singleton validation and provider claim", () => {
+  const source = readFileSync(
+    new URL(
+      "guest-access-reservation-singleton-fence.e14.ts",
+      import.meta.url
+    ),
+    "utf8"
+  );
+
+  const transactionIndex = source.indexOf("lockDb.$transaction");
+  const rowLockIndex = source.indexOf("FOR UPDATE", transactionIndex);
+  const singletonIndex = source.indexOf(
+    "validateReservationSingletonBeforeClaim",
+    rowLockIndex
+  );
+  const claimIndex = source.indexOf(
+    "claimSingleGrant",
+    singletonIndex
+  );
+  const physicalIndex = source.indexOf(
+    "input.executePhysical()",
+    claimIndex
+  );
+
+  assert.ok(transactionIndex >= 0);
+  assert.ok(rowLockIndex > transactionIndex);
+  assert.ok(singletonIndex > rowLockIndex);
+  assert.ok(claimIndex > singletonIndex);
+  assert.ok(physicalIndex > claimIndex);
+});

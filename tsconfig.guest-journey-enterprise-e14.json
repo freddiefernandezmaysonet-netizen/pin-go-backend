@@ -1,0 +1,18 @@
+{
+  "compilerOptions": {
+    "noEmit": true,
+    "module": "preserve",
+    "moduleResolution": "bundler",
+    "target": "esnext",
+    "strict": true,
+    "exactOptionalPropertyTypes": true,
+    "skipLibCheck": true,
+    "types": ["node"]
+  },
+  "include": [
+    "src/e14/*.ts",
+    "src/apms/operational-intelligence-types.ts",
+    "src/apms/operational-transition-policy.ts",
+    "src/apms/operational-intelligence.service.ts"
+  ]
+}

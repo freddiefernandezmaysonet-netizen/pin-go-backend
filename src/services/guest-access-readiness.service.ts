@@ -215,7 +215,7 @@ export async function assertGuestAccessReady(
     reservationId,
     {
       persist: true,
-      now: options?.now,
+      ...(options?.now ? { now: options.now } : {}),
     }
   );
 
