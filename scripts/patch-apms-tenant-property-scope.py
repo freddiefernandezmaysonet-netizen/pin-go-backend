@@ -205,6 +205,32 @@ for path, (error_code, helper_name, config_type) in CONFIGS.items():
 }}''',
         )
 
+# Communications retains its independent typed-message domain guard while
+# adopting the shared organization AND optional property-subset hierarchy.
+replace_function(
+    "src/services/guest-journey-communications-owner.config.ts",
+    "isGuestJourneyCommunicationsOwnerScope",
+    '''export function isGuestJourneyCommunicationsOwnerScope(
+  config: GuestJourneyCommunicationsOwnerConfig,
+  input: {
+    organizationId?: string | null;
+    propertyId?: string | null;
+    communicationType?: string | null;
+  }
+): boolean {
+  if (
+    !config.enabled ||
+    !String(input.communicationType ?? "").trim()
+  ) {
+    return false;
+  }
+  return isGuestJourneyTenantPropertyScope(
+    config,
+    input
+  );
+}''',
+)
+
 # E11 activation control plane.
 control_plane = "src/services/guest-journey-activation-control-plane.service.ts"
 insert_policy_import(control_plane, ["assertGuestJourneyTenantPropertyScope"])
