@@ -16,7 +16,6 @@ concurrency:
 
 jobs:
   patch-worker:
-    if: github.actor != 'github-actions[bot]'
     runs-on: ubuntu-latest
     timeout-minutes: 20
 
