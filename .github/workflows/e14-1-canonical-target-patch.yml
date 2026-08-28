@@ -70,26 +70,30 @@ jobs:
               raise SystemExit("CANONICAL_TARGET_IMPORT_ANCHOR_INVALID")
           source = source.replace(import_anchor, import_replacement, 1)
 
-          loop_anchor = '''  for (const reservation of reservations) {
-            for (const grant of reservation.accessGrants) {'''
-          loop_replacement = '''  for (const reservation of reservations) {
-            const accessGrantsToProcess =
-              GUEST_ACCESS_ADMISSION_E14_CONFIG.enabled
-                ? (() => {
-                    const target =
-                      selectGuestAccessReservationTarget(
-                        reservation.accessGrants,
-                        {
-                          checkIn: reservation.checkIn,
-                          checkOut: reservation.checkOut,
-                        }
-                      );
-
-                    return target ? [target] : [];
-                  })()
-                : reservation.accessGrants;
-
-            for (const grant of accessGrantsToProcess) {'''
+          loop_anchor = (
+              "  for (const reservation of reservations) {\n"
+              "    for (const grant of reservation.accessGrants) {"
+          )
+          loop_replacement = (
+              "  for (const reservation of reservations) {\n"
+              "    const accessGrantsToProcess =\n"
+              "      GUEST_ACCESS_ADMISSION_E14_CONFIG.enabled\n"
+              "        ? (() => {\n"
+              "            const target =\n"
+              "              selectGuestAccessReservationTarget(\n"
+              "                reservation.accessGrants,\n"
+              "                {\n"
+              "                  checkIn: reservation.checkIn,\n"
+              "                  checkOut: reservation.checkOut,\n"
+              "                }\n"
+              "              );\n"
+              "\n"
+              "            return target ? [target] : [];\n"
+              "          })()\n"
+              "        : reservation.accessGrants;\n"
+              "\n"
+              "    for (const grant of accessGrantsToProcess) {"
+          )
 
           if source.count(loop_anchor) != 1:
               raise SystemExit("PROCESS_CHECKINS_LOOP_ANCHOR_INVALID")
