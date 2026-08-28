@@ -354,7 +354,7 @@ for path in INTENT_CYCLES:
     text = text[:start] + text[end + len("\n  ];") :]
     text = regex_once(
         text,
-        r'''\{\s*OR:\s*scopeFilters\s*\},''',
+        r'''\{\s*OR:\s*scopeFilters\s*,?\s*\},''',
         "buildGuestJourneyCoordinationIntentScopeWhere(\n          config\n        ),",
         f"{path}: intent hierarchy selector",
     )
