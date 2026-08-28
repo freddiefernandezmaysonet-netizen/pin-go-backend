@@ -1,4 +1,4 @@
-name: E14.1 Controlled Worker Artifact Gate
+name: E14.1 Controlled Worker Publish Gate
 
 on:
   push:
@@ -8,10 +8,10 @@ on:
       - ".github/workflows/e14-1-controlled-worker-patch.yml"
 
 permissions:
-  contents: read
+  contents: write
 
 jobs:
-  build-worker-artifact:
+  publish-certified-worker:
     runs-on: ubuntu-latest
     timeout-minutes: 20
 
@@ -20,7 +20,7 @@ jobs:
         with:
           ref: agent/apms-enterprise-guest-journey-e14-access-admission-fencing
           fetch-depth: 0
-          persist-credentials: false
+          persist-credentials: true
 
       - uses: actions/setup-node@v4
         with:
@@ -126,19 +126,14 @@ jobs:
             --packages=external \
             --outfile=/tmp/reservation.worker.e14.1.js
 
-      - name: Verify worker-only diff
+      - name: Verify and publish worker-only commit
+        shell: bash
         run: |
           git diff --check
           test "$(git diff --name-only)" = "src/workers/reservation.worker.ts"
-          git diff -- src/workers/reservation.worker.ts > e14-1-worker.patch
-          git hash-object src/workers/reservation.worker.ts > e14-1-worker.blob-sha
-
-      - uses: actions/upload-artifact@v4
-        with:
-          name: e14-1-controlled-worker
-          path: |
-            src/workers/reservation.worker.ts
-            e14-1-worker.patch
-            e14-1-worker.blob-sha
-          if-no-files-found: error
-          retention-days: 1
+          test "$(git hash-object src/workers/reservation.worker.ts)" = "b7b0a4587c3e18f29c26573d2992341842143166"
+          git config user.name "freddiefernandezmaysonet-netizen"
+          git config user.email "freddiefernandezmaysonet@gmail.com"
+          git add -- src/workers/reservation.worker.ts
+          git commit -m "Stop E14 sibling processing per reservation"
+          git push origin HEAD:agent/apms-enterprise-guest-journey-e14-access-admission-fencing
