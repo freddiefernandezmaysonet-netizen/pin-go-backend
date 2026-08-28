@@ -303,8 +303,7 @@ export function projectGuestAccessAmbiguityIssue(
 
   if (
     !reviewRequired ||
-    noLongerApplicable(snapshot, now) ||
-    hasActiveGrant(snapshot)
+    noLongerApplicable(snapshot, now)
   ) {
     return {
       active: false,

@@ -259,7 +259,7 @@ test("ACTIVE without complete durable credential evidence does not hide ambiguit
   assert.equal(result.visibility, "DEVELOPER");
 });
 
-test("ambiguous issue resolves when access is active or workflow is terminal", () => {
+test("active access does not resolve ambiguity without same-operation reconciliation", () => {
   const active = projectGuestAccessAmbiguityIssue(
     snapshot({
       accessGrants: [
@@ -276,7 +276,7 @@ test("ambiguous issue resolves when access is active or workflow is terminal", (
     }),
     { now: NOW }
   );
-  assert.equal(active.active, false);
+  assert.equal(active.active, true);
 
   const cancelled = projectGuestAccessAmbiguityIssue(
     snapshot({

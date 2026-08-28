@@ -12,6 +12,13 @@ const workerSource = readFileSync(
   ),
   "utf8"
 );
+const serviceSource = readFileSync(
+  new URL(
+    "guest-access-admission-fence.service.e14.ts",
+    import.meta.url
+  ),
+  "utf8"
+);
 
 
 test("E14 access admission is strict default-off and explicit opt-in", () => {
@@ -124,5 +131,77 @@ test("invalid E14 configuration cannot activate the E14 runtime path", () => {
       "GUEST_JOURNEY_E14_ACCESS_ADMISSION_ENABLED === '1'"
     ),
     false
+  );
+});
+
+test("transaction-capable production clients route through the reservation singleton fence", () => {
+  assert.match(
+    serviceSource,
+    /guest-access-reservation-singleton-fence\.e14\.js/
+  );
+  assert.match(
+    serviceSource,
+    /supportsReservationSingletonFence\(db\)[\s\S]*executeReservationSingleton\(db, input\)/
+  );
+  assert.match(
+    serviceSource,
+    /supportsReservationSingletonFence\(db\)[\s\S]*claimReservationSingleton\(db, input\)/
+  );
+});
+
+test("E14.1 stops the reservation grant loop for every fenced outcome", () => {
+  const processIndex = workerSource.indexOf(
+    "async function processCheckins"
+  );
+  const nextIndex = workerSource.indexOf(
+    "async function activateGuestNfcAssignmentsForReservation",
+    processIndex
+  );
+  const source = workerSource.slice(processIndex, nextIndex);
+
+  assert.match(
+    source,
+    /Guest access provisioning deferred by E14[\s\S]*?break;/
+  );
+  assert.match(
+    source,
+    /E14\.1 reservation singleton outcome complete[\s\S]*?break;/
+  );
+  assert.match(
+    source,
+    /E14\.1 reservation singleton orchestration failed[\s\S]*?break;/
+  );
+
+  const deferredIndex = source.indexOf(
+    "Guest access provisioning deferred by E14"
+  );
+  const deferredEnd = source.indexOf("break;", deferredIndex);
+  assert.equal(
+    source.slice(deferredIndex, deferredEnd).includes("continue;"),
+    false
+  );
+});
+
+test("default-off legacy grant behavior remains present", () => {
+  const processIndex = workerSource.indexOf(
+    "async function processCheckins"
+  );
+  const nextIndex = workerSource.indexOf(
+    "async function activateGuestNfcAssignmentsForReservation",
+    processIndex
+  );
+  const source = workerSource.slice(processIndex, nextIndex);
+  const legacyIndex = source.indexOf(
+    "// Confirma que el grant todavía está PENDING."
+  );
+
+  assert.ok(legacyIndex >= 0);
+  assert.match(
+    source.slice(legacyIndex),
+    /claimed\.count === 0[\s\S]*?continue;/
+  );
+  assert.match(
+    source.slice(legacyIndex),
+    /await activateGrant\(grant\.id\)/
   );
 });

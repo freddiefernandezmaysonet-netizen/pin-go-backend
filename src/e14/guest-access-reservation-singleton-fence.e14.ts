@@ -8,7 +8,7 @@ import {
   type ExecuteGuestAccessProvisioningResult,
   type GuestAccessProvisionClaimResult,
   type GuestAccessProvisionDb,
-} from "./guest-access-admission-fence.service.e14.js";
+} from "./guest-access-admission-fence.single-grant.e14.js";
 import {
   GUEST_ACCESS_PROVISION_OPERATION,
   parseGuestAccessProvisionFenceState,

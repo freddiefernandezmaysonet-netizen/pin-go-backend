@@ -4,7 +4,9 @@ import test from "node:test";
 
 const SOURCE_FILES = [
   "guest-access-admission-fence.policy.e14.ts",
+  "guest-access-admission-fence.single-grant.e14.ts",
   "guest-access-admission-fence.service.e14.ts",
+  "guest-access-reservation-singleton-fence.e14.ts",
   "guest-access-readiness-mission-control.policy.e14.ts",
   "guest-access-readiness-mission-control.service.e14.ts",
   "guest-access-admission-safety-cycle.e14.ts",
@@ -38,7 +40,7 @@ test("E14 source has no direct provider client import or invocation", () => {
 test("E14 reuses AccessGrant recovery fields and adds no schema dependency", () => {
   const source = readFileSync(
     new URL(
-      "guest-access-admission-fence.service.e14.ts",
+      "guest-access-reservation-singleton-fence.e14.ts",
       import.meta.url
     ),
     "utf8"
@@ -109,4 +111,35 @@ test("Mission Control represents bounded recovery and refreshes reopened issue d
 
   assert.ok(reopenIndex >= 0);
   assert.ok(refreshIndex > reopenIndex);
+});
+
+test("E14.1 locks the Reservation row before singleton validation and provider claim", () => {
+  const source = readFileSync(
+    new URL(
+      "guest-access-reservation-singleton-fence.e14.ts",
+      import.meta.url
+    ),
+    "utf8"
+  );
+
+  const transactionIndex = source.indexOf("lockDb.$transaction");
+  const rowLockIndex = source.indexOf("FOR UPDATE", transactionIndex);
+  const singletonIndex = source.indexOf(
+    "validateReservationSingletonBeforeClaim",
+    rowLockIndex
+  );
+  const claimIndex = source.indexOf(
+    "claimSingleGrant",
+    singletonIndex
+  );
+  const physicalIndex = source.indexOf(
+    "input.executePhysical()",
+    claimIndex
+  );
+
+  assert.ok(transactionIndex >= 0);
+  assert.ok(rowLockIndex > transactionIndex);
+  assert.ok(singletonIndex > rowLockIndex);
+  assert.ok(claimIndex > singletonIndex);
+  assert.ok(physicalIndex > claimIndex);
 });

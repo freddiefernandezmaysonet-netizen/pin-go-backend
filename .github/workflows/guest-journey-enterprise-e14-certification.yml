@@ -35,6 +35,7 @@ jobs:
         run: |
           node --import tsx --test \
             src/e14/guest-access-admission-fence.e14.test.ts \
+            src/e14/guest-access-reservation-singleton-fence.e14.test.ts \
             src/e14/guest-access-readiness-mission-control.e14.test.ts \
             src/e14/guest-access-e14-structural.e14.test.ts \
             src/e14/guest-access-worker-integration.e14.test.ts
