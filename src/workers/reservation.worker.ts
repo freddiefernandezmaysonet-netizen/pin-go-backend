@@ -631,7 +631,9 @@ async function fetchDueCheckins(now: Date) {
         orderBy: {
           startsAt: "asc",
         },
-        take: 5,
+        ...(GUEST_ACCESS_ADMISSION_E14_CONFIG.enabled
+          ? {}
+          : { take: 5 }),
         include: {
           lock: true,
         },
