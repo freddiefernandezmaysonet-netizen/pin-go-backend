@@ -67,32 +67,14 @@ jobs:
               + block[continue_index + len("            continue;"):]
           )
 
-          missing_org_old = '''          continue;
-        }
-
-        // Billing siempre antes de TTLock.'''
-          missing_org_new = '''          if (GUEST_ACCESS_ADMISSION_E14_CONFIG.enabled) {
-            break;
-          }
-          continue;
-        }
-
-        // Billing siempre antes de TTLock.'''
+          missing_org_old = "          continue;\n        }\n\n        // Billing siempre antes de TTLock."
+          missing_org_new = "          if (GUEST_ACCESS_ADMISSION_E14_CONFIG.enabled) {\n            break;\n          }\n          continue;\n        }\n\n        // Billing siempre antes de TTLock."
           if block.count(missing_org_old) != 1:
               raise SystemExit("MISSING_ORG_ANCHOR_COUNT_INVALID")
           block = block.replace(missing_org_old, missing_org_new, 1)
 
-          billing_old = '''          continue;
-        }
-
-        let activation: any;'''
-          billing_new = '''          if (GUEST_ACCESS_ADMISSION_E14_CONFIG.enabled) {
-            break;
-          }
-          continue;
-        }
-
-        let activation: any;'''
+          billing_old = "          continue;\n        }\n\n        let activation: any;"
+          billing_new = "          if (GUEST_ACCESS_ADMISSION_E14_CONFIG.enabled) {\n            break;\n          }\n          continue;\n        }\n\n        let activation: any;"
           if block.count(billing_old) != 1:
               raise SystemExit("BILLING_ANCHOR_COUNT_INVALID")
           block = block.replace(billing_old, billing_new, 1)
@@ -100,23 +82,13 @@ jobs:
           sms_marker = '          log("Guest SMS skipped", {'
           sms_index = block.rindex(sms_marker)
           catch_index = block.index("      } catch (error) {", sms_index)
-          success_guard = '''
-        // E14.1 reservation singleton outcome complete.
-        if (GUEST_ACCESS_ADMISSION_E14_CONFIG.enabled) {
-          break;
-        }
-'''
+          success_guard = "\n        // E14.1 reservation singleton outcome complete.\n        if (GUEST_ACCESS_ADMISSION_E14_CONFIG.enabled) {\n          break;\n        }\n"
           block = block[:catch_index] + success_guard + block[catch_index:]
 
           catch_marker = '          "Guest activation FAILED",'
           catch_marker_index = block.index(catch_marker, catch_index)
           errlog_end = block.index("        );", catch_marker_index) + len("        );")
-          catch_guard = '''
-
-        // E14.1 reservation singleton orchestration failed.
-        if (GUEST_ACCESS_ADMISSION_E14_CONFIG.enabled) {
-          break;
-        }'''
+          catch_guard = "\n\n        // E14.1 reservation singleton orchestration failed.\n        if (GUEST_ACCESS_ADMISSION_E14_CONFIG.enabled) {\n          break;\n        }"
           block = block[:errlog_end] + catch_guard + block[errlog_end:]
 
           patched = source[:start] + block + source[end:]
