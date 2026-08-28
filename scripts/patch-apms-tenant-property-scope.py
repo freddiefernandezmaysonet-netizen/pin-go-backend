@@ -412,8 +412,6 @@ for path in CLAIM_FILES:
 for path in [
     "src/services/guest-journey-access-owner.config.test.ts",
     "src/services/guest-journey-financial-owner.config.test.ts",
-    "src/services/guest-journey-compliance-owner.config.test.ts",
-    "src/services/guest-journey-communications-owner.config.test.ts",
 ]:
     text = load(path)
     text = replace_once(
@@ -423,6 +421,67 @@ for path in [
         f"{path}: property subset positive assertion",
     )
     save(path, text)
+
+compliance_test = "src/services/guest-journey-compliance-owner.config.test.ts"
+text = load(compliance_test)
+text = replace_once(
+    text,
+    '''  assert.equal(isGuestJourneyComplianceOwnerScope(config, {
+    organizationId: "org-1",
+    propertyId: "property-x",
+  }), true);
+  assert.equal(isGuestJourneyComplianceOwnerScope(config, {
+    organizationId: "org-x",
+    propertyId: "property-2",
+  }), true);''',
+    '''  assert.equal(isGuestJourneyComplianceOwnerScope(config, {
+    organizationId: "org-1",
+    propertyId: "property-2",
+  }), true);
+  assert.equal(isGuestJourneyComplianceOwnerScope(config, {
+    organizationId: "org-1",
+    propertyId: "property-x",
+  }), false);
+  assert.equal(isGuestJourneyComplianceOwnerScope(config, {
+    organizationId: "org-x",
+    propertyId: "property-2",
+  }), false);''',
+    "compliance owner hierarchical scope assertions",
+)
+save(compliance_test, text)
+
+communications_test = "src/services/guest-journey-communications-owner.config.test.ts"
+text = load(communications_test)
+require(
+    "E7 property subsets require both tenant and property membership" not in text,
+    "communications hierarchical test already present",
+)
+text += '''
+
+test("E7 property subsets require both tenant and property membership", () => {
+  const scoped = resolveGuestJourneyCommunicationsOwnerConfig({
+    GUEST_JOURNEY_COMMUNICATIONS_EXECUTE: "true",
+    GUEST_JOURNEY_COMMUNICATIONS_ORGANIZATION_IDS: "org-1",
+    GUEST_JOURNEY_COMMUNICATIONS_PROPERTY_IDS: "property-1",
+  });
+  assert.equal(isGuestJourneyCommunicationsOwnerScope(scoped, {
+    organizationId: "org-1",
+    propertyId: "property-1",
+    communicationType: "PRECHECKIN",
+  }), true);
+  assert.equal(isGuestJourneyCommunicationsOwnerScope(scoped, {
+    organizationId: "org-1",
+    propertyId: "property-2",
+    communicationType: "PRECHECKIN",
+  }), false);
+  assert.equal(isGuestJourneyCommunicationsOwnerScope(scoped, {
+    organizationId: "org-2",
+    propertyId: "property-1",
+    communicationType: "PRECHECKIN",
+  }), false);
+});
+'''
+save(communications_test, text)
 
 required_markers = {
     **{
