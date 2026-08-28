@@ -94,6 +94,121 @@ replace_once(
     '''  const organizationMatches =\n    organizationHashes.includes(\n      hashGuestJourneyRuntimeScopeId("organization", input.organizationId)\n    );\n\n  if (!organizationMatches) return false;\n  if (propertyHashes.length === 0) return true;\n\n  return propertyHashes.includes(\n    hashGuestJourneyRuntimeScopeId("property", input.propertyId)\n  );''',
 )
 
+replace_once(
+    "src/services/guest-journey-runtime-state.service.test.ts",
+    r'''test("E13 hashed scope membership supports property and organization canaries", () => {
+  const runtime = {
+    activationProfile: "shadow_only",
+    organizationScopeHashes: [
+      hashGuestJourneyRuntimeScopeId(
+        "organization",
+        "org-1"
+      ),
+    ],
+    propertyScopeHashes: [
+      hashGuestJourneyRuntimeScopeId(
+        "property",
+        "property-2"
+      ),
+    ],
+  };
+
+  assert.equal(
+    isGuestJourneyRuntimeScopeMatch(
+      runtime,
+      {
+        organizationId: "org-1",
+        propertyId: "property-1",
+      }
+    ),
+    true
+  );
+  assert.equal(
+    isGuestJourneyRuntimeScopeMatch(
+      runtime,
+      {
+        organizationId: "org-2",
+        propertyId: "property-2",
+      }
+    ),
+    true
+  );
+  assert.equal(
+    isGuestJourneyRuntimeScopeMatch(
+      runtime,
+      {
+        organizationId: "org-2",
+        propertyId: "property-3",
+      }
+    ),
+    false
+  );
+});''',
+    r'''test("E13 hashed scope membership enforces organization and optional property subset", () => {
+  const propertySubsetRuntime = {
+    activationProfile: "shadow_only",
+    organizationScopeHashes: [
+      hashGuestJourneyRuntimeScopeId(
+        "organization",
+        "org-1"
+      ),
+    ],
+    propertyScopeHashes: [
+      hashGuestJourneyRuntimeScopeId(
+        "property",
+        "property-2"
+      ),
+    ],
+  };
+
+  assert.equal(
+    isGuestJourneyRuntimeScopeMatch(
+      propertySubsetRuntime,
+      {
+        organizationId: "org-1",
+        propertyId: "property-2",
+      }
+    ),
+    true
+  );
+  assert.equal(
+    isGuestJourneyRuntimeScopeMatch(
+      propertySubsetRuntime,
+      {
+        organizationId: "org-1",
+        propertyId: "property-1",
+      }
+    ),
+    false
+  );
+  assert.equal(
+    isGuestJourneyRuntimeScopeMatch(
+      propertySubsetRuntime,
+      {
+        organizationId: "org-2",
+        propertyId: "property-2",
+      }
+    ),
+    false
+  );
+
+  const organizationWideRuntime = {
+    ...propertySubsetRuntime,
+    propertyScopeHashes: [],
+  };
+  assert.equal(
+    isGuestJourneyRuntimeScopeMatch(
+      organizationWideRuntime,
+      {
+        organizationId: "org-1",
+        propertyId: "property-any",
+      }
+    ),
+    true
+  );
+});''',
+)
+
 append_once(
     "src/apms/mission-control-runtime-health.e13.test.ts",
     "same organization but outside the configured property subset",
@@ -132,7 +247,32 @@ test("E13 treats a same-organization property outside the configured subset as o
 replace_once(
     "src/services/guest-journey-tenant-property-scope.policy.test.ts",
     '''    const ownerConfigs = [\n      "guest-journey-access-owner.config.ts",''',
-    '''    const missionControlCycle = read(\n      "./guest-journey-mission-control-cycle.service.ts"\n    );\n    assert.match(\n      missionControlCycle,\n      /isGuestJourneyTenantPropertyScope/\n    );\n\n    const runtimeState = read(\n      "./guest-journey-runtime-state.service.ts"\n    );\n    assert.match(\n      runtimeState,\n      /if \(!organizationMatches\) return false/\n    );\n    assert.match(\n      runtimeState,\n      /if \(propertyHashes\.length === 0\) return true/\n    );\n    assert.doesNotMatch(\n      runtimeState,\n      /organizationHashes\.includes\([\\s\\S]{0,180}\\|\\|[\\s\\S]{0,180}propertyHashes\.includes/\n    );\n\n    const ownerConfigs = [\n      "guest-journey-access-owner.config.ts",''',
+    r'''    const missionControlCycle = read(
+      "./guest-journey-mission-control-cycle.service.ts"
+    );
+    assert.match(
+      missionControlCycle,
+      /isGuestJourneyTenantPropertyScope/
+    );
+
+    const runtimeState = read(
+      "./guest-journey-runtime-state.service.ts"
+    );
+    assert.match(
+      runtimeState,
+      /if \(!organizationMatches\) return false/
+    );
+    assert.match(
+      runtimeState,
+      /if \(propertyHashes\.length === 0\) return true/
+    );
+    assert.doesNotMatch(
+      runtimeState,
+      /organizationHashes\.includes\([\s\S]{0,180}\|\|[\s\S]{0,180}propertyHashes\.includes/
+    );
+
+    const ownerConfigs = [
+      "guest-journey-access-owner.config.ts",''',
 )
 
 # Future PRs touching E13 runtime applicability must trigger the tenant-scope gate.
