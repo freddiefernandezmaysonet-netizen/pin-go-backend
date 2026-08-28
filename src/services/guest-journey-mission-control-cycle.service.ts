@@ -1,4 +1,10 @@
 import {
+  assertGuestJourneyTenantPropertyScope,
+  buildGuestJourneyCoordinationIntentScopeWhere,
+  isGuestJourneyTenantPropertyScope,
+} from "./guest-journey-tenant-property-scope.policy";
+
+import {
   GuestJourneyCoordinationIntentStatus,
   Prisma,
   PrismaClient,
@@ -91,53 +97,11 @@ function requireSafeConfig(
     );
   }
 
-  if (
-    config.enabled &&
-    config.organizationIds.length === 0 &&
-    config.propertyIds.length === 0
-  ) {
-    throw new Error(
-      "GUEST_JOURNEY_MISSION_CONTROL_BRIDGE_SCOPE_REQUIRED"
-    );
-  }
-}
-
-function buildScopeFilters(
-  config:
-    GuestJourneyMissionControlConfig
-): Prisma.GuestJourneyCoordinationIntentWhereInput[] {
-  const filters:
-    Prisma.GuestJourneyCoordinationIntentWhereInput[] = [];
-
-  if (config.organizationIds.length > 0) {
-    filters.push({
-      reservation: {
-        is: {
-          property: {
-            is: {
-              organizationId: {
-                in: config.organizationIds,
-              },
-            },
-          },
-        },
-      },
-    });
-  }
-
-  if (config.propertyIds.length > 0) {
-    filters.push({
-      reservation: {
-        is: {
-          propertyId: {
-            in: config.propertyIds,
-          },
-        },
-      },
-    });
-  }
-
-  return filters;
+  assertGuestJourneyTenantPropertyScope({
+    enabled: config.enabled,
+    scope: config,
+    errorCode: "GUEST_JOURNEY_MISSION_CONTROL_BRIDGE_SCOPE_REQUIRED",
+  });
 }
 
 async function selectCandidates(
@@ -164,11 +128,9 @@ async function selectCandidates(
         intentType:
           "REQUEST_ACCESS_EVALUATION",
         AND: [
-          {
-            OR: buildScopeFilters(
-              input.config
-            ),
-          },
+          buildGuestJourneyCoordinationIntentScopeWhere(
+            input.config
+          ),
           {
             OR: [
               {
@@ -257,17 +219,14 @@ function isOwnerRuntimeEnabledForIntent(input: {
     return false;
   }
 
-  return (
-    input.ownerRuntimeConfig
-      .organizationIds.includes(
-        input.intent.reservation
-          .property.organizationId
-      ) ||
-    input.ownerRuntimeConfig
-      .propertyIds.includes(
-        input.intent.reservation
-          .propertyId
-      )
+  return isGuestJourneyTenantPropertyScope(
+    input.ownerRuntimeConfig,
+    {
+      organizationId:
+        input.intent.reservation.property.organizationId,
+      propertyId:
+        input.intent.reservation.propertyId,
+    }
   );
 }
 

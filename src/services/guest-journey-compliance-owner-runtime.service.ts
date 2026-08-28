@@ -1,3 +1,7 @@
+import {
+  isGuestJourneyTenantPropertyScope,
+} from "./guest-journey-tenant-property-scope.policy";
+
 import { createHash } from "node:crypto";
 
 import {
@@ -130,8 +134,13 @@ function scopeAllows(
   propertyId: string,
   scope: ComplianceOwnerScope
 ): boolean {
-  return scope.organizationIds.includes(organizationId) ||
-    scope.propertyIds.includes(propertyId);
+  return isGuestJourneyTenantPropertyScope(
+    scope,
+    {
+      organizationId,
+      propertyId,
+    }
+  );
 }
 
 function handlerCode(intentType: ComplianceIntentType) {

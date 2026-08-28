@@ -360,3 +360,31 @@ test("E13 fresh failed runtime and its durable issue remain ERROR", () => {
     "ERROR"
   );
 });
+
+test("E13 treats a same-organization property outside the configured subset as out of scope", () => {
+  const result = deriveMissionControlNativeHealth({
+    runtimeRows: [
+      runtime({
+        propertyScopeHashes: [
+          hashGuestJourneyRuntimeScopeId(
+            "property",
+            "property-1"
+          ),
+        ],
+      }),
+    ],
+    allVisibilityCurrentIssues: [],
+    organizationId: "org-1",
+    propertyId: "property-2",
+    now: NOW,
+  });
+
+  assert.equal(
+    result.runtimeApplicable,
+    false
+  );
+  assert.equal(
+    result.autopilotStatus,
+    "PAUSED"
+  );
+});

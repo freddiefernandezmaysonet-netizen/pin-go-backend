@@ -1,3 +1,8 @@
+import {
+  assertGuestJourneyTenantPropertyScope,
+  isGuestJourneyTenantPropertyScope,
+} from "./guest-journey-tenant-property-scope.policy";
+
 export type GuestJourneyCommunicationsOwnerConfig = {
   enabled: boolean;
   batchSize: number;
@@ -61,11 +66,15 @@ export function resolveGuestJourneyCommunicationsOwnerConfig(
     env.GUEST_JOURNEY_COMMUNICATIONS_PROPERTY_IDS
   );
 
-  if (enabled && organizationIds.length === 0 && propertyIds.length === 0) {
-    throw new Error(
-      "GUEST_JOURNEY_COMMUNICATIONS_SCOPE_REQUIRED: enable at least one organization or property"
-    );
-  }
+  assertGuestJourneyTenantPropertyScope({
+    enabled,
+    scope: {
+      organizationIds,
+      propertyIds,
+    },
+    errorCode:
+      "GUEST_JOURNEY_COMMUNICATIONS_SCOPE_REQUIRED: enable at least one organization tenant",
+  });
 
   return {
     enabled,
@@ -117,13 +126,14 @@ export function isGuestJourneyCommunicationsOwnerScope(
     communicationType?: string | null;
   }
 ): boolean {
-  if (!config.enabled || !String(input.communicationType ?? "").trim()) {
+  if (
+    !config.enabled ||
+    !String(input.communicationType ?? "").trim()
+  ) {
     return false;
   }
-  const organizationId = String(input.organizationId ?? "").trim();
-  const propertyId = String(input.propertyId ?? "").trim();
-  return (
-    (organizationId.length > 0 && config.organizationIds.includes(organizationId)) ||
-    (propertyId.length > 0 && config.propertyIds.includes(propertyId))
+  return isGuestJourneyTenantPropertyScope(
+    config,
+    input
   );
 }

@@ -1,4 +1,8 @@
 import {
+  assertGuestJourneyTenantPropertyScope,
+} from "./guest-journey-tenant-property-scope.policy";
+
+import {
   resolveGuestJourneyAccessOwnerConfig,
   type GuestJourneyAccessOwnerConfig,
 } from "./guest-journey-access-owner.config";
@@ -183,10 +187,7 @@ function sameSet(
 function scopePresent(
   config: StageConfig
 ): boolean {
-  return (
-    config.organizationIds.length > 0 ||
-    config.propertyIds.length > 0
-  );
+  return config.organizationIds.length > 0;
 }
 
 function assertScopeAligned(
@@ -354,17 +355,12 @@ export function resolveGuestJourneyActivationControlPlaneConfig(
       }
     : { organizationIds: [], propertyIds: [] };
 
-  if (
-    profile !== "off" &&
-    !scopePresent({
-      enabled: true,
-      ...scope,
-    })
-  ) {
-    throw new Error(
-      "GUEST_JOURNEY_APMS_ACTIVATION_SCOPE_REQUIRED: enabled profiles require tenant/property scope"
-    );
-  }
+  assertGuestJourneyTenantPropertyScope({
+    enabled: profile !== "off",
+    scope,
+    errorCode:
+      "GUEST_JOURNEY_APMS_ACTIVATION_SCOPE_REQUIRED: enabled profiles require organization tenant scope",
+  });
 
   for (const stage of enabledStages) {
     assertScopeAligned(

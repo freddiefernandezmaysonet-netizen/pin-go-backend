@@ -366,8 +366,8 @@ test("E13 heartbeat is idempotent and never mutates config fingerprint", async (
   assert.equal(mock.latest()?.configFingerprint, before);
 });
 
-test("E13 hashed scope membership supports property and organization canaries", () => {
-  const runtime = {
+test("E13 hashed scope membership enforces organization and optional property subset", () => {
+  const propertySubsetRuntime = {
     activationProfile: "shadow_only",
     organizationScopeHashes: [
       hashGuestJourneyRuntimeScopeId(
@@ -385,19 +385,9 @@ test("E13 hashed scope membership supports property and organization canaries", 
 
   assert.equal(
     isGuestJourneyRuntimeScopeMatch(
-      runtime,
+      propertySubsetRuntime,
       {
         organizationId: "org-1",
-        propertyId: "property-1",
-      }
-    ),
-    true
-  );
-  assert.equal(
-    isGuestJourneyRuntimeScopeMatch(
-      runtime,
-      {
-        organizationId: "org-2",
         propertyId: "property-2",
       }
     ),
@@ -405,13 +395,38 @@ test("E13 hashed scope membership supports property and organization canaries", 
   );
   assert.equal(
     isGuestJourneyRuntimeScopeMatch(
-      runtime,
+      propertySubsetRuntime,
       {
-        organizationId: "org-2",
-        propertyId: "property-3",
+        organizationId: "org-1",
+        propertyId: "property-1",
       }
     ),
     false
+  );
+  assert.equal(
+    isGuestJourneyRuntimeScopeMatch(
+      propertySubsetRuntime,
+      {
+        organizationId: "org-2",
+        propertyId: "property-2",
+      }
+    ),
+    false
+  );
+
+  const organizationWideRuntime = {
+    ...propertySubsetRuntime,
+    propertyScopeHashes: [],
+  };
+  assert.equal(
+    isGuestJourneyRuntimeScopeMatch(
+      organizationWideRuntime,
+      {
+        organizationId: "org-1",
+        propertyId: "property-any",
+      }
+    ),
+    true
   );
 });
 

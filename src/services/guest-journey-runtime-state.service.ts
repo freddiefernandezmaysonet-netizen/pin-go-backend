@@ -824,12 +824,15 @@ export function isGuestJourneyRuntimeScopeMatch(
   const propertyHashes = Array.isArray(runtime.propertyScopeHashes)
     ? runtime.propertyScopeHashes.map(String)
     : [];
-  return (
+  const organizationMatches =
     organizationHashes.includes(
       hashGuestJourneyRuntimeScopeId("organization", input.organizationId)
-    ) ||
-    propertyHashes.includes(
-      hashGuestJourneyRuntimeScopeId("property", input.propertyId)
-    )
+    );
+
+  if (!organizationMatches) return false;
+  if (propertyHashes.length === 0) return true;
+
+  return propertyHashes.includes(
+    hashGuestJourneyRuntimeScopeId("property", input.propertyId)
   );
 }

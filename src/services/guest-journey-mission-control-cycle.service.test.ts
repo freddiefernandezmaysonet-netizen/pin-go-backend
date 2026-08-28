@@ -335,3 +335,46 @@ test("fails closed if enabled without E6 tenant scope", async () => {
     /MISSION_CONTROL_BRIDGE_SCOPE_REQUIRED/
   );
 });
+
+test("does not mark a same-tenant intent outside the owner property subset as auto-resolving", async () => {
+  const outsideSubset = candidate();
+  outsideSubset.reservation.propertyId = "property-2";
+  const harness = prismaCandidates([
+    outsideSubset,
+  ]);
+  let ownerRuntimeEnabled = true;
+
+  await runGuestJourneyMissionControlCycle(
+    harness.prisma as never,
+    bridgeConfig({
+      propertyIds: ["property-1"],
+    }),
+    ownerConfig({
+      propertyIds: ["property-1"],
+    }),
+    {
+      now: NOW,
+      dependencies: {
+        sync: async (
+          _db,
+          _intent,
+          options
+        ) => {
+          ownerRuntimeEnabled =
+            options.ownerRuntimeEnabled;
+          return {
+            lifecycle: "UNCHANGED",
+            escalation: "NOT_REQUIRED",
+            operationalIssueWrites: 0,
+            externalSideEffects: 0,
+          };
+        },
+      },
+    }
+  );
+
+  assert.equal(
+    ownerRuntimeEnabled,
+    false
+  );
+});
