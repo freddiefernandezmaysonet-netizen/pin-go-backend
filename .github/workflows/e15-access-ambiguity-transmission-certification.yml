@@ -139,7 +139,6 @@ jobs:
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
           git add src/e15/guest-access-ambiguity-reconciliation.e15.ts
           git add src/workers/reservation.worker.ts
-          git add -u scripts/patch-e15-typescript-fixes.py scripts/patch-e15-worker-integration.py
           git diff --cached --check
           git commit -m 'Integrate E15 access ambiguity reconciliation'
           git push origin HEAD:agent/apms-enterprise-guest-journey-e15-access-ambiguity-reconciliation
