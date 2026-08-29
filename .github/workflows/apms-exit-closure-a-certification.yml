@@ -1,0 +1,146 @@
+name: APMS Exit Closure A Canonical Access Ambiguity Certification
+
+on:
+  pull_request:
+    paths:
+      - "src/services/guest-access-exit-closure-a.policy.ts"
+      - "src/services/guest-access-exit-closure-a.policy.test.ts"
+      - "src/services/guest-journey-access-owner-*.ts"
+      - "src/e14/**"
+      - "src/e15/**"
+      - "src/workers/reservation.worker.ts"
+      - ".github/workflows/apms-exit-closure-a-certification.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  certify-exit-closure-a:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - run: npm ci
+      - run: npx prisma generate --schema prisma/schema.prisma
+
+      - name: Closure A focused contract and E8 regressions
+        run: |
+          node --import tsx --test src/services/guest-access-exit-closure-a.policy.test.ts
+          npm run test:guest-journey-enterprise-e8-access-owner
+          npx tsc -p tsconfig.guest-journey-enterprise-e8.json
+
+      - name: E14 reservation fence and Mission Control regressions
+        run: |
+          node --import tsx --test src/e14/guest-access-reservation-target.e14.test.ts src/e14/guest-access-admission-fence.e14.test.ts src/e14/guest-access-reservation-singleton-fence.e14.test.ts src/e14/guest-access-readiness-mission-control.e14.test.ts src/e14/guest-access-e14-structural.e14.test.ts src/e14/guest-access-worker-integration.e14.test.ts
+          npx tsc -p tsconfig.guest-journey-enterprise-e14.json
+
+      - name: E15 and E15.1 reconciliation regressions
+        run: |
+          node --import tsx --test src/e15/guest-access-ambiguity-reconciliation.e15.test.ts src/e15/guest-access-reservation-reconciliation-fence.e15-1.test.ts
+          npx tsc -p tsconfig.guest-journey-enterprise-e15.json
+
+      - name: Runtime Truth and tenant scope regressions
+        run: |
+          npm run test:guest-journey-enterprise-e13-runtime-truth
+          node --import tsx --test src/services/guest-journey-tenant-property-scope.policy.test.ts
+          npx tsc -p tsconfig.guest-journey-enterprise-tenant-scope.json
+
+      - name: Canonical handoff and provider safety structural gate
+        shell: bash
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          from pathlib import Path
+
+          adapter = Path('src/services/guest-journey-access-owner-adapter.service.ts').read_text()
+          e15 = Path('src/e15/guest-access-ambiguity-reconciliation.e15.ts').read_text()
+          e151 = Path('src/e15/guest-access-reservation-reconciliation-fence.e15-1.ts').read_text()
+          worker = Path('src/workers/reservation.worker.ts').read_text()
+          e14_policy = Path('src/e14/guest-access-readiness-mission-control.policy.e14.ts').read_text()
+          owner_mc = Path('src/services/guest-journey-access-owner-mission-control.service.ts').read_text()
+
+          required_adapter = [
+              'executeGuestAccessProvisioningWithFence',
+              'buildGuestJourneyAccessOwnerE14OwnerId',
+              'mapGuestJourneyAccessOwnerE14ProvisionResult',
+              'executePhysical: () => dependencies.activate(grant.id)',
+          ]
+          missing = [x for x in required_adapter if x not in adapter]
+          if missing:
+              raise SystemExit(f'EXIT_A_ACCESS_OWNER_HANDOFF_MISSING:{missing}')
+          if 'withProviderTimeout(\n      dependencies.activate(grant.id)' in adapter:
+              raise SystemExit('EXIT_A_DIRECT_ACCESS_OWNER_PROVISION_TIMEOUT_REMAINS')
+
+          required_e15 = [
+              'status: { in: [AccessStatus.PENDING, AccessStatus.ACTIVE] }',
+              'RECONCILE_LATE_SUCCESS',
+              'reconcileLateProviderSuccessUnderReservationFenceE15_1',
+              'ACTIVE_LOCAL_CREDENTIAL_ABSENT_AT_PROVIDER',
+              'syncGuestJourneyAccessOwnerMissionControl',
+          ]
+          missing = [x for x in required_e15 if x not in e15]
+          if missing:
+              raise SystemExit(f'EXIT_A_E15_LATE_SUCCESS_MISSING:{missing}')
+
+          required_fence = [
+              'findCanonicalActiveAmbiguousTarget',
+              'GUEST_ACCESS_EXIT_A_RESERVATION_RELEASE_CAS_LOST',
+              'FROM "Reservation" WHERE "id" = $1 FOR UPDATE',
+              'FROM "AccessGrant" WHERE "reservationId" = $1 ORDER BY "id" FOR UPDATE',
+              'isolationLevel: "Serializable"',
+          ]
+          missing = [x for x in required_fence if x not in e151]
+          if missing:
+              raise SystemExit(f'EXIT_A_LATE_SUCCESS_FENCE_MISSING:{missing}')
+
+          if 'e15Enabled' not in e14_policy or 'AUTO_RESOLVING' not in e14_policy:
+              raise SystemExit('EXIT_A_E14_MC_NOT_E15_AWARE')
+          if 'e15AutoResolving' not in owner_mc or 'GUEST_JOURNEY_ACCESS_OWNER_DELEGATED_TO_E15' not in owner_mc:
+              raise SystemExit('EXIT_A_OWNER_MC_NOT_E15_AWARE')
+          if worker.count('GUEST_ACCESS_AMBIGUITY_E15_CONFIG.enabled') < 3:
+              raise SystemExit('EXIT_A_WORKER_E15_ENABLEMENT_NOT_PROPAGATED')
+
+          text = '\n'.join(p.read_text() for p in sorted(Path('src/e15').glob('*.ts')))
+          forbidden = [
+              'ttlockCreatePasscode',
+              'ttlockChangePasscode',
+              'ttlockDeletePasscode',
+              '/keyboardPwd/add',
+              '/keyboardPwd/change',
+              '/keyboardPwd/delete',
+              'method: "POST"',
+              'method: "PUT"',
+              'method: "PATCH"',
+              'method: "DELETE"',
+          ]
+          found = [x for x in forbidden if x in text]
+          if found:
+              raise SystemExit(f'EXIT_A_E15_PROVIDER_MUTATION_SYMBOLS_PRESENT:{found}')
+          if 'method: "GET"' not in e15 or '/v3/lock/listKeyboardPwd' not in e15:
+              raise SystemExit('EXIT_A_E15_READ_ONLY_PROVIDER_BOUNDARY_MISSING')
+          PY
+
+      - name: Worker bundle
+        run: |
+          npx esbuild src/workers/reservation.worker.ts --bundle --platform=node --packages=external --outfile=/tmp/reservation.worker.exit-a.js
+
+      - name: Schema and change-boundary integrity
+        shell: bash
+        run: |
+          set -euo pipefail
+          DATABASE_URL='postgresql://ci:ci@127.0.0.1:5432/pin_go_exit_a_schema_validation' npx prisma validate --schema prisma/schema.prisma
+          git diff --check
+          base_sha="${{ github.event.pull_request.base.sha }}"
+          if [ -n "${base_sha}" ]; then
+            git diff --check "${base_sha}"...HEAD --
+            test -z "$(git diff --name-only "${base_sha}"...HEAD | grep -E '^prisma/migrations/|^prisma/schema\.prisma$|^package(-lock)?\.json$|^src/services/ttlock/ttlock\.brain\.ts$' || true)"
+          fi
