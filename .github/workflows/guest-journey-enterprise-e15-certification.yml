@@ -32,9 +32,9 @@ jobs:
       - run: npm ci
       - run: npx prisma generate --schema prisma/schema.prisma
 
-      - name: E15 focused contract
+      - name: E15 and E15.1 focused contract
         run: |
-          node --import tsx --test src/e15/guest-access-ambiguity-reconciliation.e15.test.ts
+          node --import tsx --test src/e15/guest-access-ambiguity-reconciliation.e15.test.ts src/e15/guest-access-reservation-reconciliation-fence.e15-1.test.ts
           npx tsc -p tsconfig.guest-journey-enterprise-e15.json
 
       - name: Access Owner and Runtime Truth regressions
@@ -52,7 +52,7 @@ jobs:
           node --import tsx --test src/services/guest-journey-tenant-property-scope.policy.test.ts
           npx tsc -p tsconfig.guest-journey-enterprise-tenant-scope.json
 
-      - name: Provider read-only structural fence
+      - name: Provider read-only and reservation-fence structural gate
         shell: bash
         run: |
           set -euo pipefail
@@ -85,6 +85,16 @@ jobs:
               raise SystemExit("E15_PROVIDER_GET_BOUNDARY_MISSING")
           if "/v3/lock/listKeyboardPwd" not in service:
               raise SystemExit("E15_PROVIDER_INVENTORY_ENDPOINT_MISSING")
+          fence = Path("src/e15/guest-access-reservation-reconciliation-fence.e15-1.ts").read_text(encoding="utf-8")
+          required = [
+              'FROM "Reservation" WHERE "id" = $1 FOR UPDATE',
+              'FROM "AccessGrant" WHERE "reservationId" = $1 ORDER BY "id" FOR UPDATE',
+              'isolationLevel: "Serializable"',
+              'GUEST_ACCESS_E15_1_RESERVATION_RELEASE_CAS_LOST',
+          ]
+          missing = [item for item in required if item not in fence]
+          if missing:
+              raise SystemExit(f"E15_1_RESERVATION_FENCE_MISSING:{missing}")
           PY
 
       - name: Worker bundle
@@ -104,5 +114,5 @@ jobs:
           set -euo pipefail
           base_sha="${{ github.event.pull_request.base.sha }}"
           if [ -n "${base_sha}" ]; then
-            test -z "$(git diff --name-only "${base_sha}"...HEAD | grep -E '^prisma/migrations/|^package(-lock)?\.json$' || true)"
+            test -z "$(git diff --name-only "${base_sha}"...HEAD | grep -E '^prisma/migrations/|^prisma/schema\.prisma$|^package(-lock)?\.json$|^src/workers/reservation\.worker\.ts$|^src/e14/' || true)"
           fi
