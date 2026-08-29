@@ -66,9 +66,36 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          ! grep -R -nE 'activateGrant|deactivateGrant|ttlockGetPasscode|ttlockCreatePasscode|ttlockChangePasscode|ttlockDeletePasscode|keyboardPwd/(add|change|delete)|method:[[:space:]]*["'"'](POST|PUT|PATCH|DELETE)["'"']' src/e15
-          grep -R -n 'method: "GET"' src/e15/guest-access-ambiguity-reconciliation.e15.ts
-          grep -R -n '/v3/lock/listKeyboardPwd' src/e15/guest-access-ambiguity-reconciliation.e15.ts
+          python - <<'PY'
+          from pathlib import Path
+          text = "\n".join(
+              path.read_text(encoding="utf-8")
+              for path in sorted(Path("src/e15").glob("*.ts"))
+          )
+          forbidden = [
+              "activateGrant",
+              "deactivateGrant",
+              "ttlockGetPasscode",
+              "ttlockCreatePasscode",
+              "ttlockChangePasscode",
+              "ttlockDeletePasscode",
+              "/keyboardPwd/add",
+              "/keyboardPwd/change",
+              "/keyboardPwd/delete",
+              'method: "POST"',
+              'method: "PUT"',
+              'method: "PATCH"',
+              'method: "DELETE"',
+          ]
+          found = [item for item in forbidden if item in text]
+          if found:
+              raise SystemExit(f"E15_PROVIDER_MUTATION_SYMBOLS_PRESENT:{found}")
+          service = Path("src/e15/guest-access-ambiguity-reconciliation.e15.ts").read_text(encoding="utf-8")
+          if 'method: "GET"' not in service:
+              raise SystemExit("E15_PROVIDER_GET_BOUNDARY_MISSING")
+          if "/v3/lock/listKeyboardPwd" not in service:
+              raise SystemExit("E15_PROVIDER_INVENTORY_ENDPOINT_MISSING")
+          PY
 
       - name: Worker bundle
         run: |
