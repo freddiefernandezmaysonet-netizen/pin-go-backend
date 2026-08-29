@@ -37,6 +37,7 @@ jobs:
           python scripts/patch-exit-closure-a-part1.py
           python scripts/patch-exit-closure-a-part2.py
           python scripts/patch-exit-closure-a-part3.py
+          python scripts/normalize-exit-closure-a.py
 
       - run: npm ci
       - run: npx prisma generate --schema prisma/schema.prisma
@@ -163,5 +164,3 @@ jobs:
           git diff --cached --check
           git commit -m 'Integrate APMS Exit Closure A access ambiguity handoff'
           git push origin HEAD:agent/apms-exit-closure-a-canonical-access-ambiguity-handoff
-
-# Retrigger marker: policy type coupling removed; technical gate unchanged.
