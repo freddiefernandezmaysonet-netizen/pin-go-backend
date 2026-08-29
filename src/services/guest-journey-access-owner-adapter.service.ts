@@ -43,6 +43,9 @@ import {
   buildGuestJourneyAccessOwnerE14OwnerId,
   mapGuestJourneyAccessOwnerE14ProvisionResult,
 } from "./guest-access-exit-closure-a.policy";
+import {
+  quarantineActiveProviderOutcomeUnderReservationFenceE15_1,
+} from "../e15/guest-access-reservation-reconciliation-fence.e15-1";
 import type {
   AccessOwnerCompletion,
   ClaimedAccessIntent,
@@ -60,6 +63,8 @@ type AdapterDependencies = {
   assertTenantProviderAuth: typeof assertOrgTtlockAuthConfigured;
   executeProvisioningFence: typeof executeGuestAccessProvisioningWithFence;
   evaluateReadiness: typeof evaluateGuestAccessReadiness;
+  quarantineActiveOutcome:
+    typeof quarantineActiveProviderOutcomeUnderReservationFenceE15_1;
 };
 
 const DEFAULT_DEPENDENCIES: AdapterDependencies = {
@@ -74,6 +79,8 @@ const DEFAULT_DEPENDENCIES: AdapterDependencies = {
   assertTenantProviderAuth: assertOrgTtlockAuthConfigured,
   executeProvisioningFence: executeGuestAccessProvisioningWithFence,
   evaluateReadiness: evaluateGuestAccessReadiness,
+  quarantineActiveOutcome:
+    quarantineActiveProviderOutcomeUnderReservationFenceE15_1,
 };
 
 const reservationSelect = {
@@ -421,6 +428,42 @@ async function executeProvisioning(
     },
   });
   if (releaseUpdate.count !== 1) {
+    const latest = await loadReservation(prisma, claim);
+    if (provisioningSatisfied(latest)) {
+      return {
+        kind: "SUCCEEDED",
+        action: "ALREADY_SATISFIED",
+        accessGrantIds: [grant.id],
+        outcomeEvidenceFingerprint:
+          evidenceFingerprint(latest),
+      };
+    }
+
+    const active = latest.accessGrants.find(
+      (item: any) => item.id === grant.id
+    );
+    if (
+      active?.status === AccessStatus.ACTIVE &&
+      active.ttlockKeyboardPwdId &&
+      active.secureAccessCode
+    ) {
+      await dependencies.quarantineActiveOutcome(
+        prisma,
+        {
+          grantId: grant.id,
+          reservationId: claim.reservationId,
+          organizationId: claim.organizationId,
+          propertyId: claim.propertyId,
+          startsAt: snapshot.checkIn,
+          endsAt: snapshot.checkOut,
+          ttlockLockId: Number(active.lock.ttlockLockId),
+          now,
+          reason:
+            "GUEST_ACCESS_PROVISION_AMBIGUOUS:OWNER_RELEASE_PERSISTENCE_FENCE_LOST",
+        }
+      );
+    }
+
     return {
       kind: "AMBIGUOUS",
       errorCode: "ACCESS_PROVISIONING_RELEASE_PERSISTENCE_FENCE_LOST",

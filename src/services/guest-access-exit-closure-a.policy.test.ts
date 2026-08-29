@@ -195,3 +195,16 @@ test("confirmed provider absence advertises controlled rearm as the next automat
     /controlled rearm/i
   );
 });
+
+
+test("manual E15 marker makes owner exhaustion developer-actionable", () => {
+  assert.equal(
+    isGuestAccessE15AutoResolvableOwnerExhaustion({
+      e15Enabled: true,
+      intentType: "REQUEST_ACCESS_PROVISIONING",
+      lastError: "ACCESS_PROVISIONING_PROVIDER_RESULT_AMBIGUOUS",
+      markerState: "MANUAL_REVIEW_REQUIRED",
+    }),
+    false
+  );
+});

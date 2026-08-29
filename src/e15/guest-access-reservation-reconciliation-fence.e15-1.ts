@@ -102,6 +102,18 @@ export type ReconcileLateProviderSuccessE15_1Input =
     payload: Prisma.InputJsonValue;
   };
 
+export type QuarantineActiveProviderOutcomeE15_1Input = {
+  grantId: string;
+  reservationId: string;
+  organizationId: string;
+  propertyId: string;
+  startsAt: Date;
+  endsAt: Date;
+  ttlockLockId: number;
+  now: Date;
+  reason: string;
+};
+
 export type ReconcileAccessIntentE15_1Input = {
   intentId: string;
   reservationId: string;
@@ -443,6 +455,61 @@ export async function reconcileLateProviderSuccessUnderReservationFenceE15_1(
         );
       }
       return true;
+    }
+  );
+  return result === true;
+}
+
+export async function quarantineActiveProviderOutcomeUnderReservationFenceE15_1(
+  prisma: PrismaClient,
+  input: QuarantineActiveProviderOutcomeE15_1Input
+): Promise<boolean> {
+  const result = await withReservationFence(
+    prisma,
+    input.reservationId,
+    async (tx, reservation) => {
+      if (
+        reservation.property.organizationId !== input.organizationId ||
+        reservation.propertyId !== input.propertyId
+      ) {
+        return false;
+      }
+
+      const target = reservation.accessGrants.find(
+        (grant) => grant.id === input.grantId
+      );
+      if (
+        !target ||
+        target.status !== AccessStatus.ACTIVE ||
+        !sameInstant(target.startsAt, input.startsAt) ||
+        !sameInstant(target.endsAt, input.endsAt) ||
+        positiveTtlockLockId(target) !== input.ttlockLockId ||
+        !target.ttlockKeyboardPwdId ||
+        !target.secureAccessCode
+      ) {
+        return false;
+      }
+
+      const updated = await tx.accessGrant.updateMany({
+        where: {
+          id: target.id,
+          reservationId: reservation.id,
+          status: AccessStatus.ACTIVE,
+          startsAt: input.startsAt,
+          endsAt: input.endsAt,
+          recoveryOperation: target.recoveryOperation,
+          recoveryAttemptCount: target.recoveryAttemptCount,
+          updatedAt: target.updatedAt,
+        },
+        data: {
+          recoveryOperation:
+            GUEST_ACCESS_PROVISION_OPERATION.AMBIGUOUS,
+          recoveryNextAttemptAt: null,
+          recoveryExhaustedAt: input.now,
+          lastError: input.reason,
+        },
+      });
+      return updated.count === 1;
     }
   );
   return result === true;

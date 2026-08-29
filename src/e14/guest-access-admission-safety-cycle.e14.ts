@@ -31,7 +31,12 @@ export async function runGuestAccessAdmissionSafetyCycle(
   const recovery =
     await recoverStaleGuestAccessProvisioningFences(
       prisma,
-      { now, limit }
+      {
+        now,
+        limit,
+        deferActiveSuccessToE15:
+          input.e15Enabled === true,
+      }
     );
 
   const reservationIds =

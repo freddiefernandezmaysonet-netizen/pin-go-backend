@@ -181,9 +181,11 @@ export function isGuestAccessE15AutoResolvableOwnerExhaustion(input: {
   e15Enabled: boolean;
   intentType: string;
   lastError: string | null;
+  markerState?: GuestAccessE15MarkerState;
 }): boolean {
   return (
     input.e15Enabled &&
+    input.markerState !== "MANUAL_REVIEW_REQUIRED" &&
     input.intentType === "REQUEST_ACCESS_PROVISIONING" &&
     String(input.lastError ?? "").toUpperCase().includes("AMBIGUOUS")
   );

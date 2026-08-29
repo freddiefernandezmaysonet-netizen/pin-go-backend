@@ -14,6 +14,7 @@ import {
 } from "../e14/guest-access-admission-fence.policy.e14";
 import {
   adoptProviderCredentialUnderReservationFenceE15_1,
+  quarantineActiveProviderOutcomeUnderReservationFenceE15_1,
   reconcileLateProviderSuccessUnderReservationFenceE15_1,
   rearmAmbiguousGrantUnderReservationFenceE15_1,
   reconcileAccessIntentUnderReservationFenceE15_1,
@@ -504,4 +505,43 @@ test("Exit Closure A refuses late success when provider id contradicts durable l
     false
   );
   assert.equal(db.calls.includes("UPDATE_GRANT"), false);
+});
+
+
+test("Closure A quarantines ACTIVE durable outcome after owner release CAS loss", async () => {
+  const db = buildDb({
+    reservation: reservation({
+      accessGrants: [grant({
+        status: AccessStatus.ACTIVE,
+        recoveryOperation: null,
+        recoveryAttemptCount: 0,
+        ttlockKeyboardPwdId: 5001,
+        secureAccessCode: { id: "code1" },
+      })],
+    }),
+  });
+  assert.equal(
+    await quarantineActiveProviderOutcomeUnderReservationFenceE15_1(
+      db.prisma,
+      {
+        grantId: "g1",
+        reservationId: "r1",
+        organizationId: "o1",
+        propertyId: "p1",
+        startsAt: checkIn,
+        endsAt: checkOut,
+        ttlockLockId: 101,
+        now,
+        reason: "GUEST_ACCESS_PROVISION_AMBIGUOUS:OWNER_RELEASE_PERSISTENCE_FENCE_LOST",
+      }
+    ),
+    true
+  );
+  assert.deepEqual(db.calls.slice(0, 4), [
+    "TX:Serializable",
+    "LOCK_RESERVATION",
+    "LOCK_GRANTS",
+    "READ_RESERVATION",
+  ]);
+  assert.equal(db.calls.includes("UPDATE_RESERVATION"), false);
 });

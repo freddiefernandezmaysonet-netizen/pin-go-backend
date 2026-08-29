@@ -664,6 +664,7 @@ export async function recoverStaleGuestAccessProvisioningFences(
   input: {
     now?: Date;
     limit?: number;
+    deferActiveSuccessToE15?: boolean;
   } = {}
 ) {
   const now = input.now ?? new Date();
@@ -738,6 +739,28 @@ export async function recoverStaleGuestAccessProvisioningFences(
         grant.ttlockKeyboardPwdId &&
           grant.secureAccessCode
       );
+
+      if (durableSuccess && input.deferActiveSuccessToE15) {
+        if (state === "AMBIGUOUS" && !grant.recoveryNextAttemptAt) {
+          ambiguous += 1;
+          continue;
+        }
+
+        const deferred = await db.accessGrant.updateMany({
+          where: compareFenceSnapshot(grant),
+          data: {
+            recoveryOperation:
+              GUEST_ACCESS_PROVISION_OPERATION.AMBIGUOUS,
+            recoveryNextAttemptAt: null,
+            recoveryExhaustedAt: now,
+            lastError:
+              "GUEST_ACCESS_PROVISION_AMBIGUOUS:LATE_PROVIDER_SUCCESS_REQUIRES_E15",
+          },
+        });
+        if (deferred.count === 1) ambiguous += 1;
+        else races += 1;
+        continue;
+      }
 
       if (
         !durableSuccess &&

@@ -102,6 +102,7 @@ function provisioningDependencies(
   return {
     isEntitled: async () => ({ ok: true, reason: "ENTITLED" }),
     assertTenantProviderAuth: async () => undefined,
+    quarantineActiveOutcome: async () => true,
     activate: async (grantId: string) => {
       assert.equal(grantId, "grant-1");
       state.accessGrants[0].status = AccessStatus.ACTIVE;

@@ -5,6 +5,7 @@ import {
 
 import { upsertOperationalIssue } from "../apms/operational-intelligence.service";
 import {
+  guestAccessE15MarkerStateFromPayload,
   guestAccessE15NextAutomaticStep,
   isGuestAccessE15AutoResolvableOwnerExhaustion,
 } from "./guest-access-exit-closure-a.policy";
@@ -49,6 +50,13 @@ export async function syncGuestJourneyAccessOwnerMissionControl(
           guestName: true,
           propertyId: true,
           property: { select: { organizationId: true } },
+          accessGrants: {
+            where: {
+              type: "GUEST",
+              method: "PASSCODE_TIMEBOUND",
+            },
+            select: { ttlockPayload: true },
+          },
         },
       },
     },
@@ -132,11 +140,27 @@ export async function syncGuestJourneyAccessOwnerMissionControl(
     return { action: "RESOLVED", operationalIssueWrites: 1, externalSideEffects: 0 };
   }
 
+  const markerStates =
+    (Array.isArray(intent.reservation.accessGrants)
+      ? intent.reservation.accessGrants
+      : []
+    ).map((grant) =>
+      guestAccessE15MarkerStateFromPayload(
+        grant.ttlockPayload
+      )
+    );
+  const e15MarkerState =
+    markerStates.find(
+      (state) => state === "MANUAL_REVIEW_REQUIRED"
+    ) ??
+    markerStates.find((state) => state !== null) ??
+    null;
   const e15AutoResolving =
     isGuestAccessE15AutoResolvableOwnerExhaustion({
       e15Enabled: expectedScope.e15Enabled === true,
       intentType: intent.intentType,
       lastError: intent.lastError,
+      markerState: e15MarkerState,
     });
   const desiredWorkflowState = e15AutoResolving
     ? "AUTO_RESOLVING"
@@ -166,7 +190,9 @@ export async function syncGuestJourneyAccessOwnerMissionControl(
       ? null
       : "Reconcile the correlated grant and TTLock evidence before rearming this intent.",
     nextAutomaticStep: e15AutoResolving
-      ? guestAccessE15NextAutomaticStep(null)
+      ? guestAccessE15NextAutomaticStep(
+          e15MarkerState
+        )
       : null,
     engine: "GUEST_JOURNEY",
     severity: e15AutoResolving ? "WARNING" : "CRITICAL",
@@ -197,6 +223,7 @@ export async function syncGuestJourneyAccessOwnerMissionControl(
       status: intent.status,
       claimCount: intent.claimCount,
       errorCode: intent.lastError,
+      e15MarkerState,
     },
     transitionCode: e15AutoResolving
       ? "GUEST_JOURNEY_ACCESS_OWNER_DELEGATED_TO_E15"
