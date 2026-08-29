@@ -3,6 +3,7 @@ import test from "node:test";
 
 import type { GuestJourneyAccessOwnerConfig } from "./guest-journey-access-owner.config";
 import { runGuestJourneyAccessOwnerCycle } from "./guest-journey-access-owner-cycle.service";
+import { resolveGuestJourneyAccessOwnerHandoff } from "./guest-journey-access-owner-handoff.service";
 
 const now = new Date("2026-08-23T14:00:00.000Z");
 
@@ -196,4 +197,197 @@ test("E8 isolates one intent failure and reports a stable error code", async () 
   assert.equal(claims, 2);
   assert.equal(metrics.errors, 2);
   assert.equal(metrics.errorCodeCounts.ACCESS_TEST_FAILURE, 2);
+});
+
+
+
+const handoffNow = new Date("2026-08-29T20:00:00.000Z");
+const handoffDayMs = 24 * 60 * 60 * 1000;
+
+const handoffActiveReservation = {
+  id: "reservation-1",
+  propertyId: "property-1",
+  status: "ACTIVE",
+  checkIn: new Date(handoffNow.getTime() + 60 * 60 * 1000),
+  checkOut: new Date(handoffNow.getTime() + 2 * handoffDayMs),
+  cancelledAt: null,
+  updatedAt: handoffNow,
+  property: { organizationId: "org-1" },
+};
+
+const handoffRecentCheckout = {
+  ...handoffActiveReservation,
+  checkIn: new Date(handoffNow.getTime() - 3 * handoffDayMs),
+  checkOut: new Date(handoffNow.getTime() - 60 * 60 * 1000),
+};
+
+const handoffAncientCheckout = {
+  ...handoffActiveReservation,
+  checkIn: new Date(handoffNow.getTime() - 40 * handoffDayMs),
+  checkOut: new Date(handoffNow.getTime() - 30 * handoffDayMs),
+  updatedAt: new Date(handoffNow.getTime() - 30 * handoffDayMs),
+};
+
+function handoffDb(input: {
+  reservation?: any | null;
+  activeIntent?: { id: string; status: string } | null;
+  terminalIntent?: { id: string; status: string } | null;
+  errorAt?: "reservation" | "activeIntent" | "terminalIntent";
+}) {
+  const queries: Array<{ model: string; query: any }> = [];
+  return {
+    queries,
+    prisma: {
+      reservation: {
+        findUnique: async (query: any) => {
+          queries.push({ model: "reservation", query });
+          if (input.errorAt === "reservation") {
+            throw new Error("DATABASE_UNAVAILABLE: reservation");
+          }
+          return input.reservation === undefined
+            ? handoffActiveReservation
+            : input.reservation;
+        },
+      },
+      guestJourneyCoordinationIntent: {
+        findFirst: async (query: any) => {
+          queries.push({ model: "intent", query });
+          const statuses = query?.where?.status?.in ?? [];
+          const activeQuery = statuses.includes("PENDING");
+          if (activeQuery) {
+            if (input.errorAt === "activeIntent") {
+              throw new Error("DATABASE_UNAVAILABLE: active-intent");
+            }
+            return input.activeIntent ?? null;
+          }
+          if (input.errorAt === "terminalIntent") {
+            throw new Error("DATABASE_UNAVAILABLE: terminal-intent");
+          }
+          return input.terminalIntent ?? null;
+        },
+      },
+    } as any,
+  };
+}
+
+const handoffIdentity = {
+  accessOwnerInScope: true,
+  reservationId: "reservation-1",
+  organizationId: "org-1",
+  propertyId: "property-1",
+  now: handoffNow,
+  internalReconcile: {
+    enabled: true,
+    horizonDays: 90,
+    lookbackDays: 7,
+  },
+  coordination: {
+    enabled: true,
+    horizonDays: 90,
+    lookbackDays: 7,
+  },
+} as const;
+
+test("E8 cutover holds due provisioning at APMS boundary before durable intent materialization", async () => {
+  const state = handoffDb({ reservation: handoffActiveReservation });
+  const result = await resolveGuestJourneyAccessOwnerHandoff(
+    state.prisma,
+    { ...handoffIdentity, operation: "PROVISION" }
+  );
+  assert.deepEqual(result, {
+    owner: "APMS_PENDING",
+    reason: "APMS_ADOPTION_WINDOW_PENDING_DURABLE_ACCESS_INTENT",
+    intentId: null,
+  });
+});
+
+test("E8 cutover holds recent checkout revocation at APMS boundary before durable intent materialization", async () => {
+  const state = handoffDb({ reservation: handoffRecentCheckout });
+  const result = await resolveGuestJourneyAccessOwnerHandoff(
+    state.prisma,
+    { ...handoffIdentity, operation: "REVOKE" }
+  );
+  assert.equal(result.owner, "APMS_PENDING");
+});
+
+test("E8 cutover preserves ancient legacy checkout ownership outside E3/E4 adoption window", async () => {
+  const state = handoffDb({ reservation: handoffAncientCheckout });
+  const result = await resolveGuestJourneyAccessOwnerHandoff(
+    state.prisma,
+    { ...handoffIdentity, operation: "REVOKE" }
+  );
+  assert.deepEqual(result, {
+    owner: "LEGACY",
+    reason: "OUTSIDE_APMS_ADOPTION_WINDOW_WITHOUT_DURABLE_ACCESS_OWNERSHIP",
+    intentId: null,
+  });
+});
+
+for (const status of ["PENDING", "CLAIMED", "WAITING_FOR_EVIDENCE", "RETRYABLE"]) {
+  test(`E8 cutover reserves ${status} operation ownership to Access Owner`, async () => {
+    const state = handoffDb({
+      reservation: handoffActiveReservation,
+      activeIntent: { id: "intent-1", status },
+    });
+    const result = await resolveGuestJourneyAccessOwnerHandoff(
+      state.prisma,
+      { ...handoffIdentity, operation: "PROVISION" }
+    );
+    assert.equal(result.owner, "ACCESS_OWNER");
+    const intentQuery = state.queries.find((entry) => entry.model === "intent")!.query;
+    assert.equal(intentQuery.where.reservationId, "reservation-1");
+    assert.equal(intentQuery.where.targetEngine, "ACCESS");
+    assert.equal(intentQuery.where.intentType, "REQUEST_ACCESS_PROVISIONING");
+    assert.deepEqual(intentQuery.where.status.in, [
+      "PENDING",
+      "CLAIMED",
+      "WAITING_FOR_EVIDENCE",
+      "RETRYABLE",
+    ]);
+  });
+}
+
+test("E8 cutover revocation ownership is operation-specific", async () => {
+  const state = handoffDb({
+    reservation: handoffRecentCheckout,
+    activeIntent: { id: "intent-r", status: "PENDING" },
+  });
+  const result = await resolveGuestJourneyAccessOwnerHandoff(
+    state.prisma,
+    { ...handoffIdentity, operation: "REVOKE" }
+  );
+  assert.equal(result.owner, "ACCESS_OWNER");
+  const intentQuery = state.queries.find((entry) => entry.model === "intent")!.query;
+  assert.equal(intentQuery.where.intentType, "REQUEST_ACCESS_REVOCATION_CHECK");
+});
+
+test("E8 cutover blocks ancient EXHAUSTED durable ownership instead of falling back to legacy", async () => {
+  const state = handoffDb({
+    reservation: handoffAncientCheckout,
+    terminalIntent: { id: "intent-exhausted", status: "EXHAUSTED" },
+  });
+  const result = await resolveGuestJourneyAccessOwnerHandoff(
+    state.prisma,
+    { ...handoffIdentity, operation: "REVOKE" }
+  );
+  assert.deepEqual(result, {
+    owner: "BLOCKED",
+    reason: "ACCESS_OWNER_HANDOFF_EXHAUSTED",
+    intentId: "intent-exhausted",
+    errorCode: "GUEST_JOURNEY_ACCESS_OWNER_HANDOFF_EXHAUSTED",
+  });
+});
+
+test("E8 cutover lookup failure is fail-closed instead of provider fallback", async () => {
+  const state = handoffDb({ errorAt: "reservation" });
+  const result = await resolveGuestJourneyAccessOwnerHandoff(
+    state.prisma,
+    { ...handoffIdentity, operation: "REVOKE" }
+  );
+  assert.deepEqual(result, {
+    owner: "BLOCKED",
+    reason: "ACCESS_OWNER_HANDOFF_LOOKUP_FAILED",
+    intentId: null,
+    errorCode: "DATABASE_UNAVAILABLE",
+  });
 });

@@ -79,6 +79,9 @@ import {
   isGuestJourneyAccessOwnerScope,
 } from "../services/guest-journey-access-owner.config";
 import {
+  resolveGuestJourneyAccessOwnerHandoff,
+} from "../services/guest-journey-access-owner-handoff.service";
+import {
   runGuestJourneyAccessOwnerCycle,
 } from "../services/guest-journey-access-owner-cycle.service";
 import {
@@ -995,7 +998,7 @@ async function processCheckins(now: Date) {
         continue;
       }
 
-      if (
+      const accessOwnerInScope =
         isGuestJourneyAccessOwnerScope(
           GUEST_JOURNEY_ACCESS_OWNER_CONFIG,
           {
@@ -1005,7 +1008,43 @@ async function processCheckins(now: Date) {
             propertyId:
               reservation.propertyId,
           }
-        )
+        );
+      const accessHandoff =
+        await resolveGuestJourneyAccessOwnerHandoff(
+          prisma,
+          {
+            accessOwnerInScope,
+            reservationId:
+              reservation.id,
+            organizationId:
+              reservation.property
+                ?.organizationId,
+            propertyId:
+              reservation.propertyId,
+            operation: "PROVISION",
+            now,
+            internalReconcile: {
+              enabled:
+                GUEST_JOURNEY_INTERNAL_RECONCILE_CONFIG.enabled,
+              horizonDays:
+                GUEST_JOURNEY_INTERNAL_RECONCILE_CONFIG.horizonDays,
+              lookbackDays:
+                GUEST_JOURNEY_INTERNAL_RECONCILE_CONFIG.lookbackDays,
+            },
+            coordination: {
+              enabled:
+                GUEST_JOURNEY_COORDINATION_CONFIG.enabled,
+              horizonDays:
+                GUEST_JOURNEY_COORDINATION_CONFIG.horizonDays,
+              lookbackDays:
+                GUEST_JOURNEY_COORDINATION_CONFIG.lookbackDays,
+            },
+          }
+        );
+
+      if (
+        accessHandoff.owner ===
+        "ACCESS_OWNER"
       ) {
         log(
           "legacy guest access provisioning yielded to Guest Journey ACCESS owner",
@@ -1013,6 +1052,45 @@ async function processCheckins(now: Date) {
             reservationId:
               reservation.id,
             accessGrantId: grant.id,
+            intentId:
+              accessHandoff.intentId,
+          }
+        );
+        continue;
+      }
+
+      if (
+        accessHandoff.owner ===
+        "APMS_PENDING"
+      ) {
+        log(
+          "legacy guest access provisioning deferred pending Guest Journey ACCESS coordination",
+          {
+            reservationId:
+              reservation.id,
+            accessGrantId: grant.id,
+            handoffReason:
+              accessHandoff.reason,
+          }
+        );
+        continue;
+      }
+
+      if (
+        accessHandoff.owner === "BLOCKED"
+      ) {
+        errLog(
+          "legacy guest access provisioning blocked by APMS ownership fence",
+          {
+            reservationId:
+              reservation.id,
+            accessGrantId: grant.id,
+            intentId:
+              accessHandoff.intentId,
+            handoffReason:
+              accessHandoff.reason,
+            errorCode:
+              accessHandoff.errorCode,
           }
         );
         continue;
@@ -1611,7 +1689,7 @@ async function processCheckouts(now: Date) {
         continue;
       }
 
-      if (
+      const accessOwnerInScope =
         isGuestJourneyAccessOwnerScope(
           GUEST_JOURNEY_ACCESS_OWNER_CONFIG,
           {
@@ -1621,7 +1699,43 @@ async function processCheckouts(now: Date) {
             propertyId:
               reservation.propertyId,
           }
-        )
+        );
+      const accessHandoff =
+        await resolveGuestJourneyAccessOwnerHandoff(
+          prisma,
+          {
+            accessOwnerInScope,
+            reservationId:
+              reservation.id,
+            organizationId:
+              reservation.property
+                ?.organizationId,
+            propertyId:
+              reservation.propertyId,
+            operation: "REVOKE",
+            now,
+            internalReconcile: {
+              enabled:
+                GUEST_JOURNEY_INTERNAL_RECONCILE_CONFIG.enabled,
+              horizonDays:
+                GUEST_JOURNEY_INTERNAL_RECONCILE_CONFIG.horizonDays,
+              lookbackDays:
+                GUEST_JOURNEY_INTERNAL_RECONCILE_CONFIG.lookbackDays,
+            },
+            coordination: {
+              enabled:
+                GUEST_JOURNEY_COORDINATION_CONFIG.enabled,
+              horizonDays:
+                GUEST_JOURNEY_COORDINATION_CONFIG.horizonDays,
+              lookbackDays:
+                GUEST_JOURNEY_COORDINATION_CONFIG.lookbackDays,
+            },
+          }
+        );
+
+      if (
+        accessHandoff.owner ===
+        "ACCESS_OWNER"
       ) {
         log(
           "legacy guest access revocation yielded to Guest Journey ACCESS owner",
@@ -1629,6 +1743,45 @@ async function processCheckouts(now: Date) {
             reservationId:
               reservation.id,
             accessGrantId: grant.id,
+            intentId:
+              accessHandoff.intentId,
+          }
+        );
+        continue;
+      }
+
+      if (
+        accessHandoff.owner ===
+        "APMS_PENDING"
+      ) {
+        log(
+          "legacy guest access revocation deferred pending Guest Journey ACCESS coordination",
+          {
+            reservationId:
+              reservation.id,
+            accessGrantId: grant.id,
+            handoffReason:
+              accessHandoff.reason,
+          }
+        );
+        continue;
+      }
+
+      if (
+        accessHandoff.owner === "BLOCKED"
+      ) {
+        errLog(
+          "legacy guest access revocation blocked by APMS ownership fence",
+          {
+            reservationId:
+              reservation.id,
+            accessGrantId: grant.id,
+            intentId:
+              accessHandoff.intentId,
+            handoffReason:
+              accessHandoff.reason,
+            errorCode:
+              accessHandoff.errorCode,
           }
         );
         continue;
