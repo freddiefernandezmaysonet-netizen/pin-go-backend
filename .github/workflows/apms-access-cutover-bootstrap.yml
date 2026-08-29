@@ -24,7 +24,8 @@ jobs:
         run: |
           set -euo pipefail
           expected_base='eb696056d7fe00df66fc339176b54b1422b20423'
-          test "$(git rev-parse HEAD^)" = "$expected_base"
+          test "$(git merge-base "$expected_base" HEAD)" = "$expected_base"
+          test "$(git rev-list --count "$expected_base"..HEAD)" -le 2
           git diff --name-only "$expected_base"...HEAD | sort > /tmp/bootstrap-files.txt
           cat > /tmp/expected-bootstrap-files.txt <<'EOF'
           .apms-access-cutover/patches/apply-access-cutover-closure.py
@@ -93,7 +94,10 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          git diff --name-only eb696056d7fe00df66fc339176b54b1422b20423 | sort > /tmp/final-files.txt
+          {
+            git diff --name-only eb696056d7fe00df66fc339176b54b1422b20423
+            git ls-files --others --exclude-standard
+          } | sort -u > /tmp/final-files.txt
           printf '%s\n' \
             'src/e14/guest-access-worker-integration.e14.test.ts' \
             'src/services/guest-journey-access-owner-cycle.service.test.ts' \
