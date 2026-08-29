@@ -250,3 +250,44 @@ test("default-off legacy grant behavior remains present", () => {
     /await activateGrant\(grant\.id\)/
   );
 });
+
+
+test("Access cutover fences current APMS work and preserves only out-of-window legacy debt", () => {
+  const checkinIndex = workerSource.indexOf(
+    "async function processCheckins"
+  );
+  const checkoutIndex = workerSource.indexOf(
+    "async function processCheckouts"
+  );
+  const checkinSource = workerSource.slice(
+    checkinIndex,
+    checkoutIndex
+  );
+  const checkoutSource = workerSource.slice(
+    checkoutIndex
+  );
+
+  assert.match(
+    checkinSource,
+    /resolveGuestJourneyAccessOwnerHandoff\([\s\S]*operation:\s*"PROVISION"[\s\S]*internalReconcile:[\s\S]*GUEST_JOURNEY_INTERNAL_RECONCILE_CONFIG[\s\S]*coordination:[\s\S]*GUEST_JOURNEY_COORDINATION_CONFIG/
+  );
+  assert.match(
+    checkoutSource,
+    /resolveGuestJourneyAccessOwnerHandoff\([\s\S]*operation:\s*"REVOKE"[\s\S]*internalReconcile:[\s\S]*GUEST_JOURNEY_INTERNAL_RECONCILE_CONFIG[\s\S]*coordination:[\s\S]*GUEST_JOURNEY_COORDINATION_CONFIG/
+  );
+  assert.match(checkinSource, /accessHandoff\.owner ===\s*"ACCESS_OWNER"/);
+  assert.match(checkoutSource, /accessHandoff\.owner ===\s*"ACCESS_OWNER"/);
+  assert.match(checkinSource, /accessHandoff\.owner ===\s*"APMS_PENDING"/);
+  assert.match(checkoutSource, /accessHandoff\.owner ===\s*"APMS_PENDING"/);
+  assert.match(checkinSource, /accessHandoff\.owner === "BLOCKED"/);
+  assert.match(checkoutSource, /accessHandoff\.owner === "BLOCKED"/);
+
+  const oldScopeOnlyYield =
+    /if\s*\(\s*isGuestJourneyAccessOwnerScope\([\s\S]*?\)\s*\)\s*\{[\s\S]*?yielded to Guest Journey ACCESS owner/;
+  assert.equal(oldScopeOnlyYield.test(checkinSource), false);
+  assert.equal(oldScopeOnlyYield.test(checkoutSource), false);
+
+  // LEGACY remains a real fallback only after the handoff resolver returns it.
+  assert.match(checkinSource, /await activateGrant\(grant\.id\)/);
+  assert.match(checkoutSource, /await deactivateGrant\(grant\.id\)/);
+});
