@@ -26,6 +26,11 @@ import {
 import type {
   GuestAccessAmbiguityE15Config,
 } from "./guest-access-ambiguity-reconciliation.config.e15";
+import {
+  adoptProviderCredentialUnderReservationFenceE15_1,
+  rearmAmbiguousGrantUnderReservationFenceE15_1,
+  reconcileAccessIntentUnderReservationFenceE15_1,
+} from "./guest-access-reservation-reconciliation-fence.e15-1";
 
 export const GUEST_ACCESS_AMBIGUITY_E15_VERSION =
   "guest_access_ambiguity_reconciliation_e15_v1" as const;
@@ -491,77 +496,35 @@ export async function runGuestAccessAmbiguityReconciliationCycle(
         observedAt: now.toISOString(),
       });
 
-      const adopted = await prisma.$transaction(async (tx) => {
-        const updated = await tx.accessGrant.updateMany({
-          where: {
-            id: grant.id,
-            status: AccessStatus.PENDING,
-            recoveryOperation: GUEST_ACCESS_PROVISION_OPERATION.AMBIGUOUS,
-            recoveryAttemptCount: grant.recoveryAttemptCount,
-            updatedAt: grant.updatedAt,
-          },
-          data: {
-            status: AccessStatus.ACTIVE,
-            ttlockKeyboardPwdId: item.keyboardPwdId,
-            accessCodeMasked: masked,
-            desiredStartsAt: grant.startsAt,
-            desiredEndsAt: grant.endsAt,
-            lastAppliedAt: now,
-            recoveryOperation: null,
-            recoveryAttemptCount: 0,
-            recoveryLastAttemptAt: null,
-            recoveryNextAttemptAt: null,
-            recoveryExhaustedAt: null,
-            lastError: null,
-            ttlockPayload: payload,
-          },
-        });
-        if (updated.count !== 1) return false;
-
-        await tx.accessCode.upsert({
-          where: { accessGrantId: grant.id },
-          create: {
-            accessGrantId: grant.id,
-            lockId: ttlockLockId,
-            method: "period",
-            keyboardPwdId: String(item.keyboardPwdId),
-            startDate: BigInt(item.startDate),
-            endDate: BigInt(item.endDate),
-            phone: reservation.guestPhone ?? null,
-            accessCodeEnc: encrypted,
-            accessCodeHash: hashed,
-            accessCodeMasked: masked,
-            expiresAt: grant.endsAt,
-          },
-          update: {
-            lockId: ttlockLockId,
-            method: "period",
-            keyboardPwdId: String(item.keyboardPwdId),
-            startDate: BigInt(item.startDate),
-            endDate: BigInt(item.endDate),
-            phone: reservation.guestPhone ?? null,
-            accessCodeEnc: encrypted,
-            accessCodeHash: hashed,
-            accessCodeMasked: masked,
-            expiresAt: grant.endsAt,
-          },
-        });
-
-        await tx.reservation.updateMany({
-          where: {
-            id: reservation.id,
-            propertyId: reservation.propertyId,
-            status: ReservationStatus.ACTIVE,
-            guestAccessReleaseStatus: GuestAccessReleaseStatus.ELIGIBLE,
-          },
-          data: {
-            guestAccessReleaseStatus: GuestAccessReleaseStatus.RELEASED,
-            guestAccessReleasedAt: now,
-            guestAccessReleaseLastError: null,
-          },
-        });
-        return true;
-      });
+      let adopted = false;
+      try {
+        adopted =
+          await adoptProviderCredentialUnderReservationFenceE15_1(
+            prisma,
+            {
+              grantId: grant.id,
+              reservationId: reservation.id,
+              organizationId,
+              propertyId: reservation.propertyId,
+              startsAt: grant.startsAt,
+              endsAt: grant.endsAt,
+              updatedAt: grant.updatedAt,
+              recoveryAttemptCount: grant.recoveryAttemptCount,
+              ttlockLockId,
+              now,
+              keyboardPwdId: item.keyboardPwdId,
+              code,
+              maskedCode: masked,
+              encryptedCode: encrypted,
+              hashedCode: hashed,
+              payload,
+              guestPhone: reservation.guestPhone ?? null,
+            }
+          );
+      } catch {
+        metrics.races += 1;
+        continue;
+      }
       if (adopted) metrics.reconciledPresent += 1;
       else metrics.races += 1;
       continue;
@@ -615,22 +578,30 @@ export async function runGuestAccessAmbiguityReconciliationCycle(
       state: "REARMED",
       reason: "CONFIRMED_PROVIDER_ABSENCE",
     };
-    const rearmed = await prisma.accessGrant.updateMany({
-      where: {
-        id: grant.id,
-        status: AccessStatus.PENDING,
-        recoveryOperation: GUEST_ACCESS_PROVISION_OPERATION.AMBIGUOUS,
-        recoveryAttemptCount: grant.recoveryAttemptCount,
-        updatedAt: grant.updatedAt,
-      },
-      data: {
-        recoveryOperation: GUEST_ACCESS_PROVISION_OPERATION.RETRYABLE,
-        recoveryNextAttemptAt: now,
-        recoveryExhaustedAt: null,
-        ttlockPayload: withMarker(grant.ttlockPayload, rearmedMarker),
-      },
-    });
-    if (rearmed.count === 1) metrics.rearmedGrants += 1;
+    let rearmed = false;
+    try {
+      rearmed =
+        await rearmAmbiguousGrantUnderReservationFenceE15_1(
+          prisma,
+          {
+            grantId: grant.id,
+            reservationId: reservation.id,
+            organizationId,
+            propertyId: reservation.propertyId,
+            startsAt: grant.startsAt,
+            endsAt: grant.endsAt,
+            updatedAt: grant.updatedAt,
+            recoveryAttemptCount: grant.recoveryAttemptCount,
+            ttlockLockId,
+            now,
+            payload: withMarker(grant.ttlockPayload, rearmedMarker),
+          }
+        );
+    } catch {
+      metrics.races += 1;
+      continue;
+    }
+    if (rearmed) metrics.rearmedGrants += 1;
     else metrics.races += 1;
   }
 
@@ -653,94 +624,49 @@ export async function runGuestAccessAmbiguityReconciliationCycle(
       reservation: {
         select: {
           id: true,
-          accessGrants: {
-            where: {
-              type: "GUEST",
-              method: AccessMethod.PASSCODE_TIMEBOUND,
-            },
-            select: {
-              id: true,
-              status: true,
-              ttlockKeyboardPwdId: true,
-              ttlockPayload: true,
-              secureAccessCode: { select: { id: true } },
-            },
-          },
+          propertyId: true,
+          property: { select: { organizationId: true } },
         },
       },
     },
   });
 
+  const intentRearmAllowed = controlledRearmPrerequisites({
+    configured: input.config.controlledRearmEnabled,
+    e14Enabled: input.e14Enabled,
+    accessOwnerEnabled: input.accessOwnerEnabled,
+  });
+
   for (const intent of intents) {
-    const active = intent.reservation.accessGrants.filter((grant) =>
-      grant.status === AccessStatus.ACTIVE &&
-      Boolean(grant.ttlockKeyboardPwdId) &&
-      Boolean(grant.secureAccessCode)
-    );
-    if (active.length === 1) {
-      const output = intentOutcomeFingerprint({
-        intentId: intent.id,
-        grantId: active[0].id,
-        keyboardPwdId: Number(active[0].ttlockKeyboardPwdId),
-      });
-      const updated = await prisma.guestJourneyCoordinationIntent.updateMany({
-        where: {
-          id: intent.id,
-          status: GuestJourneyCoordinationIntentStatus.EXHAUSTED,
-          claimCount: intent.claimCount,
-          updatedAt: intent.updatedAt,
-          lastError: intent.lastError,
-        },
-        data: {
-          status: GuestJourneyCoordinationIntentStatus.SUCCEEDED,
-          leaseToken: null,
-          claimedAt: null,
-          leaseExpiresAt: null,
-          nextActionAt: null,
-          succeededAt: now,
-          exhaustedAt: null,
-          outcomeEvidenceFingerprint: output,
-          lastError: null,
-        },
-      });
-      if (updated.count === 1) metrics.reconciledIntents += 1;
-      else metrics.races += 1;
+    let reconciliation;
+    try {
+      reconciliation =
+        await reconcileAccessIntentUnderReservationFenceE15_1(
+          prisma,
+          {
+            intentId: intent.id,
+            reservationId: intent.reservation.id,
+            organizationId:
+              intent.reservation.property.organizationId,
+            propertyId: intent.reservation.propertyId,
+            claimCount: intent.claimCount,
+            updatedAt: intent.updatedAt,
+            lastError: intent.lastError,
+            controlledRearmEnabled: intentRearmAllowed,
+            scope: input.scope,
+            now,
+          }
+        );
+    } catch {
+      metrics.races += 1;
       continue;
     }
 
-    if (!controlledRearmPrerequisites({
-      configured: input.config.controlledRearmEnabled,
-      e14Enabled: input.e14Enabled,
-      accessOwnerEnabled: input.accessOwnerEnabled,
-    })) {
-      continue;
+    if (reconciliation.action === "SUCCEEDED") {
+      metrics.reconciledIntents += 1;
+    } else if (reconciliation.action === "REARMED") {
+      metrics.rearmedIntents += 1;
     }
-    const rearmedGrant = intent.reservation.accessGrants.find((grant) =>
-      grant.status === AccessStatus.PENDING &&
-      markerFromPayload(grant.ttlockPayload)?.state === "REARMED"
-    );
-    if (!rearmedGrant) continue;
-
-    const updated = await prisma.guestJourneyCoordinationIntent.updateMany({
-      where: {
-        id: intent.id,
-        status: GuestJourneyCoordinationIntentStatus.EXHAUSTED,
-        claimCount: intent.claimCount,
-        updatedAt: intent.updatedAt,
-        lastError: intent.lastError,
-      },
-      data: {
-        status: GuestJourneyCoordinationIntentStatus.RETRYABLE,
-        leaseToken: null,
-        claimedAt: null,
-        leaseExpiresAt: null,
-        nextActionAt: now,
-        exhaustedAt: null,
-        lastError: "E15_REARMED_AFTER_CONFIRMED_PROVIDER_ABSENCE",
-      },
-    });
-    if (updated.count === 1) metrics.rearmedIntents += 1;
-    else metrics.races += 1;
   }
 
   metrics.durationMs = Date.now() - startedAt;
