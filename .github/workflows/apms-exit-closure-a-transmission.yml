@@ -163,3 +163,5 @@ jobs:
           git diff --cached --check
           git commit -m 'Integrate APMS Exit Closure A access ambiguity handoff'
           git push origin HEAD:agent/apms-exit-closure-a-canonical-access-ambiguity-handoff
+
+# Retrigger marker: policy type coupling removed; technical gate unchanged.
