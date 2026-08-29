@@ -14,6 +14,8 @@ import {
 } from "../e14/guest-access-admission-fence.policy.e14";
 import {
   adoptProviderCredentialUnderReservationFenceE15_1,
+  quarantineActiveProviderOutcomeUnderReservationFenceE15_1,
+  reconcileLateProviderSuccessUnderReservationFenceE15_1,
   rearmAmbiguousGrantUnderReservationFenceE15_1,
   reconcileAccessIntentUnderReservationFenceE15_1,
 } from "./guest-access-reservation-reconciliation-fence.e15-1";
@@ -433,4 +435,113 @@ test("E15.1 serializes a second replica through CAS after the first mutation", a
     await rearmAmbiguousGrantUnderReservationFenceE15_1(db.prisma, rearmInput()),
     false
   );
+});
+
+test("Exit Closure A reconciles late provider success under the reservation fence", async () => {
+  const db = buildDb({
+    reservation: reservation({
+      accessGrants: [grant({
+        status: AccessStatus.ACTIVE,
+        ttlockKeyboardPwdId: 5001,
+        secureAccessCode: { id: "code1" },
+        ttlockPayload: marker("VERIFYING_PROVIDER_STATE"),
+      })],
+    }),
+  });
+
+  assert.equal(
+    await reconcileLateProviderSuccessUnderReservationFenceE15_1(
+      db.prisma,
+      {
+        grantId: "g1",
+        reservationId: "r1",
+        organizationId: "o1",
+        propertyId: "p1",
+        startsAt: checkIn,
+        endsAt: checkOut,
+        updatedAt,
+        recoveryAttemptCount: 2,
+        ttlockLockId: 101,
+        now,
+        providerKeyboardPwdId: 5001,
+        payload: marker("RECONCILED_PRESENT"),
+      }
+    ),
+    true
+  );
+  assert.ok(db.calls.indexOf("LOCK_RESERVATION") < db.calls.indexOf("LOCK_GRANTS"));
+  assert.ok(db.calls.indexOf("UPDATE_GRANT") < db.calls.indexOf("UPDATE_RESERVATION"));
+});
+
+test("Exit Closure A refuses late success when provider id contradicts durable local evidence", async () => {
+  const db = buildDb({
+    reservation: reservation({
+      accessGrants: [grant({
+        status: AccessStatus.ACTIVE,
+        ttlockKeyboardPwdId: 5001,
+        secureAccessCode: { id: "code1" },
+      })],
+    }),
+  });
+
+  assert.equal(
+    await reconcileLateProviderSuccessUnderReservationFenceE15_1(
+      db.prisma,
+      {
+        grantId: "g1",
+        reservationId: "r1",
+        organizationId: "o1",
+        propertyId: "p1",
+        startsAt: checkIn,
+        endsAt: checkOut,
+        updatedAt,
+        recoveryAttemptCount: 2,
+        ttlockLockId: 101,
+        now,
+        providerKeyboardPwdId: 9999,
+        payload: marker("MANUAL_REVIEW_REQUIRED"),
+      }
+    ),
+    false
+  );
+  assert.equal(db.calls.includes("UPDATE_GRANT"), false);
+});
+
+
+test("Closure A quarantines ACTIVE durable outcome after owner release CAS loss", async () => {
+  const db = buildDb({
+    reservation: reservation({
+      accessGrants: [grant({
+        status: AccessStatus.ACTIVE,
+        recoveryOperation: null,
+        recoveryAttemptCount: 0,
+        ttlockKeyboardPwdId: 5001,
+        secureAccessCode: { id: "code1" },
+      })],
+    }),
+  });
+  assert.equal(
+    await quarantineActiveProviderOutcomeUnderReservationFenceE15_1(
+      db.prisma,
+      {
+        grantId: "g1",
+        reservationId: "r1",
+        organizationId: "o1",
+        propertyId: "p1",
+        startsAt: checkIn,
+        endsAt: checkOut,
+        ttlockLockId: 101,
+        now,
+        reason: "GUEST_ACCESS_PROVISION_AMBIGUOUS:OWNER_RELEASE_PERSISTENCE_FENCE_LOST",
+      }
+    ),
+    true
+  );
+  assert.deepEqual(db.calls.slice(0, 4), [
+    "TX:Serializable",
+    "LOCK_RESERVATION",
+    "LOCK_GRANTS",
+    "READ_RESERVATION",
+  ]);
+  assert.equal(db.calls.includes("UPDATE_RESERVATION"), false);
 });

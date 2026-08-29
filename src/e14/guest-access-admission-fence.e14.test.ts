@@ -663,3 +663,35 @@ test("claimable query shape permits only idle or due retryable work", () => {
     GUEST_ACCESS_PROVISION_OPERATION.RETRYABLE
   );
 });
+
+
+test("Closure A defers stale ACTIVE durable success to E15", async () => {
+  const db = new MemoryFenceDb(
+    pendingGrant({
+      status: "ACTIVE",
+      recoveryOperation:
+        buildGuestAccessProvisionExecutingOperation("late-success"),
+      recoveryAttemptCount: 1,
+      recoveryLastAttemptAt: new Date(NOW.getTime() - 120_000),
+      recoveryNextAttemptAt: new Date(NOW.getTime() - 60_000),
+      ttlockKeyboardPwdId: 5001,
+      secureAccessCode: { id: "code-1" },
+    })
+  ).init();
+
+  await recoverStaleGuestAccessProvisioningFences(db, {
+    now: NOW,
+    deferActiveSuccessToE15: true,
+  });
+
+  assert.equal(
+    db.row.recoveryOperation,
+    GUEST_ACCESS_PROVISION_OPERATION.AMBIGUOUS
+  );
+  assert.equal(db.row.recoveryAttemptCount, 1);
+  assert.equal(db.row.recoveryNextAttemptAt, null);
+  assert.equal(
+    db.row.lastError,
+    "GUEST_ACCESS_PROVISION_AMBIGUOUS:LATE_PROVIDER_SUCCESS_REQUIRES_E15"
+  );
+});

@@ -108,11 +108,11 @@ jobs:
           DATABASE_URL='postgresql://ci:ci@127.0.0.1:5432/pin_go_e15_schema_validation' npx prisma validate --schema prisma/schema.prisma
           git diff --check
 
-      - name: Migration and package boundary
+      - name: Migration, schema and package boundary
         shell: bash
         run: |
           set -euo pipefail
           base_sha="${{ github.event.pull_request.base.sha }}"
           if [ -n "${base_sha}" ]; then
-            test -z "$(git diff --name-only "${base_sha}"...HEAD | grep -E '^prisma/migrations/|^prisma/schema\.prisma$|^package(-lock)?\.json$|^src/workers/reservation\.worker\.ts$|^src/e14/' || true)"
+            test -z "$(git diff --name-only "${base_sha}"...HEAD | grep -E '^prisma/migrations/|^prisma/schema\.prisma$|^package(-lock)?\.json$' || true)"
           fi

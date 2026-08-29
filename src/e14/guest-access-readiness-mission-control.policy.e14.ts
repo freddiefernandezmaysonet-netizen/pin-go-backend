@@ -2,6 +2,11 @@ import {
   GUEST_ACCESS_PROVISION_OPERATION,
   parseGuestAccessProvisionFenceState,
 } from "./guest-access-admission-fence.policy.e14.js";
+import {
+  guestAccessE15NextAutomaticStep,
+  isGuestAccessE15AutoResolvableAmbiguity,
+  type GuestAccessE15MarkerState,
+} from "../services/guest-access-exit-closure-a.policy.js";
 
 export const GUEST_ACCESS_READINESS_ISSUE_CODE =
   "GUEST_ACCESS_READINESS_PENDING";
@@ -27,6 +32,7 @@ export type GuestAccessMissionSnapshot = {
     recoveryOperation: string | null;
     recoveryNextAttemptAt: Date | null;
     recoveryExhaustedAt: Date | null;
+    e15MarkerState?: GuestAccessE15MarkerState;
   }>;
 };
 
@@ -278,12 +284,12 @@ export function projectGuestAccessRecoveryIssue(
 
 export function projectGuestAccessAmbiguityIssue(
   snapshot: GuestAccessMissionSnapshot,
-  input: { now?: Date } = {}
+  input: { now?: Date; e15Enabled?: boolean } = {}
 ): GuestAccessIssueProjection {
   const now = input.now ?? new Date();
   const operationalKey =
     `GUEST_ACCESS_PROVISIONING_AMBIGUOUS:${snapshot.reservationId}`;
-  const reviewRequired = snapshot.accessGrants.some(
+  const reviewGrants = snapshot.accessGrants.filter(
     (grant) => {
       const state =
         parseGuestAccessProvisionFenceState(
@@ -300,6 +306,7 @@ export function projectGuestAccessAmbiguityIssue(
       );
     }
   );
+  const reviewRequired = reviewGrants.length > 0;
 
   if (
     !reviewRequired ||
@@ -321,6 +328,50 @@ export function projectGuestAccessAmbiguityIssue(
             ? "EXPIRED"
             : "SUPERSEDED"
           : "AUTOMATIC",
+    };
+  }
+
+  const markerStates = reviewGrants.map(
+    (grant) => grant.e15MarkerState ?? null
+  );
+  const markerState =
+    markerStates.find((state) => state === "MANUAL_REVIEW_REQUIRED") ??
+    markerStates.find(Boolean) ??
+    null;
+  if (
+    isGuestAccessE15AutoResolvableAmbiguity({
+      e15Enabled: input.e15Enabled === true,
+      markerState,
+    })
+  ) {
+    return {
+      active: true,
+      operationalKey,
+      issueCode: GUEST_ACCESS_AMBIGUITY_ISSUE_CODE,
+      title: "Guest access is being reconciled automatically",
+      issue:
+        "Pin&Go fenced the uncertain access outcome and is reconciling read-only provider evidence.",
+      operationalImpact:
+        "Automatic replay remains blocked while Pin&Go verifies the current credential state.",
+      recommendedAction: null,
+      nextAutomaticStep:
+        guestAccessE15NextAutomaticStep(markerState),
+      severity: "WARNING",
+      workflowState: "AUTO_RESOLVING",
+      visibility: "SYSTEM",
+      responsibleActor: "PIN_GO",
+      actionRequired: false,
+      canAutoResolve: true,
+      autoResolveStatus: "AVAILABLE",
+      metadata: {
+        contractVersion:
+          "guest_access_readiness_mission_control_e14_v1",
+        reservationId: snapshot.reservationId,
+        propertyId: snapshot.propertyId,
+        stage: "ACCESS_EXECUTION_RECONCILIATION",
+        e15MarkerState: markerState,
+        sanitized: true,
+      },
     };
   }
 

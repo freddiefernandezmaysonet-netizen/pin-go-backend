@@ -2546,7 +2546,11 @@ async function tick() {
         const safetyResult =
           await runGuestAccessAdmissionSafetyCycle(
             prisma,
-            { now }
+            {
+              now,
+              e15Enabled:
+                GUEST_ACCESS_AMBIGUITY_E15_CONFIG.enabled,
+            }
           );
 
         if (
@@ -2923,7 +2927,11 @@ async function tick() {
             await runGuestJourneyAccessOwnerCycle(
               prisma,
               GUEST_JOURNEY_ACCESS_OWNER_CONFIG,
-              { now }
+              {
+                now,
+                e15Enabled:
+                  GUEST_ACCESS_AMBIGUITY_E15_CONFIG.enabled,
+              }
             );
 
           log(
