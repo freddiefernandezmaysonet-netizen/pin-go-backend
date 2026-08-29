@@ -63,6 +63,8 @@ jobs:
           from pathlib import Path
 
           adapter = Path('src/services/guest-journey-access-owner-adapter.service.ts').read_text()
+          e14_fence = Path('src/e14/guest-access-admission-fence.single-grant.e14.ts').read_text()
+          e14_safety = Path('src/e14/guest-access-admission-safety-cycle.e14.ts').read_text()
           e15 = Path('src/e15/guest-access-ambiguity-reconciliation.e15.ts').read_text()
           e151 = Path('src/e15/guest-access-reservation-reconciliation-fence.e15-1.ts').read_text()
           worker = Path('src/workers/reservation.worker.ts').read_text()
@@ -74,12 +76,23 @@ jobs:
               'buildGuestJourneyAccessOwnerE14OwnerId',
               'mapGuestJourneyAccessOwnerE14ProvisionResult',
               'executePhysical: () => dependencies.activate(grant.id)',
+              'quarantineActiveProviderOutcomeUnderReservationFenceE15_1',
+              'GUEST_ACCESS_PROVISION_AMBIGUOUS:OWNER_RELEASE_PERSISTENCE_FENCE_LOST',
           ]
           missing = [x for x in required_adapter if x not in adapter]
           if missing:
               raise SystemExit(f'EXIT_A_ACCESS_OWNER_HANDOFF_MISSING:{missing}')
           if 'withProviderTimeout(\n      dependencies.activate(grant.id)' in adapter:
               raise SystemExit('EXIT_A_DIRECT_ACCESS_OWNER_PROVISION_TIMEOUT_REMAINS')
+
+          required_e14_handoff = [
+              'deferActiveSuccessToE15',
+              'GUEST_ACCESS_PROVISION_AMBIGUOUS:LATE_PROVIDER_SUCCESS_REQUIRES_E15',
+          ]
+          combined_e14 = e14_fence + '\n' + e14_safety
+          missing = [x for x in required_e14_handoff if x not in combined_e14]
+          if missing:
+              raise SystemExit(f'EXIT_A_E14_LATE_SUCCESS_HANDOFF_MISSING:{missing}')
 
           required_e15 = [
               'status: { in: [AccessStatus.PENDING, AccessStatus.ACTIVE] }',
@@ -95,6 +108,7 @@ jobs:
           required_fence = [
               'findCanonicalActiveAmbiguousTarget',
               'GUEST_ACCESS_EXIT_A_RESERVATION_RELEASE_CAS_LOST',
+              'quarantineActiveProviderOutcomeUnderReservationFenceE15_1',
               'FROM "Reservation" WHERE "id" = $1 FOR UPDATE',
               'FROM "AccessGrant" WHERE "reservationId" = $1 ORDER BY "id" FOR UPDATE',
               'isolationLevel: "Serializable"',
@@ -105,8 +119,16 @@ jobs:
 
           if 'e15Enabled' not in e14_policy or 'AUTO_RESOLVING' not in e14_policy:
               raise SystemExit('EXIT_A_E14_MC_NOT_E15_AWARE')
-          if 'e15AutoResolving' not in owner_mc or 'GUEST_JOURNEY_ACCESS_OWNER_DELEGATED_TO_E15' not in owner_mc:
-              raise SystemExit('EXIT_A_OWNER_MC_NOT_E15_AWARE')
+          required_owner_mc = [
+              'e15AutoResolving',
+              'GUEST_JOURNEY_ACCESS_OWNER_DELEGATED_TO_E15',
+              'guestAccessE15MarkerStateFromPayload',
+              'markerState: e15MarkerState',
+              'MANUAL_REVIEW_REQUIRED',
+          ]
+          missing = [x for x in required_owner_mc if x not in owner_mc]
+          if missing:
+              raise SystemExit(f'EXIT_A_OWNER_MC_NOT_E15_AWARE:{missing}')
           if worker.count('GUEST_ACCESS_AMBIGUITY_E15_CONFIG.enabled') < 3:
               raise SystemExit('EXIT_A_WORKER_E15_ENABLEMENT_NOT_PROPAGATED')
 
