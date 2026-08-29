@@ -1,0 +1,108 @@
+name: Guest Journey Enterprise E15 Access Ambiguity Certification
+
+on:
+  pull_request:
+    paths:
+      - "src/e15/**"
+      - "src/workers/reservation.worker.ts"
+      - "src/e14/**"
+      - "src/services/guest-journey-access-owner*.ts"
+      - "src/services/guest-journey-tenant-property-scope*.ts"
+      - "tsconfig.guest-journey-enterprise-e15.json"
+      - ".github/workflows/guest-journey-enterprise-e15-certification.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  certify-e15:
+    runs-on: ubuntu-latest
+    timeout-minutes: 55
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - run: npm ci
+      - run: npx prisma generate --schema prisma/schema.prisma
+
+      - name: E15 focused contract
+        run: |
+          node --import tsx --test src/e15/guest-access-ambiguity-reconciliation.e15.test.ts
+          npx tsc -p tsconfig.guest-journey-enterprise-e15.json
+
+      - name: Access Owner and Runtime Truth regressions
+        run: |
+          npm run test:guest-journey-enterprise-e8-access-owner
+          npm run test:guest-journey-enterprise-e13-runtime-truth
+
+      - name: E14 admission and ambiguity regressions
+        run: |
+          node --import tsx --test src/e14/guest-access-reservation-target.e14.test.ts src/e14/guest-access-admission-fence.e14.test.ts src/e14/guest-access-reservation-singleton-fence.e14.test.ts src/e14/guest-access-readiness-mission-control.e14.test.ts src/e14/guest-access-e14-structural.e14.test.ts src/e14/guest-access-worker-integration.e14.test.ts
+          npx tsc -p tsconfig.guest-journey-enterprise-e14.json
+
+      - name: Hierarchical tenant scope regression
+        run: |
+          node --import tsx --test src/services/guest-journey-tenant-property-scope.policy.test.ts
+          npx tsc -p tsconfig.guest-journey-enterprise-tenant-scope.json
+
+      - name: Provider read-only structural fence
+        shell: bash
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          from pathlib import Path
+          text = "\n".join(
+              path.read_text(encoding="utf-8")
+              for path in sorted(Path("src/e15").glob("*.ts"))
+          )
+          forbidden = [
+              "activateGrant",
+              "deactivateGrant",
+              "ttlockGetPasscode",
+              "ttlockCreatePasscode",
+              "ttlockChangePasscode",
+              "ttlockDeletePasscode",
+              "/keyboardPwd/add",
+              "/keyboardPwd/change",
+              "/keyboardPwd/delete",
+              'method: "POST"',
+              'method: "PUT"',
+              'method: "PATCH"',
+              'method: "DELETE"',
+          ]
+          found = [item for item in forbidden if item in text]
+          if found:
+              raise SystemExit(f"E15_PROVIDER_MUTATION_SYMBOLS_PRESENT:{found}")
+          service = Path("src/e15/guest-access-ambiguity-reconciliation.e15.ts").read_text(encoding="utf-8")
+          if 'method: "GET"' not in service:
+              raise SystemExit("E15_PROVIDER_GET_BOUNDARY_MISSING")
+          if "/v3/lock/listKeyboardPwd" not in service:
+              raise SystemExit("E15_PROVIDER_INVENTORY_ENDPOINT_MISSING")
+          PY
+
+      - name: Worker bundle
+        run: |
+          npx esbuild src/workers/reservation.worker.ts --bundle --platform=node --packages=external --outfile=/tmp/reservation.worker.e15.js
+
+      - name: Schema and patch integrity
+        shell: bash
+        run: |
+          set -euo pipefail
+          DATABASE_URL='postgresql://ci:ci@127.0.0.1:5432/pin_go_e15_schema_validation' npx prisma validate --schema prisma/schema.prisma
+          git diff --check
+
+      - name: Migration and package boundary
+        shell: bash
+        run: |
+          set -euo pipefail
+          base_sha="${{ github.event.pull_request.base.sha }}"
+          if [ -n "${base_sha}" ]; then
+            test -z "$(git diff --name-only "${base_sha}"...HEAD | grep -E '^prisma/migrations/|^package(-lock)?\.json$' || true)"
+          fi
