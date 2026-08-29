@@ -93,10 +93,13 @@ text = text[:start] + new_rearm + text[end:]
 
 intent_start = '  const intents = await prisma.guestJourneyCoordinationIntent.findMany({\n'
 intent_end = '  metrics.durationMs = Date.now() - startedAt;\n'
-if text.count(intent_start) != 1 or text.count(intent_end) != 1:
-    raise SystemExit("E15_1_INTENT_ANCHOR_MISMATCH")
+if text.count(intent_start) != 1:
+    raise SystemExit("E15_1_INTENT_START_ANCHOR_MISMATCH")
 start = text.index(intent_start)
-end = text.index(intent_end, start)
+try:
+    end = text.index(intent_end, start)
+except ValueError as exc:
+    raise SystemExit("E15_1_INTENT_END_ANCHOR_MISMATCH") from exc
 new_intents = '''  const intents = await prisma.guestJourneyCoordinationIntent.findMany({
     where: {
       targetEngine: "ACCESS",
