@@ -1,0 +1,118 @@
+name: E15 Access Ambiguity Transmission Certification
+
+on:
+  push:
+    branches:
+      - agent/apms-enterprise-guest-journey-e15-access-ambiguity-reconciliation
+    paths:
+      - ".github/workflows/e15-access-ambiguity-transmission-certification.yml"
+
+permissions:
+  contents: write
+
+jobs:
+  certify-and-integrate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 55
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: agent/apms-enterprise-guest-journey-e15-access-ambiguity-reconciliation
+          fetch-depth: 0
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Verify exact authorized ancestry
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git merge-base 0a9748275181b2117e57364f82f5c60c7d68b1d4 HEAD)" = "0a9748275181b2117e57364f82f5c60c7d68b1d4"
+          git merge-base --is-ancestor 0a9748275181b2117e57364f82f5c60c7d68b1d4 HEAD
+
+      - name: Apply deterministic E15 worker integration
+        run: |
+          python scripts/patch-e15-worker-integration.py
+          git rm scripts/patch-e15-worker-integration.py
+
+      - run: npm ci
+      - run: npx prisma generate --schema prisma/schema.prisma
+
+      - name: E15 focused contract
+        run: |
+          node --import tsx --test src/e15/guest-access-ambiguity-reconciliation.e15.test.ts
+          npx tsc -p tsconfig.guest-journey-enterprise-e15.json
+
+      - name: Existing Access Owner and Runtime Truth regressions
+        run: |
+          npm run test:guest-journey-enterprise-e8-access-owner
+          npm run test:guest-journey-enterprise-e13-runtime-truth
+
+      - name: E14 regression
+        run: |
+          node --import tsx --test src/e14/guest-access-reservation-target.e14.test.ts src/e14/guest-access-admission-fence.e14.test.ts src/e14/guest-access-reservation-singleton-fence.e14.test.ts src/e14/guest-access-readiness-mission-control.e14.test.ts src/e14/guest-access-e14-structural.e14.test.ts src/e14/guest-access-worker-integration.e14.test.ts
+          npx tsc -p tsconfig.guest-journey-enterprise-e14.json
+
+      - name: Hierarchical tenant scope regression
+        run: |
+          node --import tsx --test src/services/guest-journey-tenant-property-scope.policy.test.ts
+          npx tsc -p tsconfig.guest-journey-enterprise-tenant-scope.json
+
+      - name: Provider read-only structural fence
+        shell: bash
+        run: |
+          set -euo pipefail
+          ! grep -R -nE 'activateGrant|deactivateGrant|ttlockGetPasscode|ttlockCreatePasscode|ttlockChangePasscode|ttlockDeletePasscode|keyboardPwd/(add|change|delete)|method:[[:space:]]*["'"'](POST|PUT|PATCH|DELETE)["'"']' src/e15
+          grep -R -n 'method: "GET"' src/e15/guest-access-ambiguity-reconciliation.e15.ts
+          grep -R -n '/v3/lock/listKeyboardPwd' src/e15/guest-access-ambiguity-reconciliation.e15.ts
+
+      - name: Worker bundle
+        run: |
+          npx esbuild src/workers/reservation.worker.ts --bundle --platform=node --packages=external --outfile=/tmp/reservation.worker.e15.js
+
+      - name: Schema and patch integrity
+        shell: bash
+        run: |
+          set -euo pipefail
+          DATABASE_URL='postgresql://ci:ci@127.0.0.1:5432/pin_go_e15_schema_validation' npx prisma validate --schema prisma/schema.prisma
+          git diff --check
+          git diff --check 0a9748275181b2117e57364f82f5c60c7d68b1d4...HEAD
+          test -z "$(git diff --name-only 0a9748275181b2117e57364f82f5c60c7d68b1d4...HEAD | grep -E '^prisma/migrations/|^package(-lock)?\.json$' || true)"
+
+      - name: Verify final E15 permanent inventory
+        shell: bash
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          import subprocess
+          expected = {
+            '.github/workflows/e15-access-ambiguity-transmission-certification.yml',
+            'src/e15/guest-access-ambiguity-reconciliation.config.e15.ts',
+            'src/e15/guest-access-ambiguity-reconciliation.e15.ts',
+            'src/e15/guest-access-ambiguity-reconciliation.e15.test.ts',
+            'src/workers/reservation.worker.ts',
+            'tsconfig.guest-journey-enterprise-e15.json',
+          }
+          committed = set(subprocess.check_output([
+            'git','diff','--name-only','0a9748275181b2117e57364f82f5c60c7d68b1d4...HEAD'
+          ], text=True).splitlines())
+          working = set(subprocess.check_output(['git','diff','--name-only'], text=True).splitlines())
+          staged = set(subprocess.check_output(['git','diff','--cached','--name-only'], text=True).splitlines())
+          actual = committed | working | staged
+          if actual != expected:
+            raise SystemExit(f'E15_INVENTORY_MISMATCH expected={sorted(expected)} actual={sorted(actual)}')
+          PY
+
+      - name: Commit certified worker integration
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add src/workers/reservation.worker.ts
+          git add -u scripts/patch-e15-worker-integration.py
+          git diff --cached --check
+          git commit -m 'Integrate E15 access ambiguity reconciliation'
+          git push origin HEAD:agent/apms-enterprise-guest-journey-e15-access-ambiguity-reconciliation
