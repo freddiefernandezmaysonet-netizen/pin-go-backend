@@ -32,9 +32,11 @@ jobs:
           test "$(git merge-base 0a9748275181b2117e57364f82f5c60c7d68b1d4 HEAD)" = "0a9748275181b2117e57364f82f5c60c7d68b1d4"
           git merge-base --is-ancestor 0a9748275181b2117e57364f82f5c60c7d68b1d4 HEAD
 
-      - name: Apply deterministic E15 worker integration
+      - name: Apply deterministic E15 integration corrections
         run: |
+          python scripts/patch-e15-typescript-fixes.py
           python scripts/patch-e15-worker-integration.py
+          git rm scripts/patch-e15-typescript-fixes.py
           git rm scripts/patch-e15-worker-integration.py
 
       - run: npm ci
@@ -78,8 +80,8 @@ jobs:
           set -euo pipefail
           DATABASE_URL='postgresql://ci:ci@127.0.0.1:5432/pin_go_e15_schema_validation' npx prisma validate --schema prisma/schema.prisma
           git diff --check
-          git diff --check 0a9748275181b2117e57364f82f5c60c7d68b1d4...HEAD
-          test -z "$(git diff --name-only 0a9748275181b2117e57364f82f5c60c7d68b1d4...HEAD | grep -E '^prisma/migrations/|^package(-lock)?\.json$' || true)"
+          git diff --check 0a9748275181b2117e57364f82f5c60c7d68b1d4 --
+          test -z "$(git diff --name-only 0a9748275181b2117e57364f82f5c60c7d68b1d4 -- | grep -E '^prisma/migrations/|^package(-lock)?\.json$' || true)"
 
       - name: Verify final E15 permanent inventory
         shell: bash
@@ -95,24 +97,22 @@ jobs:
             'src/workers/reservation.worker.ts',
             'tsconfig.guest-journey-enterprise-e15.json',
           }
-          committed = set(subprocess.check_output([
-            'git','diff','--name-only','0a9748275181b2117e57364f82f5c60c7d68b1d4...HEAD'
+          actual = set(subprocess.check_output([
+            'git','diff','--name-only','0a9748275181b2117e57364f82f5c60c7d68b1d4','--'
           ], text=True).splitlines())
-          working = set(subprocess.check_output(['git','diff','--name-only'], text=True).splitlines())
-          staged = set(subprocess.check_output(['git','diff','--cached','--name-only'], text=True).splitlines())
-          actual = committed | working | staged
           if actual != expected:
             raise SystemExit(f'E15_INVENTORY_MISMATCH expected={sorted(expected)} actual={sorted(actual)}')
           PY
 
-      - name: Commit certified worker integration
+      - name: Commit certified E15 integration
         shell: bash
         run: |
           set -euo pipefail
           git config user.name 'github-actions[bot]'
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add src/e15/guest-access-ambiguity-reconciliation.e15.ts
           git add src/workers/reservation.worker.ts
-          git add -u scripts/patch-e15-worker-integration.py
+          git add -u scripts/patch-e15-typescript-fixes.py scripts/patch-e15-worker-integration.py
           git diff --cached --check
           git commit -m 'Integrate E15 access ambiguity reconciliation'
           git push origin HEAD:agent/apms-enterprise-guest-journey-e15-access-ambiguity-reconciliation
