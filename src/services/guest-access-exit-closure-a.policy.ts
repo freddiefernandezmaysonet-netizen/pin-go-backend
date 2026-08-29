@@ -1,12 +1,17 @@
 import type {
   ExecuteGuestAccessProvisioningResult,
 } from "../e14/guest-access-admission-fence.service.e14";
-import type {
-  AccessOwnerCompletion,
-} from "./guest-journey-access-owner-runtime.service";
 
 export const GUEST_ACCESS_EXIT_CLOSURE_A_VERSION =
   "guest_access_exit_closure_a_v1" as const;
+
+export type GuestAccessExitAProvisionCompletion = {
+  kind: "WAITING_FOR_EVIDENCE" | "RETRYABLE" | "AMBIGUOUS";
+  errorCode: string;
+  errorDetail: string;
+  accessGrantIds: string[];
+  retryAt?: Date | null;
+};
 
 export type GuestAccessE15MarkerState =
   | "ABSENCE_OBSERVED"
@@ -40,7 +45,7 @@ export function mapGuestJourneyAccessOwnerE14ProvisionResult<T>(
   grantId: string
 ):
   | { proceed: true; activation: T }
-  | { proceed: false; completion: AccessOwnerCompletion } {
+  | { proceed: false; completion: GuestAccessExitAProvisionCompletion } {
   if (result.status === "SUCCEEDED") {
     return { proceed: true, activation: result.activation };
   }
