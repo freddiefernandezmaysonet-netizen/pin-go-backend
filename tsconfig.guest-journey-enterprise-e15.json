@@ -1,0 +1,18 @@
+{
+  "compilerOptions": {
+    "noEmit": true,
+    "module": "preserve",
+    "moduleResolution": "bundler",
+    "target": "esnext",
+    "strict": true,
+    "exactOptionalPropertyTypes": true,
+    "skipLibCheck": true,
+    "types": ["node"]
+  },
+  "include": [
+    "src/e15/*.ts",
+    "src/e14/guest-access-admission-fence.policy.e14.ts",
+    "src/services/access-code-crypto.service.ts",
+    "src/services/guest-journey-tenant-property-scope.policy.ts"
+  ]
+}
