@@ -115,6 +115,12 @@ import {
   GUEST_ACCESS_ADMISSION_SAFETY_INTERVAL_MS,
   runGuestAccessAdmissionSafetyCycle,
 } from "../e14/guest-access-admission-safety-cycle.e14";
+import {
+  resolveGuestAccessAmbiguityE15Config,
+} from "../e15/guest-access-ambiguity-reconciliation.config.e15";
+import {
+  runGuestAccessAmbiguityReconciliationCycle,
+} from "../e15/guest-access-ambiguity-reconciliation.e15";
 
 
 console.log("[reservation.worker] BOOT", new Date().toISOString());
@@ -145,6 +151,10 @@ const POLL_MS = Number(process.env.RESERVATION_WORKER_POLL_MS ?? 10_000);
 const BATCH_SIZE = Number(process.env.RESERVATION_WORKER_BATCH_SIZE ?? 20);
 const GUEST_ACCESS_ADMISSION_E14_CONFIG =
   resolveGuestAccessAdmissionE14Config(
+    process.env
+  );
+const GUEST_ACCESS_AMBIGUITY_E15_CONFIG =
+  resolveGuestAccessAmbiguityE15Config(
     process.env
   );
 const GUEST_ACCESS_PROVISION_OWNER_ID = [
@@ -2482,6 +2492,7 @@ if (!ttlockLockId) {
 let shuttingDown = false;
 let tickRunning = false;
 let lastGuestAccessAdmissionSafetyAt = 0;
+let lastGuestAccessAmbiguityE15At = 0;
 
 async function tick() {
   if (shuttingDown) return;
@@ -2922,6 +2933,44 @@ async function tick() {
         } catch (e) {
           errLog(
             "guest-journey-access-owner crashed:",
+            toErrString(e)
+          );
+        }
+      }
+
+      if (
+        GUEST_ACCESS_AMBIGUITY_E15_CONFIG.enabled &&
+        now.getTime() - lastGuestAccessAmbiguityE15At >=
+          GUEST_ACCESS_AMBIGUITY_E15_CONFIG.intervalMs
+      ) {
+        lastGuestAccessAmbiguityE15At = now.getTime();
+        try {
+          const e15Metrics =
+            await runGuestAccessAmbiguityReconciliationCycle(
+              prisma,
+              {
+                config: GUEST_ACCESS_AMBIGUITY_E15_CONFIG,
+                scope: {
+                  organizationIds:
+                    GUEST_JOURNEY_ACCESS_OWNER_CONFIG.organizationIds,
+                  propertyIds:
+                    GUEST_JOURNEY_ACCESS_OWNER_CONFIG.propertyIds,
+                },
+                e14Enabled:
+                  GUEST_ACCESS_ADMISSION_E14_CONFIG.enabled,
+                accessOwnerEnabled:
+                  GUEST_JOURNEY_ACCESS_OWNER_CONFIG.enabled,
+                now,
+              }
+            );
+
+          log(
+            "guest-access-ambiguity-reconciliation-e15",
+            e15Metrics
+          );
+        } catch (e) {
+          errLog(
+            "guest-access-ambiguity-reconciliation-e15 crashed:",
             toErrString(e)
           );
         }
