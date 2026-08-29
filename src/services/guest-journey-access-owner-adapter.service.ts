@@ -33,6 +33,16 @@ import {
 import {
   isGuestJourneyAccessClosureSatisfied,
 } from "./guest-journey-contract";
+import {
+  executeGuestAccessProvisioningWithFence,
+} from "../e14/guest-access-admission-fence.service.e14";
+import {
+  evaluateGuestAccessReadiness,
+} from "./guest-access-readiness.service";
+import {
+  buildGuestJourneyAccessOwnerE14OwnerId,
+  mapGuestJourneyAccessOwnerE14ProvisionResult,
+} from "./guest-access-exit-closure-a.policy";
 import type {
   AccessOwnerCompletion,
   ClaimedAccessIntent,
@@ -48,6 +58,8 @@ type AdapterDependencies = {
   unassignGuestNfc: typeof unassignGuestNfcForReservation;
   isEntitled: typeof isOrgEntitled;
   assertTenantProviderAuth: typeof assertOrgTtlockAuthConfigured;
+  executeProvisioningFence: typeof executeGuestAccessProvisioningWithFence;
+  evaluateReadiness: typeof evaluateGuestAccessReadiness;
 };
 
 const DEFAULT_DEPENDENCIES: AdapterDependencies = {
@@ -60,6 +72,8 @@ const DEFAULT_DEPENDENCIES: AdapterDependencies = {
   unassignGuestNfc: unassignGuestNfcForReservation,
   isEntitled: isOrgEntitled,
   assertTenantProviderAuth: assertOrgTtlockAuthConfigured,
+  executeProvisioningFence: executeGuestAccessProvisioningWithFence,
+  evaluateReadiness: evaluateGuestAccessReadiness,
 };
 
 const reservationSelect = {
@@ -353,24 +367,41 @@ async function executeProvisioning(
     };
   }
 
-  try {
-    const activation = await withProviderTimeout(
-      dependencies.activate(grant.id),
-      providerTimeoutMs
+  const fencedProvision =
+    await dependencies.executeProvisioningFence(
+      prisma,
+      {
+        accessGrantId: grant.id,
+        reservationId: claim.reservationId,
+        ownerId: buildGuestJourneyAccessOwnerE14OwnerId({
+          intentId: claim.intentId,
+          attemptNumber: claim.attemptNumber,
+        }),
+        now,
+        physicalTimeoutMs: providerTimeoutMs,
+        evaluateReadiness: async (reservationId, evaluatedAt) =>
+          dependencies.evaluateReadiness(
+            prisma,
+            reservationId,
+            {
+              persist: true,
+              now: evaluatedAt,
+              expectedScope: {
+                organizationId: claim.organizationId,
+                propertyId: claim.propertyId,
+              },
+            }
+          ),
+        executePhysical: () => dependencies.activate(grant.id),
+      }
     );
-    if ((activation as any)?.ok !== true && !(activation as any)?.skipped) {
-      throw new Error(`ACCESS_PROVISIONING_CANONICAL_ACTIVATION_FAILED:${(activation as any)?.reason ?? "UNKNOWN"}`);
-    }
-  } catch (error) {
-    const normalized = normalizedError(error);
-    return {
-      kind: isAmbiguousProviderError(error) ? "AMBIGUOUS" : "RETRYABLE",
-      errorCode: isAmbiguousProviderError(error)
-        ? "ACCESS_PROVISIONING_PROVIDER_RESULT_AMBIGUOUS"
-        : normalized.code,
-      errorDetail: normalized.detail,
-      accessGrantIds: [grant.id],
-    };
+  const fencedDecision =
+    mapGuestJourneyAccessOwnerE14ProvisionResult(
+      fencedProvision,
+      grant.id
+    );
+  if (!fencedDecision.proceed) {
+    return fencedDecision.completion;
   }
 
   const releasedAt = now;

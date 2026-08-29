@@ -152,6 +152,7 @@ export async function runGuestJourneyAccessOwnerCycle(
   config: GuestJourneyAccessOwnerConfig,
   options: {
     now?: Date;
+    e15Enabled?: boolean;
     logger?: (entry: {
       event: "GUEST_JOURNEY_ACCESS_OWNER_CYCLE";
       metrics: AccessOwnerCycleMetrics;
@@ -216,6 +217,7 @@ export async function runGuestJourneyAccessOwnerCycle(
             {
               organizationId: candidate.reservation.property.organizationId,
               propertyId: candidate.reservation.propertyId,
+              e15Enabled: options.e15Enabled === true,
             }
           );
           metrics.operationalIssueWrites += projection.operationalIssueWrites;
@@ -265,6 +267,7 @@ export async function runGuestJourneyAccessOwnerCycle(
         {
           organizationId: claimed.claim.organizationId,
           propertyId: claimed.claim.propertyId,
+          e15Enabled: options.e15Enabled === true,
         }
       );
       metrics.operationalIssueWrites += projection.operationalIssueWrites;

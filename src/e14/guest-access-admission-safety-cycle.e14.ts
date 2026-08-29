@@ -22,6 +22,7 @@ export async function runGuestAccessAdmissionSafetyCycle(
   input: {
     now?: Date;
     limit?: number;
+    e15Enabled?: boolean;
   } = {}
 ) {
   const now = input.now ?? new Date();
@@ -98,7 +99,10 @@ export async function runGuestAccessAdmissionSafetyCycle(
         await syncGuestAccessReadinessMissionControl(
           prisma,
           reservationId,
-          { now }
+          {
+            now,
+            e15Enabled: input.e15Enabled === true,
+          }
         );
       operationalIssueWrites +=
         result.operationalIssueWrites;

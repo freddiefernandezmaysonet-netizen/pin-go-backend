@@ -5,6 +5,9 @@ import {
   upsertOperationalIssue,
 } from "../apms/operational-intelligence.service.js";
 import {
+  guestAccessE15MarkerStateFromPayload,
+} from "../services/guest-access-exit-closure-a.policy.js";
+import {
   GUEST_ACCESS_AMBIGUITY_ISSUE_CODE,
   GUEST_ACCESS_READINESS_ISSUE_CODE,
   GUEST_ACCESS_RECOVERY_ISSUE_CODE,
@@ -50,6 +53,7 @@ const reservationSelect = {
       recoveryOperation: true,
       recoveryNextAttemptAt: true,
       recoveryExhaustedAt: true,
+      ttlockPayload: true,
     },
   },
 } as const;
@@ -82,6 +86,10 @@ function toSnapshot(reservation: any): GuestAccessMissionSnapshot {
           grant.recoveryNextAttemptAt ?? null,
         recoveryExhaustedAt:
           grant.recoveryExhaustedAt ?? null,
+        e15MarkerState:
+          guestAccessE15MarkerStateFromPayload(
+            grant.ttlockPayload
+          ),
       })
     ),
   };
@@ -322,6 +330,7 @@ export async function syncGuestAccessReadinessMissionControl(
   input: {
     now?: Date;
     hostActionLeadMs?: number;
+    e15Enabled?: boolean;
   } = {}
 ) {
   const now = input.now ?? new Date();
@@ -355,7 +364,10 @@ export async function syncGuestAccessReadinessMissionControl(
   );
   const ambiguity = projectGuestAccessAmbiguityIssue(
     snapshot,
-    { now }
+    {
+      now,
+      e15Enabled: input.e15Enabled === true,
+    }
   );
 
   const [

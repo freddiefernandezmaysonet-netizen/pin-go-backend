@@ -4,6 +4,10 @@ import {
 } from "@prisma/client";
 
 import { upsertOperationalIssue } from "../apms/operational-intelligence.service";
+import {
+  guestAccessE15NextAutomaticStep,
+  isGuestAccessE15AutoResolvableOwnerExhaustion,
+} from "./guest-access-exit-closure-a.policy";
 
 const ISSUE_CODE = "GUEST_JOURNEY_ACCESS_OWNER_EXHAUSTED";
 
@@ -16,7 +20,11 @@ export type AccessOwnerMissionControlResult = {
 export async function syncGuestJourneyAccessOwnerMissionControl(
   prisma: PrismaClient,
   intentId: string,
-  expectedScope: { organizationId: string; propertyId: string },
+  expectedScope: {
+    organizationId: string;
+    propertyId: string;
+    e15Enabled?: boolean;
+  },
   dependencies: { upsert: typeof upsertOperationalIssue } = {
     upsert: upsertOperationalIssue,
   }
@@ -124,8 +132,18 @@ export async function syncGuestJourneyAccessOwnerMissionControl(
     return { action: "RESOLVED", operationalIssueWrites: 1, externalSideEffects: 0 };
   }
 
+  const e15AutoResolving =
+    isGuestAccessE15AutoResolvableOwnerExhaustion({
+      e15Enabled: expectedScope.e15Enabled === true,
+      intentType: intent.intentType,
+      lastError: intent.lastError,
+    });
+  const desiredWorkflowState = e15AutoResolving
+    ? "AUTO_RESOLVING"
+    : "ACTION_REQUIRED";
+
   if (
-    existing?.workflowState === "ACTION_REQUIRED" &&
+    existing?.workflowState === desiredWorkflowState &&
     existing.lastSignalAt.getTime() >= intent.updatedAt.getTime()
   ) {
     return { action: "UNCHANGED", operationalIssueWrites: 0, externalSideEffects: 0 };
@@ -135,19 +153,29 @@ export async function syncGuestJourneyAccessOwnerMissionControl(
   await dependencies.upsert(prisma, {
     operationalKey,
     issueCode: ISSUE_CODE,
-    title: "Guest access owner exhausted automatic recovery",
-    issue: "The fenced ACCESS owner stopped before replaying an uncertain hardware operation.",
-    operationalImpact: "Guest access provisioning or closure is not completely confirmed.",
-    recommendedAction: "Reconcile the correlated grant and TTLock evidence before rearming this intent.",
-    nextAutomaticStep: null,
+    title: e15AutoResolving
+      ? "Guest access owner is reconciling an uncertain outcome"
+      : "Guest access owner exhausted automatic recovery",
+    issue: e15AutoResolving
+      ? "The ACCESS owner fenced an uncertain provider outcome and delegated reconciliation to E15."
+      : "The fenced ACCESS owner stopped before replaying an uncertain hardware operation.",
+    operationalImpact: e15AutoResolving
+      ? "Automatic replay remains blocked while Pin&Go verifies provider state."
+      : "Guest access provisioning or closure is not completely confirmed.",
+    recommendedAction: e15AutoResolving
+      ? null
+      : "Reconcile the correlated grant and TTLock evidence before rearming this intent.",
+    nextAutomaticStep: e15AutoResolving
+      ? guestAccessE15NextAutomaticStep(null)
+      : null,
     engine: "GUEST_JOURNEY",
-    severity: "CRITICAL",
-    workflowState: "ACTION_REQUIRED",
-    visibility: "DEVELOPER",
-    responsibleActor: "SYSTEM",
-    actionRequired: true,
-    canAutoResolve: false,
-    autoResolveStatus: "NOT_SUPPORTED",
+    severity: e15AutoResolving ? "WARNING" : "CRITICAL",
+    workflowState: desiredWorkflowState,
+    visibility: e15AutoResolving ? "SYSTEM" : "DEVELOPER",
+    responsibleActor: e15AutoResolving ? "PIN_GO" : "SYSTEM",
+    actionRequired: !e15AutoResolving,
+    canAutoResolve: e15AutoResolving,
+    autoResolveStatus: e15AutoResolving ? "AVAILABLE" : "NOT_SUPPORTED",
     autoResolveActionCode: null,
     organizationId: expectedScope.organizationId,
     propertyId: expectedScope.propertyId,
@@ -170,8 +198,12 @@ export async function syncGuestJourneyAccessOwnerMissionControl(
       claimCount: intent.claimCount,
       errorCode: intent.lastError,
     },
-    transitionCode: "GUEST_JOURNEY_ACCESS_OWNER_RETRY_BUDGET_EXHAUSTED",
-    transitionSummary: "The ACCESS owner fenced uncertain execution and escalated.",
+    transitionCode: e15AutoResolving
+      ? "GUEST_JOURNEY_ACCESS_OWNER_DELEGATED_TO_E15"
+      : "GUEST_JOURNEY_ACCESS_OWNER_RETRY_BUDGET_EXHAUSTED",
+    transitionSummary: e15AutoResolving
+      ? "The ACCESS owner delegated fenced ambiguity to E15 reconciliation."
+      : "The ACCESS owner fenced uncertain execution and escalated.",
     transitionedBy: "PIN_GO",
     occurredAt,
   });

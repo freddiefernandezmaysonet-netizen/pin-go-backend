@@ -95,6 +95,13 @@ export type RearmAmbiguousGrantE15_1Input = ExpectedGrantSnapshot & {
   payload: Prisma.InputJsonValue;
 };
 
+export type ReconcileLateProviderSuccessE15_1Input =
+  ExpectedGrantSnapshot & {
+    now: Date;
+    providerKeyboardPwdId: number;
+    payload: Prisma.InputJsonValue;
+  };
+
 export type ReconcileAccessIntentE15_1Input = {
   intentId: string;
   reservationId: string;
@@ -189,6 +196,40 @@ function findCanonicalPendingTarget(
     !sameInstant(target.startsAt, input.startsAt) ||
     !sameInstant(target.endsAt, input.endsAt) ||
     positiveTtlockLockId(target) !== input.ttlockLockId
+  ) {
+    return null;
+  }
+
+  for (const sibling of reservation.accessGrants) {
+    if (sibling.id === target.id) continue;
+    if (isBlockingSibling(sibling)) return null;
+  }
+  return target;
+}
+
+function findCanonicalActiveAmbiguousTarget(
+  reservation: ReservationFenceSnapshot,
+  input: ReconcileLateProviderSuccessE15_1Input
+): ReservationFenceGrant | null {
+  const canonical = reservation.accessGrants.filter((grant) =>
+    grant.status === AccessStatus.ACTIVE &&
+    sameInstant(grant.startsAt, reservation.checkIn) &&
+    sameInstant(grant.endsAt, reservation.checkOut)
+  );
+  if (canonical.length !== 1 || canonical[0].id !== input.grantId) {
+    return null;
+  }
+
+  const target = canonical[0];
+  if (
+    target.recoveryOperation !== GUEST_ACCESS_PROVISION_OPERATION.AMBIGUOUS ||
+    target.recoveryAttemptCount !== input.recoveryAttemptCount ||
+    !sameInstant(target.updatedAt, input.updatedAt) ||
+    !sameInstant(target.startsAt, input.startsAt) ||
+    !sameInstant(target.endsAt, input.endsAt) ||
+    positiveTtlockLockId(target) !== input.ttlockLockId ||
+    Number(target.ttlockKeyboardPwdId) !== input.providerKeyboardPwdId ||
+    !target.secureAccessCode
   ) {
     return null;
   }
@@ -326,6 +367,80 @@ export async function adoptProviderCredentialUnderReservationFenceE15_1(
       });
       if (released.count !== 1) {
         throw new Error("GUEST_ACCESS_E15_1_RESERVATION_RELEASE_CAS_LOST");
+      }
+      return true;
+    }
+  );
+  return result === true;
+}
+
+export async function reconcileLateProviderSuccessUnderReservationFenceE15_1(
+  prisma: PrismaClient,
+  input: ReconcileLateProviderSuccessE15_1Input
+): Promise<boolean> {
+  const result = await withReservationFence(
+    prisma,
+    input.reservationId,
+    async (tx, reservation) => {
+      if (!lifecycleMatches(reservation, {
+        organizationId: input.organizationId,
+        propertyId: input.propertyId,
+        now: input.now,
+        releaseStatus: GuestAccessReleaseStatus.ELIGIBLE,
+      })) {
+        return false;
+      }
+
+      const target = findCanonicalActiveAmbiguousTarget(
+        reservation,
+        input
+      );
+      if (!target) return false;
+
+      const cleared = await tx.accessGrant.updateMany({
+        where: {
+          id: target.id,
+          reservationId: reservation.id,
+          status: AccessStatus.ACTIVE,
+          recoveryOperation: GUEST_ACCESS_PROVISION_OPERATION.AMBIGUOUS,
+          recoveryAttemptCount: input.recoveryAttemptCount,
+          updatedAt: input.updatedAt,
+          ttlockKeyboardPwdId: input.providerKeyboardPwdId,
+          startsAt: reservation.checkIn,
+          endsAt: reservation.checkOut,
+        },
+        data: {
+          recoveryOperation: null,
+          recoveryAttemptCount: 0,
+          recoveryLastAttemptAt: null,
+          recoveryNextAttemptAt: null,
+          recoveryExhaustedAt: null,
+          lastError: null,
+          ttlockPayload: input.payload,
+        },
+      });
+      if (cleared.count !== 1) return false;
+
+      const released = await tx.reservation.updateMany({
+        where: {
+          id: reservation.id,
+          propertyId: input.propertyId,
+          status: ReservationStatus.ACTIVE,
+          paymentState: PaymentState.PAID,
+          guestAccessReleaseStatus: GuestAccessReleaseStatus.ELIGIBLE,
+          checkIn: reservation.checkIn,
+          checkOut: reservation.checkOut,
+        },
+        data: {
+          guestAccessReleaseStatus: GuestAccessReleaseStatus.RELEASED,
+          guestAccessReleasedAt: input.now,
+          guestAccessReleaseLastError: null,
+        },
+      });
+      if (released.count !== 1) {
+        throw new Error(
+          "GUEST_ACCESS_EXIT_A_RESERVATION_RELEASE_CAS_LOST"
+        );
       }
       return true;
     }

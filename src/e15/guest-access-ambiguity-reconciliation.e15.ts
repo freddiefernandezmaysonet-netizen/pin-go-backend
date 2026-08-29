@@ -23,11 +23,18 @@ import {
 import {
   GUEST_ACCESS_PROVISION_OPERATION,
 } from "../e14/guest-access-admission-fence.policy.e14";
+import {
+  decideGuestAccessE15Reconciliation,
+} from "../services/guest-access-exit-closure-a.policy";
+import {
+  syncGuestJourneyAccessOwnerMissionControl,
+} from "../services/guest-journey-access-owner-mission-control.service";
 import type {
   GuestAccessAmbiguityE15Config,
 } from "./guest-access-ambiguity-reconciliation.config.e15";
 import {
   adoptProviderCredentialUnderReservationFenceE15_1,
+  reconcileLateProviderSuccessUnderReservationFenceE15_1,
   rearmAmbiguousGrantUnderReservationFenceE15_1,
   reconcileAccessIntentUnderReservationFenceE15_1,
 } from "./guest-access-reservation-reconciliation-fence.e15-1";
@@ -365,7 +372,7 @@ export async function runGuestAccessAmbiguityReconciliationCycle(
     where: {
       type: "GUEST",
       method: AccessMethod.PASSCODE_TIMEBOUND,
-      status: AccessStatus.PENDING,
+      status: { in: [AccessStatus.PENDING, AccessStatus.ACTIVE] },
       recoveryOperation: GUEST_ACCESS_PROVISION_OPERATION.AMBIGUOUS,
       reservation: {
         is: {
@@ -392,6 +399,8 @@ export async function runGuestAccessAmbiguityReconciliationCycle(
       recoveryExhaustedAt: true,
       lastError: true,
       ttlockPayload: true,
+      ttlockKeyboardPwdId: true,
+      secureAccessCode: { select: { id: true } },
       lock: { select: { ttlockLockId: true } },
       reservation: {
         select: {
@@ -458,32 +467,129 @@ export async function runGuestAccessAmbiguityReconciliationCycle(
       endsAt: grant.endsAt,
     });
 
-    if (classification.kind === "INCOMPLETE" || classification.kind === "CONFLICT") {
-      const marker: E15Marker = {
-        version: GUEST_ACCESS_AMBIGUITY_E15_VERSION,
-        state: classification.kind === "INCOMPLETE"
-          ? "VERIFYING_PROVIDER_STATE"
-          : "MANUAL_REVIEW_REQUIRED",
-        inventoryFingerprint: inventory.fingerprint,
-        observedAt: now.toISOString(),
-        reason: classification.reason,
-      };
-      const updated = await prisma.accessGrant.updateMany({
+    const providerDecision =
+      classification.kind === "EXACT_MATCH"
+        ? {
+            kind: "EXACT_MATCH" as const,
+            keyboardPwdId: classification.item.keyboardPwdId,
+          }
+        : classification.kind === "ABSENT"
+          ? { kind: "ABSENT" as const }
+          : classification.kind === "INCOMPLETE"
+            ? { kind: "INCOMPLETE" as const }
+            : { kind: "CONFLICT" as const };
+    const reconciliationDecision =
+      decideGuestAccessE15Reconciliation({
+        grantStatus:
+          grant.status === AccessStatus.ACTIVE
+            ? "ACTIVE"
+            : "PENDING",
+        recoveryOperation: grant.recoveryOperation,
+        localKeyboardPwdId: grant.ttlockKeyboardPwdId
+          ? Number(grant.ttlockKeyboardPwdId)
+          : null,
+        secureCodePresent: Boolean(grant.secureAccessCode),
+        provider: providerDecision,
+      });
+
+    const persistMarker = async (marker: E15Marker) =>
+      prisma.accessGrant.updateMany({
         where: {
           id: grant.id,
-          status: AccessStatus.PENDING,
+          status: grant.status,
           recoveryOperation: GUEST_ACCESS_PROVISION_OPERATION.AMBIGUOUS,
           recoveryAttemptCount: grant.recoveryAttemptCount,
           updatedAt: grant.updatedAt,
         },
-        data: { ttlockPayload: withMarker(grant.ttlockPayload, marker) },
+        data: {
+          ttlockPayload: withMarker(grant.ttlockPayload, marker),
+        },
+      });
+
+    if (reconciliationDecision === "VERIFY_PROVIDER_STATE") {
+      const updated = await persistMarker({
+        version: GUEST_ACCESS_AMBIGUITY_E15_VERSION,
+        state: "VERIFYING_PROVIDER_STATE",
+        inventoryFingerprint: inventory.fingerprint,
+        observedAt: now.toISOString(),
+        reason:
+          classification.kind === "INCOMPLETE"
+            ? classification.reason
+            : "PROVIDER_INVENTORY_INCOMPLETE",
       });
       if (updated.count !== 1) metrics.races += 1;
-      else if (classification.kind === "CONFLICT") metrics.manualReview += 1;
       continue;
     }
 
-    if (classification.kind === "EXACT_MATCH") {
+    if (reconciliationDecision === "MANUAL_REVIEW_REQUIRED") {
+      const reason =
+        classification.kind === "CONFLICT"
+          ? classification.reason
+          : grant.status === AccessStatus.ACTIVE &&
+              classification.kind === "ABSENT"
+            ? "ACTIVE_LOCAL_CREDENTIAL_ABSENT_AT_PROVIDER"
+            : grant.status === AccessStatus.ACTIVE &&
+                classification.kind === "EXACT_MATCH" &&
+                Number(grant.ttlockKeyboardPwdId) !==
+                  classification.item.keyboardPwdId
+              ? "ACTIVE_PROVIDER_CREDENTIAL_ID_MISMATCH"
+              : "ACTIVE_LOCAL_CREDENTIAL_EVIDENCE_INCOMPLETE";
+      const updated = await persistMarker({
+        version: GUEST_ACCESS_AMBIGUITY_E15_VERSION,
+        state: "MANUAL_REVIEW_REQUIRED",
+        inventoryFingerprint: inventory.fingerprint,
+        observedAt: now.toISOString(),
+        reason,
+      });
+      if (updated.count !== 1) metrics.races += 1;
+      else metrics.manualReview += 1;
+      continue;
+    }
+
+    if (
+      reconciliationDecision === "RECONCILE_LATE_SUCCESS" &&
+      classification.kind === "EXACT_MATCH"
+    ) {
+      const payload = withMarker(grant.ttlockPayload, {
+        version: GUEST_ACCESS_AMBIGUITY_E15_VERSION,
+        state: "RECONCILED_PRESENT",
+        inventoryFingerprint: inventory.fingerprint,
+        observedAt: now.toISOString(),
+        reason: "LATE_PROVIDER_SUCCESS_MATCHED_DURABLE_EVIDENCE",
+      });
+      let reconciled = false;
+      try {
+        reconciled =
+          await reconcileLateProviderSuccessUnderReservationFenceE15_1(
+            prisma,
+            {
+              grantId: grant.id,
+              reservationId: reservation.id,
+              organizationId,
+              propertyId: reservation.propertyId,
+              startsAt: grant.startsAt,
+              endsAt: grant.endsAt,
+              updatedAt: grant.updatedAt,
+              recoveryAttemptCount: grant.recoveryAttemptCount,
+              ttlockLockId,
+              now,
+              providerKeyboardPwdId: classification.item.keyboardPwdId,
+              payload,
+            }
+          );
+      } catch {
+        metrics.races += 1;
+        continue;
+      }
+      if (reconciled) metrics.reconciledPresent += 1;
+      else metrics.races += 1;
+      continue;
+    }
+
+    if (
+      reconciliationDecision === "ADOPT_PROVIDER_PRESENT" &&
+      classification.kind === "EXACT_MATCH"
+    ) {
       const item = classification.item;
       const code = item.keyboardPwd.trim();
       const encrypted = encryptAccessCode(code);
@@ -540,7 +646,7 @@ export async function runGuestAccessAmbiguityReconciliationCycle(
       const updated = await prisma.accessGrant.updateMany({
         where: {
           id: grant.id,
-          status: AccessStatus.PENDING,
+          status: grant.status,
           recoveryOperation: GUEST_ACCESS_PROVISION_OPERATION.AMBIGUOUS,
           recoveryAttemptCount: grant.recoveryAttemptCount,
           updatedAt: grant.updatedAt,
@@ -562,7 +668,7 @@ export async function runGuestAccessAmbiguityReconciliationCycle(
       const updated = await prisma.accessGrant.updateMany({
         where: {
           id: grant.id,
-          status: AccessStatus.PENDING,
+          status: grant.status,
           recoveryOperation: GUEST_ACCESS_PROVISION_OPERATION.AMBIGUOUS,
           recoveryAttemptCount: grant.recoveryAttemptCount,
           updatedAt: grant.updatedAt,
@@ -666,6 +772,23 @@ export async function runGuestAccessAmbiguityReconciliationCycle(
       metrics.reconciledIntents += 1;
     } else if (reconciliation.action === "REARMED") {
       metrics.rearmedIntents += 1;
+    }
+
+    if (reconciliation.action !== "UNCHANGED") {
+      try {
+        await syncGuestJourneyAccessOwnerMissionControl(
+          prisma,
+          intent.id,
+          {
+            organizationId:
+              intent.reservation.property.organizationId,
+            propertyId: intent.reservation.propertyId,
+            e15Enabled: input.config.enabled,
+          }
+        );
+      } catch {
+        metrics.races += 1;
+      }
     }
   }
 

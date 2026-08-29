@@ -110,6 +110,47 @@ function provisioningDependencies(
       return { ok: true, keyboardPwdId: 123 } as any;
     },
     assignNfc: async () => [],
+    evaluateReadiness: async () => ({ ready: true }),
+    executeProvisioningFence: async (_prisma: unknown, input: any) => {
+      const readiness = await input.evaluateReadiness(
+        input.reservationId,
+        now
+      );
+      if (!readiness.ready) {
+        return {
+          status: "WAITING_FOR_EVIDENCE",
+          reason: "CANONICAL_ACCESS_READINESS_NOT_ELIGIBLE",
+          attemptCount: 1,
+        };
+      }
+
+      let timer: ReturnType<typeof setTimeout> | undefined;
+      try {
+        const activation = await Promise.race([
+          input.executePhysical(),
+          new Promise<never>((_resolve, reject) => {
+            timer = setTimeout(
+              () => reject(new Error("GUEST_ACCESS_PROVISION_RESULT_AMBIGUOUS_TIMEOUT")),
+              input.physicalTimeoutMs
+            );
+          }),
+        ]);
+        return {
+          status: "SUCCEEDED",
+          activation,
+          fenceCleared: true,
+          attemptCount: 1,
+        };
+      } catch (error) {
+        return {
+          status: "AMBIGUOUS",
+          reason: error instanceof Error ? error.message : String(error),
+          attemptCount: 1,
+        };
+      } finally {
+        if (timer) clearTimeout(timer);
+      }
+    },
     ...overrides,
   } as any;
 }
