@@ -1,0 +1,73 @@
+name: Guest Journey Owner Attempt DB Contract Certification
+
+on:
+  pull_request:
+    branches:
+      - main
+    paths:
+      - ".github/workflows/guest-journey-owner-attempt-db-contract-certification.yml"
+      - "package.json"
+      - "package-lock.json"
+      - "prisma/schema.prisma"
+      - "prisma/migrations/**"
+      - "src/services/guest-journey-contract.ts"
+      - "src/services/guest-journey-owner-runtime.service.ts"
+      - "src/services/guest-journey-communications-owner-runtime.service.ts"
+      - "src/services/guest-journey-access-owner-runtime.service.ts"
+      - "src/services/guest-journey-financial-owner-runtime.service.ts"
+      - "src/services/guest-journey-compliance-owner-runtime.service.ts"
+      - "src/services/guest-journey-owner-attempt-db-contract.test.ts"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  DATABASE_URL: postgresql://postgres:postgres@127.0.0.1:5432/pingo_owner_attempt_contract_ci
+
+jobs:
+  certify-owner-attempt-db-contract:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: pingo_owner_attempt_contract_ci
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d pingo_owner_attempt_contract_ci"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Validate Prisma schema
+        run: npx prisma validate --schema prisma/schema.prisma
+
+      - name: Generate Prisma Client
+        run: npx prisma generate --schema prisma/schema.prisma
+
+      - name: Apply complete migration history to empty PostgreSQL
+        run: npx prisma migrate deploy --schema prisma/schema.prisma
+
+      - name: Certify durable owner-attempt DB allowlist
+        run: >-
+          node --import tsx --test
+          src/services/guest-journey-owner-attempt-db-contract.test.ts
