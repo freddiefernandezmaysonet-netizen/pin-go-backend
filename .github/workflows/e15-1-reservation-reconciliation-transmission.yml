@@ -32,13 +32,11 @@ jobs:
           test "$(git merge-base 4c640a1340623066fedbd5b447b073ac18822e73 HEAD)" = "4c640a1340623066fedbd5b447b073ac18822e73"
           git merge-base --is-ancestor 4c640a1340623066fedbd5b447b073ac18822e73 HEAD
 
-      - name: Apply deterministic E15.1 integration
+      - name: Apply deterministic E15.1 source integration
         run: |
           python scripts/patch-e15-1-helper-cleanup.py
           python scripts/patch-e15-1-reservation-reconciliation.py
-          git rm scripts/patch-e15-1-helper-cleanup.py
-          git rm scripts/patch-e15-1-reservation-reconciliation.py
-          git rm .github/workflows/e15-1-reservation-reconciliation-transmission.yml
+          git checkout -- .github/workflows/guest-journey-enterprise-e15-certification.yml
 
       - run: npm ci
       - run: npx prisma generate --schema prisma/schema.prisma
@@ -119,14 +117,16 @@ jobs:
           git diff --check 4c640a1340623066fedbd5b447b073ac18822e73 --
           test -z "$(git diff --name-only 4c640a1340623066fedbd5b447b073ac18822e73 -- | grep -E '^prisma/migrations/|^prisma/schema\.prisma$|^package(-lock)?\.json$|^src/workers/reservation\.worker\.ts$|^src/e14/' || true)"
 
-      - name: Verify final E15.1 permanent inventory
+      - name: Verify source-transport inventory
         shell: bash
         run: |
           set -euo pipefail
           python - <<'PY'
           import subprocess
           expected = {
-            '.github/workflows/guest-journey-enterprise-e15-certification.yml',
+            '.github/workflows/e15-1-reservation-reconciliation-transmission.yml',
+            'scripts/patch-e15-1-helper-cleanup.py',
+            'scripts/patch-e15-1-reservation-reconciliation.py',
             'src/e15/guest-access-ambiguity-reconciliation.e15.ts',
             'src/e15/guest-access-reservation-reconciliation-fence.e15-1.ts',
             'src/e15/guest-access-reservation-reconciliation-fence.e15-1.test.ts',
@@ -135,10 +135,10 @@ jobs:
             'git','diff','--name-only','4c640a1340623066fedbd5b447b073ac18822e73','--'
           ], text=True).splitlines())
           if actual != expected:
-            raise SystemExit(f'E15_1_INVENTORY_MISMATCH expected={sorted(expected)} actual={sorted(actual)}')
+            raise SystemExit(f'E15_1_SOURCE_INVENTORY_MISMATCH expected={sorted(expected)} actual={sorted(actual)}')
           PY
 
-      - name: Commit certified E15.1 integration
+      - name: Commit certified E15.1 source integration
         shell: bash
         run: |
           set -euo pipefail
@@ -146,7 +146,6 @@ jobs:
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
           git add src/e15/guest-access-ambiguity-reconciliation.e15.ts
           git add src/e15/guest-access-reservation-reconciliation-fence.e15-1.ts
-          git add .github/workflows/guest-journey-enterprise-e15-certification.yml
           git diff --cached --check
           git commit -m 'Integrate E15.1 reservation reconciliation fencing'
           git push origin HEAD:agent/apms-enterprise-guest-journey-e15-1-reservation-reconciliation-fence
