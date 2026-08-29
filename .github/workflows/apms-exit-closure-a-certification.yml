@@ -5,6 +5,7 @@ on:
     paths:
       - "src/services/guest-access-exit-closure-a.policy.ts"
       - "src/services/guest-access-exit-closure-a.policy.test.ts"
+      - "src/services/guest-access-exit-closure-a.mission-control.test.ts"
       - "src/services/guest-journey-access-owner-*.ts"
       - "src/e14/**"
       - "src/e15/**"
@@ -34,7 +35,7 @@ jobs:
 
       - name: Closure A focused contract and E8 regressions
         run: |
-          node --import tsx --test src/services/guest-access-exit-closure-a.policy.test.ts
+          node --import tsx --test src/services/guest-access-exit-closure-a.policy.test.ts src/services/guest-access-exit-closure-a.mission-control.test.ts
           npm run test:guest-journey-enterprise-e8-access-owner
           npx tsc -p tsconfig.guest-journey-enterprise-e8.json
 
