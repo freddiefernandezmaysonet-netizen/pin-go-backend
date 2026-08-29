@@ -172,17 +172,6 @@ function findCanonicalPendingTarget(
   reservation: ReservationFenceSnapshot,
   input: ExpectedGrantSnapshot
 ): ReservationFenceGrant | null {
-  if (
-    !lifecycleMatches(reservation, {
-      organizationId: input.organizationId,
-      propertyId: input.propertyId,
-      now: new Date(Math.min(input.endsAt.getTime() - 1, Date.now())),
-      releaseStatus: GuestAccessReleaseStatus.ELIGIBLE,
-    })
-  ) {
-    return null;
-  }
-
   const canonical = reservation.accessGrants.filter((grant) =>
     grant.status === AccessStatus.PENDING &&
     sameInstant(grant.startsAt, reservation.checkIn) &&
