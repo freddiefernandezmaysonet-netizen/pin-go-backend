@@ -402,7 +402,12 @@ export async function runGuestAccessAmbiguityReconciliationCycle(
   metrics.scannedGrants = grants.length;
 
   for (const grant of grants) {
-    const organizationId = grant.reservation?.property.organizationId;
+    if (!grant.reservation) {
+      metrics.manualReview += 1;
+      continue;
+    }
+    const reservation = grant.reservation;
+    const organizationId = reservation.property.organizationId;
     const ttlockLockId = Number(grant.lock.ttlockLockId);
     if (!organizationId || !Number.isFinite(ttlockLockId) || ttlockLockId <= 0) {
       metrics.manualReview += 1;
@@ -434,7 +439,7 @@ export async function runGuestAccessAmbiguityReconciliationCycle(
         pageSize: input.config.providerPageSize,
         maxPages: input.config.providerMaxPages,
         timeoutMs: input.config.providerTimeoutMs,
-        fetchImpl: input.fetchImpl,
+        ...(input.fetchImpl ? { fetchImpl: input.fetchImpl } : {}),
       });
     } catch {
       metrics.providerReadFailures += 1;
@@ -443,7 +448,7 @@ export async function runGuestAccessAmbiguityReconciliationCycle(
 
     const classification = classifyProviderInventory({
       inventory,
-      expectedName: expectedPasscodeName(grant.reservation.reservationNumber),
+      expectedName: expectedPasscodeName(reservation.reservationNumber),
       startsAt: grant.startsAt,
       endsAt: grant.endsAt,
     });
@@ -522,7 +527,7 @@ export async function runGuestAccessAmbiguityReconciliationCycle(
             keyboardPwdId: String(item.keyboardPwdId),
             startDate: BigInt(item.startDate),
             endDate: BigInt(item.endDate),
-            phone: grant.reservation.guestPhone ?? null,
+            phone: reservation.guestPhone ?? null,
             accessCodeEnc: encrypted,
             accessCodeHash: hashed,
             accessCodeMasked: masked,
@@ -534,7 +539,7 @@ export async function runGuestAccessAmbiguityReconciliationCycle(
             keyboardPwdId: String(item.keyboardPwdId),
             startDate: BigInt(item.startDate),
             endDate: BigInt(item.endDate),
-            phone: grant.reservation.guestPhone ?? null,
+            phone: reservation.guestPhone ?? null,
             accessCodeEnc: encrypted,
             accessCodeHash: hashed,
             accessCodeMasked: masked,
@@ -544,8 +549,8 @@ export async function runGuestAccessAmbiguityReconciliationCycle(
 
         await tx.reservation.updateMany({
           where: {
-            id: grant.reservation.id,
-            propertyId: grant.reservation.propertyId,
+            id: reservation.id,
+            propertyId: reservation.propertyId,
             status: ReservationStatus.ACTIVE,
             guestAccessReleaseStatus: GuestAccessReleaseStatus.ELIGIBLE,
           },
