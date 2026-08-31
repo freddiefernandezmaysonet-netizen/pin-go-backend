@@ -180,7 +180,7 @@ export function filterAlreadyOwnedGuestAccessDeliveries(input: {
   rows: PendingGuestAccessMessage[];
   existing: ExistingGuestAccessDeliveryEvidence[];
   accessGrantId: string;
-  accessGrantUpdatedAt: Date;
+  credentialAppliedAt: Date;
 }): PendingGuestAccessMessage[] {
   return input.rows.filter((row) => {
     const destination = row.channel === "email" ? row.to.toLowerCase() : row.to;
@@ -192,7 +192,7 @@ export function filterAlreadyOwnedGuestAccessDeliveries(input: {
         ? clean(message.to).toLowerCase()
         : clean(message.to);
       if (existingDestination !== destination) return false;
-      return message.createdAt.getTime() >= input.accessGrantUpdatedAt.getTime();
+      return message.createdAt.getTime() >= input.credentialAppliedAt.getTime();
     });
   });
 }
