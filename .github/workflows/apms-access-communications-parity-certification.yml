@@ -14,6 +14,7 @@ on:
       - "src/services/guest-journey-evaluator.test.ts"
       - "src/services/guest-journey-communications-delivery-adapter.service.ts"
       - "src/services/guest-journey-communications-delivery-adapter.service.test.ts"
+      - "scripts/apply-apms-access-communications-parity.py"
       - "prisma/schema.prisma"
       - "package.json"
       - "package-lock.json"
@@ -34,6 +35,12 @@ jobs:
         with:
           node-version: 22
           cache: npm
+      - name: Apply exact parity wiring in disposable checkout
+        run: |
+          python scripts/apply-apms-access-communications-parity.py
+          python scripts/apply-apms-access-communications-parity.py
+          git diff --check
+          git diff -- src/services/guest-journey-access-owner-cycle.service.ts src/services/guest-journey-access-owner-cycle.service.test.ts src/services/guest-journey-evaluator.ts src/services/guest-journey-evaluator.test.ts src/services/guest-journey-communications-delivery-adapter.service.ts src/services/guest-journey-communications-delivery-adapter.service.test.ts
       - run: npm ci
       - run: npx prisma generate
       - run: npx prisma validate
