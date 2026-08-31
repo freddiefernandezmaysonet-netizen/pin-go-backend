@@ -1,0 +1,47 @@
+name: APMS Access Communications Parity Certification
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - "src/services/guest-journey-access-communications-bridge.policy.ts"
+      - "src/services/guest-journey-access-communications-bridge.policy.test.ts"
+      - "src/services/guest-journey-access-communications-outbox.service.ts"
+      - "src/services/guest-journey-access-communications-outbox.service.test.ts"
+      - "src/services/guest-journey-access-owner-cycle.service.ts"
+      - "src/services/guest-journey-access-owner-cycle.service.test.ts"
+      - "src/services/guest-journey-evaluator.ts"
+      - "src/services/guest-journey-evaluator.test.ts"
+      - "src/services/guest-journey-communications-delivery-adapter.service.ts"
+      - "src/services/guest-journey-communications-delivery-adapter.service.test.ts"
+      - "prisma/schema.prisma"
+      - "package.json"
+      - "package-lock.json"
+      - ".github/workflows/apms-access-communications-parity-certification.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  certify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      DATABASE_URL: postgresql://postgres:postgres@localhost:5432/pingo_ci
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npx prisma generate
+      - run: npx prisma validate
+      - name: Access communications bridge policy
+        run: node --import tsx --test src/services/guest-journey-access-communications-bridge.policy.test.ts src/services/guest-journey-access-communications-outbox.service.test.ts
+      - name: E4 coordination regression
+        run: npm run test:guest-journey-enterprise-e4-coordination
+      - name: E7 communications regression
+        run: npm run test:guest-journey-enterprise-e7-communications
+      - name: E8 access owner regression
+        run: npm run test:guest-journey-enterprise-e8-access-owner
