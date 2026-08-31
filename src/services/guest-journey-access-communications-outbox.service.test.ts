@@ -32,7 +32,7 @@ function fixture(existing: any[] = []) {
       status: "ACTIVE",
       startsAt: checkIn,
       endsAt: checkOut,
-      updatedAt: now,
+      lastAppliedAt: now,
       secureAccessCode: { accessCodeHash: "hash-1" },
     }],
   };
@@ -68,7 +68,7 @@ test("materializer creates email and consented SMS without plaintext passcode", 
   assert.doesNotMatch(JSON.stringify(state.created), /123456|accessCodeEnc|passcodePlain/);
 });
 
-test("materializer suppresses delivery already owned for the current grant revision", async () => {
+test("materializer suppresses delivery already owned after credential application", async () => {
   const state = fixture([{
     channel: "email",
     to: "guest@example.com",
@@ -86,7 +86,7 @@ test("materializer suppresses delivery already owned for the current grant revis
   assert.equal(state.created[0].channel, "sms");
 });
 
-test("materializer does not let stale delivery evidence suppress a changed grant revision", async () => {
+test("materializer does not let delivery before lastAppliedAt suppress a newly applied credential", async () => {
   const state = fixture([{
     channel: "sms",
     to: "+17875550101",
@@ -97,6 +97,16 @@ test("materializer does not let stale delivery evidence suppress a changed grant
   }]);
   const result = await materializeGuestAccessCommunicationOutbox(state.prisma, input);
   assert.equal(result.created, 2);
+});
+
+test("materializer fails closed without semantic credential application time", async () => {
+  const state = fixture();
+  state.reservation.accessGrants[0].lastAppliedAt = null as any;
+  await assert.rejects(
+    materializeGuestAccessCommunicationOutbox(state.prisma, input),
+    /OUTBOX_CANONICAL_GRANT_MISSING_OR_AMBIGUOUS/
+  );
+  assert.equal(state.created.length, 0);
 });
 
 test("materializer fails closed without released canonical secure access evidence", async () => {
