@@ -21,37 +21,26 @@ on:
       - ".github/workflows/apms-access-communications-parity-certification.yml"
 
 permissions:
-  contents: write
+  contents: read
 
 jobs:
   certify:
-    if: >-
-      github.event.pull_request.head.repo.full_name == github.repository &&
-      github.event.pull_request.head.ref == 'agent/apms-access-communications-parity-closure' &&
-      github.event.pull_request.base.sha == '9b2fe614c01372445ddad00272aa637292af0829'
     runs-on: ubuntu-latest
     timeout-minutes: 20
     env:
       DATABASE_URL: postgresql://postgres:postgres@localhost:5432/pingo_ci
     steps:
       - uses: actions/checkout@v4
-        with:
-          ref: ${{ github.event.pull_request.head.ref }}
-          fetch-depth: 0
       - uses: actions/setup-node@v4
         with:
           node-version: 22
           cache: npm
-      - name: Verify frozen certification base
-        run: |
-          git fetch origin main
-          test "$(git merge-base HEAD origin/main)" = "9b2fe614c01372445ddad00272aa637292af0829"
-      - name: Apply exact parity wiring
+      - name: Verify wiring is already materialized and transformer is idempotent
         run: |
           python scripts/apply-apms-access-communications-parity.py
           python scripts/apply-apms-access-communications-parity.py
           git diff --check
-          git diff -- src/services/guest-journey-access-owner-cycle.service.ts src/services/guest-journey-access-owner-cycle.service.test.ts src/services/guest-journey-evaluator.ts src/services/guest-journey-evaluator.test.ts src/services/guest-journey-communications-delivery-adapter.service.ts src/services/guest-journey-communications-delivery-adapter.service.test.ts
+          test -z "$(git status --porcelain -- src/services/guest-journey-access-owner-cycle.service.ts src/services/guest-journey-access-owner-cycle.service.test.ts src/services/guest-journey-evaluator.ts src/services/guest-journey-evaluator.test.ts src/services/guest-journey-communications-delivery-adapter.service.ts src/services/guest-journey-communications-delivery-adapter.service.test.ts)"
       - run: npm ci
       - run: npx prisma generate
       - run: npx prisma validate
@@ -63,26 +52,3 @@ jobs:
         run: npm run test:guest-journey-enterprise-e7-communications
       - name: E8 access owner regression
         run: npm run test:guest-journey-enterprise-e8-access-owner
-      - name: Persist certified wiring to Draft branch
-        run: |
-          if git diff --quiet -- \
-            src/services/guest-journey-access-owner-cycle.service.ts \
-            src/services/guest-journey-access-owner-cycle.service.test.ts \
-            src/services/guest-journey-evaluator.ts \
-            src/services/guest-journey-evaluator.test.ts \
-            src/services/guest-journey-communications-delivery-adapter.service.ts \
-            src/services/guest-journey-communications-delivery-adapter.service.test.ts; then
-            echo "Certified wiring already persisted; no commit required."
-            exit 0
-          fi
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add \
-            src/services/guest-journey-access-owner-cycle.service.ts \
-            src/services/guest-journey-access-owner-cycle.service.test.ts \
-            src/services/guest-journey-evaluator.ts \
-            src/services/guest-journey-evaluator.test.ts \
-            src/services/guest-journey-communications-delivery-adapter.service.ts \
-            src/services/guest-journey-communications-delivery-adapter.service.test.ts
-          git commit -m "Wire APMS access delivery into Communications Owner"
-          git push origin HEAD:${{ github.event.pull_request.head.ref }}
