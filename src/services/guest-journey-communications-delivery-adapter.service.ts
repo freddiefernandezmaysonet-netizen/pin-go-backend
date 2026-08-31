@@ -317,14 +317,24 @@ export async function executeGuestJourneyCommunicationDeliveryAdapter(
     };
   }
 
-  if (clean(message.status).toUpperCase() !== "FAILED") {
+  const normalizedMessageStatus = clean(message.status).toUpperCase();
+  const expectedOwnedStatus =
+    claim.intentType === "REQUEST_COMMUNICATION"
+      ? "APMS_PENDING"
+      : "FAILED";
+
+  if (normalizedMessageStatus !== expectedOwnedStatus) {
     return {
       providerCalls: 0,
       completion: {
         kind: "WAITING_FOR_EVIDENCE",
         outcomeEvidenceFingerprint: hashEvidence({ messageLogId, status: message.status }),
-        errorCode: "COMMUNICATION_NOT_RETRYABLE",
-        errorDetail: `The correlated message has non-retryable status ${message.status ?? "UNKNOWN"}.`,
+        errorCode:
+          claim.intentType === "REQUEST_COMMUNICATION"
+            ? "COMMUNICATION_NOT_PENDING"
+            : "COMMUNICATION_NOT_RETRYABLE",
+        errorDetail:
+          `The correlated message has status ${message.status ?? "UNKNOWN"}; ${claim.intentType} requires ${expectedOwnedStatus}.`,
         messageLogId,
         communicationType: requestedType,
         channel: requestedChannel,

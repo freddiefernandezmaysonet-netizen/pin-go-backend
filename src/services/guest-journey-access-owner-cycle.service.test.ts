@@ -122,6 +122,17 @@ test("E8 claims, executes, completes, and projects one certified access intent",
             },
           };
         },
+        materializeAccessCommunications: async (_prisma, input) => {
+          calls.push("outbox");
+          assert.equal(input.reservationId, "reservation-1");
+          assert.deepEqual(input.accessGrantIds, ["grant-1"]);
+          return {
+            canonicalAccessGrantId: "grant-1",
+            proposed: 2,
+            created: 2,
+            deduplicated: 0,
+          };
+        },
         complete: async () => {
           calls.push("complete");
           return {
@@ -142,7 +153,7 @@ test("E8 claims, executes, completes, and projects one certified access intent",
       },
     }
   );
-  assert.deepEqual(calls, ["claim", "execute", "complete", "mission-control"]);
+  assert.deepEqual(calls, ["claim", "execute", "outbox", "complete", "mission-control"]);
   assert.equal(metrics.claimed, 1);
   assert.equal(metrics.providerCalls, 1);
   assert.equal(metrics.succeeded, 1);

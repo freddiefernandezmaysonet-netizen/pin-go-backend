@@ -8,7 +8,10 @@ import type { ClaimedCommunicationIntent } from "./guest-journey-communications-
 
 const now = new Date("2026-08-23T04:30:00.000Z");
 
-function claim(payload: Record<string, unknown>): ClaimedCommunicationIntent {
+function claim(
+  payload: Record<string, unknown>,
+  intentType: ClaimedCommunicationIntent["intentType"] = "REQUEST_COMMUNICATION_RETRY"
+): ClaimedCommunicationIntent {
   return {
     intentId: "intent-1",
     intentKey: "intent-key-1",
@@ -17,7 +20,7 @@ function claim(payload: Record<string, unknown>): ClaimedCommunicationIntent {
     organizationId: "org-1",
     propertyId: "property-1",
     targetEngine: "COMMUNICATIONS",
-    intentType: "REQUEST_COMMUNICATION_RETRY",
+    intentType,
     expectedOutcomeCode: "COMMUNICATION_DELIVERY_FINAL",
     payload,
     inputEvidenceFingerprint: "input-fingerprint",
@@ -283,5 +286,55 @@ test("the tenant, dates and recipient are re-fenced immediately before provider 
   );
   assert.equal(calls, 0);
   assert.equal(fixture.message.status, "OBSOLETE");
+  assert.equal(result.completion.kind, "SUCCEEDED");
+});
+
+test("first-send claims own APMS_PENDING delivery exactly once", async () => {
+  const envelope = JSON.stringify({
+    kind: "PIN_GO_EMAIL_DELIVERY",
+    type: "GUEST_ACCESS_PASSCODE",
+    retryPayload: {
+      reservationNumber: "PG-2026-000044",
+      accessGrantId: "grant-1",
+      validFrom: "2026-08-24T20:00:00.000Z",
+      validUntil: "2026-08-27T15:00:00.000Z",
+      preferredLanguage: "en",
+    },
+  });
+  const { prisma, message } = fakePrisma({
+    message: {
+      status: "APMS_PENDING",
+      communicationType: "GUEST_ACCESS_PASSCODE",
+      channel: "email",
+      to: "guest@example.com",
+      body: envelope,
+    },
+  });
+  let calls = 0;
+  const result = await executeGuestJourneyCommunicationDeliveryAdapter(
+    prisma,
+    claim(
+      {
+        messageLogId: "message-1",
+        communicationType: "GUEST_ACCESS_PASSCODE",
+        channel: "email",
+      },
+      "REQUEST_COMMUNICATION"
+    ),
+    { now, providerTimeoutMs: 100 },
+    {
+      sendSms: async () => { throw new Error("sms must not execute"); },
+      sendEmail: async (input) => {
+        calls += 1;
+        assert.equal(input.type, "GUEST_ACCESS_PASSCODE");
+        assert.equal(input.to, "guest@example.com");
+        assert.equal(input.retryPayload.accessGrantId, "grant-1");
+        return { id: "email-new" };
+      },
+    }
+  );
+  assert.equal(calls, 1);
+  assert.equal(message.status, "SENT");
+  assert.equal(result.providerCalls, 1);
   assert.equal(result.completion.kind, "SUCCEEDED");
 });

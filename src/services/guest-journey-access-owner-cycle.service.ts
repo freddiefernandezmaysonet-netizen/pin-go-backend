@@ -12,6 +12,7 @@ import {
 } from "@prisma/client";
 
 import { executeGuestJourneyAccessOwnerAdapter } from "./guest-journey-access-owner-adapter.service";
+import { materializeGuestAccessCommunicationOutbox } from "./guest-journey-access-communications-outbox.service";
 import type { GuestJourneyAccessOwnerConfig } from "./guest-journey-access-owner.config";
 import { syncGuestJourneyAccessOwnerMissionControl } from "./guest-journey-access-owner-mission-control.service";
 import {
@@ -44,6 +45,7 @@ type CycleDependencies = {
   claim: typeof claimGuestJourneyAccessIntent;
   execute: typeof executeGuestJourneyAccessOwnerAdapter;
   complete: typeof completeGuestJourneyAccessIntent;
+  materializeAccessCommunications: typeof materializeGuestAccessCommunicationOutbox;
   syncMissionControl: typeof syncGuestJourneyAccessOwnerMissionControl;
   leaseTokenFactory: () => string;
   clock: () => Date;
@@ -53,6 +55,7 @@ const DEFAULT_DEPENDENCIES: CycleDependencies = {
   claim: claimGuestJourneyAccessIntent,
   execute: executeGuestJourneyAccessOwnerAdapter,
   complete: completeGuestJourneyAccessIntent,
+  materializeAccessCommunications: materializeGuestAccessCommunicationOutbox,
   syncMissionControl: syncGuestJourneyAccessOwnerMissionControl,
   leaseTokenFactory: () => randomBytes(32).toString("base64url"),
   clock: () => new Date(),
@@ -247,6 +250,30 @@ export async function runGuestJourneyAccessOwnerCycle(
           errorDetail: normalized.detail,
           accessGrantIds: [],
         };
+      }
+
+      if (
+        claimed.claim.intentType === "REQUEST_ACCESS_PROVISIONING" &&
+        completion.kind === "SUCCEEDED" &&
+        ["PROVISIONED", "ALREADY_SATISFIED"].includes(completion.action)
+      ) {
+        try {
+          await dependencies.materializeAccessCommunications(prisma, {
+            reservationId: claimed.claim.reservationId,
+            organizationId: claimed.claim.organizationId,
+            propertyId: claimed.claim.propertyId,
+            accessGrantIds: completion.accessGrantIds,
+          });
+        } catch (error) {
+          const normalized = normalizeAccessOwnerError(error);
+          completion = {
+            kind: "RETRYABLE" as const,
+            outcomeEvidenceFingerprint: completion.outcomeEvidenceFingerprint,
+            errorCode: "ACCESS_COMMUNICATIONS_OUTBOX_MATERIALIZATION_FAILED",
+            errorDetail: normalized.detail,
+            accessGrantIds: completion.accessGrantIds,
+          };
+        }
       }
 
       const completed = await dependencies.complete(prisma, {
