@@ -65,7 +65,7 @@ test("existing SENT/FAILED ownership suppresses competing first-send", () => {
   const filtered = filterAlreadyOwnedGuestAccessDeliveries({
     rows,
     accessGrantId: "grant1",
-    accessGrantUpdatedAt: new Date("2026-08-31T18:30:00Z"),
+    credentialAppliedAt: new Date("2026-08-31T18:30:00Z"),
     existing: [
       {
         channel: "sms",
@@ -88,12 +88,33 @@ test("existing SENT/FAILED ownership suppresses competing first-send", () => {
   assert.equal(filtered.length, 0);
 });
 
-test("delivery older than latest grant mutation cannot suppress new obligation", () => {
+test("non-semantic grant update after SENT does not create duplicate first-send", () => {
+  const rows = buildGuestAccessCommunicationOutbox(base);
+  const credentialAppliedAt = new Date("2026-08-31T18:30:00Z");
+  const unrelatedGrantUpdatedAt = new Date("2026-08-31T18:45:00Z");
+  const filtered = filterAlreadyOwnedGuestAccessDeliveries({
+    rows,
+    accessGrantId: "grant1",
+    credentialAppliedAt,
+    existing: [{
+      channel: "sms",
+      to: "+17875550123",
+      status: "SENT",
+      accessGrantId: "grant1",
+      body: "masked",
+      createdAt: new Date("2026-08-31T18:31:00Z"),
+    }],
+  });
+  assert.ok(unrelatedGrantUpdatedAt.getTime() > credentialAppliedAt.getTime());
+  assert.deepEqual(filtered.map((row) => row.channel), ["email"]);
+});
+
+test("new credential application after SENT creates a new obligation", () => {
   const rows = buildGuestAccessCommunicationOutbox(base);
   const filtered = filterAlreadyOwnedGuestAccessDeliveries({
     rows,
     accessGrantId: "grant1",
-    accessGrantUpdatedAt: new Date("2026-08-31T18:40:00Z"),
+    credentialAppliedAt: new Date("2026-08-31T18:40:00Z"),
     existing: [{
       channel: "sms",
       to: "+17875550123",
