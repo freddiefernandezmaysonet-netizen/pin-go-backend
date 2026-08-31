@@ -1500,12 +1500,39 @@ export function evaluateCanonicalGuestJourney(
     const communicationSignal of
     evidence.communications.signals
   ) {
-    if (
+    const communicationStatus =
       communicationSignal.status
         .trim()
-        .toUpperCase() !==
-      "FAILED"
-    ) {
+        .toUpperCase();
+
+    if (communicationStatus === "APMS_PENDING") {
+      addIntent({
+        intentType:
+          "REQUEST_COMMUNICATION",
+        targetEngine:
+          "COMMUNICATIONS",
+        reasonCode:
+          "COMMUNICATION_DELIVERY_PENDING",
+        expectedOutcomeCode:
+          "COMMUNICATION_DELIVERY_FINAL",
+        payload: {
+          ...(communicationSignal.messageLogId
+            ? {
+                messageLogId:
+                  communicationSignal.messageLogId,
+              }
+            : {}),
+          communicationType:
+            communicationSignal
+              .communicationType,
+          channel:
+            communicationSignal.channel,
+        },
+      });
+      continue;
+    }
+
+    if (communicationStatus !== "FAILED") {
       continue;
     }
 

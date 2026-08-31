@@ -1777,3 +1777,35 @@ test(
     );
   }
 );
+
+test(
+  "proposes first-send Communications work for durable APMS_PENDING access delivery",
+  () => {
+    const evaluation = evaluateCanonicalGuestJourney(
+      createEvidence({
+        communications: {
+          signals: [
+            {
+              messageLogId: "gjcomm_pending_1",
+              communicationType: "GUEST_ACCESS_PASSCODE",
+              channel: "email",
+              status: "APMS_PENDING",
+              retryCount: 0,
+              lastError: null,
+            },
+          ],
+        },
+      })
+    );
+
+    const intent = evaluation.requiredCoordinationIntents.find(
+      (candidate) => candidate.intentType === "REQUEST_COMMUNICATION"
+    );
+    assert.ok(intent);
+    assert.equal(intent.targetEngine, "COMMUNICATIONS");
+    assert.equal(intent.reasonCode, "COMMUNICATION_DELIVERY_PENDING");
+    assert.equal(intent.payload?.messageLogId, "gjcomm_pending_1");
+    assert.equal(intent.payload?.communicationType, "GUEST_ACCESS_PASSCODE");
+    assert.equal(intent.payload?.channel, "email");
+  }
+);
