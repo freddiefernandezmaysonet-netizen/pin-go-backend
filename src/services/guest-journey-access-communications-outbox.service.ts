@@ -73,7 +73,7 @@ export async function materializeGuestAccessCommunicationOutbox(
           status: true,
           startsAt: true,
           endsAt: true,
-          updatedAt: true,
+          lastAppliedAt: true,
           secureAccessCode: {
             select: {
               accessCodeHash: true,
@@ -99,6 +99,7 @@ export async function materializeGuestAccessCommunicationOutbox(
     grant.status === AccessStatus.ACTIVE &&
     grant.startsAt.getTime() === reservation.checkIn.getTime() &&
     grant.endsAt.getTime() === reservation.checkOut.getTime() &&
+    Boolean(grant.lastAppliedAt) &&
     Boolean(clean(grant.secureAccessCode?.accessCodeHash))
   );
   if (canonical.length !== 1) {
@@ -142,7 +143,7 @@ export async function materializeGuestAccessCommunicationOutbox(
     rows,
     existing,
     accessGrantId: grant.id,
-    accessGrantUpdatedAt: grant.updatedAt,
+    credentialAppliedAt: grant.lastAppliedAt!,
   });
 
   if (pendingRows.length === 0) {
