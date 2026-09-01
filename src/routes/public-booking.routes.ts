@@ -28,6 +28,7 @@ import { createGuestReservationModificationCheckout } from "../services/guest-re
 import { applyGuestReservationModification } from "../services/guest-reservation-modification-apply.service";
 import { resolveOrganizationGuestReplyTo } from "../services/organization-guest-email.service";
 import {
+  resolvePublishedBrandContextByHostname,
   resolvePublishedBrandContextForOrganization,
   type PublishedBrandContext,
 } from "../services/branding/published-brand-context.service.js";
@@ -662,6 +663,74 @@ publicBookingRouter.post("/manage/:guestToken/cancel", async (req, res) => {
       error,
       fallbackMessage: "Failed to cancel reservation.",
       logLabel: "[public-booking guest-cancel error]",
+    });
+  }
+});
+
+publicBookingRouter.get("/discovery", async (req, res) => {
+  try {
+    const hostname = String(req.query.hostname ?? "").trim();
+
+    if (!hostname) {
+      return res.status(400).json({
+        ok: false,
+        error: "Missing hostname",
+      });
+    }
+
+    const brandContext = await resolvePublishedBrandContextByHostname(hostname);
+
+    if (brandContext.kind !== "CUSTOM_BRAND") {
+      return res.json({ ok: true, discovery: null });
+    }
+
+    const organization = await prisma.organization.findFirst({
+      where: {
+        id: brandContext.organizationId,
+        publicBookingEnabled: true,
+      },
+      select: {
+        slug: true,
+        properties: {
+          where: {
+            status: "ACTIVE",
+            isPublicBookable: true,
+          },
+          select: {
+            slug: true,
+          },
+          orderBy: {
+            name: "asc",
+          },
+        },
+      },
+    });
+
+    if (
+      !organization ||
+      !organization.slug ||
+      organization.properties.length === 0 ||
+      (brandContext.organizationSlug &&
+        organization.slug !== brandContext.organizationSlug)
+    ) {
+      return res.json({ ok: true, discovery: null });
+    }
+
+    return res.json({
+      ok: true,
+      discovery: {
+        canonicalHostname: brandContext.customDomain,
+        organizationSlug: organization.slug,
+        propertySlugs: organization.properties
+          .map((property) => property.slug)
+          .filter((slug): slug is string => Boolean(slug)),
+      },
+    });
+  } catch (error: any) {
+    console.error("[public-booking discovery error]", error?.message ?? error);
+    return res.status(500).json({
+      ok: false,
+      error: "Failed to load public booking discovery",
     });
   }
 });
