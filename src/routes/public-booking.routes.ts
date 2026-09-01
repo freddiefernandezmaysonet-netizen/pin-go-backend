@@ -51,6 +51,7 @@ function publicBookingBrandContext(context: PublishedBrandContext) {
     onPrimaryColor: context.onPrimaryColor,
     organizationSlug: context.organizationSlug,
     version: context.version,
+    customDomain: context.customDomain,
     poweredByPinGo: context.poweredByPinGo,
   };
 }
