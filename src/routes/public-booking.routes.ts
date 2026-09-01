@@ -27,6 +27,10 @@ import {
 import { createGuestReservationModificationCheckout } from "../services/guest-reservation-modification-checkout.service";
 import { applyGuestReservationModification } from "../services/guest-reservation-modification-apply.service";
 import { resolveOrganizationGuestReplyTo } from "../services/organization-guest-email.service";
+import {
+  resolvePublishedBrandContextForOrganization,
+  type PublishedBrandContext,
+} from "../services/branding/published-brand-context.service.js";
 
 const prisma = new PrismaClient();
 const publicBookingRouter = Router();
@@ -36,6 +40,34 @@ const SECURE_PRECHECKIN_DISCLOSURE_VERSION =
 
 const SECURE_PRECHECKIN_DISCLOSURE_SOURCE =
   "DIRECT_BOOKING_WEB_FORM";
+
+function publicBookingBrandContext(context: PublishedBrandContext) {
+  return {
+    kind: context.kind,
+    displayName: context.displayName,
+    logoUrl: context.logoUrl,
+    faviconUrl: context.faviconUrl,
+    primaryColor: context.primaryColor,
+    onPrimaryColor: context.onPrimaryColor,
+    organizationSlug: context.organizationSlug,
+    version: context.version,
+    poweredByPinGo: context.poweredByPinGo,
+  };
+}
+
+async function resolvePublicBookingBrandContext(organizationId: string) {
+  try {
+    const context = await resolvePublishedBrandContextForOrganization(
+      organizationId
+    );
+    return publicBookingBrandContext(context);
+  } catch (error) {
+    console.error("[public-booking brand-context error]", {
+      name: error instanceof Error ? error.name : "UnknownError",
+    });
+    return null;
+  }
+}
 
 function buildSecurePrecheckinDisclosureText(
   identityVerificationRequired: boolean
@@ -707,7 +739,9 @@ publicBookingRouter.get("/:organizationSlug", async (req, res) => {
       return res.status(404).json({ ok: false, error: "Public booking site not found" });
     }
 
-    return res.json({ ok: true, organization });
+    const publicBrand = await resolvePublicBookingBrandContext(organization.id);
+
+    return res.json({ ok: true, organization, publicBrand });
   } catch (error: any) {
     console.error("[public-booking list error]", error?.message ?? error);
     return res.status(500).json({ ok: false, error: "Failed to load booking site" });
@@ -816,8 +850,13 @@ const cancellationPolicyPresentation =
     preferredLanguage,
   });
 
+const publicBrand = await resolvePublicBookingBrandContext(
+  property.organizationId
+);
+
 return res.json({
   ok: true,
+  publicBrand,
   property: {
     ...property,
     cancellationPolicy,
