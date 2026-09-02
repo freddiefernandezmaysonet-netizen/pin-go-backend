@@ -8,7 +8,6 @@ import cors from "cors";
 
 // Routers (NO TOCAR)
 import { pmsWebhookRouter } from "./pms/ingest/webhook.routes";
-import { reservationsRouter } from "./routes/reservations.routes";
 import { buildGuestRouter } from "./routes/guest.routes";
 import { buildBillingRouter } from "./routes/billing.routes";
 import { buildBillingPortalRouter } from "./routes/billing.portal.route";
@@ -16,7 +15,6 @@ import billingPreviewRouter from "./routes/billing.preview.routes";
 import billingCapacityRouter from "./routes/billing.capacity.routes";
 import ingestRoutes from "./routes/ingest.routes";
 import { buildStaffRouter } from "./routes/staff.routes";
-import { buildCleaningRouter } from "./routes/cleaning.routes";
 import adminReactivateRoutes from "./routes/admin.reactivate.routes";
 import buildNfcSyncRouter from "./routes/nfc.sync.routes";
 import { buildPropertySettingsRouter } from "./routes/property.settings.routes";
@@ -242,8 +240,6 @@ app.use(buildDeviceBatteryRouter(prisma));
 app.use(buildDeviceGatewayRouter(prisma));
 app.use(dashboardAlertsRouter);
 
-app.use("/reservations", reservationsRouter);
-
 app.use("/billing", buildBillingRouter(prisma));
 app.use("/billing", buildBillingOverviewRouter(prisma));
 app.use("/billing", buildBillingPortalRouter(prisma));
@@ -316,7 +312,6 @@ app.use(tuyaRoutes);
 app.use(orgTuyaRoutes);
 
 app.use("/staff", buildStaffRouter(prisma));
-app.use("/", buildCleaningRouter(prisma));
 
 
 // =====================

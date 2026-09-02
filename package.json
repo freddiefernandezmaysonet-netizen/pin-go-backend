@@ -35,6 +35,7 @@
     "test:brand-policy": "tsx --test src/services/branding/brand-policy.test.ts",
     "test:published-brand-context": "tsx --test src/services/branding/published-brand-context.service.test.ts",
     "test:published-brand-origin": "tsx --test src/services/branding/published-brand-origin.policy.test.ts",
+    "test:legacy-reservations-boundary": "node --import tsx --test src/routes/legacy-reservations-boundary.contract.test.ts",
     "test:auth-cookie-domain": "tsx --test src/lib/auth-cookie-domain.policy.test.ts",
     "test:brand-management": "tsx --test src/services/branding/brand-management.service.test.ts",
     "test:brand-review": "tsx --test src/services/branding/brand-review.service.test.ts",
