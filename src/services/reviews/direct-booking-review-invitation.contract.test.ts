@@ -13,8 +13,10 @@ test("reservation confirmation never creates or delivers a review invitation", (
 
 test("review invitations use a dedicated default-off post-checkout dispatcher", () => {
   assert.match(worker, /reviewInvitationDispatcherEnabled\(\)/);
+  assert.match(worker, /reviewInvitationEligibleAfter\(\)/);
   assert.match(dispatcher, /REVIEW_INVITATION_DELAY_MS/);
-  assert.match(dispatcher, /checkOut: \{ lte: eligibleCheckout \}/);
+  assert.match(dispatcher, /gte: input\.eligibleAfter/);
+  assert.match(dispatcher, /lte: eligibleCheckout/);
   assert.match(dispatcher, /source: "DIRECT_BOOKING"/);
   assert.match(dispatcher, /externalProvider: "PIN_GO_DIRECT"/);
   assert.match(dispatcher, /createReviewInvitation\(candidate\.id, now, input\.prisma\)/);

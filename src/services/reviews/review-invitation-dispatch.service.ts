@@ -60,10 +60,17 @@ export async function claimReviewInvitationDelivery(input: {
 
 export async function dispatchPostCheckoutReviewInvitations(input: {
   prisma: PrismaClient;
+  eligibleAfter: Date;
   now?: Date;
   batchSize?: number;
 }) {
   const now = input.now ?? new Date();
+  if (
+    !(input.eligibleAfter instanceof Date) ||
+    Number.isNaN(input.eligibleAfter.getTime())
+  ) {
+    throw new Error("REVIEW_INVITATION_ELIGIBLE_AFTER_INVALID");
+  }
   const eligibleCheckout = new Date(now.getTime() - REVIEW_INVITATION_DELAY_MS);
   const retryCutoff = new Date(now.getTime() - 15 * 60 * 1000);
   const candidates = await input.prisma.reservation.findMany({
@@ -75,7 +82,10 @@ export async function dispatchPostCheckoutReviewInvitations(input: {
       paymentState: { in: ["PAID", "PARTIALLY_REFUNDED", "REFUNDED"] },
       amountCollected: { gt: 0 },
       guestEmail: { not: null },
-      checkOut: { lte: eligibleCheckout },
+      checkOut: {
+        gte: input.eligibleAfter,
+        lte: eligibleCheckout,
+      },
       review: null,
       OR: [
         { reviewInvitation: null },
