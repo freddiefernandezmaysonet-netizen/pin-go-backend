@@ -75,6 +75,57 @@ type SendDirectBookingGuestConfirmationInput = {
   preferredLanguage?: string | null;
 };
 
+type SendReviewInvitationEmailInput = {
+  to: string;
+  replyTo?: string | null;
+  guestName?: string | null;
+  propertyName: string;
+  reviewUrl: string;
+  preferredLanguage?: string | null;
+  idempotencyKey: string;
+};
+
+function getSafeReviewUrl(value: string) {
+  try {
+    const url = new URL(String(value ?? "").trim());
+    if (!["http:", "https:"].includes(url.protocol) || !url.hostname) return null;
+    if (isProd && url.protocol !== "https:") return null;
+    return url.toString();
+  } catch {
+    return null;
+  }
+}
+
+export async function sendReviewInvitationEmail(input: SendReviewInvitationEmailInput) {
+  const language = resolveGuestLanguage(input.preferredLanguage);
+  const isSpanish = language === "es";
+  const safeUrl = getSafeReviewUrl(input.reviewUrl);
+  if (!safeUrl) throw new Error("Review invitation URL is invalid");
+  if (!resend) {
+    if (isProd) throw new Error("RESEND_API_KEY missing in production");
+    return { ok: true, mode: "console" };
+  }
+  const greeting = input.guestName?.trim()
+    ? `${isSpanish ? "Hola" : "Hi"} ${escapeHtml(input.guestName.trim())},`
+    : isSpanish ? "Hola," : "Hi,";
+  const { data, error } = await resend.emails.send({
+    from: getEmailFrom(),
+    to: input.to,
+    ...(input.replyTo ? { replyTo: input.replyTo } : {}),
+    subject: isSpanish
+      ? `¿Cómo fue su estadía en ${input.propertyName}?`
+      : `How was your stay at ${input.propertyName}?`,
+    html: `<div style="font-family:Arial,sans-serif;color:#173d31;line-height:1.6;max-width:640px;margin:auto">
+      <p>${greeting}</p><h2>${isSpanish ? "Comparta su experiencia" : "Share your experience"}</h2>
+      <p>${isSpanish ? `Gracias por hospedarse en ${escapeHtml(input.propertyName)}.` : `Thank you for staying at ${escapeHtml(input.propertyName)}.`}</p>
+      <p><a href="${escapeHtml(safeUrl)}" style="display:inline-block;background:#173d31;color:#fff;text-decoration:none;padding:13px 18px;border-radius:10px;font-weight:700">${isSpanish ? "Evaluar mi estadía" : "Review my stay"}</a></p>
+      <p style="color:#52665d;font-size:13px">${isSpanish ? "Este enlace seguro es personal, de un solo uso y vence 30 días después del checkout." : "This secure link is personal, single-use, and expires 30 days after checkout."}</p>
+    </div>`,
+  }, { idempotencyKey: input.idempotencyKey });
+  if (error) throw new Error(`Resend review invitation failed: ${error.name}`);
+  return { ok: true, mode: "resend", data };
+}
+
 type SendDirectBookingHostNotificationInput = {
   to: string;
   reservationNumber: string;
