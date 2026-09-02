@@ -1,0 +1,38 @@
+name: Legacy Reservation Routes Boundary Certification
+
+on:
+  pull_request:
+    branches:
+      - main
+    paths:
+      - ".github/workflows/legacy-reservation-routes-boundary-certification.yml"
+      - "package.json"
+      - "package-lock.json"
+      - "src/server.ts"
+      - "src/routes/legacy-reservations-boundary.contract.test.ts"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  certify:
+    name: Unauthenticated legacy routes remain unmounted
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Use Node.js 22
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+
+      - name: Install locked dependencies
+        run: npm ci --silent --no-audit --no-fund
+
+      - name: Certify legacy reservation route boundary
+        run: npm run test:legacy-reservations-boundary
