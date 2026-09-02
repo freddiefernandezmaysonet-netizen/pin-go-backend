@@ -12,6 +12,12 @@ Backend:
 - `REVIEW_TOKEN_ENC_KEY_BASE64=<32-byte key encoded as base64>`
 - `APP_BASE_URL=https://app.pin-ngo.com` (or the canonical dashboard origin)
 
+Invitation worker (configure before enabling the dispatcher):
+
+- `PINGO_REVIEW_INVITATION_DISPATCH_ENABLED=false`
+- `PINGO_REVIEW_INVITATION_ELIGIBLE_AFTER=<timezone-explicit ISO timestamp>`
+- `PINGO_REVIEW_INVITATION_POLL_MS=300000`
+
 Dashboard:
 
 - `VITE_PINGO_REVIEWS_E1_ENABLED=true`
@@ -40,6 +46,11 @@ Reservation confirmation never creates, contains, retries or delivers a review
 invitation. A dedicated, independently disabled dispatcher selects only paid,
 active canonical Pin&Go Direct stays at least 24 hours after checkout. This
 boundary prevents any Reviews failure from blocking or replaying Reservation.
+The dispatcher additionally requires a timezone-explicit launch cutoff and
+selects only reservations whose checkout is on or after that instant. Missing,
+ambiguous or invalid cutoff configuration fails closed before the worker starts,
+preventing an accidental historical campaign. Any intentional backfill requires
+a separate audited workflow and authorization.
 The invitation is bound to the normalized guest email by a SHA-256 hash and the
 delivery fence revalidates the canonical recipient immediately before sending.
 

@@ -1,6 +1,9 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { claimReviewInvitationDelivery } from "./review-invitation-dispatch.service.js";
+import {
+  claimReviewInvitationDelivery,
+  dispatchPostCheckoutReviewInvitations,
+} from "./review-invitation-dispatch.service.js";
 
 function leaseStore(expiresAt: Date | null = null) {
   let leaseExpiresAt = expiresAt;
@@ -43,4 +46,51 @@ test("a live lease blocks recovery while an expired lease is reclaimable", async
   const expired = leaseStore(new Date("2026-09-02T11:59:00Z"));
   assert.equal((await claim(expired.client, "worker-b", now)).count, 1);
   assert.equal(expired.owner(), "worker-b");
+});
+
+test("candidate selection is bounded by launch cutoff and post-checkout delay", async () => {
+  let query: any;
+  const now = new Date("2026-09-05T12:00:00Z");
+  const eligibleAfter = new Date("2026-09-02T16:00:00Z");
+  const prisma = {
+    reservation: {
+      findMany: async (value: any) => {
+        query = value;
+        return [];
+      },
+    },
+  } as any;
+
+  assert.deepEqual(
+    await dispatchPostCheckoutReviewInvitations({
+      prisma,
+      now,
+      eligibleAfter,
+    }),
+    []
+  );
+  assert.deepEqual(query.where.checkOut, {
+    gte: eligibleAfter,
+    lte: new Date("2026-09-04T12:00:00Z"),
+  });
+  assert.equal(query.where.source, "DIRECT_BOOKING");
+  assert.equal(query.where.externalProvider, "PIN_GO_DIRECT");
+});
+
+test("dispatcher rejects a missing or invalid launch cutoff", async () => {
+  const prisma = { reservation: { findMany: async () => [] } } as any;
+  await assert.rejects(
+    dispatchPostCheckoutReviewInvitations({
+      prisma,
+      eligibleAfter: undefined as unknown as Date,
+    }),
+    /ELIGIBLE_AFTER_INVALID/
+  );
+  await assert.rejects(
+    dispatchPostCheckoutReviewInvitations({
+      prisma,
+      eligibleAfter: new Date("invalid"),
+    }),
+    /ELIGIBLE_AFTER_INVALID/
+  );
 });
