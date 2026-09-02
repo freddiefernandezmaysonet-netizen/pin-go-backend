@@ -1,0 +1,26 @@
+{
+  "compilerOptions": {
+    "target": "ES2022",
+    "module": "ESNext",
+    "moduleResolution": "Bundler",
+    "strict": true,
+    "skipLibCheck": true,
+    "esModuleInterop": true,
+    "noEmit": true
+  },
+  "include": [
+    "src/config/reviews.config.ts",
+    "src/services/reviews/review-policy.ts",
+    "src/services/reviews/review-eligibility.policy.ts",
+    "src/services/reviews/review-token-crypto.service.ts",
+    "src/services/reviews/review-moderation-evidence.service.ts",
+    "src/services/reviews/review-route-security.ts",
+    "src/services/reviews/review.service.ts",
+    "src/services/reviews/review-invitation-dispatch.service.ts",
+    "src/workers/review-invitation.worker.ts",
+    "src/lib/email-templates/guestReservationEmail.ts",
+    "src/lib/mailer.ts",
+    "src/routes/public-reviews.routes.ts",
+    "src/routes/dashboard.reviews.routes.ts"
+  ]
+}

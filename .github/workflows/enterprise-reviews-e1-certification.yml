@@ -1,0 +1,77 @@
+name: Enterprise Reviews E1 Certification
+
+on:
+  pull_request:
+    branches:
+      - main
+    paths:
+      - ".github/workflows/enterprise-reviews-e1-certification.yml"
+      - "package.json"
+      - "package-lock.json"
+      - "prisma/schema.prisma"
+      - "prisma/migrations/20260902010000_add_enterprise_reviews_e1/**"
+      - "src/config/reviews.config.ts"
+      - "src/config/reviews.config.test.ts"
+      - "src/lib/direct-booking-review-email.contract.test.ts"
+      - "src/lib/mailer.ts"
+      - "src/routes/dashboard.reviews.routes.ts"
+      - "src/routes/public-reviews.routes.ts"
+      - "src/routes/reviews-routes.contract.test.ts"
+      - "src/server.ts"
+      - "src/services/email-delivery.service.ts"
+      - "src/services/reviews/**"
+      - "src/workers/review-invitation.worker.ts"
+      - "tsconfig.enterprise-reviews-e1.json"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  DATABASE_URL: postgresql://postgres:postgres@127.0.0.1:5432/pingo_reviews_e1_ci
+
+jobs:
+  certify:
+    name: Reviews domain, migration and safety boundary
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: pingo_reviews_e1_ci
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d pingo_reviews_e1_ci"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Use Node.js 22
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+
+      - name: Install locked dependencies
+        run: npm ci --silent --no-audit --no-fund
+
+      - name: Validate Prisma schema
+        run: npx prisma validate --schema prisma/schema.prisma
+
+      - name: Generate Prisma Client
+        run: npx prisma generate --schema prisma/schema.prisma
+
+      - name: Apply complete migration history to empty PostgreSQL
+        run: npx prisma migrate deploy --schema prisma/schema.prisma
+
+      - name: Certify Enterprise Reviews E1
+        run: npm run test:enterprise-reviews-e1

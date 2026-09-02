@@ -38,6 +38,9 @@ model Organization {
   ttlockAuth       TTLockAuth?
   brandProfile            BrandProfile?
   organizationInvitations OrganizationInvitation[]
+  propertyReviews               PropertyReview[]
+  propertyReviewInvitations     PropertyReviewInvitation[]
+  propertyReviewModerationCases PropertyReviewModerationCase[]
 }
 
 model DashboardUser {
@@ -61,6 +64,9 @@ model DashboardUser {
   brandDomainsCreated             BrandDomain[]            @relation("BrandDomainCreatedBy")
   organizationInvitationsCreated  OrganizationInvitation[] @relation("OrganizationInvitationCreatedBy")
   organizationInvitationsAccepted OrganizationInvitation[] @relation("OrganizationInvitationAcceptedBy")
+  propertyReviewResponses         PropertyReviewResponse[]         @relation("PropertyReviewResponseAuthor")
+  propertyReviewResponseRevisions PropertyReviewResponseRevision[] @relation("PropertyReviewResponseRevisionAuthor")
+  propertyReviewModerationEvents  PropertyReviewModerationEvent[]  @relation("PropertyReviewModerationActor")
 
   @@index([organizationId, isActive])
   @@index([organizationId, role])
@@ -267,6 +273,9 @@ model Property {
   blockedDates               PropertyBlockedDate[]
   cancellationPolicies       PropertyCancellationPolicy[]
   guestAgreements            PropertyGuestAgreement[]
+  reviews                    PropertyReview[]
+  reviewInvitations          PropertyReviewInvitation[]
+  reviewModerationCases      PropertyReviewModerationCase[]
 
 
   @@index([organizationId])
@@ -553,12 +562,164 @@ model Reservation {
   cancellationPolicy      PropertyCancellationPolicy? @relation(fields: [cancellationPolicyId], references: [id],         onDelete: SetNull)
   staffAssignments        StaffAssignment[]
   modifications           ReservationModification[]
+  review                   PropertyReview?
+  reviewInvitation         PropertyReviewInvitation?
 
   @@unique([propertyId, externalProvider, externalId])
   @@index([propertyId, checkIn, checkOut])
   @@index([cancellationPolicyId])
   @@index([status, cancelledAt])
   @@index([propertyId, status, checkIn])
+}
+
+model PropertyReview {
+  id                      String               @id @default(cuid())
+  organizationId          String
+  propertyId              String
+  reservationId           String               @unique
+  source                  PropertyReviewSource @default(PIN_GO_DIRECT)
+  status                  PropertyReviewStatus @default(PENDING_MODERATION)
+  overallRating           Int
+  cleanlinessRating       Int
+  accuracyRating          Int
+  checkInAccessRating     Int
+  communicationRating     Int
+  locationRating          Int
+  valueRating             Int
+  publicComment           String               @db.Text
+  privateFeedback         String?              @db.Text
+  language                String               @default("en") @db.VarChar(10)
+  guestDisplayName        String               @db.VarChar(80)
+  stayMonth               DateTime
+  submittedAt             DateTime             @default(now())
+  publishedAt             DateTime?
+  firstPublishedAt        DateTime?
+  removedAt               DateTime?
+  moderationVersion       Int                  @default(0)
+  moderationPolicyVersion String               @default("reviews_e1_v1") @db.VarChar(40)
+  createdAt               DateTime             @default(now())
+  updatedAt               DateTime             @updatedAt
+
+  organization    Organization                   @relation(fields: [organizationId], references: [id], onDelete: Restrict)
+  property        Property                       @relation(fields: [propertyId], references: [id], onDelete: Restrict)
+  reservation     Reservation                    @relation(fields: [reservationId], references: [id], onDelete: Restrict)
+  response        PropertyReviewResponse?
+  moderationCases PropertyReviewModerationCase[]
+
+  @@index([organizationId, status, submittedAt])
+  @@index([propertyId, status, publishedAt])
+  @@index([status, submittedAt])
+}
+
+model PropertyReviewInvitation {
+  id                        String                                  @id @default(cuid())
+  organizationId            String
+  propertyId                String
+  reservationId             String                                  @unique
+  tokenHash                 String                                  @unique @db.VarChar(64)
+  recipientEmailHash        String                                  @db.VarChar(64)
+  status                    PropertyReviewInvitationStatus          @default(ELIGIBLE)
+  expiresAt                 DateTime
+  invitedAt                 DateTime?
+  consumedAt                DateTime?
+  tokenCiphertext           String                                  @db.Text
+  deliveryStatus            PropertyReviewInvitationDeliveryStatus @default(PENDING)
+  deliveryAttemptCount      Int                                     @default(0)
+  lastDeliveryAttemptAt     DateTime?
+  providerAcceptedAt        DateTime?
+  deliveryProviderMessageId String?
+  lastDeliveryError         String?                                 @db.Text
+  deliveryLeaseOwner        String?                                 @db.VarChar(120)
+  deliveryLeaseExpiresAt    DateTime?
+  createdAt                 DateTime                                @default(now())
+  updatedAt                 DateTime                                @updatedAt
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  property     Property     @relation(fields: [propertyId], references: [id], onDelete: Cascade)
+  reservation  Reservation  @relation(fields: [reservationId], references: [id], onDelete: Restrict)
+
+  @@index([organizationId, status, expiresAt])
+  @@index([propertyId, status])
+  @@index([deliveryStatus, deliveryLeaseExpiresAt, expiresAt], map: "PropertyReviewInvitation_delivery_queue_idx")
+  @@index([status, expiresAt])
+}
+
+model PropertyReviewResponse {
+  id           String                       @id @default(cuid())
+  reviewId     String                       @unique
+  authorUserId String
+  body         String                       @db.Text
+  status       PropertyReviewResponseStatus @default(PUBLISHED)
+  publishedAt  DateTime?
+  createdAt    DateTime                     @default(now())
+  updatedAt    DateTime                     @updatedAt
+  revision     Int                          @default(1)
+
+  review    PropertyReview                   @relation(fields: [reviewId], references: [id], onDelete: Restrict)
+  author    DashboardUser                    @relation("PropertyReviewResponseAuthor", fields: [authorUserId], references: [id], onDelete: Restrict)
+  revisions PropertyReviewResponseRevision[]
+
+  @@index([authorUserId])
+}
+
+model PropertyReviewResponseRevision {
+  id           String                             @id @default(cuid())
+  responseId   String
+  revision     Int
+  authorUserId String
+  body         String                             @db.Text
+  status       PropertyReviewResponseStatus
+  kind         PropertyReviewResponseRevisionKind @default(HOST_WRITE)
+  reasonCode   PropertyReviewModerationReason?
+  note         String?                            @db.Text
+  createdAt    DateTime                           @default(now())
+
+  response PropertyReviewResponse @relation(fields: [responseId], references: [id], onDelete: Restrict)
+  author   DashboardUser          @relation("PropertyReviewResponseRevisionAuthor", fields: [authorUserId], references: [id], onDelete: Restrict)
+
+  @@unique([responseId, revision])
+  @@index([authorUserId, createdAt])
+}
+
+model PropertyReviewModerationCase {
+  id             String                             @id @default(cuid())
+  organizationId String
+  propertyId     String
+  reviewId       String
+  status         PropertyReviewModerationCaseStatus @default(OPEN)
+  reasonCode     PropertyReviewModerationReason
+  evidence       Json?
+  openedAt       DateTime                           @default(now())
+  resolvedAt     DateTime?
+  createdAt      DateTime                           @default(now())
+  updatedAt      DateTime                           @updatedAt
+
+  organization Organization                    @relation(fields: [organizationId], references: [id], onDelete: Restrict)
+  property     Property                        @relation(fields: [propertyId], references: [id], onDelete: Restrict)
+  review       PropertyReview                  @relation(fields: [reviewId], references: [id], onDelete: Restrict)
+  events       PropertyReviewModerationEvent[]
+
+  @@index([organizationId, status, openedAt])
+  @@index([reviewId, status])
+  @@index([status, openedAt])
+}
+
+model PropertyReviewModerationEvent {
+  id            String                         @id @default(cuid())
+  caseId        String
+  actorUserId   String?
+  action        PropertyReviewModerationAction
+  reasonCode    PropertyReviewModerationReason?
+  evidence      Json?
+  note          String?                        @db.Text
+  policyVersion String                         @default("reviews_e1_v1") @db.VarChar(40)
+  createdAt     DateTime                       @default(now())
+
+  moderationCase PropertyReviewModerationCase @relation(fields: [caseId], references: [id], onDelete: Restrict)
+  actor          DashboardUser?                @relation("PropertyReviewModerationActor", fields: [actorUserId], references: [id], onDelete: Restrict)
+
+  @@index([caseId, createdAt])
+  @@index([actorUserId])
 }
 
 model ReservationModification {
@@ -1907,6 +2068,88 @@ enum GuestJourneyCoordinationIntentStatus {
 enum ReservationStatus {
   ACTIVE
   CANCELLED
+}
+
+enum PropertyReviewSource {
+  PIN_GO_DIRECT
+  AIRBNB
+  BOOKING_COM
+  VRBO
+  EXPEDIA
+  IMPORTED_VERIFIED
+}
+
+enum PropertyReviewStatus {
+  PENDING_MODERATION
+  PUBLISHED
+  DISPUTED
+  HELD_FOR_REVIEW
+  REJECTED
+  REMOVED
+}
+
+enum PropertyReviewInvitationStatus {
+  ELIGIBLE
+  INVITED
+  CONSUMED
+  EXPIRED
+  REVOKED
+}
+
+enum PropertyReviewInvitationDeliveryStatus {
+  PENDING
+  PROCESSING
+  SENT
+  FAILED
+}
+
+enum PropertyReviewResponseStatus {
+  PUBLISHED
+  HELD_FOR_REVIEW
+  REMOVED
+}
+
+enum PropertyReviewResponseRevisionKind {
+  HOST_WRITE
+  MODERATION_HOLD
+  MODERATION_PUBLISH
+  MODERATION_REMOVE
+}
+
+enum PropertyReviewModerationCaseStatus {
+  OPEN
+  DISPUTED
+  RESOLVED_PUBLISHED
+  RESOLVED_REJECTED
+  RESOLVED_REMOVED
+}
+
+enum PropertyReviewModerationReason {
+  AUTOMATED_SAFETY_CLEAR
+  ROUTINE_LOW_RATING_REVIEW
+  AUTOMATED_SAFETY_SIGNAL
+  UNVERIFIED_STAY
+  DUPLICATE
+  ABUSE_HARASSMENT
+  THREAT
+  EXTORTION
+  PII
+  SPAM
+  IRRELEVANT
+  FACTUALLY_CONTRADICTED
+  MANIPULATION
+  OTHER_POLICY
+}
+
+enum PropertyReviewModerationAction {
+  CASE_OPENED
+  EVIDENCE_ADDED
+  DISPUTE_OPENED
+  PUBLISHED
+  UPHELD
+  REJECTED
+  HELD
+  REMOVED
 }
 
 enum AccessMethod {

@@ -78,11 +78,19 @@ import { publicBrandContextRouter } from "./routes/public.brand-context.routes";
 import { cleaningConfirmRouter } from "./routes/cleaning-confirm.routes";
 import { teamRouter } from "./routes/team.routes";
 import publicBookingRouter from "./routes/public-booking.routes";
+import { publicReviewsRouter } from "./routes/public-reviews.routes";
+import { dashboardReviewsRouter } from "./routes/dashboard.reviews.routes";
 import { uploadsRouter } from "./routes/uploads.route";
 import { dashboardOrganizationRouter } from "./routes/dashboard.organization.route";
 import { dashboardPayoutsRouter } from "./routes/dashboard-payouts.routes";
 import { dashboardCancellationPolicyRouter } from "./routes/dashboard.cancellation-policy.routes";
 import { isPublishedBrandOriginAllowed } from "./services/branding/published-brand-origin.policy.js";
+import { reviewsE1Enabled } from "./config/reviews.config.js";
+import { assertReviewTokenEncryptionConfigured } from "./services/reviews/review-token-crypto.service.js";
+
+if (reviewsE1Enabled()) {
+  assertReviewTokenEncryptionConfigured();
+}
 
 const app = express();
 
@@ -119,12 +127,15 @@ const splitEnvOrigins = (value?: string) =>
     .map((origin) => origin.trim())
     .filter(Boolean);
 
+const localDevelopmentOrigins = process.env.NODE_ENV === "production"
+  ? []
+  : ["http://localhost:5173", "http://localhost:4173"];
+
 const allowedOrigins = [
   ...splitEnvOrigins(FRONTEND_ORIGIN),
   ...splitEnvOrigins(process.env.API_BASE_URL),
   ...splitEnvOrigins(process.env.PUBLIC_API_BASE_URL),
-  "http://localhost:5173",
-  "http://localhost:4173",
+  ...localDevelopmentOrigins,
 ].filter(Boolean) as string[];
 // =====================
 // LOG SAFE
@@ -212,6 +223,7 @@ app.use(signupSuccessRouter);
 app.use(publicOrganizationInvitationRouter);
 app.use(publicBrandContextRouter);
 app.use("/api/public-booking", publicBookingRouter);
+app.use(publicReviewsRouter);
 app.use(cleaningConfirmRouter);
 
 // =====================
@@ -300,6 +312,7 @@ app.use(dashboardPmsRouter);
 app.use(dashboardOrganizationRouter);
 app.use(dashboardPayoutsRouter);
 app.use(dashboardCancellationPolicyRouter);
+app.use(dashboardReviewsRouter);
 
 if (process.env.NODE_ENV !== "production") {
   app.use(devPmsRouter);
