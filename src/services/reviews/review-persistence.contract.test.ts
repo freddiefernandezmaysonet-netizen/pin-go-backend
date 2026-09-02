@@ -142,6 +142,11 @@ test("submission atomically enforces checkout eligibility, scope and single use"
   assert.match(service, /const privateSignals = privateFeedback[\s\S]*?detectSafetySignals\(privateFeedback\)/);
   assert.match(
     service,
+    /initialReviewDecision\([\s\S]*?ratings\.overallRating,[\s\S]*?signals,[\s\S]*?reviewAutoPublishEnabled\(\)/,
+    "submission must consult the independent default-off auto-publication gate",
+  );
+  assert.match(
+    service,
     /stayMonth: new Date\([\s\S]*?formatInTimeZone\([\s\S]*?invitation\.property\.timezone[\s\S]*?"yyyy-MM"/,
     "the public stay month must follow the property's local calendar",
   );

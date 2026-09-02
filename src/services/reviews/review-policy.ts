@@ -254,9 +254,14 @@ export function detectSafetySignals(comment: string): SafetySignal[] {
   return [...signals];
 }
 
-export function initialReviewDecision(overallRating: number, signals: SafetySignal[]) {
+export function initialReviewDecision(
+  overallRating: number,
+  signals: SafetySignal[],
+  autoPublishEnabled = false,
+) {
   if (signals.length > 0) return { status: "HELD_FOR_REVIEW" as const, reason: "AUTOMATED_SAFETY_SIGNAL" as const };
   if (overallRating <= 3) return { status: "PENDING_MODERATION" as const, reason: "ROUTINE_LOW_RATING_REVIEW" as const };
+  if (!autoPublishEnabled) return { status: "PENDING_MODERATION" as const, reason: "AUTOMATED_SAFETY_CLEAR" as const };
   return { status: "PUBLISHED" as const, reason: null };
 }
 

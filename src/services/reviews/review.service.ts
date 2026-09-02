@@ -1,6 +1,7 @@
 import crypto from "node:crypto";
 import { Prisma, type PrismaClient } from "@prisma/client";
 import { formatInTimeZone } from "date-fns-tz";
+import { reviewAutoPublishEnabled } from "../../config/reviews.config.js";
 import { prisma } from "../../lib/prisma.js";
 import {
   REVIEW_COMMENT_MAX_LENGTH,
@@ -648,7 +649,11 @@ export async function submitReview(rawToken: string, input: unknown, now = new D
       ? detectSafetySignals(privateFeedback)
       : [];
     const signals = [...new Set([...publicSignals, ...privateSignals])];
-    const decision = initialReviewDecision(ratings.overallRating, signals);
+    const decision = initialReviewDecision(
+      ratings.overallRating,
+      signals,
+      reviewAutoPublishEnabled(),
+    );
     const review = await tx.propertyReview.create({
       data: {
         organizationId: invitation.organizationId,
