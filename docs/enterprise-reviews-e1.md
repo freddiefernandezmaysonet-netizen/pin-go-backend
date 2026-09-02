@@ -9,6 +9,7 @@ reputation, host responses/disputes and an append-only decision history.
 Backend:
 
 - `PINGO_REVIEWS_E1_ENABLED=true`
+- `PINGO_REVIEW_AUTO_PUBLISH_ENABLED=false`
 - `REVIEW_TOKEN_ENC_KEY_BASE64=<32-byte key encoded as base64>`
 - `APP_BASE_URL=https://app.pin-ngo.com` (or the canonical dashboard origin)
 
@@ -38,7 +39,8 @@ invitations encrypted with it have expired or been consumed. The legacy single
 key variable remains readable as key ID `v1` during migration.
 
 The backend and dashboard flags must remain `false` until the migration and
-staging certification have completed.
+staging certification have completed. Auto-publication remains independently
+`false` until a content-safety provider has been integrated and certified.
 
 ## Invitation and email contract
 
@@ -77,7 +79,10 @@ reservation, so a stale stored timestamp cannot unlock submission early.
 
 ## Publication policy
 
-- Clean 4–5 star reviews publish after the automated safety check.
+- By default, every submitted review enters moderation before publication.
+- Clean 4–5 star reviews publish automatically only when the separately gated
+  `PINGO_REVIEW_AUTO_PUBLISH_ENABLED=true` control is explicitly enabled after
+  certification of the content-safety provider.
 - 1–3 star reviews enter `PENDING_MODERATION`.
 - Any rating with a safety signal enters `HELD_FOR_REVIEW`.
 - Subjective negative opinion is not a rejection reason.
@@ -176,11 +181,12 @@ corresponding audit insert. The scope trigger also relies on a trusted
 `search_path`; activation requires fixing or strictly locking that database
 setting and removing unnecessary schema `CREATE` privileges.
 
-Automatic publication of clean 4–5 star comments also requires a certified
+Automatic publication of clean 4–5 star comments requires a certified
 content-safety control before production. The E1 regex fence is useful defense
 in depth, but is not a comprehensive moderation provider and must not be treated
-as one. Until that control is integrated and certified, keep E1 disabled or
-route every submitted comment through the moderation queue.
+as one. `PINGO_REVIEW_AUTO_PUBLISH_ENABLED` is therefore default-off and every
+submitted comment routes through the moderation queue until that independent
+control is explicitly enabled.
 
 The application-level limits must be backed by a distributed rate limit/WAF
 policy before enabling more than a single controlled instance.

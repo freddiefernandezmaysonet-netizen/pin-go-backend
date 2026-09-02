@@ -11,6 +11,15 @@ export function reviewInvitationDispatcherEnabled(
       .toLowerCase() === "true";
 }
 
+export function reviewAutoPublishEnabled(
+  env: NodeJS.ProcessEnv = process.env
+): boolean {
+  return reviewsE1Enabled(env) &&
+    String(env.PINGO_REVIEW_AUTO_PUBLISH_ENABLED ?? "false")
+      .trim()
+      .toLowerCase() === "true";
+}
+
 export function reviewInvitationEligibleAfter(
   env: NodeJS.ProcessEnv = process.env
 ): Date {

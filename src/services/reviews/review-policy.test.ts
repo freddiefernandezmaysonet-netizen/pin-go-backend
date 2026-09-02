@@ -32,9 +32,15 @@ test("holds safety signals regardless of a high rating", () => {
   assert.equal(initialReviewDecision(5, signals).status, "HELD_FOR_REVIEW");
 });
 
-test("routes low ratings to evidence-based moderation and publishes clean high ratings", () => {
+test("routes every clean rating to moderation while auto-publication is disabled", () => {
   assert.equal(initialReviewDecision(3, []).status, "PENDING_MODERATION");
-  assert.equal(initialReviewDecision(4, []).status, "PUBLISHED");
+  assert.equal(initialReviewDecision(4, []).status, "PENDING_MODERATION");
+  assert.equal(initialReviewDecision(5, []).reason, "AUTOMATED_SAFETY_CLEAR");
+});
+
+test("publishes clean high ratings only after explicit auto-publication enablement", () => {
+  assert.equal(initialReviewDecision(3, [], true).status, "PENDING_MODERATION");
+  assert.equal(initialReviewDecision(4, [], true).status, "PUBLISHED");
 });
 
 test("public guest identity is minimized", () => {
