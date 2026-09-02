@@ -1,4 +1,5 @@
 import { prisma } from "../src/lib/prisma.js";
+import { hashPassword } from "../src/lib/auth.js";
 import { createReviewInvitation } from "../src/services/reviews/review.service.js";
 
 const STAGING_PROJECT_ID = "c325f65b-f4a5-48a9-9270-376961eeba2d";
@@ -6,6 +7,8 @@ const FIXTURE_EMAIL = "reviews-certification@pin-go.invalid";
 const ORGANIZATION_ID = "reviews_e1_staging_org";
 const PROPERTY_ID = "reviews_e1_staging_property";
 const RESERVATION_ID = "reviews_e1_staging_reservation";
+const ADMIN_ID = "reviews_e1_staging_admin";
+const ADMIN_EMAIL = "reviews-admin@pin-go.invalid";
 
 function assertIsolatedStaging() {
   if (process.env.RAILWAY_PROJECT_ID !== STAGING_PROJECT_ID) {
@@ -19,6 +22,9 @@ function assertIsolatedStaging() {
   }
   if (!FIXTURE_EMAIL.endsWith(".invalid")) {
     throw new Error("Reviews fixture refused: recipient must use the reserved .invalid domain.");
+  }
+  if (!ADMIN_EMAIL.endsWith(".invalid")) {
+    throw new Error("Reviews fixture refused: administrator must use the reserved .invalid domain.");
   }
 }
 
@@ -84,8 +90,29 @@ async function main() {
     },
   });
 
-  const invitation = await createReviewInvitation(RESERVATION_ID, now);
-  console.log(`REVIEWS_E1_STAGING_TOKEN=${invitation.token}`);
+  const adminPassword = String(process.env.PINGO_REVIEWS_E1_STAGING_ADMIN_PASSWORD ?? "");
+  if (adminPassword.length < 20) {
+    throw new Error("Reviews fixture refused: temporary administrator password is missing or too short.");
+  }
+  await prisma.dashboardUser.upsert({
+    where: { email: ADMIN_EMAIL },
+    update: { passwordHash: await hashPassword(adminPassword), isActive: true, role: "PLATFORM_ADMIN" },
+    create: {
+      id: ADMIN_ID,
+      organizationId: ORGANIZATION_ID,
+      email: ADMIN_EMAIL,
+      fullName: "Reviews Staging Moderator",
+      passwordHash: await hashPassword(adminPassword),
+      isActive: true,
+      role: "PLATFORM_ADMIN",
+    },
+  });
+
+  const existingReview = await prisma.propertyReview.findUnique({ where: { reservationId: RESERVATION_ID } });
+  if (!existingReview) {
+    const invitation = await createReviewInvitation(RESERVATION_ID, now);
+    console.log(`REVIEWS_E1_STAGING_TOKEN=${invitation.token}`);
+  }
 }
 
 main()
