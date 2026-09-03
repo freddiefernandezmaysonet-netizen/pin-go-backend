@@ -20,7 +20,7 @@ on:
       - "src/server.ts"
       - "src/services/email-delivery.service.ts"
       - "src/services/reviews/**"
-      - "src/workers/review-invitation.worker.ts"
+      - "src/workers/review-invitation*.ts"
       - "tsconfig.enterprise-reviews-e1.json"
   workflow_dispatch:
 

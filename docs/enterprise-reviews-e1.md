@@ -73,6 +73,16 @@ acceptance is recorded against the fenced invitation generation.
 inbox delivery. Bounce and delivery webhooks remain a separate operational
 concern.
 
+Every dispatch cycle that returns results emits a privacy-safe
+`[REVIEW_INVITATION_DISPATCH_SUMMARY]` heartbeat with only its outcome,
+candidate, sent, failed and skipped counts, plus duration. Cycles containing an
+individual delivery failure use the error channel so Railway can surface the
+degraded run even while the worker process remains healthy. The event never
+contains reservation or invitation identifiers, guest data, tokens, provider
+messages or URLs. A batch-level exception instead emits the existing
+`[REVIEW_INVITATION_DISPATCH_ERROR]` event with only its error name and cycle
+duration.
+
 The link expires 30 days after checkout and can create at most one native
 review. Request authorization recalculates the boundary from the canonical
 reservation, so a stale stored timestamp cannot unlock submission early.

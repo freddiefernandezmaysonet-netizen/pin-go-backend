@@ -17,6 +17,7 @@
     "src/services/reviews/review-route-security.ts",
     "src/services/reviews/review.service.ts",
     "src/services/reviews/review-invitation-dispatch.service.ts",
+    "src/workers/review-invitation-worker-observability.ts",
     "src/workers/review-invitation.worker.ts",
     "src/lib/email-templates/guestReservationEmail.ts",
     "src/lib/mailer.ts",
