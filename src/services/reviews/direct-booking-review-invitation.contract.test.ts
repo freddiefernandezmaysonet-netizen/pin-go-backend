@@ -34,6 +34,16 @@ test("dispatcher uses a CAS lease, retry delay and bounded attempts", () => {
   assert.match(dispatcher, /markReviewInvitationDelivery\(/);
 });
 
+test("worker emits allowlisted cycle summaries instead of raw dispatch results", () => {
+  assert.match(worker, /const results = await dispatchPostCheckoutReviewInvitations/);
+  assert.match(worker, /emitReviewInvitationDispatchSummary\(console, results,/);
+  assert.doesNotMatch(
+    worker,
+    /console\.(?:log|error)\([^;]*\bresults\b/s
+  );
+  assert.doesNotMatch(worker, /reservationId|guestEmail|tokenHash|reviewToken/);
+});
+
 test("review bearer stays out of the durable retry envelope", () => {
   assert.match(dispatcher, /retryPayload: \{ invitationId: invitation\.invitation\.id \}/);
   assert.doesNotMatch(dispatcher, /retryPayload:[^\n]*token/);

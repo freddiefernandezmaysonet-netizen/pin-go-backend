@@ -6,6 +6,7 @@ import {
   reviewInvitationEligibleAfter,
 } from "../config/reviews.config.js";
 import { dispatchPostCheckoutReviewInvitations } from "../services/reviews/review-invitation-dispatch.service.js";
+import { emitReviewInvitationDispatchSummary } from "./review-invitation-worker-observability.js";
 
 const pollMs = Math.max(Number(process.env.PINGO_REVIEW_INVITATION_POLL_MS ?? 300_000), 60_000);
 const dispatcherEnabled = reviewInvitationDispatcherEnabled();
@@ -22,14 +23,17 @@ let running = false;
 async function tick() {
   if (running || !dispatcherEnabled) return;
   running = true;
+  const startedAt = Date.now();
   try {
-    await dispatchPostCheckoutReviewInvitations({
+    const results = await dispatchPostCheckoutReviewInvitations({
       prisma,
       eligibleAfter: eligibleAfter!,
     });
+    emitReviewInvitationDispatchSummary(console, results, Date.now() - startedAt);
   } catch (error) {
     console.error("[REVIEW_INVITATION_DISPATCH_ERROR]", {
       name: error instanceof Error ? error.name : "UnknownError",
+      durationMs: Math.max(Date.now() - startedAt, 0),
     });
   } finally {
     running = false;
