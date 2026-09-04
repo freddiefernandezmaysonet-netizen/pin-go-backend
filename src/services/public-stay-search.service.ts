@@ -28,13 +28,17 @@ export function validatePublicStaySearchInput(input: PublicStaySearchInput) {
 }
 function getPhotoUrl(value: unknown) { return Array.isArray(value) && typeof value[0] === "string" ? value[0] : null; }
 function matchesDestination(property: { name: string; publicTitle?: string | null; city?: string | null; region?: string | null; country?: string | null; }, destination: string) {
-  const haystack = normalizePublicStaySearchText([property.publicTitle, property.name, property.city, property.region, property.country, [property.city, property.region].filter(Boolean).join(", ")].filter(Boolean).join(" "));
+  const haystack = normalizePublicStaySearchText([property.publicTitle, property.name, property.city, property.region, property.country, [property.city, property.region].filter(Boolean).join(", "), [property.city, property.region, property.country].filter(Boolean).join(", ")].filter(Boolean).join(" "));
   return haystack.includes(destination);
 }
-function buildPropertyStayDate(dateKey: string, time: string | null | undefined, timezone: string | null | undefined, fallbackTime: string) {
-  const safeTimezone = String(timezone ?? "").trim() || "America/Puerto_Rico";
+function buildPropertyStayDate(dateKey: string, time: string | null | undefined, timezone: string, fallbackTime: string) {
   const safeTime = String(time ?? "").trim() || fallbackTime;
-  return fromZonedTime(`${dateKey}T${safeTime}:00`, safeTimezone);
+  return fromZonedTime(`${dateKey}T${safeTime}:00`, timezone);
+}
+function hasValidTimeZone(value: unknown) {
+  const timezone = String(value ?? "").trim();
+  if (!timezone) return false;
+  try { new Intl.DateTimeFormat("en-US", { timeZone: timezone }).format(new Date()); return true; } catch { return false; }
 }
 
 export async function searchPublicStays(input: PublicStaySearchInput, dependencies: { prismaClient?: PrismaClient; availabilityChecker?: typeof checkPropertyAvailability; } = {}) {
@@ -47,8 +51,13 @@ export async function searchPublicStays(input: PublicStaySearchInput, dependenci
   const destinationMatches = candidates.filter((property) => matchesDestination(property, validated.destination));
   const stayRuleMatches = destinationMatches.filter((property) => validated.stayNights >= property.minimumNights && (property.maximumNights == null || validated.stayNights <= property.maximumNights));
   const checked = await Promise.all(stayRuleMatches.map(async (property) => {
-    const checkIn = buildPropertyStayDate(validated.checkInKey, property.checkInTime, property.timezone, "16:00");
-    const checkOut = buildPropertyStayDate(validated.checkOutKey, property.checkOutTime, property.timezone, "11:00");
+    const timezone = String(property.timezone ?? "").trim();
+    if (!hasValidTimeZone(timezone)) {
+      console.warn("[public-stay-search] skipping property with missing/invalid timezone", { propertyId: property.id, propertySlug: property.slug, timezone: timezone || null });
+      return null;
+    }
+    const checkIn = buildPropertyStayDate(validated.checkInKey, property.checkInTime, timezone, "16:00");
+    const checkOut = buildPropertyStayDate(validated.checkOutKey, property.checkOutTime, timezone, "11:00");
     const availability = await availabilityChecker({ propertyId: property.id, checkIn, checkOut });
     if (!availability.available || !property.slug || !property.organization.slug) return null;
     const result: PublicStaySearchResult = { organizationSlug: property.organization.slug, propertySlug: property.slug, title: property.publicTitle?.trim() || property.name, city: property.city ?? null, region: property.region ?? null, country: property.country ?? null, maxGuests: property.maxGuests ?? null, minimumNights: property.minimumNights, maximumNights: property.maximumNights ?? null, photoUrl: getPhotoUrl(property.publicPhotos), bookingPath: `/book/${property.organization.slug}/${property.slug}` };
