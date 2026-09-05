@@ -1,0 +1,18 @@
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "types": ["node"],
+    "noEmit": true,
+    "module": "ESNext",
+    "moduleResolution": "Bundler",
+    "exactOptionalPropertyTypes": false
+  },
+  "include": [
+    "src/lib/auth.ts",
+    "src/middleware/requireAuth.ts",
+    "src/pms/routes/listings.mapping.routes.ts",
+    "src/distribution/ota-commercial-lifecycle.policy.ts",
+    "src/distribution/connection-center.read-model.ts",
+    "src/routes/dashboard.distribution-connection-center.route.ts"
+  ]
+}

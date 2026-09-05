@@ -28,12 +28,13 @@ import adminUsageRoutes from "./routes/admin.usage.routes";
 import adminCapacityRoutes from "./routes/admin.capacity.routes";
 import adminSubscriptionRoutes from "./routes/admin.subscription.routes";
 import { debugRouter } from "./routes/debug.routes";
-import { listingsMappingRouter } from "./pms/routes/listings.mapping.routes";
+import { buildListingsMappingRouter } from "./pms/routes/listings.mapping.routes";
 import { meRouter } from "./routes/me.route";
 import { dashboardRouter } from "./routes/dashboard.route";
 import { dashboardReservationsRouter } from "./routes/dashboard.reservations.route";
 import { dashboardPropertiesRouter } from "./routes/dashboard.properties.route";
 import { buildDashboardChannexFullSyncRouter } from "./routes/dashboard.channex-full-sync.route";
+import { buildDashboardDistributionConnectionCenterRouter } from "./routes/dashboard.distribution-connection-center.route";
 import {
   dashboardGuestAccessSettingsRouter,
 } from "./routes/dashboard.guest-access-settings.routes";
@@ -280,7 +281,7 @@ app.use("/debug", debugRouter);
 }
 
 
-app.use("/api/pms/listings", listingsMappingRouter);
+app.use("/api/pms/listings", buildListingsMappingRouter(prisma));
 app.use("/api/org", buildOrgPmsRouter(prisma));
 
 app.use("/api/org", buildOrgTtlockSyncRouter(prisma));
@@ -301,6 +302,7 @@ app.use(adminDemoRouter);
 
 app.use(dashboardRouter);
 app.use(dashboardReservationsRouter);
+app.use(buildDashboardDistributionConnectionCenterRouter(prisma));
 app.use(buildDashboardChannexFullSyncRouter(prisma));
 app.use(dashboardPropertiesRouter);
 app.use(dashboardGuestAccessSettingsRouter);

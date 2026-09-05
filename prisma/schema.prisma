@@ -41,6 +41,9 @@ model Organization {
   propertyReviews               PropertyReview[]
   propertyReviewInvitations     PropertyReviewInvitation[]
   propertyReviewModerationCases PropertyReviewModerationCase[]
+  distributionGroups           DistributionGroup[]
+  distributionProperties       DistributionProperty[]
+  otaChannelConnections        OtaChannelConnection[]
 }
 
 model DashboardUser {
@@ -276,6 +279,8 @@ model Property {
   reviews                    PropertyReview[]
   reviewInvitations          PropertyReviewInvitation[]
   reviewModerationCases      PropertyReviewModerationCase[]
+  distributionProperties    DistributionProperty[]
+  otaChannelConnections     OtaChannelConnection[]
 
 
   @@index([organizationId])
