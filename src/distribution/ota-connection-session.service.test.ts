@@ -213,3 +213,18 @@ test("only unopened sessions expire; an opened iframe can complete after token T
     data: { status: "EXPIRED" },
   });
 });
+
+test("an opened iframe can be cancelled without applying token expiry", async () => {
+  const { client, updates } = createClient();
+  await transitionOtaConnectionSession({
+    client,
+    organizationId: "org-1",
+    requestedByUserId: "user-1",
+    sessionId: "session-1",
+    current: "OPENED",
+    next: "CANCELLED",
+    now: base.now,
+  });
+  assert.equal("expiresAt" in updates[0].where, false);
+  assert.equal(updates[0].data.status, "CANCELLED");
+});

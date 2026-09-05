@@ -280,7 +280,7 @@ export async function transitionOtaConnectionSession(args: {
   const allowed =
     (args.current === "TOKEN_ISSUED" && args.next === "OPENED") ||
     (args.current === "OPENED" && args.next === "COMPLETED") ||
-    ((args.current === "REQUESTED" || args.current === "TOKEN_ISSUED") &&
+    ((args.current === "REQUESTED" || args.current === "TOKEN_ISSUED" || args.current === "OPENED") &&
       args.next === "CANCELLED");
   if (!allowed) throw new OtaConnectionSessionError("OTA_CONNECTION_SESSION_TRANSITION_INVALID");
   const now = args.now ?? new Date();

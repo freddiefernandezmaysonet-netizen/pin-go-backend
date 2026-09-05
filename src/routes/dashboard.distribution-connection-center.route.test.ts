@@ -6,7 +6,7 @@ import express, { type RequestHandler } from "express";
 
 import { buildDashboardDistributionConnectionCenterRouter } from "./dashboard.distribution-connection-center.route";
 
-type TestUser = { id: string; orgId: string };
+type TestUser = { id: string; orgId: string; role?: string };
 
 function createPrisma(overrides: Record<string, unknown> = {}) {
   return {
@@ -28,6 +28,8 @@ async function requestRoute(args: {
   user?: TestUser;
   path?: string;
   method?: string;
+  headers?: Record<string, string>;
+  actions?: Parameters<typeof buildDashboardDistributionConnectionCenterRouter>[1];
 }) {
   const app = express();
   if (args.user) {
@@ -37,7 +39,8 @@ async function requestRoute(args: {
     };
     app.use(injectUser);
   }
-  app.use(buildDashboardDistributionConnectionCenterRouter(args.prisma));
+  app.use(express.json());
+  app.use(buildDashboardDistributionConnectionCenterRouter(args.prisma, args.actions));
 
   const server = await new Promise<Server>((resolve) => {
     const listener = app.listen(0, "127.0.0.1", () => resolve(listener));
@@ -49,7 +52,10 @@ async function requestRoute(args: {
       `http://127.0.0.1:${address.port}${
         args.path ?? "/api/dashboard/distribution/properties/property-b"
       }`,
-      { method: args.method ?? "GET", headers: { Connection: "close" } }
+      {
+        method: args.method ?? "GET",
+        headers: { Connection: "close", ...args.headers },
+      }
     );
   } finally {
     await closeServer(server);
@@ -188,4 +194,79 @@ test("successful response is no-store and does not expose the distribution vendo
   const body = await response.text();
   assert.equal(body.toLowerCase().includes("channex"), false);
   assert.equal(JSON.parse(body).connectionCenter.status, "NOT_CONFIGURED");
+});
+
+test("new mutation routes are default-off before database or adapter work", async () => {
+  let calls = 0;
+  const response = await requestRoute({
+    prisma: createPrisma(),
+    user: { id: "user-a", orgId: "organization-a", role: "ORG_ADMIN" },
+    method: "POST",
+    path: "/api/dashboard/distribution/properties/property-b/channels/AIRBNB/prepare",
+    headers: {
+      Origin: "https://app.pin-go.test",
+      "Idempotency-Key": "prepare-request-123",
+    },
+    actions: {
+      runtime: { enabled: false, reason: "DEFAULT_OFF" },
+      isTrustedOrigin: async () => true,
+      prepare: async () => { calls += 1; return { provisioningStatus: "READY" }; },
+    },
+  });
+  assert.equal(response.status, 503);
+  assert.equal(response.headers.get("cache-control"), "no-store");
+  assert.equal(calls, 0);
+});
+
+test("member, origin and idempotency fences run before mutation action", async () => {
+  let calls = 0;
+  const baseActions = {
+    runtime: { enabled: true, reason: "ENABLED" as const },
+    isTrustedOrigin: async (origin: string) => origin === "https://app.pin-go.test",
+    prepare: async () => { calls += 1; return { provisioningStatus: "READY" }; },
+  };
+  const member = await requestRoute({
+    prisma: createPrisma(),
+    user: { id: "user-a", orgId: "organization-a", role: "MEMBER" },
+    method: "POST",
+    path: "/api/dashboard/distribution/properties/property-b/channels/AIRBNB/prepare",
+    headers: { Origin: "https://app.pin-go.test", "Idempotency-Key": "request-123" },
+    actions: baseActions,
+  });
+  assert.equal(member.status, 403);
+
+  const missingKey = await requestRoute({
+    prisma: createPrisma(),
+    user: { id: "user-a", orgId: "organization-a", role: "ORG_ADMIN" },
+    method: "POST",
+    path: "/api/dashboard/distribution/properties/property-b/channels/AIRBNB/prepare",
+    headers: { Origin: "https://app.pin-go.test" },
+    actions: baseActions,
+  });
+  assert.equal(missingKey.status, 400);
+  assert.equal(calls, 0);
+});
+
+test("tenant actor and request key are forwarded to injected orchestration", async () => {
+  let received: any;
+  const response = await requestRoute({
+    prisma: createPrisma(),
+    user: { id: "user-a", orgId: "organization-a", role: "ORG_ADMIN" },
+    method: "POST",
+    path: "/api/dashboard/distribution/properties/property-b/channels/BOOKING_COM/prepare",
+    headers: { Origin: "https://app.pin-go.test", "Idempotency-Key": "request-tenant-123" },
+    actions: {
+      runtime: { enabled: true, reason: "ENABLED" },
+      isTrustedOrigin: async (_origin, organizationId) => organizationId === "organization-a",
+      prepare: async (args) => { received = args; return { provisioningStatus: "READY" }; },
+    },
+  });
+  assert.equal(response.status, 200);
+  assert.deepEqual(received, {
+    organizationId: "organization-a",
+    propertyId: "property-b",
+    requestedByUserId: "user-a",
+    provider: "BOOKING_COM",
+    requestKey: "request-tenant-123",
+  });
 });

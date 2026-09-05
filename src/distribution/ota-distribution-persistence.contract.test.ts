@@ -10,6 +10,14 @@ const sessionSource = readFileSync(
   new URL("./ota-connection-session.service.ts", import.meta.url),
   "utf8"
 );
+const orchestrationSource = readFileSync(
+  new URL("./ota-connection-orchestrator.service.ts", import.meta.url),
+  "utf8"
+);
+const adapterSource = readFileSync(
+  new URL("./channex-white-label.adapter.ts", import.meta.url),
+  "utf8"
+);
 const migration = readFileSync(
   new URL(
     "../../prisma/migrations/20260905190000_add_ota_distribution_persistence/migration.sql",
@@ -19,7 +27,7 @@ const migration = readFileSync(
 );
 
 test("new distribution services cannot call Channex, OTAs, or Direct Booking", () => {
-  const source = `${persistenceSource}\n${sessionSource}`;
+  const source = `${persistenceSource}\n${sessionSource}\n${orchestrationSource}`;
   for (const forbidden of [
     "axios",
     "fetch(",
@@ -31,6 +39,8 @@ test("new distribution services cannot call Channex, OTAs, or Direct Booking", (
     assert.equal(source.includes(forbidden), false, `forbidden boundary: ${forbidden}`);
   }
   assert.match(sessionSource, /OneTimeConnectionTokenIssuer/);
+  assert.doesNotMatch(adapterSource, /from\s+["']axios|fetch\s*\(|process\.env|console\./);
+  assert.match(adapterSource, /WhiteLabelHttpTransport/);
 });
 
 test("migration is additive and includes every commercial persistence table", () => {
