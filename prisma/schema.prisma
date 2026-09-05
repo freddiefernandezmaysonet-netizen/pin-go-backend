@@ -44,6 +44,7 @@ model Organization {
   distributionGroups           DistributionGroup[]
   distributionProperties       DistributionProperty[]
   otaChannelConnections        OtaChannelConnection[]
+  otaConnectionSessions        OtaConnectionSession[]
 }
 
 model DashboardUser {
@@ -70,6 +71,7 @@ model DashboardUser {
   propertyReviewResponses         PropertyReviewResponse[]         @relation("PropertyReviewResponseAuthor")
   propertyReviewResponseRevisions PropertyReviewResponseRevision[] @relation("PropertyReviewResponseRevisionAuthor")
   propertyReviewModerationEvents  PropertyReviewModerationEvent[]  @relation("PropertyReviewModerationActor")
+  otaConnectionSessions           OtaConnectionSession[]           @relation("OtaConnectionSessionRequester")
 
   @@index([organizationId, isActive])
   @@index([organizationId, role])
@@ -281,6 +283,7 @@ model Property {
   reviewModerationCases      PropertyReviewModerationCase[]
   distributionProperties    DistributionProperty[]
   otaChannelConnections     OtaChannelConnection[]
+  otaConnectionSessions     OtaConnectionSession[]
 
 
   @@index([organizationId])
@@ -2369,6 +2372,16 @@ enum OtaReadinessStatus {
   NOT_APPLICABLE
 }
 
+enum OtaConnectionSessionStatus {
+  REQUESTED
+  TOKEN_ISSUED
+  OPENED
+  COMPLETED
+  EXPIRED
+  FAILED
+  CANCELLED
+}
+
 model DistributionGroup {
   id                 String                         @id @default(cuid())
   organizationId     String
@@ -2447,9 +2460,43 @@ model OtaChannelConnection {
   organization         Organization         @relation(fields: [organizationId], references: [id], onDelete: Cascade)
   property             Property             @relation(fields: [propertyId], references: [id], onDelete: Cascade)
   distributionProperty DistributionProperty @relation(fields: [distributionPropertyId], references: [id], onDelete: Cascade)
+  connectionSessions   OtaConnectionSession[]
 
   @@unique([propertyId, provider])
   @@unique([provider, externalConnectionId])
   @@index([organizationId, status])
   @@index([distributionPropertyId, status])
+}
+
+model OtaConnectionSession {
+  id                     String                     @id @default(cuid())
+  organizationId         String
+  propertyId             String
+  otaChannelConnectionId String
+  requestedByUserId      String
+  provider               OtaProvider
+  status                 OtaConnectionSessionStatus @default(REQUESTED)
+  requestKey             String                     @db.VarChar(120)
+  tokenFingerprint       String?                    @db.VarChar(64)
+  launchUrlOrigin        String?                    @db.VarChar(255)
+  requestedAt            DateTime                   @default(now())
+  tokenIssuedAt          DateTime?
+  openedAt               DateTime?
+  completedAt            DateTime?
+  expiresAt              DateTime
+  failedAt               DateTime?
+  cancelledAt            DateTime?
+  lastErrorCode          String?                    @db.VarChar(120)
+  createdAt              DateTime                   @default(now())
+  updatedAt              DateTime                   @updatedAt
+
+  organization         Organization         @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  property             Property             @relation(fields: [propertyId], references: [id], onDelete: Cascade)
+  otaChannelConnection OtaChannelConnection @relation(fields: [otaChannelConnectionId], references: [id], onDelete: Cascade)
+  requestedByUser      DashboardUser        @relation("OtaConnectionSessionRequester", fields: [requestedByUserId], references: [id], onDelete: Restrict)
+
+  @@unique([organizationId, requestKey])
+  @@index([organizationId, propertyId, status, expiresAt])
+  @@index([otaChannelConnectionId, status])
+  @@index([requestedByUserId, requestedAt])
 }

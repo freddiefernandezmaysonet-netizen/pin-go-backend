@@ -12,6 +12,8 @@
     "src/middleware/requireAuth.ts",
     "src/pms/routes/listings.mapping.routes.ts",
     "src/distribution/ota-commercial-lifecycle.policy.ts",
+    "src/distribution/ota-distribution-persistence.service.ts",
+    "src/distribution/ota-connection-session.service.ts",
     "src/distribution/connection-center.read-model.ts",
     "src/routes/dashboard.distribution-connection-center.route.ts"
   ]
