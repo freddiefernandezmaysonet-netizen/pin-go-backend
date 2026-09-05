@@ -2328,3 +2328,128 @@ enum WebhookEventStatus {
   FAILED
   DEAD
 }
+
+enum DistributionPlatform {
+  CHANNEX
+}
+
+enum DistributionProvisioningStatus {
+  NOT_PROVISIONED
+  PROVISIONING
+  READY
+  FAILED
+}
+
+enum OtaProvider {
+  AIRBNB
+  BOOKING_COM
+  EXPEDIA
+  VRBO
+}
+
+enum OtaChannelConnectionStatus {
+  NOT_CONNECTED
+  AUTHORIZATION_REQUIRED
+  MAPPING_REQUIRED
+  READINESS_CHECK
+  ACTIVATION_PENDING
+  ACTIVE
+  DEGRADED
+  FAILED
+  DISCONNECTING
+  DISCONNECTED
+}
+
+enum OtaReadinessStatus {
+  NOT_STARTED
+  REQUIRED
+  IN_PROGRESS
+  READY
+  BLOCKED
+  NOT_APPLICABLE
+}
+
+model DistributionGroup {
+  id                 String                         @id @default(cuid())
+  organizationId     String
+  platform           DistributionPlatform           @default(CHANNEX)
+  externalGroupId    String?
+  provisioningStatus DistributionProvisioningStatus @default(NOT_PROVISIONED)
+  provisionedAt      DateTime?
+  verifiedAt         DateTime?
+  lastErrorCode      String?
+  lastErrorSummary   String?
+  createdAt          DateTime                       @default(now())
+  updatedAt          DateTime                       @updatedAt
+
+  organization           Organization           @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  distributionProperties DistributionProperty[]
+
+  @@unique([organizationId, platform])
+  @@unique([platform, externalGroupId])
+  @@index([provisioningStatus, updatedAt])
+}
+
+model DistributionProperty {
+  id                        String                         @id @default(cuid())
+  organizationId            String
+  propertyId                String
+  groupId                   String?
+  platform                  DistributionPlatform           @default(CHANNEX)
+  externalPropertyId        String?
+  externalPrimaryRoomTypeId String?
+  externalPrimaryRatePlanId String?
+  provisioningStatus        DistributionProvisioningStatus @default(NOT_PROVISIONED)
+  provisionedAt             DateTime?
+  verifiedAt                DateTime?
+  lastErrorCode             String?
+  lastErrorSummary          String?
+  createdAt                 DateTime                       @default(now())
+  updatedAt                 DateTime                       @updatedAt
+
+  organization          Organization           @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  property              Property               @relation(fields: [propertyId], references: [id], onDelete: Cascade)
+  group                 DistributionGroup?     @relation(fields: [groupId], references: [id], onDelete: SetNull)
+  otaChannelConnections OtaChannelConnection[]
+
+  @@unique([propertyId, platform])
+  @@unique([platform, externalPropertyId])
+  @@index([organizationId, provisioningStatus])
+  @@index([groupId])
+}
+
+model OtaChannelConnection {
+  id                        String                     @id @default(cuid())
+  organizationId            String
+  propertyId                String
+  distributionPropertyId    String
+  provider                  OtaProvider
+  status                    OtaChannelConnectionStatus @default(NOT_CONNECTED)
+  externalConnectionId      String?
+  externalChannelCode       String?
+  authorizationReadiness    OtaReadinessStatus         @default(REQUIRED)
+  mappingReadiness          OtaReadinessStatus         @default(NOT_STARTED)
+  distributionReadiness     OtaReadinessStatus         @default(NOT_STARTED)
+  paymentReadiness          OtaReadinessStatus         @default(NOT_STARTED)
+  taxReadiness              OtaReadinessStatus         @default(NOT_STARTED)
+  contentReadiness          OtaReadinessStatus         @default(NOT_STARTED)
+  activationRequestedAt     DateTime?
+  activatedAt               DateTime?
+  disconnectedAt            DateTime?
+  lastReadinessCheckedAt    DateTime?
+  lastFullSyncConfirmedAt   DateTime?
+  lastReservationReceivedAt DateTime?
+  lastErrorCode             String?
+  lastErrorSummary          String?
+  createdAt                 DateTime                   @default(now())
+  updatedAt                 DateTime                   @updatedAt
+
+  organization         Organization         @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  property             Property             @relation(fields: [propertyId], references: [id], onDelete: Cascade)
+  distributionProperty DistributionProperty @relation(fields: [distributionPropertyId], references: [id], onDelete: Cascade)
+
+  @@unique([propertyId, provider])
+  @@unique([provider, externalConnectionId])
+  @@index([organizationId, status])
+  @@index([distributionPropertyId, status])
+}
