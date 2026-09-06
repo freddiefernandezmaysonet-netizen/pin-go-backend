@@ -35,7 +35,7 @@ import { dashboardReservationsRouter } from "./routes/dashboard.reservations.rou
 import { dashboardPropertiesRouter } from "./routes/dashboard.properties.route";
 import { buildDashboardChannexFullSyncRouter } from "./routes/dashboard.channex-full-sync.route";
 import { buildDashboardDistributionConnectionCenterRouter } from "./routes/dashboard.distribution-connection-center.route";
-import { buildOtaConnectionCenterComposition } from "./distribution/ota-connection-center.composition";
+import { buildRuntimeOtaConnectionCenterComposition } from "./distribution/ota-connection-center.runtime-composition";
 import {
   dashboardGuestAccessSettingsRouter,
 } from "./routes/dashboard.guest-access-settings.routes";
@@ -309,9 +309,9 @@ app.use(dashboardRouter);
 app.use(dashboardReservationsRouter);
 app.use(buildDashboardDistributionConnectionCenterRouter(
   prisma,
-  buildOtaConnectionCenterComposition({
+  buildRuntimeOtaConnectionCenterComposition({
     prisma,
-    runtimeValue: process.env.OTA_CONNECTION_CENTER_ENABLED,
+    env: process.env,
     trustedMutationOrigins: allowedOrigins,
     isTenantOriginAllowed: async (origin, organizationId) => {
       const hostname = hostnameFromSecureRequestOrigin(origin);

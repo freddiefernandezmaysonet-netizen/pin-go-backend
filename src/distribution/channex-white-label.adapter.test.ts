@@ -82,6 +82,8 @@ test("provisioning contract is group then property, room and rate", async () => 
     "/api/v1/room_types",
     "/api/v1/rate_plans",
   ]);
+  assert.equal(requests[0]?.headers["user-api-key"], "test-api-key");
+  assert.equal("Authorization" in (requests[0]?.headers ?? {}), false);
 });
 
 test("one-time token request is scoped to group and property", async () => {
@@ -175,4 +177,25 @@ test("partial retry reuses checkpoint IDs without transport calls", async () => 
     existingExternalPrimaryRatePlanId: "rate-ext",
   }), { externalPrimaryRatePlanId: "rate-ext" });
   assert.deepEqual(requests, []);
+});
+
+test("malformed success evidence is classified as reconciliation required", async () => {
+  const value = new ChannexWhiteLabelAdapter({
+    enabled: true,
+    apiKey: "test-api-key",
+    iframeBaseUrl: "https://staging.channex.io/channels",
+    channelFilterByProvider: { AIRBNB: "airbnb-explicit-filter" },
+    transport: { async send() { return { data: {} }; } },
+  });
+  await assert.rejects(
+    value.ensureGroup({
+      organizationId: "org-1",
+      organizationName: "Pin Go",
+      existingExternalGroupId: null,
+    }),
+    (error: unknown) =>
+      error instanceof WhiteLabelAdapterError &&
+      error.code === "OTA_PROVIDER_GROUP_RESPONSE_INVALID" &&
+      error.retryDisposition === "RECONCILIATION_REQUIRED"
+  );
 });
