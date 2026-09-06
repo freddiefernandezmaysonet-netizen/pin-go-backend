@@ -1,0 +1,26 @@
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "types": ["node"],
+    "noEmit": true,
+    "module": "ESNext",
+    "moduleResolution": "Bundler",
+    "exactOptionalPropertyTypes": false
+  },
+  "include": [
+    "src/lib/auth.ts",
+    "src/middleware/requireAuth.ts",
+    "src/pms/routes/listings.mapping.routes.ts",
+    "src/distribution/ota-commercial-lifecycle.policy.ts",
+    "src/distribution/ota-distribution-persistence.service.ts",
+    "src/distribution/ota-connection-session.service.ts",
+    "src/distribution/ota-connection-runtime.policy.ts",
+    "src/distribution/distribution-mutation-security.ts",
+    "src/distribution/channex-white-label.adapter.ts",
+    "src/distribution/ota-connection-orchestrator.service.ts",
+    "src/distribution/ota-provisioning.repository.ts",
+    "src/distribution/ota-connection-center.composition.ts",
+    "src/distribution/connection-center.read-model.ts",
+    "src/routes/dashboard.distribution-connection-center.route.ts"
+  ]
+}

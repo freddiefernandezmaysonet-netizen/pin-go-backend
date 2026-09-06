@@ -1,132 +1,189 @@
+import type { PrismaClient } from "@prisma/client";
 import { Router } from "express";
-import { PrismaClient } from "@prisma/client";
 
-const prisma = new PrismaClient();
-export const listingsMappingRouter = Router();
+import { requireAuth } from "../../middleware/requireAuth";
 
-/**
- * GET pending listings (sin property asignada)
- * GET /api/pms/listings/pending?connectionId=...
- */
-listingsMappingRouter.get("/pending", async (req, res) => {
-  try {
-    const connectionId = String(req.query.connectionId || "");
-    if (!connectionId) {
-      return res.status(400).json({ ok: false, error: "MISSING_CONNECTION_ID" });
+type ListingsMappingRouterOptions = {
+  nodeEnv?: string;
+};
+
+function organizationIdFromRequest(req: unknown): string {
+  return String((req as { user?: { orgId?: unknown } }).user?.orgId ?? "").trim();
+}
+
+export function buildListingsMappingRouter(
+  prisma: PrismaClient,
+  options: ListingsMappingRouterOptions = {}
+) {
+  const router = Router();
+  const nodeEnv = options.nodeEnv ?? process.env.NODE_ENV;
+
+  router.use(requireAuth);
+
+  router.get("/pending", async (req, res) => {
+    try {
+      const organizationId = organizationIdFromRequest(req);
+      const connectionId = String(req.query.connectionId ?? "").trim();
+
+      if (!connectionId) {
+        return res.status(400).json({ ok: false, error: "MISSING_CONNECTION_ID" });
+      }
+
+      const connection = await prisma.pmsConnection.findFirst({
+        where: { id: connectionId, organizationId },
+        select: { id: true },
+      });
+
+      if (!connection) {
+        return res.status(404).json({ ok: false, error: "PMS_CONNECTION_NOT_FOUND" });
+      }
+
+      const items = await prisma.pmsListing.findMany({
+        where: { connectionId: connection.id, propertyId: null },
+        select: {
+          id: true,
+          externalListingId: true,
+          name: true,
+          createdAt: true,
+        },
+        orderBy: { createdAt: "desc" },
+      });
+
+      return res.json({ ok: true, items });
+    } catch (error) {
+      console.error("[pms.listings.pending] failed", {
+        errorType: error instanceof Error ? error.name : typeof error,
+      });
+      return res.status(500).json({ ok: false, error: "PMS_LISTINGS_LOOKUP_FAILED" });
     }
+  });
 
-    const items = await prisma.pmsListing.findMany({
-      where: {
-        connectionId,
-        propertyId: null,
-      },
-      select: {
-        id: true,
-        externalListingId: true,
-        name: true,
-        createdAt: true,
-      },
-      orderBy: { createdAt: "desc" },
-    });
+  router.post("/:pmsListingId/map", async (req, res) => {
+    try {
+      const organizationId = organizationIdFromRequest(req);
+      const pmsListingId = String(req.params.pmsListingId ?? "").trim();
+      const propertyId = String(req.body?.propertyId ?? "").trim();
 
-    res.json({ ok: true, items });
-  } catch (e: any) {
-    res.status(500).json({ ok: false, error: e.message });
-  }
-});
+      if (!propertyId) {
+        return res.status(400).json({ ok: false, error: "MISSING_PROPERTY_ID" });
+      }
 
-/**
- * Mapear listing → property
- * POST /api/pms/listings/:pmsListingId/map
- */
-listingsMappingRouter.post("/:pmsListingId/map", async (req, res) => {
-  try {
-    const { pmsListingId } = req.params;
-    const { propertyId } = req.body;
+      const [listing, property] = await Promise.all([
+        prisma.pmsListing.findFirst({
+          where: {
+            id: pmsListingId,
+            connection: { organizationId },
+          },
+          select: { id: true, connectionId: true },
+        }),
+        prisma.property.findFirst({
+          where: { id: propertyId, organizationId },
+          select: { id: true },
+        }),
+      ]);
 
-    if (!propertyId) {
-      return res.status(400).json({ ok: false, error: "MISSING_PROPERTY_ID" });
+      if (!listing || !property) {
+        return res.status(404).json({ ok: false, error: "PMS_MAPPING_TARGET_NOT_FOUND" });
+      }
+
+      const update = await prisma.pmsListing.updateMany({
+        where: { id: listing.id, connectionId: listing.connectionId },
+        data: { propertyId: property.id },
+      });
+
+      if (update.count !== 1) {
+        return res.status(409).json({ ok: false, error: "PMS_MAPPING_CONFLICT" });
+      }
+
+      const mappedListing = await prisma.pmsListing.findUnique({
+        where: { id: listing.id },
+      });
+
+      return res.json({ ok: true, listing: mappedListing });
+    } catch (error) {
+      console.error("[pms.listings.map] failed", {
+        errorType: error instanceof Error ? error.name : typeof error,
+      });
+      return res.status(500).json({ ok: false, error: "PMS_LISTING_MAPPING_FAILED" });
     }
+  });
 
-    const updated = await prisma.pmsListing.update({
-      where: { id: pmsListingId },
-      data: { propertyId },
-    });
+  router.post("/retry-failed/:connectionId", async (req, res) => {
+    try {
+      const organizationId = organizationIdFromRequest(req);
+      const connectionId = String(req.params.connectionId ?? "").trim();
+      const connection = await prisma.pmsConnection.findFirst({
+        where: { id: connectionId, organizationId },
+        select: { id: true },
+      });
 
-    res.json({ ok: true, listing: updated });
-  } catch (e: any) {
-    res.status(500).json({ ok: false, error: e.message });
-  }
-});
+      if (!connection) {
+        return res.status(404).json({ ok: false, error: "PMS_CONNECTION_NOT_FOUND" });
+      }
 
-/**
- * Reintentar webhooks fallidos después del mapping
- * POST /api/pms/listings/retry-failed/:connectionId
- */
-listingsMappingRouter.post("/retry-failed/:connectionId", async (req, res) => {
-  try {
-    const { connectionId } = req.params;
+      const failedEvents = await prisma.webhookEventIngest.findMany({
+        where: { connectionId: connection.id, status: "FAILED" },
+        select: { id: true },
+        take: 50,
+      });
 
-    const failedEvents = await prisma.webhookEventIngest.findMany({
-      where: {
-        connectionId,
-        status: "FAILED",
-      },
-      select: { id: true },
-      take: 50,
-    });
+      const eventIds = failedEvents.map((event) => event.id);
+      if (eventIds.length > 0) {
+        await prisma.webhookEventIngest.updateMany({
+          where: { connectionId: connection.id, id: { in: eventIds } },
+          data: { status: "PENDING" },
+        });
+      }
 
-    await prisma.webhookEventIngest.updateMany({
-      where: {
-        id: { in: failedEvents.map((e) => e.id) },
-      },
-      data: {
-        status: "PENDING",
-      },
-    });
-
-    res.json({
-      ok: true,
-      retried: failedEvents.length,
-    });
-  } catch (e: any) {
-    res.status(500).json({ ok: false, error: e.message });
-  }
-});
-
-/**
- * DEV ONLY
- * Crear listing PMS manual para pruebas
- * POST /api/pms/listings/dev-create
- */
-listingsMappingRouter.post("/dev-create", async (req, res) => {
-  try {
-    const { connectionId, externalListingId, name } = req.body ?? {};
-
-    if (!connectionId) {
-      return res.status(400).json({ ok: false, error: "MISSING_CONNECTION_ID" });
+      return res.json({ ok: true, retried: eventIds.length });
+    } catch (error) {
+      console.error("[pms.listings.retry] failed", {
+        errorType: error instanceof Error ? error.name : typeof error,
+      });
+      return res.status(500).json({ ok: false, error: "PMS_LISTING_RETRY_FAILED" });
     }
+  });
 
-    if (!externalListingId) {
-      return res.status(400).json({ ok: false, error: "MISSING_EXTERNAL_LISTING_ID" });
-    }
+  if (nodeEnv !== "production") {
+    router.post("/dev-create", async (req, res) => {
+      try {
+        const organizationId = organizationIdFromRequest(req);
+        const connectionId = String(req.body?.connectionId ?? "").trim();
+        const externalListingId = String(req.body?.externalListingId ?? "").trim();
 
-    const listing = await prisma.pmsListing.create({
-      data: {
-        connectionId: String(connectionId),
-        externalListingId: String(externalListingId),
-        name: String(name ?? `Listing ${externalListingId}`),
-      },
-    });
+        if (!connectionId) {
+          return res.status(400).json({ ok: false, error: "MISSING_CONNECTION_ID" });
+        }
+        if (!externalListingId) {
+          return res.status(400).json({ ok: false, error: "MISSING_EXTERNAL_LISTING_ID" });
+        }
 
-    res.json({
-      ok: true,
-      listing,
-    });
-  } catch (e: any) {
-    res.status(500).json({
-      ok: false,
-      error: e?.message ?? "dev create listing failed",
+        const connection = await prisma.pmsConnection.findFirst({
+          where: { id: connectionId, organizationId },
+          select: { id: true },
+        });
+
+        if (!connection) {
+          return res.status(404).json({ ok: false, error: "PMS_CONNECTION_NOT_FOUND" });
+        }
+
+        const listing = await prisma.pmsListing.create({
+          data: {
+            connectionId: connection.id,
+            externalListingId,
+            name: String(req.body?.name ?? `Listing ${externalListingId}`),
+          },
+        });
+
+        return res.json({ ok: true, listing });
+      } catch (error) {
+        console.error("[pms.listings.dev-create] failed", {
+          errorType: error instanceof Error ? error.name : typeof error,
+        });
+        return res.status(500).json({ ok: false, error: "PMS_LISTING_CREATE_FAILED" });
+      }
     });
   }
-});
+
+  return router;
+}
