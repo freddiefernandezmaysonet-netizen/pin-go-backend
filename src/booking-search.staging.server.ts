@@ -9,7 +9,10 @@ import { searchPublicStays } from "./services/public-stay-search.service";
 const app = express();
 const prisma = new PrismaClient();
 const PORT = Number(process.env.PORT ?? 3000);
-const STAGING_REVISION = "booking-search-staging-v11-direct-review-render";
+const STAGING_REVISION = "booking-search-staging-v12-enterprise-featured-ranking";
+const FEATURED_LIMIT = 6;
+const POPULAR_MIN_COMPLETED_STAYS_365 = 3;
+const POPULAR_TOP_FRACTION = 0.25;
 if (!process.env.DATABASE_URL) throw new Error("DATABASE_URL missing");
 app.use(cors({ origin: true, credentials: false }));
 
@@ -89,7 +92,7 @@ app.get("/api/public-booking/featured-audit", async (_q, res) => {
       take: 200,
     });
 
-    const ranked = await Promise.all(items.map(async (p: any) => {
+    const metrics = await Promise.all(items.map(async (p: any) => {
       let reviewCount = 0;
       let averageRating: number | null = null;
       try {
@@ -110,30 +113,43 @@ app.get("/api/public-booking/featured-audit", async (_q, res) => {
       const completedStays365 = await prisma.reservation.count({
         where: { propertyId: p.id, status: "ACTIVE", checkOut: { gte: since, lt: now } },
       });
-      const guestFavorite = reviewCount >= 3 && averageRating != null && averageRating >= 4.8;
-      const reviewScore = guestFavorite ? 100 + averageRating * 10 + Math.min(reviewCount, 20) : 0;
-      const popularityScore = Math.min(completedStays365, 50) * 5;
       const readinessScore =
         (p.publicTitle?.trim() ? 2 : 0) +
         (Array.isArray(p.publicPhotos) && typeof p.publicPhotos[0] === "string" ? 2 : 0) +
         (p.baseNightlyRate != null && Number(p.baseNightlyRate) > 0 ? 1 : 0) +
         (p.city ? 1 : 0);
-      const score = reviewScore + popularityScore + readinessScore;
-      const reason = guestFavorite ? "GUEST_FAVORITE" : completedStays365 > 0 ? "POPULAR" : "PIN_GO_PICK";
+
       return {
         ...publicPropertyPayload(p),
         reviewCount,
         averageRating,
         completedStays365,
-        featuredReason: reason,
-        featuredScore: score,
+        readinessScore,
       };
     }));
 
+    const popularityCandidates = metrics
+      .filter(p => p.completedStays365 >= POPULAR_MIN_COMPLETED_STAYS_365)
+      .sort((a, b) => b.completedStays365 - a.completedStays365 || (b.averageRating ?? 0) - (a.averageRating ?? 0));
+    const popularCount = popularityCandidates.length
+      ? Math.max(1, Math.ceil(metrics.length * POPULAR_TOP_FRACTION))
+      : 0;
+    const popularPropertySlugs = new Set(popularityCandidates.slice(0, popularCount).map(p => p.propertySlug));
+
+    const ranked = metrics.map(p => {
+      const guestFavorite = p.reviewCount >= 3 && p.averageRating != null && p.averageRating >= 4.8;
+      const popular = !guestFavorite && popularPropertySlugs.has(p.propertySlug);
+      const featuredReason = guestFavorite ? "GUEST_FAVORITE" : popular ? "POPULAR" : "PIN_GO_PICK";
+      const featuredTier = guestFavorite ? 0 : popular ? 1 : 2;
+      return { ...p, featuredReason, featuredTier };
+    });
+
     ranked.sort((a, b) =>
-      b.featuredScore - a.featuredScore ||
-      b.completedStays365 - a.completedStays365 ||
+      a.featuredTier - b.featuredTier ||
       (b.averageRating ?? 0) - (a.averageRating ?? 0) ||
+      b.reviewCount - a.reviewCount ||
+      b.completedStays365 - a.completedStays365 ||
+      b.readinessScore - a.readinessScore ||
       a.title.localeCompare(b.title)
     );
 
@@ -141,8 +157,13 @@ app.get("/api/public-booking/featured-audit", async (_q, res) => {
       ok: true,
       revision: STAGING_REVISION,
       windowDays: 365,
+      featuredLimit: FEATURED_LIMIT,
       guestFavoriteRule: { minimumPublishedReviews: 3, minimumAverageRating: 4.8 },
-      results: ranked.slice(0, 6),
+      popularRule: {
+        minimumCompletedStays365: POPULAR_MIN_COMPLETED_STAYS_365,
+        topFraction: POPULAR_TOP_FRACTION,
+      },
+      results: ranked.slice(0, FEATURED_LIMIT),
     });
   } catch (e) {
     console.error("[booking-featured-audit] failed", e);
