@@ -4,9 +4,128 @@ import cors from "cors";
 import path from "path";
 import { PrismaClient } from "@prisma/client";
 import { searchPublicStays } from "./services/public-stay-search.service";
-const app=express(),prisma=new PrismaClient(); const PORT=Number(process.env.PORT??3000),STAGING_REVISION="booking-search-staging-v7-bilingual"; if(!process.env.DATABASE_URL)throw new Error("DATABASE_URL missing"); app.use(cors({origin:true,credentials:false}));
-app.get("/",(_q,res)=>res.sendFile(path.resolve(process.cwd(),"src/booking-search.preview.html")));
-app.get("/health",(_q,r)=>r.json({ok:true,service:"pin-go-booking-search-staging",revision:STAGING_REVISION})); app.get("/ready",async(_q,r)=>{try{await prisma.$queryRaw`SELECT 1`;r.json({ok:true,service:"pin-go-booking-search-staging",revision:STAGING_REVISION})}catch{r.status(500).json({ok:false})}});
-app.get("/api/public-booking/catalog",async(_q,res)=>{try{const items=await prisma.property.findMany({where:{status:"ACTIVE",isPublicBookable:true,slug:{not:null},organization:{publicBookingEnabled:true,slug:{not:null}}},select:{name:true,slug:true,publicTitle:true,publicPhotos:true,baseNightlyRate:true,maxGuests:true,minimumNights:true,maximumNights:true,city:true,region:true,country:true,organization:{select:{slug:true}}},orderBy:{createdAt:"asc"},take:200});return res.json({ok:true,revision:STAGING_REVISION,results:items.map(p=>({organizationSlug:p.organization.slug,propertySlug:p.slug,title:p.publicTitle?.trim()||p.name,city:p.city??null,region:p.region??null,country:p.country??null,maxGuests:p.maxGuests??null,minimumNights:p.minimumNights,maximumNights:p.maximumNights??null,baseNightlyRate:p.baseNightlyRate==null?null:Number(p.baseNightlyRate),photoUrl:Array.isArray(p.publicPhotos)&&typeof p.publicPhotos[0]==="string"?p.publicPhotos[0]:null,bookingPath:p.organization.slug&&p.slug?`/book/${p.organization.slug}/${p.slug}`:null}))})}catch(e){console.error(e);return res.status(500).json({ok:false,error:"PUBLIC_STAY_CATALOG_FAILED"})}});
-app.get("/api/public-booking/search",async(req,res)=>{try{const result=await searchPublicStays({destination:String(req.query.destination??""),checkIn:String(req.query.checkIn??""),checkOut:String(req.query.checkOut??""),guests:Number(req.query.guests)});if(!result.ok)return res.status(400).json({ok:false,error:result.code});const slugs=result.results.map(p=>p.propertySlug);const rates=slugs.length?await prisma.property.findMany({where:{slug:{in:slugs}},select:{slug:true,baseNightlyRate:true}}):[];const m=new Map(rates.map(p=>[p.slug,p.baseNightlyRate==null?null:Number(p.baseNightlyRate)]));return res.json({...result,results:result.results.map(p=>({...p,baseNightlyRate:m.get(p.propertySlug)??null})),revision:STAGING_REVISION})}catch(e){console.error(e);return res.status(500).json({ok:false,error:"PUBLIC_STAY_SEARCH_FAILED"})}});
-app.listen(PORT,async()=>{console.log(`[booking-search-staging] listening on ${PORT} revision=${STAGING_REVISION}`);try{const x=await prisma.property.findMany({where:{status:"ACTIVE",isPublicBookable:true,slug:{not:null},organization:{publicBookingEnabled:true,slug:{not:null}}},select:{id:true,slug:true,publicTitle:true,name:true,city:true,region:true,timezone:true,baseNightlyRate:true,minimumNights:true,maximumNights:true,organization:{select:{slug:true}}},take:200});console.log("[booking-search-staging] eligible-public-catalog",{count:x.length,properties:x.map(p=>({organizationSlug:p.organization.slug,propertySlug:p.slug,title:p.publicTitle?.trim()||p.name,city:p.city,region:p.region,baseNightlyRate:p.baseNightlyRate==null?null:Number(p.baseNightlyRate),minimumNights:p.minimumNights,maximumNights:p.maximumNights}))})}catch(e){console.error(e)}});
+
+const app = express();
+const prisma = new PrismaClient();
+const PORT = Number(process.env.PORT ?? 3000);
+const STAGING_REVISION = "booking-search-staging-v8-featured-audit";
+if (!process.env.DATABASE_URL) throw new Error("DATABASE_URL missing");
+app.use(cors({ origin: true, credentials: false }));
+
+const publicPropertyWhere = {
+  status: "ACTIVE" as const,
+  isPublicBookable: true,
+  slug: { not: null },
+  organization: { publicBookingEnabled: true, slug: { not: null } },
+};
+
+function publicPropertySelect() {
+  return {
+    id: true,
+    name: true,
+    slug: true,
+    publicTitle: true,
+    publicPhotos: true,
+    baseNightlyRate: true,
+    maxGuests: true,
+    minimumNights: true,
+    maximumNights: true,
+    city: true,
+    region: true,
+    country: true,
+    organization: { select: { slug: true } },
+  } as const;
+}
+
+function publicPropertyPayload(p: any) {
+  return {
+    organizationSlug: p.organization.slug,
+    propertySlug: p.slug,
+    title: p.publicTitle?.trim() || p.name,
+    city: p.city ?? null,
+    region: p.region ?? null,
+    country: p.country ?? null,
+    maxGuests: p.maxGuests ?? null,
+    minimumNights: p.minimumNights,
+    maximumNights: p.maximumNights ?? null,
+    baseNightlyRate: p.baseNightlyRate == null ? null : Number(p.baseNightlyRate),
+    photoUrl: Array.isArray(p.publicPhotos) && typeof p.publicPhotos[0] === "string" ? p.publicPhotos[0] : null,
+    bookingPath: p.organization.slug && p.slug ? `/book/${p.organization.slug}/${p.slug}` : null,
+  };
+}
+
+app.get("/", (_q, res) => res.sendFile(path.resolve(process.cwd(), "src/booking-search.preview.html")));
+app.get("/health", (_q, r) => r.json({ ok: true, service: "pin-go-booking-search-staging", revision: STAGING_REVISION }));
+app.get("/ready", async (_q, r) => {
+  try { await prisma.$queryRaw`SELECT 1`; r.json({ ok: true, service: "pin-go-booking-search-staging", revision: STAGING_REVISION }); }
+  catch { r.status(500).json({ ok: false }); }
+});
+
+app.get("/api/public-booking/catalog", async (_q, res) => {
+  try {
+    const items = await prisma.property.findMany({ where: publicPropertyWhere, select: publicPropertySelect(), orderBy: { createdAt: "asc" }, take: 200 });
+    return res.json({ ok: true, revision: STAGING_REVISION, results: items.map(publicPropertyPayload) });
+  } catch (e) {
+    console.error(e);
+    return res.status(500).json({ ok: false, error: "PUBLIC_STAY_CATALOG_FAILED" });
+  }
+});
+
+app.get("/api/public-booking/featured-audit", async (_q, res) => {
+  try {
+    const now = new Date();
+    const since = new Date(now.getTime() - 365 * 86_400_000);
+    const items = await prisma.property.findMany({ where: publicPropertyWhere, select: publicPropertySelect(), orderBy: { createdAt: "asc" }, take: 200 });
+    const ranked = await Promise.all(items.map(async (p: any) => {
+      let reviewCount = 0;
+      let averageRating: number | null = null;
+      try {
+        const [count, aggregate] = await Promise.all([
+          prisma.propertyReview.count({ where: { propertyId: p.id, status: "PUBLISHED" } }),
+          prisma.propertyReview.aggregate({ where: { propertyId: p.id, status: "PUBLISHED" }, _avg: { overallRating: true } }),
+        ]);
+        reviewCount = count;
+        averageRating = aggregate._avg.overallRating == null ? null : Number(aggregate._avg.overallRating);
+      } catch (reviewError) {
+        console.warn("[booking-featured-audit] review metrics unavailable", { propertyId: p.id, error: reviewError instanceof Error ? reviewError.message : String(reviewError) });
+      }
+      const completedStays365 = await prisma.reservation.count({
+        where: { propertyId: p.id, status: "ACTIVE", checkOut: { gte: since, lt: now } },
+      });
+      const guestFavorite = reviewCount >= 3 && averageRating != null && averageRating >= 4.8;
+      const reviewScore = guestFavorite ? 100 + averageRating * 10 + Math.min(reviewCount, 20) : 0;
+      const popularityScore = Math.min(completedStays365, 50) * 5;
+      const readinessScore = (p.publicTitle?.trim() ? 2 : 0) + (Array.isArray(p.publicPhotos) && typeof p.publicPhotos[0] === "string" ? 2 : 0) + (p.baseNightlyRate != null && Number(p.baseNightlyRate) > 0 ? 1 : 0) + (p.city ? 1 : 0);
+      const score = reviewScore + popularityScore + readinessScore;
+      const reason = guestFavorite ? "GUEST_FAVORITE" : completedStays365 > 0 ? "POPULAR" : "PIN_GO_PICK";
+      return { ...publicPropertyPayload(p), reviewCount, averageRating, completedStays365, featuredReason: reason, featuredScore: score };
+    }));
+    ranked.sort((a, b) => b.featuredScore - a.featuredScore || b.completedStays365 - a.completedStays365 || (b.averageRating ?? 0) - (a.averageRating ?? 0) || a.title.localeCompare(b.title));
+    return res.json({ ok: true, revision: STAGING_REVISION, windowDays: 365, guestFavoriteRule: { minimumPublishedReviews: 3, minimumAverageRating: 4.8 }, results: ranked.slice(0, 6) });
+  } catch (e) {
+    console.error("[booking-featured-audit] failed", e);
+    return res.status(500).json({ ok: false, error: "PUBLIC_FEATURED_AUDIT_FAILED" });
+  }
+});
+
+app.get("/api/public-booking/search", async (req, res) => {
+  try {
+    const result = await searchPublicStays({ destination: String(req.query.destination ?? ""), checkIn: String(req.query.checkIn ?? ""), checkOut: String(req.query.checkOut ?? ""), guests: Number(req.query.guests) });
+    if (!result.ok) return res.status(400).json({ ok: false, error: result.code });
+    const slugs = result.results.map(p => p.propertySlug);
+    const rates = slugs.length ? await prisma.property.findMany({ where: { slug: { in: slugs } }, select: { slug: true, baseNightlyRate: true } }) : [];
+    const m = new Map(rates.map(p => [p.slug, p.baseNightlyRate == null ? null : Number(p.baseNightlyRate)]));
+    return res.json({ ...result, results: result.results.map(p => ({ ...p, baseNightlyRate: m.get(p.propertySlug) ?? null })), revision: STAGING_REVISION });
+  } catch (e) {
+    console.error(e);
+    return res.status(500).json({ ok: false, error: "PUBLIC_STAY_SEARCH_FAILED" });
+  }
+});
+
+app.listen(PORT, async () => {
+  console.log(`[booking-search-staging] listening on ${PORT} revision=${STAGING_REVISION}`);
+  try {
+    const x = await prisma.property.findMany({ where: publicPropertyWhere, select: { id: true, slug: true, publicTitle: true, name: true, city: true, region: true, timezone: true, baseNightlyRate: true, minimumNights: true, maximumNights: true, organization: { select: { slug: true } } }, take: 200 });
+    console.log("[booking-search-staging] eligible-public-catalog", { count: x.length, properties: x.map(p => ({ organizationSlug: p.organization.slug, propertySlug: p.slug, title: p.publicTitle?.trim() || p.name, city: p.city, region: p.region, baseNightlyRate: p.baseNightlyRate == null ? null : Number(p.baseNightlyRate), minimumNights: p.minimumNights, maximumNights: p.maximumNights })) });
+  } catch (e) { console.error(e); }
+});
