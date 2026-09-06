@@ -12,12 +12,19 @@ import {
   type DistributionMutationRequest,
 } from "../distribution/distribution-mutation-security";
 import type { OtaConnectionCenterRuntime } from "../distribution/ota-connection-runtime.policy";
+import type { OtaChannelEvidenceResult } from "../distribution/channex-channel-lifecycle.evidence.js";
+import { buildChannexChannelLifecycleWebhookRouter } from "./channex-channel-lifecycle.webhook.route.js";
 
 type MutationActor = { id?: string; orgId?: string; role?: string };
 
 export type DistributionConnectionCenterActions = {
   runtime: OtaConnectionCenterRuntime;
   isTrustedOrigin(origin: string, organizationId: string): Promise<boolean>;
+  channelLifecycle?: {
+    enabled: boolean;
+    expectedSecret: string | null | undefined;
+    applyEvidence(payload: unknown): Promise<OtaChannelEvidenceResult>;
+  };
   prepare?(args: {
     organizationId: string;
     propertyId: string;
@@ -88,6 +95,10 @@ export function buildDashboardDistributionConnectionCenterRouter(
   const mutationSecurity = createDistributionMutationSecurity({
     isTrustedOrigin: actions.isTrustedOrigin,
   });
+
+  if (actions.channelLifecycle) {
+    router.use(buildChannexChannelLifecycleWebhookRouter(actions.channelLifecycle));
+  }
 
   for (const legacyMutationPath of [
     "/api/dashboard/properties/:propertyId/distribution/enable",
