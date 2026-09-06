@@ -4,6 +4,7 @@
     "noEmit": true
   },
   "include": [
+    "src/distribution/ota-commercial-lifecycle.policy.ts",
     "src/distribution/connection-center.read-model.ts",
     "src/distribution/channex-channel-lifecycle.evidence.ts",
     "src/routes/channex-channel-lifecycle.webhook.route.ts"
