@@ -188,6 +188,9 @@ export class ChannexWhiteLabelAdapter
         title: "Primary accommodation",
         count_of_rooms: 1,
         occ_adults: 2,
+        occ_children: 0,
+        occ_infants: 0,
+        default_occupancy: 2,
       },
     });
     return { externalPrimaryRoomTypeId: responseId(

@@ -84,6 +84,17 @@ test("provisioning contract is group then property, room and rate", async () => 
   ]);
   assert.equal(requests[0]?.headers["user-api-key"], "test-api-key");
   assert.equal("Authorization" in (requests[0]?.headers ?? {}), false);
+  assert.deepEqual(requests[2]?.body, {
+    room_type: {
+      property_id: "property-ext",
+      title: "Primary accommodation",
+      count_of_rooms: 1,
+      occ_adults: 2,
+      occ_children: 0,
+      occ_infants: 0,
+      default_occupancy: 2,
+    },
+  });
 });
 
 test("one-time token request is scoped to group and property", async () => {
