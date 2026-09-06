@@ -25,7 +25,7 @@ export type WhiteLabelProvisioner = {
     organizationName: string;
     existingExternalGroupId: string | null;
   }): Promise<ProvisionedGroup>;
-  ensurePropertyInventory(args: {
+  ensureProperty(args: {
     organizationId: string;
     propertyId: string;
     propertyName: string;
@@ -33,7 +33,17 @@ export type WhiteLabelProvisioner = {
     timezone: string;
     externalGroupId: string;
     existingExternalPropertyId: string | null;
-  }): Promise<ProvisionedPropertyInventory>;
+  }): Promise<{ externalPropertyId: string }>;
+  ensurePrimaryRoomType(args: {
+    externalPropertyId: string;
+    existingExternalPrimaryRoomTypeId: string | null;
+  }): Promise<{ externalPrimaryRoomTypeId: string }>;
+  ensurePrimaryRatePlan(args: {
+    externalPropertyId: string;
+    externalPrimaryRoomTypeId: string;
+    currency: string;
+    existingExternalPrimaryRatePlanId: string | null;
+  }): Promise<{ externalPrimaryRatePlanId: string }>;
 };
 
 export class WhiteLabelAdapterError extends Error {
@@ -74,14 +84,21 @@ export class ChannexWhiteLabelAdapter
       enabled: boolean;
       apiKey: string;
       iframeBaseUrl: string;
+      channelFilterByProvider: Readonly<
+        Partial<Record<ConnectionCenterProvider, string>>
+      >;
       transport: WhiteLabelHttpTransport;
     }
   ) {}
 
-  private async post(path: string, body: unknown): Promise<unknown> {
+  private assertEnabled(): void {
     if (!this.config.enabled) {
       throw new WhiteLabelAdapterError("OTA_CONNECTION_CENTER_RUNTIME_DISABLED");
     }
+  }
+
+  private async post(path: string, body: unknown): Promise<unknown> {
+    this.assertEnabled();
     const apiKey = required(this.config.apiKey, "OTA_PROVIDER_CREDENTIALS_UNAVAILABLE", 512);
     return this.config.transport.send({
       method: "POST",
@@ -99,6 +116,7 @@ export class ChannexWhiteLabelAdapter
     organizationName: string;
     existingExternalGroupId: string | null;
   }): Promise<ProvisionedGroup> {
+    this.assertEnabled();
     if (args.existingExternalGroupId) {
       return { externalGroupId: required(args.existingExternalGroupId, "OTA_EXTERNAL_GROUP_ID_INVALID", 120) };
     }
@@ -108,7 +126,7 @@ export class ChannexWhiteLabelAdapter
     return { externalGroupId: responseId(response, "OTA_PROVIDER_GROUP_RESPONSE_INVALID") };
   }
 
-  async ensurePropertyInventory(args: {
+  async ensureProperty(args: {
     organizationId: string;
     propertyId: string;
     propertyName: string;
@@ -116,9 +134,16 @@ export class ChannexWhiteLabelAdapter
     timezone: string;
     externalGroupId: string;
     existingExternalPropertyId: string | null;
-  }): Promise<ProvisionedPropertyInventory> {
+  }): Promise<{ externalPropertyId: string }> {
+    this.assertEnabled();
     if (args.existingExternalPropertyId) {
-      throw new WhiteLabelAdapterError("OTA_PROVIDER_INVENTORY_RECONCILIATION_REQUIRED");
+      return {
+        externalPropertyId: required(
+          args.existingExternalPropertyId,
+          "OTA_EXTERNAL_PROPERTY_ID_INVALID",
+          120
+        ),
+      };
     }
     const propertyResponse = await this.post("/api/v1/properties", {
       property: {
@@ -128,33 +153,65 @@ export class ChannexWhiteLabelAdapter
         timezone: required(args.timezone, "OTA_PROPERTY_TIMEZONE_REQUIRED", 120),
       },
     });
-    const externalPropertyId = responseId(
+    return { externalPropertyId: responseId(
       propertyResponse,
       "OTA_PROVIDER_PROPERTY_RESPONSE_INVALID"
-    );
+    ) };
+  }
+
+  async ensurePrimaryRoomType(args: {
+    externalPropertyId: string;
+    existingExternalPrimaryRoomTypeId: string | null;
+  }): Promise<{ externalPrimaryRoomTypeId: string }> {
+    this.assertEnabled();
+    if (args.existingExternalPrimaryRoomTypeId) {
+      return {
+        externalPrimaryRoomTypeId: required(
+          args.existingExternalPrimaryRoomTypeId,
+          "OTA_EXTERNAL_ROOM_ID_INVALID",
+          120
+        ),
+      };
+    }
     const roomResponse = await this.post("/api/v1/room_types", {
       room_type: {
-        property_id: externalPropertyId,
+        property_id: required(args.externalPropertyId, "OTA_EXTERNAL_PROPERTY_ID_INVALID", 120),
         title: "Primary accommodation",
         count_of_rooms: 1,
         occ_adults: 2,
       },
     });
-    const externalPrimaryRoomTypeId = responseId(
+    return { externalPrimaryRoomTypeId: responseId(
       roomResponse,
       "OTA_PROVIDER_ROOM_RESPONSE_INVALID"
-    );
+    ) };
+  }
+
+  async ensurePrimaryRatePlan(args: {
+    externalPropertyId: string;
+    externalPrimaryRoomTypeId: string;
+    currency: string;
+    existingExternalPrimaryRatePlanId: string | null;
+  }): Promise<{ externalPrimaryRatePlanId: string }> {
+    this.assertEnabled();
+    if (args.existingExternalPrimaryRatePlanId) {
+      return {
+        externalPrimaryRatePlanId: required(
+          args.existingExternalPrimaryRatePlanId,
+          "OTA_EXTERNAL_RATE_ID_INVALID",
+          120
+        ),
+      };
+    }
     const rateResponse = await this.post("/api/v1/rate_plans", {
       rate_plan: {
-        property_id: externalPropertyId,
-        room_type_id: externalPrimaryRoomTypeId,
+        property_id: required(args.externalPropertyId, "OTA_EXTERNAL_PROPERTY_ID_INVALID", 120),
+        room_type_id: required(args.externalPrimaryRoomTypeId, "OTA_EXTERNAL_ROOM_ID_INVALID", 120),
         title: "Standard rate",
         currency: required(args.currency, "OTA_PROPERTY_CURRENCY_REQUIRED", 3).toUpperCase(),
       },
     });
     return {
-      externalPropertyId,
-      externalPrimaryRoomTypeId,
       externalPrimaryRatePlanId: responseId(
         rateResponse,
         "OTA_PROVIDER_RATE_RESPONSE_INVALID"
@@ -167,6 +224,12 @@ export class ChannexWhiteLabelAdapter
     externalPropertyId: string;
     provider: ConnectionCenterProvider;
   }): Promise<{ token: string; launchUrl: string }> {
+    this.assertEnabled();
+    const channelFilter = required(
+      this.config.channelFilterByProvider[args.provider] ?? "",
+      "OTA_CONNECTION_CHANNEL_FILTER_UNAVAILABLE",
+      120
+    );
     const response = record(await this.post("/api/v1/auth/one_time_token", {
       one_time_token: {
         group_id: required(args.externalGroupId, "OTA_EXTERNAL_GROUP_ID_INVALID", 120),
@@ -181,7 +244,7 @@ export class ChannexWhiteLabelAdapter
     const baseUrl = required(this.config.iframeBaseUrl, "OTA_CONNECTION_IFRAME_URL_INVALID");
     const launchUrl = new URL(baseUrl);
     launchUrl.searchParams.set("one_time_token", token);
-    launchUrl.searchParams.set("channels_filter", args.provider);
+    launchUrl.searchParams.set("channels_filter", channelFilter);
     return { token, launchUrl: launchUrl.toString() };
   }
 }

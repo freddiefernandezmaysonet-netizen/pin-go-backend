@@ -270,3 +270,37 @@ test("tenant actor and request key are forwarded to injected orchestration", asy
     requestKey: "request-tenant-123",
   });
 });
+
+test("session response exposes the launch URL but not a duplicate raw token", async () => {
+  const response = await requestRoute({
+    prisma: createPrisma(),
+    user: { id: "user-a", orgId: "organization-a", role: "ORG_ADMIN" },
+    method: "POST",
+    path: "/api/dashboard/distribution/properties/property-b/channels/AIRBNB/session",
+    headers: {
+      Origin: "https://app.pin-go.test",
+      "Idempotency-Key": "session-request-123",
+    },
+    actions: {
+      runtime: { enabled: true, reason: "ENABLED" },
+      isTrustedOrigin: async () => true,
+      issueSession: async () => ({
+        sessionId: "session-1",
+        token: "raw-one-time-token",
+        launchUrl: "https://staging.channex.io/channels?one_time_token=opaque",
+        expiresAt: new Date("2026-09-06T12:00:00.000Z"),
+      }),
+    },
+  });
+  assert.equal(response.status, 200);
+  const body = await response.json() as any;
+  assert.deepEqual(body, {
+    ok: true,
+    session: {
+      sessionId: "session-1",
+      launchUrl: "https://staging.channex.io/channels?one_time_token=opaque",
+      expiresAt: "2026-09-06T12:00:00.000Z",
+    },
+  });
+  assert.equal(JSON.stringify(body).includes("raw-one-time-token"), false);
+});

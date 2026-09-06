@@ -20,8 +20,12 @@ function setup(overrides: Partial<ProvisioningSnapshot> = {}) {
     distributionPropertyId: "distribution-property-1",
     groupStatus: "NOT_PROVISIONED",
     propertyStatus: "NOT_PROVISIONED",
+    groupLastErrorCode: null,
+    propertyLastErrorCode: null,
     externalGroupId: null,
     externalPropertyId: null,
+    externalPrimaryRoomTypeId: null,
+    externalPrimaryRatePlanId: null,
     ...overrides,
   };
   const repository: OtaProvisioningRepository = {
@@ -30,19 +34,19 @@ function setup(overrides: Partial<ProvisioningSnapshot> = {}) {
     async completeGroup() { calls.push("complete-group"); },
     async failGroup() { calls.push("fail-group"); },
     async claimProperty() { calls.push("claim-property"); return true; },
+    async checkpointProperty() { calls.push("checkpoint-property"); },
+    async checkpointPrimaryRoomType() { calls.push("checkpoint-room"); },
     async completeProperty() { calls.push("complete-property"); },
     async failProperty() { calls.push("fail-property"); },
   };
   const provisioner = {
     async ensureGroup() { calls.push("ensure-group"); return { externalGroupId: "group-ext" }; },
-    async ensurePropertyInventory() {
+    async ensureProperty() {
       calls.push("ensure-property");
-      return {
-        externalPropertyId: "property-ext",
-        externalPrimaryRoomTypeId: "room-ext",
-        externalPrimaryRatePlanId: "rate-ext",
-      };
+      return { externalPropertyId: "property-ext" };
     },
+    async ensurePrimaryRoomType() { calls.push("ensure-room"); return { externalPrimaryRoomTypeId: "room-ext" }; },
+    async ensurePrimaryRatePlan() { calls.push("ensure-rate"); return { externalPrimaryRatePlanId: "rate-ext" }; },
   };
   return { calls, repository, provisioner };
 }
@@ -68,6 +72,42 @@ test("orchestrator prepares logical state before ordered provisioning", async ()
     "complete-group",
     "claim-property",
     "ensure-property",
+    "checkpoint-property",
+    "ensure-room",
+    "checkpoint-room",
+    "ensure-rate",
+    "complete-property",
+  ]);
+});
+
+test("a retry reuses persisted partial provisioning checkpoints", async () => {
+  const { calls, repository, provisioner } = setup({
+    groupStatus: "READY",
+    propertyStatus: "FAILED",
+    externalGroupId: "group-ext",
+    externalPropertyId: "property-ext",
+    externalPrimaryRoomTypeId: "room-ext",
+  });
+  await orchestrateOtaProvisioning({
+    repository,
+    provisioner,
+    async prepareLogicalConnection() { calls.push("prepare"); },
+    organizationId: "org-1",
+    propertyId: "property-1",
+    requestedByUserId: "user-1",
+    provider: "AIRBNB",
+    requestKey: "retry-request-123",
+  });
+  assert.equal(calls.includes("ensure-group"), false);
+  assert.deepEqual(calls, [
+    "prepare",
+    "load",
+    "claim-property",
+    "ensure-property",
+    "checkpoint-property",
+    "ensure-room",
+    "checkpoint-room",
+    "ensure-rate",
     "complete-property",
   ]);
 });
@@ -90,7 +130,7 @@ test("tenant mismatch stops before provider calls", async () => {
   assert.deepEqual(calls, ["prepare", "load"]);
 });
 
-test("provider errors are sanitized and persisted as stable codes", async () => {
+test("ambiguous provider errors require reconciliation and are not automatically retried", async () => {
   const { calls, repository, provisioner } = setup();
   provisioner.ensureGroup = async () => {
     calls.push("ensure-group");
@@ -107,8 +147,27 @@ test("provider errors are sanitized and persisted as stable codes", async () => 
       provider: "AIRBNB",
       requestKey: "request-123",
     }),
-    /OTA_PROVIDER_PROVISIONING_FAILED/
+    /OTA_PROVIDER_RECONCILIATION_REQUIRED/
   );
   assert.equal(calls.includes("fail-group"), true);
   assert.equal(JSON.stringify(calls).includes("secret-api-key"), false);
+
+  const retry = setup({
+    groupStatus: "FAILED",
+    groupLastErrorCode: "OTA_PROVIDER_RECONCILIATION_REQUIRED",
+  });
+  await assert.rejects(
+    orchestrateOtaProvisioning({
+      repository: retry.repository,
+      provisioner: retry.provisioner,
+      async prepareLogicalConnection() { retry.calls.push("prepare"); },
+      organizationId: "org-1",
+      propertyId: "property-1",
+      requestedByUserId: "user-1",
+      provider: "AIRBNB",
+      requestKey: "retry-request-123",
+    }),
+    /OTA_PROVIDER_RECONCILIATION_REQUIRED/
+  );
+  assert.deepEqual(retry.calls, ["prepare", "load"]);
 });

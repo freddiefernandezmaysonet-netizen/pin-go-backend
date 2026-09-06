@@ -35,6 +35,7 @@ import { dashboardReservationsRouter } from "./routes/dashboard.reservations.rou
 import { dashboardPropertiesRouter } from "./routes/dashboard.properties.route";
 import { buildDashboardChannexFullSyncRouter } from "./routes/dashboard.channex-full-sync.route";
 import { buildDashboardDistributionConnectionCenterRouter } from "./routes/dashboard.distribution-connection-center.route";
+import { buildOtaConnectionCenterComposition } from "./distribution/ota-connection-center.composition";
 import {
   dashboardGuestAccessSettingsRouter,
 } from "./routes/dashboard.guest-access-settings.routes";
@@ -85,7 +86,11 @@ import { uploadsRouter } from "./routes/uploads.route";
 import { dashboardOrganizationRouter } from "./routes/dashboard.organization.route";
 import { dashboardPayoutsRouter } from "./routes/dashboard-payouts.routes";
 import { dashboardCancellationPolicyRouter } from "./routes/dashboard.cancellation-policy.routes";
-import { isPublishedBrandOriginAllowed } from "./services/branding/published-brand-origin.policy.js";
+import {
+  hostnameFromSecureRequestOrigin,
+  isPublishedBrandOriginAllowed,
+} from "./services/branding/published-brand-origin.policy.js";
+import { resolvePublishedBrandContextByHostname } from "./services/branding/published-brand-context.service.js";
 import { reviewsE1Enabled } from "./config/reviews.config.js";
 import { assertReviewTokenEncryptionConfigured } from "./services/reviews/review-token-crypto.service.js";
 
@@ -302,7 +307,20 @@ app.use(adminDemoRouter);
 
 app.use(dashboardRouter);
 app.use(dashboardReservationsRouter);
-app.use(buildDashboardDistributionConnectionCenterRouter(prisma));
+app.use(buildDashboardDistributionConnectionCenterRouter(
+  prisma,
+  buildOtaConnectionCenterComposition({
+    prisma,
+    runtimeValue: process.env.OTA_CONNECTION_CENTER_ENABLED,
+    trustedMutationOrigins: allowedOrigins,
+    isTenantOriginAllowed: async (origin, organizationId) => {
+      const hostname = hostnameFromSecureRequestOrigin(origin);
+      if (!hostname) return false;
+      const context = await resolvePublishedBrandContextByHostname(hostname);
+      return context.kind === "CUSTOM_BRAND" && context.organizationId === organizationId;
+    },
+  })
+));
 app.use(buildDashboardChannexFullSyncRouter(prisma));
 app.use(dashboardPropertiesRouter);
 app.use(dashboardGuestAccessSettingsRouter);

@@ -1,6 +1,11 @@
 export type OtaConnectionCenterRuntime = {
   enabled: boolean;
-  reason: "ENABLED" | "DEFAULT_OFF" | "INVALID_CONFIGURATION";
+  reason:
+    | "ENABLED"
+    | "DEFAULT_OFF"
+    | "INVALID_CONFIGURATION"
+    | "ADAPTER_UNAVAILABLE"
+    | "CONFIGURATION_INCOMPLETE";
 };
 
 export function resolveOtaConnectionCenterRuntime(

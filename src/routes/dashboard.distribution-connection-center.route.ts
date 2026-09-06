@@ -145,9 +145,13 @@ export function buildDashboardDistributionConnectionCenterRouter(
           provider,
           requestKey: req.distributionRequestKey!,
         });
+        const { token: _token, ...publicSession } = session;
         return res.json({
           ok: true,
-          session: { ...session, expiresAt: session.expiresAt.toISOString() },
+          session: {
+            ...publicSession,
+            expiresAt: publicSession.expiresAt.toISOString(),
+          },
         });
       } catch (error) {
         return mutationFailure(res, error, "OTA_CONNECTION_SESSION_FAILED");

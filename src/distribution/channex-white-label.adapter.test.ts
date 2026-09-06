@@ -22,6 +22,10 @@ function adapter(enabled: boolean) {
       enabled,
       apiKey: "test-api-key",
       iframeBaseUrl: "https://iframe.example.test/connect",
+      channelFilterByProvider: {
+        AIRBNB: "airbnb-channel-code",
+        BOOKING_COM: "booking-channel-code",
+      },
       transport: {
         async send(request) {
           requests.push(request);
@@ -48,7 +52,7 @@ test("provisioning contract is group then property, room and rate", async () => 
     organizationName: "Pin Go",
     existingExternalGroupId: null,
   });
-  const inventory = await value.ensurePropertyInventory({
+  const property = await value.ensureProperty({
     organizationId: "org-1",
     propertyId: "property-1",
     propertyName: "Casa Azul",
@@ -57,7 +61,17 @@ test("provisioning contract is group then property, room and rate", async () => 
     externalGroupId: group.externalGroupId,
     existingExternalPropertyId: null,
   });
-  assert.deepEqual(inventory, {
+  const room = await value.ensurePrimaryRoomType({
+    externalPropertyId: property.externalPropertyId,
+    existingExternalPrimaryRoomTypeId: null,
+  });
+  const rate = await value.ensurePrimaryRatePlan({
+    externalPropertyId: property.externalPropertyId,
+    externalPrimaryRoomTypeId: room.externalPrimaryRoomTypeId,
+    currency: "usd",
+    existingExternalPrimaryRatePlanId: null,
+  });
+  assert.deepEqual({ ...property, ...room, ...rate }, {
     externalPropertyId: "property-ext",
     externalPrimaryRoomTypeId: "room-ext",
     externalPrimaryRatePlanId: "rate-ext",
@@ -73,7 +87,7 @@ test("provisioning contract is group then property, room and rate", async () => 
 test("one-time token request is scoped to group and property", async () => {
   const { value, requests } = adapter(true);
   await value.ensureGroup({ organizationId: "org-1", organizationName: "Pin Go", existingExternalGroupId: null });
-  await value.ensurePropertyInventory({
+  const property = await value.ensureProperty({
     organizationId: "org-1",
     propertyId: "property-1",
     propertyName: "Casa Azul",
@@ -81,6 +95,16 @@ test("one-time token request is scoped to group and property", async () => {
     timezone: "America/Puerto_Rico",
     externalGroupId: "group-ext",
     existingExternalPropertyId: null,
+  });
+  const room = await value.ensurePrimaryRoomType({
+    externalPropertyId: property.externalPropertyId,
+    existingExternalPrimaryRoomTypeId: null,
+  });
+  await value.ensurePrimaryRatePlan({
+    externalPropertyId: property.externalPropertyId,
+    externalPrimaryRoomTypeId: room.externalPrimaryRoomTypeId,
+    currency: "USD",
+    existingExternalPrimaryRatePlanId: null,
   });
   const issued = await value.issue({
     externalGroupId: "group-ext",
@@ -91,5 +115,64 @@ test("one-time token request is scoped to group and property", async () => {
   assert.deepEqual(requests.at(-1)?.body, {
     one_time_token: { group_id: "group-ext", property_id: "property-ext" },
   });
-  assert.match(issued.launchUrl, /channels_filter=AIRBNB/);
+  assert.equal(
+    new URL(issued.launchUrl).searchParams.get("channels_filter"),
+    "airbnb-channel-code"
+  );
+});
+
+test("unknown provider filter fails closed before token issuance", async () => {
+  const { requests } = adapter(true);
+  const value = new ChannexWhiteLabelAdapter({
+    enabled: true,
+    apiKey: "test-api-key",
+    iframeBaseUrl: "https://iframe.example.test/connect",
+    channelFilterByProvider: {},
+    transport: {
+      async send(request) {
+        requests.push(request);
+        return { data: { attributes: { token: "secret-one-time-token" } } };
+      },
+    },
+  });
+  await assert.rejects(
+    value.issue({
+      externalGroupId: "group-ext",
+      externalPropertyId: "property-ext",
+      provider: "BOOKING_COM",
+    }),
+    (error: unknown) =>
+      error instanceof WhiteLabelAdapterError &&
+      error.code === "OTA_CONNECTION_CHANNEL_FILTER_UNAVAILABLE"
+  );
+  assert.deepEqual(requests, []);
+});
+
+test("partial retry reuses checkpoint IDs without transport calls", async () => {
+  const { value, requests } = adapter(true);
+  assert.deepEqual(await value.ensureGroup({
+    organizationId: "org-1",
+    organizationName: "Pin Go",
+    existingExternalGroupId: "group-ext",
+  }), { externalGroupId: "group-ext" });
+  assert.deepEqual(await value.ensureProperty({
+    organizationId: "org-1",
+    propertyId: "property-1",
+    propertyName: "Casa Azul",
+    currency: "USD",
+    timezone: "America/Puerto_Rico",
+    externalGroupId: "group-ext",
+    existingExternalPropertyId: "property-ext",
+  }), { externalPropertyId: "property-ext" });
+  assert.deepEqual(await value.ensurePrimaryRoomType({
+    externalPropertyId: "property-ext",
+    existingExternalPrimaryRoomTypeId: "room-ext",
+  }), { externalPrimaryRoomTypeId: "room-ext" });
+  assert.deepEqual(await value.ensurePrimaryRatePlan({
+    externalPropertyId: "property-ext",
+    externalPrimaryRoomTypeId: "room-ext",
+    currency: "USD",
+    existingExternalPrimaryRatePlanId: "rate-ext",
+  }), { externalPrimaryRatePlanId: "rate-ext" });
+  assert.deepEqual(requests, []);
 });

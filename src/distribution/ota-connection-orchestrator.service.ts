@@ -15,8 +15,12 @@ export type ProvisioningSnapshot = {
   distributionPropertyId: string;
   groupStatus: "NOT_PROVISIONED" | "PROVISIONING" | "READY" | "FAILED";
   propertyStatus: "NOT_PROVISIONED" | "PROVISIONING" | "READY" | "FAILED";
+  groupLastErrorCode: string | null;
+  propertyLastErrorCode: string | null;
   externalGroupId: string | null;
   externalPropertyId: string | null;
+  externalPrimaryRoomTypeId: string | null;
+  externalPrimaryRatePlanId: string | null;
 };
 
 export type OtaProvisioningRepository = {
@@ -25,6 +29,16 @@ export type OtaProvisioningRepository = {
   completeGroup(organizationId: string, groupId: string, externalGroupId: string, now: Date): Promise<void>;
   failGroup(organizationId: string, groupId: string, errorCode: string): Promise<void>;
   claimProperty(organizationId: string, distributionPropertyId: string): Promise<boolean>;
+  checkpointProperty(
+    organizationId: string,
+    distributionPropertyId: string,
+    externalPropertyId: string
+  ): Promise<void>;
+  checkpointPrimaryRoomType(
+    organizationId: string,
+    distributionPropertyId: string,
+    externalPrimaryRoomTypeId: string
+  ): Promise<void>;
   completeProperty(
     organizationId: string,
     distributionPropertyId: string,
@@ -51,7 +65,7 @@ function safeFailureCode(error: unknown): string {
   ) {
     return (error as { code: string }).code;
   }
-  return "OTA_PROVIDER_PROVISIONING_FAILED";
+  return "OTA_PROVIDER_RECONCILIATION_REQUIRED";
 }
 
 export async function orchestrateOtaProvisioning(args: {
@@ -93,6 +107,18 @@ export async function orchestrateOtaProvisioning(args: {
   if (snapshot.groupStatus === "READY" && snapshot.propertyStatus === "READY") {
     return { provisioningStatus: "READY" };
   }
+  if (
+    snapshot.groupStatus === "FAILED" &&
+    snapshot.groupLastErrorCode === "OTA_PROVIDER_RECONCILIATION_REQUIRED"
+  ) {
+    throw new OtaProvisioningError("OTA_PROVIDER_RECONCILIATION_REQUIRED");
+  }
+  if (
+    snapshot.propertyStatus === "FAILED" &&
+    snapshot.propertyLastErrorCode === "OTA_PROVIDER_RECONCILIATION_REQUIRED"
+  ) {
+    throw new OtaProvisioningError("OTA_PROVIDER_RECONCILIATION_REQUIRED");
+  }
 
   const now = args.now ?? new Date();
   let externalGroupId = snapshot.externalGroupId;
@@ -120,12 +146,17 @@ export async function orchestrateOtaProvisioning(args: {
     }
   }
 
-  if (snapshot.propertyStatus !== "READY" || !snapshot.externalPropertyId) {
+  if (
+    snapshot.propertyStatus !== "READY" ||
+    !snapshot.externalPropertyId ||
+    !snapshot.externalPrimaryRoomTypeId ||
+    !snapshot.externalPrimaryRatePlanId
+  ) {
     if (!(await args.repository.claimProperty(args.organizationId, snapshot.distributionPropertyId))) {
       throw new OtaProvisioningError("OTA_PROPERTY_PROVISIONING_CONFLICT");
     }
     try {
-      const inventory = await args.provisioner.ensurePropertyInventory({
+      const property = await args.provisioner.ensureProperty({
         organizationId: args.organizationId,
         propertyId: args.propertyId,
         propertyName: snapshot.propertyName,
@@ -134,6 +165,31 @@ export async function orchestrateOtaProvisioning(args: {
         externalGroupId,
         existingExternalPropertyId: snapshot.externalPropertyId,
       });
+      await args.repository.checkpointProperty(
+        args.organizationId,
+        snapshot.distributionPropertyId,
+        property.externalPropertyId
+      );
+      const room = await args.provisioner.ensurePrimaryRoomType({
+        externalPropertyId: property.externalPropertyId,
+        existingExternalPrimaryRoomTypeId: snapshot.externalPrimaryRoomTypeId,
+      });
+      await args.repository.checkpointPrimaryRoomType(
+        args.organizationId,
+        snapshot.distributionPropertyId,
+        room.externalPrimaryRoomTypeId
+      );
+      const rate = await args.provisioner.ensurePrimaryRatePlan({
+        externalPropertyId: property.externalPropertyId,
+        externalPrimaryRoomTypeId: room.externalPrimaryRoomTypeId,
+        currency: snapshot.currency,
+        existingExternalPrimaryRatePlanId: snapshot.externalPrimaryRatePlanId,
+      });
+      const inventory: ProvisionedPropertyInventory = {
+        externalPropertyId: property.externalPropertyId,
+        externalPrimaryRoomTypeId: room.externalPrimaryRoomTypeId,
+        externalPrimaryRatePlanId: rate.externalPrimaryRatePlanId,
+      };
       await args.repository.completeProperty(
         args.organizationId,
         snapshot.distributionPropertyId,
