@@ -221,6 +221,13 @@ export class ChannexWhiteLabelAdapter
         room_type_id: required(args.externalPrimaryRoomTypeId, "OTA_EXTERNAL_ROOM_ID_INVALID", 120),
         title: "Standard rate",
         currency: required(args.currency, "OTA_PROPERTY_CURRENCY_REQUIRED", 3).toUpperCase(),
+        options: [
+          {
+            occupancy: 2,
+            is_primary: true,
+            rate: 0,
+          },
+        ],
       },
     });
     return {

@@ -95,6 +95,21 @@ test("provisioning contract is group then property, room and rate", async () => 
       default_occupancy: 2,
     },
   });
+  assert.deepEqual(requests[3]?.body, {
+    rate_plan: {
+      property_id: "property-ext",
+      room_type_id: "room-ext",
+      title: "Standard rate",
+      currency: "USD",
+      options: [
+        {
+          occupancy: 2,
+          is_primary: true,
+          rate: 0,
+        },
+      ],
+    },
+  });
 });
 
 test("one-time token request is scoped to group and property", async () => {
