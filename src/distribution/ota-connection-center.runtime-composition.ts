@@ -3,8 +3,28 @@ import type { PrismaClient } from "@prisma/client";
 import type { DistributionConnectionCenterActions } from "../routes/dashboard.distribution-connection-center.route.js";
 import { ChannexWhiteLabelAdapter } from "./channex-white-label.adapter.js";
 import { createChannexWhiteLabelHttpTransport } from "./channex-white-label.http-transport.js";
+import { applyChannexChannelLifecycleEvidence } from "./channex-channel-lifecycle.evidence.js";
 import { buildOtaConnectionCenterComposition } from "./ota-connection-center.composition.js";
 import { resolveOtaConnectionCenterConfig } from "./ota-connection-center.config.js";
+
+function withChannelLifecycle(args: {
+  actions: DistributionConnectionCenterActions;
+  prisma: PrismaClient;
+  env: Readonly<Record<string, string | undefined>>;
+}): DistributionConnectionCenterActions {
+  return {
+    ...args.actions,
+    channelLifecycle: {
+      enabled: args.env.OTA_CHANNEL_LIFECYCLE_ENABLED === "true",
+      expectedSecret: String(args.env.OTA_CHANNEL_WEBHOOK_SECRET ?? "").trim(),
+      applyEvidence: (payload) =>
+        applyChannexChannelLifecycleEvidence({
+          client: args.prisma,
+          payload,
+        }),
+    },
+  };
+}
 
 export function buildRuntimeOtaConnectionCenterComposition(args: {
   prisma: PrismaClient;
@@ -15,11 +35,15 @@ export function buildRuntimeOtaConnectionCenterComposition(args: {
 }): DistributionConnectionCenterActions {
   const config = resolveOtaConnectionCenterConfig(args.env);
   if (!config.enabled) {
-    return buildOtaConnectionCenterComposition({
+    return withChannelLifecycle({
       prisma: args.prisma,
-      runtimeOverride: config,
-      trustedMutationOrigins: args.trustedMutationOrigins,
-      isTenantOriginAllowed: args.isTenantOriginAllowed,
+      env: args.env,
+      actions: buildOtaConnectionCenterComposition({
+        prisma: args.prisma,
+        runtimeOverride: config,
+        trustedMutationOrigins: args.trustedMutationOrigins,
+        isTenantOriginAllowed: args.isTenantOriginAllowed,
+      }),
     });
   }
 
@@ -36,13 +60,17 @@ export function buildRuntimeOtaConnectionCenterComposition(args: {
     transport,
   });
 
-  return buildOtaConnectionCenterComposition({
+  return withChannelLifecycle({
     prisma: args.prisma,
-    runtimeValue: "true",
-    trustedMutationOrigins: args.trustedMutationOrigins,
-    allowedLaunchOrigins: config.provider.allowedLaunchOrigins,
-    defaultCurrency: config.provider.defaultCurrency,
-    adapter,
-    isTenantOriginAllowed: args.isTenantOriginAllowed,
+    env: args.env,
+    actions: buildOtaConnectionCenterComposition({
+      prisma: args.prisma,
+      runtimeValue: "true",
+      trustedMutationOrigins: args.trustedMutationOrigins,
+      allowedLaunchOrigins: config.provider.allowedLaunchOrigins,
+      defaultCurrency: config.provider.defaultCurrency,
+      adapter,
+      isTenantOriginAllowed: args.isTenantOriginAllowed,
+    }),
   });
 }
