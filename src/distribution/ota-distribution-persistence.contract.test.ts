@@ -22,6 +22,14 @@ const compositionSource = readFileSync(
   new URL("./ota-connection-center.composition.ts", import.meta.url),
   "utf8"
 );
+const runtimeCompositionSource = readFileSync(
+  new URL("./ota-connection-center.runtime-composition.ts", import.meta.url),
+  "utf8"
+);
+const transportSource = readFileSync(
+  new URL("./channex-white-label.http-transport.ts", import.meta.url),
+  "utf8"
+);
 const repositorySource = readFileSync(
   new URL("./ota-provisioning.repository.ts", import.meta.url),
   "utf8"
@@ -52,11 +60,20 @@ test("new distribution services cannot call Channex, OTAs, or Direct Booking", (
   assert.match(adapterSource, /WhiteLabelHttpTransport/);
   assert.doesNotMatch(compositionSource, /from\s+["']axios|fetch\s*\(/);
   assert.doesNotMatch(repositorySource, /from\s+["']axios|fetch\s*\(/);
-  assert.match(serverSource, /buildOtaConnectionCenterComposition\(\{[\s\S]*?trustedMutationOrigins:\s*allowedOrigins,[\s\S]*?\}\)/);
+  assert.match(
+    serverSource,
+    /buildRuntimeOtaConnectionCenterComposition\(\{[\s\S]*?env:\s*process\.env,[\s\S]*?trustedMutationOrigins:\s*allowedOrigins,[\s\S]*?\}\)/
+  );
   assert.doesNotMatch(
     serverSource,
-    /buildOtaConnectionCenterComposition\(\{[\s\S]*?adapter:/
+    /createChannexWhiteLabelHttpTransport|new ChannexWhiteLabelAdapter/
   );
+  assert.match(runtimeCompositionSource, /resolveOtaConnectionCenterConfig/);
+  assert.match(runtimeCompositionSource, /createChannexWhiteLabelHttpTransport/);
+  assert.doesNotMatch(runtimeCompositionSource, /console\.|axios/);
+  assert.match(transportSource, /ALLOWED_API_ORIGINS/);
+  assert.match(transportSource, /ALLOWED_POST_PATHS/);
+  assert.doesNotMatch(transportSource, /console\.|process\.env|axios/);
 });
 
 test("migration is additive and includes every commercial persistence table", () => {

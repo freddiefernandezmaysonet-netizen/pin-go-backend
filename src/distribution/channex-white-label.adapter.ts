@@ -47,7 +47,10 @@ export type WhiteLabelProvisioner = {
 };
 
 export class WhiteLabelAdapterError extends Error {
-  constructor(readonly code: string) {
+  constructor(
+    readonly code: string,
+    readonly retryDisposition: "SAFE_RETRY" | "RECONCILIATION_REQUIRED" = "SAFE_RETRY"
+  ) {
     super(code);
     this.name = "WhiteLabelAdapterError";
   }
@@ -61,20 +64,26 @@ function required(value: string, code: string, max = 255): string {
 
 function record(value: unknown): Record<string, any> {
   if (!value || typeof value !== "object" || Array.isArray(value)) {
-    throw new WhiteLabelAdapterError("OTA_PROVIDER_RESPONSE_INVALID");
+    throw new WhiteLabelAdapterError(
+      "OTA_PROVIDER_RESPONSE_INVALID",
+      "RECONCILIATION_REQUIRED"
+    );
   }
   return value as Record<string, any>;
 }
 
 function responseId(value: unknown, code: string): string {
   const root = record(value);
-  return required(String(root.data?.id ?? ""), code, 120);
+  const id = String(root.data?.id ?? "").trim();
+  if (!id || id.length > 120) {
+    throw new WhiteLabelAdapterError(code, "RECONCILIATION_REQUIRED");
+  }
+  return id;
 }
 
 /**
- * Transport-only white-label boundary. It is inert unless both `enabled` and
- * an injected transport are supplied. The application runtime never creates a
- * network transport in this delivery stage.
+ * White-label domain boundary. It remains inert unless explicitly enabled and
+ * supplied with a transport; environment and network policy live outside it.
  */
 export class ChannexWhiteLabelAdapter
   implements WhiteLabelProvisioner, OneTimeConnectionTokenIssuer
@@ -104,7 +113,7 @@ export class ChannexWhiteLabelAdapter
       method: "POST",
       path,
       headers: {
-        Authorization: `Bearer ${apiKey}`,
+        "user-api-key": apiKey,
         "Content-Type": "application/json",
       },
       body,
@@ -179,6 +188,9 @@ export class ChannexWhiteLabelAdapter
         title: "Primary accommodation",
         count_of_rooms: 1,
         occ_adults: 2,
+        occ_children: 0,
+        occ_infants: 0,
+        default_occupancy: 2,
       },
     });
     return { externalPrimaryRoomTypeId: responseId(
@@ -209,6 +221,13 @@ export class ChannexWhiteLabelAdapter
         room_type_id: required(args.externalPrimaryRoomTypeId, "OTA_EXTERNAL_ROOM_ID_INVALID", 120),
         title: "Standard rate",
         currency: required(args.currency, "OTA_PROPERTY_CURRENCY_REQUIRED", 3).toUpperCase(),
+        options: [
+          {
+            occupancy: 2,
+            is_primary: true,
+            rate: 0,
+          },
+        ],
       },
     });
     return {
@@ -236,11 +255,15 @@ export class ChannexWhiteLabelAdapter
         property_id: required(args.externalPropertyId, "OTA_EXTERNAL_PROPERTY_ID_INVALID", 120),
       },
     }));
-    const token = required(
-      String(response.data?.attributes?.token ?? response.data?.token ?? ""),
-      "OTA_CONNECTION_TOKEN_INVALID",
-      4096
-    );
+    const token = String(
+      response.data?.attributes?.token ?? response.data?.token ?? ""
+    ).trim();
+    if (!token || token.length > 4096) {
+      throw new WhiteLabelAdapterError(
+        "OTA_CONNECTION_TOKEN_INVALID",
+        "RECONCILIATION_REQUIRED"
+      );
+    }
     const baseUrl = required(this.config.iframeBaseUrl, "OTA_CONNECTION_IFRAME_URL_INVALID");
     const launchUrl = new URL(baseUrl);
     launchUrl.searchParams.set("one_time_token", token);

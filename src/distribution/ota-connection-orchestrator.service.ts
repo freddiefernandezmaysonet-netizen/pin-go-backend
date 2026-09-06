@@ -59,6 +59,15 @@ function safeFailureCode(error: unknown): string {
   if (
     error &&
     typeof error === "object" &&
+    "retryDisposition" in error &&
+    (error as { retryDisposition?: unknown }).retryDisposition ===
+      "RECONCILIATION_REQUIRED"
+  ) {
+    return "OTA_PROVIDER_RECONCILIATION_REQUIRED";
+  }
+  if (
+    error &&
+    typeof error === "object" &&
     "code" in error &&
     typeof (error as { code?: unknown }).code === "string" &&
     /^OTA_[A-Z0-9_:.-]{1,116}$/.test((error as { code: string }).code)

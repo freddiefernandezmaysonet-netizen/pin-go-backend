@@ -18,6 +18,7 @@ import {
 } from "./ota-connection-orchestrator.service.js";
 import { PrismaOtaProvisioningRepository } from "./ota-provisioning.repository.js";
 import { resolveOtaConnectionCenterRuntime } from "./ota-connection-runtime.policy.js";
+import type { OtaConnectionCenterRuntime } from "./ota-connection-runtime.policy.js";
 
 export type OtaConnectionCenterAdapter = WhiteLabelProvisioner & OneTimeConnectionTokenIssuer;
 
@@ -42,6 +43,7 @@ function canonicalConfiguredOrigins(
 export function buildOtaConnectionCenterComposition(args: {
   prisma: PrismaClient;
   runtimeValue?: string;
+  runtimeOverride?: OtaConnectionCenterRuntime;
   trustedMutationOrigins: readonly string[];
   allowedLaunchOrigins?: readonly string[];
   defaultCurrency?: string;
@@ -50,7 +52,8 @@ export function buildOtaConnectionCenterComposition(args: {
   repository?: OtaProvisioningRepository;
   prepareLogicalConnection?: typeof prepareOtaDistributionConnection;
 }): DistributionConnectionCenterActions {
-  const requestedRuntime = resolveOtaConnectionCenterRuntime(args.runtimeValue);
+  const requestedRuntime =
+    args.runtimeOverride ?? resolveOtaConnectionCenterRuntime(args.runtimeValue);
   const trustedOrigins = canonicalConfiguredOrigins(
     args.trustedMutationOrigins,
     new Set(["https:", "http:"])
