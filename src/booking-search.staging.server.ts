@@ -9,7 +9,7 @@ import { searchPublicStays } from "./services/public-stay-search.service";
 const app = express();
 const prisma = new PrismaClient();
 const PORT = Number(process.env.PORT ?? 3000);
-const STAGING_REVISION = "booking-search-staging-v9-featured-ratings";
+const STAGING_REVISION = "booking-search-staging-v10-review-audit";
 if (!process.env.DATABASE_URL) throw new Error("DATABASE_URL missing");
 app.use(cors({ origin: true, credentials: false }));
 
@@ -67,8 +67,8 @@ app.get("/api/public-booking/featured-audit", async (_q, res) => {
       let averageRating: number | null = null;
       try {
         const [count, aggregate] = await Promise.all([
-          prisma.propertyReview.count({ where: { propertyId: p.id, status: "PUBLISHED" } }),
-          prisma.propertyReview.aggregate({ where: { propertyId: p.id, status: "PUBLISHED" }, _avg: { overallRating: true } }),
+          prisma.propertyReview.count({ where: { propertyId: p.id, status: "PUBLISHED", source: "PIN_GO_DIRECT" } }),
+          prisma.propertyReview.aggregate({ where: { propertyId: p.id, status: "PUBLISHED", source: "PIN_GO_DIRECT" }, _avg: { overallRating: true } }),
         ]);
         reviewCount = count;
         averageRating = aggregate._avg.overallRating == null ? null : Number(aggregate._avg.overallRating);
@@ -105,5 +105,25 @@ app.listen(PORT, async () => {
   try {
     const x = await prisma.property.findMany({ where: publicPropertyWhere, select: { id: true, slug: true, publicTitle: true, name: true, city: true, region: true, timezone: true, baseNightlyRate: true, minimumNights: true, maximumNights: true, organization: { select: { slug: true } } }, take: 200 });
     console.log("[booking-search-staging] eligible-public-catalog", { count: x.length, properties: x.map(p => ({ organizationSlug: p.organization.slug, propertySlug: p.slug, title: p.publicTitle?.trim() || p.name, city: p.city, region: p.region, baseNightlyRate: p.baseNightlyRate == null ? null : Number(p.baseNightlyRate), minimumNights: p.minimumNights, maximumNights: p.maximumNights })) });
+
+    const demo = x.find(p => (p.publicTitle?.trim() || p.name) === "Pin&Go Demo Property");
+    if (demo) {
+      const reviews = await prisma.propertyReview.findMany({
+        where: { propertyId: demo.id },
+        select: { id: true, status: true, source: true, overallRating: true, propertyId: true, reservationId: true, submittedAt: true, publishedAt: true },
+        orderBy: { submittedAt: "asc" },
+      });
+      const publicReviews = reviews.filter(r => r.status === "PUBLISHED" && r.source === "PIN_GO_DIRECT");
+      const publicAverage = publicReviews.length ? publicReviews.reduce((sum, r) => sum + r.overallRating, 0) / publicReviews.length : null;
+      console.log("[booking-review-audit] pin-go-demo-property", {
+        propertyId: demo.id,
+        propertySlug: demo.slug,
+        totalReviews: reviews.length,
+        publishedCount: reviews.filter(r => r.status === "PUBLISHED").length,
+        publicReviewCount: publicReviews.length,
+        publicAverageRating: publicAverage,
+        reviews: reviews.map(r => ({ id: r.id, status: r.status, source: r.source, overallRating: r.overallRating, propertyId: r.propertyId, reservationId: r.reservationId, submittedAt: r.submittedAt.toISOString(), publishedAt: r.publishedAt?.toISOString() ?? null })),
+      });
+    }
   } catch (e) { console.error(e); }
 });
