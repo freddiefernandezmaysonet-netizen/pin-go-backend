@@ -59,6 +59,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+          git fetch --no-tags origin main:refs/remotes/origin/main
           git diff origin/main...HEAD -- src/routes/auth.routes.ts src/controllers/auth.controller.ts src/server.ts | tee /tmp/auth-runtime.diff
           test ! -s /tmp/auth-runtime.diff
           ! grep -R "sendGuestSms\|sendResetPasswordEmail\|send.*Email" src/auth/mfa-otp-delivery.ts
