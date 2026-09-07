@@ -1,8 +1,8 @@
-# Pin&Go Enterprise Authentication E1 — MFA Core & Persistence
+# Pin&Go Enterprise Authentication E1 — MFA Core & Persistence Blueprint
 
 ## Scope
 
-E1 establishes dormant primitives and persistence for a future multi-factor authentication flow. It does **not** alter `/auth/login`, `/auth/me`, signup auto-login, password reset, cookies, JWT issuance, production configuration, or runtime behavior.
+E1 establishes dormant primitives and a persistence **design blueprint** for a future multi-factor authentication flow. It does **not** alter `/auth/login`, `/auth/me`, signup auto-login, password reset, cookies, JWT issuance, production configuration, Prisma schema, migration history, database state, or runtime behavior.
 
 ## Rollout contract
 
@@ -14,9 +14,9 @@ The core recognizes three rollout modes:
 
 No environment variable or runtime integration is added in E1. Therefore the repository remains operationally equivalent until a later integration slice explicitly wires this core into authentication.
 
-## Persistence
+## Persistence blueprint
 
-The unapplied migration introduces:
+`docs/design/enterprise-auth-e1-persistence.sql` documents the proposed persistence shape for:
 
 - `AuthFactor`
 - `MfaChallenge`
@@ -24,6 +24,8 @@ The unapplied migration introduces:
 - `TrustedDevice`
 - `RecoveryCode`
 - `SecurityEvent`
+
+The blueprint is intentionally outside `prisma/migrations/` and is not executable by Prisma migration deployment. A later separately authorized slice must translate the approved design into `prisma/schema.prisma` and a reviewed migration before any database change is possible.
 
 OTP/recovery material is designed to be stored as a keyed HMAC rather than plaintext. Opaque bearer material is stored as SHA-256 hashes. TOTP secret storage is reserved as encrypted ciphertext and must not be populated until an application-level encryption/key-management design is approved.
 
@@ -37,11 +39,16 @@ OTP/recovery material is designed to be stored as a keyed HMAC rather than plain
 6. Trusted-device bearer tokens must be random and only their hashes persisted.
 7. Recovery codes and OTP values must never be persisted in plaintext.
 8. E1 sends no email/SMS and performs no external provider calls.
+9. E1 contains no executable Prisma migration and changes no database schema.
+
+## Certification
+
+`.github/workflows/enterprise-auth-e1-certification.yml` executes the MFA core contract tests and fails if an enterprise-auth MFA migration is present under `prisma/migrations/`.
 
 ## Explicitly deferred
 
 - Prisma schema model declarations/client generation
-- applying the migration
+- creation/application of an MFA migration
 - `/auth/login` integration
 - challenge persistence service
 - SMS/email delivery
@@ -53,4 +60,4 @@ OTP/recovery material is designed to be stored as a keyed HMAC rather than plain
 - step-up authentication
 - platform-admin enforcement
 
-These are intentionally separate slices so E1 cannot accidentally lock out existing users.
+These are intentionally separate slices so E1 cannot accidentally lock out existing users or mutate production persistence.
