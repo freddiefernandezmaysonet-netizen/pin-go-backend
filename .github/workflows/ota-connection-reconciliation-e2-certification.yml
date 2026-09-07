@@ -12,6 +12,9 @@ on:
       - "src/distribution/channex-canonical-readiness.reconciler.test.ts"
       - "src/distribution/channex-canonical-readiness.service.ts"
       - "src/distribution/channex-canonical-readiness.service.test.ts"
+      - "src/distribution/ota-connection-center.runtime-composition.ts"
+      - "src/routes/dashboard.distribution-connection-center.route.ts"
+      - "src/routes/dashboard.distribution-connection-center.route.test.ts"
       - "tsconfig.ota-connection-reconciliation-e2.json"
       - ".github/workflows/ota-connection-reconciliation-e2-certification.yml"
 
@@ -44,12 +47,13 @@ jobs:
       - name: Type-check E2 boundary
         run: npx tsc -p tsconfig.ota-connection-reconciliation-e2.json
 
-      - name: Run E2 read-only transport, readiness, and persistence tests
+      - name: Run E2 read-only transport, readiness, persistence, and route tests
         run: >-
           npx tsx --test
           src/distribution/channex-readonly.http-transport.test.ts
           src/distribution/channex-canonical-readiness.reconciler.test.ts
           src/distribution/channex-canonical-readiness.service.test.ts
+          src/routes/dashboard.distribution-connection-center.route.test.ts
 
       - name: Verify certified Channex core remains frozen
         run: npx tsx --test src/contracts/channex-certified-core.freeze.test.ts
