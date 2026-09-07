@@ -1,0 +1,16 @@
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "types": ["node"],
+    "noEmit": true,
+    "module": "ESNext",
+    "moduleResolution": "Bundler",
+    "exactOptionalPropertyTypes": false
+  },
+  "include": [
+    "src/distribution/ota-commercial-lifecycle.policy.ts",
+    "src/distribution/connection-center.read-model.ts",
+    "src/distribution/channex-readonly.http-transport.ts",
+    "src/distribution/channex-canonical-readiness.reconciler.ts"
+  ]
+}

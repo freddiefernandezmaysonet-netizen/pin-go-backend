@@ -1,0 +1,52 @@
+name: OTA Connection Reconciliation E2 Certification
+
+on:
+  push:
+    branches:
+      - agent/ota-connection-reconciliation-e2
+  pull_request:
+    paths:
+      - "src/distribution/channex-readonly.http-transport.ts"
+      - "src/distribution/channex-readonly.http-transport.test.ts"
+      - "src/distribution/channex-canonical-readiness.reconciler.ts"
+      - "src/distribution/channex-canonical-readiness.reconciler.test.ts"
+      - "tsconfig.ota-connection-reconciliation-e2.json"
+      - ".github/workflows/ota-connection-reconciliation-e2-certification.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  canonical-readiness-certification:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      DATABASE_URL: postgresql://test:test@localhost:5432/pingo_ci
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Use Node.js 22
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+
+      - name: Install locked dependencies
+        run: npm ci --silent --no-audit --no-fund
+
+      - name: Validate Prisma schema
+        run: npx prisma validate --schema ./prisma
+
+      - name: Type-check E2 boundary
+        run: npx tsc -p tsconfig.ota-connection-reconciliation-e2.json
+
+      - name: Run E2 read-only transport and canonical readiness tests
+        run: >-
+          npx tsx --test
+          src/distribution/channex-readonly.http-transport.test.ts
+          src/distribution/channex-canonical-readiness.reconciler.test.ts
+
+      - name: Verify certified Channex core remains frozen
+        run: npx tsx --test src/contracts/channex-certified-core.freeze.test.ts
