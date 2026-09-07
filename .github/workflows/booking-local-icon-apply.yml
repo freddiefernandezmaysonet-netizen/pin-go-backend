@@ -1,0 +1,50 @@
+name: Temporary Booking Local Icon Apply
+on:
+  push:
+    branches: [agent/booking-public-web-surface-hardening]
+    paths:
+      - .github/workflows/booking-local-icon-apply.yml
+      - .github/scripts/apply_booking_local_icon.py
+permissions:
+  contents: write
+jobs:
+  apply-and-certify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: agent/booking-public-web-surface-hardening
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+      - name: Apply local icon patch
+        run: python .github/scripts/apply_booking_local_icon.py
+      - name: Verify icon is local and public routes remain
+        run: |
+          grep -F 'const BOOKING_ICON_PNG = Buffer.from(' src/booking-search.staging.server.ts
+          grep -F 'res.type("png").send(BOOKING_ICON_PNG)' src/booking-search.staging.server.ts
+          ! grep -F 'res.redirect(302, "https://pin-ngo.com/favicon.ico")' src/booking-search.staging.server.ts
+          grep -F 'app.get("/robots.txt"' src/booking-search.staging.server.ts
+          grep -F 'app.get("/sitemap.xml"' src/booking-search.staging.server.ts
+      - name: Install locked dependencies
+        run: npm ci --silent --no-audit --no-fund
+      - name: Verify TypeScript syntax/transpilation
+        run: |
+          node - <<'NODE'
+          const fs=require('fs'), ts=require('typescript');
+          const source=fs.readFileSync('src/booking-search.staging.server.ts','utf8');
+          const out=ts.transpileModule(source,{compilerOptions:{target:ts.ScriptTarget.ES2020,module:ts.ModuleKind.CommonJS,esModuleInterop:true},reportDiagnostics:true,fileName:'src/booking-search.staging.server.ts'});
+          const errors=(out.diagnostics||[]).filter(d=>d.category===ts.DiagnosticCategory.Error);
+          if(errors.length){for(const d of errors)console.error(ts.flattenDiagnosticMessageText(d.messageText,'\n'));process.exit(1)}
+          NODE
+      - name: Commit local icon handling only
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add src/booking-search.staging.server.ts
+          test -n "$(git status --porcelain src/booking-search.staging.server.ts)"
+          git commit -m "Serve Booking Search browser icon locally"
+          git push origin HEAD:agent/booking-public-web-surface-hardening
