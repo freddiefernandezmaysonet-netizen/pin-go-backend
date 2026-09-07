@@ -1,0 +1,65 @@
+name: Temporary Booking Search Checkout Calendar UX Apply
+
+on:
+  push:
+    branches:
+      - agent/booking-search-checkout-calendar-ux
+    paths:
+      - ".github/workflows/booking-search-checkout-calendar-ux-apply.yml"
+      - ".github/scripts/apply_booking_search_checkout_calendar_ux.py"
+
+permissions:
+  contents: write
+
+jobs:
+  apply-and-certify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Checkout branch
+        uses: actions/checkout@v4
+        with:
+          ref: agent/booking-search-checkout-calendar-ux
+          fetch-depth: 0
+
+      - name: Use Node.js 22
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+
+      - name: Apply anchored calendar patch
+        run: python .github/scripts/apply_booking_search_checkout_calendar_ux.py
+
+      - name: Verify calendar UX markers
+        run: |
+          grep -F "const nextCheckout=n.toISOString().slice(0,10)" src/booking-search.preview.html
+          grep -F "if(!co.value||co.value<co.min)co.value=nextCheckout" src/booking-search.preview.html
+
+      - name: Check inline JavaScript syntax
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          import re
+          html = Path('src/booking-search.preview.html').read_text()
+          scripts = re.findall(r'<script>(.*?)</script>', html, re.S)
+          if not scripts:
+              raise SystemExit('No inline script found')
+          Path('/tmp/booking-search-inline.js').write_text('\n'.join(scripts))
+          PY
+          node --check /tmp/booking-search-inline.js
+
+      - name: Install locked dependencies
+        run: npm ci --silent --no-audit --no-fund
+
+      - name: TypeScript build
+        run: npm run build
+
+      - name: Commit only Booking calendar UX change
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add src/booking-search.preview.html
+          test -n "$(git status --porcelain src/booking-search.preview.html)"
+          git commit -m "Keep checkout calendar aligned with check-in"
+          git push origin HEAD:agent/booking-search-checkout-calendar-ux
