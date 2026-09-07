@@ -76,7 +76,7 @@ import { adminBrandingRouter } from "./routes/admin.branding.routes";
 import { organizationBrandingRouter } from "./routes/organization.branding.routes";
 import { signupSuccessRouter } from "./routes/public.signup.success.routes";
 import { publicOrganizationInvitationRouter } from "./routes/public.organization-invitation.routes";
-import { publicBrandContextRouter } from "./routes/public-brand-context.routes";
+import { publicBrandContextRouter } from "./routes/public.brand-context.routes";
 import { cleaningConfirmRouter } from "./routes/cleaning-confirm.routes";
 import { teamRouter } from "./routes/team.routes";
 import publicBookingRouter from "./routes/public-booking.routes";
