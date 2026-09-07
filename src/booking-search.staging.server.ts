@@ -56,6 +56,17 @@ app.get("/", (_q, res) => {
   res.type("html").send(html);
 });
 
+app.get("/robots.txt", (_q, res) => {
+  res.type("text/plain").send("User-agent: *\nAllow: /\nDisallow: /api/\nSitemap: https://book.pin-ngo.com/sitemap.xml\n");
+});
+app.get("/sitemap.xml", (_q, res) => {
+  res.type("application/xml").send('<?xml version="1.0" encoding="UTF-8"?>\n<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9"><url><loc>https://book.pin-ngo.com/</loc></url></urlset>');
+});
+app.get(["/favicon.ico", "/apple-touch-icon.png", "/apple-touch-icon-precomposed.png"], (_q, res) => {
+  res.set("Cache-Control", "public, max-age=86400, immutable");
+  res.type("image/png").sendFile(path.resolve(process.cwd(), "src/pinngo-favicon.png"));
+});
+
 app.get("/health", (_q, r) => r.json({ ok: true, service: "pin-go-booking-search-staging", revision: STAGING_REVISION }));
 app.get("/ready", async (_q, r) => {
   try {
