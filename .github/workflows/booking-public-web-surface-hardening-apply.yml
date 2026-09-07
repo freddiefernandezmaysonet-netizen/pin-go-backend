@@ -1,0 +1,45 @@
+name: Temporary Booking Public Web Surface Hardening Apply
+
+on:
+  push:
+    branches:
+      - agent/booking-public-web-surface-hardening
+    paths:
+      - ".github/workflows/booking-public-web-surface-hardening-apply.yml"
+      - ".github/scripts/apply_booking_public_web_surface_hardening.py"
+
+permissions:
+  contents: write
+
+jobs:
+  apply-and-certify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: agent/booking-public-web-surface-hardening
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+      - name: Apply anchored hardening patch
+        run: python .github/scripts/apply_booking_public_web_surface_hardening.py
+      - name: Verify public surface routes
+        run: |
+          grep -F 'app.get("/robots.txt"' src/booking-search.staging.server.ts
+          grep -F 'app.get("/sitemap.xml"' src/booking-search.staging.server.ts
+          grep -F '"/favicon.ico", "/apple-touch-icon.png", "/apple-touch-icon-precomposed.png"' src/booking-search.staging.server.ts
+      - name: Install locked dependencies
+        run: npm ci --silent --no-audit --no-fund
+      - name: Type-check server entrypoint
+        run: npx tsc --noEmit --skipLibCheck src/booking-search.staging.server.ts --esModuleInterop --module commonjs --target es2020
+      - name: Commit only server hardening
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add src/booking-search.staging.server.ts
+          test -n "$(git status --porcelain src/booking-search.staging.server.ts)"
+          git commit -m "Harden Booking Search public web surface"
+          git push origin HEAD:agent/booking-public-web-surface-hardening
