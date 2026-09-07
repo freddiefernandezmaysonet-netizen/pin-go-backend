@@ -1,10 +1,9 @@
-name: Temporary Booking Local Icon Apply
+name: Temporary Booking Official Icon Apply
 on:
   push:
     branches: [agent/booking-public-web-surface-hardening]
     paths:
       - .github/workflows/booking-local-icon-apply.yml
-      - .github/scripts/apply_booking_local_icon.py
 permissions:
   contents: write
 jobs:
@@ -16,19 +15,48 @@ jobs:
         with:
           ref: agent/booking-public-web-surface-hardening
           fetch-depth: 0
+      - name: Fetch exact official Pin&Go icon
+        run: |
+          curl --fail --location --silent --show-error \
+            https://raw.githubusercontent.com/freddiefernandezmaysonet-netizen/pin-go-dashboard/300daaaf95f0e24911f369c70076bbcdf44cf727/public/pinngo-favicon.png \
+            --output src/pinngo-favicon.png
+          test "$(wc -c < src/pinngo-favicon.png | tr -d ' ')" = "1034397"
+          test "$(git hash-object src/pinngo-favicon.png)" = "1089fd92a61dce544a9173babbec2711c5130afa"
+      - name: Replace embedded icon with local official asset
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          import re
+
+          path = Path('src/booking-search.staging.server.ts')
+          text = path.read_text()
+          pattern = re.compile(
+              r'const BOOKING_ICON_PNG = Buffer\.from\(".*?", "base64"\);\n'
+              r'app\.get\(\["/favicon\.ico", "/apple-touch-icon\.png", "/apple-touch-icon-precomposed\.png"\], \(_q, res\) => \{\n'
+              r'  res\.type\("png"\)\.send\(BOOKING_ICON_PNG\);\n'
+              r'\}\);',
+              re.S,
+          )
+          replacement = '''app.get(["/favicon.ico", "/apple-touch-icon.png", "/apple-touch-icon-precomposed.png"], (_q, res) => {
+            res.type("image/png").sendFile(path.resolve(process.cwd(), "src/pinngo-favicon.png"));
+          });'''
+          updated, count = pattern.subn(replacement, text, count=1)
+          if count != 1:
+              raise SystemExit(f'Expected exactly one embedded icon handler, replaced {count}')
+          path.write_text(updated)
+          PY
+      - name: Verify isolated public-surface result
+        run: |
+          test "$(git hash-object src/pinngo-favicon.png)" = "1089fd92a61dce544a9173babbec2711c5130afa"
+          grep -F 'res.type("image/png").sendFile(path.resolve(process.cwd(), "src/pinngo-favicon.png"))' src/booking-search.staging.server.ts
+          ! grep -F 'BOOKING_ICON_PNG' src/booking-search.staging.server.ts
+          ! grep -F 'res.redirect(302, "https://pin-ngo.com/favicon.ico")' src/booking-search.staging.server.ts
+          grep -F 'app.get("/robots.txt"' src/booking-search.staging.server.ts
+          grep -F 'app.get("/sitemap.xml"' src/booking-search.staging.server.ts
       - uses: actions/setup-node@v4
         with:
           node-version: '22'
           cache: npm
-      - name: Apply local icon patch
-        run: python .github/scripts/apply_booking_local_icon.py
-      - name: Verify icon is local and public routes remain
-        run: |
-          grep -F 'const BOOKING_ICON_PNG = Buffer.from(' src/booking-search.staging.server.ts
-          grep -F 'res.type("png").send(BOOKING_ICON_PNG)' src/booking-search.staging.server.ts
-          ! grep -F 'res.redirect(302, "https://pin-ngo.com/favicon.ico")' src/booking-search.staging.server.ts
-          grep -F 'app.get("/robots.txt"' src/booking-search.staging.server.ts
-          grep -F 'app.get("/sitemap.xml"' src/booking-search.staging.server.ts
       - name: Install locked dependencies
         run: npm ci --silent --no-audit --no-fund
       - name: Verify TypeScript syntax/transpilation
@@ -40,11 +68,11 @@ jobs:
           const errors=(out.diagnostics||[]).filter(d=>d.category===ts.DiagnosticCategory.Error);
           if(errors.length){for(const d of errors)console.error(ts.flattenDiagnosticMessageText(d.messageText,'\n'));process.exit(1)}
           NODE
-      - name: Commit local icon handling only
+      - name: Commit exact official icon and handler only
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add src/booking-search.staging.server.ts
-          test -n "$(git status --porcelain src/booking-search.staging.server.ts)"
-          git commit -m "Serve Booking Search browser icon locally"
+          git add src/booking-search.staging.server.ts src/pinngo-favicon.png
+          test -n "$(git status --porcelain src/booking-search.staging.server.ts src/pinngo-favicon.png)"
+          git commit -m "Serve official Pin&Go Booking icon locally"
           git push origin HEAD:agent/booking-public-web-surface-hardening
