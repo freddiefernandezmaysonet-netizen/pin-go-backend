@@ -22,28 +22,22 @@ jobs:
             --output src/pinngo-favicon.png
           test "$(wc -c < src/pinngo-favicon.png | tr -d ' ')" = "1034397"
           test "$(git hash-object src/pinngo-favicon.png)" = "1089fd92a61dce544a9173babbec2711c5130afa"
-      - name: Replace embedded icon with local official asset
+      - name: Replace current icon redirect with local official asset
         run: |
           python - <<'PY'
           from pathlib import Path
-          import re
 
           path = Path('src/booking-search.staging.server.ts')
           text = path.read_text()
-          pattern = re.compile(
-              r'const BOOKING_ICON_PNG = Buffer\.from\(".*?", "base64"\);\n'
-              r'app\.get\(\["/favicon\.ico", "/apple-touch-icon\.png", "/apple-touch-icon-precomposed\.png"\], \(_q, res\) => \{\n'
-              r'  res\.type\("png"\)\.send\(BOOKING_ICON_PNG\);\n'
-              r'\}\);',
-              re.S,
-          )
-          replacement = '''app.get(["/favicon.ico", "/apple-touch-icon.png", "/apple-touch-icon-precomposed.png"], (_q, res) => {
+          old = '''app.get(["/favicon.ico", "/apple-touch-icon.png", "/apple-touch-icon-precomposed.png"], (_q, res) => {
+            res.redirect(302, "https://pin-ngo.com/favicon.ico");
+          });'''
+          new = '''app.get(["/favicon.ico", "/apple-touch-icon.png", "/apple-touch-icon-precomposed.png"], (_q, res) => {
             res.type("image/png").sendFile(path.resolve(process.cwd(), "src/pinngo-favicon.png"));
           });'''
-          updated, count = pattern.subn(replacement, text, count=1)
-          if count != 1:
-              raise SystemExit(f'Expected exactly one embedded icon handler, replaced {count}')
-          path.write_text(updated)
+          if text.count(old) != 1:
+              raise SystemExit(f'Expected exactly one current icon redirect, found {text.count(old)}')
+          path.write_text(text.replace(old, new, 1))
           PY
       - name: Verify isolated public-surface result
         run: |
