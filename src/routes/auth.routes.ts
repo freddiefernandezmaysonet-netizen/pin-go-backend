@@ -10,6 +10,7 @@ import {
   hashPassword,
 } from "../lib/auth";
 import { validatePasswordPolicy } from "../lib/passwordPolicy";
+import { evaluateE3LoginRuntime } from "../auth/mfa-runtime-policy";
 import {
   forgotPasswordHandler,
   verifyForgotPasswordCodeHandler,
@@ -50,18 +51,35 @@ authRouter.post("/auth/login", async (req, res) => {
       },
     });
 
-    if (!user) {
-      return res.status(401).json({ error: "INVALID_CREDENTIALS" });
-    }
-
-    if (!user.isActive) {
-      return res.status(403).json({ error: "USER_DISABLED" });
-    }
+    if (!user) return res.status(401).json({ error: "INVALID_CREDENTIALS" });
+    if (!user.isActive) return res.status(403).json({ error: "USER_DISABLED" });
 
     const ok = await comparePassword(password, user.passwordHash);
+    if (!ok) return res.status(401).json({ error: "INVALID_CREDENTIALS" });
 
-    if (!ok) {
-      return res.status(401).json({ error: "INVALID_CREDENTIALS" });
+    // E3 safety boundary: OFF performs no MFA persistence read. SHADOW observes only.
+    // ENFORCE is deliberately blocked by evaluateE3LoginRuntime and cannot deny login.
+    const mfaRuntime = await evaluateE3LoginRuntime({
+      configuredMode: process.env.PINGO_MFA_MODE,
+      loadVerifiedFactorCount: async () => {
+        const rows = await prisma.$queryRaw<Array<{ count: bigint }>>`
+          SELECT COUNT(*)::bigint AS count
+          FROM "AuthFactor"
+          WHERE "userId" = ${user.id}
+            AND "status" = 'VERIFIED'::"AuthFactorStatus"
+            AND "type" IN ('EMAIL'::"AuthFactorType", 'SMS'::"AuthFactorType")
+        `;
+        return Number(rows[0]?.count ?? 0);
+      },
+    });
+
+    if (mfaRuntime.telemetry !== "MFA_OFF") {
+      console.info("[auth/login] E3_MFA_RUNTIME", {
+        userId: user.id,
+        organizationId: user.organizationId,
+        telemetry: mfaRuntime.telemetry,
+        verifiedFactorCount: mfaRuntime.verifiedFactorCount,
+      });
     }
 
     const token = signAuthToken({
@@ -72,18 +90,9 @@ authRouter.post("/auth/login", async (req, res) => {
       tokenVersion: user.tokenVersion,
     });
 
-    await prisma.dashboardUser.update({
-      where: { id: user.id },
-      data: { lastLoginAt: new Date() },
-    });
+    await prisma.dashboardUser.update({ where: { id: user.id }, data: { lastLoginAt: new Date() } });
 
-    // ✅ Cookie PRODUCTION READY
-    res.setHeader(
-      "Set-Cookie",
-      buildAuthCookie(token, {
-        requestOrigin: req.get("origin"),
-      })
-    );
+    res.setHeader("Set-Cookie", buildAuthCookie(token, { requestOrigin: req.get("origin") }));
 
     return res.json({
       ok: true,
@@ -106,13 +115,7 @@ authRouter.post("/auth/login", async (req, res) => {
 // LOGOUT
 // =======================
 authRouter.post("/auth/logout", async (req, res) => {
-  // ✅ Limpieza correcta de cookie
-  res.setHeader(
-    "Set-Cookie",
-    buildClearAuthCookie({
-      requestOrigin: req.get("origin"),
-    })
-  );
+  res.setHeader("Set-Cookie", buildClearAuthCookie({ requestOrigin: req.get("origin") }));
   return res.json({ ok: true });
 });
 
@@ -122,22 +125,13 @@ authRouter.post("/auth/logout", async (req, res) => {
 authRouter.get("/auth/me", async (req, res) => {
   try {
     const token = extractTokenFromRequest(req);
-
-    if (!token) {
-      return res.status(401).json({ error: "UNAUTHENTICATED" });
-    }
+    if (!token) return res.status(401).json({ error: "UNAUTHENTICATED" });
 
     let payload: any;
-
     try {
       payload = verifyAuthToken(token);
     } catch {
-      res.setHeader(
-        "Set-Cookie",
-        buildClearAuthCookie({
-          requestOrigin: req.get("origin"),
-        })
-      );
+      res.setHeader("Set-Cookie", buildClearAuthCookie({ requestOrigin: req.get("origin") }));
       return res.status(401).json({ error: "INVALID_TOKEN" });
     }
 
@@ -150,36 +144,17 @@ authRouter.get("/auth/me", async (req, res) => {
         role: true,
         isActive: true,
         tokenVersion: true,
-        organization: {
-          select: {
-            name: true,
-            slug: true,
-          },
-        },
+        organization: { select: { name: true, slug: true } },
       },
     });
 
     if (!user) {
-      res.setHeader(
-        "Set-Cookie",
-        buildClearAuthCookie({
-          requestOrigin: req.get("origin"),
-        })
-      );
+      res.setHeader("Set-Cookie", buildClearAuthCookie({ requestOrigin: req.get("origin") }));
       return res.status(401).json({ error: "USER_NOT_FOUND" });
     }
-
-    if (!user.isActive) {
-      return res.status(403).json({ error: "USER_DISABLED" });
-    }
-
+    if (!user.isActive) return res.status(403).json({ error: "USER_DISABLED" });
     if (user.tokenVersion !== payload.tokenVersion) {
-      res.setHeader(
-        "Set-Cookie",
-        buildClearAuthCookie({
-          requestOrigin: req.get("origin"),
-        })
-      );
+      res.setHeader("Set-Cookie", buildClearAuthCookie({ requestOrigin: req.get("origin") }));
       return res.status(401).json({ error: "SESSION_EXPIRED" });
     }
 
@@ -204,10 +179,7 @@ authRouter.get("/auth/me", async (req, res) => {
 // =======================
 authRouter.post("/auth/forgot-password", forgotPasswordHandler);
 authRouter.post("/auth/reset-password", resetPasswordHandler);
-authRouter.post(
-  "/auth/forgot-password/verify-code",
-  verifyForgotPasswordCodeHandler
-);
+authRouter.post("/auth/forgot-password/verify-code", verifyForgotPasswordCodeHandler);
 
 // =======================
 // REGISTER ORG
@@ -218,78 +190,34 @@ authRouter.post("/api/auth/register-organization", async (req, res) => {
     const email = String(req.body?.email ?? "").trim().toLowerCase();
     const password = String(req.body?.password ?? "");
     const fullName = String(req.body?.name ?? "").trim();
-
-    const role =
-      String(req.body?.role ?? "ADMIN").toUpperCase() === "MEMBER"
-        ? "MEMBER"
-        : "ADMIN";
+    const role = String(req.body?.role ?? "ADMIN").toUpperCase() === "MEMBER" ? "MEMBER" : "ADMIN";
 
     if (!organizationName || !email || !password || !fullName) {
-      return res.status(400).json({
-        ok: false,
-        error: "ORGANIZATION_NAME_EMAIL_PASSWORD_NAME_REQUIRED",
-      });
+      return res.status(400).json({ ok: false, error: "ORGANIZATION_NAME_EMAIL_PASSWORD_NAME_REQUIRED" });
     }
 
-    const passwordPolicy = validatePasswordPolicy(password, {
-      email,
-      fullName,
-      organizationName,
-    });
-
+    const passwordPolicy = validatePasswordPolicy(password, { email, fullName, organizationName });
     if (!passwordPolicy.ok) {
-      return res.status(400).json({
-        ok: false,
-        error: "WEAK_PASSWORD",
-        details: passwordPolicy.errors,
-      });
+      return res.status(400).json({ ok: false, error: "WEAK_PASSWORD", details: passwordPolicy.errors });
     }
 
-    const existingUser = await prisma.dashboardUser.findUnique({
-      where: { email },
-      select: { id: true },
-    });
-
-    if (existingUser) {
-      return res.status(409).json({
-        ok: false,
-        error: "EMAIL_ALREADY_REGISTERED",
-      });
-    }
+    const existingUser = await prisma.dashboardUser.findUnique({ where: { email }, select: { id: true } });
+    if (existingUser) return res.status(409).json({ ok: false, error: "EMAIL_ALREADY_REGISTERED" });
 
     const passwordHash = await hashPassword(password);
-
     const created = await prisma.organization.create({
       data: {
         name: organizationName,
-        dashboardUsers: {
-          create: {
-            email,
-            passwordHash,
-            fullName,
-            role,
-            isActive: true,
-            tokenVersion: 1,
-          },
-        },
+        dashboardUsers: { create: { email, passwordHash, fullName, role, isActive: true, tokenVersion: 1 } },
       },
       include: {
         dashboardUsers: {
-          select: {
-            id: true,
-            organizationId: true,
-            email: true,
-            fullName: true,
-            role: true,
-            isActive: true,
-            tokenVersion: true,
-          },
+          select: { id: true, organizationId: true, email: true, fullName: true, role: true, isActive: true, tokenVersion: true },
         },
       },
     });
 
     const createdUser = created.dashboardUsers[0];
-
     const token = signAuthToken({
       sub: createdUser.id,
       orgId: createdUser.organizationId,
@@ -298,20 +226,10 @@ authRouter.post("/api/auth/register-organization", async (req, res) => {
       tokenVersion: createdUser.tokenVersion,
     });
 
-    // ✅ Cookie consistente con login
-    res.setHeader(
-      "Set-Cookie",
-      buildAuthCookie(token, {
-        requestOrigin: req.get("origin"),
-      })
-    );
-
+    res.setHeader("Set-Cookie", buildAuthCookie(token, { requestOrigin: req.get("origin") }));
     return res.status(201).json({
       ok: true,
-      organization: {
-        id: created.id,
-        name: created.name,
-      },
+      organization: { id: created.id, name: created.name },
       user: {
         id: createdUser.id,
         email: createdUser.email,
@@ -323,10 +241,6 @@ authRouter.post("/api/auth/register-organization", async (req, res) => {
     });
   } catch (e: any) {
     console.error("[auth/register-organization] ERROR", e);
-
-    return res.status(500).json({
-      ok: false,
-      error: e?.message ?? "REGISTER_ORGANIZATION_FAILED",
-    });
+    return res.status(500).json({ ok: false, error: e?.message ?? "REGISTER_ORGANIZATION_FAILED" });
   }
 });
