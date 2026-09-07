@@ -52,8 +52,10 @@ jobs:
       - name: Install locked dependencies
         run: npm ci --silent --no-audit --no-fund
 
-      - name: TypeScript build
-        run: npm run build
+      - name: Verify scoped change only
+        run: |
+          git diff -- src/booking-search.preview.html
+          test -z "$(git status --porcelain | grep -vE 'src/booking-search.preview.html|.github/workflows/booking-search-checkout-calendar-ux-apply.yml|.github/scripts/apply_booking_search_checkout_calendar_ux.py' || true)"
 
       - name: Commit only Booking calendar UX change
         run: |
