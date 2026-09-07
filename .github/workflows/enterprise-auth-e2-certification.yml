@@ -1,0 +1,67 @@
+name: Enterprise Authentication E2 Certification
+
+on:
+  pull_request:
+    branches:
+      - main
+    paths:
+      - ".github/workflows/enterprise-auth-e2-certification.yml"
+      - "src/auth/mfa-core.ts"
+      - "src/auth/mfa-otp.ts"
+      - "src/auth/mfa-otp.test.ts"
+      - "src/auth/mfa-otp-delivery.ts"
+      - "src/auth/mfa-otp-delivery.test.ts"
+      - "prisma/migrations/20260907141000_add_enterprise_auth_e2_email_sms_otp/**"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  DATABASE_URL: postgresql://postgres:postgres@127.0.0.1:5432/pingo_auth_e2_ci
+
+jobs:
+  certify:
+    name: Email SMS OTP persistence and no-send boundary
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: pingo_auth_e2_ci
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d pingo_auth_e2_ci"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Use Node.js 22
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+      - name: Install locked dependencies
+        run: npm ci --silent --no-audit --no-fund
+      - name: Apply complete migration history to empty PostgreSQL
+        run: npx prisma migrate deploy --schema prisma/schema.prisma
+      - name: Certify E2 OTP policy
+        run: npx tsx --test src/auth/mfa-otp.test.ts src/auth/mfa-otp-delivery.test.ts
+      - name: Certify login and external-delivery boundary
+        shell: bash
+        run: |
+          set -euo pipefail
+          git fetch --no-tags origin main:refs/remotes/origin/main
+          git diff origin/main...HEAD -- src/routes/auth.routes.ts src/controllers/auth.controller.ts src/server.ts | tee /tmp/auth-runtime.diff
+          test ! -s /tmp/auth-runtime.diff
+          ! grep -R "sendGuestSms\|sendResetPasswordEmail\|send.*Email" src/auth/mfa-otp-delivery.ts
