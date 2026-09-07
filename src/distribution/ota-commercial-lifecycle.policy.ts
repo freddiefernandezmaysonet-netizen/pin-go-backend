@@ -140,6 +140,63 @@ export function assertOtaChannelTransition(args: {
   }
 }
 
+const ACTIVATION_PATH: readonly OtaChannelConnectionStatus[] = [
+  "NOT_CONNECTED",
+  "AUTHORIZATION_REQUIRED",
+  "MAPPING_REQUIRED",
+  "READINESS_CHECK",
+  "ACTIVATION_PENDING",
+  "ACTIVE",
+];
+
+export function planCanonicalOtaActivation(args: {
+  current: OtaChannelConnectionStatus;
+  evidence: OtaActivationEvidence;
+}): {
+  next: OtaChannelConnectionStatus;
+  path: OtaChannelConnectionStatus[];
+  blockers: OtaActivationBlocker[];
+} {
+  const readiness = assessOtaActivationReadiness(args.evidence);
+  const currentIndex = ACTIVATION_PATH.indexOf(args.current);
+  if (currentIndex < 0) {
+    return { next: args.current, path: [], blockers: readiness.blockers };
+  }
+
+  let targetIndex = 1;
+  if (args.evidence.authorizationReadiness === "READY") targetIndex = 2;
+  if (
+    args.evidence.authorizationReadiness === "READY" &&
+    args.evidence.mappingReadiness === "READY"
+  ) {
+    targetIndex = 3;
+  }
+  if (
+    args.evidence.authorizationReadiness === "READY" &&
+    args.evidence.mappingReadiness === "READY" &&
+    args.evidence.distributionReadiness === "READY"
+  ) {
+    targetIndex = 4;
+  }
+  if (readiness.canActivate) targetIndex = 5;
+
+  if (targetIndex <= currentIndex) {
+    return { next: args.current, path: [], blockers: readiness.blockers };
+  }
+
+  const path = ACTIVATION_PATH.slice(currentIndex + 1, targetIndex + 1);
+  let current = args.current;
+  for (const next of path) {
+    assertOtaChannelTransition({
+      current,
+      next,
+      ...(next === "ACTIVE" ? { activationEvidence: args.evidence } : {}),
+    });
+    current = next;
+  }
+  return { next: current, path: [...path], blockers: readiness.blockers };
+}
+
 export function assertDistributionTenantScope(args: {
   organizationId: string;
   propertyOrganizationId: string;

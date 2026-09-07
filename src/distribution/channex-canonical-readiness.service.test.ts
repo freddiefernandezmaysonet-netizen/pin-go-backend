@@ -14,6 +14,7 @@ function fixture(options: { lifecycle?: string; tenantMismatch?: boolean } = {})
       async updateMany(args: any) { updates.push(args); return { count: 1 }; },
     },
     apmsAuditEntry: {
+      async findUnique() { return null; },
       async create(args: any) { audits.push(args); return { id: "audit" }; },
     },
   };
@@ -27,6 +28,7 @@ function fixture(options: { lifecycle?: string; tenantMismatch?: boolean } = {})
           externalPropertyId: "ext-prop",
           externalPrimaryRoomTypeId: "ext-room",
           externalPrimaryRatePlanId: "ext-rate",
+          provisioningStatus: "READY" as const,
         };
       },
     },
@@ -40,6 +42,13 @@ function fixture(options: { lifecycle?: string; tenantMismatch?: boolean } = {})
           provider: "AIRBNB" as const,
           externalConnectionId: "ext-channel",
           externalChannelCode: "ABB",
+          status: "NOT_CONNECTED" as const,
+          paymentReadiness: "NOT_STARTED" as const,
+          taxReadiness: "NOT_STARTED" as const,
+          contentReadiness: "NOT_STARTED" as const,
+          activationRequestedAt: null,
+          activatedAt: null,
+          lastFullSyncConfirmedAt: null,
         };
       },
     },
@@ -73,7 +82,16 @@ test("persists READY and deterministic audit atomically after canonical read-onl
   assert.equal(result.mappingReadiness, "READY");
   assert.equal(result.distributionReadiness, "READY");
   assert.equal(f.updates[0].data.distributionReadiness, "READY");
+  assert.equal(f.updates[0].data.status, "ACTIVATION_PENDING");
+  assert.equal(f.updates[0].data.activatedAt, undefined);
+  assert.equal(f.updates[0].where.status, "NOT_CONNECTED");
+  assert.equal(f.updates[0].where.externalConnectionId, "ext-channel");
+  assert.equal(f.updates[0].where.externalChannelCode, "ABB");
   assert.equal(f.audits.length, 1);
+  assert.equal(
+    f.audits[0].data.metadata.transitionPath.at(-1),
+    "ACTIVATION_PENDING"
+  );
   assert.match(f.audits[0].data.decisionId, /^ota-canonical-readiness:[a-f0-9]{64}$/);
 });
 
@@ -91,6 +109,35 @@ test("same request key produces the same audit decision id", async () => {
     });
   }
   assert.equal(first.audits[0].data.decisionId, second.audits[0].data.decisionId);
+});
+
+test("a retried request key is deduped before state mutation", async () => {
+  const f = fixture();
+  f.client.$transaction = async (work: any) =>
+    work({
+      otaChannelConnection: {
+        async updateMany() {
+          assert.fail("deduped reconciliation must not update state");
+        },
+      },
+      apmsAuditEntry: {
+        async findUnique() { return { id: "existing-audit" }; },
+        async create() {
+          assert.fail("deduped reconciliation must not create an audit");
+        },
+      },
+    });
+  const result = await reconcileCanonicalOtaReadiness({
+    client: f.client,
+    transport: f.transport,
+    organizationId: "org-1",
+    propertyId: "prop-1",
+    provider: "AIRBNB",
+    requestKey: "reconcile-retry-001",
+  });
+  assert.equal(result.distributionReadiness, "READY");
+  assert.equal(f.updates.length, 0);
+  assert.equal(f.audits.length, 0);
 });
 
 test("missing request key fails before provider reads or state mutation", async () => {

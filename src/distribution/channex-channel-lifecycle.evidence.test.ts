@@ -3,9 +3,26 @@ import test from "node:test";
 
 import {
   ChannexChannelEvidenceError,
+  CHANNEX_CHANNEL_LIFECYCLE_EVENT_MASK,
+  CHANNEX_CHANNEL_LIFECYCLE_EVENTS,
   applyChannexChannelLifecycleEvidence,
   normalizeChannexChannelLifecycleEvent,
 } from "./channex-channel-lifecycle.evidence.js";
+
+test("declares the complete Channex channel lifecycle event mask", () => {
+  assert.deepEqual(CHANNEX_CHANNEL_LIFECYCLE_EVENTS, [
+    "new_channel",
+    "updated_channel",
+    "activate_channel",
+    "deactivate_channel",
+    "disconnect_channel",
+    "disconnect_listing",
+  ]);
+  assert.equal(
+    CHANNEX_CHANNEL_LIFECYCLE_EVENT_MASK,
+    "new_channel;updated_channel;activate_channel;deactivate_channel;disconnect_channel;disconnect_listing"
+  );
+});
 
 function payload(event: string, overrides: Record<string, unknown> = {}) {
   return {
@@ -78,6 +95,43 @@ test("normalizes documented Airbnb channel lifecycle envelope", () => {
   assert.equal(normalized?.externalChannelCode, "ABB");
 });
 
+test("normalizes the official activate payload contract", () => {
+  const normalized = normalizeChannexChannelLifecycleEvent({
+    timestamp: "2026-09-07T18:00:00.000Z",
+    user_id: "user-ext",
+    payload: {
+      title: "Airbnb certification channel",
+      channel_id: "channel-ext-2",
+      ota_name: "Airbnb",
+    },
+    property_id: "property-ext-1",
+    event: "activate_channel",
+  });
+  assert.equal(normalized?.eventType, "activate_channel");
+  assert.equal(normalized?.provider, "AIRBNB");
+  assert.equal(normalized?.externalPropertyId, "property-ext-1");
+  assert.equal(normalized?.externalConnectionId, "channel-ext-2");
+  assert.equal(normalized?.externalChannelCode, "ABB");
+  assert.equal(normalized?.occurredAt?.toISOString(), "2026-09-07T18:00:00.000Z");
+});
+
+test("normalizes the official disconnect_channel event", () => {
+  const normalized = normalizeChannexChannelLifecycleEvent({
+    event: "disconnect_channel",
+    property_id: "property-ext-1",
+    payload: { channel_id: "channel-ext-1", ota_name: "Airbnb" },
+  });
+  assert.equal(normalized?.eventType, "disconnect_channel");
+  assert.equal(normalized?.provider, "AIRBNB");
+});
+
+test("normalizes legacy disconnected_channel evidence to the canonical event", () => {
+  const normalized = normalizeChannexChannelLifecycleEvent(
+    payload("disconnected_channel")
+  );
+  assert.equal(normalized?.eventType, "disconnect_channel");
+});
+
 test("unknown event is ignored rather than promoted", async () => {
   const { value, state } = client();
   const result = await applyChannexChannelLifecycleEvidence({
@@ -135,9 +189,9 @@ test("disconnect_listing blocks mapping and distribution", async () => {
   assert.equal(state.updates[0].data.distributionReadiness, "BLOCKED");
 });
 
-test("disconnected_channel records a definitive disconnected fail-closed state", async () => {
+test("disconnect_channel records a definitive disconnected fail-closed state", async () => {
   const { value, state } = client();
-  await applyChannexChannelLifecycleEvidence({ client: value, payload: payload("disconnected_channel") });
+  await applyChannexChannelLifecycleEvidence({ client: value, payload: payload("disconnect_channel") });
   const patch = state.updates[0].data;
   assert.equal(patch.status, "DISCONNECTED");
   assert.equal(patch.authorizationReadiness, "REQUIRED");

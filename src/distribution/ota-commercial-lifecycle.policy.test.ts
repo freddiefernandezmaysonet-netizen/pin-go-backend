@@ -6,6 +6,7 @@ import {
   assertOtaChannelTransition,
   assessOtaActivationReadiness,
   derivePropertyCommercialDistributionStatus,
+  planCanonicalOtaActivation,
   type OtaActivationEvidence,
 } from "./ota-commercial-lifecycle.policy";
 
@@ -80,6 +81,35 @@ test("activation pending cannot become active without confirmed evidence", () =>
       activationEvidence: readyEvidence(),
     })
   );
+});
+
+test("canonical plan advances through valid states but stops before ACTIVE", () => {
+  const result = planCanonicalOtaActivation({
+    current: "NOT_CONNECTED",
+    evidence: readyEvidence({
+      paymentReadiness: "NOT_STARTED",
+      lastFullSyncConfirmedAt: null,
+    }),
+  });
+  assert.equal(result.next, "ACTIVATION_PENDING");
+  assert.deepEqual(result.path, [
+    "AUTHORIZATION_REQUIRED",
+    "MAPPING_REQUIRED",
+    "READINESS_CHECK",
+    "ACTIVATION_PENDING",
+  ]);
+  assert.ok(result.blockers.includes("PAYMENT_NOT_READY"));
+  assert.ok(result.blockers.includes("FULL_SYNC_NOT_CONFIRMED"));
+});
+
+test("canonical plan reaches ACTIVE only with complete evidence", () => {
+  const result = planCanonicalOtaActivation({
+    current: "NOT_CONNECTED",
+    evidence: readyEvidence(),
+  });
+  assert.equal(result.next, "ACTIVE");
+  assert.equal(result.path.at(-1), "ACTIVE");
+  assert.deepEqual(result.blockers, []);
 });
 
 test("tenant scope rejects any organization mismatch", () => {

@@ -12,7 +12,7 @@ export type CanonicalOtaReadinessEvidence = {
   propertyPayload: unknown;
   roomTypesPayload: unknown;
   ratePlansPayload: unknown;
-  latestLifecycleEvent?: "new_channel" | "updated_channel" | "activate_channel" | "deactivate_channel" | "disconnected_channel" | "disconnect_listing" | null;
+  latestLifecycleEvent?: "new_channel" | "updated_channel" | "activate_channel" | "deactivate_channel" | "disconnect_channel" | "disconnected_channel" | "disconnect_listing" | null;
 };
 
 export type CanonicalOtaReadinessResult = {
@@ -74,7 +74,9 @@ export function deriveCanonicalOtaReadiness(
       String(evidence.externalChannelCode ?? "").trim().toUpperCase() === expectedCode
   );
   const connectedCount = channelCount(evidence.propertyPayload);
-  const lifecycle = evidence.latestLifecycleEvent ?? null;
+  const lifecycle = evidence.latestLifecycleEvent === "disconnected_channel"
+    ? "disconnect_channel"
+    : evidence.latestLifecycleEvent ?? null;
 
   if (!propertyMatches) reasons.push("PROPERTY_NOT_CANONICALLY_VERIFIED");
   if (!roomMatches) reasons.push("ROOM_TYPE_NOT_CANONICALLY_VERIFIED");
@@ -83,7 +85,7 @@ export function deriveCanonicalOtaReadiness(
   if (connectedCount === null) reasons.push("CONNECTED_CHANNEL_COUNT_UNAVAILABLE");
   else if (connectedCount < 1) reasons.push("NO_CONNECTED_CHANNEL_EVIDENCE");
 
-  if (lifecycle === "disconnected_channel") {
+  if (lifecycle === "disconnect_channel") {
     return {
       authorizationReadiness: "REQUIRED",
       mappingReadiness: "BLOCKED",

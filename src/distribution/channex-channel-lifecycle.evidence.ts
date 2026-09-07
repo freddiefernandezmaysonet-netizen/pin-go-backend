@@ -7,9 +7,12 @@ export const CHANNEX_CHANNEL_LIFECYCLE_EVENTS = [
   "updated_channel",
   "activate_channel",
   "deactivate_channel",
-  "disconnected_channel",
+  "disconnect_channel",
   "disconnect_listing",
 ] as const;
+
+export const CHANNEX_CHANNEL_LIFECYCLE_EVENT_MASK =
+  CHANNEX_CHANNEL_LIFECYCLE_EVENTS.join(";");
 
 export type ChannexChannelLifecycleEventType =
   (typeof CHANNEX_CHANNEL_LIFECYCLE_EVENTS)[number];
@@ -68,6 +71,14 @@ function providerFromChannelCode(value: string | null): ConnectionCenterProvider
   return null;
 }
 
+function canonicalChannelCode(
+  provider: ConnectionCenterProvider | null
+): string | null {
+  if (provider === "AIRBNB") return "ABB";
+  if (provider === "BOOKING_COM") return "BDC";
+  return null;
+}
+
 function stablePayloadHash(payload: unknown): string {
   return createHash("sha256").update(JSON.stringify(payload ?? null)).digest("hex");
 }
@@ -84,10 +95,13 @@ export function normalizeChannexChannelLifecycleEvent(
   const data = record(root.data ?? envelope.data);
   const attributes = record(data.attributes ?? root.attributes ?? envelope.attributes);
 
-  const eventType = normalizedString(
+  const rawEventType = normalizedString(
     root.event ?? root.event_type ?? envelope.event ?? envelope.event_type ?? root.name,
     80
   )?.toLowerCase();
+  const eventType = rawEventType === "disconnected_channel"
+    ? "disconnect_channel"
+    : rawEventType;
 
   if (!eventType || !(CHANNEX_CHANNEL_LIFECYCLE_EVENTS as readonly string[]).includes(eventType)) {
     return null;
@@ -105,26 +119,34 @@ export function normalizeChannexChannelLifecycleEvent(
     data.id ?? attributes.channel_id ?? root.channel_id ?? envelope.channel_id,
     120
   );
-  const externalChannelCode = normalizedString(
+  const providerValue = normalizedString(
     attributes.channel ??
       attributes.channel_code ??
       attributes.provider_code ??
+      envelope.ota_name ??
       root.channel ??
       root.channel_code ??
       envelope.channel,
     120
   );
+  const provider = providerFromChannelCode(providerValue);
+  const externalChannelCode = canonicalChannelCode(provider);
   const externalEventId = normalizedString(
     root.event_id ?? root.webhook_id ?? envelope.event_id ?? envelope.webhook_id,
     160
   );
   const occurredAt = parseDate(
-    root.occurred_at ?? root.inserted_at ?? root.created_at ?? envelope.occurred_at
+    root.timestamp ??
+      root.occurred_at ??
+      root.inserted_at ??
+      root.created_at ??
+      envelope.timestamp ??
+      envelope.occurred_at
   );
 
   return {
     eventType: eventType as ChannexChannelLifecycleEventType,
-    provider: providerFromChannelCode(externalChannelCode),
+    provider,
     externalPropertyId,
     externalConnectionId,
     externalChannelCode,
@@ -193,7 +215,7 @@ function evidencePatch(
         distributionReadiness: "BLOCKED",
         lastErrorCode: "OTA_CHANNEL_LISTING_DISCONNECTED",
       };
-    case "disconnected_channel":
+    case "disconnect_channel":
       return {
         ...identity,
         status: "DISCONNECTED",

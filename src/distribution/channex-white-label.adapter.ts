@@ -266,7 +266,20 @@ export class ChannexWhiteLabelAdapter
     }
     const baseUrl = required(this.config.iframeBaseUrl, "OTA_CONNECTION_IFRAME_URL_INVALID");
     const launchUrl = new URL(baseUrl);
-    launchUrl.searchParams.set("one_time_token", token);
+    launchUrl.pathname = "/auth/exchange";
+    launchUrl.search = "";
+    launchUrl.hash = "";
+    launchUrl.searchParams.set("oauth_session_key", token);
+    launchUrl.searchParams.set("app_mode", "headless");
+    launchUrl.searchParams.set("redirect_to", "/channels");
+    launchUrl.searchParams.set(
+      "property_id",
+      required(args.externalPropertyId, "OTA_EXTERNAL_PROPERTY_ID_INVALID", 120)
+    );
+    launchUrl.searchParams.set(
+      "group_id",
+      required(args.externalGroupId, "OTA_EXTERNAL_GROUP_ID_INVALID", 120)
+    );
     launchUrl.searchParams.set("channels_filter", channelFilter);
     return { token, launchUrl: launchUrl.toString() };
   }

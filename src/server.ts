@@ -198,6 +198,20 @@ app.use(
 
 app.use(bodyParser.urlencoded({ extended: true }));
 app.use("/webhooks", pmsWebhookRouter);
+app.use(buildDashboardDistributionConnectionCenterRouter(
+  prisma,
+  buildRuntimeOtaConnectionCenterComposition({
+    prisma,
+    env: process.env,
+    trustedMutationOrigins: allowedOrigins,
+    isTenantOriginAllowed: async (origin, organizationId) => {
+      const hostname = hostnameFromSecureRequestOrigin(origin);
+      if (!hostname) return false;
+      const context = await resolvePublishedBrandContextByHostname(hostname);
+      return context.kind === "CUSTOM_BRAND" && context.organizationId === organizationId;
+    },
+  })
+));
 
 // =====================
 // Health
@@ -307,20 +321,6 @@ app.use(adminDemoRouter);
 
 app.use(dashboardRouter);
 app.use(dashboardReservationsRouter);
-app.use(buildDashboardDistributionConnectionCenterRouter(
-  prisma,
-  buildRuntimeOtaConnectionCenterComposition({
-    prisma,
-    env: process.env,
-    trustedMutationOrigins: allowedOrigins,
-    isTenantOriginAllowed: async (origin, organizationId) => {
-      const hostname = hostnameFromSecureRequestOrigin(origin);
-      if (!hostname) return false;
-      const context = await resolvePublishedBrandContextByHostname(hostname);
-      return context.kind === "CUSTOM_BRAND" && context.organizationId === organizationId;
-    },
-  })
-));
 app.use(buildDashboardChannexFullSyncRouter(prisma));
 app.use(dashboardPropertiesRouter);
 app.use(dashboardGuestAccessSettingsRouter);

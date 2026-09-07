@@ -6,13 +6,18 @@ import {
   deriveCanonicalOtaReadiness,
   type CanonicalOtaReadinessResult,
 } from "./channex-canonical-readiness.reconciler.js";
+import {
+  planCanonicalOtaActivation,
+  type OtaChannelConnectionStatus,
+  type OtaReadinessStatus,
+} from "./ota-commercial-lifecycle.policy.js";
 
 const LIFECYCLE_EVENTS = new Set([
   "new_channel",
   "updated_channel",
   "activate_channel",
   "deactivate_channel",
-  "disconnected_channel",
+  "disconnect_channel",
   "disconnect_listing",
 ]);
 
@@ -30,6 +35,7 @@ type DistributionPropertyRecord = {
   externalPropertyId: string | null;
   externalPrimaryRoomTypeId: string | null;
   externalPrimaryRatePlanId: string | null;
+  provisioningStatus: "NOT_PROVISIONED" | "PROVISIONING" | "READY" | "FAILED";
 };
 
 type ConnectionRecord = {
@@ -40,6 +46,13 @@ type ConnectionRecord = {
   provider: ConnectionCenterProvider;
   externalConnectionId: string | null;
   externalChannelCode: string | null;
+  status: OtaChannelConnectionStatus;
+  paymentReadiness: OtaReadinessStatus;
+  taxReadiness: OtaReadinessStatus;
+  contentReadiness: OtaReadinessStatus;
+  activationRequestedAt: Date | null;
+  activatedAt: Date | null;
+  lastFullSyncConfirmedAt: Date | null;
 };
 
 type CanonicalReadinessTransaction = {
@@ -47,6 +60,7 @@ type CanonicalReadinessTransaction = {
     updateMany(args: any): Promise<{ count: number }>;
   };
   apmsAuditEntry: {
+    findUnique(args: any): Promise<{ id: string } | null>;
     create(args: any): Promise<unknown>;
   };
 };
@@ -71,14 +85,15 @@ function requiredExternalId(value: string | null, code: string): string {
 }
 
 function lifecycleEvent(value: string | null | undefined) {
-  const normalized = String(value ?? "").trim();
+  const raw = String(value ?? "").trim();
+  const normalized = raw === "disconnected_channel" ? "disconnect_channel" : raw;
   return LIFECYCLE_EVENTS.has(normalized)
     ? (normalized as
         | "new_channel"
         | "updated_channel"
         | "activate_channel"
         | "deactivate_channel"
-        | "disconnected_channel"
+        | "disconnect_channel"
         | "disconnect_listing")
     : null;
 }
@@ -120,6 +135,7 @@ export async function reconcileCanonicalOtaReadiness(args: {
       externalPropertyId: true,
       externalPrimaryRoomTypeId: true,
       externalPrimaryRatePlanId: true,
+      provisioningStatus: true,
     },
   });
   if (!distributionProperty) {
@@ -141,6 +157,13 @@ export async function reconcileCanonicalOtaReadiness(args: {
       provider: true,
       externalConnectionId: true,
       externalChannelCode: true,
+      status: true,
+      paymentReadiness: true,
+      taxReadiness: true,
+      contentReadiness: true,
+      activationRequestedAt: true,
+      activatedAt: true,
+      lastFullSyncConfirmedAt: true,
     },
   });
   if (!connection) {
@@ -204,8 +227,28 @@ export async function reconcileCanonicalOtaReadiness(args: {
     ratePlansPayload,
     latestLifecycleEvent: lifecycleEvent(latestLifecycleAudit?.reason),
   });
+  const activation = planCanonicalOtaActivation({
+    current: connection.status,
+    evidence: {
+      distributionPropertyStatus: distributionProperty.provisioningStatus,
+      externalConnectionId: connection.externalConnectionId,
+      authorizationReadiness: result.authorizationReadiness,
+      mappingReadiness: result.mappingReadiness,
+      distributionReadiness: result.distributionReadiness,
+      paymentReadiness: connection.paymentReadiness,
+      taxReadiness: connection.taxReadiness,
+      contentReadiness: connection.contentReadiness,
+      lastFullSyncConfirmedAt: connection.lastFullSyncConfirmedAt,
+    },
+  });
 
   await args.client.$transaction(async (tx) => {
+    const existingAudit = await tx.apmsAuditEntry.findUnique({
+      where: { decisionId },
+      select: { id: true },
+    });
+    if (existingAudit) return;
+
     const updated = await tx.otaChannelConnection.updateMany({
       where: {
         id: connection.id,
@@ -213,8 +256,12 @@ export async function reconcileCanonicalOtaReadiness(args: {
         propertyId: args.propertyId,
         distributionPropertyId: distributionProperty.id,
         provider: args.provider,
+        status: connection.status,
+        externalConnectionId: connection.externalConnectionId,
+        externalChannelCode: connection.externalChannelCode,
       },
       data: {
+        status: activation.next,
         authorizationReadiness: result.authorizationReadiness,
         mappingReadiness: result.mappingReadiness,
         distributionReadiness: result.distributionReadiness,
@@ -223,6 +270,13 @@ export async function reconcileCanonicalOtaReadiness(args: {
           result.distributionReadiness === "BLOCKED"
             ? result.reasons[result.reasons.length - 1] ?? "OTA_CANONICAL_READINESS_BLOCKED"
             : null,
+        ...(activation.path.includes("ACTIVATION_PENDING") &&
+        !connection.activationRequestedAt
+          ? { activationRequestedAt: now }
+          : {}),
+        ...(activation.next === "ACTIVE" && !connection.activatedAt
+          ? { activatedAt: now }
+          : {}),
       },
     });
     if (updated.count !== 1) {
@@ -248,6 +302,10 @@ export async function reconcileCanonicalOtaReadiness(args: {
           mappingReadiness: result.mappingReadiness,
           distributionReadiness: result.distributionReadiness,
           reasons: result.reasons,
+          previousStatus: connection.status,
+          canonicalStatus: activation.next,
+          transitionPath: activation.path,
+          activationBlockers: activation.blockers,
           externalPropertyId,
           externalRoomTypeId,
           externalRatePlanId,
