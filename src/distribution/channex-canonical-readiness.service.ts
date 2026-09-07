@@ -1,3 +1,5 @@
+import { createHash } from "node:crypto";
+
 import type { ConnectionCenterProvider } from "./connection-center.read-model.js";
 import type { ChannexReadonlyTransport } from "./channex-readonly.http-transport.js";
 import {
@@ -40,18 +42,26 @@ type ConnectionRecord = {
   externalChannelCode: string | null;
 };
 
+type CanonicalReadinessTransaction = {
+  otaChannelConnection: {
+    updateMany(args: any): Promise<{ count: number }>;
+  };
+  apmsAuditEntry: {
+    create(args: any): Promise<unknown>;
+  };
+};
+
 export type CanonicalOtaReadinessClient = {
   distributionProperty: {
     findFirst(args: any): Promise<DistributionPropertyRecord | null>;
   };
   otaChannelConnection: {
     findFirst(args: any): Promise<ConnectionRecord | null>;
-    updateMany(args: any): Promise<{ count: number }>;
   };
   apmsAuditEntry: {
     findFirst(args: any): Promise<{ reason: string | null } | null>;
-    create(args: any): Promise<unknown>;
   };
+  $transaction<T>(work: (tx: CanonicalReadinessTransaction) => Promise<T>): Promise<T>;
 };
 
 function requiredExternalId(value: string | null, code: string): string {
@@ -73,12 +83,27 @@ function lifecycleEvent(value: string | null | undefined) {
     : null;
 }
 
+function readinessDecisionId(args: {
+  connectionId: string;
+  requestKey: string;
+}): string {
+  const requestKey = String(args.requestKey ?? "").trim();
+  if (!requestKey) {
+    throw new CanonicalOtaReadinessServiceError("OTA_CANONICAL_REQUEST_KEY_REQUIRED");
+  }
+  const hash = createHash("sha256")
+    .update(`${args.connectionId}:${requestKey}`)
+    .digest("hex");
+  return `ota-canonical-readiness:${hash}`;
+}
+
 export async function reconcileCanonicalOtaReadiness(args: {
   client: CanonicalOtaReadinessClient;
   transport: ChannexReadonlyTransport;
   organizationId: string;
   propertyId: string;
   provider: ConnectionCenterProvider;
+  requestKey: string;
   now?: Date;
 }): Promise<CanonicalOtaReadinessResult> {
   const now = args.now ?? new Date();
@@ -142,6 +167,10 @@ export async function reconcileCanonicalOtaReadiness(args: {
     distributionProperty.externalPrimaryRatePlanId,
     "OTA_CANONICAL_RATE_PLAN_ID_REQUIRED"
   );
+  const decisionId = readinessDecisionId({
+    connectionId: connection.id,
+    requestKey: args.requestKey,
+  });
 
   const latestLifecycleAudit = await args.client.apmsAuditEntry.findFirst({
     where: {
@@ -176,55 +205,58 @@ export async function reconcileCanonicalOtaReadiness(args: {
     latestLifecycleEvent: lifecycleEvent(latestLifecycleAudit?.reason),
   });
 
-  const updated = await args.client.otaChannelConnection.updateMany({
-    where: {
-      id: connection.id,
-      organizationId: args.organizationId,
-      propertyId: args.propertyId,
-      distributionPropertyId: distributionProperty.id,
-      provider: args.provider,
-    },
-    data: {
-      authorizationReadiness: result.authorizationReadiness,
-      mappingReadiness: result.mappingReadiness,
-      distributionReadiness: result.distributionReadiness,
-      lastReadinessCheckedAt: now,
-      lastErrorCode:
-        result.distributionReadiness === "BLOCKED"
-          ? result.reasons[result.reasons.length - 1] ?? "OTA_CANONICAL_READINESS_BLOCKED"
-          : null,
-    },
-  });
-  if (updated.count !== 1) {
-    throw new CanonicalOtaReadinessServiceError("OTA_CANONICAL_READINESS_STATE_CONFLICT");
-  }
-
-  await args.client.apmsAuditEntry.create({
-    data: {
-      organizationId: args.organizationId,
-      propertyId: args.propertyId,
-      entityType: "DISTRIBUTION",
-      entityId: connection.id,
-      engine: "OTA_DISTRIBUTION",
-      eventType: "DECISION_APPLIED",
-      status: "SUCCESS",
-      severity: "INFO",
-      summary: "Canonical OTA readiness reconciled from Channex read-only evidence",
-      reason: result.distributionReadiness,
-      metadata: {
+  await args.client.$transaction(async (tx) => {
+    const updated = await tx.otaChannelConnection.updateMany({
+      where: {
+        id: connection.id,
+        organizationId: args.organizationId,
+        propertyId: args.propertyId,
+        distributionPropertyId: distributionProperty.id,
         provider: args.provider,
+      },
+      data: {
         authorizationReadiness: result.authorizationReadiness,
         mappingReadiness: result.mappingReadiness,
         distributionReadiness: result.distributionReadiness,
-        reasons: result.reasons,
-        externalPropertyId,
-        externalRoomTypeId,
-        externalRatePlanId,
+        lastReadinessCheckedAt: now,
+        lastErrorCode:
+          result.distributionReadiness === "BLOCKED"
+            ? result.reasons[result.reasons.length - 1] ?? "OTA_CANONICAL_READINESS_BLOCKED"
+            : null,
       },
-      startedAt: now,
-      completedAt: now,
-      durationMs: 0,
-    },
+    });
+    if (updated.count !== 1) {
+      throw new CanonicalOtaReadinessServiceError("OTA_CANONICAL_READINESS_STATE_CONFLICT");
+    }
+
+    await tx.apmsAuditEntry.create({
+      data: {
+        organizationId: args.organizationId,
+        propertyId: args.propertyId,
+        entityType: "DISTRIBUTION",
+        entityId: connection.id,
+        engine: "OTA_DISTRIBUTION",
+        eventType: "DECISION_APPLIED",
+        status: "SUCCESS",
+        severity: "INFO",
+        decisionId,
+        summary: "Canonical OTA readiness reconciled from Channex read-only evidence",
+        reason: result.distributionReadiness,
+        metadata: {
+          provider: args.provider,
+          authorizationReadiness: result.authorizationReadiness,
+          mappingReadiness: result.mappingReadiness,
+          distributionReadiness: result.distributionReadiness,
+          reasons: result.reasons,
+          externalPropertyId,
+          externalRoomTypeId,
+          externalRatePlanId,
+        },
+        startedAt: now,
+        completedAt: now,
+        durationMs: 0,
+      },
+    });
   });
 
   return result;

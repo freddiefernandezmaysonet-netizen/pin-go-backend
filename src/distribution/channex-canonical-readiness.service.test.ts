@@ -9,6 +9,14 @@ import {
 function fixture(options: { lifecycle?: string; tenantMismatch?: boolean } = {}) {
   const updates: any[] = [];
   const audits: any[] = [];
+  const tx = {
+    otaChannelConnection: {
+      async updateMany(args: any) { updates.push(args); return { count: 1 }; },
+    },
+    apmsAuditEntry: {
+      async create(args: any) { audits.push(args); return { id: "audit" }; },
+    },
+  };
   const client = {
     distributionProperty: {
       async findFirst() {
@@ -34,11 +42,12 @@ function fixture(options: { lifecycle?: string; tenantMismatch?: boolean } = {})
           externalChannelCode: "ABB",
         };
       },
-      async updateMany(args: any) { updates.push(args); return { count: 1 }; },
     },
     apmsAuditEntry: {
       async findFirst() { return { reason: options.lifecycle ?? "activate_channel" }; },
-      async create(args: any) { audits.push(args); return { id: "audit" }; },
+    },
+    async $transaction<T>(work: (txClient: typeof tx) => Promise<T>) {
+      return work(tx);
     },
   };
   const transport = {
@@ -49,7 +58,7 @@ function fixture(options: { lifecycle?: string; tenantMismatch?: boolean } = {})
   return { client, transport, updates, audits };
 }
 
-test("persists READY only after canonical read-only evidence", async () => {
+test("persists READY and deterministic audit atomically after canonical read-only evidence", async () => {
   const f = fixture();
   const result = await reconcileCanonicalOtaReadiness({
     client: f.client,
@@ -57,6 +66,7 @@ test("persists READY only after canonical read-only evidence", async () => {
     organizationId: "org-1",
     propertyId: "prop-1",
     provider: "AIRBNB",
+    requestKey: "reconcile-test-001",
     now: new Date("2026-09-07T01:00:00.000Z"),
   });
   assert.equal(result.authorizationReadiness, "READY");
@@ -64,6 +74,47 @@ test("persists READY only after canonical read-only evidence", async () => {
   assert.equal(result.distributionReadiness, "READY");
   assert.equal(f.updates[0].data.distributionReadiness, "READY");
   assert.equal(f.audits.length, 1);
+  assert.match(f.audits[0].data.decisionId, /^ota-canonical-readiness:[a-f0-9]{64}$/);
+});
+
+test("same request key produces the same audit decision id", async () => {
+  const first = fixture();
+  const second = fixture();
+  for (const f of [first, second]) {
+    await reconcileCanonicalOtaReadiness({
+      client: f.client,
+      transport: f.transport,
+      organizationId: "org-1",
+      propertyId: "prop-1",
+      provider: "AIRBNB",
+      requestKey: "reconcile-repeatable-key",
+    });
+  }
+  assert.equal(first.audits[0].data.decisionId, second.audits[0].data.decisionId);
+});
+
+test("missing request key fails before provider reads or state mutation", async () => {
+  const f = fixture();
+  let reads = 0;
+  const transport = {
+    async getProperty() { reads += 1; return {}; },
+    async listRoomTypes() { reads += 1; return {}; },
+    async listRatePlans() { reads += 1; return {}; },
+  };
+  await assert.rejects(
+    reconcileCanonicalOtaReadiness({
+      client: f.client,
+      transport,
+      organizationId: "org-1",
+      propertyId: "prop-1",
+      provider: "AIRBNB",
+      requestKey: "",
+    }),
+    (e: unknown) => e instanceof CanonicalOtaReadinessServiceError && e.code === "OTA_CANONICAL_REQUEST_KEY_REQUIRED"
+  );
+  assert.equal(reads, 0);
+  assert.equal(f.updates.length, 0);
+  assert.equal(f.audits.length, 0);
 });
 
 test("deactivate lifecycle remains BLOCKED after canonical inventory reads", async () => {
@@ -74,6 +125,7 @@ test("deactivate lifecycle remains BLOCKED after canonical inventory reads", asy
     organizationId: "org-1",
     propertyId: "prop-1",
     provider: "AIRBNB",
+    requestKey: "reconcile-deactivate-001",
   });
   assert.equal(result.distributionReadiness, "BLOCKED");
   assert.equal(f.updates[0].data.distributionReadiness, "BLOCKED");
@@ -94,9 +146,11 @@ test("tenant mismatch fails before provider reads or state mutation", async () =
       organizationId: "org-1",
       propertyId: "prop-1",
       provider: "AIRBNB",
+      requestKey: "reconcile-tenant-mismatch-001",
     }),
     (e: unknown) => e instanceof CanonicalOtaReadinessServiceError && e.code === "OTA_DISTRIBUTION_TENANT_MISMATCH"
   );
   assert.equal(reads, 0);
   assert.equal(f.updates.length, 0);
+  assert.equal(f.audits.length, 0);
 });
