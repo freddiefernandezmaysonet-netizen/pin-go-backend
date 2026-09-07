@@ -1,0 +1,49 @@
+name: Enterprise Authentication E1 Certification
+
+on:
+  pull_request:
+    branches:
+      - main
+    paths:
+      - ".github/workflows/enterprise-auth-e1-certification.yml"
+      - "src/auth/mfa-core.ts"
+      - "src/auth/mfa-core.test.ts"
+      - "docs/enterprise-auth-e1.md"
+      - "docs/design/enterprise-auth-e1-persistence.sql"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  certify:
+    name: MFA core and dormant persistence boundary
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Use Node.js 22
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+
+      - name: Install locked dependencies
+        run: npm ci --silent --no-audit --no-fund
+
+      - name: Certify MFA core
+        run: npx tsx --test src/auth/mfa-core.test.ts
+
+      - name: Certify dormant persistence boundary
+        shell: bash
+        run: |
+          set -euo pipefail
+          if find prisma/migrations -type f -path '*enterprise_auth_mfa*' -print -quit | grep -q .; then
+            echo 'Executable enterprise-auth MFA migration found under prisma/migrations' >&2
+            exit 1
+          fi
+          test -f docs/design/enterprise-auth-e1-persistence.sql
+          grep -q 'DESIGN ONLY — NOT A PRISMA MIGRATION' docs/design/enterprise-auth-e1-persistence.sql
