@@ -12,6 +12,8 @@
     "src/distribution/connection-center.read-model.ts",
     "src/distribution/channex-readonly.http-transport.ts",
     "src/distribution/channex-canonical-readiness.reconciler.ts",
-    "src/distribution/channex-canonical-readiness.service.ts"
+    "src/distribution/channex-canonical-readiness.service.ts",
+    "src/distribution/ota-connection-center.runtime-composition.ts",
+    "src/routes/dashboard.distribution-connection-center.route.ts"
   ]
 }
