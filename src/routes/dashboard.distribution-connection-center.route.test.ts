@@ -304,3 +304,158 @@ test("session response exposes the launch URL but not a duplicate raw token", as
   });
   assert.equal(JSON.stringify(body).includes("raw-one-time-token"), false);
 });
+
+test("reconcile is default-off and does not call the reconciler", async () => {
+  let calls = 0;
+  const response = await requestRoute({
+    prisma: createPrisma(),
+    user: { id: "user-a", orgId: "organization-a", role: "ORG_ADMIN" },
+    method: "POST",
+    path: "/api/dashboard/distribution/properties/property-b/channels/AIRBNB/reconcile",
+    headers: { Origin: "https://app.pin-go.test", "Idempotency-Key": "reconcile-off-123" },
+    actions: {
+      runtime: { enabled: false, reason: "DEFAULT_OFF" },
+      isTrustedOrigin: async () => true,
+      reconcile: async () => {
+        calls += 1;
+        return {
+          authorizationReadiness: "READY",
+          mappingReadiness: "READY",
+          distributionReadiness: "READY",
+          reasons: [],
+        };
+      },
+    },
+  });
+  assert.equal(response.status, 503);
+  assert.equal(response.headers.get("cache-control"), "no-store");
+  assert.equal(calls, 0);
+});
+
+test("reconcile requires ORG_ADMIN and an idempotency key", async () => {
+  let calls = 0;
+  const actions = {
+    runtime: { enabled: true, reason: "ENABLED" as const },
+    isTrustedOrigin: async () => true,
+    reconcile: async () => {
+      calls += 1;
+      return {
+        authorizationReadiness: "READY" as const,
+        mappingReadiness: "READY" as const,
+        distributionReadiness: "READY" as const,
+        reasons: [],
+      };
+    },
+  };
+  const member = await requestRoute({
+    prisma: createPrisma(),
+    user: { id: "user-a", orgId: "organization-a", role: "MEMBER" },
+    method: "POST",
+    path: "/api/dashboard/distribution/properties/property-b/channels/AIRBNB/reconcile",
+    headers: { Origin: "https://app.pin-go.test", "Idempotency-Key": "reconcile-member-123" },
+    actions,
+  });
+  assert.equal(member.status, 403);
+
+  const noKey = await requestRoute({
+    prisma: createPrisma(),
+    user: { id: "user-a", orgId: "organization-a", role: "ORG_ADMIN" },
+    method: "POST",
+    path: "/api/dashboard/distribution/properties/property-b/channels/AIRBNB/reconcile",
+    headers: { Origin: "https://app.pin-go.test" },
+    actions,
+  });
+  assert.equal(noKey.status, 400);
+  assert.equal(calls, 0);
+});
+
+test("reconcile forwards tenant, property, provider and request key", async () => {
+  let received: any;
+  const response = await requestRoute({
+    prisma: createPrisma(),
+    user: { id: "user-a", orgId: "organization-a", role: "ORG_ADMIN" },
+    method: "POST",
+    path: "/api/dashboard/distribution/properties/property-b/channels/AIRBNB/reconcile",
+    headers: { Origin: "https://app.pin-go.test", "Idempotency-Key": "reconcile-tenant-123" },
+    actions: {
+      runtime: { enabled: true, reason: "ENABLED" },
+      isTrustedOrigin: async (_origin, organizationId) => organizationId === "organization-a",
+      reconcile: async (args) => {
+        received = args;
+        return {
+          authorizationReadiness: "READY",
+          mappingReadiness: "READY",
+          distributionReadiness: "IN_PROGRESS",
+          reasons: ["AWAITING_ACTIVATION_EVIDENCE"],
+        };
+      },
+    },
+  });
+  assert.equal(response.status, 200);
+  assert.deepEqual(received, {
+    organizationId: "organization-a",
+    propertyId: "property-b",
+    requestedByUserId: "user-a",
+    provider: "AIRBNB",
+    requestKey: "reconcile-tenant-123",
+  });
+  assert.deepEqual(await response.json(), {
+    ok: true,
+    readiness: {
+      authorizationReadiness: "READY",
+      mappingReadiness: "READY",
+      distributionReadiness: "IN_PROGRESS",
+      reasons: ["AWAITING_ACTIVATION_EVIDENCE"],
+    },
+  });
+});
+
+test("reconcile response exposes readiness only and does not leak provider evidence", async () => {
+  const response = await requestRoute({
+    prisma: createPrisma(),
+    user: { id: "user-a", orgId: "organization-a", role: "ORG_ADMIN" },
+    method: "POST",
+    path: "/api/dashboard/distribution/properties/property-b/channels/AIRBNB/reconcile",
+    headers: { Origin: "https://app.pin-go.test", "Idempotency-Key": "reconcile-safe-response" },
+    actions: {
+      runtime: { enabled: true, reason: "ENABLED" },
+      isTrustedOrigin: async () => true,
+      reconcile: async () => ({
+        authorizationReadiness: "READY",
+        mappingReadiness: "READY",
+        distributionReadiness: "READY",
+        reasons: [],
+      }),
+    },
+  });
+  assert.equal(response.status, 200);
+  const body = await response.text();
+  assert.equal(body.includes("user-api-key"), false);
+  assert.equal(body.includes("staging.channex.io"), false);
+  assert.equal(body.includes("externalConnectionId"), false);
+  assert.equal(body.includes("payload"), false);
+});
+
+test("reconcile conflict fails closed without internal detail leakage", async () => {
+  const response = await requestRoute({
+    prisma: createPrisma(),
+    user: { id: "user-a", orgId: "organization-a", role: "ORG_ADMIN" },
+    method: "POST",
+    path: "/api/dashboard/distribution/properties/property-b/channels/AIRBNB/reconcile",
+    headers: { Origin: "https://app.pin-go.test", "Idempotency-Key": "reconcile-conflict-123" },
+    actions: {
+      runtime: { enabled: true, reason: "ENABLED" },
+      isTrustedOrigin: async () => true,
+      reconcile: async () => {
+        const error = new Error("database row detail must not leak") as Error & { code: string };
+        error.code = "OTA_CANONICAL_READINESS_STATE_CONFLICT";
+        throw error;
+      },
+    },
+  });
+  assert.equal(response.status, 409);
+  assert.deepEqual(await response.json(), {
+    ok: false,
+    error: "OTA_CANONICAL_READINESS_STATE_CONFLICT",
+  });
+});
