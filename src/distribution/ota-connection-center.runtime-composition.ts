@@ -83,13 +83,14 @@ export function buildRuntimeOtaConnectionCenterComposition(args: {
     env: args.env,
     actions: {
       ...actions,
-      reconcile: ({ organizationId, propertyId, provider }) =>
+      reconcile: ({ organizationId, propertyId, provider, requestKey }) =>
         reconcileCanonicalOtaReadiness({
           client: args.prisma,
           transport: readonlyTransport,
           organizationId,
           propertyId,
           provider,
+          requestKey,
         }),
     },
   });
