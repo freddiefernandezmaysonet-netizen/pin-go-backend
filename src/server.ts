@@ -76,7 +76,7 @@ import { adminBrandingRouter } from "./routes/admin.branding.routes";
 import { organizationBrandingRouter } from "./routes/organization.branding.routes";
 import { signupSuccessRouter } from "./routes/public.signup.success.routes";
 import { publicOrganizationInvitationRouter } from "./routes/public.organization-invitation.routes";
-import { publicBrandContextRouter } from "./routes/public.brand-context.routes";
+import { publicBrandContextRouter } from "./routes/public-brand-context.routes";
 import { cleaningConfirmRouter } from "./routes/cleaning-confirm.routes";
 import { teamRouter } from "./routes/team.routes";
 import publicBookingRouter from "./routes/public-booking.routes";
@@ -198,6 +198,20 @@ app.use(
 
 app.use(bodyParser.urlencoded({ extended: true }));
 app.use("/webhooks", pmsWebhookRouter);
+app.use(buildDashboardDistributionConnectionCenterRouter(
+  prisma,
+  buildRuntimeOtaConnectionCenterComposition({
+    prisma,
+    env: process.env,
+    trustedMutationOrigins: allowedOrigins,
+    isTenantOriginAllowed: async (origin, organizationId) => {
+      const hostname = hostnameFromSecureRequestOrigin(origin);
+      if (!hostname) return false;
+      const context = await resolvePublishedBrandContextByHostname(hostname);
+      return context.kind === "CUSTOM_BRAND" && context.organizationId === organizationId;
+    },
+  })
+));
 
 // =====================
 // Health
@@ -307,20 +321,6 @@ app.use(adminDemoRouter);
 
 app.use(dashboardRouter);
 app.use(dashboardReservationsRouter);
-app.use(buildDashboardDistributionConnectionCenterRouter(
-  prisma,
-  buildRuntimeOtaConnectionCenterComposition({
-    prisma,
-    env: process.env,
-    trustedMutationOrigins: allowedOrigins,
-    isTenantOriginAllowed: async (origin, organizationId) => {
-      const hostname = hostnameFromSecureRequestOrigin(origin);
-      if (!hostname) return false;
-      const context = await resolvePublishedBrandContextByHostname(hostname);
-      return context.kind === "CUSTOM_BRAND" && context.organizationId === organizationId;
-    },
-  })
-));
 app.use(buildDashboardChannexFullSyncRouter(prisma));
 app.use(dashboardPropertiesRouter);
 app.use(dashboardGuestAccessSettingsRouter);
