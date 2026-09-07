@@ -13,6 +13,7 @@ import {
 } from "../distribution/distribution-mutation-security";
 import type { OtaConnectionCenterRuntime } from "../distribution/ota-connection-runtime.policy";
 import type { OtaChannelEvidenceResult } from "../distribution/channex-channel-lifecycle.evidence.js";
+import type { CanonicalOtaReadinessResult } from "../distribution/channex-canonical-readiness.reconciler.js";
 import { buildChannexChannelLifecycleWebhookRouter } from "./channex-channel-lifecycle.webhook.route.js";
 
 type MutationActor = { id?: string; orgId?: string; role?: string };
@@ -32,6 +33,13 @@ export type DistributionConnectionCenterActions = {
     provider: ConnectionCenterProvider;
     requestKey: string;
   }): Promise<{ provisioningStatus: string }>;
+  reconcile?(args: {
+    organizationId: string;
+    propertyId: string;
+    requestedByUserId: string;
+    provider: ConnectionCenterProvider;
+    requestKey: string;
+  }): Promise<CanonicalOtaReadinessResult>;
   issueSession?(args: {
     organizationId: string;
     propertyId: string;
@@ -134,6 +142,31 @@ export function buildDashboardDistributionConnectionCenterRouter(
         return res.json({ ok: true, provisioningStatus: result.provisioningStatus });
       } catch (error) {
         return mutationFailure(res, error, "OTA_CONNECTION_PREPARE_FAILED");
+      }
+    }
+  );
+
+  router.post(
+    "/api/dashboard/distribution/properties/:propertyId/channels/:provider/reconcile",
+    requireAuth,
+    mutationSecurity,
+    async (req: DistributionMutationRequest, res) => {
+      res.setHeader("Cache-Control", "no-store");
+      if (!actions.runtime.enabled || !actions.reconcile) return mutationUnavailable(res);
+      const provider = providerFromPath(req.params.provider ?? "");
+      if (!provider) return res.status(422).json({ ok: false, error: "OTA_CONNECTION_PROVIDER_UNAVAILABLE" });
+      const actor = mutationActor(req);
+      try {
+        const readiness = await actions.reconcile({
+          organizationId: actor.orgId,
+          propertyId: String(req.params.propertyId ?? "").trim(),
+          requestedByUserId: actor.id,
+          provider,
+          requestKey: req.distributionRequestKey!,
+        });
+        return res.json({ ok: true, readiness });
+      } catch (error) {
+        return mutationFailure(res, error, "OTA_CONNECTION_RECONCILIATION_FAILED");
       }
     }
   );
