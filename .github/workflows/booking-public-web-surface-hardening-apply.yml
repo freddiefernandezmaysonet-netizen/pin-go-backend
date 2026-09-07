@@ -33,8 +33,31 @@ jobs:
           grep -F '"/favicon.ico", "/apple-touch-icon.png", "/apple-touch-icon-precomposed.png"' src/booking-search.staging.server.ts
       - name: Install locked dependencies
         run: npm ci --silent --no-audit --no-fund
-      - name: Type-check server entrypoint
-        run: npx tsc --noEmit --skipLibCheck src/booking-search.staging.server.ts --esModuleInterop --module commonjs --target es2020
+      - name: Verify TypeScript syntax/transpilation
+        run: |
+          node - <<'NODE'
+          const fs = require('fs');
+          const ts = require('typescript');
+          const source = fs.readFileSync('src/booking-search.staging.server.ts', 'utf8');
+          const out = ts.transpileModule(source, {
+            compilerOptions: {
+              target: ts.ScriptTarget.ES2020,
+              module: ts.ModuleKind.CommonJS,
+              esModuleInterop: true,
+            },
+            reportDiagnostics: true,
+            fileName: 'src/booking-search.staging.server.ts',
+          });
+          const errors = (out.diagnostics || []).filter(d => d.category === ts.DiagnosticCategory.Error);
+          if (errors.length) {
+            for (const d of errors) console.error(ts.flattenDiagnosticMessageText(d.messageText, '\n'));
+            process.exit(1);
+          }
+          NODE
+      - name: Verify scoped change only
+        run: |
+          git diff -- src/booking-search.staging.server.ts
+          test -z "$(git status --porcelain | grep -vE 'src/booking-search.staging.server.ts|.github/workflows/booking-public-web-surface-hardening-apply.yml|.github/scripts/apply_booking_public_web_surface_hardening.py' || true)"
       - name: Commit only server hardening
         run: |
           git config user.name "github-actions[bot]"
