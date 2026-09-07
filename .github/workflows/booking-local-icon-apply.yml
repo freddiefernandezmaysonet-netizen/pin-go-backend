@@ -22,29 +22,29 @@ jobs:
             --output src/pinngo-favicon.png
           test "$(wc -c < src/pinngo-favicon.png | tr -d ' ')" = "1034397"
           test "$(git hash-object src/pinngo-favicon.png)" = "1089fd92a61dce544a9173babbec2711c5130afa"
-      - name: Replace current icon redirect with local official asset
+      - name: Replace actual embedded icon handler with local official asset
         run: |
           python - <<'PY'
           from pathlib import Path
-
-          path = Path('src/booking-search.staging.server.ts')
-          text = path.read_text()
-          old = '''app.get(["/favicon.ico", "/apple-touch-icon.png", "/apple-touch-icon-precomposed.png"], (_q, res) => {
-            res.redirect(302, "https://pin-ngo.com/favicon.ico");
-          });'''
-          new = '''app.get(["/favicon.ico", "/apple-touch-icon.png", "/apple-touch-icon-precomposed.png"], (_q, res) => {
+          import re
+          path=Path('src/booking-search.staging.server.ts')
+          text=path.read_text()
+          pattern=re.compile(r'const BOOKING_ICON_PNG = Buffer\.from\("[A-Za-z0-9+/=]+", "base64"\);\napp\.get\(\["/favicon\.ico", "/apple-touch-icon\.png", "/apple-touch-icon-precomposed\.png"\], \(_q, res\) => \{\n(?:  .*\n)*?\}\);')
+          replacement='''app.get(["/favicon.ico", "/apple-touch-icon.png", "/apple-touch-icon-precomposed.png"], (_q, res) => {
+            res.set("Cache-Control", "public, max-age=86400, immutable");
             res.type("image/png").sendFile(path.resolve(process.cwd(), "src/pinngo-favicon.png"));
           });'''
-          if text.count(old) != 1:
-              raise SystemExit(f'Expected exactly one current icon redirect, found {text.count(old)}')
-          path.write_text(text.replace(old, new, 1))
+          updated,count=pattern.subn(replacement,text,count=1)
+          if count != 1:
+              raise SystemExit(f'Expected exactly one embedded icon handler, replaced {count}')
+          path.write_text(updated)
           PY
       - name: Verify isolated public-surface result
         run: |
           test "$(git hash-object src/pinngo-favicon.png)" = "1089fd92a61dce544a9173babbec2711c5130afa"
           grep -F 'res.type("image/png").sendFile(path.resolve(process.cwd(), "src/pinngo-favicon.png"))' src/booking-search.staging.server.ts
           ! grep -F 'BOOKING_ICON_PNG' src/booking-search.staging.server.ts
-          ! grep -F 'res.redirect(302, "https://pin-ngo.com/favicon.ico")' src/booking-search.staging.server.ts
+          ! grep -F 'pin-ngo.com/favicon.ico' src/booking-search.staging.server.ts
           grep -F 'app.get("/robots.txt"' src/booking-search.staging.server.ts
           grep -F 'app.get("/sitemap.xml"' src/booking-search.staging.server.ts
       - uses: actions/setup-node@v4
