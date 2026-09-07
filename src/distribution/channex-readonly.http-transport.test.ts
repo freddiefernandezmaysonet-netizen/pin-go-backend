@@ -62,15 +62,15 @@ test("rate plan lookup pins property filter", async () => {
   assert.match(url, /\/api\/v1\/rate_plans\?filter%5Bproperty_id%5D=prop-1$/);
 });
 
-test("rejects unsafe resource ids", async () => {
+test("rejects unsafe resource ids", () => {
   const transport = createChannexReadonlyHttpTransport({
     apiOrigin: "https://staging.channex.io",
     apiKey: "secret",
     timeoutMs: 1000,
     fetchImpl: async () => response({ data: {} }),
   });
-  await assert.rejects(
-    transport.getProperty("../secrets"),
+  assert.throws(
+    () => transport.getProperty("../secrets"),
     (e: unknown) => e instanceof ChannexReadonlyTransportError && e.code === "OTA_READONLY_PROPERTY_ID_INVALID"
   );
 });
