@@ -29,6 +29,12 @@ export type StoredOtaChannel = {
   lastErrorCode: string | null;
 };
 
+export type OtaChannelEvidenceScope =
+  | "CHANNEL_MANAGER_TECHNICAL"
+  | "NONE";
+
+export type DownstreamOtaAcceptance = "NOT_ATTESTED" | "NONE";
+
 function nextAction(status: OtaChannelConnectionStatus) {
   switch (status) {
     case "NOT_CONNECTED":
@@ -66,11 +72,19 @@ export function buildConnectionCenterReadModel(args: {
   const channels = CONNECTION_CENTER_CATALOG.map((catalogItem) => {
     const stored = storedByProvider.get(catalogItem.provider);
     const status = stored?.status ?? "NOT_CONNECTED";
+    const evidenceScope: OtaChannelEvidenceScope = stored
+      ? "CHANNEL_MANAGER_TECHNICAL"
+      : "NONE";
+    const downstreamOtaAcceptance: DownstreamOtaAcceptance = stored
+      ? "NOT_ATTESTED"
+      : "NONE";
 
     return {
       ...catalogItem,
       status,
       nextAction: nextAction(status),
+      evidenceScope,
+      downstreamOtaAcceptance,
       readiness: {
         authorization: stored?.authorizationReadiness ?? "REQUIRED",
         mapping: stored?.mappingReadiness ?? "NOT_STARTED",

@@ -23,6 +23,7 @@ function readyEvidence(
     taxReadiness: "READY",
     contentReadiness: "READY",
     lastFullSyncConfirmedAt: new Date("2026-09-05T12:00:00.000Z"),
+    fullSyncRequiredAfterAt: new Date("2026-09-05T11:59:59.000Z"),
     ...overrides,
   };
 }
@@ -49,6 +50,65 @@ test("activation accepts READY or NOT_APPLICABLE commercial readiness", () => {
     canActivate: true,
     blockers: [],
   });
+});
+
+test("a full sync that predates the lifecycle frontier cannot activate", () => {
+  assert.deepEqual(
+    assessOtaActivationReadiness(
+      readyEvidence({
+        lastFullSyncConfirmedAt: new Date("2026-09-05T11:59:59.999Z"),
+        fullSyncRequiredAfterAt: new Date("2026-09-05T12:00:00.000Z"),
+      })
+    ),
+    { canActivate: false, blockers: ["FULL_SYNC_PREDATES_LIFECYCLE"] }
+  );
+});
+
+test("invalid or missing full-sync instants never activate", () => {
+  assert.deepEqual(
+    assessOtaActivationReadiness(
+      readyEvidence({ lastFullSyncConfirmedAt: new Date("invalid") })
+    ).blockers,
+    ["FULL_SYNC_EVIDENCE_INVALID"]
+  );
+  assert.deepEqual(
+    assessOtaActivationReadiness(
+      readyEvidence({ fullSyncRequiredAfterAt: null })
+    ).blockers,
+    ["FULL_SYNC_FRONTIER_MISSING"]
+  );
+  assert.deepEqual(
+    assessOtaActivationReadiness(
+      readyEvidence({ fullSyncRequiredAfterAt: new Date("invalid") })
+    ).blockers,
+    ["FULL_SYNC_FRONTIER_INVALID"]
+  );
+});
+
+test("an ACTIVE channel degrades when canonical evidence is no longer complete", () => {
+  const result = planCanonicalOtaActivation({
+    current: "ACTIVE",
+    evidence: readyEvidence({ distributionReadiness: "BLOCKED" }),
+  });
+  assert.equal(result.next, "DEGRADED");
+  assert.deepEqual(result.path, ["DEGRADED"]);
+  assert.deepEqual(result.blockers, ["DISTRIBUTION_NOT_READY"]);
+});
+
+test("a DEGRADED channel returns to ACTIVE only after all evidence recovers", () => {
+  const blocked = planCanonicalOtaActivation({
+    current: "DEGRADED",
+    evidence: readyEvidence({ lastFullSyncConfirmedAt: null }),
+  });
+  assert.equal(blocked.next, "DEGRADED");
+  assert.deepEqual(blocked.path, []);
+
+  const recovered = planCanonicalOtaActivation({
+    current: "DEGRADED",
+    evidence: readyEvidence(),
+  });
+  assert.equal(recovered.next, "ACTIVE");
+  assert.deepEqual(recovered.path, ["ACTIVE"]);
 });
 
 test("a channel cannot jump directly from not connected to active", () => {
@@ -112,6 +172,61 @@ test("canonical plan reaches ACTIVE only with complete evidence", () => {
   assert.deepEqual(result.blockers, []);
 });
 
+test("canonical planning regresses pre-active states when evidence regresses", () => {
+  const authorizationLost = planCanonicalOtaActivation({
+    current: "ACTIVATION_PENDING",
+    evidence: readyEvidence({ authorizationReadiness: "IN_PROGRESS" }),
+  });
+  assert.equal(authorizationLost.next, "AUTHORIZATION_REQUIRED");
+
+  const mappingLost = planCanonicalOtaActivation({
+    current: "READINESS_CHECK",
+    evidence: readyEvidence({ mappingReadiness: "IN_PROGRESS" }),
+  });
+  assert.equal(mappingLost.next, "MAPPING_REQUIRED");
+});
+
+test("FAILED can recover, while DISCONNECTED requires a fresh lifecycle reopen", () => {
+  assert.equal(
+    planCanonicalOtaActivation({ current: "FAILED", evidence: readyEvidence() })
+      .next,
+    "ACTIVE"
+  );
+  assert.equal(
+    planCanonicalOtaActivation({
+      current: "DISCONNECTED",
+      evidence: readyEvidence(),
+    }).next,
+    "DISCONNECTED"
+  );
+});
+
+test("a prepared row without a channel identity remains NOT_CONNECTED", () => {
+  const result = planCanonicalOtaActivation({
+    current: "NOT_CONNECTED",
+    evidence: readyEvidence({
+      externalConnectionId: null,
+      authorizationReadiness: "IN_PROGRESS",
+      mappingReadiness: "IN_PROGRESS",
+      distributionReadiness: "IN_PROGRESS",
+      lastFullSyncConfirmedAt: null,
+    }),
+  });
+  assert.equal(result.next, "NOT_CONNECTED");
+});
+
+test("ACTIVE to ACTIVE still validates complete evidence", () => {
+  assert.throws(
+    () =>
+      assertOtaChannelTransition({
+        current: "ACTIVE",
+        next: "ACTIVE",
+        activationEvidence: readyEvidence({ lastFullSyncConfirmedAt: null }),
+      }),
+    /OTA_CHANNEL_ACTIVATION_BLOCKED:FULL_SYNC_NOT_CONFIRMED/
+  );
+});
+
 test("tenant scope rejects any organization mismatch", () => {
   assert.throws(
     () =>
@@ -142,6 +257,18 @@ test("property status is derived from real channel states", () => {
   assert.equal(
     derivePropertyCommercialDistributionStatus(["ACTIVE", "DEGRADED"]),
     "DEGRADED"
+  );
+  assert.equal(
+    derivePropertyCommercialDistributionStatus(["ACTIVE", "FAILED"]),
+    "DEGRADED"
+  );
+  assert.equal(
+    derivePropertyCommercialDistributionStatus(["ACTIVE", "DISCONNECTING"]),
+    "DEGRADED"
+  );
+  assert.equal(
+    derivePropertyCommercialDistributionStatus(["ACTIVE"]),
+    "ACTIVE"
   );
   assert.equal(derivePropertyCommercialDistributionStatus(["FAILED"]), "FAILED");
 });
