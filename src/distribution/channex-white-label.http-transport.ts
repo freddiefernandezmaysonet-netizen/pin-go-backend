@@ -20,6 +20,7 @@ const ALLOWED_POST_PATHS = new Set([
 const MAX_RESPONSE_BYTES = 1_000_000;
 const MAX_DIAGNOSTIC_BODY_BYTES = 16_384;
 const MAX_DIAGNOSTIC_VALUE_LENGTH = 240;
+const MAX_DIAGNOSTIC_DETAIL_ENTRIES = 12;
 
 export class WhiteLabelHttpTransportError extends Error {
   readonly retryDisposition: "SAFE_RETRY" | "RECONCILIATION_REQUIRED";
@@ -84,7 +85,7 @@ function record(value: unknown): Record<string, unknown> | null {
 }
 
 function sanitizeDiagnosticValue(value: unknown): string | null {
-  if (typeof value !== "string" && typeof value !== "number") return null;
+  if (typeof value !== "string" && typeof value !== "number" && typeof value !== "boolean") return null;
   let normalized = String(value).replace(/[\r\n\t]+/g, " ").trim();
   if (!normalized) return null;
   normalized = normalized
@@ -93,6 +94,47 @@ function sanitizeDiagnosticValue(value: unknown): string | null {
     .replace(/[A-Za-z0-9_-]{48,}/g, "[VALUE_REDACTED]")
     .replace(/[^\x20-\x7E]/g, "?");
   return normalized.slice(0, MAX_DIAGNOSTIC_VALUE_LENGTH) || null;
+}
+
+function sanitizeDiagnosticKey(value: string): string | null {
+  const normalized = String(value ?? "")
+    .replace(/[^A-Za-z0-9_.\[\]-]/g, "_")
+    .slice(0, 120);
+  return normalized || null;
+}
+
+function flattenDocumentedDetails(value: unknown): string | null {
+  const entries: string[] = [];
+
+  const visit = (current: unknown, path: string, depth: number) => {
+    if (entries.length >= MAX_DIAGNOSTIC_DETAIL_ENTRIES || depth > 3) return;
+
+    if (Array.isArray(current)) {
+      for (let index = 0; index < current.length && entries.length < MAX_DIAGNOSTIC_DETAIL_ENTRIES; index += 1) {
+        visit(current[index], `${path}[${index}]`, depth + 1);
+      }
+      return;
+    }
+
+    const object = record(current);
+    if (object) {
+      for (const [key, nested] of Object.entries(object)) {
+        if (entries.length >= MAX_DIAGNOSTIC_DETAIL_ENTRIES) break;
+        const safeKey = sanitizeDiagnosticKey(key);
+        if (!safeKey) continue;
+        visit(nested, path ? `${path}.${safeKey}` : safeKey, depth + 1);
+      }
+      return;
+    }
+
+    const safeValue = sanitizeDiagnosticValue(current);
+    const safePath = sanitizeDiagnosticKey(path);
+    if (safeValue && safePath) entries.push(`${safePath}=${safeValue}`);
+  };
+
+  visit(value, "", 0);
+  if (!entries.length) return null;
+  return entries.join("; ").slice(0, MAX_DIAGNOSTIC_VALUE_LENGTH);
 }
 
 function extractProviderDiagnostic(payload: unknown): {
@@ -104,13 +146,15 @@ function extractProviderDiagnostic(payload: unknown): {
   const errors = Array.isArray(root.errors) ? root.errors : [];
   const firstError = record(errors[0]);
   const error = record(root.error);
+  const documentedDetails = flattenDocumentedDetails(root.details);
   const providerCode = sanitizeDiagnosticValue(
-    firstError?.code ?? error?.code ?? root.code ?? firstError?.title ?? error?.title
+    firstError?.code ?? error?.code ?? root.code ?? firstError?.title ?? error?.title ??
+      (documentedDetails ? "validation_details" : null)
   );
   const providerMessage = sanitizeDiagnosticValue(
     firstError?.detail ?? firstError?.message ?? error?.detail ?? error?.message ??
       root.message ?? root.detail ?? root.error
-  );
+  ) ?? documentedDetails;
   return { providerCode, providerMessage };
 }
 
