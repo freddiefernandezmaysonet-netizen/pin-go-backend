@@ -1,9 +1,9 @@
 import { createHmac, randomBytes, timingSafeEqual } from "node:crypto";
 
 import {
-  ChannexChannelIdentityError,
-  verifyExactChannexChannel,
-} from "./channex-channel-identity.js";
+  AirbnbCallbackChannelVerificationError,
+  verifyAirbnbCallbackChannelResource,
+} from "./airbnb-host-self-service.callback-verifier.js";
 
 export class AirbnbHostSelfServiceError extends Error {
   constructor(readonly code: string) {
@@ -333,32 +333,38 @@ export async function verifyAirbnbHostCallback(args: {
   requestedByUserId: string;
   success: string;
   channelId?: string | null;
-  token: string;
+  token?: string | null;
   now?: Date;
 }): Promise<{
   success: boolean;
-  propertyId: string;
+  propertyId: string | null;
   channelId: string | null;
   channelActive: boolean | null;
-  nextAction: "RETRY_AUTHORIZATION" | "MAPPING_REQUIRED";
+  airbnbAccountVerified: false;
+  nextAction: "RETRY_AUTHORIZATION" | "LISTING_DISCOVERY_REQUIRED";
 }> {
+  // Failure redirects only guarantee success=false, not a token or channel.
+  // This is an uncorrelated UI result: no tenant/property inference or effects.
+  if (args.success === "false") {
+    return {
+      success: false,
+      propertyId: null,
+      channelId: null,
+      channelActive: null,
+      airbnbAccountVerified: false,
+      nextAction: "RETRY_AUTHORIZATION",
+    };
+  }
+  if (args.success !== "true") {
+    throw new AirbnbHostSelfServiceError("OTA_AIRBNB_CALLBACK_RESULT_INVALID");
+  }
   const claims = verifyAirbnbHostState({
-    token: args.token,
+    token: required(args.token, "OTA_AIRBNB_STATE_INVALID", 8192),
     secret: args.stateSecret,
     organizationId: args.organizationId,
     requestedByUserId: args.requestedByUserId,
     now: args.now,
   });
-
-  if (String(args.success).trim().toLowerCase() !== "true") {
-    return {
-      success: false,
-      propertyId: claims.propertyId,
-      channelId: null,
-      channelActive: null,
-      nextAction: "RETRY_AUTHORIZATION",
-    };
-  }
 
   const distributionProperty = await loadReadyDistributionProperty({
     client: args.client,
@@ -377,34 +383,19 @@ export async function verifyAirbnbHostCallback(args: {
     distributionProperty.group!.externalGroupId,
     "OTA_AIRBNB_EXTERNAL_GROUP_ID_INVALID"
   );
-  const expectedRoomTypeId = requiredUuid(
-    distributionProperty.externalPrimaryRoomTypeId,
-    "OTA_AIRBNB_EXTERNAL_ROOM_TYPE_ID_INVALID"
-  );
-  const expectedRatePlanId = requiredUuid(
-    distributionProperty.externalPrimaryRatePlanId,
-    "OTA_AIRBNB_EXTERNAL_RATE_PLAN_ID_INVALID"
-  );
-
   let verification;
   try {
-    verification = verifyExactChannexChannel({
+    verification = verifyAirbnbCallbackChannelResource({
       payload: await args.transport.getChannel(channelId),
-      provider: "AIRBNB",
       expectedChannelId: channelId,
       expectedPropertyId,
       expectedGroupId,
-      expectedRoomTypeId,
-      expectedRatePlanId,
     });
   } catch (error) {
-    if (error instanceof ChannexChannelIdentityError) {
+    if (error instanceof AirbnbCallbackChannelVerificationError) {
       throw new AirbnbHostSelfServiceError(error.code);
     }
     throw error;
-  }
-  if (!verification.identityVerified || verification.channelId !== channelId) {
-    throw new AirbnbHostSelfServiceError("OTA_AIRBNB_CHANNEL_IDENTITY_NOT_VERIFIED");
   }
 
   return {
@@ -412,6 +403,7 @@ export async function verifyAirbnbHostCallback(args: {
     propertyId: claims.propertyId,
     channelId,
     channelActive: verification.activeState,
-    nextAction: "MAPPING_REQUIRED",
+    airbnbAccountVerified: verification.airbnbAccountVerified,
+    nextAction: "LISTING_DISCOVERY_REQUIRED",
   };
 }

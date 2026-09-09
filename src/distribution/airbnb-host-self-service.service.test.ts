@@ -271,7 +271,7 @@ test("upstream errors are propagated without fabricating a URL or retrying", asy
   assert.equal(calls, 1);
 });
 
-test("successful callback verifies exact channel identity and stops at mapping required", async () => {
+test("callback reads exact resource and leaves Airbnb account verification pending", async () => {
   const token = createAirbnbHostState({
     secret: SECRET,
     organizationId: "org-1",
@@ -305,7 +305,8 @@ test("successful callback verifies exact channel identity and stops at mapping r
     propertyId: "property-1",
     channelId: CHANNEL_ID,
     channelActive: false,
-    nextAction: "MAPPING_REQUIRED",
+    airbnbAccountVerified: false,
+    nextAction: "LISTING_DISCOVERY_REQUIRED",
   });
 });
 
