@@ -54,26 +54,6 @@ export type DistributionConnectionCenterActions = {
     current: "TOKEN_ISSUED" | "OPENED" | "REQUESTED";
     next: "OPENED" | "COMPLETED" | "CANCELLED";
   }): Promise<void>;
-  issueAirbnbConnectionLink?(args: {
-    organizationId: string;
-    propertyId: string;
-    requestedByUserId: string;
-    requestKey: string;
-  }): Promise<{ authorizationUrl: string; expiresAt: Date }>;
-  verifyAirbnbCallback?(args: {
-    organizationId: string;
-    requestedByUserId: string;
-    success: string;
-    channelId?: string | null;
-    token: string;
-    requestKey: string;
-  }): Promise<{
-    success: boolean;
-    propertyId: string;
-    channelId: string | null;
-    channelActive: boolean | null;
-    nextAction: "RETRY_AUTHORIZATION" | "MAPPING_REQUIRED";
-  }>;
 };
 
 const DEFAULT_ACTIONS: DistributionConnectionCenterActions = {
@@ -201,61 +181,6 @@ export function buildDashboardDistributionConnectionCenterRouter(
   );
 
   router.post(
-    "/api/dashboard/distribution/properties/:propertyId/channels/AIRBNB/connection-link",
-    requireAuth,
-    mutationSecurity,
-    async (req: DistributionMutationRequest, res) => {
-      res.setHeader("Cache-Control", "no-store");
-      if (!actions.runtime.enabled || !actions.issueAirbnbConnectionLink) {
-        return mutationUnavailable(res);
-      }
-      const actor = mutationActor(req);
-      try {
-        const result = await actions.issueAirbnbConnectionLink({
-          organizationId: actor.orgId,
-          propertyId: String(req.params.propertyId ?? "").trim(),
-          requestedByUserId: actor.id,
-          requestKey: req.distributionRequestKey!,
-        });
-        return res.json({
-          ok: true,
-          authorizationUrl: result.authorizationUrl,
-          expiresAt: result.expiresAt.toISOString(),
-        });
-      } catch (error) {
-        return mutationFailure(res, error, "OTA_AIRBNB_CONNECTION_LINK_FAILED");
-      }
-    }
-  );
-
-  router.post(
-    "/api/dashboard/distribution/airbnb/callback/verify",
-    requireAuth,
-    mutationSecurity,
-    async (req: DistributionMutationRequest, res) => {
-      res.setHeader("Cache-Control", "no-store");
-      if (!actions.runtime.enabled || !actions.verifyAirbnbCallback) {
-        return mutationUnavailable(res);
-      }
-      const actor = mutationActor(req);
-      const body = req.body && typeof req.body === "object" ? req.body as Record<string, unknown> : {};
-      try {
-        const result = await actions.verifyAirbnbCallback({
-          organizationId: actor.orgId,
-          requestedByUserId: actor.id,
-          success: String(body.success ?? ""),
-          channelId: body.channelId == null ? null : String(body.channelId),
-          token: String(body.token ?? ""),
-          requestKey: req.distributionRequestKey!,
-        });
-        return res.json({ ok: true, result });
-      } catch (error) {
-        return mutationFailure(res, error, "OTA_AIRBNB_CALLBACK_VERIFICATION_FAILED");
-      }
-    }
-  );
-
-  router.post(
     "/api/dashboard/distribution/properties/:propertyId/channels/:provider/session",
     requireAuth,
     mutationSecurity,
@@ -375,4 +300,35 @@ export function buildDashboardDistributionConnectionCenterRouter(
         ) {
           return res.status(409).json({
             ok: false,
-            error: "OTA_DISTRIBUTION_T
+            error: "OTA_DISTRIBUTION_TENANT_MISMATCH",
+          });
+        }
+
+        const connectionCenter = buildConnectionCenterReadModel({
+          property,
+          distributionProperty: distributionProperty
+            ? {
+                provisioningStatus: distributionProperty.provisioningStatus,
+                channels:
+                  distributionProperty.otaChannelConnections as Array<
+                    StoredOtaChannel & { provider: ConnectionCenterProvider }
+                  >,
+              }
+            : null,
+        });
+
+        return res.json({ ok: true, connectionCenter });
+      } catch (error) {
+        console.error("[distribution.connection-center] lookup failed", {
+          errorType: error instanceof Error ? error.name : typeof error,
+        });
+        return res.status(500).json({
+          ok: false,
+          error: "DISTRIBUTION_CONNECTION_CENTER_FETCH_FAILED",
+        });
+      }
+    }
+  );
+
+  return router;
+}
