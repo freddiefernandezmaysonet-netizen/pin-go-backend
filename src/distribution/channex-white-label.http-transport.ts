@@ -21,6 +21,7 @@ const MAX_RESPONSE_BYTES = 1_000_000;
 const MAX_DIAGNOSTIC_BODY_BYTES = 16_384;
 const MAX_DIAGNOSTIC_VALUE_LENGTH = 240;
 const MAX_DIAGNOSTIC_DETAIL_ENTRIES = 12;
+const SENSITIVE_DIAGNOSTIC_KEY = /^(?:token|api[_-]?key|authorization|password|secret)$/i;
 
 export class WhiteLabelHttpTransportError extends Error {
   readonly retryDisposition: "SAFE_RETRY" | "RECONCILIATION_REQUIRED";
@@ -122,7 +123,12 @@ function flattenDocumentedDetails(value: unknown): string | null {
         if (entries.length >= MAX_DIAGNOSTIC_DETAIL_ENTRIES) break;
         const safeKey = sanitizeDiagnosticKey(key);
         if (!safeKey) continue;
-        visit(nested, path ? `${path}.${safeKey}` : safeKey, depth + 1);
+        const nextPath = path ? `${path}.${safeKey}` : safeKey;
+        if (SENSITIVE_DIAGNOSTIC_KEY.test(safeKey)) {
+          entries.push(`${nextPath}=[REDACTED]`);
+          continue;
+        }
+        visit(nested, nextPath, depth + 1);
       }
       return;
     }
