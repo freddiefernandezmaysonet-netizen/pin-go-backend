@@ -11,6 +11,21 @@ const ADMIN_ROLES = new Set(["ORG_ADMIN", "ADMIN", "PLATFORM_ADMIN"]);
 type Actor = { id?: string; orgId?: string; role?: string };
 type AirbnbListingSummary = { id: string; title: string };
 
+type AirbnbMappingPlanResult = {
+  propertyId: string;
+  channelId: string;
+  listing: AirbnbListingSummary;
+  ratePlan: { id: string; source: "PIN_GO_PRIMARY_RATE_PLAN" };
+  mappingRequest: {
+    mapping: {
+      rate_plan_id: string;
+      settings: { listing_id: string };
+    };
+  };
+  executable: false;
+  nextAction: "MAPPING_EXECUTION_REQUIRES_APPROVAL";
+};
+
 export type AirbnbHostSelfServiceRouteActions = {
   enabled: boolean;
   isTrustedOrigin(origin: string, organizationId: string): Promise<boolean>;
@@ -45,6 +60,12 @@ export type AirbnbHostSelfServiceRouteActions = {
     listings: AirbnbListingSummary[];
     nextAction: "MAPPING_REQUIRED";
   }>;
+  prepareMappingPlan(args: {
+    organizationId: string;
+    propertyId: string;
+    channelId: string;
+    listingId: string;
+  }): Promise<AirbnbMappingPlanResult>;
 };
 
 function failure(res: import("express").Response, error: unknown, fallback: string) {
@@ -177,6 +198,37 @@ export function buildDashboardAirbnbHostSelfServiceRouter(
         return res.json({ ok: true, result });
       } catch (error) {
         return failure(res, error, "OTA_AIRBNB_LISTINGS_DISCOVERY_FAILED");
+      }
+    }
+  );
+
+  // Read-only review of the exact future mapping request. No mapping executor
+  // exists in this gate; the selected listing is revalidated server-side.
+  router.get(
+    "/api/dashboard/distribution/properties/:propertyId/channels/AIRBNB/:channelId/mapping-plan",
+    requireAuth,
+    async (req: DistributionMutationRequest, res) => {
+      res.setHeader("Cache-Control", "no-store");
+      if (!actions.enabled) {
+        return res.status(503).json({
+          ok: false,
+          error: "OTA_AIRBNB_HOST_SELF_SERVICE_DISABLED",
+        });
+      }
+      const currentActor = actor(req);
+      if (!currentActor) {
+        return res.status(403).json({ ok: false, error: "OTA_CONNECTION_READ_FORBIDDEN" });
+      }
+      try {
+        const result = await actions.prepareMappingPlan({
+          organizationId: currentActor.orgId,
+          propertyId: String(req.params.propertyId ?? ""),
+          channelId: String(req.params.channelId ?? ""),
+          listingId: String(req.query?.listingId ?? ""),
+        });
+        return res.json({ ok: true, result });
+      } catch (error) {
+        return failure(res, error, "OTA_AIRBNB_MAPPING_PLAN_FAILED");
       }
     }
   );

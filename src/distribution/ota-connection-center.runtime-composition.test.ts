@@ -57,6 +57,8 @@ test("complete configuration composes Airbnb self-service without eager requests
   assert.equal(actions.airbnbHostSelfService?.enabled, true);
   assert.equal(typeof actions.airbnbHostSelfService?.issueConnectionLink, "function");
   assert.equal(typeof actions.airbnbHostSelfService?.verifyCallback, "function");
+  assert.equal(typeof actions.airbnbHostSelfService?.discoverListings, "function");
+  assert.equal(typeof actions.airbnbHostSelfService?.prepareMappingPlan, "function");
   assert.equal(fetchCalls, 0);
 });
 

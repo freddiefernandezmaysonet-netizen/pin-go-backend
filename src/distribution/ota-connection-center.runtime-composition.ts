@@ -11,6 +11,7 @@ import {
 } from "./airbnb-host-self-service.service.js";
 import { discoverAirbnbHostListings } from "./airbnb-host-self-service.listings.service.js";
 import { createAirbnbHostSelfServiceListingsHttpTransport } from "./airbnb-host-self-service.listings.http-transport.js";
+import { prepareAirbnbHostMappingPlan } from "./airbnb-host-self-service.mapping-plan.service.js";
 import { ChannexWhiteLabelAdapter } from "./channex-white-label.adapter.js";
 import { createChannexWhiteLabelHttpTransport } from "./channex-white-label.http-transport.js";
 import { createChannexReadonlyHttpTransport } from "./channex-readonly.http-transport.js";
@@ -214,6 +215,10 @@ export function buildRuntimeOtaConnectionCenterComposition(args: {
       return readonlyTransport.getChannel(channelId);
     },
   };
+  const airbnbReadTransport = {
+    getChannel: (id: string) => readonlyTransport.getChannel(id),
+    listListings: (id: string) => airbnbListingsTransport.listListings(id),
+  };
 
   const actions = buildOtaConnectionCenterComposition({
     prisma: args.prisma,
@@ -268,13 +273,24 @@ export function buildRuntimeOtaConnectionCenterComposition(args: {
         discoverListings: ({ organizationId, propertyId, channelId }) =>
           discoverAirbnbHostListings({
             client: airbnbClient,
-            transport: {
-              getChannel: (id) => readonlyTransport.getChannel(id),
-              listListings: (id) => airbnbListingsTransport.listListings(id),
-            },
+            transport: airbnbReadTransport,
             organizationId,
             propertyId,
             channelId,
+          }),
+        prepareMappingPlan: ({
+          organizationId,
+          propertyId,
+          channelId,
+          listingId,
+        }) =>
+          prepareAirbnbHostMappingPlan({
+            client: airbnbClient,
+            transport: airbnbReadTransport,
+            organizationId,
+            propertyId,
+            channelId,
+            listingId,
           }),
       },
       reconcile: ({
