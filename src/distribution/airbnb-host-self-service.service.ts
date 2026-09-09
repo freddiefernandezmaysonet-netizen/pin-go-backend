@@ -188,26 +188,24 @@ export function verifyAirbnbHostState(args: {
   return claims;
 }
 
-function parseConnectionLinkUrl(payload: unknown, allowedProviderOrigin: string): string {
+function parseConnectionLinkUrl(payload: unknown): string {
   const root = record(payload);
   const data = record(root?.data);
   const attributes = record(data?.attributes);
-  const rawUrl = required(
-    attributes?.url,
-    "OTA_AIRBNB_CONNECTION_LINK_RESPONSE_INVALID",
-    4096
-  );
+  const rawUrl = attributes?.url;
   try {
+    if (typeof rawUrl !== "string") throw new Error("invalid");
     const parsed = new URL(rawUrl);
     if (
       parsed.protocol !== "https:" ||
       parsed.username ||
-      parsed.password ||
-      parsed.origin !== allowedProviderOrigin
+      parsed.password
     ) {
       throw new Error("invalid");
     }
-    return parsed.toString();
+    // Channex returns the Airbnb authorization page, not its API origin.
+    // Keep HTTPS/credential guards without rewriting the provider's URL.
+    return rawUrl;
   } catch {
     throw new AirbnbHostSelfServiceError(
       "OTA_AIRBNB_CONNECTION_LINK_RESPONSE_INVALID"
@@ -284,7 +282,7 @@ export async function issueAirbnbHostConnectionLink(args: {
     args.callbackOrigin,
     "OTA_AIRBNB_CALLBACK_ORIGIN_INVALID"
   );
-  const providerOrigin = exactHttpsOrigin(
+  exactHttpsOrigin(
     args.providerOrigin,
     "OTA_AIRBNB_PROVIDER_ORIGIN_INVALID"
   );
@@ -322,7 +320,7 @@ export async function issueAirbnbHostConnectionLink(args: {
 
   const now = args.now ?? new Date();
   return {
-    authorizationUrl: parseConnectionLinkUrl(response, providerOrigin),
+    authorizationUrl: parseConnectionLinkUrl(response),
     expiresAt: new Date(now.getTime() + STATE_TTL_MS),
   };
 }
