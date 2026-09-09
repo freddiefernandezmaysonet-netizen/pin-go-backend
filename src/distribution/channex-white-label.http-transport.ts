@@ -14,6 +14,7 @@ const ALLOWED_POST_PATHS = new Set([
   "/api/v1/room_types",
   "/api/v1/rate_plans",
   "/api/v1/auth/one_time_token",
+  "/api/v1/meta/airbnb/connection_link",
 ]);
 
 export class WhiteLabelHttpTransportError extends Error {
