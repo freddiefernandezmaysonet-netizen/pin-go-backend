@@ -75,13 +75,79 @@ test("transport rejects non-allowlisted origins and paths before fetch", async (
   assert.equal(calls, 0);
 });
 
-test("4xx is retry-safe while network and 5xx outcomes require reconciliation", async () => {
+test("structured 4xx preserves only bounded sanitized provider diagnostics", async () => {
+  const warnings: unknown[][] = [];
+  const originalWarn = console.warn;
+  console.warn = (...args: unknown[]) => { warnings.push(args); };
+  try {
+    const transport = createChannexWhiteLabelHttpTransport({
+      apiOrigin: "https://staging.channex.io",
+      timeoutMs: 5_000,
+      fetchImpl: async () => new Response(JSON.stringify({
+        errors: [{
+          code: "invalid_redirect_uri",
+          detail: "redirect_uri https://secret.example/callback?token=abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789 is invalid",
+        }],
+      }), { status: 422, headers: { "Content-Type": "application/json" } }),
+    });
+
+    await assert.rejects(
+      transport.send(request),
+      (error: unknown) => {
+        assert.ok(error instanceof WhiteLabelHttpTransportError);
+        assert.equal(error.code, "OTA_PROVIDER_REQUEST_REJECTED");
+        assert.equal(error.retryDisposition, "SAFE_RETRY");
+        assert.equal(error.providerStatus, 422);
+        assert.equal(error.providerCode, "invalid_redirect_uri");
+        assert.ok(error.providerMessage?.includes("[URL_REDACTED]"));
+        assert.ok(!error.providerMessage?.includes("secret.example"));
+        assert.ok(!error.providerMessage?.includes("abcdefghijklmnopqrstuvwxyz"));
+        assert.equal(error.message, "OTA_PROVIDER_REQUEST_REJECTED");
+        return true;
+      }
+    );
+    assert.equal(warnings.length, 1);
+    const serialized = JSON.stringify(warnings);
+    assert.ok(serialized.includes("invalid_redirect_uri"));
+    assert.ok(serialized.includes("422"));
+    assert.ok(!serialized.includes("secret.example"));
+    assert.ok(!serialized.includes("abcdefghijklmnopqrstuvwxyz"));
+    assert.ok(!serialized.includes("secret-test-key"));
+  } finally {
+    console.warn = originalWarn;
+  }
+});
+
+test("unstructured or oversized 4xx never exposes raw provider bodies", async () => {
+  for (const body of ["rejected-secret", "x".repeat(20_000)]) {
+    const warnings: unknown[][] = [];
+    const originalWarn = console.warn;
+    console.warn = (...args: unknown[]) => { warnings.push(args); };
+    try {
+      const transport = createChannexWhiteLabelHttpTransport({
+        apiOrigin: "https://staging.channex.io",
+        timeoutMs: 5_000,
+        fetchImpl: async () => new Response(body, { status: 422 }),
+      });
+      await assert.rejects(
+        transport.send(request),
+        (error: unknown) => {
+          assert.ok(error instanceof WhiteLabelHttpTransportError);
+          assert.equal(error.providerStatus, 422);
+          assert.equal(error.providerCode, null);
+          assert.equal(error.providerMessage, null);
+          return true;
+        }
+      );
+      assert.ok(!JSON.stringify(warnings).includes("rejected-secret"));
+    } finally {
+      console.warn = originalWarn;
+    }
+  }
+});
+
+test("network and 5xx outcomes still require reconciliation", async () => {
   for (const scenario of [
-    {
-      response: async () => new Response("rejected-secret", { status: 422 }),
-      code: "OTA_PROVIDER_REQUEST_REJECTED",
-      retryDisposition: "SAFE_RETRY",
-    },
     {
       response: async () => new Response("provider-secret", { status: 503 }),
       code: "OTA_PROVIDER_RECONCILIATION_REQUIRED",
