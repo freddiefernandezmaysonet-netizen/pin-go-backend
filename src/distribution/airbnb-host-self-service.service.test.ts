@@ -14,6 +14,9 @@ const NOW = new Date("2026-09-09T05:00:00.000Z");
 const GROUP_ID = "11111111-1111-4111-8111-111111111111";
 const PROPERTY_ID = "22222222-2222-4222-8222-222222222222";
 const CHANNEL_ID = "33333333-3333-4333-8333-333333333333";
+const ROOM_TYPE_ID = "44444444-4444-4444-8444-444444444444";
+const RATE_PLAN_ID = "55555555-5555-4555-8555-555555555555";
+const OTHER_PROPERTY_ID = "66666666-6666-4666-8666-666666666666";
 
 function client() {
   return {
@@ -25,12 +28,45 @@ function client() {
           platform: "CHANNEX",
           provisioningStatus: "READY",
           externalPropertyId: PROPERTY_ID,
+          externalPrimaryRoomTypeId: ROOM_TYPE_ID,
+          externalPrimaryRatePlanId: RATE_PLAN_ID,
           group: {
             organizationId: "org-1",
             platform: "CHANNEX",
+            provisioningStatus: "READY",
             externalGroupId: GROUP_ID,
           },
         };
+      },
+    },
+  };
+}
+
+function exactAirbnbChannelPayload(
+  channelId = CHANNEL_ID,
+  propertyId = PROPERTY_ID
+) {
+  return {
+    data: {
+      id: channelId,
+      type: "channel",
+      attributes: {
+        id: channelId,
+        channel: "Airbnb",
+        properties: [propertyId],
+        is_active: false,
+        rate_plans: [],
+      },
+      relationships: {
+        properties: {
+          data: [{ id: propertyId, type: "property" }],
+        },
+        group: {
+          data: { id: GROUP_ID, type: "group" },
+        },
+        known_mappings: {
+          data: [],
+        },
       },
     },
   };
@@ -117,7 +153,7 @@ test("connection link rejects an authorization URL outside configured Channex or
   );
 });
 
-test("successful callback verifies exact channel and stops at mapping required", async () => {
+test("successful callback verifies exact channel identity and stops at mapping required", async () => {
   const token = createAirbnbHostState({
     secret: SECRET,
     organizationId: "org-1",
@@ -128,11 +164,12 @@ test("successful callback verifies exact channel and stops at mapping required",
   });
   let requestedChannel: string | null = null;
   const result = await verifyAirbnbHostCallback({
+    client: client(),
     transport: {
       async createConnectionLink() { throw new Error("not used"); },
       async getChannel(channelId) {
         requestedChannel = channelId;
-        return { data: { id: channelId, attributes: { channel: "airbnb", is_active: false } } };
+        return exactAirbnbChannelPayload(channelId);
       },
     },
     stateSecret: SECRET,
@@ -154,6 +191,39 @@ test("successful callback verifies exact channel and stops at mapping required",
   });
 });
 
+test("callback rejects an Airbnb channel belonging to a different Channex property", async () => {
+  const token = createAirbnbHostState({
+    secret: SECRET,
+    organizationId: "org-1",
+    propertyId: "property-1",
+    requestedByUserId: "user-1",
+    now: NOW,
+    nonce: "fixed-nonce",
+  });
+
+  await assert.rejects(
+    () => verifyAirbnbHostCallback({
+      client: client(),
+      transport: {
+        async createConnectionLink() { throw new Error("not used"); },
+        async getChannel(channelId) {
+          return exactAirbnbChannelPayload(channelId, OTHER_PROPERTY_ID);
+        },
+      },
+      stateSecret: SECRET,
+      organizationId: "org-1",
+      requestedByUserId: "user-1",
+      success: "true",
+      channelId: CHANNEL_ID,
+      token,
+      now: new Date(NOW.getTime() + 60_000),
+    }),
+    (error: unknown) =>
+      error instanceof AirbnbHostSelfServiceError &&
+      error.code === "OTA_AIRBNB_CHANNEL_IDENTITY_NOT_VERIFIED"
+  );
+});
+
 test("failed callback does not fetch a channel or claim success", async () => {
   const token = createAirbnbHostState({
     secret: SECRET,
@@ -165,6 +235,7 @@ test("failed callback does not fetch a channel or claim success", async () => {
   });
   let channelReads = 0;
   const result = await verifyAirbnbHostCallback({
+    client: client(),
     transport: {
       async createConnectionLink() { throw new Error("not used"); },
       async getChannel() { channelReads += 1; return {}; },
