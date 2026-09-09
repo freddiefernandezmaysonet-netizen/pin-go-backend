@@ -17,12 +17,19 @@ const ALLOWED_POST_PATHS = new Set([
   "/api/v1/meta/airbnb/connection_link",
 ]);
 
+const MAX_RESPONSE_BYTES = 1_000_000;
+const MAX_DIAGNOSTIC_BODY_BYTES = 16_384;
+const MAX_DIAGNOSTIC_VALUE_LENGTH = 240;
+
 export class WhiteLabelHttpTransportError extends Error {
   readonly retryDisposition: "SAFE_RETRY" | "RECONCILIATION_REQUIRED";
 
   constructor(
     readonly code: string,
-    retryDisposition: "SAFE_RETRY" | "RECONCILIATION_REQUIRED"
+    retryDisposition: "SAFE_RETRY" | "RECONCILIATION_REQUIRED",
+    readonly providerStatus: number | null = null,
+    readonly providerCode: string | null = null,
+    readonly providerMessage: string | null = null
   ) {
     super(code);
     this.name = "WhiteLabelHttpTransportError";
@@ -70,22 +77,93 @@ function requestUrl(origin: string, request: WhiteLabelTransportRequest): URL {
   return url;
 }
 
-function responseFailure(status: number): WhiteLabelHttpTransportError {
-  if (status === 429) {
+function record(value: unknown): Record<string, unknown> | null {
+  return value && typeof value === "object" && !Array.isArray(value)
+    ? value as Record<string, unknown>
+    : null;
+}
+
+function sanitizeDiagnosticValue(value: unknown): string | null {
+  if (typeof value !== "string" && typeof value !== "number") return null;
+  let normalized = String(value).replace(/[\r\n\t]+/g, " ").trim();
+  if (!normalized) return null;
+  normalized = normalized
+    .replace(/https?:\/\/\S+/gi, "[URL_REDACTED]")
+    .replace(/\b(?:token|api[_ -]?key|authorization|password|secret)\b\s*[:=]\s*\S+/gi, "$1=[REDACTED]")
+    .replace(/[A-Za-z0-9_-]{48,}/g, "[VALUE_REDACTED]")
+    .replace(/[^\x20-\x7E]/g, "?");
+  return normalized.slice(0, MAX_DIAGNOSTIC_VALUE_LENGTH) || null;
+}
+
+function extractProviderDiagnostic(payload: unknown): {
+  providerCode: string | null;
+  providerMessage: string | null;
+} {
+  const root = record(payload);
+  if (!root) return { providerCode: null, providerMessage: null };
+  const errors = Array.isArray(root.errors) ? root.errors : [];
+  const firstError = record(errors[0]);
+  const error = record(root.error);
+  const providerCode = sanitizeDiagnosticValue(
+    firstError?.code ?? error?.code ?? root.code ?? firstError?.title ?? error?.title
+  );
+  const providerMessage = sanitizeDiagnosticValue(
+    firstError?.detail ?? firstError?.message ?? error?.detail ?? error?.message ??
+      root.message ?? root.detail ?? root.error
+  );
+  return { providerCode, providerMessage };
+}
+
+async function readProviderDiagnostic(response: Response): Promise<{
+  providerCode: string | null;
+  providerMessage: string | null;
+}> {
+  const contentLength = Number(response.headers.get("content-length") ?? 0);
+  if (Number.isFinite(contentLength) && contentLength > MAX_DIAGNOSTIC_BODY_BYTES) {
+    return { providerCode: null, providerMessage: null };
+  }
+  try {
+    const body = await response.text();
+    if (!body || body.length > MAX_DIAGNOSTIC_BODY_BYTES) {
+      return { providerCode: null, providerMessage: null };
+    }
+    return extractProviderDiagnostic(JSON.parse(body) as unknown);
+  } catch {
+    return { providerCode: null, providerMessage: null };
+  }
+}
+
+async function responseFailure(response: Response): Promise<WhiteLabelHttpTransportError> {
+  const diagnostic = response.status >= 400 && response.status < 500
+    ? await readProviderDiagnostic(response)
+    : { providerCode: null, providerMessage: null };
+  if (response.status === 429) {
     return new WhiteLabelHttpTransportError(
       "OTA_PROVIDER_RATE_LIMITED",
-      "SAFE_RETRY"
+      "SAFE_RETRY",
+      response.status,
+      diagnostic.providerCode,
+      diagnostic.providerMessage
     );
   }
-  if (status >= 400 && status < 500) {
+  if (response.status >= 400 && response.status < 500) {
+    console.warn("[ota-provider] request rejected", {
+      providerStatus: response.status,
+      providerCode: diagnostic.providerCode,
+      providerMessage: diagnostic.providerMessage,
+    });
     return new WhiteLabelHttpTransportError(
       "OTA_PROVIDER_REQUEST_REJECTED",
-      "SAFE_RETRY"
+      "SAFE_RETRY",
+      response.status,
+      diagnostic.providerCode,
+      diagnostic.providerMessage
     );
   }
   return new WhiteLabelHttpTransportError(
     "OTA_PROVIDER_RECONCILIATION_REQUIRED",
-    "RECONCILIATION_REQUIRED"
+    "RECONCILIATION_REQUIRED",
+    response.status
   );
 }
 
@@ -141,17 +219,17 @@ export function createChannexWhiteLabelHttpTransport(args: {
             "RECONCILIATION_REQUIRED"
           );
         }
-        if (!response.ok) throw responseFailure(response.status);
+        if (!response.ok) throw await responseFailure(response);
 
         const contentLength = Number(response.headers.get("content-length") ?? 0);
-        if (Number.isFinite(contentLength) && contentLength > 1_000_000) {
+        if (Number.isFinite(contentLength) && contentLength > MAX_RESPONSE_BYTES) {
           throw new WhiteLabelHttpTransportError(
             "OTA_PROVIDER_RECONCILIATION_REQUIRED",
             "RECONCILIATION_REQUIRED"
           );
         }
         const body = await response.text();
-        if (body.length > 1_000_000) {
+        if (body.length > MAX_RESPONSE_BYTES) {
           throw new WhiteLabelHttpTransportError(
             "OTA_PROVIDER_RECONCILIATION_REQUIRED",
             "RECONCILIATION_REQUIRED"
