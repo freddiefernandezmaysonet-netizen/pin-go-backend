@@ -14,6 +14,10 @@ import {
 import type { OtaConnectionCenterRuntime } from "../distribution/ota-connection-runtime.policy";
 import type { OtaChannelEvidenceResult } from "../distribution/channex-channel-lifecycle.evidence.js";
 import type { CanonicalOtaReadinessResult } from "../distribution/channex-canonical-readiness.reconciler.js";
+import {
+  buildDashboardAirbnbHostSelfServiceRouter,
+  type AirbnbHostSelfServiceRouteActions,
+} from "./dashboard.airbnb-host-self-service.route.js";
 import { buildChannexChannelLifecycleWebhookRouter } from "./channex-channel-lifecycle.webhook.route.js";
 
 type MutationActor = { id?: string; orgId?: string; role?: string };
@@ -21,6 +25,7 @@ type MutationActor = { id?: string; orgId?: string; role?: string };
 export type DistributionConnectionCenterActions = {
   runtime: OtaConnectionCenterRuntime;
   isTrustedOrigin(origin: string, organizationId: string): Promise<boolean>;
+  airbnbHostSelfService?: AirbnbHostSelfServiceRouteActions;
   channelLifecycle?: {
     enabled: boolean;
     expectedSecret: string | null | undefined;
@@ -112,6 +117,12 @@ export function buildDashboardDistributionConnectionCenterRouter(
   const mutationSecurity = createDistributionMutationSecurity({
     isTrustedOrigin: actions.isTrustedOrigin,
   });
+
+  if (actions.airbnbHostSelfService) {
+    router.use(
+      buildDashboardAirbnbHostSelfServiceRouter(actions.airbnbHostSelfService)
+    );
+  }
 
   if (actions.channelLifecycle) {
     router.use(buildChannexChannelLifecycleWebhookRouter(actions.channelLifecycle));
