@@ -9,6 +9,7 @@ import {
 const ADMIN_ROLES = new Set(["ORG_ADMIN", "ADMIN", "PLATFORM_ADMIN"]);
 
 type Actor = { id?: string; orgId?: string; role?: string };
+type AirbnbListingSummary = { id: string; title: string };
 
 export type AirbnbHostSelfServiceRouteActions = {
   enabled: boolean;
@@ -32,6 +33,17 @@ export type AirbnbHostSelfServiceRouteActions = {
     channelActive: boolean | null;
     airbnbAccountVerified: false;
     nextAction: "RETRY_AUTHORIZATION" | "LISTING_DISCOVERY_REQUIRED";
+  }>;
+  discoverListings(args: {
+    organizationId: string;
+    propertyId: string;
+    channelId: string;
+  }): Promise<{
+    propertyId: string;
+    channelId: string;
+    airbnbAccountVerified: true;
+    listings: AirbnbListingSummary[];
+    nextAction: "MAPPING_REQUIRED";
   }>;
 };
 
@@ -136,6 +148,35 @@ export function buildDashboardAirbnbHostSelfServiceRouter(
         return res.json({ ok: true, result });
       } catch (error) {
         return failure(res, error, "OTA_AIRBNB_CALLBACK_VERIFICATION_FAILED");
+      }
+    }
+  );
+
+  // Read-only phase boundary. Mapping and activation are intentionally absent.
+  router.get(
+    "/api/dashboard/distribution/properties/:propertyId/channels/AIRBNB/:channelId/listings",
+    requireAuth,
+    async (req: DistributionMutationRequest, res) => {
+      res.setHeader("Cache-Control", "no-store");
+      if (!actions.enabled) {
+        return res.status(503).json({
+          ok: false,
+          error: "OTA_AIRBNB_HOST_SELF_SERVICE_DISABLED",
+        });
+      }
+      const currentActor = actor(req);
+      if (!currentActor) {
+        return res.status(403).json({ ok: false, error: "OTA_CONNECTION_READ_FORBIDDEN" });
+      }
+      try {
+        const result = await actions.discoverListings({
+          organizationId: currentActor.orgId,
+          propertyId: String(req.params.propertyId ?? ""),
+          channelId: String(req.params.channelId ?? ""),
+        });
+        return res.json({ ok: true, result });
+      } catch (error) {
+        return failure(res, error, "OTA_AIRBNB_LISTINGS_DISCOVERY_FAILED");
       }
     }
   );

@@ -9,6 +9,8 @@ import {
   type AirbnbHostSelfServiceClient,
   type AirbnbHostSelfServiceTransport,
 } from "./airbnb-host-self-service.service.js";
+import { discoverAirbnbHostListings } from "./airbnb-host-self-service.listings.service.js";
+import { createAirbnbHostSelfServiceListingsHttpTransport } from "./airbnb-host-self-service.listings.http-transport.js";
 import { ChannexWhiteLabelAdapter } from "./channex-white-label.adapter.js";
 import { createChannexWhiteLabelHttpTransport } from "./channex-white-label.http-transport.js";
 import { createChannexReadonlyHttpTransport } from "./channex-readonly.http-transport.js";
@@ -175,6 +177,12 @@ export function buildRuntimeOtaConnectionCenterComposition(args: {
     timeoutMs: config.provider.timeoutMs,
     fetchImpl: args.fetchImpl,
   });
+  const airbnbListingsTransport = createAirbnbHostSelfServiceListingsHttpTransport({
+    apiOrigin: config.provider.apiOrigin,
+    apiKey: config.provider.apiKey,
+    timeoutMs: config.provider.timeoutMs,
+    fetchImpl: args.fetchImpl,
+  });
   const adapter = new ChannexWhiteLabelAdapter({
     enabled: true,
     apiKey: config.provider.apiKey,
@@ -256,6 +264,17 @@ export function buildRuntimeOtaConnectionCenterComposition(args: {
             success,
             channelId,
             token,
+          }),
+        discoverListings: ({ organizationId, propertyId, channelId }) =>
+          discoverAirbnbHostListings({
+            client: airbnbClient,
+            transport: {
+              getChannel: (id) => readonlyTransport.getChannel(id),
+              listListings: (id) => airbnbListingsTransport.listListings(id),
+            },
+            organizationId,
+            propertyId,
+            channelId,
           }),
       },
       reconcile: ({

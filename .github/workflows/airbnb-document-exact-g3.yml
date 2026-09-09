@@ -1,0 +1,36 @@
+name: Airbnb Document-Exact Gate 3 (backend)
+
+on:
+  push:
+    branches:
+      - agent/airbnb-document-exact-closure
+
+permissions:
+  contents: read
+
+jobs:
+  listing-discovery:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout exact working branch commit
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+      - name: Use Node.js 22
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+      - name: Install locked dependencies without lifecycle scripts
+        run: npm ci --ignore-scripts --no-audit --no-fund
+      - name: Run prior gates plus document-derived listing discovery tests
+        run: node --import tsx --test src/distribution/airbnb-host-self-service.service.test.ts src/distribution/airbnb-host-self-service.callback-verifier.test.ts src/distribution/airbnb-host-self-service.listings.test.ts src/distribution/ota-connection-center.runtime-composition.test.ts
+      - name: Typecheck isolated Gate 3 production modules and route
+        run: ./node_modules/.bin/tsc --noEmit --strict --target ES2022 --module NodeNext --moduleResolution NodeNext --types node src/distribution/airbnb-host-self-service.listings.service.ts src/distribution/airbnb-host-self-service.listings.http-transport.ts src/routes/dashboard.airbnb-host-self-service.route.ts
+      - name: Prove certified shared transport and identity cores remain unchanged
+        run: git diff --exit-code 2c82832fb84b112ea81037efff8f526dd48470ab -- src/distribution/channex-channel-identity.ts src/distribution/channex-readonly.http-transport.ts src/distribution/channex-white-label.http-transport.ts src/distribution/distribution-mutation-security.ts src/middleware/requireAuth.ts prisma src/workers
+      - name: Prove Gate 3 adds no mapping activation ARI booking or worker operation
+        run: |
+          ! grep -R -E '(/mappings|/activate|load_future_reservations|ARI|worker)' src/distribution/airbnb-host-self-service.listings.service.ts src/distribution/airbnb-host-self-service.listings.http-transport.ts
