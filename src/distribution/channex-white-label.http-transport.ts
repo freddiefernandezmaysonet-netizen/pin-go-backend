@@ -21,6 +21,7 @@ const MAX_RESPONSE_BYTES = 1_000_000;
 const MAX_DIAGNOSTIC_BODY_BYTES = 16_384;
 const MAX_DIAGNOSTIC_VALUE_LENGTH = 240;
 const MAX_DIAGNOSTIC_DETAIL_ENTRIES = 12;
+const MAX_PUBLIC_DIAGNOSTIC_CODE_LENGTH = 320;
 const SENSITIVE_DIAGNOSTIC_KEY = /^(?:token|api[_-]?key|authorization|password|secret)$/i;
 
 export class WhiteLabelHttpTransportError extends Error {
@@ -91,7 +92,7 @@ function sanitizeDiagnosticValue(value: unknown): string | null {
   if (!normalized) return null;
   normalized = normalized
     .replace(/https?:\/\/\S+/gi, "[URL_REDACTED]")
-    .replace(/\b(?:token|api[_ -]?key|authorization|password|secret)\b\s*[:=]\s*\S+/gi, "$1=[REDACTED]")
+    .replace(/\b(token|api[_ -]?key|authorization|password|secret)\b\s*[:=]\s*\S+/gi, "$1=[REDACTED]")
     .replace(/[A-Za-z0-9_-]{48,}/g, "[VALUE_REDACTED]")
     .replace(/[^\x20-\x7E]/g, "?");
   return normalized.slice(0, MAX_DIAGNOSTIC_VALUE_LENGTH) || null;
@@ -164,6 +165,28 @@ function extractProviderDiagnostic(payload: unknown): {
   return { providerCode, providerMessage };
 }
 
+function diagnosticCodeSegment(value: string | null): string | null {
+  if (!value) return null;
+  const segment = value
+    .toUpperCase()
+    .replace(/[^A-Z0-9]+/g, "_")
+    .replace(/^_+|_+$/g, "")
+    .slice(0, 120);
+  return segment || null;
+}
+
+function rejectedRequestCode(
+  status: number,
+  diagnostic: { providerCode: string | null; providerMessage: string | null }
+): string {
+  const pieces = ["OTA_PROVIDER_REQUEST_REJECTED", `P${status}`];
+  const providerCode = diagnosticCodeSegment(diagnostic.providerCode);
+  const providerMessage = diagnosticCodeSegment(diagnostic.providerMessage);
+  if (providerCode) pieces.push(providerCode);
+  if (providerMessage) pieces.push(providerMessage);
+  return pieces.join("__").slice(0, MAX_PUBLIC_DIAGNOSTIC_CODE_LENGTH);
+}
+
 async function readProviderDiagnostic(response: Response): Promise<{
   providerCode: string | null;
   providerMessage: string | null;
@@ -197,13 +220,8 @@ async function responseFailure(response: Response): Promise<WhiteLabelHttpTransp
     );
   }
   if (response.status >= 400 && response.status < 500) {
-    console.warn("[ota-provider] request rejected", {
-      providerStatus: response.status,
-      providerCode: diagnostic.providerCode,
-      providerMessage: diagnostic.providerMessage,
-    });
     return new WhiteLabelHttpTransportError(
-      "OTA_PROVIDER_REQUEST_REJECTED",
+      rejectedRequestCode(response.status, diagnostic),
       "SAFE_RETRY",
       response.status,
       diagnostic.providerCode,
