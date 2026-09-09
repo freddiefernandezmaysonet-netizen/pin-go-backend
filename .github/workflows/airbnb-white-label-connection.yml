@@ -1,0 +1,38 @@
+name: Airbnb White Label Connection Only (backend)
+
+on:
+  push:
+    branches:
+      - agent/airbnb-white-label-connection-closure
+
+permissions:
+  contents: read
+
+jobs:
+  connection-only:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout exact candidate
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+      - name: Freeze every file outside the explicit connection-only diff
+        run: git diff --exit-code 2c82832fb84b112ea81037efff8f526dd48470ab HEAD -- . ':(exclude)src/distribution/airbnb-host-self-service.callback-verifier.test.ts' ':(exclude)src/distribution/airbnb-host-self-service.callback-verifier.ts' ':(exclude)src/distribution/airbnb-host-self-service.service.test.ts' ':(exclude)src/distribution/airbnb-host-self-service.service.ts' ':(exclude)src/routes/dashboard.airbnb-host-self-service.route.ts' ':(exclude).github/workflows/airbnb-white-label-connection.yml'
+      - name: Use Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+      - name: Install locked dependencies without lifecycle scripts
+        run: npm ci --ignore-scripts --no-audit --no-fund
+      - name: Test connection-link and callback with simulated dependencies
+        run: node --import tsx --test src/distribution/airbnb-host-self-service.service.test.ts src/distribution/airbnb-host-self-service.callback-verifier.test.ts
+      - name: Typecheck isolated connection modules
+        run: ./node_modules/.bin/tsc --noEmit --strict --target ES2022 --module NodeNext --moduleResolution NodeNext --types node src/distribution/airbnb-host-self-service.service.ts src/distribution/airbnb-host-self-service.callback-verifier.ts
+      - name: Exclude listings and mapping implementation from this delivery
+        run: |
+          test ! -e src/distribution/airbnb-host-self-service.listings.service.ts
+          test ! -e src/distribution/airbnb-host-self-service.mapping-plan.service.ts
+          ! grep -E '/action/listings|/mappings|/activate|load_future_reservations' src/distribution/airbnb-host-self-service.service.ts src/distribution/airbnb-host-self-service.callback-verifier.ts src/routes/dashboard.airbnb-host-self-service.route.ts
