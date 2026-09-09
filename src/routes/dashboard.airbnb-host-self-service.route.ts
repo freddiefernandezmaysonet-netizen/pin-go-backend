@@ -27,10 +27,11 @@ export type AirbnbHostSelfServiceRouteActions = {
     token: string;
   }): Promise<{
     success: boolean;
-    propertyId: string;
+    propertyId: string | null;
     channelId: string | null;
     channelActive: boolean | null;
-    nextAction: "RETRY_AUTHORIZATION" | "MAPPING_REQUIRED";
+    airbnbAccountVerified: false;
+    nextAction: "RETRY_AUTHORIZATION" | "LISTING_DISCOVERY_REQUIRED";
   }>;
 };
 
