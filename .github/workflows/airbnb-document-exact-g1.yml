@@ -1,0 +1,28 @@
+name: Airbnb Document-Exact Gate 1 (backend)
+
+on:
+  push:
+    branches:
+      - agent/airbnb-document-exact-closure
+
+permissions:
+  contents: read
+
+jobs:
+  document-exact-handoff:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout exact working branch commit
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Use Node.js 22
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+      - name: Install locked dependencies without lifecycle scripts
+        run: npm ci --ignore-scripts --no-audit --no-fund
+      - name: Run mocked document-derived handoff tests
+        run: node --import tsx --test src/distribution/airbnb-host-self-service.service.test.ts
