@@ -1,5 +1,10 @@
 import { createHmac, randomBytes, timingSafeEqual } from "node:crypto";
 
+import {
+  ChannexChannelIdentityError,
+  verifyExactChannexChannel,
+} from "./channex-channel-identity.js";
+
 export class AirbnbHostSelfServiceError extends Error {
   constructor(readonly code: string) {
     super(code);
@@ -15,9 +20,12 @@ export type AirbnbHostSelfServiceClient = {
       platform: string;
       provisioningStatus: string;
       externalPropertyId: string | null;
+      externalPrimaryRoomTypeId: string | null;
+      externalPrimaryRatePlanId: string | null;
       group: {
         organizationId: string;
         platform: string;
+        provisioningStatus: string;
         externalGroupId: string | null;
       } | null;
     } | null>;
@@ -121,7 +129,11 @@ export function createAirbnbHostState(args: {
     requestedByUserId: required(args.requestedByUserId, "OTA_AIRBNB_STATE_ACTOR_INVALID", 120),
     issuedAt: nowMs,
     expiresAt: nowMs + STATE_TTL_MS,
-    nonce: required(args.nonce ?? randomBytes(18).toString("base64url"), "OTA_AIRBNB_STATE_NONCE_INVALID", 120),
+    nonce: required(
+      args.nonce ?? randomBytes(18).toString("base64url"),
+      "OTA_AIRBNB_STATE_NONCE_INVALID",
+      120
+    ),
   };
   const encoded = Buffer.from(JSON.stringify(claims), "utf8").toString("base64url");
   return `${encoded}.${signPayload(encoded, stateSecret(args.secret))}`;
@@ -149,7 +161,9 @@ export function verifyAirbnbHostState(args: {
 
   let claims: AirbnbHostStateClaims;
   try {
-    claims = JSON.parse(Buffer.from(encoded, "base64url").toString("utf8")) as AirbnbHostStateClaims;
+    claims = JSON.parse(
+      Buffer.from(encoded, "base64url").toString("utf8")
+    ) as AirbnbHostStateClaims;
   } catch {
     throw new AirbnbHostSelfServiceError("OTA_AIRBNB_STATE_INVALID");
   }
@@ -178,7 +192,11 @@ function parseConnectionLinkUrl(payload: unknown, allowedProviderOrigin: string)
   const root = record(payload);
   const data = record(root?.data);
   const attributes = record(data?.attributes);
-  const rawUrl = required(attributes?.url, "OTA_AIRBNB_CONNECTION_LINK_RESPONSE_INVALID", 4096);
+  const rawUrl = required(
+    attributes?.url,
+    "OTA_AIRBNB_CONNECTION_LINK_RESPONSE_INVALID",
+    4096
+  );
   try {
     const parsed = new URL(rawUrl);
     if (
@@ -191,8 +209,57 @@ function parseConnectionLinkUrl(payload: unknown, allowedProviderOrigin: string)
     }
     return parsed.toString();
   } catch {
-    throw new AirbnbHostSelfServiceError("OTA_AIRBNB_CONNECTION_LINK_RESPONSE_INVALID");
+    throw new AirbnbHostSelfServiceError(
+      "OTA_AIRBNB_CONNECTION_LINK_RESPONSE_INVALID"
+    );
   }
+}
+
+async function loadReadyDistributionProperty(args: {
+  client: AirbnbHostSelfServiceClient;
+  organizationId: string;
+  propertyId: string;
+}) {
+  const distributionProperty = await args.client.distributionProperty.findFirst({
+    where: {
+      organizationId: args.organizationId,
+      propertyId: args.propertyId,
+      platform: "CHANNEX",
+    },
+    select: {
+      organizationId: true,
+      propertyId: true,
+      platform: true,
+      provisioningStatus: true,
+      externalPropertyId: true,
+      externalPrimaryRoomTypeId: true,
+      externalPrimaryRatePlanId: true,
+      group: {
+        select: {
+          organizationId: true,
+          platform: true,
+          provisioningStatus: true,
+          externalGroupId: true,
+        },
+      },
+    },
+  });
+  if (!distributionProperty) {
+    throw new AirbnbHostSelfServiceError("OTA_AIRBNB_PROPERTY_NOT_PROVISIONED");
+  }
+  if (
+    distributionProperty.organizationId !== args.organizationId ||
+    distributionProperty.propertyId !== args.propertyId ||
+    distributionProperty.platform !== "CHANNEX" ||
+    distributionProperty.provisioningStatus !== "READY" ||
+    !distributionProperty.group ||
+    distributionProperty.group.organizationId !== args.organizationId ||
+    distributionProperty.group.platform !== "CHANNEX" ||
+    distributionProperty.group.provisioningStatus !== "READY"
+  ) {
+    throw new AirbnbHostSelfServiceError("OTA_AIRBNB_PROVISIONING_NOT_READY");
+  }
+  return distributionProperty;
 }
 
 export async function issueAirbnbHostConnectionLink(args: {
@@ -208,44 +275,27 @@ export async function issueAirbnbHostConnectionLink(args: {
 }): Promise<{ authorizationUrl: string; expiresAt: Date }> {
   const organizationId = required(args.organizationId, "OTA_AIRBNB_TENANT_INVALID", 120);
   const propertyId = required(args.propertyId, "OTA_AIRBNB_PROPERTY_INVALID", 120);
-  const requestedByUserId = required(args.requestedByUserId, "OTA_AIRBNB_ACTOR_INVALID", 120);
-  const callbackOrigin = exactHttpsOrigin(args.callbackOrigin, "OTA_AIRBNB_CALLBACK_ORIGIN_INVALID");
-  const providerOrigin = exactHttpsOrigin(args.providerOrigin, "OTA_AIRBNB_PROVIDER_ORIGIN_INVALID");
-
-  const distributionProperty = await args.client.distributionProperty.findFirst({
-    where: { organizationId, propertyId, platform: "CHANNEX" },
-    select: {
-      organizationId: true,
-      propertyId: true,
-      platform: true,
-      provisioningStatus: true,
-      externalPropertyId: true,
-      group: {
-        select: {
-          organizationId: true,
-          platform: true,
-          externalGroupId: true,
-        },
-      },
-    },
+  const requestedByUserId = required(
+    args.requestedByUserId,
+    "OTA_AIRBNB_ACTOR_INVALID",
+    120
+  );
+  const callbackOrigin = exactHttpsOrigin(
+    args.callbackOrigin,
+    "OTA_AIRBNB_CALLBACK_ORIGIN_INVALID"
+  );
+  const providerOrigin = exactHttpsOrigin(
+    args.providerOrigin,
+    "OTA_AIRBNB_PROVIDER_ORIGIN_INVALID"
+  );
+  const distributionProperty = await loadReadyDistributionProperty({
+    client: args.client,
+    organizationId,
+    propertyId,
   });
-  if (!distributionProperty) {
-    throw new AirbnbHostSelfServiceError("OTA_AIRBNB_PROPERTY_NOT_PROVISIONED");
-  }
-  if (
-    distributionProperty.organizationId !== organizationId ||
-    distributionProperty.propertyId !== propertyId ||
-    distributionProperty.platform !== "CHANNEX" ||
-    distributionProperty.provisioningStatus !== "READY" ||
-    !distributionProperty.group ||
-    distributionProperty.group.organizationId !== organizationId ||
-    distributionProperty.group.platform !== "CHANNEX"
-  ) {
-    throw new AirbnbHostSelfServiceError("OTA_AIRBNB_PROVISIONING_NOT_READY");
-  }
 
   const externalGroupId = requiredUuid(
-    distributionProperty.group.externalGroupId,
+    distributionProperty.group!.externalGroupId,
     "OTA_AIRBNB_EXTERNAL_GROUP_ID_INVALID"
   );
   const externalPropertyId = requiredUuid(
@@ -277,26 +327,8 @@ export async function issueAirbnbHostConnectionLink(args: {
   };
 }
 
-function parseExactChannel(payload: unknown, channelId: string): { channelId: string; active: boolean | null } {
-  const root = record(payload);
-  const data = record(root?.data);
-  if (!data || required(data.id, "OTA_AIRBNB_CHANNEL_RESPONSE_INVALID", 120) !== channelId) {
-    throw new AirbnbHostSelfServiceError("OTA_AIRBNB_CHANNEL_RESPONSE_INVALID");
-  }
-  const attributes = record(data.attributes);
-  const channel = String(attributes?.channel ?? attributes?.channel_name ?? "").trim().toLowerCase();
-  if (channel && channel !== "airbnb") {
-    throw new AirbnbHostSelfServiceError("OTA_AIRBNB_CHANNEL_ID_MISMATCH");
-  }
-  const active = typeof attributes?.is_active === "boolean"
-    ? attributes.is_active
-    : typeof attributes?.active === "boolean"
-      ? attributes.active
-      : null;
-  return { channelId, active };
-}
-
 export async function verifyAirbnbHostCallback(args: {
+  client: AirbnbHostSelfServiceClient;
   transport: AirbnbHostSelfServiceTransport;
   stateSecret: string;
   organizationId: string;
@@ -330,13 +362,58 @@ export async function verifyAirbnbHostCallback(args: {
     };
   }
 
-  const channelId = requiredUuid(args.channelId, "OTA_AIRBNB_CHANNEL_ID_INVALID");
-  const exact = parseExactChannel(await args.transport.getChannel(channelId), channelId);
+  const distributionProperty = await loadReadyDistributionProperty({
+    client: args.client,
+    organizationId: claims.organizationId,
+    propertyId: claims.propertyId,
+  });
+  const channelId = requiredUuid(
+    args.channelId,
+    "OTA_AIRBNB_CHANNEL_ID_INVALID"
+  );
+  const expectedPropertyId = requiredUuid(
+    distributionProperty.externalPropertyId,
+    "OTA_AIRBNB_EXTERNAL_PROPERTY_ID_INVALID"
+  );
+  const expectedGroupId = requiredUuid(
+    distributionProperty.group!.externalGroupId,
+    "OTA_AIRBNB_EXTERNAL_GROUP_ID_INVALID"
+  );
+  const expectedRoomTypeId = requiredUuid(
+    distributionProperty.externalPrimaryRoomTypeId,
+    "OTA_AIRBNB_EXTERNAL_ROOM_TYPE_ID_INVALID"
+  );
+  const expectedRatePlanId = requiredUuid(
+    distributionProperty.externalPrimaryRatePlanId,
+    "OTA_AIRBNB_EXTERNAL_RATE_PLAN_ID_INVALID"
+  );
+
+  let verification;
+  try {
+    verification = verifyExactChannexChannel({
+      payload: await args.transport.getChannel(channelId),
+      provider: "AIRBNB",
+      expectedChannelId: channelId,
+      expectedPropertyId,
+      expectedGroupId,
+      expectedRoomTypeId,
+      expectedRatePlanId,
+    });
+  } catch (error) {
+    if (error instanceof ChannexChannelIdentityError) {
+      throw new AirbnbHostSelfServiceError(error.code);
+    }
+    throw error;
+  }
+  if (!verification.identityVerified || verification.channelId !== channelId) {
+    throw new AirbnbHostSelfServiceError("OTA_AIRBNB_CHANNEL_IDENTITY_NOT_VERIFIED");
+  }
+
   return {
     success: true,
     propertyId: claims.propertyId,
-    channelId: exact.channelId,
-    channelActive: exact.active,
+    channelId,
+    channelActive: verification.activeState,
     nextAction: "MAPPING_REQUIRED",
   };
 }
