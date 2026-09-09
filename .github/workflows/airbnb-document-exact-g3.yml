@@ -25,10 +25,27 @@ jobs:
           cache: npm
       - name: Install locked dependencies without lifecycle scripts
         run: npm ci --ignore-scripts --no-audit --no-fund
-      - name: Run prior gates plus document-derived listing discovery tests
-        run: node --import tsx --test src/distribution/airbnb-host-self-service.service.test.ts src/distribution/airbnb-host-self-service.callback-verifier.test.ts src/distribution/airbnb-host-self-service.listings.test.ts src/distribution/ota-connection-center.runtime-composition.test.ts
-      - name: Typecheck isolated Gate 3 production modules and route
-        run: ./node_modules/.bin/tsc --noEmit --strict --target ES2022 --module NodeNext --moduleResolution NodeNext --types node src/distribution/airbnb-host-self-service.listings.service.ts src/distribution/airbnb-host-self-service.listings.http-transport.ts src/routes/dashboard.airbnb-host-self-service.route.ts
+      - name: Run prior gates plus mocked discovery and route tests
+        run: node --import tsx --test src/distribution/airbnb-host-self-service.service.test.ts src/distribution/airbnb-host-self-service.callback-verifier.test.ts src/distribution/airbnb-host-self-service.listings.test.ts src/distribution/airbnb-host-self-service.listings-route.test.js src/distribution/ota-connection-center.runtime-composition.test.ts
+      - name: Typecheck isolated Gate 3 production modules
+        run: ./node_modules/.bin/tsc --noEmit --strict --target ES2022 --module NodeNext --moduleResolution NodeNext --types node src/distribution/airbnb-host-self-service.listings.service.ts src/distribution/airbnb-host-self-service.listings.http-transport.ts
+      - name: Verify route adds no TypeScript diagnostics over Gate 2 baseline
+        run: |
+          baseline=$(mktemp -d)
+          git archive 407271831e6e58b41c6eb4d0825b6fd89f9f3c18 src package.json | tar -x -C "$baseline"
+          ln -s "$GITHUB_WORKSPACE/node_modules" "$baseline/node_modules"
+          tsc="$GITHUB_WORKSPACE/node_modules/.bin/tsc"
+          flags=(--noEmit --strict --target ES2022 --module NodeNext --moduleResolution NodeNext --types node)
+          set +e
+          (cd "$baseline" && "$tsc" "${flags[@]}" src/routes/dashboard.airbnb-host-self-service.route.ts) > "$RUNNER_TEMP/airbnb-g3-baseline-types.txt" 2>&1
+          baseline_status=$?
+          "$tsc" "${flags[@]}" src/routes/dashboard.airbnb-host-self-service.route.ts > "$RUNNER_TEMP/airbnb-g3-current-types.txt" 2>&1
+          current_status=$?
+          set -e
+          cat "$RUNNER_TEMP/airbnb-g3-current-types.txt"
+          test "$current_status" -eq "$baseline_status"
+          diff -u "$RUNNER_TEMP/airbnb-g3-baseline-types.txt" "$RUNNER_TEMP/airbnb-g3-current-types.txt"
+          echo 'Route diagnostics match Gate 2 baseline; this is not a clean full-backend typecheck.'
       - name: Prove certified shared transport and identity cores remain unchanged
         run: git diff --exit-code 2c82832fb84b112ea81037efff8f526dd48470ab -- src/distribution/channex-channel-identity.ts src/distribution/channex-readonly.http-transport.ts src/distribution/channex-white-label.http-transport.ts src/distribution/distribution-mutation-security.ts src/middleware/requireAuth.ts prisma src/workers
       - name: Prove Gate 3 adds no mapping activation ARI booking or worker operation
