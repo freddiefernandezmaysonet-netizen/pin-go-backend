@@ -17,12 +17,22 @@ const ALLOWED_POST_PATHS = new Set([
   "/api/v1/meta/airbnb/connection_link",
 ]);
 
+const MAX_RESPONSE_BYTES = 1_000_000;
+const MAX_DIAGNOSTIC_BODY_BYTES = 16_384;
+const MAX_DIAGNOSTIC_VALUE_LENGTH = 240;
+const MAX_DIAGNOSTIC_DETAIL_ENTRIES = 12;
+const MAX_PUBLIC_DIAGNOSTIC_CODE_LENGTH = 320;
+const SENSITIVE_DIAGNOSTIC_KEY = /^(?:token|api[_-]?key|authorization|password|secret)$/i;
+
 export class WhiteLabelHttpTransportError extends Error {
   readonly retryDisposition: "SAFE_RETRY" | "RECONCILIATION_REQUIRED";
 
   constructor(
     readonly code: string,
-    retryDisposition: "SAFE_RETRY" | "RECONCILIATION_REQUIRED"
+    retryDisposition: "SAFE_RETRY" | "RECONCILIATION_REQUIRED",
+    readonly providerStatus: number | null = null,
+    readonly providerCode: string | null = null,
+    readonly providerMessage: string | null = null
   ) {
     super(code);
     this.name = "WhiteLabelHttpTransportError";
@@ -70,22 +80,158 @@ function requestUrl(origin: string, request: WhiteLabelTransportRequest): URL {
   return url;
 }
 
-function responseFailure(status: number): WhiteLabelHttpTransportError {
-  if (status === 429) {
+function record(value: unknown): Record<string, unknown> | null {
+  return value && typeof value === "object" && !Array.isArray(value)
+    ? value as Record<string, unknown>
+    : null;
+}
+
+function sanitizeDiagnosticValue(value: unknown): string | null {
+  if (typeof value !== "string" && typeof value !== "number" && typeof value !== "boolean") return null;
+  let normalized = String(value).replace(/[\r\n\t]+/g, " ").trim();
+  if (!normalized) return null;
+  normalized = normalized
+    .replace(/https?:\/\/\S+/gi, "[URL_REDACTED]")
+    .replace(/\b(token|api[_ -]?key|authorization|password|secret)\b\s*[:=]\s*\S+/gi, "$1=[REDACTED]")
+    .replace(/[A-Za-z0-9_-]{48,}/g, "[VALUE_REDACTED]")
+    .replace(/[^\x20-\x7E]/g, "?");
+  return normalized.slice(0, MAX_DIAGNOSTIC_VALUE_LENGTH) || null;
+}
+
+function sanitizeDiagnosticKey(value: string): string | null {
+  const normalized = String(value ?? "")
+    .replace(/[^A-Za-z0-9_.\[\]-]/g, "_")
+    .slice(0, 120);
+  return normalized || null;
+}
+
+function flattenDocumentedDetails(value: unknown): string | null {
+  const entries: string[] = [];
+
+  const visit = (current: unknown, path: string, depth: number) => {
+    if (entries.length >= MAX_DIAGNOSTIC_DETAIL_ENTRIES || depth > 3) return;
+
+    if (Array.isArray(current)) {
+      for (let index = 0; index < current.length && entries.length < MAX_DIAGNOSTIC_DETAIL_ENTRIES; index += 1) {
+        visit(current[index], `${path}[${index}]`, depth + 1);
+      }
+      return;
+    }
+
+    const object = record(current);
+    if (object) {
+      for (const [key, nested] of Object.entries(object)) {
+        if (entries.length >= MAX_DIAGNOSTIC_DETAIL_ENTRIES) break;
+        const safeKey = sanitizeDiagnosticKey(key);
+        if (!safeKey) continue;
+        const nextPath = path ? `${path}.${safeKey}` : safeKey;
+        if (SENSITIVE_DIAGNOSTIC_KEY.test(safeKey)) {
+          entries.push(`${nextPath}=[REDACTED]`);
+          continue;
+        }
+        visit(nested, nextPath, depth + 1);
+      }
+      return;
+    }
+
+    const safeValue = sanitizeDiagnosticValue(current);
+    const safePath = sanitizeDiagnosticKey(path);
+    if (safeValue && safePath) entries.push(`${safePath}=${safeValue}`);
+  };
+
+  visit(value, "", 0);
+  if (!entries.length) return null;
+  return entries.join("; ").slice(0, MAX_DIAGNOSTIC_VALUE_LENGTH);
+}
+
+function extractProviderDiagnostic(payload: unknown): {
+  providerCode: string | null;
+  providerMessage: string | null;
+} {
+  const root = record(payload);
+  if (!root) return { providerCode: null, providerMessage: null };
+  const errors = Array.isArray(root.errors) ? root.errors : [];
+  const firstError = record(errors[0]);
+  const error = record(root.error);
+  const documentedDetails = flattenDocumentedDetails(root.details);
+  const providerCode = sanitizeDiagnosticValue(
+    firstError?.code ?? error?.code ?? root.code ?? firstError?.title ?? error?.title ??
+      (documentedDetails ? "validation_details" : null)
+  );
+  const providerMessage = sanitizeDiagnosticValue(
+    firstError?.detail ?? firstError?.message ?? error?.detail ?? error?.message ??
+      root.message ?? root.detail ?? root.error
+  ) ?? documentedDetails;
+  return { providerCode, providerMessage };
+}
+
+function diagnosticCodeSegment(value: string | null): string | null {
+  if (!value) return null;
+  const segment = value
+    .toUpperCase()
+    .replace(/[^A-Z0-9]+/g, "_")
+    .replace(/^_+|_+$/g, "")
+    .slice(0, 120);
+  return segment || null;
+}
+
+function rejectedRequestCode(
+  status: number,
+  diagnostic: { providerCode: string | null; providerMessage: string | null }
+): string {
+  const pieces = ["OTA_PROVIDER_REQUEST_REJECTED", `P${status}`];
+  const providerCode = diagnosticCodeSegment(diagnostic.providerCode);
+  const providerMessage = diagnosticCodeSegment(diagnostic.providerMessage);
+  if (providerCode) pieces.push(providerCode);
+  if (providerMessage) pieces.push(providerMessage);
+  return pieces.join("__").slice(0, MAX_PUBLIC_DIAGNOSTIC_CODE_LENGTH);
+}
+
+async function readProviderDiagnostic(response: Response): Promise<{
+  providerCode: string | null;
+  providerMessage: string | null;
+}> {
+  const contentLength = Number(response.headers.get("content-length") ?? 0);
+  if (Number.isFinite(contentLength) && contentLength > MAX_DIAGNOSTIC_BODY_BYTES) {
+    return { providerCode: null, providerMessage: null };
+  }
+  try {
+    const body = await response.text();
+    if (!body || body.length > MAX_DIAGNOSTIC_BODY_BYTES) {
+      return { providerCode: null, providerMessage: null };
+    }
+    return extractProviderDiagnostic(JSON.parse(body) as unknown);
+  } catch {
+    return { providerCode: null, providerMessage: null };
+  }
+}
+
+async function responseFailure(response: Response): Promise<WhiteLabelHttpTransportError> {
+  const diagnostic = response.status >= 400 && response.status < 500
+    ? await readProviderDiagnostic(response)
+    : { providerCode: null, providerMessage: null };
+  if (response.status === 429) {
     return new WhiteLabelHttpTransportError(
       "OTA_PROVIDER_RATE_LIMITED",
-      "SAFE_RETRY"
+      "SAFE_RETRY",
+      response.status,
+      diagnostic.providerCode,
+      diagnostic.providerMessage
     );
   }
-  if (status >= 400 && status < 500) {
+  if (response.status >= 400 && response.status < 500) {
     return new WhiteLabelHttpTransportError(
-      "OTA_PROVIDER_REQUEST_REJECTED",
-      "SAFE_RETRY"
+      rejectedRequestCode(response.status, diagnostic),
+      "SAFE_RETRY",
+      response.status,
+      diagnostic.providerCode,
+      diagnostic.providerMessage
     );
   }
   return new WhiteLabelHttpTransportError(
     "OTA_PROVIDER_RECONCILIATION_REQUIRED",
-    "RECONCILIATION_REQUIRED"
+    "RECONCILIATION_REQUIRED",
+    response.status
   );
 }
 
@@ -141,17 +287,17 @@ export function createChannexWhiteLabelHttpTransport(args: {
             "RECONCILIATION_REQUIRED"
           );
         }
-        if (!response.ok) throw responseFailure(response.status);
+        if (!response.ok) throw await responseFailure(response);
 
         const contentLength = Number(response.headers.get("content-length") ?? 0);
-        if (Number.isFinite(contentLength) && contentLength > 1_000_000) {
+        if (Number.isFinite(contentLength) && contentLength > MAX_RESPONSE_BYTES) {
           throw new WhiteLabelHttpTransportError(
             "OTA_PROVIDER_RECONCILIATION_REQUIRED",
             "RECONCILIATION_REQUIRED"
           );
         }
         const body = await response.text();
-        if (body.length > 1_000_000) {
+        if (body.length > MAX_RESPONSE_BYTES) {
           throw new WhiteLabelHttpTransportError(
             "OTA_PROVIDER_RECONCILIATION_REQUIRED",
             "RECONCILIATION_REQUIRED"
