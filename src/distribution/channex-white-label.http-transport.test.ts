@@ -75,121 +75,94 @@ test("transport rejects non-allowlisted origins and paths before fetch", async (
   assert.equal(calls, 0);
 });
 
-test("structured 4xx preserves only bounded sanitized provider diagnostics", async () => {
-  const warnings: unknown[][] = [];
-  const originalWarn = console.warn;
-  console.warn = (...args: unknown[]) => { warnings.push(args); };
-  try {
+test("structured 4xx exposes only a bounded sanitized diagnostic code", async () => {
+  const transport = createChannexWhiteLabelHttpTransport({
+    apiOrigin: "https://staging.channex.io",
+    timeoutMs: 5_000,
+    fetchImpl: async () => new Response(JSON.stringify({
+      errors: [{
+        code: "invalid_redirect_uri",
+        detail: "redirect_uri https://secret.example/callback?token=abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789 is invalid",
+      }],
+    }), { status: 422, headers: { "Content-Type": "application/json" } }),
+  });
+
+  await assert.rejects(
+    transport.send(request),
+    (error: unknown) => {
+      assert.ok(error instanceof WhiteLabelHttpTransportError);
+      assert.equal(error.retryDisposition, "SAFE_RETRY");
+      assert.equal(error.providerStatus, 422);
+      assert.equal(error.providerCode, "invalid_redirect_uri");
+      assert.ok(error.providerMessage?.includes("[URL_REDACTED]"));
+      assert.ok(error.code.startsWith("OTA_PROVIDER_REQUEST_REJECTED__P422__INVALID_REDIRECT_URI__"));
+      assert.ok(error.code.includes("URL_REDACTED"));
+      assert.ok(!error.code.includes("secret.example"));
+      assert.ok(!error.code.includes("abcdefghijklmnopqrstuvwxyz"));
+      assert.ok(!error.code.includes("secret-test-key"));
+      assert.equal(error.message, error.code);
+      assert.ok(error.code.length <= 320);
+      return true;
+    }
+  );
+});
+
+test("documented Channex 422 details are observable per argument without secret values", async () => {
+  const transport = createChannexWhiteLabelHttpTransport({
+    apiOrigin: "https://app.channex.io",
+    timeoutMs: 5_000,
+    fetchImpl: async () => new Response(JSON.stringify({
+      details: {
+        group_id: ["is invalid"],
+        properties: { 0: ["does not belong to group"] },
+        redirect_uri: ["https://private.example/callback?token=abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789 is not allowed"],
+        token: ["secret-value-must-never-appear"],
+      },
+    }), { status: 422, headers: { "Content-Type": "application/json" } }),
+  });
+
+  await assert.rejects(
+    transport.send(request),
+    (error: unknown) => {
+      assert.ok(error instanceof WhiteLabelHttpTransportError);
+      assert.equal(error.providerStatus, 422);
+      assert.equal(error.providerCode, "validation_details");
+      assert.ok(error.providerMessage?.includes("group_id[0]=is invalid"));
+      assert.ok(error.providerMessage?.includes("properties.0[0]=does not belong to group"));
+      assert.ok(error.providerMessage?.includes("redirect_uri[0]=[URL_REDACTED]"));
+      assert.ok(error.providerMessage?.includes("token=[REDACTED]"));
+      assert.ok(error.code.startsWith("OTA_PROVIDER_REQUEST_REJECTED__P422__VALIDATION_DETAILS__"));
+      assert.ok(error.code.includes("GROUP_ID_0_IS_INVALID"));
+      assert.ok(error.code.includes("PROPERTIES_0_0_DOES_NOT_BELONG_TO_GROUP"));
+      assert.ok(!error.code.includes("private.example"));
+      assert.ok(!error.code.includes("abcdefghijklmnopqrstuvwxyz"));
+      assert.ok(!error.code.includes("secret-value-must-never-appear"));
+      assert.ok(!error.code.includes("secret-test-key"));
+      assert.ok(error.code.length <= 320);
+      return true;
+    }
+  );
+});
+
+test("unstructured or oversized 4xx exposes status only and never raw bodies", async () => {
+  for (const body of ["rejected-secret", "x".repeat(20_000)]) {
     const transport = createChannexWhiteLabelHttpTransport({
       apiOrigin: "https://staging.channex.io",
       timeoutMs: 5_000,
-      fetchImpl: async () => new Response(JSON.stringify({
-        errors: [{
-          code: "invalid_redirect_uri",
-          detail: "redirect_uri https://secret.example/callback?token=abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789 is invalid",
-        }],
-      }), { status: 422, headers: { "Content-Type": "application/json" } }),
+      fetchImpl: async () => new Response(body, { status: 422 }),
     });
-
     await assert.rejects(
       transport.send(request),
       (error: unknown) => {
         assert.ok(error instanceof WhiteLabelHttpTransportError);
-        assert.equal(error.code, "OTA_PROVIDER_REQUEST_REJECTED");
-        assert.equal(error.retryDisposition, "SAFE_RETRY");
         assert.equal(error.providerStatus, 422);
-        assert.equal(error.providerCode, "invalid_redirect_uri");
-        assert.ok(error.providerMessage?.includes("[URL_REDACTED]"));
-        assert.ok(!error.providerMessage?.includes("secret.example"));
-        assert.ok(!error.providerMessage?.includes("abcdefghijklmnopqrstuvwxyz"));
-        assert.equal(error.message, "OTA_PROVIDER_REQUEST_REJECTED");
+        assert.equal(error.providerCode, null);
+        assert.equal(error.providerMessage, null);
+        assert.equal(error.code, "OTA_PROVIDER_REQUEST_REJECTED__P422");
+        assert.ok(!error.code.includes("rejected-secret"));
         return true;
       }
     );
-    assert.equal(warnings.length, 1);
-    const serialized = JSON.stringify(warnings);
-    assert.ok(serialized.includes("invalid_redirect_uri"));
-    assert.ok(serialized.includes("422"));
-    assert.ok(!serialized.includes("secret.example"));
-    assert.ok(!serialized.includes("abcdefghijklmnopqrstuvwxyz"));
-    assert.ok(!serialized.includes("secret-test-key"));
-  } finally {
-    console.warn = originalWarn;
-  }
-});
-
-test("documented Channex 422 details are flattened and sanitized per argument", async () => {
-  const warnings: unknown[][] = [];
-  const originalWarn = console.warn;
-  console.warn = (...args: unknown[]) => { warnings.push(args); };
-  try {
-    const transport = createChannexWhiteLabelHttpTransport({
-      apiOrigin: "https://app.channex.io",
-      timeoutMs: 5_000,
-      fetchImpl: async () => new Response(JSON.stringify({
-        details: {
-          group_id: ["is invalid"],
-          properties: { 0: ["does not belong to group"] },
-          redirect_uri: ["https://private.example/callback?token=abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789 is not allowed"],
-          token: ["secret-value-must-never-appear"],
-        },
-      }), { status: 422, headers: { "Content-Type": "application/json" } }),
-    });
-
-    await assert.rejects(
-      transport.send(request),
-      (error: unknown) => {
-        assert.ok(error instanceof WhiteLabelHttpTransportError);
-        assert.equal(error.code, "OTA_PROVIDER_REQUEST_REJECTED");
-        assert.equal(error.providerStatus, 422);
-        assert.equal(error.providerCode, "validation_details");
-        assert.ok(error.providerMessage?.includes("group_id[0]=is invalid"));
-        assert.ok(error.providerMessage?.includes("properties.0[0]=does not belong to group"));
-        assert.ok(error.providerMessage?.includes("redirect_uri[0]=[URL_REDACTED]"));
-        assert.ok(!error.providerMessage?.includes("private.example"));
-        assert.ok(!error.providerMessage?.includes("abcdefghijklmnopqrstuvwxyz"));
-        assert.ok(!error.providerMessage?.includes("secret-value-must-never-appear"));
-        return true;
-      }
-    );
-
-    const serialized = JSON.stringify(warnings);
-    assert.ok(serialized.includes("validation_details"));
-    assert.ok(serialized.includes("group_id"));
-    assert.ok(serialized.includes("properties"));
-    assert.ok(!serialized.includes("private.example"));
-    assert.ok(!serialized.includes("secret-value-must-never-appear"));
-    assert.ok(!serialized.includes("secret-test-key"));
-  } finally {
-    console.warn = originalWarn;
-  }
-});
-
-test("unstructured or oversized 4xx never exposes raw provider bodies", async () => {
-  for (const body of ["rejected-secret", "x".repeat(20_000)]) {
-    const warnings: unknown[][] = [];
-    const originalWarn = console.warn;
-    console.warn = (...args: unknown[]) => { warnings.push(args); };
-    try {
-      const transport = createChannexWhiteLabelHttpTransport({
-        apiOrigin: "https://staging.channex.io",
-        timeoutMs: 5_000,
-        fetchImpl: async () => new Response(body, { status: 422 }),
-      });
-      await assert.rejects(
-        transport.send(request),
-        (error: unknown) => {
-          assert.ok(error instanceof WhiteLabelHttpTransportError);
-          assert.equal(error.providerStatus, 422);
-          assert.equal(error.providerCode, null);
-          assert.equal(error.providerMessage, null);
-          return true;
-        }
-      );
-      assert.ok(!JSON.stringify(warnings).includes("rejected-secret"));
-    } finally {
-      console.warn = originalWarn;
-    }
   }
 });
 
