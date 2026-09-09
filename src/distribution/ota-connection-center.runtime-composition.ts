@@ -1,6 +1,14 @@
+import { createHmac } from "node:crypto";
+
 import type { PrismaClient } from "@prisma/client";
 
 import type { DistributionConnectionCenterActions } from "../routes/dashboard.distribution-connection-center.route.js";
+import {
+  issueAirbnbHostConnectionLink,
+  verifyAirbnbHostCallback,
+  type AirbnbHostSelfServiceClient,
+  type AirbnbHostSelfServiceTransport,
+} from "./airbnb-host-self-service.service.js";
 import { ChannexWhiteLabelAdapter } from "./channex-white-label.adapter.js";
 import { createChannexWhiteLabelHttpTransport } from "./channex-white-label.http-transport.js";
 import { createChannexReadonlyHttpTransport } from "./channex-readonly.http-transport.js";
@@ -11,6 +19,9 @@ import {
 import { applyChannexChannelLifecycleEvidence } from "./channex-channel-lifecycle.evidence.js";
 import { buildOtaConnectionCenterComposition } from "./ota-connection-center.composition.js";
 import { resolveOtaConnectionCenterConfig } from "./ota-connection-center.config.js";
+
+const AIRBNB_CALLBACK_ORIGIN = "https://app.pin-ngo.com";
+const AIRBNB_STATE_DOMAIN = "pin-go:ota:airbnb-host-self-service:v1";
 
 function adaptPrismaCanonicalReadinessClient(
   prisma: PrismaClient
@@ -93,6 +104,26 @@ function adaptPrismaCanonicalReadinessClient(
   };
 }
 
+function adaptPrismaAirbnbHostSelfServiceClient(
+  prisma: PrismaClient
+): AirbnbHostSelfServiceClient {
+  return {
+    distributionProperty: {
+      async findFirst(query) {
+        return await prisma.distributionProperty.findFirst(query as any) as any;
+      },
+    },
+  };
+}
+
+function deriveAirbnbStateSecret(jwtSecret: string | undefined): string | null {
+  const source = String(jwtSecret ?? "").trim();
+  if (source.length < 32 || source.length > 4096) return null;
+  return createHmac("sha256", source)
+    .update(AIRBNB_STATE_DOMAIN)
+    .digest("hex");
+}
+
 function withChannelLifecycle(args: {
   actions: DistributionConnectionCenterActions;
   prisma: PrismaClient;
@@ -154,6 +185,27 @@ export function buildRuntimeOtaConnectionCenterComposition(args: {
   const canonicalReadinessClient = adaptPrismaCanonicalReadinessClient(
     args.prisma
   );
+  const airbnbClient = adaptPrismaAirbnbHostSelfServiceClient(args.prisma);
+  const airbnbStateSecret = deriveAirbnbStateSecret(args.env.JWT_SECRET);
+  const airbnbCallbackAllowed = args.trustedMutationOrigins.some(
+    (origin) => String(origin).trim() === AIRBNB_CALLBACK_ORIGIN
+  );
+  const airbnbTransport: AirbnbHostSelfServiceTransport = {
+    createConnectionLink(body) {
+      return transport.send({
+        method: "POST",
+        path: "/api/v1/meta/airbnb/connection_link",
+        headers: {
+          "user-api-key": config.provider.apiKey,
+          "Content-Type": "application/json",
+        },
+        body,
+      });
+    },
+    getChannel(channelId) {
+      return readonlyTransport.getChannel(channelId);
+    },
+  };
 
   const actions = buildOtaConnectionCenterComposition({
     prisma: args.prisma,
@@ -170,6 +222,42 @@ export function buildRuntimeOtaConnectionCenterComposition(args: {
     env: args.env,
     actions: {
       ...actions,
+      airbnbHostSelfService: {
+        enabled: Boolean(airbnbStateSecret && airbnbCallbackAllowed),
+        isTrustedOrigin: actions.isTrustedOrigin,
+        issueConnectionLink: ({
+          organizationId,
+          propertyId,
+          requestedByUserId,
+        }) =>
+          issueAirbnbHostConnectionLink({
+            client: airbnbClient,
+            transport: airbnbTransport,
+            stateSecret: airbnbStateSecret ?? "",
+            callbackOrigin: AIRBNB_CALLBACK_ORIGIN,
+            providerOrigin: config.provider.apiOrigin,
+            organizationId,
+            propertyId,
+            requestedByUserId,
+          }),
+        verifyCallback: ({
+          organizationId,
+          requestedByUserId,
+          success,
+          channelId,
+          token,
+        }) =>
+          verifyAirbnbHostCallback({
+            client: airbnbClient,
+            transport: airbnbTransport,
+            stateSecret: airbnbStateSecret ?? "",
+            organizationId,
+            requestedByUserId,
+            success,
+            channelId,
+            token,
+          }),
+      },
       reconcile: ({
         organizationId,
         propertyId,
