@@ -118,6 +118,53 @@ test("structured 4xx preserves only bounded sanitized provider diagnostics", asy
   }
 });
 
+test("documented Channex 422 details are flattened and sanitized per argument", async () => {
+  const warnings: unknown[][] = [];
+  const originalWarn = console.warn;
+  console.warn = (...args: unknown[]) => { warnings.push(args); };
+  try {
+    const transport = createChannexWhiteLabelHttpTransport({
+      apiOrigin: "https://app.channex.io",
+      timeoutMs: 5_000,
+      fetchImpl: async () => new Response(JSON.stringify({
+        details: {
+          group_id: ["is invalid"],
+          properties: { 0: ["does not belong to group"] },
+          redirect_uri: ["https://private.example/callback?token=abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789 is not allowed"],
+          token: ["secret-value-must-never-appear"],
+        },
+      }), { status: 422, headers: { "Content-Type": "application/json" } }),
+    });
+
+    await assert.rejects(
+      transport.send(request),
+      (error: unknown) => {
+        assert.ok(error instanceof WhiteLabelHttpTransportError);
+        assert.equal(error.code, "OTA_PROVIDER_REQUEST_REJECTED");
+        assert.equal(error.providerStatus, 422);
+        assert.equal(error.providerCode, "validation_details");
+        assert.ok(error.providerMessage?.includes("group_id[0]=is invalid"));
+        assert.ok(error.providerMessage?.includes("properties.0[0]=does not belong to group"));
+        assert.ok(error.providerMessage?.includes("redirect_uri[0]=[URL_REDACTED]"));
+        assert.ok(!error.providerMessage?.includes("private.example"));
+        assert.ok(!error.providerMessage?.includes("abcdefghijklmnopqrstuvwxyz"));
+        assert.ok(!error.providerMessage?.includes("secret-value-must-never-appear"));
+        return true;
+      }
+    );
+
+    const serialized = JSON.stringify(warnings);
+    assert.ok(serialized.includes("validation_details"));
+    assert.ok(serialized.includes("group_id"));
+    assert.ok(serialized.includes("properties"));
+    assert.ok(!serialized.includes("private.example"));
+    assert.ok(!serialized.includes("secret-value-must-never-appear"));
+    assert.ok(!serialized.includes("secret-test-key"));
+  } finally {
+    console.warn = originalWarn;
+  }
+});
+
 test("unstructured or oversized 4xx never exposes raw provider bodies", async () => {
   for (const body of ["rejected-secret", "x".repeat(20_000)]) {
     const warnings: unknown[][] = [];
