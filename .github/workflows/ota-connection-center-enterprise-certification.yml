@@ -1,0 +1,131 @@
+name: OTA Connection Center Enterprise Certification
+
+on:
+  pull_request:
+    paths:
+      - "src/distribution/**"
+      - "src/routes/channex-channel-lifecycle.webhook.route.*"
+      - "src/routes/dashboard.distribution-connection-center.route.*"
+      - "src/routes/dashboard.route.ts"
+      - "src/routes/properties.route.ts"
+      - "src/pms/routes/listings.mapping.routes.*"
+      - "src/lib/auth.ts"
+      - "src/middleware/requireAuth.ts"
+      - "src/server.ts"
+      - "src/contracts/channex-certified-core.freeze.test.ts"
+      - "prisma/schema.prisma"
+      - "prisma/migrations/**"
+      - "prisma/channex-ari.prisma"
+      - "src/pms/adapters/channex.adapter.*"
+      - "src/pms/adapters/types.ts"
+      - "src/pms/ingest/channex-*"
+      - "src/pms/ingest/webhook.routes.*"
+      - "src/pms/outbound/channex-*"
+      - "src/workers/channex-*"
+      - "src/services/channex-*"
+      - "src/scripts/*channex*"
+      - "package.json"
+      - "package-lock.json"
+      - "tsconfig.json"
+      - "tsconfig.ota-commercial-closure.json"
+      - "tsconfig.ota-connection-reconciliation-e1.json"
+      - "tsconfig.ota-connection-reconciliation-e2.json"
+      - ".github/workflows/ota-connection-*.yml"
+  push:
+    branches:
+      - main
+    paths:
+      - "src/distribution/**"
+      - "src/routes/channex-channel-lifecycle.webhook.route.*"
+      - "src/routes/dashboard.distribution-connection-center.route.*"
+      - "src/routes/dashboard.route.ts"
+      - "src/routes/properties.route.ts"
+      - "src/pms/routes/listings.mapping.routes.*"
+      - "src/lib/auth.ts"
+      - "src/middleware/requireAuth.ts"
+      - "src/server.ts"
+      - "src/contracts/channex-certified-core.freeze.test.ts"
+      - "prisma/schema.prisma"
+      - "prisma/migrations/**"
+      - "prisma/channex-ari.prisma"
+      - "src/pms/adapters/channex.adapter.*"
+      - "src/pms/adapters/types.ts"
+      - "src/pms/ingest/channex-*"
+      - "src/pms/ingest/webhook.routes.*"
+      - "src/pms/outbound/channex-*"
+      - "src/workers/channex-*"
+      - "src/services/channex-*"
+      - "src/scripts/*channex*"
+      - "package.json"
+      - "package-lock.json"
+      - "tsconfig.json"
+      - "tsconfig.ota-commercial-closure.json"
+      - "tsconfig.ota-connection-reconciliation-e1.json"
+      - "tsconfig.ota-connection-reconciliation-e2.json"
+      - ".github/workflows/ota-connection-*.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ota-connection-center-enterprise-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  enterprise-certification:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    env:
+      DATABASE_URL: postgresql://test:test@localhost:5432/pingo_ci
+      CHECKPOINT_DISABLE: "1"
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Use Node.js 22
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+
+      - name: Install locked dependencies
+        run: npm ci --no-audit --no-fund
+
+      - name: Validate Prisma schema
+        run: npx prisma validate --schema ./prisma
+
+      - name: Generate and verify the complete Prisma client
+        run: >-
+          npx prisma generate --schema ./prisma &&
+          node -e 'const {Prisma,PrismaClient}=require("@prisma/client");
+          const model=Prisma.dmmf.datamodel.models.find((item)=>item.name==="OtaChannelConnection");
+          const fields=new Set((model?.fields??[]).map((field)=>field.name));
+          for(const field of ["externalListingId","lastLifecycleOccurredAtMicros","readinessRevision"])
+          if(!fields.has(field)) throw new Error(`missing Prisma field: ${field}`);
+          const client=new PrismaClient();
+          for(const delegate of ["otaChannelConnection","channexAriPropertyState","distributionOutboxEvent"])
+          if(!client[delegate]) throw new Error(`missing Prisma delegate: ${delegate}`);
+          client.$disconnect();'
+
+      - name: Type-check E1 lifecycle boundary
+        run: npx tsc -p tsconfig.ota-connection-reconciliation-e1.json --noEmit
+
+      - name: Type-check E2 reconciliation boundary
+        run: npx tsc -p tsconfig.ota-connection-reconciliation-e2.json --noEmit
+
+      - name: Type-check commercial closure boundary
+        run: npm run test:ota-commercial-closure-types
+
+      - name: Test OTA Connection Center
+        run: npm run test:distribution-connection-center
+
+      - name: Test OTA distribution persistence
+        run: npm run test:ota-distribution-persistence
+
+      - name: Test PMS listing security boundary
+        run: npm run test:pms-listings-security
+
+      - name: Verify certified Channex core remains frozen
+        run: npm run test:channex-certified-core-freeze

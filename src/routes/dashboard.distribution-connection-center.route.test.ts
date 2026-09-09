@@ -459,3 +459,38 @@ test("reconcile conflict fails closed without internal detail leakage", async ()
     error: "OTA_CANONICAL_READINESS_STATE_CONFLICT",
   });
 });
+
+test("reconcile preserves retryable provider HTTP semantics", async () => {
+  for (const expectation of [
+    { code: "OTA_READONLY_PROVIDER_RATE_LIMITED", status: 429 },
+    { code: "OTA_READONLY_PROVIDER_UNAVAILABLE", status: 503 },
+  ] as const) {
+    const response = await requestRoute({
+      prisma: createPrisma(),
+      user: { id: "user-a", orgId: "organization-a", role: "ORG_ADMIN" },
+      method: "POST",
+      path: "/api/dashboard/distribution/properties/property-b/channels/AIRBNB/reconcile",
+      headers: {
+        Origin: "https://app.pin-go.test",
+        "Idempotency-Key": `reconcile-${expectation.status}`,
+      },
+      actions: {
+        runtime: { enabled: true, reason: "ENABLED" },
+        isTrustedOrigin: async () => true,
+        reconcile: async () => {
+          const error = new Error("provider detail must not leak") as Error & {
+            code: string;
+          };
+          error.code = expectation.code;
+          throw error;
+        },
+      },
+    });
+
+    assert.equal(response.status, expectation.status);
+    assert.deepEqual(await response.json(), {
+      ok: false,
+      error: expectation.code,
+    });
+  }
+});

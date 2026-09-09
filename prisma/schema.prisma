@@ -2440,6 +2440,7 @@ model OtaChannelConnection {
   status                    OtaChannelConnectionStatus @default(NOT_CONNECTED)
   externalConnectionId      String?
   externalChannelCode       String?
+  externalListingId         String?                    @db.VarChar(255)
   authorizationReadiness    OtaReadinessStatus         @default(REQUIRED)
   mappingReadiness          OtaReadinessStatus         @default(NOT_STARTED)
   distributionReadiness     OtaReadinessStatus         @default(NOT_STARTED)
@@ -2449,6 +2450,13 @@ model OtaChannelConnection {
   activationRequestedAt     DateTime?
   activatedAt               DateTime?
   disconnectedAt            DateTime?
+  lastLifecycleOccurredAt       DateTime?
+  lastLifecycleOccurredAtMicros BigInt?
+  lastLifecycleEventType        String?                    @db.VarChar(40)
+  lastLifecycleEventPrecedence  Int?
+  channelAuthorizationVerifiedAt DateTime?
+  lastChannelActivatedAt        DateTime?
+  readinessRevision             Int                       @default(0)
   lastReadinessCheckedAt    DateTime?
   lastFullSyncConfirmedAt   DateTime?
   lastReservationReceivedAt DateTime?
@@ -2464,6 +2472,7 @@ model OtaChannelConnection {
 
   @@unique([propertyId, provider])
   @@unique([provider, externalConnectionId])
+  @@unique([provider, externalListingId])
   @@index([organizationId, status])
   @@index([distributionPropertyId, status])
 }

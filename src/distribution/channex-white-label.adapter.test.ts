@@ -147,6 +147,41 @@ test("one-time token request is scoped to group and property", async () => {
     new URL(issued.launchUrl).searchParams.get("channels_filter"),
     "airbnb-channel-code"
   );
+  const launchUrl = new URL(issued.launchUrl);
+  assert.equal(launchUrl.pathname, "/auth/exchange");
+  assert.equal(launchUrl.searchParams.get("oauth_session_key"), "secret-one-time-token");
+  assert.equal(launchUrl.searchParams.get("one_time_token"), null);
+  assert.equal(launchUrl.searchParams.get("app_mode"), "headless");
+  assert.equal(launchUrl.searchParams.get("redirect_to"), "/channels");
+  assert.equal(launchUrl.searchParams.get("property_id"), "property-ext");
+  assert.equal(launchUrl.searchParams.get("group_id"), "group-ext");
+});
+
+test("launch exchange replaces a configured channels path and stale query", async () => {
+  const requests: WhiteLabelTransportRequest[] = [];
+  const value = new ChannexWhiteLabelAdapter({
+    enabled: true,
+    apiKey: "test-api-key",
+    iframeBaseUrl: "https://staging.channex.io/channels?stale=true#fragment",
+    channelFilterByProvider: { AIRBNB: "ABB" },
+    transport: {
+      async send(request) {
+        requests.push(request);
+        return { data: { attributes: { token: "one-time" } } };
+      },
+    },
+  });
+  const issued = await value.issue({
+    externalGroupId: "group-ext",
+    externalPropertyId: "property-ext",
+    provider: "AIRBNB",
+  });
+  const url = new URL(issued.launchUrl);
+  assert.equal(requests.length, 1);
+  assert.equal(url.origin, "https://staging.channex.io");
+  assert.equal(url.pathname, "/auth/exchange");
+  assert.equal(url.searchParams.get("stale"), null);
+  assert.equal(url.hash, "");
 });
 
 test("unknown provider filter fails closed before token issuance", async () => {

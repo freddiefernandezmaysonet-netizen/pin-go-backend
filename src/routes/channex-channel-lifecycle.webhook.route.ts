@@ -5,9 +5,10 @@ import {
   ChannexChannelEvidenceError,
   type OtaChannelEvidenceResult,
 } from "../distribution/channex-channel-lifecycle.evidence.js";
+import { OTA_CHANNEL_LIFECYCLE_WEBHOOK_SECRET_HEADER } from "../distribution/channex-channel-lifecycle-webhook.contract.js";
 
 export const OTA_CHANNEL_WEBHOOK_SECRET_HEADER =
-  "x-pin-go-ota-channel-webhook-secret";
+  OTA_CHANNEL_LIFECYCLE_WEBHOOK_SECRET_HEADER;
 
 function firstHeader(value: unknown): string {
   if (Array.isArray(value)) return String(value[0] ?? "").trim();
@@ -75,16 +76,15 @@ export async function processChannexChannelLifecycleWebhook(args: {
         ? error.code
         : "OTA_CHANNEL_LIFECYCLE_INGEST_FAILED";
     const status =
-      code === "OTA_CHANNEL_PROPERTY_MAPPING_NOT_FOUND" ||
-      code === "OTA_CHANNEL_CONNECTION_NOT_PREPARED"
-        ? 404
-        : code === "OTA_DISTRIBUTION_TENANT_MISMATCH" ||
-            code === "OTA_CHANNEL_EXTERNAL_CONNECTION_CONFLICT" ||
-            code === "OTA_CHANNEL_EVIDENCE_STATE_CONFLICT"
-          ? 409
-          : code.includes("PAYLOAD") || code.includes("REQUIRED")
-            ? 400
-            : 422;
+      code === "OTA_DISTRIBUTION_TENANT_MISMATCH" ||
+      code === "OTA_CHANNEL_EXTERNAL_CONNECTION_CONFLICT"
+        ? 409
+        : code.includes("PAYLOAD") ||
+            code.includes("REQUIRED") ||
+            code.includes("INVALID") ||
+            code === "OTA_CHANNEL_OCCURRED_AT_FUTURE_SKEW"
+          ? 400
+          : 503;
     return { status, body: { ok: false, error: code } };
   }
 }

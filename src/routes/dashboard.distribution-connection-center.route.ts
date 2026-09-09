@@ -91,7 +91,16 @@ function mutationFailure(
     typeof (error as { code?: unknown }).code === "string"
       ? (error as { code: string }).code
       : fallback;
-  const status = code.includes("NOT_FOUND") ? 404 : code.includes("CONFLICT") || code.includes("ALREADY_USED") ? 409 : 422;
+  const status =
+    code === "OTA_READONLY_PROVIDER_RATE_LIMITED"
+      ? 429
+      : code === "OTA_READONLY_PROVIDER_UNAVAILABLE"
+        ? 503
+        : code.includes("NOT_FOUND")
+          ? 404
+          : code.includes("CONFLICT") || code.includes("ALREADY_USED")
+            ? 409
+            : 422;
   return res.status(status).json({ ok: false, error: code });
 }
 

@@ -4,10 +4,94 @@ import type { DistributionConnectionCenterActions } from "../routes/dashboard.di
 import { ChannexWhiteLabelAdapter } from "./channex-white-label.adapter.js";
 import { createChannexWhiteLabelHttpTransport } from "./channex-white-label.http-transport.js";
 import { createChannexReadonlyHttpTransport } from "./channex-readonly.http-transport.js";
-import { reconcileCanonicalOtaReadiness } from "./channex-canonical-readiness.service.js";
+import {
+  reconcileCanonicalOtaReadiness,
+  type CanonicalOtaReadinessClient,
+} from "./channex-canonical-readiness.service.js";
 import { applyChannexChannelLifecycleEvidence } from "./channex-channel-lifecycle.evidence.js";
 import { buildOtaConnectionCenterComposition } from "./ota-connection-center.composition.js";
 import { resolveOtaConnectionCenterConfig } from "./ota-connection-center.config.js";
+
+function adaptPrismaCanonicalReadinessClient(
+  prisma: PrismaClient
+): CanonicalOtaReadinessClient {
+  return {
+    distributionProperty: {
+      async findFirst(query) {
+        return await prisma.distributionProperty.findFirst(query as any) as any;
+      },
+    },
+    otaChannelConnection: {
+      async findFirst(query) {
+        return await prisma.otaChannelConnection.findFirst(query as any) as any;
+      },
+    },
+    channexAriPropertyState: {
+      async findUnique(query) {
+        return await prisma.channexAriPropertyState.findUnique(query as any) as any;
+      },
+    },
+    pmsListing: {
+      async findMany(query) {
+        return await prisma.pmsListing.findMany(query as any) as any;
+      },
+    },
+    distributionOutboxEvent: {
+      async findMany(query) {
+        return await prisma.distributionOutboxEvent.findMany(query as any) as any;
+      },
+    },
+    apmsAuditEntry: {
+      async findUnique(query) {
+        return await prisma.apmsAuditEntry.findUnique(query as any) as any;
+      },
+    },
+    async $transaction(work, options) {
+      return prisma.$transaction(
+        async (tx) =>
+          work({
+            distributionProperty: {
+              async findFirst(query) {
+                return await tx.distributionProperty.findFirst(query as any) as any;
+              },
+            },
+            otaChannelConnection: {
+              async findFirst(query) {
+                return await tx.otaChannelConnection.findFirst(query as any) as any;
+              },
+              async updateMany(query) {
+                return tx.otaChannelConnection.updateMany(query as any);
+              },
+            },
+            channexAriPropertyState: {
+              async findUnique(query) {
+                return await tx.channexAriPropertyState.findUnique(query as any) as any;
+              },
+            },
+            pmsListing: {
+              async findMany(query) {
+                return await tx.pmsListing.findMany(query as any) as any;
+              },
+            },
+            distributionOutboxEvent: {
+              async findMany(query) {
+                return await tx.distributionOutboxEvent.findMany(query as any) as any;
+              },
+            },
+            apmsAuditEntry: {
+              async findUnique(query) {
+                return await tx.apmsAuditEntry.findUnique(query as any) as any;
+              },
+              async create(query) {
+                return tx.apmsAuditEntry.create(query as any);
+              },
+            },
+          }),
+        options as any
+      );
+    },
+  };
+}
 
 function withChannelLifecycle(args: {
   actions: DistributionConnectionCenterActions;
@@ -67,6 +151,9 @@ export function buildRuntimeOtaConnectionCenterComposition(args: {
     channelFilterByProvider: config.provider.channelFilterByProvider,
     transport,
   });
+  const canonicalReadinessClient = adaptPrismaCanonicalReadinessClient(
+    args.prisma
+  );
 
   const actions = buildOtaConnectionCenterComposition({
     prisma: args.prisma,
@@ -83,12 +170,19 @@ export function buildRuntimeOtaConnectionCenterComposition(args: {
     env: args.env,
     actions: {
       ...actions,
-      reconcile: ({ organizationId, propertyId, provider, requestKey }) =>
+      reconcile: ({
+        organizationId,
+        propertyId,
+        requestedByUserId,
+        provider,
+        requestKey,
+      }) =>
         reconcileCanonicalOtaReadiness({
-          client: args.prisma,
+          client: canonicalReadinessClient,
           transport: readonlyTransport,
           organizationId,
           propertyId,
+          requestedByUserId,
           provider,
           requestKey,
         }),
