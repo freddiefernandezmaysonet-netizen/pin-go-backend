@@ -9,7 +9,7 @@ export const AIRBNB_LIFECYCLE_WEBHOOK_EVENTS = [
   "updated_channel",
   "activate_channel",
   "deactivate_channel",
-  "disconnected_channel",
+  "disconnect_channel",
   "disconnect_listing",
 ] as const;
 export const AIRBNB_LIFECYCLE_WEBHOOK_EVENT_MASK =
@@ -18,9 +18,6 @@ export const AIRBNB_LIFECYCLE_WEBHOOK_EVENT_MASK =
 const UUID =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const ALLOWED_ORIGIN = "https://app.channex.io";
-const WEBHOOK_PAGE_LIMIT = 100;
-const MAX_WEBHOOK_PAGES = 100;
-const MAX_WEBHOOK_RESOURCES = 10_000;
 
 export class AirbnbLifecycleWebhookError extends Error {
   constructor(readonly code: string) {
@@ -31,12 +28,13 @@ export class AirbnbLifecycleWebhookError extends Error {
 
 export type AirbnbLifecycleWebhookSnapshot = {
   id: string;
-  propertyId: string;
+  propertyId: string | null;
   callbackUrl: string;
   eventMask: string;
   headers: Readonly<Record<string, string>>;
   isActive: boolean;
   sendData: boolean;
+  isGlobal: boolean;
 };
 
 export type AirbnbLifecycleWebhookEnsureResult = {
@@ -48,10 +46,7 @@ export type AirbnbLifecycleWebhookEnsureResult = {
 function exactOrigin(value: unknown): string {
   try {
     const url = new URL(String(value ?? "").trim());
-    if (
-      url.origin !== ALLOWED_ORIGIN ||
-      url.href.replace(/\/$/, "") !== url.origin
-    ) {
+    if (url.origin !== ALLOWED_ORIGIN || url.href.replace(/\/$/, "") !== url.origin) {
       throw new Error("invalid");
     }
     return url.origin;
@@ -124,10 +119,6 @@ function parseWebhook(value: unknown): AirbnbLifecycleWebhookSnapshot {
     resource?.id,
     "AIRBNB_LIFECYCLE_WEBHOOK_RESPONSE_ID_INVALID"
   );
-  const propertyId = requiredUuid(
-    attributes?.property_id ?? propertyRel?.id,
-    "AIRBNB_LIFECYCLE_WEBHOOK_RESPONSE_PROPERTY_INVALID"
-  );
   if (
     resource?.type !== "webhook" ||
     typeof attributes?.callback_url !== "string" ||
@@ -139,6 +130,16 @@ function parseWebhook(value: unknown): AirbnbLifecycleWebhookSnapshot {
       "AIRBNB_LIFECYCLE_WEBHOOK_RESPONSE_INVALID"
     );
   }
+
+  const rawPropertyId = attributes?.property_id ?? propertyRel?.id ?? null;
+  const propertyId = rawPropertyId === null
+    ? null
+    : requiredUuid(
+        rawPropertyId,
+        "AIRBNB_LIFECYCLE_WEBHOOK_RESPONSE_PROPERTY_INVALID"
+      );
+  const isGlobal = attributes?.is_global === true;
+
   return {
     id,
     propertyId,
@@ -147,6 +148,7 @@ function parseWebhook(value: unknown): AirbnbLifecycleWebhookSnapshot {
     headers: stringRecord(attributes.headers),
     isActive: attributes.is_active,
     sendData: attributes.send_data,
+    isGlobal,
   };
 }
 
@@ -154,10 +156,7 @@ function eventMaskParts(value: string): string[] | null {
   const raw = String(value ?? "").trim().toLowerCase();
   if (!raw || raw === "*") return null;
   const parts = raw.split(";").map((item) => item.trim());
-  if (
-    parts.some((item) => !item) ||
-    new Set(parts).size !== parts.length
-  ) {
+  if (parts.some((item) => !item) || new Set(parts).size !== parts.length) {
     return null;
   }
   return parts;
@@ -194,14 +193,14 @@ function secretMatches(headers: Readonly<Record<string, string>>, secret: string
     createHash("sha256").update(right).digest("hex");
 }
 
-function exactMatch(
+function exactGlobalMatch(
   webhook: AirbnbLifecycleWebhookSnapshot,
-  propertyId: string,
   callback: string,
   secret: string
 ): boolean {
   return (
-    webhook.propertyId === propertyId &&
+    webhook.propertyId === null &&
+    webhook.isGlobal === true &&
     webhook.callbackUrl === callback &&
     sameEventMask(webhook.eventMask) &&
     webhook.isActive &&
@@ -210,18 +209,10 @@ function exactMatch(
   );
 }
 
-function paginationInteger(value: unknown, min: number, max: number): number | null {
-  return typeof value === "number" &&
-    Number.isInteger(value) &&
-    value >= min &&
-    value <= max
-    ? value
-    : null;
-}
-
 export function normalizeChannexLifecycleWebhookPayload(payload: unknown): unknown {
   const root = record(payload);
   if (!root || typeof root.event !== "string") return payload;
+  // Backward-compatible normalization for any historic payload spelling.
   if (root.event.trim().toLowerCase() !== "disconnected_channel") return payload;
   return { ...root, event: "disconnect_channel" };
 }
@@ -272,93 +263,33 @@ export function createAirbnbLifecycleWebhookClient(args: {
 
   return {
     async listAll(): Promise<AirbnbLifecycleWebhookSnapshot[]> {
-      const resources: AirbnbLifecycleWebhookSnapshot[] = [];
-      const ids = new Set<string>();
-      let expectedTotal: number | null = null;
-
-      for (let page = 1; page <= MAX_WEBHOOK_PAGES; page += 1) {
-        const search = new URLSearchParams({
-          "pagination[page]": String(page),
-          "pagination[limit]": String(WEBHOOK_PAGE_LIMIT),
-        });
-        const response = await request("GET", `/webhooks?${search.toString()}`);
-        if (!Array.isArray(response.payload?.data)) {
-          throw new AirbnbLifecycleWebhookError(
-            "AIRBNB_LIFECYCLE_WEBHOOK_LIST_INVALID"
-          );
-        }
-        const meta = record(response.payload?.meta);
-        const reportedPage = paginationInteger(meta?.page, 1, MAX_WEBHOOK_PAGES);
-        const reportedLimit = paginationInteger(meta?.limit, 1, WEBHOOK_PAGE_LIMIT);
-        const reportedTotal = paginationInteger(meta?.total, 0, MAX_WEBHOOK_RESOURCES);
-        if (
-          reportedPage !== page ||
-          reportedLimit !== WEBHOOK_PAGE_LIMIT ||
-          reportedTotal === null ||
-          (expectedTotal !== null && expectedTotal !== reportedTotal)
-        ) {
-          throw new AirbnbLifecycleWebhookError(
-            "AIRBNB_LIFECYCLE_WEBHOOK_PAGINATION_INVALID"
-          );
-        }
-        expectedTotal = reportedTotal;
-
-        if (response.payload.data.length > WEBHOOK_PAGE_LIMIT) {
-          throw new AirbnbLifecycleWebhookError(
-            "AIRBNB_LIFECYCLE_WEBHOOK_LIST_TOO_LARGE"
-          );
-        }
-        for (const raw of response.payload.data) {
-          const webhook = parseWebhook(raw);
-          if (ids.has(webhook.id)) {
-            throw new AirbnbLifecycleWebhookError(
-              "AIRBNB_LIFECYCLE_WEBHOOK_DUPLICATE_RESOURCE"
-            );
-          }
-          ids.add(webhook.id);
-          resources.push(webhook);
-          if (resources.length > MAX_WEBHOOK_RESOURCES) {
-            throw new AirbnbLifecycleWebhookError(
-              "AIRBNB_LIFECYCLE_WEBHOOK_LIST_TOO_LARGE"
-            );
-          }
-        }
-
-        if (resources.length === expectedTotal) return resources;
-        if (
-          resources.length > expectedTotal ||
-          response.payload.data.length === 0 ||
-          response.payload.data.length < WEBHOOK_PAGE_LIMIT
-        ) {
-          throw new AirbnbLifecycleWebhookError(
-            "AIRBNB_LIFECYCLE_WEBHOOK_PAGINATION_INVALID"
-          );
-        }
+      // Production Channex currently accepts the plain endpoint and rejects the
+      // pagination query previously used here. Because Pin&Go owns one global
+      // lifecycle webhook, ambiguity is handled fail-closed below.
+      const response = await request("GET", "/webhooks");
+      if (!Array.isArray(response.payload?.data)) {
+        throw new AirbnbLifecycleWebhookError(
+          "AIRBNB_LIFECYCLE_WEBHOOK_LIST_INVALID"
+        );
       }
-
-      throw new AirbnbLifecycleWebhookError(
-        "AIRBNB_LIFECYCLE_WEBHOOK_LIST_TOO_LARGE"
-      );
+      return response.payload.data.map(parseWebhook);
     },
     async get(webhookId: string): Promise<AirbnbLifecycleWebhookSnapshot> {
       const id = requiredUuid(
         webhookId,
         "AIRBNB_LIFECYCLE_WEBHOOK_ID_INVALID"
       );
-      const response = await request(
-        "GET",
-        `/webhooks/${encodeURIComponent(id)}`
-      );
+      const response = await request("GET", `/webhooks/${encodeURIComponent(id)}`);
       return parseWebhook(response.payload?.data);
     },
-    async create(input: {
-      propertyId: string;
+    async createGlobal(input: {
       callbackUrl: string;
       secret: string;
     }): Promise<AirbnbLifecycleWebhookSnapshot> {
       const response = await request("POST", "/webhooks", {
         webhook: {
-          property_id: input.propertyId,
+          property_id: null,
+          is_global: true,
           callback_url: input.callbackUrl,
           event_mask: AIRBNB_LIFECYCLE_WEBHOOK_EVENT_MASK,
           headers: {
@@ -375,17 +306,15 @@ export function createAirbnbLifecycleWebhookClient(args: {
       }
       return parseWebhook(response.payload?.data);
     },
-    async update(
+    async updateGlobal(
       webhookId: string,
-      input: { propertyId: string; callbackUrl: string; secret: string }
+      input: { callbackUrl: string; secret: string }
     ): Promise<AirbnbLifecycleWebhookSnapshot> {
-      const id = requiredUuid(
-        webhookId,
-        "AIRBNB_LIFECYCLE_WEBHOOK_ID_INVALID"
-      );
+      const id = requiredUuid(webhookId, "AIRBNB_LIFECYCLE_WEBHOOK_ID_INVALID");
       const response = await request("PUT", `/webhooks/${encodeURIComponent(id)}`, {
         webhook: {
-          property_id: input.propertyId,
+          property_id: null,
+          is_global: true,
           callback_url: input.callbackUrl,
           event_mask: AIRBNB_LIFECYCLE_WEBHOOK_EVENT_MASK,
           headers: {
@@ -400,18 +329,13 @@ export function createAirbnbLifecycleWebhookClient(args: {
   };
 }
 
-export async function ensureAirbnbPropertyLifecycleWebhook(args: {
+export async function ensureAirbnbGlobalLifecycleWebhook(args: {
   apiOrigin: string;
   apiKey: string;
-  externalPropertyId: string;
   callbackUrl: string;
   webhookSecret: string;
   fetchImpl?: typeof fetch;
 }): Promise<AirbnbLifecycleWebhookEnsureResult> {
-  const propertyId = requiredUuid(
-    args.externalPropertyId,
-    "AIRBNB_LIFECYCLE_WEBHOOK_PROPERTY_ID_INVALID"
-  );
   const callback = callbackUrl(args.callbackUrl);
   const secret = requiredSecret(args.webhookSecret);
   const client = createAirbnbLifecycleWebhookClient({
@@ -421,19 +345,16 @@ export async function ensureAirbnbPropertyLifecycleWebhook(args: {
   });
   const webhooks = await client.listAll();
   const candidates = webhooks.filter(
-    (webhook) =>
-      webhook.propertyId === propertyId && webhook.callbackUrl === callback
+    (webhook) => webhook.isGlobal && webhook.callbackUrl === callback
   );
 
   if (candidates.length > 1) {
-    throw new AirbnbLifecycleWebhookError(
-      "AIRBNB_LIFECYCLE_WEBHOOK_AMBIGUOUS"
-    );
+    throw new AirbnbLifecycleWebhookError("AIRBNB_LIFECYCLE_WEBHOOK_AMBIGUOUS");
   }
   if (candidates.length === 0) {
-    const created = await client.create({ propertyId, callbackUrl: callback, secret });
+    const created = await client.createGlobal({ callbackUrl: callback, secret });
     const verified = await client.get(created.id);
-    if (!exactMatch(verified, propertyId, callback, secret)) {
+    if (!exactGlobalMatch(verified, callback, secret)) {
       throw new AirbnbLifecycleWebhookError(
         "AIRBNB_LIFECYCLE_WEBHOOK_CREATE_VERIFICATION_FAILED"
       );
@@ -442,7 +363,7 @@ export async function ensureAirbnbPropertyLifecycleWebhook(args: {
   }
 
   const candidate = candidates[0]!;
-  if (exactMatch(candidate, propertyId, callback, secret)) {
+  if (exactGlobalMatch(candidate, callback, secret)) {
     return { status: "UNCHANGED", webhookId: candidate.id, providerMutations: 0 };
   }
   if (!eventMaskWithinLifecycleScope(candidate.eventMask)) {
@@ -451,16 +372,34 @@ export async function ensureAirbnbPropertyLifecycleWebhook(args: {
     );
   }
 
-  const updated = await client.update(candidate.id, {
-    propertyId,
+  const updated = await client.updateGlobal(candidate.id, {
     callbackUrl: callback,
     secret,
   });
   const verified = await client.get(updated.id);
-  if (!exactMatch(verified, propertyId, callback, secret)) {
+  if (!exactGlobalMatch(verified, callback, secret)) {
     throw new AirbnbLifecycleWebhookError(
       "AIRBNB_LIFECYCLE_WEBHOOK_UPDATE_VERIFICATION_FAILED"
     );
   }
   return { status: "UPDATED", webhookId: verified.id, providerMutations: 1 };
+}
+
+// Compatibility shim for code/tests introduced by #116. The external property
+// identity is deliberately ignored because the production contract is global.
+export async function ensureAirbnbPropertyLifecycleWebhook(args: {
+  apiOrigin: string;
+  apiKey: string;
+  externalPropertyId: string;
+  callbackUrl: string;
+  webhookSecret: string;
+  fetchImpl?: typeof fetch;
+}): Promise<AirbnbLifecycleWebhookEnsureResult> {
+  return ensureAirbnbGlobalLifecycleWebhook({
+    apiOrigin: args.apiOrigin,
+    apiKey: args.apiKey,
+    callbackUrl: args.callbackUrl,
+    webhookSecret: args.webhookSecret,
+    fetchImpl: args.fetchImpl,
+  });
 }

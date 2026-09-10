@@ -8,7 +8,7 @@ import {
   runAirbnbPostAuthOwnerCycle,
 } from "../distribution/airbnb-post-auth-autopilot.owner.js";
 import {
-  ensureAirbnbPropertyLifecycleWebhook,
+  ensureAirbnbGlobalLifecycleWebhook,
 } from "../distribution/airbnb-lifecycle-webhook.production.js";
 import {
   createAirbnbPostAuthCanonicalReconciler,
@@ -59,9 +59,7 @@ export function resolveAirbnbPostAuthWorkerConfig(
   const connectionCenterLaunch =
     env.NODE_ENV === "production" &&
     env.OTA_CONNECTION_CENTER_ENABLED === "true";
-  const enabled = explicit
-    ? explicit === "true"
-    : connectionCenterLaunch;
+  const enabled = explicit ? explicit === "true" : connectionCenterLaunch;
   const activationSource: AirbnbPostAuthWorkerConfig["activationSource"] =
     explicit
       ? "EXPLICIT"
@@ -189,10 +187,9 @@ export async function runAirbnbPostAuthWorkerTick(args: {
       };
     }
 
-    const webhook = await ensureAirbnbPropertyLifecycleWebhook({
+    const webhook = await ensureAirbnbGlobalLifecycleWebhook({
       apiOrigin: args.config.apiOrigin,
       apiKey: args.config.apiKey,
-      externalPropertyId,
       callbackUrl: args.config.callbackUrl,
       webhookSecret: args.config.webhookSecret,
     });
@@ -209,15 +206,15 @@ export async function runAirbnbPostAuthWorkerTick(args: {
           eventType: "LIFECYCLE_WEBHOOK_ENSURED",
           status: "SUCCESS",
           severity: "INFO",
-          decisionId: `airbnb-lifecycle-webhook:${candidate.id}:${webhook.webhookId}:${webhook.status.toLowerCase()}`,
-          summary: "Airbnb property lifecycle webhook ensured before provider onboarding mutation",
+          decisionId: `airbnb-lifecycle-webhook:${webhook.webhookId}:${webhook.status.toLowerCase()}`,
+          summary: "Airbnb global lifecycle webhook ensured before provider onboarding mutation",
           reason: webhook.status,
           metadata: {
             provider: "AIRBNB",
             webhookId: webhook.webhookId,
             callbackUrl: args.config.callbackUrl,
-            externalPropertyId,
-            eventMaskScope: "CHANNEL_LIFECYCLE_ONLY",
+            isGlobal: true,
+            eventMaskScope: "GLOBAL_CHANNEL_LIFECYCLE_ONLY",
           },
           startedAt: recordedAt,
           completedAt: recordedAt,
