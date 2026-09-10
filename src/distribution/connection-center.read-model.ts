@@ -17,6 +17,7 @@ export type ConnectionCenterProvider =
 export type StoredOtaChannel = {
   provider: ConnectionCenterProvider;
   status: OtaChannelConnectionStatus;
+  externalConnectionId?: string | null;
   authorizationReadiness: OtaReadinessStatus;
   mappingReadiness: OtaReadinessStatus;
   distributionReadiness: OtaReadinessStatus;
@@ -83,6 +84,7 @@ export function buildConnectionCenterReadModel(args: {
       ...catalogItem,
       status,
       nextAction: nextAction(status),
+      channelLinked: Boolean(stored?.externalConnectionId),
       evidenceScope,
       downstreamOtaAcceptance,
       readiness: {
