@@ -1,0 +1,68 @@
+name: Airbnb Callback Persistence & Presentation (backend)
+
+on:
+  push:
+    branches:
+      - agent/airbnb-callback-persistence-presentation
+
+permissions:
+  contents: read
+
+jobs:
+  callback-persistence:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout exact branch commit
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+      - name: Use Node.js 22
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+      - name: Install locked dependencies without lifecycle scripts
+        run: npm ci --ignore-scripts --no-audit --no-fund
+      - name: Run connection regression plus persistence and presentation-contract tests
+        run: node --import tsx --test src/distribution/airbnb-host-self-service.service.test.ts src/distribution/airbnb-host-self-service.callback-verifier.test.ts src/distribution/airbnb-host-self-service.callback-persistence.test.ts src/distribution/connection-center.read-model.test.ts src/distribution/connection-center.channel-linked.test.ts src/distribution/ota-connection-center.runtime-composition.test.ts
+      - name: Typecheck isolated new persistence and read-model modules
+        run: ./node_modules/.bin/tsc --noEmit --strict --target ES2022 --module NodeNext --moduleResolution NodeNext --types node src/distribution/airbnb-host-self-service.callback-persistence.ts src/distribution/connection-center.read-model.ts
+      - name: Prove route and runtime diagnostics do not regress from production main
+        run: |
+          baseline=$(mktemp -d)
+          git archive c9304e039cb778a999ec3d34f72433d8aff6b9dd src package.json | tar -x -C "$baseline"
+          ln -s "$GITHUB_WORKSPACE/node_modules" "$baseline/node_modules"
+          tsc="$GITHUB_WORKSPACE/node_modules/.bin/tsc"
+          flags=(--noEmit --strict --target ES2022 --module NodeNext --moduleResolution NodeNext --types node)
+          set +e
+          (cd "$baseline" && "$tsc" "${flags[@]}" src/distribution/ota-connection-center.runtime-composition.ts src/routes/dashboard.distribution-connection-center.route.ts) > "$RUNNER_TEMP/baseline-types.txt" 2>&1
+          baseline_status=$?
+          "$tsc" "${flags[@]}" src/distribution/ota-connection-center.runtime-composition.ts src/routes/dashboard.distribution-connection-center.route.ts > "$RUNNER_TEMP/current-types.txt" 2>&1
+          current_status=$?
+          set -e
+          cat "$RUNNER_TEMP/current-types.txt"
+          test "$current_status" -eq "$baseline_status"
+          diff -u "$RUNNER_TEMP/baseline-types.txt" "$RUNNER_TEMP/current-types.txt"
+          echo 'Diagnostics match production baseline; this is not a clean full-backend typecheck.'
+      - name: Prove exact narrow diff allowlist
+        run: |
+          git diff --name-only c9304e039cb778a999ec3d34f72433d8aff6b9dd...HEAD | sort > "$RUNNER_TEMP/actual.txt"
+          cat > "$RUNNER_TEMP/expected.txt" <<'EOF'
+          .github/workflows/airbnb-callback-persistence-presentation.yml
+          src/distribution/airbnb-host-self-service.callback-persistence.test.ts
+          src/distribution/airbnb-host-self-service.callback-persistence.ts
+          src/distribution/connection-center.channel-linked.test.ts
+          src/distribution/connection-center.read-model.ts
+          src/distribution/ota-connection-center.runtime-composition.ts
+          src/routes/dashboard.distribution-connection-center.route.ts
+          EOF
+          sort "$RUNNER_TEMP/expected.txt" -o "$RUNNER_TEMP/expected.txt"
+          diff -u "$RUNNER_TEMP/expected.txt" "$RUNNER_TEMP/actual.txt"
+      - name: Prove certified Channex and operational surfaces remain untouched
+        run: git diff --exit-code c9304e039cb778a999ec3d34f72433d8aff6b9dd -- prisma src/pms src/workers src/distribution/channex-channel-identity.ts src/distribution/channex-readonly.http-transport.ts src/distribution/channex-white-label.http-transport.ts src/distribution/channex-canonical-readiness.service.ts src/distribution/channex-channel-lifecycle.evidence.ts src/distribution/channex-airbnb-transport-readiness.policy.ts
+      - name: Prove callback persistence cannot execute provider or distribution operations
+        run: |
+          ! grep -E 'fetch\(|\.send\(|/api/v1/|/mappings|/activate|load_future_reservations|distributionOutbox|channexAri|booking|reservation' src/distribution/airbnb-host-self-service.callback-persistence.ts
+          grep -F 'data: { externalConnectionId: channelId }' src/distribution/airbnb-host-self-service.callback-persistence.ts
