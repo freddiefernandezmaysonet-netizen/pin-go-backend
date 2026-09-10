@@ -150,16 +150,35 @@ function parseWebhook(value: unknown): AirbnbLifecycleWebhookSnapshot {
   };
 }
 
+function eventMaskParts(value: string): string[] | null {
+  const raw = String(value ?? "").trim().toLowerCase();
+  if (!raw || raw === "*") return null;
+  const parts = raw.split(";").map((item) => item.trim());
+  if (
+    parts.some((item) => !item) ||
+    new Set(parts).size !== parts.length
+  ) {
+    return null;
+  }
+  return parts;
+}
+
+function eventMaskWithinLifecycleScope(value: string): boolean {
+  const parts = eventMaskParts(value);
+  return Boolean(
+    parts &&
+      parts.every((event) =>
+        (AIRBNB_LIFECYCLE_WEBHOOK_EVENTS as readonly string[]).includes(event)
+      )
+  );
+}
+
 function sameEventMask(value: string): boolean {
-  const parts = value
-    .toLowerCase()
-    .split(";")
-    .map((item) => item.trim())
-    .filter(Boolean);
-  return (
-    parts.length === AIRBNB_LIFECYCLE_WEBHOOK_EVENTS.length &&
-    new Set(parts).size === parts.length &&
-    AIRBNB_LIFECYCLE_WEBHOOK_EVENTS.every((event) => parts.includes(event))
+  const parts = eventMaskParts(value);
+  return Boolean(
+    parts &&
+      parts.length === AIRBNB_LIFECYCLE_WEBHOOK_EVENTS.length &&
+      AIRBNB_LIFECYCLE_WEBHOOK_EVENTS.every((event) => parts.includes(event))
   );
 }
 
@@ -425,6 +444,11 @@ export async function ensureAirbnbPropertyLifecycleWebhook(args: {
   const candidate = candidates[0]!;
   if (exactMatch(candidate, propertyId, callback, secret)) {
     return { status: "UNCHANGED", webhookId: candidate.id, providerMutations: 0 };
+  }
+  if (!eventMaskWithinLifecycleScope(candidate.eventMask)) {
+    throw new AirbnbLifecycleWebhookError(
+      "AIRBNB_LIFECYCLE_WEBHOOK_SCOPE_CONFLICT"
+    );
   }
 
   const updated = await client.update(candidate.id, {
