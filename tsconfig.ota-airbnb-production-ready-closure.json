@@ -1,0 +1,27 @@
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "types": ["node"],
+    "noEmit": true,
+    "module": "ESNext",
+    "moduleResolution": "Bundler",
+    "exactOptionalPropertyTypes": false,
+    "noUncheckedIndexedAccess": false
+  },
+  "include": [
+    "src/distribution/airbnb-post-auth-autopilot.owner.ts",
+    "src/distribution/airbnb-lifecycle-webhook.production.ts",
+    "src/distribution/airbnb-post-auth-production.orchestrator.ts",
+    "src/distribution/airbnb-missed-activation.recovery.ts",
+    "src/distribution/airbnb-production-ready-post-auth-closure.test.ts",
+    "src/distribution/airbnb-production-ready-post-auth-orchestration.test.ts",
+    "src/routes/channex-channel-lifecycle.webhook.route.ts",
+    "src/workers/airbnb-post-auth-autopilot.worker.ts",
+    "scripts/airbnb-casa-collores-missed-activation-recovery.ts",
+    "src/lib/prisma.ts",
+    "src/lib/iana-timezone.ts",
+    "src/pms/outbound/channex-ari-outbox.service.ts",
+    "src/distribution/channex-readonly.http-transport.ts",
+    "src/distribution/channex-canonical-readiness.service.ts"
+  ]
+}

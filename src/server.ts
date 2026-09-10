@@ -36,6 +36,7 @@ import { dashboardPropertiesRouter } from "./routes/dashboard.properties.route";
 import { buildDashboardChannexFullSyncRouter } from "./routes/dashboard.channex-full-sync.route";
 import { buildDashboardDistributionConnectionCenterRouter } from "./routes/dashboard.distribution-connection-center.route";
 import { buildRuntimeOtaConnectionCenterComposition } from "./distribution/ota-connection-center.runtime-composition";
+import { startAirbnbPostAuthWorkerInProcess } from "./workers/airbnb-post-auth-autopilot.worker";
 import {
   dashboardGuestAccessSettingsRouter,
 } from "./routes/dashboard.guest-access-settings.routes";
@@ -411,4 +412,5 @@ export default app;
 // =====================
 app.listen(PORT, () => {
   console.log(`🚀 Pin&Go API running on port ${PORT}`);
+  startAirbnbPostAuthWorkerInProcess(process.env);
 });
