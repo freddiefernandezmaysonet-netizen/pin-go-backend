@@ -5,7 +5,8 @@
     "noEmit": true,
     "module": "ESNext",
     "moduleResolution": "Bundler",
-    "exactOptionalPropertyTypes": false
+    "exactOptionalPropertyTypes": false,
+    "noUncheckedIndexedAccess": false
   },
   "include": [
     "src/distribution/airbnb-post-auth-autopilot.owner.ts",
