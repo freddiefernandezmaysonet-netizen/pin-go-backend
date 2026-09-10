@@ -206,7 +206,7 @@ export function createCanaryScopedPrismaOwnerStore(
         throw new AirbnbPostAuthCanaryError("CANARY_LOCAL_CONTEXT_MISSING");
       }
       const dp = row.distributionProperty;
-      const group = dp.group;
+      const group = dp.group!;
       if (
         row.externalConnectionId !== target.channelId ||
         dp.externalPropertyId !== target.externalPropertyId ||
