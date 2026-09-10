@@ -21,6 +21,7 @@ const DISABLED_KEEPALIVE_MS = 24 * 60 * 60_000;
 
 export type AirbnbPostAuthWorkerConfig = {
   enabled: boolean;
+  activationSource: "EXPLICIT" | "CONNECTION_CENTER" | "DISABLED";
   pollMs: number;
   settleMs: number;
   apiOrigin: string;
@@ -48,7 +49,26 @@ function positiveInt(
 export function resolveAirbnbPostAuthWorkerConfig(
   env: Readonly<Record<string, string | undefined>> = process.env
 ): AirbnbPostAuthWorkerConfig {
-  const enabled = String(env.OTA_AIRBNB_POST_AUTH_AUTOPILOT_ENABLED ?? "").trim() === "true";
+  const explicit = String(
+    env.OTA_AIRBNB_POST_AUTH_AUTOPILOT_ENABLED ?? ""
+  ).trim();
+  if (explicit && explicit !== "true" && explicit !== "false") {
+    throw new Error("AIRBNB_POST_AUTH_WORKER_CONFIG_INVALID");
+  }
+
+  const connectionCenterLaunch =
+    env.NODE_ENV === "production" &&
+    env.OTA_CONNECTION_CENTER_ENABLED === "true";
+  const enabled = explicit
+    ? explicit === "true"
+    : connectionCenterLaunch;
+  const activationSource: AirbnbPostAuthWorkerConfig["activationSource"] =
+    explicit
+      ? "EXPLICIT"
+      : connectionCenterLaunch
+        ? "CONNECTION_CENTER"
+        : "DISABLED";
+
   const apiOrigin = String(env.OTA_CONNECTION_PROVIDER_API_ORIGIN ?? "").trim();
   const apiKey = String(env.OTA_CONNECTION_API_KEY ?? "").trim();
   const apiBaseUrl = String(env.API_BASE_URL ?? "").trim().replace(/\/$/, "");
@@ -58,6 +78,8 @@ export function resolveAirbnbPostAuthWorkerConfig(
   if (enabled) {
     if (
       env.NODE_ENV !== "production" ||
+      env.OTA_CONNECTION_CENTER_ENABLED !== "true" ||
+      env.OTA_CHANNEL_LIFECYCLE_ENABLED !== "true" ||
       apiOrigin !== "https://app.channex.io" ||
       !apiKey ||
       !apiBaseUrl.startsWith("https://") ||
@@ -69,6 +91,7 @@ export function resolveAirbnbPostAuthWorkerConfig(
 
   return {
     enabled,
+    activationSource,
     pollMs: positiveInt(
       env.OTA_AIRBNB_POST_AUTH_AUTOPILOT_POLL_MS,
       DEFAULT_POLL_MS,
@@ -110,11 +133,20 @@ async function earliestOwnerCandidate() {
       id: true,
       organizationId: true,
       propertyId: true,
+      externalConnectionId: true,
+      lastChannelActivatedAt: true,
       distributionProperty: {
         select: {
           platform: true,
           provisioningStatus: true,
           externalPropertyId: true,
+          group: {
+            select: {
+              platform: true,
+              provisioningStatus: true,
+              externalGroupId: true,
+            },
+          },
         },
       },
     },
@@ -130,14 +162,25 @@ export async function runAirbnbPostAuthWorkerTick(args: {
   }
 
   const candidate = await earliestOwnerCandidate();
+  const provider = createChannexAirbnbPostAuthProvider({
+    apiOrigin: args.config.apiOrigin,
+    apiKey: args.config.apiKey,
+  });
+
   if (candidate) {
     const externalPropertyId = String(
       candidate.distributionProperty?.externalPropertyId ?? ""
     ).trim();
+    const externalGroupId = String(
+      candidate.distributionProperty?.group?.externalGroupId ?? ""
+    ).trim();
     if (
       candidate.distributionProperty?.platform !== "CHANNEX" ||
       candidate.distributionProperty?.provisioningStatus !== "READY" ||
-      !externalPropertyId
+      candidate.distributionProperty?.group?.platform !== "CHANNEX" ||
+      candidate.distributionProperty?.group?.provisioningStatus !== "READY" ||
+      !externalPropertyId ||
+      !externalGroupId
     ) {
       return {
         status: "ACTION_REQUIRED" as const,
@@ -155,6 +198,7 @@ export async function runAirbnbPostAuthWorkerTick(args: {
     });
 
     if (webhook.providerMutations === 1) {
+      const recordedAt = args.now ?? new Date();
       await prisma.apmsAuditEntry.create({
         data: {
           organizationId: candidate.organizationId,
@@ -175,8 +219,8 @@ export async function runAirbnbPostAuthWorkerTick(args: {
             externalPropertyId,
             eventMaskScope: "CHANNEL_LIFECYCLE_ONLY",
           },
-          startedAt: args.now ?? new Date(),
-          completedAt: args.now ?? new Date(),
+          startedAt: recordedAt,
+          completedAt: recordedAt,
           durationMs: 0,
         },
       });
@@ -187,12 +231,36 @@ export async function runAirbnbPostAuthWorkerTick(args: {
         providerMutations: 1 as const,
       };
     }
+
+    // A provider-active channel without a durable activation watermark means
+    // activation happened before lifecycle ingestion was available (or the
+    // webhook has not arrived yet). Do not let canonical reconciliation mutate
+    // readinessRevision before an explicit, auditable recovery or real webhook.
+    if (!candidate.lastChannelActivatedAt) {
+      const channelId = String(candidate.externalConnectionId ?? "").trim();
+      const channel = await provider.getChannel(channelId);
+      if (
+        channel.id !== channelId ||
+        channel.groupId !== externalGroupId ||
+        channel.propertyIds.length !== 1 ||
+        channel.propertyIds[0] !== externalPropertyId
+      ) {
+        return {
+          status: "ACTION_REQUIRED" as const,
+          connectionId: candidate.id,
+          reason: "CHANNEL_SCOPE_MISMATCH",
+        };
+      }
+      if (channel.isActive) {
+        return {
+          status: "ACTION_REQUIRED" as const,
+          connectionId: candidate.id,
+          reason: "MISSED_ACTIVATION_RECOVERY_REQUIRED",
+        };
+      }
+    }
   }
 
-  const provider = createChannexAirbnbPostAuthProvider({
-    apiOrigin: args.config.apiOrigin,
-    apiKey: args.config.apiKey,
-  });
   const reconcile = createAirbnbPostAuthCanonicalReconciler({
     prisma,
     apiOrigin: args.config.apiOrigin,
@@ -235,10 +303,12 @@ export function createAirbnbPostAuthWorker(args: {
   runTick?: typeof runAirbnbPostAuthWorkerTick;
   setIntervalFn?: typeof setInterval;
   clearIntervalFn?: typeof clearInterval;
+  disconnect?: () => Promise<void>;
 }) {
   const runTick = args.runTick ?? runAirbnbPostAuthWorkerTick;
   const setIntervalFn = args.setIntervalFn ?? setInterval;
   const clearIntervalFn = args.clearIntervalFn ?? clearInterval;
+  const disconnect = args.disconnect ?? (() => prisma.$disconnect());
   let interval: NodeJS.Timeout | null = null;
   let current: Promise<void> | null = null;
   let stopping = false;
@@ -276,10 +346,39 @@ export function createAirbnbPostAuthWorker(args: {
       interval = null;
     }
     if (current) await current;
-    await prisma.$disconnect();
+    await disconnect();
   };
 
   return { start, stop, tick };
+}
+
+export function startAirbnbPostAuthWorkerInProcess(
+  env: Readonly<Record<string, string | undefined>> = process.env
+) {
+  const config = resolveAirbnbPostAuthWorkerConfig(env);
+  const worker = createAirbnbPostAuthWorker({
+    config,
+    // The backend owns the shared Prisma lifecycle. The in-process worker must
+    // never disconnect it independently.
+    disconnect: async () => undefined,
+  });
+  if (!config.enabled) {
+    console.log("[airbnb.post-auth] in-process runtime disabled", {
+      activationSource: config.activationSource,
+    });
+    return { config, worker, started: false as const };
+  }
+  void worker.start().catch((error) => {
+    console.error(
+      "[airbnb.post-auth] in-process start failed",
+      error instanceof Error ? error.message : String(error)
+    );
+  });
+  console.log("[airbnb.post-auth] in-process runtime started", {
+    activationSource: config.activationSource,
+    pollMs: config.pollMs,
+  });
+  return { config, worker, started: true as const };
 }
 
 function isDirectExecution() {
