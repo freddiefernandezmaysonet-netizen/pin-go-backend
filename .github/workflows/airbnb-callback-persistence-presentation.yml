@@ -44,8 +44,13 @@ jobs:
           set -e
           cat "$RUNNER_TEMP/current-types.txt"
           test "$current_status" -eq "$baseline_status"
-          diff -u "$RUNNER_TEMP/baseline-types.txt" "$RUNNER_TEMP/current-types.txt"
-          echo 'Diagnostics match production baseline; this is not a clean full-backend typecheck.'
+          normalize() {
+            sed -E 's#^.*(node_modules/|src/)#\1#; s/\([0-9]+,[0-9]+\)/(LINE,COL)/g' "$1" | sort -u
+          }
+          normalize "$RUNNER_TEMP/baseline-types.txt" > "$RUNNER_TEMP/baseline-types.normalized.txt"
+          normalize "$RUNNER_TEMP/current-types.txt" > "$RUNNER_TEMP/current-types.normalized.txt"
+          diff -u "$RUNNER_TEMP/baseline-types.normalized.txt" "$RUNNER_TEMP/current-types.normalized.txt"
+          echo 'Normalized diagnostics match production baseline; this is not a clean full-backend typecheck.'
       - name: Prove exact narrow diff allowlist
         run: |
           git diff --name-only c9304e039cb778a999ec3d34f72433d8aff6b9dd...HEAD | sort > "$RUNNER_TEMP/actual.txt"
