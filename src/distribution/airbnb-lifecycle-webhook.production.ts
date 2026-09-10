@@ -18,6 +18,9 @@ export const AIRBNB_LIFECYCLE_WEBHOOK_EVENT_MASK =
 const UUID =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const ALLOWED_ORIGIN = "https://app.channex.io";
+const WEBHOOK_PAGE_LIMIT = 100;
+const MAX_WEBHOOK_PAGES = 100;
+const MAX_WEBHOOK_RESOURCES = 10_000;
 
 export class AirbnbLifecycleWebhookError extends Error {
   constructor(readonly code: string) {
@@ -188,6 +191,15 @@ function exactMatch(
   );
 }
 
+function paginationInteger(value: unknown, min: number, max: number): number | null {
+  return typeof value === "number" &&
+    Number.isInteger(value) &&
+    value >= min &&
+    value <= max
+    ? value
+    : null;
+}
+
 export function normalizeChannexLifecycleWebhookPayload(payload: unknown): unknown {
   const root = record(payload);
   if (!root || typeof root.event !== "string") return payload;
@@ -214,7 +226,13 @@ export function createAirbnbLifecycleWebhookClient(args: {
     path: string,
     body?: unknown
   ) => {
-    const response = await fetchImpl(`${origin}/api/v1${path}`, {
+    const url = new URL(`/api/v1${path}`, origin);
+    if (url.origin !== origin || !url.pathname.startsWith("/api/v1/")) {
+      throw new AirbnbLifecycleWebhookError(
+        "AIRBNB_LIFECYCLE_WEBHOOK_REQUEST_INVALID"
+      );
+    }
+    const response = await fetchImpl(url, {
       method,
       redirect: "error",
       headers: {
@@ -235,13 +253,84 @@ export function createAirbnbLifecycleWebhookClient(args: {
 
   return {
     async listAll(): Promise<AirbnbLifecycleWebhookSnapshot[]> {
-      const response = await request("GET", "/webhooks");
-      if (!Array.isArray(response.payload?.data)) {
-        throw new AirbnbLifecycleWebhookError(
-          "AIRBNB_LIFECYCLE_WEBHOOK_LIST_INVALID"
-        );
+      const resources: AirbnbLifecycleWebhookSnapshot[] = [];
+      const ids = new Set<string>();
+      let expectedTotal: number | null = null;
+
+      for (let page = 1; page <= MAX_WEBHOOK_PAGES; page += 1) {
+        const search = new URLSearchParams({
+          "pagination[page]": String(page),
+          "pagination[limit]": String(WEBHOOK_PAGE_LIMIT),
+        });
+        const response = await request("GET", `/webhooks?${search.toString()}`);
+        if (!Array.isArray(response.payload?.data)) {
+          throw new AirbnbLifecycleWebhookError(
+            "AIRBNB_LIFECYCLE_WEBHOOK_LIST_INVALID"
+          );
+        }
+        const meta = record(response.payload?.meta);
+        const reportedPage = paginationInteger(meta?.page, 1, MAX_WEBHOOK_PAGES);
+        const reportedLimit = paginationInteger(meta?.limit, 1, WEBHOOK_PAGE_LIMIT);
+        const reportedTotal = paginationInteger(meta?.total, 0, MAX_WEBHOOK_RESOURCES);
+        if (
+          reportedPage !== page ||
+          reportedLimit !== WEBHOOK_PAGE_LIMIT ||
+          reportedTotal === null ||
+          (expectedTotal !== null && expectedTotal !== reportedTotal)
+        ) {
+          throw new AirbnbLifecycleWebhookError(
+            "AIRBNB_LIFECYCLE_WEBHOOK_PAGINATION_INVALID"
+          );
+        }
+        expectedTotal = reportedTotal;
+
+        if (response.payload.data.length > WEBHOOK_PAGE_LIMIT) {
+          throw new AirbnbLifecycleWebhookError(
+            "AIRBNB_LIFECYCLE_WEBHOOK_LIST_TOO_LARGE"
+          );
+        }
+        for (const raw of response.payload.data) {
+          const webhook = parseWebhook(raw);
+          if (ids.has(webhook.id)) {
+            throw new AirbnbLifecycleWebhookError(
+              "AIRBNB_LIFECYCLE_WEBHOOK_DUPLICATE_RESOURCE"
+            );
+          }
+          ids.add(webhook.id);
+          resources.push(webhook);
+          if (resources.length > MAX_WEBHOOK_RESOURCES) {
+            throw new AirbnbLifecycleWebhookError(
+              "AIRBNB_LIFECYCLE_WEBHOOK_LIST_TOO_LARGE"
+            );
+          }
+        }
+
+        if (resources.length === expectedTotal) return resources;
+        if (
+          resources.length > expectedTotal ||
+          response.payload.data.length === 0 ||
+          response.payload.data.length < WEBHOOK_PAGE_LIMIT
+        ) {
+          throw new AirbnbLifecycleWebhookError(
+            "AIRBNB_LIFECYCLE_WEBHOOK_PAGINATION_INVALID"
+          );
+        }
       }
-      return response.payload.data.map(parseWebhook);
+
+      throw new AirbnbLifecycleWebhookError(
+        "AIRBNB_LIFECYCLE_WEBHOOK_LIST_TOO_LARGE"
+      );
+    },
+    async get(webhookId: string): Promise<AirbnbLifecycleWebhookSnapshot> {
+      const id = requiredUuid(
+        webhookId,
+        "AIRBNB_LIFECYCLE_WEBHOOK_ID_INVALID"
+      );
+      const response = await request(
+        "GET",
+        `/webhooks/${encodeURIComponent(id)}`
+      );
+      return parseWebhook(response.payload?.data);
     },
     async create(input: {
       propertyId: string;
@@ -324,12 +413,13 @@ export async function ensureAirbnbPropertyLifecycleWebhook(args: {
   }
   if (candidates.length === 0) {
     const created = await client.create({ propertyId, callbackUrl: callback, secret });
-    if (!exactMatch(created, propertyId, callback, secret)) {
+    const verified = await client.get(created.id);
+    if (!exactMatch(verified, propertyId, callback, secret)) {
       throw new AirbnbLifecycleWebhookError(
         "AIRBNB_LIFECYCLE_WEBHOOK_CREATE_VERIFICATION_FAILED"
       );
     }
-    return { status: "CREATED", webhookId: created.id, providerMutations: 1 };
+    return { status: "CREATED", webhookId: verified.id, providerMutations: 1 };
   }
 
   const candidate = candidates[0]!;
@@ -342,10 +432,11 @@ export async function ensureAirbnbPropertyLifecycleWebhook(args: {
     callbackUrl: callback,
     secret,
   });
-  if (!exactMatch(updated, propertyId, callback, secret)) {
+  const verified = await client.get(updated.id);
+  if (!exactMatch(verified, propertyId, callback, secret)) {
     throw new AirbnbLifecycleWebhookError(
       "AIRBNB_LIFECYCLE_WEBHOOK_UPDATE_VERIFICATION_FAILED"
     );
   }
-  return { status: "UPDATED", webhookId: updated.id, providerMutations: 1 };
+  return { status: "UPDATED", webhookId: verified.id, providerMutations: 1 };
 }
