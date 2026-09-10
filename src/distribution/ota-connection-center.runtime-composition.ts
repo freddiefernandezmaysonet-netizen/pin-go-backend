@@ -9,6 +9,7 @@ import {
   type AirbnbHostSelfServiceClient,
   type AirbnbHostSelfServiceTransport,
 } from "./airbnb-host-self-service.service.js";
+import { verifyAndPersistAirbnbHostCallback } from "./airbnb-host-self-service.callback-persistence.js";
 import { ChannexWhiteLabelAdapter } from "./channex-white-label.adapter.js";
 import { createChannexWhiteLabelHttpTransport } from "./channex-white-label.http-transport.js";
 import { createChannexReadonlyHttpTransport } from "./channex-readonly.http-transport.js";
@@ -247,15 +248,21 @@ export function buildRuntimeOtaConnectionCenterComposition(args: {
           channelId,
           token,
         }) =>
-          verifyAirbnbHostCallback({
-            client: airbnbClient,
-            transport: airbnbTransport,
-            stateSecret: airbnbStateSecret ?? "",
+          verifyAndPersistAirbnbHostCallback({
+            verify: () =>
+              verifyAirbnbHostCallback({
+                client: airbnbClient,
+                transport: airbnbTransport,
+                stateSecret: airbnbStateSecret ?? "",
+                organizationId,
+                requestedByUserId,
+                success,
+                channelId,
+                token,
+              }),
+            client: args.prisma as any,
             organizationId,
             requestedByUserId,
-            success,
-            channelId,
-            token,
           }),
       },
       reconcile: ({
