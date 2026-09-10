@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import { processChannexChannelLifecycleWebhook } from "../routes/channex-channel-lifecycle.webhook.route.js";
+import { resolveAirbnbPostAuthWorkerConfig } from "../workers/airbnb-post-auth-autopilot.worker.js";
 import { runAirbnbPostActivationCycle } from "./airbnb-post-auth-production.orchestrator.js";
 
 const ORG_ID = "cmo1syqey0001p01dlopyf5w5";
@@ -40,6 +41,37 @@ test("lifecycle route normalizes official disconnected_channel before canonical 
   assert.equal(received.event, "disconnect_channel");
   assert.equal(received.property_id, EXTERNAL_PROPERTY_ID);
   assert.equal(received.payload.channel_id, CHANNEL_ID);
+});
+
+test("worker launches from production Connection Center only when lifecycle receiver is enabled", () => {
+  const base = {
+    NODE_ENV: "production",
+    OTA_CONNECTION_CENTER_ENABLED: "true",
+    OTA_CHANNEL_LIFECYCLE_ENABLED: "true",
+    OTA_CONNECTION_PROVIDER_API_ORIGIN: "https://app.channex.io",
+    OTA_CONNECTION_API_KEY: "provider-key",
+    API_BASE_URL: "https://api.pin-ngo.com",
+    OTA_CHANNEL_WEBHOOK_SECRET: "abcdefghijklmnopqrstuvwxyz0123456789ABCDEFG",
+  };
+  const config = resolveAirbnbPostAuthWorkerConfig(base);
+  assert.equal(config.enabled, true);
+  assert.equal(config.activationSource, "CONNECTION_CENTER");
+  assert.equal(
+    config.callbackUrl,
+    "https://api.pin-ngo.com/webhooks/ota/channex/channel-lifecycle"
+  );
+
+  assert.throws(
+    () => resolveAirbnbPostAuthWorkerConfig({ ...base, OTA_CHANNEL_LIFECYCLE_ENABLED: "false" }),
+    /AIRBNB_POST_AUTH_WORKER_CONFIG_INVALID/
+  );
+
+  const explicitlyDisabled = resolveAirbnbPostAuthWorkerConfig({
+    ...base,
+    OTA_AIRBNB_POST_AUTH_AUTOPILOT_ENABLED: "false",
+  });
+  assert.equal(explicitlyDisabled.enabled, false);
+  assert.equal(explicitlyDisabled.activationSource, "EXPLICIT");
 });
 
 test("post-activation cycle reuses completed full sync and reconciles to ACTIVE without requeue", async () => {
