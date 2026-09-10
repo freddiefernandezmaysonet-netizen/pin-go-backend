@@ -24,6 +24,8 @@ jobs:
   scope-and-tests:
     runs-on: ubuntu-latest
     timeout-minutes: 12
+    env:
+      DATABASE_URL: postgresql://postgres:postgres@localhost:5432/pingo_ci
     steps:
       - uses: actions/checkout@v4
         with:
