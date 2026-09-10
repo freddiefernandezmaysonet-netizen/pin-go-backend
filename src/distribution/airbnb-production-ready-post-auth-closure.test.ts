@@ -17,12 +17,31 @@ const RATE_PLAN_ID = "bfd7dfe7-0c6d-4145-bbc4-45546780d720";
 const LISTING_ID = "551126434553599406";
 const CALLBACK = "https://api.pin-ngo.com/webhooks/ota/channex/channel-lifecycle";
 const SECRET = "abcdefghijklmnopqrstuvwxyz0123456789ABCDEFG";
+const WEBHOOK_ID = "11111111-1111-4111-8111-111111111111";
 
 function response(status: number, body: unknown) {
   return new Response(JSON.stringify(body), {
     status,
     headers: { "content-type": "application/json" },
   });
+}
+
+function webhookResource() {
+  return {
+    id: WEBHOOK_ID,
+    type: "webhook",
+    attributes: {
+      property_id: PROPERTY_ID,
+      callback_url: CALLBACK,
+      event_mask: AIRBNB_LIFECYCLE_WEBHOOK_EVENT_MASK,
+      headers: { "x-pin-go-ota-channel-webhook-secret": SECRET },
+      is_active: true,
+      send_data: true,
+    },
+    relationships: {
+      property: { data: { id: PROPERTY_ID, type: "property" } },
+    },
+  };
 }
 
 test("normalizes official disconnected_channel to canonical disconnect_channel", () => {
@@ -42,32 +61,30 @@ test("normalizes official disconnected_channel to canonical disconnect_channel",
   );
 });
 
-test("property webhook create is exact, lifecycle-only and one provider mutation", async () => {
+test("property webhook create is exact, lifecycle-only, persisted and one provider mutation", async () => {
   const calls: Array<{ method: string; url: string; body: any }> = [];
+  let created = false;
   const fetchImpl = async (input: URL | RequestInfo, init?: RequestInit) => {
     const url = String(input);
     const method = String(init?.method ?? "GET");
     const body = init?.body ? JSON.parse(String(init.body)) : null;
     calls.push({ method, url, body });
-    if (method === "GET") return response(200, { data: [] });
-    assert.equal(method, "POST");
-    return response(201, {
-      data: {
-        id: "11111111-1111-4111-8111-111111111111",
-        type: "webhook",
-        attributes: {
-          property_id: PROPERTY_ID,
-          callback_url: CALLBACK,
-          event_mask: AIRBNB_LIFECYCLE_WEBHOOK_EVENT_MASK,
-          headers: { "x-pin-go-ota-channel-webhook-secret": SECRET },
-          is_active: true,
-          send_data: true,
-        },
-        relationships: {
-          property: { data: { id: PROPERTY_ID, type: "property" } },
-        },
-      },
-    });
+
+    if (method === "GET" && url.includes("/webhooks?")) {
+      return response(200, {
+        data: [],
+        meta: { page: 1, limit: 100, total: 0 },
+      });
+    }
+    if (method === "POST") {
+      created = true;
+      return response(201, { data: webhookResource() });
+    }
+    if (method === "GET" && url.endsWith(`/webhooks/${WEBHOOK_ID}`)) {
+      assert.equal(created, true);
+      return response(200, { data: webhookResource() });
+    }
+    throw new Error(`unexpected request ${method} ${url}`);
   };
 
   const result = await ensureAirbnbPropertyLifecycleWebhook({
@@ -81,10 +98,13 @@ test("property webhook create is exact, lifecycle-only and one provider mutation
 
   assert.deepEqual(result, {
     status: "CREATED",
-    webhookId: "11111111-1111-4111-8111-111111111111",
+    webhookId: WEBHOOK_ID,
     providerMutations: 1,
   });
-  assert.equal(calls.length, 2);
+  assert.equal(calls.length, 3);
+  assert.equal(calls[0]!.method, "GET");
+  assert.equal(calls[1]!.method, "POST");
+  assert.equal(calls[2]!.method, "GET");
   assert.equal(calls[1]!.body.webhook.property_id, PROPERTY_ID);
   assert.equal(calls[1]!.body.webhook.callback_url, CALLBACK);
   assert.equal(calls[1]!.body.webhook.event_mask, AIRBNB_LIFECYCLE_WEBHOOK_EVENT_MASK);
@@ -99,24 +119,59 @@ test("exact existing property webhook performs no provider mutation", async () =
   const fetchImpl = async (_input: URL | RequestInfo, init?: RequestInit) => {
     if (String(init?.method ?? "GET") !== "GET") writes += 1;
     return response(200, {
-      data: [
-        {
-          id: "11111111-1111-4111-8111-111111111111",
-          type: "webhook",
-          attributes: {
-            property_id: PROPERTY_ID,
-            callback_url: CALLBACK,
-            event_mask: AIRBNB_LIFECYCLE_WEBHOOK_EVENT_MASK,
-            headers: { "x-pin-go-ota-channel-webhook-secret": SECRET },
-            is_active: true,
-            send_data: true,
-          },
-          relationships: {
-            property: { data: { id: PROPERTY_ID, type: "property" } },
-          },
-        },
-      ],
+      data: [webhookResource()],
+      meta: { page: 1, limit: 100, total: 1 },
     });
+  };
+
+  const result = await ensureAirbnbPropertyLifecycleWebhook({
+    apiOrigin: "https://app.channex.io",
+    apiKey: "key",
+    externalPropertyId: PROPERTY_ID,
+    callbackUrl: CALLBACK,
+    webhookSecret: SECRET,
+    fetchImpl: fetchImpl as typeof fetch,
+  });
+  assert.equal(result.status, "UNCHANGED");
+  assert.equal(result.providerMutations, 0);
+  assert.equal(writes, 0);
+});
+
+test("webhook discovery follows pagination and sees an existing webhook beyond page one", async () => {
+  let writes = 0;
+  const firstPage = Array.from({ length: 100 }, (_, index) => ({
+    id: `${String(index + 1).padStart(8, "0")}-1111-4111-8111-111111111111`,
+    type: "webhook",
+    attributes: {
+      property_id: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+      callback_url: `https://example.com/${index}`,
+      event_mask: "booking",
+      headers: {},
+      is_active: true,
+      send_data: true,
+    },
+    relationships: {
+      property: {
+        data: { id: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa", type: "property" },
+      },
+    },
+  }));
+  const fetchImpl = async (input: URL | RequestInfo, init?: RequestInit) => {
+    if (String(init?.method ?? "GET") !== "GET") writes += 1;
+    const url = String(input);
+    if (url.includes("pagination%5Bpage%5D=1")) {
+      return response(200, {
+        data: firstPage,
+        meta: { page: 1, limit: 100, total: 101 },
+      });
+    }
+    if (url.includes("pagination%5Bpage%5D=2")) {
+      return response(200, {
+        data: [webhookResource()],
+        meta: { page: 2, limit: 100, total: 101 },
+      });
+    }
+    throw new Error(`unexpected page ${url}`);
   };
 
   const result = await ensureAirbnbPropertyLifecycleWebhook({
