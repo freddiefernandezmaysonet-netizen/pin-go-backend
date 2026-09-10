@@ -3,12 +3,10 @@ import test from "node:test";
 
 import {
   AIRBNB_LIFECYCLE_WEBHOOK_EVENT_MASK,
-  ensureAirbnbPropertyLifecycleWebhook,
+  ensureAirbnbGlobalLifecycleWebhook,
   normalizeChannexLifecycleWebhookPayload,
 } from "./airbnb-lifecycle-webhook.production.js";
-import {
-  recoverMissedAirbnbActivation,
-} from "./airbnb-missed-activation.recovery.js";
+import { recoverMissedAirbnbActivation } from "./airbnb-missed-activation.recovery.js";
 
 const PROPERTY_ID = "b58de550-63f8-49dc-abfa-4629b94a2160";
 const GROUP_ID = "a05d501f-7d1a-40fd-a21e-2805d818e527";
@@ -26,42 +24,39 @@ function response(status: number, body: unknown) {
   });
 }
 
-function webhookResource() {
+function globalWebhookResource(overrides: Record<string, unknown> = {}) {
   return {
     id: WEBHOOK_ID,
     type: "webhook",
     attributes: {
-      property_id: PROPERTY_ID,
+      property_id: null,
+      is_global: true,
       callback_url: CALLBACK,
       event_mask: AIRBNB_LIFECYCLE_WEBHOOK_EVENT_MASK,
       headers: { "x-pin-go-ota-channel-webhook-secret": SECRET },
       is_active: true,
       send_data: true,
+      ...overrides,
     },
-    relationships: {
-      property: { data: { id: PROPERTY_ID, type: "property" } },
-    },
+    relationships: { property: { data: null } },
   };
 }
 
-test("normalizes official disconnected_channel to canonical disconnect_channel", () => {
-  const payload = {
-    event: "disconnected_channel",
+test("official disconnect_channel remains canonical and historic spelling is normalized", () => {
+  const canonical = {
+    event: "disconnect_channel",
     property_id: PROPERTY_ID,
     timestamp: "2026-09-10T17:20:00Z",
     payload: { channel_id: CHANNEL_ID, ota_name: "Airbnb" },
   };
-  assert.deepEqual(normalizeChannexLifecycleWebhookPayload(payload), {
-    ...payload,
-    event: "disconnect_channel",
-  });
-  assert.equal(
-    (normalizeChannexLifecycleWebhookPayload({ ...payload, event: "activate_channel" }) as any).event,
-    "activate_channel"
+  assert.deepEqual(normalizeChannexLifecycleWebhookPayload(canonical), canonical);
+  assert.deepEqual(
+    normalizeChannexLifecycleWebhookPayload({ ...canonical, event: "disconnected_channel" }),
+    canonical
   );
 });
 
-test("property webhook create is exact, lifecycle-only, persisted and one provider mutation", async () => {
+test("global lifecycle webhook create is exact, persisted and one provider mutation", async () => {
   const calls: Array<{ method: string; url: string; body: any }> = [];
   let created = false;
   const fetchImpl = async (input: URL | RequestInfo, init?: RequestInit) => {
@@ -69,28 +64,23 @@ test("property webhook create is exact, lifecycle-only, persisted and one provid
     const method = String(init?.method ?? "GET");
     const body = init?.body ? JSON.parse(String(init.body)) : null;
     calls.push({ method, url, body });
-
-    if (method === "GET" && url.includes("/webhooks?")) {
-      return response(200, {
-        data: [],
-        meta: { page: 1, limit: 100, total: 0 },
-      });
+    if (method === "GET" && url.endsWith("/api/v1/webhooks")) {
+      return response(200, { data: [] });
     }
     if (method === "POST") {
       created = true;
-      return response(201, { data: webhookResource() });
+      return response(201, { data: globalWebhookResource() });
     }
     if (method === "GET" && url.endsWith(`/webhooks/${WEBHOOK_ID}`)) {
       assert.equal(created, true);
-      return response(200, { data: webhookResource() });
+      return response(200, { data: globalWebhookResource() });
     }
     throw new Error(`unexpected request ${method} ${url}`);
   };
 
-  const result = await ensureAirbnbPropertyLifecycleWebhook({
+  const result = await ensureAirbnbGlobalLifecycleWebhook({
     apiOrigin: "https://app.channex.io",
     apiKey: "key",
-    externalPropertyId: PROPERTY_ID,
     callbackUrl: CALLBACK,
     webhookSecret: SECRET,
     fetchImpl: fetchImpl as typeof fetch,
@@ -102,32 +92,28 @@ test("property webhook create is exact, lifecycle-only, persisted and one provid
     providerMutations: 1,
   });
   assert.equal(calls.length, 3);
-  assert.equal(calls[0]!.method, "GET");
-  assert.equal(calls[1]!.method, "POST");
-  assert.equal(calls[2]!.method, "GET");
-  assert.equal(calls[1]!.body.webhook.property_id, PROPERTY_ID);
+  assert.equal(calls[0]!.url.endsWith("/api/v1/webhooks"), true);
+  assert.equal(calls[0]!.url.includes("pagination"), false);
+  assert.equal(calls[1]!.body.webhook.property_id, null);
+  assert.equal(calls[1]!.body.webhook.is_global, true);
   assert.equal(calls[1]!.body.webhook.callback_url, CALLBACK);
   assert.equal(calls[1]!.body.webhook.event_mask, AIRBNB_LIFECYCLE_WEBHOOK_EVENT_MASK);
-  assert.equal(calls[1]!.body.webhook.event_mask.includes("disconnected_channel"), true);
-  assert.equal(calls[1]!.body.webhook.event_mask.includes("*"), false);
+  assert.equal(calls[1]!.body.webhook.event_mask.includes("disconnect_channel"), true);
+  assert.equal(calls[1]!.body.webhook.event_mask.includes("disconnected_channel"), false);
+  assert.equal(calls[1]!.body.webhook.event_mask.includes("booking"), false);
   assert.equal(calls[1]!.body.webhook.is_active, true);
   assert.equal(calls[1]!.body.webhook.send_data, true);
 });
 
-test("exact existing property webhook performs no provider mutation", async () => {
+test("exact existing global webhook performs no provider mutation", async () => {
   let writes = 0;
   const fetchImpl = async (_input: URL | RequestInfo, init?: RequestInit) => {
     if (String(init?.method ?? "GET") !== "GET") writes += 1;
-    return response(200, {
-      data: [webhookResource()],
-      meta: { page: 1, limit: 100, total: 1 },
-    });
+    return response(200, { data: [globalWebhookResource()] });
   };
-
-  const result = await ensureAirbnbPropertyLifecycleWebhook({
+  const result = await ensureAirbnbGlobalLifecycleWebhook({
     apiOrigin: "https://app.channex.io",
     apiKey: "key",
-    externalPropertyId: PROPERTY_ID,
     callbackUrl: CALLBACK,
     webhookSecret: SECRET,
     fetchImpl: fetchImpl as typeof fetch,
@@ -137,53 +123,24 @@ test("exact existing property webhook performs no provider mutation", async () =
   assert.equal(writes, 0);
 });
 
-test("webhook discovery follows pagination and sees an existing webhook beyond page one", async () => {
+test("mixed-scope global webhook fails closed instead of overwriting unrelated events", async () => {
   let writes = 0;
-  const firstPage = Array.from({ length: 100 }, (_, index) => ({
-    id: `${String(index + 1).padStart(8, "0")}-1111-4111-8111-111111111111`,
-    type: "webhook",
-    attributes: {
-      property_id: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
-      callback_url: `https://example.com/${index}`,
-      event_mask: "booking",
-      headers: {},
-      is_active: true,
-      send_data: true,
-    },
-    relationships: {
-      property: {
-        data: { id: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa", type: "property" },
-      },
-    },
-  }));
-  const fetchImpl = async (input: URL | RequestInfo, init?: RequestInit) => {
+  const fetchImpl = async (_input: URL | RequestInfo, init?: RequestInit) => {
     if (String(init?.method ?? "GET") !== "GET") writes += 1;
-    const url = String(input);
-    if (url.includes("pagination%5Bpage%5D=1")) {
-      return response(200, {
-        data: firstPage,
-        meta: { page: 1, limit: 100, total: 101 },
-      });
-    }
-    if (url.includes("pagination%5Bpage%5D=2")) {
-      return response(200, {
-        data: [webhookResource()],
-        meta: { page: 2, limit: 100, total: 101 },
-      });
-    }
-    throw new Error(`unexpected page ${url}`);
+    return response(200, {
+      data: [globalWebhookResource({ event_mask: "activate_channel;booking" })],
+    });
   };
-
-  const result = await ensureAirbnbPropertyLifecycleWebhook({
-    apiOrigin: "https://app.channex.io",
-    apiKey: "key",
-    externalPropertyId: PROPERTY_ID,
-    callbackUrl: CALLBACK,
-    webhookSecret: SECRET,
-    fetchImpl: fetchImpl as typeof fetch,
-  });
-  assert.equal(result.status, "UNCHANGED");
-  assert.equal(result.providerMutations, 0);
+  await assert.rejects(
+    () => ensureAirbnbGlobalLifecycleWebhook({
+      apiOrigin: "https://app.channex.io",
+      apiKey: "key",
+      callbackUrl: CALLBACK,
+      webhookSecret: SECRET,
+      fetchImpl: fetchImpl as typeof fetch,
+    }),
+    /AIRBNB_LIFECYCLE_WEBHOOK_SCOPE_CONFLICT/
+  );
   assert.equal(writes, 0);
 });
 
@@ -219,7 +176,6 @@ test("missed activation recovery records provider observation, not synthetic web
       },
     },
   };
-
   const tx = {
     otaChannelConnection: {
       async findFirst() { return connection; },
@@ -240,17 +196,14 @@ test("missed activation recovery records provider observation, not synthetic web
         isActive: true,
         groupId: GROUP_ID,
         propertyIds: [PROPERTY_ID],
-        mappings: [
-          {
-            id: "22222222-2222-4222-8222-222222222222",
-            ratePlanId: RATE_PLAN_ID,
-            listingId: LISTING_ID,
-          },
-        ],
+        mappings: [{
+          id: "22222222-2222-4222-8222-222222222222",
+          ratePlanId: RATE_PLAN_ID,
+          listingId: LISTING_ID,
+        }],
       };
     },
   };
-
   const observedAt = new Date("2026-09-10T17:30:00Z");
   const result = await recoverMissedAirbnbActivation({
     prisma,
@@ -267,7 +220,6 @@ test("missed activation recovery records provider observation, not synthetic web
       listingId: LISTING_ID,
     },
   });
-
   assert.equal(result.recovered, true);
   assert.equal(updateData.lastLifecycleEventType, "activate_channel");
   assert.equal(updateData.lastLifecycleEventPrecedence, 30);
