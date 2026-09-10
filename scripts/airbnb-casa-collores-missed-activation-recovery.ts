@@ -43,14 +43,22 @@ async function main() {
     },
   });
 
+  const output = result.recovered
+    ? {
+        recovered: true,
+        reason: null,
+        observedAt: result.observedAt.toISOString(),
+        decisionId: result.decisionId,
+      }
+    : {
+        recovered: false,
+        reason: result.reason,
+        observedAt: null,
+        decisionId: null,
+      };
+
   console.log(
-    `AIRBNB_MISSED_ACTIVATION_RECOVERY=${JSON.stringify({
-      recovered: result.recovered,
-      reason: "reason" in result ? result.reason : null,
-      observedAt:
-        "observedAt" in result ? result.observedAt.toISOString() : null,
-      decisionId: "decisionId" in result ? result.decisionId : null,
-    })}`
+    `AIRBNB_MISSED_ACTIVATION_RECOVERY=${JSON.stringify(output)}`
   );
 }
 
