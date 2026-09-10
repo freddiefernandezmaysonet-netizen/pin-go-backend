@@ -14,6 +14,7 @@
     "src/distribution/airbnb-post-auth-production.orchestrator.ts",
     "src/distribution/airbnb-missed-activation.recovery.ts",
     "src/distribution/airbnb-production-ready-post-auth-closure.test.ts",
+    "src/distribution/airbnb-production-ready-post-auth-orchestration.test.ts",
     "src/routes/channex-channel-lifecycle.webhook.route.ts",
     "src/workers/airbnb-post-auth-autopilot.worker.ts",
     "scripts/airbnb-casa-collores-missed-activation-recovery.ts",
