@@ -11,6 +11,31 @@ import { normalizeChannexLifecycleWebhookPayload } from "../distribution/airbnb-
 export const OTA_CHANNEL_WEBHOOK_SECRET_HEADER =
   OTA_CHANNEL_LIFECYCLE_WEBHOOK_SECRET_HEADER;
 
+let airbnbWorkerBootstrapScheduled = false;
+
+function scheduleAirbnbPostAuthWorkerBootstrap(): void {
+  if (
+    airbnbWorkerBootstrapScheduled ||
+    process.env.NODE_ENV !== "production" ||
+    process.env.OTA_CONNECTION_CENTER_ENABLED !== "true"
+  ) {
+    return;
+  }
+  airbnbWorkerBootstrapScheduled = true;
+  setImmediate(() => {
+    void import("../workers/airbnb-post-auth-autopilot.worker.js")
+      .then(({ startAirbnbPostAuthWorkerInProcess }) =>
+        startAirbnbPostAuthWorkerInProcess(process.env)
+      )
+      .catch((error) => {
+        console.error(
+          "[airbnb.post-auth] bootstrap failed",
+          error instanceof Error ? error.message : String(error)
+        );
+      });
+  });
+}
+
 function firstHeader(value: unknown): string {
   if (Array.isArray(value)) return String(value[0] ?? "").trim();
   return String(value ?? "").trim();
@@ -97,6 +122,7 @@ export function buildChannexChannelLifecycleWebhookRouter(args: {
   expectedSecret: string | null | undefined;
   applyEvidence: (payload: unknown) => Promise<OtaChannelEvidenceResult>;
 }) {
+  scheduleAirbnbPostAuthWorkerBootstrap();
   const router = Router();
   router.post("/webhooks/ota/channex/channel-lifecycle", async (req, res) => {
     const result = await processChannexChannelLifecycleWebhook({
