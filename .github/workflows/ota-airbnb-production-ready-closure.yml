@@ -13,6 +13,7 @@ on:
       - 'src/distribution/airbnb-production-ready-post-auth-orchestration.test.ts'
       - 'src/routes/channex-channel-lifecycle.webhook.route.ts'
       - 'src/workers/airbnb-post-auth-autopilot.worker.ts'
+      - 'src/server.ts'
       - 'scripts/airbnb-casa-collores-missed-activation-recovery.ts'
       - 'tsconfig.ota-airbnb-production-ready-closure.json'
       - '.github/workflows/ota-airbnb-production-ready-closure.yml'
@@ -48,6 +49,7 @@ jobs:
               src/distribution/airbnb-production-ready-post-auth-orchestration.test.ts|\
               src/routes/channex-channel-lifecycle.webhook.route.ts|\
               src/workers/airbnb-post-auth-autopilot.worker.ts|\
+              src/server.ts|\
               scripts/airbnb-casa-collores-missed-activation-recovery.ts|\
               tsconfig.ota-airbnb-production-ready-closure.json|\
               .github/workflows/ota-airbnb-production-ready-closure.yml)
