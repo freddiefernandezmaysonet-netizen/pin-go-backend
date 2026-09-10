@@ -284,6 +284,7 @@ export function buildDashboardDistributionConnectionCenterRouter(
                   propertyId: true,
                   provider: true,
                   status: true,
+                  externalConnectionId: true,
                   authorizationReadiness: true,
                   mappingReadiness: true,
                   distributionReadiness: true,
