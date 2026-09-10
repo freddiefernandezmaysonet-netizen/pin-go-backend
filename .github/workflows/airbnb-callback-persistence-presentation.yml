@@ -27,8 +27,8 @@ jobs:
         run: npm ci --ignore-scripts --no-audit --no-fund
       - name: Run connection regression plus persistence and presentation-contract tests
         run: node --import tsx --test src/distribution/airbnb-host-self-service.service.test.ts src/distribution/airbnb-host-self-service.callback-verifier.test.ts src/distribution/airbnb-host-self-service.callback-persistence.test.ts src/distribution/connection-center.read-model.test.ts src/distribution/connection-center.channel-linked.test.ts src/distribution/ota-connection-center.runtime-composition.test.ts
-      - name: Typecheck isolated new persistence and read-model modules
-        run: ./node_modules/.bin/tsc --noEmit --strict --target ES2022 --module NodeNext --moduleResolution NodeNext --types node src/distribution/airbnb-host-self-service.callback-persistence.ts src/distribution/connection-center.read-model.ts
+      - name: Typecheck isolated new persistence module
+        run: ./node_modules/.bin/tsc --noEmit --strict --target ES2022 --module NodeNext --moduleResolution NodeNext --types node src/distribution/airbnb-host-self-service.callback-persistence.ts
       - name: Prove route and runtime diagnostics do not regress from production main
         run: |
           baseline=$(mktemp -d)
@@ -37,9 +37,9 @@ jobs:
           tsc="$GITHUB_WORKSPACE/node_modules/.bin/tsc"
           flags=(--noEmit --strict --target ES2022 --module NodeNext --moduleResolution NodeNext --types node)
           set +e
-          (cd "$baseline" && "$tsc" "${flags[@]}" src/distribution/ota-connection-center.runtime-composition.ts src/routes/dashboard.distribution-connection-center.route.ts) > "$RUNNER_TEMP/baseline-types.txt" 2>&1
+          (cd "$baseline" && "$tsc" "${flags[@]}" src/distribution/connection-center.read-model.ts src/distribution/ota-connection-center.runtime-composition.ts src/routes/dashboard.distribution-connection-center.route.ts) > "$RUNNER_TEMP/baseline-types.txt" 2>&1
           baseline_status=$?
-          "$tsc" "${flags[@]}" src/distribution/ota-connection-center.runtime-composition.ts src/routes/dashboard.distribution-connection-center.route.ts > "$RUNNER_TEMP/current-types.txt" 2>&1
+          "$tsc" "${flags[@]}" src/distribution/connection-center.read-model.ts src/distribution/ota-connection-center.runtime-composition.ts src/routes/dashboard.distribution-connection-center.route.ts > "$RUNNER_TEMP/current-types.txt" 2>&1
           current_status=$?
           set -e
           cat "$RUNNER_TEMP/current-types.txt"
