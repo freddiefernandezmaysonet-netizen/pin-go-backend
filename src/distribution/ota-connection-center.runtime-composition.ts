@@ -6,10 +6,14 @@ import type { DistributionConnectionCenterActions } from "../routes/dashboard.di
 import {
   issueAirbnbHostConnectionLink,
   verifyAirbnbHostCallback,
+  verifyAirbnbHostState,
   type AirbnbHostSelfServiceClient,
   type AirbnbHostSelfServiceTransport,
 } from "./airbnb-host-self-service.service.js";
-import { verifyAndPersistAirbnbHostCallback } from "./airbnb-host-self-service.callback-persistence.js";
+import {
+  captureAirbnbCallbackPersistenceGuard,
+  verifyAndPersistAirbnbHostCallback,
+} from "./airbnb-host-self-service.callback-persistence.js";
 import { ChannexWhiteLabelAdapter } from "./channex-white-label.adapter.js";
 import { createChannexWhiteLabelHttpTransport } from "./channex-white-label.http-transport.js";
 import { createChannexReadonlyHttpTransport } from "./channex-readonly.http-transport.js";
@@ -241,14 +245,38 @@ export function buildRuntimeOtaConnectionCenterComposition(args: {
             propertyId,
             requestedByUserId,
           }),
-        verifyCallback: ({
+        verifyCallback: async ({
           organizationId,
           requestedByUserId,
           success,
           channelId,
           token,
-        }) =>
-          verifyAndPersistAirbnbHostCallback({
+        }) => {
+          if (success !== "true") {
+            return verifyAirbnbHostCallback({
+              client: airbnbClient,
+              transport: airbnbTransport,
+              stateSecret: airbnbStateSecret ?? "",
+              organizationId,
+              requestedByUserId,
+              success,
+              channelId,
+              token,
+            });
+          }
+          const claims = verifyAirbnbHostState({
+            token,
+            secret: airbnbStateSecret ?? "",
+            organizationId,
+            requestedByUserId,
+          });
+          const guard = await captureAirbnbCallbackPersistenceGuard({
+            client: args.prisma as any,
+            organizationId,
+            propertyId: claims.propertyId,
+            channelId: String(channelId ?? ""),
+          });
+          return verifyAndPersistAirbnbHostCallback({
             verify: () =>
               verifyAirbnbHostCallback({
                 client: airbnbClient,
@@ -261,9 +289,11 @@ export function buildRuntimeOtaConnectionCenterComposition(args: {
                 token,
               }),
             client: args.prisma as any,
+            guard,
             organizationId,
             requestedByUserId,
-          }),
+          });
+        },
       },
       reconcile: ({
         organizationId,
