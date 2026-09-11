@@ -1,0 +1,114 @@
+name: OTA Airbnb Host-Confirmed Mapping Certification
+
+on:
+  pull_request:
+    paths:
+      - 'src/distribution/airbnb-host-confirmed-mapping.http-transport.ts'
+      - 'src/distribution/airbnb-host-confirmed-mapping.http-transport.test.ts'
+      - 'src/distribution/airbnb-host-confirmed-mapping.service.ts'
+      - 'src/distribution/airbnb-host-confirmed-mapping.service.test.ts'
+      - 'src/routes/dashboard.airbnb-host-self-service.route.ts'
+      - 'src/routes/dashboard.airbnb-host-self-service.mapping.route.test.ts'
+      - 'src/distribution/ota-connection-center.runtime-composition.ts'
+      - 'src/distribution/ota-connection-center.runtime-composition.test.ts'
+      - '.github/workflows/ota-airbnb-host-confirmed-mapping.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  host-confirmed-mapping-certification:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      DATABASE_URL: postgresql://user:pass@localhost:5432/pingo_test
+    steps:
+      - name: Checkout exact candidate
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+
+      - name: Use Node.js 22
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+
+      - name: Install locked dependencies
+        run: npm ci --ignore-scripts --no-audit --no-fund
+
+      - name: Generate and validate Prisma client
+        run: |
+          npx prisma generate
+          npx prisma validate --schema ./prisma/schema.prisma
+
+      - name: Prove exact narrow diff allowlist
+        shell: bash
+        run: |
+          git fetch origin main --depth=1
+          git diff --name-only origin/main...HEAD | sort > "$RUNNER_TEMP/actual.txt"
+          cat > "$RUNNER_TEMP/allowed.txt" <<'EOF'
+          .github/workflows/ota-airbnb-host-confirmed-mapping.yml
+          src/distribution/airbnb-host-confirmed-mapping.http-transport.test.ts
+          src/distribution/airbnb-host-confirmed-mapping.http-transport.ts
+          src/distribution/airbnb-host-confirmed-mapping.service.test.ts
+          src/distribution/airbnb-host-confirmed-mapping.service.ts
+          src/distribution/ota-connection-center.runtime-composition.test.ts
+          src/distribution/ota-connection-center.runtime-composition.ts
+          src/routes/dashboard.airbnb-host-self-service.mapping.route.test.ts
+          src/routes/dashboard.airbnb-host-self-service.route.ts
+          EOF
+          sort "$RUNNER_TEMP/allowed.txt" -o "$RUNNER_TEMP/allowed.txt"
+          comm -23 "$RUNNER_TEMP/actual.txt" "$RUNNER_TEMP/allowed.txt" > "$RUNNER_TEMP/outside.txt"
+          test ! -s "$RUNNER_TEMP/outside.txt" || {
+            echo "OUT_OF_SCOPE_FILES"
+            cat "$RUNNER_TEMP/outside.txt"
+            exit 1
+          }
+
+      - name: Prove certified Channex core and workers remain frozen
+        run: |
+          git diff --exit-code origin/main...HEAD -- \
+            prisma \
+            src/pms \
+            src/workers \
+            src/distribution/channex-channel-identity.ts \
+            src/distribution/channex-readonly.http-transport.ts \
+            src/distribution/channex-white-label.http-transport.ts \
+            src/distribution/channex-canonical-readiness.service.ts \
+            src/distribution/channex-airbnb-transport-readiness.policy.ts \
+            src/distribution/channex-channel-lifecycle.evidence.ts
+
+      - name: Prove mapping-only documented provider surface
+        shell: bash
+        run: |
+          grep -F '/api/v1/channels/' src/distribution/airbnb-host-confirmed-mapping.http-transport.ts
+          grep -F '/mappings' src/distribution/airbnb-host-confirmed-mapping.http-transport.ts
+          grep -F 'rate_plan_id' src/distribution/airbnb-host-confirmed-mapping.http-transport.ts
+          grep -F 'listing_id' src/distribution/airbnb-host-confirmed-mapping.http-transport.ts
+          grep -F 'CONFIRM_AIRBNB_PROPERTY_MAPPING' src/distribution/airbnb-host-confirmed-mapping.service.ts
+          ! grep -R -E '/activate|load_future_reservations|check_readiness|/restrictions|/availability' \
+            src/distribution/airbnb-host-confirmed-mapping.http-transport.ts \
+            src/distribution/airbnb-host-confirmed-mapping.service.ts \
+            src/routes/dashboard.airbnb-host-self-service.mapping.route.test.ts
+
+      - name: Type-check mapping boundary
+        run: |
+          ./node_modules/.bin/tsc --noEmit --strict --target ES2022 --module NodeNext --moduleResolution NodeNext --types node \
+            src/distribution/airbnb-host-confirmed-mapping.http-transport.ts \
+            src/distribution/airbnb-host-confirmed-mapping.service.ts \
+            src/routes/dashboard.airbnb-host-self-service.route.ts \
+            src/distribution/ota-connection-center.runtime-composition.ts
+
+      - name: Run mapping and retained Airbnb regressions
+        run: |
+          node --import tsx --test \
+            src/distribution/airbnb-host-confirmed-mapping.http-transport.test.ts \
+            src/distribution/airbnb-host-confirmed-mapping.service.test.ts \
+            src/routes/dashboard.airbnb-host-self-service.mapping.route.test.ts \
+            src/routes/dashboard.airbnb-host-self-service.listings.route.test.ts \
+            src/distribution/ota-connection-center.runtime-composition.test.ts \
+            src/distribution/airbnb-host-self-service.listings.service.test.ts \
+            src/distribution/airbnb-property-auto-matching.test.ts
