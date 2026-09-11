@@ -11,6 +11,7 @@ export type PinGoPropertyMatchInput = {
   publicTitle: string | null;
   city: string | null;
   country: string | null;
+  postalCode: string | null;
   maxGuests: number | null;
 };
 
@@ -20,6 +21,17 @@ export type AirbnbListingMatchInput = {
   city: string | null;
   countryCode: string | null;
   occupancies: number[] | null;
+};
+
+export type AirbnbListingDetailsEvidence = {
+  listingId: string;
+  personCapacity: number | null;
+  city: string | null;
+  state: string | null;
+  postalCode: string | null;
+  countryCode: string | null;
+  latitude: number | null;
+  longitude: number | null;
 };
 
 export type AirbnbPropertyMatchDecision = {
@@ -50,7 +62,6 @@ type CandidateScore = {
   nameSimilarity: number;
   cityMismatch: boolean;
   countryMismatch: boolean;
-  maxGuestsMismatch: boolean;
   reasons: string[];
 };
 
@@ -181,6 +192,15 @@ function normalizeCountry(value: string | null | undefined): string | null {
   return normalized.toUpperCase();
 }
 
+function normalizePostalCode(value: string | null | undefined): string | null {
+  const normalized = String(value ?? "")
+    .normalize("NFKD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toUpperCase()
+    .replace(/[^A-Z0-9]/g, "");
+  return normalized || null;
+}
+
 function preferredNameSimilarity(
   property: PinGoPropertyMatchInput,
   listingTitle: string | null
@@ -234,28 +254,12 @@ function scoreCandidate(
     reasons.push("COUNTRY_UNKNOWN");
   }
 
-  const listingMaxGuests = listing.occupancies?.length
-    ? Math.max(...listing.occupancies)
-    : null;
-  const maxGuestsKnown = property.maxGuests != null && listingMaxGuests != null;
-  const maxGuestsMismatch =
-    maxGuestsKnown && property.maxGuests !== listingMaxGuests;
-  if (maxGuestsKnown && !maxGuestsMismatch) {
-    score += 5;
-    reasons.push("MAX_GUESTS_MATCH");
-  } else if (maxGuestsMismatch) {
-    reasons.push("MAX_GUESTS_MISMATCH");
-  } else {
-    reasons.push("MAX_GUESTS_UNKNOWN");
-  }
-
   return {
     listing,
     score: roundScore(score),
     nameSimilarity,
     cityMismatch,
     countryMismatch,
-    maxGuestsMismatch,
     reasons,
   };
 }
@@ -299,7 +303,6 @@ function decideProperty(
     top.nameSimilarity >= AUTO_MATCH_MIN_NAME_SIMILARITY &&
     !top.cityMismatch &&
     !top.countryMismatch &&
-    !top.maxGuestsMismatch &&
     margin >= AUTO_MATCH_MIN_MARGIN;
 
   const reasons = [...top.reasons];
@@ -343,6 +346,76 @@ function decideProperty(
   };
 }
 
+function withReason(
+  decision: AirbnbPropertyMatchDecision,
+  reason: string
+): AirbnbPropertyMatchDecision {
+  return decision.reasons.includes(reason)
+    ? decision
+    : { ...decision, reasons: [...decision.reasons, reason] };
+}
+
+export function corroborateAirbnbPropertyMatch(args: {
+  property: PinGoPropertyMatchInput;
+  listing: AirbnbListingMatchInput;
+  decision: AirbnbPropertyMatchDecision;
+  details: AirbnbListingDetailsEvidence;
+}): AirbnbPropertyMatchDecision {
+  const { property, listing, decision, details } = args;
+  if (
+    decision.status !== "REVIEW_REQUIRED" ||
+    !decision.candidateListingId ||
+    decision.candidateListingId !== listing.id ||
+    decision.candidateListingId !== details.listingId ||
+    !decision.reasons.includes("CITY_MISMATCH") ||
+    decision.reasons.includes("AMBIGUOUS_RUNNER_UP") ||
+    decision.reasons.includes("LISTING_CONFLICT")
+  ) {
+    return decision;
+  }
+
+  if (preferredNameSimilarity(property, listing.title) < AUTO_MATCH_MIN_NAME_SIMILARITY) {
+    return withReason(decision, "DETAILS_NAME_NOT_STRONG");
+  }
+
+  const propertyCountry = normalizeCountry(property.country);
+  const detailsCountry = normalizeCountry(details.countryCode);
+  if (!propertyCountry || !detailsCountry) {
+    return withReason(decision, "DETAILS_COUNTRY_UNKNOWN");
+  }
+  if (propertyCountry !== detailsCountry) {
+    return withReason(decision, "DETAILS_COUNTRY_MISMATCH");
+  }
+
+  const propertyPostalCode = normalizePostalCode(property.postalCode);
+  const detailsPostalCode = normalizePostalCode(details.postalCode);
+  if (!propertyPostalCode || !detailsPostalCode) {
+    return withReason(decision, "POSTAL_CODE_UNKNOWN");
+  }
+  if (propertyPostalCode !== detailsPostalCode) {
+    return withReason(decision, "POSTAL_CODE_MISMATCH");
+  }
+
+  let result = withReason(decision, "POSTAL_CODE_MATCH");
+  if (property.maxGuests != null) {
+    if (details.personCapacity == null) {
+      return withReason(result, "PERSON_CAPACITY_UNKNOWN");
+    }
+    if (property.maxGuests !== details.personCapacity) {
+      return withReason(result, "PERSON_CAPACITY_MISMATCH");
+    }
+    result = withReason(result, "PERSON_CAPACITY_MATCH");
+  }
+
+  result = withReason(result, "CITY_MISMATCH_CORROBORATED");
+  return {
+    ...result,
+    status: "AUTO_MATCH",
+    confidence: "HIGH",
+    score: Math.max(result.score, 95),
+  };
+}
+
 export function matchAirbnbPropertyPortfolio(args: {
   properties: readonly PinGoPropertyMatchInput[];
   listings: readonly AirbnbListingMatchInput[];
@@ -351,15 +424,15 @@ export function matchAirbnbPropertyPortfolio(args: {
     decideProperty(property, args.listings)
   );
 
-  const autoByListing = new Map<string, number[]>();
+  const byListing = new Map<string, number[]>();
   decisions.forEach((decision, index) => {
-    if (decision.status !== "AUTO_MATCH" || !decision.candidateListingId) return;
-    const indexes = autoByListing.get(decision.candidateListingId) ?? [];
+    if (decision.status === "UNMATCHED" || !decision.candidateListingId) return;
+    const indexes = byListing.get(decision.candidateListingId) ?? [];
     indexes.push(index);
-    autoByListing.set(decision.candidateListingId, indexes);
+    byListing.set(decision.candidateListingId, indexes);
   });
 
-  for (const indexes of autoByListing.values()) {
+  for (const indexes of byListing.values()) {
     if (indexes.length < 2) continue;
     for (const index of indexes) {
       const decision = decisions[index]!;
@@ -367,7 +440,9 @@ export function matchAirbnbPropertyPortfolio(args: {
         ...decision,
         status: "REVIEW_REQUIRED",
         confidence: "MEDIUM",
-        reasons: [...decision.reasons, "LISTING_CONFLICT"],
+        reasons: decision.reasons.includes("LISTING_CONFLICT")
+          ? decision.reasons
+          : [...decision.reasons, "LISTING_CONFLICT"],
       };
     }
   }

@@ -383,6 +383,7 @@ dashboardPropertiesRouter.get(
           city: true,
           region: true,
           country: true,
+          postalCode: true,
           timezone: true,
           status: true,
           latitude: true,
@@ -495,6 +496,7 @@ dashboardPropertiesRouter.patch(
   city,
   region,
   country,
+  postalCode,
   timezone,
   cleaningDurationMinutes,
   cleaningStartOffsetMinutes,
@@ -791,6 +793,10 @@ if (
         data.country = String(country || "").trim() || null;
       }
 
+      if (postalCode !== undefined) {
+        data.postalCode = String(postalCode || "").trim() || null;
+      }
+
       if (timezone !== undefined) {
         data.timezone = String(timezone || "").trim() || null;
       }
@@ -973,6 +979,7 @@ if (checkOutTime !== undefined) {
           city: true,
           region: true,
           country: true,
+          postalCode: true,
           timezone: true,
           status: true,
           latitude: true,
