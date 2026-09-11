@@ -1,0 +1,106 @@
+name: OTA Airbnb Listing Discovery Certification
+
+on:
+  pull_request:
+    paths:
+      - 'src/distribution/airbnb-host-self-service.listings.http-transport.ts'
+      - 'src/distribution/airbnb-host-self-service.listings.service.ts'
+      - 'src/distribution/airbnb-host-self-service.listings.service.test.ts'
+      - 'src/distribution/channex-airbnb-listings.transport.test.ts'
+      - 'src/distribution/ota-connection-center.runtime-composition.ts'
+      - 'src/distribution/ota-connection-center.runtime-composition.test.ts'
+      - 'src/routes/dashboard.airbnb-host-self-service.route.ts'
+      - 'src/routes/dashboard.airbnb-host-self-service.listings.route.test.ts'
+      - '.github/workflows/ota-airbnb-listing-discovery.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  listing-discovery-certification:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      DATABASE_URL: postgresql://user:pass@localhost:5432/pingo_test
+    steps:
+      - name: Checkout exact candidate
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+
+      - name: Use Node.js 22
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+
+      - name: Install locked dependencies
+        run: npm ci --ignore-scripts --no-audit --no-fund
+
+      - name: Generate Prisma client
+        run: npx prisma generate
+
+      - name: Prove exact narrow diff allowlist
+        shell: bash
+        run: |
+          git fetch origin main --depth=1
+          git diff --name-only origin/main...HEAD | sort > "$RUNNER_TEMP/actual.txt"
+          cat > "$RUNNER_TEMP/expected.txt" <<'EOF'
+          .github/workflows/ota-airbnb-listing-discovery.yml
+          src/distribution/airbnb-host-self-service.listings.http-transport.ts
+          src/distribution/airbnb-host-self-service.listings.service.test.ts
+          src/distribution/airbnb-host-self-service.listings.service.ts
+          src/distribution/channex-airbnb-listings.transport.test.ts
+          src/distribution/ota-connection-center.runtime-composition.test.ts
+          src/distribution/ota-connection-center.runtime-composition.ts
+          src/routes/dashboard.airbnb-host-self-service.listings.route.test.ts
+          src/routes/dashboard.airbnb-host-self-service.route.ts
+          EOF
+          sort "$RUNNER_TEMP/expected.txt" -o "$RUNNER_TEMP/expected.txt"
+          diff -u "$RUNNER_TEMP/expected.txt" "$RUNNER_TEMP/actual.txt"
+
+      - name: Prove certified Channex core remains frozen
+        run: |
+          git diff --exit-code origin/main...HEAD -- \
+            prisma \
+            src/pms \
+            src/workers \
+            src/distribution/channex-channel-identity.ts \
+            src/distribution/channex-readonly.http-transport.ts \
+            src/distribution/channex-white-label.http-transport.ts \
+            src/distribution/channex-canonical-readiness.service.ts \
+            src/distribution/channex-channel-lifecycle.evidence.ts \
+            src/distribution/channex-airbnb-transport-readiness.policy.ts
+
+      - name: Prove scope is listing discovery only
+        shell: bash
+        run: |
+          ! grep -R -E '/mappings|/activate|load_future_reservations|check_readiness' \
+            src/distribution/airbnb-host-self-service.listings.http-transport.ts \
+            src/distribution/airbnb-host-self-service.listings.service.ts \
+            src/routes/dashboard.airbnb-host-self-service.listings.route.test.ts
+          ! grep -E 'method:[[:space:]]*"POST"|method:[[:space:]]*"PUT"|method:[[:space:]]*"PATCH"|method:[[:space:]]*"DELETE"' \
+            src/distribution/airbnb-host-self-service.listings.http-transport.ts
+          grep -F 'method: "GET"' src/distribution/airbnb-host-self-service.listings.http-transport.ts
+          grep -F '/action/listings' src/distribution/airbnb-host-self-service.listings.http-transport.ts
+
+      - name: Type-check listing discovery boundary
+        run: |
+          ./node_modules/.bin/tsc --noEmit --strict --target ES2022 --module NodeNext --moduleResolution NodeNext --types node \
+            src/distribution/airbnb-host-self-service.listings.http-transport.ts \
+            src/distribution/airbnb-host-self-service.listings.service.ts \
+            src/routes/dashboard.airbnb-host-self-service.route.ts \
+            src/distribution/ota-connection-center.runtime-composition.ts
+
+      - name: Run listing discovery and retained Airbnb regressions
+        run: |
+          node --import tsx --test \
+            src/distribution/channex-airbnb-listings.transport.test.ts \
+            src/distribution/airbnb-host-self-service.listings.service.test.ts \
+            src/routes/dashboard.airbnb-host-self-service.listings.route.test.ts \
+            src/distribution/ota-connection-center.runtime-composition.test.ts \
+            src/distribution/airbnb-host-self-service.service.test.ts \
+            src/distribution/airbnb-host-self-service.callback-verifier.test.ts \
+            src/distribution/airbnb-host-self-service.callback-persistence.test.ts
