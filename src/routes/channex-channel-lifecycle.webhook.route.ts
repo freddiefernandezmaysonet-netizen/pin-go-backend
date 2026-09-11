@@ -6,7 +6,6 @@ import {
   type OtaChannelEvidenceResult,
 } from "../distribution/channex-channel-lifecycle.evidence.js";
 import { OTA_CHANNEL_LIFECYCLE_WEBHOOK_SECRET_HEADER } from "../distribution/channex-channel-lifecycle-webhook.contract.js";
-import { normalizeChannexLifecycleWebhookPayload } from "../distribution/airbnb-lifecycle-webhook.production.js";
 
 export const OTA_CHANNEL_WEBHOOK_SECRET_HEADER =
   OTA_CHANNEL_LIFECYCLE_WEBHOOK_SECRET_HEADER;
@@ -56,9 +55,7 @@ export async function processChannexChannelLifecycleWebhook(args: {
   }
 
   try {
-    const result = await args.applyEvidence(
-      normalizeChannexLifecycleWebhookPayload(args.body)
-    );
+    const result = await args.applyEvidence(args.body);
     if (result.ignored) {
       return {
         status: 202,
