@@ -1,4 +1,10 @@
 import { AirbnbHostSelfServiceError } from "./airbnb-host-self-service.service.js";
+import {
+  matchAirbnbPropertyPortfolio,
+  type AirbnbPropertyMatchDecision,
+  type AirbnbPropertyPortfolioMatch,
+  type PinGoPropertyMatchInput,
+} from "./airbnb-property-auto-matching.js";
 
 export type AirbnbListingSummary = {
   id: string;
@@ -20,10 +26,20 @@ export type AirbnbListingDiscoveryClient = {
       externalConnectionId: string | null;
     } | null>;
   };
+  property: {
+    findMany(args: unknown): Promise<PinGoPropertyMatchInput[]>;
+  };
 };
 
 export type AirbnbListingDiscoveryTransport = {
   listAirbnbListings(channelId: string): Promise<unknown>;
+};
+
+export type AirbnbListingDiscoveryResult = {
+  channelId: string;
+  listings: AirbnbListingSummary[];
+  match: AirbnbPropertyMatchDecision;
+  portfolioSummary: AirbnbPropertyPortfolioMatch["summary"];
 };
 
 const UUID =
@@ -100,10 +116,7 @@ export async function discoverAirbnbListings(args: {
   transport: AirbnbListingDiscoveryTransport;
   organizationId: string;
   propertyId: string;
-}): Promise<{
-  channelId: string;
-  listings: AirbnbListingSummary[];
-}> {
+}): Promise<AirbnbListingDiscoveryResult> {
   const organizationId = required(
     args.organizationId,
     "OTA_AIRBNB_TENANT_INVALID"
@@ -149,9 +162,43 @@ export async function discoverAirbnbListings(args: {
     );
   }
 
+  const properties = await args.client.property.findMany({
+    where: {
+      organizationId,
+      status: "ACTIVE",
+    },
+    orderBy: { id: "asc" },
+    select: {
+      id: true,
+      name: true,
+      publicTitle: true,
+      city: true,
+      country: true,
+      maxGuests: true,
+    },
+  });
+  if (!properties.some((property) => property.id === propertyId)) {
+    throw new AirbnbHostSelfServiceError(
+      "OTA_AIRBNB_PROPERTY_NOT_FOUND"
+    );
+  }
+
   const payload = await args.transport.listAirbnbListings(channelId);
+  const listings = parseAirbnbListingDiscoveryPayload(payload);
+  const portfolio = matchAirbnbPropertyPortfolio({ properties, listings });
+  const match = portfolio.decisions.find(
+    (decision) => decision.propertyId === propertyId
+  );
+  if (!match) {
+    throw new AirbnbHostSelfServiceError(
+      "OTA_AIRBNB_PROPERTY_MATCHING_FAILED"
+    );
+  }
+
   return {
     channelId,
-    listings: parseAirbnbListingDiscoveryPayload(payload),
+    listings,
+    match,
+    portfolioSummary: portfolio.summary,
   };
 }
