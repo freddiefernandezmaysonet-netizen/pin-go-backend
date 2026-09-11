@@ -2,6 +2,7 @@ import { Router } from "express";
 
 import { requireAuth } from "../middleware/requireAuth.js";
 import type { AirbnbListingDiscoveryResult } from "../distribution/airbnb-host-self-service.listings.service.js";
+import type { AirbnbHostConfirmedMappingResult } from "../distribution/airbnb-host-confirmed-mapping.service.js";
 import {
   createDistributionMutationSecurity,
   type DistributionMutationRequest,
@@ -24,6 +25,14 @@ export type AirbnbHostSelfServiceRouteActions = {
     organizationId: string;
     propertyId: string;
   }): Promise<AirbnbListingDiscoveryResult>;
+  confirmMapping?(args: {
+    organizationId: string;
+    propertyId: string;
+    requestedByUserId: string;
+    requestKey: string;
+    listingId: string;
+    confirmation: string;
+  }): Promise<AirbnbHostConfirmedMappingResult>;
   verifyCallback(args: {
     organizationId: string;
     requestedByUserId: string;
@@ -52,11 +61,16 @@ function failure(res: import("express").Response, error: unknown, fallback: stri
     ? 404
     : code.includes("FORBIDDEN") || code.includes("TENANT") || code.includes("ACTOR")
       ? 403
-      : code.includes("RATE_LIMITED")
-        ? 429
-        : code.includes("UNAVAILABLE")
-          ? 503
-          : 422;
+      : code.includes("CONFLICT")
+        ? 409
+        : code.includes("RATE_LIMITED")
+          ? 429
+          : code.includes("UNAVAILABLE") ||
+              code.includes("RECONCILIATION_REQUIRED") ||
+              code === "OTA_AIRBNB_MAPPING_RESPONSE_INVALID" ||
+              code === "OTA_AIRBNB_MAPPING_RESPONSE_TOO_LARGE"
+            ? 503
+            : 422;
   return res.status(status).json({ ok: false, error: code });
 }
 
@@ -144,6 +158,47 @@ export function buildDashboardAirbnbHostSelfServiceRouter(
         });
       } catch (error) {
         return failure(res, error, "OTA_AIRBNB_LISTING_DISCOVERY_FAILED");
+      }
+    }
+  );
+
+  router.post(
+    "/api/dashboard/distribution/properties/:propertyId/channels/AIRBNB/mapping",
+    requireAuth,
+    mutationSecurity,
+    async (req: DistributionMutationRequest, res) => {
+      res.setHeader("Cache-Control", "no-store");
+      if (!actions.enabled || !actions.confirmMapping) {
+        return res.status(503).json({
+          ok: false,
+          error: "OTA_AIRBNB_MAPPING_UNAVAILABLE",
+        });
+      }
+      const currentActor = actor(req);
+      if (!currentActor) {
+        return res.status(403).json({
+          ok: false,
+          error: "OTA_CONNECTION_MUTATION_FORBIDDEN",
+        });
+      }
+      try {
+        const result = await actions.confirmMapping({
+          organizationId: currentActor.orgId,
+          propertyId: String(req.params.propertyId ?? "").trim(),
+          requestedByUserId: currentActor.id,
+          requestKey: req.distributionRequestKey!,
+          listingId: String(req.body?.listingId ?? "").trim(),
+          confirmation: String(req.body?.confirmation ?? ""),
+        });
+        return res.json({
+          ok: true,
+          mapping: {
+            outcome: result.outcome,
+            listingId: result.listingId,
+          },
+        });
+      } catch (error) {
+        return failure(res, error, "OTA_AIRBNB_MAPPING_FAILED");
       }
     }
   );
