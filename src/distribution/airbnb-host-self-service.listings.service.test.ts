@@ -28,20 +28,48 @@ const DOCUMENTED_LISTINGS_PAYLOAD = {
   },
 };
 
-function client(row: any = {
+const DEFAULT_CONNECTION = {
   organizationId: "org-1",
   propertyId: "property-1",
   provider: "AIRBNB",
   externalConnectionId: CHANNEL_ID,
-}) {
-  const queries: unknown[] = [];
+};
+
+const DEFAULT_PROPERTIES = [
+  {
+    id: "property-1",
+    name: "Test Property",
+    publicTitle: null,
+    city: "text",
+    country: "DE",
+    maxGuests: 4,
+  },
+];
+
+function client(args: {
+  connection?: any;
+  properties?: any[];
+} = {}) {
+  const connectionQueries: unknown[] = [];
+  const propertyQueries: unknown[] = [];
+  const connection = Object.prototype.hasOwnProperty.call(args, "connection")
+    ? args.connection
+    : DEFAULT_CONNECTION;
+  const properties = args.properties ?? DEFAULT_PROPERTIES;
   return {
-    queries,
+    connectionQueries,
+    propertyQueries,
     value: {
       otaChannelConnection: {
         async findFirst(query: unknown) {
-          queries.push(query);
-          return row;
+          connectionQueries.push(query);
+          return connection;
+        },
+      },
+      property: {
+        async findMany(query: unknown) {
+          propertyQueries.push(query);
+          return properties;
         },
       },
     },
@@ -87,7 +115,7 @@ test("preserves undocumented nullability instead of fabricating metadata", () =>
   );
 });
 
-test("discovers listings from the exact persisted Airbnb channel for tenant/property scope", async () => {
+test("discovers once from the exact persisted Airbnb channel and matches tenant properties locally", async () => {
   const db = client();
   const providerCalls: string[] = [];
   const result = await discoverAirbnbListings({
@@ -102,7 +130,7 @@ test("discovers listings from the exact persisted Airbnb channel for tenant/prop
     propertyId: "property-1",
   });
 
-  assert.deepEqual(db.queries, [
+  assert.deepEqual(db.connectionQueries, [
     {
       where: {
         organizationId: "org-1",
@@ -117,13 +145,72 @@ test("discovers listings from the exact persisted Airbnb channel for tenant/prop
       },
     },
   ]);
+  assert.deepEqual(db.propertyQueries, [
+    {
+      where: {
+        organizationId: "org-1",
+        status: "ACTIVE",
+      },
+      orderBy: { id: "asc" },
+      select: {
+        id: true,
+        name: true,
+        publicTitle: true,
+        city: true,
+        country: true,
+        maxGuests: true,
+      },
+    },
+  ]);
   assert.deepEqual(providerCalls, [CHANNEL_ID]);
   assert.equal(result.channelId, CHANNEL_ID);
-  assert.equal(result.listings[0].id, "42544559");
+  assert.equal(result.listings[0]?.id, "42544559");
+  assert.equal(result.match.propertyId, "property-1");
+  assert.equal(result.match.status, "AUTO_MATCH");
+  assert.equal(result.match.candidateListingId, "42544559");
+  assert.deepEqual(result.portfolioSummary, {
+    propertiesConsidered: 1,
+    listingsConsidered: 1,
+    autoMatched: 1,
+    reviewRequired: 0,
+    unmatched: 0,
+  });
+});
+
+test("portfolio matching uses all active properties without extra provider reads", async () => {
+  const db = client({
+    properties: [
+      ...DEFAULT_PROPERTIES,
+      {
+        id: "property-2",
+        name: "Ocean View",
+        publicTitle: null,
+        city: "San Juan",
+        country: "Puerto Rico",
+        maxGuests: 6,
+      },
+    ],
+  });
+  let providerCalls = 0;
+  const result = await discoverAirbnbListings({
+    client: db.value,
+    transport: {
+      async listAirbnbListings() {
+        providerCalls += 1;
+        return DOCUMENTED_LISTINGS_PAYLOAD;
+      },
+    },
+    organizationId: "org-1",
+    propertyId: "property-1",
+  });
+
+  assert.equal(providerCalls, 1);
+  assert.equal(result.portfolioSummary.propertiesConsidered, 2);
+  assert.equal(result.portfolioSummary.listingsConsidered, 1);
 });
 
 test("fails closed before provider access when local connection scope does not match", async () => {
-  for (const row of [
+  for (const connection of [
     null,
     {
       organizationId: "org-other",
@@ -153,7 +240,7 @@ test("fails closed before provider access when local connection scope does not m
     let providerCalls = 0;
     await assert.rejects(
       discoverAirbnbListings({
-        client: client(row).value,
+        client: client({ connection }).value,
         transport: {
           async listAirbnbListings() {
             providerCalls += 1;
@@ -167,6 +254,38 @@ test("fails closed before provider access when local connection scope does not m
     );
     assert.equal(providerCalls, 0);
   }
+});
+
+test("fails closed before provider access when the requested Pin&Go property is not active in tenant scope", async () => {
+  let providerCalls = 0;
+  await assert.rejects(
+    discoverAirbnbListings({
+      client: client({
+        properties: [
+          {
+            id: "property-other",
+            name: "Other",
+            publicTitle: null,
+            city: null,
+            country: null,
+            maxGuests: null,
+          },
+        ],
+      }).value,
+      transport: {
+        async listAirbnbListings() {
+          providerCalls += 1;
+          return DOCUMENTED_LISTINGS_PAYLOAD;
+        },
+      },
+      organizationId: "org-1",
+      propertyId: "property-1",
+    }),
+    (error: unknown) =>
+      error instanceof AirbnbHostSelfServiceError &&
+      error.code === "OTA_AIRBNB_PROPERTY_NOT_FOUND"
+  );
+  assert.equal(providerCalls, 0);
 });
 
 test("rejects malformed listing envelopes without inventing listings", () => {
