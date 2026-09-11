@@ -1,7 +1,7 @@
 import { Router } from "express";
 
 import { requireAuth } from "../middleware/requireAuth.js";
-import type { AirbnbListingSummary } from "../distribution/airbnb-host-self-service.listings.service.js";
+import type { AirbnbListingDiscoveryResult } from "../distribution/airbnb-host-self-service.listings.service.js";
 import {
   createDistributionMutationSecurity,
   type DistributionMutationRequest,
@@ -23,10 +23,7 @@ export type AirbnbHostSelfServiceRouteActions = {
   listListings(args: {
     organizationId: string;
     propertyId: string;
-  }): Promise<{
-    channelId: string;
-    listings: AirbnbListingSummary[];
-  }>;
+  }): Promise<AirbnbListingDiscoveryResult>;
   verifyCallback(args: {
     organizationId: string;
     requestedByUserId: string;
@@ -140,7 +137,11 @@ export function buildDashboardAirbnbHostSelfServiceRouter(
           organizationId: currentActor.orgId,
           propertyId: String(req.params.propertyId ?? "").trim(),
         });
-        return res.json({ ok: true, listings: result.listings });
+        return res.json({
+          ok: true,
+          listings: result.listings,
+          match: result.match,
+        });
       } catch (error) {
         return failure(res, error, "OTA_AIRBNB_LISTING_DISCOVERY_FAILED");
       }
