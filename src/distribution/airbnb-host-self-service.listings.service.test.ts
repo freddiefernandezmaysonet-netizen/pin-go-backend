@@ -4,17 +4,19 @@ import test from "node:test";
 import { AirbnbHostSelfServiceError } from "./airbnb-host-self-service.service.js";
 import {
   discoverAirbnbListings,
+  parseAirbnbListingDetailsPayload,
   parseAirbnbListingDiscoveryPayload,
 } from "./airbnb-host-self-service.listings.service.js";
 
 const CHANNEL_ID = "44444444-4444-4444-8444-444444444444";
+const LISTING_ID = "42544559";
 
 const DOCUMENTED_LISTINGS_PAYLOAD = {
   data: {
     listing_id_dictionary: {
       values: [
         {
-          id: "42544559",
+          id: LISTING_ID,
           title: "Test Property · Test Channex Property",
           type: "apartment",
           occupancies: [1, 2, 3, 4],
@@ -24,6 +26,22 @@ const DOCUMENTED_LISTINGS_PAYLOAD = {
           quality_status: "text",
         },
       ],
+    },
+  },
+};
+
+const DOCUMENTED_DETAILS_PAYLOAD = {
+  data: {
+    listing: {
+      id: 42544559,
+      id_str: LISTING_ID,
+      person_capacity: 4,
+      city: "Berlin",
+      state: "Berlin",
+      zipcode: "10115",
+      country_code: "DE",
+      lat: 52.520008,
+      lng: 13.404954,
     },
   },
 };
@@ -42,6 +60,7 @@ const DEFAULT_PROPERTIES = [
     publicTitle: null,
     city: "text",
     country: "DE",
+    postalCode: "10115",
     maxGuests: 4,
   },
 ];
@@ -76,10 +95,28 @@ function client(args: {
   };
 }
 
+function transport(args: {
+  listings?: unknown;
+  details?: unknown;
+  listingCalls?: string[];
+  detailCalls?: Array<[string, string]>;
+} = {}) {
+  return {
+    async listAirbnbListings(channelId: string) {
+      args.listingCalls?.push(channelId);
+      return args.listings ?? DOCUMENTED_LISTINGS_PAYLOAD;
+    },
+    async getAirbnbListingDetails(channelId: string, listingId: string) {
+      args.detailCalls?.push([channelId, listingId]);
+      return args.details ?? DOCUMENTED_DETAILS_PAYLOAD;
+    },
+  };
+}
+
 test("parses the documented Airbnb listing dictionary without adding provider fields", () => {
   assert.deepEqual(parseAirbnbListingDiscoveryPayload(DOCUMENTED_LISTINGS_PAYLOAD), [
     {
-      id: "42544559",
+      id: LISTING_ID,
       title: "Test Property · Test Channex Property",
       type: "apartment",
       occupancies: [1, 2, 3, 4],
@@ -91,41 +128,26 @@ test("parses the documented Airbnb listing dictionary without adding provider fi
   ]);
 });
 
-test("preserves undocumented nullability instead of fabricating metadata", () => {
-  assert.deepEqual(
-    parseAirbnbListingDiscoveryPayload({
-      data: {
-        listing_id_dictionary: {
-          values: [{ id: "42544559", synchronization_category: null }],
-        },
-      },
-    }),
-    [
-      {
-        id: "42544559",
-        title: null,
-        type: null,
-        occupancies: null,
-        synchronizationCategory: null,
-        city: null,
-        countryCode: null,
-        qualityStatus: null,
-      },
-    ]
-  );
+test("parses documented listing_details location and exact person capacity", () => {
+  assert.deepEqual(parseAirbnbListingDetailsPayload(DOCUMENTED_DETAILS_PAYLOAD), {
+    listingId: LISTING_ID,
+    personCapacity: 4,
+    city: "Berlin",
+    state: "Berlin",
+    postalCode: "10115",
+    countryCode: "DE",
+    latitude: 52.520008,
+    longitude: 13.404954,
+  });
 });
 
 test("discovers once from the persisted Airbnb channel and matches tenant properties locally", async () => {
   const db = client();
-  const providerCalls: string[] = [];
+  const listingCalls: string[] = [];
+  const detailCalls: Array<[string, string]> = [];
   const result = await discoverAirbnbListings({
     client: db.value,
-    transport: {
-      async listAirbnbListings(channelId) {
-        providerCalls.push(channelId);
-        return DOCUMENTED_LISTINGS_PAYLOAD;
-      },
-    },
+    transport: transport({ listingCalls, detailCalls }),
     organizationId: "org-1",
     propertyId: "property-1",
   });
@@ -158,44 +180,130 @@ test("discovers once from the persisted Airbnb channel and matches tenant proper
         publicTitle: true,
         city: true,
         country: true,
+        postalCode: true,
         maxGuests: true,
       },
     },
   ]);
-  assert.deepEqual(providerCalls, [CHANNEL_ID]);
+  assert.deepEqual(listingCalls, [CHANNEL_ID]);
+  assert.deepEqual(detailCalls, []);
   assert.equal(result.channelId, CHANNEL_ID);
-  assert.equal(result.listings[0]?.id, "42544559");
-  assert.equal(result.match.propertyId, "property-1");
+  assert.equal(result.listings[0]?.id, LISTING_ID);
   assert.equal(result.match.status, "AUTO_MATCH");
-  assert.equal(result.match.candidateListingId, "42544559");
 });
 
-test("portfolio conflict detection uses active tenant properties without extra provider reads", async () => {
+test("Casa Collores uses one documented detail read to corroborate Las Piedras vs Collores", async () => {
+  const listingCalls: string[] = [];
+  const detailCalls: Array<[string, string]> = [];
+  const listings = {
+    data: {
+      listing_id_dictionary: {
+        values: [
+          {
+            id: "551126434553599406",
+            title: "Casa Collores",
+            occupancies: [1, 2, 3, 4],
+            city: "Collores",
+            country_code: "PR",
+          },
+        ],
+      },
+    },
+  };
+  const details = {
+    data: {
+      listing: {
+        id: 551126434553599406,
+        id_str: "551126434553599406",
+        person_capacity: 2,
+        city: "Collores",
+        state: "Puerto Rico",
+        zipcode: "00771",
+        country_code: "PR",
+        lat: 18.19,
+        lng: -65.87,
+      },
+    },
+  };
   const db = client({
     properties: [
-      DEFAULT_PROPERTIES[0],
       {
-        ...DEFAULT_PROPERTIES[0],
-        id: "property-2",
+        id: "property-1",
+        name: "Casa Collores",
+        publicTitle: null,
+        city: "Las Piedras",
+        country: "Puerto Rico",
+        postalCode: "00771",
+        maxGuests: 2,
       },
     ],
   });
-  let providerCalls = 0;
+
   const result = await discoverAirbnbListings({
     client: db.value,
+    transport: transport({ listings, details, listingCalls, detailCalls }),
+    organizationId: "org-1",
+    propertyId: "property-1",
+  });
+
+  assert.deepEqual(listingCalls, [CHANNEL_ID]);
+  assert.deepEqual(detailCalls, [[CHANNEL_ID, "551126434553599406"]]);
+  assert.equal(result.match.status, "AUTO_MATCH");
+  assert.ok(result.match.reasons.includes("POSTAL_CODE_MATCH"));
+  assert.ok(result.match.reasons.includes("PERSON_CAPACITY_MATCH"));
+});
+
+test("detail corroboration failure remains review required instead of forcing a match", async () => {
+  const listings = {
+    data: {
+      listing_id_dictionary: {
+        values: [
+          {
+            id: LISTING_ID,
+            title: "Test Property · Test Channex Property",
+            city: "Other locality",
+            country_code: "DE",
+          },
+        ],
+      },
+    },
+  };
+  const result = await discoverAirbnbListings({
+    client: client().value,
     transport: {
       async listAirbnbListings() {
-        providerCalls += 1;
-        return DOCUMENTED_LISTINGS_PAYLOAD;
+        return listings;
+      },
+      async getAirbnbListingDetails() {
+        throw new Error("provider unavailable");
       },
     },
     organizationId: "org-1",
     propertyId: "property-1",
   });
 
-  assert.equal(providerCalls, 1);
+  assert.equal(result.match.status, "REVIEW_REQUIRED");
+  assert.ok(result.match.reasons.includes("DETAILS_UNAVAILABLE"));
+});
+
+test("portfolio conflict detection prevents extra provider detail reads", async () => {
+  const db = client({
+    properties: [
+      { ...DEFAULT_PROPERTIES[0], city: "other" },
+      { ...DEFAULT_PROPERTIES[0], id: "property-2", city: "other" },
+    ],
+  });
+  const detailCalls: Array<[string, string]> = [];
+  const result = await discoverAirbnbListings({
+    client: db.value,
+    transport: transport({ detailCalls }),
+    organizationId: "org-1",
+    propertyId: "property-1",
+  });
+
   assert.equal(result.match.status, "REVIEW_REQUIRED");
   assert.ok(result.match.reasons.includes("LISTING_CONFLICT"));
+  assert.deepEqual(detailCalls, []);
 });
 
 test("fails closed before provider access when local connection scope does not match", async () => {
@@ -235,6 +343,10 @@ test("fails closed before provider access when local connection scope does not m
             providerCalls += 1;
             return DOCUMENTED_LISTINGS_PAYLOAD;
           },
+          async getAirbnbListingDetails() {
+            providerCalls += 1;
+            return DOCUMENTED_DETAILS_PAYLOAD;
+          },
         },
         organizationId: "org-1",
         propertyId: "property-1",
@@ -257,6 +369,7 @@ test("fails closed before provider access when the requested Pin&Go property is 
             publicTitle: null,
             city: null,
             country: null,
+            postalCode: null,
             maxGuests: null,
           },
         ],
@@ -265,6 +378,10 @@ test("fails closed before provider access when the requested Pin&Go property is 
         async listAirbnbListings() {
           providerCalls += 1;
           return DOCUMENTED_LISTINGS_PAYLOAD;
+        },
+        async getAirbnbListingDetails() {
+          providerCalls += 1;
+          return DOCUMENTED_DETAILS_PAYLOAD;
         },
       },
       organizationId: "org-1",
@@ -277,7 +394,7 @@ test("fails closed before provider access when the requested Pin&Go property is 
   assert.equal(providerCalls, 0);
 });
 
-test("rejects malformed listing envelopes without inventing listings", () => {
+test("rejects malformed listing envelopes and details without inventing fields", () => {
   for (const payload of [
     null,
     {},
@@ -291,6 +408,22 @@ test("rejects malformed listing envelopes without inventing listings", () => {
   ]) {
     assert.throws(
       () => parseAirbnbListingDiscoveryPayload(payload),
+      (error: unknown) =>
+        error instanceof AirbnbHostSelfServiceError &&
+        error.code === "OTA_AIRBNB_LISTING_DISCOVERY_RESPONSE_INVALID"
+    );
+  }
+
+  for (const payload of [
+    null,
+    {},
+    { data: {} },
+    { data: { listing: null } },
+    { data: { listing: { id: 1 } } },
+    { data: { listing: { id_str: "1", person_capacity: "2" } } },
+  ]) {
+    assert.throws(
+      () => parseAirbnbListingDetailsPayload(payload),
       (error: unknown) =>
         error instanceof AirbnbHostSelfServiceError &&
         error.code === "OTA_AIRBNB_LISTING_DISCOVERY_RESPONSE_INVALID"

@@ -6,6 +6,7 @@ const ALLOWED_API_ORIGINS = new Set([
 const MAX_RESPONSE_BYTES = 1_000_000;
 const UUID =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+const AIRBNB_LISTING_ID = /^\d{1,32}$/;
 
 export class AirbnbListingDiscoveryTransportError extends Error {
   constructor(readonly code: string) {
@@ -41,6 +42,16 @@ function safeChannelId(value: string): string {
   if (!UUID.test(id)) {
     throw new AirbnbListingDiscoveryTransportError(
       "OTA_AIRBNB_CHANNEL_ID_INVALID"
+    );
+  }
+  return id;
+}
+
+function safeListingId(value: string): string {
+  const id = String(value ?? "").trim();
+  if (!AIRBNB_LISTING_ID.test(id)) {
+    throw new AirbnbListingDiscoveryTransportError(
+      "OTA_AIRBNB_LISTING_ID_INVALID"
     );
   }
   return id;
@@ -96,67 +107,78 @@ export function createAirbnbListingDiscoveryHttpTransport(args: {
     );
   }
 
+  async function getJson(url: URL): Promise<unknown> {
+    if (url.origin !== origin) {
+      throw new AirbnbListingDiscoveryTransportError(
+        "OTA_AIRBNB_LISTING_DISCOVERY_REQUEST_NOT_ALLOWED"
+      );
+    }
+
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), args.timeoutMs);
+    try {
+      let response: Response;
+      try {
+        response = await fetchImpl(url, {
+          method: "GET",
+          headers: {
+            Accept: "application/json",
+            "user-api-key": apiKey,
+          },
+          redirect: "error",
+          signal: controller.signal,
+        });
+      } catch {
+        throw new AirbnbListingDiscoveryTransportError(
+          "OTA_AIRBNB_LISTING_DISCOVERY_PROVIDER_UNAVAILABLE"
+        );
+      }
+      if (!response.ok) throw failure(response.status);
+
+      const contentLength = Number(response.headers.get("content-length") ?? 0);
+      if (Number.isFinite(contentLength) && contentLength > MAX_RESPONSE_BYTES) {
+        throw new AirbnbListingDiscoveryTransportError(
+          "OTA_AIRBNB_LISTING_DISCOVERY_RESPONSE_TOO_LARGE"
+        );
+      }
+      const text = await response.text();
+      if (text.length > MAX_RESPONSE_BYTES) {
+        throw new AirbnbListingDiscoveryTransportError(
+          "OTA_AIRBNB_LISTING_DISCOVERY_RESPONSE_TOO_LARGE"
+        );
+      }
+      try {
+        return JSON.parse(text) as unknown;
+      } catch {
+        throw new AirbnbListingDiscoveryTransportError(
+          "OTA_AIRBNB_LISTING_DISCOVERY_RESPONSE_INVALID"
+        );
+      }
+    } finally {
+      clearTimeout(timeout);
+    }
+  }
+
   return {
     async listAirbnbListings(channelId: string): Promise<unknown> {
       const id = safeChannelId(channelId);
+      return await getJson(
+        new URL(`/api/v1/channels/${encodeURIComponent(id)}/action/listings`, origin)
+      );
+    },
+
+    async getAirbnbListingDetails(
+      channelId: string,
+      listingId: string
+    ): Promise<unknown> {
+      const id = safeChannelId(channelId);
+      const safeId = safeListingId(listingId);
       const url = new URL(
-        `/api/v1/channels/${encodeURIComponent(id)}/action/listings`,
+        `/api/v1/channels/${encodeURIComponent(id)}/action/listing_details`,
         origin
       );
-      if (url.origin !== origin) {
-        throw new AirbnbListingDiscoveryTransportError(
-          "OTA_AIRBNB_LISTING_DISCOVERY_REQUEST_NOT_ALLOWED"
-        );
-      }
-
-      const controller = new AbortController();
-      const timeout = setTimeout(() => controller.abort(), args.timeoutMs);
-      try {
-        let response: Response;
-        try {
-          response = await fetchImpl(url, {
-            method: "GET",
-            headers: {
-              Accept: "application/json",
-              "user-api-key": apiKey,
-            },
-            redirect: "error",
-            signal: controller.signal,
-          });
-        } catch {
-          throw new AirbnbListingDiscoveryTransportError(
-            "OTA_AIRBNB_LISTING_DISCOVERY_PROVIDER_UNAVAILABLE"
-          );
-        }
-        if (!response.ok) throw failure(response.status);
-
-        const contentLength = Number(
-          response.headers.get("content-length") ?? 0
-        );
-        if (
-          Number.isFinite(contentLength) &&
-          contentLength > MAX_RESPONSE_BYTES
-        ) {
-          throw new AirbnbListingDiscoveryTransportError(
-            "OTA_AIRBNB_LISTING_DISCOVERY_RESPONSE_TOO_LARGE"
-          );
-        }
-        const text = await response.text();
-        if (text.length > MAX_RESPONSE_BYTES) {
-          throw new AirbnbListingDiscoveryTransportError(
-            "OTA_AIRBNB_LISTING_DISCOVERY_RESPONSE_TOO_LARGE"
-          );
-        }
-        try {
-          return JSON.parse(text) as unknown;
-        } catch {
-          throw new AirbnbListingDiscoveryTransportError(
-            "OTA_AIRBNB_LISTING_DISCOVERY_RESPONSE_INVALID"
-          );
-        }
-      } finally {
-        clearTimeout(timeout);
-      }
+      url.searchParams.set("listing_id", safeId);
+      return await getJson(url);
     },
   };
 }
