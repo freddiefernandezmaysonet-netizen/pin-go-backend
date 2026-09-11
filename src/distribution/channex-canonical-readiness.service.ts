@@ -918,7 +918,7 @@ export async function reconcileCanonicalOtaReadiness(args: {
         args.transport.getRoomType(externalRoomTypeId)
       ),
       readExactResourceOrMissing(() =>
-        args.transport.getRatePlan(ratePlanId)
+        args.transport.getRatePlan(externalRatePlanId)
       ),
       ariPropertyStateReader.findUnique({
         where: { propertyId: args.propertyId },
