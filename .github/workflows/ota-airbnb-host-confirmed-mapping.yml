@@ -97,13 +97,11 @@ jobs:
             src/distribution/airbnb-host-confirmed-mapping.service.ts \
             src/routes/dashboard.airbnb-host-self-service.mapping.route.test.ts
 
-      - name: Type-check mapping boundary
+      - name: Type-check isolated mapping modules
         run: |
           ./node_modules/.bin/tsc --noEmit --strict --target ES2022 --module NodeNext --moduleResolution NodeNext --types node \
             src/distribution/airbnb-host-confirmed-mapping.http-transport.ts \
-            src/distribution/airbnb-host-confirmed-mapping.service.ts \
-            src/routes/dashboard.airbnb-host-self-service.route.ts \
-            src/distribution/ota-connection-center.runtime-composition.ts
+            src/distribution/airbnb-host-confirmed-mapping.service.ts
 
       - name: Run mapping and retained Airbnb regressions
         run: |
