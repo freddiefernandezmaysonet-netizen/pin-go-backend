@@ -57,7 +57,6 @@ jobs:
           git diff --name-only origin/main...HEAD | sort > "$RUNNER_TEMP/actual.txt"
           cat > "$RUNNER_TEMP/expected.txt" <<'EOF'
           .github/workflows/ota-airbnb-listing-discovery.yml
-          prisma/migrations/20260911153000_add_property_postal_code/migration.sql
           prisma/schema.prisma
           src/distribution/airbnb-host-self-service.listings.http-transport.ts
           src/distribution/airbnb-host-self-service.listings.service.test.ts
