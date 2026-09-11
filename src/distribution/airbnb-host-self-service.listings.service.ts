@@ -127,17 +127,20 @@ function normalizePinGoCountryForAirbnb(
   return country;
 }
 
-function detailsFailureReason(error: unknown): string | null {
-  const code =
-    error &&
-    typeof error === "object" &&
-    "code" in error &&
-    typeof (error as { code?: unknown }).code === "string"
-      ? (error as { code: string }).code
+function detailsFailureReasons(error: unknown): string[] {
+  if (!error || typeof error !== "object") return [];
+  const value = error as { code?: unknown; providerStatus?: unknown };
+  const code = typeof value.code === "string" ? value.code : null;
+  const providerStatus =
+    typeof value.providerStatus === "number" &&
+    Number.isInteger(value.providerStatus) &&
+    value.providerStatus >= 400 &&
+    value.providerStatus <= 599
+      ? value.providerStatus
       : null;
-  if (!code) return null;
 
-  const reasons: Readonly<Record<string, string>> = {
+  const reasons: string[] = [];
+  const byCode: Readonly<Record<string, string>> = {
     OTA_AIRBNB_LISTING_DISCOVERY_NOT_FOUND: "DETAILS_NOT_FOUND",
     OTA_AIRBNB_LISTING_DISCOVERY_RATE_LIMITED: "DETAILS_RATE_LIMITED",
     OTA_AIRBNB_LISTING_DISCOVERY_REQUEST_REJECTED: "DETAILS_REQUEST_REJECTED",
@@ -146,7 +149,9 @@ function detailsFailureReason(error: unknown): string | null {
     OTA_AIRBNB_LISTING_DISCOVERY_RESPONSE_INVALID: "DETAILS_RESPONSE_INVALID",
     OTA_AIRBNB_LISTING_DISCOVERY_TRANSPORT_UNAVAILABLE: "DETAILS_TRANSPORT_UNAVAILABLE",
   };
-  return reasons[code] ?? null;
+  if (code && byCode[code]) reasons.push(byCode[code]);
+  if (providerStatus != null) reasons.push(`DETAILS_HTTP_${providerStatus}`);
+  return reasons;
 }
 
 export function parseAirbnbListingDiscoveryPayload(
@@ -343,8 +348,9 @@ export async function discoverAirbnbListings(args: {
         });
       } catch (error) {
         match = appendReason(match, "DETAILS_UNAVAILABLE");
-        const failureReason = detailsFailureReason(error);
-        if (failureReason) match = appendReason(match, failureReason);
+        for (const reason of detailsFailureReasons(error)) {
+          match = appendReason(match, reason);
+        }
       }
     }
   }
