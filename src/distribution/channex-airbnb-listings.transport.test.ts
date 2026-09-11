@@ -116,18 +116,20 @@ test("Airbnb listing discovery rejects unsafe identifiers before provider access
     transport.listAirbnbListings("../secrets"),
     (error: unknown) =>
       error instanceof AirbnbListingDiscoveryTransportError &&
-      error.code === "OTA_AIRBNB_CHANNEL_ID_INVALID"
+      error.code === "OTA_AIRBNB_CHANNEL_ID_INVALID" &&
+      error.providerStatus === null
   );
   await assert.rejects(
     transport.getAirbnbListingDetails(CHANNEL_ID, "../secrets"),
     (error: unknown) =>
       error instanceof AirbnbListingDiscoveryTransportError &&
-      error.code === "OTA_AIRBNB_LISTING_ID_INVALID"
+      error.code === "OTA_AIRBNB_LISTING_ID_INVALID" &&
+      error.providerStatus === null
   );
   assert.equal(calls, 0);
 });
 
-test("Airbnb listing reads map documented provider failures without retrying", async () => {
+test("Airbnb listing reads retain only documented provider status and never retry", async () => {
   for (const [status, code] of [
     [404, "OTA_AIRBNB_LISTING_DISCOVERY_NOT_FOUND"],
     [429, "OTA_AIRBNB_LISTING_DISCOVERY_RATE_LIMITED"],
@@ -141,14 +143,16 @@ test("Airbnb listing reads map documented provider failures without retrying", a
       timeoutMs: 1000,
       fetchImpl: async () => {
         calls += 1;
-        return response({}, status);
+        return response({ secret: "must-not-be-exposed" }, status);
       },
     });
     await assert.rejects(
       transport.getAirbnbListingDetails(CHANNEL_ID, LISTING_ID),
       (error: unknown) =>
         error instanceof AirbnbListingDiscoveryTransportError &&
-        error.code === code
+        error.code === code &&
+        error.providerStatus === status &&
+        !error.message.includes("must-not-be-exposed")
     );
     assert.equal(calls, 1);
   }
