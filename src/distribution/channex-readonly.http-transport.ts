@@ -18,7 +18,6 @@ export type ChannexReadonlyTransport = {
   getRatePlan(ratePlanId: string): Promise<unknown>;
   listChannels(propertyId: string, channel?: string): Promise<unknown>;
   getChannel(channelId: string): Promise<unknown>;
-  listAirbnbListings(channelId: string): Promise<unknown>;
 };
 
 const CHANNEL_PAGE_LIMIT = 100;
@@ -321,10 +320,6 @@ export function createChannexReadonlyHttpTransport(args: {
     getChannel(channelId) {
       const id = safeUuid(channelId, "OTA_READONLY_CHANNEL_ID_INVALID");
       return get(`/api/v1/channels/${encodeURIComponent(id)}`);
-    },
-    listAirbnbListings(channelId) {
-      const id = safeUuid(channelId, "OTA_READONLY_CHANNEL_ID_INVALID");
-      return get(`/api/v1/channels/${encodeURIComponent(id)}/action/listings`);
     },
   };
 }
