@@ -292,7 +292,7 @@ test("US properties outside Puerto Rico are never treated as PR listings", async
   assert.ok(result.match.reasons.includes("COUNTRY_MISMATCH"));
 });
 
-test("detail corroboration failure remains review required and retains a bounded failure class", async () => {
+test("detail corroboration failure remains review required and retains bounded failure class and HTTP status", async () => {
   const listings = {
     data: {
       listing_id_dictionary: {
@@ -308,15 +308,13 @@ test("detail corroboration failure remains review required and retains a bounded
     },
   };
   const scenarios = [
-    ["OTA_AIRBNB_LISTING_DISCOVERY_NOT_FOUND", "DETAILS_NOT_FOUND"],
-    ["OTA_AIRBNB_LISTING_DISCOVERY_RATE_LIMITED", "DETAILS_RATE_LIMITED"],
-    ["OTA_AIRBNB_LISTING_DISCOVERY_REQUEST_REJECTED", "DETAILS_REQUEST_REJECTED"],
-    ["OTA_AIRBNB_LISTING_DISCOVERY_PROVIDER_UNAVAILABLE", "DETAILS_PROVIDER_UNAVAILABLE"],
-    ["OTA_AIRBNB_LISTING_DISCOVERY_RESPONSE_TOO_LARGE", "DETAILS_RESPONSE_TOO_LARGE"],
-    ["OTA_AIRBNB_LISTING_DISCOVERY_RESPONSE_INVALID", "DETAILS_RESPONSE_INVALID"],
+    ["OTA_AIRBNB_LISTING_DISCOVERY_NOT_FOUND", "DETAILS_NOT_FOUND", 404],
+    ["OTA_AIRBNB_LISTING_DISCOVERY_RATE_LIMITED", "DETAILS_RATE_LIMITED", 429],
+    ["OTA_AIRBNB_LISTING_DISCOVERY_REQUEST_REJECTED", "DETAILS_REQUEST_REJECTED", 422],
+    ["OTA_AIRBNB_LISTING_DISCOVERY_PROVIDER_UNAVAILABLE", "DETAILS_PROVIDER_UNAVAILABLE", 503],
   ] as const;
 
-  for (const [code, expectedReason] of scenarios) {
+  for (const [code, expectedReason, providerStatus] of scenarios) {
     const result = await discoverAirbnbListings({
       client: client().value,
       transport: {
@@ -324,7 +322,10 @@ test("detail corroboration failure remains review required and retains a bounded
           return listings;
         },
         async getAirbnbListingDetails() {
-          throw Object.assign(new Error("safe classified failure"), { code });
+          throw Object.assign(new Error("safe classified failure"), {
+            code,
+            providerStatus,
+          });
         },
       },
       organizationId: "org-1",
@@ -334,7 +335,43 @@ test("detail corroboration failure remains review required and retains a bounded
     assert.equal(result.match.status, "REVIEW_REQUIRED");
     assert.ok(result.match.reasons.includes("DETAILS_UNAVAILABLE"));
     assert.ok(result.match.reasons.includes(expectedReason));
+    assert.ok(result.match.reasons.includes(`DETAILS_HTTP_${providerStatus}`));
   }
+});
+
+test("local parser failures remain classified without inventing an HTTP status", async () => {
+  const listings = {
+    data: {
+      listing_id_dictionary: {
+        values: [
+          {
+            id: LISTING_ID,
+            title: "Test Property · Test Channex Property",
+            city: "Other locality",
+            country_code: "DE",
+          },
+        ],
+      },
+    },
+  };
+  const result = await discoverAirbnbListings({
+    client: client().value,
+    transport: {
+      async listAirbnbListings() {
+        return listings;
+      },
+      async getAirbnbListingDetails() {
+        return { data: { listing: { id_str: LISTING_ID, person_capacity: "invalid" } } };
+      },
+    },
+    organizationId: "org-1",
+    propertyId: "property-1",
+  });
+
+  assert.equal(result.match.status, "REVIEW_REQUIRED");
+  assert.ok(result.match.reasons.includes("DETAILS_UNAVAILABLE"));
+  assert.ok(result.match.reasons.includes("DETAILS_RESPONSE_INVALID"));
+  assert.equal(result.match.reasons.some((reason) => reason.startsWith("DETAILS_HTTP_")), false);
 });
 
 test("unknown detail errors remain generic and do not leak error text", async () => {
