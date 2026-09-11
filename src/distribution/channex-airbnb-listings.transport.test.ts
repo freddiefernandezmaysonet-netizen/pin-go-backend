@@ -73,8 +73,8 @@ test("Airbnb listing discovery rejects unsafe channel ids before provider access
     },
   });
 
-  assert.throws(
-    () => transport.listAirbnbListings("../secrets"),
+  await assert.rejects(
+    transport.listAirbnbListings("../secrets"),
     (error: unknown) =>
       error instanceof AirbnbListingDiscoveryTransportError &&
       error.code === "OTA_AIRBNB_CHANNEL_ID_INVALID"
