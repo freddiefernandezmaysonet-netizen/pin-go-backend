@@ -1,6 +1,9 @@
 import { AirbnbHostSelfServiceError } from "./airbnb-host-self-service.service.js";
 import {
+  corroborateAirbnbPropertyMatch,
   matchAirbnbPropertyPortfolio,
+  shouldCorroborateAirbnbPropertyMatch,
+  type AirbnbListingDetailsMatchInput,
   type AirbnbPropertyMatchDecision,
   type PinGoPropertyMatchInput,
 } from "./airbnb-property-auto-matching.js";
@@ -15,6 +18,8 @@ export type AirbnbListingSummary = {
   countryCode: string | null;
   qualityStatus: string | null;
 };
+
+export type AirbnbListingDetailsSummary = AirbnbListingDetailsMatchInput;
 
 export type AirbnbListingDiscoveryClient = {
   otaChannelConnection: {
@@ -32,6 +37,7 @@ export type AirbnbListingDiscoveryClient = {
 
 export type AirbnbListingDiscoveryTransport = {
   listAirbnbListings(channelId: string): Promise<unknown>;
+  getAirbnbListingDetails(channelId: string, listingId: string): Promise<unknown>;
 };
 
 export type AirbnbListingDiscoveryResult = {
@@ -67,10 +73,35 @@ function optionalOccupancies(value: unknown): number[] | null {
   return [...value];
 }
 
+function optionalInteger(value: unknown, code: string): number | null {
+  if (value == null) return null;
+  if (typeof value !== "number" || !Number.isInteger(value)) {
+    throw new AirbnbHostSelfServiceError(code);
+  }
+  return value;
+}
+
+function optionalFiniteNumber(value: unknown, code: string): number | null {
+  if (value == null) return null;
+  if (typeof value !== "number" || !Number.isFinite(value)) {
+    throw new AirbnbHostSelfServiceError(code);
+  }
+  return value;
+}
+
 function record(value: unknown): Record<string, unknown> | null {
   return value && typeof value === "object" && !Array.isArray(value)
     ? (value as Record<string, unknown>)
     : null;
+}
+
+function addReason(
+  decision: AirbnbPropertyMatchDecision,
+  reason: string
+): AirbnbPropertyMatchDecision {
+  return decision.reasons.includes(reason)
+    ? decision
+    : { ...decision, reasons: [...decision.reasons, reason] };
 }
 
 export function parseAirbnbListingDiscoveryPayload(
@@ -107,6 +138,56 @@ export function parseAirbnbListingDiscoveryPayload(
       qualityStatus: optionalText(listing.quality_status),
     };
   });
+}
+
+export function parseAirbnbListingDetailsPayload(
+  payload: unknown
+): AirbnbListingDetailsSummary {
+  const root = record(payload);
+  const data = record(root?.data);
+  const listing = record(data?.listing);
+  if (!listing) {
+    throw new AirbnbHostSelfServiceError(
+      "OTA_AIRBNB_LISTING_DETAILS_RESPONSE_INVALID"
+    );
+  }
+
+  const idStr = optionalText(listing.id_str)?.trim() || null;
+  const rawId = listing.id;
+  const id =
+    idStr ??
+    (typeof rawId === "string" && rawId.trim()
+      ? rawId.trim()
+      : typeof rawId === "number" && Number.isInteger(rawId)
+        ? String(rawId)
+        : null);
+  if (!id) {
+    throw new AirbnbHostSelfServiceError(
+      "OTA_AIRBNB_LISTING_DETAILS_RESPONSE_INVALID"
+    );
+  }
+
+  return {
+    id,
+    name: optionalText(listing.name),
+    personCapacity: optionalInteger(
+      listing.person_capacity,
+      "OTA_AIRBNB_LISTING_DETAILS_RESPONSE_INVALID"
+    ),
+    city: optionalText(listing.city),
+    state: optionalText(listing.state),
+    street: optionalText(listing.street),
+    postalCode: optionalText(listing.zipcode),
+    countryCode: optionalText(listing.country_code),
+    latitude: optionalFiniteNumber(
+      listing.lat,
+      "OTA_AIRBNB_LISTING_DETAILS_RESPONSE_INVALID"
+    ),
+    longitude: optionalFiniteNumber(
+      listing.lng,
+      "OTA_AIRBNB_LISTING_DETAILS_RESPONSE_INVALID"
+    ),
+  };
 }
 
 export async function discoverAirbnbListings(args: {
@@ -172,11 +253,13 @@ export async function discoverAirbnbListings(args: {
       publicTitle: true,
       city: true,
       country: true,
+      postalCode: true,
       maxGuests: true,
     },
   });
 
-  if (!properties.some((property) => property.id === propertyId)) {
+  const property = properties.find((candidate) => candidate.id === propertyId);
+  if (!property) {
     throw new AirbnbHostSelfServiceError(
       "OTA_AIRBNB_PROPERTY_NOT_FOUND"
     );
@@ -185,7 +268,7 @@ export async function discoverAirbnbListings(args: {
   const payload = await args.transport.listAirbnbListings(channelId);
   const listings = parseAirbnbListingDiscoveryPayload(payload);
   const portfolio = matchAirbnbPropertyPortfolio({ properties, listings });
-  const match = portfolio.decisions.find(
+  let match = portfolio.decisions.find(
     (decision) => decision.propertyId === propertyId
   );
 
@@ -193,6 +276,39 @@ export async function discoverAirbnbListings(args: {
     throw new AirbnbHostSelfServiceError(
       "OTA_AIRBNB_PROPERTY_MATCHING_FAILED"
     );
+  }
+
+  const competingCandidate = portfolio.decisions.some(
+    (decision) =>
+      decision.propertyId !== propertyId &&
+      decision.status !== "UNMATCHED" &&
+      decision.candidateListingId != null &&
+      decision.candidateListingId === match?.candidateListingId
+  );
+  if (competingCandidate) {
+    match = addReason(match, "LISTING_CONFLICT");
+  }
+
+  if (
+    !competingCandidate &&
+    shouldCorroborateAirbnbPropertyMatch({ property, decision: match }) &&
+    match.candidateListingId
+  ) {
+    try {
+      const detailsPayload = await args.transport.getAirbnbListingDetails(
+        channelId,
+        match.candidateListingId
+      );
+      const details = parseAirbnbListingDetailsPayload(detailsPayload);
+      match = corroborateAirbnbPropertyMatch({
+        property,
+        decision: match,
+        details,
+        competingDecisions: portfolio.decisions,
+      });
+    } catch {
+      match = addReason(match, "DETAILS_UNAVAILABLE");
+    }
   }
 
   return {
