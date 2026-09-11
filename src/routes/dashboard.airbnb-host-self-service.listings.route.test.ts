@@ -11,6 +11,21 @@ import {
 
 type TestUser = { id: string; orgId: string; role?: string };
 
+const EMPTY_DISCOVERY = {
+  channelId: "unused",
+  listings: [],
+  match: {
+    propertyId: "property-1",
+    status: "UNMATCHED" as const,
+    confidence: "LOW" as const,
+    candidateListingId: null,
+    candidateTitle: null,
+    score: 0,
+    runnerUpScore: null,
+    reasons: ["NO_LISTING_CANDIDATE"],
+  },
+};
+
 function actions(overrides: Partial<AirbnbHostSelfServiceRouteActions> = {}): AirbnbHostSelfServiceRouteActions {
   return {
     enabled: true,
@@ -18,7 +33,7 @@ function actions(overrides: Partial<AirbnbHostSelfServiceRouteActions> = {}): Ai
     issueConnectionLink: async () => {
       throw new Error("not used");
     },
-    listListings: async () => ({ channelId: "unused", listings: [] }),
+    listListings: async () => EMPTY_DISCOVERY,
     verifyCallback: async () => {
       throw new Error("not used");
     },
@@ -70,7 +85,7 @@ test("listing discovery is unavailable when Airbnb self-service is disabled", as
       enabled: false,
       listListings: async () => {
         calls += 1;
-        return { channelId: "unused", listings: [] };
+        return EMPTY_DISCOVERY;
       },
     }),
   });
@@ -85,7 +100,7 @@ test("listing discovery requires an authenticated admin actor", async () => {
   const routeActions = actions({
     listListings: async () => {
       calls += 1;
-      return { channelId: "unused", listings: [] };
+      return EMPTY_DISCOVERY;
     },
   });
 
@@ -100,7 +115,7 @@ test("listing discovery requires an authenticated admin actor", async () => {
   assert.equal(calls, 0);
 });
 
-test("listing discovery forwards only tenant and property scope and returns no provider channel id", async () => {
+test("listing discovery returns read-only matching evidence without exposing provider channel id", async () => {
   let received: unknown;
   const response = await requestRoute({
     user: { id: "user-1", orgId: "org-1", role: "ORG_ADMIN" },
@@ -121,6 +136,16 @@ test("listing discovery forwards only tenant and property scope and returns no p
               qualityStatus: "text",
             },
           ],
+          match: {
+            propertyId: "property-1",
+            status: "AUTO_MATCH",
+            confidence: "HIGH",
+            candidateListingId: "42544559",
+            candidateTitle: "Test Property · Test Channex Property",
+            score: 100,
+            runnerUpScore: null,
+            reasons: ["NAME_EXACT", "CITY_MATCH", "COUNTRY_MATCH", "MAX_GUESTS_MATCH"],
+          },
         };
       },
     }),
@@ -135,5 +160,8 @@ test("listing discovery forwards only tenant and property scope and returns no p
   const body = await response.json() as any;
   assert.equal(body.ok, true);
   assert.equal(body.listings[0].id, "42544559");
+  assert.equal(body.match.status, "AUTO_MATCH");
+  assert.equal(body.match.confidence, "HIGH");
+  assert.equal(body.match.candidateListingId, "42544559");
   assert.equal(JSON.stringify(body).includes("44444444-4444-4444-8444-444444444444"), false);
 });

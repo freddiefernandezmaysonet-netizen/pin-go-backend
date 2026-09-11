@@ -1,4 +1,4 @@
-name: OTA Airbnb Listing Discovery Certification
+name: OTA Airbnb Listing Discovery + Auto-Matching V1 Certification
 
 on:
   pull_request:
@@ -6,6 +6,8 @@ on:
       - 'src/distribution/airbnb-host-self-service.listings.http-transport.ts'
       - 'src/distribution/airbnb-host-self-service.listings.service.ts'
       - 'src/distribution/airbnb-host-self-service.listings.service.test.ts'
+      - 'src/distribution/airbnb-property-auto-matching.ts'
+      - 'src/distribution/airbnb-property-auto-matching.test.ts'
       - 'src/distribution/channex-airbnb-listings.transport.test.ts'
       - 'src/distribution/ota-connection-center.runtime-composition.ts'
       - 'src/distribution/ota-connection-center.runtime-composition.test.ts'
@@ -18,7 +20,7 @@ permissions:
   contents: read
 
 jobs:
-  listing-discovery-certification:
+  listing-discovery-auto-matching-certification:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     env:
@@ -49,11 +51,10 @@ jobs:
           git diff --name-only origin/main...HEAD | sort > "$RUNNER_TEMP/actual.txt"
           cat > "$RUNNER_TEMP/expected.txt" <<'EOF'
           .github/workflows/ota-airbnb-listing-discovery.yml
-          src/distribution/airbnb-host-self-service.listings.http-transport.ts
           src/distribution/airbnb-host-self-service.listings.service.test.ts
           src/distribution/airbnb-host-self-service.listings.service.ts
-          src/distribution/channex-airbnb-listings.transport.test.ts
-          src/distribution/ota-connection-center.runtime-composition.test.ts
+          src/distribution/airbnb-property-auto-matching.test.ts
+          src/distribution/airbnb-property-auto-matching.ts
           src/distribution/ota-connection-center.runtime-composition.ts
           src/routes/dashboard.airbnb-host-self-service.listings.route.test.ts
           src/routes/dashboard.airbnb-host-self-service.route.ts
@@ -67,6 +68,7 @@ jobs:
             prisma \
             src/pms \
             src/workers \
+            src/distribution/airbnb-host-self-service.listings.http-transport.ts \
             src/distribution/channex-channel-identity.ts \
             src/distribution/channex-readonly.http-transport.ts \
             src/distribution/channex-white-label.http-transport.ts \
@@ -74,27 +76,27 @@ jobs:
             src/distribution/channex-channel-lifecycle.evidence.ts \
             src/distribution/channex-airbnb-transport-readiness.policy.ts
 
-      - name: Prove scope is listing discovery only
+      - name: Prove scope is read-only listing discovery and local matching only
         shell: bash
         run: |
           ! grep -R -E '/mappings|/activate|load_future_reservations|check_readiness' \
-            src/distribution/airbnb-host-self-service.listings.http-transport.ts \
             src/distribution/airbnb-host-self-service.listings.service.ts \
-            src/routes/dashboard.airbnb-host-self-service.listings.route.test.ts
-          ! grep -E 'method:[[:space:]]*"POST"|method:[[:space:]]*"PUT"|method:[[:space:]]*"PATCH"|method:[[:space:]]*"DELETE"' \
-            src/distribution/airbnb-host-self-service.listings.http-transport.ts
-          grep -F 'method: "GET"' src/distribution/airbnb-host-self-service.listings.http-transport.ts
-          grep -F '/action/listings' src/distribution/airbnb-host-self-service.listings.http-transport.ts
+            src/distribution/airbnb-property-auto-matching.ts \
+            src/routes/dashboard.airbnb-host-self-service.route.ts
+          grep -F 'listAirbnbListings(channelId)' src/distribution/airbnb-host-self-service.listings.service.ts
+          grep -F 'matchAirbnbPropertyPortfolio' src/distribution/airbnb-host-self-service.listings.service.ts
 
-      - name: Type-check isolated new listing modules
+      - name: Type-check isolated listing and matching modules
         run: |
           ./node_modules/.bin/tsc --noEmit --strict --target ES2022 --module NodeNext --moduleResolution NodeNext --types node \
             src/distribution/airbnb-host-self-service.listings.http-transport.ts \
+            src/distribution/airbnb-property-auto-matching.ts \
             src/distribution/airbnb-host-self-service.listings.service.ts
 
-      - name: Run listing discovery and retained Airbnb regressions
+      - name: Run auto-matching listing discovery and retained Airbnb regressions
         run: |
           node --import tsx --test \
+            src/distribution/airbnb-property-auto-matching.test.ts \
             src/distribution/channex-airbnb-listings.transport.test.ts \
             src/distribution/airbnb-host-self-service.listings.service.test.ts \
             src/routes/dashboard.airbnb-host-self-service.listings.route.test.ts \
