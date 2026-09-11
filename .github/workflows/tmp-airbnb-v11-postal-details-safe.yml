@@ -27,6 +27,34 @@ jobs:
       - name: Apply deterministic patch
         run: python .github/scripts/tmp_airbnb_v11_postal_details.py
 
+      - name: Preserve base newline conventions and keep permanent workflow untouched
+        shell: bash
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          import subprocess
+
+          base = "d2b9c74eee2a26d661acdb7c4345d1d1f6bdb912"
+          paths = [
+              "prisma/schema.prisma",
+              "src/routes/properties.route.ts",
+              "src/routes/dashboard.properties.route.ts",
+              "src/distribution/airbnb-host-self-service.listings.http-transport.ts",
+              "src/distribution/channex-airbnb-listings.transport.test.ts",
+              "src/distribution/airbnb-host-self-service.listings.service.ts",
+              "src/distribution/airbnb-host-self-service.listings.service.test.ts",
+              "src/distribution/airbnb-property-auto-matching.ts",
+              "src/distribution/airbnb-property-auto-matching.test.ts",
+          ]
+          for path in paths:
+              base_bytes = subprocess.check_output(["git", "show", f"{base}:{path}"])
+              current = Path(path).read_bytes().replace(b"\r\n", b"\n")
+              if b"\r\n" in base_bytes:
+                  current = current.replace(b"\n", b"\r\n")
+              Path(path).write_bytes(current)
+          PY
+          git checkout -- .github/workflows/ota-airbnb-listing-discovery.yml
+
       - name: Use Node.js 22
         uses: actions/setup-node@v4
         with:
@@ -64,20 +92,29 @@ jobs:
         shell: bash
         run: |
           git diff --check
+          git diff --numstat d2b9c74eee2a26d661acdb7c4345d1d1f6bdb912 -- \
+            prisma/schema.prisma \
+            src/routes/properties.route.ts \
+            src/routes/dashboard.properties.route.ts \
+            src/distribution/airbnb-host-self-service.listings.http-transport.ts \
+            src/distribution/channex-airbnb-listings.transport.test.ts \
+            src/distribution/airbnb-host-self-service.listings.service.ts \
+            src/distribution/airbnb-host-self-service.listings.service.test.ts \
+            src/distribution/airbnb-property-auto-matching.ts \
+            src/distribution/airbnb-property-auto-matching.test.ts
           ! grep -R -E '/mappings|/activate|load_future_reservations|check_readiness' \
             src/distribution/airbnb-host-self-service.listings.http-transport.ts \
             src/distribution/airbnb-host-self-service.listings.service.ts \
             src/distribution/airbnb-property-auto-matching.ts
           test "$(git diff d2b9c74eee2a26d661acdb7c4345d1d1f6bdb912 --numstat -- prisma/schema.prisma | awk '{print $1":"$2}')" = "1:0"
 
-      - name: Commit only certified implementation and remove temporary automation
+      - name: Commit only certified implementation
         shell: bash
         run: |
           git config user.name 'github-actions[bot]'
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
-          git rm -f .github/scripts/tmp_airbnb_v11_postal_details.py .github/workflows/tmp-airbnb-v11-postal-details-safe.yml
+          git rm -f .github/scripts/tmp_airbnb_v11_postal_details.py
           git add \
-            .github/workflows/ota-airbnb-listing-discovery.yml \
             prisma/schema.prisma \
             prisma/migrations/20260911153000_add_property_postal_code/migration.sql \
             src/routes/properties.route.ts \
