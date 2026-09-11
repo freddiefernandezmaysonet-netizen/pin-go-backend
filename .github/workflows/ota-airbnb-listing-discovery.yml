@@ -1,8 +1,12 @@
-name: OTA Airbnb Listing Discovery + Auto-Matching V1 Certification
+name: OTA Airbnb Listing Discovery + Auto-Matching V1.1 Certification
 
 on:
   pull_request:
     paths:
+      - 'prisma/schema.prisma'
+      - 'prisma/migrations/20260911153000_add_property_postal_code/migration.sql'
+      - 'src/routes/properties.route.ts'
+      - 'src/routes/dashboard.properties.route.ts'
       - 'src/distribution/airbnb-host-self-service.listings.http-transport.ts'
       - 'src/distribution/airbnb-host-self-service.listings.service.ts'
       - 'src/distribution/airbnb-host-self-service.listings.service.test.ts'
@@ -41,8 +45,10 @@ jobs:
       - name: Install locked dependencies
         run: npm ci --ignore-scripts --no-audit --no-fund
 
-      - name: Generate Prisma client
-        run: npx prisma generate
+      - name: Generate and validate Prisma client
+        run: |
+          npx prisma generate
+          npx prisma validate --schema ./prisma/schema.prisma
 
       - name: Prove exact narrow diff allowlist
         shell: bash
@@ -51,24 +57,25 @@ jobs:
           git diff --name-only origin/main...HEAD | sort > "$RUNNER_TEMP/actual.txt"
           cat > "$RUNNER_TEMP/expected.txt" <<'EOF'
           .github/workflows/ota-airbnb-listing-discovery.yml
+          prisma/migrations/20260911153000_add_property_postal_code/migration.sql
+          prisma/schema.prisma
+          src/distribution/airbnb-host-self-service.listings.http-transport.ts
           src/distribution/airbnb-host-self-service.listings.service.test.ts
           src/distribution/airbnb-host-self-service.listings.service.ts
           src/distribution/airbnb-property-auto-matching.test.ts
           src/distribution/airbnb-property-auto-matching.ts
-          src/distribution/ota-connection-center.runtime-composition.ts
-          src/routes/dashboard.airbnb-host-self-service.listings.route.test.ts
-          src/routes/dashboard.airbnb-host-self-service.route.ts
+          src/distribution/channex-airbnb-listings.transport.test.ts
+          src/routes/dashboard.properties.route.ts
+          src/routes/properties.route.ts
           EOF
           sort "$RUNNER_TEMP/expected.txt" -o "$RUNNER_TEMP/expected.txt"
           diff -u "$RUNNER_TEMP/expected.txt" "$RUNNER_TEMP/actual.txt"
 
-      - name: Prove certified Channex core remains frozen
+      - name: Prove certified write-capable Channex core remains frozen
         run: |
           git diff --exit-code origin/main...HEAD -- \
-            prisma \
             src/pms \
             src/workers \
-            src/distribution/airbnb-host-self-service.listings.http-transport.ts \
             src/distribution/channex-channel-identity.ts \
             src/distribution/channex-readonly.http-transport.ts \
             src/distribution/channex-white-label.http-transport.ts \
@@ -76,15 +83,18 @@ jobs:
             src/distribution/channex-channel-lifecycle.evidence.ts \
             src/distribution/channex-airbnb-transport-readiness.policy.ts
 
-      - name: Prove scope is read-only listing discovery and local matching only
+      - name: Prove scope is read-only listing discovery and details corroboration only
         shell: bash
         run: |
           ! grep -R -E '/mappings|/activate|load_future_reservations|check_readiness' \
+            src/distribution/airbnb-host-self-service.listings.http-transport.ts \
             src/distribution/airbnb-host-self-service.listings.service.ts \
-            src/distribution/airbnb-property-auto-matching.ts \
-            src/routes/dashboard.airbnb-host-self-service.route.ts
-          grep -F 'listAirbnbListings(channelId)' src/distribution/airbnb-host-self-service.listings.service.ts
-          grep -F 'matchAirbnbPropertyPortfolio' src/distribution/airbnb-host-self-service.listings.service.ts
+            src/distribution/airbnb-property-auto-matching.ts
+          grep -F '/action/listings' src/distribution/airbnb-host-self-service.listings.http-transport.ts
+          grep -F '/action/listing_details' src/distribution/airbnb-host-self-service.listings.http-transport.ts
+          grep -F 'person_capacity' src/distribution/airbnb-host-self-service.listings.service.ts
+          grep -F 'zipcode' src/distribution/airbnb-host-self-service.listings.service.ts
+          grep -F 'postalCode' prisma/schema.prisma
 
       - name: Type-check isolated listing and matching modules
         run: |
@@ -93,7 +103,7 @@ jobs:
             src/distribution/airbnb-property-auto-matching.ts \
             src/distribution/airbnb-host-self-service.listings.service.ts
 
-      - name: Run auto-matching listing discovery and retained Airbnb regressions
+      - name: Run V1.1 and retained Airbnb regressions
         run: |
           node --import tsx --test \
             src/distribution/airbnb-property-auto-matching.test.ts \
