@@ -239,7 +239,7 @@ test("uses one candidate-specific details GET to corroborate Las Piedras versus 
             listing_id_dictionary: {
               values: [
                 {
-                  id: "551126434553599406",
+                  id: "42544559",
                   title: "Casa Collores",
                   occupancies: [1, 2],
                   city: "Collores",
@@ -276,7 +276,7 @@ test("uses one candidate-specific details GET to corroborate Las Piedras versus 
 
   assert.deepEqual(listingCalls, [CHANNEL_ID]);
   assert.deepEqual(detailCalls, [
-    { channelId: CHANNEL_ID, listingId: "551126434553599406" },
+    { channelId: CHANNEL_ID, listingId: "42544559" },
   ]);
   assert.equal(result.match.status, "AUTO_MATCH");
   assert.equal(result.match.confidence, "HIGH");

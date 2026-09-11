@@ -47,8 +47,9 @@ function safeChannelId(value: string): string {
 }
 
 function safeListingId(value: string): string {
-  const id = String(value ?? "").trim();
-  if (!id || id.length > 255 || /[\x00-\x1F\x7F]/.test(id)) {
+  const raw = String(value ?? "");
+  const id = raw.trim();
+  if (!id || id.length > 255 || /[\x00-\x1F\x7F]/.test(raw)) {
     throw new AirbnbListingDiscoveryTransportError(
       "OTA_AIRBNB_LISTING_ID_INVALID"
     );

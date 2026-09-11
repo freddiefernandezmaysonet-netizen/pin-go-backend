@@ -471,15 +471,15 @@ export function matchAirbnbPropertyPortfolio(args: {
     decideProperty(property, args.listings)
   );
 
-  const autoByListing = new Map<string, number[]>();
+  const candidatesByListing = new Map<string, number[]>();
   decisions.forEach((decision, index) => {
-    if (decision.status !== "AUTO_MATCH" || !decision.candidateListingId) return;
-    const indexes = autoByListing.get(decision.candidateListingId) ?? [];
+    if (decision.status === "UNMATCHED" || !decision.candidateListingId) return;
+    const indexes = candidatesByListing.get(decision.candidateListingId) ?? [];
     indexes.push(index);
-    autoByListing.set(decision.candidateListingId, indexes);
+    candidatesByListing.set(decision.candidateListingId, indexes);
   });
 
-  for (const indexes of autoByListing.values()) {
+  for (const indexes of candidatesByListing.values()) {
     if (indexes.length < 2) continue;
     for (const index of indexes) {
       const decision = decisions[index]!;
@@ -487,7 +487,9 @@ export function matchAirbnbPropertyPortfolio(args: {
         ...decision,
         status: "REVIEW_REQUIRED",
         confidence: "MEDIUM",
-        reasons: [...decision.reasons, "LISTING_CONFLICT"],
+        reasons: decision.reasons.includes("LISTING_CONFLICT")
+          ? decision.reasons
+          : [...decision.reasons, "LISTING_CONFLICT"],
       };
     }
   }

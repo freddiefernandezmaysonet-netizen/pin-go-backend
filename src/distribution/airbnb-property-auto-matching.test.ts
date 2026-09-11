@@ -172,6 +172,24 @@ test("one Airbnb listing can never be auto-matched to two Pin&Go properties", ()
   }
 });
 
+test("an AUTO candidate is downgraded when another property also claims the same listing for review", () => {
+  const result = matchAirbnbPropertyPortfolio({
+    properties: [
+      property({ id: "property-1", city: "Collores" }),
+      property({ id: "property-2", city: "Las Piedras" }),
+    ],
+    listings: [listing()],
+  });
+
+  assert.equal(result.summary.autoMatched, 0);
+  assert.equal(result.summary.reviewRequired, 2);
+  for (const decision of result.decisions) {
+    assert.equal(decision.status, "REVIEW_REQUIRED");
+    assert.equal(decision.candidateListingId, "listing-1");
+    assert.ok(decision.reasons.includes("LISTING_CONFLICT"));
+  }
+});
+
 test("uses whichever Pin&Go title is the stronger identity signal", () => {
   const result = matchAirbnbPropertyPortfolio({
     properties: [
