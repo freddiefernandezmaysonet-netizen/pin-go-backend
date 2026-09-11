@@ -1,0 +1,64 @@
+name: Temporary Postal Schema Narrow Fix V4
+
+on:
+  push:
+    branches:
+      - agent/airbnb-auto-matching-v1-1-postal-details
+    paths:
+      - .github/workflows/tmp-postal-schema-narrow-fix-v4.yml
+
+permissions:
+  contents: write
+
+jobs:
+  narrow-schema:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      DATABASE_URL: postgresql://user:pass@localhost:5432/pingo_test
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: agent/airbnb-auto-matching-v1-1-postal-details
+          fetch-depth: 0
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+
+      - name: Install locked dependencies
+        run: npm ci --ignore-scripts --no-audit --no-fund
+
+      - name: Restore exact base schema and add only postalCode
+        shell: bash
+        run: |
+          git show d2b9c74eee2a26d661acdb7c4345d1d1f6bdb912:prisma/schema.prisma > prisma/schema.prisma
+          python - <<'PY'
+          from pathlib import Path
+          path = Path('prisma/schema.prisma')
+          text = path.read_text()
+          old = '''  region                     String?\n  country                    String?\n  timezone                   String?'''
+          new = '''  region                     String?\n  country                    String?\n  postalCode                 String?\n  timezone                   String?'''
+          count = text.count(old)
+          if count != 1:
+              raise SystemExit(f'expected schema anchor exactly once, found {count}')
+          path.write_text(text.replace(old, new, 1))
+          PY
+          ./node_modules/.bin/prisma validate --schema prisma/schema.prisma
+          stats="$(git diff d2b9c74eee2a26d661acdb7c4345d1d1f6bdb912 --numstat -- prisma/schema.prisma | awk '{print $1":"$2}')"
+          test "$stats" = "1:0"
+          git diff --check d2b9c74eee2a26d661acdb7c4345d1d1f6bdb912 -- prisma/schema.prisma
+
+      - name: Commit exact narrow correction
+        shell: bash
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git rm -f .github/workflows/tmp-postal-schema-narrow-fix.yml .github/workflows/tmp-postal-schema-narrow-fix-v4.yml
+          git add prisma/schema.prisma
+          stats="$(git diff d2b9c74eee2a26d661acdb7c4345d1d1f6bdb912 --numstat -- prisma/schema.prisma | awk '{print $1":"$2}')"
+          test "$stats" = "1:0"
+          git commit -m 'Narrow Property postalCode schema change'
+          git push origin HEAD:agent/airbnb-auto-matching-v1-1-postal-details
