@@ -1,0 +1,60 @@
+name: Temporary Postal Schema Patch V2
+
+on:
+  push:
+    branches:
+      - agent/airbnb-auto-matching-v1-1-postal-details
+    paths:
+      - .github/workflows/tmp-postal-schema-patch-v2.yml
+
+permissions:
+  contents: write
+
+jobs:
+  patch-schema:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: agent/airbnb-auto-matching-v1-1-postal-details
+          fetch-depth: 0
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+
+      - name: Install locked dependencies
+        run: npm ci --ignore-scripts --no-audit --no-fund
+
+      - name: Patch and validate Property postalCode
+        shell: bash
+        env:
+          DATABASE_URL: postgresql://user:pass@localhost:5432/pingo_test
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          path = Path('prisma/schema.prisma')
+          text = path.read_text()
+          old = '''  region                     String?\n  country                    String?\n  timezone                   String?'''
+          new = '''  region                     String?\n  country                    String?\n  postalCode                 String?\n  timezone                   String?'''
+          if text.count(old) != 1:
+              raise SystemExit(f'expected schema anchor exactly once, found {text.count(old)}')
+          path.write_text(text.replace(old, new, 1))
+          PY
+          ./node_modules/.bin/prisma format --schema prisma/schema.prisma
+          ./node_modules/.bin/prisma validate --schema prisma/schema.prisma
+          grep -n 'postalCode' prisma/schema.prisma
+
+      - name: Commit schema patch and remove temporary workflows
+        shell: bash
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git rm -f .github/workflows/tmp-postal-schema-patch.yml .github/workflows/tmp-postal-schema-patch-v2.yml
+          git add prisma/schema.prisma
+          git diff --cached --check
+          git commit -m 'Add Property postalCode field'
+          git push origin HEAD:agent/airbnb-auto-matching-v1-1-postal-details
