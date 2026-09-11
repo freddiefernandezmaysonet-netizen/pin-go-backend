@@ -135,6 +135,11 @@ function adaptPrismaAirbnbListingDiscoveryClient(
         return await prisma.otaChannelConnection.findFirst(query as any) as any;
       },
     },
+    property: {
+      async findMany(query) {
+        return await prisma.property.findMany(query as any) as any;
+      },
+    },
   };
 }
 
