@@ -247,7 +247,7 @@ function canonicalChannelCode(
 function documentedChannexAdapterCode(
   provider: ConnectionCenterProvider
 ): string {
-  if (provider === "AIRBNB") return "Airbnb";
+  if (provider === "AIRBNB") return "AirBNB";
   if (provider === "BOOKING_COM") return "BookingCom";
   if (provider === "EXPEDIA") return "Expedia";
   return "Vrbo";
@@ -918,7 +918,7 @@ export async function reconcileCanonicalOtaReadiness(args: {
         args.transport.getRoomType(externalRoomTypeId)
       ),
       readExactResourceOrMissing(() =>
-        args.transport.getRatePlan(externalRatePlanId)
+        args.transport.getRatePlan(ratePlanId)
       ),
       ariPropertyStateReader.findUnique({
         where: { propertyId: args.propertyId },
