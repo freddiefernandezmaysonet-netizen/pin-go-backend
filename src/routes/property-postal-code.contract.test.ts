@@ -26,7 +26,10 @@ test("property create edit and dashboard read contracts carry postalCode", () =>
 
   assert.match(propertiesRoute, /postalCode:\s*p\.postalCode\s*\?\?\s*""/);
   assert.match(propertiesRoute, /postalCode:\s*postalCode\?\.trim\(\)\s*\|\|\s*null/);
-  assert.match(propertiesRoute, /postalCode !== undefined[\s\S]*data\.postalCode/);
+  assert.match(
+    propertiesRoute,
+    /postalCode !== undefined\s*\?\s*\{\s*postalCode:\s*postalCode\?\.trim\(\)\s*\|\|\s*null\s*\}\s*:\s*\{\}/
+  );
 
   assert.match(dashboardRoute, /postalCode:\s*true/);
   assert.match(dashboardRoute, /postalCode !== undefined[\s\S]*data\.postalCode/);
