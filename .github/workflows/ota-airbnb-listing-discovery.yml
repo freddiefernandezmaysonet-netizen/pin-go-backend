@@ -1,18 +1,19 @@
-name: OTA Airbnb Listing Discovery + Auto-Matching V1 Certification
+name: OTA Airbnb Listing Discovery + Auto-Matching V1.1 Certification
 
 on:
   pull_request:
     paths:
+      - 'prisma/schema.prisma'
+      - 'prisma/migrations/20260911143000_add_property_postal_code/migration.sql'
       - 'src/distribution/airbnb-host-self-service.listings.http-transport.ts'
       - 'src/distribution/airbnb-host-self-service.listings.service.ts'
       - 'src/distribution/airbnb-host-self-service.listings.service.test.ts'
       - 'src/distribution/airbnb-property-auto-matching.ts'
       - 'src/distribution/airbnb-property-auto-matching.test.ts'
       - 'src/distribution/channex-airbnb-listings.transport.test.ts'
-      - 'src/distribution/ota-connection-center.runtime-composition.ts'
-      - 'src/distribution/ota-connection-center.runtime-composition.test.ts'
-      - 'src/routes/dashboard.airbnb-host-self-service.route.ts'
-      - 'src/routes/dashboard.airbnb-host-self-service.listings.route.test.ts'
+      - 'src/routes/properties.route.ts'
+      - 'src/routes/dashboard.properties.route.ts'
+      - 'src/routes/property-postal-code.contract.test.ts'
       - '.github/workflows/ota-airbnb-listing-discovery.yml'
   workflow_dispatch:
 
@@ -41,34 +42,38 @@ jobs:
       - name: Install locked dependencies
         run: npm ci --ignore-scripts --no-audit --no-fund
 
-      - name: Generate Prisma client
-        run: npx prisma generate
+      - name: Validate schema and generate Prisma client
+        run: |
+          npx prisma validate --schema prisma/schema.prisma
+          npx prisma generate
 
       - name: Prove exact narrow diff allowlist
         shell: bash
         run: |
           git fetch origin main --depth=1
           git diff --name-only origin/main...HEAD | sort > "$RUNNER_TEMP/actual.txt"
-          cat > "$RUNNER_TEMP/expected.txt" <<'EOF'
+          cat > "$RUNNER_TEMP/expected.txt" <<'FILES'
           .github/workflows/ota-airbnb-listing-discovery.yml
+          prisma/migrations/20260911143000_add_property_postal_code/migration.sql
+          prisma/schema.prisma
+          src/distribution/airbnb-host-self-service.listings.http-transport.ts
           src/distribution/airbnb-host-self-service.listings.service.test.ts
           src/distribution/airbnb-host-self-service.listings.service.ts
           src/distribution/airbnb-property-auto-matching.test.ts
           src/distribution/airbnb-property-auto-matching.ts
-          src/distribution/ota-connection-center.runtime-composition.ts
-          src/routes/dashboard.airbnb-host-self-service.listings.route.test.ts
-          src/routes/dashboard.airbnb-host-self-service.route.ts
-          EOF
+          src/distribution/channex-airbnb-listings.transport.test.ts
+          src/routes/dashboard.properties.route.ts
+          src/routes/properties.route.ts
+          src/routes/property-postal-code.contract.test.ts
+          FILES
           sort "$RUNNER_TEMP/expected.txt" -o "$RUNNER_TEMP/expected.txt"
           diff -u "$RUNNER_TEMP/expected.txt" "$RUNNER_TEMP/actual.txt"
 
-      - name: Prove certified Channex core remains frozen
+      - name: Prove unrelated certified Channex core remains frozen
         run: |
           git diff --exit-code origin/main...HEAD -- \
-            prisma \
             src/pms \
             src/workers \
-            src/distribution/airbnb-host-self-service.listings.http-transport.ts \
             src/distribution/channex-channel-identity.ts \
             src/distribution/channex-readonly.http-transport.ts \
             src/distribution/channex-white-label.http-transport.ts \
@@ -76,15 +81,23 @@ jobs:
             src/distribution/channex-channel-lifecycle.evidence.ts \
             src/distribution/channex-airbnb-transport-readiness.policy.ts
 
-      - name: Prove scope is read-only listing discovery and local matching only
+      - name: Prove provider scope is read-only and document-exact
         shell: bash
         run: |
           ! grep -R -E '/mappings|/activate|load_future_reservations|check_readiness' \
+            src/distribution/airbnb-host-self-service.listings.http-transport.ts \
             src/distribution/airbnb-host-self-service.listings.service.ts \
-            src/distribution/airbnb-property-auto-matching.ts \
-            src/routes/dashboard.airbnb-host-self-service.route.ts
-          grep -F 'listAirbnbListings(channelId)' src/distribution/airbnb-host-self-service.listings.service.ts
-          grep -F 'matchAirbnbPropertyPortfolio' src/distribution/airbnb-host-self-service.listings.service.ts
+            src/distribution/airbnb-property-auto-matching.ts
+          grep -F '/action/listings' src/distribution/airbnb-host-self-service.listings.http-transport.ts
+          grep -F '/action/listing_details' src/distribution/airbnb-host-self-service.listings.http-transport.ts
+          grep -F 'method: "GET"' src/distribution/airbnb-host-self-service.listings.http-transport.ts
+          ! grep -R -E 'method: "(POST|PUT|PATCH|DELETE)"' src/distribution/airbnb-host-self-service.listings.http-transport.ts
+
+      - name: Prove postal code migration is additive only
+        shell: bash
+        run: |
+          grep -Fx 'ALTER TABLE "Property" ADD COLUMN "postalCode" TEXT;' prisma/migrations/20260911143000_add_property_postal_code/migration.sql
+          grep -E '^  postalCode +String\?$' prisma/schema.prisma
 
       - name: Type-check isolated listing and matching modules
         run: |
@@ -93,12 +106,13 @@ jobs:
             src/distribution/airbnb-property-auto-matching.ts \
             src/distribution/airbnb-host-self-service.listings.service.ts
 
-      - name: Run auto-matching listing discovery and retained Airbnb regressions
+      - name: Run V1.1 matching and retained Airbnb regressions
         run: |
           node --import tsx --test \
             src/distribution/airbnb-property-auto-matching.test.ts \
             src/distribution/channex-airbnb-listings.transport.test.ts \
             src/distribution/airbnb-host-self-service.listings.service.test.ts \
+            src/routes/property-postal-code.contract.test.ts \
             src/routes/dashboard.airbnb-host-self-service.listings.route.test.ts \
             src/distribution/ota-connection-center.runtime-composition.test.ts \
             src/distribution/airbnb-host-self-service.service.test.ts \
