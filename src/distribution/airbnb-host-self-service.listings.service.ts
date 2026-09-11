@@ -2,13 +2,13 @@ import { AirbnbHostSelfServiceError } from "./airbnb-host-self-service.service.j
 
 export type AirbnbListingSummary = {
   id: string;
-  title: string;
-  type: string;
-  occupancies: number[];
-  synchronizationCategory: string;
-  city: string;
-  countryCode: string;
-  qualityStatus: string;
+  title: string | null;
+  type: string | null;
+  occupancies: number[] | null;
+  synchronizationCategory: string | null;
+  city: string | null;
+  countryCode: string | null;
+  qualityStatus: string | null;
 };
 
 export type AirbnbListingDiscoveryClient = {
@@ -36,13 +36,12 @@ function required(value: unknown, code: string): string {
   return value;
 }
 
-function record(value: unknown): Record<string, unknown> | null {
-  return value && typeof value === "object" && !Array.isArray(value)
-    ? (value as Record<string, unknown>)
-    : null;
+function optionalText(value: unknown): string | null {
+  return typeof value === "string" ? value : null;
 }
 
-function parseOccupancies(value: unknown): number[] {
+function optionalOccupancies(value: unknown): number[] | null {
+  if (value == null) return null;
   if (
     !Array.isArray(value) ||
     value.some((item) => typeof item !== "number" || !Number.isInteger(item))
@@ -52,6 +51,12 @@ function parseOccupancies(value: unknown): number[] {
     );
   }
   return [...value];
+}
+
+function record(value: unknown): Record<string, unknown> | null {
+  return value && typeof value === "object" && !Array.isArray(value)
+    ? (value as Record<string, unknown>)
+    : null;
 }
 
 export function parseAirbnbListingDiscoveryPayload(
@@ -79,31 +84,13 @@ export function parseAirbnbListingDiscoveryPayload(
         listing.id,
         "OTA_AIRBNB_LISTING_DISCOVERY_RESPONSE_INVALID"
       ),
-      title: required(
-        listing.title,
-        "OTA_AIRBNB_LISTING_DISCOVERY_RESPONSE_INVALID"
-      ),
-      type: required(
-        listing.type,
-        "OTA_AIRBNB_LISTING_DISCOVERY_RESPONSE_INVALID"
-      ),
-      occupancies: parseOccupancies(listing.occupancies),
-      synchronizationCategory: required(
-        listing.synchronization_category,
-        "OTA_AIRBNB_LISTING_DISCOVERY_RESPONSE_INVALID"
-      ),
-      city: required(
-        listing.city,
-        "OTA_AIRBNB_LISTING_DISCOVERY_RESPONSE_INVALID"
-      ),
-      countryCode: required(
-        listing.country_code,
-        "OTA_AIRBNB_LISTING_DISCOVERY_RESPONSE_INVALID"
-      ),
-      qualityStatus: required(
-        listing.quality_status,
-        "OTA_AIRBNB_LISTING_DISCOVERY_RESPONSE_INVALID"
-      ),
+      title: optionalText(listing.title),
+      type: optionalText(listing.type),
+      occupancies: optionalOccupancies(listing.occupancies),
+      synchronizationCategory: optionalText(listing.synchronization_category),
+      city: optionalText(listing.city),
+      countryCode: optionalText(listing.country_code),
+      qualityStatus: optionalText(listing.quality_status),
     };
   });
 }
