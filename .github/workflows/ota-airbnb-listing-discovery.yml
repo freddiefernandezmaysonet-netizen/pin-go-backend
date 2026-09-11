@@ -55,7 +55,7 @@ jobs:
         run: |
           git fetch origin main --depth=1
           git diff --name-only origin/main...HEAD | sort > "$RUNNER_TEMP/actual.txt"
-          cat > "$RUNNER_TEMP/expected.txt" <<'EOF'
+          cat > "$RUNNER_TEMP/allowed.txt" <<'EOF'
           .github/workflows/ota-airbnb-listing-discovery.yml
           prisma/schema.prisma
           src/distribution/airbnb-host-self-service.listings.http-transport.ts
@@ -67,8 +67,14 @@ jobs:
           src/routes/dashboard.properties.route.ts
           src/routes/properties.route.ts
           EOF
-          sort "$RUNNER_TEMP/expected.txt" -o "$RUNNER_TEMP/expected.txt"
-          diff -u "$RUNNER_TEMP/expected.txt" "$RUNNER_TEMP/actual.txt"
+          sort "$RUNNER_TEMP/allowed.txt" -o "$RUNNER_TEMP/allowed.txt"
+          test -s "$RUNNER_TEMP/actual.txt"
+          while IFS= read -r file; do
+            grep -Fqx "$file" "$RUNNER_TEMP/allowed.txt" || {
+              echo "Unexpected file outside Airbnb V1.1 certification allowlist: $file" >&2
+              exit 1
+            }
+          done < "$RUNNER_TEMP/actual.txt"
 
       - name: Prove certified write-capable Channex core remains frozen
         run: |

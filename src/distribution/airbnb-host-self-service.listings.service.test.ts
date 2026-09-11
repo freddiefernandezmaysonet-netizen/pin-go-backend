@@ -59,6 +59,7 @@ const DEFAULT_PROPERTIES = [
     name: "Test Property · Test Channex Property",
     publicTitle: null,
     city: "text",
+    region: "Berlin",
     country: "DE",
     postalCode: "10115",
     maxGuests: 4,
@@ -179,6 +180,7 @@ test("discovers once from the persisted Airbnb channel and matches tenant proper
         name: true,
         publicTitle: true,
         city: true,
+        region: true,
         country: true,
         postalCode: true,
         maxGuests: true,
@@ -192,7 +194,7 @@ test("discovers once from the persisted Airbnb channel and matches tenant proper
   assert.equal(result.match.status, "AUTO_MATCH");
 });
 
-test("Casa Collores uses one documented detail read to corroborate Las Piedras vs Collores", async () => {
+test("Casa Collores production-shaped US plus PR region matches Airbnb PR and corroborates locality", async () => {
   const listingCalls: string[] = [];
   const detailCalls: Array<[string, string]> = [];
   const listings = {
@@ -215,7 +217,7 @@ test("Casa Collores uses one documented detail read to corroborate Las Piedras v
       listing: {
         id: 551126434553599406,
         id_str: "551126434553599406",
-        person_capacity: 2,
+        person_capacity: 3,
         city: "Collores",
         state: "Puerto Rico",
         zipcode: "00771",
@@ -232,9 +234,10 @@ test("Casa Collores uses one documented detail read to corroborate Las Piedras v
         name: "Casa Collores",
         publicTitle: null,
         city: "Las Piedras",
-        country: "Puerto Rico",
+        region: "PR",
+        country: "United States",
         postalCode: "00771",
-        maxGuests: 2,
+        maxGuests: 3,
       },
     ],
   });
@@ -249,11 +252,94 @@ test("Casa Collores uses one documented detail read to corroborate Las Piedras v
   assert.deepEqual(listingCalls, [CHANNEL_ID]);
   assert.deepEqual(detailCalls, [[CHANNEL_ID, "551126434553599406"]]);
   assert.equal(result.match.status, "AUTO_MATCH");
+  assert.equal(result.match.reasons.includes("COUNTRY_MISMATCH"), false);
+  assert.ok(result.match.reasons.includes("COUNTRY_MATCH"));
   assert.ok(result.match.reasons.includes("POSTAL_CODE_MATCH"));
   assert.ok(result.match.reasons.includes("PERSON_CAPACITY_MATCH"));
 });
 
-test("detail corroboration failure remains review required instead of forcing a match", async () => {
+test("US properties outside Puerto Rico are never treated as PR listings", async () => {
+  const listings = {
+    data: {
+      listing_id_dictionary: {
+        values: [
+          {
+            id: LISTING_ID,
+            title: "Test Property · Test Channex Property",
+            city: "text",
+            country_code: "PR",
+          },
+        ],
+      },
+    },
+  };
+  const result = await discoverAirbnbListings({
+    client: client({
+      properties: [
+        {
+          ...DEFAULT_PROPERTIES[0],
+          region: "FL",
+          country: "United States",
+        },
+      ],
+    }).value,
+    transport: transport({ listings }),
+    organizationId: "org-1",
+    propertyId: "property-1",
+  });
+
+  assert.equal(result.match.status, "REVIEW_REQUIRED");
+  assert.ok(result.match.reasons.includes("COUNTRY_MISMATCH"));
+});
+
+test("detail corroboration failure remains review required and retains bounded failure class and HTTP status", async () => {
+  const listings = {
+    data: {
+      listing_id_dictionary: {
+        values: [
+          {
+            id: LISTING_ID,
+            title: "Test Property · Test Channex Property",
+            city: "Other locality",
+            country_code: "DE",
+          },
+        ],
+      },
+    },
+  };
+  const scenarios = [
+    ["OTA_AIRBNB_LISTING_DISCOVERY_NOT_FOUND", "DETAILS_NOT_FOUND", 404],
+    ["OTA_AIRBNB_LISTING_DISCOVERY_RATE_LIMITED", "DETAILS_RATE_LIMITED", 429],
+    ["OTA_AIRBNB_LISTING_DISCOVERY_REQUEST_REJECTED", "DETAILS_REQUEST_REJECTED", 422],
+    ["OTA_AIRBNB_LISTING_DISCOVERY_PROVIDER_UNAVAILABLE", "DETAILS_PROVIDER_UNAVAILABLE", 503],
+  ] as const;
+
+  for (const [code, expectedReason, providerStatus] of scenarios) {
+    const result = await discoverAirbnbListings({
+      client: client().value,
+      transport: {
+        async listAirbnbListings() {
+          return listings;
+        },
+        async getAirbnbListingDetails() {
+          throw Object.assign(new Error("safe classified failure"), {
+            code,
+            providerStatus,
+          });
+        },
+      },
+      organizationId: "org-1",
+      propertyId: "property-1",
+    });
+
+    assert.equal(result.match.status, "REVIEW_REQUIRED");
+    assert.ok(result.match.reasons.includes("DETAILS_UNAVAILABLE"));
+    assert.ok(result.match.reasons.includes(expectedReason));
+    assert.ok(result.match.reasons.includes(`DETAILS_HTTP_${providerStatus}`));
+  }
+});
+
+test("local parser failures remain classified without inventing an HTTP status", async () => {
   const listings = {
     data: {
       listing_id_dictionary: {
@@ -275,7 +361,7 @@ test("detail corroboration failure remains review required instead of forcing a 
         return listings;
       },
       async getAirbnbListingDetails() {
-        throw new Error("provider unavailable");
+        return { data: { listing: { id_str: LISTING_ID, person_capacity: "invalid" } } };
       },
     },
     organizationId: "org-1",
@@ -284,6 +370,45 @@ test("detail corroboration failure remains review required instead of forcing a 
 
   assert.equal(result.match.status, "REVIEW_REQUIRED");
   assert.ok(result.match.reasons.includes("DETAILS_UNAVAILABLE"));
+  assert.ok(result.match.reasons.includes("DETAILS_RESPONSE_INVALID"));
+  assert.equal(result.match.reasons.some((reason) => reason.startsWith("DETAILS_HTTP_")), false);
+});
+
+test("unknown detail errors remain generic and do not leak error text", async () => {
+  const listings = {
+    data: {
+      listing_id_dictionary: {
+        values: [
+          {
+            id: LISTING_ID,
+            title: "Test Property · Test Channex Property",
+            city: "Other locality",
+            country_code: "DE",
+          },
+        ],
+      },
+    },
+  };
+  const result = await discoverAirbnbListings({
+    client: client().value,
+    transport: {
+      async listAirbnbListings() {
+        return listings;
+      },
+      async getAirbnbListingDetails() {
+        throw new Error("secret-provider-body-must-never-appear");
+      },
+    },
+    organizationId: "org-1",
+    propertyId: "property-1",
+  });
+
+  assert.equal(result.match.status, "REVIEW_REQUIRED");
+  assert.deepEqual(
+    result.match.reasons.filter((reason) => reason.startsWith("DETAILS_")),
+    ["DETAILS_UNAVAILABLE"]
+  );
+  assert.equal(result.match.reasons.join(" ").includes("secret-provider-body"), false);
 });
 
 test("portfolio conflict detection prevents extra provider detail reads", async () => {
@@ -368,6 +493,7 @@ test("fails closed before provider access when the requested Pin&Go property is 
             name: "Other",
             publicTitle: null,
             city: null,
+            region: null,
             country: null,
             postalCode: null,
             maxGuests: null,

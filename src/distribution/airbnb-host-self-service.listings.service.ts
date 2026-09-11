@@ -18,6 +18,10 @@ export type AirbnbListingSummary = {
   qualityStatus: string | null;
 };
 
+type AirbnbListingDiscoveryPropertyRow = PinGoPropertyMatchInput & {
+  region: string | null;
+};
+
 export type AirbnbListingDiscoveryClient = {
   otaChannelConnection: {
     findFirst(args: unknown): Promise<{
@@ -28,7 +32,7 @@ export type AirbnbListingDiscoveryClient = {
     } | null>;
   };
   property: {
-    findMany(args: unknown): Promise<PinGoPropertyMatchInput[]>;
+    findMany(args: unknown): Promise<AirbnbListingDiscoveryPropertyRow[]>;
   };
 };
 
@@ -45,6 +49,14 @@ export type AirbnbListingDiscoveryResult = {
 
 const UUID =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+
+const UNITED_STATES_COUNTRY_VALUES = new Set([
+  "UNITED STATES",
+  "UNITED STATES OF AMERICA",
+  "US",
+  "USA",
+]);
+const PUERTO_RICO_REGION_VALUES = new Set(["PR", "PUERTO RICO"]);
 
 function required(value: unknown, code: string): string {
   if (typeof value !== "string" || value.length === 0) {
@@ -94,6 +106,52 @@ function record(value: unknown): Record<string, unknown> | null {
   return value && typeof value === "object" && !Array.isArray(value)
     ? (value as Record<string, unknown>)
     : null;
+}
+
+function normalizedLocationToken(value: string | null | undefined): string {
+  return String(value ?? "").trim().toUpperCase();
+}
+
+function normalizePinGoCountryForAirbnb(
+  country: string | null,
+  region: string | null
+): string | null {
+  const normalizedCountry = normalizedLocationToken(country);
+  const normalizedRegion = normalizedLocationToken(region);
+  if (
+    UNITED_STATES_COUNTRY_VALUES.has(normalizedCountry) &&
+    PUERTO_RICO_REGION_VALUES.has(normalizedRegion)
+  ) {
+    return "Puerto Rico";
+  }
+  return country;
+}
+
+function detailsFailureReasons(error: unknown): string[] {
+  if (!error || typeof error !== "object") return [];
+  const value = error as { code?: unknown; providerStatus?: unknown };
+  const code = typeof value.code === "string" ? value.code : null;
+  const providerStatus =
+    typeof value.providerStatus === "number" &&
+    Number.isInteger(value.providerStatus) &&
+    value.providerStatus >= 400 &&
+    value.providerStatus <= 599
+      ? value.providerStatus
+      : null;
+
+  const reasons: string[] = [];
+  const byCode: Readonly<Record<string, string>> = {
+    OTA_AIRBNB_LISTING_DISCOVERY_NOT_FOUND: "DETAILS_NOT_FOUND",
+    OTA_AIRBNB_LISTING_DISCOVERY_RATE_LIMITED: "DETAILS_RATE_LIMITED",
+    OTA_AIRBNB_LISTING_DISCOVERY_REQUEST_REJECTED: "DETAILS_REQUEST_REJECTED",
+    OTA_AIRBNB_LISTING_DISCOVERY_PROVIDER_UNAVAILABLE: "DETAILS_PROVIDER_UNAVAILABLE",
+    OTA_AIRBNB_LISTING_DISCOVERY_RESPONSE_TOO_LARGE: "DETAILS_RESPONSE_TOO_LARGE",
+    OTA_AIRBNB_LISTING_DISCOVERY_RESPONSE_INVALID: "DETAILS_RESPONSE_INVALID",
+    OTA_AIRBNB_LISTING_DISCOVERY_TRANSPORT_UNAVAILABLE: "DETAILS_TRANSPORT_UNAVAILABLE",
+  };
+  if (code && byCode[code]) reasons.push(byCode[code]);
+  if (providerStatus != null) reasons.push(`DETAILS_HTTP_${providerStatus}`);
+  return reasons;
 }
 
 export function parseAirbnbListingDiscoveryPayload(
@@ -219,7 +277,7 @@ export async function discoverAirbnbListings(args: {
     );
   }
 
-  const properties = await args.client.property.findMany({
+  const propertyRows = await args.client.property.findMany({
     where: {
       organizationId,
       status: "ACTIVE",
@@ -230,11 +288,18 @@ export async function discoverAirbnbListings(args: {
       name: true,
       publicTitle: true,
       city: true,
+      region: true,
       country: true,
       postalCode: true,
       maxGuests: true,
     },
   });
+  const properties: PinGoPropertyMatchInput[] = propertyRows.map(
+    ({ region, ...property }) => ({
+      ...property,
+      country: normalizePinGoCountryForAirbnb(property.country, region),
+    })
+  );
 
   const property = properties.find((candidate) => candidate.id === propertyId);
   if (!property) {
@@ -281,8 +346,11 @@ export async function discoverAirbnbListings(args: {
           decision: match,
           details,
         });
-      } catch {
+      } catch (error) {
         match = appendReason(match, "DETAILS_UNAVAILABLE");
+        for (const reason of detailsFailureReasons(error)) {
+          match = appendReason(match, reason);
+        }
       }
     }
   }
