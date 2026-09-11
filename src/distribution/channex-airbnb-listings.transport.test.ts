@@ -2,9 +2,9 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import {
-  ChannexReadonlyTransportError,
-  createChannexReadonlyHttpTransport,
-} from "./channex-readonly.http-transport.js";
+  AirbnbListingDiscoveryTransportError,
+  createAirbnbListingDiscoveryHttpTransport,
+} from "./airbnb-host-self-service.listings.http-transport.js";
 
 const CHANNEL_ID = "44444444-4444-4444-8444-444444444444";
 
@@ -35,7 +35,7 @@ test("Airbnb listing discovery uses the documented channel-scoped GET with no bo
       },
     },
   };
-  const transport = createChannexReadonlyHttpTransport({
+  const transport = createAirbnbListingDiscoveryHttpTransport({
     apiOrigin: "https://app.channex.io",
     apiKey: "secret",
     timeoutMs: 1000,
@@ -54,13 +54,16 @@ test("Airbnb listing discovery uses the documented channel-scoped GET with no bo
     `https://app.channex.io/api/v1/channels/${CHANNEL_ID}/action/listings`
   );
   assert.equal(calls[0].init?.method, "GET");
-  assert.equal((calls[0].init?.headers as Record<string, string>)["user-api-key"], "secret");
+  assert.equal(
+    (calls[0].init?.headers as Record<string, string>)["user-api-key"],
+    "secret"
+  );
   assert.equal("body" in (calls[0].init ?? {}), false);
 });
 
 test("Airbnb listing discovery rejects unsafe channel ids before provider access", async () => {
   let calls = 0;
-  const transport = createChannexReadonlyHttpTransport({
+  const transport = createAirbnbListingDiscoveryHttpTransport({
     apiOrigin: "https://app.channex.io",
     apiKey: "secret",
     timeoutMs: 1000,
@@ -73,8 +76,35 @@ test("Airbnb listing discovery rejects unsafe channel ids before provider access
   assert.throws(
     () => transport.listAirbnbListings("../secrets"),
     (error: unknown) =>
-      error instanceof ChannexReadonlyTransportError &&
-      error.code === "OTA_READONLY_CHANNEL_ID_INVALID"
+      error instanceof AirbnbListingDiscoveryTransportError &&
+      error.code === "OTA_AIRBNB_CHANNEL_ID_INVALID"
   );
   assert.equal(calls, 0);
+});
+
+test("Airbnb listing discovery maps documented provider failures without retrying", async () => {
+  for (const [status, code] of [
+    [404, "OTA_AIRBNB_LISTING_DISCOVERY_NOT_FOUND"],
+    [429, "OTA_AIRBNB_LISTING_DISCOVERY_RATE_LIMITED"],
+    [422, "OTA_AIRBNB_LISTING_DISCOVERY_REQUEST_REJECTED"],
+    [503, "OTA_AIRBNB_LISTING_DISCOVERY_PROVIDER_UNAVAILABLE"],
+  ] as const) {
+    let calls = 0;
+    const transport = createAirbnbListingDiscoveryHttpTransport({
+      apiOrigin: "https://app.channex.io",
+      apiKey: "secret",
+      timeoutMs: 1000,
+      fetchImpl: async () => {
+        calls += 1;
+        return response({}, status);
+      },
+    });
+    await assert.rejects(
+      transport.listAirbnbListings(CHANNEL_ID),
+      (error: unknown) =>
+        error instanceof AirbnbListingDiscoveryTransportError &&
+        error.code === code
+    );
+    assert.equal(calls, 1);
+  }
 });
