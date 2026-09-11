@@ -1,0 +1,247 @@
+name: Temporary Airbnb V1.1 Backend Finalize
+
+on:
+  push:
+    branches:
+      - agent/airbnb-auto-matching-v1-1-postal-details
+    paths:
+      - .github/workflows/tmp-airbnb-v1-1-backend-finalize.yml
+
+permissions:
+  contents: write
+
+jobs:
+  finalize:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      DATABASE_URL: postgresql://user:pass@localhost:5432/pingo_test
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: agent/airbnb-auto-matching-v1-1-postal-details
+          fetch-depth: 0
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+
+      - name: Install locked dependencies
+        run: npm ci --ignore-scripts --no-audit --no-fund
+
+      - name: Apply exact route and transport patches
+        shell: bash
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+
+          def replace_once(path: str, old: str, new: str):
+              p = Path(path)
+              text = p.read_text()
+              count = text.count(old)
+              if count != 1:
+                  raise SystemExit(f'{path}: expected one anchor, found {count}: {old!r}')
+              p.write_text(text.replace(old, new, 1))
+
+          def replace_exact_count(path: str, old: str, new: str, expected: int):
+              p = Path(path)
+              text = p.read_text()
+              count = text.count(old)
+              if count != expected:
+                  raise SystemExit(f'{path}: expected {expected} anchors, found {count}: {old!r}')
+              p.write_text(text.replace(old, new))
+
+          transport = 'src/distribution/airbnb-host-self-service.listings.http-transport.ts'
+          replace_once(
+              transport,
+              '''function safeListingId(value: string): string {\n  const id = String(value ?? "").trim();\n  if (!id || id.length > 255 || /[\\x00-\\x1F\\x7F]/.test(id)) {''',
+              '''function safeListingId(value: string): string {\n  const raw = String(value ?? "");\n  const id = raw.trim();\n  if (!id || id.length > 255 || /[\\x00-\\x1F\\x7F]/.test(raw)) {'''
+          )
+
+          properties = 'src/routes/properties.route.ts'
+          replace_once(properties, '          country: p.country ?? "",\n          timezone:', '          country: p.country ?? "",\n          postalCode: p.postalCode ?? "",\n          timezone:')
+          replace_once(properties, '  country,\n  timezone,', '  country,\n  postalCode,\n  timezone,')
+          replace_once(properties, '          country: country?.trim() || null,\n          timezone:', '          country: country?.trim() || null,\n          postalCode: postalCode?.trim() || null,\n          timezone:')
+          replace_once(properties, '        country,\n        timezone,', '        country,\n        postalCode,\n        timezone,')
+          replace_once(properties, '          ...(country !== undefined ? { country: country?.trim() || null } : {}),\n          ...(timezone !== undefined', '          ...(country !== undefined ? { country: country?.trim() || null } : {}),\n          ...(postalCode !== undefined ? { postalCode: postalCode?.trim() || null } : {}),\n          ...(timezone !== undefined')
+
+          dashboard = 'src/routes/dashboard.properties.route.ts'
+          replace_exact_count(dashboard, '          country: true,\n          timezone: true,', '          country: true,\n          postalCode: true,\n          timezone: true,', 2)
+          marker = 'dashboardPropertiesRouter.patch(\n  "/api/dashboard/properties/:id",'
+          p = Path(dashboard)
+          text = p.read_text()
+          start = text.index(marker)
+          head, section = text[:start], text[start:]
+          old = '  country,\n  timezone,'
+          if section.count(old) < 1:
+              raise SystemExit('dashboard patch destructuring anchor missing')
+          section = section.replace(old, '  country,\n  postalCode,\n  timezone,', 1)
+          old = '''      if (country !== undefined) {\n        data.country = String(country || "").trim() || null;\n      }\n\n      if (timezone !== undefined) {'''
+          new = '''      if (country !== undefined) {\n        data.country = String(country || "").trim() || null;\n      }\n\n      if (postalCode !== undefined) {\n        data.postalCode = String(postalCode || "").trim() || null;\n      }\n\n      if (timezone !== undefined) {'''
+          if section.count(old) != 1:
+              raise SystemExit(f'dashboard postal data anchor expected once, found {section.count(old)}')
+          section = section.replace(old, new, 1)
+          p.write_text(head + section)
+          PY
+
+      - name: Replace certification workflow with V1.1 contract
+        shell: bash
+        run: |
+          cat > .github/workflows/ota-airbnb-listing-discovery.yml <<'EOF'
+          name: OTA Airbnb Listing Discovery + Auto-Matching V1.1 Certification
+
+          on:
+            pull_request:
+              paths:
+                - 'prisma/schema.prisma'
+                - 'prisma/migrations/20260911143000_add_property_postal_code/migration.sql'
+                - 'src/distribution/airbnb-host-self-service.listings.http-transport.ts'
+                - 'src/distribution/airbnb-host-self-service.listings.service.ts'
+                - 'src/distribution/airbnb-host-self-service.listings.service.test.ts'
+                - 'src/distribution/airbnb-property-auto-matching.ts'
+                - 'src/distribution/airbnb-property-auto-matching.test.ts'
+                - 'src/distribution/channex-airbnb-listings.transport.test.ts'
+                - 'src/routes/properties.route.ts'
+                - 'src/routes/dashboard.properties.route.ts'
+                - 'src/routes/property-postal-code.contract.test.ts'
+                - '.github/workflows/ota-airbnb-listing-discovery.yml'
+            workflow_dispatch:
+
+          permissions:
+            contents: read
+
+          jobs:
+            listing-discovery-auto-matching-certification:
+              runs-on: ubuntu-latest
+              timeout-minutes: 10
+              env:
+                DATABASE_URL: postgresql://user:pass@localhost:5432/pingo_test
+              steps:
+                - name: Checkout exact candidate
+                  uses: actions/checkout@v4
+                  with:
+                    persist-credentials: false
+                    fetch-depth: 0
+
+                - name: Use Node.js 22
+                  uses: actions/setup-node@v4
+                  with:
+                    node-version: '22'
+                    cache: npm
+
+                - name: Install locked dependencies
+                  run: npm ci --ignore-scripts --no-audit --no-fund
+
+                - name: Validate schema and generate Prisma client
+                  run: |
+                    npx prisma validate --schema prisma/schema.prisma
+                    npx prisma generate
+
+                - name: Prove exact narrow diff allowlist
+                  shell: bash
+                  run: |
+                    git fetch origin main --depth=1
+                    git diff --name-only origin/main...HEAD | sort > "$RUNNER_TEMP/actual.txt"
+                    cat > "$RUNNER_TEMP/expected.txt" <<'FILES'
+                    .github/workflows/ota-airbnb-listing-discovery.yml
+                    prisma/migrations/20260911143000_add_property_postal_code/migration.sql
+                    prisma/schema.prisma
+                    src/distribution/airbnb-host-self-service.listings.http-transport.ts
+                    src/distribution/airbnb-host-self-service.listings.service.test.ts
+                    src/distribution/airbnb-host-self-service.listings.service.ts
+                    src/distribution/airbnb-property-auto-matching.test.ts
+                    src/distribution/airbnb-property-auto-matching.ts
+                    src/distribution/channex-airbnb-listings.transport.test.ts
+                    src/routes/dashboard.properties.route.ts
+                    src/routes/properties.route.ts
+                    src/routes/property-postal-code.contract.test.ts
+                    FILES
+                    sort "$RUNNER_TEMP/expected.txt" -o "$RUNNER_TEMP/expected.txt"
+                    diff -u "$RUNNER_TEMP/expected.txt" "$RUNNER_TEMP/actual.txt"
+
+                - name: Prove unrelated certified Channex core remains frozen
+                  run: |
+                    git diff --exit-code origin/main...HEAD -- \
+                      src/pms \
+                      src/workers \
+                      src/distribution/channex-channel-identity.ts \
+                      src/distribution/channex-readonly.http-transport.ts \
+                      src/distribution/channex-white-label.http-transport.ts \
+                      src/distribution/channex-canonical-readiness.service.ts \
+                      src/distribution/channex-channel-lifecycle.evidence.ts \
+                      src/distribution/channex-airbnb-transport-readiness.policy.ts
+
+                - name: Prove provider scope is read-only and document-exact
+                  shell: bash
+                  run: |
+                    ! grep -R -E '/mappings|/activate|load_future_reservations|check_readiness' \
+                      src/distribution/airbnb-host-self-service.listings.http-transport.ts \
+                      src/distribution/airbnb-host-self-service.listings.service.ts \
+                      src/distribution/airbnb-property-auto-matching.ts
+                    grep -F '/action/listings' src/distribution/airbnb-host-self-service.listings.http-transport.ts
+                    grep -F '/action/listing_details' src/distribution/airbnb-host-self-service.listings.http-transport.ts
+                    grep -F 'method: "GET"' src/distribution/airbnb-host-self-service.listings.http-transport.ts
+                    ! grep -R -E 'method: "(POST|PUT|PATCH|DELETE)"' src/distribution/airbnb-host-self-service.listings.http-transport.ts
+
+                - name: Prove postal code migration is additive only
+                  shell: bash
+                  run: |
+                    grep -Fx 'ALTER TABLE "Property" ADD COLUMN "postalCode" TEXT;' prisma/migrations/20260911143000_add_property_postal_code/migration.sql
+                    grep -E '^  postalCode +String\?$' prisma/schema.prisma
+
+                - name: Type-check isolated listing and matching modules
+                  run: |
+                    ./node_modules/.bin/tsc --noEmit --strict --target ES2022 --module NodeNext --moduleResolution NodeNext --types node \
+                      src/distribution/airbnb-host-self-service.listings.http-transport.ts \
+                      src/distribution/airbnb-property-auto-matching.ts \
+                      src/distribution/airbnb-host-self-service.listings.service.ts
+
+                - name: Run V1.1 matching and retained Airbnb regressions
+                  run: |
+                    node --import tsx --test \
+                      src/distribution/airbnb-property-auto-matching.test.ts \
+                      src/distribution/channex-airbnb-listings.transport.test.ts \
+                      src/distribution/airbnb-host-self-service.listings.service.test.ts \
+                      src/routes/property-postal-code.contract.test.ts \
+                      src/routes/dashboard.airbnb-host-self-service.listings.route.test.ts \
+                      src/distribution/ota-connection-center.runtime-composition.test.ts \
+                      src/distribution/airbnb-host-self-service.service.test.ts \
+                      src/distribution/airbnb-host-self-service.callback-verifier.test.ts \
+                      src/distribution/airbnb-host-self-service.callback-persistence.test.ts
+          EOF
+
+      - name: Validate and test backend V1.1 without provider access
+        shell: bash
+        run: |
+          npx prisma validate --schema prisma/schema.prisma
+          npx prisma generate
+          ./node_modules/.bin/tsc --noEmit --strict --target ES2022 --module NodeNext --moduleResolution NodeNext --types node \
+            src/distribution/airbnb-host-self-service.listings.http-transport.ts \
+            src/distribution/airbnb-property-auto-matching.ts \
+            src/distribution/airbnb-host-self-service.listings.service.ts
+          node --import tsx --test \
+            src/distribution/airbnb-property-auto-matching.test.ts \
+            src/distribution/channex-airbnb-listings.transport.test.ts \
+            src/distribution/airbnb-host-self-service.listings.service.test.ts \
+            src/routes/property-postal-code.contract.test.ts \
+            src/routes/dashboard.airbnb-host-self-service.listings.route.test.ts \
+            src/distribution/ota-connection-center.runtime-composition.test.ts \
+            src/distribution/airbnb-host-self-service.service.test.ts \
+            src/distribution/airbnb-host-self-service.callback-verifier.test.ts \
+            src/distribution/airbnb-host-self-service.callback-persistence.test.ts
+
+      - name: Commit only after tests pass
+        shell: bash
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git rm .github/workflows/tmp-airbnb-v1-1-backend-finalize.yml
+          git add \
+            .github/workflows/ota-airbnb-listing-discovery.yml \
+            src/distribution/airbnb-host-self-service.listings.http-transport.ts \
+            src/routes/properties.route.ts \
+            src/routes/dashboard.properties.route.ts
+          git commit -m 'Wire postal code and certify Airbnb V1.1 backend'
+          git push origin HEAD:agent/airbnb-auto-matching-v1-1-postal-details
