@@ -1,0 +1,93 @@
+name: Temporary Airbnb V1.1 Postal Details Safe Patch
+
+on:
+  push:
+    branches:
+      - agent/airbnb-auto-matching-v1-1-postal-details-safe
+    paths:
+      - '.github/workflows/tmp-airbnb-v11-postal-details-safe.yml'
+
+permissions:
+  contents: write
+
+jobs:
+  patch-test-commit:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      DATABASE_URL: postgresql://user:pass@localhost:5432/pingo_test
+    steps:
+      - name: Checkout exact safe branch
+        uses: actions/checkout@v4
+        with:
+          ref: agent/airbnb-auto-matching-v1-1-postal-details-safe
+          fetch-depth: 0
+
+      - name: Apply deterministic patch
+        run: python .github/scripts/tmp_airbnb_v11_postal_details.py
+
+      - name: Use Node.js 22
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+
+      - name: Install locked dependencies
+        run: npm ci --ignore-scripts --no-audit --no-fund
+
+      - name: Generate and validate Prisma
+        run: |
+          npx prisma generate
+          npx prisma validate --schema ./prisma/schema.prisma
+
+      - name: Type-check isolated Airbnb V1.1 modules
+        run: |
+          ./node_modules/.bin/tsc --noEmit --strict --target ES2022 --module NodeNext --moduleResolution NodeNext --types node \
+            src/distribution/airbnb-host-self-service.listings.http-transport.ts \
+            src/distribution/airbnb-property-auto-matching.ts \
+            src/distribution/airbnb-host-self-service.listings.service.ts
+
+      - name: Run focused and retained Airbnb tests
+        run: |
+          node --import tsx --test \
+            src/distribution/airbnb-property-auto-matching.test.ts \
+            src/distribution/channex-airbnb-listings.transport.test.ts \
+            src/distribution/airbnb-host-self-service.listings.service.test.ts \
+            src/routes/dashboard.airbnb-host-self-service.listings.route.test.ts \
+            src/distribution/ota-connection-center.runtime-composition.test.ts \
+            src/distribution/airbnb-host-self-service.service.test.ts \
+            src/distribution/airbnb-host-self-service.callback-verifier.test.ts \
+            src/distribution/airbnb-host-self-service.callback-persistence.test.ts
+
+      - name: Prove final diff is narrow and read-only
+        shell: bash
+        run: |
+          git diff --check
+          ! grep -R -E '/mappings|/activate|load_future_reservations|check_readiness' \
+            src/distribution/airbnb-host-self-service.listings.http-transport.ts \
+            src/distribution/airbnb-host-self-service.listings.service.ts \
+            src/distribution/airbnb-property-auto-matching.ts
+          test "$(git diff d2b9c74eee2a26d661acdb7c4345d1d1f6bdb912 --numstat -- prisma/schema.prisma | awk '{print $1":"$2}')" = "1:0"
+
+      - name: Commit only certified implementation and remove temporary automation
+        shell: bash
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git rm -f .github/scripts/tmp_airbnb_v11_postal_details.py .github/workflows/tmp-airbnb-v11-postal-details-safe.yml
+          git add \
+            .github/workflows/ota-airbnb-listing-discovery.yml \
+            prisma/schema.prisma \
+            prisma/migrations/20260911153000_add_property_postal_code/migration.sql \
+            src/routes/properties.route.ts \
+            src/routes/dashboard.properties.route.ts \
+            src/distribution/airbnb-host-self-service.listings.http-transport.ts \
+            src/distribution/channex-airbnb-listings.transport.test.ts \
+            src/distribution/airbnb-host-self-service.listings.service.ts \
+            src/distribution/airbnb-host-self-service.listings.service.test.ts \
+            src/distribution/airbnb-property-auto-matching.ts \
+            src/distribution/airbnb-property-auto-matching.test.ts
+          git diff --cached --check
+          git commit -m 'Add postal-code Airbnb details corroboration'
+          git push origin HEAD:agent/airbnb-auto-matching-v1-1-postal-details-safe
