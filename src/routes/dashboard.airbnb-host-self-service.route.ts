@@ -1,6 +1,7 @@
 import { Router } from "express";
 
 import { requireAuth } from "../middleware/requireAuth.js";
+import type { AirbnbListingSummary } from "../distribution/airbnb-host-self-service.listings.service.js";
 import {
   createDistributionMutationSecurity,
   type DistributionMutationRequest,
@@ -19,6 +20,13 @@ export type AirbnbHostSelfServiceRouteActions = {
     requestedByUserId: string;
     requestKey: string;
   }): Promise<{ authorizationUrl: string; expiresAt: Date }>;
+  listListings(args: {
+    organizationId: string;
+    propertyId: string;
+  }): Promise<{
+    channelId: string;
+    listings: AirbnbListingSummary[];
+  }>;
   verifyCallback(args: {
     organizationId: string;
     requestedByUserId: string;
@@ -105,6 +113,36 @@ export function buildDashboardAirbnbHostSelfServiceRouter(
         });
       } catch (error) {
         return failure(res, error, "OTA_AIRBNB_CONNECTION_LINK_FAILED");
+      }
+    }
+  );
+
+  router.get(
+    "/api/dashboard/distribution/properties/:propertyId/channels/AIRBNB/listings",
+    requireAuth,
+    async (req: DistributionMutationRequest, res) => {
+      res.setHeader("Cache-Control", "no-store");
+      if (!actions.enabled) {
+        return res.status(503).json({
+          ok: false,
+          error: "OTA_AIRBNB_HOST_SELF_SERVICE_DISABLED",
+        });
+      }
+      const currentActor = actor(req);
+      if (!currentActor) {
+        return res.status(403).json({
+          ok: false,
+          error: "OTA_CONNECTION_MUTATION_FORBIDDEN",
+        });
+      }
+      try {
+        const result = await actions.listListings({
+          organizationId: currentActor.orgId,
+          propertyId: String(req.params.propertyId ?? "").trim(),
+        });
+        return res.json({ ok: true, listings: result.listings });
+      } catch (error) {
+        return failure(res, error, "OTA_AIRBNB_LISTING_DISCOVERY_FAILED");
       }
     }
   );
