@@ -11,6 +11,10 @@ import {
   type AirbnbHostSelfServiceTransport,
 } from "./airbnb-host-self-service.service.js";
 import {
+  discoverAirbnbListings,
+  type AirbnbListingDiscoveryClient,
+} from "./airbnb-host-self-service.listings.service.js";
+import {
   captureAirbnbCallbackPersistenceGuard,
   verifyAndPersistAirbnbHostCallback,
 } from "./airbnb-host-self-service.callback-persistence.js";
@@ -121,6 +125,18 @@ function adaptPrismaAirbnbHostSelfServiceClient(
   };
 }
 
+function adaptPrismaAirbnbListingDiscoveryClient(
+  prisma: PrismaClient
+): AirbnbListingDiscoveryClient {
+  return {
+    otaChannelConnection: {
+      async findFirst(query) {
+        return await prisma.otaChannelConnection.findFirst(query as any) as any;
+      },
+    },
+  };
+}
+
 function deriveAirbnbStateSecret(jwtSecret: string | undefined): string | null {
   const source = String(jwtSecret ?? "").trim();
   if (source.length < 32 || source.length > 4096) return null;
@@ -191,6 +207,7 @@ export function buildRuntimeOtaConnectionCenterComposition(args: {
     args.prisma
   );
   const airbnbClient = adaptPrismaAirbnbHostSelfServiceClient(args.prisma);
+  const airbnbListingClient = adaptPrismaAirbnbListingDiscoveryClient(args.prisma);
   const airbnbStateSecret = deriveAirbnbStateSecret(args.env.JWT_SECRET);
   const airbnbCallbackAllowed = args.trustedMutationOrigins.some(
     (origin) => String(origin).trim() === AIRBNB_CALLBACK_ORIGIN
@@ -244,6 +261,13 @@ export function buildRuntimeOtaConnectionCenterComposition(args: {
             organizationId,
             propertyId,
             requestedByUserId,
+          }),
+        listListings: ({ organizationId, propertyId }) =>
+          discoverAirbnbListings({
+            client: airbnbListingClient,
+            transport: readonlyTransport,
+            organizationId,
+            propertyId,
           }),
         verifyCallback: async ({
           organizationId,
