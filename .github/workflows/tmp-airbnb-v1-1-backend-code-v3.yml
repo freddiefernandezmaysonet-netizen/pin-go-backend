@@ -1,0 +1,154 @@
+name: Temporary Airbnb V1.1 Backend Code V3
+
+on:
+  push:
+    branches:
+      - agent/airbnb-auto-matching-v1-1-postal-details
+    paths:
+      - .github/workflows/tmp-airbnb-v1-1-backend-code-v3.yml
+
+permissions:
+  contents: write
+
+jobs:
+  certify-and-commit-code:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      DATABASE_URL: postgresql://user:pass@localhost:5432/pingo_test
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: agent/airbnb-auto-matching-v1-1-postal-details
+          fetch-depth: 0
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+
+      - name: Install locked dependencies
+        run: npm ci --ignore-scripts --no-audit --no-fund
+
+      - name: Apply exact code-only V1.1 patches
+        shell: bash
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+
+          def replace_once(path: str, old: str, new: str):
+              p = Path(path)
+              text = p.read_text()
+              count = text.count(old)
+              if count != 1:
+                  raise SystemExit(f'{path}: expected one anchor, found {count}: {old!r}')
+              p.write_text(text.replace(old, new, 1))
+
+          def replace_exact_count(path: str, old: str, new: str, expected: int):
+              p = Path(path)
+              text = p.read_text()
+              count = text.count(old)
+              if count != expected:
+                  raise SystemExit(f'{path}: expected {expected} anchors, found {count}: {old!r}')
+              p.write_text(text.replace(old, new))
+
+          transport = 'src/distribution/airbnb-host-self-service.listings.http-transport.ts'
+          replace_once(
+              transport,
+              '''function safeListingId(value: string): string {\n  const id = String(value ?? "").trim();\n  if (!id || id.length > 255 || /[\\x00-\\x1F\\x7F]/.test(id)) {''',
+              '''function safeListingId(value: string): string {\n  const raw = String(value ?? "");\n  const id = raw.trim();\n  if (!id || id.length > 255 || /[\\x00-\\x1F\\x7F]/.test(raw)) {'''
+          )
+
+          properties = 'src/routes/properties.route.ts'
+          replace_once(properties, '          country: p.country ?? "",\n          timezone:', '          country: p.country ?? "",\n          postalCode: p.postalCode ?? "",\n          timezone:')
+          replace_once(properties, '  country,\n  timezone,', '  country,\n  postalCode,\n  timezone,')
+          replace_once(properties, '          country: country?.trim() || null,\n          timezone:', '          country: country?.trim() || null,\n          postalCode: postalCode?.trim() || null,\n          timezone:')
+          replace_once(properties, '        country,\n        timezone,', '        country,\n        postalCode,\n        timezone,')
+          replace_once(properties, '          ...(country !== undefined ? { country: country?.trim() || null } : {}),\n          ...(timezone !== undefined', '          ...(country !== undefined ? { country: country?.trim() || null } : {}),\n          ...(postalCode !== undefined ? { postalCode: postalCode?.trim() || null } : {}),\n          ...(timezone !== undefined')
+
+          dashboard = 'src/routes/dashboard.properties.route.ts'
+          replace_exact_count(dashboard, '          country: true,\n          timezone: true,', '          country: true,\n          postalCode: true,\n          timezone: true,', 2)
+          marker = 'dashboardPropertiesRouter.patch(\n  "/api/dashboard/properties/:id",'
+          p = Path(dashboard)
+          text = p.read_text()
+          start = text.index(marker)
+          head, section = text[:start], text[start:]
+          old = '  country,\n  timezone,'
+          if section.count(old) < 1:
+              raise SystemExit('dashboard patch destructuring anchor missing')
+          section = section.replace(old, '  country,\n  postalCode,\n  timezone,', 1)
+          old = '''      if (country !== undefined) {\n        data.country = String(country || "").trim() || null;\n      }\n\n      if (timezone !== undefined) {'''
+          new = '''      if (country !== undefined) {\n        data.country = String(country || "").trim() || null;\n      }\n\n      if (postalCode !== undefined) {\n        data.postalCode = String(postalCode || "").trim() || null;\n      }\n\n      if (timezone !== undefined) {'''
+          if section.count(old) != 1:
+              raise SystemExit(f'dashboard postal data anchor expected once, found {section.count(old)}')
+          section = section.replace(old, new, 1)
+          p.write_text(head + section)
+
+          matcher = 'src/distribution/airbnb-property-auto-matching.ts'
+          replace_once(
+              matcher,
+              '''  const autoByListing = new Map<string, number[]>();\n  decisions.forEach((decision, index) => {\n    if (decision.status !== "AUTO_MATCH" || !decision.candidateListingId) return;\n    const indexes = autoByListing.get(decision.candidateListingId) ?? [];\n    indexes.push(index);\n    autoByListing.set(decision.candidateListingId, indexes);\n  });\n\n  for (const indexes of autoByListing.values()) {\n    if (indexes.length < 2) continue;\n    for (const index of indexes) {\n      const decision = decisions[index]!;\n      decisions[index] = {\n        ...decision,\n        status: "REVIEW_REQUIRED",\n        confidence: "MEDIUM",\n        reasons: [...decision.reasons, "LISTING_CONFLICT"],\n      };\n    }\n  }''',
+              '''  const candidatesByListing = new Map<string, number[]>();\n  decisions.forEach((decision, index) => {\n    if (decision.status === "UNMATCHED" || !decision.candidateListingId) return;\n    const indexes = candidatesByListing.get(decision.candidateListingId) ?? [];\n    indexes.push(index);\n    candidatesByListing.set(decision.candidateListingId, indexes);\n  });\n\n  for (const indexes of candidatesByListing.values()) {\n    if (indexes.length < 2) continue;\n    for (const index of indexes) {\n      const decision = decisions[index]!;\n      decisions[index] = {\n        ...decision,\n        status: "REVIEW_REQUIRED",\n        confidence: "MEDIUM",\n        reasons: decision.reasons.includes("LISTING_CONFLICT")\n          ? decision.reasons\n          : [...decision.reasons, "LISTING_CONFLICT"],\n      };\n    }\n  }'''
+          )
+
+          matcher_test = 'src/distribution/airbnb-property-auto-matching.test.ts'
+          p = Path(matcher_test)
+          text = p.read_text()
+          anchor = '''test("uses whichever Pin&Go title is the stronger identity signal", () => {'''
+          test_block = '''test("an AUTO candidate is downgraded when another property also claims the same listing for review", () => {\n  const result = matchAirbnbPropertyPortfolio({\n    properties: [\n      property({ id: "property-1", city: "Collores" }),\n      property({ id: "property-2", city: "Las Piedras" }),\n    ],\n    listings: [listing()],\n  });\n\n  assert.equal(result.summary.autoMatched, 0);\n  assert.equal(result.summary.reviewRequired, 2);\n  for (const decision of result.decisions) {\n    assert.equal(decision.status, "REVIEW_REQUIRED");\n    assert.equal(decision.candidateListingId, "listing-1");\n    assert.ok(decision.reasons.includes("LISTING_CONFLICT"));\n  }\n});\n\n'''
+          if text.count(anchor) != 1:
+              raise SystemExit('matcher test insertion anchor missing or ambiguous')
+          p.write_text(text.replace(anchor, test_block + anchor, 1))
+
+          service_test = Path('src/distribution/airbnb-host-self-service.listings.service.test.ts')
+          service_text = service_test.read_text().replace('551126434553599406', '42544559')
+          service_test.write_text(service_text)
+          PY
+
+      - name: Validate schema, type-check and run regression suite
+        shell: bash
+        run: |
+          npx prisma validate --schema prisma/schema.prisma
+          npx prisma generate
+          ./node_modules/.bin/tsc --noEmit --strict --target ES2022 --module NodeNext --moduleResolution NodeNext --types node \
+            src/distribution/airbnb-host-self-service.listings.http-transport.ts \
+            src/distribution/airbnb-property-auto-matching.ts \
+            src/distribution/airbnb-host-self-service.listings.service.ts
+          node --import tsx --test \
+            src/distribution/airbnb-property-auto-matching.test.ts \
+            src/distribution/channex-airbnb-listings.transport.test.ts \
+            src/distribution/airbnb-host-self-service.listings.service.test.ts \
+            src/routes/property-postal-code.contract.test.ts \
+            src/routes/dashboard.airbnb-host-self-service.listings.route.test.ts \
+            src/distribution/ota-connection-center.runtime-composition.test.ts \
+            src/distribution/airbnb-host-self-service.service.test.ts \
+            src/distribution/airbnb-host-self-service.callback-verifier.test.ts \
+            src/distribution/airbnb-host-self-service.callback-persistence.test.ts
+
+      - name: Prove no provider-write or broad-scope regression
+        shell: bash
+        run: |
+          ! grep -R -E '/mappings|/activate|load_future_reservations|check_readiness' \
+            src/distribution/airbnb-host-self-service.listings.http-transport.ts \
+            src/distribution/airbnb-host-self-service.listings.service.ts \
+            src/distribution/airbnb-property-auto-matching.ts
+          ! grep -R -E 'method: "(POST|PUT|PATCH|DELETE)"' \
+            src/distribution/airbnb-host-self-service.listings.http-transport.ts
+          git diff --check
+
+      - name: Commit code only after all checks pass
+        shell: bash
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add \
+            src/distribution/airbnb-host-self-service.listings.http-transport.ts \
+            src/distribution/airbnb-host-self-service.listings.service.test.ts \
+            src/distribution/airbnb-property-auto-matching.ts \
+            src/distribution/airbnb-property-auto-matching.test.ts \
+            src/routes/properties.route.ts \
+            src/routes/dashboard.properties.route.ts
+          git diff --cached --check
+          git commit -m 'Finalize postal code and Airbnb V1.1 backend code'
+          git push origin HEAD:agent/airbnb-auto-matching-v1-1-postal-details
