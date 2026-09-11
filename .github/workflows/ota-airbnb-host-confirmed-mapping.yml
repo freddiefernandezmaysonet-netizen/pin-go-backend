@@ -1,6 +1,9 @@
 name: OTA Airbnb Host-Confirmed Mapping Certification
 
 on:
+  push:
+    branches:
+      - agent/airbnb-host-confirmed-mapping-safe
   pull_request:
     paths:
       - 'src/distribution/airbnb-host-confirmed-mapping.http-transport.ts'
