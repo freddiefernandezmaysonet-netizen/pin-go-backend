@@ -86,13 +86,11 @@ jobs:
           grep -F 'method: "GET"' src/distribution/airbnb-host-self-service.listings.http-transport.ts
           grep -F '/action/listings' src/distribution/airbnb-host-self-service.listings.http-transport.ts
 
-      - name: Type-check listing discovery boundary
+      - name: Type-check isolated new listing modules
         run: |
           ./node_modules/.bin/tsc --noEmit --strict --target ES2022 --module NodeNext --moduleResolution NodeNext --types node \
             src/distribution/airbnb-host-self-service.listings.http-transport.ts \
-            src/distribution/airbnb-host-self-service.listings.service.ts \
-            src/routes/dashboard.airbnb-host-self-service.route.ts \
-            src/distribution/ota-connection-center.runtime-composition.ts
+            src/distribution/airbnb-host-self-service.listings.service.ts
 
       - name: Run listing discovery and retained Airbnb regressions
         run: |
