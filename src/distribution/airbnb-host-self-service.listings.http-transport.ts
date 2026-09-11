@@ -9,7 +9,10 @@ const UUID =
 const AIRBNB_LISTING_ID = /^\d{1,32}$/;
 
 export class AirbnbListingDiscoveryTransportError extends Error {
-  constructor(readonly code: string) {
+  constructor(
+    readonly code: string,
+    readonly providerStatus: number | null = null
+  ) {
     super(code);
     this.name = "AirbnbListingDiscoveryTransportError";
   }
@@ -60,21 +63,25 @@ function safeListingId(value: string): string {
 function failure(status: number): AirbnbListingDiscoveryTransportError {
   if (status === 404) {
     return new AirbnbListingDiscoveryTransportError(
-      "OTA_AIRBNB_LISTING_DISCOVERY_NOT_FOUND"
+      "OTA_AIRBNB_LISTING_DISCOVERY_NOT_FOUND",
+      status
     );
   }
   if (status === 429) {
     return new AirbnbListingDiscoveryTransportError(
-      "OTA_AIRBNB_LISTING_DISCOVERY_RATE_LIMITED"
+      "OTA_AIRBNB_LISTING_DISCOVERY_RATE_LIMITED",
+      status
     );
   }
   if (status >= 400 && status < 500) {
     return new AirbnbListingDiscoveryTransportError(
-      "OTA_AIRBNB_LISTING_DISCOVERY_REQUEST_REJECTED"
+      "OTA_AIRBNB_LISTING_DISCOVERY_REQUEST_REJECTED",
+      status
     );
   }
   return new AirbnbListingDiscoveryTransportError(
-    "OTA_AIRBNB_LISTING_DISCOVERY_PROVIDER_UNAVAILABLE"
+    "OTA_AIRBNB_LISTING_DISCOVERY_PROVIDER_UNAVAILABLE",
+    status
   );
 }
 
