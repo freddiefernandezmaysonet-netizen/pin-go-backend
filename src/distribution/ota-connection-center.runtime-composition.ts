@@ -14,6 +14,7 @@ import {
   discoverAirbnbListings,
   type AirbnbListingDiscoveryClient,
 } from "./airbnb-host-self-service.listings.service.js";
+import { createAirbnbListingDiscoveryHttpTransport } from "./airbnb-host-self-service.listings.http-transport.js";
 import {
   captureAirbnbCallbackPersistenceGuard,
   verifyAndPersistAirbnbHostCallback,
@@ -196,6 +197,12 @@ export function buildRuntimeOtaConnectionCenterComposition(args: {
     timeoutMs: config.provider.timeoutMs,
     fetchImpl: args.fetchImpl,
   });
+  const airbnbListingTransport = createAirbnbListingDiscoveryHttpTransport({
+    apiOrigin: config.provider.apiOrigin,
+    apiKey: config.provider.apiKey,
+    timeoutMs: config.provider.timeoutMs,
+    fetchImpl: args.fetchImpl,
+  });
   const adapter = new ChannexWhiteLabelAdapter({
     enabled: true,
     apiKey: config.provider.apiKey,
@@ -265,7 +272,7 @@ export function buildRuntimeOtaConnectionCenterComposition(args: {
         listListings: ({ organizationId, propertyId }) =>
           discoverAirbnbListings({
             client: airbnbListingClient,
-            transport: readonlyTransport,
+            transport: airbnbListingTransport,
             organizationId,
             propertyId,
           }),
