@@ -7,9 +7,11 @@ import type {
   PmsAdapter,
   PmsAdapterConnection,
 } from "./types";
+import {
+  isProductionRuntime,
+  resolveChannexRuntimeTransport,
+} from "../../lib/channex-runtime-transport.policy.js";
 
-const CHANNEX_API_BASE_URL =
-  process.env.CHANNEX_API_BASE_URL ?? "https://staging.channex.io";
 const CHANNEX_REQUEST_TIMEOUT_MS = 15_000;
 
 const CHANNEX_BOOKING_EVENTS = new Set<ChannexBookingWebhookEventType>([
@@ -57,7 +59,7 @@ function decryptJson(encryptedValue: string): any {
   return JSON.parse(decrypted.toString("utf8"));
 }
 
-function getChannexApiKey(connection: PmsAdapterConnection) {
+function getNonProductionChannexApiKey(connection: PmsAdapterConnection) {
   if (connection.credentialsEncrypted) {
     const creds = decryptJson(connection.credentialsEncrypted);
     const apiKey = asString(creds?.apiKey);
@@ -70,15 +72,20 @@ function getChannexApiKey(connection: PmsAdapterConnection) {
   throw new Error("CHANNEX_NO_API_KEY");
 }
 
-function getChannexBaseUrl() {
-  return CHANNEX_API_BASE_URL.replace(/\/+$/, "");
+function getChannexTransport(connection: PmsAdapterConnection) {
+  return resolveChannexRuntimeTransport({
+    nonProductionApiKey: isProductionRuntime()
+      ? null
+      : getNonProductionChannexApiKey(connection),
+    nonProductionMissingApiKeyError: "CHANNEX_NO_API_KEY",
+  });
 }
 
-function getChannexHeaders(connection: PmsAdapterConnection) {
+function getChannexHeaders(apiKey: string) {
   return {
     Accept: "application/json",
     "Content-Type": "application/json",
-    "user-api-key": getChannexApiKey(connection),
+    "user-api-key": apiKey,
   };
 }
 
@@ -413,12 +420,13 @@ export const channexAdapter: PmsAdapter = {
   },
 
   fetchBookingRevision: async ({ connection, revisionId }) => {
+    const transport = getChannexTransport(connection);
     const response = await axios.get(
-      `${getChannexBaseUrl()}/api/v1/booking_revisions/${encodeURIComponent(
+      `${transport.apiOrigin}/api/v1/booking_revisions/${encodeURIComponent(
         revisionId
       )}`,
       {
-        headers: getChannexHeaders(connection),
+        headers: getChannexHeaders(transport.apiKey),
         timeout: CHANNEX_REQUEST_TIMEOUT_MS,
       }
     );
@@ -427,10 +435,11 @@ export const channexAdapter: PmsAdapter = {
   },
 
   fetchBookingRevisionFeed: async ({ connection }) => {
+    const transport = getChannexTransport(connection);
     const response = await axios.get(
-      `${getChannexBaseUrl()}/api/v1/booking_revisions/feed`,
+      `${transport.apiOrigin}/api/v1/booking_revisions/feed`,
       {
-        headers: getChannexHeaders(connection),
+        headers: getChannexHeaders(transport.apiKey),
         params: {
           "order[inserted_at]": "asc",
         },
@@ -442,13 +451,14 @@ export const channexAdapter: PmsAdapter = {
   },
 
   acknowledgeBookingRevision: async ({ connection, revisionId }) => {
+    const transport = getChannexTransport(connection);
     await axios.post(
-      `${getChannexBaseUrl()}/api/v1/booking_revisions/${encodeURIComponent(
+      `${transport.apiOrigin}/api/v1/booking_revisions/${encodeURIComponent(
         revisionId
       )}/ack`,
       {},
       {
-        headers: getChannexHeaders(connection),
+        headers: getChannexHeaders(transport.apiKey),
         timeout: CHANNEX_REQUEST_TIMEOUT_MS,
       }
     );

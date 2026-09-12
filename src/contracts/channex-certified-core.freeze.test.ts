@@ -5,8 +5,19 @@ import path from "node:path";
 import test from "node:test";
 
 const CERTIFIED_CORE_SHA256 =
-  "816ab50a5cd35137a4bfe336c513de29f8b1fec08907e720f642ca281736787a";
-const CERTIFIED_CORE_FILE_COUNT = 116;
+  "85190e2aef52c2b4a00d40972bf66f696647f3977b99813fff1fe8019bd2d7bb";
+const CERTIFIED_CORE_FILE_COUNT = 124;
+
+const CHANNEX_PRODUCTION_TRANSPORT_BOUNDARY_FILES = new Set([
+  "src/distribution/ota-connection-center.config.test.ts",
+  "src/distribution/ota-connection-center.config.ts",
+  "src/lib/channex-production-runtime-boundary.contract.test.ts",
+  "src/lib/channex-runtime-transport.policy.test.ts",
+  "src/lib/channex-runtime-transport.policy.ts",
+  "src/routes/dashboard.channex-full-sync.route.test.ts",
+  "src/routes/dashboard.channex-full-sync.route.ts",
+  "src/routes/org.pms.routes.ts",
+]);
 
 function walk(directory: string): string[] {
   return fs.readdirSync(directory, { withFileTypes: true }).flatMap((entry) => {
@@ -17,6 +28,7 @@ function walk(directory: string): string[] {
 
 function isCertifiedCoreFile(filePath: string): boolean {
   return (
+    CHANNEX_PRODUCTION_TRANSPORT_BOUNDARY_FILES.has(filePath) ||
     filePath === "prisma/channex-ari.prisma" ||
     filePath === "src/pms/adapters/channex.adapter.ts" ||
     filePath === "src/pms/adapters/channex.adapter.test.ts" ||
