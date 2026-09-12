@@ -7,6 +7,10 @@ import type { OtaProvisioningRepository } from "./ota-connection-orchestrator.se
 function configuredComposition() {
   const calls: string[] = [];
   const repository: OtaProvisioningRepository = {
+    async adoptCertifiedPmsListingMapping() {
+      calls.push("adopt-certified-mapping");
+      return "ADOPTED";
+    },
     async loadTenantSnapshot() {
       calls.push("load");
       return {
@@ -18,14 +22,14 @@ function configuredComposition() {
         timezone: "America/Puerto_Rico",
         groupId: "group-1",
         distributionPropertyId: "distribution-property-1",
-        groupStatus: "NOT_PROVISIONED",
-        propertyStatus: "NOT_PROVISIONED",
+        groupStatus: "READY",
+        propertyStatus: "READY",
         groupLastErrorCode: null,
         propertyLastErrorCode: null,
-        externalGroupId: null,
-        externalPropertyId: null,
-        externalPrimaryRoomTypeId: null,
-        externalPrimaryRatePlanId: null,
+        externalGroupId: "group-ext",
+        externalPropertyId: "certified-property",
+        externalPrimaryRoomTypeId: "certified-room",
+        externalPrimaryRatePlanId: "certified-rate",
       };
     },
     async claimGroup() { calls.push("claim-group"); return true; },
@@ -104,7 +108,7 @@ test("adapter alone cannot activate incomplete currency or launch-origin configu
   });
 });
 
-test("configured composition executes the full fake provisioning boundary", async () => {
+test("configured composition adopts certified mapping without provider provisioning", async () => {
   const { actions, calls } = configuredComposition();
   assert.ok(actions.prepare);
   const result = await actions.prepare!({
@@ -117,17 +121,8 @@ test("configured composition executes the full fake provisioning boundary", asyn
   assert.deepEqual(result, { provisioningStatus: "READY" });
   assert.deepEqual(calls, [
     "logical-prepare",
+    "adopt-certified-mapping",
     "load",
-    "claim-group",
-    "transport-group",
-    "complete-group",
-    "claim-property",
-    "transport-property",
-    "checkpoint-property",
-    "transport-room",
-    "checkpoint-room",
-    "transport-rate",
-    "complete-property",
   ]);
 });
 

@@ -12,6 +12,16 @@ type ProvisioningPrismaClient = {
   distributionGroup: {
     updateMany(args: any): Promise<{ count: number }>;
   };
+  pmsListing: {
+    findMany(args: any): Promise<any[]>;
+  };
+  apmsAuditEntry: {
+    create(args: any): Promise<any>;
+  };
+  $transaction<T>(
+    work: (tx: ProvisioningPrismaClient) => Promise<T>,
+    options?: { isolationLevel?: "Serializable" }
+  ): Promise<T>;
 };
 
 export class OtaProvisioningRepositoryError extends Error {
@@ -33,6 +43,26 @@ function requireUpdate(result: { count: number }, code: string): void {
   if (result.count !== 1) throw new OtaProvisioningRepositoryError(code);
 }
 
+function requireText(value: unknown, code: string): string {
+  const normalized = typeof value === "string" ? value.trim() : "";
+  if (!normalized) throw new OtaProvisioningRepositoryError(code);
+  return normalized;
+}
+
+function requireMetadata(value: unknown): Record<string, unknown> {
+  if (
+    typeof value !== "object" ||
+    value === null ||
+    Array.isArray(value) ||
+    Object.getPrototypeOf(value) !== Object.prototype
+  ) {
+    throw new OtaProvisioningRepositoryError(
+      "OTA_CERTIFIED_PMS_LISTING_METADATA_INVALID"
+    );
+  }
+  return value as Record<string, unknown>;
+}
+
 export class PrismaOtaProvisioningRepository implements OtaProvisioningRepository {
   private readonly currency: string;
 
@@ -41,6 +71,204 @@ export class PrismaOtaProvisioningRepository implements OtaProvisioningRepositor
     defaultCurrency: string
   ) {
     this.currency = requireCurrency(defaultCurrency);
+  }
+
+  async adoptCertifiedPmsListingMapping(
+    organizationId: string,
+    propertyId: string,
+    requestedByUserId: string,
+    now: Date
+  ): Promise<"ADOPTED" | "ALREADY_ALIGNED"> {
+    return this.client.$transaction(async (tx) => {
+      const distributionProperty = await tx.distributionProperty.findFirst({
+        where: { organizationId, propertyId, platform: "CHANNEX" },
+        select: {
+          id: true,
+          organizationId: true,
+          propertyId: true,
+          platform: true,
+          provisioningStatus: true,
+          externalPropertyId: true,
+          externalPrimaryRoomTypeId: true,
+          externalPrimaryRatePlanId: true,
+          updatedAt: true,
+          property: { select: { id: true, organizationId: true } },
+          group: {
+            select: {
+              id: true,
+              organizationId: true,
+              platform: true,
+              provisioningStatus: true,
+              externalGroupId: true,
+            },
+          },
+        },
+      });
+      if (!distributionProperty) {
+        throw new OtaProvisioningRepositoryError(
+          "OTA_DISTRIBUTION_PROPERTY_NOT_FOUND"
+        );
+      }
+      if (
+        distributionProperty.organizationId !== organizationId ||
+        distributionProperty.propertyId !== propertyId ||
+        distributionProperty.platform !== "CHANNEX" ||
+        !distributionProperty.property ||
+        distributionProperty.property.id !== propertyId ||
+        distributionProperty.property.organizationId !== organizationId ||
+        !distributionProperty.group ||
+        distributionProperty.group.organizationId !== organizationId ||
+        distributionProperty.group.platform !== "CHANNEX"
+      ) {
+        throw new OtaProvisioningRepositoryError(
+          "OTA_DISTRIBUTION_TENANT_MISMATCH"
+        );
+      }
+      if (
+        distributionProperty.group.provisioningStatus !== "READY" ||
+        !requireText(
+          distributionProperty.group.externalGroupId,
+          "OTA_CERTIFIED_MAPPING_GROUP_NOT_READY"
+        )
+      ) {
+        throw new OtaProvisioningRepositoryError(
+          "OTA_CERTIFIED_MAPPING_GROUP_NOT_READY"
+        );
+      }
+
+      const listings = await tx.pmsListing.findMany({
+        where: { propertyId, connection: { provider: "CHANNEX" } },
+        orderBy: { id: "asc" },
+        take: 2,
+        select: {
+          id: true,
+          connectionId: true,
+          propertyId: true,
+          externalListingId: true,
+          metadata: true,
+          updatedAt: true,
+          connection: {
+            select: {
+              id: true,
+              organizationId: true,
+              provider: true,
+              status: true,
+            },
+          },
+        },
+      });
+      if (listings.length !== 1) {
+        throw new OtaProvisioningRepositoryError(
+          "OTA_CERTIFIED_PMS_LISTING_CARDINALITY_INVALID"
+        );
+      }
+      const listing = listings[0]!;
+      if (
+        listing.propertyId !== propertyId ||
+        listing.connectionId !== listing.connection?.id ||
+        listing.connection?.organizationId !== organizationId ||
+        listing.connection?.provider !== "CHANNEX"
+      ) {
+        throw new OtaProvisioningRepositoryError(
+          "OTA_DISTRIBUTION_TENANT_MISMATCH"
+        );
+      }
+      if (listing.connection.status !== "ACTIVE") {
+        throw new OtaProvisioningRepositoryError(
+          "OTA_CERTIFIED_PMS_CONNECTION_NOT_ACTIVE"
+        );
+      }
+
+      const metadata = requireMetadata(listing.metadata);
+      if (metadata.provider !== "CHANNEX") {
+        throw new OtaProvisioningRepositoryError(
+          "OTA_CERTIFIED_PMS_LISTING_PROVIDER_INVALID"
+        );
+      }
+      const certifiedInventory = {
+        externalPropertyId: requireText(
+          metadata.channexPropertyId,
+          "OTA_CERTIFIED_CHANNEX_PROPERTY_ID_REQUIRED"
+        ),
+        externalPrimaryRoomTypeId: requireText(
+          listing.externalListingId,
+          "OTA_CERTIFIED_CHANNEX_ROOM_TYPE_ID_REQUIRED"
+        ),
+        externalPrimaryRatePlanId: requireText(
+          metadata.channexRatePlanId,
+          "OTA_CERTIFIED_CHANNEX_RATE_PLAN_ID_REQUIRED"
+        ),
+      };
+      const alreadyAligned =
+        distributionProperty.provisioningStatus === "READY" &&
+        distributionProperty.externalPropertyId ===
+          certifiedInventory.externalPropertyId &&
+        distributionProperty.externalPrimaryRoomTypeId ===
+          certifiedInventory.externalPrimaryRoomTypeId &&
+        distributionProperty.externalPrimaryRatePlanId ===
+          certifiedInventory.externalPrimaryRatePlanId;
+      if (alreadyAligned) return "ALREADY_ALIGNED";
+
+      requireUpdate(
+        await tx.distributionProperty.updateMany({
+          where: {
+            id: distributionProperty.id,
+            organizationId,
+            propertyId,
+            platform: "CHANNEX",
+            provisioningStatus: distributionProperty.provisioningStatus,
+            externalPropertyId: distributionProperty.externalPropertyId,
+            externalPrimaryRoomTypeId:
+              distributionProperty.externalPrimaryRoomTypeId,
+            externalPrimaryRatePlanId:
+              distributionProperty.externalPrimaryRatePlanId,
+            updatedAt: distributionProperty.updatedAt,
+          },
+          data: {
+            ...certifiedInventory,
+            provisioningStatus: "READY",
+            verifiedAt: now,
+            lastErrorCode: null,
+            lastErrorSummary: null,
+          },
+        }),
+        "OTA_CERTIFIED_MAPPING_ADOPTION_CONFLICT"
+      );
+      await tx.apmsAuditEntry.create({
+        data: {
+          organizationId,
+          propertyId,
+          entityType: "DISTRIBUTION",
+          entityId: distributionProperty.id,
+          engine: "OTA_DISTRIBUTION",
+          eventType: "CERTIFIED_PMS_MAPPING_ADOPTED",
+          status: "SUCCESS",
+          severity: "INFO",
+          decisionId:
+            `ota-certified-mapping-adoption:v1:${distributionProperty.id}:` +
+            `${listing.id}:${distributionProperty.updatedAt.toISOString()}`,
+          summary: "Connection Center adopted the certified Channex PMS mapping",
+          reason: "CERTIFIED_PMS_LISTING_IS_SOURCE_OF_TRUTH",
+          metadata: {
+            requestedByUserId: requireText(
+              requestedByUserId,
+              "OTA_REQUESTED_BY_USER_ID_REQUIRED"
+            ),
+            pmsConnectionId: listing.connectionId,
+            pmsListingId: listing.id,
+            previous: {
+              externalPropertyId: distributionProperty.externalPropertyId,
+              externalPrimaryRoomTypeId:
+                distributionProperty.externalPrimaryRoomTypeId,
+              externalPrimaryRatePlanId:
+                distributionProperty.externalPrimaryRatePlanId,
+            },
+            certified: certifiedInventory,
+          },
+        },
+      });
+      return "ADOPTED";
+    }, { isolationLevel: "Serializable" });
   }
 
   async loadTenantSnapshot(

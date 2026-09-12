@@ -24,6 +24,12 @@ export type ProvisioningSnapshot = {
 };
 
 export type OtaProvisioningRepository = {
+  adoptCertifiedPmsListingMapping(
+    organizationId: string,
+    propertyId: string,
+    requestedByUserId: string,
+    now: Date
+  ): Promise<"ADOPTED" | "ALREADY_ALIGNED">;
   loadTenantSnapshot(organizationId: string, propertyId: string): Promise<ProvisioningSnapshot | null>;
   claimGroup(organizationId: string, groupId: string): Promise<boolean>;
   completeGroup(organizationId: string, groupId: string, externalGroupId: string, now: Date): Promise<void>;
@@ -102,6 +108,14 @@ export async function orchestrateOtaProvisioning(args: {
     requestKey: args.requestKey,
   });
 
+  const now = args.now ?? new Date();
+  await args.repository.adoptCertifiedPmsListingMapping(
+    args.organizationId,
+    args.propertyId,
+    args.requestedByUserId,
+    now
+  );
+
   const snapshot = await args.repository.loadTenantSnapshot(
     args.organizationId,
     args.propertyId
@@ -129,7 +143,6 @@ export async function orchestrateOtaProvisioning(args: {
     throw new OtaProvisioningError("OTA_PROVIDER_RECONCILIATION_REQUIRED");
   }
 
-  const now = args.now ?? new Date();
   let externalGroupId = snapshot.externalGroupId;
   if (snapshot.groupStatus !== "READY" || !externalGroupId) {
     if (!(await args.repository.claimGroup(args.organizationId, snapshot.groupId))) {
