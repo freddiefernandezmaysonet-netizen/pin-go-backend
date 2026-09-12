@@ -11,6 +11,7 @@ const ORGANIZATION_ID = "org-1";
 const PROPERTY_ID = "property-1";
 const DISTRIBUTION_PROPERTY_ID = "distribution-property-1";
 const CHANNEL_ID = "04ef2057-cca7-4e28-be54-f991f461a1cd";
+const CHANNEL_ATTRIBUTES_ID = "96177287-c3b2-4d98-9eb7-5c1927795825";
 const EXTERNAL_PROPERTY_ID = "b58de550-63f8-49dc-abfa-4629b94a2160";
 const GROUP_ID = "a05d501f-7d1a-40fd-a21e-2805d818e527";
 const RATE_PLAN_ID = "bfd7dfe7-0c6d-4145-bbc4-45546780d720";
@@ -94,13 +95,17 @@ function discovery(overrides: Record<string, unknown> = {}) {
   } as any;
 }
 
-function channelPayload(mappings: Array<{ id: string; ratePlanId: string; listingId: string }> = [], isActive = false) {
+function channelPayload(
+  mappings: Array<{ id: string; ratePlanId: string; listingId: string }> = [],
+  isActive = false,
+  dataId = CHANNEL_ID
+) {
   return {
     data: {
       type: "channel",
-      id: CHANNEL_ID,
+      id: dataId,
       attributes: {
-        id: CHANNEL_ID,
+        id: CHANNEL_ATTRIBUTES_ID,
         channel: "Airbnb",
         is_active: isActive,
         properties: [EXTERNAL_PROPERTY_ID],
@@ -189,7 +194,7 @@ test("requires explicit host confirmation before any local or provider access", 
   assert.deepEqual(h.calls, { discover: 0, getChannel: 0, createMapping: 0 });
 });
 
-test("submits exactly one mapping after tenant, candidate and channel fencing", async () => {
+test("accepts documented distinct data.id and attributes.id before one mapping submission", async () => {
   const h = harness();
   const result = await execute(h);
   assert.deepEqual(result, {
@@ -199,6 +204,20 @@ test("submits exactly one mapping after tenant, candidate and channel fencing", 
   });
   assert.deepEqual(h.local.reads, { distribution: 1, connection: 1 });
   assert.deepEqual(h.calls, { discover: 1, getChannel: 1, createMapping: 1 });
+});
+
+test("still rejects a channel resource whose data.id is not the expected channel id", async () => {
+  const h = harness({
+    channel: channelPayload([], false, "716305c4-561a-4561-a187-7f5b8aeb5920"),
+  });
+  await assert.rejects(
+    execute(h),
+    (error: unknown) =>
+      error instanceof AirbnbHostConfirmedMappingError &&
+      error.code === "OTA_AIRBNB_MAPPING_CHANNEL_STATE_INVALID"
+  );
+  assert.equal(h.calls.getChannel, 1);
+  assert.equal(h.calls.createMapping, 0);
 });
 
 test("is idempotent when the exact provider mapping already exists", async () => {

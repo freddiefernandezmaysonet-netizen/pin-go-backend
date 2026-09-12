@@ -173,7 +173,6 @@ function parseExactChannel(args: {
   const groupRelationship = relationships ? record(relationships.group) : null;
   const group = groupRelationship ? record(groupRelationship.data) : null;
   const channelId = channel ? String(channel.id ?? "").trim() : "";
-  const attributeId = attributes ? String(attributes.id ?? "").trim() : "";
   const groupId = group ? String(group.id ?? "").trim() : "";
   const properties = attributes?.properties;
   const ratePlans = attributes?.rate_plans;
@@ -184,7 +183,6 @@ function parseExactChannel(args: {
     channel.type !== "channel" ||
     !attributes ||
     channelId !== args.channelId ||
-    attributeId !== args.channelId ||
     attributes.channel !== "Airbnb" ||
     attributes.is_active !== false ||
     !Array.isArray(properties) ||

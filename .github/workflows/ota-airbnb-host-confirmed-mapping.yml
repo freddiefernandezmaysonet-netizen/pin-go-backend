@@ -4,6 +4,7 @@ on:
   push:
     branches:
       - agent/airbnb-host-confirmed-mapping-safe
+      - agent/airbnb-mapping-channel-id-preflight-fix-safe
   pull_request:
     paths:
       - 'src/distribution/airbnb-host-confirmed-mapping.http-transport.ts'
@@ -104,6 +105,9 @@ jobs:
           grep -F 'rate_plan_id' src/distribution/airbnb-host-confirmed-mapping.http-transport.ts
           grep -F 'listing_id' src/distribution/airbnb-host-confirmed-mapping.http-transport.ts
           grep -F 'CONFIRM_AIRBNB_PROPERTY_MAPPING' src/distribution/airbnb-host-confirmed-mapping.service.ts
+          grep -F 'channelId !== args.channelId' src/distribution/airbnb-host-confirmed-mapping.service.ts
+          ! grep -E 'attributeId.*args\.channelId|attributes\.id.*args\.channelId' \
+            src/distribution/airbnb-host-confirmed-mapping.service.ts
           ! grep -R -E '/activate|load_future_reservations|check_readiness|/restrictions|/availability' \
             src/distribution/airbnb-host-confirmed-mapping.http-transport.ts \
             src/distribution/airbnb-host-confirmed-mapping.service.ts \
