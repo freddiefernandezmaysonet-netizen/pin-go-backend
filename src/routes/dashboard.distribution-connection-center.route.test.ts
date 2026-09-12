@@ -5,6 +5,7 @@ import test from "node:test";
 import express, { type RequestHandler } from "express";
 
 import { buildDashboardDistributionConnectionCenterRouter } from "./dashboard.distribution-connection-center.route";
+import { buildDashboardChannexFullSyncRouter } from "./dashboard.channex-full-sync.route";
 
 type TestUser = { id: string; orgId: string; role?: string };
 
@@ -76,7 +77,6 @@ test("legacy mutation endpoints are fenced before database or vendor access", as
   for (const path of [
     "/api/dashboard/properties/property-b/distribution/enable",
     "/api/dashboard/properties/property-b/channex/provision",
-    "/api/dashboard/properties/property-b/channex/sync-availability",
   ]) {
     const response = await requestRoute({
       prisma,
@@ -92,6 +92,53 @@ test("legacy mutation endpoints are fenced before database or vendor access", as
   }
 
   assert.equal(reads, 0);
+});
+
+test("canonical Full Sync route is not fenced as a legacy Connection Center mutation", async () => {
+  const app = express();
+  const injectUser: RequestHandler = (req, _res, next) => {
+    (req as typeof req & { user: TestUser }).user = {
+      id: "user-a",
+      orgId: "organization-a",
+    };
+    next();
+  };
+  app.use(injectUser);
+  app.use(express.json());
+
+  const prisma = createPrisma({
+    property: {
+      findFirst: async () => ({
+        id: "property-b",
+        timezone: "America/Puerto_Rico",
+        distributionEnabled: false,
+        distributionStatus: "DISABLED",
+      }),
+    },
+  });
+
+  app.use(buildDashboardDistributionConnectionCenterRouter(prisma));
+  app.use(buildDashboardChannexFullSyncRouter(prisma));
+
+  const server = await new Promise<Server>((resolve) => {
+    const listener = app.listen(0, "127.0.0.1", () => resolve(listener));
+  });
+  const address = server.address() as AddressInfo;
+
+  try {
+    const response = await fetch(
+      `http://127.0.0.1:${address.port}/api/dashboard/properties/property-b/channex/sync-availability`,
+      { method: "POST", headers: { Connection: "close" } }
+    );
+
+    assert.equal(response.status, 409);
+    assert.deepEqual(await response.json(), {
+      ok: false,
+      error: "Property distribution must be ACTIVE before requesting a Full Sync",
+    });
+  } finally {
+    await closeServer(server);
+  }
 });
 
 test("unauthenticated callers are rejected before property data is read", async () => {
