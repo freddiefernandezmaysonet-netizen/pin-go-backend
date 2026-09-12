@@ -5,8 +5,90 @@ import { formatInTimeZone } from "date-fns-tz";
 
 import { requireIanaTimezone } from "../lib/iana-timezone";
 import { requireAuth } from "../middleware/requireAuth";
+import {
+  resolveChannexAriMapping,
+  type ChannexAriMappingDb,
+} from "../pms/outbound/channex-ari-mapping.service";
 import { createChannexAriOutboxEvent } from "../pms/outbound/channex-ari-outbox.service";
 import { buildDashboardCalendarOverridesRouter } from "./dashboard.calendar-overrides.route";
+
+const CHANNEX_PRODUCTION_ORIGIN = "https://app.channex.io";
+
+type CanonicalFullSyncMapping = {
+  organizationId: unknown;
+  propertyId: unknown;
+  platform: unknown;
+  provisioningStatus: unknown;
+  externalPropertyId: unknown;
+  externalPrimaryRoomTypeId: unknown;
+  externalPrimaryRatePlanId: unknown;
+} | null;
+
+function normalizedText(value: unknown): string {
+  return typeof value === "string" ? value.trim() : "";
+}
+
+export function assertFullSyncProductionChannexHost(
+  env: NodeJS.ProcessEnv = process.env
+): void {
+  if (normalizedText(env.NODE_ENV).toLowerCase() !== "production") return;
+
+  const configured = normalizedText(env.CHANNEX_API_BASE_URL);
+  let parsed: URL;
+
+  try {
+    parsed = new URL(configured);
+  } catch {
+    throw new Error("CHANNEX_ARI_PRODUCTION_HOST_INVALID");
+  }
+
+  if (
+    parsed.origin !== CHANNEX_PRODUCTION_ORIGIN ||
+    parsed.pathname !== "/" ||
+    parsed.username ||
+    parsed.password ||
+    parsed.search ||
+    parsed.hash
+  ) {
+    throw new Error("CHANNEX_ARI_PRODUCTION_HOST_INVALID");
+  }
+}
+
+export function assertFullSyncCanonicalMappingConsistency(input: {
+  organizationId: string;
+  propertyId: string;
+  legacyMapping: {
+    channexPropertyId: string;
+    externalRoomTypeId: string;
+    channexRatePlanId: string;
+  };
+  canonicalMapping: CanonicalFullSyncMapping;
+}): void {
+  const canonical = input.canonicalMapping;
+  if (!canonical) {
+    throw new Error("CHANNEX_ARI_CANONICAL_MAPPING_MISSING");
+  }
+
+  if (
+    normalizedText(canonical.organizationId) !== input.organizationId ||
+    normalizedText(canonical.propertyId) !== input.propertyId ||
+    normalizedText(canonical.platform) !== "CHANNEX" ||
+    normalizedText(canonical.provisioningStatus) !== "READY"
+  ) {
+    throw new Error("CHANNEX_ARI_CANONICAL_MAPPING_NOT_READY");
+  }
+
+  if (
+    normalizedText(canonical.externalPropertyId) !==
+      input.legacyMapping.channexPropertyId ||
+    normalizedText(canonical.externalPrimaryRoomTypeId) !==
+      input.legacyMapping.externalRoomTypeId ||
+    normalizedText(canonical.externalPrimaryRatePlanId) !==
+      input.legacyMapping.channexRatePlanId
+  ) {
+    throw new Error("CHANNEX_ARI_CANONICAL_MAPPING_MISMATCH");
+  }
+}
 
 export function resolveFullSyncTodayDateKey(
   requestedAt: Date,
@@ -60,6 +142,8 @@ export function buildDashboardChannexFullSyncRouter(prisma: PrismaClient) {
           });
         }
 
+        assertFullSyncProductionChannexHost();
+
         const requestedAt = new Date();
         const todayDateKey = resolveFullSyncTodayDateKey(
           requestedAt,
@@ -70,6 +154,39 @@ export function buildDashboardChannexFullSyncRouter(prisma: PrismaClient) {
 
         const result = await prisma.$transaction(
           async (tx) => {
+            const legacyMapping = await resolveChannexAriMapping(
+              tx as ChannexAriMappingDb,
+              {
+                organizationId: orgId,
+                propertyId: property.id,
+              }
+            );
+            const canonicalMapping =
+              await tx.distributionProperty.findUnique({
+                where: {
+                  propertyId_platform: {
+                    propertyId: property.id,
+                    platform: "CHANNEX",
+                  },
+                },
+                select: {
+                  organizationId: true,
+                  propertyId: true,
+                  platform: true,
+                  provisioningStatus: true,
+                  externalPropertyId: true,
+                  externalPrimaryRoomTypeId: true,
+                  externalPrimaryRatePlanId: true,
+                },
+              });
+
+            assertFullSyncCanonicalMappingConsistency({
+              organizationId: orgId,
+              propertyId: property.id,
+              legacyMapping,
+              canonicalMapping,
+            });
+
             const existingAriState =
               await tx.channexAriPropertyState.findUnique({
                 where: { propertyId: property.id },
@@ -194,6 +311,22 @@ export function buildDashboardChannexFullSyncRouter(prisma: PrismaClient) {
             ok: false,
             error: "A Full Sync is already in progress for this property",
             correlationId: error?.correlationId ?? null,
+          });
+        }
+
+        if (
+          error?.message === "CHANNEX_ARI_PRODUCTION_HOST_INVALID" ||
+          error?.message === "CHANNEX_ARI_CANONICAL_MAPPING_MISSING" ||
+          error?.message === "CHANNEX_ARI_CANONICAL_MAPPING_NOT_READY" ||
+          error?.message === "CHANNEX_ARI_CANONICAL_MAPPING_MISMATCH"
+        ) {
+          return res.status(409).json({
+            ok: false,
+            error:
+              error.message === "CHANNEX_ARI_PRODUCTION_HOST_INVALID"
+                ? "Production Full Sync requires https://app.channex.io"
+                : "Canonical Channex mapping is not aligned for Full Sync",
+            code: error.message,
           });
         }
 
