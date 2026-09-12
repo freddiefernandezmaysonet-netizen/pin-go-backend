@@ -10,6 +10,8 @@ import {
   hashPassword,
 } from "../lib/auth";
 import { validatePasswordPolicy } from "../lib/passwordPolicy";
+import { evaluateE3LoginRuntime } from "../auth/mfa-runtime-policy";
+import { mfaEnrollmentRouter } from "../auth/mfa-enrollment.routes";
 import {
   forgotPasswordHandler,
   verifyForgotPasswordCodeHandler,
@@ -18,6 +20,7 @@ import {
 
 const prisma = new PrismaClient();
 export const authRouter = Router();
+authRouter.use(mfaEnrollmentRouter);
 
 // =======================
 // LOGIN
@@ -62,6 +65,31 @@ authRouter.post("/auth/login", async (req, res) => {
 
     if (!ok) {
       return res.status(401).json({ error: "INVALID_CREDENTIALS" });
+    }
+
+    // E3 safety boundary: OFF performs no MFA persistence read. SHADOW observes only.
+    // ENFORCE is deliberately blocked by evaluateE3LoginRuntime and cannot deny login.
+    const mfaRuntime = await evaluateE3LoginRuntime({
+      configuredMode: process.env.PINGO_MFA_MODE,
+      loadVerifiedFactorCount: async () => {
+        const rows = await prisma.$queryRaw<Array<{ count: bigint }>>`
+          SELECT COUNT(*)::bigint AS count
+          FROM "AuthFactor"
+          WHERE "userId" = ${user.id}
+            AND "status" = 'VERIFIED'::"AuthFactorStatus"
+            AND "type" IN ('EMAIL'::"AuthFactorType", 'SMS'::"AuthFactorType")
+        `;
+        return Number(rows[0]?.count ?? 0);
+      },
+    });
+
+    if (mfaRuntime.telemetry !== "MFA_OFF") {
+      console.info("[auth/login] E3_MFA_RUNTIME", {
+        userId: user.id,
+        organizationId: user.organizationId,
+        telemetry: mfaRuntime.telemetry,
+        verifiedFactorCount: mfaRuntime.verifiedFactorCount,
+      });
     }
 
     const token = signAuthToken({
