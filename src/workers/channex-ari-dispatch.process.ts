@@ -19,6 +19,12 @@ import {
 
 export const CHANNEX_ARI_DISPATCH_DISABLED_KEEPALIVE_MS =
   24 * 60 * 60_000;
+export const CHANNEX_ARI_PRODUCTION_ORIGIN = "https://app.channex.io";
+
+export type ChannexAriDispatchProviderConfig = {
+  apiKey: string;
+  baseUrl: string;
+};
 
 export type ChannexAriDispatchProcessRuntime = {
   activation: ChannexAriDispatchActivation;
@@ -57,6 +63,53 @@ function publicErrorCode(error: unknown): string {
     : "CHANNEX_ARI_DISPATCH_PROCESS_FAILED";
 }
 
+function normalizedText(value: unknown): string {
+  return typeof value === "string" ? value.trim() : "";
+}
+
+export function resolveChannexAriDispatchProviderConfig(
+  env: NodeJS.ProcessEnv = process.env
+): ChannexAriDispatchProviderConfig {
+  const apiKey = normalizedText(env.OTA_CONNECTION_API_KEY);
+  if (!apiKey || apiKey.length > 4_096) {
+    throw new Error("CHANNEX_ARI_OTA_API_KEY_REQUIRED");
+  }
+
+  const configuredOrigin = normalizedText(
+    env.OTA_CONNECTION_PROVIDER_API_ORIGIN
+  );
+  let parsed: URL;
+
+  try {
+    parsed = new URL(configuredOrigin);
+  } catch {
+    throw new Error("CHANNEX_ARI_OTA_ORIGIN_INVALID");
+  }
+
+  if (
+    !["http:", "https:"].includes(parsed.protocol) ||
+    parsed.pathname !== "/" ||
+    parsed.username ||
+    parsed.password ||
+    parsed.search ||
+    parsed.hash
+  ) {
+    throw new Error("CHANNEX_ARI_OTA_ORIGIN_INVALID");
+  }
+
+  if (
+    normalizedText(env.NODE_ENV).toLowerCase() === "production" &&
+    parsed.origin !== CHANNEX_ARI_PRODUCTION_ORIGIN
+  ) {
+    throw new Error("CHANNEX_ARI_PRODUCTION_ORIGIN_REQUIRED");
+  }
+
+  return {
+    apiKey,
+    baseUrl: parsed.origin,
+  };
+}
+
 export function isChannexAriDispatchProcessEntrypoint(
   entrypoint = process.argv[1],
   moduleUrl = import.meta.url
@@ -80,6 +133,9 @@ export async function startChannexAriDispatchProcess(
   const clearIntervalFn = input.clearIntervalFn ?? clearInterval;
   const activation = resolveChannexAriDispatchActivation(env);
   const config = resolveChannexAriDispatchConfig(env);
+  const provider = activation.enabled
+    ? resolveChannexAriDispatchProviderConfig(env)
+    : null;
   let idleKeepAlive: NodeJS.Timeout | null = null;
   let stopped = false;
 
@@ -89,8 +145,8 @@ export async function startChannexAriDispatchProcess(
     activation,
     config,
     credentialsSecret: env.PMS_CREDENTIALS_SECRET,
-    globalApiKey: env.CHANNEX_API_KEY,
-    baseUrl: env.CHANNEX_API_BASE_URL,
+    globalApiKey: provider?.apiKey,
+    baseUrl: provider?.baseUrl,
     logger,
     setIntervalFn,
     clearIntervalFn,

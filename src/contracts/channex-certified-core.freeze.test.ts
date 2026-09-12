@@ -5,7 +5,7 @@ import path from "node:path";
 import test from "node:test";
 
 const CERTIFIED_CORE_SHA256 =
-  "085477095e14d087715407c3db7843e6b49a284e80f9a5a91a9a9a407148334b";
+  "816ab50a5cd35137a4bfe336c513de29f8b1fec08907e720f642ca281736787a";
 const CERTIFIED_CORE_FILE_COUNT = 116;
 
 function walk(directory: string): string[] {

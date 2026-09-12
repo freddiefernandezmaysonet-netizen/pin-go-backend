@@ -5,6 +5,7 @@ import { pathToFileURL } from "node:url";
 import {
   CHANNEX_ARI_DISPATCH_DISABLED_KEEPALIVE_MS,
   isChannexAriDispatchProcessEntrypoint,
+  resolveChannexAriDispatchProviderConfig,
   startChannexAriDispatchProcess,
 } from "./channex-ari-dispatch.process";
 import type { ChannexAriDispatchWorkerController } from "./channex-ari-dispatch.worker";
@@ -114,8 +115,8 @@ test("forwards explicit activation, bounded config and credentials without idle 
   const workerInputs: any[] = [];
   let processIntervalCalls = 0;
   const credentialsSecret = "private-credentials-secret";
-  const globalApiKey = "private-global-api-key";
-  const baseUrl = "https://staging.example.test";
+  const globalApiKey = "private-ota-connection-api-key";
+  const baseUrl = "https://staging.channex.io";
   const env = {
     CHANNEX_ARI_DISPATCH_ENABLED: "true",
     CHANNEX_ARI_DISPATCH_POLL_MS: "15000",
@@ -126,8 +127,8 @@ test("forwards explicit activation, bounded config and credentials without idle 
     CHANNEX_ARI_DISPATCH_COMPLETION_RESERVE_MS: "10000",
     CHANNEX_ARI_DISPATCH_JITTER_MS: "2500",
     PMS_CREDENTIALS_SECRET: credentialsSecret,
-    CHANNEX_API_KEY: globalApiKey,
-    CHANNEX_API_BASE_URL: baseUrl,
+    OTA_CONNECTION_API_KEY: globalApiKey,
+    OTA_CONNECTION_PROVIDER_API_ORIGIN: baseUrl,
   } as NodeJS.ProcessEnv;
   const before = { ...env };
 
@@ -170,6 +171,82 @@ test("forwards explicit activation, bounded config and credentials without idle 
   assert.equal(serializedRuntime.includes(credentialsSecret), false);
   assert.equal(serializedRuntime.includes(globalApiKey), false);
   assert.equal(serializedRuntime.includes(baseUrl), false);
+});
+
+test("production dispatch accepts only the canonical OTA credential and app origin", () => {
+  assert.deepEqual(
+    resolveChannexAriDispatchProviderConfig({
+      NODE_ENV: "production",
+      OTA_CONNECTION_API_KEY: " production-key ",
+      OTA_CONNECTION_PROVIDER_API_ORIGIN: "https://app.channex.io/",
+      CHANNEX_API_KEY: "legacy-key-must-be-ignored",
+      CHANNEX_API_BASE_URL: "https://staging.channex.io",
+    } as NodeJS.ProcessEnv),
+    {
+      apiKey: "production-key",
+      baseUrl: "https://app.channex.io",
+    }
+  );
+});
+
+test("active production dispatch fails before worker construction for legacy-only configuration", async () => {
+  let createCalls = 0;
+
+  await assert.rejects(
+    () =>
+      startChannexAriDispatchProcess({
+        db: {} as any,
+        disconnect: async () => undefined,
+        env: {
+          NODE_ENV: "production",
+          CHANNEX_ARI_DISPATCH_ENABLED: "true",
+          CHANNEX_API_KEY: "legacy-key",
+          CHANNEX_API_BASE_URL: "https://staging.channex.io",
+        } as NodeJS.ProcessEnv,
+        createWorker: ((() => {
+          createCalls += 1;
+          return createWorkerController().worker;
+        }) as unknown) as any,
+      }),
+    /CHANNEX_ARI_OTA_API_KEY_REQUIRED/
+  );
+
+  assert.equal(createCalls, 0);
+});
+
+test("active production dispatch rejects every non-canonical OTA origin before worker construction", async () => {
+  for (const origin of [
+    undefined,
+    "https://staging.channex.io",
+    "https://api.channex.io",
+    "https://app.channex.io/api/v1",
+    "https://app.channex.io?target=staging",
+  ]) {
+    let createCalls = 0;
+
+    await assert.rejects(
+      () =>
+        startChannexAriDispatchProcess({
+          db: {} as any,
+          disconnect: async () => undefined,
+          env: {
+            NODE_ENV: "production",
+            CHANNEX_ARI_DISPATCH_ENABLED: "true",
+            OTA_CONNECTION_API_KEY: "production-key",
+            OTA_CONNECTION_PROVIDER_API_ORIGIN: origin,
+          } as NodeJS.ProcessEnv,
+          createWorker: ((() => {
+            createCalls += 1;
+            return createWorkerController().worker;
+          }) as unknown) as any,
+        }),
+      origin === undefined || origin.includes("/api/") || origin.includes("?")
+        ? /CHANNEX_ARI_OTA_ORIGIN_INVALID/
+        : /CHANNEX_ARI_PRODUCTION_ORIGIN_REQUIRED/
+    );
+
+    assert.equal(createCalls, 0);
+  }
 });
 
 test("rejects invalid activation before constructing a worker", async () => {
