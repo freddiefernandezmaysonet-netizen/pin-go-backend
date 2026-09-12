@@ -33,7 +33,7 @@ export function assertFullSyncProductionChannexHost(
 ): void {
   if (normalizedText(env.NODE_ENV).toLowerCase() !== "production") return;
 
-  const configured = normalizedText(env.CHANNEX_API_BASE_URL);
+  const configured = normalizedText(env.OTA_CONNECTION_PROVIDER_API_ORIGIN);
   let parsed: URL;
 
   try {

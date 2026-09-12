@@ -42,13 +42,13 @@ test("production Full Sync accepts only app.channex.io", () => {
   assert.doesNotThrow(() =>
     assertFullSyncProductionChannexHost({
       NODE_ENV: "production",
-      CHANNEX_API_BASE_URL: "https://app.channex.io",
+      OTA_CONNECTION_PROVIDER_API_ORIGIN: "https://app.channex.io",
     })
   );
   assert.doesNotThrow(() =>
     assertFullSyncProductionChannexHost({
       NODE_ENV: "production",
-      CHANNEX_API_BASE_URL: "https://app.channex.io/",
+      OTA_CONNECTION_PROVIDER_API_ORIGIN: "https://app.channex.io/",
     })
   );
 });
@@ -65,7 +65,7 @@ test("production Full Sync rejects staging, missing, and non-canonical Channex h
       () =>
         assertFullSyncProductionChannexHost({
           NODE_ENV: "production",
-          CHANNEX_API_BASE_URL: value,
+          OTA_CONNECTION_PROVIDER_API_ORIGIN: value,
         }),
       /CHANNEX_ARI_PRODUCTION_HOST_INVALID/
     );
@@ -76,7 +76,7 @@ test("non-production Full Sync leaves environment selection to its explicit runt
   assert.doesNotThrow(() =>
     assertFullSyncProductionChannexHost({
       NODE_ENV: "test",
-      CHANNEX_API_BASE_URL: "https://staging.channex.io",
+      OTA_CONNECTION_PROVIDER_API_ORIGIN: "https://staging.channex.io",
     })
   );
 });
