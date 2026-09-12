@@ -24,12 +24,12 @@ export type ProvisioningSnapshot = {
 };
 
 export type OtaProvisioningRepository = {
-  adoptCertifiedPmsListingMapping(
+  alignPmsListingToReadyDistributionMapping(
     organizationId: string,
     propertyId: string,
     requestedByUserId: string,
     now: Date
-  ): Promise<"ADOPTED" | "ALREADY_ALIGNED">;
+  ): Promise<"ALIGNED" | "ALREADY_ALIGNED">;
   loadTenantSnapshot(organizationId: string, propertyId: string): Promise<ProvisioningSnapshot | null>;
   claimGroup(organizationId: string, groupId: string): Promise<boolean>;
   completeGroup(organizationId: string, groupId: string, externalGroupId: string, now: Date): Promise<void>;
@@ -108,14 +108,6 @@ export async function orchestrateOtaProvisioning(args: {
     requestKey: args.requestKey,
   });
 
-  const now = args.now ?? new Date();
-  await args.repository.adoptCertifiedPmsListingMapping(
-    args.organizationId,
-    args.propertyId,
-    args.requestedByUserId,
-    now
-  );
-
   const snapshot = await args.repository.loadTenantSnapshot(
     args.organizationId,
     args.propertyId
@@ -128,8 +120,15 @@ export async function orchestrateOtaProvisioning(args: {
     throw new OtaProvisioningError("OTA_DISTRIBUTION_TENANT_MISMATCH");
   }
   if (snapshot.groupStatus === "READY" && snapshot.propertyStatus === "READY") {
+    await args.repository.alignPmsListingToReadyDistributionMapping(
+      args.organizationId,
+      args.propertyId,
+      args.requestedByUserId,
+      args.now ?? new Date()
+    );
     return { provisioningStatus: "READY" };
   }
+  const now = args.now ?? new Date();
   if (
     snapshot.groupStatus === "FAILED" &&
     snapshot.groupLastErrorCode === "OTA_PROVIDER_RECONCILIATION_REQUIRED"

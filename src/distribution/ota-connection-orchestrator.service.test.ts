@@ -29,7 +29,7 @@ function setup(overrides: Partial<ProvisioningSnapshot> = {}) {
     ...overrides,
   };
   const repository: OtaProvisioningRepository = {
-    async adoptCertifiedPmsListingMapping() { calls.push("adopt-certified-mapping"); return "ALREADY_ALIGNED"; },
+    async alignPmsListingToReadyDistributionMapping() { calls.push("align-pms-mapping"); return "ALREADY_ALIGNED"; },
     async loadTenantSnapshot() { calls.push("load"); return snapshot; },
     async claimGroup() { calls.push("claim-group"); return true; },
     async completeGroup() { calls.push("complete-group"); },
@@ -67,7 +67,6 @@ test("orchestrator prepares logical state before ordered provisioning", async ()
   assert.deepEqual(result, { provisioningStatus: "READY" });
   assert.deepEqual(calls, [
     "prepare",
-    "adopt-certified-mapping",
     "load",
     "claim-group",
     "ensure-group",
@@ -103,7 +102,6 @@ test("a retry reuses persisted partial provisioning checkpoints", async () => {
   assert.equal(calls.includes("ensure-group"), false);
   assert.deepEqual(calls, [
     "prepare",
-    "adopt-certified-mapping",
     "load",
     "claim-property",
     "ensure-property",
@@ -130,7 +128,7 @@ test("tenant mismatch stops before provider calls", async () => {
     }),
     /OTA_DISTRIBUTION_TENANT_MISMATCH/
   );
-  assert.deepEqual(calls, ["prepare", "adopt-certified-mapping", "load"]);
+  assert.deepEqual(calls, ["prepare", "load"]);
 });
 
 test("ambiguous provider errors require reconciliation and are not automatically retried", async () => {
@@ -172,10 +170,10 @@ test("ambiguous provider errors require reconciliation and are not automatically
     }),
     /OTA_PROVIDER_RECONCILIATION_REQUIRED/
   );
-  assert.deepEqual(retry.calls, ["prepare", "adopt-certified-mapping", "load"]);
+  assert.deepEqual(retry.calls, ["prepare", "load"]);
 });
 
-test("an adopted certified mapping returns READY without any provider provisioning", async () => {
+test("a READY distribution mapping aligns PMS and returns without provider provisioning", async () => {
   const { calls, repository, provisioner } = setup({
     groupStatus: "READY",
     propertyStatus: "READY",
@@ -184,9 +182,9 @@ test("an adopted certified mapping returns READY without any provider provisioni
     externalPrimaryRoomTypeId: "certified-room",
     externalPrimaryRatePlanId: "certified-rate",
   });
-  repository.adoptCertifiedPmsListingMapping = async () => {
-    calls.push("adopt-certified-mapping");
-    return "ADOPTED";
+  repository.alignPmsListingToReadyDistributionMapping = async () => {
+    calls.push("align-pms-mapping");
+    return "ALIGNED";
   };
   const result = await orchestrateOtaProvisioning({
     repository,
@@ -196,8 +194,8 @@ test("an adopted certified mapping returns READY without any provider provisioni
     propertyId: "property-1",
     requestedByUserId: "user-1",
     provider: "AIRBNB",
-    requestKey: "adopt-certified-001",
+    requestKey: "align-pms-001",
   });
   assert.deepEqual(result, { provisioningStatus: "READY" });
-  assert.deepEqual(calls, ["prepare", "adopt-certified-mapping", "load"]);
+  assert.deepEqual(calls, ["prepare", "load", "align-pms-mapping"]);
 });

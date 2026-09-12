@@ -7,9 +7,9 @@ import type { OtaProvisioningRepository } from "./ota-connection-orchestrator.se
 function configuredComposition() {
   const calls: string[] = [];
   const repository: OtaProvisioningRepository = {
-    async adoptCertifiedPmsListingMapping() {
-      calls.push("adopt-certified-mapping");
-      return "ADOPTED";
+    async alignPmsListingToReadyDistributionMapping() {
+      calls.push("align-pms-mapping");
+      return "ALIGNED";
     },
     async loadTenantSnapshot() {
       calls.push("load");
@@ -108,7 +108,7 @@ test("adapter alone cannot activate incomplete currency or launch-origin configu
   });
 });
 
-test("configured composition adopts certified mapping without provider provisioning", async () => {
+test("configured composition aligns PMS to READY distribution without provider provisioning", async () => {
   const { actions, calls } = configuredComposition();
   assert.ok(actions.prepare);
   const result = await actions.prepare!({
@@ -121,8 +121,8 @@ test("configured composition adopts certified mapping without provider provision
   assert.deepEqual(result, { provisioningStatus: "READY" });
   assert.deepEqual(calls, [
     "logical-prepare",
-    "adopt-certified-mapping",
     "load",
+    "align-pms-mapping",
   ]);
 });
 
