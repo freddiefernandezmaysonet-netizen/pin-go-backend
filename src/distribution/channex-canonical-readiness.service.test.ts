@@ -5,7 +5,10 @@ import {
   CanonicalOtaReadinessServiceError,
   reconcileCanonicalOtaReadiness,
 } from "./channex-canonical-readiness.service.js";
-import { ChannexReadonlyTransportError } from "./channex-readonly.http-transport.js";
+import {
+  ChannexReadonlyTransportError,
+  createChannexReadonlyHttpTransport,
+} from "./channex-readonly.http-transport.js";
 import { calculateChannexAriCanonicalJsonIntegrity } from "../pms/outbound/channex-ari-canonical-json.policy.js";
 import {
   CHANNEX_ARI_FULL_SYNC_DAYS,
@@ -699,6 +702,10 @@ function fixture(options: FixtureOptions = {}) {
     },
     async listChannels(propertyId: string, channel?: string) {
       reads.channelCollection.push({ propertyId, channel });
+      // Model the case-sensitive adapter filter instead of accepting any name.
+      if (propertyId !== EXTERNAL_PROPERTY_ID || channel !== "AirBNB") {
+        return discoveryPayload("NOT_FOUND");
+      }
       if (options.channelTransportFailure?.phase === "COLLECTION") {
         throw new ChannexReadonlyTransportError(
           options.channelTransportFailure.code
@@ -788,6 +795,160 @@ function assertNoChannexReads(f: ReturnType<typeof fixture>) {
   assert.equal(f.reads.legacyRatePlanCollection, 0);
 }
 
+test("Airbnb discovery fixture distinguishes adapter code from display name and local code", async () => {
+  const f = fixture();
+  for (const channel of ["Airbnb", "ABB", "airbnb", undefined]) {
+    const payload = await f.transport.listChannels(EXTERNAL_PROPERTY_ID, channel);
+    assert.deepEqual(payload.data, []);
+  }
+  assert.deepEqual(
+    (await f.transport.listChannels(SECOND_CHANNEL_ID, "AirBNB")).data,
+    []
+  );
+  const payload = await f.transport.listChannels(EXTERNAL_PROPERTY_ID, "AirBNB");
+  assert.equal(payload.data.length, 1);
+  assert.equal(payload.data[0]!.attributes.channel, "Airbnb");
+});
+
+test("AirBNB filter reaches the read-only HTTP boundary and exact channel verification", async (t) => {
+  for (const externalConnectionId of [null, EXTERNAL_CHANNEL_ID]) {
+    await t.test(externalConnectionId ? "stored channel" : "discovered channel", async () => {
+      const f = fixture({ externalConnectionId });
+      const requests: URL[] = [];
+      const transport = createChannexReadonlyHttpTransport({
+        apiOrigin: "https://app.channex.io",
+        apiKey: "test-key-not-a-secret",
+        timeoutMs: 1000,
+        // All requests are intercepted here; this test never calls a provider.
+        fetchImpl: async (input, init) => {
+          const url = new URL(input instanceof Request ? input.url : String(input));
+          requests.push(url);
+          assert.equal(url.origin, "https://app.channex.io");
+          assert.equal(init?.method, "GET");
+          assert.equal(init?.redirect, "error");
+          let payload: unknown;
+          if (url.pathname === "/api/v1/channels") {
+            assert.equal(url.searchParams.get("filter[channel]"), "AirBNB");
+            assert.equal(url.searchParams.get("filter[property_id]"), EXTERNAL_PROPERTY_ID);
+            assert.equal(url.searchParams.get("pagination[page]"), "1");
+            assert.equal(url.searchParams.get("pagination[limit]"), "100");
+            const collection = await f.transport.listChannels(
+              url.searchParams.get("filter[property_id]")!,
+              url.searchParams.get("filter[channel]")!
+            );
+            payload = {
+              ...collection,
+              meta: { ...collection.meta, order_by: "inserted_at", order_direction: "asc" },
+            };
+          } else if (url.pathname === `/api/v1/channels/${EXTERNAL_CHANNEL_ID}`) {
+            payload = await f.transport.getChannel(EXTERNAL_CHANNEL_ID);
+          } else if (url.pathname === `/api/v1/properties/${EXTERNAL_PROPERTY_ID}`) {
+            payload = await f.transport.getProperty(EXTERNAL_PROPERTY_ID);
+          } else if (url.pathname === `/api/v1/room_types/${EXTERNAL_ROOM_TYPE_ID}`) {
+            payload = await f.transport.getRoomType(EXTERNAL_ROOM_TYPE_ID);
+          } else if (url.pathname === `/api/v1/rate_plans/${EXTERNAL_RATE_PLAN_ID}`) {
+            payload = await f.transport.getRatePlan(EXTERNAL_RATE_PLAN_ID);
+          } else {
+            assert.fail(`Unexpected mocked request: ${url.pathname}`);
+          }
+          return new Response(JSON.stringify(payload), {
+            status: 200,
+            headers: { "Content-Type": "application/json" },
+          });
+        },
+      });
+      const result = await reconcileCanonicalOtaReadiness({
+        client: f.client,
+        transport,
+        organizationId: ORGANIZATION_ID,
+        propertyId: PROPERTY_ID,
+        requestedByUserId: REQUESTED_BY_USER_ID,
+        provider: "AIRBNB",
+        requestKey: `http-filter-${externalConnectionId ?? "discovered"}`,
+        now: NOW,
+      });
+      assert.equal(requests.length, 5);
+      assert.equal(result.authorizationReadiness, "READY");
+      assert.equal(result.mappingReadiness, "READY");
+      assert.equal(result.distributionReadiness, "READY");
+      assert.deepEqual(f.reads.channel, [EXTERNAL_CHANNEL_ID]);
+      assert.equal(f.updates[0].data.status, "ACTIVE");
+      assert.equal(f.updates[0].data.externalChannelCode, "ABB");
+      assert.equal(f.updates[0].data.externalListingId, "airbnb-listing-1");
+      const metadata = f.audits[0].data.metadata;
+      assert.equal(metadata.channelDiscoveryOutcome, "FOUND");
+      assert.equal(metadata.channelCandidateCount, 1);
+      assert.equal(metadata.channelVerification.identityVerified, true);
+      assert.equal(metadata.channelVerification.mappingVerified, true);
+      assert.equal(metadata.fullSyncEvidence.qualified, true);
+      assert.equal(metadata.fullSyncEvidence.otaAcceptanceVerified, false);
+    });
+  }
+});
+
+test("an incorrectly forwarded Airbnb display-name filter remains fail-closed", async () => {
+  const f = fixture();
+  const listChannels = f.transport.listChannels.bind(f.transport);
+  f.transport.listChannels = (propertyId) => listChannels(propertyId, "Airbnb");
+  const result = await reconcile(f, "reconcile-wrong-filter-regression");
+  assert.ok(result.reasons.includes("CHANNEL_DISCOVERY_NOT_FOUND"));
+  assert.equal(result.authorizationReadiness, "IN_PROGRESS");
+  assert.equal(result.mappingReadiness, "IN_PROGRESS");
+  assert.equal(result.distributionReadiness, "IN_PROGRESS");
+  assert.deepEqual(f.reads.channel, []);
+  assert.notEqual(f.updates[0].data.status, "ACTIVE");
+  assert.equal(f.updates[0].data.externalConnectionId, EXTERNAL_CHANNEL_ID);
+  assert.equal(f.updates[0].data.lastErrorCode, "CHANNEL_DISCOVERY_NOT_FOUND");
+});
+
+test("Booking canonical discovery retains BookingCom filter and BDC local code", async () => {
+  const f = fixture();
+  const bookingChannel = channelPayload();
+  bookingChannel.data.attributes.channel = "BookingCom";
+  const result = await reconcileCanonicalOtaReadiness({
+    client: {
+      ...f.client,
+      otaChannelConnection: {
+        async findFirst() {
+          return {
+            ...await f.client.otaChannelConnection.findFirst(),
+            provider: "BOOKING_COM" as const,
+            externalChannelCode: "BDC",
+          };
+        },
+      },
+    },
+    transport: {
+      ...f.transport,
+      async listChannels(propertyId, channel) {
+        assert.equal(propertyId, EXTERNAL_PROPERTY_ID);
+        assert.equal(channel, "BookingCom");
+        f.reads.channelCollection.push({ propertyId, channel });
+        return { data: [bookingChannel.data], meta: { page: 1, limit: 100, total: 1 } };
+      },
+      async getChannel(id) {
+        assert.equal(id, EXTERNAL_CHANNEL_ID);
+        f.reads.channel.push(id);
+        return bookingChannel;
+      },
+    },
+    organizationId: ORGANIZATION_ID,
+    propertyId: PROPERTY_ID,
+    requestedByUserId: REQUESTED_BY_USER_ID,
+    provider: "BOOKING_COM",
+    requestKey: "reconcile-booking-filter-unchanged",
+    now: NOW,
+  });
+  assert.equal(result.authorizationReadiness, "READY");
+  assert.equal(result.mappingReadiness, "READY");
+  assert.deepEqual(f.reads.channelCollection, [
+    { propertyId: EXTERNAL_PROPERTY_ID, channel: "BookingCom" },
+  ]);
+  assert.deepEqual(f.reads.channel, [EXTERNAL_CHANNEL_ID]);
+  assert.equal(f.updates[0].data.externalChannelCode, "BDC");
+  assert.equal(f.audits[0].data.metadata.channelVerification.providerVerified, true);
+});
+
 test("persists ACTIVE only from exact channel, mapping, lifecycle, and post-lifecycle full-sync evidence", async () => {
   const f = fixture();
   const result = await reconcile(f, "reconcile-exact-ready-001");
@@ -809,7 +970,7 @@ test("persists ACTIVE only from exact channel, mapping, lifecycle, and post-life
   assert.deepEqual(f.reads.ratePlan, [EXTERNAL_RATE_PLAN_ID]);
   assert.deepEqual(f.reads.channel, [EXTERNAL_CHANNEL_ID]);
   assert.deepEqual(f.reads.channelCollection, [
-    { propertyId: EXTERNAL_PROPERTY_ID, channel: "Airbnb" },
+    { propertyId: EXTERNAL_PROPERTY_ID, channel: "AirBNB" },
   ]);
   assert.equal(f.reads.legacyRoomTypeCollection, 0);
   assert.equal(f.reads.legacyRatePlanCollection, 0);
@@ -954,7 +1115,7 @@ test("discovers one unique Airbnb channel and binds it only after exact GET veri
   await reconcile(f, "reconcile-discovery-unique-001");
 
   assert.deepEqual(f.reads.channelCollection, [
-    { propertyId: EXTERNAL_PROPERTY_ID, channel: "Airbnb" },
+    { propertyId: EXTERNAL_PROPERTY_ID, channel: "AirBNB" },
   ]);
   assert.deepEqual(f.reads.channel, [EXTERNAL_CHANNEL_ID]);
   assert.equal(f.updates[0].where.externalConnectionId, null);
