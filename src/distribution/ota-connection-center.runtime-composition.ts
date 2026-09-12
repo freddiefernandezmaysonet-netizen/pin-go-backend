@@ -16,6 +16,11 @@ import {
 } from "./airbnb-host-self-service.listings.service.js";
 import { createAirbnbListingDiscoveryHttpTransport } from "./airbnb-host-self-service.listings.http-transport.js";
 import {
+  confirmAirbnbHostMapping,
+  type AirbnbHostConfirmedMappingClient,
+} from "./airbnb-host-confirmed-mapping.service.js";
+import { createAirbnbHostConfirmedMappingHttpTransport } from "./airbnb-host-confirmed-mapping.http-transport.js";
+import {
   captureAirbnbCallbackPersistenceGuard,
   verifyAndPersistAirbnbHostCallback,
 } from "./airbnb-host-self-service.callback-persistence.js";
@@ -143,6 +148,23 @@ function adaptPrismaAirbnbListingDiscoveryClient(
   };
 }
 
+function adaptPrismaAirbnbHostConfirmedMappingClient(
+  prisma: PrismaClient
+): AirbnbHostConfirmedMappingClient {
+  return {
+    distributionProperty: {
+      async findFirst(query) {
+        return await prisma.distributionProperty.findFirst(query as any) as any;
+      },
+    },
+    otaChannelConnection: {
+      async findFirst(query) {
+        return await prisma.otaChannelConnection.findFirst(query as any) as any;
+      },
+    },
+  };
+}
+
 function deriveAirbnbStateSecret(jwtSecret: string | undefined): string | null {
   const source = String(jwtSecret ?? "").trim();
   if (source.length < 32 || source.length > 4096) return null;
@@ -208,6 +230,12 @@ export function buildRuntimeOtaConnectionCenterComposition(args: {
     timeoutMs: config.provider.timeoutMs,
     fetchImpl: args.fetchImpl,
   });
+  const airbnbMappingTransport = createAirbnbHostConfirmedMappingHttpTransport({
+    apiOrigin: config.provider.apiOrigin,
+    apiKey: config.provider.apiKey,
+    timeoutMs: config.provider.timeoutMs,
+    fetchImpl: args.fetchImpl,
+  });
   const adapter = new ChannexWhiteLabelAdapter({
     enabled: true,
     apiKey: config.provider.apiKey,
@@ -220,6 +248,7 @@ export function buildRuntimeOtaConnectionCenterComposition(args: {
   );
   const airbnbClient = adaptPrismaAirbnbHostSelfServiceClient(args.prisma);
   const airbnbListingClient = adaptPrismaAirbnbListingDiscoveryClient(args.prisma);
+  const airbnbMappingClient = adaptPrismaAirbnbHostConfirmedMappingClient(args.prisma);
   const airbnbStateSecret = deriveAirbnbStateSecret(args.env.JWT_SECRET);
   const airbnbCallbackAllowed = args.trustedMutationOrigins.some(
     (origin) => String(origin).trim() === AIRBNB_CALLBACK_ORIGIN
@@ -240,6 +269,17 @@ export function buildRuntimeOtaConnectionCenterComposition(args: {
       return readonlyTransport.getChannel(channelId);
     },
   };
+
+  const discoverListings = (input: {
+    organizationId: string;
+    propertyId: string;
+  }) =>
+    discoverAirbnbListings({
+      client: airbnbListingClient,
+      transport: airbnbListingTransport,
+      organizationId: input.organizationId,
+      propertyId: input.propertyId,
+    });
 
   const actions = buildOtaConnectionCenterComposition({
     prisma: args.prisma,
@@ -274,12 +314,22 @@ export function buildRuntimeOtaConnectionCenterComposition(args: {
             propertyId,
             requestedByUserId,
           }),
-        listListings: ({ organizationId, propertyId }) =>
-          discoverAirbnbListings({
-            client: airbnbListingClient,
-            transport: airbnbListingTransport,
+        listListings: discoverListings,
+        confirmMapping: ({
+          organizationId,
+          propertyId,
+          listingId,
+          confirmation,
+        }) =>
+          confirmAirbnbHostMapping({
+            client: airbnbMappingClient,
+            readonlyTransport,
+            mappingTransport: airbnbMappingTransport,
+            discoverListings,
             organizationId,
             propertyId,
+            listingId,
+            confirmation,
           }),
         verifyCallback: async ({
           organizationId,

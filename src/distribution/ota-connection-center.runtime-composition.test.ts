@@ -39,7 +39,7 @@ test("runtime composition remains inert by default and when incomplete", () => {
   assert.equal(fetchCalls, 0);
 });
 
-test("complete configuration composes Airbnb self-service without eager requests", () => {
+test("complete configuration composes Airbnb self-service and mapping without eager requests", () => {
   let fetchCalls = 0;
   const actions = buildRuntimeOtaConnectionCenterComposition({
     prisma: {} as any,
@@ -57,6 +57,7 @@ test("complete configuration composes Airbnb self-service without eager requests
   assert.equal(actions.airbnbHostSelfService?.enabled, true);
   assert.equal(typeof actions.airbnbHostSelfService?.issueConnectionLink, "function");
   assert.equal(typeof actions.airbnbHostSelfService?.listListings, "function");
+  assert.equal(typeof actions.airbnbHostSelfService?.confirmMapping, "function");
   assert.equal(typeof actions.airbnbHostSelfService?.verifyCallback, "function");
   assert.equal(fetchCalls, 0);
 });
