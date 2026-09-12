@@ -131,7 +131,6 @@ export function buildDashboardDistributionConnectionCenterRouter(
   for (const legacyMutationPath of [
     "/api/dashboard/properties/:propertyId/distribution/enable",
     "/api/dashboard/properties/:propertyId/channex/provision",
-    "/api/dashboard/properties/:propertyId/channex/sync-availability",
   ]) {
     router.post(legacyMutationPath, requireAuth, (_req, res) =>
       res.status(409).json({
