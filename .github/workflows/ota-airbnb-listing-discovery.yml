@@ -56,14 +56,25 @@ jobs:
           git fetch origin main --depth=1
           git diff --name-only origin/main...HEAD | sort > "$RUNNER_TEMP/actual.txt"
           cat > "$RUNNER_TEMP/allowed.txt" <<'EOF'
+          .github/workflows/ota-airbnb-host-confirmed-mapping.yml
           .github/workflows/ota-airbnb-listing-discovery.yml
+          prisma/migrations/20260911153000_add_property_postal_code/migration.sql
           prisma/schema.prisma
+          src/distribution/airbnb-host-confirmed-mapping.http-transport.test.ts
+          src/distribution/airbnb-host-confirmed-mapping.http-transport.ts
+          src/distribution/airbnb-host-confirmed-mapping.service.test.ts
+          src/distribution/airbnb-host-confirmed-mapping.service.ts
           src/distribution/airbnb-host-self-service.listings.http-transport.ts
           src/distribution/airbnb-host-self-service.listings.service.test.ts
           src/distribution/airbnb-host-self-service.listings.service.ts
           src/distribution/airbnb-property-auto-matching.test.ts
           src/distribution/airbnb-property-auto-matching.ts
           src/distribution/channex-airbnb-listings.transport.test.ts
+          src/distribution/ota-connection-center.runtime-composition.test.ts
+          src/distribution/ota-connection-center.runtime-composition.ts
+          src/routes/dashboard.airbnb-host-self-service.listings.route.test.ts
+          src/routes/dashboard.airbnb-host-self-service.mapping.route.test.ts
+          src/routes/dashboard.airbnb-host-self-service.route.ts
           src/routes/dashboard.properties.route.ts
           src/routes/properties.route.ts
           EOF
@@ -71,7 +82,7 @@ jobs:
           test -s "$RUNNER_TEMP/actual.txt"
           while IFS= read -r file; do
             grep -Fqx "$file" "$RUNNER_TEMP/allowed.txt" || {
-              echo "Unexpected file outside Airbnb V1.1 certification allowlist: $file" >&2
+              echo "Unexpected file outside coordinated Airbnb certification allowlist: $file" >&2
               exit 1
             }
           done < "$RUNNER_TEMP/actual.txt"
