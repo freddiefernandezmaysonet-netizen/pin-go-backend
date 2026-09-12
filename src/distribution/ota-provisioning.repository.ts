@@ -14,6 +14,7 @@ type ProvisioningPrismaClient = {
   };
   pmsListing: {
     findMany(args: any): Promise<any[]>;
+    updateMany(args: any): Promise<{ count: number }>;
   };
   apmsAuditEntry: {
     create(args: any): Promise<any>;
@@ -73,12 +74,12 @@ export class PrismaOtaProvisioningRepository implements OtaProvisioningRepositor
     this.currency = requireCurrency(defaultCurrency);
   }
 
-  async adoptCertifiedPmsListingMapping(
+  async alignPmsListingToReadyDistributionMapping(
     organizationId: string,
     propertyId: string,
     requestedByUserId: string,
     now: Date
-  ): Promise<"ADOPTED" | "ALREADY_ALIGNED"> {
+  ): Promise<"ALIGNED" | "ALREADY_ALIGNED"> {
     return this.client.$transaction(async (tx) => {
       const distributionProperty = await tx.distributionProperty.findFirst({
         where: { organizationId, propertyId, platform: "CHANNEX" },
@@ -135,6 +136,25 @@ export class PrismaOtaProvisioningRepository implements OtaProvisioningRepositor
           "OTA_CERTIFIED_MAPPING_GROUP_NOT_READY"
         );
       }
+      if (distributionProperty.provisioningStatus !== "READY") {
+        throw new OtaProvisioningRepositoryError(
+          "OTA_DISTRIBUTION_MAPPING_NOT_READY"
+        );
+      }
+      const canonicalInventory = {
+        externalPropertyId: requireText(
+          distributionProperty.externalPropertyId,
+          "OTA_DISTRIBUTION_PROPERTY_ID_REQUIRED"
+        ),
+        externalPrimaryRoomTypeId: requireText(
+          distributionProperty.externalPrimaryRoomTypeId,
+          "OTA_DISTRIBUTION_ROOM_TYPE_ID_REQUIRED"
+        ),
+        externalPrimaryRatePlanId: requireText(
+          distributionProperty.externalPrimaryRatePlanId,
+          "OTA_DISTRIBUTION_RATE_PLAN_ID_REQUIRED"
+        ),
+      };
 
       const listings = await tx.pmsListing.findMany({
         where: { propertyId, connection: { provider: "CHANNEX" } },
@@ -185,70 +205,58 @@ export class PrismaOtaProvisioningRepository implements OtaProvisioningRepositor
           "OTA_CERTIFIED_PMS_LISTING_PROVIDER_INVALID"
         );
       }
-      const certifiedInventory = {
-        externalPropertyId: requireText(
-          metadata.channexPropertyId,
-          "OTA_CERTIFIED_CHANNEX_PROPERTY_ID_REQUIRED"
-        ),
-        externalPrimaryRoomTypeId: requireText(
-          listing.externalListingId,
-          "OTA_CERTIFIED_CHANNEX_ROOM_TYPE_ID_REQUIRED"
-        ),
-        externalPrimaryRatePlanId: requireText(
-          metadata.channexRatePlanId,
-          "OTA_CERTIFIED_CHANNEX_RATE_PLAN_ID_REQUIRED"
-        ),
-      };
       const alreadyAligned =
-        distributionProperty.provisioningStatus === "READY" &&
-        distributionProperty.externalPropertyId ===
-          certifiedInventory.externalPropertyId &&
-        distributionProperty.externalPrimaryRoomTypeId ===
-          certifiedInventory.externalPrimaryRoomTypeId &&
-        distributionProperty.externalPrimaryRatePlanId ===
-          certifiedInventory.externalPrimaryRatePlanId;
+        listing.externalListingId ===
+          canonicalInventory.externalPrimaryRoomTypeId &&
+        metadata.channexPropertyId === canonicalInventory.externalPropertyId &&
+        metadata.channexRatePlanId ===
+          canonicalInventory.externalPrimaryRatePlanId;
       if (alreadyAligned) return "ALREADY_ALIGNED";
 
       requireUpdate(
-        await tx.distributionProperty.updateMany({
+        await tx.pmsListing.updateMany({
           where: {
-            id: distributionProperty.id,
-            organizationId,
+            id: listing.id,
+            connectionId: listing.connectionId,
             propertyId,
-            platform: "CHANNEX",
-            provisioningStatus: distributionProperty.provisioningStatus,
-            externalPropertyId: distributionProperty.externalPropertyId,
-            externalPrimaryRoomTypeId:
-              distributionProperty.externalPrimaryRoomTypeId,
-            externalPrimaryRatePlanId:
-              distributionProperty.externalPrimaryRatePlanId,
-            updatedAt: distributionProperty.updatedAt,
+            externalListingId: listing.externalListingId,
+            updatedAt: listing.updatedAt,
+            connection: {
+              organizationId,
+              provider: "CHANNEX",
+              status: "ACTIVE",
+            },
           },
           data: {
-            ...certifiedInventory,
-            provisioningStatus: "READY",
-            verifiedAt: now,
-            lastErrorCode: null,
-            lastErrorSummary: null,
+            externalListingId:
+              canonicalInventory.externalPrimaryRoomTypeId,
+            metadata: {
+              ...metadata,
+              provider: "CHANNEX",
+              channexPropertyId: canonicalInventory.externalPropertyId,
+              channexRatePlanId:
+                canonicalInventory.externalPrimaryRatePlanId,
+            },
           },
         }),
-        "OTA_CERTIFIED_MAPPING_ADOPTION_CONFLICT"
+        "OTA_PMS_MAPPING_ALIGNMENT_CONFLICT"
       );
       await tx.apmsAuditEntry.create({
         data: {
           organizationId,
           propertyId,
-          entityType: "DISTRIBUTION",
-          entityId: distributionProperty.id,
+          entityType: "PMS_LISTING",
+          entityId: listing.id,
           engine: "OTA_DISTRIBUTION",
-          eventType: "CERTIFIED_PMS_MAPPING_ADOPTED",
+          eventType: "PMS_LISTING_ALIGNED_TO_DISTRIBUTION_MAPPING",
           status: "SUCCESS",
           severity: "INFO",
+          completedAt: now,
           decisionId:
-            `ota-certified-mapping-adoption:v1:${distributionProperty.id}:` +
-            `${listing.id}:${distributionProperty.updatedAt.toISOString()}`,
-          summary: "Connection Center adopted the certified Channex PMS mapping",
-          reason: "CERTIFIED_PMS_LISTING_IS_SOURCE_OF_TRUTH",
+            `ota-pms-mapping-alignment:v1:${distributionProperty.id}:` +
+            `${listing.id}:${listing.updatedAt.toISOString()}`,
+          summary: "Connection Center aligned the PMS listing to the ready distribution mapping",
+          reason: "READY_DISTRIBUTION_MAPPING_IS_SOURCE_OF_TRUTH",
           metadata: {
             requestedByUserId: requireText(
               requestedByUserId,
@@ -257,17 +265,15 @@ export class PrismaOtaProvisioningRepository implements OtaProvisioningRepositor
             pmsConnectionId: listing.connectionId,
             pmsListingId: listing.id,
             previous: {
-              externalPropertyId: distributionProperty.externalPropertyId,
-              externalPrimaryRoomTypeId:
-                distributionProperty.externalPrimaryRoomTypeId,
-              externalPrimaryRatePlanId:
-                distributionProperty.externalPrimaryRatePlanId,
+              externalPropertyId: metadata.channexPropertyId ?? null,
+              externalPrimaryRoomTypeId: listing.externalListingId,
+              externalPrimaryRatePlanId: metadata.channexRatePlanId ?? null,
             },
-            certified: certifiedInventory,
+            canonical: canonicalInventory,
           },
         },
       });
-      return "ADOPTED";
+      return "ALIGNED";
     }, { isolationLevel: "Serializable" });
   }
 

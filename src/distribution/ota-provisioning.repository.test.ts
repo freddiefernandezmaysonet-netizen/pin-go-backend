@@ -10,6 +10,7 @@ function setup(record?: any, pmsListings: any[] = []) {
   const reads: any[] = [];
   const groupUpdates: any[] = [];
   const propertyUpdates: any[] = [];
+  const pmsUpdates: any[] = [];
   const audits: any[] = [];
   const client = {
     distributionProperty: {
@@ -21,6 +22,7 @@ function setup(record?: any, pmsListings: any[] = []) {
     },
     pmsListing: {
       async findMany() { return pmsListings; },
+      async updateMany(args: any) { pmsUpdates.push(args); return { count: 1 }; },
     },
     apmsAuditEntry: {
       async create(args: any) { audits.push(args); return { id: "audit-1" }; },
@@ -32,6 +34,7 @@ function setup(record?: any, pmsListings: any[] = []) {
     reads,
     groupUpdates,
     propertyUpdates,
+    pmsUpdates,
     audits,
   };
 }
@@ -64,7 +67,7 @@ const record = {
   },
 };
 
-const certifiedListing = {
+const legacyListing = {
   id: "listing-1",
   connectionId: "pms-connection-1",
   propertyId: "property-1",
@@ -130,44 +133,77 @@ test("invalid currency is rejected before database access", () => {
   );
 });
 
-test("adopts the unique certified PMS mapping into DistributionProperty without changing PmsListing", async () => {
-  const { repository, propertyUpdates, audits } = setup(record, [certifiedListing]);
-  const result = await repository.adoptCertifiedPmsListingMapping(
+const readyDistributionRecord = {
+  ...record,
+  provisioningStatus: "READY",
+  externalPropertyId: "canonical-property",
+  externalPrimaryRoomTypeId: "canonical-room",
+  externalPrimaryRatePlanId: "canonical-rate",
+};
+
+test("aligns the unique PMS listing to the READY DistributionProperty without changing distribution", async () => {
+  const { repository, propertyUpdates, pmsUpdates, audits } = setup(
+    readyDistributionRecord,
+    [legacyListing]
+  );
+  const result = await repository.alignPmsListingToReadyDistributionMapping(
     "org-1",
     "property-1",
     "user-1",
     new Date("2026-09-12T13:00:00.000Z")
   );
-  assert.equal(result, "ADOPTED");
-  assert.deepEqual(propertyUpdates[0].data, {
-    externalPropertyId: "certified-property",
-    externalPrimaryRoomTypeId: "certified-room",
-    externalPrimaryRatePlanId: "certified-rate",
-    provisioningStatus: "READY",
-    verifiedAt: new Date("2026-09-12T13:00:00.000Z"),
-    lastErrorCode: null,
-    lastErrorSummary: null,
+  assert.equal(result, "ALIGNED");
+  assert.equal(propertyUpdates.length, 0);
+  assert.deepEqual(pmsUpdates[0].where, {
+    id: "listing-1",
+    connectionId: "pms-connection-1",
+    propertyId: "property-1",
+    externalListingId: "certified-room",
+    updatedAt: new Date("2026-08-20T12:00:00.000Z"),
+    connection: {
+      organizationId: "org-1",
+      provider: "CHANNEX",
+      status: "ACTIVE",
+    },
+  });
+  assert.deepEqual(pmsUpdates[0].data, {
+    externalListingId: "canonical-room",
+    metadata: {
+      provider: "CHANNEX",
+      channexPropertyId: "canonical-property",
+      channexRatePlanId: "canonical-rate",
+      preserved: "unchanged",
+    },
   });
   assert.equal(audits.length, 1);
-  assert.equal(audits[0].data.eventType, "CERTIFIED_PMS_MAPPING_ADOPTED");
-  assert.deepEqual(audits[0].data.metadata.certified, {
-    externalPropertyId: "certified-property",
-    externalPrimaryRoomTypeId: "certified-room",
-    externalPrimaryRatePlanId: "certified-rate",
+  assert.equal(
+    audits[0].data.eventType,
+    "PMS_LISTING_ALIGNED_TO_DISTRIBUTION_MAPPING"
+  );
+  assert.equal(audits[0].data.completedAt.toISOString(), "2026-09-12T13:00:00.000Z");
+  assert.deepEqual(audits[0].data.metadata.canonical, {
+    externalPropertyId: "canonical-property",
+    externalPrimaryRoomTypeId: "canonical-room",
+    externalPrimaryRatePlanId: "canonical-rate",
   });
 });
 
-test("an already aligned certified mapping is idempotent", async () => {
-  const aligned = {
-    ...record,
-    provisioningStatus: "READY",
-    externalPropertyId: "certified-property",
-    externalPrimaryRoomTypeId: "certified-room",
-    externalPrimaryRatePlanId: "certified-rate",
+test("an already aligned PMS mapping is idempotent", async () => {
+  const alignedListing = {
+    ...legacyListing,
+    externalListingId: "canonical-room",
+    metadata: {
+      ...legacyListing.metadata,
+      channexPropertyId: "canonical-property",
+      channexRatePlanId: "canonical-rate",
+    },
   };
-  const { repository, propertyUpdates, audits } = setup(aligned, [certifiedListing]);
+  const { repository, propertyUpdates, pmsUpdates, audits } = setup(
+    readyDistributionRecord,
+    [alignedListing]
+  );
   assert.equal(
-    await repository.adoptCertifiedPmsListingMapping(
+    await repository.alignPmsListingToReadyDistributionMapping(
       "org-1",
       "property-1",
       "user-1",
@@ -176,26 +212,48 @@ test("an already aligned certified mapping is idempotent", async () => {
     "ALREADY_ALIGNED"
   );
   assert.equal(propertyUpdates.length, 0);
+  assert.equal(pmsUpdates.length, 0);
   assert.equal(audits.length, 0);
 });
 
-test("certified mapping adoption fails closed for zero, multiple, foreign-tenant, and invalid metadata listings", async (t) => {
+test("PMS alignment fails closed for zero, multiple, foreign-tenant, and invalid metadata listings", async (t) => {
   const scenarios = [
     { name: "zero", listings: [], code: "OTA_CERTIFIED_PMS_LISTING_CARDINALITY_INVALID" },
-    { name: "multiple", listings: [certifiedListing, { ...certifiedListing, id: "listing-2" }], code: "OTA_CERTIFIED_PMS_LISTING_CARDINALITY_INVALID" },
-    { name: "foreign tenant", listings: [{ ...certifiedListing, connection: { ...certifiedListing.connection, organizationId: "org-2" } }], code: "OTA_DISTRIBUTION_TENANT_MISMATCH" },
-    { name: "invalid metadata", listings: [{ ...certifiedListing, metadata: [] }], code: "OTA_CERTIFIED_PMS_LISTING_METADATA_INVALID" },
+    { name: "multiple", listings: [legacyListing, { ...legacyListing, id: "listing-2" }], code: "OTA_CERTIFIED_PMS_LISTING_CARDINALITY_INVALID" },
+    { name: "foreign tenant", listings: [{ ...legacyListing, connection: { ...legacyListing.connection, organizationId: "org-2" } }], code: "OTA_DISTRIBUTION_TENANT_MISMATCH" },
+    { name: "invalid metadata", listings: [{ ...legacyListing, metadata: [] }], code: "OTA_CERTIFIED_PMS_LISTING_METADATA_INVALID" },
   ];
   for (const scenario of scenarios) {
     await t.test(scenario.name, async () => {
-      const { repository, propertyUpdates, audits } = setup(record, scenario.listings);
+      const { repository, propertyUpdates, pmsUpdates, audits } = setup(
+        readyDistributionRecord,
+        scenario.listings
+      );
       await assert.rejects(
-        repository.adoptCertifiedPmsListingMapping("org-1", "property-1", "user-1", new Date()),
+        repository.alignPmsListingToReadyDistributionMapping("org-1", "property-1", "user-1", new Date()),
         (error: unknown) =>
           error instanceof OtaProvisioningRepositoryError && error.code === scenario.code
       );
       assert.equal(propertyUpdates.length, 0);
+      assert.equal(pmsUpdates.length, 0);
       assert.equal(audits.length, 0);
     });
   }
+});
+
+test("PMS alignment rejects a non-ready distribution mapping before any listing write", async () => {
+  const { repository, pmsUpdates, audits } = setup(record, [legacyListing]);
+  await assert.rejects(
+    repository.alignPmsListingToReadyDistributionMapping(
+      "org-1",
+      "property-1",
+      "user-1",
+      new Date()
+    ),
+    (error: unknown) =>
+      error instanceof OtaProvisioningRepositoryError &&
+      error.code === "OTA_DISTRIBUTION_MAPPING_NOT_READY"
+  );
+  assert.equal(pmsUpdates.length, 0);
+  assert.equal(audits.length, 0);
 });
