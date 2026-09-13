@@ -78,6 +78,7 @@ test("orchestrator prepares logical state before ordered provisioning", async ()
     "checkpoint-room",
     "ensure-rate",
     "complete-property",
+    "align-pms-mapping",
   ]);
 });
 
@@ -110,6 +111,7 @@ test("a retry reuses persisted partial provisioning checkpoints", async () => {
     "checkpoint-room",
     "ensure-rate",
     "complete-property",
+    "align-pms-mapping",
   ]);
 });
 
@@ -182,7 +184,12 @@ test("a READY distribution mapping aligns PMS and returns without provider provi
     externalPrimaryRoomTypeId: "certified-room",
     externalPrimaryRatePlanId: "certified-rate",
   });
-  repository.alignPmsListingToReadyDistributionMapping = async () => {
+  repository.alignPmsListingToReadyDistributionMapping = async (orgId, propertyId, actorId, now, options) => {
+    assert.equal(orgId, "org-1");
+    assert.equal(propertyId, "property-1");
+    assert.equal(actorId, "user-1");
+    assert.ok(now instanceof Date);
+    assert.deepEqual(options, { createIfMissing: true });
     calls.push("align-pms-mapping");
     return "ALIGNED";
   };
