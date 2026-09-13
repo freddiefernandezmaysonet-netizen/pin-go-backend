@@ -51,3 +51,29 @@ test("complete staging configuration normalizes only non-secret values", () => {
     BOOKING_COM: "booking-explicit-filter",
   });
 });
+
+test("production accepts only app.channex.io for API and iframe", () => {
+  assert.deepEqual(
+    resolveOtaConnectionCenterConfig({
+      ...complete,
+      NODE_ENV: "production",
+    }),
+    { enabled: false, reason: "CONFIGURATION_INCOMPLETE" }
+  );
+
+  const config = resolveOtaConnectionCenterConfig({
+    ...complete,
+    NODE_ENV: "production",
+    OTA_CONNECTION_PROVIDER_API_ORIGIN: "https://app.channex.io",
+    OTA_CONNECTION_API_KEY: "ota-production-key",
+    OTA_CONNECTION_IFRAME_BASE_URL: "https://app.channex.io/channels",
+    CHANNEX_API_KEY: "legacy-key-must-be-ignored",
+    CHANNEX_API_BASE_URL: "https://staging.channex.io",
+  });
+
+  assert.equal(config.enabled, true);
+  if (!config.enabled) return;
+  assert.equal(config.provider.apiOrigin, "https://app.channex.io");
+  assert.equal(config.provider.apiKey, "ota-production-key");
+  assert.equal(config.provider.iframeBaseUrl, "https://app.channex.io/channels");
+});

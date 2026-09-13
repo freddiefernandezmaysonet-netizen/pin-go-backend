@@ -6,6 +6,10 @@ import {
   assertPayloadWithinLimit,
   type ChannexAriMessageKind,
 } from "./channex-ari-lifecycle.policy";
+import {
+  isProductionRuntime,
+  resolveChannexRuntimeTransport,
+} from "../../lib/channex-runtime-transport.policy.js";
 
 export const CHANNEX_ARI_HTTP_DEFAULT_BASE_URL = "https://staging.channex.io";
 export const CHANNEX_ARI_HTTP_DEFAULT_TIMEOUT_MS = 15_000;
@@ -500,9 +504,16 @@ export async function sendChannexAriHttpRequest(
   input: SendChannexAriHttpRequestInput
 ): Promise<SendChannexAriHttpRequestResult> {
   const endpoint = endpointForMessageKind(input.messageKind);
-  const baseUrl = normalizeBaseUrl(input.baseUrl);
+  const production = isProductionRuntime();
+  const runtimeTransport = resolveChannexRuntimeTransport({
+    nonProductionApiKey: production ? null : requireApiKey(input.apiKey),
+    nonProductionApiOrigin: production ? null : normalizeBaseUrl(input.baseUrl),
+    nonProductionMissingApiKeyError: "CHANNEX_ARI_HTTP_API_KEY_REQUIRED",
+    nonProductionInvalidOriginError: "CHANNEX_ARI_HTTP_BASE_URL_INVALID",
+  });
+  const baseUrl = runtimeTransport.apiOrigin;
   const timeoutMs = normalizeTimeoutMs(input.timeoutMs);
-  const apiKey = requireApiKey(input.apiKey);
+  const apiKey = runtimeTransport.apiKey;
   const payloadBytes = assertPayloadShape(input.payload);
   const receivedAt = normalizeReceivedAt(input.receivedAt);
   const url = `${baseUrl}${endpoint}`;

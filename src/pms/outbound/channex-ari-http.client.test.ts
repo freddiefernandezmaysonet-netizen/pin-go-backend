@@ -153,6 +153,87 @@ test("posts Availability with the certified endpoint, headers and limits", async
   assert.equal(JSON.stringify(result).includes(API_KEY), false);
 });
 
+test("production HTTP boundary uses OTA transport and ignores supplied legacy values", async () => {
+  const previous = {
+    nodeEnv: process.env.NODE_ENV,
+    otaKey: process.env.OTA_CONNECTION_API_KEY,
+    otaOrigin: process.env.OTA_CONNECTION_PROVIDER_API_ORIGIN,
+    legacyOrigin: process.env.CHANNEX_API_BASE_URL,
+  };
+  process.env.NODE_ENV = "production";
+  process.env.OTA_CONNECTION_API_KEY = "ota-production-key";
+  process.env.OTA_CONNECTION_PROVIDER_API_ORIGIN = "https://app.channex.io";
+  process.env.CHANNEX_API_BASE_URL = "https://staging.channex.io";
+
+  const mock = createMockTransport(async () => ({ status: 200, data: {} }));
+
+  try {
+    await sendChannexAriHttpRequest({
+      messageKind: "AVAILABILITY",
+      payload: availabilityPayload(),
+      apiKey: "supplied-legacy-key",
+      baseUrl: "https://staging.channex.io",
+      receivedAt: RECEIVED_AT,
+      transport: mock.transport,
+    });
+
+    assert.equal(mock.calls.length, 1);
+    assert.equal(
+      mock.calls[0].url,
+      "https://app.channex.io/api/v1/availability"
+    );
+    assert.equal(
+      mock.calls[0].config.headers["user-api-key"],
+      "ota-production-key"
+    );
+  } finally {
+    if (previous.nodeEnv === undefined) delete process.env.NODE_ENV;
+    else process.env.NODE_ENV = previous.nodeEnv;
+    if (previous.otaKey === undefined) delete process.env.OTA_CONNECTION_API_KEY;
+    else process.env.OTA_CONNECTION_API_KEY = previous.otaKey;
+    if (previous.otaOrigin === undefined) {
+      delete process.env.OTA_CONNECTION_PROVIDER_API_ORIGIN;
+    } else process.env.OTA_CONNECTION_PROVIDER_API_ORIGIN = previous.otaOrigin;
+    if (previous.legacyOrigin === undefined) delete process.env.CHANNEX_API_BASE_URL;
+    else process.env.CHANNEX_API_BASE_URL = previous.legacyOrigin;
+  }
+});
+
+test("production HTTP boundary rejects staging before transport", async () => {
+  const previous = {
+    nodeEnv: process.env.NODE_ENV,
+    otaKey: process.env.OTA_CONNECTION_API_KEY,
+    otaOrigin: process.env.OTA_CONNECTION_PROVIDER_API_ORIGIN,
+  };
+  process.env.NODE_ENV = "production";
+  process.env.OTA_CONNECTION_API_KEY = "ota-production-key";
+  process.env.OTA_CONNECTION_PROVIDER_API_ORIGIN = "https://staging.channex.io";
+  const mock = createMockTransport(async () => ({ status: 200, data: {} }));
+
+  try {
+    await assert.rejects(
+      sendChannexAriHttpRequest({
+        messageKind: "AVAILABILITY",
+        payload: availabilityPayload(),
+        apiKey: "legacy-key",
+        baseUrl: "https://staging.channex.io",
+        receivedAt: RECEIVED_AT,
+        transport: mock.transport,
+      }),
+      /CHANNEX_PRODUCTION_OTA_ORIGIN_REQUIRED/
+    );
+    assert.equal(mock.calls.length, 0);
+  } finally {
+    if (previous.nodeEnv === undefined) delete process.env.NODE_ENV;
+    else process.env.NODE_ENV = previous.nodeEnv;
+    if (previous.otaKey === undefined) delete process.env.OTA_CONNECTION_API_KEY;
+    else process.env.OTA_CONNECTION_API_KEY = previous.otaKey;
+    if (previous.otaOrigin === undefined) {
+      delete process.env.OTA_CONNECTION_PROVIDER_API_ORIGIN;
+    } else process.env.OTA_CONNECTION_PROVIDER_API_ORIGIN = previous.otaOrigin;
+  }
+});
+
 test("certification #10 sends compacted Availability ranges without transforming the body", async () => {
   const payload = {
     values: [

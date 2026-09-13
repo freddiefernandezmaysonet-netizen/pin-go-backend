@@ -1,5 +1,9 @@
 import type { ConnectionCenterProvider } from "./connection-center.read-model.js";
 import { resolveOtaConnectionCenterRuntime } from "./ota-connection-runtime.policy.js";
+import {
+  CHANNEX_PRODUCTION_API_ORIGIN,
+  isProductionRuntime,
+} from "../lib/channex-runtime-transport.policy.js";
 
 export type OtaConnectionCenterProviderConfig = {
   apiOrigin: string;
@@ -68,8 +72,21 @@ export function resolveOtaConnectionCenterConfig(
     };
   }
 
-  const apiUrl = exactUrl(env.OTA_CONNECTION_PROVIDER_API_ORIGIN, API_ORIGINS);
-  const iframeUrl = exactUrl(env.OTA_CONNECTION_IFRAME_BASE_URL, IFRAME_URLS);
+  const production = isProductionRuntime(env);
+  const allowedApiOrigins = production
+    ? new Set([CHANNEX_PRODUCTION_API_ORIGIN])
+    : API_ORIGINS;
+  const allowedIframeUrls = production
+    ? new Set([`${CHANNEX_PRODUCTION_API_ORIGIN}/channels`])
+    : IFRAME_URLS;
+  const apiUrl = exactUrl(
+    env.OTA_CONNECTION_PROVIDER_API_ORIGIN,
+    allowedApiOrigins
+  );
+  const iframeUrl = exactUrl(
+    env.OTA_CONNECTION_IFRAME_BASE_URL,
+    allowedIframeUrls
+  );
   const apiKey = String(env.OTA_CONNECTION_API_KEY ?? "").trim();
   const currency = String(env.OTA_CONNECTION_DEFAULT_CURRENCY ?? "").trim().toUpperCase();
   const airbnbFilter = channelFilter(env.OTA_CONNECTION_AIRBNB_FILTER);

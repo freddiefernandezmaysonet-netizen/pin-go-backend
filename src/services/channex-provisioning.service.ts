@@ -2,11 +2,9 @@ import crypto from "crypto";
 import axios from "axios";
 import { PrismaClient, PmsProvider } from "@prisma/client";
 import { requireIanaTimezone } from "../lib/iana-timezone";
+import { resolveChannexRuntimeTransport } from "../lib/channex-runtime-transport.policy.js";
 
 const prisma = new PrismaClient();
-
-const CHANNEX_API_BASE_URL =
-  process.env.CHANNEX_API_BASE_URL ?? "https://staging.channex.io";
 
 const CHANNEX_PROPERTY_TYPES = new Set([
   "apartment",
@@ -59,16 +57,6 @@ function decryptJson(payload: string) {
   return JSON.parse(decrypted);
 }
 
-function getChannexApiKey() {
-  const apiKey = String(process.env.CHANNEX_API_KEY ?? "").trim();
-
-  if (!apiKey) {
-    throw new Error("CHANNEX_API_KEY_MISSING");
-  }
-
-  return apiKey;
-}
-
 function requireChannexPropertyType(value: unknown): string {
   const propertyType = String(value ?? "").trim().toLowerCase();
 
@@ -85,10 +73,11 @@ function requireChannexPropertyType(value: unknown): string {
 
 async function createChannexProperty(args: {
   apiKey: string;
+  apiOrigin: string;
   payload: Record<string, unknown>;
 }) {
   const resp = await axios.post(
-    `${CHANNEX_API_BASE_URL.replace(/\/+$/, "")}/api/v1/properties`,
+    `${args.apiOrigin}/api/v1/properties`,
     {
       property: args.payload,
     },
@@ -116,11 +105,12 @@ async function createChannexProperty(args: {
 
 async function createChannexRoomType(args: {
   apiKey: string;
+  apiOrigin: string;
   channexPropertyId: string;
   payload: Record<string, unknown>;
 }) {
   const resp = await axios.post(
-    `${CHANNEX_API_BASE_URL.replace(/\/+$/, "")}/api/v1/room_types`,
+    `${args.apiOrigin}/api/v1/room_types`,
     {
       room_type: {
         property_id: args.channexPropertyId,
@@ -151,13 +141,14 @@ async function createChannexRoomType(args: {
 
 async function createChannexRatePlan(args: {
   apiKey: string;
+  apiOrigin: string;
   channexPropertyId: string;
   channexRoomTypeId: string;
   payload: Record<string, unknown>;
 }) {
   try {
     const resp = await axios.post(
-      `${CHANNEX_API_BASE_URL.replace(/\/+$/, "")}/api/v1/rate_plans`,
+      `${args.apiOrigin}/api/v1/rate_plans`,
       {
         rate_plan: {
           property_id: args.channexPropertyId,
@@ -272,7 +263,7 @@ export async function provisionChannexProperty(propertyId: string) {
     };
   }
 
-  const apiKey = getChannexApiKey();
+  const transport = resolveChannexRuntimeTransport();
 
   const propertyPayload = {
     title: property.publicTitle ?? property.name,
@@ -315,18 +306,21 @@ export async function provisionChannexProperty(propertyId: string) {
   };
 
   const channexProperty = await createChannexProperty({
-    apiKey,
+    apiKey: transport.apiKey,
+    apiOrigin: transport.apiOrigin,
     payload: propertyPayload,
   });
 
   const channexRoomType = await createChannexRoomType({
-    apiKey,
+    apiKey: transport.apiKey,
+    apiOrigin: transport.apiOrigin,
     channexPropertyId: channexProperty.channexPropertyId,
     payload: roomTypePayload,
   });
 
   const channexRatePlan = await createChannexRatePlan({
-    apiKey,
+    apiKey: transport.apiKey,
+    apiOrigin: transport.apiOrigin,
     channexPropertyId: channexProperty.channexPropertyId,
     channexRoomTypeId: channexRoomType.channexRoomTypeId,
     payload: {

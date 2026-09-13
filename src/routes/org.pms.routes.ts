@@ -5,12 +5,14 @@ import { z } from "zod";
 import crypto from "crypto";
 import axios from "axios";
 import { requireOrg } from "../middleware/requireOrg";
+import {
+  CHANNEX_STAGING_API_ORIGIN,
+  resolveChannexRuntimeTransport,
+} from "../lib/channex-runtime-transport.policy.js";
 
 const GUESTY_AUTH_URL = "https://open-api.guesty.com/oauth2/token";
 const HOSTAWAY_AUTH_URL = "https://api.hostaway.com/v1/accessTokens";
 const LODGIFY_TEST_URL = "https://api.lodgify.com/v1/countries";
-const CHANNEX_TEST_URL =
-  "https://staging.channex.io/api/v1/properties/options";
 
 const providerSchema = z.nativeEnum(PmsProvider);
 
@@ -226,13 +228,20 @@ async function testLodgifyConnection(input: {
 async function testChannexConnection(input: {
   apiKey: string;
 }) {
-  const resp = await axios.get(CHANNEX_TEST_URL, {
-    headers: {
-      Accept: "application/json",
-      "user-api-key": input.apiKey,
-    },
-    timeout: 15000,
+  const transport = resolveChannexRuntimeTransport({
+    nonProductionApiKey: input.apiKey,
+    nonProductionApiOrigin: CHANNEX_STAGING_API_ORIGIN,
   });
+  const resp = await axios.get(
+    `${transport.apiOrigin}/api/v1/properties/options`,
+    {
+      headers: {
+        Accept: "application/json",
+        "user-api-key": transport.apiKey,
+      },
+      timeout: 15000,
+    }
+  );
 
   return {
     ok: resp.status >= 200 && resp.status < 300,

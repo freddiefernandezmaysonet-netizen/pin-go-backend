@@ -4,6 +4,10 @@ import { Router } from "express";
 import { formatInTimeZone } from "date-fns-tz";
 
 import { requireIanaTimezone } from "../lib/iana-timezone";
+import {
+  isProductionRuntime,
+  resolveChannexRuntimeTransport,
+} from "../lib/channex-runtime-transport.policy.js";
 import { requireAuth } from "../middleware/requireAuth";
 import {
   resolveChannexAriMapping,
@@ -11,8 +15,6 @@ import {
 } from "../pms/outbound/channex-ari-mapping.service";
 import { createChannexAriOutboxEvent } from "../pms/outbound/channex-ari-outbox.service";
 import { buildDashboardCalendarOverridesRouter } from "./dashboard.calendar-overrides.route";
-
-const CHANNEX_PRODUCTION_ORIGIN = "https://app.channex.io";
 
 type CanonicalFullSyncMapping = {
   organizationId: unknown;
@@ -31,25 +33,17 @@ function normalizedText(value: unknown): string {
 export function assertFullSyncProductionChannexHost(
   env: NodeJS.ProcessEnv = process.env
 ): void {
-  if (normalizedText(env.NODE_ENV).toLowerCase() !== "production") return;
-
-  const configured = normalizedText(env.OTA_CONNECTION_PROVIDER_API_ORIGIN);
-  let parsed: URL;
+  if (!isProductionRuntime(env)) return;
 
   try {
-    parsed = new URL(configured);
-  } catch {
-    throw new Error("CHANNEX_ARI_PRODUCTION_HOST_INVALID");
-  }
-
-  if (
-    parsed.origin !== CHANNEX_PRODUCTION_ORIGIN ||
-    parsed.pathname !== "/" ||
-    parsed.username ||
-    parsed.password ||
-    parsed.search ||
-    parsed.hash
-  ) {
+    resolveChannexRuntimeTransport({ env });
+  } catch (error) {
+    if (
+      error instanceof Error &&
+      error.message === "CHANNEX_PRODUCTION_OTA_API_KEY_REQUIRED"
+    ) {
+      throw new Error("CHANNEX_ARI_PRODUCTION_API_KEY_INVALID");
+    }
     throw new Error("CHANNEX_ARI_PRODUCTION_HOST_INVALID");
   }
 }

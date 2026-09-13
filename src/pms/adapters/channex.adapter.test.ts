@@ -200,3 +200,99 @@ test("acknowledgement uses the exact revision ACK endpoint", async () => {
     axios.post = originalPost;
   }
 });
+
+test("production booking revision requests ignore legacy and connection credentials", async () => {
+  const previous = {
+    nodeEnv: process.env.NODE_ENV,
+    otaKey: process.env.OTA_CONNECTION_API_KEY,
+    otaOrigin: process.env.OTA_CONNECTION_PROVIDER_API_ORIGIN,
+    legacyKey: process.env.CHANNEX_API_KEY,
+    legacyOrigin: process.env.CHANNEX_API_BASE_URL,
+  };
+  process.env.NODE_ENV = "production";
+  process.env.OTA_CONNECTION_API_KEY = "ota-production-key";
+  process.env.OTA_CONNECTION_PROVIDER_API_ORIGIN = "https://app.channex.io";
+  process.env.CHANNEX_API_KEY = "legacy-key-must-be-ignored";
+  process.env.CHANNEX_API_BASE_URL = "https://staging.channex.io";
+
+  const originalGet = axios.get;
+  let requestedUrl = "";
+  let requestedConfig: Parameters<typeof axios.get>[1] | undefined;
+  axios.get = (async (url: string, config?: Parameters<typeof axios.get>[1]) => {
+    requestedUrl = url;
+    requestedConfig = config;
+    return { data: REVISION_FIXTURE };
+  }) as typeof axios.get;
+
+  try {
+    const fetchBookingRevision = requireAdapterMethod(
+      channexAdapter.fetchBookingRevision,
+      "fetchBookingRevision"
+    );
+    await fetchBookingRevision({
+      connection: {},
+      revisionId: "revision-001",
+    });
+
+    assert.equal(
+      requestedUrl,
+      "https://app.channex.io/api/v1/booking_revisions/revision-001"
+    );
+    assert.equal(
+      (requestedConfig?.headers as Record<string, string>)["user-api-key"],
+      "ota-production-key"
+    );
+  } finally {
+    axios.get = originalGet;
+    if (previous.nodeEnv === undefined) delete process.env.NODE_ENV;
+    else process.env.NODE_ENV = previous.nodeEnv;
+    if (previous.otaKey === undefined) delete process.env.OTA_CONNECTION_API_KEY;
+    else process.env.OTA_CONNECTION_API_KEY = previous.otaKey;
+    if (previous.otaOrigin === undefined) {
+      delete process.env.OTA_CONNECTION_PROVIDER_API_ORIGIN;
+    } else process.env.OTA_CONNECTION_PROVIDER_API_ORIGIN = previous.otaOrigin;
+    if (previous.legacyKey === undefined) delete process.env.CHANNEX_API_KEY;
+    else process.env.CHANNEX_API_KEY = previous.legacyKey;
+    if (previous.legacyOrigin === undefined) delete process.env.CHANNEX_API_BASE_URL;
+    else process.env.CHANNEX_API_BASE_URL = previous.legacyOrigin;
+  }
+});
+
+test("production adapter fails before HTTP when OTA origin is not app.channex.io", async () => {
+  const previous = {
+    nodeEnv: process.env.NODE_ENV,
+    otaKey: process.env.OTA_CONNECTION_API_KEY,
+    otaOrigin: process.env.OTA_CONNECTION_PROVIDER_API_ORIGIN,
+  };
+  process.env.NODE_ENV = "production";
+  process.env.OTA_CONNECTION_API_KEY = "ota-production-key";
+  process.env.OTA_CONNECTION_PROVIDER_API_ORIGIN = "https://staging.channex.io";
+
+  const originalGet = axios.get;
+  let requestCount = 0;
+  axios.get = (async () => {
+    requestCount += 1;
+    return { data: REVISION_FIXTURE };
+  }) as typeof axios.get;
+
+  try {
+    const fetchBookingRevision = requireAdapterMethod(
+      channexAdapter.fetchBookingRevision,
+      "fetchBookingRevision"
+    );
+    await assert.rejects(
+      fetchBookingRevision({ connection: {}, revisionId: "revision-001" }),
+      /CHANNEX_PRODUCTION_OTA_ORIGIN_REQUIRED/
+    );
+    assert.equal(requestCount, 0);
+  } finally {
+    axios.get = originalGet;
+    if (previous.nodeEnv === undefined) delete process.env.NODE_ENV;
+    else process.env.NODE_ENV = previous.nodeEnv;
+    if (previous.otaKey === undefined) delete process.env.OTA_CONNECTION_API_KEY;
+    else process.env.OTA_CONNECTION_API_KEY = previous.otaKey;
+    if (previous.otaOrigin === undefined) {
+      delete process.env.OTA_CONNECTION_PROVIDER_API_ORIGIN;
+    } else process.env.OTA_CONNECTION_PROVIDER_API_ORIGIN = previous.otaOrigin;
+  }
+});

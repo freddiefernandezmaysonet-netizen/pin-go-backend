@@ -1,23 +1,11 @@
 import { PrismaClient, PmsProvider } from "@prisma/client";
 import axios from "axios";
 import { calculateDirectBookingPricing } from "./direct-booking-pricing.service";
+import { resolveChannexRuntimeTransport } from "../lib/channex-runtime-transport.policy.js";
 
 const prisma = new PrismaClient();
 
 const DEFAULT_SYNC_DAYS = 365;
-const CHANNEX_API_BASE_URL =
-  process.env.CHANNEX_API_BASE_URL ?? "https://staging.channex.io";
-
-function getChannexApiKey() {
-  const apiKey = String(process.env.CHANNEX_API_KEY ?? "").trim();
-
-  if (!apiKey) {
-    throw new Error("CHANNEX_API_KEY_MISSING");
-  }
-
-  return apiKey;
-}
-
 type ChannexListingMetadata = {
   channexPropertyId?: string;
   channexRatePlanId?: string;
@@ -108,13 +96,13 @@ export async function syncChannexAvailabilityForProperty(
     throw new Error("CHANNEX_LISTING_MAPPING_INCOMPLETE");
   }
 
-const apiKey = getChannexApiKey();
+const transport = resolveChannexRuntimeTransport();
  
   let roomTypeResp;
 
   try {
     roomTypeResp = await axios.put(
-      `${CHANNEX_API_BASE_URL.replace(/\/+$/, "")}/api/v1/room_types/${channexRoomTypeId}`,
+      `${transport.apiOrigin}/api/v1/room_types/${channexRoomTypeId}`,
       {
         room_type: {
           title: property.publicTitle ?? property.name,
@@ -129,7 +117,7 @@ const apiKey = getChannexApiKey();
         headers: {
           Accept: "application/json",
           "Content-Type": "application/json",
-          "user-api-key": apiKey,
+          "user-api-key": transport.apiKey,
         },
         timeout: 20000,
       }
@@ -304,7 +292,7 @@ const ratesPayload = availabilityPreview.map((item) => {
 
   try {
     ratesResp = await axios.post(
-      `${CHANNEX_API_BASE_URL.replace(/\/+$/, "")}/api/v1/restrictions`,
+      `${transport.apiOrigin}/api/v1/restrictions`,
       {
         values: ratesPayload,
       },
@@ -312,7 +300,7 @@ const ratesPayload = availabilityPreview.map((item) => {
         headers: {
           Accept: "application/json",
           "Content-Type": "application/json",
-          "user-api-key": apiKey,
+          "user-api-key": transport.apiKey,
         },
         timeout: 20000,
       }
@@ -343,7 +331,7 @@ const ratesPayload = availabilityPreview.map((item) => {
 
   try {
     availabilityResp = await axios.post(
-      `${CHANNEX_API_BASE_URL.replace(/\/+$/, "")}/api/v1/availability`,
+      `${transport.apiOrigin}/api/v1/availability`,
       {
         values: channexAvailabilityPayload,
       },
@@ -351,7 +339,7 @@ const ratesPayload = availabilityPreview.map((item) => {
         headers: {
           Accept: "application/json",
           "Content-Type": "application/json",
-          "user-api-key": apiKey,
+          "user-api-key": transport.apiKey,
         },
         timeout: 20000,
       }
