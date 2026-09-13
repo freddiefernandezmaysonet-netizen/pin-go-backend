@@ -36,6 +36,12 @@ const LIFECYCLE_OCCURRED_AT_MICROS =
   BigInt(LIFECYCLE_OCCURRED_AT.getTime()) * 1_000n + 456n;
 const FULL_SYNC_REQUESTED_AT = new Date("2026-09-07T00:00:00.125Z");
 const FULL_SYNC_COMPLETED_AT = new Date("2026-09-07T00:00:00.126Z");
+const PRE_ACTIVATION_FULL_SYNC_REQUESTED_AT = new Date(
+  "2026-09-07T00:00:00.110Z"
+);
+const PRE_ACTIVATION_FULL_SYNC_COMPLETED_AT = new Date(
+  "2026-09-07T00:00:00.120Z"
+);
 const NOW = new Date("2026-09-07T01:00:00.000Z");
 
 type DiscoveryMode = "UNIQUE" | "AMBIGUOUS" | "NOT_FOUND";
@@ -76,7 +82,11 @@ type FixtureOptions = {
   status?: "NOT_CONNECTED" | "ACTIVE" | "DEGRADED";
   activatedAt?: Date | null;
   channelRead?: "FOUND" | "NOT_FOUND";
-  fullSync?: "QUALIFIED" | "PREDATES_LIFECYCLE" | "INVALID_DATE";
+  fullSync?:
+    | "QUALIFIED"
+    | "PRE_ACTIVATION"
+    | "PREDATES_LIFECYCLE"
+    | "INVALID_DATE";
   outboxMapping?: "VERIFIED" | "MISMATCH";
   pmsMapping?: "VERIFIED" | "MISMATCH";
   tenantMismatch?: boolean;
@@ -161,7 +171,7 @@ function channelPayload(
       id: channelId,
       attributes: {
         id: channelId,
-        channel: "Airbnb",
+        channel: "AirBNB",
         is_active: active,
         ...(includeOperationalStatus ? { status: operationalStatus } : {}),
         properties: [EXTERNAL_PROPERTY_ID],
@@ -463,6 +473,7 @@ function fixture(options: FixtureOptions = {}) {
 
   function propertyStateRecord() {
     const predates = options.fullSync === "PREDATES_LIFECYCLE";
+    const preActivation = options.fullSync === "PRE_ACTIVATION";
     const invalid = options.fullSync === "INVALID_DATE";
     return {
       organizationId: ORGANIZATION_ID,
@@ -471,10 +482,14 @@ function fixture(options: FixtureOptions = {}) {
         ? new Date(Number.NaN)
         : predates
           ? new Date("2026-09-06T23:59:00.000Z")
-          : FULL_SYNC_REQUESTED_AT,
+          : preActivation
+            ? PRE_ACTIVATION_FULL_SYNC_REQUESTED_AT
+            : FULL_SYNC_REQUESTED_AT,
       lastFullSyncCompletedAt: predates
         ? new Date("2026-09-06T23:59:30.000Z")
-        : FULL_SYNC_COMPLETED_AT,
+        : preActivation
+          ? PRE_ACTIVATION_FULL_SYNC_COMPLETED_AT
+          : FULL_SYNC_COMPLETED_AT,
       updatedAt: new Date("2026-09-07T00:00:00.127Z"),
     };
   }
@@ -514,12 +529,17 @@ function fixture(options: FixtureOptions = {}) {
 
   function outboxEvidenceRecords() {
     const predates = options.fullSync === "PREDATES_LIFECYCLE";
+    const preActivation = options.fullSync === "PRE_ACTIVATION";
     const requestedAt = predates
       ? new Date("2026-09-06T23:59:00.000Z")
-      : FULL_SYNC_REQUESTED_AT;
+      : preActivation
+        ? PRE_ACTIVATION_FULL_SYNC_REQUESTED_AT
+        : FULL_SYNC_REQUESTED_AT;
     const completedAt = predates
       ? new Date("2026-09-06T23:59:30.000Z")
-      : FULL_SYNC_COMPLETED_AT;
+      : preActivation
+        ? PRE_ACTIVATION_FULL_SYNC_COMPLETED_AT
+        : FULL_SYNC_COMPLETED_AT;
     return fullSyncOutboxPair({
       requestedAt,
       completedAt,
@@ -699,6 +719,9 @@ function fixture(options: FixtureOptions = {}) {
     },
     async listChannels(propertyId: string, channel?: string) {
       reads.channelCollection.push({ propertyId, channel });
+      if (propertyId !== EXTERNAL_PROPERTY_ID || channel !== "AirBNB") {
+        return discoveryPayload("NOT_FOUND");
+      }
       if (options.channelTransportFailure?.phase === "COLLECTION") {
         throw new ChannexReadonlyTransportError(
           options.channelTransportFailure.code
@@ -809,7 +832,7 @@ test("persists ACTIVE only from exact channel, mapping, lifecycle, and post-life
   assert.deepEqual(f.reads.ratePlan, [EXTERNAL_RATE_PLAN_ID]);
   assert.deepEqual(f.reads.channel, [EXTERNAL_CHANNEL_ID]);
   assert.deepEqual(f.reads.channelCollection, [
-    { propertyId: EXTERNAL_PROPERTY_ID, channel: "Airbnb" },
+    { propertyId: EXTERNAL_PROPERTY_ID, channel: "AirBNB" },
   ]);
   assert.equal(f.reads.legacyRoomTypeCollection, 0);
   assert.equal(f.reads.legacyRatePlanCollection, 0);
@@ -862,6 +885,44 @@ test("persists ACTIVE only from exact channel, mapping, lifecycle, and post-life
     /^ota-canonical-readiness:[a-f0-9]{64}$/
   );
   assert.deepEqual(f.transactionIsolationLevels, ["Serializable"]);
+});
+
+test("activate_channel reuses the certified pre-activation Full Sync when mapping is unchanged", async () => {
+  const f = fixture({
+    lifecycle: "activate_channel",
+    fullSync: "PRE_ACTIVATION",
+  });
+  const result = await reconcile(f, "reconcile-pre-activation-full-sync-001");
+
+  assert.deepEqual(
+    {
+      authorizationReadiness: result.authorizationReadiness,
+      mappingReadiness: result.mappingReadiness,
+      distributionReadiness: result.distributionReadiness,
+    },
+    {
+      authorizationReadiness: "READY",
+      mappingReadiness: "READY",
+      distributionReadiness: "READY",
+    }
+  );
+  assert.equal(f.updates[0].data.status, "ACTIVE");
+  assert.deepEqual(
+    f.updates[0].data.lastFullSyncConfirmedAt,
+    PRE_ACTIVATION_FULL_SYNC_COMPLETED_AT
+  );
+  assert.deepEqual(f.updates[0].data.activatedAt, ACTIVATED_AT);
+  assert.deepEqual(
+    f.audits[0].data.metadata.fullSyncEvidence.frontierAt,
+    "2026-09-07T00:00:00.100Z"
+  );
+  assert.equal(
+    f.audits[0].data.metadata.fullSyncEvidence.qualificationReason,
+    "QUALIFIED"
+  );
+  assert.deepEqual(f.reads.channelCollection, [
+    { propertyId: EXTERNAL_PROPERTY_ID, channel: "AirBNB" },
+  ]);
 });
 
 test("an enabled exact channel with non-active operational status cannot persist ACTIVE", async () => {
@@ -954,7 +1015,7 @@ test("discovers one unique Airbnb channel and binds it only after exact GET veri
   await reconcile(f, "reconcile-discovery-unique-001");
 
   assert.deepEqual(f.reads.channelCollection, [
-    { propertyId: EXTERNAL_PROPERTY_ID, channel: "Airbnb" },
+    { propertyId: EXTERNAL_PROPERTY_ID, channel: "AirBNB" },
   ]);
   assert.deepEqual(f.reads.channel, [EXTERNAL_CHANNEL_ID]);
   assert.equal(f.updates[0].where.externalConnectionId, null);
@@ -1206,7 +1267,10 @@ test("DEGRADED re-entry replaces historical activatedAt with the current correla
 });
 
 test("a full sync that predates the lifecycle frontier cannot close activation", async () => {
-  const f = fixture({ fullSync: "PREDATES_LIFECYCLE" });
+  const f = fixture({
+    fullSync: "PREDATES_LIFECYCLE",
+    lifecycle: "updated_channel",
+  });
   const result = await reconcile(f, "reconcile-stale-full-sync-001");
 
   assert.equal(result.distributionReadiness, "IN_PROGRESS");

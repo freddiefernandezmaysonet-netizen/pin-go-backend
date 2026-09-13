@@ -139,7 +139,7 @@ function parseOccurredAt(value: unknown): {
 
 function providerFromChannelCode(value: string | null): ConnectionCenterProvider | null {
   const code = value?.trim() ?? "";
-  if (code === "Airbnb") return "AIRBNB";
+  if (code === "AirBNB" || code === "Airbnb") return "AIRBNB";
   if (code === "BookingCom") return "BOOKING_COM";
   return null;
 }
@@ -278,11 +278,13 @@ function evidencePatch(
     paymentReadiness: "NOT_STARTED",
     taxReadiness: "NOT_STARTED",
     contentReadiness: "NOT_STARTED",
-    // Every accepted lifecycle mutation opens a new evidence epoch. The
-    // canonical reconciler may stamp this again only after the new epoch has
-    // exact channel, mapping and full-sync evidence.
+    // Lifecycle mutations that can alter the PMS-to-Channex mapping open a new
+    // Full Sync evidence epoch. Channel activation alone preserves the exact
+    // mapping-bound Full Sync that was required before activation.
     activatedAt: null,
-    lastFullSyncConfirmedAt: null,
+    ...(event.eventType === "activate_channel"
+      ? {}
+      : { lastFullSyncConfirmedAt: null }),
     ...(event.externalConnectionId
       ? { externalConnectionId: event.externalConnectionId }
       : {}),

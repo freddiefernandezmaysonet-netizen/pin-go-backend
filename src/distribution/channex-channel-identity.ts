@@ -58,6 +58,16 @@ const DOCUMENTED_CHANNEL_BY_PROVIDER: Readonly<
   VRBO: "Vrbo",
 };
 
+function documentedChannelMatches(
+  provider: ConnectionCenterProvider,
+  value: unknown
+): boolean {
+  if (provider === "AIRBNB") {
+    return value === "AirBNB" || value === "Airbnb";
+  }
+  return value === DOCUMENTED_CHANNEL_BY_PROVIDER[provider];
+}
+
 function record(value: unknown): JsonRecord | null {
   return value && typeof value === "object" && !Array.isArray(value)
     ? (value as JsonRecord)
@@ -192,12 +202,11 @@ export function discoverUniqueChannexChannel(args: {
     args.expectedPropertyId,
     "OTA_CHANNEL_EXPECTED_PROPERTY_ID_INVALID"
   );
-  const expectedChannel = DOCUMENTED_CHANNEL_BY_PROVIDER[args.provider];
   const candidateIds = new Set<string>();
 
   for (const resource of channelResourceList(args.payload)) {
     const attributes = record(resource.attributes)!;
-    if (attributes.channel !== expectedChannel) continue;
+    if (!documentedChannelMatches(args.provider, attributes.channel)) continue;
     if (
       !validateDocumentedPropertySources(resource, invalidCollection).includes(
         expectedPropertyId
@@ -364,8 +373,10 @@ export function verifyExactChannexChannel(args: {
   const outboundMappings = documentedOutboundMappings(attributes);
 
   const resourceTypeVerified = channel.type === "channel";
-  const providerVerified =
-    attributes.channel === DOCUMENTED_CHANNEL_BY_PROVIDER[args.provider];
+  const providerVerified = documentedChannelMatches(
+    args.provider,
+    attributes.channel
+  );
   const propertyVerified = properties.includes(expectedPropertyId);
   const groupVerified = groupId === expectedGroupId;
   const identityVerified =

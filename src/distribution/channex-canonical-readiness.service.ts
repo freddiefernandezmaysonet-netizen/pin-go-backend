@@ -247,7 +247,7 @@ function canonicalChannelCode(
 function documentedChannexAdapterCode(
   provider: ConnectionCenterProvider
 ): string {
-  if (provider === "AIRBNB") return "Airbnb";
+  if (provider === "AIRBNB") return "AirBNB";
   if (provider === "BOOKING_COM") return "BookingCom";
   if (provider === "EXPEDIA") return "Expedia";
   return "Vrbo";
@@ -1061,6 +1061,7 @@ export async function reconcileCanonicalOtaReadiness(args: {
   }
 
   const fullSync = qualifyChannexCorrelatedFullSyncEvidence({
+    provider: args.provider,
     expectedOrganizationId: args.organizationId,
     expectedPropertyId: args.propertyId,
     expectedConnectionId: solePmsListing?.connection.id ?? "",
@@ -1070,8 +1071,10 @@ export async function reconcileCanonicalOtaReadiness(args: {
     expectedExternalRatePlanId: externalRatePlanId,
     state: propertyState,
     outboxEvidence: fullSyncOutboxEvidence,
+    latestLifecycleEvent: watermark.event,
     lastChannelActivatedAt: connection.lastChannelActivatedAt,
-    lastLifecycleOccurredAt: lifecycleFrontierAt,
+    lastLifecycleOccurredAt: watermark.occurredAt,
+    lifecycleReadinessFrontierAt: lifecycleFrontierAt,
     mappingLastChangedAt,
   });
   const fullSyncQualified = fullSync.qualified && ariMapping.verified;
@@ -1124,10 +1127,7 @@ export async function reconcileCanonicalOtaReadiness(args: {
     );
   }
 
-  const fullSyncRequiredAfterAt = latestDate(
-    latestDate(connection.lastChannelActivatedAt, lifecycleFrontierAt),
-    mappingLastChangedAt
-  );
+  const fullSyncRequiredAfterAt = fullSync.frontierAt;
   const activation = planCanonicalOtaActivation({
     current: connection.status,
     evidence: {
@@ -1141,6 +1141,10 @@ export async function reconcileCanonicalOtaReadiness(args: {
       fullSyncRequiredAfterAt,
     },
   });
+  const commercialActivatedAt = latestDate(
+    connection.lastChannelActivatedAt,
+    fullSyncConfirmedAt
+  );
   const lastErrorCode = attentionCode({
     result,
     channel,
@@ -1405,8 +1409,8 @@ export async function reconcileCanonicalOtaReadiness(args: {
         readinessRevision: { increment: 1 },
         ...(activation.next === "ACTIVE" &&
         (connection.status !== "ACTIVE" || !connection.activatedAt) &&
-        fullSyncConfirmedAt
-          ? { activatedAt: fullSyncConfirmedAt }
+        commercialActivatedAt
+          ? { activatedAt: commercialActivatedAt }
           : activation.next !== "ACTIVE"
             ? { activatedAt: null }
             : {}),

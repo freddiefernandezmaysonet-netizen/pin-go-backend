@@ -152,6 +152,7 @@ function fullSyncInput(overrides: Record<string, unknown> = {}) {
     typeof propertyState
   >;
   return {
+    provider: "AIRBNB",
     expectedOrganizationId: "org-1",
     expectedPropertyId: "property-1",
     expectedConnectionId: "pms-connection-1",
@@ -169,8 +170,10 @@ function fullSyncInput(overrides: Record<string, unknown> = {}) {
             state.lastFullSyncCompletedAt,
           )
         : []),
+    latestLifecycleEvent: "updated_channel",
     lastChannelActivatedAt: ACTIVATED_AT,
     lastLifecycleOccurredAt: LIFECYCLE_AT,
+    lifecycleReadinessFrontierAt: LIFECYCLE_AT,
     mappingLastChangedAt: ACTIVATED_AT,
     ...overrides,
   } as Parameters<typeof qualifyChannexCorrelatedFullSyncEvidence>[0];
@@ -201,6 +204,98 @@ test("uses the later activation timestamp when it is newer than the latest lifec
 
   assert.equal(result.qualified, true);
   assert.deepEqual(result.frontierAt, laterActivation);
+});
+
+test("activate_channel preserves a certified Full Sync completed after the unchanged mapping", () => {
+  const mappingAt = new Date("2026-09-07T10:00:00.000Z");
+  const requestedAt = new Date("2026-09-07T10:01:00.000Z");
+  const completedAt = new Date("2026-09-07T10:02:00.000Z");
+  const activatedAt = new Date("2026-09-07T10:03:00.000Z");
+  const result = qualifyChannexCorrelatedFullSyncEvidence(
+    fullSyncInput({
+      latestLifecycleEvent: "activate_channel",
+      lastChannelActivatedAt: activatedAt,
+      lastLifecycleOccurredAt: activatedAt,
+      lifecycleReadinessFrontierAt: activatedAt,
+      mappingLastChangedAt: mappingAt,
+      state: propertyState({
+        lastFullSyncRequestedAt: requestedAt,
+        lastFullSyncCompletedAt: completedAt,
+      }),
+      outboxEvidence: fullSyncPair(requestedAt, completedAt),
+    }),
+  );
+
+  assert.equal(result.qualified, true);
+  assert.equal(result.reason, "QUALIFIED");
+  assert.deepEqual(result.frontierAt, mappingAt);
+  assert.deepEqual(result.confirmedAt, completedAt);
+});
+
+test("activate_channel preservation is limited to Airbnb", () => {
+  const mappingAt = new Date("2026-09-07T10:00:00.000Z");
+  const requestedAt = new Date("2026-09-07T10:01:00.000Z");
+  const completedAt = new Date("2026-09-07T10:02:00.000Z");
+  const activatedAt = new Date("2026-09-07T10:03:00.000Z");
+  const result = qualifyChannexCorrelatedFullSyncEvidence(
+    fullSyncInput({
+      provider: "BOOKING_COM",
+      latestLifecycleEvent: "activate_channel",
+      lastChannelActivatedAt: activatedAt,
+      lastLifecycleOccurredAt: activatedAt,
+      lifecycleReadinessFrontierAt: activatedAt,
+      mappingLastChangedAt: mappingAt,
+      state: propertyState({
+        lastFullSyncRequestedAt: requestedAt,
+        lastFullSyncCompletedAt: completedAt,
+      }),
+      outboxEvidence: fullSyncPair(requestedAt, completedAt),
+    }),
+  );
+
+  assert.equal(result.qualified, false);
+  assert.equal(result.reason, "FULL_SYNC_COMPLETION_PREDATES_FRONTIER");
+  assert.deepEqual(result.frontierAt, activatedAt);
+});
+
+test("activate_channel preservation rejects an incoherent activation watermark", () => {
+  const lifecycleAt = new Date("2026-09-07T10:03:00.000Z");
+  const result = qualifyChannexCorrelatedFullSyncEvidence(
+    fullSyncInput({
+      latestLifecycleEvent: "activate_channel",
+      lastChannelActivatedAt: new Date("2026-09-07T10:02:59.999Z"),
+      lastLifecycleOccurredAt: lifecycleAt,
+      lifecycleReadinessFrontierAt: lifecycleAt,
+    }),
+  );
+
+  assert.equal(result.qualified, false);
+  assert.equal(result.reason, "LIFECYCLE_EVIDENCE_INVALID");
+});
+
+test("activate_channel cannot preserve a Full Sync that predates the current mapping", () => {
+  const requestedAt = new Date("2026-09-07T10:01:00.000Z");
+  const completedAt = new Date("2026-09-07T10:02:00.000Z");
+  const activatedAt = new Date("2026-09-07T10:03:00.000Z");
+  const mappingAt = new Date("2026-09-07T10:04:00.000Z");
+  const result = qualifyChannexCorrelatedFullSyncEvidence(
+    fullSyncInput({
+      latestLifecycleEvent: "activate_channel",
+      lastChannelActivatedAt: activatedAt,
+      lastLifecycleOccurredAt: activatedAt,
+      lifecycleReadinessFrontierAt: activatedAt,
+      mappingLastChangedAt: mappingAt,
+      state: propertyState({
+        lastFullSyncRequestedAt: requestedAt,
+        lastFullSyncCompletedAt: completedAt,
+      }),
+      outboxEvidence: fullSyncPair(requestedAt, completedAt),
+    }),
+  );
+
+  assert.equal(result.qualified, false);
+  assert.equal(result.reason, "FULL_SYNC_COMPLETION_PREDATES_FRONTIER");
+  assert.deepEqual(result.frontierAt, mappingAt);
 });
 
 test("rejects missing lifecycle, request and completion evidence fail-closed", () => {

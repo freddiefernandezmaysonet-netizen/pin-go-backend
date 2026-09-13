@@ -335,6 +335,20 @@ test("normalizes the official activate payload contract", () => {
   assert.equal(normalized?.occurredAt?.toISOString(), "2026-09-07T18:00:00.000Z");
 });
 
+test("normalizes the production AirBNB lifecycle adapter token", () => {
+  const normalized = normalizeChannexChannelLifecycleEvent(
+    payload("activate_channel", {
+      payload: {
+        title: "Airbnb certification channel",
+        channel_id: EXTERNAL_CHANNEL_ID,
+        ota_name: "AirBNB",
+      },
+    })
+  );
+  assert.equal(normalized?.provider, "AIRBNB");
+  assert.equal(normalized?.externalChannelCode, "ABB");
+});
+
 test("normalizes the exact disconnect_channel name with the canonical envelope", () => {
   const normalized = normalizeChannexChannelLifecycleEvent({
     event: "disconnect_channel",
@@ -540,6 +554,50 @@ test("unknown channel is ignored rather than promoted", async () => {
   assert.equal(state.updates.length, 0);
 });
 
+test("production AirBNB lifecycle evidence is applied", async () => {
+  const { value, state } = client();
+  const result = await applyChannexChannelLifecycleEvidence({
+    client: value,
+    payload: payload("activate_channel", {
+      payload: {
+        title: "Airbnb certification channel",
+        channel_id: EXTERNAL_CHANNEL_ID,
+        ota_name: "AirBNB",
+      },
+    }),
+  });
+
+  assert.deepEqual(result, {
+    ignored: false,
+    deduped: false,
+    connectionId: "conn-1",
+    eventType: "activate_channel",
+  });
+  assert.equal(state.updates.length, 1);
+  assert.equal(state.audits.length, 1);
+});
+
+test("legacy ABB adapter alias is rejected as lifecycle evidence", async () => {
+  const { value, state } = client();
+  const result = await applyChannexChannelLifecycleEvidence({
+    client: value,
+    payload: payload("activate_channel", {
+      payload: {
+        title: "Airbnb certification channel",
+        channel_id: EXTERNAL_CHANNEL_ID,
+        ota_name: "ABB",
+      },
+    }),
+  });
+
+  assert.deepEqual(result, {
+    ignored: true,
+    ignoredReason: "UNSUPPORTED_CHANNEL",
+  });
+  assert.equal(state.updates.length, 0);
+  assert.equal(state.audits.length, 0);
+});
+
 test("future lifecycle evidence beyond the accepted clock skew fails before persistence", async () => {
   const { value, state } = client();
   await assert.rejects(
@@ -723,7 +781,7 @@ test("disconnect_channel records a definitive disconnected fail-closed state", a
   assert.equal(patch.lastChannelActivatedAt, null);
 });
 
-test("every accepted lifecycle event invalidates full-sync and commercial readiness", async () => {
+test("activate_channel preserves mapped Full Sync while other lifecycle events invalidate it", async () => {
   for (const eventType of CHANNEX_CHANNEL_LIFECYCLE_EVENTS) {
     const { value, state } = client();
     await applyChannexChannelLifecycleEvidence({
@@ -731,7 +789,11 @@ test("every accepted lifecycle event invalidates full-sync and commercial readin
       payload: payload(eventType),
     });
     const patch = state.updates[0].data;
-    assert.equal(patch.lastFullSyncConfirmedAt, null, eventType);
+    if (eventType === "activate_channel") {
+      assert.equal("lastFullSyncConfirmedAt" in patch, false, eventType);
+    } else {
+      assert.equal(patch.lastFullSyncConfirmedAt, null, eventType);
+    }
     assert.equal(patch.paymentReadiness, "NOT_STARTED", eventType);
     assert.equal(patch.taxReadiness, "NOT_STARTED", eventType);
     assert.equal(patch.contentReadiness, "NOT_STARTED", eventType);

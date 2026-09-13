@@ -5,6 +5,8 @@ import {
   CHANNEX_ARI_FULL_SYNC_DAYS,
   addUtcDays,
 } from "../pms/outbound/channex-ari-lifecycle.policy";
+import type { CanonicalLifecycleEvent } from "./channex-canonical-readiness.reconciler.js";
+import type { ConnectionCenterProvider } from "./connection-center.read-model.js";
 
 export const CHANNEX_CORRELATED_FULL_SYNC_EVIDENCE_TYPE =
   "CHANNEX_CORRELATED_FULL_SYNC_ACCEPTED" as const;
@@ -409,6 +411,7 @@ function validateFullSyncPayload(args: {
 }
 
 export function qualifyChannexCorrelatedFullSyncEvidence(input: {
+  provider: ConnectionCenterProvider;
   expectedOrganizationId: string;
   expectedPropertyId: string;
   expectedConnectionId: string;
@@ -418,8 +421,10 @@ export function qualifyChannexCorrelatedFullSyncEvidence(input: {
   expectedExternalRatePlanId: string;
   state: ChannexAriPropertyStateEvidence | null;
   outboxEvidence: readonly ChannexCorrelatedFullSyncOutboxEvidence[];
+  latestLifecycleEvent: CanonicalLifecycleEvent | null;
   lastChannelActivatedAt: Date | null;
   lastLifecycleOccurredAt: Date | null;
+  lifecycleReadinessFrontierAt: Date | null;
   mappingLastChangedAt: Date | null;
 }): ChannexCorrelatedFullSyncQualification {
   const expectedOrganizationId = normalizedText(input.expectedOrganizationId);
@@ -448,11 +453,35 @@ export function qualifyChannexCorrelatedFullSyncEvidence(input: {
     return unqualifiedFullSync("CHANNEL_ACTIVATION_EVIDENCE_INVALID");
   }
 
-  if (!input.lastLifecycleOccurredAt) {
+  if (
+    !input.latestLifecycleEvent ||
+    !input.lastLifecycleOccurredAt ||
+    !input.lifecycleReadinessFrontierAt
+  ) {
     return unqualifiedFullSync("LIFECYCLE_EVIDENCE_MISSING");
   }
   const lastLifecycleOccurredAt = validDate(input.lastLifecycleOccurredAt);
-  if (!lastLifecycleOccurredAt) {
+  const lifecycleReadinessFrontierAt = validDate(
+    input.lifecycleReadinessFrontierAt,
+  );
+  if (
+    !lastLifecycleOccurredAt ||
+    !lifecycleReadinessFrontierAt ||
+    lifecycleReadinessFrontierAt.getTime() <
+      lastLifecycleOccurredAt.getTime() ||
+    lifecycleReadinessFrontierAt.getTime() >
+      lastLifecycleOccurredAt.getTime() + 1
+  ) {
+    return unqualifiedFullSync("LIFECYCLE_EVIDENCE_INVALID");
+  }
+
+  const activationPreservesMappedFullSync =
+    input.provider === "AIRBNB" &&
+    input.latestLifecycleEvent === "activate_channel";
+  if (
+    activationPreservesMappedFullSync &&
+    lastChannelActivatedAt.getTime() !== lastLifecycleOccurredAt.getTime()
+  ) {
     return unqualifiedFullSync("LIFECYCLE_EVIDENCE_INVALID");
   }
 
@@ -465,11 +494,13 @@ export function qualifyChannexCorrelatedFullSyncEvidence(input: {
   }
 
   const frontierAt = new Date(
-    Math.max(
-      lastChannelActivatedAt.getTime(),
-      lastLifecycleOccurredAt.getTime(),
-      mappingLastChangedAt.getTime(),
-    ),
+    activationPreservesMappedFullSync
+      ? mappingLastChangedAt.getTime()
+      : Math.max(
+          lastChannelActivatedAt.getTime(),
+          lifecycleReadinessFrontierAt.getTime(),
+          mappingLastChangedAt.getTime(),
+        ),
   );
 
   if (!input.state.lastFullSyncRequestedAt) {
