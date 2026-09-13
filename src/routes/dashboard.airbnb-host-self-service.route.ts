@@ -3,6 +3,7 @@ import { Router } from "express";
 import { requireAuth } from "../middleware/requireAuth.js";
 import type { AirbnbListingDiscoveryResult } from "../distribution/airbnb-host-self-service.listings.service.js";
 import type { AirbnbHostConfirmedMappingResult } from "../distribution/airbnb-host-confirmed-mapping.service.js";
+import type { AirbnbActivationState, AirbnbActivationResult } from "../distribution/airbnb-host-activation.service.js";
 import {
   createDistributionMutationSecurity,
   type DistributionMutationRequest,
@@ -14,6 +15,11 @@ type Actor = { id?: string; orgId?: string; role?: string };
 
 export type AirbnbHostSelfServiceRouteActions = {
   enabled: boolean;
+  inspectActivation?(args: { organizationId: string; propertyId: string }): Promise<AirbnbActivationState>;
+  activate?(args: { organizationId: string; propertyId: string; requestedByUserId: string; requestKey: string;
+    channelId: string; mappingId: string; listingId: string; confirmation: string }): Promise<AirbnbActivationResult>;
+  verifyActivation?(args: { organizationId: string; propertyId: string; requestedByUserId: string; requestKey: string;
+    channelId: string; mappingId: string; listingId: string; confirmation: string }): Promise<AirbnbActivationResult>;
   isTrustedOrigin(origin: string, organizationId: string): Promise<boolean>;
   issueConnectionLink(args: {
     organizationId: string;
@@ -231,6 +237,65 @@ export function buildDashboardAirbnbHostSelfServiceRouter(
       } catch (error) {
         return failure(res, error, "OTA_AIRBNB_CALLBACK_VERIFICATION_FAILED");
       }
+    }
+  );
+
+  router.get(
+    "/api/dashboard/distribution/properties/:propertyId/channels/AIRBNB/activation",
+    requireAuth,
+    async (req: DistributionMutationRequest, res) => {
+      res.setHeader("Cache-Control", "no-store");
+      if (!actions.enabled || !actions.inspectActivation) return res.status(503).json({ ok: false, error: "OTA_AIRBNB_ACTIVATION_UNAVAILABLE" });
+      const currentActor = actor(req);
+      if (!currentActor) return res.status(403).json({ ok: false, error: "OTA_CONNECTION_MUTATION_FORBIDDEN" });
+      try {
+        const activation = await actions.inspectActivation({ organizationId: currentActor.orgId, propertyId: String(req.params.propertyId ?? "").trim() });
+        return res.json({ ok: true, activation });
+      } catch (error) { return failure(res, error, "OTA_AIRBNB_ACTIVATION_CHECK_UNAVAILABLE"); }
+    }
+  );
+  router.post(
+    "/api/dashboard/distribution/properties/:propertyId/channels/AIRBNB/activate",
+    requireAuth,
+    mutationSecurity,
+    async (req: DistributionMutationRequest, res) => {
+      res.setHeader("Cache-Control", "no-store");
+      if (!actions.enabled || !actions.activate) return res.status(503).json({ ok: false, error: "OTA_AIRBNB_ACTIVATION_UNAVAILABLE" });
+      const currentActor = actor(req);
+      if (!currentActor) return res.status(403).json({ ok: false, error: "OTA_CONNECTION_MUTATION_FORBIDDEN" });
+      try {
+        const activation = await actions.activate({
+          organizationId: currentActor.orgId, propertyId: String(req.params.propertyId ?? "").trim(),
+          requestedByUserId: currentActor.id, requestKey: req.distributionRequestKey!,
+          channelId: typeof req.body?.channelId === "string" ? req.body.channelId : "",
+          mappingId: typeof req.body?.mappingId === "string" ? req.body.mappingId : "",
+          listingId: typeof req.body?.listingId === "string" ? req.body.listingId : "",
+          confirmation: typeof req.body?.confirmation === "string" ? req.body.confirmation : "",
+        });
+        return res.json({ ok: true, activation });
+      } catch (error) { return failure(res, error, "OTA_AIRBNB_ACTIVATION_RECONCILIATION_REQUIRED"); }
+    }
+  );
+  router.post(
+    "/api/dashboard/distribution/properties/:propertyId/channels/AIRBNB/activation/verify",
+    requireAuth,
+    mutationSecurity,
+    async (req: DistributionMutationRequest, res) => {
+      res.setHeader("Cache-Control", "no-store");
+      if (!actions.enabled || !actions.verifyActivation) return res.status(503).json({ ok: false, error: "OTA_AIRBNB_ACTIVATION_UNAVAILABLE" });
+      const currentActor = actor(req);
+      if (!currentActor) return res.status(403).json({ ok: false, error: "OTA_CONNECTION_MUTATION_FORBIDDEN" });
+      try {
+        const activation = await actions.verifyActivation({
+          organizationId: currentActor.orgId, propertyId: String(req.params.propertyId ?? "").trim(),
+          requestedByUserId: currentActor.id, requestKey: req.distributionRequestKey!,
+          channelId: typeof req.body?.channelId === "string" ? req.body.channelId : "",
+          mappingId: typeof req.body?.mappingId === "string" ? req.body.mappingId : "",
+          listingId: typeof req.body?.listingId === "string" ? req.body.listingId : "",
+          confirmation: typeof req.body?.confirmation === "string" ? req.body.confirmation : "",
+        });
+        return res.json({ ok: true, activation });
+      } catch (error) { return failure(res, error, "OTA_AIRBNB_ACTIVATION_RECONCILIATION_REQUIRED"); }
     }
   );
 
