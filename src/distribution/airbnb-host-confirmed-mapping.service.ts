@@ -259,14 +259,15 @@ function parseMappingResponse(args: {
   const channel = channelRelationship ? record(channelRelationship.data) : null;
   const mappingId = attributes ? String(attributes.id ?? "").trim() : "";
   const listingId = settings ? String(settings.listing_id ?? "").trim() : "";
-  const responseChannelId = data ? String(data.id ?? "").trim() : "";
+  const responseResourceId = data ? String(data.id ?? "").trim() : "";
+  // The channel identity is carried by relationships.channel, not the resource id.
   const relationshipChannelId = channel ? String(channel.id ?? "").trim() : "";
 
   if (
     !root ||
     !data ||
     data.type !== "channel_rate_plan" ||
-    responseChannelId !== args.channelId ||
+    !UUID.test(responseResourceId) ||
     !attributes ||
     !UUID.test(mappingId) ||
     !settings ||
