@@ -148,6 +148,22 @@ test("discovery returns only the unique documented provider + property candidate
   });
 });
 
+test("discovery accepts the production AirBNB adapter token", () => {
+  const result = discoverUniqueChannexChannel({
+    payload: {
+      data: [listChannel({ id: CHANNEL_ID, channel: "AirBNB" })],
+      meta: { page: 1, limit: 100, total: 1 },
+    },
+    provider: "AIRBNB",
+    expectedPropertyId: PROPERTY_ID,
+  });
+  assert.deepEqual(result, {
+    outcome: "FOUND",
+    channelId: CHANNEL_ID,
+    candidateCount: 1,
+  });
+});
+
 test("discovery rejects legacy provider aliases instead of widening identity", () => {
   const result = discoverUniqueChannexChannel({
     payload: {
@@ -236,7 +252,7 @@ test("discovery rejects missing or contradictory attributes.properties evidence"
 
 test("exact verification proves active Airbnb outbound mapping", () => {
   const result = verifyExactChannexChannel({
-    payload: exactChannel(),
+    payload: exactChannel({ channel: "AirBNB" }),
     ...expected,
   });
   assert.deepEqual(result, {

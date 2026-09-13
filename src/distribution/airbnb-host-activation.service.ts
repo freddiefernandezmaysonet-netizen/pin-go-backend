@@ -6,12 +6,22 @@ import { CHANNEX_ARI_FULL_SYNC_DAYS } from "../pms/outbound/channex-ari-lifecycl
 import { calculateChannexAriCanonicalJsonIntegrity } from "../pms/outbound/channex-ari-canonical-json.policy.js";
 import type { ChannexReadonlyTransport } from "./channex-readonly.http-transport.js";
 import { AirbnbActivationError, type AirbnbActivationTransport } from "./airbnb-host-activation.http-transport.js";
+import {
+  CHANNEX_CHANNEL_LIFECYCLE_APPLIED_AUDIT_SUMMARY,
+  CHANNEX_CHANNEL_LIFECYCLE_SKIPPED_AUDIT_SUMMARY,
+  CHANNEX_CHANNEL_LIFECYCLE_EVENT_PRECEDENCE,
+  CHANNEX_CHANNEL_LIFECYCLE_EVENTS,
+  isChannexFullSyncInvalidatingLifecycleEvent,
+  latestChannexFullSyncInvalidationAuditEvidence,
+  type ChannexChannelLifecycleEventType,
+  type ChannexFullSyncInvalidationEvidence,
+} from "./channex-channel-lifecycle.evidence.js";
 
 export const AIRBNB_ACTIVATION_CONFIRMATION = "CONFIRM_AIRBNB_ACTIVATION";
 export const AIRBNB_ACTIVATION_VERIFICATION_CONFIRMATION = "VERIFY_AIRBNB_ACTIVATION";
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 type Scope = { organizationId: string; propertyId: string };
-type Readers = Pick<PrismaClient, "distributionProperty" | "otaChannelConnection" | "pmsListing" | "channexAriPropertyState" | "distributionOutboxEvent">;
+type Readers = Pick<PrismaClient, "distributionProperty" | "otaChannelConnection" | "pmsListing" | "channexAriPropertyState" | "distributionOutboxEvent" | "apmsAuditEntry">;
 type Dependencies = Scope & { client: PrismaClient; readonlyTransport: Pick<ChannexReadonlyTransport, "getChannel">; now?: Date };
 export type AirbnbActivationState = {
   status: "READY" | "ACTIVE" | "NOT_READY" | "CHECK_REQUIRED";
@@ -33,6 +43,68 @@ function fingerprint(value: unknown): string {
   return createHash("sha256").update(JSON.stringify(value)).digest("hex");
 }
 
+const AIRBNB_FULL_SYNC_INVALIDATING_LIFECYCLE_EVENTS =
+  CHANNEX_CHANNEL_LIFECYCLE_EVENTS.filter(eventType =>
+    isChannexFullSyncInvalidatingLifecycleEvent("AIRBNB", eventType));
+
+type LifecycleWatermark = ChannexFullSyncInvalidationEvidence;
+
+function lifecycleWatermark(connection: Record<string, any>): LifecycleWatermark | null | false {
+  const values = [
+    connection.lastLifecycleOccurredAt,
+    connection.lastLifecycleOccurredAtMicros,
+    connection.lastLifecycleEventType,
+    connection.lastLifecycleEventPrecedence,
+  ];
+  if (values.every(value => value == null)) return null;
+  if (values.some(value => value == null)) return false;
+  const occurredAt = new Date(connection.lastLifecycleOccurredAt);
+  let occurredAtMicros: bigint;
+  try { occurredAtMicros = BigInt(connection.lastLifecycleOccurredAtMicros); } catch { return false; }
+  const eventType = connection.lastLifecycleEventType as ChannexChannelLifecycleEventType;
+  const precedence = connection.lastLifecycleEventPrecedence;
+  if (
+    Number.isNaN(occurredAt.getTime()) ||
+    occurredAt.getTime() < 0 ||
+    occurredAtMicros < 0n ||
+    occurredAtMicros / 1000n !== BigInt(occurredAt.getTime()) ||
+    !(CHANNEX_CHANNEL_LIFECYCLE_EVENTS as readonly string[]).includes(eventType) ||
+    !Number.isInteger(precedence) ||
+    CHANNEX_CHANNEL_LIFECYCLE_EVENT_PRECEDENCE[eventType] !== precedence
+  ) return false;
+  return { eventType, occurredAt, occurredAtMicros, precedence };
+}
+
+function compareLifecycle(
+  left: LifecycleWatermark,
+  right: LifecycleWatermark,
+): number {
+  if (left.occurredAtMicros !== right.occurredAtMicros) {
+    return left.occurredAtMicros > right.occurredAtMicros ? 1 : -1;
+  }
+  return left.precedence - right.precedence;
+}
+
+function lifecycleFrontierAt(evidence: ChannexFullSyncInvalidationEvidence): Date | null {
+  const milliseconds = Number((evidence.occurredAtMicros + 999n) / 1000n);
+  return Number.isSafeInteger(milliseconds) ? new Date(milliseconds) : null;
+}
+
+function validDate(value: unknown): Date | null {
+  if (!(value instanceof Date) || Number.isNaN(value.getTime()) || value.getTime() < 0) return null;
+  return new Date(value);
+}
+
+function latestDate(values: unknown[]): Date | null {
+  let latest: Date | null = null;
+  for (const value of values) {
+    const date = validDate(value);
+    if (!date) return null;
+    if (!latest || date > latest) latest = date;
+  }
+  return latest;
+}
+
 async function context(client: Readers, input: Scope) {
   const scope = { organizationId: input.organizationId, propertyId: input.propertyId };
   if (!scope.organizationId || !scope.propertyId) fail("TENANT_INVALID");
@@ -40,21 +112,22 @@ async function context(client: Readers, input: Scope) {
     client.distributionProperty.findFirst({
       where: { ...scope, platform: "CHANNEX" },
       select: {
-        id: true, organizationId: true, propertyId: true, platform: true, provisioningStatus: true, updatedAt: true,
+        id: true, organizationId: true, propertyId: true, groupId: true, platform: true, provisioningStatus: true, updatedAt: true,
         externalPropertyId: true, externalPrimaryRoomTypeId: true, externalPrimaryRatePlanId: true,
-        group: { select: { organizationId: true, platform: true, provisioningStatus: true, externalGroupId: true } },
+        group: { select: { id: true, organizationId: true, platform: true, provisioningStatus: true, externalGroupId: true, updatedAt: true } },
         property: { select: { id: true, organizationId: true, distributionEnabled: true, distributionStatus: true, timezone: true } },
       },
     }),
     client.otaChannelConnection.findFirst({
       where: { ...scope, provider: "AIRBNB" },
       select: { id: true, organizationId: true, propertyId: true, distributionPropertyId: true, provider: true,
-        status: true, externalConnectionId: true, externalListingId: true, readinessRevision: true, updatedAt: true, activationRequestedAt: true },
+        status: true, externalConnectionId: true, externalListingId: true, readinessRevision: true, updatedAt: true, activationRequestedAt: true,
+        lastLifecycleOccurredAt: true, lastLifecycleOccurredAtMicros: true, lastLifecycleEventType: true, lastLifecycleEventPrecedence: true },
     }),
     client.pmsListing.findMany({
       where: { propertyId: scope.propertyId, connection: { provider: "CHANNEX" } },
       take: 2, select: { id: true, connectionId: true, propertyId: true, externalListingId: true, metadata: true, updatedAt: true,
-        connection: { select: { id: true, organizationId: true, provider: true, status: true } } },
+        connection: { select: { id: true, organizationId: true, provider: true, status: true, updatedAt: true } } },
     }),
     client.channexAriPropertyState.findUnique({ where: { propertyId: scope.propertyId },
       select: { organizationId: true, propertyId: true, lastFullSyncRequestedAt: true, lastFullSyncCompletedAt: true } }),
@@ -64,7 +137,8 @@ async function context(client: Readers, input: Scope) {
       dp.platform !== "CHANNEX" || dp.provisioningStatus !== "READY" ||
       dp.property.organizationId !== scope.organizationId || dp.property.id !== scope.propertyId ||
       !dp.property.distributionEnabled || dp.property.distributionStatus !== "ACTIVE" ||
-      dp.group.organizationId !== scope.organizationId || dp.group.platform !== "CHANNEX" || dp.group.provisioningStatus !== "READY" ||
+      dp.groupId !== dp.group.id || dp.group.organizationId !== scope.organizationId ||
+      dp.group.platform !== "CHANNEX" || dp.group.provisioningStatus !== "READY" ||
       connection.organizationId !== scope.organizationId || connection.propertyId !== scope.propertyId ||
       connection.distributionPropertyId !== dp.id || connection.provider !== "AIRBNB") fail("CONTEXT_CONFLICT");
   if (["FAILED", "DISCONNECTING", "DISCONNECTED"].includes(connection.status)) fail("CONTEXT_CONFLICT");
@@ -75,6 +149,61 @@ async function context(client: Readers, input: Scope) {
   const listing = listings[0]!;
   if (!validateChannexAriCanonicalMapping({ expectedOrganizationId: scope.organizationId, expectedPropertyId: scope.propertyId,
     distributionProperty: dp, pmsListing: listing, pmsConnection: listing.connection }).verified) fail("PMS_MAPPING_CONFLICT");
+  const invalidationAudits = await client.apmsAuditEntry.findMany({
+    where: {
+      organizationId: scope.organizationId,
+      propertyId: scope.propertyId,
+      entityType: "DISTRIBUTION",
+      entityId: connection.id,
+      engine: "OTA_DISTRIBUTION",
+      eventType: { in: ["DECISION_APPLIED", "DECISION_SKIPPED"] },
+      status: "SUCCESS",
+      summary: {
+        in: [
+          CHANNEX_CHANNEL_LIFECYCLE_APPLIED_AUDIT_SUMMARY,
+          CHANNEX_CHANNEL_LIFECYCLE_SKIPPED_AUDIT_SUMMARY,
+        ],
+      },
+      reason: { in: [...AIRBNB_FULL_SYNC_INVALIDATING_LIFECYCLE_EVENTS] },
+    },
+    orderBy: [{ createdAt: "asc" }, { id: "asc" }],
+    select: {
+      organizationId: true,
+      propertyId: true,
+      entityType: true,
+      entityId: true,
+      engine: true,
+      eventType: true,
+      status: true,
+      summary: true,
+      reason: true,
+      metadata: true,
+    },
+  });
+  const watermark = lifecycleWatermark(connection);
+  let invalidation: ChannexFullSyncInvalidationEvidence | null = null;
+  let lifecycleEvidenceValid = watermark !== false;
+  if (lifecycleEvidenceValid) {
+    try {
+      invalidation = latestChannexFullSyncInvalidationAuditEvidence(invalidationAudits, {
+        organizationId: scope.organizationId,
+        propertyId: scope.propertyId,
+        connectionId: connection.id,
+        provider: "AIRBNB",
+        externalPropertyId: dp.externalPropertyId!,
+        externalConnectionId: connection.externalConnectionId!,
+      });
+    } catch {
+      lifecycleEvidenceValid = false;
+    }
+  }
+  if (lifecycleEvidenceValid && (!invalidation || !watermark)) {
+    lifecycleEvidenceValid = false;
+  } else if (lifecycleEvidenceValid && watermark !== false && watermark && invalidation) {
+    lifecycleEvidenceValid = isChannexFullSyncInvalidatingLifecycleEvent("AIRBNB", watermark.eventType)
+      ? compareLifecycle(invalidation, watermark) === 0
+      : compareLifecycle(invalidation, watermark) < 0;
+  }
   const events = state?.lastFullSyncRequestedAt ? await client.distributionOutboxEvent.findMany({
     where: { ...scope, provider: "CHANNEX", syncMode: "FULL", createdAt: { gte: state.lastFullSyncRequestedAt } },
     orderBy: { createdAt: "asc" }, take: 3, include: { delivery: true },
@@ -82,22 +211,42 @@ async function context(client: Readers, input: Scope) {
   // Only local identities and the completed ARI pair enter the concurrency guard.
   // Unrelated credentials/connection metadata are neither hashed nor returned.
   const signature = fingerprint({
-    dp: [dp.id, dp.updatedAt, dp.externalPropertyId, dp.externalPrimaryRoomTypeId, dp.externalPrimaryRatePlanId, dp.group.externalGroupId],
+    dp: [dp.id, dp.updatedAt, dp.externalPropertyId, dp.externalPrimaryRoomTypeId, dp.externalPrimaryRatePlanId],
+    group: [dp.group.id, dp.group.updatedAt, dp.group.externalGroupId],
     // activationRequestedAt and updatedAt intentionally stay outside this
     // material signature: the durable claim changes both before the POST.
-    connection: [connection.id, connection.externalConnectionId, connection.externalListingId, connection.status, connection.readinessRevision],
-    listing: [listing.id, listing.updatedAt, listing.connectionId, listing.externalListingId, record(listing.metadata).channexPropertyId, record(listing.metadata).channexRatePlanId],
+    connection: [connection.id, connection.externalConnectionId, connection.externalListingId, connection.status, connection.readinessRevision,
+      connection.lastLifecycleOccurredAt, connection.lastLifecycleOccurredAtMicros?.toString(), connection.lastLifecycleEventType,
+      connection.lastLifecycleEventPrecedence],
+    listing: [listing.id, listing.updatedAt, listing.connectionId, listing.externalListingId,
+      record(listing.metadata).channexPropertyId, record(listing.metadata).channexRatePlanId,
+      listing.connection.id, listing.connection.updatedAt],
+    invalidation: [lifecycleEvidenceValid, invalidation?.eventType, invalidation?.occurredAt,
+      invalidation?.occurredAtMicros.toString(), invalidation?.precedence],
     state: [state?.lastFullSyncRequestedAt, state?.lastFullSyncCompletedAt],
     events: events.map(e => [e.id, e.status, e.deliveryId, e.delivery?.status, e.delivery?.payloadHash]),
   });
-  return { dp, group: dp.group, connection, listing, state, events, signature };
+  return { dp, group: dp.group, connection, listing, state, events, invalidation, lifecycleEvidenceValid, signature };
 }
 type Context = Awaited<ReturnType<typeof context>>;
 
 function fullSyncReady(c: Context, scope: Scope, now: Date): boolean {
-  const { state, events, dp, listing } = c;
+  const { state, events, dp, group, listing, invalidation, lifecycleEvidenceValid } = c;
+  const mappingLastChangedAt = latestDate([
+    dp.updatedAt,
+    group.updatedAt,
+    listing.updatedAt,
+    listing.connection.updatedAt,
+  ]);
+  const invalidationFrontierAt = invalidation ? lifecycleFrontierAt(invalidation) : null;
+  const evidenceFrontierAt = mappingLastChangedAt && lifecycleEvidenceValid && (!invalidation || invalidationFrontierAt)
+    ? new Date(Math.max(mappingLastChangedAt.getTime(), invalidationFrontierAt?.getTime() ?? 0))
+    : null;
   if (!state || state.organizationId !== scope.organizationId || state.propertyId !== scope.propertyId ||
       !state.lastFullSyncRequestedAt || !state.lastFullSyncCompletedAt || events.length !== 2 ||
+      !validDate(state.lastFullSyncRequestedAt) || !validDate(state.lastFullSyncCompletedAt) ||
+      !validDate(now) || !evidenceFrontierAt ||
+      state.lastFullSyncRequestedAt <= evidenceFrontierAt ||
       state.lastFullSyncCompletedAt < state.lastFullSyncRequestedAt || state.lastFullSyncCompletedAt > now) return false;
   if (!events[0]?.correlationId || events[0].correlationId !== events[1]?.correlationId ||
       new Set(events.map(e => e.messageKind)).size !== 2 || new Set(events.map(e => e.deliveryId)).size !== 2) return false;
@@ -258,6 +407,7 @@ async function finalizeActivationVerified(args: Dependencies, c: Context, input:
   verifiedDecisionId: string;
   auditBase: ActivationAuditBase;
   claimedAt?: Date | null;
+  fullSyncRequiredAt?: Date | null;
 }) {
   const completedAt = new Date();
   await args.client.$transaction(async tx => {
@@ -266,8 +416,45 @@ async function finalizeActivationVerified(args: Dependencies, c: Context, input:
       current.dp.externalPropertyId !== c.dp.externalPropertyId ||
       current.connection.externalConnectionId !== c.connection.externalConnectionId ||
       current.dp.externalPrimaryRatePlanId !== c.dp.externalPrimaryRatePlanId ||
-      current.listing.id !== c.listing.id
-    ) fail("CONTEXT_CONFLICT");
+      current.listing.id !== c.listing.id ||
+      (input.fullSyncRequiredAt &&
+        !fullSyncReady(current, args, input.fullSyncRequiredAt))
+    ) {
+      throw new AirbnbActivationError(
+        "OTA_AIRBNB_ACTIVATION_RECONCILIATION_REQUIRED",
+        true
+      );
+    }
+    if (input.claimedAt) {
+      const currentClaim = current.connection.activationRequestedAt;
+      if (
+        !validDate(input.claimedAt) ||
+        !validDate(currentClaim) ||
+        currentClaim!.getTime() !== input.claimedAt.getTime()
+      ) {
+        throw new AirbnbActivationError(
+          "OTA_AIRBNB_ACTIVATION_RECONCILIATION_REQUIRED",
+          true
+        );
+      }
+      const released = await tx.otaChannelConnection.updateMany({
+        where: {
+          id: c.connection.id,
+          organizationId: args.organizationId,
+          propertyId: args.propertyId,
+          provider: "AIRBNB",
+          externalConnectionId: c.connection.externalConnectionId,
+          activationRequestedAt: input.claimedAt,
+        },
+        data: { activationRequestedAt: null },
+      });
+      if (released.count !== 1) {
+        throw new AirbnbActivationError(
+          "OTA_AIRBNB_ACTIVATION_RECONCILIATION_REQUIRED",
+          true
+        );
+      }
+    }
     await tx.apmsAuditEntry.upsert({
       where: { decisionId: input.verifiedDecisionId },
       update: {},
@@ -291,19 +478,6 @@ async function finalizeActivationVerified(args: Dependencies, c: Context, input:
           status: { in: ["PENDING", "UNKNOWN"] },
         },
         data: { status: "SUCCESS", reason: null, completedAt },
-      });
-    }
-    if (input.claimedAt) {
-      await tx.otaChannelConnection.updateMany({
-        where: {
-          id: c.connection.id,
-          organizationId: args.organizationId,
-          propertyId: args.propertyId,
-          provider: "AIRBNB",
-          externalConnectionId: c.connection.externalConnectionId,
-          activationRequestedAt: input.claimedAt,
-        },
-        data: { activationRequestedAt: null },
       });
     }
   }, { isolationLevel: "Serializable" });
@@ -376,6 +550,7 @@ export async function activateAirbnbForHost(args: Dependencies & {
       verifiedDecisionId: `${decisionId}:verified`,
       auditBase,
       claimedAt: wasActive ? null : now,
+      fullSyncRequiredAt: wasActive ? null : now,
     });
   } catch (error) {
     if (!wasActive) {

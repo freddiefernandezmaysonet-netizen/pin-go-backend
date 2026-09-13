@@ -9,6 +9,12 @@ import {
 } from "./airbnb-host-activation.service.js";
 import { AirbnbActivationError } from "./airbnb-host-activation.http-transport.js";
 import { calculateChannexAriCanonicalJsonIntegrity } from "../pms/outbound/channex-ari-canonical-json.policy.js";
+import {
+  CHANNEX_CHANNEL_LIFECYCLE_APPLIED_AUDIT_SUMMARY,
+  CHANNEX_CHANNEL_LIFECYCLE_SKIPPED_AUDIT_SUMMARY,
+  CHANNEX_CHANNEL_LIFECYCLE_EVENT_PRECEDENCE,
+  type ChannexChannelLifecycleEventType,
+} from "./channex-channel-lifecycle.evidence.js";
 
 const property = "11111111-1111-4111-8111-111111111111";
 const room = "22222222-2222-4222-8222-222222222222";
@@ -17,18 +23,60 @@ const channel = "44444444-4444-4444-8444-444444444444";
 const group = "55555555-5555-4555-8555-555555555555";
 const mapping = "66666666-6666-4666-8666-666666666666";
 const now = new Date("2026-09-13T18:00:00Z");
+const mappingChangedAt = new Date("2026-09-13T15:25:00Z");
+const lifecycleOccurredAt = new Date("2026-09-13T15:30:00Z");
 const scope = { organizationId: "org-1", propertyId: "property-1" };
 
+function lifecycleAudit(
+  connectionId: string,
+  eventType: ChannexChannelLifecycleEventType,
+  occurredAt: Date,
+  outcome: "APPLIED" | "STALE_OR_SUPERSEDED" = "APPLIED",
+) {
+  const applied = outcome === "APPLIED";
+  return {
+    id: `audit-${eventType}-${occurredAt.getTime()}-${outcome}`,
+    ...scope,
+    entityType: "DISTRIBUTION",
+    entityId: connectionId,
+    engine: "OTA_DISTRIBUTION",
+    eventType: applied ? "DECISION_APPLIED" : "DECISION_SKIPPED",
+    status: "SUCCESS",
+    summary: applied
+      ? CHANNEX_CHANNEL_LIFECYCLE_APPLIED_AUDIT_SUMMARY
+      : CHANNEX_CHANNEL_LIFECYCLE_SKIPPED_AUDIT_SUMMARY,
+    reason: eventType,
+    metadata: {
+      provider: "AIRBNB",
+      externalPropertyId: property,
+      externalConnectionId: channel,
+      externalChannelCode: "ABB",
+      sourceOccurredAt: occurredAt.toISOString(),
+      sourceOccurredAtMicros: (BigInt(occurredAt.getTime()) * 1000n).toString(),
+      sourceEventPrecedence: CHANNEX_CHANNEL_LIFECYCLE_EVENT_PRECEDENCE[eventType],
+      orderingOutcome: outcome,
+      canonicalReadinessPromotion: false,
+    },
+    createdAt: occurredAt,
+    decisionId: `lifecycle-${eventType}-${occurredAt.getTime()}`,
+  };
+}
+
 function fixture() {
-  const dp = { ...scope, id: "dp-1", platform: "CHANNEX", provisioningStatus: "READY", updatedAt: now,
+  const dp = { ...scope, id: "dp-1", groupId: "group-row-1", platform: "CHANNEX", provisioningStatus: "READY", updatedAt: mappingChangedAt,
     externalPropertyId: property, externalPrimaryRoomTypeId: room, externalPrimaryRatePlanId: rate,
     property: { id: scope.propertyId, organizationId: scope.organizationId, distributionEnabled: true, distributionStatus: "ACTIVE", timezone: "America/Puerto_Rico" },
-    group: { organizationId: scope.organizationId, platform: "CHANNEX", provisioningStatus: "READY", externalGroupId: group } };
+    group: { id: "group-row-1", organizationId: scope.organizationId, platform: "CHANNEX", provisioningStatus: "READY", externalGroupId: group, updatedAt: mappingChangedAt } };
   const connection = { ...scope, id: "ota-1", provider: "AIRBNB", distributionPropertyId: dp.id,
-    externalConnectionId: channel, externalListingId: null, status: "AUTHORIZATION_REQUIRED", readinessRevision: 1, updatedAt: now, activationRequestedAt: null as Date | null };
-  const listing = { id: "listing-1", connectionId: "pms-1", propertyId: scope.propertyId, externalListingId: room, updatedAt: now,
+    externalConnectionId: channel, externalListingId: null, status: "AUTHORIZATION_REQUIRED", readinessRevision: 1,
+    updatedAt: lifecycleOccurredAt, activationRequestedAt: null as Date | null,
+    lastLifecycleOccurredAt: lifecycleOccurredAt,
+    lastLifecycleOccurredAtMicros: BigInt(lifecycleOccurredAt.getTime()) * 1000n,
+    lastLifecycleEventType: "updated_channel",
+    lastLifecycleEventPrecedence: CHANNEX_CHANNEL_LIFECYCLE_EVENT_PRECEDENCE.updated_channel };
+  const listing = { id: "listing-1", connectionId: "pms-1", propertyId: scope.propertyId, externalListingId: room, updatedAt: mappingChangedAt,
     metadata: { provider: "CHANNEX", channexPropertyId: property, channexRatePlanId: rate },
-    connection: { id: "pms-1", organizationId: scope.organizationId, provider: "CHANNEX", status: "ACTIVE" } };
+    connection: { id: "pms-1", organizationId: scope.organizationId, provider: "CHANNEX", status: "ACTIVE", updatedAt: mappingChangedAt } };
   const state = { ...scope, lastFullSyncRequestedAt: new Date("2026-09-13T15:36:00Z"), lastFullSyncCompletedAt: new Date("2026-09-13T15:37:00Z") };
   const events = ["AVAILABILITY", "RATES_RESTRICTIONS"].map(messageKind => {
     const payload = { values: [{ property_id: property, ...(messageKind === "AVAILABILITY" ? { room_type_id: room, availability: 1 } : { rate_plan_id: rate, rate: 150 }), date_from: "2026-09-13", date_to: "2028-01-25" }] };
@@ -40,6 +88,7 @@ function fixture() {
   const remote = { data: { id: channel, type: "channel", attributes: { channel: "AirBNB", is_active: false,
     properties: [property], rate_plans: [{ id: mapping, rate_plan_id: rate, settings: { listing_id: "551126434553599406" } }] }, relationships: { group: { data: { id: group, type: "group" } } } } };
   const audits = new Map<string, any>();
+  const lifecycleAudits = [lifecycleAudit(connection.id, "updated_channel", lifecycleOccurredAt)];
   const queries: any[] = [], writes: any[] = [];
   let posts = 0, gets = 0, reconciles = 0;
   const client: any = {
@@ -57,11 +106,27 @@ function fixture() {
     distributionOutboxEvent: { findMany: async () => structuredClone(events) },
     apmsAuditEntry: {
       findUnique: async (q: any) => audits.get(q.where.decisionId) ?? null,
-      findMany: async (q: any) => [...audits.values()].filter(a =>
-        a.organizationId === q.where.organizationId && a.propertyId === q.where.propertyId &&
-        a.entityType === q.where.entityType && a.entityId === q.where.entityId &&
-        a.engine === q.where.engine && a.eventType === q.where.eventType &&
-        q.where.status.in.includes(a.status)).slice(0, q.take),
+      findMany: async (q: any) => {
+        queries.push(q);
+        if (q.where.summary?.in) {
+          const reasons = q.where.reason?.in ?? [];
+          return structuredClone(lifecycleAudits.filter(a =>
+            a.organizationId === q.where.organizationId &&
+            a.propertyId === q.where.propertyId &&
+            a.entityType === q.where.entityType &&
+            a.entityId === q.where.entityId &&
+            a.engine === q.where.engine &&
+            q.where.eventType.in.includes(a.eventType) &&
+            a.status === q.where.status &&
+            q.where.summary.in.includes(a.summary) &&
+            reasons.includes(a.reason)));
+        }
+        return [...audits.values()].filter(a =>
+          a.organizationId === q.where.organizationId && a.propertyId === q.where.propertyId &&
+          a.entityType === q.where.entityType && a.entityId === q.where.entityId &&
+          a.engine === q.where.engine && a.eventType === q.where.eventType &&
+          q.where.status.in.includes(a.status)).slice(0, q.take);
+      },
       create: async (q: any) => { assert(!audits.has(q.data.decisionId)); audits.set(q.data.decisionId, q.data); return q.data; },
       update: async (q: any) => { Object.assign(audits.get(q.where.decisionId), q.data); return audits.get(q.where.decisionId); },
       updateMany: async (q: any) => {
@@ -86,7 +151,7 @@ function fixture() {
     activationTransport: { activate: async (id: string) => { assert.equal(id, channel); posts++; remote.data.attributes.is_active = true; } },
     reconcile: async () => { reconciles++; }, channelId: channel, mappingId: mapping, listingId: "551126434553599406",
     confirmation: AIRBNB_ACTIVATION_CONFIRMATION, requestedByUserId: "host-1", requestKey: "activation-12345678" };
-  return { args, dp, connection, listing, state, events, remote, audits, queries, writes, counts: () => ({ posts, gets, reconciles }) };
+  return { args, dp, connection, listing, state, events, remote, audits, lifecycleAudits, queries, writes, counts: () => ({ posts, gets, reconciles }) };
 }
 
 test("read-only inspection verifies the existing mapping and completed 500-day ARI pair", async () => {
@@ -97,7 +162,7 @@ test("read-only inspection verifies the existing mapping and completed 500-day A
   assert.deepEqual(f.queries[0].where, { ...scope, platform: "CHANNEX" });
 });
 
-test("explicit activation is audited before one POST, verified by GET, and reconciled without forcing ACTIVE", async () => {
+test("direct lifecycle then Full Sync sequence permits one audited activation POST", async () => {
   const f = fixture();
   const realActivate = f.args.activationTransport.activate;
   f.args.activationTransport.activate = async id => {
@@ -113,6 +178,74 @@ test("explicit activation is audited before one POST, verified by GET, and recon
   assert.equal([...f.audits.values()].filter(a => a.eventType === "ACTIVATION_VERIFIED").length, 1);
   assert.equal((await activateAirbnbForHost(f.args)).outcome, "ALREADY_ACTIVE");
   assert.equal(f.counts().posts, 1);
+});
+
+test("an invalidating lifecycle event after Full Sync blocks before claim or POST", async () => {
+  const f = fixture();
+  const invalidatedAt = new Date("2026-09-13T16:00:00Z");
+  f.connection.updatedAt = invalidatedAt;
+  f.connection.readinessRevision++;
+  f.connection.lastLifecycleOccurredAt = invalidatedAt;
+  f.connection.lastLifecycleOccurredAtMicros = BigInt(invalidatedAt.getTime()) * 1000n;
+  f.connection.lastLifecycleEventType = "updated_channel";
+  f.connection.lastLifecycleEventPrecedence = CHANNEX_CHANNEL_LIFECYCLE_EVENT_PRECEDENCE.updated_channel;
+  f.lifecycleAudits.unshift(lifecycleAudit(f.connection.id, "updated_channel", invalidatedAt));
+
+  await assert.rejects(() => activateAirbnbForHost(f.args), /FULL_SYNC_REQUIRED/);
+  assert.equal(f.counts().posts, 0);
+  assert.equal(f.writes.length, 0);
+  assert.equal(f.audits.size, 0);
+});
+
+test("a stale-delivered invalidation between Full Sync and activate_channel cannot revive that sync", async () => {
+  const f = fixture();
+  const invalidatedAt = new Date("2026-09-13T16:00:00Z");
+  const activatedAt = new Date("2026-09-13T16:01:00Z");
+  f.connection.updatedAt = activatedAt;
+  f.connection.readinessRevision++;
+  f.connection.lastLifecycleOccurredAt = activatedAt;
+  f.connection.lastLifecycleOccurredAtMicros = BigInt(activatedAt.getTime()) * 1000n;
+  f.connection.lastLifecycleEventType = "activate_channel";
+  f.connection.lastLifecycleEventPrecedence = CHANNEX_CHANNEL_LIFECYCLE_EVENT_PRECEDENCE.activate_channel;
+  f.lifecycleAudits.push(lifecycleAudit(
+    f.connection.id,
+    "updated_channel",
+    invalidatedAt,
+    "STALE_OR_SUPERSEDED",
+  ));
+
+  await assert.rejects(() => activateAirbnbForHost(f.args), /FULL_SYNC_REQUIRED/);
+  assert.equal(f.counts().posts, 0);
+  assert.equal(f.writes.length, 0);
+  assert.equal(f.audits.size, 0);
+});
+
+test("a durable mapping change after Full Sync blocks before claim or POST", async () => {
+  const f = fixture();
+  f.listing.updatedAt = new Date("2026-09-13T16:00:00Z");
+
+  await assert.rejects(() => activateAirbnbForHost(f.args), /FULL_SYNC_REQUIRED/);
+  assert.equal(f.counts().posts, 0);
+  assert.equal(f.writes.length, 0);
+  assert.equal(f.audits.size, 0);
+});
+
+test("a Full Sync request in the lifecycle frontier millisecond blocks before POST", async () => {
+  const f = fixture();
+  f.state.lastFullSyncRequestedAt = new Date(lifecycleOccurredAt);
+
+  await assert.rejects(() => activateAirbnbForHost(f.args), /FULL_SYNC_REQUIRED/);
+  assert.equal(f.counts().posts, 0);
+  assert.equal(f.writes.length, 0);
+});
+
+test("missing durable audit for the current invalidating lifecycle blocks activation", async () => {
+  const f = fixture();
+  f.lifecycleAudits.length = 0;
+
+  await assert.rejects(() => activateAirbnbForHost(f.args), /FULL_SYNC_REQUIRED/);
+  assert.equal(f.counts().posts, 0);
+  assert.equal(f.writes.length, 0);
 });
 
 test("an already active channel needs no repeated POST or new Full Sync", async () => {
@@ -224,6 +357,73 @@ test("a successful POST response without an active GET is never reported as acti
   assert.equal([...f.audits.values()][0].status, "UNKNOWN");
   assert.equal([...f.audits.values()].filter(a => a.eventType === "ACTIVATION_VERIFIED").length, 0);
   assert.equal((await inspectAirbnbActivation(f.args)).status, "CHECK_REQUIRED");
+});
+
+test("an invalidation persisted after POST prevents verified activation from reviving the old Full Sync", async () => {
+  const f = fixture();
+  const send = f.args.activationTransport.activate;
+  const invalidatedAt = new Date("2026-09-13T16:00:00Z");
+  f.args.activationTransport.activate = async id => {
+    await send(id);
+    f.connection.activationRequestedAt = null;
+    f.connection.updatedAt = invalidatedAt;
+    f.connection.readinessRevision++;
+    f.connection.lastLifecycleOccurredAt = invalidatedAt;
+    f.connection.lastLifecycleOccurredAtMicros = BigInt(invalidatedAt.getTime()) * 1000n;
+    f.connection.lastLifecycleEventType = "updated_channel";
+    f.connection.lastLifecycleEventPrecedence = CHANNEX_CHANNEL_LIFECYCLE_EVENT_PRECEDENCE.updated_channel;
+    f.lifecycleAudits.push(lifecycleAudit(f.connection.id, "updated_channel", invalidatedAt));
+  };
+
+  await assert.rejects(
+    () => activateAirbnbForHost(f.args),
+    /RECONCILIATION_REQUIRED/,
+  );
+  assert.equal(f.counts().posts, 1);
+  assert.equal([...f.audits.values()].find(a => a.eventType === "ACTIVATION_REQUESTED")?.status, "UNKNOWN");
+  assert.equal([...f.audits.values()].filter(a => a.eventType === "ACTIVATION_VERIFIED").length, 0);
+});
+
+for (const [name, replacement] of [
+  ["lost", null],
+  ["replaced", new Date("2026-09-13T18:00:01Z")],
+] as const) test(`a ${name} activation claim cannot be finalized as SUCCESS`, async () => {
+  const f = fixture();
+  const send = f.args.activationTransport.activate;
+  f.args.activationTransport.activate = async id => {
+    await send(id);
+    f.connection.activationRequestedAt = replacement;
+  };
+
+  await assert.rejects(
+    () => activateAirbnbForHost(f.args),
+    /RECONCILIATION_REQUIRED/,
+  );
+  assert.equal(f.counts().posts, 1);
+  const requested = [...f.audits.values()].find(a => a.eventType === "ACTIVATION_REQUESTED");
+  assert.equal(requested?.status, "UNKNOWN");
+  assert.notEqual(requested?.status, "SUCCESS");
+  assert.equal([...f.audits.values()].filter(a => a.eventType === "ACTIVATION_VERIFIED").length, 0);
+});
+
+test("a failed activation-claim release CAS cannot write successful audits", async () => {
+  const f = fixture();
+  const update = f.args.client.otaChannelConnection.updateMany;
+  f.args.client.otaChannelConnection.updateMany = async (q: any) => {
+    if (q.where.activationRequestedAt instanceof Date && q.data.activationRequestedAt === null) {
+      return { count: 0 };
+    }
+    return update(q);
+  };
+
+  await assert.rejects(
+    () => activateAirbnbForHost(f.args),
+    /RECONCILIATION_REQUIRED/,
+  );
+  assert.equal(f.counts().posts, 1);
+  const requested = [...f.audits.values()].find(a => a.eventType === "ACTIVATION_REQUESTED");
+  assert.equal(requested?.status, "UNKNOWN");
+  assert.equal([...f.audits.values()].filter(a => a.eventType === "ACTIVATION_VERIFIED").length, 0);
 });
 
 test("explicit GET-only verification closes an uncertain audit without another activation POST", async () => {

@@ -12,7 +12,17 @@ on:
       - 'src/distribution/airbnb-host-self-service.listings.service.test.ts'
       - 'src/distribution/airbnb-property-auto-matching.ts'
       - 'src/distribution/airbnb-property-auto-matching.test.ts'
+      - 'src/distribution/airbnb-host-activation.service.ts'
+      - 'src/distribution/airbnb-host-activation.service.test.ts'
       - 'src/distribution/channex-airbnb-listings.transport.test.ts'
+      - 'src/distribution/channex-airbnb-transport-readiness.policy.ts'
+      - 'src/distribution/channex-airbnb-transport-readiness.policy.test.ts'
+      - 'src/distribution/channex-canonical-readiness.service.ts'
+      - 'src/distribution/channex-canonical-readiness.service.test.ts'
+      - 'src/distribution/channex-channel-identity.ts'
+      - 'src/distribution/channex-channel-identity.test.ts'
+      - 'src/distribution/channex-channel-lifecycle.evidence.ts'
+      - 'src/distribution/channex-channel-lifecycle.evidence.test.ts'
       - 'src/distribution/ota-connection-center.runtime-composition.ts'
       - 'src/distribution/ota-connection-center.runtime-composition.test.ts'
       - 'src/routes/dashboard.airbnb-host-self-service.route.ts'
@@ -74,6 +84,14 @@ jobs:
           src/distribution/airbnb-property-auto-matching.test.ts
           src/distribution/airbnb-property-auto-matching.ts
           src/distribution/channex-airbnb-listings.transport.test.ts
+          src/distribution/channex-airbnb-transport-readiness.policy.test.ts
+          src/distribution/channex-airbnb-transport-readiness.policy.ts
+          src/distribution/channex-canonical-readiness.service.test.ts
+          src/distribution/channex-canonical-readiness.service.ts
+          src/distribution/channex-channel-identity.test.ts
+          src/distribution/channex-channel-identity.ts
+          src/distribution/channex-channel-lifecycle.evidence.test.ts
+          src/distribution/channex-channel-lifecycle.evidence.ts
           src/distribution/ota-connection-center.runtime-composition.test.ts
           src/distribution/ota-connection-center.runtime-composition.ts
           src/routes/dashboard.airbnb-host-self-service.activation.route.test.ts
@@ -92,19 +110,36 @@ jobs:
             }
           done < "$RUNNER_TEMP/actual.txt"
 
-      - name: Prove certified write-capable Channex core remains frozen
+      - name: Prove unaffected certified Channex transports and workers remain frozen
         run: |
           git diff --exit-code origin/main...HEAD -- \
             src/pms \
             src/workers \
-            src/distribution/channex-channel-identity.ts \
             src/distribution/channex-readonly.http-transport.ts \
-            src/distribution/channex-white-label.http-transport.ts \
-            src/distribution/channex-canonical-readiness.service.ts \
-            src/distribution/channex-channel-lifecycle.evidence.ts \
-            src/distribution/channex-airbnb-transport-readiness.policy.ts
+            src/distribution/channex-white-label.http-transport.ts
 
-      - name: Prove scope is read-only listing discovery and details corroboration only
+      - name: Verify certified Channex core fingerprint
+        run: npm run test:channex-certified-core-freeze
+
+      - name: Type-check coordinated lifecycle, readiness and activation boundaries
+        run: |
+          npx tsc -p tsconfig.ota-connection-reconciliation-e1.json --noEmit
+          npx tsc -p tsconfig.ota-connection-reconciliation-e2.json --noEmit
+          ./node_modules/.bin/tsc --noEmit --strict --target ES2022 --module ESNext --moduleResolution Bundler --types node --skipLibCheck \
+            src/distribution/airbnb-host-activation.http-transport.ts \
+            src/distribution/airbnb-host-activation.service.ts
+
+      - name: Run coordinated lifecycle, readiness and activation certification
+        run: |
+          node --import tsx --test \
+            src/distribution/channex-channel-identity.test.ts \
+            src/distribution/channex-channel-lifecycle.evidence.test.ts \
+            src/distribution/channex-airbnb-transport-readiness.policy.test.ts \
+            src/distribution/channex-canonical-readiness.service.test.ts \
+            src/distribution/airbnb-host-activation.service.test.ts \
+            src/distribution/ota-connection-center.runtime-composition.test.ts
+
+      - name: Prove listing-discovery sub-scope remains read-only
         shell: bash
         run: |
           ! grep -R -E '/mappings|/activate|load_future_reservations|check_readiness' \
@@ -131,7 +166,6 @@ jobs:
             src/distribution/channex-airbnb-listings.transport.test.ts \
             src/distribution/airbnb-host-self-service.listings.service.test.ts \
             src/routes/dashboard.airbnb-host-self-service.listings.route.test.ts \
-            src/distribution/ota-connection-center.runtime-composition.test.ts \
             src/distribution/airbnb-host-self-service.service.test.ts \
             src/distribution/airbnb-host-self-service.callback-verifier.test.ts \
             src/distribution/airbnb-host-self-service.callback-persistence.test.ts
