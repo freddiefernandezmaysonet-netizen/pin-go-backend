@@ -183,7 +183,8 @@ function parseExactChannel(args: {
     channel.type !== "channel" ||
     !attributes ||
     channelId !== args.channelId ||
-    attributes.channel !== "Airbnb" ||
+    typeof attributes.channel !== "string" ||
+    attributes.channel.toLowerCase() !== "airbnb" ||
     attributes.is_active !== false ||
     !Array.isArray(properties) ||
     !properties.every((value) => typeof value === "string" && UUID.test(value)) ||
