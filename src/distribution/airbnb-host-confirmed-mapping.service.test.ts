@@ -122,11 +122,11 @@ function channelPayload(
   };
 }
 
-function mappingResponse() {
+function mappingResponse(resourceId = CHANNEL_ID) {
   return {
     data: {
       type: "channel_rate_plan",
-      id: CHANNEL_ID,
+      id: resourceId,
       attributes: {
         id: MAPPING_ID,
         settings: { listing_id: LISTING_ID },
@@ -359,4 +359,61 @@ test("rejects a malformed mapping success response instead of advancing lifecycl
       error.code === "OTA_AIRBNB_MAPPING_RESPONSE_INVALID"
   );
   assert.equal(h.calls.createMapping, 1);
+});
+
+test("accepts a mapping resource id distinct from its related channel id", async () => {
+  const h = harness();
+  h.dependencies.mappingTransport.createMapping = async () => {
+    h.calls.createMapping += 1;
+    return mappingResponse(MAPPING_ID);
+  };
+  assert.deepEqual(await execute(h), {
+    outcome: "MAPPING_SUBMITTED",
+    listingId: LISTING_ID,
+    mappingId: MAPPING_ID,
+  });
+  assert.deepEqual(h.calls, { discover: 1, getChannel: 1, createMapping: 1 });
+});
+
+test("mapping response rejects invalid identities and missing evidence without retrying", async () => {
+  const mutations: Array<(payload: ReturnType<typeof mappingResponse>) => void> = [
+    payload => { payload.data.id = "invalid"; },
+    payload => { Reflect.deleteProperty(payload.data, "id"); },
+    payload => { payload.data.type = "channel"; },
+    payload => { payload.data.attributes.id = "invalid"; },
+    payload => { Reflect.deleteProperty(payload.data, "attributes"); },
+    payload => { payload.data.attributes.settings.listing_id = "999999999"; },
+    payload => { Reflect.deleteProperty(payload.data.attributes, "settings"); },
+    payload => { payload.data.relationships.channel.data.id = MAPPING_ID; },
+    payload => { payload.data.relationships.channel.data.type = "property"; },
+    payload => { Reflect.deleteProperty(payload.data, "relationships"); },
+  ];
+  for (const mutate of mutations) {
+    const payload = mappingResponse();
+    mutate(payload);
+    const h = harness();
+    h.dependencies.mappingTransport.createMapping = async () => {
+      h.calls.createMapping += 1;
+      return payload;
+    };
+    await assert.rejects(execute(h), (error: unknown) =>
+      error instanceof AirbnbHostConfirmedMappingError &&
+      error.code === "OTA_AIRBNB_MAPPING_RESPONSE_INVALID"
+    );
+    assert.deepEqual(h.calls, { discover: 1, getChannel: 1, createMapping: 1 });
+  }
+});
+
+test("recognizes an existing mapping on an AirBNB channel without another mapping POST", async () => {
+  const channel = channelPayload([
+    { id: MAPPING_ID, ratePlanId: RATE_PLAN_ID, listingId: LISTING_ID },
+  ]);
+  channel.data.attributes.channel = "AirBNB";
+  const h = harness({ channel });
+  assert.deepEqual(await execute(h), {
+    outcome: "ALREADY_MAPPED",
+    listingId: LISTING_ID,
+    mappingId: MAPPING_ID,
+  });
+  assert.deepEqual(h.calls, { discover: 1, getChannel: 1, createMapping: 0 });
 });
