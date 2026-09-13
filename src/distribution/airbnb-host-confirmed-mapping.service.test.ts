@@ -206,6 +206,54 @@ test("accepts documented distinct data.id and attributes.id before one mapping s
   assert.deepEqual(h.calls, { discover: 1, getChannel: 1, createMapping: 1 });
 });
 
+test("accepts production AirBNB and adapter casing variants before exactly one mapping submission", async () => {
+  for (const adapter of ["AirBNB", "Airbnb", "AIRBNB", "airbnb"]) {
+    const channel = channelPayload();
+    channel.data.attributes.channel = adapter;
+    const h = harness({ channel });
+    assert.deepEqual(await execute(h), {
+      outcome: "MAPPING_SUBMITTED",
+      listingId: LISTING_ID,
+      mappingId: MAPPING_ID,
+    });
+    assert.deepEqual(h.calls, { discover: 1, getChannel: 1, createMapping: 1 });
+  }
+});
+
+test("rejects other adapters and non-string adapter values before mapping submission", async () => {
+  for (const adapter of ["BookingCom", "AirbnbOther", "", null, undefined, 1, ["AirBNB"]]) {
+    const channel = channelPayload();
+    Object.assign(channel.data.attributes, { channel: adapter });
+    const h = harness({ channel });
+    await assert.rejects(execute(h), (error: unknown) =>
+      error instanceof AirbnbHostConfirmedMappingError &&
+      error.code === "OTA_AIRBNB_MAPPING_CHANNEL_STATE_INVALID"
+    );
+    assert.equal(h.calls.createMapping, 0);
+  }
+});
+
+test("production AirBNB casing preserves channel, property, group and inactive-state guards", async () => {
+  const foreignId = "716305c4-561a-4561-a187-7f5b8aeb5920";
+  const invalidChannels = [
+    channelPayload([], false, foreignId),
+    channelPayload([], true),
+    channelPayload(),
+    channelPayload(),
+  ];
+  invalidChannels[2]!.data.attributes.properties = [foreignId];
+  invalidChannels[3]!.data.relationships.group.data.id = foreignId;
+  for (const channel of invalidChannels) {
+    channel.data.attributes.channel = "AirBNB";
+    const h = harness({ channel });
+    await assert.rejects(execute(h), (error: unknown) =>
+      error instanceof AirbnbHostConfirmedMappingError &&
+      error.code === "OTA_AIRBNB_MAPPING_CHANNEL_STATE_INVALID"
+    );
+    assert.equal(h.calls.createMapping, 0);
+  }
+});
+
 test("still rejects a channel resource whose data.id is not the expected channel id", async () => {
   const h = harness({
     channel: channelPayload([], false, "716305c4-561a-4561-a187-7f5b8aeb5920"),
