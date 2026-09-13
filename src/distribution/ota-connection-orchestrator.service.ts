@@ -28,8 +28,9 @@ export type OtaProvisioningRepository = {
     organizationId: string,
     propertyId: string,
     requestedByUserId: string,
-    now: Date
-  ): Promise<"ALIGNED" | "ALREADY_ALIGNED">;
+    now: Date,
+    options?: { createIfMissing: boolean }
+  ): Promise<"CREATED" | "ALIGNED" | "ALREADY_ALIGNED">;
   loadTenantSnapshot(organizationId: string, propertyId: string): Promise<ProvisioningSnapshot | null>;
   claimGroup(organizationId: string, groupId: string): Promise<boolean>;
   completeGroup(organizationId: string, groupId: string, externalGroupId: string, now: Date): Promise<void>;
@@ -124,7 +125,8 @@ export async function orchestrateOtaProvisioning(args: {
       args.organizationId,
       args.propertyId,
       args.requestedByUserId,
-      args.now ?? new Date()
+      args.now ?? new Date(),
+      { createIfMissing: true }
     );
     return { provisioningStatus: "READY" };
   }
@@ -228,5 +230,15 @@ export async function orchestrateOtaProvisioning(args: {
     }
   }
 
+  // External inventory is checkpointed before local linkage. A failed local
+  // transaction can therefore be retried through the READY branch without
+  // creating another property, room type or rate plan at the provider.
+  await args.repository.alignPmsListingToReadyDistributionMapping(
+    args.organizationId,
+    args.propertyId,
+    args.requestedByUserId,
+    now,
+    { createIfMissing: true }
+  );
   return { provisioningStatus: "READY" };
 }

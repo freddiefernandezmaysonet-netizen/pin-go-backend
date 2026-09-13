@@ -14,7 +14,13 @@ type ProvisioningPrismaClient = {
   };
   pmsListing: {
     findMany(args: any): Promise<any[]>;
+    findUnique(args: any): Promise<any>;
+    create(args: any): Promise<any>;
     updateMany(args: any): Promise<{ count: number }>;
+  };
+  pmsConnection: {
+    findUnique(args: any): Promise<any>;
+    create(args: any): Promise<any>;
   };
   apmsAuditEntry: {
     create(args: any): Promise<any>;
@@ -78,8 +84,10 @@ export class PrismaOtaProvisioningRepository implements OtaProvisioningRepositor
     organizationId: string,
     propertyId: string,
     requestedByUserId: string,
-    now: Date
-  ): Promise<"ALIGNED" | "ALREADY_ALIGNED"> {
+    now: Date,
+    options: { createIfMissing: boolean } = { createIfMissing: false }
+  ): Promise<"CREATED" | "ALIGNED" | "ALREADY_ALIGNED"> {
+    const actorId = requireText(requestedByUserId, "OTA_REQUESTED_BY_USER_ID_REQUIRED");
     return this.client.$transaction(async (tx) => {
       const distributionProperty = await tx.distributionProperty.findFirst({
         where: { organizationId, propertyId, platform: "CHANNEX" },
@@ -93,7 +101,7 @@ export class PrismaOtaProvisioningRepository implements OtaProvisioningRepositor
           externalPrimaryRoomTypeId: true,
           externalPrimaryRatePlanId: true,
           updatedAt: true,
-          property: { select: { id: true, organizationId: true } },
+          property: { select: { id: true, organizationId: true, name: true } },
           group: {
             select: {
               id: true,
@@ -177,6 +185,89 @@ export class PrismaOtaProvisioningRepository implements OtaProvisioningRepositor
           },
         },
       });
+      // Only canonical onboarding may create a missing link. The existing
+      // alignment-only entry point still rejects zero listings by default.
+      if (listings.length === 0 && options.createIfMissing) {
+        let connection = await tx.pmsConnection.findUnique({
+          where: { organizationId_provider: { organizationId, provider: "CHANNEX" } },
+          select: { id: true, organizationId: true, provider: true, status: true },
+        });
+        if (!connection) {
+          connection = await tx.pmsConnection.create({
+            data: {
+              organizationId,
+              provider: "CHANNEX",
+              status: "ACTIVE",
+              metadata: {
+                connectionType: "WHITE_LABEL_GLOBAL",
+                managedBy: "PinGo",
+                createdBy: "ota-provisioning.repository",
+                createdAt: now.toISOString(),
+              },
+            },
+            select: { id: true, organizationId: true, provider: true, status: true },
+          });
+        }
+        if (
+          !connection?.id || connection.organizationId !== organizationId ||
+          connection.provider !== "CHANNEX"
+        ) {
+          throw new OtaProvisioningRepositoryError("OTA_DISTRIBUTION_TENANT_MISMATCH");
+        }
+        if (connection.status !== "ACTIVE") {
+          throw new OtaProvisioningRepositoryError("OTA_CERTIFIED_PMS_CONNECTION_NOT_ACTIVE");
+        }
+        const occupiedRoom = await tx.pmsListing.findUnique({
+          where: {
+            connectionId_externalListingId: {
+              connectionId: connection.id,
+              externalListingId: canonicalInventory.externalPrimaryRoomTypeId,
+            },
+          },
+          select: { id: true },
+        });
+        if (occupiedRoom) {
+          throw new OtaProvisioningRepositoryError("OTA_PMS_MAPPING_ROOM_ALREADY_LINKED");
+        }
+        const created = await tx.pmsListing.create({
+          data: {
+            connectionId: connection.id,
+            propertyId,
+            externalListingId: canonicalInventory.externalPrimaryRoomTypeId,
+            name: distributionProperty.property.name,
+            metadata: {
+              provider: "CHANNEX",
+              channexPropertyId: canonicalInventory.externalPropertyId,
+              channexRatePlanId: canonicalInventory.externalPrimaryRatePlanId,
+              provisionedAt: now.toISOString(),
+            },
+          },
+          select: { id: true },
+        });
+        await tx.apmsAuditEntry.create({
+          data: {
+            organizationId,
+            propertyId,
+            entityType: "PMS_LISTING",
+            entityId: created.id,
+            engine: "OTA_DISTRIBUTION",
+            eventType: "PMS_LISTING_CREATED_FROM_DISTRIBUTION_MAPPING",
+            status: "SUCCESS",
+            severity: "INFO",
+            completedAt: now,
+            decisionId: `ota-pms-mapping-creation:v1:${distributionProperty.id}:${created.id}`,
+            summary: "Connection Center created the PMS listing from the ready distribution mapping",
+            reason: "CANONICAL_PROVISIONING_PMS_LINK_REQUIRED",
+            metadata: {
+              requestedByUserId: actorId,
+              pmsConnectionId: connection.id,
+              pmsListingId: created.id,
+              canonical: canonicalInventory,
+            },
+          },
+        });
+        return "CREATED";
+      }
       if (listings.length !== 1) {
         throw new OtaProvisioningRepositoryError(
           "OTA_CERTIFIED_PMS_LISTING_CARDINALITY_INVALID"
@@ -258,10 +349,7 @@ export class PrismaOtaProvisioningRepository implements OtaProvisioningRepositor
           summary: "Connection Center aligned the PMS listing to the ready distribution mapping",
           reason: "READY_DISTRIBUTION_MAPPING_IS_SOURCE_OF_TRUTH",
           metadata: {
-            requestedByUserId: requireText(
-              requestedByUserId,
-              "OTA_REQUESTED_BY_USER_ID_REQUIRED"
-            ),
+            requestedByUserId: actorId,
             pmsConnectionId: listing.connectionId,
             pmsListingId: listing.id,
             previous: {
