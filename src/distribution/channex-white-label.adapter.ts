@@ -281,6 +281,10 @@ export class ChannexWhiteLabelAdapter
       required(args.externalGroupId, "OTA_EXTERNAL_GROUP_ID_INVALID", 120)
     );
     launchUrl.searchParams.set("channels_filter", channelFilter);
+    if (args.provider === "BOOKING_COM") {
+      // Channex separates channel-list filtering from channels available to connect.
+      launchUrl.searchParams.set("available_channels", channelFilter);
+    }
     return { token, launchUrl: launchUrl.toString() };
   }
 }
