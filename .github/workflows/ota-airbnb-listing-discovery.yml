@@ -60,6 +60,10 @@ jobs:
           .github/workflows/ota-airbnb-listing-discovery.yml
           prisma/migrations/20260911153000_add_property_postal_code/migration.sql
           prisma/schema.prisma
+          src/distribution/airbnb-host-activation.http-transport.test.ts
+          src/distribution/airbnb-host-activation.http-transport.ts
+          src/distribution/airbnb-host-activation.service.test.ts
+          src/distribution/airbnb-host-activation.service.ts
           src/distribution/airbnb-host-confirmed-mapping.http-transport.test.ts
           src/distribution/airbnb-host-confirmed-mapping.http-transport.ts
           src/distribution/airbnb-host-confirmed-mapping.service.test.ts
@@ -72,6 +76,7 @@ jobs:
           src/distribution/channex-airbnb-listings.transport.test.ts
           src/distribution/ota-connection-center.runtime-composition.test.ts
           src/distribution/ota-connection-center.runtime-composition.ts
+          src/routes/dashboard.airbnb-host-self-service.activation.route.test.ts
           src/routes/dashboard.airbnb-host-self-service.listings.route.test.ts
           src/routes/dashboard.airbnb-host-self-service.mapping.route.test.ts
           src/routes/dashboard.airbnb-host-self-service.route.ts

@@ -20,6 +20,8 @@ import {
   type AirbnbHostConfirmedMappingClient,
 } from "./airbnb-host-confirmed-mapping.service.js";
 import { createAirbnbHostConfirmedMappingHttpTransport } from "./airbnb-host-confirmed-mapping.http-transport.js";
+import { createAirbnbActivationHttpTransport } from "./airbnb-host-activation.http-transport.js";
+import { activateAirbnbForHost, inspectAirbnbActivation, verifyAirbnbActivationForHost } from "./airbnb-host-activation.service.js";
 import {
   captureAirbnbCallbackPersistenceGuard,
   verifyAndPersistAirbnbHostCallback,
@@ -246,6 +248,10 @@ export function buildRuntimeOtaConnectionCenterComposition(args: {
   const canonicalReadinessClient = adaptPrismaCanonicalReadinessClient(
     args.prisma
   );
+  const activationTransport = createAirbnbActivationHttpTransport({
+    env: args.env, apiOrigin: config.provider.apiOrigin, apiKey: config.provider.apiKey,
+    timeoutMs: config.provider.timeoutMs, fetchImpl: args.fetchImpl,
+  });
   const airbnbClient = adaptPrismaAirbnbHostSelfServiceClient(args.prisma);
   const airbnbListingClient = adaptPrismaAirbnbListingDiscoveryClient(args.prisma);
   const airbnbMappingClient = adaptPrismaAirbnbHostConfirmedMappingClient(args.prisma);
@@ -315,6 +321,23 @@ export function buildRuntimeOtaConnectionCenterComposition(args: {
             requestedByUserId,
           }),
         listListings: discoverListings,
+        inspectActivation: (input) => inspectAirbnbActivation({ ...input, client: args.prisma, readonlyTransport }),
+        activate: (input) => activateAirbnbForHost({
+          ...input, client: args.prisma, readonlyTransport, activationTransport,
+          reconcile: () => reconcileCanonicalOtaReadiness({
+            client: canonicalReadinessClient, transport: readonlyTransport,
+            organizationId: input.organizationId, propertyId: input.propertyId,
+            requestedByUserId: input.requestedByUserId, provider: "AIRBNB", requestKey: input.requestKey,
+          }),
+        }),
+        verifyActivation: (input) => verifyAirbnbActivationForHost({
+          ...input, client: args.prisma, readonlyTransport,
+          reconcile: () => reconcileCanonicalOtaReadiness({
+            client: canonicalReadinessClient, transport: readonlyTransport,
+            organizationId: input.organizationId, propertyId: input.propertyId,
+            requestedByUserId: input.requestedByUserId, provider: "AIRBNB", requestKey: input.requestKey,
+          }),
+        }),
         confirmMapping: ({
           organizationId,
           propertyId,

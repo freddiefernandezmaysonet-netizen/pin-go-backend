@@ -58,6 +58,9 @@ test("complete configuration composes Airbnb self-service and mapping without ea
   assert.equal(typeof actions.airbnbHostSelfService?.issueConnectionLink, "function");
   assert.equal(typeof actions.airbnbHostSelfService?.listListings, "function");
   assert.equal(typeof actions.airbnbHostSelfService?.confirmMapping, "function");
+  assert.equal(typeof actions.airbnbHostSelfService?.inspectActivation, "function");
+  assert.equal(typeof actions.airbnbHostSelfService?.activate, "function");
+  assert.equal(typeof actions.airbnbHostSelfService?.verifyActivation, "function");
   assert.equal(typeof actions.airbnbHostSelfService?.verifyCallback, "function");
   assert.equal(fetchCalls, 0);
 });
