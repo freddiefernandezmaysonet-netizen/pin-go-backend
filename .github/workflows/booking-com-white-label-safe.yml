@@ -1,0 +1,99 @@
+name: Booking.com White Label Validation (backend)
+
+on:
+  push:
+    branches: [agent/booking-com-white-label-safe]
+  pull_request:
+    paths:
+      - src/distribution/channex-white-label.adapter.ts
+      - src/distribution/channex-white-label.booking-com.test.ts
+      - .github/workflows/booking-com-white-label-safe.yml
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      DATABASE_URL: postgresql://test:test@127.0.0.1:5432/pingo_ci
+      CHANNEX_API_KEY: test-api-key
+      CHANNEX_API_BASE_URL: https://staging.channex.io
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+      - name: Freeze files outside this change
+        run: |
+          git diff --exit-code 46485e0f821c3e5878671ae75fe77e33f34775cb HEAD -- . ':(exclude)src/distribution/channex-white-label.adapter.ts' ':(exclude)src/distribution/channex-white-label.booking-com.test.ts' ':(exclude).github/workflows/booking-com-white-label-safe.yml'
+          mkdir -p validation-evidence
+          git rev-parse HEAD > validation-evidence/head.txt
+          git diff --stat 46485e0f821c3e5878671ae75fe77e33f34775cb HEAD > validation-evidence/diff-stat.txt
+      - name: Install locked dependencies without lifecycle scripts
+        run: npm ci --ignore-scripts --no-audit --no-fund
+      - name: Generate and validate Prisma without migrations or database connections
+        run: |
+          ./node_modules/.bin/prisma generate --schema ./prisma
+          ./node_modules/.bin/prisma validate --schema ./prisma
+      - name: Prevent external network access during tests
+        run: |
+          cat > /tmp/pingo-test-network-guard.cjs <<'NODE'
+          const net = require('node:net');
+          const original = net.Socket.prototype.connect;
+          net.Socket.prototype.connect = function (...args) {
+            const options = Array.isArray(args[0]) ? args[0] : args;
+            const first = options[0];
+            const host = typeof first === 'object' ? first.host : (typeof options[1] === 'string' ? options[1] : 'localhost');
+            if (host && !['localhost', '127.0.0.1', '::1'].includes(host)) {
+              throw new Error('TEST_EXTERNAL_NETWORK_BLOCKED');
+            }
+            return original.apply(this, args);
+          };
+          NODE
+      - name: Run original and Booking.com adapter tests
+        env:
+          NODE_OPTIONS: --require /tmp/pingo-test-network-guard.cjs
+        run: node --import tsx --test src/distribution/channex-white-label.adapter.test.ts src/distribution/channex-white-label.booking-com.test.ts 2>&1 | tee validation-evidence/adapter-tests.txt
+      - name: Run full Connection Center and persistence suites
+        env:
+          NODE_OPTIONS: --require /tmp/pingo-test-network-guard.cjs
+        run: |
+          npm run test:distribution-connection-center 2>&1 | tee validation-evidence/connection-center-tests.txt
+          npm run test:ota-distribution-persistence 2>&1 | tee validation-evidence/persistence-tests.txt
+      - name: Verify certified core freeze
+        env:
+          NODE_OPTIONS: --require /tmp/pingo-test-network-guard.cjs
+        run: npm run test:channex-certified-core-freeze 2>&1 | tee validation-evidence/certified-core-freeze.txt
+      - name: Typecheck commercial OTA integration
+        run: npm run test:ota-commercial-closure-types 2>&1 | tee validation-evidence/ota-types.txt
+      - name: Audit full project types against unchanged main
+        if: always()
+        run: |
+          if [ ! -x ./node_modules/.bin/tsc ]; then exit 1; fi
+          git worktree add --detach /tmp/pingo-booking-baseline 46485e0f821c3e5878671ae75fe77e33f34775cb
+          ln -s "$GITHUB_WORKSPACE/node_modules" /tmp/pingo-booking-baseline/node_modules
+          set +e
+          (cd /tmp/pingo-booking-baseline && ./node_modules/.bin/tsc --noEmit --pretty false -p tsconfig.json) > validation-evidence/full-types-baseline.txt 2>&1
+          baseline=$?
+          ./node_modules/.bin/tsc --noEmit --pretty false -p tsconfig.json > validation-evidence/full-types-candidate.txt 2>&1
+          candidate=$?
+          set -e
+          printf 'baseline_exit=%s\ncandidate_exit=%s\n' "$baseline" "$candidate" | tee validation-evidence/full-types-status.txt
+          grep -c 'error TS' validation-evidence/full-types-baseline.txt || true
+          grep -c 'error TS' validation-evidence/full-types-candidate.txt || true
+          diff -u validation-evidence/full-types-baseline.txt validation-evidence/full-types-candidate.txt > validation-evidence/full-types-delta.txt || true
+          echo 'Full-project typecheck results are preserved separately from the focused OTA typecheck.'
+          exit "$candidate"
+      - name: Preserve validation evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: booking-com-backend-validation
+          path: validation-evidence/
+          retention-days: 7
