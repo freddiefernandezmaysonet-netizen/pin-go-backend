@@ -425,6 +425,7 @@ export function qualifyChannexCorrelatedFullSyncEvidence(input: {
   lastChannelActivatedAt: Date | null;
   lastLifecycleOccurredAt: Date | null;
   lifecycleReadinessFrontierAt: Date | null;
+  durableFullSyncInvalidationFrontierAt: Date | null;
   mappingLastChangedAt: Date | null;
 }): ChannexCorrelatedFullSyncQualification {
   const expectedOrganizationId = normalizedText(input.expectedOrganizationId);
@@ -485,6 +486,23 @@ export function qualifyChannexCorrelatedFullSyncEvidence(input: {
     return unqualifiedFullSync("LIFECYCLE_EVIDENCE_INVALID");
   }
 
+  let durableFullSyncInvalidationFrontierAt: Date | null = null;
+  if (activationPreservesMappedFullSync) {
+    if (!input.durableFullSyncInvalidationFrontierAt) {
+      return unqualifiedFullSync("LIFECYCLE_EVIDENCE_MISSING");
+    }
+    durableFullSyncInvalidationFrontierAt = validDate(
+      input.durableFullSyncInvalidationFrontierAt,
+    );
+    if (
+      !durableFullSyncInvalidationFrontierAt ||
+      durableFullSyncInvalidationFrontierAt.getTime() >
+        lastLifecycleOccurredAt.getTime()
+    ) {
+      return unqualifiedFullSync("LIFECYCLE_EVIDENCE_INVALID");
+    }
+  }
+
   if (!input.mappingLastChangedAt) {
     return unqualifiedFullSync("MAPPING_CHANGE_EVIDENCE_MISSING");
   }
@@ -495,9 +513,20 @@ export function qualifyChannexCorrelatedFullSyncEvidence(input: {
 
   const frontierAt = new Date(
     activationPreservesMappedFullSync
-      ? mappingLastChangedAt.getTime()
+      ? Math.max(
+          mappingLastChangedAt.getTime(),
+          durableFullSyncInvalidationFrontierAt!.getTime(),
+        )
       : Math.max(
           lastChannelActivatedAt.getTime(),
+          lifecycleReadinessFrontierAt.getTime(),
+          mappingLastChangedAt.getTime(),
+        ),
+  );
+  const strictEvidenceFrontierAt = new Date(
+    activationPreservesMappedFullSync
+      ? frontierAt.getTime()
+      : Math.max(
           lifecycleReadinessFrontierAt.getTime(),
           mappingLastChangedAt.getTime(),
         ),
@@ -545,7 +574,10 @@ export function qualifyChannexCorrelatedFullSyncEvidence(input: {
     });
   }
 
-  if (requestedAt.getTime() < frontierAt.getTime()) {
+  if (
+    requestedAt.getTime() <= strictEvidenceFrontierAt.getTime() ||
+    requestedAt.getTime() < frontierAt.getTime()
+  ) {
     return unqualifiedFullSync("FULL_SYNC_REQUEST_PREDATES_FRONTIER", {
       requestedAt,
       completedAt,

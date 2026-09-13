@@ -4,11 +4,16 @@ import test from "node:test";
 
 import {
   ChannexChannelEvidenceError,
+  CHANNEX_CHANNEL_LIFECYCLE_APPLIED_AUDIT_SUMMARY,
+  CHANNEX_CHANNEL_LIFECYCLE_SKIPPED_AUDIT_SUMMARY,
   CHANNEX_CHANNEL_LIFECYCLE_EVENT_MASK,
   CHANNEX_CHANNEL_LIFECYCLE_EVENT_PRECEDENCE,
   CHANNEX_CHANNEL_LIFECYCLE_EVENTS,
   applyChannexChannelLifecycleEvidence,
+  isChannexFullSyncInvalidatingLifecycleEvent,
+  latestChannexFullSyncInvalidationAuditEvidence,
   normalizeChannexChannelLifecycleEvent,
+  parseChannexFullSyncInvalidationAudit,
 } from "./channex-channel-lifecycle.evidence.js";
 
 const schema = readFileSync(
@@ -238,6 +243,7 @@ function epochMicros(timestamp: string): bigint {
 function client(options: {
   property?: any;
   connection?: any;
+  propertyState?: any;
   existingAudit?: boolean;
   updateCounts?: number[];
 } = {}) {
@@ -259,6 +265,8 @@ function client(options: {
         externalConnectionId: null,
         externalChannelCode: null,
         externalListingId: null,
+        activationRequestedAt: null,
+        lastFullSyncConfirmedAt: null,
         updatedAt: new Date("2026-09-06T17:00:00.000Z"),
         lastLifecycleOccurredAt: null,
         lastLifecycleOccurredAtMicros: null,
@@ -285,6 +293,20 @@ function client(options: {
           count:
             options.updateCounts?.[state.updates.length - 1] ?? 1,
         };
+      },
+    },
+    channexAriPropertyState: {
+      async findUnique() {
+        if (options.propertyState !== undefined) return options.propertyState;
+        const confirmedAt = connection?.lastFullSyncConfirmedAt;
+        return confirmedAt instanceof Date
+          ? {
+              organizationId: "org-1",
+              propertyId: "prop-1",
+              lastFullSyncRequestedAt: confirmedAt,
+              lastFullSyncCompletedAt: confirmedAt,
+            }
+          : null;
       },
     },
     apmsAuditEntry: {
@@ -781,7 +803,7 @@ test("disconnect_channel records a definitive disconnected fail-closed state", a
   assert.equal(patch.lastChannelActivatedAt, null);
 });
 
-test("activate_channel preserves mapped Full Sync while other lifecycle events invalidate it", async () => {
+test("Airbnb activate_channel preserves mapped Full Sync while other lifecycle events invalidate it", async () => {
   for (const eventType of CHANNEX_CHANNEL_LIFECYCLE_EVENTS) {
     const { value, state } = client();
     await applyChannexChannelLifecycleEvidence({
@@ -791,13 +813,196 @@ test("activate_channel preserves mapped Full Sync while other lifecycle events i
     const patch = state.updates[0].data;
     if (eventType === "activate_channel") {
       assert.equal("lastFullSyncConfirmedAt" in patch, false, eventType);
+      assert.equal("activationRequestedAt" in patch, false, eventType);
     } else {
       assert.equal(patch.lastFullSyncConfirmedAt, null, eventType);
+      assert.equal(patch.activationRequestedAt, null, eventType);
     }
     assert.equal(patch.paymentReadiness, "NOT_STARTED", eventType);
     assert.equal(patch.taxReadiness, "NOT_STARTED", eventType);
     assert.equal(patch.contentReadiness, "NOT_STARTED", eventType);
   }
+});
+
+test("Booking.com activate_channel invalidates mapped Full Sync", async () => {
+  const { value, state } = client({
+    connection: {
+      provider: "BOOKING_COM",
+      activationRequestedAt: new Date("2026-09-06T17:59:00.000Z"),
+      lastFullSyncConfirmedAt: new Date("2026-09-06T17:58:00.000Z"),
+    },
+  });
+  await applyChannexChannelLifecycleEvidence({
+    client: value,
+    payload: payload("activate_channel", {
+      payload: {
+        title: "Booking.com certification channel",
+        channel_id: EXTERNAL_CHANNEL_ID,
+        ota_name: "BookingCom",
+      },
+    }),
+  });
+
+  assert.equal(state.updates[0].data.lastFullSyncConfirmedAt, null);
+  assert.equal(state.updates[0].data.activationRequestedAt, null);
+  assert.equal(
+    isChannexFullSyncInvalidatingLifecycleEvent(
+      "BOOKING_COM",
+      "activate_channel"
+    ),
+    true
+  );
+  assert.equal(
+    isChannexFullSyncInvalidatingLifecycleEvent("AIRBNB", "activate_channel"),
+    false
+  );
+  assert.equal(
+    isChannexFullSyncInvalidatingLifecycleEvent(null, "activate_channel"),
+    true
+  );
+});
+
+test("selects the latest source-ordered applied or skipped lifecycle invalidation", () => {
+  const sourceOccurredAt = "2026-09-06T18:00:00.123456Z";
+  const persistedOccurredAt = "2026-09-06T18:00:00.123Z";
+  const audit = {
+    organizationId: "org-1",
+    propertyId: "prop-1",
+    entityType: "DISTRIBUTION",
+    entityId: "conn-1",
+    engine: "OTA_DISTRIBUTION",
+    eventType: "DECISION_APPLIED",
+    status: "SUCCESS",
+    summary: CHANNEX_CHANNEL_LIFECYCLE_APPLIED_AUDIT_SUMMARY,
+    reason: "updated_channel",
+    metadata: {
+      provider: "AIRBNB",
+      externalPropertyId: EXTERNAL_PROPERTY_ID,
+      externalConnectionId: EXTERNAL_CHANNEL_ID,
+      externalChannelCode: "ABB",
+      sourceOccurredAt: persistedOccurredAt,
+      sourceOccurredAtMicros: epochMicros(sourceOccurredAt).toString(),
+      sourceEventPrecedence: 20,
+      orderingOutcome: "APPLIED",
+      canonicalReadinessPromotion: false,
+    },
+  };
+  const expected = {
+    organizationId: "org-1",
+    propertyId: "prop-1",
+    connectionId: "conn-1",
+    provider: "AIRBNB" as const,
+    externalPropertyId: EXTERNAL_PROPERTY_ID,
+    externalConnectionId: EXTERNAL_CHANNEL_ID,
+  };
+
+  assert.equal(parseChannexFullSyncInvalidationAudit(null, expected), null);
+  assert.deepEqual(parseChannexFullSyncInvalidationAudit(audit, expected), {
+    eventType: "updated_channel",
+    occurredAt: new Date("2026-09-06T18:00:00.123Z"),
+    occurredAtMicros: epochMicros(sourceOccurredAt),
+    precedence: 20,
+  });
+
+  const laterSkippedAt = "2026-09-06T18:00:00.123457Z";
+  const skipped = {
+    ...audit,
+    eventType: "DECISION_SKIPPED",
+    summary: CHANNEX_CHANNEL_LIFECYCLE_SKIPPED_AUDIT_SUMMARY,
+    metadata: {
+      ...audit.metadata,
+      sourceOccurredAtMicros: epochMicros(laterSkippedAt).toString(),
+      orderingOutcome: "STALE_OR_SUPERSEDED",
+    },
+  };
+  assert.deepEqual(
+    latestChannexFullSyncInvalidationAuditEvidence(
+      [skipped, audit],
+      expected,
+    ),
+    {
+      eventType: "updated_channel",
+      occurredAt: new Date("2026-09-06T18:00:00.123Z"),
+      occurredAtMicros: epochMicros(laterSkippedAt),
+      precedence: 20,
+    },
+  );
+
+  const otherEpoch = {
+    ...skipped,
+    metadata: {
+      ...skipped.metadata,
+      externalConnectionId: UNKNOWN_CHANNEL_ID,
+    },
+  };
+  assert.equal(
+    latestChannexFullSyncInvalidationAuditEvidence([otherEpoch], expected),
+    null
+  );
+  assert.throws(
+    () => parseChannexFullSyncInvalidationAudit(otherEpoch, expected),
+    (error: unknown) =>
+      error instanceof ChannexChannelEvidenceError &&
+      error.code === "OTA_CHANNEL_FULL_SYNC_INVALIDATION_EVIDENCE_INVALID"
+  );
+});
+
+test("rejects malformed, cross-tenant, or non-invalidating lifecycle audit evidence", () => {
+  const sourceOccurredAt = "2026-09-06T18:00:00.123456Z";
+  const persistedOccurredAt = "2026-09-06T18:00:00.123Z";
+  const audit = {
+    organizationId: "org-1",
+    propertyId: "prop-1",
+    entityType: "DISTRIBUTION",
+    entityId: "conn-1",
+    engine: "OTA_DISTRIBUTION",
+    eventType: "DECISION_APPLIED",
+    status: "SUCCESS",
+    summary: CHANNEX_CHANNEL_LIFECYCLE_APPLIED_AUDIT_SUMMARY,
+    reason: "updated_channel",
+    metadata: {
+      provider: "AIRBNB",
+      externalPropertyId: EXTERNAL_PROPERTY_ID,
+      externalConnectionId: EXTERNAL_CHANNEL_ID,
+      externalChannelCode: "ABB",
+      sourceOccurredAt: persistedOccurredAt,
+      sourceOccurredAtMicros: epochMicros(sourceOccurredAt).toString(),
+      sourceEventPrecedence: 20,
+      orderingOutcome: "APPLIED",
+      canonicalReadinessPromotion: false,
+    },
+  };
+  const expected = {
+    organizationId: "org-1",
+    propertyId: "prop-1",
+    connectionId: "conn-1",
+    provider: "AIRBNB" as const,
+    externalPropertyId: EXTERNAL_PROPERTY_ID,
+    externalConnectionId: EXTERNAL_CHANNEL_ID,
+  };
+  const rejects = (candidate: unknown) =>
+    assert.throws(
+      () => parseChannexFullSyncInvalidationAudit(candidate, expected),
+      (error: unknown) =>
+        error instanceof ChannexChannelEvidenceError &&
+        error.code === "OTA_CHANNEL_FULL_SYNC_INVALIDATION_EVIDENCE_INVALID"
+    );
+
+  rejects({ ...audit, organizationId: "other-org" });
+  rejects({ ...audit, entityId: "other-connection" });
+  rejects({ ...audit, eventType: "DECISION_SKIPPED" });
+  rejects({
+    ...audit,
+    metadata: { ...audit.metadata, sourceOccurredAtMicros: "1" },
+  });
+  rejects({
+    ...audit,
+    reason: "activate_channel",
+    metadata: {
+      ...audit.metadata,
+      sourceEventPrecedence: 30,
+    },
+  });
 });
 
 test("lifecycle evidence fences and invalidates the external listing binding by event semantics", async () => {
@@ -953,6 +1158,228 @@ test("older lifecycle evidence is durably audited but never mutates state", asyn
     state.audits[0].data.metadata.persistedEventType,
     "deactivate_channel"
   );
+});
+
+test("a late-delivered invalidation between Full Sync and activate_channel revokes the durable latch", async () => {
+  const confirmedAt = new Date("2026-09-06T18:30:00.000Z");
+  const activationRequestedAt = new Date("2026-09-06T18:40:00.000Z");
+  const { value, state } = client({
+    connection: {
+      status: "ACTIVE",
+      externalConnectionId: EXTERNAL_CHANNEL_ID,
+      externalChannelCode: "ABB",
+      activationRequestedAt,
+      activatedAt: new Date("2026-09-06T19:00:00.000Z"),
+      lastFullSyncConfirmedAt: confirmedAt,
+      lastLifecycleOccurredAt: new Date("2026-09-06T19:00:00.000Z"),
+      lastLifecycleOccurredAtMicros: epochMicros("2026-09-06T19:00:00.000Z"),
+      lastLifecycleEventType: "activate_channel",
+      lastLifecycleEventPrecedence: 30,
+      readinessRevision: 7,
+    },
+  });
+
+  const result = await applyChannexChannelLifecycleEvidence({
+    client: value,
+    payload: payload("updated_channel", {
+      timestamp: "2026-09-06T18:45:00.000Z",
+    }),
+  });
+
+  assert.equal(result.ignored, true);
+  assert.equal(result.ignoredReason, "STALE_LIFECYCLE_EVENT");
+  assert.equal(state.updates.length, 1);
+  assert.equal(state.updates[0].where.lastFullSyncConfirmedAt, confirmedAt);
+  assert.equal(state.updates[0].where.activationRequestedAt, activationRequestedAt);
+  assert.equal(state.updates[0].data.status, "DEGRADED");
+  assert.equal(state.updates[0].data.activationRequestedAt, null);
+  assert.equal(state.updates[0].data.activatedAt, null);
+  assert.equal(state.updates[0].data.distributionReadiness, "IN_PROGRESS");
+  assert.equal(state.updates[0].data.lastFullSyncConfirmedAt, null);
+  assert.deepEqual(state.updates[0].data.readinessRevision, { increment: 1 });
+  assert.equal(state.audits[0].data.eventType, "DECISION_SKIPPED");
+  assert.equal(state.audits[0].data.metadata.fullSyncEvidenceInvalidated, true);
+  assert.equal(state.audits[0].data.metadata.canonicalReadinessRevision, 8);
+});
+
+test("a late-delivered invalidation between Full Sync request and completion revokes the durable latch", async () => {
+  const requestedAt = new Date("2026-09-06T18:20:00.000Z");
+  const confirmedAt = new Date("2026-09-06T18:30:00.000Z");
+  const { value, state } = client({
+    connection: {
+      status: "ACTIVE",
+      externalConnectionId: EXTERNAL_CHANNEL_ID,
+      externalChannelCode: "ABB",
+      lastFullSyncConfirmedAt: confirmedAt,
+      lastLifecycleOccurredAt: new Date("2026-09-06T19:00:00.000Z"),
+      lastLifecycleOccurredAtMicros: epochMicros("2026-09-06T19:00:00.000Z"),
+      lastLifecycleEventType: "activate_channel",
+      lastLifecycleEventPrecedence: 30,
+      readinessRevision: 7,
+    },
+    propertyState: {
+      organizationId: "org-1",
+      propertyId: "prop-1",
+      lastFullSyncRequestedAt: requestedAt,
+      lastFullSyncCompletedAt: confirmedAt,
+    },
+  });
+
+  await applyChannexChannelLifecycleEvidence({
+    client: value,
+    payload: payload("updated_channel", {
+      timestamp: "2026-09-06T18:25:00.000Z",
+    }),
+  });
+
+  assert.equal(state.updates.length, 1);
+  assert.equal(state.updates[0].data.status, "DEGRADED");
+  assert.equal(state.updates[0].data.lastFullSyncConfirmedAt, null);
+  assert.equal(state.audits[0].data.metadata.fullSyncEvidenceInvalidated, true);
+  assert.equal(
+    state.audits[0].data.metadata.fullSyncRequestBoundaryAt,
+    requestedAt.toISOString()
+  );
+});
+
+test("an invalidation in the same millisecond as the Full Sync request revokes fail-closed", async () => {
+  const requestedAt = new Date("2026-09-06T18:20:00.000Z");
+  const confirmedAt = new Date("2026-09-06T18:30:00.000Z");
+  const { value, state } = client({
+    connection: {
+      externalConnectionId: EXTERNAL_CHANNEL_ID,
+      externalChannelCode: "ABB",
+      lastFullSyncConfirmedAt: confirmedAt,
+      lastLifecycleOccurredAt: new Date("2026-09-06T19:00:00.000Z"),
+      lastLifecycleOccurredAtMicros: epochMicros("2026-09-06T19:00:00.000Z"),
+      lastLifecycleEventType: "activate_channel",
+      lastLifecycleEventPrecedence: 30,
+    },
+    propertyState: {
+      organizationId: "org-1",
+      propertyId: "prop-1",
+      lastFullSyncRequestedAt: requestedAt,
+      lastFullSyncCompletedAt: confirmedAt,
+    },
+  });
+
+  await applyChannexChannelLifecycleEvidence({
+    client: value,
+    payload: payload("updated_channel", {
+      timestamp: "2026-09-06T18:20:00.000Z",
+    }),
+  });
+
+  assert.equal(state.updates.length, 1);
+  assert.equal(state.updates[0].data.lastFullSyncConfirmedAt, null);
+  assert.equal(state.audits[0].data.metadata.fullSyncEvidenceInvalidated, true);
+});
+
+test("a microsecond invalidation whose ceiling equals the Full Sync request revokes fail-closed", async () => {
+  const requestedAt = new Date("2026-09-06T18:20:00.001Z");
+  const confirmedAt = new Date("2026-09-06T18:30:00.000Z");
+  const { value, state } = client({
+    connection: {
+      externalConnectionId: EXTERNAL_CHANNEL_ID,
+      externalChannelCode: "ABB",
+      lastFullSyncConfirmedAt: confirmedAt,
+      lastLifecycleOccurredAt: new Date("2026-09-06T19:00:00.000Z"),
+      lastLifecycleOccurredAtMicros: epochMicros("2026-09-06T19:00:00.000Z"),
+      lastLifecycleEventType: "activate_channel",
+      lastLifecycleEventPrecedence: 30,
+    },
+    propertyState: {
+      organizationId: "org-1",
+      propertyId: "prop-1",
+      lastFullSyncRequestedAt: requestedAt,
+      lastFullSyncCompletedAt: confirmedAt,
+    },
+  });
+
+  await applyChannexChannelLifecycleEvidence({
+    client: value,
+    payload: payload("updated_channel", {
+      timestamp: "2026-09-06T18:20:00.000456Z",
+    }),
+  });
+
+  assert.equal(state.updates.length, 1);
+  assert.equal(state.updates[0].data.lastFullSyncConfirmedAt, null);
+  assert.equal(state.audits[0].data.metadata.fullSyncEvidenceInvalidated, true);
+  assert.equal(
+    state.audits[0].data.metadata.fullSyncInvalidationFrontierAt,
+    requestedAt.toISOString()
+  );
+});
+
+test("a stale invalidation from another external channel epoch cannot revoke the current latch", async () => {
+  const requestedAt = new Date("2026-09-06T18:20:00.000Z");
+  const confirmedAt = new Date("2026-09-06T18:30:00.000Z");
+  const { value, state } = client({
+    connection: {
+      externalConnectionId: EXTERNAL_CHANNEL_ID,
+      externalChannelCode: "ABB",
+      lastFullSyncConfirmedAt: confirmedAt,
+      lastLifecycleOccurredAt: new Date("2026-09-06T19:00:00.000Z"),
+      lastLifecycleOccurredAtMicros: epochMicros("2026-09-06T19:00:00.000Z"),
+      lastLifecycleEventType: "activate_channel",
+      lastLifecycleEventPrecedence: 30,
+    },
+    propertyState: {
+      organizationId: "org-1",
+      propertyId: "prop-1",
+      lastFullSyncRequestedAt: requestedAt,
+      lastFullSyncCompletedAt: confirmedAt,
+    },
+  });
+
+  await applyChannexChannelLifecycleEvidence({
+    client: value,
+    payload: payload("updated_channel", {
+      timestamp: "2026-09-06T18:25:00.000Z",
+      payload: {
+        title: "Old Airbnb channel",
+        channel_id: UNKNOWN_CHANNEL_ID,
+        ota_name: "Airbnb",
+      },
+    }),
+  });
+
+  assert.equal(state.updates.length, 0);
+  assert.equal(state.audits[0].data.metadata.fullSyncEvidenceInvalidated, false);
+  assert.equal(
+    state.audits[0].data.metadata.persistedExternalConnectionId,
+    EXTERNAL_CHANNEL_ID
+  );
+  assert.equal(
+    state.audits[0].data.metadata.externalConnectionId,
+    UNKNOWN_CHANNEL_ID
+  );
+});
+
+test("a stale invalidation clearly before the confirmed Full Sync does not revoke it", async () => {
+  const confirmedAt = new Date("2026-09-06T18:30:00.000Z");
+  const { value, state } = client({
+    connection: {
+      externalConnectionId: EXTERNAL_CHANNEL_ID,
+      externalChannelCode: "ABB",
+      lastFullSyncConfirmedAt: confirmedAt,
+      lastLifecycleOccurredAt: new Date("2026-09-06T19:00:00.000Z"),
+      lastLifecycleOccurredAtMicros: epochMicros("2026-09-06T19:00:00.000Z"),
+      lastLifecycleEventType: "activate_channel",
+      lastLifecycleEventPrecedence: 30,
+    },
+  });
+
+  await applyChannexChannelLifecycleEvidence({
+    client: value,
+    payload: payload("updated_channel", {
+      timestamp: "2026-09-06T18:29:59.998999Z",
+    }),
+  });
+
+  assert.equal(state.updates.length, 0);
+  assert.equal(state.audits[0].data.metadata.fullSyncEvidenceInvalidated, false);
 });
 
 test("equal source timestamps use deterministic fail-closed precedence", async () => {

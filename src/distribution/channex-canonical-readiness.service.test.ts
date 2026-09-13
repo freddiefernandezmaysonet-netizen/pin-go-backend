@@ -11,6 +11,10 @@ import {
   CHANNEX_ARI_FULL_SYNC_DAYS,
   addUtcDays,
 } from "../pms/outbound/channex-ari-lifecycle.policy.js";
+import {
+  CHANNEX_CHANNEL_LIFECYCLE_APPLIED_AUDIT_SUMMARY,
+  CHANNEX_CHANNEL_LIFECYCLE_SKIPPED_AUDIT_SUMMARY,
+} from "./channex-channel-lifecycle.evidence.js";
 
 const EXTERNAL_PROPERTY_ID = "faf0559d-965f-426c-8303-107b0b1bc5ff";
 const EXTERNAL_ROOM_TYPE_ID = "8f134234-a0e6-4edb-9ed0-2224ecc35716";
@@ -96,6 +100,11 @@ type FixtureOptions = {
   nonDecisionP2002At?: "UPDATE" | "AUDIT_CREATE";
   mappingChangedAfterFullSyncRequest?: boolean;
   transactionEvidenceMutation?: boolean;
+  durableInvalidationAt?: Date | null;
+  durableInvalidationSkipped?: boolean;
+  transactionDurableInvalidationAt?: Date;
+  durableInvalidationAuditOverrides?: Record<string, unknown>;
+  durableInvalidationMetadataOverrides?: Record<string, unknown>;
   readinessRevision?: number;
   auditRecordOverrides?: Record<string, unknown>;
   auditMetadataOverrides?: Record<string, unknown>;
@@ -576,6 +585,48 @@ function fixture(options: FixtureOptions = {}) {
     };
   }
 
+  function durableInvalidationAuditRecord(transactional = false) {
+    const occurredAt = transactional && options.transactionDurableInvalidationAt
+      ? options.transactionDurableInvalidationAt
+      : options.durableInvalidationAt === undefined
+        ? new Date("2026-09-07T00:00:00.100Z")
+        : options.durableInvalidationAt;
+    if (occurredAt === null) return null;
+    const occurredAtMicros = BigInt(occurredAt.getTime()) * 1_000n;
+    return {
+      id: "full-sync-invalidation-audit",
+      organizationId: ORGANIZATION_ID,
+      propertyId: PROPERTY_ID,
+      entityType: "DISTRIBUTION",
+      entityId: CONNECTION_ID,
+      engine: "OTA_DISTRIBUTION",
+      eventType: options.durableInvalidationSkipped
+        ? "DECISION_SKIPPED"
+        : "DECISION_APPLIED",
+      status: "SUCCESS",
+      summary: options.durableInvalidationSkipped
+        ? CHANNEX_CHANNEL_LIFECYCLE_SKIPPED_AUDIT_SUMMARY
+        : CHANNEX_CHANNEL_LIFECYCLE_APPLIED_AUDIT_SUMMARY,
+      reason: "updated_channel",
+      metadata: {
+        provider: "AIRBNB",
+        externalPropertyId: EXTERNAL_PROPERTY_ID,
+        externalConnectionId: EXTERNAL_CHANNEL_ID,
+        externalChannelCode: "ABB",
+        sourceOccurredAt: occurredAt.toISOString(),
+        sourceOccurredAtMicros: occurredAtMicros.toString(),
+        sourceEventPrecedence: 20,
+        orderingOutcome: options.durableInvalidationSkipped
+          ? "STALE_OR_SUPERSEDED"
+          : "APPLIED",
+        canonicalReadinessPromotion: false,
+        ...options.durableInvalidationMetadataOverrides,
+      },
+      createdAt: new Date(occurredAt.getTime() + 1),
+      ...options.durableInvalidationAuditOverrides,
+    };
+  }
+
   const tx = {
     distributionProperty: {
       async findFirst() {
@@ -633,6 +684,10 @@ function fixture(options: FixtureOptions = {}) {
             )
           : null;
       },
+      async findMany() {
+        const audit = durableInvalidationAuditRecord(true);
+        return audit ? [audit] : [];
+      },
       async create(args: any) {
         if (options.nonDecisionP2002At === "AUDIT_CREATE") {
           throw {
@@ -682,6 +737,10 @@ function fixture(options: FixtureOptions = {}) {
         return options.existingAudit
           ? persistedAuditRecord(initialReadinessRevision)
           : null;
+      },
+      async findMany() {
+        const audit = durableInvalidationAuditRecord();
+        return audit ? [audit] : [];
       },
     },
     async $transaction<T>(
@@ -923,6 +982,100 @@ test("activate_channel reuses the certified pre-activation Full Sync when mappin
   assert.deepEqual(f.reads.channelCollection, [
     { propertyId: EXTERNAL_PROPERTY_ID, channel: "AirBNB" },
   ]);
+});
+
+test("activate_channel cannot revive a Full Sync invalidated by an intermediate lifecycle event", async () => {
+  const invalidatedAt = new Date("2026-09-07T00:00:00.121Z");
+  const f = fixture({
+    lifecycle: "activate_channel",
+    fullSync: "PRE_ACTIVATION",
+    durableInvalidationAt: invalidatedAt,
+    durableInvalidationSkipped: true,
+  });
+  const result = await reconcile(f, "reconcile-invalidated-pre-activation-sync-001");
+
+  assert.equal(result.distributionReadiness, "IN_PROGRESS");
+  assert.equal(f.updates[0].data.status, "READINESS_CHECK");
+  assert.equal(f.updates[0].data.lastFullSyncConfirmedAt, null);
+  assert.ok(
+    result.reasons.includes(
+      "FULL_SYNC_NOT_QUALIFIED:FULL_SYNC_COMPLETION_PREDATES_FRONTIER"
+    )
+  );
+  assert.equal(
+    f.audits[0].data.metadata.fullSyncEvidence.qualificationReason,
+    "FULL_SYNC_COMPLETION_PREDATES_FRONTIER"
+  );
+  assert.equal(
+    f.audits[0].data.metadata.fullSyncEvidence.durableFullSyncInvalidationFrontierAt,
+    invalidatedAt.toISOString()
+  );
+  assert.equal(
+    f.audits[0].data.metadata.fullSyncEvidence.frontierAt,
+    invalidatedAt.toISOString()
+  );
+});
+
+test("activate_channel fails closed when its durable invalidation history is missing", async () => {
+  const f = fixture({
+    lifecycle: "activate_channel",
+    fullSync: "PRE_ACTIVATION",
+    durableInvalidationAt: null,
+  });
+  const result = await reconcile(f, "reconcile-missing-invalidation-history-001");
+
+  assert.equal(result.distributionReadiness, "IN_PROGRESS");
+  assert.equal(f.updates[0].data.lastFullSyncConfirmedAt, null);
+  assert.ok(
+    result.reasons.includes(
+      "FULL_SYNC_NOT_QUALIFIED:LIFECYCLE_EVIDENCE_MISSING"
+    )
+  );
+});
+
+test("activate_channel ignores another channel epoch and fails closed without current invalidation history", async () => {
+  const f = fixture({
+    lifecycle: "activate_channel",
+    fullSync: "PRE_ACTIVATION",
+    durableInvalidationMetadataOverrides: {
+      externalConnectionId: SECOND_CHANNEL_ID,
+    },
+  });
+  const result = await reconcile(
+    f,
+    "reconcile-old-channel-epoch-invalidation-001"
+  );
+
+  assert.equal(result.distributionReadiness, "IN_PROGRESS");
+  assert.equal(f.updates[0].data.lastFullSyncConfirmedAt, null);
+  assert.ok(
+    result.reasons.includes(
+      "FULL_SYNC_NOT_QUALIFIED:LIFECYCLE_EVIDENCE_MISSING"
+    )
+  );
+  assert.equal(
+    f.audits[0].data.metadata.fullSyncEvidence
+      .durableFullSyncInvalidationFrontierAt,
+    null
+  );
+});
+
+test("corrupt durable invalidation scope fails before provider reads or mutation", async () => {
+  const f = fixture({
+    lifecycle: "activate_channel",
+    durableInvalidationAuditOverrides: { organizationId: "other-org" },
+  });
+
+  await assert.rejects(
+    reconcile(f, "reconcile-corrupt-invalidation-scope-001"),
+    (error: unknown) =>
+      error instanceof CanonicalOtaReadinessServiceError &&
+      error.code ===
+        "OTA_CANONICAL_FULL_SYNC_INVALIDATION_EVIDENCE_INVALID"
+  );
+  assertNoChannexReads(f);
+  assert.equal(f.updates.length, 0);
+  assert.equal(f.audits.length, 0);
 });
 
 test("an enabled exact channel with non-active operational status cannot persist ACTIVE", async () => {
@@ -1418,6 +1571,24 @@ test("a transactional mutation of internal mapping evidence is fenced before per
 
   await assert.rejects(
     reconcile(f, "reconcile-internal-evidence-conflict-001"),
+    (error: unknown) =>
+      error instanceof CanonicalOtaReadinessServiceError &&
+      error.code === "OTA_CANONICAL_INTERNAL_EVIDENCE_CONFLICT"
+  );
+  assert.equal(f.updates.length, 0);
+  assert.equal(f.audits.length, 0);
+  assert.deepEqual(f.transactionIsolationLevels, ["Serializable"]);
+});
+
+test("a newer durable invalidation frontier is fenced before canonical persistence", async () => {
+  const f = fixture({
+    transactionDurableInvalidationAt: new Date(
+      "2026-09-07T00:00:00.124Z"
+    ),
+  });
+
+  await assert.rejects(
+    reconcile(f, "reconcile-invalidation-evidence-conflict-001"),
     (error: unknown) =>
       error instanceof CanonicalOtaReadinessServiceError &&
       error.code === "OTA_CANONICAL_INTERNAL_EVIDENCE_CONFLICT"

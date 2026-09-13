@@ -14,8 +14,20 @@ export const CHANNEX_CHANNEL_LIFECYCLE_EVENTS = [
 export const CHANNEX_CHANNEL_LIFECYCLE_EVENT_MASK =
   CHANNEX_CHANNEL_LIFECYCLE_EVENTS.join(";");
 
+export const CHANNEX_CHANNEL_LIFECYCLE_APPLIED_AUDIT_SUMMARY =
+  "Channex OTA channel lifecycle evidence ingested";
+export const CHANNEX_CHANNEL_LIFECYCLE_SKIPPED_AUDIT_SUMMARY =
+  "Stale Channex OTA channel lifecycle evidence ignored";
+
 export type ChannexChannelLifecycleEventType =
   (typeof CHANNEX_CHANNEL_LIFECYCLE_EVENTS)[number];
+
+export function isChannexFullSyncInvalidatingLifecycleEvent(
+  provider: ConnectionCenterProvider | null,
+  eventType: ChannexChannelLifecycleEventType
+): boolean {
+  return !(provider === "AIRBNB" && eventType === "activate_channel");
+}
 
 export const CHANNEX_CHANNEL_LIFECYCLE_EVENT_PRECEDENCE: Readonly<
   Record<ChannexChannelLifecycleEventType, number>
@@ -54,6 +66,22 @@ export type OtaChannelEvidenceResult = {
   deduped?: boolean;
   connectionId?: string;
   eventType?: ChannexChannelLifecycleEventType;
+};
+
+export type ChannexFullSyncInvalidationEvidence = {
+  eventType: ChannexChannelLifecycleEventType;
+  occurredAt: Date;
+  occurredAtMicros: bigint;
+  precedence: number;
+};
+
+export type ChannexFullSyncInvalidationAuditScope = {
+  organizationId: string;
+  propertyId: string;
+  connectionId: string;
+  provider: ConnectionCenterProvider;
+  externalPropertyId: string;
+  externalConnectionId: string;
 };
 
 export class ChannexChannelEvidenceError extends Error {
@@ -135,6 +163,143 @@ function parseOccurredAt(value: unknown): {
     occurredAt: parsed,
     occurredAtMicros: BigInt(epochSecondMillis) * 1000n + microsecondFraction,
   };
+}
+
+function parseChannexFullSyncInvalidationAuditInternal(
+  audit: unknown | null,
+  expected: ChannexFullSyncInvalidationAuditScope,
+  ignoreDifferentChannelEpoch: boolean
+): ChannexFullSyncInvalidationEvidence | null {
+  if (audit === null) return null;
+
+  const invalid = () => {
+    throw new ChannexChannelEvidenceError(
+      "OTA_CHANNEL_FULL_SYNC_INVALIDATION_EVIDENCE_INVALID"
+    );
+  };
+  const row = record(audit);
+  const metadata = record(row.metadata);
+  const eventType = row.reason;
+  const applied =
+    row.eventType === "DECISION_APPLIED" &&
+    row.summary === CHANNEX_CHANNEL_LIFECYCLE_APPLIED_AUDIT_SUMMARY &&
+    metadata.orderingOutcome === "APPLIED";
+  const skipped =
+    row.eventType === "DECISION_SKIPPED" &&
+    row.summary === CHANNEX_CHANNEL_LIFECYCLE_SKIPPED_AUDIT_SUMMARY &&
+    metadata.orderingOutcome === "STALE_OR_SUPERSEDED";
+  if (
+    !expected.organizationId ||
+    !expected.propertyId ||
+    !expected.connectionId ||
+    !CHANNEX_UUID.test(expected.externalPropertyId) ||
+    !CHANNEX_UUID.test(expected.externalConnectionId) ||
+    row.organizationId !== expected.organizationId ||
+    row.propertyId !== expected.propertyId ||
+    row.entityType !== "DISTRIBUTION" ||
+    row.entityId !== expected.connectionId ||
+    row.engine !== "OTA_DISTRIBUTION" ||
+    row.status !== "SUCCESS" ||
+    (!applied && !skipped) ||
+    typeof eventType !== "string" ||
+    !(CHANNEX_CHANNEL_LIFECYCLE_EVENTS as readonly string[]).includes(
+      eventType
+    ) ||
+    metadata.provider !== expected.provider ||
+    typeof metadata.externalPropertyId !== "string" ||
+    !CHANNEX_UUID.test(metadata.externalPropertyId) ||
+    typeof metadata.externalConnectionId !== "string" ||
+    !CHANNEX_UUID.test(metadata.externalConnectionId) ||
+    metadata.externalChannelCode !== canonicalChannelCode(expected.provider) ||
+    metadata.canonicalReadinessPromotion !== false ||
+    typeof metadata.sourceOccurredAt !== "string" ||
+    metadata.sourceOccurredAt !== metadata.sourceOccurredAt.trim() ||
+    typeof metadata.sourceOccurredAtMicros !== "string" ||
+    !/^\d+$/.test(metadata.sourceOccurredAtMicros) ||
+    !Number.isInteger(metadata.sourceEventPrecedence)
+  ) {
+    return invalid();
+  }
+
+  if (
+    metadata.externalPropertyId !== expected.externalPropertyId ||
+    metadata.externalConnectionId !== expected.externalConnectionId
+  ) {
+    if (ignoreDifferentChannelEpoch) return null;
+    return invalid();
+  }
+
+  const typedEventType = eventType as ChannexChannelLifecycleEventType;
+  if (
+    !isChannexFullSyncInvalidatingLifecycleEvent(
+      expected.provider,
+      typedEventType
+    ) ||
+    metadata.sourceEventPrecedence !==
+      CHANNEX_CHANNEL_LIFECYCLE_EVENT_PRECEDENCE[typedEventType]
+  ) {
+    return invalid();
+  }
+
+  try {
+    const parsed = parseOccurredAt(metadata.sourceOccurredAt);
+    const persistedMicros = BigInt(metadata.sourceOccurredAtMicros);
+    // The audit's ISO timestamp is persisted from a JavaScript Date and is
+    // therefore millisecond-precise. The adjacent integer retains the source
+    // payload's full microsecond ordering and must fall inside that millisecond.
+    if (persistedMicros / 1000n !== BigInt(parsed.occurredAt.getTime())) {
+      return invalid();
+    }
+    return {
+      eventType: typedEventType,
+      occurredAt: parsed.occurredAt,
+      occurredAtMicros: persistedMicros,
+      precedence: metadata.sourceEventPrecedence,
+    };
+  } catch (error) {
+    if (
+      error instanceof ChannexChannelEvidenceError &&
+      error.code === "OTA_CHANNEL_FULL_SYNC_INVALIDATION_EVIDENCE_INVALID"
+    ) {
+      throw error;
+    }
+    return invalid();
+  }
+}
+
+export function parseChannexFullSyncInvalidationAudit(
+  audit: unknown | null,
+  expected: ChannexFullSyncInvalidationAuditScope
+): ChannexFullSyncInvalidationEvidence | null {
+  return parseChannexFullSyncInvalidationAuditInternal(
+    audit,
+    expected,
+    false
+  );
+}
+
+export function latestChannexFullSyncInvalidationAuditEvidence(
+  audits: readonly unknown[],
+  expected: ChannexFullSyncInvalidationAuditScope
+): ChannexFullSyncInvalidationEvidence | null {
+  let latest: ChannexFullSyncInvalidationEvidence | null = null;
+  for (const audit of audits) {
+    const evidence = parseChannexFullSyncInvalidationAuditInternal(
+      audit,
+      expected,
+      true
+    );
+    if (!evidence) continue;
+    if (
+      !latest ||
+      evidence.occurredAtMicros > latest.occurredAtMicros ||
+      (evidence.occurredAtMicros === latest.occurredAtMicros &&
+        evidence.precedence > latest.precedence)
+    ) {
+      latest = evidence;
+    }
+  }
+  return latest;
 }
 
 function providerFromChannelCode(value: string | null): ConnectionCenterProvider | null {
@@ -279,12 +444,18 @@ function evidencePatch(
     taxReadiness: "NOT_STARTED",
     contentReadiness: "NOT_STARTED",
     // Lifecycle mutations that can alter the PMS-to-Channex mapping open a new
-    // Full Sync evidence epoch. Channel activation alone preserves the exact
+    // Full Sync evidence epoch. Only Airbnb activation preserves the exact
     // mapping-bound Full Sync that was required before activation.
     activatedAt: null,
-    ...(event.eventType === "activate_channel"
-      ? {}
-      : { lastFullSyncConfirmedAt: null }),
+    ...(isChannexFullSyncInvalidatingLifecycleEvent(
+      event.provider,
+      event.eventType
+    )
+      ? {
+          activationRequestedAt: null,
+          lastFullSyncConfirmedAt: null,
+        }
+      : {}),
     ...(event.externalConnectionId
       ? { externalConnectionId: event.externalConnectionId }
       : {}),
@@ -583,6 +754,8 @@ export async function applyChannexChannelLifecycleEvidence(args: {
         externalConnectionId: true,
         externalChannelCode: true,
         externalListingId: true,
+        activationRequestedAt: true,
+        lastFullSyncConfirmedAt: true,
         updatedAt: true,
         lastLifecycleOccurredAt: true,
         lastLifecycleOccurredAtMicros: true,
@@ -623,6 +796,92 @@ export async function applyChannexChannelLifecycleEvidence(args: {
     const watermark = persistedWatermark(connection);
     const readinessRevision = persistedReadinessRevision(connection);
     if (compareLifecycleOrder(normalized, watermark) <= 0) {
+      const confirmedAt = connection.lastFullSyncConfirmedAt;
+      const currentChannelEpoch =
+        normalized.externalConnectionId === connection.externalConnectionId &&
+        normalized.externalChannelCode === connection.externalChannelCode;
+      const canInvalidateConfirmedFullSync =
+        isChannexFullSyncInvalidatingLifecycleEvent(
+          normalized.provider,
+          normalized.eventType
+        ) &&
+        currentChannelEpoch &&
+        confirmedAt instanceof Date &&
+        Number.isFinite(confirmedAt.getTime());
+      const fullSyncState = canInvalidateConfirmedFullSync
+        ? await tx.channexAriPropertyState.findUnique({
+            where: { propertyId: distributionProperty.propertyId },
+            select: {
+              organizationId: true,
+              propertyId: true,
+              lastFullSyncRequestedAt: true,
+              lastFullSyncCompletedAt: true,
+            },
+          })
+        : null;
+      const fullSyncRequestEvidenceValid =
+        fullSyncState?.organizationId === distributionProperty.organizationId &&
+        fullSyncState?.propertyId === distributionProperty.propertyId &&
+        fullSyncState.lastFullSyncRequestedAt instanceof Date &&
+        Number.isFinite(fullSyncState.lastFullSyncRequestedAt.getTime()) &&
+        fullSyncState.lastFullSyncCompletedAt instanceof Date &&
+        Number.isFinite(fullSyncState.lastFullSyncCompletedAt.getTime()) &&
+        fullSyncState.lastFullSyncCompletedAt.getTime() ===
+          confirmedAt?.getTime() &&
+        fullSyncState.lastFullSyncRequestedAt.getTime() <=
+          fullSyncState.lastFullSyncCompletedAt.getTime();
+      const invalidationFrontierMillis = Number(
+        (normalized.occurredAtMicros + 999n) / 1000n
+      );
+      const invalidatesConfirmedFullSync =
+        canInvalidateConfirmedFullSync &&
+        (!fullSyncRequestEvidenceValid ||
+          !Number.isSafeInteger(invalidationFrontierMillis) ||
+          // Full Sync request timestamps are millisecond-precise. Round the
+          // source event up so a request inside its microsecond-bearing
+          // millisecond cannot be treated as strictly later.
+          invalidationFrontierMillis >=
+            fullSyncState!.lastFullSyncRequestedAt.getTime());
+      if (invalidatesConfirmedFullSync) {
+        const invalidated = await tx.otaChannelConnection.updateMany({
+          where: {
+            id: connection.id,
+            organizationId: distributionProperty.organizationId,
+            propertyId: distributionProperty.propertyId,
+            distributionPropertyId: distributionProperty.id,
+            provider: normalized.provider,
+            status: connection.status,
+            externalConnectionId: connection.externalConnectionId,
+            externalChannelCode: connection.externalChannelCode,
+            externalListingId: connection.externalListingId,
+            activationRequestedAt: connection.activationRequestedAt ?? null,
+            lastFullSyncConfirmedAt: confirmedAt,
+            readinessRevision,
+            updatedAt: connection.updatedAt,
+            lastLifecycleOccurredAt: connection.lastLifecycleOccurredAt,
+            lastLifecycleOccurredAtMicros:
+              connection.lastLifecycleOccurredAtMicros,
+            lastLifecycleEventType: connection.lastLifecycleEventType,
+            lastLifecycleEventPrecedence:
+              connection.lastLifecycleEventPrecedence,
+          },
+          data: {
+            ...(connection.status === "ACTIVE"
+              ? { status: "DEGRADED" }
+              : connection.status === "ACTIVATION_PENDING"
+                ? { status: "READINESS_CHECK" }
+                : {}),
+            activationRequestedAt: null,
+            activatedAt: null,
+            distributionReadiness: "IN_PROGRESS",
+            lastFullSyncConfirmedAt: null,
+            readinessRevision: { increment: 1 },
+          },
+        });
+        if (invalidated.count !== 1) {
+          throw new LifecycleEvidenceCasConflict();
+        }
+      }
       await tx.apmsAuditEntry.create({
         data: {
           organizationId: distributionProperty.organizationId,
@@ -634,13 +893,16 @@ export async function applyChannexChannelLifecycleEvidence(args: {
           status: "SUCCESS",
           severity: "INFO",
           decisionId: evidenceDecisionId,
-          summary: "Stale Channex OTA channel lifecycle evidence ignored",
+          summary: CHANNEX_CHANNEL_LIFECYCLE_SKIPPED_AUDIT_SUMMARY,
           reason: normalized.eventType,
           metadata: {
             provider: normalized.provider,
             externalPropertyId: normalized.externalPropertyId,
             externalConnectionId: normalized.externalConnectionId,
             externalChannelCode: normalized.externalChannelCode,
+            persistedExternalConnectionId: connection.externalConnectionId,
+            persistedExternalChannelCode: connection.externalChannelCode,
+            persistedExternalListingId: connection.externalListingId,
             sourceOccurredAt: normalized.occurredAt.toISOString(),
             sourceOccurredAtMicros: normalized.occurredAtMicros.toString(),
             sourceEventPrecedence:
@@ -652,6 +914,20 @@ export async function applyChannexChannelLifecycleEvidence(args: {
             persistedEventPrecedence: watermark?.precedence ?? null,
             orderingOutcome: "STALE_OR_SUPERSEDED",
             canonicalReadinessPromotion: false,
+            fullSyncEvidenceInvalidated: invalidatesConfirmedFullSync,
+            fullSyncRequestEvidenceValid,
+            fullSyncRequestBoundaryAt:
+              fullSyncRequestEvidenceValid
+                ? fullSyncState.lastFullSyncRequestedAt.toISOString()
+                : null,
+            fullSyncInvalidationFrontierAt: Number.isSafeInteger(
+              invalidationFrontierMillis
+            )
+              ? new Date(invalidationFrontierMillis).toISOString()
+              : null,
+            previousReadinessRevision: readinessRevision,
+            canonicalReadinessRevision:
+              readinessRevision + (invalidatesConfirmedFullSync ? 1 : 0),
           },
           startedAt: now,
           completedAt: now,
@@ -691,6 +967,9 @@ export async function applyChannexChannelLifecycleEvidence(args: {
         externalConnectionId: connection.externalConnectionId,
         externalChannelCode: connection.externalChannelCode,
         externalListingId: connection.externalListingId,
+        activationRequestedAt: connection.activationRequestedAt ?? null,
+        lastFullSyncConfirmedAt:
+          connection.lastFullSyncConfirmedAt ?? null,
         readinessRevision,
         updatedAt: connection.updatedAt,
         lastLifecycleOccurredAt: connection.lastLifecycleOccurredAt ?? null,
@@ -728,7 +1007,7 @@ export async function applyChannexChannelLifecycleEvidence(args: {
         status: "SUCCESS",
         severity: "INFO",
         decisionId: evidenceDecisionId,
-        summary: "Channex OTA channel lifecycle evidence ingested",
+        summary: CHANNEX_CHANNEL_LIFECYCLE_APPLIED_AUDIT_SUMMARY,
         reason: normalized.eventType,
         metadata: {
           provider: normalized.provider,
