@@ -1,4 +1,5 @@
 import type { ChannexAriCanonicalMappingResult } from "./channex-airbnb-transport-readiness.policy.js";
+import type { OtaReadinessStatus } from "./ota-commercial-lifecycle.policy.js";
 
 export const CHANNEX_BOOKING_COM_TRANSPORT_POLICY_VERSION =
   "channex_booking_com_transport_v1" as const;
@@ -20,17 +21,13 @@ export type ChannexBookingComTransportReadinessReason =
   | "CANONICAL_MAPPING_NOT_VERIFIED"
   | "CHANNEL_NOT_ACTIVE";
 
-type ChannexBookingComTransportReadinessStatus =
-  | "NOT_STARTED"
-  | "NOT_APPLICABLE";
-
 export type ChannexBookingComTransportReadinessResult = {
   applied: boolean;
   reason: ChannexBookingComTransportReadinessReason;
   readiness: {
-    paymentReadiness: ChannexBookingComTransportReadinessStatus;
-    taxReadiness: ChannexBookingComTransportReadinessStatus;
-    contentReadiness: ChannexBookingComTransportReadinessStatus;
+    paymentReadiness: OtaReadinessStatus;
+    taxReadiness: OtaReadinessStatus;
+    contentReadiness: OtaReadinessStatus;
   };
   metadata: {
     policyVersion: typeof CHANNEX_BOOKING_COM_TRANSPORT_POLICY_VERSION;
@@ -45,18 +42,6 @@ export type ChannexBookingComTransportReadinessResult = {
   };
 };
 
-const FAIL_CLOSED_READINESS = {
-  paymentReadiness: "NOT_STARTED",
-  taxReadiness: "NOT_STARTED",
-  contentReadiness: "NOT_STARTED",
-} as const;
-
-const NOT_APPLICABLE_READINESS = {
-  paymentReadiness: "NOT_APPLICABLE",
-  taxReadiness: "NOT_APPLICABLE",
-  contentReadiness: "NOT_APPLICABLE",
-} as const;
-
 function normalizedText(value: unknown): string {
   return typeof value === "string" ? value.trim() : "";
 }
@@ -64,13 +49,12 @@ function normalizedText(value: unknown): string {
 function bookingComPolicyResult(
   applied: boolean,
   reason: ChannexBookingComTransportReadinessReason,
+  readiness: ChannexBookingComTransportReadinessResult["readiness"],
 ): ChannexBookingComTransportReadinessResult {
   return {
     applied,
     reason,
-    readiness: {
-      ...(applied ? NOT_APPLICABLE_READINESS : FAIL_CLOSED_READINESS),
-    },
+    readiness: { ...readiness },
     metadata: {
       policyVersion: CHANNEX_BOOKING_COM_TRANSPORT_POLICY_VERSION,
       semanticScope: CHANNEX_BOOKING_COM_TRANSPORT_SEMANTIC_SCOPE,
@@ -87,8 +71,7 @@ function bookingComPolicyResult(
  * Pin&Go-to-Channex mapping and Channex's active channel gate. It deliberately
  * does not attest Booking.com payment, tax, listing-content or downstream ARI
  * acceptance. Those concerns must not be fabricated from technical channel
- * evidence, so they become NOT_APPLICABLE only after the technical boundary is
- * proven.
+ * evidence. Their independently persisted readiness is preserved unchanged.
  */
 export function deriveChannexBookingComTransportReadiness(input: {
   provider: string;
@@ -100,9 +83,18 @@ export function deriveChannexBookingComTransportReadiness(input: {
     isActive: boolean;
   } | null;
   mapping: ChannexAriCanonicalMappingResult;
+  currentCommercialReadiness: {
+    paymentReadiness: OtaReadinessStatus;
+    taxReadiness: OtaReadinessStatus;
+    contentReadiness: OtaReadinessStatus;
+  };
 }): ChannexBookingComTransportReadinessResult {
   if (normalizedText(input.provider) !== "BOOKING_COM") {
-    return bookingComPolicyResult(false, "PROVIDER_NOT_SUPPORTED");
+    return bookingComPolicyResult(
+      false,
+      "PROVIDER_NOT_SUPPORTED",
+      input.currentCommercialReadiness,
+    );
   }
 
   const expectedConnectionId = normalizedText(
@@ -122,16 +114,32 @@ export function deriveChannexBookingComTransportReadiness(input: {
     observedConnectionId !== expectedConnectionId ||
     observedChannelCode !== "BDC"
   ) {
-    return bookingComPolicyResult(false, "CHANNEL_IDENTITY_NOT_VERIFIED");
+    return bookingComPolicyResult(
+      false,
+      "CHANNEL_IDENTITY_NOT_VERIFIED",
+      input.currentCommercialReadiness,
+    );
   }
 
   if (input.mapping.verified !== true || input.mapping.reason !== "VERIFIED") {
-    return bookingComPolicyResult(false, "CANONICAL_MAPPING_NOT_VERIFIED");
+    return bookingComPolicyResult(
+      false,
+      "CANONICAL_MAPPING_NOT_VERIFIED",
+      input.currentCommercialReadiness,
+    );
   }
 
   if (input.observedChannel?.isActive !== true) {
-    return bookingComPolicyResult(false, "CHANNEL_NOT_ACTIVE");
+    return bookingComPolicyResult(
+      false,
+      "CHANNEL_NOT_ACTIVE",
+      input.currentCommercialReadiness,
+    );
   }
 
-  return bookingComPolicyResult(true, "POLICY_APPLIED");
+  return bookingComPolicyResult(
+    true,
+    "POLICY_APPLIED",
+    input.currentCommercialReadiness,
+  );
 }
