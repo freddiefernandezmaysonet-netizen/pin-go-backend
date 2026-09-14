@@ -28,6 +28,14 @@ import {
   type OtaChannelConnectionStatus,
   type OtaReadinessStatus,
 } from "./ota-commercial-lifecycle.policy.js";
+import {
+  CHANNEX_CHANNEL_LIFECYCLE_APPLIED_AUDIT_SUMMARY,
+  CHANNEX_CHANNEL_LIFECYCLE_SKIPPED_AUDIT_SUMMARY,
+  CHANNEX_CHANNEL_LIFECYCLE_EVENTS,
+  ChannexChannelEvidenceError,
+  isChannexFullSyncInvalidatingLifecycleEvent,
+  latestChannexFullSyncInvalidationAuditEvidence,
+} from "./channex-channel-lifecycle.evidence.js";
 
 const LIFECYCLE_PRECEDENCE: Readonly<Record<CanonicalLifecycleEvent, number>> = {
   new_channel: 10,
@@ -158,6 +166,7 @@ type CanonicalReadinessTransaction = {
   };
   apmsAuditEntry: {
     findUnique(args: any): Promise<CanonicalReadinessAuditRecord | null>;
+    findMany(args: any): Promise<unknown[]>;
     create(args: any): Promise<unknown>;
   };
 };
@@ -180,6 +189,7 @@ export type CanonicalOtaReadinessClient = {
   };
   apmsAuditEntry: {
     findUnique(args: any): Promise<CanonicalReadinessAuditRecord | null>;
+    findMany(args: any): Promise<unknown[]>;
   };
   $transaction<T>(
     work: (tx: CanonicalReadinessTransaction) => Promise<T>,
@@ -247,7 +257,7 @@ function canonicalChannelCode(
 function documentedChannexAdapterCode(
   provider: ConnectionCenterProvider
 ): string {
-  if (provider === "AIRBNB") return "Airbnb";
+  if (provider === "AIRBNB") return "AirBNB";
   if (provider === "BOOKING_COM") return "BookingCom";
   if (provider === "EXPEDIA") return "Expedia";
   return "Vrbo";
@@ -524,6 +534,110 @@ function lifecycleReadinessFrontier(
     );
   }
   return new Date(numericMilliseconds);
+}
+
+function fullSyncInvalidationAuditQuery(args: {
+  organizationId: string;
+  propertyId: string;
+  connectionId: string;
+  provider: ConnectionCenterProvider;
+}) {
+  return {
+    where: {
+      organizationId: args.organizationId,
+      propertyId: args.propertyId,
+      entityType: "DISTRIBUTION",
+      entityId: args.connectionId,
+      engine: "OTA_DISTRIBUTION",
+      eventType: { in: ["DECISION_APPLIED", "DECISION_SKIPPED"] },
+      status: "SUCCESS",
+      summary: {
+        in: [
+          CHANNEX_CHANNEL_LIFECYCLE_APPLIED_AUDIT_SUMMARY,
+          CHANNEX_CHANNEL_LIFECYCLE_SKIPPED_AUDIT_SUMMARY,
+        ],
+      },
+      reason: {
+        in: CHANNEX_CHANNEL_LIFECYCLE_EVENTS.filter((eventType) =>
+          isChannexFullSyncInvalidatingLifecycleEvent(
+            args.provider,
+            eventType
+          )
+        ),
+      },
+    },
+    orderBy: [{ createdAt: "asc" }, { id: "asc" }],
+    select: {
+      id: true,
+      organizationId: true,
+      propertyId: true,
+      entityType: true,
+      entityId: true,
+      engine: true,
+      eventType: true,
+      status: true,
+      summary: true,
+      reason: true,
+      metadata: true,
+      createdAt: true,
+    },
+  };
+}
+
+function durableFullSyncInvalidationFrontier(args: {
+  audits: readonly unknown[];
+  organizationId: string;
+  propertyId: string;
+  connectionId: string;
+  provider: ConnectionCenterProvider;
+  externalPropertyId: string;
+  externalConnectionId: string | null;
+  lifecycle: ReturnType<typeof lifecycleWatermark>;
+}): Date | null {
+  let invalidation;
+  try {
+    invalidation = latestChannexFullSyncInvalidationAuditEvidence(args.audits, {
+      organizationId: args.organizationId,
+      propertyId: args.propertyId,
+      connectionId: args.connectionId,
+      provider: args.provider,
+      externalPropertyId: args.externalPropertyId,
+      externalConnectionId: args.externalConnectionId ?? "",
+    });
+  } catch (error) {
+    if (error instanceof ChannexChannelEvidenceError) {
+      throw new CanonicalOtaReadinessServiceError(
+        "OTA_CANONICAL_FULL_SYNC_INVALIDATION_EVIDENCE_INVALID"
+      );
+    }
+    throw error;
+  }
+  if (!invalidation) return null;
+
+  const lifecycleEvent = args.lifecycle.event;
+  const lifecycleMicros = args.lifecycle.occurredAtMicros;
+  const lifecyclePrecedence = args.lifecycle.precedence;
+  if (
+    !lifecycleEvent ||
+    lifecycleMicros === null ||
+    lifecyclePrecedence === null ||
+    invalidation.occurredAtMicros > lifecycleMicros ||
+    (invalidation.occurredAtMicros === lifecycleMicros &&
+      invalidation.precedence > lifecyclePrecedence) ||
+    (isChannexFullSyncInvalidatingLifecycleEvent(
+      args.provider,
+      lifecycleEvent
+    ) &&
+      (invalidation.eventType !== lifecycleEvent ||
+        invalidation.occurredAtMicros !== lifecycleMicros ||
+        invalidation.precedence !== lifecyclePrecedence))
+  ) {
+    throw new CanonicalOtaReadinessServiceError(
+      "OTA_CANONICAL_FULL_SYNC_INVALIDATION_EVIDENCE_INVALID"
+    );
+  }
+
+  return lifecycleReadinessFrontier(invalidation.occurredAtMicros);
 }
 
 async function resolveExactChannel(args: {
@@ -884,6 +998,32 @@ export async function reconcileCanonicalOtaReadiness(args: {
   const lifecycleFrontierAt = lifecycleReadinessFrontier(
     watermark.occurredAtMicros
   );
+  const activationPreservesMappedFullSync =
+    args.provider === "AIRBNB" &&
+    watermark.event === "activate_channel" &&
+    typeof connection.externalConnectionId === "string" &&
+    CHANNEX_UUID.test(connection.externalConnectionId);
+  const fullSyncInvalidationAudits = activationPreservesMappedFullSync
+    ? await args.client.apmsAuditEntry.findMany(
+        fullSyncInvalidationAuditQuery({
+          organizationId: args.organizationId,
+          propertyId: args.propertyId,
+          connectionId: connection.id,
+          provider: args.provider,
+        })
+      )
+    : [];
+  const durableFullSyncInvalidationFrontierAt =
+    durableFullSyncInvalidationFrontier({
+      audits: fullSyncInvalidationAudits,
+      organizationId: args.organizationId,
+      propertyId: args.propertyId,
+      connectionId: connection.id,
+      provider: args.provider,
+      externalPropertyId,
+      externalConnectionId: connection.externalConnectionId,
+      lifecycle: watermark,
+    });
   const ariPropertyStateReader = args.client.channexAriPropertyState;
   if (!ariPropertyStateReader) {
     throw new CanonicalOtaReadinessServiceError(
@@ -1061,6 +1201,7 @@ export async function reconcileCanonicalOtaReadiness(args: {
   }
 
   const fullSync = qualifyChannexCorrelatedFullSyncEvidence({
+    provider: args.provider,
     expectedOrganizationId: args.organizationId,
     expectedPropertyId: args.propertyId,
     expectedConnectionId: solePmsListing?.connection.id ?? "",
@@ -1070,8 +1211,11 @@ export async function reconcileCanonicalOtaReadiness(args: {
     expectedExternalRatePlanId: externalRatePlanId,
     state: propertyState,
     outboxEvidence: fullSyncOutboxEvidence,
+    latestLifecycleEvent: watermark.event,
     lastChannelActivatedAt: connection.lastChannelActivatedAt,
-    lastLifecycleOccurredAt: lifecycleFrontierAt,
+    lastLifecycleOccurredAt: watermark.occurredAt,
+    lifecycleReadinessFrontierAt: lifecycleFrontierAt,
+    durableFullSyncInvalidationFrontierAt,
     mappingLastChangedAt,
   });
   const fullSyncQualified = fullSync.qualified && ariMapping.verified;
@@ -1124,10 +1268,7 @@ export async function reconcileCanonicalOtaReadiness(args: {
     );
   }
 
-  const fullSyncRequiredAfterAt = latestDate(
-    latestDate(connection.lastChannelActivatedAt, lifecycleFrontierAt),
-    mappingLastChangedAt
-  );
+  const fullSyncRequiredAfterAt = fullSync.frontierAt;
   const activation = planCanonicalOtaActivation({
     current: connection.status,
     evidence: {
@@ -1141,6 +1282,10 @@ export async function reconcileCanonicalOtaReadiness(args: {
       fullSyncRequiredAfterAt,
     },
   });
+  const commercialActivatedAt = latestDate(
+    connection.lastChannelActivatedAt,
+    fullSyncConfirmedAt
+  );
   const lastErrorCode = attentionCode({
     result,
     channel,
@@ -1153,6 +1298,7 @@ export async function reconcileCanonicalOtaReadiness(args: {
     propertyState,
     pmsListings,
     fullSyncOutboxEvidence,
+    fullSyncInvalidationAudits,
   });
 
   const applyDecision = () =>
@@ -1219,6 +1365,7 @@ export async function reconcileCanonicalOtaReadiness(args: {
         currentPropertyState,
         currentPmsListings,
         currentFullSyncOutboxEvidence,
+        currentFullSyncInvalidationAudits,
       ] = await Promise.all([
         tx.distributionProperty.findFirst({
           where: {
@@ -1351,12 +1498,23 @@ export async function reconcileCanonicalOtaReadiness(args: {
               },
             })
           : Promise.resolve([]),
+        activationPreservesMappedFullSync
+          ? tx.apmsAuditEntry.findMany(
+              fullSyncInvalidationAuditQuery({
+                organizationId: args.organizationId,
+                propertyId: args.propertyId,
+                connectionId: connection.id,
+                provider: args.provider,
+              })
+            )
+          : Promise.resolve([]),
       ]);
       const currentInternalEvidenceFingerprint = internalEvidenceFingerprint({
         distributionProperty: currentDistributionProperty,
         propertyState: currentPropertyState,
         pmsListings: currentPmsListings,
         fullSyncOutboxEvidence: currentFullSyncOutboxEvidence,
+        fullSyncInvalidationAudits: currentFullSyncInvalidationAudits,
       });
       if (
         currentInternalEvidenceFingerprint !==
@@ -1378,6 +1536,8 @@ export async function reconcileCanonicalOtaReadiness(args: {
         externalConnectionId: connection.externalConnectionId,
         externalChannelCode: connection.externalChannelCode,
         externalListingId: connection.externalListingId,
+        activationRequestedAt: connection.activationRequestedAt,
+        lastFullSyncConfirmedAt: connection.lastFullSyncConfirmedAt,
         updatedAt: connection.updatedAt,
         lastLifecycleOccurredAt: connection.lastLifecycleOccurredAt,
         lastLifecycleOccurredAtMicros:
@@ -1405,8 +1565,8 @@ export async function reconcileCanonicalOtaReadiness(args: {
         readinessRevision: { increment: 1 },
         ...(activation.next === "ACTIVE" &&
         (connection.status !== "ACTIVE" || !connection.activatedAt) &&
-        fullSyncConfirmedAt
-          ? { activatedAt: fullSyncConfirmedAt }
+        commercialActivatedAt
+          ? { activatedAt: commercialActivatedAt }
           : activation.next !== "ACTIVE"
             ? { activatedAt: null }
             : {}),
@@ -1480,6 +1640,8 @@ export async function reconcileCanonicalOtaReadiness(args: {
             requestedAt: fullSync.requestedAt?.toISOString() ?? null,
             completedAt: fullSync.completedAt?.toISOString() ?? null,
             frontierAt: fullSync.frontierAt?.toISOString() ?? null,
+            durableFullSyncInvalidationFrontierAt:
+              durableFullSyncInvalidationFrontierAt?.toISOString() ?? null,
             mappingLastChangedAt:
               mappingLastChangedAt?.toISOString() ?? null,
             otaAcceptanceVerified: false,

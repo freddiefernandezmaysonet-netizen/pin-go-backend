@@ -73,6 +73,9 @@ function adaptPrismaCanonicalReadinessClient(
       async findUnique(query) {
         return await prisma.apmsAuditEntry.findUnique(query as any) as any;
       },
+      async findMany(query) {
+        return await prisma.apmsAuditEntry.findMany(query as any) as any;
+      },
     },
     async $transaction(work, options) {
       return prisma.$transaction(
@@ -109,6 +112,9 @@ function adaptPrismaCanonicalReadinessClient(
             apmsAuditEntry: {
               async findUnique(query) {
                 return await tx.apmsAuditEntry.findUnique(query as any) as any;
+              },
+              async findMany(query) {
+                return await tx.apmsAuditEntry.findMany(query as any) as any;
               },
               async create(query) {
                 return tx.apmsAuditEntry.create(query as any);
