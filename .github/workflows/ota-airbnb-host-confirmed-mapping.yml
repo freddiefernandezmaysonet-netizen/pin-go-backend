@@ -69,6 +69,7 @@ jobs:
           cat > "$RUNNER_TEMP/allowed.txt" <<'EOF'
           .github/workflows/ota-airbnb-host-confirmed-mapping.yml
           .github/workflows/ota-airbnb-listing-discovery.yml
+          package.json
           prisma/migrations/20260911153000_add_property_postal_code/migration.sql
           prisma/schema.prisma
           src/distribution/airbnb-host-activation.http-transport.test.ts
@@ -89,12 +90,18 @@ jobs:
           src/distribution/channex-airbnb-transport-readiness.policy.ts
           src/distribution/channex-canonical-readiness.service.test.ts
           src/distribution/channex-canonical-readiness.service.ts
+          src/distribution/channex-channel-lifecycle-webhook-registration.http-transport.test.ts
+          src/distribution/channex-channel-lifecycle-webhook-registration.http-transport.ts
+          src/distribution/channex-channel-lifecycle-webhook-registration.test.ts
+          src/distribution/channex-channel-lifecycle-webhook-registration.ts
           src/distribution/channex-channel-identity.test.ts
           src/distribution/channex-channel-identity.ts
           src/distribution/channex-channel-lifecycle.evidence.test.ts
           src/distribution/channex-channel-lifecycle.evidence.ts
           src/distribution/ota-connection-center.runtime-composition.test.ts
           src/distribution/ota-connection-center.runtime-composition.ts
+          src/distribution/ota-connection-center.composition.test.ts
+          src/distribution/ota-connection-center.composition.ts
           src/routes/dashboard.airbnb-host-self-service.activation.route.test.ts
           src/routes/dashboard.airbnb-host-self-service.listings.route.test.ts
           src/routes/dashboard.airbnb-host-self-service.mapping.route.test.ts
