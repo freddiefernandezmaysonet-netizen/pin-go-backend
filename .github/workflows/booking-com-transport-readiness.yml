@@ -1,0 +1,71 @@
+name: Booking.com transport readiness validation
+on:
+  push:
+    branches: [agent/booking-com-transport-readiness]
+permissions:
+  contents: read
+defaults:
+  run:
+    shell: bash
+concurrency:
+  group: booking-transport-${{ github.ref }}
+  cancel-in-progress: true
+env:
+  DATABASE_URL: postgresql://test:test@127.0.0.1:5432/test
+  CHANNEX_API_KEY: TEST_ONLY
+  CHANNEX_API_BASE_URL: https://staging.channex.io
+jobs:
+  validation:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+      - name: Record exact source and preserve main boundary
+        run: |
+          mkdir -p evidence
+          git merge-base --is-ancestor f818b6578729c744f1f626f64c314b92a118f776 HEAD
+          git rev-parse HEAD > evidence/head.txt
+          git diff f818b6578729c744f1f626f64c314b92a118f776 HEAD > evidence/candidate.patch
+          git archive --format=tar.gz -o evidence/source.tar.gz HEAD
+      - name: Install locked test dependencies without lifecycle scripts
+        run: npm ci --ignore-scripts --no-audit --no-fund
+      - name: Generate Prisma client only, no database operations
+        run: ./node_modules/.bin/prisma generate --schema ./prisma
+      - name: Isolated test execution guard
+        run: |
+          cat > "$RUNNER_TEMP/no-network.cjs" <<'JS'
+          const net = require('node:net');
+          const connect = net.Socket.prototype.connect;
+          net.Socket.prototype.connect = function (...args) {
+            const normalized = Array.isArray(args[0]) ? args[0] : args;
+            const first = normalized[0];
+            const host = first && typeof first === 'object' ? first.host : (typeof normalized[1] === 'string' ? normalized[1] : 'localhost');
+            if (host && !['localhost','127.0.0.1','::1'].includes(host)) throw new Error('TEST_EXTERNAL_NETWORK_BLOCKED');
+            return connect.apply(this,args);
+          };
+          JS
+      - name: Connection Center and persistence regressions
+        env:
+          NODE_OPTIONS: --require ${{ runner.temp }}/no-network.cjs
+        run: |
+          npm run test:distribution-connection-center 2>&1 | tee evidence/connection-center.txt
+          npm run test:ota-distribution-persistence 2>&1 | tee evidence/persistence.txt
+          npm run test:ota-commercial-closure-types 2>&1 | tee evidence/ota-types.txt
+      - name: Preserve source and portable validation inputs
+        if: always()
+        run: |
+          git diff --exit-code HEAD
+          tar -czf evidence/test-toolchain.tar.gz node_modules/typescript node_modules/tsx node_modules/esbuild node_modules/@esbuild node_modules/get-tsconfig node_modules/resolve-pkg-maps node_modules/@types/node node_modules/undici-types
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: booking-transport-validation
+          path: evidence/
+          retention-days: 7
