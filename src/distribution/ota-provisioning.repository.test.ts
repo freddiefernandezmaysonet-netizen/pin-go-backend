@@ -467,6 +467,11 @@ test("canonical prepare with no listing completes linkage; retry after local fai
     trustedMutationOrigins: ["https://app.pin-ngo.com"],
     allowedLaunchOrigins: ["https://app.channex.io"],
     prepareLogicalConnection: async () => ({} as any),
+    configureBookingWebhook: async ({ organizationId, propertyId }) => {
+      assert.equal(organizationId, "org-1");
+      assert.equal(propertyId, "property-1");
+      return { verified: true };
+    },
     adapter: {
       async ensureGroup() { throw new Error("Existing group must be reused"); },
       async ensureProperty() { providerCalls.push("property"); return { externalPropertyId: "canonical-property" }; },

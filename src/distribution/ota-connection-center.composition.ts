@@ -14,11 +14,13 @@ import {
 } from "./ota-distribution-persistence.service.js";
 import {
   orchestrateOtaProvisioning,
+  OtaProvisioningError,
   type OtaProvisioningRepository,
 } from "./ota-connection-orchestrator.service.js";
 import { PrismaOtaProvisioningRepository } from "./ota-provisioning.repository.js";
 import { resolveOtaConnectionCenterRuntime } from "./ota-connection-runtime.policy.js";
 import type { OtaConnectionCenterRuntime } from "./ota-connection-runtime.policy.js";
+import { configureChannexBookingWebhookForConnectionCenter } from "../services/channex-booking-webhook-registration.service.js";
 
 export type OtaConnectionCenterAdapter = WhiteLabelProvisioner & OneTimeConnectionTokenIssuer;
 
@@ -51,6 +53,10 @@ export function buildOtaConnectionCenterComposition(args: {
   isTenantOriginAllowed?(origin: string, organizationId: string): Promise<boolean>;
   repository?: OtaProvisioningRepository;
   prepareLogicalConnection?: typeof prepareOtaDistributionConnection;
+  configureBookingWebhook?(input: {
+    organizationId: string;
+    propertyId: string;
+  }): Promise<{ verified: boolean }>;
 }): DistributionConnectionCenterActions {
   const requestedRuntime =
     args.runtimeOverride ?? resolveOtaConnectionCenterRuntime(args.runtimeValue);
@@ -94,19 +100,40 @@ export function buildOtaConnectionCenterComposition(args: {
     };
   }
   const prepareLogicalConnection = args.prepareLogicalConnection ?? prepareOtaDistributionConnection;
+  const configureBookingWebhook =
+    args.configureBookingWebhook ?? configureChannexBookingWebhookForConnectionCenter;
 
   return {
     runtime: { enabled: true, reason: "ENABLED" },
     isTrustedOrigin,
-    prepare: (input) => orchestrateOtaProvisioning({
-      repository,
-      provisioner: args.adapter!,
-      prepareLogicalConnection: (logicalInput) => prepareLogicalConnection({
-        client: args.prisma as any,
-        ...logicalInput,
-      }),
-      ...input,
-    }),
+    prepare: async (input) => {
+      const result = await orchestrateOtaProvisioning({
+        repository,
+        provisioner: args.adapter!,
+        prepareLogicalConnection: (logicalInput) => prepareLogicalConnection({
+          client: args.prisma as any,
+          ...logicalInput,
+        }),
+        ...input,
+      });
+      // Inventory and the canonical PMS link are already committed. On webhook
+      // failure the READY inventory can be reused without reprovisioning it.
+      // Do not return a successful preparation until GET verification succeeds.
+      try {
+        const webhook = await configureBookingWebhook({
+          organizationId: input.organizationId,
+          propertyId: input.propertyId,
+        });
+        if (webhook.verified !== true) {
+          throw new Error("CHANNEX_WEBHOOK_NOT_VERIFIED");
+        }
+      } catch {
+        // Axios errors can carry request headers; never propagate that payload
+        // through the host-facing Connection Center error boundary.
+        throw new OtaProvisioningError("OTA_BOOKING_WEBHOOK_REGISTRATION_FAILED");
+      }
+      return result;
+    },
     issueSession: (input) => issueOtaConnectionSession({
       client: args.prisma as any,
       issuer: args.adapter!,

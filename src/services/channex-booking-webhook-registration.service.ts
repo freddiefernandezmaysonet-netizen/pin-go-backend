@@ -2,6 +2,11 @@ import axios from "axios";
 import { PmsProvider } from "@prisma/client";
 import { prisma } from "../lib/prisma";
 import {
+  CHANNEX_PRODUCTION_API_ORIGIN,
+  isProductionRuntime,
+  resolveChannexRuntimeTransport,
+} from "../lib/channex-runtime-transport.policy";
+import {
   CHANNEX_WEBHOOK_SECRET_HEADER,
   generateChannexWebhookSecret,
 } from "../pms/ingest/channex-webhook-auth";
@@ -9,6 +14,14 @@ import {
 const CHANNEX_WEBHOOK_EVENT_MASK = "booking";
 const CHANNEX_WEBHOOK_SEND_DATA = false;
 const CHANNEX_REQUEST_TIMEOUT_MS = 20_000;
+export const CHANNEX_PRODUCTION_WEBHOOK_CALLBACK_URL =
+  "https://api.pin-ngo.com/webhooks/channex";
+
+type RegistrationEnvironment = Readonly<Record<string, string | undefined>>;
+type RegistrationScope = {
+  propertyId: string;
+  organizationId?: string;
+};
 
 function asRecord(value: unknown): Record<string, unknown> {
   return value && typeof value === "object" && !Array.isArray(value)
@@ -43,6 +56,36 @@ export function normalizeChannexWebhookCallbackUrl(value: string) {
   }
 
   return url.toString().replace(/\/+$/, "");
+}
+
+export function normalizeChannexLiveBaseUrl(value: string) {
+  let url: URL;
+  try {
+    url = new URL(String(value ?? "").trim());
+  } catch {
+    throw new Error("CHANNEX_PRODUCTION_OTA_ORIGIN_REQUIRED");
+  }
+  if (url.protocol !== "https:") {
+    throw new Error("CHANNEX_LIVE_WEBHOOK_REQUIRES_HTTPS");
+  }
+  if (url.hostname === "staging.channex.io") {
+    throw new Error("CHANNEX_LIVE_WEBHOOK_REJECTS_STAGING");
+  }
+  if (
+    url.origin !== CHANNEX_PRODUCTION_API_ORIGIN ||
+    url.pathname !== "/" || url.username || url.password || url.search || url.hash
+  ) {
+    throw new Error("CHANNEX_PRODUCTION_OTA_ORIGIN_REQUIRED");
+  }
+  return url.origin;
+}
+
+export function normalizeChannexLiveWebhookCallbackUrl(value: string) {
+  const callbackUrl = normalizeChannexWebhookCallbackUrl(value);
+  if (callbackUrl !== CHANNEX_PRODUCTION_WEBHOOK_CALLBACK_URL) {
+    throw new Error("CHANNEX_LIVE_WEBHOOK_CALLBACK_MUST_BE_PRODUCTION_API");
+  }
+  return callbackUrl;
 }
 
 export function buildChannexBookingWebhookPayload(args: {
@@ -179,11 +222,12 @@ async function persistWebhookMetadata(args: {
   );
 }
 
-export async function configureChannexBookingWebhookForStaging(args: {
-  propertyId: string;
+// Both entry points share the certified POST/PUT -> GET -> verified flow.
+async function configureChannexBookingWebhook(args: RegistrationScope & {
   callbackUrl: string;
   apiKey: string;
   apiBaseUrl: string;
+  environment: "STAGING" | "LIVE";
 }) {
   const propertyId = String(args.propertyId ?? "").trim();
   const apiKey = String(args.apiKey ?? "").trim();
@@ -196,8 +240,14 @@ export async function configureChannexBookingWebhookForStaging(args: {
     throw new Error("CHANNEX_API_KEY_REQUIRED");
   }
 
-  const apiBaseUrl = normalizeChannexStagingBaseUrl(args.apiBaseUrl);
-  const callbackUrl = normalizeChannexWebhookCallbackUrl(args.callbackUrl);
+  const apiBaseUrl = args.apiBaseUrl;
+  const callbackUrl = args.callbackUrl;
+  const organizationId = args.organizationId === undefined
+    ? undefined
+    : asString(args.organizationId);
+  if (organizationId === null) {
+    throw new Error("CHANNEX_WEBHOOK_ORGANIZATION_ID_REQUIRED");
+  }
 
   const listings = await prisma.pmsListing.findMany({
     where: {
@@ -206,6 +256,7 @@ export async function configureChannexBookingWebhookForStaging(args: {
         is: {
           provider: PmsProvider.CHANNEX,
           status: "ACTIVE",
+          ...(organizationId ? { organizationId } : {}),
         },
       },
     },
@@ -213,6 +264,7 @@ export async function configureChannexBookingWebhookForStaging(args: {
       connection: {
         select: {
           id: true,
+          organizationId: true,
           webhookSecret: true,
         },
       },
@@ -222,6 +274,12 @@ export async function configureChannexBookingWebhookForStaging(args: {
 
   if (listings.length === 0) {
     throw new Error("CHANNEX_PROPERTY_MAPPING_NOT_FOUND");
+  }
+
+  if (organizationId && listings.some(
+    (listing) => listing.connection.organizationId !== organizationId
+  )) {
+    throw new Error("CHANNEX_WEBHOOK_TENANT_MISMATCH");
   }
 
   const connectionIds = Array.from(
@@ -271,13 +329,50 @@ export async function configureChannexBookingWebhookForStaging(args: {
   const existingWebhookId = existingWebhookIds[0] ?? null;
   const connection = listings[0]!.connection;
   const existingSecret = asString(connection.webhookSecret);
-  const webhookSecret = existingSecret ?? generateChannexWebhookSecret();
+  let webhookSecret = existingSecret;
+  let secretCreated = false;
 
-  if (!existingSecret) {
-    await prisma.pmsConnection.update({
-      where: { id: connection.id },
-      data: { webhookSecret },
+  if (!webhookSecret) {
+    const candidateSecret = generateChannexWebhookSecret();
+    // An organization shares one PMS connection across properties. Claim the
+    // absent value atomically: concurrent onboarding must not rotate a secret
+    // already selected by another property's registration.
+    const claimed = await prisma.pmsConnection.updateMany({
+      where: {
+        id: connection.id,
+        organizationId: connection.organizationId,
+        provider: PmsProvider.CHANNEX,
+        status: "ACTIVE",
+        webhookSecret: connection.webhookSecret,
+      },
+      data: { webhookSecret: candidateSecret },
     });
+    if (claimed.count === 1) {
+      webhookSecret = candidateSecret;
+      secretCreated = true;
+    } else if (claimed.count === 0) {
+      const current = await prisma.pmsConnection.findUnique({
+        where: { id: connection.id },
+        select: {
+          organizationId: true,
+          provider: true,
+          status: true,
+          webhookSecret: true,
+        },
+      });
+      if (
+        !current || current.organizationId !== connection.organizationId ||
+        current.provider !== PmsProvider.CHANNEX || current.status !== "ACTIVE"
+      ) {
+        throw new Error("CHANNEX_WEBHOOK_SECRET_PERSISTENCE_CONFLICT");
+      }
+      webhookSecret = asString(current.webhookSecret);
+      if (!webhookSecret) {
+        throw new Error("CHANNEX_WEBHOOK_SECRET_PERSISTENCE_CONFLICT");
+      }
+    } else {
+      throw new Error("CHANNEX_WEBHOOK_SECRET_PERSISTENCE_CONFLICT");
+    }
   }
 
   const headers = {
@@ -302,6 +397,7 @@ export async function configureChannexBookingWebhookForStaging(args: {
         {
           headers,
           timeout: CHANNEX_REQUEST_TIMEOUT_MS,
+          maxRedirects: 0,
         }
       );
       operation = "UPDATED";
@@ -331,6 +427,7 @@ export async function configureChannexBookingWebhookForStaging(args: {
       {
         headers,
         timeout: CHANNEX_REQUEST_TIMEOUT_MS,
+        maxRedirects: 0,
       }
     );
 
@@ -353,6 +450,7 @@ export async function configureChannexBookingWebhookForStaging(args: {
     {
       headers,
       timeout: CHANNEX_REQUEST_TIMEOUT_MS,
+      maxRedirects: 0,
     }
   );
 
@@ -373,7 +471,7 @@ export async function configureChannexBookingWebhookForStaging(args: {
   return {
     ok: true,
     provider: "PIN_GO_CONNECT",
-    environment: "STAGING",
+    environment: args.environment,
     operation,
     propertyId,
     channexPropertyId,
@@ -382,7 +480,84 @@ export async function configureChannexBookingWebhookForStaging(args: {
     eventMask: CHANNEX_WEBHOOK_EVENT_MASK,
     sendData: CHANNEX_WEBHOOK_SEND_DATA,
     isActive: true,
-    secretCreated: !existingSecret,
+    secretCreated,
     verified: true,
   };
+}
+
+// Retain the certified staging command and its public contract.
+export async function configureChannexBookingWebhookForStaging(args: {
+  propertyId: string;
+  callbackUrl: string;
+  apiKey: string;
+  apiBaseUrl: string;
+}) {
+  return configureChannexBookingWebhook({
+    ...args,
+    apiBaseUrl: normalizeChannexStagingBaseUrl(args.apiBaseUrl),
+    callbackUrl: normalizeChannexWebhookCallbackUrl(args.callbackUrl),
+    environment: "STAGING",
+  });
+}
+
+export async function configureChannexBookingWebhookForLive(
+  args: RegistrationScope & { env?: RegistrationEnvironment }
+) {
+  // The live command is productive even when NODE_ENV is absent. This is a
+  // configuration view, not a process.env mutation; legacy credentials cannot
+  // become a fallback or override an explicitly configured OTA transport.
+  const transport = resolveChannexRuntimeTransport({
+    env: { ...(args.env ?? process.env), NODE_ENV: "production" },
+  });
+  return configureChannexBookingWebhook({
+    propertyId: args.propertyId,
+    organizationId: args.organizationId,
+    apiKey: transport.apiKey,
+    apiBaseUrl: normalizeChannexLiveBaseUrl(transport.apiOrigin),
+    callbackUrl: CHANNEX_PRODUCTION_WEBHOOK_CALLBACK_URL,
+    environment: "LIVE",
+  });
+}
+
+export async function configureChannexBookingWebhookForConnectionCenter(args: {
+  organizationId: string;
+  propertyId: string;
+  env?: RegistrationEnvironment;
+}) {
+  const organizationId = asString(args.organizationId);
+  if (!organizationId) {
+    throw new Error("CHANNEX_WEBHOOK_ORGANIZATION_ID_REQUIRED");
+  }
+  const env = args.env ?? process.env;
+  let configuredOrigin: string | null = null;
+  try {
+    configuredOrigin = new URL(env.OTA_CONNECTION_PROVIDER_API_ORIGIN ?? "").origin;
+  } catch {
+    // The transport resolver below rejects missing or malformed configuration.
+  }
+  if (isProductionRuntime(env) || configuredOrigin === CHANNEX_PRODUCTION_API_ORIGIN) {
+    return configureChannexBookingWebhookForLive({
+      organizationId,
+      propertyId: args.propertyId,
+      env,
+    });
+  }
+
+  // Keep staging certification isolated. Explicit empty values prevent the
+  // shared resolver from falling back to CHANNEX_API_KEY/CHANNEX_API_BASE_URL.
+  const transport = resolveChannexRuntimeTransport({
+    env,
+    nonProductionApiKey: env.OTA_CONNECTION_API_KEY ?? "",
+    nonProductionApiOrigin: env.OTA_CONNECTION_PROVIDER_API_ORIGIN ?? "",
+    nonProductionMissingApiKeyError: "OTA_CONNECTION_API_KEY_REQUIRED",
+    nonProductionInvalidOriginError: "OTA_CONNECTION_PROVIDER_API_ORIGIN_REQUIRED",
+  });
+  return configureChannexBookingWebhook({
+    organizationId,
+    propertyId: args.propertyId,
+    apiKey: transport.apiKey,
+    apiBaseUrl: normalizeChannexStagingBaseUrl(transport.apiOrigin),
+    callbackUrl: normalizeChannexWebhookCallbackUrl(env.CHANNEX_WEBHOOK_CALLBACK_URL ?? ""),
+    environment: "STAGING",
+  });
 }
