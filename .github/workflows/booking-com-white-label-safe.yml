@@ -1,0 +1,188 @@
+name: Booking.com White Label Validation (backend)
+
+on:
+  push:
+    branches: [agent/booking-com-white-label-safe]
+  pull_request:
+    paths:
+      - src/distribution/channex-white-label.adapter.ts
+      - src/distribution/channex-white-label.booking-com.test.ts
+      - .github/workflows/booking-com-white-label-safe.yml
+
+permissions:
+  contents: read
+
+defaults:
+  run:
+    shell: bash
+
+concurrency:
+  group: booking-com-backend-${{ github.event_name }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  BASELINE_SHA: edf64fb95d11e67103da7145eca7e1de412f9176
+  REVIEWED_SHA: c695b33e5d0e2b734420441d176d9f634e21b425
+  DATABASE_URL: postgresql://test:test@127.0.0.1:5432/pingo_ci
+  CHANNEX_API_KEY: test-api-key
+  CHANNEX_API_BASE_URL: https://staging.channex.io
+
+jobs:
+  current-main-compatibility:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+      - name: Verify reviewed patch and freeze all other current-main files
+        run: |
+          mkdir -p validation-evidence
+          python3 <<'PY' | tee validation-evidence/scope.txt
+          import os,subprocess
+          from pathlib import Path
+          base=os.environ['BASELINE_SHA']; reviewed=os.environ['REVIEWED_SHA']
+          files=['src/distribution/channex-white-label.adapter.ts','src/distribution/channex-white-label.booking-com.test.ts']
+          for path in files:
+              assert Path(path).read_bytes()==subprocess.check_output(['git','show',f'{reviewed}:{path}']),path
+          expected=set(files+['.github/workflows/booking-com-white-label-safe.yml'])
+          changed=set(subprocess.check_output(['git','diff','--name-only',base,'HEAD'],text=True).splitlines())
+          assert changed==expected,{'unexpected':sorted(changed-expected),'missing':sorted(expected-changed)}
+          subprocess.run(['git','merge-base','--is-ancestor',base,'HEAD'],check=True)
+          print('PASS: current main is an ancestor; only original Booking.com adapter/test plus validation workflow differ.')
+          print('PASS: all current-main Airbnb, ARI, webhook, Prisma, dependency, compiler and runtime configuration files are preserved.')
+          PY
+          git rev-parse HEAD > validation-evidence/head.txt
+          git diff "$BASELINE_SHA" HEAD > validation-evidence/candidate.patch
+      - name: Install unchanged locked dependencies without lifecycle scripts
+        run: |
+          npm ci --ignore-scripts --no-audit --no-fund
+          node --version > validation-evidence/versions.txt
+          ./node_modules/.bin/tsc --version >> validation-evidence/versions.txt
+      - name: Generate and validate Prisma without migrations or database access
+        run: |
+          ./node_modules/.bin/prisma generate --schema ./prisma 2>&1 | tee validation-evidence/prisma-generate.txt
+          ./node_modules/.bin/prisma validate --schema ./prisma 2>&1 | tee validation-evidence/prisma-validate.txt
+      - name: Install test-only external socket guard
+        run: |
+          cat > "$RUNNER_TEMP/pingo-test-network-guard.cjs" <<'NODE'
+          const net = require('node:net');
+          const connect = net.Socket.prototype.connect;
+          net.Socket.prototype.connect = function (...args) {
+            const normalized = Array.isArray(args[0]) ? args[0] : args;
+            const first = normalized[0];
+            const host = first && typeof first === 'object' ? first.host : (typeof normalized[1] === 'string' ? normalized[1] : 'localhost');
+            if (host && !['localhost', '127.0.0.1', '::1'].includes(host)) throw new Error('TEST_EXTERNAL_NETWORK_BLOCKED');
+            return connect.apply(this, args);
+          };
+          NODE
+      - name: Original and Booking.com adapter tests
+        env:
+          NODE_OPTIONS: --require ${{ runner.temp }}/pingo-test-network-guard.cjs
+        run: node --import tsx --test src/distribution/channex-white-label.adapter.test.ts src/distribution/channex-white-label.booking-com.test.ts 2>&1 | tee validation-evidence/adapter-tests.txt
+      - name: Entire Connection Center and persistence regression selection
+        env:
+          NODE_OPTIONS: --require ${{ runner.temp }}/pingo-test-network-guard.cjs
+        run: |
+          npm run test:distribution-connection-center 2>&1 | tee validation-evidence/connection-center-tests.txt
+          npm run test:ota-distribution-persistence 2>&1 | tee validation-evidence/persistence-tests.txt
+          node --import tsx --test src/distribution/airbnb-host-activation.service.test.ts 2>&1 | tee validation-evidence/airbnb-current-activation-tests.txt
+      - name: Complete existing Channex certification regression suite
+        env:
+          NODE_OPTIONS: --require ${{ runner.temp }}/pingo-test-network-guard.cjs
+        run: npm run test:channex-certification 2>&1 | tee validation-evidence/channex-certification.txt
+      - name: Certified-core freeze and configured commercial OTA typecheck
+        env:
+          NODE_OPTIONS: --require ${{ runner.temp }}/pingo-test-network-guard.cjs
+        run: |
+          npm run test:channex-certified-core-freeze 2>&1 | tee validation-evidence/certified-core-freeze.txt
+          npm run test:ota-commercial-closure-types 2>&1 | tee validation-evidence/ota-types.txt
+      - name: Validate production-origin Booking.com configuration using only a synthetic transport
+        env:
+          NODE_OPTIONS: --require ${{ runner.temp }}/pingo-test-network-guard.cjs
+        run: |
+          node --import tsx --input-type=module <<'NODE' | tee validation-evidence/production-origin-fixture.txt
+          import assert from 'node:assert/strict';
+          import {ChannexWhiteLabelAdapter} from './src/distribution/channex-white-label.adapter.ts';
+          import {resolveOtaConnectionCenterConfig} from './src/distribution/ota-connection-center.config.ts';
+          const env={NODE_ENV:'production',OTA_CONNECTION_CENTER_ENABLED:'true',OTA_CONNECTION_API_KEY:'test-key',OTA_CONNECTION_PROVIDER_API_ORIGIN:'https://app.channex.io',OTA_CONNECTION_IFRAME_BASE_URL:'https://app.channex.io/channels',OTA_CONNECTION_DEFAULT_CURRENCY:'USD',OTA_CONNECTION_AIRBNB_FILTER:'ABB',OTA_CONNECTION_BOOKING_FILTER:'BDC'};
+          const config=resolveOtaConnectionCenterConfig(env);
+          assert.equal(config.enabled,true);
+          assert.equal(resolveOtaConnectionCenterConfig({...env,OTA_CONNECTION_PROVIDER_API_ORIGIN:'https://staging.channex.io',OTA_CONNECTION_IFRAME_BASE_URL:'https://staging.channex.io/channels'}).enabled,false);
+          const calls=[];
+          const adapter=new ChannexWhiteLabelAdapter({enabled:true,...config.provider,transport:{async send(request){calls.push(request);return {data:{token:'LOCAL_TEST_ONLY'}};}}});
+          const result=await adapter.issue({provider:'BOOKING_COM',externalPropertyId:'test-property',externalGroupId:'test-group'});
+          const url=new URL(result.launchUrl);
+          assert.equal(url.origin,'https://app.channex.io');
+          assert.equal(url.searchParams.get('channels_filter'),'BDC');
+          assert.equal(url.searchParams.get('available_channels'),'BDC');
+          assert.equal(url.searchParams.get('property_id'),'test-property');
+          assert.equal(url.searchParams.get('group_id'),'test-group');
+          assert.deepEqual(calls.map(r=>[r.method,r.path]),[['POST','/api/v1/auth/one_time_token']]);
+          console.log('PASS: production-origin configuration, BDC filters, property/group scope; staging rejected in production. Synthetic transport only; real runtime values NOT verified.');
+          NODE
+      - name: Preserve exact source after validation
+        if: always()
+        run: git diff --exit-code HEAD -- .
+      - name: Upload current-main compatibility evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: booking-com-current-main-compatibility
+          path: validation-evidence/
+          retention-days: 14
+          if-no-files-found: error
+
+  full-project-types:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+      - run: npm ci --ignore-scripts --no-audit --no-fund
+      - run: ./node_modules/.bin/prisma generate --schema ./prisma
+      - name: Keep the full-project failure explicit and classify unchanged diagnostics
+        run: |
+          mkdir -p validation-evidence
+          git rev-parse HEAD > validation-evidence/head.txt
+          git worktree add --detach "$RUNNER_TEMP/booking-types-baseline" "$BASELINE_SHA"
+          ln -s "$GITHUB_WORKSPACE/node_modules" "$RUNNER_TEMP/booking-types-baseline/node_modules"
+          set +e
+          (cd "$RUNNER_TEMP/booking-types-baseline" && ./node_modules/.bin/tsc --noEmit --pretty false -p tsconfig.json) > validation-evidence/full-types-baseline.txt 2>&1
+          baseline=$?
+          ./node_modules/.bin/tsc --noEmit --pretty false -p tsconfig.json > validation-evidence/full-types-candidate.txt 2>&1
+          candidate=$?
+          set -e
+          printf 'baseline_exit=%s\ncandidate_exit=%s\n' "$baseline" "$candidate" | tee validation-evidence/full-types-status.txt
+          python3 <<'PY'
+          import collections,json,re
+          from pathlib import Path
+          root=Path('validation-evidence')
+          before=(root/'full-types-baseline.txt').read_bytes(); after=(root/'full-types-candidate.txt').read_bytes()
+          diagnostics=re.findall(r'^(.+?)\(\d+,\d+\): error (TS\d+): (.*)$',after.decode(),re.M)
+          counts=collections.Counter(path.split('/')[0] for path,code,msg in diagnostics)
+          result={'identical':before==after,'baselineDiagnostics':before.count(b'error TS'),'candidateDiagnostics':after.count(b'error TS'),'diagnosticsByRoot':dict(counts),'topCodes':collections.Counter(code for path,code,msg in diagnostics).most_common(10),'releaseApproval':False}
+          (root/'full-types-summary.json').write_text(json.dumps(result,indent=2))
+          print(json.dumps(result,indent=2))
+          assert before==after,'Candidate introduced or changed global type diagnostics'
+          PY
+          exit "$candidate"
+      - name: Upload full-project diagnostics without waiving the result
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: booking-com-current-main-full-types
+          path: validation-evidence/
+          retention-days: 14
+          if-no-files-found: error
