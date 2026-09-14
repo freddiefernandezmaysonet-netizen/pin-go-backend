@@ -12,6 +12,8 @@ import {
 import {
   ChannexChannelLifecycleWebhookRegistrationError,
   executeChannexChannelLifecycleWebhookRegistration,
+  configureProductionChannexChannelLifecycleWebhook,
+  OTA_CHANNEL_LIFECYCLE_PRODUCTION_CALLBACK_URL,
   planChannexChannelLifecycleWebhookRegistration,
   type ChannexChannelLifecycleWebhookRegistrationTransport,
   type ChannexWebhookSnapshot,
@@ -180,6 +182,90 @@ test("APPLY is idempotent: matching state skips PUT and still verifies with GET"
   assert.equal(result.status, "UNCHANGED_AND_VERIFIED");
   assert.equal(mocked.calls.put.length, 0);
   assert.equal(mocked.calls.get.length, 1);
+});
+
+test("production registration creates a separate property-scoped lifecycle webhook and verifies it", async () => {
+  const productionId = "33333333-3333-4333-8333-333333333333";
+  const calls = { post: 0, put: 0, get: 0 };
+  let current: ChannexWebhookSnapshot | null = null;
+  const productionTransport: any = {
+    apiOrigin: "https://app.channex.io",
+    async listAllWebhooks() {
+      return [snapshot({ callbackUrl: "https://api.pin-ngo.com/webhooks/channex", eventMask: "booking", sendData: false })];
+    },
+    async postWebhook(payload: any) {
+      calls.post++;
+      current = snapshot({
+        id: productionId,
+        propertyId: externalPropertyId,
+        callbackUrl: payload.webhook.callback_url,
+        eventMask: payload.webhook.event_mask,
+        headers: payload.webhook.headers,
+        isActive: payload.webhook.is_active,
+        sendData: payload.webhook.send_data,
+      });
+      return productionId;
+    },
+    async putWebhook() { calls.put++; },
+    async getWebhook() { calls.get++; return current!; },
+  };
+  const result = await configureProductionChannexChannelLifecycleWebhook({
+    client: { distributionProperty: { async findFirst() {
+      return { organizationId: "org-1", propertyId: "property-1", externalPropertyId };
+    } } } as any,
+    transport: productionTransport,
+    organizationId: "org-1",
+    propertyId: "property-1",
+    webhookSecret,
+  });
+  assert.deepEqual(result, { verified: true, webhookId: productionId, operation: "CREATED" });
+  assert.deepEqual(calls, { post: 1, put: 0, get: 1 });
+  assert.equal(current!.callbackUrl, OTA_CHANNEL_LIFECYCLE_PRODUCTION_CALLBACK_URL);
+  assert.equal(current!.eventMask, OTA_CHANNEL_LIFECYCLE_WEBHOOK_EVENT_MASK);
+  assert.equal(current!.sendData, true);
+});
+
+test("production registration updates one exact lifecycle candidate but never repurposes booking", async () => {
+  const calls = { post: 0, put: 0, get: 0 };
+  let current = snapshot({
+    callbackUrl: OTA_CHANNEL_LIFECYCLE_PRODUCTION_CALLBACK_URL,
+    eventMask: "updated_channel",
+  });
+  const productionTransport: any = {
+    apiOrigin: "https://app.channex.io",
+    async listAllWebhooks() { return [
+      snapshot({ id: otherWebhookId, callbackUrl: "https://api.pin-ngo.com/webhooks/channex", eventMask: "booking", sendData: false }),
+      current,
+    ]; },
+    async postWebhook() { calls.post++; return otherWebhookId; },
+    async putWebhook(_id: string, payload: any) {
+      calls.put++;
+      current = { ...current, eventMask: payload.webhook.event_mask, headers: payload.webhook.headers,
+        isActive: payload.webhook.is_active, sendData: payload.webhook.send_data };
+    },
+    async getWebhook() { calls.get++; return current; },
+  };
+  const result = await configureProductionChannexChannelLifecycleWebhook({
+    client: { distributionProperty: { async findFirst() {
+      return { organizationId: "org-1", propertyId: "property-1", externalPropertyId };
+    } } } as any,
+    transport: productionTransport,
+    organizationId: "org-1", propertyId: "property-1", webhookSecret,
+  });
+  assert.equal(result.operation, "UPDATED");
+  assert.deepEqual(calls, { post: 0, put: 1, get: 1 });
+});
+
+test("production registration rejects staging transport before database or HTTP access", async () => {
+  let reads = 0;
+  const mocked = transport([]);
+  await assert.rejects(configureProductionChannexChannelLifecycleWebhook({
+    client: { distributionProperty: { async findFirst() { reads++; return null; } } } as any,
+    transport: { ...mocked.value, postWebhook: async () => webhookId },
+    organizationId: "org-1", propertyId: "property-1", webhookSecret,
+  }), /OTA_CHANNEL_LIFECYCLE_WEBHOOK_PRODUCTION_ORIGIN_REQUIRED/);
+  assert.equal(reads, 0);
+  assert.equal(mocked.calls.list, 0);
 });
 
 test("planner fails closed for zero, multiple, wildcard, mixed and protected candidates", () => {

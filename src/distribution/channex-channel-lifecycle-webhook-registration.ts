@@ -1,4 +1,5 @@
 import crypto from "node:crypto";
+import type { PrismaClient } from "@prisma/client";
 
 import {
   ChannexChannelLifecycleWebhookContractError,
@@ -17,6 +18,9 @@ import {
 } from "./channex-channel-lifecycle-webhook-registration.config.js";
 
 const CHANNEX_STAGING_API_ORIGIN = "https://staging.channex.io";
+const CHANNEX_PRODUCTION_API_ORIGIN = "https://app.channex.io";
+export const OTA_CHANNEL_LIFECYCLE_PRODUCTION_CALLBACK_URL =
+  "https://api.pin-ngo.com/webhooks/ota/channex/channel-lifecycle";
 
 export type ChannexWebhookSnapshot = {
   id: string;
@@ -39,6 +43,15 @@ export type ChannexChannelLifecycleWebhookRegistrationTransport = {
   ): Promise<void>;
   getWebhook(webhookId: string): Promise<ChannexWebhookSnapshot>;
 };
+
+export type ChannexChannelLifecycleProductionRegistrationTransport =
+  ChannexChannelLifecycleWebhookRegistrationTransport & {
+    postWebhook(
+      payload: ChannexChannelLifecycleWebhookWritePayload
+    ): Promise<string>;
+  };
+
+type ProductionRegistrationClient = Pick<PrismaClient, "distributionProperty">;
 
 export class ChannexChannelLifecycleWebhookRegistrationError extends Error {
   constructor(readonly code: string) {
@@ -345,4 +358,85 @@ export async function executeChannexChannelLifecycleWebhookRegistration(args: {
     sendData: true,
     isActive: true,
   };
+}
+
+export async function configureProductionChannexChannelLifecycleWebhook(args: {
+  client: ProductionRegistrationClient;
+  transport: ChannexChannelLifecycleProductionRegistrationTransport;
+  organizationId: string;
+  propertyId: string;
+  webhookSecret: string;
+  callbackUrl?: string;
+}): Promise<{ verified: true; webhookId: string; operation: "CREATED" | "UPDATED" | "UNCHANGED" }> {
+  if (args.transport.apiOrigin !== CHANNEX_PRODUCTION_API_ORIGIN) {
+    fail("OTA_CHANNEL_LIFECYCLE_WEBHOOK_PRODUCTION_ORIGIN_REQUIRED");
+  }
+  const organizationId = String(args.organizationId ?? "").trim();
+  const propertyId = String(args.propertyId ?? "").trim();
+  if (!organizationId || !propertyId) {
+    fail("OTA_CHANNEL_LIFECYCLE_PROPERTY_SCOPE_REQUIRED");
+  }
+  const callbackUrl = normalizeOtaChannelLifecycleWebhookCallbackUrl(
+    args.callbackUrl ?? OTA_CHANNEL_LIFECYCLE_PRODUCTION_CALLBACK_URL
+  );
+  const webhookSecret = String(args.webhookSecret ?? "").trim();
+  if (!/^[\x21-\x7E]{1,512}$/.test(webhookSecret)) {
+    fail("OTA_CHANNEL_LIFECYCLE_WEBHOOK_SECRET_REQUIRED");
+  }
+  const property = await args.client.distributionProperty.findFirst({
+    where: { organizationId, propertyId, platform: "CHANNEX" },
+    select: { organizationId: true, propertyId: true, externalPropertyId: true },
+  });
+  if (!property) fail("OTA_CHANNEL_LIFECYCLE_DISTRIBUTION_PROPERTY_NOT_FOUND");
+  if (property.organizationId !== organizationId || property.propertyId !== propertyId) {
+    fail("OTA_DISTRIBUTION_TENANT_MISMATCH");
+  }
+  const externalPropertyId = normalizeChannexUuid(property.externalPropertyId);
+  if (!externalPropertyId) {
+    fail("OTA_CHANNEL_LIFECYCLE_EXTERNAL_PROPERTY_ID_REQUIRED");
+  }
+  const webhooks = await args.transport.listAllWebhooks();
+  const candidates = webhooks.filter(
+    (webhook) =>
+      normalizeChannexUuid(webhook.propertyId) === externalPropertyId &&
+      comparableCallback(webhook.callbackUrl) === callbackUrl
+  );
+  if (candidates.length > 1) {
+    fail("OTA_CHANNEL_LIFECYCLE_WEBHOOK_CANDIDATE_AMBIGUOUS");
+  }
+  const payload = buildChannexChannelLifecycleWebhookPayload({
+    externalPropertyId,
+    callbackUrl,
+    webhookSecret,
+  });
+  let webhookId: string;
+  let operation: "CREATED" | "UPDATED" | "UNCHANGED";
+  if (candidates.length === 0) {
+    webhookId = normalizeChannexUuid(await args.transport.postWebhook(payload)) ?? "";
+    if (!webhookId) fail("OTA_CHANNEL_LIFECYCLE_WEBHOOK_CREATE_RESPONSE_INVALID");
+    operation = "CREATED";
+  } else {
+    const plan = planChannexChannelLifecycleWebhookRegistration({
+      webhooks,
+      externalPropertyId,
+      callbackUrl,
+      webhookSecret,
+    });
+    webhookId = plan.webhookId;
+    if (plan.alreadyMatches) {
+      operation = "UNCHANGED";
+    } else {
+      await args.transport.putWebhook(webhookId, payload);
+      operation = "UPDATED";
+    }
+  }
+  const verification = await args.transport.getWebhook(webhookId);
+  assertVerifiedChannexChannelLifecycleWebhook({
+    webhook: verification,
+    webhookId,
+    externalPropertyId,
+    callbackUrl,
+    webhookSecret,
+  });
+  return { verified: true, webhookId, operation };
 }

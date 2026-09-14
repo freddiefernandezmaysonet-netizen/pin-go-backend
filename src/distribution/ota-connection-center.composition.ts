@@ -57,6 +57,10 @@ export function buildOtaConnectionCenterComposition(args: {
     organizationId: string;
     propertyId: string;
   }): Promise<{ verified: boolean }>;
+  configureChannelLifecycleWebhook?(input: {
+    organizationId: string;
+    propertyId: string;
+  }): Promise<{ verified: boolean }>;
 }): DistributionConnectionCenterActions {
   const requestedRuntime =
     args.runtimeOverride ?? resolveOtaConnectionCenterRuntime(args.runtimeValue);
@@ -131,6 +135,21 @@ export function buildOtaConnectionCenterComposition(args: {
         // Axios errors can carry request headers; never propagate that payload
         // through the host-facing Connection Center error boundary.
         throw new OtaProvisioningError("OTA_BOOKING_WEBHOOK_REGISTRATION_FAILED");
+      }
+      if (args.configureChannelLifecycleWebhook) {
+        try {
+          const lifecycleWebhook = await args.configureChannelLifecycleWebhook({
+            organizationId: input.organizationId,
+            propertyId: input.propertyId,
+          });
+          if (lifecycleWebhook.verified !== true) {
+            throw new Error("OTA_CHANNEL_LIFECYCLE_WEBHOOK_NOT_VERIFIED");
+          }
+        } catch {
+          throw new OtaProvisioningError(
+            "OTA_CHANNEL_LIFECYCLE_WEBHOOK_REGISTRATION_FAILED"
+          );
+        }
       }
       return result;
     },

@@ -9,8 +9,12 @@ import { buildOtaConnectionCenterComposition } from "./ota-connection-center.com
 import type { OtaProvisioningRepository } from "./ota-connection-orchestrator.service.js";
 
 type WebhookConfigurer = NonNullable<Parameters<typeof buildOtaConnectionCenterComposition>[0]["configureBookingWebhook"]>;
+type LifecycleWebhookConfigurer = NonNullable<Parameters<typeof buildOtaConnectionCenterComposition>[0]["configureChannelLifecycleWebhook"]>;
 
-function configuredComposition(configureBookingWebhook?: WebhookConfigurer) {
+function configuredComposition(
+  configureBookingWebhook?: WebhookConfigurer,
+  configureChannelLifecycleWebhook?: LifecycleWebhookConfigurer
+) {
   const calls: string[] = [];
   const repository: OtaProvisioningRepository = {
     async alignPmsListingToReadyDistributionMapping() {
@@ -65,6 +69,11 @@ function configuredComposition(configureBookingWebhook?: WebhookConfigurer) {
     configureBookingWebhook: configureBookingWebhook ?? (async (input) => {
       assert.deepEqual(input, { organizationId: "org-1", propertyId: "property-1" });
       calls.push("register-booking-webhook");
+      return { verified: true };
+    }),
+    configureChannelLifecycleWebhook: configureChannelLifecycleWebhook ?? (async (input) => {
+      assert.deepEqual(input, { organizationId: "org-1", propertyId: "property-1" });
+      calls.push("register-channel-lifecycle-webhook");
       return { verified: true };
     }),
     prepareLogicalConnection: async () => { calls.push("logical-prepare"); return {} as any; },
@@ -135,6 +144,7 @@ test("configured composition aligns PMS to READY distribution without provider p
     "load",
     "align-pms-mapping",
     "register-booking-webhook",
+    "register-channel-lifecycle-webhook",
   ]);
 });
 
@@ -173,6 +183,7 @@ test("new property registers only after inventory and canonical PMS linkage are 
     "claim-property", "transport-property", "checkpoint-property", "transport-room",
     "checkpoint-room", "transport-rate", "complete-property", "align-pms-mapping",
     "register-booking-webhook",
+    "register-channel-lifecycle-webhook",
   ]);
 });
 
@@ -212,7 +223,27 @@ test("failed webhook verification returns a sanitized error and the READY mappin
   assert.deepEqual(calls, [
     "logical-prepare", "load", "align-pms-mapping",
     "logical-prepare", "load", "align-pms-mapping",
+    "register-channel-lifecycle-webhook",
   ]);
+});
+
+test("lifecycle webhook verification is required after booking verification", async () => {
+  const { actions } = configuredComposition(undefined, async () => ({ verified: false }));
+  await assert.rejects(
+    actions.prepare!(prepareInput),
+    /OTA_CHANNEL_LIFECYCLE_WEBHOOK_REGISTRATION_FAILED/
+  );
+});
+
+test("lifecycle webhook errors are sanitized", async () => {
+  const { actions } = configuredComposition(undefined, async () => {
+    throw new Error("request contained lifecycle-secret and canonical-api-key");
+  });
+  await assert.rejects(actions.prepare!(prepareInput), (error: any) => {
+    assert.equal(error.code, "OTA_CHANNEL_LIFECYCLE_WEBHOOK_REGISTRATION_FAILED");
+    assert.equal(JSON.stringify(error).includes("lifecycle-secret"), false);
+    return true;
+  });
 });
 
 test("unverified registrar output cannot produce a successful preparation", async () => {
