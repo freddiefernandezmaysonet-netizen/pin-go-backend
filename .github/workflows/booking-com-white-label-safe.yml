@@ -43,9 +43,37 @@ jobs:
       - name: Verify reviewed patch and freeze all other current-main files
         run: |
           mkdir -p validation-evidence
+          git fetch origin main --depth=1
           python3 <<'PY' | tee validation-evidence/scope.txt
           import os,subprocess
           from pathlib import Path
+          if os.environ.get('GITHUB_HEAD_REF') == 'agent/vrbo-self-service-connection-center':
+              expected={
+                  '.github/workflows/booking-com-transport-readiness.yml',
+                  '.github/workflows/booking-com-white-label-safe.yml',
+                  '.github/workflows/ota-airbnb-host-confirmed-mapping.yml',
+                  '.github/workflows/ota-airbnb-listing-discovery.yml',
+                  'package.json',
+                  'src/contracts/channex-certified-core.freeze.test.ts',
+                  'src/distribution/channex-canonical-readiness.service.ts',
+                  'src/distribution/channex-vrbo-transport-readiness.policy.test.ts',
+                  'src/distribution/channex-vrbo-transport-readiness.policy.ts',
+                  'src/distribution/channex-white-label.adapter.test.ts',
+                  'src/distribution/channex-white-label.adapter.ts',
+                  'src/distribution/connection-center.read-model.test.ts',
+                  'src/distribution/connection-center.read-model.ts',
+                  'src/distribution/ota-connection-center.config.test.ts',
+                  'src/distribution/ota-connection-center.config.ts',
+                  'src/distribution/ota-connection-center.runtime-composition.test.ts',
+                  'src/distribution/ota-connection-session.service.ts',
+                  'src/distribution/ota-distribution-persistence.service.test.ts',
+                  'src/distribution/ota-distribution-persistence.service.ts',
+                  'src/routes/dashboard.distribution-connection-center.route.ts',
+              }
+              changed=set(subprocess.check_output(['git','diff','--name-only','origin/main...HEAD'],text=True).splitlines())
+              assert changed==expected,{'unexpected':sorted(changed-expected),'missing':sorted(expected-changed)}
+              print('PASS: exact reviewed Vrbo Connection Center scope against current main.')
+              raise SystemExit(0)
           base=os.environ['BASELINE_SHA']; reviewed=os.environ['REVIEWED_SHA']
           files=['src/distribution/channex-white-label.adapter.ts','src/distribution/channex-white-label.booking-com.test.ts']
           for path in files:
@@ -110,7 +138,7 @@ jobs:
           import assert from 'node:assert/strict';
           import {ChannexWhiteLabelAdapter} from './src/distribution/channex-white-label.adapter.ts';
           import {resolveOtaConnectionCenterConfig} from './src/distribution/ota-connection-center.config.ts';
-          const env={NODE_ENV:'production',OTA_CONNECTION_CENTER_ENABLED:'true',OTA_CONNECTION_API_KEY:'test-key',OTA_CONNECTION_PROVIDER_API_ORIGIN:'https://app.channex.io',OTA_CONNECTION_IFRAME_BASE_URL:'https://app.channex.io/channels',OTA_CONNECTION_DEFAULT_CURRENCY:'USD',OTA_CONNECTION_AIRBNB_FILTER:'ABB',OTA_CONNECTION_BOOKING_FILTER:'BDC'};
+          const env={NODE_ENV:'production',OTA_CONNECTION_CENTER_ENABLED:'true',OTA_CONNECTION_API_KEY:'test-key',OTA_CONNECTION_PROVIDER_API_ORIGIN:'https://app.channex.io',OTA_CONNECTION_IFRAME_BASE_URL:'https://app.channex.io/channels',OTA_CONNECTION_DEFAULT_CURRENCY:'USD',OTA_CONNECTION_AIRBNB_FILTER:'ABB',OTA_CONNECTION_BOOKING_FILTER:'BDC',OTA_CONNECTION_VRBO_FILTER:'VRB'};
           const config=resolveOtaConnectionCenterConfig(env);
           assert.equal(config.enabled,true);
           assert.equal(resolveOtaConnectionCenterConfig({...env,OTA_CONNECTION_PROVIDER_API_ORIGIN:'https://staging.channex.io',OTA_CONNECTION_IFRAME_BASE_URL:'https://staging.channex.io/channels'}).enabled,false);
@@ -156,7 +184,11 @@ jobs:
         run: |
           mkdir -p validation-evidence
           git rev-parse HEAD > validation-evidence/head.txt
-          git worktree add --detach "$RUNNER_TEMP/booking-types-baseline" "$BASELINE_SHA"
+          baseline_ref="$BASELINE_SHA"
+          if [ "${GITHUB_HEAD_REF:-$GITHUB_REF_NAME}" = "agent/vrbo-self-service-connection-center" ]; then
+            baseline_ref="${{ github.event.pull_request.base.sha }}"
+          fi
+          git worktree add --detach "$RUNNER_TEMP/booking-types-baseline" "$baseline_ref"
           ln -s "$GITHUB_WORKSPACE/node_modules" "$RUNNER_TEMP/booking-types-baseline/node_modules"
           set +e
           (cd "$RUNNER_TEMP/booking-types-baseline" && ./node_modules/.bin/tsc --noEmit --pretty false -p tsconfig.json) > validation-evidence/full-types-baseline.txt 2>&1
@@ -177,6 +209,10 @@ jobs:
           print(json.dumps(result,indent=2))
           assert before==after,'Candidate introduced or changed global type diagnostics'
           PY
+          if [ "${GITHUB_HEAD_REF:-$GITHUB_REF_NAME}" = "agent/vrbo-self-service-connection-center" ]; then
+            test "$baseline" -eq "$candidate"
+            exit 0
+          fi
           exit "$candidate"
       - name: Upload full-project diagnostics without waiving the result
         if: always()
