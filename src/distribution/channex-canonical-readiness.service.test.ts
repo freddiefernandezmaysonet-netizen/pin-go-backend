@@ -60,7 +60,7 @@ type DistributionGroupMode =
   | "EXTERNAL_ID_INVALID";
 
 type FixtureOptions = {
-  provider?: "AIRBNB" | "BOOKING_COM";
+  provider?: "AIRBNB" | "BOOKING_COM" | "EXPEDIA";
   paymentReadiness?: "NOT_STARTED" | "IN_PROGRESS" | "READY" | "BLOCKED" | "NOT_APPLICABLE";
   taxReadiness?: "NOT_STARTED" | "IN_PROGRESS" | "READY" | "BLOCKED" | "NOT_APPLICABLE";
   contentReadiness?: "NOT_STARTED" | "IN_PROGRESS" | "READY" | "BLOCKED" | "NOT_APPLICABLE";
@@ -369,8 +369,18 @@ function fullSyncOutboxPair(args: {
 
 function fixture(options: FixtureOptions = {}) {
   const provider = options.provider ?? "AIRBNB";
-  const channelAdapter = provider === "BOOKING_COM" ? "BookingCom" : "AirBNB";
-  const channelCode = provider === "BOOKING_COM" ? "BDC" : "ABB";
+  const channelAdapter =
+    provider === "BOOKING_COM"
+      ? "BookingCom"
+      : provider === "EXPEDIA"
+        ? "Expedia"
+        : "AirBNB";
+  const channelCode =
+    provider === "BOOKING_COM"
+      ? "BDC"
+      : provider === "EXPEDIA"
+        ? "EXP"
+        : "ABB";
   const externalConnectionId =
     options.externalConnectionId === undefined
       ? EXTERNAL_CHANNEL_ID
@@ -1025,6 +1035,48 @@ test("Booking.com activation does not reuse a pre-activation Full Sync", async (
   assert.equal(
     f.audits[0].data.metadata.fullSyncEvidence.qualificationReason,
     "FULL_SYNC_COMPLETION_PREDATES_FRONTIER",
+  );
+});
+
+test("Expedia uses its exact EXP transport policy and preserves commercial readiness", async () => {
+  const f = fixture({
+    provider: "EXPEDIA",
+    paymentReadiness: "IN_PROGRESS",
+    taxReadiness: "READY",
+    contentReadiness: "BLOCKED",
+  });
+  const result = await reconcile(f, "reconcile-expedia-exact-001");
+
+  assert.equal(result.authorizationReadiness, "READY");
+  assert.equal(result.mappingReadiness, "READY");
+  assert.equal(result.distributionReadiness, "READY");
+  assert.deepEqual(f.reads.channelCollection, [
+    { propertyId: EXTERNAL_PROPERTY_ID, channel: "Expedia" },
+  ]);
+  assert.equal(f.updates[0].data.externalConnectionId, EXTERNAL_CHANNEL_ID);
+  assert.equal(f.updates[0].data.externalChannelCode, "EXP");
+  assert.equal(f.updates[0].data.externalListingId, null);
+  assert.equal(f.updates[0].data.status, "ACTIVE");
+  assert.equal(f.updates[0].data.paymentReadiness, "IN_PROGRESS");
+  assert.equal(f.updates[0].data.taxReadiness, "READY");
+  assert.equal(f.updates[0].data.contentReadiness, "BLOCKED");
+  assert.deepEqual(f.updates[0].data.lastFullSyncConfirmedAt, FULL_SYNC_COMPLETED_AT);
+  assert.deepEqual(f.updates[0].data.activatedAt, FULL_SYNC_COMPLETED_AT);
+  assert.equal(f.audits[0].data.metadata.canonicalStatus, "ACTIVE");
+  assert.deepEqual(f.audits[0].data.metadata.activationBlockers, []);
+  assert.equal(
+    f.audits[0].data.metadata.transportScopePolicy.policyVersion,
+    "channex_expedia_transport_v1",
+  );
+  assert.equal(f.audits[0].data.metadata.transportScopePolicy.applied, true);
+  assert.equal(
+    f.audits[0].data.metadata.transportScopePolicy.otaAcceptanceVerified,
+    false,
+  );
+  assert.equal(
+    f.audits[0].data.metadata.transportScopePolicy
+      .commercialReadinessRequiredForTechnicalActivation,
+    false,
   );
 });
 

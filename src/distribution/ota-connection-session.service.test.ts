@@ -10,7 +10,12 @@ import {
   type OtaConnectionSessionClient,
 } from "./ota-connection-session.service.js";
 
-function createClient(options: { ready?: boolean; duplicate?: boolean; corrupt?: boolean } = {}) {
+function createClient(options: {
+  ready?: boolean;
+  duplicate?: boolean;
+  corrupt?: boolean;
+  provider?: "AIRBNB" | "EXPEDIA";
+} = {}) {
   const sessions: any[] = [];
   const audits: any[] = [];
   const updates: any[] = [];
@@ -24,7 +29,7 @@ function createClient(options: { ready?: boolean; duplicate?: boolean; corrupt?:
           id: "connection-1",
           organizationId: "org-1",
           propertyId: "property-1",
-          provider: "AIRBNB",
+          provider: options.provider ?? "AIRBNB",
           distributionProperty: {
             organizationId: options.corrupt ? "org-other" : "org-1",
             propertyId: "property-1",
@@ -82,6 +87,30 @@ test("issued secret is returned once while persistence keeps only SHA-256 and or
   assert.equal(updates[0].data.launchUrlOrigin, "https://app.channex.io");
   assert.equal(JSON.stringify({ sessions, audits, updates }).includes("one-time-secret"), false);
   assert.equal(JSON.stringify({ sessions, audits, updates }).includes("mode=iframe"), false);
+});
+
+test("Expedia can issue a tenant-scoped one-time connection session", async () => {
+  const { client, sessions } = createClient({ provider: "EXPEDIA" });
+  let issuedProvider: string | null = null;
+  const result = await issueOtaConnectionSession({
+    client,
+    issuer: {
+      async issue(args) {
+        issuedProvider = args.provider;
+        return {
+          token: "expedia-one-time-secret",
+          launchUrl: "https://app.channex.io/auth/exchange",
+        };
+      },
+    },
+    ...base,
+    provider: "EXPEDIA",
+    requestKey: "expedia-request-1",
+  });
+
+  assert.equal(issuedProvider, "EXPEDIA");
+  assert.equal(result.sessionId, "session-1");
+  assert.equal(sessions[0].provider, "EXPEDIA");
 });
 
 test("session issuance is blocked until group and property provisioning are ready", async () => {

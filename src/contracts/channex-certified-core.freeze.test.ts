@@ -5,7 +5,7 @@ import path from "node:path";
 import test from "node:test";
 
 const CERTIFIED_CORE_SHA256 =
-  "01dbcec40109953066e9811148a79e3cb57a100c69221bbf8c483c190d0b843e";
+  "eaac49107952dd5b8d8bc454a6cea220ff2105232e846c5b7248edaf18ad213f";
 const CERTIFIED_CORE_FILE_COUNT = 124;
 
 const CHANNEX_PRODUCTION_TRANSPORT_BOUNDARY_FILES = new Set([

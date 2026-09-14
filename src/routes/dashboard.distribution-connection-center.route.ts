@@ -71,8 +71,11 @@ function providerFromPath(value: string): ConnectionCenterProvider | null {
   if (
     normalized === "AIRBNB" ||
     normalized === "BOOKING_COM" ||
+    normalized === "EXPEDIA" ||
     normalized === "VRBO"
-  ) return normalized;
+  ) {
+    return normalized;
+  }
   return null;
 }
 

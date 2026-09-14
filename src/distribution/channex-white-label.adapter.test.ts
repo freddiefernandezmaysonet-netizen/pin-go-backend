@@ -26,6 +26,7 @@ function adapter(enabled: boolean) {
         AIRBNB: "airbnb-channel-code",
         BOOKING_COM: "booking-channel-code",
         VRBO: "VRB",
+        EXPEDIA: "EXP",
       },
       transport: {
         async send(request) {
@@ -205,6 +206,34 @@ test("launch exchange replaces a configured channels path and stale query", asyn
   assert.equal(url.pathname, "/auth/exchange");
   assert.equal(url.searchParams.get("stale"), null);
   assert.equal(url.hash, "");
+});
+
+test("Expedia filters both displayed and configurable channels", async () => {
+  const requests: WhiteLabelTransportRequest[] = [];
+  const value = new ChannexWhiteLabelAdapter({
+    enabled: true,
+    apiKey: "test-api-key",
+    iframeBaseUrl: "https://staging.channex.io/channels",
+    channelFilterByProvider: { EXPEDIA: "EXP" },
+    transport: {
+      async send(request) {
+        requests.push(request);
+        return { data: { attributes: { token: "expedia-one-time-token" } } };
+      },
+    },
+  });
+  const issued = await value.issue({
+    externalGroupId: "group-ext",
+    externalPropertyId: "property-ext",
+    provider: "EXPEDIA",
+  });
+  const url = new URL(issued.launchUrl);
+
+  assert.equal(url.searchParams.get("channels_filter"), "EXP");
+  assert.equal(url.searchParams.get("available_channels"), "EXP");
+  assert.equal(requests.length, 1);
+  assert.equal(requests[0]?.path, "/api/v1/auth/one_time_token");
+  assert.equal(requests[0]?.method, "POST");
 });
 
 test("unknown provider filter fails closed before token issuance", async () => {

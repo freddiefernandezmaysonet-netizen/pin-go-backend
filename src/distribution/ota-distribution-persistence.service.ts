@@ -58,6 +58,7 @@ export type OtaDistributionPersistenceClient = {
 const SELF_SERVICE_PROVIDERS = new Set<ConnectionCenterProvider>([
   "AIRBNB",
   "BOOKING_COM",
+  "EXPEDIA",
   "VRBO",
 ]);
 

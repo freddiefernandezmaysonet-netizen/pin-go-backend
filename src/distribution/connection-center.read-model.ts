@@ -7,7 +7,7 @@ import {
 export const CONNECTION_CENTER_CATALOG = [
   { provider: "AIRBNB", name: "Airbnb", availability: "AVAILABLE" },
   { provider: "BOOKING_COM", name: "Booking.com", availability: "AVAILABLE" },
-  { provider: "EXPEDIA", name: "Expedia", availability: "PLANNED" },
+  { provider: "EXPEDIA", name: "Expedia", availability: "AVAILABLE" },
   { provider: "VRBO", name: "Vrbo", availability: "AVAILABLE" },
 ] as const;
 
