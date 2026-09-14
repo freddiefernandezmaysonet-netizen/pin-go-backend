@@ -23,6 +23,7 @@ import {
   validateChannexAriCanonicalMapping,
   type ChannexCorrelatedFullSyncOutboxEvidence,
 } from "./channex-airbnb-transport-readiness.policy.js";
+import { deriveChannexBookingComTransportReadiness } from "./channex-booking-com-transport-readiness.policy.js";
 import {
   planCanonicalOtaActivation,
   type OtaChannelConnectionStatus,
@@ -1254,13 +1255,27 @@ export async function reconcileCanonicalOtaReadiness(args: {
           isActive: channel.verification.activeState,
         }
       : null;
-  const commercialPolicy = deriveChannexAirbnbTransportReadiness({
-    provider: args.provider,
-    expectedExternalConnectionId: resolvedExternalConnectionId,
-    expectedExternalChannelCode: resolvedExternalChannelCode,
-    observedChannel: exactMappedActiveChannel,
-    mapping: ariMapping,
-  });
+  const commercialPolicy =
+    args.provider === "BOOKING_COM"
+      ? deriveChannexBookingComTransportReadiness({
+          provider: args.provider,
+          expectedExternalConnectionId: resolvedExternalConnectionId,
+          expectedExternalChannelCode: resolvedExternalChannelCode,
+          observedChannel: exactMappedActiveChannel,
+          mapping: ariMapping,
+          currentCommercialReadiness: {
+            paymentReadiness: connection.paymentReadiness,
+            taxReadiness: connection.taxReadiness,
+            contentReadiness: connection.contentReadiness,
+          },
+        })
+      : deriveChannexAirbnbTransportReadiness({
+          provider: args.provider,
+          expectedExternalConnectionId: resolvedExternalConnectionId,
+          expectedExternalChannelCode: resolvedExternalChannelCode,
+          observedChannel: exactMappedActiveChannel,
+          mapping: ariMapping,
+        });
   if (!commercialPolicy.applied) {
     appendReason(
       result,

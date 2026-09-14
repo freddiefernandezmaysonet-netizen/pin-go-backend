@@ -60,6 +60,10 @@ type DistributionGroupMode =
   | "EXTERNAL_ID_INVALID";
 
 type FixtureOptions = {
+  provider?: "AIRBNB" | "BOOKING_COM";
+  paymentReadiness?: "NOT_STARTED" | "IN_PROGRESS" | "READY" | "BLOCKED" | "NOT_APPLICABLE";
+  taxReadiness?: "NOT_STARTED" | "IN_PROGRESS" | "READY" | "BLOCKED" | "NOT_APPLICABLE";
+  contentReadiness?: "NOT_STARTED" | "IN_PROGRESS" | "READY" | "BLOCKED" | "NOT_APPLICABLE";
   externalConnectionId?: string | null;
   externalListingId?: string | null;
   channelListingId?: string;
@@ -364,6 +368,9 @@ function fullSyncOutboxPair(args: {
 }
 
 function fixture(options: FixtureOptions = {}) {
+  const provider = options.provider ?? "AIRBNB";
+  const channelAdapter = provider === "BOOKING_COM" ? "BookingCom" : "AirBNB";
+  const channelCode = provider === "BOOKING_COM" ? "BDC" : "ABB";
   const externalConnectionId =
     options.externalConnectionId === undefined
       ? EXTERNAL_CHANNEL_ID
@@ -393,7 +400,10 @@ function fixture(options: FixtureOptions = {}) {
     property: [] as string[],
     roomType: [] as string[],
     ratePlan: [] as string[],
-    channelCollection: [] as Array<{ propertyId: string; channel?: string }>,
+    channelCollection: [] as Array<{
+      propertyId: string;
+      channel: string | undefined;
+    }>,
     channel: [] as string[],
     legacyRoomTypeCollection: 0,
     legacyRatePlanCollection: 0,
@@ -419,7 +429,9 @@ function fixture(options: FixtureOptions = {}) {
                 ? "not-a-uuid"
                 : CHANNEL_GROUP_ID,
             provisioningStatus:
-              groupMode === "STATUS_NOT_READY" ? "PROVISIONING" : "READY",
+              groupMode === "STATUS_NOT_READY"
+                ? ("PROVISIONING" as const)
+                : ("READY" as const),
             updatedAt: new Date("2026-09-07T00:00:00.100Z"),
           };
     return {
@@ -453,14 +465,14 @@ function fixture(options: FixtureOptions = {}) {
       organizationId: options.tenantMismatch ? "other-org" : ORGANIZATION_ID,
       propertyId: PROPERTY_ID,
       distributionPropertyId: DISTRIBUTION_PROPERTY_ID,
-      provider: "AIRBNB" as const,
+      provider,
       externalConnectionId,
-      externalChannelCode: externalConnectionId ? "ABB" : null,
+      externalChannelCode: externalConnectionId ? channelCode : null,
       externalListingId,
       status: options.status ?? ("NOT_CONNECTED" as const),
-      paymentReadiness: "NOT_STARTED" as const,
-      taxReadiness: "NOT_STARTED" as const,
-      contentReadiness: "NOT_STARTED" as const,
+      paymentReadiness: options.paymentReadiness ?? ("NOT_STARTED" as const),
+      taxReadiness: options.taxReadiness ?? ("NOT_STARTED" as const),
+      contentReadiness: options.contentReadiness ?? ("NOT_STARTED" as const),
       activationRequestedAt: null,
       activatedAt:
         options.activatedAt !== undefined
@@ -778,7 +790,7 @@ function fixture(options: FixtureOptions = {}) {
     },
     async listChannels(propertyId: string, channel?: string) {
       reads.channelCollection.push({ propertyId, channel });
-      if (propertyId !== EXTERNAL_PROPERTY_ID || channel !== "AirBNB") {
+      if (propertyId !== EXTERNAL_PROPERTY_ID || channel !== channelAdapter) {
         return discoveryPayload("NOT_FOUND");
       }
       if (options.channelTransportFailure?.phase === "COLLECTION") {
@@ -789,7 +801,11 @@ function fixture(options: FixtureOptions = {}) {
       if (options.invalidChannelCollectionContract) {
         return invalidChannelCollectionPayload();
       }
-      return discoveryPayload(options.discovery ?? "UNIQUE");
+      const payload = discoveryPayload(options.discovery ?? "UNIQUE");
+      for (const candidate of payload.data) {
+        candidate.attributes.channel = channelAdapter;
+      }
+      return payload;
     },
     async getChannel(id: string) {
       reads.channel.push(id);
@@ -806,7 +822,7 @@ function fixture(options: FixtureOptions = {}) {
       if (options.invalidChannelResourceContract) {
         return invalidChannelResourcePayload();
       }
-      return channelPayload(
+      const payload = channelPayload(
         id,
         options.channelActive ?? true,
         options.channelGroupMismatch
@@ -816,6 +832,8 @@ function fixture(options: FixtureOptions = {}) {
         options.channelOperationalStatus,
         options.includeChannelOperationalStatus ?? false
       );
+      payload.data.attributes.channel = channelAdapter;
+      return payload;
     },
     async listRoomTypes() {
       reads.legacyRoomTypeCollection += 1;
@@ -828,6 +846,7 @@ function fixture(options: FixtureOptions = {}) {
   };
 
   return {
+    provider,
     client,
     transport,
     updates,
@@ -854,7 +873,7 @@ async function reconcile(
     organizationId: ORGANIZATION_ID,
     propertyId: PROPERTY_ID,
     requestedByUserId,
-    provider: "AIRBNB",
+    provider: f.provider,
     requestKey,
     now: NOW,
   });
@@ -944,6 +963,73 @@ test("persists ACTIVE only from exact channel, mapping, lifecycle, and post-life
     /^ota-canonical-readiness:[a-f0-9]{64}$/
   );
   assert.deepEqual(f.transactionIsolationLevels, ["Serializable"]);
+});
+
+test("Booking.com uses its exact BDC transport policy and preserves commercial readiness", async () => {
+  const f = fixture({
+    provider: "BOOKING_COM",
+    paymentReadiness: "IN_PROGRESS",
+    taxReadiness: "READY",
+    contentReadiness: "BLOCKED",
+  });
+  const result = await reconcile(f, "reconcile-booking-com-exact-001");
+
+  assert.equal(result.authorizationReadiness, "READY");
+  assert.equal(result.mappingReadiness, "READY");
+  assert.equal(result.distributionReadiness, "READY");
+  assert.deepEqual(f.reads.channelCollection, [
+    { propertyId: EXTERNAL_PROPERTY_ID, channel: "BookingCom" },
+  ]);
+  assert.equal(f.updates[0].data.externalConnectionId, EXTERNAL_CHANNEL_ID);
+  assert.equal(f.updates[0].data.externalChannelCode, "BDC");
+  assert.equal(f.updates[0].data.externalListingId, null);
+  assert.equal(f.updates[0].data.paymentReadiness, "IN_PROGRESS");
+  assert.equal(f.updates[0].data.taxReadiness, "READY");
+  assert.equal(f.updates[0].data.contentReadiness, "BLOCKED");
+  assert.equal(
+    f.audits[0].data.metadata.transportScopePolicy.policyVersion,
+    "channex_booking_com_transport_v1",
+  );
+  assert.equal(f.audits[0].data.metadata.transportScopePolicy.applied, true);
+  assert.equal(
+    f.audits[0].data.metadata.transportScopePolicy.otaAcceptanceVerified,
+    false,
+  );
+});
+
+test("Booking.com activation does not reuse a pre-activation Full Sync", async () => {
+  const f = fixture({
+    provider: "BOOKING_COM",
+    fullSync: "PRE_ACTIVATION",
+  });
+  const result = await reconcile(f, "reconcile-booking-com-pre-activation-001");
+
+  assert.equal(result.distributionReadiness, "IN_PROGRESS");
+  assert.equal(f.updates[0].data.status, "READINESS_CHECK");
+  assert.equal(f.updates[0].data.lastFullSyncConfirmedAt, null);
+  assert.ok(
+    result.reasons.includes(
+      "FULL_SYNC_NOT_QUALIFIED:FULL_SYNC_COMPLETION_PREDATES_FRONTIER",
+    ),
+  );
+  assert.equal(
+    f.audits[0].data.metadata.fullSyncEvidence.qualificationReason,
+    "FULL_SYNC_COMPLETION_PREDATES_FRONTIER",
+  );
+});
+
+test("Booking.com tenant mismatch fails before Channex reads or persistence", async () => {
+  const f = fixture({ provider: "BOOKING_COM", tenantMismatch: true });
+
+  await assert.rejects(
+    reconcile(f, "reconcile-booking-com-tenant-mismatch-001"),
+    (error: unknown) =>
+      error instanceof CanonicalOtaReadinessServiceError &&
+      error.code === "OTA_DISTRIBUTION_TENANT_MISMATCH",
+  );
+  assertNoChannexReads(f);
+  assert.equal(f.updates.length, 0);
+  assert.equal(f.audits.length, 0);
 });
 
 test("activate_channel reuses the certified pre-activation Full Sync when mapping is unchanged", async () => {
