@@ -36,6 +36,8 @@ import {
 import { applyChannexChannelLifecycleEvidence } from "./channex-channel-lifecycle.evidence.js";
 import { buildOtaConnectionCenterComposition } from "./ota-connection-center.composition.js";
 import { resolveOtaConnectionCenterConfig } from "./ota-connection-center.config.js";
+import { configureProductionChannexChannelLifecycleWebhook } from "./channex-channel-lifecycle-webhook-registration.js";
+import { createChannexChannelLifecycleWebhookRegistrationHttpTransport } from "./channex-channel-lifecycle-webhook-registration.http-transport.js";
 
 const AIRBNB_CALLBACK_ORIGIN = "https://app.pin-ngo.com";
 const AIRBNB_STATE_DOMAIN = "pin-go:ota:airbnb-host-self-service:v1";
@@ -258,6 +260,15 @@ export function buildRuntimeOtaConnectionCenterComposition(args: {
     env: args.env, apiOrigin: config.provider.apiOrigin, apiKey: config.provider.apiKey,
     timeoutMs: config.provider.timeoutMs, fetchImpl: args.fetchImpl,
   });
+  const lifecycleRegistrationTransport =
+    config.provider.apiOrigin === "https://app.channex.io"
+      ? createChannexChannelLifecycleWebhookRegistrationHttpTransport({
+          apiOrigin: config.provider.apiOrigin,
+          apiKey: config.provider.apiKey,
+          timeoutMs: config.provider.timeoutMs,
+          fetchImpl: args.fetchImpl,
+        })
+      : null;
   const airbnbClient = adaptPrismaAirbnbHostSelfServiceClient(args.prisma);
   const airbnbListingClient = adaptPrismaAirbnbListingDiscoveryClient(args.prisma);
   const airbnbMappingClient = adaptPrismaAirbnbHostConfirmedMappingClient(args.prisma);
@@ -301,6 +312,22 @@ export function buildRuntimeOtaConnectionCenterComposition(args: {
     defaultCurrency: config.provider.defaultCurrency,
     adapter,
     isTenantOriginAllowed: args.isTenantOriginAllowed,
+    configureChannelLifecycleWebhook: lifecycleRegistrationTransport
+      ? (input) => {
+          if (
+            args.env.OTA_CHANNEL_LIFECYCLE_ENABLED !== "true" ||
+            !String(args.env.OTA_CHANNEL_WEBHOOK_SECRET ?? "").trim()
+          ) {
+            throw new Error("OTA_CHANNEL_LIFECYCLE_RUNTIME_NOT_READY");
+          }
+          return configureProductionChannexChannelLifecycleWebhook({
+            client: args.prisma,
+            transport: lifecycleRegistrationTransport,
+            webhookSecret: String(args.env.OTA_CHANNEL_WEBHOOK_SECRET).trim(),
+            ...input,
+          });
+        }
+      : undefined,
   });
 
   return withChannelLifecycle({
