@@ -52,6 +52,23 @@ test("activation accepts READY or NOT_APPLICABLE commercial readiness", () => {
   });
 });
 
+test("technical activation can keep commercial readiness separate when explicitly scoped", () => {
+  const evidence = readyEvidence({
+    paymentReadiness: "NOT_STARTED",
+    taxReadiness: "IN_PROGRESS",
+    contentReadiness: "BLOCKED",
+    commercialReadinessRequiredForTechnicalActivation: false,
+  });
+
+  assert.deepEqual(assessOtaActivationReadiness(evidence), {
+    canActivate: true,
+    blockers: [],
+  });
+  assert.equal(evidence.paymentReadiness, "NOT_STARTED");
+  assert.equal(evidence.taxReadiness, "IN_PROGRESS");
+  assert.equal(evidence.contentReadiness, "BLOCKED");
+});
+
 test("a full sync that predates the lifecycle frontier cannot activate", () => {
   assert.deepEqual(
     assessOtaActivationReadiness(
