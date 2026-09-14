@@ -58,6 +58,7 @@ export type OtaDistributionPersistenceClient = {
 const SELF_SERVICE_PROVIDERS = new Set<ConnectionCenterProvider>([
   "AIRBNB",
   "BOOKING_COM",
+  "VRBO",
 ]);
 
 export class OtaDistributionPersistenceError extends Error {
@@ -84,9 +85,8 @@ function requestDecisionId(organizationId: string, requestKey: string): string {
 
 function assertSelfServiceProvider(provider: ConnectionCenterProvider): void {
   if (SELF_SERVICE_PROVIDERS.has(provider)) return;
-  const suffix = provider === "VRBO" ? "ASSISTED_BETA" : "PLANNED";
   throw new OtaDistributionPersistenceError(
-    `OTA_PROVIDER_SELF_SERVICE_UNAVAILABLE:${provider}:${suffix}`
+    `OTA_PROVIDER_SELF_SERVICE_UNAVAILABLE:${provider}:PLANNED`
   );
 }
 

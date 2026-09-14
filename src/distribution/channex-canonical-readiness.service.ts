@@ -24,6 +24,7 @@ import {
   type ChannexCorrelatedFullSyncOutboxEvidence,
 } from "./channex-airbnb-transport-readiness.policy.js";
 import { deriveChannexBookingComTransportReadiness } from "./channex-booking-com-transport-readiness.policy.js";
+import { deriveChannexVrboTransportReadiness } from "./channex-vrbo-transport-readiness.policy.js";
 import {
   planCanonicalOtaActivation,
   type OtaChannelConnectionStatus,
@@ -252,6 +253,7 @@ function canonicalChannelCode(
 ): string | null {
   if (provider === "AIRBNB") return "ABB";
   if (provider === "BOOKING_COM") return "BDC";
+  if (provider === "VRBO") return "VRB";
   return null;
 }
 
@@ -1269,6 +1271,19 @@ export async function reconcileCanonicalOtaReadiness(args: {
             contentReadiness: connection.contentReadiness,
           },
         })
+      : args.provider === "VRBO"
+      ? deriveChannexVrboTransportReadiness({
+          provider: args.provider,
+          expectedExternalConnectionId: resolvedExternalConnectionId,
+          expectedExternalChannelCode: resolvedExternalChannelCode,
+          observedChannel: exactMappedActiveChannel,
+          mapping: ariMapping,
+          currentCommercialReadiness: {
+            paymentReadiness: connection.paymentReadiness,
+            taxReadiness: connection.taxReadiness,
+            contentReadiness: connection.contentReadiness,
+          },
+        })
       : deriveChannexAirbnbTransportReadiness({
           provider: args.provider,
           expectedExternalConnectionId: resolvedExternalConnectionId,
@@ -1294,7 +1309,7 @@ export async function reconcileCanonicalOtaReadiness(args: {
       distributionReadiness: result.distributionReadiness,
       ...commercialPolicy.readiness,
       commercialReadinessRequiredForTechnicalActivation:
-        args.provider !== "BOOKING_COM",
+        args.provider !== "BOOKING_COM" && args.provider !== "VRBO",
       lastFullSyncConfirmedAt: fullSyncConfirmedAt,
       fullSyncRequiredAfterAt,
     },
@@ -1668,7 +1683,7 @@ export async function reconcileCanonicalOtaReadiness(args: {
             reason: commercialPolicy.reason,
             readiness: commercialPolicy.readiness,
             commercialReadinessRequiredForTechnicalActivation:
-              args.provider !== "BOOKING_COM",
+              args.provider !== "BOOKING_COM" && args.provider !== "VRBO",
             ...commercialPolicy.metadata,
           },
         },

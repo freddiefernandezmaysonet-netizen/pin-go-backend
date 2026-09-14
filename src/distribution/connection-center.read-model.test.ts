@@ -47,7 +47,7 @@ test("empty property produces an honest white-label catalog", () => {
       ["AIRBNB", "NOT_CONNECTED", "AVAILABLE", "NONE", "NONE"],
       ["BOOKING_COM", "NOT_CONNECTED", "AVAILABLE", "NONE", "NONE"],
       ["EXPEDIA", "NOT_CONNECTED", "PLANNED", "NONE", "NONE"],
-      ["VRBO", "NOT_CONNECTED", "ASSISTED_BETA", "NONE", "NONE"],
+      ["VRBO", "NOT_CONNECTED", "AVAILABLE", "NONE", "NONE"],
     ]
   );
   assert.equal(JSON.stringify(result).toLowerCase().includes("channex"), false);

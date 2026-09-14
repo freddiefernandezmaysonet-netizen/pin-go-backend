@@ -91,6 +91,7 @@ export function resolveOtaConnectionCenterConfig(
   const currency = String(env.OTA_CONNECTION_DEFAULT_CURRENCY ?? "").trim().toUpperCase();
   const airbnbFilter = channelFilter(env.OTA_CONNECTION_AIRBNB_FILTER);
   const bookingFilter = channelFilter(env.OTA_CONNECTION_BOOKING_FILTER);
+  const vrboFilter = channelFilter(env.OTA_CONNECTION_VRBO_FILTER);
   const timeoutRaw = String(env.OTA_CONNECTION_HTTP_TIMEOUT_MS ?? "10000").trim();
   const timeoutMs = Number(timeoutRaw);
 
@@ -102,6 +103,7 @@ export function resolveOtaConnectionCenterConfig(
     !/^[A-Z]{3}$/.test(currency) ||
     !airbnbFilter ||
     !bookingFilter ||
+    !vrboFilter ||
     !/^\d+$/.test(timeoutRaw) ||
     !Number.isInteger(timeoutMs) ||
     timeoutMs < 1_000 ||
@@ -121,6 +123,7 @@ export function resolveOtaConnectionCenterConfig(
       channelFilterByProvider: {
         AIRBNB: airbnbFilter,
         BOOKING_COM: bookingFilter,
+        VRBO: vrboFilter,
       },
       defaultCurrency: currency,
       timeoutMs,

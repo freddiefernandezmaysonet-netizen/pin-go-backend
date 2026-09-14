@@ -25,6 +25,7 @@ function adapter(enabled: boolean) {
       channelFilterByProvider: {
         AIRBNB: "airbnb-channel-code",
         BOOKING_COM: "booking-channel-code",
+        VRBO: "VRB",
       },
       transport: {
         async send(request) {
@@ -43,6 +44,28 @@ test("default-off adapter performs zero transport calls", async () => {
     (error: unknown) => error instanceof WhiteLabelAdapterError && error.code === "OTA_CONNECTION_CENTER_RUNTIME_DISABLED"
   );
   assert.deepEqual(requests, []);
+});
+
+test("Vrbo launch restricts visible and connectable channels to VRB", async () => {
+  const value = new ChannexWhiteLabelAdapter({
+    enabled: true,
+    apiKey: "test-api-key",
+    iframeBaseUrl: "https://iframe.example.test/channels",
+    channelFilterByProvider: { VRBO: "VRB" },
+    transport: {
+      async send() {
+        return { data: { attributes: { token: "vrbo-one-time-token" } } };
+      },
+    },
+  });
+  const issued = await value.issue({
+    externalGroupId: "group-ext",
+    externalPropertyId: "property-ext",
+    provider: "VRBO",
+  });
+  const url = new URL(issued.launchUrl);
+  assert.equal(url.searchParams.get("channels_filter"), "VRB");
+  assert.equal(url.searchParams.get("available_channels"), "VRB");
 });
 
 test("provisioning contract is group then property, room and rate", async () => {

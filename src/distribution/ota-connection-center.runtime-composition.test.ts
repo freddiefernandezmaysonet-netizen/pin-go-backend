@@ -11,6 +11,7 @@ const complete = {
   OTA_CONNECTION_DEFAULT_CURRENCY: "USD",
   OTA_CONNECTION_AIRBNB_FILTER: "airbnb-explicit-filter",
   OTA_CONNECTION_BOOKING_FILTER: "booking-explicit-filter",
+  OTA_CONNECTION_VRBO_FILTER: "vrbo-explicit-filter",
   JWT_SECRET: "test-jwt-secret-with-at-least-thirty-two-characters",
 };
 
