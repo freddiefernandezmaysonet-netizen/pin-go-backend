@@ -11,6 +11,7 @@ const complete = {
   OTA_CONNECTION_DEFAULT_CURRENCY: "usd",
   OTA_CONNECTION_AIRBNB_FILTER: "airbnb-explicit-filter",
   OTA_CONNECTION_BOOKING_FILTER: "booking-explicit-filter",
+  OTA_CONNECTION_VRBO_FILTER: "vrbo-explicit-filter",
 };
 
 test("configuration is default-off without inspecting optional provider values", () => {
@@ -28,6 +29,7 @@ test("enabled runtime requires every provider value and matching exact origins",
     { ...complete, OTA_CONNECTION_PROVIDER_API_ORIGIN: "https://evil.example" },
     { ...complete, OTA_CONNECTION_IFRAME_BASE_URL: "https://app.channex.io/channels" },
     { ...complete, OTA_CONNECTION_BOOKING_FILTER: "" },
+    { ...complete, OTA_CONNECTION_VRBO_FILTER: "" },
     { ...complete, OTA_CONNECTION_DEFAULT_CURRENCY: "US dollars" },
     { ...complete, OTA_CONNECTION_HTTP_TIMEOUT_MS: "999" },
   ]) {
@@ -49,6 +51,7 @@ test("complete staging configuration normalizes only non-secret values", () => {
   assert.deepEqual(config.provider.channelFilterByProvider, {
     AIRBNB: "airbnb-explicit-filter",
     BOOKING_COM: "booking-explicit-filter",
+    VRBO: "vrbo-explicit-filter",
   });
 });
 

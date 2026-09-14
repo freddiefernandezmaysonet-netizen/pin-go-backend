@@ -167,7 +167,11 @@ export async function issueOtaConnectionSession(args: {
   if (!/^[A-Za-z0-9._:-]+$/.test(requestKey)) {
     throw new OtaConnectionSessionError("OTA_CONNECTION_REQUEST_KEY_INVALID");
   }
-  if (args.provider !== "AIRBNB" && args.provider !== "BOOKING_COM") {
+  if (
+    args.provider !== "AIRBNB" &&
+    args.provider !== "BOOKING_COM" &&
+    args.provider !== "VRBO"
+  ) {
     throw new OtaConnectionSessionError("OTA_CONNECTION_PROVIDER_UNAVAILABLE");
   }
   await verifyScope({ client: args.client, organizationId, propertyId, requestedByUserId });

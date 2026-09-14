@@ -7,7 +7,7 @@ import {
   type OtaDistributionPersistenceClient,
 } from "./ota-distribution-persistence.service.js";
 
-function createClient(overrides: { actor?: boolean; property?: boolean; corrupt?: boolean } = {}) {
+function createClient(overrides: { actor?: boolean; property?: boolean; corrupt?: boolean; provider?: "AIRBNB" | "VRBO" } = {}) {
   const writes: Array<{ model: string; args: any }> = [];
   const group = { id: "group-1", organizationId: "org-1", platform: "CHANNEX" as const };
   const distributionProperty = {
@@ -22,7 +22,7 @@ function createClient(overrides: { actor?: boolean; property?: boolean; corrupt?
     organizationId: "org-1",
     propertyId: "property-1",
     distributionPropertyId: "dp-1",
-    provider: "AIRBNB" as const,
+    provider: overrides.provider ?? "AIRBNB",
     status: "NOT_CONNECTED",
   };
   const tx = {
@@ -91,8 +91,8 @@ test("corrupt cross-tenant persistence fails closed inside the transaction", asy
   );
 });
 
-test("planned and assisted channels cannot enter self-service", async () => {
-  for (const provider of ["EXPEDIA", "VRBO"] as const) {
+test("planned channels cannot enter self-service", async () => {
+  for (const provider of ["EXPEDIA"] as const) {
     const { client, writes } = createClient();
     await assert.rejects(
       prepareOtaDistributionConnection({ client, ...base, provider }),
@@ -100,4 +100,10 @@ test("planned and assisted channels cannot enter self-service", async () => {
     );
     assert.deepEqual(writes, []);
   }
+});
+
+test("Vrbo can enter the canonical self-service preparation", async () => {
+  const { client, writes } = createClient({ provider: "VRBO" });
+  await prepareOtaDistributionConnection({ ...base, client, provider: "VRBO" });
+  assert.deepEqual(writes.map((write) => write.model), ["group", "property", "connection", "audit"]);
 });

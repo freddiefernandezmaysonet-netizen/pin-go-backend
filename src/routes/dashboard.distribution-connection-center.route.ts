@@ -68,7 +68,11 @@ const DEFAULT_ACTIONS: DistributionConnectionCenterActions = {
 
 function providerFromPath(value: string): ConnectionCenterProvider | null {
   const normalized = String(value ?? "").trim().toUpperCase();
-  if (normalized === "AIRBNB" || normalized === "BOOKING_COM") return normalized;
+  if (
+    normalized === "AIRBNB" ||
+    normalized === "BOOKING_COM" ||
+    normalized === "VRBO"
+  ) return normalized;
   return null;
 }
 
