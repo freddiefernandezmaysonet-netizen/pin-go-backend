@@ -1,7 +1,13 @@
 name: Booking.com transport readiness validation
 on:
-  push:
-    branches: [agent/booking-com-transport-readiness]
+  pull_request:
+    branches: [main]
+    paths:
+      - .github/workflows/booking-com-transport-readiness.yml
+      - src/distribution/channex-canonical-readiness.service.test.ts
+      - src/distribution/channex-canonical-readiness.service.ts
+      - src/distribution/ota-commercial-lifecycle.policy.test.ts
+      - src/distribution/ota-commercial-lifecycle.policy.ts
 permissions:
   contents: read
 defaults:
@@ -21,6 +27,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
+          ref: ${{ github.event.pull_request.head.sha }}
           persist-credentials: false
           fetch-depth: 0
       - uses: actions/setup-node@v4
@@ -30,10 +37,26 @@ jobs:
       - name: Record exact source and preserve main boundary
         run: |
           mkdir -p evidence
-          git merge-base --is-ancestor f818b6578729c744f1f626f64c314b92a118f776 HEAD
+          git merge-base --is-ancestor "${{ github.event.pull_request.base.sha }}" HEAD
           git rev-parse HEAD > evidence/head.txt
-          git diff f818b6578729c744f1f626f64c314b92a118f776 HEAD > evidence/candidate.patch
+          git diff "${{ github.event.pull_request.base.sha }}"...HEAD > evidence/candidate.patch
           git archive --format=tar.gz -o evidence/source.tar.gz HEAD
+      - name: Prove exact narrow diff allowlist
+        run: |
+          cat > "$RUNNER_TEMP/allowed.txt" <<'EOF'
+          .github/workflows/booking-com-transport-readiness.yml
+          src/distribution/channex-canonical-readiness.service.test.ts
+          src/distribution/channex-canonical-readiness.service.ts
+          src/distribution/ota-commercial-lifecycle.policy.test.ts
+          src/distribution/ota-commercial-lifecycle.policy.ts
+          EOF
+          git diff --name-only "${{ github.event.pull_request.base.sha }}"...HEAD | sort > "$RUNNER_TEMP/actual.txt"
+          sort "$RUNNER_TEMP/allowed.txt" -o "$RUNNER_TEMP/allowed.txt"
+          comm -23 "$RUNNER_TEMP/actual.txt" "$RUNNER_TEMP/allowed.txt" > "$RUNNER_TEMP/outside.txt"
+          test ! -s "$RUNNER_TEMP/outside.txt" || {
+            cat "$RUNNER_TEMP/outside.txt"
+            exit 1
+          }
       - name: Install locked test dependencies without lifecycle scripts
         run: npm ci --ignore-scripts --no-audit --no-fund
       - name: Generate Prisma client only, no database operations
@@ -58,6 +81,7 @@ jobs:
           npm run test:distribution-connection-center 2>&1 | tee evidence/connection-center.txt
           npm run test:ota-distribution-persistence 2>&1 | tee evidence/persistence.txt
           npm run test:ota-commercial-closure-types 2>&1 | tee evidence/ota-types.txt
+          npm run test:channex-certified-core-freeze 2>&1 | tee evidence/channex-core-freeze.txt
       - name: Preserve source and portable validation inputs
         if: always()
         run: |

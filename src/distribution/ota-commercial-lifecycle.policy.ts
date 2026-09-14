@@ -34,6 +34,7 @@ export type OtaActivationEvidence = {
   paymentReadiness: OtaReadinessStatus;
   taxReadiness: OtaReadinessStatus;
   contentReadiness: OtaReadinessStatus;
+  commercialReadinessRequiredForTechnicalActivation?: boolean;
   lastFullSyncConfirmedAt: Date | null;
   fullSyncRequiredAfterAt: Date | null;
 };
@@ -117,14 +118,16 @@ export function assessOtaActivationReadiness(
   if (evidence.distributionReadiness !== "READY") {
     blockers.push("DISTRIBUTION_NOT_READY");
   }
-  if (!OPTIONAL_READINESS_COMPLETE.has(evidence.paymentReadiness)) {
-    blockers.push("PAYMENT_NOT_READY");
-  }
-  if (!OPTIONAL_READINESS_COMPLETE.has(evidence.taxReadiness)) {
-    blockers.push("TAX_NOT_READY");
-  }
-  if (!OPTIONAL_READINESS_COMPLETE.has(evidence.contentReadiness)) {
-    blockers.push("CONTENT_NOT_READY");
+  if (evidence.commercialReadinessRequiredForTechnicalActivation !== false) {
+    if (!OPTIONAL_READINESS_COMPLETE.has(evidence.paymentReadiness)) {
+      blockers.push("PAYMENT_NOT_READY");
+    }
+    if (!OPTIONAL_READINESS_COMPLETE.has(evidence.taxReadiness)) {
+      blockers.push("TAX_NOT_READY");
+    }
+    if (!OPTIONAL_READINESS_COMPLETE.has(evidence.contentReadiness)) {
+      blockers.push("CONTENT_NOT_READY");
+    }
   }
   const confirmedAtMs = evidence.lastFullSyncConfirmedAt?.getTime() ?? null;
   const frontierAtMs = evidence.fullSyncRequiredAfterAt?.getTime() ?? null;

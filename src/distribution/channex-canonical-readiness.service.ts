@@ -1293,6 +1293,8 @@ export async function reconcileCanonicalOtaReadiness(args: {
       mappingReadiness: result.mappingReadiness,
       distributionReadiness: result.distributionReadiness,
       ...commercialPolicy.readiness,
+      commercialReadinessRequiredForTechnicalActivation:
+        args.provider !== "BOOKING_COM",
       lastFullSyncConfirmedAt: fullSyncConfirmedAt,
       fullSyncRequiredAfterAt,
     },
@@ -1665,6 +1667,8 @@ export async function reconcileCanonicalOtaReadiness(args: {
             applied: commercialPolicy.applied,
             reason: commercialPolicy.reason,
             readiness: commercialPolicy.readiness,
+            commercialReadinessRequiredForTechnicalActivation:
+              args.provider !== "BOOKING_COM",
             ...commercialPolicy.metadata,
           },
         },

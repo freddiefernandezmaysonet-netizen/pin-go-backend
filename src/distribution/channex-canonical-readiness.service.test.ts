@@ -983,9 +983,14 @@ test("Booking.com uses its exact BDC transport policy and preserves commercial r
   assert.equal(f.updates[0].data.externalConnectionId, EXTERNAL_CHANNEL_ID);
   assert.equal(f.updates[0].data.externalChannelCode, "BDC");
   assert.equal(f.updates[0].data.externalListingId, null);
+  assert.equal(f.updates[0].data.status, "ACTIVE");
   assert.equal(f.updates[0].data.paymentReadiness, "IN_PROGRESS");
   assert.equal(f.updates[0].data.taxReadiness, "READY");
   assert.equal(f.updates[0].data.contentReadiness, "BLOCKED");
+  assert.deepEqual(f.updates[0].data.lastFullSyncConfirmedAt, FULL_SYNC_COMPLETED_AT);
+  assert.deepEqual(f.updates[0].data.activatedAt, FULL_SYNC_COMPLETED_AT);
+  assert.equal(f.audits[0].data.metadata.canonicalStatus, "ACTIVE");
+  assert.deepEqual(f.audits[0].data.metadata.activationBlockers, []);
   assert.equal(
     f.audits[0].data.metadata.transportScopePolicy.policyVersion,
     "channex_booking_com_transport_v1",
@@ -993,6 +998,11 @@ test("Booking.com uses its exact BDC transport policy and preserves commercial r
   assert.equal(f.audits[0].data.metadata.transportScopePolicy.applied, true);
   assert.equal(
     f.audits[0].data.metadata.transportScopePolicy.otaAcceptanceVerified,
+    false,
+  );
+  assert.equal(
+    f.audits[0].data.metadata.transportScopePolicy
+      .commercialReadinessRequiredForTechnicalActivation,
     false,
   );
 });
