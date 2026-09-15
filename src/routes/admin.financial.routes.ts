@@ -1,6 +1,7 @@
 import { Router } from "express";
 import { PrismaClient } from "@prisma/client";
 import { requireAuth } from "../middleware/requireAuth";
+import { summarizeSmsFinancialTelemetry } from "../services/sms-financial-telemetry.service";
 
 const prisma = new PrismaClient();
 const router = Router();
@@ -10,7 +11,6 @@ const SMART_PRICE = 14.99;
 
 const STRIPE_PERCENT = 0.029;
 const STRIPE_FIXED_PER_ORG = 0.3;
-const AVG_SMS_COST = 0.008;
 const TUYA_COST_PER_SMART_PROPERTY = 0.3;
 
 function assertPlatformAdmin(req: any, res: any) {
@@ -46,7 +46,7 @@ router.get("/financial/overview", requireAuth, async (req, res) => {
       subscriptions,
       organizations,
       totalReservations,
-      totalSmsMessages,
+      twilioSmsMessages,
       totalAutomationExecutions,
     ] = await Promise.all([
       prisma.organization.count(),
@@ -78,12 +78,18 @@ router.get("/financial/overview", requireAuth, async (req, res) => {
         },
       }),
 
-      prisma.messageLog.count({
+      prisma.messageLog.findMany({
         where: {
           channel: "sms",
+          provider: "twilio",
+          status: "SENT",
           createdAt: {
             gte: since,
           },
+        },
+        select: {
+          body: true,
+          organizationId: true,
         },
       }),
 
@@ -96,13 +102,33 @@ router.get("/financial/overview", requireAuth, async (req, res) => {
       }),
     ]);
 
+    const smsTelemetry = summarizeSmsFinancialTelemetry(
+      twilioSmsMessages
+    );
+
+    const smsMessagesByOrg = new Map<
+      string,
+      Array<{ body: string | null }>
+    >();
+
+    for (const message of twilioSmsMessages) {
+      if (!message.organizationId) continue;
+      const rows = smsMessagesByOrg.get(
+        message.organizationId
+      ) ?? [];
+      rows.push({ body: message.body });
+      smsMessagesByOrg.set(
+        message.organizationId,
+        rows
+      );
+    }
+
     const orgUsage = await Promise.all(
       organizations.map(async (org) => {
         const [
           locksUsed,
           smartUsed,
           reservations,
-          smsUsed,
           automationExecutions,
         ] = await Promise.all([
           prisma.lock.count({
@@ -133,16 +159,6 @@ router.get("/financial/overview", requireAuth, async (req, res) => {
             },
           }),
 
-          prisma.messageLog.count({
-            where: {
-              organizationId: org.id,
-              channel: "sms",
-              createdAt: {
-                gte: since,
-              },
-            },
-          }),
-
           prisma.automationExecutionLog.count({
             where: {
               organizationId: org.id,
@@ -152,6 +168,10 @@ router.get("/financial/overview", requireAuth, async (req, res) => {
             },
           }),
         ]);
+
+        const orgSmsTelemetry = summarizeSmsFinancialTelemetry(
+          smsMessagesByOrg.get(org.id) ?? []
+        );
 
         const subscription = subscriptions.find(
           (s) => s.organizationId === org.id
@@ -182,7 +202,8 @@ router.get("/financial/overview", requireAuth, async (req, res) => {
             locksUsed,
             smartPropertiesUsed: smartUsed,
             reservations, // últimos 30 días
-            smsUsed, // últimos 30 días
+            smsUsed: orgSmsTelemetry.totalMessages, // últimos 30 días
+            smsSegments: orgSmsTelemetry.totalSegments,
             automationExecutions, // últimos 30 días
           },
 
@@ -225,8 +246,9 @@ router.get("/financial/overview", requireAuth, async (req, res) => {
           subscribedOrgs * STRIPE_FIXED_PER_ORG
         : 0;
 
-    // 🔥 COSTOS REALES (30 días)
-    const twilioCost = totalSmsMessages * AVG_SMS_COST;
+    // Costo base estimado por segmentos de SMS enviados (30 días).
+    // No incluye carrier fees ni ajustes posteriores de factura Twilio.
+    const twilioCost = smsTelemetry.estimatedCostUsd;
 
     const tuyaCost =
       activeSmartProperties * TUYA_COST_PER_SMART_PROPERTY;
@@ -250,7 +272,11 @@ router.get("/financial/overview", requireAuth, async (req, res) => {
         entitledSmartProperties,
         activeLocks,
         activeSmartProperties,
-        totalSmsMessages, // 30 días
+        totalSmsMessages: smsTelemetry.totalMessages, // 30 días
+        totalSmsSegments: smsTelemetry.totalSegments,
+        twilioSmsSegmentRateUsd: smsTelemetry.segmentRateUsd,
+        smsCostEstimateBasis:
+          "SENT_TWILIO_MESSAGE_LOG_BODY_SEGMENTS_BASE_RATE",
         totalAutomationExecutions, // 30 días
       },
 
