@@ -5,6 +5,7 @@ import {
   resolveGuestLanguage,
   type GuestLanguage,
 } from "./guest-language.service";
+import { hasGuestSmsConsent } from "./guest-journey-access-communications-bridge.policy";
 
 function toGsmSafeCheckoutText(value: unknown, maxLength: number) {
   return String(value ?? "")
@@ -66,6 +67,7 @@ export async function sendCheckoutSms(
         guestPhone: true,
         preferredLanguage: true,
         checkOut: true,
+        externalRaw: true,
         property: {
           select: {
             id: true,
@@ -79,6 +81,22 @@ export async function sendCheckoutSms(
 
     if (!r || !r.guestPhone) {
       return { ok: false, skipped: true, error: "Missing guestPhone" };
+    }
+
+    if (process.env.GUEST_SMS_ENABLED !== "1") {
+      return {
+        ok: true,
+        skipped: true,
+        reason: "GUEST_SMS_DISABLED",
+      };
+    }
+
+    if (!hasGuestSmsConsent(r.externalRaw)) {
+      return {
+        ok: true,
+        skipped: true,
+        reason: "SMS_CONSENT_NOT_GRANTED",
+      };
     }
 
     const propertyName = r.property?.name ?? "your property";
