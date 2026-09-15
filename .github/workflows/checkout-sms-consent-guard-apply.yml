@@ -1,0 +1,127 @@
+name: Checkout SMS Consent Guard Apply
+
+on:
+  push:
+    branches:
+      - agent/checkout-sms-consent-guard-v1
+    paths:
+      - ".github/workflows/checkout-sms-consent-guard-apply.yml"
+
+permissions:
+  contents: write
+
+jobs:
+  apply-and-validate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: agent/checkout-sms-consent-guard-v1
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+      - name: Apply checkout retry consent guard
+        shell: bash
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+
+          path = Path("src/workers/message.retry.worker.ts")
+          text = path.read_text()
+
+          import_anchor = '''import {
+            isGuestJourneyCommunicationsOwnerScope,
+            resolveGuestJourneyCommunicationsOwnerConfig,
+          } from "../services/guest-journey-communications-owner.config";
+          '''
+          import_replacement = import_anchor + '''import { evaluateCheckoutSmsConsent } from "../services/checkout-sms-consent.policy";
+          '''
+          if import_anchor not in text:
+            raise SystemExit("checkout retry import anchor not found")
+          text = text.replace(import_anchor, import_replacement, 1)
+
+          retry_anchor = '''      log("Retrying SMS message", {
+          id: msg.id,
+          to: msg.to,
+          channel: msg.channel,
+          retryCount: msg.retryCount,
+        });
+          '''
+          retry_guard = '''      if (String(msg.communicationType ?? "").toUpperCase() === "CHECKOUT") {
+        const reservationId = String(msg.reservationId ?? "").trim();
+
+        if (!reservationId) {
+          await prisma.messageLog.update({
+            where: { id: msg.id },
+            data: {
+              status: "FAILED_FINAL",
+              error: "CHECKOUT_SMS_RESERVATION_ID_MISSING",
+            },
+          });
+          continue;
+        }
+
+        const reservation = await prisma.reservation.findUnique({
+          where: { id: reservationId },
+          select: { externalRaw: true },
+        });
+
+        if (!reservation) {
+          await prisma.messageLog.update({
+            where: { id: msg.id },
+            data: {
+              status: "FAILED_FINAL",
+              error: "CHECKOUT_SMS_RESERVATION_NOT_FOUND",
+            },
+          });
+          continue;
+        }
+
+        const consentDecision = evaluateCheckoutSmsConsent(
+          reservation.externalRaw
+        );
+
+        if (!consentDecision.allowed) {
+          await prisma.messageLog.update({
+            where: { id: msg.id },
+            data: {
+              status: "FAILED_FINAL",
+              error: consentDecision.reason,
+            },
+          });
+
+          log("Checkout SMS retry blocked", {
+            id: msg.id,
+            reservationId,
+            reason: consentDecision.reason,
+          });
+          continue;
+        }
+      }
+
+''' + retry_anchor
+          if retry_anchor not in text:
+            raise SystemExit("checkout retry send anchor not found")
+          text = text.replace(retry_anchor, retry_guard, 1)
+
+          path.write_text(text)
+          PY
+      - run: npm ci
+      - name: Checkout SMS consent guard tests
+        run: npx tsx --test src/services/checkoutSms.consent-guard.test.ts
+      - name: Bundle checkout SMS service
+        run: npx esbuild src/services/checkoutSms.service.ts --bundle --platform=node --packages=external --outfile=/tmp/checkoutSms.service.js
+      - name: Bundle message retry worker
+        run: npx esbuild src/workers/message.retry.worker.ts --bundle --platform=node --packages=external --outfile=/tmp/message.retry.worker.js
+      - name: Commit validated retry guard only
+        shell: bash
+        run: |
+          git config user.name "freddiefernandezmaysonet-netizen"
+          git config user.email "freddiefernandezmaysonet@gmail.com"
+          git add src/workers/message.retry.worker.ts
+          git diff --cached --check
+          git commit -m "Guard checkout SMS retries with guest consent"
+          git push origin HEAD:agent/checkout-sms-consent-guard-v1
