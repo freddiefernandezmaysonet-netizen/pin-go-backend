@@ -2,6 +2,7 @@ import { PrismaClient } from "@prisma/client";
 import crypto from "crypto";
 import { sendSms } from "../integrations/twilio/twilio.client";
 import { selectNextStaffForProperty } from "./staff-selection.service";
+import { buildCleaningConfirmationSmsBody } from "./cleaning-confirmation-sms-body.service";
 
 const DISPATCH_TYPE = "CLEANING_CONFIRMATION";
 const SEND_START_HOUR = 8;
@@ -160,7 +161,6 @@ if (!cleaningNfcEnabled) {
     "la propiedad asignada";
 
   const roomName = reservation.roomName ?? "N/A";
-  const staffName = staff.fullName ?? "Staff";
 
   const checkOutText = new Intl.DateTimeFormat("en-US", {
     timeZone: timezone,
@@ -172,23 +172,12 @@ if (!cleaningNfcEnabled) {
     hour12: true,
   }).format(new Date(reservation.checkOut));
 
-  const es =
-    `🧼 Pin&Go Solicitud de limpieza\n` +
-    `Asignado: ${staffName}\n` +
-    `Propiedad: ${propertyName}\n` +
-    `Unidad: ${roomName}\n` +
-    `Check-out: ${checkOutText}\n\n` +
-    `Confirma si estás disponible:\n${confirmUrl}`;
-
-  const en =
-    `🧼 Pin&Go Cleaning request\n` +
-    `Assigned: ${staffName}\n` +
-    `Property: ${propertyName}\n` +
-    `Unit: ${roomName}\n` +
-    `Check-out: ${checkOutText}\n\n` +
-    `Confirm if you are available:\n${confirmUrl}`;
-
-  const body = `${es}\n\n---\n\n${en}`;
+  const body = buildCleaningConfirmationSmsBody({
+    propertyName,
+    roomName,
+    checkOutText,
+    confirmUrl,
+  });
 
   const sms = await sendSms(staff.phoneE164, body);
 
