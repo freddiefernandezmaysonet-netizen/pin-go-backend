@@ -174,22 +174,33 @@ export function buildCleaningStartSmsBody(params: {
   endsAt: Date;
   timezone?: string | null;
 }): string {
-  return (
-    `Pin&Go - Limpieza INICIADA\n` +
-    `Asignado: ${cleanEnv(params.staffName) ?? "Staff"}\n` +
-    `Propiedad: ${cleanEnv(params.propertyName) ?? "N/A"}\n` +
-    `Unidad: ${cleanEnv(params.roomName) ?? "N/A"}\n` +
-    `Inicio: ${fmtWithTimezone(
+  const propertyName =
+    toGsmSafeText(cleanEnv(params.propertyName) ?? "N/A", 20) || "N/A";
+  const roomName =
+    toGsmSafeText(cleanEnv(params.roomName) ?? "N/A", 12) || "N/A";
+  const start = toGsmSafeText(
+    fmtWithTimezone(
       params.startsAt,
       params.timezone ?? "America/Puerto_Rico",
-      "es"
-      )}\n` +
-     `Fin: ${fmtWithTimezone(
-       params.endsAt,
-       params.timezone ?? "America/Puerto_Rico",
-       "es"
-     )}\n` +
-    `Su tarjeta NFC esta activa unicamente durante esta ventana.`
+      "en"
+    ),
+    22
+  );
+  const end = toGsmSafeText(
+    fmtWithTimezone(
+      params.endsAt,
+      params.timezone ?? "America/Puerto_Rico",
+      "en"
+    ),
+    22
+  );
+
+  return (
+    `Pin&Go clean start/inicio. ` +
+    `Prop: ${propertyName}. ` +
+    `Unit: ${roomName}. ` +
+    `Window: ${start}-${end}. ` +
+    `NFC active/activa.`
   );
 }
 
