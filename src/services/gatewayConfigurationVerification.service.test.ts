@@ -43,7 +43,7 @@ function fakePrisma() {
 
 const NOW = new Date("2026-09-15T12:00:00.000Z");
 
-test("enabling monitoring verifies immediately and replaces stale offline state", async () => {
+test("enabling monitoring verifies immediately and leaves a healthy gateway idle", async () => {
   const { prisma, writes } = fakePrisma();
   let calls = 0;
 
@@ -71,13 +71,11 @@ test("enabling monitoring verifies immediately and replaces stale offline state"
   assert.equal(result.gatewayConnected, true);
   assert.equal(result.isOnline, true);
   assert.equal(result.providerRequestCount, 2);
+  assert.equal(result.nextCheckAt, null);
   assert.equal(writes.length, 1);
   assert.equal(writes[0].update.gatewayConnected, true);
   assert.equal(writes[0].update.isOnline, true);
-  assert.equal(
-    writes[0].update.gatewayNextCheckAt.toISOString(),
-    "2026-09-16T12:00:00.000Z"
-  );
+  assert.equal(writes[0].update.gatewayNextCheckAt, null);
 });
 
 test("confirmed missing gateway enters eight-hour revalidation", async () => {
