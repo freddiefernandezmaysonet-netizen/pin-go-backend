@@ -1,6 +1,11 @@
 import { Router } from "express";
 import { PrismaClient } from "@prisma/client";
 import { requireAuth } from "../middleware/requireAuth";
+import {
+  gatewayMonitoringModeFromPolicy,
+  loadGatewayMonitoringPolicies,
+  setGatewayMonitoringPolicy,
+} from "../services/lockGatewayMonitoring.service";
 
 const prisma = new PrismaClient();
 export const dashboardLocksRouter = Router();
@@ -36,7 +41,7 @@ dashboardLocksRouter.get("/api/dashboard/locks", requireAuth, async (req, res) =
     const maybeId = Number(search);
     where.OR = [
       { displayName: { contains: search, mode: "insensitive" } },
-      { ttlockLockName: { contains: search, mode: "insensitive" } }, 
+      { ttlockLockName: { contains: search, mode: "insensitive" } },
       ...(Number.isFinite(maybeId) ? [{ ttlockLockId: maybeId }] : []),
     ];
   }
@@ -79,6 +84,11 @@ dashboardLocksRouter.get("/api/dashboard/locks", requireAuth, async (req, res) =
     }),
   ]);
 
+  const gatewayPolicies = await loadGatewayMonitoringPolicies(prisma, {
+    organizationId: orgId,
+    lockIds: rows.map((lock) => lock.id),
+  });
+
   return res.json({
     page,
     pageSize,
@@ -90,6 +100,10 @@ dashboardLocksRouter.get("/api/dashboard/locks", requireAuth, async (req, res) =
       isActive: l.isActive,
       updatedAt: l.updatedAt.toISOString(),
       property: l.property,
+
+      gatewayMonitoringMode: gatewayMonitoringModeFromPolicy(
+        gatewayPolicies.get(l.id) ?? null
+      ),
 
       battery: l.deviceHealth?.battery ?? null,
       batteryFresh: !!l.deviceHealth?.lastSyncAt,
@@ -118,3 +132,64 @@ dashboardLocksRouter.get("/api/dashboard/locks", requireAuth, async (req, res) =
     })),
   });
 });
+
+dashboardLocksRouter.patch(
+  "/api/dashboard/locks/:lockId/gateway-monitoring",
+  requireAuth,
+  async (req, res) => {
+    const user = (req as any).user;
+    const orgId = user.orgId as string;
+    const lockId = String(req.params.lockId ?? "").trim();
+    const gatewayInstalled = req.body?.gatewayInstalled;
+
+    if (!lockId) {
+      return res.status(400).json({
+        ok: false,
+        error: "LOCK_ID_REQUIRED",
+      });
+    }
+
+    if (typeof gatewayInstalled !== "boolean") {
+      return res.status(400).json({
+        ok: false,
+        error: "GATEWAY_INSTALLED_BOOLEAN_REQUIRED",
+      });
+    }
+
+    const lock = await prisma.lock.findFirst({
+      where: {
+        id: lockId,
+        property: {
+          organizationId: orgId,
+        },
+      },
+      select: {
+        id: true,
+        propertyId: true,
+      },
+    });
+
+    if (!lock) {
+      return res.status(404).json({
+        ok: false,
+        error: "LOCK_NOT_FOUND",
+      });
+    }
+
+    const policy = await setGatewayMonitoringPolicy(prisma, {
+      organizationId: orgId,
+      propertyId: lock.propertyId,
+      lockId: lock.id,
+      enabled: gatewayInstalled,
+      configuredBy: user.id ?? null,
+    });
+
+    return res.json({
+      ok: true,
+      lockId: lock.id,
+      gatewayInstalled,
+      gatewayMonitoringMode: gatewayInstalled ? "ENABLED" : "DISABLED",
+      configuredAt: policy.updatedAt.toISOString(),
+    });
+  }
+);
