@@ -1,5 +1,7 @@
 import "dotenv/config";
 
+import { prisma } from "../lib/prisma";
+import { reconcileStoredDeviceHealthStatuses } from "../services/deviceHealthStoredStatusReconciliation.service";
 import {
   runHardenedDeviceHealthWorker,
 } from "./deviceHealth.hardened.worker";
@@ -23,6 +25,7 @@ async function tick() {
 
   try {
     await runHardenedDeviceHealthWorker();
+    await reconcileStoredDeviceHealthStatuses(prisma);
   } catch (error) {
     console.error(
       "DeviceHealth worker tick failed",
