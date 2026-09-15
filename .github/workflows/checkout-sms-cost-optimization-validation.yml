@@ -1,0 +1,28 @@
+name: Checkout SMS Cost Optimization Validation
+
+on:
+  push:
+    branches:
+      - agent/checkout-sms-cost-optimization-v1
+    paths:
+      - ".github/workflows/checkout-sms-cost-optimization-validation.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+      - run: npm ci
+      - name: Checkout SMS cost optimization tests
+        run: npx tsx --test src/services/checkoutSms.sms-cost-optimization.test.ts
+      - name: Bundle checkout SMS service
+        run: npx esbuild src/services/checkoutSms.service.ts --bundle --platform=node --packages=external --outfile=/tmp/checkoutSms.service.js
