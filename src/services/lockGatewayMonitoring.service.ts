@@ -4,6 +4,8 @@ export const LOCK_GATEWAY_POLICY_TYPE =
   "TTLOCK_GATEWAY_MONITORING";
 export const LOCK_GATEWAY_POLICY_PROVIDER =
   "PIN_GO";
+const LOCK_GATEWAY_EXTERNAL_ID_PREFIX =
+  "LOCK_GATEWAY:";
 
 export type GatewayMonitoringMode =
   | "ENABLED"
@@ -16,6 +18,29 @@ type GatewayPolicyRow = {
   isActive: boolean;
   updatedAt: Date;
 };
+
+function policyExternalId(lockId: string) {
+  return `${LOCK_GATEWAY_EXTERNAL_ID_PREFIX}${lockId}`;
+}
+
+function lockIdFromPolicyExternalId(
+  externalId: string | null
+) {
+  if (
+    !externalId ||
+    !externalId.startsWith(
+      LOCK_GATEWAY_EXTERNAL_ID_PREFIX
+    )
+  ) {
+    return null;
+  }
+
+  const lockId = externalId.slice(
+    LOCK_GATEWAY_EXTERNAL_ID_PREFIX.length
+  );
+
+  return lockId || null;
+}
 
 export function gatewayMonitoringModeFromPolicy(
   policy?: Pick<GatewayPolicyRow, "isActive"> | null
@@ -53,7 +78,7 @@ export async function loadGatewayMonitoringPolicies(
       type: LOCK_GATEWAY_POLICY_TYPE,
       provider: LOCK_GATEWAY_POLICY_PROVIDER,
       externalId: {
-        in: input.lockIds,
+        in: input.lockIds.map(policyExternalId),
       },
     },
     select: {
@@ -65,11 +90,12 @@ export async function loadGatewayMonitoringPolicies(
   });
 
   for (const row of rows) {
-    if (
-      typeof row.externalId === "string" &&
-      row.externalId.length > 0
-    ) {
-      policies.set(row.externalId, row);
+    const lockId = lockIdFromPolicyExternalId(
+      row.externalId
+    );
+
+    if (lockId) {
+      policies.set(lockId, row);
     }
   }
 
@@ -86,13 +112,17 @@ export async function setGatewayMonitoringPolicy(
     configuredBy?: string | null;
   }
 ) {
+  const externalId = policyExternalId(
+    input.lockId
+  );
+
   const existing = await prisma.propertyDevice.findFirst({
     where: {
       organizationId: input.organizationId,
       propertyId: input.propertyId,
       type: LOCK_GATEWAY_POLICY_TYPE,
       provider: LOCK_GATEWAY_POLICY_PROVIDER,
-      externalId: input.lockId,
+      externalId,
     },
     select: {
       id: true,
@@ -126,7 +156,7 @@ export async function setGatewayMonitoringPolicy(
       name: "TTLock gateway monitoring",
       type: LOCK_GATEWAY_POLICY_TYPE,
       provider: LOCK_GATEWAY_POLICY_PROVIDER,
-      externalId: input.lockId,
+      externalId,
       isActive: input.enabled,
       metadata,
     },
