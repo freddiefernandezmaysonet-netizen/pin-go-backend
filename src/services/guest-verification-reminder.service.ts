@@ -95,37 +95,11 @@ export function buildVerificationReminderSms(input: {
   verificationUrl: string;
   language: GuestLanguage;
 }) {
-  const guestName =
-    String(input.guestName ?? "").trim();
-
-  const isSpanish = input.language === "es";
-  const greeting = guestName
-    ? `${isSpanish ? "Hola" : "Hi"} ${guestName},`
-    : isSpanish
-      ? "Hola,"
-      : "Hi,";
-
-  if (isSpanish) {
-    return `${greeting}
-
-Acción requerida para la reservación #${input.reservationNumber} en ${input.propertyName}.
-
-Complete su registro seguro antes de que Pin&Go pueda entregar su acceso digital:
-
-${input.verificationUrl}
-
-Pin&Go Guest Services`;
+  if (input.language === "es") {
+    return `Pin&Go: Verifica tu registro para recibir acceso: ${input.verificationUrl}`;
   }
 
-  return `${greeting}
-
-Action required for reservation #${input.reservationNumber} at ${input.propertyName}.
-
-Please complete your secure pre-check-in before Pin&Go can release your digital access:
-
-${input.verificationUrl}
-
-Pin&Go Guest Services`;
+  return `Pin&Go: Complete verification to receive access: ${input.verificationUrl}`;
 }
 
 function toErrorMessage(error: unknown) {
