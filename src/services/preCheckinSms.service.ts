@@ -87,32 +87,17 @@ function buildGoogleMapsLink(input: {
       ? null
       : Number(input.longitude);
 
-  const hasCoords =
-    Number.isFinite(lat) &&
-    Number.isFinite(lng) &&
-    lat! >= -90 &&
-    lat! <= 90 &&
-    lng! >= -180 &&
-    lng! <= 180;
-
-  if (hasCoords) {
+  if (hasValidCoordinates(lat, lng)) {
     return {
       address,
       mapsLink: `https://www.google.com/maps/search/?api=1&query=${lat},${lng}`,
     };
   }
 
-  if (address) {
-    return {
-      address,
-      mapsLink: `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(
-        address
-      )}`,
-    };
-  }
-
+  // When coordinates are unavailable, the short address is cheaper than
+  // embedding an encoded Google Maps search URL that repeats the same text.
   return {
-    address: null,
+    address,
     mapsLink: null,
   };
 }
@@ -146,6 +131,20 @@ export function shouldIncludePreCheckinVerification(input: {
   );
 }
 
+function toGsmSafeText(value: unknown, maxLength: number) {
+  return String(value ?? "")
+    .normalize("NFKD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/[“”]/g, '"')
+    .replace(/[‘’]/g, "'")
+    .replace(/[–—]/g, "-")
+    .replace(/`/g, "'")
+    .replace(/[^\x20-\x7E]/g, "")
+    .replace(/\s+/g, " ")
+    .trim()
+    .slice(0, maxLength);
+}
+
 export function buildPreCheckinMessage(input: {
   guestName?: string | null;
   propertyName: string;
@@ -155,45 +154,43 @@ export function buildPreCheckinMessage(input: {
   verifyLink: string | null;
   language: GuestLanguage;
 }) {
-  const guestName = String(input.guestName ?? "").trim();
   const isSpanish = input.language === "es";
-  const greeting = guestName
-    ? `${isSpanish ? "Hola" : "Hi"} ${guestName},`
-    : isSpanish
-      ? "Hola,"
-      : "Hi,";
+  const propertyName =
+    toGsmSafeText(input.propertyName, 32) ||
+    (isSpanish ? "la propiedad" : "the property");
+  const checkInTime = toGsmSafeText(input.checkInTime, 16);
+  const location = input.mapsLink
+    ? String(input.mapsLink).trim()
+    : toGsmSafeText(input.address, 80);
+  const verifyLink = input.verifyLink
+    ? String(input.verifyLink).trim()
+    : null;
 
-  let message = isSpanish
-    ? `${greeting}\n\nTu check-in en ${input.propertyName} está programado para hoy a las ${input.checkInTime}.`
-    : `${greeting}\n\nYour check-in at ${input.propertyName} is scheduled for today at ${input.checkInTime}.`;
+  const parts: string[] = [
+    isSpanish
+      ? `Pin&Go: Check-in hoy ${checkInTime} en ${propertyName}.`
+      : `Pin&Go: Check-in today ${checkInTime} at ${propertyName}.`,
+  ];
 
-  if (input.address) {
-    message += isSpanish
-      ? `\n\nDirección:\n${input.address}`
-      : `\n\nAddress:\n${input.address}`;
+  if (location) {
+    parts.push(
+      isSpanish
+        ? `Ubicacion: ${location}`
+        : `Location: ${location}`
+    );
   }
 
-  if (input.mapsLink) {
-    message += isSpanish
-      ? `\n\nUbicación exacta:\n${input.mapsLink}`
-      : `\n\nExact location:\n${input.mapsLink}`;
-  }
-
-  if (input.verifyLink) {
-    message += isSpanish
-      ? `\n\n🛡️ Antes de recibir sus accesos digitales, complete su registro previo al check-in:\n\n${input.verifyLink}`
-      : `\n\n🛡️ Before receiving your digital access credentials, please complete your secure pre-check-in verification:\n\n${input.verifyLink}`;
-
-    message += isSpanish
-      ? "\n\nTu acceso digital será enviado automáticamente luego de completar la verificación.\n\nTe esperamos."
-      : "\n\nYour digital access will be delivered automatically after verification is completed.\n\nWe look forward to your arrival.";
+  if (verifyLink) {
+    parts.push(
+      isSpanish
+        ? `Verificacion requerida: ${verifyLink}`
+        : `Verification required: ${verifyLink}`
+    );
   } else {
-    message += isSpanish
-      ? "\n\nTe esperamos."
-      : "\n\nWe look forward to your arrival.";
+    parts.push(isSpanish ? "Te esperamos." : "See you soon.");
   }
 
-  return message;
+  return parts.join(" ");
 }
 
 export async function sendPreCheckinSms(
