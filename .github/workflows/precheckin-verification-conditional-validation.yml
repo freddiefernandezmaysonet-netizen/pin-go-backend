@@ -1,0 +1,30 @@
+name: Precheckin Verification Conditional Validation
+
+on:
+  push:
+    branches:
+      - agent/precheckin-verification-conditional
+    paths:
+      - ".github/workflows/precheckin-verification-conditional-validation.yml"
+      - "src/services/preCheckinSms.service.ts"
+      - "src/services/preCheckinSms.verification-policy.test.ts"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+      - run: npm ci
+      - name: Verification policy tests
+        run: npx tsx --test src/services/preCheckinSms.verification-policy.test.ts
+      - name: Bundle pre-checkin SMS service
+        run: npx esbuild src/services/preCheckinSms.service.ts --bundle --platform=node --packages=external --outfile=/tmp/preCheckinSms.service.js
