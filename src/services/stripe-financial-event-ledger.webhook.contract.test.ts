@@ -12,7 +12,7 @@ test("Stripe webhook claims financial events only after signature verification",
     "stripe.webhooks.constructEvent"
   );
   const claimIndex = webhook.indexOf(
-    "claimStripeFinancialEvent"
+    "ledgerClaim = await claimStripeFinancialEvent"
   );
 
   assert.ok(constructIndex >= 0);
