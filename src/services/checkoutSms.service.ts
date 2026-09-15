@@ -5,7 +5,7 @@ import {
   resolveGuestLanguage,
   type GuestLanguage,
 } from "./guest-language.service";
-import { hasGuestSmsConsent } from "./guest-journey-access-communications-bridge.policy";
+import { evaluateCheckoutSmsConsent } from "./checkout-sms-consent.policy";
 
 function toGsmSafeCheckoutText(value: unknown, maxLength: number) {
   return String(value ?? "")
@@ -83,19 +83,14 @@ export async function sendCheckoutSms(
       return { ok: false, skipped: true, error: "Missing guestPhone" };
     }
 
-    if (process.env.GUEST_SMS_ENABLED !== "1") {
-      return {
-        ok: true,
-        skipped: true,
-        reason: "GUEST_SMS_DISABLED",
-      };
-    }
+    const consentDecision =
+      evaluateCheckoutSmsConsent(r.externalRaw);
 
-    if (!hasGuestSmsConsent(r.externalRaw)) {
+    if (!consentDecision.allowed) {
       return {
         ok: true,
         skipped: true,
-        reason: "SMS_CONSENT_NOT_GRANTED",
+        reason: consentDecision.reason,
       };
     }
 
