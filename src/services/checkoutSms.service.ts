@@ -6,43 +6,37 @@ import {
   type GuestLanguage,
 } from "./guest-language.service";
 
-function buildCheckoutMessage(input: {
+function toGsmSafeCheckoutText(value: unknown, maxLength: number) {
+  return String(value ?? "")
+    .normalize("NFKD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/[“”]/g, '"')
+    .replace(/[‘’]/g, "'")
+    .replace(/[–—]/g, "-")
+    .replace(/[^A-Za-z0-9 .,&'()#*+/:;-]/g, "")
+    .replace(/\s+/g, " ")
+    .trim()
+    .slice(0, maxLength);
+}
+
+export function buildCheckoutMessage(input: {
   guestName?: string | null;
   propertyName: string;
   checkoutTime: string;
   language: GuestLanguage;
 }) {
-  const guestName = String(input.guestName ?? "").trim();
-  const isSpanish = input.language === "es";
-  const greeting = guestName
-    ? `${isSpanish ? "Hola" : "Hi"} ${guestName},`
-    : isSpanish
-      ? "Hola,"
-      : "Hi,";
+  const propertyName =
+    toGsmSafeCheckoutText(input.propertyName, 24) ||
+    (input.language === "es" ? "propiedad" : "property");
+  const checkoutTime =
+    toGsmSafeCheckoutText(input.checkoutTime, 20) ||
+    "checkout";
 
-  if (isSpanish) {
-    return `${greeting}
-
-Tu check-out de ${input.propertyName} ha sido procesado correctamente a las ${input.checkoutTime}.
-
-Antes de salir:
-- Cierra puertas y ventanas
-- Apaga luces y aire acondicionado
-
-Gracias por tu estadía.
-Te esperamos nuevamente.`;
+  if (input.language === "es") {
+    return `Pin&Go: Check-out ${propertyName} completado a las ${checkoutTime}. Cierra puertas/ventanas y apaga luces/AC. Gracias por tu estadia.`;
   }
 
-  return `${greeting}
-
-Your check-out from ${input.propertyName} has been completed at ${input.checkoutTime}.
-
-Before leaving:
-- Close doors and windows
-- Turn off lights and AC
-
-Thank you for your stay.
-We hope to host you again.`;
+  return `Pin&Go: Check-out ${propertyName} completed at ${checkoutTime}. Close doors/windows and turn off lights/AC. Thank you.`;
 }
 
 export async function sendCheckoutSms(
@@ -51,7 +45,6 @@ export async function sendCheckoutSms(
 ) {
   let retryBody: string | null = null;
   try {
-    // ✅ idempotencia real: solo bloquear si ya fue enviado exitosamente
     const existing = await prisma.messageDispatchLog.findFirst({
       where: {
         reservationId,
@@ -88,15 +81,13 @@ export async function sendCheckoutSms(
     }
 
     const propertyName = r.property?.name ?? "your property";
-
     const language = resolveGuestLanguage(r.preferredLanguage);
-
-   const checkoutTime = new Intl.DateTimeFormat(getGuestIntlLocale(language), {
-  timeZone: r.property?.timezone ?? "UTC",
-  hour: "2-digit",
-  minute: "2-digit",
-  hour12: true,
-}).format(new Date(r.checkOut));
+    const checkoutTime = new Intl.DateTimeFormat(getGuestIntlLocale(language), {
+      timeZone: r.property?.timezone ?? "UTC",
+      hour: "2-digit",
+      minute: "2-digit",
+      hour12: true,
+    }).format(new Date(r.checkOut));
 
     const body = buildCheckoutMessage({
       guestName: r.guestName,
@@ -171,7 +162,6 @@ export async function sendCheckoutSms(
         });
       }
     } catch {
-      // no-op
     }
 
     try {
@@ -184,7 +174,6 @@ export async function sendCheckoutSms(
         },
       });
     } catch {
-      // no-op
     }
 
     return { ok: false, error: e?.message ?? "unknown_error" };
