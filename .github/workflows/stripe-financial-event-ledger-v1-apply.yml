@@ -40,3 +40,5 @@ jobs:
           git diff --cached --check
           git commit -m "Add Stripe financial event ledger"
           git push origin HEAD:agent/stripe-financial-event-ledger-v1
+
+# Validation retry after correcting the webhook contract anchor.
