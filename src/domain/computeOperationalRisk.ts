@@ -3,6 +3,10 @@ import {
   OperationalRiskLevel,
 } from "@prisma/client";
 
+const GATEWAY_CRITICAL_WINDOW_HOURS = 6;
+const BATTERY_WARNING_THRESHOLD = 30;
+const BATTERY_CRITICAL_THRESHOLD = 20;
+
 type ComputeOperationalRiskInput = {
   healthStatus: DeviceHealthStatus;
   battery?: number | null;
@@ -36,7 +40,15 @@ export function computeOperationalRisk(
       ? (nextCheckInAt.getTime() - now) / (1000 * 60 * 60)
       : null;
 
-  const checkInSoon = hoursToCheckIn !== null && hoursToCheckIn <= 24;
+  const checkInSoon =
+    hoursToCheckIn !== null &&
+    hoursToCheckIn >= 0 &&
+    hoursToCheckIn <= 24;
+
+  const gatewayCriticalWindow =
+    hoursToCheckIn !== null &&
+    hoursToCheckIn >= 0 &&
+    hoursToCheckIn <= GATEWAY_CRITICAL_WINDOW_HOURS;
 
   // ==================================================
   // UNKNOWN / MISSING VALIDATION
@@ -73,23 +85,27 @@ export function computeOperationalRisk(
   // ==================================================
   // CRITICAL CONDITIONS
   // ==================================================
-  if (gatewayConnected === false && checkInSoon) {
+  if (gatewayConnected === false && gatewayCriticalWindow) {
     return {
       operationalRisk: "CRITICAL",
       operationalMessage:
-        "Gateway unavailable and a reservation is scheduled soon. Pin&Go may fail to prepare access before guest arrival.",
+        "Gateway unavailable six hours before check-in. Immediate action is required.",
       recommendedAction:
-        "Verify gateway connectivity immediately and restore remote communication.",
+        "Restore gateway connectivity before guest arrival.",
     };
   }
 
-  if (battery !== null && battery < 30 && checkInSoon) {
+  if (
+    battery !== null &&
+    battery < BATTERY_CRITICAL_THRESHOLD &&
+    checkInSoon
+  ) {
     return {
       operationalRisk: "CRITICAL",
       operationalMessage:
-        "Battery below 30% and a reservation is scheduled soon. Replace batteries immediately to avoid reservation issues.",
+        `Battery is below ${BATTERY_CRITICAL_THRESHOLD}% before an upcoming check-in.`,
       recommendedAction:
-        "Replace lock batteries before the next check-in.",
+        "Replace the lock batteries before guest arrival.",
     };
   }
 
@@ -123,17 +139,20 @@ export function computeOperationalRisk(
     return {
       operationalRisk: "WARNING",
       operationalMessage:
-        "Gateway unavailable. Pin&Go remote preparation may fail for this lock.",
+        "Gateway unavailable. Pin&Go will escalate if it remains offline inside six hours of check-in.",
       recommendedAction:
-        "Verify gateway installation and restore connectivity.",
+        "Verify gateway connectivity before the next guest arrival.",
     };
   }
 
-  if (battery !== null && battery < 30) {
+  if (
+    battery !== null &&
+    battery < BATTERY_WARNING_THRESHOLD
+  ) {
     return {
       operationalRisk: "WARNING",
       operationalMessage:
-        "Battery below 30%. Replacement recommended soon.",
+        `Battery below ${BATTERY_WARNING_THRESHOLD}%. Replacement recommended soon.`,
       recommendedAction:
         "Schedule battery replacement to avoid future access issues.",
     };
