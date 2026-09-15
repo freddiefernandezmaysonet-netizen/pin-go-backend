@@ -73,6 +73,21 @@ test("gateway monitoring disabled means zero gateway polling", () => {
   );
 });
 
+test("gateway nextCheckAt is authoritative before the scheduled retry", () => {
+  assert.equal(
+    isGatewayCheckDue({
+      now: NOW,
+      mode: "ENABLED",
+      health: health({
+        gatewayConnected: false,
+        gatewayNextCheckAt: new Date("2026-09-15T10:00:00.000Z"),
+      }),
+      checkIn: new Date("2026-09-15T05:00:00.000Z"),
+    }),
+    false
+  );
+});
+
 test("legacy unconfigured lock keeps no-reservation gateway behavior", () => {
   assert.equal(
     isGatewayCheckDue({
