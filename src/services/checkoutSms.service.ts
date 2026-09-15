@@ -6,43 +6,37 @@ import {
   type GuestLanguage,
 } from "./guest-language.service";
 
-function buildCheckoutMessage(input: {
+function toGsmSafeCheckoutText(value: unknown, maxLength: number) {
+  return String(value ?? "")
+    .normalize("NFKD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/[“”]/g, '"')
+    .replace(/[‘’]/g, "'")
+    .replace(/[–—]/g, "-")
+    .replace(/[^A-Za-z0-9 .,&'()#*+/:;-]/g, "")
+    .replace(/\s+/g, " ")
+    .trim()
+    .slice(0, maxLength);
+}
+
+export function buildCheckoutMessage(input: {
   guestName?: string | null;
   propertyName: string;
   checkoutTime: string;
   language: GuestLanguage;
 }) {
-  const guestName = String(input.guestName ?? "").trim();
-  const isSpanish = input.language === "es";
-  const greeting = guestName
-    ? `${isSpanish ? "Hola" : "Hi"} ${guestName},`
-    : isSpanish
-      ? "Hola,"
-      : "Hi,";
+  const propertyName =
+    toGsmSafeCheckoutText(input.propertyName, 24) ||
+    (input.language === "es" ? "propiedad" : "property");
+  const checkoutTime =
+    toGsmSafeCheckoutText(input.checkoutTime, 20) ||
+    "checkout";
 
-  if (isSpanish) {
-    return `${greeting}
-
-Tu check-out de ${input.propertyName} ha sido procesado correctamente a las ${input.checkoutTime}.
-
-Antes de salir:
-- Cierra puertas y ventanas
-- Apaga luces y aire acondicionado
-
-Gracias por tu estadía.
-Te esperamos nuevamente.`;
+  if (input.language === "es") {
+    return `Pin&Go: Check-out ${propertyName} completado a las ${checkoutTime}. Cierra puertas/ventanas y apaga luces/AC. Gracias por tu estadia.`;
   }
 
-  return `${greeting}
-
-Your check-out from ${input.propertyName} has been completed at ${input.checkoutTime}.
-
-Before leaving:
-- Close doors and windows
-- Turn off lights and AC
-
-Thank you for your stay.
-We hope to host you again.`;
+  return `Pin&Go: Check-out ${propertyName} completed at ${checkoutTime}. Close doors/windows and turn off lights/AC. Thank you.`;
 }
 
 export async function sendCheckoutSms(
