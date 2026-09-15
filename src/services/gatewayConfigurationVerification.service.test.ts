@@ -107,6 +107,40 @@ test("confirmed missing gateway enters eight-hour revalidation", async () => {
   assert.equal(writes[0].update.gatewayDisconnectedSince.toISOString(), NOW.toISOString());
 });
 
+test("associated but offline gateway enters eight-hour revalidation as disconnected", async () => {
+  const { prisma, writes } = fakePrisma();
+
+  const result = await applyGatewayMonitoringConfiguration(prisma, {
+    lockId: "lock-1",
+    ttlockLockId: 123,
+    enabled: true,
+    now: NOW,
+    fetchGatewayStatus: async () => ({
+      hasGateway: true,
+      isOnline: false,
+      gatewayId: 456,
+      gatewayRssi: -88,
+      providerRequestCount: 2,
+      providerResponseAt: NOW,
+      raw: { gatewayId: 456, online: false },
+    }),
+  });
+
+  assert.equal(result.state, "REVALIDATING");
+  assert.equal(result.gatewayConnected, false);
+  assert.equal(result.isOnline, false);
+  assert.equal(
+    result.nextCheckAt?.toISOString(),
+    "2026-09-15T20:00:00.000Z"
+  );
+  assert.equal(writes[0].update.gatewayConnected, false);
+  assert.equal(writes[0].update.isOnline, false);
+  assert.equal(
+    writes[0].update.gatewayNextCheckAt.toISOString(),
+    "2026-09-15T20:00:00.000Z"
+  );
+});
+
 test("provider error clears stale offline booleans instead of treating them as current truth", async () => {
   const { prisma, writes } = fakePrisma();
 
