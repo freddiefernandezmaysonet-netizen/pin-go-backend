@@ -6,6 +6,7 @@ import {
   loadGatewayMonitoringPolicies,
   setGatewayMonitoringPolicy,
 } from "../services/lockGatewayMonitoring.service";
+import { applyGatewayMonitoringConfiguration } from "../services/gatewayConfigurationVerification.service";
 
 const prisma = new PrismaClient();
 export const dashboardLocksRouter = Router();
@@ -166,6 +167,7 @@ dashboardLocksRouter.patch(
       select: {
         id: true,
         propertyId: true,
+        ttlockLockId: true,
       },
     });
 
@@ -184,12 +186,26 @@ dashboardLocksRouter.patch(
       configuredBy: user.id ?? null,
     });
 
+    const verification = await applyGatewayMonitoringConfiguration(prisma, {
+      lockId: lock.id,
+      ttlockLockId: lock.ttlockLockId,
+      enabled: gatewayInstalled,
+    });
+
     return res.json({
       ok: true,
       lockId: lock.id,
       gatewayInstalled,
       gatewayMonitoringMode: gatewayInstalled ? "ENABLED" : "DISABLED",
       configuredAt: policy.updatedAt.toISOString(),
+      verification: {
+        state: verification.state,
+        gatewayConnected: verification.gatewayConnected,
+        isOnline: verification.isOnline,
+        nextCheckAt: verification.nextCheckAt?.toISOString() ?? null,
+        providerRequestCount: verification.providerRequestCount,
+        error: verification.error,
+      },
     });
   }
 );

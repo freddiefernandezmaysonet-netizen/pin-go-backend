@@ -73,7 +73,7 @@ test("gateway monitoring disabled means zero gateway polling", () => {
   );
 });
 
-test("gateway nextCheckAt is authoritative before the scheduled retry", () => {
+test("gateway failure nextCheckAt remains authoritative before retry", () => {
   assert.equal(
     isGatewayCheckDue({
       now: NOW,
@@ -83,6 +83,37 @@ test("gateway nextCheckAt is authoritative before the scheduled retry", () => {
         gatewayNextCheckAt: new Date("2026-09-15T10:00:00.000Z"),
       }),
       checkIn: new Date("2026-09-15T05:00:00.000Z"),
+    }),
+    false
+  );
+});
+
+test("gateway failure retry remains due without a reservation", () => {
+  assert.equal(
+    isGatewayCheckDue({
+      now: NOW,
+      mode: "ENABLED",
+      health: health({
+        gatewayConnected: false,
+        gatewayNextCheckAt: new Date("2026-09-15T01:59:59.000Z"),
+        gatewayDisconnectedSince: new Date("2026-09-14T18:00:00.000Z"),
+      }),
+      checkIn: null,
+    }),
+    true
+  );
+});
+
+test("healthy enabled gateway stays idle with no reservation inside 24 hours", () => {
+  assert.equal(
+    isGatewayCheckDue({
+      now: NOW,
+      mode: "ENABLED",
+      health: health({
+        gatewayLastCheckedAt: new Date("2026-09-01T02:00:00.000Z"),
+        gatewayNextCheckAt: null,
+      }),
+      checkIn: null,
     }),
     false
   );
@@ -100,28 +131,14 @@ test("legacy unconfigured lock keeps no-reservation gateway behavior", () => {
   );
 });
 
-test("explicitly enabled gateway is checked every 24 hours when healthy", () => {
-  assert.equal(
-    isGatewayCheckDue({
-      now: NOW,
-      mode: "ENABLED",
-      health: health({
-        gatewayLastCheckedAt: new Date("2026-09-14T01:59:59.000Z"),
-      }),
-      checkIn: null,
-    }),
-    true
-  );
-});
-
-test("gateway success schedules 24-hour maintenance without reservation", () => {
+test("gateway success schedules no idle maintenance check without reservation", () => {
   assert.equal(
     nextGatewaySuccessCheckAt({
       now: NOW,
       mode: "ENABLED",
       checkIn: null,
-    })?.toISOString(),
-    "2026-09-16T02:00:00.000Z"
+    }),
+    null
   );
 });
 
@@ -156,6 +173,21 @@ test("gateway failure escalates on the third scheduled check", () => {
 
   assert.equal(third.escalate, true);
   assert.equal(third.stage, "ACTION_REQUIRED");
+});
+
+test("reservation inside 24 hours resumes gateway readiness checks", () => {
+  assert.equal(
+    isGatewayCheckDue({
+      now: NOW,
+      mode: "ENABLED",
+      health: health({
+        gatewayLastCheckedAt: new Date("2026-09-14T20:00:00.000Z"),
+        gatewayNextCheckAt: null,
+      }),
+      checkIn: new Date("2026-09-15T22:00:00.000Z"),
+    }),
+    true
+  );
 });
 
 test("reservation proximity accelerates gateway checks to one hour inside six hours", () => {
