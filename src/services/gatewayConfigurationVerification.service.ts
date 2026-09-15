@@ -6,7 +6,6 @@ import {
 } from "../ttlock/ttlock.gatewayStatus";
 import {
   GATEWAY_FIRST_RETRY_MS,
-  GATEWAY_HEALTHY_INTERVAL_MS,
 } from "../workers/deviceHealth.scheduler.policy";
 
 export type GatewayConfigurationVerificationState =
@@ -59,9 +58,11 @@ export async function applyGatewayMonitoringConfiguration(
     const connected = response.hasGateway && response.isOnline;
 
     if (connected) {
-      const nextCheckAt = new Date(
-        now.getTime() + GATEWAY_HEALTHY_INTERVAL_MS
-      );
+      // Configuration is the one justified immediate verification. Once the
+      // gateway is confirmed healthy, do not maintenance-poll it while idle.
+      // The worker resumes gateway checks when a reservation enters the next
+      // 24-hour readiness window.
+      const nextCheckAt = null;
 
       await upsertDeviceHealth(prisma, {
         lockId: input.lockId,
