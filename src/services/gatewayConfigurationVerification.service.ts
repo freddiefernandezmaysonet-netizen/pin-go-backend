@@ -107,7 +107,7 @@ export async function applyGatewayMonitoringConfiguration(
 
     await upsertDeviceHealth(prisma, {
       lockId: input.lockId,
-      gatewayConnected: response.hasGateway,
+      gatewayConnected: false,
       isOnline: false,
       gatewayRssi: response.gatewayRssi,
       gatewayLastCheckedAt: now,
@@ -131,7 +131,7 @@ export async function applyGatewayMonitoringConfiguration(
 
     return {
       state: "REVALIDATING" as const,
-      gatewayConnected: response.hasGateway,
+      gatewayConnected: false,
       isOnline: false,
       nextCheckAt,
       providerRequestCount: response.providerRequestCount,
