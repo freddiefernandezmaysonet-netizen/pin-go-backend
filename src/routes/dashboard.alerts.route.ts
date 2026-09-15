@@ -1,6 +1,10 @@
 import { Router } from "express";
 import { PrismaClient } from "@prisma/client";
 import { requireAuth } from "../middleware/requireAuth";
+import {
+  gatewayMonitoringModeFromPolicy,
+  loadGatewayMonitoringPolicies,
+} from "../services/lockGatewayMonitoring.service";
 
 const prisma = new PrismaClient();
 export const dashboardAlertsRouter = Router();
@@ -40,10 +44,26 @@ async function buildAlertsForOrg(orgId: string) {
     },
   });
 
+  const gatewayPolicies = await loadGatewayMonitoringPolicies(prisma, {
+    organizationId: orgId,
+    lockIds: rows.map((row) => row.lockId),
+  });
+
+  const visibleRows = rows.filter((row) => {
+    const mode = gatewayMonitoringModeFromPolicy(
+      gatewayPolicies.get(row.lockId) ?? null
+    );
+
+    // A lock explicitly configured without a gateway does not participate in
+    // remote battery/gateway monitoring. Historical DeviceHealth state must
+    // not surface as an actionable host alert for that lock.
+    return mode !== "DISABLED";
+  });
+
   return {
     ok: true,
-    total: rows.length,
-    items: rows.map((r) => ({
+    total: visibleRows.length,
+    items: visibleRows.map((r) => ({
       lockId: r.lockId,
       lockName: r.lock?.ttlockLockName ?? "Lock",
       propertyName: r.lock?.property?.name ?? null,
