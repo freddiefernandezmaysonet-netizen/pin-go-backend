@@ -42,3 +42,5 @@ jobs:
           git diff --cached --check
           git commit -m "Make SMS financial telemetry segment-aware"
           git push origin HEAD:agent/sms-financial-telemetry-segment-aware-v1
+
+# Validation retry after correcting the UCS-2 test fixture.
