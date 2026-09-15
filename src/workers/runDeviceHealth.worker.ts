@@ -1,8 +1,8 @@
 import "dotenv/config";
 
 import {
-  runDeviceHealthWorker,
-} from "./deviceHealth.worker";
+  runHardenedDeviceHealthWorker,
+} from "./deviceHealth.hardened.worker";
 
 const HOUR_MS =
   60 * 60 * 1000;
@@ -22,7 +22,7 @@ async function tick() {
   tickRunning = true;
 
   try {
-    await runDeviceHealthWorker();
+    await runHardenedDeviceHealthWorker();
   } catch (error) {
     console.error(
       "DeviceHealth worker tick failed",
@@ -79,7 +79,7 @@ async function shutdown(
 
 async function main() {
   console.log(
-    "Starting DeviceHealth worker process"
+    "Starting hardened DeviceHealth worker process"
   );
 
   await tick();
