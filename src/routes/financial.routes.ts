@@ -1,6 +1,7 @@
 import { Router } from "express";
 import { PrismaClient } from "@prisma/client";
 import { requireOrg } from "../middleware/requireOrg";
+import { summarizeSmsFinancialTelemetry } from "../services/sms-financial-telemetry.service";
 
 const prisma = new PrismaClient();
 const router = Router();
@@ -12,7 +13,6 @@ const SMART_PRICE = 9.99;
 // Costos estimados
 const STRIPE_PERCENT = 0.029;
 const STRIPE_FIXED = 0.3;
-const AVG_SMS_COST = 0.008;
 const TUYA_DEVICE_COST = 0.3;
 
 router.get("/financial/overview", requireOrg(prisma), async (req, res) => {
@@ -34,6 +34,24 @@ router.get("/financial/overview", requireOrg(prisma), async (req, res) => {
       where: { organizationId: orgId },
     });
 
+    const smsSince = new Date();
+    smsSince.setDate(smsSince.getDate() - 30);
+
+    const twilioSmsMessages = await prisma.messageLog.findMany({
+      where: {
+        organizationId: orgId,
+        channel: "sms",
+        provider: "twilio",
+        status: "SENT",
+        createdAt: { gte: smsSince },
+      },
+      select: { body: true },
+    });
+
+    const smsTelemetry = summarizeSmsFinancialTelemetry(
+      twilioSmsMessages
+    );
+
     // =====================
     // REVENUE
     // =====================
@@ -46,8 +64,7 @@ router.get("/financial/overview", requireOrg(prisma), async (req, res) => {
     // =====================
     const stripeFee = totalRevenue * STRIPE_PERCENT + STRIPE_FIXED;
 
-    const estimatedSms = reservations * 4; // avg 4 SMS por reserva
-    const twilioCost = estimatedSms * AVG_SMS_COST;
+    const twilioCost = smsTelemetry.estimatedCostUsd;
 
     const tuyaCost = activeSmart * TUYA_DEVICE_COST;
 
@@ -72,6 +89,15 @@ router.get("/financial/overview", requireOrg(prisma), async (req, res) => {
         activeLocks,
         activeSmart,
         reservations,
+      },
+      smsTelemetry: {
+        period: "LAST_30_DAYS",
+        totalMessages: smsTelemetry.totalMessages,
+        totalSegments: smsTelemetry.totalSegments,
+        gsm7Messages: smsTelemetry.gsm7Messages,
+        ucs2Messages: smsTelemetry.ucs2Messages,
+        segmentRateUsd: smsTelemetry.segmentRateUsd,
+        estimateBasis: "SENT_TWILIO_MESSAGE_LOG_BODY_SEGMENTS_BASE_RATE",
       },
       costs: {
         stripe: stripeFee,
