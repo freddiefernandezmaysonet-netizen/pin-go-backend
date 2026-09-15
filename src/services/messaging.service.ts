@@ -200,17 +200,25 @@ export function buildCleaningEndSmsBody(params: {
   endsAt: Date;
   timezone?: string | null;
 }): string {
-  return (
-    `Pin&Go ✅ Limpieza FINALIZADA\n` +
-    `Asignado: ${cleanEnv(params.staffName) ?? "Staff"}\n` +
-    `Propiedad: ${cleanEnv(params.propertyName) ?? "N/A"}\n` +
-    `Unidad: ${cleanEnv(params.roomName) ?? "N/A"}\n` +
-    `Fin: ${fmtWithTimezone(
+  const propertyName =
+    toGsmSafeText(cleanEnv(params.propertyName) ?? "N/A", 24) || "N/A";
+  const roomName =
+    toGsmSafeText(cleanEnv(params.roomName) ?? "N/A", 16) || "N/A";
+  const end = toGsmSafeText(
+    fmtWithTimezone(
       params.endsAt,
       params.timezone ?? "America/Puerto_Rico",
-      "es"
-    )}\n` +
-    `Acceso expiró automáticamente.`
+      "en"
+    ),
+    24
+  );
+
+  return (
+    `Pin&Go cleaning done/lista. ` +
+    `Prop: ${propertyName}. ` +
+    `Unit/Unidad: ${roomName}. ` +
+    `End/Fin: ${end}. ` +
+    `Access/Acceso ended/finalizado.`
   );
 }
 
