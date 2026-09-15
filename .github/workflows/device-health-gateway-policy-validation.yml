@@ -28,7 +28,8 @@ jobs:
         run: >-
           npx tsc --noEmit
           --types node
-          --module nodenext
+          --module esnext
+          --moduleResolution bundler
           --target esnext
           --strict
           --skipLibCheck
