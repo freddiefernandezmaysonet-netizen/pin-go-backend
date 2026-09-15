@@ -62,12 +62,12 @@ export function isGatewayCheckDue(input: {
 
   const health = input.health;
 
-  // Only failure/revalidation timers are authoritative while idle. This also
-  // prevents a legacy +24h healthy timer written by the previous policy from
-  // causing one last unnecessary maintenance call after this rollout.
+  // A scheduled timer remains authoritative only for a gateway that is not
+  // currently confirmed healthy. This preserves failed/provider-error retries
+  // while ignoring legacy +24h healthy maintenance timers from the old policy.
   if (
-    health?.gatewayDisconnectedSince &&
-    health.gatewayNextCheckAt
+    health?.gatewayNextCheckAt &&
+    health.gatewayConnected !== true
   ) {
     return health.gatewayNextCheckAt <= input.now;
   }
