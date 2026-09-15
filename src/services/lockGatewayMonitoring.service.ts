@@ -57,6 +57,15 @@ export function gatewayMonitoringEnabledForWorker(
   return mode !== "DISABLED";
 }
 
+export function shouldSurfaceDeviceHealthAlert(
+  mode: GatewayMonitoringMode
+) {
+  // Remote battery/gateway health is intentionally not monitored for locks
+  // explicitly configured without a gateway. Historical telemetry must not
+  // continue surfacing as an actionable host alert for those locks.
+  return mode !== "DISABLED";
+}
+
 export async function loadGatewayMonitoringPolicies(
   prisma: PrismaClient,
   input: {
