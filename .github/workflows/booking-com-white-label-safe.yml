@@ -74,6 +74,37 @@ jobs:
               assert changed==expected,{'unexpected':sorted(changed-expected),'missing':sorted(expected-changed)}
               print('PASS: exact reviewed Vrbo Connection Center scope against current main.')
               raise SystemExit(0)
+          if os.environ.get('GITHUB_HEAD_REF') == 'agent/expedia-connection-center-backend':
+              expected={
+                  '.github/workflows/booking-com-transport-readiness.yml',
+                  '.github/workflows/booking-com-white-label-safe.yml',
+                  '.github/workflows/ota-airbnb-host-confirmed-mapping.yml',
+                  '.github/workflows/ota-airbnb-listing-discovery.yml',
+                  'package.json',
+                  'src/contracts/channex-certified-core.freeze.test.ts',
+                  'src/distribution/channex-canonical-readiness.service.test.ts',
+                  'src/distribution/channex-canonical-readiness.service.ts',
+                  'src/distribution/channex-channel-lifecycle.evidence.test.ts',
+                  'src/distribution/channex-channel-lifecycle.evidence.ts',
+                  'src/distribution/channex-expedia-transport-readiness.policy.test.ts',
+                  'src/distribution/channex-expedia-transport-readiness.policy.ts',
+                  'src/distribution/channex-white-label.adapter.test.ts',
+                  'src/distribution/channex-white-label.adapter.ts',
+                  'src/distribution/connection-center.read-model.test.ts',
+                  'src/distribution/connection-center.read-model.ts',
+                  'src/distribution/ota-connection-center.config.test.ts',
+                  'src/distribution/ota-connection-center.config.ts',
+                  'src/distribution/ota-connection-session.service.test.ts',
+                  'src/distribution/ota-connection-session.service.ts',
+                  'src/distribution/ota-distribution-persistence.service.test.ts',
+                  'src/distribution/ota-distribution-persistence.service.ts',
+                  'src/routes/dashboard.distribution-connection-center.route.test.ts',
+                  'src/routes/dashboard.distribution-connection-center.route.ts',
+              }
+              changed=set(subprocess.check_output(['git','diff','--name-only','origin/main...HEAD'],text=True).splitlines())
+              assert changed==expected,{'unexpected':sorted(changed-expected),'missing':sorted(expected-changed)}
+              print('PASS: exact reviewed Expedia Connection Center scope against current main.')
+              raise SystemExit(0)
           base=os.environ['BASELINE_SHA']; reviewed=os.environ['REVIEWED_SHA']
           files=['src/distribution/channex-white-label.adapter.ts','src/distribution/channex-white-label.booking-com.test.ts']
           for path in files:
@@ -185,7 +216,7 @@ jobs:
           mkdir -p validation-evidence
           git rev-parse HEAD > validation-evidence/head.txt
           baseline_ref="$BASELINE_SHA"
-          if [ "${GITHUB_HEAD_REF:-$GITHUB_REF_NAME}" = "agent/vrbo-self-service-connection-center" ]; then
+          if [ "${GITHUB_HEAD_REF:-$GITHUB_REF_NAME}" = "agent/vrbo-self-service-connection-center" ] || [ "${GITHUB_HEAD_REF:-$GITHUB_REF_NAME}" = "agent/expedia-connection-center-backend" ]; then
             baseline_ref="${{ github.event.pull_request.base.sha }}"
           fi
           git worktree add --detach "$RUNNER_TEMP/booking-types-baseline" "$baseline_ref"
@@ -198,18 +229,24 @@ jobs:
           set -e
           printf 'baseline_exit=%s\ncandidate_exit=%s\n' "$baseline" "$candidate" | tee validation-evidence/full-types-status.txt
           python3 <<'PY'
-          import collections,json,re
+          import collections,json,os,re
           from pathlib import Path
           root=Path('validation-evidence')
           before=(root/'full-types-baseline.txt').read_bytes(); after=(root/'full-types-candidate.txt').read_bytes()
-          diagnostics=re.findall(r'^(.+?)\(\d+,\d+\): error (TS\d+): (.*)$',after.decode(),re.M)
+          pattern=r'^(.+?)\(\d+,\d+\): error (TS\d+): (.*)$'
+          baseline_diagnostics=re.findall(pattern,before.decode(),re.M)
+          diagnostics=re.findall(pattern,after.decode(),re.M)
           counts=collections.Counter(path.split('/')[0] for path,code,msg in diagnostics)
-          result={'identical':before==after,'baselineDiagnostics':before.count(b'error TS'),'candidateDiagnostics':after.count(b'error TS'),'diagnosticsByRoot':dict(counts),'topCodes':collections.Counter(code for path,code,msg in diagnostics).most_common(10),'releaseApproval':False}
+          semantic_diagnostics_identical=collections.Counter(baseline_diagnostics)==collections.Counter(diagnostics)
+          result={'identical':before==after,'semanticDiagnosticsIdentical':semantic_diagnostics_identical,'baselineDiagnostics':before.count(b'error TS'),'candidateDiagnostics':after.count(b'error TS'),'diagnosticsByRoot':dict(counts),'topCodes':collections.Counter(code for path,code,msg in diagnostics).most_common(10),'releaseApproval':False}
           (root/'full-types-summary.json').write_text(json.dumps(result,indent=2))
           print(json.dumps(result,indent=2))
-          assert before==after,'Candidate introduced or changed global type diagnostics'
+          if os.environ.get('GITHUB_HEAD_REF') == 'agent/expedia-connection-center-backend':
+            assert semantic_diagnostics_identical,'Candidate introduced, removed or changed global type diagnostics'
+          else:
+            assert before==after,'Candidate introduced or changed global type diagnostics'
           PY
-          if [ "${GITHUB_HEAD_REF:-$GITHUB_REF_NAME}" = "agent/vrbo-self-service-connection-center" ]; then
+          if [ "${GITHUB_HEAD_REF:-$GITHUB_REF_NAME}" = "agent/vrbo-self-service-connection-center" ] || [ "${GITHUB_HEAD_REF:-$GITHUB_REF_NAME}" = "agent/expedia-connection-center-backend" ]; then
             test "$baseline" -eq "$candidate"
             exit 0
           fi

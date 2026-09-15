@@ -35,7 +35,10 @@ function createClient(overrides: { actor?: boolean; property?: boolean; corrupt?
     },
     otaChannelConnection: {
       async findUnique() { return null; },
-      async create(args: unknown) { writes.push({ model: "connection", args }); return connection; },
+      async create(args: any) {
+        writes.push({ model: "connection", args });
+        return { ...connection, provider: args.data.provider };
+      },
     },
     apmsAuditEntry: {
       async findUnique() { return null; },
@@ -91,15 +94,21 @@ test("corrupt cross-tenant persistence fails closed inside the transaction", asy
   );
 });
 
-test("planned channels cannot enter self-service", async () => {
-  for (const provider of ["EXPEDIA"] as const) {
-    const { client, writes } = createClient();
-    await assert.rejects(
-      prepareOtaDistributionConnection({ client, ...base, provider }),
-      /OTA_PROVIDER_SELF_SERVICE_UNAVAILABLE/
-    );
-    assert.deepEqual(writes, []);
-  }
+test("Expedia can enter self-service", async () => {
+  const { client, writes } = createClient();
+  const result = await prepareOtaDistributionConnection({
+    client,
+    ...base,
+    provider: "EXPEDIA",
+  });
+
+  assert.equal(result.provider, "EXPEDIA");
+  assert.deepEqual(writes.map((write) => write.model), [
+    "group",
+    "property",
+    "connection",
+    "audit",
+  ]);
 });
 
 test("Vrbo can enter the canonical self-service preparation", async () => {

@@ -52,6 +52,7 @@ test("complete staging configuration normalizes only non-secret values", () => {
     AIRBNB: "airbnb-explicit-filter",
     BOOKING_COM: "booking-explicit-filter",
     VRBO: "vrbo-explicit-filter",
+    EXPEDIA: "EXP",
   });
 });
 

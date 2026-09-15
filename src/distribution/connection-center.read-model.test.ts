@@ -46,7 +46,7 @@ test("empty property produces an honest white-label catalog", () => {
     [
       ["AIRBNB", "NOT_CONNECTED", "AVAILABLE", "NONE", "NONE"],
       ["BOOKING_COM", "NOT_CONNECTED", "AVAILABLE", "NONE", "NONE"],
-      ["EXPEDIA", "NOT_CONNECTED", "PLANNED", "NONE", "NONE"],
+      ["EXPEDIA", "NOT_CONNECTED", "AVAILABLE", "NONE", "NONE"],
       ["VRBO", "NOT_CONNECTED", "AVAILABLE", "NONE", "NONE"],
     ]
   );

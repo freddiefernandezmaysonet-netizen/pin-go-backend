@@ -78,6 +78,37 @@ jobs:
             diff -u "$RUNNER_TEMP/vrbo-allowed.txt" "$RUNNER_TEMP/actual.txt"
             exit 0
           fi
+          if [ "${GITHUB_HEAD_REF:-$GITHUB_REF_NAME}" = "agent/expedia-connection-center-backend" ]; then
+            cat > "$RUNNER_TEMP/expedia-allowed.txt" <<'EOF'
+          .github/workflows/booking-com-transport-readiness.yml
+          .github/workflows/booking-com-white-label-safe.yml
+          .github/workflows/ota-airbnb-host-confirmed-mapping.yml
+          .github/workflows/ota-airbnb-listing-discovery.yml
+          package.json
+          src/contracts/channex-certified-core.freeze.test.ts
+          src/distribution/channex-canonical-readiness.service.test.ts
+          src/distribution/channex-canonical-readiness.service.ts
+          src/distribution/channex-channel-lifecycle.evidence.test.ts
+          src/distribution/channex-channel-lifecycle.evidence.ts
+          src/distribution/channex-expedia-transport-readiness.policy.test.ts
+          src/distribution/channex-expedia-transport-readiness.policy.ts
+          src/distribution/channex-white-label.adapter.test.ts
+          src/distribution/channex-white-label.adapter.ts
+          src/distribution/connection-center.read-model.test.ts
+          src/distribution/connection-center.read-model.ts
+          src/distribution/ota-connection-center.config.test.ts
+          src/distribution/ota-connection-center.config.ts
+          src/distribution/ota-connection-session.service.test.ts
+          src/distribution/ota-connection-session.service.ts
+          src/distribution/ota-distribution-persistence.service.test.ts
+          src/distribution/ota-distribution-persistence.service.ts
+          src/routes/dashboard.distribution-connection-center.route.test.ts
+          src/routes/dashboard.distribution-connection-center.route.ts
+          EOF
+            sort "$RUNNER_TEMP/expedia-allowed.txt" -o "$RUNNER_TEMP/expedia-allowed.txt"
+            diff -u "$RUNNER_TEMP/expedia-allowed.txt" "$RUNNER_TEMP/actual.txt"
+            exit 0
+          fi
           sort "$RUNNER_TEMP/allowed.txt" -o "$RUNNER_TEMP/allowed.txt"
           comm -23 "$RUNNER_TEMP/actual.txt" "$RUNNER_TEMP/allowed.txt" > "$RUNNER_TEMP/outside.txt"
           test ! -s "$RUNNER_TEMP/outside.txt" || {

@@ -371,6 +371,20 @@ test("normalizes the production AirBNB lifecycle adapter token", () => {
   assert.equal(normalized?.externalChannelCode, "ABB");
 });
 
+test("normalizes the documented Expedia lifecycle adapter token", () => {
+  const normalized = normalizeChannexChannelLifecycleEvent(
+    payload("activate_channel", {
+      payload: {
+        title: "Expedia certification channel",
+        channel_id: EXTERNAL_CHANNEL_ID,
+        ota_name: "Expedia",
+      },
+    })
+  );
+  assert.equal(normalized?.provider, "EXPEDIA");
+  assert.equal(normalized?.externalChannelCode, "EXP");
+});
+
 test("normalizes the exact disconnect_channel name with the canonical envelope", () => {
   const normalized = normalizeChannexChannelLifecycleEvent({
     event: "disconnect_channel",

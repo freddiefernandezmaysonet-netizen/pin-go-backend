@@ -295,27 +295,36 @@ test("member, origin and idempotency fences run before mutation action", async (
 });
 
 test("tenant actor and request key are forwarded to injected orchestration", async () => {
-  let received: any;
-  const response = await requestRoute({
-    prisma: createPrisma(),
-    user: { id: "user-a", orgId: "organization-a", role: "ORG_ADMIN" },
-    method: "POST",
-    path: "/api/dashboard/distribution/properties/property-b/channels/BOOKING_COM/prepare",
-    headers: { Origin: "https://app.pin-go.test", "Idempotency-Key": "request-tenant-123" },
-    actions: {
-      runtime: { enabled: true, reason: "ENABLED" },
-      isTrustedOrigin: async (_origin, organizationId) => organizationId === "organization-a",
-      prepare: async (args) => { received = args; return { provisioningStatus: "READY" }; },
-    },
-  });
-  assert.equal(response.status, 200);
-  assert.deepEqual(received, {
-    organizationId: "organization-a",
-    propertyId: "property-b",
-    requestedByUserId: "user-a",
-    provider: "BOOKING_COM",
-    requestKey: "request-tenant-123",
-  });
+  for (const provider of ["BOOKING_COM", "EXPEDIA"] as const) {
+    let received: any;
+    const response = await requestRoute({
+      prisma: createPrisma(),
+      user: { id: "user-a", orgId: "organization-a", role: "ORG_ADMIN" },
+      method: "POST",
+      path: `/api/dashboard/distribution/properties/property-b/channels/${provider}/prepare`,
+      headers: {
+        Origin: "https://app.pin-go.test",
+        "Idempotency-Key": `request-tenant-${provider}`,
+      },
+      actions: {
+        runtime: { enabled: true, reason: "ENABLED" },
+        isTrustedOrigin: async (_origin, organizationId) =>
+          organizationId === "organization-a",
+        prepare: async (args) => {
+          received = args;
+          return { provisioningStatus: "READY" };
+        },
+      },
+    });
+    assert.equal(response.status, 200);
+    assert.deepEqual(received, {
+      organizationId: "organization-a",
+      propertyId: "property-b",
+      requestedByUserId: "user-a",
+      provider,
+      requestKey: `request-tenant-${provider}`,
+    });
+  }
 });
 
 test("session response exposes the launch URL but not a duplicate raw token", async () => {

@@ -124,6 +124,7 @@ export function resolveOtaConnectionCenterConfig(
         AIRBNB: airbnbFilter,
         BOOKING_COM: bookingFilter,
         VRBO: vrboFilter,
+        EXPEDIA: "EXP",
       },
       defaultCurrency: currency,
       timeoutMs,

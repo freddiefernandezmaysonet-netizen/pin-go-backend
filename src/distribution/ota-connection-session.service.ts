@@ -170,6 +170,7 @@ export async function issueOtaConnectionSession(args: {
   if (
     args.provider !== "AIRBNB" &&
     args.provider !== "BOOKING_COM" &&
+    args.provider !== "EXPEDIA" &&
     args.provider !== "VRBO"
   ) {
     throw new OtaConnectionSessionError("OTA_CONNECTION_PROVIDER_UNAVAILABLE");
