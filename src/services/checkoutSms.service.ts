@@ -45,6 +45,7 @@ export async function sendCheckoutSms(
 ) {
   let retryBody: string | null = null;
   try {
+    // ✅ idempotencia real: solo bloquear si ya fue enviado exitosamente
     const existing = await prisma.messageDispatchLog.findFirst({
       where: {
         reservationId,
@@ -81,13 +82,15 @@ export async function sendCheckoutSms(
     }
 
     const propertyName = r.property?.name ?? "your property";
+
     const language = resolveGuestLanguage(r.preferredLanguage);
-    const checkoutTime = new Intl.DateTimeFormat(getGuestIntlLocale(language), {
-      timeZone: r.property?.timezone ?? "UTC",
-      hour: "2-digit",
-      minute: "2-digit",
-      hour12: true,
-    }).format(new Date(r.checkOut));
+
+   const checkoutTime = new Intl.DateTimeFormat(getGuestIntlLocale(language), {
+  timeZone: r.property?.timezone ?? "UTC",
+  hour: "2-digit",
+  minute: "2-digit",
+  hour12: true,
+}).format(new Date(r.checkOut));
 
     const body = buildCheckoutMessage({
       guestName: r.guestName,
@@ -162,6 +165,7 @@ export async function sendCheckoutSms(
         });
       }
     } catch {
+      // no-op
     }
 
     try {
@@ -174,6 +178,7 @@ export async function sendCheckoutSms(
         },
       });
     } catch {
+      // no-op
     }
 
     return { ok: false, error: e?.message ?? "unknown_error" };
