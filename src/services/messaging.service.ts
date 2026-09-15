@@ -149,7 +149,6 @@ export function buildGuestPasscodeSmsBody(params: {
   language: GuestLanguage;
 }): string {
   const isSpanish = params.language === "es";
-  const guestName = toGsmSafeText(params.guestName, 24);
   const code = toGsmSafeText(params.code, 10);
   const validUntil = toGsmSafeText(
     fmtWithTimezone(
@@ -161,12 +160,10 @@ export function buildGuestPasscodeSmsBody(params: {
   );
 
   if (isSpanish) {
-    const greeting = guestName ? ` Hola ${guestName}.` : "";
-    return `Pin&Go acceso.${greeting} Codigo: ${code}. Ingresa el codigo y presiona la tecla de desbloqueo (#, * o similar). Valido hasta ${validUntil}.`;
+    return `Pin&Go acceso. Codigo: ${code}. En keypad, ingresa el codigo y presiona desbloqueo (#, * o similar). Valido hasta ${validUntil}.`;
   }
 
-  const greeting = guestName ? ` Hi ${guestName}.` : "";
-  return `Pin&Go access.${greeting} Code: ${code}. Enter the code and press the unlock key (#, * or similar). Valid until ${validUntil}.`;
+  return `Pin&Go access. Code: ${code}. Enter code on keypad and press unlock (#, * or similar). Valid until ${validUntil}.`;
 }
 
 export function buildCleaningStartSmsBody(params: {
@@ -404,7 +401,7 @@ export async function sendCleaningEndSms(
     roomName: args.roomName,
     endsAt: args.endsAt,
     timezone: args.timezone,
- });
+  });
 
   return sendLoggedSms({
     prisma: args.prisma,
