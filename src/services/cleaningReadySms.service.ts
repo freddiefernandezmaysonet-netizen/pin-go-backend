@@ -1,5 +1,6 @@
 import { PrismaClient } from "@prisma/client";
 import { sendSms } from "../integrations/twilio/twilio.client";
+import { buildCleaningReadySmsBody } from "./cleaning-ready-sms-body.service";
 
 export async function sendCleaningReadySms(
   prisma: PrismaClient,
@@ -56,7 +57,6 @@ export async function sendCleaningReadySms(
 
     const propertyName = assignment.reservation?.property?.name ?? "Property";
     const roomName = assignment.reservation?.roomName ?? "N/A";
-    const staffName = assignment.staffMember.fullName ?? "Staff";
 
     const timezone = assignment.reservation?.property?.timezone ?? "UTC";
 
@@ -80,23 +80,12 @@ const end = new Intl.DateTimeFormat("en-US", {
   hour12: true,
 }).format(new Date(assignment.endsAt));
 
-    const es =
-      `🧼 Pin&Go Limpieza lista para comenzar \n` +
-      `Asignado: ${staffName}\n` +
-      `Propiedad: ${propertyName}\n` +
-      `Unidad: ${roomName}\n` +
-      `Ventana: ${start} - ${end}\n` +
-      `La propiedad está lista para limpieza.`;
-
-    const en =
-      `🧼 Pin&Go Cleaning ready to start\n` +
-      `Assigned: ${staffName}\n` +
-      `Property: ${propertyName}\n` +
-      `Unit: ${roomName}\n` +
-      `Window: ${start} - ${end}\n` +
-      `The property is now ready for cleaning.`;
-
-    const body = `${es}\n\n---\n\n${en}`;
+    const body = buildCleaningReadySmsBody({
+      propertyName,
+      roomName,
+      start,
+      end,
+    });
 
     const sent = await sendSms(assignment.staffMember.phoneE164, body);
 
