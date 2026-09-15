@@ -1,0 +1,67 @@
+name: Enterprise Authentication E3 Certification
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - ".github/workflows/enterprise-auth-e3-certification.yml"
+      - "tsconfig.enterprise-auth-e3.json"
+      - "src/auth/mfa-runtime-policy.ts"
+      - "src/auth/mfa-runtime-policy.test.ts"
+      - "src/auth/mfa-enrollment.ts"
+      - "src/auth/mfa-enrollment.test.ts"
+      - "src/auth/mfa-enrollment.routes.ts"
+      - "src/routes/auth.routes.ts"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  DATABASE_URL: postgresql://postgres:postgres@127.0.0.1:5432/pingo_auth_e3_ci
+
+jobs:
+  certify:
+    name: OFF SHADOW runtime and enrollment boundary
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: pingo_auth_e3_ci
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U postgres -d pingo_auth_e3_ci"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Use Node.js 22
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+      - name: Install locked dependencies
+        run: npm ci --silent --no-audit --no-fund
+      - name: Apply migration history to ephemeral PostgreSQL
+        run: npx prisma migrate deploy --schema prisma/schema.prisma
+      - name: Certify E1 E2 E3 authentication contracts
+        run: npx tsx --test src/auth/mfa-core.test.ts src/auth/mfa-otp.test.ts src/auth/mfa-otp-delivery.test.ts src/auth/mfa-runtime-policy.test.ts src/auth/mfa-enrollment.test.ts
+      - name: TypeScript E3 contract
+        run: npx tsc -p tsconfig.enterprise-auth-e3.json
+      - name: Certify E3 no-enforcement no-delivery boundary
+        shell: bash
+        run: |
+          set -euo pipefail
+          grep -q 'ENFORCE.*mode: "OFF"' src/auth/mfa-runtime-policy.test.ts
+          grep -q 'sessionAllowed: true' src/auth/mfa-runtime-policy.ts
+          ! grep -R "sendGuestSms\|sendResetPasswordEmail\|send.*Email" src/auth/mfa-enrollment.routes.ts src/auth/mfa-enrollment.ts src/auth/mfa-runtime-policy.ts
+          ! grep -R "PINGO_MFA_MODE.*ENFORCE" src/routes/auth.routes.ts
+          grep -q 'authRouter.use(mfaEnrollmentRouter)' src/routes/auth.routes.ts
