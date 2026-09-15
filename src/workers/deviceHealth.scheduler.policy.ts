@@ -8,6 +8,7 @@ const DAY_MS = 24 * HOUR_MS;
 export const GATEWAY_HEALTHY_INTERVAL_MS = DAY_MS;
 export const GATEWAY_FIRST_RETRY_MS = 8 * HOUR_MS;
 export const GATEWAY_SECOND_RETRY_MS = 12 * HOUR_MS;
+export const GATEWAY_READINESS_WINDOW_MS = 6 * HOUR_MS;
 
 export type SchedulerHealth = {
   battery: number | null;
@@ -60,39 +61,56 @@ export function isGatewayCheckDue(input: {
     return false;
   }
 
-  const health = input.health;
-
-  // A scheduled timer remains authoritative only for a gateway that is not
-  // currently confirmed healthy. This preserves failed/provider-error retries
-  // while ignoring legacy +24h healthy maintenance timers from the old policy.
-  if (
-    health?.gatewayNextCheckAt &&
-    health.gatewayConnected !== true
-  ) {
-    return health.gatewayNextCheckAt <= input.now;
-  }
-
-  // Healthy gateways do not receive maintenance polling while the property is
-  // idle. Once a reservation enters the worker's 24-hour window, readiness
-  // checks resume and accelerate as check-in approaches.
+  // Gateway readiness is intentionally quiet until the next ACTIVE arrival is
+  // inside the six-hour critical window. Configuration-time verification is a
+  // separate one-time action and is not governed by this worker scheduler.
   if (!input.checkIn) {
     return false;
   }
+
+  const readinessWindowStart = new Date(
+    input.checkIn.getTime() - GATEWAY_READINESS_WINDOW_MS
+  );
+
+  if (input.now < readinessWindowStart) {
+    return false;
+  }
+
+  const health = input.health;
 
   if (!health?.gatewayLastCheckedAt) {
     return true;
   }
 
-  const interval = reservationGatewayIntervalMs({
-    now: input.now,
-    checkIn: input.checkIn,
-  });
+  const checkedInsideReadinessWindow =
+    health.gatewayLastCheckedAt >= readinessWindowStart;
 
-  return (
-    input.now.getTime() -
-      health.gatewayLastCheckedAt.getTime() >=
-    interval
-  );
+  // Any telemetry from before T-6 is stale for this arrival. Perform one fresh
+  // readiness verification when the worker first enters the critical window,
+  // regardless of older maintenance timers or status.
+  if (!checkedInsideReadinessWindow) {
+    return true;
+  }
+
+  const certifiedHealthyForArrival =
+    health.gatewayConnected === true &&
+    health.gatewayLastSuccessfulAt !== null &&
+    health.gatewayLastSuccessfulAt >= readinessWindowStart;
+
+  // One successful verification inside T-6 certifies the gateway for this
+  // arrival. Do not spend more TTLock calls while the gateway remains healthy.
+  if (certifiedHealthyForArrival) {
+    return false;
+  }
+
+  // A failed/provider-error check inside T-6 keeps its recovery timer
+  // authoritative. Failures retry hourly via nextGatewayFailure so Pin&Go can
+  // auto-resolve if the host restores connectivity before check-in.
+  if (health.gatewayNextCheckAt) {
+    return health.gatewayNextCheckAt <= input.now;
+  }
+
+  return true;
 }
 
 export function nextGatewaySuccessCheckAt(input: {
@@ -100,19 +118,8 @@ export function nextGatewaySuccessCheckAt(input: {
   mode: GatewayMonitoringMode;
   checkIn?: Date | null;
 }) {
-  if (input.checkIn) {
-    return new Date(
-      input.now.getTime() +
-        reservationGatewayIntervalMs({
-          now: input.now,
-          checkIn: input.checkIn,
-        })
-    );
-  }
-
-  // A confirmed healthy gateway stays quiet while there is no reservation in
-  // the 24-hour readiness window. The hourly worker can still notice when a
-  // new reservation enters that window without making TTLock calls while idle.
+  // A successful gateway check is terminal for the current readiness window.
+  // The next reservation will naturally require a fresh T-6 certification.
   return null;
 }
 
