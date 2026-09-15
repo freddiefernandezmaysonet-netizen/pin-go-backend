@@ -1,0 +1,44 @@
+name: Gateway T-6 Validation
+
+on:
+  push:
+    branches:
+      - agent/gateway-readiness-tminus6
+    paths:
+      - ".github/workflows/gateway-tminus6-validation.yml"
+      - "src/workers/deviceHealth.scheduler.policy.ts"
+      - "src/workers/deviceHealth.scheduler.policy.test.ts"
+      - "src/workers/deviceHealth.hardened.worker.ts"
+      - "src/services/device-health-alert.service.ts"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    name: T-6 gateway readiness validation
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Run scheduler policy tests
+        run: npx tsx --test src/workers/deviceHealth.scheduler.policy.test.ts
+
+      - name: Bundle runtime boundaries
+        run: |
+          npx esbuild src/workers/deviceHealth.scheduler.policy.ts --bundle --platform=node --packages=external --outfile=/tmp/deviceHealth.scheduler.policy.js
+          npx esbuild src/workers/deviceHealth.hardened.worker.ts --bundle --platform=node --packages=external --outfile=/tmp/deviceHealth.hardened.worker.js
+          npx esbuild src/services/device-health-alert.service.ts --bundle --platform=node --packages=external --outfile=/tmp/device-health-alert.service.js
