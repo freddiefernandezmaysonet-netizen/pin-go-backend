@@ -62,9 +62,13 @@ export function isGatewayCheckDue(input: {
 
   const health = input.health;
 
-  // Failure/revalidation schedules remain authoritative even without a
-  // reservation. This is what preserves the 8h -> 12h -> escalation flow.
-  if (health?.gatewayNextCheckAt) {
+  // Only failure/revalidation timers are authoritative while idle. This also
+  // prevents a legacy +24h healthy timer written by the previous policy from
+  // causing one last unnecessary maintenance call after this rollout.
+  if (
+    health?.gatewayDisconnectedSince &&
+    health.gatewayNextCheckAt
+  ) {
     return health.gatewayNextCheckAt <= input.now;
   }
 
