@@ -1,0 +1,71 @@
+name: Verification Reminder SMS Cost Optimization Apply
+
+on:
+  push:
+    branches:
+      - agent/verification-reminder-sms-cost-optimization-v1
+    paths:
+      - ".github/workflows/verification-reminder-sms-cost-optimization-apply.yml"
+
+permissions:
+  contents: write
+
+jobs:
+  apply-and-validate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: agent/verification-reminder-sms-cost-optimization-v1
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+      - name: Apply exact template optimization
+        shell: bash
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+
+          path = Path("src/services/guest-verification-reminder.service.ts")
+          text = path.read_text()
+          start = text.index("export function buildVerificationReminderSms")
+          end = text.index("function toErrorMessage", start)
+
+          replacement = '''export function buildVerificationReminderSms(input: {
+            guestName?: string | null;
+            propertyName: string;
+            reservationNumber: string;
+            verificationUrl: string;
+            language: GuestLanguage;
+          }) {
+            if (input.language === "es") {
+              return `Pin&Go: Verifica tu registro para recibir acceso: ${input.verificationUrl}`;
+            }
+
+            return `Pin&Go: Complete verification to receive access: ${input.verificationUrl}`;
+          }
+
+          '''
+
+          updated = text[:start] + replacement + text[end:]
+          if updated == text:
+            raise SystemExit("template replacement produced no change")
+          path.write_text(updated)
+          PY
+      - run: npm ci
+      - name: Verification reminder SMS cost tests
+        run: npx tsx --test src/services/guest-verification-reminder.sms-cost-optimization.test.ts
+      - name: Bundle verification reminder service
+        run: npx esbuild src/services/guest-verification-reminder.service.ts --bundle --platform=node --packages=external --outfile=/tmp/guest-verification-reminder.service.js
+      - name: Commit validated template only
+        shell: bash
+        run: |
+          git config user.name "freddiefernandezmaysonet-netizen"
+          git config user.email "freddiefernandezmaysonet@gmail.com"
+          git add src/services/guest-verification-reminder.service.ts
+          git diff --cached --check
+          git commit -m "Optimize guest verification reminder SMS segment usage"
+          git push origin HEAD:agent/verification-reminder-sms-cost-optimization-v1
