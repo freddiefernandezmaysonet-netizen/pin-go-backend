@@ -3,6 +3,8 @@ import type { GatewayMonitoringMode } from "../services/lockGatewayMonitoring.se
 const HOUR_MS = 60 * 60 * 1000;
 const DAY_MS = 24 * HOUR_MS;
 
+// Used only for low-frequency recovery checks after a persistent gateway
+// failure has already escalated. Healthy gateways are reservation-driven.
 export const GATEWAY_HEALTHY_INTERVAL_MS = DAY_MS;
 export const GATEWAY_FIRST_RETRY_MS = 8 * HOUR_MS;
 export const GATEWAY_SECOND_RETRY_MS = 12 * HOUR_MS;
@@ -60,37 +62,32 @@ export function isGatewayCheckDue(input: {
 
   const health = input.health;
 
+  // Failure/revalidation schedules remain authoritative even without a
+  // reservation. This is what preserves the 8h -> 12h -> escalation flow.
   if (health?.gatewayNextCheckAt) {
     return health.gatewayNextCheckAt <= input.now;
   }
 
-  if (!health?.gatewayLastCheckedAt) {
-    // Legacy unconfigured locks preserve the previous behavior: gateway is
-    // checked only when there is an operational reservation window.
-    return input.mode === "ENABLED" || Boolean(input.checkIn);
-  }
-
-  if (input.checkIn) {
-    const interval = reservationGatewayIntervalMs({
-      now: input.now,
-      checkIn: input.checkIn,
-    });
-
-    return (
-      input.now.getTime() -
-        health.gatewayLastCheckedAt.getTime() >=
-      interval
-    );
-  }
-
-  if (input.mode === "LEGACY_UNCONFIGURED") {
+  // Healthy gateways do not receive maintenance polling while the property is
+  // idle. Once a reservation enters the worker's 24-hour window, readiness
+  // checks resume and accelerate as check-in approaches.
+  if (!input.checkIn) {
     return false;
   }
+
+  if (!health?.gatewayLastCheckedAt) {
+    return true;
+  }
+
+  const interval = reservationGatewayIntervalMs({
+    now: input.now,
+    checkIn: input.checkIn,
+  });
 
   return (
     input.now.getTime() -
       health.gatewayLastCheckedAt.getTime() >=
-    GATEWAY_HEALTHY_INTERVAL_MS
+    interval
   );
 }
 
@@ -109,12 +106,9 @@ export function nextGatewaySuccessCheckAt(input: {
     );
   }
 
-  if (input.mode === "ENABLED") {
-    return new Date(
-      input.now.getTime() + GATEWAY_HEALTHY_INTERVAL_MS
-    );
-  }
-
+  // A confirmed healthy gateway stays quiet while there is no reservation in
+  // the 24-hour readiness window. The hourly worker can still notice when a
+  // new reservation enters that window without making TTLock calls while idle.
   return null;
 }
 
