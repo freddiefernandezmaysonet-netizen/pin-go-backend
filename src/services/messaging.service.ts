@@ -61,6 +61,20 @@ function cleanEnv(value: string | null | undefined): string | null {
   return v.length > 0 ? v : null;
 }
 
+function toGsmSafeText(value: unknown, maxLength: number): string {
+  return String(value ?? "")
+    .normalize("NFKD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/[“”]/g, '"')
+    .replace(/[‘’]/g, "'")
+    .replace(/[–—]/g, "-")
+    .replace(/`/g, "'")
+    .replace(/[^\x20-\x7E]/g, "")
+    .replace(/\s+/g, " ")
+    .trim()
+    .slice(0, maxLength);
+}
+
 function toErrString(e: unknown): string {
   if (e instanceof Error) return `${e.name}: ${e.message}`;
   return String(e);
@@ -74,7 +88,7 @@ function getFromNumber(): string | null {
   );
 }
 
-function maskSensitiveBody(body: string): string {
+export function maskSensitiveBody(body: string): string {
   if (!body) return body;
 
   let masked = body;
@@ -89,6 +103,14 @@ function maskSensitiveBody(body: string): string {
 
   masked = masked.replace(
     /(your access code is:\s*)(\d{4,10})/gi,
+    (_m, prefix, code) => {
+      if (code.length <= 2) return `${prefix}**`;
+      return `${prefix}${"*".repeat(Math.max(code.length - 2, 4))}${code.slice(-2)}`;
+    }
+  );
+
+  masked = masked.replace(
+    /\b((?:Codigo|Code):\s*)(\d{4,10})\b/gi,
     (_m, prefix, code) => {
       if (code.length <= 2) return `${prefix}**`;
       return `${prefix}${"*".repeat(Math.max(code.length - 2, 4))}${code.slice(-2)}`;
@@ -127,50 +149,24 @@ export function buildGuestPasscodeSmsBody(params: {
   language: GuestLanguage;
 }): string {
   const isSpanish = params.language === "es";
-  const guestName = params.guestName ?? (isSpanish ? "Huésped" : "Guest");
-  const validUntil = fmtWithTimezone(
-    params.validUntil,
-    params.timezone,
-    params.language
+  const guestName = toGsmSafeText(params.guestName, 24);
+  const code = toGsmSafeText(params.code, 10);
+  const validUntil = toGsmSafeText(
+    fmtWithTimezone(
+      params.validUntil,
+      params.timezone,
+      params.language
+    ),
+    32
   );
 
   if (isSpanish) {
-    return `🔐 Acceso Pin&Go
-
-Hola ${guestName},
-
-Tu código de entrada es:
-${params.code}
-
-⚠️ IMPORTANTE:
-- Ingresa el código en el keypad
-- Presiona la tecla de desbloqueo (#, *, u otro símbolo según el modelo)
-
-🕒 Válido hasta:
-${validUntil}
-
-Durante tu estadía, el acceso continuo estará disponible mediante tarjetas NFC.
-
-— Pin&Go`;
+    const greeting = guestName ? ` Hola ${guestName}.` : "";
+    return `Pin&Go acceso.${greeting} Codigo: ${code}. Ingresa el codigo y presiona la tecla de desbloqueo (#, * o similar). Valido hasta ${validUntil}.`;
   }
 
-  return `🔐 Pin&Go Access
-
-Hi ${guestName},
-
-Your access code is:
-${params.code}
-
-⚠️ IMPORTANT:
-- Enter the code on the keypad
-- Press the unlock key (#, *, or another symbol depending on the model)
-
-🕒 Valid until:
-${validUntil}
-
-During your stay, continuous access may be available via NFC cards.
-
-— Pin&Go`;
+  const greeting = guestName ? ` Hi ${guestName}.` : "";
+  return `Pin&Go access.${greeting} Code: ${code}. Enter the code and press the unlock key (#, * or similar). Valid until ${validUntil}.`;
 }
 
 export function buildCleaningStartSmsBody(params: {
