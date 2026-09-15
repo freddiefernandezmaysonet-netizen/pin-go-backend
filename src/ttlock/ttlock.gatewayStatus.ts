@@ -163,7 +163,7 @@ export async function ttlockFetchGatewayStatus(
       providerResponseAt: new Date(),
       raw: {
         association: associationRaw,
-        accountGateways: null,
+        accountGateways: null as unknown[] | null,
       },
     };
   }
