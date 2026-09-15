@@ -16,6 +16,7 @@ import {
   isGuestJourneyCommunicationsOwnerScope,
   resolveGuestJourneyCommunicationsOwnerConfig,
 } from "../services/guest-journey-communications-owner.config";
+import { evaluateCheckoutSmsConsent } from "../services/checkout-sms-consent.policy";
 
 const WORKER_NAME = "message.retry.worker";
 const POLL_MS = Number(process.env.MESSAGE_RETRY_POLL_MS ?? 30000);
@@ -175,6 +176,58 @@ async function processRetries() {
         });
         continue;
       }
+      if (String(msg.communicationType ?? "").toUpperCase() === "CHECKOUT") {
+        const reservationId = String(msg.reservationId ?? "").trim();
+
+        if (!reservationId) {
+          await prisma.messageLog.update({
+            where: { id: msg.id },
+            data: {
+              status: "FAILED_FINAL",
+              error: "CHECKOUT_SMS_RESERVATION_ID_MISSING",
+            },
+          });
+          continue;
+        }
+
+        const reservation = await prisma.reservation.findUnique({
+          where: { id: reservationId },
+          select: { externalRaw: true },
+        });
+
+        if (!reservation) {
+          await prisma.messageLog.update({
+            where: { id: msg.id },
+            data: {
+              status: "FAILED_FINAL",
+              error: "CHECKOUT_SMS_RESERVATION_NOT_FOUND",
+            },
+          });
+          continue;
+        }
+
+        const consentDecision = evaluateCheckoutSmsConsent(
+          reservation.externalRaw
+        );
+
+        if (!consentDecision.allowed) {
+          await prisma.messageLog.update({
+            where: { id: msg.id },
+            data: {
+              status: "FAILED_FINAL",
+              error: consentDecision.reason,
+            },
+          });
+
+          log("Checkout SMS retry blocked", {
+            id: msg.id,
+            reservationId,
+            reason: consentDecision.reason,
+          });
+          continue;
+        }
+      }
+
       log("Retrying SMS message", {
         id: msg.id,
         to: msg.to,
