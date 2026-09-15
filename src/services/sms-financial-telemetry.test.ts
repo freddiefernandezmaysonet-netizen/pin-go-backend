@@ -40,11 +40,11 @@ test("GSM-7 extended characters count as two units", () => {
 
 test("Unicode and emoji use UCS-2 boundaries conservatively", () => {
   assert.deepEqual(
-    estimateSmsSegments("ñ".repeat(70)),
+    estimateSmsSegments("á".repeat(70)),
     { encoding: "UCS-2", units: 70, segments: 1 }
   );
   assert.equal(
-    estimateSmsSegments("ñ".repeat(71)).segments,
+    estimateSmsSegments("á".repeat(71)).segments,
     2
   );
 
@@ -95,7 +95,7 @@ test("summary charges segments, not logical messages", () => {
     [
       { body: "A".repeat(160) },
       { body: "A".repeat(161) },
-      { body: "ñ".repeat(71) },
+      { body: "á".repeat(71) },
     ],
     {} as NodeJS.ProcessEnv
   );
