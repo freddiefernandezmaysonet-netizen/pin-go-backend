@@ -1,0 +1,42 @@
+name: Device Health Gateway Policy Validation
+
+on:
+  push:
+    branches:
+      - agent/device-health-gateway-policy-hardening
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - name: Install dependencies
+        run: npm ci
+      - name: Generate Prisma client
+        run: npx prisma generate
+      - name: Scheduler policy tests
+        run: node --import tsx --test src/workers/deviceHealth.scheduler.policy.test.ts
+      - name: Type-check hardened device health surface
+        run: >-
+          npx tsc --noEmit
+          --types node
+          --module nodenext
+          --target esnext
+          --strict
+          --skipLibCheck
+          --exactOptionalPropertyTypes
+          --noUncheckedIndexedAccess
+          src/workers/deviceHealth.hardened.worker.ts
+          src/workers/deviceHealth.scheduler.policy.ts
+          src/ttlock/ttlock.gatewayStatus.ts
+          src/services/lockGatewayMonitoring.service.ts
+          src/services/gateway-maintenance-operational.service.ts
+          src/routes/dashboard.locks.route.ts
