@@ -1,0 +1,32 @@
+name: Device Health Gateway Alert Validation
+
+on:
+  push:
+    branches:
+      - agent/device-health-gateway-policy-hardening
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - name: Install dependencies
+        run: npm ci
+      - name: Generate Prisma client
+        run: npx prisma generate
+      - name: Gateway policy tests
+        run: node --import tsx --test src/services/lockGatewayMonitoring.service.test.ts src/workers/deviceHealth.scheduler.policy.test.ts
+      - name: Runtime import alerts route
+        run: >-
+          node --import tsx --input-type=module -e
+          "await import('./src/routes/dashboard.alerts.route.ts'); await import('./src/services/lockGatewayMonitoring.service.ts');"
+      - name: Compile alerts route
+        run: npx esbuild src/routes/dashboard.alerts.route.ts --bundle --platform=node --format=esm --packages=external --outfile=/tmp/dashboard-alerts.mjs
