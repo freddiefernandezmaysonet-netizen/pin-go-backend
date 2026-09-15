@@ -19,7 +19,6 @@ export type SchedulerHealth = {
   gatewayLastSuccessfulAt: Date | null;
   gatewayNextCheckAt: Date | null;
   gatewayDisconnectedSince: Date | null;
-  gatewayCheckReservationId: string | null;
 };
 
 export function isBatteryCheckDue(input: {
@@ -56,7 +55,6 @@ export function isGatewayCheckDue(input: {
   now: Date;
   mode: GatewayMonitoringMode;
   health: SchedulerHealth | null;
-  reservationId?: string | null;
   checkIn?: Date | null;
 }) {
   if (input.mode === "DISABLED") {
@@ -66,7 +64,7 @@ export function isGatewayCheckDue(input: {
   // Gateway readiness is intentionally quiet until the next ACTIVE arrival is
   // inside the six-hour critical window. Configuration-time verification is a
   // separate one-time action and is not governed by this worker scheduler.
-  if (!input.checkIn || !input.reservationId) {
+  if (!input.checkIn) {
     return false;
   }
 
@@ -84,16 +82,11 @@ export function isGatewayCheckDue(input: {
     return true;
   }
 
-  const sameReservation =
-    health.gatewayCheckReservationId === input.reservationId;
-
   const checkedInsideReadinessWindow =
-    sameReservation &&
     health.gatewayLastCheckedAt >= readinessWindowStart;
 
-  // Every reservation gets its own fresh T-6 readiness certification. Older
-  // telemetry, including a healthy result from another reservation, cannot
-  // satisfy the current arrival.
+  // Any telemetry from before T-6 is stale for this arrival. Perform one fresh
+  // readiness verification when the worker first enters the critical window.
   if (!checkedInsideReadinessWindow) {
     return true;
   }
@@ -104,7 +97,7 @@ export function isGatewayCheckDue(input: {
     health.gatewayLastSuccessfulAt >= readinessWindowStart;
 
   // One successful verification inside T-6 certifies the gateway for this
-  // reservation. Do not spend more TTLock calls while the gateway remains healthy.
+  // arrival. Do not spend more TTLock calls while the gateway remains healthy.
   if (certifiedHealthyForArrival) {
     return false;
   }
@@ -124,8 +117,9 @@ export function nextGatewaySuccessCheckAt(input: {
   mode: GatewayMonitoringMode;
   checkIn?: Date | null;
 }) {
-  // A successful gateway check is terminal for the current reservation's
-  // readiness window. The next reservation requires its own T-6 certification.
+  // A successful gateway check is terminal for the current readiness window.
+  // The next arrival naturally requires a fresh T-6 certification because its
+  // readiness window starts later than this successful check.
   return null;
 }
 
