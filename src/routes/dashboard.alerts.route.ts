@@ -4,6 +4,7 @@ import { requireAuth } from "../middleware/requireAuth";
 import {
   gatewayMonitoringModeFromPolicy,
   loadGatewayMonitoringPolicies,
+  shouldSurfaceDeviceHealthAlert,
 } from "../services/lockGatewayMonitoring.service";
 
 const prisma = new PrismaClient();
@@ -54,10 +55,7 @@ async function buildAlertsForOrg(orgId: string) {
       gatewayPolicies.get(row.lockId) ?? null
     );
 
-    // A lock explicitly configured without a gateway does not participate in
-    // remote battery/gateway monitoring. Historical DeviceHealth state must
-    // not surface as an actionable host alert for that lock.
-    return mode !== "DISABLED";
+    return shouldSurfaceDeviceHealthAlert(mode);
   });
 
   return {
