@@ -52,33 +52,38 @@ function buildGoogleMapsLink(input: {
   region?: string | null;
   country?: string | null;
 }): { address: string | null; mapsLink: string | null } {
-     const isPuertoRico =
-  String(input.region ?? "").toLowerCase().includes("puerto rico") ||
-  String(input.country ?? "").toLowerCase() === "puerto rico";
+  const isPuertoRico =
+    String(input.region ?? "").toLowerCase().includes("puerto rico") ||
+    String(input.country ?? "").toLowerCase() === "puerto rico";
 
-const formattedAddress = String(input.address1 ?? "").trim();
+  const formattedAddress = String(input.address1 ?? "").trim();
 
-const fallbackAddressParts = [
-  input.city,
-  input.region,
-  isPuertoRico ? null : input.country,
-]
-
+  const fallbackAddressParts = [
+    input.city,
+    input.region,
+    isPuertoRico ? null : input.country,
+  ]
     .filter(Boolean)
     .map((part) => String(part).trim())
     .filter(Boolean);
 
-  const address = formattedAddress ||
-    (fallbackAddressParts.length > 0 ? fallbackAddressParts.join(", ") : null);
+  const address =
+    formattedAddress ||
+    (fallbackAddressParts.length > 0
+      ? fallbackAddressParts.join(", ")
+      : null);
 
-  // 🔧 parsing más tolerante
   const lat =
-    input.latitude === null || input.latitude === undefined || input.latitude === ""
+    input.latitude === null ||
+    input.latitude === undefined ||
+    input.latitude === ""
       ? null
       : Number(input.latitude);
 
   const lng =
-    input.longitude === null || input.longitude === undefined || input.longitude === ""
+    input.longitude === null ||
+    input.longitude === undefined ||
+    input.longitude === ""
       ? null
       : Number(input.longitude);
 
@@ -90,19 +95,19 @@ const fallbackAddressParts = [
     lng! >= -180 &&
     lng! <= 180;
 
-  // ✅ PRIORIDAD: coordenadas SIEMPRE
   if (hasCoords) {
     return {
       address,
-  mapsLink: `https://www.google.com/maps/search/?api=1&query=${lat},${lng}`,
+      mapsLink: `https://www.google.com/maps/search/?api=1&query=${lat},${lng}`,
     };
   }
 
-  // ✅ fallback address (aunque no esté perfecto)
   if (address) {
     return {
       address,
-  mapsLink: `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(address)}`,   
+      mapsLink: `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(
+        address
+      )}`,
     };
   }
 
@@ -112,7 +117,36 @@ const fallbackAddressParts = [
   };
 }
 
-function buildPreCheckinMessage(input: {
+export function shouldIncludePreCheckinVerification(input: {
+  guestToken?: string | null;
+  verificationStatus?: string | null;
+  guestAgreementSnapshot?: unknown;
+}): boolean {
+  const guestAgreementSnapshot =
+    input.guestAgreementSnapshot &&
+    typeof input.guestAgreementSnapshot === "object" &&
+    !Array.isArray(input.guestAgreementSnapshot)
+      ? (input.guestAgreementSnapshot as Record<string, unknown>)
+      : null;
+
+  const identityVerificationRequired =
+    guestAgreementSnapshot?.requiresIdentityVerification !== false;
+
+  const verificationStatus = String(input.verificationStatus ?? "")
+    .trim()
+    .toUpperCase();
+
+  const guestToken = String(input.guestToken ?? "").trim();
+
+  return (
+    Boolean(guestToken) &&
+    identityVerificationRequired &&
+    verificationStatus !== "COMPLETED" &&
+    verificationStatus !== "NOT_REQUIRED"
+  );
+}
+
+export function buildPreCheckinMessage(input: {
   guestName?: string | null;
   propertyName: string;
   checkInTime: string;
@@ -149,11 +183,15 @@ function buildPreCheckinMessage(input: {
     message += isSpanish
       ? `\n\n🛡️ Antes de recibir sus accesos digitales, complete su registro previo al check-in:\n\n${input.verifyLink}`
       : `\n\n🛡️ Before receiving your digital access credentials, please complete your secure pre-check-in verification:\n\n${input.verifyLink}`;
-  }
 
-  message += isSpanish
-    ? "\n\nTu acceso digital será enviado automáticamente luego de completar la verificación.\n\nTe esperamos."
-    : "\n\nYour digital access will be delivered automatically after verification is completed.\n\nWe look forward to your arrival.";
+    message += isSpanish
+      ? "\n\nTu acceso digital será enviado automáticamente luego de completar la verificación.\n\nTe esperamos."
+      : "\n\nYour digital access will be delivered automatically after verification is completed.\n\nWe look forward to your arrival.";
+  } else {
+    message += isSpanish
+      ? "\n\nTe esperamos."
+      : "\n\nWe look forward to your arrival.";
+  }
 
   return message;
 }
@@ -184,6 +222,8 @@ export async function sendPreCheckinSms(
         guestPhone: true,
         preferredLanguage: true,
         guestToken: true,
+        guestAgreementSnapshot: true,
+        verificationStatus: true,
         checkIn: true,
         property: {
           select: {
@@ -208,10 +248,16 @@ export async function sendPreCheckinSms(
 
     const propertyName = r.property?.name ?? "your property";
 
-    const verifyLink = r.guestToken
+    const verificationNeeded = shouldIncludePreCheckinVerification({
+      guestToken: r.guestToken,
+      verificationStatus: r.verificationStatus,
+      guestAgreementSnapshot: r.guestAgreementSnapshot,
+    });
+
+    const verifyLink = verificationNeeded && r.guestToken
       ? buildGuestVerificationUrl(r.guestToken)
       : null;
-    
+
     const { address, mapsLink } = buildGoogleMapsLink({
       latitude: r.property?.latitude,
       longitude: r.property?.longitude,
@@ -223,12 +269,15 @@ export async function sendPreCheckinSms(
 
     const language = resolveGuestLanguage(r.preferredLanguage);
 
-   const checkInTime = new Intl.DateTimeFormat(getGuestIntlLocale(language), {
-  timeZone: r.property?.timezone ?? "UTC",
-  hour: "2-digit",
-  minute: "2-digit",
-  hour12: true,
-}).format(new Date(r.checkIn));
+    const checkInTime = new Intl.DateTimeFormat(
+      getGuestIntlLocale(language),
+      {
+        timeZone: r.property?.timezone ?? "UTC",
+        hour: "2-digit",
+        minute: "2-digit",
+        hour12: true,
+      }
+    ).format(new Date(r.checkIn));
 
     const body = buildPreCheckinMessage({
       guestName: r.guestName,
@@ -293,7 +342,9 @@ export async function sendPreCheckinSms(
             channel: "sms",
             to: r.guestPhone,
             from: process.env.TWILIO_FROM_NUMBER ?? null,
-            body: retryBody ?? "[PRECHECKIN SMS FAILED BEFORE LOG BODY COULD BE PERSISTED]",
+            body:
+              retryBody ??
+              "[PRECHECKIN SMS FAILED BEFORE LOG BODY COULD BE PERSISTED]",
             provider: "twilio",
             providerMessageId: null,
             status: "FAILED",
