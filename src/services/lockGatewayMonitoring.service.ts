@@ -38,9 +38,11 @@ export async function loadGatewayMonitoringPolicies(
     organizationId?: string;
     lockIds: string[];
   }
-) {
+): Promise<Map<string, GatewayPolicyRow>> {
+  const policies = new Map<string, GatewayPolicyRow>();
+
   if (input.lockIds.length === 0) {
-    return new Map<string, GatewayPolicyRow>();
+    return policies;
   }
 
   const rows = await prisma.propertyDevice.findMany({
@@ -62,15 +64,16 @@ export async function loadGatewayMonitoringPolicies(
     },
   });
 
-  return new Map(
-    rows
-      .filter(
-        (row): row is GatewayPolicyRow =>
-          typeof row.externalId === "string" &&
-          row.externalId.length > 0
-      )
-      .map((row) => [row.externalId, row])
-  );
+  for (const row of rows) {
+    if (
+      typeof row.externalId === "string" &&
+      row.externalId.length > 0
+    ) {
+      policies.set(row.externalId, row);
+    }
+  }
+
+  return policies;
 }
 
 export async function setGatewayMonitoringPolicy(
