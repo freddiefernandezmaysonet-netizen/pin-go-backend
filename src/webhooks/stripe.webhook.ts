@@ -14,6 +14,11 @@ import {
   handleGuestIdentityStripeEvent,
   reconcileGuestIdentityVerificationSession,
 } from "../services/guest-identity-webhook.service";
+import {
+  claimStripeFinancialEvent,
+  markStripeFinancialEventFailed,
+  markStripeFinancialEventProcessed,
+} from "../services/stripe-financial-event-ledger.service";
 
 const prisma = new PrismaClient();
 
@@ -41,6 +46,39 @@ export function registerStripeWebhook(app: Express) {
       } catch (err: any) {
         console.error("❌ Stripe webhook signature error:", err?.message ?? err);
         return res.status(400).send(`Webhook Error: ${err?.message ?? "Invalid signature"}`);
+      }
+
+      let ledgerClaim;
+
+      try {
+        ledgerClaim = await claimStripeFinancialEvent(
+          prisma,
+          event
+        );
+      } catch (ledgerError: any) {
+        console.error(
+          "[STRIPE_FINANCIAL_EVENT_LEDGER_CLAIM_FAILED]",
+          {
+            eventId: event.id,
+            eventType: event.type,
+            error:
+              ledgerError?.message ?? ledgerError,
+          }
+        );
+
+        return res.status(500).json({
+          ok: false,
+          error: "stripe_event_ledger_claim_failed",
+        });
+      }
+
+      if (!ledgerClaim.shouldProcess) {
+        return res.json({
+          received: true,
+          type: event.type,
+          duplicate: true,
+          ledgerReason: ledgerClaim.reason,
+        });
       }
 
       try {
@@ -236,12 +274,39 @@ export function registerStripeWebhook(app: Express) {
           }
         }
 
+        if (ledgerClaim.tracked) {
+          await markStripeFinancialEventProcessed(
+            prisma,
+            event.id
+          );
+        }
+
         return res.json({
           received: true,
           type: event.type,
         });
       } catch (err: any) {
         console.error("🔥 Stripe webhook processing error:", err?.message ?? err);
+
+        if (ledgerClaim.tracked) {
+          try {
+            await markStripeFinancialEventFailed(
+              prisma,
+              event.id,
+              err
+            );
+          } catch (ledgerError: any) {
+            console.error(
+              "[STRIPE_FINANCIAL_EVENT_LEDGER_FAILURE_MARK_FAILED]",
+              {
+                eventId: event.id,
+                eventType: event.type,
+                error:
+                  ledgerError?.message ?? ledgerError,
+              }
+            );
+          }
+        }
 
         return res.status(500).json({
           ok: false,
