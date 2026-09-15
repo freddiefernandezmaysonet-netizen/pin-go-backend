@@ -11,19 +11,69 @@ export type NotifyCleanerOfManualReservationCancellationInput = {
   prisma?: PrismaClient;
 };
 
-function formatStayDate(
+function toGsmSafeManualCleanerCancellationText(
+  value: unknown,
+  maxLength: number
+) {
+  return String(value ?? "")
+    .normalize("NFKD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/[“”]/g, '"')
+    .replace(/[‘’]/g, "'")
+    .replace(/[–—]/g, "-")
+    .replace(/[^A-Za-z0-9 .,&'()#*+/:;?%-]/g, "")
+    .replace(/\s+/g, " ")
+    .trim()
+    .slice(0, maxLength);
+}
+
+function formatCompactStayDate(
   value: Date,
   timeZone: string
 ) {
   return new Intl.DateTimeFormat("en-US", {
     timeZone,
-    year: "numeric",
     month: "2-digit",
     day: "2-digit",
     hour: "2-digit",
     minute: "2-digit",
     hour12: true,
-  }).format(value);
+  })
+    .format(value)
+    .replace(",", "")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+export function buildManualCleanerCancellationSmsBody(input: {
+  reservationNumber: string;
+  propertyName: string;
+  checkIn: Date;
+  checkOut: Date;
+  timeZone: string;
+}) {
+  const reservationNumber =
+    toGsmSafeManualCleanerCancellationText(input.reservationNumber, 24) ||
+    "N/A";
+  const propertyName =
+    toGsmSafeManualCleanerCancellationText(input.propertyName, 20) ||
+    "Property";
+  const checkIn = toGsmSafeManualCleanerCancellationText(
+    formatCompactStayDate(input.checkIn, input.timeZone),
+    16
+  );
+  const checkOut = toGsmSafeManualCleanerCancellationText(
+    formatCompactStayDate(input.checkOut, input.timeZone),
+    16
+  );
+
+  return (
+    `Pin&Go clean cancelled/cancelada. ` +
+    `Res: ${reservationNumber}. ` +
+    `Prop: ${propertyName}. ` +
+    `Stay: ${checkIn}-${checkOut}. ` +
+    `No cleaning/no limpieza.`
+  );
 }
 
 export async function notifyCleanerOfManualReservationCancellation({
@@ -173,32 +223,13 @@ export async function notifyCleanerOfManualReservationCancellation({
   const reservationNumber =
     reservation.reservationNumber ??
     reservation.id;
-  const checkIn = formatStayDate(
-    reservation.checkIn,
-    timeZone
-  );
-  const checkOut = formatStayDate(
-    reservation.checkOut,
-    timeZone
-  );
-
-  const spanish =
-    `🧼 Pin&Go — Limpieza cancelada\n` +
-    `La reservación #${reservationNumber} fue cancelada por el anfitrión.\n` +
-    `Propiedad: ${propertyName}\n` +
-    `Entrada: ${checkIn}\n` +
-    `Salida: ${checkOut}\n\n` +
-    `No se requiere la limpieza asociada a esta reservación.`;
-
-  const english =
-    `🧼 Pin&Go — Cleaning cancelled\n` +
-    `Reservation #${reservationNumber} was cancelled by the host.\n` +
-    `Property: ${propertyName}\n` +
-    `Check-in: ${checkIn}\n` +
-    `Check-out: ${checkOut}\n\n` +
-    `The cleaning associated with this reservation is no longer required.`;
-
-  const body = `${spanish}\n\n---\n\n${english}`;
+  const body = buildManualCleanerCancellationSmsBody({
+    reservationNumber: String(reservationNumber),
+    propertyName,
+    checkIn: reservation.checkIn,
+    checkOut: reservation.checkOut,
+    timeZone,
+  });
 
   try {
     const sms = await sendSms(
