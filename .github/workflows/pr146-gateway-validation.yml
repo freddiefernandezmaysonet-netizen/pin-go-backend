@@ -1,0 +1,52 @@
+name: PR146 Gateway Validation
+
+on:
+  push:
+    branches:
+      - agent/gateway-config-immediate-verification
+    paths:
+      - ".github/workflows/pr146-gateway-validation.yml"
+      - "src/routes/dashboard.locks.route.ts"
+      - "src/services/gatewayConfigurationVerification.service.ts"
+      - "src/services/gatewayConfigurationVerification.service.test.ts"
+      - "src/services/lockGatewayMonitoring.service.ts"
+      - "src/services/lockGatewayMonitoring.service.test.ts"
+      - "src/workers/deviceHealth.scheduler.policy.ts"
+      - "src/workers/deviceHealth.scheduler.policy.test.ts"
+      - "src/workers/deviceHealth.hardened.worker.ts"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    name: Gateway policy validation
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Run focused gateway tests
+        run: >-
+          npx tsx --test
+          src/services/gatewayConfigurationVerification.service.test.ts
+          src/services/lockGatewayMonitoring.service.test.ts
+          src/workers/deviceHealth.scheduler.policy.test.ts
+
+      - name: Bundle changed runtime boundaries
+        run: |
+          npx esbuild src/services/gatewayConfigurationVerification.service.ts --bundle --platform=node --packages=external --outfile=/tmp/gatewayConfigurationVerification.js
+          npx esbuild src/routes/dashboard.locks.route.ts --bundle --platform=node --packages=external --outfile=/tmp/dashboard.locks.route.js
+          npx esbuild src/workers/deviceHealth.hardened.worker.ts --bundle --platform=node --packages=external --outfile=/tmp/deviceHealth.hardened.worker.js
