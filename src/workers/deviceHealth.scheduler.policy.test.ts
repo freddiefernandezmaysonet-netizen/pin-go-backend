@@ -88,6 +88,22 @@ test("gateway failure nextCheckAt remains authoritative before retry", () => {
   );
 });
 
+test("gateway failure retry remains due without a reservation", () => {
+  assert.equal(
+    isGatewayCheckDue({
+      now: NOW,
+      mode: "ENABLED",
+      health: health({
+        gatewayConnected: false,
+        gatewayNextCheckAt: new Date("2026-09-15T01:59:59.000Z"),
+        gatewayDisconnectedSince: new Date("2026-09-14T18:00:00.000Z"),
+      }),
+      checkIn: null,
+    }),
+    true
+  );
+});
+
 test("healthy enabled gateway stays idle with no reservation inside 24 hours", () => {
   assert.equal(
     isGatewayCheckDue({
