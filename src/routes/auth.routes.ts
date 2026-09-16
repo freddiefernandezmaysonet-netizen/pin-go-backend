@@ -28,10 +28,12 @@ import {
   signSessionBoundAuthToken,
   verifySessionBoundAuthToken,
 } from "../auth/session-bound-token.js";
+import { revokeBoundSessionOnLogout } from "../auth/session-binding-shadow.js";
+import { touchBoundSessionHumanActivity } from "../auth/session-enforcement-runtime.js";
 import {
-  observeSessionBindingShadow,
-  revokeBoundSessionOnLogout,
-} from "../auth/session-binding-shadow.js";
+  requireAuth,
+  type AuthenticatedUser,
+} from "../middleware/requireAuth.js";
 
 const prisma = new PrismaClient();
 export const authRouter = Router();
@@ -273,104 +275,62 @@ authRouter.post("/auth/logout", async (req, res) => {
 // =======================
 // ME (SESSION CHECK)
 // =======================
-authRouter.get("/auth/me", async (req, res) => {
+authRouter.get("/auth/me", requireAuth, async (req, res) => {
+  const user = (req as any).user as AuthenticatedUser;
+
+  return res.json({
+    user: {
+      id: user.id,
+      email: user.email,
+      orgId: user.orgId,
+      role: user.role,
+      organizationName: user.organizationName ?? null,
+      organizationSlug: user.organizationSlug ?? null,
+    },
+  });
+});
+
+// =======================
+// HUMAN SESSION ACTIVITY
+// =======================
+authRouter.post("/auth/session/activity", requireAuth, async (req, res) => {
+  const user = (req as any).user as AuthenticatedUser;
+
+  if (!user.sessionId || typeof user.tokenVersion !== "number") {
+    return res.json({
+      ok: true,
+      active: true,
+      touched: false,
+      bound: false,
+      reason: "UNBOUND_LEGACY",
+    });
+  }
+
   try {
-    const token = extractTokenFromRequest(req);
-
-    if (!token) {
-      return res.status(401).json({ error: "UNAUTHENTICATED" });
-    }
-
-    let payload: ReturnType<typeof verifySessionBoundAuthToken>;
-
-    try {
-      payload = verifySessionBoundAuthToken(token);
-    } catch {
-      res.setHeader(
-        "Set-Cookie",
-        buildClearAuthCookie({
-          requestOrigin: req.get("origin"),
-        })
-      );
-      return res.status(401).json({ error: "INVALID_TOKEN" });
-    }
-
-    const user = await prisma.dashboardUser.findUnique({
-      where: { id: payload.sub },
-      select: {
-        id: true,
-        organizationId: true,
-        email: true,
-        role: true,
-        isActive: true,
-        tokenVersion: true,
-        organization: {
-          select: {
-            name: true,
-            slug: true,
-          },
-        },
-      },
+    const activity = await touchBoundSessionHumanActivity(prisma as any, {
+      sessionId: user.sessionId,
+      userId: user.id,
+      organizationId: user.orgId,
+      tokenVersion: user.tokenVersion,
     });
 
-    if (!user) {
-      res.setHeader(
-        "Set-Cookie",
-        buildClearAuthCookie({
-          requestOrigin: req.get("origin"),
-        })
-      );
-      return res.status(401).json({ error: "USER_NOT_FOUND" });
-    }
-
-    if (!user.isActive) {
-      return res.status(403).json({ error: "USER_DISABLED" });
-    }
-
-    if (user.tokenVersion !== payload.tokenVersion) {
-      res.setHeader(
-        "Set-Cookie",
-        buildClearAuthCookie({
-          requestOrigin: req.get("origin"),
-        })
-      );
-      return res.status(401).json({ error: "SESSION_EXPIRED" });
-    }
-
-    try {
-      const observation = await observeSessionBindingShadow(prisma as any, {
-        sessionId: payload.sid,
-        userId: payload.sub,
-        organizationId: payload.orgId,
-        tokenVersion: payload.tokenVersion,
+    if (!activity.valid) {
+      console.warn("[auth/session/activity][e8b-shadow] NOT_TOUCHED", {
+        sessionId: activity.sessionId,
+        reason: activity.reason,
       });
-
-      if (observation.bound && !observation.valid) {
-        console.warn("[auth/me][session-e8a-shadow] WOULD_DENY", {
-          sessionId: observation.sessionId,
-          reason: observation.reason,
-        });
-      }
-    } catch (shadowError) {
-      console.error(
-        "[auth/me][session-e8a-shadow] OBSERVATION_FAILED",
-        shadowError
-      );
     }
 
     return res.json({
-      user: {
-        id: user.id,
-        email: user.email,
-        orgId: user.organizationId,
-        role: user.role,
-        organizationName: user.organization?.name ?? null,
-        organizationSlug: user.organization?.slug ?? null,
-      },
+      ok: true,
+      active: activity.valid,
+      touched: activity.touched,
+      bound: activity.bound,
+      reason: activity.reason,
     });
-  } catch (e) {
-    console.error("[auth/me] ERROR", e);
-    return res.status(401).json({ error: "UNAUTHENTICATED" });
+  } catch (activityError) {
+    console.error("[auth/session/activity][e8b] VALIDATION_UNAVAILABLE", activityError);
+    return res.status(503).json({ error: "SESSION_VALIDATION_UNAVAILABLE" });
   }
 });
 
