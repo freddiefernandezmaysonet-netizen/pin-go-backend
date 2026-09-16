@@ -5,7 +5,11 @@ import {
   createOtpMaterial,
   otpExpiresAt,
 } from "./mfa-otp.js";
-import { deliverMfaEmailOtp } from "./mfa-email-otp-delivery.js";
+import {
+  deliverMfaEmailOtp,
+  type MfaEmailDeliveryEnvironment,
+  type MfaEmailSender,
+} from "./mfa-email-otp-delivery.js";
 import { createLoginEmailMfaChallenge } from "./mfa-login-challenge.js";
 import { normalizeMfaEmail } from "./mfa-email-only-policy.js";
 
@@ -36,6 +40,11 @@ export type E6CanaryFlowClient = {
   };
 };
 
+export type E6DeliveryOptions = {
+  env?: MfaEmailDeliveryEnvironment;
+  sender?: MfaEmailSender;
+};
+
 export type BeginCanaryResult = {
   challengeToken: string;
   expiresAt: Date;
@@ -60,7 +69,8 @@ export async function beginE6EmailCanary(
     email: string;
     pepper: string;
     now?: Date;
-  }
+  },
+  deliveryOptions: E6DeliveryOptions = {}
 ): Promise<BeginCanaryResult> {
   const now = input.now ?? new Date();
   const created = await createLoginEmailMfaChallenge(client, {
@@ -71,11 +81,14 @@ export async function beginE6EmailCanary(
     now,
   });
 
-  const delivery = await deliverMfaEmailOtp({
-    destination: input.email,
-    code: created.code,
-    expiresInMinutes: 5,
-  });
+  const delivery = await deliverMfaEmailOtp(
+    {
+      destination: input.email,
+      code: created.code,
+      expiresInMinutes: 5,
+    },
+    deliveryOptions
+  );
 
   if (!delivery.delivered) {
     throw new Error("MFA_CANARY_EMAIL_NOT_DELIVERED");
@@ -122,7 +135,8 @@ export async function resendE6EmailCanary(
     organizationId: string;
     pepper: string;
     now?: Date;
-  }
+  },
+  deliveryOptions: E6DeliveryOptions = {}
 ): Promise<ResendCanaryResult> {
   const now = input.now ?? new Date();
   const token = String(input.challengeToken ?? "").trim();
@@ -184,11 +198,14 @@ export async function resendE6EmailCanary(
   });
   const expiresAt = otpExpiresAt(now);
 
-  const delivery = await deliverMfaEmailOtp({
-    destination,
-    code: material.code,
-    expiresInMinutes: 5,
-  });
+  const delivery = await deliverMfaEmailOtp(
+    {
+      destination,
+      code: material.code,
+      expiresInMinutes: 5,
+    },
+    deliveryOptions
+  );
   if (!delivery.delivered) throw new Error("MFA_CANARY_EMAIL_NOT_DELIVERED");
 
   await client.mfaChallenge.update({
