@@ -7,11 +7,13 @@ import { prisma } from "../lib/prisma";
 import { verifySessionBoundAuthToken } from "../auth/session-bound-token.js";
 import { guardAuthenticatedSession } from "../auth/session-request-guard.js";
 
-type AuthenticatedUser = {
+export type AuthenticatedUser = {
   id: string;
   orgId: string;
   email?: string;
   role?: string;
+  organizationName?: string | null;
+  organizationSlug?: string | null;
   sessionId?: string;
   tokenVersion?: number;
 };
@@ -92,6 +94,8 @@ export async function requireAuth(
     orgId: decision.user.organizationId,
     email: decision.user.email,
     role: decision.user.role,
+    organizationName: decision.user.organization?.name ?? null,
+    organizationSlug: decision.user.organization?.slug ?? null,
     sessionId: decision.sessionId ?? undefined,
     tokenVersion: decision.user.tokenVersion,
   } satisfies AuthenticatedUser;
