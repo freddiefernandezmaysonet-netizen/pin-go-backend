@@ -1,6 +1,7 @@
 import { PrismaClient } from "@prisma/client";
 import { Router } from "express";
 import { requireAuth } from "../middleware/requireAuth.js";
+import { createConnectDashboardLoginLink } from "../services/stripe-connect-dashboard-link.service.js";
 import {
   createConnectOnboardingLink,
   getOrganizationPayoutStatus,
@@ -204,6 +205,27 @@ dashboardPayoutsRouter.post(
       return res.json({
         ok: true,
         onboardingLink,
+      });
+    } catch (error: any) {
+      return sendRouteError(res, error);
+    }
+  }
+);
+
+dashboardPayoutsRouter.post(
+  "/api/dashboard/payouts/login-link",
+  requireAuth,
+  async (req, res) => {
+    try {
+      const organizationId = getOrgIdFromRequest(req);
+
+      const loginLink = await createConnectDashboardLoginLink(
+        organizationId
+      );
+
+      return res.json({
+        ok: true,
+        loginLink,
       });
     } catch (error: any) {
       return sendRouteError(res, error);
