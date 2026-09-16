@@ -1,6 +1,7 @@
 import Stripe from "stripe";
 import {
   buildDirectBookingCheckoutStripeContext,
+  directBookingDirectChargesAllowedForConnectedAccount,
   directBookingDirectChargesEnabled,
 } from "../services/direct-booking-stripe-charge-mode.service.js";
 
@@ -22,6 +23,9 @@ console.log("STRIPE KEY CHECK:", {
 const stripe = new Stripe(key, {
   apiVersion: "2023-10-16",
 });
+
+const CONNECT_CANARY_IGNORED_EVENT_TYPE =
+  "pin_go.connect_canary_ignored";
 
 const originalCheckoutSessionCreate =
   stripe.checkout.sessions.create.bind(stripe.checkout.sessions);
@@ -96,7 +100,31 @@ stripe.webhooks.constructEvent = ((...args: any[]) => {
     const connectArgs = [...args];
     connectArgs[2] = connectWebhookSecret;
 
-    return (originalConstructEvent as any)(...connectArgs);
+    const connectEvent = (originalConstructEvent as any)(
+      ...connectArgs
+    ) as Stripe.Event;
+    const connectedAccountId = String(
+      (connectEvent as Stripe.Event & { account?: string }).account ?? ""
+    ).trim();
+
+    if (
+      !directBookingDirectChargesAllowedForConnectedAccount(
+        connectedAccountId
+      )
+    ) {
+      console.warn("[STRIPE_CONNECT_CANARY_EVENT_IGNORED]", {
+        eventId: connectEvent.id,
+        eventType: connectEvent.type,
+        connectedAccountId: connectedAccountId || null,
+      });
+
+      return {
+        ...connectEvent,
+        type: CONNECT_CANARY_IGNORED_EVENT_TYPE,
+      } as unknown as Stripe.Event;
+    }
+
+    return connectEvent;
   }
 }) as typeof stripe.webhooks.constructEvent;
 
