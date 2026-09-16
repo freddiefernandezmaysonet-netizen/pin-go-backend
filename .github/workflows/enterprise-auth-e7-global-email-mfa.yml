@@ -90,9 +90,16 @@ jobs:
           test -z "$(git diff --name-only origin/main...HEAD -- prisma/migrations)"
           test -z "$(git diff --name-only origin/main...HEAD -- src/lib/auth.ts src/server.ts src/controllers/password.controller.ts)"
           if test -n "$(git diff --name-only origin/main...HEAD -- src/middleware/requireAuth.ts)"; then
-            grep -q 'observeSessionBindingShadow' src/middleware/requireAuth.ts
-            grep -q 'WOULD_DENY' src/middleware/requireAuth.ts
-            ! grep -q 'SESSION_EXPIRED' src/middleware/requireAuth.ts
+            if grep -q 'guardAuthenticatedSession' src/middleware/requireAuth.ts; then
+              grep -q 'WOULD_DENY' src/middleware/requireAuth.ts
+              grep -q 'SESSION_EXPIRED' src/middleware/requireAuth.ts
+              grep -q 'SESSION_REAUTH_REQUIRED' src/middleware/requireAuth.ts
+              grep -q 'SESSION_VALIDATION_UNAVAILABLE' src/middleware/requireAuth.ts
+            else
+              grep -q 'observeSessionBindingShadow' src/middleware/requireAuth.ts
+              grep -q 'WOULD_DENY' src/middleware/requireAuth.ts
+              ! grep -q 'SESSION_EXPIRED' src/middleware/requireAuth.ts
+            fi
           fi
           ! grep -R "sendGuestSms\|Twilio\|factorType: \"SMS\"" src/auth/mfa-global-runtime.ts src/auth/mfa-login.routes.ts src/routes/auth.routes.ts src/routes/public.signup.success.routes.ts
           grep -q 'configuredMode === "ENFORCE"' src/auth/mfa-global-runtime.ts
