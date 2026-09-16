@@ -31,18 +31,19 @@ stripe.checkout.sessions.create = (async (
   options?: Stripe.RequestOptions
 ) => {
   const flow = String(params.metadata?.flow ?? "").trim();
-  const isDirectBookingFlow =
-    flow === "direct_booking" ||
-    flow === "direct_booking_reservation_modification";
 
-  if (!isDirectBookingFlow || !directBookingDirectChargesEnabled()) {
+  // Direct Charges V1 is intentionally fenced to the initial Direct Booking
+  // checkout. Reservation modifications remain on the certified legacy path
+  // until their retrieve/payment/refund lifecycle is explicitly migrated.
+  if (
+    flow !== "direct_booking" ||
+    !directBookingDirectChargesEnabled()
+  ) {
     return originalCheckoutSessionCreate(params, options);
   }
 
   const connectedAccountId = String(
-    params.metadata?.stripeConnectedAccountId ??
-      params.metadata?.connectedAccountId ??
-      ""
+    params.metadata?.stripeConnectedAccountId ?? ""
   ).trim();
 
   const checkoutContext = buildDirectBookingCheckoutStripeContext({
