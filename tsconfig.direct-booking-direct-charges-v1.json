@@ -1,0 +1,11 @@
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "noEmit": true,
+    "types": ["node"]
+  },
+  "include": [
+    "src/services/direct-booking-stripe-charge-mode.service.ts",
+    "src/services/direct-booking-stripe-charge-mode.service.test.ts"
+  ]
+}
