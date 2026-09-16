@@ -7,6 +7,7 @@ import {
 } from "@prisma/client";
 import { formatInTimeZone } from "date-fns-tz";
 import stripe from "../billing/stripe";
+import { createDirectBookingStripeRefund } from "./direct-booking-stripe-refund.service.js";
 import { reconcileReservation } from "./reservation.reconcile.service";
 import { persistChannexAriReservationIntent } from "../pms/outbound/channex-ari-reservation-producer.service";
 
@@ -309,8 +310,10 @@ export async function refundDirectBookingReservation({
   const refundIdempotencyKey = `direct-booking-refund:${reservation.id}:${resolvedRefundAmountCents}`;
 
   try {
-    const refund = await stripe.refunds.create(
-      {
+    const stripeRefundResult = await createDirectBookingStripeRefund({
+      stripeClient: stripe,
+      connectedAccountId: reservation.stripeConnectedAccountId,
+      params: {
         payment_intent: reservation.stripePaymentIntentId,
         amount: resolvedRefundAmountCents,
         reverse_transfer: true,
@@ -330,10 +333,11 @@ export async function refundDirectBookingReservation({
           refundPercent: String(effectiveRefundPercent),
         },
       },
-      {
+      options: {
         idempotencyKey: refundIdempotencyKey,
-      }
-    );
+      },
+    });
+    const refund = stripeRefundResult.refund;
 
     const refundedAt = new Date();
 
@@ -347,7 +351,9 @@ export async function refundDirectBookingReservation({
       refundMode: effectiveRefundMode,
       refundPercent: effectiveRefundPercent,
       isFullRefund,
-      reverseTransfer: true,
+      reverseTransfer: stripeRefundResult.reverseTransfer,
+      stripeChargeMode: stripeRefundResult.chargeMode,
+      stripeAccount: stripeRefundResult.stripeAccount,
       refundApplicationFee,
       refundedAt: refundedAt.toISOString(),
       requestedByUserId,
