@@ -8,14 +8,19 @@ on:
       - ".github/workflows/enterprise-auth-e6-email-otp-canary.yml"
       - ".github/workflows/enterprise-auth-e7-global-email-mfa.yml"
       - ".github/workflows/enterprise-auth-e8a-session-binding-shadow.yml"
+      - ".github/workflows/enterprise-auth-e8b-session-enforcement.yml"
       - "src/auth/session-bound-token.ts"
       - "src/auth/session-binding-shadow.ts"
+      - "src/auth/session-enforcement-runtime.ts"
+      - "src/auth/session-request-guard.ts"
       - "src/auth/enterprise-auth-e7.test.ts"
       - "src/auth/enterprise-auth-e8a.test.ts"
+      - "src/auth/enterprise-auth-e8b.test.ts"
       - "src/auth/mfa-login.routes.ts"
       - "src/middleware/requireAuth.ts"
       - "src/routes/auth.routes.ts"
       - "tsconfig.enterprise-auth-e8a.json"
+      - "tsconfig.enterprise-auth-e8b.json"
   workflow_dispatch:
 
 permissions:
@@ -99,16 +104,23 @@ jobs:
           test -z "$(git diff --name-only origin/main...HEAD -- prisma/migrations)"
           test -z "$(git diff --name-only origin/main...HEAD -- prisma/auth.prisma src/lib/auth.ts src/lib/prisma.ts src/server.ts src/controllers/password.controller.ts src/routes/public.signup.success.routes.ts)"
 
-          allowed='^(\.github/workflows/enterprise-auth-e5-login-runtime-shadow\.yml|\.github/workflows/enterprise-auth-e6-email-otp-canary\.yml|\.github/workflows/enterprise-auth-e7-global-email-mfa\.yml|\.github/workflows/enterprise-auth-e8a-session-binding-shadow\.yml|src/auth/session-bound-token\.ts|src/auth/session-binding-shadow\.ts|src/auth/enterprise-auth-e7\.test\.ts|src/auth/enterprise-auth-e8a\.test\.ts|src/auth/mfa-login\.routes\.ts|src/middleware/requireAuth\.ts|src/routes/auth\.routes\.ts|tsconfig\.enterprise-auth-e8a\.json)$'
+          allowed='^(\.github/workflows/enterprise-auth-e5-login-runtime-shadow\.yml|\.github/workflows/enterprise-auth-e6-email-otp-canary\.yml|\.github/workflows/enterprise-auth-e7-global-email-mfa\.yml|\.github/workflows/enterprise-auth-e8a-session-binding-shadow\.yml|\.github/workflows/enterprise-auth-e8b-session-enforcement\.yml|src/auth/session-bound-token\.ts|src/auth/session-binding-shadow\.ts|src/auth/session-enforcement-runtime\.ts|src/auth/session-request-guard\.ts|src/auth/enterprise-auth-e7\.test\.ts|src/auth/enterprise-auth-e8a\.test\.ts|src/auth/enterprise-auth-e8b\.test\.ts|src/auth/mfa-login\.routes\.ts|src/middleware/requireAuth\.ts|src/routes/auth\.routes\.ts|tsconfig\.enterprise-auth-e8a\.json|tsconfig\.enterprise-auth-e8b\.json)$'
           unexpected="$(git diff --name-only origin/main...HEAD | grep -Ev "$allowed" || true)"
           test -z "$unexpected"
 
           grep -q 'signSessionBoundAuthToken' src/routes/auth.routes.ts
           grep -q 'signSessionBoundAuthToken' src/auth/mfa-login.routes.ts
           grep -q 'verifySessionBoundAuthToken' src/middleware/requireAuth.ts
-          grep -q 'observeSessionBindingShadow' src/middleware/requireAuth.ts
-          grep -q 'WOULD_DENY' src/middleware/requireAuth.ts
-          ! grep -q 'SESSION_EXPIRED' src/middleware/requireAuth.ts
+          if grep -q 'guardAuthenticatedSession' src/middleware/requireAuth.ts; then
+            grep -q 'WOULD_DENY' src/middleware/requireAuth.ts
+            grep -q 'SESSION_EXPIRED' src/auth/session-request-guard.ts
+            grep -q 'SESSION_REAUTH_REQUIRED' src/auth/session-request-guard.ts
+            grep -q 'SESSION_VALIDATION_UNAVAILABLE' src/auth/session-request-guard.ts
+          else
+            grep -q 'observeSessionBindingShadow' src/middleware/requireAuth.ts
+            grep -q 'WOULD_DENY' src/middleware/requireAuth.ts
+            ! grep -q 'SESSION_EXPIRED' src/middleware/requireAuth.ts
+          fi
           grep -q 'revokeBoundSessionOnLogout' src/routes/auth.routes.ts
           grep -q 'AUTH_SESSION_REVOKED' src/auth/session-binding-shadow.ts
           grep -q 'SESSION_ACTIVITY_TOUCH_INTERVAL_MS = 5 \* 60 \* 1000' src/auth/session-binding-shadow.ts

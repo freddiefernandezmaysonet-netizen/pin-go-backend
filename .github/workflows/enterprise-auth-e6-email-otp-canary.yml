@@ -94,9 +94,16 @@ jobs:
           test -z "$(git diff --name-only origin/main...HEAD -- prisma/migrations)"
           test -z "$(git diff --name-only origin/main...HEAD -- src/lib/auth.ts src/server.ts)"
           if test -n "$(git diff --name-only origin/main...HEAD -- src/middleware/requireAuth.ts)"; then
-            grep -q 'observeSessionBindingShadow' src/middleware/requireAuth.ts
-            grep -q 'WOULD_DENY' src/middleware/requireAuth.ts
-            ! grep -q 'SESSION_EXPIRED' src/middleware/requireAuth.ts
+            if grep -q 'guardAuthenticatedSession' src/middleware/requireAuth.ts; then
+              grep -q 'WOULD_DENY' src/middleware/requireAuth.ts
+              grep -q 'SESSION_EXPIRED' src/auth/session-request-guard.ts
+              grep -q 'SESSION_REAUTH_REQUIRED' src/auth/session-request-guard.ts
+              grep -q 'SESSION_VALIDATION_UNAVAILABLE' src/auth/session-request-guard.ts
+            else
+              grep -q 'observeSessionBindingShadow' src/middleware/requireAuth.ts
+              grep -q 'WOULD_DENY' src/middleware/requireAuth.ts
+              ! grep -q 'SESSION_EXPIRED' src/middleware/requireAuth.ts
+            fi
           fi
           ! grep -R "sendGuestSms\|Twilio\|factorType: \"SMS\"" src/auth/mfa-canary-runtime.ts src/auth/mfa-canary-flow.ts src/auth/mfa-login.routes.ts src/routes/auth.routes.ts
           grep -q 'normalized === "ENFORCE"' src/auth/mfa-canary-runtime.ts

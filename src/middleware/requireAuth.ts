@@ -1,75 +1,113 @@
 import type { Request, Response, NextFunction } from "express";
-import { extractTokenFromRequest } from "../lib/auth";
+import {
+  buildClearAuthCookie,
+  extractTokenFromRequest,
+} from "../lib/auth";
 import { prisma } from "../lib/prisma";
 import { verifySessionBoundAuthToken } from "../auth/session-bound-token.js";
-import { observeSessionBindingShadow } from "../auth/session-binding-shadow.js";
+import { guardAuthenticatedSession } from "../auth/session-request-guard.js";
 
-type AuthenticatedUser = {
+export type AuthenticatedUser = {
   id: string;
   orgId: string;
   email?: string;
   role?: string;
+  organizationName?: string | null;
+  organizationSlug?: string | null;
   sessionId?: string;
+  tokenVersion?: number;
 };
+
+function clearAuthCookie(req: Request, res: Response) {
+  res.setHeader(
+    "Set-Cookie",
+    buildClearAuthCookie({
+      requestOrigin: req.get("origin") ?? null,
+    })
+  );
+}
 
 export async function requireAuth(
   req: Request,
   res: Response,
   next: NextFunction
 ) {
-  // 1) Compatibilidad con el modo actual de desarrollo:
-  // si server.ts sigue inyectando req.user manualmente, esto continúa funcionando.
   const existingUser = (req as any).user as AuthenticatedUser | undefined;
+  const nonProduction = process.env.NODE_ENV !== "production";
+  const allowInjectedCiAuth = nonProduction && process.env.CI === "true";
+  const allowInjectedDevAuth =
+    nonProduction && process.env.ENABLE_DEV_AUTH === "true";
 
-  if (existingUser?.id && existingUser?.orgId) {
+  if (
+    (allowInjectedCiAuth || allowInjectedDevAuth) &&
+    existingUser?.id &&
+    existingUser?.orgId
+  ) {
     return next();
   }
 
-  // 2) Auth real por token (Bearer o cookie)
-  try {
-    const token = extractTokenFromRequest(req);
-
-    if (!token) {
-      return res.status(401).json({ error: "UNAUTHENTICATED" });
-    }
-
-    const payload = verifySessionBoundAuthToken(token);
-
-    (req as any).user = {
-      id: payload.sub,
-      orgId: payload.orgId,
-      email: payload.email,
-      role: payload.role,
-      sessionId: payload.sid,
-    } satisfies AuthenticatedUser;
-
-    if (!(req as any).user?.orgId) {
-      return res.status(403).json({ error: "NO_ORG" });
-    }
-
-    try {
-      const observation = await observeSessionBindingShadow(prisma as any, {
-        sessionId: payload.sid,
-        userId: payload.sub,
-        organizationId: payload.orgId,
-        tokenVersion: payload.tokenVersion,
-      });
-
-      if (observation.bound && !observation.valid) {
-        console.warn("[auth/session-e8a-shadow] WOULD_DENY", {
-          sessionId: observation.sessionId,
-          reason: observation.reason,
-        });
-      }
-    } catch (shadowError) {
-      console.error(
-        "[auth/session-e8a-shadow] OBSERVATION_FAILED",
-        shadowError
-      );
-    }
-
-    return next();
-  } catch {
+  const token = extractTokenFromRequest(req);
+  if (!token) {
     return res.status(401).json({ error: "UNAUTHENTICATED" });
   }
+
+  let payload: ReturnType<typeof verifySessionBoundAuthToken>;
+  try {
+    payload = verifySessionBoundAuthToken(token);
+  } catch {
+    clearAuthCookie(req, res);
+    return res.status(401).json({ error: "UNAUTHENTICATED" });
+  }
+
+  const decision = await guardAuthenticatedSession(prisma as any, {
+    userId: payload.sub,
+    organizationId: payload.orgId,
+    tokenVersion: payload.tokenVersion,
+    sessionId: payload.sid,
+    userAgent: req.get("user-agent") ?? null,
+  });
+
+  if (decision.kind === "UNAVAILABLE") {
+    console.error("[auth/session-e8b] VALIDATION_UNAVAILABLE", {
+      mode: decision.mode,
+    });
+    return res.status(503).json({ error: decision.error });
+  }
+
+  if (decision.kind === "DENY") {
+    if (decision.clearCookie) {
+      clearAuthCookie(req, res);
+    }
+
+    console.warn("[auth/session-e8b] DENY", {
+      mode: decision.mode,
+      reason: decision.reason,
+      error: decision.error,
+    });
+    return res.status(decision.status).json({ error: decision.error });
+  }
+
+  if (decision.shadowReason) {
+    console.warn("[auth/session-e8b-shadow] WOULD_DENY", {
+      sessionId: decision.sessionId,
+      reason: decision.shadowReason,
+    });
+  }
+
+  (req as any).user = {
+    id: decision.user.id,
+    orgId: decision.user.organizationId,
+    email: decision.user.email,
+    role: decision.user.role,
+    organizationName: decision.user.organization?.name ?? null,
+    organizationSlug: decision.user.organization?.slug ?? null,
+    sessionId: decision.sessionId ?? undefined,
+    tokenVersion: decision.user.tokenVersion,
+  } satisfies AuthenticatedUser;
+
+  if (!(req as any).user?.orgId) {
+    return res.status(403).json({ error: "NO_ORG" });
+  }
+
+  return next();
 }
