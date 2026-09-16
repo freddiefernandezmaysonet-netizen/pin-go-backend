@@ -90,9 +90,9 @@ jobs:
           if test -n "$(git diff --name-only origin/main...HEAD -- src/middleware/requireAuth.ts)"; then
             if grep -q 'guardAuthenticatedSession' src/middleware/requireAuth.ts; then
               grep -q 'WOULD_DENY' src/middleware/requireAuth.ts
-              grep -q 'SESSION_EXPIRED' src/middleware/requireAuth.ts
-              grep -q 'SESSION_REAUTH_REQUIRED' src/middleware/requireAuth.ts
-              grep -q 'SESSION_VALIDATION_UNAVAILABLE' src/middleware/requireAuth.ts
+              grep -q 'SESSION_EXPIRED' src/auth/session-request-guard.ts
+              grep -q 'SESSION_REAUTH_REQUIRED' src/auth/session-request-guard.ts
+              grep -q 'SESSION_VALIDATION_UNAVAILABLE' src/auth/session-request-guard.ts
             else
               grep -q 'observeSessionBindingShadow' src/middleware/requireAuth.ts
               grep -q 'WOULD_DENY' src/middleware/requireAuth.ts
