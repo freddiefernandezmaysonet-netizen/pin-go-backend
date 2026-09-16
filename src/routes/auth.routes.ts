@@ -18,11 +18,12 @@ import {
 import { mfaLoginRouter } from "../auth/mfa-login.routes.js";
 import { observeE5ShadowLogin } from "../auth/mfa-login-runtime.js";
 import { beginE6EmailCanary } from "../auth/mfa-canary-flow.js";
+import { findValidE6TrustedDevice } from "../auth/mfa-canary-runtime.js";
 import {
-  evaluateE6EffectiveMode,
-  findValidE6TrustedDevice,
-  type E6Environment,
-} from "../auth/mfa-canary-runtime.js";
+  evaluateE7EffectiveMode,
+  requiresE7MfaChallenge,
+  type E7Environment,
+} from "../auth/mfa-global-runtime.js";
 import { createAuthSession } from "../auth/trusted-device-session.persistence.js";
 import { extractTrustedDeviceToken } from "../auth/trusted-device-cookie.js";
 
@@ -30,7 +31,7 @@ const prisma = new PrismaClient();
 export const authRouter = Router();
 authRouter.use(mfaLoginRouter);
 
-function readE6Environment(): E6Environment {
+function readE6Environment(): E7Environment {
   return {
     PINGO_MFA_MODE: process.env.PINGO_MFA_MODE,
     PINGO_MFA_CANARY_USER_IDS: process.env.PINGO_MFA_CANARY_USER_IDS,
@@ -88,10 +89,13 @@ authRouter.post("/auth/login", async (req, res) => {
 
     const trustedDeviceToken = extractTrustedDeviceToken(req);
     const e6Environment = readE6Environment();
-    const e6Runtime = evaluateE6EffectiveMode(user.id, e6Environment);
+    const e6Runtime = evaluateE7EffectiveMode(user.id, e6Environment);
 
-    if (e6Runtime.reason === "ENFORCE_BLOCKED") {
-      console.warn("[auth/login][mfa-e6] ENFORCE_BLOCKED_TO_OFF");
+    if (e6Runtime.mode === "ENFORCE" && !e6Runtime.ready) {
+      console.error("[auth/login][mfa-e7-enforce] CONFIGURATION_BLOCKED", {
+        reason: e6Runtime.reason,
+      });
+      return res.status(503).json({ error: "MFA_NOT_CONFIGURED" });
     }
 
     const observeShadow = async () => {
@@ -112,7 +116,7 @@ authRouter.post("/auth/login", async (req, res) => {
       }
     };
 
-    if (e6Runtime.mode === "CANARY") {
+    if (requiresE7MfaChallenge(e6Runtime)) {
       try {
         const trustedDevice = await findValidE6TrustedDevice(prisma as any, {
           userId: user.id,
@@ -135,7 +139,9 @@ authRouter.post("/auth/login", async (req, res) => {
               type: "AUTH_SESSION_CREATED",
               userAgent: req.get("user-agent") ?? null,
               metadata: {
-                mode: "CANARY",
+                ...(e6Runtime.mode === "CANARY"
+                  ? { mode: "CANARY" }
+                  : { mode: "ENFORCE" }),
                 sessionId: session.sessionId,
                 trustedDeviceId: trustedDevice.id,
                 trustedDeviceValid: true,
@@ -160,10 +166,18 @@ authRouter.post("/auth/login", async (req, res) => {
             resendAfterSeconds: 60,
           });
         }
-      } catch (canaryError) {
+      } catch (mfaError) {
+        if (e6Runtime.failClosed) {
+          console.error(
+            "[auth/login][mfa-e7-enforce] FAIL_CLOSED",
+            mfaError
+          );
+          return res.status(503).json({ error: "MFA_DELIVERY_FAILED" });
+        }
+
         console.error(
           "[auth/login][mfa-e6-canary] FAIL_OPEN_TO_LEGACY",
-          canaryError
+          mfaError
         );
         await observeShadow();
       }
@@ -184,7 +198,6 @@ authRouter.post("/auth/login", async (req, res) => {
       data: { lastLoginAt: new Date() },
     });
 
-    // ✅ Cookie PRODUCTION READY
     res.setHeader(
       "Set-Cookie",
       buildAuthCookie(token, {
@@ -213,7 +226,6 @@ authRouter.post("/auth/login", async (req, res) => {
 // LOGOUT
 // =======================
 authRouter.post("/auth/logout", async (req, res) => {
-  // ✅ Limpieza correcta de cookie
   res.setHeader(
     "Set-Cookie",
     buildClearAuthCookie({
@@ -397,24 +409,13 @@ authRouter.post("/api/auth/register-organization", async (req, res) => {
 
     const createdUser = created.dashboardUsers[0];
 
-    const token = signAuthToken({
-      sub: createdUser.id,
-      orgId: createdUser.organizationId,
-      email: createdUser.email,
-      role: createdUser.role,
-      tokenVersion: createdUser.tokenVersion,
-    });
-
-    // ✅ Cookie consistente con login
-    res.setHeader(
-      "Set-Cookie",
-      buildAuthCookie(token, {
-        requestOrigin: req.get("origin"),
-      })
-    );
+    if (!createdUser) {
+      throw new Error("REGISTERED_USER_MISSING");
+    }
 
     return res.status(201).json({
       ok: true,
+      requiresLogin: true,
       organization: {
         id: created.id,
         name: created.name,
