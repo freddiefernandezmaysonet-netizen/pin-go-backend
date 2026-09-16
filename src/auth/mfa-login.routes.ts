@@ -1,38 +1,125 @@
 import { Router } from "express";
 import { PrismaClient } from "@prisma/client";
+import { hashOpaqueToken } from "./mfa-core.js";
 import { verifyLoginEmailMfaChallenge } from "./mfa-login-challenge.js";
-import { createAuthSession, createTrustedDevice } from "./trusted-device-session.persistence.js";
+import { resendE6EmailCanary } from "./mfa-canary-flow.js";
+import {
+  evaluateE6EffectiveMode,
+  type E6Environment,
+} from "./mfa-canary-runtime.js";
+import {
+  createAuthSession,
+  createTrustedDevice,
+} from "./trusted-device-session.persistence.js";
 import { buildAuthCookie, signAuthToken } from "../lib/auth.js";
 import { buildTrustedDeviceCookie } from "./trusted-device-cookie.js";
-import { resolveE5RuntimeMode } from "./mfa-login-runtime.js";
 
 const prisma = new PrismaClient();
 export const mfaLoginRouter = Router();
 
-function readPepper(): string {
-  return String(process.env.PINGO_MFA_OTP_PEPPER ?? "").trim();
+function readE6Environment(): E6Environment {
+  return {
+    PINGO_MFA_MODE: process.env.PINGO_MFA_MODE,
+    PINGO_MFA_CANARY_USER_IDS: process.env.PINGO_MFA_CANARY_USER_IDS,
+    PINGO_MFA_OTP_PEPPER: process.env.PINGO_MFA_OTP_PEPPER,
+    PINGO_MFA_EMAIL_DELIVERY: process.env.PINGO_MFA_EMAIL_DELIVERY,
+    RESEND_API_KEY: process.env.RESEND_API_KEY,
+    EMAIL_FROM: process.env.EMAIL_FROM,
+  };
 }
 
-mfaLoginRouter.post("/auth/mfa/verify", async (req, res) => {
+async function resolveCanaryChallengeUser(challengeToken: string) {
+  const token = String(challengeToken ?? "").trim();
+  if (!token) return null;
+
+  const challenge = await prisma.mfaChallenge.findUnique({
+    where: { challengeTokenHash: hashOpaqueToken(token) },
+    select: { userId: true },
+  });
+  if (!challenge) return null;
+
+  const user = await prisma.dashboardUser.findUnique({
+    where: { id: challenge.userId },
+    select: {
+      id: true,
+      organizationId: true,
+      email: true,
+      role: true,
+      isActive: true,
+      tokenVersion: true,
+      organization: { select: { name: true, slug: true } },
+    },
+  });
+  if (!user || !user.isActive) return null;
+
+  const effective = evaluateE6EffectiveMode(user.id, readE6Environment());
+  if (effective.mode !== "CANARY") return null;
+
+  return user;
+}
+
+mfaLoginRouter.post("/auth/mfa/resend", async (req, res) => {
   try {
-    const runtime = resolveE5RuntimeMode(process.env.PINGO_MFA_MODE);
-    if (runtime.mode === "OFF") {
+    const challengeToken = String(req.body?.challengeToken ?? "").trim();
+    if (!challengeToken) {
+      return res.status(400).json({ error: "MFA_CHALLENGE_REQUIRED" });
+    }
+
+    const user = await resolveCanaryChallengeUser(challengeToken);
+    if (!user) {
       return res.status(404).json({ error: "MFA_NOT_ACTIVE" });
     }
 
+    const pepper = String(process.env.PINGO_MFA_OTP_PEPPER ?? "").trim();
+    const result = await resendE6EmailCanary(prisma as any, {
+      challengeToken,
+      organizationId: user.organizationId,
+      pepper,
+    });
+
+    if (!result.ok) {
+      if (result.reason === "COOLDOWN") {
+        return res.status(429).json({
+          error: "MFA_RESEND_COOLDOWN",
+          retryAfterSeconds: result.retryAfterSeconds ?? 60,
+        });
+      }
+      if (result.reason === "EXPIRED") {
+        return res.status(410).json({ error: "MFA_EXPIRED" });
+      }
+      return res.status(404).json({ error: "MFA_CHALLENGE_NOT_AVAILABLE" });
+    }
+
+    return res.json({
+      ok: true,
+      mfaRequired: true,
+      challengeToken,
+      destination: result.maskedDestination,
+      expiresAt: result.expiresAt.toISOString(),
+      resendAfterSeconds: result.cooldownSeconds,
+    });
+  } catch (error) {
+    console.error("[auth/mfa/resend] ERROR", error);
+    return res.status(500).json({ error: "MFA_RESEND_FAILED" });
+  }
+});
+
+mfaLoginRouter.post("/auth/mfa/verify", async (req, res) => {
+  try {
     const challengeToken = String(req.body?.challengeToken ?? "").trim();
     const code = String(req.body?.code ?? "").trim();
     const trustDevice = req.body?.trustDevice === true;
-    const pepper = readPepper();
 
     if (!challengeToken || !code) {
       return res.status(400).json({ error: "MFA_CHALLENGE_CODE_REQUIRED" });
     }
 
-    if (pepper.length < 32) {
-      return res.status(503).json({ error: "MFA_NOT_CONFIGURED" });
+    const canaryUser = await resolveCanaryChallengeUser(challengeToken);
+    if (!canaryUser) {
+      return res.status(404).json({ error: "MFA_NOT_ACTIVE" });
     }
 
+    const pepper = String(process.env.PINGO_MFA_OTP_PEPPER ?? "").trim();
     const verified = await verifyLoginEmailMfaChallenge(prisma as any, {
       challengeToken,
       code,
@@ -40,25 +127,19 @@ mfaLoginRouter.post("/auth/mfa/verify", async (req, res) => {
     });
 
     if (!verified.ok) {
-      const status = verified.reason === "NOT_FOUND" ? 404 : 401;
+      const status =
+        verified.reason === "NOT_FOUND"
+          ? 404
+          : verified.reason === "EXPIRED"
+            ? 410
+            : verified.reason === "LOCKED"
+              ? 423
+              : 401;
       return res.status(status).json({ error: `MFA_${verified.reason}` });
     }
 
-    const user = await prisma.dashboardUser.findUnique({
-      where: { id: verified.userId },
-      select: {
-        id: true,
-        organizationId: true,
-        email: true,
-        role: true,
-        isActive: true,
-        tokenVersion: true,
-        organization: { select: { name: true, slug: true } },
-      },
-    });
-
-    if (!user || !user.isActive) {
-      return res.status(401).json({ error: "MFA_USER_UNAVAILABLE" });
+    if (verified.userId !== canaryUser.id) {
+      return res.status(401).json({ error: "MFA_USER_MISMATCH" });
     }
 
     let trustedDeviceId: string | null = null;
@@ -66,28 +147,61 @@ mfaLoginRouter.post("/auth/mfa/verify", async (req, res) => {
 
     if (trustDevice) {
       const trusted = await createTrustedDevice(prisma as any, {
-        userId: user.id,
+        userId: canaryUser.id,
         label: "Trusted browser",
         userAgent: req.get("user-agent") ?? null,
       });
       trustedDeviceId = trusted.trustedDeviceId;
       trustedDeviceCookie = buildTrustedDeviceCookie(trusted.token);
+
+      await prisma.securityEvent.create({
+        data: {
+          userId: canaryUser.id,
+          organizationId: canaryUser.organizationId,
+          type: "TRUSTED_DEVICE_CREATED",
+          userAgent: req.get("user-agent") ?? null,
+          metadata: {
+            trustedDeviceId,
+            expiresAt: trusted.expiresAt.toISOString(),
+          },
+        },
+      });
     }
 
-    await createAuthSession(prisma as any, {
-      userId: user.id,
-      organizationId: user.organizationId,
-      tokenVersion: user.tokenVersion,
+    const session = await createAuthSession(prisma as any, {
+      userId: canaryUser.id,
+      organizationId: canaryUser.organizationId,
+      tokenVersion: canaryUser.tokenVersion,
       trustedDeviceId,
       userAgent: req.get("user-agent") ?? null,
     });
 
+    await prisma.securityEvent.create({
+      data: {
+        userId: canaryUser.id,
+        organizationId: canaryUser.organizationId,
+        type: "AUTH_SESSION_CREATED",
+        userAgent: req.get("user-agent") ?? null,
+        metadata: {
+          mode: "CANARY",
+          sessionId: session.sessionId,
+          trustedDeviceId,
+          mfaVerified: true,
+        },
+      },
+    });
+
     const token = signAuthToken({
-      sub: user.id,
-      orgId: user.organizationId,
-      email: user.email,
-      role: user.role,
-      tokenVersion: user.tokenVersion,
+      sub: canaryUser.id,
+      orgId: canaryUser.organizationId,
+      email: canaryUser.email,
+      role: canaryUser.role,
+      tokenVersion: canaryUser.tokenVersion,
+    });
+
+    await prisma.dashboardUser.update({
+      where: { id: canaryUser.id },
+      data: { lastLoginAt: new Date() },
     });
 
     const cookies = [
@@ -99,12 +213,12 @@ mfaLoginRouter.post("/auth/mfa/verify", async (req, res) => {
     return res.json({
       ok: true,
       user: {
-        id: user.id,
-        email: user.email,
-        orgId: user.organizationId,
-        role: user.role,
-        organizationName: user.organization?.name ?? null,
-        organizationSlug: user.organization?.slug ?? null,
+        id: canaryUser.id,
+        email: canaryUser.email,
+        orgId: canaryUser.organizationId,
+        role: canaryUser.role,
+        organizationName: canaryUser.organization?.name ?? null,
+        organizationSlug: canaryUser.organization?.slug ?? null,
       },
       trustedDevice: Boolean(trustedDeviceId),
     });
