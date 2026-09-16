@@ -1,5 +1,7 @@
 import { evaluateSessionSecurity } from "./session-security.policy.js";
 
+export const SESSION_ACTIVITY_TOUCH_INTERVAL_MS = 5 * 60 * 1000;
+
 export type SessionBindingShadowReason =
   | "ACTIVE"
   | "UNBOUND_LEGACY"
@@ -128,6 +130,25 @@ export async function observeSessionBindingShadow(
       sessionId,
       reason: decision.reason,
     };
+  }
+
+  if (
+    now.getTime() - row.lastActivityAt.getTime() >=
+    SESSION_ACTIVITY_TOUCH_INTERVAL_MS
+  ) {
+    await client.authSession.updateMany({
+      where: {
+        id: row.id,
+        userId: input.userId,
+        organizationId: input.organizationId,
+        tokenVersion: input.tokenVersion,
+        revokedAt: null,
+        lastActivityAt: row.lastActivityAt,
+      },
+      data: {
+        lastActivityAt: now,
+      },
+    });
   }
 
   return {
