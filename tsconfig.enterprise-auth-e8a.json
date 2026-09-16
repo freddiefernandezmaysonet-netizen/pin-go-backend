@@ -13,6 +13,7 @@
     "src/middleware/requireAuth.ts",
     "src/auth/session-security.policy.ts",
     "src/auth/trusted-device-session.persistence.ts",
+    "src/auth/session-bound-token.ts",
     "src/auth/session-binding-shadow.ts",
     "src/auth/mfa-login-runtime.ts",
     "src/auth/mfa-login.routes.ts",
