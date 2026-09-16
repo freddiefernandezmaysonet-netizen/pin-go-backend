@@ -6,6 +6,8 @@ export type DirectBookingStripeChargeMode =
 
 const DIRECT_CHARGES_ENV =
   "DIRECT_BOOKING_STRIPE_DIRECT_CHARGES_ENABLED";
+const DIRECT_CHARGES_CANARY_ACCOUNTS_ENV =
+  "DIRECT_BOOKING_STRIPE_DIRECT_CHARGES_CANARY_ACCOUNT_IDS";
 
 export function directBookingDirectChargesEnabled(
   env: NodeJS.ProcessEnv = process.env
@@ -15,10 +17,45 @@ export function directBookingDirectChargesEnabled(
     .toLowerCase() === "true";
 }
 
-export function resolveDirectBookingStripeChargeMode(
+function directChargesCanaryAccounts(
   env: NodeJS.ProcessEnv = process.env
+) {
+  return String(env[DIRECT_CHARGES_CANARY_ACCOUNTS_ENV] ?? "")
+    .split(",")
+    .map((value) => value.trim())
+    .filter(Boolean);
+}
+
+export function directBookingDirectChargesAllowedForConnectedAccount(
+  connectedAccountId: unknown,
+  env: NodeJS.ProcessEnv = process.env
+) {
+  if (!directBookingDirectChargesEnabled(env)) {
+    return false;
+  }
+
+  const accountId = String(connectedAccountId ?? "").trim();
+
+  if (!accountId.startsWith("acct_")) {
+    return false;
+  }
+
+  const allowedAccounts = directChargesCanaryAccounts(env);
+
+  return (
+    allowedAccounts.includes("*") ||
+    allowedAccounts.includes(accountId)
+  );
+}
+
+export function resolveDirectBookingStripeChargeMode(
+  env: NodeJS.ProcessEnv = process.env,
+  connectedAccountId?: string | null
 ): DirectBookingStripeChargeMode {
-  return directBookingDirectChargesEnabled(env)
+  return directBookingDirectChargesAllowedForConnectedAccount(
+    connectedAccountId,
+    env
+  )
     ? "DIRECT_CHARGE"
     : "DESTINATION_CHARGE";
 }
@@ -42,7 +79,10 @@ export function buildDirectBookingCheckoutStripeContext(input: {
   const connectedAccountId = requireConnectedAccountId(
     input.connectedAccountId
   );
-  const chargeMode = resolveDirectBookingStripeChargeMode(input.env);
+  const chargeMode = resolveDirectBookingStripeChargeMode(
+    input.env,
+    connectedAccountId
+  );
 
   if (chargeMode === "DESTINATION_CHARGE") {
     return {
@@ -112,7 +152,7 @@ export function buildDirectBookingRefundStripeContext(input: {
     >,
     requestOptions: {
       stripeAccount: requireConnectedAccountId(input.connectedAccountId),
-    } satisfies Stripe.RequestOptions,
+    } satisfies Stripe.RequestOptions;
   };
 }
 
