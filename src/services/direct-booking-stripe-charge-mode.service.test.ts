@@ -66,7 +66,12 @@ test("direct charge checkout removes transfer_data and targets connected account
   });
 
   assert.equal(context.chargeMode, "DIRECT_CHARGE");
-  assert.equal(context.paymentIntentData.transfer_data, undefined);
+  assert.equal(
+    "transfer_data" in context.paymentIntentData
+      ? context.paymentIntentData.transfer_data
+      : undefined,
+    undefined
+  );
   assert.equal(context.paymentIntentData.application_fee_amount, 125);
   assert.deepEqual(context.requestOptions, {
     stripeAccount: connectedAccountId,
