@@ -23,7 +23,10 @@ export function normalizeOtpDestination(type: OtpFactorType, value: string): str
 export function maskOtpDestination(type: OtpFactorType, value: string): string {
   const normalized = normalizeOtpDestination(type, value);
   if (type === "SMS") return `•••• ${normalized.slice(-4)}`;
-  const [local, domain] = normalized.split("@");
+
+  const at = normalized.indexOf("@");
+  const local = normalized.slice(0, at);
+  const domain = normalized.slice(at + 1);
   const visible = local.slice(0, Math.min(1, local.length));
   return `${visible}${"•".repeat(Math.max(3, local.length - visible.length))}@${domain}`;
 }
