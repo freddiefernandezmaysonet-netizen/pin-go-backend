@@ -5,6 +5,7 @@
     "types": ["node"]
   },
   "include": [
+    "src/billing/stripe.ts",
     "src/services/direct-booking-stripe-charge-mode.service.ts",
     "src/services/direct-booking-stripe-charge-mode.service.test.ts"
   ]
