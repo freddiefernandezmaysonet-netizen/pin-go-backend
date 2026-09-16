@@ -4,6 +4,7 @@ import { verifyLoginEmailMfaChallenge } from "./mfa-login-challenge.js";
 import { createAuthSession, createTrustedDevice } from "./trusted-device-session.persistence.js";
 import { buildAuthCookie, signAuthToken } from "../lib/auth.js";
 import { buildTrustedDeviceCookie } from "./trusted-device-cookie.js";
+import { resolveE5RuntimeMode } from "./mfa-login-runtime.js";
 
 const prisma = new PrismaClient();
 export const mfaLoginRouter = Router();
@@ -14,6 +15,11 @@ function readPepper(): string {
 
 mfaLoginRouter.post("/auth/mfa/verify", async (req, res) => {
   try {
+    const runtime = resolveE5RuntimeMode(process.env.PINGO_MFA_MODE);
+    if (runtime.mode === "OFF") {
+      return res.status(404).json({ error: "MFA_NOT_ACTIVE" });
+    }
+
     const challengeToken = String(req.body?.challengeToken ?? "").trim();
     const code = String(req.body?.code ?? "").trim();
     const trustDevice = req.body?.trustDevice === true;
