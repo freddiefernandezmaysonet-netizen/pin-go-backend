@@ -33,11 +33,16 @@ export async function requireAuth(
   next: NextFunction
 ) {
   const existingUser = (req as any).user as AuthenticatedUser | undefined;
+  const nonProduction = process.env.NODE_ENV !== "production";
+  const allowInjectedCiAuth = nonProduction && process.env.CI === "true";
   const allowInjectedDevAuth =
-    process.env.NODE_ENV !== "production" &&
-    process.env.ENABLE_DEV_AUTH === "true";
+    nonProduction && process.env.ENABLE_DEV_AUTH === "true";
 
-  if (allowInjectedDevAuth && existingUser?.id && existingUser?.orgId) {
+  if (
+    (allowInjectedCiAuth || allowInjectedDevAuth) &&
+    existingUser?.id &&
+    existingUser?.orgId
+  ) {
     return next();
   }
 
