@@ -116,6 +116,16 @@ test("aggregates Stripe actuals and avoids Reservation double counting", async (
         },
       }),
       ledgerEvent({
+        stripeId: "evt_unrelated_transfer",
+        type: "transfer.created",
+        object: {
+          id: "tr_unrelated",
+          object: "transfer",
+          amount: 5000,
+          currency: "usd",
+        },
+      }),
+      ledgerEvent({
         stripeId: "evt_refund",
         type: "refund.created",
         object: {
@@ -168,7 +178,7 @@ test("aggregates Stripe actuals and avoids Reservation double counting", async (
     stripeProcessingFeesActual: null,
     netPlatformRevenue: null,
     reconciliationStatus: "REQUIRES_BALANCE_TRANSACTION_RECONCILIATION",
-    ledgerEventCount: 6,
+    ledgerEventCount: 7,
     livemode: true,
   });
 });

@@ -388,6 +388,7 @@ export async function getStripeFinancialActuals(
                 in: [...relatedPaymentIntentIds],
               },
             },
+            { stripeTransferId: { in: [...transfers.keys()] } },
           ],
         },
       ],
@@ -504,7 +505,12 @@ export async function getStripeFinancialActuals(
     }
   }
 
-  const bookingTransfersFromLedger = sumMap(transfers);
+  let bookingTransfersFromLedger = 0;
+  for (const reservation of reservationRows) {
+    if (!reservation.stripeTransferId) continue;
+    const amount = transfers.get(reservation.stripeTransferId);
+    if (amount !== undefined) bookingTransfersFromLedger += amount;
+  }
 
   const saasRevenueActual = money(sumMap(invoices));
   const connectPlatformFeesActual = money(
