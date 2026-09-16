@@ -141,6 +141,9 @@ dashboardPayoutsRouter.get(
         const stripeProcessingFeeAmount = hasActualDirectChargeEvidence
           ? money(financialEvidence.stripeProcessingFeeAmount)
           : null;
+        const applicationFeeAmount = hasActualDirectChargeEvidence
+          ? money(financialEvidence.applicationFeeAmount)
+          : null;
         const actualHostNetAmount = hasActualDirectChargeEvidence
           ? money(financialEvidence.hostNetAmount)
           : null;
@@ -164,6 +167,8 @@ dashboardPayoutsRouter.get(
             reservation.directBookingProtectionFeeAmount
           ),
           totalPinGoFeeAmount: money(reservation.platformFeeAmount),
+          applicationFeeAmount,
+          applicationFeeActual: applicationFeeAmount !== null,
           stripeProcessingFeeAmount,
           stripeProcessingFeeActual: stripeProcessingFeeAmount !== null,
           stripeFeeSource: hasActualDirectChargeEvidence
