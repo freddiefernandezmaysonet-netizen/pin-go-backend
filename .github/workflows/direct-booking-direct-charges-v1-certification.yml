@@ -13,6 +13,8 @@ on:
       - "src/services/direct-booking-stripe-resource-context.service.test.ts"
       - "src/services/direct-booking-stripe-refund.service.ts"
       - "src/services/direct-booking-stripe-refund.service.test.ts"
+      - "src/services/direct-booking-refund.service.ts"
+      - "src/services/direct-booking-refund-direct-charges.contract.test.ts"
       - "tsconfig.direct-booking-direct-charges-v1.json"
       - ".github/workflows/direct-booking-direct-charges-v1-certification.yml"
 
@@ -34,12 +36,13 @@ jobs:
       - name: Install locked dependencies
         run: npm ci --ignore-scripts --no-audit --no-fund
 
-      - name: Unit test Direct Booking Stripe policies
+      - name: Unit test Direct Booking Stripe policies and wiring
         run: >-
           node --import tsx --test
           src/services/direct-booking-stripe-charge-mode.service.test.ts
           src/services/direct-booking-stripe-resource-context.service.test.ts
           src/services/direct-booking-stripe-refund.service.test.ts
+          src/services/direct-booking-refund-direct-charges.contract.test.ts
 
       - name: Type-check Direct Booking Stripe policies
         shell: bash
