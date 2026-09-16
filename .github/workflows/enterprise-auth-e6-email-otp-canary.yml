@@ -1,33 +1,36 @@
-name: Enterprise Authentication E5 Login Runtime Shadow
+name: Enterprise Authentication E6 Email OTP Canary
 
 on:
   pull_request:
     branches: [main]
     paths:
-      - ".github/workflows/enterprise-auth-e5-login-runtime-shadow.yml"
+      - ".github/workflows/enterprise-auth-e6-email-otp-canary.yml"
       - "src/auth/mfa-core.ts"
       - "src/auth/mfa-otp.ts"
       - "src/auth/mfa-email-only-policy.ts"
       - "src/auth/session-security.policy.ts"
+      - "src/auth/mfa-email-otp-delivery.ts"
       - "src/auth/trusted-device-session.persistence.ts"
       - "src/auth/trusted-device-cookie.ts"
       - "src/auth/mfa-login-runtime.ts"
       - "src/auth/mfa-login-challenge.ts"
       - "src/auth/mfa-login.routes.ts"
-      - "src/auth/enterprise-auth-e5.test.ts"
+      - "src/auth/mfa-canary-runtime.ts"
+      - "src/auth/mfa-canary-flow.ts"
+      - "src/auth/enterprise-auth-e6.test.ts"
       - "src/routes/auth.routes.ts"
-      - "tsconfig.enterprise-auth-e5.json"
+      - "tsconfig.enterprise-auth-e6.json"
   workflow_dispatch:
 
 permissions:
   contents: read
 
 env:
-  DATABASE_URL: postgresql://postgres:postgres@localhost:5432/pingo_auth_e5?schema=public
+  DATABASE_URL: postgresql://postgres:postgres@localhost:5432/pingo_auth_e6?schema=public
 
 jobs:
   certify:
-    name: E5 OFF-safe login shadow contracts
+    name: E6 canary contracts
     runs-on: ubuntu-latest
     timeout-minutes: 15
     services:
@@ -36,7 +39,7 @@ jobs:
         env:
           POSTGRES_USER: postgres
           POSTGRES_PASSWORD: postgres
-          POSTGRES_DB: pingo_auth_e5
+          POSTGRES_DB: pingo_auth_e6
         ports:
           - 5432:5432
         options: >-
@@ -64,7 +67,7 @@ jobs:
           npx prisma generate
           npx prisma migrate deploy
 
-      - name: Certify E1 through E5 auth contracts
+      - name: Certify E1 through E6 auth contracts
         run: >-
           npx tsx --test
           src/auth/mfa-core.test.ts
@@ -73,22 +76,25 @@ jobs:
           src/auth/mfa-email-only-session-security.test.ts
           src/auth/enterprise-auth-e4.test.ts
           src/auth/enterprise-auth-e5.test.ts
+          src/auth/enterprise-auth-e6.test.ts
 
-      - name: TypeScript E5 module contract
-        run: npx tsc -p tsconfig.enterprise-auth-e5.json
+      - name: TypeScript E6 module contract
+        run: npx tsc -p tsconfig.enterprise-auth-e6.json
 
-      - name: Load E5 login routes
+      - name: Load E6 login routes
         run: npx tsx -e "import('./src/auth/mfa-login.routes.ts').then(() => import('./src/routes/auth.routes.ts'))"
 
-      - name: Certify E5 runtime boundaries
+      - name: Certify E6 safety boundaries
         shell: bash
         run: |
           set -euo pipefail
           git fetch --no-tags origin main:refs/remotes/origin/main
           test -z "$(git diff --name-only origin/main...HEAD -- prisma/migrations)"
           test -z "$(git diff --name-only origin/main...HEAD -- src/lib/auth.ts src/middleware/requireAuth.ts src/server.ts)"
-          ! grep -R "deliverMfaEmailOtp\|sendGuestSms\|Twilio" src/routes/auth.routes.ts src/auth/mfa-login-runtime.ts src/auth/mfa-login.routes.ts
-          grep -q 'normalized === "ENFORCE"' src/auth/mfa-login-runtime.ts
-          grep -q 'mode: "OFF", enforceBlocked: true' src/auth/mfa-login-runtime.ts
-          grep -q 'observeE5ShadowLogin' src/routes/auth.routes.ts
-          grep -q 'e6Runtime.mode === "SHADOW"' src/routes/auth.routes.ts
+          ! grep -R "sendGuestSms\|Twilio\|factorType: \"SMS\"" src/auth/mfa-canary-runtime.ts src/auth/mfa-canary-flow.ts src/auth/mfa-login.routes.ts src/routes/auth.routes.ts
+          grep -q 'normalized === "ENFORCE"' src/auth/mfa-canary-runtime.ts
+          grep -q 'reason: "ENFORCE_BLOCKED"' src/auth/mfa-canary-runtime.ts
+          grep -q 'PINGO_MFA_CANARY_USER_IDS' src/auth/mfa-canary-runtime.ts
+          grep -q 'mode: "CANARY"' src/routes/auth.routes.ts
+          grep -q 'FAIL_OPEN_TO_LEGACY' src/routes/auth.routes.ts
+          grep -q 'deliverMfaEmailOtp' src/auth/mfa-canary-flow.ts

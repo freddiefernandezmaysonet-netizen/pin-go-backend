@@ -171,6 +171,16 @@ export async function verifyLoginEmailMfaChallenge(
       where: { id: challenge.id },
       data: { status: reason === "EXPIRED" ? "EXPIRED" : "LOCKED" },
     });
+    await client.securityEvent.create({
+      data: {
+        userId: challenge.userId,
+        type: reason === "EXPIRED" ? "MFA_CHALLENGE_EXPIRED" : "MFA_CHALLENGE_LOCKED",
+        metadata: {
+          challengeId: challenge.id,
+          attemptCount: challenge.attemptCount,
+        },
+      },
+    });
     return { ok: false, reason };
   }
 
@@ -191,6 +201,17 @@ export async function verifyLoginEmailMfaChallenge(
         status: locked ? "LOCKED" : "PENDING",
       },
     });
+    await client.securityEvent.create({
+      data: {
+        userId: challenge.userId,
+        type: locked ? "MFA_CHALLENGE_LOCKED" : "MFA_CHALLENGE_FAILED",
+        metadata: {
+          challengeId: challenge.id,
+          attemptCount,
+          maxAttempts: challenge.maxAttempts,
+        },
+      },
+    });
     return { ok: false, reason: locked ? "LOCKED" : "INVALID_CODE" };
   }
 
@@ -209,6 +230,17 @@ export async function verifyLoginEmailMfaChallenge(
       status: "VERIFIED",
       verifiedAt: now,
       lastUsedAt: now,
+    },
+  });
+
+  await client.securityEvent.create({
+    data: {
+      userId: challenge.userId,
+      type: "MFA_CHALLENGE_VERIFIED",
+      metadata: {
+        challengeId: challenge.id,
+        factorId: challenge.factorId,
+      },
     },
   });
 

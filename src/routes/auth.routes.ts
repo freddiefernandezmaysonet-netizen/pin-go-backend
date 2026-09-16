@@ -16,15 +16,30 @@ import {
   resetPasswordHandler,
 } from "../controllers/password.controller";
 import { mfaLoginRouter } from "../auth/mfa-login.routes.js";
+import { observeE5ShadowLogin } from "../auth/mfa-login-runtime.js";
+import { beginE6EmailCanary } from "../auth/mfa-canary-flow.js";
 import {
-  observeE5ShadowLogin,
-  resolveE5RuntimeMode,
-} from "../auth/mfa-login-runtime.js";
+  evaluateE6EffectiveMode,
+  findValidE6TrustedDevice,
+  type E6Environment,
+} from "../auth/mfa-canary-runtime.js";
+import { createAuthSession } from "../auth/trusted-device-session.persistence.js";
 import { extractTrustedDeviceToken } from "../auth/trusted-device-cookie.js";
 
 const prisma = new PrismaClient();
 export const authRouter = Router();
 authRouter.use(mfaLoginRouter);
+
+function readE6Environment(): E6Environment {
+  return {
+    PINGO_MFA_MODE: process.env.PINGO_MFA_MODE,
+    PINGO_MFA_CANARY_USER_IDS: process.env.PINGO_MFA_CANARY_USER_IDS,
+    PINGO_MFA_OTP_PEPPER: process.env.PINGO_MFA_OTP_PEPPER,
+    PINGO_MFA_EMAIL_DELIVERY: process.env.PINGO_MFA_EMAIL_DELIVERY,
+    RESEND_API_KEY: process.env.RESEND_API_KEY,
+    EMAIL_FROM: process.env.EMAIL_FROM,
+  };
+}
 
 // =======================
 // LOGIN
@@ -71,24 +86,89 @@ authRouter.post("/auth/login", async (req, res) => {
       return res.status(401).json({ error: "INVALID_CREDENTIALS" });
     }
 
-    const e5Runtime = resolveE5RuntimeMode(process.env.PINGO_MFA_MODE);
-    if (e5Runtime.enforceBlocked) {
-      console.warn("[auth/login][mfa-e5] ENFORCE_BLOCKED_TO_OFF");
+    const trustedDeviceToken = extractTrustedDeviceToken(req);
+    const e6Environment = readE6Environment();
+    const e6Runtime = evaluateE6EffectiveMode(user.id, e6Environment);
+
+    if (e6Runtime.reason === "ENFORCE_BLOCKED") {
+      console.warn("[auth/login][mfa-e6] ENFORCE_BLOCKED_TO_OFF");
     }
 
-    if (e5Runtime.mode === "SHADOW") {
+    const observeShadow = async () => {
       try {
         await observeE5ShadowLogin(prisma as any, {
           userId: user.id,
           organizationId: user.organizationId,
           email: user.email,
           tokenVersion: user.tokenVersion,
-          trustedDeviceToken: extractTrustedDeviceToken(req),
+          trustedDeviceToken,
           userAgent: req.get("user-agent") ?? null,
         });
       } catch (shadowError) {
-        console.error("[auth/login][mfa-e5-shadow] OBSERVATION_FAILED", shadowError);
+        console.error(
+          "[auth/login][mfa-e6-shadow] OBSERVATION_FAILED",
+          shadowError
+        );
       }
+    };
+
+    if (e6Runtime.mode === "CANARY") {
+      try {
+        const trustedDevice = await findValidE6TrustedDevice(prisma as any, {
+          userId: user.id,
+          token: trustedDeviceToken,
+        });
+
+        if (trustedDevice) {
+          const session = await createAuthSession(prisma as any, {
+            userId: user.id,
+            organizationId: user.organizationId,
+            tokenVersion: user.tokenVersion,
+            trustedDeviceId: trustedDevice.id,
+            userAgent: req.get("user-agent") ?? null,
+          });
+
+          await prisma.securityEvent.create({
+            data: {
+              userId: user.id,
+              organizationId: user.organizationId,
+              type: "AUTH_SESSION_CREATED",
+              userAgent: req.get("user-agent") ?? null,
+              metadata: {
+                mode: "CANARY",
+                sessionId: session.sessionId,
+                trustedDeviceId: trustedDevice.id,
+                trustedDeviceValid: true,
+                mfaBypassed: true,
+              },
+            },
+          });
+        } else {
+          const challenge = await beginE6EmailCanary(prisma as any, {
+            userId: user.id,
+            organizationId: user.organizationId,
+            email: user.email,
+            pepper: String(e6Environment.PINGO_MFA_OTP_PEPPER ?? ""),
+          });
+
+          return res.json({
+            ok: true,
+            mfaRequired: true,
+            challengeToken: challenge.challengeToken,
+            destination: challenge.maskedDestination,
+            expiresAt: challenge.expiresAt.toISOString(),
+            resendAfterSeconds: 60,
+          });
+        }
+      } catch (canaryError) {
+        console.error(
+          "[auth/login][mfa-e6-canary] FAIL_OPEN_TO_LEGACY",
+          canaryError
+        );
+        await observeShadow();
+      }
+    } else if (e6Runtime.mode === "SHADOW") {
+      await observeShadow();
     }
 
     const token = signAuthToken({
