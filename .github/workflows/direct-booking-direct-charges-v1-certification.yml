@@ -1,0 +1,36 @@
+name: Direct Booking Direct Charges V1 Certification
+
+on:
+  push:
+    branches:
+      - agent/direct-booking-direct-charges-v1
+  pull_request:
+    paths:
+      - "src/services/direct-booking-stripe-charge-mode.service.ts"
+      - "src/services/direct-booking-stripe-charge-mode.service.test.ts"
+      - "tsconfig.direct-booking-direct-charges-v1.json"
+      - ".github/workflows/direct-booking-direct-charges-v1-certification.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  certify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install locked dependencies
+        run: npm ci --ignore-scripts --no-audit --no-fund
+
+      - name: Unit test charge mode policy
+        run: node --import tsx --test src/services/direct-booking-stripe-charge-mode.service.test.ts
+
+      - name: Type-check charge mode policy
+        run: npx tsc -p tsconfig.direct-booking-direct-charges-v1.json
