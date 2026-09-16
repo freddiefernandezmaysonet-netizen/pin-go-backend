@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import fs from "node:fs";
 import test from "node:test";
 import {
   buildDirectBookingCheckoutStripeContext,
@@ -10,6 +11,10 @@ import {
 } from "./direct-booking-stripe-charge-mode.service.js";
 
 const connectedAccountId = "acct_123456789";
+const stripeClientSource = fs.readFileSync(
+  new URL("../billing/stripe.ts", import.meta.url),
+  "utf8"
+);
 
 test("Direct Booking Stripe charge mode defaults to destination charge", () => {
   assert.equal(
@@ -133,5 +138,42 @@ test("charge mode is persisted and defaults legacy reservations to destination c
   assert.equal(
     resolveDirectBookingChargeModeFromMetadata(undefined),
     "DESTINATION_CHARGE"
+  );
+});
+
+test("Stripe client keeps Direct Charges fenced behind the explicit feature flag", () => {
+  assert.match(
+    stripeClientSource,
+    /flow !== "direct_booking" \|\|\s*!directBookingDirectChargesEnabled\(\)/
+  );
+  assert.match(
+    stripeClientSource,
+    /return originalCheckoutSessionCreate\(params, options\);/
+  );
+});
+
+test("Stripe client does not migrate reservation modification checkout implicitly", () => {
+  assert.match(
+    stripeClientSource,
+    /Direct Charges V1 is intentionally fenced to the initial Direct Booking/
+  );
+  assert.doesNotMatch(
+    stripeClientSource,
+    /flow === "direct_booking_reservation_modification"[\s\S]*?buildDirectBookingCheckoutStripeContext/
+  );
+});
+
+test("Stripe client supports a separate Connect webhook secret only when Direct Charges are enabled", () => {
+  assert.match(
+    stripeClientSource,
+    /STRIPE_CONNECT_WEBHOOK_SECRET/
+  );
+  assert.match(
+    stripeClientSource,
+    /!directBookingDirectChargesEnabled\(\) \|\|\s*!connectWebhookSecret/
+  );
+  assert.match(
+    stripeClientSource,
+    /connectArgs\[2\] = connectWebhookSecret/
   );
 });
