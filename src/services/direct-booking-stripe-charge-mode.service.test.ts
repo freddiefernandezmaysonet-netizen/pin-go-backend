@@ -7,7 +7,7 @@ import {
   directBookingStripeChargeModeMetadata,
   resolveDirectBookingChargeModeFromMetadata,
   resolveDirectBookingStripeChargeMode,
-} from "./direct-booking-stripe-charge-mode.service";
+} from "./direct-booking-stripe-charge-mode.service.js";
 
 const connectedAccountId = "acct_123456789";
 
