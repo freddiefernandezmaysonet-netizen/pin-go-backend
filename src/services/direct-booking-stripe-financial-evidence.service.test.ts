@@ -1,9 +1,15 @@
 import assert from "node:assert/strict";
+import fs from "node:fs";
 import test from "node:test";
 import {
   extractDirectBookingStripeFinancialEvidence,
   reconcileDirectBookingDirectChargeFinancialEvidence,
 } from "./direct-booking-stripe-financial-evidence.service.js";
+
+const dashboardPayoutsRouteSource = fs.readFileSync(
+  new URL("../routes/dashboard-payouts.routes.ts", import.meta.url),
+  "utf8"
+);
 
 test("extracts direct charge Stripe fee and actual host net from expanded balance transaction", () => {
   const paymentIntent = {
@@ -260,4 +266,30 @@ test("financial reconciliation stores actual Stripe fee and host net for Direct 
     hostNetAmountCents: 818,
     stripeBalanceTransactionId: "txn_direct",
   });
+});
+
+test("host payout transactions stay scoped to the authenticated organization", () => {
+  assert.match(
+    dashboardPayoutsRouteSource,
+    /const organizationId = getOrgIdFromRequest\(req\);[\s\S]*?property:\s*\{\s*organizationId,\s*\}/
+  );
+  assert.doesNotMatch(
+    dashboardPayoutsRouteSource,
+    /req\.(?:query|body)\.organizationId/
+  );
+});
+
+test("host payout transactions expose Stripe fees only from actual Direct Charge balance evidence", () => {
+  assert.match(
+    dashboardPayoutsRouteSource,
+    /financialEvidence\.chargeMode === "DIRECT_CHARGE"[\s\S]*?financialEvidence\.source === "STRIPE_BALANCE_TRANSACTION"/
+  );
+  assert.match(
+    dashboardPayoutsRouteSource,
+    /stripeProcessingFeeAmount = hasActualDirectChargeEvidence[\s\S]*?money\(financialEvidence\.stripeProcessingFeeAmount\)[\s\S]*?: null/
+  );
+  assert.match(
+    dashboardPayoutsRouteSource,
+    /stripeProcessingFeeActual: stripeProcessingFeeAmount !== null/
+  );
 });
