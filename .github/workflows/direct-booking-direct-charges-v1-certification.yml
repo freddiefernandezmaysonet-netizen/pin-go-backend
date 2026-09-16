@@ -11,6 +11,8 @@ on:
       - "src/services/direct-booking-stripe-charge-mode.service.test.ts"
       - "src/services/direct-booking-stripe-resource-context.service.ts"
       - "src/services/direct-booking-stripe-resource-context.service.test.ts"
+      - "src/services/direct-booking-stripe-refund.service.ts"
+      - "src/services/direct-booking-stripe-refund.service.test.ts"
       - "tsconfig.direct-booking-direct-charges-v1.json"
       - ".github/workflows/direct-booking-direct-charges-v1-certification.yml"
 
@@ -37,6 +39,7 @@ jobs:
           node --import tsx --test
           src/services/direct-booking-stripe-charge-mode.service.test.ts
           src/services/direct-booking-stripe-resource-context.service.test.ts
+          src/services/direct-booking-stripe-refund.service.test.ts
 
       - name: Type-check Direct Booking Stripe policies
         shell: bash
