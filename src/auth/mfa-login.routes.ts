@@ -91,7 +91,7 @@ mfaLoginRouter.post("/auth/mfa/verify", async (req, res) => {
     });
 
     const cookies = [
-      buildAuthCookie(token, { requestOrigin: req.get("origin") }),
+      buildAuthCookie(token, { requestOrigin: req.get("origin") ?? null }),
       ...(trustedDeviceCookie ? [trustedDeviceCookie] : []),
     ];
     res.setHeader("Set-Cookie", cookies);
