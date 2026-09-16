@@ -1,0 +1,102 @@
+name: Enterprise Authentication E7 Global Email MFA
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - ".github/workflows/enterprise-auth-e7-global-email-mfa.yml"
+      - "src/auth/mfa-global-runtime.ts"
+      - "src/auth/mfa-login.routes.ts"
+      - "src/auth/enterprise-auth-e7.test.ts"
+      - "src/routes/auth.routes.ts"
+      - "src/routes/public.signup.success.routes.ts"
+      - "tsconfig.enterprise-auth-e7.json"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  DATABASE_URL: postgresql://postgres:postgres@localhost:5432/pingo_auth_e7?schema=public
+
+jobs:
+  certify:
+    name: E7 global email MFA contracts
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: pingo_auth_e7
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci --silent --no-audit --no-fund
+
+      - name: Validate Prisma and migration history
+        run: |
+          npx prisma validate
+          npx prisma generate
+          npx prisma migrate deploy
+
+      - name: Certify E1 through E7 auth contracts
+        run: >-
+          npx tsx --test
+          src/auth/mfa-core.test.ts
+          src/auth/mfa-otp.test.ts
+          src/auth/mfa-otp-delivery.test.ts
+          src/auth/mfa-email-only-session-security.test.ts
+          src/auth/enterprise-auth-e4.test.ts
+          src/auth/enterprise-auth-e5.test.ts
+          src/auth/enterprise-auth-e6.test.ts
+          src/auth/mfa-email-branding.test.ts
+          src/auth/enterprise-auth-e7.test.ts
+
+      - name: TypeScript E7 module contract
+        run: npx tsc -p tsconfig.enterprise-auth-e7.json
+
+      - name: Load E7 auth routes
+        run: >-
+          npx tsx -e "Promise.all([
+          import('./src/auth/mfa-login.routes.ts'),
+          import('./src/routes/auth.routes.ts'),
+          import('./src/routes/public.signup.success.routes.ts')
+          ])"
+
+      - name: Certify E7 safety boundaries
+        shell: bash
+        run: |
+          set -euo pipefail
+          git fetch --no-tags origin main:refs/remotes/origin/main
+          test -z "$(git diff --name-only origin/main...HEAD -- prisma/migrations)"
+          test -z "$(git diff --name-only origin/main...HEAD -- src/lib/auth.ts src/middleware/requireAuth.ts src/server.ts src/controllers/password.controller.ts)"
+          ! grep -R "sendGuestSms\|Twilio\|factorType: \"SMS\"" src/auth/mfa-global-runtime.ts src/auth/mfa-login.routes.ts src/routes/auth.routes.ts src/routes/public.signup.success.routes.ts
+          grep -q 'configuredMode === "ENFORCE"' src/auth/mfa-global-runtime.ts
+          grep -q 'failClosed: true' src/auth/mfa-global-runtime.ts
+          grep -q 'FAIL_CLOSED' src/routes/auth.routes.ts
+          grep -q 'MFA_NOT_CONFIGURED' src/routes/auth.routes.ts
+          grep -q 'FAIL_OPEN_TO_LEGACY' src/routes/auth.routes.ts
+          grep -q 'requiresLogin: true' src/routes/auth.routes.ts
+          grep -q 'requiresLogin: true' src/routes/public.signup.success.routes.ts
+          ! grep -q 'signAuthToken' src/routes/public.signup.success.routes.ts
+          ! grep -q 'Set-Cookie' src/routes/public.signup.success.routes.ts
+          test "$(grep -o 'signAuthToken(' src/routes/auth.routes.ts | wc -l | tr -d ' ')" = "1"

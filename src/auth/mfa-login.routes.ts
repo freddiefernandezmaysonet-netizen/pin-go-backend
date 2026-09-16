@@ -4,9 +4,10 @@ import { hashOpaqueToken } from "./mfa-core.js";
 import { verifyLoginEmailMfaChallenge } from "./mfa-login-challenge.js";
 import { resendE6EmailCanary } from "./mfa-canary-flow.js";
 import {
-  evaluateE6EffectiveMode,
-  type E6Environment,
-} from "./mfa-canary-runtime.js";
+  evaluateE7EffectiveMode,
+  requiresE7MfaChallenge,
+  type E7Environment,
+} from "./mfa-global-runtime.js";
 import {
   createAuthSession,
   createTrustedDevice,
@@ -17,7 +18,7 @@ import { buildTrustedDeviceCookie } from "./trusted-device-cookie.js";
 const prisma = new PrismaClient();
 export const mfaLoginRouter = Router();
 
-function readE6Environment(): E6Environment {
+function readE7Environment(): E7Environment {
   return {
     PINGO_MFA_MODE: process.env.PINGO_MFA_MODE,
     PINGO_MFA_CANARY_USER_IDS: process.env.PINGO_MFA_CANARY_USER_IDS,
@@ -28,15 +29,46 @@ function readE6Environment(): E6Environment {
   };
 }
 
-async function resolveCanaryChallengeUser(challengeToken: string) {
+type ChallengeUser = {
+  id: string;
+  organizationId: string;
+  email: string;
+  role: string;
+  isActive: boolean;
+  tokenVersion: number;
+  organization: {
+    name: string;
+    slug: string;
+  } | null;
+};
+
+type ChallengeResolution =
+  | {
+      ok: true;
+      user: ChallengeUser;
+      mode: "CANARY" | "ENFORCE";
+    }
+  | {
+      ok: false;
+      status: 404 | 503;
+      error: "MFA_NOT_ACTIVE" | "MFA_NOT_CONFIGURED";
+    };
+
+async function resolveMfaChallengeUser(
+  challengeToken: string
+): Promise<ChallengeResolution> {
   const token = String(challengeToken ?? "").trim();
-  if (!token) return null;
+  if (!token) {
+    return { ok: false, status: 404, error: "MFA_NOT_ACTIVE" };
+  }
 
   const challenge = await prisma.mfaChallenge.findUnique({
     where: { challengeTokenHash: hashOpaqueToken(token) },
     select: { userId: true },
   });
-  if (!challenge) return null;
+  if (!challenge) {
+    return { ok: false, status: 404, error: "MFA_NOT_ACTIVE" };
+  }
 
   const user = await prisma.dashboardUser.findUnique({
     where: { id: challenge.userId },
@@ -50,12 +82,25 @@ async function resolveCanaryChallengeUser(challengeToken: string) {
       organization: { select: { name: true, slug: true } },
     },
   });
-  if (!user || !user.isActive) return null;
+  if (!user || !user.isActive) {
+    return { ok: false, status: 404, error: "MFA_NOT_ACTIVE" };
+  }
 
-  const effective = evaluateE6EffectiveMode(user.id, readE6Environment());
-  if (effective.mode !== "CANARY") return null;
+  const effective = evaluateE7EffectiveMode(user.id, readE7Environment());
 
-  return user;
+  if (effective.mode === "ENFORCE" && !effective.ready) {
+    return { ok: false, status: 503, error: "MFA_NOT_CONFIGURED" };
+  }
+
+  if (!requiresE7MfaChallenge(effective)) {
+    return { ok: false, status: 404, error: "MFA_NOT_ACTIVE" };
+  }
+
+  return {
+    ok: true,
+    user,
+    mode: effective.mode,
+  };
 }
 
 mfaLoginRouter.post("/auth/mfa/resend", async (req, res) => {
@@ -65,15 +110,15 @@ mfaLoginRouter.post("/auth/mfa/resend", async (req, res) => {
       return res.status(400).json({ error: "MFA_CHALLENGE_REQUIRED" });
     }
 
-    const user = await resolveCanaryChallengeUser(challengeToken);
-    if (!user) {
-      return res.status(404).json({ error: "MFA_NOT_ACTIVE" });
+    const resolution = await resolveMfaChallengeUser(challengeToken);
+    if (!resolution.ok) {
+      return res.status(resolution.status).json({ error: resolution.error });
     }
 
     const pepper = String(process.env.PINGO_MFA_OTP_PEPPER ?? "").trim();
     const result = await resendE6EmailCanary(prisma as any, {
       challengeToken,
-      organizationId: user.organizationId,
+      organizationId: resolution.user.organizationId,
       pepper,
     });
 
@@ -114,11 +159,12 @@ mfaLoginRouter.post("/auth/mfa/verify", async (req, res) => {
       return res.status(400).json({ error: "MFA_CHALLENGE_CODE_REQUIRED" });
     }
 
-    const canaryUser = await resolveCanaryChallengeUser(challengeToken);
-    if (!canaryUser) {
-      return res.status(404).json({ error: "MFA_NOT_ACTIVE" });
+    const resolution = await resolveMfaChallengeUser(challengeToken);
+    if (!resolution.ok) {
+      return res.status(resolution.status).json({ error: resolution.error });
     }
 
+    const { user, mode } = resolution;
     const pepper = String(process.env.PINGO_MFA_OTP_PEPPER ?? "").trim();
     const verified = await verifyLoginEmailMfaChallenge(prisma as any, {
       challengeToken,
@@ -138,7 +184,7 @@ mfaLoginRouter.post("/auth/mfa/verify", async (req, res) => {
       return res.status(status).json({ error: `MFA_${verified.reason}` });
     }
 
-    if (verified.userId !== canaryUser.id) {
+    if (verified.userId !== user.id) {
       return res.status(401).json({ error: "MFA_USER_MISMATCH" });
     }
 
@@ -147,7 +193,7 @@ mfaLoginRouter.post("/auth/mfa/verify", async (req, res) => {
 
     if (trustDevice) {
       const trusted = await createTrustedDevice(prisma as any, {
-        userId: canaryUser.id,
+        userId: user.id,
         label: "Trusted browser",
         userAgent: req.get("user-agent") ?? null,
       });
@@ -156,8 +202,8 @@ mfaLoginRouter.post("/auth/mfa/verify", async (req, res) => {
 
       await prisma.securityEvent.create({
         data: {
-          userId: canaryUser.id,
-          organizationId: canaryUser.organizationId,
+          userId: user.id,
+          organizationId: user.organizationId,
           type: "TRUSTED_DEVICE_CREATED",
           userAgent: req.get("user-agent") ?? null,
           metadata: {
@@ -169,21 +215,21 @@ mfaLoginRouter.post("/auth/mfa/verify", async (req, res) => {
     }
 
     const session = await createAuthSession(prisma as any, {
-      userId: canaryUser.id,
-      organizationId: canaryUser.organizationId,
-      tokenVersion: canaryUser.tokenVersion,
+      userId: user.id,
+      organizationId: user.organizationId,
+      tokenVersion: user.tokenVersion,
       trustedDeviceId,
       userAgent: req.get("user-agent") ?? null,
     });
 
     await prisma.securityEvent.create({
       data: {
-        userId: canaryUser.id,
-        organizationId: canaryUser.organizationId,
+        userId: user.id,
+        organizationId: user.organizationId,
         type: "AUTH_SESSION_CREATED",
         userAgent: req.get("user-agent") ?? null,
         metadata: {
-          mode: "CANARY",
+          mode,
           sessionId: session.sessionId,
           trustedDeviceId,
           mfaVerified: true,
@@ -192,15 +238,15 @@ mfaLoginRouter.post("/auth/mfa/verify", async (req, res) => {
     });
 
     const token = signAuthToken({
-      sub: canaryUser.id,
-      orgId: canaryUser.organizationId,
-      email: canaryUser.email,
-      role: canaryUser.role,
-      tokenVersion: canaryUser.tokenVersion,
+      sub: user.id,
+      orgId: user.organizationId,
+      email: user.email,
+      role: user.role,
+      tokenVersion: user.tokenVersion,
     });
 
     await prisma.dashboardUser.update({
-      where: { id: canaryUser.id },
+      where: { id: user.id },
       data: { lastLoginAt: new Date() },
     });
 
@@ -213,12 +259,12 @@ mfaLoginRouter.post("/auth/mfa/verify", async (req, res) => {
     return res.json({
       ok: true,
       user: {
-        id: canaryUser.id,
-        email: canaryUser.email,
-        orgId: canaryUser.organizationId,
-        role: canaryUser.role,
-        organizationName: canaryUser.organization?.name ?? null,
-        organizationSlug: canaryUser.organization?.slug ?? null,
+        id: user.id,
+        email: user.email,
+        orgId: user.organizationId,
+        role: user.role,
+        organizationName: user.organization?.name ?? null,
+        organizationSlug: user.organization?.slug ?? null,
       },
       trustedDevice: Boolean(trustedDeviceId),
     });
