@@ -68,7 +68,7 @@ mfaLoginRouter.post("/auth/mfa/verify", async (req, res) => {
       trustedDeviceCookie = buildTrustedDeviceCookie(trusted.token);
     }
 
-    const session = await createAuthSession(prisma as any, {
+    await createAuthSession(prisma as any, {
       userId: user.id,
       organizationId: user.organizationId,
       tokenVersion: user.tokenVersion,
@@ -82,7 +82,6 @@ mfaLoginRouter.post("/auth/mfa/verify", async (req, res) => {
       email: user.email,
       role: user.role,
       tokenVersion: user.tokenVersion,
-      sid: session.sessionId,
     });
 
     const cookies = [
