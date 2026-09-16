@@ -15,9 +15,16 @@ import {
   verifyForgotPasswordCodeHandler,
   resetPasswordHandler,
 } from "../controllers/password.controller";
+import { mfaLoginRouter } from "../auth/mfa-login.routes.js";
+import {
+  observeE5ShadowLogin,
+  resolveE5RuntimeMode,
+} from "../auth/mfa-login-runtime.js";
+import { extractTrustedDeviceToken } from "../auth/trusted-device-cookie.js";
 
 const prisma = new PrismaClient();
 export const authRouter = Router();
+authRouter.use(mfaLoginRouter);
 
 // =======================
 // LOGIN
@@ -62,6 +69,26 @@ authRouter.post("/auth/login", async (req, res) => {
 
     if (!ok) {
       return res.status(401).json({ error: "INVALID_CREDENTIALS" });
+    }
+
+    const e5Runtime = resolveE5RuntimeMode(process.env.PINGO_MFA_MODE);
+    if (e5Runtime.enforceBlocked) {
+      console.warn("[auth/login][mfa-e5] ENFORCE_BLOCKED_TO_OFF");
+    }
+
+    if (e5Runtime.mode === "SHADOW") {
+      try {
+        await observeE5ShadowLogin(prisma as any, {
+          userId: user.id,
+          organizationId: user.organizationId,
+          email: user.email,
+          tokenVersion: user.tokenVersion,
+          trustedDeviceToken: extractTrustedDeviceToken(req),
+          userAgent: req.get("user-agent") ?? null,
+        });
+      } catch (shadowError) {
+        console.error("[auth/login][mfa-e5-shadow] OBSERVATION_FAILED", shadowError);
+      }
     }
 
     const token = signAuthToken({
