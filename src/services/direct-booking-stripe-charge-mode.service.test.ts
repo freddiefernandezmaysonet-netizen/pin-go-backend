@@ -5,6 +5,7 @@ import {
   buildDirectBookingCheckoutStripeContext,
   buildDirectBookingRefundStripeContext,
   buildDirectBookingStripeObjectRequestOptions,
+  directBookingDirectChargesAllowedForConnectedAccount,
   directBookingStripeChargeModeMetadata,
   resolveDirectBookingChargeModeFromMetadata,
   resolveDirectBookingStripeChargeMode,
@@ -18,23 +19,75 @@ const stripeClientSource = fs.readFileSync(
 
 test("Direct Booking Stripe charge mode defaults to destination charge", () => {
   assert.equal(
-    resolveDirectBookingStripeChargeMode({}),
+    resolveDirectBookingStripeChargeMode({}, connectedAccountId),
     "DESTINATION_CHARGE"
   );
 });
 
-test("Direct Booking Stripe charge mode enables direct charges only when explicitly true", () => {
+test("Direct Booking Direct Charges fail closed unless the connected account is allowlisted", () => {
   assert.equal(
-    resolveDirectBookingStripeChargeMode({
-      DIRECT_BOOKING_STRIPE_DIRECT_CHARGES_ENABLED: "true",
-    }),
+    resolveDirectBookingStripeChargeMode(
+      {
+        DIRECT_BOOKING_STRIPE_DIRECT_CHARGES_ENABLED: "true",
+      },
+      connectedAccountId
+    ),
+    "DESTINATION_CHARGE"
+  );
+
+  assert.equal(
+    resolveDirectBookingStripeChargeMode(
+      {
+        DIRECT_BOOKING_STRIPE_DIRECT_CHARGES_ENABLED: "true",
+        DIRECT_BOOKING_STRIPE_DIRECT_CHARGES_CANARY_ACCOUNT_IDS:
+          "acct_other",
+      },
+      connectedAccountId
+    ),
+    "DESTINATION_CHARGE"
+  );
+
+  assert.equal(
+    resolveDirectBookingStripeChargeMode(
+      {
+        DIRECT_BOOKING_STRIPE_DIRECT_CHARGES_ENABLED: "true",
+        DIRECT_BOOKING_STRIPE_DIRECT_CHARGES_CANARY_ACCOUNT_IDS:
+          connectedAccountId,
+      },
+      connectedAccountId
+    ),
     "DIRECT_CHARGE"
   );
+
   assert.equal(
-    resolveDirectBookingStripeChargeMode({
-      DIRECT_BOOKING_STRIPE_DIRECT_CHARGES_ENABLED: "false",
-    }),
+    resolveDirectBookingStripeChargeMode(
+      {
+        DIRECT_BOOKING_STRIPE_DIRECT_CHARGES_ENABLED: "false",
+        DIRECT_BOOKING_STRIPE_DIRECT_CHARGES_CANARY_ACCOUNT_IDS:
+          connectedAccountId,
+      },
+      connectedAccountId
+    ),
     "DESTINATION_CHARGE"
+  );
+});
+
+test("Direct Booking Direct Charges can be explicitly expanded after canary with wildcard allowlist", () => {
+  const env = {
+    DIRECT_BOOKING_STRIPE_DIRECT_CHARGES_ENABLED: "true",
+    DIRECT_BOOKING_STRIPE_DIRECT_CHARGES_CANARY_ACCOUNT_IDS: "*",
+  };
+
+  assert.equal(
+    directBookingDirectChargesAllowedForConnectedAccount(
+      connectedAccountId,
+      env
+    ),
+    true
+  );
+  assert.equal(
+    resolveDirectBookingStripeChargeMode(env, connectedAccountId),
+    "DIRECT_CHARGE"
   );
 });
 
@@ -57,7 +110,7 @@ test("destination charge checkout preserves transfer_data destination", () => {
   assert.equal(context.requestOptions, undefined);
 });
 
-test("direct charge checkout removes transfer_data and targets connected account", () => {
+test("direct charge checkout removes transfer_data and targets allowlisted connected account", () => {
   const context = buildDirectBookingCheckoutStripeContext({
     connectedAccountId,
     paymentIntentData: {
@@ -67,6 +120,8 @@ test("direct charge checkout removes transfer_data and targets connected account
     },
     env: {
       DIRECT_BOOKING_STRIPE_DIRECT_CHARGES_ENABLED: "true",
+      DIRECT_BOOKING_STRIPE_DIRECT_CHARGES_CANARY_ACCOUNT_IDS:
+        connectedAccountId,
     },
   });
 
