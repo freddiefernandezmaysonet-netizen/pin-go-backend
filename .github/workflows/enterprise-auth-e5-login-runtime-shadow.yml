@@ -1,0 +1,90 @@
+name: Enterprise Authentication E5 Login Runtime Shadow
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - ".github/workflows/enterprise-auth-e5-login-runtime-shadow.yml"
+      - "src/auth/mfa-core.ts"
+      - "src/auth/mfa-otp.ts"
+      - "src/auth/mfa-email-only-policy.ts"
+      - "src/auth/session-security.policy.ts"
+      - "src/auth/trusted-device-session.persistence.ts"
+      - "src/auth/trusted-device-cookie.ts"
+      - "src/auth/mfa-login-runtime.ts"
+      - "src/auth/mfa-login-challenge.ts"
+      - "src/auth/mfa-login.routes.ts"
+      - "src/auth/enterprise-auth-e5.test.ts"
+      - "src/routes/auth.routes.ts"
+      - "tsconfig.enterprise-auth-e5.json"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  DATABASE_URL: postgresql://postgres:postgres@localhost:5432/pingo_auth_e5?schema=public
+
+jobs:
+  certify:
+    name: E5 OFF-safe login shadow contracts
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: pingo_auth_e5
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci --silent --no-audit --no-fund
+
+      - name: Validate Prisma and migration history
+        run: |
+          npx prisma validate
+          npx prisma generate
+          npx prisma migrate deploy
+
+      - name: Certify E1 through E5 auth contracts
+        run: >-
+          npx tsx --test
+          src/auth/mfa-core.test.ts
+          src/auth/mfa-otp.test.ts
+          src/auth/mfa-otp-delivery.test.ts
+          src/auth/mfa-email-only-session-security.test.ts
+          src/auth/enterprise-auth-e4.test.ts
+          src/auth/enterprise-auth-e5.test.ts
+
+      - name: TypeScript E5 contract
+        run: npx tsc -p tsconfig.enterprise-auth-e5.json
+
+      - name: Certify E5 runtime boundaries
+        shell: bash
+        run: |
+          set -euo pipefail
+          git fetch --no-tags origin main:refs/remotes/origin/main
+          test -z "$(git diff --name-only origin/main...HEAD -- prisma/migrations)"
+          test -z "$(git diff --name-only origin/main...HEAD -- src/lib/auth.ts src/middleware/requireAuth.ts src/server.ts)"
+          ! grep -R "deliverMfaEmailOtp\|sendGuestSms\|Twilio" src/routes/auth.routes.ts src/auth/mfa-login-runtime.ts src/auth/mfa-login.routes.ts
+          grep -q 'normalized === "ENFORCE"' src/auth/mfa-login-runtime.ts
+          grep -q 'mode: "OFF", enforceBlocked: true' src/auth/mfa-login-runtime.ts
+          grep -q 'if (e5Runtime.mode === "SHADOW")' src/routes/auth.routes.ts
