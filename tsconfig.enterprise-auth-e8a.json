@@ -1,0 +1,23 @@
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "types": ["node"],
+    "noEmit": true,
+    "declaration": false,
+    "declarationMap": false,
+    "sourceMap": false
+  },
+  "include": [
+    "src/lib/auth.ts",
+    "src/lib/prisma.ts",
+    "src/middleware/requireAuth.ts",
+    "src/auth/session-security.policy.ts",
+    "src/auth/trusted-device-session.persistence.ts",
+    "src/auth/session-binding-shadow.ts",
+    "src/auth/mfa-login-runtime.ts",
+    "src/auth/mfa-login.routes.ts",
+    "src/auth/mfa-global-runtime.ts",
+    "src/routes/auth.routes.ts",
+    "src/auth/enterprise-auth-e8a.test.ts"
+  ]
+}
