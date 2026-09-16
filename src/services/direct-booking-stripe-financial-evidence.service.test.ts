@@ -1,6 +1,9 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { extractDirectBookingStripeFinancialEvidence } from "./direct-booking-stripe-financial-evidence.service.js";
+import {
+  extractDirectBookingStripeFinancialEvidence,
+  reconcileDirectBookingDirectChargeFinancialEvidence,
+} from "./direct-booking-stripe-financial-evidence.service.js";
 
 test("extracts direct charge Stripe fee and actual host net from expanded balance transaction", () => {
   const paymentIntent = {
@@ -96,4 +99,165 @@ test("latest charge id alone is preserved without fabricating fee data", () => {
   assert.equal(evidence.stripeBalanceTransactionId, null);
   assert.equal(evidence.stripeProcessingFeeAmountCents, null);
   assert.equal(evidence.hostNetAmountCents, null);
+});
+
+test("financial reconciliation is a strict no-op for legacy Direct Booking sessions", async () => {
+  let reservationRead = false;
+  let reservationWrite = false;
+  let stripeRead = false;
+
+  const result = await reconcileDirectBookingDirectChargeFinancialEvidence({
+    reservationRepository: {
+      async findUnique() {
+        reservationRead = true;
+        return null;
+      },
+      async update() {
+        reservationWrite = true;
+        return null;
+      },
+    },
+    stripeClient: {
+      paymentIntents: {
+        async retrieve() {
+          stripeRead = true;
+          return {} as any;
+        },
+      },
+    },
+    event: {
+      type: "checkout.session.completed",
+      data: {
+        object: {
+          id: "cs_legacy",
+          metadata: {
+            flow: "direct_booking",
+          },
+        },
+      },
+    } as any,
+  });
+
+  assert.deepEqual(result, {
+    handled: false,
+    reason: "NOT_DIRECT_CHARGE",
+  });
+  assert.equal(reservationRead, false);
+  assert.equal(reservationWrite, false);
+  assert.equal(stripeRead, false);
+});
+
+test("financial reconciliation stores actual Stripe fee and host net for Direct Charges", async () => {
+  const updates: any[] = [];
+  const stripeCalls: any[] = [];
+
+  const result = await reconcileDirectBookingDirectChargeFinancialEvidence({
+    reservationRepository: {
+      async findUnique() {
+        return {
+          id: "res_direct",
+          stripePaymentIntentId: "pi_direct",
+          stripeConnectedAccountId: "acct_host",
+          stripeChargeId: null,
+          stripeTransferId: null,
+          stripeApplicationFeeId: null,
+          hostPayoutAmount: 9,
+          externalRaw: {
+            existing: true,
+          },
+        };
+      },
+      async update(args: any) {
+        updates.push(args);
+        return args;
+      },
+    },
+    stripeClient: {
+      paymentIntents: {
+        async retrieve(...args: any[]) {
+          stripeCalls.push(args);
+
+          if (args.length < 3) {
+            const error: any = new Error("No such payment_intent");
+            error.code = "resource_missing";
+            throw error;
+          }
+
+          assert.deepEqual(args[2], {
+            stripeAccount: "acct_host",
+          });
+
+          return {
+            id: "pi_direct",
+            application_fee_amount: 123,
+            latest_charge: {
+              id: "ch_direct",
+              object: "charge",
+              transfer: null,
+              application_fee: { id: "fee_direct" },
+              balance_transaction: {
+                id: "txn_direct",
+                object: "balance_transaction",
+                fee: 182,
+                net: 818,
+                currency: "usd",
+              },
+            },
+          } as any;
+        },
+      },
+    },
+    event: {
+      id: "evt_direct",
+      type: "checkout.session.completed",
+      account: "acct_host",
+      data: {
+        object: {
+          id: "cs_direct",
+          payment_intent: "pi_direct",
+          metadata: {
+            flow: "direct_booking",
+            stripeChargeMode: "DIRECT_CHARGE",
+            stripeConnectedAccountId: "acct_host",
+          },
+        },
+      },
+    } as any,
+    now: new Date("2026-09-16T20:00:00.000Z"),
+  });
+
+  assert.equal(stripeCalls.length, 2);
+  assert.equal(updates.length, 1);
+  assert.equal(updates[0].where.id, "res_direct");
+  assert.equal(updates[0].data.hostPayoutAmount, 8.18);
+  assert.equal(updates[0].data.stripeChargeId, "ch_direct");
+  assert.equal(updates[0].data.stripeApplicationFeeId, "fee_direct");
+  assert.equal(
+    updates[0].data.externalRaw.stripeFinancialEvidence.stripeProcessingFeeAmount,
+    0.59
+  );
+  assert.equal(
+    updates[0].data.externalRaw.stripeFinancialEvidence.applicationFeeAmount,
+    1.23
+  );
+  assert.equal(
+    updates[0].data.externalRaw.stripeFinancialEvidence.hostNetAmount,
+    8.18
+  );
+  assert.equal(
+    updates[0].data.externalRaw.stripeFinancialEvidence.stripeBalanceTransactionId,
+    "txn_direct"
+  );
+  assert.equal(updates[0].data.externalRaw.existing, true);
+
+  assert.deepEqual(result, {
+    handled: true,
+    reservationId: "res_direct",
+    paymentIntentId: "pi_direct",
+    connectedAccountId: "acct_host",
+    chargeMode: "DIRECT_CHARGE",
+    stripeProcessingFeeAmountCents: 59,
+    hostNetAmountCents: 818,
+    stripeBalanceTransactionId: "txn_direct",
+  });
 });
