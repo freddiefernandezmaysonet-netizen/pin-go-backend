@@ -74,8 +74,11 @@ jobs:
           src/auth/enterprise-auth-e4.test.ts
           src/auth/enterprise-auth-e5.test.ts
 
-      - name: TypeScript E5 contract
+      - name: TypeScript E5 module contract
         run: npx tsc -p tsconfig.enterprise-auth-e5.json
+
+      - name: Load E5 login routes
+        run: npx tsx -e "import('./src/auth/mfa-login.routes.ts').then(() => import('./src/routes/auth.routes.ts'))"
 
       - name: Certify E5 runtime boundaries
         shell: bash
