@@ -1,0 +1,135 @@
+// Pin&Go Enterprise Authentication persistence models.
+// Multi-file Prisma schema support is GA in Prisma >= 6.7.
+// Relations are enforced by PostgreSQL migrations; scalar foreign-key fields are
+// intentionally used here to avoid coupling auth persistence to legacy model files.
+
+enum AuthFactorType {
+  PASSKEY
+  TOTP
+  SMS
+  EMAIL
+}
+
+enum AuthFactorStatus {
+  PENDING
+  VERIFIED
+  DISABLED
+}
+
+enum MfaChallengeStatus {
+  PENDING
+  VERIFIED
+  EXPIRED
+  LOCKED
+  CONSUMED
+}
+
+enum SecurityEventType {
+  MFA_FACTOR_REGISTERED
+  MFA_FACTOR_VERIFIED
+  MFA_FACTOR_DISABLED
+  MFA_CHALLENGE_CREATED
+  MFA_CHALLENGE_SENT
+  MFA_CHALLENGE_VERIFIED
+  MFA_CHALLENGE_FAILED
+  MFA_CHALLENGE_LOCKED
+  MFA_CHALLENGE_EXPIRED
+  TRUSTED_DEVICE_CREATED
+  TRUSTED_DEVICE_REVOKED
+  AUTH_SESSION_CREATED
+  AUTH_SESSION_REVOKED
+  AUTH_SESSION_EXPIRED
+}
+
+model AuthFactor {
+  id          String           @id @default(cuid())
+  userId      String
+  type        AuthFactorType
+  status      AuthFactorStatus @default(PENDING)
+  label       String?
+  destination String?
+  verifiedAt  DateTime?
+  lastUsedAt  DateTime?
+  createdAt   DateTime         @default(now())
+  updatedAt   DateTime         @updatedAt
+
+  @@unique([userId, type, destination])
+  @@index([userId, status])
+  @@index([userId, type])
+}
+
+model MfaChallenge {
+  id                 String             @id @default(cuid())
+  userId             String
+  factorId           String
+  purpose            String             @default("LOGIN_MFA")
+  challengeTokenHash String             @unique
+  otpHash            String
+  status             MfaChallengeStatus @default(PENDING)
+  attemptCount       Int                @default(0)
+  maxAttempts        Int                @default(5)
+  expiresAt          DateTime
+  lastSentAt         DateTime?
+  verifiedAt         DateTime?
+  consumedAt         DateTime?
+  createdAt          DateTime           @default(now())
+
+  @@index([userId, status])
+  @@index([factorId, status])
+  @@index([expiresAt])
+}
+
+model SecurityEvent {
+  id             String            @id @default(cuid())
+  userId         String?
+  organizationId String?
+  type           SecurityEventType
+  ipHash         String?
+  userAgent      String?
+  metadata       Json?
+  createdAt      DateTime          @default(now())
+
+  @@index([userId, createdAt])
+  @@index([organizationId, createdAt])
+  @@index([type, createdAt])
+}
+
+model TrustedDevice {
+  id         String   @id @default(cuid())
+  userId     String
+  tokenHash  String   @unique
+  label      String?
+  userAgent  String?
+  lastIpHash String?
+  expiresAt  DateTime
+  lastUsedAt DateTime?
+  revokedAt  DateTime?
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  @@index([userId, revokedAt])
+  @@index([expiresAt])
+}
+
+model AuthSession {
+  id                String   @id @default(cuid())
+  userId            String
+  organizationId    String
+  tokenVersion      Int
+  authenticatedAt   DateTime @default(now())
+  lastActivityAt    DateTime @default(now())
+  absoluteExpiresAt DateTime
+  trustedDeviceId   String?
+  userAgent         String?
+  lastIpHash        String?
+  revokedAt         DateTime?
+  revokeReason      String?
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+
+  @@index([userId, revokedAt])
+  @@index([organizationId, revokedAt])
+  @@index([absoluteExpiresAt])
+  @@index([lastActivityAt])
+  @@index([trustedDeviceId])
+}

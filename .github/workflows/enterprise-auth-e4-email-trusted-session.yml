@@ -1,0 +1,96 @@
+name: Enterprise Authentication E4 Email Trusted Session
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - ".github/workflows/enterprise-auth-e4-email-trusted-session.yml"
+      - "prisma.config.ts"
+      - "prisma/auth.prisma"
+      - "prisma/migrations/20260916133000_add_enterprise_auth_e4_trusted_session/migration.sql"
+      - "src/auth/mfa-otp.ts"
+      - "src/auth/mfa-email-otp-delivery.ts"
+      - "src/auth/trusted-device-session.persistence.ts"
+      - "src/auth/enterprise-auth-e4.test.ts"
+      - "tsconfig.enterprise-auth-e4.json"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  DATABASE_URL: postgresql://postgres:postgres@localhost:5432/pingo_auth_e4?schema=public
+  PSQL_DATABASE_URL: postgresql://postgres:postgres@localhost:5432/pingo_auth_e4
+
+jobs:
+  certify:
+    name: PostgreSQL + Prisma + E4 auth contracts
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: pingo_auth_e4
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci --silent --no-audit --no-fund
+
+      - name: Validate multi-file Prisma schema
+        run: |
+          npx prisma validate
+          npx prisma generate
+
+      - name: Apply complete migration history to ephemeral PostgreSQL
+        run: npx prisma migrate deploy
+
+      - name: Verify E4 persistence objects
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(psql "$PSQL_DATABASE_URL" -Atc "SELECT COUNT(*) FROM pg_tables WHERE schemaname='public' AND tablename='TrustedDevice';")" = "1"
+          test "$(psql "$PSQL_DATABASE_URL" -Atc "SELECT COUNT(*) FROM pg_tables WHERE schemaname='public' AND tablename='AuthSession';")" = "1"
+          test "$(psql "$PSQL_DATABASE_URL" -Atc "SELECT COUNT(*) FROM pg_constraint WHERE conname='TrustedDevice_userId_fkey';")" = "1"
+          test "$(psql "$PSQL_DATABASE_URL" -Atc "SELECT COUNT(*) FROM pg_constraint WHERE conname='AuthSession_userId_fkey';")" = "1"
+          test "$(psql "$PSQL_DATABASE_URL" -Atc "SELECT COUNT(*) FROM pg_constraint WHERE conname='AuthSession_organizationId_fkey';")" = "1"
+          test "$(psql "$PSQL_DATABASE_URL" -Atc "SELECT COUNT(*) FROM pg_constraint WHERE conname='AuthSession_trustedDeviceId_fkey';")" = "1"
+
+      - name: Certify E1 through E4 auth contracts
+        run: >-
+          npx tsx --test
+          src/auth/mfa-core.test.ts
+          src/auth/mfa-otp.test.ts
+          src/auth/mfa-otp-delivery.test.ts
+          src/auth/mfa-email-only-session-security.test.ts
+          src/auth/enterprise-auth-e4.test.ts
+
+      - name: TypeScript E4 contract
+        run: npx tsc -p tsconfig.enterprise-auth-e4.json
+
+      - name: Certify dormant runtime boundary
+        shell: bash
+        run: |
+          set -euo pipefail
+          git fetch --no-tags origin main:refs/remotes/origin/main
+          git diff origin/main...HEAD -- src/routes/auth.routes.ts src/middleware/requireAuth.ts src/lib/auth.ts src/server.ts | tee /tmp/e4-runtime.diff
+          test ! -s /tmp/e4-runtime.diff
+          ! grep -R "sendGuestSms\|Twilio" src/auth/mfa-email-otp-delivery.ts src/auth/trusted-device-session.persistence.ts
