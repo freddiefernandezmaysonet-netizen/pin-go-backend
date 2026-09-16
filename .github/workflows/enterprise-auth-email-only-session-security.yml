@@ -1,0 +1,35 @@
+name: Enterprise Authentication Email Only Session Security
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - ".github/workflows/enterprise-auth-email-only-session-security.yml"
+      - "src/auth/mfa-email-only-policy.ts"
+      - "src/auth/session-security.policy.ts"
+      - "src/auth/mfa-email-only-session-security.test.ts"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  certify:
+    name: EMAIL ONLY and dormant session security contracts
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+      - run: npm ci --silent --no-audit --no-fund
+      - name: Certify policy contracts
+        run: npx tsx --test src/auth/mfa-email-only-session-security.test.ts
+      - name: Certify dormant boundary
+        shell: bash
+        run: |
+          set -euo pipefail
+          ! grep -R "sendGuestSms\|Twilio" src/auth/mfa-email-only-policy.ts src/auth/session-security.policy.ts
+          ! grep -R "PINGO_MFA_MODE.*ENFORCE" src/auth/mfa-email-only-policy.ts src/auth/session-security.policy.ts
