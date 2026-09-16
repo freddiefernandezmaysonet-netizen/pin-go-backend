@@ -2,6 +2,7 @@ import { Router } from "express";
 import { PrismaClient } from "@prisma/client";
 import { requireAuth } from "../middleware/requireAuth";
 import { summarizeSmsFinancialTelemetry } from "../services/sms-financial-telemetry.service";
+import { getStripeFinancialActuals } from "../services/stripe-financial-adapter.service";
 
 const prisma = new PrismaClient();
 const router = Router();
@@ -48,6 +49,7 @@ router.get("/financial/overview", requireAuth, async (req, res) => {
       totalReservations,
       twilioSmsMessages,
       totalAutomationExecutions,
+      stripeActuals,
     ] = await Promise.all([
       prisma.organization.count(),
 
@@ -100,6 +102,8 @@ router.get("/financial/overview", requireAuth, async (req, res) => {
           },
         },
       }),
+
+      getStripeFinancialActuals(prisma, { since }),
     ]);
 
     const smsTelemetry = summarizeSmsFinancialTelemetry(
@@ -297,6 +301,8 @@ router.get("/financial/overview", requireAuth, async (req, res) => {
         net: money(netProfit),
         margin: money(margin),
       },
+
+      stripeActuals,
 
       organizations: orgUsage,
     });
