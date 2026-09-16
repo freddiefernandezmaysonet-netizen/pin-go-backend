@@ -39,7 +39,7 @@ type ChallengeUser = {
   tokenVersion: number;
   organization: {
     name: string;
-    slug: string;
+    slug: string | null;
   } | null;
 };
 
