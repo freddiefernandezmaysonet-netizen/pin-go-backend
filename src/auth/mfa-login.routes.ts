@@ -12,8 +12,9 @@ import {
   createAuthSession,
   createTrustedDevice,
 } from "./trusted-device-session.persistence.js";
-import { buildAuthCookie, signAuthToken } from "../lib/auth.js";
+import { buildAuthCookie } from "../lib/auth.js";
 import { buildTrustedDeviceCookie } from "./trusted-device-cookie.js";
+import { signSessionBoundAuthToken } from "./session-bound-token.js";
 
 const prisma = new PrismaClient();
 export const mfaLoginRouter = Router();
@@ -38,7 +39,7 @@ type ChallengeUser = {
   tokenVersion: number;
   organization: {
     name: string;
-    slug: string;
+    slug: string | null;
   } | null;
 };
 
@@ -237,13 +238,16 @@ mfaLoginRouter.post("/auth/mfa/verify", async (req, res) => {
       },
     });
 
-    const token = signAuthToken({
-      sub: user.id,
-      orgId: user.organizationId,
-      email: user.email,
-      role: user.role,
-      tokenVersion: user.tokenVersion,
-    });
+    const token = signSessionBoundAuthToken(
+      {
+        sub: user.id,
+        orgId: user.organizationId,
+        email: user.email,
+        role: user.role,
+        tokenVersion: user.tokenVersion,
+      },
+      session.sessionId
+    );
 
     await prisma.dashboardUser.update({
       where: { id: user.id },

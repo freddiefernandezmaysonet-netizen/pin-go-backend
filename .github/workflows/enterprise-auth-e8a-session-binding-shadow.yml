@@ -1,0 +1,115 @@
+name: Enterprise Authentication E8A Session Binding Shadow
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - ".github/workflows/enterprise-auth-e5-login-runtime-shadow.yml"
+      - ".github/workflows/enterprise-auth-e6-email-otp-canary.yml"
+      - ".github/workflows/enterprise-auth-e7-global-email-mfa.yml"
+      - ".github/workflows/enterprise-auth-e8a-session-binding-shadow.yml"
+      - "src/auth/session-bound-token.ts"
+      - "src/auth/session-binding-shadow.ts"
+      - "src/auth/enterprise-auth-e7.test.ts"
+      - "src/auth/enterprise-auth-e8a.test.ts"
+      - "src/auth/mfa-login.routes.ts"
+      - "src/middleware/requireAuth.ts"
+      - "src/routes/auth.routes.ts"
+      - "tsconfig.enterprise-auth-e8a.json"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  DATABASE_URL: postgresql://postgres:postgres@localhost:5432/pingo_auth_e8a?schema=public
+
+jobs:
+  certify:
+    name: E8A session binding shadow contracts
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: pingo_auth_e8a
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci --silent --no-audit --no-fund
+
+      - name: Validate Prisma and migration history
+        run: |
+          npx prisma validate
+          npx prisma generate
+          npx prisma migrate deploy
+
+      - name: Certify E1 through E8A auth contracts
+        run: >-
+          npx tsx --test
+          src/auth/mfa-core.test.ts
+          src/auth/mfa-otp.test.ts
+          src/auth/mfa-otp-delivery.test.ts
+          src/auth/mfa-email-only-session-security.test.ts
+          src/auth/enterprise-auth-e4.test.ts
+          src/auth/enterprise-auth-e5.test.ts
+          src/auth/enterprise-auth-e6.test.ts
+          src/auth/mfa-email-branding.test.ts
+          src/auth/enterprise-auth-e7.test.ts
+          src/auth/enterprise-auth-e8a.test.ts
+
+      - name: TypeScript E8A contract
+        run: npx tsc -p tsconfig.enterprise-auth-e8a.json
+
+      - name: Load E8A auth runtime
+        run: >-
+          npx tsx -e "Promise.all([
+          import('./src/auth/session-bound-token.ts'),
+          import('./src/auth/session-binding-shadow.ts'),
+          import('./src/auth/mfa-login.routes.ts'),
+          import('./src/middleware/requireAuth.ts'),
+          import('./src/routes/auth.routes.ts')
+          ])"
+
+      - name: Certify E8A safety boundaries
+        shell: bash
+        run: |
+          set -euo pipefail
+          git fetch --no-tags origin main:refs/remotes/origin/main
+
+          test -z "$(git diff --name-only origin/main...HEAD -- prisma/migrations)"
+          test -z "$(git diff --name-only origin/main...HEAD -- prisma/auth.prisma src/lib/auth.ts src/lib/prisma.ts src/server.ts src/controllers/password.controller.ts src/routes/public.signup.success.routes.ts)"
+
+          allowed='^(\.github/workflows/enterprise-auth-e5-login-runtime-shadow\.yml|\.github/workflows/enterprise-auth-e6-email-otp-canary\.yml|\.github/workflows/enterprise-auth-e7-global-email-mfa\.yml|\.github/workflows/enterprise-auth-e8a-session-binding-shadow\.yml|src/auth/session-bound-token\.ts|src/auth/session-binding-shadow\.ts|src/auth/enterprise-auth-e7\.test\.ts|src/auth/enterprise-auth-e8a\.test\.ts|src/auth/mfa-login\.routes\.ts|src/middleware/requireAuth\.ts|src/routes/auth\.routes\.ts|tsconfig\.enterprise-auth-e8a\.json)$'
+          unexpected="$(git diff --name-only origin/main...HEAD | grep -Ev "$allowed" || true)"
+          test -z "$unexpected"
+
+          grep -q 'signSessionBoundAuthToken' src/routes/auth.routes.ts
+          grep -q 'signSessionBoundAuthToken' src/auth/mfa-login.routes.ts
+          grep -q 'verifySessionBoundAuthToken' src/middleware/requireAuth.ts
+          grep -q 'observeSessionBindingShadow' src/middleware/requireAuth.ts
+          grep -q 'WOULD_DENY' src/middleware/requireAuth.ts
+          ! grep -q 'SESSION_EXPIRED' src/middleware/requireAuth.ts
+          grep -q 'revokeBoundSessionOnLogout' src/routes/auth.routes.ts
+          grep -q 'AUTH_SESSION_REVOKED' src/auth/session-binding-shadow.ts
+          grep -q 'SESSION_ACTIVITY_TOUCH_INTERVAL_MS = 5 \* 60 \* 1000' src/auth/session-binding-shadow.ts
+          ! grep -R "sendGuestSms\|Twilio\|factorType: \"SMS\"" src/auth/session-bound-token.ts src/auth/session-binding-shadow.ts src/middleware/requireAuth.ts

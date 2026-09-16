@@ -91,11 +91,12 @@ test("E7 direct organization registration no longer issues an auth session", () 
   assert.notEqual(start, -1);
 
   const registerSource = source.slice(start);
+  assert.doesNotMatch(registerSource, /signSessionBoundAuthToken\(/);
   assert.doesNotMatch(registerSource, /signAuthToken\(/);
   assert.doesNotMatch(registerSource, /Set-Cookie/);
   assert.match(registerSource, /requiresLogin:\s*true/);
 
-  const totalTokenIssues = source.match(/signAuthToken\(/g) ?? [];
+  const totalTokenIssues = source.match(/signSessionBoundAuthToken\(/g) ?? [];
   assert.equal(totalTokenIssues.length, 1);
 });
 
@@ -103,6 +104,7 @@ test("E7 Stripe signup success never auto-logs a new account in", () => {
   const source = readFileSync("src/routes/public.signup.success.routes.ts", "utf8");
 
   assert.doesNotMatch(source, /signAuthToken/);
+  assert.doesNotMatch(source, /signSessionBoundAuthToken/);
   assert.doesNotMatch(source, /buildAuthCookie/);
   assert.doesNotMatch(source, /Set-Cookie/);
   assert.match(source, /autoLoggedIn:\s*false/);

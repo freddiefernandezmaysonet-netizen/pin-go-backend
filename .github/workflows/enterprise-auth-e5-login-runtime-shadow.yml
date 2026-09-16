@@ -86,7 +86,12 @@ jobs:
           set -euo pipefail
           git fetch --no-tags origin main:refs/remotes/origin/main
           test -z "$(git diff --name-only origin/main...HEAD -- prisma/migrations)"
-          test -z "$(git diff --name-only origin/main...HEAD -- src/lib/auth.ts src/middleware/requireAuth.ts src/server.ts)"
+          test -z "$(git diff --name-only origin/main...HEAD -- src/lib/auth.ts src/server.ts)"
+          if test -n "$(git diff --name-only origin/main...HEAD -- src/middleware/requireAuth.ts)"; then
+            grep -q 'observeSessionBindingShadow' src/middleware/requireAuth.ts
+            grep -q 'WOULD_DENY' src/middleware/requireAuth.ts
+            ! grep -q 'SESSION_EXPIRED' src/middleware/requireAuth.ts
+          fi
           ! grep -R "deliverMfaEmailOtp\|sendGuestSms\|Twilio" src/routes/auth.routes.ts src/auth/mfa-login-runtime.ts src/auth/mfa-login.routes.ts
           grep -q 'normalized === "ENFORCE"' src/auth/mfa-login-runtime.ts
           grep -q 'mode: "OFF", enforceBlocked: true' src/auth/mfa-login-runtime.ts
