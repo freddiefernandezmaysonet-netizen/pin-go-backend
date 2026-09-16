@@ -8,6 +8,7 @@ on:
       - "prisma.config.ts"
       - "prisma/auth.prisma"
       - "prisma/migrations/20260916133000_add_enterprise_auth_e4_trusted_session/migration.sql"
+      - "src/auth/mfa-otp.ts"
       - "src/auth/mfa-email-otp-delivery.ts"
       - "src/auth/trusted-device-session.persistence.ts"
       - "src/auth/enterprise-auth-e4.test.ts"
