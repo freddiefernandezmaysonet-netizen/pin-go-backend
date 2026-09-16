@@ -33,4 +33,14 @@ jobs:
         run: node --import tsx --test src/services/direct-booking-stripe-charge-mode.service.test.ts
 
       - name: Type-check charge mode policy
-        run: npx tsc -p tsconfig.direct-booking-direct-charges-v1.json
+        shell: bash
+        run: |
+          set -o pipefail
+          npx tsc -p tsconfig.direct-booking-direct-charges-v1.json 2>&1 | tee direct-booking-direct-charges-tsc.log
+
+      - name: Upload type-check diagnostics
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: direct-booking-direct-charges-typecheck
+          path: direct-booking-direct-charges-tsc.log
