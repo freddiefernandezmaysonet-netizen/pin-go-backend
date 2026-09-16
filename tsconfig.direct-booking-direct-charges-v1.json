@@ -9,6 +9,8 @@
     "src/services/direct-booking-stripe-charge-mode.service.ts",
     "src/services/direct-booking-stripe-charge-mode.service.test.ts",
     "src/services/direct-booking-stripe-resource-context.service.ts",
-    "src/services/direct-booking-stripe-resource-context.service.test.ts"
+    "src/services/direct-booking-stripe-resource-context.service.test.ts",
+    "src/services/direct-booking-stripe-refund.service.ts",
+    "src/services/direct-booking-stripe-refund.service.test.ts"
   ]
 }
