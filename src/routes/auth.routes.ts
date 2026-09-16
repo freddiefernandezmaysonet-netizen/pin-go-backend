@@ -2,11 +2,9 @@ import { Router } from "express";
 import { PrismaClient } from "@prisma/client";
 import {
   comparePassword,
-  signAuthToken,
   buildAuthCookie,
   buildClearAuthCookie,
   extractTokenFromRequest,
-  verifyAuthToken,
   hashPassword,
 } from "../lib/auth";
 import { validatePasswordPolicy } from "../lib/passwordPolicy";
@@ -26,6 +24,14 @@ import {
 } from "../auth/mfa-global-runtime.js";
 import { createAuthSession } from "../auth/trusted-device-session.persistence.js";
 import { extractTrustedDeviceToken } from "../auth/trusted-device-cookie.js";
+import {
+  signSessionBoundAuthToken,
+  verifySessionBoundAuthToken,
+} from "../auth/session-bound-token.js";
+import {
+  observeSessionBindingShadow,
+  revokeBoundSessionOnLogout,
+} from "../auth/session-binding-shadow.js";
 
 const prisma = new PrismaClient();
 export const authRouter = Router();
@@ -90,6 +96,7 @@ authRouter.post("/auth/login", async (req, res) => {
     const trustedDeviceToken = extractTrustedDeviceToken(req);
     const e6Environment = readE6Environment();
     const e6Runtime = evaluateE7EffectiveMode(user.id, e6Environment);
+    let boundSessionId: string | null = null;
 
     if (e6Runtime.mode === "ENFORCE" && !e6Runtime.ready) {
       console.error("[auth/login][mfa-e7-enforce] CONFIGURATION_BLOCKED", {
@@ -100,7 +107,7 @@ authRouter.post("/auth/login", async (req, res) => {
 
     const observeShadow = async () => {
       try {
-        await observeE5ShadowLogin(prisma as any, {
+        const observation = await observeE5ShadowLogin(prisma as any, {
           userId: user.id,
           organizationId: user.organizationId,
           email: user.email,
@@ -108,11 +115,14 @@ authRouter.post("/auth/login", async (req, res) => {
           trustedDeviceToken,
           userAgent: req.get("user-agent") ?? null,
         });
+        boundSessionId = observation.sessionId ?? boundSessionId;
+        return observation;
       } catch (shadowError) {
         console.error(
           "[auth/login][mfa-e6-shadow] OBSERVATION_FAILED",
           shadowError
         );
+        return null;
       }
     };
 
@@ -131,6 +141,7 @@ authRouter.post("/auth/login", async (req, res) => {
             trustedDeviceId: trustedDevice.id,
             userAgent: req.get("user-agent") ?? null,
           });
+          boundSessionId = session.sessionId;
 
           await prisma.securityEvent.create({
             data: {
@@ -185,13 +196,16 @@ authRouter.post("/auth/login", async (req, res) => {
       await observeShadow();
     }
 
-    const token = signAuthToken({
-      sub: user.id,
-      orgId: user.organizationId,
-      email: user.email,
-      role: user.role,
-      tokenVersion: user.tokenVersion,
-    });
+    const token = signSessionBoundAuthToken(
+      {
+        sub: user.id,
+        orgId: user.organizationId,
+        email: user.email,
+        role: user.role,
+        tokenVersion: user.tokenVersion,
+      },
+      boundSessionId
+    );
 
     await prisma.dashboardUser.update({
       where: { id: user.id },
@@ -226,12 +240,33 @@ authRouter.post("/auth/login", async (req, res) => {
 // LOGOUT
 // =======================
 authRouter.post("/auth/logout", async (req, res) => {
+  const token = extractTokenFromRequest(req);
+
   res.setHeader(
     "Set-Cookie",
     buildClearAuthCookie({
       requestOrigin: req.get("origin"),
     })
   );
+
+  if (token) {
+    try {
+      const payload = verifySessionBoundAuthToken(token);
+      await revokeBoundSessionOnLogout(prisma as any, {
+        sessionId: payload.sid,
+        userId: payload.sub,
+        organizationId: payload.orgId,
+        tokenVersion: payload.tokenVersion,
+        userAgent: req.get("user-agent") ?? null,
+      });
+    } catch (logoutSessionError) {
+      console.error(
+        "[auth/logout][session-e8a] REVOCATION_FAILED",
+        logoutSessionError
+      );
+    }
+  }
+
   return res.json({ ok: true });
 });
 
@@ -246,10 +281,10 @@ authRouter.get("/auth/me", async (req, res) => {
       return res.status(401).json({ error: "UNAUTHENTICATED" });
     }
 
-    let payload: any;
+    let payload: ReturnType<typeof verifySessionBoundAuthToken>;
 
     try {
-      payload = verifyAuthToken(token);
+      payload = verifySessionBoundAuthToken(token);
     } catch {
       res.setHeader(
         "Set-Cookie",
@@ -300,6 +335,27 @@ authRouter.get("/auth/me", async (req, res) => {
         })
       );
       return res.status(401).json({ error: "SESSION_EXPIRED" });
+    }
+
+    try {
+      const observation = await observeSessionBindingShadow(prisma as any, {
+        sessionId: payload.sid,
+        userId: payload.sub,
+        organizationId: payload.orgId,
+        tokenVersion: payload.tokenVersion,
+      });
+
+      if (observation.bound && !observation.valid) {
+        console.warn("[auth/me][session-e8a-shadow] WOULD_DENY", {
+          sessionId: observation.sessionId,
+          reason: observation.reason,
+        });
+      }
+    } catch (shadowError) {
+      console.error(
+        "[auth/me][session-e8a-shadow] OBSERVATION_FAILED",
+        shadowError
+      );
     }
 
     return res.json({
