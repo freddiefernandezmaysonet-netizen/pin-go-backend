@@ -146,17 +146,19 @@ test("E8A logout revokes exactly the bound session and records the event", async
 });
 
 test("E8A runtime remains shadow/fail-open and binds newly issued JWTs to sid", () => {
-  const authSource = readFileSync("src/lib/auth.ts", "utf8");
+  const tokenSource = readFileSync("src/auth/session-bound-token.ts", "utf8");
   const middlewareSource = readFileSync("src/middleware/requireAuth.ts", "utf8");
   const loginSource = readFileSync("src/routes/auth.routes.ts", "utf8");
   const mfaSource = readFileSync("src/auth/mfa-login.routes.ts", "utf8");
 
-  assert.match(authSource, /sid\?: string/);
-  assert.match(authSource, /sid: payload\.sid/);
+  assert.match(tokenSource, /sid\?: string/);
+  assert.match(tokenSource, /decoded\.sid/);
   assert.match(middlewareSource, /observeSessionBindingShadow/);
   assert.match(middlewareSource, /WOULD_DENY/);
   assert.doesNotMatch(middlewareSource, /SESSION_EXPIRED/);
-  assert.match(loginSource, /sid:\s*boundSessionId/);
+  assert.match(loginSource, /signSessionBoundAuthToken/);
+  assert.match(loginSource, /boundSessionId/);
   assert.match(loginSource, /revokeBoundSessionOnLogout/);
-  assert.match(mfaSource, /sid:\s*session\.sessionId/);
+  assert.match(mfaSource, /signSessionBoundAuthToken/);
+  assert.match(mfaSource, /session\.sessionId/);
 });
