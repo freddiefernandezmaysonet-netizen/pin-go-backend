@@ -232,3 +232,22 @@ test("Stripe client supports a separate Connect webhook secret only when Direct 
     /connectArgs\[2\] = connectWebhookSecret/
   );
 });
+
+test("Stripe Connect webhook events are fenced to allowlisted canary accounts", () => {
+  assert.match(
+    stripeClientSource,
+    /directBookingDirectChargesAllowedForConnectedAccount\(\s*connectedAccountId\s*\)/
+  );
+  assert.match(
+    stripeClientSource,
+    /CONNECT_CANARY_IGNORED_EVENT_TYPE\s*=\s*\n?\s*"pin_go\.connect_canary_ignored"/
+  );
+  assert.match(
+    stripeClientSource,
+    /\[STRIPE_CONNECT_CANARY_EVENT_IGNORED\]/
+  );
+  assert.match(
+    stripeClientSource,
+    /type:\s*CONNECT_CANARY_IGNORED_EVENT_TYPE/
+  );
+});
