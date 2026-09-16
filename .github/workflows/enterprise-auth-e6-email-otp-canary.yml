@@ -10,6 +10,7 @@ on:
       - "src/auth/mfa-email-only-policy.ts"
       - "src/auth/session-security.policy.ts"
       - "src/auth/mfa-email-otp-delivery.ts"
+      - "src/auth/mfa-email-branding.test.ts"
       - "src/auth/trusted-device-session.persistence.ts"
       - "src/auth/trusted-device-cookie.ts"
       - "src/auth/mfa-login-runtime.ts"
@@ -77,6 +78,7 @@ jobs:
           src/auth/enterprise-auth-e4.test.ts
           src/auth/enterprise-auth-e5.test.ts
           src/auth/enterprise-auth-e6.test.ts
+          src/auth/mfa-email-branding.test.ts
 
       - name: TypeScript E6 module contract
         run: npx tsc -p tsconfig.enterprise-auth-e6.json
