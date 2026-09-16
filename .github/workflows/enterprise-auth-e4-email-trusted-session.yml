@@ -19,6 +19,7 @@ permissions:
 
 env:
   DATABASE_URL: postgresql://postgres:postgres@localhost:5432/pingo_auth_e4?schema=public
+  PSQL_DATABASE_URL: postgresql://postgres:postgres@localhost:5432/pingo_auth_e4
 
 jobs:
   certify:
@@ -65,12 +66,12 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          test "$(psql "$DATABASE_URL" -Atc "SELECT COUNT(*) FROM pg_tables WHERE schemaname='public' AND tablename='TrustedDevice';")" = "1"
-          test "$(psql "$DATABASE_URL" -Atc "SELECT COUNT(*) FROM pg_tables WHERE schemaname='public' AND tablename='AuthSession';")" = "1"
-          test "$(psql "$DATABASE_URL" -Atc "SELECT COUNT(*) FROM pg_constraint WHERE conname='TrustedDevice_userId_fkey';")" = "1"
-          test "$(psql "$DATABASE_URL" -Atc "SELECT COUNT(*) FROM pg_constraint WHERE conname='AuthSession_userId_fkey';")" = "1"
-          test "$(psql "$DATABASE_URL" -Atc "SELECT COUNT(*) FROM pg_constraint WHERE conname='AuthSession_organizationId_fkey';")" = "1"
-          test "$(psql "$DATABASE_URL" -Atc "SELECT COUNT(*) FROM pg_constraint WHERE conname='AuthSession_trustedDeviceId_fkey';")" = "1"
+          test "$(psql "$PSQL_DATABASE_URL" -Atc "SELECT COUNT(*) FROM pg_tables WHERE schemaname='public' AND tablename='TrustedDevice';")" = "1"
+          test "$(psql "$PSQL_DATABASE_URL" -Atc "SELECT COUNT(*) FROM pg_tables WHERE schemaname='public' AND tablename='AuthSession';")" = "1"
+          test "$(psql "$PSQL_DATABASE_URL" -Atc "SELECT COUNT(*) FROM pg_constraint WHERE conname='TrustedDevice_userId_fkey';")" = "1"
+          test "$(psql "$PSQL_DATABASE_URL" -Atc "SELECT COUNT(*) FROM pg_constraint WHERE conname='AuthSession_userId_fkey';")" = "1"
+          test "$(psql "$PSQL_DATABASE_URL" -Atc "SELECT COUNT(*) FROM pg_constraint WHERE conname='AuthSession_organizationId_fkey';")" = "1"
+          test "$(psql "$PSQL_DATABASE_URL" -Atc "SELECT COUNT(*) FROM pg_constraint WHERE conname='AuthSession_trustedDeviceId_fkey';")" = "1"
 
       - name: Certify E1 through E4 auth contracts
         run: >-
