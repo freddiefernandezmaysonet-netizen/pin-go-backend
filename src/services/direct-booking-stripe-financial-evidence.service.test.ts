@@ -279,7 +279,7 @@ test("host payout transactions stay scoped to the authenticated organization", (
   );
 });
 
-test("host payout transactions expose Stripe fees only from actual Direct Charge balance evidence", () => {
+test("host payout transactions expose actual Stripe financial evidence only from Direct Charge balance evidence", () => {
   assert.match(
     dashboardPayoutsRouteSource,
     /financialEvidence\.chargeMode === "DIRECT_CHARGE"[\s\S]*?financialEvidence\.source === "STRIPE_BALANCE_TRANSACTION"/
@@ -291,5 +291,13 @@ test("host payout transactions expose Stripe fees only from actual Direct Charge
   assert.match(
     dashboardPayoutsRouteSource,
     /stripeProcessingFeeActual: stripeProcessingFeeAmount !== null/
+  );
+  assert.match(
+    dashboardPayoutsRouteSource,
+    /applicationFeeAmount = hasActualDirectChargeEvidence[\s\S]*?money\(financialEvidence\.applicationFeeAmount\)[\s\S]*?: null/
+  );
+  assert.match(
+    dashboardPayoutsRouteSource,
+    /applicationFeeActual: applicationFeeAmount !== null/
   );
 });
