@@ -152,7 +152,7 @@ export function buildDirectBookingRefundStripeContext(input: {
     >,
     requestOptions: {
       stripeAccount: requireConnectedAccountId(input.connectedAccountId),
-    } satisfies Stripe.RequestOptions;
+    } satisfies Stripe.RequestOptions,
   };
 }
 
