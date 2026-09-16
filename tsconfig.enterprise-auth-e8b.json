@@ -1,0 +1,19 @@
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "types": ["node"],
+    "noEmit": true,
+    "declaration": false,
+    "declarationMap": false,
+    "sourceMap": false,
+    "module": "ESNext",
+    "moduleResolution": "Bundler",
+    "exactOptionalPropertyTypes": false
+  },
+  "include": [
+    "src/auth/session-security.policy.ts",
+    "src/auth/session-enforcement-runtime.ts",
+    "src/auth/session-request-guard.ts",
+    "src/auth/enterprise-auth-e8b.test.ts"
+  ]
+}
