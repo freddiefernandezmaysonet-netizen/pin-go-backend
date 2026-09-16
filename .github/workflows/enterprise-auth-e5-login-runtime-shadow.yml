@@ -90,4 +90,5 @@ jobs:
           ! grep -R "deliverMfaEmailOtp\|sendGuestSms\|Twilio" src/routes/auth.routes.ts src/auth/mfa-login-runtime.ts src/auth/mfa-login.routes.ts
           grep -q 'normalized === "ENFORCE"' src/auth/mfa-login-runtime.ts
           grep -q 'mode: "OFF", enforceBlocked: true' src/auth/mfa-login-runtime.ts
-          grep -q 'if (e5Runtime.mode === "SHADOW")' src/routes/auth.routes.ts
+          grep -q 'observeE5ShadowLogin' src/routes/auth.routes.ts
+          grep -q 'e6Runtime.mode === "SHADOW"' src/routes/auth.routes.ts
