@@ -1,0 +1,23 @@
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "noEmit": true,
+    "types": ["node"]
+  },
+  "include": [
+    "src/billing/stripe.ts",
+    "src/services/stripe-connect-dashboard-link.service.ts",
+    "src/services/stripe-connect-dashboard-link.contract.test.ts",
+    "src/services/direct-booking-stripe-charge-mode.service.ts",
+    "src/services/direct-booking-stripe-charge-mode.service.test.ts",
+    "src/services/direct-booking-stripe-resource-context.service.ts",
+    "src/services/direct-booking-stripe-resource-context.service.test.ts",
+    "src/services/direct-booking-stripe-refund.service.ts",
+    "src/services/direct-booking-stripe-refund.service.test.ts",
+    "src/services/direct-booking-stripe-financial-evidence.service.ts",
+    "src/services/direct-booking-stripe-financial-evidence.service.test.ts",
+    "src/services/direct-booking-refund-direct-charges.contract.test.ts",
+    "src/services/stripe-financial-event-ledger.service.ts",
+    "src/services/stripe-financial-event-ledger.service.test.ts"
+  ]
+}

@@ -1,5 +1,6 @@
 import type Stripe from "stripe";
 import type { PrismaClient } from "@prisma/client";
+import { reconcileDirectBookingDirectChargeFinancialEvidence } from "./direct-booking-stripe-financial-evidence.service.js";
 
 const FINANCIAL_EVENT_PREFIXES = [
   "checkout.session.",
@@ -13,7 +14,16 @@ const FINANCIAL_EVENT_PREFIXES = [
   "payout.",
 ] as const;
 
-type StripeEventLogDb = Pick<PrismaClient, "stripeEventLog">;
+type StripeEventLogDb = Pick<PrismaClient, "stripeEventLog"> &
+  Partial<Pick<PrismaClient, "reservation">>;
+
+type DirectBookingStripeClient = Parameters<
+  typeof reconcileDirectBookingDirectChargeFinancialEvidence
+>[0]["stripeClient"];
+
+type MarkStripeFinancialEventProcessedOptions = {
+  stripeClient?: DirectBookingStripeClient;
+};
 
 export type StripeFinancialEventLedgerClaim = {
   tracked: boolean;
@@ -34,6 +44,39 @@ export function isStripeFinancialLedgerEventType(type: string) {
 
 function serializeStripeEvent(event: Stripe.Event) {
   return JSON.parse(JSON.stringify(event));
+}
+
+function asRecord(value: unknown): Record<string, any> | null {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    return null;
+  }
+
+  return value as Record<string, any>;
+}
+
+function isDirectBookingDirectChargeCheckoutEvent(event: Stripe.Event) {
+  if (event.type !== "checkout.session.completed") {
+    return false;
+  }
+
+  const object = asRecord(event.data?.object);
+  const metadata = asRecord(object?.metadata);
+
+  return (
+    String(metadata?.flow ?? "").trim() === "direct_booking" &&
+    String(metadata?.stripeChargeMode ?? "").trim() === "DIRECT_CHARGE"
+  );
+}
+
+async function getDirectBookingStripeClient(
+  injected?: DirectBookingStripeClient
+): Promise<DirectBookingStripeClient> {
+  if (injected) {
+    return injected;
+  }
+
+  const stripeModule = await import("../billing/stripe.js");
+  return stripeModule.default;
 }
 
 function isUniqueConstraintError(error: unknown) {
@@ -155,8 +198,39 @@ export async function claimStripeFinancialEvent(
 export async function markStripeFinancialEventProcessed(
   db: StripeEventLogDb,
   stripeId: string,
-  processedAt = new Date()
+  processedAt = new Date(),
+  options: MarkStripeFinancialEventProcessedOptions = {}
 ) {
+  const existing = await db.stripeEventLog.findUnique({
+    where: {
+      stripeId,
+    },
+    select: {
+      payload: true,
+    },
+  });
+
+  const event = existing?.payload as Stripe.Event | undefined;
+
+  if (event && isDirectBookingDirectChargeCheckoutEvent(event)) {
+    if (!db.reservation) {
+      throw new Error(
+        "STRIPE_FINANCIAL_LEDGER_RESERVATION_REPOSITORY_REQUIRED"
+      );
+    }
+
+    const stripeClient = await getDirectBookingStripeClient(
+      options.stripeClient
+    );
+
+    await reconcileDirectBookingDirectChargeFinancialEvidence({
+      reservationRepository: db.reservation,
+      stripeClient,
+      event,
+      now: processedAt,
+    });
+  }
+
   await db.stripeEventLog.update({
     where: {
       stripeId,
