@@ -12,6 +12,8 @@
     "src/services/direct-booking-stripe-resource-context.service.test.ts",
     "src/services/direct-booking-stripe-refund.service.ts",
     "src/services/direct-booking-stripe-refund.service.test.ts",
+    "src/services/direct-booking-stripe-financial-evidence.service.ts",
+    "src/services/direct-booking-stripe-financial-evidence.service.test.ts",
     "src/services/direct-booking-refund-direct-charges.contract.test.ts"
   ]
 }
