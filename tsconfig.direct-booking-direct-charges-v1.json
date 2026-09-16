@@ -6,7 +6,6 @@
   },
   "include": [
     "src/billing/stripe.ts",
-    "src/routes/dashboard-payouts.routes.ts",
     "src/services/stripe-connect-dashboard-link.service.ts",
     "src/services/stripe-connect-dashboard-link.contract.test.ts",
     "src/services/direct-booking-stripe-charge-mode.service.ts",
