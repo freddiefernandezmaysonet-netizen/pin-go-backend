@@ -103,11 +103,12 @@ jobs:
           test -z "$unexpected"
 
           grep -q 'PINGO_SESSION_MODE' src/auth/session-enforcement-runtime.ts
-          grep -q 'return .*"SHADOW"' src/auth/session-enforcement-runtime.ts
+          grep -q ': "SHADOW";' src/auth/session-enforcement-runtime.ts
           grep -q 'guardAuthenticatedSession' src/middleware/requireAuth.ts
-          grep -q 'SESSION_REAUTH_REQUIRED' src/middleware/requireAuth.ts
-          grep -q 'SESSION_EXPIRED' src/middleware/requireAuth.ts
-          grep -q 'SESSION_VALIDATION_UNAVAILABLE' src/middleware/requireAuth.ts
+          grep -q 'WOULD_DENY' src/middleware/requireAuth.ts
+          grep -q 'SESSION_REAUTH_REQUIRED' src/auth/session-request-guard.ts
+          grep -q 'SESSION_EXPIRED' src/auth/session-request-guard.ts
+          grep -q 'SESSION_VALIDATION_UNAVAILABLE' src/auth/session-request-guard.ts
           grep -q 'process.env.NODE_ENV !== "production"' src/middleware/requireAuth.ts
           grep -q 'process.env.ENABLE_DEV_AUTH === "true"' src/middleware/requireAuth.ts
           grep -q '/auth/session/activity' src/routes/auth.routes.ts
