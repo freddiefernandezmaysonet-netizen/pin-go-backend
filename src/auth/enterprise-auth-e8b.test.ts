@@ -286,16 +286,20 @@ test("E8B runtime source preserves MFA and separates SHADOW from ENFORCE", () =>
   const middleware = readFileSync("src/middleware/requireAuth.ts", "utf8");
   const routes = readFileSync("src/routes/auth.routes.ts", "utf8");
   const runtime = readFileSync("src/auth/session-enforcement-runtime.ts", "utf8");
+  const guard = readFileSync("src/auth/session-request-guard.ts", "utf8");
 
   assert.match(runtime, /PINGO_SESSION_MODE/);
   assert.match(runtime, /"SHADOW"/);
   assert.match(runtime, /"ENFORCE"/);
-  assert.match(middleware, /SESSION_REAUTH_REQUIRED/);
-  assert.match(middleware, /SESSION_EXPIRED/);
-  assert.match(middleware, /SESSION_VALIDATION_UNAVAILABLE/);
+  assert.match(middleware, /guardAuthenticatedSession/);
+  assert.match(middleware, /WOULD_DENY/);
+  assert.match(guard, /SESSION_REAUTH_REQUIRED/);
+  assert.match(guard, /SESSION_EXPIRED/);
+  assert.match(guard, /SESSION_VALIDATION_UNAVAILABLE/);
   assert.match(middleware, /process\.env\.NODE_ENV !== "production"/);
   assert.match(middleware, /process\.env\.ENABLE_DEV_AUTH === "true"/);
   assert.match(routes, /\/auth\/session\/activity/);
   assert.match(routes, /touchBoundSessionHumanActivity/);
   assert.doesNotMatch(runtime, /PINGO_MFA_MODE/);
+  assert.doesNotMatch(guard, /PINGO_MFA_MODE/);
 });
