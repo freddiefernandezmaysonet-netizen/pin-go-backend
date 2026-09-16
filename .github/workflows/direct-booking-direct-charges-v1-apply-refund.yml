@@ -1,0 +1,45 @@
+name: Apply Direct Booking Direct Charges Refund Patch
+
+on:
+  push:
+    branches:
+      - agent/direct-booking-direct-charges-v1
+    paths:
+      - "scripts/apply-direct-booking-refund-direct-charges.mjs"
+      - ".github/workflows/direct-booking-direct-charges-v1-apply-refund.yml"
+
+permissions:
+  contents: write
+
+jobs:
+  apply-refund-patch:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: agent/direct-booking-direct-charges-v1
+          fetch-depth: 0
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Apply guarded refund patch
+        run: node scripts/apply-direct-booking-refund-direct-charges.mjs
+
+      - name: Validate patch whitespace
+        run: git diff --check
+
+      - name: Commit patched refund service
+        shell: bash
+        run: |
+          git add src/services/direct-booking-refund.service.ts
+          if git diff --cached --quiet; then
+            echo "Refund service already patched."
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git commit -m "Wire Direct Booking refunds to charge-mode adapter"
+          git push origin HEAD:agent/direct-booking-direct-charges-v1
