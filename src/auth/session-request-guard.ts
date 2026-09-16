@@ -49,7 +49,7 @@ export type SessionRequestGuardDecision =
     }
   | {
       kind: "UNAVAILABLE";
-      mode: "ENFORCE";
+      mode: SessionEnforcementMode;
       status: 503;
       error: "SESSION_VALIDATION_UNAVAILABLE";
       clearCookie: false;
@@ -90,18 +90,14 @@ export async function guardAuthenticatedSession(
       },
     });
   } catch {
-    if (mode === "ENFORCE") {
-      return {
-        kind: "UNAVAILABLE",
-        mode,
-        status: 503,
-        error: "SESSION_VALIDATION_UNAVAILABLE",
-        clearCookie: false,
-        reason: "VALIDATION_FAILED",
-      };
-    }
-
-    throw new Error("SESSION_SHADOW_USER_LOOKUP_FAILED");
+    return {
+      kind: "UNAVAILABLE",
+      mode,
+      status: 503,
+      error: "SESSION_VALIDATION_UNAVAILABLE",
+      clearCookie: false,
+      reason: "VALIDATION_FAILED",
+    };
   }
 
   if (!user) {
@@ -150,23 +146,13 @@ export async function guardAuthenticatedSession(
       now: input.now,
     });
   } catch {
-    if (mode === "ENFORCE") {
-      return {
-        kind: "UNAVAILABLE",
-        mode,
-        status: 503,
-        error: "SESSION_VALIDATION_UNAVAILABLE",
-        clearCookie: false,
-        reason: "VALIDATION_FAILED",
-      };
-    }
-
     return {
-      kind: "ALLOW",
+      kind: "UNAVAILABLE",
       mode,
-      user,
-      sessionId: String(input.sessionId ?? "").trim() || null,
-      shadowReason: null,
+      status: 503,
+      error: "SESSION_VALIDATION_UNAVAILABLE",
+      clearCookie: false,
+      reason: "VALIDATION_FAILED",
     };
   }
 
