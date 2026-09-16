@@ -4,9 +4,9 @@ import { normalizeMfaEmail } from "./mfa-email-only-policy.js";
 export type MfaEmailDeliveryMode = "MOCK" | "RESEND";
 
 export type MfaEmailDeliveryEnvironment = {
-  PINGO_MFA_EMAIL_DELIVERY?: string;
-  RESEND_API_KEY?: string;
-  EMAIL_FROM?: string;
+  PINGO_MFA_EMAIL_DELIVERY?: string | undefined;
+  RESEND_API_KEY?: string | undefined;
+  EMAIL_FROM?: string | undefined;
 };
 
 export type MfaEmailSender = (input: {
@@ -23,8 +23,16 @@ export type MfaEmailDeliveryResult = {
   providerMessageId: string | null;
 };
 
+function readProcessMfaEmailEnvironment(): MfaEmailDeliveryEnvironment {
+  return {
+    PINGO_MFA_EMAIL_DELIVERY: process.env.PINGO_MFA_EMAIL_DELIVERY,
+    RESEND_API_KEY: process.env.RESEND_API_KEY,
+    EMAIL_FROM: process.env.EMAIL_FROM,
+  };
+}
+
 export function resolveMfaEmailDeliveryMode(
-  env: MfaEmailDeliveryEnvironment = process.env
+  env: MfaEmailDeliveryEnvironment = readProcessMfaEmailEnvironment()
 ): MfaEmailDeliveryMode {
   return String(env.PINGO_MFA_EMAIL_DELIVERY ?? "")
     .trim()
@@ -66,7 +74,8 @@ export async function deliverMfaEmailOtp(
     sender?: MfaEmailSender;
   } = {}
 ): Promise<MfaEmailDeliveryResult> {
-  const env = options.env ?? process.env;
+  const env: MfaEmailDeliveryEnvironment =
+    options.env ?? readProcessMfaEmailEnvironment();
   const mode = resolveMfaEmailDeliveryMode(env);
 
   if (mode === "MOCK") {
