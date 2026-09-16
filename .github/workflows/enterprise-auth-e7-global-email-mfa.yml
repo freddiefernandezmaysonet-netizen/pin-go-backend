@@ -88,7 +88,12 @@ jobs:
           set -euo pipefail
           git fetch --no-tags origin main:refs/remotes/origin/main
           test -z "$(git diff --name-only origin/main...HEAD -- prisma/migrations)"
-          test -z "$(git diff --name-only origin/main...HEAD -- src/lib/auth.ts src/middleware/requireAuth.ts src/server.ts src/controllers/password.controller.ts)"
+          test -z "$(git diff --name-only origin/main...HEAD -- src/lib/auth.ts src/server.ts src/controllers/password.controller.ts)"
+          if test -n "$(git diff --name-only origin/main...HEAD -- src/middleware/requireAuth.ts)"; then
+            grep -q 'observeSessionBindingShadow' src/middleware/requireAuth.ts
+            grep -q 'WOULD_DENY' src/middleware/requireAuth.ts
+            ! grep -q 'SESSION_EXPIRED' src/middleware/requireAuth.ts
+          fi
           ! grep -R "sendGuestSms\|Twilio\|factorType: \"SMS\"" src/auth/mfa-global-runtime.ts src/auth/mfa-login.routes.ts src/routes/auth.routes.ts src/routes/public.signup.success.routes.ts
           grep -q 'configuredMode === "ENFORCE"' src/auth/mfa-global-runtime.ts
           grep -q 'failClosed: true' src/auth/mfa-global-runtime.ts
@@ -98,5 +103,7 @@ jobs:
           grep -q 'requiresLogin: true' src/routes/auth.routes.ts
           grep -q 'requiresLogin: true' src/routes/public.signup.success.routes.ts
           ! grep -q 'signAuthToken' src/routes/public.signup.success.routes.ts
+          ! grep -q 'signSessionBoundAuthToken' src/routes/public.signup.success.routes.ts
           ! grep -q 'Set-Cookie' src/routes/public.signup.success.routes.ts
-          test "$(grep -o 'signAuthToken(' src/routes/auth.routes.ts | wc -l | tr -d ' ')" = "1"
+          test "$(grep -o 'signSessionBoundAuthToken(' src/routes/auth.routes.ts | wc -l | tr -d ' ')" = "1"
+          test "$(grep -o 'signSessionBoundAuthToken(' src/auth/mfa-login.routes.ts | wc -l | tr -d ' ')" = "1"
