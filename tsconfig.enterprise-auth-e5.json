@@ -16,8 +16,6 @@
     "src/auth/trusted-device-cookie.ts",
     "src/auth/mfa-login-runtime.ts",
     "src/auth/mfa-login-challenge.ts",
-    "src/auth/mfa-login.routes.ts",
-    "src/auth/enterprise-auth-e5.test.ts",
-    "src/routes/auth.routes.ts"
+    "src/auth/enterprise-auth-e5.test.ts"
   ]
 }
