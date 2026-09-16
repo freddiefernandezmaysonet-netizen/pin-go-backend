@@ -1,6 +1,5 @@
 import type Stripe from "stripe";
 import type { PrismaClient } from "@prisma/client";
-import stripe from "../billing/stripe";
 import { reconcileDirectBookingDirectChargeFinancialEvidence } from "./direct-booking-stripe-financial-evidence.service.js";
 
 const FINANCIAL_EVENT_PREFIXES = [
@@ -18,10 +17,12 @@ const FINANCIAL_EVENT_PREFIXES = [
 type StripeEventLogDb = Pick<PrismaClient, "stripeEventLog"> &
   Partial<Pick<PrismaClient, "reservation">>;
 
+type DirectBookingStripeClient = Parameters<
+  typeof reconcileDirectBookingDirectChargeFinancialEvidence
+>[0]["stripeClient"];
+
 type MarkStripeFinancialEventProcessedOptions = {
-  stripeClient?: Parameters<
-    typeof reconcileDirectBookingDirectChargeFinancialEvidence
-  >[0]["stripeClient"];
+  stripeClient?: DirectBookingStripeClient;
 };
 
 export type StripeFinancialEventLedgerClaim = {
@@ -65,6 +66,17 @@ function isDirectBookingDirectChargeCheckoutEvent(event: Stripe.Event) {
     String(metadata?.flow ?? "").trim() === "direct_booking" &&
     String(metadata?.stripeChargeMode ?? "").trim() === "DIRECT_CHARGE"
   );
+}
+
+async function getDirectBookingStripeClient(
+  injected?: DirectBookingStripeClient
+): Promise<DirectBookingStripeClient> {
+  if (injected) {
+    return injected;
+  }
+
+  const stripeModule = await import("../billing/stripe.js");
+  return stripeModule.default;
 }
 
 function isUniqueConstraintError(error: unknown) {
@@ -207,9 +219,13 @@ export async function markStripeFinancialEventProcessed(
       );
     }
 
+    const stripeClient = await getDirectBookingStripeClient(
+      options.stripeClient
+    );
+
     await reconcileDirectBookingDirectChargeFinancialEvidence({
       reservationRepository: db.reservation,
-      stripeClient: options.stripeClient ?? stripe,
+      stripeClient,
       event,
       now: processedAt,
     });
