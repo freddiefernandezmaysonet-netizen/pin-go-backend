@@ -7,7 +7,7 @@ import {
   isStripeFinancialLedgerEventType,
   markStripeFinancialEventFailed,
   markStripeFinancialEventProcessed,
-} from "./stripe-financial-event-ledger.service";
+} from "./stripe-financial-event-ledger.service.js";
 
 function stripeEvent(input: {
   id?: string;
