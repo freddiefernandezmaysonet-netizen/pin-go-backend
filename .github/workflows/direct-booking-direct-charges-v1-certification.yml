@@ -7,6 +7,7 @@ on:
   pull_request:
     paths:
       - "src/billing/stripe.ts"
+      - "src/routes/dashboard-payouts.routes.ts"
       - "src/services/direct-booking-stripe-charge-mode.service.ts"
       - "src/services/direct-booking-stripe-charge-mode.service.test.ts"
       - "src/services/direct-booking-stripe-resource-context.service.ts"
