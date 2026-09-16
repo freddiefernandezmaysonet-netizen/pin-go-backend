@@ -1,0 +1,24 @@
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "types": ["node"],
+    "noEmit": true,
+    "declaration": false,
+    "declarationMap": false,
+    "sourceMap": false
+  },
+  "include": [
+    "src/auth/mfa-core.ts",
+    "src/auth/mfa-otp.ts",
+    "src/auth/mfa-email-only-policy.ts",
+    "src/auth/session-security.policy.ts",
+    "src/auth/mfa-email-otp-delivery.ts",
+    "src/auth/trusted-device-session.persistence.ts",
+    "src/auth/trusted-device-cookie.ts",
+    "src/auth/mfa-login-runtime.ts",
+    "src/auth/mfa-login-challenge.ts",
+    "src/auth/mfa-canary-runtime.ts",
+    "src/auth/mfa-canary-flow.ts",
+    "src/auth/enterprise-auth-e6.test.ts"
+  ]
+}
