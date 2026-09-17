@@ -91,12 +91,13 @@ test("new V2 account policy does not infer an email and disables Stripe-hosted d
     organizationName: "Fernandez Property Management LLC",
     country: "US",
   });
+  const metadata = params.metadata as Stripe.MetadataParam;
 
   assert.equal(params.email, undefined);
   assert.equal(params.type, undefined);
   assert.equal(params.controller?.requirement_collection, "application");
   assert.equal(params.controller?.stripe_dashboard?.type, "none");
-  assert.equal(params.metadata?.organizationId, "org_fernandez");
+  assert.equal(metadata.organizationId, "org_fernandez");
 });
 
 test("V2 Account Session is bound to exactly one account and exposes no money-moving actions", () => {
