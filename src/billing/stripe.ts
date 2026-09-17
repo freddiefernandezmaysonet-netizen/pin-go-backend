@@ -55,6 +55,14 @@ stripe.checkout.sessions.create = (async (
     paymentIntentData: params.payment_intent_data ?? {},
   });
 
+  // Initial Direct Booking already uses Stripe's 50-key Session metadata
+  // budget. hostPayoutStatus is derivable from stripeConnectedAccountId during
+  // ingest, so omit that redundant key before persisting stripeChargeMode.
+  const {
+    hostPayoutStatus: _derivedHostPayoutStatus,
+    ...checkoutSessionMetadata
+  } = params.metadata ?? {};
+
   const nextParams: Stripe.Checkout.SessionCreateParams = {
     ...params,
     payment_intent_data: {
@@ -65,7 +73,7 @@ stripe.checkout.sessions.create = (async (
       },
     },
     metadata: {
-      ...(params.metadata ?? {}),
+      ...checkoutSessionMetadata,
       stripeChargeMode: checkoutContext.chargeMode,
     },
   };

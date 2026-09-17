@@ -8,6 +8,7 @@ on:
     paths:
       - "src/billing/stripe.ts"
       - "src/routes/dashboard-payouts.routes.ts"
+      - "src/routes/public-booking.metadata-limit.contract.test.ts"
       - "src/services/stripe-connect-dashboard-link.service.ts"
       - "src/services/stripe-connect-dashboard-link.contract.test.ts"
       - "src/services/direct-booking-stripe-charge-mode.service.ts"
@@ -56,6 +57,7 @@ jobs:
           src/services/direct-booking-refund-direct-charges.contract.test.ts
           src/services/stripe-connect-dashboard-link.contract.test.ts
           src/services/stripe-financial-event-ledger.service.test.ts
+          src/routes/public-booking.metadata-limit.contract.test.ts
 
       - name: Type-check Direct Booking Stripe policies
         shell: bash
