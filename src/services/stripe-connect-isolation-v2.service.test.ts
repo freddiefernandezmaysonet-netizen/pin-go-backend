@@ -7,6 +7,7 @@ import {
   buildStripeConnectIsolationV2AccountCreateParams,
   buildStripeConnectIsolationV2AccountSessionParams,
   isStripeConnectIsolationV2Enabled,
+  isStripeConnectV2AccountCreationEnabled,
 } from "./stripe-connect-isolation-v2.service.js";
 
 function stripeAccount(input: {
@@ -27,6 +28,16 @@ test("Isolation V2 is default-off", () => {
   assert.equal(
     isStripeConnectIsolationV2Enabled({
       STRIPE_CONNECT_ISOLATION_V2_ENABLED: "true",
+    }),
+    true
+  );
+});
+
+test("V2 account creation has a separate default-off fence", () => {
+  assert.equal(isStripeConnectV2AccountCreationEnabled({}), false);
+  assert.equal(
+    isStripeConnectV2AccountCreationEnabled({
+      STRIPE_CONNECT_V2_ACCOUNT_CREATION_ENABLED: "true",
     }),
     true
   );
@@ -89,12 +100,13 @@ test("new V2 account policy makes the connected account pay Stripe fees and keep
   const params = buildStripeConnectIsolationV2AccountCreateParams({
     organizationId: "org_fernandez",
     organizationName: "Fernandez Property Management LLC",
-    country: "US",
+    country: "PR",
   });
   const metadata = params.metadata as Stripe.MetadataParam;
 
   assert.equal(params.email, undefined);
   assert.equal(params.type, undefined);
+  assert.equal(params.country, "US");
   assert.equal(params.controller?.fees?.payer, "account");
   assert.equal(params.controller?.losses?.payments, "stripe");
   assert.equal(params.controller?.requirement_collection, "stripe");
@@ -102,12 +114,16 @@ test("new V2 account policy makes the connected account pay Stripe fees and keep
   assert.equal(metadata.organizationId, "org_fernandez");
 });
 
-test("V2 Account Session is bound to exactly one account and exposes no money-moving actions", () => {
+test("V2 Account Session includes no-dashboard required surfaces and keeps money-moving actions disabled", () => {
   const params = buildStripeConnectIsolationV2AccountSessionParams(
     "acct_fernandez"
   );
 
   assert.equal(params.account, "acct_fernandez");
+  assert.equal(params.components.account_onboarding?.enabled, true);
+  assert.equal(params.components.account_management?.enabled, true);
+  assert.equal(params.components.notification_banner?.enabled, true);
+  assert.equal(params.components.documents?.enabled, true);
   assert.equal(params.components.payments?.enabled, true);
   assert.equal(
     params.components.payments?.features?.refund_management,
