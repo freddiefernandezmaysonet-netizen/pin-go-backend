@@ -27,7 +27,10 @@ type AccountSessionComponentsCompat =
       enabled?: boolean;
       features?: { external_account_collection?: boolean };
     };
-    notification_banner?: { enabled?: boolean };
+    notification_banner?: {
+      enabled?: boolean;
+      features?: { external_account_collection?: boolean };
+    };
   };
 
 function stripeAccount(input: {
@@ -206,8 +209,16 @@ test("pre-onboarding V2 Account Session enables only onboarding and notification
   assert.equal(components.notification_banner?.enabled, true);
   assert.equal(components.account_onboarding?.enabled, true);
   assert.equal(
+    components.notification_banner?.features?.external_account_collection,
+    false
+  );
+  assert.equal(
     components.account_onboarding?.features?.external_account_collection,
     false
+  );
+  assert.equal(
+    components.notification_banner?.features?.external_account_collection,
+    components.account_onboarding?.features?.external_account_collection
   );
   assert.equal(
     components.account_onboarding?.features?.disable_stripe_user_authentication,
