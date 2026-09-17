@@ -240,53 +240,61 @@ export function buildStripeConnectIsolationV2AccountCreateParams(input: {
   };
 }
 
-export function buildStripeConnectIsolationV2AccountSessionParams(
-  accountId: string
-): Stripe.AccountSessionCreateParams {
-  // Pin&Go currently uses stripe-node 14.x, whose generated types predate
-  // current embedded Connect features. Keep the compatibility bridge narrow
-  // and scoped only to the V2 Account Session payload.
-  const components: AccountSessionComponentsCompat = {
-    account_onboarding: {
-      enabled: true,
-      features: {
-        external_account_collection: false,
-        disable_stripe_user_authentication: false,
-      },
-    },
-    account_management: {
-      enabled: true,
-      features: {
-        external_account_collection: true,
-      },
-    },
-    notification_banner: {
-      enabled: true,
-    },
-    documents: {
-      enabled: true,
-    },
-    payments: {
-      enabled: true,
-      features: {
-        capture_payments: false,
-        dispute_management: false,
-        refund_management: false,
-        destination_on_behalf_of_charge_management: false,
-      },
-    },
-    payouts: {
-      enabled: true,
-      features: {
-        edit_payout_schedule: false,
-        instant_payouts: false,
-        standard_payouts: false,
-      },
-    },
-  };
+export function buildStripeConnectIsolationV2AccountSessionParams(input: {
+  accountId: string;
+  detailsSubmitted: boolean;
+}): Stripe.AccountSessionCreateParams {
+  // Keep pre-onboarding Account Sessions intentionally minimal. Stripe validates
+  // cross-component feature compatibility for every enabled component even if
+  // the frontend does not mount it. Financial surfaces are enabled only after
+  // the connected account has submitted onboarding details.
+  const components: AccountSessionComponentsCompat = input.detailsSubmitted
+    ? {
+        notification_banner: {
+          enabled: true,
+        },
+        account_management: {
+          enabled: true,
+          features: {
+            external_account_collection: true,
+          },
+        },
+        documents: {
+          enabled: true,
+        },
+        payments: {
+          enabled: true,
+          features: {
+            capture_payments: false,
+            dispute_management: false,
+            refund_management: false,
+            destination_on_behalf_of_charge_management: false,
+          },
+        },
+        payouts: {
+          enabled: true,
+          features: {
+            edit_payout_schedule: false,
+            instant_payouts: false,
+            standard_payouts: false,
+          },
+        },
+      }
+    : {
+        notification_banner: {
+          enabled: true,
+        },
+        account_onboarding: {
+          enabled: true,
+          features: {
+            external_account_collection: false,
+            disable_stripe_user_authentication: false,
+          },
+        },
+      };
 
   return {
-    account: accountId,
+    account: input.accountId,
     components: components as Stripe.AccountSessionCreateParams["components"],
   };
 }
@@ -429,7 +437,10 @@ export async function createStripeConnectIsolationV2AccountSession(
   });
 
   const session = await stripe.accountSessions.create(
-    buildStripeConnectIsolationV2AccountSessionParams(account.id),
+    buildStripeConnectIsolationV2AccountSessionParams({
+      accountId: account.id,
+      detailsSubmitted: Boolean(account.details_submitted),
+    }),
     buildStripeConnectIsolationV2AccountSessionRequestOptions()
   );
 
