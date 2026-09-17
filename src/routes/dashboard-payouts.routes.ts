@@ -10,6 +10,7 @@ import {
 import {
   createStripeConnectIsolationV2Account,
   createStripeConnectIsolationV2AccountSession,
+  getStripeConnectV2Eligibility,
 } from "../services/stripe-connect-isolation-v2.service.js";
 
 const prisma = new PrismaClient();
@@ -79,6 +80,28 @@ dashboardPayoutsRouter.get(
       return res.json({
         ok: true,
         payoutStatus,
+      });
+    } catch (error: any) {
+      return sendRouteError(res, error);
+    }
+  }
+);
+
+dashboardPayoutsRouter.get(
+  "/api/dashboard/payouts/connect-isolation-v2/eligibility",
+  requireAuth,
+  async (req, res) => {
+    try {
+      const organizationId = getOrgIdFromRequest(req);
+      const eligibility = getStripeConnectV2Eligibility(organizationId);
+
+      res.setHeader("Cache-Control", "no-store");
+      return res.json({
+        ok: true,
+        eligibility: {
+          eligible: eligibility.eligible,
+          accountCreationAllowed: eligibility.accountCreationAllowed,
+        },
       });
     } catch (error: any) {
       return sendRouteError(res, error);
