@@ -1,0 +1,126 @@
+import assert from "node:assert/strict";
+import test from "node:test";
+import type Stripe from "stripe";
+import {
+  StripeConnectIsolationV2Error,
+  assertStripeConnectTenantOwnership,
+  buildStripeConnectIsolationV2AccountCreateParams,
+  buildStripeConnectIsolationV2AccountSessionParams,
+  isStripeConnectIsolationV2Enabled,
+} from "./stripe-connect-isolation-v2.service.js";
+
+function stripeAccount(input: {
+  id: string;
+  organizationId?: string;
+}): Stripe.Account {
+  return {
+    id: input.id,
+    object: "account",
+    metadata: input.organizationId
+      ? { organizationId: input.organizationId }
+      : {},
+  } as unknown as Stripe.Account;
+}
+
+test("Isolation V2 is default-off", () => {
+  assert.equal(isStripeConnectIsolationV2Enabled({}), false);
+  assert.equal(
+    isStripeConnectIsolationV2Enabled({
+      STRIPE_CONNECT_ISOLATION_V2_ENABLED: "true",
+    }),
+    true
+  );
+});
+
+test("tenant ownership accepts only the persisted account bound to the same organization", () => {
+  const account = stripeAccount({
+    id: "acct_fernandez",
+    organizationId: "org_fernandez",
+  });
+
+  const result = assertStripeConnectTenantOwnership({
+    organizationId: "org_fernandez",
+    persistedAccountId: "acct_fernandez",
+    account,
+  });
+
+  assert.equal(result.id, "acct_fernandez");
+});
+
+test("tenant ownership fails closed when Stripe metadata belongs to another organization", () => {
+  const account = stripeAccount({
+    id: "acct_remanso",
+    organizationId: "org_remanso",
+  });
+
+  assert.throws(
+    () =>
+      assertStripeConnectTenantOwnership({
+        organizationId: "org_fernandez",
+        persistedAccountId: "acct_remanso",
+        account,
+      }),
+    (error: unknown) =>
+      error instanceof StripeConnectIsolationV2Error &&
+      error.code === "STRIPE_CONNECT_TENANT_MISMATCH"
+  );
+});
+
+test("tenant ownership fails closed when persisted account id and Stripe account differ", () => {
+  const account = stripeAccount({
+    id: "acct_remanso",
+    organizationId: "org_fernandez",
+  });
+
+  assert.throws(
+    () =>
+      assertStripeConnectTenantOwnership({
+        organizationId: "org_fernandez",
+        persistedAccountId: "acct_fernandez",
+        account,
+      }),
+    (error: unknown) =>
+      error instanceof StripeConnectIsolationV2Error &&
+      error.code === "STRIPE_CONNECT_ACCOUNT_ID_MISMATCH"
+  );
+});
+
+test("new V2 account policy does not infer an email and disables Stripe-hosted dashboard access", () => {
+  const params = buildStripeConnectIsolationV2AccountCreateParams({
+    organizationId: "org_fernandez",
+    organizationName: "Fernandez Property Management LLC",
+    country: "US",
+  });
+
+  assert.equal(params.email, undefined);
+  assert.equal(params.type, undefined);
+  assert.equal(params.controller?.requirement_collection, "application");
+  assert.equal(params.controller?.stripe_dashboard?.type, "none");
+  assert.equal(params.metadata?.organizationId, "org_fernandez");
+});
+
+test("V2 Account Session is bound to exactly one account and exposes no money-moving actions", () => {
+  const params = buildStripeConnectIsolationV2AccountSessionParams(
+    "acct_fernandez"
+  );
+
+  assert.equal(params.account, "acct_fernandez");
+  assert.equal(params.components.payments?.enabled, true);
+  assert.equal(
+    params.components.payments?.features?.refund_management,
+    false
+  );
+  assert.equal(
+    params.components.payments?.features?.dispute_management,
+    false
+  );
+  assert.equal(params.components.payouts?.enabled, true);
+  assert.equal(
+    params.components.payouts?.features?.standard_payouts,
+    false
+  );
+  assert.equal(
+    params.components.payouts?.features?.instant_payouts,
+    false
+  );
+});
