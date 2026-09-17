@@ -11,17 +11,17 @@ const source = fs.readFileSync(
 test("Direct Booking financial refs select connected-account context only for Direct Charges", () => {
   assert.match(
     source,
-    /stripeChargeMode[\s\S]*DIRECT_CHARGE[\s\S]*stripeConnectedAccountId/
+    /stripeChargeMode\s*===\s*"DIRECT_CHARGE"\s*&&\s*stripeConnectedAccountId[\s\S]*\?\s*stripeConnectedAccountId\s*:\s*undefined/
   );
   assert.match(
     source,
-    /stripeAccount:\s*stripeConnectedAccountId/
+    /stripeAccount\s*\?\s*\{\s*stripeAccount\s*\}\s*:\s*undefined/
   );
 });
 
 test("Destination Charge financial refs preserve platform context", () => {
   assert.match(
     source,
-    /DIRECT_CHARGE[\s\S]*stripeConnectedAccountId[\s\S]*undefined/
+    /stripeChargeMode\s*===\s*"DIRECT_CHARGE"[\s\S]*:\s*undefined/
   );
 });
