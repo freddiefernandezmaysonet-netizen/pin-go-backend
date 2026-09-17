@@ -54,6 +54,13 @@ jobs:
           grep -q 'requirement_collection: "stripe"' src/services/stripe-connect-isolation-v2.service.ts
           grep -q 'stripe_dashboard: { type: "none" }' src/services/stripe-connect-isolation-v2.service.ts
           grep -q 'account_onboarding' src/services/stripe-connect-isolation-v2.service.ts
+          grep -q 'external_account_collection: false' src/services/stripe-connect-isolation-v2.service.ts
+          grep -q 'disable_stripe_user_authentication: false' src/services/stripe-connect-isolation-v2.service.ts
+          grep -q '2026-03-25.dahlia' src/services/stripe-connect-isolation-v2.service.ts
+          grep -q 'buildStripeConnectIsolationV2AccountSessionRequestOptions' src/services/stripe-connect-isolation-v2.service.ts
+          grep -q 'accountSessions.create' src/services/stripe-connect-isolation-v2.service.ts
+          grep -q 'stripeClient = new Stripe(secretKey);' src/services/stripe-connect-isolation-v2.service.ts
+          ! grep -q 'new Stripe(secretKey,.*apiVersion' src/services/stripe-connect-isolation-v2.service.ts
           grep -q 'account_management' src/services/stripe-connect-isolation-v2.service.ts
           grep -q 'notification_banner' src/services/stripe-connect-isolation-v2.service.ts
           grep -q 'documents' src/services/stripe-connect-isolation-v2.service.ts

@@ -2,10 +2,12 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import type Stripe from "stripe";
 import {
+  STRIPE_CONNECT_V2_ACCOUNT_SESSION_API_VERSION,
   StripeConnectIsolationV2Error,
   assertStripeConnectTenantOwnership,
   buildStripeConnectIsolationV2AccountCreateParams,
   buildStripeConnectIsolationV2AccountSessionParams,
+  buildStripeConnectIsolationV2AccountSessionRequestOptions,
   getStripeConnectV2Eligibility,
   isStripeConnectIsolationV2Enabled,
   isStripeConnectV2AccountCreationEnabled,
@@ -14,6 +16,13 @@ import {
 
 type AccountSessionComponentsCompat =
   Stripe.AccountSessionCreateParams["components"] & {
+    account_onboarding?: {
+      enabled?: boolean;
+      features?: {
+        external_account_collection?: boolean;
+        disable_stripe_user_authentication?: boolean;
+      };
+    };
     account_management?: { enabled?: boolean };
     notification_banner?: { enabled?: boolean };
   };
@@ -177,6 +186,36 @@ test("new V2 account policy makes the connected account pay Stripe fees and keep
   assert.equal(params.controller?.requirement_collection, "stripe");
   assert.equal(params.controller?.stripe_dashboard?.type, "none");
   assert.equal(metadata.organizationId, "org_fernandez");
+});
+
+test("V2 Account Session uses Dahlia onboarding semantics without disabling Stripe authentication", () => {
+  const params = buildStripeConnectIsolationV2AccountSessionParams(
+    "acct_fernandez"
+  );
+  const components = params.components as AccountSessionComponentsCompat;
+  const requestOptions =
+    buildStripeConnectIsolationV2AccountSessionRequestOptions() as {
+      apiVersion?: string;
+    };
+
+  assert.equal(params.account, "acct_fernandez");
+  assert.equal(components.account_onboarding?.enabled, true);
+  assert.equal(
+    components.account_onboarding?.features?.external_account_collection,
+    false
+  );
+  assert.equal(
+    components.account_onboarding?.features?.disable_stripe_user_authentication,
+    false
+  );
+  assert.equal(
+    STRIPE_CONNECT_V2_ACCOUNT_SESSION_API_VERSION,
+    "2026-03-25.dahlia"
+  );
+  assert.equal(
+    requestOptions.apiVersion,
+    STRIPE_CONNECT_V2_ACCOUNT_SESSION_API_VERSION
+  );
 });
 
 test("V2 Account Session includes no-dashboard required surfaces and keeps money-moving actions disabled", () => {
