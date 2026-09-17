@@ -7,6 +7,22 @@ const ISOLATION_V2_FLAG = "STRIPE_CONNECT_ISOLATION_V2_ENABLED";
 const V2_ACCOUNT_CREATION_FLAG =
   "STRIPE_CONNECT_V2_ACCOUNT_CREATION_ENABLED";
 
+type AccountSessionComponentsCompat =
+  Stripe.AccountSessionCreateParams["components"] & {
+    account_management?: {
+      enabled: boolean;
+      features?: {
+        external_account_collection?: boolean;
+      };
+    };
+    notification_banner?: {
+      enabled: boolean;
+      features?: {
+        external_account_collection?: boolean;
+      };
+    };
+  };
+
 export class StripeConnectIsolationV2Error extends Error {
   statusCode: number;
   code: string;
@@ -160,45 +176,51 @@ export function buildStripeConnectIsolationV2AccountCreateParams(input: {
 export function buildStripeConnectIsolationV2AccountSessionParams(
   accountId: string
 ): Stripe.AccountSessionCreateParams {
-  return {
-    account: accountId,
-    components: {
-      account_onboarding: {
-        enabled: true,
-        features: {
-          external_account_collection: true,
-        },
-      },
-      account_management: {
-        enabled: true,
-        features: {
-          external_account_collection: true,
-        },
-      },
-      notification_banner: {
-        enabled: true,
-      },
-      documents: {
-        enabled: true,
-      },
-      payments: {
-        enabled: true,
-        features: {
-          capture_payments: false,
-          dispute_management: false,
-          refund_management: false,
-          destination_on_behalf_of_charge_management: false,
-        },
-      },
-      payouts: {
-        enabled: true,
-        features: {
-          edit_payout_schedule: false,
-          instant_payouts: false,
-          standard_payouts: false,
-        },
+  // Pin&Go currently uses stripe-node 14.x. Stripe's current Account Session API
+  // documents account_management and notification_banner, but those two keys
+  // predate the installed SDK's generated TypeScript surface. Keep the bridge
+  // narrow and document-exact rather than weakening the whole call to `any`.
+  const components: AccountSessionComponentsCompat = {
+    account_onboarding: {
+      enabled: true,
+      features: {
+        external_account_collection: true,
       },
     },
+    account_management: {
+      enabled: true,
+      features: {
+        external_account_collection: true,
+      },
+    },
+    notification_banner: {
+      enabled: true,
+    },
+    documents: {
+      enabled: true,
+    },
+    payments: {
+      enabled: true,
+      features: {
+        capture_payments: false,
+        dispute_management: false,
+        refund_management: false,
+        destination_on_behalf_of_charge_management: false,
+      },
+    },
+    payouts: {
+      enabled: true,
+      features: {
+        edit_payout_schedule: false,
+        instant_payouts: false,
+        standard_payouts: false,
+      },
+    },
+  };
+
+  return {
+    account: accountId,
+    components: components as Stripe.AccountSessionCreateParams["components"],
   };
 }
 
