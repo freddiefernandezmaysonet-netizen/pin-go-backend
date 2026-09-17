@@ -47,6 +47,7 @@ jobs:
           set -euo pipefail
           grep -q 'STRIPE_CONNECT_ISOLATION_V2_ENABLED' src/services/stripe-connect-isolation-v2.service.ts
           grep -q 'STRIPE_CONNECT_V2_ACCOUNT_CREATION_ENABLED' src/services/stripe-connect-isolation-v2.service.ts
+          grep -q 'STRIPE_CONNECT_V2_CANARY_ORGANIZATION_IDS' src/services/stripe-connect-isolation-v2.service.ts
           grep -q 'STRIPE_CONNECT_TENANT_MISMATCH' src/services/stripe-connect-isolation-v2.service.ts
           grep -q 'fees: { payer: "account" }' src/services/stripe-connect-isolation-v2.service.ts
           grep -q 'losses: { payments: "stripe" }' src/services/stripe-connect-isolation-v2.service.ts
@@ -56,7 +57,9 @@ jobs:
           grep -q 'account_management' src/services/stripe-connect-isolation-v2.service.ts
           grep -q 'notification_banner' src/services/stripe-connect-isolation-v2.service.ts
           grep -q 'documents' src/services/stripe-connect-isolation-v2.service.ts
+          grep -q 'accountCreationAllowed' src/services/stripe-connect-isolation-v2.service.ts
           grep -q 'email, undefined' src/services/stripe-connect-isolation-v2.service.test.ts
+          grep -q '/api/dashboard/payouts/connect-isolation-v2/eligibility' src/routes/dashboard-payouts.routes.ts
           grep -q '/api/dashboard/payouts/connect-isolation-v2/account' src/routes/dashboard-payouts.routes.ts
           grep -q '/api/dashboard/payouts/connect-isolation-v2/account-session' src/routes/dashboard-payouts.routes.ts
           ! grep -q 'req.body.*account' src/routes/dashboard-payouts.routes.ts
