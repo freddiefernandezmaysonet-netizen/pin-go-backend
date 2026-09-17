@@ -244,10 +244,10 @@ export function buildStripeConnectIsolationV2AccountSessionParams(input: {
   accountId: string;
   detailsSubmitted: boolean;
 }): Stripe.AccountSessionCreateParams {
-  // Keep pre-onboarding Account Sessions intentionally minimal. Stripe validates
-  // cross-component feature compatibility for every enabled component even if
-  // the frontend does not mount it. Financial surfaces are enabled only after
-  // the connected account has submitted onboarding details.
+  // Stripe documents notification_banner as a remediation surface for accounts
+  // that have already completed initial onboarding. Keep the initial session
+  // scoped to account_onboarding only, then expose remediation/financial
+  // surfaces after Stripe reports details_submitted=true.
   const components: AccountSessionComponentsCompat = input.detailsSubmitted
     ? {
         notification_banner: {
@@ -281,16 +281,10 @@ export function buildStripeConnectIsolationV2AccountSessionParams(input: {
         },
       }
     : {
-        notification_banner: {
-          enabled: true,
-          features: {
-            external_account_collection: false,
-          },
-        },
         account_onboarding: {
           enabled: true,
           features: {
-            external_account_collection: false,
+            external_account_collection: true,
             disable_stripe_user_authentication: false,
           },
         },
