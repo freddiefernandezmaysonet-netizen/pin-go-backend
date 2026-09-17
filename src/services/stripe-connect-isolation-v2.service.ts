@@ -101,9 +101,9 @@ export function buildStripeConnectIsolationV2AccountCreateParams(input: {
   return {
     country: input.country,
     controller: {
-      fees: { payer: "application" },
-      losses: { payments: "application" },
-      requirement_collection: "application",
+      fees: { payer: "account" },
+      losses: { payments: "stripe" },
+      requirement_collection: "stripe",
       stripe_dashboard: { type: "none" },
     },
     capabilities: {
