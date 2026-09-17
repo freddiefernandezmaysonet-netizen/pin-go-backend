@@ -47,7 +47,10 @@ jobs:
           set -euo pipefail
           grep -q 'STRIPE_CONNECT_ISOLATION_V2_ENABLED' src/services/stripe-connect-isolation-v2.service.ts
           grep -q 'STRIPE_CONNECT_TENANT_MISMATCH' src/services/stripe-connect-isolation-v2.service.ts
+          grep -q 'fees: { payer: "account" }' src/services/stripe-connect-isolation-v2.service.ts
+          grep -q 'losses: { payments: "stripe" }' src/services/stripe-connect-isolation-v2.service.ts
+          grep -q 'requirement_collection: "stripe"' src/services/stripe-connect-isolation-v2.service.ts
           grep -q 'stripe_dashboard: { type: "none" }' src/services/stripe-connect-isolation-v2.service.ts
           grep -q 'email, undefined' src/services/stripe-connect-isolation-v2.service.test.ts
-          grep -q '/api/dashboard/payouts/isolation-v2/account-session' src/routes/dashboard-payouts.routes.ts
+          grep -q '/api/dashboard/payouts/connect-isolation-v2/account-session' src/routes/dashboard-payouts.routes.ts
           ! grep -q 'req.body.*account' src/routes/dashboard-payouts.routes.ts
