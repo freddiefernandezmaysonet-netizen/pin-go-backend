@@ -53,19 +53,18 @@ jobs:
           grep -q 'losses: { payments: "stripe" }' src/services/stripe-connect-isolation-v2.service.ts
           grep -q 'requirement_collection: "stripe"' src/services/stripe-connect-isolation-v2.service.ts
           grep -q 'stripe_dashboard: { type: "none" }' src/services/stripe-connect-isolation-v2.service.ts
+          grep -q 'detailsSubmitted: boolean' src/services/stripe-connect-isolation-v2.service.ts
+          grep -q 'input.detailsSubmitted' src/services/stripe-connect-isolation-v2.service.ts
           grep -q 'account_onboarding' src/services/stripe-connect-isolation-v2.service.ts
           grep -q 'external_account_collection: false' src/services/stripe-connect-isolation-v2.service.ts
           grep -q 'disable_stripe_user_authentication: false' src/services/stripe-connect-isolation-v2.service.ts
           grep -q '2026-03-25.dahlia' src/services/stripe-connect-isolation-v2.service.ts
           grep -q 'buildStripeConnectIsolationV2AccountSessionRequestOptions' src/services/stripe-connect-isolation-v2.service.ts
-          grep -q 'accountSessions.create' src/services/stripe-connect-isolation-v2.service.ts
+          grep -q 'Boolean(account.details_submitted)' src/services/stripe-connect-isolation-v2.service.ts
           grep -q 'stripeClient = new Stripe(secretKey);' src/services/stripe-connect-isolation-v2.service.ts
           ! grep -q 'new Stripe(secretKey,.*apiVersion' src/services/stripe-connect-isolation-v2.service.ts
-          grep -q 'account_management' src/services/stripe-connect-isolation-v2.service.ts
-          grep -q 'notification_banner' src/services/stripe-connect-isolation-v2.service.ts
-          grep -q 'documents' src/services/stripe-connect-isolation-v2.service.ts
-          grep -q 'accountCreationAllowed' src/services/stripe-connect-isolation-v2.service.ts
-          grep -q 'email, undefined' src/services/stripe-connect-isolation-v2.service.test.ts
+          grep -q 'pre-onboarding V2 Account Session enables only onboarding and notification banner' src/services/stripe-connect-isolation-v2.service.test.ts
+          grep -q 'post-onboarding V2 Account Session enables account, payment and payout surfaces without onboarding' src/services/stripe-connect-isolation-v2.service.test.ts
           grep -q '/api/dashboard/payouts/connect-isolation-v2/eligibility' src/routes/dashboard-payouts.routes.ts
           grep -q '/api/dashboard/payouts/connect-isolation-v2/account' src/routes/dashboard-payouts.routes.ts
           grep -q '/api/dashboard/payouts/connect-isolation-v2/account-session' src/routes/dashboard-payouts.routes.ts

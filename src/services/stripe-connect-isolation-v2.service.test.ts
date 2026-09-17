@@ -23,7 +23,10 @@ type AccountSessionComponentsCompat =
         disable_stripe_user_authentication?: boolean;
       };
     };
-    account_management?: { enabled?: boolean };
+    account_management?: {
+      enabled?: boolean;
+      features?: { external_account_collection?: boolean };
+    };
     notification_banner?: { enabled?: boolean };
   };
 
@@ -188,10 +191,11 @@ test("new V2 account policy makes the connected account pay Stripe fees and keep
   assert.equal(metadata.organizationId, "org_fernandez");
 });
 
-test("V2 Account Session uses Dahlia onboarding semantics without disabling Stripe authentication", () => {
-  const params = buildStripeConnectIsolationV2AccountSessionParams(
-    "acct_fernandez"
-  );
+test("pre-onboarding V2 Account Session enables only onboarding and notification banner", () => {
+  const params = buildStripeConnectIsolationV2AccountSessionParams({
+    accountId: "acct_fernandez",
+    detailsSubmitted: false,
+  });
   const components = params.components as AccountSessionComponentsCompat;
   const requestOptions =
     buildStripeConnectIsolationV2AccountSessionRequestOptions() as {
@@ -199,6 +203,7 @@ test("V2 Account Session uses Dahlia onboarding semantics without disabling Stri
     };
 
   assert.equal(params.account, "acct_fernandez");
+  assert.equal(components.notification_banner?.enabled, true);
   assert.equal(components.account_onboarding?.enabled, true);
   assert.equal(
     components.account_onboarding?.features?.external_account_collection,
@@ -208,6 +213,10 @@ test("V2 Account Session uses Dahlia onboarding semantics without disabling Stri
     components.account_onboarding?.features?.disable_stripe_user_authentication,
     false
   );
+  assert.equal(components.account_management, undefined);
+  assert.equal(components.documents, undefined);
+  assert.equal(components.payments, undefined);
+  assert.equal(components.payouts, undefined);
   assert.equal(
     STRIPE_CONNECT_V2_ACCOUNT_SESSION_API_VERSION,
     "2026-03-25.dahlia"
@@ -218,33 +227,26 @@ test("V2 Account Session uses Dahlia onboarding semantics without disabling Stri
   );
 });
 
-test("V2 Account Session includes no-dashboard required surfaces and keeps money-moving actions disabled", () => {
-  const params = buildStripeConnectIsolationV2AccountSessionParams(
-    "acct_fernandez"
-  );
+test("post-onboarding V2 Account Session enables account, payment and payout surfaces without onboarding", () => {
+  const params = buildStripeConnectIsolationV2AccountSessionParams({
+    accountId: "acct_fernandez",
+    detailsSubmitted: true,
+  });
   const components = params.components as AccountSessionComponentsCompat;
 
   assert.equal(params.account, "acct_fernandez");
-  assert.equal(components.account_onboarding?.enabled, true);
-  assert.equal(components.account_management?.enabled, true);
   assert.equal(components.notification_banner?.enabled, true);
+  assert.equal(components.account_onboarding, undefined);
+  assert.equal(components.account_management?.enabled, true);
+  assert.equal(
+    components.account_management?.features?.external_account_collection,
+    true
+  );
   assert.equal(components.documents?.enabled, true);
   assert.equal(components.payments?.enabled, true);
-  assert.equal(
-    components.payments?.features?.refund_management,
-    false
-  );
-  assert.equal(
-    components.payments?.features?.dispute_management,
-    false
-  );
+  assert.equal(components.payments?.features?.refund_management, false);
+  assert.equal(components.payments?.features?.dispute_management, false);
   assert.equal(components.payouts?.enabled, true);
-  assert.equal(
-    components.payouts?.features?.standard_payouts,
-    false
-  );
-  assert.equal(
-    components.payouts?.features?.instant_payouts,
-    false
-  );
+  assert.equal(components.payouts?.features?.standard_payouts, false);
+  assert.equal(components.payouts?.features?.instant_payouts, false);
 });
