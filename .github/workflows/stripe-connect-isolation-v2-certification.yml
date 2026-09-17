@@ -56,7 +56,8 @@ jobs:
           grep -q 'detailsSubmitted: boolean' src/services/stripe-connect-isolation-v2.service.ts
           grep -q 'input.detailsSubmitted' src/services/stripe-connect-isolation-v2.service.ts
           grep -q 'account_onboarding' src/services/stripe-connect-isolation-v2.service.ts
-          grep -q 'external_account_collection: false' src/services/stripe-connect-isolation-v2.service.ts
+          grep -q 'notification_banner' src/services/stripe-connect-isolation-v2.service.ts
+          test "$(grep -c 'external_account_collection: false' src/services/stripe-connect-isolation-v2.service.ts)" -ge 2
           grep -q 'disable_stripe_user_authentication: false' src/services/stripe-connect-isolation-v2.service.ts
           grep -q '2026-03-25.dahlia' src/services/stripe-connect-isolation-v2.service.ts
           grep -q 'buildStripeConnectIsolationV2AccountSessionRequestOptions' src/services/stripe-connect-isolation-v2.service.ts
@@ -65,6 +66,7 @@ jobs:
           ! grep -q 'new Stripe(secretKey,.*apiVersion' src/services/stripe-connect-isolation-v2.service.ts
           grep -q 'pre-onboarding V2 Account Session enables only onboarding and notification banner' src/services/stripe-connect-isolation-v2.service.test.ts
           grep -q 'post-onboarding V2 Account Session enables account, payment and payout surfaces without onboarding' src/services/stripe-connect-isolation-v2.service.test.ts
+          grep -q 'components.notification_banner?.features?.external_account_collection' src/services/stripe-connect-isolation-v2.service.test.ts
           grep -q '/api/dashboard/payouts/connect-isolation-v2/eligibility' src/routes/dashboard-payouts.routes.ts
           grep -q '/api/dashboard/payouts/connect-isolation-v2/account' src/routes/dashboard-payouts.routes.ts
           grep -q '/api/dashboard/payouts/connect-isolation-v2/account-session' src/routes/dashboard-payouts.routes.ts
