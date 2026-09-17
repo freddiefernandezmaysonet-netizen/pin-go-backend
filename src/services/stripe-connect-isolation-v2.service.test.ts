@@ -85,7 +85,7 @@ test("tenant ownership fails closed when persisted account id and Stripe account
   );
 });
 
-test("new V2 account policy does not infer an email and disables Stripe-hosted dashboard access", () => {
+test("new V2 account policy makes the connected account pay Stripe fees and keeps Stripe-hosted dashboard disabled", () => {
   const params = buildStripeConnectIsolationV2AccountCreateParams({
     organizationId: "org_fernandez",
     organizationName: "Fernandez Property Management LLC",
@@ -95,7 +95,9 @@ test("new V2 account policy does not infer an email and disables Stripe-hosted d
 
   assert.equal(params.email, undefined);
   assert.equal(params.type, undefined);
-  assert.equal(params.controller?.requirement_collection, "application");
+  assert.equal(params.controller?.fees?.payer, "account");
+  assert.equal(params.controller?.losses?.payments, "stripe");
+  assert.equal(params.controller?.requirement_collection, "stripe");
   assert.equal(params.controller?.stripe_dashboard?.type, "none");
   assert.equal(metadata.organizationId, "org_fernandez");
 });
