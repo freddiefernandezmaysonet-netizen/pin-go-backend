@@ -235,7 +235,7 @@ dashboardPayoutsRouter.post(
 );
 
 dashboardPayoutsRouter.post(
-  "/api/dashboard/payouts/isolation-v2/account-session",
+  "/api/dashboard/payouts/connect-isolation-v2/account-session",
   requireAuth,
   async (req, res) => {
     try {
