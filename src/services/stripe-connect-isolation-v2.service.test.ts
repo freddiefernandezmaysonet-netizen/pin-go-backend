@@ -10,6 +10,12 @@ import {
   isStripeConnectV2AccountCreationEnabled,
 } from "./stripe-connect-isolation-v2.service.js";
 
+type AccountSessionComponentsCompat =
+  Stripe.AccountSessionCreateParams["components"] & {
+    account_management?: { enabled?: boolean };
+    notification_banner?: { enabled?: boolean };
+  };
+
 function stripeAccount(input: {
   id: string;
   organizationId?: string;
@@ -118,28 +124,29 @@ test("V2 Account Session includes no-dashboard required surfaces and keeps money
   const params = buildStripeConnectIsolationV2AccountSessionParams(
     "acct_fernandez"
   );
+  const components = params.components as AccountSessionComponentsCompat;
 
   assert.equal(params.account, "acct_fernandez");
-  assert.equal(params.components.account_onboarding?.enabled, true);
-  assert.equal(params.components.account_management?.enabled, true);
-  assert.equal(params.components.notification_banner?.enabled, true);
-  assert.equal(params.components.documents?.enabled, true);
-  assert.equal(params.components.payments?.enabled, true);
+  assert.equal(components.account_onboarding?.enabled, true);
+  assert.equal(components.account_management?.enabled, true);
+  assert.equal(components.notification_banner?.enabled, true);
+  assert.equal(components.documents?.enabled, true);
+  assert.equal(components.payments?.enabled, true);
   assert.equal(
-    params.components.payments?.features?.refund_management,
+    components.payments?.features?.refund_management,
     false
   );
   assert.equal(
-    params.components.payments?.features?.dispute_management,
+    components.payments?.features?.dispute_management,
     false
   );
-  assert.equal(params.components.payouts?.enabled, true);
+  assert.equal(components.payouts?.enabled, true);
   assert.equal(
-    params.components.payouts?.features?.standard_payouts,
+    components.payouts?.features?.standard_payouts,
     false
   );
   assert.equal(
-    params.components.payouts?.features?.instant_payouts,
+    components.payouts?.features?.instant_payouts,
     false
   );
 });
