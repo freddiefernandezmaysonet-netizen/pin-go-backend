@@ -283,6 +283,9 @@ export function buildStripeConnectIsolationV2AccountSessionParams(input: {
     : {
         notification_banner: {
           enabled: true,
+          features: {
+            external_account_collection: false,
+          },
         },
         account_onboarding: {
           enabled: true,
