@@ -7,7 +7,10 @@ import {
   getOrganizationPayoutStatus,
   syncConnectAccountStatus,
 } from "../services/stripe-connect.service.js";
-import { createStripeConnectIsolationV2AccountSession } from "../services/stripe-connect-isolation-v2.service.js";
+import {
+  createStripeConnectIsolationV2Account,
+  createStripeConnectIsolationV2AccountSession,
+} from "../services/stripe-connect-isolation-v2.service.js";
 
 const prisma = new PrismaClient();
 
@@ -227,6 +230,27 @@ dashboardPayoutsRouter.post(
       return res.json({
         ok: true,
         loginLink,
+      });
+    } catch (error: any) {
+      return sendRouteError(res, error);
+    }
+  }
+);
+
+dashboardPayoutsRouter.post(
+  "/api/dashboard/payouts/connect-isolation-v2/account",
+  requireAuth,
+  async (req, res) => {
+    try {
+      const organizationId = getOrgIdFromRequest(req);
+      const account = await createStripeConnectIsolationV2Account(
+        organizationId
+      );
+
+      res.setHeader("Cache-Control", "no-store");
+      return res.status(201).json({
+        ok: true,
+        account,
       });
     } catch (error: any) {
       return sendRouteError(res, error);
