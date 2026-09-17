@@ -6,8 +6,10 @@ import {
   assertStripeConnectTenantOwnership,
   buildStripeConnectIsolationV2AccountCreateParams,
   buildStripeConnectIsolationV2AccountSessionParams,
+  getStripeConnectV2Eligibility,
   isStripeConnectIsolationV2Enabled,
   isStripeConnectV2AccountCreationEnabled,
+  isStripeConnectV2CanaryOrganization,
 } from "./stripe-connect-isolation-v2.service.js";
 
 type AccountSessionComponentsCompat =
@@ -46,6 +48,63 @@ test("V2 account creation has a separate default-off fence", () => {
       STRIPE_CONNECT_V2_ACCOUNT_CREATION_ENABLED: "true",
     }),
     true
+  );
+});
+
+test("V2 organization canary allowlist is fail-closed", () => {
+  assert.equal(isStripeConnectV2CanaryOrganization("org_fernandez", {}), false);
+  assert.equal(
+    isStripeConnectV2CanaryOrganization("org_fernandez", {
+      STRIPE_CONNECT_V2_CANARY_ORGANIZATION_IDS:
+        "org_remanso, org_fernandez;org_other",
+    }),
+    true
+  );
+  assert.equal(
+    isStripeConnectV2CanaryOrganization("org_unknown", {
+      STRIPE_CONNECT_V2_CANARY_ORGANIZATION_IDS:
+        "org_remanso, org_fernandez;org_other",
+    }),
+    false
+  );
+});
+
+test("V2 eligibility requires global isolation and explicit organization canary membership", () => {
+  assert.deepEqual(getStripeConnectV2Eligibility("org_fernandez", {}), {
+    eligible: false,
+    isolationEnabled: false,
+    canaryOrganization: false,
+    accountCreationEnabled: false,
+    accountCreationAllowed: false,
+  });
+
+  assert.deepEqual(
+    getStripeConnectV2Eligibility("org_fernandez", {
+      STRIPE_CONNECT_ISOLATION_V2_ENABLED: "true",
+      STRIPE_CONNECT_V2_ACCOUNT_CREATION_ENABLED: "true",
+    }),
+    {
+      eligible: false,
+      isolationEnabled: true,
+      canaryOrganization: false,
+      accountCreationEnabled: true,
+      accountCreationAllowed: false,
+    }
+  );
+
+  assert.deepEqual(
+    getStripeConnectV2Eligibility("org_fernandez", {
+      STRIPE_CONNECT_ISOLATION_V2_ENABLED: "true",
+      STRIPE_CONNECT_V2_ACCOUNT_CREATION_ENABLED: "true",
+      STRIPE_CONNECT_V2_CANARY_ORGANIZATION_IDS: "org_fernandez",
+    }),
+    {
+      eligible: true,
+      isolationEnabled: true,
+      canaryOrganization: true,
+      accountCreationEnabled: true,
+      accountCreationAllowed: true,
+    }
   );
 });
 
