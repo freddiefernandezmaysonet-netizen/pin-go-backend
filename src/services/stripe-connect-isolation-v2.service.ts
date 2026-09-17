@@ -9,8 +9,18 @@ const V2_ACCOUNT_CREATION_FLAG =
 const V2_CANARY_ORGANIZATIONS_FLAG =
   "STRIPE_CONNECT_V2_CANARY_ORGANIZATION_IDS";
 
+export const STRIPE_CONNECT_V2_ACCOUNT_SESSION_API_VERSION =
+  "2026-03-25.dahlia";
+
 type AccountSessionComponentsCompat =
   Stripe.AccountSessionCreateParams["components"] & {
+    account_onboarding?: {
+      enabled: boolean;
+      features?: {
+        external_account_collection?: boolean;
+        disable_stripe_user_authentication?: boolean;
+      };
+    };
     account_management?: {
       enabled: boolean;
       features?: {
@@ -233,15 +243,15 @@ export function buildStripeConnectIsolationV2AccountCreateParams(input: {
 export function buildStripeConnectIsolationV2AccountSessionParams(
   accountId: string
 ): Stripe.AccountSessionCreateParams {
-  // Pin&Go currently uses stripe-node 14.x. Stripe's current Account Session API
-  // documents account_management and notification_banner, but those two keys
-  // predate the installed SDK's generated TypeScript surface. Keep the bridge
-  // narrow and document-exact rather than weakening the whole call to `any`.
+  // Pin&Go currently uses stripe-node 14.x, whose generated types predate
+  // current embedded Connect features. Keep the compatibility bridge narrow
+  // and scoped only to the V2 Account Session payload.
   const components: AccountSessionComponentsCompat = {
     account_onboarding: {
       enabled: true,
       features: {
-        external_account_collection: true,
+        external_account_collection: false,
+        disable_stripe_user_authentication: false,
       },
     },
     account_management: {
@@ -279,6 +289,15 @@ export function buildStripeConnectIsolationV2AccountSessionParams(
     account: accountId,
     components: components as Stripe.AccountSessionCreateParams["components"],
   };
+}
+
+export function buildStripeConnectIsolationV2AccountSessionRequestOptions(): Stripe.RequestOptions {
+  // Do not upgrade Pin&Go's global Stripe API version. Dahlia is intentionally
+  // isolated to Account Sessions V2 so legacy Direct Booking / Connect V1 flows
+  // continue using stripe-node 14.x behavior.
+  return {
+    apiVersion: STRIPE_CONNECT_V2_ACCOUNT_SESSION_API_VERSION,
+  } as unknown as Stripe.RequestOptions;
 }
 
 export async function createStripeConnectIsolationV2Account(
@@ -410,7 +429,8 @@ export async function createStripeConnectIsolationV2AccountSession(
   });
 
   const session = await stripe.accountSessions.create(
-    buildStripeConnectIsolationV2AccountSessionParams(account.id)
+    buildStripeConnectIsolationV2AccountSessionParams(account.id),
+    buildStripeConnectIsolationV2AccountSessionRequestOptions()
   );
 
   if (session.account !== account.id) {
