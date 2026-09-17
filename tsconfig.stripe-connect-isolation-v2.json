@@ -6,7 +6,6 @@
   },
   "include": [
     "src/services/stripe-connect-isolation-v2.service.ts",
-    "src/services/stripe-connect-isolation-v2.service.test.ts",
-    "src/routes/dashboard-payouts.routes.ts"
+    "src/services/stripe-connect-isolation-v2.service.test.ts"
   ]
 }
