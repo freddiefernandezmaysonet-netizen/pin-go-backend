@@ -1,0 +1,56 @@
+name: Stripe Connect Isolation V2 Certification
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - "src/services/stripe-connect-isolation-v2.service.ts"
+      - "src/services/stripe-connect-isolation-v2.service.test.ts"
+      - "src/routes/dashboard-payouts.routes.ts"
+      - "tsconfig.stripe-connect-isolation-v2.json"
+      - ".github/workflows/stripe-connect-isolation-v2-certification.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  certify:
+    name: Tenant isolation contracts
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      DATABASE_URL: postgresql://postgres:postgres@localhost:5432/pingo_connect_isolation_v2?schema=public
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci --silent --no-audit --no-fund
+
+      - name: Generate Prisma client
+        run: npx prisma generate
+
+      - name: Test Stripe Connect tenant isolation
+        run: npx tsx --test src/services/stripe-connect-isolation-v2.service.test.ts
+
+      - name: TypeScript isolation contract
+        run: npx tsc -p tsconfig.stripe-connect-isolation-v2.json
+
+      - name: Certify safety boundaries
+        shell: bash
+        run: |
+          set -euo pipefail
+          grep -q 'STRIPE_CONNECT_ISOLATION_V2_ENABLED' src/services/stripe-connect-isolation-v2.service.ts
+          grep -q 'STRIPE_CONNECT_TENANT_MISMATCH' src/services/stripe-connect-isolation-v2.service.ts
+          grep -q 'fees: { payer: "account" }' src/services/stripe-connect-isolation-v2.service.ts
+          grep -q 'losses: { payments: "stripe" }' src/services/stripe-connect-isolation-v2.service.ts
+          grep -q 'requirement_collection: "stripe"' src/services/stripe-connect-isolation-v2.service.ts
+          grep -q 'stripe_dashboard: { type: "none" }' src/services/stripe-connect-isolation-v2.service.ts
+          grep -q 'email, undefined' src/services/stripe-connect-isolation-v2.service.test.ts
+          grep -q '/api/dashboard/payouts/connect-isolation-v2/account-session' src/routes/dashboard-payouts.routes.ts
+          ! grep -q 'req.body.*account' src/routes/dashboard-payouts.routes.ts

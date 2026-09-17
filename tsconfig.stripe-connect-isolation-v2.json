@@ -1,0 +1,11 @@
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "noEmit": true,
+    "types": ["node"]
+  },
+  "include": [
+    "src/services/stripe-connect-isolation-v2.service.ts",
+    "src/services/stripe-connect-isolation-v2.service.test.ts"
+  ]
+}
