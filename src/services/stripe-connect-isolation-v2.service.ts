@@ -123,6 +123,33 @@ export function buildStripeConnectIsolationV2AccountCreateParams(input: {
   };
 }
 
+export function buildStripeConnectIsolationV2AccountSessionParams(
+  accountId: string
+): Stripe.AccountSessionCreateParams {
+  return {
+    account: accountId,
+    components: {
+      payments: {
+        enabled: true,
+        features: {
+          capture_payments: false,
+          dispute_management: false,
+          refund_management: false,
+          destination_on_behalf_of_charge_management: false,
+        },
+      },
+      payouts: {
+        enabled: true,
+        features: {
+          edit_payout_schedule: false,
+          instant_payouts: false,
+          standard_payouts: false,
+        },
+      },
+    },
+  };
+}
+
 export async function createStripeConnectIsolationV2AccountSession(
   organizationId: string
 ) {
@@ -170,28 +197,9 @@ export async function createStripeConnectIsolationV2AccountSession(
     account: retrieved,
   });
 
-  const session = await stripe.accountSessions.create({
-    account: account.id,
-    components: {
-      payments: {
-        enabled: true,
-        features: {
-          capture_payments: false,
-          dispute_management: false,
-          refund_management: false,
-          destination_on_behalf_of_charge_management: false,
-        },
-      },
-      payouts: {
-        enabled: true,
-        features: {
-          edit_payout_schedule: false,
-          instant_payouts: false,
-          standard_payouts: false,
-        },
-      },
-    },
-  });
+  const session = await stripe.accountSessions.create(
+    buildStripeConnectIsolationV2AccountSessionParams(account.id)
+  );
 
   if (session.account !== account.id) {
     throw new StripeConnectIsolationV2Error(
