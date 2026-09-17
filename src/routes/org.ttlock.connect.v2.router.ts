@@ -57,11 +57,11 @@ export function buildOrgTtlockConnectV2Router(prisma: PrismaClient) {
    */
   router.post("/ttlock/connect", async (req: any, res) => {
     try {
-      console.log("🔵 TTLOCK CONNECT V2 HIT");
-      console.log("BODY:", req.body);
-      console.log("ORG ID:", req.orgId);
-
       const orgId = req.orgId;
+
+      console.log("🔵 TTLOCK CONNECT V2 HIT", {
+        organizationId: orgId ?? null,
+      });
 
       const username = String(req.body.username ?? "");
       const passwordPlain = String(req.body.password ?? "");
