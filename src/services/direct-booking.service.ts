@@ -157,7 +157,11 @@ function parseHostPayoutStatus(session: Stripe.Checkout.Session) {
     : "NOT_APPLICABLE";
 }
 
-async function getStripeFinancialRefs(paymentIntentId: string | null) {
+async function getStripeFinancialRefs(
+  paymentIntentId: string | null,
+  stripeChargeMode: string | null,
+  stripeConnectedAccountId: string | null
+) {
   const emptyRefs = {
     stripeChargeId: null as string | null,
     stripeTransferId: null as string | null,
@@ -169,13 +173,22 @@ async function getStripeFinancialRefs(paymentIntentId: string | null) {
   }
 
   try {
-    const paymentIntent = await stripe.paymentIntents.retrieve(paymentIntentId, {
-      expand: [
-        "latest_charge",
-        "latest_charge.transfer",
-        "latest_charge.application_fee",
-      ],
-    });
+    const stripeAccount =
+      stripeChargeMode === "DIRECT_CHARGE" && stripeConnectedAccountId
+        ? stripeConnectedAccountId
+        : undefined;
+
+    const paymentIntent = await stripe.paymentIntents.retrieve(
+      paymentIntentId,
+      {
+        expand: [
+          "latest_charge",
+          "latest_charge.transfer",
+          "latest_charge.application_fee",
+        ],
+      },
+      stripeAccount ? { stripeAccount } : undefined
+    );
 
     const latestCharge = paymentIntent.latest_charge;
 
@@ -780,7 +793,13 @@ const hostPayoutAmount = parseOptionalMoneyMetadata(
 
 const hostPayoutStatus = parseHostPayoutStatus(session);
 
-const stripeFinancialRefs = await getStripeFinancialRefs(paymentIntentId);
+const stripeChargeMode = optionalMetadata(session, "stripeChargeMode");
+
+const stripeFinancialRefs = await getStripeFinancialRefs(
+  paymentIntentId,
+  stripeChargeMode,
+  stripeConnectedAccountId
+);
 
 const selectedAmenityIds = parseSelectedAmenityIds(session);
 const pricingBreakdown = await calculateDirectBookingPricing({
