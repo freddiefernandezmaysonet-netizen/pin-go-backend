@@ -19,6 +19,7 @@ import {
   markStripeFinancialEventFailed,
   markStripeFinancialEventProcessed,
 } from "../services/stripe-financial-event-ledger.service";
+import { syncStripeDirectChargeDispute } from "../services/stripe-direct-charge-dispute.service";
 
 const prisma = new PrismaClient();
 
@@ -175,6 +176,21 @@ export function registerStripeWebhook(app: Express) {
                 session.metadata?.reservationModificationId ?? null,
               paymentReplay:
                 "paymentReplay" in result ? result.paymentReplay : null,
+            });
+
+            break;
+          }
+
+          case "charge.dispute.created":
+          case "charge.dispute.updated":
+          case "charge.dispute.closed": {
+            const result = await syncStripeDirectChargeDispute(prisma, event);
+
+            console.log("[STRIPE_DIRECT_CHARGE_DISPUTE]", {
+              eventId: event.id,
+              eventType: event.type,
+              handled: result.handled,
+              action: result.action,
             });
 
             break;

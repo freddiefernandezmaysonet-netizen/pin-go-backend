@@ -9,6 +9,7 @@ on:
       - "src/billing/stripe.ts"
       - "src/webhooks/stripe.webhook.ts"
       - "src/webhooks/stripe-production-log-hygiene.contract.test.ts"
+      - "src/webhooks/stripe-direct-charge-dispute.contract.test.ts"
       - "src/routes/dashboard-payouts.routes.ts"
       - "src/routes/public-booking.metadata-limit.contract.test.ts"
       - "src/services/stripe-connect-dashboard-link.service.ts"
@@ -23,6 +24,8 @@ on:
       - "src/services/direct-booking-stripe-financial-evidence.service.test.ts"
       - "src/services/stripe-financial-event-ledger.service.ts"
       - "src/services/stripe-financial-event-ledger.service.test.ts"
+      - "src/services/stripe-direct-charge-dispute.service.ts"
+      - "src/services/stripe-direct-charge-dispute.service.test.ts"
       - "src/services/direct-booking.service.ts"
       - "src/services/direct-booking-financial-refs.contract.test.ts"
       - "src/services/direct-booking-refund.service.ts"
@@ -62,8 +65,10 @@ jobs:
           src/services/direct-booking-refund-direct-charges.contract.test.ts
           src/services/stripe-connect-dashboard-link.contract.test.ts
           src/services/stripe-financial-event-ledger.service.test.ts
+          src/services/stripe-direct-charge-dispute.service.test.ts
           src/routes/public-booking.metadata-limit.contract.test.ts
           src/webhooks/stripe-production-log-hygiene.contract.test.ts
+          src/webhooks/stripe-direct-charge-dispute.contract.test.ts
 
       - name: Type-check Direct Booking Stripe policies
         shell: bash
