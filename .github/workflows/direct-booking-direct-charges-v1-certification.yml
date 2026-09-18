@@ -9,6 +9,7 @@ on:
       - "src/billing/stripe.ts"
       - "src/webhooks/stripe.webhook.ts"
       - "src/webhooks/stripe-production-log-hygiene.contract.test.ts"
+      - "src/webhooks/stripe-direct-charge-dispute.contract.test.ts"
       - "src/routes/dashboard-payouts.routes.ts"
       - "src/routes/public-booking.metadata-limit.contract.test.ts"
       - "src/services/stripe-connect-dashboard-link.service.ts"
@@ -67,6 +68,7 @@ jobs:
           src/services/stripe-direct-charge-dispute.service.test.ts
           src/routes/public-booking.metadata-limit.contract.test.ts
           src/webhooks/stripe-production-log-hygiene.contract.test.ts
+          src/webhooks/stripe-direct-charge-dispute.contract.test.ts
 
       - name: Type-check Direct Booking Stripe policies
         shell: bash
