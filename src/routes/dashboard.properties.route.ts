@@ -47,6 +47,7 @@ import {
 import { resolveOrganizationGuestReplyTo } from "../services/organization-guest-email.service";
 import { createChannexAriOutboxEvent } from "../pms/outbound/channex-ari-outbox.service";
 import { buildFullSyncRange } from "../pms/outbound/channex-ari-lifecycle.policy";
+import { assertDirectBookingPayoutReady } from "../services/stripe-connect.service";
 
 const prisma = new PrismaClient();
 export const dashboardPropertiesRouter = Router();
@@ -713,6 +714,7 @@ if (
      select: {
   id: true,
   status: true,
+  isPublicBookable: true,
   distributionEnabled: true,
   distributionStatus: true,
   timezone: true,
@@ -751,6 +753,31 @@ if (
           ok: false,
           error: "Cannot edit an archived property",
         });
+      }
+
+      if (
+        isPublicBookable === true &&
+        existing.isPublicBookable !== true
+      ) {
+        try {
+          await assertDirectBookingPayoutReady(orgId);
+        } catch (error: any) {
+          if (
+            error?.code === "HOST_PAYOUT_NOT_READY" ||
+            error?.statusCode === 409
+          ) {
+            return res.status(409).json({
+              ok: false,
+              error: error?.code || "HOST_PAYOUT_NOT_READY",
+              message:
+                error?.message ||
+                "Complete Stripe Connect setup before publishing this property for Direct Booking.",
+              payoutStatus: error?.details,
+            });
+          }
+
+          throw error;
+        }
       }
 
       if (
