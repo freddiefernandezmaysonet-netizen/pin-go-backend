@@ -21,6 +21,8 @@ on:
       - "src/services/direct-booking-stripe-financial-evidence.service.test.ts"
       - "src/services/stripe-financial-event-ledger.service.ts"
       - "src/services/stripe-financial-event-ledger.service.test.ts"
+      - "src/services/direct-booking.service.ts"
+      - "src/services/direct-booking-financial-refs.contract.test.ts"
       - "src/services/direct-booking-refund.service.ts"
       - "src/services/direct-booking-refund-direct-charges.contract.test.ts"
       - "tsconfig.direct-booking-direct-charges-v1.json"
@@ -54,6 +56,7 @@ jobs:
           src/services/direct-booking-stripe-resource-context.service.test.ts
           src/services/direct-booking-stripe-refund.service.test.ts
           src/services/direct-booking-stripe-financial-evidence.service.test.ts
+          src/services/direct-booking-financial-refs.contract.test.ts
           src/services/direct-booking-refund-direct-charges.contract.test.ts
           src/services/stripe-connect-dashboard-link.contract.test.ts
           src/services/stripe-financial-event-ledger.service.test.ts
