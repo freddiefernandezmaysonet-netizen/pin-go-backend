@@ -95,9 +95,15 @@ export function registerStripeWebhook(app: Express) {
 
             console.log("🧾 checkout.session.completed", {
               sessionId: session.id,
-              customer: session.customer,
-              subscription: session.subscription,
-              metadata: session.metadata ?? null,
+              customerId: session.customer ? String(session.customer) : null,
+              subscriptionId: session.subscription ? String(session.subscription) : null,
+              flow: String(session.metadata?.flow ?? "").trim() || null,
+              stripeChargeMode:
+                String(session.metadata?.stripeChargeMode ?? "").trim() || null,
+              organizationId:
+                String(session.metadata?.organizationId ?? "").trim() || null,
+              propertyId:
+                String(session.metadata?.propertyId ?? "").trim() || null,
             });
 
            const flow = String(session.metadata?.flow ?? "").trim();
