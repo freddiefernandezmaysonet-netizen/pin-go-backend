@@ -173,21 +173,23 @@ async function getStripeFinancialRefs(
   }
 
   try {
-    const stripeAccount =
-      stripeChargeMode === "DIRECT_CHARGE" && stripeConnectedAccountId
-        ? stripeConnectedAccountId
-        : undefined;
+    if (stripeChargeMode !== "DIRECT_CHARGE") {
+      throw new Error("DIRECT_BOOKING_STRIPE_CHARGE_MODE_INVALID");
+    }
+
+    if (!String(stripeConnectedAccountId ?? "").trim().startsWith("acct_")) {
+      throw new Error("DIRECT_BOOKING_STRIPE_CONNECTED_ACCOUNT_INVALID");
+    }
 
     const paymentIntent = await stripe.paymentIntents.retrieve(
       paymentIntentId,
       {
         expand: [
           "latest_charge",
-          "latest_charge.transfer",
           "latest_charge.application_fee",
         ],
       },
-      stripeAccount ? { stripeAccount } : undefined
+      { stripeAccount: stripeConnectedAccountId! }
     );
 
     const latestCharge = paymentIntent.latest_charge;
