@@ -1,6 +1,6 @@
 import { Router } from "express";
 import type { PrismaClient } from "@prisma/client";
-import { requireAuth } from "../middleware/requireAuth";
+import { requireAuth } from "../middleware/requireAuth.js";
 import {
   getEditablePropertyGuestKnowledge,
   upsertPropertyGuestKnowledge,
