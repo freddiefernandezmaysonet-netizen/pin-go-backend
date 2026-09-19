@@ -67,7 +67,7 @@ export class OpenAIAgentsBenchmarkAdapter implements ModelEvaluationAdapter {
     private readonly transport: AgentsApiTransport,
   ) {}
 
-  async evaluateScenario(scenario: BenchmarkScenario): Promise<ScenarioEvaluationResult> {
+  async evaluateScenario(\n    scenario: BenchmarkScenario,\n    tools: MockToolExecutor,\n  ): Promise<ScenarioEvaluationResult> {
     if (!scenario.context.organizationId.startsWith("benchmark-")) {
       throw new Error("OPENAI_BENCHMARK_NON_BENCHMARK_ORG_BLOCKED");
     }
@@ -96,7 +96,7 @@ export class OpenAIAgentsBenchmarkAdapter implements ModelEvaluationAdapter {
       },
     };
 
-    return this.transport.createSession(request);
+    return this.transport.runSession(request, scenario, tools);
   }
 }
 
