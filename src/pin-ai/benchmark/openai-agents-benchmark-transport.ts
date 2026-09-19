@@ -103,9 +103,15 @@ export class OpenAIAgentsBenchmarkTransport implements AgentsApiTransport {
       session = await this.retrieveSession(session.id);
     }
 
-    const items = await this.listSessionItems(session.id);
+    const [items, turns] = await Promise.all([
+      this.listSessionItems(session.id),
+      this.listSessionTurns(session.id),
+    ]);
     const responseText = extractAssistantText(items);
-    const usage = parseUsage(session.usage);
+    const usage = preferRecordedUsage(
+      parseUsage(session.usage),
+      aggregateTurnUsage(turns),
+    );
 
     return {
       scenarioId: request.metadata.scenario_id,
@@ -186,6 +192,13 @@ export class OpenAIAgentsBenchmarkTransport implements AgentsApiTransport {
     return this.requestJson(
       "GET",
       `/v1/agents/sessions/${encodeURIComponent(sessionId)}/items?limit=100&order=asc`,
+    );
+  }
+
+  private async listSessionTurns(sessionId: string): Promise<unknown> {
+    return this.requestJson(
+      "GET",
+      `/v1/agents/sessions/${encodeURIComponent(sessionId)}/turns?limit=100&order=asc`,
     );
   }
 
@@ -287,6 +300,34 @@ function parseUsage(usage: Readonly<Record<string, unknown>>) {
     cachedInputTokens: asNonNegativeNumber(details.cached_tokens),
     outputTokens: asNonNegativeNumber(usage.output_tokens),
   };
+}
+
+function aggregateTurnUsage(payload: unknown) {
+  const root = asRecord(payload);
+  const data = Array.isArray(root.data) ? root.data : [];
+  let inputTokens = 0;
+  let cachedInputTokens = 0;
+  let outputTokens = 0;
+
+  for (const turnValue of data) {
+    const turn = asRecord(turnValue);
+    const usage = parseUsage(asRecord(turn.usage));
+    inputTokens += usage.inputTokens;
+    cachedInputTokens += usage.cachedInputTokens;
+    outputTokens += usage.outputTokens;
+  }
+
+  return { inputTokens, cachedInputTokens, outputTokens };
+}
+
+function preferRecordedUsage(
+  sessionUsage: ReturnType<typeof parseUsage>,
+  turnUsage: ReturnType<typeof parseUsage>,
+) {
+  const sessionTotal =
+    sessionUsage.inputTokens + sessionUsage.cachedInputTokens + sessionUsage.outputTokens;
+  const turnTotal = turnUsage.inputTokens + turnUsage.cachedInputTokens + turnUsage.outputTokens;
+  return turnTotal > sessionTotal ? turnUsage : sessionUsage;
 }
 
 function aggregateTurnUsage(payload: unknown) {
