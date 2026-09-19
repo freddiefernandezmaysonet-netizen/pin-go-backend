@@ -73,9 +73,11 @@ test("OpenAI benchmark transport blocks non-benchmark tenant metadata before net
 test("OpenAI benchmark transport sends only to configured Agents session endpoint", async () => {
   let capturedUrl = "";
   let capturedAuthorization = "";
+  let capturedBetaHeader = "";
   const fetchImpl: BenchmarkFetch = async (url, init) => {
     capturedUrl = url;
     capturedAuthorization = init.headers.authorization;
+    capturedBetaHeader = init.headers["OpenAI-Beta"];
     return {
       ok: true,
       status: 200,
@@ -100,6 +102,7 @@ test("OpenAI benchmark transport sends only to configured Agents session endpoin
 
   assert.equal(capturedUrl, "https://api.openai.com/v1/agents/sessions");
   assert.equal(capturedAuthorization, "Bearer benchmark-test-key");
+  assert.equal(capturedBetaHeader, "agents=v1");
   assert.equal(result.scenarioId, "001");
   assert.equal(result.model, "gpt-5.6-luna");
   assert.equal(result.responseText, "Benchmark response");
