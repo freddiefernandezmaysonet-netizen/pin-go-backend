@@ -58,7 +58,11 @@ export class OpenAIAgentsBenchmarkTransport implements AgentsApiTransport {
     });
 
     if (!response.ok) {
-      throw new Error(`PIN_AI_BENCHMARK_OPENAI_HTTP_${response.status}`);
+      const errorPayload = await safeJson(response);
+      const diagnostic = sanitizeOpenAIError(errorPayload);
+      throw new Error(
+        `PIN_AI_BENCHMARK_OPENAI_HTTP_${response.status}:${diagnostic.type}:${diagnostic.code}:${diagnostic.message}`,
+      );
     }
 
     const payload = await response.json();
