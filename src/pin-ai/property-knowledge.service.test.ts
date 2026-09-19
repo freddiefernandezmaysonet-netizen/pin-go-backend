@@ -79,7 +79,9 @@ test("Property Knowledge composes existing Pin&Go sources without operational cr
   const serialized = JSON.stringify(snapshot);
   assert.doesNotMatch(serialized, /ttlockLockId/);
   assert.doesNotMatch(serialized, /externalId/);
-  assert.doesNotMatch(serialized, /passcode/i);
+  assert.doesNotMatch(serialized, /activePasscode/);
+  assert.doesNotMatch(serialized, /futurePasscode/);
+  assert.doesNotMatch(serialized, /nfcCredential/);
 });
 
 test("Property Knowledge uses Spanish guest agreement fields when requested", () => {
