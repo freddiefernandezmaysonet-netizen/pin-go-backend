@@ -169,7 +169,7 @@ test("OpenAI benchmark transport extracts assistant output from session items", 
     outputTokens: 30,
   });
   assert.equal(result.toolCalls.length, 0);
-  assert.equal(calls.length, 2);
+  assert.equal(calls.length, 3);
   assert.ok(calls.every((call) => call.beta === "agents=v1"));
 });
 
@@ -249,7 +249,7 @@ test("OpenAI benchmark transport executes required mock function and submits too
 
   assert.equal(result.responseText, "Your access is scheduled for 4:00 PM.");
   assert.deepEqual(result.toolCalls, [{ name: "get_access_status", arguments: {} }]);
-  assert.equal(calls.length, 4);
+  assert.equal(calls.length, 5);
 });
 
 test("OpenAI benchmark transport sanitizes error diagnostics and redacts keys", async () => {
@@ -293,3 +293,56 @@ function jsonResponse(payload: unknown) {
     },
   };
 }
+
+test("OpenAI benchmark transport falls back to completed turn usage when session usage is zero", async () => {
+  const fetchImpl: BenchmarkFetch = async (url, init) => {
+    if (url.endsWith("/v1/agents/sessions") && init.method === "POST") {
+      return jsonResponse({
+        id: "session_usage",
+        status: "idle",
+        required_actions: [],
+        usage: {
+          input_tokens: 0,
+          input_tokens_details: { cached_tokens: 0 },
+          output_tokens: 0,
+        },
+      });
+    }
+    if (url.includes("/v1/agents/sessions/session_usage/items")) {
+      return jsonResponse({
+        object: "list",
+        data: [{
+          type: "message",
+          role: "assistant",
+          content: [{ type: "output_text", text: "Done." }],
+        }],
+      });
+    }
+    if (url.includes("/v1/agents/sessions/session_usage/turns")) {
+      return jsonResponse({
+        object: "list",
+        data: [{
+          id: "turn_usage",
+          usage: {
+            input_tokens: 333,
+            input_tokens_details: { cached_tokens: 111 },
+            output_tokens: 44,
+          },
+        }],
+      });
+    }
+    throw new Error(`unexpected fetch: ${init.method} ${url}`);
+  };
+
+  const transport = new OpenAIAgentsBenchmarkTransport(
+    { enabled: true, apiKey: "benchmark-test-key", pollDelayMs: 0 },
+    fetchImpl,
+  );
+
+  const result = await transport.runSession(request, scenario, tools);
+  assert.deepEqual(result.usage, {
+    inputTokens: 333,
+    cachedInputTokens: 111,
+    outputTokens: 44,
+  });
+});
