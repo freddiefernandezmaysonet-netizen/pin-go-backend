@@ -69,9 +69,10 @@ async function main(): Promise<void> {
     },
   });
   const runner = new ModelEvaluationRunner(adapter, mockTools);
+  console.log("PIN_AI_BENCHMARK_CANARY_STARTED:001:gpt-5.6-luna");
   const result = await runner.runScenario(scenario);
 
-  process.stdout.write(
+  console.log(
     JSON.stringify({
       benchmark: true,
       scenarioId: result.scenarioId,
@@ -83,12 +84,14 @@ async function main(): Promise<void> {
       estimatedCostUsd: result.estimatedCostUsd,
       criticalFailuresObserved: result.expectationResults.criticalFailuresObserved,
       outboundCalls,
-    }) + "\n",
+    }),
   );
+  await new Promise((resolve) => setTimeout(resolve, 1000));
 }
 
-main().catch((error: unknown) => {
+main().catch(async (error: unknown) => {
   const message = error instanceof Error ? error.message : "UNKNOWN_ERROR";
-  process.stderr.write(`PIN_AI_BENCHMARK_CANARY_FAILED:${message}\n`);
+  console.error(`PIN_AI_BENCHMARK_CANARY_FAILED:${message}`);
   process.exitCode = 1;
+  await new Promise((resolve) => setTimeout(resolve, 1000));
 });
