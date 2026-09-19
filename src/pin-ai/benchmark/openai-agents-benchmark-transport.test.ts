@@ -147,10 +147,21 @@ test("OpenAI benchmark transport extracts assistant output from session items", 
       });
     }
 
+    if (url.endsWith("/v1/agents/sessions/session_001/turns/turn_001")) {
+      return jsonResponse({
+        id: "turn_001",
+        usage: {
+          input_tokens: 120,
+          input_tokens_details: { cached_tokens: 20 },
+          output_tokens: 30,
+        },
+      });
+    }
+
     if (url.includes("/v1/agents/sessions/session_001/turns")) {
       return jsonResponse({
         object: "list",
-        data: [],
+        data: [{ id: "turn_001", usage: null }],
       });
     }
 
@@ -176,7 +187,7 @@ test("OpenAI benchmark transport extracts assistant output from session items", 
     outputTokens: 30,
   });
   assert.equal(result.toolCalls.length, 0);
-  assert.equal(calls.length, 3);
+  assert.equal(calls.length, 4);
   assert.ok(calls.every((call) => call.beta === "agents=v1"));
 });
 
@@ -239,10 +250,21 @@ test("OpenAI benchmark transport executes required mock function and submits too
       });
     }
 
+    if (url.endsWith("/v1/agents/sessions/session_tool/turns/turn_1")) {
+      return jsonResponse({
+        id: "turn_1",
+        usage: {
+          input_tokens: 200,
+          input_tokens_details: { cached_tokens: 50 },
+          output_tokens: 40,
+        },
+      });
+    }
+
     if (url.includes("/v1/agents/sessions/session_tool/turns")) {
       return jsonResponse({
         object: "list",
-        data: [],
+        data: [{ id: "turn_1", usage: null }],
       });
     }
 
@@ -263,7 +285,7 @@ test("OpenAI benchmark transport executes required mock function and submits too
 
   assert.equal(result.responseText, "Your access is scheduled for 4:00 PM.");
   assert.deepEqual(result.toolCalls, [{ name: "get_access_status", arguments: {} }]);
-  assert.equal(calls.length, 5);
+  assert.equal(calls.length, 6);
 });
 
 test("OpenAI benchmark transport sanitizes error diagnostics and redacts keys", async () => {
@@ -332,16 +354,22 @@ test("OpenAI benchmark transport falls back to completed turn usage when session
         }],
       });
     }
+    if (url.endsWith("/v1/agents/sessions/session_usage/turns/turn_usage")) {
+      return jsonResponse({
+        id: "turn_usage",
+        usage: {
+          input_tokens: 333,
+          input_tokens_details: { cached_tokens: 111 },
+          output_tokens: 44,
+        },
+      });
+    }
     if (url.includes("/v1/agents/sessions/session_usage/turns")) {
       return jsonResponse({
         object: "list",
         data: [{
           id: "turn_usage",
-          usage: {
-            input_tokens: 333,
-            input_tokens_details: { cached_tokens: 111 },
-            output_tokens: 44,
-          },
+          usage: null,
         }],
       });
     }
