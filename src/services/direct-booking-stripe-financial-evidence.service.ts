@@ -87,7 +87,7 @@ export function extractDirectBookingStripeFinancialEvidence(
   const commonEvidence = {
     ...emptyEvidence,
     stripeChargeId: charge.id ?? null,
-    stripeTransferId: objectId(chargeAny.transfer),
+    stripeTransferId: null,
     stripeApplicationFeeId: objectId(chargeAny.application_fee),
     stripeBalanceTransactionId: balanceTransactionId,
     applicationFeeAmountCents,
@@ -161,7 +161,6 @@ export async function reconcileDirectBookingDirectChargeFinancialEvidence(input:
       stripePaymentIntentId: true,
       stripeConnectedAccountId: true,
       stripeChargeId: true,
-      stripeTransferId: true,
       stripeApplicationFeeId: true,
       hostPayoutAmount: true,
       externalRaw: true,
@@ -214,7 +213,6 @@ export async function reconcileDirectBookingDirectChargeFinancialEvidence(input:
     params: {
       expand: [
         "latest_charge",
-        "latest_charge.transfer",
         "latest_charge.application_fee",
         "latest_charge.balance_transaction",
       ],
@@ -255,8 +253,6 @@ export async function reconcileDirectBookingDirectChargeFinancialEvidence(input:
   const updateData: Record<string, any> = {
     stripeChargeId:
       evidence.stripeChargeId ?? reservation.stripeChargeId ?? undefined,
-    stripeTransferId:
-      evidence.stripeTransferId ?? reservation.stripeTransferId ?? undefined,
     stripeApplicationFeeId:
       evidence.stripeApplicationFeeId ??
       reservation.stripeApplicationFeeId ??
