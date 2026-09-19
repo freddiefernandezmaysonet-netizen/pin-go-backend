@@ -72,6 +72,11 @@ async function main(): Promise<void> {
   console.log("PIN_AI_BENCHMARK_CANARY_STARTED:001:gpt-5.6-luna");
   const result = await runner.runScenario(scenario);
 
+  const usageAvailable =
+    result.usage.inputTokens > 0 ||
+    result.usage.cachedInputTokens > 0 ||
+    result.usage.outputTokens > 0;
+
   console.log(
     JSON.stringify({
       benchmark: true,
@@ -80,8 +85,9 @@ async function main(): Promise<void> {
       responseText: result.responseText,
       toolCalls: result.toolCalls.map((call) => call.name),
       usage: result.usage,
+      usageStatus: usageAvailable ? "RECORDED" : "UNAVAILABLE",
       latencyMs: result.latencyMs,
-      estimatedCostUsd: result.estimatedCostUsd,
+      estimatedCostUsd: usageAvailable ? result.estimatedCostUsd : null,
       criticalFailuresObserved: result.expectationResults.criticalFailuresObserved,
       outboundCalls,
     }),
