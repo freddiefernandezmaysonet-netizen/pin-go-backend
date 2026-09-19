@@ -1,0 +1,1 @@
+Trigger one controlled source deployment for Scenario 004 with property-specific keypad knowledge.
