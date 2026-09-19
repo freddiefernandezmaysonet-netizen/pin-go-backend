@@ -1,4 +1,5 @@
 import { Router } from "express";
+import type Stripe from "stripe";
 import { PrismaClient, ReservationModificationStatus } from "@prisma/client";
 import {
   checkPropertyAvailability,
@@ -1442,11 +1443,7 @@ const guestAcceptedSecurePreCheckinRequirementText =
     const platformFeeAmount = toMoneyFromCents(platformFeeAmountCents);
     const hostPayoutAmount = toMoneyFromCents(hostPayoutAmountCents);
 
-    const paymentIntentData: any = {
-      transfer_data: {
-        destination: connectedAccountId,
-      },
-    };
+    const paymentIntentData: Stripe.Checkout.SessionCreateParams.PaymentIntentData = {};
 
     if (platformFeeAmountCents > 0) {
       paymentIntentData.application_fee_amount = platformFeeAmountCents;

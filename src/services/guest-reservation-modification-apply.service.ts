@@ -238,7 +238,6 @@ function assertFinancialContract(input: {
       Boolean(input.modification.stripeCheckoutSessionId) &&
       Boolean(input.modification.stripePaymentIntentId) &&
       Boolean(input.modification.stripeChargeId) &&
-      Boolean(input.modification.stripeTransferId) &&
       (input.additionalPlatformFeeAmountCents === 0 ||
         Boolean(input.modification.stripeApplicationFeeId)) &&
       input.modification.stripePaymentStatus === "paid" &&

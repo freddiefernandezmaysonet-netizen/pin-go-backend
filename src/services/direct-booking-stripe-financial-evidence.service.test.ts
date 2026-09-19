@@ -72,23 +72,23 @@ test("does not invent actual fee or host net when balance transaction is not exp
   );
 });
 
-test("legacy destination transfer reference remains available", () => {
+test("Direct Charge financial evidence never records a destination transfer", () => {
   const paymentIntent = {
-    id: "pi_legacy",
+    id: "pi_direct",
     application_fee_amount: 100,
     latest_charge: {
-      id: "ch_legacy",
+      id: "ch_direct",
       object: "charge",
-      transfer: { id: "tr_legacy" },
-      application_fee: "fee_legacy",
+      transfer: { id: "tr_legacy_shape" },
+      application_fee: "fee_direct",
       balance_transaction: null,
     },
   } as any;
 
   const evidence = extractDirectBookingStripeFinancialEvidence(paymentIntent);
-  assert.equal(evidence.stripeTransferId, "tr_legacy");
-  assert.equal(evidence.stripeChargeId, "ch_legacy");
-  assert.equal(evidence.stripeApplicationFeeId, "fee_legacy");
+  assert.equal(evidence.stripeTransferId, null);
+  assert.equal(evidence.stripeChargeId, "ch_direct");
+  assert.equal(evidence.stripeApplicationFeeId, "fee_direct");
   assert.equal(evidence.stripeProcessingFeeAmountCents, null);
   assert.equal(evidence.hostNetAmountCents, null);
 });
@@ -183,12 +183,6 @@ test("financial reconciliation stores actual Stripe fee and host net for Direct 
         async retrieve(...args: any[]) {
           stripeCalls.push(args);
 
-          if (args.length < 3) {
-            const error: any = new Error("No such payment_intent");
-            error.code = "resource_missing";
-            throw error;
-          }
-
           assert.deepEqual(args[2], {
             stripeAccount: "acct_host",
           });
@@ -232,7 +226,7 @@ test("financial reconciliation stores actual Stripe fee and host net for Direct 
     now: new Date("2026-09-16T20:00:00.000Z"),
   });
 
-  assert.equal(stripeCalls.length, 2);
+  assert.equal(stripeCalls.length, 1);
   assert.equal(updates.length, 1);
   assert.equal(updates[0].where.id, "res_direct");
   assert.equal(updates[0].data.hostPayoutAmount, 8.18);
