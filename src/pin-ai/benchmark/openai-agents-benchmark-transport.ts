@@ -52,6 +52,7 @@ export class OpenAIAgentsBenchmarkTransport implements AgentsApiTransport {
       headers: {
         authorization: `Bearer ${this.config.apiKey}`,
         "content-type": "application/json",
+        "OpenAI-Beta": "agents=v1",
       },
       body: JSON.stringify(request),
     });
