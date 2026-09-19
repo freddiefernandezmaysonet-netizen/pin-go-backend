@@ -6,6 +6,8 @@ on:
       - main
     paths:
       - "src/pin-ai/benchmark/**"
+      - "src/pin-ai/property-knowledge.service.ts"
+      - "src/pin-ai/property-knowledge.service.test.ts"
       - "package.json"
       - "package-lock.json"
       - ".github/workflows/pin-ai-guest-services-benchmark-v1.yml"
@@ -66,6 +68,8 @@ jobs:
             src/pin-ai/benchmark/reconcile-provider-usage.ts \
             src/pin-ai/benchmark/property-knowledge-contract.ts \
             src/pin-ai/benchmark/property-knowledge-contract.test.ts \
+            src/pin-ai/property-knowledge.service.ts \
+            src/pin-ai/property-knowledge.service.test.ts \
             src/pin-ai/benchmark/canary-001-luna.ts \
             src/pin-ai/benchmark/canary-002-luna.ts \
             src/pin-ai/benchmark/canary-003-luna.ts \
