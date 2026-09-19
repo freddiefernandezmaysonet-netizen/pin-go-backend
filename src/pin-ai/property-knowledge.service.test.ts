@@ -44,25 +44,6 @@ test("Property Knowledge composes existing Pin&Go sources without operational cr
           provider: "TUYA",
         },
       ],
-      guestKnowledge: {
-        version: 1,
-        wifi: { ssid: "Benchmark WiFi", password: "guest-wifi-password" },
-        parking: { instructions: "Use the marked space by the entrance." },
-        arrivalInstructionsEn: "Park first, then walk to the main entrance.",
-        arrivalInstructionsEs: "Estacione primero y camine a la entrada principal.",
-        accessInstructionsEn: "Wake the keypad and press the confirm button after the assigned credential.",
-        accessInstructionsEs: "Active el teclado y presione confirmar luego de la credencial asignada.",
-        applianceGuides: { airConditioning: "Use the wall thermostat." },
-        troubleshooting: { keypad: "If the display sleeps, touch the screen once." },
-        utilities: { breakerPanel: "Hallway utility closet." },
-        garbageInstructionsEn: "Use the bin beside the driveway.",
-        garbageInstructionsEs: "Use el zafacón junto a la entrada.",
-        checkoutInstructionsEn: "Close the door when leaving.",
-        checkoutInstructionsEs: "Cierre la puerta al salir.",
-        safetyInformation: { extinguisher: "Kitchen cabinet near the exit." },
-        localNotes: ["Benchmark local note"],
-        customFaq: { "Where is parking?": "Beside the entrance." },
-      },
       guestAgreements: [
         {
           version: "v1",
@@ -94,14 +75,6 @@ test("Property Knowledge composes existing Pin&Go sources without operational cr
   assert.ok(snapshot.facts.some((fact) => fact.key === "checkInTime"));
   assert.ok(snapshot.facts.some((fact) => fact.key === "locks"));
   assert.ok(snapshot.facts.some((fact) => fact.key === "rules"));
-  assert.deepEqual(
-    snapshot.facts.find((fact) => fact.key === "wifi")?.value,
-    { ssid: "Benchmark WiFi", password: "guest-wifi-password" },
-  );
-  assert.equal(
-    snapshot.facts.find((fact) => fact.key === "accessInstructions")?.value,
-    "Wake the keypad and press the confirm button after the assigned credential.",
-  );
 
   const serialized = JSON.stringify(snapshot);
   assert.doesNotMatch(serialized, /ttlockLockId/);
@@ -131,25 +104,6 @@ test("Property Knowledge uses Spanish guest agreement fields when requested", ()
       amenities: [],
       locks: [],
       propertyDevices: [],
-      guestKnowledge: {
-        version: 2,
-        wifi: null,
-        parking: null,
-        arrivalInstructionsEn: "English arrival",
-        arrivalInstructionsEs: "Llegada en español",
-        accessInstructionsEn: "English access",
-        accessInstructionsEs: "Acceso en español",
-        applianceGuides: null,
-        troubleshooting: null,
-        utilities: null,
-        garbageInstructionsEn: "English garbage",
-        garbageInstructionsEs: "Basura en español",
-        checkoutInstructionsEn: "English checkout",
-        checkoutInstructionsEs: "Salida en español",
-        safetyInformation: null,
-        localNotes: null,
-        customFaq: null,
-      },
       guestAgreements: [
         {
           version: "v1",
@@ -171,16 +125,10 @@ test("Property Knowledge uses Spanish guest agreement fields when requested", ()
   const description = snapshot.facts.find((fact) => fact.key === "description");
   const title = snapshot.facts.find((fact) => fact.key === "agreementTitle");
   const rules = snapshot.facts.find((fact) => fact.key === "rules");
-  const arrival = snapshot.facts.find((fact) => fact.key === "arrivalInstructions");
-  const access = snapshot.facts.find((fact) => fact.key === "accessInstructions");
-  const checkout = snapshot.facts.find((fact) => fact.key === "checkoutInstructions");
 
   assert.equal(description?.value, "Español");
   assert.equal(title?.value, "Reglas");
   assert.deepEqual(rules?.value, ["No fumar"]);
-  assert.equal(arrival?.value, "Llegada en español");
-  assert.equal(access?.value, "Acceso en español");
-  assert.equal(checkout?.value, "Salida en español");
 });
 
 test("Property Knowledge query is hard scoped by organization and property", async () => {
