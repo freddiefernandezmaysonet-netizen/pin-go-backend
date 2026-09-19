@@ -82,6 +82,7 @@ import { teamRouter } from "./routes/team.routes";
 import publicBookingRouter from "./routes/public-booking.routes";
 import { publicReviewsRouter } from "./routes/public-reviews.routes";
 import { dashboardReviewsRouter } from "./routes/dashboard.reviews.routes";
+import { buildDashboardPropertyGuestKnowledgeRouter } from "./routes/dashboard.property-guest-knowledge.route";
 import { uploadsRouter } from "./routes/uploads.route";
 import { dashboardOrganizationRouter } from "./routes/dashboard.organization.route";
 import { dashboardPayoutsRouter } from "./routes/dashboard-payouts.routes";
@@ -333,6 +334,7 @@ app.use(dashboardOrganizationRouter);
 app.use(dashboardPayoutsRouter);
 app.use(dashboardCancellationPolicyRouter);
 app.use(dashboardReviewsRouter);
+app.use(buildDashboardPropertyGuestKnowledgeRouter(prisma));
 
 if (process.env.NODE_ENV !== "production") {
   app.use(devPmsRouter);
