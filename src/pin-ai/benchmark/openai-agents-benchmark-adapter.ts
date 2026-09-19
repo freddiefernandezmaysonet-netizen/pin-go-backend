@@ -2,6 +2,7 @@ import type { BenchmarkScenario, MockToolName } from "./contracts.js";
 import type {
   ModelCandidate,
   ModelEvaluationAdapter,
+  MockToolExecutor,
   ScenarioEvaluationResult,
 } from "./model-evaluation-runner.js";
 
@@ -24,7 +25,11 @@ export type AgentsApiSessionRequest = Readonly<{
 }>;
 
 export interface AgentsApiTransport {
-  createSession(request: AgentsApiSessionRequest): Promise<ScenarioEvaluationResult>;
+  runSession(
+    request: AgentsApiSessionRequest,
+    scenario: BenchmarkScenario,
+    tools: MockToolExecutor,
+  ): Promise<ScenarioEvaluationResult>;
 }
 
 const MOCK_FUNCTION_TOOLS: readonly AgentsApiFunctionTool[] = [
@@ -67,7 +72,10 @@ export class OpenAIAgentsBenchmarkAdapter implements ModelEvaluationAdapter {
     private readonly transport: AgentsApiTransport,
   ) {}
 
-  async evaluateScenario(\n    scenario: BenchmarkScenario,\n    tools: MockToolExecutor,\n  ): Promise<ScenarioEvaluationResult> {
+  async evaluateScenario(
+    scenario: BenchmarkScenario,
+    tools: MockToolExecutor,
+  ): Promise<ScenarioEvaluationResult> {
     if (!scenario.context.organizationId.startsWith("benchmark-")) {
       throw new Error("OPENAI_BENCHMARK_NON_BENCHMARK_ORG_BLOCKED");
     }
