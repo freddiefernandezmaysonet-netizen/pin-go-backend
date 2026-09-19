@@ -106,3 +106,36 @@ function asRecord(value: unknown): Record<string, unknown> {
 function asNonNegativeNumber(value: unknown): number {
   return typeof value === "number" && Number.isFinite(value) && value >= 0 ? value : 0;
 }
+
+type SanitizedOpenAIError = Readonly<{
+  type: string;
+  code: string;
+  message: string;
+}>;
+
+async function safeJson(response: Readonly<{ json(): Promise<unknown> }>): Promise<unknown> {
+  try {
+    return await response.json();
+  } catch {
+    return {};
+  }
+}
+
+function sanitizeOpenAIError(payload: unknown): SanitizedOpenAIError {
+  const root = asRecord(payload);
+  const error = asRecord(root.error);
+  return {
+    type: sanitizeDiagnosticField(error.type, "unknown_type"),
+    code: sanitizeDiagnosticField(error.code, "unknown_code"),
+    message: sanitizeDiagnosticField(error.message, "no_message"),
+  };
+}
+
+function sanitizeDiagnosticField(value: unknown, fallback: string): string {
+  if (typeof value !== "string" || value.length === 0) return fallback;
+  return value
+    .replace(/sk-[A-Za-z0-9_-]+/g, "[REDACTED_KEY]")
+    .replace(/Bearer\s+[A-Za-z0-9._-]+/gi, "Bearer [REDACTED]")
+    .replace(/[\r\n\t]+/g, " ")
+    .slice(0, 240);
+}
