@@ -18,12 +18,12 @@ test("Property Knowledge V1 accepts guest-facing stable knowledge", () => {
     parking: {
       instructions: "Use the marked space beside the entrance.",
     },
-    accessInstructions: "Wake the keypad before entering the assigned credential.",
+    accessInstructionsEn: "Wake the keypad before entering the assigned credential.",
     applianceGuides: {
       television: "Use the living-room remote and select HDMI 1.",
       airConditioning: "Use the wall thermostat.",
     },
-    checkoutInstructions: "Leave by 11:00 AM and close the door behind you.",
+    checkoutInstructionsEn: "Leave by 11:00 AM and close the door behind you.",
   };
 
   assert.doesNotThrow(() => assertPropertyKnowledgeSafe(draft));
