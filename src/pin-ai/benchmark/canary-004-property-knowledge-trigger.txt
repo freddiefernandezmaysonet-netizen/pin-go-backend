@@ -1,1 +1,0 @@
-Trigger one controlled source deployment for Pin AI Scenario 004 using Property Knowledge composer.
