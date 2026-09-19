@@ -66,4 +66,5 @@ jobs:
             src/pin-ai/benchmark/reconcile-provider-usage.ts \
             src/pin-ai/benchmark/canary-001-luna.ts \
             src/pin-ai/benchmark/canary-002-luna.ts \
-            src/pin-ai/benchmark/canary-003-luna.ts
+            src/pin-ai/benchmark/canary-003-luna.ts \
+            src/pin-ai/benchmark/canary-004-luna.ts
