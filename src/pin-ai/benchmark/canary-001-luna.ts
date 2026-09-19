@@ -31,15 +31,16 @@ async function main(): Promise<void> {
   const guardedFetch = async (
     input: string,
     init: Readonly<{
-      method: "POST";
+      method: "GET" | "POST";
       headers: Readonly<Record<string, string>>;
-      body: string;
+      body?: string;
     }>,
   ) => {
     outboundCalls += 1;
-    if (outboundCalls > 1) {
-      throw new Error("PIN_AI_BENCHMARK_CANARY_SINGLE_CALL_LIMIT");
+    if (outboundCalls > 8) {
+      throw new Error("PIN_AI_BENCHMARK_CANARY_NETWORK_CALL_LIMIT");
     }
+
     const response = await fetch(input, init);
     return {
       ok: response.ok,
@@ -62,6 +63,9 @@ async function main(): Promise<void> {
     get_access_status: {
       accessStatus: scenario.context.accessStatus,
       accessStartsAtLocal: scenario.context.accessStartsAtLocal,
+    },
+    get_cleaning_status: {
+      cleaningStatus: scenario.context.cleaningStatus,
     },
   });
   const runner = new ModelEvaluationRunner(adapter, mockTools);
