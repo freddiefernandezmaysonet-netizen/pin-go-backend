@@ -1,4 +1,5 @@
 import { Router } from "express";
+import type Stripe from "stripe";
 import { PrismaClient, ReservationModificationStatus } from "@prisma/client";
 import {
   checkPropertyAvailability,
