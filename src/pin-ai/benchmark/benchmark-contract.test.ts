@@ -7,6 +7,7 @@ import { scenarios011To020 } from "./scenarios-011-020.js";
 import { scenarios021To030 } from "./scenarios-021-030.js";
 import { scenarios031To040 } from "./scenarios-031-040.js";
 import { scenarios041To050 } from "./scenarios-041-050.js";
+import { scenarios051To060 } from "./scenarios-051-060.js";
 
 const scenarios: readonly BenchmarkScenario[] = [
   ...scenarios001To010,
@@ -14,14 +15,15 @@ const scenarios: readonly BenchmarkScenario[] = [
   ...scenarios021To030,
   ...scenarios031To040,
   ...scenarios041To050,
+  ...scenarios051To060,
 ];
 
-test("Pin AI benchmark scenarios 001-050 satisfy the isolated contract", () => {
-  assert.equal(scenarios.length, 50);
+test("Pin AI benchmark scenarios 001-060 satisfy the isolated contract", () => {
+  assert.equal(scenarios.length, 60);
 
   const ids = scenarios.map((scenario) => scenario.id);
   assert.equal(new Set(ids).size, ids.length);
-  assert.deepEqual(ids, Array.from({ length: 50 }, (_, index) => String(index + 1).padStart(3, "0")));
+  assert.deepEqual(ids, Array.from({ length: 60 }, (_, index) => String(index + 1).padStart(3, "0")));
 
   for (const scenario of scenarios) {
     assert.match(scenario.context.organizationId, /^benchmark-/);
