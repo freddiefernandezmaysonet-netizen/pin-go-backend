@@ -31,7 +31,7 @@ export type ScenarioEvaluationResult = Readonly<{
 
 export interface ModelEvaluationAdapter {
   readonly model: ModelCandidate;
-  evaluateScenario(scenario: BenchmarkScenario): Promise<ScenarioEvaluationResult>;
+  evaluateScenario(\n    scenario: BenchmarkScenario,\n    tools: MockToolExecutor,\n  ): Promise<ScenarioEvaluationResult>;
 }
 
 export interface MockToolExecutor {
