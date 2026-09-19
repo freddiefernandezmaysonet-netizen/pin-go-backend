@@ -98,7 +98,7 @@ test("authoring creates version 1 and increments version on update", async () =>
     },
   } as any;
 
-  const result = await upsertPropertyGuestKnowledge({
+  const result = (await upsertPropertyGuestKnowledge({
     prisma,
     organizationId: "benchmark-org-a",
     propertyId: "benchmark-property-a",
@@ -108,7 +108,7 @@ test("authoring creates version 1 and increments version on update", async () =>
       },
       checkoutInstructionsEs: "Cierre la puerta al salir.",
     },
-  });
+  })) as { version: number };
 
   assert.equal(capturedUpsert.where.propertyId, "benchmark-property-a");
   assert.equal(capturedUpsert.create.version, 1);
