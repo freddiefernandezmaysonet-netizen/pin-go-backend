@@ -330,34 +330,6 @@ function preferRecordedUsage(
   return turnTotal > sessionTotal ? turnUsage : sessionUsage;
 }
 
-function aggregateTurnUsage(payload: unknown) {
-  const root = asRecord(payload);
-  const data = Array.isArray(root.data) ? root.data : [];
-  let inputTokens = 0;
-  let cachedInputTokens = 0;
-  let outputTokens = 0;
-
-  for (const turnValue of data) {
-    const turn = asRecord(turnValue);
-    const usage = parseUsage(asRecord(turn.usage));
-    inputTokens += usage.inputTokens;
-    cachedInputTokens += usage.cachedInputTokens;
-    outputTokens += usage.outputTokens;
-  }
-
-  return { inputTokens, cachedInputTokens, outputTokens };
-}
-
-function preferRecordedUsage(
-  sessionUsage: ReturnType<typeof parseUsage>,
-  turnUsage: ReturnType<typeof parseUsage>,
-) {
-  const sessionTotal =
-    sessionUsage.inputTokens + sessionUsage.cachedInputTokens + sessionUsage.outputTokens;
-  const turnTotal = turnUsage.inputTokens + turnUsage.cachedInputTokens + turnUsage.outputTokens;
-  return turnTotal > sessionTotal ? turnUsage : sessionUsage;
-}
-
 function extractAssistantText(payload: unknown): string {
   const root = asRecord(payload);
   const data = Array.isArray(root.data) ? root.data : [];
