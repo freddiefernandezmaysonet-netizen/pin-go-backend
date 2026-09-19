@@ -62,6 +62,25 @@ type PropertyKnowledgeRecord = Readonly<{
     type: string;
     provider: string;
   }>[];
+  guestKnowledge: Readonly<{
+    version: number;
+    wifi: unknown;
+    parking: unknown;
+    arrivalInstructionsEn: string | null;
+    arrivalInstructionsEs: string | null;
+    accessInstructionsEn: string | null;
+    accessInstructionsEs: string | null;
+    applianceGuides: unknown;
+    troubleshooting: unknown;
+    utilities: unknown;
+    garbageInstructionsEn: string | null;
+    garbageInstructionsEs: string | null;
+    checkoutInstructionsEn: string | null;
+    checkoutInstructionsEs: string | null;
+    safetyInformation: unknown;
+    localNotes: unknown;
+    customFaq: unknown;
+  }> | null;
   guestAgreements: readonly Readonly<{
     version: string;
     title: string;
