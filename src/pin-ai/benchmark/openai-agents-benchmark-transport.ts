@@ -108,9 +108,13 @@ export class OpenAIAgentsBenchmarkTransport implements AgentsApiTransport {
       this.listSessionTurns(session.id),
     ]);
     const responseText = extractAssistantText(items);
+    const retrievedTurns = await this.retrieveListedTurns(session.id, turns);
     const usage = preferRecordedUsage(
       parseUsage(session.usage),
-      aggregateTurnUsage(turns),
+      preferRecordedUsage(
+        aggregateTurnUsage(turns),
+        aggregateTurnUsage({ data: retrievedTurns }),
+      ),
     );
 
     return {
@@ -200,6 +204,20 @@ export class OpenAIAgentsBenchmarkTransport implements AgentsApiTransport {
       "GET",
       `/v1/agents/sessions/${encodeURIComponent(sessionId)}/turns?limit=100&order=asc`,
     );
+  }
+
+  private async retrieveListedTurns(sessionId: string, payload: unknown): Promise<unknown[]> {
+    const turnIds = extractTurnIds(payload);
+    const turns: unknown[] = [];
+    for (const turnId of turnIds) {
+      turns.push(
+        await this.requestJson(
+          "GET",
+          `/v1/agents/sessions/${encodeURIComponent(sessionId)}/turns/${encodeURIComponent(turnId)}`,
+        ),
+      );
+    }
+    return turns;
   }
 
   private async requestJson(
@@ -300,6 +318,17 @@ function parseUsage(usage: Readonly<Record<string, unknown>>) {
     cachedInputTokens: asNonNegativeNumber(details.cached_tokens),
     outputTokens: asNonNegativeNumber(usage.output_tokens),
   };
+}
+
+function extractTurnIds(payload: unknown): string[] {
+  const root = asRecord(payload);
+  const data = Array.isArray(root.data) ? root.data : [];
+  return data
+    .map((turnValue) => {
+      const turn = asRecord(turnValue);
+      return typeof turn.id === "string" ? turn.id : "";
+    })
+    .filter((id) => id.length > 0);
 }
 
 function aggregateTurnUsage(payload: unknown) {
