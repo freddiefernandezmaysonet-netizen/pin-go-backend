@@ -22,25 +22,14 @@ type PaymentIntentReader = {
   };
 };
 
-function normalizeConnectedAccountId(value: unknown) {
+function requireConnectedAccountId(value: unknown) {
   const accountId = String(value ?? "").trim();
-  return accountId.startsWith("acct_") ? accountId : null;
-}
 
-export function isStripeResourceMissingError(error: unknown) {
-  if (!error || typeof error !== "object") return false;
+  if (!accountId.startsWith("acct_")) {
+    throw new Error("DIRECT_BOOKING_STRIPE_CONNECTED_ACCOUNT_INVALID");
+  }
 
-  const candidate = error as {
-    code?: unknown;
-    statusCode?: unknown;
-    raw?: { code?: unknown };
-  };
-
-  return (
-    candidate.code === "resource_missing" ||
-    candidate.raw?.code === "resource_missing" ||
-    candidate.statusCode === 404
-  );
+  return accountId;
 }
 
 export async function retrieveDirectBookingCheckoutSession(input: {
@@ -48,36 +37,19 @@ export async function retrieveDirectBookingCheckoutSession(input: {
   sessionId: string;
   connectedAccountId?: string | null;
 }) {
-  try {
-    const session = await input.stripeClient.checkout.sessions.retrieve(
-      input.sessionId
-    );
+  const connectedAccountId = requireConnectedAccountId(
+    input.connectedAccountId
+  );
+  const session = await input.stripeClient.checkout.sessions.retrieve(
+    input.sessionId,
+    { stripeAccount: connectedAccountId }
+  );
 
-    return {
-      session,
-      chargeMode: "DESTINATION_CHARGE" as DirectBookingStripeChargeMode,
-      stripeAccount: null as string | null,
-    };
-  } catch (error) {
-    const connectedAccountId = normalizeConnectedAccountId(
-      input.connectedAccountId
-    );
-
-    if (!connectedAccountId || !isStripeResourceMissingError(error)) {
-      throw error;
-    }
-
-    const session = await input.stripeClient.checkout.sessions.retrieve(
-      input.sessionId,
-      { stripeAccount: connectedAccountId }
-    );
-
-    return {
-      session,
-      chargeMode: "DIRECT_CHARGE" as DirectBookingStripeChargeMode,
-      stripeAccount: connectedAccountId,
-    };
-  }
+  return {
+    session,
+    chargeMode: "DIRECT_CHARGE" as DirectBookingStripeChargeMode,
+    stripeAccount: connectedAccountId,
+  };
 }
 
 export async function retrieveDirectBookingPaymentIntent(input: {
@@ -86,36 +58,18 @@ export async function retrieveDirectBookingPaymentIntent(input: {
   connectedAccountId?: string | null;
   params?: Stripe.PaymentIntentRetrieveParams;
 }) {
-  try {
-    const paymentIntent = await input.stripeClient.paymentIntents.retrieve(
-      input.paymentIntentId,
-      input.params
-    );
+  const connectedAccountId = requireConnectedAccountId(
+    input.connectedAccountId
+  );
+  const paymentIntent = await input.stripeClient.paymentIntents.retrieve(
+    input.paymentIntentId,
+    input.params,
+    { stripeAccount: connectedAccountId }
+  );
 
-    return {
-      paymentIntent,
-      chargeMode: "DESTINATION_CHARGE" as DirectBookingStripeChargeMode,
-      stripeAccount: null as string | null,
-    };
-  } catch (error) {
-    const connectedAccountId = normalizeConnectedAccountId(
-      input.connectedAccountId
-    );
-
-    if (!connectedAccountId || !isStripeResourceMissingError(error)) {
-      throw error;
-    }
-
-    const paymentIntent = await input.stripeClient.paymentIntents.retrieve(
-      input.paymentIntentId,
-      input.params,
-      { stripeAccount: connectedAccountId }
-    );
-
-    return {
-      paymentIntent,
-      chargeMode: "DIRECT_CHARGE" as DirectBookingStripeChargeMode,
-      stripeAccount: connectedAccountId,
-    };
-  }
+  return {
+    paymentIntent,
+    chargeMode: "DIRECT_CHARGE" as DirectBookingStripeChargeMode,
+    stripeAccount: connectedAccountId,
+  };
 }
