@@ -64,6 +64,8 @@ jobs:
             src/pin-ai/benchmark/openai-benchmark-usage-reconciler.ts \
             src/pin-ai/benchmark/openai-benchmark-usage-reconciler.test.ts \
             src/pin-ai/benchmark/reconcile-provider-usage.ts \
+            src/pin-ai/benchmark/property-knowledge-contract.ts \
+            src/pin-ai/benchmark/property-knowledge-contract.test.ts \
             src/pin-ai/benchmark/canary-001-luna.ts \
             src/pin-ai/benchmark/canary-002-luna.ts \
             src/pin-ai/benchmark/canary-003-luna.ts \
