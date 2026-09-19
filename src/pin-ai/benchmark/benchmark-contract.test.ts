@@ -3,19 +3,19 @@ import test from "node:test";
 
 import { MOCK_TOOL_NAMES, type BenchmarkScenario } from "./contracts.js";
 import { scenarios001To010 } from "./scenarios-001-010.js";
-import { scenarios011To020 } from "./scenarios-011-020.js";
+import { scenarios011To020 } from "./scenarios-011-020.js";\nimport { scenarios021To030 } from "./scenarios-021-030.js";
 
 const scenarios: readonly BenchmarkScenario[] = [
   ...scenarios001To010,
   ...scenarios011To020,
 ];
 
-test("Pin AI benchmark scenarios 001-020 satisfy the isolated contract", () => {
-  assert.equal(scenarios.length, 20);
+test("Pin AI benchmark scenarios 001-030 satisfy the isolated contract", () => {
+  assert.equal(scenarios.length, 30);
 
   const ids = scenarios.map((scenario) => scenario.id);
   assert.equal(new Set(ids).size, ids.length);
-  assert.deepEqual(ids, Array.from({ length: 20 }, (_, index) => String(index + 1).padStart(3, "0")));
+  assert.deepEqual(ids, Array.from({ length: 30 }, (_, index) => String(index + 1).padStart(3, "0")));
 
   for (const scenario of scenarios) {
     assert.match(scenario.context.organizationId, /^benchmark-/);
