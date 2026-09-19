@@ -3,7 +3,8 @@ import test from "node:test";
 
 import { MOCK_TOOL_NAMES, type BenchmarkScenario } from "./contracts.js";
 import { scenarios001To010 } from "./scenarios-001-010.js";
-import { scenarios011To020 } from "./scenarios-011-020.js";\nimport { scenarios021To030 } from "./scenarios-021-030.js";
+import { scenarios011To020 } from "./scenarios-011-020.js";
+import { scenarios021To030 } from "./scenarios-021-030.js";
 
 const scenarios: readonly BenchmarkScenario[] = [
   ...scenarios001To010,
