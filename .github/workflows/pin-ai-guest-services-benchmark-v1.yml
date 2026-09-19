@@ -8,6 +8,10 @@ on:
       - "src/pin-ai/benchmark/**"
       - "src/pin-ai/property-knowledge.service.ts"
       - "src/pin-ai/property-knowledge.service.test.ts"
+      - "src/pin-ai/property-guest-knowledge.service.ts"
+      - "src/pin-ai/property-guest-knowledge.service.test.ts"
+      - "src/routes/dashboard.property-guest-knowledge.route.ts"
+      - "src/server.ts"
       - "prisma/schema.prisma"
       - "prisma/migrations/**"
       - "package.json"
@@ -75,6 +79,9 @@ jobs:
             src/pin-ai/benchmark/property-knowledge-contract.test.ts \
             src/pin-ai/property-knowledge.service.ts \
             src/pin-ai/property-knowledge.service.test.ts \
+            src/pin-ai/property-guest-knowledge.service.ts \
+            src/pin-ai/property-guest-knowledge.service.test.ts \
+            src/routes/dashboard.property-guest-knowledge.route.ts \
             src/pin-ai/benchmark/property-knowledge-benchmark-tool-executor.ts \
             src/pin-ai/benchmark/property-knowledge-benchmark-tool-executor.test.ts \
             src/pin-ai/benchmark/canary-001-luna.ts \
