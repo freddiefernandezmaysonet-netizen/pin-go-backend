@@ -48,7 +48,12 @@ const MOCK_FUNCTION_TOOLS: readonly AgentsApiFunctionTool[] = [
 ].map((name) => ({
   type: "function" as const,
   name: name as MockToolName,
-  description: `Benchmark-only mock function: ${name}`,
+  description:
+    name === "get_property_knowledge"
+      ? "Read stable, guest-facing facts about this benchmark property such as arrival details, amenities, lock location, house rules, and other property knowledge. Do not use it for live credentials or dynamic operational authorization."
+      : name === "get_access_status"
+        ? "Read the dynamic access state for this benchmark reservation, including whether access is active and whether a replacement credential is authorized."
+        : `Benchmark-only mock function: ${name}`,
   parameters: {
     type: "object",
     properties: {},
