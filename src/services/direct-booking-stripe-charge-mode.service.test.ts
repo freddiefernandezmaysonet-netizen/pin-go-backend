@@ -87,9 +87,17 @@ test("charge mode metadata accepts only Direct Charge", () => {
   );
 });
 
-test("Stripe client still contains no implicit migration assertion for reservation modifications until that file is migrated", () => {
-  assert.match(
+test("Stripe client no longer contains Direct Charges canary or initial-checkout fencing", () => {
+  assert.doesNotMatch(
+    stripeClientSource,
+    /directBookingDirectChargesEnabled|directBookingDirectChargesAllowedForConnectedAccount/
+  );
+  assert.doesNotMatch(
     stripeClientSource,
     /Direct Charges V1 is intentionally fenced to the initial Direct Booking/
+  );
+  assert.match(
+    stripeClientSource,
+    /flow !== "direct_booking"/
   );
 });
