@@ -58,4 +58,6 @@ jobs:
             src/pin-ai/benchmark/mock-tool-executor.ts \
             src/pin-ai/benchmark/model-evaluation-runner.test.ts \
             src/pin-ai/benchmark/openai-agents-benchmark-adapter.ts \
-            src/pin-ai/benchmark/openai-agents-benchmark-adapter.test.ts
+            src/pin-ai/benchmark/openai-agents-benchmark-adapter.test.ts \
+            src/pin-ai/benchmark/openai-agents-benchmark-transport.ts \
+            src/pin-ai/benchmark/openai-agents-benchmark-transport.test.ts
