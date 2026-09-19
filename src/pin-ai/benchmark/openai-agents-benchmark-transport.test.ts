@@ -112,3 +112,35 @@ test("OpenAI benchmark transport sends only to configured Agents session endpoin
     outputTokens: 30,
   });
 });
+
+test("OpenAI benchmark transport sanitizes error diagnostics and redacts keys", async () => {
+  const fetchImpl: BenchmarkFetch = async () => ({
+    ok: false,
+    status: 401,
+    async json() {
+      return {
+        error: {
+          type: "invalid_request_error",
+          code: "invalid_api_key",
+          message: "Invalid key sk-secret-example\nBearer token-secret",
+        },
+      };
+    },
+  });
+  const transport = new OpenAIAgentsBenchmarkTransport(
+    { enabled: true, apiKey: "benchmark-test-key" },
+    fetchImpl,
+  );
+
+  await assert.rejects(
+    transport.createSession(request),
+    (error: unknown) => {
+      assert.ok(error instanceof Error);
+      assert.match(error.message, /HTTP_401:invalid_request_error:invalid_api_key/);
+      assert.match(error.message, /\[REDACTED_KEY\]/);
+      assert.doesNotMatch(error.message, /sk-secret-example/);
+      assert.doesNotMatch(error.message, /token-secret/);
+      return true;
+    },
+  );
+});
