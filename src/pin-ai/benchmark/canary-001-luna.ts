@@ -37,7 +37,7 @@ async function main(): Promise<void> {
     }>,
   ) => {
     outboundCalls += 1;
-    if (outboundCalls > 8) {
+    if (outboundCalls > 40) {
       throw new Error("PIN_AI_BENCHMARK_CANARY_NETWORK_CALL_LIMIT");
     }
 
@@ -50,7 +50,7 @@ async function main(): Promise<void> {
   };
 
   const transport = new OpenAIAgentsBenchmarkTransport(
-    { enabled: true, apiKey },
+    { enabled: true, apiKey, maxPolls: 30, pollDelayMs: 500 },
     guardedFetch,
   );
   const adapter = new OpenAIAgentsBenchmarkAdapter("gpt-5.6-luna", transport);
