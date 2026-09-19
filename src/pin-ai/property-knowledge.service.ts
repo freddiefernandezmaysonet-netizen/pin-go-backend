@@ -1,5 +1,3 @@
-import type { PrismaClient } from "@prisma/client";
-
 export type PropertyKnowledgeLanguage = "en" | "es";
 
 export type PropertyKnowledgeFact = Readonly<{
@@ -29,9 +27,59 @@ export type PropertyKnowledgeSnapshot = Readonly<{
   facts: readonly PropertyKnowledgeFact[];
 }>;
 
-type PropertyKnowledgeRecord = Awaited<
-  ReturnType<typeof loadPropertyKnowledgeRecord>
->;
+type PropertyKnowledgeRecord = Readonly<{
+  id: string;
+  organizationId: string;
+  name: string;
+  publicTitle: string | null;
+  publicDescription: string | null;
+  publicDescriptionEs: string | null;
+  maxGuests: number | null;
+  timezone: string | null;
+  checkInTime: string | null;
+  checkOutTime: string | null;
+  guestAccessMode: string;
+  amenities: readonly Readonly<{
+    name: string;
+    description: string | null;
+    chargeMode: string;
+  }>[];
+  locks: readonly Readonly<{
+    displayName: string | null;
+    locationLabel: string | null;
+    ttlockLockName: string | null;
+  }>[];
+  propertyDevices: readonly Readonly<{
+    name: string;
+    type: string;
+    provider: string;
+  }>[];
+  guestAgreements: readonly Readonly<{
+    version: string;
+    title: string;
+    titleEn: string | null;
+    titleEs: string | null;
+    guestFacingSummary: string | null;
+    guestFacingSummaryEn: string | null;
+    guestFacingSummaryEs: string | null;
+    rules: unknown;
+    rulesEn: unknown;
+    rulesEs: unknown;
+  }>[];
+  cancellationPolicies: readonly Readonly<{
+    name: string;
+    guestFacingSummary: string | null;
+    description: string | null;
+    refundRules: unknown;
+    nonRefundableScenarios: unknown;
+  }>[];
+}>;
+
+type PropertyKnowledgePrisma = Readonly<{
+  property: Readonly<{
+    findFirst(args: unknown): Promise<PropertyKnowledgeRecord | null>;
+  }>;
+}>;
 
 const PROHIBITED_KEYS = new Set([
   "activePasscode",
@@ -52,7 +100,7 @@ export async function getPropertyKnowledgeSnapshot({
   propertyId,
   language = "en",
 }: {
-  prisma: PrismaClient;
+  prisma: PropertyKnowledgePrisma;
   organizationId: string;
   propertyId: string;
   language?: PropertyKnowledgeLanguage;
@@ -83,7 +131,7 @@ async function loadPropertyKnowledgeRecord({
   organizationId,
   propertyId,
 }: {
-  prisma: PrismaClient;
+  prisma: PropertyKnowledgePrisma;
   organizationId: string;
   propertyId: string;
 }) {
