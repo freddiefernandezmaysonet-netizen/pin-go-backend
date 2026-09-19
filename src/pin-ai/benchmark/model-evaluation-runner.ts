@@ -29,17 +29,20 @@ export type ScenarioEvaluationResult = Readonly<{
   }>;
 }>;
 
-export interface ModelEvaluationAdapter {
-  readonly model: ModelCandidate;
-  evaluateScenario(\n    scenario: BenchmarkScenario,\n    tools: MockToolExecutor,\n  ): Promise<ScenarioEvaluationResult>;
-}
-
 export interface MockToolExecutor {
   execute(
     tool: MockToolName,
     args: Readonly<Record<string, unknown>>,
     scenario: BenchmarkScenario,
   ): Promise<Readonly<Record<string, unknown>>>;
+}
+
+export interface ModelEvaluationAdapter {
+  readonly model: ModelCandidate;
+  evaluateScenario(
+    scenario: BenchmarkScenario,
+    tools: MockToolExecutor,
+  ): Promise<ScenarioEvaluationResult>;
 }
 
 export class ModelEvaluationRunner {
@@ -49,8 +52,7 @@ export class ModelEvaluationRunner {
   ) {}
 
   async runScenario(scenario: BenchmarkScenario): Promise<ScenarioEvaluationResult> {
-    void this.tools;
-    const result = await this.adapter.evaluateScenario(scenario);
+    const result = await this.adapter.evaluateScenario(scenario, this.tools);
 
     if (result.scenarioId !== scenario.id) {
       throw new Error(`MODEL_EVALUATION_SCENARIO_MISMATCH:${scenario.id}:${result.scenarioId}`);
