@@ -148,7 +148,7 @@ test("accumulates a fully evidenced additional Stripe payment", () => {
   input.modification.stripeCheckoutSessionId = "cs_modification_1";
   input.modification.stripePaymentIntentId = "pi_modification_1";
   input.modification.stripeChargeId = "ch_modification_1";
-  input.modification.stripeTransferId = "tr_modification_1";
+  input.modification.stripeTransferId = null;
   input.modification.stripeApplicationFeeId = "fee_modification_1";
   input.modification.stripePaymentStatus = "paid";
 
