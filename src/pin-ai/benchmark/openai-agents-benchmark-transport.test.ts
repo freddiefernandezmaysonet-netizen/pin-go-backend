@@ -147,6 +147,13 @@ test("OpenAI benchmark transport extracts assistant output from session items", 
       });
     }
 
+    if (url.includes("/v1/agents/sessions/session_001/turns")) {
+      return jsonResponse({
+        object: "list",
+        data: [],
+      });
+    }
+
     throw new Error(`unexpected fetch: ${init.method} ${url}`);
   };
 
@@ -229,6 +236,13 @@ test("OpenAI benchmark transport executes required mock function and submits too
             content: [{ type: "output_text", text: "Your access is scheduled for 4:00 PM." }],
           },
         ],
+      });
+    }
+
+    if (url.includes("/v1/agents/sessions/session_tool/turns")) {
+      return jsonResponse({
+        object: "list",
+        data: [],
       });
     }
 
