@@ -3,16 +3,9 @@ export type PropertyKnowledgeLanguage = "en" | "es";
 export type PropertyKnowledgeFact = Readonly<{
   category:
     | "ARRIVAL"
-    | "WIFI"
     | "ACCESS"
-    | "PARKING"
     | "AMENITIES"
-    | "APPLIANCES"
-    | "UTILITIES"
     | "HOUSE_RULES"
-    | "CHECKOUT"
-    | "SAFETY"
-    | "LOCAL_INFO"
     | "CANCELLATION"
     | "PROPERTY";
   key: string;
@@ -23,8 +16,7 @@ export type PropertyKnowledgeFact = Readonly<{
     | "LOCK"
     | "PROPERTY_DEVICE"
     | "GUEST_AGREEMENT"
-    | "CANCELLATION_POLICY"
-    | "PROPERTY_GUEST_KNOWLEDGE";
+    | "CANCELLATION_POLICY";
   authoritative: true;
 }>;
 
@@ -62,25 +54,6 @@ type PropertyKnowledgeRecord = Readonly<{
     type: string;
     provider: string;
   }>[];
-  guestKnowledge: Readonly<{
-    version: number;
-    wifi: unknown;
-    parking: unknown;
-    arrivalInstructionsEn: string | null;
-    arrivalInstructionsEs: string | null;
-    accessInstructionsEn: string | null;
-    accessInstructionsEs: string | null;
-    applianceGuides: unknown;
-    troubleshooting: unknown;
-    utilities: unknown;
-    garbageInstructionsEn: string | null;
-    garbageInstructionsEs: string | null;
-    checkoutInstructionsEn: string | null;
-    checkoutInstructionsEs: string | null;
-    safetyInformation: unknown;
-    localNotes: unknown;
-    customFaq: unknown;
-  }> | null;
   guestAgreements: readonly Readonly<{
     version: string;
     title: string;
@@ -224,27 +197,6 @@ async function loadPropertyKnowledgeRecord({
           rulesEs: true,
         },
       },
-      guestKnowledge: {
-        select: {
-          version: true,
-          wifi: true,
-          parking: true,
-          arrivalInstructionsEn: true,
-          arrivalInstructionsEs: true,
-          accessInstructionsEn: true,
-          accessInstructionsEs: true,
-          applianceGuides: true,
-          troubleshooting: true,
-          utilities: true,
-          garbageInstructionsEn: true,
-          garbageInstructionsEs: true,
-          checkoutInstructionsEn: true,
-          checkoutInstructionsEs: true,
-          safetyInformation: true,
-          localNotes: true,
-          customFaq: true,
-        },
-      },
       cancellationPolicies: {
         where: { isActive: true },
         orderBy: { updatedAt: "desc" },
@@ -328,109 +280,6 @@ export function composePropertyKnowledgeSnapshot({
         provider: device.provider,
       })),
       "PROPERTY_DEVICE",
-    );
-  }
-
-  const guestKnowledge = property.guestKnowledge;
-  if (guestKnowledge) {
-    addFact(
-      facts,
-      "PROPERTY",
-      "guestKnowledgeVersion",
-      guestKnowledge.version,
-      "PROPERTY_GUEST_KNOWLEDGE",
-    );
-    addFact(
-      facts,
-      "WIFI",
-      "wifi",
-      guestKnowledge.wifi,
-      "PROPERTY_GUEST_KNOWLEDGE",
-    );
-    addFact(
-      facts,
-      "PARKING",
-      "parking",
-      guestKnowledge.parking,
-      "PROPERTY_GUEST_KNOWLEDGE",
-    );
-    addFact(
-      facts,
-      "ARRIVAL",
-      "arrivalInstructions",
-      language === "es"
-        ? guestKnowledge.arrivalInstructionsEs ?? guestKnowledge.arrivalInstructionsEn
-        : guestKnowledge.arrivalInstructionsEn ?? guestKnowledge.arrivalInstructionsEs,
-      "PROPERTY_GUEST_KNOWLEDGE",
-    );
-    addFact(
-      facts,
-      "ACCESS",
-      "accessInstructions",
-      language === "es"
-        ? guestKnowledge.accessInstructionsEs ?? guestKnowledge.accessInstructionsEn
-        : guestKnowledge.accessInstructionsEn ?? guestKnowledge.accessInstructionsEs,
-      "PROPERTY_GUEST_KNOWLEDGE",
-    );
-    addFact(
-      facts,
-      "APPLIANCES",
-      "applianceGuides",
-      guestKnowledge.applianceGuides,
-      "PROPERTY_GUEST_KNOWLEDGE",
-    );
-    addFact(
-      facts,
-      "PROPERTY",
-      "troubleshooting",
-      guestKnowledge.troubleshooting,
-      "PROPERTY_GUEST_KNOWLEDGE",
-    );
-    addFact(
-      facts,
-      "UTILITIES",
-      "utilities",
-      guestKnowledge.utilities,
-      "PROPERTY_GUEST_KNOWLEDGE",
-    );
-    addFact(
-      facts,
-      "UTILITIES",
-      "garbageInstructions",
-      language === "es"
-        ? guestKnowledge.garbageInstructionsEs ?? guestKnowledge.garbageInstructionsEn
-        : guestKnowledge.garbageInstructionsEn ?? guestKnowledge.garbageInstructionsEs,
-      "PROPERTY_GUEST_KNOWLEDGE",
-    );
-    addFact(
-      facts,
-      "CHECKOUT",
-      "checkoutInstructions",
-      language === "es"
-        ? guestKnowledge.checkoutInstructionsEs ?? guestKnowledge.checkoutInstructionsEn
-        : guestKnowledge.checkoutInstructionsEn ?? guestKnowledge.checkoutInstructionsEs,
-      "PROPERTY_GUEST_KNOWLEDGE",
-    );
-    addFact(
-      facts,
-      "SAFETY",
-      "safetyInformation",
-      guestKnowledge.safetyInformation,
-      "PROPERTY_GUEST_KNOWLEDGE",
-    );
-    addFact(
-      facts,
-      "LOCAL_INFO",
-      "localNotes",
-      guestKnowledge.localNotes,
-      "PROPERTY_GUEST_KNOWLEDGE",
-    );
-    addFact(
-      facts,
-      "LOCAL_INFO",
-      "customFaq",
-      guestKnowledge.customFaq,
-      "PROPERTY_GUEST_KNOWLEDGE",
     );
   }
 
