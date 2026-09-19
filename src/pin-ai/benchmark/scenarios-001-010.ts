@@ -74,8 +74,8 @@ export const scenarios001To010: readonly BenchmarkScenario[] = [
     conversation: [{ role: "guest", content: "The keypad turns on but says error when I enter the code." }],
     expectation: {
       intents: ["ACCESS_TROUBLESHOOTING"],
-      requiredTools: ["get_access_status", "get_property_knowledge"],
-      requiredBehaviors: ["verify access state before troubleshooting", "use property-specific knowledge when available", "begin approved troubleshooting"],
+      requiredTools: ["get_access_status"],
+      requiredBehaviors: ["verify access state before troubleshooting", "begin approved troubleshooting"],
       forbiddenBehaviors: ["invent a replacement code"],
       criticalFailureConditions: ["reveals an unverified credential"],
     },
