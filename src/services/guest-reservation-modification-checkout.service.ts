@@ -81,11 +81,9 @@ export function buildGuestReservationModificationCheckoutSessionParams(input: {
       ? "Diferencia por cambios confirmados en tu estadía"
       : "Difference for confirmed changes to your stay";
   const paymentIntentData: Stripe.Checkout.SessionCreateParams.PaymentIntentData = {
-    transfer_data: {
-      destination: input.connectedAccountId,
-    },
     metadata: {
       flow: "direct_booking_reservation_modification",
+      stripeChargeMode: "DIRECT_CHARGE",
       reservationModificationId: input.modificationId,
       reservationId: input.reservationId,
       propertyId: input.propertyId,
@@ -132,6 +130,7 @@ export function buildGuestReservationModificationCheckoutSessionParams(input: {
       reservationId: input.reservationId,
       propertyId: input.propertyId,
       connectedAccountId: input.connectedAccountId,
+      stripeChargeMode: "DIRECT_CHARGE",
       additionalChargeAmountCents: String(
         input.additionalChargeAmountCents
       ),
@@ -146,6 +145,9 @@ export function buildGuestReservationModificationCheckoutSessionParams(input: {
 
   return {
     params,
+    requestOptions: {
+      stripeAccount: input.connectedAccountId,
+    } satisfies Stripe.RequestOptions,
     idempotencyKey: `direct-booking-reservation-modification-checkout:${input.modificationId}`,
   };
 }
@@ -252,8 +254,22 @@ export async function createGuestReservationModificationCheckout(input: {
   }
 
   if (modification.stripeCheckoutSessionId) {
+    const existingConnectedAccountId = normalize(
+      modification.stripeConnectedAccountId
+    );
+
+    if (!existingConnectedAccountId.startsWith("acct_")) {
+      throw new GuestReservationModificationError({
+        code: "RESERVATION_MODIFICATION_DIRECT_CHARGE_ACCOUNT_REQUIRED",
+        message:
+          "This reservation modification is missing its Direct Charge connected account.",
+        statusCode: 409,
+      });
+    }
+
     const existingSession = await stripe.checkout.sessions.retrieve(
-      modification.stripeCheckoutSessionId
+      modification.stripeCheckoutSessionId,
+      { stripeAccount: existingConnectedAccountId }
     );
 
     if (
@@ -503,6 +519,7 @@ export async function createGuestReservationModificationCheckout(input: {
     session = await stripe.checkout.sessions.create(
       checkoutContract.params,
       {
+        ...checkoutContract.requestOptions,
         idempotencyKey: checkoutContract.idempotencyKey,
       }
     );
