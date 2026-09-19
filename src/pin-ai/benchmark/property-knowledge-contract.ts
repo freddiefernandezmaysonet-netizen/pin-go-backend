@@ -49,16 +49,20 @@ export type PropertyGuestKnowledgeDraft = Readonly<{
     instructions?: string;
     restrictions?: string;
   }>;
-  arrivalInstructions?: string;
-  accessInstructions?: string;
-  applianceGuides?: Readonly<Record<string, string>>;
-  troubleshooting?: Readonly<Record<string, string>>;
-  utilities?: Readonly<Record<string, string>>;
-  garbageInstructions?: string;
-  checkoutInstructions?: string;
-  safetyInformation?: Readonly<Record<string, string>>;
+  arrivalInstructionsEn?: string;
+  arrivalInstructionsEs?: string;
+  accessInstructionsEn?: string;
+  accessInstructionsEs?: string;
+  applianceGuides?: Readonly<Record<string, unknown>>;
+  troubleshooting?: Readonly<Record<string, unknown>>;
+  utilities?: Readonly<Record<string, unknown>>;
+  garbageInstructionsEn?: string;
+  garbageInstructionsEs?: string;
+  checkoutInstructionsEn?: string;
+  checkoutInstructionsEs?: string;
+  safetyInformation?: Readonly<Record<string, unknown>>;
   localNotes?: readonly string[];
-  customFaq?: Readonly<Record<string, string>>;
+  customFaq?: Readonly<Record<string, unknown>>;
 }>;
 
 export const PROPERTY_KNOWLEDGE_PROHIBITED_KEYS = [
