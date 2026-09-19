@@ -1,0 +1,68 @@
+name: Pin AI Guest Services Benchmark V1
+
+on:
+  pull_request:
+    branches:
+      - main
+    paths:
+      - "src/pin-ai/benchmark/**"
+      - "package.json"
+      - "package-lock.json"
+      - ".github/workflows/pin-ai-guest-services-benchmark-v1.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  benchmark-contract:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Install locked dependencies without lifecycle scripts
+        run: npm ci --ignore-scripts --no-audit --no-fund
+
+      - name: Run isolated Pin AI benchmark contract
+        run: npm run test:pin-ai-benchmark
+
+      - name: Typecheck isolated Pin AI benchmark
+        run: |
+          ./node_modules/.bin/tsc --noEmit \
+            --module nodenext \
+            --moduleResolution nodenext \
+            --target esnext \
+            --strict \
+            --skipLibCheck \
+            --types node \
+            src/pin-ai/benchmark/contracts.ts \
+            src/pin-ai/benchmark/scenarios-001-010.ts \
+            src/pin-ai/benchmark/scenarios-011-020.ts \
+            src/pin-ai/benchmark/scenarios-021-030.ts \
+            src/pin-ai/benchmark/scenarios-031-040.ts \
+            src/pin-ai/benchmark/scenarios-041-050.ts \
+            src/pin-ai/benchmark/scenarios-051-060.ts \
+            src/pin-ai/benchmark/scenarios-061-070.ts \
+            src/pin-ai/benchmark/scenarios-071-080.ts \
+            src/pin-ai/benchmark/scenarios-081-090.ts \
+            src/pin-ai/benchmark/scenarios-091-100.ts \
+            src/pin-ai/benchmark/benchmark-contract.test.ts \
+            src/pin-ai/benchmark/model-evaluation-runner.ts \
+            src/pin-ai/benchmark/mock-tool-executor.ts \
+            src/pin-ai/benchmark/model-evaluation-runner.test.ts \
+            src/pin-ai/benchmark/openai-agents-benchmark-adapter.ts \
+            src/pin-ai/benchmark/openai-agents-benchmark-adapter.test.ts \
+            src/pin-ai/benchmark/openai-agents-benchmark-transport.ts \
+            src/pin-ai/benchmark/openai-agents-benchmark-transport.test.ts \
+            src/pin-ai/benchmark/openai-benchmark-usage-reconciler.ts \
+            src/pin-ai/benchmark/openai-benchmark-usage-reconciler.test.ts \
+            src/pin-ai/benchmark/reconcile-provider-usage.ts \
+            src/pin-ai/benchmark/canary-001-luna.ts \
+            src/pin-ai/benchmark/canary-002-luna.ts
