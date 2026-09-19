@@ -142,11 +142,11 @@ test("editable read verifies tenant ownership before returning knowledge", async
     },
   } as any;
 
-  const result: any = await getEditablePropertyGuestKnowledge({
+  const result = (await getEditablePropertyGuestKnowledge({
     prisma,
     organizationId: "benchmark-org-a",
     propertyId: "benchmark-property-a",
-  });
+  })) as { version: number };
 
   assert.equal(readCalled, true);
   assert.equal(result.version, 3);
