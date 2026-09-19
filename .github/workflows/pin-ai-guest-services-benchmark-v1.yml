@@ -70,6 +70,8 @@ jobs:
             src/pin-ai/benchmark/property-knowledge-contract.test.ts \
             src/pin-ai/property-knowledge.service.ts \
             src/pin-ai/property-knowledge.service.test.ts \
+            src/pin-ai/benchmark/property-knowledge-benchmark-tool-executor.ts \
+            src/pin-ai/benchmark/property-knowledge-benchmark-tool-executor.test.ts \
             src/pin-ai/benchmark/canary-001-luna.ts \
             src/pin-ai/benchmark/canary-002-luna.ts \
             src/pin-ai/benchmark/canary-003-luna.ts \
