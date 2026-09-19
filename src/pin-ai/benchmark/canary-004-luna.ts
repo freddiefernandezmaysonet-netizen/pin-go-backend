@@ -76,30 +76,6 @@ async function main(): Promise<void> {
         },
       ],
       propertyDevices: [],
-      guestKnowledge: {
-        version: 1,
-        wifi: null,
-        parking: null,
-        arrivalInstructionsEn: null,
-        arrivalInstructionsEs: null,
-        accessInstructionsEn:
-          "For the front-door keypad, wake the screen, enter the assigned guest credential, then press the confirm button once. If the display shows error, wait five seconds before one retry.",
-        accessInstructionsEs:
-          "Para el teclado de la puerta principal, active la pantalla, ingrese la credencial asignada y presione confirmar una vez. Si muestra error, espere cinco segundos antes de un solo reintento.",
-        applianceGuides: null,
-        troubleshooting: {
-          keypad:
-            "If the front-door keypad display is asleep, touch the screen once to wake it. Do not generate or substitute another credential.",
-        },
-        utilities: null,
-        garbageInstructionsEn: null,
-        garbageInstructionsEs: null,
-        checkoutInstructionsEn: null,
-        checkoutInstructionsEs: null,
-        safetyInformation: null,
-        localNotes: null,
-        customFaq: null,
-      },
       guestAgreements: [],
       cancellationPolicies: [],
     },
