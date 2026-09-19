@@ -219,6 +219,13 @@ async function getStripeFinancialRefs(
           : chargeAny.application_fee?.id ?? null,
     };
   } catch (error: any) {
+    if (
+      error?.message === "DIRECT_BOOKING_STRIPE_CHARGE_MODE_INVALID" ||
+      error?.message === "DIRECT_BOOKING_STRIPE_CONNECTED_ACCOUNT_INVALID"
+    ) {
+      throw error;
+    }
+
     console.error("[DIRECT_BOOKING_STRIPE_FINANCIAL_REFS_ERROR]", {
       paymentIntentId,
       error: error?.message ?? error,
