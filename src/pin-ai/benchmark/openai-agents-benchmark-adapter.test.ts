@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import type { BenchmarkScenario } from "./contracts.js";
+import { FixtureMockToolExecutor } from "./mock-tool-executor.js";
 import {
   OPENAI_AGENTS_BENCHMARK_TOOLS,
   OpenAIAgentsBenchmarkAdapter,
@@ -37,11 +38,17 @@ const scenario: BenchmarkScenario = {
   },
 };
 
+const mockTools = new FixtureMockToolExecutor({
+  get_reservation_context: { checkoutLocal: scenario.context.checkOutLocal },
+});
+
 test("OpenAI benchmark adapter emits environment none and mock tools only", async () => {
   let captured: AgentsApiSessionRequest | undefined;
   const transport: AgentsApiTransport = {
-    async createSession(request) {
+    async runSession(request, receivedScenario, receivedTools) {
       captured = request;
+      assert.equal(receivedScenario.id, scenario.id);
+      assert.equal(receivedTools, mockTools);
       return {
         scenarioId: scenario.id,
         model: "gpt-5.6-luna",
@@ -61,7 +68,7 @@ test("OpenAI benchmark adapter emits environment none and mock tools only", asyn
   };
 
   const adapter = new OpenAIAgentsBenchmarkAdapter("gpt-5.6-luna", transport);
-  await adapter.evaluateScenario(scenario);
+  await adapter.evaluateScenario(scenario, mockTools);
 
   assert.ok(captured);
   assert.deepEqual(captured.environment, { type: "none" });
@@ -75,17 +82,20 @@ test("OpenAI benchmark adapter emits environment none and mock tools only", asyn
 
 test("OpenAI benchmark adapter blocks non-benchmark tenant context", async () => {
   const transport: AgentsApiTransport = {
-    async createSession() {
+    async runSession() {
       throw new Error("transport must not be called");
     },
   };
   const adapter = new OpenAIAgentsBenchmarkAdapter("gpt-5.6-luna", transport);
 
   await assert.rejects(
-    adapter.evaluateScenario({
-      ...scenario,
-      context: { ...scenario.context, organizationId: "real-org" },
-    }),
+    adapter.evaluateScenario(
+      {
+        ...scenario,
+        context: { ...scenario.context, organizationId: "real-org" },
+      },
+      mockTools,
+    ),
     /OPENAI_BENCHMARK_NON_BENCHMARK_ORG_BLOCKED/,
   );
 });
