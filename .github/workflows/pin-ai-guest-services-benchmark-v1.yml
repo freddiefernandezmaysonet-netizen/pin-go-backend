@@ -45,4 +45,6 @@ jobs:
             src/pin-ai/benchmark/contracts.ts \
             src/pin-ai/benchmark/scenarios-001-010.ts \
             src/pin-ai/benchmark/scenarios-011-020.ts \
+            src/pin-ai/benchmark/scenarios-021-030.ts \
+            src/pin-ai/benchmark/scenarios-031-040.ts \
             src/pin-ai/benchmark/benchmark-contract.test.ts
