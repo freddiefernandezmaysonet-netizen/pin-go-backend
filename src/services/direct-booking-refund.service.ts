@@ -316,7 +316,6 @@ export async function refundDirectBookingReservation({
       params: {
         payment_intent: reservation.stripePaymentIntentId,
         amount: resolvedRefundAmountCents,
-        reverse_transfer: true,
         refund_application_fee: refundApplicationFee,
         metadata: {
           platform: "PinGo",
