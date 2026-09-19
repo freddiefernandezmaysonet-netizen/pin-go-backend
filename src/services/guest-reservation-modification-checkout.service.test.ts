@@ -23,7 +23,7 @@ const common = {
     "https://app.pin-ngo.com/booking/manage/guest_token_001",
 };
 
-test("builds a destination charge Checkout for the exact additional amount", () => {
+test("builds a Direct Charge Checkout for the exact additional amount", () => {
   const result = buildGuestReservationModificationCheckoutSessionParams(
     common
   );
@@ -36,9 +36,14 @@ test("builds a destination charge Checkout for the exact additional amount", () 
   assert.equal(priceData?.unit_amount, common.additionalChargeAmountCents);
   assert.equal(priceData?.currency, "usd");
   assert.equal(
-    paymentIntentData?.transfer_data?.destination,
-    common.connectedAccountId
+    paymentIntentData && "transfer_data" in paymentIntentData
+      ? paymentIntentData.transfer_data
+      : undefined,
+    undefined
   );
+  assert.deepEqual(result.requestOptions, {
+    stripeAccount: common.connectedAccountId,
+  });
   assert.equal(
     paymentIntentData?.application_fee_amount,
     common.additionalPlatformFeeAmountCents
@@ -70,6 +75,14 @@ test("uses modification identity consistently in metadata and idempotency", () =
   assert.equal(
     result.params.metadata?.additionalHostPayoutAmountCents,
     "9500"
+  );
+  assert.equal(
+    result.params.metadata?.stripeChargeMode,
+    "DIRECT_CHARGE"
+  );
+  assert.equal(
+    result.params.payment_intent_data?.metadata?.stripeChargeMode,
+    "DIRECT_CHARGE"
   );
 });
 
@@ -110,9 +123,15 @@ test("omits application fee when the incremental Pin&Go fee is zero", () => {
     undefined
   );
   assert.equal(
-    result.params.payment_intent_data?.transfer_data?.destination,
-    common.connectedAccountId
+    result.params.payment_intent_data &&
+      "transfer_data" in result.params.payment_intent_data
+      ? result.params.payment_intent_data.transfer_data
+      : undefined,
+    undefined
   );
+  assert.deepEqual(result.requestOptions, {
+    stripeAccount: common.connectedAccountId,
+  });
 });
 
 test("renders the Checkout item in the guest preferred language", () => {
