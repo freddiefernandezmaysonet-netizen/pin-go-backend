@@ -8,6 +8,7 @@ import { scenarios011To020 } from "./scenarios-011-020.js";\nimport { scenarios0
 const scenarios: readonly BenchmarkScenario[] = [
   ...scenarios001To010,
   ...scenarios011To020,
+  ...scenarios021To030,
 ];
 
 test("Pin AI benchmark scenarios 001-030 satisfy the isolated contract", () => {
