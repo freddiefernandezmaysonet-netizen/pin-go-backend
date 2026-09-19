@@ -279,7 +279,6 @@ model Property {
   blockedDates               PropertyBlockedDate[]
   cancellationPolicies       PropertyCancellationPolicy[]
   guestAgreements            PropertyGuestAgreement[]
-  guestKnowledge             PropertyGuestKnowledge?
   reviews                    PropertyReview[]
   reviewInvitations          PropertyReviewInvitation[]
   reviewModerationCases      PropertyReviewModerationCase[]
@@ -1537,34 +1536,6 @@ model SalesFollowUp {
 
   @@index([status, dueAt])
   @@index([appointmentId])
-}
-
-model PropertyGuestKnowledge {
-  id                    String   @id @default(cuid())
-  propertyId            String   @unique
-  version               Int      @default(1)
-  wifi                  Json?
-  parking               Json?
-  arrivalInstructionsEn String?
-  arrivalInstructionsEs String?
-  accessInstructionsEn  String?
-  accessInstructionsEs  String?
-  applianceGuides       Json?
-  troubleshooting       Json?
-  utilities             Json?
-  garbageInstructionsEn String?
-  garbageInstructionsEs String?
-  checkoutInstructionsEn String?
-  checkoutInstructionsEs String?
-  safetyInformation     Json?
-  localNotes            Json?
-  customFaq             Json?
-  createdAt             DateTime @default(now())
-  updatedAt             DateTime @updatedAt
-
-  property Property @relation(fields: [propertyId], references: [id], onDelete: Cascade)
-
-  @@index([propertyId])
 }
 
 model PropertyAmenity {
