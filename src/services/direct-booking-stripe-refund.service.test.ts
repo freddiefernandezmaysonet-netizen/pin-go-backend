@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
+import type Stripe from "stripe";
 import { createDirectBookingStripeRefund } from "./direct-booking-stripe-refund.service.js";
 
 test("Direct Charge refund is created directly in the connected account", async () => {
@@ -48,8 +49,8 @@ test("Direct Charge refund preserves application fee refund semantics", async ()
   const stripeClient = {
     refunds: {
       create: async (
-        params: Record<string, unknown>,
-        options?: Record<string, unknown>
+        params: Stripe.RefundCreateParams,
+        options?: Stripe.RequestOptions
       ) => {
         assert.equal(params.refund_application_fee, true);
         assert.equal("reverse_transfer" in params, false);
