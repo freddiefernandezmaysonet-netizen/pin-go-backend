@@ -31,6 +31,8 @@ export type MockToolName =
   | "check_early_checkin"
   | "check_late_checkout"
   | "check_extension_availability"
+  | "calculate_extension_price"
+  | "check_date_change"
   | "get_cancellation_policy"
   | "get_payment_context"
   | "escalate_to_host";
@@ -54,7 +56,9 @@ export type BenchmarkScenario = Readonly<{
     | "GROUNDING"
     | "POLICY"
     | "TROUBLESHOOTING"
-    | "SECURITY";
+    | "SECURITY"
+    | "STAY_REQUEST"
+    | "RESERVATION_CHANGE";
   context: StayContext;
   conversation: readonly BenchmarkMessage[];
   expectation: BenchmarkExpectation;
@@ -68,6 +72,8 @@ export const MOCK_TOOL_NAMES: readonly MockToolName[] = [
   "check_early_checkin",
   "check_late_checkout",
   "check_extension_availability",
+  "calculate_extension_price",
+  "check_date_change",
   "get_cancellation_policy",
   "get_payment_context",
   "escalate_to_host",
