@@ -1,7 +1,7 @@
 import { OpenAIAgentsBenchmarkAdapter } from "./openai-agents-benchmark-adapter.js";
 import { OpenAIAgentsBenchmarkTransport } from "./openai-agents-benchmark-transport.js";
 import { ModelEvaluationRunner } from "./model-evaluation-runner.js";
-import { FixtureMockToolExecutor } from "./mock-tool-executor.js";
+import { PropertyKnowledgeBenchmarkToolExecutor } from "./property-knowledge-benchmark-tool-executor.js";
 import { scenarios001To010 } from "./scenarios-001-010.js";
 
 async function main(): Promise<void> {
@@ -54,15 +54,41 @@ async function main(): Promise<void> {
     guardedFetch,
   );
   const adapter = new OpenAIAgentsBenchmarkAdapter("gpt-5.6-luna", transport);
-  const mockTools = new FixtureMockToolExecutor({
-    get_access_status: {
-      accessStatus: "ACTIVE",
-      accessStartsAtLocal: scenario.context.accessStartsAtLocal,
-      credentialState: "ACTIVE",
-      lockConnectivity: "UNKNOWN",
-      replacementCredentialAuthorized: false,
+  const mockTools = new PropertyKnowledgeBenchmarkToolExecutor(
+    {
+      id: scenario.context.propertyId,
+      organizationId: scenario.context.organizationId,
+      name: "Benchmark Property",
+      publicTitle: "Benchmark Stay",
+      publicDescription: "Guest-facing benchmark property.",
+      publicDescriptionEs: "Propiedad benchmark para huéspedes.",
+      maxGuests: scenario.context.maxGuests,
+      timezone: "America/Puerto_Rico",
+      checkInTime: "16:00",
+      checkOutTime: "11:00",
+      guestAccessMode: "PASSCODE_ONLY",
+      amenities: [],
+      locks: [
+        {
+          displayName: "Front Door",
+          locationLabel: "Main entrance",
+          ttlockLockName: "Benchmark Front",
+        },
+      ],
+      propertyDevices: [],
+      guestAgreements: [],
+      cancellationPolicies: [],
     },
-  });
+    {
+      get_access_status: {
+        accessStatus: "ACTIVE",
+        accessStartsAtLocal: scenario.context.accessStartsAtLocal,
+        credentialState: "ACTIVE",
+        lockConnectivity: "UNKNOWN",
+        replacementCredentialAuthorized: false,
+      },
+    },
+  );
 
   const runner = new ModelEvaluationRunner(adapter, mockTools);
   console.log("PIN_AI_BENCHMARK_CANARY_STARTED:004:gpt-5.6-luna");
