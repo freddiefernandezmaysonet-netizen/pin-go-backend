@@ -164,11 +164,12 @@ export class OpenAIAgentsRuntimeTransport {
           type: "function",
           name: tool.name,
           description: tool.description,
-          parameters: {
-            type: "object",
-            properties: {},
-            additionalProperties: false,
-          },
+          parameters:
+            tool.parameters ?? {
+              type: "object",
+              properties: {},
+              additionalProperties: false,
+            },
         })),
       },
       input: JSON.stringify({
