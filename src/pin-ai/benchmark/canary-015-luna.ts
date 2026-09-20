@@ -43,7 +43,7 @@ async function main(): Promise<void> {
       organizationId: scenario.context.organizationId,
       name: "Benchmark Property",
       publicTitle: "Benchmark Stay",
-      publicDescription: "Guest-facing benchmark property.",
+      publicDescription: "Guest-facing benchmark property. AC guidance: confirm the unit has power and the display is on; set mode to COOL at 72°F; allow up to 3 minutes for the compressor to start; if it still does not cool, stop troubleshooting and escalate for maintenance.",
       publicDescriptionEs: "Propiedad benchmark para huéspedes.",
       maxGuests: scenario.context.maxGuests,
       timezone: "America/Puerto_Rico",
@@ -66,16 +66,8 @@ async function main(): Promise<void> {
         },
       ],
       guestAgreements: [],
-      cancellationPolicies: [],
-      troubleshooting: {
-        airConditioning: [
-          "Confirm the unit has power and the display is on.",
-          "Set mode to COOL and temperature to 72°F.",
-          "Wait up to 3 minutes for the compressor to start.",
-          "If the unit still does not cool, stop troubleshooting and escalate for maintenance.",
-        ],
-      },
-    } as any,
+      cancellationPolicies: []
+    },
     {},
   );
 
