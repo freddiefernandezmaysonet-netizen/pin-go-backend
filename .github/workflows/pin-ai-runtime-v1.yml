@@ -64,4 +64,5 @@ jobs:
             src/pin-ai/runtime/runtime-real-read-canary-luna.ts \
             src/pin-ai/runtime/pin-go-eligibility-checks.ts \
             src/pin-ai/runtime/pin-go-eligibility-checks.test.ts \
-            src/pin-ai/runtime/runtime-eligibility-canary-luna.ts
+            src/pin-ai/runtime/runtime-eligibility-canary-luna.ts \
+            src/pin-ai/runtime/runtime-extension-price-canary.ts
