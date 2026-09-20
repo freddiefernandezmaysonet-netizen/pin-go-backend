@@ -170,6 +170,7 @@ export class OpenAIAgentsRuntimeTransport {
           "When escalation is needed, request escalate_to_host; Runtime V1 shadow mode will record it without executing it.",
           "In shadow mode, never tell the guest that an escalation, host request, refund, cancellation, payment, access change, or reservation change was sent, completed, approved, or executed unless the tool result explicitly says executed=true.",
           "If escalate_to_host returns executed=false, describe it only as something that would be escalated or requires host review.",
+          "Treat extension pricing as an estimate for review only. Never describe an estimated price as final or claim that a payment, charge, approval, or reservation extension occurred.",
           "Keep resolved issues resolved and do not repeat exhausted troubleshooting.",
           "Reply naturally in the guest's current language.",
         ].join(" "),

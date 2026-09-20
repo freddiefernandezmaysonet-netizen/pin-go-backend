@@ -215,8 +215,13 @@ test("runtime advertises exactly the enabled Runtime V1 tools to Luna", async ()
   await adapter.run(request, createConversationMemory(request), tools);
 
   const sessionPayload = JSON.parse(createSessionBody) as {
-    agent: { tools: Array<{ name: string }> };
+    agent: { instructions: string; tools: Array<{ name: string }> };
   };
+
+  assert.match(
+    sessionPayload.agent.instructions,
+    /extension pricing as an estimate for review only/i,
+  );
 
   assert.deepEqual(
     sessionPayload.agent.tools.map((tool) => tool.name),

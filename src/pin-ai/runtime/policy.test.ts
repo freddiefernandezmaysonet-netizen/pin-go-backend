@@ -178,6 +178,30 @@ test("runtime rejects false approval or mutation claims after eligibility checks
   }
 });
 
+test("runtime rejects false charge or final-price claims after extension pricing", () => {
+  for (const responseText of [
+    "You've been charged $100 for the additional night.",
+    "Your payment has been processed.",
+    "The extension price is final.",
+    "Le cobré $100 por la noche adicional.",
+    "Su pago ha sido procesado.",
+    "El precio de extensión es final.",
+  ]) {
+    assert.throws(
+      () =>
+        assertRuntimeResponseSafe({
+          responseText,
+          toolCalls: [
+            { name: "check_extension_availability", arguments: {} },
+          ],
+          escalationCreated: false,
+          requiresHumanReview: true,
+        }),
+      /PIN_AI_RUNTIME_FALSE_COMPLETION_CLAIM/,
+    );
+  }
+});
+
 test("runtime allows conditional language when shadow escalation is not executed", () => {
   for (const responseText of [
     "This would be escalated to the host for review before any change is approved.",
@@ -185,6 +209,8 @@ test("runtime allows conditional language when shadow escalation is not executed
     "Your late checkout is available for review, but it is not yet approved.",
     "La extensión está disponible, pero aún no ha sido aprobada.",
     "No reservation changes or charges have been made.",
+    "The estimated additional cost is $100; no charge or reservation change has been made.",
+    "El costo adicional estimado es $100; no se realizó ningún cargo ni cambio de reserva.",
   ]) {
     assert.doesNotThrow(() =>
       assertRuntimeResponseSafe({

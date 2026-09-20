@@ -96,6 +96,14 @@ function assertNoFalseCompletionClaims(response: PinAIRuntimeResponse): void {
     /\b(?:la|el|tu|su) (?:entrada temprana|check-?in temprano|salida tardia|check-?out tardio|extension) (?:esta|fue|ha sido) (?:aprobado|aprobada|confirmado|confirmada|autorizado|autorizada|completado|completada)\b/,
     /\b(?:your|the) (?:reservation|stay) (?:is|was|has been) (?:changed|extended|updated|modified)\b/,
     /\b(?:la|tu|su) (?:reservacion|reserva|estadia) (?:esta|fue|ha sido) (?:cambiada|extendida|actualizada|modificada)\b/,
+    /\b(?:you(?:'|’)ve|you have) been charged\b/,
+    /\bi(?:'|’)ve charged\b/,
+    /\bi have charged\b/,
+    /\b(?:the|your) (?:payment|charge) (?:was|has been) (?:processed|completed|collected)\b/,
+    /\b(?:te|le|se le) (?:cobre|cobramos|cargue|cargamos)\b/,
+    /\b(?:el|tu|su) (?:pago|cargo) (?:fue|ha sido|se ha) (?:procesado|completado|realizado|cobrado)\b/,
+    /\b(?:the|your) (?:extension )?price (?:is|was|has been) (?:final|confirmed|locked in)\b/,
+    /\b(?:el|tu|su) precio (?:de extension )?(?:es|fue|ha sido) (?:final|confirmado)\b/,
   ];
 
   if (
