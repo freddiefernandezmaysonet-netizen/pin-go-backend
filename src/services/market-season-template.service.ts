@@ -14,6 +14,10 @@ function normalizeMarketCountry(value: unknown) {
 
   const normalized = raw.toLowerCase();
 
+  if (normalized === "pr" || normalized === "puerto rico") {
+    return "United States";
+  }
+
   if (
     normalized === "us" ||
     normalized === "usa" ||

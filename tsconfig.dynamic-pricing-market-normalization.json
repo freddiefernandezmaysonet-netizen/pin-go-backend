@@ -1,0 +1,15 @@
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "types": ["node"],
+    "noEmit": true,
+    "module": "ESNext",
+    "moduleResolution": "Bundler"
+  },
+  "include": [
+    "src/data/holiday-pricing-catalog.ts",
+    "src/services/market-season-template.service.ts",
+    "src/services/holiday-pricing-template.service.ts",
+    "src/services/dynamic-pricing-market-normalization.test.ts"
+  ]
+}
