@@ -75,4 +75,5 @@ jobs:
             src/pin-ai/runtime/google-places-read-client.ts \
             src/pin-ai/runtime/google-places-read-client.test.ts \
             src/pin-ai/runtime/runtime-local-places-canary.ts \
-            src/pin-ai/runtime/runtime-web-search-canary-luna.ts
+            src/pin-ai/runtime/runtime-web-search-canary-luna.ts \
+            src/pin-ai/runtime/runtime-location-audit.ts
