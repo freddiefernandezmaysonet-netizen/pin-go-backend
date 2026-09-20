@@ -1,5 +1,6 @@
 import {
   PIN_AI_RUNTIME_TOOLS,
+  isPinAIRuntimeToolEnabled,
   type PinAIRuntimeRequest,
   type PinAIRuntimeResponse,
   type PinAIRuntimeToolName,
@@ -164,7 +165,9 @@ export class OpenAIAgentsRuntimeTransport {
           "Keep resolved issues resolved and do not repeat exhausted troubleshooting.",
           "Reply naturally in the guest's current language.",
         ].join(" "),
-        tools: PIN_AI_RUNTIME_TOOLS.map((tool) => ({
+        tools: PIN_AI_RUNTIME_TOOLS.filter((tool) =>
+          isPinAIRuntimeToolEnabled(tool.name),
+        ).map((tool) => ({
           type: "function",
           name: tool.name,
           description: tool.description,
@@ -310,7 +313,9 @@ function parseRequiredAction(value: unknown): RuntimeRequiredAction {
   }
 
   const name = typeof action.name === "string" ? action.name : "";
-  const allowed = PIN_AI_RUNTIME_TOOLS.some((tool) => tool.name === name);
+  const allowed =
+    PIN_AI_RUNTIME_TOOLS.some((tool) => tool.name === name) &&
+    isPinAIRuntimeToolEnabled(name as PinAIRuntimeToolName);
   if (!allowed) {
     throw new Error(`PIN_AI_RUNTIME_UNAPPROVED_TOOL:${sanitizeDiagnostic(name)}`);
   }
