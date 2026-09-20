@@ -279,3 +279,105 @@ test("runtime rejects a disabled tool returned by Luna before execution", async 
   );
   assert.equal(toolExecutions, 0);
 });
+
+test("runtime rejects non-object tool arguments before execution", async () => {
+  let toolExecutions = 0;
+  const tools: PinAIRuntimeToolExecutor = {
+    async execute() {
+      toolExecutions += 1;
+      throw new Error("TOOL_SHOULD_NOT_EXECUTE");
+    },
+  };
+
+  for (const invalidArguments of [null, "{}", []]) {
+    const transport = new OpenAIAgentsRuntimeTransport(
+      {
+        enabled: true,
+        apiKey: "test-key",
+        model: "gpt-5.6-luna",
+        pollDelayMs: 0,
+      },
+      async () => ({
+        ok: true,
+        status: 200,
+        async json() {
+          return {
+            id: "sess_invalid_args",
+            status: "requires_action",
+            required_actions: [
+              {
+                type: "function_call",
+                turn_id: "turn_invalid_args",
+                call_id: "call_invalid_args",
+                name: "check_late_checkout",
+                arguments: invalidArguments,
+              },
+            ],
+          };
+        },
+      }),
+    );
+
+    await assert.rejects(
+      new LunaRuntimeAdapter(transport).run(
+        request,
+        createConversationMemory(request),
+        tools,
+      ),
+      /PIN_AI_RUNTIME_TOOL_ARGUMENTS_INVALID/,
+    );
+  }
+  assert.equal(toolExecutions, 0);
+});
+
+test("runtime rejects a repeated call id before duplicate execution", async () => {
+  let toolExecutions = 0;
+  const repeatedActionSession = {
+    id: "sess_duplicate_call",
+    status: "requires_action",
+    required_actions: [
+      {
+        type: "function_call",
+        turn_id: "turn_duplicate_call",
+        call_id: "call_duplicate",
+        name: "get_access_status",
+        arguments: {},
+      },
+    ],
+  };
+
+  const transport = new OpenAIAgentsRuntimeTransport(
+    {
+      enabled: true,
+      apiKey: "test-key",
+      model: "gpt-5.6-luna",
+      pollDelayMs: 0,
+      maxPolls: 2,
+    },
+    async (input, init) => ({
+      ok: true,
+      status: 200,
+      async json() {
+        if (init.method === "POST" && input.endsWith("/events")) return {};
+        return repeatedActionSession;
+      },
+    }),
+  );
+
+  const tools: PinAIRuntimeToolExecutor = {
+    async execute() {
+      toolExecutions += 1;
+      return { accessStatus: "ACTIVE" };
+    },
+  };
+
+  await assert.rejects(
+    new LunaRuntimeAdapter(transport).run(
+      request,
+      createConversationMemory(request),
+      tools,
+    ),
+    /PIN_AI_RUNTIME_DUPLICATE_TOOL_CALL_ID:call_duplicate/,
+  );
+  assert.equal(toolExecutions, 1);
+});

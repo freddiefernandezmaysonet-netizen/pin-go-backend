@@ -62,6 +62,7 @@ export class OpenAIAgentsRuntimeTransport {
       name: PinAIRuntimeToolName;
       arguments: Readonly<Record<string, unknown>>;
     }[] = [];
+    const handledCallIds = new Set<string>();
 
     let escalationCreated = false;
     let requiresHumanReview = false;
@@ -85,6 +86,13 @@ export class OpenAIAgentsRuntimeTransport {
         }
 
         for (const action of session.requiredActions) {
+          if (handledCallIds.has(action.callId)) {
+            throw new Error(
+              `PIN_AI_RUNTIME_DUPLICATE_TOOL_CALL_ID:${sanitizeDiagnostic(action.callId)}`,
+            );
+          }
+          handledCallIds.add(action.callId);
+
           recordedToolCalls.push({
             name: action.name,
             arguments: action.arguments,
@@ -326,12 +334,22 @@ function parseRequiredAction(value: unknown): RuntimeRequiredAction {
     throw new Error("PIN_AI_RUNTIME_REQUIRED_ACTION_ID_MISSING");
   }
 
+  if (
+    !action.arguments ||
+    typeof action.arguments !== "object" ||
+    Array.isArray(action.arguments)
+  ) {
+    throw new Error(
+      `PIN_AI_RUNTIME_TOOL_ARGUMENTS_INVALID:${sanitizeDiagnostic(callId)}`,
+    );
+  }
+
   return {
     type: "function_call",
     turnId,
     callId,
     name: name as PinAIRuntimeToolName,
-    arguments: asRecord(action.arguments),
+    arguments: action.arguments as Record<string, unknown>,
   };
 }
 
