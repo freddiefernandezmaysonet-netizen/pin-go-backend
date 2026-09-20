@@ -60,7 +60,15 @@ function createPrismaFixture(options: Readonly<{
   modificationHold?: boolean;
   blockedDate?: boolean;
   cancellationPolicySnapshot?: unknown;
+  paymentContext?: Readonly<{
+    paymentState?: string;
+    totalAmount?: number | null;
+    amountCollected?: number | null;
+    amountRefunded?: number | null;
+  }>;
 }> = {}) {
+  const paymentContext = options.paymentContext ?? {};
+
   return {
     property: {
       async findFirst() {
@@ -103,13 +111,26 @@ function createPrismaFixture(options: Readonly<{
           children: 0,
           status: "ACTIVE",
           totalAmount:
-            "currentTotalAmount" in options
-              ? options.currentTotalAmount
-              : 400,
+            "totalAmount" in paymentContext
+              ? paymentContext.totalAmount
+              : "currentTotalAmount" in options
+                ? options.currentTotalAmount
+                : 400,
           currency: "usd",
           selectedAmenityIds: ["amenity-a"],
           source: "DIRECT_BOOKING",
-          paymentState: "PAID",
+          paymentState: paymentContext.paymentState ?? "PAID",
+          amountCollected:
+            "amountCollected" in paymentContext
+              ? paymentContext.amountCollected
+              : 400,
+          amountRefunded:
+            "amountRefunded" in paymentContext
+              ? paymentContext.amountRefunded
+              : 0,
+          stripeCheckoutSessionId: "cs_private_001",
+          stripePaymentIntentId: "pi_private_001",
+          stripeChargeId: "ch_private_001",
           verificationStatus: "VERIFIED",
           identityVerificationRequiredSnapshot: true,
           stripeIdentityVerificationStatus: "VERIFIED",
@@ -757,4 +778,81 @@ test("cancellation policy fails closed when the reservation snapshot is missing 
   assert.equal(result.cancellationExecuted, false);
   assert.equal(result.refundExecuted, false);
   assert.equal(evaluationExecutions, 0);
+});
+
+test("payment context returns guest-safe persisted amounts without financial authority", async () => {
+  const executor = new PinGoRuntimeReadToolExecutor(
+    createPrismaFixture({
+      paymentContext: {
+        paymentState: "PARTIALLY_REFUNDED",
+        totalAmount: 400,
+        amountCollected: 400,
+        amountRefunded: 125,
+      },
+    }),
+  );
+
+  const result = await executor.execute(
+    "get_payment_context",
+    {},
+    request,
+    createConversationMemory(request),
+  );
+  const payment = result.payment as Record<string, unknown>;
+  const authority = result.financialAuthority as Record<string, unknown>;
+
+  assert.equal(result.decision, "PAYMENT_CONTEXT_READ");
+  assert.equal(result.authorizationGranted, false);
+  assert.equal(result.requiresHumanReview, false);
+  assert.equal(payment.state, "PARTIALLY_REFUNDED");
+  assert.equal(payment.totalAmount, 400);
+  assert.equal(payment.amountCollected, 400);
+  assert.equal(payment.amountRefunded, 125);
+  assert.equal(payment.amountRetained, 275);
+  assert.equal(payment.paymentRecorded, true);
+  assert.equal(payment.refundRecorded, true);
+  assert.equal(authority.canCharge, false);
+  assert.equal(authority.canRefund, false);
+  assert.equal(authority.canTransfer, false);
+  assert.equal(result.paymentAuthorized, false);
+  assert.equal(result.chargeExecuted, false);
+  assert.equal(result.refundExecuted, false);
+  assert.equal(result.transferExecuted, false);
+
+  const serialized = JSON.stringify(result);
+  assert.doesNotMatch(serialized, /cs_private_001/);
+  assert.doesNotMatch(serialized, /pi_private_001/);
+  assert.doesNotMatch(serialized, /ch_private_001/);
+  assert.doesNotMatch(
+    serialized,
+    /stripeCheckoutSessionId|stripePaymentIntentId|stripeChargeId|hostPayout/i,
+  );
+});
+
+test("payment context fails closed on invalid persisted amounts", async () => {
+  const executor = new PinGoRuntimeReadToolExecutor(
+    createPrismaFixture({
+      paymentContext: {
+        paymentState: "PAID",
+        amountCollected: null,
+        amountRefunded: 0,
+      },
+    }),
+  );
+
+  const result = await executor.execute(
+    "get_payment_context",
+    {},
+    request,
+    createConversationMemory(request),
+  );
+
+  assert.equal(result.decision, "PAYMENT_CONTEXT_INVALID");
+  assert.equal(result.authorizationGranted, false);
+  assert.equal(result.requiresHumanReview, true);
+  assert.equal(result.paymentAuthorized, false);
+  assert.equal(result.chargeExecuted, false);
+  assert.equal(result.refundExecuted, false);
+  assert.equal(result.transferExecuted, false);
+  assert.equal(result.payment, undefined);
 });

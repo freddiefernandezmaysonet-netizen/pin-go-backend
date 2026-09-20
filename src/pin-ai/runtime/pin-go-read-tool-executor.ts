@@ -119,9 +119,116 @@ export class PinGoRuntimeReadToolExecutor implements PinAIRuntimeToolExecutor {
         return this.checkDateChange(request, args);
       case "get_cancellation_policy":
         return this.getCancellationPolicy(request);
+      case "get_payment_context":
+        return this.getPaymentContext(request);
       default:
         throw new Error(`PIN_AI_RUNTIME_READ_TOOL_NOT_IMPLEMENTED:${tool}`);
     }
+  }
+
+  private async getPaymentContext(
+    request: PinAIRuntimeRequest,
+  ): Promise<Readonly<Record<string, unknown>>> {
+    const reservation = await this.prisma.reservation.findFirst({
+      where: {
+        id: request.context.reservationId,
+        propertyId: request.context.propertyId,
+        property: {
+          organizationId: request.context.organizationId,
+        },
+      },
+      select: {
+        id: true,
+        reservationNumber: true,
+        status: true,
+        source: true,
+        paymentState: true,
+        totalAmount: true,
+        amountCollected: true,
+        amountRefunded: true,
+        currency: true,
+        stripeCheckoutSessionId: true,
+        stripePaymentIntentId: true,
+        stripeChargeId: true,
+      },
+    });
+
+    if (!reservation) {
+      throw new Error("PIN_AI_RUNTIME_RESERVATION_NOT_FOUND_OR_OUT_OF_SCOPE");
+    }
+
+    const totalAmount =
+      reservation.totalAmount == null
+        ? null
+        : toPersistedMoney(reservation.totalAmount);
+    const amountCollected = toPersistedMoney(reservation.amountCollected);
+    const amountRefunded = toPersistedMoney(reservation.amountRefunded);
+    if (
+      amountCollected === null ||
+      amountCollected < 0 ||
+      amountRefunded === null ||
+      amountRefunded < 0 ||
+      (totalAmount !== null && totalAmount < 0)
+    ) {
+      return {
+        decision: "PAYMENT_CONTEXT_INVALID",
+        authorizationGranted: false,
+        requiresHumanReview: true,
+        paymentAuthorized: false,
+        chargeExecuted: false,
+        refundExecuted: false,
+        transferExecuted: false,
+        note:
+          "Persisted payment amounts are incomplete or invalid. Runtime V1 will not infer or execute a financial action.",
+      };
+    }
+
+    const amountRetained = Math.max(
+      0,
+      Math.round((amountCollected - amountRefunded) * 100) / 100,
+    );
+
+    return {
+      decision: "PAYMENT_CONTEXT_READ",
+      authorizationGranted: false,
+      requiresHumanReview: false,
+      reservation: {
+        reservationNumber: reservation.reservationNumber,
+        status: reservation.status,
+        source: reservation.source,
+      },
+      payment: {
+        state: reservation.paymentState,
+        currency: String(reservation.currency ?? "usd").toLowerCase(),
+        totalAmount,
+        amountCollected,
+        amountRefunded,
+        amountRetained,
+        paymentRecorded:
+          reservation.paymentState !== "NONE" || amountCollected > 0,
+        refundRecorded:
+          reservation.paymentState === "PARTIALLY_REFUNDED" ||
+          reservation.paymentState === "REFUNDED" ||
+          amountRefunded > 0,
+      },
+      providerEvidence: {
+        checkoutSessionRecorded: Boolean(reservation.stripeCheckoutSessionId),
+        paymentIntentRecorded: Boolean(reservation.stripePaymentIntentId),
+        chargeRecorded: Boolean(reservation.stripeChargeId),
+      },
+      financialAuthority: {
+        canCharge: false,
+        canRefund: false,
+        canTransfer: false,
+        deterministicAuthorizationRequired: true,
+      },
+      paymentAuthorized: false,
+      chargeExecuted: false,
+      refundExecuted: false,
+      transferExecuted: false,
+      note:
+        "Read-only persisted payment context only. No charge, refund, transfer, approval, or reservation change was executed.",
+    };
   }
 
   private async getCancellationPolicy(
@@ -849,6 +956,11 @@ export class PinGoRuntimeReadToolExecutor implements PinAIRuntimeToolExecutor {
 function toMoney(value: unknown): number | null {
   const parsed = Number(value);
   return Number.isFinite(parsed) ? Math.round(parsed * 100) / 100 : null;
+}
+
+function toPersistedMoney(value: unknown): number | null {
+  if (value === null || value === undefined || value === "") return null;
+  return toMoney(value);
 }
 
 function parseDateOnly(value: unknown): string | null {

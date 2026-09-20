@@ -199,7 +199,8 @@ export const PIN_AI_RUNTIME_TOOLS: readonly PinAIRuntimeToolDefinition[] = [
   {
     name: "get_payment_context",
     authority: "READ_DYNAMIC",
-    description: "Read payment context without executing financial actions.",
+    description:
+      "Read guest-safe persisted payment and refund context for the scoped reservation. This does not authorize or execute a charge, refund, transfer, compensation, or reservation change.",
   },
   {
     name: "search_local_places",
