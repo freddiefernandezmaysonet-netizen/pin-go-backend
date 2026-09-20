@@ -79,6 +79,26 @@ test("pending Spanish pre-checkin stays GSM-7 and fits two representative segmen
   assert.doesNotMatch(body, /🛡️/u);
 });
 
+test("property address fallback preserves a clickable Google Maps search URL", () => {
+  const address = "Carr 926 km 0.5 Bo Collores";
+  const mapsLink =
+    `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(address)}`;
+
+  const body = buildPreCheckinMessage({
+    propertyName: "Casa Collores",
+    checkInTime: "04:00 PM",
+    address,
+    mapsLink,
+    verifyLink: null,
+    language: "en",
+  });
+
+  assert.match(
+    body,
+    /https:\/\/www\.google\.com\/maps\/search\/\?api=1&query=Carr%20926%20km%200\.5%20Bo%20Collores/
+  );
+});
+
 test("address is used only as compact fallback when no map link exists", () => {
   const body = buildPreCheckinMessage({
     propertyName: "Casa Águila del Mar",
