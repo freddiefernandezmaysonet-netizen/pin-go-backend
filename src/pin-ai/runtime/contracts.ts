@@ -24,6 +24,7 @@ export type PinAIRuntimeToolDefinition = Readonly<{
   name: PinAIRuntimeToolName;
   authority: PinAIToolAuthority;
   description: string;
+  parameters?: Readonly<Record<string, unknown>>;
 }>;
 
 export type PinAIConversationMessage = Readonly<{
@@ -82,17 +83,52 @@ export const PIN_AI_RUNTIME_TOOLS: readonly PinAIRuntimeToolDefinition[] = [
   {
     name: "check_early_checkin",
     authority: "CHECK_ELIGIBILITY",
-    description: "Check whether early check-in is eligible.",
+    description:
+      "Evaluate an early check-in request using current reservation, turnover, cleaning, and availability evidence. This is read-only and does not approve or modify the stay.",
+    parameters: {
+      type: "object",
+      properties: {
+        requestedLocalTime: {
+          type: "string",
+          description: "Requested local arrival time in HH:MM format when stated by the guest.",
+        },
+      },
+      additionalProperties: false,
+    },
   },
   {
     name: "check_late_checkout",
     authority: "CHECK_ELIGIBILITY",
-    description: "Check whether late checkout is eligible.",
+    description:
+      "Evaluate a late-checkout request using the next reservation and required cleaning window. This is read-only and does not approve or modify checkout.",
+    parameters: {
+      type: "object",
+      properties: {
+        requestedLocalTime: {
+          type: "string",
+          description: "Requested local checkout time in HH:MM format when stated by the guest.",
+        },
+      },
+      additionalProperties: false,
+    },
   },
   {
     name: "check_extension_availability",
     authority: "CHECK_ELIGIBILITY",
-    description: "Check whether a stay extension is available.",
+    description:
+      "Check read-only calendar availability for extending the current stay. This does not change dates or collect payment.",
+    parameters: {
+      type: "object",
+      properties: {
+        additionalNights: {
+          type: "integer",
+          minimum: 1,
+          maximum: 30,
+          description: "Number of additional nights requested by the guest.",
+        },
+      },
+      additionalProperties: false,
+    },
   },
   {
     name: "calculate_extension_price",
