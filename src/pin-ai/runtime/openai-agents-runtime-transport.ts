@@ -96,6 +96,8 @@ export class OpenAIAgentsRuntimeTransport {
               shadow: true,
               executed: false,
               reason: "SHADOW_MODE_ESCALATION_NOT_EXECUTED",
+              guestFacingConstraint:
+                "Do not claim this request was sent or escalated. Say it would be escalated or requires host review.",
             });
             continue;
           }
@@ -157,6 +159,8 @@ export class OpenAIAgentsRuntimeTransport {
           "Do not invent property, reservation, access, payment, or policy facts.",
           "Do not perform irreversible actions directly.",
           "When escalation is needed, request escalate_to_host; Runtime V1 shadow mode will record it without executing it.",
+          "In shadow mode, never tell the guest that an escalation, host request, refund, cancellation, payment, access change, or reservation change was sent, completed, approved, or executed unless the tool result explicitly says executed=true.",
+          "If escalate_to_host returns executed=false, describe it only as something that would be escalated or requires host review.",
           "Keep resolved issues resolved and do not repeat exhausted troubleshooting.",
           "Reply naturally in the guest's current language.",
         ].join(" "),
