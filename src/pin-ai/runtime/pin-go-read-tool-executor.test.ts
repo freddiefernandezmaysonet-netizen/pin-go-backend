@@ -17,6 +17,38 @@ const request: PinAIRuntimeRequest = {
   conversation: [{ role: "guest", content: "What is my access status?" }],
 };
 
+const cancellationPolicySnapshot = {
+  policyId: "policy-a",
+  name: "Moderate",
+  type: "MODERATE",
+  source: "PROPERTY_POLICY",
+  guestSelfCancellationEnabled: true,
+  autoRefundEligibleCancellations: true,
+  requireHostApprovalOutsidePolicy: true,
+  freeCancellationHoursBeforeCheckIn: 336,
+  refundBasis: "NIGHTLY_SUBTOTAL",
+  refundPercentBeforeDeadline: 100,
+  refundPercentAfterDeadline: 0,
+  refundRules: [
+    {
+      minHoursBeforeCheckIn: 336,
+      refundPercent: 100,
+      label: "Full refund",
+      description: "At least 14 days before check-in.",
+    },
+  ],
+  nonRefundableScenarios: ["EARLY_DEPARTURE", "DELAYED_ARRIVAL"],
+  guestFacingSummary: "Full refund at least 14 days before check-in.",
+  cleaningFeeRefundable: false,
+  amenitiesRefundable: false,
+  taxesRefundable: true,
+  nonRefundableDiscountPercent: null,
+  description: "Moderate cancellation terms.",
+  snapshotAt: "2026-08-01T12:00:00.000Z",
+  guestAcceptedCancellationTerms: true,
+  guestAcceptedCancellationTermsText: "private acceptance evidence",
+};
+
 function createPrismaFixture(options: Readonly<{
   reservationConflict?: Readonly<{
     checkIn: Date;
@@ -27,6 +59,7 @@ function createPrismaFixture(options: Readonly<{
   maximumNights?: number | null;
   modificationHold?: boolean;
   blockedDate?: boolean;
+  cancellationPolicySnapshot?: unknown;
 }> = {}) {
   return {
     property: {
@@ -85,7 +118,16 @@ function createPrismaFixture(options: Readonly<{
           guestAccessEligibleAt: new Date("2026-09-20T18:00:00.000Z"),
           guestAccessReleasedAt: new Date("2026-09-20T18:01:00.000Z"),
           guestAccessModeSnapshot: "PASSCODE_ONLY",
-          cancellationPolicySnapshot: { version: "v1" },
+          cancellationPolicySnapshot:
+            "cancellationPolicySnapshot" in options
+              ? options.cancellationPolicySnapshot
+              : { version: "v1" },
+          pricingBreakdown: {
+            nightlySubtotal: 300,
+            cleaningFee: 50,
+            amenitiesTotal: 25,
+            taxesTotal: 25,
+          },
           cancelledAt: null,
           property: {
             organizationId: "org-a",
@@ -580,4 +622,139 @@ test("date change presents a lower estimate as potential reduction, never a refu
   assert.equal(result.refundExecuted, false);
   assert.equal(result.chargeExecuted, false);
   assert.equal(result.reservationChanged, false);
+});
+
+test("cancellation policy evaluates the reservation snapshot without executing cancellation or refund", async () => {
+  let evaluationInput: Record<string, unknown> | null = null;
+  const executor = new PinGoRuntimeReadToolExecutor(
+    createPrismaFixture({ cancellationPolicySnapshot }),
+    undefined,
+    async (input) => {
+      evaluationInput = input;
+      return {
+        requestedAt: "2026-09-20T16:00:00.000Z",
+        checkIn: "2026-09-20T20:00:00.000Z",
+        freeCancellationDeadline: "2026-09-06T20:00:00.000Z",
+        hoursBeforeCheckIn: 4,
+        beforeDeadline: false,
+        refundPercent: 0,
+        refundAmount: 0,
+        refundAmountCents: 0,
+        usesTieredRules: true,
+        matchedRefundRule: null,
+        eligibleForGuestSelfCancellation: false,
+        eligibleForAutoRefund: false,
+        requiresHostApproval: true,
+        reason: "CANCELLATION_REQUIRES_HOST_APPROVAL",
+        breakdown: {
+          refundableBase: 300,
+          refundableBaseCents: 30000,
+        },
+      };
+    },
+  );
+
+  const result = await executor.execute(
+    "get_cancellation_policy",
+    {},
+    request,
+    createConversationMemory(request),
+  );
+
+  assert.deepEqual(evaluationInput, {
+    snapshot: {
+      policyId: "policy-a",
+      name: "Moderate",
+      type: "MODERATE",
+      source: "PROPERTY_POLICY",
+      guestSelfCancellationEnabled: true,
+      autoRefundEligibleCancellations: true,
+      requireHostApprovalOutsidePolicy: true,
+      freeCancellationHoursBeforeCheckIn: 336,
+      refundBasis: "NIGHTLY_SUBTOTAL",
+      refundPercentBeforeDeadline: 100,
+      refundPercentAfterDeadline: 0,
+      refundRules: cancellationPolicySnapshot.refundRules,
+      nonRefundableScenarios: cancellationPolicySnapshot.nonRefundableScenarios,
+      guestFacingSummary: cancellationPolicySnapshot.guestFacingSummary,
+      cleaningFeeRefundable: false,
+      amenitiesRefundable: false,
+      taxesRefundable: true,
+      nonRefundableDiscountPercent: null,
+      description: cancellationPolicySnapshot.description,
+      snapshotAt: cancellationPolicySnapshot.snapshotAt,
+    },
+    checkIn: new Date("2026-09-20T20:00:00.000Z"),
+    totalAmount: 400,
+    pricingBreakdown: {
+      nightlySubtotal: 300,
+      cleaningFee: 50,
+      amenitiesTotal: 25,
+      taxesTotal: 25,
+    },
+    requestedAt: new Date("2026-09-20T16:00:00.000Z"),
+    actor: "GUEST",
+  });
+  assert.equal(result.decision, "CANCELLATION_POLICY_EVALUATED");
+  assert.equal(result.authorizationGranted, false);
+  assert.equal(result.requiresHumanReview, true);
+  assert.equal(result.cancellationExecuted, false);
+  assert.equal(result.refundExecuted, false);
+  assert.equal(result.chargeExecuted, false);
+  assert.equal(
+    (result.evaluation as Record<string, unknown>).estimatedRefundAmount,
+    0,
+  );
+  const serialized = JSON.stringify(result);
+  assert.doesNotMatch(serialized, /private acceptance evidence/);
+  assert.doesNotMatch(serialized, /guestAcceptedCancellationTerms/);
+});
+
+test("cancellation policy uses the canonical engine for its read-only estimate", async () => {
+  const executor = new PinGoRuntimeReadToolExecutor(
+    createPrismaFixture({ cancellationPolicySnapshot }),
+  );
+
+  const result = await executor.execute(
+    "get_cancellation_policy",
+    {},
+    request,
+    createConversationMemory(request),
+  );
+  const evaluation = result.evaluation as Record<string, unknown>;
+
+  assert.equal(result.decision, "CANCELLATION_POLICY_EVALUATED");
+  assert.equal(evaluation.refundPercent, 0);
+  assert.equal(evaluation.estimatedRefundAmount, 0);
+  assert.equal(evaluation.refundableBase, 300);
+  assert.equal(evaluation.requiresHostApproval, true);
+  assert.equal(result.authorizationGranted, false);
+  assert.equal(result.cancellationExecuted, false);
+  assert.equal(result.refundExecuted, false);
+});
+
+test("cancellation policy fails closed when the reservation snapshot is missing or invalid", async () => {
+  let evaluationExecutions = 0;
+  const executor = new PinGoRuntimeReadToolExecutor(
+    createPrismaFixture({ cancellationPolicySnapshot: null }),
+    undefined,
+    async () => {
+      evaluationExecutions += 1;
+      throw new Error("EVALUATION_SHOULD_NOT_EXECUTE");
+    },
+  );
+
+  const result = await executor.execute(
+    "get_cancellation_policy",
+    {},
+    request,
+    createConversationMemory(request),
+  );
+
+  assert.equal(result.decision, "CANCELLATION_POLICY_SNAPSHOT_UNAVAILABLE");
+  assert.equal(result.authorizationGranted, false);
+  assert.equal(result.requiresHumanReview, true);
+  assert.equal(result.cancellationExecuted, false);
+  assert.equal(result.refundExecuted, false);
+  assert.equal(evaluationExecutions, 0);
 });

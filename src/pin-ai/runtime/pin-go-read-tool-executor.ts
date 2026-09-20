@@ -54,6 +54,31 @@ type RuntimePricingCalculator = (input: Readonly<{
   }>[];
 }>>;
 
+type RuntimeCancellationPolicyEvaluator = (input: Readonly<{
+  snapshot: Readonly<Record<string, unknown>>;
+  checkIn: Date;
+  totalAmount: unknown;
+  pricingBreakdown?: unknown;
+  requestedAt: Date;
+  actor: "GUEST";
+}>) => Promise<Readonly<{
+  requestedAt: unknown;
+  checkIn: unknown;
+  freeCancellationDeadline: unknown;
+  hoursBeforeCheckIn: unknown;
+  beforeDeadline: unknown;
+  refundPercent: unknown;
+  refundAmount: unknown;
+  refundAmountCents: unknown;
+  usesTieredRules: unknown;
+  matchedRefundRule: unknown;
+  eligibleForGuestSelfCancellation: unknown;
+  eligibleForAutoRefund: unknown;
+  requiresHostApproval: unknown;
+  reason: unknown;
+  breakdown: Readonly<Record<string, unknown>>;
+}>>;
+
 export class PinGoRuntimeReadToolExecutor implements PinAIRuntimeToolExecutor {
   private readonly eligibility: PinGoRuntimeEligibilityChecks;
 
@@ -61,6 +86,8 @@ export class PinGoRuntimeReadToolExecutor implements PinAIRuntimeToolExecutor {
     private readonly prisma: RuntimeReadPrisma,
     private readonly calculatePricing: RuntimePricingCalculator =
       calculateRuntimeExtensionPricing,
+    private readonly evaluateCancellationPolicy: RuntimeCancellationPolicyEvaluator =
+      evaluateRuntimeCancellationPolicy,
   ) {
     this.eligibility = new PinGoRuntimeEligibilityChecks(prisma);
   }
@@ -90,9 +117,122 @@ export class PinGoRuntimeReadToolExecutor implements PinAIRuntimeToolExecutor {
         return this.calculateExtensionPrice(request, args);
       case "check_date_change":
         return this.checkDateChange(request, args);
+      case "get_cancellation_policy":
+        return this.getCancellationPolicy(request);
       default:
         throw new Error(`PIN_AI_RUNTIME_READ_TOOL_NOT_IMPLEMENTED:${tool}`);
     }
+  }
+
+  private async getCancellationPolicy(
+    request: PinAIRuntimeRequest,
+  ): Promise<Readonly<Record<string, unknown>>> {
+    const reservation = await this.prisma.reservation.findFirst({
+      where: {
+        id: request.context.reservationId,
+        propertyId: request.context.propertyId,
+        property: {
+          organizationId: request.context.organizationId,
+        },
+      },
+      select: {
+        id: true,
+        status: true,
+        checkIn: true,
+        totalAmount: true,
+        currency: true,
+        pricingBreakdown: true,
+        cancellationPolicySnapshot: true,
+      },
+    });
+
+    if (!reservation) {
+      throw new Error("PIN_AI_RUNTIME_RESERVATION_NOT_FOUND_OR_OUT_OF_SCOPE");
+    }
+
+    const snapshot = parseCancellationPolicySnapshot(
+      reservation.cancellationPolicySnapshot,
+    );
+    if (!snapshot) {
+      return {
+        decision: "CANCELLATION_POLICY_SNAPSHOT_UNAVAILABLE",
+        authorizationGranted: false,
+        requiresHumanReview: true,
+        cancellationExecuted: false,
+        refundExecuted: false,
+        chargeExecuted: false,
+        note:
+          "The reservation-specific cancellation policy snapshot is missing or invalid. Runtime V1 will not substitute the property's current policy.",
+      };
+    }
+
+    const requestedAt = new Date(request.context.currentLocalDateTime);
+    if (Number.isNaN(requestedAt.getTime())) {
+      return {
+        decision: "CANCELLATION_POLICY_EVALUATION_TIME_INVALID",
+        authorizationGranted: false,
+        requiresHumanReview: true,
+        cancellationExecuted: false,
+        refundExecuted: false,
+        chargeExecuted: false,
+      };
+    }
+
+    const evaluation = await this.evaluateCancellationPolicy({
+      snapshot,
+      checkIn: reservation.checkIn,
+      totalAmount: reservation.totalAmount,
+      pricingBreakdown: reservation.pricingBreakdown,
+      requestedAt,
+      actor: "GUEST",
+    });
+    const refundAmount = toMoney(evaluation.refundAmount);
+    const refundAmountCents = Number(evaluation.refundAmountCents);
+    const refundPercent = Number(evaluation.refundPercent);
+    if (
+      refundAmount === null ||
+      !Number.isInteger(refundAmountCents) ||
+      refundAmountCents < 0 ||
+      !Number.isFinite(refundPercent) ||
+      refundPercent < 0 ||
+      refundPercent > 100
+    ) {
+      throw new Error("PIN_AI_RUNTIME_CANCELLATION_POLICY_EVALUATION_INVALID");
+    }
+
+    return {
+      decision: "CANCELLATION_POLICY_EVALUATED",
+      authorizationGranted: false,
+      requiresHumanReview: evaluation.requiresHostApproval === true,
+      reservationStatus: reservation.status,
+      currency: String(reservation.currency ?? "usd").toLowerCase(),
+      policy: serializeCancellationPolicySnapshot(snapshot),
+      evaluation: {
+        requestedAt: evaluation.requestedAt,
+        checkIn: evaluation.checkIn,
+        freeCancellationDeadline: evaluation.freeCancellationDeadline,
+        hoursBeforeCheckIn: evaluation.hoursBeforeCheckIn,
+        beforeDeadline: evaluation.beforeDeadline,
+        refundPercent,
+        estimatedRefundAmount: refundAmount,
+        estimatedRefundAmountCents: refundAmountCents,
+        estimateOnly: true,
+        usesTieredRules: evaluation.usesTieredRules,
+        matchedRefundRule: evaluation.matchedRefundRule,
+        eligibleForGuestSelfCancellation:
+          evaluation.eligibleForGuestSelfCancellation,
+        eligibleForAutoRefund: evaluation.eligibleForAutoRefund,
+        requiresHostApproval: evaluation.requiresHostApproval,
+        reason: evaluation.reason,
+        refundableBase: toMoney(evaluation.breakdown.refundableBase),
+        refundableBaseCents: evaluation.breakdown.refundableBaseCents,
+      },
+      cancellationExecuted: false,
+      refundExecuted: false,
+      chargeExecuted: false,
+      note:
+        "Read-only reservation policy evaluation only. No cancellation, refund, charge, approval, or reservation change was executed.",
+    };
   }
 
   private async checkDateChange(
@@ -755,6 +895,190 @@ function dateChangeDenied(
   };
 }
 
+const CANCELLATION_POLICY_TYPES = new Set([
+  "FLEXIBLE",
+  "MODERATE",
+  "FIRM",
+  "STRICT",
+  "CUSTOM",
+  "NON_REFUNDABLE",
+]);
+const CANCELLATION_REFUND_BASES = new Set([
+  "TOTAL_AMOUNT",
+  "NIGHTLY_SUBTOTAL",
+  "NIGHTLY_PLUS_CLEANING",
+  "CUSTOM",
+]);
+const CANCELLATION_NON_REFUNDABLE_SCENARIOS = new Set([
+  "EARLY_DEPARTURE",
+  "DELAYED_ARRIVAL",
+  "REDUCED_NIGHTS",
+  "WEATHER_RE_SCHEDULE",
+  "OTHER",
+]);
+
+function parseCancellationPolicySnapshot(
+  value: unknown,
+): Readonly<Record<string, unknown>> | null {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return null;
+  const snapshot = value as Readonly<Record<string, unknown>>;
+  const type = String(snapshot.type ?? "");
+  const refundBasis = String(snapshot.refundBasis ?? "");
+  const refundRules = Array.isArray(snapshot.refundRules)
+    ? snapshot.refundRules.map(parseCancellationRefundRule)
+    : [];
+  const nonRefundableScenarios = Array.isArray(
+    snapshot.nonRefundableScenarios,
+  )
+    ? snapshot.nonRefundableScenarios.map(String)
+    : [];
+  const booleanKeys = [
+    "guestSelfCancellationEnabled",
+    "autoRefundEligibleCancellations",
+    "requireHostApprovalOutsidePolicy",
+    "cleaningFeeRefundable",
+    "amenitiesRefundable",
+    "taxesRefundable",
+  ] as const;
+  const numericKeys = [
+    "freeCancellationHoursBeforeCheckIn",
+    "refundPercentBeforeDeadline",
+    "refundPercentAfterDeadline",
+  ] as const;
+
+  if (
+    typeof snapshot.name !== "string" ||
+    !snapshot.name.trim() ||
+    typeof snapshot.source !== "string" ||
+    !CANCELLATION_POLICY_TYPES.has(type) ||
+    !CANCELLATION_REFUND_BASES.has(refundBasis) ||
+    !Array.isArray(snapshot.refundRules) ||
+    refundRules.some((rule) => rule === null) ||
+    !Array.isArray(snapshot.nonRefundableScenarios) ||
+    nonRefundableScenarios.some(
+      (scenario) => !CANCELLATION_NON_REFUNDABLE_SCENARIOS.has(scenario),
+    ) ||
+    booleanKeys.some((key) => typeof snapshot[key] !== "boolean") ||
+    numericKeys.some((key) => !Number.isFinite(Number(snapshot[key]))) ||
+    typeof snapshot.snapshotAt !== "string" ||
+    Number.isNaN(Date.parse(snapshot.snapshotAt)) ||
+    (snapshot.nonRefundableDiscountPercent != null &&
+      (!Number.isFinite(Number(snapshot.nonRefundableDiscountPercent)) ||
+        Number(snapshot.nonRefundableDiscountPercent) < 0 ||
+        Number(snapshot.nonRefundableDiscountPercent) > 100))
+  ) {
+    return null;
+  }
+
+  const normalizedRules = refundRules.filter(
+    (rule): rule is Readonly<Record<string, unknown>> => rule !== null,
+  );
+  if (
+    normalizedRules.some(
+      (rule) =>
+        Number(rule.minHoursBeforeCheckIn) < 0 ||
+        Number(rule.refundPercent) < 0 ||
+        Number(rule.refundPercent) > 100,
+    ) ||
+    numericKeys.some((key) => Number(snapshot[key]) < 0) ||
+    Number(snapshot.refundPercentBeforeDeadline) > 100 ||
+    Number(snapshot.refundPercentAfterDeadline) > 100
+  ) {
+    return null;
+  }
+
+  return {
+    policyId:
+      typeof snapshot.policyId === "string" ? snapshot.policyId : null,
+    name: snapshot.name.trim(),
+    type,
+    source: snapshot.source,
+    guestSelfCancellationEnabled: snapshot.guestSelfCancellationEnabled,
+    autoRefundEligibleCancellations:
+      snapshot.autoRefundEligibleCancellations,
+    requireHostApprovalOutsidePolicy:
+      snapshot.requireHostApprovalOutsidePolicy,
+    freeCancellationHoursBeforeCheckIn: Number(
+      snapshot.freeCancellationHoursBeforeCheckIn,
+    ),
+    refundBasis,
+    refundPercentBeforeDeadline: Number(
+      snapshot.refundPercentBeforeDeadline,
+    ),
+    refundPercentAfterDeadline: Number(snapshot.refundPercentAfterDeadline),
+    refundRules: normalizedRules,
+    nonRefundableScenarios,
+    guestFacingSummary:
+      typeof snapshot.guestFacingSummary === "string"
+        ? snapshot.guestFacingSummary
+        : null,
+    cleaningFeeRefundable: snapshot.cleaningFeeRefundable,
+    amenitiesRefundable: snapshot.amenitiesRefundable,
+    taxesRefundable: snapshot.taxesRefundable,
+    nonRefundableDiscountPercent:
+      snapshot.nonRefundableDiscountPercent == null
+        ? null
+        : Number(snapshot.nonRefundableDiscountPercent),
+    description:
+      typeof snapshot.description === "string" ? snapshot.description : null,
+    snapshotAt: snapshot.snapshotAt,
+  };
+}
+
+function parseCancellationRefundRule(
+  value: unknown,
+): Readonly<Record<string, unknown>> | null {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return null;
+  const rule = value as Readonly<Record<string, unknown>>;
+  const minHoursBeforeCheckIn = Number(rule.minHoursBeforeCheckIn);
+  const refundPercent = Number(rule.refundPercent);
+  if (
+    !Number.isFinite(minHoursBeforeCheckIn) ||
+    !Number.isFinite(refundPercent)
+  ) {
+    return null;
+  }
+  return {
+    minHoursBeforeCheckIn,
+    refundPercent,
+    label:
+      typeof rule.label === "string" && rule.label.trim()
+        ? rule.label.trim()
+        : `${refundPercent}% refund`,
+    description:
+      typeof rule.description === "string" ? rule.description : null,
+  };
+}
+
+function serializeCancellationPolicySnapshot(
+  snapshot: Readonly<Record<string, unknown>>,
+): Readonly<Record<string, unknown>> {
+  return {
+    name: snapshot.name,
+    type: snapshot.type,
+    source: snapshot.source,
+    snapshotAt: snapshot.snapshotAt,
+    guestSelfCancellationEnabled: snapshot.guestSelfCancellationEnabled,
+    autoRefundEligibleCancellations:
+      snapshot.autoRefundEligibleCancellations,
+    requireHostApprovalOutsidePolicy:
+      snapshot.requireHostApprovalOutsidePolicy,
+    freeCancellationHoursBeforeCheckIn:
+      snapshot.freeCancellationHoursBeforeCheckIn,
+    refundBasis: snapshot.refundBasis,
+    refundPercentBeforeDeadline: snapshot.refundPercentBeforeDeadline,
+    refundPercentAfterDeadline: snapshot.refundPercentAfterDeadline,
+    refundRules: snapshot.refundRules,
+    nonRefundableScenarios: snapshot.nonRefundableScenarios,
+    guestFacingSummary: snapshot.guestFacingSummary,
+    cleaningFeeRefundable: snapshot.cleaningFeeRefundable,
+    amenitiesRefundable: snapshot.amenitiesRefundable,
+    taxesRefundable: snapshot.taxesRefundable,
+    nonRefundableDiscountPercent: snapshot.nonRefundableDiscountPercent,
+    description: snapshot.description,
+  };
+}
+
 async function calculateRuntimeExtensionPricing(
   input: Parameters<RuntimePricingCalculator>[0],
 ): ReturnType<RuntimePricingCalculator> {
@@ -771,4 +1095,22 @@ async function calculateRuntimeExtensionPricing(
   }
 
   return pricingModule.calculateDirectBookingPricing(input);
+}
+
+async function evaluateRuntimeCancellationPolicy(
+  input: Parameters<RuntimeCancellationPolicyEvaluator>[0],
+): ReturnType<RuntimeCancellationPolicyEvaluator> {
+  const moduleUrl = new URL(
+    "../../services/cancellation-policy.service.js",
+    import.meta.url,
+  ).href;
+  const policyModule = (await import(moduleUrl)) as Readonly<{
+    evaluateCancellationPolicy?: RuntimeCancellationPolicyEvaluator;
+  }>;
+
+  if (typeof policyModule.evaluateCancellationPolicy !== "function") {
+    throw new Error("PIN_AI_RUNTIME_CANCELLATION_POLICY_ENGINE_UNAVAILABLE");
+  }
+
+  return policyModule.evaluateCancellationPolicy(input);
 }

@@ -192,7 +192,8 @@ export const PIN_AI_RUNTIME_TOOLS: readonly PinAIRuntimeToolDefinition[] = [
   {
     name: "get_cancellation_policy",
     authority: "READ_DYNAMIC",
-    description: "Read the reservation-applicable cancellation policy.",
+    description:
+      "Read the reservation-specific cancellation policy snapshot and calculate the current estimated consequences. This does not cancel the reservation, approve an exception, or execute a refund.",
   },
   {
     name: "get_payment_context",
