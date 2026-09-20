@@ -15,3 +15,4 @@ One controlled Luna native web-search canary after Runtime V1 Run #84.
 Restore the stable eligibility canary after the web-search staging context precondition failed.
 One final controlled Luna native web-search canary after the location fallback passed Runtime V1 Run #86.
 Execute the authorized native web-search canary after correcting the Railway command restoration sequence.
+Restore the stable eligibility canary after staging property location data was unavailable.
