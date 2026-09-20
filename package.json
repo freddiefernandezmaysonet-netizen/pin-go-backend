@@ -139,6 +139,7 @@
     "pin-ai:runtime:date-change-luna-canary": "node --import tsx src/pin-ai/runtime/runtime-date-change-canary-luna.ts",
     "pin-ai:runtime:cancellation-policy-canary": "node --import tsx src/pin-ai/runtime/runtime-cancellation-policy-canary.ts",
     "pin-ai:runtime:cancellation-policy-luna-canary": "node --import tsx src/pin-ai/runtime/runtime-cancellation-policy-canary-luna.ts",
+    "pin-ai:runtime:payment-context-canary": "node --import tsx src/pin-ai/runtime/runtime-payment-context-canary.ts",
     "test:pin-ai-runtime": "node --import tsx --test src/pin-ai/runtime/policy.test.ts src/pin-ai/runtime/runtime-core.test.ts src/pin-ai/runtime/shadow-orchestrator.test.ts src/pin-ai/runtime/luna-runtime-adapter.test.ts src/pin-ai/runtime/pin-go-read-tool-executor.test.ts src/pin-ai/runtime/pin-go-eligibility-checks.test.ts",
     "test:pin-ai-benchmark": "node --import tsx --test src/pin-ai/benchmark/benchmark-contract.test.ts src/pin-ai/benchmark/model-evaluation-runner.test.ts src/pin-ai/benchmark/openai-agents-benchmark-adapter.test.ts src/pin-ai/benchmark/openai-agents-benchmark-transport.test.ts src/pin-ai/benchmark/openai-benchmark-usage-reconciler.test.ts src/pin-ai/benchmark/property-knowledge-contract.test.ts src/pin-ai/property-knowledge.service.test.ts src/pin-ai/benchmark/property-knowledge-benchmark-tool-executor.test.ts src/pin-ai/benchmark/benchmark-batch-plan.test.ts",
     "pin-ai:benchmark:canary": "node --import tsx src/pin-ai/benchmark/canary-001-luna.ts",
