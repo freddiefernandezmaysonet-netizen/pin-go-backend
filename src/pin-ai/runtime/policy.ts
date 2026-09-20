@@ -107,6 +107,16 @@ function assertNoFalseCompletionClaims(response: PinAIRuntimeResponse): void {
     /\b(?:el|tu|su) (?:pago|cargo) (?:fue|ha sido|se ha) (?:procesado|completado|realizado|cobrado)\b/,
     /\b(?:the|your) (?:extension )?price (?:is|was|has been) (?:final|confirmed|locked in)\b/,
     /\b(?:el|tu|su) precio (?:de extension )?(?:es|fue|ha sido) (?:final|confirmado)\b/,
+    /\b(?:your|the) (?:reservation|stay) (?:is|was|has been) (?:cancelled|canceled)\b/,
+    /\b(?:your|the) cancellation (?:is|was|has been) (?:confirmed|completed|processed)\b/,
+    /\bi(?:'|’)ve (?:issued|processed|sent) (?:a|the|your) refund\b/,
+    /\bi have (?:issued|processed|sent) (?:a|the|your) refund\b/,
+    /\b(?:your|the) refund (?:was|has been|is) (?:issued|processed|sent|approved|completed|guaranteed)\b/,
+    /\byou will receive (?:a|the|your|an?) (?:full |partial )?refund\b/,
+    /\b(?:la|tu|su) (?:reservacion|reserva|estadia) (?:esta|fue|ha sido) cancelada\b/,
+    /\b(?:tu|su|el) reembolso (?:fue|ha sido|esta) (?:emitido|procesado|enviado|aprobado|completado|garantizado)\b/,
+    /\b(?:he|hemos) (?:emitido|procesado|enviado) (?:un|el|tu|su) reembolso\b/,
+    /\brecibira(?:s)? (?:un|el|tu|su) reembolso\b/,
   ];
 
   if (

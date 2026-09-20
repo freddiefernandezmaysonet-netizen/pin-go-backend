@@ -69,6 +69,7 @@ export const PIN_AI_RUNTIME_ENABLED_TOOL_NAMES = [
   "check_extension_availability",
   "calculate_extension_price",
   "check_date_change",
+  "get_cancellation_policy",
   "escalate_to_host",
 ] as const satisfies readonly PinAIRuntimeToolName[];
 

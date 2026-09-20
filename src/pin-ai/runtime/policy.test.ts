@@ -40,7 +40,6 @@ test("runtime permits bounded read and escalation tools", () => {
 
 test("runtime rejects every conceptually declared but disabled tool", () => {
   for (const tool of [
-    "get_cancellation_policy",
     "get_payment_context",
     "search_local_places",
   ] as const) {
@@ -211,6 +210,31 @@ test("runtime rejects false charge or final-price claims after extension pricing
   }
 });
 
+test("runtime rejects false cancellation and refund completion claims", () => {
+  for (const responseText of [
+    "Your reservation has been cancelled.",
+    "Your cancellation is confirmed.",
+    "I've issued your refund.",
+    "Your refund has been processed.",
+    "You will receive a full refund.",
+    "Su reservación ha sido cancelada.",
+    "Su reembolso ha sido procesado.",
+    "He emitido su reembolso.",
+    "Recibirá un reembolso.",
+  ]) {
+    assert.throws(
+      () =>
+        assertRuntimeResponseSafe({
+          responseText,
+          toolCalls: [{ name: "get_cancellation_policy", arguments: {} }],
+          escalationCreated: false,
+          requiresHumanReview: false,
+        }),
+      /PIN_AI_RUNTIME_FALSE_COMPLETION_CLAIM/,
+    );
+  }
+});
+
 test("runtime allows conditional language when shadow escalation is not executed", () => {
   for (const responseText of [
     "This would be escalated to the host for review before any change is approved.",
@@ -220,6 +244,8 @@ test("runtime allows conditional language when shadow escalation is not executed
     "No reservation changes or charges have been made.",
     "The estimated additional cost is $100; no charge or reservation change has been made.",
     "El costo adicional estimado es $100; no se realizó ningún cargo ni cambio de reserva.",
+    "If you cancel now, the estimated refund would be $100; no cancellation or refund has been executed.",
+    "Si cancela ahora, el reembolso estimado sería $100; no se ha cancelado la reserva ni emitido un reembolso.",
   ]) {
     assert.doesNotThrow(() =>
       assertRuntimeResponseSafe({

@@ -155,6 +155,40 @@ test("guarded executor permits read-only date-change previews", async () => {
   assert.equal(result.guestId, "guest-a");
 });
 
+test("guarded executor permits read-only cancellation policy evaluation", async () => {
+  let delegateExecutions = 0;
+  const delegate: PinAIRuntimeToolExecutor = {
+    async execute(tool, args) {
+      delegateExecutions += 1;
+      assert.equal(tool, "get_cancellation_policy");
+      assert.deepEqual(args, {});
+      return {
+        decision: "CANCELLATION_POLICY_EVALUATED",
+        authorizationGranted: false,
+        cancellationExecuted: false,
+        refundExecuted: false,
+      };
+    },
+  };
+
+  const executor = new GuardedPinAIRuntimeToolExecutor(delegate);
+  const result = await executor.execute(
+    "get_cancellation_policy",
+    {},
+    request,
+    createConversationMemory(request),
+  );
+
+  assert.equal(delegateExecutions, 1);
+  assert.equal(result.authorizationGranted, false);
+  assert.equal(result.cancellationExecuted, false);
+  assert.equal(result.refundExecuted, false);
+  assert.equal(result.organizationId, "org-a");
+  assert.equal(result.propertyId, "property-a");
+  assert.equal(result.reservationId, "reservation-a");
+  assert.equal(result.guestId, "guest-a");
+});
+
 test("guarded executor rejects disabled tools before delegation", async () => {
   let delegateExecutions = 0;
   const delegate: PinAIRuntimeToolExecutor = {
@@ -168,7 +202,6 @@ test("guarded executor rejects disabled tools before delegation", async () => {
   const memory = createConversationMemory(request);
 
   for (const tool of [
-    "get_cancellation_policy",
     "get_payment_context",
     "search_local_places",
   ] as const) {
