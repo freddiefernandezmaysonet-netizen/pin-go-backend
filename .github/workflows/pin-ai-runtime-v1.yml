@@ -44,4 +44,7 @@ jobs:
             --types node \
             src/pin-ai/runtime/contracts.ts \
             src/pin-ai/runtime/policy.ts \
-            src/pin-ai/runtime/policy.test.ts
+            src/pin-ai/runtime/policy.test.ts \
+            src/pin-ai/runtime/conversation-memory.ts \
+            src/pin-ai/runtime/tool-executor.ts \
+            src/pin-ai/runtime/runtime-core.test.ts
