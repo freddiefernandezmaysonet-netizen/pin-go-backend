@@ -1,0 +1,1 @@
+Trigger one controlled source deployment for Pin AI Scenario 020 Luna canary.
