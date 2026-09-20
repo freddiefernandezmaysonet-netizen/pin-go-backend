@@ -44,6 +44,7 @@ const MOCK_FUNCTION_TOOLS: readonly AgentsApiFunctionTool[] = [
   "check_date_change",
   "get_cancellation_policy",
   "get_payment_context",
+  "search_local_places",
   "escalate_to_host",
 ].map((name) => ({
   type: "function" as const,
@@ -53,7 +54,9 @@ const MOCK_FUNCTION_TOOLS: readonly AgentsApiFunctionTool[] = [
       ? "Read stable, guest-facing facts about this benchmark property such as arrival details, amenities, lock location, house rules, and other property knowledge. Do not use it for live credentials or dynamic operational authorization."
       : name === "get_access_status"
         ? "Read the dynamic access state for this benchmark reservation, including whether access is active and whether a replacement credential is authorized."
-        : `Benchmark-only mock function: ${name}`,
+        : name === "search_local_places"
+          ? "Search current nearby places for the benchmark property. Use this for restaurants, pharmacies, attractions, stores, and other local recommendations instead of inventing businesses from model memory."
+          : `Benchmark-only mock function: ${name}`,
   parameters: {
     type: "object",
     properties: {},
