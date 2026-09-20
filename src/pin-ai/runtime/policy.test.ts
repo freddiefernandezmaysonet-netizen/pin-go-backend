@@ -71,3 +71,39 @@ test("runtime forbids direct irreversible actions", () => {
     );
   }
 });
+
+
+test("runtime rejects false completion claims for shadow escalation", () => {
+  assert.throws(
+    () =>
+      assertRuntimeResponseSafe({
+        responseText: "I've sent the request to the host.",
+        toolCalls: [
+          {
+            name: "escalate_to_host",
+            arguments: {},
+          },
+        ],
+        escalationCreated: false,
+        requiresHumanReview: true,
+      }),
+    /PIN_AI_RUNTIME_FALSE_COMPLETION_CLAIM/,
+  );
+});
+
+test("runtime allows conditional language when shadow escalation is not executed", () => {
+  assert.doesNotThrow(() =>
+    assertRuntimeResponseSafe({
+      responseText:
+        "This would be escalated to the host for review before any change is approved.",
+      toolCalls: [
+        {
+          name: "escalate_to_host",
+          arguments: {},
+        },
+      ],
+      escalationCreated: false,
+      requiresHumanReview: true,
+    }),
+  );
+});
