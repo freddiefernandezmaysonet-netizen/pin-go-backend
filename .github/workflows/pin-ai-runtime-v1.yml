@@ -54,4 +54,7 @@ jobs:
             src/pin-ai/runtime/openai-agents-runtime-transport.ts \
             src/pin-ai/runtime/luna-runtime-adapter.ts \
             src/pin-ai/runtime/luna-runtime-adapter.test.ts \
-            src/pin-ai/runtime/runtime-shadow-canary-luna.ts
+            src/pin-ai/runtime/runtime-shadow-canary-luna.ts \
+            src/pin-ai/runtime/pin-go-read-tool-executor.ts \
+            src/pin-ai/runtime/pin-go-runtime-tools.ts \
+            src/pin-ai/runtime/pin-go-read-tool-executor.test.ts
