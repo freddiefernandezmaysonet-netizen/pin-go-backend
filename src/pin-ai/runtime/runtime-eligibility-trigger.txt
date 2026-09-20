@@ -3,3 +3,4 @@ Verification rerun after truthful shadow-completion guard.
 Verification rerun after Runtime V1 tool allowlist certification.
 One controlled direct read-only extension price canary after Runtime V1 Run #54.
 One controlled Luna eligibility canary after enabling read-only extension pricing in Runtime V1 Run #58.
+One controlled Luna eligibility metadata verification after Runtime V1 Run #60.
