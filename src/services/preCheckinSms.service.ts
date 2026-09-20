@@ -94,10 +94,17 @@ function buildGoogleMapsLink(input: {
     };
   }
 
-  // When coordinates are unavailable, the short address is cheaper than
-  // embedding an encoded Google Maps search URL that repeats the same text.
+  if (address) {
+    return {
+      address,
+      mapsLink: `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(
+        address
+      )}`,
+    };
+  }
+
   return {
-    address,
+    address: null,
     mapsLink: null,
   };
 }
