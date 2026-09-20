@@ -103,6 +103,13 @@ function createPrismaFixture() {
       },
     },
     cleaningConfirmation: {
+      async findFirst() {
+        return {
+          status: "CONFIRMED",
+          createdAt: new Date("2026-09-20T12:00:00.000Z"),
+          updatedAt: new Date("2026-09-20T13:00:00.000Z"),
+        };
+      },
       async findMany() {
         return [
           {
@@ -111,6 +118,16 @@ function createPrismaFixture() {
             updatedAt: new Date("2026-09-20T13:00:00.000Z"),
           },
         ];
+      },
+    },
+    propertyBlockedDate: {
+      async findFirst() {
+        return null;
+      },
+    },
+    reservationModification: {
+      async findFirst() {
+        return null;
       },
     },
   };
@@ -162,16 +179,25 @@ test("real read adapter returns cleaning confirmation state without token or sta
   assert.doesNotMatch(serialized, /token|staffMemberId/);
 });
 
-test("real read adapter fails closed for tools not yet bound to Pin&Go engines", async () => {
+test("real read adapter binds eligibility checks but still fails closed for unimplemented financial tools", async () => {
   const executor = new PinGoRuntimeReadToolExecutor(createPrismaFixture());
+
+  const lateCheckout = await executor.execute(
+    "check_late_checkout",
+    { requestedLocalTime: "13:00" },
+    request,
+    createConversationMemory(request),
+  );
+
+  assert.equal(lateCheckout.authorizationGranted, false);
 
   await assert.rejects(
     executor.execute(
-      "check_late_checkout",
+      "calculate_extension_price",
       {},
       request,
       createConversationMemory(request),
     ),
-    /PIN_AI_RUNTIME_READ_TOOL_NOT_IMPLEMENTED:check_late_checkout/,
+    /PIN_AI_RUNTIME_READ_TOOL_NOT_IMPLEMENTED:calculate_extension_price/,
   );
 });
