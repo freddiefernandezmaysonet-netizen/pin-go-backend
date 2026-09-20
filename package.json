@@ -146,6 +146,7 @@
     "pin-ai:benchmark:canary:012": "node --import tsx src/pin-ai/benchmark/canary-012-luna.ts",
     "pin-ai:benchmark:canary:013": "node --import tsx src/pin-ai/benchmark/canary-013-luna.ts",
     "pin-ai:benchmark:canary:014": "node --import tsx src/pin-ai/benchmark/canary-014-luna.ts",
+    "pin-ai:benchmark:canary:015": "node --import tsx src/pin-ai/benchmark/canary-015-luna.ts",
     "pin-ai:benchmark:usage-reconcile": "node --import tsx src/pin-ai/benchmark/reconcile-provider-usage.ts"
   },
   "dependencies": {
