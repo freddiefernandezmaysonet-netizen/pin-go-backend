@@ -206,7 +206,34 @@ export const PIN_AI_RUNTIME_TOOLS: readonly PinAIRuntimeToolDefinition[] = [
   {
     name: "search_local_places",
     authority: "EXTERNAL_READ",
-    description: "Search current nearby places for concierge requests.",
+    description:
+      "Search current Google Places results near the scoped property's stored coordinates. Distances are straight-line estimates; hours, prices, availability, and bookings are not verified or executed.",
+    parameters: {
+      type: "object",
+      properties: {
+        query: {
+          type: "string",
+          minLength: 2,
+          maxLength: 120,
+          description:
+            "Guest's place request, including relevant category or preference such as Puerto Rican food, pharmacy, or parking.",
+        },
+        radiusMeters: {
+          type: "integer",
+          minimum: 500,
+          maximum: 50000,
+          description: "Optional search radius in meters. Defaults to 15000.",
+        },
+        maxResults: {
+          type: "integer",
+          minimum: 1,
+          maximum: 5,
+          description: "Optional result limit. Defaults to 5.",
+        },
+      },
+      required: ["query"],
+      additionalProperties: false,
+    },
   },
   {
     name: "escalate_to_host",

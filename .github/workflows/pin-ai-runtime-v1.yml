@@ -71,4 +71,6 @@ jobs:
             src/pin-ai/runtime/runtime-cancellation-policy-canary.ts \
             src/pin-ai/runtime/runtime-cancellation-policy-canary-luna.ts \
             src/pin-ai/runtime/runtime-payment-context-canary.ts \
-            src/pin-ai/runtime/runtime-payment-context-canary-luna.ts
+            src/pin-ai/runtime/runtime-payment-context-canary-luna.ts \
+            src/pin-ai/runtime/google-places-read-client.ts \
+            src/pin-ai/runtime/google-places-read-client.test.ts

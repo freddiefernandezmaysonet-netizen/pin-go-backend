@@ -66,6 +66,10 @@ function createPrismaFixture(options: Readonly<{
     amountCollected?: number | null;
     amountRefunded?: number | null;
   }>;
+  propertyCoordinates?: Readonly<{
+    latitude: number | null;
+    longitude: number | null;
+  }>;
 }> = {}) {
   const paymentContext = options.paymentContext ?? {};
 
@@ -89,6 +93,12 @@ function createPrismaFixture(options: Readonly<{
           propertyDevices: [],
           guestAgreements: [],
           cancellationPolicies: [],
+          latitude: options.propertyCoordinates
+            ? options.propertyCoordinates.latitude
+            : 18.2,
+          longitude: options.propertyCoordinates
+            ? options.propertyCoordinates.longitude
+            : -66.3,
         };
       },
     },
@@ -855,4 +865,125 @@ test("payment context fails closed on invalid persisted amounts", async () => {
   assert.equal(result.refundExecuted, false);
   assert.equal(result.transferExecuted, false);
   assert.equal(result.payment, undefined);
+});
+
+test("local places search uses scoped property coordinates without exposing them", async () => {
+  let searchInput: Record<string, unknown> | null = null;
+  const executor = new PinGoRuntimeReadToolExecutor(
+    createPrismaFixture(),
+    undefined,
+    undefined,
+    async (input) => {
+      searchInput = input;
+      return {
+        provider: "GOOGLE_PLACES",
+        places: [
+          {
+            name: "Nearby Restaurant",
+            category: "Puerto Rican restaurant",
+            formattedAddress: "Nearby address",
+            googleMapsUri: "https://maps.google.com/?cid=near",
+            businessStatus: "OPERATIONAL",
+            straightLineDistanceMeters: 850,
+            currentOpeningStatus: "NOT_REQUESTED",
+          },
+        ],
+      };
+    },
+  );
+
+  const result = await executor.execute(
+    "search_local_places",
+    { query: "Puerto Rican food", radiusMeters: 5_000, maxResults: 3 },
+    request,
+    createConversationMemory(request),
+  );
+
+  assert.deepEqual(searchInput, {
+    query: "Puerto Rican food",
+    latitude: 18.2,
+    longitude: -66.3,
+    radiusMeters: 5_000,
+    maxResults: 3,
+    languageCode: "en",
+  });
+  assert.equal(result.decision, "LOCAL_PLACES_SEARCH_COMPLETED");
+  assert.equal(result.authorizationGranted, false);
+  assert.equal(result.externalReadPerformed, true);
+  assert.equal(result.currentOpeningHoursVerified, false);
+  assert.equal(result.currentPricesVerified, false);
+  assert.equal(result.bookingExecuted, false);
+  assert.equal(result.actionsExecuted, false);
+  assert.equal((result.places as readonly unknown[]).length, 1);
+  const serialized = JSON.stringify(result);
+  assert.doesNotMatch(serialized, /18\.2|-66\.3|latitude|longitude/);
+});
+
+test("local places search fails closed before provider calls without coordinates or valid bounds", async () => {
+  let providerCalls = 0;
+  const cases = [
+    {
+      prisma: createPrismaFixture({
+        propertyCoordinates: { latitude: null, longitude: null },
+      }),
+      args: { query: "pharmacy" },
+      decision: "PROPERTY_COORDINATES_UNAVAILABLE",
+    },
+    {
+      prisma: createPrismaFixture(),
+      args: { query: "pharmacy", radiusMeters: 100_000 },
+      decision: "INVALID_LOCAL_PLACES_BOUNDS",
+    },
+    {
+      prisma: createPrismaFixture(),
+      args: { query: "x" },
+      decision: "INVALID_LOCAL_PLACES_QUERY",
+    },
+  ];
+
+  for (const input of cases) {
+    const executor = new PinGoRuntimeReadToolExecutor(
+      input.prisma,
+      undefined,
+      undefined,
+      async () => {
+        providerCalls += 1;
+        throw new Error("PROVIDER_SHOULD_NOT_EXECUTE");
+      },
+    );
+    const result = await executor.execute(
+      "search_local_places",
+      input.args,
+      request,
+      createConversationMemory(request),
+    );
+    assert.equal(result.decision, input.decision);
+    assert.equal(result.externalReadPerformed, false);
+    assert.equal(result.actionsExecuted, false);
+  }
+
+  assert.equal(providerCalls, 0);
+});
+
+test("local places search converts provider failures to a safe unavailable result", async () => {
+  const executor = new PinGoRuntimeReadToolExecutor(
+    createPrismaFixture(),
+    undefined,
+    undefined,
+    async () => {
+      throw new Error("PRIVATE_PROVIDER_DIAGNOSTIC");
+    },
+  );
+
+  const result = await executor.execute(
+    "search_local_places",
+    { query: "parking" },
+    request,
+    createConversationMemory(request),
+  );
+
+  assert.equal(result.decision, "LOCAL_PLACES_PROVIDER_UNAVAILABLE");
+  assert.equal(result.externalReadPerformed, false);
+  assert.equal(result.actionsExecuted, false);
+  assert.doesNotMatch(JSON.stringify(result), /PRIVATE_PROVIDER_DIAGNOSTIC/);
 });

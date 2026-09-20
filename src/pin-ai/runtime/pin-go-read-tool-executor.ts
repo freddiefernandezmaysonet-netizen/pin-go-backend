@@ -15,6 +15,11 @@ import type {
   PinAIRuntimeToolExecutor,
 } from "./tool-executor.js";
 import { PinGoRuntimeEligibilityChecks } from "./pin-go-eligibility-checks.js";
+import {
+  searchGooglePlaces,
+  type GooglePlacesSearchInput,
+  type GooglePlacesSearchResult,
+} from "./google-places-read-client.js";
 
 type RuntimeReadPrisma = Readonly<{
   property: Readonly<{
@@ -79,6 +84,10 @@ type RuntimeCancellationPolicyEvaluator = (input: Readonly<{
   breakdown: Readonly<Record<string, unknown>>;
 }>>;
 
+type RuntimeLocalPlacesSearch = (
+  input: GooglePlacesSearchInput,
+) => Promise<GooglePlacesSearchResult>;
+
 export class PinGoRuntimeReadToolExecutor implements PinAIRuntimeToolExecutor {
   private readonly eligibility: PinGoRuntimeEligibilityChecks;
 
@@ -88,6 +97,8 @@ export class PinGoRuntimeReadToolExecutor implements PinAIRuntimeToolExecutor {
       calculateRuntimeExtensionPricing,
     private readonly evaluateCancellationPolicy: RuntimeCancellationPolicyEvaluator =
       evaluateRuntimeCancellationPolicy,
+    private readonly searchLocalPlaces: RuntimeLocalPlacesSearch =
+      searchGooglePlaces,
   ) {
     this.eligibility = new PinGoRuntimeEligibilityChecks(prisma);
   }
@@ -121,8 +132,85 @@ export class PinGoRuntimeReadToolExecutor implements PinAIRuntimeToolExecutor {
         return this.getCancellationPolicy(request);
       case "get_payment_context":
         return this.getPaymentContext(request);
+      case "search_local_places":
+        return this.searchNearbyPlaces(request, args);
       default:
         throw new Error(`PIN_AI_RUNTIME_READ_TOOL_NOT_IMPLEMENTED:${tool}`);
+    }
+  }
+
+  private async searchNearbyPlaces(
+    request: PinAIRuntimeRequest,
+    args: Readonly<Record<string, unknown>>,
+  ): Promise<Readonly<Record<string, unknown>>> {
+    const query = typeof args.query === "string" ? args.query.trim() : "";
+    if (query.length < 2 || query.length > 120 || /[\u0000-\u001f]/.test(query)) {
+      return localPlacesUnavailable("INVALID_LOCAL_PLACES_QUERY");
+    }
+
+    const radiusMeters = integerInRange(args.radiusMeters, 500, 50_000) ?? 15_000;
+    const maxResults = integerInRange(args.maxResults, 1, 5) ?? 5;
+    if (
+      (args.radiusMeters !== undefined &&
+        integerInRange(args.radiusMeters, 500, 50_000) === null) ||
+      (args.maxResults !== undefined &&
+        integerInRange(args.maxResults, 1, 5) === null)
+    ) {
+      return localPlacesUnavailable("INVALID_LOCAL_PLACES_BOUNDS");
+    }
+    const property = await this.prisma.property.findFirst({
+      where: {
+        id: request.context.propertyId,
+        organizationId: request.context.organizationId,
+        status: "ACTIVE",
+      },
+      select: {
+        id: true,
+        latitude: true,
+        longitude: true,
+      },
+    });
+
+    if (!property) {
+      throw new Error("PIN_AI_RUNTIME_PROPERTY_NOT_FOUND_OR_OUT_OF_SCOPE");
+    }
+
+    const latitude = finiteCoordinate(property.latitude, -90, 90);
+    const longitude = finiteCoordinate(property.longitude, -180, 180);
+    if (latitude === null || longitude === null) {
+      return localPlacesUnavailable("PROPERTY_COORDINATES_UNAVAILABLE");
+    }
+
+    try {
+      const result = await this.searchLocalPlaces({
+        query,
+        latitude,
+        longitude,
+        radiusMeters,
+        maxResults,
+        languageCode: request.context.preferredLanguage === "es" ? "es" : "en",
+      });
+
+      return {
+        decision: "LOCAL_PLACES_SEARCH_COMPLETED",
+        authorizationGranted: false,
+        requiresHumanReview: false,
+        query,
+        searchRadiusMeters: radiusMeters,
+        currentAsOf: request.context.currentLocalDateTime,
+        provider: result.provider,
+        attribution: "Google Maps",
+        places: result.places,
+        externalReadPerformed: true,
+        currentOpeningHoursVerified: false,
+        currentPricesVerified: false,
+        bookingExecuted: false,
+        actionsExecuted: false,
+        note:
+          "Read-only local search. Distances are straight-line estimates. Current hours, prices, availability, and booking status were not requested or verified.",
+      };
+    } catch {
+      return localPlacesUnavailable("LOCAL_PLACES_PROVIDER_UNAVAILABLE");
     }
   }
 
@@ -961,6 +1049,46 @@ function toMoney(value: unknown): number | null {
 function toPersistedMoney(value: unknown): number | null {
   if (value === null || value === undefined || value === "") return null;
   return toMoney(value);
+}
+
+function integerInRange(
+  value: unknown,
+  minimum: number,
+  maximum: number,
+): number | null {
+  if (value === undefined) return null;
+  const parsed = Number(value);
+  return Number.isInteger(parsed) && parsed >= minimum && parsed <= maximum
+    ? parsed
+    : null;
+}
+
+function finiteCoordinate(
+  value: unknown,
+  minimum: number,
+  maximum: number,
+): number | null {
+  if (value === null || value === undefined || value === "") return null;
+  const parsed = Number(value);
+  return Number.isFinite(parsed) && parsed >= minimum && parsed <= maximum
+    ? parsed
+    : null;
+}
+
+function localPlacesUnavailable(
+  decision: string,
+): Readonly<Record<string, unknown>> {
+  return {
+    decision,
+    authorizationGranted: false,
+    requiresHumanReview: false,
+    places: [],
+    externalReadPerformed: false,
+    currentOpeningHoursVerified: false,
+    currentPricesVerified: false,
+    bookingExecuted: false,
+    actionsExecuted: false,
+  };
 }
 
 function parseDateOnly(value: unknown): string | null {
