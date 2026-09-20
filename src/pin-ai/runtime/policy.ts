@@ -86,10 +86,13 @@ function assertNoFalseCompletionClaims(response: PinAIRuntimeResponse): void {
   const falseCompletionPatterns = [
     /\bi(?:'|’)ve (?:sent|submitted|forwarded|escalated|contacted|notified|informed)\b/,
     /\bi have (?:sent|submitted|forwarded|escalated|contacted|notified|informed)\b/,
+    /\bi(?:'|’)m (?:sending|submitting|forwarding|escalating|contacting|notifying|informing)\b/,
+    /\bi am (?:sending|submitting|forwarding|escalating|contacting|notifying|informing)\b/,
     /\bi (?:sent|submitted|forwarded|escalated|contacted|notified|informed) (?:a|an|the|this|your)\b/,
     /\b(?:the|this|your) request (?:was|has been) (?:sent|submitted|forwarded|escalated)\b/,
     /\bthe (?:host|issue) (?:was|has been) (?:contacted|notified|informed|escalated)\b/,
     /\b(?:he|hemos) (?:enviado|enviada|presentado|presentada|remitido|remitida|escalado|escalada|contactado|contactada|notificado|notificada|avisado|avisada)\b/,
+    /\b(?:estoy|estamos) (?:enviando|presentando|remitiendo|escalando|contactando|notificando|avisando)\b/,
     /\b(?:ya |le |lo |la )?(?:envie|enviamos|presente|presentamos|remiti|remitimos|escale|escalamos|contacte|contactamos|notifique|notificamos|avise|avisamos)\b/,
     /\b(?:la|el|tu|su) (?:solicitud|pedido|anfitrion|host) (?:fue|ha sido) (?:enviado|enviada|presentado|presentada|remitido|remitida|escalado|escalada|contactado|contactada|notificado|notificada|avisado|avisada)\b/,
     /\b(?:your|the) (?:early check-?in|late check-?out|stay extension|extension) (?:is|was|has been) (?:approved|confirmed|authorized|booked|completed)\b/,

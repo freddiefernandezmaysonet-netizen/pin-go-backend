@@ -115,8 +115,11 @@ test("runtime rejects equivalent shadow escalation completion claims", () => {
   for (const responseText of [
     "The host has been notified.",
     "I submitted the combined request.",
+    "I'm sending both requests for host review.",
+    "I am forwarding your request to the host.",
     "Your request has been forwarded to the host.",
     "Le envié la solicitud al anfitrión.",
+    "Estoy enviando ambas solicitudes al anfitrión.",
     "La solicitud fue enviada al anfitrión.",
   ]) {
     assert.throws(
