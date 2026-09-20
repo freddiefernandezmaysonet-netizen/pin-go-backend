@@ -366,6 +366,102 @@ test("runtime advertises exactly the enabled Runtime V1 tools to Luna", async ()
   );
 });
 
+test("runtime advertises native web search separately without exposing hidden functions", async () => {
+  let createSessionBody = "";
+  const responses = [
+    {
+      id: "sess_web_search_tools",
+      status: "idle",
+      required_actions: [],
+    },
+    {
+      data: [
+        { type: "web_search_call", status: "completed" },
+        {
+          type: "message",
+          role: "assistant",
+          content: [{ type: "output_text", text: "Two current options." }],
+        },
+      ],
+    },
+  ];
+
+  const transport = new OpenAIAgentsRuntimeTransport(
+    {
+      enabled: true,
+      apiKey: "test-key",
+      model: "gpt-5.6-luna",
+      webSearch: {
+        enabled: true,
+        mode: "live",
+        location: {
+          country: "PR",
+          region: "Puerto Rico",
+          city: "San Juan",
+          timezone: "America/Puerto_Rico",
+        },
+      },
+      pollDelayMs: 0,
+    },
+    async (_input, init) => {
+      if (init.method === "POST" && init.body && createSessionBody === "") {
+        createSessionBody = init.body;
+      }
+      const payload = responses.shift();
+      if (payload === undefined) throw new Error("UNEXPECTED_FETCH");
+      return {
+        ok: true,
+        status: 200,
+        async json() {
+          return payload;
+        },
+      };
+    },
+  );
+
+  const result = await new LunaRuntimeAdapter(transport).run(
+    request,
+    createConversationMemory(request),
+    { async execute() { return {}; } },
+  );
+  const sessionPayload = JSON.parse(createSessionBody) as {
+    agent: {
+      tools: Array<{
+        type: string;
+        name?: string;
+        mode?: string;
+        location?: Readonly<Record<string, string>>;
+      }>;
+    };
+  };
+
+  assert.deepEqual(sessionPayload.agent.tools[0], {
+    type: "web_search",
+    mode: "live",
+    location: {
+      country: "PR",
+      region: "Puerto Rico",
+      city: "San Juan",
+      timezone: "America/Puerto_Rico",
+    },
+  });
+  assert.equal(
+    sessionPayload.agent.tools.some(
+      (tool) => tool.type === "function" && tool.name === "search_local_places",
+    ),
+    false,
+  );
+  assert.equal(
+    sessionPayload.agent.tools.filter((tool) => tool.type === "function").length,
+    12,
+  );
+  assert.deepEqual(result.webSearch, {
+    enabled: true,
+    used: true,
+    callCount: 1,
+  });
+});
+
 test("runtime rejects a disabled tool returned by Luna before execution", async () => {
   let toolExecutions = 0;
 

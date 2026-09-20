@@ -12,6 +12,16 @@ export type OpenAIRuntimeTransportConfig = Readonly<{
   enabled: boolean;
   apiKey?: string;
   model: "gpt-5.6-luna";
+  webSearch?: Readonly<{
+    enabled: boolean;
+    mode?: "live" | "cached";
+    location?: Readonly<{
+      country?: string;
+      region?: string;
+      city?: string;
+      timezone?: string;
+    }>;
+  }>;
   baseUrl?: string;
   maxPolls?: number;
   pollDelayMs?: number;
@@ -137,10 +147,16 @@ export class OpenAIAgentsRuntimeTransport {
 
     const items = await this.listSessionItems(session.id);
     const responseText = extractAssistantText(items);
+    const webSearchCallCount = countWebSearchCalls(items);
 
     return {
       responseText,
       toolCalls: recordedToolCalls,
+      webSearch: {
+        enabled: this.config.webSearch?.enabled === true,
+        used: webSearchCallCount > 0,
+        callCount: webSearchCallCount,
+      },
       escalationCreated,
       requiresHumanReview,
     };
@@ -179,22 +195,37 @@ export class OpenAIAgentsRuntimeTransport {
           "Treat date-change availability and pricing as an estimate for host review only. Never claim that reservation dates changed or that a charge, refund, payment, or approval occurred.",
           "Treat cancellation-policy results and refund amounts as read-only estimates. Never claim that a reservation was cancelled or a refund was issued, sent, processed, approved, or guaranteed.",
           "Treat payment context as read-only persisted history only. It can report recorded payment and refund states, but it never authorizes a new charge, refund, transfer, service credit, compensation, approval, or reservation change. Distinguish recorded history from any requested future action.",
+          "Use web search only for current public information such as local recommendations. Do not treat search results as proof of current opening hours, prices, availability, distance from the property, or a completed booking.",
+          "Never disclose the property's private address or coordinates in a search query or response.",
           "Keep resolved issues resolved and do not repeat exhausted troubleshooting.",
           "Reply naturally in the guest's current language.",
         ].join(" "),
-        tools: PIN_AI_RUNTIME_TOOLS.filter((tool) =>
-          isPinAIRuntimeToolEnabled(tool.name),
-        ).map((tool) => ({
-          type: "function",
-          name: tool.name,
-          description: tool.description,
-          parameters:
-            tool.parameters ?? {
-              type: "object",
-              properties: {},
-              additionalProperties: false,
-            },
-        })),
+        tools: [
+          ...(this.config.webSearch?.enabled === true
+            ? [
+                {
+                  type: "web_search" as const,
+                  mode: this.config.webSearch.mode ?? "live",
+                  ...(this.config.webSearch.location
+                    ? { location: this.config.webSearch.location }
+                    : {}),
+                },
+              ]
+            : []),
+          ...PIN_AI_RUNTIME_TOOLS.filter((tool) =>
+            isPinAIRuntimeToolEnabled(tool.name),
+          ).map((tool) => ({
+            type: "function" as const,
+            name: tool.name,
+            description: tool.description,
+            parameters:
+              tool.parameters ?? {
+                type: "object",
+                properties: {},
+                additionalProperties: false,
+              },
+          })),
+        ],
       },
       input: JSON.stringify({
         runtime: "pin-ai-v1",
@@ -399,6 +430,18 @@ function extractAssistantText(payload: unknown): string {
   }
 
   return chunks.join("\n").trim();
+}
+
+function countWebSearchCalls(payload: unknown): number {
+  const root = asRecord(payload);
+  const data = Array.isArray(root.data) ? root.data : [];
+
+  return data.reduce((count, itemValue) => {
+    const item = asRecord(itemValue);
+    return typeof item.type === "string" && item.type.includes("web_search")
+      ? count + 1
+      : count;
+  }, 0);
 }
 
 function extractSessionError(value: unknown): string {

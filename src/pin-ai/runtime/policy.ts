@@ -123,6 +123,11 @@ function assertNoFalseCompletionClaims(response: PinAIRuntimeResponse): void {
     /\b(?:your|the) transfer (?:was|has been|is) (?:issued|approved|sent|processed|completed)\b/,
     /\b(?:he|hemos) (?:emitido|aprobado|aplicado|enviado) (?:un|el|tu|su) (?:credito|compensacion)\b/,
     /\b(?:tu|su|el) (?:credito|compensacion|transferencia) (?:fue|ha sido|esta) (?:emitido|emitida|aprobado|aprobada|aplicado|aplicada|enviado|enviada|procesado|procesada|completado|completada)\b/,
+    /\bi(?:'|’)ve (?:booked|reserved) (?:a|the|your) (?:table|restaurant|tour|activity|reservation)\b/,
+    /\bi have (?:booked|reserved) (?:a|the|your) (?:table|restaurant|tour|activity|reservation)\b/,
+    /\b(?:your|the) (?:table|restaurant(?: reservation)?|tour|activity|reservation) (?:is|was|has been) (?:booked|reserved|confirmed)\b/,
+    /\b(?:he|hemos) (?:reservado|confirmado) (?:una|un|la|el|tu|su) (?:mesa|restaurante|tour|actividad|reservacion|reserva)\b/,
+    /\b(?:tu|su|la|el) (?:mesa|restaurante|tour|actividad|reservacion|reserva) (?:fue|ha sido|esta) (?:reservada|reservado|confirmada|confirmado)\b/,
   ];
 
   if (

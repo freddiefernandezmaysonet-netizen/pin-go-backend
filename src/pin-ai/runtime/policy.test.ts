@@ -254,6 +254,26 @@ test("runtime rejects false compensation or transfer completion claims", () => {
   }
 });
 
+test("runtime rejects false local booking claims after web search", () => {
+  for (const responseText of [
+    "I've booked a table for you.",
+    "Your restaurant reservation has been confirmed.",
+    "He reservado una mesa para usted.",
+  ]) {
+    assert.throws(
+      () =>
+        assertRuntimeResponseSafe({
+          responseText,
+          toolCalls: [],
+          webSearch: { enabled: true, used: true, callCount: 1 },
+          escalationCreated: false,
+          requiresHumanReview: false,
+        }),
+      /PIN_AI_RUNTIME_FALSE_COMPLETION_CLAIM/,
+    );
+  }
+});
+
 test("runtime allows conditional language when shadow escalation is not executed", () => {
   for (const responseText of [
     "This would be escalated to the host for review before any change is approved.",

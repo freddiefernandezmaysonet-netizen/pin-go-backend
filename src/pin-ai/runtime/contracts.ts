@@ -55,6 +55,11 @@ export type PinAIToolCall = Readonly<{
 export type PinAIRuntimeResponse = Readonly<{
   responseText: string;
   toolCalls: readonly PinAIToolCall[];
+  webSearch?: Readonly<{
+    enabled: boolean;
+    used: boolean;
+    callCount: number;
+  }>;
   escalationCreated: boolean;
   requiresHumanReview: boolean;
 }>;
