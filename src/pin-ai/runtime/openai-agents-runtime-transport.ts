@@ -118,6 +118,10 @@ export class OpenAIAgentsRuntimeTransport {
             memory,
           );
 
+          if (toolResultRequiresHumanReview(output)) {
+            requiresHumanReview = true;
+          }
+
           await this.submitToolResult(session.id, action, output);
         }
       }
@@ -286,6 +290,23 @@ export class OpenAIAgentsRuntimeTransport {
       throw new Error("PIN_AI_RUNTIME_OPENAI_INVALID_RESPONSE");
     }
   }
+}
+
+const HUMAN_REVIEW_DECISIONS = new Set([
+  "OPERATIONALLY_AVAILABLE_FOR_REVIEW",
+  "PRICE_CALCULATED_FOR_REVIEW",
+  "PRICE_REQUIRES_HUMAN_REVIEW",
+]);
+
+function toolResultRequiresHumanReview(
+  output: Readonly<Record<string, unknown>>,
+): boolean {
+  return (
+    output.requiresHumanReview === true ||
+    output.pricingReviewRequired === true ||
+    (typeof output.decision === "string" &&
+      HUMAN_REVIEW_DECISIONS.has(output.decision))
+  );
 }
 
 function parseSessionSnapshot(payload: unknown): RuntimeSessionSnapshot {

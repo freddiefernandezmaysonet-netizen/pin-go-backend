@@ -1,7 +1,10 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import type { PinAIRuntimeRequest } from "./contracts.js";
+import type {
+  PinAIRuntimeRequest,
+  PinAIRuntimeToolName,
+} from "./contracts.js";
 import { createConversationMemory } from "./conversation-memory.js";
 import { LunaRuntimeAdapter } from "./luna-runtime-adapter.js";
 import { OpenAIAgentsRuntimeTransport } from "./openai-agents-runtime-transport.js";
@@ -23,6 +26,73 @@ const request: PinAIRuntimeRequest = {
     },
   ],
 };
+
+async function runSingleToolResult(
+  toolName: PinAIRuntimeToolName,
+  output: Readonly<Record<string, unknown>>,
+) {
+  const responses = [
+    {
+      id: "sess_review_metadata",
+      status: "requires_action",
+      required_actions: [
+        {
+          type: "function_call",
+          turn_id: "turn_review_metadata",
+          call_id: "call_review_metadata",
+          name: toolName,
+          arguments: {},
+        },
+      ],
+    },
+    {},
+    {
+      id: "sess_review_metadata",
+      status: "idle",
+      required_actions: [],
+    },
+    {
+      data: [
+        {
+          type: "message",
+          role: "assistant",
+          content: [{ type: "output_text", text: "Checked." }],
+        },
+      ],
+    },
+  ];
+
+  const transport = new OpenAIAgentsRuntimeTransport(
+    {
+      enabled: true,
+      apiKey: "test-key",
+      model: "gpt-5.6-luna",
+      pollDelayMs: 0,
+    },
+    async () => {
+      const payload = responses.shift();
+      if (payload === undefined) throw new Error("UNEXPECTED_FETCH");
+      return {
+        ok: true,
+        status: 200,
+        async json() {
+          return payload;
+        },
+      };
+    },
+  );
+
+  return new LunaRuntimeAdapter(transport).run(
+    request,
+    createConversationMemory(request),
+    {
+      async execute(tool) {
+        assert.equal(tool, toolName);
+        return output;
+      },
+    },
+  );
+}
 
 test("Luna runtime adapter executes read tools but shadows escalation", async () => {
   let accessToolExecutions = 0;
@@ -151,6 +221,44 @@ test("runtime transport fails closed when OpenAI runtime is disabled", async () 
     adapter.run(request, createConversationMemory(request), tools),
     /PIN_AI_RUNTIME_OPENAI_DISABLED/,
   );
+});
+
+test("runtime marks review metadata from eligibility and pricing decisions", async () => {
+  for (const testCase of [
+    {
+      tool: "check_late_checkout",
+      output: { decision: "OPERATIONALLY_AVAILABLE_FOR_REVIEW" },
+    },
+    {
+      tool: "calculate_extension_price",
+      output: { decision: "PRICE_CALCULATED_FOR_REVIEW" },
+    },
+    {
+      tool: "calculate_extension_price",
+      output: {
+        decision: "PRICE_REQUIRES_HUMAN_REVIEW",
+        pricingReviewRequired: true,
+      },
+    },
+    {
+      tool: "get_property_knowledge",
+      output: { requiresHumanReview: true },
+    },
+  ] as const) {
+    const result = await runSingleToolResult(testCase.tool, testCase.output);
+    assert.equal(result.requiresHumanReview, true);
+    assert.equal(result.escalationCreated, false);
+  }
+});
+
+test("runtime does not mark unavailable eligibility as human review", async () => {
+  const result = await runSingleToolResult("check_extension_availability", {
+    decision: "NOT_AVAILABLE",
+    authorizationGranted: false,
+  });
+
+  assert.equal(result.requiresHumanReview, false);
+  assert.equal(result.escalationCreated, false);
 });
 
 test("runtime advertises exactly the enabled Runtime V1 tools to Luna", async () => {
