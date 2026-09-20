@@ -5,6 +5,7 @@ import { LunaRuntimeAdapter } from "./luna-runtime-adapter.js";
 import { GuardedPinAIModelAdapter } from "./model-adapter.js";
 import { OpenAIAgentsRuntimeTransport } from "./openai-agents-runtime-transport.js";
 import { createPinGoRuntimeReadToolExecutor } from "./pin-go-runtime-tools.js";
+import { resolveWebSearchLocation } from "./web-search-location.js";
 
 async function main(): Promise<void> {
   if (process.env.PIN_AI_RUNTIME_SHADOW_ENABLED !== "true") {
@@ -46,14 +47,11 @@ async function main(): Promise<void> {
     throw new Error("PIN_AI_RUNTIME_STAGING_WEB_SEARCH_CONTEXT_NOT_FOUND");
   }
 
-  const city = boundedLocationPart(reservation.property.city);
-  const region = boundedLocationPart(reservation.property.region);
-  const country = normalizeCountry(reservation.property.country);
-  const timezone = boundedLocationPart(reservation.property.timezone);
-  if (!city && !region && !country) {
+  const { city, region, country, timezone, label: locationLabel } =
+    resolveWebSearchLocation(reservation.property);
+  if (!locationLabel) {
     throw new Error("PIN_AI_RUNTIME_STAGING_WEB_SEARCH_LOCATION_NOT_FOUND");
   }
-  const locationLabel = [city, region, country].filter(Boolean).join(", ");
   const spanish = reservation.preferredLanguage === "es";
 
   const request: PinAIRuntimeRequest = {
@@ -166,16 +164,6 @@ async function main(): Promise<void> {
 
   await prisma.$disconnect();
   await new Promise((resolve) => setTimeout(resolve, 1000));
-}
-
-function boundedLocationPart(value: string | null): string {
-  return String(value ?? "").trim().slice(0, 100);
-}
-
-function normalizeCountry(value: string | null): string {
-  const country = boundedLocationPart(value);
-  if (/^(puerto rico|pr)$/i.test(country)) return "PR";
-  return /^[a-z]{2}$/i.test(country) ? country.toUpperCase() : "";
 }
 
 main().catch(async (error: unknown) => {
