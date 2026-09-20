@@ -36,11 +36,29 @@ type RuntimeReadPrisma = Readonly<{
   }>;
 }>;
 
+type RuntimePricingCalculator = (input: Readonly<{
+  propertyId: string;
+  checkIn: Date;
+  checkOut: Date;
+  selectedAmenityIds?: string[];
+  excludeReservationId?: string;
+}>) => Promise<Readonly<{
+  currency?: unknown;
+  totalAmount: unknown;
+  totalAmountCents: unknown;
+  nightlyRates?: readonly Readonly<{
+    date?: unknown;
+    rate?: unknown;
+  }>[];
+}>>;
+
 export class PinGoRuntimeReadToolExecutor implements PinAIRuntimeToolExecutor {
   private readonly eligibility: PinGoRuntimeEligibilityChecks;
 
   constructor(
     private readonly prisma: RuntimeReadPrisma,
+    private readonly calculatePricing: RuntimePricingCalculator =
+      calculateRuntimeExtensionPricing,
   ) {
     this.eligibility = new PinGoRuntimeEligibilityChecks(prisma);
   }
@@ -66,9 +84,169 @@ export class PinGoRuntimeReadToolExecutor implements PinAIRuntimeToolExecutor {
         return this.eligibility.checkLateCheckout(request, args);
       case "check_extension_availability":
         return this.eligibility.checkExtensionAvailability(request, args);
+      case "calculate_extension_price":
+        return this.calculateExtensionPrice(request, args);
       default:
         throw new Error(`PIN_AI_RUNTIME_READ_TOOL_NOT_IMPLEMENTED:${tool}`);
     }
+  }
+
+  private async calculateExtensionPrice(
+    request: PinAIRuntimeRequest,
+    args: Readonly<Record<string, unknown>>,
+  ): Promise<Readonly<Record<string, unknown>>> {
+    const availability = await this.eligibility.checkExtensionAvailability(
+      request,
+      args,
+    );
+
+    if (availability.decision !== "CALENDAR_AVAILABLE_FOR_PRICING") {
+      return {
+        ...availability,
+        priceCalculated: false,
+        chargeExecuted: false,
+        reservationChanged: false,
+      };
+    }
+
+    const reservation = await this.prisma.reservation.findFirst({
+      where: {
+        id: request.context.reservationId,
+        propertyId: request.context.propertyId,
+        status: "ACTIVE",
+        property: {
+          organizationId: request.context.organizationId,
+        },
+      },
+      select: {
+        id: true,
+        propertyId: true,
+        checkIn: true,
+        checkOut: true,
+        totalAmount: true,
+        currency: true,
+        selectedAmenityIds: true,
+        property: {
+          select: {
+            maximumNights: true,
+          },
+        },
+      },
+    });
+
+    if (!reservation) {
+      throw new Error("PIN_AI_RUNTIME_RESERVATION_NOT_FOUND_OR_OUT_OF_SCOPE");
+    }
+
+    const currentTotalAmount = toMoney(reservation.totalAmount);
+    if (currentTotalAmount === null || currentTotalAmount <= 0) {
+      return {
+        decision: "CURRENT_RESERVATION_TOTAL_UNAVAILABLE",
+        authorizationGranted: false,
+        priceCalculated: false,
+        chargeExecuted: false,
+        reservationChanged: false,
+      };
+    }
+
+    const proposedCheckOut = availability.proposedCheckOut;
+    const additionalNights = availability.additionalNights;
+    if (
+      !(proposedCheckOut instanceof Date) ||
+      !Number.isInteger(additionalNights) ||
+      Number(additionalNights) <= 0
+    ) {
+      throw new Error("PIN_AI_RUNTIME_EXTENSION_AVAILABILITY_CONTRACT_INVALID");
+    }
+
+    const proposedNights = Math.ceil(
+      (proposedCheckOut.getTime() - reservation.checkIn.getTime()) /
+        (1000 * 60 * 60 * 24),
+    );
+    if (
+      reservation.property.maximumNights &&
+      proposedNights > reservation.property.maximumNights
+    ) {
+      return {
+        decision: "MAXIMUM_STAY_EXCEEDED",
+        authorizationGranted: false,
+        priceCalculated: false,
+        additionalNights,
+        maximumNights: reservation.property.maximumNights,
+        proposedNights,
+        chargeExecuted: false,
+        reservationChanged: false,
+      };
+    }
+
+    const pricing = await this.calculatePricing({
+      propertyId: reservation.propertyId,
+      checkIn: reservation.checkIn,
+      checkOut: proposedCheckOut,
+      selectedAmenityIds: Array.isArray(reservation.selectedAmenityIds)
+        ? reservation.selectedAmenityIds
+        : [],
+      excludeReservationId: reservation.id,
+    });
+
+    const proposedTotalAmount = toMoney(pricing.totalAmount);
+    const proposedTotalAmountCents = Number(pricing.totalAmountCents);
+    if (
+      proposedTotalAmount === null ||
+      !Number.isInteger(proposedTotalAmountCents) ||
+      proposedTotalAmountCents < 0
+    ) {
+      throw new Error("PIN_AI_RUNTIME_EXTENSION_PRICE_INVALID");
+    }
+
+    const currentTotalAmountCents = Math.round(currentTotalAmount * 100);
+    const amountDifferenceCents =
+      proposedTotalAmountCents - currentTotalAmountCents;
+    const amountDifference = amountDifferenceCents / 100;
+    const extensionStartDateKey = reservation.checkOut
+      .toISOString()
+      .slice(0, 10);
+    const extensionNightlyRates = Array.isArray(pricing.nightlyRates)
+      ? pricing.nightlyRates
+          .filter(
+            (item) =>
+              typeof item?.date === "string" &&
+              item.date >= extensionStartDateKey,
+          )
+          .map((item) => ({
+            date: item.date,
+            rate: toMoney(item.rate),
+          }))
+      : [];
+
+    return {
+      decision:
+        amountDifferenceCents > 0
+          ? "PRICE_CALCULATED_FOR_REVIEW"
+          : "PRICE_REQUIRES_HUMAN_REVIEW",
+      authorizationGranted: false,
+      priceCalculated: true,
+      priceIsEstimate: true,
+      additionalNights,
+      currentCheckOut: reservation.checkOut,
+      proposedCheckOut,
+      currency: String(
+        pricing.currency ?? reservation.currency ?? "usd",
+      ).toLowerCase(),
+      currentReservationTotal: currentTotalAmount,
+      proposedReservationTotal: proposedTotalAmount,
+      amountDifference,
+      amountDifferenceCents,
+      additionalAmount: amountDifferenceCents > 0 ? amountDifference : null,
+      additionalAmountCents:
+        amountDifferenceCents > 0 ? amountDifferenceCents : null,
+      extensionNightlyRates,
+      pricingReviewRequired: amountDifferenceCents <= 0,
+      chargeExecuted: false,
+      reservationChanged: false,
+      note:
+        "Read-only estimate only. No reservation change, approval, payment, or charge was executed.",
+    };
   }
 
   private async getPropertyKnowledge(
@@ -277,4 +455,27 @@ export class PinGoRuntimeReadToolExecutor implements PinAIRuntimeToolExecutor {
       throw new Error("PIN_AI_RUNTIME_RESERVATION_NOT_FOUND_OR_OUT_OF_SCOPE");
     }
   }
+}
+
+function toMoney(value: unknown): number | null {
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? Math.round(parsed * 100) / 100 : null;
+}
+
+async function calculateRuntimeExtensionPricing(
+  input: Parameters<RuntimePricingCalculator>[0],
+): ReturnType<RuntimePricingCalculator> {
+  const moduleUrl = new URL(
+    "../../services/direct-booking-pricing.service.js",
+    import.meta.url,
+  ).href;
+  const pricingModule = (await import(moduleUrl)) as Readonly<{
+    calculateDirectBookingPricing?: RuntimePricingCalculator;
+  }>;
+
+  if (typeof pricingModule.calculateDirectBookingPricing !== "function") {
+    throw new Error("PIN_AI_RUNTIME_PRICING_ENGINE_UNAVAILABLE");
+  }
+
+  return pricingModule.calculateDirectBookingPricing(input);
 }

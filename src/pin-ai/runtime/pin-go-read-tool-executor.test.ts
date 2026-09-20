@@ -17,7 +17,14 @@ const request: PinAIRuntimeRequest = {
   conversation: [{ role: "guest", content: "What is my access status?" }],
 };
 
-function createPrismaFixture() {
+function createPrismaFixture(options: Readonly<{
+  reservationConflict?: Readonly<{
+    checkIn: Date;
+    checkOut: Date;
+  }>;
+  currentTotalAmount?: number | null;
+  maximumNights?: number | null;
+}> = {}) {
   return {
     property: {
       async findFirst() {
@@ -43,6 +50,9 @@ function createPrismaFixture() {
     },
     reservation: {
       async findFirst(args: any) {
+        if (args?.where?.id?.not) {
+          return options.reservationConflict ?? null;
+        }
         if (args?.select?.id === true && Object.keys(args.select).length === 1) {
           return { id: "reservation-a" };
         }
@@ -56,6 +66,12 @@ function createPrismaFixture() {
           adults: 2,
           children: 0,
           status: "ACTIVE",
+          totalAmount:
+            "currentTotalAmount" in options
+              ? options.currentTotalAmount
+              : 400,
+          currency: "usd",
+          selectedAmenityIds: ["amenity-a"],
           source: "DIRECT_BOOKING",
           paymentState: "PAID",
           verificationStatus: "VERIFIED",
@@ -74,6 +90,8 @@ function createPrismaFixture() {
             checkInTime: "16:00",
             checkOutTime: "11:00",
             maxGuests: 4,
+            maximumNights:
+              "maximumNights" in options ? options.maximumNights : 14,
           },
         };
       },
@@ -179,8 +197,24 @@ test("real read adapter returns cleaning confirmation state without token or sta
   assert.doesNotMatch(serialized, /token|staffMemberId/);
 });
 
-test("real read adapter binds eligibility checks but still fails closed for unimplemented financial tools", async () => {
-  const executor = new PinGoRuntimeReadToolExecutor(createPrismaFixture());
+test("real read adapter calculates an extension estimate without authorization or execution", async () => {
+  let pricingInput: Record<string, unknown> | null = null;
+  const executor = new PinGoRuntimeReadToolExecutor(
+    createPrismaFixture(),
+    async (input) => {
+      pricingInput = input;
+      return {
+        currency: "usd",
+        totalAmount: 525,
+        totalAmountCents: 52500,
+        nightlyRates: [
+          { date: "2026-09-20", rate: 150 },
+          { date: "2026-09-21", rate: 150 },
+          { date: "2026-09-22", rate: 100 },
+        ],
+      } as any;
+    },
+  );
 
   const lateCheckout = await executor.execute(
     "check_late_checkout",
@@ -191,13 +225,132 @@ test("real read adapter binds eligibility checks but still fails closed for unim
 
   assert.equal(lateCheckout.authorizationGranted, false);
 
-  await assert.rejects(
-    executor.execute(
-      "calculate_extension_price",
-      {},
-      request,
-      createConversationMemory(request),
-    ),
-    /PIN_AI_RUNTIME_READ_TOOL_NOT_IMPLEMENTED:calculate_extension_price/,
+  const result = await executor.execute(
+    "calculate_extension_price",
+    { additionalNights: 1 },
+    request,
+    createConversationMemory(request),
   );
+
+  assert.deepEqual(pricingInput, {
+    propertyId: "property-a",
+    checkIn: new Date("2026-09-20T20:00:00.000Z"),
+    checkOut: new Date("2026-09-23T15:00:00.000Z"),
+    selectedAmenityIds: ["amenity-a"],
+    excludeReservationId: "reservation-a",
+  });
+  assert.equal(result.decision, "PRICE_CALCULATED_FOR_REVIEW");
+  assert.equal(result.authorizationGranted, false);
+  assert.equal(result.priceCalculated, true);
+  assert.equal(result.additionalAmount, 125);
+  assert.equal(result.additionalAmountCents, 12500);
+  assert.equal(result.chargeExecuted, false);
+  assert.equal(result.reservationChanged, false);
+  assert.deepEqual(result.extensionNightlyRates, [
+    { date: "2026-09-22", rate: 100 },
+  ]);
+});
+
+test("extension price is not calculated when extension availability fails", async () => {
+  const prisma = createPrismaFixture({
+    reservationConflict: {
+      checkIn: new Date("2026-09-22T20:00:00.000Z"),
+      checkOut: new Date("2026-09-24T15:00:00.000Z"),
+    },
+  });
+
+  let pricingExecutions = 0;
+  const executor = new PinGoRuntimeReadToolExecutor(prisma, async () => {
+    pricingExecutions += 1;
+    throw new Error("PRICING_SHOULD_NOT_EXECUTE");
+  });
+
+  const result = await executor.execute(
+    "calculate_extension_price",
+    { additionalNights: 1 },
+    request,
+    createConversationMemory(request),
+  );
+
+  assert.equal(result.decision, "NOT_AVAILABLE");
+  assert.equal(result.authorizationGranted, false);
+  assert.equal(result.priceCalculated, false);
+  assert.equal(pricingExecutions, 0);
+});
+
+test("extension price is not calculated beyond the maximum stay", async () => {
+  let pricingExecutions = 0;
+  const executor = new PinGoRuntimeReadToolExecutor(
+    createPrismaFixture({ maximumNights: 2 }),
+    async () => {
+      pricingExecutions += 1;
+      throw new Error("PRICING_SHOULD_NOT_EXECUTE");
+    },
+  );
+
+  const result = await executor.execute(
+    "calculate_extension_price",
+    { additionalNights: 1 },
+    request,
+    createConversationMemory(request),
+  );
+
+  assert.equal(result.decision, "MAXIMUM_STAY_EXCEEDED");
+  assert.equal(result.authorizationGranted, false);
+  assert.equal(result.priceCalculated, false);
+  assert.equal(result.maximumNights, 2);
+  assert.equal(result.proposedNights, 3);
+  assert.equal(pricingExecutions, 0);
+});
+
+test("extension price fails closed when the current reservation total is unavailable", async () => {
+  let pricingExecutions = 0;
+  const executor = new PinGoRuntimeReadToolExecutor(
+    createPrismaFixture({ currentTotalAmount: null }),
+    async () => {
+      pricingExecutions += 1;
+      throw new Error("PRICING_SHOULD_NOT_EXECUTE");
+    },
+  );
+
+  const result = await executor.execute(
+    "calculate_extension_price",
+    { additionalNights: 1 },
+    request,
+    createConversationMemory(request),
+  );
+
+  assert.equal(result.decision, "CURRENT_RESERVATION_TOTAL_UNAVAILABLE");
+  assert.equal(result.authorizationGranted, false);
+  assert.equal(result.priceCalculated, false);
+  assert.equal(pricingExecutions, 0);
+});
+
+test("non-positive extension differences require review and are never presented as a charge", async () => {
+  const executor = new PinGoRuntimeReadToolExecutor(
+    createPrismaFixture(),
+    async () =>
+      ({
+        currency: "usd",
+        totalAmount: 350,
+        totalAmountCents: 35000,
+        nightlyRates: [{ date: "2026-09-22", rate: 100 }],
+      }) as any,
+  );
+
+  const result = await executor.execute(
+    "calculate_extension_price",
+    { additionalNights: 1 },
+    request,
+    createConversationMemory(request),
+  );
+
+  assert.equal(result.decision, "PRICE_REQUIRES_HUMAN_REVIEW");
+  assert.equal(result.authorizationGranted, false);
+  assert.equal(result.amountDifference, -50);
+  assert.equal(result.additionalAmount, null);
+  assert.equal(result.additionalAmountCents, null);
+  assert.equal(result.pricingReviewRequired, true);
+  assert.equal(result.chargeExecuted, false);
+  assert.equal(result.reservationChanged, false);
 });

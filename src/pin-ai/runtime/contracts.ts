@@ -150,7 +150,21 @@ export const PIN_AI_RUNTIME_TOOLS: readonly PinAIRuntimeToolDefinition[] = [
   {
     name: "calculate_extension_price",
     authority: "CHECK_ELIGIBILITY",
-    description: "Calculate an extension price without charging.",
+    description:
+      "Calculate a read-only estimated price difference for an available stay extension. This does not approve the extension, change reservation dates, or charge the guest.",
+    parameters: {
+      type: "object",
+      properties: {
+        additionalNights: {
+          type: "integer",
+          minimum: 1,
+          maximum: 30,
+          description: "Number of additional nights requested by the guest.",
+        },
+      },
+      required: ["additionalNights"],
+      additionalProperties: false,
+    },
   },
   {
     name: "check_date_change",
