@@ -5,6 +5,7 @@ import type {
 import {
   assertNoDirectIrreversibleAction,
   assertRuntimeRequestScoped,
+  assertRuntimeToolEnabled,
 } from "./policy.js";
 import {
   assertMemoryMatchesRequest,
@@ -33,6 +34,7 @@ export class GuardedPinAIRuntimeToolExecutor implements PinAIRuntimeToolExecutor
   ): Promise<Readonly<Record<string, unknown>>> {
     assertRuntimeRequestScoped(request);
     assertMemoryMatchesRequest(memory, request);
+    assertRuntimeToolEnabled(tool);
     assertNoDirectIrreversibleAction(tool);
 
     const result = await this.delegate.execute(tool, args, request, memory);

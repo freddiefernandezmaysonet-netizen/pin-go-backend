@@ -1,13 +1,9 @@
 import {
-  PIN_AI_RUNTIME_TOOLS,
+  isPinAIRuntimeToolEnabled,
   type PinAIRuntimeRequest,
   type PinAIRuntimeResponse,
   type PinAIRuntimeToolName,
 } from "./contracts.js";
-
-const TOOL_NAMES = new Set<PinAIRuntimeToolName>(
-  PIN_AI_RUNTIME_TOOLS.map((tool) => tool.name),
-);
 
 const FORBIDDEN_RESPONSE_KEYS = [
   "activePasscode",
@@ -34,14 +30,20 @@ export function assertRuntimeRequestScoped(request: PinAIRuntimeRequest): void {
 
 export function assertRuntimeResponseSafe(response: PinAIRuntimeResponse): void {
   for (const call of response.toolCalls) {
-    if (!TOOL_NAMES.has(call.name)) {
-      throw new Error(`PIN_AI_RUNTIME_TOOL_NOT_ALLOWED:${call.name}`);
-    }
+    assertRuntimeToolEnabled(call.name);
     assertNoForbiddenKeys(call.arguments, ["toolCalls", call.name]);
   }
 
   assertNoForbiddenKeys(response, ["response"]);
   assertNoFalseCompletionClaims(response);
+}
+
+export function assertRuntimeToolEnabled(
+  toolName: PinAIRuntimeToolName,
+): void {
+  if (!isPinAIRuntimeToolEnabled(toolName)) {
+    throw new Error(`PIN_AI_RUNTIME_TOOL_NOT_ENABLED:${toolName}`);
+  }
 }
 
 export function assertNoDirectIrreversibleAction(toolName: string): void {

@@ -80,3 +80,31 @@ test("guarded executor preserves tenant and stay scope", async () => {
     guestId: "guest-a",
   });
 });
+
+test("guarded executor rejects disabled tools before delegation", async () => {
+  let delegateExecutions = 0;
+  const delegate: PinAIRuntimeToolExecutor = {
+    async execute() {
+      delegateExecutions += 1;
+      return {};
+    },
+  };
+
+  const executor = new GuardedPinAIRuntimeToolExecutor(delegate);
+  const memory = createConversationMemory(request);
+
+  for (const tool of [
+    "calculate_extension_price",
+    "check_date_change",
+    "get_cancellation_policy",
+    "get_payment_context",
+    "search_local_places",
+  ] as const) {
+    await assert.rejects(
+      executor.execute(tool, {}, request, memory),
+      new RegExp(`PIN_AI_RUNTIME_TOOL_NOT_ENABLED:${tool}`),
+    );
+  }
+
+  assert.equal(delegateExecutions, 0);
+});
