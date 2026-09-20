@@ -12,6 +12,7 @@ import type {
 import type {
   PinAIRuntimeToolExecutor,
 } from "./tool-executor.js";
+import { PinGoRuntimeEligibilityChecks } from "./pin-go-eligibility-checks.js";
 
 type RuntimeReadPrisma = Readonly<{
   property: Readonly<{
@@ -24,18 +25,29 @@ type RuntimeReadPrisma = Readonly<{
     findMany(args: unknown): Promise<any[]>;
   }>;
   cleaningConfirmation: Readonly<{
+    findFirst(args: unknown): Promise<any>;
     findMany(args: unknown): Promise<any[]>;
+  }>;
+  propertyBlockedDate: Readonly<{
+    findFirst(args: unknown): Promise<any>;
+  }>;
+  reservationModification: Readonly<{
+    findFirst(args: unknown): Promise<any>;
   }>;
 }>;
 
 export class PinGoRuntimeReadToolExecutor implements PinAIRuntimeToolExecutor {
+  private readonly eligibility: PinGoRuntimeEligibilityChecks;
+
   constructor(
     private readonly prisma: RuntimeReadPrisma,
-  ) {}
+  ) {
+    this.eligibility = new PinGoRuntimeEligibilityChecks(prisma);
+  }
 
   async execute(
     tool: PinAIRuntimeToolName,
-    _args: Readonly<Record<string, unknown>>,
+    args: Readonly<Record<string, unknown>>,
     request: PinAIRuntimeRequest,
     _memory: PinAIConversationMemory,
   ): Promise<Readonly<Record<string, unknown>>> {
@@ -48,6 +60,12 @@ export class PinGoRuntimeReadToolExecutor implements PinAIRuntimeToolExecutor {
         return this.getAccessStatus(request);
       case "get_cleaning_status":
         return this.getCleaningStatus(request);
+      case "check_early_checkin":
+        return this.eligibility.checkEarlyCheckin(request, args);
+      case "check_late_checkout":
+        return this.eligibility.checkLateCheckout(request, args);
+      case "check_extension_availability":
+        return this.eligibility.checkExtensionAvailability(request, args);
       default:
         throw new Error(`PIN_AI_RUNTIME_READ_TOOL_NOT_IMPLEMENTED:${tool}`);
     }
