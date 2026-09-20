@@ -90,4 +90,5 @@ jobs:
             src/pin-ai/benchmark/canary-016-luna.ts \
             src/pin-ai/benchmark/canary-017-luna.ts \
             src/pin-ai/benchmark/canary-018-luna.ts \
-            src/pin-ai/benchmark/canary-019-luna.ts
+            src/pin-ai/benchmark/canary-019-luna.ts \
+            src/pin-ai/benchmark/canary-020-luna.ts
