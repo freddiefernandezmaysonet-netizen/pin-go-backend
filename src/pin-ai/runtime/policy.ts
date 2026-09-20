@@ -41,6 +41,7 @@ export function assertRuntimeResponseSafe(response: PinAIRuntimeResponse): void 
   }
 
   assertNoForbiddenKeys(response, ["response"]);
+  assertNoFalseCompletionClaims(response);
 }
 
 export function assertNoDirectIrreversibleAction(toolName: string): void {
@@ -71,5 +72,38 @@ function assertNoForbiddenKeys(value: unknown, path: string[]): void {
       throw new Error(`PIN_AI_RUNTIME_FORBIDDEN_FIELD:${[...path, key].join(".")}`);
     }
     assertNoForbiddenKeys(nested, [...path, key]);
+  }
+}
+
+
+function assertNoFalseCompletionClaims(response: PinAIRuntimeResponse): void {
+  const proposedEscalation =
+    response.toolCalls.some((call) => call.name === "escalate_to_host") &&
+    response.escalationCreated === false;
+
+  if (!proposedEscalation) return;
+
+  const text = response.responseText.toLowerCase();
+  const falseCompletionPatterns = [
+    /\bi(?:'|’)ve sent\b/,
+    /\bi have sent\b/,
+    /\bi sent (?:the|your|this)\b/,
+    /\bi(?:'|’)ve escalated\b/,
+    /\bi have escalated\b/,
+    /\bi escalated\b/,
+    /\bthe request (?:was|has been) sent\b/,
+    /\bthe issue (?:was|has been) escalated\b/,
+    /\bhe enviado\b/,
+    /\bya envi[eé]\b/,
+    /\blo envi[eé]\b/,
+    /\bhe escalado\b/,
+    /\bya escal[eé]\b/,
+    /\blo escal[eé]\b/,
+    /\bse envi[oó] (?:la|el) solicitud\b/,
+    /\bse escal[oó] (?:el|la)\b/,
+  ];
+
+  if (falseCompletionPatterns.some((pattern) => pattern.test(text))) {
+    throw new Error("PIN_AI_RUNTIME_FALSE_COMPLETION_CLAIM");
   }
 }
