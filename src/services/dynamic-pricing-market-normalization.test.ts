@@ -72,8 +72,8 @@ test("Puerto Rico Google Places geography resolves to the Puerto Rico market for
     property: {
       findUnique: async () => ({
         id: "property-pr",
-        country: "Puerto Rico",
-        region: "Puerto Rico",
+        country: "PR",
+        region: "PR",
       }),
       update: async (args: any) => {
         propertyUpdates.push(args);
@@ -100,4 +100,89 @@ test("Puerto Rico Google Places geography resolves to the Puerto Rico market for
   assert.deepEqual(propertyUpdates.at(-1)?.data, {
     holidayPricingEnabled: true,
   });
+});
+
+
+test("United States / Florida season lookup remains unchanged", async () => {
+  const lookups: any[] = [];
+
+  const db = {
+    property: {
+      findUnique: async () => ({
+        id: "property-miami",
+        country: "United States",
+        region: "Florida",
+      }),
+      update: async () => ({}),
+    },
+    marketSeasonTemplate: {
+      findMany: async (args: any) => {
+        lookups.push(args.where);
+        return [];
+      },
+    },
+    propertySeason: {
+      updateMany: async () => ({ count: 0 }),
+      findFirst: async () => null,
+      create: async () => ({}),
+      update: async () => ({}),
+    },
+  } as any;
+
+  const result = await applyDefaultMarketSeasonsForProperty(
+    "property-miami",
+    db
+  );
+
+  assert.equal(result.skipped, true);
+  assert.equal(result.reason, "NO_MARKET_SEASON_TEMPLATES");
+  assert.equal(lookups[0]?.country, "United States");
+  assert.equal(lookups[0]?.region, "Florida");
+  assert.equal(lookups[1]?.country, "United States");
+  assert.equal(lookups[1]?.region, null);
+});
+
+test("Spain holiday lookup remains international and is not remapped to United States", async () => {
+  let holidayWrites = 0;
+
+  const db = {
+    property: {
+      findUnique: async () => ({
+        id: "property-spain",
+        country: "Spain",
+        region: "Community of Madrid",
+      }),
+      update: async () => {
+        holidayWrites += 1;
+        return {};
+      },
+    },
+    propertyHolidayPricing: {
+      updateMany: async () => {
+        holidayWrites += 1;
+        return { count: 0 };
+      },
+      findFirst: async () => {
+        holidayWrites += 1;
+        return null;
+      },
+      create: async () => {
+        holidayWrites += 1;
+        return {};
+      },
+      update: async () => {
+        holidayWrites += 1;
+        return {};
+      },
+    },
+  } as any;
+
+  const result = await applyDefaultHolidayPricingForProperty(
+    "property-spain",
+    db
+  );
+
+  assert.equal(result.skipped, true);
+  assert.equal(result.reason, "NO_HOLIDAY_PRICING_TEMPLATES");
+  assert.equal(holidayWrites, 0);
 });
