@@ -1,7 +1,7 @@
 import { OpenAIAgentsBenchmarkAdapter } from "./openai-agents-benchmark-adapter.js";
 import { OpenAIAgentsBenchmarkTransport } from "./openai-agents-benchmark-transport.js";
 import { ModelEvaluationRunner } from "./model-evaluation-runner.js";
-import { PropertyKnowledgeBenchmarkToolExecutor } from "./property-knowledge-benchmark-tool-executor.js";
+import { FixtureMockToolExecutor } from "./mock-tool-executor.js";
 import { scenarios001To010 } from "./scenarios-001-010.js";
 
 async function main(): Promise<void> {
@@ -37,27 +37,29 @@ async function main(): Promise<void> {
   );
   const adapter = new OpenAIAgentsBenchmarkAdapter("gpt-5.6-luna", transport);
 
-  const mockTools = new PropertyKnowledgeBenchmarkToolExecutor(
-    {
-      id: scenario.context.propertyId,
-      organizationId: scenario.context.organizationId,
-      name: "Benchmark Property",
-      publicTitle: "Benchmark Stay",
-      publicDescription: "Guest-facing benchmark property. Nearby Puerto Rican food options in the property guide include Benchmark Boricua Kitchen (about 8 minutes away, traditional Puerto Rican dishes) and Benchmark Lechonera (about 15 minutes away, roast pork and classic sides).",
-      publicDescriptionEs: "Propiedad benchmark para huéspedes.",
-      maxGuests: scenario.context.maxGuests,
-      timezone: "America/Puerto_Rico",
-      checkInTime: "16:00",
-      checkOutTime: "11:00",
-      guestAccessMode: "PASSCODE_ONLY",
-      amenities: [],
-      locks: [],
-      propertyDevices: [],
-      guestAgreements: [],
-      cancellationPolicies: [],
+  const mockTools = new FixtureMockToolExecutor({
+    search_local_places: {
+      query: "Puerto Rican food",
+      searchArea: "near benchmark property",
+      currentAsOf: scenario.context.currentLocalDateTime,
+      places: [
+        {
+          name: "Benchmark Boricua Kitchen",
+          category: "Puerto Rican",
+          distanceMinutes: 8,
+          openStatus: "OPEN",
+          note: "Traditional Puerto Rican dishes.",
+        },
+        {
+          name: "Benchmark Lechonera",
+          category: "Puerto Rican",
+          distanceMinutes: 15,
+          openStatus: "OPEN",
+          note: "Roast pork and classic sides.",
+        },
+      ],
     },
-    {},
-  );
+  });
 
   const runner = new ModelEvaluationRunner(adapter, mockTools);
   console.log("PIN_AI_BENCHMARK_CANARY_STARTED:010:gpt-5.6-luna");
