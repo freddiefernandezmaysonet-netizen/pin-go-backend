@@ -60,4 +60,5 @@ jobs:
             src/pin-ai/runtime/runtime-shadow-canary-luna.ts \
             src/pin-ai/runtime/pin-go-read-tool-executor.ts \
             src/pin-ai/runtime/pin-go-runtime-tools.ts \
-            src/pin-ai/runtime/pin-go-read-tool-executor.test.ts
+            src/pin-ai/runtime/pin-go-read-tool-executor.test.ts \
+            src/pin-ai/runtime/runtime-real-read-canary-luna.ts
