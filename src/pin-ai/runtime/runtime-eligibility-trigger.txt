@@ -5,5 +5,6 @@ One controlled direct read-only extension price canary after Runtime V1 Run #54.
 One controlled Luna eligibility canary after enabling read-only extension pricing in Runtime V1 Run #58.
 One controlled direct read-only date-change canary after Runtime V1 Run #65.
 One controlled Luna date-change canary after enabling the read-only tool in Runtime V1 Run #68.
+One controlled direct read-only cancellation-policy canary after Runtime V1 Run #71.
 One controlled Luna eligibility metadata verification after Runtime V1 Run #60.
 One final controlled Luna truthfulness verification after Runtime V1 Run #62.
