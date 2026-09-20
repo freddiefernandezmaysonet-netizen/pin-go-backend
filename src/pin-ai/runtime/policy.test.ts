@@ -39,10 +39,7 @@ test("runtime permits bounded read and escalation tools", () => {
 });
 
 test("runtime rejects every conceptually declared but disabled tool", () => {
-  for (const tool of [
-    "get_payment_context",
-    "search_local_places",
-  ] as const) {
+  for (const tool of ["search_local_places"] as const) {
     assert.throws(
       () =>
         assertRuntimeResponseSafe({
@@ -235,6 +232,28 @@ test("runtime rejects false cancellation and refund completion claims", () => {
   }
 });
 
+test("runtime rejects false compensation or transfer completion claims", () => {
+  for (const responseText of [
+    "I've issued your service credit.",
+    "Your compensation has been approved.",
+    "The transfer has been processed.",
+    "He emitido su crédito.",
+    "Su compensación ha sido aprobada.",
+    "Su transferencia fue procesada.",
+  ]) {
+    assert.throws(
+      () =>
+        assertRuntimeResponseSafe({
+          responseText,
+          toolCalls: [{ name: "get_payment_context", arguments: {} }],
+          escalationCreated: false,
+          requiresHumanReview: false,
+        }),
+      /PIN_AI_RUNTIME_FALSE_COMPLETION_CLAIM/,
+    );
+  }
+});
+
 test("runtime allows conditional language when shadow escalation is not executed", () => {
   for (const responseText of [
     "This would be escalated to the host for review before any change is approved.",
@@ -246,6 +265,8 @@ test("runtime allows conditional language when shadow escalation is not executed
     "El costo adicional estimado es $100; no se realizó ningún cargo ni cambio de reserva.",
     "If you cancel now, the estimated refund would be $100; no cancellation or refund has been executed.",
     "Si cancela ahora, el reembolso estimado sería $100; no se ha cancelado la reserva ni emitido un reembolso.",
+    "The reservation currently records a paid payment state; no new charge, refund, transfer, or compensation was executed.",
+    "La reservación registra actualmente un estado de pago pagado; no se ejecutó ningún cargo, reembolso, transferencia ni compensación nueva.",
   ]) {
     assert.doesNotThrow(() =>
       assertRuntimeResponseSafe({

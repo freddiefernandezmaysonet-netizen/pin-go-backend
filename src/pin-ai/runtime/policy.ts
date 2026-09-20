@@ -117,6 +117,12 @@ function assertNoFalseCompletionClaims(response: PinAIRuntimeResponse): void {
     /\b(?:tu|su|el) reembolso (?:fue|ha sido|esta) (?:emitido|procesado|enviado|aprobado|completado|garantizado)\b/,
     /\b(?:he|hemos) (?:emitido|procesado|enviado) (?:un|el|tu|su) reembolso\b/,
     /\brecibira(?:s)? (?:un|el|tu|su) reembolso\b/,
+    /\bi(?:'|’)ve (?:issued|approved|applied|sent) (?:a|the|your) (?:service )?(?:credit|compensation)\b/,
+    /\bi have (?:issued|approved|applied|sent) (?:a|the|your) (?:service )?(?:credit|compensation)\b/,
+    /\b(?:your|the) (?:service )?(?:credit|compensation) (?:was|has been|is) (?:issued|approved|applied|sent|processed|completed)\b/,
+    /\b(?:your|the) transfer (?:was|has been|is) (?:issued|approved|sent|processed|completed)\b/,
+    /\b(?:he|hemos) (?:emitido|aprobado|aplicado|enviado) (?:un|el|tu|su) (?:credito|compensacion)\b/,
+    /\b(?:tu|su|el) (?:credito|compensacion|transferencia) (?:fue|ha sido|esta) (?:emitido|emitida|aprobado|aprobada|aplicado|aplicada|enviado|enviada|procesado|procesada|completado|completada)\b/,
   ];
 
   if (

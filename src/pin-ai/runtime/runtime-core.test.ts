@@ -189,6 +189,44 @@ test("guarded executor permits read-only cancellation policy evaluation", async 
   assert.equal(result.guestId, "guest-a");
 });
 
+test("guarded executor permits read-only payment context", async () => {
+  let delegateExecutions = 0;
+  const delegate: PinAIRuntimeToolExecutor = {
+    async execute(tool, args) {
+      delegateExecutions += 1;
+      assert.equal(tool, "get_payment_context");
+      assert.deepEqual(args, {});
+      return {
+        decision: "PAYMENT_CONTEXT_READ",
+        authorizationGranted: false,
+        paymentAuthorized: false,
+        chargeExecuted: false,
+        refundExecuted: false,
+        transferExecuted: false,
+      };
+    },
+  };
+
+  const executor = new GuardedPinAIRuntimeToolExecutor(delegate);
+  const result = await executor.execute(
+    "get_payment_context",
+    {},
+    request,
+    createConversationMemory(request),
+  );
+
+  assert.equal(delegateExecutions, 1);
+  assert.equal(result.authorizationGranted, false);
+  assert.equal(result.paymentAuthorized, false);
+  assert.equal(result.chargeExecuted, false);
+  assert.equal(result.refundExecuted, false);
+  assert.equal(result.transferExecuted, false);
+  assert.equal(result.organizationId, "org-a");
+  assert.equal(result.propertyId, "property-a");
+  assert.equal(result.reservationId, "reservation-a");
+  assert.equal(result.guestId, "guest-a");
+});
+
 test("guarded executor rejects disabled tools before delegation", async () => {
   let delegateExecutions = 0;
   const delegate: PinAIRuntimeToolExecutor = {
@@ -201,10 +239,7 @@ test("guarded executor rejects disabled tools before delegation", async () => {
   const executor = new GuardedPinAIRuntimeToolExecutor(delegate);
   const memory = createConversationMemory(request);
 
-  for (const tool of [
-    "get_payment_context",
-    "search_local_places",
-  ] as const) {
+  for (const tool of ["search_local_places"] as const) {
     await assert.rejects(
       executor.execute(tool, {}, request, memory),
       new RegExp(`PIN_AI_RUNTIME_TOOL_NOT_ENABLED:${tool}`),

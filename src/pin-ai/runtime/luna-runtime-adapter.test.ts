@@ -342,6 +342,10 @@ test("runtime advertises exactly the enabled Runtime V1 tools to Luna", async ()
     sessionPayload.agent.instructions,
     /cancellation-policy results and refund amounts as read-only estimates/i,
   );
+  assert.match(
+    sessionPayload.agent.instructions,
+    /payment context as read-only persisted history only/i,
+  );
 
   assert.deepEqual(
     sessionPayload.agent.tools.map((tool) => tool.name),
@@ -356,6 +360,7 @@ test("runtime advertises exactly the enabled Runtime V1 tools to Luna", async ()
       "calculate_extension_price",
       "check_date_change",
       "get_cancellation_policy",
+      "get_payment_context",
       "escalate_to_host",
     ],
   );
@@ -383,7 +388,7 @@ test("runtime rejects a disabled tool returned by Luna before execution", async 
               type: "function_call",
               turn_id: "turn_disabled_tool",
               call_id: "call_disabled_tool",
-              name: "get_payment_context",
+              name: "search_local_places",
               arguments: {},
             },
           ],
@@ -403,7 +408,7 @@ test("runtime rejects a disabled tool returned by Luna before execution", async 
 
   await assert.rejects(
     adapter.run(request, createConversationMemory(request), tools),
-    /PIN_AI_RUNTIME_UNAPPROVED_TOOL:get_payment_context/,
+    /PIN_AI_RUNTIME_UNAPPROVED_TOOL:search_local_places/,
   );
   assert.equal(toolExecutions, 0);
 });
