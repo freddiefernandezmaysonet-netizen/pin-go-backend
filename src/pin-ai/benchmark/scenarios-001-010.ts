@@ -162,8 +162,8 @@ export const scenarios001To010: readonly BenchmarkScenario[] = [
     ],
     expectation: {
       intents: ["LOCAL_RECOMMENDATION"],
-      requiredTools: ["get_property_knowledge"],
-      requiredBehaviors: ["keep access issue resolved", "switch naturally to the new request"],
+      requiredTools: ["search_local_places"],
+      requiredBehaviors: ["keep access issue resolved", "switch naturally to the new request", "ground recommendations in current local search results"],
       forbiddenBehaviors: ["continue access troubleshooting"],
     },
   },
