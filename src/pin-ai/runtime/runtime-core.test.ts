@@ -115,6 +115,46 @@ test("guarded executor permits read-only extension pricing", async () => {
   assert.equal(result.guestId, "guest-a");
 });
 
+test("guarded executor permits read-only date-change previews", async () => {
+  let delegateExecutions = 0;
+  const args = {
+    proposedCheckInDate: "2026-09-23",
+    proposedCheckOutDate: "2026-09-25",
+  };
+  const delegate: PinAIRuntimeToolExecutor = {
+    async execute(tool, receivedArgs) {
+      delegateExecutions += 1;
+      assert.equal(tool, "check_date_change");
+      assert.deepEqual(receivedArgs, args);
+      return {
+        decision: "DATE_CHANGE_AVAILABLE_FOR_REVIEW",
+        authorizationGranted: false,
+        chargeExecuted: false,
+        refundExecuted: false,
+        reservationChanged: false,
+      };
+    },
+  };
+
+  const executor = new GuardedPinAIRuntimeToolExecutor(delegate);
+  const result = await executor.execute(
+    "check_date_change",
+    args,
+    request,
+    createConversationMemory(request),
+  );
+
+  assert.equal(delegateExecutions, 1);
+  assert.equal(result.authorizationGranted, false);
+  assert.equal(result.chargeExecuted, false);
+  assert.equal(result.refundExecuted, false);
+  assert.equal(result.reservationChanged, false);
+  assert.equal(result.organizationId, "org-a");
+  assert.equal(result.propertyId, "property-a");
+  assert.equal(result.reservationId, "reservation-a");
+  assert.equal(result.guestId, "guest-a");
+});
+
 test("guarded executor rejects disabled tools before delegation", async () => {
   let delegateExecutions = 0;
   const delegate: PinAIRuntimeToolExecutor = {
@@ -128,7 +168,6 @@ test("guarded executor rejects disabled tools before delegation", async () => {
   const memory = createConversationMemory(request);
 
   for (const tool of [
-    "check_date_change",
     "get_cancellation_policy",
     "get_payment_context",
     "search_local_places",

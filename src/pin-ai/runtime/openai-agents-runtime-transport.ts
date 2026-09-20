@@ -176,6 +176,7 @@ export class OpenAIAgentsRuntimeTransport {
           "Do not say that you are sending, submitting, forwarding, escalating, contacting, or notifying anyone when executed=false.",
           "If escalate_to_host returns executed=false, describe it only as something that would be escalated or requires host review.",
           "Treat extension pricing as an estimate for review only. Never describe an estimated price as final or claim that a payment, charge, approval, or reservation extension occurred.",
+          "Treat date-change availability and pricing as an estimate for host review only. Never claim that reservation dates changed or that a charge, refund, payment, or approval occurred.",
           "Keep resolved issues resolved and do not repeat exhausted troubleshooting.",
           "Reply naturally in the guest's current language.",
         ].join(" "),
@@ -297,6 +298,7 @@ const HUMAN_REVIEW_DECISIONS = new Set([
   "OPERATIONALLY_AVAILABLE_FOR_REVIEW",
   "PRICE_CALCULATED_FOR_REVIEW",
   "PRICE_REQUIRES_HUMAN_REVIEW",
+  "DATE_CHANGE_AVAILABLE_FOR_REVIEW",
 ]);
 
 function toolResultRequiresHumanReview(

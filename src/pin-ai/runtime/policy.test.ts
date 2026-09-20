@@ -40,7 +40,6 @@ test("runtime permits bounded read and escalation tools", () => {
 
 test("runtime rejects every conceptually declared but disabled tool", () => {
   for (const tool of [
-    "check_date_change",
     "get_cancellation_policy",
     "get_payment_context",
     "search_local_places",
@@ -165,6 +164,14 @@ test("runtime rejects false approval or mutation claims after eligibility checks
     {
       responseText: "Su reservación ha sido extendida.",
       tool: "check_extension_availability",
+    },
+    {
+      responseText: "Your reservation has been changed to the new dates.",
+      tool: "check_date_change",
+    },
+    {
+      responseText: "Su reserva ha sido modificada a las nuevas fechas.",
+      tool: "check_date_change",
     },
   ] as const) {
     assert.throws(
