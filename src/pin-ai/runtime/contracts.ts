@@ -59,6 +59,23 @@ export type PinAIRuntimeResponse = Readonly<{
   requiresHumanReview: boolean;
 }>;
 
+export const PIN_AI_RUNTIME_ENABLED_TOOL_NAMES = [
+  "get_property_knowledge",
+  "get_reservation_context",
+  "get_access_status",
+  "get_cleaning_status",
+  "check_early_checkin",
+  "check_late_checkout",
+  "check_extension_availability",
+  "escalate_to_host",
+] as const satisfies readonly PinAIRuntimeToolName[];
+
+export function isPinAIRuntimeToolEnabled(
+  name: PinAIRuntimeToolName,
+): boolean {
+  return (PIN_AI_RUNTIME_ENABLED_TOOL_NAMES as readonly PinAIRuntimeToolName[]).includes(name);
+}
+
 export const PIN_AI_RUNTIME_TOOLS: readonly PinAIRuntimeToolDefinition[] = [
   {
     name: "get_property_knowledge",
