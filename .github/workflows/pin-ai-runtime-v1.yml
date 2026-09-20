@@ -50,4 +50,7 @@ jobs:
             src/pin-ai/runtime/runtime-core.test.ts \
             src/pin-ai/runtime/model-adapter.ts \
             src/pin-ai/runtime/shadow-orchestrator.ts \
-            src/pin-ai/runtime/shadow-orchestrator.test.ts
+            src/pin-ai/runtime/shadow-orchestrator.test.ts \
+            src/pin-ai/runtime/openai-agents-runtime-transport.ts \
+            src/pin-ai/runtime/luna-runtime-adapter.ts \
+            src/pin-ai/runtime/luna-runtime-adapter.test.ts
