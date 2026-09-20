@@ -153,8 +153,7 @@ test("runtime transport fails closed when OpenAI runtime is disabled", async () 
   );
 });
 
-
-test("runtime advertises only implemented tools to Luna", async () => {
+test("runtime advertises exactly the enabled Runtime V1 tools to Luna", async () => {
   let createSessionBody = "";
 
   const responses = [
@@ -215,10 +214,68 @@ test("runtime advertises only implemented tools to Luna", async () => {
   const adapter = new LunaRuntimeAdapter(transport);
   await adapter.run(request, createConversationMemory(request), tools);
 
-  assert.match(createSessionBody, /check_late_checkout/);
-  assert.match(createSessionBody, /check_extension_availability/);
-  assert.doesNotMatch(createSessionBody, /calculate_extension_price/);
-  assert.doesNotMatch(createSessionBody, /check_date_change/);
-  assert.doesNotMatch(createSessionBody, /get_payment_context/);
-  assert.doesNotMatch(createSessionBody, /search_local_places/);
+  const sessionPayload = JSON.parse(createSessionBody) as {
+    agent: { tools: Array<{ name: string }> };
+  };
+
+  assert.deepEqual(
+    sessionPayload.agent.tools.map((tool) => tool.name),
+    [
+      "get_property_knowledge",
+      "get_reservation_context",
+      "get_access_status",
+      "get_cleaning_status",
+      "check_early_checkin",
+      "check_late_checkout",
+      "check_extension_availability",
+      "escalate_to_host",
+    ],
+  );
+});
+
+test("runtime rejects a disabled tool returned by Luna before execution", async () => {
+  let toolExecutions = 0;
+
+  const transport = new OpenAIAgentsRuntimeTransport(
+    {
+      enabled: true,
+      apiKey: "test-key",
+      model: "gpt-5.6-luna",
+      pollDelayMs: 0,
+    },
+    async () => ({
+      ok: true,
+      status: 200,
+      async json() {
+        return {
+          id: "sess_disabled_tool",
+          status: "requires_action",
+          required_actions: [
+            {
+              type: "function_call",
+              turn_id: "turn_disabled_tool",
+              call_id: "call_disabled_tool",
+              name: "calculate_extension_price",
+              arguments: {},
+            },
+          ],
+        };
+      },
+    }),
+  );
+
+  const tools: PinAIRuntimeToolExecutor = {
+    async execute() {
+      toolExecutions += 1;
+      return {};
+    },
+  };
+
+  const adapter = new LunaRuntimeAdapter(transport);
+
+  await assert.rejects(
+    adapter.run(request, createConversationMemory(request), tools),
+    /PIN_AI_RUNTIME_UNAPPROVED_TOOL:calculate_extension_price/,
+  );
+  assert.equal(toolExecutions, 0);
 });
