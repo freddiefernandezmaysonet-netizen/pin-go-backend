@@ -1,2 +1,3 @@
 Trigger one controlled staging eligibility deployment for Pin AI Runtime V1 Luna shadow canary.
 Verification rerun after truthful shadow-completion guard.
+Verification rerun after Runtime V1 tool allowlist certification.
