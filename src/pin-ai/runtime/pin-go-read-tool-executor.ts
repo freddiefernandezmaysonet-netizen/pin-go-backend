@@ -1,3 +1,5 @@
+import { fromZonedTime } from "date-fns-tz";
+
 import {
   getPropertyKnowledgeSnapshot,
   type PropertyKnowledgeLanguage,
@@ -86,9 +88,256 @@ export class PinGoRuntimeReadToolExecutor implements PinAIRuntimeToolExecutor {
         return this.eligibility.checkExtensionAvailability(request, args);
       case "calculate_extension_price":
         return this.calculateExtensionPrice(request, args);
+      case "check_date_change":
+        return this.checkDateChange(request, args);
       default:
         throw new Error(`PIN_AI_RUNTIME_READ_TOOL_NOT_IMPLEMENTED:${tool}`);
     }
+  }
+
+  private async checkDateChange(
+    request: PinAIRuntimeRequest,
+    args: Readonly<Record<string, unknown>>,
+  ): Promise<Readonly<Record<string, unknown>>> {
+    const proposedCheckInDate = parseDateOnly(args.proposedCheckInDate);
+    const proposedCheckOutDate = parseDateOnly(args.proposedCheckOutDate);
+
+    if (!proposedCheckInDate || !proposedCheckOutDate) {
+      return dateChangeDenied(
+        args.proposedCheckInDate == null || args.proposedCheckOutDate == null
+          ? "PROPOSED_DATES_REQUIRED"
+          : "INVALID_PROPOSED_DATES",
+      );
+    }
+
+    const reservation = await this.prisma.reservation.findFirst({
+      where: {
+        id: request.context.reservationId,
+        propertyId: request.context.propertyId,
+        status: "ACTIVE",
+        property: {
+          organizationId: request.context.organizationId,
+        },
+      },
+      select: {
+        id: true,
+        propertyId: true,
+        checkIn: true,
+        checkOut: true,
+        totalAmount: true,
+        currency: true,
+        selectedAmenityIds: true,
+        property: {
+          select: {
+            timezone: true,
+            checkInTime: true,
+            checkOutTime: true,
+            minimumNights: true,
+            maximumNights: true,
+          },
+        },
+      },
+    });
+
+    if (!reservation) {
+      throw new Error("PIN_AI_RUNTIME_RESERVATION_NOT_FOUND_OR_OUT_OF_SCOPE");
+    }
+
+    const timezone = String(reservation.property.timezone ?? "").trim();
+    if (!timezone) {
+      throw new Error("PIN_AI_RUNTIME_PROPERTY_TIMEZONE_REQUIRED");
+    }
+
+    const proposedCheckIn = buildPropertyDate(
+      proposedCheckInDate,
+      reservation.property.checkInTime ?? "16:00",
+      timezone,
+    );
+    const proposedCheckOut = buildPropertyDate(
+      proposedCheckOutDate,
+      reservation.property.checkOutTime ?? "11:00",
+      timezone,
+    );
+
+    if (
+      Number.isNaN(proposedCheckIn.getTime()) ||
+      Number.isNaN(proposedCheckOut.getTime()) ||
+      proposedCheckOut <= proposedCheckIn
+    ) {
+      return dateChangeDenied("INVALID_PROPOSED_DATES");
+    }
+
+    const currentDateTime = new Date(request.context.currentLocalDateTime);
+    if (
+      Number.isNaN(currentDateTime.getTime()) ||
+      proposedCheckIn <= currentDateTime
+    ) {
+      return dateChangeDenied("PROPOSED_CHECK_IN_MUST_BE_IN_FUTURE");
+    }
+
+    if (
+      proposedCheckIn.getTime() === reservation.checkIn.getTime() &&
+      proposedCheckOut.getTime() === reservation.checkOut.getTime()
+    ) {
+      return {
+        ...dateChangeDenied("NO_DATE_CHANGE"),
+        currentCheckIn: reservation.checkIn,
+        currentCheckOut: reservation.checkOut,
+      };
+    }
+
+    const nights = dateOnlyNightCount(
+      proposedCheckInDate,
+      proposedCheckOutDate,
+    );
+    const minimumNights = Math.max(
+      1,
+      Number(reservation.property.minimumNights ?? 1),
+    );
+    if (nights < minimumNights) {
+      return {
+        ...dateChangeDenied("MINIMUM_STAY_NOT_MET"),
+        nights,
+        minimumNights,
+      };
+    }
+    if (
+      reservation.property.maximumNights &&
+      nights > reservation.property.maximumNights
+    ) {
+      return {
+        ...dateChangeDenied("MAXIMUM_STAY_EXCEEDED"),
+        nights,
+        maximumNights: reservation.property.maximumNights,
+      };
+    }
+
+    const reservationConflict = await this.prisma.reservation.findFirst({
+      where: {
+        id: { not: reservation.id },
+        propertyId: reservation.propertyId,
+        status: "ACTIVE",
+        checkIn: { lt: proposedCheckOut },
+        checkOut: { gt: proposedCheckIn },
+      },
+      select: { id: true },
+    });
+    if (reservationConflict) {
+      return {
+        ...dateChangeDenied("NOT_AVAILABLE"),
+        reason: "ACTIVE_RESERVATION_CONFLICT",
+        proposedCheckIn,
+        proposedCheckOut,
+      };
+    }
+
+    const modificationHold = await this.prisma.reservationModification.findFirst({
+      where: {
+        reservation: { propertyId: reservation.propertyId },
+        proposedCheckIn: { lt: proposedCheckOut },
+        proposedCheckOut: { gt: proposedCheckIn },
+        OR: [
+          { status: "PAYMENT_PROCESSING" },
+          {
+            status: "AWAITING_PAYMENT",
+            checkoutExpiresAt: { gt: currentDateTime },
+          },
+        ],
+      },
+      select: { id: true },
+    });
+    if (modificationHold) {
+      return {
+        ...dateChangeDenied("NOT_AVAILABLE"),
+        reason: "ACTIVE_RESERVATION_MODIFICATION_HOLD",
+        proposedCheckIn,
+        proposedCheckOut,
+      };
+    }
+
+    const blockedDate = await this.prisma.propertyBlockedDate.findFirst({
+      where: {
+        propertyId: reservation.propertyId,
+        startDate: { lt: proposedCheckOut },
+        endDate: { gt: proposedCheckIn },
+      },
+      select: { id: true },
+    });
+    if (blockedDate) {
+      return {
+        ...dateChangeDenied("NOT_AVAILABLE"),
+        reason: "PROPERTY_BLOCKED_DATE",
+        proposedCheckIn,
+        proposedCheckOut,
+      };
+    }
+
+    const currentTotalAmount = toMoney(reservation.totalAmount);
+    if (currentTotalAmount === null || currentTotalAmount <= 0) {
+      return dateChangeDenied("CURRENT_RESERVATION_TOTAL_UNAVAILABLE");
+    }
+
+    const pricing = await this.calculatePricing({
+      propertyId: reservation.propertyId,
+      checkIn: proposedCheckIn,
+      checkOut: proposedCheckOut,
+      selectedAmenityIds: Array.isArray(reservation.selectedAmenityIds)
+        ? reservation.selectedAmenityIds
+        : [],
+      excludeReservationId: reservation.id,
+    });
+    const proposedTotalAmount = toMoney(pricing.totalAmount);
+    const proposedTotalAmountCents = Number(pricing.totalAmountCents);
+    if (
+      proposedTotalAmount === null ||
+      !Number.isInteger(proposedTotalAmountCents) ||
+      proposedTotalAmountCents < 0
+    ) {
+      throw new Error("PIN_AI_RUNTIME_DATE_CHANGE_PRICE_INVALID");
+    }
+
+    const currentTotalAmountCents = Math.round(currentTotalAmount * 100);
+    const amountDifferenceCents =
+      proposedTotalAmountCents - currentTotalAmountCents;
+    const amountDifference = amountDifferenceCents / 100;
+
+    return {
+      decision: "DATE_CHANGE_AVAILABLE_FOR_REVIEW",
+      authorizationGranted: false,
+      priceCalculated: true,
+      priceIsEstimate: true,
+      currentCheckIn: reservation.checkIn,
+      currentCheckOut: reservation.checkOut,
+      proposedCheckIn,
+      proposedCheckOut,
+      nights,
+      currency: String(
+        pricing.currency ?? reservation.currency ?? "usd",
+      ).toLowerCase(),
+      currentReservationTotal: currentTotalAmount,
+      proposedReservationTotal: proposedTotalAmount,
+      amountDifference,
+      amountDifferenceCents,
+      financialReview:
+        amountDifferenceCents > 0
+          ? "ADDITIONAL_PAYMENT_REVIEW_REQUIRED"
+          : amountDifferenceCents < 0
+            ? "POTENTIAL_REDUCTION_REVIEW_REQUIRED"
+            : "NO_PRICE_DIFFERENCE",
+      additionalAmount: amountDifferenceCents > 0 ? amountDifference : null,
+      additionalAmountCents:
+        amountDifferenceCents > 0 ? amountDifferenceCents : null,
+      potentialReductionAmount:
+        amountDifferenceCents < 0 ? Math.abs(amountDifference) : null,
+      potentialReductionAmountCents:
+        amountDifferenceCents < 0 ? Math.abs(amountDifferenceCents) : null,
+      requiresHumanReview: true,
+      chargeExecuted: false,
+      refundExecuted: false,
+      reservationChanged: false,
+      note:
+        "Read-only estimate only. No reservation change, approval, refund, payment, or charge was executed.",
+    };
   }
 
   private async calculateExtensionPrice(
@@ -460,6 +709,50 @@ export class PinGoRuntimeReadToolExecutor implements PinAIRuntimeToolExecutor {
 function toMoney(value: unknown): number | null {
   const parsed = Number(value);
   return Number.isFinite(parsed) ? Math.round(parsed * 100) / 100 : null;
+}
+
+function parseDateOnly(value: unknown): string | null {
+  if (typeof value !== "string") return null;
+  const dateKey = value.trim();
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(dateKey)) return null;
+
+  const [year, month, day] = dateKey.split("-").map(Number);
+  const parsed = new Date(Date.UTC(year, month - 1, day));
+  return parsed.toISOString().slice(0, 10) === dateKey ? dateKey : null;
+}
+
+function buildPropertyDate(
+  dateKey: string,
+  localTime: unknown,
+  timezone: string,
+): Date {
+  const time =
+    typeof localTime === "string" &&
+    /^(?:[01]\d|2[0-3]):[0-5]\d$/.test(localTime)
+      ? localTime
+      : "00:00";
+  return fromZonedTime(`${dateKey}T${time}:00`, timezone);
+}
+
+function dateOnlyNightCount(checkInDate: string, checkOutDate: string): number {
+  return Math.round(
+    (Date.parse(`${checkOutDate}T00:00:00.000Z`) -
+      Date.parse(`${checkInDate}T00:00:00.000Z`)) /
+      86_400_000,
+  );
+}
+
+function dateChangeDenied(
+  decision: string,
+): Readonly<Record<string, unknown>> {
+  return {
+    decision,
+    authorizationGranted: false,
+    priceCalculated: false,
+    chargeExecuted: false,
+    refundExecuted: false,
+    reservationChanged: false,
+  };
 }
 
 async function calculateRuntimeExtensionPricing(

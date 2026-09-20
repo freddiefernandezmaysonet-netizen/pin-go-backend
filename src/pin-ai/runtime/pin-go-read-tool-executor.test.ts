@@ -23,7 +23,10 @@ function createPrismaFixture(options: Readonly<{
     checkOut: Date;
   }>;
   currentTotalAmount?: number | null;
+  minimumNights?: number | null;
   maximumNights?: number | null;
+  modificationHold?: boolean;
+  blockedDate?: boolean;
 }> = {}) {
   return {
     property: {
@@ -90,6 +93,8 @@ function createPrismaFixture(options: Readonly<{
             checkInTime: "16:00",
             checkOutTime: "11:00",
             maxGuests: 4,
+            minimumNights:
+              "minimumNights" in options ? options.minimumNights : 1,
             maximumNights:
               "maximumNights" in options ? options.maximumNights : 14,
           },
@@ -140,12 +145,12 @@ function createPrismaFixture(options: Readonly<{
     },
     propertyBlockedDate: {
       async findFirst() {
-        return null;
+        return options.blockedDate ? { id: "blocked-a" } : null;
       },
     },
     reservationModification: {
       async findFirst() {
-        return null;
+        return options.modificationHold ? { id: "modification-a" } : null;
       },
     },
   };
@@ -351,6 +356,228 @@ test("non-positive extension differences require review and are never presented 
   assert.equal(result.additionalAmount, null);
   assert.equal(result.additionalAmountCents, null);
   assert.equal(result.pricingReviewRequired, true);
+  assert.equal(result.chargeExecuted, false);
+  assert.equal(result.reservationChanged, false);
+});
+
+test("date change previews exact proposed dates without authorization or execution", async () => {
+  let pricingInput: Record<string, unknown> | null = null;
+  const executor = new PinGoRuntimeReadToolExecutor(
+    createPrismaFixture(),
+    async (input) => {
+      pricingInput = input;
+      return {
+        currency: "usd",
+        totalAmount: 450,
+        totalAmountCents: 45000,
+        nightlyRates: [],
+      } as any;
+    },
+  );
+
+  const result = await executor.execute(
+    "check_date_change",
+    {
+      proposedCheckInDate: "2026-09-23",
+      proposedCheckOutDate: "2026-09-25",
+    },
+    request,
+    createConversationMemory(request),
+  );
+
+  assert.deepEqual(pricingInput, {
+    propertyId: "property-a",
+    checkIn: new Date("2026-09-23T20:00:00.000Z"),
+    checkOut: new Date("2026-09-25T15:00:00.000Z"),
+    selectedAmenityIds: ["amenity-a"],
+    excludeReservationId: "reservation-a",
+  });
+  assert.equal(result.decision, "DATE_CHANGE_AVAILABLE_FOR_REVIEW");
+  assert.equal(result.authorizationGranted, false);
+  assert.equal(result.priceCalculated, true);
+  assert.equal(result.nights, 2);
+  assert.equal(result.amountDifference, 50);
+  assert.equal(result.financialReview, "ADDITIONAL_PAYMENT_REVIEW_REQUIRED");
+  assert.equal(result.additionalAmount, 50);
+  assert.equal(result.requiresHumanReview, true);
+  assert.equal(result.chargeExecuted, false);
+  assert.equal(result.refundExecuted, false);
+  assert.equal(result.reservationChanged, false);
+});
+
+test("date change fails closed on invalid or missing proposed dates", async () => {
+  let pricingExecutions = 0;
+  const executor = new PinGoRuntimeReadToolExecutor(
+    createPrismaFixture(),
+    async () => {
+      pricingExecutions += 1;
+      throw new Error("PRICING_SHOULD_NOT_EXECUTE");
+    },
+  );
+
+  const missing = await executor.execute(
+    "check_date_change",
+    { proposedCheckInDate: "2026-09-23" },
+    request,
+    createConversationMemory(request),
+  );
+  const invalid = await executor.execute(
+    "check_date_change",
+    {
+      proposedCheckInDate: "2026-02-30",
+      proposedCheckOutDate: "2026-03-02",
+    },
+    request,
+    createConversationMemory(request),
+  );
+
+  assert.equal(missing.decision, "PROPOSED_DATES_REQUIRED");
+  assert.equal(invalid.decision, "INVALID_PROPOSED_DATES");
+  assert.equal(missing.authorizationGranted, false);
+  assert.equal(invalid.reservationChanged, false);
+  assert.equal(pricingExecutions, 0);
+});
+
+test("date change does not price dates that conflict with an active reservation", async () => {
+  let pricingExecutions = 0;
+  const executor = new PinGoRuntimeReadToolExecutor(
+    createPrismaFixture({
+      reservationConflict: {
+        checkIn: new Date("2026-09-23T20:00:00.000Z"),
+        checkOut: new Date("2026-09-25T15:00:00.000Z"),
+      },
+    }),
+    async () => {
+      pricingExecutions += 1;
+      throw new Error("PRICING_SHOULD_NOT_EXECUTE");
+    },
+  );
+
+  const result = await executor.execute(
+    "check_date_change",
+    {
+      proposedCheckInDate: "2026-09-23",
+      proposedCheckOutDate: "2026-09-25",
+    },
+    request,
+    createConversationMemory(request),
+  );
+
+  assert.equal(result.decision, "NOT_AVAILABLE");
+  assert.equal(result.reason, "ACTIVE_RESERVATION_CONFLICT");
+  assert.equal(result.priceCalculated, false);
+  assert.equal(result.authorizationGranted, false);
+  assert.equal(result.reservationChanged, false);
+  assert.equal(pricingExecutions, 0);
+});
+
+test("date change respects active modification holds and blocked dates", async () => {
+  const inputs = [
+    {
+      fixture: createPrismaFixture({ modificationHold: true }),
+      reason: "ACTIVE_RESERVATION_MODIFICATION_HOLD",
+    },
+    {
+      fixture: createPrismaFixture({ blockedDate: true }),
+      reason: "PROPERTY_BLOCKED_DATE",
+    },
+  ];
+
+  for (const input of inputs) {
+    let pricingExecutions = 0;
+    const executor = new PinGoRuntimeReadToolExecutor(
+      input.fixture,
+      async () => {
+        pricingExecutions += 1;
+        throw new Error("PRICING_SHOULD_NOT_EXECUTE");
+      },
+    );
+    const result = await executor.execute(
+      "check_date_change",
+      {
+        proposedCheckInDate: "2026-09-23",
+        proposedCheckOutDate: "2026-09-25",
+      },
+      request,
+      createConversationMemory(request),
+    );
+
+    assert.equal(result.decision, "NOT_AVAILABLE");
+    assert.equal(result.reason, input.reason);
+    assert.equal(result.priceCalculated, false);
+    assert.equal(result.refundExecuted, false);
+    assert.equal(pricingExecutions, 0);
+  }
+});
+
+test("date change enforces minimum and maximum stays before pricing", async () => {
+  const cases = [
+    {
+      fixture: createPrismaFixture({ minimumNights: 3 }),
+      proposedCheckOutDate: "2026-09-25",
+      decision: "MINIMUM_STAY_NOT_MET",
+    },
+    {
+      fixture: createPrismaFixture({ maximumNights: 2 }),
+      proposedCheckOutDate: "2026-09-26",
+      decision: "MAXIMUM_STAY_EXCEEDED",
+    },
+  ];
+
+  for (const input of cases) {
+    let pricingExecutions = 0;
+    const executor = new PinGoRuntimeReadToolExecutor(
+      input.fixture,
+      async () => {
+        pricingExecutions += 1;
+        throw new Error("PRICING_SHOULD_NOT_EXECUTE");
+      },
+    );
+    const result = await executor.execute(
+      "check_date_change",
+      {
+        proposedCheckInDate: "2026-09-23",
+        proposedCheckOutDate: input.proposedCheckOutDate,
+      },
+      request,
+      createConversationMemory(request),
+    );
+
+    assert.equal(result.decision, input.decision);
+    assert.equal(result.authorizationGranted, false);
+    assert.equal(result.priceCalculated, false);
+    assert.equal(pricingExecutions, 0);
+  }
+});
+
+test("date change presents a lower estimate as potential reduction, never a refund", async () => {
+  const executor = new PinGoRuntimeReadToolExecutor(
+    createPrismaFixture(),
+    async () =>
+      ({
+        currency: "usd",
+        totalAmount: 350,
+        totalAmountCents: 35000,
+        nightlyRates: [],
+      }) as any,
+  );
+
+  const result = await executor.execute(
+    "check_date_change",
+    {
+      proposedCheckInDate: "2026-09-23",
+      proposedCheckOutDate: "2026-09-25",
+    },
+    request,
+    createConversationMemory(request),
+  );
+
+  assert.equal(result.decision, "DATE_CHANGE_AVAILABLE_FOR_REVIEW");
+  assert.equal(result.amountDifference, -50);
+  assert.equal(result.financialReview, "POTENTIAL_REDUCTION_REVIEW_REQUIRED");
+  assert.equal(result.additionalAmount, null);
+  assert.equal(result.potentialReductionAmount, 50);
+  assert.equal(result.refundExecuted, false);
   assert.equal(result.chargeExecuted, false);
   assert.equal(result.reservationChanged, false);
 });

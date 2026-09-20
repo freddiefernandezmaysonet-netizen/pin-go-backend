@@ -170,7 +170,23 @@ export const PIN_AI_RUNTIME_TOOLS: readonly PinAIRuntimeToolDefinition[] = [
   {
     name: "check_date_change",
     authority: "CHECK_ELIGIBILITY",
-    description: "Check date-change options without committing them.",
+    description:
+      "Check read-only availability and estimated pricing for moving the entire stay to exact proposed dates. This does not approve the request, change reservation dates, issue a refund, or charge the guest.",
+    parameters: {
+      type: "object",
+      properties: {
+        proposedCheckInDate: {
+          type: "string",
+          description: "Proposed check-in date in YYYY-MM-DD format.",
+        },
+        proposedCheckOutDate: {
+          type: "string",
+          description: "Proposed check-out date in YYYY-MM-DD format.",
+        },
+      },
+      required: ["proposedCheckInDate", "proposedCheckOutDate"],
+      additionalProperties: false,
+    },
   },
   {
     name: "get_cancellation_policy",
