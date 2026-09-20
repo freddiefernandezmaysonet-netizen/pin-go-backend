@@ -233,6 +233,7 @@ test("runtime advertises exactly the enabled Runtime V1 tools to Luna", async ()
       "check_early_checkin",
       "check_late_checkout",
       "check_extension_availability",
+      "calculate_extension_price",
       "escalate_to_host",
     ],
   );
@@ -260,7 +261,7 @@ test("runtime rejects a disabled tool returned by Luna before execution", async 
               type: "function_call",
               turn_id: "turn_disabled_tool",
               call_id: "call_disabled_tool",
-              name: "calculate_extension_price",
+              name: "check_date_change",
               arguments: {},
             },
           ],
@@ -280,7 +281,7 @@ test("runtime rejects a disabled tool returned by Luna before execution", async 
 
   await assert.rejects(
     adapter.run(request, createConversationMemory(request), tools),
-    /PIN_AI_RUNTIME_UNAPPROVED_TOOL:calculate_extension_price/,
+    /PIN_AI_RUNTIME_UNAPPROVED_TOOL:check_date_change/,
   );
   assert.equal(toolExecutions, 0);
 });

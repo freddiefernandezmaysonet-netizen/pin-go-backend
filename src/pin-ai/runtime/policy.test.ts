@@ -40,7 +40,6 @@ test("runtime permits bounded read and escalation tools", () => {
 
 test("runtime rejects every conceptually declared but disabled tool", () => {
   for (const tool of [
-    "calculate_extension_price",
     "check_date_change",
     "get_cancellation_policy",
     "get_payment_context",

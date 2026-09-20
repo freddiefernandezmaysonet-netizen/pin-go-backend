@@ -81,6 +81,40 @@ test("guarded executor preserves tenant and stay scope", async () => {
   });
 });
 
+test("guarded executor permits read-only extension pricing", async () => {
+  let delegateExecutions = 0;
+  const delegate: PinAIRuntimeToolExecutor = {
+    async execute(tool, args) {
+      delegateExecutions += 1;
+      assert.equal(tool, "calculate_extension_price");
+      assert.deepEqual(args, { additionalNights: 1 });
+      return {
+        decision: "PRICE_CALCULATED_FOR_REVIEW",
+        authorizationGranted: false,
+        chargeExecuted: false,
+        reservationChanged: false,
+      };
+    },
+  };
+
+  const executor = new GuardedPinAIRuntimeToolExecutor(delegate);
+  const result = await executor.execute(
+    "calculate_extension_price",
+    { additionalNights: 1 },
+    request,
+    createConversationMemory(request),
+  );
+
+  assert.equal(delegateExecutions, 1);
+  assert.equal(result.authorizationGranted, false);
+  assert.equal(result.chargeExecuted, false);
+  assert.equal(result.reservationChanged, false);
+  assert.equal(result.organizationId, "org-a");
+  assert.equal(result.propertyId, "property-a");
+  assert.equal(result.reservationId, "reservation-a");
+  assert.equal(result.guestId, "guest-a");
+});
+
 test("guarded executor rejects disabled tools before delegation", async () => {
   let delegateExecutions = 0;
   const delegate: PinAIRuntimeToolExecutor = {
@@ -94,7 +128,6 @@ test("guarded executor rejects disabled tools before delegation", async () => {
   const memory = createConversationMemory(request);
 
   for (const tool of [
-    "calculate_extension_price",
     "check_date_change",
     "get_cancellation_policy",
     "get_payment_context",

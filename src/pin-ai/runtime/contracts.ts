@@ -67,6 +67,7 @@ export const PIN_AI_RUNTIME_ENABLED_TOOL_NAMES = [
   "check_early_checkin",
   "check_late_checkout",
   "check_extension_availability",
+  "calculate_extension_price",
   "escalate_to_host",
 ] as const satisfies readonly PinAIRuntimeToolName[];
 

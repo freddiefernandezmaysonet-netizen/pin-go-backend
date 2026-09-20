@@ -4,7 +4,7 @@ import {
   isPinAIRuntimeToolEnabled,
   type PinAIRuntimeRequest,
 } from "./contracts.js";
-import { PinGoRuntimeReadToolExecutor } from "./pin-go-read-tool-executor.js";
+import { createPinGoRuntimeReadToolExecutor } from "./pin-go-runtime-tools.js";
 
 const TOOL_NAME = "calculate_extension_price" as const;
 const ADDITIONAL_NIGHTS = 1;
@@ -16,8 +16,8 @@ async function main(): Promise<void> {
   if (process.env.PIN_AI_RUNTIME_REAL_READ_ENABLED !== "true") {
     throw new Error("PIN_AI_RUNTIME_REAL_READ_DISABLED");
   }
-  if (isPinAIRuntimeToolEnabled(TOOL_NAME)) {
-    throw new Error("PIN_AI_RUNTIME_EXTENSION_PRICE_TOOL_MUST_REMAIN_HIDDEN");
+  if (!isPinAIRuntimeToolEnabled(TOOL_NAME)) {
+    throw new Error("PIN_AI_RUNTIME_EXTENSION_PRICE_TOOL_NOT_ENABLED");
   }
 
   const reservations = await prisma.reservation.findMany({
@@ -44,7 +44,7 @@ async function main(): Promise<void> {
     throw new Error("PIN_AI_RUNTIME_STAGING_PRICED_ACTIVE_RESERVATION_NOT_FOUND");
   }
 
-  const executor = new PinGoRuntimeReadToolExecutor(prisma);
+  const executor = createPinGoRuntimeReadToolExecutor();
   console.log("PIN_AI_RUNTIME_EXTENSION_PRICE_STARTED:DIRECT_READ_ONLY");
 
   for (const reservation of reservations) {
