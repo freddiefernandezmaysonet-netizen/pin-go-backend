@@ -47,4 +47,7 @@ jobs:
             src/pin-ai/runtime/policy.test.ts \
             src/pin-ai/runtime/conversation-memory.ts \
             src/pin-ai/runtime/tool-executor.ts \
-            src/pin-ai/runtime/runtime-core.test.ts
+            src/pin-ai/runtime/runtime-core.test.ts \
+            src/pin-ai/runtime/model-adapter.ts \
+            src/pin-ai/runtime/shadow-orchestrator.ts \
+            src/pin-ai/runtime/shadow-orchestrator.test.ts
