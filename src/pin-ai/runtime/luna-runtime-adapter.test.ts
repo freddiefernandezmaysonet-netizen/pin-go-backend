@@ -152,3 +152,73 @@ test("runtime transport fails closed when OpenAI runtime is disabled", async () 
     /PIN_AI_RUNTIME_OPENAI_DISABLED/,
   );
 });
+
+
+test("runtime advertises only implemented tools to Luna", async () => {
+  let createSessionBody = "";
+
+  const responses = [
+    {
+      id: "sess_tools",
+      status: "idle",
+      required_actions: [],
+    },
+    {
+      data: [
+        {
+          type: "message",
+          role: "assistant",
+          content: [
+            {
+              type: "output_text",
+              text: "Checked.",
+            },
+          ],
+        },
+      ],
+    },
+  ];
+
+  const transport = new OpenAIAgentsRuntimeTransport(
+    {
+      enabled: true,
+      apiKey: "test-key",
+      model: "gpt-5.6-luna",
+      pollDelayMs: 0,
+    },
+    async (_input, init) => {
+      if (init.method === "POST" && init.body && createSessionBody === "") {
+        createSessionBody = init.body;
+      }
+
+      const payload = responses.shift();
+      if (payload === undefined) {
+        throw new Error("UNEXPECTED_FETCH");
+      }
+
+      return {
+        ok: true,
+        status: 200,
+        async json() {
+          return payload;
+        },
+      };
+    },
+  );
+
+  const tools: PinAIRuntimeToolExecutor = {
+    async execute() {
+      return {};
+    },
+  };
+
+  const adapter = new LunaRuntimeAdapter(transport);
+  await adapter.run(request, createConversationMemory(request), tools);
+
+  assert.match(createSessionBody, /check_late_checkout/);
+  assert.match(createSessionBody, /check_extension_availability/);
+  assert.doesNotMatch(createSessionBody, /calculate_extension_price/);
+  assert.doesNotMatch(createSessionBody, /check_date_change/);
+  assert.doesNotMatch(createSessionBody, /get_payment_context/);
+  assert.doesNotMatch(createSessionBody, /search_local_places/);
+});
