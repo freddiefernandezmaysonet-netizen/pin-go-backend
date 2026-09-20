@@ -124,22 +124,31 @@ test("Luna runtime adapter executes read tools but shadows escalation", async ()
   assert.match(result.responseText, /would escalate/i);
 });
 
-test("runtime transport rejects non-Luna model config", async () => {
-  assert.throws(
-    () =>
-      new OpenAIAgentsRuntimeTransport(
-        {
-          enabled: true,
-          apiKey: "test-key",
-          model: "gpt-5.6-luna" as "gpt-5.6-luna",
-        },
-        async () => ({
-          ok: true,
-          status: 200,
-          async json() {
-            return {};
-          },
-        }),
-      ),
+test("runtime transport fails closed when OpenAI runtime is disabled", async () => {
+  const transport = new OpenAIAgentsRuntimeTransport(
+    {
+      enabled: false,
+      apiKey: "test-key",
+      model: "gpt-5.6-luna",
+    },
+    async () => ({
+      ok: true,
+      status: 200,
+      async json() {
+        return {};
+      },
+    }),
+  );
+
+  const adapter = new LunaRuntimeAdapter(transport);
+  const tools: PinAIRuntimeToolExecutor = {
+    async execute() {
+      return {};
+    },
+  };
+
+  await assert.rejects(
+    adapter.run(request, createConversationMemory(request), tools),
+    /PIN_AI_RUNTIME_OPENAI_DISABLED/,
   );
 });
