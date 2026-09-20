@@ -68,4 +68,5 @@ jobs:
             src/pin-ai/runtime/runtime-extension-price-canary.ts \
             src/pin-ai/runtime/runtime-date-change-canary.ts \
             src/pin-ai/runtime/runtime-date-change-canary-luna.ts \
-            src/pin-ai/runtime/runtime-cancellation-policy-canary.ts
+            src/pin-ai/runtime/runtime-cancellation-policy-canary.ts \
+            src/pin-ai/runtime/runtime-cancellation-policy-canary-luna.ts
