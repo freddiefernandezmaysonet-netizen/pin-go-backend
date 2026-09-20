@@ -35,6 +35,7 @@ export type MockToolName =
   | "check_date_change"
   | "get_cancellation_policy"
   | "get_payment_context"
+  | "search_local_places"
   | "escalate_to_host";
 
 export type BenchmarkExpectation = Readonly<{
@@ -76,5 +77,6 @@ export const MOCK_TOOL_NAMES: readonly MockToolName[] = [
   "check_date_change",
   "get_cancellation_policy",
   "get_payment_context",
+  "search_local_places",
   "escalate_to_host",
 ] as const;
