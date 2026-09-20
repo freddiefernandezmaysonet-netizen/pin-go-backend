@@ -24,7 +24,6 @@ async function main(): Promise<void> {
       status: "ACTIVE",
       property: {
         status: "ACTIVE",
-        city: { not: null },
       },
     },
     orderBy: { updatedAt: "desc" },
@@ -43,7 +42,7 @@ async function main(): Promise<void> {
       },
     },
   });
-  if (!reservation?.property.city) {
+  if (!reservation) {
     throw new Error("PIN_AI_RUNTIME_STAGING_WEB_SEARCH_CONTEXT_NOT_FOUND");
   }
 
@@ -51,6 +50,9 @@ async function main(): Promise<void> {
   const region = boundedLocationPart(reservation.property.region);
   const country = normalizeCountry(reservation.property.country);
   const timezone = boundedLocationPart(reservation.property.timezone);
+  if (!city && !region && !country) {
+    throw new Error("PIN_AI_RUNTIME_STAGING_WEB_SEARCH_LOCATION_NOT_FOUND");
+  }
   const locationLabel = [city, region, country].filter(Boolean).join(", ");
   const spanish = reservation.preferredLanguage === "es";
 
@@ -106,7 +108,7 @@ async function main(): Promise<void> {
         location: {
           ...(country ? { country } : {}),
           ...(region ? { region } : {}),
-          city,
+          ...(city ? { city } : {}),
           ...(timezone ? { timezone } : {}),
         },
       },
