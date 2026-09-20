@@ -43,7 +43,7 @@ async function main(): Promise<void> {
       organizationId: scenario.context.organizationId,
       name: "Benchmark Property",
       publicTitle: "Benchmark Stay",
-      publicDescription: "Guest-facing benchmark property.",
+      publicDescription: "Guest-facing benchmark property. Nearby Puerto Rican food options in the property guide include Benchmark Boricua Kitchen (about 8 minutes away, traditional Puerto Rican dishes) and Benchmark Lechonera (about 15 minutes away, roast pork and classic sides).",
       publicDescriptionEs: "Propiedad benchmark para huéspedes.",
       maxGuests: scenario.context.maxGuests,
       timezone: "America/Puerto_Rico",
@@ -55,21 +55,7 @@ async function main(): Promise<void> {
       propertyDevices: [],
       guestAgreements: [],
       cancellationPolicies: [],
-      localRecommendations: [
-        {
-          category: "PUERTO_RICAN_FOOD",
-          name: "Benchmark Boricua Kitchen",
-          distanceMinutes: 8,
-          note: "Traditional Puerto Rican dishes.",
-        },
-        {
-          category: "PUERTO_RICAN_FOOD",
-          name: "Benchmark Lechonera",
-          distanceMinutes: 15,
-          note: "Roast pork and classic sides.",
-        },
-      ],
-    } as any,
+    },
     {},
   );
 
