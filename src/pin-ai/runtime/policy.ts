@@ -79,33 +79,29 @@ function assertNoForbiddenKeys(value: unknown, path: string[]): void {
 
 
 function assertNoFalseCompletionClaims(response: PinAIRuntimeResponse): void {
-  const proposedEscalation =
-    response.toolCalls.some((call) => call.name === "escalate_to_host") &&
-    response.escalationCreated === false;
-
-  if (!proposedEscalation) return;
-
-  const text = response.responseText.toLowerCase();
+  const text = response.responseText
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/\p{Diacritic}/gu, "");
   const falseCompletionPatterns = [
-    /\bi(?:'|’)ve sent\b/,
-    /\bi have sent\b/,
-    /\bi sent (?:the|your|this)\b/,
-    /\bi(?:'|’)ve escalated\b/,
-    /\bi have escalated\b/,
-    /\bi escalated\b/,
-    /\bthe request (?:was|has been) sent\b/,
-    /\bthe issue (?:was|has been) escalated\b/,
-    /\bhe enviado\b/,
-    /\bya envi[eé]\b/,
-    /\blo envi[eé]\b/,
-    /\bhe escalado\b/,
-    /\bya escal[eé]\b/,
-    /\blo escal[eé]\b/,
-    /\bse envi[oó] (?:la|el) solicitud\b/,
-    /\bse escal[oó] (?:el|la)\b/,
+    /\bi(?:'|’)ve (?:sent|submitted|forwarded|escalated|contacted|notified|informed)\b/,
+    /\bi have (?:sent|submitted|forwarded|escalated|contacted|notified|informed)\b/,
+    /\bi (?:sent|submitted|forwarded|escalated|contacted|notified|informed) (?:a|an|the|this|your)\b/,
+    /\b(?:the|this|your) request (?:was|has been) (?:sent|submitted|forwarded|escalated)\b/,
+    /\bthe (?:host|issue) (?:was|has been) (?:contacted|notified|informed|escalated)\b/,
+    /\b(?:he|hemos) (?:enviado|enviada|presentado|presentada|remitido|remitida|escalado|escalada|contactado|contactada|notificado|notificada|avisado|avisada)\b/,
+    /\b(?:ya |le |lo |la )?(?:envie|enviamos|presente|presentamos|remiti|remitimos|escale|escalamos|contacte|contactamos|notifique|notificamos|avise|avisamos)\b/,
+    /\b(?:la|el|tu|su) (?:solicitud|pedido|anfitrion|host) (?:fue|ha sido) (?:enviado|enviada|presentado|presentada|remitido|remitida|escalado|escalada|contactado|contactada|notificado|notificada|avisado|avisada)\b/,
+    /\b(?:your|the) (?:early check-?in|late check-?out|stay extension|extension) (?:is|was|has been) (?:approved|confirmed|authorized|booked|completed)\b/,
+    /\b(?:la|el|tu|su) (?:entrada temprana|check-?in temprano|salida tardia|check-?out tardio|extension) (?:esta|fue|ha sido) (?:aprobado|aprobada|confirmado|confirmada|autorizado|autorizada|completado|completada)\b/,
+    /\b(?:your|the) (?:reservation|stay) (?:is|was|has been) (?:changed|extended|updated|modified)\b/,
+    /\b(?:la|tu|su) (?:reservacion|reserva|estadia) (?:esta|fue|ha sido) (?:cambiada|extendida|actualizada|modificada)\b/,
   ];
 
-  if (falseCompletionPatterns.some((pattern) => pattern.test(text))) {
+  if (
+    response.escalationCreated === false &&
+    falseCompletionPatterns.some((pattern) => pattern.test(text))
+  ) {
     throw new Error("PIN_AI_RUNTIME_FALSE_COMPLETION_CLAIM");
   }
 }

@@ -112,19 +112,100 @@ test("runtime rejects false completion claims for shadow escalation", () => {
   );
 });
 
-test("runtime allows conditional language when shadow escalation is not executed", () => {
-  assert.doesNotThrow(() =>
-    assertRuntimeResponseSafe({
-      responseText:
-        "This would be escalated to the host for review before any change is approved.",
-      toolCalls: [
-        {
-          name: "escalate_to_host",
-          arguments: {},
-        },
-      ],
-      escalationCreated: false,
-      requiresHumanReview: true,
-    }),
+test("runtime rejects equivalent shadow escalation completion claims", () => {
+  for (const responseText of [
+    "The host has been notified.",
+    "I submitted the combined request.",
+    "Your request has been forwarded to the host.",
+    "Le envié la solicitud al anfitrión.",
+    "La solicitud fue enviada al anfitrión.",
+  ]) {
+    assert.throws(
+      () =>
+        assertRuntimeResponseSafe({
+          responseText,
+          toolCalls: [{ name: "escalate_to_host", arguments: {} }],
+          escalationCreated: false,
+          requiresHumanReview: true,
+        }),
+      /PIN_AI_RUNTIME_FALSE_COMPLETION_CLAIM/,
+    );
+  }
+});
+
+test("runtime rejects escalation completion claims even without a tool call", () => {
+  assert.throws(
+    () =>
+      assertRuntimeResponseSafe({
+        responseText: "I've sent the request to the host.",
+        toolCalls: [],
+        escalationCreated: false,
+        requiresHumanReview: true,
+      }),
+    /PIN_AI_RUNTIME_FALSE_COMPLETION_CLAIM/,
   );
+});
+
+test("runtime rejects false approval or mutation claims after eligibility checks", () => {
+  for (const testCase of [
+    {
+      responseText: "Your late checkout has been approved.",
+      tool: "check_late_checkout",
+    },
+    {
+      responseText: "Your stay extension is confirmed.",
+      tool: "check_extension_availability",
+    },
+    {
+      responseText: "La salida tardía fue aprobada.",
+      tool: "check_late_checkout",
+    },
+    {
+      responseText: "Su reservación ha sido extendida.",
+      tool: "check_extension_availability",
+    },
+  ] as const) {
+    assert.throws(
+      () =>
+        assertRuntimeResponseSafe({
+          responseText: testCase.responseText,
+          toolCalls: [{ name: testCase.tool, arguments: {} }],
+          escalationCreated: false,
+          requiresHumanReview: true,
+        }),
+      /PIN_AI_RUNTIME_FALSE_COMPLETION_CLAIM/,
+    );
+  }
+});
+
+test("runtime allows conditional language when shadow escalation is not executed", () => {
+  for (const responseText of [
+    "This would be escalated to the host for review before any change is approved.",
+    "The host has not been notified. This requires host review.",
+    "Your late checkout is available for review, but it is not yet approved.",
+    "La extensión está disponible, pero aún no ha sido aprobada.",
+    "No reservation changes or charges have been made.",
+  ]) {
+    assert.doesNotThrow(() =>
+      assertRuntimeResponseSafe({
+        responseText,
+        toolCalls: [
+          {
+            name: "check_late_checkout",
+            arguments: {},
+          },
+          {
+            name: "check_extension_availability",
+            arguments: {},
+          },
+          {
+            name: "escalate_to_host",
+            arguments: {},
+          },
+        ],
+        escalationCreated: false,
+        requiresHumanReview: true,
+      }),
+    );
+  }
 });
