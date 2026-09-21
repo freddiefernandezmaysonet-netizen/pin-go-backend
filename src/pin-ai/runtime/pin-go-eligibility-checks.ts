@@ -211,8 +211,11 @@ export class PinGoRuntimeEligibilityChecks {
       };
     }
 
-    const proposedCheckOut = new Date(stay.checkOut);
-    proposedCheckOut.setUTCDate(proposedCheckOut.getUTCDate() + additionalNights);
+    const proposedCheckOut = addLocalCalendarDays(
+      stay.checkOut,
+      requireTimezone(stay),
+      additionalNights,
+    );
 
     const reservationConflict = await this.prisma.reservation.findFirst({
       where: {
@@ -358,4 +361,21 @@ function parseAdditionalNights(value: unknown): number | null {
   if (typeof value !== "number" || !Number.isInteger(value)) return null;
   if (value < 1 || value > 30) return null;
   return value;
+}
+
+function addLocalCalendarDays(
+  value: Date,
+  timezone: string,
+  days: number,
+): Date {
+  const localDateKey = formatInTimeZone(value, timezone, "yyyy-MM-dd");
+  const localTime = formatInTimeZone(value, timezone, "HH:mm:ss.SSS");
+  const [year, month, day] = localDateKey.split("-").map(Number);
+  const shiftedDateKey = new Date(
+    Date.UTC(year, month - 1, day + days),
+  )
+    .toISOString()
+    .slice(0, 10);
+
+  return fromZonedTime(`${shiftedDateKey}T${localTime}`, timezone);
 }

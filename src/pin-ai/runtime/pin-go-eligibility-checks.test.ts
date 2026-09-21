@@ -22,6 +22,9 @@ function fixture(options?: {
   nextCheckIn?: Date | null;
   extensionConflict?: boolean;
   blockedDate?: boolean;
+  checkIn?: Date;
+  checkOut?: Date;
+  timezone?: string;
 }) {
   let reservationCall = 0;
   return {
@@ -32,11 +35,13 @@ function fixture(options?: {
           return {
             id: "reservation-a",
             propertyId: "property-a",
-            checkIn: new Date("2026-09-20T20:00:00.000Z"),
-            checkOut: new Date("2026-09-22T15:00:00.000Z"),
+            checkIn:
+              options?.checkIn ?? new Date("2026-09-20T20:00:00.000Z"),
+            checkOut:
+              options?.checkOut ?? new Date("2026-09-22T15:00:00.000Z"),
             property: {
               organizationId: "org-a",
-              timezone: "America/Puerto_Rico",
+              timezone: options?.timezone ?? "America/Puerto_Rico",
               checkInTime: "16:00",
               checkOutTime: "11:00",
               cleaningDurationMinutes: 180,
@@ -146,4 +151,44 @@ test("extension availability remains a read-only calendar decision", async () =>
   assert.equal(result.decision, "CALENDAR_AVAILABLE_FOR_PRICING");
   assert.equal(result.authorizationGranted, false);
   assert.equal(result.pricingRequired, true);
+});
+
+test("extension preserves local checkout time across spring DST", async () => {
+  const checks = new PinGoRuntimeEligibilityChecks(
+    fixture({
+      checkIn: new Date("2026-03-05T21:00:00.000Z"),
+      checkOut: new Date("2026-03-07T16:00:00.000Z"),
+      timezone: "America/New_York",
+    }),
+  );
+
+  const result = await checks.checkExtensionAvailability(request, {
+    additionalNights: 1,
+  });
+
+  assert.equal(result.decision, "CALENDAR_AVAILABLE_FOR_PRICING");
+  assert.equal(
+    (result.proposedCheckOut as Date).toISOString(),
+    "2026-03-08T15:00:00.000Z",
+  );
+});
+
+test("extension preserves local checkout time across fall DST", async () => {
+  const checks = new PinGoRuntimeEligibilityChecks(
+    fixture({
+      checkIn: new Date("2026-10-29T20:00:00.000Z"),
+      checkOut: new Date("2026-10-31T15:00:00.000Z"),
+      timezone: "America/New_York",
+    }),
+  );
+
+  const result = await checks.checkExtensionAvailability(request, {
+    additionalNights: 1,
+  });
+
+  assert.equal(result.decision, "CALENDAR_AVAILABLE_FOR_PRICING");
+  assert.equal(
+    (result.proposedCheckOut as Date).toISOString(),
+    "2026-11-01T16:00:00.000Z",
+  );
 });
