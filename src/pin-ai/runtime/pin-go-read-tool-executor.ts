@@ -843,6 +843,8 @@ export class PinGoRuntimeReadToolExecutor implements PinAIRuntimeToolExecutor {
       prisma: this.prisma,
       organizationId: request.context.organizationId,
       propertyId: request.context.propertyId,
+      reservationId: request.context.reservationId,
+      currentDateTime: request.context.currentLocalDateTime,
       language,
     });
   }

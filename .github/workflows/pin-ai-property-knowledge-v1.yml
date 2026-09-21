@@ -59,6 +59,7 @@ jobs:
         run: |
           node --import tsx --test \
             src/pin-ai/property-knowledge-entry.contract.test.ts \
+            src/pin-ai/property-knowledge.service.test.ts \
             src/routes/dashboard.property-knowledge.routes.test.ts
 
       - name: Run retained Pin AI Runtime V1 tests
@@ -78,5 +79,9 @@ jobs:
             --types node \
             src/pin-ai/property-knowledge-entry.contract.ts \
             src/pin-ai/property-knowledge-entry.contract.test.ts \
+            src/pin-ai/property-knowledge.service.ts \
+            src/pin-ai/property-knowledge.service.test.ts \
+            src/pin-ai/runtime/pin-go-read-tool-executor.ts \
+            src/pin-ai/runtime/pin-go-read-tool-executor.test.ts \
             src/routes/dashboard.property-knowledge.routes.ts \
             src/routes/dashboard.property-knowledge.routes.test.ts

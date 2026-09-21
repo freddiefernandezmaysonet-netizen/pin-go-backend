@@ -70,6 +70,7 @@ function createPrismaFixture(options: Readonly<{
     latitude: number | null;
     longitude: number | null;
   }>;
+  propertyKnowledgeEntries?: readonly Readonly<Record<string, unknown>>[];
 }> = {}) {
   const paymentContext = options.paymentContext ?? {};
 
@@ -93,6 +94,15 @@ function createPrismaFixture(options: Readonly<{
           propertyDevices: [],
           guestAgreements: [],
           cancellationPolicies: [],
+          knowledgeEntries: options.propertyKnowledgeEntries ?? [],
+          reservations: [
+            {
+              id: "reservation-a",
+              status: "ACTIVE",
+              checkIn: new Date("2026-09-20T20:00:00.000Z"),
+              checkOut: new Date("2026-09-22T15:00:00.000Z"),
+            },
+          ],
           latitude: options.propertyCoordinates
             ? options.propertyCoordinates.latitude
             : 18.2,
@@ -235,6 +245,62 @@ function createPrismaFixture(options: Readonly<{
     },
   };
 }
+
+test("real read adapter exposes persisted Property Knowledge only within guest visibility", async () => {
+  const executor = new PinGoRuntimeReadToolExecutor(
+    createPrismaFixture({
+      propertyKnowledgeEntries: [
+        {
+          category: "PARKING",
+          key: "parking.instructions",
+          titleEn: "Parking",
+          titleEs: "Estacionamiento",
+          contentEn: "Use space 4.",
+          contentEs: "Use el espacio 4.",
+          visibility: "CONFIRMED_GUEST",
+          sortOrder: 10,
+          revision: 1,
+          isActive: true,
+          createdByUserId: "private-user-a",
+          updatedByUserId: "private-user-b",
+        },
+        {
+          category: "WIFI",
+          key: "wifi.main",
+          titleEn: "Wi-Fi",
+          titleEs: "Wi-Fi",
+          contentEn: "Network: CasaGuest; password: palms-and-sun",
+          contentEs: "Red: CasaGuest; contraseña: palms-and-sun",
+          visibility: "DURING_STAY",
+          sortOrder: 20,
+          revision: 1,
+          isActive: true,
+        },
+      ],
+    }),
+  );
+  const inStayRequest: PinAIRuntimeRequest = {
+    ...request,
+    context: {
+      ...request.context,
+      currentLocalDateTime: "2026-09-21T10:00:00-04:00",
+      preferredLanguage: "es",
+    },
+  };
+
+  const result = await executor.execute(
+    "get_property_knowledge",
+    {},
+    inStayRequest,
+    createConversationMemory(inStayRequest),
+  );
+
+  const serialized = JSON.stringify(result);
+  assert.match(serialized, /parking\.instructions/);
+  assert.match(serialized, /Use el espacio 4/);
+  assert.match(serialized, /wifi\.main/);
+  assert.doesNotMatch(serialized, /private-user-a|private-user-b/);
+});
 
 test("real read adapter returns scoped reservation context without guest PII or Stripe IDs", async () => {
   const executor = new PinGoRuntimeReadToolExecutor(createPrismaFixture());

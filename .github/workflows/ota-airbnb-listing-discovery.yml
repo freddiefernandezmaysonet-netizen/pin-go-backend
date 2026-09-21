@@ -74,6 +74,10 @@ jobs:
           prisma/schema.prisma
           src/pin-ai/property-knowledge-entry.contract.test.ts
           src/pin-ai/property-knowledge-entry.contract.ts
+          src/pin-ai/property-knowledge.service.test.ts
+          src/pin-ai/property-knowledge.service.ts
+          src/pin-ai/runtime/pin-go-read-tool-executor.test.ts
+          src/pin-ai/runtime/pin-go-read-tool-executor.ts
           src/routes/dashboard.property-knowledge.routes.test.ts
           src/routes/dashboard.property-knowledge.routes.ts
           src/server.ts
