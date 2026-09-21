@@ -1,0 +1,22 @@
+Trigger one controlled staging eligibility deployment for Pin AI Runtime V1 Luna shadow canary.
+Verification rerun after truthful shadow-completion guard.
+Verification rerun after Runtime V1 tool allowlist certification.
+One controlled direct read-only extension price canary after Runtime V1 Run #54.
+One controlled Luna eligibility canary after enabling read-only extension pricing in Runtime V1 Run #58.
+One controlled direct read-only date-change canary after Runtime V1 Run #65.
+One controlled Luna date-change canary after enabling the read-only tool in Runtime V1 Run #68.
+One controlled direct read-only cancellation-policy canary after Runtime V1 Run #71.
+One controlled Luna cancellation-policy canary after enabling the read-only tool in Runtime V1 Run #74.
+One controlled Luna eligibility metadata verification after Runtime V1 Run #60.
+One final controlled Luna truthfulness verification after Runtime V1 Run #62.
+One controlled direct read-only payment-context canary after Runtime V1 Run #77.
+One controlled Luna payment-context canary after enabling the read-only tool in Runtime V1 Run #80.
+One controlled Luna native web-search canary after Runtime V1 Run #84.
+Restore the stable eligibility canary after the web-search staging context precondition failed.
+One final controlled Luna native web-search canary after the location fallback passed Runtime V1 Run #86.
+Execute the authorized native web-search canary after correcting the Railway command restoration sequence.
+Restore the stable eligibility canary after staging property location data was unavailable.
+Run one read-only staging property-location audit after Runtime V1 Run #90.
+Run the authorized native web-search canary after the timezone-derived PR fallback passed Runtime V1 Run #92.
+Run one authorized diagnostic native web-search canary after Runtime V1 Run #94.
+Run one authorized combined web-search and eligibility canary after Runtime V1 Run #97.
