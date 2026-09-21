@@ -1,4 +1,5 @@
 import { Router } from "express";
+import type Stripe from "stripe";
 import { PrismaClient, ReservationModificationStatus } from "@prisma/client";
 import {
   checkPropertyAvailability,
@@ -860,6 +861,22 @@ publicBookingRouter.get("/:organizationSlug/:propertySlug", async (req, res) => 
             amount: true,
           },
         },
+        nearbyPlaces: {
+          where: { isActive: true },
+          orderBy: [{ sortOrder: "asc" }, { createdAt: "asc" }],
+          select: {
+            id: true,
+            name: true,
+            category: true,
+            description: true,
+            distanceText: true,
+            travelTimeMinutes: true,
+            latitude: true,
+            longitude: true,
+            googleMapsUrl: true,
+            photoUrl: true,
+          },
+        },
        taxes: {
          where: { isActive: true },
          orderBy: { name: "asc" },
@@ -1071,6 +1088,113 @@ publicBookingRouter.post("/check-availability", async (req, res) => {
   } catch (error: any) {
     console.error("[public-booking availability error]", error?.message ?? error);
     return res.status(500).json({ ok: false, error: "Failed to check availability" });
+  }
+});
+
+publicBookingRouter.post("/calendar-rates", async (req, res) => {
+  try {
+    const { propertyId, from, to } = req.body ?? {};
+    const fromDateKey = parseDateKey(from);
+    const toDateKey = parseDateKey(to);
+
+    if (!propertyId || !fromDateKey || !toDateKey) {
+      return res.status(400).json({
+        ok: false,
+        error: "Invalid calendar rates request",
+      });
+    }
+
+    const property = await prisma.property.findFirst({
+      where: {
+        id: String(propertyId),
+        status: "ACTIVE",
+        isPublicBookable: true,
+        organization: {
+          publicBookingEnabled: true,
+        },
+      },
+      select: {
+        id: true,
+        checkInTime: true,
+        checkOutTime: true,
+        timezone: true,
+      },
+    });
+
+    if (!property) {
+      return res.status(404).json({
+        ok: false,
+        error: "Property not available for public booking",
+      });
+    }
+
+    const endExclusiveKey = new Date(
+      Date.UTC(
+        Number(toDateKey.slice(0, 4)),
+        Number(toDateKey.slice(5, 7)) - 1,
+        Number(toDateKey.slice(8, 10)) + 1
+      )
+    )
+      .toISOString()
+      .slice(0, 10);
+
+    const stayDates = buildPropertyStayDateRange({
+      checkInDateKey: fromDateKey,
+      checkOutDateKey: endExclusiveKey,
+      propertyCheckInTime: property.checkInTime,
+      propertyCheckOutTime: property.checkOutTime,
+      propertyTimeZone: property.timezone,
+    });
+
+    if (stayDates.checkIn >= stayDates.checkOut) {
+      return res.status(400).json({
+        ok: false,
+        error: "Invalid calendar rates request",
+      });
+    }
+
+    const maxCalendarDays = 93;
+    const calendarDays = Math.ceil(
+      (stayDates.checkOut.getTime() - stayDates.checkIn.getTime()) /
+        (1000 * 60 * 60 * 24)
+    );
+
+    if (calendarDays > maxCalendarDays) {
+      return res.status(400).json({
+        ok: false,
+        error: "Calendar rate range exceeds 93 days",
+      });
+    }
+
+    const pricing = await calculateDirectBookingPricing({
+      propertyId: property.id,
+      checkIn: stayDates.checkIn,
+      checkOut: stayDates.checkOut,
+      selectedAmenityIds: [],
+      includeAuditEntries: false,
+    });
+
+    return res.json({
+      ok: true,
+      currency: pricing.currency,
+      rates: pricing.nightlyRates.map((item) => ({
+        date: item.date,
+        rate: item.rate,
+      })),
+      from: fromDateKey,
+      to: toDateKey,
+      timezone: stayDates.timeZone,
+    });
+  } catch (error: any) {
+    console.error(
+      "[public-booking calendar-rates error]",
+      error?.message ?? error
+    );
+
+    return res.status(500).json({
+      ok: false,
+      error: "Unable to load calendar rates",
+    });
   }
 });
 
@@ -1442,11 +1566,7 @@ const guestAcceptedSecurePreCheckinRequirementText =
     const platformFeeAmount = toMoneyFromCents(platformFeeAmountCents);
     const hostPayoutAmount = toMoneyFromCents(hostPayoutAmountCents);
 
-    const paymentIntentData: any = {
-      transfer_data: {
-        destination: connectedAccountId,
-      },
-    };
+    const paymentIntentData: Stripe.Checkout.SessionCreateParams.PaymentIntentData = {};
 
     if (platformFeeAmountCents > 0) {
       paymentIntentData.application_fee_amount = platformFeeAmountCents;

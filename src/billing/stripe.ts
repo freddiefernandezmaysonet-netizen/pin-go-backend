@@ -1,8 +1,6 @@
 import Stripe from "stripe";
 import {
   buildDirectBookingCheckoutStripeContext,
-  directBookingDirectChargesAllowedForConnectedAccount,
-  directBookingDirectChargesEnabled,
 } from "../services/direct-booking-stripe-charge-mode.service.js";
 
 const raw = process.env.STRIPE_SECRET_KEY;
@@ -18,9 +16,6 @@ const stripe = new Stripe(key, {
   apiVersion: "2023-10-16",
 });
 
-const CONNECT_CANARY_IGNORED_EVENT_TYPE =
-  "pin_go.connect_canary_ignored";
-
 const originalCheckoutSessionCreate =
   stripe.checkout.sessions.create.bind(stripe.checkout.sessions);
 
@@ -30,13 +25,7 @@ stripe.checkout.sessions.create = (async (
 ) => {
   const flow = String(params.metadata?.flow ?? "").trim();
 
-  // Direct Charges V1 is intentionally fenced to the initial Direct Booking
-  // checkout. Reservation modifications remain on the certified legacy path
-  // until their retrieve/payment/refund lifecycle is explicitly migrated.
-  if (
-    flow !== "direct_booking" ||
-    !directBookingDirectChargesEnabled()
-  ) {
+  if (flow !== "direct_booking") {
     return originalCheckoutSessionCreate(params, options);
   }
 
@@ -92,7 +81,6 @@ stripe.webhooks.constructEvent = ((...args: any[]) => {
     ).trim();
 
     if (
-      !directBookingDirectChargesEnabled() ||
       !connectWebhookSecret ||
       connectWebhookSecret === String(args[2] ?? "")
     ) {
@@ -102,31 +90,9 @@ stripe.webhooks.constructEvent = ((...args: any[]) => {
     const connectArgs = [...args];
     connectArgs[2] = connectWebhookSecret;
 
-    const connectEvent = (originalConstructEvent as any)(
+    return (originalConstructEvent as any)(
       ...connectArgs
     ) as Stripe.Event;
-    const connectedAccountId = String(
-      (connectEvent as Stripe.Event & { account?: string }).account ?? ""
-    ).trim();
-
-    if (
-      !directBookingDirectChargesAllowedForConnectedAccount(
-        connectedAccountId
-      )
-    ) {
-      console.warn("[STRIPE_CONNECT_CANARY_EVENT_IGNORED]", {
-        eventId: connectEvent.id,
-        eventType: connectEvent.type,
-        connectedAccountId: connectedAccountId || null,
-      });
-
-      return {
-        ...connectEvent,
-        type: CONNECT_CANARY_IGNORED_EVENT_TYPE,
-      } as unknown as Stripe.Event;
-    }
-
-    return connectEvent;
   }
 }) as typeof stripe.webhooks.constructEvent;
 

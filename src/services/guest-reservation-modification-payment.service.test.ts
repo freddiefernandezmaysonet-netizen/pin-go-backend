@@ -45,6 +45,7 @@ function createSession(): Stripe.Checkout.Session {
       reservationId: "reservation_001",
       propertyId: "property_001",
       connectedAccountId: "acct_connected_001",
+      stripeChargeMode: "DIRECT_CHARGE",
       additionalChargeAmountCents: "10000",
       additionalPlatformFeeAmountCents: "500",
       additionalHostPayoutAmountCents: "9500",
@@ -62,7 +63,7 @@ function expectPaymentError(
   });
 }
 
-test("accepts a paid Checkout only when identity, amounts and destination match", () => {
+test("accepts a paid Direct Charge Checkout only when identity, amounts and connected account match", () => {
   const contract = buildGuestReservationModificationPaidCheckoutContract({
     session: createSession(),
     modification: createModification(),
@@ -124,7 +125,7 @@ test("rejects a Checkout linked to another modification or session", () => {
   );
 });
 
-test("rejects a Connect destination different from the durable snapshot", () => {
+test("rejects a connected account different from the durable snapshot", () => {
   const session = createSession();
   session.metadata!.connectedAccountId = "acct_attacker";
 
@@ -149,7 +150,11 @@ test("persists independent Stripe evidence before invoking the canonical applier
     /status:\s*ReservationModificationStatus\.PAYMENT_PROCESSING/
   );
   assert.match(source, /stripe\.paymentIntents\.retrieve/);
-  assert.match(source, /stripe\.transfers\.retrieve/);
+  assert.match(
+    source,
+    /stripe\.paymentIntents\.retrieve\([\s\S]*stripeAccount:\s*contract\.connectedAccountId/
+  );
+  assert.doesNotMatch(source, /stripe\.transfers\.retrieve/);
   assert.match(source, /stripe\.applicationFees\.retrieve/);
   assert.match(source, /status:\s*ReservationModificationStatus\.APPLYING/);
   assert.match(source, /await applyGuestReservationModification\(/);

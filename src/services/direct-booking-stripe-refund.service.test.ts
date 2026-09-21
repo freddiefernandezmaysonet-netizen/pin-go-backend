@@ -1,55 +1,15 @@
 import assert from "node:assert/strict";
 import test from "node:test";
+import type Stripe from "stripe";
 import { createDirectBookingStripeRefund } from "./direct-booking-stripe-refund.service.js";
 
-function resourceMissing() {
-  return Object.assign(new Error("No such payment_intent"), {
-    code: "resource_missing",
-    statusCode: 404,
-  });
-}
-
-test("legacy destination refund is sent unchanged and is not retried", async () => {
-  const calls: unknown[] = [];
-  const refund = { id: "re_legacy" } as any;
-  const stripeClient = {
-    refunds: {
-      create: async (...args: unknown[]) => {
-        calls.push(args);
-        return refund;
-      },
-    },
-  };
-  const params = {
-    payment_intent: "pi_legacy",
-    amount: 1000,
-    reverse_transfer: true,
-    refund_application_fee: true,
-  };
-  const options = { idempotencyKey: "refund:legacy" };
-
-  const result = await createDirectBookingStripeRefund({
-    stripeClient,
-    params,
-    options,
-    connectedAccountId: "acct_host",
-  });
-
-  assert.equal(result.refund, refund);
-  assert.equal(result.chargeMode, "DESTINATION_CHARGE");
-  assert.equal(result.reverseTransfer, true);
-  assert.equal(result.stripeAccount, null);
-  assert.deepEqual(calls, [[params, options]]);
-});
-
-test("direct charge refund retries in connected account without reverse_transfer", async () => {
+test("Direct Charge refund is created directly in the connected account", async () => {
   const calls: unknown[] = [];
   const refund = { id: "re_direct" } as any;
   const stripeClient = {
     refunds: {
       create: async (...args: unknown[]) => {
         calls.push(args);
-        if (calls.length === 1) throw resourceMissing();
         return refund;
       },
     },
@@ -57,7 +17,6 @@ test("direct charge refund retries in connected account without reverse_transfer
   const params = {
     payment_intent: "pi_direct",
     amount: 1000,
-    reverse_transfer: true,
     refund_application_fee: true,
     metadata: { reservationId: "res_123" },
   };
@@ -74,18 +33,45 @@ test("direct charge refund retries in connected account without reverse_transfer
   assert.equal(result.chargeMode, "DIRECT_CHARGE");
   assert.equal(result.reverseTransfer, false);
   assert.equal(result.stripeAccount, "acct_host");
+  assert.deepEqual(calls, [
+    [
+      params,
+      {
+        idempotencyKey: "refund:direct",
+        stripeAccount: "acct_host",
+      },
+    ],
+  ]);
+});
 
-  const secondCall = calls[1] as [Record<string, unknown>, Record<string, unknown>];
-  assert.equal("reverse_transfer" in secondCall[0], false);
-  assert.equal(secondCall[0].refund_application_fee, true);
-  assert.equal(secondCall[0].payment_intent, "pi_direct");
-  assert.deepEqual(secondCall[1], {
-    idempotencyKey: "refund:direct",
-    stripeAccount: "acct_host",
+test("Direct Charge refund preserves application fee refund semantics", async () => {
+  const refund = { id: "re_direct" } as any;
+  const stripeClient = {
+    refunds: {
+      create: async (
+        params: Stripe.RefundCreateParams,
+        options?: Stripe.RequestOptions
+      ) => {
+        assert.equal(params.refund_application_fee, true);
+        assert.equal("reverse_transfer" in params, false);
+        assert.equal(options?.stripeAccount, "acct_host");
+        return refund;
+      },
+    },
+  };
+
+  await createDirectBookingStripeRefund({
+    stripeClient,
+    params: {
+      payment_intent: "pi_direct",
+      amount: 500,
+      refund_application_fee: true,
+    },
+    connectedAccountId: "acct_host",
   });
 });
 
-test("non-resource Stripe errors are never retried", async () => {
+test("Stripe errors are not retried through the platform account", async () => {
   let calls = 0;
   const stripeClient = {
     refunds: {
@@ -102,7 +88,6 @@ test("non-resource Stripe errors are never retried", async () => {
       params: {
         payment_intent: "pi_direct",
         amount: 1000,
-        reverse_transfer: true,
       },
       connectedAccountId: "acct_host",
     }),
@@ -111,13 +96,13 @@ test("non-resource Stripe errors are never retried", async () => {
   assert.equal(calls, 1);
 });
 
-test("resource missing is not retried without a valid connected account", async () => {
+test("missing connected account fails closed before Stripe is called", async () => {
   let calls = 0;
   const stripeClient = {
     refunds: {
       create: async () => {
         calls += 1;
-        throw resourceMissing();
+        return { id: "re_should_not_exist" } as any;
       },
     },
   };
@@ -128,11 +113,10 @@ test("resource missing is not retried without a valid connected account", async 
       params: {
         payment_intent: "pi_direct",
         amount: 1000,
-        reverse_transfer: true,
       },
       connectedAccountId: null,
     }),
-    /No such payment_intent/
+    /DIRECT_BOOKING_STRIPE_CONNECTED_ACCOUNT_INVALID/
   );
-  assert.equal(calls, 1);
+  assert.equal(calls, 0);
 });

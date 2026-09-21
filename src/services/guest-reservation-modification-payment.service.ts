@@ -280,24 +280,19 @@ async function retrieveFinancialEvidence(
     {
       expand: [
         "latest_charge",
-        "latest_charge.transfer",
         "latest_charge.application_fee",
       ],
-    }
+    },
+    { stripeAccount: contract.connectedAccountId }
   );
-  const paymentIntentAny = paymentIntent as any;
-  const paymentIntentDestination = objectId(
-    paymentIntentAny.transfer_data?.destination
-  );
-
   if (
     paymentIntent.status !== "succeeded" ||
     paymentIntent.amount_received !== contract.additionalChargeAmountCents ||
     paymentIntent.currency.toLowerCase() !== contract.currency ||
     paymentIntent.application_fee_amount !==
       (contract.additionalPlatformFeeAmountCents || null) ||
-    paymentIntentDestination !== contract.connectedAccountId ||
     paymentIntent.metadata?.flow !== MODIFICATION_PAYMENT_FLOW ||
+    paymentIntent.metadata?.stripeChargeMode !== "DIRECT_CHARGE" ||
     paymentIntent.metadata?.reservationModificationId !==
       contract.modificationId ||
     paymentIntent.metadata?.reservationId !== contract.reservationId ||
@@ -320,16 +315,17 @@ async function retrieveFinancialEvidence(
   }
 
   if (typeof latestCharge === "string") {
-    charge = await stripe.charges.retrieve(latestCharge, {
-      expand: ["transfer", "application_fee"],
-    });
+    charge = await stripe.charges.retrieve(
+      latestCharge,
+      { expand: ["application_fee"] },
+      { stripeAccount: contract.connectedAccountId }
+    );
   } else {
     charge = latestCharge;
   }
 
   const chargeAny = charge as any;
   const chargePaymentIntentId = objectId(charge.payment_intent);
-  const transferId = objectId(chargeAny.transfer);
   const applicationFeeId = objectId(chargeAny.application_fee);
 
   if (
@@ -338,28 +334,11 @@ async function retrieveFinancialEvidence(
     charge.amount !== contract.additionalChargeAmountCents ||
     charge.currency.toLowerCase() !== contract.currency ||
     chargePaymentIntentId !== contract.paymentIntentId ||
-    !transferId ||
     (contract.additionalPlatformFeeAmountCents > 0 && !applicationFeeId)
   ) {
     throw paymentError({
       code: "RESERVATION_MODIFICATION_PAYMENT_CHARGE_MISMATCH",
       message: "Stripe Charge evidence does not match the modification.",
-    });
-  }
-
-  const transfer =
-    typeof chargeAny.transfer === "string"
-      ? await stripe.transfers.retrieve(transferId)
-      : (chargeAny.transfer as Stripe.Transfer);
-
-  if (
-    transfer.amount !== contract.additionalHostPayoutAmountCents ||
-    transfer.currency.toLowerCase() !== contract.currency ||
-    objectId(transfer.destination) !== contract.connectedAccountId
-  ) {
-    throw paymentError({
-      code: "RESERVATION_MODIFICATION_PAYMENT_TRANSFER_MISMATCH",
-      message: "Stripe Transfer evidence does not match the host payout.",
     });
   }
 
@@ -390,7 +369,7 @@ async function retrieveFinancialEvidence(
   return {
     stripePaymentIntentId: paymentIntent.id,
     stripeChargeId: charge.id,
-    stripeTransferId: transfer.id,
+    stripeTransferId: null,
     stripeApplicationFeeId: applicationFee?.id ?? null,
   };
 }
@@ -489,7 +468,6 @@ export async function handleGuestReservationModificationCheckoutPaid(
         modification.stripePaymentStatus === "paid" &&
         modification.stripePaymentIntentId === contract.paymentIntentId &&
         Boolean(modification.stripeChargeId) &&
-        Boolean(modification.stripeTransferId) &&
         (contract.additionalPlatformFeeAmountCents === 0 ||
           Boolean(modification.stripeApplicationFeeId));
 

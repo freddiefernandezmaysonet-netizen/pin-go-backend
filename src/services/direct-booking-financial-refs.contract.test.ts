@@ -8,20 +8,25 @@ const source = fs.readFileSync(
   "utf8"
 );
 
-test("Direct Booking financial refs select connected-account context only for Direct Charges", () => {
+test("Direct Booking financial refs require Direct Charge context", () => {
   assert.match(
     source,
-    /stripeChargeMode\s*===\s*"DIRECT_CHARGE"\s*&&\s*stripeConnectedAccountId[\s\S]*\?\s*stripeConnectedAccountId\s*:\s*undefined/
+    /stripeChargeMode\s*!==\s*"DIRECT_CHARGE"[\s\S]*DIRECT_BOOKING_STRIPE_CHARGE_MODE_INVALID/
   );
   assert.match(
     source,
-    /stripeAccount\s*\?\s*\{\s*stripeAccount\s*\}\s*:\s*undefined/
+    /stripeConnectedAccountId[\s\S]*startsWith\("acct_"\)[\s\S]*DIRECT_BOOKING_STRIPE_CONNECTED_ACCOUNT_INVALID/
   );
 });
 
-test("Destination Charge financial refs preserve platform context", () => {
+test("Direct Booking financial refs always read PaymentIntent in the connected account", () => {
   assert.match(
     source,
-    /stripeChargeMode\s*===\s*"DIRECT_CHARGE"[\s\S]*:\s*undefined/
+    /stripe\.paymentIntents\.retrieve\([\s\S]*\{\s*stripeAccount:\s*stripeConnectedAccountId!\s*\}/
   );
+  assert.doesNotMatch(
+    source,
+    /stripeAccount\s*\?\s*\{\s*stripeAccount\s*\}\s*:\s*undefined/
+  );
+  assert.doesNotMatch(source, /latest_charge\.transfer/);
 });

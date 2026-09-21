@@ -32,6 +32,13 @@ on:
       - "src/services/direct-booking-financial-refs.contract.test.ts"
       - "src/services/direct-booking-refund.service.ts"
       - "src/services/direct-booking-refund-direct-charges.contract.test.ts"
+      - "src/services/direct-booking-direct-charges-only.contract.test.ts"
+      - "src/services/guest-reservation-modification-checkout.service.ts"
+      - "src/services/guest-reservation-modification-checkout.service.test.ts"
+      - "src/services/guest-reservation-modification-payment.service.ts"
+      - "src/services/guest-reservation-modification-payment.service.test.ts"
+      - "src/services/guest-reservation-modification-apply.service.ts"
+      - "src/services/guest-reservation-modification-apply.service.test.ts"
       - "tsconfig.direct-booking-direct-charges-v1.json"
       - ".github/workflows/direct-booking-direct-charges-v1-certification.yml"
 
@@ -65,6 +72,10 @@ jobs:
           src/services/direct-booking-stripe-financial-evidence.service.test.ts
           src/services/direct-booking-financial-refs.contract.test.ts
           src/services/direct-booking-refund-direct-charges.contract.test.ts
+          src/services/direct-booking-direct-charges-only.contract.test.ts
+          src/services/guest-reservation-modification-checkout.service.test.ts
+          src/services/guest-reservation-modification-payment.service.test.ts
+          src/services/guest-reservation-modification-apply.service.test.ts
           src/services/stripe-connect-dashboard-link.contract.test.ts
           src/services/stripe-financial-event-ledger.service.test.ts
           src/services/stripe-direct-charge-dispute.service.test.ts
