@@ -308,8 +308,10 @@ model PropertyNearbyPlace {
   id                String              @id @default(cuid())
   propertyId        String
   name              String
+  nameEs            String?
   category          NearbyPlaceCategory @default(OTHER)
   description       String?
+  descriptionEs     String?
   distanceText      String?
   travelTimeMinutes Int?
   latitude          Decimal?            @db.Decimal(10, 7)
