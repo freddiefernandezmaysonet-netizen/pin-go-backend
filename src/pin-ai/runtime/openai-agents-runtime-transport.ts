@@ -16,6 +16,7 @@ export type OpenAIRuntimeTransportConfig = Readonly<{
   enabled: boolean;
   apiKey?: string;
   agentId?: string;
+  resumeSessionId?: string;
   model: "gpt-5.6-luna";
   webSearch?: PinAIOpenAIWebSearchConfig;
   baseUrl?: string;
@@ -73,7 +74,17 @@ export class OpenAIAgentsRuntimeTransport {
     let escalationCreated = false;
     let requiresHumanReview = false;
 
-    let session = await this.createSession(request, memory);
+    let session: RuntimeSessionSnapshot;
+    if (this.config.resumeSessionId) {
+      session = await this.retrieveSession(this.config.resumeSessionId);
+      if (session.status !== "idle") {
+        throw new Error("PIN_AI_RUNTIME_AGENT_SESSION_BUSY");
+      }
+      await this.submitGuestMessage(session.id, request, memory);
+      session = await this.retrieveSession(session.id);
+    } else {
+      session = await this.createSession(request, memory);
+    }
     let polls = 0;
     const maxPolls = this.config.maxPolls ?? 30;
 
@@ -147,6 +158,7 @@ export class OpenAIAgentsRuntimeTransport {
 
     return {
       responseText,
+      openaiSessionId: session.id,
       toolCalls: recordedToolCalls,
       webSearch: {
         enabled: this.config.webSearch?.enabled === true,
@@ -173,6 +185,12 @@ export class OpenAIAgentsRuntimeTransport {
       !/^agent_[A-Za-z0-9]+$/.test(this.config.agentId)
     ) {
       throw new Error("PIN_AI_RUNTIME_OPENAI_AGENT_ID_INVALID");
+    }
+    if (
+      this.config.resumeSessionId !== undefined &&
+      !/^session_[A-Za-z0-9_-]+$/.test(this.config.resumeSessionId)
+    ) {
+      throw new Error("PIN_AI_RUNTIME_OPENAI_SESSION_ID_INVALID");
     }
   }
 
@@ -213,6 +231,41 @@ export class OpenAIAgentsRuntimeTransport {
         "GET",
         `/v1/agents/sessions/${encodeURIComponent(sessionId)}`,
       ),
+    );
+  }
+
+  private async submitGuestMessage(
+    sessionId: string,
+    request: PinAIRuntimeRequest,
+    memory: PinAIConversationMemory,
+  ): Promise<void> {
+    await this.requestJson(
+      "POST",
+      `/v1/agents/sessions/${encodeURIComponent(sessionId)}/events`,
+      JSON.stringify({
+        events: [
+          {
+            type: "agent.session.input.message",
+            input: [
+              {
+                role: "user",
+                content: [
+                  {
+                    type: "input_text",
+                    text: JSON.stringify({
+                      runtime: "pin-ai-v1",
+                      context: request.context,
+                      memory,
+                      conversation: request.conversation,
+                    }),
+                  },
+                ],
+              },
+            ],
+          },
+        ],
+      }),
+      true,
     );
   }
 
@@ -371,12 +424,13 @@ function parseRequiredAction(value: unknown): RuntimeRequiredAction {
 function extractAssistantText(payload: unknown): string {
   const root = asRecord(payload);
   const data = Array.isArray(root.data) ? root.data : [];
-  const chunks: string[] = [];
+  let latestChunks: string[] = [];
 
   for (const itemValue of data) {
     const item = asRecord(itemValue);
     if (item.type !== "message" || item.role !== "assistant") continue;
     const content = Array.isArray(item.content) ? item.content : [];
+    const chunks: string[] = [];
 
     for (const partValue of content) {
       const part = asRecord(partValue);
@@ -384,16 +438,22 @@ function extractAssistantText(payload: unknown): string {
         chunks.push(part.text);
       }
     }
+    if (chunks.length > 0) latestChunks = chunks;
   }
 
-  return chunks.join("\n").trim();
+  return latestChunks.join("\n").trim();
 }
 
 function countWebSearchCalls(payload: unknown): number {
   const root = asRecord(payload);
   const data = Array.isArray(root.data) ? root.data : [];
+  const lastGuestMessageIndex = data.reduce((lastIndex, itemValue, index) => {
+    const item = asRecord(itemValue);
+    return item.type === "message" && item.role === "user" ? index : lastIndex;
+  }, -1);
+  const currentTurnItems = data.slice(lastGuestMessageIndex + 1);
 
-  return data.reduce((count, itemValue) => {
+  return currentTurnItems.reduce((count, itemValue) => {
     const item = asRecord(itemValue);
     return typeof item.type === "string" && item.type.includes("web_search")
       ? count + 1

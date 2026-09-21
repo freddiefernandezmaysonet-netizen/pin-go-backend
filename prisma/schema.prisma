@@ -574,12 +574,29 @@ model Reservation {
   modifications           ReservationModification[]
   review                   PropertyReview?
   reviewInvitation         PropertyReviewInvitation?
+  pinAIGuestConversation   PinAIGuestConversation?
 
   @@unique([propertyId, externalProvider, externalId])
   @@index([propertyId, checkIn, checkOut])
   @@index([cancellationPolicyId])
   @@index([status, cancelledAt])
   @@index([propertyId, status, checkIn])
+}
+
+model PinAIGuestConversation {
+  id                 String       @id @default(cuid())
+  reservationId      String       @unique
+  openaiSessionId    String?      @unique @db.VarChar(160)
+  leaseToken         String?      @db.VarChar(64)
+  leaseExpiresAt     DateTime?
+  lastMessageAt      DateTime?
+  lastErrorCode      String?      @db.VarChar(120)
+  createdAt          DateTime     @default(now())
+  updatedAt          DateTime     @updatedAt
+  reservation        Reservation  @relation(fields: [reservationId], references: [id], onDelete: Cascade)
+
+  @@index([leaseExpiresAt])
+  @@index([lastMessageAt])
 }
 
 model PropertyReview {

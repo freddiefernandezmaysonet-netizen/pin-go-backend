@@ -17,6 +17,14 @@ const now = new Date("2026-09-21T16:00:00.000Z");
 
 function createPrisma(reservation: unknown) {
   const calls: unknown[] = [];
+  let conversation: {
+    reservationId: string;
+    openaiSessionId: string | null;
+    leaseToken: string | null;
+    leaseExpiresAt: Date | null;
+    lastMessageAt?: Date | null;
+    lastErrorCode?: string | null;
+  } | null = null;
   const prisma = {
     reservation: {
       async findFirst(args: unknown) {
@@ -24,8 +32,59 @@ function createPrisma(reservation: unknown) {
         return reservation;
       },
     },
+    pinAIGuestConversation: {
+      async findUnique() {
+        return conversation
+          ? { openaiSessionId: conversation.openaiSessionId }
+          : null;
+      },
+      async create(args: {
+        data: {
+          reservationId: string;
+          leaseToken: string;
+          leaseExpiresAt: Date;
+        };
+      }) {
+        if (conversation) throw new Error("UNIQUE_CONSTRAINT");
+        conversation = {
+          reservationId: args.data.reservationId,
+          openaiSessionId: null,
+          leaseToken: args.data.leaseToken,
+          leaseExpiresAt: args.data.leaseExpiresAt,
+        };
+        return conversation;
+      },
+      async updateMany(args: {
+        where: {
+          reservationId: string;
+          leaseToken?: string;
+          OR?: unknown[];
+        };
+        data: Partial<NonNullable<typeof conversation>>;
+      }) {
+        if (!conversation || conversation.reservationId !== args.where.reservationId) {
+          return { count: 0 };
+        }
+        if (
+          args.where.leaseToken !== undefined &&
+          conversation.leaseToken !== args.where.leaseToken
+        ) {
+          return { count: 0 };
+        }
+        if (
+          args.where.OR &&
+          conversation.leaseToken !== null &&
+          conversation.leaseExpiresAt &&
+          conversation.leaseExpiresAt >= now
+        ) {
+          return { count: 0 };
+        }
+        conversation = { ...conversation, ...args.data };
+        return { count: 1 };
+      },
+    },
   } as unknown as GuestPinAIGatewayPrisma;
-  return { prisma, calls };
+  return { prisma, calls, getConversation: () => conversation };
 }
 
 function shadowResult(
@@ -38,6 +97,7 @@ function shadowResult(
     memory: createConversationMemory(request),
     response: {
       responseText: "El checkout requiere revisión del host.",
+      openaiSessionId: "session_test",
       toolCalls: [{ name: "check_late_checkout", arguments: {} }],
       webSearch: { enabled: true, used: false, callCount: 0 },
       escalationCreated: false,
@@ -127,14 +187,85 @@ test("scopes one valid token to one active reservation and sends no guest PII", 
   assert.deepEqual(result, {
     reply: "El checkout requiere revisión del host.",
     mode: "SHADOW",
-    conversationPersisted: false,
+    conversationPersisted: true,
     escalationCreated: false,
     requiresHumanReview: true,
     actionsExecuted: false,
-    databaseWrites: false,
+    databaseWrites: true,
+    operationalWrites: false,
     webSearch: { enabled: true, used: false },
   });
   assert.equal("toolCalls" in result, false);
+});
+
+test("reuses one server-side OpenAI session for conversational follow-ups", async () => {
+  const { prisma, getConversation } = createPrisma({
+    id: "reservation-a",
+    propertyId: "property-a",
+    preferredLanguage: "es",
+    property: {
+      organizationId: "org-a",
+      city: "San Juan",
+      region: "PR",
+      country: "PR",
+      timezone: "America/Puerto_Rico",
+    },
+  });
+  const resumeSessionIds: Array<string | undefined> = [];
+  const messages: string[] = [];
+  const runtime: GuestPinAIRuntimeRunner = async (
+    request,
+    _location,
+    resumeSessionId,
+  ) => {
+    resumeSessionIds.push(resumeSessionId);
+    messages.push(request.conversation[0]?.content ?? "");
+    return shadowResult(request, { openaiSessionId: "session_conversation" });
+  };
+  const gateway = new GuestPinAIGateway(prisma, runtime, true, () => now);
+
+  await gateway.reply({ guestToken: token, message: "¿Puedo salir tarde?" });
+  await gateway.reply({ guestToken: token, message: "¿Y cuánto costaría?" });
+
+  assert.deepEqual(resumeSessionIds, [undefined, "session_conversation"]);
+  assert.deepEqual(messages, ["¿Puedo salir tarde?", "¿Y cuánto costaría?"]);
+  assert.equal(getConversation()?.openaiSessionId, "session_conversation");
+  assert.equal(getConversation()?.leaseToken, null);
+});
+
+test("returns a retryable busy error without discarding an existing conversation", async () => {
+  const { prisma, getConversation } = createPrisma({
+    id: "reservation-a",
+    propertyId: "property-a",
+    preferredLanguage: "en",
+    property: {
+      organizationId: "org-a",
+      city: null,
+      region: null,
+      country: null,
+      timezone: null,
+    },
+  });
+  let runtimeCalls = 0;
+  const runtime: GuestPinAIRuntimeRunner = async (request) => {
+    runtimeCalls += 1;
+    if (runtimeCalls === 1) {
+      return shadowResult(request, { openaiSessionId: "session_existing" });
+    }
+    throw new Error("PIN_AI_RUNTIME_AGENT_SESSION_BUSY");
+  };
+  const gateway = new GuestPinAIGateway(prisma, runtime, true, () => now);
+
+  await gateway.reply({ guestToken: token, message: "First turn" });
+  await assert.rejects(
+    gateway.reply({ guestToken: token, message: "Second turn" }),
+    (error: unknown) =>
+      error instanceof GuestPinAIGatewayError &&
+      error.code === "CONVERSATION_BUSY",
+  );
+
+  assert.equal(getConversation()?.openaiSessionId, "session_existing");
+  assert.equal(getConversation()?.leaseToken, null);
 });
 
 test("does not call the runtime for an invalid, expired, inactive, or cross-scope token", async () => {

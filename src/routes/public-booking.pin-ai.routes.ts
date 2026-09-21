@@ -90,6 +90,13 @@ function mapGatewayError(error: unknown): Readonly<{
         logCode: error.code,
       };
     }
+    if (error.code === "CONVERSATION_BUSY") {
+      return {
+        status: 409,
+        publicCode: "PIN_AI_BUSY",
+        logCode: error.code,
+      };
+    }
     return {
       status: 502,
       publicCode: "PIN_AI_UNAVAILABLE",

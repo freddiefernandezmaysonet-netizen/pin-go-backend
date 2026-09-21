@@ -223,6 +223,32 @@ test("runtime transport fails closed when OpenAI runtime is disabled", async () 
   );
 });
 
+test("runtime rejects an invalid persisted OpenAI session id before network access", async () => {
+  let fetchCalls = 0;
+  const transport = new OpenAIAgentsRuntimeTransport(
+    {
+      enabled: true,
+      apiKey: "test-key",
+      resumeSessionId: "not-a-session-id",
+      model: "gpt-5.6-luna",
+    },
+    async () => {
+      fetchCalls += 1;
+      throw new Error("NETWORK_SHOULD_NOT_BE_CALLED");
+    },
+  );
+
+  await assert.rejects(
+    new LunaRuntimeAdapter(transport).run(
+      request,
+      createConversationMemory(request),
+      { async execute() { return {}; } },
+    ),
+    /PIN_AI_RUNTIME_OPENAI_SESSION_ID_INVALID/,
+  );
+  assert.equal(fetchCalls, 0);
+});
+
 test("runtime preserves safe structured diagnostics from a failed OpenAI session", async () => {
   const transport = new OpenAIAgentsRuntimeTransport(
     {
@@ -495,6 +521,86 @@ test("runtime advertises native web search separately without exposing hidden fu
     sessionPayload.agent.tools.filter((tool) => tool.type === "function").length,
     13,
   );
+  assert.deepEqual(result.webSearch, {
+    enabled: true,
+    used: true,
+    callCount: 1,
+  });
+});
+
+test("runtime continues an idle OpenAI session and returns only the latest turn", async () => {
+  const calls: Array<{ method: string; url: string; body?: string }> = [];
+  const responses = [
+    { id: "session_conversation", status: "idle", required_actions: [] },
+    {},
+    { id: "session_conversation", status: "idle", required_actions: [] },
+    {
+      data: [
+        { type: "message", role: "user", content: [] },
+        { type: "web_search_call", status: "completed" },
+        {
+          type: "message",
+          role: "assistant",
+          content: [{ type: "output_text", text: "Earlier answer." }],
+        },
+        { type: "message", role: "user", content: [] },
+        { type: "web_search_call", status: "completed" },
+        {
+          type: "message",
+          role: "assistant",
+          content: [{ type: "output_text", text: "Latest answer." }],
+        },
+      ],
+    },
+  ];
+  const transport = new OpenAIAgentsRuntimeTransport(
+    {
+      enabled: true,
+      apiKey: "test-key",
+      agentId: "agent_saved123",
+      resumeSessionId: "session_conversation",
+      model: "gpt-5.6-luna",
+      webSearch: { enabled: true, mode: "live" },
+      pollDelayMs: 0,
+    },
+    async (url, init) => {
+      calls.push({ method: init.method, url, ...(init.body ? { body: init.body } : {}) });
+      const payload = responses.shift();
+      if (payload === undefined) throw new Error("UNEXPECTED_FETCH");
+      return {
+        ok: true,
+        status: 200,
+        async json() {
+          return payload;
+        },
+      };
+    },
+  );
+
+  const result = await new LunaRuntimeAdapter(transport).run(
+    request,
+    createConversationMemory(request),
+    { async execute() { return {}; } },
+  );
+
+  assert.equal(calls.some((call) => call.url.endsWith("/v1/agents/sessions")), false);
+  const messageEvent = calls.find(
+    (call) => call.method === "POST" && call.url.endsWith("/events"),
+  );
+  const eventPayload = JSON.parse(messageEvent?.body ?? "{}") as {
+    events?: Array<{
+      type?: string;
+      input?: Array<{ content?: Array<{ type?: string; text?: string }> }>;
+    }>;
+  };
+  assert.equal(eventPayload.events?.[0]?.type, "agent.session.input.message");
+  assert.equal(eventPayload.events?.[0]?.input?.[0]?.content?.[0]?.type, "input_text");
+  assert.match(
+    eventPayload.events?.[0]?.input?.[0]?.content?.[0]?.text ?? "",
+    /The AC still isn't cooling/,
+  );
+  assert.equal(result.openaiSessionId, "session_conversation");
+  assert.equal(result.responseText, "Latest answer.");
   assert.deepEqual(result.webSearch, {
     enabled: true,
     used: true,
