@@ -861,6 +861,22 @@ publicBookingRouter.get("/:organizationSlug/:propertySlug", async (req, res) => 
             amount: true,
           },
         },
+        nearbyPlaces: {
+          where: { isActive: true },
+          orderBy: [{ sortOrder: "asc" }, { createdAt: "asc" }],
+          select: {
+            id: true,
+            name: true,
+            category: true,
+            description: true,
+            distanceText: true,
+            travelTimeMinutes: true,
+            latitude: true,
+            longitude: true,
+            googleMapsUrl: true,
+            photoUrl: true,
+          },
+        },
        taxes: {
          where: { isActive: true },
          orderBy: { name: "asc" },

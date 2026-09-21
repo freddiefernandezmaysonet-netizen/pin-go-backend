@@ -19,6 +19,7 @@ import adminReactivateRoutes from "./routes/admin.reactivate.routes";
 import buildNfcSyncRouter from "./routes/nfc.sync.routes";
 import { buildPropertySettingsRouter } from "./routes/property.settings.routes";
 import { buildPropertiesRouter } from "./routes/properties.route";
+import { buildPropertyNearbyPlacesRouter } from "./routes/property-nearby-places.routes";
 import { buildAdminLocksRouter } from "./routes/admin.locks.routes";
 import { buildAdminLocksSwapRouter } from "./routes/admin.locks.swap.routes";
 import buildDeviceHealthRouter from "./routes/deviceHealth.routes";
@@ -279,6 +280,7 @@ app.use("/billing", billingCapacityRouter);
 app.use("/billing", billingPreviewRouter);
 
 app.use(buildPropertiesRouter(prisma));
+app.use(buildPropertyNearbyPlacesRouter(prisma));
 app.use("/api/properties", buildPropertyAutomationRouter(prisma));
 
 app.use("/api/admin", adminReactivateRoutes);
