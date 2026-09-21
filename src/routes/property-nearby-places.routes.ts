@@ -124,8 +124,10 @@ export function buildPropertyNearbyPlacesRouter(prisma: PrismaClient) {
         data: {
           propertyId: property.id,
           name,
+          nameEs: optionalText(req.body?.nameEs),
           category: category as any,
           description: optionalText(req.body?.description),
+          descriptionEs: optionalText(req.body?.descriptionEs),
           distanceText: optionalText(req.body?.distanceText),
           travelTimeMinutes:
             travelTimeMinutes === null ? null : Math.max(0, Math.round(travelTimeMinutes)),
@@ -170,6 +172,10 @@ export function buildPropertyNearbyPlacesRouter(prisma: PrismaClient) {
         data.name = name;
       }
 
+      if (req.body?.nameEs !== undefined) {
+        data.nameEs = optionalText(req.body.nameEs);
+      }
+
       if (req.body?.category !== undefined) {
         const category = String(req.body.category).toUpperCase();
         if (!ALLOWED_CATEGORIES.has(category)) {
@@ -178,7 +184,7 @@ export function buildPropertyNearbyPlacesRouter(prisma: PrismaClient) {
         data.category = category;
       }
 
-      for (const field of ["description", "distanceText"]) {
+      for (const field of ["description", "descriptionEs", "distanceText"]) {
         if (req.body?.[field] !== undefined) data[field] = optionalText(req.body[field]);
       }
 
