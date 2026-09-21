@@ -1,0 +1,74 @@
+name: Pin AI Property Knowledge V1
+
+on:
+  pull_request:
+    branches:
+      - agent/pin-ai-runtime-v1
+    paths:
+      - "prisma/schema.prisma"
+      - "prisma/migrations/20260921120000_add_pin_ai_property_knowledge_v1/migration.sql"
+      - "src/pin-ai/property-knowledge-entry.contract.ts"
+      - "src/pin-ai/property-knowledge-entry.contract.test.ts"
+      - "src/pin-ai/property-knowledge.service.ts"
+      - "src/pin-ai/property-knowledge.service.test.ts"
+      - "src/pin-ai/runtime/**"
+      - "package.json"
+      - "package-lock.json"
+      - ".github/workflows/pin-ai-property-knowledge-v1.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  property-knowledge-contract:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      DATABASE_URL: postgresql://user:pass@localhost:5432/pingo_test
+    steps:
+      - name: Checkout exact candidate
+        uses: actions/checkout@v4
+
+      - name: Use Node.js 22
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+
+      - name: Install locked dependencies without lifecycle scripts
+        run: npm ci --ignore-scripts --no-audit --no-fund
+
+      - name: Generate and validate Prisma client
+        run: |
+          npx prisma generate
+          npx prisma validate --schema ./prisma/schema.prisma
+
+      - name: Prove migration is additive and bounded
+        shell: bash
+        run: |
+          migration="prisma/migrations/20260921120000_add_pin_ai_property_knowledge_v1/migration.sql"
+          grep -F 'CREATE TABLE "PropertyKnowledgeEntry"' "$migration"
+          grep -F 'PropertyKnowledgeEntry_content_check' "$migration"
+          grep -F 'PropertyKnowledgeEntry_wifi_visibility_check' "$migration"
+          ! grep -E '(^|[[:space:]])(DROP|TRUNCATE|DELETE FROM|INSERT INTO)[[:space:]]|^UPDATE[[:space:]]' "$migration"
+
+      - name: Run Property Knowledge V1 security tests
+        run: node --import tsx --test src/pin-ai/property-knowledge-entry.contract.test.ts
+
+      - name: Run retained Pin AI Runtime V1 tests
+        run: npm run test:pin-ai-runtime
+
+      - name: Run retained Pin AI benchmark tests
+        run: npm run test:pin-ai-benchmark
+
+      - name: Type-check Property Knowledge V1 contract
+        run: |
+          ./node_modules/.bin/tsc --noEmit \
+            --module nodenext \
+            --moduleResolution nodenext \
+            --target esnext \
+            --strict \
+            --skipLibCheck \
+            --types node \
+            src/pin-ai/property-knowledge-entry.contract.ts \
+            src/pin-ai/property-knowledge-entry.contract.test.ts

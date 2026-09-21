@@ -63,8 +63,22 @@ jobs:
       - name: Prove exact narrow diff allowlist
         shell: bash
         run: |
-          git fetch origin main --depth=1
-          git diff --name-only origin/main...HEAD | sort > "$RUNNER_TEMP/actual.txt"
+          BASE_BRANCH="${GITHUB_BASE_REF:-main}"
+          git fetch origin "+refs/heads/$BASE_BRANCH:refs/remotes/origin/$BASE_BRANCH" --depth=1
+          git diff --name-only "origin/$BASE_BRANCH...HEAD" | sort > "$RUNNER_TEMP/actual.txt"
+          if [ "${GITHUB_HEAD_REF:-$GITHUB_REF_NAME}" = "agent/pin-ai-property-knowledge-v1" ]; then
+            cat > "$RUNNER_TEMP/pin-ai-property-knowledge-allowed.txt" <<'EOF'
+          .github/workflows/ota-airbnb-listing-discovery.yml
+          .github/workflows/pin-ai-property-knowledge-v1.yml
+          prisma/migrations/20260921120000_add_pin_ai_property_knowledge_v1/migration.sql
+          prisma/schema.prisma
+          src/pin-ai/property-knowledge-entry.contract.test.ts
+          src/pin-ai/property-knowledge-entry.contract.ts
+          EOF
+            sort "$RUNNER_TEMP/pin-ai-property-knowledge-allowed.txt" -o "$RUNNER_TEMP/pin-ai-property-knowledge-allowed.txt"
+            diff -u "$RUNNER_TEMP/pin-ai-property-knowledge-allowed.txt" "$RUNNER_TEMP/actual.txt"
+            exit 0
+          fi
           if [ "${GITHUB_HEAD_REF:-$GITHUB_REF_NAME}" = "agent/vrbo-self-service-connection-center" ]; then
             cat > "$RUNNER_TEMP/vrbo-allowed.txt" <<'EOF'
           .github/workflows/booking-com-transport-readiness.yml
@@ -177,7 +191,7 @@ jobs:
 
       - name: Prove unaffected certified Channex transports and workers remain frozen
         run: |
-          git diff --exit-code origin/main...HEAD -- \
+          git diff --exit-code "origin/${GITHUB_BASE_REF:-main}...HEAD" -- \
             src/pms \
             src/workers \
             src/distribution/channex-readonly.http-transport.ts \
