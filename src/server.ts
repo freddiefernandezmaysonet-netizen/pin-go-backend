@@ -86,6 +86,7 @@ import { uploadsRouter } from "./routes/uploads.route";
 import { dashboardOrganizationRouter } from "./routes/dashboard.organization.route";
 import { dashboardPayoutsRouter } from "./routes/dashboard-payouts.routes";
 import { dashboardCancellationPolicyRouter } from "./routes/dashboard.cancellation-policy.routes";
+import { buildDashboardPropertyKnowledgeRouter } from "./routes/dashboard.property-knowledge.routes";
 import {
   hostnameFromSecureRequestOrigin,
   isPublishedBrandOriginAllowed,
@@ -332,6 +333,7 @@ app.use(dashboardPmsRouter);
 app.use(dashboardOrganizationRouter);
 app.use(dashboardPayoutsRouter);
 app.use(dashboardCancellationPolicyRouter);
+app.use(buildDashboardPropertyKnowledgeRouter(prisma));
 app.use(dashboardReviewsRouter);
 
 if (process.env.NODE_ENV !== "production") {

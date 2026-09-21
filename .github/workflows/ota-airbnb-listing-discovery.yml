@@ -74,6 +74,9 @@ jobs:
           prisma/schema.prisma
           src/pin-ai/property-knowledge-entry.contract.test.ts
           src/pin-ai/property-knowledge-entry.contract.ts
+          src/routes/dashboard.property-knowledge.routes.test.ts
+          src/routes/dashboard.property-knowledge.routes.ts
+          src/server.ts
           EOF
             sort "$RUNNER_TEMP/pin-ai-property-knowledge-allowed.txt" -o "$RUNNER_TEMP/pin-ai-property-knowledge-allowed.txt"
             diff -u "$RUNNER_TEMP/pin-ai-property-knowledge-allowed.txt" "$RUNNER_TEMP/actual.txt"

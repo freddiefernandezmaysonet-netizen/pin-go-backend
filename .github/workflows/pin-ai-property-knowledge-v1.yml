@@ -12,6 +12,9 @@ on:
       - "src/pin-ai/property-knowledge.service.ts"
       - "src/pin-ai/property-knowledge.service.test.ts"
       - "src/pin-ai/runtime/**"
+      - "src/routes/dashboard.property-knowledge.routes.ts"
+      - "src/routes/dashboard.property-knowledge.routes.test.ts"
+      - "src/server.ts"
       - "package.json"
       - "package-lock.json"
       - ".github/workflows/pin-ai-property-knowledge-v1.yml"
@@ -53,7 +56,10 @@ jobs:
           ! grep -E '(^|[[:space:]])(DROP|TRUNCATE|DELETE FROM|INSERT INTO)[[:space:]]|^UPDATE[[:space:]]' "$migration"
 
       - name: Run Property Knowledge V1 security tests
-        run: node --import tsx --test src/pin-ai/property-knowledge-entry.contract.test.ts
+        run: |
+          node --import tsx --test \
+            src/pin-ai/property-knowledge-entry.contract.test.ts \
+            src/routes/dashboard.property-knowledge.routes.test.ts
 
       - name: Run retained Pin AI Runtime V1 tests
         run: npm run test:pin-ai-runtime
@@ -64,11 +70,13 @@ jobs:
       - name: Type-check Property Knowledge V1 contract
         run: |
           ./node_modules/.bin/tsc --noEmit \
-            --module nodenext \
-            --moduleResolution nodenext \
+            --module preserve \
+            --moduleResolution bundler \
             --target esnext \
             --strict \
             --skipLibCheck \
             --types node \
             src/pin-ai/property-knowledge-entry.contract.ts \
-            src/pin-ai/property-knowledge-entry.contract.test.ts
+            src/pin-ai/property-knowledge-entry.contract.test.ts \
+            src/routes/dashboard.property-knowledge.routes.ts \
+            src/routes/dashboard.property-knowledge.routes.test.ts
