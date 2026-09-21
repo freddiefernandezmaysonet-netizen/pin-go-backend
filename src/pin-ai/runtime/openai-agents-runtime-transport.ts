@@ -447,9 +447,16 @@ function countWebSearchCalls(payload: unknown): number {
 function extractSessionError(value: unknown): string {
   if (typeof value === "string") return value;
   const error = asRecord(value);
-  return typeof error.message === "string"
-    ? error.message
-    : "unknown_session_error";
+  const diagnostic = [
+    ["type", error.type],
+    ["code", error.code],
+    ["message", error.message],
+  ]
+    .filter((entry): entry is [string, string] => typeof entry[1] === "string")
+    .map(([key, field]) => `${key}=${field}`)
+    .join(";");
+
+  return diagnostic || "unknown_session_error";
 }
 
 function asRecord(value: unknown): Record<string, unknown> {

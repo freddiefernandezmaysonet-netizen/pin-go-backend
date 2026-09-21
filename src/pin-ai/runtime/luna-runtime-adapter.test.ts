@@ -223,6 +223,42 @@ test("runtime transport fails closed when OpenAI runtime is disabled", async () 
   );
 });
 
+test("runtime preserves safe structured diagnostics from a failed OpenAI session", async () => {
+  const transport = new OpenAIAgentsRuntimeTransport(
+    {
+      enabled: true,
+      apiKey: "test-key",
+      model: "gpt-5.6-luna",
+      pollDelayMs: 0,
+    },
+    async () => ({
+      ok: true,
+      status: 200,
+      async json() {
+        return {
+          id: "sess_failed",
+          status: "failed",
+          required_actions: [],
+          error: {
+            type: "server_error",
+            code: "agent_internal_error",
+            message: "An internal error occurred.",
+          },
+        };
+      },
+    }),
+  );
+
+  await assert.rejects(
+    new LunaRuntimeAdapter(transport).run(
+      request,
+      createConversationMemory(request),
+      { async execute() { return {}; } },
+    ),
+    /PIN_AI_RUNTIME_AGENT_SESSION_FAILED:type=server_error;code=agent_internal_error;message=An internal error occurred\./,
+  );
+});
+
 test("runtime marks review metadata from eligibility and pricing decisions", async () => {
   for (const testCase of [
     {

@@ -7,6 +7,9 @@ import { OpenAIAgentsRuntimeTransport } from "./openai-agents-runtime-transport.
 import { createPinGoRuntimeReadToolExecutor } from "./pin-go-runtime-tools.js";
 import { resolveWebSearchLocation } from "./web-search-location.js";
 
+let openAIApiCalls = 0;
+const openAIRequestIds: string[] = [];
+
 async function main(): Promise<void> {
   if (process.env.PIN_AI_RUNTIME_SHADOW_ENABLED !== "true") {
     throw new Error("PIN_AI_RUNTIME_SHADOW_DISABLED");
@@ -73,7 +76,6 @@ async function main(): Promise<void> {
     ],
   };
 
-  let openAIApiCalls = 0;
   const guardedFetch = async (
     input: string,
     init: Readonly<{
@@ -88,6 +90,10 @@ async function main(): Promise<void> {
     }
 
     const response = await fetch(input, init);
+    const requestId = response.headers.get("x-request-id")?.trim() ?? "";
+    if (/^[A-Za-z0-9_-]{1,128}$/.test(requestId)) {
+      openAIRequestIds.push(requestId);
+    }
     return {
       ok: response.ok,
       status: response.status,
@@ -159,6 +165,7 @@ async function main(): Promise<void> {
       actionsExecuted: false,
       databaseWrites: false,
       openAIApiCalls,
+      openAIRequestIds,
     }),
   );
 
@@ -168,7 +175,17 @@ async function main(): Promise<void> {
 
 main().catch(async (error: unknown) => {
   const message = error instanceof Error ? error.message : "UNKNOWN_ERROR";
-  console.error(`PIN_AI_RUNTIME_WEB_SEARCH_FAILED:${message}`);
+  console.error(
+    `PIN_AI_RUNTIME_WEB_SEARCH_FAILED:${JSON.stringify({
+      error: message,
+      authorizationGranted: false,
+      bookingExecuted: false,
+      actionsExecuted: false,
+      databaseWrites: false,
+      openAIApiCalls,
+      openAIRequestIds,
+    })}`,
+  );
   process.exitCode = 1;
   await prisma.$disconnect().catch(() => undefined);
   await new Promise((resolve) => setTimeout(resolve, 1000));
