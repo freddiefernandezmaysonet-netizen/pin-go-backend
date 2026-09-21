@@ -25,6 +25,25 @@ function optionalNumber(value: unknown) {
   return Number.isFinite(number) ? number : NaN;
 }
 
+function optionalHttpUrl(value: unknown) {
+  const text = optionalText(value);
+  if (!text) return null;
+  if (text.length > 2048) return undefined;
+
+  try {
+    const url = new URL(text);
+    return url.protocol === "https:" || url.protocol === "http:" ? url.toString() : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+function coordinatesAreValid(latitude: number | null, longitude: number | null) {
+  if ((latitude === null) !== (longitude === null)) return false;
+  if (latitude === null || longitude === null) return true;
+  return latitude >= -90 && latitude <= 90 && longitude >= -180 && longitude <= 180;
+}
+
 export function buildPropertyNearbyPlacesRouter(prisma: PrismaClient) {
   const router = Router();
   router.use(requireAuth);
@@ -84,10 +103,20 @@ export function buildPropertyNearbyPlacesRouter(prisma: PrismaClient) {
         return res.status(400).json({ ok: false, error: "Invalid numeric value" });
       }
 
-      if ((latitude !== null) !== (longitude !== null)) {
+      if (!coordinatesAreValid(latitude, longitude)) {
         return res.status(400).json({
           ok: false,
-          error: "latitude and longitude must be provided together",
+          error: "Invalid latitude/longitude",
+        });
+      }
+
+      const googleMapsUrl = optionalHttpUrl(req.body?.googleMapsUrl);
+      const photoUrl = optionalHttpUrl(req.body?.photoUrl);
+
+      if (googleMapsUrl === undefined || photoUrl === undefined) {
+        return res.status(400).json({
+          ok: false,
+          error: "URLs must use http/https and be at most 2048 characters",
         });
       }
 
@@ -102,8 +131,8 @@ export function buildPropertyNearbyPlacesRouter(prisma: PrismaClient) {
             travelTimeMinutes === null ? null : Math.max(0, Math.round(travelTimeMinutes)),
           latitude,
           longitude,
-          googleMapsUrl: optionalText(req.body?.googleMapsUrl),
-          photoUrl: optionalText(req.body?.photoUrl),
+          googleMapsUrl,
+          photoUrl,
           sortOrder: sortOrder === null ? 0 : Math.round(sortOrder),
           isActive: req.body?.isActive === undefined ? true : Boolean(req.body.isActive),
         },
@@ -149,8 +178,21 @@ export function buildPropertyNearbyPlacesRouter(prisma: PrismaClient) {
         data.category = category;
       }
 
-      for (const field of ["description", "distanceText", "googleMapsUrl", "photoUrl"]) {
+      for (const field of ["description", "distanceText"]) {
         if (req.body?.[field] !== undefined) data[field] = optionalText(req.body[field]);
+      }
+
+      for (const field of ["googleMapsUrl", "photoUrl"]) {
+        if (req.body?.[field] !== undefined) {
+          const url = optionalHttpUrl(req.body[field]);
+          if (url === undefined) {
+            return res.status(400).json({
+              ok: false,
+              error: `${field} must use http/https and be at most 2048 characters`,
+            });
+          }
+          data[field] = url;
+        }
       }
 
       for (const field of ["travelTimeMinutes", "sortOrder"]) {
@@ -181,10 +223,10 @@ export function buildPropertyNearbyPlacesRouter(prisma: PrismaClient) {
           return res.status(400).json({ ok: false, error: "Invalid coordinates" });
         }
 
-        if ((latitude !== null) !== (longitude !== null)) {
+        if (!coordinatesAreValid(latitude, longitude)) {
           return res.status(400).json({
             ok: false,
-            error: "latitude and longitude must be provided together",
+            error: "Invalid latitude/longitude",
           });
         }
 
