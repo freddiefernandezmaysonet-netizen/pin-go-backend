@@ -12,6 +12,7 @@ type CalculateDirectBookingPricingInput = {
   checkOut: Date;
   selectedAmenityIds?: string[];
   excludeReservationId?: string;
+  includeAuditEntries?: boolean;
 };
 
 function toMoney(value: unknown) {
@@ -736,7 +737,9 @@ const nightlySubtotal = toMoney(
   nightlyRates.reduce((sum, item) => sum + item.rate, 0)
 );
 
-const auditEntries = nightlyRates.map((item) =>
+const auditEntries = input.includeAuditEntries === false
+  ? []
+  : nightlyRates.map((item) =>
   createRevenueAuditEntry({
     entityId: input.propertyId,
     decisionId: `revenue-pricing:${input.propertyId}:${item.date}`,
