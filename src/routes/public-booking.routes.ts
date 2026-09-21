@@ -956,6 +956,22 @@ return res.json({
         activeGuestAgreement
           ?.requiresIdentityVerification ?? true,
     },
+    propertyRules: activeGuestAgreement
+      ? {
+          en:
+            activeGuestAgreement.rulesEn ??
+            activeGuestAgreement.rules ??
+            null,
+          es:
+            activeGuestAgreement.rulesEs ??
+            activeGuestAgreement.rulesEn ??
+            activeGuestAgreement.rules ??
+            null,
+        }
+      : {
+          en: null,
+          es: null,
+        },
     organization: {
       ...property.organization,
       contactEmail: organizationContact.email,
