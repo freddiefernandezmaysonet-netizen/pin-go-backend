@@ -4,6 +4,7 @@ on:
   pull_request:
     branches:
       - agent/pin-ai-property-knowledge-v1
+      - agent/pin-ai-guest-gateway-v1
     paths:
       - "src/pin-ai/guest/**"
       - "src/pin-ai/runtime/**"
