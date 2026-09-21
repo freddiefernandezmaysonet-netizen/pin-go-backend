@@ -69,18 +69,34 @@ jobs:
           if [ "${GITHUB_HEAD_REF:-$GITHUB_REF_NAME}" = "agent/pin-ai-property-knowledge-v1" ]; then
             cat > "$RUNNER_TEMP/pin-ai-property-knowledge-allowed.txt" <<'EOF'
           .github/workflows/ota-airbnb-listing-discovery.yml
+          .github/workflows/pin-ai-guest-gateway-v1.yml
           .github/workflows/pin-ai-property-knowledge-v1.yml
+          package.json
           prisma/migrations/20260921120000_add_pin_ai_property_knowledge_v1/migration.sql
           prisma/schema.prisma
+          src/pin-ai/guest/guest-runtime-gateway.test.ts
+          src/pin-ai/guest/guest-runtime-gateway.ts
           src/pin-ai/property-knowledge-entry.contract.test.ts
           src/pin-ai/property-knowledge-entry.contract.ts
           src/pin-ai/property-knowledge.service.test.ts
           src/pin-ai/property-knowledge.service.ts
+          src/pin-ai/runtime/contracts.ts
+          src/pin-ai/runtime/luna-runtime-adapter.test.ts
+          src/pin-ai/runtime/openai-agent-config.test.ts
+          src/pin-ai/runtime/openai-agent-config.ts
+          src/pin-ai/runtime/openai-agents-runtime-transport.ts
+          src/pin-ai/runtime/openai-saved-agent-audit.test.ts
+          src/pin-ai/runtime/openai-saved-agent-audit.ts
           src/pin-ai/runtime/pin-go-read-tool-executor.test.ts
           src/pin-ai/runtime/pin-go-read-tool-executor.ts
           src/routes/dashboard.property-knowledge.routes.test.ts
           src/routes/dashboard.property-knowledge.routes.ts
+          src/routes/public-booking.pin-ai.routes.test.ts
+          src/routes/public-booking.pin-ai.routes.ts
+          src/scripts/audit-pin-ai-openai-agent.ts
+          src/scripts/sync-pin-ai-openai-agent.ts
           src/server.ts
+          tsconfig.pin-ai-guest-gateway.json
           EOF
             sort "$RUNNER_TEMP/pin-ai-property-knowledge-allowed.txt" -o "$RUNNER_TEMP/pin-ai-property-knowledge-allowed.txt"
             diff -u "$RUNNER_TEMP/pin-ai-property-knowledge-allowed.txt" "$RUNNER_TEMP/actual.txt"
