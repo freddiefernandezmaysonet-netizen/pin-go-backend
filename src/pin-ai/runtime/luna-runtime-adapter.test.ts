@@ -498,6 +498,98 @@ test("runtime advertises native web search separately without exposing hidden fu
   });
 });
 
+test("runtime preserves read-only function calls and native web search evidence in one session", async () => {
+  let toolExecutions = 0;
+  const responses = [
+    {
+      id: "sess_web_search_with_function",
+      status: "requires_action",
+      required_actions: [
+        {
+          type: "function_call",
+          turn_id: "turn_web_search_with_function",
+          call_id: "call_web_search_with_function",
+          name: "check_late_checkout",
+          arguments: { requestedLocalTime: "13:00" },
+        },
+      ],
+    },
+    {},
+    {
+      id: "sess_web_search_with_function",
+      status: "idle",
+      required_actions: [],
+    },
+    {
+      data: [
+        { type: "web_search_call", status: "completed" },
+        {
+          type: "message",
+          role: "assistant",
+          content: [
+            {
+              type: "output_text",
+              text: "The late checkout is available for review, and here are current public restaurant options.",
+            },
+          ],
+        },
+      ],
+    },
+  ];
+
+  const transport = new OpenAIAgentsRuntimeTransport(
+    {
+      enabled: true,
+      apiKey: "test-key",
+      model: "gpt-5.6-luna",
+      webSearch: { enabled: true, mode: "live" },
+      pollDelayMs: 0,
+    },
+    async () => {
+      const payload = responses.shift();
+      if (payload === undefined) throw new Error("UNEXPECTED_FETCH");
+      return {
+        ok: true,
+        status: 200,
+        async json() {
+          return payload;
+        },
+      };
+    },
+  );
+
+  const result = await new LunaRuntimeAdapter(transport).run(
+    request,
+    createConversationMemory(request),
+    {
+      async execute(tool, args) {
+        toolExecutions += 1;
+        assert.equal(tool, "check_late_checkout");
+        assert.deepEqual(args, { requestedLocalTime: "13:00" });
+        return {
+          decision: "OPERATIONALLY_AVAILABLE_FOR_REVIEW",
+          authorizationGranted: false,
+        };
+      },
+    },
+  );
+
+  assert.equal(toolExecutions, 1);
+  assert.deepEqual(result.toolCalls, [
+    {
+      name: "check_late_checkout",
+      arguments: { requestedLocalTime: "13:00" },
+    },
+  ]);
+  assert.deepEqual(result.webSearch, {
+    enabled: true,
+    used: true,
+    callCount: 1,
+  });
+  assert.equal(result.escalationCreated, false);
+  assert.equal(result.requiresHumanReview, true);
+});
+
 test("runtime rejects a disabled tool returned by Luna before execution", async () => {
   let toolExecutions = 0;
 
