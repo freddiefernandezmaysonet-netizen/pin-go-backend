@@ -1,0 +1,53 @@
+name: Pin AI Guest Gateway V1
+
+on:
+  pull_request:
+    branches:
+      - agent/pin-ai-property-knowledge-v1
+      - agent/pin-ai-guest-gateway-v1
+    paths:
+      - "src/pin-ai/guest/**"
+      - "src/pin-ai/runtime/**"
+      - "src/routes/public-booking.pin-ai.routes.ts"
+      - "src/routes/public-booking.pin-ai.routes.test.ts"
+      - "src/server.ts"
+      - "package.json"
+      - "package-lock.json"
+      - "tsconfig.pin-ai-guest-gateway.json"
+      - ".github/workflows/pin-ai-guest-gateway-v1.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  guest-gateway-contract:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      DATABASE_URL: postgresql://user:pass@localhost:5432/pingo_test
+    steps:
+      - name: Checkout exact candidate
+        uses: actions/checkout@v4
+
+      - name: Use Node.js 22
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+
+      - name: Install locked dependencies without lifecycle scripts
+        run: npm ci --ignore-scripts --no-audit --no-fund
+
+      - name: Generate and validate Prisma client
+        run: |
+          npx prisma generate
+          npx prisma validate --schema ./prisma/schema.prisma
+
+      - name: Run Pin AI Runtime and Guest Gateway tests
+        run: npm run test:pin-ai-runtime
+
+      - name: Run retained Pin AI benchmark tests
+        run: npm run test:pin-ai-benchmark
+
+      - name: Type-check Pin AI Guest Gateway V1
+        run: npm run test:pin-ai-guest-gateway-types

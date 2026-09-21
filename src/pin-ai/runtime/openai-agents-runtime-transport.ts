@@ -6,22 +6,18 @@ import {
   type PinAIRuntimeToolName,
 } from "./contracts.js";
 import type { PinAIConversationMemory } from "./conversation-memory.js";
+import {
+  buildPinAIOpenAIAgentConfig,
+  type PinAIOpenAIWebSearchConfig,
+} from "./openai-agent-config.js";
 import type { PinAIRuntimeToolExecutor } from "./tool-executor.js";
 
 export type OpenAIRuntimeTransportConfig = Readonly<{
   enabled: boolean;
   apiKey?: string;
+  agentId?: string;
   model: "gpt-5.6-luna";
-  webSearch?: Readonly<{
-    enabled: boolean;
-    mode?: "live" | "cached";
-    location?: Readonly<{
-      country?: string;
-      region?: string;
-      city?: string;
-      timezone?: string;
-    }>;
-  }>;
+  webSearch?: PinAIOpenAIWebSearchConfig;
   baseUrl?: string;
   maxPolls?: number;
   pollDelayMs?: number;
@@ -172,6 +168,12 @@ export class OpenAIAgentsRuntimeTransport {
     if (this.config.model !== "gpt-5.6-luna") {
       throw new Error("PIN_AI_RUNTIME_MODEL_NOT_ALLOWED");
     }
+    if (
+      this.config.agentId !== undefined &&
+      !/^agent_[A-Za-z0-9]+$/.test(this.config.agentId)
+    ) {
+      throw new Error("PIN_AI_RUNTIME_OPENAI_AGENT_ID_INVALID");
+    }
   }
 
   private async createSession(
@@ -180,53 +182,8 @@ export class OpenAIAgentsRuntimeTransport {
   ): Promise<RuntimeSessionSnapshot> {
     const payload = {
       environment: { type: "none" },
-      agent: {
-        model: this.config.model,
-        instructions: [
-          "You are Pin AI Guest Services.",
-          "Use the supplied stay context, conversation memory, and runtime tools.",
-          "Do not invent property, reservation, access, payment, or policy facts.",
-          "Do not perform irreversible actions directly.",
-          "When escalation is needed, request escalate_to_host; Runtime V1 shadow mode will record it without executing it.",
-          "In shadow mode, never tell the guest that an escalation, host request, refund, cancellation, payment, access change, or reservation change was sent, completed, approved, or executed unless the tool result explicitly says executed=true.",
-          "Do not say that you are sending, submitting, forwarding, escalating, contacting, or notifying anyone when executed=false.",
-          "If escalate_to_host returns executed=false, describe it only as something that would be escalated or requires host review.",
-          "Treat extension pricing as an estimate for review only. Never describe an estimated price as final or claim that a payment, charge, approval, or reservation extension occurred.",
-          "Treat date-change availability and pricing as an estimate for host review only. Never claim that reservation dates changed or that a charge, refund, payment, or approval occurred.",
-          "Treat cancellation-policy results and refund amounts as read-only estimates. Never claim that a reservation was cancelled or a refund was issued, sent, processed, approved, or guaranteed.",
-          "Treat payment context as read-only persisted history only. It can report recorded payment and refund states, but it never authorizes a new charge, refund, transfer, service credit, compensation, approval, or reservation change. Distinguish recorded history from any requested future action.",
-          "Use web search only for current public information such as local recommendations. Do not treat search results as proof of current opening hours, prices, availability, distance from the property, or a completed booking.",
-          "Never disclose the property's private address or coordinates in a search query or response.",
-          "Keep resolved issues resolved and do not repeat exhausted troubleshooting.",
-          "Reply naturally in the guest's current language.",
-        ].join(" "),
-        tools: [
-          ...(this.config.webSearch?.enabled === true
-            ? [
-                {
-                  type: "web_search" as const,
-                  mode: this.config.webSearch.mode ?? "live",
-                  ...(this.config.webSearch.location
-                    ? { location: this.config.webSearch.location }
-                    : {}),
-                },
-              ]
-            : []),
-          ...PIN_AI_RUNTIME_TOOLS.filter((tool) =>
-            isPinAIRuntimeToolEnabled(tool.name),
-          ).map((tool) => ({
-            type: "function" as const,
-            name: tool.name,
-            description: tool.description,
-            parameters:
-              tool.parameters ?? {
-                type: "object",
-                properties: {},
-                additionalProperties: false,
-              },
-          })),
-        ],
-      },
+      ...(this.config.agentId ? { agent_id: this.config.agentId } : {}),
+      agent: buildPinAIOpenAIAgentConfig(this.config.webSearch),
       input: JSON.stringify({
         runtime: "pin-ai-v1",
         context: request.context,
