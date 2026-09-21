@@ -223,6 +223,32 @@ test("runtime transport fails closed when OpenAI runtime is disabled", async () 
   );
 });
 
+test("runtime rejects an invalid persisted OpenAI session id before network access", async () => {
+  let fetchCalls = 0;
+  const transport = new OpenAIAgentsRuntimeTransport(
+    {
+      enabled: true,
+      apiKey: "test-key",
+      resumeSessionId: "not-a-session-id",
+      model: "gpt-5.6-luna",
+    },
+    async () => {
+      fetchCalls += 1;
+      throw new Error("NETWORK_SHOULD_NOT_BE_CALLED");
+    },
+  );
+
+  await assert.rejects(
+    new LunaRuntimeAdapter(transport).run(
+      request,
+      createConversationMemory(request),
+      { async execute() { return {}; } },
+    ),
+    /PIN_AI_RUNTIME_OPENAI_SESSION_ID_INVALID/,
+  );
+  assert.equal(fetchCalls, 0);
+});
+
 test("runtime preserves safe structured diagnostics from a failed OpenAI session", async () => {
   const transport = new OpenAIAgentsRuntimeTransport(
     {
