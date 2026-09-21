@@ -70,8 +70,8 @@ async function main(): Promise<void> {
       {
         role: "guest",
         content: spanish
-          ? `Usa la búsqueda web en vivo para encontrar hasta tres restaurantes actuales en ${locationLabel}. Incluye enlaces a las fuentes. No confirmes horarios, precios ni disponibilidad y no reserves ni contactes a nadie.`
-          : `Use live web search to find up to three current restaurants in ${locationLabel}. Include source links. Do not confirm hours, prices, or availability, and do not book or contact anyone.`,
+          ? `Usa la búsqueda web en vivo para encontrar hasta tres restaurantes actuales en ${locationLabel}. También evalúa si puedo hacer checkout a la 1:00 PM y quedarme una noche adicional. Incluye enlaces a las fuentes. No confirmes horarios, precios ni disponibilidad, no reserves ni contactes a nadie, y no afirmes que el late checkout o la extensión fueron aprobados o ejecutados.`
+          : `Use live web search to find up to three current restaurants in ${locationLabel}. Also evaluate whether I can check out at 1:00 PM and stay one additional night. Include source links. Do not confirm hours, prices, or availability, do not book or contact anyone, and do not claim the late checkout or extension was approved or executed.`,
       },
     ],
   };
@@ -85,7 +85,7 @@ async function main(): Promise<void> {
     }>,
   ) => {
     openAIApiCalls += 1;
-    if (openAIApiCalls > 40) {
+    if (openAIApiCalls > 60) {
       throw new Error("PIN_AI_RUNTIME_WEB_SEARCH_NETWORK_CALL_LIMIT");
     }
 
@@ -116,7 +116,7 @@ async function main(): Promise<void> {
           ...(timezone ? { timezone } : {}),
         },
       },
-      maxPolls: 30,
+      maxPolls: 50,
       pollDelayMs: 500,
     },
     guardedFetch,
@@ -140,10 +140,26 @@ async function main(): Promise<void> {
     throw new Error("PIN_AI_RUNTIME_WEB_SEARCH_NOT_USED");
   }
 
+  const functionToolCalls = response.toolCalls.map((call) => call.name);
+  for (const requiredTool of [
+    "check_late_checkout",
+    "check_extension_availability",
+  ] as const) {
+    if (!functionToolCalls.includes(requiredTool)) {
+      throw new Error(
+        `PIN_AI_RUNTIME_COMBINED_CANARY_TOOL_NOT_CALLED:${requiredTool}`,
+      );
+    }
+  }
+
+  if (response.escalationCreated !== false) {
+    throw new Error("PIN_AI_RUNTIME_COMBINED_CANARY_ESCALATION_EXECUTED");
+  }
+
   console.log(
     JSON.stringify({
       runtime: "pin-ai-v1",
-      mode: "SHADOW_WEB_SEARCH",
+      mode: "SHADOW_WEB_SEARCH_ELIGIBILITY",
       model: "gpt-5.6-luna",
       scope: {
         organizationId: request.context.organizationId,
@@ -156,8 +172,10 @@ async function main(): Promise<void> {
         },
       },
       responseText: response.responseText,
-      functionToolCalls: response.toolCalls.map((call) => call.name),
+      functionToolCalls,
       webSearch: response.webSearch,
+      escalationCreated: response.escalationCreated,
+      requiresHumanReview: response.requiresHumanReview,
       authorizationGranted: false,
       currentOpeningHoursVerified: false,
       currentPricesVerified: false,
