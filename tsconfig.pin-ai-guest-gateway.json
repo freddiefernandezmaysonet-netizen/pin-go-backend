@@ -1,0 +1,15 @@
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "noEmit": true,
+    "types": ["node"],
+    "exactOptionalPropertyTypes": false,
+    "noUncheckedIndexedAccess": false
+  },
+  "include": [
+    "src/pin-ai/guest/guest-runtime-gateway.ts",
+    "src/pin-ai/guest/guest-runtime-gateway.test.ts",
+    "src/routes/public-booking.pin-ai.routes.ts",
+    "src/routes/public-booking.pin-ai.routes.test.ts"
+  ]
+}

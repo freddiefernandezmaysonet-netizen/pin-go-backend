@@ -80,6 +80,7 @@ import { publicBrandContextRouter } from "./routes/public.brand-context.routes";
 import { cleaningConfirmRouter } from "./routes/cleaning-confirm.routes";
 import { teamRouter } from "./routes/team.routes";
 import publicBookingRouter from "./routes/public-booking.routes";
+import { buildPublicBookingPinAIRouter } from "./routes/public-booking.pin-ai.routes.js";
 import { publicReviewsRouter } from "./routes/public-reviews.routes";
 import { dashboardReviewsRouter } from "./routes/dashboard.reviews.routes";
 import { uploadsRouter } from "./routes/uploads.route";
@@ -244,6 +245,10 @@ app.use(signupSuccessRouter);
 app.use(publicOrganizationInvitationRouter);
 app.use(publicBrandContextRouter);
 app.use("/api/public-booking", publicBookingRouter);
+app.use(
+  "/api/public-booking",
+  buildPublicBookingPinAIRouter({ prisma, env: process.env }),
+);
 app.use(publicReviewsRouter);
 app.use(cleaningConfirmRouter);
 
