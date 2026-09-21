@@ -80,12 +80,14 @@ import { publicBrandContextRouter } from "./routes/public.brand-context.routes";
 import { cleaningConfirmRouter } from "./routes/cleaning-confirm.routes";
 import { teamRouter } from "./routes/team.routes";
 import publicBookingRouter from "./routes/public-booking.routes";
+import { buildPublicBookingPinAIRouter } from "./routes/public-booking.pin-ai.routes.js";
 import { publicReviewsRouter } from "./routes/public-reviews.routes";
 import { dashboardReviewsRouter } from "./routes/dashboard.reviews.routes";
 import { uploadsRouter } from "./routes/uploads.route";
 import { dashboardOrganizationRouter } from "./routes/dashboard.organization.route";
 import { dashboardPayoutsRouter } from "./routes/dashboard-payouts.routes";
 import { dashboardCancellationPolicyRouter } from "./routes/dashboard.cancellation-policy.routes";
+import { buildDashboardPropertyKnowledgeRouter } from "./routes/dashboard.property-knowledge.routes";
 import {
   hostnameFromSecureRequestOrigin,
   isPublishedBrandOriginAllowed,
@@ -243,6 +245,10 @@ app.use(signupSuccessRouter);
 app.use(publicOrganizationInvitationRouter);
 app.use(publicBrandContextRouter);
 app.use("/api/public-booking", publicBookingRouter);
+app.use(
+  "/api/public-booking",
+  buildPublicBookingPinAIRouter({ prisma, env: process.env }),
+);
 app.use(publicReviewsRouter);
 app.use(cleaningConfirmRouter);
 
@@ -332,6 +338,7 @@ app.use(dashboardPmsRouter);
 app.use(dashboardOrganizationRouter);
 app.use(dashboardPayoutsRouter);
 app.use(dashboardCancellationPolicyRouter);
+app.use(buildDashboardPropertyKnowledgeRouter(prisma));
 app.use(dashboardReviewsRouter);
 
 if (process.env.NODE_ENV !== "production") {

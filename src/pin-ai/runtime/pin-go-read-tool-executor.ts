@@ -28,6 +28,9 @@ type RuntimeReadPrisma = Readonly<{
   reservation: Readonly<{
     findFirst(args: unknown): Promise<any>;
   }>;
+  guestJourney: Readonly<{
+    findFirst(args: unknown): Promise<any>;
+  }>;
   accessGrant: Readonly<{
     findMany(args: unknown): Promise<any[]>;
   }>;
@@ -88,6 +91,15 @@ type RuntimeLocalPlacesSearch = (
   input: GooglePlacesSearchInput,
 ) => Promise<GooglePlacesSearchResult>;
 
+type GuestJourneyCoordinationView = Readonly<{
+  intentType: string;
+  targetEngine: string;
+  status: string;
+  lastAttemptAt: Date | null;
+  nextActionAt: Date | null;
+  exhaustedAt: Date | null;
+}>;
+
 export class PinGoRuntimeReadToolExecutor implements PinAIRuntimeToolExecutor {
   private readonly eligibility: PinGoRuntimeEligibilityChecks;
 
@@ -114,6 +126,8 @@ export class PinGoRuntimeReadToolExecutor implements PinAIRuntimeToolExecutor {
         return this.getPropertyKnowledge(request);
       case "get_reservation_context":
         return this.getReservationContext(request);
+      case "get_guest_journey_status":
+        return this.getGuestJourneyStatus(request);
       case "get_access_status":
         return this.getAccessStatus(request);
       case "get_cleaning_status":
@@ -843,6 +857,8 @@ export class PinGoRuntimeReadToolExecutor implements PinAIRuntimeToolExecutor {
       prisma: this.prisma,
       organizationId: request.context.organizationId,
       propertyId: request.context.propertyId,
+      reservationId: request.context.reservationId,
+      currentDateTime: request.context.currentLocalDateTime,
       language,
     });
   }
@@ -979,6 +995,124 @@ export class PinGoRuntimeReadToolExecutor implements PinAIRuntimeToolExecutor {
     };
   }
 
+  private async getGuestJourneyStatus(
+    request: PinAIRuntimeRequest,
+  ): Promise<Readonly<Record<string, unknown>>> {
+    const journey = await this.prisma.guestJourney.findFirst({
+      where: {
+        reservationId: request.context.reservationId,
+        reservation: {
+          propertyId: request.context.propertyId,
+          property: {
+            organizationId: request.context.organizationId,
+          },
+        },
+      },
+      select: {
+        currentState: true,
+        stateChangedAt: true,
+        verificationCompletedAt: true,
+        accessScheduledAt: true,
+        readyForArrivalAt: true,
+        stayActiveAt: true,
+        checkoutDueAt: true,
+        completedAt: true,
+        cancelledAt: true,
+        coordinationIntents: {
+          where: {
+            status: {
+              in: [
+                "PENDING",
+                "CLAIMED",
+                "WAITING_FOR_EVIDENCE",
+                "RETRYABLE",
+                "EXHAUSTED",
+              ],
+            },
+          },
+          orderBy: {
+            updatedAt: "desc",
+          },
+          take: 20,
+          select: {
+            intentType: true,
+            targetEngine: true,
+            status: true,
+            lastAttemptAt: true,
+            nextActionAt: true,
+            exhaustedAt: true,
+          },
+        },
+      },
+    });
+
+    if (!journey) {
+      return {
+        decision: "GUEST_JOURNEY_STATUS_UNAVAILABLE",
+        journeyFound: false,
+        authorizationGranted: false,
+        requiresHumanReview: true,
+        operationalWrites: false,
+        actionsExecuted: false,
+        note:
+          "No canonical Guest Journey was found for the scoped reservation. No lifecycle state was inferred or changed.",
+      };
+    }
+
+    const activeCoordination: readonly GuestJourneyCoordinationView[] =
+      Array.isArray(journey.coordinationIntents)
+        ? journey.coordinationIntents.map((intent: any) => ({
+            intentType: String(intent.intentType ?? "UNKNOWN"),
+            targetEngine: String(intent.targetEngine ?? "UNKNOWN"),
+            status: String(intent.status ?? "UNKNOWN"),
+            lastAttemptAt: intent.lastAttemptAt ?? null,
+            nextActionAt: intent.nextActionAt ?? null,
+            exhaustedAt: intent.exhaustedAt ?? null,
+          }))
+        : [];
+    const exhaustedCount = activeCoordination.filter(
+      (intent) => intent.status === "EXHAUSTED",
+    ).length;
+    const retryableCount = activeCoordination.filter(
+      (intent) => intent.status === "RETRYABLE",
+    ).length;
+    const waitingCount = activeCoordination.filter((intent) =>
+      ["PENDING", "CLAIMED", "WAITING_FOR_EVIDENCE"].includes(
+        String(intent.status),
+      ),
+    ).length;
+
+    return {
+      decision: "GUEST_JOURNEY_STATUS_READ",
+      journeyFound: true,
+      currentState: journey.currentState,
+      stateChangedAt: journey.stateChangedAt,
+      nextExpectedMilestone: nextGuestJourneyMilestone(journey.currentState),
+      milestones: {
+        verificationCompletedAt: journey.verificationCompletedAt,
+        accessScheduledAt: journey.accessScheduledAt,
+        readyForArrivalAt: journey.readyForArrivalAt,
+        stayActiveAt: journey.stayActiveAt,
+        checkoutDueAt: journey.checkoutDueAt,
+        completedAt: journey.completedAt,
+        cancelledAt: journey.cancelledAt,
+      },
+      coordinationSummary: {
+        activeCount: activeCoordination.length,
+        waitingCount,
+        retryableCount,
+        exhaustedCount,
+      },
+      activeCoordination,
+      authorizationGranted: false,
+      requiresHumanReview: exhaustedCount > 0,
+      operationalWrites: false,
+      actionsExecuted: false,
+      note:
+        "Read-only canonical lifecycle status. No reconciliation, retry, escalation, or operational action was executed.",
+    };
+  }
+
   private async getCleaningStatus(
     request: PinAIRuntimeRequest,
   ): Promise<Readonly<Record<string, unknown>>> {
@@ -1032,6 +1166,22 @@ export class PinGoRuntimeReadToolExecutor implements PinAIRuntimeToolExecutor {
 function toMoney(value: unknown): number | null {
   const parsed = Number(value);
   return Number.isFinite(parsed) ? Math.round(parsed * 100) / 100 : null;
+}
+
+function nextGuestJourneyMilestone(currentState: unknown): string | null {
+  const milestones: Readonly<Record<string, string | null>> = {
+    RESERVATION_CONFIRMED: "VERIFICATION_PENDING",
+    VERIFICATION_PENDING: "VERIFICATION_COMPLETED",
+    VERIFICATION_COMPLETED: "ACCESS_SCHEDULED",
+    ACCESS_SCHEDULED: "READY_FOR_ARRIVAL",
+    READY_FOR_ARRIVAL: "STAY_ACTIVE",
+    STAY_ACTIVE: "CHECKOUT_DUE",
+    CHECKOUT_DUE: "JOURNEY_COMPLETED",
+    JOURNEY_COMPLETED: null,
+    JOURNEY_CANCELLED: null,
+  };
+
+  return milestones[String(currentState)] ?? null;
 }
 
 function toPersistedMoney(value: unknown): number | null {

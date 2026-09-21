@@ -1,3 +1,9 @@
+import {
+  normalizePropertyKnowledgeEntryDraft,
+  type PropertyKnowledgeEntryCategory,
+  type PropertyKnowledgeEntryVisibility,
+} from "./property-knowledge-entry.contract.js";
+
 export type PropertyKnowledgeLanguage = "en" | "es";
 
 export type PropertyKnowledgeFact = Readonly<{
@@ -7,7 +13,13 @@ export type PropertyKnowledgeFact = Readonly<{
     | "AMENITIES"
     | "HOUSE_RULES"
     | "CANCELLATION"
-    | "PROPERTY";
+    | "PROPERTY"
+    | "WIFI"
+    | "PARKING"
+    | "APPLIANCE"
+    | "TROUBLESHOOTING"
+    | "EMERGENCY"
+    | "LOCAL_GUIDE";
   key: string;
   value: unknown;
   source:
@@ -16,7 +28,8 @@ export type PropertyKnowledgeFact = Readonly<{
     | "LOCK"
     | "PROPERTY_DEVICE"
     | "GUEST_AGREEMENT"
-    | "CANCELLATION_POLICY";
+    | "CANCELLATION_POLICY"
+    | "PROPERTY_GUEST_KNOWLEDGE";
   authoritative: true;
 }>;
 
@@ -73,6 +86,24 @@ type PropertyKnowledgeRecord = Readonly<{
     refundRules: unknown;
     nonRefundableScenarios: unknown;
   }>[];
+  knowledgeEntries?: readonly Readonly<{
+    category: PropertyKnowledgeEntryCategory;
+    key: string;
+    titleEn: string | null;
+    titleEs: string | null;
+    contentEn: string | null;
+    contentEs: string | null;
+    visibility: PropertyKnowledgeEntryVisibility;
+    sortOrder: number;
+    revision: number;
+    isActive: boolean;
+  }>[];
+  reservations?: readonly Readonly<{
+    id: string;
+    status: string;
+    checkIn: Date;
+    checkOut: Date;
+  }>[];
 }>;
 
 type PropertyKnowledgePrisma = Readonly<{
@@ -98,17 +129,22 @@ export async function getPropertyKnowledgeSnapshot({
   prisma,
   organizationId,
   propertyId,
+  reservationId,
+  currentDateTime,
   language = "en",
 }: {
   prisma: PropertyKnowledgePrisma;
   organizationId: string;
   propertyId: string;
+  reservationId?: string;
+  currentDateTime?: string;
   language?: PropertyKnowledgeLanguage;
 }): Promise<PropertyKnowledgeSnapshot> {
   const property = await loadPropertyKnowledgeRecord({
     prisma,
     organizationId,
     propertyId,
+    reservationId,
   });
 
   if (!property) {
@@ -119,6 +155,7 @@ export async function getPropertyKnowledgeSnapshot({
     organizationId,
     propertyId,
     language,
+    currentDateTime,
     property,
   });
 
@@ -130,10 +167,12 @@ async function loadPropertyKnowledgeRecord({
   prisma,
   organizationId,
   propertyId,
+  reservationId,
 }: {
   prisma: PropertyKnowledgePrisma;
   organizationId: string;
   propertyId: string;
+  reservationId?: string;
 }) {
   return prisma.property.findFirst({
     where: {
@@ -209,6 +248,43 @@ async function loadPropertyKnowledgeRecord({
           nonRefundableScenarios: true,
         },
       },
+      knowledgeEntries: {
+        where: { isActive: true },
+        orderBy: [
+          { category: "asc" },
+          { sortOrder: "asc" },
+          { key: "asc" },
+        ],
+        select: {
+          category: true,
+          key: true,
+          titleEn: true,
+          titleEs: true,
+          contentEn: true,
+          contentEs: true,
+          visibility: true,
+          sortOrder: true,
+          revision: true,
+          isActive: true,
+        },
+      },
+      ...(reservationId
+        ? {
+            reservations: {
+              where: {
+                id: reservationId,
+                status: "ACTIVE",
+              },
+              take: 1,
+              select: {
+                id: true,
+                status: true,
+                checkIn: true,
+                checkOut: true,
+              },
+            },
+          }
+        : {}),
     },
   });
 }
@@ -217,11 +293,13 @@ export function composePropertyKnowledgeSnapshot({
   organizationId,
   propertyId,
   language,
+  currentDateTime,
   property,
 }: {
   organizationId: string;
   propertyId: string;
   language: PropertyKnowledgeLanguage;
+  currentDateTime?: string;
   property: NonNullable<PropertyKnowledgeRecord>;
 }): PropertyKnowledgeSnapshot {
   const facts: PropertyKnowledgeFact[] = [];
@@ -357,12 +435,69 @@ export function composePropertyKnowledgeSnapshot({
     );
   }
 
+  addPersistedKnowledgeEntries({
+    facts,
+    language,
+    currentDateTime,
+    property,
+  });
+
   return {
     organizationId,
     propertyId,
     language,
     facts,
   };
+}
+
+function addPersistedKnowledgeEntries({
+  facts,
+  language,
+  currentDateTime,
+  property,
+}: {
+  facts: PropertyKnowledgeFact[];
+  language: PropertyKnowledgeLanguage;
+  currentDateTime?: string;
+  property: NonNullable<PropertyKnowledgeRecord>;
+}): void {
+  const reservation = property.reservations?.[0];
+  const confirmedGuest = reservation?.status === "ACTIVE";
+  const current = currentDateTime ? new Date(currentDateTime) : null;
+  const duringStay = Boolean(
+    reservation &&
+      confirmedGuest &&
+      current &&
+      Number.isFinite(current.getTime()) &&
+      current >= reservation.checkIn &&
+      current < reservation.checkOut,
+  );
+
+  for (const entry of property.knowledgeEntries ?? []) {
+    if (!entry.isActive) continue;
+    if (entry.visibility === "CONFIRMED_GUEST" && !confirmedGuest) {
+      continue;
+    }
+    if (entry.visibility === "DURING_STAY" && !duringStay) continue;
+
+    const normalized = normalizePropertyKnowledgeEntryDraft(entry);
+    const title =
+      language === "es"
+        ? normalized.titleEs ?? normalized.titleEn
+        : normalized.titleEn ?? normalized.titleEs;
+    const content =
+      language === "es"
+        ? normalized.contentEs ?? normalized.contentEn
+        : normalized.contentEn ?? normalized.contentEs;
+
+    addFact(
+      facts,
+      normalized.category,
+      normalized.key,
+      { title, content },
+      "PROPERTY_GUEST_KNOWLEDGE",
+    );
+  }
 }
 
 function addFact(

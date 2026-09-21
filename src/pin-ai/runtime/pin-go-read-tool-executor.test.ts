@@ -70,6 +70,8 @@ function createPrismaFixture(options: Readonly<{
     latitude: number | null;
     longitude: number | null;
   }>;
+  propertyKnowledgeEntries?: readonly Readonly<Record<string, unknown>>[];
+  guestJourney?: Readonly<Record<string, unknown>> | null;
 }> = {}) {
   const paymentContext = options.paymentContext ?? {};
 
@@ -93,6 +95,15 @@ function createPrismaFixture(options: Readonly<{
           propertyDevices: [],
           guestAgreements: [],
           cancellationPolicies: [],
+          knowledgeEntries: options.propertyKnowledgeEntries ?? [],
+          reservations: [
+            {
+              id: "reservation-a",
+              status: "ACTIVE",
+              checkIn: new Date("2026-09-20T20:00:00.000Z"),
+              checkOut: new Date("2026-09-22T15:00:00.000Z"),
+            },
+          ],
           latitude: options.propertyCoordinates
             ? options.propertyCoordinates.latitude
             : 18.2,
@@ -174,6 +185,63 @@ function createPrismaFixture(options: Readonly<{
         };
       },
     },
+    guestJourney: {
+      async findFirst(args: any) {
+        assert.equal(args.where.reservationId, "reservation-a");
+        assert.equal(args.where.reservation.propertyId, "property-a");
+        assert.equal(
+          args.where.reservation.property.organizationId,
+          "org-a",
+        );
+        assert.equal(args.select.id, undefined);
+        assert.equal(args.select.coordinationIntents.select.intentKey, undefined);
+        assert.equal(args.select.coordinationIntents.select.payload, undefined);
+        assert.equal(args.select.coordinationIntents.select.lastError, undefined);
+        assert.equal(args.select.coordinationIntents.select.leaseToken, undefined);
+        assert.equal(
+          args.select.coordinationIntents.select.evidenceFingerprint,
+          undefined,
+        );
+
+        if ("guestJourney" in options) return options.guestJourney;
+
+        return {
+          id: "private-journey-id",
+          currentState: "VERIFICATION_PENDING",
+          stateChangedAt: new Date("2026-09-20T12:00:00.000Z"),
+          verificationCompletedAt: null,
+          accessScheduledAt: null,
+          readyForArrivalAt: null,
+          stayActiveAt: null,
+          checkoutDueAt: null,
+          completedAt: null,
+          cancelledAt: null,
+          coordinationIntents: [
+            {
+              intentKey: "private-intent-key",
+              intentType: "COMPLETE_COMPLIANCE",
+              targetEngine: "COMPLIANCE",
+              status: "WAITING_FOR_EVIDENCE",
+              lastAttemptAt: new Date("2026-09-20T12:01:00.000Z"),
+              nextActionAt: new Date("2026-09-20T12:06:00.000Z"),
+              exhaustedAt: null,
+              payload: { private: "do-not-return" },
+              lastError: "private-provider-error",
+              leaseToken: "private-lease-token",
+              evidenceFingerprint: "private-fingerprint",
+            },
+            {
+              intentType: "PROVISION_ACCESS",
+              targetEngine: "ACCESS",
+              status: "EXHAUSTED",
+              lastAttemptAt: new Date("2026-09-20T12:02:00.000Z"),
+              nextActionAt: null,
+              exhaustedAt: new Date("2026-09-20T12:03:00.000Z"),
+            },
+          ],
+        };
+      },
+    },
     accessGrant: {
       async findMany(args: any) {
         assert.equal(args.select.lastError, undefined);
@@ -236,6 +304,62 @@ function createPrismaFixture(options: Readonly<{
   };
 }
 
+test("real read adapter exposes persisted Property Knowledge only within guest visibility", async () => {
+  const executor = new PinGoRuntimeReadToolExecutor(
+    createPrismaFixture({
+      propertyKnowledgeEntries: [
+        {
+          category: "PARKING",
+          key: "parking.instructions",
+          titleEn: "Parking",
+          titleEs: "Estacionamiento",
+          contentEn: "Use space 4.",
+          contentEs: "Use el espacio 4.",
+          visibility: "CONFIRMED_GUEST",
+          sortOrder: 10,
+          revision: 1,
+          isActive: true,
+          createdByUserId: "private-user-a",
+          updatedByUserId: "private-user-b",
+        },
+        {
+          category: "WIFI",
+          key: "wifi.main",
+          titleEn: "Wi-Fi",
+          titleEs: "Wi-Fi",
+          contentEn: "Network: CasaGuest; password: palms-and-sun",
+          contentEs: "Red: CasaGuest; contraseña: palms-and-sun",
+          visibility: "DURING_STAY",
+          sortOrder: 20,
+          revision: 1,
+          isActive: true,
+        },
+      ],
+    }),
+  );
+  const inStayRequest: PinAIRuntimeRequest = {
+    ...request,
+    context: {
+      ...request.context,
+      currentLocalDateTime: "2026-09-21T10:00:00-04:00",
+      preferredLanguage: "es",
+    },
+  };
+
+  const result = await executor.execute(
+    "get_property_knowledge",
+    {},
+    inStayRequest,
+    createConversationMemory(inStayRequest),
+  );
+
+  const serialized = JSON.stringify(result);
+  assert.match(serialized, /parking\.instructions/);
+  assert.match(serialized, /Use el espacio 4/);
+  assert.match(serialized, /wifi\.main/);
+  assert.doesNotMatch(serialized, /private-user-a|private-user-b/);
+});
+
 test("real read adapter returns scoped reservation context without guest PII or Stripe IDs", async () => {
   const executor = new PinGoRuntimeReadToolExecutor(createPrismaFixture());
   const result = await executor.execute(
@@ -248,6 +372,54 @@ test("real read adapter returns scoped reservation context without guest PII or 
   const serialized = JSON.stringify(result);
   assert.match(serialized, /#PG-2026-000001/);
   assert.doesNotMatch(serialized, /guestEmail|guestPhone|guestToken|stripePaymentIntentId/);
+});
+
+test("real read adapter returns sanitized canonical Guest Journey status without executing lifecycle work", async () => {
+  const executor = new PinGoRuntimeReadToolExecutor(createPrismaFixture());
+  const result = await executor.execute(
+    "get_guest_journey_status",
+    {},
+    request,
+    createConversationMemory(request),
+  );
+
+  assert.equal(result.decision, "GUEST_JOURNEY_STATUS_READ");
+  assert.equal(result.currentState, "VERIFICATION_PENDING");
+  assert.equal(result.nextExpectedMilestone, "VERIFICATION_COMPLETED");
+  assert.equal(result.requiresHumanReview, true);
+  assert.equal(result.operationalWrites, false);
+  assert.equal(result.actionsExecuted, false);
+  assert.deepEqual(result.coordinationSummary, {
+    activeCount: 2,
+    waitingCount: 1,
+    retryableCount: 0,
+    exhaustedCount: 1,
+  });
+
+  const serialized = JSON.stringify(result);
+  assert.match(serialized, /COMPLETE_COMPLIANCE|PROVISION_ACCESS/);
+  assert.doesNotMatch(
+    serialized,
+    /private-journey-id|private-intent-key|do-not-return|private-provider-error|private-lease-token|private-fingerprint|intentKey|payload|lastError|leaseToken|evidenceFingerprint/,
+  );
+});
+
+test("real read adapter fails closed when the scoped Guest Journey is unavailable", async () => {
+  const executor = new PinGoRuntimeReadToolExecutor(
+    createPrismaFixture({ guestJourney: null }),
+  );
+  const result = await executor.execute(
+    "get_guest_journey_status",
+    {},
+    request,
+    createConversationMemory(request),
+  );
+
+  assert.equal(result.decision, "GUEST_JOURNEY_STATUS_UNAVAILABLE");
+  assert.equal(result.journeyFound, false);
+  assert.equal(result.requiresHumanReview, true);
+  assert.equal(result.operationalWrites, false);
+  assert.equal(result.actionsExecuted, false);
 });
 
 test("real read adapter exposes access state without credentials or TTLock identifiers", async () => {

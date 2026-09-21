@@ -330,6 +330,7 @@ test("runtime advertises exactly the enabled Runtime V1 tools to Luna", async ()
     {
       enabled: true,
       apiKey: "test-key",
+      agentId: "agent_saved123",
       model: "gpt-5.6-luna",
       pollDelayMs: 0,
     },
@@ -363,9 +364,11 @@ test("runtime advertises exactly the enabled Runtime V1 tools to Luna", async ()
   await adapter.run(request, createConversationMemory(request), tools);
 
   const sessionPayload = JSON.parse(createSessionBody) as {
+    agent_id: string;
     agent: { instructions: string; tools: Array<{ name: string }> };
   };
 
+  assert.equal(sessionPayload.agent_id, "agent_saved123");
   assert.match(
     sessionPayload.agent.instructions,
     /extension pricing as an estimate for review only/i,
@@ -388,6 +391,7 @@ test("runtime advertises exactly the enabled Runtime V1 tools to Luna", async ()
     [
       "get_property_knowledge",
       "get_reservation_context",
+      "get_guest_journey_status",
       "get_access_status",
       "get_cleaning_status",
       "check_early_checkin",
@@ -489,7 +493,7 @@ test("runtime advertises native web search separately without exposing hidden fu
   );
   assert.equal(
     sessionPayload.agent.tools.filter((tool) => tool.type === "function").length,
-    12,
+    13,
   );
   assert.deepEqual(result.webSearch, {
     enabled: true,
