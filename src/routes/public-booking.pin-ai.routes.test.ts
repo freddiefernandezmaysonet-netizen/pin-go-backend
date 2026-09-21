@@ -11,6 +11,12 @@ import { buildPublicBookingPinAIRouter } from "./public-booking.pin-ai.routes.js
 const token = "12345678-1234-1234-1234-123456789abc";
 
 function createPrisma() {
+  let conversation: {
+    reservationId: string;
+    openaiSessionId: string | null;
+    leaseToken: string | null;
+    leaseExpiresAt: Date | null;
+  } | null = null;
   return {
     reservation: {
       async findFirst() {
@@ -26,6 +32,47 @@ function createPrisma() {
             timezone: "America/Puerto_Rico",
           },
         };
+      },
+    },
+    pinAIGuestConversation: {
+      async findUnique() {
+        return conversation
+          ? { openaiSessionId: conversation.openaiSessionId }
+          : null;
+      },
+      async create(args: {
+        data: {
+          reservationId: string;
+          leaseToken: string;
+          leaseExpiresAt: Date;
+        };
+      }) {
+        conversation = {
+          reservationId: args.data.reservationId,
+          openaiSessionId: null,
+          leaseToken: args.data.leaseToken,
+          leaseExpiresAt: args.data.leaseExpiresAt,
+        };
+        return conversation;
+      },
+      async updateMany(args: {
+        where: { reservationId: string; leaseToken?: string };
+        data: Partial<{
+          openaiSessionId: string | null;
+          leaseToken: string | null;
+          leaseExpiresAt: Date | null;
+        }>;
+      }) {
+        if (
+          !conversation ||
+          conversation.reservationId !== args.where.reservationId ||
+          (args.where.leaseToken !== undefined &&
+            conversation.leaseToken !== args.where.leaseToken)
+        ) {
+          return { count: 0 };
+        }
+        conversation = { ...conversation, ...args.data };
+        return { count: 1 };
       },
     },
   } as unknown as GuestPinAIGatewayPrisma;
@@ -54,6 +101,7 @@ async function request(body: unknown, enabled = true) {
         memory: createConversationMemory(runtimeRequest),
         response: {
           responseText: "I can check that for you.",
+          openaiSessionId: "session_route_test",
           toolCalls: [],
           escalationCreated: false,
           requiresHumanReview: false,
@@ -93,11 +141,12 @@ test("returns a minimal no-store shadow response without internal tool data", as
     ok: true,
     reply: "I can check that for you.",
     mode: "SHADOW",
-    conversationPersisted: false,
+    conversationPersisted: true,
     escalationCreated: false,
     requiresHumanReview: false,
     actionsExecuted: false,
-    databaseWrites: false,
+    databaseWrites: true,
+    operationalWrites: false,
     webSearch: { enabled: false, used: false },
   });
 });
