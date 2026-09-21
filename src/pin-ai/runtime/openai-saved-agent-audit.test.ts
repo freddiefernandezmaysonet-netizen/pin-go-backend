@@ -10,7 +10,7 @@ import {
   planOpenAISavedAgentSync,
 } from "./openai-saved-agent-audit.js";
 
-test("saved-agent audit identifies the four post-baseline tools and native search as missing", () => {
+test("saved-agent audit identifies the five post-baseline tools and native search as missing", () => {
   const originalToolNames = [
     "get_property_knowledge",
     "get_reservation_context",
@@ -29,6 +29,7 @@ test("saved-agent audit identifies the four post-baseline tools and native searc
   });
 
   assert.deepEqual(audit.missingFunctionTools, [
+    "get_guest_journey_status",
     "calculate_extension_price",
     "check_date_change",
     "get_cancellation_policy",
@@ -93,6 +94,7 @@ test("saved-agent sync plan atomically replaces the tool array with the canonica
   });
 
   assert.deepEqual(plan.before.missingFunctionTools, [
+    "get_guest_journey_status",
     "calculate_extension_price",
     "check_date_change",
     "get_cancellation_policy",
