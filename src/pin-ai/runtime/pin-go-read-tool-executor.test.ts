@@ -175,7 +175,13 @@ function createPrismaFixture(options: Readonly<{
       },
     },
     accessGrant: {
-      async findMany() {
+      async findMany(args: any) {
+        assert.equal(args.select.lastError, undefined);
+        assert.equal(args.select.recoveryOperation, undefined);
+        assert.equal(args.select.recoveryAttemptCount, undefined);
+        assert.equal(args.select.recoveryExhaustedAt, undefined);
+        assert.equal(args.select.lastAppliedAt, undefined);
+        assert.equal(args.select.revokedReason, undefined);
         return [
           {
             method: "PASSCODE",
@@ -183,12 +189,13 @@ function createPrismaFixture(options: Readonly<{
             startsAt: new Date("2026-09-20T18:00:00.000Z"),
             endsAt: new Date("2026-09-22T15:00:00.000Z"),
             type: "GUEST",
-            lastError: null,
-            recoveryOperation: null,
-            recoveryAttemptCount: 0,
-            recoveryExhaustedAt: null,
+            lastError:
+              "TTLOCK_ACTIVATE_FAILED: provider token sk-sensitive-runtime-value",
+            recoveryOperation: "GUEST_ACCESS_PROVISION_RETRYABLE",
+            recoveryAttemptCount: 3,
+            recoveryExhaustedAt: new Date("2026-09-20T18:05:00.000Z"),
             lastAppliedAt: new Date("2026-09-20T18:01:00.000Z"),
-            revokedReason: null,
+            revokedReason: "INTERNAL_OPERATOR_REASON",
             lock: {
               displayName: "Front Door",
               locationLabel: "Main entrance",
@@ -257,7 +264,7 @@ test("real read adapter exposes access state without credentials or TTLock ident
   assert.match(serialized, /Front Door/);
   assert.doesNotMatch(
     serialized,
-    /accessCodeMasked|unlockKey|ttlockKeyboardPwdId|ttlockKeyId|ttlockPayload|ttlockLockId/,
+    /accessCodeMasked|unlockKey|ttlockKeyboardPwdId|ttlockKeyId|ttlockPayload|ttlockLockId|lastError|recoveryOperation|recoveryAttemptCount|recoveryExhaustedAt|lastAppliedAt|revokedReason|sk-sensitive-runtime-value|INTERNAL_OPERATOR_REASON/,
   );
 });
 

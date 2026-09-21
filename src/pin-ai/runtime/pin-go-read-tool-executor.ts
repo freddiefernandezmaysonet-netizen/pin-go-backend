@@ -950,12 +950,6 @@ export class PinGoRuntimeReadToolExecutor implements PinAIRuntimeToolExecutor {
         startsAt: true,
         endsAt: true,
         type: true,
-        lastError: true,
-        recoveryOperation: true,
-        recoveryAttemptCount: true,
-        recoveryExhaustedAt: true,
-        lastAppliedAt: true,
-        revokedReason: true,
         lock: {
           select: {
             displayName: true,
@@ -974,12 +968,6 @@ export class PinGoRuntimeReadToolExecutor implements PinAIRuntimeToolExecutor {
         startsAt: grant.startsAt,
         endsAt: grant.endsAt,
         type: grant.type,
-        lastError: grant.lastError,
-        recoveryOperation: grant.recoveryOperation,
-        recoveryAttemptCount: grant.recoveryAttemptCount,
-        recoveryExhaustedAt: grant.recoveryExhaustedAt,
-        lastAppliedAt: grant.lastAppliedAt,
-        revokedReason: grant.revokedReason,
         lock: grant.lock
           ? {
               displayName: grant.lock.displayName,
