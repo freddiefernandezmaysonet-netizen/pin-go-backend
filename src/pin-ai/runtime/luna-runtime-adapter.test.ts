@@ -417,6 +417,7 @@ test("runtime advertises exactly the enabled Runtime V1 tools to Luna", async ()
     [
       "get_property_knowledge",
       "get_reservation_context",
+      "get_guest_journey_status",
       "get_access_status",
       "get_cleaning_status",
       "check_early_checkin",
@@ -518,7 +519,7 @@ test("runtime advertises native web search separately without exposing hidden fu
   );
   assert.equal(
     sessionPayload.agent.tools.filter((tool) => tool.type === "function").length,
-    12,
+    13,
   );
   assert.deepEqual(result.webSearch, {
     enabled: true,

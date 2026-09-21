@@ -1,6 +1,7 @@
 export type PinAIRuntimeToolName =
   | "get_property_knowledge"
   | "get_reservation_context"
+  | "get_guest_journey_status"
   | "get_access_status"
   | "get_cleaning_status"
   | "check_early_checkin"
@@ -68,6 +69,7 @@ export type PinAIRuntimeResponse = Readonly<{
 export const PIN_AI_RUNTIME_ENABLED_TOOL_NAMES = [
   "get_property_knowledge",
   "get_reservation_context",
+  "get_guest_journey_status",
   "get_access_status",
   "get_cleaning_status",
   "check_early_checkin",
@@ -96,6 +98,12 @@ export const PIN_AI_RUNTIME_TOOLS: readonly PinAIRuntimeToolDefinition[] = [
     name: "get_reservation_context",
     authority: "READ_DYNAMIC",
     description: "Read canonical reservation and stay context.",
+  },
+  {
+    name: "get_guest_journey_status",
+    authority: "READ_DYNAMIC",
+    description:
+      "Read the canonical guest-journey stage, sanitized active coordination status, and next expected milestone. This is read-only and does not reconcile, retry, escalate, or execute an operational action.",
   },
   {
     name: "get_access_status",
