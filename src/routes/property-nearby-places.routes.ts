@@ -2,6 +2,8 @@ import { Router } from "express";
 import type { PrismaClient } from "@prisma/client";
 import { requireAuth } from "../middleware/requireAuth";
 
+const MAX_NEARBY_PLACES_PER_PROPERTY = 5;
+
 const ALLOWED_CATEGORIES = new Set([
   "BEACH",
   "RESTAURANT",
@@ -82,6 +84,17 @@ export function buildPropertyNearbyPlacesRouter(prisma: PrismaClient) {
 
       if (!property) {
         return res.status(404).json({ ok: false, error: "Property not found" });
+      }
+
+      const existingCount = await prisma.propertyNearbyPlace.count({
+        where: { propertyId: property.id },
+      });
+
+      if (existingCount >= MAX_NEARBY_PLACES_PER_PROPERTY) {
+        return res.status(409).json({
+          ok: false,
+          error: "A property can have at most 5 Things to Do places",
+        });
       }
 
       const name = String(req.body?.name ?? "").trim();
