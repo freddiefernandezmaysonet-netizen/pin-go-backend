@@ -867,8 +867,10 @@ publicBookingRouter.get("/:organizationSlug/:propertySlug", async (req, res) => 
           select: {
             id: true,
             name: true,
+            nameEs: true,
             category: true,
             description: true,
+            descriptionEs: true,
             distanceText: true,
             travelTimeMinutes: true,
             latitude: true,
