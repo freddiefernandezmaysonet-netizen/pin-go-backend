@@ -10,6 +10,7 @@ import {
 const EXPECTED_FUNCTION_TOOLS = [
   "get_property_knowledge",
   "get_reservation_context",
+  "get_guest_journey_status",
   "get_access_status",
   "get_cleaning_status",
   "check_early_checkin",

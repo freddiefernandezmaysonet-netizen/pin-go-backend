@@ -71,6 +71,7 @@ function createPrismaFixture(options: Readonly<{
     longitude: number | null;
   }>;
   propertyKnowledgeEntries?: readonly Readonly<Record<string, unknown>>[];
+  guestJourney?: Readonly<Record<string, unknown>> | null;
 }> = {}) {
   const paymentContext = options.paymentContext ?? {};
 
@@ -181,6 +182,63 @@ function createPrismaFixture(options: Readonly<{
             maximumNights:
               "maximumNights" in options ? options.maximumNights : 14,
           },
+        };
+      },
+    },
+    guestJourney: {
+      async findFirst(args: any) {
+        assert.equal(args.where.reservationId, "reservation-a");
+        assert.equal(args.where.reservation.propertyId, "property-a");
+        assert.equal(
+          args.where.reservation.property.organizationId,
+          "org-a",
+        );
+        assert.equal(args.select.id, undefined);
+        assert.equal(args.select.coordinationIntents.select.intentKey, undefined);
+        assert.equal(args.select.coordinationIntents.select.payload, undefined);
+        assert.equal(args.select.coordinationIntents.select.lastError, undefined);
+        assert.equal(args.select.coordinationIntents.select.leaseToken, undefined);
+        assert.equal(
+          args.select.coordinationIntents.select.evidenceFingerprint,
+          undefined,
+        );
+
+        if ("guestJourney" in options) return options.guestJourney;
+
+        return {
+          id: "private-journey-id",
+          currentState: "VERIFICATION_PENDING",
+          stateChangedAt: new Date("2026-09-20T12:00:00.000Z"),
+          verificationCompletedAt: null,
+          accessScheduledAt: null,
+          readyForArrivalAt: null,
+          stayActiveAt: null,
+          checkoutDueAt: null,
+          completedAt: null,
+          cancelledAt: null,
+          coordinationIntents: [
+            {
+              intentKey: "private-intent-key",
+              intentType: "COMPLETE_COMPLIANCE",
+              targetEngine: "COMPLIANCE",
+              status: "WAITING_FOR_EVIDENCE",
+              lastAttemptAt: new Date("2026-09-20T12:01:00.000Z"),
+              nextActionAt: new Date("2026-09-20T12:06:00.000Z"),
+              exhaustedAt: null,
+              payload: { private: "do-not-return" },
+              lastError: "private-provider-error",
+              leaseToken: "private-lease-token",
+              evidenceFingerprint: "private-fingerprint",
+            },
+            {
+              intentType: "PROVISION_ACCESS",
+              targetEngine: "ACCESS",
+              status: "EXHAUSTED",
+              lastAttemptAt: new Date("2026-09-20T12:02:00.000Z"),
+              nextActionAt: null,
+              exhaustedAt: new Date("2026-09-20T12:03:00.000Z"),
+            },
+          ],
         };
       },
     },
@@ -314,6 +372,54 @@ test("real read adapter returns scoped reservation context without guest PII or 
   const serialized = JSON.stringify(result);
   assert.match(serialized, /#PG-2026-000001/);
   assert.doesNotMatch(serialized, /guestEmail|guestPhone|guestToken|stripePaymentIntentId/);
+});
+
+test("real read adapter returns sanitized canonical Guest Journey status without executing lifecycle work", async () => {
+  const executor = new PinGoRuntimeReadToolExecutor(createPrismaFixture());
+  const result = await executor.execute(
+    "get_guest_journey_status",
+    {},
+    request,
+    createConversationMemory(request),
+  );
+
+  assert.equal(result.decision, "GUEST_JOURNEY_STATUS_READ");
+  assert.equal(result.currentState, "VERIFICATION_PENDING");
+  assert.equal(result.nextExpectedMilestone, "VERIFICATION_COMPLETED");
+  assert.equal(result.requiresHumanReview, true);
+  assert.equal(result.operationalWrites, false);
+  assert.equal(result.actionsExecuted, false);
+  assert.deepEqual(result.coordinationSummary, {
+    activeCount: 2,
+    waitingCount: 1,
+    retryableCount: 0,
+    exhaustedCount: 1,
+  });
+
+  const serialized = JSON.stringify(result);
+  assert.match(serialized, /COMPLETE_COMPLIANCE|PROVISION_ACCESS/);
+  assert.doesNotMatch(
+    serialized,
+    /private-journey-id|private-intent-key|do-not-return|private-provider-error|private-lease-token|private-fingerprint|intentKey|payload|lastError|leaseToken|evidenceFingerprint/,
+  );
+});
+
+test("real read adapter fails closed when the scoped Guest Journey is unavailable", async () => {
+  const executor = new PinGoRuntimeReadToolExecutor(
+    createPrismaFixture({ guestJourney: null }),
+  );
+  const result = await executor.execute(
+    "get_guest_journey_status",
+    {},
+    request,
+    createConversationMemory(request),
+  );
+
+  assert.equal(result.decision, "GUEST_JOURNEY_STATUS_UNAVAILABLE");
+  assert.equal(result.journeyFound, false);
+  assert.equal(result.requiresHumanReview, true);
+  assert.equal(result.operationalWrites, false);
+  assert.equal(result.actionsExecuted, false);
 });
 
 test("real read adapter exposes access state without credentials or TTLock identifiers", async () => {
