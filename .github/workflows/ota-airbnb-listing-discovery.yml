@@ -66,6 +66,23 @@ jobs:
           BASE_BRANCH="${GITHUB_BASE_REF:-main}"
           git fetch origin "+refs/heads/$BASE_BRANCH:refs/remotes/origin/$BASE_BRANCH" --depth=1
           git diff --name-only "origin/$BASE_BRANCH...HEAD" | sort > "$RUNNER_TEMP/actual.txt"
+          if [ "${GITHUB_HEAD_REF:-$GITHUB_REF_NAME}" = "agent/pin-ai-conversation-sessions-v1" ]; then
+            cat > "$RUNNER_TEMP/pin-ai-conversation-allowed.txt" <<'EOF'
+          .github/workflows/ota-airbnb-listing-discovery.yml
+          prisma/migrations/20260921143000_add_pin_ai_guest_conversation_sessions/migration.sql
+          prisma/schema.prisma
+          src/pin-ai/guest/guest-runtime-gateway.test.ts
+          src/pin-ai/guest/guest-runtime-gateway.ts
+          src/pin-ai/runtime/contracts.ts
+          src/pin-ai/runtime/luna-runtime-adapter.test.ts
+          src/pin-ai/runtime/openai-agents-runtime-transport.ts
+          src/routes/public-booking.pin-ai.routes.test.ts
+          src/routes/public-booking.pin-ai.routes.ts
+          EOF
+            sort "$RUNNER_TEMP/pin-ai-conversation-allowed.txt" -o "$RUNNER_TEMP/pin-ai-conversation-allowed.txt"
+            diff -u "$RUNNER_TEMP/pin-ai-conversation-allowed.txt" "$RUNNER_TEMP/actual.txt"
+            exit 0
+          fi
           if [ "${GITHUB_HEAD_REF:-$GITHUB_REF_NAME}" = "agent/pin-ai-property-knowledge-v1" ]; then
             cat > "$RUNNER_TEMP/pin-ai-property-knowledge-allowed.txt" <<'EOF'
           .github/workflows/ota-airbnb-listing-discovery.yml
