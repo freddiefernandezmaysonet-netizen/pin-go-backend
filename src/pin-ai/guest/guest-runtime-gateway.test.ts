@@ -220,6 +220,7 @@ test("enables native OpenAI web search with coarse location only", async () => {
       PIN_AI_RUNTIME_SHADOW_ENABLED: "true",
       PIN_AI_RUNTIME_REAL_READ_ENABLED: "true",
       PIN_AI_RUNTIME_WEB_SEARCH_ENABLED: "true",
+      PIN_AI_OPENAI_AGENT_ID: "agent_test123",
       OPENAI_API_KEY: "test-key",
     })(request, {
       city: "San Juan",
@@ -233,8 +234,10 @@ test("enables native OpenAI web search with coarse location only", async () => {
     assert.equal(result.actionsExecuted, false);
     assert.equal(result.response.responseText, "Three options nearby.");
     const sessionPayload = JSON.parse(calls[0]?.body ?? "{}") as {
+      agent_id?: string;
       agent?: { tools?: unknown[] };
     };
+    assert.equal(sessionPayload.agent_id, "agent_test123");
     const serializedTools = JSON.stringify(sessionPayload.agent?.tools ?? []);
     assert.match(serializedTools, /"type":"web_search"/);
     assert.match(serializedTools, /"city":"San Juan"/);

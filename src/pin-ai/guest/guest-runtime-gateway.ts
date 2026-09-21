@@ -177,6 +177,10 @@ export function createGuestPinAIRuntimeRunner(
     if (!apiKey) {
       throw new Error("PIN_AI_RUNTIME_OPENAI_API_KEY_MISSING");
     }
+    const agentId = env.PIN_AI_OPENAI_AGENT_ID;
+    if (!agentId) {
+      throw new Error("PIN_AI_RUNTIME_OPENAI_AGENT_ID_MISSING");
+    }
 
     let outboundCalls = 0;
     const guardedFetch = async (
@@ -207,6 +211,7 @@ export function createGuestPinAIRuntimeRunner(
       {
         enabled: true,
         apiKey,
+        agentId,
         model: "gpt-5.6-luna",
         webSearch: {
           enabled: webSearchEnabled,
