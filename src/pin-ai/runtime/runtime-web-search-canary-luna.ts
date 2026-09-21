@@ -5,6 +5,7 @@ import { LunaRuntimeAdapter } from "./luna-runtime-adapter.js";
 import { GuardedPinAIModelAdapter } from "./model-adapter.js";
 import { OpenAIAgentsRuntimeTransport } from "./openai-agents-runtime-transport.js";
 import { createPinGoRuntimeReadToolExecutor } from "./pin-go-runtime-tools.js";
+import type { PinAIRuntimeToolExecutor } from "./tool-executor.js";
 import { resolveWebSearchLocation } from "./web-search-location.js";
 
 let openAIApiCalls = 0;
@@ -101,6 +102,55 @@ async function main(): Promise<void> {
     };
   };
 
+  const observedToolResults: Array<
+    Readonly<{
+      name: string;
+      decision: unknown;
+      authorizationGranted: unknown;
+      chargeExecuted: unknown;
+      reservationChanged: unknown;
+      actionsExecuted: unknown;
+    }>
+  > = [];
+  const readTools = createPinGoRuntimeReadToolExecutor();
+  const tools: PinAIRuntimeToolExecutor = {
+    async execute(tool, args, runtimeRequest, memory) {
+      const output = await readTools.execute(tool, args, runtimeRequest, memory);
+      observedToolResults.push({
+        name: tool,
+        decision: output.decision,
+        authorizationGranted: output.authorizationGranted,
+        chargeExecuted: output.chargeExecuted,
+        reservationChanged: output.reservationChanged,
+        actionsExecuted: output.actionsExecuted,
+      });
+
+      if (
+        (tool === "check_late_checkout" ||
+          tool === "check_extension_availability" ||
+          tool === "calculate_extension_price") &&
+        output.authorizationGranted !== false
+      ) {
+        throw new Error(
+          `PIN_AI_RUNTIME_COMBINED_CANARY_AUTHORIZATION_INVARIANT_FAILED:${tool}`,
+        );
+      }
+
+      if (
+        output.authorizationGranted === true ||
+        output.chargeExecuted === true ||
+        output.reservationChanged === true ||
+        output.actionsExecuted === true
+      ) {
+        throw new Error(
+          `PIN_AI_RUNTIME_COMBINED_CANARY_MUTATION_INVARIANT_FAILED:${tool}`,
+        );
+      }
+
+      return output;
+    },
+  };
+
   const transport = new OpenAIAgentsRuntimeTransport(
     {
       enabled: true,
@@ -129,7 +179,7 @@ async function main(): Promise<void> {
   const response = await model.run(
     request,
     createConversationMemory(request),
-    createPinGoRuntimeReadToolExecutor(),
+    tools,
   );
 
   if (
@@ -148,6 +198,14 @@ async function main(): Promise<void> {
     if (!functionToolCalls.includes(requiredTool)) {
       throw new Error(
         `PIN_AI_RUNTIME_COMBINED_CANARY_TOOL_NOT_CALLED:${requiredTool}`,
+      );
+    }
+    const evidence = observedToolResults.find(
+      (result) => result.name === requiredTool,
+    );
+    if (evidence?.authorizationGranted !== false) {
+      throw new Error(
+        `PIN_AI_RUNTIME_COMBINED_CANARY_AUTHORIZATION_INVARIANT_FAILED:${requiredTool}`,
       );
     }
   }
@@ -173,6 +231,7 @@ async function main(): Promise<void> {
       },
       responseText: response.responseText,
       functionToolCalls,
+      observedToolResults,
       webSearch: response.webSearch,
       escalationCreated: response.escalationCreated,
       requiresHumanReview: response.requiresHumanReview,
