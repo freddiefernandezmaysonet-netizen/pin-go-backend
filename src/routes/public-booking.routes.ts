@@ -1524,37 +1524,7 @@ if (guestAcceptedSecurePreCheckinRequirement !== true) {
           ? new Date().toISOString()
           : null;
 
-    const propertyProtectionPolicySnapshot = propertyProtectionEnabled
-      ? {
-          enabled: true,
-          mode: "CARD_ON_FILE",
-          maxDamageLiabilityAmount:
-            propertyProtectionMaxDamageLiabilityAmount,
-          currency: "usd",
-          disclosureVersion: propertyProtectionDisclosureVersion,
-          capturedAt: new Date().toISOString(),
-        }
-      : {
-          enabled: false,
-          mode: "CARD_ON_FILE",
-          maxDamageLiabilityAmount: null,
-          currency: "usd",
-          disclosureVersion: propertyProtectionDisclosureVersion,
-          capturedAt: new Date().toISOString(),
-        };
 
-    const damagePaymentConsent = propertyProtectionEnabled
-      ? {
-          accepted: true,
-          acceptedAt: propertyProtectionConsentAcceptedAt,
-          version: propertyProtectionDisclosureVersion,
-          source: "DIRECT_BOOKING_CHECKOUT",
-          mode: "CARD_ON_FILE",
-          maxDamageLiabilityAmount:
-            propertyProtectionMaxDamageLiabilityAmount,
-          currency: "usd",
-        }
-      : null;
 
 if (property.maxGuests && totalGuests > property.maxGuests) {
   return res.status(400).json({
