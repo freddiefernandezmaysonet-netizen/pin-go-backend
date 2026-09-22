@@ -31,6 +31,7 @@ export async function notifyGuestOfApprovedDamageCase(input: {
           guestName: true,
           guestEmail: true,
           guestToken: true,
+          guestTokenExpiresAt: true,
           preferredLanguage: true,
           propertyId: true,
           property: {
@@ -95,6 +96,21 @@ export async function notifyGuestOfApprovedDamageCase(input: {
     }
 
     return { ok: true, alreadySent: true, messageLogId: alreadySent.id };
+  }
+
+  const minimumPortalExpiry = new Date(
+    Date.now() + 30 * 24 * 60 * 60 * 1000
+  );
+
+  if (
+    reservation.guestTokenExpiresAt &&
+    reservation.guestTokenExpiresAt.getTime() <
+      minimumPortalExpiry.getTime()
+  ) {
+    await input.prisma.reservation.update({
+      where: { id: reservation.id },
+      data: { guestTokenExpiresAt: minimumPortalExpiry },
+    });
   }
 
   const replyTo = await resolveOrganizationGuestReplyTo(
