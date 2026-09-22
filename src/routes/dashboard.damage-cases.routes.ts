@@ -1,5 +1,5 @@
 import { Router, type Request, type Response } from "express";
-import { DamageCaseStatus, PrismaClient } from "@prisma/client";
+import { DamageCaseStatus, Prisma, PrismaClient } from "@prisma/client";
 import { requireAuth } from "../middleware/requireAuth";
 import { evaluateDamageCasePolicy } from "../services/damage-case-policy.service.js";
 
@@ -94,7 +94,10 @@ export function buildDashboardDamageCasesRouter(prisma: PrismaClient) {
         requestedAmount: policy.requestedAmount,
         currency: String(reservation.currency ?? "usd").toLowerCase(),
         description,
-        evidence,
+        evidence:
+          evidence === null
+            ? Prisma.DbNull
+            : (evidence as Prisma.InputJsonValue),
         reportedByUserId: auth.id,
         status: evidencePresent(evidence)
           ? DamageCaseStatus.OPEN
@@ -154,7 +157,10 @@ export function buildDashboardDamageCasesRouter(prisma: PrismaClient) {
       data: {
         requestedAmount: policy.requestedAmount,
         description,
-        evidence: evidence as any,
+        evidence:
+          evidence === null
+            ? Prisma.DbNull
+            : (evidence as Prisma.InputJsonValue),
         status: evidencePresent(evidence)
           ? DamageCaseStatus.OPEN
           : DamageCaseStatus.EVIDENCE_PENDING,
