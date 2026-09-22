@@ -33,6 +33,7 @@ import { buildListingsMappingRouter } from "./pms/routes/listings.mapping.routes
 import { meRouter } from "./routes/me.route";
 import { dashboardRouter } from "./routes/dashboard.route";
 import { dashboardReservationsRouter } from "./routes/dashboard.reservations.route";
+import { buildDashboardDamageCasesRouter } from "./routes/dashboard.damage-cases.routes";
 import { dashboardPropertiesRouter } from "./routes/dashboard.properties.route";
 import { buildDashboardChannexFullSyncRouter } from "./routes/dashboard.channex-full-sync.route";
 import { buildDashboardDistributionConnectionCenterRouter } from "./routes/dashboard.distribution-connection-center.route";
@@ -329,6 +330,7 @@ app.use(adminDemoRouter);
 
 app.use(dashboardRouter);
 app.use(dashboardReservationsRouter);
+app.use(buildDashboardDamageCasesRouter(prisma));
 app.use(buildDashboardChannexFullSyncRouter(prisma));
 app.use(dashboardPropertiesRouter);
 app.use(dashboardGuestAccessSettingsRouter);
