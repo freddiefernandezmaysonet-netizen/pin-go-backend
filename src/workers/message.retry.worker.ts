@@ -11,6 +11,7 @@ import {
   sendGuestAccessPasscodeEmail,
   sendManualReservationGuestCancellationEmail,
   sendPropertyProtectionGuestDamageNotice,
+  sendPropertyProtectionHostGuestResponseNotice,
 } from "../lib/mailer";
 import { resolveOrganizationGuestReplyTo } from "../services/organization-guest-email.service";
 import {
@@ -987,6 +988,207 @@ async function processPropertyProtectionDamageNoticeRetries() {
   }
 }
 
+function parsePropertyProtectionHostResponseRetryPayload(
+  body: string
+): {
+  damageCaseId: string;
+  guestResponse: "ACCEPTED" | "DISPUTED";
+  recipientEmail: string;
+  hostName: string | null;
+} | null {
+  try {
+    const parsed = JSON.parse(body);
+    if (
+      parsed?.kind !== "PIN_GO_EMAIL_DELIVERY" ||
+      parsed?.type !== "PROPERTY_PROTECTION_HOST_GUEST_RESPONSE_NOTICE"
+    ) {
+      return null;
+    }
+
+    const damageCaseId = String(
+      parsed?.retryPayload?.damageCaseId ?? ""
+    ).trim();
+    const guestResponse = String(
+      parsed?.retryPayload?.guestResponse ?? ""
+    ).trim();
+    const recipientEmail = String(
+      parsed?.retryPayload?.recipientEmail ?? ""
+    )
+      .trim()
+      .toLowerCase();
+    const hostNameValue = String(
+      parsed?.retryPayload?.hostName ?? ""
+    ).trim();
+
+    if (
+      !damageCaseId ||
+      !recipientEmail ||
+      (guestResponse !== "ACCEPTED" && guestResponse !== "DISPUTED")
+    ) {
+      return null;
+    }
+
+    return {
+      damageCaseId,
+      guestResponse,
+      recipientEmail,
+      hostName: hostNameValue || null,
+    };
+  } catch {
+    return null;
+  }
+}
+
+async function processPropertyProtectionHostResponseRetries() {
+  const failedEmailMessages = await prisma.messageLog.findMany({
+    where: {
+      channel: "email",
+      provider: "resend",
+      status: "FAILED",
+      retryCount: { lt: MAX_RETRIES },
+      communicationType:
+        "PROPERTY_PROTECTION_HOST_GUEST_RESPONSE_NOTICE",
+    },
+    take: BATCH_SIZE,
+    orderBy: { createdAt: "asc" },
+  });
+
+  for (const message of failedEmailMessages) {
+    try {
+      const payload =
+        parsePropertyProtectionHostResponseRetryPayload(message.body);
+      if (!payload) {
+        throw new Error(
+          "PROPERTY_PROTECTION_HOST_RESPONSE_RETRY_PAYLOAD_MISSING"
+        );
+      }
+
+      const damageCase = await prisma.damageCase.findUnique({
+        where: { id: payload.damageCaseId },
+        select: {
+          id: true,
+          guestResponse: true,
+          reservation: {
+            select: {
+              id: true,
+              reservationNumber: true,
+              property: { select: { name: true } },
+            },
+          },
+        },
+      });
+
+      if (
+        !damageCase ||
+        damageCase.guestResponse !== payload.guestResponse
+      ) {
+        throw new Error(
+          "PROPERTY_PROTECTION_HOST_RESPONSE_CASE_CHANGED"
+        );
+      }
+
+      if (
+        payload.recipientEmail !==
+        String(message.to ?? "").trim().toLowerCase()
+      ) {
+        throw new Error(
+          "PROPERTY_PROTECTION_HOST_RESPONSE_DESTINATION_MISMATCH"
+        );
+      }
+
+      const appUrl = String(
+        process.env.APP_URL ?? "http://localhost:3000"
+      )
+        .trim()
+        .replace(/\/+$/, "");
+      const reservationDetailUrl =
+        `${appUrl}/reservations/${encodeURIComponent(
+          damageCase.reservation.id
+        )}`;
+
+      const sent =
+        await sendPropertyProtectionHostGuestResponseNotice({
+          to: payload.recipientEmail,
+          hostName: payload.hostName,
+          reservationNumber:
+            damageCase.reservation.reservationNumber ??
+            damageCase.reservation.id,
+          propertyName: damageCase.reservation.property.name,
+          guestResponse: payload.guestResponse,
+          reservationDetailUrl,
+          idempotencyKey:
+            `property-protection-host-response-${damageCase.id}-${payload.guestResponse}-${payload.recipientEmail}`,
+        });
+
+      const providerMessageId =
+        (sent as any)?.data?.id ?? (sent as any)?.id ?? null;
+
+      await prisma.messageLog.update({
+        where: { id: message.id },
+        data: {
+          status: "SENT",
+          providerMessageId,
+          retryCount: { increment: 1 },
+          error: null,
+        },
+      });
+
+      try {
+        await prisma.messageDispatchLog.create({
+          data: {
+            reservationId: damageCase.reservation.id,
+            type: "PROPERTY_PROTECTION_HOST_GUEST_RESPONSE_NOTICE",
+            channel: "email",
+            status: "SENT",
+          },
+        });
+      } catch (dispatchLogError) {
+        errLog("Property Protection host response retry dispatch log failed", {
+          messageId: message.id,
+          error: toErrString(dispatchLogError),
+        });
+      }
+
+      log("Property Protection host response retry success", {
+        messageId: message.id,
+        damageCaseId: damageCase.id,
+        retryCount: message.retryCount + 1,
+      });
+    } catch (error) {
+      const errorMessage = toErrString(error);
+      const nextRetryCount = message.retryCount + 1;
+      const nonRetryable =
+        errorMessage.includes("RETRY_PAYLOAD_MISSING") ||
+        errorMessage.includes("CASE_CHANGED") ||
+        errorMessage.includes("DESTINATION_MISMATCH");
+      const finalFailure =
+        nonRetryable || nextRetryCount >= MAX_RETRIES;
+
+      await prisma.messageLog
+        .update({
+          where: { id: message.id },
+          data: {
+            status: finalFailure ? "FAILED_FINAL" : "FAILED",
+            retryCount: { increment: 1 },
+            error: errorMessage,
+          },
+        })
+        .catch(() => {});
+
+      errLog(
+        finalFailure
+          ? "Property Protection host response retry stopped"
+          : "Property Protection host response retry failed",
+        {
+          messageId: message.id,
+          retryCount: nextRetryCount,
+          error: errorMessage,
+        }
+      );
+    }
+  }
+}
+
 let shuttingDown = false;
 let tickRunning = false;
 
@@ -1041,6 +1243,17 @@ async function tick() {
     } catch (e) {
       errLog(
         "processPropertyProtectionDamageNoticeRetries crashed",
+        {
+          err: toErrString(e),
+        }
+      );
+    }
+
+    try {
+      await processPropertyProtectionHostResponseRetries();
+    } catch (e) {
+      errLog(
+        "processPropertyProtectionHostResponseRetries crashed",
         {
           err: toErrString(e),
         }
