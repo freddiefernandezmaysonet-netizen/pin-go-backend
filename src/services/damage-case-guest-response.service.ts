@@ -4,7 +4,18 @@ import {
   PrismaClient,
 } from "@prisma/client";
 import { prisma as prismaSingleton } from "../lib/prisma.js";
-import { GuestCancellationError } from "./guest-cancellation.service.js";
+
+export class GuestDamageCaseResponseError extends Error {
+  statusCode: number;
+  code: string;
+
+  constructor(input: { code: string; message: string; statusCode: number }) {
+    super(input.message);
+    this.name = "GuestDamageCaseResponseError";
+    this.code = input.code;
+    this.statusCode = input.statusCode;
+  }
+}
 
 const RESPONSE_VERSION = "PROPERTY_PROTECTION_GUEST_RESPONSE_V1";
 const MAX_RESPONSE_NOTE_LENGTH = 2000;
@@ -33,7 +44,7 @@ function normalizeNote(value: unknown) {
 }
 
 function fail(code: string, message: string, statusCode: number): never {
-  throw new GuestCancellationError({ code, message, statusCode });
+  throw new GuestDamageCaseResponseError({ code, message, statusCode });
 }
 
 function serializeResponse(damageCase: {
