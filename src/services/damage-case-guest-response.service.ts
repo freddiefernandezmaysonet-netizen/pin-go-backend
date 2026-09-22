@@ -50,6 +50,7 @@ function fail(code: string, message: string, statusCode: number): never {
 function serializeResponse(damageCase: {
   id: string;
   guestResponse: DamageCaseGuestResponse;
+  guestAcknowledgedAt: Date | null;
   guestRespondedAt: Date | null;
   guestResponseNote: string | null;
   guestResponseVersion: string | null;
@@ -57,6 +58,8 @@ function serializeResponse(damageCase: {
   return {
     damageCaseId: damageCase.id,
     guestResponse: damageCase.guestResponse,
+    guestAcknowledgedAt:
+      damageCase.guestAcknowledgedAt?.toISOString() ?? null,
     guestRespondedAt: damageCase.guestRespondedAt?.toISOString() ?? null,
     guestResponseNote: damageCase.guestResponseNote,
     guestResponseVersion: damageCase.guestResponseVersion,
@@ -122,6 +125,7 @@ export async function recordGuestDamageCaseResponse(input: {
           id: true,
           status: true,
           guestResponse: true,
+          guestAcknowledgedAt: true,
           guestRespondedAt: true,
           guestResponseNote: true,
           guestResponseVersion: true,
@@ -215,6 +219,10 @@ export async function recordGuestDamageCaseResponse(input: {
     },
     data: {
       guestResponse: requestedResponse,
+      guestAcknowledgedAt:
+        action === "ACKNOWLEDGED"
+          ? damageCase.guestAcknowledgedAt ?? respondedAt
+          : undefined,
       guestRespondedAt: respondedAt,
       guestResponseNote: responseNote,
       guestResponseVersion: RESPONSE_VERSION,
@@ -259,6 +267,10 @@ export async function recordGuestDamageCaseResponse(input: {
     response: {
       damageCaseId: damageCase.id,
       guestResponse: requestedResponse,
+      guestAcknowledgedAt:
+        action === "ACKNOWLEDGED"
+          ? (damageCase.guestAcknowledgedAt ?? respondedAt).toISOString()
+          : damageCase.guestAcknowledgedAt?.toISOString() ?? null,
       guestRespondedAt: respondedAt.toISOString(),
       guestResponseNote: responseNote,
       guestResponseVersion: RESPONSE_VERSION,
