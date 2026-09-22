@@ -362,7 +362,8 @@ function isGuestCancellationRouteError(error: any) {
   return (
     error &&
     typeof error === "object" &&
-    error.name === "GuestCancellationError" &&
+    (error.name === "GuestCancellationError" ||
+      error.name === "GuestDamageCaseResponseError") &&
     typeof error.code === "string" &&
     typeof error.statusCode === "number"
   );
