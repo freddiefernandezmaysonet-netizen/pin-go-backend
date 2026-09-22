@@ -1711,11 +1711,18 @@ const guestAcceptedSecurePreCheckinRequirementText =
       paymentIntentData.application_fee_amount = platformFeeAmountCents;
     }
 
+    if (propertyProtectionEnabled) {
+      paymentIntentData.setup_future_usage = "off_session";
+    }
+
     const APP_URL = process.env.APP_URL ?? "http://localhost:3000";
 
     const session = await stripe.checkout.sessions.create({
   mode: "payment",
   locale: normalizedPreferredLanguage,
+  ...(propertyProtectionEnabled
+    ? { customer_creation: "always" as const }
+    : {}),
   customer_email: String(guestEmail).trim(),
   payment_intent_data: paymentIntentData,
       line_items: [
