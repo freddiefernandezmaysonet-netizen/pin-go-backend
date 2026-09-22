@@ -856,15 +856,24 @@ export async function getGuestPropertyProtectionCase({
   const reservation = await getReservationByGuestToken(guestToken);
   const damageCase = reservation.damageCase;
 
+  const guestVisibleDamageCase =
+    Boolean(damageCase) &&
+    (
+      [
+        "GUEST_NOTIFICATION_PENDING",
+        "GUEST_NOTIFIED",
+        "CHARGE_BLOCKED",
+      ].includes(String(damageCase?.status)) ||
+      (
+        damageCase?.status === "CLOSED_NO_CHARGE" &&
+        Boolean(damageCase.hostApprovedAt)
+      )
+    );
+
   if (
     reservation.propertyProtectionRequiredSnapshot !== true ||
     !damageCase ||
-    ![
-      "GUEST_NOTIFICATION_PENDING",
-      "GUEST_NOTIFIED",
-      "CHARGE_BLOCKED",
-      "CLOSED_NO_CHARGE",
-    ].includes(String(damageCase.status))
+    !guestVisibleDamageCase
   ) {
     return {
       available: false,
