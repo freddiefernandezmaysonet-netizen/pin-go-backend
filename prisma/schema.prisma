@@ -241,7 +241,7 @@ model Property {
   autonomousPricingEnabled   Boolean                     @default(false)
   cleaningFee                Decimal?                    @db.Decimal(10,2)
   propertyProtectionEnabled  Boolean                     @default(false)
-  propertyProtectionMode     String                      @default("CARD_ON_FILE")
+  propertyProtectionMode     PropertyProtectionMode      @default(CARD_ON_FILE)
   maxDamageLiabilityAmount   Decimal?                    @db.Decimal(10,2)
   maxGuests                  Int?
   minimumNights              Int                         @default(1)
@@ -295,6 +295,20 @@ model Property {
   @@index([organizationId])
   @@index([organizationId, status])
   @@unique([organizationId, slug])
+}
+
+enum PropertyProtectionMode {
+  CARD_ON_FILE
+}
+
+enum DamagePaymentMethodStatus {
+  NOT_REQUIRED
+  CONSENT_REQUIRED
+  SETUP_PENDING
+  READY
+  ACTION_REQUIRED
+  FAILED
+  REVOKED
 }
 
 enum NearbyPlaceCategory {
@@ -579,11 +593,11 @@ model Reservation {
   identityVerificationRequiredSnapshot   Boolean?
   identityVerificationProviderCostAmount Decimal?    @db.Decimal(10, 2)
   propertyProtectionRequiredSnapshot      Boolean?
-  propertyProtectionModeSnapshot          String?
+  propertyProtectionModeSnapshot          PropertyProtectionMode?
   maxDamageLiabilityAmountSnapshot         Decimal?    @db.Decimal(10, 2)
   propertyProtectionPolicySnapshot         Json?
   damagePaymentConsent                     Json?
-  damagePaymentMethodStatus                String      @default("NOT_REQUIRED")
+  damagePaymentMethodStatus                DamagePaymentMethodStatus @default(NOT_REQUIRED)
   stripeDamageCustomerId                   String?
   stripeDamagePaymentMethodId              String?
   guestAccessModeSnapshot                    GuestAccessMode @default(PASSCODE_ONLY)
