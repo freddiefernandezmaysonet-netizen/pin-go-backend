@@ -9,7 +9,7 @@ on:
       - "src/routes/public-booking.property-protection-card-on-file.contract.test.ts"
       - "src/services/direct-booking.service.ts"
       - "src/services/damage-case-policy.service.ts"
-      - "src/services/damage-case-policy.service.test.ts src/routes/dashboard.damage-cases.contract.test.ts"
+      - "src/services/damage-case-policy.service.test.ts"
       - "src/routes/dashboard.damage-cases.routes.ts"
       - "src/routes/dashboard.damage-cases.contract.test.ts"
       - "src/server.ts"
@@ -49,7 +49,7 @@ jobs:
           node --import tsx --test src/routes/public-booking.property-protection.contract.test.ts
           node --import tsx --test src/routes/public-booking.property-protection-consent.contract.test.ts
           node --import tsx --test src/routes/public-booking.property-protection-card-on-file.contract.test.ts
-          node --import tsx --test src/services/damage-case-policy.service.test.ts
+          node --import tsx --test src/services/damage-case-policy.service.test.ts src/routes/dashboard.damage-cases.contract.test.ts
           node --import tsx --test src/routes/dashboard.damage-cases.contract.test.ts
 
       - name: Type-check Property Protection and Damage Case boundaries
