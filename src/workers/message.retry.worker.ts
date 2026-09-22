@@ -835,6 +835,7 @@ async function processPropertyProtectionDamageNoticeRetries() {
               guestName: true,
               guestEmail: true,
               guestToken: true,
+              guestTokenExpiresAt: true,
               preferredLanguage: true,
               propertyId: true,
               property: {
@@ -874,6 +875,20 @@ async function processPropertyProtectionDamageNoticeRetries() {
         .replace(/\/+$/, "");
       const manageReservationUrl =
         `${appUrl}/booking/manage/${encodeURIComponent(guestToken)}`;
+      const minimumPortalExpiry = new Date(
+        Date.now() + 30 * 24 * 60 * 60 * 1000
+      );
+      if (
+        reservation.guestTokenExpiresAt &&
+        reservation.guestTokenExpiresAt.getTime() <
+          minimumPortalExpiry.getTime()
+      ) {
+        await prisma.reservation.update({
+          where: { id: reservation.id },
+          data: { guestTokenExpiresAt: minimumPortalExpiry },
+        });
+      }
+
       const replyTo = await resolveOrganizationGuestReplyTo(
         prisma,
         reservation.property.organizationId
