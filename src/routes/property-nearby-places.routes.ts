@@ -2,6 +2,8 @@ import { Router } from "express";
 import type { PrismaClient } from "@prisma/client";
 import { requireAuth } from "../middleware/requireAuth";
 
+const MAX_NEARBY_PLACES_PER_PROPERTY = 5;
+
 const ALLOWED_CATEGORIES = new Set([
   "BEACH",
   "RESTAURANT",
@@ -84,6 +86,17 @@ export function buildPropertyNearbyPlacesRouter(prisma: PrismaClient) {
         return res.status(404).json({ ok: false, error: "Property not found" });
       }
 
+      const existingCount = await prisma.propertyNearbyPlace.count({
+        where: { propertyId: property.id },
+      });
+
+      if (existingCount >= MAX_NEARBY_PLACES_PER_PROPERTY) {
+        return res.status(409).json({
+          ok: false,
+          error: "A property can have at most 5 Things to Do places",
+        });
+      }
+
       const name = String(req.body?.name ?? "").trim();
       const category = String(req.body?.category ?? "OTHER").toUpperCase();
       const travelTimeMinutes = optionalNumber(req.body?.travelTimeMinutes);
@@ -124,8 +137,10 @@ export function buildPropertyNearbyPlacesRouter(prisma: PrismaClient) {
         data: {
           propertyId: property.id,
           name,
+          nameEs: optionalText(req.body?.nameEs),
           category: category as any,
           description: optionalText(req.body?.description),
+          descriptionEs: optionalText(req.body?.descriptionEs),
           distanceText: optionalText(req.body?.distanceText),
           travelTimeMinutes:
             travelTimeMinutes === null ? null : Math.max(0, Math.round(travelTimeMinutes)),
@@ -170,6 +185,10 @@ export function buildPropertyNearbyPlacesRouter(prisma: PrismaClient) {
         data.name = name;
       }
 
+      if (req.body?.nameEs !== undefined) {
+        data.nameEs = optionalText(req.body.nameEs);
+      }
+
       if (req.body?.category !== undefined) {
         const category = String(req.body.category).toUpperCase();
         if (!ALLOWED_CATEGORIES.has(category)) {
@@ -178,7 +197,7 @@ export function buildPropertyNearbyPlacesRouter(prisma: PrismaClient) {
         data.category = category;
       }
 
-      for (const field of ["description", "distanceText"]) {
+      for (const field of ["description", "descriptionEs", "distanceText"]) {
         if (req.body?.[field] !== undefined) data[field] = optionalText(req.body[field]);
       }
 
