@@ -849,6 +849,9 @@ publicBookingRouter.get("/:organizationSlug/:propertySlug", async (req, res) => 
         publicPhotos: true,
         baseNightlyRate: true,
         cleaningFee: true,
+        propertyProtectionEnabled: true,
+        propertyProtectionMode: true,
+        maxDamageLiabilityAmount: true,
         amenities: {
           where: { isActive: true },
           orderBy: { name: "asc" },
@@ -950,6 +953,21 @@ return res.json({
     ...property,
     cancellationPolicy,
     cancellationPolicyPresentation,
+    propertyProtection: property.propertyProtectionEnabled
+      ? {
+          enabled: true,
+          mode: property.propertyProtectionMode,
+          maxDamageLiabilityAmount: property.maxDamageLiabilityAmount,
+          currency: "usd",
+          disclosureVersion: "property_protection_card_on_file_v1",
+        }
+      : {
+          enabled: false,
+          mode: property.propertyProtectionMode,
+          maxDamageLiabilityAmount: null,
+          currency: "usd",
+          disclosureVersion: "property_protection_card_on_file_v1",
+        },
     guestAccessSettings: {
       configured: Boolean(activeGuestAgreement),
       requiresIdentityVerification:
