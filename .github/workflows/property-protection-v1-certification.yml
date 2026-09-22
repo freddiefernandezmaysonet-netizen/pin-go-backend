@@ -6,7 +6,7 @@ on:
       - "src/routes/public-booking.routes.ts"
       - "src/routes/public-booking.property-protection.contract.test.ts"
       - "src/routes/public-booking.property-protection-consent.contract.test.ts"
-      - "src/routes/public-booking.property-protection-card-on-file.contract.test.ts src/services/damage-case-policy.service.test.ts"
+      - "src/routes/public-booking.property-protection-card-on-file.contract.test.ts"
       - "src/services/direct-booking.service.ts"
       - "src/services/damage-case-policy.service.ts"
       - "src/services/damage-case-policy.service.test.ts"
@@ -45,7 +45,7 @@ jobs:
         run: |
           node --import tsx --test src/routes/public-booking.property-protection.contract.test.ts
           node --import tsx --test src/routes/public-booking.property-protection-consent.contract.test.ts
-          node --import tsx --test src/routes/public-booking.property-protection-card-on-file.contract.test.ts
+          node --import tsx --test src/routes/public-booking.property-protection-card-on-file.contract.test.ts src/services/damage-case-policy.service.test.ts
           node --import tsx --test src/services/damage-case-policy.service.test.ts
 
       - name: Type-check Property Protection route boundary
