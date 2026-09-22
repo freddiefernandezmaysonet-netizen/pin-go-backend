@@ -105,3 +105,23 @@ test("automatic notice retry updates delivery evidence and case state together",
   assert.doesNotMatch(block, /paymentIntents/);
   assert.doesNotMatch(block, /charges\./);
 });
+
+
+test("Damage Case notice preserves Manage Reservation access for post-stay review", () => {
+  assert.match(service, /guestTokenExpiresAt: true/);
+  assert.match(service, /30 \* 24 \* 60 \* 60 \* 1000/);
+  assert.match(service, /guestTokenExpiresAt: minimumPortalExpiry/);
+  assert.match(retryWorker, /guestTokenExpiresAt: true/);
+  assert.match(retryWorker, /guestTokenExpiresAt: minimumPortalExpiry/);
+});
+
+test("indefinite guest tokens are not shortened by Damage Case notification", () => {
+  assert.match(
+    service,
+    /reservation\.guestTokenExpiresAt &&[\s\S]*reservation\.guestTokenExpiresAt\.getTime\(\)/
+  );
+  assert.match(
+    retryWorker,
+    /reservation\.guestTokenExpiresAt &&[\s\S]*reservation\.guestTokenExpiresAt\.getTime\(\)/
+  );
+});
