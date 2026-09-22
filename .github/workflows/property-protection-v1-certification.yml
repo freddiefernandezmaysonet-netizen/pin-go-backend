@@ -1,0 +1,41 @@
+name: Property Protection V1 Certification
+
+on:
+  pull_request:
+    paths:
+      - "src/routes/public-booking.routes.ts"
+      - "src/routes/public-booking.property-protection.contract.test.ts"
+      - "src/routes/dashboard.properties.route.ts"
+      - "src/routes/dashboard.properties.property-protection.test.ts"
+      - "prisma/schema.prisma"
+      - "prisma/migrations/**"
+      - ".github/workflows/property-protection-v1-certification.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  certify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install locked dependencies
+        run: npm ci --ignore-scripts --no-audit --no-fund
+
+      - name: Generate and validate Prisma client without database operations
+        run: |
+          ./node_modules/.bin/prisma generate --schema ./prisma
+          ./node_modules/.bin/prisma validate --schema ./prisma
+
+      - name: Certify Property Protection public contract
+        run: node --import tsx --test src/routes/public-booking.property-protection.contract.test.ts
+
+      - name: Type-check Property Protection route boundary
+        run: npx tsc --noEmit --skipLibCheck --module nodenext --moduleResolution nodenext --target es2022 src/routes/public-booking.property-protection.contract.test.ts
