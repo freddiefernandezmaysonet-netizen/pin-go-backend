@@ -2198,3 +2198,574 @@ enum OperationalResolutionType {
   AUTOMATIC
   MANUAL
   EXPIRED
+  SUPERSEDED
+}
+
+enum SeasonType {
+  PEAK
+  SHOULDER
+  LOW
+}
+
+enum AmenityChargeMode {
+  INCLUDED
+  REQUIRED
+  OPTIONAL
+}
+
+enum BookingType {
+  ONBOARDING
+  DEMO
+}
+
+enum ReminderKind {
+  CHECKIN_LINK
+  VERIFICATION_REMINDER
+}
+
+enum PersonRole {
+  MANAGER
+  GUEST
+  STAFF
+}
+
+enum PendingSignupStatus {
+  PENDING
+  CHECKOUT_CREATED
+  COMPLETED
+  EXPIRED
+  CANCELED
+  FAILED
+}
+
+enum DashboardUserRole {
+  ADMIN
+  MEMBER
+  PLATFORM_ADMIN
+  ORG_ADMIN
+}
+
+enum BrandExperienceType {
+  STANDARD
+  ENTERPRISE_BRANDED
+}
+
+enum BrandProfileStatus {
+  DRAFT
+  ACTIVE
+  SUSPENDED
+}
+
+enum BrandRevisionApprovalStatus {
+  DRAFT
+  PENDING_APPROVAL
+  APPROVED
+  REJECTED
+}
+
+enum BrandDomainType {
+  PINNGO_SUBDOMAIN
+  CUSTOM_DOMAIN
+}
+
+enum BrandDomainStatus {
+  PENDING_CONFIGURATION
+  PENDING_DNS
+  VERIFYING
+  ACTIVE
+  FAILED
+  RETIRED
+}
+
+enum BrandDomainProvider {
+  VERCEL
+}
+
+enum SubscriptionStatus {
+  ACTIVE
+  PAST_DUE
+  CANCELED
+  TRIALING
+  UNPAID
+  INCOMPLETE
+  INCOMPLETE_EXPIRED
+}
+
+enum GuestJourneyState {
+  RESERVATION_CONFIRMED
+  VERIFICATION_PENDING
+  VERIFICATION_COMPLETED
+  ACCESS_SCHEDULED
+  READY_FOR_ARRIVAL
+  STAY_ACTIVE
+  CHECKOUT_DUE
+  JOURNEY_COMPLETED
+  JOURNEY_CANCELLED
+}
+
+enum GuestJourneyCoordinationIntentStatus {
+  PENDING
+  CLAIMED
+  WAITING_FOR_EVIDENCE
+  RETRYABLE
+  SUCCEEDED
+  EXHAUSTED
+  SUPERSEDED
+}
+
+enum ReservationStatus {
+  ACTIVE
+  CANCELLED
+}
+
+enum PropertyReviewSource {
+  PIN_GO_DIRECT
+  AIRBNB
+  BOOKING_COM
+  VRBO
+  EXPEDIA
+  IMPORTED_VERIFIED
+}
+
+enum PropertyReviewStatus {
+  PENDING_MODERATION
+  PUBLISHED
+  DISPUTED
+  HELD_FOR_REVIEW
+  REJECTED
+  REMOVED
+}
+
+enum PropertyReviewInvitationStatus {
+  ELIGIBLE
+  INVITED
+  CONSUMED
+  EXPIRED
+  REVOKED
+}
+
+enum PropertyReviewInvitationDeliveryStatus {
+  PENDING
+  PROCESSING
+  SENT
+  FAILED
+}
+
+enum PropertyReviewResponseStatus {
+  PUBLISHED
+  HELD_FOR_REVIEW
+  REMOVED
+}
+
+enum PropertyReviewResponseRevisionKind {
+  HOST_WRITE
+  MODERATION_HOLD
+  MODERATION_PUBLISH
+  MODERATION_REMOVE
+}
+
+enum PropertyReviewModerationCaseStatus {
+  OPEN
+  DISPUTED
+  RESOLVED_PUBLISHED
+  RESOLVED_REJECTED
+  RESOLVED_REMOVED
+}
+
+enum PropertyReviewModerationReason {
+  AUTOMATED_SAFETY_CLEAR
+  ROUTINE_LOW_RATING_REVIEW
+  AUTOMATED_SAFETY_SIGNAL
+  UNVERIFIED_STAY
+  DUPLICATE
+  ABUSE_HARASSMENT
+  THREAT
+  EXTORTION
+  PII
+  SPAM
+  IRRELEVANT
+  FACTUALLY_CONTRADICTED
+  MANIPULATION
+  OTHER_POLICY
+}
+
+enum PropertyReviewModerationAction {
+  CASE_OPENED
+  EVIDENCE_ADDED
+  DISPUTE_OPENED
+  PUBLISHED
+  UPHELD
+  REJECTED
+  HELD
+  REMOVED
+}
+
+enum AccessMethod {
+  PASSCODE_TIMEBOUND
+  AUTHORIZED_ADMIN
+}
+
+enum AccessStatus {
+  PENDING
+  ACTIVE
+  SUSPENDED
+  REVOKED
+  FAILED
+}
+
+enum AccessGrantType {
+  GUEST
+  STAFF
+}
+
+enum StaffAccessMethod {
+  NFC_TIMEBOUND
+  EKEY_TIMEBOUND
+}
+
+enum StaffAssignmentStatus {
+  SCHEDULED
+  ACTIVE
+  COMPLETED
+  CANCELLED
+  FAILED
+}
+
+enum PropertyStaffRole {
+  PRIMARY
+  BACKUP
+}
+
+enum PaymentState {
+  NONE
+  PAID
+  PARTIALLY_REFUNDED
+  REFUNDED
+}
+
+enum ReservationModificationStatus {
+  AWAITING_PAYMENT
+  PAYMENT_PROCESSING
+  PAYMENT_FAILED
+  HOST_APPROVAL_REQUIRED
+  APPLYING
+  APPLIED
+  EXPIRED
+  CANCELLED
+}
+
+enum ReservationModificationFinancialAction {
+  ADDITIONAL_PAYMENT_REQUIRED
+  NO_PAYMENT_REQUIRED
+  NO_REFUND_DUE_CONFIRMATION_REQUIRED
+  REDUCTION_REVIEW_REQUIRED
+}
+
+enum StripeConnectStatus {
+  NOT_CONNECTED
+  ONBOARDING_REQUIRED
+  PENDING_VERIFICATION
+  READY
+  RESTRICTED
+}
+
+enum HostPayoutStatus {
+  NOT_APPLICABLE
+  BLOCKED
+  PENDING_CONNECT
+  ROUTED_TO_CONNECT
+  PAID_TO_HOST
+  PARTIALLY_REFUNDED
+  FAILED
+  REFUNDED
+}
+
+enum CancellationPolicyType {
+  FLEXIBLE
+  MODERATE
+  FIRM
+  STRICT
+  CUSTOM
+  NON_REFUNDABLE
+}
+
+enum CancellationRefundBasis {
+  TOTAL_AMOUNT
+  NIGHTLY_SUBTOTAL
+  NIGHTLY_PLUS_CLEANING
+  CUSTOM
+}
+
+enum CancellationActor {
+  HOST
+  GUEST
+  SYSTEM
+  PIN_AI
+}
+
+enum NfcCardStatus {
+  AVAILABLE
+  ASSIGNED
+  LOST
+  RETIRED
+}
+
+enum NfcAssignmentStatus {
+  SCHEDULED
+  PROVISIONING
+  ACTIVE
+  ENDED
+  FAILED
+}
+enum NfcAssignmentRole {
+  GUEST
+  CLEANING
+}
+
+enum GuestAccessMode {
+  PASSCODE_ONLY
+  PASSCODE_PLUS_NFC
+}
+
+enum PropertyKnowledgeCategory {
+  PROPERTY
+  ARRIVAL
+  ACCESS
+  WIFI
+  PARKING
+  AMENITIES
+  HOUSE_RULES
+  APPLIANCE
+  TROUBLESHOOTING
+  EMERGENCY
+  LOCAL_GUIDE
+}
+
+enum PropertyKnowledgeVisibility {
+  PUBLIC
+  CONFIRMED_GUEST
+  DURING_STAY
+}
+
+enum GuestAccessReleaseStatus {
+  BLOCKED
+  ELIGIBLE
+  RELEASED
+}
+
+enum DeviceHealthStatus {
+  HEALTHY
+  WARNING
+  OFFLINE
+  LOW_BATTERY
+  UNKNOWN
+}
+
+enum OperationalRiskLevel {
+  HEALTHY
+  WARNING
+  AT_RISK
+  CRITICAL
+  UNKNOWN
+}
+
+enum PmsProvider {
+  CLOUDBEDS
+  GUESTY
+  HOSTAWAY
+  LODGIFY
+  GENERIC
+  CHANNEX
+}
+
+enum PmsConnectionStatus {
+  ACTIVE
+  DISABLED
+  ERROR
+}
+
+enum WebhookEventStatus {
+  PENDING
+  PROCESSING
+  PROCESSED
+  FAILED
+  DEAD
+}
+
+enum DistributionPlatform {
+  CHANNEX
+}
+
+enum DistributionProvisioningStatus {
+  NOT_PROVISIONED
+  PROVISIONING
+  READY
+  FAILED
+}
+
+enum OtaProvider {
+  AIRBNB
+  BOOKING_COM
+  EXPEDIA
+  VRBO
+}
+
+enum OtaChannelConnectionStatus {
+  NOT_CONNECTED
+  AUTHORIZATION_REQUIRED
+  MAPPING_REQUIRED
+  READINESS_CHECK
+  ACTIVATION_PENDING
+  ACTIVE
+  DEGRADED
+  FAILED
+  DISCONNECTING
+  DISCONNECTED
+}
+
+enum OtaReadinessStatus {
+  NOT_STARTED
+  REQUIRED
+  IN_PROGRESS
+  READY
+  BLOCKED
+  NOT_APPLICABLE
+}
+
+enum OtaConnectionSessionStatus {
+  REQUESTED
+  TOKEN_ISSUED
+  OPENED
+  COMPLETED
+  EXPIRED
+  FAILED
+  CANCELLED
+}
+
+model DistributionGroup {
+  id                 String                         @id @default(cuid())
+  organizationId     String
+  platform           DistributionPlatform           @default(CHANNEX)
+  externalGroupId    String?
+  provisioningStatus DistributionProvisioningStatus @default(NOT_PROVISIONED)
+  provisionedAt      DateTime?
+  verifiedAt         DateTime?
+  lastErrorCode      String?
+  lastErrorSummary   String?
+  createdAt          DateTime                       @default(now())
+  updatedAt          DateTime                       @updatedAt
+
+  organization           Organization           @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  distributionProperties DistributionProperty[]
+
+  @@unique([organizationId, platform])
+  @@unique([platform, externalGroupId])
+  @@index([provisioningStatus, updatedAt])
+}
+
+model DistributionProperty {
+  id                        String                         @id @default(cuid())
+  organizationId            String
+  propertyId                String
+  groupId                   String?
+  platform                  DistributionPlatform           @default(CHANNEX)
+  externalPropertyId        String?
+  externalPrimaryRoomTypeId String?
+  externalPrimaryRatePlanId String?
+  provisioningStatus        DistributionProvisioningStatus @default(NOT_PROVISIONED)
+  provisionedAt             DateTime?
+  verifiedAt                DateTime?
+  lastErrorCode             String?
+  lastErrorSummary          String?
+  createdAt                 DateTime                       @default(now())
+  updatedAt                 DateTime                       @updatedAt
+
+  organization          Organization           @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  property              Property               @relation(fields: [propertyId], references: [id], onDelete: Cascade)
+  group                 DistributionGroup?     @relation(fields: [groupId], references: [id], onDelete: SetNull)
+  otaChannelConnections OtaChannelConnection[]
+
+  @@unique([propertyId, platform])
+  @@unique([platform, externalPropertyId])
+  @@index([organizationId, provisioningStatus])
+  @@index([groupId])
+}
+
+model OtaChannelConnection {
+  id                        String                     @id @default(cuid())
+  organizationId            String
+  propertyId                String
+  distributionPropertyId    String
+  provider                  OtaProvider
+  status                    OtaChannelConnectionStatus @default(NOT_CONNECTED)
+  externalConnectionId      String?
+  externalChannelCode       String?
+  externalListingId         String?                    @db.VarChar(255)
+  authorizationReadiness    OtaReadinessStatus         @default(REQUIRED)
+  mappingReadiness          OtaReadinessStatus         @default(NOT_STARTED)
+  distributionReadiness     OtaReadinessStatus         @default(NOT_STARTED)
+  paymentReadiness          OtaReadinessStatus         @default(NOT_STARTED)
+  taxReadiness              OtaReadinessStatus         @default(NOT_STARTED)
+  contentReadiness          OtaReadinessStatus         @default(NOT_STARTED)
+  activationRequestedAt     DateTime?
+  activatedAt               DateTime?
+  disconnectedAt            DateTime?
+  lastLifecycleOccurredAt       DateTime?
+  lastLifecycleOccurredAtMicros BigInt?
+  lastLifecycleEventType        String?                    @db.VarChar(40)
+  lastLifecycleEventPrecedence  Int?
+  channelAuthorizationVerifiedAt DateTime?
+  lastChannelActivatedAt        DateTime?
+  readinessRevision             Int                       @default(0)
+  lastReadinessCheckedAt    DateTime?
+  lastFullSyncConfirmedAt   DateTime?
+  lastReservationReceivedAt DateTime?
+  lastErrorCode             String?
+  lastErrorSummary          String?
+  createdAt                 DateTime                   @default(now())
+  updatedAt                 DateTime                   @updatedAt
+
+  organization         Organization         @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  property             Property             @relation(fields: [propertyId], references: [id], onDelete: Cascade)
+  distributionProperty DistributionProperty @relation(fields: [distributionPropertyId], references: [id], onDelete: Cascade)
+  connectionSessions   OtaConnectionSession[]
+
+  @@unique([propertyId, provider])
+  @@unique([provider, externalConnectionId])
+  @@unique([provider, externalListingId])
+  @@index([organizationId, status])
+  @@index([distributionPropertyId, status])
+}
+
+model OtaConnectionSession {
+  id                     String                     @id @default(cuid())
+  organizationId         String
+  propertyId             String
+  otaChannelConnectionId String
+  requestedByUserId      String
+  provider               OtaProvider
+  status                 OtaConnectionSessionStatus @default(REQUESTED)
+  requestKey             String                     @db.VarChar(120)
+  tokenFingerprint       String?                    @db.VarChar(64)
+  launchUrlOrigin        String?                    @db.VarChar(255)
+  requestedAt            DateTime                   @default(now())
+  tokenIssuedAt          DateTime?
+  openedAt               DateTime?
+  completedAt            DateTime?
+  expiresAt              DateTime
+  failedAt               DateTime?
+  cancelledAt            DateTime?
+  lastErrorCode          String?                    @db.VarChar(120)
+  createdAt              DateTime                   @default(now())
+  updatedAt              DateTime                   @updatedAt
+
+  organization         Organization         @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  property             Property             @relation(fields: [propertyId], references: [id], onDelete: Cascade)
+  otaChannelConnection OtaChannelConnection @relation(fields: [otaChannelConnectionId], references: [id], onDelete: Cascade)
+  requestedByUser      DashboardUser        @relation("OtaConnectionSessionRequester", fields: [requestedByUserId], references: [id], onDelete: Restrict)
+
+  @@unique([organizationId, requestKey])
+  @@index([organizationId, propertyId, status, expiresAt])
+  @@index([otaChannelConnectionId, status])
+  @@index([requestedByUserId, requestedAt])
+}
