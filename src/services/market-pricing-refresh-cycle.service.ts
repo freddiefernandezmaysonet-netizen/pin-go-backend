@@ -142,7 +142,6 @@ export async function runMarketPricingRefreshCycle(input: {
   clock?: () => Date;
   batchSize: number;
   horizonDays: number;
-  currency: string;
   retryBackoffMs: number;
   blockedBackoffMs: number;
 }): Promise<MarketPricingRefreshCycleResult> {
@@ -176,7 +175,6 @@ export async function runMarketPricingRefreshCycle(input: {
     now: selectedAt,
     limit: batchSize,
     horizonDays,
-    currency: input.currency,
   });
   const items: MarketPricingRefreshCycleItem[] = [];
 
