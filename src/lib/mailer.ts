@@ -96,6 +96,85 @@ function getSafeReviewUrl(value: string) {
   }
 }
 
+export async function sendPropertyProtectionGuestDamageNotice(
+  input: SendPropertyProtectionGuestDamageNoticeInput
+) {
+  const language = resolveGuestLanguage(input.preferredLanguage);
+  const isSpanish = language === "es";
+  const safeManageUrl = getSafeUrl(input.manageReservationUrl);
+
+  if (!safeManageUrl) {
+    throw new Error("Property Protection manage reservation URL is invalid");
+  }
+
+  const greeting = input.guestName?.trim()
+    ? `${isSpanish ? "Hola" : "Hi"} ${escapeHtml(input.guestName.trim())},`
+    : isSpanish
+      ? "Hola,"
+      : "Hi,";
+
+  if (!resend) {
+    if (isProd) {
+      throw new Error("RESEND_API_KEY missing in production");
+    }
+
+    return { ok: true, mode: "console" };
+  }
+
+  const subject = isSpanish
+    ? `Actualización de Protección de la propiedad — Reservación #${input.reservationNumber}`
+    : `Property Protection update — Reservation #${input.reservationNumber}`;
+
+  const { data, error } = await resend.emails.send(
+    {
+      from: getEmailFrom(),
+      to: input.to,
+      ...(input.replyTo ? { replyTo: input.replyTo } : {}),
+      subject,
+      html: `
+        <div style="font-family:Arial,sans-serif;color:#111827;line-height:1.6;max-width:640px;margin:auto">
+          <div style="background:linear-gradient(135deg,#020617,#1d4ed8);color:#fff;border-radius:18px;padding:24px;margin-bottom:20px">
+            <p style="margin:0 0 8px;font-size:12px;letter-spacing:.08em;text-transform:uppercase;font-weight:800">
+              ${isSpanish ? "Protección de la propiedad" : "Property Protection"}
+            </p>
+            <h1 style="margin:0;font-size:26px;line-height:1.2">
+              ${isSpanish ? "Hay una actualización en su reservación" : "There is an update to your reservation"}
+            </h1>
+          </div>
+          <p>${greeting}</p>
+          <p>
+            ${isSpanish
+              ? `Se ha registrado una actualización relacionada con Protección de la propiedad para su reservación #${escapeHtml(input.reservationNumber)} en ${escapeHtml(input.propertyName)}.`
+              : `A Property Protection update has been recorded for reservation #${escapeHtml(input.reservationNumber)} at ${escapeHtml(input.propertyName)}.`}
+          </p>
+          <p>
+            ${isSpanish
+              ? "Revise los detalles en Administrar reservación. No se ha realizado ningún cargo por esta actualización."
+              : "Review the details in Manage reservation. No charge has been made for this update."}
+          </p>
+          <p style="margin:24px 0">
+            <a href="${escapeHtml(safeManageUrl)}" style="display:inline-block;background:#1d4ed8;color:#fff;text-decoration:none;padding:13px 18px;border-radius:10px;font-weight:800">
+              ${isSpanish ? "Administrar reservación" : "Manage reservation"}
+            </a>
+          </p>
+          <p style="color:#6b7280;font-size:13px">
+            ${isSpanish
+              ? "Los detalles y el estado vigente del caso se mantienen en su portal seguro de reservación."
+              : "The current case details and status are maintained in your secure reservation portal."}
+          </p>
+        </div>
+      `,
+    },
+    { idempotencyKey: input.idempotencyKey }
+  );
+
+  if (error) {
+    throw new Error(`Resend Property Protection notice failed: ${error.name}`);
+  }
+
+  return { ok: true, mode: "resend", data };
+}
+
 export async function sendReviewInvitationEmail(input: SendReviewInvitationEmailInput) {
   const language = resolveGuestLanguage(input.preferredLanguage);
   const isSpanish = language === "es";
@@ -125,6 +204,17 @@ export async function sendReviewInvitationEmail(input: SendReviewInvitationEmail
   if (error) throw new Error(`Resend review invitation failed: ${error.name}`);
   return { ok: true, mode: "resend", data };
 }
+
+export type SendPropertyProtectionGuestDamageNoticeInput = {
+  to: string;
+  replyTo?: string | null;
+  reservationNumber: string;
+  guestName?: string | null;
+  propertyName: string;
+  manageReservationUrl: string;
+  preferredLanguage?: string | null;
+  idempotencyKey: string;
+};
 
 type SendDirectBookingHostNotificationInput = {
   to: string;

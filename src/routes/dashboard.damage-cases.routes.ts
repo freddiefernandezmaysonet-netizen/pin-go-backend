@@ -2,6 +2,7 @@ import { Router, type Request, type Response } from "express";
 import { DamageCaseStatus, Prisma, PrismaClient } from "@prisma/client";
 import { requireAuth } from "../middleware/requireAuth";
 import { evaluateDamageCasePolicy } from "../services/damage-case-policy.service.js";
+import { notifyGuestOfApprovedDamageCase } from "../services/damage-case-guest-notification.service.js";
 
 type AuthUser = { id: string; orgId: string };
 
@@ -232,7 +233,21 @@ export function buildDashboardDamageCasesRouter(prisma: PrismaClient) {
         status: DamageCaseStatus.GUEST_NOTIFICATION_PENDING,
       },
     });
-    return res.json({ ok: true, damageCase: updated });
+
+    const guestNotification = await notifyGuestOfApprovedDamageCase({
+      prisma,
+      damageCaseId: updated.id,
+    });
+
+    const finalDamageCase = guestNotification.ok
+      ? await prisma.damageCase.findUnique({ where: { id: updated.id } })
+      : updated;
+
+    return res.json({
+      ok: true,
+      damageCase: finalDamageCase ?? updated,
+      guestNotification,
+    });
   });
 
   router.post("/api/dashboard/damage-cases/:id/close-no-charge", requireAuth, async (req, res) => {
