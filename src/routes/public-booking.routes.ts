@@ -19,6 +19,7 @@ import {
 import {
   cancelReservationFromGuestPortal,
   getGuestCancellationPreview,
+  getGuestPropertyProtectionCase,
 } from "../services/guest-cancellation.service";
 import {
   confirmGuestReservationModification,
@@ -616,6 +617,26 @@ publicBookingRouter.post(
         fallbackMessage:
           "Failed to create reservation modification payment Checkout.",
         logLabel: "[public-booking modification-checkout error]",
+      });
+    }
+  }
+);
+
+publicBookingRouter.get(
+  "/manage/:guestToken/property-protection-case",
+  async (req, res) => {
+    try {
+      const guestToken = String(req.params.guestToken ?? "").trim();
+      const result = await getGuestPropertyProtectionCase({ guestToken });
+
+      res.setHeader("Cache-Control", "no-store");
+      return res.json({ ok: true, ...result });
+    } catch (error: any) {
+      return sendGuestCancellationRouteError({
+        res,
+        error,
+        fallbackMessage: "Failed to load Property Protection case.",
+        logLabel: "[public-booking property-protection-case error]",
       });
     }
   }
