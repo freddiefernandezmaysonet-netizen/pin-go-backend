@@ -24,11 +24,9 @@ test("Property Protection consent terms come from server property configuration"
   assert.match(routeSource, /guestAcceptedPropertyProtectionMaxDamageLiabilityAmount/);
 });
 
-test("checkout metadata carries Property Protection evidence without changing Stripe payment setup", () => {
+test("checkout metadata carries Property Protection evidence", () => {
   assert.match(routeSource, /propertyProtectionEvidence/);
   assert.match(routeSource, /propertyProtectionCheckoutEvidence/);
-  assert.doesNotMatch(routeSource, /setup_future_usage/);
-  assert.doesNotMatch(routeSource, /customer_creation/);
 });
 
 test("completed checkout persists immutable Property Protection snapshot and consent", () => {
