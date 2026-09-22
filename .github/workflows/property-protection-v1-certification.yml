@@ -4,7 +4,7 @@ on:
   pull_request:
     paths:
       - "src/routes/public-booking.routes.ts"
-      - "src/routes/public-booking.property-protection.contract.test.ts src/routes/public-booking.property-protection-consent.contract.test.ts"
+      - "src/routes/public-booking.property-protection.contract.test.ts"
       - "src/routes/public-booking.property-protection-consent.contract.test.ts"
       - "src/services/direct-booking.service.ts"
       - "src/routes/dashboard.properties.route.ts"
@@ -44,4 +44,4 @@ jobs:
           node --import tsx --test src/routes/public-booking.property-protection-consent.contract.test.ts
 
       - name: Type-check Property Protection route boundary
-        run: npx tsc --noEmit --skipLibCheck --module nodenext --moduleResolution nodenext --target es2022 src/routes/public-booking.property-protection.contract.test.ts
+        run: npx tsc --noEmit --skipLibCheck --module nodenext --moduleResolution nodenext --target es2022 src/routes/public-booking.property-protection.contract.test.ts src/routes/public-booking.property-protection-consent.contract.test.ts
