@@ -1514,16 +1514,18 @@ if (guestAcceptedSecurePreCheckinRequirement !== true) {
     }
 
     const propertyProtectionConsentAcceptedAt =
-      propertyProtectionEnabled &&
-      guestAcceptedPropertyProtectionConsentAt &&
-      !Number.isNaN(
-        new Date(String(guestAcceptedPropertyProtectionConsentAt)).getTime()
-      )
-        ? new Date(String(guestAcceptedPropertyProtectionConsentAt)).toISOString()
-        : propertyProtectionEnabled
-          ? new Date().toISOString()
-          : null;
+      propertyProtectionEnabled
+        ? new Date().toISOString()
+        : null;
 
+    const propertyProtectionCheckoutEvidence = JSON.stringify({
+      r: propertyProtectionEnabled,
+      m: "CARD_ON_FILE",
+      a: propertyProtectionMaxDamageLiabilityAmount,
+      v: propertyProtectionDisclosureVersion,
+      c: propertyProtectionEnabled,
+      t: propertyProtectionConsentAcceptedAt,
+    });
 
 
 if (property.maxGuests && totalGuests > property.maxGuests) {
@@ -1755,18 +1757,7 @@ const guestAcceptedSecurePreCheckinRequirementText =
         consentSource: "DIRECT_BOOKING_WEB_FORM",
         consentVersion: "stay_notifications_v1",
 
-        propertyProtectionRequired: String(propertyProtectionEnabled),
-        propertyProtectionMode: "CARD_ON_FILE",
-        propertyProtectionMaxDamageLiabilityAmount:
-          propertyProtectionMaxDamageLiabilityAmount === null
-            ? ""
-            : String(propertyProtectionMaxDamageLiabilityAmount),
-        propertyProtectionDisclosureVersion:
-          propertyProtectionDisclosureVersion,
-        propertyProtectionConsentAccepted:
-          String(propertyProtectionEnabled),
-        propertyProtectionConsentAcceptedAt:
-          propertyProtectionConsentAcceptedAt ?? "",
+        propertyProtectionEvidence: propertyProtectionCheckoutEvidence,
 
         securePrecheckinAccepted: "true",
         securePrecheckinAcceptedAt: guestAcceptedSecurePreCheckinRequirementAt,
@@ -1777,7 +1768,6 @@ const guestAcceptedSecurePreCheckinRequirementText =
         securePrecheckinSource: SECURE_PRECHECKIN_DISCLOSURE_SOURCE,
         adults: String(adultsCount),
         children: String(childrenCount),
-        totalGuests: String(totalGuests),
         nights: String(nights),
         nightlyRate: String(pricing.nightlyRate),
         cleaningFee: String(pricing.cleaningFee),
