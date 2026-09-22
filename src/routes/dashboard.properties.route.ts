@@ -134,7 +134,7 @@ function toComparablePropertyNumber(value: unknown): number | null {
   return Number.isFinite(parsed) ? parsed : null;
 }
 
-function hasPropertyAriConfigurationChanged(
+export function hasPropertyAriConfigurationChanged(
   existing: Record<string, unknown>,
   data: Record<string, unknown>
 ): boolean {
