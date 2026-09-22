@@ -21,6 +21,7 @@ import {
   getGuestCancellationPreview,
   getGuestPropertyProtectionCase,
 } from "../services/guest-cancellation.service";
+import { recordGuestDamageCaseResponse } from "../services/damage-case-guest-response.service";
 import {
   confirmGuestReservationModification,
   getGuestReservationModificationOptions,
@@ -637,6 +638,30 @@ publicBookingRouter.get(
         error,
         fallbackMessage: "Failed to load Property Protection case.",
         logLabel: "[public-booking property-protection-case error]",
+      });
+    }
+  }
+);
+
+publicBookingRouter.post(
+  "/manage/:guestToken/property-protection-case/respond",
+  async (req, res) => {
+    try {
+      const guestToken = String(req.params.guestToken ?? "").trim();
+      const result = await recordGuestDamageCaseResponse({
+        guestToken,
+        action: req.body?.action,
+        note: req.body?.note,
+      });
+
+      res.setHeader("Cache-Control", "no-store");
+      return res.json(result);
+    } catch (error: any) {
+      return sendGuestCancellationRouteError({
+        res,
+        error,
+        fallbackMessage: "Failed to record Property Protection response.",
+        logLabel: "[public-booking property-protection-response error]",
       });
     }
   }
