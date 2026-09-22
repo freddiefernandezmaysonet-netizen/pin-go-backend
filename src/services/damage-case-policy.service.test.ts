@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { DamagePaymentMethodStatus } from "@prisma/client";
-import { evaluateDamageCasePolicy } from "./damage-case-policy.service";
+import { evaluateDamageCasePolicy } from "./damage-case-policy.service.js";
 
 const readyReservation = {
   propertyProtectionRequiredSnapshot: true,
