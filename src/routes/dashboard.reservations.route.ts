@@ -304,6 +304,11 @@ dashboardReservationsRouter.get(
             evidence: true,
             hostApprovedAt: true,
             guestNotifiedAt: true,
+            guestResponse: true,
+            guestAcknowledgedAt: true,
+            guestRespondedAt: true,
+            guestResponseNote: true,
+            guestResponseVersion: true,
             closedAt: true,
             closedReason: true,
             createdAt: true,
@@ -414,6 +419,13 @@ dashboardReservationsRouter.get(
               reservation.damageCase.hostApprovedAt?.toISOString() ?? null,
             guestNotifiedAt:
               reservation.damageCase.guestNotifiedAt?.toISOString() ?? null,
+            guestResponse: reservation.damageCase.guestResponse,
+            guestAcknowledgedAt:
+              reservation.damageCase.guestAcknowledgedAt?.toISOString() ?? null,
+            guestRespondedAt:
+              reservation.damageCase.guestRespondedAt?.toISOString() ?? null,
+            guestResponseNote: reservation.damageCase.guestResponseNote,
+            guestResponseVersion: reservation.damageCase.guestResponseVersion,
             closedAt: reservation.damageCase.closedAt?.toISOString() ?? null,
             closedReason: reservation.damageCase.closedReason,
             createdAt: reservation.damageCase.createdAt.toISOString(),

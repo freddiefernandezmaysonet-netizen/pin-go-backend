@@ -32,6 +32,42 @@ test("reservation detail exposes only host-operational Damage Case fields", () =
   assert.match(source, /closedReason:/);
 });
 
+test("reservation detail exposes the guest Damage Case response to the host", () => {
+  assert.match(source, /guestResponse: true/);
+  assert.match(source, /guestAcknowledgedAt: true/);
+  assert.match(source, /guestRespondedAt: true/);
+  assert.match(source, /guestResponseNote: true/);
+  assert.match(source, /guestResponseVersion: true/);
+  assert.match(
+    source,
+    /guestResponse: reservation\.damageCase\.guestResponse/
+  );
+  assert.match(
+    source,
+    /reservation\.damageCase\.guestAcknowledgedAt\?\.toISOString\(\) \?\? null/
+  );
+  assert.match(
+    source,
+    /reservation\.damageCase\.guestRespondedAt\?\.toISOString\(\) \?\? null/
+  );
+});
+
+test("guest response host read model remains non-charging", () => {
+  const responseStart = source.indexOf(
+    "damageCase: reservation.damageCase"
+  );
+  const responseEnd = source.indexOf(
+    "property: reservation.property",
+    responseStart
+  );
+  const responseBlock = source.slice(responseStart, responseEnd);
+
+  assert.doesNotMatch(responseBlock, /stripeDamageCustomerId/);
+  assert.doesNotMatch(responseBlock, /stripeDamagePaymentMethodId/);
+  assert.doesNotMatch(responseBlock, /paymentIntent/i);
+  assert.doesNotMatch(responseBlock, /charge|capture|refund/i);
+});
+
 test("reservation detail remains organization scoped", () => {
   assert.match(
     source,
