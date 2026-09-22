@@ -586,6 +586,60 @@ const cancellationPolicyRefundBasis = optionalMetadata(
   "cancellationPolicyRefundBasis"
 );
 
+const propertyProtectionRequired =
+  optionalMetadata(session, "propertyProtectionRequired") === "true";
+const propertyProtectionMode =
+  optionalMetadata(session, "propertyProtectionMode") ?? "CARD_ON_FILE";
+const propertyProtectionDisclosureVersion =
+  optionalMetadata(session, "propertyProtectionDisclosureVersion") ??
+  "property_protection_card_on_file_v1";
+const propertyProtectionConsentAccepted =
+  optionalMetadata(session, "propertyProtectionConsentAccepted") === "true";
+const propertyProtectionConsentAcceptedAt =
+  optionalMetadata(session, "propertyProtectionConsentAcceptedAt");
+const propertyProtectionMaxDamageLiabilityAmount =
+  parseOptionalMoneyMetadata(
+    session,
+    "propertyProtectionMaxDamageLiabilityAmount"
+  );
+
+if (
+  propertyProtectionRequired &&
+  (
+    propertyProtectionMode !== "CARD_ON_FILE" ||
+    !propertyProtectionConsentAccepted ||
+    !propertyProtectionConsentAcceptedAt ||
+    propertyProtectionMaxDamageLiabilityAmount === null ||
+    propertyProtectionMaxDamageLiabilityAmount <= 0
+  )
+) {
+  throw new Error("DIRECT_BOOKING_PROPERTY_PROTECTION_CONSENT_INVALID");
+}
+
+const propertyProtectionPolicySnapshot = {
+  enabled: propertyProtectionRequired,
+  mode: "CARD_ON_FILE",
+  maxDamageLiabilityAmount: propertyProtectionRequired
+    ? propertyProtectionMaxDamageLiabilityAmount
+    : null,
+  currency: "usd",
+  disclosureVersion: propertyProtectionDisclosureVersion,
+  capturedAt: new Date().toISOString(),
+};
+
+const damagePaymentConsent = propertyProtectionRequired
+  ? {
+      accepted: true,
+      acceptedAt: propertyProtectionConsentAcceptedAt,
+      version: propertyProtectionDisclosureVersion,
+      source: "DIRECT_BOOKING_CHECKOUT",
+      mode: "CARD_ON_FILE",
+      maxDamageLiabilityAmount:
+        propertyProtectionMaxDamageLiabilityAmount,
+      currency: "usd",
+    }
+  : null;
+
 const securePreCheckinDisclosureAccepted =
   String(
     session.metadata?.securePrecheckinAccepted ??
@@ -850,6 +904,10 @@ const ingestResult = await ingestReservation({
   acceptedAt: smsConsent ? new Date().toISOString() : null,
 },
     cancellationTerms: cancellationTermsAcceptance,
+    propertyProtection: {
+      policySnapshot: propertyProtectionPolicySnapshot,
+      damagePaymentConsent,
+    },
  },
 
   status: "ACTIVE",
@@ -893,6 +951,20 @@ const updatedReservation = await prisma.reservation.update({
   hostPayoutLastSyncedAt: new Date(),
   directBookingProtectionFeeAmount,
   identityVerificationRequiredSnapshot,
+  propertyProtectionRequiredSnapshot: propertyProtectionRequired,
+  propertyProtectionModeSnapshot: "CARD_ON_FILE",
+  maxDamageLiabilityAmountSnapshot:
+    propertyProtectionRequired
+      ? propertyProtectionMaxDamageLiabilityAmount
+      : null,
+  propertyProtectionPolicySnapshot:
+    propertyProtectionPolicySnapshot as any,
+  damagePaymentConsent:
+    damagePaymentConsent as any,
+  damagePaymentMethodStatus:
+    propertyProtectionRequired
+      ? "SETUP_PENDING"
+      : "NOT_REQUIRED",
 
   selectedAmenityIds,
   pricingBreakdown: pricingBreakdownJson,
