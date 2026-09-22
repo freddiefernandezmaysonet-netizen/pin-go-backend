@@ -19,6 +19,7 @@ CREATE TABLE "MarketPricingProfile" (
     "propertyId" TEXT NOT NULL,
     "enabled" BOOLEAN NOT NULL DEFAULT false,
     "provider" TEXT,
+    "currency" VARCHAR(3) NOT NULL,
     "strategy" "MarketPricingStrategy" NOT NULL DEFAULT 'BALANCED',
     "position" "MarketPricingPosition" NOT NULL DEFAULT 'COMPETITIVE',
     "aggressiveness" "MarketPricingAggressiveness" NOT NULL DEFAULT 'MODERATE',
@@ -149,3 +150,4 @@ ALTER TABLE "MarketPricingSnapshot" ADD CONSTRAINT "MarketPricingSnapshot_profil
 
 -- AddForeignKey
 ALTER TABLE "MarketPricingSnapshot" ADD CONSTRAINT "MarketPricingSnapshot_runId_fkey" FOREIGN KEY ("runId") REFERENCES "MarketPricingRun"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+
