@@ -935,21 +935,26 @@ if (propertyProtectionRequired) {
           : paymentIntent.customer?.id ?? null;
       const customerId =
         checkoutCustomerId ?? paymentIntentCustomerId;
-      const paymentMethod =
-        typeof paymentIntent.payment_method === "string"
-          ? null
-          : paymentIntent.payment_method;
       const paymentMethodId =
         typeof paymentIntent.payment_method === "string"
           ? paymentIntent.payment_method
           : paymentIntent.payment_method?.id ?? null;
+      const paymentMethod =
+        paymentIntent.payment_method &&
+        typeof paymentIntent.payment_method !== "string"
+          ? paymentIntent.payment_method
+          : paymentMethodId
+            ? await stripe.paymentMethods.retrieve(
+                paymentMethodId,
+                {
+                  stripeAccount: stripeConnectedAccountId,
+                }
+              )
+            : null;
 
       const reusableCardMethod =
         Boolean(paymentMethodId) &&
-        (
-          paymentMethod === null ||
-          paymentMethod.type === "card"
-        );
+        paymentMethod?.type === "card";
 
       if (customerId && reusableCardMethod) {
         stripeDamageCustomerId = customerId;
