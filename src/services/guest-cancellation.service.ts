@@ -613,6 +613,7 @@ async function getReservationByGuestToken(guestTokenInput: string) {
           hostApprovedAt: true,
           guestNotifiedAt: true,
           guestResponse: true,
+          guestAcknowledgedAt: true,
           guestRespondedAt: true,
           guestResponseNote: true,
           guestResponseVersion: true,
@@ -924,6 +925,8 @@ export async function getGuestPropertyProtectionCase({
       hostApprovedAt: damageCase.hostApprovedAt?.toISOString() ?? null,
       guestNotifiedAt: damageCase.guestNotifiedAt?.toISOString() ?? null,
       guestResponse: damageCase.guestResponse,
+      guestAcknowledgedAt:
+        damageCase.guestAcknowledgedAt?.toISOString() ?? null,
       guestRespondedAt: damageCase.guestRespondedAt?.toISOString() ?? null,
       guestResponseNote: damageCase.guestResponseNote,
       guestResponseVersion: damageCase.guestResponseVersion,
