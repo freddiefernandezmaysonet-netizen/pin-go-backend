@@ -10,6 +10,7 @@ import {
 import {
   sendGuestAccessPasscodeEmail,
   sendManualReservationGuestCancellationEmail,
+  sendPropertyProtectionGuestDamageNotice,
 } from "../lib/mailer";
 import { resolveOrganizationGuestReplyTo } from "../services/organization-guest-email.service";
 import {
@@ -779,6 +780,198 @@ async function processManualCancellationEmailRetries() {
   }
 }
 
+
+function parsePropertyProtectionDamageNoticeRetryPayload(
+  body: string
+): { damageCaseId: string } | null {
+  try {
+    const parsed = JSON.parse(body);
+    if (
+      parsed?.kind !== "PIN_GO_EMAIL_DELIVERY" ||
+      parsed?.type !== "PROPERTY_PROTECTION_GUEST_DAMAGE_NOTICE"
+    ) {
+      return null;
+    }
+    const damageCaseId = String(
+      parsed?.retryPayload?.damageCaseId ?? ""
+    ).trim();
+    return damageCaseId ? { damageCaseId } : null;
+  } catch {
+    return null;
+  }
+}
+
+async function processPropertyProtectionDamageNoticeRetries() {
+  const failedEmailMessages = await prisma.messageLog.findMany({
+    where: {
+      channel: "email",
+      provider: "resend",
+      status: "FAILED",
+      retryCount: { lt: MAX_RETRIES },
+      communicationType: "PROPERTY_PROTECTION_GUEST_DAMAGE_NOTICE",
+    },
+    take: BATCH_SIZE,
+    orderBy: { createdAt: "asc" },
+  });
+
+  for (const message of failedEmailMessages) {
+    try {
+      const payload = parsePropertyProtectionDamageNoticeRetryPayload(
+        message.body
+      );
+      if (!payload) {
+        throw new Error(
+          "PROPERTY_PROTECTION_DAMAGE_NOTICE_RETRY_PAYLOAD_MISSING"
+        );
+      }
+
+      const damageCase = await prisma.damageCase.findUnique({
+        where: { id: payload.damageCaseId },
+        include: {
+          reservation: {
+            select: {
+              id: true,
+              reservationNumber: true,
+              guestName: true,
+              guestEmail: true,
+              guestToken: true,
+              preferredLanguage: true,
+              propertyId: true,
+              property: {
+                select: {
+                  name: true,
+                  organizationId: true,
+                },
+              },
+            },
+          },
+        },
+      });
+
+      if (
+        !damageCase ||
+        damageCase.status !== "GUEST_NOTIFICATION_PENDING"
+      ) {
+        throw new Error(
+          "PROPERTY_PROTECTION_DAMAGE_NOTICE_CASE_NOT_PENDING"
+        );
+      }
+
+      const reservation = damageCase.reservation;
+      const guestEmail = String(reservation.guestEmail ?? "").trim();
+      const guestToken = String(reservation.guestToken ?? "").trim();
+
+      if (!guestEmail || !guestToken || guestEmail !== message.to.trim()) {
+        throw new Error(
+          "PROPERTY_PROTECTION_DAMAGE_NOTICE_DESTINATION_MISSING"
+        );
+      }
+
+      const appUrl = String(
+        process.env.APP_URL ?? "http://localhost:3000"
+      )
+        .trim()
+        .replace(/\/+$/, "");
+      const manageReservationUrl =
+        `${appUrl}/booking/manage/${encodeURIComponent(guestToken)}`;
+      const replyTo = await resolveOrganizationGuestReplyTo(
+        prisma,
+        reservation.property.organizationId
+      );
+
+      const sent = await sendPropertyProtectionGuestDamageNotice({
+        to: guestEmail,
+        replyTo: replyTo.email,
+        reservationNumber:
+          reservation.reservationNumber ?? reservation.id,
+        guestName: reservation.guestName,
+        propertyName: reservation.property.name,
+        manageReservationUrl,
+        preferredLanguage: reservation.preferredLanguage,
+        idempotencyKey:
+          `property-protection-damage-notice-${damageCase.id}`,
+      });
+
+      const providerMessageId =
+        (sent as any)?.data?.id ??
+        (sent as any)?.id ??
+        null;
+
+      await prisma.$transaction([
+        prisma.messageLog.update({
+          where: { id: message.id },
+          data: {
+            status: "SENT",
+            providerMessageId,
+            retryCount: { increment: 1 },
+            error: null,
+          },
+        }),
+        prisma.damageCase.update({
+          where: { id: damageCase.id },
+          data: {
+            status: "GUEST_NOTIFIED",
+            guestNotifiedAt: new Date(),
+          },
+        }),
+      ]);
+
+      try {
+        await prisma.messageDispatchLog.create({
+          data: {
+            reservationId: reservation.id,
+            type: "PROPERTY_PROTECTION_GUEST_DAMAGE_NOTICE",
+            channel: "email",
+            status: "SENT",
+          },
+        });
+      } catch (dispatchLogError) {
+        errLog("Property Protection notice retry dispatch log failed", {
+          messageId: message.id,
+          error: toErrString(dispatchLogError),
+        });
+      }
+
+      log("Property Protection damage notice retry success", {
+        messageId: message.id,
+        damageCaseId: damageCase.id,
+        retryCount: message.retryCount + 1,
+      });
+    } catch (error) {
+      const errorMessage = toErrString(error);
+      const nextRetryCount = message.retryCount + 1;
+      const nonRetryable =
+        errorMessage.includes("RETRY_PAYLOAD_MISSING") ||
+        errorMessage.includes("CASE_NOT_PENDING") ||
+        errorMessage.includes("DESTINATION_MISSING");
+      const finalFailure =
+        nonRetryable || nextRetryCount >= MAX_RETRIES;
+
+      await prisma.messageLog
+        .update({
+          where: { id: message.id },
+          data: {
+            status: finalFailure ? "FAILED_FINAL" : "FAILED",
+            retryCount: { increment: 1 },
+            error: errorMessage,
+          },
+        })
+        .catch(() => {});
+
+      errLog(
+        finalFailure
+          ? "Property Protection damage notice retry stopped"
+          : "Property Protection damage notice retry failed",
+        {
+          messageId: message.id,
+          retryCount: nextRetryCount,
+          error: errorMessage,
+        }
+      );
+    }
+  }
+}
+
 let shuttingDown = false;
 let tickRunning = false;
 
@@ -822,6 +1015,17 @@ async function tick() {
     } catch (e) {
       errLog(
         "processManualCancellationEmailRetries crashed",
+        {
+          err: toErrString(e),
+        }
+      );
+    }
+
+    try {
+      await processPropertyProtectionDamageNoticeRetries();
+    } catch (e) {
+      errLog(
+        "processPropertyProtectionDamageNoticeRetries crashed",
         {
           err: toErrString(e),
         }
