@@ -972,6 +972,38 @@ return res.json({
           en: null,
           es: null,
         },
+    guestAgreementDisclosure: activeGuestAgreement
+      ? {
+          version: activeGuestAgreement.version,
+          en: {
+            title:
+              activeGuestAgreement.titleEn?.trim() ||
+              activeGuestAgreement.title,
+            summary:
+              activeGuestAgreement.guestFacingSummaryEn?.trim() ||
+              activeGuestAgreement.guestFacingSummary?.trim() ||
+              null,
+            agreementText:
+              activeGuestAgreement.agreementTextEn?.trim() ||
+              activeGuestAgreement.agreementText,
+          },
+          es: {
+            title:
+              activeGuestAgreement.titleEs?.trim() ||
+              activeGuestAgreement.titleEn?.trim() ||
+              activeGuestAgreement.title,
+            summary:
+              activeGuestAgreement.guestFacingSummaryEs?.trim() ||
+              activeGuestAgreement.guestFacingSummaryEn?.trim() ||
+              activeGuestAgreement.guestFacingSummary?.trim() ||
+              null,
+            agreementText:
+              activeGuestAgreement.agreementTextEs?.trim() ||
+              activeGuestAgreement.agreementTextEn?.trim() ||
+              activeGuestAgreement.agreementText,
+          },
+        }
+      : null,
     organization: {
       ...property.organization,
       contactEmail: organizationContact.email,
