@@ -894,6 +894,82 @@ const stripeFinancialRefs = await getStripeFinancialRefs(
   stripeConnectedAccountId
 );
 
+let stripeDamageCustomerId: string | null = null;
+let stripeDamagePaymentMethodId: string | null = null;
+let damagePaymentMethodStatus:
+  | "NOT_REQUIRED"
+  | "SETUP_PENDING"
+  | "READY"
+  | "ACTION_REQUIRED"
+  | "FAILED"
+  | "REVOKED" = propertyProtectionRequired
+    ? "SETUP_PENDING"
+    : "NOT_REQUIRED";
+
+if (propertyProtectionRequired) {
+  if (
+    !stripeConnectedAccountId ||
+    stripeChargeMode !== "DIRECT_CHARGE" ||
+    !paymentIntentId
+  ) {
+    damagePaymentMethodStatus = "FAILED";
+  } else {
+    try {
+      const paymentIntent = await stripe.paymentIntents.retrieve(
+        paymentIntentId,
+        {
+          expand: ["payment_method"],
+        },
+        {
+          stripeAccount: stripeConnectedAccountId,
+        }
+      );
+
+      const checkoutCustomerId =
+        typeof session.customer === "string"
+          ? session.customer
+          : session.customer?.id ?? null;
+      const paymentIntentCustomerId =
+        typeof paymentIntent.customer === "string"
+          ? paymentIntent.customer
+          : paymentIntent.customer?.id ?? null;
+      const customerId =
+        checkoutCustomerId ?? paymentIntentCustomerId;
+      const paymentMethod =
+        typeof paymentIntent.payment_method === "string"
+          ? null
+          : paymentIntent.payment_method;
+      const paymentMethodId =
+        typeof paymentIntent.payment_method === "string"
+          ? paymentIntent.payment_method
+          : paymentIntent.payment_method?.id ?? null;
+
+      const reusableCardMethod =
+        Boolean(paymentMethodId) &&
+        (
+          paymentMethod === null ||
+          paymentMethod.type === "card"
+        );
+
+      if (customerId && reusableCardMethod) {
+        stripeDamageCustomerId = customerId;
+        stripeDamagePaymentMethodId = paymentMethodId;
+        damagePaymentMethodStatus = "READY";
+      } else {
+        damagePaymentMethodStatus = "ACTION_REQUIRED";
+      }
+    } catch (error) {
+      console.error("[DIRECT_BOOKING_PROPERTY_PROTECTION_CARD_ON_FILE_SETUP_FAILED]", {
+        reservationCheckoutSessionId: session.id,
+        propertyId: property.id,
+        organizationId: property.organizationId,
+        error: error instanceof Error ? error.message : "UnknownError",
+      });
+      damagePaymentMethodStatus = "FAILED";
+    }
+  }
+}
+
 const selectedAmenityIds = parseSelectedAmenityIds(session);
 const pricingBreakdown = await calculateDirectBookingPricing({
   propertyId: property.id,
@@ -991,10 +1067,9 @@ const updatedReservation = await prisma.reservation.update({
     propertyProtectionPolicySnapshot as any,
   damagePaymentConsent:
     damagePaymentConsent as any,
-  damagePaymentMethodStatus:
-    propertyProtectionRequired
-      ? "SETUP_PENDING"
-      : "NOT_REQUIRED",
+  damagePaymentMethodStatus,
+  stripeDamageCustomerId,
+  stripeDamagePaymentMethodId,
 
   selectedAmenityIds,
   pricingBreakdown: pricingBreakdownJson,
