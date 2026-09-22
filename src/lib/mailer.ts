@@ -175,6 +175,94 @@ export async function sendPropertyProtectionGuestDamageNotice(
   return { ok: true, mode: "resend", data };
 }
 
+export async function sendPropertyProtectionHostGuestResponseNotice(
+  input: SendPropertyProtectionHostGuestResponseNoticeInput
+) {
+  const safeReservationUrl = getSafeUrl(input.reservationDetailUrl);
+  if (!safeReservationUrl) {
+    throw new Error("Property Protection reservation detail URL is invalid");
+  }
+
+  if (
+    input.guestResponse !== "ACCEPTED" &&
+    input.guestResponse !== "DISPUTED"
+  ) {
+    throw new Error("Property Protection host notice requires a final response");
+  }
+
+  const safeHostName = escapeHtml(input.hostName?.trim() || "Host");
+  const safeReservationNumber = escapeHtml(input.reservationNumber);
+  const safePropertyName = escapeHtml(input.propertyName);
+  const accepted = input.guestResponse === "ACCEPTED";
+
+  if (!resend) {
+    if (isProd) {
+      throw new Error("RESEND_API_KEY missing in production");
+    }
+    return { ok: true, mode: "console" };
+  }
+
+  const { data, error } = await resend.emails.send(
+    {
+      from: getEmailFrom(),
+      to: input.to,
+      subject:
+        `Property Protection response / Respuesta — Reservation #${input.reservationNumber}`,
+      html: `
+        <div style="font-family:Arial,sans-serif;color:#111827;line-height:1.6;max-width:640px;margin:auto">
+          <div style="background:linear-gradient(135deg,#020617,#1d4ed8);color:#fff;border-radius:18px;padding:24px;margin-bottom:20px">
+            <p style="margin:0 0 8px;font-size:12px;letter-spacing:.08em;text-transform:uppercase;font-weight:800">
+              Property Protection / Protección de la propiedad
+            </p>
+            <h1 style="margin:0;font-size:26px;line-height:1.2">
+              Guest response recorded / Respuesta registrada
+            </h1>
+          </div>
+          <p>Hi ${safeHostName},</p>
+          <p>
+            The guest <strong>${accepted ? "accepted" : "disputed"}</strong>
+            the approved Property Protection report for reservation
+            #${safeReservationNumber} at ${safePropertyName}.
+          </p>
+          <p>
+            No charge has been made. Open Reservation Detail to review the
+            current case status${accepted ? "." : " and the guest's explanation."}
+          </p>
+          <hr style="border:0;border-top:1px solid #e5e7eb;margin:22px 0" />
+          <p>Hola ${safeHostName},</p>
+          <p>
+            El huésped <strong>${accepted ? "aceptó" : "disputó"}</strong>
+            el reporte aprobado de Protección de la propiedad para la
+            reservación #${safeReservationNumber} en ${safePropertyName}.
+          </p>
+          <p>
+            No se ha realizado ningún cargo. Abra Detalle de la reservación
+            para revisar el estado vigente del caso${accepted ? "." : " y la explicación del huésped."}
+          </p>
+          <p style="margin:24px 0">
+            <a href="${escapeHtml(safeReservationUrl)}" style="display:inline-block;background:#1d4ed8;color:#fff;text-decoration:none;padding:13px 18px;border-radius:10px;font-weight:800">
+              Open Reservation Detail / Abrir detalle
+            </a>
+          </p>
+          <p style="color:#6b7280;font-size:13px">
+            The full case remains inside the authenticated Pin&amp;Go Dashboard.
+            El expediente completo permanece dentro del Dashboard autenticado de Pin&amp;Go.
+          </p>
+        </div>
+      `,
+    },
+    { idempotencyKey: input.idempotencyKey }
+  );
+
+  if (error) {
+    throw new Error(
+      `Resend Property Protection host response notice failed: ${error.name}`
+    );
+  }
+
+  return { ok: true, mode: "resend", data };
+}
+
 export async function sendReviewInvitationEmail(input: SendReviewInvitationEmailInput) {
   const language = resolveGuestLanguage(input.preferredLanguage);
   const isSpanish = language === "es";
@@ -213,6 +301,16 @@ export type SendPropertyProtectionGuestDamageNoticeInput = {
   propertyName: string;
   manageReservationUrl: string;
   preferredLanguage?: string | null;
+  idempotencyKey: string;
+};
+
+export type SendPropertyProtectionHostGuestResponseNoticeInput = {
+  to: string;
+  hostName?: string | null;
+  reservationNumber: string;
+  propertyName: string;
+  guestResponse: "ACCEPTED" | "DISPUTED";
+  reservationDetailUrl: string;
   idempotencyKey: string;
 };
 
