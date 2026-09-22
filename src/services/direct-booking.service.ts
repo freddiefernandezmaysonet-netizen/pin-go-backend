@@ -586,22 +586,49 @@ const cancellationPolicyRefundBasis = optionalMetadata(
   "cancellationPolicyRefundBasis"
 );
 
+const propertyProtectionEvidenceRaw =
+  optionalMetadata(session, "propertyProtectionEvidence");
+
+let propertyProtectionEvidence: {
+  r?: boolean;
+  m?: string;
+  a?: number | null;
+  v?: string;
+  c?: boolean;
+  t?: string | null;
+} = {};
+
+if (propertyProtectionEvidenceRaw) {
+  try {
+    const parsed = JSON.parse(propertyProtectionEvidenceRaw);
+    if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
+      propertyProtectionEvidence = parsed;
+    }
+  } catch {
+    throw new Error("DIRECT_BOOKING_PROPERTY_PROTECTION_EVIDENCE_INVALID");
+  }
+}
+
 const propertyProtectionRequired =
-  optionalMetadata(session, "propertyProtectionRequired") === "true";
+  propertyProtectionEvidence.r === true;
 const propertyProtectionMode =
-  optionalMetadata(session, "propertyProtectionMode") ?? "CARD_ON_FILE";
+  String(propertyProtectionEvidence.m ?? "CARD_ON_FILE");
 const propertyProtectionDisclosureVersion =
-  optionalMetadata(session, "propertyProtectionDisclosureVersion") ??
-  "property_protection_card_on_file_v1";
-const propertyProtectionConsentAccepted =
-  optionalMetadata(session, "propertyProtectionConsentAccepted") === "true";
-const propertyProtectionConsentAcceptedAt =
-  optionalMetadata(session, "propertyProtectionConsentAcceptedAt");
-const propertyProtectionMaxDamageLiabilityAmount =
-  parseOptionalMoneyMetadata(
-    session,
-    "propertyProtectionMaxDamageLiabilityAmount"
+  String(
+    propertyProtectionEvidence.v ??
+      "property_protection_card_on_file_v1"
   );
+const propertyProtectionConsentAccepted =
+  propertyProtectionEvidence.c === true;
+const propertyProtectionConsentAcceptedAt =
+  typeof propertyProtectionEvidence.t === "string"
+    ? propertyProtectionEvidence.t
+    : null;
+const propertyProtectionMaxDamageLiabilityAmount =
+  propertyProtectionEvidence.a === null ||
+  propertyProtectionEvidence.a === undefined
+    ? null
+    : Number(propertyProtectionEvidence.a);
 
 if (
   propertyProtectionRequired &&
@@ -609,7 +636,10 @@ if (
     propertyProtectionMode !== "CARD_ON_FILE" ||
     !propertyProtectionConsentAccepted ||
     !propertyProtectionConsentAcceptedAt ||
+    propertyProtectionDisclosureVersion !==
+      "property_protection_card_on_file_v1" ||
     propertyProtectionMaxDamageLiabilityAmount === null ||
+    !Number.isFinite(propertyProtectionMaxDamageLiabilityAmount) ||
     propertyProtectionMaxDamageLiabilityAmount <= 0
   )
 ) {
