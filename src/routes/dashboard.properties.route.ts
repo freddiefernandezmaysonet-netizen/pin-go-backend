@@ -678,21 +678,18 @@ if (Number.isNaN(maxDamageLiabilityAmount)) {
   return res.status(400).json({ ok: false, error: "maxDamageLiabilityAmount must be a valid amount" });
 }
 
-if (
-  propertyProtectionMode !== undefined &&
-  String(propertyProtectionMode).trim().toUpperCase() !== "CARD_ON_FILE"
-) {
-  return res.status(400).json({ ok: false, error: "propertyProtectionMode must be CARD_ON_FILE" });
-}
+const requestedProtectionValidationError =
+  validatePropertyProtectionConfiguration({
+    enabled: propertyProtectionEnabled === true,
+    mode: propertyProtectionMode,
+    maxDamageLiabilityAmount,
+  });
 
 if (
-  propertyProtectionEnabled === true &&
-  (maxDamageLiabilityAmount === null || maxDamageLiabilityAmount <= 0)
+  propertyProtectionMode !== undefined &&
+  requestedProtectionValidationError === "propertyProtectionMode must be CARD_ON_FILE"
 ) {
-  return res.status(400).json({
-    ok: false,
-    error: "maxDamageLiabilityAmount must be greater than 0 when Property Protection is enabled",
-  });
+  return res.status(400).json({ ok: false, error: requestedProtectionValidationError });
 }
 
 if (Number.isNaN(maxGuests)) {
@@ -1044,13 +1041,20 @@ const effectiveMaxDamageLiability =
       ? null
       : Number(existing.maxDamageLiabilityAmount);
 
-if (
-  effectiveProtectionEnabled &&
-  (effectiveMaxDamageLiability === null || effectiveMaxDamageLiability <= 0)
-) {
+const effectiveProtectionValidationError =
+  validatePropertyProtectionConfiguration({
+    enabled: effectiveProtectionEnabled,
+    mode:
+      propertyProtectionMode !== undefined
+        ? propertyProtectionMode
+        : existing.propertyProtectionMode,
+    maxDamageLiabilityAmount: effectiveMaxDamageLiability,
+  });
+
+if (effectiveProtectionValidationError) {
   return res.status(400).json({
     ok: false,
-    error: "maxDamageLiabilityAmount must be greater than 0 when Property Protection is enabled",
+    error: effectiveProtectionValidationError,
   });
 }
 
