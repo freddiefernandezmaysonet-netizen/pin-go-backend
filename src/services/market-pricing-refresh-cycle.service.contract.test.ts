@@ -235,7 +235,6 @@ function execute(input: {
     clock: () => settledAt,
     batchSize: 20,
     horizonDays: 365,
-    currency: "USD",
     retryBackoffMs,
     blockedBackoffMs,
   });
@@ -294,7 +293,6 @@ test("the cycle defers blocked data and completes a ready refresh sequentially",
       now: selectedAt,
       limit: 20,
       horizonDays: 365,
-      currency: "USD",
     },
   ]);
   assert.deepEqual(state.deferrals, [
@@ -449,7 +447,6 @@ test("invalid cycle limits fail before candidate selection", async () => {
     clock: () => settledAt,
     batchSize: 20,
     horizonDays: 365,
-    currency: "USD",
     retryBackoffMs,
     blockedBackoffMs,
   };
