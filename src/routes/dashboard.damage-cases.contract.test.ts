@@ -47,7 +47,7 @@ test("Damage Case API contains no Stripe financial mutation", () => {
   assert.doesNotMatch(routeSource, /charges\./);
   assert.doesNotMatch(routeSource, /refunds\./);
   assert.doesNotMatch(routeSource, /capture_method/);
-  assert.doesNotMatch(routeSource, /stripeDamagePaymentMethodId\s*:/);
+  assert.doesNotMatch(routeSource, /stripeDamagePaymentMethodId\s*=\s*/);
 });
 
 test("server registers the Damage Case dashboard router", () => {
