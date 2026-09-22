@@ -42,6 +42,7 @@ function profile(overrides: UnknownRecord = {}): UnknownRecord {
   return {
     id: "profile-1",
     provider: "  provider-a  ",
+    currency: " usd ",
     strategy: "BALANCED",
     position: "COMPETITIVE",
     aggressiveness: "MODERATE",
@@ -92,7 +93,6 @@ test("a due Puerto Rico profile becomes a provider-ready local-date request", as
     now: new Date("2026-09-23T02:30:00.000Z"),
     limit: 20,
     horizonDays: 365,
-    currency: " usd ",
   });
 
   assert.equal(candidates.length, 1);
@@ -129,6 +129,7 @@ test("a due Puerto Rico profile becomes a provider-ready local-date request", as
 
 test("the same instant uses the property's timezone for another world market", async () => {
   const tokyo = profile({
+    currency: " jpy ",
     property: {
       ...record(profile().property),
       country: "JP",
@@ -143,7 +144,6 @@ test("the same instant uses the property's timezone for another world market", a
     now: new Date("2026-09-22T20:00:00.000Z"),
     limit: 10,
     horizonDays: 30,
-    currency: "JPY",
   });
 
   const candidate = readyCandidate(candidates[0]);
@@ -166,7 +166,6 @@ test("missing coordinates block the candidate instead of becoming zeroes", async
     now: new Date("2026-09-22T20:00:00.000Z"),
     limit: 10,
     horizonDays: 365,
-    currency: "USD",
   });
 
   assert.deepEqual(candidates[0], {
@@ -199,7 +198,6 @@ test("country and timezone deficiencies receive explicit blocked reasons", async
       now: new Date("2026-09-22T20:00:00.000Z"),
       limit: 10,
       horizonDays: 365,
-      currency: "USD",
     });
     const candidate = requiredCandidate(candidates[0]);
     assert.equal(candidate.status, "BLOCKED");
@@ -224,7 +222,6 @@ test("invalid property capacity or radius fails closed", async () => {
     now: new Date("2026-09-22T20:00:00.000Z"),
     limit: 10,
     horizonDays: 365,
-    currency: "USD",
   });
 
   assert.deepEqual(
@@ -241,7 +238,6 @@ test("the database query selects bounded due profiles in deterministic order", a
     now,
     limit: 2,
     horizonDays: 90,
-    currency: "USD",
   });
 
   const query = record(fixture.queries[0]);
@@ -258,6 +254,7 @@ test("the database query selects bounded due profiles in deterministic order", a
     { nextRefreshAt: { sort: "asc", nulls: "first" } },
     { createdAt: "asc" },
   ]);
+  assert.equal(record(query.select).currency, true);
 });
 
 test("a defensive eligibility check skips an unexpected future profile", async () => {
@@ -269,19 +266,37 @@ test("a defensive eligibility check skips an unexpected future profile", async (
     now: new Date("2026-09-22T20:00:00.000Z"),
     limit: 10,
     horizonDays: 365,
-    currency: "USD",
   });
 
   assert.deepEqual(candidates, []);
 });
 
-test("invalid batch, horizon, clock, or currency inputs are rejected", async () => {
+test("an invalid profile currency is blocked without affecting other markets", async () => {
+  const fixture = repositoryFixture([
+    profile({ currency: "US" }),
+    profile({
+      id: "profile-2",
+      currency: "EUR",
+      property: { ...record(profile().property), id: "property-2" },
+    }),
+  ]);
+
+  const candidates = await fixture.repository.listDue({
+    now: new Date("2026-09-22T20:00:00.000Z"),
+    limit: 10,
+    horizonDays: 365,
+  });
+
+  assert.equal(record(candidates[0]).reason, "CURRENCY_INVALID");
+  assert.equal(readyCandidate(candidates[1]).request.property.currency, "EUR");
+});
+
+test("invalid batch, horizon, or clock inputs are rejected", async () => {
   const fixture = repositoryFixture([]);
   const valid = {
     now: new Date("2026-09-22T20:00:00.000Z"),
     limit: 10,
     horizonDays: 365,
-    currency: "USD",
   };
 
   assert.equal(
@@ -299,12 +314,6 @@ test("invalid batch, horizon, clock, or currency inputs are rejected", async () 
       fixture.repository.listDue({ ...valid, horizonDays: 731 }),
     ),
     "MARKET_PRICING_CANDIDATE_HORIZON_INVALID",
-  );
-  assert.equal(
-    await errorMessage(
-      fixture.repository.listDue({ ...valid, currency: "US" }),
-    ),
-    "MARKET_PRICING_CANDIDATE_CURRENCY_INVALID",
   );
   assert.equal(fixture.queries.length, 0);
 });
