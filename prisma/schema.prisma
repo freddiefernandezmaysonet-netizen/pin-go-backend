@@ -240,6 +240,9 @@ model Property {
   eventPricingEnabled        Boolean                     @default(false)
   autonomousPricingEnabled   Boolean                     @default(false)
   cleaningFee                Decimal?                    @db.Decimal(10,2)
+  propertyProtectionEnabled  Boolean                     @default(false)
+  propertyProtectionMode     String                      @default("CARD_ON_FILE")
+  maxDamageLiabilityAmount   Decimal?                    @db.Decimal(10,2)
   maxGuests                  Int?
   minimumNights              Int                         @default(1)
   maximumNights              Int?
@@ -575,6 +578,14 @@ model Reservation {
   directBookingProtectionFeeAmount       Decimal?    @db.Decimal(10, 2)
   identityVerificationRequiredSnapshot   Boolean?
   identityVerificationProviderCostAmount Decimal?    @db.Decimal(10, 2)
+  propertyProtectionRequiredSnapshot      Boolean?
+  propertyProtectionModeSnapshot          String?
+  maxDamageLiabilityAmountSnapshot         Decimal?    @db.Decimal(10, 2)
+  propertyProtectionPolicySnapshot         Json?
+  damagePaymentConsent                     Json?
+  damagePaymentMethodStatus                String      @default("NOT_REQUIRED")
+  stripeDamageCustomerId                   String?
+  stripeDamagePaymentMethodId              String?
   guestAccessModeSnapshot                    GuestAccessMode @default(PASSCODE_ONLY)
   securePreCheckinDisclosureAcceptance       Json?
   guestAgreementSnapshot                     Json?
