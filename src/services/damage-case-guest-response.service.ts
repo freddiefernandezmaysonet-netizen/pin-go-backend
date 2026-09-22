@@ -4,6 +4,7 @@ import {
   PrismaClient,
 } from "@prisma/client";
 import { prisma as prismaSingleton } from "../lib/prisma.js";
+import { notifyHostOfGuestDamageCaseResponse } from "./damage-case-host-response-notification.service.js";
 
 export class GuestDamageCaseResponseError extends Error {
   statusCode: number;
@@ -45,6 +46,33 @@ function normalizeNote(value: unknown) {
 
 function fail(code: string, message: string, statusCode: number): never {
   throw new GuestDamageCaseResponseError({ code, message, statusCode });
+}
+
+async function notifyHostSafely(input: {
+  prisma: PrismaClient;
+  damageCaseId: string;
+  guestResponse: DamageCaseGuestResponse;
+}) {
+  if (
+    input.guestResponse !== DamageCaseGuestResponse.ACCEPTED &&
+    input.guestResponse !== DamageCaseGuestResponse.DISPUTED
+  ) {
+    return null;
+  }
+
+  try {
+    return await notifyHostOfGuestDamageCaseResponse({
+      prisma: input.prisma,
+      damageCaseId: input.damageCaseId,
+      expectedResponse: input.guestResponse,
+    });
+  } catch (error) {
+    return {
+      ok: false,
+      code: "DAMAGE_CASE_HOST_NOTIFICATION_UNEXPECTED_ERROR" as const,
+      error: error instanceof Error ? error.message : String(error),
+    };
+  }
 }
 
 function serializeResponse(damageCase: {
@@ -185,10 +213,17 @@ export async function recordGuestDamageCaseResponse(input: {
       action !== "DISPUTED" ||
       damageCase.guestResponseNote === responseNote
     ) {
+      const hostNotification = await notifyHostSafely({
+        prisma,
+        damageCaseId: damageCase.id,
+        guestResponse: requestedResponse,
+      });
+
       return {
         ok: true,
         alreadyRecorded: true,
         response: serializeResponse(damageCase),
+        hostNotification,
       };
     }
 
@@ -248,10 +283,17 @@ export async function recordGuestDamageCaseResponse(input: {
       (action !== "DISPUTED" ||
         concurrent.guestResponseNote === responseNote)
     ) {
+      const hostNotification = await notifyHostSafely({
+        prisma,
+        damageCaseId: concurrent.id,
+        guestResponse: requestedResponse,
+      });
+
       return {
         ok: true,
         alreadyRecorded: true,
         response: serializeResponse(concurrent),
+        hostNotification,
       };
     }
 
@@ -261,6 +303,12 @@ export async function recordGuestDamageCaseResponse(input: {
       409
     );
   }
+
+  const hostNotification = await notifyHostSafely({
+    prisma,
+    damageCaseId: damageCase.id,
+    guestResponse: requestedResponse,
+  });
 
   return {
     ok: true,
@@ -277,5 +325,6 @@ export async function recordGuestDamageCaseResponse(input: {
       guestResponseVersion: RESPONSE_VERSION,
       collectionStatus: "NO_CHARGE_MADE" as const,
     },
+    hostNotification,
   };
 }
