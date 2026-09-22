@@ -301,6 +301,39 @@ enum PropertyProtectionMode {
   CARD_ON_FILE
 }
 
+enum DamageCaseStatus {
+  OPEN
+  EVIDENCE_PENDING
+  HOST_REVIEW
+  GUEST_NOTIFICATION_PENDING
+  GUEST_NOTIFIED
+  CHARGE_BLOCKED
+  CLOSED_NO_CHARGE
+}
+
+model DamageCase {
+  id                  String           @id @default(cuid())
+  reservationId       String           @unique
+  status              DamageCaseStatus @default(OPEN)
+  requestedAmount     Decimal          @db.Decimal(10, 2)
+  approvedAmount      Decimal?         @db.Decimal(10, 2)
+  currency            String           @default("usd")
+  description         String
+  evidence            Json?
+  reportedByUserId    String?
+  hostApprovedAt      DateTime?
+  hostApprovedByUserId String?
+  guestNotifiedAt     DateTime?
+  closedAt            DateTime?
+  closedReason        String?
+  createdAt           DateTime         @default(now())
+  updatedAt           DateTime         @updatedAt
+
+  reservation Reservation @relation(fields: [reservationId], references: [id], onDelete: Cascade)
+
+  @@index([status, createdAt])
+}
+
 enum DamagePaymentMethodStatus {
   NOT_REQUIRED
   CONSENT_REQUIRED
@@ -637,6 +670,7 @@ model Reservation {
   review                   PropertyReview?
   reviewInvitation         PropertyReviewInvitation?
   pinAIGuestConversation   PinAIGuestConversation?
+  damageCase               DamageCase?
 
   @@unique([propertyId, externalProvider, externalId])
   @@index([propertyId, checkIn, checkOut])
