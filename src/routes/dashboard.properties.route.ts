@@ -134,7 +134,7 @@ function toComparablePropertyNumber(value: unknown): number | null {
   return Number.isFinite(parsed) ? parsed : null;
 }
 
-function hasPropertyAriConfigurationChanged(
+export function hasPropertyAriConfigurationChanged(
   existing: Record<string, unknown>,
   data: Record<string, unknown>
 ): boolean {
@@ -423,6 +423,9 @@ dashboardPropertiesRouter.get(
           maximumNightlyRate: true,
           weekendMarkupPercent: true,
           cleaningFee: true,
+          propertyProtectionEnabled: true,
+          propertyProtectionMode: true,
+          maxDamageLiabilityAmount: true,
           maxGuests: true,
           minimumNights: true,
           maximumNights: true,
@@ -529,6 +532,9 @@ dashboardPropertiesRouter.patch(
   maximumNightlyRate: maximumNightlyRateRaw,
   weekendMarkupPercent: weekendMarkupPercentRaw,
   cleaningFee: cleaningFeeRaw,
+  propertyProtectionEnabled,
+  propertyProtectionMode,
+  maxDamageLiabilityAmount: maxDamageLiabilityAmountRaw,
   maxGuests: maxGuestsRaw,
   minimumNights: minimumNightsRaw,
   maximumNights: maximumNightsRaw,
@@ -562,6 +568,7 @@ const parsedOccupancyHighThresholdPercent =
 const parsedOccupancyHighAdjustmentPercent =
   parseOptionalPercent(occupancyHighAdjustmentPercentRaw);
 const cleaningFee = parseOptionalMoney(cleaningFeeRaw);
+const maxDamageLiabilityAmount = parseOptionalMoney(maxDamageLiabilityAmountRaw);
 const maxGuests = parseOptionalInt(maxGuestsRaw);
 const minimumNights = parseOptionalInt(minimumNightsRaw);
 const maximumNights = parseOptionalInt(maximumNightsRaw);
@@ -644,6 +651,27 @@ if (
 
 if (Number.isNaN(cleaningFee)) {
   return res.status(400).json({ ok: false, error: "cleaningFee must be a valid amount" });
+}
+
+if (Number.isNaN(maxDamageLiabilityAmount)) {
+  return res.status(400).json({ ok: false, error: "maxDamageLiabilityAmount must be a valid amount" });
+}
+
+if (
+  propertyProtectionMode !== undefined &&
+  String(propertyProtectionMode).trim().toUpperCase() !== "CARD_ON_FILE"
+) {
+  return res.status(400).json({ ok: false, error: "propertyProtectionMode must be CARD_ON_FILE" });
+}
+
+if (
+  propertyProtectionEnabled === true &&
+  (maxDamageLiabilityAmount === null || maxDamageLiabilityAmount <= 0)
+) {
+  return res.status(400).json({
+    ok: false,
+    error: "maxDamageLiabilityAmount must be greater than 0 when Property Protection is enabled",
+  });
 }
 
 if (Number.isNaN(maxGuests)) {
@@ -736,6 +764,9 @@ if (
   minimumNightlyRate: true,
   maximumNightlyRate: true,
   weekendMarkupPercent: true,
+  propertyProtectionEnabled: true,
+  propertyProtectionMode: true,
+  maxDamageLiabilityAmount: true,
   minimumNights: true,
   maximumNights: true,
 },
@@ -968,6 +999,40 @@ if (cleaningFeeRaw !== undefined) {
   data.cleaningFee = cleaningFee;
 }
 
+if (propertyProtectionEnabled !== undefined) {
+  data.propertyProtectionEnabled = Boolean(propertyProtectionEnabled);
+}
+
+if (propertyProtectionMode !== undefined) {
+  data.propertyProtectionMode = "CARD_ON_FILE";
+}
+
+if (maxDamageLiabilityAmountRaw !== undefined) {
+  data.maxDamageLiabilityAmount = maxDamageLiabilityAmount;
+}
+
+const effectiveProtectionEnabled =
+  propertyProtectionEnabled !== undefined
+    ? Boolean(propertyProtectionEnabled)
+    : existing.propertyProtectionEnabled;
+
+const effectiveMaxDamageLiability =
+  maxDamageLiabilityAmountRaw !== undefined
+    ? maxDamageLiabilityAmount
+    : existing.maxDamageLiabilityAmount === null
+      ? null
+      : Number(existing.maxDamageLiabilityAmount);
+
+if (
+  effectiveProtectionEnabled &&
+  (effectiveMaxDamageLiability === null || effectiveMaxDamageLiability <= 0)
+) {
+  return res.status(400).json({
+    ok: false,
+    error: "maxDamageLiabilityAmount must be greater than 0 when Property Protection is enabled",
+  });
+}
+
 if (maxGuestsRaw !== undefined) {
   data.maxGuests = maxGuests;
 }
@@ -1044,6 +1109,9 @@ if (checkOutTime !== undefined) {
           maximumNightlyRate: true,
           weekendMarkupPercent: true,
           cleaningFee: true,
+          propertyProtectionEnabled: true,
+          propertyProtectionMode: true,
+          maxDamageLiabilityAmount: true,
           maxGuests: true,
           minimumNights: true,
           maximumNights: true,
