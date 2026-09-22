@@ -235,6 +235,7 @@ export async function recordGuestDamageCaseResponse(input: {
       select: {
         id: true,
         guestResponse: true,
+        guestAcknowledgedAt: true,
         guestRespondedAt: true,
         guestResponseNote: true,
         guestResponseVersion: true,
