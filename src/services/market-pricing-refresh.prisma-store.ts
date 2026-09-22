@@ -12,6 +12,7 @@ import type {
 import type { MarketComparableCandidate } from "./market-pricing-provider.contract";
 
 const MARKET_PRICING_LOCK_PREFIX = "MARKET_PRICING_REFRESH:";
+const MARKET_PRICING_RUN_STALE_AFTER_MS = 30 * 60 * 1000;
 
 function isoDate(value: string, code: string): Date {
   const parsed = new Date(`${value}T00:00:00.000Z`);
@@ -159,28 +160,86 @@ export function createPrismaMarketPricingRefreshStore(
 ): MarketPricingRefreshStore {
   return {
     async createRun(input) {
-      const run = await prisma.marketPricingRun.create({
-        data: {
-          profileId: input.profileId,
-          provider: input.provider,
-          status: MarketPricingRunStatus.RUNNING,
-          requestedDateFrom: isoDate(
-            input.requestedDateFrom,
-            "MARKET_PRICING_REQUESTED_DATE_FROM_INVALID",
-          ),
-          requestedDateTo: isoDate(
-            input.requestedDateToExclusive,
-            "MARKET_PRICING_REQUESTED_DATE_TO_INVALID",
-          ),
-          startedAt: input.startedAt,
-          metadata: {
-            rangeSemantics: "DATE_TO_EXCLUSIVE",
-          },
-        },
-        select: { id: true },
-      });
+      if (
+        !(input.startedAt instanceof Date) ||
+        Number.isNaN(input.startedAt.getTime())
+      ) {
+        throw new Error("MARKET_PRICING_STARTED_AT_INVALID");
+      }
+      const requestedDateFrom = isoDate(
+        input.requestedDateFrom,
+        "MARKET_PRICING_REQUESTED_DATE_FROM_INVALID",
+      );
+      const requestedDateTo = isoDate(
+        input.requestedDateToExclusive,
+        "MARKET_PRICING_REQUESTED_DATE_TO_INVALID",
+      );
+      const staleBefore = new Date(
+        input.startedAt.getTime() - MARKET_PRICING_RUN_STALE_AFTER_MS,
+      );
 
-      return { runId: run.id };
+      return prisma.$transaction(async (tx) => {
+        await acquireProfileLock(tx, input.profileId);
+
+        await tx.marketPricingRun.updateMany({
+          where: {
+            profileId: input.profileId,
+            status: {
+              in: [
+                MarketPricingRunStatus.PENDING,
+                MarketPricingRunStatus.RUNNING,
+              ],
+            },
+            OR: [
+              { startedAt: { lte: staleBefore } },
+              {
+                startedAt: null,
+                createdAt: { lte: staleBefore },
+              },
+            ],
+          },
+          data: {
+            status: MarketPricingRunStatus.FAILED,
+            completedAt: input.startedAt,
+            errorCode: "STALE_RUN_RECOVERED",
+            errorSummary:
+              "An abandoned market pricing refresh was closed before a new attempt.",
+          },
+        });
+
+        const activeRun = await tx.marketPricingRun.findFirst({
+          where: {
+            profileId: input.profileId,
+            status: {
+              in: [
+                MarketPricingRunStatus.PENDING,
+                MarketPricingRunStatus.RUNNING,
+              ],
+            },
+          },
+          select: { id: true },
+        });
+        if (activeRun) {
+          throw new Error("MARKET_PRICING_REFRESH_ALREADY_RUNNING");
+        }
+
+        const run = await tx.marketPricingRun.create({
+          data: {
+            profileId: input.profileId,
+            provider: input.provider,
+            status: MarketPricingRunStatus.RUNNING,
+            requestedDateFrom,
+            requestedDateTo,
+            startedAt: input.startedAt,
+            metadata: {
+              rangeSemantics: "DATE_TO_EXCLUSIVE",
+            },
+          },
+          select: { id: true },
+        });
+
+        return { runId: run.id };
+      });
     },
 
     async completeRunAtomically(input) {
@@ -359,13 +418,3 @@ export function createPrismaMarketPricingRefreshStore(
             errorSummary: input.errorSummary,
           },
         });
-        if (failed.count !== 1) return;
-
-        await tx.marketPricingProfile.updateMany({
-          where: { id: run.profileId },
-          data: { lastErrorCode: input.errorCode },
-        });
-      });
-    },
-  };
-}
