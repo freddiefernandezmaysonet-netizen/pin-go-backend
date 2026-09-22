@@ -26,6 +26,10 @@ import {
   getGuestReservationModificationPreview,
 } from "../services/guest-reservation-modification.service";
 import { createGuestReservationModificationCheckout } from "../services/guest-reservation-modification-checkout.service";
+import {
+  GuestDamageCaseError,
+  getGuestDamageCasePortalView,
+} from "../services/guest-damage-case-portal.service.js";
 import { applyGuestReservationModification } from "../services/guest-reservation-modification-apply.service";
 import { resolveOrganizationGuestReplyTo } from "../services/organization-guest-email.service";
 import {
@@ -616,6 +620,37 @@ publicBookingRouter.post(
         fallbackMessage:
           "Failed to create reservation modification payment Checkout.",
         logLabel: "[public-booking modification-checkout error]",
+      });
+    }
+  }
+);
+
+publicBookingRouter.get(
+  "/manage/:guestToken/damage-case",
+  async (req, res) => {
+    try {
+      const result = await getGuestDamageCasePortalView(prisma, {
+        guestToken: req.params.guestToken,
+      });
+
+      res.setHeader("Cache-Control", "no-store");
+      return res.json(result);
+    } catch (error: unknown) {
+      if (error instanceof GuestDamageCaseError) {
+        return res.status(error.statusCode).json({
+          ok: false,
+          error: error.code,
+          message: error.message,
+        });
+      }
+
+      console.error("[public-booking guest-damage-case error]", {
+        error: error instanceof Error ? error.message : String(error),
+      });
+      return res.status(500).json({
+        ok: false,
+        error: "GUEST_DAMAGE_CASE_LOAD_FAILED",
+        message: "Failed to load Property Protection details.",
       });
     }
   }
