@@ -3,8 +3,8 @@ import {
   DamageCaseStatus,
   PrismaClient,
 } from "@prisma/client";
-import { prisma as prismaSingleton } from "../lib/prisma";
-import { GuestCancellationError } from "./guest-cancellation.service";
+import { prisma as prismaSingleton } from "../lib/prisma.js";
+import { GuestCancellationError } from "./guest-cancellation.service.js";
 
 const RESPONSE_VERSION = "PROPERTY_PROTECTION_GUEST_RESPONSE_V1";
 const MAX_RESPONSE_NOTE_LENGTH = 2000;
