@@ -271,6 +271,7 @@ model Property {
   propertyDevices            PropertyDevice[]
   propertyStaff              PropertyStaff[]
   amenities                  PropertyAmenity[]
+  knowledgeEntries           PropertyKnowledgeEntry[]
   taxes                      PropertyTax[]
   nightlyRates               PropertyNightlyRate[]
   seasons                    PropertySeason[]
@@ -610,12 +611,29 @@ model Reservation {
   modifications           ReservationModification[]
   review                   PropertyReview?
   reviewInvitation         PropertyReviewInvitation?
+  pinAIGuestConversation   PinAIGuestConversation?
 
   @@unique([propertyId, externalProvider, externalId])
   @@index([propertyId, checkIn, checkOut])
   @@index([cancellationPolicyId])
   @@index([status, cancelledAt])
   @@index([propertyId, status, checkIn])
+}
+
+model PinAIGuestConversation {
+  id                 String       @id @default(cuid())
+  reservationId      String       @unique
+  openaiSessionId    String?      @unique @db.VarChar(160)
+  leaseToken         String?      @db.VarChar(64)
+  leaseExpiresAt     DateTime?
+  lastMessageAt      DateTime?
+  lastErrorCode      String?      @db.VarChar(120)
+  createdAt          DateTime     @default(now())
+  updatedAt          DateTime     @updatedAt
+  reservation        Reservation  @relation(fields: [reservationId], references: [id], onDelete: Cascade)
+
+  @@index([leaseExpiresAt])
+  @@index([lastMessageAt])
 }
 
 model PropertyReview {
@@ -1592,6 +1610,31 @@ model PropertyAmenity {
   @@index([propertyId])
 }
 
+model PropertyKnowledgeEntry {
+  id              String                      @id @default(cuid())
+  propertyId      String
+  category        PropertyKnowledgeCategory
+  key             String                      @db.VarChar(80)
+  titleEn         String?                     @db.VarChar(160)
+  titleEs         String?                     @db.VarChar(160)
+  contentEn       String?
+  contentEs       String?
+  visibility      PropertyKnowledgeVisibility @default(CONFIRMED_GUEST)
+  sortOrder       Int                         @default(0)
+  revision        Int                         @default(1)
+  isActive        Boolean                     @default(true)
+  createdByUserId String?
+  updatedByUserId String?
+  createdAt       DateTime                    @default(now())
+  updatedAt       DateTime                    @updatedAt
+
+  property Property @relation(fields: [propertyId], references: [id], onDelete: Cascade)
+
+  @@unique([propertyId, key])
+  @@index([propertyId, isActive, sortOrder])
+  @@index([propertyId, visibility, isActive])
+}
+
 model PropertyTax {
   id         String   @id @default(cuid())
   propertyId String
@@ -2323,6 +2366,26 @@ enum NfcAssignmentRole {
 enum GuestAccessMode {
   PASSCODE_ONLY
   PASSCODE_PLUS_NFC
+}
+
+enum PropertyKnowledgeCategory {
+  PROPERTY
+  ARRIVAL
+  ACCESS
+  WIFI
+  PARKING
+  AMENITIES
+  HOUSE_RULES
+  APPLIANCE
+  TROUBLESHOOTING
+  EMERGENCY
+  LOCAL_GUIDE
+}
+
+enum PropertyKnowledgeVisibility {
+  PUBLIC
+  CONFIRMED_GUEST
+  DURING_STAY
 }
 
 enum GuestAccessReleaseStatus {

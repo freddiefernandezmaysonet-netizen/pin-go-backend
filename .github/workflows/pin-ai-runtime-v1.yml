@@ -1,0 +1,81 @@
+name: Pin AI Runtime V1
+
+on:
+  pull_request:
+    branches:
+      - agent/pin-ai-guest-services-benchmark-v1
+    paths:
+      - "src/pin-ai/runtime/**"
+      - "package.json"
+      - "package-lock.json"
+      - ".github/workflows/pin-ai-runtime-v1.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  runtime-contract:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Install locked dependencies without lifecycle scripts
+        run: npm ci --ignore-scripts --no-audit --no-fund
+
+      - name: Generate Prisma client
+        run: npx prisma generate
+
+      - name: Run Pin AI Runtime V1 tests
+        run: npm run test:pin-ai-runtime
+
+      - name: Typecheck Pin AI Runtime V1
+        run: |
+          ./node_modules/.bin/tsc --noEmit \
+            --module nodenext \
+            --moduleResolution nodenext \
+            --target esnext \
+            --strict \
+            --skipLibCheck \
+            --types node \
+            src/pin-ai/runtime/contracts.ts \
+            src/pin-ai/runtime/policy.ts \
+            src/pin-ai/runtime/policy.test.ts \
+            src/pin-ai/runtime/conversation-memory.ts \
+            src/pin-ai/runtime/tool-executor.ts \
+            src/pin-ai/runtime/runtime-core.test.ts \
+            src/pin-ai/runtime/model-adapter.ts \
+            src/pin-ai/runtime/shadow-orchestrator.ts \
+            src/pin-ai/runtime/shadow-orchestrator.test.ts \
+            src/pin-ai/runtime/openai-agents-runtime-transport.ts \
+            src/pin-ai/runtime/luna-runtime-adapter.ts \
+            src/pin-ai/runtime/luna-runtime-adapter.test.ts \
+            src/pin-ai/runtime/runtime-shadow-canary-luna.ts \
+            src/pin-ai/runtime/pin-go-read-tool-executor.ts \
+            src/pin-ai/runtime/pin-go-runtime-tools.ts \
+            src/pin-ai/runtime/pin-go-read-tool-executor.test.ts \
+            src/pin-ai/runtime/runtime-real-read-canary-luna.ts \
+            src/pin-ai/runtime/pin-go-eligibility-checks.ts \
+            src/pin-ai/runtime/pin-go-eligibility-checks.test.ts \
+            src/pin-ai/runtime/runtime-eligibility-canary-luna.ts \
+            src/pin-ai/runtime/runtime-extension-price-canary.ts \
+            src/pin-ai/runtime/runtime-date-change-canary.ts \
+            src/pin-ai/runtime/runtime-date-change-canary-luna.ts \
+            src/pin-ai/runtime/runtime-cancellation-policy-canary.ts \
+            src/pin-ai/runtime/runtime-cancellation-policy-canary-luna.ts \
+            src/pin-ai/runtime/runtime-payment-context-canary.ts \
+            src/pin-ai/runtime/runtime-payment-context-canary-luna.ts \
+            src/pin-ai/runtime/google-places-read-client.ts \
+            src/pin-ai/runtime/google-places-read-client.test.ts \
+            src/pin-ai/runtime/runtime-local-places-canary.ts \
+            src/pin-ai/runtime/web-search-location.ts \
+            src/pin-ai/runtime/web-search-location.test.ts \
+            src/pin-ai/runtime/runtime-web-search-canary-luna.ts \
+            src/pin-ai/runtime/runtime-location-audit.ts

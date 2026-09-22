@@ -1,0 +1,21 @@
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "noEmit": true,
+    "types": ["node"],
+    "exactOptionalPropertyTypes": false,
+    "noUncheckedIndexedAccess": false
+  },
+  "include": [
+    "src/pin-ai/guest/guest-runtime-gateway.ts",
+    "src/pin-ai/guest/guest-runtime-gateway.test.ts",
+    "src/pin-ai/runtime/openai-agent-config.ts",
+    "src/pin-ai/runtime/openai-agent-config.test.ts",
+    "src/pin-ai/runtime/openai-saved-agent-audit.ts",
+    "src/pin-ai/runtime/openai-saved-agent-audit.test.ts",
+    "src/routes/public-booking.pin-ai.routes.ts",
+    "src/routes/public-booking.pin-ai.routes.test.ts",
+    "src/scripts/audit-pin-ai-openai-agent.ts",
+    "src/scripts/sync-pin-ai-openai-agent.ts"
+  ]
+}

@@ -63,8 +63,203 @@ jobs:
       - name: Prove exact narrow diff allowlist
         shell: bash
         run: |
-          git fetch origin main --depth=1
-          git diff --name-only origin/main...HEAD | sort > "$RUNNER_TEMP/actual.txt"
+          BASE_BRANCH="${GITHUB_BASE_REF:-main}"
+          git fetch origin "+refs/heads/$BASE_BRANCH:refs/remotes/origin/$BASE_BRANCH" --depth=1
+          git diff --name-only "origin/$BASE_BRANCH...HEAD" | sort > "$RUNNER_TEMP/actual.txt"
+          if [ "${GITHUB_HEAD_REF:-$GITHUB_REF_NAME}" = "agent/pin-ai-guest-services-benchmark-v1" ]; then
+            cat > "$RUNNER_TEMP/pin-ai-root-allowed.txt" <<'EOF'
+          .github/workflows/ota-airbnb-listing-discovery.yml
+          .github/workflows/pin-ai-guest-gateway-v1.yml
+          .github/workflows/pin-ai-guest-services-benchmark-v1.yml
+          .github/workflows/pin-ai-property-knowledge-v1.yml
+          .github/workflows/pin-ai-runtime-v1.yml
+          docs/pin-ai-runtime-v1-certification.md
+          package.json
+          prisma/migrations/20260921120000_add_pin_ai_property_knowledge_v1/migration.sql
+          prisma/migrations/20260921143000_add_pin_ai_guest_conversation_sessions/migration.sql
+          prisma/schema.prisma
+          src/pin-ai/benchmark/benchmark-batch-plan.test.ts
+          src/pin-ai/benchmark/benchmark-batch-plan.ts
+          src/pin-ai/benchmark/benchmark-contract.test.ts
+          src/pin-ai/benchmark/canary-001-luna.ts
+          src/pin-ai/benchmark/canary-002-luna.ts
+          src/pin-ai/benchmark/canary-002-trigger.txt
+          src/pin-ai/benchmark/canary-003-luna.ts
+          src/pin-ai/benchmark/canary-003-trigger.txt
+          src/pin-ai/benchmark/canary-004-luna.ts
+          src/pin-ai/benchmark/canary-004-trigger.txt
+          src/pin-ai/benchmark/canary-005-luna.ts
+          src/pin-ai/benchmark/canary-005-trigger.txt
+          src/pin-ai/benchmark/canary-006-luna.ts
+          src/pin-ai/benchmark/canary-006-trigger.txt
+          src/pin-ai/benchmark/canary-007-luna.ts
+          src/pin-ai/benchmark/canary-007-trigger.txt
+          src/pin-ai/benchmark/canary-008-luna.ts
+          src/pin-ai/benchmark/canary-008-trigger.txt
+          src/pin-ai/benchmark/canary-009-luna.ts
+          src/pin-ai/benchmark/canary-009-trigger.txt
+          src/pin-ai/benchmark/canary-010-luna.ts
+          src/pin-ai/benchmark/canary-010-trigger.txt
+          src/pin-ai/benchmark/canary-011-luna.ts
+          src/pin-ai/benchmark/canary-011-trigger.txt
+          src/pin-ai/benchmark/canary-012-luna.ts
+          src/pin-ai/benchmark/canary-012-trigger.txt
+          src/pin-ai/benchmark/canary-013-luna.ts
+          src/pin-ai/benchmark/canary-013-trigger.txt
+          src/pin-ai/benchmark/canary-014-luna.ts
+          src/pin-ai/benchmark/canary-014-trigger.txt
+          src/pin-ai/benchmark/canary-015-luna.ts
+          src/pin-ai/benchmark/canary-015-trigger.txt
+          src/pin-ai/benchmark/canary-016-luna.ts
+          src/pin-ai/benchmark/canary-016-trigger.txt
+          src/pin-ai/benchmark/canary-017-luna.ts
+          src/pin-ai/benchmark/canary-017-trigger.txt
+          src/pin-ai/benchmark/canary-018-luna.ts
+          src/pin-ai/benchmark/canary-018-trigger.txt
+          src/pin-ai/benchmark/canary-019-luna.ts
+          src/pin-ai/benchmark/canary-019-trigger.txt
+          src/pin-ai/benchmark/canary-020-luna.ts
+          src/pin-ai/benchmark/canary-020-trigger.txt
+          src/pin-ai/benchmark/contracts.ts
+          src/pin-ai/benchmark/mock-tool-executor.ts
+          src/pin-ai/benchmark/model-evaluation-runner.test.ts
+          src/pin-ai/benchmark/model-evaluation-runner.ts
+          src/pin-ai/benchmark/openai-agents-benchmark-adapter.test.ts
+          src/pin-ai/benchmark/openai-agents-benchmark-adapter.ts
+          src/pin-ai/benchmark/openai-agents-benchmark-transport.test.ts
+          src/pin-ai/benchmark/openai-agents-benchmark-transport.ts
+          src/pin-ai/benchmark/openai-benchmark-usage-reconciler.test.ts
+          src/pin-ai/benchmark/openai-benchmark-usage-reconciler.ts
+          src/pin-ai/benchmark/property-knowledge-benchmark-tool-executor.test.ts
+          src/pin-ai/benchmark/property-knowledge-benchmark-tool-executor.ts
+          src/pin-ai/benchmark/property-knowledge-contract.test.ts
+          src/pin-ai/benchmark/property-knowledge-contract.ts
+          src/pin-ai/benchmark/reconcile-provider-usage.ts
+          src/pin-ai/benchmark/scenarios-001-010.ts
+          src/pin-ai/benchmark/scenarios-011-020.ts
+          src/pin-ai/benchmark/scenarios-021-030.ts
+          src/pin-ai/benchmark/scenarios-031-040.ts
+          src/pin-ai/benchmark/scenarios-041-050.ts
+          src/pin-ai/benchmark/scenarios-051-060.ts
+          src/pin-ai/benchmark/scenarios-061-070.ts
+          src/pin-ai/benchmark/scenarios-071-080.ts
+          src/pin-ai/benchmark/scenarios-081-090.ts
+          src/pin-ai/benchmark/scenarios-091-100.ts
+          src/pin-ai/benchmark/usage-reconcile-trigger.txt
+          src/pin-ai/guest/guest-runtime-gateway.test.ts
+          src/pin-ai/guest/guest-runtime-gateway.ts
+          src/pin-ai/property-knowledge-entry.contract.test.ts
+          src/pin-ai/property-knowledge-entry.contract.ts
+          src/pin-ai/property-knowledge.service.test.ts
+          src/pin-ai/property-knowledge.service.ts
+          src/pin-ai/runtime/contracts.ts
+          src/pin-ai/runtime/conversation-memory.ts
+          src/pin-ai/runtime/google-places-read-client.test.ts
+          src/pin-ai/runtime/google-places-read-client.ts
+          src/pin-ai/runtime/luna-runtime-adapter.test.ts
+          src/pin-ai/runtime/luna-runtime-adapter.ts
+          src/pin-ai/runtime/model-adapter.ts
+          src/pin-ai/runtime/openai-agent-config.test.ts
+          src/pin-ai/runtime/openai-agent-config.ts
+          src/pin-ai/runtime/openai-agents-runtime-transport.ts
+          src/pin-ai/runtime/openai-saved-agent-audit.test.ts
+          src/pin-ai/runtime/openai-saved-agent-audit.ts
+          src/pin-ai/runtime/pin-go-eligibility-checks.test.ts
+          src/pin-ai/runtime/pin-go-eligibility-checks.ts
+          src/pin-ai/runtime/pin-go-read-tool-executor.test.ts
+          src/pin-ai/runtime/pin-go-read-tool-executor.ts
+          src/pin-ai/runtime/pin-go-runtime-tools.ts
+          src/pin-ai/runtime/policy.test.ts
+          src/pin-ai/runtime/policy.ts
+          src/pin-ai/runtime/runtime-cancellation-policy-canary-luna.ts
+          src/pin-ai/runtime/runtime-cancellation-policy-canary.ts
+          src/pin-ai/runtime/runtime-core.test.ts
+          src/pin-ai/runtime/runtime-date-change-canary-luna.ts
+          src/pin-ai/runtime/runtime-date-change-canary.ts
+          src/pin-ai/runtime/runtime-eligibility-canary-luna.ts
+          src/pin-ai/runtime/runtime-eligibility-trigger.txt
+          src/pin-ai/runtime/runtime-extension-price-canary.ts
+          src/pin-ai/runtime/runtime-local-places-canary.ts
+          src/pin-ai/runtime/runtime-location-audit.ts
+          src/pin-ai/runtime/runtime-payment-context-canary-luna.ts
+          src/pin-ai/runtime/runtime-payment-context-canary.ts
+          src/pin-ai/runtime/runtime-real-read-canary-luna.ts
+          src/pin-ai/runtime/runtime-real-read-trigger.txt
+          src/pin-ai/runtime/runtime-shadow-canary-luna.ts
+          src/pin-ai/runtime/runtime-shadow-trigger.txt
+          src/pin-ai/runtime/runtime-web-search-canary-luna.ts
+          src/pin-ai/runtime/shadow-orchestrator.test.ts
+          src/pin-ai/runtime/shadow-orchestrator.ts
+          src/pin-ai/runtime/tool-executor.ts
+          src/pin-ai/runtime/web-search-location.test.ts
+          src/pin-ai/runtime/web-search-location.ts
+          src/routes/dashboard.property-knowledge.routes.test.ts
+          src/routes/dashboard.property-knowledge.routes.ts
+          src/routes/public-booking.pin-ai.routes.test.ts
+          src/routes/public-booking.pin-ai.routes.ts
+          src/scripts/audit-pin-ai-openai-agent.ts
+          src/scripts/sync-pin-ai-openai-agent.ts
+          src/server.ts
+          tsconfig.pin-ai-guest-gateway.json
+          EOF
+            sort "$RUNNER_TEMP/pin-ai-root-allowed.txt" -o "$RUNNER_TEMP/pin-ai-root-allowed.txt"
+            diff -u "$RUNNER_TEMP/pin-ai-root-allowed.txt" "$RUNNER_TEMP/actual.txt"
+            exit 0
+          fi
+
+          if [ "${GITHUB_HEAD_REF:-$GITHUB_REF_NAME}" = "agent/pin-ai-conversation-sessions-v1" ]; then
+            cat > "$RUNNER_TEMP/pin-ai-conversation-allowed.txt" <<'EOF'
+          .github/workflows/ota-airbnb-listing-discovery.yml
+          prisma/migrations/20260921143000_add_pin_ai_guest_conversation_sessions/migration.sql
+          prisma/schema.prisma
+          src/pin-ai/guest/guest-runtime-gateway.test.ts
+          src/pin-ai/guest/guest-runtime-gateway.ts
+          src/pin-ai/runtime/contracts.ts
+          src/pin-ai/runtime/luna-runtime-adapter.test.ts
+          src/pin-ai/runtime/openai-agents-runtime-transport.ts
+          src/routes/public-booking.pin-ai.routes.test.ts
+          src/routes/public-booking.pin-ai.routes.ts
+          EOF
+            sort "$RUNNER_TEMP/pin-ai-conversation-allowed.txt" -o "$RUNNER_TEMP/pin-ai-conversation-allowed.txt"
+            diff -u "$RUNNER_TEMP/pin-ai-conversation-allowed.txt" "$RUNNER_TEMP/actual.txt"
+            exit 0
+          fi
+          if [ "${GITHUB_HEAD_REF:-$GITHUB_REF_NAME}" = "agent/pin-ai-property-knowledge-v1" ]; then
+            cat > "$RUNNER_TEMP/pin-ai-property-knowledge-allowed.txt" <<'EOF'
+          .github/workflows/ota-airbnb-listing-discovery.yml
+          .github/workflows/pin-ai-guest-gateway-v1.yml
+          .github/workflows/pin-ai-property-knowledge-v1.yml
+          package.json
+          prisma/migrations/20260921120000_add_pin_ai_property_knowledge_v1/migration.sql
+          prisma/schema.prisma
+          src/pin-ai/guest/guest-runtime-gateway.test.ts
+          src/pin-ai/guest/guest-runtime-gateway.ts
+          src/pin-ai/property-knowledge-entry.contract.test.ts
+          src/pin-ai/property-knowledge-entry.contract.ts
+          src/pin-ai/property-knowledge.service.test.ts
+          src/pin-ai/property-knowledge.service.ts
+          src/pin-ai/runtime/contracts.ts
+          src/pin-ai/runtime/luna-runtime-adapter.test.ts
+          src/pin-ai/runtime/openai-agent-config.test.ts
+          src/pin-ai/runtime/openai-agent-config.ts
+          src/pin-ai/runtime/openai-agents-runtime-transport.ts
+          src/pin-ai/runtime/openai-saved-agent-audit.test.ts
+          src/pin-ai/runtime/openai-saved-agent-audit.ts
+          src/pin-ai/runtime/pin-go-read-tool-executor.test.ts
+          src/pin-ai/runtime/pin-go-read-tool-executor.ts
+          src/routes/dashboard.property-knowledge.routes.test.ts
+          src/routes/dashboard.property-knowledge.routes.ts
+          src/routes/public-booking.pin-ai.routes.test.ts
+          src/routes/public-booking.pin-ai.routes.ts
+          src/scripts/audit-pin-ai-openai-agent.ts
+          src/scripts/sync-pin-ai-openai-agent.ts
+          src/server.ts
+          tsconfig.pin-ai-guest-gateway.json
+          EOF
+            sort "$RUNNER_TEMP/pin-ai-property-knowledge-allowed.txt" -o "$RUNNER_TEMP/pin-ai-property-knowledge-allowed.txt"
+            diff -u "$RUNNER_TEMP/pin-ai-property-knowledge-allowed.txt" "$RUNNER_TEMP/actual.txt"
+            exit 0
+          fi
           if [ "${GITHUB_HEAD_REF:-$GITHUB_REF_NAME}" = "agent/vrbo-self-service-connection-center" ]; then
             cat > "$RUNNER_TEMP/vrbo-allowed.txt" <<'EOF'
           .github/workflows/booking-com-transport-readiness.yml
@@ -177,7 +372,7 @@ jobs:
 
       - name: Prove unaffected certified Channex transports and workers remain frozen
         run: |
-          git diff --exit-code origin/main...HEAD -- \
+          git diff --exit-code "origin/${GITHUB_BASE_REF:-main}...HEAD" -- \
             src/pms \
             src/workers \
             src/distribution/channex-readonly.http-transport.ts \
