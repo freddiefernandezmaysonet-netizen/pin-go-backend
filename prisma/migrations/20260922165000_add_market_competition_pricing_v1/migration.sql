@@ -121,6 +121,9 @@ CREATE UNIQUE INDEX "MarketComparable_profileId_provider_externalListingId_key" 
 CREATE INDEX "MarketPricingRun_profileId_status_createdAt_idx" ON "MarketPricingRun"("profileId", "status", "createdAt");
 
 -- CreateIndex
+CREATE UNIQUE INDEX "MarketPricingRun_profileId_active_key" ON "MarketPricingRun"("profileId") WHERE "status" IN ('PENDING', 'RUNNING');
+
+-- CreateIndex
 CREATE INDEX "MarketPricingRun_status_createdAt_idx" ON "MarketPricingRun"("status", "createdAt");
 
 -- CreateIndex
