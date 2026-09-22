@@ -30,6 +30,8 @@ jobs:
         run: npm ci --ignore-scripts --no-audit --no-fund
 
       - name: Generate and validate Prisma client without database operations
+        env:
+          DATABASE_URL: postgresql://property_protection_ci:property_protection_ci@127.0.0.1:5432/property_protection_ci
         run: |
           ./node_modules/.bin/prisma generate --schema ./prisma
           ./node_modules/.bin/prisma validate --schema ./prisma
