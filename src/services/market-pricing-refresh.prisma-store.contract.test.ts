@@ -90,6 +90,7 @@ function prismaFixture(
     createdCount?: number;
     completionCount?: number;
     failureCount?: number;
+    activeRunId?: string | null;
   } = {},
 ) {
   const events: string[] = [];
@@ -118,6 +119,15 @@ function prismaFixture(
           provider: "provider-a",
           status: options.runStatus ?? "RUNNING",
         };
+      },
+      async findFirst(): Promise<{ id: string } | null> {
+        events.push("read-active-run");
+        return options.activeRunId ? { id: options.activeRunId } : null;
+      },
+      async create(args: unknown): Promise<{ id: string }> {
+        events.push("create-run");
+        calls.runCreates.push(args);
+        return { id: "run-1" };
       },
       async updateMany(args: unknown): Promise<{ count: number }> {
         events.push("update-run");
@@ -172,10 +182,6 @@ function prismaFixture(
 
   const prisma = {
     marketPricingRun: {
-      async create(args: unknown): Promise<{ id: string }> {
-        calls.runCreates.push(args);
-        return { id: "run-1" };
-      },
       async findUnique(): Promise<{ profileId: string }> {
         return { profileId: "profile-1" };
       },
@@ -193,7 +199,7 @@ function prismaFixture(
   };
 }
 
-test("createRun persists UTC dates with an exclusive upper bound", async () => {
+test("createRun locks, recovers stale work, and persists an exclusive UTC range", async () => {
   const fixture = prismaFixture();
 
   const result = await fixture.store.createRun({
@@ -205,6 +211,21 @@ test("createRun persists UTC dates with an exclusive upper bound", async () => {
   });
 
   assert.deepEqual(result, { runId: "run-1" });
+  assert.deepEqual(fixture.events.slice(0, 5), [
+    "transaction",
+    "lock",
+    "update-run",
+    "read-active-run",
+    "create-run",
+  ]);
+  const recovery = record(fixture.calls.runUpdates[0]);
+  const recoveryWhere = record(recovery.where);
+  const recoveryOr = recoveryWhere.OR as UnknownRecord[];
+  assert.equal(
+    (record(recoveryOr[0].startedAt).lte as Date).toISOString(),
+    "2026-09-22T16:30:00.000Z",
+  );
+  assert.equal(record(recovery.data).errorCode, "STALE_RUN_RECOVERED");
   const data = record(record(fixture.calls.runCreates[0]).data);
   assert.equal(
     (data.requestedDateFrom as Date).toISOString(),
@@ -215,6 +236,29 @@ test("createRun persists UTC dates with an exclusive upper bound", async () => {
     "2026-10-04T00:00:00.000Z",
   );
   assert.deepEqual(data.metadata, { rangeSemantics: "DATE_TO_EXCLUSIVE" });
+});
+
+test("createRun rejects a concurrent active refresh before creating another run", async () => {
+  const fixture = prismaFixture({ activeRunId: "run-active" });
+
+  const message = await errorMessage(
+    fixture.store.createRun({
+      profileId: "profile-1",
+      provider: "provider-a",
+      requestedDateFrom: "2026-10-01",
+      requestedDateToExclusive: "2026-10-04",
+      startedAt: observedAt,
+    }),
+  );
+
+  assert.equal(message, "MARKET_PRICING_REFRESH_ALREADY_RUNNING");
+  assert.equal(fixture.calls.runCreates.length, 0);
+  assert.deepEqual(fixture.events.slice(0, 4), [
+    "transaction",
+    "lock",
+    "update-run",
+    "read-active-run",
+  ]);
 });
 
 test("atomic completion locks first, stales absent comparables, and detects exact changed dates", async () => {
