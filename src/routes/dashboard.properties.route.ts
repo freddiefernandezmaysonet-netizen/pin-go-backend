@@ -92,6 +92,27 @@ function parseOptionalPercent(value: unknown): number | null {
   return Number.isFinite(parsed) ? parsed : NaN;
 }
 
+export function validatePropertyProtectionConfiguration(input: {
+  enabled: boolean;
+  mode: unknown;
+  maxDamageLiabilityAmount: number | null;
+}) {
+  if (String(input.mode ?? "CARD_ON_FILE").trim().toUpperCase() !== "CARD_ON_FILE") {
+    return "propertyProtectionMode must be CARD_ON_FILE";
+  }
+
+  if (
+    input.enabled &&
+    (input.maxDamageLiabilityAmount === null ||
+      !Number.isFinite(input.maxDamageLiabilityAmount) ||
+      input.maxDamageLiabilityAmount <= 0)
+  ) {
+    return "maxDamageLiabilityAmount must be greater than 0 when Property Protection is enabled";
+  }
+
+  return null;
+}
+
 function parseOptionalInt(value: unknown): number | null {
   if (value === undefined || value === null || String(value).trim() === "") {
     return null;
