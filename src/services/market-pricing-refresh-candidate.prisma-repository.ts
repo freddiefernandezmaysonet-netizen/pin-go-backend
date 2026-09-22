@@ -5,6 +5,7 @@ import { evaluateMarketPricingRefreshEligibility } from "./market-pricing-refres
 import type { MarketPricingRefreshConfiguration } from "./market-pricing-refresh.service";
 
 export type MarketPricingRefreshCandidateBlockedReason =
+  | "CURRENCY_INVALID"
   | "COORDINATES_REQUIRED"
   | "COUNTRY_REQUIRED"
   | "TIMEZONE_REQUIRED"
@@ -32,7 +33,6 @@ export type MarketPricingRefreshCandidateRepository = {
     now: Date;
     limit: number;
     horizonDays: number;
-    currency: string;
   }): Promise<MarketPricingRefreshCandidate[]>;
 };
 
@@ -40,8 +40,7 @@ function requireValidInput(input: {
   now: Date;
   limit: number;
   horizonDays: number;
-  currency: string;
-}): string {
+}): void {
   if (!(input.now instanceof Date) || Number.isNaN(input.now.getTime())) {
     throw new Error("MARKET_PRICING_CANDIDATE_NOW_INVALID");
   }
@@ -55,14 +54,6 @@ function requireValidInput(input: {
   ) {
     throw new Error("MARKET_PRICING_CANDIDATE_HORIZON_INVALID");
   }
-
-  const currency = String(input.currency ?? "")
-    .trim()
-    .toUpperCase();
-  if (!/^[A-Z]{3}$/.test(currency)) {
-    throw new Error("MARKET_PRICING_CANDIDATE_CURRENCY_INVALID");
-  }
-  return currency;
 }
 
 function cleanOptional(value: string | null): string | null {
@@ -111,7 +102,7 @@ export function createPrismaMarketPricingRefreshCandidateRepository(
 ): MarketPricingRefreshCandidateRepository {
   return {
     async listDue(input) {
-      const currency = requireValidInput(input);
+      requireValidInput(input);
       const profiles = await prisma.marketPricingProfile.findMany({
         where: {
           enabled: true,
@@ -127,6 +118,7 @@ export function createPrismaMarketPricingRefreshCandidateRepository(
         select: {
           id: true,
           provider: true,
+          currency: true,
           strategy: true,
           position: true,
           aggressiveness: true,
@@ -163,6 +155,20 @@ export function createPrismaMarketPricingRefreshCandidateRepository(
           now: input.now,
         });
         if (!eligibility.eligible) continue;
+
+        const currency = String(profile.currency ?? "")
+          .trim()
+          .toUpperCase();
+        if (!/^[A-Z]{3}$/.test(currency)) {
+          candidates.push({
+            status: "BLOCKED",
+            profileId: profile.id,
+            propertyId: String(profile.property.id ?? "").trim(),
+            provider: eligibility.provider,
+            reason: "CURRENCY_INVALID",
+          });
+          continue;
+        }
 
         const propertyId = String(profile.property.id ?? "").trim();
         const latitude =
