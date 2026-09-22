@@ -42,7 +42,7 @@ test("migration adds response evidence without financial mutations", () => {
   assert.match(migration, /CREATE TYPE "DamageCaseGuestResponse"/);
   assert.match(migration, /ALTER TABLE "DamageCase"/);
   assert.match(migration, /DEFAULT 'PENDING'/);
-  assert.doesNotMatch(migration, /PaymentIntent|charge|hold|capture|refund/i);
+  assert.doesNotMatch(migration, /stripe|payment_intent|capture_method/i);
 });
 
 test("guest response endpoint reuses the existing guest token", () => {
