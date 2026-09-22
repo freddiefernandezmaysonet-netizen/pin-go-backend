@@ -33,6 +33,7 @@ export function createMarketPricingProviderRegistry(input: {
     throw new Error("MARKET_PRICING_PROVIDER_REGISTRY_INPUT_INVALID");
   }
 
+  const enabled = input.enabled;
   const providersByKey = new Map<string, MarketPricingProvider>();
   for (const provider of input.providers) {
     const key = requireProviderKey(provider);
@@ -44,7 +45,7 @@ export function createMarketPricingProviderRegistry(input: {
 
   return {
     resolve(provider: string): MarketPricingProvider | null {
-      if (!input.enabled) return null;
+      if (!enabled) return null;
 
       const key = String(provider ?? "").trim();
       if (!PROVIDER_KEY_PATTERN.test(key)) return null;
