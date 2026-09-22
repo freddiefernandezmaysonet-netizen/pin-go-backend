@@ -16,6 +16,10 @@ test("Manage Reservation exposes Damage Case only after host approval", () => {
   assert.match(serviceSource, /GUEST_NOTIFIED/);
   assert.match(serviceSource, /CHARGE_BLOCKED/);
   assert.match(serviceSource, /CLOSED_NO_CHARGE/);
+  assert.match(
+    serviceSource,
+    /damageCase\?\.status === "CLOSED_NO_CHARGE"[\s\S]*Boolean\(damageCase\.hostApprovedAt\)/
+  );
   assert.doesNotMatch(
     serviceSource.slice(
       serviceSource.indexOf("getGuestPropertyProtectionCase"),
@@ -55,4 +59,14 @@ test("guest portal Property Protection endpoint contains no financial mutation",
   assert.doesNotMatch(block, /paymentIntents/);
   assert.doesNotMatch(block, /charges\./);
   assert.doesNotMatch(block, /refunds\./);
+});
+
+
+test("a case closed before host approval remains private", () => {
+  const block = serviceSource.slice(
+    serviceSource.indexOf("getGuestPropertyProtectionCase"),
+    serviceSource.indexOf("getGuestCancellationPreview")
+  );
+  assert.match(block, /guestVisibleDamageCase/);
+  assert.match(block, /hostApprovedAt/);
 });
