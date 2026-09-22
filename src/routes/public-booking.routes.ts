@@ -1358,6 +1358,10 @@ publicBookingRouter.post("/create-checkout", async (req, res) => {
    stayNotificationsConsent,
    guestAcceptedCancellationTerms,
    guestAcceptedSecurePreCheckinRequirement,
+   guestAcceptedPropertyProtectionConsent,
+   guestAcceptedPropertyProtectionConsentAt,
+   guestAcceptedPropertyProtectionConsentVersion,
+   guestAcceptedPropertyProtectionMaxDamageLiabilityAmount,
    adults,
    children,
    selectedAmenityIds,
@@ -1427,6 +1431,9 @@ if (guestAcceptedSecurePreCheckinRequirement !== true) {
         publicTitle: true,
         baseNightlyRate: true,
         cleaningFee: true,
+        propertyProtectionEnabled: true,
+        propertyProtectionMode: true,
+        maxDamageLiabilityAmount: true,
         maxGuests: true,
         minimumNights: true,
         maximumNights: true,
@@ -1456,6 +1463,98 @@ if (guestAcceptedSecurePreCheckinRequirement !== true) {
         error: "Property is missing baseNightlyRate",
       });
     }
+
+    const propertyProtectionEnabled =
+      property.propertyProtectionEnabled === true;
+    const propertyProtectionDisclosureVersion =
+      "property_protection_card_on_file_v1";
+    const propertyProtectionMaxDamageLiabilityAmount =
+      property.maxDamageLiabilityAmount === null
+        ? null
+        : Number(property.maxDamageLiabilityAmount);
+
+    if (
+      propertyProtectionEnabled &&
+      (
+        property.propertyProtectionMode !== "CARD_ON_FILE" ||
+        propertyProtectionMaxDamageLiabilityAmount === null ||
+        !Number.isFinite(propertyProtectionMaxDamageLiabilityAmount) ||
+        propertyProtectionMaxDamageLiabilityAmount <= 0
+      )
+    ) {
+      return res.status(409).json({
+        ok: false,
+        error: "PROPERTY_PROTECTION_CONFIGURATION_INVALID",
+      });
+    }
+
+    if (
+      propertyProtectionEnabled &&
+      guestAcceptedPropertyProtectionConsent !== true
+    ) {
+      return res.status(400).json({
+        ok: false,
+        error: "PROPERTY_PROTECTION_CONSENT_REQUIRED",
+      });
+    }
+
+    if (
+      propertyProtectionEnabled &&
+      (
+        String(guestAcceptedPropertyProtectionConsentVersion ?? "") !==
+          propertyProtectionDisclosureVersion ||
+        Number(guestAcceptedPropertyProtectionMaxDamageLiabilityAmount) !==
+          propertyProtectionMaxDamageLiabilityAmount
+      )
+    ) {
+      return res.status(409).json({
+        ok: false,
+        error: "PROPERTY_PROTECTION_TERMS_CHANGED",
+      });
+    }
+
+    const propertyProtectionConsentAcceptedAt =
+      propertyProtectionEnabled &&
+      guestAcceptedPropertyProtectionConsentAt &&
+      !Number.isNaN(
+        new Date(String(guestAcceptedPropertyProtectionConsentAt)).getTime()
+      )
+        ? new Date(String(guestAcceptedPropertyProtectionConsentAt)).toISOString()
+        : propertyProtectionEnabled
+          ? new Date().toISOString()
+          : null;
+
+    const propertyProtectionPolicySnapshot = propertyProtectionEnabled
+      ? {
+          enabled: true,
+          mode: "CARD_ON_FILE",
+          maxDamageLiabilityAmount:
+            propertyProtectionMaxDamageLiabilityAmount,
+          currency: "usd",
+          disclosureVersion: propertyProtectionDisclosureVersion,
+          capturedAt: new Date().toISOString(),
+        }
+      : {
+          enabled: false,
+          mode: "CARD_ON_FILE",
+          maxDamageLiabilityAmount: null,
+          currency: "usd",
+          disclosureVersion: propertyProtectionDisclosureVersion,
+          capturedAt: new Date().toISOString(),
+        };
+
+    const damagePaymentConsent = propertyProtectionEnabled
+      ? {
+          accepted: true,
+          acceptedAt: propertyProtectionConsentAcceptedAt,
+          version: propertyProtectionDisclosureVersion,
+          source: "DIRECT_BOOKING_CHECKOUT",
+          mode: "CARD_ON_FILE",
+          maxDamageLiabilityAmount:
+            propertyProtectionMaxDamageLiabilityAmount,
+          currency: "usd",
+        }
+      : null;
 
 if (property.maxGuests && totalGuests > property.maxGuests) {
   return res.status(400).json({
@@ -1685,6 +1784,19 @@ const guestAcceptedSecurePreCheckinRequirementText =
         stayNotificationsConsent: String(stayNotificationsConsent === true),
         consentSource: "DIRECT_BOOKING_WEB_FORM",
         consentVersion: "stay_notifications_v1",
+
+        propertyProtectionRequired: String(propertyProtectionEnabled),
+        propertyProtectionMode: "CARD_ON_FILE",
+        propertyProtectionMaxDamageLiabilityAmount:
+          propertyProtectionMaxDamageLiabilityAmount === null
+            ? ""
+            : String(propertyProtectionMaxDamageLiabilityAmount),
+        propertyProtectionDisclosureVersion:
+          propertyProtectionDisclosureVersion,
+        propertyProtectionConsentAccepted:
+          String(propertyProtectionEnabled),
+        propertyProtectionConsentAcceptedAt:
+          propertyProtectionConsentAcceptedAt ?? "",
 
         securePrecheckinAccepted: "true",
         securePrecheckinAcceptedAt: guestAcceptedSecurePreCheckinRequirementAt,
