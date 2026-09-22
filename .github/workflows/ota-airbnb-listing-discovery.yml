@@ -66,6 +66,22 @@ jobs:
           BASE_BRANCH="${GITHUB_BASE_REF:-main}"
           git fetch origin "+refs/heads/$BASE_BRANCH:refs/remotes/origin/$BASE_BRANCH" --depth=1
           git diff --name-only "origin/$BASE_BRANCH...HEAD" | sort > "$RUNNER_TEMP/actual.txt"
+          if [ "${GITHUB_HEAD_REF:-$GITHUB_REF_NAME}" = "agent/property-protection-v1-guest-damage-response" ]; then
+            cat > "$RUNNER_TEMP/property-protection-guest-response-allowed.txt" <<'EOF'
+          .github/workflows/ota-airbnb-listing-discovery.yml
+          .github/workflows/property-protection-v1-certification.yml
+          prisma/migrations/20260922204500_damage_case_guest_response_non_charging/migration.sql
+          prisma/schema.prisma
+          src/routes/public-booking.routes.ts
+          src/services/damage-case-guest-response.contract.test.ts
+          src/services/damage-case-guest-response.service.ts
+          src/services/guest-cancellation.service.ts
+          EOF
+            sort "$RUNNER_TEMP/property-protection-guest-response-allowed.txt" -o "$RUNNER_TEMP/property-protection-guest-response-allowed.txt"
+            diff -u "$RUNNER_TEMP/property-protection-guest-response-allowed.txt" "$RUNNER_TEMP/actual.txt"
+            exit 0
+          fi
+
           if [ "${GITHUB_HEAD_REF:-$GITHUB_REF_NAME}" = "agent/pin-ai-guest-services-benchmark-v1" ]; then
             cat > "$RUNNER_TEMP/pin-ai-root-allowed.txt" <<'EOF'
           .github/workflows/ota-airbnb-listing-discovery.yml
