@@ -25,7 +25,8 @@ test("Property Protection consent terms come from server property configuration"
 });
 
 test("checkout metadata carries Property Protection evidence without changing Stripe payment setup", () => {
-  assert.match(routeSource, /propertyProtectionConsentAcceptedAt/);
+  assert.match(routeSource, /propertyProtectionEvidence/);
+  assert.match(routeSource, /propertyProtectionCheckoutEvidence/);
   assert.doesNotMatch(routeSource, /setup_future_usage/);
   assert.doesNotMatch(routeSource, /customer_creation/);
 });
@@ -45,4 +46,28 @@ test("disabled Property Protection remains NOT_REQUIRED", () => {
     serviceSource,
     /propertyProtectionRequired\s*\?\s*"SETUP_PENDING"\s*:\s*"NOT_REQUIRED"/
   );
+});
+
+
+test("Direct Booking Session metadata stays within Stripe's 50-key limit", () => {
+  const createCheckoutStart = routeSource.indexOf(
+    'publicBookingRouter.post("/create-checkout"'
+  );
+  const metadataStart = routeSource.indexOf("metadata: {", createCheckoutStart);
+  const metadataEnd = routeSource.indexOf("\n      },\n    });", metadataStart);
+  const metadataBlock = routeSource.slice(metadataStart, metadataEnd);
+  const explicitKeys = [
+    ...metadataBlock.matchAll(/^\s{8}([A-Za-z][A-Za-z0-9]*):/gm),
+  ].map((match) => match[1]);
+  const shorthandKeys = [
+    "guestAcceptedCancellationTermsAt",
+  ].filter((key) =>
+    new RegExp(`^\\s{8}${key},$`, "m").test(metadataBlock)
+  );
+
+  // billing/stripe.ts removes hostPayoutStatus and adds stripeChargeMode,
+  // so the final Session metadata count remains unchanged.
+  assert.ok(explicitKeys.length + shorthandKeys.length <= 50);
+  assert.match(metadataBlock, /propertyProtectionEvidence:/);
+  assert.doesNotMatch(metadataBlock, /totalGuests:/);
 });
