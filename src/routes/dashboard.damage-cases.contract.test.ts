@@ -27,11 +27,11 @@ test("creation reuses the certified immutable reservation policy guard", () => {
   assert.match(routeSource, /DAMAGE_CASE_ALREADY_EXISTS/);
 });
 
-test("review requires evidence and approval stops at guest notification pending", () => {
+test("review requires evidence and approval delegates guest notification without enabling collection", () => {
   assert.match(routeSource, /DAMAGE_EVIDENCE_REQUIRED/);
   assert.match(routeSource, /DamageCaseStatus\.HOST_REVIEW/);
   assert.match(routeSource, /DamageCaseStatus\.GUEST_NOTIFICATION_PENDING/);
-  assert.doesNotMatch(routeSource, /DamageCaseStatus\.GUEST_NOTIFIED/);
+  assert.match(routeSource, /notifyGuestOfApprovedDamageCase/);
   assert.doesNotMatch(routeSource, /DamageCaseStatus\.CHARGE_BLOCKED/);
 });
 
