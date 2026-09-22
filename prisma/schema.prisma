@@ -332,6 +332,7 @@ model DamageCase {
   hostApprovedByUserId String?
   guestNotifiedAt     DateTime?
   guestResponse       DamageCaseGuestResponse @default(PENDING)
+  guestAcknowledgedAt DateTime?
   guestRespondedAt    DateTime?
   guestResponseNote   String?
   guestResponseVersion String?
