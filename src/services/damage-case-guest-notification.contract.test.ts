@@ -51,15 +51,14 @@ test("notification is idempotent and logged before state transition", () => {
 });
 
 test("failed delivery leaves the case pending and does not claim notification", () => {
-  const failureIndex = service.indexOf(
-    'code: "DAMAGE_CASE_GUEST_NOTIFICATION_DELIVERY_FAILED"'
+  const failureBranch = service.match(
+    /if \(!delivery\.ok \|\| delivery\.status !== "SENT"\) \{[\s\S]*?return \{[\s\S]*?DAMAGE_CASE_GUEST_NOTIFICATION_DELIVERY_FAILED[\s\S]*?\};[\s\S]*?\}/
   );
+  assert.ok(failureBranch);
   const transitionIndex = service.indexOf(
     "const updated = await input.prisma.damageCase.updateMany"
   );
-  assert.ok(failureIndex > 0);
-  assert.ok(transitionIndex > failureIndex);
-  assert.match(service.slice(failureIndex, transitionIndex), /return/);
+  assert.ok(transitionIndex > service.indexOf(failureBranch[0]));
 });
 
 test("host approval invokes notice but still contains no Stripe collection", () => {
