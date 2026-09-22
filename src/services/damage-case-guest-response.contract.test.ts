@@ -33,6 +33,7 @@ test("guest Damage Case response is persisted separately from operational status
   assert.match(schema, /ACCEPTED/);
   assert.match(schema, /DISPUTED/);
   assert.match(schema, /guestResponse\s+DamageCaseGuestResponse/);
+  assert.match(schema, /guestAcknowledgedAt\s+DateTime\?/);
   assert.match(schema, /guestRespondedAt\s+DateTime\?/);
   assert.match(schema, /guestResponseNote\s+String\?/);
   assert.match(schema, /guestResponseVersion\s+String\?/);
@@ -72,6 +73,8 @@ test("acknowledgement can advance but final responses cannot be overwritten", ()
   assert.match(service, /DamageCaseGuestResponse\.ACCEPTED/);
   assert.match(service, /DamageCaseGuestResponse\.DISPUTED/);
   assert.match(service, /DAMAGE_CASE_GUEST_RESPONSE_FINAL/);
+  assert.match(service, /guestAcknowledgedAt:/);
+  assert.match(service, /damageCase\.guestAcknowledgedAt \?\? respondedAt/);
   assert.match(service, /guestResponse: damageCase\.guestResponse/);
   assert.match(service, /DAMAGE_CASE_GUEST_RESPONSE_CONFLICT/);
 });
@@ -104,6 +107,7 @@ test("guest response retains explicit non-charging boundary", () => {
 
 test("guest response is exposed by the existing case read model", () => {
   assert.match(guestReadModel, /guestResponse: true/);
+  assert.match(guestReadModel, /guestAcknowledgedAt: true/);
   assert.match(guestReadModel, /guestRespondedAt: true/);
   assert.match(guestReadModel, /guestResponseNote: true/);
   assert.match(guestReadModel, /guestResponseVersion: true/);
