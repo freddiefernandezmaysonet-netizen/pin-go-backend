@@ -601,6 +601,21 @@ async function getReservationByGuestToken(guestTokenInput: string) {
       ],
     },
     include: {
+      damageCase: {
+        select: {
+          id: true,
+          status: true,
+          requestedAmount: true,
+          approvedAmount: true,
+          currency: true,
+          description: true,
+          evidence: true,
+          hostApprovedAt: true,
+          guestNotifiedAt: true,
+          closedAt: true,
+          closedReason: true,
+        },
+      },
       property: {
         select: {
           id: true,
@@ -832,6 +847,85 @@ securePreCheckin: {
         evaluation,
       }),
     refund: refund ?? getRecordedRefund(reservation.externalRaw),
+  };
+}
+
+export async function getGuestPropertyProtectionCase({
+  guestToken,
+}: GuestCancellationPreviewInput) {
+  const reservation = await getReservationByGuestToken(guestToken);
+  const damageCase = reservation.damageCase;
+
+  const guestVisibleDamageCase =
+    Boolean(damageCase) &&
+    (
+      [
+        "GUEST_NOTIFICATION_PENDING",
+        "GUEST_NOTIFIED",
+        "CHARGE_BLOCKED",
+      ].includes(String(damageCase?.status)) ||
+      (
+        damageCase?.status === "CLOSED_NO_CHARGE" &&
+        Boolean(damageCase.hostApprovedAt)
+      )
+    );
+
+  if (
+    reservation.propertyProtectionRequiredSnapshot !== true ||
+    !damageCase ||
+    !guestVisibleDamageCase
+  ) {
+    return {
+      available: false,
+      reservationNumber: reservation.reservationNumber ?? null,
+      propertyName: reservation.property?.name ?? reservation.roomName ?? null,
+      preferredLanguage: reservation.preferredLanguage ?? null,
+      propertyProtection: null,
+      damageCase: null,
+    };
+  }
+
+  const evidence =
+    damageCase.evidence &&
+    typeof damageCase.evidence === "object" &&
+    !Array.isArray(damageCase.evidence)
+      ? (damageCase.evidence as Record<string, unknown>)
+      : null;
+
+  return {
+    available: true,
+    reservationNumber: reservation.reservationNumber ?? null,
+    propertyName: reservation.property?.name ?? reservation.roomName ?? null,
+    preferredLanguage: reservation.preferredLanguage ?? null,
+    propertyProtection: {
+      mode: reservation.propertyProtectionModeSnapshot ?? "CARD_ON_FILE",
+      maxDamageLiabilityAmount:
+        reservation.maxDamageLiabilityAmountSnapshot === null
+          ? null
+          : Number(reservation.maxDamageLiabilityAmountSnapshot),
+      currency: reservation.currency ?? "usd",
+    },
+    damageCase: {
+      id: damageCase.id,
+      status: damageCase.status,
+      requestedAmount: Number(damageCase.requestedAmount),
+      approvedAmount:
+        damageCase.approvedAmount === null
+          ? null
+          : Number(damageCase.approvedAmount),
+      currency: damageCase.currency,
+      description: damageCase.description,
+      evidenceNotes:
+        typeof evidence?.notes === "string" ? evidence.notes : null,
+      hostApprovedAt: damageCase.hostApprovedAt?.toISOString() ?? null,
+      guestNotifiedAt: damageCase.guestNotifiedAt?.toISOString() ?? null,
+      closedAt: damageCase.closedAt?.toISOString() ?? null,
+      closedReason: damageCase.closedReason,
+      collectionStatus:
+        damageCase.status === "CLOSED_NO_CHARGE"
+          ? "CLOSED_NO_CHARGE"
+          : "NO_CHARGE_MADE",
+    },
   };
 }
 
