@@ -289,6 +289,27 @@ dashboardReservationsRouter.get(
         pricingBreakdown: true,
         stripeCheckoutSessionId: true,
         stripePaymentIntentId: true,
+        propertyProtectionRequiredSnapshot: true,
+        propertyProtectionModeSnapshot: true,
+        maxDamageLiabilityAmountSnapshot: true,
+        damagePaymentMethodStatus: true,
+        damageCase: {
+          select: {
+            id: true,
+            status: true,
+            requestedAmount: true,
+            approvedAmount: true,
+            currency: true,
+            description: true,
+            evidence: true,
+            hostApprovedAt: true,
+            guestNotifiedAt: true,
+            closedAt: true,
+            closedReason: true,
+            createdAt: true,
+            updatedAt: true,
+          },
+        },
         property: {
           select: {
             id: true,
@@ -368,6 +389,37 @@ dashboardReservationsRouter.get(
       pricingBreakdown: reservation.pricingBreakdown ?? null,
       stripeCheckoutSessionId: reservation.stripeCheckoutSessionId ?? null,
       stripePaymentIntentId: reservation.stripePaymentIntentId ?? null,
+      propertyProtection: {
+        required: reservation.propertyProtectionRequiredSnapshot === true,
+        mode: reservation.propertyProtectionModeSnapshot ?? null,
+        maxDamageLiabilityAmount:
+          reservation.maxDamageLiabilityAmountSnapshot === null
+            ? null
+            : Number(reservation.maxDamageLiabilityAmountSnapshot),
+        cardOnFileStatus: reservation.damagePaymentMethodStatus,
+      },
+      damageCase: reservation.damageCase
+        ? {
+            id: reservation.damageCase.id,
+            status: reservation.damageCase.status,
+            requestedAmount: Number(reservation.damageCase.requestedAmount),
+            approvedAmount:
+              reservation.damageCase.approvedAmount === null
+                ? null
+                : Number(reservation.damageCase.approvedAmount),
+            currency: reservation.damageCase.currency,
+            description: reservation.damageCase.description,
+            evidence: reservation.damageCase.evidence,
+            hostApprovedAt:
+              reservation.damageCase.hostApprovedAt?.toISOString() ?? null,
+            guestNotifiedAt:
+              reservation.damageCase.guestNotifiedAt?.toISOString() ?? null,
+            closedAt: reservation.damageCase.closedAt?.toISOString() ?? null,
+            closedReason: reservation.damageCase.closedReason,
+            createdAt: reservation.damageCase.createdAt.toISOString(),
+            updatedAt: reservation.damageCase.updatedAt.toISOString(),
+          }
+        : null,
       property: reservation.property
         ? {
             id: reservation.property.id,
