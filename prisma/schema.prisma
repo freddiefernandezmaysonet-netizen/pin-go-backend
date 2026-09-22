@@ -311,6 +311,13 @@ enum DamageCaseStatus {
   CLOSED_NO_CHARGE
 }
 
+enum DamageCaseGuestResponse {
+  PENDING
+  ACKNOWLEDGED
+  ACCEPTED
+  DISPUTED
+}
+
 model DamageCase {
   id                  String           @id @default(cuid())
   reservationId       String           @unique
@@ -324,6 +331,10 @@ model DamageCase {
   hostApprovedAt      DateTime?
   hostApprovedByUserId String?
   guestNotifiedAt     DateTime?
+  guestResponse       DamageCaseGuestResponse @default(PENDING)
+  guestRespondedAt    DateTime?
+  guestResponseNote   String?
+  guestResponseVersion String?
   closedAt            DateTime?
   closedReason        String?
   createdAt           DateTime         @default(now())
