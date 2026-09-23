@@ -3,6 +3,7 @@ import { DamageCaseStatus, Prisma, PrismaClient } from "@prisma/client";
 import { requireAuth } from "../middleware/requireAuth";
 import { evaluateDamageCasePolicy } from "../services/damage-case-policy.service.js";
 import { notifyGuestOfApprovedDamageCase } from "../services/damage-case-guest-notification.service.js";
+import { notifyGuestOfNoChargeDamageCaseClosure } from "../services/damage-case-guest-closure-notification.service.js";
 
 type AuthUser = { id: string; orgId: string };
 
@@ -14,6 +15,21 @@ function evidencePresent(value: unknown): boolean {
   if (Array.isArray(value)) return value.length > 0;
   if (value && typeof value === "object") return Object.keys(value as object).length > 0;
   return false;
+}
+
+async function notifyGuestOfClosureSafely(input: {
+  prisma: PrismaClient;
+  damageCaseId: string;
+}) {
+  try {
+    return await notifyGuestOfNoChargeDamageCaseClosure(input);
+  } catch (error) {
+    return {
+      ok: false,
+      code: "DAMAGE_CASE_GUEST_CLOSURE_NOTICE_UNEXPECTED_ERROR" as const,
+      error: error instanceof Error ? error.message : String(error),
+    };
+  }
 }
 
 export function buildDashboardDamageCasesRouter(prisma: PrismaClient) {
@@ -260,7 +276,16 @@ export function buildDashboardDamageCasesRouter(prisma: PrismaClient) {
     });
     if (!existing) return res.status(404).json({ ok: false, error: "DAMAGE_CASE_NOT_FOUND" });
     if (existing.status === DamageCaseStatus.CLOSED_NO_CHARGE) {
-      return res.json({ ok: true, damageCase: existing, alreadyClosed: true });
+      const guestClosureNotification = await notifyGuestOfClosureSafely({
+        prisma,
+        damageCaseId: existing.id,
+      });
+      return res.json({
+        ok: true,
+        damageCase: existing,
+        alreadyClosed: true,
+        guestClosureNotification,
+      });
     }
     const reason = String(req.body?.reason ?? "").trim();
     if (!reason) return res.status(400).json({ ok: false, error: "DAMAGE_CASE_CLOSE_REASON_REQUIRED" });
@@ -273,7 +298,15 @@ export function buildDashboardDamageCasesRouter(prisma: PrismaClient) {
         closedReason: reason,
       },
     });
-    return res.json({ ok: true, damageCase: updated });
+    const guestClosureNotification = await notifyGuestOfClosureSafely({
+      prisma,
+      damageCaseId: updated.id,
+    });
+    return res.json({
+      ok: true,
+      damageCase: updated,
+      guestClosureNotification,
+    });
   });
 
   return router;
