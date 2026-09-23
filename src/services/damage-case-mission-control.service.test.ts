@@ -20,6 +20,7 @@ function damageCase(
     guestResponse: DamageCaseGuestResponse.PENDING,
     createdAt: new Date("2026-09-23T10:00:00.000Z"),
     updatedAt: new Date("2026-09-23T11:00:00.000Z"),
+    guestNotifiedAt: null,
     reservationId: "reservation-internal-1",
     reservation: {
       reservationNumber: "PG-2026-000001",
@@ -28,6 +29,7 @@ function damageCase(
       property: { organizationId: "organization-1" },
     },
     damageNoticeDelivery: null,
+    closureNoticeDelivery: null,
     ...overrides,
   };
 }
@@ -145,6 +147,60 @@ test("projects no-charge closure as a resolved manual host outcome", () => {
   assert.equal(result.resolutionType, "MANUAL");
   assert.equal(result.resolvedBy, "HOST");
   assert.match(result.issue, /without charging the guest/i);
+});
+
+test("keeps a never-visible no-charge closure resolved without requiring delivery", () => {
+  const result = project({
+    status: DamageCaseStatus.CLOSED_NO_CHARGE,
+    guestNotifiedAt: null,
+    closureNoticeDelivery: null,
+  });
+
+  assert.equal(result.workflowState, "RESOLVED");
+  assert.equal(result.metadata?.closureNoticeRequired, false);
+});
+
+test("projects an active guest closure retry as auto-resolving", () => {
+  const result = project({
+    status: DamageCaseStatus.CLOSED_NO_CHARGE,
+    guestNotifiedAt: new Date("2026-09-23T10:30:00.000Z"),
+    closureNoticeDelivery: { status: "FAILED", retryCount: 2 },
+  });
+
+  assert.equal(result.workflowState, "AUTO_RESOLVING");
+  assert.equal(result.responsibleActor, "PIN_GO");
+  assert.equal(result.canAutoResolve, true);
+  assert.match(result.issue, /closed without charge/i);
+});
+
+test("requires action when guest closure delivery is missing or exhausted", () => {
+  for (const closureNoticeDelivery of [
+    null,
+    { status: "FAILED", retryCount: 3 },
+    { status: "FAILED_FINAL", retryCount: 1 },
+  ]) {
+    const result = project({
+      status: DamageCaseStatus.CLOSED_NO_CHARGE,
+      guestNotifiedAt: new Date("2026-09-23T10:30:00.000Z"),
+      closureNoticeDelivery,
+    });
+
+    assert.equal(result.workflowState, "ACTION_REQUIRED");
+    assert.equal(result.actionRequired, true);
+    assert.equal(result.canAutoResolve, false);
+    assert.match(result.issue, /no charge was made/i);
+  }
+});
+
+test("resolves a guest-visible closure only after confirmed delivery", () => {
+  const result = project({
+    status: DamageCaseStatus.CLOSED_NO_CHARGE,
+    guestNotifiedAt: new Date("2026-09-23T10:30:00.000Z"),
+    closureNoticeDelivery: { status: "SENT", retryCount: 1 },
+  });
+
+  assert.equal(result.workflowState, "RESOLVED");
+  assert.equal(result.metadata?.closureNoticeDeliveryStatus, "SENT");
 });
 
 test("keeps CHARGE_BLOCKED defensive and non-executing", () => {

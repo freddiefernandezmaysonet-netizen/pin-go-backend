@@ -18,6 +18,13 @@ test("selects missing and stale projections in a bounded deterministic batch", (
   assert.match(reconciler, /guestResponse/);
   assert.match(reconciler, /damageNoticeDeliveryStatus/);
   assert.match(reconciler, /damageNoticeRetryCount/);
+  assert.match(reconciler, /closureNoticeRequired/);
+  assert.match(reconciler, /closureNoticeDeliveryStatus/);
+  assert.match(reconciler, /closureNoticeRetryCount/);
+  assert.match(
+    reconciler,
+    /PROPERTY_PROTECTION_GUEST_NO_CHARGE_CLOSURE_NOTICE/
+  );
   assert.match(reconciler, /Math\.min\(100/);
   assert.match(reconciler, /ORDER BY dc\."updatedAt" ASC, dc\."id" ASC/);
   assert.match(reconciler, /LIMIT \$\{boundedBatchSize\}/);
