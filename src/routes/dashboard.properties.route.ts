@@ -28,12 +28,8 @@ import {
   projectMissionControlOperationalState,
 } from "../apms/mission-control-projection";
 import {
-  deriveMissionControlNativeHealth,
-} from "../apms/mission-control-runtime-health.e13";
-import {
-  GUEST_JOURNEY_RUNTIME_NAME,
-  GUEST_JOURNEY_RUNTIME_SERVICE_NAME,
-} from "../services/guest-journey-runtime-state.service";
+  toObservationalMissionControlSnapshot,
+} from "../apms/mission-control-observational";
 import type { AuditEntry } from "../apms/audit-types";
 import { persistAuditEntry } from "../apms/audit-persistence.service";
 import { createDistributionAuditEntry } from "../apms/distribution-audit.mapper";
@@ -2322,17 +2318,9 @@ const operationalIssueSelect = {
   actionTarget: true,
 } as const;
 
-const runtimeEnvironment = String(
-  process.env.RAILWAY_ENVIRONMENT_NAME ??
-    process.env.NODE_ENV ??
-    "development"
-).trim() || "development";
-
 const [
   activeOperationalIssueRows,
   recentlyResolvedIssueRows,
-  allVisibilityCurrentIssueRows,
-  guestJourneyRuntimeRows,
 ] = await Promise.all([
   prisma.operationalIssue.findMany({
     where: {
@@ -2369,69 +2357,6 @@ const [
     take: 50,
     select: operationalIssueSelect,
   }),
-  prisma.operationalIssue.findMany({
-    where: {
-      workflowState: {
-        in: [
-          "ACTION_REQUIRED",
-          "WAITING",
-          "AUTO_RESOLVING",
-        ],
-      },
-      OR: [
-        {
-          organizationId: orgId,
-          propertyId: property.id,
-        },
-        {
-          organizationId: orgId,
-          propertyId: null,
-        },
-        {
-          organizationId: null,
-          propertyId: property.id,
-        },
-        {
-          organizationId: null,
-          propertyId: null,
-          engine: "GUEST_JOURNEY",
-          issueCode:
-            "GUEST_JOURNEY_RUNTIME_BLOCKED",
-        },
-      ],
-    },
-    orderBy: {
-      lastSignalAt: "desc",
-    },
-    take: 100,
-    select: operationalIssueSelect,
-  }),
-  prisma.apmsRuntimeState.findMany({
-    where: {
-      runtimeName:
-        GUEST_JOURNEY_RUNTIME_NAME,
-      environment: runtimeEnvironment,
-      serviceName:
-        GUEST_JOURNEY_RUNTIME_SERVICE_NAME,
-    },
-    orderBy: {
-      lastHeartbeatAt: "desc",
-    },
-    take: 20,
-    select: {
-      runtimeName: true,
-      environment: true,
-      serviceName: true,
-      activationProfile: true,
-      configFingerprint: true,
-      scopeFingerprint: true,
-      organizationScopeHashes: true,
-      propertyScopeHashes: true,
-      status: true,
-      preflightStatus: true,
-      lastHeartbeatAt: true,
-    },
-  }),
 ]);
 
 const operationalIssueRows = [
@@ -2440,10 +2365,7 @@ const operationalIssueRows = [
 ];
 
 const operationalReservationIds =
-  [
-    ...operationalIssueRows,
-    ...allVisibilityCurrentIssueRows,
-  ]
+  operationalIssueRows
     .map((item) =>
       String(item.reservationId ?? "").trim()
     )
@@ -2573,11 +2495,6 @@ const operationalItems =
     operationalIssueRows
   );
 
-const allVisibilityCurrentItems =
-  mapOperationalIssueRows(
-    allVisibilityCurrentIssueRows
-  );
-
       const {
         currentOperationalState,
         hostActionQueue,
@@ -2585,17 +2502,6 @@ const allVisibilityCurrentItems =
         autoResolvingItems,
         recentlyResolved,
       } = projectMissionControlOperationalState(operationalItems);
-
-      const nativeHealth =
-        deriveMissionControlNativeHealth({
-          runtimeRows:
-            guestJourneyRuntimeRows,
-          allVisibilityCurrentIssues:
-            allVisibilityCurrentItems,
-          organizationId: orgId,
-          propertyId: property.id,
-          now: new Date(),
-        });
 
       const hostInterventionRequired =
         operationalItems.filter(
@@ -2635,13 +2541,8 @@ const allVisibilityCurrentItems =
           : baseSnapshot.recentAuditEntries ?? [];
 
       const snapshot = {
-        ...baseSnapshot,
-        // E13 native current health. Runtime state and every OperationalIssue
-        // visibility participate in health; only HOST items are exposed.
-        autopilotStatus:
-          nativeHealth.autopilotStatus,
-        engineHealth:
-          nativeHealth.engineHealth,
+        // Preserve operational reporting without claiming global engine health.
+        ...toObservationalMissionControlSnapshot(baseSnapshot),
         guestJourneyMetrics,
         recommendedActions:
           mapHostActionQueueToRecommendedActions(

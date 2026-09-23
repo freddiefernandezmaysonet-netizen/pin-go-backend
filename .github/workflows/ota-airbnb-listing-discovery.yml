@@ -66,6 +66,21 @@ jobs:
           BASE_BRANCH="${GITHUB_BASE_REF:-main}"
           git fetch origin "+refs/heads/$BASE_BRANCH:refs/remotes/origin/$BASE_BRANCH" --depth=1
           git diff --name-only "origin/$BASE_BRANCH...HEAD" | sort > "$RUNNER_TEMP/actual.txt"
+          if [ "${GITHUB_HEAD_REF:-$GITHUB_REF_NAME}" = "agent/mission-control-e13-decoupling-v1" ]; then
+            cat > "$RUNNER_TEMP/mission-control-allowed.txt" <<'EOF'
+          .github/workflows/mission-control-observational-certification.yml
+          .github/workflows/ota-airbnb-listing-discovery.yml
+          src/apms/mission-control-observational.test.ts
+          src/apms/mission-control-observational.ts
+          src/routes/dashboard.properties.route.ts
+          src/services/guest-journey-e13-runtime-truth.contract.test.ts
+          src/services/guest-journey-runtime-enforcement.contract.test.ts
+          EOF
+            sort "$RUNNER_TEMP/mission-control-allowed.txt" -o "$RUNNER_TEMP/mission-control-allowed.txt"
+            diff -u "$RUNNER_TEMP/mission-control-allowed.txt" "$RUNNER_TEMP/actual.txt"
+            exit 0
+          fi
+
           if [ "${GITHUB_HEAD_REF:-$GITHUB_REF_NAME}" = "agent/property-protection-v1-guest-damage-response" ]; then
             cat > "$RUNNER_TEMP/property-protection-guest-response-allowed.txt" <<'EOF'
           .github/workflows/ota-airbnb-listing-discovery.yml
