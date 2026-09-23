@@ -41,6 +41,8 @@ export type IngestPayload = {
   checkIn: string;
   checkOut: string;
   paymentState?: "NONE" | "PAID" | "FAILED" | "PENDING";
+  totalAmount?: number | null;
+  currency?: string | null;
 
   externalProvider?: string | null;
   externalId?: string | null;
@@ -266,6 +268,8 @@ export async function ingestReservation(p: IngestPayload) {
       checkIn,
       checkOut,
       paymentState,
+      totalAmount: p.totalAmount,
+      currency: p.currency,
       guestTokenExpiresAt,
 
       externalProvider,
@@ -898,6 +902,8 @@ async function upsertReservation(
     checkIn: Date;
     checkOut: Date;
     paymentState: PaymentState;
+    totalAmount?: number | null;
+    currency?: string | null;
     guestTokenExpiresAt: Date;
   }
 ): Promise<{ reservation: any; didChange: boolean }> {
@@ -1008,6 +1014,8 @@ async function upsertReservation(
           checkIn: input.checkIn,
           checkOut: input.checkOut,
           paymentState: input.paymentState,
+          totalAmount: input.totalAmount ?? undefined,
+          currency: input.currency ?? undefined,
           guestTokenExpiresAt: input.guestTokenExpiresAt,
 
           lastIngestError: null,
@@ -1048,6 +1056,8 @@ async function upsertReservation(
           checkIn: input.checkIn,
           checkOut: input.checkOut,
           paymentState: input.paymentState,
+          totalAmount: input.totalAmount ?? undefined,
+          currency: input.currency ?? undefined,
           guestTokenExpiresAt: input.guestTokenExpiresAt,
 
           lastIngestError: null,
@@ -1087,6 +1097,8 @@ async function upsertReservation(
         checkIn: input.checkIn,
         checkOut: input.checkOut,
         paymentState: input.paymentState,
+          totalAmount: input.totalAmount ?? undefined,
+          currency: input.currency ?? undefined,
         guestTokenExpiresAt: input.guestTokenExpiresAt,
 
         lastIngestError: null,
@@ -1127,6 +1139,8 @@ async function upsertReservation(
       checkIn: input.checkIn,
       checkOut: input.checkOut,
       paymentState: input.paymentState,
+          totalAmount: input.totalAmount ?? undefined,
+          currency: input.currency ?? undefined,
       guestTokenExpiresAt: input.guestTokenExpiresAt,
 
       lastIngestError: null,
@@ -1152,6 +1166,8 @@ async function upsertReservation(
       checkIn: input.checkIn,
       checkOut: input.checkOut,
       paymentState: input.paymentState,
+          totalAmount: input.totalAmount ?? undefined,
+          currency: input.currency ?? undefined,
       guestTokenExpiresAt: input.guestTokenExpiresAt,
 
       lastIngestError: null,
