@@ -1,0 +1,55 @@
+name: Property Protection Exact Payment Authorization
+
+on:
+  pull_request:
+    paths:
+      - "src/services/damage-case-payment-authorization*"
+      - "src/services/damage-case-charge-eligibility*"
+      - "src/routes/public-booking.damage-payment-authorization*"
+      - "src/routes/public-booking.routes.ts"
+      - "prisma/**"
+      - ".github/workflows/property-protection-payment-authorization.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  certify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: pingo_damage_authorization_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d pingo_damage_authorization_test"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      DATABASE_URL: postgresql://postgres:postgres@127.0.0.1:5432/pingo_damage_authorization_test
+      DAMAGE_AUTHORIZATION_TEST_DATABASE_URL: postgresql://postgres:postgres@127.0.0.1:5432/pingo_damage_authorization_test
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - name: Install locked dependencies without lifecycle scripts
+        run: npm ci --ignore-scripts --no-audit --no-fund
+      - name: Validate schema and run migrations in disposable database only
+        run: |
+          ./node_modules/.bin/prisma generate --schema ./prisma
+          ./node_modules/.bin/prisma validate --schema ./prisma
+          ./node_modules/.bin/prisma migrate deploy --schema ./prisma
+      - name: Strict type check authorization boundary
+        run: ./node_modules/.bin/tsc --noEmit --strict --skipLibCheck --module nodenext --moduleResolution nodenext --target es2022 src/services/damage-case-payment-authorization.test.ts src/services/damage-case-payment-authorization.db.test.ts src/routes/public-booking.damage-payment-authorization.routes.test.ts
+      - name: Pure and HTTP contract tests without providers
+        run: node --import tsx --test src/services/damage-case-payment-authorization.test.ts src/services/damage-case-charge-eligibility.policy.test.ts src/routes/public-booking.damage-payment-authorization.routes.test.ts
+      - name: Real PostgreSQL persistence, stale consent and concurrency
+        run: node --import tsx --test src/services/damage-case-payment-authorization.db.test.ts
