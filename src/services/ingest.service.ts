@@ -945,21 +945,7 @@ async function upsertReservation(
         select: { paymentState: true },
       });
 
-      const raw = input.externalRaw ?? {};
-      const amountPaid = Number((raw as any).amount_paid ?? 0);
-
-      const hasSuccessfulTransaction =
-        Array.isArray((raw as any).transactions) &&
-        (raw as any).transactions.some(
-          (t: any) => String(t?.status ?? "").toLowerCase() === "done"
-        );
-
-      const recalculatedPaymentState =
-        amountPaid > 0 || hasSuccessfulTransaction
-          ? PaymentState.PAID
-          : PaymentState.NONE;
-
-      const paymentChanged = existing?.paymentState !== recalculatedPaymentState;
+      const paymentChanged = existing?.paymentState !== input.paymentState;
 
       if (
         !paymentChanged &&
