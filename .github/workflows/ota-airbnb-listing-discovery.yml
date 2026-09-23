@@ -82,6 +82,23 @@ jobs:
             exit 0
           fi
 
+          if [ "${GITHUB_HEAD_REF:-$GITHUB_REF_NAME}" = "agent/property-listing-details-v1" ]; then
+            cat > "$RUNNER_TEMP/property-listing-details-v1-allowed.txt" <<'EOF'
+          .github/workflows/ota-airbnb-listing-discovery.yml
+          package.json
+          prisma/migrations/20260923152500_add_property_listing_details_v1/migration.sql
+          prisma/schema.prisma
+          src/routes/dashboard.property-listing-details.routes.test.ts
+          src/routes/dashboard.property-listing-details.routes.ts
+          src/server.ts
+          src/services/property-listing-details.service.test.ts
+          src/services/property-listing-details.service.ts
+          EOF
+            sort "$RUNNER_TEMP/property-listing-details-v1-allowed.txt" -o "$RUNNER_TEMP/property-listing-details-v1-allowed.txt"
+            diff -u "$RUNNER_TEMP/property-listing-details-v1-allowed.txt" "$RUNNER_TEMP/actual.txt"
+            exit 0
+          fi
+
           if [ "${GITHUB_HEAD_REF:-$GITHUB_REF_NAME}" = "agent/pin-ai-guest-services-benchmark-v1" ]; then
             cat > "$RUNNER_TEMP/pin-ai-root-allowed.txt" <<'EOF'
           .github/workflows/ota-airbnb-listing-discovery.yml
