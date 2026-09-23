@@ -64,7 +64,7 @@ test("host response notice is idempotent per recipient and logged", () => {
   assert.match(notificationService, /sendLoggedEmail/);
   assert.match(
     notificationService,
-    /property-protection-host-response-\$\{damageCase\.id\}-\$\{damageCase\.guestResponse\}-\$\{recipient\.email\}/
+    /property-protection-host-response-\$\{damageCase\.id\}-\$\{guestResponse\}-\$\{recipient\.email\}/
   );
   assert.match(
     emailDelivery,
