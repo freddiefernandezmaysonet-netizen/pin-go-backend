@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 import test from "node:test";
 
 import type { ChannexAriCoalescingPlan } from "./channex-ari-coalescing.policy";
@@ -673,4 +674,49 @@ test("does not mutate plan, mapping, source rows or expose unrelated data", asyn
   assert.deepEqual(selectedMapping, beforeMapping);
   assert.deepEqual(selectedProperty, beforeProperty);
   assert.equal(JSON.stringify(result).includes("must-not-be-returned"), false);
+});
+
+
+test("Direct Booking and Channex remain wired to the same canonical pricing engine", () => {
+  const publicBookingSource = readFileSync(
+    new URL("../../routes/public-booking.routes.ts", import.meta.url),
+    "utf-8"
+  );
+  const directBookingServiceSource = readFileSync(
+    new URL("../../services/direct-booking.service.ts", import.meta.url),
+    "utf-8"
+  );
+  const channexSnapshotSource = readFileSync(
+    new URL("./channex-ari-snapshot.service.ts", import.meta.url),
+    "utf-8"
+  );
+  const legacyChannexSyncSource = readFileSync(
+    new URL("../../services/channex-availability-sync.service.ts", import.meta.url),
+    "utf-8"
+  );
+
+  assert.match(
+    publicBookingSource,
+    /import \{ calculateDirectBookingPricing \} from "\.\.\/services\/direct-booking-pricing\.service";/
+  );
+  assert.match(
+    directBookingServiceSource,
+    /import \{ calculateDirectBookingPricing \} from "\.\/direct-booking-pricing\.service";/
+  );
+  assert.match(
+    channexSnapshotSource,
+    /import \{ calculateDirectBookingPricing \} from "\.\.\/\.\.\/services\/direct-booking-pricing\.service";/
+  );
+  assert.match(
+    legacyChannexSyncSource,
+    /import \{ calculateDirectBookingPricing \} from "\.\/direct-booking-pricing\.service";/
+  );
+
+  assert.match(publicBookingSource, /await calculateDirectBookingPricing\(/);
+  assert.match(directBookingServiceSource, /await calculateDirectBookingPricing\(/);
+  assert.match(
+    channexSnapshotSource,
+    /input\.calculatePricing \?\? calculateDirectBookingPricing/
+  );
+  assert.match(legacyChannexSyncSource, /await calculateDirectBookingPricing\(/);
 });
