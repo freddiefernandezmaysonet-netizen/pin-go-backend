@@ -22,6 +22,8 @@ import { resolveOtaConnectionCenterRuntime } from "./ota-connection-runtime.poli
 import type { OtaConnectionCenterRuntime } from "./ota-connection-runtime.policy.js";
 import { configureChannexBookingWebhookForConnectionCenter } from "../services/channex-booking-webhook-registration.service.js";
 
+import type { InitialDistributionEnablement } from "./ota-initial-distribution-enablement.service.js";
+
 export type OtaConnectionCenterAdapter = WhiteLabelProvisioner & OneTimeConnectionTokenIssuer;
 
 function canonicalConfiguredOrigins(
@@ -52,6 +54,7 @@ export function buildOtaConnectionCenterComposition(args: {
   adapter?: OtaConnectionCenterAdapter;
   isTenantOriginAllowed?(origin: string, organizationId: string): Promise<boolean>;
   repository?: OtaProvisioningRepository;
+  initialDistributionEnablement?: InitialDistributionEnablement;
   prepareLogicalConnection?: typeof prepareOtaDistributionConnection;
   configureBookingWebhook?(input: {
     organizationId: string;
@@ -111,6 +114,7 @@ export function buildOtaConnectionCenterComposition(args: {
     runtime: { enabled: true, reason: "ENABLED" },
     isTrustedOrigin,
     prepare: async (input) => {
+      await args.initialDistributionEnablement?.preflight(input);
       const result = await orchestrateOtaProvisioning({
         repository,
         provisioner: args.adapter!,
@@ -120,6 +124,7 @@ export function buildOtaConnectionCenterComposition(args: {
         }),
         ...input,
       });
+      const initialDistributionGuard = await args.initialDistributionEnablement?.capture(input);
       // Inventory and the canonical PMS link are already committed. On webhook
       // failure the READY inventory can be reused without reprovisioning it.
       // Do not return a successful preparation until GET verification succeeds.
@@ -151,6 +156,7 @@ export function buildOtaConnectionCenterComposition(args: {
           );
         }
       }
+      await args.initialDistributionEnablement?.complete(input, initialDistributionGuard ?? null);
       return result;
     },
     issueSession: (input) => issueOtaConnectionSession({
