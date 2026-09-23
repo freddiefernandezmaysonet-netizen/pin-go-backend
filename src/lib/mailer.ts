@@ -1,15 +1,15 @@
 import { Resend } from "resend";
 import {
   buildGuestReservationEmail,
-} from "./email-templates/guestReservationEmail";
+} from "./email-templates/guestReservationEmail.js";
 import {
   getGuestIntlLocale,
   resolveGuestLanguage,
   type GuestLanguage,
-} from "../services/guest-language.service";
+} from "../services/guest-language.service.js";
 import type {
   RenderedCancellationPolicy,
-} from "../services/cancellation-policy-renderer";
+} from "../services/cancellation-policy-renderer.js";
 
 const resendApiKey = String(process.env.RESEND_API_KEY ?? "").trim();
 const emailFrom = String(process.env.EMAIL_FROM ?? "").trim();
