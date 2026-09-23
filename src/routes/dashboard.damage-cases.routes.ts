@@ -4,6 +4,7 @@ import { requireAuth } from "../middleware/requireAuth";
 import { evaluateDamageCasePolicy } from "../services/damage-case-policy.service.js";
 import { notifyGuestOfApprovedDamageCase } from "../services/damage-case-guest-notification.service.js";
 import { notifyGuestOfNoChargeDamageCaseClosure } from "../services/damage-case-guest-closure-notification.service.js";
+import { syncDamageCaseMissionControlSafely } from "../services/damage-case-mission-control.service.js";
 
 type AuthUser = { id: string; orgId: string };
 
@@ -122,6 +123,11 @@ export function buildDashboardDamageCasesRouter(prisma: PrismaClient) {
       },
     });
 
+    await syncDamageCaseMissionControlSafely({
+      prisma,
+      damageCaseId: created.id,
+    });
+
     return res.status(201).json({ ok: true, damageCase: created });
   });
 
@@ -183,6 +189,10 @@ export function buildDashboardDamageCasesRouter(prisma: PrismaClient) {
           : DamageCaseStatus.EVIDENCE_PENDING,
       },
     });
+    await syncDamageCaseMissionControlSafely({
+      prisma,
+      damageCaseId: updated.id,
+    });
     return res.json({ ok: true, damageCase: updated });
   });
 
@@ -205,6 +215,10 @@ export function buildDashboardDamageCasesRouter(prisma: PrismaClient) {
     const updated = await prisma.damageCase.update({
       where: { id: existing.id },
       data: { status: DamageCaseStatus.HOST_REVIEW },
+    });
+    await syncDamageCaseMissionControlSafely({
+      prisma,
+      damageCaseId: updated.id,
     });
     return res.json({ ok: true, damageCase: updated });
   });
@@ -276,6 +290,10 @@ export function buildDashboardDamageCasesRouter(prisma: PrismaClient) {
     });
     if (!existing) return res.status(404).json({ ok: false, error: "DAMAGE_CASE_NOT_FOUND" });
     if (existing.status === DamageCaseStatus.CLOSED_NO_CHARGE) {
+      await syncDamageCaseMissionControlSafely({
+        prisma,
+        damageCaseId: existing.id,
+      });
       const guestClosureNotification = await notifyGuestOfClosureSafely({
         prisma,
         damageCaseId: existing.id,
@@ -297,6 +315,10 @@ export function buildDashboardDamageCasesRouter(prisma: PrismaClient) {
         closedAt: new Date(),
         closedReason: reason,
       },
+    });
+    await syncDamageCaseMissionControlSafely({
+      prisma,
+      damageCaseId: updated.id,
     });
     const guestClosureNotification = await notifyGuestOfClosureSafely({
       prisma,

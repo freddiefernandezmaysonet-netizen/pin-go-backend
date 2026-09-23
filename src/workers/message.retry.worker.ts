@@ -20,6 +20,7 @@ import {
   resolveGuestJourneyCommunicationsOwnerConfig,
 } from "../services/guest-journey-communications-owner.config";
 import { evaluateCheckoutSmsConsent } from "../services/checkout-sms-consent.policy";
+import { syncDamageCaseMissionControlSafely } from "../services/damage-case-mission-control.service";
 
 const WORKER_NAME = "message.retry.worker";
 const POLL_MS = Number(process.env.MESSAGE_RETRY_POLL_MS ?? 30000);
@@ -933,6 +934,12 @@ async function processPropertyProtectionDamageNoticeRetries() {
         }),
       ]);
 
+      await syncDamageCaseMissionControlSafely({
+        prisma,
+        damageCaseId: damageCase.id,
+        maxMessageRetries: MAX_RETRIES,
+      });
+
       try {
         await prisma.messageDispatchLog.create({
           data: {
@@ -974,6 +981,16 @@ async function processPropertyProtectionDamageNoticeRetries() {
           },
         })
         .catch(() => {});
+
+      const failedPayload =
+        parsePropertyProtectionDamageNoticeRetryPayload(message.body);
+      if (failedPayload) {
+        await syncDamageCaseMissionControlSafely({
+          prisma,
+          damageCaseId: failedPayload.damageCaseId,
+          maxMessageRetries: MAX_RETRIES,
+        });
+      }
 
       errLog(
         finalFailure
