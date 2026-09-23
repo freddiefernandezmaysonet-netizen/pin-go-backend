@@ -1,4 +1,4 @@
-import type { GuestLanguage } from "../../services/guest-language.service";
+import type { GuestLanguage } from "../../services/guest-language.service.js";
 
 export type GuestReservationEmailMode =
   | "DIRECT_BOOKING"
