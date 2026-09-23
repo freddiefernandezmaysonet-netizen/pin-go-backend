@@ -80,31 +80,6 @@ function getStripeConnectRefreshUrl() {
   );
 }
 
-function normalizeConnectCountry(country?: string | null) {
-  const normalized = country?.trim().toUpperCase();
-
-  if (!normalized) return "US";
-
-  const aliases: Record<string, string> = {
-    US: "US",
-    USA: "US",
-    "UNITED STATES": "US",
-    "UNITED STATES OF AMERICA": "US",
-    PR: "US",
-    "PUERTO RICO": "US",
-  };
-
-  if (aliases[normalized]) {
-    return aliases[normalized];
-  }
-
-  if (/^[A-Z]{2}$/.test(normalized)) {
-    return normalized;
-  }
-
-  return "US";
-}
-
 function serializeStripeJson(value: unknown) {
   if (!value) return null;
   return JSON.parse(JSON.stringify(value));
@@ -224,32 +199,10 @@ export async function createOrGetConnectAccount(organizationId: string) {
     return syncConnectAccountStatus(organizationId);
   }
 
-  const stripe = getStripeClient();
-
-  const primaryUser = organization.dashboardUsers[0];
-  const primaryProperty = organization.properties[0];
-
-  const account = await stripe.accounts.create({
-    type: "express",
-    country: normalizeConnectCountry(primaryProperty?.country),
-    email: primaryUser?.email,
-    capabilities: {
-      card_payments: { requested: true },
-      transfers: { requested: true },
-    },
-    business_profile: {
-      name: organization.name,
-      product_description:
-        "Short-term rental direct booking payouts powered by Pin&Go.",
-    },
-    metadata: {
-      organizationId: organization.id,
-      platform: "PinGo",
-      product: "Host Payouts V1",
-    },
+  throw Object.assign(new Error("Stripe account setup is temporarily unavailable during the Host Payouts transition."), {
+    code: "STRIPE_CONNECT_CREATION_CUTOVER_BLOCKED",
+    statusCode: 409,
   });
-
-  return updateOrganizationFromStripeAccount(organization.id, account);
 }
 
 export async function createConnectOnboardingLink(organizationId: string) {
