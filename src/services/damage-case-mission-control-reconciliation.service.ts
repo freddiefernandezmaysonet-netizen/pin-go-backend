@@ -37,6 +37,16 @@ export async function findDamageCaseMissionControlReconciliationCandidates(
       ORDER BY ml."createdAt" DESC, ml."id" DESC
       LIMIT 1
     ) delivery ON TRUE
+    LEFT JOIN LATERAL (
+      SELECT ml."status", ml."retryCount"
+      FROM "MessageLog" ml
+      WHERE ml."reservationId" = dc."reservationId"
+        AND ml."communicationType" =
+          'PROPERTY_PROTECTION_GUEST_NO_CHARGE_CLOSURE_NOTICE'
+        AND ml."channel" = 'email'
+      ORDER BY ml."createdAt" DESC, ml."id" DESC
+      LIMIT 1
+    ) closure_delivery ON TRUE
     WHERE oi."id" IS NULL
       OR oi."lastSignalAt" < dc."updatedAt"
       OR oi."metadata" ->> 'damageCaseStatus'
@@ -47,6 +57,12 @@ export async function findDamageCaseMissionControlReconciliationCandidates(
         IS DISTINCT FROM delivery."status"
       OR oi."metadata" ->> 'damageNoticeRetryCount'
         IS DISTINCT FROM delivery."retryCount"::text
+      OR oi."metadata" ->> 'closureNoticeRequired'
+        IS DISTINCT FROM (dc."guestNotifiedAt" IS NOT NULL)::text
+      OR oi."metadata" ->> 'closureNoticeDeliveryStatus'
+        IS DISTINCT FROM closure_delivery."status"
+      OR oi."metadata" ->> 'closureNoticeRetryCount'
+        IS DISTINCT FROM closure_delivery."retryCount"::text
     ORDER BY dc."updatedAt" ASC, dc."id" ASC
     LIMIT ${boundedBatchSize}
   `);

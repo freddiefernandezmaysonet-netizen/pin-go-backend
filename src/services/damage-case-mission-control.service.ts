@@ -5,6 +5,8 @@ import {
 } from "@prisma/client";
 
 import {
+  ApmsOperationalReopenSourceNotResolvedError,
+  reopenOperationalIssue,
   upsertOperationalIssue,
   type UpsertOperationalIssueInput,
 } from "../apms/operational-intelligence.service.js";
@@ -18,6 +20,7 @@ export type DamageCaseMissionControlSource = {
   guestResponse: DamageCaseGuestResponse;
   createdAt: Date;
   updatedAt: Date;
+  guestNotifiedAt: Date | null;
   reservationId: string;
   reservation: {
     reservationNumber: string | null;
@@ -28,6 +31,10 @@ export type DamageCaseMissionControlSource = {
     };
   };
   damageNoticeDelivery: {
+    status: string;
+    retryCount: number;
+  } | null;
+  closureNoticeDelivery: {
     status: string;
     retryCount: number;
   } | null;
@@ -197,25 +204,73 @@ export function projectDamageCaseToMissionControl(input: {
       );
     }
   } else if (damageCase.status === DamageCaseStatus.CLOSED_NO_CHARGE) {
-    state = {
-      title: "Property Protection case closed without charge",
-      issue: `The damage case for ${reservation} was closed without charging the guest.`,
-      operationalImpact:
-        "The non-charging Property Protection workflow is complete.",
-      recommendedAction: null,
-      nextAutomaticStep: null,
-      severity: "INFO",
-      workflowState: "RESOLVED",
-      responsibleActor: "NONE",
-      actionRequired: false,
-      canAutoResolve: false,
-      autoResolveStatus: "NOT_SUPPORTED",
-      resolutionCode: "PROPERTY_PROTECTION_CLOSED_NO_CHARGE",
-      resolutionSummary:
-        "The host closed the Property Protection case without a guest charge.",
-      resolutionType: "MANUAL",
-      resolvedBy: "HOST",
-    };
+    const delivery = damageCase.closureNoticeDelivery;
+    const closureNoticeRequired = Boolean(damageCase.guestNotifiedAt);
+    const retryActive =
+      delivery?.status === "FAILED" &&
+      delivery.retryCount < input.maxMessageRetries;
+
+    if (!closureNoticeRequired || delivery?.status === "SENT") {
+      state = {
+        title: "Property Protection case closed without charge",
+        issue: `The damage case for ${reservation} was closed without charging the guest.`,
+        operationalImpact:
+          "The non-charging Property Protection workflow is complete.",
+        recommendedAction: null,
+        nextAutomaticStep: null,
+        severity: "INFO",
+        workflowState: "RESOLVED",
+        responsibleActor: "NONE",
+        actionRequired: false,
+        canAutoResolve: false,
+        autoResolveStatus: "NOT_SUPPORTED",
+        resolutionCode: "PROPERTY_PROTECTION_CLOSED_NO_CHARGE",
+        resolutionSummary:
+          "The host closed the Property Protection case without a guest charge.",
+        resolutionType: "MANUAL",
+        resolvedBy: "HOST",
+      };
+    } else if (retryActive) {
+      state = {
+        title: "Pin&Go is delivering the Property Protection closure",
+        issue: `The damage case for ${reservation} is closed without charge and its guest closure notice is pending retry.`,
+        operationalImpact:
+          "The case remains closed without charge while Pin&Go retries the guest closure notice.",
+        recommendedAction: null,
+        nextAutomaticStep:
+          "Pin&Go will retry the brief guest closure notice automatically and record delivery.",
+        severity: "INFO",
+        workflowState: "AUTO_RESOLVING",
+        responsibleActor: "PIN_GO",
+        actionRequired: false,
+        canAutoResolve: true,
+        autoResolveStatus: "AVAILABLE",
+        resolutionCode: null,
+        resolutionSummary: null,
+        resolutionType: null,
+        resolvedBy: null,
+      };
+    } else {
+      state = {
+        title: "Property Protection closure notice needs attention",
+        issue: `Pin&Go could not confirm delivery of the closure notice for ${reservation}. The case remains closed and no charge was made.`,
+        operationalImpact:
+          "The Damage Case is closed without charge, but guest closure communication is incomplete.",
+        recommendedAction:
+          "Verify the guest email destination and contact Pin&Go support before considering the communication complete.",
+        nextAutomaticStep: null,
+        severity: "WARNING",
+        workflowState: "ACTION_REQUIRED",
+        responsibleActor: "HOST",
+        actionRequired: true,
+        canAutoResolve: false,
+        autoResolveStatus: "NOT_SUPPORTED",
+        resolutionCode: null,
+        resolutionSummary: null,
+        resolutionType: null,
+        resolvedBy: null,
+      };
+    }
   } else {
     state = actionRequired(
       "Property Protection case is financially blocked",
@@ -250,6 +305,11 @@ export function projectDamageCaseToMissionControl(input: {
         damageCase.damageNoticeDelivery?.status ?? null,
       damageNoticeRetryCount:
         damageCase.damageNoticeDelivery?.retryCount ?? null,
+      closureNoticeRequired: Boolean(damageCase.guestNotifiedAt),
+      closureNoticeDeliveryStatus:
+        damageCase.closureNoticeDelivery?.status ?? null,
+      closureNoticeRetryCount:
+        damageCase.closureNoticeDelivery?.retryCount ?? null,
     },
     transitionCode: `PROPERTY_PROTECTION_${damageCase.status}_${damageCase.guestResponse}`,
     transitionSummary:
@@ -295,12 +355,77 @@ export async function syncDamageCaseMissionControl(input: {
     select: { status: true, retryCount: true },
   });
 
+  const closureNoticeDelivery = await input.prisma.messageLog.findFirst({
+    where: {
+      reservationId: damageCase.reservationId,
+      communicationType:
+        "PROPERTY_PROTECTION_GUEST_NO_CHARGE_CLOSURE_NOTICE",
+      channel: "email",
+    },
+    orderBy: { createdAt: "desc" },
+    select: { status: true, retryCount: true },
+  });
+
   const projection = projectDamageCaseToMissionControl({
-    damageCase: { ...damageCase, damageNoticeDelivery },
+    damageCase: {
+      ...damageCase,
+      damageNoticeDelivery,
+      closureNoticeDelivery,
+    },
     maxMessageRetries:
       input.maxMessageRetries ??
       Number(process.env.MESSAGE_MAX_RETRIES ?? 3),
   });
+
+  if (
+    damageCase.status === DamageCaseStatus.CLOSED_NO_CHARGE &&
+    damageCase.guestNotifiedAt
+  ) {
+    const deliveryObservedAt = new Date();
+    projection.lastSignalAt = deliveryObservedAt;
+    projection.occurredAt = deliveryObservedAt;
+    projection.resolvedAt =
+      projection.workflowState === "RESOLVED"
+        ? deliveryObservedAt
+        : null;
+  }
+
+  const currentIssue = await input.prisma.operationalIssue.findUnique({
+    where: { operationalKey: projection.operationalKey },
+    select: { workflowState: true },
+  });
+
+  if (
+    currentIssue?.workflowState === "RESOLVED" &&
+    projection.workflowState !== "RESOLVED"
+  ) {
+    try {
+      await reopenOperationalIssue(input.prisma, {
+        operationalKey: projection.operationalKey,
+        workflowState: projection.workflowState,
+        severity: projection.severity,
+        responsibleActor: projection.responsibleActor,
+        actionRequired: projection.actionRequired,
+        recommendedAction: projection.recommendedAction,
+        nextAutomaticStep: projection.nextAutomaticStep,
+        canAutoResolve: projection.canAutoResolve,
+        autoResolveStatus: projection.autoResolveStatus,
+        autoResolveActionCode: projection.autoResolveActionCode,
+        reopenCode:
+          "PROPERTY_PROTECTION_CLOSURE_DELIVERY_INCOMPLETE",
+        reopenSummary:
+          "Property Protection reopened the operational projection because required guest closure delivery is incomplete.",
+        reopenedBy: "PIN_GO",
+        sourceType: projection.sourceType,
+        occurredAt: projection.occurredAt,
+        metadata: projection.metadata as Record<string, unknown>,
+      });
+    } catch (error) {
+      if (!(error instanceof ApmsOperationalReopenSourceNotResolvedError)) {
+        throw error;
+      }
+    }
+  }
 
   const operationalIssue = await upsertOperationalIssue(
     input.prisma,

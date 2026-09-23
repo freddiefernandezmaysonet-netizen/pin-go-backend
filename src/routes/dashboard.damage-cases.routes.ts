@@ -290,11 +290,11 @@ export function buildDashboardDamageCasesRouter(prisma: PrismaClient) {
     });
     if (!existing) return res.status(404).json({ ok: false, error: "DAMAGE_CASE_NOT_FOUND" });
     if (existing.status === DamageCaseStatus.CLOSED_NO_CHARGE) {
-      await syncDamageCaseMissionControlSafely({
+      const guestClosureNotification = await notifyGuestOfClosureSafely({
         prisma,
         damageCaseId: existing.id,
       });
-      const guestClosureNotification = await notifyGuestOfClosureSafely({
+      await syncDamageCaseMissionControlSafely({
         prisma,
         damageCaseId: existing.id,
       });
@@ -316,11 +316,11 @@ export function buildDashboardDamageCasesRouter(prisma: PrismaClient) {
         closedReason: reason,
       },
     });
-    await syncDamageCaseMissionControlSafely({
+    const guestClosureNotification = await notifyGuestOfClosureSafely({
       prisma,
       damageCaseId: updated.id,
     });
-    const guestClosureNotification = await notifyGuestOfClosureSafely({
+    await syncDamageCaseMissionControlSafely({
       prisma,
       damageCaseId: updated.id,
     });

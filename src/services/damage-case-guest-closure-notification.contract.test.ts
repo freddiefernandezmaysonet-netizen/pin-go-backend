@@ -108,6 +108,7 @@ test("automatic closure retry preserves the closed case state", () => {
   const retryBlock = retryWorker.slice(retryStart, retryEnd);
   assert.match(retryBlock, /status !== "CLOSED_NO_CHARGE"/);
   assert.match(retryBlock, /prisma\.messageLog\.update/);
+  assert.match(retryBlock, /syncDamageCaseMissionControlSafely/);
   assert.doesNotMatch(retryBlock, /damageCase\.update/);
   assert.doesNotMatch(retryBlock, /CHARGE_BLOCKED/);
 });

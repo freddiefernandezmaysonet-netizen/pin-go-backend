@@ -19,12 +19,20 @@ test("synchronizes every host-owned Damage Case mutation", () => {
   assert.match(routes, /CLOSED_NO_CHARGE[\s\S]*syncDamageCaseMissionControlSafely/);
 });
 
-test("synchronizes guest notice delivery, guest response and automatic retry", () => {
+test("synchronizes guest notices, responses, closure delivery and automatic retry", () => {
   assert.match(guestNotice, /syncDamageCaseMissionControlSafely/);
   assert.match(guestResponse, /syncDamageCaseMissionControlSafely/);
   assert.match(
     retryWorker,
     /PROPERTY_PROTECTION_GUEST_DAMAGE_NOTICE[\s\S]*syncDamageCaseMissionControlSafely/
+  );
+  assert.match(
+    retryWorker,
+    /processPropertyProtectionGuestClosureRetries[\s\S]*syncDamageCaseMissionControlSafely/
+  );
+  assert.match(
+    projector,
+    /PROPERTY_PROTECTION_GUEST_NO_CHARGE_CLOSURE_NOTICE/
   );
 });
 
@@ -34,6 +42,20 @@ test("persists one canonical issue through the existing Operational Intelligence
   assert.match(projector, /organizationId:\s*damageCase\.reservation\.property\.organizationId/);
   assert.match(projector, /propertyId:\s*damageCase\.reservation\.propertyId/);
   assert.match(projector, /reservationId:\s*damageCase\.reservationId/);
+});
+
+test("uses the explicit APMS reopen contract when closure delivery becomes incomplete", () => {
+  assert.match(projector, /currentIssue\?\.workflowState === "RESOLVED"/);
+  assert.match(projector, /reopenOperationalIssue/);
+  assert.match(
+    projector,
+    /PROPERTY_PROTECTION_CLOSURE_DELIVERY_INCOMPLETE/
+  );
+  assert.match(projector, /deliveryObservedAt/);
+  assert.match(
+    projector,
+    /ApmsOperationalReopenSourceNotResolvedError/
+  );
 });
 
 test("contains no financial execution primitive", () => {
