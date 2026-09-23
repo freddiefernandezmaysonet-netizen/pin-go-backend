@@ -1,6 +1,9 @@
 import { Prisma, PrismaClient } from "@prisma/client";
 
-import { syncDamageCaseMissionControlSafely } from "./damage-case-mission-control.service.js";
+import {
+  resolveDamageCaseMaxMessageRetries,
+  syncDamageCaseMissionControlSafely,
+} from "./damage-case-mission-control.service.js";
 
 type ReconciliationCandidate = {
   damageCaseId: string;
@@ -20,10 +23,8 @@ export async function findDamageCaseMissionControlReconciliationCandidates(
   maxMessageRetries = Number(process.env.MESSAGE_MAX_RETRIES ?? 3)
 ): Promise<ReconciliationCandidate[]> {
   const boundedBatchSize = Math.max(1, Math.min(100, Math.trunc(batchSize)));
-  const boundedMaxMessageRetries = Math.max(
-    1,
-    Math.trunc(maxMessageRetries)
-  );
+  const boundedMaxMessageRetries =
+    resolveDamageCaseMaxMessageRetries(maxMessageRetries);
 
   return prisma.$queryRaw<ReconciliationCandidate[]>(Prisma.sql`
     SELECT dc."id" AS "damageCaseId"
@@ -74,32 +75,42 @@ export async function findDamageCaseMissionControlReconciliationCandidates(
               AND host_message."retryCount" >= ${boundedMaxMessageRetries}
             )
             OR (
-              host_message."status" IS NOT NULL
-              AND host_message."status" NOT IN (
-                'SENT',
-                'FAILED',
-                'FAILED_FINAL'
+              host_message."id" IS NOT NULL
+              AND (
+                host_message."status" IS NULL
+                OR host_message."status" NOT IN (
+                  'SENT',
+                  'FAILED',
+                  'FAILED_FINAL'
+                )
               )
             )
         )::int AS "failedFinalCount",
         COUNT(*) FILTER (
-          WHERE host_message."status" IS NULL
+          WHERE host_message."id" IS NULL
         )::int AS "missingCount"
-      FROM "DashboardUser" dashboard_user
+      FROM (
+        SELECT DISTINCT
+          LOWER(BTRIM(candidate."email")) AS "email"
+        FROM "DashboardUser" candidate
+        WHERE candidate."organizationId" = property."organizationId"
+          AND candidate."isActive" = true
+          AND candidate."role" = 'ORG_ADMIN'
+          AND BTRIM(candidate."email") <> ''
+      ) dashboard_user
       LEFT JOIN LATERAL (
-        SELECT ml."status", ml."retryCount"
+        SELECT ml."id", ml."status", ml."retryCount"
         FROM "MessageLog" ml
         WHERE ml."reservationId" = dc."reservationId"
           AND ml."communicationType" =
             'PROPERTY_PROTECTION_HOST_GUEST_RESPONSE_NOTICE'
           AND ml."channel" = 'email'
-          AND LOWER(ml."to") = LOWER(dashboard_user."email")
+          AND ml."organizationId" = property."organizationId"
+          AND ml."propertyId" = property."id"
+          AND LOWER(BTRIM(ml."to")) = dashboard_user."email"
         ORDER BY ml."createdAt" DESC, ml."id" DESC
         LIMIT 1
       ) host_message ON TRUE
-      WHERE dashboard_user."organizationId" = property."organizationId"
-        AND dashboard_user."isActive" = true
-        AND dashboard_user."role" = 'ORG_ADMIN'
     ) host_delivery ON TRUE
     WHERE oi."id" IS NULL
       OR oi."lastSignalAt" < dc."updatedAt"
@@ -107,6 +118,12 @@ export async function findDamageCaseMissionControlReconciliationCandidates(
         IS DISTINCT FROM dc."status"::text
       OR oi."metadata" ->> 'guestResponse'
         IS DISTINCT FROM dc."guestResponse"::text
+      OR oi."organizationId"
+        IS DISTINCT FROM property."organizationId"
+      OR oi."propertyId"
+        IS DISTINCT FROM property."id"
+      OR oi."reservationId"
+        IS DISTINCT FROM reservation."id"
       OR oi."metadata" ->> 'damageNoticeDeliveryStatus'
         IS DISTINCT FROM delivery."status"
       OR oi."metadata" ->> 'damageNoticeRetryCount'
@@ -179,8 +196,9 @@ export async function reconcileDamageCaseMissionControl(input: {
   const syncDamageCase =
     input.syncDamageCase ?? syncDamageCaseMissionControlSafely;
   const maxMessageRetries =
-    input.maxMessageRetries ??
-    Number(process.env.MESSAGE_MAX_RETRIES ?? 3);
+    resolveDamageCaseMaxMessageRetries(
+      input.maxMessageRetries ?? process.env.MESSAGE_MAX_RETRIES
+    );
   const candidates = await findCandidates(
     input.prisma,
     input.batchSize,
@@ -193,7 +211,7 @@ export async function reconcileDamageCaseMissionControl(input: {
     const result = await syncDamageCase({
       prisma: input.prisma,
       damageCaseId: candidate.damageCaseId,
-      maxMessageRetries: input.maxMessageRetries,
+      maxMessageRetries,
     });
 
     if (result.ok) {

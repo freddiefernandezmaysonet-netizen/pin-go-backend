@@ -76,6 +76,21 @@ async function notifyHostSafely(input: {
   }
 }
 
+async function notifyHostAndSyncMissionControl(input: {
+  prisma: PrismaClient;
+  damageCaseId: string;
+  guestResponse: DamageCaseGuestResponse;
+}) {
+  const hostNotification = await notifyHostSafely(input);
+
+  await syncDamageCaseMissionControlSafely({
+    prisma: input.prisma,
+    damageCaseId: input.damageCaseId,
+  });
+
+  return hostNotification;
+}
+
 function serializeResponse(damageCase: {
   id: string;
   guestResponse: DamageCaseGuestResponse;
@@ -214,18 +229,10 @@ export async function recordGuestDamageCaseResponse(input: {
       action !== "DISPUTED" ||
       damageCase.guestResponseNote === responseNote
     ) {
-      await syncDamageCaseMissionControlSafely({
-        prisma,
-        damageCaseId: damageCase.id,
-      });
-      const hostNotification = await notifyHostSafely({
+      const hostNotification = await notifyHostAndSyncMissionControl({
         prisma,
         damageCaseId: damageCase.id,
         guestResponse: requestedResponse,
-      });
-      await syncDamageCaseMissionControlSafely({
-        prisma,
-        damageCaseId: damageCase.id,
       });
 
       return {
@@ -292,18 +299,10 @@ export async function recordGuestDamageCaseResponse(input: {
       (action !== "DISPUTED" ||
         concurrent.guestResponseNote === responseNote)
     ) {
-      await syncDamageCaseMissionControlSafely({
-        prisma,
-        damageCaseId: concurrent.id,
-      });
-      const hostNotification = await notifyHostSafely({
+      const hostNotification = await notifyHostAndSyncMissionControl({
         prisma,
         damageCaseId: concurrent.id,
         guestResponse: requestedResponse,
-      });
-      await syncDamageCaseMissionControlSafely({
-        prisma,
-        damageCaseId: concurrent.id,
       });
 
       return {
@@ -321,19 +320,10 @@ export async function recordGuestDamageCaseResponse(input: {
     );
   }
 
-  await syncDamageCaseMissionControlSafely({
-    prisma,
-    damageCaseId: damageCase.id,
-  });
-
-  const hostNotification = await notifyHostSafely({
+  const hostNotification = await notifyHostAndSyncMissionControl({
     prisma,
     damageCaseId: damageCase.id,
     guestResponse: requestedResponse,
-  });
-  await syncDamageCaseMissionControlSafely({
-    prisma,
-    damageCaseId: damageCase.id,
   });
 
   return {

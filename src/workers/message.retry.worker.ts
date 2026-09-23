@@ -20,12 +20,17 @@ import {
   resolveGuestJourneyCommunicationsOwnerConfig,
 } from "../services/guest-journey-communications-owner.config";
 import { evaluateCheckoutSmsConsent } from "../services/checkout-sms-consent.policy";
-import { syncDamageCaseMissionControlSafely } from "../services/damage-case-mission-control.service";
+import {
+  resolveDamageCaseMaxMessageRetries,
+  syncDamageCaseMissionControlSafely,
+} from "../services/damage-case-mission-control.service";
 import { reconcileDamageCaseMissionControl } from "../services/damage-case-mission-control-reconciliation.service";
 
 const WORKER_NAME = "message.retry.worker";
 const POLL_MS = Number(process.env.MESSAGE_RETRY_POLL_MS ?? 30000);
-const MAX_RETRIES = Number(process.env.MESSAGE_MAX_RETRIES ?? 3);
+const MAX_RETRIES = resolveDamageCaseMaxMessageRetries(
+  process.env.MESSAGE_MAX_RETRIES
+);
 const BATCH_SIZE = Number(process.env.MESSAGE_RETRY_BATCH_SIZE ?? 20);
 const GUEST_JOURNEY_COMMUNICATIONS_OWNER_CONFIG =
   resolveGuestJourneyCommunicationsOwnerConfig();
@@ -1305,7 +1310,10 @@ async function processPropertyProtectionHostResponseRetries() {
             select: {
               id: true,
               reservationNumber: true,
-              property: { select: { name: true } },
+              propertyId: true,
+              property: {
+                select: { name: true, organizationId: true },
+              },
             },
           },
         },
@@ -1326,6 +1334,36 @@ async function processPropertyProtectionHostResponseRetries() {
       ) {
         throw new Error(
           "PROPERTY_PROTECTION_HOST_RESPONSE_DESTINATION_MISMATCH"
+        );
+      }
+
+      if (
+        message.reservationId !== damageCase.reservation.id ||
+        message.propertyId !== damageCase.reservation.propertyId ||
+        message.organizationId !==
+          damageCase.reservation.property.organizationId
+      ) {
+        throw new Error(
+          "PROPERTY_PROTECTION_HOST_RESPONSE_SCOPE_MISMATCH"
+        );
+      }
+
+      const activeAdmins = await prisma.dashboardUser.findMany({
+        where: {
+          organizationId:
+            damageCase.reservation.property.organizationId,
+          isActive: true,
+          role: "ORG_ADMIN",
+        },
+        select: { email: true },
+      });
+      const recipientIsActiveAdmin = activeAdmins.some(
+        (admin) =>
+          admin.email.trim().toLowerCase() === payload.recipientEmail
+      );
+      if (!recipientIsActiveAdmin) {
+        throw new Error(
+          "PROPERTY_PROTECTION_HOST_RESPONSE_RECIPIENT_INACTIVE"
         );
       }
 
@@ -1356,8 +1394,11 @@ async function processPropertyProtectionHostResponseRetries() {
       const providerMessageId =
         (sent as any)?.data?.id ?? (sent as any)?.id ?? null;
 
-      await prisma.messageLog.update({
-        where: { id: message.id },
+      const sentUpdate = await prisma.messageLog.updateMany({
+        where: {
+          id: message.id,
+          status: { in: ["FAILED", "FAILED_FINAL"] },
+        },
         data: {
           status: "SENT",
           providerMessageId,
@@ -1372,20 +1413,22 @@ async function processPropertyProtectionHostResponseRetries() {
         maxMessageRetries: MAX_RETRIES,
       });
 
-      try {
-        await prisma.messageDispatchLog.create({
-          data: {
-            reservationId: damageCase.reservation.id,
-            type: "PROPERTY_PROTECTION_HOST_GUEST_RESPONSE_NOTICE",
-            channel: "email",
-            status: "SENT",
-          },
-        });
-      } catch (dispatchLogError) {
-        errLog("Property Protection host response retry dispatch log failed", {
-          messageId: message.id,
-          error: toErrString(dispatchLogError),
-        });
+      if (sentUpdate.count === 1) {
+        try {
+          await prisma.messageDispatchLog.create({
+            data: {
+              reservationId: damageCase.reservation.id,
+              type: "PROPERTY_PROTECTION_HOST_GUEST_RESPONSE_NOTICE",
+              channel: "email",
+              status: "SENT",
+            },
+          });
+        } catch (dispatchLogError) {
+          errLog("Property Protection host response retry dispatch log failed", {
+            messageId: message.id,
+            error: toErrString(dispatchLogError),
+          });
+        }
       }
 
       log("Property Protection host response retry success", {
@@ -1399,13 +1442,19 @@ async function processPropertyProtectionHostResponseRetries() {
       const nonRetryable =
         errorMessage.includes("RETRY_PAYLOAD_MISSING") ||
         errorMessage.includes("CASE_CHANGED") ||
-        errorMessage.includes("DESTINATION_MISMATCH");
+        errorMessage.includes("DESTINATION_MISMATCH") ||
+        errorMessage.includes("SCOPE_MISMATCH") ||
+        errorMessage.includes("RECIPIENT_INACTIVE");
       const finalFailure =
         nonRetryable || nextRetryCount >= MAX_RETRIES;
 
       await prisma.messageLog
-        .update({
-          where: { id: message.id },
+        .updateMany({
+          where: {
+            id: message.id,
+            status: "FAILED",
+            retryCount: message.retryCount,
+          },
           data: {
             status: finalFailure ? "FAILED_FINAL" : "FAILED",
             retryCount: { increment: 1 },

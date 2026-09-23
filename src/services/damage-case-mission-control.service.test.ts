@@ -8,6 +8,7 @@ import {
 
 import {
   projectDamageCaseToMissionControl,
+  resolveDamageCaseMaxMessageRetries,
   type DamageCaseMissionControlSource,
 } from "./damage-case-mission-control.service.js";
 
@@ -43,6 +44,13 @@ function project(
     maxMessageRetries: 3,
   });
 }
+
+test("normalizes the retry limit once for projection and reconciliation", () => {
+  assert.equal(resolveDamageCaseMaxMessageRetries(3.9), 3);
+  assert.equal(resolveDamageCaseMaxMessageRetries("2"), 2);
+  assert.equal(resolveDamageCaseMaxMessageRetries(0), 3);
+  assert.equal(resolveDamageCaseMaxMessageRetries(Number.NaN), 3);
+});
 
 test("uses one stable operational identity and preserves tenant scope", () => {
   const first = project();

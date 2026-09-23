@@ -57,3 +57,23 @@ test("does no writes when no Damage Case projection is stale", async () => {
   assert.equal(syncCalls, 0);
   assert.deepEqual(result, { checked: 0, reconciled: 0, failed: 0 });
 });
+
+test("passes one normalized retry limit to candidate selection and projection", async () => {
+  let projectedLimit: number | undefined;
+
+  await reconcileDamageCaseMissionControl({
+    prisma,
+    batchSize: 20,
+    maxMessageRetries: 2.9,
+    findCandidates: async (_prisma, _batchSize, maxMessageRetries) => {
+      assert.equal(maxMessageRetries, 2);
+      return [{ damageCaseId: "damage-case-1" }];
+    },
+    syncDamageCase: async (input) => {
+      projectedLimit = input.maxMessageRetries;
+      return { ok: true, operationalIssue: {} } as never;
+    },
+  });
+
+  assert.equal(projectedLimit, 2);
+});

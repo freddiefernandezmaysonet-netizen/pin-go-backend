@@ -15,6 +15,11 @@ import {
 export const PROPERTY_PROTECTION_OPERATIONAL_ISSUE_CODE =
   "PROPERTY_PROTECTION_DAMAGE_CASE";
 
+export function resolveDamageCaseMaxMessageRetries(value: unknown) {
+  const parsed = Math.trunc(Number(value));
+  return Number.isFinite(parsed) && parsed >= 1 ? parsed : 3;
+}
+
 export type HostResponseDeliveryStatus =
   | "NOT_REQUIRED"
   | "DESTINATION_MISSING"
@@ -445,8 +450,9 @@ export async function syncDamageCaseMissionControl(input: {
     damageCase.guestResponse === DamageCaseGuestResponse.ACCEPTED ||
     damageCase.guestResponse === DamageCaseGuestResponse.DISPUTED;
   const maxMessageRetries =
-    input.maxMessageRetries ??
-    Number(process.env.MESSAGE_MAX_RETRIES ?? 3);
+    resolveDamageCaseMaxMessageRetries(
+      input.maxMessageRetries ?? process.env.MESSAGE_MAX_RETRIES
+    );
   let hostResponseDelivery: HostResponseDeliverySummary | null = null;
 
   if (finalGuestResponse) {
@@ -472,7 +478,9 @@ export async function syncDamageCaseMissionControl(input: {
             communicationType:
               "PROPERTY_PROTECTION_HOST_GUEST_RESPONSE_NOTICE",
             channel: "email",
-            to: { in: recipientEmails, mode: "insensitive" },
+            organizationId:
+              damageCase.reservation.property.organizationId,
+            propertyId: damageCase.reservation.propertyId,
           },
           orderBy: [{ createdAt: "desc" }, { id: "desc" }],
           select: { to: true, status: true, retryCount: true },
@@ -561,6 +569,31 @@ export async function syncDamageCaseMissionControl(input: {
     select: { workflowState: true },
   });
 
+  const reopenReason = finalGuestResponse
+    ? hostResponseDelivery?.status === "SENT"
+      ? {
+          code: "PROPERTY_PROTECTION_FINAL_GUEST_RESPONSE_ACTIVE",
+          summary:
+            "Property Protection reopened the operational projection because the canonical final guest response requires an active operational state.",
+        }
+      : {
+          code: "PROPERTY_PROTECTION_HOST_RESPONSE_DELIVERY_INCOMPLETE",
+          summary:
+            "Property Protection reopened the operational projection because required host response notice delivery is incomplete.",
+        }
+    : damageCase.status === DamageCaseStatus.CLOSED_NO_CHARGE &&
+        damageCase.guestNotifiedAt
+      ? {
+          code: "PROPERTY_PROTECTION_CLOSURE_DELIVERY_INCOMPLETE",
+          summary:
+            "Property Protection reopened the operational projection because required guest closure delivery is incomplete.",
+        }
+      : {
+          code: "PROPERTY_PROTECTION_CANONICAL_STATE_RECONCILIATION",
+          summary:
+            "Property Protection reopened the operational projection because its resolved state did not match the canonical Damage Case.",
+        };
+
   if (
     currentIssue?.workflowState === "RESOLVED" &&
     projection.workflowState !== "RESOLVED"
@@ -577,10 +610,8 @@ export async function syncDamageCaseMissionControl(input: {
         canAutoResolve: projection.canAutoResolve,
         autoResolveStatus: projection.autoResolveStatus,
         autoResolveActionCode: projection.autoResolveActionCode,
-        reopenCode:
-          "PROPERTY_PROTECTION_CLOSURE_DELIVERY_INCOMPLETE",
-        reopenSummary:
-          "Property Protection reopened the operational projection because required guest closure delivery is incomplete.",
+        reopenCode: reopenReason.code,
+        reopenSummary: reopenReason.summary,
         reopenedBy: "PIN_GO",
         sourceType: projection.sourceType,
         occurredAt: projection.occurredAt,
