@@ -9,9 +9,7 @@ import {
   buildStripeConnectIsolationV2AccountSessionParams,
   buildStripeConnectIsolationV2AccountSessionRequestOptions,
   getStripeConnectV2Eligibility,
-  isStripeConnectIsolationV2Enabled,
   isStripeConnectV2AccountCreationEnabled,
-  isStripeConnectV2CanaryOrganization,
 } from "./stripe-connect-isolation-v2.service.js";
 
 type AccountSessionComponentsCompat =
@@ -46,81 +44,22 @@ function stripeAccount(input: {
   } as unknown as Stripe.Account;
 }
 
-test("Isolation V2 is default-off", () => {
-  assert.equal(isStripeConnectIsolationV2Enabled({}), false);
-  assert.equal(
-    isStripeConnectIsolationV2Enabled({
-      STRIPE_CONNECT_ISOLATION_V2_ENABLED: "true",
-    }),
-    true
-  );
+test("global experience does not depend on historical canary or isolation flags", () => {
+  for (const org of ["org_serena", "org_existing", "org_new"]) {
+    assert.deepEqual(getStripeConnectV2Eligibility(org, {}), { eligible: true, accountCreationAllowed: false });
+    assert.deepEqual(getStripeConnectV2Eligibility(org, {
+      STRIPE_CONNECT_ISOLATION_V2_ENABLED: "false",
+      STRIPE_CONNECT_V2_CANARY_ORGANIZATION_IDS: "another_org",
+      STRIPE_CONNECT_V2_ACCOUNT_CREATION_ENABLED: "true",
+    }), { eligible: true, accountCreationAllowed: true });
+  }
+  assert.deepEqual(getStripeConnectV2Eligibility("", { STRIPE_CONNECT_V2_ACCOUNT_CREATION_ENABLED: "true" }),
+    { eligible: false, accountCreationAllowed: false });
 });
 
-test("V2 account creation has a separate default-off fence", () => {
+test("account creation keeps the existing independent kill switch", () => {
   assert.equal(isStripeConnectV2AccountCreationEnabled({}), false);
-  assert.equal(
-    isStripeConnectV2AccountCreationEnabled({
-      STRIPE_CONNECT_V2_ACCOUNT_CREATION_ENABLED: "true",
-    }),
-    true
-  );
-});
-
-test("V2 organization canary allowlist is fail-closed", () => {
-  assert.equal(isStripeConnectV2CanaryOrganization("org_fernandez", {}), false);
-  assert.equal(
-    isStripeConnectV2CanaryOrganization("org_fernandez", {
-      STRIPE_CONNECT_V2_CANARY_ORGANIZATION_IDS:
-        "org_remanso, org_fernandez;org_other",
-    }),
-    true
-  );
-  assert.equal(
-    isStripeConnectV2CanaryOrganization("org_unknown", {
-      STRIPE_CONNECT_V2_CANARY_ORGANIZATION_IDS:
-        "org_remanso, org_fernandez;org_other",
-    }),
-    false
-  );
-});
-
-test("V2 eligibility requires global isolation and explicit organization canary membership", () => {
-  assert.deepEqual(getStripeConnectV2Eligibility("org_fernandez", {}), {
-    eligible: false,
-    isolationEnabled: false,
-    canaryOrganization: false,
-    accountCreationEnabled: false,
-    accountCreationAllowed: false,
-  });
-
-  assert.deepEqual(
-    getStripeConnectV2Eligibility("org_fernandez", {
-      STRIPE_CONNECT_ISOLATION_V2_ENABLED: "true",
-      STRIPE_CONNECT_V2_ACCOUNT_CREATION_ENABLED: "true",
-    }),
-    {
-      eligible: false,
-      isolationEnabled: true,
-      canaryOrganization: false,
-      accountCreationEnabled: true,
-      accountCreationAllowed: false,
-    }
-  );
-
-  assert.deepEqual(
-    getStripeConnectV2Eligibility("org_fernandez", {
-      STRIPE_CONNECT_ISOLATION_V2_ENABLED: "true",
-      STRIPE_CONNECT_V2_ACCOUNT_CREATION_ENABLED: "true",
-      STRIPE_CONNECT_V2_CANARY_ORGANIZATION_IDS: "org_fernandez",
-    }),
-    {
-      eligible: true,
-      isolationEnabled: true,
-      canaryOrganization: true,
-      accountCreationEnabled: true,
-      accountCreationAllowed: true,
-    }
-  );
+  assert.equal(isStripeConnectV2AccountCreationEnabled({ STRIPE_CONNECT_V2_ACCOUNT_CREATION_ENABLED: "true" }), true);
 });
 
 test("tenant ownership accepts only the persisted account bound to the same organization", () => {
@@ -252,25 +191,4 @@ test("post-onboarding V2 Account Session enables remediation, account, payment a
   assert.equal(components.payouts?.enabled, true);
   assert.equal(components.payouts?.features?.standard_payouts, false);
   assert.equal(components.payouts?.features?.instant_payouts, false);
-});
-
-
-test("cutover blocks V2 creation even with all creation flags enabled", async () => {
-  const { createStripeConnectIsolationV2Account } = await import("./stripe-connect-isolation-v2.service.js");
-  const values = {
-    STRIPE_CONNECT_ISOLATION_V2_ENABLED: "true",
-    STRIPE_CONNECT_V2_ACCOUNT_CREATION_ENABLED: "true",
-    STRIPE_CONNECT_V2_CANARY_ORGANIZATION_IDS: "org-cutover-test",
-  };
-  const previous = Object.fromEntries(Object.keys(values).map(key => [key, process.env[key]]));
-  Object.assign(process.env, values);
-  try {
-    await assert.rejects(createStripeConnectIsolationV2Account("org-cutover-test"), {
-      code: "STRIPE_CONNECT_CREATION_CUTOVER_BLOCKED", statusCode: 409,
-    });
-  } finally {
-    for (const [key, value] of Object.entries(previous)) {
-      if (value === undefined) delete process.env[key]; else process.env[key] = value;
-    }
-  }
 });

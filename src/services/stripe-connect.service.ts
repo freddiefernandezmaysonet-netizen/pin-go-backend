@@ -199,9 +199,8 @@ export async function createOrGetConnectAccount(organizationId: string) {
     return syncConnectAccountStatus(organizationId);
   }
 
-  throw Object.assign(new Error("Stripe account setup is temporarily unavailable during the Host Payouts transition."), {
-    code: "STRIPE_CONNECT_CREATION_CUTOVER_BLOCKED",
-    statusCode: 409,
+  throw Object.assign(new Error("Use the embedded Stripe account setup in Payments & Payouts."), {
+    code: "STRIPE_CONNECT_LEGACY_CREATION_RETIRED", statusCode: 409,
   });
 }
 
