@@ -4,6 +4,7 @@ on:
   pull_request:
     branches: [main]
     paths:
+      - "src/services/stripe-connect.service.ts"
       - "src/services/stripe-connect-isolation-v2.service.ts"
       - "src/services/stripe-connect-isolation-v2.service.test.ts"
       - "src/routes/dashboard-payouts.routes.ts"
@@ -70,3 +71,6 @@ jobs:
           grep -q '/api/dashboard/payouts/connect-isolation-v2/account' src/routes/dashboard-payouts.routes.ts
           grep -q '/api/dashboard/payouts/connect-isolation-v2/account-session' src/routes/dashboard-payouts.routes.ts
           ! grep -q 'req.body.*account' src/routes/dashboard-payouts.routes.ts
+          grep -q 'STRIPE_CONNECT_CREATION_CUTOVER_BLOCKED' src/services/stripe-connect.service.ts
+          ! grep -q 'stripe.accounts.create' src/services/stripe-connect.service.ts
+          ! grep -q 'stripe.accounts.create' src/services/stripe-connect-isolation-v2.service.ts

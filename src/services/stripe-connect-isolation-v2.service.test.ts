@@ -253,3 +253,24 @@ test("post-onboarding V2 Account Session enables remediation, account, payment a
   assert.equal(components.payouts?.features?.standard_payouts, false);
   assert.equal(components.payouts?.features?.instant_payouts, false);
 });
+
+
+test("cutover blocks V2 creation even with all creation flags enabled", async () => {
+  const { createStripeConnectIsolationV2Account } = await import("./stripe-connect-isolation-v2.service.js");
+  const values = {
+    STRIPE_CONNECT_ISOLATION_V2_ENABLED: "true",
+    STRIPE_CONNECT_V2_ACCOUNT_CREATION_ENABLED: "true",
+    STRIPE_CONNECT_V2_CANARY_ORGANIZATION_IDS: "org-cutover-test",
+  };
+  const previous = Object.fromEntries(Object.keys(values).map(key => [key, process.env[key]]));
+  Object.assign(process.env, values);
+  try {
+    await assert.rejects(createStripeConnectIsolationV2Account("org-cutover-test"), {
+      code: "STRIPE_CONNECT_CREATION_CUTOVER_BLOCKED", statusCode: 409,
+    });
+  } finally {
+    for (const [key, value] of Object.entries(previous)) {
+      if (value === undefined) delete process.env[key]; else process.env[key] = value;
+    }
+  }
+});
