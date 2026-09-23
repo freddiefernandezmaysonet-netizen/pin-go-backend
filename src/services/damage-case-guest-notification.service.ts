@@ -1,4 +1,5 @@
 import { DamageCaseStatus, PrismaClient } from "@prisma/client";
+import { isDamageCaseAfterCheckout } from "./damage-case-checkout.policy.js";
 import { sendPropertyProtectionGuestDamageNotice } from "../lib/mailer.js";
 import { sendLoggedEmail } from "./email-delivery.service.js";
 import { resolveOrganizationGuestReplyTo } from "./organization-guest-email.service.js";
@@ -28,6 +29,7 @@ export async function notifyGuestOfApprovedDamageCase(input: {
       reservation: {
         select: {
           id: true,
+          checkOut: true,
           reservationNumber: true,
           guestName: true,
           guestEmail: true,
@@ -52,10 +54,8 @@ export async function notifyGuestOfApprovedDamageCase(input: {
   }
 
   if (
-    ![
-      DamageCaseStatus.GUEST_NOTIFICATION_PENDING,
-      DamageCaseStatus.GUEST_NOTIFIED,
-    ].includes(damageCase.status)
+    damageCase.status !== DamageCaseStatus.GUEST_NOTIFICATION_PENDING &&
+    damageCase.status !== DamageCaseStatus.GUEST_NOTIFIED
   ) {
     return {
       ok: false,
@@ -64,6 +64,9 @@ export async function notifyGuestOfApprovedDamageCase(input: {
   }
 
   const reservation = damageCase.reservation;
+  if (!isDamageCaseAfterCheckout(reservation.checkOut)) {
+    return { ok: false, code: "DAMAGE_CASE_CHECKOUT_REQUIRED" as const };
+  }
   const manageReservationUrl = buildManageReservationUrl(
     reservation.guestToken ?? ""
   );
