@@ -160,35 +160,14 @@ test("E13 runtime truth performs no provider action", () => {
   );
 });
 
-test("E13 Mission Control consumes all visibility for health and returns HOST items only", () => {
-  assert.match(
-    propertyRoute,
-    /allVisibilityCurrentIssueRows/
-  );
-  assert.match(
-    propertyRoute,
-    /prisma\.apmsRuntimeState\.findMany/
-  );
-  assert.match(
-    propertyRoute,
-    /deriveMissionControlNativeHealth/
-  );
-  assert.match(
-    propertyRoute,
-    /visibility:\s*"HOST"/
-  );
-  assert.match(
-    propertyRoute,
-    /operationalItems,\s*\n\s*currentOperationalState/
-  );
-  assert.match(
-    propertyRoute,
-    /autopilotStatus:\s*\n\s*nativeHealth\.autopilotStatus/
-  );
-  assert.match(
-    propertyRoute,
-    /activityHistory,\s*\n\s*recentAuditEntries: activityHistory/
-  );
+test("Mission Control host reporting preserves operations without Enterprise global health", () => {
+  assert.doesNotMatch(propertyRoute, /deriveMissionControlNativeHealth|apmsRuntimeState|allVisibilityCurrentIssueRows/);
+  assert.match(propertyRoute, /\.\.\.toObservationalMissionControlSnapshot\(baseSnapshot\)/);
+  assert.match(propertyRoute, /organizationId: orgId,\s*propertyId: property\.id,\s*visibility: "HOST"/);
+  assert.match(propertyRoute, /operationalItems,\s*\n\s*currentOperationalState/);
+  assert.match(propertyRoute, /hostActionQueue,\s*\n\s*waitingItems,\s*\n\s*autoResolvingItems/);
+  assert.match(propertyRoute, /guestJourneyMetrics,/);
+  assert.match(propertyRoute, /activityHistory,\s*\n\s*recentAuditEntries: activityHistory/);
 });
 
 test("E13 removes the transitional E12 middleware from source and server wiring", () => {

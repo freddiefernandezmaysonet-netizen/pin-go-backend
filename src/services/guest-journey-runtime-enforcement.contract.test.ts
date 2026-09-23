@@ -66,29 +66,11 @@ test("E13 removes the transitional E12 response middleware", () => {
   );
 });
 
-test("Mission Control now derives current health natively from runtime truth and OperationalIssue", () => {
-  assert.match(
-    propertyRouteSource,
-    /deriveMissionControlNativeHealth/
-  );
-  assert.match(
-    propertyRouteSource,
-    /prisma\.apmsRuntimeState\.findMany/
-  );
-  assert.match(
-    propertyRouteSource,
-    /allVisibilityCurrentIssueRows/
-  );
-  assert.match(
-    propertyRouteSource,
-    /visibility:\s*"HOST"/
-  );
-  assert.match(
-    propertyRouteSource,
-    /autopilotStatus:\s*\n\s*nativeHealth\.autopilotStatus/
-  );
-  assert.match(
-    propertyRouteSource,
-    /engineHealth:\s*\n\s*nativeHealth\.engineHealth/
-  );
+test("Mission Control host reporting no longer depends on the Enterprise runtime gate", () => {
+  assert.doesNotMatch(propertyRouteSource, /deriveMissionControlNativeHealth|prisma\.apmsRuntimeState|nativeHealth/);
+  assert.match(propertyRouteSource, /toObservationalMissionControlSnapshot\(baseSnapshot\)/);
+  assert.match(propertyRouteSource, /visibility:\s*"HOST"/);
+  assert.match(propertyRouteSource, /projectMissionControlOperationalState\(operationalItems\)/);
+  assert.match(propertyRouteSource, /mapHostActionQueueToRecommendedActions/);
+  assert.match(propertyRouteSource, /activityHistory/);
 });
