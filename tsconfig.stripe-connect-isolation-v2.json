@@ -5,6 +5,7 @@
     "types": ["node"]
   },
   "include": [
+    "src/services/stripe-connect.service.ts",
     "src/services/stripe-connect-provisioning.service.ts",
     "src/services/stripe-connect-provisioning.service.test.ts",
     "src/services/stripe-connect-isolation-v2.service.ts",

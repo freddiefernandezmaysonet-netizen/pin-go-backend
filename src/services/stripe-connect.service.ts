@@ -80,31 +80,6 @@ function getStripeConnectRefreshUrl() {
   );
 }
 
-function normalizeConnectCountry(country?: string | null) {
-  const normalized = country?.trim().toUpperCase();
-
-  if (!normalized) return "US";
-
-  const aliases: Record<string, string> = {
-    US: "US",
-    USA: "US",
-    "UNITED STATES": "US",
-    "UNITED STATES OF AMERICA": "US",
-    PR: "US",
-    "PUERTO RICO": "US",
-  };
-
-  if (aliases[normalized]) {
-    return aliases[normalized];
-  }
-
-  if (/^[A-Z]{2}$/.test(normalized)) {
-    return normalized;
-  }
-
-  return "US";
-}
-
 function serializeStripeJson(value: unknown) {
   if (!value) return null;
   return JSON.parse(JSON.stringify(value));
