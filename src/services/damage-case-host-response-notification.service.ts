@@ -5,6 +5,7 @@ import {
 } from "@prisma/client";
 import { sendPropertyProtectionHostGuestResponseNotice } from "../lib/mailer.js";
 import { sendLoggedEmail } from "./email-delivery.service.js";
+import { isDamageCaseAfterCheckout } from "./damage-case-checkout.policy.js";
 
 const COMMUNICATION_TYPE =
   "PROPERTY_PROTECTION_HOST_GUEST_RESPONSE_NOTICE" as const;
@@ -60,6 +61,7 @@ export async function notifyHostOfGuestDamageCaseResponse(input: {
       reservation: {
         select: {
           id: true,
+          checkOut: true,
           reservationNumber: true,
           propertyId: true,
           property: {
@@ -75,6 +77,9 @@ export async function notifyHostOfGuestDamageCaseResponse(input: {
 
   if (!damageCase) {
     return { ok: false, code: "DAMAGE_CASE_NOT_FOUND" as const };
+  }
+  if (!isDamageCaseAfterCheckout(damageCase.reservation.checkOut)) {
+    return { ok: false, code: "DAMAGE_CASE_CHECKOUT_REQUIRED" as const };
   }
 
   if (

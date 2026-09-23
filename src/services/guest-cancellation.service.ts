@@ -4,6 +4,7 @@ import {
   ReservationStatus,
 } from "@prisma/client";
 import { formatInTimeZone } from "date-fns-tz";
+import { isDamageCaseAfterCheckout } from "./damage-case-checkout.policy.js";
 import {
   buildCancellationPolicySnapshot,
   evaluateCancellationPolicy,
@@ -862,6 +863,7 @@ export async function getGuestPropertyProtectionCase({
   const damageCase = reservation.damageCase;
 
   const guestVisibleDamageCase =
+    isDamageCaseAfterCheckout(reservation.checkOut) &&
     Boolean(damageCase) &&
     (
       [

@@ -4,6 +4,7 @@ import {
   PrismaClient,
 } from "@prisma/client";
 import { prisma as prismaSingleton } from "../lib/prisma.js";
+import { isDamageCaseAfterCheckout } from "./damage-case-checkout.policy.js";
 import { notifyHostOfGuestDamageCaseResponse } from "./damage-case-host-response-notification.service.js";
 import { syncDamageCaseMissionControlSafely } from "./damage-case-mission-control.service.js";
 
@@ -160,6 +161,7 @@ export async function recordGuestDamageCaseResponse(input: {
     },
     select: {
       id: true,
+      checkOut: true,
       source: true,
       externalProvider: true,
       stripeCheckoutSessionId: true,
@@ -211,6 +213,10 @@ export async function recordGuestDamageCaseResponse(input: {
   }
 
   const damageCase = reservation.damageCase;
+
+  if (!isDamageCaseAfterCheckout(reservation.checkOut)) {
+    fail("DAMAGE_CASE_CHECKOUT_REQUIRED", "Property Protection is available after checkout.", 409);
+  }
 
   if (damageCase.status !== DamageCaseStatus.GUEST_NOTIFIED) {
     fail(
