@@ -73,3 +73,4 @@ jobs:
           ! grep -q 'req.body.*account' src/routes/dashboard-payouts.routes.ts
           grep -q 'STRIPE_CONNECT_CREATION_CUTOVER_BLOCKED' src/services/stripe-connect.service.ts
           ! grep -q 'stripe.accounts.create' src/services/stripe-connect.service.ts
+          ! grep -q 'stripe.accounts.create' src/services/stripe-connect-isolation-v2.service.ts

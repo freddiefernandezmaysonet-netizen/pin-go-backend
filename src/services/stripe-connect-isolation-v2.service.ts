@@ -307,89 +307,13 @@ export function buildStripeConnectIsolationV2AccountSessionRequestOptions(): Str
 
 export async function createStripeConnectIsolationV2Account(
   organizationId: string
-) {
-  const eligibility = assertStripeConnectV2CanaryEligible(organizationId);
-
-  if (!eligibility.accountCreationAllowed) {
-    throw new StripeConnectIsolationV2Error(
-      "STRIPE_CONNECT_V2_ACCOUNT_CREATION_DISABLED",
-      "Stripe Connect V2 account creation is not enabled.",
-      404
-    );
-  }
-
-  const organization = await prisma.organization.findUnique({
-    where: { id: organizationId },
-    select: {
-      id: true,
-      name: true,
-      stripeConnectAccountId: true,
-      properties: {
-        where: { status: "ACTIVE" },
-        select: { country: true },
-        take: 1,
-      },
-    },
-  });
-
-  if (!organization) {
-    throw new StripeConnectIsolationV2Error(
-      "ORGANIZATION_NOT_FOUND",
-      "Organization not found.",
-      404
-    );
-  }
-
-  if (organization.stripeConnectAccountId) {
-    throw new StripeConnectIsolationV2Error(
-      "STRIPE_CONNECT_ACCOUNT_ALREADY_EXISTS",
-      "This organization already has a Stripe connected account."
-    );
-  }
-
-  const stripe = getStripeClient();
-  const account = await stripe.accounts.create(
-    buildStripeConnectIsolationV2AccountCreateParams({
-      organizationId: organization.id,
-      organizationName: organization.name,
-      country: organization.properties[0]?.country ?? "US",
-    })
+): Promise<{ accountId: string; accountDisplayId: string; organizationId: string; organizationName: string }> {
+  assertStripeConnectV2CanaryEligible(organizationId);
+  throw new StripeConnectIsolationV2Error(
+    "STRIPE_CONNECT_CREATION_CUTOVER_BLOCKED",
+    "Stripe account setup is temporarily unavailable during the Host Payouts transition.",
+    409
   );
-
-  const stripeOrganizationId = String(
-    account.metadata?.organizationId ?? ""
-  ).trim();
-
-  if (stripeOrganizationId !== organization.id) {
-    throw new StripeConnectIsolationV2Error(
-      "STRIPE_CONNECT_TENANT_MISMATCH",
-      "Stripe returned a connected account without the expected organization binding.",
-      502
-    );
-  }
-
-  await prisma.organization.update({
-    where: { id: organization.id },
-    data: {
-      stripeConnectAccountId: account.id,
-      stripeConnectStatus: account.details_submitted
-        ? "PENDING_VERIFICATION"
-        : "ONBOARDING_REQUIRED",
-      stripeConnectChargesEnabled: Boolean(account.charges_enabled),
-      stripeConnectPayoutsEnabled: Boolean(account.payouts_enabled),
-      stripeConnectDetailsSubmitted: Boolean(account.details_submitted),
-      stripeConnectRequirements: serializeStripeJson(account.requirements),
-      stripeConnectDisabledReason: account.requirements?.disabled_reason ?? null,
-      stripeConnectLastSyncedAt: new Date(),
-    },
-  });
-
-  return {
-    accountId: account.id,
-    accountDisplayId: `acct_••••${account.id.slice(-4)}`,
-    organizationId: organization.id,
-    organizationName: organization.name,
-  };
 }
 
 export async function createStripeConnectIsolationV2AccountSession(
