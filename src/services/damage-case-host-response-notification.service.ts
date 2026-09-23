@@ -38,17 +38,8 @@ async function getHostRecipients(
     orderBy: { createdAt: "asc" },
   });
 
-  const users =
-    admins.length > 0
-      ? admins
-      : await prisma.dashboardUser.findMany({
-          where: { organizationId, isActive: true },
-          select: { email: true, fullName: true },
-          orderBy: { createdAt: "asc" },
-        });
-
   const seen = new Set<string>();
-  return users.flatMap((user) => {
+  return admins.flatMap((user) => {
     const email = String(user.email ?? "").trim().toLowerCase();
     if (!email || seen.has(email)) return [];
     seen.add(email);

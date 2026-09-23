@@ -51,6 +51,11 @@ test("host recipients remain organization-scoped active administrators", () => {
     /role: DashboardUserRole\.ORG_ADMIN/
   );
   assert.match(notificationService, /seen\.has\(email\)/);
+  assert.equal(
+    notificationService.match(/dashboardUser\.findMany/g)?.length,
+    1
+  );
+  assert.doesNotMatch(notificationService, /admins\.length/);
 });
 
 test("host response notice is idempotent per recipient and logged", () => {
