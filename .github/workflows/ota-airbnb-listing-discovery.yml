@@ -66,6 +66,25 @@ jobs:
           BASE_BRANCH="${GITHUB_BASE_REF:-main}"
           git fetch origin "+refs/heads/$BASE_BRANCH:refs/remotes/origin/$BASE_BRANCH" --depth=1
           git diff --name-only "origin/$BASE_BRANCH...HEAD" | sort > "$RUNNER_TEMP/actual.txt"
+          if [ "${GITHUB_HEAD_REF:-$GITHUB_REF_NAME}" = "agent/host-payouts-global-flow" ]; then
+            cat > "$RUNNER_TEMP/payouts-global-allowed.txt" <<'EOF'
+          .github/workflows/ota-airbnb-listing-discovery.yml
+          .github/workflows/stripe-connect-isolation-v2-certification.yml
+          docs/host-payouts-global-transition.md
+          prisma/migrations/20260923180000_stripe_connect_provisioning/migration.sql
+          prisma/schema.prisma
+          src/services/stripe-connect-isolation-v2.service.test.ts
+          src/services/stripe-connect-isolation-v2.service.ts
+          src/services/stripe-connect-provisioning.migration.test.mjs
+          src/services/stripe-connect-provisioning.service.test.ts
+          src/services/stripe-connect-provisioning.service.ts
+          src/services/stripe-connect.service.ts
+          tsconfig.stripe-connect-isolation-v2.json
+          EOF
+            sort "$RUNNER_TEMP/payouts-global-allowed.txt" -o "$RUNNER_TEMP/payouts-global-allowed.txt"
+            diff -u "$RUNNER_TEMP/payouts-global-allowed.txt" "$RUNNER_TEMP/actual.txt"
+            exit 0
+          fi
           if [ "${GITHUB_HEAD_REF:-$GITHUB_REF_NAME}" = "agent/mission-control-e13-decoupling-v1" ]; then
             cat > "$RUNNER_TEMP/mission-control-allowed.txt" <<'EOF'
           .github/workflows/mission-control-observational-certification.yml

@@ -224,32 +224,9 @@ export async function createOrGetConnectAccount(organizationId: string) {
     return syncConnectAccountStatus(organizationId);
   }
 
-  const stripe = getStripeClient();
-
-  const primaryUser = organization.dashboardUsers[0];
-  const primaryProperty = organization.properties[0];
-
-  const account = await stripe.accounts.create({
-    type: "express",
-    country: normalizeConnectCountry(primaryProperty?.country),
-    email: primaryUser?.email,
-    capabilities: {
-      card_payments: { requested: true },
-      transfers: { requested: true },
-    },
-    business_profile: {
-      name: organization.name,
-      product_description:
-        "Short-term rental direct booking payouts powered by Pin&Go.",
-    },
-    metadata: {
-      organizationId: organization.id,
-      platform: "PinGo",
-      product: "Host Payouts V1",
-    },
+  throw Object.assign(new Error("Use the embedded Stripe account setup in Payments & Payouts."), {
+    code: "STRIPE_CONNECT_LEGACY_CREATION_RETIRED", statusCode: 409,
   });
-
-  return updateOrganizationFromStripeAccount(organization.id, account);
 }
 
 export async function createConnectOnboardingLink(organizationId: string) {
