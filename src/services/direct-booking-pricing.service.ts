@@ -1,10 +1,109 @@
 import { PrismaClient } from "@prisma/client";
 import type { DecisionStep } from "../apms/decision-types";
 import { createRevenueAuditEntry } from "../apms/revenue-audit.mapper";
+import {
+  applyMarketCompetitionPricingToNightlyRates,
+  type MarketPricingApplicationResult,
+} from "./market-competition-pricing-application.service";
 
 type PricingDecisionStep = DecisionStep<number>;
 
 const prisma = new PrismaClient();
+
+type MarketPricingApplicationEnvironment = Readonly<
+  Record<string, string | undefined>
+>;
+
+type MarketPricingStagePrisma = Pick<
+  PrismaClient,
+  "marketPricingProfile" | "marketPricingSnapshot"
+>;
+
+export function marketCompetitionPricingApplicationEnabled(
+  env: MarketPricingApplicationEnvironment = process.env
+) {
+  return (
+    String(env.PINGO_MARKET_PRICING_APPLICATION_ENABLED ?? "false")
+      .trim()
+      .toLowerCase() === "true"
+  );
+}
+
+function unchangedMarketPricingResult(input: {
+  date: string;
+  currentRate: number;
+  reason: MarketPricingApplicationResult["reason"];
+}): MarketPricingApplicationResult {
+  return {
+    date: input.date,
+    previousRate: toMoney(input.currentRate),
+    rate: toMoney(input.currentRate),
+    applied: false,
+    reason: input.reason,
+    targetRate: null,
+    confidence: null,
+  };
+}
+
+export async function applyMarketCompetitionPricingStage(
+  prismaClient: MarketPricingStagePrisma,
+  input: Readonly<{
+    propertyId: string;
+    nights: readonly Readonly<{
+      date: string;
+      currentRate: number;
+      manualOverride: boolean;
+    }>[];
+    env?: MarketPricingApplicationEnvironment;
+    now?: Date;
+  }>
+): Promise<MarketPricingApplicationResult[]> {
+  const runtimeEnabled = marketCompetitionPricingApplicationEnabled(input.env);
+
+  if (!runtimeEnabled) {
+    return input.nights.map((night) =>
+      unchangedMarketPricingResult({
+        date: night.date,
+        currentRate: night.currentRate,
+        reason: "RUNTIME_DISABLED",
+      })
+    );
+  }
+
+  const profile = await prismaClient.marketPricingProfile.findUnique({
+    where: { propertyId: input.propertyId },
+    select: { currency: true },
+  });
+
+  if (!profile) {
+    return input.nights.map((night) =>
+      unchangedMarketPricingResult({
+        date: night.date,
+        currentRate: night.currentRate,
+        reason: "PROFILE_NOT_CONFIGURED",
+      })
+    );
+  }
+
+  const expectedCurrency = String(profile.currency ?? "").trim().toUpperCase();
+  if (!/^[A-Z]{3}$/.test(expectedCurrency)) {
+    return input.nights.map((night) =>
+      unchangedMarketPricingResult({
+        date: night.date,
+        currentRate: night.currentRate,
+        reason: "CURRENCY_MISMATCH",
+      })
+    );
+  }
+
+  return applyMarketCompetitionPricingToNightlyRates(prismaClient, {
+    propertyId: input.propertyId,
+    expectedCurrency,
+    nights: input.nights,
+    runtimeEnabled: true,
+    ...(input.now ? { now: input.now } : {}),
+  });
+}
 
 type CalculateDirectBookingPricingInput = {
   propertyId: string;
@@ -617,12 +716,12 @@ const nightlyRateByDate = new Map(
   ])
 );
 
-const nightlyRates = stayDates.map((date) => {
+const preparedNightlyRates = stayDates.map((date) => {
   const dateKey = toDateKey(date);
   const override = nightlyRateByDate.get(dateKey);
   const baseRateForDate = override?.rate ?? fallbackNightlyRate;
 
-   const pricingBreakdown: PricingDecisionStep[] = [
+  const pricingBreakdown: PricingDecisionStep[] = [
     createPricingDecisionStep({
       rule: override ? "CUSTOM_RATE" : "BASE_RATE",
       label: override ? "Manual Override" : "Base Rate",
@@ -671,6 +770,54 @@ const nightlyRates = stayDates.map((date) => {
     }
   }
 
+  return {
+    dateKey,
+    override,
+    baseRateForDate,
+    currentRate,
+    pricingBreakdown,
+  };
+});
+
+const marketCompetitionResults = await applyMarketCompetitionPricingStage(
+  prisma,
+  {
+    propertyId: input.propertyId,
+    nights: preparedNightlyRates.map((item) => ({
+      date: item.dateKey,
+      currentRate: item.currentRate,
+      manualOverride: Boolean(item.override),
+    })),
+  }
+);
+
+const nightlyRates = preparedNightlyRates.map((prepared, index) => {
+  const {
+    dateKey,
+    override,
+    baseRateForDate,
+    pricingBreakdown,
+  } = prepared;
+  let currentRate = prepared.currentRate;
+
+  const marketCompetitionResult = marketCompetitionResults[index];
+
+  if (
+    marketCompetitionResult?.applied &&
+    marketCompetitionResult.rate !== currentRate
+  ) {
+    pricingBreakdown.push(
+      createPricingDecisionStep({
+        rule: "MARKET_COMPETITION",
+        label: "Market Competition",
+        previousRate: currentRate,
+        newRate: marketCompetitionResult.rate,
+        adjustmentPercent: null,
+      })
+    );
+    currentRate = marketCompetitionResult.rate;
+  }
+
   const finalRateBeforeBounds = currentRate;
 
   const pricingBoundsDecision = createPricingBoundsDecision(finalRateBeforeBounds);
@@ -704,7 +851,7 @@ const nightlyRates = stayDates.map((date) => {
       adjustmentPercent: null,
     })
   );
- 
+
   const appliedRules = [
     ...(override ? [override.reason ?? "CUSTOM_RATE"] : []),
     ...pricingBreakdown
@@ -729,7 +876,7 @@ const nightlyRates = stayDates.map((date) => {
     appliedRules: normalizedAppliedRules,
     pricingBreakdown,
   };
-}); 
+});
 
 const nightlyRate = fallbackNightlyRate;
 const cleaningFee = toMoney(property.cleaningFee);

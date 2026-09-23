@@ -36,6 +36,10 @@ import { dashboardReservationsRouter } from "./routes/dashboard.reservations.rou
 import { buildDashboardDamageCasesRouter } from "./routes/dashboard.damage-cases.routes";
 import { dashboardPropertiesRouter } from "./routes/dashboard.properties.route";
 import { buildDashboardChannexFullSyncRouter } from "./routes/dashboard.channex-full-sync.route";
+import {
+  buildDashboardMarketPricingProfileRouter,
+  createPrismaMarketPricingProfileRouteActions,
+} from "./routes/dashboard.market-pricing-profile.route";
 import { buildDashboardDistributionConnectionCenterRouter } from "./routes/dashboard.distribution-connection-center.route";
 import { buildRuntimeOtaConnectionCenterComposition } from "./distribution/ota-connection-center.runtime-composition";
 import {
@@ -50,6 +54,7 @@ import { buildDashboardHealthRouter } from "./routes/dashboard.health.routes";
 import { buildOrgPmsRouter } from "./routes/org.pms.routes";
 import { dashboardPmsRouter } from "./routes/dashboard.pms.route";
 import { devPmsRouter } from "./routes/dev.pms.routes";
+import { requireAuth } from "./middleware/requireAuth";
 
 import { authRouter } from "./routes/auth.routes";
 import { eventsRouter } from "./routes/events.route";
@@ -332,6 +337,10 @@ app.use(dashboardRouter);
 app.use(dashboardReservationsRouter);
 app.use(buildDashboardDamageCasesRouter(prisma));
 app.use(buildDashboardChannexFullSyncRouter(prisma));
+app.use(buildDashboardMarketPricingProfileRouter({
+  auth: requireAuth,
+  actions: createPrismaMarketPricingProfileRouteActions(prisma),
+}));
 app.use(dashboardPropertiesRouter);
 app.use(dashboardGuestAccessSettingsRouter);
 app.use(dashboardLocksRouter);

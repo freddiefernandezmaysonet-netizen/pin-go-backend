@@ -290,6 +290,7 @@ model Property {
   otaChannelConnections     OtaChannelConnection[]
   otaConnectionSessions     OtaConnectionSession[]
   nearbyPlaces              PropertyNearbyPlace[]
+  marketPricingProfile      MarketPricingProfile?
 
 
   @@index([organizationId])
@@ -472,6 +473,139 @@ model PropertyHolidayPricing {
   @@index([propertyId])
   @@index([propertyId, isActive])
   @@index([propertyId, source])
+}
+
+
+enum MarketPricingStrategy {
+  OCCUPANCY
+  BALANCED
+  REVENUE
+}
+
+enum MarketPricingPosition {
+  VALUE
+  COMPETITIVE
+  PREMIUM
+}
+
+enum MarketPricingAggressiveness {
+  CONSERVATIVE
+  MODERATE
+  AGGRESSIVE
+}
+
+enum MarketComparableStatus {
+  ACTIVE
+  EXCLUDED
+  STALE
+}
+
+enum MarketPricingRunStatus {
+  PENDING
+  RUNNING
+  SUCCEEDED
+  PARTIAL
+  FAILED
+}
+
+model MarketPricingProfile {
+  id                      String                      @id @default(cuid())
+  propertyId              String                      @unique
+  enabled                 Boolean                     @default(false)
+  provider                String?
+  currency                String                      @db.VarChar(3)
+  strategy                MarketPricingStrategy       @default(BALANCED)
+  position                MarketPricingPosition       @default(COMPETITIVE)
+  aggressiveness          MarketPricingAggressiveness @default(MODERATE)
+  minimumConfidence       Decimal                     @default(70) @db.Decimal(5, 2)
+  maximumIncreasePercent  Decimal                     @default(20) @db.Decimal(5, 2)
+  maximumDecreasePercent  Decimal                     @default(15) @db.Decimal(5, 2)
+  marketRadiusKm          Decimal?                    @db.Decimal(8, 2)
+  maximumComparables      Int                         @default(10)
+  refreshIntervalHours    Int                         @default(24)
+  lastSuccessfulRefreshAt DateTime?
+  nextRefreshAt           DateTime?
+  lastErrorCode           String?
+  createdAt               DateTime                    @default(now())
+  updatedAt               DateTime                    @updatedAt
+  property                Property                    @relation(fields: [propertyId], references: [id], onDelete: Cascade)
+  comparables             MarketComparable[]
+  runs                    MarketPricingRun[]
+  snapshots               MarketPricingSnapshot[]
+
+  @@index([enabled, nextRefreshAt])
+  @@index([provider])
+}
+
+model MarketComparable {
+  id                String                 @id @default(cuid())
+  profileId         String
+  provider          String
+  externalListingId String
+  listingName       String?
+  latitude          Decimal?               @db.Decimal(10, 7)
+  longitude         Decimal?               @db.Decimal(10, 7)
+  distanceKm        Decimal?               @db.Decimal(8, 2)
+  similarityScore   Decimal                @db.Decimal(5, 2)
+  status            MarketComparableStatus @default(ACTIVE)
+  attributes        Json?
+  firstSeenAt       DateTime                @default(now())
+  lastSeenAt        DateTime                @default(now())
+  createdAt         DateTime                @default(now())
+  updatedAt         DateTime                @updatedAt
+  profile           MarketPricingProfile   @relation(fields: [profileId], references: [id], onDelete: Cascade)
+
+  @@unique([profileId, provider, externalListingId])
+  @@index([profileId, status, similarityScore])
+}
+
+model MarketPricingRun {
+  id                String                 @id @default(cuid())
+  profileId         String
+  provider          String
+  status            MarketPricingRunStatus @default(PENDING)
+  requestedDateFrom DateTime               @db.Date
+  requestedDateTo   DateTime               @db.Date
+  comparableCount   Int                    @default(0)
+  snapshotCount     Int                    @default(0)
+  changedDateKeys   String[]               @default([])
+  startedAt         DateTime?
+  completedAt       DateTime?
+  errorCode         String?
+  errorSummary      String?
+  metadata          Json?
+  createdAt         DateTime               @default(now())
+  updatedAt         DateTime               @updatedAt
+  profile           MarketPricingProfile   @relation(fields: [profileId], references: [id], onDelete: Cascade)
+  snapshots         MarketPricingSnapshot[]
+
+  @@index([profileId, status, createdAt])
+  @@index([status, createdAt])
+}
+
+model MarketPricingSnapshot {
+  id             String               @id @default(cuid())
+  profileId      String
+  runId          String
+  provider       String
+  stayDate       DateTime             @db.Date
+  sampleSize     Int
+  availableCount Int
+  lowerRate      Decimal?             @db.Decimal(10, 2)
+  medianRate     Decimal              @db.Decimal(10, 2)
+  upperRate      Decimal?             @db.Decimal(10, 2)
+  targetRate     Decimal              @db.Decimal(10, 2)
+  confidence     Decimal              @db.Decimal(5, 2)
+  observedAt     DateTime
+  expiresAt      DateTime
+  evidence       Json?
+  createdAt      DateTime             @default(now())
+  profile        MarketPricingProfile @relation(fields: [profileId], references: [id], onDelete: Cascade)
+  run            MarketPricingRun     @relation(fields: [runId], references: [id], onDelete: Cascade)
+
+  @@unique([profileId, provider, stayDate, observedAt])
+  @@index([profileId, stayDate, expiresAt])
+  @@index([runId])
 }
 
 model Lock {
