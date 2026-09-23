@@ -1,6 +1,7 @@
 import type { PrismaClient } from "@prisma/client";
 
 import type { MarketPricingProvider } from "./market-pricing-provider.contract";
+import { createAirDnaMarketPricingProvider } from "./airdna-market-pricing.provider";
 import {
   createMarketPricingProviderRegistry,
   type MarketPricingRuntimeEnvironment,
@@ -30,6 +31,32 @@ export type MarketPricingRefreshRuntime = {
   runOnce(): Promise<MarketPricingRefreshRuntimeRunResult>;
 };
 
+function explicitTrue(value: string | undefined): boolean {
+  return String(value ?? "").trim().toLowerCase() === "true";
+}
+
+export function builtInMarketPricingProviders(input: {
+  env?: MarketPricingRuntimeEnvironment;
+  clock?: () => Date;
+} = {}): readonly MarketPricingProvider[] {
+  const env = input.env ?? {};
+
+  if (!explicitTrue(env.PINGO_MARKET_PRICING_AIRDNA_ENABLED)) {
+    return [];
+  }
+
+  return [
+    createAirDnaMarketPricingProvider({
+      enabled: true,
+      apiKey: env.PINGO_MARKET_PRICING_AIRDNA_API_KEY,
+      ...(env.PINGO_MARKET_PRICING_AIRDNA_API_ORIGIN
+        ? { apiOrigin: env.PINGO_MARKET_PRICING_AIRDNA_API_ORIGIN }
+        : {}),
+      ...(input.clock ? { clock: input.clock } : {}),
+    }),
+  ];
+}
+
 export function createMarketPricingRefreshRuntime(input: {
   env?: MarketPricingRuntimeEnvironment;
   prisma?: PrismaClient;
@@ -54,7 +81,13 @@ export function createMarketPricingRefreshRuntime(input: {
 
   const providerRegistry = createMarketPricingProviderRegistry({
     enabled: true,
-    providers: input.providers ?? [],
+    providers: [
+      ...builtInMarketPricingProviders({
+        env: input.env,
+        ...(input.clock ? { clock: input.clock } : {}),
+      }),
+      ...(input.providers ?? []),
+    ],
   });
   const candidateRepository =
     createPrismaMarketPricingRefreshCandidateRepository(input.prisma);
