@@ -1083,8 +1083,8 @@ async function upsertReservation(
         checkIn: input.checkIn,
         checkOut: input.checkOut,
         paymentState: input.paymentState,
-          totalAmount: input.totalAmount ?? undefined,
-          currency: input.currency ?? undefined,
+        totalAmount: input.totalAmount ?? undefined,
+        currency: input.currency ?? undefined,
         guestTokenExpiresAt: input.guestTokenExpiresAt,
 
         lastIngestError: null,
@@ -1125,8 +1125,8 @@ async function upsertReservation(
       checkIn: input.checkIn,
       checkOut: input.checkOut,
       paymentState: input.paymentState,
-          totalAmount: input.totalAmount ?? undefined,
-          currency: input.currency ?? undefined,
+      totalAmount: input.totalAmount ?? undefined,
+      currency: input.currency ?? undefined,
       guestTokenExpiresAt: input.guestTokenExpiresAt,
 
       lastIngestError: null,
@@ -1152,8 +1152,8 @@ async function upsertReservation(
       checkIn: input.checkIn,
       checkOut: input.checkOut,
       paymentState: input.paymentState,
-          totalAmount: input.totalAmount ?? undefined,
-          currency: input.currency ?? undefined,
+      totalAmount: input.totalAmount ?? undefined,
+      currency: input.currency ?? undefined,
       guestTokenExpiresAt: input.guestTokenExpiresAt,
 
       lastIngestError: null,
