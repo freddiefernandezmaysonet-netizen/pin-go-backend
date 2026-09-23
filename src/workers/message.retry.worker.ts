@@ -10,6 +10,7 @@ import {
 import {
   sendGuestAccessPasscodeEmail,
   sendManualReservationGuestCancellationEmail,
+  sendPropertyProtectionGuestClosureNotice,
   sendPropertyProtectionGuestDamageNotice,
   sendPropertyProtectionHostGuestResponseNotice,
 } from "../lib/mailer";
@@ -988,6 +989,204 @@ async function processPropertyProtectionDamageNoticeRetries() {
   }
 }
 
+function parsePropertyProtectionGuestClosureRetryPayload(
+  body: string
+): { damageCaseId: string } | null {
+  try {
+    const parsed = JSON.parse(body);
+    if (
+      parsed?.kind !== "PIN_GO_EMAIL_DELIVERY" ||
+      parsed?.type !==
+        "PROPERTY_PROTECTION_GUEST_NO_CHARGE_CLOSURE_NOTICE"
+    ) {
+      return null;
+    }
+    const damageCaseId = String(
+      parsed?.retryPayload?.damageCaseId ?? ""
+    ).trim();
+    return damageCaseId ? { damageCaseId } : null;
+  } catch {
+    return null;
+  }
+}
+
+async function processPropertyProtectionGuestClosureRetries() {
+  const failedEmailMessages = await prisma.messageLog.findMany({
+    where: {
+      channel: "email",
+      provider: "resend",
+      status: "FAILED",
+      retryCount: { lt: MAX_RETRIES },
+      communicationType:
+        "PROPERTY_PROTECTION_GUEST_NO_CHARGE_CLOSURE_NOTICE",
+    },
+    take: BATCH_SIZE,
+    orderBy: { createdAt: "asc" },
+  });
+
+  for (const message of failedEmailMessages) {
+    try {
+      const payload = parsePropertyProtectionGuestClosureRetryPayload(
+        message.body
+      );
+      if (!payload) {
+        throw new Error(
+          "PROPERTY_PROTECTION_GUEST_CLOSURE_RETRY_PAYLOAD_MISSING"
+        );
+      }
+
+      const damageCase = await prisma.damageCase.findUnique({
+        where: { id: payload.damageCaseId },
+        select: {
+          id: true,
+          status: true,
+          guestNotifiedAt: true,
+          reservation: {
+            select: {
+              id: true,
+              reservationNumber: true,
+              guestName: true,
+              guestEmail: true,
+              guestToken: true,
+              guestTokenExpiresAt: true,
+              preferredLanguage: true,
+              property: {
+                select: {
+                  name: true,
+                  organizationId: true,
+                },
+              },
+            },
+          },
+        },
+      });
+
+      if (
+        !damageCase ||
+        damageCase.status !== "CLOSED_NO_CHARGE" ||
+        !damageCase.guestNotifiedAt
+      ) {
+        throw new Error(
+          "PROPERTY_PROTECTION_GUEST_CLOSURE_CASE_NOT_ELIGIBLE"
+        );
+      }
+
+      const reservation = damageCase.reservation;
+      const guestEmail = String(reservation.guestEmail ?? "").trim();
+      const guestToken = String(reservation.guestToken ?? "").trim();
+
+      if (!guestEmail || !guestToken || guestEmail !== message.to.trim()) {
+        throw new Error(
+          "PROPERTY_PROTECTION_GUEST_CLOSURE_DESTINATION_MISSING"
+        );
+      }
+
+      const appUrl = String(
+        process.env.APP_URL ?? "http://localhost:3000"
+      )
+        .trim()
+        .replace(/\/+$/, "");
+      const manageReservationUrl =
+        `${appUrl}/booking/manage/${encodeURIComponent(guestToken)}`;
+      const minimumPortalExpiry = new Date(
+        Date.now() + 30 * 24 * 60 * 60 * 1000
+      );
+      if (
+        reservation.guestTokenExpiresAt &&
+        reservation.guestTokenExpiresAt.getTime() <
+          minimumPortalExpiry.getTime()
+      ) {
+        await prisma.reservation.update({
+          where: { id: reservation.id },
+          data: { guestTokenExpiresAt: minimumPortalExpiry },
+        });
+      }
+
+      const replyTo = await resolveOrganizationGuestReplyTo(
+        prisma,
+        reservation.property.organizationId
+      );
+      const sent = await sendPropertyProtectionGuestClosureNotice({
+        to: guestEmail,
+        replyTo: replyTo.email,
+        reservationNumber:
+          reservation.reservationNumber ?? reservation.id,
+        guestName: reservation.guestName,
+        propertyName: reservation.property.name,
+        manageReservationUrl,
+        preferredLanguage: reservation.preferredLanguage,
+        idempotencyKey:
+          `property-protection-no-charge-closure-${damageCase.id}`,
+      });
+      const providerMessageId =
+        (sent as any)?.data?.id ?? (sent as any)?.id ?? null;
+
+      await prisma.messageLog.update({
+        where: { id: message.id },
+        data: {
+          status: "SENT",
+          providerMessageId,
+          retryCount: { increment: 1 },
+          error: null,
+        },
+      });
+
+      try {
+        await prisma.messageDispatchLog.create({
+          data: {
+            reservationId: reservation.id,
+            type: "PROPERTY_PROTECTION_GUEST_NO_CHARGE_CLOSURE_NOTICE",
+            channel: "email",
+            status: "SENT",
+          },
+        });
+      } catch (dispatchLogError) {
+        errLog("Property Protection closure retry dispatch log failed", {
+          messageId: message.id,
+          error: toErrString(dispatchLogError),
+        });
+      }
+
+      log("Property Protection guest closure retry success", {
+        messageId: message.id,
+        damageCaseId: damageCase.id,
+        retryCount: message.retryCount + 1,
+      });
+    } catch (error) {
+      const errorMessage = toErrString(error);
+      const nextRetryCount = message.retryCount + 1;
+      const nonRetryable =
+        errorMessage.includes("RETRY_PAYLOAD_MISSING") ||
+        errorMessage.includes("CASE_NOT_ELIGIBLE") ||
+        errorMessage.includes("DESTINATION_MISSING");
+      const finalFailure =
+        nonRetryable || nextRetryCount >= MAX_RETRIES;
+
+      await prisma.messageLog
+        .update({
+          where: { id: message.id },
+          data: {
+            status: finalFailure ? "FAILED_FINAL" : "FAILED",
+            retryCount: { increment: 1 },
+            error: errorMessage,
+          },
+        })
+        .catch(() => {});
+
+      errLog(
+        finalFailure
+          ? "Property Protection guest closure retry stopped"
+          : "Property Protection guest closure retry failed",
+        {
+          messageId: message.id,
+          retryCount: nextRetryCount,
+          error: errorMessage,
+        }
+      );
+    }
+  }
+}
+
 function parsePropertyProtectionHostResponseRetryPayload(
   body: string
 ): {
@@ -1254,6 +1453,17 @@ async function tick() {
     } catch (e) {
       errLog(
         "processPropertyProtectionHostResponseRetries crashed",
+        {
+          err: toErrString(e),
+        }
+      );
+    }
+
+    try {
+      await processPropertyProtectionGuestClosureRetries();
+    } catch (e) {
+      errLog(
+        "processPropertyProtectionGuestClosureRetries crashed",
         {
           err: toErrString(e),
         }

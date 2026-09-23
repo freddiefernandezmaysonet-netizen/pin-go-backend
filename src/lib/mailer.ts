@@ -175,6 +175,81 @@ export async function sendPropertyProtectionGuestDamageNotice(
   return { ok: true, mode: "resend", data };
 }
 
+export async function sendPropertyProtectionGuestClosureNotice(
+  input: SendPropertyProtectionGuestClosureNoticeInput
+) {
+  const language = resolveGuestLanguage(input.preferredLanguage);
+  const isSpanish = language === "es";
+  const safeManageUrl = getSafeUrl(input.manageReservationUrl);
+
+  if (!safeManageUrl) {
+    throw new Error("Property Protection manage reservation URL is invalid");
+  }
+
+  const greeting = input.guestName?.trim()
+    ? `${isSpanish ? "Hola" : "Hi"} ${escapeHtml(input.guestName.trim())},`
+    : isSpanish
+      ? "Hola,"
+      : "Hi,";
+
+  if (!resend) {
+    if (isProd) {
+      throw new Error("RESEND_API_KEY missing in production");
+    }
+    return { ok: true, mode: "console" };
+  }
+
+  const subject = isSpanish
+    ? `Caso de Protección de la propiedad cerrado — Reservación #${input.reservationNumber}`
+    : `Property Protection case closed — Reservation #${input.reservationNumber}`;
+
+  const { data, error } = await resend.emails.send(
+    {
+      from: getEmailFrom(),
+      to: input.to,
+      ...(input.replyTo ? { replyTo: input.replyTo } : {}),
+      subject,
+      html: `
+        <div style="font-family:Arial,sans-serif;color:#111827;line-height:1.6;max-width:640px;margin:auto">
+          <div style="background:linear-gradient(135deg,#020617,#1d4ed8);color:#fff;border-radius:18px;padding:24px;margin-bottom:20px">
+            <p style="margin:0 0 8px;font-size:12px;letter-spacing:.08em;text-transform:uppercase;font-weight:800">
+              ${isSpanish ? "Protección de la propiedad" : "Property Protection"}
+            </p>
+            <h1 style="margin:0;font-size:26px;line-height:1.2">
+              ${isSpanish ? "El caso fue cerrado" : "The case has been closed"}
+            </h1>
+          </div>
+          <p>${greeting}</p>
+          <p>
+            ${isSpanish
+              ? `El caso de Protección de la propiedad relacionado con su reservación #${escapeHtml(input.reservationNumber)} en ${escapeHtml(input.propertyName)} fue cerrado.`
+              : `The Property Protection case related to reservation #${escapeHtml(input.reservationNumber)} at ${escapeHtml(input.propertyName)} has been closed.`}
+          </p>
+          <p>
+            ${isSpanish
+              ? "No se ha realizado ningún cargo. Puede revisar el estado final en Administrar reservación."
+              : "No charge has been made. You can review the final status in Manage reservation."}
+          </p>
+          <p style="margin:24px 0">
+            <a href="${escapeHtml(safeManageUrl)}" style="display:inline-block;background:#1d4ed8;color:#fff;text-decoration:none;padding:13px 18px;border-radius:10px;font-weight:800">
+              ${isSpanish ? "Administrar reservación" : "Manage reservation"}
+            </a>
+          </p>
+        </div>
+      `,
+    },
+    { idempotencyKey: input.idempotencyKey }
+  );
+
+  if (error) {
+    throw new Error(
+      `Resend Property Protection closure notice failed: ${error.name}`
+    );
+  }
+
+  return { ok: true, mode: "resend", data };
+}
+
 export async function sendPropertyProtectionHostGuestResponseNotice(
   input: SendPropertyProtectionHostGuestResponseNoticeInput
 ) {
@@ -294,6 +369,17 @@ export async function sendReviewInvitationEmail(input: SendReviewInvitationEmail
 }
 
 export type SendPropertyProtectionGuestDamageNoticeInput = {
+  to: string;
+  replyTo?: string | null;
+  reservationNumber: string;
+  guestName?: string | null;
+  propertyName: string;
+  manageReservationUrl: string;
+  preferredLanguage?: string | null;
+  idempotencyKey: string;
+};
+
+export type SendPropertyProtectionGuestClosureNoticeInput = {
   to: string;
   replyTo?: string | null;
   reservationNumber: string;
