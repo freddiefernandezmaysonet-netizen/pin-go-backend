@@ -22,6 +22,7 @@ import {
   getGuestPropertyProtectionCase,
 } from "../services/guest-cancellation.service";
 import { recordGuestDamageCaseResponse } from "../services/damage-case-guest-response.service";
+import { damagePaymentAuthorizationRouter } from "./public-booking.damage-payment-authorization.routes.js";
 import {
   confirmGuestReservationModification,
   getGuestReservationModificationOptions,
@@ -38,6 +39,7 @@ import {
 
 const prisma = new PrismaClient();
 const publicBookingRouter = Router();
+publicBookingRouter.use(damagePaymentAuthorizationRouter(prisma));
 
 const SECURE_PRECHECKIN_DISCLOSURE_VERSION =
   "secure_precheckin_disclosure_v1";

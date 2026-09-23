@@ -556,7 +556,32 @@ model DamageCase {
 
   reservation Reservation @relation(fields: [reservationId], references: [id], onDelete: Cascade)
 
+  paymentAuthorization DamageCasePaymentAuthorization?
+
   @@index([status, createdAt])
+}
+
+// Explicit exact-amount consent, not a payment attempt or proof of collection.
+// Never backfill from DamageCase.guestResponse or reservation booking consent.
+model DamageCasePaymentAuthorization {
+  id                 String   @id @default(cuid())
+  damageCaseId       String   @unique
+  organizationId     String
+  reservationId      String
+  connectedAccountId String
+  claimRevision      String
+  amountMinor        Int
+  currency           String
+  version            String
+  action             String
+  language           String
+  consentText        String
+  termsSnapshot      Json
+  authorizedAt       DateTime @default(now())
+
+  damageCase DamageCase @relation(fields: [damageCaseId], references: [id], onDelete: Restrict)
+
+  @@index([organizationId, reservationId])
 }
 
 enum DamagePaymentMethodStatus {

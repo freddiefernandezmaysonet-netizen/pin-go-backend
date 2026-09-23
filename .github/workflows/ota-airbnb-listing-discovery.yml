@@ -70,6 +70,25 @@ jobs:
           BASE_BRANCH="${GITHUB_BASE_REF:-main}"
           git fetch origin "+refs/heads/$BASE_BRANCH:refs/remotes/origin/$BASE_BRANCH" --depth=1
           git diff --name-only "origin/$BASE_BRANCH...HEAD" | sort > "$RUNNER_TEMP/actual.txt"
+          if [ "${GITHUB_HEAD_REF:-$GITHUB_REF_NAME}" = "agent/property-protection-payment-authorization" ]; then
+            cat > "$RUNNER_TEMP/damage-authorization-allowed.txt" <<'EOF'
+          .github/workflows/ota-airbnb-listing-discovery.yml
+          .github/workflows/property-protection-payment-authorization.yml
+          .github/workflows/property-protection-v1-certification.yml
+          docs/property-protection-payment-authorization.md
+          prisma/migrations/20260923210000_damage_case_payment_authorization/migration.sql
+          prisma/schema.prisma
+          src/routes/public-booking.damage-payment-authorization.routes.test.ts
+          src/routes/public-booking.damage-payment-authorization.routes.ts
+          src/routes/public-booking.routes.ts
+          src/services/damage-case-payment-authorization.db.test.ts
+          src/services/damage-case-payment-authorization.service.ts
+          src/services/damage-case-payment-authorization.test.ts
+          EOF
+            sort "$RUNNER_TEMP/damage-authorization-allowed.txt" -o "$RUNNER_TEMP/damage-authorization-allowed.txt"
+            diff -u "$RUNNER_TEMP/damage-authorization-allowed.txt" "$RUNNER_TEMP/actual.txt"
+            exit 0
+          fi
           if [ "${GITHUB_HEAD_REF:-$GITHUB_REF_NAME}" = "agent/host-payouts-global-flow" ]; then
             cat > "$RUNNER_TEMP/payouts-global-allowed.txt" <<'EOF'
           .github/workflows/ota-airbnb-listing-discovery.yml
