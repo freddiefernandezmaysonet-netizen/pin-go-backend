@@ -1,6 +1,7 @@
 import {
   DamageCaseGuestResponse,
   DamageCaseStatus,
+  DashboardUserRole,
   PrismaClient,
 } from "@prisma/client";
 
@@ -13,6 +14,28 @@ import {
 
 export const PROPERTY_PROTECTION_OPERATIONAL_ISSUE_CODE =
   "PROPERTY_PROTECTION_DAMAGE_CASE";
+
+export function resolveDamageCaseMaxMessageRetries(value: unknown) {
+  const parsed = Math.trunc(Number(value));
+  return Number.isFinite(parsed) && parsed >= 1 ? parsed : 3;
+}
+
+export type HostResponseDeliveryStatus =
+  | "NOT_REQUIRED"
+  | "DESTINATION_MISSING"
+  | "MISSING"
+  | "RETRYING"
+  | "FAILED_FINAL"
+  | "SENT";
+
+export type HostResponseDeliverySummary = {
+  status: HostResponseDeliveryStatus;
+  recipientCount: number;
+  sentCount: number;
+  retryingCount: number;
+  failedFinalCount: number;
+  missingCount: number;
+};
 
 export type DamageCaseMissionControlSource = {
   id: string;
@@ -38,6 +61,7 @@ export type DamageCaseMissionControlSource = {
     status: string;
     retryCount: number;
   } | null;
+  hostResponseDelivery: HostResponseDeliverySummary | null;
 };
 
 type ProjectionState = Pick<
@@ -110,6 +134,39 @@ function waiting(
   };
 }
 
+function autoResolvingHostResponseNotice(reservation: string): ProjectionState {
+  return {
+    title: "Pin&Go is delivering the guest response to the host",
+    issue: `The guest submitted a final Property Protection response for ${reservation}, and one or more host notices are pending retry. No charge was made.`,
+    operationalImpact:
+      "The guest response is safely recorded while Pin&Go retries delivery to the active organization administrators.",
+    recommendedAction: null,
+    nextAutomaticStep:
+      "Pin&Go will retry the host response notice automatically and record delivery for every expected recipient.",
+    severity: "INFO",
+    workflowState: "AUTO_RESOLVING",
+    responsibleActor: "PIN_GO",
+    actionRequired: false,
+    canAutoResolve: true,
+    autoResolveStatus: "AVAILABLE",
+    resolutionCode: null,
+    resolutionSummary: null,
+    resolutionType: null,
+    resolvedBy: null,
+  };
+}
+
+function hostResponseNoticeNeedsAttention(
+  reservation: string
+): ProjectionState {
+  return actionRequired(
+    "Property Protection host notice needs attention",
+    `Pin&Go could not confirm delivery of the guest's final Property Protection response for ${reservation}. The response remains recorded and no charge was made.`,
+    "Verify that the organization has active administrator email destinations and contact Pin&Go support before considering host notification complete.",
+    "WARNING"
+  );
+}
+
 export function projectDamageCaseToMissionControl(input: {
   damageCase: DamageCaseMissionControlSource;
   maxMessageRetries: number;
@@ -176,18 +233,29 @@ export function projectDamageCaseToMissionControl(input: {
         };
   } else if (damageCase.status === DamageCaseStatus.GUEST_NOTIFIED) {
     if (damageCase.guestResponse === DamageCaseGuestResponse.DISPUTED) {
+      const deliveryStatus = damageCase.hostResponseDelivery?.status;
       state = actionRequired(
         "Guest disputed the Property Protection case",
-        `The guest disputed the damage case for ${reservation}. No charge was made.`,
-        "Review the guest response and close the case without charge when the review is complete.",
+        deliveryStatus === "SENT"
+          ? `The guest disputed the damage case for ${reservation}, and the host notice was delivered. No charge was made.`
+          : `The guest disputed the damage case for ${reservation}. Host notice delivery is incomplete, but the response remains available in Dashboard and no charge was made.`,
+        deliveryStatus === "SENT"
+          ? "Review the guest response and close the case without charge when the review is complete."
+          : "Review the guest response in Dashboard, verify active administrator email destinations, and close the case without charge when the review is complete.",
         "WARNING"
       );
     } else if (damageCase.guestResponse === DamageCaseGuestResponse.ACCEPTED) {
-      state = waiting(
-        "Guest accepted the Property Protection case",
-        `The guest accepted the damage case for ${reservation}. No charge has been made and financial processing is not enabled.`,
-        "The case will remain non-charging until a host closes it without charge or a separately authorized financial phase is introduced."
-      );
+      const deliveryStatus = damageCase.hostResponseDelivery?.status;
+      state =
+        deliveryStatus === "SENT"
+          ? waiting(
+              "Guest accepted the Property Protection case",
+              `The guest accepted the damage case for ${reservation}, and the host notice was delivered. No charge has been made and financial processing is not enabled.`,
+              "The case will remain non-charging until a host closes it without charge or a separately authorized financial phase is introduced."
+            )
+          : deliveryStatus === "RETRYING"
+            ? autoResolvingHostResponseNotice(reservation)
+            : hostResponseNoticeNeedsAttention(reservation);
     } else if (
       damageCase.guestResponse === DamageCaseGuestResponse.ACKNOWLEDGED
     ) {
@@ -310,6 +378,18 @@ export function projectDamageCaseToMissionControl(input: {
         damageCase.closureNoticeDelivery?.status ?? null,
       closureNoticeRetryCount:
         damageCase.closureNoticeDelivery?.retryCount ?? null,
+      hostResponseDeliveryStatus:
+        damageCase.hostResponseDelivery?.status ?? "NOT_REQUIRED",
+      hostResponseRecipientCount:
+        damageCase.hostResponseDelivery?.recipientCount ?? 0,
+      hostResponseSentCount:
+        damageCase.hostResponseDelivery?.sentCount ?? 0,
+      hostResponseRetryingCount:
+        damageCase.hostResponseDelivery?.retryingCount ?? 0,
+      hostResponseFailedFinalCount:
+        damageCase.hostResponseDelivery?.failedFinalCount ?? 0,
+      hostResponseMissingCount:
+        damageCase.hostResponseDelivery?.missingCount ?? 0,
     },
     transitionCode: `PROPERTY_PROTECTION_${damageCase.status}_${damageCase.guestResponse}`,
     transitionSummary:
@@ -366,20 +446,114 @@ export async function syncDamageCaseMissionControl(input: {
     select: { status: true, retryCount: true },
   });
 
+  const finalGuestResponse =
+    damageCase.guestResponse === DamageCaseGuestResponse.ACCEPTED ||
+    damageCase.guestResponse === DamageCaseGuestResponse.DISPUTED;
+  const maxMessageRetries =
+    resolveDamageCaseMaxMessageRetries(
+      input.maxMessageRetries ?? process.env.MESSAGE_MAX_RETRIES
+    );
+  let hostResponseDelivery: HostResponseDeliverySummary | null = null;
+
+  if (finalGuestResponse) {
+    const recipients = await input.prisma.dashboardUser.findMany({
+      where: {
+        organizationId: damageCase.reservation.property.organizationId,
+        isActive: true,
+        role: DashboardUserRole.ORG_ADMIN,
+      },
+      select: { email: true },
+    });
+    const recipientEmails = [
+      ...new Set(
+        recipients
+          .map((recipient) => recipient.email.trim().toLowerCase())
+          .filter(Boolean)
+      ),
+    ];
+    const messages = recipientEmails.length
+      ? await input.prisma.messageLog.findMany({
+          where: {
+            reservationId: damageCase.reservationId,
+            communicationType:
+              "PROPERTY_PROTECTION_HOST_GUEST_RESPONSE_NOTICE",
+            channel: "email",
+            organizationId:
+              damageCase.reservation.property.organizationId,
+            propertyId: damageCase.reservation.propertyId,
+          },
+          orderBy: [{ createdAt: "desc" }, { id: "desc" }],
+          select: { to: true, status: true, retryCount: true },
+        })
+      : [];
+    const latestByRecipient = new Map<
+      string,
+      { status: string | null; retryCount: number }
+    >();
+
+    for (const message of messages) {
+      const email = message.to.trim().toLowerCase();
+      if (!latestByRecipient.has(email)) {
+        latestByRecipient.set(email, message);
+      }
+    }
+
+    let sentCount = 0;
+    let retryingCount = 0;
+    let failedFinalCount = 0;
+    let missingCount = 0;
+
+    for (const email of recipientEmails) {
+      const delivery = latestByRecipient.get(email);
+      if (!delivery) {
+        missingCount += 1;
+      } else if (delivery.status === "SENT") {
+        sentCount += 1;
+      } else if (
+        delivery.status === "FAILED" &&
+        delivery.retryCount < maxMessageRetries
+      ) {
+        retryingCount += 1;
+      } else {
+        failedFinalCount += 1;
+      }
+    }
+
+    const status: HostResponseDeliveryStatus =
+      recipientEmails.length === 0
+        ? "DESTINATION_MISSING"
+        : failedFinalCount > 0
+          ? "FAILED_FINAL"
+          : missingCount > 0
+            ? "MISSING"
+            : retryingCount > 0
+              ? "RETRYING"
+              : "SENT";
+
+    hostResponseDelivery = {
+      status,
+      recipientCount: recipientEmails.length,
+      sentCount,
+      retryingCount,
+      failedFinalCount,
+      missingCount,
+    };
+  }
+
   const projection = projectDamageCaseToMissionControl({
     damageCase: {
       ...damageCase,
       damageNoticeDelivery,
       closureNoticeDelivery,
+      hostResponseDelivery,
     },
-    maxMessageRetries:
-      input.maxMessageRetries ??
-      Number(process.env.MESSAGE_MAX_RETRIES ?? 3),
+    maxMessageRetries,
   });
 
   if (
-    damageCase.status === DamageCaseStatus.CLOSED_NO_CHARGE &&
-    damageCase.guestNotifiedAt
+    (damageCase.status === DamageCaseStatus.CLOSED_NO_CHARGE &&
+      damageCase.guestNotifiedAt) ||
+    finalGuestResponse
   ) {
     const deliveryObservedAt = new Date();
     projection.lastSignalAt = deliveryObservedAt;
@@ -394,6 +568,31 @@ export async function syncDamageCaseMissionControl(input: {
     where: { operationalKey: projection.operationalKey },
     select: { workflowState: true },
   });
+
+  const reopenReason = finalGuestResponse
+    ? hostResponseDelivery?.status === "SENT"
+      ? {
+          code: "PROPERTY_PROTECTION_FINAL_GUEST_RESPONSE_ACTIVE",
+          summary:
+            "Property Protection reopened the operational projection because the canonical final guest response requires an active operational state.",
+        }
+      : {
+          code: "PROPERTY_PROTECTION_HOST_RESPONSE_DELIVERY_INCOMPLETE",
+          summary:
+            "Property Protection reopened the operational projection because required host response notice delivery is incomplete.",
+        }
+    : damageCase.status === DamageCaseStatus.CLOSED_NO_CHARGE &&
+        damageCase.guestNotifiedAt
+      ? {
+          code: "PROPERTY_PROTECTION_CLOSURE_DELIVERY_INCOMPLETE",
+          summary:
+            "Property Protection reopened the operational projection because required guest closure delivery is incomplete.",
+        }
+      : {
+          code: "PROPERTY_PROTECTION_CANONICAL_STATE_RECONCILIATION",
+          summary:
+            "Property Protection reopened the operational projection because its resolved state did not match the canonical Damage Case.",
+        };
 
   if (
     currentIssue?.workflowState === "RESOLVED" &&
@@ -411,10 +610,8 @@ export async function syncDamageCaseMissionControl(input: {
         canAutoResolve: projection.canAutoResolve,
         autoResolveStatus: projection.autoResolveStatus,
         autoResolveActionCode: projection.autoResolveActionCode,
-        reopenCode:
-          "PROPERTY_PROTECTION_CLOSURE_DELIVERY_INCOMPLETE",
-        reopenSummary:
-          "Property Protection reopened the operational projection because required guest closure delivery is incomplete.",
+        reopenCode: reopenReason.code,
+        reopenSummary: reopenReason.summary,
         reopenedBy: "PIN_GO",
         sourceType: projection.sourceType,
         occurredAt: projection.occurredAt,

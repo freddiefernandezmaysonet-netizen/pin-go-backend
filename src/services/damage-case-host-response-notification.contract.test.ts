@@ -64,6 +64,8 @@ test("host response notice is idempotent per recipient and logged", () => {
     /PROPERTY_PROTECTION_HOST_GUEST_RESPONSE_NOTICE/
   );
   assert.match(notificationService, /messageLog\.findFirst/);
+  assert.match(notificationService, /organizationId:\s*reservation\.property\.organizationId/);
+  assert.match(notificationService, /propertyId:\s*reservation\.propertyId/);
   assert.match(notificationService, /existing\?\.status === "SENT"/);
   assert.match(notificationService, /existing\?\.status === "FAILED"/);
   assert.match(notificationService, /sendLoggedEmail/);
@@ -125,6 +127,13 @@ test("message retry worker retries host response without changing case status", 
     /sendPropertyProtectionHostGuestResponseNotice/
   );
   assert.match(retryWorker, /status: "SENT"/);
+  assert.match(retryWorker, /PROPERTY_PROTECTION_HOST_RESPONSE_SCOPE_MISMATCH/);
+  assert.match(retryWorker, /PROPERTY_PROTECTION_HOST_RESPONSE_RECIPIENT_INACTIVE/);
+  assert.match(retryWorker, /role: "ORG_ADMIN"/);
+  assert.match(retryWorker, /messageLog[\s\S]*updateMany/);
+  assert.match(retryWorker, /retryCount: message\.retryCount/);
+  assert.match(retryWorker, /sentUpdate\.count === 1/);
+  assert.match(retryWorker, /resolveDamageCaseMaxMessageRetries/);
 
   const retryStart = retryWorker.indexOf(
     "async function processPropertyProtectionHostResponseRetries"

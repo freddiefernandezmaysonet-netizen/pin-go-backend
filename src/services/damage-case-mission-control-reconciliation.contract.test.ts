@@ -21,9 +21,29 @@ test("selects missing and stale projections in a bounded deterministic batch", (
   assert.match(reconciler, /closureNoticeRequired/);
   assert.match(reconciler, /closureNoticeDeliveryStatus/);
   assert.match(reconciler, /closureNoticeRetryCount/);
+  assert.match(reconciler, /hostResponseDeliveryStatus/);
+  assert.match(reconciler, /hostResponseRecipientCount/);
+  assert.match(reconciler, /hostResponseSentCount/);
+  assert.match(reconciler, /hostResponseRetryingCount/);
+  assert.match(reconciler, /hostResponseFailedFinalCount/);
+  assert.match(reconciler, /hostResponseMissingCount/);
+  assert.match(reconciler, /host_message\."id" IS NULL/);
+  assert.match(reconciler, /host_message\."id" IS NOT NULL/);
+  assert.match(reconciler, /SELECT DISTINCT/);
+  assert.match(reconciler, /LOWER\(BTRIM\(candidate\."email"\)\)/);
+  assert.match(reconciler, /LOWER\(BTRIM\(ml\."to"\)\)/);
+  assert.match(reconciler, /oi\."organizationId"/);
+  assert.match(reconciler, /oi\."propertyId"/);
+  assert.match(reconciler, /oi\."reservationId"/);
+  assert.match(reconciler, /ml\."organizationId" = property\."organizationId"/);
+  assert.match(reconciler, /ml\."propertyId" = property\."id"/);
   assert.match(
     reconciler,
     /PROPERTY_PROTECTION_GUEST_NO_CHARGE_CLOSURE_NOTICE/
+  );
+  assert.match(
+    reconciler,
+    /PROPERTY_PROTECTION_HOST_GUEST_RESPONSE_NOTICE/
   );
   assert.match(reconciler, /Math\.min\(100/);
   assert.match(reconciler, /ORDER BY dc\."updatedAt" ASC, dc\."id" ASC/);

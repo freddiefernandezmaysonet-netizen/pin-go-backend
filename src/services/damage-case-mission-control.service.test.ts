@@ -8,6 +8,7 @@ import {
 
 import {
   projectDamageCaseToMissionControl,
+  resolveDamageCaseMaxMessageRetries,
   type DamageCaseMissionControlSource,
 } from "./damage-case-mission-control.service.js";
 
@@ -30,6 +31,7 @@ function damageCase(
     },
     damageNoticeDelivery: null,
     closureNoticeDelivery: null,
+    hostResponseDelivery: null,
     ...overrides,
   };
 }
@@ -42,6 +44,13 @@ function project(
     maxMessageRetries: 3,
   });
 }
+
+test("normalizes the retry limit once for projection and reconciliation", () => {
+  assert.equal(resolveDamageCaseMaxMessageRetries(3.9), 3);
+  assert.equal(resolveDamageCaseMaxMessageRetries("2"), 2);
+  assert.equal(resolveDamageCaseMaxMessageRetries(0), 3);
+  assert.equal(resolveDamageCaseMaxMessageRetries(Number.NaN), 3);
+});
 
 test("uses one stable operational identity and preserves tenant scope", () => {
   const first = project();
@@ -103,15 +112,14 @@ test("does not claim auto-resolution when delivery is missing or retries are exh
     assert.equal(result.actionRequired, true);
     assert.equal(result.canAutoResolve, false);
     assert.equal(result.autoResolveStatus, "NOT_SUPPORTED");
-    assert.match(result.issue, /No charge was made/);
+    assert.match(result.issue, /no charge was made/i);
   }
 });
 
-test("projects pending, acknowledged and accepted guest responses as waiting", () => {
+test("projects pending and acknowledged guest responses as waiting", () => {
   for (const guestResponse of [
     DamageCaseGuestResponse.PENDING,
     DamageCaseGuestResponse.ACKNOWLEDGED,
-    DamageCaseGuestResponse.ACCEPTED,
   ]) {
     const result = project({
       status: DamageCaseStatus.GUEST_NOTIFIED,
@@ -124,10 +132,84 @@ test("projects pending, acknowledged and accepted guest responses as waiting", (
   }
 });
 
+test("waits after acceptance only when every host notice was delivered", () => {
+  const result = project({
+    status: DamageCaseStatus.GUEST_NOTIFIED,
+    guestResponse: DamageCaseGuestResponse.ACCEPTED,
+    hostResponseDelivery: {
+      status: "SENT",
+      recipientCount: 2,
+      sentCount: 2,
+      retryingCount: 0,
+      failedFinalCount: 0,
+      missingCount: 0,
+    },
+  });
+
+  assert.equal(result.workflowState, "WAITING");
+  assert.equal(result.actionRequired, false);
+  assert.equal(result.metadata?.hostResponseDeliveryStatus, "SENT");
+  assert.equal(result.metadata?.hostResponseSentCount, 2);
+});
+
+test("auto-resolves an accepted response while any host notice retries", () => {
+  const result = project({
+    status: DamageCaseStatus.GUEST_NOTIFIED,
+    guestResponse: DamageCaseGuestResponse.ACCEPTED,
+    hostResponseDelivery: {
+      status: "RETRYING",
+      recipientCount: 2,
+      sentCount: 1,
+      retryingCount: 1,
+      failedFinalCount: 0,
+      missingCount: 0,
+    },
+  });
+
+  assert.equal(result.workflowState, "AUTO_RESOLVING");
+  assert.equal(result.responsibleActor, "PIN_GO");
+  assert.equal(result.canAutoResolve, true);
+  assert.match(result.issue, /No charge was made/);
+});
+
+test("requires action when accepted-response host delivery is incomplete", () => {
+  for (const status of [
+    "DESTINATION_MISSING",
+    "MISSING",
+    "FAILED_FINAL",
+  ] as const) {
+    const result = project({
+      status: DamageCaseStatus.GUEST_NOTIFIED,
+      guestResponse: DamageCaseGuestResponse.ACCEPTED,
+      hostResponseDelivery: {
+        status,
+        recipientCount: status === "DESTINATION_MISSING" ? 0 : 1,
+        sentCount: 0,
+        retryingCount: 0,
+        failedFinalCount: status === "FAILED_FINAL" ? 1 : 0,
+        missingCount: status === "MISSING" ? 1 : 0,
+      },
+    });
+
+    assert.equal(result.workflowState, "ACTION_REQUIRED");
+    assert.equal(result.actionRequired, true);
+    assert.equal(result.canAutoResolve, false);
+    assert.match(result.issue, /no charge was made/i);
+  }
+});
+
 test("projects a guest dispute as host action required without charging", () => {
   const result = project({
     status: DamageCaseStatus.GUEST_NOTIFIED,
     guestResponse: DamageCaseGuestResponse.DISPUTED,
+    hostResponseDelivery: {
+      status: "SENT",
+      recipientCount: 1,
+      sentCount: 1,
+      retryingCount: 0,
+      failedFinalCount: 0,
+      missingCount: 0,
+    },
   });
 
   assert.equal(result.workflowState, "ACTION_REQUIRED");

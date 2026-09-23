@@ -131,6 +131,8 @@ export async function notifyHostOfGuestDamageCaseResponse(input: {
         communicationType: COMMUNICATION_TYPE,
         channel: "email",
         to: recipient.email,
+        organizationId: reservation.property.organizationId,
+        propertyId: reservation.propertyId,
       },
       orderBy: { createdAt: "desc" },
       select: { id: true, status: true },

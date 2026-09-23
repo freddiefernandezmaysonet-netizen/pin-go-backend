@@ -31,9 +31,27 @@ test("synchronizes guest notices, responses, closure delivery and automatic retr
     /processPropertyProtectionGuestClosureRetries[\s\S]*syncDamageCaseMissionControlSafely/
   );
   assert.match(
+    retryWorker,
+    /processPropertyProtectionHostResponseRetries[\s\S]*syncDamageCaseMissionControlSafely/
+  );
+  assert.match(
+    guestResponse,
+    /const hostNotification = await notifyHostSafely\(input\);[\s\S]*await syncDamageCaseMissionControlSafely[\s\S]*return hostNotification/
+  );
+  assert.equal(
+    guestResponse.match(/await syncDamageCaseMissionControlSafely/g)?.length,
+    1
+  );
+  assert.match(
     projector,
     /PROPERTY_PROTECTION_GUEST_NO_CHARGE_CLOSURE_NOTICE/
   );
+  assert.match(
+    projector,
+    /PROPERTY_PROTECTION_HOST_GUEST_RESPONSE_NOTICE/
+  );
+  assert.match(projector, /message\.to\.trim\(\)\.toLowerCase\(\)/);
+  assert.doesNotMatch(projector, /to:\s*\{\s*in:\s*recipientEmails/);
 });
 
 test("persists one canonical issue through the existing Operational Intelligence service", () => {
@@ -50,6 +68,18 @@ test("uses the explicit APMS reopen contract when closure delivery becomes incom
   assert.match(
     projector,
     /PROPERTY_PROTECTION_CLOSURE_DELIVERY_INCOMPLETE/
+  );
+  assert.match(
+    projector,
+    /PROPERTY_PROTECTION_HOST_RESPONSE_DELIVERY_INCOMPLETE/
+  );
+  assert.match(
+    projector,
+    /PROPERTY_PROTECTION_FINAL_GUEST_RESPONSE_ACTIVE/
+  );
+  assert.match(
+    projector,
+    /PROPERTY_PROTECTION_CANONICAL_STATE_RECONCILIATION/
   );
   assert.match(projector, /deliveryObservedAt/);
   assert.match(
