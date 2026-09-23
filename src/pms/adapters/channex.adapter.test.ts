@@ -130,6 +130,43 @@ test("fetchBookingRevision uses only the revision endpoint", async () => {
   }
 });
 
+test("booking revision reads Channex customer.mail and phone", async () => {
+  process.env.CHANNEX_API_KEY = "test-api-key";
+  const originalGet = axios.get;
+  axios.get = (async () => ({
+    data: {
+      data: {
+        ...REVISION_FIXTURE.data,
+        attributes: {
+          ...REVISION_FIXTURE.data.attributes,
+          guest_email: undefined,
+          guest_phone: undefined,
+          customer: {
+            name: "Test Guest",
+            mail: "guest@example.com",
+            phone: "+17875550123",
+          },
+        },
+      },
+    },
+  })) as typeof axios.get;
+
+  try {
+    const fetchBookingRevision = requireAdapterMethod(
+      channexAdapter.fetchBookingRevision,
+      "fetchBookingRevision"
+    );
+    const result = await fetchBookingRevision({
+      connection: {},
+      revisionId: "revision-001",
+    });
+    assert.equal(result.reservation.guest?.email, "guest@example.com");
+    assert.equal(result.reservation.guest?.phone, "+17875550123");
+  } finally {
+    axios.get = originalGet;
+  }
+});
+
 test("Channex adapter does not expose Booking Find or booking-by-id", () => {
   assert.equal(channexAdapter.fetchReservation, undefined);
 });
