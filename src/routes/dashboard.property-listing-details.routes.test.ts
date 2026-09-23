@@ -1,0 +1,26 @@
+import assert from "node:assert/strict";
+import test from "node:test";
+import fs from "node:fs";
+import path from "node:path";
+
+const routeSource = fs.readFileSync(
+  path.resolve("src/routes/dashboard.property-listing-details.routes.ts"),
+  "utf8"
+);
+const serverSource = fs.readFileSync(path.resolve("src/server.ts"), "utf8");
+
+test("listing-details API exposes authenticated GET and PUT routes", () => {
+  assert.match(routeSource, /router\.get\([\s\S]*"\/api\/dashboard\/properties\/:id\/listing-details"[\s\S]*requireAuth/);
+  assert.match(routeSource, /router\.put\([\s\S]*"\/api\/dashboard\/properties\/:id\/listing-details"[\s\S]*requireAuth/);
+});
+
+test("listing-details writes are tenant-scoped and transactional", () => {
+  assert.match(routeSource, /organizationId: orgId/);
+  assert.match(routeSource, /prisma\.\$transaction/);
+  assert.match(routeSource, /version: \{ increment: 1 \}/);
+});
+
+test("server registers the dedicated listing-details router", () => {
+  assert.match(serverSource, /buildDashboardPropertyListingDetailsRouter/);
+  assert.match(serverSource, /app\.use\(buildDashboardPropertyListingDetailsRouter\(prisma\)\)/);
+});
