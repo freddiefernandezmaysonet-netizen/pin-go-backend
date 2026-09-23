@@ -26,6 +26,7 @@ on:
       - "src/services/damage-case-mission-control-reconciliation.service.ts"
       - "src/services/damage-case-mission-control-reconciliation.service.test.ts"
       - "src/services/damage-case-mission-control-reconciliation.contract.test.ts"
+      - "src/services/damage-case-mission-control-reconciliation.db.test.ts"
       - "src/services/email-delivery.service.ts"
       - "src/lib/mailer.ts"
       - "src/workers/message.retry.worker.ts"

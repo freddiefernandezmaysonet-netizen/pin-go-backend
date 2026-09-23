@@ -1,0 +1,52 @@
+name: Property Protection Reconciliation PostgreSQL
+
+on:
+  pull_request:
+    paths:
+      - ".github/workflows/property-protection-reconciliation-db.yml"
+      - "src/services/damage-case-mission-control*.ts"
+      - "src/apms/operational-intelligence*.ts"
+      - "prisma/**"
+      - "package.json"
+      - "package-lock.json"
+
+permissions:
+  contents: read
+
+jobs:
+  certify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: pingo_pp_reconciliation_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d pingo_pp_reconciliation_test"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      DATABASE_URL: postgresql://postgres:postgres@127.0.0.1:5432/pingo_pp_reconciliation_test
+      PROPERTY_PROTECTION_TEST_DATABASE_URL: postgresql://postgres:postgres@127.0.0.1:5432/pingo_pp_reconciliation_test
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - name: Install locked dependencies without lifecycle scripts
+        run: npm ci --ignore-scripts --no-audit --no-fund
+      - name: Generate client and materialize schema in disposable PostgreSQL only
+        run: |
+          ./node_modules/.bin/prisma generate --schema ./prisma
+          ./node_modules/.bin/prisma db push --schema ./prisma --skip-generate
+      - name: Type check focused integration suite
+        run: ./node_modules/.bin/tsc --noEmit --skipLibCheck --module nodenext --moduleResolution nodenext --target es2022 src/services/damage-case-mission-control-reconciliation.db.test.ts
+      - name: Run actual SQL and canonical projector without workers or delivery providers
+        run: node --import tsx --test src/services/damage-case-mission-control-reconciliation.db.test.ts
