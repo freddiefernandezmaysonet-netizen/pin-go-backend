@@ -1,0 +1,82 @@
+name: Prepare isolated Mission Control patch
+on:
+  push:
+    branches: ['agent/mission-control-e13-decoupling-v1']
+    paths: ['.github/scripts/prepare-mission-control-e13.py']
+permissions:
+  contents: read
+concurrency:
+  group: prepare-mission-control-e13-backend
+  cancel-in-progress: false
+jobs:
+  prepare:
+    if: github.repository == 'freddiefernandezmaysonet-netizen/pin-go-backend' && github.ref == 'refs/heads/agent/mission-control-e13-decoupling-v1'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: write
+    env:
+      DATABASE_URL: postgresql://ci:ci@127.0.0.1:1/unused
+      NODE_ENV: test
+      BASE_SHA: 95d4393de1406d66e966c6223a22b5b626b3da61
+      TARGET_BRANCH: agent/mission-control-e13-decoupling-v1
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+      - name: Guard audited base and isolated branch
+        run: |
+          test "$GITHUB_REF" = "refs/heads/$TARGET_BRANCH"
+          test "$(git rev-parse HEAD^)" = "$BASE_SHA"
+          test "$(git ls-remote origin "refs/heads/$TARGET_BRANCH" | cut -f1)" = "$GITHUB_SHA"
+      - run: npm ci --ignore-scripts --no-audit --no-fund
+      - run: npx --no-install prisma generate --schema prisma/schema.prisma
+      - name: Verify unmodified API baseline and reporting contracts
+        run: |
+          npx --no-install esbuild src/server.ts --bundle --platform=node --format=esm --packages=external --outfile="$RUNNER_TEMP/api-before.mjs"
+          node --import tsx --test src/apms/mission-control-projection.test.ts src/services/guest-journey-e13-runtime-truth.contract.test.ts src/services/guest-journey-runtime-enforcement.contract.test.ts
+      - name: Apply exact audited replacements, one file at a time
+        run: python .github/scripts/prepare-mission-control-e13.py
+      - name: Certify response preservation and compile without starting the application
+        run: |
+          node --import tsx --test src/apms/mission-control-observational.test.ts src/apms/mission-control-projection.test.ts src/services/guest-journey-e13-runtime-truth.contract.test.ts src/services/guest-journey-runtime-enforcement.contract.test.ts
+          npx --no-install tsc --noEmit --strict --target es2022 --module nodenext --moduleResolution nodenext --allowImportingTsExtensions --skipLibCheck --types node src/apms/mission-control-observational.ts src/apms/mission-control-observational.test.ts
+          npx --no-install esbuild src/server.ts --bundle --platform=node --format=esm --packages=external --outfile="$RUNNER_TEMP/api-after.mjs"
+          git diff --check
+      - name: Remove temporary preparer and verify exact final scope
+        run: |
+          git rm -- .github/scripts/prepare-mission-control-e13.py .github/workflows/prepare-mission-control-e13.yml
+          git add -- src/routes/dashboard.properties.route.ts src/services/guest-journey-e13-runtime-truth.contract.test.ts src/services/guest-journey-runtime-enforcement.contract.test.ts .github/workflows/ota-airbnb-listing-discovery.yml
+          git diff --name-only "$BASE_SHA" | sort > "$RUNNER_TEMP/actual.txt"
+          cat > "$RUNNER_TEMP/allowed.txt" <<'EOF'
+          .github/workflows/mission-control-observational-certification.yml
+          .github/workflows/ota-airbnb-listing-discovery.yml
+          src/apms/mission-control-observational.test.ts
+          src/apms/mission-control-observational.ts
+          src/routes/dashboard.properties.route.ts
+          src/services/guest-journey-e13-runtime-truth.contract.test.ts
+          src/services/guest-journey-runtime-enforcement.contract.test.ts
+          EOF
+          sort "$RUNNER_TEMP/allowed.txt" -o "$RUNNER_TEMP/allowed.txt"
+          diff -u "$RUNNER_TEMP/allowed.txt" "$RUNNER_TEMP/actual.txt"
+          git diff --exit-code "$BASE_SHA" -- src/workers src/e14 src/e15 prisma src/services/guest-journey.service.ts src/services/ttlock src/server.ts package.json package-lock.json
+          git diff --cached --check
+      - name: Publish only the verified candidate branch (never main)
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          test "$GITHUB_REF" = "refs/heads/$TARGET_BRANCH"
+          test "$TARGET_BRANCH" = "agent/mission-control-e13-decoupling-v1"
+          test "$(git ls-remote origin "refs/heads/$TARGET_BRANCH" | cut -f1)" = "$GITHUB_SHA"
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git commit -m 'Decouple host Mission Control from Enterprise global health'
+          AUTH_HEADER="$(printf 'x-access-token:%s' "$GH_TOKEN" | base64 -w0)"
+          git -c "http.https://github.com/.extraheader=AUTHORIZATION: basic $AUTH_HEADER" push origin "HEAD:refs/heads/$TARGET_BRANCH"
+          git rev-parse HEAD
