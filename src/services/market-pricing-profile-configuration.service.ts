@@ -36,6 +36,27 @@ export type ConfigureMarketPricingProfileInput = {
   };
 };
 
+const PROFILE_SELECT = {
+  id: true,
+  propertyId: true,
+  enabled: true,
+  provider: true,
+  currency: true,
+  strategy: true,
+  position: true,
+  aggressiveness: true,
+  minimumConfidence: true,
+  maximumIncreasePercent: true,
+  maximumDecreasePercent: true,
+  marketRadiusKm: true,
+  maximumComparables: true,
+  refreshIntervalHours: true,
+  nextRefreshAt: true,
+  lastSuccessfulRefreshAt: true,
+  lastErrorCode: true,
+  updatedAt: true,
+} as const;
+
 function requiredId(value: string, code: string): string {
   const clean = String(value ?? "").trim();
   if (!clean) throw new Error(code);
@@ -160,6 +181,36 @@ function configuration(
   };
 }
 
+export async function getMarketPricingProfileConfiguration(
+  prisma: PrismaClient,
+  input: { organizationId: string; propertyId: string },
+) {
+  const organizationId = requiredId(
+    input.organizationId,
+    "MARKET_PRICING_ORGANIZATION_ID_REQUIRED",
+  );
+  const propertyId = requiredId(
+    input.propertyId,
+    "MARKET_PRICING_PROPERTY_ID_REQUIRED",
+  );
+  const property = await prisma.property.findFirst({
+    where: {
+      id: propertyId,
+      organizationId,
+      status: { not: "ARCHIVED" },
+    },
+    select: {
+      id: true,
+      marketPricingProfile: { select: PROFILE_SELECT },
+    },
+  });
+  if (!property) throw new Error("MARKET_PRICING_PROPERTY_NOT_FOUND");
+
+  return property.marketPricingProfile
+    ? { configured: true as const, profile: property.marketPricingProfile }
+    : { configured: false as const, profile: null };
+}
+
 export async function configureMarketPricingProfile(
   prisma: PrismaClient,
   input: ConfigureMarketPricingProfileInput,
@@ -213,24 +264,6 @@ export async function configureMarketPricingProfile(
       nextRefreshAt: null,
       lastErrorCode: null,
     },
-    select: {
-      id: true,
-      propertyId: true,
-      enabled: true,
-      provider: true,
-      currency: true,
-      strategy: true,
-      position: true,
-      aggressiveness: true,
-      minimumConfidence: true,
-      maximumIncreasePercent: true,
-      maximumDecreasePercent: true,
-      marketRadiusKm: true,
-      maximumComparables: true,
-      refreshIntervalHours: true,
-      nextRefreshAt: true,
-      lastErrorCode: true,
-      updatedAt: true,
-    },
+    select: PROFILE_SELECT,
   });
 }

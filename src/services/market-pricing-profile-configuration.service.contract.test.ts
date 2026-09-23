@@ -3,7 +3,10 @@ import test from "node:test";
 
 import type { PrismaClient } from "@prisma/client";
 
-import { configureMarketPricingProfile } from "./market-pricing-profile-configuration.service";
+import {
+  configureMarketPricingProfile,
+  getMarketPricingProfileConfiguration,
+} from "./market-pricing-profile-configuration.service";
 
 function prismaDouble(input: {
   property?: { id: string; marketPricingProfile: { provider: string | null } | null } | null;
@@ -220,5 +223,54 @@ test("a provider can only be removed while the profile is disabled", async () =>
       configuration: { enabled: true, currency: "USD" },
     }),
     /MARKET_PRICING_PROVIDER_REQUIRED_FOR_ACTIVATION/,
+  );
+});
+
+test("read model reports an unconfigured property without inventing defaults", async () => {
+  const { prisma, calls } = prismaDouble();
+
+  const result = await getMarketPricingProfileConfiguration(prisma, {
+    organizationId: "organization-1",
+    propertyId: "property-1",
+  });
+
+  assert.deepEqual(result, { configured: false, profile: null });
+  assert.equal(calls.propertyQuery.length, 1);
+});
+
+test("read model returns the stored profile through a tenant-scoped lookup", async () => {
+  const profile = {
+    id: "profile-1",
+    propertyId: "property-1",
+    enabled: true,
+    provider: "existing-provider",
+    currency: "USD",
+  };
+  const { prisma, calls } = prismaDouble({
+    property: { id: "property-1", marketPricingProfile: profile },
+  });
+
+  const result = await getMarketPricingProfileConfiguration(prisma, {
+    organizationId: "organization-1",
+    propertyId: "property-1",
+  });
+
+  assert.deepEqual(result, { configured: true, profile });
+  assert.deepEqual((calls.propertyQuery[0] as any).where, {
+    id: "property-1",
+    organizationId: "organization-1",
+    status: { not: "ARCHIVED" },
+  });
+});
+
+test("read model does not reveal a missing or cross-tenant property", async () => {
+  const { prisma } = prismaDouble({ property: null });
+
+  await assert.rejects(
+    getMarketPricingProfileConfiguration(prisma, {
+      organizationId: "another-organization",
+      propertyId: "property-1",
+    }),
+    /MARKET_PRICING_PROPERTY_NOT_FOUND/,
   );
 });
