@@ -15,7 +15,7 @@ permissions:
 
 jobs:
   certify:
-    name: Public listing projection and TypeScript
+    name: Public listing projection contract
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
