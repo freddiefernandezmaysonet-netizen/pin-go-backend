@@ -25,6 +25,7 @@ import {
   syncDamageCaseMissionControlSafely,
 } from "../services/damage-case-mission-control.service";
 import { reconcileDamageCaseMissionControl } from "../services/damage-case-mission-control-reconciliation.service";
+import { isDamageCaseAfterCheckout } from "../services/damage-case-checkout.policy.js";
 
 const WORKER_NAME = "message.retry.worker";
 const POLL_MS = Number(process.env.MESSAGE_RETRY_POLL_MS ?? 30000);
@@ -810,6 +811,18 @@ function parsePropertyProtectionDamageNoticeRetryPayload(
   }
 }
 
+// Cycle through bounded pages so a deferred pre-checkout case cannot block
+// unrelated eligible notices behind it. Cursors are hints, never delivery state.
+const damageRetryCursors = new Map<string, string>();
+function damageRetryPage(type: string) {
+  const id = damageRetryCursors.get(type);
+  return id ? { cursor: { id }, skip: 1 } : {};
+}
+function advanceDamageRetryPage(type: string, messages: { id: string }[]) {
+  if (messages.length === BATCH_SIZE) damageRetryCursors.set(type, messages[messages.length - 1].id);
+  else damageRetryCursors.delete(type);
+}
+
 async function processPropertyProtectionDamageNoticeRetries() {
   const failedEmailMessages = await prisma.messageLog.findMany({
     where: {
@@ -819,9 +832,11 @@ async function processPropertyProtectionDamageNoticeRetries() {
       retryCount: { lt: MAX_RETRIES },
       communicationType: "PROPERTY_PROTECTION_GUEST_DAMAGE_NOTICE",
     },
+    ...damageRetryPage("damage"),
     take: BATCH_SIZE,
-    orderBy: { createdAt: "asc" },
+    orderBy: [{ createdAt: "asc" }, { id: "asc" }],
   });
+  advanceDamageRetryPage("damage", failedEmailMessages);
 
   for (const message of failedEmailMessages) {
     try {
@@ -840,6 +855,7 @@ async function processPropertyProtectionDamageNoticeRetries() {
           reservation: {
             select: {
               id: true,
+              checkOut: true,
               reservationNumber: true,
               guestName: true,
               guestEmail: true,
@@ -866,6 +882,8 @@ async function processPropertyProtectionDamageNoticeRetries() {
           "PROPERTY_PROTECTION_DAMAGE_NOTICE_CASE_NOT_PENDING"
         );
       }
+
+      if (!isDamageCaseAfterCheckout(damageCase.reservation.checkOut)) continue;
 
       const reservation = damageCase.reservation;
       const guestEmail = String(reservation.guestEmail ?? "").trim();
@@ -1043,9 +1061,11 @@ async function processPropertyProtectionGuestClosureRetries() {
       communicationType:
         "PROPERTY_PROTECTION_GUEST_NO_CHARGE_CLOSURE_NOTICE",
     },
+    ...damageRetryPage("closure"),
     take: BATCH_SIZE,
-    orderBy: { createdAt: "asc" },
+    orderBy: [{ createdAt: "asc" }, { id: "asc" }],
   });
+  advanceDamageRetryPage("closure", failedEmailMessages);
 
   for (const message of failedEmailMessages) {
     try {
@@ -1067,6 +1087,7 @@ async function processPropertyProtectionGuestClosureRetries() {
           reservation: {
             select: {
               id: true,
+              checkOut: true,
               reservationNumber: true,
               guestName: true,
               guestEmail: true,
@@ -1093,6 +1114,8 @@ async function processPropertyProtectionGuestClosureRetries() {
           "PROPERTY_PROTECTION_GUEST_CLOSURE_CASE_NOT_ELIGIBLE"
         );
       }
+
+      if (!isDamageCaseAfterCheckout(damageCase.reservation.checkOut)) continue;
 
       const reservation = damageCase.reservation;
       const guestEmail = String(reservation.guestEmail ?? "").trim();
@@ -1287,9 +1310,11 @@ async function processPropertyProtectionHostResponseRetries() {
       communicationType:
         "PROPERTY_PROTECTION_HOST_GUEST_RESPONSE_NOTICE",
     },
+    ...damageRetryPage("host"),
     take: BATCH_SIZE,
-    orderBy: { createdAt: "asc" },
+    orderBy: [{ createdAt: "asc" }, { id: "asc" }],
   });
+  advanceDamageRetryPage("host", failedEmailMessages);
 
   for (const message of failedEmailMessages) {
     try {
@@ -1309,6 +1334,7 @@ async function processPropertyProtectionHostResponseRetries() {
           reservation: {
             select: {
               id: true,
+              checkOut: true,
               reservationNumber: true,
               propertyId: true,
               property: {
@@ -1327,6 +1353,8 @@ async function processPropertyProtectionHostResponseRetries() {
           "PROPERTY_PROTECTION_HOST_RESPONSE_CASE_CHANGED"
         );
       }
+
+      if (!isDamageCaseAfterCheckout(damageCase.reservation.checkOut)) continue;
 
       if (
         payload.recipientEmail !==

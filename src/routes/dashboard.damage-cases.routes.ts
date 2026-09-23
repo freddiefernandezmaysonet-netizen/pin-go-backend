@@ -1,4 +1,5 @@
 import { Router, type Request, type Response } from "express";
+import { isDamageCaseAfterCheckout } from "../services/damage-case-checkout.policy.js";
 import { DamageCaseStatus, Prisma, PrismaClient } from "@prisma/client";
 import { requireAuth } from "../middleware/requireAuth";
 import { evaluateDamageCasePolicy } from "../services/damage-case-policy.service.js";
@@ -233,6 +234,7 @@ export function buildDashboardDamageCasesRouter(prisma: PrismaClient) {
       include: {
         reservation: {
           select: {
+            checkOut: true,
             propertyProtectionRequiredSnapshot: true,
             maxDamageLiabilityAmountSnapshot: true,
             damagePaymentMethodStatus: true,
@@ -245,6 +247,10 @@ export function buildDashboardDamageCasesRouter(prisma: PrismaClient) {
     if (!existing) return res.status(404).json({ ok: false, error: "DAMAGE_CASE_NOT_FOUND" });
     if (existing.status !== DamageCaseStatus.HOST_REVIEW) {
       return res.status(409).json({ ok: false, error: "DAMAGE_CASE_APPROVAL_TRANSITION_INVALID" });
+    }
+
+    if (!isDamageCaseAfterCheckout(existing.reservation.checkOut)) {
+      return res.status(409).json({ ok: false, error: "DAMAGE_CASE_CHECKOUT_REQUIRED" });
     }
 
     const policy = evaluateDamageCasePolicy({
@@ -287,8 +293,14 @@ export function buildDashboardDamageCasesRouter(prisma: PrismaClient) {
         id: String(req.params.id),
         reservation: { property: { organizationId: auth.orgId } },
       },
+      include: { reservation: { select: { checkOut: true } } },
     });
     if (!existing) return res.status(404).json({ ok: false, error: "DAMAGE_CASE_NOT_FOUND" });
+    // Do not lose a closure notice if an already-notified stay was extended.
+    // Internal, never-notified cases can still be closed without contacting the guest.
+    if (existing.guestNotifiedAt && !isDamageCaseAfterCheckout(existing.reservation.checkOut)) {
+      return res.status(409).json({ ok: false, error: "DAMAGE_CASE_CHECKOUT_REQUIRED" });
+    }
     if (existing.status === DamageCaseStatus.CLOSED_NO_CHARGE) {
       const guestClosureNotification = await notifyGuestOfClosureSafely({
         prisma,
