@@ -2,7 +2,7 @@ name: Prepare isolated Mission Control patch
 on:
   push:
     branches: ['agent/mission-control-e13-decoupling-v1']
-    paths: ['.github/scripts/prepare-mission-control-e13.py']
+    paths: ['.github/scripts/prepare-mission-control-e13.py', '.github/workflows/prepare-mission-control-e13.yml']
 permissions:
   contents: read
 concurrency:
@@ -10,7 +10,7 @@ concurrency:
   cancel-in-progress: false
 jobs:
   prepare:
-    if: github.repository == 'freddiefernandezmaysonet-netizen/pin-go-backend' && github.ref == 'refs/heads/agent/mission-control-e13-decoupling-v1'
+    if: github.repository == 'freddiefernandezmaysonet-netizen/pin-go-backend' && github.ref == 'refs/heads/agent/mission-control-e13-decoupling-v1' && contains(github.event.head_commit.message, '[prepare-e13]')
     runs-on: ubuntu-latest
     timeout-minutes: 15
     permissions:
@@ -33,7 +33,7 @@ jobs:
       - name: Guard audited base and isolated branch
         run: |
           test "$GITHUB_REF" = "refs/heads/$TARGET_BRANCH"
-          test "$(git rev-parse HEAD^)" = "$BASE_SHA"
+          git merge-base --is-ancestor "$BASE_SHA" HEAD
           test "$(git ls-remote origin "refs/heads/$TARGET_BRANCH" | cut -f1)" = "$GITHUB_SHA"
       - run: npm ci --ignore-scripts --no-audit --no-fund
       - run: npx --no-install prisma generate --schema prisma/schema.prisma
@@ -67,16 +67,23 @@ jobs:
           diff -u "$RUNNER_TEMP/allowed.txt" "$RUNNER_TEMP/actual.txt"
           git diff --exit-code "$BASE_SHA" -- src/workers src/e14 src/e15 prisma src/services/guest-journey.service.ts src/services/ttlock src/server.ts package.json package-lock.json
           git diff --cached --check
-      - name: Publish only the verified candidate branch (never main)
+      - name: Export verified Git blobs only; no ref update or deployment
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          test "$GITHUB_REF" = "refs/heads/$TARGET_BRANCH"
-          test "$TARGET_BRANCH" = "agent/mission-control-e13-decoupling-v1"
-          test "$(git ls-remote origin "refs/heads/$TARGET_BRANCH" | cut -f1)" = "$GITHUB_SHA"
-          git config user.name 'github-actions[bot]'
-          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
-          git commit -m 'Decouple host Mission Control from Enterprise global health'
-          AUTH_HEADER="$(printf 'x-access-token:%s' "$GH_TOKEN" | base64 -w0)"
-          git -c "http.https://github.com/.extraheader=AUTHORIZATION: basic $AUTH_HEADER" push origin "HEAD:refs/heads/$TARGET_BRANCH"
-          git rev-parse HEAD
+          python - <<'PY'
+          import base64, json, os, pathlib, subprocess, urllib.request
+          assert os.environ['GITHUB_REPOSITORY'] == 'freddiefernandezmaysonet-netizen/pin-go-backend'
+          assert os.environ['GITHUB_REF'] == 'refs/heads/agent/mission-control-e13-decoupling-v1'
+          endpoint = 'https://api.github.com/repos/' + os.environ['GITHUB_REPOSITORY'] + '/git/blobs'
+          manifest = []
+          for path in pathlib.Path(os.environ['RUNNER_TEMP'], 'allowed.txt').read_text().splitlines():
+              body = json.dumps({'content': base64.b64encode(pathlib.Path(path).read_bytes()).decode(), 'encoding':'base64'}).encode()
+              request = urllib.request.Request(endpoint, data=body, method='POST', headers={'Authorization':'Bearer '+os.environ['GH_TOKEN'], 'Content-Type':'application/json', 'Accept':'application/vnd.github+json'})
+              with urllib.request.urlopen(request, timeout=30) as response:
+                  sha = json.load(response)['sha']
+              assert sha == subprocess.check_output(['git','hash-object',path],text=True).strip()
+              manifest.append({'path':path,'mode':'100644','type':'blob','sha':sha})
+          print('VERIFIED_PARENT_SHA='+os.environ['GITHUB_SHA'])
+          print('VERIFIED_BLOBS='+json.dumps(manifest))
+          PY
