@@ -13,6 +13,8 @@ on:
       - "src/services/damage-case-policy.service.ts"
       - "src/services/damage-case-checkout.policy.ts"
       - "src/services/damage-case-checkout.policy.test.ts"
+      - "src/services/damage-case-charge-eligibility.policy.ts"
+      - "src/services/damage-case-charge-eligibility.policy.test.ts"
       - "src/services/damage-case-policy.service.test.ts"
       - "src/services/damage-case-guest-notification.service.ts"
       - "src/services/damage-case-guest-notification.contract.test.ts"
@@ -76,6 +78,13 @@ jobs:
           node --import tsx --test src/routes/public-booking.property-protection-guest-portal.contract.test.ts
           node --import tsx --test src/services/damage-case-policy.service.test.ts
           node --import tsx --test src/services/damage-case-checkout.policy.test.ts
+          node --import tsx --test src/services/damage-case-charge-eligibility.policy.test.ts
+
+      - name: Type-check isolated damage payment eligibility policy
+        run: npx tsc --noEmit --strict --skipLibCheck --module nodenext --moduleResolution nodenext --target es2022 src/services/damage-case-charge-eligibility.policy.test.ts
+
+      - name: Continue non-charging Damage Case certification
+        run: |
           node --import tsx --test src/services/damage-case-guest-notification.contract.test.ts
           node --import tsx --test src/services/damage-case-guest-closure-notification.contract.test.ts
           node --import tsx --test src/services/damage-case-guest-response.contract.test.ts
