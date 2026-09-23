@@ -34,6 +34,7 @@ import {
   type CanonicalOtaReadinessClient,
 } from "./channex-canonical-readiness.service.js";
 import { applyChannexChannelLifecycleEvidence } from "./channex-channel-lifecycle.evidence.js";
+import { createInitialDistributionEnablement } from "./ota-initial-distribution-enablement.service.js";
 import { buildOtaConnectionCenterComposition } from "./ota-connection-center.composition.js";
 import { resolveOtaConnectionCenterConfig } from "./ota-connection-center.config.js";
 import { configureProductionChannexChannelLifecycleWebhook } from "./channex-channel-lifecycle-webhook-registration.js";
@@ -307,6 +308,7 @@ export function buildRuntimeOtaConnectionCenterComposition(args: {
   const actions = buildOtaConnectionCenterComposition({
     prisma: args.prisma,
     runtimeValue: "true",
+    initialDistributionEnablement: createInitialDistributionEnablement(args.prisma),
     trustedMutationOrigins: args.trustedMutationOrigins,
     allowedLaunchOrigins: config.provider.allowedLaunchOrigins,
     defaultCurrency: config.provider.defaultCurrency,
