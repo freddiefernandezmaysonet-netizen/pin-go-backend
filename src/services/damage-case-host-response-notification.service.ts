@@ -106,6 +106,7 @@ export async function notifyHostOfGuestDamageCaseResponse(input: {
     };
   }
 
+  const guestResponse = damageCase.guestResponse as FinalGuestResponse;
   const reservation = damageCase.reservation;
   const reservationDetailUrl = buildReservationDetailUrl(reservation.id);
   if (!reservationDetailUrl) {
@@ -166,7 +167,7 @@ export async function notifyHostOfGuestDamageCaseResponse(input: {
       organizationId: reservation.property.organizationId,
       retryPayload: {
         damageCaseId: damageCase.id,
-        guestResponse: damageCase.guestResponse,
+        guestResponse: guestResponse,
         recipientEmail: recipient.email,
         hostName: recipient.fullName,
       },
@@ -177,10 +178,10 @@ export async function notifyHostOfGuestDamageCaseResponse(input: {
           reservationNumber:
             reservation.reservationNumber ?? reservation.id,
           propertyName: reservation.property.name,
-          guestResponse: damageCase.guestResponse,
+          guestResponse: guestResponse,
           reservationDetailUrl,
           idempotencyKey:
-            `property-protection-host-response-${damageCase.id}-${damageCase.guestResponse}-${recipient.email}`,
+            `property-protection-host-response-${damageCase.id}-${guestResponse}-${recipient.email}`,
         }),
     });
 
@@ -197,6 +198,6 @@ export async function notifyHostOfGuestDamageCaseResponse(input: {
     alreadySent,
     pendingRetry,
     failed,
-    guestResponse: damageCase.guestResponse,
+    guestResponse: guestResponse,
   };
 }
