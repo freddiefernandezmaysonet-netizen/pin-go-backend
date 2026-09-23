@@ -290,11 +290,210 @@ model Property {
   otaChannelConnections     OtaChannelConnection[]
   otaConnectionSessions     OtaConnectionSession[]
   nearbyPlaces              PropertyNearbyPlace[]
+  listingDetails           PropertyListingDetails?
 
 
   @@index([organizationId])
   @@index([organizationId, status])
   @@unique([organizationId, slug])
+}
+
+enum ListingAccommodationType {
+  ENTIRE_PLACE
+  PRIVATE_ROOM
+  SHARED_ROOM
+}
+
+enum ListingPermissionState {
+  ALLOWED
+  NOT_ALLOWED
+  UNKNOWN
+}
+
+enum ListingTruthState {
+  YES
+  NO
+  UNKNOWN
+}
+
+enum ListingParkingType {
+  PRIVATE
+  GARAGE
+  DRIVEWAY
+  STREET
+  LOT
+  OTHER
+}
+
+enum ListingParkingFeeType {
+  FREE
+  PAID
+  UNKNOWN
+}
+
+enum ListingSleepingAreaKind {
+  BEDROOM
+  SLEEPING_AREA
+}
+
+enum ListingBedType {
+  KING
+  QUEEN
+  DOUBLE
+  SINGLE
+  BUNK
+  SOFA_BED
+  FUTON
+  CRIB
+  OTHER
+}
+
+enum ListingSharedSpaceType {
+  POOL
+  HOT_TUB
+  KITCHEN
+  PATIO
+  YARD
+  LIVING_ROOM
+  LAUNDRY
+  OTHER
+}
+
+enum ListingSafetyConsiderationType {
+  POOL
+  HOT_TUB
+  WATERFRONT
+  HEIGHTS
+  STAIRS
+  OTHER
+}
+
+model PropertyListingDetails {
+  id                              String                   @id @default(cuid())
+  propertyId                      String                   @unique
+  version                         Int                      @default(1)
+  accommodationType               ListingAccommodationType?
+  bedroomCount                    Int?
+  fullBathroomCount               Int?
+  halfBathroomCount               Int?
+  minimumPrimaryBookingGuestAge   Int?
+  childrenPolicy                  ListingPermissionState   @default(UNKNOWN)
+  infantsPolicy                   ListingPermissionState   @default(UNKNOWN)
+  adultsOnly                      ListingTruthState        @default(UNKNOWN)
+  petsPolicy                      ListingPermissionState   @default(UNKNOWN)
+  smokingPolicy                   ListingPermissionState   @default(UNKNOWN)
+  vapingPolicy                    ListingPermissionState   @default(UNKNOWN)
+  eventsPolicy                    ListingPermissionState   @default(UNKNOWN)
+  unregisteredVisitorsPolicy      ListingPermissionState   @default(UNKNOWN)
+  quietHoursEnabled               ListingTruthState        @default(UNKNOWN)
+  quietHoursStart                 String?                  @db.VarChar(5)
+  quietHoursEnd                   String?                  @db.VarChar(5)
+  parkingAvailability             ListingTruthState        @default(UNKNOWN)
+  parkingType                     ListingParkingType?
+  parkingFeeType                  ListingParkingFeeType?
+  parkingVehicleCapacity          Int?
+  smokeDetector                   ListingTruthState        @default(UNKNOWN)
+  carbonMonoxideDetector          ListingTruthState        @default(UNKNOWN)
+  exteriorSecurityCameras         ListingTruthState        @default(UNKNOWN)
+  exteriorSecurityCamerasDisclosureEn String?
+  exteriorSecurityCamerasDisclosureEs String?
+  animalsOnProperty               ListingTruthState        @default(UNKNOWN)
+  animalsOnPropertyDisclosureEn   String?
+  animalsOnPropertyDisclosureEs   String?
+  stepFreeEntrance                ListingTruthState        @default(UNKNOWN)
+  entranceStepCount               Int?
+  elevatorAvailable               ListingTruthState        @default(UNKNOWN)
+  accessibleParking               ListingTruthState        @default(UNKNOWN)
+  stepFreeBedroomAccess           ListingTruthState        @default(UNKNOWN)
+  stepFreeBathroomAccess          ListingTruthState        @default(UNKNOWN)
+  stepFreeShower                  ListingTruthState        @default(UNKNOWN)
+  createdAt                       DateTime                  @default(now())
+  updatedAt                       DateTime                  @updatedAt
+
+  property             Property                            @relation(fields: [propertyId], references: [id], onDelete: Cascade)
+  sleepingAreas        PropertyListingSleepingArea[]
+  sharedSpaces         PropertyListingSharedSpace[]
+  safetyConsiderations PropertyListingSafetyConsideration[]
+  additionalConsiderations PropertyListingAdditionalConsideration[]
+
+  @@index([propertyId, version])
+}
+
+model PropertyListingSleepingArea {
+  id               String                  @id @default(cuid())
+  listingDetailsId String
+  kind             ListingSleepingAreaKind @default(BEDROOM)
+  nameEn           String?
+  nameEs           String?
+  sortOrder        Int                     @default(0)
+  createdAt        DateTime                @default(now())
+  updatedAt        DateTime                @updatedAt
+
+  listingDetails PropertyListingDetails @relation(fields: [listingDetailsId], references: [id], onDelete: Cascade)
+  beds           PropertyListingBed[]
+
+  @@index([listingDetailsId, sortOrder])
+}
+
+model PropertyListingBed {
+  id             String         @id @default(cuid())
+  sleepingAreaId String
+  type           ListingBedType
+  quantity       Int
+  createdAt      DateTime       @default(now())
+  updatedAt      DateTime       @updatedAt
+
+  sleepingArea PropertyListingSleepingArea @relation(fields: [sleepingAreaId], references: [id], onDelete: Cascade)
+
+  @@index([sleepingAreaId])
+}
+
+model PropertyListingSharedSpace {
+  id               String                 @id @default(cuid())
+  listingDetailsId String
+  type             ListingSharedSpaceType
+  labelEn          String?
+  labelEs          String?
+  sortOrder        Int                    @default(0)
+  createdAt        DateTime               @default(now())
+  updatedAt        DateTime               @updatedAt
+
+  listingDetails PropertyListingDetails @relation(fields: [listingDetailsId], references: [id], onDelete: Cascade)
+
+  @@index([listingDetailsId, sortOrder])
+}
+
+model PropertyListingSafetyConsideration {
+  id               String                         @id @default(cuid())
+  listingDetailsId String
+  type             ListingSafetyConsiderationType
+  descriptionEn    String?
+  descriptionEs    String?
+  isActive         Boolean                        @default(true)
+  sortOrder        Int                            @default(0)
+  createdAt        DateTime                       @default(now())
+  updatedAt        DateTime                       @updatedAt
+
+  listingDetails PropertyListingDetails @relation(fields: [listingDetailsId], references: [id], onDelete: Cascade)
+
+  @@index([listingDetailsId, isActive, sortOrder])
+}
+
+model PropertyListingAdditionalConsideration {
+  id               String   @id @default(cuid())
+  listingDetailsId String
+  titleEn          String?
+  titleEs          String?
+  descriptionEn    String?
+  descriptionEs    String?
+  isActive         Boolean  @default(true)
+  sortOrder        Int      @default(0)
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+
+  listingDetails PropertyListingDetails @relation(fields: [listingDetailsId], references: [id], onDelete: Cascade)
+
+  @@index([listingDetailsId, isActive, sortOrder])
 }
 
 enum PropertyProtectionMode {
