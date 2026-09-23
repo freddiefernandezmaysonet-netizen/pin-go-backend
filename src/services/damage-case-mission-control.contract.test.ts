@@ -1,0 +1,44 @@
+import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
+import test from "node:test";
+
+function source(path: string) {
+  return readFileSync(new URL(path, import.meta.url), "utf8");
+}
+
+const projector = source("./damage-case-mission-control.service.ts");
+const routes = source("../routes/dashboard.damage-cases.routes.ts");
+const guestNotice = source("./damage-case-guest-notification.service.ts");
+const guestResponse = source("./damage-case-guest-response.service.ts");
+const retryWorker = source("../workers/message.retry.worker.ts");
+
+test("synchronizes every host-owned Damage Case mutation", () => {
+  assert.match(routes, /damageCase\.create[\s\S]*syncDamageCaseMissionControlSafely/);
+  assert.match(routes, /damageCase\.update[\s\S]*syncDamageCaseMissionControlSafely/);
+  assert.match(routes, /HOST_REVIEW[\s\S]*syncDamageCaseMissionControlSafely/);
+  assert.match(routes, /CLOSED_NO_CHARGE[\s\S]*syncDamageCaseMissionControlSafely/);
+});
+
+test("synchronizes guest notice delivery, guest response and automatic retry", () => {
+  assert.match(guestNotice, /syncDamageCaseMissionControlSafely/);
+  assert.match(guestResponse, /syncDamageCaseMissionControlSafely/);
+  assert.match(
+    retryWorker,
+    /PROPERTY_PROTECTION_GUEST_DAMAGE_NOTICE[\s\S]*syncDamageCaseMissionControlSafely/
+  );
+});
+
+test("persists one canonical issue through the existing Operational Intelligence service", () => {
+  assert.match(projector, /PROPERTY_PROTECTION_DAMAGE_CASE:\$\{damageCase\.id\}/);
+  assert.match(projector, /upsertOperationalIssue/);
+  assert.match(projector, /organizationId:\s*damageCase\.reservation\.property\.organizationId/);
+  assert.match(projector, /propertyId:\s*damageCase\.reservation\.propertyId/);
+  assert.match(projector, /reservationId:\s*damageCase\.reservationId/);
+});
+
+test("contains no financial execution primitive", () => {
+  for (const file of [projector, routes, guestNotice, guestResponse]) {
+    assert.doesNotMatch(file, /PaymentIntent|paymentIntents\.|charges\.|capture\(|refunds\./);
+  }
+  assert.doesNotMatch(projector, /autoResolveActionCode:\s*["']/);
+});

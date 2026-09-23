@@ -2,6 +2,7 @@ import { DamageCaseStatus, PrismaClient } from "@prisma/client";
 import { sendPropertyProtectionGuestDamageNotice } from "../lib/mailer.js";
 import { sendLoggedEmail } from "./email-delivery.service.js";
 import { resolveOrganizationGuestReplyTo } from "./organization-guest-email.service.js";
+import { syncDamageCaseMissionControlSafely } from "./damage-case-mission-control.service.js";
 
 const COMMUNICATION_TYPE = "PROPERTY_PROTECTION_GUEST_DAMAGE_NOTICE" as const;
 
@@ -68,6 +69,10 @@ export async function notifyGuestOfApprovedDamageCase(input: {
   );
 
   if (!reservation.guestEmail || !manageReservationUrl) {
+    await syncDamageCaseMissionControlSafely({
+      prisma: input.prisma,
+      damageCaseId: damageCase.id,
+    });
     return {
       ok: false,
       code: "DAMAGE_CASE_GUEST_NOTIFICATION_DESTINATION_MISSING" as const,
@@ -94,6 +99,11 @@ export async function notifyGuestOfApprovedDamageCase(input: {
         },
       });
     }
+
+    await syncDamageCaseMissionControlSafely({
+      prisma: input.prisma,
+      damageCaseId: damageCase.id,
+    });
 
     return { ok: true, alreadySent: true, messageLogId: alreadySent.id };
   }
@@ -149,6 +159,10 @@ export async function notifyGuestOfApprovedDamageCase(input: {
   });
 
   if (!delivery.ok || delivery.status !== "SENT") {
+    await syncDamageCaseMissionControlSafely({
+      prisma: input.prisma,
+      damageCaseId: damageCase.id,
+    });
     return {
       ok: false,
       code: "DAMAGE_CASE_GUEST_NOTIFICATION_DELIVERY_FAILED" as const,
@@ -165,6 +179,11 @@ export async function notifyGuestOfApprovedDamageCase(input: {
       status: DamageCaseStatus.GUEST_NOTIFIED,
       guestNotifiedAt: new Date(),
     },
+  });
+
+  await syncDamageCaseMissionControlSafely({
+    prisma: input.prisma,
+    damageCaseId: damageCase.id,
   });
 
   return {

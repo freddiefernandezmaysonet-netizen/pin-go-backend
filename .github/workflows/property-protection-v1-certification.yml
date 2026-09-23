@@ -20,6 +20,9 @@ on:
       - "src/services/damage-case-guest-response.contract.test.ts"
       - "src/services/damage-case-host-response-notification.service.ts"
       - "src/services/damage-case-host-response-notification.contract.test.ts"
+      - "src/services/damage-case-mission-control.service.ts"
+      - "src/services/damage-case-mission-control.service.test.ts"
+      - "src/services/damage-case-mission-control.contract.test.ts"
       - "src/services/email-delivery.service.ts"
       - "src/lib/mailer.ts"
       - "src/workers/message.retry.worker.ts"
@@ -70,8 +73,10 @@ jobs:
           node --import tsx --test src/services/damage-case-guest-closure-notification.contract.test.ts
           node --import tsx --test src/services/damage-case-guest-response.contract.test.ts
           node --import tsx --test src/services/damage-case-host-response-notification.contract.test.ts
+          node --import tsx --test src/services/damage-case-mission-control.service.test.ts
+          node --import tsx --test src/services/damage-case-mission-control.contract.test.ts
           node --import tsx --test src/routes/dashboard.damage-cases.contract.test.ts
           node --import tsx --test src/routes/dashboard.reservations.property-protection.contract.test.ts
 
       - name: Type-check Property Protection and Damage Case boundaries
-        run: npx tsc --noEmit --skipLibCheck --module nodenext --moduleResolution nodenext --target es2022 src/routes/public-booking.property-protection.contract.test.ts src/routes/public-booking.property-protection-consent.contract.test.ts src/routes/public-booking.property-protection-card-on-file.contract.test.ts src/routes/public-booking.property-protection-guest-portal.contract.test.ts src/services/damage-case-policy.service.test.ts src/services/damage-case-guest-notification.contract.test.ts src/services/damage-case-guest-closure-notification.service.ts src/services/damage-case-guest-closure-notification.contract.test.ts src/services/damage-case-guest-response.service.ts src/services/damage-case-guest-response.contract.test.ts src/services/damage-case-host-response-notification.service.ts src/services/damage-case-host-response-notification.contract.test.ts src/routes/dashboard.damage-cases.contract.test.ts src/routes/dashboard.reservations.property-protection.contract.test.ts
+        run: npx tsc --noEmit --skipLibCheck --module nodenext --moduleResolution nodenext --target es2022 src/routes/public-booking.property-protection.contract.test.ts src/routes/public-booking.property-protection-consent.contract.test.ts src/routes/public-booking.property-protection-card-on-file.contract.test.ts src/routes/public-booking.property-protection-guest-portal.contract.test.ts src/services/damage-case-policy.service.test.ts src/services/damage-case-guest-notification.contract.test.ts src/services/damage-case-guest-closure-notification.service.ts src/services/damage-case-guest-closure-notification.contract.test.ts src/services/damage-case-guest-response.service.ts src/services/damage-case-guest-response.contract.test.ts src/services/damage-case-host-response-notification.service.ts src/services/damage-case-host-response-notification.contract.test.ts src/services/damage-case-mission-control.service.ts src/services/damage-case-mission-control.service.test.ts src/services/damage-case-mission-control.contract.test.ts src/routes/dashboard.damage-cases.contract.test.ts src/routes/dashboard.reservations.property-protection.contract.test.ts

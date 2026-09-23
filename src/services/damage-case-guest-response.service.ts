@@ -5,6 +5,7 @@ import {
 } from "@prisma/client";
 import { prisma as prismaSingleton } from "../lib/prisma.js";
 import { notifyHostOfGuestDamageCaseResponse } from "./damage-case-host-response-notification.service.js";
+import { syncDamageCaseMissionControlSafely } from "./damage-case-mission-control.service.js";
 
 export class GuestDamageCaseResponseError extends Error {
   statusCode: number;
@@ -213,6 +214,10 @@ export async function recordGuestDamageCaseResponse(input: {
       action !== "DISPUTED" ||
       damageCase.guestResponseNote === responseNote
     ) {
+      await syncDamageCaseMissionControlSafely({
+        prisma,
+        damageCaseId: damageCase.id,
+      });
       const hostNotification = await notifyHostSafely({
         prisma,
         damageCaseId: damageCase.id,
@@ -283,6 +288,10 @@ export async function recordGuestDamageCaseResponse(input: {
       (action !== "DISPUTED" ||
         concurrent.guestResponseNote === responseNote)
     ) {
+      await syncDamageCaseMissionControlSafely({
+        prisma,
+        damageCaseId: concurrent.id,
+      });
       const hostNotification = await notifyHostSafely({
         prisma,
         damageCaseId: concurrent.id,
@@ -303,6 +312,11 @@ export async function recordGuestDamageCaseResponse(input: {
       409
     );
   }
+
+  await syncDamageCaseMissionControlSafely({
+    prisma,
+    damageCaseId: damageCase.id,
+  });
 
   const hostNotification = await notifyHostSafely({
     prisma,
