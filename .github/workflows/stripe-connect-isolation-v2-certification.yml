@@ -4,6 +4,10 @@ on:
   pull_request:
     branches: [main]
     paths:
+      - "src/services/stripe-connect-provisioning*"
+      - "src/services/stripe-connect.service.ts"
+      - "prisma/schema.prisma"
+      - "prisma/migrations/20260923180000_stripe_connect_provisioning/migration.sql"
       - "src/services/stripe-connect-isolation-v2.service.ts"
       - "src/services/stripe-connect-isolation-v2.service.test.ts"
       - "src/routes/dashboard-payouts.routes.ts"
@@ -36,7 +40,12 @@ jobs:
         run: npx prisma generate
 
       - name: Test Stripe Connect tenant isolation
-        run: npx tsx --test src/services/stripe-connect-isolation-v2.service.test.ts
+        run: npx tsx --test src/services/stripe-connect-isolation-v2.service.test.ts src/services/stripe-connect-provisioning.service.test.ts
+
+      - name: Test migration in disposable in-memory PostgreSQL
+        run: |
+          npm install --ignore-scripts --no-audit --no-fund --prefix "$RUNNER_TEMP/pingo-pglite" @electric-sql/pglite@0.3.14
+          PINGO_PGLITE_MODULE="$RUNNER_TEMP/pingo-pglite/node_modules/@electric-sql/pglite/dist/index.js" node --test src/services/stripe-connect-provisioning.migration.test.mjs
 
       - name: TypeScript isolation contract
         run: npx tsc -p tsconfig.stripe-connect-isolation-v2.json
@@ -45,9 +54,8 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          grep -q 'STRIPE_CONNECT_ISOLATION_V2_ENABLED' src/services/stripe-connect-isolation-v2.service.ts
           grep -q 'STRIPE_CONNECT_V2_ACCOUNT_CREATION_ENABLED' src/services/stripe-connect-isolation-v2.service.ts
-          grep -q 'STRIPE_CONNECT_V2_CANARY_ORGANIZATION_IDS' src/services/stripe-connect-isolation-v2.service.ts
+          ! grep -q 'STRIPE_CONNECT_V2_CANARY_ORGANIZATION_IDS' src/services/stripe-connect-isolation-v2.service.ts
           grep -q 'STRIPE_CONNECT_TENANT_MISMATCH' src/services/stripe-connect-isolation-v2.service.ts
           grep -q 'fees: { payer: "account" }' src/services/stripe-connect-isolation-v2.service.ts
           grep -q 'losses: { payments: "stripe" }' src/services/stripe-connect-isolation-v2.service.ts
@@ -70,3 +78,4 @@ jobs:
           grep -q '/api/dashboard/payouts/connect-isolation-v2/account' src/routes/dashboard-payouts.routes.ts
           grep -q '/api/dashboard/payouts/connect-isolation-v2/account-session' src/routes/dashboard-payouts.routes.ts
           ! grep -q 'req.body.*account' src/routes/dashboard-payouts.routes.ts
+          ! grep -q 'stripe.accounts.create' src/services/stripe-connect.service.ts

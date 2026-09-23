@@ -25,6 +25,7 @@ model Organization {
   stripeConnectRequirements     Json?
   stripeConnectDisabledReason   String?
   stripeConnectLastSyncedAt     DateTime?
+  stripeConnectProvisioning    StripeConnectProvisioning?
 
   dashboardUsers   DashboardUser[]
   deviceHealths    DeviceHealth[]
@@ -45,6 +46,19 @@ model Organization {
   distributionProperties       DistributionProperty[]
   otaChannelConnections        OtaChannelConnection[]
   otaConnectionSessions        OtaConnectionSession[]
+}
+
+// One durable creation attempt per organization. Ambiguous outcomes require
+// reconciliation; they must never create another account automatically.
+model StripeConnectProvisioning {
+  organizationId String @id
+  idempotencyKey String @unique
+  state String @default("CLAIMED")
+  request Json
+  accountId String? @unique
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Restrict)
 }
 
 model DashboardUser {

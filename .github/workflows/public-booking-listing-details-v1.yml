@@ -1,0 +1,32 @@
+name: Public Booking Listing Details V1 Certification
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - '.github/workflows/public-booking-listing-details-v1.yml'
+      - '.github/workflows/ota-airbnb-listing-discovery.yml'
+      - 'package.json'
+      - 'src/routes/public-booking.routes.ts'
+      - 'src/routes/public-booking.listing-details.contract.test.ts'
+
+permissions:
+  contents: read
+
+jobs:
+  certify:
+    name: Public listing projection contract
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+      - name: Install locked dependencies
+        run: npm ci --ignore-scripts --no-audit --no-fund
+      - name: Certify public listing details
+        run: npm run test:public-booking-listing-details-v1

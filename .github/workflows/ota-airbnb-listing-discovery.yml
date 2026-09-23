@@ -62,10 +62,6 @@ jobs:
 
       - name: Prove exact narrow diff allowlist
         shell: bash
-        env:
-          SCOPE_PR_NUMBER: ${{ github.event.pull_request.number }}
-          SCOPE_HEAD_REPO: ${{ github.event.pull_request.head.repo.full_name }}
-          SCOPE_BASE_REPO: ${{ github.event.pull_request.base.repo.full_name }}
         run: |
           BASE_BRANCH="${GITHUB_BASE_REF:-main}"
           git fetch origin "+refs/heads/$BASE_BRANCH:refs/remotes/origin/$BASE_BRANCH" --depth=1
@@ -89,6 +85,19 @@ jobs:
             diff -u "$RUNNER_TEMP/payouts-global-allowed.txt" "$RUNNER_TEMP/actual.txt"
             exit 0
           fi
+          if [ "${GITHUB_HEAD_REF:-$GITHUB_REF_NAME}" = "agent/public-booking-listing-details-v1" ]; then
+            cat > "$RUNNER_TEMP/public-booking-listing-details-v1-allowed.txt" <<'EOF'
+          .github/workflows/ota-airbnb-listing-discovery.yml
+          .github/workflows/public-booking-listing-details-v1.yml
+          package.json
+          src/routes/public-booking.listing-details.contract.test.ts
+          src/routes/public-booking.routes.ts
+          EOF
+            sort "$RUNNER_TEMP/public-booking-listing-details-v1-allowed.txt" -o "$RUNNER_TEMP/public-booking-listing-details-v1-allowed.txt"
+            diff -u "$RUNNER_TEMP/public-booking-listing-details-v1-allowed.txt" "$RUNNER_TEMP/actual.txt"
+            exit 0
+          fi
+
           if [ "${GITHUB_HEAD_REF:-$GITHUB_REF_NAME}" = "agent/mission-control-e13-decoupling-v1" ]; then
             cat > "$RUNNER_TEMP/mission-control-allowed.txt" <<'EOF'
           .github/workflows/mission-control-observational-certification.yml

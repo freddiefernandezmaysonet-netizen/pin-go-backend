@@ -1,13 +1,10 @@
 import { PrismaClient } from "@prisma/client";
 import Stripe from "stripe";
+import { provisionStripeConnectAccount } from "./stripe-connect-provisioning.service.js";
 
 const prisma = new PrismaClient();
 
-const ISOLATION_V2_FLAG = "STRIPE_CONNECT_ISOLATION_V2_ENABLED";
-const V2_ACCOUNT_CREATION_FLAG =
-  "STRIPE_CONNECT_V2_ACCOUNT_CREATION_ENABLED";
-const V2_CANARY_ORGANIZATIONS_FLAG =
-  "STRIPE_CONNECT_V2_CANARY_ORGANIZATION_IDS";
+const V2_ACCOUNT_CREATION_FLAG = "STRIPE_CONNECT_V2_ACCOUNT_CREATION_ENABLED";
 
 export const STRIPE_CONNECT_V2_ACCOUNT_SESSION_API_VERSION =
   "2026-03-25.dahlia";
@@ -67,75 +64,20 @@ function getStripeClient() {
   return stripeClient;
 }
 
-export function isStripeConnectIsolationV2Enabled(
-  env: NodeJS.ProcessEnv = process.env
-) {
-  return String(env[ISOLATION_V2_FLAG] ?? "")
-    .trim()
-    .toLowerCase() === "true";
+export function isStripeConnectV2AccountCreationEnabled(env: NodeJS.ProcessEnv = process.env) {
+  return String(env[V2_ACCOUNT_CREATION_FLAG] ?? "").trim().toLowerCase() === "true";
 }
 
-export function isStripeConnectV2AccountCreationEnabled(
-  env: NodeJS.ProcessEnv = process.env
-) {
-  return String(env[V2_ACCOUNT_CREATION_FLAG] ?? "")
-    .trim()
-    .toLowerCase() === "true";
+// Global interface/session availability; creation remains a separate kill switch.
+export function getStripeConnectV2Eligibility(organizationId: string, env: NodeJS.ProcessEnv = process.env) {
+  const eligible = Boolean(String(organizationId ?? "").trim());
+  return { eligible, accountCreationAllowed: eligible && isStripeConnectV2AccountCreationEnabled(env) };
 }
 
-function parseCanaryOrganizationIds(env: NodeJS.ProcessEnv = process.env) {
-  return new Set(
-    String(env[V2_CANARY_ORGANIZATIONS_FLAG] ?? "")
-      .split(/[\s,;]+/)
-      .map((value) => value.trim())
-      .filter(Boolean)
-  );
-}
-
-export function isStripeConnectV2CanaryOrganization(
-  organizationId: string,
-  env: NodeJS.ProcessEnv = process.env
-) {
-  const normalizedOrganizationId = String(organizationId ?? "").trim();
-  if (!normalizedOrganizationId) return false;
-
-  return parseCanaryOrganizationIds(env).has(normalizedOrganizationId);
-}
-
-export function getStripeConnectV2Eligibility(
-  organizationId: string,
-  env: NodeJS.ProcessEnv = process.env
-) {
-  const isolationEnabled = isStripeConnectIsolationV2Enabled(env);
-  const canaryOrganization = isStripeConnectV2CanaryOrganization(
-    organizationId,
-    env
-  );
-  const accountCreationEnabled =
-    isStripeConnectV2AccountCreationEnabled(env);
-  const eligible = isolationEnabled && canaryOrganization;
-
-  return {
-    eligible,
-    isolationEnabled,
-    canaryOrganization,
-    accountCreationEnabled,
-    accountCreationAllowed: eligible && accountCreationEnabled,
-  };
-}
-
-function assertStripeConnectV2CanaryEligible(organizationId: string) {
-  const eligibility = getStripeConnectV2Eligibility(organizationId);
-
-  if (!eligibility.eligible) {
-    throw new StripeConnectIsolationV2Error(
-      "STRIPE_CONNECT_V2_CANARY_NOT_ENABLED",
-      "Stripe Connect V2 is not enabled for this organization.",
-      404
-    );
+function assertStripeConnectOrganization(organizationId: string) {
+  if (!getStripeConnectV2Eligibility(organizationId).eligible) {
+    throw new StripeConnectIsolationV2Error("MISSING_ORGANIZATION_CONTEXT", "Missing organization context.", 401);
   }
-
-  return eligibility;
 }
 
 function normalizeConnectCountry(country?: string | null) {
@@ -155,11 +97,6 @@ function normalizeConnectCountry(country?: string | null) {
   if (aliases[normalized]) return aliases[normalized];
   if (/^[A-Z]{2}$/.test(normalized)) return normalized;
   return "US";
-}
-
-function serializeStripeJson(value: unknown) {
-  if (!value) return null;
-  return JSON.parse(JSON.stringify(value));
 }
 
 function asStripeAccount(
@@ -308,15 +245,7 @@ export function buildStripeConnectIsolationV2AccountSessionRequestOptions(): Str
 export async function createStripeConnectIsolationV2Account(
   organizationId: string
 ) {
-  const eligibility = assertStripeConnectV2CanaryEligible(organizationId);
-
-  if (!eligibility.accountCreationAllowed) {
-    throw new StripeConnectIsolationV2Error(
-      "STRIPE_CONNECT_V2_ACCOUNT_CREATION_DISABLED",
-      "Stripe Connect V2 account creation is not enabled.",
-      404
-    );
-  }
+  assertStripeConnectOrganization(organizationId);
 
   const organization = await prisma.organization.findUnique({
     where: { id: organizationId },
@@ -340,48 +269,21 @@ export async function createStripeConnectIsolationV2Account(
     );
   }
 
-  if (organization.stripeConnectAccountId) {
-    throw new StripeConnectIsolationV2Error(
-      "STRIPE_CONNECT_ACCOUNT_ALREADY_EXISTS",
-      "This organization already has a Stripe connected account."
-    );
+  if (!organization.stripeConnectAccountId && !getStripeConnectV2Eligibility(organizationId).accountCreationAllowed) {
+    throw new StripeConnectIsolationV2Error("STRIPE_CONNECT_V2_ACCOUNT_CREATION_DISABLED", "Stripe account creation is temporarily unavailable.", 409);
   }
 
-  const stripe = getStripeClient();
-  const account = await stripe.accounts.create(
-    buildStripeConnectIsolationV2AccountCreateParams({
+  const account = await provisionStripeConnectAccount(organizationId, {
+    db: prisma,
+    stripe: getStripeClient(),
+    params: buildStripeConnectIsolationV2AccountCreateParams({
       organizationId: organization.id,
       organizationName: organization.name,
       country: organization.properties[0]?.country ?? "US",
-    })
-  );
-
-  const stripeOrganizationId = String(
-    account.metadata?.organizationId ?? ""
-  ).trim();
-
-  if (stripeOrganizationId !== organization.id) {
-    throw new StripeConnectIsolationV2Error(
-      "STRIPE_CONNECT_TENANT_MISMATCH",
-      "Stripe returned a connected account without the expected organization binding.",
-      502
-    );
-  }
-
-  await prisma.organization.update({
-    where: { id: organization.id },
-    data: {
-      stripeConnectAccountId: account.id,
-      stripeConnectStatus: account.details_submitted
-        ? "PENDING_VERIFICATION"
-        : "ONBOARDING_REQUIRED",
-      stripeConnectChargesEnabled: Boolean(account.charges_enabled),
-      stripeConnectPayoutsEnabled: Boolean(account.payouts_enabled),
-      stripeConnectDetailsSubmitted: Boolean(account.details_submitted),
-      stripeConnectRequirements: serializeStripeJson(account.requirements),
-      stripeConnectDisabledReason: account.requirements?.disabled_reason ?? null,
-      stripeConnectLastSyncedAt: new Date(),
-    },
+    }),
+    validate: (account, persistedAccountId) => assertStripeConnectTenantOwnership({
+      organizationId, persistedAccountId, account,
+    }),
   });
 
   return {
@@ -395,7 +297,7 @@ export async function createStripeConnectIsolationV2Account(
 export async function createStripeConnectIsolationV2AccountSession(
   organizationId: string
 ) {
-  assertStripeConnectV2CanaryEligible(organizationId);
+  assertStripeConnectOrganization(organizationId);
 
   const organization = await prisma.organization.findUnique({
     where: { id: organizationId },
