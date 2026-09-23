@@ -8,6 +8,8 @@ on:
       - 'src/distribution/ota-connection-center.composition.ts'
       - 'src/distribution/ota-connection-center.runtime-composition.ts'
       - '.github/workflows/ota-initial-distribution-enablement.yml'
+      - '.github/workflows/ota-airbnb-listing-discovery.yml'
+      - '.github/workflows/ota-airbnb-host-confirmed-mapping.yml'
 permissions:
   contents: read
 concurrency:
@@ -47,10 +49,14 @@ jobs:
       - name: Exact scope and whitespace
         env:
           BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          SCOPE_PR_NUMBER: ${{ github.event.pull_request.number }}
+          SCOPE_HEAD_REPO: ${{ github.event.pull_request.head.repo.full_name }}
+          SCOPE_BASE_REPO: ${{ github.event.pull_request.base.repo.full_name }}
         run: |
           git diff --check "$BASE_SHA"...HEAD
           git diff --name-only "$BASE_SHA"...HEAD > /tmp/ota-initial-changed.txt
           python3 - <<'PY'
+          import os
           from pathlib import Path
           allowed = {
             'src/distribution/ota-initial-distribution-enablement.service.ts',
@@ -60,5 +66,23 @@ jobs:
             '.github/workflows/ota-initial-distribution-enablement.yml',
           }
           changed = set(Path('/tmp/ota-initial-changed.txt').read_text().splitlines())
+          # The expanded scope is not available to other PRs, repos or branches.
+          if os.environ.get('GITHUB_HEAD_REF') == 'agent/ota-initial-distribution-enablement-v1':
+            repo = 'freddiefernandezmaysonet-netizen/pin-go-backend'
+            if not (
+              os.environ.get('GITHUB_EVENT_NAME') == 'pull_request'
+              and os.environ.get('GITHUB_REPOSITORY') == repo
+              and os.environ.get('SCOPE_PR_NUMBER') == '230'
+              and os.environ.get('SCOPE_HEAD_REPO') == repo
+              and os.environ.get('SCOPE_BASE_REPO') == repo
+              and os.environ.get('GITHUB_BASE_REF') == 'main'
+            ):
+              raise SystemExit('PR #230 repository/branch scope mismatch')
+            allowed.update({
+              '.github/workflows/ota-airbnb-listing-discovery.yml',
+              '.github/workflows/ota-airbnb-host-confirmed-mapping.yml',
+            })
+            if changed != allowed:
+              raise SystemExit(f'Exact seven-file scope required: {sorted(changed ^ allowed)}')
           assert changed <= allowed, f'Unexpected scope: {sorted(changed - allowed)}'
           PY
