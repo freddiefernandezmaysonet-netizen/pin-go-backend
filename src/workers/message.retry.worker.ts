@@ -1366,6 +1366,12 @@ async function processPropertyProtectionHostResponseRetries() {
         },
       });
 
+      await syncDamageCaseMissionControlSafely({
+        prisma,
+        damageCaseId: damageCase.id,
+        maxMessageRetries: MAX_RETRIES,
+      });
+
       try {
         await prisma.messageDispatchLog.create({
           data: {
@@ -1407,6 +1413,16 @@ async function processPropertyProtectionHostResponseRetries() {
           },
         })
         .catch(() => {});
+
+      const failedPayload =
+        parsePropertyProtectionHostResponseRetryPayload(message.body);
+      if (failedPayload) {
+        await syncDamageCaseMissionControlSafely({
+          prisma,
+          damageCaseId: failedPayload.damageCaseId,
+          maxMessageRetries: MAX_RETRIES,
+        });
+      }
 
       errLog(
         finalFailure

@@ -31,8 +31,20 @@ test("synchronizes guest notices, responses, closure delivery and automatic retr
     /processPropertyProtectionGuestClosureRetries[\s\S]*syncDamageCaseMissionControlSafely/
   );
   assert.match(
+    retryWorker,
+    /processPropertyProtectionHostResponseRetries[\s\S]*syncDamageCaseMissionControlSafely/
+  );
+  assert.match(
+    guestResponse,
+    /notifyHostSafely[\s\S]*syncDamageCaseMissionControlSafely/
+  );
+  assert.match(
     projector,
     /PROPERTY_PROTECTION_GUEST_NO_CHARGE_CLOSURE_NOTICE/
+  );
+  assert.match(
+    projector,
+    /PROPERTY_PROTECTION_HOST_GUEST_RESPONSE_NOTICE/
   );
 });
 

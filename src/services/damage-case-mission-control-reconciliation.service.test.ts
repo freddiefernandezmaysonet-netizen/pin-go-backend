@@ -14,9 +14,10 @@ test("reconciles one bounded candidate set through the canonical projector", asy
     prisma,
     batchSize: 20,
     maxMessageRetries: 3,
-    findCandidates: async (_prisma, batchSize) => {
+    findCandidates: async (_prisma, batchSize, maxMessageRetries) => {
       assert.equal(_prisma, prisma);
       assert.equal(batchSize, 20);
+      assert.equal(maxMessageRetries, 3);
       return [
         { damageCaseId: "damage-case-1" },
         { damageCaseId: "damage-case-2" },

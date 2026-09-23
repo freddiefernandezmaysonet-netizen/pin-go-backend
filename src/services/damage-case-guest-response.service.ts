@@ -223,6 +223,10 @@ export async function recordGuestDamageCaseResponse(input: {
         damageCaseId: damageCase.id,
         guestResponse: requestedResponse,
       });
+      await syncDamageCaseMissionControlSafely({
+        prisma,
+        damageCaseId: damageCase.id,
+      });
 
       return {
         ok: true,
@@ -297,6 +301,10 @@ export async function recordGuestDamageCaseResponse(input: {
         damageCaseId: concurrent.id,
         guestResponse: requestedResponse,
       });
+      await syncDamageCaseMissionControlSafely({
+        prisma,
+        damageCaseId: concurrent.id,
+      });
 
       return {
         ok: true,
@@ -322,6 +330,10 @@ export async function recordGuestDamageCaseResponse(input: {
     prisma,
     damageCaseId: damageCase.id,
     guestResponse: requestedResponse,
+  });
+  await syncDamageCaseMissionControlSafely({
+    prisma,
+    damageCaseId: damageCase.id,
   });
 
   return {
