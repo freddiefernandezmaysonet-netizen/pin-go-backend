@@ -21,6 +21,7 @@ import {
 } from "../services/guest-journey-communications-owner.config";
 import { evaluateCheckoutSmsConsent } from "../services/checkout-sms-consent.policy";
 import { syncDamageCaseMissionControlSafely } from "../services/damage-case-mission-control.service";
+import { reconcileDamageCaseMissionControl } from "../services/damage-case-mission-control-reconciliation.service";
 
 const WORKER_NAME = "message.retry.worker";
 const POLL_MS = Number(process.env.MESSAGE_RETRY_POLL_MS ?? 30000);
@@ -1485,6 +1486,22 @@ async function tick() {
           err: toErrString(e),
         }
       );
+    }
+
+    try {
+      const reconciliation = await reconcileDamageCaseMissionControl({
+        prisma,
+        batchSize: BATCH_SIZE,
+        maxMessageRetries: MAX_RETRIES,
+      });
+
+      if (reconciliation.checked > 0) {
+        log("Property Protection Mission Control reconciliation", reconciliation);
+      }
+    } catch (e) {
+      errLog("reconcileDamageCaseMissionControl crashed", {
+        err: toErrString(e),
+      });
     }
   } finally {
     tickRunning = false;
