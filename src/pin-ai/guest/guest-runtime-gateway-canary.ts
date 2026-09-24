@@ -49,6 +49,29 @@ export function assertGuestGatewayCanaryEnvironment(env: NodeJS.ProcessEnv): voi
   }
 }
 
+export function buildGuestGatewayCanaryReservationWhere(now: Date) {
+  return {
+    status: "ACTIVE" as const,
+    guestToken: { not: null },
+    guestTokenExpiresAt: { gt: now },
+    property: { status: "ACTIVE" as const },
+    OR: [
+      { pinAIGuestConversation: null },
+      {
+        pinAIGuestConversation: {
+          is: {
+            openaiSessionId: null,
+            OR: [
+              { leaseToken: null },
+              { leaseExpiresAt: { lt: now } },
+            ],
+          },
+        },
+      },
+    ],
+  };
+}
+
 export async function runGuestGatewayCanary(input: Readonly<{
   gateway: GatewayLike;
   guestToken: string;
@@ -147,13 +170,7 @@ async function main(): Promise<void> {
 
     const now = new Date();
     const reservation = await prisma.reservation.findFirst({
-      where: {
-        status: "ACTIVE",
-        guestToken: { not: null },
-        guestTokenExpiresAt: { gt: now },
-        property: { status: "ACTIVE" },
-        pinAIGuestConversation: null,
-      },
+      where: buildGuestGatewayCanaryReservationWhere(now),
       orderBy: { updatedAt: "desc" },
       select: {
         id: true,
@@ -163,7 +180,7 @@ async function main(): Promise<void> {
     });
 
     if (!reservation?.guestToken) {
-      throw new Error("PIN_AI_GUEST_GATEWAY_CANARY_FRESH_RESERVATION_NOT_FOUND");
+      throw new Error("PIN_AI_GUEST_GATEWAY_CANARY_REUSABLE_RESERVATION_NOT_FOUND");
     }
 
     const reservationUpdatedAtBefore = reservation.updatedAt.getTime();
