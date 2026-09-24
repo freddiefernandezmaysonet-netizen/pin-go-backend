@@ -25,9 +25,11 @@ export function readChannexBookingFields(externalRaw: unknown): ChannexBookingFi
   const customer = record(booking.customer);
   const guest = record(booking.guest);
   const amountValue = booking.amount;
-  const amount = amountValue == null || amountValue === ""
-    ? null
-    : Number(amountValue);
+  const amount = typeof amountValue === "number"
+    ? amountValue
+    : typeof amountValue === "string" && /^\d+(?:\.\d+)?$/.test(amountValue.trim())
+      ? Number(amountValue.trim())
+      : null;
   const currency = nonempty(booking.currency);
 
   return {
