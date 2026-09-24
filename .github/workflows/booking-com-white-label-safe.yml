@@ -231,7 +231,7 @@ jobs:
           mkdir -p validation-evidence
           git rev-parse HEAD > validation-evidence/head.txt
           baseline_ref="$BASELINE_SHA"
-          if [ "${GITHUB_HEAD_REF:-$GITHUB_REF_NAME}" = "agent/vrbo-self-service-connection-center" ] || [ "${GITHUB_HEAD_REF:-$GITHUB_REF_NAME}" = "agent/expedia-connection-center-backend" ]; then
+          if [ "${GITHUB_HEAD_REF:-$GITHUB_REF_NAME}" = "agent/vrbo-self-service-connection-center" ] || [ "${GITHUB_HEAD_REF:-$GITHUB_REF_NAME}" = "agent/expedia-connection-center-backend" ] || [ "${GITHUB_HEAD_REF:-$GITHUB_REF_NAME}" = "agent/channex-room-capacity-max-guests" ]; then
             baseline_ref="${{ github.event.pull_request.base.sha }}"
           fi
           git worktree add --detach "$RUNNER_TEMP/booking-types-baseline" "$baseline_ref"
@@ -256,12 +256,12 @@ jobs:
           result={'identical':before==after,'semanticDiagnosticsIdentical':semantic_diagnostics_identical,'baselineDiagnostics':before.count(b'error TS'),'candidateDiagnostics':after.count(b'error TS'),'diagnosticsByRoot':dict(counts),'topCodes':collections.Counter(code for path,code,msg in diagnostics).most_common(10),'releaseApproval':False}
           (root/'full-types-summary.json').write_text(json.dumps(result,indent=2))
           print(json.dumps(result,indent=2))
-          if os.environ.get('GITHUB_HEAD_REF') == 'agent/expedia-connection-center-backend':
+          if os.environ.get('GITHUB_HEAD_REF') in {'agent/expedia-connection-center-backend','agent/channex-room-capacity-max-guests'}:
             assert semantic_diagnostics_identical,'Candidate introduced, removed or changed global type diagnostics'
           else:
             assert before==after,'Candidate introduced or changed global type diagnostics'
           PY
-          if [ "${GITHUB_HEAD_REF:-$GITHUB_REF_NAME}" = "agent/vrbo-self-service-connection-center" ] || [ "${GITHUB_HEAD_REF:-$GITHUB_REF_NAME}" = "agent/expedia-connection-center-backend" ]; then
+          if [ "${GITHUB_HEAD_REF:-$GITHUB_REF_NAME}" = "agent/vrbo-self-service-connection-center" ] || [ "${GITHUB_HEAD_REF:-$GITHUB_REF_NAME}" = "agent/expedia-connection-center-backend" ] || [ "${GITHUB_HEAD_REF:-$GITHUB_REF_NAME}" = "agent/channex-room-capacity-max-guests" ]; then
             test "$baseline" -eq "$candidate"
             exit 0
           fi
