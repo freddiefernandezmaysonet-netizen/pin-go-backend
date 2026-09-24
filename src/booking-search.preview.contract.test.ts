@@ -15,6 +15,7 @@ test("booking preview exposes faceted discovery controls in both languages", () 
     "maxPrice",
     "minRating",
     "accommodationType",
+    "propertyType",
     "bedType",
     "minBedrooms",
     "minBathrooms",
@@ -31,6 +32,8 @@ test("booking preview exposes faceted discovery controls in both languages", () 
   assert.match(html, /Maximum stay total/);
   assert.match(html, /Mesa de billar/);
   assert.match(html, /Ocean view/);
+  assert.match(html, /Cabaña/);
+  assert.match(html, /Cabin/);
 });
 
 test("filter UI forwards supported V2 query parameters only after a valid stay search", () => {
@@ -38,6 +41,7 @@ test("filter UI forwards supported V2 query parameters only after a valid stay s
   assert.match(html, /q\.maxTotalPrice=\$\('maxPrice'\)\.value/);
   assert.match(html, /q\.minRating=\$\('minRating'\)\.value/);
   assert.match(html, /q\.accommodationTypes=\$\('accommodationType'\)\.value/);
+  assert.match(html, /q\.propertyTypes=\$\('propertyType'\)\.value/);
   assert.match(html, /q\.bedTypes=\$\('bedType'\)\.value/);
   assert.match(html, /q\.minBedrooms=\$\('minBedrooms'\)\.value/);
   assert.match(html, /q\.minBathrooms=\$\('minBathrooms'\)\.value/);
