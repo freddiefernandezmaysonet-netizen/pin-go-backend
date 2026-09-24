@@ -14,6 +14,7 @@ test("public booking search forwards V2 faceted discovery filters", () => {
   assert.match(source, /minReviewCount:\s*optionalQueryNumber\(req\.query\.minReviewCount\)/);
   assert.match(source, /amenities:\s*queryStringList\(req\.query\.amenities\)/);
   assert.match(source, /accommodationTypes:\s*queryStringList\(req\.query\.accommodationTypes\)/);
+  assert.match(source, /propertyTypes:\s*queryStringList\(req\.query\.propertyTypes\)/);
   assert.match(source, /bedTypes:\s*queryStringList\(req\.query\.bedTypes\)/);
   assert.match(source, /minBedrooms:\s*optionalQueryNumber\(req\.query\.minBedrooms\)/);
   assert.match(source, /minBathrooms:\s*optionalQueryNumber\(req\.query\.minBathrooms\)/);
