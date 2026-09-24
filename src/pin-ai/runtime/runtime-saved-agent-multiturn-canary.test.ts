@@ -134,7 +134,7 @@ test("multi-turn canary creates one saved-agent session and resumes it for turn 
                   content: [
                     {
                       type: "output_text",
-                      text: "The remaining step is the access-readiness milestone.",
+                      text: "PIN-AI-ORBIT-47",
                     },
                   ],
                 },
@@ -179,6 +179,7 @@ test("multi-turn canary creates one saved-agent session and resumes it for turn 
   assert.equal(result.operationalWrites, false);
   assert.equal(result.escalationCreated, false);
   assert.equal(result.webSearchUsed, false);
+  assert.equal(result.semanticContinuity, true);
   assert.deepEqual(result.firstTurn.toolCalls, ["get_reservation_context"]);
   assert.deepEqual(result.secondTurn.toolCalls, []);
   assert.equal(result.firstTurn.responseLength > 0, true);
@@ -236,7 +237,7 @@ test("multi-turn canary creates one saved-agent session and resumes it for turn 
   assert.equal(messageEvents.length, 1);
   assert.match(
     messageEvents[0]?.events?.[0]?.input?.[0]?.content?.[0]?.text ?? "",
-    /Based on what you just told me/,
+    /What code did I give you in my previous message\?/,
   );
 });
 
@@ -274,7 +275,10 @@ test("multi-turn canary fails if OpenAI returns a different session on turn two"
             content: [
               {
                 type: "output_text",
-                text: itemReads === 1 ? "First answer." : "Second answer.",
+                text:
+                  itemReads === 1
+                    ? "First answer."
+                    : "PIN-AI-ORBIT-47",
               },
             ],
           },
@@ -307,6 +311,76 @@ test("multi-turn canary fails if OpenAI returns a different session on turn two"
       tools: { async execute() { return {}; } },
     }),
     /PIN_AI_RUNTIME_MULTITURN_SESSION_ID_CHANGED/,
+  );
+});
+
+test("multi-turn canary fails closed when turn two cannot recall the semantic marker", async () => {
+  let itemReads = 0;
+
+  const fetchImpl = async (
+    url: string,
+    init: Readonly<{
+      method: "GET" | "POST";
+      headers: Readonly<Record<string, string>>;
+      body?: string;
+    }>,
+  ) => {
+    if (init.method === "POST" && url.endsWith("/v1/agents/sessions")) {
+      return response({
+        id: "session_semantic",
+        status: "idle",
+        required_actions: [],
+      });
+    }
+
+    if (init.method === "POST" && url.endsWith("/events")) {
+      return response({});
+    }
+
+    if (init.method === "GET" && url.endsWith("/items?limit=100&order=asc")) {
+      itemReads += 1;
+      return response({
+        data: [
+          {
+            type: "message",
+            role: "assistant",
+            content: [
+              {
+                type: "output_text",
+                text:
+                  itemReads === 1
+                    ? "First answer."
+                    : "I do not remember the code.",
+              },
+            ],
+          },
+        ],
+      });
+    }
+
+    if (
+      init.method === "GET" &&
+      url.includes("/v1/agents/sessions/session_semantic")
+    ) {
+      return response({
+        id: "session_semantic",
+        status: "idle",
+        required_actions: [],
+      });
+    }
+
+    throw new Error(`UNEXPECTED_FETCH:${init.method}:${url}`);
+  };
+
+  await assert.rejects(
+    runSavedAgentMultiTurnCanary({
+      apiKey: "test-key",
+      agentId: "agent_saved123",
+      context,
+      fetchImpl,
+      tools: { async execute() { return {}; } },
+    }),
+    /PIN_AI_RUNTIME_MULTITURN_SEMANTIC_CONTINUITY_FAILED/,
   );
 });
 
