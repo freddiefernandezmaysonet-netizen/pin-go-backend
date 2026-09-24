@@ -14,6 +14,7 @@ function setup(overrides: Partial<ProvisioningSnapshot> = {}) {
     organizationName: "Organization One",
     propertyId: "property-1",
     propertyName: "Casa Uno",
+    maxGuests: 4,
     currency: "USD",
     timezone: "America/Puerto_Rico",
     groupId: "group-1",
@@ -46,7 +47,7 @@ function setup(overrides: Partial<ProvisioningSnapshot> = {}) {
       calls.push("ensure-property");
       return { externalPropertyId: "property-ext" };
     },
-    async ensurePrimaryRoomType() { calls.push("ensure-room"); return { externalPrimaryRoomTypeId: "room-ext" }; },
+    async ensurePrimaryRoomType(args: any) { calls.push("ensure-room"); assert.equal(args.maxGuests, 4); return { externalPrimaryRoomTypeId: "room-ext" }; },
     async ensurePrimaryRatePlan() { calls.push("ensure-rate"); return { externalPrimaryRatePlanId: "rate-ext" }; },
   };
   return { calls, repository, provisioner };

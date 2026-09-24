@@ -87,6 +87,7 @@ test("provisioning contract is group then property, room and rate", async () => 
   });
   const room = await value.ensurePrimaryRoomType({
     externalPropertyId: property.externalPropertyId,
+    maxGuests: 4,
     existingExternalPrimaryRoomTypeId: null,
   });
   const rate = await value.ensurePrimaryRatePlan({
@@ -113,10 +114,10 @@ test("provisioning contract is group then property, room and rate", async () => 
       property_id: "property-ext",
       title: "Primary accommodation",
       count_of_rooms: 1,
-      occ_adults: 2,
+      occ_adults: 4,
       occ_children: 0,
       occ_infants: 0,
-      default_occupancy: 2,
+      default_occupancy: 4,
     },
   });
   assert.deepEqual(requests[3]?.body, {
@@ -136,6 +137,21 @@ test("provisioning contract is group then property, room and rate", async () => 
   });
 });
 
+test("room provisioning fails closed for invalid maxGuests before transport", async () => {
+  const { value, requests } = adapter(true);
+  await assert.rejects(
+    value.ensurePrimaryRoomType({
+      externalPropertyId: "property-ext",
+      maxGuests: 0,
+      existingExternalPrimaryRoomTypeId: null,
+    }),
+    (error: unknown) =>
+      error instanceof WhiteLabelAdapterError &&
+      error.code === "OTA_PROPERTY_MAX_GUESTS_INVALID"
+  );
+  assert.equal(requests.length, 0);
+});
+
 test("one-time token request is scoped to group and property", async () => {
   const { value, requests } = adapter(true);
   await value.ensureGroup({ organizationId: "org-1", organizationName: "Pin Go", existingExternalGroupId: null });
@@ -150,6 +166,7 @@ test("one-time token request is scoped to group and property", async () => {
   });
   const room = await value.ensurePrimaryRoomType({
     externalPropertyId: property.externalPropertyId,
+    maxGuests: 4,
     existingExternalPrimaryRoomTypeId: null,
   });
   await value.ensurePrimaryRatePlan({
@@ -281,6 +298,7 @@ test("partial retry reuses checkpoint IDs without transport calls", async () => 
   }), { externalPropertyId: "property-ext" });
   assert.deepEqual(await value.ensurePrimaryRoomType({
     externalPropertyId: "property-ext",
+    maxGuests: 4,
     existingExternalPrimaryRoomTypeId: "room-ext",
   }), { externalPrimaryRoomTypeId: "room-ext" });
   assert.deepEqual(await value.ensurePrimaryRatePlan({

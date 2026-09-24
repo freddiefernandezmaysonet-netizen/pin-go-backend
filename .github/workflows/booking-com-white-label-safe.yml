@@ -47,6 +47,21 @@ jobs:
           python3 <<'PY' | tee validation-evidence/scope.txt
           import os,subprocess
           from pathlib import Path
+          if os.environ.get('GITHUB_HEAD_REF') == 'agent/channex-room-capacity-max-guests':
+              expected={
+                  '.github/workflows/booking-com-white-label-safe.yml',
+                  'src/distribution/channex-white-label.adapter.test.ts',
+                  'src/distribution/channex-white-label.adapter.ts',
+                  'src/distribution/ota-connection-center.composition.test.ts',
+                  'src/distribution/ota-connection-orchestrator.service.test.ts',
+                  'src/distribution/ota-connection-orchestrator.service.ts',
+                  'src/distribution/ota-provisioning.repository.test.ts',
+                  'src/distribution/ota-provisioning.repository.ts',
+              }
+              changed=set(subprocess.check_output(['git','diff','--name-only','origin/main...HEAD'],text=True).splitlines())
+              assert changed==expected,{'unexpected':sorted(changed-expected),'missing':sorted(expected-changed)}
+              print('PASS: exact reviewed Channex room capacity scope against current main.')
+              raise SystemExit(0)
           if os.environ.get('GITHUB_HEAD_REF') == 'agent/vrbo-self-service-connection-center':
               expected={
                   '.github/workflows/booking-com-transport-readiness.yml',
@@ -216,7 +231,7 @@ jobs:
           mkdir -p validation-evidence
           git rev-parse HEAD > validation-evidence/head.txt
           baseline_ref="$BASELINE_SHA"
-          if [ "${GITHUB_HEAD_REF:-$GITHUB_REF_NAME}" = "agent/vrbo-self-service-connection-center" ] || [ "${GITHUB_HEAD_REF:-$GITHUB_REF_NAME}" = "agent/expedia-connection-center-backend" ]; then
+          if [ "${GITHUB_HEAD_REF:-$GITHUB_REF_NAME}" = "agent/vrbo-self-service-connection-center" ] || [ "${GITHUB_HEAD_REF:-$GITHUB_REF_NAME}" = "agent/expedia-connection-center-backend" ] || [ "${GITHUB_HEAD_REF:-$GITHUB_REF_NAME}" = "agent/channex-room-capacity-max-guests" ]; then
             baseline_ref="${{ github.event.pull_request.base.sha }}"
           fi
           git worktree add --detach "$RUNNER_TEMP/booking-types-baseline" "$baseline_ref"
@@ -241,12 +256,12 @@ jobs:
           result={'identical':before==after,'semanticDiagnosticsIdentical':semantic_diagnostics_identical,'baselineDiagnostics':before.count(b'error TS'),'candidateDiagnostics':after.count(b'error TS'),'diagnosticsByRoot':dict(counts),'topCodes':collections.Counter(code for path,code,msg in diagnostics).most_common(10),'releaseApproval':False}
           (root/'full-types-summary.json').write_text(json.dumps(result,indent=2))
           print(json.dumps(result,indent=2))
-          if os.environ.get('GITHUB_HEAD_REF') == 'agent/expedia-connection-center-backend':
+          if os.environ.get('GITHUB_HEAD_REF') in {'agent/expedia-connection-center-backend','agent/channex-room-capacity-max-guests'}:
             assert semantic_diagnostics_identical,'Candidate introduced, removed or changed global type diagnostics'
           else:
             assert before==after,'Candidate introduced or changed global type diagnostics'
           PY
-          if [ "${GITHUB_HEAD_REF:-$GITHUB_REF_NAME}" = "agent/vrbo-self-service-connection-center" ] || [ "${GITHUB_HEAD_REF:-$GITHUB_REF_NAME}" = "agent/expedia-connection-center-backend" ]; then
+          if [ "${GITHUB_HEAD_REF:-$GITHUB_REF_NAME}" = "agent/vrbo-self-service-connection-center" ] || [ "${GITHUB_HEAD_REF:-$GITHUB_REF_NAME}" = "agent/expedia-connection-center-backend" ] || [ "${GITHUB_HEAD_REF:-$GITHUB_REF_NAME}" = "agent/channex-room-capacity-max-guests" ]; then
             test "$baseline" -eq "$candidate"
             exit 0
           fi
