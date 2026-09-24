@@ -9,6 +9,7 @@ export type ProvisioningSnapshot = {
   organizationName: string;
   propertyId: string;
   propertyName: string;
+  maxGuests: number;
   currency: string;
   timezone: string;
   groupId: string;
@@ -195,6 +196,7 @@ export async function orchestrateOtaProvisioning(args: {
       );
       const room = await args.provisioner.ensurePrimaryRoomType({
         externalPropertyId: property.externalPropertyId,
+        maxGuests: snapshot.maxGuests,
         existingExternalPrimaryRoomTypeId: snapshot.externalPrimaryRoomTypeId,
       });
       await args.repository.checkpointPrimaryRoomType(
