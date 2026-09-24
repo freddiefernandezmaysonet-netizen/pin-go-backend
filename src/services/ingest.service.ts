@@ -36,6 +36,8 @@ export type IngestPayload = {
   guestEmail?: string | null;
   guestPhone?: string | null;
   preferredLanguage?: string | null;
+  adults?: number | null;
+  children?: number | null;
   roomName?: string | null;
 
   checkIn: string;
@@ -260,6 +262,8 @@ export async function ingestReservation(p: IngestPayload) {
       guestName: p.guestName,
       guestEmail: p.guestEmail ?? null,
       guestPhone: p.guestPhone ?? null,
+      adults: p.adults ?? null,
+      children: p.children ?? null,
       preferredLanguage,
       roomName: p.roomName ?? null,
 
@@ -886,6 +890,8 @@ async function upsertReservation(
     guestName: string;
     guestEmail?: string | null;
     guestPhone?: string | null;
+    adults?: number | null;
+    children?: number | null;
     preferredLanguage: string;
     roomName?: string | null;
     guestAccessModeSnapshot: GuestAccessMode;
@@ -994,6 +1000,8 @@ async function upsertReservation(
           guestName: input.guestName,
           guestEmail: input.guestEmail ?? null,
           guestPhone: input.guestPhone ?? null,
+          ...(input.adults != null ? { adults: input.adults } : {}),
+          ...(input.children != null ? { children: input.children } : {}),
           preferredLanguage: input.preferredLanguage,
           roomName: input.roomName ?? null,
 
@@ -1034,6 +1042,8 @@ async function upsertReservation(
           guestName: input.guestName,
           guestEmail: input.guestEmail ?? null,
           guestPhone: input.guestPhone ?? null,
+          ...(input.adults != null ? { adults: input.adults } : {}),
+          ...(input.children != null ? { children: input.children } : {}),
           preferredLanguage: input.preferredLanguage,
           roomName: input.roomName ?? null,
 
@@ -1072,6 +1082,8 @@ async function upsertReservation(
         guestName: input.guestName,
         guestEmail: input.guestEmail ?? null,
         guestPhone: input.guestPhone ?? null,
+        ...(input.adults != null ? { adults: input.adults } : {}),
+        ...(input.children != null ? { children: input.children } : {}),
         preferredLanguage: input.preferredLanguage,
         roomName: input.roomName ?? null,
 

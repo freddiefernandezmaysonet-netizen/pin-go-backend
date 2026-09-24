@@ -168,6 +168,64 @@ test("revision and feed preserve documented customer contact fields and legacy a
   }
 });
 
+test("Vrbo customer surname and occupancy are preserved canonically", async () => {
+  const previousKey = process.env.CHANNEX_API_KEY;
+  process.env.CHANNEX_API_KEY = "test-api-key";
+  const originalGet = axios.get;
+  const { guest_name, guest_email, guest_phone, ...attributes } = REVISION_FIXTURE.data.attributes;
+  const resource = {
+    ...REVISION_FIXTURE.data,
+    attributes: {
+      ...attributes,
+      ota_name: "VRBO",
+      customer: { name: "Arelis", surname: "Maldonado", phone: null },
+      occupancy: { adults: 2, children: 0, infants: 0, ages: null },
+    },
+  };
+  axios.get = (async () => ({ data: { data: resource } })) as typeof axios.get;
+  try {
+    const result = await requireAdapterMethod(
+      channexAdapter.fetchBookingRevision,
+      "fetchBookingRevision"
+    )({ connection: {}, revisionId: "revision-001" });
+    assert.equal(result.reservation.guest?.name, "Arelis Maldonado");
+    assert.equal(result.reservation.guest?.email, undefined);
+    assert.equal(result.reservation.guest?.phone, undefined);
+    assert.equal(result.reservation.party?.adults, 2);
+    assert.equal(result.reservation.party?.children, undefined);
+  } finally {
+    axios.get = originalGet;
+    if (previousKey === undefined) delete process.env.CHANNEX_API_KEY;
+    else process.env.CHANNEX_API_KEY = previousKey;
+  }
+});
+
+test("customer surname is not duplicated when customer name already contains it", async () => {
+  const previousKey = process.env.CHANNEX_API_KEY;
+  process.env.CHANNEX_API_KEY = "test-api-key";
+  const originalGet = axios.get;
+  const { guest_name, ...attributes } = REVISION_FIXTURE.data.attributes;
+  const resource = {
+    ...REVISION_FIXTURE.data,
+    attributes: {
+      ...attributes,
+      customer: { name: "Arelis Maldonado", surname: "Maldonado" },
+    },
+  };
+  axios.get = (async () => ({ data: resource })) as typeof axios.get;
+  try {
+    const result = await requireAdapterMethod(
+      channexAdapter.fetchBookingRevision,
+      "fetchBookingRevision"
+    )({ connection: {}, revisionId: "revision-001" });
+    assert.equal(result.reservation.guest?.name, "Arelis Maldonado");
+  } finally {
+    axios.get = originalGet;
+    if (previousKey === undefined) delete process.env.CHANNEX_API_KEY;
+    else process.env.CHANNEX_API_KEY = previousKey;
+  }
+});
+
 test("Channex adapter does not expose Booking Find or booking-by-id", () => {
   assert.equal(channexAdapter.fetchReservation, undefined);
 });

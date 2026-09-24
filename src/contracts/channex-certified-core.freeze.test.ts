@@ -4,11 +4,11 @@ import fs from "node:fs";
 import path from "node:path";
 import test from "node:test";
 
-// Authorized recertification review: PR #236, 2026-09-24.
-// Only customer.mail fallback and its revision/feed regression tests changed.
+// Authorized recertification review: PR #241, 2026-09-24.
+// Channex guest full-name normalization and booking occupancy propagation changed.
 // Booking Lifecycle CI passed; the protected 124-file scope remains intact.
 const CERTIFIED_CORE_SHA256 =
-  "07716bb3fe0800f87d948cca133523d85d27d71e1616080024df3db83c58146a";
+  "9deeac82a4468f7bb20225b76453a159fd2e61c19b26d93351e03a08c5d8fc16";
 const CERTIFIED_CORE_FILE_COUNT = 124;
 
 const CHANNEX_PRODUCTION_TRANSPORT_BOUNDARY_FILES = new Set([
