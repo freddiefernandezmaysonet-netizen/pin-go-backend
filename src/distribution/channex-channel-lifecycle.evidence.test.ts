@@ -629,7 +629,7 @@ test("production AirBNB lifecycle evidence is applied", async () => {
 });
 
 test("Vrbo lifecycle evidence captures the channel identity instead of being ignored", async () => {
-  const { value, state } = client();
+  const { value, state } = client({ connection: { provider: "VRBO" } });
   const result = await applyChannexChannelLifecycleEvidence({
     client: value,
     payload: payload("new_channel", {
@@ -655,7 +655,7 @@ test("Vrbo lifecycle evidence captures the channel identity instead of being ign
 });
 
 test("Vrbo activate lifecycle evidence retains canonical VRB identity", async () => {
-  const { value, state } = client();
+  const { value, state } = client({ connection: { provider: "VRBO" } });
   const result = await applyChannexChannelLifecycleEvidence({
     client: value,
     payload: payload("activate_channel", {
