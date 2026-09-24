@@ -64,6 +64,7 @@ const record = {
     id: "property-1",
     organizationId: "org-1",
     name: "Casa Uno",
+    maxGuests: 4,
     timezone: "America/Puerto_Rico",
   },
   group: {
@@ -105,6 +106,8 @@ test("snapshot query and returned evidence remain tenant scoped", async () => {
     platform: "CHANNEX",
   });
   assert.equal(snapshot?.currency, "USD");
+  assert.equal(snapshot?.maxGuests, 4);
+  assert.equal(reads[0].select.property.select.maxGuests, true);
   assert.equal(snapshot?.externalPropertyId, "property-ext");
   assert.equal(snapshot?.externalPrimaryRoomTypeId, "room-ext");
   assert.equal(snapshot?.externalPrimaryRatePlanId, null);
