@@ -222,3 +222,37 @@ test("rejects unknown physical property types instead of guessing", () => {
     assert.equal(result.code, "INVALID_PROPERTY_TYPES");
   }
 });
+
+
+test("accepts canonical listing features without inferring them from prose", () => {
+  const result = validatePublicStaySearchInput({
+    ...FUTURE_STAY,
+    propertyTypes: ["CABIN"],
+    features: ["wood_construction", "ocean_view", "pool_table", "gym"],
+    bedTypes: ["KING"],
+  });
+
+  assert.equal(result.ok, true);
+  if (!result.ok) return;
+
+  assert.deepEqual(result.value.propertyTypes, ["CABIN"]);
+  assert.deepEqual(result.value.features, [
+    "WOOD_CONSTRUCTION",
+    "OCEAN_VIEW",
+    "POOL_TABLE",
+    "GYM",
+  ]);
+  assert.deepEqual(result.value.bedTypes, ["KING"]);
+});
+
+test("rejects unknown listing features instead of inventing a match", () => {
+  const result = validatePublicStaySearchInput({
+    ...FUTURE_STAY,
+    features: ["ROMANTIC"],
+  });
+
+  assert.equal(result.ok, false);
+  if (!result.ok) {
+    assert.equal(result.code, "INVALID_FEATURES");
+  }
+});
