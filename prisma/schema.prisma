@@ -350,6 +350,20 @@ enum ListingBedType {
   OTHER
 }
 
+enum ListingFeatureType {
+  WOOD_CONSTRUCTION
+  OCEAN_VIEW
+  MOUNTAIN_VIEW
+  WATERFRONT
+  BEACH_ACCESS
+  POOL_TABLE
+  GYM
+  FIREPLACE
+  OUTDOOR_GRILL
+  WORKSPACE
+  OTHER
+}
+
 enum ListingSharedSpaceType {
   POOL
   HOT_TUB
@@ -416,6 +430,7 @@ model PropertyListingDetails {
   property             Property                            @relation(fields: [propertyId], references: [id], onDelete: Cascade)
   sleepingAreas        PropertyListingSleepingArea[]
   sharedSpaces         PropertyListingSharedSpace[]
+  features             PropertyListingFeature[]
   safetyConsiderations PropertyListingSafetyConsideration[]
   additionalConsiderations PropertyListingAdditionalConsideration[]
 
@@ -449,6 +464,23 @@ model PropertyListingBed {
   sleepingArea PropertyListingSleepingArea @relation(fields: [sleepingAreaId], references: [id], onDelete: Cascade)
 
   @@index([sleepingAreaId])
+}
+
+model PropertyListingFeature {
+  id               String             @id @default(cuid())
+  listingDetailsId String
+  type             ListingFeatureType
+  labelEn          String?
+  labelEs          String?
+  isActive         Boolean            @default(true)
+  sortOrder        Int                @default(0)
+  createdAt        DateTime           @default(now())
+  updatedAt        DateTime           @updatedAt
+
+  listingDetails PropertyListingDetails @relation(fields: [listingDetailsId], references: [id], onDelete: Cascade)
+
+  @@unique([listingDetailsId, type])
+  @@index([listingDetailsId, isActive, sortOrder])
 }
 
 model PropertyListingSharedSpace {
