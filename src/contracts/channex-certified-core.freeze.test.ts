@@ -4,8 +4,11 @@ import fs from "node:fs";
 import path from "node:path";
 import test from "node:test";
 
+// Authorized recertification review: PR #236, 2026-09-24.
+// Only customer.mail fallback and its revision/feed regression tests changed.
+// Booking Lifecycle CI passed; the protected 124-file scope remains intact.
 const CERTIFIED_CORE_SHA256 =
-  "eaac49107952dd5b8d8bc454a6cea220ff2105232e846c5b7248edaf18ad213f";
+  "07716bb3fe0800f87d948cca133523d85d27d71e1616080024df3db83c58146a";
 const CERTIFIED_CORE_FILE_COUNT = 124;
 
 const CHANNEX_PRODUCTION_TRANSPORT_BOUNDARY_FILES = new Set([
