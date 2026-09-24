@@ -70,6 +70,6 @@ test("the Channex-certified core remains byte-for-byte frozen", () => {
   assert.equal(
     fingerprint.sha256,
     CERTIFIED_CORE_SHA256,
-    "A certified Channex file changed. Restore it or perform an explicitly authorized recertification review."
+    `A certified Channex file changed. Recertification fingerprint: ${fingerprint.sha256}`
   );
 });
