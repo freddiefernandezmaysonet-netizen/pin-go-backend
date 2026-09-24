@@ -1,0 +1,35 @@
+name: Public Stay Search V2 certification
+
+on:
+  pull_request:
+    branches:
+      - agent/booking-public-stay-search-staging
+    paths:
+      - "src/services/public-stay-search.service.ts"
+      - "src/services/public-stay-search.service.test.ts"
+      - ".github/workflows/public-stay-search-v2.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  certify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+      - name: Install locked dependencies
+        run: npm ci --ignore-scripts --no-audit --no-fund
+      - name: Generate Prisma client
+        run: npx prisma generate
+      - name: Run focused search tests
+        run: node --import tsx --test src/services/public-stay-search.service.test.ts
+      - name: Type-check focused search surface
+        run: npx tsc --noEmit --strict --skipLibCheck --target ES2022 --module NodeNext --moduleResolution NodeNext --types node src/services/public-stay-search.service.ts src/services/public-stay-search.service.test.ts
