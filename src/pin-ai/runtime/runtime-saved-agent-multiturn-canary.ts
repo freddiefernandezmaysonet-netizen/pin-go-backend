@@ -20,6 +20,8 @@ import {
 } from "./pin-go-runtime-tools.js";
 import type { PinAIRuntimeToolExecutor } from "./tool-executor.js";
 
+const SEMANTIC_CONTINUITY_MARKER = "PIN-AI-ORBIT-47";
+
 type MultiTurnCanaryContext = Readonly<{
   organizationId: string;
   propertyId: string;
@@ -50,6 +52,7 @@ export type SavedAgentMultiTurnCanaryResult = Readonly<{
   operationalWrites: false;
   escalationCreated: false;
   webSearchUsed: false;
+  semanticContinuity: true;
 }>;
 
 export function assertSavedAgentMultiTurnCanaryEnvironment(
@@ -91,8 +94,8 @@ export async function runSavedAgentMultiTurnCanary(input: Readonly<{
   const firstRequest = buildRequest(
     input.context,
     input.context.preferredLanguage === "es"
-      ? "¿Cuál es el estado actual de mi estadía y cuál es el próximo paso?"
-      : "What is the current status of my stay and what is the next step?",
+      ? `Para esta prueba, recuerda el código ${SEMANTIC_CONTINUITY_MARKER}. ¿Cuál es el estado actual de mi estadía y cuál es el próximo paso?`
+      : `For this test, remember the code ${SEMANTIC_CONTINUITY_MARKER}. What is the current status of my stay and what is the next step?`,
   );
 
   console.log("PIN_AI_RUNTIME_MULTITURN_FIRST_TURN_BEGIN");
@@ -115,8 +118,8 @@ export async function runSavedAgentMultiTurnCanary(input: Readonly<{
   const secondRequest = buildRequest(
     input.context,
     input.context.preferredLanguage === "es"
-      ? "Basado en lo que acabas de decirme, ¿qué falta antes de que mi acceso esté listo?"
-      : "Based on what you just told me, what is still needed before my access is ready?",
+      ? "¿Cuál fue el código que te di en mi mensaje anterior? Responde solo con el código."
+      : "What code did I give you in my previous message? Reply with only the code.",
   );
 
   console.log("PIN_AI_RUNTIME_MULTITURN_SECOND_TURN_BEGIN");
@@ -134,6 +137,13 @@ export async function runSavedAgentMultiTurnCanary(input: Readonly<{
   console.log("PIN_AI_RUNTIME_MULTITURN_SECOND_TURN_COMPLETE");
   if (secondTurn.response.openaiSessionId !== sessionId) {
     throw new Error("PIN_AI_RUNTIME_MULTITURN_SESSION_ID_CHANGED");
+  }
+  if (
+    !secondTurn.response.responseText
+      .toUpperCase()
+      .includes(SEMANTIC_CONTINUITY_MARKER)
+  ) {
+    throw new Error("PIN_AI_RUNTIME_MULTITURN_SEMANTIC_CONTINUITY_FAILED");
   }
 
   const allToolCalls = [
@@ -153,6 +163,7 @@ export async function runSavedAgentMultiTurnCanary(input: Readonly<{
     operationalWrites: false,
     escalationCreated: false,
     webSearchUsed: false,
+    semanticContinuity: true,
   };
 }
 
@@ -313,6 +324,7 @@ async function main(): Promise<void> {
       databaseWrites: result.databaseWrites,
       operationalWrites: result.operationalWrites,
       webSearchUsed: result.webSearchUsed,
+      semanticContinuity: result.semanticContinuity,
       outboundCalls,
     }),
   );
