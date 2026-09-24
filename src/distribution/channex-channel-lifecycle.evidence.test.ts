@@ -385,6 +385,21 @@ test("normalizes the documented Expedia lifecycle adapter token", () => {
   assert.equal(normalized?.externalChannelCode, "EXP");
 });
 
+test("normalizes the documented Vrbo lifecycle adapter token", () => {
+  const normalized = normalizeChannexChannelLifecycleEvent(
+    payload("new_channel", {
+      payload: {
+        title: "Vrbo certification channel",
+        channel_id: EXTERNAL_CHANNEL_ID,
+        ota_name: "Vrbo",
+      },
+    })
+  );
+  assert.equal(normalized?.provider, "VRBO");
+  assert.equal(normalized?.externalConnectionId, EXTERNAL_CHANNEL_ID);
+  assert.equal(normalized?.externalChannelCode, "VRB");
+});
+
 test("normalizes the exact disconnect_channel name with the canonical envelope", () => {
   const normalized = normalizeChannexChannelLifecycleEvent({
     event: "disconnect_channel",
@@ -611,6 +626,55 @@ test("production AirBNB lifecycle evidence is applied", async () => {
   });
   assert.equal(state.updates.length, 1);
   assert.equal(state.audits.length, 1);
+});
+
+test("Vrbo lifecycle evidence captures the channel identity instead of being ignored", async () => {
+  const { value, state } = client();
+  const result = await applyChannexChannelLifecycleEvidence({
+    client: value,
+    payload: payload("new_channel", {
+      payload: {
+        title: "Vrbo certification channel",
+        channel_id: EXTERNAL_CHANNEL_ID,
+        ota_name: "Vrbo",
+      },
+    }),
+  });
+
+  assert.deepEqual(result, {
+    ignored: false,
+    deduped: false,
+    connectionId: "conn-1",
+    eventType: "new_channel",
+  });
+  assert.equal(state.updates.length, 1);
+  assert.equal(state.updates[0].data.externalConnectionId, EXTERNAL_CHANNEL_ID);
+  assert.equal(state.updates[0].data.externalChannelCode, "VRB");
+  assert.equal(state.updates[0].data.authorizationReadiness, "IN_PROGRESS");
+  assert.equal(state.audits.length, 1);
+});
+
+test("Vrbo activate lifecycle evidence retains canonical VRB identity", async () => {
+  const { value, state } = client();
+  const result = await applyChannexChannelLifecycleEvidence({
+    client: value,
+    payload: payload("activate_channel", {
+      payload: {
+        title: "Vrbo certification channel",
+        channel_id: EXTERNAL_CHANNEL_ID,
+        ota_name: "Vrbo",
+      },
+    }),
+  });
+
+  assert.equal(result.ignored, false);
+  assert.equal(result.eventType, "activate_channel");
+  assert.equal(state.updates[0].data.externalConnectionId, EXTERNAL_CHANNEL_ID);
+  assert.equal(state.updates[0].data.externalChannelCode, "VRB");
+  assert.equal(
+    state.updates[0].data.lastChannelActivatedAt.toISOString(),
+    "2026-09-06T18:00:00.000Z"
+  );
 });
 
 test("legacy ABB adapter alias is rejected as lifecycle evidence", async () => {
