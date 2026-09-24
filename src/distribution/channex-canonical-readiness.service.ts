@@ -265,7 +265,7 @@ function documentedChannexAdapterCode(
   if (provider === "AIRBNB") return "AirBNB";
   if (provider === "BOOKING_COM") return "BookingCom";
   if (provider === "EXPEDIA") return "Expedia";
-  return "Vrbo";
+  return "VRBO";
 }
 
 function lifecycleWatermark(connection: ConnectionRecord): {

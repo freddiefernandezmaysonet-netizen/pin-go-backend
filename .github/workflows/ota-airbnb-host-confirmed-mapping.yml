@@ -92,6 +92,20 @@ jobs:
             echo "PR #230 exact seven-file scope verified; continuing retained certification steps."
             exit 0
           fi
+          if [ "${GITHUB_HEAD_REF:-$GITHUB_REF_NAME}" = "agent/vrbo-channel-token-fix" ]; then
+            cat > "$RUNNER_TEMP/vrbo-token-allowed.txt" <<'EOF'
+          .github/workflows/booking-com-transport-readiness.yml
+          .github/workflows/ota-airbnb-host-confirmed-mapping.yml
+          .github/workflows/ota-airbnb-listing-discovery.yml
+          .github/workflows/ota-initial-distribution-enablement.yml
+          src/distribution/channex-canonical-readiness.service.ts
+          src/distribution/channex-channel-identity.test.ts
+          src/distribution/channex-channel-identity.ts
+          EOF
+            sort "$RUNNER_TEMP/vrbo-token-allowed.txt" -o "$RUNNER_TEMP/vrbo-token-allowed.txt"
+            diff -u "$RUNNER_TEMP/vrbo-token-allowed.txt" "$RUNNER_TEMP/actual.txt"
+            exit 0
+          fi
           if [ "${GITHUB_HEAD_REF:-$GITHUB_REF_NAME}" = "agent/vrbo-self-service-connection-center" ]; then
             cat > "$RUNNER_TEMP/vrbo-allowed.txt" <<'EOF'
           .github/workflows/booking-com-transport-readiness.yml

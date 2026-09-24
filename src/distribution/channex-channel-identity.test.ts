@@ -176,6 +176,54 @@ test("discovery rejects legacy provider aliases instead of widening identity", (
   assert.equal(result.outcome, "NOT_FOUND");
 });
 
+test("Vrbo discovery accepts only the production VRBO adapter token", () => {
+  const accepted = discoverUniqueChannexChannel({
+    payload: {
+      data: [listChannel({ id: CHANNEL_ID, channel: "VRBO" })],
+      meta: { page: 1, limit: 100, total: 1 },
+    },
+    provider: "VRBO",
+    expectedPropertyId: PROPERTY_ID,
+  });
+  assert.deepEqual(accepted, {
+    outcome: "FOUND",
+    channelId: CHANNEL_ID,
+    candidateCount: 1,
+  });
+
+  for (const channel of ["Vrbo", "VRB"]) {
+    const rejected = discoverUniqueChannexChannel({
+      payload: {
+        data: [listChannel({ id: CHANNEL_ID, channel })],
+        meta: { page: 1, limit: 100, total: 1 },
+      },
+      provider: "VRBO",
+      expectedPropertyId: PROPERTY_ID,
+    });
+    assert.equal(rejected.outcome, "NOT_FOUND");
+  }
+});
+
+test("Vrbo exact verification accepts VRBO and rejects Vrbo and VRB", () => {
+  const vrboExpected = { ...expected, provider: "VRBO" as const };
+  const accepted = verifyExactChannexChannel({
+    payload: exactChannel({ channel: "VRBO" }),
+    ...vrboExpected,
+  });
+  assert.equal(accepted.providerVerified, true);
+  assert.equal(accepted.identityVerified, true);
+
+  for (const channel of ["Vrbo", "VRB"]) {
+    const rejected = verifyExactChannexChannel({
+      payload: exactChannel({ channel }),
+      ...vrboExpected,
+    });
+    assert.equal(rejected.providerVerified, false);
+    assert.equal(rejected.identityVerified, false);
+    assert.ok(rejected.reasons.includes("CHANNEL_PROVIDER_NOT_VERIFIED"));
+  }
+});
+
 test("discovery never guesses between multiple exact candidates", () => {
   const result = discoverUniqueChannexChannel({
     payload: {

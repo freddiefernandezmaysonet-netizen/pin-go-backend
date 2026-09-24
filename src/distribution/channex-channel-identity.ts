@@ -55,7 +55,7 @@ const DOCUMENTED_CHANNEL_BY_PROVIDER: Readonly<
   AIRBNB: "Airbnb",
   BOOKING_COM: "BookingCom",
   EXPEDIA: "Expedia",
-  VRBO: "Vrbo",
+  VRBO: "VRBO",
 };
 
 function documentedChannelMatches(
