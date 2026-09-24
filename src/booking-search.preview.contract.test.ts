@@ -60,3 +60,14 @@ test("result cards surface canonical total stay price and reputation evidence", 
   assert.match(html, /p\.reviewCount/);
   assert.match(html, /p\.matchedAmenities/);
 });
+
+
+test("mobile filters avoid duplicated discovery concepts and expose collapsible sticky UX", () => {
+  const amenityOptions = html.match(/const AMENITY_OPTIONS=\[(.*?)\];const filterToggle/s)?.[1] ?? "";
+  assert.doesNotMatch(amenityOptions, /value:'gym'/);
+  assert.doesNotMatch(amenityOptions, /value:'pool table'/);
+  assert.doesNotMatch(amenityOptions, /value:'ocean view'/);
+  assert.match(html, /class="filterSection"/);
+  assert.match(html, /position:sticky/);
+  assert.match(html, /accommodation:'Espacio'/);
+});

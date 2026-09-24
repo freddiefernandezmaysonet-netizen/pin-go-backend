@@ -688,9 +688,22 @@ export async function searchPublicStays(
     }
 
     if (validated.features.length) {
-      if (!details) return false;
-      const availableFeatures = new Set(details.features.map((feature) => feature.type));
-      if (!validated.features.every((feature) => availableFeatures.has(feature))) {
+      const availableFeatures = new Set(details?.features.map((feature) => feature.type) ?? []);
+      const legacyAmenities = new Set(propertyAmenityCanonicalNames(property.amenities));
+      const legacyFeatureAmenity: Partial<Record<(typeof FEATURE_TYPES)[number], string>> = {
+        OCEAN_VIEW: "ocean view",
+        POOL_TABLE: "pool table",
+        GYM: "gym",
+      };
+
+      if (
+        !validated.features.every(
+          (feature) =>
+            availableFeatures.has(feature) ||
+            (legacyFeatureAmenity[feature] != null &&
+              legacyAmenities.has(legacyFeatureAmenity[feature]!))
+        )
+      ) {
         return false;
       }
     }

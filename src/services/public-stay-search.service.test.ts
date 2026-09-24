@@ -415,3 +415,79 @@ test("availability and pricing work are concurrency bounded", async () => {
   assert.ok(availabilityPeak > 1);
   assert.ok(pricingPeak > 1);
 });
+
+
+test("canonical discovery features can use equivalent verified legacy amenities during migration", async () => {
+  const candidate = {
+    id: "legacy-feature-property",
+    name: "California Cabin",
+    slug: "california-cabin",
+    publicTitle: null,
+    publicPhotos: null,
+    maxGuests: 4,
+    minimumNights: 1,
+    maximumNights: null,
+    city: "Malibu",
+    region: "California",
+    country: "USA",
+    timezone: "America/Los_Angeles",
+    checkInTime: "16:00",
+    checkOutTime: "11:00",
+    listingDetails: {
+      accommodationType: "ENTIRE_PLACE",
+      propertyType: "CABIN",
+      bedroomCount: 1,
+      fullBathroomCount: 1,
+      halfBathroomCount: 0,
+      features: [],
+      sleepingAreas: [{ beds: [{ type: "KING", quantity: 1 }] }],
+    },
+    amenities: [
+      { id: "a1", name: "Vista al mar", isActive: true, chargeMode: "INCLUDED" },
+      { id: "a2", name: "Mesa de billar", isActive: true, chargeMode: "INCLUDED" },
+      { id: "a3", name: "Gimnasio", isActive: true, chargeMode: "INCLUDED" },
+    ],
+    organization: { slug: "test-org" },
+  };
+
+  const db = {
+    property: {
+      async findMany(args: any) {
+        return args.cursor ? [] : [candidate];
+      },
+    },
+    propertyReview: {
+      async groupBy() {
+        return [];
+      },
+    },
+  };
+
+  const result = await searchPublicStays(
+    {
+      ...FUTURE_STAY,
+      destination: "California",
+      propertyTypes: ["CABIN"],
+      features: ["OCEAN_VIEW", "POOL_TABLE", "GYM"],
+      bedTypes: ["KING"],
+    },
+    {
+      prismaClient: db as never,
+      availabilityChecker: async () => ({ available: true, reason: null }) as never,
+      pricingCalculator: async () =>
+        ({
+          currency: "usd",
+          nights: 6,
+          nightlySubtotal: 600,
+          cleaningFee: 100,
+          amenitiesTotal: 0,
+          taxesTotal: 70,
+          totalAmount: 770,
+        }) as never,
+    }
+  );
+
+  assert.equal(result.ok, true);
+  if (!result.ok) return;
+  assert.equal(result.pagination.total, 1);
+});
