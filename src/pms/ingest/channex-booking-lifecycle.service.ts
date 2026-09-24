@@ -54,7 +54,7 @@ function resolvePaymentState(
     : "NONE";
 }
 
-function resolveBookingFinancials(revision: ChannexBookingRevision) {
+export function resolveBookingFinancials(revision: ChannexBookingRevision) {
   const raw = asRecord(revision.reservation.raw);
   const amount = Number(raw.amount);
   const currency = asString(raw.currency)?.toUpperCase() ?? null;
