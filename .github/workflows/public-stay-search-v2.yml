@@ -7,6 +7,8 @@ on:
     paths:
       - "src/services/public-stay-search.service.ts"
       - "src/services/public-stay-search.service.test.ts"
+      - "src/booking-search.staging.server.ts"
+      - "src/booking-search.staging.server.contract.test.ts"
       - ".github/workflows/public-stay-search-v2.yml"
   workflow_dispatch:
 
@@ -30,6 +32,6 @@ jobs:
       - name: Generate Prisma client
         run: npx prisma generate
       - name: Run focused search tests
-        run: node --import tsx --test src/services/public-stay-search.service.test.ts
+        run: node --import tsx --test src/services/public-stay-search.service.test.ts src/booking-search.staging.server.contract.test.ts
       - name: Compile and import focused search surface
         run: node --import tsx -e "await import('./src/services/public-stay-search.service.ts')"
