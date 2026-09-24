@@ -201,12 +201,16 @@ function toCanonicalReservation(
   }
 
   const timezone = firstString(booking?.timezone, booking?.time_zone);
-  const guestName = firstString(
-    booking?.guest_name,
-    booking?.guestName,
-    booking?.customer?.name,
-    booking?.guest?.name
-  );
+  const explicitGuestName = firstString(booking?.guest_name, booking?.guestName, booking?.guest?.name);
+  const customerName = firstString(booking?.customer?.name);
+  const customerSurname = firstString(booking?.customer?.surname);
+  const guestName =
+    explicitGuestName ??
+    (customerName && customerSurname
+      ? customerName.toLowerCase().endsWith(customerSurname.toLowerCase())
+        ? customerName
+        : `${customerName} ${customerSurname}`
+      : customerName ?? customerSurname);
   const guestEmail = firstString(
     booking?.guest_email,
     booking?.guestEmail,
