@@ -4,6 +4,7 @@ import {
   normalizePublicStaySearchText,
   parsePublicStayDateKey,
   validatePublicStaySearchInput,
+  searchPublicStays,
 } from "./public-stay-search.service";
 
 const FUTURE_STAY = {
@@ -255,4 +256,162 @@ test("rejects unknown listing features instead of inventing a match", () => {
   if (!result.ok) {
     assert.equal(result.code, "INVALID_FEATURES");
   }
+});
+
+
+test("candidate discovery paginates past 200 properties instead of silently truncating", async () => {
+  const totalCandidates = 205;
+  const allCandidates = Array.from({ length: totalCandidates }, (_, index) => ({
+    id: `property-${String(index + 1).padStart(3, "0")}`,
+    name: `California Stay ${index + 1}`,
+    slug: `stay-${index + 1}`,
+    publicTitle: null,
+    publicPhotos: null,
+    maxGuests: 4,
+    minimumNights: 1,
+    maximumNights: null,
+    city: "Los Angeles",
+    region: "California",
+    country: "USA",
+    timezone: "America/Los_Angeles",
+    checkInTime: "16:00",
+    checkOutTime: "11:00",
+    listingDetails: null,
+    amenities: [],
+    organization: { slug: "test-org" },
+  }));
+
+  let candidateCalls = 0;
+  const db = {
+    property: {
+      async findMany(args: any) {
+        candidateCalls += 1;
+        const cursorId = args.cursor?.id as string | undefined;
+        const start = cursorId
+          ? allCandidates.findIndex((item) => item.id === cursorId) + (args.skip ?? 0)
+          : 0;
+        return allCandidates.slice(start, start + args.take);
+      },
+    },
+    propertyReview: {
+      async groupBy() {
+        return [];
+      },
+    },
+  };
+
+  const result = await searchPublicStays(
+    {
+      ...FUTURE_STAY,
+      destination: "California",
+      pageSize: 50,
+    },
+    {
+      prismaClient: db as never,
+      availabilityChecker: async () => ({ available: true, reason: null }) as never,
+      pricingCalculator: async () =>
+        ({
+          currency: "usd",
+          nights: 6,
+          nightlySubtotal: 600,
+          cleaningFee: 100,
+          amenitiesTotal: 0,
+          taxesTotal: 70,
+          totalAmount: 770,
+        }) as never,
+    }
+  );
+
+  assert.equal(result.ok, true);
+  if (!result.ok) return;
+
+  assert.equal(result.pagination.total, totalCandidates);
+  assert.equal(result.results.length, 50);
+  assert.ok(candidateCalls >= 3, "candidate discovery must fetch multiple batches");
+});
+
+test("availability and pricing work are concurrency bounded", async () => {
+  const totalCandidates = 24;
+  const candidates = Array.from({ length: totalCandidates }, (_, index) => ({
+    id: `bounded-${index + 1}`,
+    name: `California Stay ${index + 1}`,
+    slug: `bounded-${index + 1}`,
+    publicTitle: null,
+    publicPhotos: null,
+    maxGuests: 4,
+    minimumNights: 1,
+    maximumNights: null,
+    city: "San Diego",
+    region: "California",
+    country: "USA",
+    timezone: "America/Los_Angeles",
+    checkInTime: "16:00",
+    checkOutTime: "11:00",
+    listingDetails: null,
+    amenities: [],
+    organization: { slug: "test-org" },
+  }));
+
+  const db = {
+    property: {
+      async findMany(args: any) {
+        const cursorId = args.cursor?.id as string | undefined;
+        const start = cursorId
+          ? candidates.findIndex((item) => item.id === cursorId) + (args.skip ?? 0)
+          : 0;
+        return candidates.slice(start, start + args.take);
+      },
+    },
+    propertyReview: {
+      async groupBy() {
+        return [];
+      },
+    },
+  };
+
+  let availabilityActive = 0;
+  let availabilityPeak = 0;
+  let pricingActive = 0;
+  let pricingPeak = 0;
+
+  const wait = () => new Promise((resolve) => setTimeout(resolve, 2));
+
+  const result = await searchPublicStays(
+    {
+      ...FUTURE_STAY,
+      destination: "California",
+      pageSize: 50,
+    },
+    {
+      prismaClient: db as never,
+      availabilityChecker: async () => {
+        availabilityActive += 1;
+        availabilityPeak = Math.max(availabilityPeak, availabilityActive);
+        await wait();
+        availabilityActive -= 1;
+        return { available: true, reason: null } as never;
+      },
+      pricingCalculator: async () => {
+        pricingActive += 1;
+        pricingPeak = Math.max(pricingPeak, pricingActive);
+        await wait();
+        pricingActive -= 1;
+        return {
+          currency: "usd",
+          nights: 6,
+          nightlySubtotal: 600,
+          cleaningFee: 100,
+          amenitiesTotal: 0,
+          taxesTotal: 70,
+          totalAmount: 770,
+        } as never;
+      },
+    }
+  );
+
+  assert.equal(result.ok, true);
+  assert.ok(availabilityPeak <= 8);
+  assert.ok(pricingPeak <= 8);
+  assert.ok(availabilityPeak > 1);
+  assert.ok(pricingPeak > 1);
 });
