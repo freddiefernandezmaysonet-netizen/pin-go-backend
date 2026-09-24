@@ -8,6 +8,7 @@ on:
       - "src/services/public-stay-search.service.ts"
       - "prisma/schema.prisma"
       - "prisma/migrations/20260923152500_add_property_listing_details_v1/migration.sql"
+      - "prisma/migrations/20260924131500_add_listing_property_type/migration.sql"
       - "src/services/public-stay-search.service.test.ts"
       - "src/booking-search.staging.server.ts"
       - "src/booking-search.staging.server.contract.test.ts"
