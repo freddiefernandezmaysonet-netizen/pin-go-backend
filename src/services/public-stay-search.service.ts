@@ -26,6 +26,10 @@ export type PublicStaySearchInput = {
   minRating?: number | null;
   minReviewCount?: number | null;
   amenities?: string[] | null;
+  accommodationTypes?: string[] | null;
+  bedTypes?: string[] | null;
+  minBedrooms?: number | null;
+  minBathrooms?: number | null;
   sort?: PublicStaySort | null;
   page?: number | null;
   pageSize?: number | null;
@@ -57,6 +61,13 @@ export type PublicStaySearchResult = {
   reviewCount: number;
   amenities: string[];
   matchedAmenities: string[];
+  listingDetails: {
+    accommodationType: "ENTIRE_PLACE" | "PRIVATE_ROOM" | "SHARED_ROOM" | null;
+    bedroomCount: number | null;
+    fullBathroomCount: number | null;
+    halfBathroomCount: number | null;
+    bedTypes: string[];
+  } | null;
   pricing: PublicStayPricingSummary;
 };
 
@@ -72,6 +83,10 @@ type ValidatedPublicStaySearchInput = {
   minRating: number | null;
   minReviewCount: number;
   amenities: string[];
+  accommodationTypes: Array<"ENTIRE_PLACE" | "PRIVATE_ROOM" | "SHARED_ROOM">;
+  bedTypes: Array<"KING" | "QUEEN" | "DOUBLE" | "SINGLE" | "BUNK" | "SOFA_BED" | "FUTON" | "CRIB" | "OTHER">;
+  minBedrooms: number | null;
+  minBathrooms: number | null;
   sort: PublicStaySort;
   page: number;
   pageSize: number;
@@ -133,6 +148,24 @@ function normalizeRequestedAmenities(value: unknown) {
         .slice(0, 25)
     )
   );
+}
+
+const ACCOMMODATION_TYPES = ["ENTIRE_PLACE", "PRIVATE_ROOM", "SHARED_ROOM"] as const;
+const BED_TYPES = ["KING", "QUEEN", "DOUBLE", "SINGLE", "BUNK", "SOFA_BED", "FUTON", "CRIB", "OTHER"] as const;
+
+function normalizeEnumList<T extends readonly string[]>(value: unknown, allowed: T): T[number][] | null {
+  if (value == null) return [];
+  if (!Array.isArray(value)) return null;
+  const normalized = Array.from(new Set(value.map((item) => String(item).trim().toUpperCase()).filter(Boolean)));
+  return normalized.every((item) => (allowed as readonly string[]).includes(item))
+    ? (normalized as T[number][])
+    : null;
+}
+
+function parseOptionalNonNegativeNumber(value: unknown) {
+  if (value == null || value === "") return null;
+  const number = Number(value);
+  return Number.isFinite(number) && number >= 0 ? number : null;
 }
 
 export function parsePublicStayDateKey(value: unknown) {
@@ -266,6 +299,26 @@ export function validatePublicStaySearchInput(
     return { ok: false, code: "INVALID_MIN_REVIEW_COUNT" };
   }
 
+  const accommodationTypes = normalizeEnumList(input.accommodationTypes, ACCOMMODATION_TYPES);
+  if (accommodationTypes === null) {
+    return { ok: false, code: "INVALID_ACCOMMODATION_TYPES" };
+  }
+
+  const bedTypes = normalizeEnumList(input.bedTypes, BED_TYPES);
+  if (bedTypes === null) {
+    return { ok: false, code: "INVALID_BED_TYPES" };
+  }
+
+  const minBedrooms = parseOptionalNonNegativeNumber(input.minBedrooms);
+  if (input.minBedrooms != null && minBedrooms === null) {
+    return { ok: false, code: "INVALID_MIN_BEDROOMS" };
+  }
+
+  const minBathrooms = parseOptionalNonNegativeNumber(input.minBathrooms);
+  if (input.minBathrooms != null && minBathrooms === null) {
+    return { ok: false, code: "INVALID_MIN_BATHROOMS" };
+  }
+
   const sort = String(input.sort ?? "RECOMMENDED").trim().toUpperCase();
   if (!PUBLIC_STAY_SORTS.includes(sort as PublicStaySort)) {
     return { ok: false, code: "INVALID_SORT" };
@@ -296,6 +349,10 @@ export function validatePublicStaySearchInput(
       minRating,
       minReviewCount,
       amenities: normalizeRequestedAmenities(input.amenities),
+      accommodationTypes,
+      bedTypes,
+      minBedrooms,
+      minBathrooms,
       sort: sort as PublicStaySort,
       page,
       pageSize,
@@ -498,6 +555,21 @@ export async function searchPublicStays(
       timezone: true,
       checkInTime: true,
       checkOutTime: true,
+      listingDetails: {
+        select: {
+          accommodationType: true,
+          bedroomCount: true,
+          fullBathroomCount: true,
+          halfBathroomCount: true,
+          sleepingAreas: {
+            select: {
+              beds: {
+                select: { type: true, quantity: true },
+              },
+            },
+          },
+        },
+      },
       amenities: {
         where: { isActive: true },
         select: {
@@ -523,7 +595,50 @@ export async function searchPublicStays(
     matchesRequestedAmenities(property.amenities, validated.amenities)
   );
 
-  const stayRuleMatches = amenityMatches.filter(
+  const listingMatches = amenityMatches.filter((property) => {
+    const details = property.listingDetails;
+
+    if (
+      validated.accommodationTypes.length &&
+      (!details?.accommodationType ||
+        !validated.accommodationTypes.includes(details.accommodationType))
+    ) {
+      return false;
+    }
+
+    if (
+      validated.minBedrooms !== null &&
+      (details?.bedroomCount == null ||
+        details.bedroomCount < validated.minBedrooms)
+    ) {
+      return false;
+    }
+
+    if (validated.minBathrooms !== null) {
+      if (!details || details.fullBathroomCount == null) return false;
+      const bathrooms =
+        details.fullBathroomCount + (details.halfBathroomCount ?? 0) * 0.5;
+      if (bathrooms < validated.minBathrooms) return false;
+    }
+
+    if (validated.bedTypes.length) {
+      if (!details) return false;
+      const availableBedTypes = new Set(
+        details.sleepingAreas.flatMap((area) =>
+          area.beds
+            .filter((bed) => Number(bed.quantity) > 0)
+            .map((bed) => bed.type)
+        )
+      );
+      if (!validated.bedTypes.every((bedType) => availableBedTypes.has(bedType))) {
+        return false;
+      }
+    }
+
+    return true;
+  });
+
+  const stayRuleMatches = listingMatches.filter(
     (property) =>
       validated.stayNights >= property.minimumNights &&
       (property.maximumNights == null ||
@@ -692,6 +807,23 @@ export async function searchPublicStays(
           matchedAmenities: validated.amenities.filter((amenity) =>
             canonicalAmenities.includes(amenity)
           ),
+          listingDetails: property.listingDetails
+            ? {
+                accommodationType: property.listingDetails.accommodationType,
+                bedroomCount: property.listingDetails.bedroomCount,
+                fullBathroomCount: property.listingDetails.fullBathroomCount,
+                halfBathroomCount: property.listingDetails.halfBathroomCount,
+                bedTypes: Array.from(
+                  new Set(
+                    property.listingDetails.sleepingAreas.flatMap((area) =>
+                      area.beds
+                        .filter((bed) => Number(bed.quantity) > 0)
+                        .map((bed) => bed.type)
+                    )
+                  )
+                ),
+              }
+            : null,
           pricing: {
             currency: String(pricing.currency ?? "usd").toUpperCase(),
             nights: Number(pricing.nights),
@@ -732,6 +864,10 @@ export async function searchPublicStays(
       minRating: validated.minRating,
       minReviewCount: validated.minReviewCount,
       amenities: validated.amenities,
+      accommodationTypes: validated.accommodationTypes,
+      bedTypes: validated.bedTypes,
+      minBedrooms: validated.minBedrooms,
+      minBathrooms: validated.minBathrooms,
       sort: validated.sort,
       page: validated.page,
       pageSize: validated.pageSize,
