@@ -152,3 +152,44 @@ test("rejects unsupported sort values and oversized pages", () => {
     assert.equal(invalidPageSize.code, "INVALID_PAGE_SIZE");
   }
 });
+
+
+test("accepts canonical Listing Details facets for future Pin AI discovery", () => {
+  const result = validatePublicStaySearchInput({
+    ...FUTURE_STAY,
+    accommodationTypes: ["entire_place"],
+    bedTypes: ["king"],
+    minBedrooms: 2,
+    minBathrooms: 1.5,
+  });
+
+  assert.equal(result.ok, true);
+  if (!result.ok) return;
+
+  assert.deepEqual(result.value.accommodationTypes, ["ENTIRE_PLACE"]);
+  assert.deepEqual(result.value.bedTypes, ["KING"]);
+  assert.equal(result.value.minBedrooms, 2);
+  assert.equal(result.value.minBathrooms, 1.5);
+});
+
+test("rejects unknown accommodation and bed types instead of guessing", () => {
+  const accommodation = validatePublicStaySearchInput({
+    ...FUTURE_STAY,
+    accommodationTypes: ["CABIN"],
+  });
+
+  assert.equal(accommodation.ok, false);
+  if (!accommodation.ok) {
+    assert.equal(accommodation.code, "INVALID_ACCOMMODATION_TYPES");
+  }
+
+  const bed = validatePublicStaySearchInput({
+    ...FUTURE_STAY,
+    bedTypes: ["CALIFORNIA_KING"],
+  });
+
+  assert.equal(bed.ok, false);
+  if (!bed.ok) {
+    assert.equal(bed.code, "INVALID_BED_TYPES");
+  }
+});
