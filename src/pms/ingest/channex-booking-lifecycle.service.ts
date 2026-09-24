@@ -509,6 +509,8 @@ export async function persistChannexBookingRevision(args: {
       guestName: args.revision.reservation.guest?.name ?? "Guest",
       guestEmail: args.revision.reservation.guest?.email ?? null,
       guestPhone: args.revision.reservation.guest?.phone ?? null,
+      adults: args.revision.reservation.party?.adults ?? null,
+      children: args.revision.reservation.party?.children ?? null,
       roomName: listing.name ?? args.revision.reservation.listingName ?? null,
       checkIn: args.revision.reservation.checkIn,
       checkOut: args.revision.reservation.checkOut,
