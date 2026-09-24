@@ -290,6 +290,22 @@ enum ListingAccommodationType {
   SHARED_ROOM
 }
 
+enum ListingPropertyType {
+  HOUSE
+  APARTMENT
+  CONDO
+  CABIN
+  COTTAGE
+  VILLA
+  TOWNHOUSE
+  BUNGALOW
+  LOFT
+  STUDIO
+  GUESTHOUSE
+  FARM_STAY
+  OTHER
+}
+
 enum ListingPermissionState {
   ALLOWED
   NOT_ALLOWED
@@ -359,6 +375,7 @@ model PropertyListingDetails {
   propertyId                      String                   @unique
   version                         Int                      @default(1)
   accommodationType               ListingAccommodationType?
+  propertyType                    ListingPropertyType?
   bedroomCount                    Int?
   fullBathroomCount               Int?
   halfBathroomCount               Int?
