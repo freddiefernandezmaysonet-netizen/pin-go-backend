@@ -14,6 +14,10 @@ test("booking preview exposes faceted discovery controls in both languages", () 
     "minPrice",
     "maxPrice",
     "minRating",
+    "accommodationType",
+    "bedType",
+    "minBedrooms",
+    "minBathrooms",
     "sort",
     "amenityFilters",
     "filterApply",
@@ -33,6 +37,10 @@ test("filter UI forwards supported V2 query parameters only after a valid stay s
   assert.match(html, /q\.minTotalPrice=\$\('minPrice'\)\.value/);
   assert.match(html, /q\.maxTotalPrice=\$\('maxPrice'\)\.value/);
   assert.match(html, /q\.minRating=\$\('minRating'\)\.value/);
+  assert.match(html, /q\.accommodationTypes=\$\('accommodationType'\)\.value/);
+  assert.match(html, /q\.bedTypes=\$\('bedType'\)\.value/);
+  assert.match(html, /q\.minBedrooms=\$\('minBedrooms'\)\.value/);
+  assert.match(html, /q\.minBathrooms=\$\('minBathrooms'\)\.value/);
   assert.match(html, /q\.sort=\$\('sort'\)\.value/);
   assert.match(html, /q\.amenities=amenities\.join\(','\)/);
   assert.match(html, /base\.destination&&base\.checkIn&&base\.checkOut/);
