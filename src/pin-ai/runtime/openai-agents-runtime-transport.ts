@@ -188,7 +188,7 @@ export class OpenAIAgentsRuntimeTransport {
     }
     if (
       this.config.resumeSessionId !== undefined &&
-      !/^session_[A-Za-z0-9_-]+$/.test(this.config.resumeSessionId)
+      !/^(?:sess|session)_[A-Za-z0-9_-]+$/.test(this.config.resumeSessionId)
     ) {
       throw new Error("PIN_AI_RUNTIME_OPENAI_SESSION_ID_INVALID");
     }
