@@ -27,6 +27,7 @@ export type PublicStaySearchInput = {
   minReviewCount?: number | null;
   amenities?: string[] | null;
   accommodationTypes?: string[] | null;
+  propertyTypes?: string[] | null;
   bedTypes?: string[] | null;
   minBedrooms?: number | null;
   minBathrooms?: number | null;
@@ -63,6 +64,7 @@ export type PublicStaySearchResult = {
   matchedAmenities: string[];
   listingDetails: {
     accommodationType: "ENTIRE_PLACE" | "PRIVATE_ROOM" | "SHARED_ROOM" | null;
+    propertyType: "HOUSE" | "APARTMENT" | "CONDO" | "CABIN" | "COTTAGE" | "VILLA" | "TOWNHOUSE" | "BUNGALOW" | "LOFT" | "STUDIO" | "GUESTHOUSE" | "FARM_STAY" | "OTHER" | null;
     bedroomCount: number | null;
     fullBathroomCount: number | null;
     halfBathroomCount: number | null;
@@ -84,6 +86,7 @@ type ValidatedPublicStaySearchInput = {
   minReviewCount: number;
   amenities: string[];
   accommodationTypes: Array<"ENTIRE_PLACE" | "PRIVATE_ROOM" | "SHARED_ROOM">;
+  propertyTypes: Array<"HOUSE" | "APARTMENT" | "CONDO" | "CABIN" | "COTTAGE" | "VILLA" | "TOWNHOUSE" | "BUNGALOW" | "LOFT" | "STUDIO" | "GUESTHOUSE" | "FARM_STAY" | "OTHER">;
   bedTypes: Array<"KING" | "QUEEN" | "DOUBLE" | "SINGLE" | "BUNK" | "SOFA_BED" | "FUTON" | "CRIB" | "OTHER">;
   minBedrooms: number | null;
   minBathrooms: number | null;
@@ -151,6 +154,7 @@ function normalizeRequestedAmenities(value: unknown) {
 }
 
 const ACCOMMODATION_TYPES = ["ENTIRE_PLACE", "PRIVATE_ROOM", "SHARED_ROOM"] as const;
+const PROPERTY_TYPES = ["HOUSE", "APARTMENT", "CONDO", "CABIN", "COTTAGE", "VILLA", "TOWNHOUSE", "BUNGALOW", "LOFT", "STUDIO", "GUESTHOUSE", "FARM_STAY", "OTHER"] as const;
 const BED_TYPES = ["KING", "QUEEN", "DOUBLE", "SINGLE", "BUNK", "SOFA_BED", "FUTON", "CRIB", "OTHER"] as const;
 
 function normalizeEnumList<T extends readonly string[]>(value: unknown, allowed: T): T[number][] | null {
@@ -304,6 +308,11 @@ export function validatePublicStaySearchInput(
     return { ok: false, code: "INVALID_ACCOMMODATION_TYPES" };
   }
 
+  const propertyTypes = normalizeEnumList(input.propertyTypes, PROPERTY_TYPES);
+  if (propertyTypes === null) {
+    return { ok: false, code: "INVALID_PROPERTY_TYPES" };
+  }
+
   const bedTypes = normalizeEnumList(input.bedTypes, BED_TYPES);
   if (bedTypes === null) {
     return { ok: false, code: "INVALID_BED_TYPES" };
@@ -350,6 +359,7 @@ export function validatePublicStaySearchInput(
       minReviewCount,
       amenities: normalizeRequestedAmenities(input.amenities),
       accommodationTypes,
+      propertyTypes,
       bedTypes,
       minBedrooms,
       minBathrooms,
@@ -558,6 +568,7 @@ export async function searchPublicStays(
       listingDetails: {
         select: {
           accommodationType: true,
+          propertyType: true,
           bedroomCount: true,
           fullBathroomCount: true,
           halfBathroomCount: true,
@@ -602,6 +613,14 @@ export async function searchPublicStays(
       validated.accommodationTypes.length &&
       (!details?.accommodationType ||
         !validated.accommodationTypes.includes(details.accommodationType))
+    ) {
+      return false;
+    }
+
+    if (
+      validated.propertyTypes.length &&
+      (!details?.propertyType ||
+        !validated.propertyTypes.includes(details.propertyType))
     ) {
       return false;
     }
@@ -810,6 +829,7 @@ export async function searchPublicStays(
           listingDetails: property.listingDetails
             ? {
                 accommodationType: property.listingDetails.accommodationType,
+                propertyType: property.listingDetails.propertyType,
                 bedroomCount: property.listingDetails.bedroomCount,
                 fullBathroomCount: property.listingDetails.fullBathroomCount,
                 halfBathroomCount: property.listingDetails.halfBathroomCount,
@@ -865,6 +885,7 @@ export async function searchPublicStays(
       minReviewCount: validated.minReviewCount,
       amenities: validated.amenities,
       accommodationTypes: validated.accommodationTypes,
+      propertyTypes: validated.propertyTypes,
       bedTypes: validated.bedTypes,
       minBedrooms: validated.minBedrooms,
       minBathrooms: validated.minBathrooms,
