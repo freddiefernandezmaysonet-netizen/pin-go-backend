@@ -66,6 +66,28 @@ jobs:
             '.github/workflows/ota-initial-distribution-enablement.yml',
           }
           changed = set(Path('/tmp/ota-initial-changed.txt').read_text().splitlines())
+          if os.environ.get('GITHUB_HEAD_REF') == 'agent/vrbo-channel-token-fix':
+            repo = 'freddiefernandezmaysonet-netizen/pin-go-backend'
+            if not (
+              os.environ.get('GITHUB_EVENT_NAME') == 'pull_request'
+              and os.environ.get('GITHUB_REPOSITORY') == repo
+              and os.environ.get('SCOPE_PR_NUMBER') == '238'
+              and os.environ.get('SCOPE_HEAD_REPO') == repo
+              and os.environ.get('SCOPE_BASE_REPO') == repo
+              and os.environ.get('GITHUB_BASE_REF') == 'main'
+            ):
+              raise SystemExit('PR #238 repository/branch scope mismatch')
+            allowed = {
+              '.github/workflows/booking-com-transport-readiness.yml',
+              '.github/workflows/ota-airbnb-host-confirmed-mapping.yml',
+              '.github/workflows/ota-airbnb-listing-discovery.yml',
+              '.github/workflows/ota-initial-distribution-enablement.yml',
+              'src/distribution/channex-canonical-readiness.service.ts',
+              'src/distribution/channex-channel-identity.test.ts',
+              'src/distribution/channex-channel-identity.ts',
+            }
+            if changed != allowed:
+              raise SystemExit(f'PR #238 exact seven-file scope required: {sorted(changed ^ allowed)}')
           # The expanded scope is not available to other PRs, repos or branches.
           if os.environ.get('GITHUB_HEAD_REF') == 'agent/ota-initial-distribution-enablement-v1':
             repo = 'freddiefernandezmaysonet-netizen/pin-go-backend'
