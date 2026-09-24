@@ -282,10 +282,14 @@ test("multi-turn canary fails if OpenAI returns a different session on turn two"
       });
     }
 
-    if (init.method === "GET" && url.includes("/v1/agents/sessions/session_original")) {
+    if (
+      init.method === "GET" &&
+      (url.includes("/v1/agents/sessions/session_original") ||
+        url.includes("/v1/agents/sessions/session_changed"))
+    ) {
       sessionReads += 1;
       return response({
-        id: sessionReads === 1 ? "session_changed" : "session_changed",
+        id: "session_changed",
         status: "idle",
         required_actions: [],
       });
