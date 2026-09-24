@@ -307,6 +307,7 @@ function providerFromChannelCode(value: string | null): ConnectionCenterProvider
   if (code === "AirBNB" || code === "Airbnb") return "AIRBNB";
   if (code === "BookingCom") return "BOOKING_COM";
   if (code === "Expedia") return "EXPEDIA";
+  if (code === "Vrbo") return "VRBO";
   return null;
 }
 
@@ -316,6 +317,7 @@ function canonicalChannelCode(
   if (provider === "AIRBNB") return "ABB";
   if (provider === "BOOKING_COM") return "BDC";
   if (provider === "EXPEDIA") return "EXP";
+  if (provider === "VRBO") return "VRB";
   return null;
 }
 
