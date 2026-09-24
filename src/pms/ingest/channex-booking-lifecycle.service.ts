@@ -54,20 +54,6 @@ function resolvePaymentState(
     : "NONE";
 }
 
-function parseChannexBookingAmount(rawValue: unknown): number | null {
-  const raw = asRecord(rawValue);
-  if (raw.amount == null || raw.amount === "") return null;
-  const amount = Number(raw.amount);
-  return Number.isFinite(amount) && amount >= 0 ? amount : null;
-}
-
-function parseChannexBookingCurrency(rawValue: unknown): string | null {
-  const currency = asString(asRecord(rawValue).currency);
-  return currency && /^[A-Za-z]{3}$/.test(currency)
-    ? currency.toLowerCase()
-    : null;
-}
-
 function resolveReservationSource(revision: ChannexBookingRevision) {
   const raw = asRecord(revision.reservation.raw);
   return asString(raw.ota_name) ?? "PIN_GO_CONNECT";
@@ -527,8 +513,6 @@ export async function persistChannexBookingRevision(args: {
       checkIn: args.revision.reservation.checkIn,
       checkOut: args.revision.reservation.checkOut,
       paymentState: resolvePaymentState(args.revision),
-      totalAmount: parseChannexBookingAmount(args.revision.reservation.raw),
-      currency: parseChannexBookingCurrency(args.revision.reservation.raw),
       externalProvider: "CHANNEX",
       externalId: args.revision.identity.bookingId,
       externalUpdatedAt: insertedAt.toISOString(),
