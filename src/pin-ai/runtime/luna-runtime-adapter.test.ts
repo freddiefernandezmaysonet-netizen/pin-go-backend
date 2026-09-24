@@ -531,9 +531,9 @@ test("runtime advertises native web search separately without exposing hidden fu
 test("runtime continues an idle OpenAI session and returns only the latest turn", async () => {
   const calls: Array<{ method: string; url: string; body?: string }> = [];
   const responses = [
-    { id: "session_conversation", status: "idle", required_actions: [] },
+    { id: "sess_conversation", status: "idle", required_actions: [] },
     {},
-    { id: "session_conversation", status: "idle", required_actions: [] },
+    { id: "sess_conversation", status: "idle", required_actions: [] },
     {
       data: [
         { type: "message", role: "user", content: [] },
@@ -558,7 +558,7 @@ test("runtime continues an idle OpenAI session and returns only the latest turn"
       enabled: true,
       apiKey: "test-key",
       agentId: "agent_saved123",
-      resumeSessionId: "session_conversation",
+      resumeSessionId: "sess_conversation",
       model: "gpt-5.6-luna",
       webSearch: { enabled: true, mode: "live" },
       pollDelayMs: 0,
@@ -599,7 +599,7 @@ test("runtime continues an idle OpenAI session and returns only the latest turn"
     eventPayload.events?.[0]?.input?.[0]?.content?.[0]?.text ?? "",
     /The AC still isn't cooling/,
   );
-  assert.equal(result.openaiSessionId, "session_conversation");
+  assert.equal(result.openaiSessionId, "sess_conversation");
   assert.equal(result.responseText, "Latest answer.");
   assert.deepEqual(result.webSearch, {
     enabled: true,
