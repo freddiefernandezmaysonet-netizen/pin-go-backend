@@ -28,6 +28,7 @@ function configuredComposition(
         organizationName: "Organization One",
         propertyId: "property-1",
         propertyName: "Casa Uno",
+        maxGuests: 4,
         currency: "USD",
         timezone: "America/Puerto_Rico",
         groupId: "group-1",
