@@ -9,7 +9,7 @@ import test from "node:test";
 // Booking Lifecycle CI passed; the protected 124-file scope remains intact.
 const CERTIFIED_CORE_SHA256 =
   "9deeac82a4468f7bb20225b76453a159fd2e61c19b26d93351e03a08c5d8fc16";
-const CERTIFIED_CORE_FILE_COUNT = 124;
+const CERTIFIED_CORE_FILE_COUNT = 125;
 
 const CHANNEX_PRODUCTION_TRANSPORT_BOUNDARY_FILES = new Set([
   "src/distribution/ota-connection-center.config.test.ts",
