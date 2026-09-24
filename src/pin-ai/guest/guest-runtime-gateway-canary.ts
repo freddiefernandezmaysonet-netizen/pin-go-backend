@@ -132,6 +132,19 @@ async function main(): Promise<void> {
   ]);
 
   try {
+    const migrationRows = await prisma.$queryRaw<
+      Array<{ migration_name: string; finished_at: Date | null; rolled_back_at: Date | null }>
+    >`
+      SELECT "migration_name", "finished_at", "rolled_back_at"
+      FROM "_prisma_migrations"
+      WHERE "migration_name" = '20260921143000_add_pin_ai_guest_conversation_sessions'
+      LIMIT 1
+    `;
+    const migration = migrationRows[0];
+    if (!migration || migration.finished_at === null || migration.rolled_back_at !== null) {
+      throw new Error("PIN_AI_GUEST_GATEWAY_CANARY_MIGRATION_NOT_APPLIED");
+    }
+
     const now = new Date();
     const reservation = await prisma.reservation.findFirst({
       where: {
@@ -210,7 +223,14 @@ if (entryPoint && import.meta.url === pathToFileURL(entryPoint).href) {
     const code = error instanceof Error
       ? error.message.match(/^PIN_AI_[A-Z0-9_]+/)?.[0]
       : undefined;
-    console.error(`PIN_AI_GUEST_GATEWAY_CANARY_FAILED:${code ?? "UNKNOWN_ERROR"}`);
+    const providerCode =
+      error && typeof error === "object" && "code" in error &&
+      typeof (error as { code?: unknown }).code === "string"
+        ? String((error as { code: string }).code).replace(/[^A-Z0-9_]/gi, "").slice(0, 32)
+        : undefined;
+    console.error(
+      `PIN_AI_GUEST_GATEWAY_CANARY_FAILED:${code ?? providerCode ?? "UNKNOWN_ERROR"}`,
+    );
     process.exitCode = 1;
   });
 }
