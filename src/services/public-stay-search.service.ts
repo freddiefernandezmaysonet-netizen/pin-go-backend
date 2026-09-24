@@ -84,7 +84,7 @@ type SearchDependencies = {
 };
 
 const AMENITY_ALIASES: Record<string, string[]> = {
-  wifi: ["wifi", "wi fi", "wireless internet", "internet"],
+  wifi: ["wifi", "wi-fi", "wi fi", "wireless internet", "internet"],
   pool: ["pool", "swimming pool", "piscina"],
   parking: ["parking", "free parking", "estacionamiento", "aparcamiento"],
   gym: ["gym", "fitness center", "fitness centre", "gimnasio"],
