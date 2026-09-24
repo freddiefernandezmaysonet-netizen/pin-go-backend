@@ -228,8 +228,23 @@ if (entryPoint && import.meta.url === pathToFileURL(entryPoint).href) {
       typeof (error as { code?: unknown }).code === "string"
         ? String((error as { code: string }).code).replace(/[^A-Z0-9_]/gi, "").slice(0, 32)
         : undefined;
+    const providerTable =
+      error && typeof error === "object" && "meta" in error &&
+      (error as { meta?: unknown }).meta &&
+      typeof (error as { meta?: unknown }).meta === "object"
+        ? (() => {
+            const meta = (error as { meta: Record<string, unknown> }).meta;
+            const raw = typeof meta.table === "string"
+              ? meta.table
+              : typeof meta.modelName === "string"
+                ? meta.modelName
+                : "";
+            return raw.replace(/[^A-Za-z0-9_.-]/g, "").slice(0, 96);
+          })()
+        : "";
     console.error(
-      `PIN_AI_GUEST_GATEWAY_CANARY_FAILED:${code ?? providerCode ?? "UNKNOWN_ERROR"}`,
+      `PIN_AI_GUEST_GATEWAY_CANARY_FAILED:${code ?? providerCode ?? "UNKNOWN_ERROR"}` +
+      (providerTable ? `:${providerTable}` : ""),
     );
     process.exitCode = 1;
   });
