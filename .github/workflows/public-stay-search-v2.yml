@@ -36,6 +36,8 @@ jobs:
       - name: Generate Prisma client
         run: npx prisma generate
       - name: Validate Prisma schema
+        env:
+          DATABASE_URL: postgresql://ci:ci@127.0.0.1:5432/pingo_schema_validation
         run: npx prisma validate
       - name: Run focused search tests
         run: node --import tsx --test src/services/public-stay-search.service.test.ts src/booking-search.staging.server.contract.test.ts src/booking-search.preview.contract.test.ts
