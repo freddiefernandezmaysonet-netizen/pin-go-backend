@@ -2,6 +2,18 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { readChannexBookingFields } from "./ota-reservation-fields.service";
 
+test("invalid amounts remain unknown instead of becoming a payment value", () => {
+  for (const amount of ["", "   ", false, true, [], {}, null, undefined, NaN, Infinity, -1, "-1", "0x10", "1e3"]) {
+    assert.equal(readChannexBookingFields({ provider: "CHANNEX", booking: { amount } }).totalAmount, null);
+  }
+});
+
+test("valid zero and decimal booking amounts are preserved", () => {
+  for (const [amount, expected] of [[0, 0], ["0", 0], [125.4, 125.4], [" 125.40 ", 125.4]] as const) {
+    assert.equal(readChannexBookingFields({ provider: "CHANNEX", booking: { amount } }).totalAmount, expected);
+  }
+});
+
 test("preserved Channex revision supplies guest contact and booking money", () => {
   assert.deepEqual(readChannexBookingFields({
     provider: "CHANNEX",
