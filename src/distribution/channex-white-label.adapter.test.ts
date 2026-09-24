@@ -298,6 +298,7 @@ test("partial retry reuses checkpoint IDs without transport calls", async () => 
   }), { externalPropertyId: "property-ext" });
   assert.deepEqual(await value.ensurePrimaryRoomType({
     externalPropertyId: "property-ext",
+    maxGuests: 4,
     existingExternalPrimaryRoomTypeId: "room-ext",
   }), { externalPrimaryRoomTypeId: "room-ext" });
   assert.deepEqual(await value.ensurePrimaryRatePlan({
