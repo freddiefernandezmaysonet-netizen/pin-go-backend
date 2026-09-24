@@ -95,6 +95,8 @@ export async function runSavedAgentMultiTurnCanary(input: Readonly<{
       : "What is the current status of my stay and what is the next step?",
   );
 
+  console.log("PIN_AI_RUNTIME_MULTITURN_FIRST_TURN_BEGIN");
+
   const firstTurn = await runTurn({
     apiKey: input.apiKey,
     agentId: input.agentId,
@@ -104,6 +106,7 @@ export async function runSavedAgentMultiTurnCanary(input: Readonly<{
   });
 
   assertShadowTurn(firstTurn);
+  console.log("PIN_AI_RUNTIME_MULTITURN_FIRST_TURN_COMPLETE");
   const sessionId = firstTurn.response.openaiSessionId;
   if (!sessionId) {
     throw new Error("PIN_AI_RUNTIME_MULTITURN_SESSION_ID_MISSING");
@@ -116,6 +119,8 @@ export async function runSavedAgentMultiTurnCanary(input: Readonly<{
       : "Based on what you just told me, what is still needed before my access is ready?",
   );
 
+  console.log("PIN_AI_RUNTIME_MULTITURN_SECOND_TURN_BEGIN");
+
   const secondTurn = await runTurn({
     apiKey: input.apiKey,
     agentId: input.agentId,
@@ -126,6 +131,7 @@ export async function runSavedAgentMultiTurnCanary(input: Readonly<{
   });
 
   assertShadowTurn(secondTurn);
+  console.log("PIN_AI_RUNTIME_MULTITURN_SECOND_TURN_COMPLETE");
   if (secondTurn.response.openaiSessionId !== sessionId) {
     throw new Error("PIN_AI_RUNTIME_MULTITURN_SESSION_ID_CHANGED");
   }
@@ -256,7 +262,21 @@ async function main(): Promise<void> {
       throw new Error("PIN_AI_RUNTIME_MULTITURN_NETWORK_CALL_LIMIT");
     }
 
-    const response = await fetch(url, init);
+    let response: Response;
+    try {
+      response = await fetch(url, {
+        ...init,
+        signal: AbortSignal.timeout(20_000),
+      });
+    } catch (error) {
+      if (
+        error instanceof Error &&
+        (error.name === "TimeoutError" || error.name === "AbortError")
+      ) {
+        throw new Error("PIN_AI_RUNTIME_MULTITURN_FETCH_TIMEOUT");
+      }
+      throw error;
+    }
     return {
       ok: response.ok,
       status: response.status,
