@@ -485,6 +485,33 @@ function compareNullableNumberDesc(
   return b - a;
 }
 
+const PUBLIC_STAY_CANDIDATE_BATCH_SIZE = 100;
+const PUBLIC_STAY_SEARCH_CONCURRENCY = 8;
+
+async function mapWithConcurrency<T, R>(
+  values: readonly T[],
+  concurrency: number,
+  mapper: (value: T, index: number) => Promise<R>
+): Promise<R[]> {
+  if (!values.length) return [];
+
+  const results = new Array<R>(values.length);
+  let nextIndex = 0;
+  const workerCount = Math.min(Math.max(1, concurrency), values.length);
+
+  await Promise.all(
+    Array.from({ length: workerCount }, async () => {
+      while (true) {
+        const index = nextIndex++;
+        if (index >= values.length) return;
+        results[index] = await mapper(values[index]!, index);
+      }
+    })
+  );
+
+  return results;
+}
+
 function sortSearchResults(
   results: PublicStaySearchResult[],
   sort: PublicStaySort
@@ -549,7 +576,7 @@ export async function searchPublicStays(
   const pricingCalculator =
     dependencies.pricingCalculator ?? calculateDirectBookingPricing;
 
-  const candidates = await db.property.findMany({
+  const candidateQuery = {
     where: {
       status: "ACTIVE",
       isPublicBookable: true,
@@ -609,8 +636,29 @@ export async function searchPublicStays(
         select: { slug: true },
       },
     },
-    take: 200,
-  });
+  } as const;
+
+  const candidates: Awaited<ReturnType<typeof db.property.findMany>> = [];
+  let cursorId: string | undefined;
+
+  while (true) {
+    const batch = await db.property.findMany({
+      ...candidateQuery,
+      orderBy: { id: "asc" },
+      take: PUBLIC_STAY_CANDIDATE_BATCH_SIZE,
+      ...(cursorId
+        ? {
+            cursor: { id: cursorId },
+            skip: 1,
+          }
+        : {}),
+    });
+
+    candidates.push(...batch);
+
+    if (batch.length < PUBLIC_STAY_CANDIDATE_BATCH_SIZE) break;
+    cursorId = batch[batch.length - 1]!.id;
+  }
 
   const destinationMatches = candidates.filter((property) =>
     matchesDestination(property, validated.destination)
@@ -687,8 +735,10 @@ export async function searchPublicStays(
   );
 
   const availableProperties = (
-    await Promise.all(
-      stayRuleMatches.map(async (property) => {
+    await mapWithConcurrency(
+      stayRuleMatches,
+      PUBLIC_STAY_SEARCH_CONCURRENCY,
+      async (property) => {
         const timezone = String(property.timezone ?? "").trim();
 
         if (!hasValidTimeZone(timezone)) {
@@ -730,7 +780,7 @@ export async function searchPublicStays(
         }
 
         return { property, checkIn, checkOut };
-      })
+      }
     )
   ).filter(
     (
@@ -792,8 +842,10 @@ export async function searchPublicStays(
   });
 
   const pricedResults = (
-    await Promise.all(
-      reviewMatches.map(async ({ property, checkIn, checkOut }) => {
+    await mapWithConcurrency(
+      reviewMatches,
+      PUBLIC_STAY_SEARCH_CONCURRENCY,
+      async ({ property, checkIn, checkOut }) => {
         const selectedAmenityIds = selectedAmenityIdsForPricing(
           property.amenities,
           validated.amenities
@@ -879,7 +931,7 @@ export async function searchPublicStays(
         };
 
         return result;
-      })
+      }
     )
   ).filter(
     (result): result is PublicStaySearchResult => result !== null
