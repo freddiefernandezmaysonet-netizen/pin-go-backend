@@ -9,7 +9,7 @@ import { searchPublicStays } from "./services/public-stay-search.service";
 const app = express();
 const prisma = new PrismaClient();
 const PORT = Number(process.env.PORT ?? 3000);
-const STAGING_REVISION = "booking-search-staging-v12-enterprise-featured-ranking";
+const STAGING_REVISION = "booking-search-staging-v13-faceted-discovery";
 const FEATURED_LIMIT = 6;
 const POPULAR_MIN_COMPLETED_STAYS_365 = 3;
 const POPULAR_TOP_FRACTION = 0.25;
@@ -182,6 +182,20 @@ app.get("/api/public-booking/featured-audit", async (_q, res) => {
   }
 });
 
+function optionalQueryNumber(value: unknown) {
+  if (value == null || value === "") return undefined;
+  return Number(value);
+}
+
+function queryStringList(value: unknown) {
+  const raw = Array.isArray(value) ? value : value == null ? [] : [value];
+
+  return raw
+    .flatMap((item) => String(item).split(","))
+    .map((item) => item.trim())
+    .filter(Boolean);
+}
+
 app.get("/api/public-booking/search", async (req, res) => {
   try {
     const result = await searchPublicStays({
@@ -189,6 +203,16 @@ app.get("/api/public-booking/search", async (req, res) => {
       checkIn: String(req.query.checkIn ?? ""),
       checkOut: String(req.query.checkOut ?? ""),
       guests: Number(req.query.guests),
+      minTotalPrice: optionalQueryNumber(req.query.minTotalPrice),
+      maxTotalPrice: optionalQueryNumber(req.query.maxTotalPrice),
+      currency:
+        req.query.currency == null ? undefined : String(req.query.currency),
+      minRating: optionalQueryNumber(req.query.minRating),
+      minReviewCount: optionalQueryNumber(req.query.minReviewCount),
+      amenities: queryStringList(req.query.amenities),
+      sort: req.query.sort == null ? undefined : String(req.query.sort) as any,
+      page: optionalQueryNumber(req.query.page),
+      pageSize: optionalQueryNumber(req.query.pageSize),
     });
     if (!result.ok) return res.status(400).json({ ok: false, error: result.code });
 
