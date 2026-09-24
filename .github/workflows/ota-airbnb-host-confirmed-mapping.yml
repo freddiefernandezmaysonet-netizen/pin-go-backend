@@ -97,6 +97,7 @@ jobs:
           .github/workflows/booking-com-transport-readiness.yml
           .github/workflows/ota-airbnb-host-confirmed-mapping.yml
           .github/workflows/ota-airbnb-listing-discovery.yml
+          .github/workflows/ota-initial-distribution-enablement.yml
           src/distribution/channex-canonical-readiness.service.ts
           src/distribution/channex-channel-identity.test.ts
           src/distribution/channex-channel-identity.ts
