@@ -211,7 +211,8 @@ function toCanonicalReservation(
     booking?.guest_email,
     booking?.guestEmail,
     booking?.customer?.email,
-    booking?.guest?.email
+    booking?.guest?.email,
+    booking?.customer?.mail
   );
   const guestPhone = firstString(
     booking?.guest_phone,

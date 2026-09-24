@@ -130,6 +130,44 @@ test("fetchBookingRevision uses only the revision endpoint", async () => {
   }
 });
 
+test("revision and feed preserve documented customer contact fields and legacy aliases", async () => {
+  const previousKey = process.env.CHANNEX_API_KEY;
+  process.env.CHANNEX_API_KEY = "test-api-key";
+  const originalGet = axios.get;
+  const cases = [
+    { name: "documented mail", contact: { customer: { mail: "guest@example.com", phone: "+17875550123" } }, email: "guest@example.com" },
+    { name: "masked mail", contact: { customer: { mail: "relay@guest.example.com", phone: "+17875550123" } }, email: "relay@guest.example.com" },
+    { name: "legacy customer email", contact: { customer: { email: "legacy@example.com", phone: "+17875550123" } }, email: "legacy@example.com" },
+    { name: "legacy precedence", contact: { guest_email: "legacy@example.com", customer: { mail: "other@example.com", phone: "+17875550123" } }, email: "legacy@example.com" },
+    { name: "empty alias falls back to mail", contact: { guest_email: "  ", customer: { email: "", mail: " guest@example.com ", phone: "+17875550123" } }, email: "guest@example.com" },
+    { name: "empty mail", contact: { customer: { mail: "  ", phone: "+17875550123" } }, email: undefined },
+    { name: "null mail", contact: { customer: { mail: null, phone: "+17875550123" } }, email: undefined },
+    { name: "missing mail", contact: { customer: { phone: "+17875550123" } }, email: undefined },
+    { name: "missing customer", contact: {}, email: undefined },
+  ];
+  try {
+    for (const entry of cases) {
+      const { guest_email, guest_phone, ...attributes } = REVISION_FIXTURE.data.attributes;
+      const resource = { ...REVISION_FIXTURE.data, attributes: { ...attributes, ota_name: "Agoda", ...entry.contact } };
+      axios.get = (async (url: string) => ({
+        data: { data: url.endsWith("/feed") ? [resource] : resource },
+      })) as typeof axios.get;
+      const revision = await requireAdapterMethod(channexAdapter.fetchBookingRevision, "fetchBookingRevision")({ connection: {}, revisionId: "revision-001" });
+      const feed = await requireAdapterMethod(channexAdapter.fetchBookingRevisionFeed, "fetchBookingRevisionFeed")({ connection: {} });
+      assert.equal(feed.length, 1, entry.name);
+      for (const result of [revision, feed[0]!]) {
+        assert.equal(result.reservation.guest?.email, entry.email, entry.name);
+        assert.equal(result.reservation.guest?.phone, entry.contact.customer?.phone, entry.name);
+        assert.equal(result.identity.bookingId, "booking-001", entry.name);
+      }
+    }
+  } finally {
+    axios.get = originalGet;
+    if (previousKey === undefined) delete process.env.CHANNEX_API_KEY;
+    else process.env.CHANNEX_API_KEY = previousKey;
+  }
+});
+
 test("Channex adapter does not expose Booking Find or booking-by-id", () => {
   assert.equal(channexAdapter.fetchReservation, undefined);
 });
