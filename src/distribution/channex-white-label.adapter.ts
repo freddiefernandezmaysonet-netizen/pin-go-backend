@@ -36,6 +36,7 @@ export type WhiteLabelProvisioner = {
   }): Promise<{ externalPropertyId: string }>;
   ensurePrimaryRoomType(args: {
     externalPropertyId: string;
+    maxGuests: number;
     existingExternalPrimaryRoomTypeId: string | null;
   }): Promise<{ externalPrimaryRoomTypeId: string }>;
   ensurePrimaryRatePlan(args: {
@@ -170,6 +171,7 @@ export class ChannexWhiteLabelAdapter
 
   async ensurePrimaryRoomType(args: {
     externalPropertyId: string;
+    maxGuests: number;
     existingExternalPrimaryRoomTypeId: string | null;
   }): Promise<{ externalPrimaryRoomTypeId: string }> {
     this.assertEnabled();
@@ -182,15 +184,18 @@ export class ChannexWhiteLabelAdapter
         ),
       };
     }
+    if (!Number.isInteger(args.maxGuests) || args.maxGuests < 1 || args.maxGuests > 100) {
+      throw new WhiteLabelAdapterError("OTA_PROPERTY_MAX_GUESTS_INVALID");
+    }
     const roomResponse = await this.post("/api/v1/room_types", {
       room_type: {
         property_id: required(args.externalPropertyId, "OTA_EXTERNAL_PROPERTY_ID_INVALID", 120),
         title: "Primary accommodation",
         count_of_rooms: 1,
-        occ_adults: 2,
+        occ_adults: args.maxGuests,
         occ_children: 0,
         occ_infants: 0,
-        default_occupancy: 2,
+        default_occupancy: args.maxGuests,
       },
     });
     return { externalPrimaryRoomTypeId: responseId(
