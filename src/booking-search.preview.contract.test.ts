@@ -21,6 +21,7 @@ test("booking preview exposes faceted discovery controls in both languages", () 
     "minBathrooms",
     "sort",
     "amenityFilters",
+    "featureFilters",
     "filterApply",
     "filterReset",
     "clearFilters",
@@ -34,6 +35,8 @@ test("booking preview exposes faceted discovery controls in both languages", () 
   assert.match(html, /Ocean view/);
   assert.match(html, /Cabaña/);
   assert.match(html, /Cabin/);
+  assert.match(html, /Construcción en madera/);
+  assert.match(html, /Wood construction/);
 });
 
 test("filter UI forwards supported V2 query parameters only after a valid stay search", () => {
@@ -47,6 +50,7 @@ test("filter UI forwards supported V2 query parameters only after a valid stay s
   assert.match(html, /q\.minBathrooms=\$\('minBathrooms'\)\.value/);
   assert.match(html, /q\.sort=\$\('sort'\)\.value/);
   assert.match(html, /q\.amenities=amenities\.join\(','\)/);
+  assert.match(html, /q\.features=features\.join\(','\)/);
   assert.match(html, /base\.destination&&base\.checkIn&&base\.checkOut/);
 });
 
