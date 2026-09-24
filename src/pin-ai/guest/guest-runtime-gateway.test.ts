@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
+import { createTurnFixture } from "../runtime/runtime-turn.test-fixture.js";
 
 import { createConversationMemory } from "../runtime/conversation-memory.js";
 import type { PinAIRuntimeRequest } from "../runtime/contracts.js";
@@ -309,25 +310,16 @@ test("fails closed if the runtime reports an executed escalation", async () => {
 
 test("enables native OpenAI web search with coarse location only", async () => {
   const originalFetch = globalThis.fetch;
-  const calls: Array<{ url: string; body?: string }> = [];
+  const fixture = createTurnFixture({ answer: () => "Three options nearby." });
+  const calls = fixture.calls;
   globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) => {
     const url = String(input);
-    calls.push({
-      url,
+    const response = await fixture.fetchImpl(url, {
+      method: init?.method === "POST" ? "POST" : "GET",
+      headers: {},
       ...(typeof init?.body === "string" ? { body: init.body } : {}),
     });
-
-    const payload = url.endsWith("/items?limit=100&order=asc")
-      ? {
-          data: [
-            {
-              type: "message",
-              role: "assistant",
-              content: [{ type: "output_text", text: "Three options nearby." }],
-            },
-          ],
-        }
-      : { id: "session-a", status: "idle", required_actions: [] };
+    const payload = await response.json();
     return new Response(JSON.stringify(payload), {
       status: 200,
       headers: { "Content-Type": "application/json" },
