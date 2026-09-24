@@ -4,6 +4,7 @@ import test from "node:test";
 import type { GuestPinAIGatewayResponse } from "./guest-runtime-gateway.js";
 import {
   assertGuestGatewayCanaryEnvironment,
+  buildGuestGatewayCanaryReservationWhere,
   runGuestGatewayCanary,
 } from "./guest-runtime-gateway-canary.js";
 
@@ -47,6 +48,32 @@ test("guest gateway canary requires explicit isolated shadow configuration", () 
       expected,
     );
   }
+});
+
+test("guest gateway canary selector accepts only fresh or safely reusable conversations", () => {
+  const now = new Date("2026-09-24T23:45:00.000Z");
+  const where = buildGuestGatewayCanaryReservationWhere(now);
+
+  assert.deepEqual(where, {
+    status: "ACTIVE",
+    guestToken: { not: null },
+    guestTokenExpiresAt: { gt: now },
+    property: { status: "ACTIVE" },
+    OR: [
+      { pinAIGuestConversation: null },
+      {
+        pinAIGuestConversation: {
+          is: {
+            openaiSessionId: null,
+            OR: [
+              { leaseToken: null },
+              { leaseExpiresAt: { lt: now } },
+            ],
+          },
+        },
+      },
+    ],
+  });
 });
 
 test("guest gateway canary preserves one session across three shadow turns and observes human review", async () => {
