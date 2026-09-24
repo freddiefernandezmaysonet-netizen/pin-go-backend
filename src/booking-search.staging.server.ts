@@ -212,6 +212,7 @@ app.get("/api/public-booking/search", async (req, res) => {
       amenities: queryStringList(req.query.amenities),
       accommodationTypes: queryStringList(req.query.accommodationTypes),
       propertyTypes: queryStringList(req.query.propertyTypes),
+      features: queryStringList(req.query.features),
       bedTypes: queryStringList(req.query.bedTypes),
       minBedrooms: optionalQueryNumber(req.query.minBedrooms),
       minBathrooms: optionalQueryNumber(req.query.minBathrooms),
