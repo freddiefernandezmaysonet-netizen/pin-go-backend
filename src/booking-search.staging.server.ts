@@ -211,6 +211,7 @@ app.get("/api/public-booking/search", async (req, res) => {
       minReviewCount: optionalQueryNumber(req.query.minReviewCount),
       amenities: queryStringList(req.query.amenities),
       accommodationTypes: queryStringList(req.query.accommodationTypes),
+      propertyTypes: queryStringList(req.query.propertyTypes),
       bedTypes: queryStringList(req.query.bedTypes),
       minBedrooms: optionalQueryNumber(req.query.minBedrooms),
       minBathrooms: optionalQueryNumber(req.query.minBathrooms),
