@@ -28,6 +28,7 @@ export type PublicStaySearchInput = {
   amenities?: string[] | null;
   accommodationTypes?: string[] | null;
   propertyTypes?: string[] | null;
+  features?: string[] | null;
   bedTypes?: string[] | null;
   minBedrooms?: number | null;
   minBathrooms?: number | null;
@@ -69,6 +70,7 @@ export type PublicStaySearchResult = {
     fullBathroomCount: number | null;
     halfBathroomCount: number | null;
     bedTypes: string[];
+    features: string[];
   } | null;
   pricing: PublicStayPricingSummary;
 };
@@ -87,6 +89,7 @@ type ValidatedPublicStaySearchInput = {
   amenities: string[];
   accommodationTypes: Array<"ENTIRE_PLACE" | "PRIVATE_ROOM" | "SHARED_ROOM">;
   propertyTypes: Array<"HOUSE" | "APARTMENT" | "CONDO" | "CABIN" | "COTTAGE" | "VILLA" | "TOWNHOUSE" | "BUNGALOW" | "LOFT" | "STUDIO" | "GUESTHOUSE" | "FARM_STAY" | "OTHER">;
+  features: Array<"WOOD_CONSTRUCTION" | "OCEAN_VIEW" | "MOUNTAIN_VIEW" | "WATERFRONT" | "BEACH_ACCESS" | "POOL_TABLE" | "GYM" | "FIREPLACE" | "OUTDOOR_GRILL" | "WORKSPACE" | "OTHER">;
   bedTypes: Array<"KING" | "QUEEN" | "DOUBLE" | "SINGLE" | "BUNK" | "SOFA_BED" | "FUTON" | "CRIB" | "OTHER">;
   minBedrooms: number | null;
   minBathrooms: number | null;
@@ -155,6 +158,7 @@ function normalizeRequestedAmenities(value: unknown) {
 
 const ACCOMMODATION_TYPES = ["ENTIRE_PLACE", "PRIVATE_ROOM", "SHARED_ROOM"] as const;
 const PROPERTY_TYPES = ["HOUSE", "APARTMENT", "CONDO", "CABIN", "COTTAGE", "VILLA", "TOWNHOUSE", "BUNGALOW", "LOFT", "STUDIO", "GUESTHOUSE", "FARM_STAY", "OTHER"] as const;
+const FEATURE_TYPES = ["WOOD_CONSTRUCTION", "OCEAN_VIEW", "MOUNTAIN_VIEW", "WATERFRONT", "BEACH_ACCESS", "POOL_TABLE", "GYM", "FIREPLACE", "OUTDOOR_GRILL", "WORKSPACE", "OTHER"] as const;
 const BED_TYPES = ["KING", "QUEEN", "DOUBLE", "SINGLE", "BUNK", "SOFA_BED", "FUTON", "CRIB", "OTHER"] as const;
 
 function normalizeEnumList<T extends readonly string[]>(value: unknown, allowed: T): T[number][] | null {
@@ -313,6 +317,11 @@ export function validatePublicStaySearchInput(
     return { ok: false, code: "INVALID_PROPERTY_TYPES" };
   }
 
+  const features = normalizeEnumList(input.features, FEATURE_TYPES);
+  if (features === null) {
+    return { ok: false, code: "INVALID_FEATURES" };
+  }
+
   const bedTypes = normalizeEnumList(input.bedTypes, BED_TYPES);
   if (bedTypes === null) {
     return { ok: false, code: "INVALID_BED_TYPES" };
@@ -360,6 +369,7 @@ export function validatePublicStaySearchInput(
       amenities: normalizeRequestedAmenities(input.amenities),
       accommodationTypes,
       propertyTypes,
+      features,
       bedTypes,
       minBedrooms,
       minBathrooms,
@@ -572,6 +582,10 @@ export async function searchPublicStays(
           bedroomCount: true,
           fullBathroomCount: true,
           halfBathroomCount: true,
+          features: {
+            where: { isActive: true },
+            select: { type: true },
+          },
           sleepingAreas: {
             select: {
               beds: {
@@ -623,6 +637,14 @@ export async function searchPublicStays(
         !validated.propertyTypes.includes(details.propertyType))
     ) {
       return false;
+    }
+
+    if (validated.features.length) {
+      if (!details) return false;
+      const availableFeatures = new Set(details.features.map((feature) => feature.type));
+      if (!validated.features.every((feature) => availableFeatures.has(feature))) {
+        return false;
+      }
     }
 
     if (
@@ -833,6 +855,7 @@ export async function searchPublicStays(
                 bedroomCount: property.listingDetails.bedroomCount,
                 fullBathroomCount: property.listingDetails.fullBathroomCount,
                 halfBathroomCount: property.listingDetails.halfBathroomCount,
+                features: property.listingDetails.features.map((feature) => feature.type),
                 bedTypes: Array.from(
                   new Set(
                     property.listingDetails.sleepingAreas.flatMap((area) =>
@@ -886,6 +909,7 @@ export async function searchPublicStays(
       amenities: validated.amenities,
       accommodationTypes: validated.accommodationTypes,
       propertyTypes: validated.propertyTypes,
+      features: validated.features,
       bedTypes: validated.bedTypes,
       minBedrooms: validated.minBedrooms,
       minBathrooms: validated.minBathrooms,
