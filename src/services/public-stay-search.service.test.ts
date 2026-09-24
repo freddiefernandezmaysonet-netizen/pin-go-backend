@@ -193,3 +193,32 @@ test("rejects unknown accommodation and bed types instead of guessing", () => {
     assert.equal(bed.code, "INVALID_BED_TYPES");
   }
 });
+
+
+test("accepts physical property type independently from accommodation mode", () => {
+  const result = validatePublicStaySearchInput({
+    ...FUTURE_STAY,
+    accommodationTypes: ["ENTIRE_PLACE"],
+    propertyTypes: ["cabin"],
+    bedTypes: ["KING"],
+  });
+
+  assert.equal(result.ok, true);
+  if (!result.ok) return;
+
+  assert.deepEqual(result.value.accommodationTypes, ["ENTIRE_PLACE"]);
+  assert.deepEqual(result.value.propertyTypes, ["CABIN"]);
+  assert.deepEqual(result.value.bedTypes, ["KING"]);
+});
+
+test("rejects unknown physical property types instead of guessing", () => {
+  const result = validatePublicStaySearchInput({
+    ...FUTURE_STAY,
+    propertyTypes: ["WOODEN_CABIN"],
+  });
+
+  assert.equal(result.ok, false);
+  if (!result.ok) {
+    assert.equal(result.code, "INVALID_PROPERTY_TYPES");
+  }
+});
