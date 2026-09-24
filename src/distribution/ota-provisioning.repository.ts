@@ -381,7 +381,7 @@ export class PrismaOtaProvisioningRepository implements OtaProvisioningRepositor
         externalPrimaryRoomTypeId: true,
         externalPrimaryRatePlanId: true,
         organization: { select: { name: true } },
-        property: { select: { name: true, timezone: true } },
+        property: { select: { name: true, timezone: true, maxGuests: true } },
         group: {
           select: {
             id: true,
@@ -411,6 +411,7 @@ export class PrismaOtaProvisioningRepository implements OtaProvisioningRepositor
       organizationName: String(record.organization?.name ?? "").trim(),
       propertyId,
       propertyName: String(record.property?.name ?? "").trim(),
+      maxGuests: Number(record.property?.maxGuests),
       currency: this.currency,
       timezone,
       groupId: record.group.id,
