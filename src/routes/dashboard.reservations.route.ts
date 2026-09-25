@@ -15,6 +15,7 @@ import {
   cancelManualReservationByHost,
   ManualReservationCancellationError,
 } from "../services/manual-reservation-cancellation.service";
+import { GuestContactRecoveryError, recoverChannexGuestContactByHost } from "../services/ota-guest-contact-host-recovery.service";
 
 const prisma = new PrismaClient();
 export const dashboardReservationsRouter = Router();
@@ -278,6 +279,7 @@ dashboardReservationsRouter.get(
         reservationNumber: true,
         guestName: true,
         guestEmail: true,
+        guestPhone: true,
         roomName: true,
         checkIn: true,
         checkOut: true,
@@ -478,6 +480,44 @@ dashboardReservationsRouter.get(
         },
       })),
     });
+  }
+);
+
+
+dashboardReservationsRouter.patch(
+  "/api/dashboard/reservations/:id/guest-contact",
+  requireAuth,
+  async (req, res) => {
+    try {
+      const user = (req as any).user;
+      const result = await recoverChannexGuestContactByHost({
+        prisma,
+        organizationId: String(user.orgId ?? "").trim(),
+        reservationId: String(req.params.id ?? "").trim(),
+        requestedByUserId: String(user.id ?? user.userId ?? "").trim(),
+        ...(Object.prototype.hasOwnProperty.call(req.body ?? {}, "guestEmail")
+          ? { guestEmail: req.body.guestEmail }
+          : {}),
+        ...(Object.prototype.hasOwnProperty.call(req.body ?? {}, "guestPhone")
+          ? { guestPhone: req.body.guestPhone }
+          : {}),
+      });
+      return res.json(result);
+    } catch (error: any) {
+      if (error instanceof GuestContactRecoveryError || error?.code) {
+        return res.status(error?.statusCode || 400).json({
+          ok: false,
+          error: error?.code || "GUEST_CONTACT_RECOVERY_ERROR",
+          message: error?.message || "Unable to recover guest contact information.",
+        });
+      }
+      console.error("[DASHBOARD_GUEST_CONTACT_RECOVERY_ERROR]", error);
+      return res.status(500).json({
+        ok: false,
+        error: "GUEST_CONTACT_RECOVERY_ERROR",
+        message: "Unable to recover guest contact information.",
+      });
+    }
   }
 );
 
