@@ -24,7 +24,7 @@ import type { AuditEntry } from "../apms/audit-types";
 import { ensureReservationGuestAgreementSnapshot } from "./guest-agreement.service";
 import { ensureGuestJourneyForConfirmedReservation } from "./guest-journey.service";
 import { persistChannexAriReservationIntent } from "../pms/outbound/channex-ari-reservation-producer.service";
-import { syncChannexGuestContactRecovery } from "./channex-guest-contact-recovery.service";
+import { syncChannexGuestContactRecovery } from "./ota-guest-contact-recovery.service";
 
 console.log("[INGEST] running src/services/ingest.service.ts", new Date().toISOString());
 const prisma = new PrismaClient();
