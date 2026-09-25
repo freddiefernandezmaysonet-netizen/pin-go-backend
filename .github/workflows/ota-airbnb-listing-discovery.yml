@@ -498,6 +498,7 @@ jobs:
           src/routes/dashboard.airbnb-host-self-service.mapping.route.test.ts
           src/routes/dashboard.airbnb-host-self-service.route.ts
           src/routes/dashboard.properties.route.ts
+          src/services/property-checkout-time-validation.test.ts
           src/routes/properties.route.ts
           EOF
           sort "$RUNNER_TEMP/allowed.txt" -o "$RUNNER_TEMP/allowed.txt"
