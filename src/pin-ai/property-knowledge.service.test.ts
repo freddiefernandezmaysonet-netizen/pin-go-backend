@@ -22,6 +22,7 @@ function propertyRecord(overrides: Record<string, unknown> = {}) {
     amenities: [],
     taxes: [],
     listingDetails: null,
+    reviews: [],
     locks: [],
     propertyDevices: [],
     guestAgreements: [],
@@ -279,6 +280,62 @@ test("Property Knowledge exposes complete guest-safe listing, amenity, tax, and 
   assert.doesNotMatch(serialized, /guestToken/i);
 });
 
+test("Property Knowledge exposes a guest-safe published direct review summary", () => {
+  const snapshot = composePropertyKnowledgeSnapshot({
+    organizationId: "benchmark-org-a",
+    propertyId: "benchmark-property-a",
+    language: "en",
+    property: propertyRecord({
+      reviews: [
+        { overallRating: 5 },
+        { overallRating: 4 },
+        { overallRating: 5 },
+      ],
+    }),
+  });
+
+  const summary = snapshot.facts.find(
+    (fact) => fact.key === "reviewSummary",
+  );
+  assert.deepEqual(summary, {
+    category: "PROPERTY",
+    key: "reviewSummary",
+    value: {
+      averageRating: 4.67,
+      reviewCount: 3,
+      scale: 5,
+      source: "PIN_GO_DIRECT",
+    },
+    source: "PROPERTY_REVIEW",
+    authoritative: true,
+  });
+
+  const serialized = JSON.stringify(summary);
+  assert.doesNotMatch(serialized, /publicComment/i);
+  assert.doesNotMatch(serialized, /privateFeedback/i);
+  assert.doesNotMatch(serialized, /moderation/i);
+  assert.doesNotMatch(serialized, /guestDisplayName/i);
+});
+
+test("Property Knowledge distinguishes an unrated property from unavailable review data", () => {
+  const snapshot = composePropertyKnowledgeSnapshot({
+    organizationId: "benchmark-org-a",
+    propertyId: "benchmark-property-a",
+    language: "es",
+    property: propertyRecord({ reviews: [] }),
+  });
+
+  const summary = snapshot.facts.find(
+    (fact) => fact.key === "reviewSummary",
+  );
+  assert.deepEqual(summary?.value, {
+    averageRating: null,
+    reviewCount: 0,
+    scale: 5,
+    source: "PIN_GO_DIRECT",
+  });
+});
+
 test("Property Knowledge uses Spanish guest agreement fields when requested", () => {
   const snapshot = composePropertyKnowledgeSnapshot({
     organizationId: "benchmark-org-a",
@@ -512,6 +569,15 @@ test("Property Knowledge query is hard scoped by organization and property", asy
   assert.deepEqual(capturedSelect.taxes.select, {
     name: true,
     percentage: true,
+  });
+  assert.deepEqual(capturedSelect.reviews, {
+    where: {
+      status: "PUBLISHED",
+      source: "PIN_GO_DIRECT",
+    },
+    select: {
+      overallRating: true,
+    },
   });
   assert.equal(capturedSelect.listingDetails.select.bedroomCount, true);
   assert.equal(capturedSelect.listingDetails.select.fullBathroomCount, true);
