@@ -44,6 +44,11 @@ export type PropertyKnowledgeSnapshot = Readonly<{
   facts: readonly PropertyKnowledgeFact[];
 }>;
 
+type PropertyKnowledgeReviewSummary = Readonly<{
+  averageRating: number | null;
+  reviewCount: number;
+}>;
+
 type PropertyKnowledgeRecord = Readonly<{
   id: string;
   organizationId: string;
@@ -134,9 +139,7 @@ type PropertyKnowledgeRecord = Readonly<{
       sortOrder: number;
     }>[];
   }> | null;
-  reviews?: readonly Readonly<{
-    overallRating: number;
-  }>[];
+  reviewSummary?: PropertyKnowledgeReviewSummary;
   locks: readonly Readonly<{
     displayName: string | null;
     locationLabel: string | null;
@@ -190,6 +193,12 @@ type PropertyKnowledgePrisma = Readonly<{
   property: Readonly<{
     findFirst(args: unknown): Promise<PropertyKnowledgeRecord | null>;
   }>;
+  propertyReview: Readonly<{
+    aggregate(args: unknown): Promise<{
+      _avg: Readonly<{ overallRating: number | null }>;
+      _count: Readonly<{ _all: number }>;
+    }>;
+  }>;
 }>;
 
 const PROHIBITED_KEYS = new Set([
@@ -231,12 +240,17 @@ export async function getPropertyKnowledgeSnapshot({
     throw new Error("PROPERTY_KNOWLEDGE_PROPERTY_NOT_FOUND");
   }
 
+  const reviewSummary = await loadPropertyReviewSummary({
+    prisma,
+    organizationId,
+    propertyId,
+  });
   const snapshot = composePropertyKnowledgeSnapshot({
     organizationId,
     propertyId,
     language,
     currentDateTime,
-    property,
+    property: { ...property, reviewSummary },
   });
 
   assertNoProhibitedKnowledge(snapshot);
@@ -377,15 +391,6 @@ async function loadPropertyKnowledgeRecord({
           },
         },
       },
-      reviews: {
-        where: {
-          status: "PUBLISHED",
-          source: "PIN_GO_DIRECT",
-        },
-        select: {
-          overallRating: true,
-        },
-      },
       locks: {
         where: { isActive: true },
         orderBy: { createdAt: "asc" },
@@ -474,6 +479,35 @@ async function loadPropertyKnowledgeRecord({
   });
 }
 
+async function loadPropertyReviewSummary({
+  prisma,
+  organizationId,
+  propertyId,
+}: {
+  prisma: PropertyKnowledgePrisma;
+  organizationId: string;
+  propertyId: string;
+}): Promise<PropertyKnowledgeReviewSummary> {
+  const result = await prisma.propertyReview.aggregate({
+    where: {
+      organizationId,
+      propertyId,
+      status: "PUBLISHED",
+      source: "PIN_GO_DIRECT",
+    },
+    _avg: { overallRating: true },
+    _count: { _all: true },
+  });
+
+  return {
+    averageRating:
+      result._avg.overallRating === null
+        ? null
+        : Math.round(result._avg.overallRating * 100) / 100,
+    reviewCount: result._count._all,
+  };
+}
+
 export function composePropertyKnowledgeSnapshot({
   organizationId,
   propertyId,
@@ -538,7 +572,10 @@ export function composePropertyKnowledgeSnapshot({
     addListingDetailsFacts(facts, property.listingDetails, language);
   }
 
-  addReviewSummaryFact(facts, property.reviews ?? []);
+  addReviewSummaryFact(
+    facts,
+    property.reviewSummary ?? { averageRating: null, reviewCount: 0 },
+  );
 
   if (property.locks.length > 0) {
     addFact(
@@ -658,30 +695,15 @@ export function composePropertyKnowledgeSnapshot({
 
 function addReviewSummaryFact(
   facts: PropertyKnowledgeFact[],
-  reviews: readonly Readonly<{ overallRating: number }>[],
+  summary: PropertyKnowledgeReviewSummary,
 ): void {
-  const ratings = reviews
-    .map((review) => review.overallRating)
-    .filter(
-      (rating) =>
-        Number.isInteger(rating) && rating >= 1 && rating <= 5,
-    );
-  const reviewCount = ratings.length;
-  const averageRating =
-    reviewCount > 0
-      ? Math.round(
-          (ratings.reduce((sum, rating) => sum + rating, 0) / reviewCount) *
-            100,
-        ) / 100
-      : null;
-
   addFact(
     facts,
     "PROPERTY",
     "reviewSummary",
     {
-      averageRating,
-      reviewCount,
+      averageRating: summary.averageRating,
+      reviewCount: summary.reviewCount,
       scale: 5,
       source: "PIN_GO_DIRECT",
     },
