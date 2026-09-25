@@ -736,17 +736,6 @@ export class PinGoRuntimeReadToolExecutor implements PinAIRuntimeToolExecutor {
       throw new Error("PIN_AI_RUNTIME_RESERVATION_NOT_FOUND_OR_OUT_OF_SCOPE");
     }
 
-    const currentTotalAmount = toMoney(reservation.totalAmount);
-    if (currentTotalAmount === null || currentTotalAmount <= 0) {
-      return {
-        decision: "CURRENT_RESERVATION_TOTAL_UNAVAILABLE",
-        authorizationGranted: false,
-        priceCalculated: false,
-        chargeExecuted: false,
-        reservationChanged: false,
-      };
-    }
-
     const proposedCheckOut = availability.proposedCheckOut;
     const additionalNights = availability.additionalNights;
     if (
@@ -777,35 +766,57 @@ export class PinGoRuntimeReadToolExecutor implements PinAIRuntimeToolExecutor {
       };
     }
 
-    const pricing = await this.calculatePricing({
+    const selectedAmenityIds = Array.isArray(reservation.selectedAmenityIds)
+      ? reservation.selectedAmenityIds
+      : [];
+    const pricingBaseInput = {
       propertyId: reservation.propertyId,
       checkIn: reservation.checkIn,
-      checkOut: proposedCheckOut,
-      selectedAmenityIds: Array.isArray(reservation.selectedAmenityIds)
-        ? reservation.selectedAmenityIds
-        : [],
+      selectedAmenityIds,
       excludeReservationId: reservation.id,
-    });
+    };
 
-    const proposedTotalAmount = toMoney(pricing.totalAmount);
-    const proposedTotalAmountCents = Number(pricing.totalAmountCents);
+    const [currentCanonicalPricing, proposedCanonicalPricing] =
+      await Promise.all([
+        this.calculatePricing({
+          ...pricingBaseInput,
+          checkOut: reservation.checkOut,
+        }),
+        this.calculatePricing({
+          ...pricingBaseInput,
+          checkOut: proposedCheckOut,
+        }),
+      ]);
+
+    const currentCanonicalTotal = toMoney(currentCanonicalPricing.totalAmount);
+    const currentCanonicalTotalCents = Number(
+      currentCanonicalPricing.totalAmountCents,
+    );
+    const proposedCanonicalTotal = toMoney(proposedCanonicalPricing.totalAmount);
+    const proposedCanonicalTotalCents = Number(
+      proposedCanonicalPricing.totalAmountCents,
+    );
     if (
-      proposedTotalAmount === null ||
-      !Number.isInteger(proposedTotalAmountCents) ||
-      proposedTotalAmountCents < 0
+      currentCanonicalTotal === null ||
+      !Number.isInteger(currentCanonicalTotalCents) ||
+      currentCanonicalTotalCents < 0 ||
+      proposedCanonicalTotal === null ||
+      !Number.isInteger(proposedCanonicalTotalCents) ||
+      proposedCanonicalTotalCents < 0
     ) {
       throw new Error("PIN_AI_RUNTIME_EXTENSION_PRICE_INVALID");
     }
 
-    const currentTotalAmountCents = Math.round(currentTotalAmount * 100);
     const amountDifferenceCents =
-      proposedTotalAmountCents - currentTotalAmountCents;
+      proposedCanonicalTotalCents - currentCanonicalTotalCents;
     const amountDifference = amountDifferenceCents / 100;
     const extensionStartDateKey = reservation.checkOut
       .toISOString()
       .slice(0, 10);
-    const extensionNightlyRates = Array.isArray(pricing.nightlyRates)
-      ? pricing.nightlyRates
+    const extensionNightlyRates = Array.isArray(
+      proposedCanonicalPricing.nightlyRates,
+    )
+      ? proposedCanonicalPricing.nightlyRates
           .filter(
             (item) =>
               typeof item?.date === "string" &&
@@ -816,6 +827,7 @@ export class PinGoRuntimeReadToolExecutor implements PinAIRuntimeToolExecutor {
             rate: toMoney(item.rate),
           }))
       : [];
+    const historicalReservationTotal = toMoney(reservation.totalAmount);
 
     return {
       decision:
@@ -825,14 +837,21 @@ export class PinGoRuntimeReadToolExecutor implements PinAIRuntimeToolExecutor {
       authorizationGranted: false,
       priceCalculated: true,
       priceIsEstimate: true,
+      pricingBasis: "CANONICAL_CURRENT_VS_EXTENDED_DELTA",
       additionalNights,
       currentCheckOut: reservation.checkOut,
       proposedCheckOut,
       currency: String(
-        pricing.currency ?? reservation.currency ?? "usd",
+        proposedCanonicalPricing.currency ??
+          currentCanonicalPricing.currency ??
+          reservation.currency ??
+          "usd",
       ).toLowerCase(),
-      currentReservationTotal: currentTotalAmount,
-      proposedReservationTotal: proposedTotalAmount,
+      historicalReservationTotal,
+      currentCanonicalTotal,
+      currentCanonicalTotalCents,
+      proposedCanonicalTotal,
+      proposedCanonicalTotalCents,
       amountDifference,
       amountDifferenceCents,
       additionalAmount: amountDifferenceCents > 0 ? amountDifference : null,
@@ -843,7 +862,7 @@ export class PinGoRuntimeReadToolExecutor implements PinAIRuntimeToolExecutor {
       chargeExecuted: false,
       reservationChanged: false,
       note:
-        "Read-only estimate only. No reservation change, approval, payment, or charge was executed.",
+        "Read-only canonical pricing delta only. No reservation change, approval, payment, or charge was executed.",
     };
   }
 
