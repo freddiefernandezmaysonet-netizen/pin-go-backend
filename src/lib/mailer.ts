@@ -27,6 +27,17 @@ type SendSalesFollowUpEmailInput = {
   name?: string | null;
 };
 
+export type SendGuestContactRecoveryHostNoticeInput = {
+  to: string;
+  hostName?: string | null;
+  reservationNumber: string;
+  propertyName: string;
+  sourceName: string;
+  missingFields: string[];
+  reservationDetailUrl: string;
+  idempotencyKey: string;
+};
+
 type SendGuestAccessPasscodeEmailInput = {
   to: string;
   replyTo?: string | null;
@@ -1681,6 +1692,49 @@ export async function sendManualReservationGuestConfirmation(
     mode: "resend",
     data,
   };
+}
+
+
+export async function sendGuestContactRecoveryHostNotice(
+  input: SendGuestContactRecoveryHostNoticeInput
+) {
+  const safeUrl = getSafeUrl(input.reservationDetailUrl);
+  if (!safeUrl) throw new Error("Guest contact recovery reservation URL is invalid");
+  const safeHostName = escapeHtml(input.hostName?.trim() || "Host");
+  const safeReservationNumber = escapeHtml(input.reservationNumber);
+  const safePropertyName = escapeHtml(input.propertyName);
+  const safeSourceName = escapeHtml(input.sourceName);
+  const missing = input.missingFields.map((field) => escapeHtml(field.toLowerCase())).join(" and ");
+
+  if (!resend) {
+    if (isProd) throw new Error("RESEND_API_KEY missing in production");
+    return { ok: true, mode: "console" };
+  }
+
+  const subject = `Guest contact information required — Reservation #${input.reservationNumber}`;
+  const { data, error } = await resend.emails.send(
+    {
+      from: getEmailFrom(),
+      to: input.to,
+      subject,
+      html: `
+        <div style="font-family:Arial,sans-serif;color:#111827;line-height:1.6;max-width:640px;margin:auto">
+          <h1 style="font-size:24px">Guest contact information required</h1>
+          <p>Hi ${safeHostName},</p>
+          <p>Reservation #${safeReservationNumber} for ${safePropertyName}, received from ${safeSourceName} through Pin&Go Connect, is missing guest ${missing}.</p>
+          <p>Add only the missing information shown in the OTA reservation. Once saved, Pin&Go will automatically reconcile eligible guest communications.</p>
+          <p style="margin:24px 0">
+            <a href="${escapeHtml(safeUrl)}" style="display:inline-block;background:#1d4ed8;color:#fff;text-decoration:none;padding:13px 18px;border-radius:10px;font-weight:800">
+              Complete guest information
+            </a>
+          </p>
+        </div>
+      `,
+    },
+    { idempotencyKey: input.idempotencyKey }
+  );
+  if (error) throw new Error(`Resend guest contact recovery notice failed: ${error.name}`);
+  return { ok: true, mode: "resend", data };
 }
 
 export async function sendDirectBookingHostNotification(

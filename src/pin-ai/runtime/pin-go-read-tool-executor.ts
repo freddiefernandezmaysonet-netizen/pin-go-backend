@@ -887,6 +887,10 @@ export class PinGoRuntimeReadToolExecutor implements PinAIRuntimeToolExecutor {
   private async getPropertyKnowledge(
     request: PinAIRuntimeRequest,
   ): Promise<Readonly<Record<string, unknown>>> {
+    if (request.context.propertyKnowledge) {
+      return request.context.propertyKnowledge;
+    }
+
     const language: PropertyKnowledgeLanguage =
       request.context.preferredLanguage === "es" ? "es" : "en";
 

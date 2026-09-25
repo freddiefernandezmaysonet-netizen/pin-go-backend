@@ -304,6 +304,44 @@ function createPrismaFixture(options: Readonly<{
   };
 }
 
+test("real read adapter reuses the guest-scoped preloaded property snapshot", async () => {
+  let propertyReads = 0;
+  const executor = new PinGoRuntimeReadToolExecutor({
+    property: {
+      async findFirst() {
+        propertyReads += 1;
+        throw new Error("PRELOADED_SNAPSHOT_SHOULD_BE_REUSED");
+      },
+    },
+  } as any);
+  const propertyKnowledge = {
+    organizationId: "org-a",
+    propertyId: "property-a",
+    language: "en" as const,
+    facts: [{
+      category: "HOUSE_RULES" as const,
+      key: "listingPolicies",
+      value: { childrenPolicy: "ALLOWED", infantsPolicy: "NOT_ALLOWED" },
+      source: "PROPERTY_LISTING_DETAILS" as const,
+      authoritative: true as const,
+    }],
+  };
+  const scopedRequest: PinAIRuntimeRequest = {
+    ...request,
+    context: { ...request.context, propertyKnowledge },
+  };
+
+  const result = await executor.execute(
+    "get_property_knowledge",
+    {},
+    scopedRequest,
+    createConversationMemory(scopedRequest),
+  );
+
+  assert.deepEqual(result, propertyKnowledge);
+  assert.equal(propertyReads, 0);
+});
+
 test("real read adapter exposes persisted Property Knowledge only within guest visibility", async () => {
   const executor = new PinGoRuntimeReadToolExecutor(
     createPrismaFixture({

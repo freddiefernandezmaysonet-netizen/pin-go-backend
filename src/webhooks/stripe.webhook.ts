@@ -20,6 +20,8 @@ import {
   markStripeFinancialEventProcessed,
 } from "../services/stripe-financial-event-ledger.service";
 import { syncStripeDirectChargeDispute } from "../services/stripe-direct-charge-dispute.service";
+import { reconcileDamageCasePaymentIntent } from "../services/damage-case-payment-webhook.service.js";
+import { syncDamageCaseMissionControlSafely } from "../services/damage-case-mission-control.service.js";
 
 const prisma = new PrismaClient();
 
@@ -178,6 +180,35 @@ export function registerStripeWebhook(app: Express) {
                 "paymentReplay" in result ? result.paymentReplay : null,
             });
 
+            break;
+          }
+
+          case "payment_intent.succeeded":
+          case "payment_intent.processing":
+          case "payment_intent.payment_failed":
+          case "payment_intent.canceled": {
+            const result = await reconcileDamageCasePaymentIntent(
+              prisma,
+              event
+            );
+            if (result.handled) {
+              const paymentIntent = event.data.object as Stripe.PaymentIntent;
+              const damageCaseId = String(
+                paymentIntent.metadata?.damageCaseId ?? ""
+              ).trim();
+              if (damageCaseId) {
+                await syncDamageCaseMissionControlSafely({
+                  prisma,
+                  damageCaseId,
+                });
+              }
+            }
+            console.log("[PROPERTY_PROTECTION_PAYMENT_INTENT]", {
+              eventId: event.id,
+              eventType: event.type,
+              handled: result.handled,
+              reason: "reason" in result ? result.reason : null,
+            });
             break;
           }
 

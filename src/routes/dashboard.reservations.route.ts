@@ -15,6 +15,7 @@ import {
   cancelManualReservationByHost,
   ManualReservationCancellationError,
 } from "../services/manual-reservation-cancellation.service";
+import { GuestContactRecoveryError, recoverChannexGuestContactByHost } from "../services/ota-guest-contact-host-recovery.service";
 
 const prisma = new PrismaClient();
 export const dashboardReservationsRouter = Router();
@@ -278,6 +279,7 @@ dashboardReservationsRouter.get(
         reservationNumber: true,
         guestName: true,
         guestEmail: true,
+        guestPhone: true,
         roomName: true,
         checkIn: true,
         checkOut: true,
@@ -316,6 +318,31 @@ dashboardReservationsRouter.get(
             closedReason: true,
             createdAt: true,
             updatedAt: true,
+            paymentAuthorization: {
+              select: {
+                id: true,
+                amountMinor: true,
+                currency: true,
+                claimRevision: true,
+                authorizedAt: true,
+              },
+            },
+            paymentAttempt: {
+              select: {
+                id: true,
+                status: true,
+                amountMinor: true,
+                currency: true,
+                providerStatus: true,
+                failureCode: true,
+                declineCode: true,
+                failureMessage: true,
+                firstAttemptedAt: true,
+                lastAttemptedAt: true,
+                succeededAt: true,
+                failedAt: true,
+              },
+            },
           },
         },
         property: {
@@ -433,6 +460,43 @@ dashboardReservationsRouter.get(
             closedReason: reservation.damageCase.closedReason,
             createdAt: reservation.damageCase.createdAt.toISOString(),
             updatedAt: reservation.damageCase.updatedAt.toISOString(),
+            paymentAuthorization: reservation.damageCase.paymentAuthorization
+              ? {
+                  id: reservation.damageCase.paymentAuthorization.id,
+                  amountMinor:
+                    reservation.damageCase.paymentAuthorization.amountMinor,
+                  currency:
+                    reservation.damageCase.paymentAuthorization.currency,
+                  claimRevision:
+                    reservation.damageCase.paymentAuthorization.claimRevision,
+                  authorizedAt:
+                    reservation.damageCase.paymentAuthorization.authorizedAt.toISOString(),
+                }
+              : null,
+            paymentAttempt: reservation.damageCase.paymentAttempt
+              ? {
+                  id: reservation.damageCase.paymentAttempt.id,
+                  status: reservation.damageCase.paymentAttempt.status,
+                  amountMinor: reservation.damageCase.paymentAttempt.amountMinor,
+                  currency: reservation.damageCase.paymentAttempt.currency,
+                  providerStatus:
+                    reservation.damageCase.paymentAttempt.providerStatus,
+                  failureCode:
+                    reservation.damageCase.paymentAttempt.failureCode,
+                  declineCode:
+                    reservation.damageCase.paymentAttempt.declineCode,
+                  failureMessage:
+                    reservation.damageCase.paymentAttempt.failureMessage,
+                  firstAttemptedAt:
+                    reservation.damageCase.paymentAttempt.firstAttemptedAt?.toISOString() ?? null,
+                  lastAttemptedAt:
+                    reservation.damageCase.paymentAttempt.lastAttemptedAt?.toISOString() ?? null,
+                  succeededAt:
+                    reservation.damageCase.paymentAttempt.succeededAt?.toISOString() ?? null,
+                  failedAt:
+                    reservation.damageCase.paymentAttempt.failedAt?.toISOString() ?? null,
+                }
+              : null,
           }
         : null,
       property: reservation.property
@@ -478,6 +542,44 @@ dashboardReservationsRouter.get(
         },
       })),
     });
+  }
+);
+
+
+dashboardReservationsRouter.patch(
+  "/api/dashboard/reservations/:id/guest-contact",
+  requireAuth,
+  async (req, res) => {
+    try {
+      const user = (req as any).user;
+      const result = await recoverChannexGuestContactByHost({
+        prisma,
+        organizationId: String(user.orgId ?? "").trim(),
+        reservationId: String(req.params.id ?? "").trim(),
+        requestedByUserId: String(user.id ?? user.userId ?? "").trim(),
+        ...(Object.prototype.hasOwnProperty.call(req.body ?? {}, "guestEmail")
+          ? { guestEmail: req.body.guestEmail }
+          : {}),
+        ...(Object.prototype.hasOwnProperty.call(req.body ?? {}, "guestPhone")
+          ? { guestPhone: req.body.guestPhone }
+          : {}),
+      });
+      return res.json(result);
+    } catch (error: any) {
+      if (error instanceof GuestContactRecoveryError || error?.code) {
+        return res.status(error?.statusCode || 400).json({
+          ok: false,
+          error: error?.code || "GUEST_CONTACT_RECOVERY_ERROR",
+          message: error?.message || "Unable to recover guest contact information.",
+        });
+      }
+      console.error("[DASHBOARD_GUEST_CONTACT_RECOVERY_ERROR]", error);
+      return res.status(500).json({
+        ok: false,
+        error: "GUEST_CONTACT_RECOVERY_ERROR",
+        message: "Unable to recover guest contact information.",
+      });
+    }
   }
 );
 

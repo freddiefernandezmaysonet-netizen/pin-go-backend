@@ -52,7 +52,7 @@ test("reservation detail exposes the guest Damage Case response to the host", ()
   );
 });
 
-test("guest response host read model remains non-charging", () => {
+test("host read model exposes payment truth without saved-card or Stripe object IDs", () => {
   const responseStart = source.indexOf(
     "damageCase: reservation.damageCase"
   );
@@ -65,7 +65,11 @@ test("guest response host read model remains non-charging", () => {
   assert.doesNotMatch(responseBlock, /stripeDamageCustomerId/);
   assert.doesNotMatch(responseBlock, /stripeDamagePaymentMethodId/);
   assert.doesNotMatch(responseBlock, /paymentIntent/i);
-  assert.doesNotMatch(responseBlock, /charge|capture|refund/i);
+  assert.match(responseBlock, /paymentAuthorization/);
+  assert.match(responseBlock, /paymentAttempt/);
+  assert.match(responseBlock, /providerStatus/);
+  assert.match(responseBlock, /failureCode/);
+  assert.doesNotMatch(responseBlock, /capture|refund/i);
 });
 
 test("reservation detail remains organization scoped", () => {

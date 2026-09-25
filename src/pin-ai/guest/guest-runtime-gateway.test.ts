@@ -16,8 +16,80 @@ import {
 const token = "12345678-1234-1234-1234-123456789abc";
 const now = new Date("2026-09-21T16:00:00.000Z");
 
+function createPropertyKnowledgeRecord(propertyId: string, organizationId: string) {
+  return {
+    id: propertyId,
+    organizationId,
+    name: "Pin&Go Demo Property",
+    publicTitle: "Pin&Go Demo Property",
+    publicDescription: null,
+    publicDescriptionEs: null,
+    maxGuests: 3,
+    timezone: "America/Puerto_Rico",
+    checkInTime: "16:00",
+    checkOutTime: "11:00",
+    guestAccessMode: "PASSCODE_ONLY",
+    amenities: [],
+    taxes: [],
+    listingDetails: {
+      version: 1,
+      accommodationType: "ENTIRE_PLACE",
+      bedroomCount: 2,
+      fullBathroomCount: 1,
+      halfBathroomCount: 0,
+      minimumPrimaryBookingGuestAge: 21,
+      childrenPolicy: "ALLOWED",
+      infantsPolicy: "NOT_ALLOWED",
+      adultsOnly: "UNKNOWN",
+      petsPolicy: "UNKNOWN",
+      smokingPolicy: "UNKNOWN",
+      vapingPolicy: "UNKNOWN",
+      eventsPolicy: "UNKNOWN",
+      unregisteredVisitorsPolicy: "UNKNOWN",
+      quietHoursEnabled: "UNKNOWN",
+      quietHoursStart: null,
+      quietHoursEnd: null,
+      parkingAvailability: "UNKNOWN",
+      parkingType: null,
+      parkingFeeType: null,
+      parkingVehicleCapacity: null,
+      smokeDetector: "UNKNOWN",
+      carbonMonoxideDetector: "UNKNOWN",
+      exteriorSecurityCameras: "UNKNOWN",
+      exteriorSecurityCamerasDisclosureEn: null,
+      exteriorSecurityCamerasDisclosureEs: null,
+      animalsOnProperty: "UNKNOWN",
+      animalsOnPropertyDisclosureEn: null,
+      animalsOnPropertyDisclosureEs: null,
+      stepFreeEntrance: "UNKNOWN",
+      entranceStepCount: null,
+      elevatorAvailable: "UNKNOWN",
+      accessibleParking: "UNKNOWN",
+      stepFreeBedroomAccess: "UNKNOWN",
+      stepFreeBathroomAccess: "UNKNOWN",
+      stepFreeShower: "UNKNOWN",
+      sleepingAreas: [],
+      sharedSpaces: [],
+      safetyConsiderations: [],
+      additionalConsiderations: [],
+    },
+    locks: [],
+    propertyDevices: [],
+    guestAgreements: [],
+    cancellationPolicies: [],
+    knowledgeEntries: [],
+    reservations: [{
+      id: "reservation-a",
+      status: "ACTIVE",
+      checkIn: new Date("2026-09-20T20:00:00.000Z"),
+      checkOut: new Date("2026-09-22T15:00:00.000Z"),
+    }],
+  };
+}
+
 function createPrisma(reservation: unknown) {
   const calls: unknown[] = [];
+  const propertyCalls: unknown[] = [];
   let conversation: {
     reservationId: string;
     openaiSessionId: string | null;
@@ -27,6 +99,13 @@ function createPrisma(reservation: unknown) {
     lastErrorCode?: string | null;
   } | null = null;
   const prisma = {
+    property: {
+      async findFirst(args: unknown) {
+        propertyCalls.push(args);
+        const query = args as { where: { id: string; organizationId: string } };
+        return createPropertyKnowledgeRecord(query.where.id, query.where.organizationId);
+      },
+    },
     reservation: {
       async findFirst(args: unknown) {
         calls.push(args);
@@ -85,7 +164,7 @@ function createPrisma(reservation: unknown) {
       },
     },
   } as unknown as GuestPinAIGatewayPrisma;
-  return { prisma, calls, getConversation: () => conversation };
+  return { prisma, calls, propertyCalls, getConversation: () => conversation };
 }
 
 function shadowResult(
@@ -140,7 +219,7 @@ test("rejects malformed credentials and bounded-message violations before databa
 });
 
 test("scopes one valid token to one active reservation and sends no guest PII", async () => {
-  const { prisma, calls } = createPrisma({
+  const { prisma, calls, propertyCalls } = createPrisma({
     id: "reservation-a",
     propertyId: "property-a",
     preferredLanguage: "es-PR",
@@ -183,6 +262,28 @@ test("scopes one valid token to one active reservation and sends no guest PII", 
   assert.equal(receivedRequest?.context.organizationId, "org-a");
   assert.equal(receivedRequest?.context.reservationId, "reservation-a");
   assert.equal(receivedRequest?.context.preferredLanguage, "es");
+  assert.deepEqual(
+    propertyCalls.map((call) => (call as { where: unknown }).where),
+    [{ id: "property-a", organizationId: "org-a", status: "ACTIVE" }],
+  );
+  assert.deepEqual(
+    receivedRequest?.context.propertyKnowledge?.facts.find(
+      (fact) => fact.key === "listingPolicies",
+    )?.value,
+    {
+      childrenPolicy: "ALLOWED",
+      infantsPolicy: "NOT_ALLOWED",
+      adultsOnly: "UNKNOWN",
+      petsPolicy: "UNKNOWN",
+      smokingPolicy: "UNKNOWN",
+      vapingPolicy: "UNKNOWN",
+      eventsPolicy: "UNKNOWN",
+      unregisteredVisitorsPolicy: "UNKNOWN",
+      quietHoursEnabled: "UNKNOWN",
+      quietHoursStart: null,
+      quietHoursEnd: null,
+    },
+  );
   assert.equal(receivedRequest?.conversation[0]?.content, "¿Puedo salir a la 1 PM?");
   assert.equal(receivedLocation?.label, "San Juan, PR, PR");
   assert.deepEqual(result, {

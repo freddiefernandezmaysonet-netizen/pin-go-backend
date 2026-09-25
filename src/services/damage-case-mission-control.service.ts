@@ -271,6 +271,26 @@ export function projectDamageCaseToMissionControl(input: {
         "Pin&Go is waiting for the guest to review the case in Manage Reservation."
       );
     }
+  } else if (damageCase.status === DamageCaseStatus.CHARGED) {
+    state = {
+      title: "Property Protection payment completed",
+      issue: `The authorized Property Protection payment for ${reservation} was completed.`,
+      operationalImpact:
+        "The exact guest-authorized amount was collected through the host's connected Stripe account.",
+      recommendedAction: null,
+      nextAutomaticStep: null,
+      severity: "INFO",
+      workflowState: "RESOLVED",
+      responsibleActor: "NONE",
+      actionRequired: false,
+      canAutoResolve: false,
+      autoResolveStatus: "NOT_SUPPORTED",
+      resolutionCode: "PROPERTY_PROTECTION_PAYMENT_SUCCEEDED",
+      resolutionSummary:
+        "Stripe confirmed collection of the exact authorized Property Protection amount.",
+      resolutionType: "AUTOMATIC",
+      resolvedBy: "PIN_GO",
+    };
   } else if (damageCase.status === DamageCaseStatus.CLOSED_NO_CHARGE) {
     const delivery = damageCase.closureNoticeDelivery;
     const closureNoticeRequired = Boolean(damageCase.guestNotifiedAt);
