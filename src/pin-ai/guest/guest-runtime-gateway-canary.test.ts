@@ -50,7 +50,7 @@ test("guest gateway canary requires explicit isolated shadow configuration", () 
   }
 });
 
-test("guest gateway canary selector accepts only fresh or safely reusable conversations", () => {
+test("guest gateway canary selector accepts fresh or safely reusable persisted sessions", () => {
   const now = new Date("2026-09-24T23:45:00.000Z");
   const where = buildGuestGatewayCanaryReservationWhere(now);
 
@@ -64,7 +64,6 @@ test("guest gateway canary selector accepts only fresh or safely reusable conver
       {
         pinAIGuestConversation: {
           is: {
-            openaiSessionId: null,
             OR: [
               { leaseToken: null },
               { leaseExpiresAt: { lt: now } },
