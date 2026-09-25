@@ -521,7 +521,17 @@ enum DamageCaseStatus {
   GUEST_NOTIFICATION_PENDING
   GUEST_NOTIFIED
   CHARGE_BLOCKED
+  CHARGED
   CLOSED_NO_CHARGE
+}
+
+enum DamageCasePaymentAttemptStatus {
+  PREPARED
+  PROCESSING
+  REQUIRES_ACTION
+  SUCCEEDED
+  FAILED
+  CANCELED
 }
 
 enum DamageCaseGuestResponse {
@@ -557,6 +567,7 @@ model DamageCase {
   reservation Reservation @relation(fields: [reservationId], references: [id], onDelete: Cascade)
 
   paymentAuthorization DamageCasePaymentAuthorization?
+  paymentAttempt       DamageCasePaymentAttempt?
 
   @@index([status, createdAt])
 }
@@ -580,8 +591,47 @@ model DamageCasePaymentAuthorization {
   authorizedAt       DateTime @default(now())
 
   damageCase DamageCase @relation(fields: [damageCaseId], references: [id], onDelete: Restrict)
+  paymentAttempt DamageCasePaymentAttempt?
 
   @@index([organizationId, reservationId])
+}
+
+// Canonical financial execution record. One immutable exact authorization can
+// produce at most one Stripe PaymentIntent for a Damage Case in V1.
+model DamageCasePaymentAttempt {
+  id                     String                         @id @default(cuid())
+  damageCaseId           String                         @unique
+  paymentAuthorizationId String                         @unique
+  organizationId         String
+  reservationId          String
+  connectedAccountId     String
+  claimRevision          String
+  amountMinor            Int
+  currency               String
+  idempotencyKey         String                         @unique
+  status                 DamageCasePaymentAttemptStatus @default(PREPARED)
+  stripePaymentIntentId  String?                        @unique
+  stripeChargeId         String?
+  providerStatus         String?
+  failureCode            String?
+  declineCode            String?
+  failureMessage         String?
+  executionLeaseId       String?
+  executionLeaseExpiresAt DateTime?
+  attemptCount           Int                            @default(0)
+  requestedByUserId      String
+  firstAttemptedAt       DateTime?
+  lastAttemptedAt        DateTime?
+  succeededAt            DateTime?
+  failedAt               DateTime?
+  createdAt              DateTime                       @default(now())
+  updatedAt              DateTime                       @updatedAt
+
+  damageCase          DamageCase                     @relation(fields: [damageCaseId], references: [id], onDelete: Restrict)
+  paymentAuthorization DamageCasePaymentAuthorization @relation(fields: [paymentAuthorizationId], references: [id], onDelete: Restrict)
+
+  @@index([organizationId, status, createdAt])
+  @@index([reservationId])
 }
 
 enum DamagePaymentMethodStatus {

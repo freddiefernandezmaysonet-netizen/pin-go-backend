@@ -7,6 +7,9 @@ import { Prisma, PrismaClient } from "@prisma/client";
 import { damagePaymentAuthorizationRouter } from "../routes/public-booking.damage-payment-authorization.routes.js";
 import { getDamagePaymentAuthorizationTerms as getTerms, recordDamagePaymentAuthorization as record,
   DamagePaymentAuthorizationError } from "./damage-case-payment-authorization.service.js";
+import { executeDamageCasePayment } from "./damage-case-payment-execution.service.js";
+import { reconcileDamageCasePaymentIntent } from "./damage-case-payment-webhook.service.js";
+import type Stripe from "stripe";
 
 const TEST_URL = "postgresql://postgres:postgres@127.0.0.1:5432/pingo_damage_authorization_test";
 test("exact damage payment authorization in disposable PostgreSQL", async t => {
@@ -177,6 +180,94 @@ test("exact damage payment authorization in disposable PostgreSQL", async t => {
       const saved = await db.damageCasePaymentAuthorization.findUniqueOrThrow({ where: { damageCaseId: f.damageCase.id } });
       assert.equal(saved.language, "en"); assert.equal(saved.consentText, current.terms.consentText);
     } finally { await new Promise<void>((resolve, reject) => server.close(error => error ? reject(error) : resolve())); }
+  });
+  await t.test("exact Direct Charge is persisted once and replay is idempotent", async () => {
+    const f = await fixture();
+    await submit(f, body(await terms(f)));
+    const calls: Array<{ params: Stripe.PaymentIntentCreateParams; options: Stripe.RequestOptions }> = [];
+    const stripeClient = { paymentIntents: { create: async (
+      params: Stripe.PaymentIntentCreateParams,
+      options: Stripe.RequestOptions
+    ) => {
+      calls.push({ params, options });
+      return {
+        id: "pi_damage_exact_1",
+        status: "succeeded",
+        amount: params.amount,
+        currency: params.currency,
+        latest_charge: "ch_damage_exact_1",
+        metadata: params.metadata,
+      } as Stripe.PaymentIntent;
+    } } };
+    const input = {
+      prisma: db,
+      stripeClient,
+      organizationId: f.org.id,
+      damageCaseId: f.damageCase.id,
+      requestedByUserId: "synthetic-host",
+      now: new Date("2026-09-25T12:00:00Z"),
+    };
+    const first = await executeDamageCasePayment(input);
+    const replay = await executeDamageCasePayment(input);
+    assert.equal(first.ok, true);
+    assert.equal(replay.ok, true);
+    assert.equal("idempotent" in replay && replay.idempotent, true);
+    assert.equal(calls.length, 1);
+    assert.equal(calls[0].params.amount, 10025);
+    assert.equal(calls[0].params.off_session, true);
+    assert.equal(calls[0].params.confirm, true);
+    assert.equal(calls[0].options.stripeAccount, f.reservation.stripeConnectedAccountId);
+    assert.match(String(calls[0].options.idempotencyKey), /^pingo_pp_charge_v1_[a-f0-9]{64}$/);
+    assert.equal(await db.damageCasePaymentAttempt.count({ where: { damageCaseId: f.damageCase.id } }), 1);
+    assert.equal((await db.damageCase.findUniqueOrThrow({ where: { id: f.damageCase.id } })).status, "CHARGED");
+  });
+  await t.test("concurrent host clicks produce one provider request", async () => {
+    const f = await fixture();
+    await submit(f, body(await terms(f)));
+    let release!: () => void;
+    const gate = new Promise<void>(resolve => { release = resolve; });
+    let started!: () => void;
+    const ready = new Promise<void>(resolve => { started = resolve; });
+    let calls = 0;
+    const stripeClient = { paymentIntents: { create: async (params: Stripe.PaymentIntentCreateParams) => {
+      calls += 1; started(); await gate;
+      return { id: "pi_damage_concurrent", status: "succeeded", amount: params.amount,
+        currency: params.currency, latest_charge: "ch_damage_concurrent", metadata: params.metadata } as Stripe.PaymentIntent;
+    } } };
+    const input = { prisma: db, stripeClient, organizationId: f.org.id,
+      damageCaseId: f.damageCase.id, requestedByUserId: "synthetic-host",
+      now: new Date("2026-09-25T12:00:00Z") };
+    const first = executeDamageCasePayment(input);
+    await ready;
+    const duplicate = await executeDamageCasePayment(input);
+    assert.equal("inProgress" in duplicate && duplicate.inProgress, true);
+    assert.equal(calls, 1);
+    release();
+    assert.equal((await first).ok, true);
+  });
+  await t.test("webhook is authoritative for a processing payment", async () => {
+    const f = await fixture();
+    await submit(f, body(await terms(f)));
+    let created!: Stripe.PaymentIntent;
+    const stripeClient = { paymentIntents: { create: async (params: Stripe.PaymentIntentCreateParams) => {
+      created = { id: "pi_damage_processing", status: "processing", amount: params.amount,
+        currency: params.currency, latest_charge: null, metadata: params.metadata } as Stripe.PaymentIntent;
+      return created;
+    } } };
+    const execution = await executeDamageCasePayment({ prisma: db, stripeClient,
+      organizationId: f.org.id, damageCaseId: f.damageCase.id,
+      requestedByUserId: "synthetic-host", now: new Date("2026-09-25T12:00:00Z") });
+    assert.equal("inProgress" in execution && execution.inProgress, true);
+    const succeeded = { ...created, status: "succeeded", latest_charge: "ch_damage_webhook" } as Stripe.PaymentIntent;
+    const event = { id: "evt_damage_webhook", type: "payment_intent.succeeded",
+      account: f.reservation.stripeConnectedAccountId,
+      data: { object: succeeded } } as Stripe.Event;
+    const result = await reconcileDamageCasePaymentIntent(db, event, new Date("2026-09-25T12:01:00Z"));
+    assert.equal(result.handled, true);
+    const attempt = await db.damageCasePaymentAttempt.findUniqueOrThrow({ where: { damageCaseId: f.damageCase.id } });
+    assert.equal(attempt.status, "SUCCEEDED");
+    assert.equal(attempt.stripeChargeId, "ch_damage_webhook");
+    assert.equal((await db.damageCase.findUniqueOrThrow({ where: { id: f.damageCase.id } })).status, "CHARGED");
   });
   assert.equal(await db.messageLog.count(), 0, "No email or message enqueued");
 });

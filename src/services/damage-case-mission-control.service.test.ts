@@ -293,3 +293,12 @@ test("keeps CHARGE_BLOCKED defensive and non-executing", () => {
   assert.equal(result.autoResolveActionCode, null);
   assert.match(result.issue, /No charge was made/);
 });
+
+test("resolves only the Stripe-confirmed CHARGED state", () => {
+  const result = project({ status: DamageCaseStatus.CHARGED });
+
+  assert.equal(result.workflowState, "RESOLVED");
+  assert.equal(result.resolutionCode, "PROPERTY_PROTECTION_PAYMENT_SUCCEEDED");
+  assert.equal(result.resolutionType, "AUTOMATIC");
+  assert.match(result.operationalImpact, /exact guest-authorized amount/i);
+});

@@ -41,13 +41,22 @@ test("API has an explicit no-charge close path", () => {
   assert.match(routeSource, /DAMAGE_CASE_CLOSE_REASON_REQUIRED/);
 });
 
-test("Damage Case API contains no Stripe financial mutation", () => {
-  assert.doesNotMatch(routeSource, /from ["']\.\.\/billing\/stripe/);
+test("financial mutation is isolated behind the authenticated exact-payment service", () => {
+  assert.match(routeSource, /\/api\/dashboard\/damage-cases\/:id\/charge/);
+  assert.match(routeSource, /executeDamageCasePayment/);
+  assert.match(routeSource, /organizationId: auth\.orgId/);
+  assert.match(routeSource, /requestedByUserId: auth\.id/);
   assert.doesNotMatch(routeSource, /paymentIntents\./);
   assert.doesNotMatch(routeSource, /charges\./);
   assert.doesNotMatch(routeSource, /refunds\./);
   assert.doesNotMatch(routeSource, /capture_method/);
   assert.doesNotMatch(routeSource, /stripeDamagePaymentMethodId\s*=\s*/);
+});
+
+test("no-charge closure cannot race an active or successful payment", () => {
+  assert.match(routeSource, /DAMAGE_CASE_PAYMENT_EXECUTION_ALREADY_STARTED/);
+  assert.match(routeSource, /DamageCaseStatus\.CHARGED/);
+  assert.match(routeSource, /paymentAttempt/);
 });
 
 test("server registers the Damage Case dashboard router", () => {

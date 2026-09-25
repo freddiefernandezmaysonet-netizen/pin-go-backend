@@ -16,11 +16,15 @@ const fail = (code: string, statusCode = 409): never => {
 };
 export const PAYMENT_AUTHORIZATION_ACTION = "ACCEPT_AND_AUTHORIZE_PAYMENT";
 
-const include = {
+export const damagePaymentAuthorizationReservationInclude = {
   property: { include: { organization: true } },
-  damageCase: { include: { paymentAuthorization: true } },
+  damageCase: {
+    include: { paymentAuthorization: true, paymentAttempt: true },
+  },
 } satisfies Prisma.ReservationInclude;
-type Reservation = Prisma.ReservationGetPayload<{ include: typeof include }>;
+export type DamagePaymentAuthorizationReservation = Prisma.ReservationGetPayload<{
+  include: typeof damagePaymentAuthorizationReservationInclude;
+}>;
 type Language = "en" | "es";
 
 // Decimal -> integer cents without binary floating point rounding or coercion.
@@ -50,7 +54,11 @@ export function damageAuthorizationText(amountMinor: number, language: Language)
     : `I authorize the host to charge ${amount} to my saved payment method for this Property Protection case through Pin&Go. This authorization is separate from my acceptance of the case. Recording this authorization does not make a charge.`;
 }
 
-function buildTerms(reservation: Reservation, now: Date, language: Language) {
+export function buildDamagePaymentAuthorizationTerms(
+  reservation: DamagePaymentAuthorizationReservation,
+  now: Date,
+  language: Language
+) {
   const dc = reservation.damageCase;
   if (!dc) return fail("CASE_UNAVAILABLE", 404);
   const account = reservation.stripeConnectedAccountId;
@@ -129,13 +137,73 @@ function buildTerms(reservation: Reservation, now: Date, language: Language) {
   };
 }
 
+export function evaluateRecordedDamagePaymentAuthorization(
+  reservation: DamagePaymentAuthorizationReservation,
+  now: Date
+) {
+  const terms = buildDamagePaymentAuthorizationTerms(
+    reservation,
+    now,
+    reservation.preferredLanguage.toLowerCase().startsWith("es") ? "es" : "en"
+  );
+  const dc = reservation.damageCase!;
+  const authorization = dc.paymentAuthorization;
+  const policy = object(reservation.propertyProtectionPolicySnapshot);
+
+  return {
+    ...terms,
+    eligibility: evaluateDamageChargeEligibility({
+      now,
+      checkOut: reservation.checkOut,
+      directBooking:
+        reservation.source === "DIRECT_BOOKING" ||
+        reservation.externalProvider === "PIN_GO_DIRECT" ||
+        Boolean(reservation.stripeCheckoutSessionId),
+      protectionEnabled: reservation.propertyProtectionRequiredSnapshot === true,
+      protectionMode: reservation.propertyProtectionModeSnapshot ?? "",
+      organizationId: reservation.property.organizationId,
+      reservationId: reservation.id,
+      damageCaseId: dc.id,
+      connectedAccountId: reservation.stripeConnectedAccountId ?? "",
+      status: dc.status,
+      closedAt: dc.closedAt,
+      guestResponse: dc.guestResponse,
+      hostApprovedAt: dc.hostApprovedAt,
+      hostApprovedByUserId: dc.hostApprovedByUserId,
+      guestNotifiedAt: dc.guestNotifiedAt,
+      claimRevision: terms.publicTerms.claimRevision,
+      approvedAmountMinor: terms.publicTerms.amountMinor,
+      acceptedMaximumMinor: terms.publicTerms.acceptedMaximumMinor,
+      currency: dc.currency,
+      maximumCurrency: String(policy.currency),
+      authorization: authorization
+        ? {
+            version: authorization.version,
+            action: authorization.action,
+            organizationId: authorization.organizationId,
+            reservationId: authorization.reservationId,
+            damageCaseId: authorization.damageCaseId,
+            connectedAccountId: authorization.connectedAccountId,
+            claimRevision: authorization.claimRevision,
+            amountMinor: authorization.amountMinor,
+            currency: authorization.currency,
+            authorizedAt: authorization.authorizedAt,
+          }
+        : null,
+    }),
+  };
+}
+
 function token(value: unknown): string {
   if (typeof value !== "string" || !value.trim() || value.length > 512)
     return fail("RESERVATION_NOT_FOUND", 404);
   return value.trim();
 }
 async function load(db: Prisma.TransactionClient, guestToken: string, now: Date) {
-  const reservation = await db.reservation.findUnique({ where: { guestToken }, include });
+  const reservation = await db.reservation.findUnique({
+    where: { guestToken },
+    include: damagePaymentAuthorizationReservationInclude,
+  });
   if (!reservation || (reservation.guestTokenExpiresAt && reservation.guestTokenExpiresAt <= now))
     return fail("RESERVATION_NOT_FOUND", 404);
   return reservation;
@@ -151,7 +219,11 @@ export async function getDamagePaymentAuthorizationTerms(input: {
 }) {
   const now = new Date();
   const reservation = await load(input.prisma, token(input.guestToken), now);
-  const terms = buildTerms(reservation, now, language(input.language, reservation.preferredLanguage));
+  const terms = buildDamagePaymentAuthorizationTerms(
+    reservation,
+    now,
+    language(input.language, reservation.preferredLanguage)
+  );
   const existing = reservation.damageCase!.paymentAuthorization;
   return {
     ok: true, terms: terms.publicTerms,
@@ -186,7 +258,11 @@ export async function recordDamagePaymentAuthorization(input: {
         await db.$queryRaw`SELECT "id" FROM "DamageCase" WHERE "reservationId" = ${rows[0].id} FOR UPDATE`;
         const now = new Date();
         const reservation = await load(db, guestToken, now);
-        const { publicTerms: terms, snapshot } = buildTerms(reservation, now, language(body.language, reservation.preferredLanguage));
+        const { publicTerms: terms, snapshot } = buildDamagePaymentAuthorizationTerms(
+          reservation,
+          now,
+          language(body.language, reservation.preferredLanguage)
+        );
         if (body.claimRevision !== terms.claimRevision || body.amountMinor !== terms.amountMinor)
           return fail("AUTHORIZATION_TERMS_CHANGED");
         const existing = reservation.damageCase!.paymentAuthorization;
