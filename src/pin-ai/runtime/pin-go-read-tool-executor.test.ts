@@ -454,10 +454,10 @@ test("real read adapter returns cleaning confirmation state without token or sta
   assert.doesNotMatch(serialized, /token|staffMemberId/);
 });
 
-test("real read adapter calculates an extension estimate from canonical current-vs-extended pricing", async () => {
+test("real read adapter keeps the persisted reservation total while pricing the extension increment", async () => {
   const pricingInputs: Record<string, unknown>[] = [];
   const executor = new PinGoRuntimeReadToolExecutor(
-    createPrismaFixture(),
+    createPrismaFixture({ currentTotalAmount: 3.35 }),
     async (input) => {
       pricingInputs.push(input);
       const isExtended =
@@ -466,18 +466,18 @@ test("real read adapter calculates an extension estimate from canonical current-
       return (isExtended
         ? {
             currency: "usd",
-            totalAmount: 525,
-            totalAmountCents: 52500,
+            totalAmount: 336.87,
+            totalAmountCents: 33687,
             nightlyRates: [
               { date: "2026-09-20", rate: 150 },
               { date: "2026-09-21", rate: 150 },
-              { date: "2026-09-22", rate: 100 },
+              { date: "2026-09-22", rate: 150 },
             ],
           }
         : {
             currency: "usd",
-            totalAmount: 400,
-            totalAmountCents: 40000,
+            totalAmount: 168.37,
+            totalAmountCents: 16837,
             nightlyRates: [
               { date: "2026-09-20", rate: 150 },
               { date: "2026-09-21", rate: 150 },
@@ -485,15 +485,6 @@ test("real read adapter calculates an extension estimate from canonical current-
           }) as any;
     },
   );
-
-  const lateCheckout = await executor.execute(
-    "check_late_checkout",
-    { requestedLocalTime: "13:00" },
-    request,
-    createConversationMemory(request),
-  );
-
-  assert.equal(lateCheckout.authorizationGranted, false);
 
   const result = await executor.execute(
     "calculate_extension_price",
@@ -521,15 +512,27 @@ test("real read adapter calculates an extension estimate from canonical current-
   assert.equal(result.decision, "PRICE_CALCULATED_FOR_REVIEW");
   assert.equal(result.authorizationGranted, false);
   assert.equal(result.priceCalculated, true);
-  assert.equal(result.pricingBasis, "CANONICAL_CURRENT_VS_EXTENDED_DELTA");
-  assert.equal(result.currentCanonicalTotal, 400);
-  assert.equal(result.proposedCanonicalTotal, 525);
-  assert.equal(result.additionalAmount, 125);
-  assert.equal(result.additionalAmountCents, 12500);
+  assert.equal(
+    result.pricingBasis,
+    "PERSISTED_RESERVATION_TOTAL_PLUS_EXTENSION_DELTA",
+  );
+  assert.equal(result.currentReservationTotal, 3.35);
+  assert.equal(result.currentReservationTotalCents, 335);
+  assert.equal(result.additionalAmount, 168.5);
+  assert.equal(result.additionalAmountCents, 16850);
+  assert.equal(result.proposedReservationTotal, 171.85);
+  assert.equal(result.proposedReservationTotalCents, 17185);
+  assert.equal("currentCanonicalTotal" in result, false);
+  assert.equal("currentCanonicalTotalCents" in result, false);
+  assert.equal("proposedCanonicalTotal" in result, false);
+  assert.equal("proposedCanonicalTotalCents" in result, false);
+  assert.equal("historicalReservationTotal" in result, false);
+  assert.equal("amountDifference" in result, false);
+  assert.equal("amountDifferenceCents" in result, false);
   assert.equal(result.chargeExecuted, false);
   assert.equal(result.reservationChanged, false);
   assert.deepEqual(result.extensionNightlyRates, [
-    { date: "2026-09-22", rate: 100 },
+    { date: "2026-09-22", rate: 150 },
   ]);
 });
 
@@ -585,12 +588,10 @@ test("extension price is not calculated beyond the maximum stay", async () => {
   assert.equal(pricingExecutions, 0);
 });
 
-test("extension pricing does not depend on the historical reservation total", async () => {
-  let pricingExecutions = 0;
+test("missing persisted reservation total requires review without exposing canonical totals", async () => {
   const executor = new PinGoRuntimeReadToolExecutor(
     createPrismaFixture({ currentTotalAmount: null }),
     async (input) => {
-      pricingExecutions += 1;
       const isExtended =
         input.checkOut.getTime() ===
         new Date("2026-09-23T15:00:00.000Z").getTime();
@@ -617,21 +618,24 @@ test("extension pricing does not depend on the historical reservation total", as
     createConversationMemory(request),
   );
 
-  assert.equal(pricingExecutions, 2);
-  assert.equal(result.decision, "PRICE_CALCULATED_FOR_REVIEW");
-  assert.equal(result.historicalReservationTotal, null);
-  assert.equal(result.currentCanonicalTotal, 100);
-  assert.equal(result.proposedCanonicalTotal, 101);
+  assert.equal(result.decision, "PRICE_REQUIRES_HUMAN_REVIEW");
+  assert.equal(result.currentReservationTotal, null);
+  assert.equal(result.currentReservationTotalCents, null);
   assert.equal(result.additionalAmount, 1);
   assert.equal(result.additionalAmountCents, 100);
+  assert.equal(result.proposedReservationTotal, null);
+  assert.equal(result.proposedReservationTotalCents, null);
+  assert.equal(result.pricingReviewRequired, true);
+  assert.equal("currentCanonicalTotal" in result, false);
+  assert.equal("proposedCanonicalTotal" in result, false);
   assert.equal(result.authorizationGranted, false);
   assert.equal(result.chargeExecuted, false);
   assert.equal(result.reservationChanged, false);
 });
 
-test("non-positive canonical extension deltas require review and are never presented as a charge", async () => {
+test("non-positive extension deltas require review and never produce a proposed guest total", async () => {
   const executor = new PinGoRuntimeReadToolExecutor(
-    createPrismaFixture(),
+    createPrismaFixture({ currentTotalAmount: 3.35 }),
     async (input) => {
       const isExtended =
         input.checkOut.getTime() ===
@@ -661,9 +665,11 @@ test("non-positive canonical extension deltas require review and are never prese
 
   assert.equal(result.decision, "PRICE_REQUIRES_HUMAN_REVIEW");
   assert.equal(result.authorizationGranted, false);
-  assert.equal(result.amountDifference, -50);
+  assert.equal(result.currentReservationTotal, 3.35);
   assert.equal(result.additionalAmount, null);
   assert.equal(result.additionalAmountCents, null);
+  assert.equal(result.proposedReservationTotal, null);
+  assert.equal(result.proposedReservationTotalCents, null);
   assert.equal(result.pricingReviewRequired, true);
   assert.equal(result.chargeExecuted, false);
   assert.equal(result.reservationChanged, false);
