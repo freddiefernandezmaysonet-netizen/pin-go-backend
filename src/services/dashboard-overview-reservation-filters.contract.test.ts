@@ -9,28 +9,24 @@ async function readRoute(name: string) {
   );
 }
 
-test("checkouts today uses the same active UTC window in metrics and reservations", async () => {
-  const [metricsSource, reservationsSource] = await Promise.all([
+test("today metrics and checkout filters use each property timezone", async () => {
+  const [overviewSource, metricsSource, reservationsSource] = await Promise.all([
+    readRoute("dashboard.route.ts"),
     readRoute("dashboard.metrics.route.ts"),
     readRoute("dashboard.reservations.route.ts"),
   ]);
 
-  assert.match(
-    metricsSource,
-    /status:\s*ReservationStatus\.ACTIVE,[\s\S]*checkOut:\s*\{\s*gte:\s*start,\s*lt:\s*end\s*\}/
-  );
-  assert.match(
-    reservationsSource,
-    /operationalStatusQ === "CHECKOUTS_TODAY"/
-  );
-  assert.match(
-    reservationsSource,
-    /operationalStatus === "CHECKOUTS_TODAY"[\s\S]*where\.checkOut = \{ gte: start, lt: end \}/
-  );
-  assert.match(
-    reservationsSource,
-    /where:\s*any = \{\s*property:\s*\{ organizationId: orgId \}/
-  );
+  for (const source of [overviewSource, metricsSource, reservationsSource]) {
+    assert.match(source, /formatInTimeZone/);
+    assert.match(source, /fromZonedTime/);
+    assert.doesNotMatch(source, /startEndOfTodayUTC/);
+  }
+
+  assert.match(metricsSource, /propertyId[\s\S]*checkOut:\s*\{\s*gte:\s*start,\s*lt:\s*end/);
+  assert.match(reservationsSource, /operationalStatusQ === "CHECKOUTS_TODAY"/);
+  assert.match(reservationsSource, /property\.timezone/);
+  assert.match(overviewSource, /checkInTodayWhere/);
+  assert.match(overviewSource, /checkOutTodayWhere/);
 });
 
 test("upcoming and in-house deep links remain supported by reservations", async () => {

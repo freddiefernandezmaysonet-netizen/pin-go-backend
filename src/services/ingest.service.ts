@@ -43,6 +43,8 @@ export type IngestPayload = {
   checkIn: string;
   checkOut: string;
   paymentState?: "NONE" | "PAID" | "FAILED" | "PENDING";
+  totalAmount?: number | null;
+  currency?: string | null;
 
   externalProvider?: string | null;
   externalId?: string | null;
@@ -143,6 +145,7 @@ export async function ingestReservation(p: IngestPayload) {
   where: { id: p.propertyId },
   select: {
     checkInTime: true,
+    checkOutTime: true,
     timezone: true,
     guestAccessMode: true,
     cleaningNfcEnabled: true,
@@ -150,7 +153,7 @@ export async function ingestReservation(p: IngestPayload) {
 });
 
   const propertyCheckInTime = property?.checkInTime ?? "15:00";
-  const propertyCheckOutTime = "11:00";
+  const propertyCheckOutTime = property?.checkOutTime ?? "11:00";
   const propertyTimeZone = property?.timezone ?? "America/Puerto_Rico";
 
 
@@ -270,6 +273,8 @@ export async function ingestReservation(p: IngestPayload) {
       checkIn,
       checkOut,
       paymentState,
+      totalAmount: p.totalAmount ?? null,
+      currency: p.currency ?? null,
       guestTokenExpiresAt,
 
       externalProvider,
@@ -904,6 +909,8 @@ async function upsertReservation(
     checkIn: Date;
     checkOut: Date;
     paymentState: PaymentState;
+    totalAmount?: number | null;
+    currency?: string | null;
     guestTokenExpiresAt: Date;
   }
 ): Promise<{ reservation: any; didChange: boolean }> {
@@ -942,7 +949,7 @@ async function upsertReservation(
     if (existingByPms) {
       const existing = await tx.reservation.findUnique({
         where: { id: existingByPms.id },
-        select: { paymentState: true },
+        select: { paymentState: true, totalAmount: true, currency: true },
       });
 
       const raw = input.externalRaw ?? {};
@@ -960,9 +967,17 @@ async function upsertReservation(
           : PaymentState.NONE;
 
       const paymentChanged = existing?.paymentState !== recalculatedPaymentState;
+      const totalAmountChanged =
+        input.totalAmount != null &&
+        Number(existing?.totalAmount ?? NaN) !== input.totalAmount;
+      const currencyChanged =
+        input.currency != null &&
+        String(existing?.currency ?? "").toUpperCase() !== input.currency.toUpperCase();
 
       if (
         !paymentChanged &&
+        !totalAmountChanged &&
+        !currencyChanged &&
         isOlderOrSame(
           input.externalUpdatedAt ?? null,
           existingByPms.externalUpdatedAt ?? null
@@ -1016,6 +1031,8 @@ async function upsertReservation(
           checkIn: input.checkIn,
           checkOut: input.checkOut,
           paymentState: input.paymentState,
+          ...(input.totalAmount != null ? { totalAmount: input.totalAmount } : {}),
+          ...(input.currency != null ? { currency: input.currency } : {}),
           guestTokenExpiresAt: input.guestTokenExpiresAt,
 
           lastIngestError: null,
@@ -1058,6 +1075,8 @@ async function upsertReservation(
           checkIn: input.checkIn,
           checkOut: input.checkOut,
           paymentState: input.paymentState,
+          ...(input.totalAmount != null ? { totalAmount: input.totalAmount } : {}),
+          ...(input.currency != null ? { currency: input.currency } : {}),
           guestTokenExpiresAt: input.guestTokenExpiresAt,
 
           lastIngestError: null,
@@ -1099,6 +1118,8 @@ async function upsertReservation(
         checkIn: input.checkIn,
         checkOut: input.checkOut,
         paymentState: input.paymentState,
+        ...(input.totalAmount != null ? { totalAmount: input.totalAmount } : {}),
+        ...(input.currency != null ? { currency: input.currency } : {}),
         guestTokenExpiresAt: input.guestTokenExpiresAt,
 
         lastIngestError: null,
@@ -1139,6 +1160,8 @@ async function upsertReservation(
       checkIn: input.checkIn,
       checkOut: input.checkOut,
       paymentState: input.paymentState,
+      ...(input.totalAmount != null ? { totalAmount: input.totalAmount } : {}),
+      ...(input.currency != null ? { currency: input.currency } : {}),
       guestTokenExpiresAt: input.guestTokenExpiresAt,
 
       lastIngestError: null,
@@ -1164,6 +1187,8 @@ async function upsertReservation(
       checkIn: input.checkIn,
       checkOut: input.checkOut,
       paymentState: input.paymentState,
+      ...(input.totalAmount != null ? { totalAmount: input.totalAmount } : {}),
+      ...(input.currency != null ? { currency: input.currency } : {}),
       guestTokenExpiresAt: input.guestTokenExpiresAt,
 
       lastIngestError: null,

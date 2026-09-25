@@ -5,6 +5,7 @@ import {
   PaymentState,
 } from "@prisma/client";
 import { Router } from "express";
+import { formatInTimeZone, fromZonedTime } from "date-fns-tz";
 import { requireAuth } from "../middleware/requireAuth";
 import {
   DirectBookingRefundError,
@@ -42,15 +43,11 @@ function clamp(n: number, min: number, max: number) {
   return Math.max(min, Math.min(max, n));
 }
 
-function startEndOfTodayUTC() {
-  const now = new Date();
-  const start = new Date(
-    Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate(), 0, 0, 0)
-  );
-  const end = new Date(
-    Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate() + 1, 0, 0, 0)
-  );
-
+function propertyTodayWindow(now: Date, timezone: string) {
+  const dateKey = formatInTimeZone(now, timezone, "yyyy-MM-dd");
+  const start = fromZonedTime(`${dateKey}T00:00:00`, timezone);
+  const nextDateKey = formatInTimeZone(new Date(start.getTime() + 36 * 60 * 60 * 1000), timezone, "yyyy-MM-dd");
+  const end = fromZonedTime(`${nextDateKey}T00:00:00`, timezone);
   return { start, end };
 }
 
@@ -148,8 +145,14 @@ dashboardReservationsRouter.get("/api/dashboard/reservations", requireAuth, asyn
       where.checkIn = { lte: now };
       where.checkOut = { gt: now };
     } else if (operationalStatus === "CHECKOUTS_TODAY") {
-      const { start, end } = startEndOfTodayUTC();
-      where.checkOut = { gte: start, lt: end };
+      const properties = await prisma.property.findMany({
+        where: { organizationId: orgId, ...(propertyId ? { id: propertyId } : {}) },
+        select: { id: true, timezone: true },
+      });
+      where.OR = properties.map((property) => {
+        const { start, end } = propertyTodayWindow(now, property.timezone);
+        return { propertyId: property.id, checkOut: { gte: start, lt: end } };
+      });
     } else if (operationalStatus === "CHECKED_OUT") {
       where.checkOut = { lte: now };
     }

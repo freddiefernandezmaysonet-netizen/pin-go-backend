@@ -70,12 +70,13 @@ export async function handlePmsWebhookEvent(params: {
   where: { id: listing.propertyId },
   select: {
     checkInTime: true,
+    checkOutTime: true,
     timezone: true,
   },
 });
 
     const propertyCheckInTime = property?.checkInTime ?? "15:00";
-    const propertyCheckOutTime = "11:00";
+    const propertyCheckOutTime = property?.checkOutTime ?? "11:00";
     const propertyTimeZone = property?.timezone ?? "America/Puerto_Rico";
 
     if (!normalized.checkIn) {
