@@ -228,7 +228,7 @@ const canonicalHash = safeJsonHash({
 
      const property = await tx.property.findUnique({
   where: { id: listing.propertyId! },
-  select: { checkInTime: true, timezone: true },
+  select: { checkInTime: true, checkOutTime: true, timezone: true },
 });
      
   const propertyTimeZone = property?.timezone ?? "America/Puerto_Rico";
@@ -241,7 +241,7 @@ const resolvedCheckIn = applyPropertyTime(
      
 const resolvedCheckOut = applyPropertyTime(
   canonical!.checkOut,
-  "11:00",
+  property?.checkOutTime ?? "11:00",
   propertyTimeZone
 );
 
