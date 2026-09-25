@@ -5,22 +5,39 @@ import { requireAuth } from "../middleware/requireAuth";
 const prisma = new PrismaClient();
 export const dashboardMetricsRouter = Router();
 
-function startEndOfTodayUTC() {
-  const now = new Date();
-  const start = new Date(
-    Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate(), 0, 0, 0)
+import { formatInTimeZone, fromZonedTime } from "date-fns-tz";
+
+function propertyTodayWindow(now: Date, timezone: string) {
+  const dateKey = formatInTimeZone(now, timezone, "yyyy-MM-dd");
+  const start = fromZonedTime(`${dateKey}T00:00:00`, timezone);
+  const nextDateKey = formatInTimeZone(
+    new Date(start.getTime() + 36 * 60 * 60 * 1000),
+    timezone,
+    "yyyy-MM-dd"
   );
-  const end = new Date(
-    Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate() + 1, 0, 0, 0)
-  );
-  return { now, start, end };
+  const end = fromZonedTime(`${nextDateKey}T00:00:00`, timezone);
+  return { start, end };
 }
+
+async function organizationPropertyTodayWindows(prisma: PrismaClient, organizationId: string, now: Date) {
+  const properties = await prisma.property.findMany({
+    where: { organizationId },
+    select: { id: true, timezone: true },
+  });
+  return properties.map((property) => ({
+    propertyId: property.id,
+    ...propertyTodayWindow(now, property.timezone),
+  }));
+}
+
 
 dashboardMetricsRouter.get("/api/dashboard/metrics", requireAuth, async (req, res) => {
   const user = (req as any).user;
   const orgId = user.orgId as string;
 
-  const { now, start, end } = startEndOfTodayUTC();
+  const now = new Date();
+  const todayWindows = await organizationPropertyTodayWindows(prisma, orgId, now);
+  const todayWhere = todayWindows.map(({ propertyId, start, end }) => ({ propertyId, checkOut: { gte: start, lt: end } }));
 
   const [
     upcomingArrivals,
@@ -49,7 +66,7 @@ dashboardMetricsRouter.get("/api/dashboard/metrics", requireAuth, async (req, re
     prisma.reservation.count({
       where: {
         status: ReservationStatus.ACTIVE,
-        checkOut: { gte: start, lt: end },
+        OR: todayWhere,
         property: { organizationId: orgId },
       },
     }),
