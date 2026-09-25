@@ -32,6 +32,7 @@ export type PropertyKnowledgeFact = Readonly<{
     | "CANCELLATION_POLICY"
     | "PROPERTY_LISTING_DETAILS"
     | "PROPERTY_TAX"
+    | "PROPERTY_REVIEW"
     | "PROPERTY_GUEST_KNOWLEDGE";
   authoritative: true;
 }>;
@@ -41,6 +42,11 @@ export type PropertyKnowledgeSnapshot = Readonly<{
   propertyId: string;
   language: PropertyKnowledgeLanguage;
   facts: readonly PropertyKnowledgeFact[];
+}>;
+
+type PropertyKnowledgeReviewSummary = Readonly<{
+  averageRating: number | null;
+  reviewCount: number;
 }>;
 
 type PropertyKnowledgeRecord = Readonly<{
@@ -133,6 +139,7 @@ type PropertyKnowledgeRecord = Readonly<{
       sortOrder: number;
     }>[];
   }> | null;
+  reviewSummary?: PropertyKnowledgeReviewSummary;
   locks: readonly Readonly<{
     displayName: string | null;
     locationLabel: string | null;
@@ -186,6 +193,12 @@ type PropertyKnowledgePrisma = Readonly<{
   property: Readonly<{
     findFirst(args: unknown): Promise<PropertyKnowledgeRecord | null>;
   }>;
+  propertyReview: Readonly<{
+    aggregate(args: unknown): Promise<{
+      _avg: Readonly<{ overallRating: number | null }>;
+      _count: Readonly<{ _all: number }>;
+    }>;
+  }>;
 }>;
 
 const PROHIBITED_KEYS = new Set([
@@ -227,12 +240,17 @@ export async function getPropertyKnowledgeSnapshot({
     throw new Error("PROPERTY_KNOWLEDGE_PROPERTY_NOT_FOUND");
   }
 
+  const reviewSummary = await loadPropertyReviewSummary({
+    prisma,
+    organizationId,
+    propertyId,
+  });
   const snapshot = composePropertyKnowledgeSnapshot({
     organizationId,
     propertyId,
     language,
     currentDateTime,
-    property,
+    property: { ...property, reviewSummary },
   });
 
   assertNoProhibitedKnowledge(snapshot);
@@ -461,6 +479,35 @@ async function loadPropertyKnowledgeRecord({
   });
 }
 
+async function loadPropertyReviewSummary({
+  prisma,
+  organizationId,
+  propertyId,
+}: {
+  prisma: PropertyKnowledgePrisma;
+  organizationId: string;
+  propertyId: string;
+}): Promise<PropertyKnowledgeReviewSummary> {
+  const result = await prisma.propertyReview.aggregate({
+    where: {
+      organizationId,
+      propertyId,
+      status: "PUBLISHED",
+      source: "PIN_GO_DIRECT",
+    },
+    _avg: { overallRating: true },
+    _count: { _all: true },
+  });
+
+  return {
+    averageRating:
+      result._avg.overallRating === null
+        ? null
+        : Math.round(result._avg.overallRating * 100) / 100,
+    reviewCount: result._count._all,
+  };
+}
+
 export function composePropertyKnowledgeSnapshot({
   organizationId,
   propertyId,
@@ -524,6 +571,11 @@ export function composePropertyKnowledgeSnapshot({
   if (property.listingDetails) {
     addListingDetailsFacts(facts, property.listingDetails, language);
   }
+
+  addReviewSummaryFact(
+    facts,
+    property.reviewSummary ?? { averageRating: null, reviewCount: 0 },
+  );
 
   if (property.locks.length > 0) {
     addFact(
@@ -639,6 +691,24 @@ export function composePropertyKnowledgeSnapshot({
     language,
     facts,
   };
+}
+
+function addReviewSummaryFact(
+  facts: PropertyKnowledgeFact[],
+  summary: PropertyKnowledgeReviewSummary,
+): void {
+  addFact(
+    facts,
+    "PROPERTY",
+    "reviewSummary",
+    {
+      averageRating: summary.averageRating,
+      reviewCount: summary.reviewCount,
+      scale: 5,
+      source: "PIN_GO_DIRECT",
+    },
+    "PROPERTY_REVIEW",
+  );
 }
 
 function addListingDetailsFacts(
