@@ -1,3 +1,5 @@
+import type { PropertyKnowledgeSnapshot } from "../property-knowledge.service.js";
+
 export type PinAIRuntimeToolName =
   | "get_property_knowledge"
   | "get_reservation_context"
@@ -41,6 +43,7 @@ export type PinAIStayContext = Readonly<{
   guestId: string;
   currentLocalDateTime: string;
   preferredLanguage?: "en" | "es";
+  propertyKnowledge?: PropertyKnowledgeSnapshot;
 }>;
 
 export type PinAIRuntimeRequest = Readonly<{

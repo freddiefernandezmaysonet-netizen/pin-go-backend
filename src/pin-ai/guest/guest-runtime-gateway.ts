@@ -2,6 +2,7 @@ import type { PrismaClient } from "@prisma/client";
 import { randomUUID } from "node:crypto";
 
 import type { PinAIRuntimeRequest } from "../runtime/contracts.js";
+import { getPropertyKnowledgeSnapshot } from "../property-knowledge.service.js";
 import { LunaRuntimeAdapter } from "../runtime/luna-runtime-adapter.js";
 import { GuardedPinAIModelAdapter } from "../runtime/model-adapter.js";
 import { OpenAIAgentsRuntimeTransport } from "../runtime/openai-agents-runtime-transport.js";
@@ -34,7 +35,7 @@ type GuestReservationScope = Readonly<{
 
 export type GuestPinAIGatewayPrisma = Pick<
   PrismaClient,
-  "reservation" | "pinAIGuestConversation"
+  "reservation" | "pinAIGuestConversation" | "property"
 >;
 
 export type GuestPinAIRuntimeRunner = (
@@ -122,6 +123,17 @@ export class GuestPinAIGateway {
       throw new GuestPinAIGatewayError("RESERVATION_NOT_FOUND");
     }
 
+    const preferredLanguage: "en" | "es" =
+      reservation.preferredLanguage.toLowerCase().startsWith("es") ? "es" : "en";
+    const propertyKnowledge = await getPropertyKnowledgeSnapshot({
+      prisma: this.prisma as unknown as Parameters<typeof getPropertyKnowledgeSnapshot>[0]["prisma"],
+      organizationId: reservation.property.organizationId,
+      propertyId: reservation.propertyId,
+      reservationId: reservation.id,
+      currentDateTime: currentDateTime.toISOString(),
+      language: preferredLanguage,
+    });
+
     const lease = await this.acquireConversationLease(
       reservation.id,
       currentDateTime,
@@ -134,10 +146,8 @@ export class GuestPinAIGateway {
         reservationId: reservation.id,
         guestId: "reservation-guest",
         currentLocalDateTime: currentDateTime.toISOString(),
-        preferredLanguage:
-          reservation.preferredLanguage.toLowerCase().startsWith("es")
-            ? "es"
-            : "en",
+        preferredLanguage,
+        propertyKnowledge,
       },
       conversation: [{ role: "guest", content: message }],
     };
