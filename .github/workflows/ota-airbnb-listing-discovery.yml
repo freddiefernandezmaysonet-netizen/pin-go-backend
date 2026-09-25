@@ -70,6 +70,32 @@ jobs:
           BASE_BRANCH="${GITHUB_BASE_REF:-main}"
           git fetch origin "+refs/heads/$BASE_BRANCH:refs/remotes/origin/$BASE_BRANCH" --depth=1
           git diff --name-only "origin/$BASE_BRANCH...HEAD" | sort > "$RUNNER_TEMP/actual.txt"
+          if [ "${GITHUB_HEAD_REF:-$GITHUB_REF_NAME}" = "agent/property-protection-v1-payment-attempt-foundation" ]; then
+            cat > "$RUNNER_TEMP/damage-payment-execution-allowed.txt" <<'EOF'
+          .github/workflows/ota-airbnb-listing-discovery.yml
+          .github/workflows/ota-initial-distribution-enablement.yml
+          .github/workflows/property-protection-payment-authorization.yml
+          .github/workflows/property-protection-v1-certification.yml
+          prisma/migrations/20260925170000_damage_case_payment_attempt/migration.sql
+          prisma/schema.prisma
+          src/routes/dashboard.damage-cases.contract.test.ts
+          src/routes/dashboard.damage-cases.routes.ts
+          src/routes/dashboard.reservations.property-protection.contract.test.ts
+          src/routes/dashboard.reservations.route.ts
+          src/services/damage-case-mission-control.service.test.ts
+          src/services/damage-case-mission-control.service.ts
+          src/services/damage-case-payment-authorization.db.test.ts
+          src/services/damage-case-payment-authorization.service.ts
+          src/services/damage-case-payment-execution.service.ts
+          src/services/damage-case-payment-execution.test.ts
+          src/services/damage-case-payment-webhook.service.ts
+          src/webhooks/stripe.webhook.ts
+          EOF
+            sort "$RUNNER_TEMP/damage-payment-execution-allowed.txt" -o "$RUNNER_TEMP/damage-payment-execution-allowed.txt"
+            diff -u "$RUNNER_TEMP/damage-payment-execution-allowed.txt" "$RUNNER_TEMP/actual.txt"
+            exit 0
+          fi
+
           if [ "${GITHUB_HEAD_REF:-$GITHUB_REF_NAME}" = "agent/property-protection-payment-authorization" ]; then
             cat > "$RUNNER_TEMP/damage-authorization-allowed.txt" <<'EOF'
           .github/workflows/ota-airbnb-listing-discovery.yml

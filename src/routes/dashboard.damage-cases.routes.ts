@@ -6,6 +6,11 @@ import { evaluateDamageCasePolicy } from "../services/damage-case-policy.service
 import { notifyGuestOfApprovedDamageCase } from "../services/damage-case-guest-notification.service.js";
 import { notifyGuestOfNoChargeDamageCaseClosure } from "../services/damage-case-guest-closure-notification.service.js";
 import { syncDamageCaseMissionControlSafely } from "../services/damage-case-mission-control.service.js";
+import stripe from "../billing/stripe.js";
+import {
+  DamageCasePaymentExecutionError,
+  executeDamageCasePayment,
+} from "../services/damage-case-payment-execution.service.js";
 
 type AuthUser = { id: string; orgId: string };
 
@@ -286,6 +291,29 @@ export function buildDashboardDamageCasesRouter(prisma: PrismaClient) {
     });
   });
 
+  router.post("/api/dashboard/damage-cases/:id/charge", requireAuth, async (req, res) => {
+    const auth = user(req);
+    try {
+      const result = await executeDamageCasePayment({
+        prisma,
+        stripeClient: stripe,
+        organizationId: auth.orgId,
+        damageCaseId: String(req.params.id),
+        requestedByUserId: auth.id,
+      });
+      await syncDamageCaseMissionControlSafely({
+        prisma,
+        damageCaseId: String(req.params.id),
+      });
+      return res.status(result.inProgress ? 202 : 200).json(result);
+    } catch (error) {
+      if (error instanceof DamageCasePaymentExecutionError) {
+        return res.status(error.statusCode).json({ ok: false, error: error.code });
+      }
+      throw error;
+    }
+  });
+
   router.post("/api/dashboard/damage-cases/:id/close-no-charge", requireAuth, async (req, res) => {
     const auth = user(req);
     const existing = await prisma.damageCase.findFirst({
@@ -293,9 +321,22 @@ export function buildDashboardDamageCasesRouter(prisma: PrismaClient) {
         id: String(req.params.id),
         reservation: { property: { organizationId: auth.orgId } },
       },
-      include: { reservation: { select: { checkOut: true } } },
+      include: {
+        reservation: { select: { checkOut: true } },
+        paymentAttempt: { select: { status: true } },
+      },
     });
     if (!existing) return res.status(404).json({ ok: false, error: "DAMAGE_CASE_NOT_FOUND" });
+    if (
+      existing.status === DamageCaseStatus.CHARGED ||
+      (existing.paymentAttempt &&
+        !["FAILED", "CANCELED"].includes(existing.paymentAttempt.status))
+    ) {
+      return res.status(409).json({
+        ok: false,
+        error: "DAMAGE_CASE_PAYMENT_EXECUTION_ALREADY_STARTED",
+      });
+    }
     // Do not lose a closure notice if an already-notified stay was extended.
     // Internal, never-notified cases can still be closed without contacting the guest.
     if (existing.guestNotifiedAt && !isDamageCaseAfterCheckout(existing.reservation.checkOut)) {
@@ -320,13 +361,29 @@ export function buildDashboardDamageCasesRouter(prisma: PrismaClient) {
     const reason = String(req.body?.reason ?? "").trim();
     if (!reason) return res.status(400).json({ ok: false, error: "DAMAGE_CASE_CLOSE_REASON_REQUIRED" });
 
-    const updated = await prisma.damageCase.update({
-      where: { id: existing.id },
+    const closed = await prisma.damageCase.updateMany({
+      where: {
+        id: existing.id,
+        status: { not: DamageCaseStatus.CHARGED },
+        OR: [
+          { paymentAttempt: { is: null } },
+          { paymentAttempt: { is: { status: { in: ["FAILED", "CANCELED"] } } } },
+        ],
+      },
       data: {
         status: DamageCaseStatus.CLOSED_NO_CHARGE,
         closedAt: new Date(),
         closedReason: reason,
       },
+    });
+    if (closed.count !== 1) {
+      return res.status(409).json({
+        ok: false,
+        error: "DAMAGE_CASE_PAYMENT_EXECUTION_ALREADY_STARTED",
+      });
+    }
+    const updated = await prisma.damageCase.findUniqueOrThrow({
+      where: { id: existing.id },
     });
     const guestClosureNotification = await notifyGuestOfClosureSafely({
       prisma,

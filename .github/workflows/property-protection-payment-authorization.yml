@@ -5,6 +5,11 @@ on:
     paths:
       - "src/services/damage-case-payment-authorization*"
       - "src/services/damage-case-charge-eligibility*"
+      - "src/services/damage-case-payment-execution*"
+      - "src/services/damage-case-payment-webhook*"
+      - "src/routes/dashboard.damage-cases*"
+      - "src/routes/dashboard.reservations*"
+      - "src/webhooks/stripe.webhook.ts"
       - "src/routes/public-booking.damage-payment-authorization*"
       - "src/routes/public-booking.routes.ts"
       - "prisma/**"
@@ -48,8 +53,8 @@ jobs:
           ./node_modules/.bin/prisma validate --schema ./prisma
           ./node_modules/.bin/prisma migrate deploy --schema ./prisma
       - name: Strict type check authorization boundary
-        run: ./node_modules/.bin/tsc --noEmit --strict --skipLibCheck --module nodenext --moduleResolution nodenext --target es2022 src/services/damage-case-payment-authorization.test.ts src/services/damage-case-payment-authorization.db.test.ts src/routes/public-booking.damage-payment-authorization.routes.test.ts
+        run: ./node_modules/.bin/tsc --noEmit --strict --skipLibCheck --module nodenext --moduleResolution nodenext --target es2022 src/services/damage-case-payment-authorization.test.ts src/services/damage-case-payment-authorization.db.test.ts src/services/damage-case-payment-execution.test.ts src/services/damage-case-payment-webhook.service.ts src/routes/public-booking.damage-payment-authorization.routes.test.ts
       - name: Pure and HTTP contract tests without providers
-        run: node --import tsx --test src/services/damage-case-payment-authorization.test.ts src/services/damage-case-charge-eligibility.policy.test.ts src/routes/public-booking.damage-payment-authorization.routes.test.ts
+        run: node --import tsx --test src/services/damage-case-payment-authorization.test.ts src/services/damage-case-charge-eligibility.policy.test.ts src/services/damage-case-payment-execution.test.ts src/routes/public-booking.damage-payment-authorization.routes.test.ts
       - name: Real PostgreSQL persistence, stale consent and concurrency
         run: node --import tsx --test src/services/damage-case-payment-authorization.db.test.ts
