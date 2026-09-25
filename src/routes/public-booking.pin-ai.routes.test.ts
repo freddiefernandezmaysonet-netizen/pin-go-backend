@@ -10,6 +10,77 @@ import { buildPublicBookingPinAIRouter } from "./public-booking.pin-ai.routes.js
 
 const token = "12345678-1234-1234-1234-123456789abc";
 
+function createPropertyKnowledgeRecord(propertyId: string, organizationId: string) {
+  return {
+    id: propertyId,
+    organizationId,
+    name: "Pin&Go Demo Property",
+    publicTitle: "Pin&Go Demo Property",
+    publicDescription: null,
+    publicDescriptionEs: null,
+    maxGuests: 3,
+    timezone: "America/Puerto_Rico",
+    checkInTime: "16:00",
+    checkOutTime: "11:00",
+    guestAccessMode: "PASSCODE_ONLY",
+    amenities: [],
+    taxes: [],
+    listingDetails: {
+      version: 1,
+      accommodationType: "ENTIRE_PLACE",
+      bedroomCount: 2,
+      fullBathroomCount: 1,
+      halfBathroomCount: 0,
+      minimumPrimaryBookingGuestAge: 21,
+      childrenPolicy: "ALLOWED",
+      infantsPolicy: "NOT_ALLOWED",
+      adultsOnly: "UNKNOWN",
+      petsPolicy: "UNKNOWN",
+      smokingPolicy: "UNKNOWN",
+      vapingPolicy: "UNKNOWN",
+      eventsPolicy: "UNKNOWN",
+      unregisteredVisitorsPolicy: "UNKNOWN",
+      quietHoursEnabled: "UNKNOWN",
+      quietHoursStart: null,
+      quietHoursEnd: null,
+      parkingAvailability: "UNKNOWN",
+      parkingType: null,
+      parkingFeeType: null,
+      parkingVehicleCapacity: null,
+      smokeDetector: "UNKNOWN",
+      carbonMonoxideDetector: "UNKNOWN",
+      exteriorSecurityCameras: "UNKNOWN",
+      exteriorSecurityCamerasDisclosureEn: null,
+      exteriorSecurityCamerasDisclosureEs: null,
+      animalsOnProperty: "UNKNOWN",
+      animalsOnPropertyDisclosureEn: null,
+      animalsOnPropertyDisclosureEs: null,
+      stepFreeEntrance: "UNKNOWN",
+      entranceStepCount: null,
+      elevatorAvailable: "UNKNOWN",
+      accessibleParking: "UNKNOWN",
+      stepFreeBedroomAccess: "UNKNOWN",
+      stepFreeBathroomAccess: "UNKNOWN",
+      stepFreeShower: "UNKNOWN",
+      sleepingAreas: [],
+      sharedSpaces: [],
+      safetyConsiderations: [],
+      additionalConsiderations: [],
+    },
+    locks: [],
+    propertyDevices: [],
+    guestAgreements: [],
+    cancellationPolicies: [],
+    knowledgeEntries: [],
+    reservations: [{
+      id: "reservation-a",
+      status: "ACTIVE",
+      checkIn: new Date("2026-09-20T20:00:00.000Z"),
+      checkOut: new Date("2026-09-22T15:00:00.000Z"),
+    }],
+  };
+}
+
 function createPrisma() {
   let conversation: {
     reservationId: string;
@@ -18,6 +89,11 @@ function createPrisma() {
     leaseExpiresAt: Date | null;
   } | null = null;
   return {
+    property: {
+      async findFirst(args: { where: { id: string; organizationId: string } }) {
+        return createPropertyKnowledgeRecord(args.where.id, args.where.organizationId);
+      },
+    },
     reservation: {
       async findFirst() {
         return {
