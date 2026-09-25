@@ -25,6 +25,7 @@ import { ensureReservationGuestAgreementSnapshot } from "./guest-agreement.servi
 import { ensureGuestJourneyForConfirmedReservation } from "./guest-journey.service";
 import { persistChannexAriReservationIntent } from "../pms/outbound/channex-ari-reservation-producer.service";
 import { syncChannexGuestContactRecovery } from "./ota-guest-contact-recovery.service";
+import { notifyHostGuestContactRecoveryRequired } from "./ota-guest-contact-recovery-host-notification.service";
 
 console.log("[INGEST] running src/services/ingest.service.ts", new Date().toISOString());
 const prisma = new PrismaClient();
@@ -447,10 +448,16 @@ if (property?.cleaningNfcEnabled === true) {
   });
 
 if (String(externalProvider ?? "").toUpperCase() === "CHANNEX") {
-  await syncChannexGuestContactRecovery(prisma, result.reservationId, {
+  const contactRecovery = await syncChannexGuestContactRecovery(prisma, result.reservationId, {
     guestEmail: p.guestEmail ?? null,
     guestPhone: p.guestPhone ?? null,
   });
+  if ("missingFields" in contactRecovery && contactRecovery.missingFields?.length) {
+    await notifyHostGuestContactRecoveryRequired(prisma, {
+      reservationId: result.reservationId,
+      missingFields: contactRecovery.missingFields,
+    });
+  }
 }
 
 if (result.cancelled) {
