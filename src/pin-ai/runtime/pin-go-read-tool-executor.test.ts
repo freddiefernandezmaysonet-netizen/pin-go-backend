@@ -454,22 +454,35 @@ test("real read adapter returns cleaning confirmation state without token or sta
   assert.doesNotMatch(serialized, /token|staffMemberId/);
 });
 
-test("real read adapter calculates an extension estimate without authorization or execution", async () => {
-  let pricingInput: Record<string, unknown> | null = null;
+test("real read adapter calculates an extension estimate from canonical current-vs-extended pricing", async () => {
+  const pricingInputs: Record<string, unknown>[] = [];
   const executor = new PinGoRuntimeReadToolExecutor(
     createPrismaFixture(),
     async (input) => {
-      pricingInput = input;
-      return {
-        currency: "usd",
-        totalAmount: 525,
-        totalAmountCents: 52500,
-        nightlyRates: [
-          { date: "2026-09-20", rate: 150 },
-          { date: "2026-09-21", rate: 150 },
-          { date: "2026-09-22", rate: 100 },
-        ],
-      } as any;
+      pricingInputs.push(input);
+      const isExtended =
+        input.checkOut.getTime() ===
+        new Date("2026-09-23T15:00:00.000Z").getTime();
+      return (isExtended
+        ? {
+            currency: "usd",
+            totalAmount: 525,
+            totalAmountCents: 52500,
+            nightlyRates: [
+              { date: "2026-09-20", rate: 150 },
+              { date: "2026-09-21", rate: 150 },
+              { date: "2026-09-22", rate: 100 },
+            ],
+          }
+        : {
+            currency: "usd",
+            totalAmount: 400,
+            totalAmountCents: 40000,
+            nightlyRates: [
+              { date: "2026-09-20", rate: 150 },
+              { date: "2026-09-21", rate: 150 },
+            ],
+          }) as any;
     },
   );
 
@@ -489,16 +502,28 @@ test("real read adapter calculates an extension estimate without authorization o
     createConversationMemory(request),
   );
 
-  assert.deepEqual(pricingInput, {
-    propertyId: "property-a",
-    checkIn: new Date("2026-09-20T20:00:00.000Z"),
-    checkOut: new Date("2026-09-23T15:00:00.000Z"),
-    selectedAmenityIds: ["amenity-a"],
-    excludeReservationId: "reservation-a",
-  });
+  assert.deepEqual(pricingInputs, [
+    {
+      propertyId: "property-a",
+      checkIn: new Date("2026-09-20T20:00:00.000Z"),
+      checkOut: new Date("2026-09-22T15:00:00.000Z"),
+      selectedAmenityIds: ["amenity-a"],
+      excludeReservationId: "reservation-a",
+    },
+    {
+      propertyId: "property-a",
+      checkIn: new Date("2026-09-20T20:00:00.000Z"),
+      checkOut: new Date("2026-09-23T15:00:00.000Z"),
+      selectedAmenityIds: ["amenity-a"],
+      excludeReservationId: "reservation-a",
+    },
+  ]);
   assert.equal(result.decision, "PRICE_CALCULATED_FOR_REVIEW");
   assert.equal(result.authorizationGranted, false);
   assert.equal(result.priceCalculated, true);
+  assert.equal(result.pricingBasis, "CANONICAL_CURRENT_VS_EXTENDED_DELTA");
+  assert.equal(result.currentCanonicalTotal, 400);
+  assert.equal(result.proposedCanonicalTotal, 525);
   assert.equal(result.additionalAmount, 125);
   assert.equal(result.additionalAmountCents, 12500);
   assert.equal(result.chargeExecuted, false);
@@ -560,13 +585,28 @@ test("extension price is not calculated beyond the maximum stay", async () => {
   assert.equal(pricingExecutions, 0);
 });
 
-test("extension price fails closed when the current reservation total is unavailable", async () => {
+test("extension pricing does not depend on the historical reservation total", async () => {
   let pricingExecutions = 0;
   const executor = new PinGoRuntimeReadToolExecutor(
     createPrismaFixture({ currentTotalAmount: null }),
-    async () => {
+    async (input) => {
       pricingExecutions += 1;
-      throw new Error("PRICING_SHOULD_NOT_EXECUTE");
+      const isExtended =
+        input.checkOut.getTime() ===
+        new Date("2026-09-23T15:00:00.000Z").getTime();
+      return (isExtended
+        ? {
+            currency: "usd",
+            totalAmount: 101,
+            totalAmountCents: 10100,
+            nightlyRates: [{ date: "2026-09-22", rate: 1 }],
+          }
+        : {
+            currency: "usd",
+            totalAmount: 100,
+            totalAmountCents: 10000,
+            nightlyRates: [],
+          }) as any;
     },
   );
 
@@ -577,22 +617,39 @@ test("extension price fails closed when the current reservation total is unavail
     createConversationMemory(request),
   );
 
-  assert.equal(result.decision, "CURRENT_RESERVATION_TOTAL_UNAVAILABLE");
+  assert.equal(pricingExecutions, 2);
+  assert.equal(result.decision, "PRICE_CALCULATED_FOR_REVIEW");
+  assert.equal(result.historicalReservationTotal, null);
+  assert.equal(result.currentCanonicalTotal, 100);
+  assert.equal(result.proposedCanonicalTotal, 101);
+  assert.equal(result.additionalAmount, 1);
+  assert.equal(result.additionalAmountCents, 100);
   assert.equal(result.authorizationGranted, false);
-  assert.equal(result.priceCalculated, false);
-  assert.equal(pricingExecutions, 0);
+  assert.equal(result.chargeExecuted, false);
+  assert.equal(result.reservationChanged, false);
 });
 
-test("non-positive extension differences require review and are never presented as a charge", async () => {
+test("non-positive canonical extension deltas require review and are never presented as a charge", async () => {
   const executor = new PinGoRuntimeReadToolExecutor(
     createPrismaFixture(),
-    async () =>
-      ({
-        currency: "usd",
-        totalAmount: 350,
-        totalAmountCents: 35000,
-        nightlyRates: [{ date: "2026-09-22", rate: 100 }],
-      }) as any,
+    async (input) => {
+      const isExtended =
+        input.checkOut.getTime() ===
+        new Date("2026-09-23T15:00:00.000Z").getTime();
+      return (isExtended
+        ? {
+            currency: "usd",
+            totalAmount: 350,
+            totalAmountCents: 35000,
+            nightlyRates: [{ date: "2026-09-22", rate: 100 }],
+          }
+        : {
+            currency: "usd",
+            totalAmount: 400,
+            totalAmountCents: 40000,
+            nightlyRates: [],
+          }) as any;
+    },
   );
 
   const result = await executor.execute(
