@@ -27,18 +27,17 @@ export async function notifyHostGuestContactRecoveryRequired(
       guestPhone: true,
       propertyId: true,
       property: { select: { name: true, organizationId: true } },
-      operationalIssues: {
-        where: { operationalKey: `GUEST_CONTACT_RECOVERY:${input.reservationId}` },
-        select: { workflowState: true },
-        take: 1,
-      },
     },
   });
 
   if (!reservation || String(reservation.externalProvider ?? "").toUpperCase() !== "CHANNEX") {
     return { sent: 0, skipped: true, reason: "NOT_CHANNEX" } as const;
   }
-  if (reservation.operationalIssues[0]?.workflowState !== "ACTION_REQUIRED") {
+  const issue = await prisma.operationalIssue.findUnique({
+    where: { operationalKey: `GUEST_CONTACT_RECOVERY:${input.reservationId}` },
+    select: { workflowState: true },
+  });
+  if (issue?.workflowState !== "ACTION_REQUIRED") {
     return { sent: 0, skipped: true, reason: "NOT_ACTION_REQUIRED" } as const;
   }
 
