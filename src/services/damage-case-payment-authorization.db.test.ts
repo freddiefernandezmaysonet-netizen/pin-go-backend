@@ -184,6 +184,11 @@ test("exact damage payment authorization in disposable PostgreSQL", async t => {
   await t.test("exact Direct Charge is persisted once and replay is idempotent", async () => {
     const f = await fixture();
     await submit(f, body(await terms(f)));
+    const authorization = await db.damageCasePaymentAuthorization.findUniqueOrThrow({
+      where: { damageCaseId: f.damageCase.id },
+      select: { authorizedAt: true },
+    });
+    const paymentNow = new Date(authorization.authorizedAt.getTime() + 60_000);
     const calls: Array<{ params: Stripe.PaymentIntentCreateParams; options: Stripe.RequestOptions }> = [];
     const stripeClient = { paymentIntents: { create: async (
       params: Stripe.PaymentIntentCreateParams,
@@ -205,7 +210,7 @@ test("exact damage payment authorization in disposable PostgreSQL", async t => {
       organizationId: f.org.id,
       damageCaseId: f.damageCase.id,
       requestedByUserId: "synthetic-host",
-      now: new Date("2026-09-25T12:00:00Z"),
+      now: paymentNow,
     };
     const first = await executeDamageCasePayment(input);
     const replay = await executeDamageCasePayment(input);
@@ -224,6 +229,11 @@ test("exact damage payment authorization in disposable PostgreSQL", async t => {
   await t.test("concurrent host clicks produce one provider request", async () => {
     const f = await fixture();
     await submit(f, body(await terms(f)));
+    const authorization = await db.damageCasePaymentAuthorization.findUniqueOrThrow({
+      where: { damageCaseId: f.damageCase.id },
+      select: { authorizedAt: true },
+    });
+    const paymentNow = new Date(authorization.authorizedAt.getTime() + 60_000);
     let release!: () => void;
     const gate = new Promise<void>(resolve => { release = resolve; });
     let started!: () => void;
@@ -236,7 +246,7 @@ test("exact damage payment authorization in disposable PostgreSQL", async t => {
     } } };
     const input = { prisma: db, stripeClient, organizationId: f.org.id,
       damageCaseId: f.damageCase.id, requestedByUserId: "synthetic-host",
-      now: new Date("2026-09-25T12:00:00Z") };
+      now: paymentNow };
     const first = executeDamageCasePayment(input);
     await ready;
     const duplicate = await executeDamageCasePayment(input);
@@ -248,6 +258,11 @@ test("exact damage payment authorization in disposable PostgreSQL", async t => {
   await t.test("webhook is authoritative for a processing payment", async () => {
     const f = await fixture();
     await submit(f, body(await terms(f)));
+    const authorization = await db.damageCasePaymentAuthorization.findUniqueOrThrow({
+      where: { damageCaseId: f.damageCase.id },
+      select: { authorizedAt: true },
+    });
+    const paymentNow = new Date(authorization.authorizedAt.getTime() + 60_000);
     let created!: Stripe.PaymentIntent;
     const stripeClient = { paymentIntents: { create: async (params: Stripe.PaymentIntentCreateParams) => {
       created = { id: "pi_damage_processing", status: "processing", amount: params.amount,
@@ -256,13 +271,17 @@ test("exact damage payment authorization in disposable PostgreSQL", async t => {
     } } };
     const execution = await executeDamageCasePayment({ prisma: db, stripeClient,
       organizationId: f.org.id, damageCaseId: f.damageCase.id,
-      requestedByUserId: "synthetic-host", now: new Date("2026-09-25T12:00:00Z") });
+      requestedByUserId: "synthetic-host", now: paymentNow });
     assert.equal("inProgress" in execution && execution.inProgress, true);
     const succeeded = { ...created, status: "succeeded", latest_charge: "ch_damage_webhook" } as Stripe.PaymentIntent;
     const event = { id: "evt_damage_webhook", type: "payment_intent.succeeded",
       account: f.reservation.stripeConnectedAccountId,
       data: { object: succeeded } } as Stripe.Event;
-    const result = await reconcileDamageCasePaymentIntent(db, event, new Date("2026-09-25T12:01:00Z"));
+    const result = await reconcileDamageCasePaymentIntent(
+      db,
+      event,
+      new Date(paymentNow.getTime() + 60_000)
+    );
     assert.equal(result.handled, true);
     const attempt = await db.damageCasePaymentAttempt.findUniqueOrThrow({ where: { damageCaseId: f.damageCase.id } });
     assert.equal(attempt.status, "SUCCEEDED");
