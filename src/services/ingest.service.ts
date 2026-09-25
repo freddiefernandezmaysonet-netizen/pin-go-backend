@@ -24,6 +24,7 @@ import type { AuditEntry } from "../apms/audit-types";
 import { ensureReservationGuestAgreementSnapshot } from "./guest-agreement.service";
 import { ensureGuestJourneyForConfirmedReservation } from "./guest-journey.service";
 import { persistChannexAriReservationIntent } from "../pms/outbound/channex-ari-reservation-producer.service";
+import { syncChannexGuestContactRecovery } from "./channex-guest-contact-recovery.service";
 
 console.log("[INGEST] running src/services/ingest.service.ts", new Date().toISOString());
 const prisma = new PrismaClient();
@@ -444,6 +445,13 @@ if (property?.cleaningNfcEnabled === true) {
   cleaningConfirmation,
 };
   });
+
+if (String(externalProvider ?? "").toUpperCase() === "CHANNEX") {
+  await syncChannexGuestContactRecovery(prisma, result.reservationId, {
+    guestEmail: p.guestEmail ?? null,
+    guestPhone: p.guestPhone ?? null,
+  });
+}
 
 if (result.cancelled) {
   if (result.didChange) {
@@ -938,7 +946,7 @@ async function upsertReservation(
           externalId: input.externalId!,
         },
       },
-      select: { id: true, externalUpdatedAt: true },
+      select: { id: true, externalUpdatedAt: true, guestEmail: true, guestPhone: true },
     });
 
     function isOlderOrSame(incoming?: Date | null, current?: Date | null) {
@@ -1013,8 +1021,16 @@ async function upsertReservation(
           source: input.source ?? undefined,
 
           guestName: input.guestName,
-          guestEmail: input.guestEmail ?? null,
-          guestPhone: input.guestPhone ?? null,
+          guestEmail:
+            String(input.externalProvider ?? "").toUpperCase() === "CHANNEX" &&
+            input.guestEmail == null
+              ? existingByPms.guestEmail
+              : input.guestEmail ?? null,
+          guestPhone:
+            String(input.externalProvider ?? "").toUpperCase() === "CHANNEX" &&
+            input.guestPhone == null
+              ? existingByPms.guestPhone
+              : input.guestPhone ?? null,
           ...(input.adults != null ? { adults: input.adults } : {}),
           ...(input.children != null ? { children: input.children } : {}),
           preferredLanguage: input.preferredLanguage,
@@ -1045,7 +1061,7 @@ async function upsertReservation(
 
     const existingByIngestKey = await tx.reservation.findUnique({
       where: { ingestKey },
-      select: { id: true },
+      select: { id: true, guestEmail: true, guestPhone: true },
     });
 
     if (existingByIngestKey) {
@@ -1057,8 +1073,16 @@ async function upsertReservation(
 
           source: input.source ?? undefined,
           guestName: input.guestName,
-          guestEmail: input.guestEmail ?? null,
-          guestPhone: input.guestPhone ?? null,
+          guestEmail:
+            String(input.externalProvider ?? "").toUpperCase() === "CHANNEX" &&
+            input.guestEmail == null
+              ? existingByIngestKey.guestEmail
+              : input.guestEmail ?? null,
+          guestPhone:
+            String(input.externalProvider ?? "").toUpperCase() === "CHANNEX" &&
+            input.guestPhone == null
+              ? existingByIngestKey.guestPhone
+              : input.guestPhone ?? null,
           ...(input.adults != null ? { adults: input.adults } : {}),
           ...(input.children != null ? { children: input.children } : {}),
           preferredLanguage: input.preferredLanguage,
