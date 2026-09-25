@@ -20,6 +20,8 @@ function propertyRecord(overrides: Record<string, unknown> = {}) {
     checkOutTime: "11:00",
     guestAccessMode: "PASSCODE_ONLY",
     amenities: [],
+    taxes: [],
+    listingDetails: null,
     locks: [],
     propertyDevices: [],
     guestAgreements: [],
@@ -106,6 +108,173 @@ test("Property Knowledge composes existing Pin&Go sources without operational cr
   assert.doesNotMatch(serialized, /activePasscode/);
   assert.doesNotMatch(serialized, /futurePasscode/);
   assert.doesNotMatch(serialized, /nfcCredential/);
+});
+
+test("Property Knowledge exposes complete guest-safe listing, amenity, tax, and bed facts", () => {
+  const snapshot = composePropertyKnowledgeSnapshot({
+    organizationId: "benchmark-org-a",
+    propertyId: "benchmark-property-a",
+    language: "es",
+    property: propertyRecord({
+      maxGuests: 3,
+      amenities: [
+        {
+          name: "Pet fee",
+          description: "Cargo por mascota",
+          chargeMode: "OPTIONAL",
+          feeType: "PER_STAY",
+          amount: "45.00",
+        },
+      ],
+      taxes: [
+        {
+          name: "Room tax",
+          percentage: "11.50",
+        },
+      ],
+      listingDetails: {
+        version: 1,
+        accommodationType: "ENTIRE_PLACE",
+        bedroomCount: 2,
+        fullBathroomCount: 1,
+        halfBathroomCount: 1,
+        minimumPrimaryBookingGuestAge: 21,
+        childrenPolicy: "ALLOWED",
+        infantsPolicy: "ALLOWED",
+        adultsOnly: "NO",
+        petsPolicy: "ALLOWED",
+        smokingPolicy: "NOT_ALLOWED",
+        vapingPolicy: "NOT_ALLOWED",
+        eventsPolicy: "NOT_ALLOWED",
+        unregisteredVisitorsPolicy: "NOT_ALLOWED",
+        quietHoursEnabled: "YES",
+        quietHoursStart: "22:00",
+        quietHoursEnd: "08:00",
+        parkingAvailability: "YES",
+        parkingType: "DRIVEWAY",
+        parkingFeeType: "FREE",
+        parkingVehicleCapacity: 2,
+        smokeDetector: "YES",
+        carbonMonoxideDetector: "YES",
+        exteriorSecurityCameras: "YES",
+        exteriorSecurityCamerasDisclosureEn: "Exterior entrance camera.",
+        exteriorSecurityCamerasDisclosureEs: "Cámara exterior en la entrada.",
+        animalsOnProperty: "NO",
+        animalsOnPropertyDisclosureEn: null,
+        animalsOnPropertyDisclosureEs: null,
+        stepFreeEntrance: "YES",
+        entranceStepCount: 0,
+        elevatorAvailable: "NO",
+        accessibleParking: "YES",
+        stepFreeBedroomAccess: "YES",
+        stepFreeBathroomAccess: "YES",
+        stepFreeShower: "NO",
+        sleepingAreas: [
+          {
+            kind: "BEDROOM",
+            nameEn: "Primary bedroom",
+            nameEs: "Habitación principal",
+            sortOrder: 0,
+            beds: [{ type: "KING", quantity: 1 }],
+          },
+          {
+            kind: "BEDROOM",
+            nameEn: "Second bedroom",
+            nameEs: "Segunda habitación",
+            sortOrder: 1,
+            beds: [{ type: "QUEEN", quantity: 2 }],
+          },
+        ],
+        sharedSpaces: [
+          {
+            type: "POOL",
+            labelEn: "Shared pool",
+            labelEs: "Piscina compartida",
+            sortOrder: 0,
+          },
+        ],
+        safetyConsiderations: [
+          {
+            type: "POOL",
+            descriptionEn: "Pool has no lifeguard.",
+            descriptionEs: "La piscina no tiene salvavidas.",
+            sortOrder: 0,
+          },
+        ],
+        additionalConsiderations: [
+          {
+            titleEn: "Stairs",
+            titleEs: "Escaleras",
+            descriptionEn: "One interior step.",
+            descriptionEs: "Un escalón interior.",
+            sortOrder: 0,
+          },
+        ],
+      },
+    }),
+  });
+
+  const maxGuests = snapshot.facts.find((fact) => fact.key === "maxGuests");
+  const amenities = snapshot.facts.find((fact) => fact.key === "amenities");
+  const taxes = snapshot.facts.find((fact) => fact.key === "taxes");
+  const summary = snapshot.facts.find((fact) => fact.key === "listingSummary");
+  const sleepingAreas = snapshot.facts.find(
+    (fact) => fact.key === "sleepingAreas",
+  );
+  const policies = snapshot.facts.find(
+    (fact) => fact.key === "listingPolicies",
+  );
+  const parking = snapshot.facts.find((fact) => fact.key === "parking");
+  const safety = snapshot.facts.find(
+    (fact) => fact.key === "safetyAndAccessibility",
+  );
+
+  assert.equal(maxGuests?.value, 3);
+  assert.deepEqual(amenities?.value, [
+    {
+      name: "Pet fee",
+      description: "Cargo por mascota",
+      chargeMode: "OPTIONAL",
+      feeType: "PER_STAY",
+      amount: 45,
+    },
+  ]);
+  assert.deepEqual(taxes?.value, [{ name: "Room tax", percentage: 11.5 }]);
+  assert.deepEqual(summary?.value, {
+    version: 1,
+    accommodationType: "ENTIRE_PLACE",
+    bedroomCount: 2,
+    fullBathroomCount: 1,
+    halfBathroomCount: 1,
+    minimumPrimaryBookingGuestAge: 21,
+    totalBeds: 3,
+    bedTypeCounts: { KING: 1, QUEEN: 2 },
+  });
+  assert.deepEqual(sleepingAreas?.value, [
+    {
+      kind: "BEDROOM",
+      name: "Habitación principal",
+      beds: [{ type: "KING", quantity: 1 }],
+    },
+    {
+      kind: "BEDROOM",
+      name: "Segunda habitación",
+      beds: [{ type: "QUEEN", quantity: 2 }],
+    },
+  ]);
+  assert.equal((policies?.value as any).petsPolicy, "ALLOWED");
+  assert.equal((policies?.value as any).smokingPolicy, "NOT_ALLOWED");
+  assert.equal((parking?.value as any).feeType, "FREE");
+  assert.equal(
+    (safety?.value as any).exteriorSecurityCamerasDisclosure,
+    "Cámara exterior en la entrada.",
+  );
+
+  const serialized = JSON.stringify(snapshot);
+  assert.doesNotMatch(serialized, /stripe/i);
+  assert.doesNotMatch(serialized, /passcode/i);
+  assert.doesNotMatch(serialized, /ttlockLockId/i);
+  assert.doesNotMatch(serialized, /guestToken/i);
 });
 
 test("Property Knowledge uses Spanish guest agreement fields when requested", () => {
@@ -331,6 +500,28 @@ test("Property Knowledge query is hard scoped by organization and property", asy
     status: "ACTIVE",
   });
   assert.deepEqual(capturedSelect.knowledgeEntries.where, { isActive: true });
+  assert.deepEqual(capturedSelect.amenities.select, {
+    name: true,
+    description: true,
+    chargeMode: true,
+    feeType: true,
+    amount: true,
+  });
+  assert.deepEqual(capturedSelect.taxes.select, {
+    name: true,
+    percentage: true,
+  });
+  assert.equal(capturedSelect.listingDetails.select.bedroomCount, true);
+  assert.equal(capturedSelect.listingDetails.select.fullBathroomCount, true);
+  assert.equal(capturedSelect.listingDetails.select.petsPolicy, true);
+  assert.equal(
+    capturedSelect.listingDetails.select.sleepingAreas.select.beds.select.type,
+    true,
+  );
+  assert.equal(
+    capturedSelect.listingDetails.select.sleepingAreas.select.beds.select.quantity,
+    true,
+  );
   assert.deepEqual(capturedSelect.reservations.where, {
     id: "reservation-a",
     status: "ACTIVE",
