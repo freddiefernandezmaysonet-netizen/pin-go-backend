@@ -145,6 +145,7 @@ export async function ingestReservation(p: IngestPayload) {
   where: { id: p.propertyId },
   select: {
     checkInTime: true,
+    checkOutTime: true,
     timezone: true,
     guestAccessMode: true,
     cleaningNfcEnabled: true,
@@ -152,7 +153,7 @@ export async function ingestReservation(p: IngestPayload) {
 });
 
   const propertyCheckInTime = property?.checkInTime ?? "15:00";
-  const propertyCheckOutTime = "11:00";
+  const propertyCheckOutTime = property?.checkOutTime ?? "11:00";
   const propertyTimeZone = property?.timezone ?? "America/Puerto_Rico";
 
 
