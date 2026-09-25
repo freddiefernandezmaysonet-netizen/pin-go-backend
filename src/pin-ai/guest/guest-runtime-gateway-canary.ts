@@ -60,7 +60,6 @@ export function buildGuestGatewayCanaryReservationWhere(now: Date) {
       {
         pinAIGuestConversation: {
           is: {
-            openaiSessionId: null,
             OR: [
               { leaseToken: null },
               { leaseExpiresAt: { lt: now } },
