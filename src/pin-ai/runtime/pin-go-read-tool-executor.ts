@@ -827,18 +827,38 @@ export class PinGoRuntimeReadToolExecutor implements PinAIRuntimeToolExecutor {
             rate: toMoney(item.rate),
           }))
       : [];
-    const historicalReservationTotal =
+    const currentReservationTotal =
       reservation.totalAmount == null ? null : toMoney(reservation.totalAmount);
+    const currentReservationTotalCents =
+      currentReservationTotal == null
+        ? null
+        : Math.round(currentReservationTotal * 100);
+    const additionalAmount =
+      amountDifferenceCents > 0 ? amountDifference : null;
+    const additionalAmountCents =
+      amountDifferenceCents > 0 ? amountDifferenceCents : null;
+    const proposedReservationTotalCents =
+      currentReservationTotalCents !== null &&
+      additionalAmountCents !== null
+        ? currentReservationTotalCents + additionalAmountCents
+        : null;
+    const proposedReservationTotal =
+      proposedReservationTotalCents === null
+        ? null
+        : proposedReservationTotalCents / 100;
+    const persistedTotalUnavailable =
+      currentReservationTotalCents === null ||
+      currentReservationTotalCents < 0;
 
     return {
       decision:
-        amountDifferenceCents > 0
+        amountDifferenceCents > 0 && !persistedTotalUnavailable
           ? "PRICE_CALCULATED_FOR_REVIEW"
           : "PRICE_REQUIRES_HUMAN_REVIEW",
       authorizationGranted: false,
       priceCalculated: true,
       priceIsEstimate: true,
-      pricingBasis: "CANONICAL_CURRENT_VS_EXTENDED_DELTA",
+      pricingBasis: "PERSISTED_RESERVATION_TOTAL_PLUS_EXTENSION_DELTA",
       additionalNights,
       currentCheckOut: reservation.checkOut,
       proposedCheckOut,
@@ -848,22 +868,19 @@ export class PinGoRuntimeReadToolExecutor implements PinAIRuntimeToolExecutor {
           reservation.currency ??
           "usd",
       ).toLowerCase(),
-      historicalReservationTotal,
-      currentCanonicalTotal,
-      currentCanonicalTotalCents,
-      proposedCanonicalTotal,
-      proposedCanonicalTotalCents,
-      amountDifference,
-      amountDifferenceCents,
-      additionalAmount: amountDifferenceCents > 0 ? amountDifference : null,
-      additionalAmountCents:
-        amountDifferenceCents > 0 ? amountDifferenceCents : null,
+      currentReservationTotal,
+      currentReservationTotalCents,
+      additionalAmount,
+      additionalAmountCents,
+      proposedReservationTotal,
+      proposedReservationTotalCents,
       extensionNightlyRates,
-      pricingReviewRequired: amountDifferenceCents <= 0,
+      pricingReviewRequired:
+        amountDifferenceCents <= 0 || persistedTotalUnavailable,
       chargeExecuted: false,
       reservationChanged: false,
       note:
-        "Read-only canonical pricing delta only. No reservation change, approval, payment, or charge was executed.",
+        "Read-only extension estimate. The current reservation total is the persisted Pin&Go total; the additional amount is the current extension pricing delta. No reservation change, approval, payment, or charge was executed.",
     };
   }
 
