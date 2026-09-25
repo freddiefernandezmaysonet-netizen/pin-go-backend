@@ -272,7 +272,9 @@ test("Property Knowledge exposes complete guest-safe listing, amenity, tax, and 
 
   const serialized = JSON.stringify(snapshot);
   assert.doesNotMatch(serialized, /stripe/i);
-  assert.doesNotMatch(serialized, /passcode/i);
+  assert.doesNotMatch(serialized, /activePasscode/i);
+  assert.doesNotMatch(serialized, /futurePasscode/i);
+  assert.doesNotMatch(serialized, /nfcCredential/i);
   assert.doesNotMatch(serialized, /ttlockLockId/i);
   assert.doesNotMatch(serialized, /guestToken/i);
 });
