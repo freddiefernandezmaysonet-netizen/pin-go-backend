@@ -32,7 +32,8 @@ export async function syncChannexGuestContactRecovery(
   incoming: {
     guestEmail?: string | null;
     guestPhone?: string | null;
-  }
+  },
+  dependencies: { upsert: typeof upsertOperationalIssue } = { upsert: upsertOperationalIssue }
 ) {
   const reservation = await prisma.reservation.findUnique({
     where: { id: reservationId },
@@ -62,7 +63,7 @@ export async function syncChannexGuestContactRecovery(
 
   if (reservation.status === ReservationStatus.CANCELLED) {
     if (!existingIssue) return { applicable: true as const, state: effectiveState, cancelled: true as const };
-    await upsertOperationalIssue(prisma, {
+    await dependencies.upsert(prisma, {
       operationalKey,
       issueCode: "GUEST_CONTACT_RECOVERY_CANCELLED",
       title: "Guest contact recovery closed",
@@ -100,7 +101,7 @@ export async function syncChannexGuestContactRecovery(
 
   if (effectiveState === "COMPLETE") {
     if (!existingIssue) return { applicable: true as const, state: effectiveState };
-    await upsertOperationalIssue(prisma, {
+    await dependencies.upsert(prisma, {
       operationalKey,
       issueCode: "GUEST_CONTACT_COMPLETE",
       title: "Guest contact information complete",
@@ -150,7 +151,7 @@ export async function syncChannexGuestContactRecovery(
         ? ["EMAIL"]
         : ["PHONE"];
 
-  await upsertOperationalIssue(prisma, {
+  await dependencies.upsert(prisma, {
     operationalKey,
     issueCode: "OTA_GUEST_CONTACT_MISSING",
     title: "Guest contact information required",
