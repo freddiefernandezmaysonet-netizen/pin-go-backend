@@ -32,6 +32,7 @@ export type PropertyKnowledgeFact = Readonly<{
     | "CANCELLATION_POLICY"
     | "PROPERTY_LISTING_DETAILS"
     | "PROPERTY_TAX"
+    | "PROPERTY_REVIEW"
     | "PROPERTY_GUEST_KNOWLEDGE";
   authoritative: true;
 }>;
@@ -133,6 +134,9 @@ type PropertyKnowledgeRecord = Readonly<{
       sortOrder: number;
     }>[];
   }> | null;
+  reviews?: readonly Readonly<{
+    overallRating: number;
+  }>[];
   locks: readonly Readonly<{
     displayName: string | null;
     locationLabel: string | null;
@@ -373,6 +377,15 @@ async function loadPropertyKnowledgeRecord({
           },
         },
       },
+      reviews: {
+        where: {
+          status: "PUBLISHED",
+          source: "PIN_GO_DIRECT",
+        },
+        select: {
+          overallRating: true,
+        },
+      },
       locks: {
         where: { isActive: true },
         orderBy: { createdAt: "asc" },
@@ -525,6 +538,8 @@ export function composePropertyKnowledgeSnapshot({
     addListingDetailsFacts(facts, property.listingDetails, language);
   }
 
+  addReviewSummaryFact(facts, property.reviews ?? []);
+
   if (property.locks.length > 0) {
     addFact(
       facts,
@@ -639,6 +654,39 @@ export function composePropertyKnowledgeSnapshot({
     language,
     facts,
   };
+}
+
+function addReviewSummaryFact(
+  facts: PropertyKnowledgeFact[],
+  reviews: readonly Readonly<{ overallRating: number }>[],
+): void {
+  const ratings = reviews
+    .map((review) => review.overallRating)
+    .filter(
+      (rating) =>
+        Number.isInteger(rating) && rating >= 1 && rating <= 5,
+    );
+  const reviewCount = ratings.length;
+  const averageRating =
+    reviewCount > 0
+      ? Math.round(
+          (ratings.reduce((sum, rating) => sum + rating, 0) / reviewCount) *
+            100,
+        ) / 100
+      : null;
+
+  addFact(
+    facts,
+    "PROPERTY",
+    "reviewSummary",
+    {
+      averageRating,
+      reviewCount,
+      scale: 5,
+      source: "PIN_GO_DIRECT",
+    },
+    "PROPERTY_REVIEW",
+  );
 }
 
 function addListingDetailsFacts(
