@@ -460,6 +460,7 @@ jobs:
           cat > "$RUNNER_TEMP/allowed.txt" <<'EOF'
           .github/workflows/ota-airbnb-host-confirmed-mapping.yml
           .github/workflows/ota-airbnb-listing-discovery.yml
+          .github/workflows/ota-initial-distribution-enablement.yml
           package.json
           prisma/migrations/20260911153000_add_property_postal_code/migration.sql
           prisma/schema.prisma
