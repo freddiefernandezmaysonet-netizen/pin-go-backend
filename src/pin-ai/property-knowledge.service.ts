@@ -19,7 +19,8 @@ export type PropertyKnowledgeFact = Readonly<{
     | "APPLIANCE"
     | "TROUBLESHOOTING"
     | "EMERGENCY"
-    | "LOCAL_GUIDE";
+    | "LOCAL_GUIDE"
+    | "PRICING";
   key: string;
   value: unknown;
   source:
@@ -29,6 +30,8 @@ export type PropertyKnowledgeFact = Readonly<{
     | "PROPERTY_DEVICE"
     | "GUEST_AGREEMENT"
     | "CANCELLATION_POLICY"
+    | "PROPERTY_LISTING_DETAILS"
+    | "PROPERTY_TAX"
     | "PROPERTY_GUEST_KNOWLEDGE";
   authoritative: true;
 }>;
@@ -56,7 +59,80 @@ type PropertyKnowledgeRecord = Readonly<{
     name: string;
     description: string | null;
     chargeMode: string;
+    feeType: string;
+    amount: unknown;
   }>[];
+  taxes?: readonly Readonly<{
+    name: string;
+    percentage: unknown;
+  }>[];
+  listingDetails?: Readonly<{
+    version: number;
+    accommodationType: string | null;
+    bedroomCount: number | null;
+    fullBathroomCount: number | null;
+    halfBathroomCount: number | null;
+    minimumPrimaryBookingGuestAge: number | null;
+    childrenPolicy: string;
+    infantsPolicy: string;
+    adultsOnly: string;
+    petsPolicy: string;
+    smokingPolicy: string;
+    vapingPolicy: string;
+    eventsPolicy: string;
+    unregisteredVisitorsPolicy: string;
+    quietHoursEnabled: string;
+    quietHoursStart: string | null;
+    quietHoursEnd: string | null;
+    parkingAvailability: string;
+    parkingType: string | null;
+    parkingFeeType: string | null;
+    parkingVehicleCapacity: number | null;
+    smokeDetector: string;
+    carbonMonoxideDetector: string;
+    exteriorSecurityCameras: string;
+    exteriorSecurityCamerasDisclosureEn: string | null;
+    exteriorSecurityCamerasDisclosureEs: string | null;
+    animalsOnProperty: string;
+    animalsOnPropertyDisclosureEn: string | null;
+    animalsOnPropertyDisclosureEs: string | null;
+    stepFreeEntrance: string;
+    entranceStepCount: number | null;
+    elevatorAvailable: string;
+    accessibleParking: string;
+    stepFreeBedroomAccess: string;
+    stepFreeBathroomAccess: string;
+    stepFreeShower: string;
+    sleepingAreas: readonly Readonly<{
+      kind: string;
+      nameEn: string | null;
+      nameEs: string | null;
+      sortOrder: number;
+      beds: readonly Readonly<{
+        type: string;
+        quantity: number;
+      }>[];
+    }>[];
+    sharedSpaces: readonly Readonly<{
+      type: string;
+      labelEn: string | null;
+      labelEs: string | null;
+      sortOrder: number;
+    }>[];
+    safetyConsiderations: readonly Readonly<{
+      type: string;
+      descriptionEn: string | null;
+      descriptionEs: string | null;
+      sortOrder: number;
+    }>[];
+    additionalConsiderations: readonly Readonly<{
+      titleEn: string | null;
+      titleEs: string | null;
+      descriptionEn: string | null;
+      descriptionEs: string | null;
+      sortOrder: number;
+    }>[];
+  }> | null;
   locks: readonly Readonly<{
     displayName: string | null;
     locationLabel: string | null;
@@ -199,6 +275,102 @@ async function loadPropertyKnowledgeRecord({
           name: true,
           description: true,
           chargeMode: true,
+          feeType: true,
+          amount: true,
+        },
+      },
+      taxes: {
+        where: { isActive: true },
+        orderBy: { name: "asc" },
+        select: {
+          name: true,
+          percentage: true,
+        },
+      },
+      listingDetails: {
+        select: {
+          version: true,
+          accommodationType: true,
+          bedroomCount: true,
+          fullBathroomCount: true,
+          halfBathroomCount: true,
+          minimumPrimaryBookingGuestAge: true,
+          childrenPolicy: true,
+          infantsPolicy: true,
+          adultsOnly: true,
+          petsPolicy: true,
+          smokingPolicy: true,
+          vapingPolicy: true,
+          eventsPolicy: true,
+          unregisteredVisitorsPolicy: true,
+          quietHoursEnabled: true,
+          quietHoursStart: true,
+          quietHoursEnd: true,
+          parkingAvailability: true,
+          parkingType: true,
+          parkingFeeType: true,
+          parkingVehicleCapacity: true,
+          smokeDetector: true,
+          carbonMonoxideDetector: true,
+          exteriorSecurityCameras: true,
+          exteriorSecurityCamerasDisclosureEn: true,
+          exteriorSecurityCamerasDisclosureEs: true,
+          animalsOnProperty: true,
+          animalsOnPropertyDisclosureEn: true,
+          animalsOnPropertyDisclosureEs: true,
+          stepFreeEntrance: true,
+          entranceStepCount: true,
+          elevatorAvailable: true,
+          accessibleParking: true,
+          stepFreeBedroomAccess: true,
+          stepFreeBathroomAccess: true,
+          stepFreeShower: true,
+          sleepingAreas: {
+            orderBy: { sortOrder: "asc" },
+            select: {
+              kind: true,
+              nameEn: true,
+              nameEs: true,
+              sortOrder: true,
+              beds: {
+                orderBy: { createdAt: "asc" },
+                select: {
+                  type: true,
+                  quantity: true,
+                },
+              },
+            },
+          },
+          sharedSpaces: {
+            orderBy: { sortOrder: "asc" },
+            select: {
+              type: true,
+              labelEn: true,
+              labelEs: true,
+              sortOrder: true,
+            },
+          },
+          safetyConsiderations: {
+            where: { isActive: true },
+            orderBy: { sortOrder: "asc" },
+            select: {
+              type: true,
+              descriptionEn: true,
+              descriptionEs: true,
+              sortOrder: true,
+            },
+          },
+          additionalConsiderations: {
+            where: { isActive: true },
+            orderBy: { sortOrder: "asc" },
+            select: {
+              titleEn: true,
+              titleEs: true,
+              descriptionEn: true,
+              descriptionEs: true,
+              sortOrder: true,
+            },
+          },
         },
       },
       locks: {
@@ -329,9 +501,28 @@ export function composePropertyKnowledgeSnapshot({
         name: amenity.name,
         description: amenity.description,
         chargeMode: amenity.chargeMode,
+        feeType: amenity.feeType,
+        amount: toGuestNumber(amenity.amount),
       })),
       "AMENITY",
     );
+  }
+
+  if ((property.taxes?.length ?? 0) > 0) {
+    addFact(
+      facts,
+      "PRICING",
+      "taxes",
+      property.taxes?.map((tax) => ({
+        name: tax.name,
+        percentage: toGuestNumber(tax.percentage),
+      })),
+      "PROPERTY_TAX",
+    );
+  }
+
+  if (property.listingDetails) {
+    addListingDetailsFacts(facts, property.listingDetails, language);
   }
 
   if (property.locks.length > 0) {
@@ -448,6 +639,162 @@ export function composePropertyKnowledgeSnapshot({
     language,
     facts,
   };
+}
+
+function addListingDetailsFacts(
+  facts: PropertyKnowledgeFact[],
+  details: NonNullable<PropertyKnowledgeRecord["listingDetails"]>,
+  language: PropertyKnowledgeLanguage,
+): void {
+  const localized = (
+    english: string | null,
+    spanish: string | null,
+  ): string | null =>
+    language === "es" ? spanish ?? english : english ?? spanish;
+
+  const sleepingAreas = details.sleepingAreas.map((area) => ({
+    kind: area.kind,
+    name: localized(area.nameEn, area.nameEs),
+    beds: area.beds.map((bed) => ({
+      type: bed.type,
+      quantity: bed.quantity,
+    })),
+  }));
+  const bedTypeCounts: Record<string, number> = {};
+  let totalBeds = 0;
+  for (const area of sleepingAreas) {
+    for (const bed of area.beds) {
+      const quantity = Number.isInteger(bed.quantity) && bed.quantity > 0
+        ? bed.quantity
+        : 0;
+      totalBeds += quantity;
+      bedTypeCounts[bed.type] = (bedTypeCounts[bed.type] ?? 0) + quantity;
+    }
+  }
+
+  addFact(
+    facts,
+    "PROPERTY",
+    "listingSummary",
+    {
+      version: details.version,
+      accommodationType: details.accommodationType,
+      bedroomCount: details.bedroomCount,
+      fullBathroomCount: details.fullBathroomCount,
+      halfBathroomCount: details.halfBathroomCount,
+      minimumPrimaryBookingGuestAge: details.minimumPrimaryBookingGuestAge,
+      totalBeds,
+      bedTypeCounts,
+    },
+    "PROPERTY_LISTING_DETAILS",
+  );
+  addFact(
+    facts,
+    "PROPERTY",
+    "sleepingAreas",
+    sleepingAreas,
+    "PROPERTY_LISTING_DETAILS",
+  );
+  addFact(
+    facts,
+    "HOUSE_RULES",
+    "listingPolicies",
+    {
+      childrenPolicy: details.childrenPolicy,
+      infantsPolicy: details.infantsPolicy,
+      adultsOnly: details.adultsOnly,
+      petsPolicy: details.petsPolicy,
+      smokingPolicy: details.smokingPolicy,
+      vapingPolicy: details.vapingPolicy,
+      eventsPolicy: details.eventsPolicy,
+      unregisteredVisitorsPolicy: details.unregisteredVisitorsPolicy,
+      quietHoursEnabled: details.quietHoursEnabled,
+      quietHoursStart: details.quietHoursStart,
+      quietHoursEnd: details.quietHoursEnd,
+    },
+    "PROPERTY_LISTING_DETAILS",
+  );
+  addFact(
+    facts,
+    "PARKING",
+    "parking",
+    {
+      availability: details.parkingAvailability,
+      type: details.parkingType,
+      feeType: details.parkingFeeType,
+      vehicleCapacity: details.parkingVehicleCapacity,
+    },
+    "PROPERTY_LISTING_DETAILS",
+  );
+  addFact(
+    facts,
+    "PROPERTY",
+    "safetyAndAccessibility",
+    {
+      smokeDetector: details.smokeDetector,
+      carbonMonoxideDetector: details.carbonMonoxideDetector,
+      exteriorSecurityCameras: details.exteriorSecurityCameras,
+      exteriorSecurityCamerasDisclosure: localized(
+        details.exteriorSecurityCamerasDisclosureEn,
+        details.exteriorSecurityCamerasDisclosureEs,
+      ),
+      animalsOnProperty: details.animalsOnProperty,
+      animalsOnPropertyDisclosure: localized(
+        details.animalsOnPropertyDisclosureEn,
+        details.animalsOnPropertyDisclosureEs,
+      ),
+      stepFreeEntrance: details.stepFreeEntrance,
+      entranceStepCount: details.entranceStepCount,
+      elevatorAvailable: details.elevatorAvailable,
+      accessibleParking: details.accessibleParking,
+      stepFreeBedroomAccess: details.stepFreeBedroomAccess,
+      stepFreeBathroomAccess: details.stepFreeBathroomAccess,
+      stepFreeShower: details.stepFreeShower,
+    },
+    "PROPERTY_LISTING_DETAILS",
+  );
+  if (details.sharedSpaces.length > 0) {
+    addFact(
+      facts,
+      "PROPERTY",
+      "sharedSpaces",
+      details.sharedSpaces.map((space) => ({
+        type: space.type,
+        label: localized(space.labelEn, space.labelEs),
+      })),
+      "PROPERTY_LISTING_DETAILS",
+    );
+  }
+  if (details.safetyConsiderations.length > 0) {
+    addFact(
+      facts,
+      "PROPERTY",
+      "safetyConsiderations",
+      details.safetyConsiderations.map((item) => ({
+        type: item.type,
+        description: localized(item.descriptionEn, item.descriptionEs),
+      })),
+      "PROPERTY_LISTING_DETAILS",
+    );
+  }
+  if (details.additionalConsiderations.length > 0) {
+    addFact(
+      facts,
+      "PROPERTY",
+      "additionalConsiderations",
+      details.additionalConsiderations.map((item) => ({
+        title: localized(item.titleEn, item.titleEs),
+        description: localized(item.descriptionEn, item.descriptionEs),
+      })),
+      "PROPERTY_LISTING_DETAILS",
+    );
+  }
+}
+
+function toGuestNumber(value: unknown): number | null {
+  if (value === null || value === undefined || value === "") return null;
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? parsed : null;
 }
 
 function addPersistedKnowledgeEntries({
