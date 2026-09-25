@@ -22,7 +22,7 @@ function propertyRecord(overrides: Record<string, unknown> = {}) {
     amenities: [],
     taxes: [],
     listingDetails: null,
-    reviews: [],
+    reviewSummary: { averageRating: null, reviewCount: 0 },
     locks: [],
     propertyDevices: [],
     guestAgreements: [],
@@ -286,11 +286,7 @@ test("Property Knowledge exposes a guest-safe published direct review summary", 
     propertyId: "benchmark-property-a",
     language: "en",
     property: propertyRecord({
-      reviews: [
-        { overallRating: 5 },
-        { overallRating: 4 },
-        { overallRating: 5 },
-      ],
+      reviewSummary: { averageRating: 4.67, reviewCount: 3 },
     }),
   });
 
@@ -317,12 +313,66 @@ test("Property Knowledge exposes a guest-safe published direct review summary", 
   assert.doesNotMatch(serialized, /guestDisplayName/i);
 });
 
+test("Property Knowledge computes the review summary in a tenant-scoped database aggregate", async () => {
+  let capturedAggregateArgs: any;
+  const prisma = {
+    property: {
+      async findFirst(args: any) {
+        assert.deepEqual(args.where, {
+          id: "benchmark-property-a",
+          organizationId: "benchmark-org-a",
+          status: "ACTIVE",
+        });
+        return propertyRecord();
+      },
+    },
+    propertyReview: {
+      async aggregate(args: any) {
+        capturedAggregateArgs = args;
+        return {
+          _avg: { overallRating: 14 / 3 },
+          _count: { _all: 3 },
+        };
+      },
+    },
+  } as any;
+
+  const snapshot = await getPropertyKnowledgeSnapshot({
+    prisma,
+    organizationId: "benchmark-org-a",
+    propertyId: "benchmark-property-a",
+    language: "en",
+  });
+
+  assert.deepEqual(capturedAggregateArgs, {
+    where: {
+      organizationId: "benchmark-org-a",
+      propertyId: "benchmark-property-a",
+      status: "PUBLISHED",
+      source: "PIN_GO_DIRECT",
+    },
+    _avg: { overallRating: true },
+    _count: { _all: true },
+  });
+  assert.deepEqual(
+    snapshot.facts.find((fact) => fact.key === "reviewSummary")?.value,
+    {
+      averageRating: 4.67,
+      reviewCount: 3,
+      scale: 5,
+      source: "PIN_GO_DIRECT",
+    },
+  );
+});
+
 test("Property Knowledge distinguishes an unrated property from unavailable review data", () => {
   const snapshot = composePropertyKnowledgeSnapshot({
     organizationId: "benchmark-org-a",
     propertyId: "benchmark-property-a",
     language: "es",
-    property: propertyRecord({ reviews: [] }),
+    property: propertyRecord({
+      reviewSummary: { averageRating: null, reviewCount: 0 },
+    }),
   });
 
   const summary = snapshot.facts.find(
@@ -569,15 +619,6 @@ test("Property Knowledge query is hard scoped by organization and property", asy
   assert.deepEqual(capturedSelect.taxes.select, {
     name: true,
     percentage: true,
-  });
-  assert.deepEqual(capturedSelect.reviews, {
-    where: {
-      status: "PUBLISHED",
-      source: "PIN_GO_DIRECT",
-    },
-    select: {
-      overallRating: true,
-    },
   });
   assert.equal(capturedSelect.listingDetails.select.bedroomCount, true);
   assert.equal(capturedSelect.listingDetails.select.fullBathroomCount, true);
