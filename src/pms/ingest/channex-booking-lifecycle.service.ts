@@ -54,6 +54,16 @@ function resolvePaymentState(
     : "NONE";
 }
 
+export function resolveBookingFinancials(revision: ChannexBookingRevision) {
+  const raw = asRecord(revision.reservation.raw);
+  const amount = Number(raw.amount);
+  const currency = asString(raw.currency)?.toUpperCase() ?? null;
+  return {
+    totalAmount: Number.isFinite(amount) && amount >= 0 ? amount : null,
+    currency: currency && /^[A-Z]{3}$/.test(currency) ? currency : null,
+  };
+}
+
 function resolveReservationSource(revision: ChannexBookingRevision) {
   const raw = asRecord(revision.reservation.raw);
   return asString(raw.ota_name) ?? "PIN_GO_CONNECT";
@@ -503,6 +513,7 @@ export async function persistChannexBookingRevision(args: {
   }
 
   if (lifecycleAction === "INGEST") {
+    const financials = resolveBookingFinancials(args.revision);
     const result = await ingestReservation({
       source: resolveReservationSource(args.revision),
       propertyId: listing.propertyId,
@@ -515,6 +526,8 @@ export async function persistChannexBookingRevision(args: {
       checkIn: args.revision.reservation.checkIn,
       checkOut: args.revision.reservation.checkOut,
       paymentState: resolvePaymentState(args.revision),
+      totalAmount: financials.totalAmount,
+      currency: financials.currency,
       externalProvider: "CHANNEX",
       externalId: args.revision.identity.bookingId,
       externalUpdatedAt: insertedAt.toISOString(),
