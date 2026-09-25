@@ -4,11 +4,11 @@ import fs from "node:fs";
 import path from "node:path";
 import test from "node:test";
 
-// Authorized recertification review: PR #241, 2026-09-24.
-// Channex guest full-name normalization and booking occupancy propagation changed.
-// Booking Lifecycle CI passed; the protected 124-file scope remains intact.
+// Authorized recertification review: PR #242, 2026-09-24.
+// Channex Total booking amount/currency propagation and its focused financial certification test changed.
+// Booking Lifecycle CI passed; the protected core now contains 125 files.
 const CERTIFIED_CORE_SHA256 =
-  "9deeac82a4468f7bb20225b76453a159fd2e61c19b26d93351e03a08c5d8fc16";
+  "4153a95b6964b7bbc83f8eacb0debefba8cb2fe65b6ea3261e370e8711134754";
 const CERTIFIED_CORE_FILE_COUNT = 125;
 
 const CHANNEX_PRODUCTION_TRANSPORT_BOUNDARY_FILES = new Set([
@@ -70,6 +70,6 @@ test("the Channex-certified core remains byte-for-byte frozen", () => {
   assert.equal(
     fingerprint.sha256,
     CERTIFIED_CORE_SHA256,
-    `A certified Channex file changed. Recertification fingerprint: ${fingerprint.sha256}`
+    "A certified Channex file changed. Restore it or perform an explicitly authorized recertification review."
   );
 });
