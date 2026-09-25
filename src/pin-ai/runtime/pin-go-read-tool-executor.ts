@@ -827,7 +827,8 @@ export class PinGoRuntimeReadToolExecutor implements PinAIRuntimeToolExecutor {
             rate: toMoney(item.rate),
           }))
       : [];
-    const historicalReservationTotal = toMoney(reservation.totalAmount);
+    const historicalReservationTotal =
+      reservation.totalAmount == null ? null : toMoney(reservation.totalAmount);
 
     return {
       decision:
