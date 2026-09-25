@@ -1037,7 +1037,7 @@ if (checkInTime !== undefined) {
 
 if (checkOutTime !== undefined) {
   const normalizedCheckOutTime = String(checkOutTime || "").trim();
-  if (!/^(?:[01]\\d|2[0-3]):[0-5]\\d$/.test(normalizedCheckOutTime)) {
+  if (!/^(?:[01]\d|2[0-3]):[0-5]\d$/.test(normalizedCheckOutTime)) {
     return res.status(400).json({
       ok: false,
       error: "checkOutTime must use HH:mm format",
