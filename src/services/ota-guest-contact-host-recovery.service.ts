@@ -1,7 +1,8 @@
 import crypto from "node:crypto";
-import { PrismaClient } from "@prisma/client";
+import { AccessGrantType, PrismaClient } from "@prisma/client";
 import { persistAuditEntry } from "../apms/audit-persistence.service";
 import { syncChannexGuestContactRecovery } from "./ota-guest-contact-recovery.service";
+import { materializeGuestAccessCommunicationOutbox } from "./guest-journey-access-communications-outbox.service";
 
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 const PHONE_RE = /^\+[1-9]\d{7,14}$/;
@@ -105,10 +106,42 @@ export async function recoverChannexGuestContactByHost(input: {
     guestPhone: null,
   });
 
+  let communications = {
+    status: "NOT_ELIGIBLE_YET" as "MATERIALIZED" | "NOT_ELIGIBLE_YET",
+    created: 0,
+    deduplicated: 0,
+  };
+  const grants = await prisma.accessGrant.findMany({
+    where: { reservationId: reservation.id, type: AccessGrantType.GUEST },
+    select: { id: true },
+  });
+  if (grants.length > 0) {
+    try {
+      const outbox = await materializeGuestAccessCommunicationOutbox(prisma, {
+        organizationId,
+        propertyId: reservation.propertyId,
+        reservationId: reservation.id,
+        accessGrantIds: grants.map((grant) => grant.id),
+      });
+      communications = {
+        status: "MATERIALIZED",
+        created: outbox.created,
+        deduplicated: outbox.deduplicated,
+      };
+    } catch (error: any) {
+      const code = String(error?.message ?? "");
+      const expectedNotReady =
+        code === "ACCESS_COMMUNICATIONS_OUTBOX_RELEASE_EVIDENCE_MISSING" ||
+        code === "ACCESS_COMMUNICATIONS_OUTBOX_CANONICAL_GRANT_MISSING_OR_AMBIGUOUS";
+      if (!expectedNotReady) throw error;
+    }
+  }
+
   return {
     ok: true as const,
     reservationId: reservation.id,
     guestEmail: updated.guestEmail,
     guestPhone: updated.guestPhone,
+    communications,
   };
 }
