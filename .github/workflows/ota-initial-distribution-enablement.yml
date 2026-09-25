@@ -66,6 +66,40 @@ jobs:
             '.github/workflows/ota-initial-distribution-enablement.yml',
           }
           changed = set(Path('/tmp/ota-initial-changed.txt').read_text().splitlines())
+          if os.environ.get('GITHUB_HEAD_REF') == 'agent/property-protection-v1-payment-attempt-foundation':
+            repo = 'freddiefernandezmaysonet-netizen/pin-go-backend'
+            if not (
+              os.environ.get('GITHUB_EVENT_NAME') == 'pull_request'
+              and os.environ.get('GITHUB_REPOSITORY') == repo
+              and os.environ.get('SCOPE_PR_NUMBER') == '256'
+              and os.environ.get('SCOPE_HEAD_REPO') == repo
+              and os.environ.get('SCOPE_BASE_REPO') == repo
+              and os.environ.get('GITHUB_BASE_REF') == 'main'
+            ):
+              raise SystemExit('PR #256 repository/branch scope mismatch')
+            allowed = {
+              '.github/workflows/ota-airbnb-listing-discovery.yml',
+              '.github/workflows/ota-initial-distribution-enablement.yml',
+              '.github/workflows/property-protection-payment-authorization.yml',
+              '.github/workflows/property-protection-v1-certification.yml',
+              'prisma/migrations/20260925170000_damage_case_payment_attempt/migration.sql',
+              'prisma/schema.prisma',
+              'src/routes/dashboard.damage-cases.contract.test.ts',
+              'src/routes/dashboard.damage-cases.routes.ts',
+              'src/routes/dashboard.reservations.property-protection.contract.test.ts',
+              'src/routes/dashboard.reservations.route.ts',
+              'src/services/damage-case-mission-control.service.test.ts',
+              'src/services/damage-case-mission-control.service.ts',
+              'src/services/damage-case-payment-authorization.db.test.ts',
+              'src/services/damage-case-payment-authorization.service.ts',
+              'src/services/damage-case-payment-execution.service.ts',
+              'src/services/damage-case-payment-execution.test.ts',
+              'src/services/damage-case-payment-webhook.service.ts',
+              'src/webhooks/stripe.webhook.ts',
+            }
+            if changed != allowed:
+              raise SystemExit(f'PR #256 exact eighteen-file scope required: {sorted(changed ^ allowed)}')
+            raise SystemExit(0)
           if os.environ.get('GITHUB_HEAD_REF') == 'agent/vrbo-channel-token-fix':
             repo = 'freddiefernandezmaysonet-netizen/pin-go-backend'
             if not (

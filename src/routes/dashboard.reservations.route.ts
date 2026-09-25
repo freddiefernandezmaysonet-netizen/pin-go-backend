@@ -318,6 +318,31 @@ dashboardReservationsRouter.get(
             closedReason: true,
             createdAt: true,
             updatedAt: true,
+            paymentAuthorization: {
+              select: {
+                id: true,
+                amountMinor: true,
+                currency: true,
+                claimRevision: true,
+                authorizedAt: true,
+              },
+            },
+            paymentAttempt: {
+              select: {
+                id: true,
+                status: true,
+                amountMinor: true,
+                currency: true,
+                providerStatus: true,
+                failureCode: true,
+                declineCode: true,
+                failureMessage: true,
+                firstAttemptedAt: true,
+                lastAttemptedAt: true,
+                succeededAt: true,
+                failedAt: true,
+              },
+            },
           },
         },
         property: {
@@ -435,6 +460,43 @@ dashboardReservationsRouter.get(
             closedReason: reservation.damageCase.closedReason,
             createdAt: reservation.damageCase.createdAt.toISOString(),
             updatedAt: reservation.damageCase.updatedAt.toISOString(),
+            paymentAuthorization: reservation.damageCase.paymentAuthorization
+              ? {
+                  id: reservation.damageCase.paymentAuthorization.id,
+                  amountMinor:
+                    reservation.damageCase.paymentAuthorization.amountMinor,
+                  currency:
+                    reservation.damageCase.paymentAuthorization.currency,
+                  claimRevision:
+                    reservation.damageCase.paymentAuthorization.claimRevision,
+                  authorizedAt:
+                    reservation.damageCase.paymentAuthorization.authorizedAt.toISOString(),
+                }
+              : null,
+            paymentAttempt: reservation.damageCase.paymentAttempt
+              ? {
+                  id: reservation.damageCase.paymentAttempt.id,
+                  status: reservation.damageCase.paymentAttempt.status,
+                  amountMinor: reservation.damageCase.paymentAttempt.amountMinor,
+                  currency: reservation.damageCase.paymentAttempt.currency,
+                  providerStatus:
+                    reservation.damageCase.paymentAttempt.providerStatus,
+                  failureCode:
+                    reservation.damageCase.paymentAttempt.failureCode,
+                  declineCode:
+                    reservation.damageCase.paymentAttempt.declineCode,
+                  failureMessage:
+                    reservation.damageCase.paymentAttempt.failureMessage,
+                  firstAttemptedAt:
+                    reservation.damageCase.paymentAttempt.firstAttemptedAt?.toISOString() ?? null,
+                  lastAttemptedAt:
+                    reservation.damageCase.paymentAttempt.lastAttemptedAt?.toISOString() ?? null,
+                  succeededAt:
+                    reservation.damageCase.paymentAttempt.succeededAt?.toISOString() ?? null,
+                  failedAt:
+                    reservation.damageCase.paymentAttempt.failedAt?.toISOString() ?? null,
+                }
+              : null,
           }
         : null,
       property: reservation.property

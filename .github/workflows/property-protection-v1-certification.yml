@@ -16,6 +16,9 @@ on:
       - "src/services/damage-case-charge-eligibility.policy.ts"
       - "src/services/damage-case-charge-eligibility.policy.test.ts"
       - "src/services/damage-case-payment-authorization*"
+      - "src/services/damage-case-payment-execution*"
+      - "src/services/damage-case-payment-webhook*"
+      - "src/webhooks/stripe.webhook.ts"
       - "src/routes/public-booking.damage-payment-authorization*"
       - "src/services/damage-case-policy.service.test.ts"
       - "src/services/damage-case-guest-notification.service.ts"
@@ -82,9 +85,10 @@ jobs:
           node --import tsx --test src/services/damage-case-checkout.policy.test.ts
           node --import tsx --test src/services/damage-case-charge-eligibility.policy.test.ts
           node --import tsx --test src/services/damage-case-payment-authorization.test.ts
+          node --import tsx --test src/services/damage-case-payment-execution.test.ts
 
       - name: Type-check isolated damage payment eligibility policy
-        run: npx tsc --noEmit --strict --skipLibCheck --module nodenext --moduleResolution nodenext --target es2022 src/services/damage-case-charge-eligibility.policy.test.ts
+        run: npx tsc --noEmit --strict --skipLibCheck --module nodenext --moduleResolution nodenext --target es2022 src/services/damage-case-charge-eligibility.policy.test.ts src/services/damage-case-payment-execution.test.ts src/services/damage-case-payment-webhook.service.ts
 
       - name: Continue non-charging Damage Case certification
         run: |
