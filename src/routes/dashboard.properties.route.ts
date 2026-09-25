@@ -856,26 +856,16 @@ if (
       }
 
  if (cleaningDurationMinutes !== undefined) {
-  const n = Number(cleaningDurationMinutes);
-
-  if (!Number.isFinite(n) || n < 0) {
+  const normalizedDuration = Number(cleaningDurationMinutes);
+  if (normalizedDuration !== 180 && normalizedDuration !== 240) {
     return res.status(400).json({
       ok: false,
-      error: "cleaningDurationMinutes must be a valid number",
+      error: "cleaningDurationMinutes must be 180 or 240",
     });
   }
-
-  const normalizedDuration = Math.trunc(n);
-
   data.cleaningDurationMinutes = normalizedDuration;
-
-  // 🔒 Mantener Property.checkInTime sincronizado con el dashboard
-  if (normalizedDuration === 240) {
-    data.checkInTime = "16:00";
-  } else {
-    data.checkInTime = "15:00";
-  }
-}   
+  data.checkInTime = normalizedDuration === 240 ? "16:00" : "15:00";
+}
 
       if (cleaningStartOffsetMinutes !== undefined) {
         const n = Number(cleaningStartOffsetMinutes);
@@ -1046,7 +1036,14 @@ if (checkInTime !== undefined) {
 }
 
 if (checkOutTime !== undefined) {
-  data.checkOutTime = String(checkOutTime || "").trim() || null;
+  const normalizedCheckOutTime = String(checkOutTime || "").trim();
+  if (!/^(?:[01]\\d|2[0-3]):[0-5]\\d$/.test(normalizedCheckOutTime)) {
+    return res.status(400).json({
+      ok: false,
+      error: "checkOutTime must use HH:mm format",
+    });
+  }
+  data.checkOutTime = normalizedCheckOutTime;
 }
 
       const ariConfigurationChanged =
