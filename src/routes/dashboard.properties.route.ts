@@ -45,6 +45,10 @@ import { createChannexAriOutboxEvent } from "../pms/outbound/channex-ari-outbox.
 import { buildFullSyncRange } from "../pms/outbound/channex-ari-lifecycle.policy";
 import { assertDirectBookingPayoutReady } from "../services/stripe-connect.service";
 
+export function isValidPropertyTime(value: string): boolean {
+  return /^(?:[01]\d|2[0-3]):[0-5]\d$/.test(value);
+}
+
 const prisma = new PrismaClient();
 export const dashboardPropertiesRouter = Router();
 
@@ -1037,7 +1041,7 @@ if (checkInTime !== undefined) {
 
 if (checkOutTime !== undefined) {
   const normalizedCheckOutTime = String(checkOutTime || "").trim();
-  if (!/^(?:[01]\d|2[0-3]):[0-5]\d$/.test(normalizedCheckOutTime)) {
+  if (!isValidPropertyTime(normalizedCheckOutTime)) {
     return res.status(400).json({
       ok: false,
       error: "checkOutTime must use HH:mm format",
