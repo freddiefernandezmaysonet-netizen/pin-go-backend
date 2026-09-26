@@ -22,10 +22,19 @@ type GuestReservationModificationPreviewInput = {
   selectedAmenityIds?: string[];
 };
 
+export type GuestReservationModificationConfirmationSource =
+  | "GUEST_MANAGE_RESERVATION"
+  | "PIN_AI_GUEST_SERVICES";
+
 type GuestReservationModificationConfirmInput =
   GuestReservationModificationPreviewInput & {
     clientRequestId: string;
     acceptNoRefundReduction?: boolean;
+    expectedPreviewFingerprint?: string;
+    confirmationSource?: GuestReservationModificationConfirmationSource;
+    actionProposalId?: string;
+    actionProposalFingerprint?: string;
+    actionProposalConfirmedAt?: Date;
   };
 
 type JsonObject = Record<string, unknown>;
@@ -73,6 +82,93 @@ function normalizeClientRequestId(value: unknown) {
   }
 
   return clientRequestId;
+}
+
+function normalizeOptionalSha256(value: unknown, code: string) {
+  if (value === undefined || value === null || value === "") {
+    return null;
+  }
+
+  const normalized = String(value).trim().toLowerCase();
+  if (!/^[a-f0-9]{64}$/.test(normalized)) {
+    throw new GuestReservationModificationError({
+      code,
+      message: "A valid SHA-256 fingerprint is required.",
+      statusCode: 400,
+    });
+  }
+
+  return normalized;
+}
+
+function normalizeOptionalActionProposalId(value: unknown) {
+  if (value === undefined || value === null || value === "") {
+    return null;
+  }
+
+  const normalized = String(value).trim();
+  if (!/^[A-Za-z0-9_-]{8,128}$/.test(normalized)) {
+    throw new GuestReservationModificationError({
+      code: "INVALID_ACTION_PROPOSAL_ID",
+      message: "A valid Pin AI action proposal ID is required.",
+      statusCode: 400,
+    });
+  }
+
+  return normalized;
+}
+
+function canonicalizePreviewFingerprintValue(value: unknown): unknown {
+  if (
+    value === null ||
+    typeof value === "string" ||
+    typeof value === "boolean"
+  ) {
+    return value;
+  }
+
+  if (typeof value === "number") {
+    if (!Number.isFinite(value)) {
+      throw new GuestReservationModificationError({
+        code: "INVALID_RESERVATION_MODIFICATION_PREVIEW",
+        message: "Reservation modification preview contains invalid numeric data.",
+        statusCode: 409,
+      });
+    }
+    return value;
+  }
+
+  if (value instanceof Date) {
+    if (Number.isNaN(value.getTime())) {
+      throw new GuestReservationModificationError({
+        code: "INVALID_RESERVATION_MODIFICATION_PREVIEW",
+        message: "Reservation modification preview contains an invalid date.",
+        statusCode: 409,
+      });
+    }
+    return value.toISOString();
+  }
+
+  if (Array.isArray(value)) {
+    return value.map(canonicalizePreviewFingerprintValue);
+  }
+
+  if (value && typeof value === "object") {
+    return Object.fromEntries(
+      Object.entries(value as Record<string, unknown>)
+        .sort(([left], [right]) => left.localeCompare(right))
+        .map(([key, nested]) => [
+          key,
+          canonicalizePreviewFingerprintValue(nested),
+        ])
+    );
+  }
+
+  throw new GuestReservationModificationError({
+    code: "INVALID_RESERVATION_MODIFICATION_PREVIEW",
+    message: "Reservation modification preview contains unsupported data.",
+    statusCode: 409,
+  });
 }
 
 function normalizeSelectedAmenityIds(value: unknown) {
@@ -731,9 +827,9 @@ export async function getGuestReservationModificationPreview(
           : "REDUCTION_REVIEW_REQUIRED"
         : "NO_PAYMENT_REQUIRED";
 
-  return {
-    managementPhase: "PRE_STAY",
-    modificationAllowed: true,
+  const preview = {
+    managementPhase: "PRE_STAY" as const,
+    modificationAllowed: true as const,
     reservation: {
       reservationNumber: reservation.reservationNumber,
       version: reservation.updatedAt,
@@ -790,6 +886,85 @@ export async function getGuestReservationModificationPreview(
       reductionPolicy,
     },
   };
+
+  return {
+    ...preview,
+    previewFingerprint:
+      buildGuestReservationModificationPreviewFingerprint(preview),
+  };
+}
+
+export function buildGuestReservationModificationPreviewFingerprint(
+  preview: Readonly<{
+    reservation: {
+      version: Date;
+      currency: string;
+      current: {
+        checkIn: Date;
+        checkOut: Date;
+        adults: number;
+        children: number;
+        selectedAmenityIds: string[];
+        totalAmountCents: number;
+      };
+      proposed: {
+        checkIn: Date;
+        checkOut: Date;
+        adults: number;
+        children: number;
+        selectedAmenityIds: string[];
+      };
+    };
+    changes: {
+      datesChanged: boolean;
+      guestsChanged: boolean;
+      amenitiesChanged: boolean;
+      hasChanges: boolean;
+      requiresSecurePreCheckinRefresh: boolean;
+    };
+    pricing: {
+      proposed: unknown;
+      amountDifferenceCents: number;
+      financialAction: string;
+      reductionPolicy: unknown;
+    };
+  }>
+) {
+  const canonical = canonicalizePreviewFingerprintValue({
+    version: "guest_reservation_modification_preview_v1",
+    reservationVersion: preview.reservation.version,
+    currency: String(preview.reservation.currency ?? "").toLowerCase(),
+    current: {
+      checkIn: preview.reservation.current.checkIn,
+      checkOut: preview.reservation.current.checkOut,
+      adults: preview.reservation.current.adults,
+      children: preview.reservation.current.children,
+      selectedAmenityIds: normalizeSelectedAmenityIds(
+        preview.reservation.current.selectedAmenityIds
+      ),
+      totalAmountCents: preview.reservation.current.totalAmountCents,
+    },
+    proposed: {
+      checkIn: preview.reservation.proposed.checkIn,
+      checkOut: preview.reservation.proposed.checkOut,
+      adults: preview.reservation.proposed.adults,
+      children: preview.reservation.proposed.children,
+      selectedAmenityIds: normalizeSelectedAmenityIds(
+        preview.reservation.proposed.selectedAmenityIds
+      ),
+    },
+    changes: preview.changes,
+    pricing: {
+      proposed: preview.pricing.proposed,
+      amountDifferenceCents: preview.pricing.amountDifferenceCents,
+      financialAction: preview.pricing.financialAction,
+      reductionPolicy: preview.pricing.reductionPolicy,
+    },
+  });
+
+  return createHash("sha256")
+    .update(JSON.stringify(canonical), "utf8")
+    .digest("hex");
 }
 
 export async function confirmGuestReservationModification(
@@ -801,6 +976,46 @@ export async function confirmGuestReservationModification(
     input.selectedAmenityIds
   );
   const acceptNoRefundReduction = input.acceptNoRefundReduction === true;
+  const expectedPreviewFingerprint = normalizeOptionalSha256(
+    input.expectedPreviewFingerprint,
+    "INVALID_EXPECTED_PREVIEW_FINGERPRINT"
+  );
+  const confirmationSource: GuestReservationModificationConfirmationSource =
+    input.confirmationSource ?? "GUEST_MANAGE_RESERVATION";
+  const actionProposalId = normalizeOptionalActionProposalId(
+    input.actionProposalId
+  );
+  const actionProposalFingerprint = normalizeOptionalSha256(
+    input.actionProposalFingerprint,
+    "INVALID_ACTION_PROPOSAL_FINGERPRINT"
+  );
+  const actionProposalConfirmedAt =
+    input.actionProposalConfirmedAt instanceof Date &&
+    !Number.isNaN(input.actionProposalConfirmedAt.getTime())
+      ? new Date(input.actionProposalConfirmedAt)
+      : null;
+
+  if (confirmationSource === "PIN_AI_GUEST_SERVICES") {
+    if (
+      !expectedPreviewFingerprint ||
+      !actionProposalId ||
+      !actionProposalFingerprint ||
+      !actionProposalConfirmedAt
+    ) {
+      throw new GuestReservationModificationError({
+        code: "PIN_AI_ACTION_PROPOSAL_EVIDENCE_REQUIRED",
+        message:
+          "Confirmed Pin AI action proposal evidence is required for this reservation modification.",
+        statusCode: 400,
+      });
+    }
+  } else if (confirmationSource !== "GUEST_MANAGE_RESERVATION") {
+    throw new GuestReservationModificationError({
+      code: "INVALID_RESERVATION_MODIFICATION_CONFIRMATION_SOURCE",
+      message: "Unsupported reservation modification confirmation source.",
+      statusCode: 400,
+    });
+  }
 
   if (!guestToken) {
     throw new GuestReservationModificationError({
@@ -857,6 +1072,22 @@ export async function confirmGuestReservationModification(
     children: input.children,
     selectedAmenityIds,
   });
+
+  if (
+    expectedPreviewFingerprint &&
+    preview.previewFingerprint !== expectedPreviewFingerprint
+  ) {
+    throw new GuestReservationModificationError({
+      code: "RESERVATION_MODIFICATION_PREVIEW_CHANGED",
+      message:
+        "The reservation modification preview changed after it was quoted. Review the updated terms before continuing.",
+      statusCode: 409,
+      details: {
+        expectedPreviewFingerprint,
+        currentPreviewFingerprint: preview.previewFingerprint,
+      },
+    });
+  }
 
   if (!preview.changes.hasChanges) {
     throw new GuestReservationModificationError({
@@ -1043,13 +1274,24 @@ export async function confirmGuestReservationModification(
         }) as any,
         proposedPricing: preview.pricing.proposed as any,
         reductionPolicy: preview.pricing.reductionPolicy as any,
+        requestSource: confirmationSource,
         guestConfirmation: {
           confirmed: true,
           confirmedAt: confirmedAt.toISOString(),
-          source: "GUEST_MANAGE_RESERVATION",
+          source: confirmationSource,
           acceptedNoRefundReduction:
             financialAction ===
             ReservationModificationFinancialAction.NO_REFUND_DUE_CONFIRMATION_REQUIRED,
+          ...(confirmationSource === "PIN_AI_GUEST_SERVICES"
+            ? {
+                actionProposalId,
+                actionProposalFingerprint,
+                actionProposalConfirmedAt:
+                  actionProposalConfirmedAt!.toISOString(),
+                expectedPreviewFingerprint,
+                confirmedPreviewFingerprint: preview.previewFingerprint,
+              }
+            : {}),
         },
         currentTotalAmount: preview.pricing.currentTotalAmount,
         proposedTotalAmount: preview.pricing.proposed.totalAmount,
