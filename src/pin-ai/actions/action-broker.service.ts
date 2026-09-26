@@ -266,17 +266,6 @@ export class PinAIActionBroker {
         .reservationModification
         .prepare(input);
 
-    if (
-      prepared.proposal.actionType !==
-      PinAIActionProposalType
-        .RESERVATION_MODIFICATION
-    ) {
-      throw new PinAIActionBrokerError(
-        "INVALID_ACTION_TYPE",
-        409,
-      );
-    }
-
     return {
       publicResult: {
         actionType:
