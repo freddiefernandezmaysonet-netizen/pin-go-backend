@@ -1,0 +1,62 @@
+name: Pin AI Reservation Action E2E Certification V1
+
+on:
+  pull_request:
+    branches:
+      - main
+    paths:
+      - "src/pin-ai/actions/reservation-action-e2e-certification.test.ts"
+      - "tsconfig.pin-ai-reservation-action-e2e.json"
+      - ".github/workflows/pin-ai-reservation-action-e2e-certification-v1.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  reservation-action-e2e:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      DATABASE_URL: postgresql://user:pass@localhost:5432/pingo_test
+      APP_URL: http://localhost:3000
+
+    steps:
+      - name: Checkout exact candidate
+        uses: actions/checkout@v4
+
+      - name: Use Node.js 22
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+
+      - name: Install locked dependencies without lifecycle scripts
+        run: npm ci --ignore-scripts --no-audit --no-fund
+
+      - name: Generate and validate Prisma client
+        run: |
+          npx prisma generate
+          npx prisma validate --schema ./prisma/schema.prisma
+
+      - name: Run integrated reservation action E2E certification
+        run: node --import tsx --test src/pin-ai/actions/reservation-action-e2e-certification.test.ts
+
+      - name: Type-check integrated E2E contract
+        run: npx tsc -p tsconfig.pin-ai-reservation-action-e2e.json
+
+      - name: Regress proposal Runtime
+        run: |
+          node --import tsx --test             src/pin-ai/runtime/action-proposal-tool-executor.test.ts             src/pin-ai/runtime/action-proposal-runtime-composition.test.ts
+
+      - name: Regress Action Broker
+        run: |
+          node --import tsx --test             src/pin-ai/actions/action-broker.service.test.ts             src/pin-ai/actions/action-broker.composition.test.ts
+
+      - name: Regress Reservation Modification Action Adapter
+        run: node --import tsx --test src/pin-ai/actions/reservation-modification-action-adapter.service.test.ts
+
+      - name: Regress Action Proposal Foundation
+        run: node --import tsx --test src/pin-ai/actions/action-proposal.service.test.ts
+
+      - name: Regress full Pin AI Runtime
+        run: npm run test:pin-ai-runtime
