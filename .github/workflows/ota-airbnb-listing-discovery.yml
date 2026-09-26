@@ -80,13 +80,14 @@ jobs:
             cat > "$RUNNER_TEMP/listing-discovery-schema-main-sync-allowed.txt" <<'EOF'
           .github/workflows/listing-discovery-schema-main-sync.yml
           .github/workflows/ota-airbnb-listing-discovery.yml
+          .github/workflows/ota-initial-distribution-enablement.yml
           prisma/migrations/20260924131500_add_listing_property_type/migration.sql
           prisma/migrations/20260924133000_add_listing_features_v1/migration.sql
           prisma/schema.prisma
           EOF
             sort "$RUNNER_TEMP/listing-discovery-schema-main-sync-allowed.txt" -o "$RUNNER_TEMP/listing-discovery-schema-main-sync-allowed.txt"
             diff -u "$RUNNER_TEMP/listing-discovery-schema-main-sync-allowed.txt" "$RUNNER_TEMP/actual.txt"
-            echo "PR #258 exact five-file schema reconciliation scope verified."
+            echo "PR #258 exact six-file schema reconciliation scope verified."
             exit 0
           fi
 
