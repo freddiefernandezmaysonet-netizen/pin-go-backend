@@ -19,6 +19,23 @@ const SleepingArea = z.object({
   beds: z.array(Bed).max(20).default([]),
 }).strict();
 
+const PropertyType = z.enum([
+  "HOUSE", "APARTMENT", "CONDO", "CABIN", "COTTAGE", "VILLA", "TOWNHOUSE",
+  "BUNGALOW", "LOFT", "STUDIO", "GUESTHOUSE", "FARM_STAY", "OTHER",
+]);
+
+const ListingFeature = z.object({
+  type: z.enum([
+    "WOOD_CONSTRUCTION", "OCEAN_VIEW", "MOUNTAIN_VIEW", "WATERFRONT",
+    "BEACH_ACCESS", "POOL_TABLE", "GYM", "FIREPLACE", "OUTDOOR_GRILL",
+    "WORKSPACE", "OTHER",
+  ]),
+  labelEn: z.string().trim().max(200).nullable().optional().default(null),
+  labelEs: z.string().trim().max(200).nullable().optional().default(null),
+  isActive: z.boolean().default(true),
+  sortOrder: z.number().int().min(0).max(1000).default(0),
+}).strict();
+
 const SharedSpace = z.object({
   type: z.enum(["POOL", "HOT_TUB", "KITCHEN", "PATIO", "YARD", "LIVING_ROOM", "LAUNDRY", "OTHER"]),
   labelEn: z.string().trim().max(200).nullable().optional().default(null),
@@ -49,6 +66,7 @@ const AdditionalConsideration = z.object({
 
 export const PropertyListingDetailsInputSchema = z.object({
   accommodationType: z.enum(["ENTIRE_PLACE", "PRIVATE_ROOM", "SHARED_ROOM"]).nullable().optional().default(null),
+  propertyType: PropertyType.nullable().optional().default(null),
   bedroomCount: Count,
   fullBathroomCount: Count,
   halfBathroomCount: Count,
@@ -85,6 +103,15 @@ export const PropertyListingDetailsInputSchema = z.object({
   stepFreeShower: Truth,
   sleepingAreas: z.array(SleepingArea).max(100).default([]),
   sharedSpaces: z.array(SharedSpace).max(100).default([]),
+  features: z.array(ListingFeature).max(100).default([]).superRefine((features, ctx) => {
+    const seen = new Set<string>();
+    features.forEach((feature, index) => {
+      if (seen.has(feature.type)) {
+        ctx.addIssue({ code: "custom", path: [index, "type"], message: "feature types must be unique" });
+      }
+      seen.add(feature.type);
+    });
+  }),
   safetyConsiderations: z.array(SafetyConsideration).max(100).default([]),
   additionalConsiderations: z.array(AdditionalConsideration).max(100).default([]),
 }).strict().superRefine((value, ctx) => {
