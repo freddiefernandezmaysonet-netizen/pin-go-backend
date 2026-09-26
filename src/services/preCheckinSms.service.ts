@@ -5,6 +5,12 @@ import {
   resolveGuestLanguage,
   type GuestLanguage,
 } from "./guest-language.service";
+import { sendLoggedEmail } from "./email-delivery.service";
+import { resolveOrganizationGuestReplyTo } from "./organization-guest-email.service";
+import {
+  getGuestPreCheckinEmailSubject,
+  sendGuestPreCheckinEmail,
+} from "../lib/mailer";
 
 function getPublicApiUrl() {
   return String(
@@ -198,6 +204,147 @@ export function buildPreCheckinMessage(input: {
   }
 
   return parts.join(" ");
+}
+
+export async function sendPreCheckinEmail(
+  prisma: PrismaClient,
+  reservationId: string
+) {
+  const existing = await prisma.messageDispatchLog.findFirst({
+    where: {
+      reservationId,
+      type: "PRECHECKIN",
+      channel: "email",
+      status: "SENT",
+    },
+  });
+
+  if (existing) {
+    return { ok: true, skipped: true, status: "SENT" as const };
+  }
+
+  const r = await prisma.reservation.findUnique({
+    where: { id: reservationId },
+    select: {
+      id: true,
+      reservationNumber: true,
+      guestName: true,
+      guestEmail: true,
+      preferredLanguage: true,
+      guestToken: true,
+      guestAgreementSnapshot: true,
+      verificationStatus: true,
+      checkIn: true,
+      property: {
+        select: {
+          id: true,
+          organizationId: true,
+          name: true,
+          timezone: true,
+          address1: true,
+          city: true,
+          region: true,
+          country: true,
+          latitude: true,
+          longitude: true,
+        },
+      },
+    },
+  });
+
+  if (!r || !r.guestEmail) {
+    return {
+      ok: false,
+      skipped: true,
+      status: "SKIPPED" as const,
+      error: "Missing guestEmail",
+    };
+  }
+
+  const reservationNumber =
+    r.reservationNumber ?? "Pending";
+  const propertyName =
+    r.property?.name ?? "your property";
+  const language =
+    resolveGuestLanguage(r.preferredLanguage);
+
+  const verificationNeeded =
+    shouldIncludePreCheckinVerification({
+      guestToken: r.guestToken,
+      verificationStatus: r.verificationStatus,
+      guestAgreementSnapshot:
+        r.guestAgreementSnapshot,
+    });
+
+  const verificationUrl =
+    verificationNeeded && r.guestToken
+      ? buildGuestVerificationUrl(r.guestToken)
+      : null;
+
+  const { address, mapsLink } =
+    buildGoogleMapsLink({
+      latitude: r.property?.latitude,
+      longitude: r.property?.longitude,
+      address1: r.property?.address1,
+      city: r.property?.city,
+      region: r.property?.region,
+      country: r.property?.country,
+    });
+
+  const subject =
+    getGuestPreCheckinEmailSubject({
+      reservationNumber,
+      preferredLanguage:
+        r.preferredLanguage,
+    });
+
+  return sendLoggedEmail({
+    prisma,
+    type: "PRECHECKIN",
+    to: r.guestEmail,
+    subject,
+    reservationId: r.id,
+    propertyId: r.property?.id ?? null,
+    organizationId:
+      r.property?.organizationId ?? null,
+    retryPayload: {
+      reservationNumber,
+      guestName: r.guestName,
+      propertyName,
+      checkIn: r.checkIn.toISOString(),
+      propertyTimeZone:
+        r.property?.timezone ?? null,
+      address,
+      mapsLink,
+      verificationUrl,
+      preferredLanguage: language,
+    },
+    send: async () => {
+      const replyTo =
+        r.property?.organizationId
+          ? await resolveOrganizationGuestReplyTo(
+              prisma,
+              r.property.organizationId
+            )
+          : null;
+
+      return sendGuestPreCheckinEmail({
+        to: r.guestEmail!,
+        replyTo: replyTo?.email ?? null,
+        reservationNumber,
+        guestName: r.guestName,
+        propertyName,
+        checkIn: r.checkIn,
+        propertyTimeZone:
+          r.property?.timezone ?? null,
+        address,
+        mapsLink,
+        verificationUrl,
+        preferredLanguage:
+          r.preferredLanguage,
+      });
+    },
+  });
 }
 
 export async function sendPreCheckinSms(
