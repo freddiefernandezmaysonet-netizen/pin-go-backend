@@ -1,5 +1,6 @@
 import type { PrismaClient } from "@prisma/client";
 import { randomUUID } from "node:crypto";
+import { formatInTimeZone } from "date-fns-tz";
 
 import type { PinAIRuntimeRequest } from "../runtime/contracts.js";
 import { getPropertyKnowledgeSnapshot } from "../property-knowledge.service.js";
@@ -19,6 +20,21 @@ import {
 const MAX_GUEST_MESSAGE_LENGTH = 2_000;
 const GUEST_TOKEN_PATTERN = /^[A-Za-z0-9_-]{16,200}$/;
 const CONVERSATION_LEASE_MS = 90_000;
+
+function formatPropertyLocalDateTime(date: Date, timezone: string | null): string {
+  const normalizedTimezone = timezone?.trim();
+  if (!normalizedTimezone) return date.toISOString();
+
+  try {
+    return formatInTimeZone(
+      date,
+      normalizedTimezone,
+      "yyyy-MM-dd'T'HH:mm:ssXXX",
+    );
+  } catch {
+    return date.toISOString();
+  }
+}
 
 type GuestReservationScope = Readonly<{
   id: string;
@@ -125,12 +141,16 @@ export class GuestPinAIGateway {
 
     const preferredLanguage: "en" | "es" =
       reservation.preferredLanguage.toLowerCase().startsWith("es") ? "es" : "en";
+    const currentLocalDateTime = formatPropertyLocalDateTime(
+      currentDateTime,
+      reservation.property.timezone,
+    );
     const propertyKnowledge = await getPropertyKnowledgeSnapshot({
       prisma: this.prisma as unknown as Parameters<typeof getPropertyKnowledgeSnapshot>[0]["prisma"],
       organizationId: reservation.property.organizationId,
       propertyId: reservation.propertyId,
       reservationId: reservation.id,
-      currentDateTime: currentDateTime.toISOString(),
+      currentDateTime: currentLocalDateTime,
       language: preferredLanguage,
     });
 
@@ -145,7 +165,7 @@ export class GuestPinAIGateway {
         propertyId: reservation.propertyId,
         reservationId: reservation.id,
         guestId: "reservation-guest",
-        currentLocalDateTime: currentDateTime.toISOString(),
+        currentLocalDateTime,
         preferredLanguage,
         propertyKnowledge,
       },
