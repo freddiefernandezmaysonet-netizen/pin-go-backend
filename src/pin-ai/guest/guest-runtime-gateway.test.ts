@@ -760,9 +760,9 @@ test("runtime proposal gate requires the independently enabled action broker", a
     runtime(
       runtimeRequest,
       {
-        city: null,
-        region: null,
-        country: null,
+        city: "",
+        region: "",
+        country: "",
         timezone: "America/Puerto_Rico",
         label: "",
       },
