@@ -66,6 +66,31 @@ jobs:
             '.github/workflows/ota-initial-distribution-enablement.yml',
           }
           changed = set(Path('/tmp/ota-initial-changed.txt').read_text().splitlines())
+          if os.environ.get('GITHUB_HEAD_REF') == 'agent/listing-experience-tags-v1':
+            repo = 'freddiefernandezmaysonet-netizen/pin-go-backend'
+            if not (
+              os.environ.get('GITHUB_EVENT_NAME') == 'pull_request'
+              and os.environ.get('GITHUB_REPOSITORY') == repo
+              and os.environ.get('SCOPE_PR_NUMBER') == '260'
+              and os.environ.get('SCOPE_HEAD_REPO') == repo
+              and os.environ.get('SCOPE_BASE_REPO') == repo
+              and os.environ.get('GITHUB_BASE_REF') == 'main'
+            ):
+              raise SystemExit('PR #260 repository/branch scope mismatch')
+            allowed = {
+              '.github/workflows/listing-experience-tags-v1.yml',
+              '.github/workflows/ota-airbnb-listing-discovery.yml',
+              '.github/workflows/ota-initial-distribution-enablement.yml',
+              'prisma/migrations/20260925221500_add_listing_experience_tags_v1/migration.sql',
+              'prisma/schema.prisma',
+              'src/routes/dashboard.property-listing-details.routes.test.ts',
+              'src/routes/dashboard.property-listing-details.routes.ts',
+              'src/services/property-listing-details.service.test.ts',
+              'src/services/property-listing-details.service.ts',
+            }
+            if changed != allowed:
+              raise SystemExit(f'PR #260 exact nine-file scope required: {sorted(changed ^ allowed)}')
+            raise SystemExit(0)
           if os.environ.get('GITHUB_HEAD_REF') == 'agent/listing-discovery-schema-main-sync':
             repo = 'freddiefernandezmaysonet-netizen/pin-go-backend'
             if not (
