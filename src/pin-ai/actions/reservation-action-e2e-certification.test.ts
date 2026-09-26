@@ -349,7 +349,15 @@ function createHarness(
         fakePrisma as never,
       reservationModification:
         adapter,
-      async confirmProposal(input) {
+      async confirmProposal(
+        input: Readonly<{
+          prisma: unknown;
+          guestToken: unknown;
+          proposalId: unknown;
+          confirmationToken: unknown;
+          now?: Date;
+        }>,
+      ) {
         confirmedToken =
           String(
             input.confirmationToken ??
