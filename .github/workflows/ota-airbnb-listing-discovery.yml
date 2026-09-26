@@ -70,6 +70,27 @@ jobs:
           BASE_BRANCH="${GITHUB_BASE_REF:-main}"
           git fetch origin "+refs/heads/$BASE_BRANCH:refs/remotes/origin/$BASE_BRANCH" --depth=1
           git diff --name-only "origin/$BASE_BRANCH...HEAD" | sort > "$RUNNER_TEMP/actual.txt"
+          if [ "${GITHUB_HEAD_REF:-$GITHUB_REF_NAME}" = "agent/listing-discovery-schema-main-sync" ]; then
+            test "$GITHUB_EVENT_NAME" = "pull_request"
+            test "$GITHUB_REPOSITORY" = "freddiefernandezmaysonet-netizen/pin-go-backend"
+            test "$SCOPE_PR_NUMBER" = "258"
+            test "$SCOPE_HEAD_REPO" = "$GITHUB_REPOSITORY"
+            test "$SCOPE_BASE_REPO" = "$GITHUB_REPOSITORY"
+            test "$GITHUB_BASE_REF" = "main"
+            cat > "$RUNNER_TEMP/listing-discovery-schema-main-sync-allowed.txt" <<'EOF'
+          .github/workflows/listing-discovery-schema-main-sync.yml
+          .github/workflows/ota-airbnb-listing-discovery.yml
+          .github/workflows/ota-initial-distribution-enablement.yml
+          prisma/migrations/20260924131500_add_listing_property_type/migration.sql
+          prisma/migrations/20260924133000_add_listing_features_v1/migration.sql
+          prisma/schema.prisma
+          EOF
+            sort "$RUNNER_TEMP/listing-discovery-schema-main-sync-allowed.txt" -o "$RUNNER_TEMP/listing-discovery-schema-main-sync-allowed.txt"
+            diff -u "$RUNNER_TEMP/listing-discovery-schema-main-sync-allowed.txt" "$RUNNER_TEMP/actual.txt"
+            echo "PR #258 exact six-file schema reconciliation scope verified."
+            exit 0
+          fi
+
           if [ "${GITHUB_HEAD_REF:-$GITHUB_REF_NAME}" = "agent/property-protection-v1-payment-attempt-foundation" ]; then
             cat > "$RUNNER_TEMP/damage-payment-execution-allowed.txt" <<'EOF'
           .github/workflows/ota-airbnb-listing-discovery.yml
