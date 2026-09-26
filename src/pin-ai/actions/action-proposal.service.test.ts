@@ -15,6 +15,7 @@ import {
   confirmPinAIActionProposal,
   createPinAIActionProposal,
   PinAIActionProposalError,
+  supersedePinAIActionProposal,
 } from "./action-proposal.service.js";
 
 const NOW =
@@ -279,12 +280,14 @@ function createPrisma(
         calls.push(
           "LOCK_RESERVATION",
         );
-        const token =
+        const locator =
           String(values[0] ?? "");
         const row =
           reservations.find(
             (item) =>
-              item.guestToken === token,
+              item.guestToken ===
+                locator ||
+              item.id === locator,
           );
         return row
           ? [{ id: row.id }]
@@ -1066,6 +1069,122 @@ test(
         .status,
       PinAIActionProposalStatus
         .PENDING_CONFIRMATION,
+    );
+  },
+);
+
+test(
+  "a confirmed proposal can be superseded without erasing consent evidence",
+  async () => {
+    const fixture =
+      createPrisma();
+    const created =
+      await createProposal(
+        fixture,
+      );
+
+    const confirmed =
+      await confirmPinAIActionProposal({
+        prisma:
+          fixture.prisma,
+        guestToken:
+          TOKEN_A,
+        proposalId:
+          created.proposal.id,
+        confirmationToken:
+          created
+            .confirmationToken,
+        now: NOW,
+      });
+
+    const confirmedAt =
+      confirmed.proposal
+        .confirmedAt;
+    assert.ok(confirmedAt);
+
+    const superseded =
+      await supersedePinAIActionProposal({
+        prisma:
+          fixture.prisma,
+        organizationId:
+          "organization-a",
+        propertyId:
+          "property-a",
+        reservationId:
+          "reservation-a",
+        proposalId:
+          created.proposal.id,
+        expectedProposalFingerprint:
+          created.proposal
+            .proposalFingerprint,
+        now:
+          new Date(
+            NOW.getTime() +
+              1_000,
+          ),
+      });
+
+    assert.equal(
+      superseded
+        .proposal.status,
+      PinAIActionProposalStatus
+        .SUPERSEDED,
+    );
+    assert.equal(
+      superseded.actionExecuted,
+      false,
+    );
+    assert.equal(
+      superseded
+        .proposal.confirmedAt
+        ?.toISOString(),
+      confirmedAt.toISOString(),
+    );
+    assert.equal(
+      superseded
+        .proposal.supersededAt
+        ?.toISOString(),
+      new Date(
+        NOW.getTime() +
+          1_000,
+      ).toISOString(),
+    );
+
+    const replay =
+      await supersedePinAIActionProposal({
+        prisma:
+          fixture.prisma,
+        organizationId:
+          "organization-a",
+        propertyId:
+          "property-a",
+        reservationId:
+          "reservation-a",
+        proposalId:
+          created.proposal.id,
+        expectedProposalFingerprint:
+          created.proposal
+            .proposalFingerprint,
+        now:
+          new Date(
+            NOW.getTime() +
+              2_000,
+          ),
+      });
+
+    assert.equal(
+      replay.idempotentReplay,
+      true,
+    );
+    assert.equal(
+      replay.actionExecuted,
+      false,
+    );
+    assert.equal(
+      replay
+        .proposal.confirmedAt
+        ?.toISOString(),
+      confirmedAt.toISOString(),
     );
   },
 );
