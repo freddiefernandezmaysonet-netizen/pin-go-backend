@@ -38,7 +38,10 @@ import {
 import {
   sendGuestAccessPasscodeEmail,
 } from "../lib/mailer";
-import { sendPreCheckinSms } from "../services/preCheckinSms.service";
+import {
+  sendPreCheckinEmail,
+  sendPreCheckinSms,
+} from "../services/preCheckinSms.service";
 import { sendCheckoutSms } from "../services/checkoutSms.service";
 import { sendCleaningReadySms } from "../services/cleaningReadySms.service";
 import { resolveGuestLanguage } from "../services/guest-language.service";
@@ -366,40 +369,57 @@ async function processPreCheckinMessages(
   const upcoming =
     await prisma.reservation.findMany({
       where: {
-        OR: [
+        AND: [
           {
-            checkIn: {
-              gt: now,
-              lte: new Date(
-                now.getTime() + FOUR_HOURS
-              ),
-            },
+            OR: [
+              {
+                checkIn: {
+                  gt: now,
+                  lte: new Date(
+                    now.getTime() + FOUR_HOURS
+                  ),
+                },
+              },
+              {
+                checkIn: {
+                  lte: now,
+                },
+                checkOut: {
+                  gt: now,
+                },
+                createdAt: {
+                  gte:
+                    prisma.reservation.fields
+                      .checkIn,
+                },
+              },
+            ],
           },
           {
-            checkIn: {
-              lte: now,
-            },
-            checkOut: {
-              gt: now,
-            },
-            createdAt: {
-              gte:
-                prisma.reservation.fields
-                  .checkIn,
-            },
+            OR: [
+              {
+                guestEmail: {
+                  not: null,
+                },
+              },
+              {
+                guestPhone: {
+                  not: null,
+                },
+              },
+            ],
           },
         ],
         paymentState:
           PaymentState.PAID,
-        guestPhone: {
-          not: null,
-        },
         status:
           ReservationStatus.ACTIVE,
       },
       select: {
         id: true,
         reservationNumber: true,
+        guestEmail: true,
+        guestPhone: true,
         externalRaw: true,
       },
       take: 50,
@@ -420,6 +440,48 @@ async function processPreCheckinMessages(
   );
 
   for (const reservation of upcoming) {
+    if (reservation.guestEmail) {
+      try {
+        const emailResult =
+          await sendPreCheckinEmail(
+            prisma,
+            reservation.id
+          );
+
+        log(
+          "Pre-checkin email processed",
+          {
+            reservationNumber:
+              reservation.reservationNumber ??
+              null,
+            reservationId:
+              reservation.id,
+            status:
+              emailResult.status ?? null,
+            skipped:
+              emailResult.skipped === true,
+          }
+        );
+      } catch (error) {
+        errLog(
+          "Pre-checkin email crashed",
+          {
+            reservationNumber:
+              reservation.reservationNumber ??
+              null,
+            reservationId:
+              reservation.id,
+            error:
+              toErrString(error),
+          }
+        );
+      }
+    }
+
+    if (!reservation.guestPhone) {
+      continue;
+    }
+
     if (
       !hasGuestSmsConsent(
         reservation.externalRaw
@@ -448,7 +510,7 @@ async function processPreCheckinMessages(
       );
     } catch (error) {
       errLog(
-        "Pre-checkin crashed",
+        "Pre-checkin SMS crashed",
         {
           reservationNumber:
             reservation.reservationNumber ??
