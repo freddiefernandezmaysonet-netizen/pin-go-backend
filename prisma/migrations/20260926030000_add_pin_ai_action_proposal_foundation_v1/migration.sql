@@ -74,7 +74,6 @@ CREATE TABLE "PinAIActionProposal" (
         )
         OR (
           "status" = 'SUPERSEDED'
-          AND "confirmedAt" IS NULL
           AND "cancelledAt" IS NULL
           AND "supersededAt" IS NOT NULL
         )
