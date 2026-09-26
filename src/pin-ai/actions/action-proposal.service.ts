@@ -636,6 +636,17 @@ function publicProposal(
   };
 }
 
+export type ConfirmPinAIActionProposalResult =
+  Readonly<{
+    ok: true;
+    idempotentReplay: boolean;
+    proposalConfirmed: true;
+    actionExecuted: false;
+    proposal: ReturnType<
+      typeof publicProposal
+    >;
+  }>;
+
 export async function createPinAIActionProposal(
   input:
     CreatePinAIActionProposalInput,
@@ -911,7 +922,7 @@ export async function createPinAIActionProposal(
 export async function confirmPinAIActionProposal(
   input:
     ConfirmPinAIActionProposalInput,
-) {
+): Promise<ConfirmPinAIActionProposalResult> {
   const guestToken =
     normalizeGuestToken(
       input.guestToken,
