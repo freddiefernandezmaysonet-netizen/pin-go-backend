@@ -1,0 +1,16 @@
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "noEmit": true,
+    "types": ["node"],
+    "exactOptionalPropertyTypes": false,
+    "noUncheckedIndexedAccess": false
+  },
+  "include": [
+    "src/pin-ai/actions/action-proposal.service.ts",
+    "src/pin-ai/actions/reservation-modification-action-adapter.service.ts",
+    "src/pin-ai/actions/reservation-modification-action-adapter.service.test.ts",
+    "src/services/guest-reservation-modification.service.ts",
+    "src/services/guest-reservation-modification.policy.test.ts"
+  ]
+}
