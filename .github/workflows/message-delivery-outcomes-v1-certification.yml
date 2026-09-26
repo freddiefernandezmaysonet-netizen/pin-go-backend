@@ -1,0 +1,57 @@
+name: Message Delivery Outcomes V1 Certification
+
+on:
+  pull_request:
+    paths:
+      - "prisma/schema.prisma"
+      - "prisma/migrations/20260926174500_add_message_delivery_outcomes_v1/**"
+      - "src/services/guest-journey-communications-delivery-outcome.*"
+      - "src/routes/message-delivery.webhooks.routes.ts"
+      - "src/integrations/twilio/twilio.client.ts"
+      - "src/server.ts"
+      - "tsconfig.message-delivery-outcomes-v1.json"
+      - ".github/workflows/message-delivery-outcomes-v1-certification.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  certify-message-delivery-outcomes-v1:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      DATABASE_URL: postgresql://ci:ci@127.0.0.1:5432/pin_go_message_delivery_outcomes
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - run: npm ci
+      - run: npx prisma generate --schema prisma/schema.prisma
+
+      - name: Delivery outcome unit and contract tests
+        run: >-
+          node --import tsx --test
+          src/services/guest-journey-communications-delivery-outcome.service.test.ts
+          src/services/guest-journey-communications-delivery-outcome.contract.test.ts
+
+      - name: Focused TypeScript certification
+        run: npx tsc -p tsconfig.message-delivery-outcomes-v1.json
+
+      - name: Bundle API wiring
+        run: npx esbuild src/server.ts --bundle --platform=node --packages=external --outfile=/tmp/server.message-delivery-outcomes-v1.js
+
+      - name: Validate Prisma schema without applying migrations
+        run: npx prisma validate --schema prisma/schema.prisma
+
+      - name: Migration and patch integrity
+        run: |
+          set -euo pipefail
+          git diff --check
+          test -f prisma/migrations/20260926174500_add_message_delivery_outcomes_v1/migration.sql
+          grep -q '"providerDeliveryStatus"' prisma/migrations/20260926174500_add_message_delivery_outcomes_v1/migration.sql
+          grep -q '"providerMessageId"' prisma/migrations/20260926174500_add_message_delivery_outcomes_v1/migration.sql
+          ! grep -Eq 'DROP COLUMN "status"|ALTER COLUMN "status"' prisma/migrations/20260926174500_add_message_delivery_outcomes_v1/migration.sql
