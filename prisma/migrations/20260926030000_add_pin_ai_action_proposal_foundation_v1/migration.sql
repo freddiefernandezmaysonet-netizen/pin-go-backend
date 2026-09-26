@@ -90,6 +90,10 @@ ON "PinAIActionProposal"("organizationId", "propertyId", "reservationId");
 CREATE INDEX "PinAIActionProposal_reservationId_actionType_status_expiresAt_idx"
 ON "PinAIActionProposal"("reservationId", "actionType", "status", "expiresAt");
 
+CREATE UNIQUE INDEX "PinAIActionProposal_one_pending_per_reservation_action_key"
+ON "PinAIActionProposal"("reservationId", "actionType")
+WHERE "status" = 'PENDING_CONFIRMATION';
+
 CREATE INDEX "PinAIActionProposal_proposalFingerprint_idx"
 ON "PinAIActionProposal"("proposalFingerprint");
 
