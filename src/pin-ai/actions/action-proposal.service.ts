@@ -56,6 +56,8 @@ export class PinAIActionProposalError
       | "INVALID_EXPIRY"
       | "INVALID_PROPOSAL_ID"
       | "INVALID_CONFIRMATION_TOKEN"
+      | "INVALID_ACTION_SCOPE"
+      | "INVALID_PROPOSAL_FINGERPRINT"
       | "RESERVATION_NOT_FOUND"
       | "PROPOSAL_NOT_FOUND"
       | "PROPOSAL_SCOPE_MISMATCH"
@@ -89,6 +91,17 @@ export type ConfirmPinAIActionProposalInput =
     guestToken: unknown;
     proposalId: unknown;
     confirmationToken: unknown;
+    now?: Date;
+  }>;
+
+export type SupersedePinAIActionProposalInput =
+  Readonly<{
+    prisma: PrismaClient;
+    organizationId: unknown;
+    propertyId: unknown;
+    reservationId: unknown;
+    proposalId: unknown;
+    expectedProposalFingerprint: unknown;
     now?: Date;
   }>;
 
@@ -142,6 +155,46 @@ function normalizeProposalId(
   }
 
   return proposalId;
+}
+
+function normalizeInternalScopeId(
+  value: unknown,
+): string {
+  const normalized =
+    typeof value === "string"
+      ? value.trim()
+      : "";
+
+  if (
+    !normalized ||
+    normalized.length > 128 ||
+    !/^[A-Za-z0-9_-]+$/.test(normalized)
+  ) {
+    return fail(
+      "INVALID_ACTION_SCOPE",
+      400,
+    );
+  }
+
+  return normalized;
+}
+
+function normalizeProposalFingerprint(
+  value: unknown,
+): string {
+  const normalized =
+    typeof value === "string"
+      ? value.trim()
+      : "";
+
+  if (!/^[a-f0-9]{64}$/.test(normalized)) {
+    return fail(
+      "INVALID_PROPOSAL_FINGERPRINT",
+      400,
+    );
+  }
+
+  return normalized;
 }
 
 function normalizeActionType(
@@ -547,6 +600,8 @@ function publicProposal(
     termsSnapshot: unknown;
     expiresAt: Date;
     confirmedAt: Date | null;
+    cancelledAt: Date | null;
+    supersededAt: Date | null;
     createdAt: Date;
   }>,
 ) {
@@ -572,6 +627,10 @@ function publicProposal(
       proposal.expiresAt,
     confirmedAt:
       proposal.confirmedAt,
+    cancelledAt:
+      proposal.cancelledAt,
+    supersededAt:
+      proposal.supersededAt,
     createdAt:
       proposal.createdAt,
   };
@@ -1117,6 +1176,228 @@ export async function confirmPinAIActionProposal(
       }
 
       return transactionResult;
+    } catch (error) {
+      if (
+        isRetryableTransactionError(
+          error,
+        ) &&
+        attempt < 2
+      ) {
+        continue;
+      }
+
+      if (
+        isRetryableTransactionError(
+          error,
+        )
+      ) {
+        return fail(
+          "PROPOSAL_CONCURRENT_CHANGE",
+        );
+      }
+
+      throw error;
+    }
+  }
+
+  return fail(
+    "PROPOSAL_CONCURRENT_CHANGE",
+  );
+}
+
+export async function supersedePinAIActionProposal(
+  input:
+    SupersedePinAIActionProposalInput,
+) {
+  const organizationId =
+    normalizeInternalScopeId(
+      input.organizationId,
+    );
+  const propertyId =
+    normalizeInternalScopeId(
+      input.propertyId,
+    );
+  const reservationId =
+    normalizeInternalScopeId(
+      input.reservationId,
+    );
+  const proposalId =
+    normalizeProposalId(
+      input.proposalId,
+    );
+  const expectedProposalFingerprint =
+    normalizeProposalFingerprint(
+      input.expectedProposalFingerprint,
+    );
+  const now =
+    normalizeNow(input.now);
+
+  for (
+    let attempt = 0;
+    attempt < 3;
+    attempt += 1
+  ) {
+    try {
+      return await input.prisma
+        .$transaction(
+          async (db) => {
+            const reservationRows =
+              await db.$queryRaw<
+                Array<{ id: string }>
+              >`
+                SELECT "id"
+                FROM "Reservation"
+                WHERE "id" = ${reservationId}
+                FOR UPDATE
+              `;
+
+            if (
+              reservationRows[0]?.id !==
+              reservationId
+            ) {
+              return fail(
+                "PROPOSAL_SCOPE_MISMATCH",
+                404,
+              );
+            }
+
+            await db.$queryRaw`
+              SELECT "id"
+              FROM "PinAIActionProposal"
+              WHERE "id" = ${proposalId}
+              FOR UPDATE
+            `;
+
+            let proposal =
+              await db
+                .pinAIActionProposal
+                .findUnique({
+                  where: {
+                    id: proposalId,
+                  },
+                });
+
+            if (!proposal) {
+              return fail(
+                "PROPOSAL_NOT_FOUND",
+                404,
+              );
+            }
+
+            if (
+              proposal.organizationId !==
+                organizationId ||
+              proposal.propertyId !==
+                propertyId ||
+              proposal.reservationId !==
+                reservationId ||
+              proposal.proposalFingerprint !==
+                expectedProposalFingerprint
+            ) {
+              return fail(
+                "PROPOSAL_SCOPE_MISMATCH",
+                404,
+              );
+            }
+
+            if (
+              proposal.status ===
+              PinAIActionProposalStatus
+                .SUPERSEDED
+            ) {
+              return {
+                ok: true,
+                idempotentReplay:
+                  true,
+                actionExecuted:
+                  false as const,
+                proposal:
+                  publicProposal(
+                    proposal,
+                  ),
+              };
+            }
+
+            if (
+              ![
+                PinAIActionProposalStatus
+                  .PENDING_CONFIRMATION,
+                PinAIActionProposalStatus
+                  .CONFIRMED,
+              ].includes(
+                proposal.status,
+              )
+            ) {
+              return fail(
+                "PROPOSAL_NOT_CONFIRMABLE",
+              );
+            }
+
+            const updated =
+              await db
+                .pinAIActionProposal
+                .updateMany({
+                  where: {
+                    id: proposal.id,
+                    organizationId,
+                    propertyId,
+                    reservationId,
+                    proposalFingerprint:
+                      expectedProposalFingerprint,
+                    status: {
+                      in: [
+                        PinAIActionProposalStatus
+                          .PENDING_CONFIRMATION,
+                        PinAIActionProposalStatus
+                          .CONFIRMED,
+                      ],
+                    },
+                  },
+                  data: {
+                    status:
+                      PinAIActionProposalStatus
+                        .SUPERSEDED,
+                    supersededAt:
+                      now,
+                  },
+                });
+
+            if (
+              updated.count !== 1
+            ) {
+              return fail(
+                "PROPOSAL_CONCURRENT_CHANGE",
+              );
+            }
+
+            proposal =
+              await db
+                .pinAIActionProposal
+                .findUniqueOrThrow({
+                  where: {
+                    id: proposal.id,
+                  },
+                });
+
+            return {
+              ok: true,
+              idempotentReplay:
+                false,
+              actionExecuted:
+                false as const,
+              proposal:
+                publicProposal(
+                  proposal,
+                ),
+            };
+          },
+          {
+            isolationLevel:
+              Prisma
+                .TransactionIsolationLevel
+                .Serializable,
+          },
+        );
     } catch (error) {
       if (
         isRetryableTransactionError(
