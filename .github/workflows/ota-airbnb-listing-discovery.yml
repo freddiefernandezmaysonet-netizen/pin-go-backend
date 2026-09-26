@@ -70,6 +70,30 @@ jobs:
           BASE_BRANCH="${GITHUB_BASE_REF:-main}"
           git fetch origin "+refs/heads/$BASE_BRANCH:refs/remotes/origin/$BASE_BRANCH" --depth=1
           git diff --name-only "origin/$BASE_BRANCH...HEAD" | sort > "$RUNNER_TEMP/actual.txt"
+          if [ "${GITHUB_HEAD_REF:-$GITHUB_REF_NAME}" = "agent/listing-experience-tags-v1" ]; then
+            test "$GITHUB_EVENT_NAME" = "pull_request"
+            test "$GITHUB_REPOSITORY" = "freddiefernandezmaysonet-netizen/pin-go-backend"
+            test "$SCOPE_PR_NUMBER" = "260"
+            test "$SCOPE_HEAD_REPO" = "$GITHUB_REPOSITORY"
+            test "$SCOPE_BASE_REPO" = "$GITHUB_REPOSITORY"
+            test "$GITHUB_BASE_REF" = "main"
+            cat > "$RUNNER_TEMP/listing-experience-tags-v1-allowed.txt" <<'EOF'
+          .github/workflows/listing-experience-tags-v1.yml
+          .github/workflows/ota-airbnb-listing-discovery.yml
+          .github/workflows/ota-initial-distribution-enablement.yml
+          prisma/migrations/20260925221500_add_listing_experience_tags_v1/migration.sql
+          prisma/schema.prisma
+          src/routes/dashboard.property-listing-details.routes.test.ts
+          src/routes/dashboard.property-listing-details.routes.ts
+          src/services/property-listing-details.service.test.ts
+          src/services/property-listing-details.service.ts
+          EOF
+            sort "$RUNNER_TEMP/listing-experience-tags-v1-allowed.txt" -o "$RUNNER_TEMP/listing-experience-tags-v1-allowed.txt"
+            diff -u "$RUNNER_TEMP/listing-experience-tags-v1-allowed.txt" "$RUNNER_TEMP/actual.txt"
+            echo "PR #260 exact nine-file experience tags scope verified."
+            exit 0
+          fi
+
           if [ "${GITHUB_HEAD_REF:-$GITHUB_REF_NAME}" = "agent/listing-discovery-schema-main-sync" ]; then
             test "$GITHUB_EVENT_NAME" = "pull_request"
             test "$GITHUB_REPOSITORY" = "freddiefernandezmaysonet-netizen/pin-go-backend"

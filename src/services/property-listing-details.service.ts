@@ -24,6 +24,23 @@ const PropertyType = z.enum([
   "BUNGALOW", "LOFT", "STUDIO", "GUESTHOUSE", "FARM_STAY", "OTHER",
 ]);
 
+function experienceTagSlug(value: string) {
+  return value
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase()
+    .trim()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "")
+    .slice(0, 80);
+}
+
+const ExperienceTag = z.object({
+  label: z.string().trim().min(2).max(80),
+  isActive: z.boolean().default(true),
+  sortOrder: z.number().int().min(0).max(1000).default(0),
+}).strict();
+
 const ListingFeature = z.object({
   type: z.enum([
     "WOOD_CONSTRUCTION", "OCEAN_VIEW", "MOUNTAIN_VIEW", "WATERFRONT",
@@ -110,6 +127,19 @@ export const PropertyListingDetailsInputSchema = z.object({
         ctx.addIssue({ code: "custom", path: [index, "type"], message: "feature types must be unique" });
       }
       seen.add(feature.type);
+    });
+  }),
+  experienceTags: z.array(ExperienceTag).max(20).default([]).transform((tags, ctx) => {
+    const seen = new Set<string>();
+    return tags.map((tag, index) => {
+      const slug = experienceTagSlug(tag.label);
+      if (!slug) {
+        ctx.addIssue({ code: "custom", path: [index, "label"], message: "experience tag must contain letters or numbers" });
+      } else if (seen.has(slug)) {
+        ctx.addIssue({ code: "custom", path: [index, "label"], message: "experience tags must be unique" });
+      }
+      seen.add(slug);
+      return { ...tag, slug };
     });
   }),
   safetyConsiderations: z.array(SafetyConsideration).max(100).default([]),
