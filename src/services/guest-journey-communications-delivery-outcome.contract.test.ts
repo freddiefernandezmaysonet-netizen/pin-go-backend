@@ -74,7 +74,7 @@ test("provider webhook routes verify signatures before persisting outcomes", asy
   assert.match(source, /x-twilio-signature/);
   assert.match(source, /recordMessageDeliveryOutcome\(/);
 
-  const resendVerifyIndex = source.indexOf("webhooks.verify");
+  const resendVerifyIndex = source.indexOf("verifyResendWebhookSignature");
   const resendPersistIndex = source.indexOf(
     "recordMessageDeliveryOutcome",
     resendVerifyIndex
