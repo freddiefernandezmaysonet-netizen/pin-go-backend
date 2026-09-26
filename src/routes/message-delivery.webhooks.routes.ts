@@ -1,12 +1,12 @@
 import { Router } from "express";
 import type { PrismaClient } from "@prisma/client";
 import Twilio from "twilio";
-import { Resend } from "resend";
 
 import {
   normalizeResendDeliveryEvent,
   normalizeTwilioDeliveryCallback,
   recordMessageDeliveryOutcome,
+  verifyResendWebhookSignature,
 } from "../services/guest-journey-communications-delivery-outcome.service";
 
 function clean(value: unknown): string {
@@ -102,26 +102,30 @@ export function buildMessageDeliveryWebhookRouter(
         });
       }
 
-      let event: unknown;
-
-      try {
-        const resend = new Resend(
-          clean(env.RESEND_API_KEY) || "re_webhook_verification_only"
-        );
-
-        event = resend.webhooks.verify({
+      const signatureValid =
+        verifyResendWebhookSignature({
           payload: rawBody,
-          headers: {
-            id: svixId,
-            timestamp: svixTimestamp,
-            signature: svixSignature,
-          },
-          webhookSecret,
+          secret: webhookSecret,
+          id: svixId,
+          timestamp: svixTimestamp,
+          signature: svixSignature,
         });
-      } catch {
+
+      if (!signatureValid) {
         return res.status(403).json({
           ok: false,
           error: "RESEND_WEBHOOK_SIGNATURE_INVALID",
+        });
+      }
+
+      let event: unknown;
+
+      try {
+        event = JSON.parse(rawBody);
+      } catch {
+        return res.status(400).json({
+          ok: false,
+          error: "RESEND_WEBHOOK_PAYLOAD_INVALID",
         });
       }
 
