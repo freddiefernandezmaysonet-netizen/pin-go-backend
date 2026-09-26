@@ -38,6 +38,20 @@ export type SendGuestContactRecoveryHostNoticeInput = {
   idempotencyKey: string;
 };
 
+export type SendGuestPreCheckinEmailInput = {
+  to: string;
+  replyTo?: string | null;
+  reservationNumber: string;
+  guestName?: string | null;
+  propertyName: string;
+  checkIn: Date;
+  propertyTimeZone?: string | null;
+  address?: string | null;
+  mapsLink?: string | null;
+  verificationUrl?: string | null;
+  preferredLanguage?: string | null;
+};
+
 type SendGuestAccessPasscodeEmailInput = {
   to: string;
   replyTo?: string | null;
@@ -2100,6 +2114,140 @@ export async function sendDirectBookingHostCancellationNotification(
     mode: "resend",
     data,
   };
+}
+
+export function getGuestPreCheckinEmailSubject(input: {
+  reservationNumber: string;
+  preferredLanguage?: string | null;
+}) {
+  const language = resolveGuestLanguage(input.preferredLanguage);
+  return language === "es"
+    ? `Información de check-in - Reservación #${input.reservationNumber}`
+    : `Check-in information - Reservation #${input.reservationNumber}`;
+}
+
+export async function sendGuestPreCheckinEmail(
+  input: SendGuestPreCheckinEmailInput
+) {
+  const language = resolveGuestLanguage(input.preferredLanguage);
+  const isSpanish = language === "es";
+  const safeReservationNumber = escapeHtml(input.reservationNumber);
+  const safeGuestName = escapeHtml(
+    input.guestName?.trim() || (isSpanish ? "Huésped" : "Guest")
+  );
+  const safePropertyName = escapeHtml(input.propertyName);
+  const dateTimeZone = normalizePropertyTimeZone(input.propertyTimeZone);
+  const formattedCheckIn = formatBookingDateTime(
+    input.checkIn,
+    dateTimeZone,
+    language
+  );
+
+  const safeMapsLink = input.mapsLink ? getSafeUrl(input.mapsLink) : null;
+  const safeVerificationUrl = input.verificationUrl
+    ? getSafeUrl(input.verificationUrl)
+    : null;
+  const safeAddress = input.address?.trim()
+    ? escapeHtml(input.address.trim())
+    : null;
+
+  if (!resend) {
+    if (isProd) {
+      throw new Error("RESEND_API_KEY missing in production");
+    }
+
+    console.log("RESEND_API_KEY missing. Guest pre-checkin email fallback.", {
+      to: input.to,
+      reservationNumber: input.reservationNumber,
+    });
+
+    return { ok: true, mode: "console" };
+  }
+
+  const locationBlock = safeMapsLink || safeAddress
+    ? `
+      <div style="background:#f8fafc;border:1px solid #cbd5e1;border-radius:14px;padding:16px;margin:18px 0;">
+        <p style="margin:0 0 6px;font-weight:800;">${isSpanish ? "Ubicación" : "Location"}</p>
+        ${safeAddress ? `<p style="margin:0 0 8px;">${safeAddress}</p>` : ""}
+        ${safeMapsLink ? `<a href="${escapeHtml(safeMapsLink)}" style="font-weight:800;">${isSpanish ? "Abrir en Google Maps" : "Open in Google Maps"}</a>` : ""}
+      </div>
+    `
+    : "";
+
+  const verificationBlock = safeVerificationUrl
+    ? `
+      <div style="background:#fff7ed;border:1px solid #fdba74;border-radius:14px;padding:16px;margin:18px 0;">
+        <p style="margin:0 0 10px;font-weight:800;">
+          ${isSpanish ? "Acción requerida antes de recibir acceso" : "Action required before access is released"}
+        </p>
+        <p style="margin:0 0 12px;">
+          ${isSpanish
+            ? "Complete la verificación pendiente para que Pin&Go pueda liberar su acceso de forma segura."
+            : "Complete the pending verification so Pin&Go can securely release your access."}
+        </p>
+        <a href="${escapeHtml(safeVerificationUrl)}" style="display:inline-block;background:#ea580c;color:#fff;text-decoration:none;padding:11px 15px;border-radius:9px;font-weight:800;">
+          ${isSpanish ? "Completar verificación" : "Complete verification"}
+        </a>
+      </div>
+    `
+    : `
+      <div style="background:#ecfdf5;border:1px solid #a7f3d0;border-radius:14px;padding:16px;margin:18px 0;">
+        <p style="margin:0;font-weight:800;">
+          ${isSpanish ? "Su pre-check-in está al día." : "Your pre-check-in is up to date."}
+        </p>
+      </div>
+    `;
+
+  const { data, error } = await resend.emails.send({
+    from: getEmailFrom(),
+    to: input.to,
+    ...(input.replyTo ? { replyTo: input.replyTo } : {}),
+    subject: getGuestPreCheckinEmailSubject(input),
+    html: `
+      <div style="font-family:Arial,sans-serif;color:#111827;line-height:1.6;max-width:680px;margin:0 auto;">
+        <div style="background:linear-gradient(135deg,#020617,#1d4ed8);color:#ffffff;border-radius:18px;padding:24px;margin-bottom:20px;">
+          <p style="margin:0 0 8px;font-size:12px;letter-spacing:.08em;text-transform:uppercase;font-weight:800;">
+            ${isSpanish ? "Pre-check-in Pin&Go" : "Pin&Go Pre-check-in"}
+          </p>
+          <h1 style="margin:0;font-size:28px;line-height:1.15;">
+            ${isSpanish ? "Información para su llegada" : "Arrival information"}
+          </h1>
+          <p style="margin:10px 0 0;color:#dbeafe;font-weight:700;">
+            ${isSpanish ? "Reservación" : "Reservation"} #${safeReservationNumber}
+          </p>
+        </div>
+
+        <p>${isSpanish ? "Hola" : "Hi"} ${safeGuestName},</p>
+        <p>
+          ${isSpanish
+            ? `Su llegada a <strong>${safePropertyName}</strong> es el <strong>${escapeHtml(formattedCheckIn)}</strong>.`
+            : `Your arrival at <strong>${safePropertyName}</strong> is <strong>${escapeHtml(formattedCheckIn)}</strong>.`}
+        </p>
+
+        ${locationBlock}
+        ${verificationBlock}
+
+        <p style="color:#64748b;font-size:13px;">
+          ${isSpanish
+            ? "Este correo contiene información de llegada. El acceso se envía por separado cuando todos los requisitos aplicables estén completos."
+            : "This email contains arrival information. Access is sent separately once all applicable requirements are complete."}
+        </p>
+
+        <p>Pin&Go</p>
+      </div>
+    `,
+  });
+
+  if (error) {
+    throw new Error(`Resend guest pre-checkin email failed: ${error.message}`);
+  }
+
+  console.log("PRECHECKIN EMAIL SENT", {
+    to: input.to,
+    reservationNumber: input.reservationNumber,
+  });
+
+  return { ok: true, mode: "resend", data };
 }
 
 export async function sendGuestAccessPasscodeEmail(
