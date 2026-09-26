@@ -99,6 +99,11 @@ function createPrisma(reservation: unknown) {
     lastErrorCode?: string | null;
   } | null = null;
   const prisma = {
+    propertyReview: {
+      async aggregate() {
+        return { _avg: { overallRating: null }, _count: { _all: 0 } };
+      },
+    },
     property: {
       async findFirst(args: unknown) {
         propertyCalls.push(args);
