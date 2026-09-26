@@ -9,6 +9,7 @@ import {
   sendDirectBookingHostCancellationNotification,
   sendDirectBookingHostNotification,
   sendGuestAccessPasscodeEmail,
+  sendGuestPreCheckinEmail,
   sendGuestVerificationReminderEmail,
   sendManualReservationGuestCancellationEmail,
   sendManualReservationGuestConfirmation,
@@ -108,6 +109,59 @@ async function defaultSendEmail(input: {
       return sendDirectBookingGuestCancellationEmail(payload);
     case "DIRECT_BOOKING_HOST_CANCELLATION":
       return sendDirectBookingHostCancellationNotification(payload);
+    case "PRECHECKIN": {
+      const reservationNumber =
+        clean(payload.reservationNumber);
+      const propertyName =
+        clean(payload.propertyName);
+      const checkIn =
+        new Date(String(payload.checkIn ?? ""));
+
+      if (!reservationNumber) {
+        throw new Error(
+          "COMMUNICATION_PRECHECKIN_RESERVATION_NUMBER_MISSING"
+        );
+      }
+      if (!propertyName) {
+        throw new Error(
+          "COMMUNICATION_PRECHECKIN_PROPERTY_NAME_MISSING"
+        );
+      }
+      if (Number.isNaN(checkIn.getTime())) {
+        throw new Error(
+          "COMMUNICATION_PRECHECKIN_CHECKIN_INVALID"
+        );
+      }
+
+      const replyTo =
+        await resolveOrganizationGuestReplyTo(
+          input.prisma,
+          input.organizationId
+        );
+
+      return sendGuestPreCheckinEmail({
+        to: input.to,
+        replyTo: replyTo.email,
+        reservationNumber,
+        guestName:
+          clean(payload.guestName) || null,
+        propertyName,
+        checkIn,
+        propertyTimeZone:
+          clean(payload.propertyTimeZone) ||
+          null,
+        address:
+          clean(payload.address) || null,
+        mapsLink:
+          clean(payload.mapsLink) || null,
+        verificationUrl:
+          clean(payload.verificationUrl) ||
+          null,
+        preferredLanguage:
+          clean(payload.preferredLanguage) ||
+          null,
+      });
+    }
     case "GUEST_VERIFICATION_REMINDER": {
       const reservation = await input.prisma.reservation.findFirst({
         where: {
