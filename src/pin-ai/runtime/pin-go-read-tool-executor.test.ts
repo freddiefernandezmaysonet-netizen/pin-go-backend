@@ -76,6 +76,11 @@ function createPrismaFixture(options: Readonly<{
   const paymentContext = options.paymentContext ?? {};
 
   return {
+    propertyReview: {
+      async aggregate() {
+        return { _avg: { overallRating: null }, _count: { _all: 0 } };
+      },
+    },
     property: {
       async findFirst() {
         return {
