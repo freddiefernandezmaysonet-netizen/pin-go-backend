@@ -63,3 +63,16 @@ test("nested public projection omits database identifiers and timestamps", () =>
   assert.doesNotMatch(listingProjection, /createdAt: true/);
   assert.doesNotMatch(listingProjection, /updatedAt: true/);
 });
+
+
+test("public property detail exposes guest-safe discovery facts", () => {
+  assert.match(detailRoute, /propertyType: true/);
+  assert.match(detailRoute, /features:\s*\{[\s\S]*where: \{ isActive: true \}[\s\S]*type: true[\s\S]*labelEn: true[\s\S]*labelEs: true[\s\S]*sortOrder: true/);
+});
+
+test("experience tags remain discovery metadata and are not automatically public", () => {
+  const listingStart = detailRoute.indexOf("listingDetails:");
+  const listingEnd = detailRoute.indexOf("\n       taxes:", listingStart);
+  const listingProjection = detailRoute.slice(listingStart, listingEnd);
+  assert.doesNotMatch(listingProjection, /experienceTags:/);
+});
