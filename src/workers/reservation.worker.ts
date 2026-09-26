@@ -79,6 +79,9 @@ import {
   isGuestJourneyAccessOwnerScope,
 } from "../services/guest-journey-access-owner.config";
 import {
+  hasGuestSmsConsent,
+} from "../services/guest-journey-access-communications-bridge.policy";
+import {
   resolveGuestJourneyAccessOwnerHandoff,
 } from "../services/guest-journey-access-owner-handoff.service";
 import {
@@ -483,42 +486,6 @@ function errLog(...args: any[]) {
 function toErrString(e: unknown) {
   if (e instanceof Error) return `${e.name}: ${e.message}\n${e.stack ?? ''}`.trim();
   return String(e);
-}
-
-function hasGuestSmsConsent(
-  externalRaw: unknown
-): boolean {
-  if (
-    !externalRaw ||
-    typeof externalRaw !== "object" ||
-    Array.isArray(externalRaw)
-  ) {
-    return false;
-  }
-
-  const consent = (
-    externalRaw as Record<string, unknown>
-  ).consent;
-
-  if (
-    !consent ||
-    typeof consent !== "object" ||
-    Array.isArray(consent)
-  ) {
-    return false;
-  }
-
-  const consentRecord =
-    consent as Record<string, unknown>;
-
-  const acceptedAt = String(
-    consentRecord.acceptedAt ?? ""
-  ).trim();
-
-  return (
-    consentRecord.smsConsent === true &&
-    acceptedAt.length > 0
-  );
 }
 
 function maskPasscode(code: string) {
