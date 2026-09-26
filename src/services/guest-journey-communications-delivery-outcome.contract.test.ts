@@ -62,12 +62,14 @@ test("Twilio status callback is only attached with secure complete configuration
 test("provider webhook routes verify signatures before persisting outcomes", async () => {
   const source = await read("../routes/message-delivery.webhooks.routes.ts");
 
-  assert.match(source, /resend\.webhooks\.verify\(/);
+  assert.match(source, /verifyResendWebhookSignature\(/);
+  assert.match(source, /payload:\s*rawBody/);
+  assert.match(source, /secret:\s*webhookSecret/);
   assert.match(source, /id:\s*svixId/);
   assert.match(source, /timestamp:\s*svixTimestamp/);
   assert.match(source, /signature:\s*svixSignature/);
-  assert.match(source, /^\s*webhookSecret,\s*$/m);
-  assert.doesNotMatch(source, /resend as any/);
+  assert.doesNotMatch(source, /new Resend|resend\.webhooks\.verify|resend as any/);
+  assert.match(source, /JSON\.parse\(rawBody\)/);
   assert.match(source, /Twilio\.validateRequest\(/);
   assert.match(source, /x-twilio-signature/);
   assert.match(source, /recordMessageDeliveryOutcome\(/);
