@@ -1175,6 +1175,15 @@ export async function confirmPinAIActionProposal(
         );
       }
 
+      if (
+        !("proposal" in
+          transactionResult)
+      ) {
+        return fail(
+          "PROPOSAL_CONCURRENT_CHANGE",
+        );
+      }
+
       return transactionResult;
     } catch (error) {
       if (
