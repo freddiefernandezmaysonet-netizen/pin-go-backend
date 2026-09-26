@@ -666,7 +666,7 @@ test(
 );
 
 test(
-  "create is idempotent and returns the same deterministic confirmation token",
+  "create is idempotent in proposal identity and rotates the confirmation token",
   async () => {
     const fixture =
       createPrisma();
@@ -696,12 +696,58 @@ test(
       replay.proposal.id,
       first.proposal.id,
     );
-    assert.equal(
+    assert.notEqual(
       replay.confirmationToken,
       first.confirmationToken,
     );
+    assert.match(
+      replay.confirmationToken,
+      /^[A-Za-z0-9_-]{43}$/,
+    );
     assert.equal(
       replay.actionExecuted,
+      false,
+    );
+
+    await assert.rejects(
+      () =>
+        confirmPinAIActionProposal({
+          prisma:
+            fixture.prisma,
+          guestToken:
+            TOKEN_A,
+          proposalId:
+            replay.proposal.id,
+          confirmationToken:
+            first.confirmationToken,
+          now: NOW,
+        }),
+      (error: unknown) =>
+        error instanceof
+          PinAIActionProposalError &&
+        error.code ===
+          "PROPOSAL_TOKEN_MISMATCH",
+    );
+
+    const confirmed =
+      await confirmPinAIActionProposal({
+        prisma:
+          fixture.prisma,
+        guestToken:
+          TOKEN_A,
+        proposalId:
+          replay.proposal.id,
+        confirmationToken:
+          replay.confirmationToken,
+        now: NOW,
+      });
+
+    assert.equal(
+      confirmed.proposalConfirmed,
+      true,
+    );
+    assert.equal(
+      confirmed.actionExecuted,
       false,
     );
   },
