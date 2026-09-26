@@ -1,6 +1,6 @@
 import {
   createHash,
-  createHmac,
+  randomBytes,
   randomUUID,
   timingSafeEqual,
 } from "node:crypto";
@@ -380,28 +380,9 @@ export function buildPinAIActionProposalFingerprint(
     .digest("hex");
 }
 
-function deriveConfirmationToken(
-  input: Readonly<{
-    guestToken: string;
-    proposalId: string;
-    proposalFingerprint: string;
-    expiresAt: Date;
-  }>,
-): string {
-  return createHmac(
-    "sha256",
-    input.guestToken,
-  )
-    .update(
-      [
-        PIN_AI_ACTION_PROPOSAL_VERSION,
-        input.proposalId,
-        input.proposalFingerprint,
-        input.expiresAt.toISOString(),
-      ].join(":"),
-      "utf8",
-    )
-    .digest("base64url");
+function generateConfirmationToken(): string {
+  return randomBytes(32)
+    .toString("base64url");
 }
 
 function hashConfirmationToken(
@@ -719,28 +700,23 @@ export async function createPinAIActionProposal(
 
             if (existing) {
               const token =
-                deriveConfirmationToken({
-                  guestToken,
-                  proposalId:
-                    existing.id,
-                  proposalFingerprint:
-                    existing
-                      .proposalFingerprint,
-                  expiresAt:
-                    existing.expiresAt,
-                });
-
-              if (
+                generateConfirmationToken();
+              const tokenHash =
                 hashConfirmationToken(
                   token,
-                ) !==
-                existing
-                  .confirmationTokenHash
-              ) {
-                return fail(
-                  "PROPOSAL_TOKEN_MISMATCH",
                 );
-              }
+              const refreshed =
+                await db
+                  .pinAIActionProposal
+                  .update({
+                    where: {
+                      id: existing.id,
+                    },
+                    data: {
+                      confirmationTokenHash:
+                        tokenHash,
+                    },
+                  });
 
               return {
                 ok: true,
@@ -752,7 +728,7 @@ export async function createPinAIActionProposal(
                   token,
                 proposal:
                   publicProposal(
-                    existing,
+                    refreshed,
                   ),
               };
             }
@@ -780,13 +756,7 @@ export async function createPinAIActionProposal(
             const proposalId =
               randomUUID();
             const token =
-              deriveConfirmationToken({
-                guestToken,
-                proposalId,
-                proposalFingerprint:
-                  fingerprint,
-                expiresAt,
-              });
+              generateConfirmationToken();
             const tokenHash =
               hashConfirmationToken(
                 token,
