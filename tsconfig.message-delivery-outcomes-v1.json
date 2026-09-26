@@ -12,6 +12,7 @@
     "src/services/guest-journey-communications-delivery-outcome.service.ts",
     "src/services/guest-journey-communications-delivery-outcome.service.test.ts",
     "src/services/guest-journey-communications-delivery-outcome.contract.test.ts",
+    "src/services/guest-journey-communications-delivery-outcome.db.test.ts",
     "src/routes/message-delivery.webhooks.routes.ts",
     "src/integrations/twilio/twilio.client.ts"
   ]

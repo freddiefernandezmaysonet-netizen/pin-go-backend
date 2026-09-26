@@ -1,11 +1,13 @@
 import assert from "node:assert/strict";
 import test from "node:test";
+import { createHmac } from "node:crypto";
 
 import {
   normalizeResendDeliveryEvent,
   normalizeTwilioDeliveryCallback,
   recordMessageDeliveryOutcome,
   shouldApplyProviderDeliveryTransition,
+  verifyResendWebhookSignature,
 } from "./guest-journey-communications-delivery-outcome.service";
 
 test("Resend delivery events normalize to provider outcomes", () => {
@@ -177,4 +179,65 @@ test("out-of-order provider events are ignored", async () => {
   assert.equal(result.matched, true);
   assert.equal(result.applied, false);
   assert.equal(fixture.updates.length, 0);
+});
+
+
+test("Resend Svix signature verifier accepts valid payload and rejects tampering", () => {
+  const key = Buffer.from(
+    "pin-go-resend-webhook-canary-secret",
+    "utf8"
+  );
+  const secret =
+    "whsec_" + key.toString("base64");
+  const id = "msg_test_1";
+  const timestamp = "1780000000";
+  const payload =
+    '{"type":"email.delivered","data":{"email_id":"email-1"}}';
+
+  const signature = createHmac("sha256", key)
+    .update(`${id}.${timestamp}.${payload}`, "utf8")
+    .digest("base64");
+
+  const input = {
+    payload,
+    secret,
+    id,
+    timestamp,
+    signature: `v1,${signature}`,
+    now: new Date(1780000000 * 1000),
+  };
+
+  assert.equal(
+    verifyResendWebhookSignature(input),
+    true
+  );
+
+  assert.equal(
+    verifyResendWebhookSignature({
+      ...input,
+      payload: payload + " ",
+    }),
+    false
+  );
+
+  assert.equal(
+    verifyResendWebhookSignature({
+      ...input,
+      signature:
+        `v1,invalid v1,${signature}`,
+    }),
+    true,
+    "multiple signatures must accept any valid v1 candidate"
+  );
+
+  assert.equal(
+    verifyResendWebhookSignature({
+      ...input,
+      now: new Date(
+        (1780000000 + 301) * 1000
+      ),
+    }),
+    false,
+    "stale signatures must be rejected"
+  );
 });

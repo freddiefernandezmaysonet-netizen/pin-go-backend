@@ -47,18 +47,34 @@ test("Twilio status callback is only attached with secure complete configuration
     } as NodeJS.ProcessEnv),
     null
   );
+
+  assert.equal(
+    resolveTwilioStatusCallback({
+      MESSAGE_DELIVERY_WEBHOOKS_ENABLED: "1",
+      TWILIO_AUTH_TOKEN: "secret",
+      PUBLIC_BASE_URL: "https://api.pin-ngo.com",
+      NODE_ENV: "production",
+    } as NodeJS.ProcessEnv),
+    "https://api.pin-ngo.com/webhooks/delivery/twilio"
+  );
 });
 
 test("provider webhook routes verify signatures before persisting outcomes", async () => {
   const source = await read("../routes/message-delivery.webhooks.routes.ts");
 
-  assert.match(source, /webhooks\.verify\(/);
-  assert.match(source, /webhookSecret/);
+  assert.match(source, /verifyResendWebhookSignature\(/);
+  assert.match(source, /payload:\s*rawBody/);
+  assert.match(source, /secret:\s*webhookSecret/);
+  assert.match(source, /id:\s*svixId/);
+  assert.match(source, /timestamp:\s*svixTimestamp/);
+  assert.match(source, /signature:\s*svixSignature/);
+  assert.doesNotMatch(source, /new Resend|resend\.webhooks\.verify|resend as any/);
+  assert.match(source, /JSON\.parse\(rawBody\)/);
   assert.match(source, /Twilio\.validateRequest\(/);
   assert.match(source, /x-twilio-signature/);
   assert.match(source, /recordMessageDeliveryOutcome\(/);
 
-  const resendVerifyIndex = source.indexOf("webhooks.verify");
+  const resendVerifyIndex = source.indexOf("verifyResendWebhookSignature");
   const resendPersistIndex = source.indexOf(
     "recordMessageDeliveryOutcome",
     resendVerifyIndex

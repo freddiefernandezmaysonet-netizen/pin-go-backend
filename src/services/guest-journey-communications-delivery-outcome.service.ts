@@ -1,4 +1,5 @@
 import type { PrismaClient } from "@prisma/client";
+import { createHmac, timingSafeEqual } from "node:crypto";
 
 export type MessageDeliveryProvider = "resend" | "twilio";
 
@@ -26,6 +27,101 @@ export type ProviderDeliveryOutcome = {
   errorCode?: string | null;
   errorMessage?: string | null;
 };
+
+export type ResendWebhookSignatureInput = {
+  payload: string;
+  secret: string;
+  id: string;
+  timestamp: string;
+  signature: string;
+  now?: Date;
+  toleranceSeconds?: number;
+};
+
+export function verifyResendWebhookSignature(
+  input: ResendWebhookSignatureInput
+): boolean {
+  const payload = String(input.payload ?? "");
+  const id = clean(input.id);
+  const timestamp = clean(input.timestamp);
+  const signature = clean(input.signature);
+  const secret = clean(input.secret);
+
+  if (!payload || !id || !timestamp || !signature || !secret) {
+    return false;
+  }
+
+  const timestampSeconds = Number(timestamp);
+  if (!Number.isFinite(timestampSeconds)) {
+    return false;
+  }
+
+  const toleranceSeconds =
+    input.toleranceSeconds ?? 5 * 60;
+  const nowSeconds = Math.floor(
+    (input.now ?? new Date()).getTime() / 1000
+  );
+
+  if (
+    Math.abs(nowSeconds - timestampSeconds) >
+    toleranceSeconds
+  ) {
+    return false;
+  }
+
+  const encodedSecret = secret.startsWith("whsec_")
+    ? secret.slice("whsec_".length)
+    : secret;
+
+  let key: Buffer;
+  try {
+    key = Buffer.from(encodedSecret, "base64");
+  } catch {
+    return false;
+  }
+
+  if (key.length === 0) {
+    return false;
+  }
+
+  const signedContent =
+    `${id}.${timestamp}.${payload}`;
+
+  const expected = createHmac("sha256", key)
+    .update(signedContent, "utf8")
+    .digest();
+
+  const candidates = signature
+    .split(/\s+/)
+    .map((token) => token.trim())
+    .filter(Boolean);
+
+  for (const candidate of candidates) {
+    const commaIndex = candidate.indexOf(",");
+    if (commaIndex <= 0) continue;
+
+    const version = candidate.slice(0, commaIndex);
+    const encoded = candidate.slice(commaIndex + 1);
+
+    if (version !== "v1" || !encoded) continue;
+
+    let received: Buffer;
+    try {
+      received = Buffer.from(encoded, "base64");
+    } catch {
+      continue;
+    }
+
+    if (
+      received.length === expected.length &&
+      timingSafeEqual(received, expected)
+    ) {
+      return true;
+    }
+  }
+
+  return false;
+}
 
 const STATUS_RANK: Record<ProviderDeliveryStatus, number> = {
   ACCEPTED: 10,
