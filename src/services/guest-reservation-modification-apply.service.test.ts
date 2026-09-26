@@ -14,7 +14,7 @@ const now = new Date("2026-10-01T12:00:00.000Z");
 const currentCheckIn = new Date("2026-10-10T20:00:00.000Z");
 const currentCheckOut = new Date("2026-10-15T15:00:00.000Z");
 
-function createInput() {
+function createInput(): Parameters<typeof buildGuestReservationModificationApplyPlan>[0] {
   return {
     now,
     modification: {
@@ -259,3 +259,64 @@ test("preserves the previous stay as the access reconciliation baseline", () => 
   );
   assert.match(source, /lastHardwareSyncAt: null/);
 });
+
+function inStayInput() {
+  const input = createInput();
+  input.now = new Date("2026-10-12T12:00:00Z");
+  input.modification.proposedCheckOut = new Date("2026-10-16T15:00:00Z");
+  input.modification.guestConfirmation = {
+    confirmed: true, source: "PIN_AI_GUEST_SERVICES", operation: "EXTEND_CHECKOUT_ONLY",
+    confirmedAt: "2026-10-12T11:00:00Z", actionProposalConfirmedAt: "2026-10-12T10:59:00Z",
+    actionProposalId: "proposal-test-12345678", actionProposalFingerprint: "a".repeat(64),
+    expectedPreviewFingerprint: "b".repeat(64), confirmedPreviewFingerprint: "b".repeat(64),
+  };
+  return input;
+}
+
+test("confirmed in-stay extension checks only the added interval and retains check-in and guest configuration", () => {
+  const input = inStayInput();
+  const plan = buildGuestReservationModificationApplyPlan(input);
+  assert.equal(plan.availabilityCheckIn.getTime(), input.reservation.checkOut.getTime());
+  assert.equal(plan.guestsChanged, false);
+  assert.equal(plan.amenitiesChanged, false);
+  assert.equal(plan.nextAmountCollected, 500);
+});
+
+test("paid in-stay extension still requires complete payment evidence and exact financial split", () => {
+  const input = inStayInput();
+  input.modification.financialAction = ReservationModificationFinancialAction.ADDITIONAL_PAYMENT_REQUIRED;
+  input.modification.proposedTotalAmount = 600;
+  input.modification.amountDifference = 100;
+  input.modification.additionalChargeAmount = 100;
+  input.modification.additionalPlatformFeeAmount = 10;
+  input.modification.additionalHostPayoutAmount = 90;
+  assert.throws(() => buildGuestReservationModificationApplyPlan(input), /additional payment is not ready/);
+  Object.assign(input.modification, {
+    stripeConnectedAccountId: "acct_host_1", stripeCheckoutSessionId: "cs_test", stripePaymentIntentId: "pi_test",
+    stripeChargeId: "ch_test", stripeApplicationFeeId: "fee_test", stripePaymentStatus: "paid",
+  });
+  const plan = buildGuestReservationModificationApplyPlan(input);
+  assert.equal(plan.nextAmountCollected, 600);
+  assert.equal(plan.nextPlatformFeeAmount, 60);
+  assert.equal(plan.nextHostPayoutAmount, 540);
+  input.modification.additionalHostPayoutAmount = 89;
+  assert.throws(() => buildGuestReservationModificationApplyPlan(input), /split is invalid/);
+});
+
+for (const scenario of ["missing proposal", "wrong source", "changed fingerprint", "future confirmation", "changed check-in", "changed guests", "changed amenities", "ended stay", "shortened stay", "missing operation"] as const) {
+  test(`in-stay application rejects ${scenario}`, () => {
+    const input = inStayInput();
+    const evidence = input.modification.guestConfirmation as Record<string, unknown>;
+    if (scenario === "missing proposal") delete evidence.actionProposalId;
+    if (scenario === "wrong source") evidence.source = "GUEST_MANAGE_RESERVATION";
+    if (scenario === "changed fingerprint") evidence.confirmedPreviewFingerprint = "c".repeat(64);
+    if (scenario === "future confirmation") evidence.confirmedAt = "2026-10-13T00:00:00Z";
+    if (scenario === "changed check-in") input.modification.proposedCheckIn = new Date("2026-10-11T20:00:00Z");
+    if (scenario === "changed guests") input.modification.proposedAdults = 3;
+    if (scenario === "changed amenities") input.modification.proposedSelectedAmenityIds = [];
+    if (scenario === "ended stay") input.now = input.reservation.checkOut;
+    if (scenario === "shortened stay") input.modification.proposedCheckOut = new Date("2026-10-14T15:00:00Z");
+    if (scenario === "missing operation") delete evidence.operation;
+    assert.throws(() => buildGuestReservationModificationApplyPlan(input));
+  });
+}

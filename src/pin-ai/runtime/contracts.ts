@@ -219,10 +219,15 @@ export const PIN_AI_RUNTIME_TOOLS: readonly PinAIRuntimeToolDefinition[] = [
     parameters: {
       type: "object",
       properties: {
+        operation: {
+          type: "string",
+          enum: ["EXTEND_CHECKOUT_ONLY"],
+          description: "For an in-stay extension, preserve the stored check-in and change checkout only. Omit for pre-stay date changes.",
+        },
         proposedCheckInDate: {
           type: "string",
           description:
-            "Exact proposed local check-in date in YYYY-MM-DD format.",
+            "Exact proposed local check-in date in YYYY-MM-DD format. Required for pre-stay date changes; omit for EXTEND_CHECKOUT_ONLY.",
         },
         proposedCheckOutDate: {
           type: "string",
@@ -231,7 +236,6 @@ export const PIN_AI_RUNTIME_TOOLS: readonly PinAIRuntimeToolDefinition[] = [
         },
       },
       required: [
-        "proposedCheckInDate",
         "proposedCheckOutDate",
       ],
       additionalProperties: false,

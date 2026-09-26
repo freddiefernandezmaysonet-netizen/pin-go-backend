@@ -112,3 +112,15 @@ test("action proposal tool and guest-confirmation instructions appear only behin
   assert.match(instructions, /Never ask the guest to type or repeat a confirmation token/i);
   assert.match(instructions, /actionExecuted=true/i);
 });
+
+
+test("canary proposal schema allows checkout-only extensions and instructs preservation of check-in", () => {
+  const config = buildPinAIOpenAIAgentConfig(undefined, { enabled: true });
+  const tools = config.tools as Array<Record<string, unknown>>;
+  const tool = tools.find((item) => item.name === "prepare_reservation_modification")!;
+  const parameters = tool.parameters as { required: string[]; properties: Record<string, { enum?: string[] }> };
+  assert.deepEqual(parameters.required, ["proposedCheckOutDate"]);
+  assert.deepEqual(parameters.properties.operation.enum, ["EXTEND_CHECKOUT_ONLY"]);
+  assert.match(String(config.instructions), /Omit proposedCheckInDate: the server preserves the stored check-in/);
+  assert.match(String(config.instructions), /Pre-stay date changes still require both exact dates/);
+});

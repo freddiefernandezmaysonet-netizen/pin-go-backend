@@ -22,6 +22,7 @@ type Language = "en" | "es";
 
 export type PinAIReservationModificationPreview =
   Readonly<{
+    managementPhase?: string;
     changes: Readonly<{
       hasChanges: boolean;
     }>;
@@ -60,6 +61,7 @@ export type PinAIReservationModificationPreview =
   }>;
 
 type PrepareInput = Readonly<{
+  operation?: "EXTEND_CHECKOUT_ONLY";
   guestToken: string;
   checkIn: Date;
   checkOut: Date;
@@ -75,6 +77,7 @@ type ExecuteInput = Readonly<{
 }>;
 
 type TermsV1 = Readonly<{
+  operation?: "EXTEND_CHECKOUT_ONLY";
   version: typeof PIN_AI_RESERVATION_MODIFICATION_TERMS_VERSION;
   quotedAt: string;
   quoteExpiresAt: string;
@@ -140,6 +143,7 @@ export type PinAIReservationModificationActionAdapterDependencies =
   Readonly<{
     prisma: AdapterPrisma;
     getPreview: (input: Readonly<{
+      operation?: "EXTEND_CHECKOUT_ONLY";
       guestToken: string;
       checkIn: Date;
       checkOut: Date;
@@ -173,6 +177,7 @@ export type PinAIReservationModificationActionAdapterDependencies =
       now: Date;
     }>) => Promise<unknown>;
     confirmModification: (input: Readonly<{
+      operation?: "EXTEND_CHECKOUT_ONLY";
       guestToken: string;
       clientRequestId: string;
       checkIn: Date;
@@ -542,7 +547,8 @@ function parseTerms(
   if (
     root.version !==
       PIN_AI_RESERVATION_MODIFICATION_TERMS_VERSION ||
-    root.availabilityHeld !== false
+    root.availabilityHeld !== false ||
+    (root.operation !== undefined && root.operation !== "EXTEND_CHECKOUT_ONLY")
   ) {
     return fail(
       "INVALID_QUOTE_TERMS",
@@ -669,6 +675,7 @@ function parseTerms(
   }
 
   return {
+    ...(root.operation === "EXTEND_CHECKOUT_ONLY" ? { operation: root.operation } : {}),
     version:
       PIN_AI_RESERVATION_MODIFICATION_TERMS_VERSION,
     quotedAt,
@@ -761,12 +768,24 @@ function parseTerms(
 
 function buildTerms(
   input: Readonly<{
+    operation?: "EXTEND_CHECKOUT_ONLY";
     preview:
       PinAIReservationModificationPreview;
     now: Date;
     quoteExpiresAt: Date;
   }>,
 ): TermsV1 {
+  if (input.operation === "EXTEND_CHECKOUT_ONLY") {
+    const { current, proposed } = input.preview.reservation;
+    if (input.preview.managementPhase !== "IN_STAY" ||
+      current.checkIn.getTime() !== proposed.checkIn.getTime() ||
+      proposed.checkOut <= current.checkOut ||
+      current.adults !== proposed.adults || current.children !== proposed.children ||
+      JSON.stringify([...current.selectedAmenityIds].sort()) !==
+        JSON.stringify([...proposed.selectedAmenityIds].sort())) {
+      return fail("INVALID_QUOTE_TERMS", 409);
+    }
+  }
   const propertyTimezone =
     safeTimezone(
       input.preview.property
@@ -806,6 +825,7 @@ function buildTerms(
   }
 
   return {
+    ...(input.operation ? { operation: input.operation } : {}),
     version:
       PIN_AI_RESERVATION_MODIFICATION_TERMS_VERSION,
     quotedAt:
@@ -1015,6 +1035,7 @@ export class PinAIReservationModificationActionAdapter {
     const preview =
       await this.dependencies
         .getPreview({
+          ...(input.operation ? { operation: input.operation } : {}),
           guestToken:
             cleanGuestToken,
           checkIn:
@@ -1038,6 +1059,7 @@ export class PinAIReservationModificationActionAdapter {
 
     const terms =
       buildTerms({
+        ...(input.operation ? { operation: input.operation } : {}),
         preview,
         now,
         quoteExpiresAt,
@@ -1268,6 +1290,7 @@ export class PinAIReservationModificationActionAdapter {
     const freshPreview =
       await this.dependencies
         .getPreview({
+          ...(terms.operation ? { operation: terms.operation } : {}),
           guestToken:
             cleanGuestToken,
           checkIn:
@@ -1339,6 +1362,7 @@ export class PinAIReservationModificationActionAdapter {
       confirmed =
         await this.dependencies
           .confirmModification({
+            ...(terms.operation ? { operation: terms.operation } : {}),
             guestToken:
               cleanGuestToken,
             clientRequestId:

@@ -531,6 +531,7 @@ export function createGuestPinAIRuntimeRunner(
         apiKey,
         agentId,
         ...(resumeSessionId ? { resumeSessionId } : {}),
+        requireCurrentSessionConfig: true,
         model: "gpt-5.6-luna",
         webSearch: {
           enabled: webSearchEnabled,

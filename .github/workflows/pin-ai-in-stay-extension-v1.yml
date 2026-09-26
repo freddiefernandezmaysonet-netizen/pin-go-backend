@@ -1,0 +1,50 @@
+name: Pin AI In-Stay Extension V1
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - "src/pin-ai/**"
+      - "src/services/guest-reservation-*"
+      - "src/services/direct-booking-pricing.service.ts"
+      - "tsconfig.pin-ai-*.json"
+      - ".github/workflows/pin-ai-in-stay-extension-v1.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  isolated-regression:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      DATABASE_URL: postgresql://user:pass@localhost:5432/pingo_test
+      STRIPE_SECRET_KEY: sk_test_contract_only
+      APP_URL: http://localhost:3000
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+      - name: Install locked dependencies
+        run: npm ci --ignore-scripts --no-audit --no-fund
+      - name: Generate Prisma client
+        run: npx prisma generate
+      - name: Run isolated runtime and canonical contracts
+        run: |
+          node --import tsx --test \
+            src/pin-ai/runtime/*.test.ts \
+            src/pin-ai/guest/*.test.ts \
+            src/pin-ai/property-knowledge*.test.ts \
+            src/pin-ai/actions/*.test.ts \
+            src/services/guest-reservation-extension-preview.test.ts \
+            src/services/guest-reservation-modification-apply.service.test.ts \
+            src/services/guest-reservation-modification-checkout.service.test.ts \
+            src/services/guest-reservation-modification-payment.service.test.ts \
+            src/services/guest-reservation-modification.policy.test.ts
+      - name: Compile the three affected scopes
+        run: |
+          npx tsc -p tsconfig.pin-ai-in-stay-extension.json --noEmit false --outDir /tmp/in-stay-build
+          npx tsc -p tsconfig.pin-ai-action-proposal-runtime.json --noEmit false --outDir /tmp/runtime-build
+          npx tsc -p tsconfig.pin-ai-guest-gateway.json --noEmit false --outDir /tmp/gateway-build

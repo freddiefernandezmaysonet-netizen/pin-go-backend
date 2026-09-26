@@ -1,4 +1,4 @@
-import { fromZonedTime } from "date-fns-tz";
+import { formatInTimeZone, fromZonedTime } from "date-fns-tz";
 
 import type {
   PinAIActionBrokerPrepareResult,
@@ -17,8 +17,11 @@ import type {
 
 type ReservationModificationOptions =
   Readonly<{
+    managementPhase?: string;
     reservation: Readonly<{
       current: Readonly<{
+        checkIn?: Date;
+        checkOut?: Date;
         adults: number;
         children: number;
         selectedAmenityIds:
@@ -54,9 +57,11 @@ export type PinAIActionProposalRuntimeToolDependencies =
       PinAIRuntimeToolExecutor;
     enabled: boolean;
     guestToken: string;
+    estimateInStayExtension?: (args: Readonly<Record<string, unknown>>) => Promise<Readonly<Record<string, unknown>> | null>;
     getModificationOptions:
       (input: Readonly<{
         guestToken: string;
+        allowInStayExtension?: boolean;
       }>) =>
         Promise<
           ReservationModificationOptions
@@ -64,6 +69,7 @@ export type PinAIActionProposalRuntimeToolDependencies =
     prepareReservationModification:
       (
         input: Readonly<{
+          operation?: "EXTEND_CHECKOUT_ONLY";
           guestToken: string;
           checkIn: Date;
           checkOut: Date;
@@ -277,6 +283,10 @@ export class PinAIActionProposalRuntimeToolExecutor
       Record<string, unknown>
     >
   > {
+    if (tool === "calculate_extension_price" && this.dependencies.enabled && this.dependencies.estimateInStayExtension) {
+      const estimate = await this.dependencies.estimateInStayExtension(args);
+      if (estimate !== null) return estimate;
+    }
     if (
       tool !==
       "prepare_reservation_modification"
@@ -298,6 +308,11 @@ export class PinAIActionProposalRuntimeToolExecutor
       );
     }
 
+    const isExtension = args.operation === "EXTEND_CHECKOUT_ONLY";
+    if (args.operation !== undefined && !isExtension) {
+      throw new Error("PIN_AI_RUNTIME_ACTION_PROPOSAL_OPERATION_INVALID");
+    }
+
     const proposedCheckInDate =
       parseDateOnly(
         args.proposedCheckInDate,
@@ -308,7 +323,8 @@ export class PinAIActionProposalRuntimeToolExecutor
       );
 
     if (
-      !proposedCheckInDate ||
+      (!isExtension && !proposedCheckInDate) ||
+      (args.proposedCheckInDate !== undefined && !proposedCheckInDate) ||
       !proposedCheckOutDate
     ) {
       throw new Error(
@@ -317,7 +333,7 @@ export class PinAIActionProposalRuntimeToolExecutor
     }
 
     const key =
-      `${proposedCheckInDate}:${proposedCheckOutDate}`;
+      `${isExtension ? "EXTEND_CHECKOUT_ONLY" : "CHANGE_DATES"}:${proposedCheckInDate ?? "preserve"}:${proposedCheckOutDate}`;
 
     if (
       this.proposalKey
@@ -339,6 +355,7 @@ export class PinAIActionProposalRuntimeToolExecutor
     const options =
       await this.dependencies
         .getModificationOptions({
+          ...(isExtension ? { allowInStayExtension: true } : {}),
           guestToken:
             this.dependencies
               .guestToken,
@@ -370,12 +387,24 @@ export class PinAIActionProposalRuntimeToolExecutor
         "11:00",
       );
 
-    const checkIn =
-      buildPropertyDate(
-        proposedCheckInDate,
-        checkInTime,
-        timezone,
-      );
+    if (options.managementPhase === "IN_STAY" && !isExtension) {
+      throw new Error("PIN_AI_RUNTIME_IN_STAY_EXTENSION_OPERATION_REQUIRED");
+    }
+    const current = options.reservation.current;
+    if (isExtension && (
+      options.managementPhase !== "IN_STAY" ||
+      !(current.checkIn instanceof Date) || !Number.isFinite(current.checkIn.getTime()) ||
+      !(current.checkOut instanceof Date) || !Number.isFinite(current.checkOut.getTime())
+    )) {
+      throw new Error("PIN_AI_RUNTIME_IN_STAY_EXTENSION_CONTEXT_INVALID");
+    }
+    if (isExtension && proposedCheckInDate &&
+      proposedCheckInDate !== formatInTimeZone(current.checkIn!, timezone, "yyyy-MM-dd")) {
+      throw new Error("PIN_AI_RUNTIME_IN_STAY_CHECK_IN_IMMUTABLE");
+    }
+    const checkIn = isExtension
+      ? new Date(current.checkIn!.getTime())
+      : buildPropertyDate(proposedCheckInDate!, checkInTime, timezone);
     const checkOut =
       buildPropertyDate(
         proposedCheckOutDate,
@@ -384,7 +413,8 @@ export class PinAIActionProposalRuntimeToolExecutor
       );
 
     if (
-      checkOut <= checkIn
+      checkOut <= checkIn ||
+      (isExtension && checkOut <= current.checkOut!)
     ) {
       throw new Error(
         "PIN_AI_RUNTIME_ACTION_PROPOSAL_DATES_INVALID",
@@ -422,6 +452,7 @@ export class PinAIActionProposalRuntimeToolExecutor
     const prepared =
       await this.dependencies
         .prepareReservationModification({
+          ...(isExtension ? { operation: "EXTEND_CHECKOUT_ONLY" as const } : {}),
           guestToken:
             this.dependencies
               .guestToken,

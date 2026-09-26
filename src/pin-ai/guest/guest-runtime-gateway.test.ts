@@ -1079,3 +1079,22 @@ test("runtime proposal gate requires the independently enabled action broker", a
     /PIN_AI_RUNTIME_ACTION_BROKER_REQUIRED/,
   );
 });
+
+test("persists a replacement provider session and resumes it on the next message", async () => {
+  const { prisma, getConversation } = createPrisma({
+    id: "reservation-a", propertyId: "property-a", preferredLanguage: "es",
+    property: { organizationId: "org-a", city: "San Juan", region: "PR", country: "PR", timezone: "America/Puerto_Rico" },
+  });
+  const resumed: (string | undefined)[] = [];
+  const runtime: GuestPinAIRuntimeRunner = async (request, _location, session) => {
+    resumed.push(session);
+    return shadowResult(request, { openaiSessionId: resumed.length === 1 ? "sess_old" : "sess_replacement" });
+  };
+  const gateway = new GuestPinAIGateway(prisma, runtime, true, () => now);
+  await gateway.reply({ guestToken: token, message: "Consulta inicial" });
+  await gateway.reply({ guestToken: token, message: "Extender la salida" });
+  assert.equal(getConversation()?.openaiSessionId, "sess_replacement");
+  assert.equal(getConversation()?.leaseToken, null);
+  await gateway.reply({ guestToken: token, message: "¿Qué opciones tengo?" });
+  assert.deepEqual(resumed, [undefined, "sess_old", "sess_replacement"]);
+});

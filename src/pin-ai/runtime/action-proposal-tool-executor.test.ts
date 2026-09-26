@@ -9,6 +9,7 @@ import {
 } from "./conversation-memory.js";
 import {
   PinAIActionProposalRuntimeToolExecutor,
+  type PinAIActionProposalRuntimeToolDependencies,
 } from "./action-proposal-tool-executor.js";
 
 const request: PinAIRuntimeRequest = {
@@ -32,6 +33,7 @@ const request: PinAIRuntimeRequest = {
 
 function createHarness(
   enabled = true,
+  currentOptions?: Awaited<ReturnType<PinAIActionProposalRuntimeToolDependencies["getModificationOptions"]>>,
 ) {
   let delegateCalls = 0;
   let prepareCalls = 0;
@@ -54,6 +56,7 @@ function createHarness(
       guestToken:
         "12345678-1234-1234-1234-123456789abc",
       async getModificationOptions() {
+        if (currentOptions) return currentOptions;
         return {
           reservation: {
             current: {
@@ -414,3 +417,78 @@ test(
     );
   },
 );
+
+const inStayOptions = {
+  managementPhase: "IN_STAY",
+  reservation: { current: {
+    checkIn: new Date("2026-09-26T18:17:03.123Z"),
+    checkOut: new Date("2026-09-27T15:00:00Z"),
+    adults: 2, children: 0, selectedAmenityIds: ["breakfast"],
+  } },
+  property: { timezone: "America/Puerto_Rico", checkInTime: "16:00", checkOutTime: "11:00" },
+};
+
+test("checkout-only proposal preserves the persisted check-in including custom time and milliseconds", async () => {
+  const h = createHarness(true, inStayOptions);
+  const args = { operation: "EXTEND_CHECKOUT_ONLY", proposedCheckOutDate: "2026-09-28" };
+  const memory = createConversationMemory(request);
+  const first = await h.executor.execute("prepare_reservation_modification", args, request, memory);
+  assert.equal(first.decision, "ACTION_PROPOSAL_PREPARED");
+  assert.equal(first.actionExecuted, false);
+  const input = h.getReceivedPrepare()!;
+  assert.equal(input.operation, "EXTEND_CHECKOUT_ONLY");
+  assert.equal((input.checkIn as Date).toISOString(), "2026-09-26T18:17:03.123Z");
+  assert.equal((input.checkOut as Date).toISOString(), "2026-09-28T15:00:00.000Z");
+  assert.deepEqual(input.selectedAmenityIds, ["breakfast"]);
+  await h.executor.execute("prepare_reservation_modification", args, request, memory);
+  assert.equal(h.getPrepareCalls(), 1);
+});
+
+for (const [name, args, options, expected] of [
+  ["changing check-in", { operation: "EXTEND_CHECKOUT_ONLY", proposedCheckInDate: "2026-09-25", proposedCheckOutDate: "2026-09-28" }, inStayOptions, "CHECK_IN_IMMUTABLE"],
+  ["unchanged checkout", { operation: "EXTEND_CHECKOUT_ONLY", proposedCheckOutDate: "2026-09-27" }, inStayOptions, "DATES_INVALID"],
+  ["shorter checkout", { operation: "EXTEND_CHECKOUT_ONLY", proposedCheckOutDate: "2026-09-26" }, inStayOptions, "DATES_INVALID"],
+  ["missing operation during in-stay", { proposedCheckInDate: "2026-09-26", proposedCheckOutDate: "2026-09-28" }, inStayOptions, "OPERATION_REQUIRED"],
+  ["extension outside in-stay", { operation: "EXTEND_CHECKOUT_ONLY", proposedCheckOutDate: "2026-09-28" }, { ...inStayOptions, managementPhase: "PRE_STAY" }, "CONTEXT_INVALID"],
+  ["unknown operation", { operation: "CHANGE_CHECK_IN", proposedCheckOutDate: "2026-09-28" }, inStayOptions, "OPERATION_INVALID"],
+  ["missing pre-stay check-in", { proposedCheckOutDate: "2026-09-28" }, { ...inStayOptions, managementPhase: "PRE_STAY" }, "DATES_INVALID"],
+] as const) {
+  test(`rejects ${name} before creating a proposal`, async () => {
+    const h = createHarness(true, options);
+    await assert.rejects(h.executor.execute("prepare_reservation_modification", args, request, createConversationMemory(request)), new RegExp(expected));
+    assert.equal(h.getPrepareCalls(), 0);
+  });
+}
+
+for (const enabled of [true, false]) {
+  test(`canonical extension estimate is gated without preparing a proposal: enabled=${enabled}`, async () => {
+    let estimates = 0;
+    let delegated = 0;
+    const forbidden = async (): Promise<never> => { throw new Error("UNEXPECTED_PROPOSAL_WRITE"); };
+    const executor = new PinAIActionProposalRuntimeToolExecutor({
+      enabled, guestToken: "test-token",
+      delegate: { async execute() { delegated++; return { decision: "LEGACY_ESTIMATE" }; } },
+      getModificationOptions: forbidden,
+      prepareReservationModification: forbidden,
+      estimateInStayExtension: async () => { estimates++; return { decision: "CANONICAL_ESTIMATE" }; },
+    });
+    const result = await executor.execute("calculate_extension_price", {additionalNights: 1}, request, createConversationMemory(request));
+    assert.equal(result.decision, enabled ? "CANONICAL_ESTIMATE" : "LEGACY_ESTIMATE");
+    assert.equal(estimates, enabled ? 1 : 0);
+    assert.equal(delegated, enabled ? 0 : 1);
+    assert.equal(executor.getPrivateActionProposal(), null);
+  });
+}
+
+test("pre-stay extension estimate delegates when canonical in-stay estimator returns null", async () => {
+  const forbidden = async (): Promise<never> => { throw new Error("UNEXPECTED_PROPOSAL_WRITE"); };
+  const executor = new PinAIActionProposalRuntimeToolExecutor({
+    enabled: true, guestToken: "test-token",
+    delegate: { async execute() { return {decision: "LEGACY_ESTIMATE"}; } },
+    getModificationOptions: forbidden, prepareReservationModification: forbidden,
+    estimateInStayExtension: async () => null,
+  });
+  const result = await executor.execute("calculate_extension_price", {additionalNights: 1}, request, createConversationMemory(request));
+  assert.equal(result.decision, "LEGACY_ESTIMATE");
+  assert.equal(executor.getPrivateActionProposal(), null);
+});

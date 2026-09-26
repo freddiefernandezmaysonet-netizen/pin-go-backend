@@ -1,3 +1,4 @@
+import { estimateCanonicalInStayExtension, type CanonicalExtensionEstimateProviders } from "./canonical-extension-estimate.js";
 import {
   createDefaultPinAIActionBroker,
 } from "../actions/action-broker.composition.js";
@@ -64,6 +65,13 @@ export function createActionProposalRuntimeDependencies(
       input.enabled,
     guestToken:
       input.guestToken,
+    estimateInStayExtension: async (args) => {
+      const module = await loadProviderModule(RESERVATION_MODIFICATION_SERVICE_MODULE);
+      return estimateCanonicalInStayExtension(input.guestToken, args, {
+        getOptions: requireProviderFunction<CanonicalExtensionEstimateProviders["getOptions"]>(module, "getGuestReservationModificationOptions"),
+        preview: requireProviderFunction<CanonicalExtensionEstimateProviders["preview"]>(module, "getGuestReservationModificationPreview"),
+      });
+    },
     getModificationOptions:
       async (request) => {
         const module =
