@@ -1,0 +1,25 @@
+{
+  "compilerOptions": {
+    "noEmit": true,
+    "module": "preserve",
+    "moduleResolution": "bundler",
+    "target": "esnext",
+    "strict": true,
+    "skipLibCheck": true,
+    "types": ["node"],
+    "exactOptionalPropertyTypes": false,
+    "noUncheckedIndexedAccess": false
+  },
+  "include": [
+    "src/pin-ai/runtime/contracts.ts",
+    "src/pin-ai/runtime/openai-agent-config.ts",
+    "src/pin-ai/runtime/openai-agent-config.test.ts",
+    "src/pin-ai/runtime/openai-agents-runtime-transport.ts",
+    "src/pin-ai/runtime/luna-runtime-adapter.ts",
+    "src/pin-ai/runtime/luna-runtime-adapter.test.ts",
+    "src/pin-ai/runtime/action-proposal-tool-executor.ts",
+    "src/pin-ai/runtime/action-proposal-tool-executor.test.ts",
+    "src/pin-ai/runtime/action-proposal-runtime-composition.ts",
+    "src/pin-ai/runtime/action-proposal-runtime-composition.test.ts"
+  ]
+}
