@@ -80,6 +80,7 @@ jobs:
             cat > "$RUNNER_TEMP/listing-experience-tags-v1-allowed.txt" <<'EOF'
           .github/workflows/listing-experience-tags-v1.yml
           .github/workflows/ota-airbnb-listing-discovery.yml
+          .github/workflows/ota-initial-distribution-enablement.yml
           prisma/migrations/20260925221500_add_listing_experience_tags_v1/migration.sql
           prisma/schema.prisma
           src/routes/dashboard.property-listing-details.routes.test.ts
@@ -89,7 +90,7 @@ jobs:
           EOF
             sort "$RUNNER_TEMP/listing-experience-tags-v1-allowed.txt" -o "$RUNNER_TEMP/listing-experience-tags-v1-allowed.txt"
             diff -u "$RUNNER_TEMP/listing-experience-tags-v1-allowed.txt" "$RUNNER_TEMP/actual.txt"
-            echo "PR #260 exact eight-file experience tags scope verified."
+            echo "PR #260 exact nine-file experience tags scope verified."
             exit 0
           fi
 
