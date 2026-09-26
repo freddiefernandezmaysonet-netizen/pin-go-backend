@@ -1,0 +1,52 @@
+name: Pin AI Action Proposal Foundation V1
+
+on:
+  pull_request:
+    branches:
+      - main
+    paths:
+      - "prisma/schema.prisma"
+      - "prisma/migrations/20260926030000_add_pin_ai_action_proposal_foundation_v1/migration.sql"
+      - "src/pin-ai/actions/**"
+      - "tsconfig.pin-ai-action-proposal.json"
+      - ".github/workflows/pin-ai-action-proposal-foundation-v1.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  action-proposal-foundation:
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    env:
+      DATABASE_URL: postgresql://user:pass@localhost:5432/pingo_test
+
+    steps:
+      - name: Checkout exact candidate
+        uses: actions/checkout@v4
+
+      - name: Use Node.js 22
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+
+      - name: Install locked dependencies without lifecycle scripts
+        run: npm ci --ignore-scripts --no-audit --no-fund
+
+      - name: Generate and validate Prisma client
+        run: |
+          npx prisma generate
+          npx prisma validate --schema ./prisma/schema.prisma
+
+      - name: Run Action Proposal focused tests
+        run: node --import tsx --test src/pin-ai/actions/action-proposal.service.test.ts
+
+      - name: Type-check Action Proposal foundation
+        run: npx tsc -p tsconfig.pin-ai-action-proposal.json
+
+      - name: Run retained Pin AI Runtime tests
+        run: npm run test:pin-ai-runtime
+
+      - name: Run retained Pin AI benchmark tests
+        run: npm run test:pin-ai-benchmark

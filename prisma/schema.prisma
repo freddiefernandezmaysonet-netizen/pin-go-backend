@@ -1036,6 +1036,7 @@ model Reservation {
   review                   PropertyReview?
   reviewInvitation         PropertyReviewInvitation?
   pinAIGuestConversation   PinAIGuestConversation?
+  pinAIActionProposals     PinAIActionProposal[]
   damageCase               DamageCase?
 
   @@unique([propertyId, externalProvider, externalId])
@@ -1209,6 +1210,35 @@ model PropertyReviewModerationEvent {
 
   @@index([caseId, createdAt])
   @@index([actorUserId])
+}
+
+model PinAIActionProposal {
+  id                       String                    @id @default(cuid())
+  organizationId           String
+  propertyId               String
+  reservationId            String
+  version                  String                    @default("pin_ai_action_proposal_v1")
+  actionType               PinAIActionProposalType
+  status                   PinAIActionProposalStatus @default(PENDING_CONFIRMATION)
+  proposalFingerprint      String                    @db.VarChar(64)
+  baseReservationUpdatedAt DateTime
+  language                 String                    @db.VarChar(2)
+  consentText              String
+  termsSnapshot            Json
+  confirmationTokenHash    String                    @unique @db.VarChar(64)
+  expiresAt                DateTime
+  confirmedAt              DateTime?
+  cancelledAt              DateTime?
+  supersededAt             DateTime?
+  createdAt                DateTime                  @default(now())
+  updatedAt                DateTime                  @updatedAt
+
+  reservation Reservation @relation(fields: [reservationId], references: [id], onDelete: Cascade)
+
+  @@index([organizationId, propertyId, reservationId])
+  @@index([reservationId, actionType, status, expiresAt])
+  @@index([proposalFingerprint])
+  @@index([status, expiresAt])
 }
 
 model ReservationModification {
@@ -2725,6 +2755,18 @@ enum ReservationModificationFinancialAction {
   NO_PAYMENT_REQUIRED
   NO_REFUND_DUE_CONFIRMATION_REQUIRED
   REDUCTION_REVIEW_REQUIRED
+}
+
+enum PinAIActionProposalType {
+  RESERVATION_MODIFICATION
+}
+
+enum PinAIActionProposalStatus {
+  PENDING_CONFIRMATION
+  CONFIRMED
+  EXPIRED
+  CANCELLED
+  SUPERSEDED
 }
 
 enum StripeConnectStatus {
