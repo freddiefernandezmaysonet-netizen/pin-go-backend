@@ -1029,7 +1029,7 @@ export async function confirmPinAIActionProposal(
                 .CONFIRMED
             ) {
               return {
-                ok: true,
+                ok: true as const,
                 idempotentReplay:
                   true,
                 proposalConfirmed:
@@ -1151,7 +1151,7 @@ export async function confirmPinAIActionProposal(
                 });
 
             return {
-              ok: true,
+              ok: true as const,
               idempotentReplay:
                 false,
               proposalConfirmed:
