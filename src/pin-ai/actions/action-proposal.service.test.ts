@@ -621,13 +621,18 @@ test(
       buildPinAIActionProposalFingerprint(
         base,
       );
+    const reorderedTerms =
+      Object.fromEntries(
+        Object.entries(
+          terms(),
+        ).reverse(),
+      );
+
     const reordered =
       buildPinAIActionProposalFingerprint({
         ...base,
-        termsSnapshot: {
-          currency: "usd",
-          ...terms(),
-        },
+        termsSnapshot:
+          reorderedTerms,
       });
     const spanish =
       buildPinAIActionProposalFingerprint({
