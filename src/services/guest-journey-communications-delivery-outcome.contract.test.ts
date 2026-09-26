@@ -67,7 +67,7 @@ test("provider webhook routes verify signatures before persisting outcomes", asy
   assert.match(source, /"svix-timestamp":\s*svixTimestamp/);
   assert.match(source, /"svix-signature":\s*svixSignature/);
   assert.match(source, /secret:\s*webhookSecret/);
-  assert.doesNotMatch(source, /webhookSecret,\s*\}\);/);
+  assert.doesNotMatch(source, /^\s*webhookSecret,\s*$/m);
   assert.match(source, /Twilio\.validateRequest\(/);
   assert.match(source, /x-twilio-signature/);
   assert.match(source, /recordMessageDeliveryOutcome\(/);
