@@ -25,6 +25,9 @@ type RuntimeReadPrisma = Readonly<{
   property: Readonly<{
     findFirst(args: unknown): Promise<any>;
   }>;
+  propertyReview: Readonly<{
+    aggregate(args: unknown): Promise<any>;
+  }>;
   reservation: Readonly<{
     findFirst(args: unknown): Promise<any>;
   }>;
