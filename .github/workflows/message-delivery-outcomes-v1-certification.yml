@@ -6,6 +6,7 @@ on:
       - "prisma/schema.prisma"
       - "prisma/migrations/20260926174500_add_message_delivery_outcomes_v1/**"
       - "src/services/guest-journey-communications-delivery-outcome.*"
+      - "src/workers/message-retry-provider-delivery.db.test.ts"
       - "src/routes/message-delivery.webhooks.routes.ts"
       - "src/integrations/twilio/twilio.client.ts"
       - "src/server.ts"
@@ -58,6 +59,11 @@ jobs:
         run: >-
           node --import tsx --test
           src/services/guest-journey-communications-delivery-outcome.db.test.ts
+
+      - name: PostgreSQL provider retry eligibility
+        run: >-
+          node --import tsx --test
+          src/workers/message-retry-provider-delivery.db.test.ts
 
       - name: Focused TypeScript certification
         run: npx tsc -p tsconfig.message-delivery-outcomes-v1.json
