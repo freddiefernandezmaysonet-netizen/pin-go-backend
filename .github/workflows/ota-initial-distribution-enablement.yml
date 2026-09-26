@@ -66,6 +66,33 @@ jobs:
             '.github/workflows/ota-initial-distribution-enablement.yml',
           }
           changed = set(Path('/tmp/ota-initial-changed.txt').read_text().splitlines())
+          if os.environ.get('GITHUB_HEAD_REF') == 'agent/message-delivery-outcomes-v1':
+            repo = 'freddiefernandezmaysonet-netizen/pin-go-backend'
+            if not (
+              os.environ.get('GITHUB_EVENT_NAME') == 'pull_request'
+              and os.environ.get('GITHUB_REPOSITORY') == repo
+              and os.environ.get('SCOPE_HEAD_REPO') == repo
+              and os.environ.get('SCOPE_BASE_REPO') == repo
+              and os.environ.get('GITHUB_BASE_REF') == 'main'
+            ):
+              raise SystemExit('Message Delivery Outcomes V1 repository/branch scope mismatch')
+            allowed = {
+              '.github/workflows/message-delivery-outcomes-v1-certification.yml',
+              '.github/workflows/ota-airbnb-listing-discovery.yml',
+              '.github/workflows/ota-initial-distribution-enablement.yml',
+              'prisma/migrations/20260926174500_add_message_delivery_outcomes_v1/migration.sql',
+              'prisma/schema.prisma',
+              'src/integrations/twilio/twilio.client.ts',
+              'src/routes/message-delivery.webhooks.routes.ts',
+              'src/server.ts',
+              'src/services/guest-journey-communications-delivery-outcome.contract.test.ts',
+              'src/services/guest-journey-communications-delivery-outcome.service.test.ts',
+              'src/services/guest-journey-communications-delivery-outcome.service.ts',
+              'tsconfig.message-delivery-outcomes-v1.json',
+            }
+            if changed != allowed:
+              raise SystemExit(f'Message Delivery Outcomes V1 exact twelve-file scope required: {sorted(changed ^ allowed)}')
+            raise SystemExit(0)
           if os.environ.get('GITHUB_HEAD_REF') == 'agent/listing-experience-tags-v1':
             repo = 'freddiefernandezmaysonet-netizen/pin-go-backend'
             if not (

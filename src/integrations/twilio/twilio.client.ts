@@ -8,6 +8,42 @@ function cleanEnv(v?: string) {
     .replace(/^["']|["']$/g, ""); // quita comillas al inicio/fin
 }
 
+export function resolveTwilioStatusCallback(
+  env: NodeJS.ProcessEnv = process.env
+): string | null {
+  if (env.MESSAGE_DELIVERY_WEBHOOKS_ENABLED !== "1") {
+    return null;
+  }
+
+  if (!cleanEnv(env.TWILIO_AUTH_TOKEN)) {
+    return null;
+  }
+
+  const raw =
+    cleanEnv(env.PUBLIC_API_BASE_URL) ||
+    cleanEnv(env.API_BASE_URL);
+
+  if (!raw) return null;
+
+  try {
+    const url = new URL(raw);
+
+    if (
+      env.NODE_ENV === "production" &&
+      url.protocol !== "https:"
+    ) {
+      return null;
+    }
+
+    return (
+      url.toString().replace(/\/+$/, "") +
+      "/webhooks/delivery/twilio"
+    );
+  } catch {
+    return null;
+  }
+}
+
 function getTwilioEnv() {
   const ACCOUNT_SID = cleanEnv(process.env.TWILIO_ACCOUNT_SID);
   const API_KEY = cleanEnv(process.env.TWILIO_API_KEY);
@@ -51,10 +87,16 @@ export async function sendSms(to: string, body: string) {
     accountSid: ACCOUNT_SID,
   });
 
+  const statusCallback =
+    resolveTwilioStatusCallback();
+
   const msg = await client.messages.create({
     from: FROM,
     to,
     body,
+    ...(statusCallback
+      ? { statusCallback }
+      : {}),
   });
 
   return { sid: msg.sid, status: msg.status };

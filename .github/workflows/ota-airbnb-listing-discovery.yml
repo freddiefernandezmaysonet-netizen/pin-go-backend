@@ -70,6 +70,32 @@ jobs:
           BASE_BRANCH="${GITHUB_BASE_REF:-main}"
           git fetch origin "+refs/heads/$BASE_BRANCH:refs/remotes/origin/$BASE_BRANCH" --depth=1
           git diff --name-only "origin/$BASE_BRANCH...HEAD" | sort > "$RUNNER_TEMP/actual.txt"
+          if [ "${GITHUB_HEAD_REF:-$GITHUB_REF_NAME}" = "agent/message-delivery-outcomes-v1" ]; then
+            test "$GITHUB_EVENT_NAME" = "pull_request"
+            test "$GITHUB_REPOSITORY" = "freddiefernandezmaysonet-netizen/pin-go-backend"
+            test "$SCOPE_HEAD_REPO" = "$GITHUB_REPOSITORY"
+            test "$SCOPE_BASE_REPO" = "$GITHUB_REPOSITORY"
+            test "$GITHUB_BASE_REF" = "main"
+            cat > "$RUNNER_TEMP/message-delivery-outcomes-v1-allowed.txt" <<'EOF'
+          .github/workflows/message-delivery-outcomes-v1-certification.yml
+          .github/workflows/ota-airbnb-listing-discovery.yml
+          .github/workflows/ota-initial-distribution-enablement.yml
+          prisma/migrations/20260926174500_add_message_delivery_outcomes_v1/migration.sql
+          prisma/schema.prisma
+          src/integrations/twilio/twilio.client.ts
+          src/routes/message-delivery.webhooks.routes.ts
+          src/server.ts
+          src/services/guest-journey-communications-delivery-outcome.contract.test.ts
+          src/services/guest-journey-communications-delivery-outcome.service.test.ts
+          src/services/guest-journey-communications-delivery-outcome.service.ts
+          tsconfig.message-delivery-outcomes-v1.json
+          EOF
+            sort "$RUNNER_TEMP/message-delivery-outcomes-v1-allowed.txt" -o "$RUNNER_TEMP/message-delivery-outcomes-v1-allowed.txt"
+            diff -u "$RUNNER_TEMP/message-delivery-outcomes-v1-allowed.txt" "$RUNNER_TEMP/actual.txt"
+            echo "Message Delivery Outcomes V1 exact non-OTA schema scope verified."
+            exit 0
+          fi
+
           if [ "${GITHUB_HEAD_REF:-$GITHUB_REF_NAME}" = "agent/listing-experience-tags-v1" ]; then
             test "$GITHUB_EVENT_NAME" = "pull_request"
             test "$GITHUB_REPOSITORY" = "freddiefernandezmaysonet-netizen/pin-go-backend"
