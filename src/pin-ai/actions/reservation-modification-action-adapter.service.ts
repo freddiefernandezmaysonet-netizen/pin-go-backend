@@ -6,13 +6,6 @@ import {
   type PrismaClient,
 } from "@prisma/client";
 
-import { prisma } from "../../lib/prisma.js";
-import {
-  applyGuestReservationModification,
-} from "../../services/guest-reservation-modification-apply.service.js";
-import {
-  createGuestReservationModificationCheckout,
-} from "../../services/guest-reservation-modification-checkout.service.js";
 import {
   confirmGuestReservationModification,
   getGuestReservationModificationPreview,
@@ -121,8 +114,21 @@ export type PinAIReservationModificationActionAdapterDependencies =
     createProposal: typeof createPinAIActionProposal;
     supersedeProposal: typeof supersedePinAIActionProposal;
     confirmModification: typeof confirmGuestReservationModification;
-    createCheckout: typeof createGuestReservationModificationCheckout;
-    applyModification: typeof applyGuestReservationModification;
+    createCheckout: (input: Readonly<{
+      guestToken: string;
+      modificationId: string;
+    }>) => Promise<Readonly<{
+      checkoutUrl: string | null;
+      checkoutExpiresAt: Date;
+    }>>;
+    applyModification: (input: Readonly<{
+      modificationId: string;
+    }>) => Promise<Readonly<{
+      modification: Readonly<{
+        id: string;
+        status: ReservationModificationStatus;
+      }>;
+    }>>;
     now: () => Date;
   }>;
 
@@ -253,6 +259,18 @@ function date(
       parsed.getTime(),
     )
   ) {
+    return fail(
+      "INVALID_QUOTE_TERMS",
+      409,
+    );
+  }
+
+  return parsed;
+}
+
+function signedInteger(value: unknown) {
+  const parsed = Number(value);
+  if (!Number.isSafeInteger(parsed)) {
     return fail(
       "INVALID_QUOTE_TERMS",
       409,
@@ -632,7 +650,7 @@ function parseTerms(
           1,
         ),
       amountDifferenceCents:
-        Number(
+        signedInteger(
           pricing
             .amountDifferenceCents,
         ),
@@ -1503,21 +1521,3 @@ export class PinAIReservationModificationActionAdapter {
   }
 }
 
-export function createPinAIReservationModificationActionAdapter() {
-  return new PinAIReservationModificationActionAdapter({
-    prisma,
-    getPreview:
-      getGuestReservationModificationPreview,
-    createProposal:
-      createPinAIActionProposal,
-    supersedeProposal:
-      supersedePinAIActionProposal,
-    confirmModification:
-      confirmGuestReservationModification,
-    createCheckout:
-      createGuestReservationModificationCheckout,
-    applyModification:
-      applyGuestReservationModification,
-    now: () => new Date(),
-  });
-}
