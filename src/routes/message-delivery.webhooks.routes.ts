@@ -109,14 +109,14 @@ export function buildMessageDeliveryWebhookRouter(
           clean(env.RESEND_API_KEY) || "re_webhook_verification_only"
         );
 
-        event = await (resend as any).webhooks.verify({
+        event = resend.webhooks.verify({
           payload: rawBody,
           headers: {
-            "svix-id": svixId,
-            "svix-timestamp": svixTimestamp,
-            "svix-signature": svixSignature,
+            id: svixId,
+            timestamp: svixTimestamp,
+            signature: svixSignature,
           },
-          secret: webhookSecret,
+          webhookSecret,
         });
       } catch {
         return res.status(403).json({
