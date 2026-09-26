@@ -165,9 +165,26 @@ function createPrisma(
           return false;
         }
         if (
+          where.propertyId &&
+          candidate.propertyId !==
+            where.propertyId
+        ) {
+          return false;
+        }
+        if (
           where.property?.status &&
           candidate.property.status !==
             where.property.status
+        ) {
+          return false;
+        }
+        if (
+          where.property
+            ?.organizationId &&
+          candidate.property
+            .organizationId !==
+            where.property
+              .organizationId
         ) {
           return false;
         }
@@ -1200,6 +1217,60 @@ test(
         .proposal.confirmedAt
         ?.toISOString(),
       confirmedAt.toISOString(),
+    );
+  },
+);
+
+test(
+  "internal supersede verifies canonical reservation tenant scope",
+  async () => {
+    const fixture =
+      createPrisma();
+    const created =
+      await createProposal(
+        fixture,
+      );
+
+    fixture.reservations[0]
+      .property.organizationId =
+      "organization-b";
+
+    await assert.rejects(
+      () =>
+        supersedePinAIActionProposal({
+          prisma:
+            fixture.prisma,
+          organizationId:
+            "organization-a",
+          propertyId:
+            "property-a",
+          reservationId:
+            "reservation-a",
+          proposalId:
+            created.proposal.id,
+          expectedProposalFingerprint:
+            created.proposal
+              .proposalFingerprint,
+          now: NOW,
+        }),
+      (error: unknown) =>
+        error instanceof
+          PinAIActionProposalError &&
+        error.code ===
+          "PROPOSAL_SCOPE_MISMATCH" &&
+        error.statusCode === 404,
+    );
+
+    assert.equal(
+      fixture.proposals[0]
+        .status,
+      PinAIActionProposalStatus
+        .PENDING_CONFIRMATION,
+    );
+    assert.equal(
+      fixture.proposals[0]
+        .supersededAt,
+      null,
     );
   },
 );
