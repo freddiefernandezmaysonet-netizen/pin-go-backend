@@ -24,3 +24,13 @@ test("server registers the dedicated listing-details router", () => {
   assert.match(serverSource, /buildDashboardPropertyListingDetailsRouter/);
   assert.match(serverSource, /app\.use\(buildDashboardPropertyListingDetailsRouter\(prisma\)\)/);
 });
+
+
+test("listing-details GET includes active discovery features", () => {
+  assert.match(routeSource, /features:\s*\{[\s\S]*where:\s*\{\s*isActive:\s*true\s*\}[\s\S]*orderBy:\s*\{\s*sortOrder:\s*"asc"/);
+});
+
+test("listing-details PUT replaces discovery features transactionally", () => {
+  assert.match(routeSource, /propertyListingFeature\.deleteMany\([\s\S]*listingDetailsId:\s*details\.id/);
+  assert.match(routeSource, /propertyListingFeature\.createMany\([\s\S]*features\.map/);
+});
