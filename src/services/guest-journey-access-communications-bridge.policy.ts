@@ -52,9 +52,23 @@ export function hasGuestSmsConsent(externalRaw: unknown): boolean {
   if (!externalRaw || typeof externalRaw !== "object" || Array.isArray(externalRaw)) return false;
   const consent = (externalRaw as Record<string, unknown>).consent;
   if (!consent || typeof consent !== "object" || Array.isArray(consent)) return false;
+
   const record = consent as Record<string, unknown>;
-  return Boolean(clean(record.acceptedAt)) &&
-    (record.smsConsent === true || record.stayNotificationsConsent === true);
+  const optedIn =
+    record.smsConsent === true ||
+    record.stayNotificationsConsent === true;
+
+  if (!optedIn) return false;
+  if (Boolean(clean(record.acceptedAt))) return true;
+
+  // Historical Direct Booking recovery:
+  // stayNotificationsConsent was durably persisted, but acceptedAt was
+  // incorrectly derived only from smsConsent by the legacy mapper.
+  return (
+    record.stayNotificationsConsent === true &&
+    clean(record.consentSource) === "DIRECT_BOOKING_WEB_FORM" &&
+    clean(record.consentVersion) === "stay_notifications_v1"
+  );
 }
 
 function resolveLanguage(value: string | null): "es" | "en" {

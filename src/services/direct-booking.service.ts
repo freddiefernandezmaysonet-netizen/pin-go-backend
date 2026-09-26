@@ -545,6 +545,9 @@ export async function handleDirectBookingCheckoutCompleted(
   const smsConsent =
     String(session.metadata?.smsConsent ?? "").trim() === "true";
 
+  const effectiveSmsConsent =
+    smsConsent || stayNotificationsConsent;
+
   const consentSource =
     String(session.metadata?.consentSource ?? "").trim() ||
     "DIRECT_BOOKING_WEB_FORM";
@@ -1012,7 +1015,7 @@ const ingestResult = await ingestReservation({
   smsConsent,
   consentSource,
   consentVersion,
-  acceptedAt: smsConsent ? new Date().toISOString() : null,
+  acceptedAt: effectiveSmsConsent ? new Date().toISOString() : null,
 },
     cancellationTerms: cancellationTermsAcceptance,
     propertyProtection: {
