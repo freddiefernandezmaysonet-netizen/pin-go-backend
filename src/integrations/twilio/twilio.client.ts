@@ -21,7 +21,8 @@ export function resolveTwilioStatusCallback(
 
   const raw =
     cleanEnv(env.PUBLIC_API_BASE_URL) ||
-    cleanEnv(env.API_BASE_URL);
+    cleanEnv(env.API_BASE_URL) ||
+    cleanEnv(env.PUBLIC_BASE_URL);
 
   if (!raw) return null;
 
