@@ -459,6 +459,7 @@ model PropertyListingDetails {
   sleepingAreas        PropertyListingSleepingArea[]
   sharedSpaces         PropertyListingSharedSpace[]
   features             PropertyListingFeature[]
+  experienceTags       PropertyListingExperienceTag[]
   safetyConsiderations PropertyListingSafetyConsideration[]
   additionalConsiderations PropertyListingAdditionalConsideration[]
 
@@ -508,6 +509,22 @@ model PropertyListingFeature {
   listingDetails PropertyListingDetails @relation(fields: [listingDetailsId], references: [id], onDelete: Cascade)
 
   @@unique([listingDetailsId, type])
+  @@index([listingDetailsId, isActive, sortOrder])
+}
+
+model PropertyListingExperienceTag {
+  id               String   @id @default(cuid())
+  listingDetailsId String
+  slug             String
+  label            String
+  isActive         Boolean  @default(true)
+  sortOrder        Int      @default(0)
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+
+  listingDetails PropertyListingDetails @relation(fields: [listingDetailsId], references: [id], onDelete: Cascade)
+
+  @@unique([listingDetailsId, slug])
   @@index([listingDetailsId, isActive, sortOrder])
 }
 
