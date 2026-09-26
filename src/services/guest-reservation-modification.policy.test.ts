@@ -6,6 +6,7 @@ import {
 } from "@prisma/client";
 import {
   assertGuestCountChangeAllowed,
+  buildGuestReservationModificationPreviewFingerprint,
   buildGuestReservationModificationRequestFingerprint,
   evaluateGuestReservationModificationReduction,
   getGuestReservationModificationInitialStatus,
@@ -145,6 +146,94 @@ test("rejects invalid dates before building an idempotency fingerprint", () => {
       }),
     /Missing or invalid check-in\/check-out dates/
   );
+});
+
+test("builds a stable quoted-preview fingerprint and binds material price terms", () => {
+  const preview = {
+    reservation: {
+      version: new Date("2026-10-01T12:00:00.000Z"),
+      currency: "USD",
+      current: {
+        checkIn: currentCheckIn,
+        checkOut: currentCheckOut,
+        adults: 2,
+        children: 0,
+        selectedAmenityIds: ["amenity-b", "amenity-a"],
+        totalAmountCents: 35_335,
+      },
+      proposed: {
+        checkIn: currentCheckIn,
+        checkOut: new Date("2026-10-16T15:00:00.000Z"),
+        adults: 2,
+        children: 0,
+        selectedAmenityIds: ["amenity-a", "amenity-b"],
+      },
+    },
+    changes: {
+      datesChanged: true,
+      guestsChanged: false,
+      amenitiesChanged: false,
+      hasChanges: true,
+      requiresSecurePreCheckinRefresh: false,
+    },
+    pricing: {
+      proposed: {
+        totalAmountCents: 52_185,
+        totalAmount: 521.85,
+        taxes: [
+          { name: "Tax B", amount: 20 },
+          { name: "Tax A", amount: 10 },
+        ],
+      },
+      amountDifferenceCents: 16_850,
+      financialAction: "ADDITIONAL_PAYMENT_REQUIRED",
+      reductionPolicy: {
+        outcome: "NOT_APPLICABLE",
+        nonRefundableReasons: [],
+        requiresHostApproval: false,
+        refundableReductionAmountCents: 0,
+      },
+    },
+  };
+
+  const first = buildGuestReservationModificationPreviewFingerprint(preview);
+  const reordered = buildGuestReservationModificationPreviewFingerprint({
+    ...preview,
+    reservation: {
+      ...preview.reservation,
+      current: {
+        ...preview.reservation.current,
+        selectedAmenityIds: ["amenity-a", "amenity-b"],
+      },
+    },
+    pricing: {
+      ...preview.pricing,
+      proposed: {
+        taxes: [
+          { amount: 20, name: "Tax B" },
+          { amount: 10, name: "Tax A" },
+        ],
+        totalAmount: 521.85,
+        totalAmountCents: 52_185,
+      },
+    },
+  });
+  const changedPrice = buildGuestReservationModificationPreviewFingerprint({
+    ...preview,
+    pricing: {
+      ...preview.pricing,
+      proposed: {
+        ...(preview.pricing.proposed as Record<string, unknown>),
+        totalAmountCents: 53_455,
+        totalAmount: 534.55,
+      },
+      amountDifferenceCents: 18_120,
+    },
+  });
+
+  assert.match(first, /^[a-f0-9]{64}$/);
+  assert.equal(first, reordered);
+  assert.notEqual(first, changedPrice);
 });
 
 test("maps every financial action to its durable initial status", () => {
