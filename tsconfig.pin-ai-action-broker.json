@@ -1,0 +1,19 @@
+{
+  "compilerOptions": {
+    "noEmit": true,
+    "module": "preserve",
+    "moduleResolution": "bundler",
+    "target": "esnext",
+    "strict": true,
+    "skipLibCheck": true,
+    "types": ["node"],
+    "exactOptionalPropertyTypes": false,
+    "noUncheckedIndexedAccess": false
+  },
+  "include": [
+    "src/pin-ai/actions/action-broker.service.ts",
+    "src/pin-ai/actions/action-broker.service.test.ts",
+    "src/pin-ai/actions/action-broker.composition.ts",
+    "src/pin-ai/actions/action-broker.composition.test.ts"
+  ]
+}

@@ -4,6 +4,9 @@ import type { AddressInfo } from "node:net";
 import test from "node:test";
 import express from "express";
 
+import {
+  PinAIActionProposalError,
+} from "../pin-ai/actions/action-proposal.service.js";
 import { createConversationMemory } from "../pin-ai/runtime/conversation-memory.js";
 import type { GuestPinAIGatewayPrisma } from "../pin-ai/guest/guest-runtime-gateway.js";
 import { buildPublicBookingPinAIRouter } from "./public-booking.pin-ai.routes.js";
@@ -214,6 +217,98 @@ async function request(body: unknown, enabled = true) {
   }
 }
 
+async function requestAction(
+  body: unknown,
+  options: Readonly<{
+    enabled?: boolean;
+    broker?: Readonly<{
+      confirmAndExecute(
+        input: Readonly<{
+          guestToken: unknown;
+          proposalId: unknown;
+          confirmationToken: unknown;
+        }>,
+      ): Promise<unknown>;
+    }>;
+  }> = {},
+) {
+  const app = express();
+  app.use(express.json());
+  app.use(
+    "/api/public-booking",
+    buildPublicBookingPinAIRouter({
+      prisma: createPrisma(),
+      env: {
+        PIN_AI_GUEST_GATEWAY_ENABLED:
+          "true",
+        PIN_AI_ACTION_BROKER_ENABLED:
+          options.enabled === false
+            ? "false"
+            : "true",
+      },
+      runtime: async (runtimeRequest) => ({
+        mode: "SHADOW",
+        request: runtimeRequest,
+        memory:
+          createConversationMemory(
+            runtimeRequest,
+          ),
+        response: {
+          responseText:
+            "I can check that for you.",
+          openaiSessionId:
+            "session_route_test",
+          toolCalls: [],
+          escalationCreated:
+            false,
+          requiresHumanReview:
+            false,
+        },
+        actionsExecuted: false,
+      }),
+      actionBroker:
+        options.broker as never,
+      now: () =>
+        new Date(
+          "2026-09-21T16:00:00.000Z",
+        ),
+    }),
+  );
+
+  const server =
+    await new Promise<Server>(
+      (resolve) => {
+        const listener =
+          app.listen(
+            0,
+            "127.0.0.1",
+            () =>
+              resolve(listener),
+          );
+      },
+    );
+  const address =
+    server.address() as AddressInfo;
+
+  try {
+    return await fetch(
+      `http://127.0.0.1:${address.port}/api/public-booking/manage/${token}/pin-ai/action-proposals/proposal-12345678/confirm`,
+      {
+        method: "POST",
+        headers: {
+          Connection: "close",
+          "Content-Type":
+            "application/json",
+        },
+        body:
+          JSON.stringify(body),
+      },
+    );
+  } finally {
+    await closeServer(server);
+  }
+}
+
 test("returns a minimal no-store shadow response without internal tool data", async () => {
   const response = await request({ message: "What time is checkout?" });
   assert.equal(response.status, 200);
@@ -252,3 +347,233 @@ test("returns a controlled 503 while the guest gateway flag is disabled", async 
     error: "PIN_AI_UNAVAILABLE",
   });
 });
+
+
+test(
+  "keeps guest actions disabled behind an independent default-off flag",
+  async () => {
+    let calls = 0;
+    const response =
+      await requestAction(
+        {
+          confirmationToken:
+            "confirmation-token-private-123456789012345",
+        },
+        {
+          enabled: false,
+          broker: {
+            async confirmAndExecute() {
+              calls += 1;
+              return {};
+            },
+          },
+        },
+      );
+
+    assert.equal(
+      response.status,
+      503,
+    );
+    assert.equal(calls, 0);
+    assert.equal(
+      response.headers.get(
+        "cache-control",
+      ),
+      "no-store",
+    );
+    assert.deepEqual(
+      await response.json(),
+      {
+        ok: false,
+        error:
+          "PIN_AI_ACTIONS_UNAVAILABLE",
+      },
+    );
+  },
+);
+
+test(
+  "confirms through the broker with only server-route credentials and returns structured action state",
+  async () => {
+    let received:
+      Record<string, unknown> | null =
+      null;
+
+    const response =
+      await requestAction(
+        {
+          confirmationToken:
+            "confirmation-token-private-123456789012345",
+        },
+        {
+          broker: {
+            async confirmAndExecute(
+              input,
+            ) {
+              received = {
+                ...input,
+              };
+
+              return {
+                ok: true,
+                actionType:
+                  "RESERVATION_MODIFICATION",
+                proposalId:
+                  "proposal-12345678",
+                outcome:
+                  "WAITING_FOR_PAYMENT",
+                actionExecuted:
+                  false,
+                quoteExpiresAt:
+                  new Date(
+                    "2026-09-26T15:00:00.000Z",
+                  ),
+                quoteExpiresAtLocal:
+                  "2026-09-26T11:00:00-04:00",
+                propertyTimezone:
+                  "America/Puerto_Rico",
+                availabilityHeld:
+                  false,
+                modificationId:
+                  "modification-12345678",
+                modificationStatus:
+                  "AWAITING_PAYMENT",
+                checkoutUrl:
+                  "https://checkout.stripe.test/session",
+                paymentExpiresAt:
+                  new Date(
+                    "2026-09-26T15:20:00.000Z",
+                  ),
+                amountDifference:
+                  168.5,
+                amountDifferenceCents:
+                  16_850,
+                currency: "usd",
+                reasonCode: null,
+              };
+            },
+          },
+        },
+      );
+
+    assert.equal(
+      response.status,
+      200,
+    );
+    assert.deepEqual(
+      received,
+      {
+        guestToken: token,
+        proposalId:
+          "proposal-12345678",
+        confirmationToken:
+          "confirmation-token-private-123456789012345",
+      },
+    );
+
+    const payload =
+      await response.json() as {
+        action: {
+          outcome: string;
+          actionExecuted:
+            boolean;
+          checkoutUrl:
+            string;
+          availabilityHeld:
+            boolean;
+        };
+      };
+
+    assert.equal(
+      payload.action.outcome,
+      "WAITING_FOR_PAYMENT",
+    );
+    assert.equal(
+      payload.action
+        .actionExecuted,
+      false,
+    );
+    assert.equal(
+      payload.action
+        .availabilityHeld,
+      false,
+    );
+    assert.equal(
+      payload.action.checkoutUrl,
+      "https://checkout.stripe.test/session",
+    );
+  },
+);
+
+test(
+  "rejects extra action-confirmation fields before the broker is called",
+  async () => {
+    let calls = 0;
+    const response =
+      await requestAction(
+        {
+          confirmationToken:
+            "confirmation-token-private-123456789012345",
+          execute: true,
+        },
+        {
+          broker: {
+            async confirmAndExecute() {
+              calls += 1;
+              return {};
+            },
+          },
+        },
+      );
+
+    assert.equal(
+      response.status,
+      400,
+    );
+    assert.equal(calls, 0);
+    assert.deepEqual(
+      await response.json(),
+      {
+        ok: false,
+        error:
+          "INVALID_REQUEST",
+      },
+    );
+  },
+);
+
+test(
+  "maps a wrong confirmation token to a controlled 403 without exposing internals",
+  async () => {
+    const response =
+      await requestAction(
+        {
+          confirmationToken:
+            "wrong-confirmation-token-123456789012345",
+        },
+        {
+          broker: {
+            async confirmAndExecute() {
+              throw new PinAIActionProposalError(
+                "PROPOSAL_TOKEN_MISMATCH",
+                403,
+              );
+            },
+          },
+        },
+      );
+
+    assert.equal(
+      response.status,
+      403,
+    );
+    assert.deepEqual(
+      await response.json(),
+      {
+        ok: false,
+        error:
+          "INVALID_CONFIRMATION",
+      },
+    );
+  },
+);
