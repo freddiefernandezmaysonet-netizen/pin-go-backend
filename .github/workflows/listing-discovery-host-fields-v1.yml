@@ -1,0 +1,38 @@
+name: Listing Discovery Host Fields V1
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - "src/services/property-listing-details.service.ts"
+      - "src/services/property-listing-details.service.test.ts"
+      - "src/routes/dashboard.property-listing-details.routes.ts"
+      - "src/routes/dashboard.property-listing-details.routes.test.ts"
+      - ".github/workflows/listing-discovery-host-fields-v1.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  certify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      DATABASE_URL: postgresql://ci:ci@127.0.0.1:5432/pingo_schema_validation
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+      - run: npm ci --ignore-scripts --no-audit --no-fund
+      - run: npx prisma generate
+      - name: Run focused Listing Details host-field tests
+        run: npm run test:property-listing-details-v1
+      - name: Compile focused modules
+        run: |
+          node --import tsx -e "await import('./src/services/property-listing-details.service.ts')"
+          node --import tsx -e "await import('./src/routes/dashboard.property-listing-details.routes.ts')"
