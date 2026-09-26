@@ -1132,15 +1132,17 @@ export async function confirmPinAIActionProposal(
           },
         );
 
-      if (
+      const deferredError =
         "deferredError" in
-        transactionResult
-      ) {
+          transactionResult
+          ? transactionResult
+              .deferredError
+          : undefined;
+
+      if (deferredError) {
         return fail(
-          transactionResult
-            .deferredError.code,
-          transactionResult
-            .deferredError.statusCode,
+          deferredError.code,
+          deferredError.statusCode,
         );
       }
 
