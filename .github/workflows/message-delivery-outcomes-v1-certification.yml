@@ -20,6 +20,20 @@ jobs:
   certify-message-delivery-outcomes-v1:
     runs-on: ubuntu-latest
     timeout-minutes: 15
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: ci
+          POSTGRES_PASSWORD: ci
+          POSTGRES_DB: pin_go_message_delivery_outcomes
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U ci -d pin_go_message_delivery_outcomes"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
     env:
       DATABASE_URL: postgresql://ci:ci@127.0.0.1:5432/pin_go_message_delivery_outcomes
     steps:
@@ -31,12 +45,19 @@ jobs:
 
       - run: npm ci
       - run: npx prisma generate --schema prisma/schema.prisma
+      - name: Apply migrations to ephemeral PostgreSQL
+        run: npx prisma migrate deploy --schema prisma/schema.prisma
 
       - name: Delivery outcome unit and contract tests
         run: >-
           node --import tsx --test
           src/services/guest-journey-communications-delivery-outcome.service.test.ts
           src/services/guest-journey-communications-delivery-outcome.contract.test.ts
+
+      - name: PostgreSQL delivery outcome persistence
+        run: >-
+          node --import tsx --test
+          src/services/guest-journey-communications-delivery-outcome.db.test.ts
 
       - name: Focused TypeScript certification
         run: npx tsc -p tsconfig.message-delivery-outcomes-v1.json
