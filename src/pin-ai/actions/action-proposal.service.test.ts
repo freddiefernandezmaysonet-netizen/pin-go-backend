@@ -217,12 +217,27 @@ function createPrisma(
     ) {
       return false;
     }
-    if (
-      where.status &&
-      proposal.status !==
+    if (where.status) {
+      if (
+        typeof where.status ===
+          "object" &&
+        Array.isArray(
+          where.status.in,
+        )
+      ) {
+        if (
+          !where.status.in.includes(
+            proposal.status,
+          )
+        ) {
+          return false;
+        }
+      } else if (
+        proposal.status !==
         where.status
-    ) {
-      return false;
+      ) {
+        return false;
+      }
     }
     if (
       where.proposalFingerprint &&
