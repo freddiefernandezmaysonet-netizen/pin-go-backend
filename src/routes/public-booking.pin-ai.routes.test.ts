@@ -8,7 +8,10 @@ import {
   PinAIActionProposalError,
 } from "../pin-ai/actions/action-proposal.service.js";
 import { createConversationMemory } from "../pin-ai/runtime/conversation-memory.js";
-import type { GuestPinAIGatewayPrisma } from "../pin-ai/guest/guest-runtime-gateway.js";
+import type {
+  GuestPinAIGatewayPrisma,
+  GuestPinAIRuntimeRunner,
+} from "../pin-ai/guest/guest-runtime-gateway.js";
 import { buildPublicBookingPinAIRouter } from "./public-booking.pin-ai.routes.js";
 
 const token = "12345678-1234-1234-1234-123456789abc";
