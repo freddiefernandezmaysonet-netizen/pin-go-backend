@@ -79,6 +79,7 @@ jobs:
             cat > "$RUNNER_TEMP/message-delivery-outcomes-v1-allowed.txt" <<'EOF'
           .github/workflows/message-delivery-outcomes-v1-certification.yml
           .github/workflows/ota-airbnb-listing-discovery.yml
+          .github/workflows/ota-initial-distribution-enablement.yml
           prisma/migrations/20260926174500_add_message_delivery_outcomes_v1/migration.sql
           prisma/schema.prisma
           src/integrations/twilio/twilio.client.ts
