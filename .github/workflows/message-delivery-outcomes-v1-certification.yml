@@ -8,6 +8,8 @@ on:
       - "src/services/guest-journey-communications-delivery-outcome.*"
       - "src/workers/message-retry-provider-delivery.db.test.ts"
       - "src/routes/message-delivery.webhooks.routes.ts"
+      - "src/routes/dashboard.messages.routes.ts"
+      - "src/routes/dashboard.messages.delivery-outcome.contract.test.ts"
       - "src/integrations/twilio/twilio.client.ts"
       - "src/server.ts"
       - "tsconfig.message-delivery-outcomes-v1.json"
@@ -54,6 +56,7 @@ jobs:
           node --import tsx --test
           src/services/guest-journey-communications-delivery-outcome.service.test.ts
           src/services/guest-journey-communications-delivery-outcome.contract.test.ts
+          src/routes/dashboard.messages.delivery-outcome.contract.test.ts
 
       - name: PostgreSQL delivery outcome persistence
         run: >-
