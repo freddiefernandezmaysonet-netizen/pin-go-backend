@@ -647,6 +647,20 @@ export type ConfirmPinAIActionProposalResult =
     >;
   }>;
 
+type ConfirmPinAIActionProposalTransactionResult =
+  | Readonly<{
+      kind: "SUCCESS";
+      result:
+        ConfirmPinAIActionProposalResult;
+    }>
+  | Readonly<{
+      kind: "DEFERRED_ERROR";
+      code:
+        | "PROPOSAL_EXPIRED"
+        | "PROPOSAL_SUPERSEDED";
+      statusCode: number;
+    }>;
+
 export async function createPinAIActionProposal(
   input:
     CreatePinAIActionProposalInput,
@@ -958,7 +972,11 @@ export async function confirmPinAIActionProposal(
       const transactionResult =
         await input.prisma
           .$transaction(
-          async (db) => {
+          async (
+            db,
+          ): Promise<
+            ConfirmPinAIActionProposalTransactionResult
+          > => {
             const reservationId =
               await lockReservationByGuestToken(
                 db,
@@ -1029,17 +1047,21 @@ export async function confirmPinAIActionProposal(
                 .CONFIRMED
             ) {
               return {
-                ok: true as const,
-                idempotentReplay:
-                  true,
-                proposalConfirmed:
-                  true as const,
-                actionExecuted:
-                  false as const,
-                proposal:
-                  publicProposal(
-                    proposal,
-                  ),
+                kind:
+                  "SUCCESS",
+                result: {
+                  ok: true,
+                  idempotentReplay:
+                    true,
+                  proposalConfirmed:
+                    true,
+                  actionExecuted:
+                    false,
+                  proposal:
+                    publicProposal(
+                      proposal,
+                    ),
+                },
               };
             }
 
@@ -1069,11 +1091,11 @@ export async function confirmPinAIActionProposal(
                   },
                 });
               return {
-                deferredError: {
-                  code:
-                    "PROPOSAL_EXPIRED" as const,
-                  statusCode: 410,
-                },
+                kind:
+                  "DEFERRED_ERROR",
+                code:
+                  "PROPOSAL_EXPIRED",
+                statusCode: 410,
               };
             }
 
@@ -1099,11 +1121,11 @@ export async function confirmPinAIActionProposal(
                   },
                 });
               return {
-                deferredError: {
-                  code:
-                    "PROPOSAL_SUPERSEDED" as const,
-                  statusCode: 409,
-                },
+                kind:
+                  "DEFERRED_ERROR",
+                code:
+                  "PROPOSAL_SUPERSEDED",
+                statusCode: 409,
               };
             }
 
@@ -1151,17 +1173,21 @@ export async function confirmPinAIActionProposal(
                 });
 
             return {
-              ok: true as const,
-              idempotentReplay:
-                false,
-              proposalConfirmed:
-                true as const,
-              actionExecuted:
-                false as const,
-              proposal:
-                publicProposal(
-                  proposal,
-                ),
+              kind:
+                "SUCCESS",
+              result: {
+                ok: true,
+                idempotentReplay:
+                  false,
+                proposalConfirmed:
+                  true,
+                actionExecuted:
+                  false,
+                proposal:
+                  publicProposal(
+                    proposal,
+                  ),
+              },
             };
           },
           {
@@ -1172,30 +1198,17 @@ export async function confirmPinAIActionProposal(
           },
         );
 
-      const deferredError =
-        "deferredError" in
-          transactionResult
-          ? transactionResult
-              .deferredError
-          : undefined;
-
-      if (deferredError) {
-        return fail(
-          deferredError.code,
-          deferredError.statusCode,
-        );
-      }
-
       if (
-        !("proposal" in
-          transactionResult)
+        transactionResult.kind ===
+        "DEFERRED_ERROR"
       ) {
         return fail(
-          "PROPOSAL_CONCURRENT_CHANGE",
+          transactionResult.code,
+          transactionResult.statusCode,
         );
       }
 
-      return transactionResult;
+      return transactionResult.result;
     } catch (error) {
       if (
         isRetryableTransactionError(
