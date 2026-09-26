@@ -39,6 +39,11 @@ jobs:
           node --import tsx --test
           src/services/guest-journey-access-communications-bridge.policy.test.ts
           src/services/precheckin-email-fallback.contract.test.ts
+      - name: Provider delivery regressions
+        run: >-
+          node --import tsx --test
+          src/workers/message-retry-provider-delivery.contract.test.ts
+          src/services/reservation-complete-flow-provider-delivery.contract.test.ts
       - name: Bundle worker integration boundaries
         run: |
           npx esbuild src/workers/reservation.worker.ts --bundle --platform=node --packages=external --outfile=/tmp/reservation.worker.e7.js

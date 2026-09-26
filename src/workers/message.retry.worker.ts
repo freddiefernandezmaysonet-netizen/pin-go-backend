@@ -323,7 +323,13 @@ async function processGuestAccessEmailRetries() {
       where: {
         channel: "email",
         provider: "resend",
-        status: "FAILED",
+        OR: [
+          { status: "FAILED" },
+          {
+            status: "SENT",
+            providerDeliveryStatus: "FAILED",
+          },
+        ],
         retryCount: {
           lt: MAX_RETRIES,
         },
@@ -488,6 +494,11 @@ async function processGuestAccessEmailRetries() {
         data: {
           status: "SENT",
           providerMessageId,
+          providerDeliveryStatus: null,
+          providerStatusUpdatedAt: null,
+          providerErrorCode: null,
+          providerErrorMessage: null,
+          deliveredAt: null,
           retryCount: {
             increment: 1,
           },
@@ -606,7 +617,13 @@ async function processManualCancellationEmailRetries() {
     where: {
       channel: "email",
       provider: "resend",
-      status: "FAILED",
+      OR: [
+        { status: "FAILED" },
+        {
+          status: "SENT",
+          providerDeliveryStatus: "FAILED",
+        },
+      ],
       retryCount: {
         lt: MAX_RETRIES,
       },
@@ -720,6 +737,11 @@ async function processManualCancellationEmailRetries() {
         data: {
           status: "SENT",
           providerMessageId,
+          providerDeliveryStatus: null,
+          providerStatusUpdatedAt: null,
+          providerErrorCode: null,
+          providerErrorMessage: null,
+          deliveredAt: null,
           retryCount: {
             increment: 1,
           },
@@ -828,7 +850,13 @@ async function processPropertyProtectionDamageNoticeRetries() {
     where: {
       channel: "email",
       provider: "resend",
-      status: "FAILED",
+      OR: [
+        { status: "FAILED" },
+        {
+          status: "SENT",
+          providerDeliveryStatus: "FAILED",
+        },
+      ],
       retryCount: { lt: MAX_RETRIES },
       communicationType: "PROPERTY_PROTECTION_GUEST_DAMAGE_NOTICE",
     },
@@ -945,6 +973,11 @@ async function processPropertyProtectionDamageNoticeRetries() {
           data: {
             status: "SENT",
             providerMessageId,
+            providerDeliveryStatus: null,
+            providerStatusUpdatedAt: null,
+            providerErrorCode: null,
+            providerErrorMessage: null,
+            deliveredAt: null,
             retryCount: { increment: 1 },
             error: null,
           },
@@ -1056,7 +1089,13 @@ async function processPropertyProtectionGuestClosureRetries() {
     where: {
       channel: "email",
       provider: "resend",
-      status: "FAILED",
+      OR: [
+        { status: "FAILED" },
+        {
+          status: "SENT",
+          providerDeliveryStatus: "FAILED",
+        },
+      ],
       retryCount: { lt: MAX_RETRIES },
       communicationType:
         "PROPERTY_PROTECTION_GUEST_NO_CHARGE_CLOSURE_NOTICE",
@@ -1172,6 +1211,11 @@ async function processPropertyProtectionGuestClosureRetries() {
         data: {
           status: "SENT",
           providerMessageId,
+          providerDeliveryStatus: null,
+          providerStatusUpdatedAt: null,
+          providerErrorCode: null,
+          providerErrorMessage: null,
+          deliveredAt: null,
           retryCount: { increment: 1 },
           error: null,
         },
@@ -1305,7 +1349,13 @@ async function processPropertyProtectionHostResponseRetries() {
     where: {
       channel: "email",
       provider: "resend",
-      status: "FAILED",
+      OR: [
+        { status: "FAILED" },
+        {
+          status: "SENT",
+          providerDeliveryStatus: "FAILED",
+        },
+      ],
       retryCount: { lt: MAX_RETRIES },
       communicationType:
         "PROPERTY_PROTECTION_HOST_GUEST_RESPONSE_NOTICE",
@@ -1430,6 +1480,11 @@ async function processPropertyProtectionHostResponseRetries() {
         data: {
           status: "SENT",
           providerMessageId,
+          providerDeliveryStatus: null,
+          providerStatusUpdatedAt: null,
+          providerErrorCode: null,
+          providerErrorMessage: null,
+          deliveredAt: null,
           retryCount: { increment: 1 },
           error: null,
         },
