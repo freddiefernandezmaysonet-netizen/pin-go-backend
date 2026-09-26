@@ -224,6 +224,19 @@ function isFailureStatus(value: unknown) {
   return status === "FAILED" || status === "ERROR" || status === "BOUNCED";
 }
 
+function isTerminalProviderDeliveryFailure(value: unknown) {
+  const status = normalizeText(value);
+
+  return [
+    "FAILED",
+    "BOUNCED",
+    "SUPPRESSED",
+    "COMPLAINED",
+    "UNDELIVERED",
+    "CANCELED",
+  ].includes(status);
+}
+
 function getAuditSearchText(entry: StoredAuditEntry) {
   return [
     entry.engine,
@@ -496,18 +509,57 @@ function hasMessageEvidence(input: {
     status: string;
     createdAt: Date;
   }>;
- messageLogs: Array<{
-  channel: string;
-  to: string;
-  body: string;
-  status: string | null;
-  error: string | null;
-  createdAt: Date;
-}>;
+  messageLogs: Array<{
+    channel: string;
+    to: string;
+    body: string;
+    status: string | null;
+    providerDeliveryStatus: string | null;
+    error: string | null;
+    createdAt: Date;
+  }>;
   tokens: string[];
   expectedTo?: string | null;
 }) {
   const tokens = input.tokens.map(normalizeText).filter(Boolean);
+  const expectedTo = String(input.expectedTo ?? "").trim().toLowerCase();
+
+  // MessageLog is the provider-correlated source of truth when present.
+  // The query is ordered newest-first, so the first matching log represents
+  // the latest known attempt/evidence for this communication.
+  const matchingMessageLog = input.messageLogs.find((log) => {
+    const channel = normalizeText(log.channel);
+    const recipientMatches =
+      !expectedTo || String(log.to ?? "").trim().toLowerCase() === expectedTo;
+
+    const searchText = [
+      log.channel,
+      log.to,
+      log.status,
+      log.error,
+      log.body,
+    ]
+      .join(" ")
+      .toUpperCase();
+
+    return (
+      channel === "EMAIL" &&
+      recipientMatches &&
+      tokens.every((token) => searchText.includes(token))
+    );
+  });
+
+  if (matchingMessageLog) {
+    if (
+      isTerminalProviderDeliveryFailure(
+        matchingMessageLog.providerDeliveryStatus
+      )
+    ) {
+      return false;
+    }
+
+    return isSuccessStatus(matchingMessageLog.status);
+  }
 
   const matchingAuditEntry = input.auditEntries.some((entry) => {
     if (normalizeText(entry.engine) !== "MESSAGING") return false;
@@ -529,35 +581,7 @@ function hasMessageEvidence(input: {
       isSuccessStatus(log.status);
   });
 
-  if (matchingDispatchLog) return true;
-
-  const expectedTo = String(input.expectedTo ?? "").trim().toLowerCase();
-
-  const matchingMessageLog = input.messageLogs.some((log) => {
-  const channel = normalizeText(log.channel);
-  const statusOk = isSuccessStatus(log.status);
-  const recipientMatches =
-    !expectedTo || String(log.to ?? "").trim().toLowerCase() === expectedTo;
-
-  const searchText = [
-    log.channel,
-    log.to,
-    log.status,
-    log.error,
-    (log as any).body,
-  ]
-    .join(" ")
-    .toUpperCase();
-
-  return (
-    channel === "EMAIL" &&
-    statusOk &&
-    recipientMatches &&
-    tokens.every((token) => searchText.includes(token))
-  );
-});
-
-return matchingMessageLog;
+  return matchingDispatchLog;
 }
 
 export async function auditReservationCompleteFlow(
@@ -988,6 +1012,7 @@ const guestConfirmationEmailEvidenceRequired =
     to: true,
     body: true,
     status: true,
+    providerDeliveryStatus: true,
     error: true,
     createdAt: true,
   },
