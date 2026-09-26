@@ -75,3 +75,40 @@ test("saved-agent manifest preserves shadow truthfulness instructions", () => {
   assert.match(PIN_AI_OPENAI_AGENT_INSTRUCTIONS, /cancellation-policy results/i);
   assert.match(PIN_AI_OPENAI_AGENT_INSTRUCTIONS, /payment context as read-only/i);
 });
+
+test("action proposal tool stays absent from the default saved-agent manifest", () => {
+  const tools = buildPinAIOpenAITools();
+  assert.equal(
+    tools.some(
+      (tool) =>
+        tool.type === "function" &&
+        tool.name === "prepare_reservation_modification"
+    ),
+    false,
+  );
+});
+
+test("action proposal tool and guest-confirmation instructions appear only behind the explicit gate", () => {
+  const config = buildPinAIOpenAIAgentConfig(
+    undefined,
+    { enabled: true },
+  );
+  const tools = Array.isArray(config.tools)
+    ? config.tools as Array<Record<string, unknown>>
+    : [];
+  const instructions = String(config.instructions ?? "");
+
+  assert.equal(
+    tools.some(
+      (tool) =>
+        tool.type === "function" &&
+        tool.name === "prepare_reservation_modification"
+    ),
+    true,
+  );
+  assert.match(instructions, /exact quote expiration/i);
+  assert.match(instructions, /availability is not held/i);
+  assert.match(instructions, /confirmation control/i);
+  assert.match(instructions, /Never ask the guest to type or repeat a confirmation token/i);
+  assert.match(instructions, /actionExecuted=true/i);
+});
