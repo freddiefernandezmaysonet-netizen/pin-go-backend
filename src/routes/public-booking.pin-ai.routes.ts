@@ -9,6 +9,9 @@ import {
 import {
   PinAIActionProposalError,
 } from "../pin-ai/actions/action-proposal.service.js";
+import {
+  resolvePinAIActionCanaryScope,
+} from "../pin-ai/actions/action-canary-scope.js";
 
 import {
   createGuestPinAIRuntimeRunner,
@@ -102,6 +105,55 @@ export function buildPublicBookingPinAIRouter(input: Readonly<{
           return res.status(400).json({
             ok: false,
             error: "INVALID_REQUEST",
+          });
+        }
+
+        const currentDateTime =
+          input.now?.() ??
+          new Date();
+        const reservation =
+          await input.prisma
+            .reservation
+            .findFirst({
+              where: {
+                guestToken:
+                  req.params
+                    .guestToken,
+                guestTokenExpiresAt: {
+                  gt:
+                    currentDateTime,
+                },
+                status: "ACTIVE",
+                property: {
+                  status:
+                    "ACTIVE",
+                },
+              },
+              select: {
+                id: true,
+              },
+            });
+
+        if (!reservation) {
+          return res.status(404).json({
+            ok: false,
+            error:
+              "ACTION_PROPOSAL_NOT_FOUND",
+          });
+        }
+
+        const canary =
+          resolvePinAIActionCanaryScope({
+            reservationId:
+              reservation.id,
+            env,
+          });
+
+        if (!canary.enabled) {
+          return res.status(503).json({
+            ok: false,
+            error:
+              "PIN_AI_ACTIONS_UNAVAILABLE",
           });
         }
 
