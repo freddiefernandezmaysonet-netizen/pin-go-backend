@@ -5,6 +5,13 @@ export type PinAIActionCanaryReason =
   | "RESERVATION_NOT_SELECTED"
   | "CANARY_ACTIVE";
 
+export type PinAIActionCanaryEnvironment =
+  Readonly<{
+    PIN_AI_ACTION_BROKER_ENABLED?: string;
+    PIN_AI_ACTION_PROPOSAL_TOOL_ENABLED?: string;
+    PIN_AI_ACTION_CANARY_RESERVATION_IDS?: string;
+  }>;
+
 export type PinAIActionCanaryResolution =
   Readonly<{
     enabled: boolean;
@@ -74,12 +81,8 @@ export function parsePinAIActionCanaryReservationIds(
 export function resolvePinAIActionCanaryScope(
   input: Readonly<{
     reservationId: unknown;
-    env: Pick<
-      NodeJS.ProcessEnv,
-      | "PIN_AI_ACTION_BROKER_ENABLED"
-      | "PIN_AI_ACTION_PROPOSAL_TOOL_ENABLED"
-      | "PIN_AI_ACTION_CANARY_RESERVATION_IDS"
-    >;
+    env:
+      PinAIActionCanaryEnvironment;
   }>,
 ): PinAIActionCanaryResolution {
   const reservationId =
