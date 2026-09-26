@@ -397,10 +397,8 @@ function consentText(
     );
   const difference =
     amountText(
-      Math.abs(
-        input.terms.pricing
-          .amountDifferenceCents,
-      ),
+      input.terms.pricing
+        .amountDifferenceCents,
       input.terms.currency,
       input.language,
     );
@@ -568,6 +566,30 @@ function parseTerms(
     );
   }
 
+  const propertyTimezone =
+    safeTimezone(
+      root.propertyTimezone,
+    );
+  const quoteExpiresAtLocal =
+    text(
+      root.quoteExpiresAtLocal,
+      "INVALID_QUOTE_TERMS",
+      80,
+    );
+
+  if (
+    quoteExpiresAtLocal !==
+    formatLocalExpiry(
+      new Date(quoteExpiresAt),
+      propertyTimezone,
+    )
+  ) {
+    return fail(
+      "INVALID_QUOTE_TERMS",
+      409,
+    );
+  }
+
   return {
     version:
       PIN_AI_RESERVATION_MODIFICATION_TERMS_VERSION,
@@ -576,16 +598,8 @@ function parseTerms(
     priceGuaranteedUntil,
     availabilityCheckedAt,
     availabilityHeld: false,
-    propertyTimezone:
-      safeTimezone(
-        root.propertyTimezone,
-      ),
-    quoteExpiresAtLocal:
-      text(
-        root.quoteExpiresAtLocal,
-        "INVALID_QUOTE_TERMS",
-        80,
-      ),
+    propertyTimezone,
+    quoteExpiresAtLocal,
     previewFingerprint,
     reservationVersion,
     currency,
