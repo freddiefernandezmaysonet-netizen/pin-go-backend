@@ -8,6 +8,7 @@ import {
 import type { PinAIConversationMemory } from "./conversation-memory.js";
 import {
   buildPinAIOpenAIAgentConfig,
+  type PinAIOpenAIActionProposalConfig,
   type PinAIOpenAIWebSearchConfig,
 } from "./openai-agent-config.js";
 import type { PinAIRuntimeToolExecutor } from "./tool-executor.js";
@@ -19,6 +20,7 @@ export type OpenAIRuntimeTransportConfig = Readonly<{
   resumeSessionId?: string;
   model: "gpt-5.6-luna";
   webSearch?: PinAIOpenAIWebSearchConfig;
+  actionProposal?: PinAIOpenAIActionProposalConfig;
   baseUrl?: string;
   maxPolls?: number;
   pollDelayMs?: number;
@@ -176,6 +178,17 @@ export class OpenAIAgentsRuntimeTransport {
               throw new Error("PIN_AI_RUNTIME_REQUIRED_ACTION_TURN_MISMATCH");
             }
             for (const action of session.requiredActions) {
+              if (
+                action.name ===
+                  "prepare_reservation_modification" &&
+                this.config.actionProposal
+                  ?.enabled !== true
+              ) {
+                throw new Error(
+                  "PIN_AI_RUNTIME_ACTION_PROPOSAL_TOOL_DISABLED",
+                );
+              }
+
               if (handledCallIds.has(action.callId)) {
                 throw new Error(
                   `PIN_AI_RUNTIME_DUPLICATE_TOOL_CALL_ID:${sanitizeDiagnostic(action.callId)}`,
@@ -262,7 +275,10 @@ export class OpenAIAgentsRuntimeTransport {
     return parseSessionSnapshot(await this.requestJson("POST", "/v1/agents/sessions", JSON.stringify({
       environment: { type: "none" },
       ...(this.config.agentId ? { agent_id: this.config.agentId } : {}),
-      agent: buildPinAIOpenAIAgentConfig(this.config.webSearch),
+      agent: buildPinAIOpenAIAgentConfig(
+        this.config.webSearch,
+        this.config.actionProposal,
+      ),
       input: inputText,
       metadata: {
         pin_ai_runtime: "v1",
