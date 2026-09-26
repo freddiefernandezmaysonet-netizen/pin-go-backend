@@ -1,0 +1,30 @@
+name: Listing Discovery Schema Main Sync
+
+on:
+  pull_request:
+    paths:
+      - "prisma/schema.prisma"
+      - "prisma/migrations/20260924131500_add_listing_property_type/migration.sql"
+      - "prisma/migrations/20260924133000_add_listing_features_v1/migration.sql"
+      - ".github/workflows/listing-discovery-schema-main-sync.yml"
+  workflow_dispatch:
+
+jobs:
+  certify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - name: Generate Prisma client
+        run: npx prisma generate
+      - name: Validate Prisma schema
+        env:
+          DATABASE_URL: postgresql://ci:ci@127.0.0.1:5432/pingo_schema_validation
+        run: npx prisma validate
+      - name: Compile smoke
+        run: npx tsc --noEmit --pretty false
