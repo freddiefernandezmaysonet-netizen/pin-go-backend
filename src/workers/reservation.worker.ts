@@ -414,6 +414,12 @@ async function processPreCheckinMessages(
           PaymentState.PAID,
         status:
           ReservationStatus.ACTIVE,
+        messageDispatchLogs: {
+          none: {
+            type: "PRECHECKIN",
+            status: "SENT",
+          },
+        },
       },
       select: {
         id: true,
@@ -462,6 +468,22 @@ async function processPreCheckinMessages(
               emailResult.skipped === true,
           }
         );
+
+        if (emailResult.status === "SENT") {
+          log(
+            "Pre-checkin obligation fulfilled",
+            {
+              reservationNumber:
+                reservation.reservationNumber ??
+                null,
+              reservationId:
+                reservation.id,
+              channel: "email",
+            }
+          );
+
+          continue;
+        }
       } catch (error) {
         errLog(
           "Pre-checkin email crashed",
