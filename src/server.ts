@@ -55,6 +55,7 @@ import { devPmsRouter } from "./routes/dev.pms.routes";
 import { authRouter } from "./routes/auth.routes";
 import { eventsRouter } from "./routes/events.route";
 import messagesRouter from "./routes/dashboard.messages.routes";
+import { buildMessageDeliveryWebhookRouter } from "./routes/message-delivery.webhooks.routes";
 
 import { buildOrgTtlockSyncRouter } from "./routes/org.ttlock.sync.router";
 import { buildOrgLocksSwapRouter } from "./routes/org.locks.swap.router";
@@ -202,6 +203,7 @@ app.use(
 );
 
 app.use(bodyParser.urlencoded({ extended: true }));
+app.use(buildMessageDeliveryWebhookRouter(prisma));
 app.use("/webhooks", pmsWebhookRouter);
 app.use(buildDashboardDistributionConnectionCenterRouter(
   prisma,
