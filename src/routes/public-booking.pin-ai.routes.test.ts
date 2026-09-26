@@ -230,6 +230,7 @@ async function requestAction(
   body: unknown,
   options: Readonly<{
     enabled?: boolean;
+    canaryReservationIds?: string;
     broker?: Readonly<{
       confirmAndExecute(
         input: Readonly<{
@@ -254,6 +255,11 @@ async function requestAction(
           options.enabled === false
             ? "false"
             : "true",
+        PIN_AI_ACTION_PROPOSAL_TOOL_ENABLED:
+          "true",
+        PIN_AI_ACTION_CANARY_RESERVATION_IDS:
+          options.canaryReservationIds ??
+          "reservation-a",
       },
       runtime: async (runtimeRequest) => ({
         mode: "SHADOW",
@@ -477,6 +483,82 @@ test(
       ),
       "no-store",
     );
+    assert.deepEqual(
+      await response.json(),
+      {
+        ok: false,
+        error:
+          "PIN_AI_ACTIONS_UNAVAILABLE",
+      },
+    );
+  },
+);
+
+test(
+  "keeps action confirmation disabled when the canary allowlist is empty",
+  async () => {
+    let calls = 0;
+    const response =
+      await requestAction(
+        {
+          confirmationToken:
+            "confirmation-token-private-123456789012345",
+        },
+        {
+          canaryReservationIds:
+            "",
+          broker: {
+            async confirmAndExecute() {
+              calls += 1;
+              return {};
+            },
+          },
+        },
+      );
+
+    assert.equal(
+      response.status,
+      503,
+    );
+    assert.equal(calls, 0);
+    assert.deepEqual(
+      await response.json(),
+      {
+        ok: false,
+        error:
+          "PIN_AI_ACTIONS_UNAVAILABLE",
+      },
+    );
+  },
+);
+
+test(
+  "keeps action confirmation disabled for a reservation outside the canary allowlist",
+  async () => {
+    let calls = 0;
+    const response =
+      await requestAction(
+        {
+          confirmationToken:
+            "confirmation-token-private-123456789012345",
+        },
+        {
+          canaryReservationIds:
+            "reservation-other-12345678",
+          broker: {
+            async confirmAndExecute() {
+              calls += 1;
+              return {};
+            },
+          },
+        },
+      );
+
+    assert.equal(
+      response.status,
+      503,
+    );
+    assert.equal(calls, 0);
     assert.deepEqual(
       await response.json(),
       {

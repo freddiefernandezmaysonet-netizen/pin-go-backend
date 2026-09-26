@@ -733,6 +733,313 @@ test("fails closed when private proposal evidence is not paired with exactly one
   );
 });
 
+test(
+  "runtime keeps the proposal tool hidden for a reservation outside the canary allowlist",
+  async () => {
+    const originalFetch =
+      globalThis.fetch;
+    const fixture =
+      createTurnFixture({
+        answer: () =>
+          "Your reservation remains read-only.",
+      });
+
+    globalThis.fetch =
+      (async (
+        input:
+          string | URL | Request,
+        init?: RequestInit,
+      ) => {
+        const response =
+          await fixture.fetchImpl(
+            String(input),
+            {
+              method:
+                init?.method ===
+                "POST"
+                  ? "POST"
+                  : "GET",
+              headers: {},
+              ...(typeof init?.body ===
+              "string"
+                ? {
+                    body:
+                      init.body,
+                  }
+                : {}),
+            },
+          );
+        const payload =
+          await response.json();
+        return new Response(
+          JSON.stringify(
+            payload,
+          ),
+          {
+            status: 200,
+            headers: {
+              "Content-Type":
+                "application/json",
+            },
+          },
+        );
+      }) as typeof fetch;
+
+    const runtimeRequest:
+      PinAIRuntimeRequest = {
+      context: {
+        organizationId:
+          "org-a",
+        propertyId:
+          "property-a",
+        reservationId:
+          "reservation-a",
+        guestId:
+          "reservation-guest",
+        currentLocalDateTime:
+          "2026-09-21T12:00:00-04:00",
+        preferredLanguage:
+          "en",
+      },
+      conversation: [
+        {
+          role: "guest",
+          content:
+            "Change my dates.",
+        },
+      ],
+    };
+
+    try {
+      const result =
+        await createGuestPinAIRuntimeRunner({
+          PIN_AI_RUNTIME_SHADOW_ENABLED:
+            "true",
+          PIN_AI_RUNTIME_REAL_READ_ENABLED:
+            "true",
+          PIN_AI_ACTION_PROPOSAL_TOOL_ENABLED:
+            "true",
+          PIN_AI_ACTION_BROKER_ENABLED:
+            "true",
+          PIN_AI_ACTION_CANARY_RESERVATION_IDS:
+            "reservation-other-12345678",
+          PIN_AI_OPENAI_AGENT_ID:
+            "agent_test123",
+          OPENAI_API_KEY:
+            "test-key",
+        })(
+          runtimeRequest,
+          {
+            city: "",
+            region: "",
+            country: "",
+            timezone:
+              "America/Puerto_Rico",
+            label: "",
+          },
+          undefined,
+          {
+            guestToken:
+              token,
+          },
+        );
+
+      assert.equal(
+        result.actionsExecuted,
+        false,
+      );
+      const payload =
+        JSON.parse(
+          fixture.calls[0]
+            ?.body ?? "{}",
+        ) as {
+          agent?: {
+            tools?: Array<{
+              name?: string;
+              type?: string;
+            }>;
+          };
+        };
+      const functionTools =
+        (
+          payload.agent
+            ?.tools ?? []
+        ).filter(
+          (tool) =>
+            tool.type ===
+            "function",
+        );
+
+      assert.equal(
+        functionTools.length,
+        13,
+      );
+      assert.equal(
+        functionTools.some(
+          (tool) =>
+            tool.name ===
+            "prepare_reservation_modification",
+        ),
+        false,
+      );
+    } finally {
+      globalThis.fetch =
+        originalFetch;
+    }
+  },
+);
+
+test(
+  "runtime advertises proposal tool only for the explicitly canaried reservation",
+  async () => {
+    const originalFetch =
+      globalThis.fetch;
+    const fixture =
+      createTurnFixture({
+        answer: () =>
+          "I can prepare a quote.",
+      });
+
+    globalThis.fetch =
+      (async (
+        input:
+          string | URL | Request,
+        init?: RequestInit,
+      ) => {
+        const response =
+          await fixture.fetchImpl(
+            String(input),
+            {
+              method:
+                init?.method ===
+                "POST"
+                  ? "POST"
+                  : "GET",
+              headers: {},
+              ...(typeof init?.body ===
+              "string"
+                ? {
+                    body:
+                      init.body,
+                  }
+                : {}),
+            },
+          );
+        const payload =
+          await response.json();
+        return new Response(
+          JSON.stringify(
+            payload,
+          ),
+          {
+            status: 200,
+            headers: {
+              "Content-Type":
+                "application/json",
+            },
+          },
+        );
+      }) as typeof fetch;
+
+    const runtimeRequest:
+      PinAIRuntimeRequest = {
+      context: {
+        organizationId:
+          "org-a",
+        propertyId:
+          "property-a",
+        reservationId:
+          "reservation-a",
+        guestId:
+          "reservation-guest",
+        currentLocalDateTime:
+          "2026-09-21T12:00:00-04:00",
+        preferredLanguage:
+          "en",
+      },
+      conversation: [
+        {
+          role: "guest",
+          content:
+            "Change my dates.",
+        },
+      ],
+    };
+
+    try {
+      await createGuestPinAIRuntimeRunner({
+        PIN_AI_RUNTIME_SHADOW_ENABLED:
+          "true",
+        PIN_AI_RUNTIME_REAL_READ_ENABLED:
+          "true",
+        PIN_AI_ACTION_PROPOSAL_TOOL_ENABLED:
+          "true",
+        PIN_AI_ACTION_BROKER_ENABLED:
+          "true",
+        PIN_AI_ACTION_CANARY_RESERVATION_IDS:
+          "reservation-a",
+        PIN_AI_OPENAI_AGENT_ID:
+          "agent_test123",
+        OPENAI_API_KEY:
+          "test-key",
+      })(
+        runtimeRequest,
+        {
+          city: "",
+          region: "",
+          country: "",
+          timezone:
+            "America/Puerto_Rico",
+          label: "",
+        },
+        undefined,
+        {
+          guestToken:
+            token,
+        },
+      );
+
+      const payload =
+        JSON.parse(
+          fixture.calls[0]
+            ?.body ?? "{}",
+        ) as {
+          agent?: {
+            tools?: Array<{
+              name?: string;
+              type?: string;
+            }>;
+          };
+        };
+      const functionTools =
+        (
+          payload.agent
+            ?.tools ?? []
+        ).filter(
+          (tool) =>
+            tool.type ===
+            "function",
+        );
+
+      assert.equal(
+        functionTools.length,
+        14,
+      );
+      assert.equal(
+        functionTools.some(
+          (tool) =>
+            tool.name ===
+            "prepare_reservation_modification",
+        ),
+        true,
+      );
+    } finally {
+      globalThis.fetch =
+        originalFetch;
+    }
+  },
+);
+
 test("runtime proposal gate requires the independently enabled action broker", async () => {
   const runtime = createGuestPinAIRuntimeRunner({
     PIN_AI_RUNTIME_SHADOW_ENABLED: "true",

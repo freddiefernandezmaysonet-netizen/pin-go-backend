@@ -7,6 +7,9 @@ import type {
   PinAIPrivateActionProposal,
 } from "../runtime/action-proposal-tool-executor.js";
 import {
+  resolvePinAIActionCanaryScope,
+} from "../actions/action-canary-scope.js";
+import {
   createActionProposalRuntimeDependencies,
 } from "../runtime/action-proposal-runtime-composition.js";
 import { getPropertyKnowledgeSnapshot } from "../property-knowledge.service.js";
@@ -469,9 +472,15 @@ export function createGuestPinAIRuntimeRunner(
       );
     }
 
+    const actionCanary =
+      resolvePinAIActionCanaryScope({
+        reservationId:
+          request.context
+            .reservationId,
+        env,
+      });
     const actionProposalEnabled =
-      actionProposalRequested &&
-      actionBrokerEnabled;
+      actionCanary.enabled;
 
     if (
       actionProposalEnabled &&
