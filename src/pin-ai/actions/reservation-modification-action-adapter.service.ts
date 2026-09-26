@@ -6,16 +6,6 @@ import {
   type PrismaClient,
 } from "@prisma/client";
 
-import {
-  confirmGuestReservationModification,
-  getGuestReservationModificationPreview,
-  GuestReservationModificationError,
-} from "../../services/guest-reservation-modification.service.js";
-import {
-  createPinAIActionProposal,
-  supersedePinAIActionProposal,
-} from "./action-proposal.service.js";
-
 export const PIN_AI_RESERVATION_MODIFICATION_TERMS_VERSION =
   "pin_ai_reservation_modification_terms_v1" as const;
 
@@ -29,6 +19,45 @@ export type PinAIReservationModificationActionOutcome =
   | "REVIEW_REQUIRED";
 
 type Language = "en" | "es";
+
+export type PinAIReservationModificationPreview =
+  Readonly<{
+    changes: Readonly<{
+      hasChanges: boolean;
+    }>;
+    property: Readonly<{
+      timezone: string | null;
+    }>;
+    reservation: Readonly<{
+      version: Date;
+      currency: string;
+      current: Readonly<{
+        checkIn: Date;
+        checkOut: Date;
+        adults: number;
+        children: number;
+        selectedAmenityIds: string[];
+      }>;
+      proposed: Readonly<{
+        checkIn: Date;
+        checkOut: Date;
+        adults: number;
+        children: number;
+        selectedAmenityIds: string[];
+      }>;
+    }>;
+    pricing: Readonly<{
+      currentTotalAmountCents: number;
+      proposed: Readonly<{
+        totalAmountCents: number;
+        [key: string]: unknown;
+      }>;
+      amountDifferenceCents: number;
+      financialAction: string;
+      reductionPolicy: unknown;
+    }>;
+    previewFingerprint: string;
+  }>;
 
 type PrepareInput = Readonly<{
   guestToken: string;
@@ -110,10 +139,59 @@ type AdapterPrisma = Pick<
 export type PinAIReservationModificationActionAdapterDependencies =
   Readonly<{
     prisma: AdapterPrisma;
-    getPreview: typeof getGuestReservationModificationPreview;
-    createProposal: typeof createPinAIActionProposal;
-    supersedeProposal: typeof supersedePinAIActionProposal;
-    confirmModification: typeof confirmGuestReservationModification;
+    getPreview: (input: Readonly<{
+      guestToken: string;
+      checkIn: Date;
+      checkOut: Date;
+      adults: number;
+      children: number;
+      selectedAmenityIds?: string[];
+    }>) => Promise<PinAIReservationModificationPreview>;
+    createProposal: (input: Readonly<{
+      prisma: PrismaClient;
+      guestToken: string;
+      actionType: PinAIActionProposalType;
+      language: Language;
+      consentText: string;
+      termsSnapshot: Readonly<Record<string, unknown>>;
+      expiresAt: Date;
+      now: Date;
+    }>) => Promise<Readonly<{
+      confirmationToken: string;
+      proposal: Readonly<{
+        id: string;
+        expiresAt: Date;
+      }>;
+    }>>;
+    supersedeProposal: (input: Readonly<{
+      prisma: PrismaClient;
+      organizationId: string;
+      propertyId: string;
+      reservationId: string;
+      proposalId: string;
+      expectedProposalFingerprint: string;
+      now: Date;
+    }>) => Promise<unknown>;
+    confirmModification: (input: Readonly<{
+      guestToken: string;
+      clientRequestId: string;
+      checkIn: Date;
+      checkOut: Date;
+      adults: number;
+      children: number;
+      selectedAmenityIds: string[];
+      acceptNoRefundReduction: boolean;
+      expectedPreviewFingerprint: string;
+      confirmationSource: "PIN_AI_GUEST_SERVICES";
+      actionProposalId: string;
+      actionProposalFingerprint: string;
+      actionProposalConfirmedAt: Date;
+    }>) => Promise<Readonly<{
+      modification: Readonly<{
+        id: string;
+        status: ReservationModificationStatus;
+      }>;
+    }>>;
     createCheckout: (input: Readonly<{
       guestToken: string;
       modificationId: string;
@@ -684,11 +762,7 @@ function parseTerms(
 function buildTerms(
   input: Readonly<{
     preview:
-      Awaited<
-        ReturnType<
-          typeof getGuestReservationModificationPreview
-        >
-      >;
+      PinAIReservationModificationPreview;
     now: Date;
     quoteExpiresAt: Date;
   }>,
@@ -832,6 +906,29 @@ function acceptNoRefundReduction(
       .financialAction ===
     "NO_REFUND_DUE_CONFIRMATION_REQUIRED"
   );
+}
+
+function reservationModificationErrorCode(
+  error: unknown,
+) {
+  if (
+    error &&
+    typeof error === "object" &&
+    "code" in error &&
+    typeof (
+      error as { code?: unknown }
+    ).code === "string"
+  ) {
+    return String(
+      (
+        error as {
+          code: string;
+        }
+      ).code,
+    );
+  }
+
+  return null;
 }
 
 function output(
@@ -1284,10 +1381,10 @@ export class PinAIReservationModificationActionAdapter {
           });
     } catch (error) {
       if (
-        error instanceof
-          GuestReservationModificationError &&
-        error.code ===
-          "RESERVATION_MODIFICATION_PREVIEW_CHANGED"
+        reservationModificationErrorCode(
+          error,
+        ) ===
+        "RESERVATION_MODIFICATION_PREVIEW_CHANGED"
       ) {
         await this.dependencies
           .supersedeProposal({
@@ -1417,15 +1514,19 @@ export class PinAIReservationModificationActionAdapter {
             terms.currency,
         });
       } catch (error) {
+        const errorCode =
+          reservationModificationErrorCode(
+            error,
+          );
+
         if (
-          error instanceof
-            GuestReservationModificationError &&
+          errorCode &&
           [
             "RESERVATION_MODIFICATION_PRICE_CHANGED",
             "RESERVATION_CHANGED_RETRY_PREVIEW",
             "PROPERTY_NOT_AVAILABLE_FOR_SELECTED_DATES",
             "RESERVATION_MODIFICATION_CHECKOUT_WINDOW_EXPIRED",
-          ].includes(error.code)
+          ].includes(errorCode)
         ) {
           await this.dependencies
             .supersedeProposal({
