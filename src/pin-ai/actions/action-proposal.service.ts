@@ -1319,14 +1319,12 @@ export async function supersedePinAIActionProposal(
             }
 
             if (
-              ![
+              proposal.status !==
                 PinAIActionProposalStatus
-                  .PENDING_CONFIRMATION,
+                  .PENDING_CONFIRMATION &&
+              proposal.status !==
                 PinAIActionProposalStatus
-                  .CONFIRMED,
-              ].includes(
-                proposal.status,
-              )
+                  .CONFIRMED
             ) {
               return fail(
                 "PROPOSAL_NOT_CONFIRMABLE",
