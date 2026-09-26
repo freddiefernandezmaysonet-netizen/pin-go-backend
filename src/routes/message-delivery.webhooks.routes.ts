@@ -20,7 +20,8 @@ function deliveryWebhooksEnabled(env: NodeJS.ProcessEnv): boolean {
 function publicApiBaseUrl(env: NodeJS.ProcessEnv): string | null {
   const raw =
     clean(env.PUBLIC_API_BASE_URL) ||
-    clean(env.API_BASE_URL);
+    clean(env.API_BASE_URL) ||
+    clean(env.PUBLIC_BASE_URL);
 
   if (!raw) return null;
 
