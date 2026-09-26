@@ -345,6 +345,9 @@ export function buildPinAIActionProposalFingerprint(
     baseReservationUpdatedAt: Date;
     actionType:
       PinAIActionProposalType;
+    language:
+      ProposalLanguage;
+    consentText: string;
     termsSnapshot:
       ProposalTerms;
   }>,
@@ -365,6 +368,10 @@ export function buildPinAIActionProposalFingerprint(
             .toISOString(),
         actionType:
           input.actionType,
+        language:
+          input.language,
+        consentText:
+          input.consentText,
         termsSnapshot:
           input.termsSnapshot,
       }),
@@ -660,6 +667,8 @@ export async function createPinAIActionProposal(
                 baseReservationUpdatedAt:
                   reservation.updatedAt,
                 actionType,
+                language,
+                consentText,
                 termsSnapshot:
                   input.termsSnapshot,
               });
@@ -815,6 +824,8 @@ export async function createPinAIActionProposal(
                     confirmationTokenHash:
                       tokenHash,
                     expiresAt,
+                    createdAt:
+                      now,
                   },
                 });
 
@@ -904,8 +915,9 @@ export async function confirmPinAIActionProposal(
     attempt += 1
   ) {
     try {
-      return await input.prisma
-        .$transaction(
+      const transactionResult =
+        await input.prisma
+          .$transaction(
           async (db) => {
             const reservationId =
               await lockReservationByGuestToken(
@@ -1016,10 +1028,13 @@ export async function confirmPinAIActionProposal(
                         .EXPIRED,
                   },
                 });
-              return fail(
-                "PROPOSAL_EXPIRED",
-                410,
-              );
+              return {
+                deferredError: {
+                  code:
+                    "PROPOSAL_EXPIRED" as const,
+                  statusCode: 410,
+                },
+              };
             }
 
             if (
@@ -1043,9 +1058,13 @@ export async function confirmPinAIActionProposal(
                       now,
                   },
                 });
-              return fail(
-                "PROPOSAL_SUPERSEDED",
-              );
+              return {
+                deferredError: {
+                  code:
+                    "PROPOSAL_SUPERSEDED" as const,
+                  statusCode: 409,
+                },
+              };
             }
 
             const updated =
@@ -1112,6 +1131,20 @@ export async function confirmPinAIActionProposal(
                 .Serializable,
           },
         );
+
+      if (
+        "deferredError" in
+        transactionResult
+      ) {
+        return fail(
+          transactionResult
+            .deferredError.code,
+          transactionResult
+            .deferredError.statusCode,
+        );
+      }
+
+      return transactionResult;
     } catch (error) {
       if (
         isRetryableTransactionError(
