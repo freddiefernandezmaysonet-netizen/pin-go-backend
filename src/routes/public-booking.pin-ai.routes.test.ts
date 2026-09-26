@@ -169,7 +169,11 @@ async function closeServer(server: Server) {
   });
 }
 
-async function request(body: unknown, enabled = true) {
+async function request(
+  body: unknown,
+  enabled = true,
+  runtimeOverride?: GuestPinAIRuntimeRunner,
+) {
   const app = express();
   app.use(express.json());
   app.use(
@@ -179,19 +183,21 @@ async function request(body: unknown, enabled = true) {
       env: {
         PIN_AI_GUEST_GATEWAY_ENABLED: enabled ? "true" : "false",
       },
-      runtime: async (runtimeRequest) => ({
-        mode: "SHADOW",
-        request: runtimeRequest,
-        memory: createConversationMemory(runtimeRequest),
-        response: {
-          responseText: "I can check that for you.",
-          openaiSessionId: "session_route_test",
-          toolCalls: [],
-          escalationCreated: false,
-          requiresHumanReview: false,
-        },
-        actionsExecuted: false,
-      }),
+      runtime:
+        runtimeOverride ??
+        (async (runtimeRequest) => ({
+          mode: "SHADOW",
+          request: runtimeRequest,
+          memory: createConversationMemory(runtimeRequest),
+          response: {
+            responseText: "I can check that for you.",
+            openaiSessionId: "session_route_test",
+            toolCalls: [],
+            escalationCreated: false,
+            requiresHumanReview: false,
+          },
+          actionsExecuted: false,
+        })),
       now: () => new Date("2026-09-21T16:00:00.000Z"),
     }),
   );
@@ -325,6 +331,93 @@ test("returns a minimal no-store shadow response without internal tool data", as
     operationalWrites: false,
     webSearch: { enabled: false, used: false },
   });
+});
+
+test("message route returns a no-store structured action proposal without exposing runtime tool internals", async () => {
+  const expiresAt = new Date("2026-09-26T15:00:00.000Z");
+  const runtime: GuestPinAIRuntimeRunner = async (runtimeRequest) => ({
+    mode: "SHADOW",
+    request: runtimeRequest,
+    memory: createConversationMemory(runtimeRequest),
+    response: {
+      responseText:
+        "Preparé una cotización válida hasta la hora indicada. La disponibilidad no está retenida; usa el control de confirmación para continuar.",
+      openaiSessionId: "session_route_action",
+      toolCalls: [{
+        name: "prepare_reservation_modification",
+        arguments: {
+          proposedCheckInDate: "2026-10-01",
+          proposedCheckOutDate: "2026-10-05",
+        },
+      }],
+      escalationCreated: false,
+      requiresHumanReview: false,
+    },
+    actionsExecuted: false,
+    privateActionProposal: {
+      publicResult: {
+        actionType: "RESERVATION_MODIFICATION",
+        proposalId: "proposal-12345678",
+        requiresGuestConfirmation: true,
+        actionExecuted: false,
+        quote: {
+          quotedAt: new Date("2026-09-26T14:00:00.000Z"),
+          quoteExpiresAt: expiresAt,
+          quoteExpiresAtLocal: "2026-09-26T11:00:00-04:00",
+          priceGuaranteedUntil: expiresAt,
+          propertyTimezone: "America/Puerto_Rico",
+          availabilityCheckedAt: new Date("2026-09-26T14:00:00.000Z"),
+          availabilityHeld: false,
+          currentTotalAmount: 353.35,
+          proposedTotalAmount: 521.85,
+          amountDifference: 168.5,
+          amountDifferenceCents: 16_850,
+          currency: "usd",
+          financialAction: "ADDITIONAL_PAYMENT_REQUIRED",
+        },
+      },
+      privateConfirmation: {
+        proposalId: "proposal-12345678",
+        confirmationToken:
+          "confirmation-token-private-123456789012345",
+        expiresAt,
+      },
+    },
+  });
+
+  const response = await request(
+    { message: "Sí, quiero extender la estadía." },
+    true,
+    runtime,
+  );
+
+  assert.equal(response.status, 200);
+  assert.equal(
+    response.headers.get("cache-control"),
+    "no-store",
+  );
+
+  const payload =
+    await response.json() as Record<string, any>;
+  assert.equal(
+    payload.actionProposal.proposalId,
+    "proposal-12345678",
+  );
+  assert.equal(
+    payload.actionProposal.confirmationToken,
+    "confirmation-token-private-123456789012345",
+  );
+  assert.equal(
+    payload.actionProposal.quote.availabilityHeld,
+    false,
+  );
+  assert.equal("toolCalls" in payload, false);
+  assert.equal(
+    JSON.stringify(payload.reply).includes(
+      "confirmation-token-private",
+    ),
+    false,
+  );
 });
 
 test("rejects client-supplied conversation history and arbitrary fields", async () => {
