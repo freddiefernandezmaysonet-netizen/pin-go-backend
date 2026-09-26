@@ -1294,6 +1294,28 @@ export async function supersedePinAIActionProposal(
               );
             }
 
+            const canonicalReservation =
+              await db.reservation
+                .findFirst({
+                  where: {
+                    id: reservationId,
+                    propertyId,
+                    property: {
+                      organizationId,
+                    },
+                  },
+                  select: {
+                    id: true,
+                  },
+                });
+
+            if (!canonicalReservation) {
+              return fail(
+                "PROPOSAL_SCOPE_MISMATCH",
+                404,
+              );
+            }
+
             await db.$queryRaw`
               SELECT "id"
               FROM "PinAIActionProposal"
