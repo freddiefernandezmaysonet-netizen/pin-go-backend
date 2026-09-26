@@ -1623,6 +1623,11 @@ model MessageLog {
   provider          String
   providerMessageId String?
   status            String?
+  providerDeliveryStatus String?
+  providerStatusUpdatedAt DateTime?
+  providerErrorCode       String?
+  providerErrorMessage    String?
+  deliveredAt             DateTime?
   accessGrantId     String?
   createdAt         DateTime     @default(now())
   error             String?
@@ -1642,6 +1647,8 @@ model MessageLog {
   @@index([status, retryCount, createdAt])
   @@index([organizationId, propertyId, createdAt])
   @@index([organizationId, status, retryCount, createdAt])
+  @@index([provider, providerMessageId])
+  @@index([providerDeliveryStatus, providerStatusUpdatedAt])
 }
 
 model MessageDispatchLog {
