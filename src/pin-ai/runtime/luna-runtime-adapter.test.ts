@@ -104,6 +104,137 @@ test("runtime advertises exactly 13 canonical functions and preserves shadow ins
   assert.equal(agent.tools.some((tool) => tool.type === "web_search"), false);
 });
 
+test("runtime proposal tool is absent by default and fails closed if OpenAI requests it anyway", async () => {
+  const f = createTurnFixture({
+    actions: () => [{
+      name: "prepare_reservation_modification",
+      arguments: {
+        proposedCheckInDate: "2026-10-01",
+        proposedCheckOutDate: "2026-10-05",
+      },
+    }],
+  });
+  let executed = 0;
+
+  await assert.rejects(
+    run(
+      transport(f.fetchImpl),
+      {
+        async execute() {
+          executed += 1;
+          return {};
+        },
+      },
+    ),
+    /ACTION_PROPOSAL_TOOL_DISABLED/,
+  );
+
+  assert.equal(executed, 0);
+  const agent = f.createPayload.agent as {
+    tools: TestItem[];
+  };
+  assert.equal(
+    agent.tools.some(
+      (tool) =>
+        tool.name ===
+        "prepare_reservation_modification",
+    ),
+    false,
+  );
+});
+
+test("runtime advertises and executes the proposal-only tool only when explicitly enabled", async () => {
+  const f = createTurnFixture({
+    actions: () => [{
+      name: "prepare_reservation_modification",
+      arguments: {
+        proposedCheckInDate: "2026-10-01",
+        proposedCheckOutDate: "2026-10-05",
+      },
+    }],
+    answer: () =>
+      "I prepared a quote that is valid until the time shown. Availability is not held; use the confirmation control to continue.",
+  });
+  const executed: PinAIRuntimeToolName[] = [];
+
+  const result = await run(
+    transport(
+      f.fetchImpl,
+      {
+        actionProposal: {
+          enabled: true,
+        },
+      },
+    ),
+    {
+      async execute(name) {
+        executed.push(name);
+        return {
+          decision:
+            "ACTION_PROPOSAL_PREPARED",
+          proposalId:
+            "proposal-12345678",
+          requiresGuestConfirmation:
+            true,
+          actionExecuted: false,
+          availabilityHeld: false,
+          quote: {
+            quoteExpiresAtLocal:
+              "2026-09-26T11:00:00-04:00",
+          },
+        };
+      },
+    },
+  );
+
+  assert.deepEqual(
+    executed,
+    ["prepare_reservation_modification"],
+  );
+  assert.deepEqual(
+    result.toolCalls.map(
+      (call) => call.name,
+    ),
+    ["prepare_reservation_modification"],
+  );
+  assert.equal(
+    result.escalationCreated,
+    false,
+  );
+
+  const agent = f.createPayload.agent as {
+    tools: TestItem[];
+    instructions: string;
+  };
+  assert.equal(
+    agent.tools.filter(
+      (tool) =>
+        tool.type === "function",
+    ).length,
+    14,
+  );
+  assert.equal(
+    agent.tools.some(
+      (tool) =>
+        tool.name ===
+        "prepare_reservation_modification",
+    ),
+    true,
+  );
+  assert.match(
+    agent.instructions,
+    /exact quote expiration/i,
+  );
+  assert.match(
+    agent.instructions,
+    /confirmation control/i,
+  );
+  assert.match(
+    agent.instructions,
+    /Never ask the guest to type or repeat a confirmation token/i,
+  );
+});
+
 test("runtime advertises opt-in native web search separately and scopes its evidence by turn", async () => {
   const f = resumed();
   f.items.splice(1, 0, { id: "web_old", turn_id: "turn_1", type: "web_search_call", status: "completed" });
