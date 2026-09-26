@@ -12,6 +12,10 @@ const listingDetailsInclude = {
     include: { beds: { orderBy: { createdAt: "asc" as const } } },
   },
   sharedSpaces: { orderBy: { sortOrder: "asc" as const } },
+  features: {
+    where: { isActive: true },
+    orderBy: { sortOrder: "asc" as const },
+  },
   safetyConsiderations: { orderBy: { sortOrder: "asc" as const } },
   additionalConsiderations: { orderBy: { sortOrder: "asc" as const } },
 };
@@ -77,6 +81,7 @@ export function buildDashboardPropertyListingDetailsRouter(prisma: PrismaClient)
         const {
           sleepingAreas,
           sharedSpaces,
+          features,
           safetyConsiderations,
           additionalConsiderations,
           ...scalar
@@ -100,6 +105,9 @@ export function buildDashboardPropertyListingDetailsRouter(prisma: PrismaClient)
             where: { listingDetailsId: details.id },
           });
           await tx.propertyListingSharedSpace.deleteMany({
+            where: { listingDetailsId: details.id },
+          });
+          await tx.propertyListingFeature.deleteMany({
             where: { listingDetailsId: details.id },
           });
           await tx.propertyListingSafetyConsideration.deleteMany({
@@ -132,6 +140,15 @@ export function buildDashboardPropertyListingDetailsRouter(prisma: PrismaClient)
               data: sharedSpaces.map((space) => ({
                 listingDetailsId: details.id,
                 ...space,
+              })),
+            });
+          }
+
+          if (features.length > 0) {
+            await tx.propertyListingFeature.createMany({
+              data: features.map((feature) => ({
+                listingDetailsId: details.id,
+                ...feature,
               })),
             });
           }

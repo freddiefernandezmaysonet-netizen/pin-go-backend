@@ -81,3 +81,34 @@ test("supports bedrooms plus a non-bedroom sleeping area without inflating bedro
 test("rejects an empty additional consideration", () => {
   invalid({ additionalConsiderations: [{}] }, "consideration requires");
 });
+
+
+test("accepts canonical property type and discovery features", () => {
+  const normalized = normalizePropertyListingDetailsInput({
+    propertyType: "CABIN",
+    features: [
+      { type: "WOOD_CONSTRUCTION", isActive: true, sortOrder: 0 },
+      { type: "OCEAN_VIEW", labelEn: "Ocean view", labelEs: "Vista al mar", isActive: true, sortOrder: 1 },
+      { type: "GYM", isActive: true, sortOrder: 2 },
+    ],
+  });
+
+  assert.equal(normalized.propertyType, "CABIN");
+  assert.deepEqual(normalized.features.map((feature) => feature.type), [
+    "WOOD_CONSTRUCTION",
+    "OCEAN_VIEW",
+    "GYM",
+  ]);
+});
+
+test("rejects unknown discovery taxonomy values", () => {
+  invalid({ propertyType: "WOODEN_CABIN" }, "propertyType");
+  invalid({ features: [{ type: "ROMANTIC" }] }, "features");
+});
+
+test("rejects duplicate canonical feature types", () => {
+  invalid(
+    { features: [{ type: "GYM" }, { type: "GYM" }] },
+    "feature types must be unique"
+  );
+});
