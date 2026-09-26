@@ -7,6 +7,8 @@ export type PinAIActionCanaryReason =
 
 export type PinAIActionCanaryEnvironment =
   Readonly<{
+    [key: string]:
+      string | undefined;
     PIN_AI_ACTION_BROKER_ENABLED?: string;
     PIN_AI_ACTION_PROPOSAL_TOOL_ENABLED?: string;
     PIN_AI_ACTION_CANARY_RESERVATION_IDS?: string;
