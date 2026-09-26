@@ -112,3 +112,34 @@ test("rejects duplicate canonical feature types", () => {
     "feature types must be unique"
   );
 });
+
+
+test("normalizes free-form experience tags for discovery", () => {
+  const normalized = normalizePropertyListingDetailsInput({
+    experienceTags: [
+      { label: " Romantic Retreat ", sortOrder: 0 },
+      { label: "Couples Retreat", sortOrder: 1 },
+      { label: "Bien-être & Spa", sortOrder: 2 },
+    ],
+  });
+
+  assert.deepEqual(
+    normalized.experienceTags.map((tag) => ({ label: tag.label, slug: tag.slug })),
+    [
+      { label: "Romantic Retreat", slug: "romantic-retreat" },
+      { label: "Couples Retreat", slug: "couples-retreat" },
+      { label: "Bien-être & Spa", slug: "bien-etre-spa" },
+    ]
+  );
+});
+
+test("rejects duplicate normalized experience tags and excessive tags", () => {
+  invalid(
+    { experienceTags: [{ label: "Romantic Retreat" }, { label: "romantic-retreat" }] },
+    "experience tags must be unique"
+  );
+  invalid(
+    { experienceTags: Array.from({ length: 21 }, (_, index) => ({ label: `Tag ${index + 1}` })) },
+    "experienceTags"
+  );
+});
