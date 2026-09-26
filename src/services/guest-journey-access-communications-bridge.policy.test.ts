@@ -38,12 +38,81 @@ test("preserves legacy email envelope and Spanish subject", () => {
 });
 
 test("SMS requires durable consent", () => {
-  assert.equal(hasGuestSmsConsent({ consent: { acceptedAt: "x", stayNotificationsConsent: true } }), true);
+  assert.equal(
+    hasGuestSmsConsent({
+      consent: {
+        acceptedAt: "2026-09-26T12:00:00-04:00",
+        smsConsent: true,
+      },
+    }),
+    true
+  );
+
+  assert.equal(
+    hasGuestSmsConsent({
+      consent: {
+        acceptedAt: "2026-09-26T12:00:00-04:00",
+        smsConsent: false,
+        stayNotificationsConsent: true,
+      },
+    }),
+    true
+  );
+
   const rows = buildGuestAccessCommunicationOutbox({
     ...base,
-    externalRaw: { consent: { acceptedAt: "x", smsConsent: false, stayNotificationsConsent: false } },
+    externalRaw: {
+      consent: {
+        acceptedAt: "2026-09-26T12:00:00-04:00",
+        smsConsent: false,
+        stayNotificationsConsent: false,
+      },
+    },
   });
   assert.deepEqual(rows.map((row) => row.channel), ["email"]);
+});
+
+test("recovers historical Direct Booking stay notification consent when acceptedAt was lost", () => {
+  assert.equal(
+    hasGuestSmsConsent({
+      consent: {
+        acceptedAt: null,
+        smsConsent: false,
+        stayNotificationsConsent: true,
+        consentSource: "DIRECT_BOOKING_WEB_FORM",
+        consentVersion: "stay_notifications_v1",
+      },
+    }),
+    true
+  );
+});
+
+test("does not recover missing acceptedAt without exact Direct Booking provenance", () => {
+  assert.equal(
+    hasGuestSmsConsent({
+      consent: {
+        acceptedAt: null,
+        smsConsent: false,
+        stayNotificationsConsent: true,
+        consentSource: "OTHER_SOURCE",
+        consentVersion: "stay_notifications_v1",
+      },
+    }),
+    false
+  );
+
+  assert.equal(
+    hasGuestSmsConsent({
+      consent: {
+        acceptedAt: null,
+        smsConsent: false,
+        stayNotificationsConsent: true,
+        consentSource: "DIRECT_BOOKING_WEB_FORM",
+        consentVersion: "unknown",
+      },
+    }),
+    false
+  );
 });
 
 test("same credential/window/destination is deterministic", () => {
