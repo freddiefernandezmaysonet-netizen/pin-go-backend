@@ -16,6 +16,10 @@ const listingDetailsInclude = {
     where: { isActive: true },
     orderBy: { sortOrder: "asc" as const },
   },
+  experienceTags: {
+    where: { isActive: true },
+    orderBy: { sortOrder: "asc" as const },
+  },
   safetyConsiderations: { orderBy: { sortOrder: "asc" as const } },
   additionalConsiderations: { orderBy: { sortOrder: "asc" as const } },
 };
@@ -82,6 +86,7 @@ export function buildDashboardPropertyListingDetailsRouter(prisma: PrismaClient)
           sleepingAreas,
           sharedSpaces,
           features,
+          experienceTags,
           safetyConsiderations,
           additionalConsiderations,
           ...scalar
@@ -108,6 +113,9 @@ export function buildDashboardPropertyListingDetailsRouter(prisma: PrismaClient)
             where: { listingDetailsId: details.id },
           });
           await tx.propertyListingFeature.deleteMany({
+            where: { listingDetailsId: details.id },
+          });
+          await tx.propertyListingExperienceTag.deleteMany({
             where: { listingDetailsId: details.id },
           });
           await tx.propertyListingSafetyConsideration.deleteMany({
@@ -149,6 +157,15 @@ export function buildDashboardPropertyListingDetailsRouter(prisma: PrismaClient)
               data: features.map((feature) => ({
                 listingDetailsId: details.id,
                 ...feature,
+              })),
+            });
+          }
+
+          if (experienceTags.length > 0) {
+            await tx.propertyListingExperienceTag.createMany({
+              data: experienceTags.map((tag) => ({
+                listingDetailsId: details.id,
+                ...tag,
               })),
             });
           }
