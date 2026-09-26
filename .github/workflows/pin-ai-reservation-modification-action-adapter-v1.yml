@@ -1,0 +1,62 @@
+name: Pin AI Reservation Modification Action Adapter V1
+
+on:
+  pull_request:
+    branches:
+      - main
+      - agent/pin-ai-action-proposal-foundation-v1
+    paths:
+      - "src/pin-ai/actions/reservation-modification-action-adapter.service.ts"
+      - "src/pin-ai/actions/reservation-modification-action-adapter.service.test.ts"
+      - "src/services/guest-reservation-modification.service.ts"
+      - "src/services/guest-reservation-modification.policy.test.ts"
+      - "tsconfig.pin-ai-reservation-modification-action.json"
+      - ".github/workflows/pin-ai-reservation-modification-action-adapter-v1.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  reservation-modification-action-adapter:
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    env:
+      DATABASE_URL: postgresql://user:pass@localhost:5432/pingo_test
+      STRIPE_SECRET_KEY: sk_test_pin_ai_ci_placeholder
+      APP_URL: http://localhost:3000
+
+    steps:
+      - name: Checkout exact candidate
+        uses: actions/checkout@v4
+
+      - name: Use Node.js 22
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+
+      - name: Install locked dependencies without lifecycle scripts
+        run: npm ci --ignore-scripts --no-audit --no-fund
+
+      - name: Generate and validate Prisma client
+        run: |
+          npx prisma generate
+          npx prisma validate --schema ./prisma/schema.prisma
+
+      - name: Run Action Adapter and retained Reservation Modification tests
+        run: |
+          node --import tsx --test \
+            src/pin-ai/actions/reservation-modification-action-adapter.service.test.ts \
+            src/services/guest-reservation-modification.policy.test.ts \
+            src/services/guest-reservation-modification-apply.service.test.ts \
+            src/services/guest-reservation-modification-checkout.service.test.ts \
+            src/services/guest-reservation-modification-payment.service.test.ts
+
+      - name: Type-check Reservation Modification Action Adapter
+        run: npx tsc -p tsconfig.pin-ai-reservation-modification-action.json
+
+      - name: Regress Pin AI Action Proposal foundation
+        run: node --import tsx --test src/pin-ai/actions/action-proposal.service.test.ts
+
+      - name: Regress retained Pin AI Runtime
+        run: npm run test:pin-ai-runtime
