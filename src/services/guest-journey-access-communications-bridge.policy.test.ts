@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
+import { readFile } from "node:fs/promises";
 import {
   buildGuestAccessCommunicationOutbox,
   filterAlreadyOwnedGuestAccessDeliveries,
@@ -194,4 +195,21 @@ test("new credential application after SENT creates a new obligation", () => {
     }],
   });
   assert.deepEqual(filtered.map((row) => row.channel).sort(), ["email", "sms"]);
+});
+
+
+test("verification reminder consumes the canonical SMS consent policy", async () => {
+  const source = await readFile(
+    new URL("./guest-verification-reminder.service.ts", import.meta.url),
+    "utf8"
+  );
+
+  assert.match(
+    source,
+    /import \{ hasGuestSmsConsent \} from "\.\/guest-journey-access-communications-bridge\.policy";/
+  );
+  assert.doesNotMatch(
+    source,
+    /function hasGuestSmsConsent\(/
+  );
 });

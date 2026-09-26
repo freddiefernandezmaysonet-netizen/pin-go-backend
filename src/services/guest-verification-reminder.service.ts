@@ -14,6 +14,7 @@ import {
   type GuestLanguage,
 } from "./guest-language.service";
 import { resolveOrganizationGuestReplyTo } from "./organization-guest-email.service";
+import { hasGuestSmsConsent } from "./guest-journey-access-communications-bridge.policy";
 
 export type SendGuestVerificationReminderResult = {
   reservationId: string;
@@ -39,42 +40,6 @@ function buildGuestVerificationUrl(
   return (
     `${getPublicApiUrl()}/guest/verify/` +
     encodeURIComponent(guestToken)
-  );
-}
-
-function hasGuestSmsConsent(
-  externalRaw: unknown
-): boolean {
-  if (
-    !externalRaw ||
-    typeof externalRaw !== "object" ||
-    Array.isArray(externalRaw)
-  ) {
-    return false;
-  }
-
-  const consent = (
-    externalRaw as Record<string, unknown>
-  ).consent;
-
-  if (
-    !consent ||
-    typeof consent !== "object" ||
-    Array.isArray(consent)
-  ) {
-    return false;
-  }
-
-  const consentRecord =
-    consent as Record<string, unknown>;
-
-  const acceptedAt = String(
-    consentRecord.acceptedAt ?? ""
-  ).trim();
-
-  return (
-    consentRecord.smsConsent === true &&
-    acceptedAt.length > 0
   );
 }
 
