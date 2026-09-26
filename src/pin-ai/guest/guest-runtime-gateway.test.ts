@@ -99,6 +99,11 @@ function createPrisma(reservation: unknown) {
     lastErrorCode?: string | null;
   } | null = null;
   const prisma = {
+    propertyReview: {
+      async aggregate() {
+        return { _avg: { overallRating: null }, _count: { _all: 0 } };
+      },
+    },
     property: {
       async findFirst(args: unknown) {
         propertyCalls.push(args);
@@ -262,6 +267,7 @@ test("scopes one valid token to one active reservation and sends no guest PII", 
   assert.equal(receivedRequest?.context.organizationId, "org-a");
   assert.equal(receivedRequest?.context.reservationId, "reservation-a");
   assert.equal(receivedRequest?.context.preferredLanguage, "es");
+  assert.equal(receivedRequest?.context.currentLocalDateTime, "2026-09-21T12:00:00-04:00");
   assert.deepEqual(
     propertyCalls.map((call) => (call as { where: unknown }).where),
     [{ id: "property-a", organizationId: "org-a", status: "ACTIVE" }],
@@ -298,6 +304,41 @@ test("scopes one valid token to one active reservation and sends no guest PII", 
     webSearch: { enabled: true, used: false },
   });
   assert.equal("toolCalls" in result, false);
+});
+
+
+test("keeps the property-local calendar date when UTC has already crossed midnight", async () => {
+  const utcAfterMidnight = new Date("2026-09-26T02:13:00.000Z");
+  const { prisma } = createPrisma({
+    id: "reservation-a",
+    propertyId: "property-a",
+    preferredLanguage: "es-PR",
+    property: {
+      organizationId: "org-a",
+      city: "San Juan",
+      region: "PR",
+      country: "PR",
+      timezone: "America/Puerto_Rico",
+    },
+  });
+  let receivedRequest: PinAIRuntimeRequest | undefined;
+  const runtime: GuestPinAIRuntimeRunner = async (request) => {
+    receivedRequest = request;
+    return shadowResult(request);
+  };
+  const gateway = new GuestPinAIGateway(
+    prisma,
+    runtime,
+    true,
+    () => utcAfterMidnight,
+  );
+
+  await gateway.reply({ guestToken: token, message: "¿Qué día es hoy?" });
+
+  assert.equal(
+    receivedRequest?.context.currentLocalDateTime,
+    "2026-09-25T22:13:00-04:00",
+  );
 });
 
 test("reuses one server-side OpenAI session for conversational follow-ups", async () => {
