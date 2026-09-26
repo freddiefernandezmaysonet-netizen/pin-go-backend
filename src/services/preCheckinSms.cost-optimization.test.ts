@@ -1,3 +1,4 @@
+import { hasGuestSmsConsent } from "./guest-journey-access-communications-bridge.policy";
 import test from "node:test";
 import assert from "node:assert/strict";
 
@@ -114,4 +115,33 @@ test("address is used only as compact fallback when no map link exists", () => {
   assert.match(body, /Casa Aguila del Mar/);
   assert.match(body, /Ubicacion: 123 Calle Principal/);
   assert.doesNotMatch(body, /Á/);
+});
+
+
+test("historical Direct Booking stay notification consent remains eligible for pre-checkin", () => {
+  assert.equal(
+    hasGuestSmsConsent({
+      consent: {
+        acceptedAt: null,
+        smsConsent: false,
+        stayNotificationsConsent: true,
+        consentSource: "DIRECT_BOOKING_WEB_FORM",
+        consentVersion: "stay_notifications_v1",
+      },
+    }),
+    true
+  );
+
+  assert.equal(
+    hasGuestSmsConsent({
+      consent: {
+        acceptedAt: null,
+        smsConsent: false,
+        stayNotificationsConsent: true,
+        consentSource: "OTHER_SOURCE",
+        consentVersion: "stay_notifications_v1",
+      },
+    }),
+    false
+  );
 });
