@@ -1,7 +1,11 @@
 {
-  "extends": "./tsconfig.json",
   "compilerOptions": {
     "noEmit": true,
+    "module": "preserve",
+    "moduleResolution": "bundler",
+    "target": "esnext",
+    "strict": true,
+    "skipLibCheck": true,
     "types": ["node"],
     "exactOptionalPropertyTypes": false,
     "noUncheckedIndexedAccess": false
