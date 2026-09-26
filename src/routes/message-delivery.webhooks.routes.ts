@@ -112,11 +112,11 @@ export function buildMessageDeliveryWebhookRouter(
         event = await (resend as any).webhooks.verify({
           payload: rawBody,
           headers: {
-            id: svixId,
-            timestamp: svixTimestamp,
-            signature: svixSignature,
+            "svix-id": svixId,
+            "svix-timestamp": svixTimestamp,
+            "svix-signature": svixSignature,
           },
-          webhookSecret,
+          secret: webhookSecret,
         });
       } catch {
         return res.status(403).json({
