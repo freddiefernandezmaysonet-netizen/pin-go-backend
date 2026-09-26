@@ -37,6 +37,19 @@ test("legacy pre-checkin delivers email independently before optional SMS consen
   );
 });
 
+test("legacy pre-checkin closes the obligation after the first successful channel", async () => {
+  const worker = await read("../workers/reservation.worker.ts");
+
+  assert.match(
+    worker,
+    /messageDispatchLogs:\s*\{\s*none:\s*\{\s*type:\s*"PRECHECKIN",\s*status:\s*"SENT"/
+  );
+  assert.match(
+    worker,
+    /if \(emailResult\.status === "SENT"\) \{[\s\S]*?Pre-checkin obligation fulfilled[\s\S]*?continue;/
+  );
+});
+
 test("pre-checkin email is first-class logged communication evidence", async () => {
   const delivery = await read(
     "./email-delivery.service.ts"
