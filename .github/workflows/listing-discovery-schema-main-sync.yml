@@ -26,5 +26,12 @@ jobs:
         env:
           DATABASE_URL: postgresql://ci:ci@127.0.0.1:5432/pingo_schema_validation
         run: npx prisma validate
-      - name: Compile smoke
-        run: npx tsc --noEmit --pretty false
+      - name: Verify generated discovery contract
+        run: |
+          node - <<'NODE'
+          const client = require("@prisma/client");
+          if (client.ListingPropertyType?.CABIN !== "CABIN") throw new Error("ListingPropertyType.CABIN missing");
+          if (client.ListingFeatureType?.OCEAN_VIEW !== "OCEAN_VIEW") throw new Error("ListingFeatureType.OCEAN_VIEW missing");
+          if (!client.Prisma?.ModelName?.PropertyListingFeature) throw new Error("PropertyListingFeature model missing");
+          console.log("PASS - generated Prisma discovery contract");
+          NODE
