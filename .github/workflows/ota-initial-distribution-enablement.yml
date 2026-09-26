@@ -66,6 +66,28 @@ jobs:
             '.github/workflows/ota-initial-distribution-enablement.yml',
           }
           changed = set(Path('/tmp/ota-initial-changed.txt').read_text().splitlines())
+          if os.environ.get('GITHUB_HEAD_REF') == 'agent/listing-discovery-schema-main-sync':
+            repo = 'freddiefernandezmaysonet-netizen/pin-go-backend'
+            if not (
+              os.environ.get('GITHUB_EVENT_NAME') == 'pull_request'
+              and os.environ.get('GITHUB_REPOSITORY') == repo
+              and os.environ.get('SCOPE_PR_NUMBER') == '258'
+              and os.environ.get('SCOPE_HEAD_REPO') == repo
+              and os.environ.get('SCOPE_BASE_REPO') == repo
+              and os.environ.get('GITHUB_BASE_REF') == 'main'
+            ):
+              raise SystemExit('PR #258 repository/branch scope mismatch')
+            allowed = {
+              '.github/workflows/listing-discovery-schema-main-sync.yml',
+              '.github/workflows/ota-airbnb-listing-discovery.yml',
+              '.github/workflows/ota-initial-distribution-enablement.yml',
+              'prisma/migrations/20260924131500_add_listing_property_type/migration.sql',
+              'prisma/migrations/20260924133000_add_listing_features_v1/migration.sql',
+              'prisma/schema.prisma',
+            }
+            if changed != allowed:
+              raise SystemExit(f'PR #258 exact six-file scope required: {sorted(changed ^ allowed)}')
+            raise SystemExit(0)
           if os.environ.get('GITHUB_HEAD_REF') == 'agent/property-protection-v1-payment-attempt-foundation':
             repo = 'freddiefernandezmaysonet-netizen/pin-go-backend'
             if not (
