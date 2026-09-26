@@ -34,8 +34,11 @@ jobs:
       - run: npm ci
       - run: npx prisma generate
       - run: npm run test:guest-journey-enterprise-e7-communications
-      - name: Pre-checkin canonical consent regression
-        run: node --import tsx --test src/services/guest-journey-access-communications-bridge.policy.test.ts
+      - name: Pre-checkin regressions
+        run: >-
+          node --import tsx --test
+          src/services/guest-journey-access-communications-bridge.policy.test.ts
+          src/services/precheckin-email-fallback.contract.test.ts
       - name: Bundle worker integration boundaries
         run: |
           npx esbuild src/workers/reservation.worker.ts --bundle --platform=node --packages=external --outfile=/tmp/reservation.worker.e7.js
