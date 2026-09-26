@@ -11,6 +11,7 @@ export type PinAIRuntimeToolName =
   | "check_extension_availability"
   | "calculate_extension_price"
   | "check_date_change"
+  | "prepare_reservation_modification"
   | "get_cancellation_policy"
   | "get_payment_context"
   | "search_local_places"
@@ -20,6 +21,7 @@ export type PinAIToolAuthority =
   | "READ_STABLE"
   | "READ_DYNAMIC"
   | "CHECK_ELIGIBILITY"
+  | "PROPOSE_ACTION"
   | "EXTERNAL_READ"
   | "ESCALATION";
 
@@ -80,6 +82,7 @@ export const PIN_AI_RUNTIME_ENABLED_TOOL_NAMES = [
   "check_extension_availability",
   "calculate_extension_price",
   "check_date_change",
+  "prepare_reservation_modification",
   "get_cancellation_policy",
   "get_payment_context",
   "escalate_to_host",
@@ -205,6 +208,32 @@ export const PIN_AI_RUNTIME_TOOLS: readonly PinAIRuntimeToolDefinition[] = [
         },
       },
       required: ["proposedCheckInDate", "proposedCheckOutDate"],
+      additionalProperties: false,
+    },
+  },
+  {
+    name: "prepare_reservation_modification",
+    authority: "PROPOSE_ACTION",
+    description:
+      "Prepare a guest-confirmable reservation-modification proposal for exact local stay dates. This may persist a proposal and quote, but it does not change the reservation, approve the request, collect payment, charge the guest, or hold availability.",
+    parameters: {
+      type: "object",
+      properties: {
+        proposedCheckInDate: {
+          type: "string",
+          description:
+            "Exact proposed local check-in date in YYYY-MM-DD format.",
+        },
+        proposedCheckOutDate: {
+          type: "string",
+          description:
+            "Exact proposed local check-out date in YYYY-MM-DD format.",
+        },
+      },
+      required: [
+        "proposedCheckInDate",
+        "proposedCheckOutDate",
+      ],
       additionalProperties: false,
     },
   },
