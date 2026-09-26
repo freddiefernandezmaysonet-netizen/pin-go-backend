@@ -511,3 +511,264 @@ test("enables native OpenAI web search with coarse location only", async () => {
     globalThis.fetch = originalFetch;
   }
 });
+
+
+test("passes guest authorization to the runtime only through the private runner argument", async () => {
+  const { prisma } = createPrisma({
+    id: "reservation-a",
+    propertyId: "property-a",
+    preferredLanguage: "es",
+    property: {
+      organizationId: "org-a",
+      city: "San Juan",
+      region: "PR",
+      country: "PR",
+      timezone: "America/Puerto_Rico",
+    },
+  });
+  let receivedAuthorization:
+    Parameters<GuestPinAIRuntimeRunner>[3] |
+    undefined;
+  let serializedRequest = "";
+
+  const runtime: GuestPinAIRuntimeRunner = async (
+    request,
+    _location,
+    _resumeSessionId,
+    actionAuthorization,
+  ) => {
+    receivedAuthorization =
+      actionAuthorization;
+    serializedRequest =
+      JSON.stringify(request);
+    return shadowResult(request);
+  };
+
+  const gateway = new GuestPinAIGateway(
+    prisma,
+    runtime,
+    true,
+    () => now,
+  );
+
+  await gateway.reply({
+    guestToken: token,
+    message: "Quiero cambiar las fechas.",
+  });
+
+  assert.deepEqual(
+    receivedAuthorization,
+    { guestToken: token },
+  );
+  assert.equal(
+    serializedRequest.includes(token),
+    false,
+  );
+  assert.equal(
+    serializedRequest.includes("guestToken"),
+    false,
+  );
+});
+
+test("returns a confirmed-action proposal credential only through the guest gateway response", async () => {
+  const { prisma } = createPrisma({
+    id: "reservation-a",
+    propertyId: "property-a",
+    preferredLanguage: "es",
+    property: {
+      organizationId: "org-a",
+      city: "San Juan",
+      region: "PR",
+      country: "PR",
+      timezone: "America/Puerto_Rico",
+    },
+  });
+
+  const expiresAt =
+    new Date("2026-09-21T17:00:00.000Z");
+
+  const runtime: GuestPinAIRuntimeRunner = async (request) => ({
+    ...shadowResult(request, {
+      responseText:
+        "Preparé una cotización válida hasta la hora indicada. La disponibilidad no está retenida; usa el control de confirmación para continuar.",
+      toolCalls: [{
+        name: "prepare_reservation_modification",
+        arguments: {
+          proposedCheckInDate: "2026-10-01",
+          proposedCheckOutDate: "2026-10-05",
+        },
+      }],
+    }),
+    privateActionProposal: {
+      publicResult: {
+        actionType: "RESERVATION_MODIFICATION",
+        proposalId: "proposal-12345678",
+        requiresGuestConfirmation: true,
+        actionExecuted: false,
+        quote: {
+          quotedAt: new Date("2026-09-21T16:00:00.000Z"),
+          quoteExpiresAt: expiresAt,
+          quoteExpiresAtLocal: "2026-09-21T13:00:00-04:00",
+          priceGuaranteedUntil: expiresAt,
+          propertyTimezone: "America/Puerto_Rico",
+          availabilityCheckedAt: new Date("2026-09-21T16:00:00.000Z"),
+          availabilityHeld: false,
+          currentTotalAmount: 353.35,
+          proposedTotalAmount: 521.85,
+          amountDifference: 168.5,
+          amountDifferenceCents: 16_850,
+          currency: "usd",
+          financialAction: "ADDITIONAL_PAYMENT_REQUIRED",
+        },
+      },
+      privateConfirmation: {
+        proposalId: "proposal-12345678",
+        confirmationToken:
+          "confirmation-token-private-123456789012345",
+        expiresAt,
+      },
+    },
+  });
+
+  const gateway = new GuestPinAIGateway(
+    prisma,
+    runtime,
+    true,
+    () => now,
+  );
+
+  const result = await gateway.reply({
+    guestToken: token,
+    message: "Sí, quiero extender la estadía.",
+  });
+
+  assert.equal(
+    result.actionsExecuted,
+    false,
+  );
+  assert.equal(
+    result.operationalWrites,
+    false,
+  );
+  assert.equal(
+    result.actionProposal?.proposalId,
+    "proposal-12345678",
+  );
+  assert.equal(
+    result.actionProposal?.confirmationToken,
+    "confirmation-token-private-123456789012345",
+  );
+  assert.equal(
+    result.actionProposal?.quote.availabilityHeld,
+    false,
+  );
+  assert.equal(
+    result.actionProposal?.quote.quoteExpiresAtLocal,
+    "2026-09-21T13:00:00-04:00",
+  );
+});
+
+test("fails closed when private proposal evidence is not paired with exactly one proposal tool call", async () => {
+  const { prisma } = createPrisma({
+    id: "reservation-a",
+    propertyId: "property-a",
+    preferredLanguage: "en",
+    property: {
+      organizationId: "org-a",
+      city: null,
+      region: null,
+      country: null,
+      timezone: "America/Puerto_Rico",
+    },
+  });
+
+  const runtime: GuestPinAIRuntimeRunner = async (request) => ({
+    ...shadowResult(request, {
+      toolCalls: [],
+    }),
+    privateActionProposal: {
+      publicResult: {
+        actionType: "RESERVATION_MODIFICATION",
+        proposalId: "proposal-12345678",
+        requiresGuestConfirmation: true,
+        actionExecuted: false,
+        quote: {
+          quotedAt: now,
+          quoteExpiresAt: new Date(now.getTime() + 60_000),
+          quoteExpiresAtLocal: "2026-09-21T12:01:00-04:00",
+          priceGuaranteedUntil: new Date(now.getTime() + 60_000),
+          propertyTimezone: "America/Puerto_Rico",
+          availabilityCheckedAt: now,
+          availabilityHeld: false,
+          currentTotalAmount: 100,
+          proposedTotalAmount: 120,
+          amountDifference: 20,
+          amountDifferenceCents: 2_000,
+          currency: "usd",
+          financialAction: "ADDITIONAL_PAYMENT_REQUIRED",
+        },
+      },
+      privateConfirmation: {
+        proposalId: "proposal-12345678",
+        confirmationToken:
+          "confirmation-token-private-123456789012345",
+        expiresAt: new Date(now.getTime() + 60_000),
+      },
+    },
+  });
+
+  const gateway = new GuestPinAIGateway(
+    prisma,
+    runtime,
+    true,
+    () => now,
+  );
+
+  await assert.rejects(
+    gateway.reply({
+      guestToken: token,
+      message: "Proceed.",
+    }),
+    /PIN_AI_GUEST_GATEWAY_SHADOW_INVARIANT_FAILED/,
+  );
+});
+
+test("runtime proposal gate requires the independently enabled action broker", async () => {
+  const runtime = createGuestPinAIRuntimeRunner({
+    PIN_AI_RUNTIME_SHADOW_ENABLED: "true",
+    PIN_AI_RUNTIME_REAL_READ_ENABLED: "true",
+    PIN_AI_ACTION_PROPOSAL_TOOL_ENABLED: "true",
+    PIN_AI_ACTION_BROKER_ENABLED: "false",
+  });
+
+  const runtimeRequest: PinAIRuntimeRequest = {
+    context: {
+      organizationId: "org-a",
+      propertyId: "property-a",
+      reservationId: "reservation-a",
+      guestId: "reservation-guest",
+      currentLocalDateTime: "2026-09-21T12:00:00-04:00",
+      preferredLanguage: "en",
+    },
+    conversation: [{
+      role: "guest",
+      content: "Change my dates.",
+    }],
+  };
+
+  await assert.rejects(
+    runtime(
+      runtimeRequest,
+      {
+        city: "",
+        region: "",
+        country: "",
+        timezone: "America/Puerto_Rico",
+        label: "",
+      },
+      undefined,
+      { guestToken: token },
+    ),
+    /PIN_AI_RUNTIME_ACTION_BROKER_REQUIRED/,
+  );
+});

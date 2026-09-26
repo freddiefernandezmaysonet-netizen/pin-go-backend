@@ -3,11 +3,20 @@ import { randomUUID } from "node:crypto";
 import { formatInTimeZone } from "date-fns-tz";
 
 import type { PinAIRuntimeRequest } from "../runtime/contracts.js";
+import type {
+  PinAIPrivateActionProposal,
+} from "../runtime/action-proposal-tool-executor.js";
+import {
+  createActionProposalRuntimeDependencies,
+} from "../runtime/action-proposal-runtime-composition.js";
 import { getPropertyKnowledgeSnapshot } from "../property-knowledge.service.js";
 import { LunaRuntimeAdapter } from "../runtime/luna-runtime-adapter.js";
 import { GuardedPinAIModelAdapter } from "../runtime/model-adapter.js";
 import { OpenAIAgentsRuntimeTransport } from "../runtime/openai-agents-runtime-transport.js";
-import { createPinGoRuntimeReadToolExecutor } from "../runtime/pin-go-runtime-tools.js";
+import {
+  createPinGoRuntimeReadToolExecutor,
+  createPinGoRuntimeToolExecutorWithActionProposal,
+} from "../runtime/pin-go-runtime-tools.js";
 import {
   PinAIShadowOrchestrator,
   type PinAIShadowRunResult,
@@ -54,11 +63,50 @@ export type GuestPinAIGatewayPrisma = Pick<
   "reservation" | "pinAIGuestConversation" | "property"
 >;
 
+export type GuestPinAIActionAuthorization = Readonly<{
+  guestToken: string;
+}>;
+
+export type GuestPinAIRuntimeRunResult =
+  PinAIShadowRunResult &
+  Readonly<{
+    privateActionProposal?:
+      PinAIPrivateActionProposal |
+      null;
+  }>;
+
 export type GuestPinAIRuntimeRunner = (
   request: PinAIRuntimeRequest,
   location: WebSearchLocation,
   resumeSessionId?: string,
-) => Promise<PinAIShadowRunResult>;
+  actionAuthorization?:
+    GuestPinAIActionAuthorization,
+) => Promise<GuestPinAIRuntimeRunResult>;
+
+export type GuestPinAIActionProposalResponse =
+  Readonly<{
+    actionType:
+      "RESERVATION_MODIFICATION";
+    proposalId: string;
+    requiresGuestConfirmation: true;
+    confirmationToken: string;
+    expiresAt: Date;
+    quote: Readonly<{
+      quotedAt: Date;
+      quoteExpiresAt: Date;
+      quoteExpiresAtLocal: string;
+      priceGuaranteedUntil: Date;
+      propertyTimezone: string;
+      availabilityCheckedAt: Date;
+      availabilityHeld: false;
+      currentTotalAmount: number;
+      proposedTotalAmount: number;
+      amountDifference: number;
+      amountDifferenceCents: number;
+      currency: string;
+      financialAction: string;
+    }>;
+  }>;
 
 export type GuestPinAIGatewayResponse = Readonly<{
   reply: string;
@@ -69,6 +117,8 @@ export type GuestPinAIGatewayResponse = Readonly<{
   actionsExecuted: false;
   databaseWrites: true;
   operationalWrites: false;
+  actionProposal?:
+    GuestPinAIActionProposalResponse;
   webSearch: Readonly<{
     enabled: boolean;
     used: boolean;
@@ -172,12 +222,16 @@ export class GuestPinAIGateway {
       conversation: [{ role: "guest", content: message }],
     };
 
-    let result: PinAIShadowRunResult;
+    let result:
+      GuestPinAIRuntimeRunResult;
     try {
       result = await this.runtime(
         request,
         resolveWebSearchLocation(reservation.property),
         lease.openaiSessionId ?? undefined,
+        {
+          guestToken,
+        },
       );
     } catch (error) {
       await this.releaseFailedConversationLease(
@@ -207,6 +261,48 @@ export class GuestPinAIGateway {
       );
       throw new GuestPinAIGatewayError("SHADOW_INVARIANT_FAILED");
     }
+
+    const prepareToolCalls =
+      result.response.toolCalls.filter(
+        (call) =>
+          call.name ===
+          "prepare_reservation_modification",
+      );
+    const privateActionProposal =
+      result.privateActionProposal ??
+      null;
+
+    if (
+      (
+        privateActionProposal &&
+        prepareToolCalls.length !== 1
+      ) ||
+      (
+        !privateActionProposal &&
+        prepareToolCalls.length !== 0
+      )
+    ) {
+      await this.releaseFailedConversationLease(
+        reservation.id,
+        lease.leaseToken,
+        new GuestPinAIGatewayError(
+          "SHADOW_INVARIANT_FAILED",
+        ),
+        true,
+      );
+      throw new GuestPinAIGatewayError(
+        "SHADOW_INVARIANT_FAILED",
+      );
+    }
+
+    const actionProposal:
+      GuestPinAIActionProposalResponse |
+      undefined =
+      privateActionProposal
+        ? buildGuestActionProposalResponse(
+            privateActionProposal,
+          )
+        : undefined;
 
     const reply = result.response.responseText.trim();
     if (!reply) {
@@ -256,6 +352,11 @@ export class GuestPinAIGateway {
       actionsExecuted: false,
       databaseWrites: true,
       operationalWrites: false,
+      ...(actionProposal
+        ? {
+            actionProposal,
+          }
+        : {}),
       webSearch: {
         enabled: result.response.webSearch?.enabled === true,
         used: result.response.webSearch?.used === true,
@@ -339,12 +440,46 @@ export class GuestPinAIGateway {
 export function createGuestPinAIRuntimeRunner(
   env: NodeJS.ProcessEnv = process.env,
 ): GuestPinAIRuntimeRunner {
-  return async (request, location, resumeSessionId) => {
+  return async (
+    request,
+    location,
+    resumeSessionId,
+    actionAuthorization,
+  ) => {
     if (env.PIN_AI_RUNTIME_SHADOW_ENABLED !== "true") {
       throw new Error("PIN_AI_RUNTIME_SHADOW_DISABLED");
     }
     if (env.PIN_AI_RUNTIME_REAL_READ_ENABLED !== "true") {
       throw new Error("PIN_AI_RUNTIME_REAL_READ_DISABLED");
+    }
+
+    const actionProposalRequested =
+      env.PIN_AI_ACTION_PROPOSAL_TOOL_ENABLED ===
+      "true";
+    const actionBrokerEnabled =
+      env.PIN_AI_ACTION_BROKER_ENABLED ===
+      "true";
+
+    if (
+      actionProposalRequested &&
+      !actionBrokerEnabled
+    ) {
+      throw new Error(
+        "PIN_AI_RUNTIME_ACTION_BROKER_REQUIRED",
+      );
+    }
+
+    const actionProposalEnabled =
+      actionProposalRequested &&
+      actionBrokerEnabled;
+
+    if (
+      actionProposalEnabled &&
+      !actionAuthorization?.guestToken
+    ) {
+      throw new Error(
+        "PIN_AI_RUNTIME_ACTION_AUTHORIZATION_MISSING",
+      );
     }
 
     const apiKey = env.OPENAI_API_KEY;
@@ -402,6 +537,10 @@ export function createGuestPinAIRuntimeRunner(
               }
             : {}),
         },
+        actionProposal: {
+          enabled:
+            actionProposalEnabled,
+        },
         maxPolls: 50,
         pollDelayMs: 500,
       },
@@ -411,10 +550,70 @@ export function createGuestPinAIRuntimeRunner(
       new LunaRuntimeAdapter(transport),
     );
 
-    return new PinAIShadowOrchestrator(
-      model,
-      createPinGoRuntimeReadToolExecutor(),
-    ).run(request);
+    if (!actionProposalEnabled) {
+      return new PinAIShadowOrchestrator(
+        model,
+        createPinGoRuntimeReadToolExecutor(),
+      ).run(request);
+    }
+
+    const actionTools =
+      createPinGoRuntimeToolExecutorWithActionProposal(
+        createActionProposalRuntimeDependencies({
+          guestToken:
+            actionAuthorization!.guestToken,
+          enabled: true,
+        }),
+      );
+
+    const result =
+      await new PinAIShadowOrchestrator(
+        model,
+        actionTools.executor,
+      ).run(request);
+
+    return {
+      ...result,
+      privateActionProposal:
+        actionTools
+          .actionProposalExecutor
+          .getPrivateActionProposal(),
+    };
+  };
+}
+
+function buildGuestActionProposalResponse(
+  value: PinAIPrivateActionProposal,
+): GuestPinAIActionProposalResponse {
+  const publicResult =
+    value.publicResult;
+  const privateConfirmation =
+    value.privateConfirmation;
+
+  if (
+    publicResult.proposalId !==
+    privateConfirmation.proposalId
+  ) {
+    throw new GuestPinAIGatewayError(
+      "SHADOW_INVARIANT_FAILED",
+    );
+  }
+
+  return {
+    actionType:
+      publicResult.actionType,
+    proposalId:
+      publicResult.proposalId,
+    requiresGuestConfirmation:
+      true,
+    confirmationToken:
+      privateConfirmation
+        .confirmationToken,
+    expiresAt:
+      privateConfirmation
+        .expiresAt,
+    quote:
+      publicResult.quote,
   };
 }
 

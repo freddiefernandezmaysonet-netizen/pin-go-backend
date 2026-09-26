@@ -24,6 +24,10 @@ export const PIN_AI_OPENAI_AGENT_INSTRUCTIONS = [
   "Reply naturally in the guest's current language.",
 ].join(" ");
 
+export type PinAIOpenAIActionProposalConfig = Readonly<{
+  enabled: boolean;
+}>;
+
 export type PinAIOpenAIWebSearchConfig = Readonly<{
   enabled: boolean;
   mode?: "live" | "cached";
@@ -35,8 +39,26 @@ export type PinAIOpenAIWebSearchConfig = Readonly<{
   }>;
 }>;
 
+export function buildPinAIOpenAIInstructions(
+  actionProposal?: PinAIOpenAIActionProposalConfig,
+): string {
+  if (actionProposal?.enabled !== true) {
+    return PIN_AI_OPENAI_AGENT_INSTRUCTIONS;
+  }
+
+  return [
+    PIN_AI_OPENAI_AGENT_INSTRUCTIONS,
+    "When the guest clearly wants to proceed with an eligible stay date change or extension, use prepare_reservation_modification only after you have enough exact date information.",
+    "The proposal tool creates a reviewable quote only. It does not modify the reservation, hold dates, collect payment, or charge the guest.",
+    "If a proposal is prepared, state the exact quote expiration returned by the tool, state that availability is not held and will be checked again, and ask the guest to use the confirmation control shown in the interface.",
+    "Never ask the guest to type or repeat a confirmation token. Never mention or infer any private confirmation credential.",
+    "Never claim the reservation changed unless a later canonical result explicitly says actionExecuted=true.",
+  ].join(" ");
+}
+
 export function buildPinAIOpenAITools(
   webSearch?: PinAIOpenAIWebSearchConfig,
+  actionProposal?: PinAIOpenAIActionProposalConfig,
 ): readonly Readonly<Record<string, unknown>>[] {
   return [
     ...(webSearch?.enabled === true
@@ -49,7 +71,11 @@ export function buildPinAIOpenAITools(
         ]
       : []),
     ...PIN_AI_RUNTIME_TOOLS.filter((tool) =>
-      isPinAIRuntimeToolEnabled(tool.name),
+      isPinAIRuntimeToolEnabled(tool.name) &&
+      (
+        tool.name !== "prepare_reservation_modification" ||
+        actionProposal?.enabled === true
+      ),
     ).map((tool) => ({
       type: "function" as const,
       name: tool.name,
@@ -66,10 +92,18 @@ export function buildPinAIOpenAITools(
 
 export function buildPinAIOpenAIAgentConfig(
   webSearch?: PinAIOpenAIWebSearchConfig,
+  actionProposal?: PinAIOpenAIActionProposalConfig,
 ): Readonly<Record<string, unknown>> {
   return {
     model: "gpt-5.6-luna",
-    instructions: PIN_AI_OPENAI_AGENT_INSTRUCTIONS,
-    tools: buildPinAIOpenAITools(webSearch),
+    instructions:
+      buildPinAIOpenAIInstructions(
+        actionProposal,
+      ),
+    tools:
+      buildPinAIOpenAITools(
+        webSearch,
+        actionProposal,
+      ),
   };
 }
