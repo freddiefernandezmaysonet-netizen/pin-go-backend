@@ -1,0 +1,63 @@
+name: Pin AI Reservation Action Canary Scope V1
+
+on:
+  pull_request:
+    branches:
+      - main
+    paths:
+      - "src/pin-ai/actions/action-canary-scope.ts"
+      - "src/pin-ai/actions/action-canary-scope.test.ts"
+      - "src/pin-ai/guest/guest-runtime-gateway.ts"
+      - "src/pin-ai/guest/guest-runtime-gateway.test.ts"
+      - "src/routes/public-booking.pin-ai.routes.ts"
+      - "src/routes/public-booking.pin-ai.routes.test.ts"
+      - ".github/workflows/pin-ai-reservation-action-canary-scope-v1.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  reservation-action-canary-scope:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      DATABASE_URL: postgresql://user:pass@localhost:5432/pingo_test
+      APP_URL: http://localhost:3000
+
+    steps:
+      - name: Checkout exact candidate
+        uses: actions/checkout@v4
+
+      - name: Use Node.js 22
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+
+      - name: Install locked dependencies without lifecycle scripts
+        run: npm ci --ignore-scripts --no-audit --no-fund
+
+      - name: Generate and validate Prisma client
+        run: |
+          npx prisma generate
+          npx prisma validate --schema ./prisma/schema.prisma
+
+      - name: Run action canary scope tests
+        run: |
+          node --import tsx --test             src/pin-ai/actions/action-canary-scope.test.ts             src/pin-ai/guest/guest-runtime-gateway.test.ts             src/routes/public-booking.pin-ai.routes.test.ts
+
+      - name: Type-check retained Pin AI Guest Gateway
+        run: npm run test:pin-ai-guest-gateway-types
+
+      - name: Regress integrated reservation action E2E
+        run: node --import tsx --test src/pin-ai/actions/reservation-action-e2e-certification.test.ts
+
+      - name: Regress Action Broker
+        run: |
+          node --import tsx --test             src/pin-ai/actions/action-broker.service.test.ts             src/pin-ai/actions/action-broker.composition.test.ts
+
+      - name: Regress Action Proposal Foundation
+        run: node --import tsx --test src/pin-ai/actions/action-proposal.service.test.ts
+
+      - name: Regress retained Pin AI Runtime
+        run: npm run test:pin-ai-runtime
