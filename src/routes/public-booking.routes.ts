@@ -935,6 +935,7 @@ publicBookingRouter.get("/:organizationSlug/:propertySlug", async (req, res) => 
           select: {
             version: true,
             accommodationType: true,
+            propertyType: true,
             bedroomCount: true,
             fullBathroomCount: true,
             halfBathroomCount: true,
@@ -983,6 +984,16 @@ publicBookingRouter.get("/:organizationSlug/:propertySlug", async (req, res) => 
                     quantity: true,
                   },
                 },
+              },
+            },
+            features: {
+              where: { isActive: true },
+              orderBy: { sortOrder: "asc" },
+              select: {
+                type: true,
+                labelEn: true,
+                labelEs: true,
+                sortOrder: true,
               },
             },
             sharedSpaces: {
