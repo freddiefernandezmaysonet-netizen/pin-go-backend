@@ -89,6 +89,11 @@ function createPrisma() {
     leaseExpiresAt: Date | null;
   } | null = null;
   return {
+    propertyReview: {
+      async aggregate() {
+        return { _avg: { overallRating: null }, _count: { _all: 0 } };
+      },
+    },
     property: {
       async findFirst(args: { where: { id: string; organizationId: string } }) {
         return createPropertyKnowledgeRecord(args.where.id, args.where.organizationId);
