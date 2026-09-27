@@ -10,6 +10,7 @@ import {
 import {
   GATEWAY_FIRST_RETRY_MS,
 } from "../workers/deviceHealth.scheduler.policy";
+import { recordTtlockGatewayObservation } from "./ttlock-gateway-health.service";
 
 export type GatewayConfigurationVerificationState =
   | "CONNECTED"
@@ -68,6 +69,34 @@ export async function applyGatewayMonitoringConfiguration(
       response.hasGateway &&
       response.isOnline &&
       linkHealth.state === "LOCK_LINK_FRESH";
+
+    if (response.gatewayId !== null) {
+      await recordTtlockGatewayObservation(prisma, {
+        organizationId: (
+          await prisma.lock.findUniqueOrThrow({
+            where: { id: input.lockId },
+            select: {
+              property: {
+                select: {
+                  organizationId: true,
+                },
+              },
+            },
+          })
+        ).property.organizationId,
+        lockId: input.lockId,
+        ttlockGatewayId: response.gatewayId,
+        isOnline: response.isOnline,
+        occurredAt: response.providerResponseAt,
+        source: "GATEWAY_CONFIGURATION",
+        rawPayload: {
+          gatewayId: response.gatewayId,
+          isOnline: response.isOnline,
+          gatewayRssiUpdatedAt:
+            response.gatewayRssiUpdatedAt?.toISOString() ?? null,
+        },
+      });
+    }
 
     if (connected) {
       // Configuration is the one justified immediate verification. Once the
