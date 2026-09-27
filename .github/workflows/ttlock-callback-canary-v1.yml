@@ -10,6 +10,7 @@ on:
       - "src/routes/ttlock-callback.routes.test.ts"
       - "src/routes/ttlock-callback.server-contract.test.ts"
       - "src/services/ttlock-gateway-health.service.ts"
+      - "src/services/ttlock-gateway-health.service.test.ts"
       - "src/services/ttlock-gateway-offline-callback-reconciliation.service.ts"
       - "src/services/ttlock-gateway-offline-callback-reconciliation.test.ts"
       - "src/services/ttlock-gateway-inventory-sync.service.ts"
@@ -45,6 +46,7 @@ jobs:
           src/ttlock/ttlock.callback.test.ts
           src/routes/ttlock-callback.routes.test.ts
           src/routes/ttlock-callback.server-contract.test.ts
+          src/services/ttlock-gateway-health.service.test.ts
           src/services/ttlock-gateway-offline-callback-reconciliation.test.ts
           src/services/ttlock-gateway-inventory-sync.service.test.ts
 
