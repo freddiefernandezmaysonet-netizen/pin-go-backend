@@ -448,6 +448,7 @@ export type SendDeviceGatewayCriticalAlertEmailInput = {
   checkIn: Date;
   propertyTimeZone?: string | null;
   connectivityIssue?: "GATEWAY_OFFLINE" | "LOCK_LINK_STALE";
+  stayPhase?: "PRE_ARRIVAL" | "IN_STAY";
 };
 
 type SendManualReservationGuestConfirmationInput = {
@@ -2605,6 +2606,7 @@ export async function sendDeviceGatewayCriticalAlertEmail(
     input.connectivityIssue ?? "GATEWAY_OFFLINE";
   const lockLinkStale =
     connectivityIssue === "LOCK_LINK_STALE";
+  const inStay = input.stayPhase === "IN_STAY";
 
   const formattedCheckIn = formatBookingDateTime(
     input.checkIn,
@@ -2628,6 +2630,7 @@ export async function sendDeviceGatewayCriticalAlertEmail(
         reservationNumber:
           input.reservationNumber ?? null,
         connectivityIssue,
+        stayPhase: input.stayPhase ?? "PRE_ARRIVAL",
       }
     );
 
@@ -2640,20 +2643,32 @@ export async function sendDeviceGatewayCriticalAlertEmail(
   }
 
   const subject = lockLinkStale
-    ? "CRITICAL / CRÍTICO: Lock is not communicating with gateway"
-    : "CRITICAL / CRÍTICO: Gateway offline before guest check-in";
+    ? inStay
+      ? "CRITICAL / CRÍTICO: Lock communication unavailable during guest stay"
+      : "CRITICAL / CRÍTICO: Lock is not communicating with gateway"
+    : inStay
+      ? "CRITICAL / CRÍTICO: Gateway offline during guest stay"
+      : "CRITICAL / CRÍTICO: Gateway offline before guest check-in";
 
   const heading = lockLinkStale
     ? "Lock communication unavailable / Cerradura sin comunicación"
     : "Gateway offline / Gateway desconectado";
 
   const detectedEn = lockLinkStale
-    ? `Pin&amp;Go detected that the gateway for <strong>${safePropertyName}</strong> is online, but <strong>${safeLockName}</strong> has not refreshed its gateway-to-lock signal before guest check-in.`
-    : `Pin&amp;Go detected that the gateway for <strong>${safePropertyName}</strong> remains offline less than six hours before guest check-in.`;
+    ? inStay
+      ? `Pin&amp;Go detected that the gateway for <strong>${safePropertyName}</strong> is online, but <strong>${safeLockName}</strong> has stopped refreshing its gateway-to-lock signal during an active guest stay.`
+      : `Pin&amp;Go detected that the gateway for <strong>${safePropertyName}</strong> is online, but <strong>${safeLockName}</strong> has not refreshed its gateway-to-lock signal before guest check-in.`
+    : inStay
+      ? `Pin&amp;Go detected that the gateway for <strong>${safePropertyName}</strong> is offline during an active guest stay.`
+      : `Pin&amp;Go detected that the gateway for <strong>${safePropertyName}</strong> remains offline less than six hours before guest check-in.`;
 
   const detectedEs = lockLinkStale
-    ? `Pin&amp;Go detectó que el gateway de <strong>${safePropertyName}</strong> está online, pero <strong>${safeLockName}</strong> no ha actualizado su señal gateway↔cerradura antes del check-in.`
-    : `Pin&amp;Go detectó que el gateway de <strong>${safePropertyName}</strong> continúa desconectado a menos de seis horas del check-in.`;
+    ? inStay
+      ? `Pin&amp;Go detectó que el gateway de <strong>${safePropertyName}</strong> está online, pero <strong>${safeLockName}</strong> dejó de actualizar su señal gateway↔cerradura durante una estadía activa.`
+      : `Pin&amp;Go detectó que el gateway de <strong>${safePropertyName}</strong> está online, pero <strong>${safeLockName}</strong> no ha actualizado su señal gateway↔cerradura antes del check-in.`
+    : inStay
+      ? `Pin&amp;Go detectó que el gateway de <strong>${safePropertyName}</strong> está desconectado durante una estadía activa.`
+      : `Pin&amp;Go detectó que el gateway de <strong>${safePropertyName}</strong> continúa desconectado a menos de seis horas del check-in.`;
 
   const actionEn = lockLinkStale
     ? "Wake or touch the lock, verify battery and Bluetooth range, and confirm the gateway remains close enough to communicate with the lock."
