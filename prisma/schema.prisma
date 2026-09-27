@@ -2320,6 +2320,7 @@ model OperationalIssue {
   updatedAt DateTime @updatedAt
 
   transitions  OperationalIssueTransition[]
+  hostThread PinAIHostIncidentThread?
   runtimeStates ApmsRuntimeState[]
 
   @@index([organizationId])
@@ -2338,6 +2339,42 @@ model OperationalIssue {
   @@index([reservationId, workflowState])
 }
 
+
+model PinAIHostIncidentThread {
+  id String @id @default(cuid())
+  issueId String @unique
+  organizationId String
+  propertyId String
+  reservationId String
+  version Int @default(0)
+  acknowledgedBy String?
+  acknowledgedAt DateTime?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  issue OperationalIssue @relation(fields: [issueId], references: [id], onDelete: Cascade)
+  messages PinAIHostIncidentMessage[]
+
+  @@index([organizationId, updatedAt])
+  @@index([reservationId])
+}
+
+model PinAIHostIncidentMessage {
+  id String @id @default(cuid())
+  threadId String
+  sequence Int
+  actorId String
+  requestId String
+  requestHash String @db.VarChar(64)
+  kind String @db.VarChar(24)
+  audience String @db.VarChar(16)
+  contentCiphertext String @db.Text
+  createdAt DateTime @default(now())
+  thread PinAIHostIncidentThread @relation(fields: [threadId], references: [id], onDelete: Cascade)
+
+  @@unique([threadId, requestId])
+  @@unique([threadId, sequence])
+  @@index([threadId, audience, sequence])
+}
 
 model ApmsRuntimeState {
   id String @id @default(cuid())
