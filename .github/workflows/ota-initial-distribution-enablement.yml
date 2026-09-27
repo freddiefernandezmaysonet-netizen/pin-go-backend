@@ -97,6 +97,38 @@ jobs:
               raise SystemExit(f'PR #294 exact twelve-file Gateway Health scope required: {sorted(changed ^ allowed)}')
             print('PR #294 exact Gateway Health scope verified; all retained OTA protections executed.')
             raise SystemExit(0)
+          # PR #295 only; all activation, Full Sync and core checks above still run.
+          if os.environ.get('GITHUB_HEAD_REF') == 'agent/pin-ai-host-incident-foundation-v1':
+            repo = 'freddiefernandezmaysonet-netizen/pin-go-backend'
+            if not (
+              os.environ.get('GITHUB_EVENT_NAME') == 'pull_request'
+              and os.environ.get('GITHUB_REPOSITORY') == repo
+              and os.environ.get('SCOPE_PR_NUMBER') == '295'
+              and os.environ.get('SCOPE_HEAD_REPO') == repo
+              and os.environ.get('SCOPE_BASE_REPO') == repo
+              and os.environ.get('GITHUB_BASE_REF') == 'main'
+            ):
+              raise SystemExit('PR #295 repository/branch scope mismatch')
+            allowed = {
+              '.github/workflows/ota-airbnb-listing-discovery.yml',
+              '.github/workflows/ota-initial-distribution-enablement.yml',
+              '.github/workflows/pin-ai-host-incidents-v1.yml',
+              'docs/pin-ai-host-incident-conversations-blueprint-v1.md',
+              'docs/pin-ai-host-incident-foundation-v1.md',
+              'prisma/migrations/20260927180000_pin_ai_host_incident_threads/migration.sql',
+              'prisma/schema.prisma',
+              'src/pin-ai/host/host-incident-policy.ts',
+              'src/pin-ai/host/host-incident.database.test.ts',
+              'src/pin-ai/host/host-incident.service.ts',
+              'src/pin-ai/host/host-incident.test.ts',
+              'src/routes/dashboard.pin-ai-host-incidents.routes.ts',
+              'src/server.ts',
+              'tsconfig.pin-ai-host-incidents.json',
+            }
+            if changed != allowed:
+              raise SystemExit(f'PR #295 exact host incident scope required: {sorted(changed ^ allowed)}')
+            print('PR #295 exact host incident scope verified; all retained OTA protections executed.')
+            raise SystemExit(0)
           # PR #284 only; all activation, Full Sync and core checks above still run.
           if os.environ.get('GITHUB_HEAD_REF') == 'agent/pin-ai-server-history-v1':
             repo = 'freddiefernandezmaysonet-netizen/pin-go-backend'
