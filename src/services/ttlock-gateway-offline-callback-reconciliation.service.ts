@@ -47,6 +47,16 @@ function payloadContainsGatewayId(
   );
 }
 
+export function shouldApplyGatewayOfflineTransition(input: {
+  gatewayConnected: boolean | null;
+  isOnline: boolean | null;
+}) {
+  return !(
+    input.gatewayConnected === false &&
+    input.isOnline === false
+  );
+}
+
 export async function reconcileTtlockGatewayOfflineCallback(
   prisma: PrismaClient,
   input: {
@@ -71,6 +81,8 @@ export async function reconcileTtlockGatewayOfflineCallback(
           rawPayload: true,
           gatewayRawPayload: true,
           gatewayDisconnectedSince: true,
+          gatewayConnected: true,
+          isOnline: true,
         },
       },
     },
@@ -92,7 +104,20 @@ export async function reconcileTtlockGatewayOfflineCallback(
     );
   });
 
+  let updatedLocks = 0;
+
   for (const lock of matchedLocks) {
+    if (
+      !lock.deviceHealth ||
+      !shouldApplyGatewayOfflineTransition({
+        gatewayConnected:
+          lock.deviceHealth.gatewayConnected,
+        isOnline: lock.deviceHealth.isOnline,
+      })
+    ) {
+      continue;
+    }
+
     await upsertDeviceHealth(prisma, {
       lockId: lock.id,
       gatewayConnected: false,
@@ -113,15 +138,19 @@ export async function reconcileTtlockGatewayOfflineCallback(
         isOnline: false,
       },
     });
+
+    updatedLocks += 1;
   }
 
   return {
     status:
-      matchedLocks.length > 0
-        ? ("UPDATED" as const)
-        : ("NO_LOCAL_GATEWAY_MAPPING" as const),
+      matchedLocks.length === 0
+        ? ("NO_LOCAL_GATEWAY_MAPPING" as const)
+        : updatedLocks === 0
+          ? ("DUPLICATE_STATE" as const)
+          : ("UPDATED" as const),
     matchedLocks: matchedLocks.length,
-    updatedLocks: matchedLocks.length,
+    updatedLocks,
     providerRequests: 0,
   };
 }
