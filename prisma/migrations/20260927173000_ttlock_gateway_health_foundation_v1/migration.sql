@@ -23,7 +23,7 @@ CREATE TABLE "TtlockGateway" (
 );
 
 ALTER TABLE "Lock"
-ADD COLUMN "ttlockGatewayId" TEXT;
+ADD COLUMN "ttlockGatewayRecordId" TEXT;
 
 CREATE UNIQUE INDEX "TtlockGateway_organizationId_ttlockGatewayId_key"
 ON "TtlockGateway"("organizationId", "ttlockGatewayId");
@@ -34,8 +34,8 @@ ON "TtlockGateway"("organizationId", "isOnline");
 CREATE INDEX "TtlockGateway_lastEventAt_idx"
 ON "TtlockGateway"("lastEventAt");
 
-CREATE INDEX "Lock_ttlockGatewayId_idx"
-ON "Lock"("ttlockGatewayId");
+CREATE INDEX "Lock_ttlockGatewayRecordId_idx"
+ON "Lock"("ttlockGatewayRecordId");
 
 ALTER TABLE "TtlockGateway"
 ADD CONSTRAINT "TtlockGateway_organizationId_fkey"
@@ -45,8 +45,8 @@ ON DELETE CASCADE
 ON UPDATE CASCADE;
 
 ALTER TABLE "Lock"
-ADD CONSTRAINT "Lock_ttlockGatewayId_fkey"
-FOREIGN KEY ("ttlockGatewayId")
+ADD CONSTRAINT "Lock_ttlockGatewayRecordId_fkey"
+FOREIGN KEY ("ttlockGatewayRecordId")
 REFERENCES "TtlockGateway"("id")
 ON DELETE SET NULL
 ON UPDATE CASCADE;
