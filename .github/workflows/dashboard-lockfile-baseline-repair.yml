@@ -2,6 +2,9 @@ name: Dashboard Lockfile Baseline Repair
 
 on:
   workflow_dispatch:
+  pull_request:
+    paths:
+      - ".github/workflows/dashboard-lockfile-baseline-repair.yml"
 
 permissions:
   contents: write
