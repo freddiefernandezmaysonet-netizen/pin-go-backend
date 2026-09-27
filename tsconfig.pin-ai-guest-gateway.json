@@ -9,6 +9,7 @@
   "include": [
     "src/pin-ai/guest/guest-runtime-gateway.ts",
     "src/pin-ai/guest/guest-runtime-gateway.test.ts",
+    "src/pin-ai/guest/guest-history.database.test.ts",
     "src/pin-ai/guest/guest-runtime-gateway-canary.ts",
     "src/pin-ai/guest/guest-runtime-gateway-canary.test.ts",
     "src/pin-ai/runtime/openai-agent-config.ts",

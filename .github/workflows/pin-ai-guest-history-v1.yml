@@ -1,0 +1,51 @@
+name: Pin AI Guest History V1
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - "src/pin-ai/guest/**"
+      - "src/routes/public-booking.pin-ai.routes*"
+      - "prisma/schema.prisma"
+      - "prisma/migrations/20260927032500_pin_ai_guest_history_v1/**"
+      - ".github/workflows/pin-ai-guest-history-v1.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  guest-history-postgres:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: history_test
+          POSTGRES_PASSWORD: history_test
+          POSTGRES_DB: pin_ai_history_test
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U history_test -d pin_ai_history_test"
+          --health-interval 5s --health-timeout 5s --health-retries 10
+    env:
+      DATABASE_URL: postgresql://history_test:history_test@localhost:5432/pin_ai_history_test
+      PIN_AI_HISTORY_DB_TEST: "true"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+      - run: npm ci --ignore-scripts --no-audit --no-fund
+      - name: Prepare isolated test schema
+        run: |
+          npx prisma generate
+          npx prisma validate --schema ./prisma/schema.prisma
+          npx prisma db push --skip-generate
+      - name: Exercise additive migration and durable history against PostgreSQL
+        run: node --import tsx --test src/pin-ai/guest/guest-history.database.test.ts
+      - name: Regress guest runtime and routes
+        run: npm run test:pin-ai-runtime
+      - name: Compile guest gateway and history
+        run: npm run test:pin-ai-guest-gateway-types

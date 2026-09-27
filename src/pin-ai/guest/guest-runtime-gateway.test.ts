@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { openGuestHistory, readGuestMessages, sealGuestHistory, saveGuestActionReceipt } from "./guest-history.js";
 import test from "node:test";
 import { createTurnFixture } from "../runtime/runtime-turn.test-fixture.js";
 
@@ -97,6 +98,8 @@ function createPrisma(reservation: unknown) {
     leaseExpiresAt: Date | null;
     lastMessageAt?: Date | null;
     lastErrorCode?: string | null;
+    guestHistoryCiphertext?: string | null;
+    guestActionReceiptsCiphertext?: string | null;
   } | null = null;
   const prisma = {
     propertyReview: {
@@ -120,7 +123,7 @@ function createPrisma(reservation: unknown) {
     pinAIGuestConversation: {
       async findUnique() {
         return conversation
-          ? { openaiSessionId: conversation.openaiSessionId }
+          ? { ...conversation }
           : null;
       },
       async create(args: {
@@ -374,6 +377,46 @@ test("reuses one server-side OpenAI session for conversational follow-ups", asyn
   assert.deepEqual(messages, ["¿Puedo salir tarde?", "¿Y cuánto costaría?"]);
   assert.equal(getConversation()?.openaiSessionId, "session_conversation");
   assert.equal(getConversation()?.leaseToken, null);
+  const saved = getConversation()?.guestHistoryCiphertext;
+  assert.ok(saved);
+  assert.doesNotMatch(saved, /Puedo salir|costaría/);
+  const history = readGuestMessages({ reservationId: "reservation-a", guestToken: token }, saved);
+  assert.equal(history.length, 4);
+  assert.deepEqual(history.filter(m => m.role === "guest").map(m => m.text), messages);
+  assert.equal(new Set(history.map(m => m.id)).size, 4);
+});
+
+test("history ciphertext is bound to the reservation, token, and purpose and rejects corruption", () => {
+  const scope = { reservationId: "reservation-a", guestToken: token };
+  const encrypted = sealGuestHistory(scope, "messages", [{ id: "one", role: "guest", text: "Private dialogue" }]);
+  assert.doesNotMatch(encrypted, /Private dialogue/);
+  assert.equal(readGuestMessages(scope, encrypted).length, 1);
+  assert.throws(() => readGuestMessages({ ...scope, reservationId: "reservation-b" }, encrypted), /PIN_AI_HISTORY_UNAVAILABLE/);
+  assert.throws(() => readGuestMessages({ ...scope, guestToken: "another-private-token" }, encrypted), /PIN_AI_HISTORY_UNAVAILABLE/);
+  assert.throws(() => openGuestHistory(scope, "receipts", encrypted), /PIN_AI_HISTORY_UNAVAILABLE/);
+  assert.throws(() => readGuestMessages(scope, "corrupt"), /PIN_AI_HISTORY_UNAVAILABLE/);
+});
+
+test("receipt persistence retries a CAS conflict without touching dialogue or leases", async () => {
+  const scope = { reservationId: "reservation-a", guestToken: token };
+  let cipher: string | null = null;
+  let attempts = 0;
+  const prisma = { pinAIGuestConversation: {
+    findUnique: async () => ({ guestActionReceiptsCiphertext: cipher }),
+    updateMany: async (args: any) => {
+      assert.deepEqual(Object.keys(args.data), ["guestActionReceiptsCiphertext"]);
+      assert.equal(args.where.reservationId, scope.reservationId);
+      assert.equal(args.where.guestActionReceiptsCiphertext, cipher);
+      if (attempts++ === 0) return { count: 0 };
+      cipher = args.data.guestActionReceiptsCiphertext;
+      return { count: 1 };
+    },
+  } };
+  await saveGuestActionReceipt(prisma as never, scope, { proposalId: "proposal-a", checkoutUrl: "https://checkout.example.test/private" } as never);
+  assert.equal(attempts, 2);
+  assert.ok(cipher);
+  assert.doesNotMatch(cipher, /checkout.example.test/);
+  assert.equal((openGuestHistory<any[]>(scope, "receipts", cipher))[0].proposalId, "proposal-a");
 });
 
 test("returns a retryable busy error without discarding an existing conversation", async () => {
