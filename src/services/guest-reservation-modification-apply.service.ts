@@ -571,9 +571,20 @@ function serializeAppliedResult(input: {
   };
 }
 
+type ApplyDependencies = Readonly<{
+  client: Pick<PrismaClient, "reservationModification" | "$transaction">;
+  now: () => Date;
+  reconcile: (reservationId: string) => Promise<unknown>;
+}>;
+const defaultApplyDependencies: ApplyDependencies = {
+  client: prisma, now: () => new Date(), reconcile: reconcileReservation,
+};
+
 export async function applyGuestReservationModification(input: {
   modificationId: string;
-}) {
+}, dependencies: ApplyDependencies = defaultApplyDependencies) {
+  const prisma = dependencies.client;
+  const reconcileReservation = dependencies.reconcile;
   const modificationId = normalizeId(
     input.modificationId,
     "RESERVATION_MODIFICATION_ID_REQUIRED"
@@ -591,7 +602,7 @@ export async function applyGuestReservationModification(input: {
     });
   }
 
-  const now = new Date();
+  const now = dependencies.now();
 
   try {
     const result = await prisma.$transaction(

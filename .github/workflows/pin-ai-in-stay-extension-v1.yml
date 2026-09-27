@@ -67,6 +67,7 @@ jobs:
     env:
       DATABASE_URL: postgresql://postgres:postgres@127.0.0.1:5432/pingo_pin_ai_extension_test
       PIN_AI_EXTENSION_TEST_DATABASE_URL: postgresql://postgres:postgres@127.0.0.1:5432/pingo_pin_ai_extension_test
+      STRIPE_SECRET_KEY: sk_test_contract_only
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4

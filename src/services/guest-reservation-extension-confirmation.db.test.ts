@@ -1,3 +1,4 @@
+import { applyGuestReservationModification } from "./guest-reservation-modification-apply.service.js";
 import assert from "node:assert/strict";
 import test from "node:test";
 import { PrismaClient } from "@prisma/client";
@@ -16,7 +17,7 @@ test("in-stay confirmation concurrency in disposable PostgreSQL", async t => {
   const now = new Date("2026-09-26T22:00:00Z");
   let sequence = 0;
 
-  async function fixture() {
+  async function fixture(concurrent = true) {
     const key = `synthetic-extension-${++sequence}`;
     const org = await db.organization.create({ data: { name: key } });
     const property = await db.property.create({ data: {
@@ -27,6 +28,7 @@ test("in-stay confirmation concurrency in disposable PostgreSQL", async t => {
       propertyId: property.id, guestName: "Synthetic", guestEmail: `${key}@example.invalid`, guestToken: key,
       source: "DIRECT_BOOKING", status: "ACTIVE", paymentState: "PAID", currency: "usd",
       adults: 2, children: 0, selectedAmenityIds: [], totalAmount: 150,
+      amountCollected: 150, platformFeeAmount: 0, hostPayoutAmount: 150, stripeConnectedAccountId: "acct_synthetic",
       checkIn: new Date("2026-09-26T20:00:00Z"), checkOut: new Date("2026-09-27T15:00:00Z"),
       pricingBreakdown: {
         currency: "usd", nights: 1, nightlyRate: 100, nightlyRates: [{date: "2026-09-26", rate: 100}],
@@ -62,6 +64,7 @@ test("in-stay confirmation concurrency in disposable PostgreSQL", async t => {
     let release!: () => void;
     const rendezvous = new Promise<void>(resolve => { release = resolve; });
     dependencies.checkAvailability = async () => {
+      if (!concurrent) return {available: true, conflict: null};
       arrivals++;
       if (arrivals === 2) release();
       await rendezvous;
@@ -98,4 +101,60 @@ test("in-stay confirmation concurrency in disposable PostgreSQL", async t => {
       assert.equal(replay.idempotentReplay, true);
     });
   }
+
+  for (const scenario of ["apply-and-replay", "missing-payment", "blocked-dates", "changed-reservation"] as const) {
+    await t.test(`real apply transaction: ${scenario}`, async () => {
+      const f = await fixture(false);
+      const confirmed = await confirmGuestReservationModification(f.confirmation, f.dependencies);
+      const id = confirmed.modification.id;
+      // Synthetic evidence only: no provider call, checkout creation or real payment.
+      await db.reservationModification.update({where: {id}, data: {
+        status: "APPLYING",
+        ...(scenario === "missing-payment" ? {} : {
+          stripeConnectedAccountId: "acct_synthetic", stripeCheckoutSessionId: "cs_synthetic",
+          stripePaymentIntentId: "pi_synthetic", stripeChargeId: "ch_synthetic",
+          stripeApplicationFeeId: "fee_synthetic", stripePaymentStatus: "paid",
+        }),
+      }});
+      if (scenario === "blocked-dates") {
+        await db.propertyBlockedDate.create({data: {
+          propertyId: f.reservation.propertyId, startDate: f.reservation.checkOut,
+          endDate: f.confirmation.checkOut,
+        }});
+      }
+      if (scenario === "changed-reservation") {
+        await db.reservation.update({where: {id: f.reservation.id}, data: {totalAmount: 151}});
+      }
+      const before = await db.reservation.findUniqueOrThrow({where: {id: f.reservation.id}});
+      const reconciled: string[] = [];
+      const dependencies = {client: db, now: () => new Date(now), reconcile: async (reservationId: string) => {reconciled.push(reservationId);} };
+      if (scenario !== "apply-and-replay") {
+        const expected = scenario === "missing-payment" ? "RESERVATION_MODIFICATION_PAYMENT_EVIDENCE_INCOMPLETE"
+          : scenario === "blocked-dates" ? "PROPERTY_NOT_AVAILABLE_FOR_MODIFICATION_APPLY"
+          : "RESERVATION_CHANGED_BEFORE_MODIFICATION_APPLY";
+        await assert.rejects(applyGuestReservationModification({modificationId: id}, dependencies),
+          (error: unknown) => (error as {code?: string}).code === expected);
+        assert.deepEqual(await db.reservation.findUniqueOrThrow({where: {id: f.reservation.id}}), before);
+        const failed = await db.reservationModification.findUniqueOrThrow({where: {id}});
+        assert.equal(failed.status, "APPLYING");
+        assert.equal(failed.appliedAt, null);
+        assert.equal(failed.failureCode, expected);
+        assert.deepEqual(reconciled, []);
+      } else {
+        await applyGuestReservationModification({modificationId: id}, dependencies);
+        const applied = await db.reservation.findUniqueOrThrow({where: {id: f.reservation.id}});
+        assert.equal(applied.checkIn.getTime(), before.checkIn.getTime());
+        assert.equal(applied.checkOut.getTime(), f.confirmation.checkOut.getTime());
+        assert.equal(Number(applied.totalAmount), 250);
+        assert.equal(Number(applied.amountCollected), 250);
+        assert.equal(Number(applied.platformFeeAmount) + Number(applied.hostPayoutAmount), 250);
+        assert.equal((await db.reservationModification.findUniqueOrThrow({where: {id}})).status, "APPLIED");
+        await applyGuestReservationModification({modificationId: id}, dependencies);
+        assert.deepEqual(await db.reservation.findUniqueOrThrow({where: {id: f.reservation.id}}), applied);
+        assert.ok(reconciled.every(value => value === f.reservation.id));
+        assert.ok(reconciled.length > 0);
+      }
+    });
+  }
+
 });
