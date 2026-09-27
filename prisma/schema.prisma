@@ -1606,6 +1606,8 @@ model DeviceHealth {
 
   // Gateway telemetry persistence
   gatewayRssi               Int?
+  lockLinkState             String?
+  lockLinkLastSeenAt        DateTime?
   gatewayLastFailedAt       DateTime?
   gatewayLastError          String?
   gatewayRawPayload         Json?
@@ -1631,6 +1633,7 @@ model DeviceHealth {
   @@index([nextCheckInAt])
   @@index([batteryNextCheckAt])
   @@index([gatewayNextCheckAt])
+  @@index([lockLinkState])
   @@index([gatewayCheckReservationId])
   @@index([gatewayCriticalAlertReservationId, gatewayCriticalAlertStatus])
 }
