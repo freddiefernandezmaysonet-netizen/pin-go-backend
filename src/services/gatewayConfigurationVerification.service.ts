@@ -71,8 +71,6 @@ export async function applyGatewayMonitoringConfiguration(
         typeof (response.raw as Record<string, unknown>).gatewayMac === "string"
           ? String((response.raw as Record<string, unknown>).gatewayMac)
           : null,
-      isOnline: response.hasGateway ? response.isOnline : null,
-      observedAt: response.providerResponseAt,
       source: "GATEWAY_CONFIGURATION",
     });
 
