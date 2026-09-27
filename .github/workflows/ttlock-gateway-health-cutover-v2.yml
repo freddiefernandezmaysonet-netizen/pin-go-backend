@@ -1,0 +1,67 @@
+name: TTLock Gateway Health Cutover V2
+
+on:
+  pull_request:
+    paths:
+      - "prisma/schema.prisma"
+      - "prisma/migrations/20260927190000_ttlock_gateway_health_cutover_v2/**"
+      - "src/routes/ttlock-callback.routes.ts"
+      - "src/routes/ttlock-callback.routes.test.ts"
+      - "src/routes/dashboard.health.routes.ts"
+      - "src/services/deviceHealth.service.ts"
+      - "src/services/gatewayConfigurationVerification.service.ts"
+      - "src/services/ttlock-gateway-health.service.ts"
+      - "src/services/ttlock-gateway-mapping.service.ts"
+      - "src/workers/deviceHealth.hardened.worker.ts"
+      - ".github/workflows/ttlock-gateway-health-cutover-v2.yml"
+  workflow_dispatch:
+
+jobs:
+  certify:
+    runs-on: ubuntu-24.04
+    env:
+      DATABASE_URL: postgresql://postgres:postgres@localhost:5432/pingo_test
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: pingo_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d pingo_test"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+
+      - name: Install locked dependencies
+        run: npm ci --ignore-scripts --no-audit --no-fund
+
+      - name: Generate and validate Prisma
+        run: |
+          npx prisma generate
+          npx prisma validate --schema prisma/schema.prisma
+
+      - name: Apply full migration history
+        run: npx prisma migrate deploy --schema prisma/schema.prisma
+
+      - name: Certify callback and gateway state
+        run: |
+          node --import tsx --test \
+            src/routes/ttlock-callback.routes.test.ts \
+            src/services/ttlock-gateway-health.service.test.ts
+
+      - name: Bundle cutover boundaries
+        run: |
+          npx esbuild src/routes/ttlock-callback.routes.ts --bundle --platform=node --packages=external --outfile=/tmp/ttlock-callback.js
+          npx esbuild src/routes/dashboard.health.routes.ts --bundle --platform=node --packages=external --outfile=/tmp/dashboard-health.js
+          npx esbuild src/workers/deviceHealth.hardened.worker.ts --bundle --platform=node --packages=external --outfile=/tmp/device-health-worker.js
