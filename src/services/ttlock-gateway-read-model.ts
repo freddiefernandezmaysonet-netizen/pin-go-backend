@@ -12,12 +12,12 @@ export function effectiveTtlockGatewayHealth(input: {
   return {
     gatewayConnected: hasCanonicalState
       ? input.canonicalOnline!
-      : input.legacyConnected ?? null,
+      : null,
     gatewayId: input.gatewayId ?? null,
     gatewayName: input.gatewayName ?? null,
     gatewayStateSource: hasCanonicalState
       ? ("TTLOCK_GATEWAY" as const)
-      : ("LEGACY_DEVICE_HEALTH" as const),
+      : ("TTLOCK_GATEWAY_UNKNOWN" as const),
     gatewayLastEventAt: input.lastEventAt ?? null,
   };
 }
