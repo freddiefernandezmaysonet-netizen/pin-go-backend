@@ -237,6 +237,10 @@ async function recordGatewayFailure(input: {
         checkIn: input.reservation.checkIn,
         now: input.now,
         connectivityIssue: input.connectivityIssue,
+        stayPhase:
+          input.reservation.checkIn <= input.now
+            ? "IN_STAY"
+            : "PRE_ARRIVAL",
       });
     }
 
