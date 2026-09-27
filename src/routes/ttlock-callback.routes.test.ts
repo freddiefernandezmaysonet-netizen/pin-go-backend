@@ -3,7 +3,7 @@ import test from "node:test";
 
 import {
   evaluateTtlockCallbackCanary,
-  shouldReconcileTtlockGatewayOffline,
+  parseTtlockGatewayStateCallback,
 } from "./ttlock-callback.routes";
 
 const token = "callback-secret-123";
@@ -88,27 +88,36 @@ test("TTLock callback canary accepts authenticated form and returns safe evidenc
 });
 
 
-test("gateway offline reconciliation requires verified TTLock callback shape", () => {
+test("gateway state callback accepts only notifyType 2 with explicit online state", () => {
   assert.deepEqual(
-    shouldReconcileTtlockGatewayOffline({
+    parseTtlockGatewayStateCallback({
       gatewayId: "2046625",
       isOnline: "0",
       notifyType: "2",
     }),
-    { gatewayId: 2046625 }
+    { gatewayId: 2046625, isOnline: false }
+  );
+
+  assert.deepEqual(
+    parseTtlockGatewayStateCallback({
+      gatewayId: "2046625",
+      isOnline: "1",
+      notifyType: "2",
+    }),
+    { gatewayId: 2046625, isOnline: true }
   );
 
   assert.equal(
-    shouldReconcileTtlockGatewayOffline({
+    parseTtlockGatewayStateCallback({
       gatewayId: "2046625",
-      isOnline: "1",
+      isOnline: "2",
       notifyType: "2",
     }),
     null
   );
 
   assert.equal(
-    shouldReconcileTtlockGatewayOffline({
+    parseTtlockGatewayStateCallback({
       gatewayId: "2046625",
       isOnline: "0",
       notifyType: "1",
@@ -117,7 +126,7 @@ test("gateway offline reconciliation requires verified TTLock callback shape", (
   );
 
   assert.equal(
-    shouldReconcileTtlockGatewayOffline({
+    parseTtlockGatewayStateCallback({
       gatewayId: "not-a-number",
       isOnline: "0",
       notifyType: "2",
