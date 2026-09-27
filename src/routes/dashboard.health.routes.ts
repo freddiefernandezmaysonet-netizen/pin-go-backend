@@ -5,6 +5,7 @@ import {
   loadGatewayMonitoringPolicies,
   type GatewayMonitoringMode,
 } from "../services/lockGatewayMonitoring.service";
+import { effectiveTtlockGatewayHealth } from "../services/ttlock-gateway-read-model";
 
 function isVisibleRisk(risk?: string | null) {
   return risk !== "HEALTHY";
@@ -28,28 +29,6 @@ function riskRank(risk?: string | null) {
 
 function getOrgId(req: any): string | null {
   return req?.user?.orgId ?? null;
-}
-
-export function effectiveGatewayHealth(input: {
-  canonicalOnline?: boolean | null;
-  legacyConnected?: boolean | null;
-  gatewayId?: number | null;
-  lastEventAt?: Date | null;
-}) {
-  const hasCanonicalState =
-    input.canonicalOnline === true ||
-    input.canonicalOnline === false;
-
-  return {
-    gatewayConnected: hasCanonicalState
-      ? input.canonicalOnline!
-      : input.legacyConnected ?? null,
-    gatewayId: input.gatewayId ?? null,
-    gatewayStateSource: hasCanonicalState
-      ? ("TTLOCK_GATEWAY" as const)
-      : ("LEGACY_DEVICE_HEALTH" as const),
-    gatewayLastEventAt: input.lastEventAt ?? null,
-  };
 }
 
 export function shouldShowHealthLock(input: {
@@ -305,7 +284,7 @@ export function buildDashboardHealthRouter(prisma: PrismaClient) {
             lock.locationLabel ??
             `Lock ${lock.ttlockLockId}`;
 
-          const gateway = effectiveGatewayHealth({
+          const gateway = effectiveTtlockGatewayHealth({
             canonicalOnline: lock.ttlockGateway?.isOnline,
             legacyConnected: health?.gatewayConnected,
             gatewayId: lock.ttlockGateway?.ttlockGatewayId,
@@ -462,7 +441,7 @@ export function buildDashboardHealthRouter(prisma: PrismaClient) {
             lock.locationLabel ??
             `Lock ${lock.ttlockLockId}`;
 
-          const gateway = effectiveGatewayHealth({
+          const gateway = effectiveTtlockGatewayHealth({
             canonicalOnline: lock.ttlockGateway?.isOnline,
             legacyConnected: health?.gatewayConnected,
             gatewayId: lock.ttlockGateway?.ttlockGatewayId,
