@@ -40,7 +40,6 @@ export async function learnTtlockGatewayMapping(
     },
     update: {
       gatewayMac: input.gatewayMac ?? undefined,
-      source: input.source,
     },
     select: { id: true },
   });
