@@ -37,6 +37,7 @@ model Organization {
   staffMembers     StaffMember[]
   subscriptions    Subscription?
   ttlockAuth       TTLockAuth?
+  ttlockGateways   TtlockGateway[]
   brandProfile            BrandProfile?
   organizationInvitations OrganizationInvitation[]
   propertyReviews               PropertyReview[]
@@ -838,12 +839,15 @@ model Lock {
   propertyId     String
   ttlockLockName String?
   displayName    String?
+  ttlockGatewayRecordId String?
   sGrants        AccessGrant[]
   deviceHealth   DeviceHealth?
   property       Property        @relation(fields: [propertyId], references: [id])
+  ttlockGateway  TtlockGateway?  @relation(fields: [ttlockGatewayRecordId], references: [id], onDelete: SetNull)
   groups         LockGroupLock[]
 
   @@index([propertyId, isActive])
+  @@index([ttlockGatewayRecordId])
 }
 
 model Person {
@@ -1508,6 +1512,32 @@ model TTLockAuth {
   createdAt      DateTime     @default(now())
   updatedAt      DateTime     @updatedAt
   organization   Organization @relation(fields: [organizationId], references: [id])
+}
+
+model TtlockGateway {
+  id                String       @id @default(cuid())
+  organizationId    String
+  ttlockGatewayId   Int
+  gatewayMac        String?
+  gatewayName       String?
+  gatewayVersion    String?
+  networkName       String?
+  isOnline          Boolean?
+  lastEventAt       DateTime?
+  lastOnlineAt      DateTime?
+  lastOfflineAt     DateTime?
+  source            String?
+  rawPayload        Json?
+  createdAt         DateTime     @default(now())
+  updatedAt         DateTime     @updatedAt
+
+  organization      Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  locks             Lock[]
+
+  @@unique([organizationId, ttlockGatewayId])
+  @@index([ttlockGatewayId])
+  @@index([organizationId, isOnline])
+  @@index([lastEventAt])
 }
 
 model LockGroup {

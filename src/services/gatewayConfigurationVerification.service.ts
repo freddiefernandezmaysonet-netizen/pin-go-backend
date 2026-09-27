@@ -10,6 +10,7 @@ import {
 import {
   GATEWAY_FIRST_RETRY_MS,
 } from "../workers/deviceHealth.scheduler.policy";
+import { learnTtlockGatewayMapping } from "./ttlock-gateway-mapping.service";
 
 export type GatewayConfigurationVerificationState =
   | "CONNECTED"
@@ -22,6 +23,7 @@ export async function applyGatewayMonitoringConfiguration(
   prisma: PrismaClient,
   input: {
     lockId: string;
+    organizationId: string;
     ttlockLockId: number;
     enabled: boolean;
     now?: Date;
@@ -58,6 +60,20 @@ export async function applyGatewayMonitoringConfiguration(
 
   try {
     const response = await fetchGatewayStatus(input.ttlockLockId);
+    await learnTtlockGatewayMapping(prisma, {
+      organizationId: input.organizationId,
+      lockId: input.lockId,
+      gatewayId: response.gatewayId,
+      gatewayMac:
+        response.raw &&
+        typeof response.raw === "object" &&
+        !Array.isArray(response.raw) &&
+        typeof (response.raw as Record<string, unknown>).gatewayMac === "string"
+          ? String((response.raw as Record<string, unknown>).gatewayMac)
+          : null,
+      source: "GATEWAY_CONFIGURATION",
+    });
+
     const linkHealth = evaluateTtlockLockLinkHealth({
       hasGateway: response.hasGateway,
       gatewayOnline: response.isOnline,
