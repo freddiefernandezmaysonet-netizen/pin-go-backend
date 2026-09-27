@@ -2,7 +2,13 @@ import { applyGuestReservationModification } from "./guest-reservation-modificat
 import assert from "node:assert/strict";
 import test from "node:test";
 import { PrismaClient } from "@prisma/client";
-import { confirmGuestReservationModification, getGuestReservationModificationPreview } from "./guest-reservation-modification.service.js";
+import { confirmGuestReservationModification, getGuestReservationModificationPreview, getGuestReservationModificationOptions } from "./guest-reservation-modification.service.js";
+import { PinAIReservationModificationActionAdapter } from "../pin-ai/actions/reservation-modification-action-adapter.service.js";
+import { createPinAIActionProposal, confirmPinAIActionProposal, supersedePinAIActionProposal } from "../pin-ai/actions/action-proposal.service.js";
+import { PinAIActionBroker } from "../pin-ai/actions/action-broker.service.js";
+import { PinAIActionProposalRuntimeToolExecutor } from "../pin-ai/runtime/action-proposal-tool-executor.js";
+import { createConversationMemory } from "../pin-ai/runtime/conversation-memory.js";
+import { GuestPinAIGateway } from "../pin-ai/guest/guest-runtime-gateway.js";
 
 const TEST_URL = "postgresql://postgres:postgres@127.0.0.1:5432/pingo_pin_ai_extension_test";
 
@@ -101,6 +107,85 @@ test("in-stay confirmation concurrency in disposable PostgreSQL", async t => {
       assert.equal(replay.idempotentReplay, true);
     });
   }
+
+  await t.test("checkout-only proposal travels through executor, broker, gateway and canonical confirmation", async () => {
+    const f = await fixture(false);
+    const guestToken = f.confirmation.guestToken;
+    // The public gateway requires an unexpired token; synthetic record only.
+    const original = await db.reservation.update({ where: { id: f.reservation.id }, data: {
+      guestTokenExpiresAt: new Date("2026-09-29T15:00:00Z"), preferredLanguage: "es",
+    } });
+    let checkoutCalls = 0;
+    const adapter = new PinAIReservationModificationActionAdapter({
+      prisma: db, now: () => new Date(now),
+      getPreview: input => getGuestReservationModificationPreview(input, f.dependencies),
+      createProposal: createPinAIActionProposal,
+      supersedeProposal: supersedePinAIActionProposal,
+      confirmModification: input => confirmGuestReservationModification(input, f.dependencies),
+      createCheckout: async input => {
+        checkoutCalls++;
+        assert.equal(input.guestToken, guestToken);
+        const modification = await db.reservationModification.findUniqueOrThrow({ where: { id: input.modificationId } });
+        assert.equal(modification.status, "AWAITING_PAYMENT");
+        return { checkoutUrl: "https://checkout.example.invalid/synthetic", checkoutExpiresAt: new Date("2026-09-26T23:00:00Z") };
+      },
+      applyModification: async () => { throw new Error("UNEXPECTED_APPLY_BEFORE_PAYMENT"); },
+    });
+    const broker = new PinAIActionBroker({ prisma: db, reservationModification: adapter,
+      confirmProposal: confirmPinAIActionProposal, now: () => new Date(now) });
+    let modelOutput = "";
+    const gateway = new GuestPinAIGateway(db, async (request, _location, _session, authorization) => {
+      assert.equal(authorization?.guestToken, guestToken);
+      const executor = new PinAIActionProposalRuntimeToolExecutor({
+        enabled: true, guestToken,
+        delegate: { async execute() { throw new Error("UNEXPECTED_READ_TOOL"); } },
+        getModificationOptions: input => getGuestReservationModificationOptions(input, f.dependencies),
+        prepareReservationModification: input => broker.prepareReservationModification(input),
+      });
+      const args = { operation: "EXTEND_CHECKOUT_ONLY", proposedCheckOutDate: "2026-09-28" };
+      const memory = createConversationMemory(request);
+      modelOutput = JSON.stringify(await executor.execute("prepare_reservation_modification", args, request, memory));
+      return { mode: "SHADOW", request, memory, actionsExecuted: false,
+        response: { responseText: "Cotización preparada para extender únicamente la salida.",
+          openaiSessionId: "sess_synthetic_database_contract", requiresHumanReview: false,
+          escalationCreated: false, toolCalls: [{ name: "prepare_reservation_modification", arguments: args }] },
+        privateActionProposal: executor.getPrivateActionProposal() };
+    }, true, () => new Date(now));
+    const reply = await gateway.reply({ guestToken, message: "Extiende solo mi salida al 28 de septiembre." });
+    const proposal = reply.actionProposal;
+    assert.ok(proposal, "Canonical proposal must reach the guest response");
+    assert.equal(proposal.quote.amountDifferenceCents, 10000);
+    assert.equal(proposal.quote.currentTotalAmount, 150);
+    assert.equal(proposal.quote.proposedTotalAmount, 250);
+    assert.equal(proposal.quote.propertyTimezone, "America/Puerto_Rico");
+    assert.equal(reply.actionsExecuted, false);
+    assert.equal(modelOutput.includes(proposal.confirmationToken), false);
+    assert.equal(checkoutCalls, 0);
+    assert.equal(await db.reservationModification.count({ where: { reservationId: original.id } }), 0);
+    const stored = await db.pinAIActionProposal.findUniqueOrThrow({ where: { id: proposal.proposalId } });
+    assert.equal(stored.status, "PENDING_CONFIRMATION");
+    const terms = stored.termsSnapshot as { operation?: string; proposed?: { checkIn?: string; checkOut?: string } };
+    assert.equal(terms.operation, "EXTEND_CHECKOUT_ONLY");
+    assert.equal(terms.proposed?.checkIn, original.checkIn.toISOString());
+    assert.equal(terms.proposed?.checkOut, "2026-09-28T15:00:00.000Z");
+    await assert.rejects(broker.confirmAndExecute({ guestToken, proposalId: proposal.proposalId,
+      confirmationToken: "z".repeat(64) }), /TOKEN_MISMATCH/);
+    assert.equal(checkoutCalls, 0);
+    assert.equal(await db.reservationModification.count({ where: { reservationId: original.id } }), 0);
+    const result = await broker.confirmAndExecute({ guestToken, proposalId: proposal.proposalId,
+      confirmationToken: proposal.confirmationToken });
+    assert.equal(result.outcome, "WAITING_FOR_PAYMENT");
+    assert.equal(result.actionExecuted, false);
+    assert.equal(result.checkoutUrl, "https://checkout.example.invalid/synthetic");
+    assert.equal(checkoutCalls, 1);
+    const modification = await db.reservationModification.findUniqueOrThrow({ where: { id: result.modificationId! } });
+    assert.equal(modification.status, "AWAITING_PAYMENT");
+    assert.equal(modification.proposedCheckIn.getTime(), original.checkIn.getTime());
+    assert.equal(modification.proposedCheckOut.toISOString(), "2026-09-28T15:00:00.000Z");
+    assert.equal(modification.stripeCheckoutSessionId, null);
+    assert.equal((await db.pinAIActionProposal.findUniqueOrThrow({ where: { id: proposal.proposalId } })).status, "CONFIRMED");
+    assert.deepEqual(await db.reservation.findUniqueOrThrow({ where: { id: original.id } }), original);
+  });
 
   for (const scenario of ["apply-and-replay", "missing-payment", "blocked-dates", "changed-reservation"] as const) {
     await t.test(`real apply transaction: ${scenario}`, async () => {
