@@ -20,6 +20,20 @@ jobs:
     runs-on: ubuntu-24.04
     env:
       DATABASE_URL: postgresql://postgres:postgres@localhost:5432/pingo_test
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: pingo_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d pingo_test"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -37,6 +51,9 @@ jobs:
         run: |
           npx prisma generate
           npx prisma validate --schema ./prisma/schema.prisma
+
+      - name: Apply migrations to ephemeral PostgreSQL
+        run: npx prisma migrate deploy
 
       - name: Run gateway health foundation tests
         run: |
