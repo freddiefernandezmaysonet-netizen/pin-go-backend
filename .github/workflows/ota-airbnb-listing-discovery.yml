@@ -70,6 +70,32 @@ jobs:
           BASE_BRANCH="${GITHUB_BASE_REF:-main}"
           git fetch origin "+refs/heads/$BASE_BRANCH:refs/remotes/origin/$BASE_BRANCH" --depth=1
           git diff --name-only "origin/$BASE_BRANCH...HEAD" | sort > "$RUNNER_TEMP/actual.txt"
+
+          # PR #294 only: TTLock Gateway Health foundation is outside OTA scope.
+          # Keep this workflow fail-closed by permitting only the exact foundation files.
+          if [ "${GITHUB_HEAD_REF:-$GITHUB_REF_NAME}" = "agent/ttlock-gateway-health-foundation-v1" ]; then
+            test "$GITHUB_EVENT_NAME" = "pull_request"
+            test "$GITHUB_REPOSITORY" = "freddiefernandezmaysonet-netizen/pin-go-backend"
+            test "$SCOPE_PR_NUMBER" = "294"
+            test "$SCOPE_HEAD_REPO" = "$GITHUB_REPOSITORY"
+            test "$SCOPE_BASE_REPO" = "$GITHUB_REPOSITORY"
+            test "$GITHUB_BASE_REF" = "main"
+            cat > "$RUNNER_TEMP/ttlock-gateway-health-foundation-v1-allowed.txt" <<'EOF'
+          .github/workflows/ota-airbnb-listing-discovery.yml
+          prisma/migrations/20260927173000_ttlock_gateway_health_foundation_v1/migration.sql
+          prisma/schema.prisma
+          src/routes/dashboard.locks.route.ts
+          src/services/gatewayConfigurationVerification.service.test.ts
+          src/services/gatewayConfigurationVerification.service.ts
+          src/services/ttlock-gateway-health.service.test.ts
+          src/services/ttlock-gateway-health.service.ts
+          src/services/ttlock-gateway-mapping.service.ts
+          EOF
+            sort "$RUNNER_TEMP/ttlock-gateway-health-foundation-v1-allowed.txt" -o "$RUNNER_TEMP/ttlock-gateway-health-foundation-v1-allowed.txt"
+            diff -u "$RUNNER_TEMP/ttlock-gateway-health-foundation-v1-allowed.txt" "$RUNNER_TEMP/actual.txt"
+            echo "PR #294 exact TTLock Gateway Health foundation scope verified; OTA files remain untouched."
+            exit 0
+          fi
           # PR #284 only: exact Pin AI history scope; all OTA certification steps below still run.
           if [ "${GITHUB_HEAD_REF:-$GITHUB_REF_NAME}" = "agent/pin-ai-server-history-v1" ]; then
             test "$GITHUB_EVENT_NAME" = "pull_request"
