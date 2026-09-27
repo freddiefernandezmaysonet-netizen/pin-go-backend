@@ -31,6 +31,10 @@ type DeviceConnectivityIssue =
   | "GATEWAY_OFFLINE"
   | "LOCK_LINK_STALE";
 
+type DeviceStayPhase =
+  | "PRE_ARRIVAL"
+  | "IN_STAY";
+
 function normalizeError(error: unknown): string {
   const message =
     error instanceof Error
@@ -138,11 +142,16 @@ async function upsertGatewayCriticalIssue(input: {
   emailError?: string | null;
   occurredAt: Date;
   connectivityIssue?: DeviceConnectivityIssue;
+  stayPhase?: DeviceStayPhase;
 }) {
   const connectivityIssue =
     input.connectivityIssue ?? "GATEWAY_OFFLINE";
+  const stayPhase =
+    input.stayPhase ?? "PRE_ARRIVAL";
   const lockLinkStale =
     connectivityIssue === "LOCK_LINK_STALE";
+  const inStay =
+    stayPhase === "IN_STAY";
 
   return upsertOperationalIssue(
     input.prisma,
@@ -155,16 +164,28 @@ async function upsertGatewayCriticalIssue(input: {
         }),
 
       issueCode: lockLinkStale
-        ? "DEVICE_LOCK_LINK_STALE_CRITICAL"
-        : "DEVICE_GATEWAY_OFFLINE_CRITICAL",
+        ? inStay
+          ? "DEVICE_LOCK_LINK_STALE_IN_STAY_CRITICAL"
+          : "DEVICE_LOCK_LINK_STALE_CRITICAL"
+        : inStay
+          ? "DEVICE_GATEWAY_OFFLINE_IN_STAY_CRITICAL"
+          : "DEVICE_GATEWAY_OFFLINE_CRITICAL",
 
       title: lockLinkStale
-        ? "Lock is not communicating with gateway"
-        : "Gateway offline before guest check-in",
+        ? inStay
+          ? "Lock communication unavailable during guest stay"
+          : "Lock is not communicating with gateway"
+        : inStay
+          ? "Gateway offline during guest stay"
+          : "Gateway offline before guest check-in",
 
       issue: lockLinkStale
-        ? `The gateway for ${input.propertyName} is online, but ${input.lockName} has not refreshed its gateway-to-lock signal before check-in.`
-        : `The gateway for ${input.propertyName} remains offline less than six hours before check-in.`,
+        ? inStay
+          ? `The gateway for ${input.propertyName} is online, but ${input.lockName} stopped refreshing its gateway-to-lock signal during an active guest stay.`
+          : `The gateway for ${input.propertyName} is online, but ${input.lockName} has not refreshed its gateway-to-lock signal before check-in.`
+        : inStay
+          ? `The gateway for ${input.propertyName} is offline during an active guest stay.`
+          : `The gateway for ${input.propertyName} remains offline less than six hours before check-in.`,
 
       operationalImpact:
         "Pin&Go may be unable to create, update, or revoke remote guest access.",
@@ -217,6 +238,7 @@ async function upsertGatewayCriticalIssue(input: {
         emailError:
           input.emailError ?? null,
         connectivityIssue,
+        stayPhase,
       },
 
       transitionCode: lockLinkStale
@@ -224,8 +246,12 @@ async function upsertGatewayCriticalIssue(input: {
         : "DEVICE_GATEWAY_CRITICAL_DETECTED",
 
       transitionSummary: lockLinkStale
-        ? "The gateway remained online but the lock-to-gateway signal was stale inside the critical check-in window."
-        : "Gateway remained offline inside the six-hour critical check-in window.",
+        ? inStay
+          ? "The gateway remained online but the lock-to-gateway signal became stale during an active guest stay."
+          : "The gateway remained online but the lock-to-gateway signal was stale inside the critical check-in window."
+        : inStay
+          ? "Gateway connectivity was lost during an active guest stay."
+          : "Gateway remained offline inside the six-hour critical check-in window.",
 
       transitionedBy: "PIN_GO",
       occurredAt: input.occurredAt,
@@ -542,6 +568,7 @@ export async function sendGatewayCriticalHostAlert(
     checkIn: Date;
     now?: Date;
     connectivityIssue?: DeviceConnectivityIssue;
+    stayPhase?: DeviceStayPhase;
   }
 ) {
   const now = input.now ?? new Date();
@@ -826,6 +853,7 @@ export async function sendGatewayCriticalHostAlert(
       emailError: error,
       occurredAt: now,
       connectivityIssue: input.connectivityIssue,
+      stayPhase: input.stayPhase,
     });
 
     return {
@@ -851,6 +879,8 @@ export async function sendGatewayCriticalHostAlert(
           input.propertyTimeZone,
         connectivityIssue:
           input.connectivityIssue,
+        stayPhase:
+          input.stayPhase,
       });
 
     const markedSent =
@@ -920,6 +950,7 @@ export async function sendGatewayCriticalHostAlert(
           : "SENT_STATE_RECONCILIATION_REQUIRED",
       occurredAt: now,
       connectivityIssue: input.connectivityIssue,
+      stayPhase: input.stayPhase,
     });
 
     return {
@@ -1000,6 +1031,7 @@ export async function sendGatewayCriticalHostAlert(
         normalizedError,
       occurredAt: now,
       connectivityIssue: input.connectivityIssue,
+      stayPhase: input.stayPhase,
     });
 
     return {
