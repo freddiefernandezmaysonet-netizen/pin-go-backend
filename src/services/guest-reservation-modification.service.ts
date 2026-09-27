@@ -14,6 +14,7 @@ import { calculateDirectBookingPricing } from "./direct-booking-pricing.service"
 import { resolvePinAIActionCanaryScope } from "../pin-ai/actions/action-canary-scope.js";
 import { InStayExtensionError, IN_STAY_EXTENSION_MIN_PAYMENT_WINDOW_MS } from "../pin-ai/actions/in-stay-extension.js";
 import { previewGuestReservationExtension } from "./guest-reservation-extension-preview.js";
+import { reservationStateFingerprint } from "../pin-ai/actions/reservation-state-fingerprint.js";
 
 const prisma = new PrismaClient();
 
@@ -891,6 +892,7 @@ export async function getGuestReservationModificationPreview(
     managementPhase: extension ? "IN_STAY" as const : "PRE_STAY" as const,
     modificationAllowed: true as const,
     reservation: {
+      ...(extension ? { stateFingerprint: reservationStateFingerprint(reservation) } : {}),
       reservationNumber: reservation.reservationNumber,
       version: reservation.updatedAt,
       propertyName: reservation.property.name,
@@ -958,6 +960,7 @@ export function buildGuestReservationModificationPreviewFingerprint(
   preview: Readonly<{
     reservation: {
       version: Date;
+      stateFingerprint?: string;
       currency: string;
       current: {
         checkIn: Date;
@@ -992,7 +995,7 @@ export function buildGuestReservationModificationPreviewFingerprint(
 ) {
   const canonical = canonicalizePreviewFingerprintValue({
     version: "guest_reservation_modification_preview_v1",
-    reservationVersion: preview.reservation.version,
+    reservationVersion: preview.reservation.stateFingerprint ?? preview.reservation.version,
     currency: String(preview.reservation.currency ?? "").toLowerCase(),
     current: {
       checkIn: preview.reservation.current.checkIn,
@@ -1192,8 +1195,9 @@ export async function confirmGuestReservationModification(
   );
 
   if (
-    baseReservation.updatedAt.getTime() !==
-    preview.reservation.version.getTime()
+    inStayExtension
+      ? reservationStateFingerprint(baseReservation) !== preview.reservation.stateFingerprint
+      : baseReservation.updatedAt.getTime() !== preview.reservation.version.getTime()
   ) {
     throw new GuestReservationModificationError({
       code: "RESERVATION_CHANGED_RETRY_PREVIEW",
@@ -1245,20 +1249,13 @@ export async function confirmGuestReservationModification(
 
     const currentReservation = await tx.reservation.findUnique({
       where: { id: baseReservation.id },
-      select: {
-        id: true,
-        updatedAt: true,
-        status: true,
-        paymentState: true,
-        checkIn: true,
-        checkOut: true,
-      },
     });
 
     if (
       !currentReservation ||
-      currentReservation.updatedAt.getTime() !==
-        baseReservation.updatedAt.getTime() ||
+      (inStayExtension
+        ? reservationStateFingerprint(currentReservation) !== preview.reservation.stateFingerprint
+        : currentReservation.updatedAt.getTime() !== baseReservation.updatedAt.getTime()) ||
       currentReservation.status !== ReservationStatus.ACTIVE ||
       currentReservation.paymentState !== PaymentState.PAID ||
       (inStayExtension
@@ -1359,7 +1356,8 @@ export async function confirmGuestReservationModification(
         reductionPolicy: preview.pricing.reductionPolicy as any,
         requestSource: confirmationSource,
         guestConfirmation: {
-          ...(inStayExtension ? { operation: "EXTEND_CHECKOUT_ONLY" } : {}),
+          ...(inStayExtension ? { operation: "EXTEND_CHECKOUT_ONLY",
+            reservationStateFingerprint: preview.reservation.stateFingerprint } : {}),
           confirmed: true,
           confirmedAt: confirmedAt.toISOString(),
           source: confirmationSource,

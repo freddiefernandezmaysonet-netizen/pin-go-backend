@@ -12,6 +12,7 @@ import {
   ReservationStatus,
   type PrismaClient,
 } from "@prisma/client";
+import { extensionStateFingerprint, reservationStateFingerprint } from "./reservation-state-fingerprint.js";
 
 export const PIN_AI_ACTION_PROPOSAL_VERSION =
   "pin_ai_action_proposal_v1" as const;
@@ -34,6 +35,7 @@ type ProposalTerms =
   Readonly<Record<string, unknown>>;
 
 type ProposalReservationScope = Readonly<{
+  stateFingerprint: string;
   id: string;
   propertyId: string;
   updatedAt: Date;
@@ -562,11 +564,7 @@ async function loadReservationScope(
           status: "ACTIVE",
         },
       },
-      select: {
-        id: true,
-        propertyId: true,
-        updatedAt: true,
-        guestTokenExpiresAt: true,
+      include: {
         property: {
           select: {
             organizationId: true,
@@ -583,7 +581,7 @@ async function loadReservationScope(
     );
   }
 
-  return reservation;
+  return { ...reservation, stateFingerprint: reservationStateFingerprint(reservation) };
 }
 
 function publicProposal(
@@ -720,6 +718,11 @@ export async function createPinAIActionProposal(
                 reservation
                   .guestTokenExpiresAt,
               );
+            const quotedState = extensionStateFingerprint(input.termsSnapshot);
+            if (quotedState && (actionType !== PinAIActionProposalType.RESERVATION_MODIFICATION ||
+                quotedState !== reservation.stateFingerprint)) {
+              return fail("PROPOSAL_CONCURRENT_CHANGE");
+            }
             const fingerprint =
               buildPinAIActionProposalFingerprint({
                 organizationId:
@@ -1099,7 +1102,9 @@ export async function confirmPinAIActionProposal(
               };
             }
 
-            if (
+            const quotedState = proposal.actionType === PinAIActionProposalType.RESERVATION_MODIFICATION
+              ? extensionStateFingerprint(proposal.termsSnapshot) : null;
+            if (quotedState ? quotedState !== reservation.stateFingerprint :
               proposal
                 .baseReservationUpdatedAt
                 .getTime() !==
@@ -1140,8 +1145,7 @@ export async function confirmPinAIActionProposal(
                       PinAIActionProposalStatus
                         .PENDING_CONFIRMATION,
                     baseReservationUpdatedAt:
-                      reservation
-                        .updatedAt,
+                      proposal.baseReservationUpdatedAt,
                     expiresAt: {
                       gt: now,
                     },

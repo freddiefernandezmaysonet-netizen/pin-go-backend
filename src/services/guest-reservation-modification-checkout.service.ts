@@ -1,4 +1,5 @@
 import Stripe from "stripe";
+import { extensionStateFingerprint, reservationStateFingerprint } from "../pin-ai/actions/reservation-state-fingerprint.js";
 import {
   PaymentState,
   PrismaClient,
@@ -377,13 +378,16 @@ export async function createGuestReservationModificationCheckout(input: {
   }
 
   const guestEmail = normalize(reservation.guestEmail);
+  const confirmedState = inStayExtension
+    ? extensionStateFingerprint(modification.guestConfirmation) : null;
 
   if (
     reservation.status !== ReservationStatus.ACTIVE ||
     reservation.paymentState !== PaymentState.PAID ||
     (!inStayExtension && reservation.checkIn <= now) ||
-    reservation.updatedAt.getTime() !==
-      modification.baseReservationUpdatedAt.getTime()
+    (confirmedState
+      ? reservationStateFingerprint(reservation) !== confirmedState
+      : reservation.updatedAt.getTime() !== modification.baseReservationUpdatedAt.getTime())
   ) {
     throw new GuestReservationModificationError({
       code: "RESERVATION_CHANGED_RETRY_PREVIEW",

@@ -9,6 +9,7 @@ import { PinAIActionBroker } from "../pin-ai/actions/action-broker.service.js";
 import { PinAIActionProposalRuntimeToolExecutor } from "../pin-ai/runtime/action-proposal-tool-executor.js";
 import { createConversationMemory } from "../pin-ai/runtime/conversation-memory.js";
 import { GuestPinAIGateway } from "../pin-ai/guest/guest-runtime-gateway.js";
+import { createGuestReservationModificationCheckout } from "./guest-reservation-modification-checkout.service.js";
 
 const TEST_URL = "postgresql://postgres:postgres@127.0.0.1:5432/pingo_pin_ai_extension_test";
 
@@ -108,7 +109,8 @@ test("in-stay confirmation concurrency in disposable PostgreSQL", async t => {
     });
   }
 
-  await t.test("checkout-only proposal travels through executor, broker, gateway and canonical confirmation", async () => {
+  for (const change of ["none", "watchdog", "material"] as const) {
+  await t.test(`checkout-only complete proposal flow after ${change} update`, async () => {
     const f = await fixture(false);
     const guestToken = f.confirmation.guestToken;
     // The public gateway requires an unexpired token; synthetic record only.
@@ -147,7 +149,7 @@ test("in-stay confirmation concurrency in disposable PostgreSQL", async t => {
       modelOutput = JSON.stringify(await executor.execute("prepare_reservation_modification", args, request, memory));
       return { mode: "SHADOW", request, memory, actionsExecuted: false,
         response: { responseText: "Cotización preparada para extender únicamente la salida.",
-          openaiSessionId: "sess_synthetic_database_contract", requiresHumanReview: false,
+          openaiSessionId: `sess_synthetic_database_contract_${change}`, requiresHumanReview: false,
           escalationCreated: false, toolCalls: [{ name: "prepare_reservation_modification", arguments: args }] },
         privateActionProposal: executor.getPrivateActionProposal() };
     }, true, () => new Date(now));
@@ -172,6 +174,21 @@ test("in-stay confirmation concurrency in disposable PostgreSQL", async t => {
       confirmationToken: "z".repeat(64) }), /TOKEN_MISMATCH/);
     assert.equal(checkoutCalls, 0);
     assert.equal(await db.reservationModification.count({ where: { reservationId: original.id } }), 0);
+    const beforeConfirmation = change === "none" ? original : await db.reservation.update({
+      where: { id: original.id }, data: change === "material" ? { amountRefunded: 1 } : {
+        lastReconciledAt: new Date(now), lastReconciledCheckIn: original.checkIn,
+        lastReconciledCheckOut: original.checkOut,
+      },
+    });
+    if (change !== "none") assert.notEqual(beforeConfirmation.updatedAt.getTime(), original.updatedAt.getTime());
+    if (change === "material") {
+      await assert.rejects(() => broker.confirmAndExecute({ guestToken, proposalId: proposal.proposalId,
+        confirmationToken: proposal.confirmationToken }), /ACTION_PROPOSAL_NOT_CONFIRMABLE/);
+      assert.equal((await db.pinAIActionProposal.findUniqueOrThrow({ where: { id: proposal.proposalId } })).status, "SUPERSEDED");
+      assert.equal(checkoutCalls, 0);
+      assert.equal(await db.reservationModification.count({ where: { reservationId: original.id } }), 0);
+      return;
+    }
     const result = await broker.confirmAndExecute({ guestToken, proposalId: proposal.proposalId,
       confirmationToken: proposal.confirmationToken });
     assert.equal(result.outcome, "WAITING_FOR_PAYMENT");
@@ -184,8 +201,35 @@ test("in-stay confirmation concurrency in disposable PostgreSQL", async t => {
     assert.equal(modification.proposedCheckOut.toISOString(), "2026-09-28T15:00:00.000Z");
     assert.equal(modification.stripeCheckoutSessionId, null);
     assert.equal((await db.pinAIActionProposal.findUniqueOrThrow({ where: { id: proposal.proposalId } })).status, "CONFIRMED");
-    assert.deepEqual(await db.reservation.findUniqueOrThrow({ where: { id: original.id } }), original);
+    assert.deepEqual(await db.reservation.findUniqueOrThrow({ where: { id: original.id } }), beforeConfirmation);
   });
+  }
+
+  for (const change of ["watchdog", "material"] as const) {
+    await t.test(`canonical preview and checkout guards after ${change} updates`, async () => {
+      const f = await fixture(false);
+      const confirmed = await confirmGuestReservationModification(f.confirmation, f.dependencies);
+      await db.reservation.update({ where: { id: f.reservation.id }, data: change === "material"
+        ? { amountRefunded: 1 }
+        : { lastReconciledAt: new Date(now), lastReconciledCheckIn: f.reservation.checkIn, lastReconciledCheckOut: f.reservation.checkOut } });
+      // Reach the availability boundary after the checkout's reservation guard.
+      // All provider dependencies are replaced with throwing sentinels.
+      let availabilityCalls = 0;
+      await assert.rejects(() => createGuestReservationModificationCheckout({
+        guestToken: f.confirmation.guestToken, modificationId: confirmed.modification.id,
+      }, { client: db, now: () => new Date(now),
+        stripe: { checkout: { sessions: {
+          create: async () => { throw new Error("UNEXPECTED_PROVIDER_CALL"); },
+          retrieve: async () => { throw new Error("UNEXPECTED_PROVIDER_CALL"); },
+        } } } as never,
+        checkAvailability: async () => { availabilityCalls++; throw new Error("SYNTHETIC_AVAILABILITY_BOUNDARY"); },
+        calculatePricing: async () => { throw new Error("UNEXPECTED_PRICING_CALL"); },
+        assertPayoutReady: async () => { throw new Error("UNEXPECTED_PROVIDER_CALL"); },
+      }), change === "watchdog" ? /SYNTHETIC_AVAILABILITY_BOUNDARY/ : /changed before payment Checkout/);
+      assert.equal(availabilityCalls, change === "watchdog" ? 1 : 0);
+      assert.equal((await db.reservationModification.findUniqueOrThrow({ where: { id: confirmed.modification.id } })).stripeCheckoutSessionId, null);
+    });
+  }
 
   for (const scenario of ["apply-and-replay", "missing-payment", "blocked-dates", "changed-reservation"] as const) {
     await t.test(`real apply transaction: ${scenario}`, async () => {
