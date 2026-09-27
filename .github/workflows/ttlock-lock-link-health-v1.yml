@@ -43,3 +43,11 @@ jobs:
 
       - name: Focused TypeScript build
         run: npx tsc -p tsconfig.ttlock-lock-link-health-v1.json
+
+      - name: Bundle hardened device-health worker
+        run: >-
+          npx esbuild src/workers/deviceHealth.hardened.worker.ts
+          --bundle
+          --platform=node
+          --packages=external
+          --outfile=/tmp/deviceHealth.hardened.worker.js
