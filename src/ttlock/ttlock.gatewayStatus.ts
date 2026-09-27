@@ -47,6 +47,20 @@ function parseErrcode(value: unknown) {
   return finiteNumber(value);
 }
 
+function timestampDate(value: unknown): Date | null {
+  const timestamp = finiteNumber(value);
+
+  if (timestamp === null || timestamp <= 0) {
+    return null;
+  }
+
+  const parsed = new Date(timestamp);
+
+  return Number.isNaN(parsed.getTime())
+    ? null
+    : parsed;
+}
+
 async function postForm(input: {
   url: string;
   body: URLSearchParams;
@@ -159,6 +173,7 @@ export async function ttlockFetchGatewayStatus(
       isOnline: false,
       gatewayId: null as number | null,
       gatewayRssi: null as number | null,
+      gatewayRssiUpdatedAt: null as Date | null,
       providerRequestCount,
       providerResponseAt: new Date(),
       raw: {
@@ -171,6 +186,9 @@ export async function ttlockFetchGatewayStatus(
   const first = associationList[0] as JsonRecord;
   const gatewayId = finiteNumber(first.gatewayId);
   const gatewayRssi = finiteNumber(first.rssi);
+  const gatewayRssiUpdatedAt = timestampDate(
+    first.rssiUpdateDate
+  );
 
   if (gatewayId === null) {
     throw new TTLockGatewayStatusError({
@@ -259,6 +277,7 @@ export async function ttlockFetchGatewayStatus(
     isOnline: isOnlineValue === 1,
     gatewayId,
     gatewayRssi,
+    gatewayRssiUpdatedAt,
     providerRequestCount,
     providerResponseAt: new Date(),
     raw: {
