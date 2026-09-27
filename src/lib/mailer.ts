@@ -447,6 +447,7 @@ export type SendDeviceGatewayCriticalAlertEmailInput = {
   reservationNumber?: string | null;
   checkIn: Date;
   propertyTimeZone?: string | null;
+  connectivityIssue?: "GATEWAY_OFFLINE" | "LOCK_LINK_STALE";
 };
 
 type SendManualReservationGuestConfirmationInput = {
@@ -2600,6 +2601,10 @@ export async function sendDeviceGatewayCriticalAlertEmail(
   const safeReservationNumber = input.reservationNumber
     ? escapeHtml(input.reservationNumber)
     : null;
+  const connectivityIssue =
+    input.connectivityIssue ?? "GATEWAY_OFFLINE";
+  const lockLinkStale =
+    connectivityIssue === "LOCK_LINK_STALE";
 
   const formattedCheckIn = formatBookingDateTime(
     input.checkIn,
@@ -2622,6 +2627,7 @@ export async function sendDeviceGatewayCriticalAlertEmail(
         lockName: input.lockName,
         reservationNumber:
           input.reservationNumber ?? null,
+        connectivityIssue,
       }
     );
 
@@ -2633,12 +2639,35 @@ export async function sendDeviceGatewayCriticalAlertEmail(
     };
   }
 
+  const subject = lockLinkStale
+    ? "CRITICAL / CRÍTICO: Lock is not communicating with gateway"
+    : "CRITICAL / CRÍTICO: Gateway offline before guest check-in";
+
+  const heading = lockLinkStale
+    ? "Lock communication unavailable / Cerradura sin comunicación"
+    : "Gateway offline / Gateway desconectado";
+
+  const detectedEn = lockLinkStale
+    ? `Pin&amp;Go detected that the gateway for <strong>${safePropertyName}</strong> is online, but <strong>${safeLockName}</strong> has not refreshed its gateway-to-lock signal before guest check-in.`
+    : `Pin&amp;Go detected that the gateway for <strong>${safePropertyName}</strong> remains offline less than six hours before guest check-in.`;
+
+  const detectedEs = lockLinkStale
+    ? `Pin&amp;Go detectó que el gateway de <strong>${safePropertyName}</strong> está online, pero <strong>${safeLockName}</strong> no ha actualizado su señal gateway↔cerradura antes del check-in.`
+    : `Pin&amp;Go detectó que el gateway de <strong>${safePropertyName}</strong> continúa desconectado a menos de seis horas del check-in.`;
+
+  const actionEn = lockLinkStale
+    ? "Wake or touch the lock, verify battery and Bluetooth range, and confirm the gateway remains close enough to communicate with the lock."
+    : "Restore gateway connectivity immediately to preserve remote access automation.";
+
+  const actionEs = lockLinkStale
+    ? "Active o toque la cerradura, verifique la batería y el alcance Bluetooth, y confirme que el gateway esté lo suficientemente cerca para comunicarse con la cerradura."
+    : "Restaure inmediatamente la conexión del gateway para preservar la automatización remota de acceso.";
+
   const { data, error } =
     await resend.emails.send({
       from: getEmailFrom(),
       to: recipients,
-      subject:
-        "CRITICAL / CRÍTICO: Gateway offline before guest check-in",
+      subject,
       html: `
         <div style="font-family:Arial,sans-serif;color:#111827;line-height:1.6;max-width:680px;margin:0 auto;">
           <div style="background:#7f1d1d;color:#ffffff;border-radius:18px;padding:24px;margin-bottom:20px;">
@@ -2647,20 +2676,16 @@ export async function sendDeviceGatewayCriticalAlertEmail(
             </p>
 
             <h1 style="margin:0;font-size:28px;line-height:1.15;">
-              Gateway offline / Gateway desconectado
+              ${heading}
             </h1>
           </div>
 
           <p>
-            Pin&amp;Go detected that the gateway for
-            <strong>${safePropertyName}</strong>
-            remains offline less than six hours before guest check-in.
+            ${detectedEn}
           </p>
 
           <p>
-            Pin&amp;Go detectó que el gateway de
-            <strong>${safePropertyName}</strong>
-            continúa desconectado a menos de seis horas del check-in.
+            ${detectedEs}
           </p>
 
           <div style="background:#fef2f2;border:1px solid #fecaca;border-radius:16px;padding:20px;margin:22px 0;">
@@ -2691,18 +2716,16 @@ export async function sendDeviceGatewayCriticalAlertEmail(
           </h2>
 
           <p>
-            Restore gateway connectivity immediately to preserve remote
-            access automation.
+            ${actionEn}
           </p>
 
           <p>
-            Restaure inmediatamente la conexión del gateway para preservar
-            la automatización remota de acceso.
+            ${actionEs}
           </p>
 
           <p style="color:#475569;font-size:13px;">
-            Pin&amp;Go will continue checking the gateway every hour.<br />
-            Pin&amp;Go continuará verificando el gateway cada hora.
+            Pin&amp;Go will continue checking connectivity automatically.<br />
+            Pin&amp;Go continuará verificando la conectividad automáticamente.
           </p>
         </div>
       `,
