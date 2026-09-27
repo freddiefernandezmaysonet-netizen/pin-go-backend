@@ -75,6 +75,7 @@ test("safe metadata exposes identifiers but never credential fields", () => {
     recordType: "7",
     lockDate: "1700000000000",
     serverDate: "1700000000500",
+    notifyType: "42",
     keyboardPwd: "998877",
     username: "guest@example.com",
     records: "[{\"keyboardPwd\":\"998877\"}]",
@@ -87,6 +88,7 @@ test("safe metadata exposes identifiers but never credential fields", () => {
   assert.equal(safe.recordType, "7");
   assert.equal(safe.lockDate, "1700000000000");
   assert.equal(safe.serverDate, "1700000000500");
+  assert.equal(safe.notifyType, "42");
 
   assert.deepEqual(
     safe.keys,
@@ -95,6 +97,7 @@ test("safe metadata exposes identifiers but never credential fields", () => {
       "keyboardPwd",
       "lockDate",
       "lockId",
+      "notifyType",
       "recordType",
       "records",
       "serverDate",
