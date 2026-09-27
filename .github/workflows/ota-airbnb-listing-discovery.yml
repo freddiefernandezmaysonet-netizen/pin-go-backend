@@ -87,9 +87,12 @@ jobs:
           src/routes/dashboard.alerts.route.ts
           src/routes/dashboard.health.routes.ts
           src/routes/dashboard.locks.route.ts
+          src/routes/org.ttlock.sync.router.ts
           src/services/gatewayConfigurationVerification.service.test.ts
           src/services/gatewayConfigurationVerification.service.ts
           src/services/ttlock-gateway-health.service.ts
+          src/services/ttlock-gateway-inventory-sync.service.test.ts
+          src/services/ttlock-gateway-inventory-sync.service.ts
           src/services/ttlock-gateway-offline-callback-reconciliation.service.ts
           src/services/ttlock-gateway-offline-callback-reconciliation.test.ts
           src/workers/deviceHealth.hardened.worker.ts
