@@ -15,6 +15,7 @@ test("canonical gateway state overrides contradictory legacy per-lock state", ()
     {
       gatewayConnected: false,
       gatewayId: 2046625,
+      gatewayName: null,
       gatewayStateSource: "TTLOCK_GATEWAY",
       gatewayLastEventAt: new Date("2026-09-27T18:00:00.000Z"),
     }
@@ -29,13 +30,14 @@ test("canonical gateway state overrides contradictory legacy per-lock state", ()
     {
       gatewayConnected: true,
       gatewayId: 2046625,
+      gatewayName: null,
       gatewayStateSource: "TTLOCK_GATEWAY",
       gatewayLastEventAt: null,
     }
   );
 });
 
-test("uninitialized canonical gateway falls back to legacy during cutover", () => {
+test("uninitialized canonical gateway remains unknown and never falls back to legacy state", () => {
   assert.deepEqual(
     effectiveTtlockGatewayHealth({
       canonicalOnline: null,
@@ -43,9 +45,10 @@ test("uninitialized canonical gateway falls back to legacy during cutover", () =
       gatewayId: 2046625,
     }),
     {
-      gatewayConnected: true,
+      gatewayConnected: null,
       gatewayId: 2046625,
-      gatewayStateSource: "LEGACY_DEVICE_HEALTH",
+      gatewayName: null,
+      gatewayStateSource: "TTLOCK_GATEWAY_UNKNOWN",
       gatewayLastEventAt: null,
     }
   );
