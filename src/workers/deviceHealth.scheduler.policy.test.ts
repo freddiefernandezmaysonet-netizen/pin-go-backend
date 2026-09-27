@@ -2,7 +2,9 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import {
+  GATEWAY_ACCESS_RECHECK_WINDOW_MS,
   GATEWAY_FIRST_RETRY_MS,
+  GATEWAY_IN_STAY_INTERVAL_MS,
   GATEWAY_READINESS_WINDOW_MS,
   GATEWAY_SECOND_RETRY_MS,
   isBatteryCheckDue,
@@ -122,23 +124,41 @@ test("gateway becomes due when reservation enters the six-hour readiness window"
   );
 });
 
-test("healthy gateway certified inside T-6 is not checked again for that arrival", () => {
+test("healthy T-6 certification waits until the targeted T-2 access recheck", () => {
   const checkIn = new Date("2026-09-15T07:00:00.000Z");
   const certifiedAt = new Date("2026-09-15T02:00:00.000Z");
+  const accessRecheckAt = new Date(
+    checkIn.getTime() - GATEWAY_ACCESS_RECHECK_WINDOW_MS
+  );
 
   assert.equal(
     isGatewayCheckDue({
-      now: new Date("2026-09-15T05:00:00.000Z"),
+      now: new Date("2026-09-15T04:59:59.000Z"),
       mode: "ENABLED",
       health: health({
         gatewayConnected: true,
         gatewayLastCheckedAt: certifiedAt,
         gatewayLastSuccessfulAt: certifiedAt,
-        gatewayNextCheckAt: null,
+        gatewayNextCheckAt: accessRecheckAt,
       }),
       checkIn,
     }),
     false
+  );
+
+  assert.equal(
+    isGatewayCheckDue({
+      now: accessRecheckAt,
+      mode: "ENABLED",
+      health: health({
+        gatewayConnected: true,
+        gatewayLastCheckedAt: certifiedAt,
+        gatewayLastSuccessfulAt: certifiedAt,
+        gatewayNextCheckAt: accessRecheckAt,
+      }),
+      checkIn,
+    }),
+    true
   );
 });
 
@@ -177,14 +197,91 @@ test("failed T-6 gateway check respects its hourly recovery timer", () => {
   );
 });
 
-test("successful gateway readiness check schedules no further check", () => {
+test("successful T-6 gateway readiness schedules one T-2 access recheck", () => {
   assert.equal(
     nextGatewaySuccessCheckAt({
       now: NOW,
       mode: "ENABLED",
       checkIn: new Date("2026-09-15T07:00:00.000Z"),
+    })?.toISOString(),
+    "2026-09-15T05:00:00.000Z"
+  );
+});
+
+test("successful gateway check at T-2 schedules no further check", () => {
+  const checkIn = new Date("2026-09-15T07:00:00.000Z");
+
+  assert.equal(
+    nextGatewaySuccessCheckAt({
+      now: new Date("2026-09-15T05:00:00.000Z"),
+      mode: "ENABLED",
+      checkIn,
     }),
     null
+  );
+});
+
+test("in-stay gateway check becomes due when no current telemetry exists", () => {
+  const checkIn = new Date("2026-09-15T00:00:00.000Z");
+
+  assert.equal(
+    isGatewayCheckDue({
+      now: NOW,
+      mode: "ENABLED",
+      health: null,
+      checkIn,
+    }),
+    true
+  );
+});
+
+test("healthy in-stay gateway waits until the hourly recheck", () => {
+  const checkIn = new Date("2026-09-15T00:00:00.000Z");
+  const checkedAt = new Date("2026-09-15T01:30:00.000Z");
+
+  assert.equal(
+    isGatewayCheckDue({
+      now: NOW,
+      mode: "ENABLED",
+      health: health({
+        gatewayLastCheckedAt: checkedAt,
+        gatewayLastSuccessfulAt: checkedAt,
+        gatewayNextCheckAt: new Date(
+          checkedAt.getTime() + GATEWAY_IN_STAY_INTERVAL_MS
+        ),
+      }),
+      checkIn,
+    }),
+    false
+  );
+
+  assert.equal(
+    isGatewayCheckDue({
+      now: new Date(
+        checkedAt.getTime() + GATEWAY_IN_STAY_INTERVAL_MS
+      ),
+      mode: "ENABLED",
+      health: health({
+        gatewayLastCheckedAt: checkedAt,
+        gatewayLastSuccessfulAt: checkedAt,
+        gatewayNextCheckAt: new Date(
+          checkedAt.getTime() + GATEWAY_IN_STAY_INTERVAL_MS
+        ),
+      }),
+      checkIn,
+    }),
+    true
+  );
+});
+
+test("successful in-stay gateway check schedules the next hourly check", () => {
+  assert.equal(
+    nextGatewaySuccessCheckAt({
+      now: NOW,
+      mode: "ENABLED",
+      checkIn: new Date("2026-09-15T00:00:00.000Z"),
+    })?.toISOString(),
+    "2026-09-15T03:00:00.000Z"
   );
 });
 

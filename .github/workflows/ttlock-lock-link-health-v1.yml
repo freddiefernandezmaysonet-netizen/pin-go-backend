@@ -1,0 +1,53 @@
+name: TTLock Lock Link Health V1
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - "src/ttlock/ttlock.gatewayStatus.ts"
+      - "src/ttlock/ttlock.lockLinkHealth.ts"
+      - "src/ttlock/ttlock.lockLinkHealth.test.ts"
+      - "src/workers/deviceHealth.scheduler.policy.ts"
+      - "src/workers/deviceHealth.scheduler.policy.test.ts"
+      - "src/workers/deviceHealth.hardened.worker.ts"
+      - "src/services/device-health-alert.service.ts"
+      - "src/services/gatewayConfigurationVerification.service.ts"
+      - "src/services/gatewayConfigurationVerification.service.test.ts"
+      - "src/lib/mailer.ts"
+      - "tsconfig.ttlock-lock-link-health-v1.json"
+      - ".github/workflows/ttlock-lock-link-health-v1.yml"
+
+jobs:
+  certify:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+
+      - name: Install locked dependencies
+        run: npm ci --ignore-scripts --no-audit --no-fund
+
+      - name: Generate Prisma client
+        run: npx prisma generate
+
+      - name: Run lock-link health policies
+        run: >-
+          node --import tsx --test
+          src/ttlock/ttlock.lockLinkHealth.test.ts
+          src/workers/deviceHealth.scheduler.policy.test.ts
+          src/services/gatewayConfigurationVerification.service.test.ts
+
+      - name: Focused TypeScript build
+        run: npx tsc -p tsconfig.ttlock-lock-link-health-v1.json
+
+      - name: Bundle hardened device-health worker
+        run: >-
+          npx esbuild src/workers/deviceHealth.hardened.worker.ts
+          --bundle
+          --platform=node
+          --packages=external
+          --outfile=/tmp/deviceHealth.hardened.worker.js

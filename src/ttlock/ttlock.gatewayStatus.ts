@@ -8,6 +8,17 @@ const MAX_GATEWAY_PAGES = 20;
 
 type JsonRecord = Record<string, unknown>;
 
+export type TTLockGatewayStatusResult = {
+  hasGateway: boolean;
+  isOnline: boolean;
+  gatewayId: number | null;
+  gatewayRssi: number | null;
+  gatewayRssiUpdatedAt: Date | null;
+  providerRequestCount: number;
+  providerResponseAt: Date;
+  raw: unknown;
+};
+
 export class TTLockGatewayStatusError extends Error {
   readonly errcode: number | null;
   readonly httpStatus: number | null;
@@ -45,6 +56,20 @@ function finiteNumber(value: unknown): number | null {
 
 function parseErrcode(value: unknown) {
   return finiteNumber(value);
+}
+
+function timestampDate(value: unknown): Date | null {
+  const timestamp = finiteNumber(value);
+
+  if (timestamp === null || timestamp <= 0) {
+    return null;
+  }
+
+  const parsed = new Date(timestamp);
+
+  return Number.isNaN(parsed.getTime())
+    ? null
+    : parsed;
 }
 
 async function postForm(input: {
@@ -124,7 +149,7 @@ async function postForm(input: {
 
 export async function ttlockFetchGatewayStatus(
   ttlockLockId: number
-) {
+): Promise<TTLockGatewayStatusResult> {
   const accessToken =
     await getDeviceHealthAccessTokenForTtlockLock(
       ttlockLockId
@@ -159,6 +184,7 @@ export async function ttlockFetchGatewayStatus(
       isOnline: false,
       gatewayId: null as number | null,
       gatewayRssi: null as number | null,
+      gatewayRssiUpdatedAt: null as Date | null,
       providerRequestCount,
       providerResponseAt: new Date(),
       raw: {
@@ -171,6 +197,9 @@ export async function ttlockFetchGatewayStatus(
   const first = associationList[0] as JsonRecord;
   const gatewayId = finiteNumber(first.gatewayId);
   const gatewayRssi = finiteNumber(first.rssi);
+  const gatewayRssiUpdatedAt = timestampDate(
+    first.rssiUpdateDate
+  );
 
   if (gatewayId === null) {
     throw new TTLockGatewayStatusError({
@@ -259,6 +288,7 @@ export async function ttlockFetchGatewayStatus(
     isOnline: isOnlineValue === 1,
     gatewayId,
     gatewayRssi,
+    gatewayRssiUpdatedAt,
     providerRequestCount,
     providerResponseAt: new Date(),
     raw: {
