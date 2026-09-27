@@ -15,6 +15,7 @@ export type TtlockCallbackSafeMetadata = {
   serverDate: string | null;
   isOnline: string | null;
   eventType: string | null;
+  notifyType: string | null;
 };
 
 function asScalar(value: unknown): string | null {
@@ -104,6 +105,7 @@ export function ttlockCallbackSafeMetadata(
     serverDate: firstValue(form, ["serverDate", "server_date"]),
     isOnline: firstValue(form, ["isOnline", "online", "status"]),
     eventType: firstValue(form, ["eventType", "event_type", "type"]),
+    notifyType: firstValue(form, ["notifyType", "notify_type"]),
   };
 }
 
