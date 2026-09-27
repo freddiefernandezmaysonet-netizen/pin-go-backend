@@ -2,26 +2,28 @@ name: Dashboard Lockfile Baseline Repair
 
 on:
   workflow_dispatch:
-  pull_request:
-    paths:
-      - "pin-go-dashboard/package.json"
-      - "pin-go-dashboard/package-lock.json"
-      - ".github/workflows/dashboard-lockfile-baseline-repair.yml"
+
+permissions:
+  contents: write
 
 jobs:
-  generate:
+  repair:
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: agent/dashboard-lockfile-baseline-fix
       - uses: actions/setup-node@v4
         with:
           node-version: "22"
-      - name: Generate candidate lockfile
+      - name: Generate exact lockfile
         working-directory: pin-go-dashboard
         run: npm install --package-lock-only --ignore-scripts --no-audit --no-fund
-      - name: Upload candidate lockfile
-        uses: actions/upload-artifact@v4
-        with:
-          name: dashboard-package-lock-candidate
-          path: pin-go-dashboard/package-lock.json
-          if-no-files-found: error
+      - name: Commit generated lockfile only
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add pin-go-dashboard/package-lock.json
+          git diff --cached --quiet && exit 0
+          git commit -m "fix(dashboard): synchronize package lock"
+          git push origin HEAD:agent/dashboard-lockfile-baseline-fix
