@@ -702,59 +702,7 @@ jobs:
             src/distribution/channex-white-label.http-transport.ts
 
           if [ "${GITHUB_HEAD_REF:-$GITHUB_REF_NAME}" = "agent/ttlock-gateway-health-v1" ]; then
-            changed_workers="$(git diff --name-only "$BASE" -- src/workers | grep -v '^src/workers/deviceHealth\.hardened\.worker\.ts
-      - name: Verify certified Channex core fingerprint
-        run: npm run test:channex-certified-core-freeze
-
-      - name: Type-check coordinated lifecycle, readiness and activation boundaries
-        run: |
-          npx tsc -p tsconfig.ota-connection-reconciliation-e1.json --noEmit
-          npx tsc -p tsconfig.ota-connection-reconciliation-e2.json --noEmit
-          ./node_modules/.bin/tsc --noEmit --strict --target ES2022 --module ESNext --moduleResolution Bundler --types node --skipLibCheck \
-            src/distribution/airbnb-host-activation.http-transport.ts \
-            src/distribution/airbnb-host-activation.service.ts
-
-      - name: Run coordinated lifecycle, readiness and activation certification
-        run: |
-          node --import tsx --test \
-            src/distribution/channex-channel-identity.test.ts \
-            src/distribution/channex-channel-lifecycle.evidence.test.ts \
-            src/distribution/channex-airbnb-transport-readiness.policy.test.ts \
-            src/distribution/channex-canonical-readiness.service.test.ts \
-            src/distribution/airbnb-host-activation.service.test.ts \
-            src/distribution/ota-connection-center.runtime-composition.test.ts
-
-      - name: Prove listing-discovery sub-scope remains read-only
-        shell: bash
-        run: |
-          ! grep -R -E '/mappings|/activate|load_future_reservations|check_readiness' \
-            src/distribution/airbnb-host-self-service.listings.http-transport.ts \
-            src/distribution/airbnb-host-self-service.listings.service.ts \
-            src/distribution/airbnb-property-auto-matching.ts
-          grep -F '/action/listings' src/distribution/airbnb-host-self-service.listings.http-transport.ts
-          grep -F '/action/listing_details' src/distribution/airbnb-host-self-service.listings.http-transport.ts
-          grep -F 'person_capacity' src/distribution/airbnb-host-self-service.listings.service.ts
-          grep -F 'zipcode' src/distribution/airbnb-host-self-service.listings.service.ts
-          grep -F 'postalCode' prisma/schema.prisma
-
-      - name: Type-check isolated listing and matching modules
-        run: |
-          ./node_modules/.bin/tsc --noEmit --strict --target ES2022 --module NodeNext --moduleResolution NodeNext --types node \
-            src/distribution/airbnb-host-self-service.listings.http-transport.ts \
-            src/distribution/airbnb-property-auto-matching.ts \
-            src/distribution/airbnb-host-self-service.listings.service.ts
-
-      - name: Run V1.1 and retained Airbnb regressions
-        run: |
-          node --import tsx --test \
-            src/distribution/airbnb-property-auto-matching.test.ts \
-            src/distribution/channex-airbnb-listings.transport.test.ts \
-            src/distribution/airbnb-host-self-service.listings.service.test.ts \
-            src/routes/dashboard.airbnb-host-self-service.listings.route.test.ts \
-            src/distribution/airbnb-host-self-service.service.test.ts \
-            src/distribution/airbnb-host-self-service.callback-verifier.test.ts \
-            src/distribution/airbnb-host-self-service.callback-persistence.test.ts
- || true)"
+            changed_workers="$(git diff --name-only "$BASE" -- src/workers | grep -v -Fx 'src/workers/deviceHealth.hardened.worker.ts' || true)"
             if [ -n "$changed_workers" ]; then
               echo "Unexpected worker change outside TTLock Gateway Health V1:" >&2
               echo "$changed_workers" >&2
