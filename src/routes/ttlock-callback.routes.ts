@@ -1,7 +1,8 @@
 import { Router } from "express";
 import type { PrismaClient } from "@prisma/client";
 
-import { reconcileTtlockGatewayOfflineCallback } from "../services/ttlock-gateway-offline-callback-reconciliation.service";
+import { applyTtlockGatewayCallbackState } from "../services/ttlock-gateway-health.service";
+import { resolveUniqueMappedTtlockGateway } from "../services/ttlock-gateway-mapping.service";
 
 import {
   isTtlockCallbackContentType,
@@ -81,16 +82,21 @@ export function evaluateTtlockCallbackCanary(input: {
   };
 }
 
-export function shouldReconcileTtlockGatewayOffline(
+export function parseTtlockGatewayStateCallback(
   metadata: {
     gatewayId: string | null;
     isOnline: string | null;
     notifyType: string | null;
+    serverDate?: string | null;
   }
-): { gatewayId: number } | null {
+): {
+  gatewayId: number;
+  isOnline: boolean;
+  occurredAt: Date;
+} | null {
   if (
     metadata.notifyType !== "2" ||
-    metadata.isOnline !== "0" ||
+    (metadata.isOnline !== "0" && metadata.isOnline !== "1") ||
     !metadata.gatewayId
   ) {
     return null;
@@ -101,7 +107,17 @@ export function shouldReconcileTtlockGatewayOffline(
     return null;
   }
 
-  return { gatewayId };
+  const serverDate = Number(metadata.serverDate);
+  const occurredAt =
+    Number.isFinite(serverDate) && serverDate > 0
+      ? new Date(serverDate)
+      : new Date();
+
+  return {
+    gatewayId,
+    isOnline: metadata.isOnline === "1",
+    occurredAt,
+  };
 }
 
 export function buildTtlockCallbackCanaryRouter(
@@ -135,27 +151,52 @@ export function buildTtlockCallbackCanaryRouter(
       ...result.metadata,
     });
 
-    const offlineGateway =
-      shouldReconcileTtlockGatewayOffline(result.metadata);
+    const gatewayState =
+      parseTtlockGatewayStateCallback(result.metadata);
 
-    if (offlineGateway) {
-      void reconcileTtlockGatewayOfflineCallback(prisma, {
-        gatewayId: offlineGateway.gatewayId,
-      })
-        .then((reconciliation) => {
-          console.log(
-            "[ttlock.callback.gateway-reconciliation] completed",
+    if (gatewayState) {
+      void resolveUniqueMappedTtlockGateway(
+        prisma,
+        gatewayState.gatewayId
+      )
+        .then(async (resolution) => {
+          if (resolution.status !== "RESOLVED" || !resolution.gateway) {
+            console.warn(
+              "[ttlock.callback.gateway-state] unresolved",
+              {
+                gatewayId: gatewayState.gatewayId,
+                resolution: resolution.status,
+                providerRequests: 0,
+              }
+            );
+            return;
+          }
+
+          const applied = await applyTtlockGatewayCallbackState(
+            prisma,
             {
-              gatewayId: offlineGateway.gatewayId,
-              ...reconciliation,
+              organizationId:
+                resolution.gateway.organizationId,
+              gatewayId: gatewayState.gatewayId,
+              isOnline: gatewayState.isOnline,
+              occurredAt: gatewayState.occurredAt,
+            }
+          );
+
+          console.log(
+            "[ttlock.callback.gateway-state] completed",
+            {
+              gatewayId: gatewayState.gatewayId,
+              isOnline: gatewayState.isOnline,
+              ...applied,
             }
           );
         })
         .catch((error) => {
           console.error(
-            "[ttlock.callback.gateway-reconciliation] failed",
+            "[ttlock.callback.gateway-state] failed",
             {
-              gatewayId: offlineGateway.gatewayId,
+              gatewayId: gatewayState.gatewayId,
               error:
                 error instanceof Error
                   ? error.message
