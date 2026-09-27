@@ -13,7 +13,7 @@ async function resolveAccessToken(accessToken?: string, ttlockLockId?: number) {
   return typeof token === "string" ? token : token.access_token;
 }
 
-async function postForm(url: string, form: Record<string, string | number | undefined>) {
+async function postForm(url: string, form: Record<string, string | number | undefined>, timeoutMs?: number) {
   const body = new URLSearchParams();
   Object.entries(form).forEach(([k, v]) => {
     if (v !== undefined && v !== null) body.set(k, String(v));
@@ -23,6 +23,7 @@ async function postForm(url: string, form: Record<string, string | number | unde
     method: "POST",
     headers: { "Content-Type": "application/x-www-form-urlencoded" },
     body: body.toString(),
+    ...(timeoutMs === undefined ? {} : { signal: AbortSignal.timeout(timeoutMs) }),
   });
 
   const text = await resp.text();
@@ -73,6 +74,7 @@ export async function ttlockChangeCardPeriod(params: {
   endDate: number;
   changeType?: 1 | 2 | 3; // 2 = gateway
   accessToken?: string;
+  timeoutMs?: number;
 }) {
   const { base, clientId } = ttlockBase();
   const accessToken = await resolveAccessToken(params.accessToken, params.lockId);
@@ -86,7 +88,7 @@ export async function ttlockChangeCardPeriod(params: {
     endDate: params.endDate,
     changeType: params.changeType ?? 2,
     date: Date.now(),
-  });
+  }, params.timeoutMs);
 }
 
 export async function ttlockDeleteCard(params: {
