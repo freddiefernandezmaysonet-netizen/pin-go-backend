@@ -45,7 +45,10 @@ jobs:
         run: |
           git show "$BASE_SHA:prisma/schema.prisma" > /tmp/pin-ai-host-base.prisma
           npx prisma db push --schema /tmp/pin-ai-host-base.prisma --skip-generate
-          npx prisma db execute --file prisma/migrations/20260927180000_pin_ai_host_incident_threads/migration.sql --schema prisma/schema.prisma
+          migration=prisma/migrations/20260927180000_pin_ai_host_incident_threads/migration.sql
+          if ! git cat-file -e "$BASE_SHA:$migration" 2>/dev/null; then
+            npx prisma db execute --file "$migration" --schema prisma/schema.prisma
+          fi
           npx prisma generate
       - name: Host foundation unit and PostgreSQL API tests
         run: node --import tsx --test src/pin-ai/host/*.test.ts
