@@ -192,7 +192,9 @@ async function upsertGatewayCriticalIssue(input: {
 
       recommendedAction: lockLinkStale
         ? "Wake or touch the lock, verify battery and Bluetooth range, and confirm the gateway can communicate with the lock."
-        : "Restore gateway connectivity immediately before guest arrival.",
+        : inStay
+          ? "Restore gateway connectivity immediately; remote guest-access automation may be affected during the active stay."
+          : "Restore gateway connectivity immediately before guest arrival.",
 
       nextAutomaticStep:
         "Pin&Go will continue checking device connectivity automatically.",
