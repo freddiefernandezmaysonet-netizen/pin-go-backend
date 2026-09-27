@@ -66,6 +66,37 @@ jobs:
             '.github/workflows/ota-initial-distribution-enablement.yml',
           }
           changed = set(Path('/tmp/ota-initial-changed.txt').read_text().splitlines())
+          # PR #294 only: TTLock Gateway Health foundation is outside OTA runtime scope.
+          # All activation, Full Sync and certified-core checks above still run.
+          if os.environ.get('GITHUB_HEAD_REF') == 'agent/ttlock-gateway-health-foundation-v1':
+            repo = 'freddiefernandezmaysonet-netizen/pin-go-backend'
+            if not (
+              os.environ.get('GITHUB_EVENT_NAME') == 'pull_request'
+              and os.environ.get('GITHUB_REPOSITORY') == repo
+              and os.environ.get('SCOPE_PR_NUMBER') == '294'
+              and os.environ.get('SCOPE_HEAD_REPO') == repo
+              and os.environ.get('SCOPE_BASE_REPO') == repo
+              and os.environ.get('GITHUB_BASE_REF') == 'main'
+            ):
+              raise SystemExit('PR #294 repository/branch scope mismatch')
+            allowed = {
+              '.github/workflows/ota-airbnb-listing-discovery.yml',
+              '.github/workflows/ota-initial-distribution-enablement.yml',
+              '.github/workflows/ttlock-gateway-health-foundation-v1.yml',
+              'prisma/migrations/20260927173000_ttlock_gateway_health_foundation_v1/migration.sql',
+              'prisma/schema.prisma',
+              'src/routes/dashboard.locks.route.ts',
+              'src/services/gatewayConfigurationVerification.service.test.ts',
+              'src/services/gatewayConfigurationVerification.service.ts',
+              'src/services/ttlock-gateway-health.service.test.ts',
+              'src/services/ttlock-gateway-health.service.ts',
+              'src/services/ttlock-gateway-mapping.service.ts',
+              'src/workers/deviceHealth.hardened.worker.ts',
+            }
+            if changed != allowed:
+              raise SystemExit(f'PR #294 exact twelve-file Gateway Health scope required: {sorted(changed ^ allowed)}')
+            print('PR #294 exact Gateway Health scope verified; all retained OTA protections executed.')
+            raise SystemExit(0)
           # PR #295 only; all activation, Full Sync and core checks above still run.
           if os.environ.get('GITHUB_HEAD_REF') == 'agent/pin-ai-host-incident-foundation-v1':
             repo = 'freddiefernandezmaysonet-netizen/pin-go-backend'

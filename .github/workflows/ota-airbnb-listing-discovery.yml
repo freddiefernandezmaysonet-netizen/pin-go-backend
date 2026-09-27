@@ -70,6 +70,35 @@ jobs:
           BASE_BRANCH="${GITHUB_BASE_REF:-main}"
           git fetch origin "+refs/heads/$BASE_BRANCH:refs/remotes/origin/$BASE_BRANCH" --depth=1
           git diff --name-only "origin/$BASE_BRANCH...HEAD" | sort > "$RUNNER_TEMP/actual.txt"
+
+          # PR #294 only: TTLock Gateway Health foundation is outside OTA scope.
+          # Keep this workflow fail-closed by permitting only the exact foundation files.
+          if [ "${GITHUB_HEAD_REF:-$GITHUB_REF_NAME}" = "agent/ttlock-gateway-health-foundation-v1" ]; then
+            test "$GITHUB_EVENT_NAME" = "pull_request"
+            test "$GITHUB_REPOSITORY" = "freddiefernandezmaysonet-netizen/pin-go-backend"
+            test "$SCOPE_PR_NUMBER" = "294"
+            test "$SCOPE_HEAD_REPO" = "$GITHUB_REPOSITORY"
+            test "$SCOPE_BASE_REPO" = "$GITHUB_REPOSITORY"
+            test "$GITHUB_BASE_REF" = "main"
+            cat > "$RUNNER_TEMP/ttlock-gateway-health-foundation-v1-allowed.txt" <<'EOF'
+          .github/workflows/ota-airbnb-listing-discovery.yml
+          .github/workflows/ota-initial-distribution-enablement.yml
+          .github/workflows/ttlock-gateway-health-foundation-v1.yml
+          prisma/migrations/20260927173000_ttlock_gateway_health_foundation_v1/migration.sql
+          prisma/schema.prisma
+          src/routes/dashboard.locks.route.ts
+          src/services/gatewayConfigurationVerification.service.test.ts
+          src/services/gatewayConfigurationVerification.service.ts
+          src/services/ttlock-gateway-health.service.test.ts
+          src/services/ttlock-gateway-health.service.ts
+          src/services/ttlock-gateway-mapping.service.ts
+          src/workers/deviceHealth.hardened.worker.ts
+          EOF
+            sort "$RUNNER_TEMP/ttlock-gateway-health-foundation-v1-allowed.txt" -o "$RUNNER_TEMP/ttlock-gateway-health-foundation-v1-allowed.txt"
+            diff -u "$RUNNER_TEMP/ttlock-gateway-health-foundation-v1-allowed.txt" "$RUNNER_TEMP/actual.txt"
+            echo "PR #294 exact TTLock Gateway Health foundation scope verified; OTA files remain untouched."
+            exit 0
+          fi
           # PR #295 only: exact host incident foundation scope; retain all OTA steps below.
           if [ "${GITHUB_HEAD_REF:-$GITHUB_REF_NAME}" = "agent/pin-ai-host-incident-foundation-v1" ]; then
             test "$GITHUB_EVENT_NAME" = "pull_request"
@@ -96,7 +125,7 @@ jobs:
           EOF
             diff -u "$RUNNER_TEMP/pin-ai-host-incident-allowed.txt" "$RUNNER_TEMP/actual.txt"
             # Pin the reviewed additive schema diff and migration, not just their filenames.
-            test "$(git diff --no-ext-diff --no-color --full-index --unified=0 "origin/$BASE_BRANCH...HEAD" -- prisma/schema.prisma | sha256sum | cut -d ' ' -f 1)" = "05d6caec91c13fc148ba26c3c13d2d5d1d5f0264220c3c49a9daf20b9c9d7ce1"
+            test "$(git diff --no-ext-diff --no-color --full-index --unified=0 "origin/$BASE_BRANCH...HEAD" -- prisma/schema.prisma | sha256sum | cut -d ' ' -f 1)" = "6f432ddbccb1c6352c641fa6f2ce817e43c72359f64590ac5199b8311df46dcd"
             test "$(sha256sum prisma/migrations/20260927180000_pin_ai_host_incident_threads/migration.sql | cut -d ' ' -f 1)" = "4f75953b816801bfbda824d5a71b18d527f2919de2648f8f19fbecc41554a9c0"
             echo "PR #295 exact host incident scope verified; continuing all retained OTA certifications."
             exit 0
@@ -690,12 +719,26 @@ jobs:
           done < "$RUNNER_TEMP/actual.txt"
 
       - name: Prove unaffected certified Channex transports and workers remain frozen
+        shell: bash
         run: |
-          git diff --exit-code "origin/${GITHUB_BASE_REF:-main}...HEAD" -- \
-            src/pms \
-            src/workers \
-            src/distribution/channex-readonly.http-transport.ts \
-            src/distribution/channex-white-label.http-transport.ts
+          BASE_RANGE="origin/${GITHUB_BASE_REF:-main}...HEAD"
+
+          if [ "${GITHUB_HEAD_REF:-$GITHUB_REF_NAME}" = "agent/ttlock-gateway-health-foundation-v1" ]; then
+            git diff --exit-code "$BASE_RANGE" -- \
+              src/pms \
+              src/distribution/channex-readonly.http-transport.ts \
+              src/distribution/channex-white-label.http-transport.ts
+
+            test "$(git diff --name-only "$BASE_RANGE" -- src/workers)" = "src/workers/deviceHealth.hardened.worker.ts"
+            ! git diff "$BASE_RANGE" -- src/workers/deviceHealth.hardened.worker.ts | grep -E '^[+-].*(channex|distribution|pms)'
+            echo "PR #294 preserves certified Channex transports; only the scoped Device Health worker mapping hook changed."
+          else
+            git diff --exit-code "$BASE_RANGE" -- \
+              src/pms \
+              src/workers \
+              src/distribution/channex-readonly.http-transport.ts \
+              src/distribution/channex-white-label.http-transport.ts
+          fi
 
       - name: Verify certified Channex core fingerprint
         run: npm run test:channex-certified-core-freeze

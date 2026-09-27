@@ -1,0 +1,75 @@
+name: TTLock Gateway Health Foundation V1
+
+on:
+  pull_request:
+    paths:
+      - "prisma/schema.prisma"
+      - "prisma/migrations/20260927173000_ttlock_gateway_health_foundation_v1/**"
+      - "src/services/ttlock-gateway-health.service.ts"
+      - "src/services/ttlock-gateway-health.service.test.ts"
+      - "src/services/ttlock-gateway-mapping.service.ts"
+      - "src/services/gatewayConfigurationVerification.service.ts"
+      - "src/services/gatewayConfigurationVerification.service.test.ts"
+      - "src/routes/dashboard.locks.route.ts"
+      - "src/workers/deviceHealth.hardened.worker.ts"
+      - ".github/workflows/ttlock-gateway-health-foundation-v1.yml"
+  workflow_dispatch:
+
+jobs:
+  certify:
+    runs-on: ubuntu-24.04
+    env:
+      DATABASE_URL: postgresql://postgres:postgres@localhost:5432/pingo_test
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: pingo_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d pingo_test"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Use Node.js 22
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+
+      - name: Install locked dependencies
+        run: npm ci --ignore-scripts --no-audit --no-fund
+
+      - name: Generate and validate Prisma
+        run: |
+          npx prisma generate
+          npx prisma validate --schema ./prisma/schema.prisma
+
+      - name: Apply migrations to ephemeral PostgreSQL
+        run: npx prisma migrate deploy
+
+      - name: Run gateway health foundation tests
+        run: |
+          node --import tsx --test \
+            src/services/ttlock-gateway-health.service.test.ts \
+            src/services/gatewayConfigurationVerification.service.test.ts
+
+      - name: Bundle canonical gateway services
+        run: |
+          npx esbuild src/services/ttlock-gateway-health.service.ts --bundle --platform=node --packages=external --outfile=/tmp/ttlock-gateway-health.service.js
+          npx esbuild src/services/ttlock-gateway-mapping.service.ts --bundle --platform=node --packages=external --outfile=/tmp/ttlock-gateway-mapping.service.js
+
+      - name: Bundle gateway configuration route
+        run: |
+          npx esbuild src/routes/dashboard.locks.route.ts --bundle --platform=node --packages=external --outfile=/tmp/dashboard.locks.route.js
+
+      - name: Bundle hardened Device Health worker
+        run: |
+          npx esbuild src/workers/deviceHealth.hardened.worker.ts --bundle --platform=node --packages=external --outfile=/tmp/deviceHealth.hardened.worker.js

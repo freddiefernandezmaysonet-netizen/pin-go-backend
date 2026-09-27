@@ -29,6 +29,7 @@ import {
 import {
   evaluateTtlockLockLinkHealth,
 } from "../ttlock/ttlock.lockLinkHealth";
+import { learnTtlockGatewayMapping } from "../services/ttlock-gateway-mapping.service";
 import {
   isBatteryCheckDue,
   isGatewayCheckDue,
@@ -531,6 +532,13 @@ export async function runHardenedDeviceHealthWorker() {
             lock.ttlockLockId
           );
           ttlockRequestsTotal += response.providerRequestCount;
+
+          await learnTtlockGatewayMapping(prisma, {
+            organizationId: lock.property.organizationId,
+            lockId: lock.id,
+            gatewayId: response.gatewayId,
+            source: "DEVICE_HEALTH_WORKER",
+          });
 
           const linkHealth =
             evaluateTtlockLockLinkHealth({
