@@ -70,6 +70,37 @@ jobs:
           BASE_BRANCH="${GITHUB_BASE_REF:-main}"
           git fetch origin "+refs/heads/$BASE_BRANCH:refs/remotes/origin/$BASE_BRANCH" --depth=1
           git diff --name-only "origin/$BASE_BRANCH...HEAD" | sort > "$RUNNER_TEMP/actual.txt"
+          # PR #295 only: exact host incident foundation scope; retain all OTA steps below.
+          if [ "${GITHUB_HEAD_REF:-$GITHUB_REF_NAME}" = "agent/pin-ai-host-incident-foundation-v1" ]; then
+            test "$GITHUB_EVENT_NAME" = "pull_request"
+            test "$GITHUB_REPOSITORY" = "freddiefernandezmaysonet-netizen/pin-go-backend"
+            test "$SCOPE_PR_NUMBER" = "295"
+            test "$SCOPE_HEAD_REPO" = "$GITHUB_REPOSITORY"
+            test "$SCOPE_BASE_REPO" = "$GITHUB_REPOSITORY"
+            test "$GITHUB_BASE_REF" = "main"
+            cat > "$RUNNER_TEMP/pin-ai-host-incident-allowed.txt" <<'EOF'
+          .github/workflows/ota-airbnb-listing-discovery.yml
+          .github/workflows/pin-ai-host-incidents-v1.yml
+          docs/pin-ai-host-incident-conversations-blueprint-v1.md
+          docs/pin-ai-host-incident-foundation-v1.md
+          prisma/migrations/20260927180000_pin_ai_host_incident_threads/migration.sql
+          prisma/schema.prisma
+          src/pin-ai/host/host-incident-policy.ts
+          src/pin-ai/host/host-incident.database.test.ts
+          src/pin-ai/host/host-incident.service.ts
+          src/pin-ai/host/host-incident.test.ts
+          src/routes/dashboard.pin-ai-host-incidents.routes.ts
+          src/server.ts
+          tsconfig.pin-ai-host-incidents.json
+          EOF
+            diff -u "$RUNNER_TEMP/pin-ai-host-incident-allowed.txt" "$RUNNER_TEMP/actual.txt"
+            # Pin the reviewed additive schema diff and migration, not just their filenames.
+            test "$(git diff --no-ext-diff --no-color --unified=0 "origin/$BASE_BRANCH...HEAD" -- prisma/schema.prisma | sha256sum | cut -d ' ' -f 1)" = "453723aab75ae48fcd518e34a5151062462b67d3ce7fdb540b2e257b96f349d2"
+            test "$(sha256sum prisma/migrations/20260927180000_pin_ai_host_incident_threads/migration.sql | cut -d ' ' -f 1)" = "4f75953b816801bfbda824d5a71b18d527f2919de2648f8f19fbecc41554a9c0"
+            echo "PR #295 exact host incident scope verified; continuing all retained OTA certifications."
+            exit 0
+          fi
+
           # PR #284 only: exact Pin AI history scope; all OTA certification steps below still run.
           if [ "${GITHUB_HEAD_REF:-$GITHUB_REF_NAME}" = "agent/pin-ai-server-history-v1" ]; then
             test "$GITHUB_EVENT_NAME" = "pull_request"
