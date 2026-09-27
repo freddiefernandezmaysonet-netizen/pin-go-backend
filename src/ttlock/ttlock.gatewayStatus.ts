@@ -8,6 +8,17 @@ const MAX_GATEWAY_PAGES = 20;
 
 type JsonRecord = Record<string, unknown>;
 
+export type TTLockGatewayStatusResult = {
+  hasGateway: boolean;
+  isOnline: boolean;
+  gatewayId: number | null;
+  gatewayRssi: number | null;
+  gatewayRssiUpdatedAt: Date | null;
+  providerRequestCount: number;
+  providerResponseAt: Date;
+  raw: unknown;
+};
+
 export class TTLockGatewayStatusError extends Error {
   readonly errcode: number | null;
   readonly httpStatus: number | null;
@@ -138,7 +149,7 @@ async function postForm(input: {
 
 export async function ttlockFetchGatewayStatus(
   ttlockLockId: number
-) {
+): Promise<TTLockGatewayStatusResult> {
   const accessToken =
     await getDeviceHealthAccessTokenForTtlockLock(
       ttlockLockId
