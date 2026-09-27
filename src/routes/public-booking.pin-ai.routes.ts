@@ -1,5 +1,7 @@
 import { Router } from "express";
 import type { PrismaClient } from "@prisma/client";
+import { saveGuestActionReceipt } from "../pin-ai/guest/guest-history.js";
+import { readGuestHistory } from "../pin-ai/guest/guest-history-reader.js";
 
 import type {
   PinAIActionBroker,
@@ -75,6 +77,33 @@ export function buildPublicBookingPinAIRouter(input: Readonly<{
         ok: false,
         error: mapped.publicCode,
       });
+    }
+  });
+
+  router.get("/manage/:guestToken/pin-ai/history", async (req, res) => {
+    res.setHeader("Cache-Control", "no-store");
+    if (!/^[A-Za-z0-9_-]{16,200}$/.test(req.params.guestToken)) {
+      return res.status(400).json({ ok: false, error: "INVALID_REQUEST" });
+    }
+    try {
+      const now = input.now?.() ?? new Date();
+      const reservation = await input.prisma.reservation.findFirst({
+        where: { guestToken: req.params.guestToken, guestTokenExpiresAt: { gt: now }, property: { status: "ACTIVE" } },
+        select: { id: true, propertyId: true, property: { select: { organizationId: true } } },
+      });
+      if (!reservation) return res.status(404).json({ ok: false, error: "RESERVATION_NOT_FOUND" });
+      if (!input.prisma.pinAIActionProposal || !input.prisma.reservationModification) {
+        return res.status(503).json({ ok: false, error: "PIN_AI_HISTORY_UNAVAILABLE" });
+      }
+      const messages = await readGuestHistory({
+        pinAIGuestConversation: input.prisma.pinAIGuestConversation,
+        pinAIActionProposal: input.prisma.pinAIActionProposal,
+        reservationModification: input.prisma.reservationModification,
+      }, { guestToken: req.params.guestToken, reservationId: reservation.id, propertyId: reservation.propertyId,
+        organizationId: reservation.property.organizationId }, now);
+      return res.json({ ok: true, version: 1, messages });
+    } catch {
+      return res.status(503).json({ ok: false, error: "PIN_AI_HISTORY_UNAVAILABLE" });
     }
   });
 
@@ -178,6 +207,17 @@ export function buildPublicBookingPinAIRouter(input: Readonly<{
                 req.body
                   .confirmationToken,
             });
+
+        // A receipt-storage outage must not turn a completed action into an HTTP
+        // failure that encourages another confirmation. Canonical status is still
+        // authoritative and can be read even when this optional URL copy is absent.
+        try {
+          await saveGuestActionReceipt(input.prisma, {
+            reservationId: reservation.id, guestToken: req.params.guestToken,
+          }, result);
+        } catch {
+          console.error("[public-booking pin-ai history]", { code: "RECEIPT_PERSISTENCE_FAILED" });
+        }
 
         return res.status(200).json({
           ok: true,

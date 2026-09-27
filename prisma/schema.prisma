@@ -1050,6 +1050,8 @@ model PinAIGuestConversation {
   id                 String       @id @default(cuid())
   reservationId      String       @unique
   openaiSessionId    String?      @unique @db.VarChar(160)
+  guestHistoryCiphertext String? @db.Text
+  guestActionReceiptsCiphertext String? @db.Text
   leaseToken         String?      @db.VarChar(64)
   leaseExpiresAt     DateTime?
   lastMessageAt      DateTime?

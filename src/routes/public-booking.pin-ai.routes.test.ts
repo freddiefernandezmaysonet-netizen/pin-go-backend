@@ -3,6 +3,7 @@ import type { Server } from "node:http";
 import type { AddressInfo } from "node:net";
 import test from "node:test";
 import express from "express";
+import { sealGuestHistory } from "../pin-ai/guest/guest-history.js";
 
 import {
   PinAIActionProposalError,
@@ -15,6 +16,78 @@ import type {
 import { buildPublicBookingPinAIRouter } from "./public-booking.pin-ai.routes.js";
 
 const token = "12345678-1234-1234-1234-123456789abc";
+
+for (const scenario of ["pending", "paid", "payable", "processing", "paid processing", "expired", "foreign proposal", "foreign ciphertext", "invalid token", "expired token", "corrupt", "database error", "no history"] as const) {
+  test(`durable history GET: ${scenario}`, async () => {
+    const now = new Date("2026-09-27T03:40:00Z");
+    const scope = { reservationId: "reservation-a", guestToken: token };
+    const expiry = new Date("2026-09-27T04:30:00Z");
+    const quote = { quotedAt: now, quoteExpiresAt: expiry, quoteExpiresAtLocal: "2026-09-27T00:30:00-04:00", priceGuaranteedUntil: expiry,
+      propertyTimezone: "America/Puerto_Rico", availabilityCheckedAt: now, availabilityHeld: false,
+      currentTotalAmount: 3.35, proposedTotalAmount: 4.47, amountDifference: 1.12, amountDifferenceCents: 112, currency: "USD", financialAction: "ADDITIONAL_PAYMENT_REQUIRED" };
+    const proposal = { proposalId: "proposal-12345678", actionType: "RESERVATION_MODIFICATION", requiresGuestConfirmation: true,
+      confirmationToken: "private-confirmation", expiresAt: expiry, quote };
+    const messages = [{ id: "guest-one", role: "guest", text: "Extender mi salida" },
+      { id: "assistant-one", role: "assistant", text: "Propuesta preparada", actionProposal: proposal }];
+    const ciphertext = sealGuestHistory(scenario === "foreign ciphertext" ? { ...scope, reservationId: "reservation-b" } : scope, "messages", messages);
+    const reads: string[] = [];
+    const prisma = {
+      reservation: { findFirst: async (args: any) => {
+        reads.push("reservation");
+        assert.deepEqual(args.where, { guestToken: token, guestTokenExpiresAt: { gt: now }, property: { status: "ACTIVE" } });
+        if (scenario === "expired token") return null;
+        return { id: scope.reservationId, propertyId: "property-a", property: { organizationId: "org-a" } };
+      } },
+      pinAIGuestConversation: { findUnique: async (args: any) => {
+        reads.push("history");
+        assert.deepEqual(args.where, { reservationId: scope.reservationId });
+        if (scenario === "database error") throw new Error("private database detail");
+        if (scenario === "no history") return null;
+        return { guestHistoryCiphertext: scenario === "corrupt" ? "corrupt" : ciphertext,
+          guestActionReceiptsCiphertext: sealGuestHistory(scope, "receipts", [{ proposalId: proposal.proposalId, modificationId: "modification-a", checkoutUrl: "https://checkout.example.test/private" }]) };
+      } },
+      pinAIActionProposal: { findFirst: async (args: any) => {
+        reads.push("proposal");
+        assert.deepEqual(args.where, { id: proposal.proposalId, reservationId: scope.reservationId, propertyId: "property-a", organizationId: "org-a", actionType: "RESERVATION_MODIFICATION" });
+        return scenario === "foreign proposal" ? null : { id: proposal.proposalId, status: scenario === "pending" ? "PENDING_CONFIRMATION" : "CONFIRMED" };
+      } },
+      reservationModification: { findFirst: async (args: any) => {
+        reads.push("modification");
+        assert.deepEqual(args.where, { reservationId: scope.reservationId, clientRequestId: `pin_ai_${proposal.proposalId}`, requestSource: "PIN_AI_GUEST_SERVICES" });
+        return scenario === "pending" ? null : { id: "modification-a", status: scenario === "paid" ? "APPLIED" : scenario === "processing" ? "PAYMENT_PROCESSING" : scenario === "expired" ? "EXPIRED" : "AWAITING_PAYMENT",
+          stripePaymentStatus: ["paid", "paid processing"].includes(scenario) ? "paid" : "unpaid", checkoutExpiresAt: expiry, appliedAt: scenario === "paid" ? now : null };
+      } },
+    };
+    const app = express();
+    app.use(buildPublicBookingPinAIRouter({ prisma: prisma as never, env: {}, now: () => now,
+      runtime: async () => { throw new Error("Must never run model"); },
+      actionBrokerFactory: async () => { throw new Error("Must never create broker"); } }));
+    const server = await new Promise<Server>(resolve => { const listener = app.listen(0, "127.0.0.1", () => resolve(listener)); });
+    try {
+      const response = await fetch(`http://127.0.0.1:${(server.address() as AddressInfo).port}/manage/${scenario === "invalid token" ? "bad" : token}/pin-ai/history`, { headers: { Connection: "close" } });
+      assert.equal(response.headers.get("cache-control"), "no-store");
+      assert.equal(response.status, scenario === "invalid token" ? 400 : scenario === "expired token" ? 404 : ["corrupt", "foreign ciphertext", "database error"].includes(scenario) ? 503 : 200);
+      const data = await response.json() as any;
+      assert.doesNotMatch(JSON.stringify(data), /private database detail|openaiSessionId|guestHistoryCiphertext|stripePaymentIntentId/);
+      if (response.ok) {
+        assert.equal(data.version, 1);
+        assert.equal(data.messages.length, scenario === "no history" ? 0 : 2);
+        if (data.messages.length) {
+          assert.equal(data.messages[0].text, "Extender mi salida");
+          const result = data.messages[1].actionResult;
+          if (scenario === "pending") assert.equal(result, undefined);
+          else {
+            assert.equal(result.outcome, scenario === "paid" ? "EXECUTED" : ["payable", "processing", "paid processing"].includes(scenario) ? "WAITING_FOR_PAYMENT" : "REVIEW_REQUIRED");
+            assert.equal(result.checkoutUrl, scenario === "payable" ? "https://checkout.example.test/private" : null);
+            assert.equal(result.actionExecuted, scenario === "paid");
+          }
+        }
+      }
+      if (scenario === "invalid token") assert.deepEqual(reads, []);
+      if (scenario === "expired token") assert.deepEqual(reads, ["reservation"]);
+    } finally { await closeServer(server); }
+  });
+}
 
 for (const scenario of ["applied", "awaiting", "processing", "expired", "missing modification", "invalid token", "invalid proposal", "expired token", "other reservation", "database error"] as const) {
   test(`read-only action receipt: ${scenario}`, async () => {
