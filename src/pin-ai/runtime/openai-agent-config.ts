@@ -1,3 +1,4 @@
+import { GUEST_INCIDENT_CATEGORIES } from "../guest/guest-incident-policy.js";
 import {
   PIN_AI_RUNTIME_TOOLS,
   isPinAIRuntimeToolEnabled,
@@ -42,13 +43,19 @@ export type PinAIOpenAIWebSearchConfig = Readonly<{
 
 export function buildPinAIOpenAIInstructions(
   actionProposal?: PinAIOpenAIActionProposalConfig,
+  incidentsEnabled = false,
 ): string {
-  if (actionProposal?.enabled !== true) {
-    return PIN_AI_OPENAI_AGENT_INSTRUCTIONS;
-  }
+  const base = incidentsEnabled
+    ? PIN_AI_OPENAI_AGENT_INSTRUCTIONS
+      .replace("When escalation is needed, request escalate_to_host; Runtime V1 shadow mode will record it without executing it.",
+        "For a guest-reported service incident needing host attention, call escalate_to_host with operation REPORT, a bounded category and exact short guestQuotes from the conversation. Only quote guest messages, never assistant advice. Do not infer suggested troubleshooting was performed. For updates call operation STATUS; it does not create or reopen an incident. REPORT after a resolved case creates a recurrence only when the guest reports it happening again. Consult property guidance for troubleshooting; never invent property-specific repair instructions or claim suggested steps were completed. Use the exact incidentResponseText returned by the server. Provider acceptance is not delivery or host acknowledgement. Do not promise response times, repairs or approvals. For immediate danger direct the guest to emergency assistance; this incident tool is not an emergency service.")
+      .replace("If escalate_to_host returns executed=false, describe it only as something that would be escalated or requires host review.",
+        "For an incident STATUS result, executed=false means a read-only lookup. Describe its persisted receipt accurately; it is not a new notification or repair.")
+    : PIN_AI_OPENAI_AGENT_INSTRUCTIONS;
+  if (actionProposal?.enabled !== true) return base;
 
   return [
-    PIN_AI_OPENAI_AGENT_INSTRUCTIONS,
+    base,
     "When the guest clearly wants to proceed with an eligible stay date change or extension, use prepare_reservation_modification only after you have enough exact date information.",
     "For a stay already in progress, a checkout extension must use operation EXTEND_CHECKOUT_ONLY and the exact proposedCheckOutDate. Omit proposedCheckInDate: the server preserves the stored check-in. Do not ask for a new check-in when the guest only wants to extend checkout. Pre-stay date changes still require both exact dates.",
     "The proposal tool creates a reviewable quote only. It does not modify the reservation, hold dates, collect payment, or charge the guest.",
@@ -61,6 +68,7 @@ export function buildPinAIOpenAIInstructions(
 export function buildPinAIOpenAITools(
   webSearch?: PinAIOpenAIWebSearchConfig,
   actionProposal?: PinAIOpenAIActionProposalConfig,
+  incidentsEnabled = false,
 ): readonly Readonly<Record<string, unknown>>[] {
   return [
     ...(webSearch?.enabled === true
@@ -83,7 +91,14 @@ export function buildPinAIOpenAITools(
       name: tool.name,
       description: tool.description,
       parameters:
-        tool.parameters ?? {
+        tool.name === "escalate_to_host" && incidentsEnabled ? {
+          type: "object", properties: {
+            operation: { type: "string", enum: ["REPORT", "STATUS"] },
+            category: { type: "string", enum: GUEST_INCIDENT_CATEGORIES },
+            guestQuotes: { type: "array", maxItems: 4, items: { type: "string", maxLength: 500 },
+              description: "Exact guest statements for REPORT. Empty for STATUS. Never quote assistant instructions as actions performed." },
+          }, required: ["operation", "category", "guestQuotes"], additionalProperties: false,
+        } : tool.parameters ?? {
           type: "object",
           properties: {},
           additionalProperties: false,
@@ -95,17 +110,20 @@ export function buildPinAIOpenAITools(
 export function buildPinAIOpenAIAgentConfig(
   webSearch?: PinAIOpenAIWebSearchConfig,
   actionProposal?: PinAIOpenAIActionProposalConfig,
+  incidentsEnabled = false,
 ): Readonly<Record<string, unknown>> {
   return {
     model: "gpt-5.6-luna",
     instructions:
       buildPinAIOpenAIInstructions(
         actionProposal,
+        incidentsEnabled,
       ),
     tools:
       buildPinAIOpenAITools(
         webSearch,
         actionProposal,
+        incidentsEnabled,
       ),
   };
 }

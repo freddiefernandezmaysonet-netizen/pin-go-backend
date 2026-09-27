@@ -54,11 +54,11 @@ export type DamageCaseMissionControlSource = {
     };
   };
   damageNoticeDelivery: {
-    status: string;
+    status: string | null;
     retryCount: number;
   } | null;
   closureNoticeDelivery: {
-    status: string;
+    status: string | null;
     retryCount: number;
   } | null;
   hostResponseDelivery: HostResponseDeliverySummary | null;

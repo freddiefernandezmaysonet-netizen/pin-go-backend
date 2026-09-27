@@ -1,4 +1,5 @@
 import { Resend } from "resend";
+import { buildGuestIncidentEmail, type GuestIncidentEmail } from "./email-templates/guestIncidentEmail.js";
 import {
   buildGuestReservationEmail,
 } from "./email-templates/guestReservationEmail.js";
@@ -16,6 +17,24 @@ const emailFrom = String(process.env.EMAIL_FROM ?? "").trim();
 const isProd = process.env.NODE_ENV === "production";
 
 const resend = resendApiKey ? new Resend(resendApiKey) : null;
+
+// Durable incident notices require a real provider acknowledgement even outside production.
+export async function sendGuestIncidentHostNotice(input: GuestIncidentEmail): Promise<string> {
+  if (!resend) throw Object.assign(new Error("PIN_AI_INCIDENT_EMAIL_UNCONFIGURED"), { statusCode: 400 });
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  try {
+    const result = await Promise.race([
+      resend.emails.send({ from: getEmailFrom(), to: input.to, ...buildGuestIncidentEmail(input) },
+        { idempotencyKey: input.idempotencyKey }),
+      new Promise<never>((_, reject) => { timer = setTimeout(() => reject(new Error("PIN_AI_INCIDENT_EMAIL_TIMEOUT")), 20_000); }),
+    ]);
+    if (result.error) throw Object.assign(new Error("PIN_AI_INCIDENT_EMAIL_REJECTED"), {
+      statusCode: (result.error as { statusCode?: number }).statusCode,
+    });
+    if (!result.data?.id) throw new Error("PIN_AI_INCIDENT_EMAIL_ACK_MISSING");
+    return result.data.id;
+  } finally { if (timer) clearTimeout(timer); }
+}
 
 type SendResetPasswordEmailInput = {
   to: string;

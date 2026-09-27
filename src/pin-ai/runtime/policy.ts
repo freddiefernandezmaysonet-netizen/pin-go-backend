@@ -131,7 +131,6 @@ function assertNoFalseCompletionClaims(response: PinAIRuntimeResponse): void {
   ];
 
   if (
-    response.escalationCreated === false &&
     falseCompletionPatterns.some((pattern) => pattern.test(text))
   ) {
     throw new Error("PIN_AI_RUNTIME_FALSE_COMPLETION_CLAIM");

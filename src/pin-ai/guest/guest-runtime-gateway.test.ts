@@ -493,6 +493,32 @@ test("fails closed if the runtime reports an executed escalation", async () => {
   );
 });
 
+test("persists a server-backed incident receipt and rejects mismatched runtime claims", async () => {
+  const receipt = { reference: "GI-012345ABCDEF", category: "HOT_WATER" as const, incidentRecorded: true as const,
+    notification: "QUEUED" as const, resolution: "OPEN" as const, hostAcknowledged: false as const };
+  for (const mismatch of [false, true]) {
+    const { prisma } = createPrisma({ id: "reservation-a", propertyId: "property-a", preferredLanguage: "es",
+      property: { organizationId: "org-a", city: null, region: null, country: null, timezone: "America/Puerto_Rico" } });
+    const text = "Incidente registrado para revisión del anfitrión. Aviso pendiente de envío.";
+    const runtime: GuestPinAIRuntimeRunner = async request => ({
+      ...shadowResult(request, { responseText: mismatch ? "He contactado al anfitrión" : text,
+        escalationCreated: true, requiresHumanReview: false, toolCalls: [{ name: "escalate_to_host", arguments: {} }] }),
+      guestIncidentEvidence: { receipt, operationalWrites: true, responseText: text },
+    });
+    const gateway = new GuestPinAIGateway(prisma, runtime, true, () => now);
+    if (mismatch) {
+      await assert.rejects(gateway.reply({ guestToken: token, message: "El agua está fría" }), /SHADOW_INVARIANT_FAILED/);
+    } else {
+      const result = await gateway.reply({ guestToken: token, message: "El agua está fría" });
+      assert.equal(result.escalationCreated, true); assert.equal(result.operationalWrites, true);
+      assert.equal(result.actionsExecuted, false); assert.deepEqual(result.incident, receipt);
+      const persisted = await prisma.pinAIGuestConversation.findUnique({ where: { reservationId: "reservation-a" } });
+      const history = readGuestMessages({ reservationId: "reservation-a", guestToken: token }, persisted?.guestHistoryCiphertext);
+      assert.equal(history.at(-1)?.text, text);
+    }
+  }
+});
+
 test("enables native OpenAI web search with coarse location only", async () => {
   const originalFetch = globalThis.fetch;
   const fixture = createTurnFixture({ answer: () => "Three options nearby." });

@@ -1,3 +1,7 @@
+import { prisma as runtimePrisma } from "../../lib/prisma.js";
+import { GuestIncidentToolExecutor, type GuestIncidentRuntimeEvidence } from "../runtime/guest-incident-tool-executor.js";
+import { GuardedPinAIRuntimeToolExecutor } from "../runtime/tool-executor.js";
+import { guestIncidentEnabled, type GuestIncidentReceipt } from "./guest-incident-policy.js";
 import type { PrismaClient } from "@prisma/client";
 import { randomUUID } from "node:crypto";
 import { appendGuestMessages, readGuestMessages, type GuestHistoryMessage } from "./guest-history.js";
@@ -74,6 +78,7 @@ export type GuestPinAIActionAuthorization = Readonly<{
 export type GuestPinAIRuntimeRunResult =
   PinAIShadowRunResult &
   Readonly<{
+    guestIncidentEvidence?: GuestIncidentRuntimeEvidence;
     privateActionProposal?:
       PinAIPrivateActionProposal |
       null;
@@ -116,11 +121,12 @@ export type GuestPinAIGatewayResponse = Readonly<{
   reply: string;
   mode: "SHADOW";
   conversationPersisted: true;
-  escalationCreated: false;
+  escalationCreated: boolean;
   requiresHumanReview: boolean;
   actionsExecuted: false;
   databaseWrites: true;
-  operationalWrites: false;
+  operationalWrites: boolean;
+  incident?: GuestIncidentReceipt | null;
   actionProposal?:
     GuestPinAIActionProposalResponse;
   webSearch: Readonly<{
@@ -264,7 +270,9 @@ export class GuestPinAIGateway {
     if (
       result.mode !== "SHADOW" ||
       result.actionsExecuted !== false ||
-      result.response.escalationCreated !== false
+      result.response.escalationCreated !== (result.guestIncidentEvidence?.operationalWrites ?? false) ||
+      (result.guestIncidentEvidence !== undefined &&
+        result.response.responseText !== result.guestIncidentEvidence.responseText)
     ) {
       await this.releaseFailedConversationLease(
         reservation.id,
@@ -366,11 +374,12 @@ export class GuestPinAIGateway {
       reply,
       mode: "SHADOW",
       conversationPersisted: true,
-      escalationCreated: false,
+      escalationCreated: result.response.escalationCreated,
       requiresHumanReview: result.response.requiresHumanReview,
       actionsExecuted: false,
       databaseWrites: true,
-      operationalWrites: false,
+      operationalWrites: result.guestIncidentEvidence?.operationalWrites ?? false,
+      ...(result.guestIncidentEvidence ? { incident: result.guestIncidentEvidence.receipt } : {}),
       ...(actionProposal
         ? {
             actionProposal,
@@ -541,6 +550,7 @@ export function createGuestPinAIRuntimeRunner(
     const webSearchEnabled =
       env.PIN_AI_RUNTIME_WEB_SEARCH_ENABLED === "true" &&
       location.label.length > 0;
+    const incidentsEnabled = !!actionAuthorization?.guestToken && guestIncidentEnabled(request.context.reservationId, env);
     const transport = new OpenAIAgentsRuntimeTransport(
       {
         enabled: true,
@@ -548,6 +558,7 @@ export function createGuestPinAIRuntimeRunner(
         agentId,
         ...(resumeSessionId ? { resumeSessionId } : {}),
         requireCurrentSessionConfig: true,
+        incidentsEnabled,
         model: "gpt-5.6-luna",
         webSearch: {
           enabled: webSearchEnabled,
@@ -576,34 +587,20 @@ export function createGuestPinAIRuntimeRunner(
       new LunaRuntimeAdapter(transport),
     );
 
-    if (!actionProposalEnabled) {
-      return new PinAIShadowOrchestrator(
-        model,
-        createPinGoRuntimeReadToolExecutor(),
-      ).run(request);
-    }
-
-    const actionTools =
-      createPinGoRuntimeToolExecutorWithActionProposal(
-        createActionProposalRuntimeDependencies({
-          guestToken:
-            actionAuthorization!.guestToken,
-          enabled: true,
-        }),
-      );
-
-    const result =
-      await new PinAIShadowOrchestrator(
-        model,
-        actionTools.executor,
-      ).run(request);
-
+    const actionTools = actionProposalEnabled
+      ? createPinGoRuntimeToolExecutorWithActionProposal(createActionProposalRuntimeDependencies({
+          guestToken: actionAuthorization!.guestToken, enabled: true,
+        })) : undefined;
+    const delegate = actionTools?.executor ?? createPinGoRuntimeReadToolExecutor();
+    const incidentTools = incidentsEnabled ? new GuestIncidentToolExecutor({
+      prisma: runtimePrisma, guestToken: actionAuthorization!.guestToken, env, delegate,
+    }) : undefined;
+    const result = await new PinAIShadowOrchestrator(model,
+      incidentTools ? new GuardedPinAIRuntimeToolExecutor(incidentTools) : delegate).run(request);
     return {
       ...result,
-      privateActionProposal:
-        actionTools
-          .actionProposalExecutor
-          .getPrivateActionProposal(),
+      ...(incidentTools?.getEvidence() ? { guestIncidentEvidence: incidentTools.getEvidence() } : {}),
+      ...(actionTools ? { privateActionProposal: actionTools.actionProposalExecutor.getPrivateActionProposal() } : {}),
     };
   };
 }
