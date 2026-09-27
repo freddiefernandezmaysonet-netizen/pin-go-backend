@@ -10,6 +10,7 @@ export const GATEWAY_FIRST_RETRY_MS = 8 * HOUR_MS;
 export const GATEWAY_SECOND_RETRY_MS = 12 * HOUR_MS;
 export const GATEWAY_READINESS_WINDOW_MS = 6 * HOUR_MS;
 export const GATEWAY_ACCESS_RECHECK_WINDOW_MS = 2 * HOUR_MS;
+export const GATEWAY_IN_STAY_INTERVAL_MS = HOUR_MS;
 
 export type SchedulerHealth = {
   battery: number | null;
@@ -62,11 +63,29 @@ export function isGatewayCheckDue(input: {
     return false;
   }
 
-  // Gateway readiness is intentionally quiet until the next ACTIVE arrival is
-  // inside the six-hour critical window. Configuration-time verification is a
-  // separate one-time action and is not governed by this worker scheduler.
+  // Gateway readiness is intentionally quiet when there is no operational
+  // reservation. Configuration-time verification is a separate one-time action.
   if (!input.checkIn) {
     return false;
+  }
+
+  // During an active stay, verify connectivity once per worker hour. A
+  // gatewayNextCheckAt created by either a healthy check or a recovery attempt
+  // remains authoritative.
+  if (input.checkIn <= input.now) {
+    if (input.health?.gatewayNextCheckAt) {
+      return input.health.gatewayNextCheckAt <= input.now;
+    }
+
+    if (!input.health?.gatewayLastCheckedAt) {
+      return true;
+    }
+
+    return (
+      input.health.gatewayLastCheckedAt.getTime() +
+        GATEWAY_IN_STAY_INTERVAL_MS <=
+      input.now.getTime()
+    );
   }
 
   const readinessWindowStart = new Date(
@@ -119,6 +138,12 @@ export function nextGatewaySuccessCheckAt(input: {
 }) {
   if (!input.checkIn) {
     return null;
+  }
+
+  if (input.checkIn <= input.now) {
+    return new Date(
+      input.now.getTime() + GATEWAY_IN_STAY_INTERVAL_MS
+    );
   }
 
   const accessRecheckAt = new Date(
