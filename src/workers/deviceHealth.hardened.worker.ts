@@ -44,11 +44,12 @@ const BATTERY_MONITORING_THRESHOLD = 30;
 const BATTERY_CRITICAL_THRESHOLD = 20;
 const GATEWAY_WINDOW_MS = 24 * HOUR_MS;
 
-type UpcomingReservation = {
+type OperationalReservation = {
   id: string;
   reservationNumber: string | null;
   propertyId: string;
   checkIn: Date;
+  checkOut: Date;
 };
 
 type WorkerLock = {
@@ -159,7 +160,7 @@ async function closePreviousGatewayWorkflow(input: {
 async function recordGatewayFailure(input: {
   lock: WorkerLock;
   mode: GatewayMonitoringMode;
-  reservation: UpcomingReservation | null;
+  reservation: OperationalReservation | null;
   now: Date;
   gatewayConnected: boolean | null;
   isOnline: boolean | null;
@@ -306,13 +307,15 @@ export async function runHardenedDeviceHealthWorker() {
     startedAt: now.toISOString(),
   });
 
-  const upcomingReservations =
+  const operationalReservations =
     await prisma.reservation.findMany({
       where: {
         status: "ACTIVE",
         checkIn: {
-          gte: now,
           lte: windowEnd,
+        },
+        checkOut: {
+          gt: now,
         },
       },
       select: {
@@ -320,14 +323,15 @@ export async function runHardenedDeviceHealthWorker() {
         reservationNumber: true,
         propertyId: true,
         checkIn: true,
+        checkOut: true,
       },
       orderBy: { checkIn: "asc" },
     });
 
   const nextReservationByProperty =
-    new Map<string, UpcomingReservation>();
+    new Map<string, OperationalReservation>();
 
-  for (const reservation of upcomingReservations) {
+  for (const reservation of operationalReservations) {
     if (!nextReservationByProperty.has(reservation.propertyId)) {
       nextReservationByProperty.set(
         reservation.propertyId,
@@ -792,7 +796,7 @@ export async function runHardenedDeviceHealthWorker() {
     gatewayEligible,
     gatewayDisabled,
     legacyUnconfigured,
-    reservationsInside24Hours: upcomingReservations.length,
+    reservationsInStayOrNext24Hours: operationalReservations.length,
     batteryDue,
     batterySkipped,
     gatewayDue,
