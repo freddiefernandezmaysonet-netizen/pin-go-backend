@@ -1,6 +1,6 @@
 import type { PrismaClient } from "@prisma/client";
 
-import { upsertDeviceHealth } from "./deviceHealth.service";
+import { recordTtlockGatewayObservation } from "./ttlock-gateway-health.service";
 
 type JsonRecord = Record<string, unknown>;
 
@@ -47,16 +47,6 @@ function payloadContainsGatewayId(
   );
 }
 
-export function shouldApplyGatewayOfflineTransition(input: {
-  gatewayConnected: boolean | null;
-  isOnline: boolean | null;
-}) {
-  return !(
-    input.gatewayConnected === false &&
-    input.isOnline === false
-  );
-}
-
 export async function reconcileTtlockGatewayOfflineCallback(
   prisma: PrismaClient,
   input: {
@@ -64,9 +54,28 @@ export async function reconcileTtlockGatewayOfflineCallback(
     occurredAt?: Date;
   }
 ) {
-  const now = input.occurredAt ?? new Date();
+  const occurredAt = input.occurredAt ?? new Date();
 
-  const locks = await prisma.lock.findMany({
+  const existingGateways = await prisma.tTLockGateway.findMany({
+    where: {
+      ttlockGatewayId: input.gatewayId,
+    },
+    select: {
+      id: true,
+      organizationId: true,
+      isOnline: true,
+    },
+  });
+
+  if (existingGateways.length > 1) {
+    return {
+      status: "AMBIGUOUS_GATEWAY_MAPPING" as const,
+      mappedLocks: 0,
+      providerRequests: 0,
+    };
+  }
+
+  const telemetryLocks = await prisma.lock.findMany({
     where: {
       isActive: true,
       deviceHealth: {
@@ -75,20 +84,21 @@ export async function reconcileTtlockGatewayOfflineCallback(
     },
     select: {
       id: true,
-      ttlockLockId: true,
+      property: {
+        select: {
+          organizationId: true,
+        },
+      },
       deviceHealth: {
         select: {
           rawPayload: true,
           gatewayRawPayload: true,
-          gatewayDisconnectedSince: true,
-          gatewayConnected: true,
-          isOnline: true,
         },
       },
     },
   });
 
-  const matchedLocks = locks.filter((lock) => {
+  const locallyMatched = telemetryLocks.filter((lock) => {
     const health = lock.deviceHealth;
     if (!health) return false;
 
@@ -104,53 +114,106 @@ export async function reconcileTtlockGatewayOfflineCallback(
     );
   });
 
-  let updatedLocks = 0;
+  const matchedOrganizationIds = [
+    ...new Set(
+      locallyMatched.map(
+        (lock) => lock.property.organizationId
+      )
+    ),
+  ];
 
-  for (const lock of matchedLocks) {
-    if (
-      !lock.deviceHealth ||
-      !shouldApplyGatewayOfflineTransition({
-        gatewayConnected:
-          lock.deviceHealth.gatewayConnected,
-        isOnline: lock.deviceHealth.isOnline,
-      })
-    ) {
-      continue;
+  const existingGateway = existingGateways[0] ?? null;
+
+  let organizationId =
+    existingGateway?.organizationId ?? null;
+
+  if (!organizationId) {
+    if (matchedOrganizationIds.length === 0) {
+      return {
+        status: "NO_LOCAL_GATEWAY_MAPPING" as const,
+        mappedLocks: 0,
+        providerRequests: 0,
+      };
     }
 
-    await upsertDeviceHealth(prisma, {
-      lockId: lock.id,
-      gatewayConnected: false,
+    if (matchedOrganizationIds.length > 1) {
+      return {
+        status: "AMBIGUOUS_GATEWAY_MAPPING" as const,
+        mappedLocks: 0,
+        providerRequests: 0,
+      };
+    }
+
+    organizationId =
+      matchedOrganizationIds[0] ?? null;
+  }
+
+  if (!organizationId) {
+    return {
+      status: "NO_LOCAL_GATEWAY_MAPPING" as const,
+      mappedLocks: 0,
+      providerRequests: 0,
+    };
+  }
+
+  if (
+    matchedOrganizationIds.some(
+      (candidate) => candidate !== organizationId
+    )
+  ) {
+    return {
+      status: "AMBIGUOUS_GATEWAY_MAPPING" as const,
+      mappedLocks: 0,
+      providerRequests: 0,
+    };
+  }
+
+  const duplicateState =
+    existingGateway?.isOnline === false;
+
+  const gateway =
+    await recordTtlockGatewayObservation(prisma, {
+      organizationId,
+      ttlockGatewayId: input.gatewayId,
       isOnline: false,
-      gatewayLastCheckedAt: now,
-      gatewayLastFailedAt: now,
-      gatewayLastError:
-        "TTLock gateway offline callback received",
-      gatewayDisconnectedSince:
-        lock.deviceHealth?.gatewayDisconnectedSince ?? now,
-      lastEventAt: now,
-      lastSyncAt: now,
+      occurredAt,
       source: "TTLOCK_CALLBACK",
       rawPayload: {
         telemetryType: "GATEWAY_CALLBACK",
         gatewayId: input.gatewayId,
-        ttlockLockId: lock.ttlockLockId,
         isOnline: false,
       },
     });
 
-    updatedLocks += 1;
+  const matchingLockIds = locallyMatched
+    .filter(
+      (lock) =>
+        lock.property.organizationId ===
+        organizationId
+    )
+    .map((lock) => lock.id);
+
+  if (matchingLockIds.length > 0) {
+    await prisma.lock.updateMany({
+      where: {
+        id: {
+          in: matchingLockIds,
+        },
+        property: {
+          organizationId,
+        },
+      },
+      data: {
+        ttlockGatewayRecordId: gateway.id,
+      },
+    });
   }
 
   return {
-    status:
-      matchedLocks.length === 0
-        ? ("NO_LOCAL_GATEWAY_MAPPING" as const)
-        : updatedLocks === 0
-          ? ("DUPLICATE_STATE" as const)
-          : ("UPDATED" as const),
-    matchedLocks: matchedLocks.length,
-    updatedLocks,
+    status: duplicateState
+      ? ("DUPLICATE_STATE" as const)
+      : ("UPDATED" as const),
+    mappedLocks: matchingLockIds.length,
     providerRequests: 0,
   };
 }
