@@ -28,6 +28,9 @@ ADD COLUMN "ttlockGatewayRecordId" TEXT;
 CREATE UNIQUE INDEX "TtlockGateway_organizationId_ttlockGatewayId_key"
 ON "TtlockGateway"("organizationId", "ttlockGatewayId");
 
+CREATE INDEX "TtlockGateway_ttlockGatewayId_idx"
+ON "TtlockGateway"("ttlockGatewayId");
+
 CREATE INDEX "TtlockGateway_organizationId_isOnline_idx"
 ON "TtlockGateway"("organizationId", "isOnline");
 
