@@ -5,6 +5,9 @@ import {
   ttlockFetchGatewayStatus,
 } from "../ttlock/ttlock.gatewayStatus";
 import {
+  evaluateTtlockLockLinkHealth,
+} from "../ttlock/ttlock.lockLinkHealth";
+import {
   GATEWAY_FIRST_RETRY_MS,
 } from "../workers/deviceHealth.scheduler.policy";
 
@@ -55,7 +58,16 @@ export async function applyGatewayMonitoringConfiguration(
 
   try {
     const response = await fetchGatewayStatus(input.ttlockLockId);
-    const connected = response.hasGateway && response.isOnline;
+    const linkHealth = evaluateTtlockLockLinkHealth({
+      hasGateway: response.hasGateway,
+      gatewayOnline: response.isOnline,
+      rssiUpdatedAt: response.gatewayRssiUpdatedAt,
+      now,
+    });
+    const connected =
+      response.hasGateway &&
+      response.isOnline &&
+      linkHealth.state === "LOCK_LINK_FRESH";
 
     if (connected) {
       // Configuration is the one justified immediate verification. Once the
@@ -101,14 +113,34 @@ export async function applyGatewayMonitoringConfiguration(
     const nextCheckAt = new Date(
       now.getTime() + GATEWAY_FIRST_RETRY_MS
     );
-    const error = response.hasGateway
-      ? "TTLock gateway is associated but currently offline"
-      : "TTLock did not return a gateway association for this lock";
+
+    const lockLinkStale =
+      linkHealth.state === "LOCK_LINK_STALE";
+    const lockLinkUnknown =
+      linkHealth.state === "LOCK_LINK_UNKNOWN";
+
+    const gatewayConnected = lockLinkStale || lockLinkUnknown
+      ? true
+      : false;
+
+    const isOnline = lockLinkStale
+      ? false
+      : lockLinkUnknown
+        ? null
+        : false;
+
+    const error = lockLinkStale
+      ? "TTLock gateway is online but the lock-to-gateway signal is stale"
+      : lockLinkUnknown
+        ? "TTLock gateway is online but lock-link freshness could not be verified"
+        : response.hasGateway
+          ? "TTLock gateway is associated but currently offline"
+          : "TTLock did not return a gateway association for this lock";
 
     await upsertDeviceHealth(prisma, {
       lockId: input.lockId,
-      gatewayConnected: false,
-      isOnline: false,
+      gatewayConnected,
+      isOnline,
       gatewayRssi: response.gatewayRssi,
       gatewayLastCheckedAt: now,
       gatewayLastFailedAt: now,
@@ -116,7 +148,8 @@ export async function applyGatewayMonitoringConfiguration(
       gatewayRawPayload: response.raw,
       gatewayProviderResponseAt: response.providerResponseAt,
       gatewayNextCheckAt: nextCheckAt,
-      gatewayDisconnectedSince: now,
+      gatewayDisconnectedSince:
+        lockLinkStale || lockLinkUnknown ? null : now,
       gatewayCheckReservationId: null,
       lastSyncAt: now,
       source: "GATEWAY_CONFIGURATION",
@@ -125,14 +158,18 @@ export async function applyGatewayMonitoringConfiguration(
         failure: true,
         hasGateway: response.hasGateway,
         isOnline: response.isOnline,
+        gatewayRssiUpdatedAt:
+          response.gatewayRssiUpdatedAt?.toISOString() ?? null,
+        lockLinkState: linkHealth.state,
+        lockLinkAgeMs: linkHealth.ageMs,
         providerRequestCount: response.providerRequestCount,
       },
     });
 
     return {
       state: "REVALIDATING" as const,
-      gatewayConnected: false,
-      isOnline: false,
+      gatewayConnected,
+      isOnline,
       nextCheckAt,
       providerRequestCount: response.providerRequestCount,
       error,
