@@ -84,7 +84,7 @@ export async function handleGuestIncident(input: {
             body: JSON.stringify({ kind: "PIN_GO_EMAIL_DELIVERY", type: GUEST_INCIDENT_NOTICE,
               retryPayload: { issueId: issue.id, reference, category: command.category,
                 reservationNumber: reservation.reservationNumber, propertyName: reservation.property.name, quotes: command.quotes,
-                dashboardOrigin: env.APP_URL ?? "" },
+                dashboardOrigin: env.APP_URL ?? "", dashboardPath: `/pin-ai/incidents/${reference}` },
               nextAttemptAt: now.toISOString(), firstAttemptAt: null }),
           } });
         }
