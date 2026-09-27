@@ -1,7 +1,5 @@
 import type { PrismaClient } from "@prisma/client";
 
-import { upsertDeviceHealth } from "./deviceHealth.service";
-
 export type TtlockGatewayCallbackState = {
   organizationId: string;
   gatewayId: number;
@@ -30,24 +28,32 @@ export async function applyTtlockGatewayCallbackState(
       id: true,
       isOnline: true,
       lastEventAt: true,
+      _count: {
+        select: { locks: true },
+      },
     },
   });
 
-  const stale =
+  if (
     existing?.lastEventAt &&
-    existing.lastEventAt.getTime() > occurredAt.getTime();
-
-  if (stale) {
+    existing.lastEventAt.getTime() > occurredAt.getTime()
+  ) {
     return {
       status: "STALE_EVENT" as const,
       gatewayId: input.gatewayId,
-      updatedLocks: 0,
+      mappedLocks: existing._count.locks,
       providerRequests: 0,
     };
   }
 
-  const duplicate =
-    existing?.isOnline === input.isOnline;
+  if (existing && existing.isOnline === input.isOnline) {
+    return {
+      status: "DUPLICATE_STATE" as const,
+      gatewayId: input.gatewayId,
+      mappedLocks: existing._count.locks,
+      providerRequests: 0,
+    };
+  }
 
   const gateway = await prisma.ttlockGateway.upsert({
     where: {
@@ -90,62 +96,16 @@ export async function applyTtlockGatewayCallbackState(
       },
     },
     select: {
-      id: true,
-      locks: {
-        where: { isActive: true },
-        select: {
-          id: true,
-          deviceHealth: {
-            select: {
-              gatewayConnected: true,
-              isOnline: true,
-              gatewayDisconnectedSince: true,
-            },
-          },
-        },
+      _count: {
+        select: { locks: true },
       },
     },
   });
 
-  let updatedLocks = 0;
-
-  for (const lock of gateway.locks) {
-    if (
-      lock.deviceHealth?.gatewayConnected === input.isOnline &&
-      lock.deviceHealth?.isOnline === input.isOnline
-    ) {
-      continue;
-    }
-
-    await upsertDeviceHealth(prisma, {
-      lockId: lock.id,
-      gatewayConnected: input.isOnline,
-      isOnline: input.isOnline,
-      gatewayDisconnectedSince: input.isOnline
-        ? null
-        : lock.deviceHealth?.gatewayDisconnectedSince ?? occurredAt,
-      gatewayLastError: input.isOnline
-        ? null
-        : "TTLock gateway offline callback received",
-      lastEventAt: occurredAt,
-      lastSyncAt: occurredAt,
-      source: "TTLOCK_GATEWAY_CALLBACK",
-      rawPayload: {
-        telemetryType: "GATEWAY_CALLBACK_COMPATIBILITY",
-        gatewayId: input.gatewayId,
-        isOnline: input.isOnline,
-      },
-    });
-
-    updatedLocks += 1;
-  }
-
   return {
-    status: duplicate
-      ? ("DUPLICATE_STATE" as const)
-      : ("UPDATED" as const),
+    status: "UPDATED" as const,
     gatewayId: input.gatewayId,
-    updatedLocks,
+    mappedLocks: gateway._count.locks,
     providerRequests: 0,
   };
 }
