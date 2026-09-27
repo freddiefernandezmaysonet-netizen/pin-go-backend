@@ -1,0 +1,66 @@
+name: Pin AI Guest Incidents V1
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - "src/pin-ai/**"
+      - "src/apms/operational-intelligence*"
+      - "src/lib/mailer.ts"
+      - "src/lib/email-templates/guestIncidentEmail.ts"
+      - "src/workers/message.retry.worker.ts"
+      - "src/services/damage-case-mission-control.service.ts"
+      - "src/services/guest-journey-communications-delivery-outcome.service.ts"
+      - "prisma/**"
+      - "package*.json"
+      - "tsconfig.pin-ai-guest-incidents.json"
+      - ".github/workflows/pin-ai-guest-incidents-v1.yml"
+permissions:
+  contents: read
+jobs:
+  incident-lifecycle:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: incident_test
+          POSTGRES_PASSWORD: synthetic_test_password
+          POSTGRES_DB: pin_ai_incident_test
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U incident_test -d pin_ai_incident_test"
+          --health-interval 5s --health-timeout 5s --health-retries 10
+    env:
+      DATABASE_URL: postgresql://incident_test:synthetic_test_password@localhost:5432/pin_ai_incident_test
+      PIN_AI_INCIDENT_DB_TEST: "true"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+      - run: npm ci --ignore-scripts --no-audit --no-fund
+      - name: Prepare isolated PostgreSQL schema
+        run: |
+          npx prisma generate
+          npx prisma db push --skip-generate
+      - name: Incident unit, runtime and real PostgreSQL transaction tests
+        run: npm run test:pin-ai-guest-incidents
+      - name: Existing guest runtime and gateway regression tests
+        run: npm run test:pin-ai-runtime
+      - name: Shared incident and messaging regression tests
+        run: >-
+          node --import tsx --test
+          src/apms/operational-intelligence.deduplication.service.test.ts
+          src/apms/operational-intelligence.reopen.service.test.ts
+          src/apms/operational-intelligence.auto-close.service.test.ts
+          src/services/damage-case-mission-control.service.test.ts
+          src/services/damage-case-host-response-notification.contract.test.ts
+          src/workers/message-retry-provider-delivery.contract.test.ts
+          src/workers/message-retry-manual-cancellation.contract.test.ts
+      - name: Strict typecheck and emitted build
+        run: |
+          npm run typecheck:pin-ai-guest-incidents
+          npm run test:pin-ai-guest-gateway-types
+          npx tsc -p tsconfig.pin-ai-guest-incidents.json --noEmit false --outDir /tmp/pin-ai-guest-incidents-build

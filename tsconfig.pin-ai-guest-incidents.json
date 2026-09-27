@@ -1,0 +1,10 @@
+{
+  "extends": "./tsconfig.pin-ai-action-proposal-runtime.json",
+  "include": [
+    "src/pin-ai/guest/guest-incident*.ts",
+    "src/pin-ai/guest/guest-runtime-gateway.ts",
+    "src/pin-ai/runtime/guest-incident*.ts",
+    "src/lib/email-templates/guestIncidentEmail.ts",
+    "src/workers/message.retry.worker.ts"
+  ]
+}

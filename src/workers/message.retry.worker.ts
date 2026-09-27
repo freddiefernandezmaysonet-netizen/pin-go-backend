@@ -26,6 +26,7 @@ import {
 } from "../services/damage-case-mission-control.service";
 import { reconcileDamageCaseMissionControl } from "../services/damage-case-mission-control-reconciliation.service";
 import { isDamageCaseAfterCheckout } from "../services/damage-case-checkout.policy.js";
+import { processGuestIncidentNotices } from "../pin-ai/guest/guest-incident-notification.service.js";
 
 const WORKER_NAME = "message.retry.worker";
 const POLL_MS = Number(process.env.MESSAGE_RETRY_POLL_MS ?? 30000);
@@ -836,7 +837,7 @@ function parsePropertyProtectionDamageNoticeRetryPayload(
 // Cycle through bounded pages so a deferred pre-checkout case cannot block
 // unrelated eligible notices behind it. Cursors are hints, never delivery state.
 const damageRetryCursors = new Map<string, string>();
-function damageRetryPage(type: string) {
+function damageRetryPage(type: string): { cursor?: { id: string }; skip?: number } {
   const id = damageRetryCursors.get(type);
   return id ? { cursor: { id }, skip: 1 } : {};
 }
@@ -1639,6 +1640,12 @@ async function tick() {
           err: toErrString(e),
         }
       );
+    }
+
+    try {
+      await processGuestIncidentNotices(prisma);
+    } catch {
+      errLog("processGuestIncidentNotices failed; durable notices retained");
     }
 
     try {

@@ -24,6 +24,7 @@ export type OpenAIRuntimeTransportConfig = Readonly<{
   model: "gpt-5.6-luna";
   webSearch?: PinAIOpenAIWebSearchConfig;
   actionProposal?: PinAIOpenAIActionProposalConfig;
+  incidentsEnabled?: boolean;
   baseUrl?: string;
   maxPolls?: number;
   pollDelayMs?: number;
@@ -115,6 +116,8 @@ export class OpenAIAgentsRuntimeTransport {
     let turnCursor: string | undefined;
     let itemCursor: string | undefined;
     let requiresHumanReview = false;
+    let incidentResponseText: string | undefined;
+    let escalationCreated = false;
     let session: RuntimeSessionSnapshot;
 
     if (this.config.resumeSessionId) {
@@ -220,7 +223,7 @@ export class OpenAIAgentsRuntimeTransport {
               // required_actions. Wait within the existing budget; never replay.
               if (acknowledgedActions.has(action.callId)) continue;
               recordedToolCalls.push({ name: action.name, arguments: action.arguments });
-              if (action.name === "escalate_to_host") {
+              if (action.name === "escalate_to_host" && this.config.incidentsEnabled !== true) {
                 requiresHumanReview = true;
                 await this.submitToolResult(sessionId, action, {
                   shadow: true,
@@ -233,6 +236,13 @@ export class OpenAIAgentsRuntimeTransport {
                 continue;
               }
               const output = await tools.execute(action.name, action.arguments, request, memory);
+              if (action.name === "escalate_to_host") {
+                if (typeof output.incidentResponseText !== "string" || typeof output.executed !== "boolean") {
+                  throw new Error("PIN_AI_INCIDENT_RECEIPT_REQUIRED");
+                }
+                incidentResponseText = output.incidentResponseText;
+                escalationCreated = output.executed;
+              }
               if (toolResultRequiresHumanReview(output)) requiresHumanReview = true;
               await this.submitToolResult(sessionId, action, output);
               acknowledgedActions.set(action.callId, structuredClone(action));
@@ -255,7 +265,7 @@ export class OpenAIAgentsRuntimeTransport {
               status: "completed",
             });
             return {
-              responseText: message.text,
+              responseText: incidentResponseText ?? message.text,
               openaiSessionId: sessionId,
               toolCalls: recordedToolCalls,
               webSearch: {
@@ -263,7 +273,7 @@ export class OpenAIAgentsRuntimeTransport {
                 used: webSearchCallCount > 0,
                 callCount: webSearchCallCount,
               },
-              escalationCreated: false,
+              escalationCreated,
               requiresHumanReview,
             };
           }
@@ -298,7 +308,7 @@ export class OpenAIAgentsRuntimeTransport {
     return createHash("sha256").update(JSON.stringify({
       version: 1,
       agentId: this.config.agentId ?? null,
-      agent: buildPinAIOpenAIAgentConfig(this.config.webSearch, this.config.actionProposal),
+      agent: buildPinAIOpenAIAgentConfig(this.config.webSearch, this.config.actionProposal, this.config.incidentsEnabled),
       organizationId: request.context.organizationId,
       propertyId: request.context.propertyId,
       reservationId: request.context.reservationId,
@@ -316,6 +326,7 @@ export class OpenAIAgentsRuntimeTransport {
       agent: buildPinAIOpenAIAgentConfig(
         this.config.webSearch,
         this.config.actionProposal,
+        this.config.incidentsEnabled,
       ),
       input: inputText,
       metadata: {

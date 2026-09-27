@@ -361,7 +361,7 @@ function shouldCreateTransition(
 }
 
 export async function upsertOperationalIssue(
-  prisma: PrismaClient,
+  prisma: PrismaClient | Prisma.TransactionClient,
   input: UpsertOperationalIssueInput
 ) {
   validateOperationalState(input);
@@ -402,7 +402,7 @@ export async function upsertOperationalIssue(
       ? requestedResolvedAt ?? occurredAt
       : null;
 
-  return prisma.$transaction(async (transaction) => {
+  const persist = async (transaction: Prisma.TransactionClient) => {
     await transaction.$executeRawUnsafe(
       "SELECT pg_advisory_xact_lock(hashtextextended($1, 0))",
       operationalKey
@@ -628,7 +628,11 @@ export async function upsertOperationalIssue(
     }
 
     return operationalIssue;
-  });
+  };
+
+  // Participate in a caller transaction when incident registration and its
+  // durable notification must commit together. Existing callers keep their transaction.
+  return "$transaction" in prisma ? prisma.$transaction(persist) : persist(prisma);
 }
 
 export async function reopenOperationalIssue(
