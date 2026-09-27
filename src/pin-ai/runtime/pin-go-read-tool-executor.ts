@@ -1,4 +1,5 @@
 import { fromZonedTime } from "date-fns-tz";
+import { readGuestNfcEvidence, type GuestNfcEvidenceReader } from "./guest-nfc-evidence.js";
 
 import {
   getPropertyKnowledgeSnapshot,
@@ -21,7 +22,7 @@ import {
   type GooglePlacesSearchResult,
 } from "./google-places-read-client.js";
 
-type RuntimeReadPrisma = Readonly<{
+type RuntimeReadPrisma = GuestNfcEvidenceReader & Readonly<{
   property: Readonly<{
     findFirst(args: unknown): Promise<any>;
   }>;
@@ -997,6 +998,12 @@ export class PinGoRuntimeReadToolExecutor implements PinAIRuntimeToolExecutor {
   ): Promise<Readonly<Record<string, unknown>>> {
     await this.assertReservationScope(request);
 
+    const nfc = await readGuestNfcEvidence(this.prisma, {
+      organizationId: request.context.organizationId,
+      propertyId: request.context.propertyId,
+      reservationId: request.context.reservationId,
+    }, new Date(request.context.currentLocalDateTime));
+
     const grants = await this.prisma.accessGrant.findMany({
       where: {
         reservationId: request.context.reservationId,
@@ -1022,6 +1029,9 @@ export class PinGoRuntimeReadToolExecutor implements PinAIRuntimeToolExecutor {
 
     return {
       reservationId: request.context.reservationId,
+      nfc,
+      lockConnectivityVerified: false,
+      interpretation: "Lock isActive is configuration only, not current connectivity. Grant status and dates are persisted authorization, not proof of hardware synchronization. Use the separate nfc evidence for physical guest cards.",
       grants: grants.map((grant) => ({
         method: grant.method,
         status: grant.status,

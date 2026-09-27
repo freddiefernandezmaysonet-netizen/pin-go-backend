@@ -1,0 +1,11 @@
+{
+  "extends": "./tsconfig.pin-ai-action-proposal-runtime.json",
+  "include": [
+    "src/pin-ai/runtime/guest-nfc-evidence.ts",
+    "src/pin-ai/runtime/guest-nfc-evidence.test.ts",
+    "src/pin-ai/runtime/pin-go-read-tool-executor.ts",
+    "src/pin-ai/runtime/pin-go-read-tool-executor.test.ts",
+    "src/pin-ai/runtime/openai-agent-config.ts",
+    "src/pin-ai/runtime/openai-agent-config.test.ts"
+  ]
+}
