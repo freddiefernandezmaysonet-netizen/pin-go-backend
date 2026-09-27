@@ -6,6 +6,7 @@ import {
 } from "./ttlock-gateway-health.service";
 import {
   learnTtlockGatewayMapping,
+  resolveUniqueMappedTtlockGateway,
 } from "./ttlock-gateway-mapping.service";
 
 const NOW = new Date("2026-09-27T17:30:00.000Z");
@@ -143,4 +144,63 @@ test("mapping learns gateway-to-lock relation without writing canonical online s
   assert.deepEqual(lockWrites[0].data, {
     ttlockGatewayRecordId: "gateway-record-1",
   });
+});
+
+
+test("callback gateway resolution is local, unique, and fail-closed", async () => {
+  const resolved = await resolveUniqueMappedTtlockGateway(
+    {
+      ttlockGateway: {
+        findMany: async () => [
+          {
+            id: "gateway-record-1",
+            organizationId: "org-1",
+            ttlockGatewayId: 2046625,
+          },
+        ],
+      },
+    } as any,
+    2046625
+  );
+
+  assert.equal(resolved.status, "RESOLVED");
+  assert.equal(resolved.gateway?.organizationId, "org-1");
+  assert.equal(resolved.providerRequests, 0);
+
+  const unknown = await resolveUniqueMappedTtlockGateway(
+    {
+      ttlockGateway: {
+        findMany: async () => [],
+      },
+    } as any,
+    2046625
+  );
+
+  assert.equal(unknown.status, "UNKNOWN_GATEWAY");
+  assert.equal(unknown.gateway, null);
+  assert.equal(unknown.providerRequests, 0);
+
+  const ambiguous = await resolveUniqueMappedTtlockGateway(
+    {
+      ttlockGateway: {
+        findMany: async () => [
+          {
+            id: "gateway-record-1",
+            organizationId: "org-1",
+            ttlockGatewayId: 2046625,
+          },
+          {
+            id: "gateway-record-2",
+            organizationId: "org-2",
+            ttlockGatewayId: 2046625,
+          },
+        ],
+      },
+    } as any,
+    2046625
+  );
+
+  assert.equal(ambiguous.status, "AMBIGUOUS_GATEWAY");
+  assert.equal(ambiguous.gateway, null);
+  assert.equal(ambiguous.providerRequests, 0);
 });
