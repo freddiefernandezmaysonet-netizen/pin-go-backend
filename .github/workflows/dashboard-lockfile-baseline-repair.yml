@@ -9,18 +9,19 @@ on:
       - ".github/workflows/dashboard-lockfile-baseline-repair.yml"
 
 jobs:
-  certify:
+  generate:
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
           node-version: "22"
-          cache: npm
-          cache-dependency-path: pin-go-dashboard/package-lock.json
-      - name: Verify clean install
+      - name: Generate candidate lockfile
         working-directory: pin-go-dashboard
-        run: npm ci --ignore-scripts --no-audit --no-fund
-      - name: Build dashboard
-        working-directory: pin-go-dashboard
-        run: npm run build
+        run: npm install --package-lock-only --ignore-scripts --no-audit --no-fund
+      - name: Upload candidate lockfile
+        uses: actions/upload-artifact@v4
+        with:
+          name: dashboard-package-lock-candidate
+          path: pin-go-dashboard/package-lock.json
+          if-no-files-found: error
