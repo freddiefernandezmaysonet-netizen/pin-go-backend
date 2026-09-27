@@ -839,15 +839,15 @@ model Lock {
   propertyId     String
   ttlockLockName String?
   displayName    String?
-  ttlockGatewayId String?
+  ttlockGatewayRecordId String?
   sGrants        AccessGrant[]
   deviceHealth   DeviceHealth?
   property       Property        @relation(fields: [propertyId], references: [id])
-  ttlockGateway  TtlockGateway?  @relation(fields: [ttlockGatewayId], references: [id], onDelete: SetNull)
+  ttlockGateway  TtlockGateway?  @relation(fields: [ttlockGatewayRecordId], references: [id], onDelete: SetNull)
   groups         LockGroupLock[]
 
   @@index([propertyId, isActive])
-  @@index([ttlockGatewayId])
+  @@index([ttlockGatewayRecordId])
 }
 
 model Person {
