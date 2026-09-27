@@ -697,7 +697,7 @@ jobs:
               src/distribution/channex-white-label.http-transport.ts
 
             test "$(git diff --name-only "$BASE_RANGE" -- src/workers)" = "src/workers/deviceHealth.hardened.worker.ts"
-            ! git diff "$BASE_RANGE" -- src/workers/deviceHealth.hardened.worker.ts | grep -E '^[+-].*(channex|distribution|pms)' 
+            ! git diff "$BASE_RANGE" -- src/workers/deviceHealth.hardened.worker.ts | grep -E '^[+-].*(channex|distribution|pms)'
             echo "PR #294 preserves certified Channex transports; only the scoped Device Health worker mapping hook changed."
           else
             git diff --exit-code "$BASE_RANGE" -- \
