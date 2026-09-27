@@ -183,7 +183,8 @@ test("in-stay confirmation concurrency in disposable PostgreSQL", async t => {
     if (change !== "none") assert.notEqual(beforeConfirmation.updatedAt.getTime(), original.updatedAt.getTime());
     if (change === "material") {
       await assert.rejects(() => broker.confirmAndExecute({ guestToken, proposalId: proposal.proposalId,
-        confirmationToken: proposal.confirmationToken }), /PROPOSAL_SUPERSEDED/);
+        confirmationToken: proposal.confirmationToken }), /ACTION_PROPOSAL_NOT_CONFIRMABLE/);
+      assert.equal((await db.pinAIActionProposal.findUniqueOrThrow({ where: { id: proposal.proposalId } })).status, "SUPERSEDED");
       assert.equal(checkoutCalls, 0);
       assert.equal(await db.reservationModification.count({ where: { reservationId: original.id } }), 0);
       return;
