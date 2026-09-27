@@ -90,6 +90,7 @@ jobs:
           src/routes/org.ttlock.sync.router.ts
           src/services/gatewayConfigurationVerification.service.test.ts
           src/services/gatewayConfigurationVerification.service.ts
+          src/services/ttlock-gateway-health.service.test.ts
           src/services/ttlock-gateway-health.service.ts
           src/services/ttlock-gateway-inventory-sync.service.test.ts
           src/services/ttlock-gateway-inventory-sync.service.ts
