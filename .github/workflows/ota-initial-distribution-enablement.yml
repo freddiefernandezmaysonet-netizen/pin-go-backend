@@ -66,6 +66,37 @@ jobs:
             '.github/workflows/ota-initial-distribution-enablement.yml',
           }
           changed = set(Path('/tmp/ota-initial-changed.txt').read_text().splitlines())
+          # PR #284 only; all activation, Full Sync and core checks above still run.
+          if os.environ.get('GITHUB_HEAD_REF') == 'agent/pin-ai-server-history-v1':
+            repo = 'freddiefernandezmaysonet-netizen/pin-go-backend'
+            if not (
+              os.environ.get('GITHUB_EVENT_NAME') == 'pull_request'
+              and os.environ.get('GITHUB_REPOSITORY') == repo
+              and os.environ.get('SCOPE_PR_NUMBER') == '284'
+              and os.environ.get('SCOPE_HEAD_REPO') == repo
+              and os.environ.get('SCOPE_BASE_REPO') == repo
+              and os.environ.get('GITHUB_BASE_REF') == 'main'
+            ):
+              raise SystemExit('PR #284 repository/branch scope mismatch')
+            allowed = {
+              '.github/workflows/ota-airbnb-listing-discovery.yml',
+              '.github/workflows/ota-initial-distribution-enablement.yml',
+              '.github/workflows/pin-ai-guest-history-v1.yml',
+              'prisma/migrations/20260927032500_pin_ai_guest_history_v1/migration.sql',
+              'prisma/schema.prisma',
+              'src/pin-ai/guest/guest-history-reader.ts',
+              'src/pin-ai/guest/guest-history.database.test.ts',
+              'src/pin-ai/guest/guest-history.ts',
+              'src/pin-ai/guest/guest-runtime-gateway.test.ts',
+              'src/pin-ai/guest/guest-runtime-gateway.ts',
+              'src/routes/public-booking.pin-ai.routes.test.ts',
+              'src/routes/public-booking.pin-ai.routes.ts',
+              'tsconfig.pin-ai-guest-gateway.json',
+            }
+            if changed != allowed:
+              raise SystemExit(f'PR #284 exact thirteen-file history scope required: {sorted(changed ^ allowed)}')
+            print('PR #284 exact Pin AI history scope verified; all retained OTA protections executed.')
+            raise SystemExit(0)
           if os.environ.get('GITHUB_HEAD_REF') == 'agent/message-delivery-outcomes-v1':
             repo = 'freddiefernandezmaysonet-netizen/pin-go-backend'
             if not (

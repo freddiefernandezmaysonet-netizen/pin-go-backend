@@ -80,6 +80,7 @@ jobs:
             test "$GITHUB_BASE_REF" = "main"
             cat > "$RUNNER_TEMP/pin-ai-history-allowed.txt" <<'EOF'
           .github/workflows/ota-airbnb-listing-discovery.yml
+          .github/workflows/ota-initial-distribution-enablement.yml
           .github/workflows/pin-ai-guest-history-v1.yml
           prisma/migrations/20260927032500_pin_ai_guest_history_v1/migration.sql
           prisma/schema.prisma
@@ -114,7 +115,7 @@ jobs:
           if Path("prisma/migrations/20260927032500_pin_ai_guest_history_v1/migration.sql").read_text() != expected_sql:
               raise SystemExit("PR #284 migration must only add the two nullable Pin AI history columns")
           PY
-            echo "PR #284 exact twelve-file Pin AI history scope verified; continuing all retained OTA certifications."
+            echo "PR #284 exact thirteen-file Pin AI history scope verified; continuing all retained OTA certifications."
             exit 0
           fi
 
