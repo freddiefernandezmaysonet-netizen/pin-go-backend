@@ -30,7 +30,7 @@ function fixture() {
     }, async updateMany() { attention++; return { count: 1 }; } },
     reservation: { async findFirst({ where }: any) { assert.equal(where.property.organizationId, "org-1"); return eligible ? { id: "reservation-51" } : null; } },
     dashboardUser: { async findMany({ where }: any) {
-      assert.deepEqual(where, { organizationId: "org-1", role: "ORG_ADMIN", isActive: true });
+      assert.deepEqual(where, { organizationId: "org-1", role: { in: ["ORG_ADMIN", "ADMIN", "PLATFORM_ADMIN"] }, isActive: true });
       return active ? [{ email: "HOST@example.test" }] : [];
     } },
   } as unknown as PrismaClient;

@@ -3,6 +3,7 @@ import { sendGuestIncidentHostNotice } from "../../lib/mailer.js";
 import type { GuestIncidentEmail } from "../../lib/email-templates/guestIncidentEmail.js";
 import { GUEST_INCIDENT_NOTICE, guestIncidentEnabled, type IncidentEnvironment } from "./guest-incident-policy.js";
 import { parsePinAIActionCanaryReservationIds } from "../actions/action-canary-scope.js";
+import { guestIncidentRecipientWhere } from "./guest-incident-recipient-policy.js";
 
 const MAX_ATTEMPTS = 4;
 const LEASE_MS = 90_000;
@@ -69,9 +70,9 @@ export async function deliverGuestIncidentNotice(input: {
     id: m.reservationId ?? "", propertyId: m.propertyId ?? "", status: "ACTIVE", checkOut: { gt: now },
     property: { organizationId: m.organizationId ?? "", status: "ACTIVE" },
   }, select: { id: true } });
-  const admins = await prisma.dashboardUser.findMany({ where: {
-    organizationId: m.organizationId ?? "", isActive: true, role: "ORG_ADMIN",
-  }, select: { email: true } });
+  const admins = m.organizationId ? await prisma.dashboardUser.findMany({
+    where: guestIncidentRecipientWhere(m.organizationId), select: { email: true },
+  }) : [];
   if (!issue || issue.workflowState === "RESOLVED" || !reservation ||
       !admins.some(a => a.email.trim().toLowerCase() === m.to)) {
     return terminal("NOTICE_SCOPE_OR_RECIPIENT_NO_LONGER_ELIGIBLE", payload.issueId);
