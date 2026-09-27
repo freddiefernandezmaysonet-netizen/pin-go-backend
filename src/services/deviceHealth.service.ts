@@ -72,6 +72,8 @@ type UpsertDeviceHealthInput = {
   batteryNextCheckAt?: Date | null;
 
   gatewayRssi?: number | null;
+  lockLinkState?: string | null;
+  lockLinkLastSeenAt?: Date | null;
   gatewayLastCheckedAt?: Date | null;
   gatewayLastSuccessfulAt?: Date | null;
   gatewayLastFailedAt?: Date | null;
@@ -189,6 +191,10 @@ export async function upsertDeviceHealth(
         input.batteryProviderResponseAt ?? null,
       gatewayRssi:
         input.gatewayRssi ?? null,
+      lockLinkState:
+        input.lockLinkState ?? null,
+      lockLinkLastSeenAt:
+        input.lockLinkLastSeenAt ?? null,
       gatewayLastFailedAt:
         input.gatewayLastFailedAt ?? null,
       gatewayLastError:
@@ -268,6 +274,14 @@ export async function upsertDeviceHealth(
       gatewayRssi:
         input.gatewayRssi !== undefined
           ? input.gatewayRssi
+          : undefined,
+      lockLinkState:
+        input.lockLinkState !== undefined
+          ? input.lockLinkState
+          : undefined,
+      lockLinkLastSeenAt:
+        input.lockLinkLastSeenAt !== undefined
+          ? input.lockLinkLastSeenAt
           : undefined,
       gatewayLastFailedAt:
         input.gatewayLastFailedAt !== undefined
