@@ -1,4 +1,5 @@
 import { Router } from "express";
+import type { PrismaClient } from "@prisma/client";
 
 import type {
   PinAIActionBroker,
@@ -22,7 +23,7 @@ import {
 } from "../pin-ai/guest/guest-runtime-gateway.js";
 
 export function buildPublicBookingPinAIRouter(input: Readonly<{
-  prisma: GuestPinAIGatewayPrisma;
+  prisma: GuestPinAIGatewayPrisma & Partial<Pick<PrismaClient, "pinAIActionProposal" | "reservationModification">>;
   env?: NodeJS.ProcessEnv;
   runtime?: GuestPinAIRuntimeRunner;
   now?: () => Date;
@@ -210,6 +211,48 @@ export function buildPublicBookingPinAIRouter(input: Readonly<{
       }
     },
   );
+
+  // Read receipts without initializing the broker or calling payment providers.
+  // Completed canary receipts remain readable when action flags are disabled.
+  router.get("/manage/:guestToken/pin-ai/action-proposals/:proposalId/status", async (req, res) => {
+    res.setHeader("Cache-Control", "no-store");
+    if (!/^[A-Za-z0-9_-]{16,200}$/.test(req.params.guestToken) ||
+        !/^[A-Za-z0-9_-]{8,128}$/.test(req.params.proposalId)) {
+      return res.status(400).json({ ok: false, error: "INVALID_REQUEST" });
+    }
+    if (!input.prisma.pinAIActionProposal || !input.prisma.reservationModification) {
+      return res.status(503).json({ ok: false, error: "PIN_AI_ACTION_STATUS_UNAVAILABLE" });
+    }
+    try {
+      const now = input.now?.() ?? new Date();
+      const reservation = await input.prisma.reservation.findFirst({
+        where: { guestToken: req.params.guestToken, guestTokenExpiresAt: { gt: now }, property: { status: "ACTIVE" } },
+        select: { id: true, propertyId: true, property: { select: { organizationId: true } } },
+      });
+      const notFound = () => res.status(404).json({ ok: false, error: "ACTION_PROPOSAL_NOT_FOUND" });
+      if (!reservation) return notFound();
+      const proposal = await input.prisma.pinAIActionProposal.findFirst({
+        where: { id: req.params.proposalId, reservationId: reservation.id, propertyId: reservation.propertyId,
+          organizationId: reservation.property.organizationId, actionType: "RESERVATION_MODIFICATION" },
+        select: { id: true, status: true },
+      });
+      if (!proposal) return notFound();
+      const modification = await input.prisma.reservationModification.findFirst({
+        where: { reservationId: reservation.id, clientRequestId: `pin_ai_${proposal.id}`, requestSource: "PIN_AI_GUEST_SERVICES" },
+        select: { id: true, status: true, stripePaymentStatus: true, checkoutExpiresAt: true, appliedAt: true },
+      });
+      return res.json({ ok: true, status: {
+        proposalId: proposal.id, proposalStatus: proposal.status,
+        modificationId: modification?.id ?? null, modificationStatus: modification?.status ?? null,
+        paymentStatus: modification?.stripePaymentStatus ?? null,
+        paymentExpiresAt: modification?.checkoutExpiresAt?.toISOString() ?? null,
+        appliedAt: modification?.appliedAt?.toISOString() ?? null,
+        checkedAt: now.toISOString(),
+      } });
+    } catch {
+      return res.status(503).json({ ok: false, error: "PIN_AI_ACTION_STATUS_UNAVAILABLE" });
+    }
+  });
 
   return router;
 }
