@@ -1535,6 +1535,7 @@ model TtlockGateway {
   locks             Lock[]
 
   @@unique([organizationId, ttlockGatewayId])
+  @@index([ttlockGatewayId])
   @@index([organizationId, isOnline])
   @@index([lastEventAt])
 }
