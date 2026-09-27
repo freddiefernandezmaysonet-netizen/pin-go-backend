@@ -3,6 +3,7 @@ import type { PrismaClient, Prisma } from "@prisma/client";
 import { upsertOperationalIssue } from "../../apms/operational-intelligence.service.js";
 import type { PinAIRuntimeRequest } from "../runtime/contracts.js";
 import { readGuestMessages } from "./guest-history.js";
+import { guestIncidentRecipientWhere } from "./guest-incident-recipient-policy.js";
 import { GUEST_INCIDENT_NOTICE, guestIncidentEnabled, incidentNotificationState, parseIncidentInput,
   type GuestIncidentReceipt, type IncidentEnvironment } from "./guest-incident-policy.js";
 
@@ -72,9 +73,9 @@ export async function handleGuestIncident(input: {
       });
       if (isNew) {
         // No fallback to arbitrary staff or a model-supplied destination.
-        const admins = await tx.dashboardUser.findMany({ where: {
-          organizationId: scope.organizationId, isActive: true, role: "ORG_ADMIN",
-        }, select: { email: true } });
+        const admins = await tx.dashboardUser.findMany({
+          where: guestIncidentRecipientWhere(scope.organizationId), select: { email: true },
+        });
         const recipients = [...new Set(admins.map(a => a.email.trim().toLowerCase()).filter(Boolean))];
         for (const to of recipients) {
           await tx.messageLog.create({ data: {

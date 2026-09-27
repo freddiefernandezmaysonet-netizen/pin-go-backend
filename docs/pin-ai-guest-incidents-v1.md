@@ -32,8 +32,11 @@ occur in actual guest messages from bounded persisted history or the current
 request. Assistant troubleshooting suggestions are not evidence of completion.
 The case is explicitly a guest report, not a verified diagnosis.
 
-Only active ORG_ADMIN recipients belonging to the reservation's organization
-receive notices. Model arguments cannot select recipients or scope. Recipients
+Only active ORG_ADMIN, legacy ADMIN, or PLATFORM_ADMIN recipients belonging to
+the reservation's organization receive notices, matching the existing
+requireOrgAdmin role policy. PLATFORM_ADMIN in another organization is never a
+fallback recipient. The same scoped predicate is used for enqueue and delivery.
+Model arguments cannot select recipients or scope. Recipients
 and canonical scope are rechecked before each send. The bilingual, escaped email
 links to authenticated Dashboard and conveys no approval credential or authority.
 
