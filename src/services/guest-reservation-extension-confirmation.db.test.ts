@@ -149,7 +149,7 @@ test("in-stay confirmation concurrency in disposable PostgreSQL", async t => {
       modelOutput = JSON.stringify(await executor.execute("prepare_reservation_modification", args, request, memory));
       return { mode: "SHADOW", request, memory, actionsExecuted: false,
         response: { responseText: "Cotización preparada para extender únicamente la salida.",
-          openaiSessionId: "sess_synthetic_database_contract", requiresHumanReview: false,
+          openaiSessionId: `sess_synthetic_database_contract_${change}`, requiresHumanReview: false,
           escalationCreated: false, toolCalls: [{ name: "prepare_reservation_modification", arguments: args }] },
         privateActionProposal: executor.getPrivateActionProposal() };
     }, true, () => new Date(now));
