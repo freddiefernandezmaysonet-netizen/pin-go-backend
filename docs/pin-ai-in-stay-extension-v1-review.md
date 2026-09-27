@@ -68,3 +68,45 @@ not refresh their tools or instructions.
 
 This is a draft for review, not production certification. No Ready, merge,
 deployment, variable changes or live financial execution is authorized by this draft.
+
+## Updated evidence and next isolated provider check (2026-09-27 UTC)
+
+- Backend PR #281 remains Draft. Disposable PostgreSQL 16 confirmation concurrency,
+  replay and apply tests passed in CI run 36282196613. These tests use synthetic
+  payment evidence and injected availability/pricing/reconciliation; they do not
+  certify external engines or live payments. This supersedes item 4 above.
+- Dashboard Draft PR #158 disables expired proposals, rechecks the deadline before
+  sending confirmation, and passed 16 local tests, lint, strict component TypeScript,
+  Vite build and CI run 36282890877. Browser end-to-end certification remains open.
+- Official OpenAI create-session reference accepts metadata (up to 16 string pairs)
+  and states that inline agent fields override a saved agent for that session:
+  https://developers.openai.com/api/reference/python/resources/beta/subresources/agents/subresources/sessions/methods/create
+  Retrieve-session returns metadata and the effective agent configuration:
+  https://developers.openai.com/api/reference/typescript/resources/beta/subresources/agents/subresources/sessions/methods/retrieve
+  This establishes the documented contract, not live verification in this project.
+- Runtime and gateway focused regression: 60/60 injected-provider tests passed.
+
+Prepared runner: `src/pin-ai/runtime/runtime-session-config-canary.ts`.
+Default invocation is disabled and performs no network request. `--run-live` opts
+into four synthetic turns using the existing saved-agent ID and API credential.
+It checks read-only -> proposals enabled -> same-session reuse -> read-only,
+provider metadata, effective 13/14 function catalogs, and exact dialogue continuity.
+It allows at most three newly created sessions, scopes subsequent requests to those
+IDs, limits requests/time, and attaches no database or operational tool executor.
+It never updates the saved agent or touches the production guest session. This probe
+does not test canonical proposal preparation or real guest confirmation.
+
+Read-only Railway audit found an existing suitable manual service:
+`pin-ai-multiturn-canary-v1` (`56c2a140-e5ec-49a3-81c1-11baca873cf4`) in
+`staging-channex-certification` (`8a78817b-b161-49c8-9bea-cd519611958f`).
+It has OPENAI_API_KEY and PIN_AI_OPENAI_AGENT_ID variable names configured; their
+values were not retrieved. Restart policy is NEVER and watch patterns disable
+automatic builds. Current source branch is `agent/pin-ai-multiturn-canary-v1` and
+start command is `npm run pin-ai:runtime:saved-agent-multiturn-canary`.
+
+Proposed execution, requiring explicit deployment authorization: change only that
+service's source to this reviewed PR branch, use the scoped runner TypeScript check
+as build command, and run `node --import tsx src/pin-ai/runtime/runtime-session-config-canary.ts --run-live`
+once. Preserve NEVER/manual watch settings and all variables. No production
+deployment, Channex service change, real reservation data, or payment provider calls.
+The only live consumption is OpenAI inference and the isolated Railway build/run.

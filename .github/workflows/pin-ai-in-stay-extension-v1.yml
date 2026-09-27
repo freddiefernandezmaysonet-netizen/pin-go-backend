@@ -48,6 +48,10 @@ jobs:
           npx tsc -p tsconfig.pin-ai-in-stay-extension.json --noEmit false --outDir /tmp/in-stay-build
           npx tsc -p tsconfig.pin-ai-action-proposal-runtime.json --noEmit false --outDir /tmp/runtime-build
           npx tsc -p tsconfig.pin-ai-guest-gateway.json --noEmit false --outDir /tmp/gateway-build
+      - name: Validate isolated provider probe without calling OpenAI
+        run: |
+          npx tsc --noEmit --strict --skipLibCheck --target ES2022 --module NodeNext --moduleResolution NodeNext src/pin-ai/runtime/runtime-session-config-canary.ts
+          node --import tsx src/pin-ai/runtime/runtime-session-config-canary.ts
 
   postgres-confirmation-concurrency:
     runs-on: ubuntu-latest
