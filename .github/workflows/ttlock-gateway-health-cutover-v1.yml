@@ -1,0 +1,63 @@
+name: TTLock Gateway Health Cutover V1
+
+on:
+  pull_request:
+    paths:
+      - "src/routes/ttlock-callback.routes.ts"
+      - "src/routes/ttlock-callback.routes.test.ts"
+      - "src/routes/dashboard.health.routes.ts"
+      - "src/routes/dashboard.health.gateway-cutover.test.ts"
+      - "src/routes/dashboard.locks.route.ts"
+      - "src/services/ttlock-gateway-health.service.ts"
+      - "src/services/ttlock-gateway-mapping.service.ts"
+      - "src/services/ttlock-gateway-read-model.ts"
+      - "src/services/ttlock-gateway-health.service.test.ts"
+      - "pin-go-dashboard/src/pages/health-center/HealthCenterPage.tsx"
+      - ".github/workflows/ttlock-gateway-health-cutover-v1.yml"
+  workflow_dispatch:
+
+jobs:
+  certify:
+    runs-on: ubuntu-24.04
+    env:
+      DATABASE_URL: postgresql://postgres:postgres@localhost:5432/pingo_test
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Use Node.js 22
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+
+      - name: Install backend dependencies
+        run: npm ci --ignore-scripts --no-audit --no-fund
+
+      - name: Generate and validate Prisma
+        run: |
+          npx prisma generate
+          npx prisma validate --schema ./prisma/schema.prisma
+
+      - name: Certify callback and canonical gateway cutover
+        run: |
+          node --import tsx --test \
+            src/routes/ttlock-callback.routes.test.ts \
+            src/routes/ttlock-callback.server-contract.test.ts \
+            src/routes/dashboard.health.gateway-cutover.test.ts \
+            src/services/ttlock-gateway-health.service.test.ts
+
+      - name: Bundle backend cutover surfaces
+        run: |
+          npx esbuild src/routes/ttlock-callback.routes.ts --bundle --platform=node --packages=external --outfile=/tmp/ttlock-callback.routes.js
+          npx esbuild src/routes/dashboard.health.routes.ts --bundle --platform=node --packages=external --outfile=/tmp/dashboard.health.routes.js
+          npx esbuild src/routes/dashboard.locks.route.ts --bundle --platform=node --packages=external --outfile=/tmp/dashboard.locks.route.js
+          npx esbuild src/server.ts --bundle --platform=node --packages=external --outfile=/tmp/server.gateway-health-cutover.js
+
+      - name: Install dashboard dependencies
+        working-directory: pin-go-dashboard
+        run: npm ci --ignore-scripts --no-audit --no-fund
+
+      - name: Build dashboard
+        working-directory: pin-go-dashboard
+        run: npm run build
