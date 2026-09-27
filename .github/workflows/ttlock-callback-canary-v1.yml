@@ -1,0 +1,58 @@
+name: TTLock Callback Canary V1
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - "src/ttlock/ttlock.callback.ts"
+      - "src/ttlock/ttlock.callback.test.ts"
+      - "src/routes/ttlock-callback.routes.ts"
+      - "src/routes/ttlock-callback.routes.test.ts"
+      - "src/routes/ttlock-callback.server-contract.test.ts"
+      - "src/server.ts"
+      - "tsconfig.ttlock-callback-canary-v1.json"
+      - ".github/workflows/ttlock-callback-canary-v1.yml"
+
+jobs:
+  certify:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+
+      - name: Install locked dependencies
+        run: npm ci --ignore-scripts --no-audit --no-fund
+
+      - name: Generate Prisma client
+        run: npx prisma generate
+
+      - name: Run callback canary tests
+        run: >-
+          node --import tsx --test
+          src/ttlock/ttlock.callback.test.ts
+          src/routes/ttlock-callback.routes.test.ts
+          src/routes/ttlock-callback.server-contract.test.ts
+
+      - name: Focused TypeScript build
+        run: npx tsc -p tsconfig.ttlock-callback-canary-v1.json
+
+      - name: Bundle TTLock callback route
+        run: >-
+          npx esbuild src/routes/ttlock-callback.routes.ts
+          --bundle
+          --platform=node
+          --packages=external
+          --outfile=/tmp/ttlock-callback.routes.js
+
+      - name: Bundle production server
+        run: >-
+          npx esbuild src/server.ts
+          --bundle
+          --platform=node
+          --packages=external
+          --outfile=/tmp/server.js
