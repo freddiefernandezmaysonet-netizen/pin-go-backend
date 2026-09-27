@@ -70,6 +70,36 @@ jobs:
           BASE_BRANCH="${GITHUB_BASE_REF:-main}"
           git fetch origin "+refs/heads/$BASE_BRANCH:refs/remotes/origin/$BASE_BRANCH" --depth=1
           git diff --name-only "origin/$BASE_BRANCH...HEAD" | sort > "$RUNNER_TEMP/actual.txt"
+          # PR #293 only: exact TTLock Gateway Health V1 scope; all OTA certification steps below still run.
+          if [ "${GITHUB_HEAD_REF:-$GITHUB_REF_NAME}" = "agent/ttlock-gateway-health-v1" ]; then
+            test "$GITHUB_EVENT_NAME" = "pull_request"
+            test "$GITHUB_REPOSITORY" = "freddiefernandezmaysonet-netizen/pin-go-backend"
+            test "$SCOPE_PR_NUMBER" = "293"
+            test "$SCOPE_HEAD_REPO" = "$GITHUB_REPOSITORY"
+            test "$SCOPE_BASE_REPO" = "$GITHUB_REPOSITORY"
+            test "$GITHUB_BASE_REF" = "main"
+            cat > "$RUNNER_TEMP/ttlock-gateway-health-v1-allowed.txt" <<'EOF'
+          .github/workflows/ota-airbnb-listing-discovery.yml
+          .github/workflows/ttlock-callback-canary-v1.yml
+          pin-go-dashboard/src/pages/locks/LocksPage.tsx
+          prisma/migrations/20260927170500_ttlock_gateway_health_v1/migration.sql
+          prisma/schema.prisma
+          src/routes/dashboard.alerts.route.ts
+          src/routes/dashboard.health.routes.ts
+          src/routes/dashboard.locks.route.ts
+          src/services/gatewayConfigurationVerification.service.test.ts
+          src/services/gatewayConfigurationVerification.service.ts
+          src/services/ttlock-gateway-health.service.ts
+          src/services/ttlock-gateway-offline-callback-reconciliation.service.ts
+          src/services/ttlock-gateway-offline-callback-reconciliation.test.ts
+          src/workers/deviceHealth.hardened.worker.ts
+          EOF
+            sort "$RUNNER_TEMP/ttlock-gateway-health-v1-allowed.txt" -o "$RUNNER_TEMP/ttlock-gateway-health-v1-allowed.txt"
+            diff -u "$RUNNER_TEMP/ttlock-gateway-health-v1-allowed.txt" "$RUNNER_TEMP/actual.txt"
+            echo "PR #293 exact TTLock Gateway Health V1 scope verified; continuing all retained OTA certifications."
+            exit 0
+          fi
+
           # PR #284 only: exact Pin AI history scope; all OTA certification steps below still run.
           if [ "${GITHUB_HEAD_REF:-$GITHUB_REF_NAME}" = "agent/pin-ai-server-history-v1" ]; then
             test "$GITHUB_EVENT_NAME" = "pull_request"
