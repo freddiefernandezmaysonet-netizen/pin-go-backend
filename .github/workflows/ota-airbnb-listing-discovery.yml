@@ -96,7 +96,7 @@ jobs:
           EOF
             diff -u "$RUNNER_TEMP/pin-ai-host-incident-allowed.txt" "$RUNNER_TEMP/actual.txt"
             # Pin the reviewed additive schema diff and migration, not just their filenames.
-            test "$(git diff --no-ext-diff --no-color --unified=0 "origin/$BASE_BRANCH...HEAD" -- prisma/schema.prisma | sha256sum | cut -d ' ' -f 1)" = "453723aab75ae48fcd518e34a5151062462b67d3ce7fdb540b2e257b96f349d2"
+            test "$(git diff --no-ext-diff --no-color --full-index --unified=0 "origin/$BASE_BRANCH...HEAD" -- prisma/schema.prisma | sha256sum | cut -d ' ' -f 1)" = "05d6caec91c13fc148ba26c3c13d2d5d1d5f0264220c3c49a9daf20b9c9d7ce1"
             test "$(sha256sum prisma/migrations/20260927180000_pin_ai_host_incident_threads/migration.sql | cut -d ' ' -f 1)" = "4f75953b816801bfbda824d5a71b18d527f2919de2648f8f19fbecc41554a9c0"
             echo "PR #295 exact host incident scope verified; continuing all retained OTA certifications."
             exit 0
