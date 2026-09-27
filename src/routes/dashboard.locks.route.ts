@@ -130,7 +130,10 @@ dashboardLocksRouter.get("/api/dashboard/locks", requireAuth, async (req, res) =
         gatewayId: gateway.gatewayId,
         gatewayName: gateway.gatewayName,
         gatewayOnline: gateway.gatewayConnected,
-        gatewayFresh: gateway.gatewayLastEventAt !== null,
+        gatewayFresh:
+          gateway.gatewayStateSource === "TTLOCK_GATEWAY"
+            ? gateway.gatewayLastEventAt !== null
+            : !!l.deviceHealth?.lastSyncAt,
         gatewayStateSource: gateway.gatewayStateSource,
 
         deviceHealth: l.deviceHealth
