@@ -23,6 +23,7 @@ export async function applyGatewayMonitoringConfiguration(
   prisma: PrismaClient,
   input: {
     lockId: string;
+    organizationId: string;
     ttlockLockId: number;
     enabled: boolean;
     now?: Date;
@@ -60,16 +61,7 @@ export async function applyGatewayMonitoringConfiguration(
   try {
     const response = await fetchGatewayStatus(input.ttlockLockId);
     await learnTtlockGatewayMapping(prisma, {
-      organizationId: (
-        await prisma.lock.findUniqueOrThrow({
-          where: { id: input.lockId },
-          select: {
-            property: {
-              select: { organizationId: true },
-            },
-          },
-        })
-      ).property.organizationId,
+      organizationId: input.organizationId,
       lockId: input.lockId,
       gatewayId: response.gatewayId,
       gatewayMac:
