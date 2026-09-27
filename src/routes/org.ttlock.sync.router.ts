@@ -3,6 +3,7 @@ import { Router } from "express";
 import type { PrismaClient } from "@prisma/client";
 import { ttlockListLocksWithAccessToken } from "../ttlock/ttlock.api";
 import { requireOrg } from "../middleware/requireOrg";
+import { syncTtlockGatewayInventory } from "../services/ttlock-gateway-inventory-sync.service";
 
 const TTLOCK_TIMEOUT_MS = 15000;
 
@@ -341,6 +342,54 @@ export function buildOrgTtlockSyncRouter(prisma: PrismaClient) {
         upserted.push(lock);
       }
 
+      let gatewayInventory:
+        | {
+            status: "SYNCED";
+            gatewaysDiscovered: number;
+            mappedLocks: number;
+            providerRequestCount: number;
+          }
+        | {
+            status: "FAILED";
+            gatewaysDiscovered: 0;
+            mappedLocks: 0;
+            providerRequestCount: null;
+            error: string;
+          };
+
+      try {
+        const result =
+          await syncTtlockGatewayInventory(
+            prisma,
+            {
+              organizationId,
+              accessToken:
+                tokenResult.accessToken,
+            }
+          );
+
+        gatewayInventory = {
+          status: "SYNCED",
+          ...result,
+        };
+      } catch (error) {
+        gatewayInventory = {
+          status: "FAILED",
+          gatewaysDiscovered: 0,
+          mappedLocks: 0,
+          providerRequestCount: null,
+          error:
+            error instanceof Error
+              ? error.message
+              : String(error),
+        };
+
+        console.error(
+          "org/ttlock/sync-locks gateway inventory failed:",
+          gatewayInventory.error
+        );
+      }
+
       return res.json({
         ok: true,
         organizationId,
@@ -349,6 +398,7 @@ export function buildOrgTtlockSyncRouter(prisma: PrismaClient) {
         updated,
         totalFromTtlock: list.length,
         locks: upserted,
+        gatewayInventory,
       });
     } catch (e: any) {
       console.error("org/ttlock/sync-locks error:", e?.message ?? e);
