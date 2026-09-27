@@ -91,6 +91,7 @@ jobs:
           src/services/ttlock-gateway-health.service.test.ts
           src/services/ttlock-gateway-health.service.ts
           src/services/ttlock-gateway-mapping.service.ts
+          src/workers/deviceHealth.hardened.worker.ts
           EOF
             sort "$RUNNER_TEMP/ttlock-gateway-health-foundation-v1-allowed.txt" -o "$RUNNER_TEMP/ttlock-gateway-health-foundation-v1-allowed.txt"
             diff -u "$RUNNER_TEMP/ttlock-gateway-health-foundation-v1-allowed.txt" "$RUNNER_TEMP/actual.txt"
