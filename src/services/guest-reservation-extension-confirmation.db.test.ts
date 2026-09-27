@@ -29,7 +29,7 @@ test("in-stay confirmation concurrency in disposable PostgreSQL", async t => {
       adults: 2, children: 0, selectedAmenityIds: [], totalAmount: 150,
       checkIn: new Date("2026-09-26T20:00:00Z"), checkOut: new Date("2026-09-27T15:00:00Z"),
       pricingBreakdown: {
-        currency: "usd", nights: 1, nightlyRates: [{date: "2026-09-26", rate: 100}],
+        currency: "usd", nights: 1, nightlyRate: 100, nightlyRates: [{date: "2026-09-26", rate: 100}],
         nightlySubtotal: 100, cleaningFee: 50, amenitiesTotal: 0, taxesTotal: 0,
         totalAmount: 150, totalAmountCents: 15000, amenities: [], taxes: [],
       },
