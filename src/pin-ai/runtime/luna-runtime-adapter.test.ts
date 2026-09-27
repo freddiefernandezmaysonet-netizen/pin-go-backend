@@ -281,13 +281,52 @@ test("runtime rejects disabled tools and invalid arguments before execution", as
   }
 });
 
+for (const scenario of ["propagates", "changed", "never-clears"] as const) {
+test(`runtime handles an acknowledged required action: ${scenario}`, async () => {
+  const f = createTurnFixture({ actions: () => [{ name: "get_access_status" }] });
+  let accepted = false;
+  let staleRead = false;
+  let savedSession: any;
+  let count = 0;
+  const fetchImpl: RuntimeFetch = async (url, init) => {
+    const response = await f.fetchImpl(url, init);
+    if (init.method === "GET" && url.endsWith(`/${f.sessionId}`)) {
+      if (!accepted) savedSession = await response.json();
+      else if (!staleRead || scenario === "never-clears") {
+        staleRead = true;
+        const stale = structuredClone(savedSession);
+        if (scenario === "changed") stale.required_actions[0].arguments = { unexpected: "changed" };
+        return jsonResponse(stale);
+      }
+    }
+    if (init.method === "POST" && url.endsWith("/events")) accepted = true;
+    if (accepted && (!staleRead || scenario === "never-clears") && url.endsWith("/turns?limit=100&order=asc")) {
+      return jsonResponse(page(f.turns.map(turn => ({ ...turn, status: "waiting" }))));
+    }
+    return response;
+  };
+  const pending = run(transport(fetchImpl), { async execute() { count += 1; return {}; } });
+  if (scenario === "propagates") {
+    const result = await pending;
+    assert.equal(result.responseText, "Checked.");
+    assert.equal(result.toolCalls.length, 1);
+  } else {
+    await assert.rejects(pending, scenario === "changed"
+      ? /TOOL_CALL_ID_REUSED_WITH_CHANGED_PAYLOAD/ : /TURN_POLL_LIMIT/);
+  }
+  assert.equal(staleRead, true);
+  assert.equal(count, 1);
+  assert.equal(f.toolResults.length, 1);
+});
+}
+
 test("runtime rejects repeated call IDs and mixed-turn actions without duplicate execution", async () => {
   const f = createTurnFixture({ actions: () => [
     { name: "get_access_status", call_id: "same" }, { name: "get_access_status", call_id: "same" },
   ] });
   let count = 0;
   await assert.rejects(run(transport(f.fetchImpl), { async execute() { count += 1; return {}; } }), /DUPLICATE_TOOL_CALL_ID/);
-  assert.equal(count, 1);
+  assert.equal(count, 0);
   const mixed = createTurnFixture({ actions: () => [
     { name: "get_access_status" }, { name: "get_cleaning_status", turn_id: "turn_foreign" },
   ] });

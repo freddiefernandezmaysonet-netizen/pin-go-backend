@@ -1,4 +1,5 @@
 import { createHash } from "node:crypto";
+import { isDeepStrictEqual } from "node:util";
 import {
   PIN_AI_RUNTIME_TOOLS,
   isPinAIRuntimeToolEnabled,
@@ -108,7 +109,7 @@ export class OpenAIAgentsRuntimeTransport {
       name: PinAIRuntimeToolName;
       arguments: Readonly<Record<string, unknown>>;
     }[] = [];
-    const handledCallIds = new Set<string>();
+    const acknowledgedActions = new Map<string, RuntimeRequiredAction>();
     const priorTurnIds = new Set<string>();
     const priorItemIds = new Set<string>();
     let turnCursor: string | undefined;
@@ -192,6 +193,17 @@ export class OpenAIAgentsRuntimeTransport {
             if (session.requiredActions.some((action) => action.turnId !== turn.id)) {
               throw new Error("PIN_AI_RUNTIME_REQUIRED_ACTION_TURN_MISMATCH");
             }
+            const batchIds = new Set<string>();
+            for (const action of session.requiredActions) {
+              if (batchIds.has(action.callId)) {
+                throw new Error("PIN_AI_RUNTIME_DUPLICATE_TOOL_CALL_ID");
+              }
+              batchIds.add(action.callId);
+              const acknowledged = acknowledgedActions.get(action.callId);
+              if (acknowledged && !isDeepStrictEqual(acknowledged, action)) {
+                throw new Error("PIN_AI_RUNTIME_TOOL_CALL_ID_REUSED_WITH_CHANGED_PAYLOAD");
+              }
+            }
             for (const action of session.requiredActions) {
               if (
                 action.name ===
@@ -204,12 +216,9 @@ export class OpenAIAgentsRuntimeTransport {
                 );
               }
 
-              if (handledCallIds.has(action.callId)) {
-                throw new Error(
-                  `PIN_AI_RUNTIME_DUPLICATE_TOOL_CALL_ID:${sanitizeDiagnostic(action.callId)}`,
-                );
-              }
-              handledCallIds.add(action.callId);
+              // Accepted tool results may take another poll to disappear from
+              // required_actions. Wait within the existing budget; never replay.
+              if (acknowledgedActions.has(action.callId)) continue;
               recordedToolCalls.push({ name: action.name, arguments: action.arguments });
               if (action.name === "escalate_to_host") {
                 requiresHumanReview = true;
@@ -220,11 +229,13 @@ export class OpenAIAgentsRuntimeTransport {
                   guestFacingConstraint:
                     "Do not claim this request was sent or escalated. Say it would be escalated or requires host review.",
                 });
+                acknowledgedActions.set(action.callId, structuredClone(action));
                 continue;
               }
               const output = await tools.execute(action.name, action.arguments, request, memory);
               if (toolResultRequiresHumanReview(output)) requiresHumanReview = true;
               await this.submitToolResult(sessionId, action, output);
+              acknowledgedActions.set(action.callId, structuredClone(action));
             }
           }
         }
