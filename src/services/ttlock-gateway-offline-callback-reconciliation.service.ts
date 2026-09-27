@@ -171,19 +171,20 @@ export async function reconcileTtlockGatewayOfflineCallback(
   const duplicateState =
     existingGateway?.isOnline === false;
 
-  const gateway =
-    await recordTtlockGatewayObservation(prisma, {
-      organizationId,
-      ttlockGatewayId: input.gatewayId,
-      isOnline: false,
-      occurredAt,
-      source: "TTLOCK_CALLBACK",
-      rawPayload: {
-        telemetryType: "GATEWAY_CALLBACK",
-        gatewayId: input.gatewayId,
+  const gateway = duplicateState && existingGateway
+    ? existingGateway
+    : await recordTtlockGatewayObservation(prisma, {
+        organizationId,
+        ttlockGatewayId: input.gatewayId,
         isOnline: false,
-      },
-    });
+        occurredAt,
+        source: "TTLOCK_CALLBACK",
+        rawPayload: {
+          telemetryType: "GATEWAY_CALLBACK",
+          gatewayId: input.gatewayId,
+          isOnline: false,
+        },
+      });
 
   const matchingLockIds = locallyMatched
     .filter(
