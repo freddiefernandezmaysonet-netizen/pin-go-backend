@@ -1,4 +1,7 @@
 import { Router } from "express";
+import type { PrismaClient } from "@prisma/client";
+
+import { reconcileTtlockGatewayOfflineCallback } from "../services/ttlock-gateway-offline-callback-reconciliation.service";
 
 import {
   isTtlockCallbackContentType,
@@ -78,7 +81,31 @@ export function evaluateTtlockCallbackCanary(input: {
   };
 }
 
+export function shouldReconcileTtlockGatewayOffline(
+  metadata: {
+    gatewayId: string | null;
+    isOnline: string | null;
+    notifyType: string | null;
+  }
+): { gatewayId: number } | null {
+  if (
+    metadata.notifyType !== "2" ||
+    metadata.isOnline !== "0" ||
+    !metadata.gatewayId
+  ) {
+    return null;
+  }
+
+  const gatewayId = Number(metadata.gatewayId);
+  if (!Number.isInteger(gatewayId) || gatewayId <= 0) {
+    return null;
+  }
+
+  return { gatewayId };
+}
+
 export function buildTtlockCallbackCanaryRouter(
+  prisma: PrismaClient,
   env: NodeJS.ProcessEnv = process.env
 ) {
   const router = Router();
@@ -107,6 +134,36 @@ export function buildTtlockCallbackCanaryRouter(
       fingerprint: result.fingerprint,
       ...result.metadata,
     });
+
+    const offlineGateway =
+      shouldReconcileTtlockGatewayOffline(result.metadata);
+
+    if (offlineGateway) {
+      void reconcileTtlockGatewayOfflineCallback(prisma, {
+        gatewayId: offlineGateway.gatewayId,
+      })
+        .then((reconciliation) => {
+          console.log(
+            "[ttlock.callback.gateway-reconciliation] completed",
+            {
+              gatewayId: offlineGateway.gatewayId,
+              ...reconciliation,
+            }
+          );
+        })
+        .catch((error) => {
+          console.error(
+            "[ttlock.callback.gateway-reconciliation] failed",
+            {
+              gatewayId: offlineGateway.gatewayId,
+              error:
+                error instanceof Error
+                  ? error.message
+                  : String(error),
+            }
+          );
+        });
+    }
 
     return res
       .status(200)

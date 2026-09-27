@@ -9,8 +9,6 @@ export const GATEWAY_HEALTHY_INTERVAL_MS = DAY_MS;
 export const GATEWAY_FIRST_RETRY_MS = 8 * HOUR_MS;
 export const GATEWAY_SECOND_RETRY_MS = 12 * HOUR_MS;
 export const GATEWAY_READINESS_WINDOW_MS = 6 * HOUR_MS;
-export const GATEWAY_ACCESS_RECHECK_WINDOW_MS = 2 * HOUR_MS;
-export const GATEWAY_IN_STAY_INTERVAL_MS = HOUR_MS;
 
 export type SchedulerHealth = {
   battery: number | null;
@@ -63,29 +61,11 @@ export function isGatewayCheckDue(input: {
     return false;
   }
 
-  // Gateway readiness is intentionally quiet when there is no operational
-  // reservation. Configuration-time verification is a separate one-time action.
+  // Gateway readiness is intentionally quiet until the next ACTIVE arrival is
+  // inside the six-hour critical window. Configuration-time verification is a
+  // separate one-time action and is not governed by this worker scheduler.
   if (!input.checkIn) {
     return false;
-  }
-
-  // During an active stay, verify connectivity once per worker hour. A
-  // gatewayNextCheckAt created by either a healthy check or a recovery attempt
-  // remains authoritative.
-  if (input.checkIn <= input.now) {
-    if (input.health?.gatewayNextCheckAt) {
-      return input.health.gatewayNextCheckAt <= input.now;
-    }
-
-    if (!input.health?.gatewayLastCheckedAt) {
-      return true;
-    }
-
-    return (
-      input.health.gatewayLastCheckedAt.getTime() +
-        GATEWAY_IN_STAY_INTERVAL_MS <=
-      input.now.getTime()
-    );
   }
 
   const readinessWindowStart = new Date(
@@ -116,16 +96,17 @@ export function isGatewayCheckDue(input: {
     health.gatewayLastSuccessfulAt !== null &&
     health.gatewayLastSuccessfulAt >= readinessWindowStart;
 
-  // A scheduled recovery or access-readiness recheck is authoritative. Healthy
-  // gateways are verified once when entering T-6 and once again at T-2, which
-  // aligns with the guest-access/NFC activation window without continuous
-  // polling.
-  if (health.gatewayNextCheckAt) {
-    return health.gatewayNextCheckAt <= input.now;
-  }
-
+  // One successful verification inside T-6 certifies the gateway for this
+  // arrival. Do not spend more TTLock calls while the gateway remains healthy.
   if (certifiedHealthyForArrival) {
     return false;
+  }
+
+  // A failed/provider-error check inside T-6 keeps its recovery timer
+  // authoritative. Failures retry hourly so Pin&Go can auto-resolve if the host
+  // restores connectivity before check-in.
+  if (health.gatewayNextCheckAt) {
+    return health.gatewayNextCheckAt <= input.now;
   }
 
   return true;
@@ -136,25 +117,10 @@ export function nextGatewaySuccessCheckAt(input: {
   mode: GatewayMonitoringMode;
   checkIn?: Date | null;
 }) {
-  if (!input.checkIn) {
-    return null;
-  }
-
-  if (input.checkIn <= input.now) {
-    return new Date(
-      input.now.getTime() + GATEWAY_IN_STAY_INTERVAL_MS
-    );
-  }
-
-  const accessRecheckAt = new Date(
-    input.checkIn.getTime() - GATEWAY_ACCESS_RECHECK_WINDOW_MS
-  );
-
-  // A healthy T-6 certification gets one targeted T-2 recheck before access
-  // activation. A success at or after T-2 is terminal for this arrival.
-  return input.now < accessRecheckAt
-    ? accessRecheckAt
-    : null;
+  // A successful gateway check is terminal for the current readiness window.
+  // The next arrival naturally requires a fresh T-6 certification because its
+  // readiness window starts later than this successful check.
+  return null;
 }
 
 export function nextGatewayFailure(input: {
