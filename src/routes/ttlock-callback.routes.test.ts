@@ -1,7 +1,10 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { evaluateTtlockCallbackCanary } from "./ttlock-callback.routes";
+import {
+  evaluateTtlockCallbackCanary,
+  shouldReconcileTtlockGatewayOffline,
+} from "./ttlock-callback.routes";
 
 const token = "callback-secret-123";
 
@@ -82,4 +85,43 @@ test("TTLock callback canary accepts authenticated form and returns safe evidenc
   assert.equal("keyboardPwd" in result.metadata, false);
   assert.equal("username" in result.metadata, false);
   assert.match(result.fingerprint, /^[a-f0-9]{64}$/);
+});
+
+
+test("gateway offline reconciliation requires verified TTLock callback shape", () => {
+  assert.deepEqual(
+    shouldReconcileTtlockGatewayOffline({
+      gatewayId: "2046625",
+      isOnline: "0",
+      notifyType: "2",
+    }),
+    { gatewayId: 2046625 }
+  );
+
+  assert.equal(
+    shouldReconcileTtlockGatewayOffline({
+      gatewayId: "2046625",
+      isOnline: "1",
+      notifyType: "2",
+    }),
+    null
+  );
+
+  assert.equal(
+    shouldReconcileTtlockGatewayOffline({
+      gatewayId: "2046625",
+      isOnline: "0",
+      notifyType: "1",
+    }),
+    null
+  );
+
+  assert.equal(
+    shouldReconcileTtlockGatewayOffline({
+      gatewayId: "not-a-number",
+      isOnline: "0",
+      notifyType: "2",
+    }),
+    null
+  );
 });
