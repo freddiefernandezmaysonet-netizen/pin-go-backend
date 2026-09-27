@@ -53,3 +53,80 @@ FOREIGN KEY ("ttlockGatewayRecordId")
 REFERENCES "TtlockGateway"("id")
 ON DELETE SET NULL
 ON UPDATE CASCADE;
+
+
+-- Backfill gateway-to-lock mappings from already-persisted local telemetry.
+-- This performs zero TTLock provider requests and intentionally does NOT
+-- backfill TtlockGateway.isOnline; callback state remains canonical.
+WITH gateway_telemetry AS (
+  SELECT
+    dh."organizationId",
+    dh."lockId",
+    CASE
+      WHEN COALESCE(
+        dh."rawPayload"->>'gatewayId',
+        dh."gatewayRawPayload"->'gateway'->>'gatewayId',
+        dh."gatewayRawPayload"->'association'->'list'->0->>'gatewayId'
+      ) ~ '^[0-9]+$'
+      THEN COALESCE(
+        dh."rawPayload"->>'gatewayId',
+        dh."gatewayRawPayload"->'gateway'->>'gatewayId',
+        dh."gatewayRawPayload"->'association'->'list'->0->>'gatewayId'
+      )::INTEGER
+      ELSE NULL
+    END AS gateway_id
+  FROM "DeviceHealth" dh
+),
+distinct_gateways AS (
+  SELECT DISTINCT
+    "organizationId",
+    gateway_id
+  FROM gateway_telemetry
+  WHERE gateway_id IS NOT NULL
+)
+INSERT INTO "TtlockGateway" (
+  "id",
+  "organizationId",
+  "ttlockGatewayId",
+  "source",
+  "createdAt",
+  "updatedAt"
+)
+SELECT
+  'ttgw_' || md5("organizationId" || ':' || gateway_id::TEXT),
+  "organizationId",
+  gateway_id,
+  'LOCAL_TELEMETRY_BACKFILL',
+  CURRENT_TIMESTAMP,
+  CURRENT_TIMESTAMP
+FROM distinct_gateways
+ON CONFLICT ("organizationId", "ttlockGatewayId") DO NOTHING;
+
+WITH gateway_telemetry AS (
+  SELECT
+    dh."organizationId",
+    dh."lockId",
+    CASE
+      WHEN COALESCE(
+        dh."rawPayload"->>'gatewayId',
+        dh."gatewayRawPayload"->'gateway'->>'gatewayId',
+        dh."gatewayRawPayload"->'association'->'list'->0->>'gatewayId'
+      ) ~ '^[0-9]+$'
+      THEN COALESCE(
+        dh."rawPayload"->>'gatewayId',
+        dh."gatewayRawPayload"->'gateway'->>'gatewayId',
+        dh."gatewayRawPayload"->'association'->'list'->0->>'gatewayId'
+      )::INTEGER
+      ELSE NULL
+    END AS gateway_id
+  FROM "DeviceHealth" dh
+)
+UPDATE "Lock" AS l
+SET "ttlockGatewayRecordId" = tg."id"
+FROM gateway_telemetry gt
+JOIN "TtlockGateway" tg
+  ON tg."organizationId" = gt."organizationId"
+ AND tg."ttlockGatewayId" = gt.gateway_id
+WHERE l."id" = gt."lockId"
+  AND gt.gateway_id IS NOT NULL
+  AND l."ttlockGatewayRecordId" IS NULL;
