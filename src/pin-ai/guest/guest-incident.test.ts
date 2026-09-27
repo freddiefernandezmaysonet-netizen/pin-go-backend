@@ -92,6 +92,22 @@ test("parallel workers claim once and record provider acceptance, not delivery",
   assert.equal(sends, 1); assert.ok(results.includes("CLAIM_LOST")); assert.equal(f.row.status, "SENT");
   assert.equal(f.row.providerMessageId, "provider-ack"); assert.equal(f.row.providerDeliveryStatus, null);
 });
+test("new incident links stay reference-bound and immutable across retries; legacy links are preserved", async () => {
+  for (const path of [undefined, "/pin-ai/incidents/GI-012345ABCDEF", "https://evil.test", "/pin-ai/incidents/GI-FFFFFFFFFFFF"]) {
+    const f = fixture(), envelope = JSON.parse(f.row.body);
+    envelope.retryPayload.dashboardPath = path;
+    f.patch({ body: JSON.stringify(envelope) });
+    const mails: { dashboardUrl: string; idempotencyKey: string }[] = [];
+    const send = async (mail: { dashboardUrl: string; idempotencyKey: string }) => { mails.push(mail); throw new Error("NETWORK_TIMEOUT"); };
+    await deliverGuestIncidentNotice({ prisma: f.prisma, message: f.row, env, now, send });
+    if (path !== undefined && path !== "/pin-ai/incidents/GI-012345ABCDEF") {
+      assert.equal(mails.length, 0); assert.equal(f.row.status, "FAILED_FINAL"); continue;
+    }
+    assert.equal(mails[0].dashboardUrl, `https://app.example.test${path ?? "/properties/property-1/calendar"}`);
+    await deliverGuestIncidentNotice({ prisma: f.prisma, message: f.row, env, now: new Date(now.getTime() + 61_000), send });
+    assert.deepEqual(mails[0], mails[1]);
+  }
+});
 test("notification disabled, missing scope or revoked admin never send", async () => {
   for (const scenario of ["disabled", "scope", "admin"]) {
     const f = fixture(); if (scenario === "scope") f.invalidateScope(); if (scenario === "admin") f.revoke();
