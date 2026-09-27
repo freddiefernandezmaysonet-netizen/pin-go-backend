@@ -7,6 +7,8 @@
     "dev": "tsx watch src/server.ts",
     "worker": "tsx src/workers/worker.ts",
     "worker:reservation": "tsx src/workers/reservation.worker.ts",
+    "test:guest-nfc-recovery": "node --import tsx --test src/services/guest-nfc-recovery.test.ts",
+    "typecheck:guest-nfc-recovery": "tsc -p tsconfig.guest-nfc-recovery.json",
     "worker:review-invitations": "tsx src/workers/review-invitation.worker.ts",
     "worker:accesscode-cleanup": "tsx src/workers/accesscode.cleanup.worker.ts",
     "worker:device-health": "tsx src/workers/runDeviceHealth.worker.ts",

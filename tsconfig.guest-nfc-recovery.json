@@ -1,0 +1,17 @@
+{
+  "compilerOptions": {
+    "noEmit": true,
+    "module": "preserve",
+    "moduleResolution": "bundler",
+    "target": "es2022",
+    "strict": true,
+    "skipLibCheck": true,
+    "types": ["node"]
+  },
+  "include": [
+    "src/services/guest-nfc-recovery*.ts",
+    "src/services/nfc-sync.service.ts",
+    "src/services/nfc-autoheal.service.ts",
+    "src/workers/nfc-watchdog.worker.ts"
+  ]
+}

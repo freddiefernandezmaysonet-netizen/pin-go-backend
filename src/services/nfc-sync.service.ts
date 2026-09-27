@@ -8,6 +8,8 @@ import {
 } from "@prisma/client";
 import { ttlockChangeCardPeriod } from "../ttlock/ttlock.card";
 import { getOrgTtlockAccessToken } from "./ttlock/ttlock.org-auth";
+import { guestNfcDueWhere, guestNfcRetryable } from "./guest-nfc-recovery.policy";
+import { reconcileGuestNfcRecoveryIssues } from "./guest-nfc-recovery-issue.service";
 
 const PROVISION_AHEAD_MS = 2 * 60 * 60 * 1000;
 const MAX_RETRY_COUNT = 5;
@@ -36,63 +38,51 @@ function isRetryableError(error: unknown) {
 
 export async function retryPendingNfcSync(
   db?: PrismaClient,
-  now: Date = new Date()
+  now: Date = new Date(),
+  options: { assignmentId?: string; guestOnly?: boolean } = {},
+  dependencies = {
+    changeCardPeriod: ttlockChangeCardPeriod,
+    getAccessToken: getOrgTtlockAccessToken,
+    reconcileIssues: reconcileGuestNfcRecoveryIssues,
+  }
 ) {
   const prisma = db ?? prismaSingleton;
   const provisionThrough = new Date(
     now.getTime() + PROVISION_AHEAD_MS
   );
 
-const staleProvisioningBefore = new Date(
-  now.getTime() - 5 * 60 * 1000
-);
-
+  const staleProvisioningBefore = new Date(now.getTime() - 5 * 60_000);
+  // Preserve the existing scheduling rules for non-guest assignments.
+  const legacyWhere = {
+    role: { not: "GUEST" as const },
+    endsAt: { gt: now },
+    OR: [
+      {
+        status: NfcAssignmentStatus.SCHEDULED,
+        startsAt: { lte: provisionThrough },
+      },
+      {
+        status: NfcAssignmentStatus.FAILED,
+        startsAt: { lte: provisionThrough },
+        lastError: { startsWith: "RETRYABLE:" },
+        retryCount: { lt: MAX_RETRY_COUNT },
+      },
+      {
+        status: NfcAssignmentStatus.PROVISIONING,
+        startsAt: { lte: provisionThrough },
+        retryCount: { lt: MAX_RETRY_COUNT },
+        OR: [
+          { provisioningStartedAt: null },
+          { provisioningStartedAt: { lte: staleProvisioningBefore } },
+        ],
+      },
+    ],
+  };
   const batch = await prisma.nfcAssignment.findMany({
     where: {
-      endsAt: {
-        gt: now,
-      },
-      OR: [
-        {
-          status: NfcAssignmentStatus.SCHEDULED,
-          startsAt: {
-            lte: provisionThrough,
-          },
-        },
-       {
-  status: NfcAssignmentStatus.FAILED,
-  startsAt: {
-    lte: provisionThrough,
-  },
-  lastError: {
-    startsWith: "RETRYABLE:",
-  },
-  retryCount: {
-    lt: MAX_RETRY_COUNT,
-  },
-},
-{
-  status: NfcAssignmentStatus.PROVISIONING,
-  startsAt: {
-    lte: provisionThrough,
-  },
-  retryCount: {
-    lt: MAX_RETRY_COUNT,
-  },
-  OR: [
-    {
-      provisioningStartedAt: null,
+      ...(options.assignmentId ? { id: options.assignmentId } : {}),
+      OR: options.guestOnly ? [guestNfcDueWhere(now)] : [guestNfcDueWhere(now), legacyWhere],
     },
-    {
-      provisioningStartedAt: {
-        lte: staleProvisioningBefore,
-      },
-    },
-  ],
-},
-   ],
-},
-
     include: {
       NfcCard: true,
       Reservation: {
@@ -125,6 +115,8 @@ const staleProvisioningBefore = new Date(
       where: {
         id: assignment.id,
         status: previousStatus,
+        retryCount: assignment.retryCount,
+        updatedAt: assignment.updatedAt,
       },
       data: {
         status: NfcAssignmentStatus.PROVISIONING,
@@ -159,6 +151,15 @@ const staleProvisioningBefore = new Date(
         continue;
       }
 
+      // Guest recovery uses the current canonical stay window, including an
+      // extension made while the original NFC assignment was FAILED.
+      const startsAt = assignment.role === "GUEST" ? assignment.Reservation.checkIn : assignment.startsAt;
+      const endsAt = assignment.role === "GUEST" ? assignment.Reservation.checkOut : assignment.endsAt;
+      if (assignment.role === "GUEST" &&
+          (endsAt <= now || startsAt >= endsAt || assignment.NfcCard.status === NfcCardStatus.RETIRED)) {
+        throw new Error("NFC_ACCESS_WINDOW_OR_CARD_INVALID");
+      }
+
       const overlappingAssignment =
         await prisma.nfcAssignment.findFirst({
           where: {
@@ -174,10 +175,10 @@ const staleProvisioningBefore = new Date(
               ],
             },
             startsAt: {
-              lt: assignment.endsAt,
+              lt: endsAt,
             },
             endsAt: {
-              gt: assignment.startsAt,
+              gt: startsAt,
             },
           },
           select: {
@@ -229,19 +230,20 @@ const staleProvisioningBefore = new Date(
       }
 
       const accessToken =
-        await getOrgTtlockAccessToken(
+        await dependencies.getAccessToken(
           prisma,
           assignment.Reservation.property
             .organizationId
         );
 
-      await ttlockChangeCardPeriod({
+      await dependencies.changeCardPeriod({
         lockId: ttlockLockId,
         cardId: ttlockCardId,
-        startDate: assignment.startsAt.getTime(),
-        endDate: assignment.endsAt.getTime(),
+        startDate: startsAt.getTime(),
+        endDate: endsAt.getTime(),
         changeType: 2,
         accessToken,
+        ...(assignment.role === "GUEST" ? { timeoutMs: 20_000 } : {}),
       });
 
       await prisma.$transaction([
@@ -251,6 +253,8 @@ const staleProvisioningBefore = new Date(
           },
           data: {
             status: NfcAssignmentStatus.ACTIVE,
+            startsAt,
+            endsAt,
             provisioningStartedAt: null,
             provisionedAt: new Date(),
             lastError: null,
@@ -271,7 +275,8 @@ const staleProvisioningBefore = new Date(
       failed++;
 
       const errorMessage = toErrString(error);
-      const retryable = isRetryableError(error);
+      const retryable = assignment.role === "GUEST"
+        ? guestNfcRetryable(errorMessage) : isRetryableError(error);
 
       await prisma.nfcAssignment.update({
         where: {
@@ -287,6 +292,10 @@ const staleProvisioningBefore = new Date(
       });
     }
   }
+
+  // Issue persistence is separate from the provider try/catch: a reporting
+  // failure must never relabel a successfully provisioned card as FAILED.
+  await dependencies.reconcileIssues(prisma, now);
 
   return {
     scheduled,
