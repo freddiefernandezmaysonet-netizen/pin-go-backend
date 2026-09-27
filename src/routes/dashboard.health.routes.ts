@@ -200,11 +200,21 @@ export function buildDashboardHealthRouter(prisma: PrismaClient) {
               name: true,
             },
           },
+          ttlockGateway: {
+            select: {
+              ttlockGatewayId: true,
+              isOnline: true,
+              lastEventAt: true,
+              source: true,
+            },
+          },
           deviceHealth: {
             select: {
               battery: true,
               isOnline: true,
               gatewayConnected: true,
+              lockLinkState: true,
+              lockLinkLastSeenAt: true,
               lastSeenAt: true,
               lastSyncAt: true,
               healthStatus: true,
@@ -249,9 +259,21 @@ export function buildDashboardHealthRouter(prisma: PrismaClient) {
             property: lock.property ?? null,
             gatewayMonitoringMode: mode,
             battery: mode === "DISABLED" ? null : health?.battery ?? null,
-            isOnline: mode === "DISABLED" ? null : health?.isOnline ?? null,
+            isOnline:
+              mode === "DISABLED"
+                ? null
+                : lock.ttlockGateway?.isOnline ?? null,
             gatewayConnected:
-              mode === "DISABLED" ? null : health?.gatewayConnected ?? null,
+              mode === "DISABLED"
+                ? null
+                : lock.ttlockGateway?.isOnline ?? null,
+            gatewayId: lock.ttlockGateway?.ttlockGatewayId ?? null,
+            gatewayStateSource: lock.ttlockGateway?.source ?? null,
+            gatewayLastEventAt: lock.ttlockGateway?.lastEventAt ?? null,
+            lockLinkState:
+              mode === "DISABLED" ? null : health?.lockLinkState ?? null,
+            lockLinkLastSeenAt:
+              mode === "DISABLED" ? null : health?.lockLinkLastSeenAt ?? null,
             healthStatus:
               mode === "DISABLED"
                 ? "NOT_MONITORED"
@@ -341,10 +363,20 @@ export function buildDashboardHealthRouter(prisma: PrismaClient) {
               name: true,
             },
           },
+          ttlockGateway: {
+            select: {
+              ttlockGatewayId: true,
+              isOnline: true,
+              lastEventAt: true,
+              source: true,
+            },
+          },
           deviceHealth: {
             select: {
               battery: true,
               gatewayConnected: true,
+              lockLinkState: true,
+              lockLinkLastSeenAt: true,
               operationalRisk: true,
               operationalMessage: true,
               recommendedAction: true,
@@ -384,7 +416,16 @@ export function buildDashboardHealthRouter(prisma: PrismaClient) {
             gatewayMonitoringMode: mode,
             battery: mode === "DISABLED" ? null : health?.battery ?? null,
             gatewayConnected:
-              mode === "DISABLED" ? null : health?.gatewayConnected ?? null,
+              mode === "DISABLED"
+                ? null
+                : lock.ttlockGateway?.isOnline ?? null,
+            gatewayId: lock.ttlockGateway?.ttlockGatewayId ?? null,
+            gatewayStateSource: lock.ttlockGateway?.source ?? null,
+            gatewayLastEventAt: lock.ttlockGateway?.lastEventAt ?? null,
+            lockLinkState:
+              mode === "DISABLED" ? null : health?.lockLinkState ?? null,
+            lockLinkLastSeenAt:
+              mode === "DISABLED" ? null : health?.lockLinkLastSeenAt ?? null,
             operationalRisk: presentation.operationalRisk,
             operationalMessage: presentation.operationalMessage,
             recommendedAction: presentation.recommendedAction,
