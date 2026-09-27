@@ -125,6 +125,7 @@ export function buildDashboardHealthRouter(prisma: PrismaClient) {
 
         if (mode === "LEGACY_UNCONFIGURED") {
           setupRequired++;
+          openAlerts++;
           continue;
         }
 
