@@ -27,6 +27,10 @@ const MAX_ALERT_ATTEMPTS = 3;
 
 const MAX_ERROR_LENGTH = 8_000;
 
+type DeviceConnectivityIssue =
+  | "GATEWAY_OFFLINE"
+  | "LOCK_LINK_STALE";
+
 function normalizeError(error: unknown): string {
   const message =
     error instanceof Error
@@ -133,7 +137,13 @@ async function upsertGatewayCriticalIssue(input: {
   emailStatus: string;
   emailError?: string | null;
   occurredAt: Date;
+  connectivityIssue?: DeviceConnectivityIssue;
 }) {
+  const connectivityIssue =
+    input.connectivityIssue ?? "GATEWAY_OFFLINE";
+  const lockLinkStale =
+    connectivityIssue === "LOCK_LINK_STALE";
+
   return upsertOperationalIssue(
     input.prisma,
     {
@@ -144,23 +154,27 @@ async function upsertGatewayCriticalIssue(input: {
             input.reservationId,
         }),
 
-      issueCode:
-        "DEVICE_GATEWAY_OFFLINE_CRITICAL",
+      issueCode: lockLinkStale
+        ? "DEVICE_LOCK_LINK_STALE_CRITICAL"
+        : "DEVICE_GATEWAY_OFFLINE_CRITICAL",
 
-      title:
-        "Gateway offline before guest check-in",
+      title: lockLinkStale
+        ? "Lock is not communicating with gateway"
+        : "Gateway offline before guest check-in",
 
-      issue:
-        `The gateway for ${input.propertyName} remains offline less than six hours before check-in.`,
+      issue: lockLinkStale
+        ? `The gateway for ${input.propertyName} is online, but ${input.lockName} has not refreshed its gateway-to-lock signal before check-in.`
+        : `The gateway for ${input.propertyName} remains offline less than six hours before check-in.`,
 
       operationalImpact:
         "Pin&Go may be unable to create, update, or revoke remote guest access.",
 
-      recommendedAction:
-        "Restore gateway connectivity immediately before guest arrival.",
+      recommendedAction: lockLinkStale
+        ? "Wake or touch the lock, verify battery and Bluetooth range, and confirm the gateway can communicate with the lock."
+        : "Restore gateway connectivity immediately before guest arrival.",
 
       nextAutomaticStep:
-        "Pin&Go will continue checking gateway connectivity every hour.",
+        "Pin&Go will continue checking device connectivity automatically.",
 
       engine: "ACCESS",
 
@@ -202,13 +216,16 @@ async function upsertGatewayCriticalIssue(input: {
           input.emailStatus,
         emailError:
           input.emailError ?? null,
+        connectivityIssue,
       },
 
-      transitionCode:
-        "DEVICE_GATEWAY_CRITICAL_DETECTED",
+      transitionCode: lockLinkStale
+        ? "DEVICE_LOCK_LINK_STALE_CRITICAL_DETECTED"
+        : "DEVICE_GATEWAY_CRITICAL_DETECTED",
 
-      transitionSummary:
-        "Gateway remained offline inside the six-hour critical check-in window.",
+      transitionSummary: lockLinkStale
+        ? "The gateway remained online but the lock-to-gateway signal was stale inside the critical check-in window."
+        : "Gateway remained offline inside the six-hour critical check-in window.",
 
       transitionedBy: "PIN_GO",
       occurredAt: input.occurredAt,
@@ -524,6 +541,7 @@ export async function sendGatewayCriticalHostAlert(
     propertyTimeZone?: string | null;
     checkIn: Date;
     now?: Date;
+    connectivityIssue?: DeviceConnectivityIssue;
   }
 ) {
   const now = input.now ?? new Date();
@@ -807,6 +825,7 @@ export async function sendGatewayCriticalHostAlert(
       emailStatus: "RECIPIENT_MISSING",
       emailError: error,
       occurredAt: now,
+      connectivityIssue: input.connectivityIssue,
     });
 
     return {
@@ -830,6 +849,8 @@ export async function sendGatewayCriticalHostAlert(
         checkIn: input.checkIn,
         propertyTimeZone:
           input.propertyTimeZone,
+        connectivityIssue:
+          input.connectivityIssue,
       });
 
     const markedSent =
@@ -898,6 +919,7 @@ export async function sendGatewayCriticalHostAlert(
           ? "SENT"
           : "SENT_STATE_RECONCILIATION_REQUIRED",
       occurredAt: now,
+      connectivityIssue: input.connectivityIssue,
     });
 
     return {
@@ -977,6 +999,7 @@ export async function sendGatewayCriticalHostAlert(
       emailError:
         normalizedError,
       occurredAt: now,
+      connectivityIssue: input.connectivityIssue,
     });
 
     return {
