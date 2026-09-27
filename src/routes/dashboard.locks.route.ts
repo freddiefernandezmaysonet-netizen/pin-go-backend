@@ -7,6 +7,7 @@ import {
   setGatewayMonitoringPolicy,
 } from "../services/lockGatewayMonitoring.service";
 import { applyGatewayMonitoringConfiguration } from "../services/gatewayConfigurationVerification.service";
+import { effectiveTtlockGatewayHealth } from "../services/ttlock-gateway-read-model";
 
 const prisma = new PrismaClient();
 export const dashboardLocksRouter = Router();
@@ -69,6 +70,14 @@ dashboardLocksRouter.get("/api/dashboard/locks", requireAuth, async (req, res) =
             name: true,
           },
         },
+        ttlockGateway: {
+          select: {
+            ttlockGatewayId: true,
+            gatewayName: true,
+            isOnline: true,
+            lastEventAt: true,
+          },
+        },
         deviceHealth: {
           select: {
             battery: true,
@@ -94,43 +103,54 @@ dashboardLocksRouter.get("/api/dashboard/locks", requireAuth, async (req, res) =
     page,
     pageSize,
     total,
-    items: rows.map((l) => ({
-      id: l.id,
-      ttlockLockId: l.ttlockLockId,
-      name: l.displayName ?? l.ttlockLockName ?? null,
-      isActive: l.isActive,
-      updatedAt: l.updatedAt.toISOString(),
-      property: l.property,
+    items: rows.map((l) => {
+      const gateway = effectiveTtlockGatewayHealth({
+        canonicalOnline: l.ttlockGateway?.isOnline,
+        legacyConnected: l.deviceHealth?.gatewayConnected,
+        gatewayId: l.ttlockGateway?.ttlockGatewayId,
+        gatewayName: l.ttlockGateway?.gatewayName,
+        lastEventAt: l.ttlockGateway?.lastEventAt,
+      });
 
-      gatewayMonitoringMode: gatewayMonitoringModeFromPolicy(
-        gatewayPolicies.get(l.id) ?? null
-      ),
+      return {
+        id: l.id,
+        ttlockLockId: l.ttlockLockId,
+        name: l.displayName ?? l.ttlockLockName ?? null,
+        isActive: l.isActive,
+        updatedAt: l.updatedAt.toISOString(),
+        property: l.property,
 
-      battery: l.deviceHealth?.battery ?? null,
-      batteryFresh: !!l.deviceHealth?.lastSyncAt,
+        gatewayMonitoringMode: gatewayMonitoringModeFromPolicy(
+          gatewayPolicies.get(l.id) ?? null
+        ),
 
-      gatewayId: null as number | null,
-      gatewayName: null as string | null,
-      gatewayOnline: l.deviceHealth?.gatewayConnected ?? null,
-      gatewayFresh: !!l.deviceHealth?.lastSyncAt,
+        battery: l.deviceHealth?.battery ?? null,
+        batteryFresh: !!l.deviceHealth?.lastSyncAt,
 
-      deviceHealth: l.deviceHealth
-        ? {
-            battery: l.deviceHealth.battery ?? null,
-            gatewayConnected: l.deviceHealth.gatewayConnected ?? null,
-            isOnline: l.deviceHealth.isOnline ?? null,
-            lastSeenAt: l.deviceHealth.lastSeenAt
-              ? l.deviceHealth.lastSeenAt.toISOString()
-              : null,
-            lastSyncAt: l.deviceHealth.lastSyncAt
-              ? l.deviceHealth.lastSyncAt.toISOString()
-              : null,
-            healthStatus: l.deviceHealth.healthStatus,
-            healthMessage: l.deviceHealth.healthMessage ?? null,
-            updatedAt: l.deviceHealth.updatedAt.toISOString(),
-          }
-        : null,
-    })),
+        gatewayId: gateway.gatewayId,
+        gatewayName: gateway.gatewayName,
+        gatewayOnline: gateway.gatewayConnected,
+        gatewayFresh: gateway.gatewayLastEventAt !== null,
+        gatewayStateSource: gateway.gatewayStateSource,
+
+        deviceHealth: l.deviceHealth
+          ? {
+              battery: l.deviceHealth.battery ?? null,
+              gatewayConnected: gateway.gatewayConnected,
+              isOnline: l.deviceHealth.isOnline ?? null,
+              lastSeenAt: l.deviceHealth.lastSeenAt
+                ? l.deviceHealth.lastSeenAt.toISOString()
+                : null,
+              lastSyncAt: l.deviceHealth.lastSyncAt
+                ? l.deviceHealth.lastSyncAt.toISOString()
+                : null,
+              healthStatus: l.deviceHealth.healthStatus,
+              healthMessage: l.deviceHealth.healthMessage ?? null,
+              updatedAt: l.deviceHealth.updatedAt.toISOString(),
+            }
+          : null,
+      };
+    }),
   });
 });
 
