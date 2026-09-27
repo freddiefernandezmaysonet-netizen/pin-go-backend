@@ -15,6 +15,8 @@ on:
       - "package.json"
       - "package-lock.json"
       - "tsconfig.pin-ai-guest-gateway.json"
+      - "tsconfig.pin-ai-nfc-evidence.json"
+      - "src/services/guest-nfc-recovery.policy.ts"
       - ".github/workflows/pin-ai-guest-gateway-v1.yml"
 
 permissions:
@@ -52,3 +54,6 @@ jobs:
 
       - name: Type-check Pin AI Guest Gateway V1
         run: npm run test:pin-ai-guest-gateway-types
+
+      - name: Compile guest NFC evidence read model
+        run: npx tsc -p tsconfig.pin-ai-nfc-evidence.json --noEmit false --outDir /tmp/pin-ai-nfc-evidence-build

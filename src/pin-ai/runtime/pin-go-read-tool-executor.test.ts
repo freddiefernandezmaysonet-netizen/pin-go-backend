@@ -76,6 +76,8 @@ function createPrismaFixture(options: Readonly<{
   const paymentContext = options.paymentContext ?? {};
 
   return {
+    nfcAssignment: { findMany: async () => [] } as any,
+    operationalIssue: { findMany: async () => [] } as any,
     propertyReview: {
       async aggregate() {
         return { _avg: { overallRating: null }, _count: { _all: 0 } };
