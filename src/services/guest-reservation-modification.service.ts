@@ -11,9 +11,33 @@ import { checkPropertyAvailability } from "./availability.service";
 import { calculateDirectBookingModificationConnectFee } from "./direct-booking-connect-fee.service";
 import { calculateDirectBookingPricing } from "./direct-booking-pricing.service";
 
+import { resolvePinAIActionCanaryScope } from "../pin-ai/actions/action-canary-scope.js";
+import { InStayExtensionError, IN_STAY_EXTENSION_MIN_PAYMENT_WINDOW_MS } from "../pin-ai/actions/in-stay-extension.js";
+import { previewGuestReservationExtension } from "./guest-reservation-extension-preview.js";
+
 const prisma = new PrismaClient();
 
+type PreviewDependencies = {
+  client: Pick<PrismaClient, "reservation">;
+  now: () => Date;
+  env: NodeJS.ProcessEnv;
+  checkAvailability: typeof checkPropertyAvailability;
+  calculatePricing: typeof calculateDirectBookingPricing;
+};
+const defaultPreviewDependencies: PreviewDependencies = {
+  client: prisma, now: () => new Date(), env: process.env,
+  checkAvailability: checkPropertyAvailability, calculatePricing: calculateDirectBookingPricing,
+};
+
+type ConfirmationDependencies = PreviewDependencies & {
+  client: Pick<PrismaClient, "reservation" | "reservationModification" | "$transaction">;
+};
+const defaultConfirmationDependencies: ConfirmationDependencies = {
+  ...defaultPreviewDependencies, client: prisma,
+};
+
 type GuestReservationModificationPreviewInput = {
+  operation?: "EXTEND_CHECKOUT_ONLY";
   guestToken: string;
   checkIn: Date;
   checkOut: Date;
@@ -196,6 +220,7 @@ function sameStringSet(left: string[], right: string[]) {
 }
 
 export function buildGuestReservationModificationRequestFingerprint(input: {
+  operation?: "EXTEND_CHECKOUT_ONLY";
   checkIn: Date;
   checkOut: Date;
   adults: number;
@@ -217,6 +242,7 @@ export function buildGuestReservationModificationRequestFingerprint(input: {
   }
 
   const canonicalRequest = JSON.stringify({
+    ...(input.operation ? { operation: input.operation } : {}),
     checkIn: input.checkIn.toISOString(),
     checkOut: input.checkOut.toISOString(),
     adults: input.adults,
@@ -299,7 +325,9 @@ function isDirectBookingReservation(reservation: {
 
 async function getEligibleReservationByGuestToken(
   guestTokenInput: unknown,
-  now = new Date()
+  now = new Date(),
+  allowInStayExtension = false,
+  dependencies: PreviewDependencies = defaultPreviewDependencies
 ) {
   const guestToken = normalizeGuestToken(guestTokenInput);
 
@@ -311,7 +339,7 @@ async function getEligibleReservationByGuestToken(
     });
   }
 
-  const reservation = await prisma.reservation.findFirst({
+  const reservation = await dependencies.client.reservation.findFirst({
     where: {
       guestToken,
       OR: [
@@ -370,7 +398,10 @@ async function getEligibleReservationByGuestToken(
   if (
     reservation.status !== ReservationStatus.ACTIVE ||
     reservation.paymentState !== PaymentState.PAID ||
-    reservation.checkIn <= now
+    (reservation.checkIn <= now && !(
+      allowInStayExtension && reservation.checkOut > now &&
+      resolvePinAIActionCanaryScope({ reservationId: reservation.id, env: dependencies.env }).enabled
+    ))
   ) {
     throw new GuestReservationModificationError({
       code: "RESERVATION_NOT_ELIGIBLE_FOR_MODIFICATION",
@@ -436,6 +467,7 @@ function serializePublicPricing(pricing: any) {
     taxesTotal: pricing.taxesTotal,
     totalAmount: pricing.totalAmount,
     totalAmountCents: pricing.totalAmountCents,
+    ...(Array.isArray(pricing.extensionQuotes) ? { extensionQuotes: pricing.extensionQuotes } : {}),
   };
 }
 
@@ -586,10 +618,12 @@ export function evaluateGuestReservationModificationReduction(input: {
 }
 
 export async function getGuestReservationModificationOptions(input: {
+  allowInStayExtension?: boolean;
   guestToken: string;
-}) {
+}, dependencies: PreviewDependencies = defaultPreviewDependencies) {
+  const now = dependencies.now();
   const reservation = await getEligibleReservationByGuestToken(
-    input.guestToken
+    input.guestToken, now, input.allowInStayExtension === true, dependencies
   );
   const currentGuestCounts = getCurrentGuestCounts(reservation);
   const currentSelectedAmenityIds = normalizeSelectedAmenityIds(
@@ -599,11 +633,11 @@ export async function getGuestReservationModificationOptions(input: {
   const guestCountLocked = hasSecurePreCheckinGuestCountLock(reservation);
 
   return {
-    managementPhase: "PRE_STAY",
+    managementPhase: reservation.checkIn <= now ? "IN_STAY" : "PRE_STAY",
     modificationAllowed: true,
     constraints: {
-      guestCountEditable: !guestCountLocked,
-      guestCountLockReason: guestCountLocked
+      guestCountEditable: reservation.checkIn > now && !guestCountLocked,
+      guestCountLockReason: reservation.checkIn <= now ? "IN_STAY_EXTENSION_ONLY" : guestCountLocked
         ? "SECURE_PRECHECKIN_COMPLETED"
         : null,
     },
@@ -640,7 +674,8 @@ export async function getGuestReservationModificationOptions(input: {
 }
 
 export async function getGuestReservationModificationPreview(
-  input: GuestReservationModificationPreviewInput
+  input: GuestReservationModificationPreviewInput,
+  dependencies: PreviewDependencies = defaultPreviewDependencies
 ) {
   const guestToken = normalizeGuestToken(input.guestToken);
 
@@ -679,13 +714,15 @@ export async function getGuestReservationModificationPreview(
     });
   }
 
-  const now = new Date();
+  const now = dependencies.now();
   const reservation = await getEligibleReservationByGuestToken(
     guestToken,
-    now
+    now,
+    input.operation === "EXTEND_CHECKOUT_ONLY",
+    dependencies
   );
 
-  if (input.checkIn <= now) {
+  if (input.checkIn <= now && input.operation !== "EXTEND_CHECKOUT_ONLY") {
     throw new GuestReservationModificationError({
       code: "MODIFIED_CHECK_IN_MUST_BE_IN_FUTURE",
       message: "The modified check-in must be in the future.",
@@ -733,7 +770,30 @@ export async function getGuestReservationModificationPreview(
     });
   }
 
-  const availability = await checkPropertyAvailability({
+  let extension: Awaited<ReturnType<typeof previewGuestReservationExtension>> | null = null;
+  if (input.operation === "EXTEND_CHECKOUT_ONLY") {
+    try {
+      extension = await previewGuestReservationExtension({
+        reservation: {
+          ...reservation, ...currentGuestCounts,
+          selectedAmenityIds: normalizeSelectedAmenityIds(reservation.selectedAmenityIds),
+          currency: reservation.currency ?? "usd", totalAmount: Number(reservation.totalAmount),
+        },
+        proposedCheckIn: input.checkIn, proposedCheckOut: input.checkOut,
+        proposedAdults: input.adults, proposedChildren: input.children,
+        proposedSelectedAmenityIds: selectedAmenityIds,
+        propertyTimezone: reservation.property.timezone ?? "",
+        propertyCheckOutTime: reservation.property.checkOutTime ?? "11:00",
+        maximumNights: reservation.property.maximumNights, now,
+      }, { checkAvailability: dependencies.checkAvailability, calculatePricing: dependencies.calculatePricing });
+    } catch (error) {
+      if (error instanceof InStayExtensionError) {
+        throw new GuestReservationModificationError({ code: error.code, message: error.message, statusCode: 409 });
+      }
+      throw error;
+    }
+  }
+  const availability = extension ? { available: true } : await dependencies.checkAvailability({
     propertyId: reservation.propertyId,
     checkIn: input.checkIn,
     checkOut: input.checkOut,
@@ -746,12 +806,12 @@ export async function getGuestReservationModificationPreview(
       message: "The property is not available for the selected dates.",
       statusCode: 409,
       details: {
-        conflictType: availability.conflict?.type ?? null,
+        conflictType: "conflict" in availability ? availability.conflict?.type ?? null : null,
       },
     });
   }
 
-  const proposedPricing = await calculateDirectBookingPricing({
+  const proposedPricing = extension?.proposedPricing ?? await dependencies.calculatePricing({
     propertyId: reservation.propertyId,
     checkIn: input.checkIn,
     checkOut: input.checkOut,
@@ -760,7 +820,7 @@ export async function getGuestReservationModificationPreview(
   });
 
   if (
-    proposedPricing.nights < (reservation.property.minimumNights ?? 1)
+    !extension && proposedPricing.nights < (reservation.property.minimumNights ?? 1)
   ) {
     throw new GuestReservationModificationError({
       code: "MINIMUM_STAY_NOT_MET",
@@ -828,7 +888,7 @@ export async function getGuestReservationModificationPreview(
         : "NO_PAYMENT_REQUIRED";
 
   const preview = {
-    managementPhase: "PRE_STAY" as const,
+    managementPhase: extension ? "IN_STAY" as const : "PRE_STAY" as const,
     modificationAllowed: true as const,
     reservation: {
       reservationNumber: reservation.reservationNumber,
@@ -968,8 +1028,16 @@ export function buildGuestReservationModificationPreviewFingerprint(
 }
 
 export async function confirmGuestReservationModification(
-  input: GuestReservationModificationConfirmInput
+  input: GuestReservationModificationConfirmInput,
+  dependencies: ConfirmationDependencies = defaultConfirmationDependencies
 ) {
+  const inStayExtension = input.operation === "EXTEND_CHECKOUT_ONLY";
+  if (inStayExtension && input.confirmationSource !== "PIN_AI_GUEST_SERVICES") {
+    throw new GuestReservationModificationError({
+      code: "PIN_AI_ACTION_PROPOSAL_EVIDENCE_REQUIRED",
+      message: "An in-stay extension requires a confirmed Pin AI proposal.", statusCode: 400,
+    });
+  }
   const guestToken = normalizeGuestToken(input.guestToken);
   const clientRequestId = normalizeClientRequestId(input.clientRequestId);
   const selectedAmenityIds = normalizeSelectedAmenityIds(
@@ -1027,6 +1095,7 @@ export async function confirmGuestReservationModification(
 
   const requestFingerprint =
     buildGuestReservationModificationRequestFingerprint({
+      ...(inStayExtension ? { operation: "EXTEND_CHECKOUT_ONLY" as const } : {}),
       checkIn: input.checkIn,
       checkOut: input.checkOut,
       adults: input.adults,
@@ -1034,8 +1103,11 @@ export async function confirmGuestReservationModification(
       selectedAmenityIds,
       acceptNoRefundReduction,
     });
-  const now = new Date();
-  const existingReplay = await prisma.reservationModification.findFirst({
+  const now = dependencies.now();
+  if (actionProposalConfirmedAt && actionProposalConfirmedAt > now) {
+    throw new GuestReservationModificationError({ code: "PIN_AI_ACTION_PROPOSAL_EVIDENCE_REQUIRED", message: "Proposal confirmation cannot be in the future.", statusCode: 400 });
+  }
+  const existingReplay = await dependencies.client.reservationModification.findFirst({
     where: {
       clientRequestId,
       reservation: {
@@ -1065,13 +1137,14 @@ export async function confirmGuestReservationModification(
   }
 
   const preview = await getGuestReservationModificationPreview({
+    ...(inStayExtension ? { operation: "EXTEND_CHECKOUT_ONLY" as const } : {}),
     guestToken,
     checkIn: input.checkIn,
     checkOut: input.checkOut,
     adults: input.adults,
     children: input.children,
     selectedAmenityIds,
-  });
+  }, dependencies);
 
   if (
     expectedPreviewFingerprint &&
@@ -1115,7 +1188,7 @@ export async function confirmGuestReservationModification(
 
   const baseReservation = await getEligibleReservationByGuestToken(
     guestToken,
-    now
+    now, inStayExtension, dependencies
   );
 
   if (
@@ -1143,11 +1216,18 @@ export async function confirmGuestReservationModification(
           platformFeePercent: getModificationPlatformFeePercent(),
         })
       : null;
-  const confirmedAt = new Date();
+  const confirmedAt = dependencies.now();
   const checkoutExpiresAt =
     initialStatus === ReservationModificationStatus.AWAITING_PAYMENT
-      ? new Date(confirmedAt.getTime() + 60 * 60 * 1000)
+      ? new Date(Math.min(confirmedAt.getTime() + 60 * 60 * 1000,
+          inStayExtension ? baseReservation.checkOut.getTime() : Infinity))
       : null;
+  if (inStayExtension && checkoutExpiresAt && checkoutExpiresAt.getTime() <= confirmedAt.getTime() + IN_STAY_EXTENSION_MIN_PAYMENT_WINDOW_MS) {
+    throw new GuestReservationModificationError({
+      code: "RESERVATION_MODIFICATION_CHECKOUT_WINDOW_EXPIRED",
+      message: "Insufficient payment time remains before the original checkout.", statusCode: 409,
+    });
+  }
   const activeStatuses = [
     ReservationModificationStatus.AWAITING_PAYMENT,
     ReservationModificationStatus.PAYMENT_PROCESSING,
@@ -1155,7 +1235,7 @@ export async function confirmGuestReservationModification(
     ReservationModificationStatus.APPLYING,
   ];
 
-  const modification = await prisma.$transaction(async (tx) => {
+  const modification = await dependencies.client.$transaction(async (tx) => {
     await tx.$queryRaw`
       SELECT "id"
       FROM "Reservation"
@@ -1171,6 +1251,7 @@ export async function confirmGuestReservationModification(
         status: true,
         paymentState: true,
         checkIn: true,
+        checkOut: true,
       },
     });
 
@@ -1180,7 +1261,9 @@ export async function confirmGuestReservationModification(
         baseReservation.updatedAt.getTime() ||
       currentReservation.status !== ReservationStatus.ACTIVE ||
       currentReservation.paymentState !== PaymentState.PAID ||
-      currentReservation.checkIn <= confirmedAt
+      (inStayExtension
+        ? currentReservation.checkIn > dependencies.now() || currentReservation.checkOut <= dependencies.now()
+        : currentReservation.checkIn <= confirmedAt)
     ) {
       throw new GuestReservationModificationError({
         code: "RESERVATION_CHANGED_RETRY_PREVIEW",
@@ -1276,6 +1359,7 @@ export async function confirmGuestReservationModification(
         reductionPolicy: preview.pricing.reductionPolicy as any,
         requestSource: confirmationSource,
         guestConfirmation: {
+          ...(inStayExtension ? { operation: "EXTEND_CHECKOUT_ONLY" } : {}),
           confirmed: true,
           confirmedAt: confirmedAt.toISOString(),
           source: confirmationSource,

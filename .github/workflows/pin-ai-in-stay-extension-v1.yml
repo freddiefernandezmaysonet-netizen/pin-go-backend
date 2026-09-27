@@ -1,0 +1,90 @@
+name: Pin AI In-Stay Extension V1
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - "src/pin-ai/**"
+      - "src/services/guest-reservation-*"
+      - "src/services/direct-booking-pricing.service.ts"
+      - "tsconfig.pin-ai-*.json"
+      - ".github/workflows/pin-ai-in-stay-extension-v1.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  isolated-regression:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      DATABASE_URL: postgresql://user:pass@localhost:5432/pingo_test
+      STRIPE_SECRET_KEY: sk_test_contract_only
+      APP_URL: http://localhost:3000
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+      - name: Install locked dependencies
+        run: npm ci --ignore-scripts --no-audit --no-fund
+      - name: Generate Prisma client
+        run: npx prisma generate
+      - name: Run isolated runtime and canonical contracts
+        run: |
+          node --import tsx --test \
+            src/pin-ai/runtime/*.test.ts \
+            src/pin-ai/guest/*.test.ts \
+            src/pin-ai/property-knowledge*.test.ts \
+            src/pin-ai/actions/*.test.ts \
+            src/services/guest-reservation-extension-preview.test.ts \
+            src/services/guest-reservation-modification-apply.service.test.ts \
+            src/services/guest-reservation-modification-checkout.service.test.ts \
+            src/services/guest-reservation-modification-payment.service.test.ts \
+            src/services/guest-reservation-modification.policy.test.ts
+      - name: Compile the three affected scopes
+        run: |
+          npx tsc -p tsconfig.pin-ai-in-stay-extension.json --noEmit false --outDir /tmp/in-stay-build
+          npx tsc -p tsconfig.pin-ai-action-proposal-runtime.json --noEmit false --outDir /tmp/runtime-build
+          npx tsc -p tsconfig.pin-ai-guest-gateway.json --noEmit false --outDir /tmp/gateway-build
+      - name: Validate isolated provider probe without calling OpenAI
+        run: |
+          npx tsc --noEmit --strict --skipLibCheck --target ES2022 --module NodeNext --moduleResolution NodeNext src/pin-ai/runtime/runtime-session-config-canary.ts
+          node --import tsx src/pin-ai/runtime/runtime-session-config-canary.ts
+
+  postgres-confirmation-concurrency:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: pingo_pin_ai_extension_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d pingo_pin_ai_extension_test"
+          --health-interval 5s --health-timeout 5s --health-retries 10
+    env:
+      DATABASE_URL: postgresql://postgres:postgres@127.0.0.1:5432/pingo_pin_ai_extension_test
+      PIN_AI_EXTENSION_TEST_DATABASE_URL: postgresql://postgres:postgres@127.0.0.1:5432/pingo_pin_ai_extension_test
+      STRIPE_SECRET_KEY: sk_test_contract_only
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+      - name: Install locked dependencies
+        run: npm ci --ignore-scripts --no-audit --no-fund
+      - name: Generate client and initialize empty disposable schema
+        run: |
+          npx prisma generate
+          npx prisma db push --skip-generate
+      - name: Compile database contract
+        run: npx tsc -p tsconfig.pin-ai-in-stay-extension.json
+      - name: Exercise real row locking and idempotency without payment providers
+        run: node --import tsx --test src/services/guest-reservation-extension-confirmation.db.test.ts

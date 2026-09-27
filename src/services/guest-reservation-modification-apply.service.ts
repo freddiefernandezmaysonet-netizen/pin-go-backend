@@ -7,6 +7,8 @@ import {
   ReservationStatus,
 } from "@prisma/client";
 import { formatInTimeZone } from "date-fns-tz";
+import { isConfirmedInStayExtension } from "../pin-ai/actions/in-stay-extension-confirmation.js";
+import { InStayExtensionError } from "../pin-ai/actions/in-stay-extension.js";
 
 import { persistChannexAriReservationIntent } from "../pms/outbound/channex-ari-reservation-producer.service";
 import {
@@ -73,6 +75,7 @@ type ApplyPlanInput = {
 };
 
 export type GuestReservationModificationApplyPlan = {
+  availabilityCheckIn: Date;
   datesChanged: boolean;
   guestsChanged: boolean;
   amenitiesChanged: boolean;
@@ -309,10 +312,20 @@ export function buildGuestReservationModificationApplyPlan(
     });
   }
 
+  let inStayExtension = false;
+  try {
+    inStayExtension = isConfirmedInStayExtension(input);
+  } catch (error) {
+    if (error instanceof InStayExtensionError) {
+      throw applyError({ code: error.code, message: error.message });
+    }
+    throw error;
+  }
+
   if (
     input.reservation.status !== ReservationStatus.ACTIVE ||
     input.reservation.paymentState !== PaymentState.PAID ||
-    input.reservation.checkIn.getTime() <= input.now.getTime()
+    (!inStayExtension && input.reservation.checkIn.getTime() <= input.now.getTime())
   ) {
     throw applyError({
       code: "RESERVATION_NOT_ELIGIBLE_FOR_MODIFICATION_APPLY",
@@ -331,7 +344,7 @@ export function buildGuestReservationModificationApplyPlan(
 
   if (
     proposedCheckOut <= proposedCheckIn ||
-    proposedCheckIn.getTime() <= input.now.getTime()
+    (!inStayExtension && proposedCheckIn.getTime() <= input.now.getTime())
   ) {
     throw applyError({
       code: "RESERVATION_MODIFICATION_PROPOSED_STAY_INVALID",
@@ -422,6 +435,7 @@ export function buildGuestReservationModificationApplyPlan(
   );
 
   return {
+    availabilityCheckIn: inStayExtension ? input.modification.currentCheckOut : proposedCheckIn,
     datesChanged,
     guestsChanged,
     amenitiesChanged,
@@ -557,9 +571,20 @@ function serializeAppliedResult(input: {
   };
 }
 
+type ApplyDependencies = Readonly<{
+  client: Pick<PrismaClient, "reservationModification" | "$transaction">;
+  now: () => Date;
+  reconcile: (reservationId: string) => Promise<unknown>;
+}>;
+const defaultApplyDependencies: ApplyDependencies = {
+  client: prisma, now: () => new Date(), reconcile: reconcileReservation,
+};
+
 export async function applyGuestReservationModification(input: {
   modificationId: string;
-}) {
+}, dependencies: ApplyDependencies = defaultApplyDependencies) {
+  const prisma = dependencies.client;
+  const reconcileReservation = dependencies.reconcile;
   const modificationId = normalizeId(
     input.modificationId,
     "RESERVATION_MODIFICATION_ID_REQUIRED"
@@ -577,7 +602,7 @@ export async function applyGuestReservationModification(input: {
     });
   }
 
-  const now = new Date();
+  const now = dependencies.now();
 
   try {
     const result = await prisma.$transaction(
@@ -651,7 +676,7 @@ export async function applyGuestReservationModification(input: {
             modificationId: modification.id,
             reservationId: modification.reservation.id,
             propertyId: modification.reservation.propertyId,
-            checkIn: modification.proposedCheckIn,
+            checkIn: plan.availabilityCheckIn,
             checkOut: modification.proposedCheckOut,
             now,
           });

@@ -281,13 +281,52 @@ test("runtime rejects disabled tools and invalid arguments before execution", as
   }
 });
 
+for (const scenario of ["propagates", "changed", "never-clears"] as const) {
+test(`runtime handles an acknowledged required action: ${scenario}`, async () => {
+  const f = createTurnFixture({ actions: () => [{ name: "get_access_status" }] });
+  let accepted = false;
+  let staleRead = false;
+  let savedSession: any;
+  let count = 0;
+  const fetchImpl: RuntimeFetch = async (url, init) => {
+    const response = await f.fetchImpl(url, init);
+    if (init.method === "GET" && url.endsWith(`/${f.sessionId}`)) {
+      if (!accepted) savedSession = await response.json();
+      else if (!staleRead || scenario === "never-clears") {
+        staleRead = true;
+        const stale = structuredClone(savedSession);
+        if (scenario === "changed") stale.required_actions[0].arguments = { unexpected: "changed" };
+        return jsonResponse(stale);
+      }
+    }
+    if (init.method === "POST" && url.endsWith("/events")) accepted = true;
+    if (accepted && (!staleRead || scenario === "never-clears") && url.endsWith("/turns?limit=100&order=asc")) {
+      return jsonResponse(page(f.turns.map(turn => ({ ...turn, status: "waiting" }))));
+    }
+    return response;
+  };
+  const pending = run(transport(fetchImpl), { async execute() { count += 1; return {}; } });
+  if (scenario === "propagates") {
+    const result = await pending;
+    assert.equal(result.responseText, "Checked.");
+    assert.equal(result.toolCalls.length, 1);
+  } else {
+    await assert.rejects(pending, scenario === "changed"
+      ? /TOOL_CALL_ID_REUSED_WITH_CHANGED_PAYLOAD/ : /TURN_POLL_LIMIT/);
+  }
+  assert.equal(staleRead, true);
+  assert.equal(count, 1);
+  assert.equal(f.toolResults.length, 1);
+});
+}
+
 test("runtime rejects repeated call IDs and mixed-turn actions without duplicate execution", async () => {
   const f = createTurnFixture({ actions: () => [
     { name: "get_access_status", call_id: "same" }, { name: "get_access_status", call_id: "same" },
   ] });
   let count = 0;
   await assert.rejects(run(transport(f.fetchImpl), { async execute() { count += 1; return {}; } }), /DUPLICATE_TOOL_CALL_ID/);
-  assert.equal(count, 1);
+  assert.equal(count, 0);
   const mixed = createTurnFixture({ actions: () => [
     { name: "get_access_status" }, { name: "get_cleaning_status", turn_id: "turn_foreign" },
   ] });
@@ -471,4 +510,65 @@ test("collection reads have a finite page budget", async () => {
   });
   await assert.rejects(run(t), /COLLECTION_PAGE_LIMIT/);
   assert.equal(pages, 10);
+});
+
+for (const transition of ["legacy", "enable", "disable", "unchanged", "other-reservation"] as const) {
+  test(`guest session configuration: ${transition}`, async () => {
+    const oldSession = createTurnFixture({ sessionId: "sess_old" });
+    const newSession = createTurnFixture({ sessionId: "sess_new" });
+    const calls: string[] = [];
+    let creatingOld = true;
+    const fetchImpl: RuntimeFetch = async (url, init) => {
+      calls.push(`${init.method} ${new URL(url).pathname}`);
+      const f = url.endsWith("/sessions") ? (creatingOld ? oldSession : newSession)
+        : url.includes("/sess_old") ? oldSession : newSession;
+      const response = await f.fetchImpl(url, init);
+      if (init.method === "GET" && new URL(url).pathname === `/v1/agents/sessions/${f.sessionId}`) {
+        return jsonResponse({ ...await response.json() as object,
+          metadata: transition === "legacy" ? {} : f.createPayload.metadata });
+      }
+      return response;
+    };
+    const initiallyEnabled = transition === "disable";
+    const config = { requireCurrentSessionConfig: true, actionProposal: { enabled: initiallyEnabled } };
+    await run(transport(fetchImpl, config));
+    oldSession.items.push({ id: "private_tool", type: "function_call_output", role: "tool",
+      turn_id: "turn_1", status: "completed", content: [{ type: "input_text", text: "PRIVATE_PROPOSAL_SENTINEL" }] });
+    creatingOld = false;
+    calls.length = 0;
+    const enabled = transition === "enable";
+    const nextRequest = transition === "other-reservation"
+      ? { ...request, context: { ...request.context, reservationId: "reservation-b" } } : request;
+    const t = transport(fetchImpl, { ...config, actionProposal: { enabled }, resumeSessionId: "sess_old" });
+    const result = await new LunaRuntimeAdapter(t).run(nextRequest, createConversationMemory(nextRequest), noTools);
+    const rotates = transition !== "unchanged";
+    assert.equal(result.openaiSessionId, rotates ? "sess_new" : "sess_old");
+    assert.equal(newSession.createCount, rotates ? 1 : 0);
+    assert.equal(calls.includes("POST /v1/agents/sessions/sess_old/events"), !rotates);
+    if (rotates) {
+      const agent = newSession.createPayload.agent as { instructions: string; tools: { name?: string; type: string }[] };
+      assert.equal(agent.tools.some(t => t.name === "prepare_reservation_modification"), enabled);
+      assert.equal(agent.tools.filter(t => t.type === "function").length, enabled ? 14 : 13);
+      assert.equal(agent.instructions.includes("EXTEND_CHECKOUT_ONLY"), enabled);
+      const input = JSON.parse(newSession.inputs[0]!);
+      assert.deepEqual(input.conversation, nextRequest.conversation);
+      assert.deepEqual(input.memory, createConversationMemory(nextRequest));
+      assert.equal(input.context.reservationId, nextRequest.context.reservationId);
+      assert.deepEqual(input.priorConversationForContextOnly, transition === "other-reservation" ? [] : [
+        ...request.conversation, { role: "assistant", content: "Checked." },
+      ]);
+      assert.equal(newSession.inputs[0]!.includes("PRIVATE_PROPOSAL_SENTINEL"), false);
+      assert.match(input.historyConstraint, /never current pricing/);
+    }
+  });
+}
+
+test("configuration rotation cannot bypass a busy existing session", async () => {
+  const f = resumed();
+  f.turns[0]!.status = "queued";
+  await assert.rejects(run(transport(f.fetchImpl, {
+    resumeSessionId: f.sessionId, requireCurrentSessionConfig: true,
+    actionProposal: { enabled: true },
+  })), /SESSION_BUSY/);
+  assert.equal(f.calls.some(c => c.method === "POST"), false);
 });

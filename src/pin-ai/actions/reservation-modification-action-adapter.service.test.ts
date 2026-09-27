@@ -26,6 +26,7 @@ const BASE_NOW =
 
 function preview(
   overrides: Partial<{
+    managementPhase: "PRE_STAY" | "IN_STAY";
     previewFingerprint: string;
     financialAction: string;
     amountDifferenceCents: number;
@@ -34,7 +35,7 @@ function preview(
 ) {
   return {
     managementPhase:
-      "PRE_STAY" as const,
+      overrides.managementPhase ?? "PRE_STAY",
     modificationAllowed:
       true as const,
     reservation: {
@@ -161,7 +162,7 @@ function preview(
   };
 }
 
-function createHarness() {
+function createHarness(previewElapsedMs = 0) {
   let now =
     new Date(BASE_NOW);
   let currentPreview =
@@ -172,6 +173,7 @@ function createHarness() {
     any = null;
   let confirmInput:
     any = null;
+  const previewInputs: unknown[] = [];
   let supersedeCalls = 0;
   let confirmStatus:
     ReservationModificationStatus =
@@ -193,7 +195,9 @@ function createHarness() {
 
   const dependencies = {
     prisma,
-    async getPreview() {
+    async getPreview(input: unknown) {
+      previewInputs.push(input);
+      now = new Date(now.getTime() + previewElapsedMs);
       return currentPreview;
     },
     async createProposal(
@@ -344,9 +348,11 @@ function createHarness() {
   async function prepare(
     language: "en" | "es" =
       "es",
+    operation?: "EXTEND_CHECKOUT_ONLY",
   ) {
     const result =
       await adapter.prepare({
+        ...(operation ? { operation } : {}),
         guestToken:
           GUEST_TOKEN,
         checkIn:
@@ -435,6 +441,7 @@ function createHarness() {
       checkoutExpiresAt =
         new Date(value);
     },
+    getPreviewInputs: () => previewInputs,
     getCreateProposalInput:
       () => createProposalInput,
     getConfirmInput:
@@ -770,3 +777,85 @@ test(
     );
   },
 );
+
+test("extension operation survives terms storage, requote and canonical confirmation", async () => {
+  const h = createHarness();
+  const value = preview({ managementPhase: "IN_STAY" });
+  value.reservation.current.checkIn = new Date("2026-09-25T18:17:03.123Z");
+  value.reservation.current.checkOut = new Date("2026-09-27T15:00:00Z");
+  value.reservation.proposed.checkIn = new Date(value.reservation.current.checkIn);
+  value.reservation.proposed.checkOut = new Date("2026-09-28T15:00:00Z");
+  h.setPreview(value);
+  await h.prepare("es", "EXTEND_CHECKOUT_ONLY");
+  assert.equal(h.getCreateProposalInput().termsSnapshot.operation, "EXTEND_CHECKOUT_ONLY");
+  await h.adapter.execute({ guestToken: GUEST_TOKEN, proposalId: PROPOSAL_ID });
+  const previews = h.getPreviewInputs() as Array<{ operation?: string; checkIn: Date }>;
+  assert.equal(previews.length, 2);
+  for (const input of previews) {
+    assert.equal(input.operation, "EXTEND_CHECKOUT_ONLY");
+    assert.equal(input.checkIn.toISOString(), "2026-09-25T18:17:03.123Z");
+  }
+  assert.equal(h.getConfirmInput().operation, "EXTEND_CHECKOUT_ONLY");
+});
+
+test("adapter refuses extension terms that would change the original check-in", async () => {
+  const h = createHarness();
+  const value = preview({ managementPhase: "IN_STAY" });
+  value.reservation.proposed.checkIn = new Date("2026-10-02T20:00:00Z");
+  h.setPreview(value);
+  await assert.rejects(h.prepare("es", "EXTEND_CHECKOUT_ONLY"), /INVALID_QUOTE_TERMS/);
+  assert.equal(h.getCreateProposalInput(), null);
+});
+
+for (const remainingMs of [120 * 60_000, 40 * 60_000, 30 * 60_000 + 1, 30 * 60_000, 29 * 60_000]) {
+  test(`paid extension quote respects original-checkout payment window: ${remainingMs}ms remaining`, async () => {
+    const h = createHarness();
+    const value = preview({ managementPhase: "IN_STAY", amountDifferenceCents: 100 });
+    value.reservation.current.checkIn = new Date(BASE_NOW.getTime() - 86_400_000);
+    value.reservation.current.checkOut = new Date(BASE_NOW.getTime() + remainingMs);
+    value.reservation.proposed.checkIn = new Date(value.reservation.current.checkIn);
+    value.reservation.proposed.checkOut = new Date(value.reservation.current.checkOut.getTime() + 86_400_000);
+    h.setPreview(value);
+    if (remainingMs <= 30 * 60_000) {
+      await assert.rejects(h.prepare("es", "EXTEND_CHECKOUT_ONLY"), /EXTENSION_CONFIRMATION_WINDOW_CLOSED/);
+      assert.equal(h.getCreateProposalInput(), null);
+    } else {
+      const result = await h.prepare("es", "EXTEND_CHECKOUT_ONLY");
+      const expected = new Date(BASE_NOW.getTime() + Math.min(60 * 60_000, remainingMs - 30 * 60_000));
+      assert.equal(result.quote.quoteExpiresAt.getTime(), expected.getTime());
+      assert.equal(result.quote.priceGuaranteedUntil.getTime(), expected.getTime());
+      assert.equal(h.getCreateProposalInput().termsSnapshot.quoteExpiresAt, expected.toISOString());
+      h.setNow(expected);
+      const expired = await h.adapter.execute({guestToken: GUEST_TOKEN, proposalId: PROPOSAL_ID});
+      assert.equal(expired.outcome, "REVIEW_REQUIRED");
+      assert.equal(expired.reasonCode, "QUOTE_EXPIRED");
+      assert.equal(expired.actionExecuted, false);
+      assert.equal(h.getConfirmInput(), null);
+    }
+  });
+}
+
+test("extension without additional payment expires at original checkout without the payment buffer", async () => {
+  const h = createHarness();
+  const value = preview({ managementPhase: "IN_STAY", amountDifferenceCents: 0, financialAction: "NO_FINANCIAL_CHANGE" });
+  value.reservation.current.checkIn = new Date(BASE_NOW.getTime() - 86_400_000);
+  value.reservation.current.checkOut = new Date(BASE_NOW.getTime() + 20 * 60_000);
+  value.reservation.proposed.checkIn = new Date(value.reservation.current.checkIn);
+  value.reservation.proposed.checkOut = new Date(value.reservation.current.checkOut.getTime() + 86_400_000);
+  h.setPreview(value);
+  const result = await h.prepare("es", "EXTEND_CHECKOUT_ONLY");
+  assert.equal(result.quote.quoteExpiresAt.getTime(), value.reservation.current.checkOut.getTime());
+});
+
+
+test("preview latency cannot create a proposal after the confirmation window closes", async () => {
+  const h = createHarness(10 * 60_000);
+  const value = preview({ managementPhase: "IN_STAY", amountDifferenceCents: 100 });
+  value.reservation.current.checkIn = new Date(BASE_NOW.getTime() - 86_400_000);
+  value.reservation.current.checkOut = new Date(BASE_NOW.getTime() + 40 * 60_000);
+  value.reservation.proposed.checkIn = new Date(value.reservation.current.checkIn);
+  value.reservation.proposed.checkOut = new Date(value.reservation.current.checkOut.getTime() + 86_400_000);
+  h.setPreview(value);
+  await assert.rejects(h.prepare("es", "EXTEND_CHECKOUT_ONLY"), /EXTENSION_CONFIRMATION_WINDOW_CLOSED/);
+  assert.equal(h.getCreateProposalInput(), null);
+});

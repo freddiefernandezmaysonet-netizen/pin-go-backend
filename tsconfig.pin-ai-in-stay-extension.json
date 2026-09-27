@@ -1,0 +1,21 @@
+{
+  "compilerOptions": {
+    "noEmit": true,
+    "module": "preserve",
+    "moduleResolution": "bundler",
+    "target": "es2022",
+    "strict": true,
+    "skipLibCheck": true,
+    "types": ["node"]
+  },
+  "include": [
+    "src/pin-ai/actions/in-stay-extension.ts",
+    "src/pin-ai/actions/in-stay-extension.test.ts",
+    "src/services/guest-reservation-extension-preview.ts",
+    "src/services/guest-reservation-extension-preview.test.ts",
+    "src/services/guest-reservation-extension-confirmation.db.test.ts",
+    "src/services/guest-reservation-modification.policy.test.ts",
+    "src/services/guest-reservation-modification-checkout.service.test.ts",
+    "src/services/guest-reservation-modification-apply.service.test.ts"
+  ]
+}

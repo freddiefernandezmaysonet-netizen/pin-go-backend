@@ -10,12 +10,28 @@ import {
 import stripe from "../billing/stripe";
 import { checkPropertyAvailability } from "./availability.service";
 import { calculateDirectBookingPricing } from "./direct-booking-pricing.service";
+import { previewGuestReservationExtension } from "./guest-reservation-extension-preview.js";
+import { isConfirmedInStayExtension } from "../pin-ai/actions/in-stay-extension-confirmation.js";
+import { InStayExtensionError } from "../pin-ai/actions/in-stay-extension.js";
 import {
   GuestReservationModificationError,
 } from "./guest-reservation-modification.service";
 import { assertDirectBookingPayoutReady } from "./stripe-connect.service";
 
 const prisma = new PrismaClient();
+type CheckoutDependencies = {
+  client: Pick<PrismaClient, "reservationModification">;
+  stripe: Pick<typeof stripe, "checkout">;
+  now: () => Date;
+  checkAvailability: typeof checkPropertyAvailability;
+  calculatePricing: typeof calculateDirectBookingPricing;
+  assertPayoutReady: typeof assertDirectBookingPayoutReady;
+};
+const defaultCheckoutDependencies: CheckoutDependencies = {
+  client: prisma, stripe, now: () => new Date(),
+  checkAvailability: checkPropertyAvailability, calculatePricing: calculateDirectBookingPricing,
+  assertPayoutReady: assertDirectBookingPayoutReady,
+};
 
 function normalize(value: unknown) {
   return String(value ?? "").trim();
@@ -179,7 +195,7 @@ function serializeCheckoutResult(input: {
 export async function createGuestReservationModificationCheckout(input: {
   guestToken: string;
   modificationId: string;
-}) {
+}, dependencies: CheckoutDependencies = defaultCheckoutDependencies) {
   const guestToken = normalize(input.guestToken);
   const modificationId = assertValidModificationId(input.modificationId);
 
@@ -191,8 +207,8 @@ export async function createGuestReservationModificationCheckout(input: {
     });
   }
 
-  const now = new Date();
-  let modification = await prisma.reservationModification.findFirst({
+  const now = dependencies.now();
+  let modification = await dependencies.client.reservationModification.findFirst({
     where: {
       id: modificationId,
       reservation: {
@@ -211,6 +227,9 @@ export async function createGuestReservationModificationCheckout(input: {
               id: true,
               name: true,
               organizationId: true,
+              timezone: true,
+              checkOutTime: true,
+              maximumNights: true,
             },
           },
         },
@@ -224,6 +243,17 @@ export async function createGuestReservationModificationCheckout(input: {
       message: "Reservation modification not found or guest link has expired.",
       statusCode: 404,
     });
+  }
+
+  const reservation = modification.reservation;
+  let inStayExtension = false;
+  try {
+    inStayExtension = isConfirmedInStayExtension({ modification, reservation, now });
+  } catch (error) {
+    if (error instanceof InStayExtensionError) {
+      throw new GuestReservationModificationError({ code: error.code, message: error.message, statusCode: 409 });
+    }
+    throw error;
   }
 
   const additionalChargeAmountCents = toCents(
@@ -267,7 +297,7 @@ export async function createGuestReservationModificationCheckout(input: {
       });
     }
 
-    const existingSession = await stripe.checkout.sessions.retrieve(
+    const existingSession = await dependencies.stripe.checkout.sessions.retrieve(
       modification.stripeCheckoutSessionId,
       { stripeAccount: existingConnectedAccountId }
     );
@@ -283,7 +313,7 @@ export async function createGuestReservationModificationCheckout(input: {
     }
 
     if (existingSession.status === "expired") {
-      await prisma.reservationModification.updateMany({
+      await dependencies.client.reservationModification.updateMany({
         where: {
           id: modification.id,
           status: ReservationModificationStatus.AWAITING_PAYMENT,
@@ -327,7 +357,7 @@ export async function createGuestReservationModificationCheckout(input: {
     modification.checkoutExpiresAt.getTime() <=
       now.getTime() + 30 * 60 * 1000
   ) {
-    await prisma.reservationModification.updateMany({
+    await dependencies.client.reservationModification.updateMany({
       where: {
         id: modification.id,
         status: ReservationModificationStatus.AWAITING_PAYMENT,
@@ -346,13 +376,12 @@ export async function createGuestReservationModificationCheckout(input: {
     });
   }
 
-  const reservation = modification.reservation;
   const guestEmail = normalize(reservation.guestEmail);
 
   if (
     reservation.status !== ReservationStatus.ACTIVE ||
     reservation.paymentState !== PaymentState.PAID ||
-    reservation.checkIn <= now ||
+    (!inStayExtension && reservation.checkIn <= now) ||
     reservation.updatedAt.getTime() !==
       modification.baseReservationUpdatedAt.getTime()
   ) {
@@ -371,9 +400,9 @@ export async function createGuestReservationModificationCheckout(input: {
     });
   }
 
-  const availability = await checkPropertyAvailability({
+  const availability = await dependencies.checkAvailability({
     propertyId: reservation.propertyId,
-    checkIn: modification.proposedCheckIn,
+    checkIn: inStayExtension ? modification.currentCheckOut : modification.proposedCheckIn,
     checkOut: modification.proposedCheckOut,
     excludeReservationId: reservation.id,
     excludeReservationModificationId: modification.id,
@@ -390,13 +419,38 @@ export async function createGuestReservationModificationCheckout(input: {
     });
   }
 
-  const currentProposedPricing = await calculateDirectBookingPricing({
-    propertyId: reservation.propertyId,
-    checkIn: modification.proposedCheckIn,
-    checkOut: modification.proposedCheckOut,
-    selectedAmenityIds: modification.proposedSelectedAmenityIds,
-    excludeReservationId: reservation.id,
-  });
+  let currentProposedPricing: { totalAmountCents: number };
+  if (inStayExtension) {
+    try {
+      const extension = await previewGuestReservationExtension({
+        reservation: { ...reservation, currency: reservation.currency ?? "usd", totalAmount: Number(reservation.totalAmount) },
+        proposedCheckIn: modification.proposedCheckIn, proposedCheckOut: modification.proposedCheckOut,
+        proposedAdults: modification.proposedAdults, proposedChildren: modification.proposedChildren,
+        proposedSelectedAmenityIds: modification.proposedSelectedAmenityIds,
+        propertyTimezone: reservation.property.timezone ?? "",
+        propertyCheckOutTime: reservation.property.checkOutTime ?? "11:00",
+        maximumNights: reservation.property.maximumNights, now,
+      }, {
+        // The added interval was checked above, excluding this modification's own hold.
+        checkAvailability: async () => availability,
+        calculatePricing: dependencies.calculatePricing,
+      });
+      currentProposedPricing = extension.proposedPricing;
+    } catch (error) {
+      if (error instanceof InStayExtensionError) {
+        throw new GuestReservationModificationError({ code: error.code, message: error.message, statusCode: 409 });
+      }
+      throw error;
+    }
+  } else {
+    currentProposedPricing = await dependencies.calculatePricing({
+      propertyId: reservation.propertyId,
+      checkIn: modification.proposedCheckIn,
+      checkOut: modification.proposedCheckOut,
+      selectedAmenityIds: modification.proposedSelectedAmenityIds,
+      excludeReservationId: reservation.id,
+    });
+  }
   const storedProposedTotalAmountCents = toCents(
     modification.proposedTotalAmount,
     "INVALID_PROPOSED_TOTAL_AMOUNT"
@@ -406,7 +460,7 @@ export async function createGuestReservationModificationCheckout(input: {
     currentProposedPricing.totalAmountCents !==
     storedProposedTotalAmountCents
   ) {
-    await prisma.reservationModification.updateMany({
+    await dependencies.client.reservationModification.updateMany({
       where: {
         id: modification.id,
         status: ReservationModificationStatus.AWAITING_PAYMENT,
@@ -433,7 +487,7 @@ export async function createGuestReservationModificationCheckout(input: {
     });
   }
 
-  const payoutReady = await assertDirectBookingPayoutReady(
+  const payoutReady = await dependencies.assertPayoutReady(
     reservation.property.organizationId
   );
   const destinationSnapshot =
@@ -450,7 +504,7 @@ export async function createGuestReservationModificationCheckout(input: {
     });
   }
 
-  await prisma.reservationModification.updateMany({
+  await dependencies.client.reservationModification.updateMany({
     where: {
       id: modification.id,
       status: ReservationModificationStatus.AWAITING_PAYMENT,
@@ -468,7 +522,7 @@ export async function createGuestReservationModificationCheckout(input: {
     },
   });
 
-  modification = await prisma.reservationModification.findUniqueOrThrow({
+  modification = await dependencies.client.reservationModification.findUniqueOrThrow({
     where: { id: modification.id },
     include: {
       reservation: {
@@ -478,6 +532,9 @@ export async function createGuestReservationModificationCheckout(input: {
               id: true,
               name: true,
               organizationId: true,
+              timezone: true,
+              checkOutTime: true,
+              maximumNights: true,
             },
           },
         },
@@ -516,7 +573,7 @@ export async function createGuestReservationModificationCheckout(input: {
   let session: Stripe.Checkout.Session;
 
   try {
-    session = await stripe.checkout.sessions.create(
+    session = await dependencies.stripe.checkout.sessions.create(
       checkoutContract.params,
       {
         ...checkoutContract.requestOptions,
@@ -524,7 +581,7 @@ export async function createGuestReservationModificationCheckout(input: {
       }
     );
   } catch (error: any) {
-    await prisma.reservationModification
+    await dependencies.client.reservationModification
       .update({
         where: { id: modification.id },
         data: {
@@ -546,7 +603,7 @@ export async function createGuestReservationModificationCheckout(input: {
     });
   }
 
-  const persisted = await prisma.reservationModification.updateMany({
+  const persisted = await dependencies.client.reservationModification.updateMany({
     where: {
       id: modification.id,
       status: ReservationModificationStatus.AWAITING_PAYMENT,
@@ -565,7 +622,7 @@ export async function createGuestReservationModificationCheckout(input: {
   });
 
   if (persisted.count === 0) {
-    const current = await prisma.reservationModification.findUnique({
+    const current = await dependencies.client.reservationModification.findUnique({
       where: { id: modification.id },
       select: {
         stripeCheckoutSessionId: true,

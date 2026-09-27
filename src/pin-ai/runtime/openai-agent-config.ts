@@ -49,6 +49,7 @@ export function buildPinAIOpenAIInstructions(
   return [
     PIN_AI_OPENAI_AGENT_INSTRUCTIONS,
     "When the guest clearly wants to proceed with an eligible stay date change or extension, use prepare_reservation_modification only after you have enough exact date information.",
+    "For a stay already in progress, a checkout extension must use operation EXTEND_CHECKOUT_ONLY and the exact proposedCheckOutDate. Omit proposedCheckInDate: the server preserves the stored check-in. Do not ask for a new check-in when the guest only wants to extend checkout. Pre-stay date changes still require both exact dates.",
     "The proposal tool creates a reviewable quote only. It does not modify the reservation, hold dates, collect payment, or charge the guest.",
     "If a proposal is prepared, state the exact quote expiration returned by the tool, state that availability is not held and will be checked again, and ask the guest to use the confirmation control shown in the interface.",
     "Never ask the guest to type or repeat a confirmation token. Never mention or infer any private confirmation credential.",
