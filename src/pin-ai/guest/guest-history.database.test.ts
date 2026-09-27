@@ -9,11 +9,12 @@ import { createConversationMemory } from "../runtime/conversation-memory.js";
 
 // This migration test mutates an isolated disposable schema, never Railway.
 const url = new URL(process.env.DATABASE_URL ?? "http://missing");
-if (!["localhost", "127.0.0.1"].includes(url.hostname) || url.pathname !== "/pin_ai_history_test" || process.env.PIN_AI_HISTORY_DB_TEST !== "true") {
+const enabled = process.env.PIN_AI_HISTORY_DB_TEST === "true";
+if (enabled && (!["localhost", "127.0.0.1"].includes(url.hostname) || url.pathname !== "/pin_ai_history_test")) {
   throw new Error("Only the explicitly enabled local pin_ai_history_test database is allowed");
 }
 
-test("additive history migration preserves sessions; actual PostgreSQL stores and restores bounded dialogue and concurrent receipts", async () => {
+test("additive history migration preserves sessions; actual PostgreSQL stores and restores bounded dialogue and concurrent receipts", { skip: !enabled }, async () => {
   const prisma = new PrismaClient();
   const now = new Date("2026-09-27T03:30:00Z");
   const token = "synthetic-history-token-1234567890";
