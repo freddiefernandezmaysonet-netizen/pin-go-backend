@@ -17,7 +17,6 @@
     "src/services/device-health-alert.service.ts",
     "src/services/gatewayConfigurationVerification.service.ts",
     "src/services/gatewayConfigurationVerification.service.test.ts",
-    "src/workers/deviceHealth.hardened.worker.ts",
     "src/lib/mailer.ts"
   ]
 }
