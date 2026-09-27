@@ -1,0 +1,23 @@
+{
+  "compilerOptions": {
+    "noEmit": true,
+    "module": "preserve",
+    "moduleResolution": "bundler",
+    "target": "esnext",
+    "strict": true,
+    "skipLibCheck": true,
+    "types": ["node"]
+  },
+  "include": [
+    "src/ttlock/ttlock.gatewayStatus.ts",
+    "src/ttlock/ttlock.lockLinkHealth.ts",
+    "src/ttlock/ttlock.lockLinkHealth.test.ts",
+    "src/workers/deviceHealth.scheduler.policy.ts",
+    "src/workers/deviceHealth.scheduler.policy.test.ts",
+    "src/services/device-health-alert.service.ts",
+    "src/services/gatewayConfigurationVerification.service.ts",
+    "src/services/gatewayConfigurationVerification.service.test.ts",
+    "src/workers/deviceHealth.hardened.worker.ts",
+    "src/lib/mailer.ts"
+  ]
+}
