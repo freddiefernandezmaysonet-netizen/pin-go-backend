@@ -233,4 +233,4 @@ test("gateway inventory sync cost scales by gateway count, not lock count", asyn
     result.mappedLocks,
     10
   );
-}
+});
