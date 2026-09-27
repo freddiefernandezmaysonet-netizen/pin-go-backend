@@ -53,4 +53,3 @@ ALTER TABLE "PinAIHostIncidentThread" ADD CONSTRAINT "PinAIHostIncidentThread_is
 
 -- AddForeignKey
 ALTER TABLE "PinAIHostIncidentMessage" ADD CONSTRAINT "PinAIHostIncidentMessage_threadId_fkey" FOREIGN KEY ("threadId") REFERENCES "PinAIHostIncidentThread"("id") ON DELETE CASCADE ON UPDATE CASCADE;
-
