@@ -96,8 +96,12 @@ export async function handleGuestIncident(input: {
       communicationType: GUEST_INCIDENT_NOTICE, body: { contains: `"issueId":"${issue.id}"` },
     }, select: { status: true, providerDeliveryStatus: true } });
     const metadata = issue.metadata as Prisma.JsonObject;
+    const hostThread = await tx.pinAIHostIncidentThread.findFirst({ where: {
+      issueId: issue.id, organizationId: scope.organizationId,
+      propertyId: scope.propertyId, reservationId: scope.reservationId,
+    }, select: { acknowledgedAt: true } });
     return { reference: String(metadata.reference), category: command.category, incidentRecorded: true,
       notification: incidentNotificationState(notices), resolution: issue.workflowState === "RESOLVED" ? "RESOLVED" : "OPEN",
-      hostAcknowledged: false };
+      hostAcknowledged: hostThread?.acknowledgedAt != null };
   });
 }

@@ -127,6 +127,8 @@ export async function readPublishedIncidentUpdates(input: { prisma: PrismaClient
         propertyId: reservation.propertyId, engine: "PIN_AI_GUEST_INCIDENT", visibility: "HOST" } } },
     include: { thread: { include: { issue: true } } }, orderBy: { id: "asc" }, take: 100 });
   return { updates: rows.map(m => ({ id: m.id, reference: reference(m.thread.issue), createdAt: m.createdAt,
+    resolution: m.thread.issue.workflowState === "RESOLVED" ? "RESOLVED" as const : "OPEN" as const,
+    hostAcknowledged: m.thread.acknowledgedAt != null,
     text: openHostContent(input.env, `${m.thread.organizationId}:${m.threadId}:${m.sequence}:GUEST`, m.contentCiphertext) })),
     nextAfter: rows.length === 100 ? rows[99].id : null };
 }
