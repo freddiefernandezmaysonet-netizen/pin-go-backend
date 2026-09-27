@@ -18,7 +18,7 @@ SET
   ),
   "lockLinkLastSeenAt" = CASE
     WHEN ("rawPayload"->>'gatewayRssiUpdatedAt') ~ '^\d{4}-\d{2}-\d{2}T'
-      THEN ("rawPayload"->>'gatewayRssiUpdatedAt')::TIMESTAMP(3)
+      THEN (("rawPayload"->>'gatewayRssiUpdatedAt')::TIMESTAMPTZ AT TIME ZONE 'UTC')::TIMESTAMP(3)
     ELSE "lockLinkLastSeenAt"
   END
 WHERE
