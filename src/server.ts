@@ -204,7 +204,7 @@ app.use(
 );
 
 app.use(bodyParser.urlencoded({ extended: true }));
-app.use(buildTtlockCallbackCanaryRouter(process.env));
+app.use(buildTtlockCallbackCanaryRouter(prisma, process.env));
 app.use(buildMessageDeliveryWebhookRouter(prisma));
 app.use("/webhooks", pmsWebhookRouter);
 app.use(buildDashboardDistributionConnectionCenterRouter(

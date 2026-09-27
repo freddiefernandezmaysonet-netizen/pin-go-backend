@@ -13,7 +13,7 @@ test("server mounts TTLock callback after urlencoded parsing and before other fo
     "app.use(bodyParser.urlencoded({ extended: true }));"
   );
   const ttlockIndex = source.indexOf(
-    "app.use(buildTtlockCallbackCanaryRouter(process.env));"
+    "app.use(buildTtlockCallbackCanaryRouter(prisma, process.env));"
   );
   const messageWebhookIndex = source.indexOf(
     "app.use(buildMessageDeliveryWebhookRouter(prisma));"
