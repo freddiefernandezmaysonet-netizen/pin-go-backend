@@ -166,6 +166,8 @@ async function recordGatewayFailure(input: {
   gatewayConnected: boolean | null;
   isOnline: boolean | null;
   gatewayRssi?: number | null;
+  lockLinkState?: string | null;
+  lockLinkLastSeenAt?: Date | null;
   error?: string | null;
   rawPayload?: unknown;
   providerResponseAt?: Date | null;
@@ -184,6 +186,8 @@ async function recordGatewayFailure(input: {
     gatewayConnected: input.gatewayConnected,
     isOnline: input.isOnline,
     gatewayRssi: input.gatewayRssi,
+    lockLinkState: input.lockLinkState,
+    lockLinkLastSeenAt: input.lockLinkLastSeenAt,
     gatewayLastCheckedAt: input.now,
     gatewayLastFailedAt: input.now,
     gatewayLastError: input.error ?? null,
@@ -566,6 +570,8 @@ export async function runHardenedDeviceHealthWorker() {
               gatewayConnected: true,
               isOnline: true,
               gatewayRssi: response.gatewayRssi,
+              lockLinkState: linkHealth.state,
+              lockLinkLastSeenAt: response.gatewayRssiUpdatedAt,
               gatewayLastCheckedAt: now,
               gatewayLastSuccessfulAt:
                 response.providerResponseAt,
@@ -639,6 +645,8 @@ export async function runHardenedDeviceHealthWorker() {
               gatewayConnected: true,
               isOnline: false,
               gatewayRssi: response.gatewayRssi,
+              lockLinkState: linkHealth.state,
+              lockLinkLastSeenAt: response.gatewayRssiUpdatedAt,
               error:
                 `TTLock gateway is online but the lock-to-gateway signal has not refreshed for ${ageMinutes ?? "an unknown number of"} minutes`,
               rawPayload: response.raw,
@@ -658,6 +666,8 @@ export async function runHardenedDeviceHealthWorker() {
               gatewayConnected: false,
               isOnline: response.isOnline,
               gatewayRssi: response.gatewayRssi,
+              lockLinkState: linkHealth.state,
+              lockLinkLastSeenAt: response.gatewayRssiUpdatedAt,
               error: response.hasGateway
                 ? "TTLock gateway is offline"
                 : "TTLock lock is not associated with a gateway",
