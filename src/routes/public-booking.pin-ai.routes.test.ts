@@ -16,6 +16,56 @@ import { buildPublicBookingPinAIRouter } from "./public-booking.pin-ai.routes.js
 
 const token = "12345678-1234-1234-1234-123456789abc";
 
+for (const scenario of ["applied", "awaiting", "processing", "expired", "missing modification", "invalid token", "invalid proposal", "expired token", "other reservation", "database error"] as const) {
+  test(`read-only action receipt: ${scenario}`, async () => {
+    const now = new Date("2026-09-27T02:40:00Z");
+    const reads: string[] = [];
+    const prisma = {
+      reservation: { findFirst: async (args: any) => {
+        reads.push("reservation");
+        assert.equal(args.where.guestToken, token);
+        assert.deepEqual(args.where.guestTokenExpiresAt, { gt: now });
+        assert.deepEqual(args.where.property, { status: "ACTIVE" });
+        if (scenario === "database error") throw new Error("private database detail");
+        if (scenario === "expired token") return null;
+        return { id: "reservation-a", propertyId: "property-a", property: { organizationId: "org-a" } };
+      } },
+      pinAIActionProposal: { findFirst: async (args: any) => {
+        reads.push("proposal");
+        assert.deepEqual(args.where, { id: "proposal-12345678", reservationId: "reservation-a", propertyId: "property-a", organizationId: "org-a", actionType: "RESERVATION_MODIFICATION" });
+        if (scenario === "other reservation") return null;
+        return { id: "proposal-12345678", status: "CONFIRMED" };
+      } },
+      reservationModification: { findFirst: async (args: any) => {
+        reads.push("modification");
+        assert.deepEqual(args.where, { reservationId: "reservation-a", clientRequestId: "pin_ai_proposal-12345678", requestSource: "PIN_AI_GUEST_SERVICES" });
+        if (scenario === "missing modification") return null;
+        return { id: "modification-12345678", status: scenario === "applied" ? "APPLIED" : scenario === "processing" ? "PAYMENT_PROCESSING" : scenario === "expired" ? "EXPIRED" : "AWAITING_PAYMENT",
+          stripePaymentStatus: scenario === "applied" ? "paid" : "unpaid", checkoutExpiresAt: new Date("2026-09-27T03:34:00Z"), appliedAt: scenario === "applied" ? now : null };
+      } },
+    };
+    const app = express();
+    app.use(buildPublicBookingPinAIRouter({ prisma: prisma as never, env: {}, now: () => now,
+      runtime: async () => { throw new Error("Runtime must never be called"); },
+      actionBrokerFactory: async () => { throw new Error("Broker must never be created"); } }));
+    const server = await new Promise<Server>(resolve => { const listener = app.listen(0, "127.0.0.1", () => resolve(listener)); });
+    try {
+      const response = await fetch(`http://127.0.0.1:${(server.address() as AddressInfo).port}/manage/${scenario === "invalid token" ? "bad" : token}/pin-ai/action-proposals/${scenario === "invalid proposal" ? "bad" : "proposal-12345678"}/status`, { headers: { Connection: "close" } });
+      assert.equal(response.headers.get("cache-control"), "no-store");
+      const invalid = scenario === "invalid token" || scenario === "invalid proposal";
+      assert.equal(response.status, invalid ? 400 : ["expired token", "other reservation"].includes(scenario) ? 404 : scenario === "database error" ? 503 : 200);
+      const data = await response.json() as any;
+      assert.doesNotMatch(JSON.stringify(data), /private database detail|confirmationToken|guestToken|stripeCheckout|checkoutUrl/);
+      if (response.ok) {
+        assert.equal(data.status.proposalId, "proposal-12345678");
+        assert.equal(data.status.checkedAt, now.toISOString());
+        assert.equal(data.status.modificationStatus, scenario === "missing modification" ? null : scenario === "applied" ? "APPLIED" : scenario === "processing" ? "PAYMENT_PROCESSING" : scenario === "expired" ? "EXPIRED" : "AWAITING_PAYMENT");
+      }
+      assert.deepEqual(reads, invalid ? [] : ["expired token", "database error"].includes(scenario) ? ["reservation"] : scenario === "other reservation" ? ["reservation", "proposal"] : ["reservation", "proposal", "modification"]);
+    } finally { await closeServer(server); }
+  });
+}
+
 function createPropertyKnowledgeRecord(propertyId: string, organizationId: string) {
   return {
     id: propertyId,
