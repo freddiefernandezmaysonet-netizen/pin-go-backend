@@ -11,66 +11,103 @@ const prisma = new PrismaClient();
 export const dashboardAlertsRouter = Router();
 
 async function buildAlertsForOrg(orgId: string) {
-  const rows = await prisma.deviceHealth.findMany({
+  const locks = await prisma.lock.findMany({
     where: {
-      organizationId: orgId,
-      healthStatus: {
-        in: ["LOW_BATTERY", "WARNING", "OFFLINE"],
-      },
-      lock: {
-        isActive: true,
+      isActive: true,
+      property: {
+        organizationId: orgId,
       },
     },
     select: {
-      lockId: true,
-      battery: true,
-      gatewayConnected: true,
-      healthStatus: true,
-      healthMessage: true,
-      updatedAt: true,
-      lock: {
+      id: true,
+      ttlockLockName: true,
+      property: {
         select: {
-          id: true,
-          ttlockLockName: true,
-          property: {
-            select: {
-              name: true,
-            },
-          },
+          name: true,
         },
       },
-    },
-    orderBy: {
-      updatedAt: "desc",
+      ttlockGateway: {
+        select: {
+          isOnline: true,
+        },
+      },
+      deviceHealth: {
+        select: {
+          battery: true,
+          gatewayConnected: true,
+          healthStatus: true,
+          healthMessage: true,
+          updatedAt: true,
+        },
+      },
     },
   });
 
   const gatewayPolicies = await loadGatewayMonitoringPolicies(prisma, {
     organizationId: orgId,
-    lockIds: rows.map((row) => row.lockId),
+    lockIds: locks.map((lock) => lock.id),
   });
 
-  const visibleRows = rows.filter((row) => {
-    const mode = gatewayMonitoringModeFromPolicy(
-      gatewayPolicies.get(row.lockId) ?? null
+  const visibleRows = locks
+    .map((lock) => {
+      const mode = gatewayMonitoringModeFromPolicy(
+        gatewayPolicies.get(lock.id) ?? null
+      );
+
+      if (!shouldSurfaceDeviceHealthAlert(mode)) {
+        return null;
+      }
+
+      const health = lock.deviceHealth;
+      const gatewayOffline =
+        lock.ttlockGateway?.isOnline === false;
+      const healthStatus = gatewayOffline
+        ? "OFFLINE"
+        : health?.healthStatus ?? "UNKNOWN";
+
+      if (
+        !["LOW_BATTERY", "WARNING", "OFFLINE"].includes(
+          healthStatus
+        )
+      ) {
+        return null;
+      }
+
+      return {
+        lockId: lock.id,
+        lockName:
+          lock.ttlockLockName ?? "Lock",
+        propertyName:
+          lock.property?.name ?? null,
+        battery: health?.battery ?? null,
+        gatewayConnected:
+          lock.ttlockGateway?.isOnline ??
+          health?.gatewayConnected ??
+          null,
+        healthStatus,
+        healthMessage: gatewayOffline
+          ? "Shared TTLock gateway offline"
+          : health?.healthMessage ?? null,
+        updatedAt:
+          health?.updatedAt ?? new Date(0),
+      };
+    })
+    .filter(
+      (
+        row
+      ): row is NonNullable<typeof row> =>
+        row !== null
+    )
+    .sort(
+      (a, b) =>
+        b.updatedAt.getTime() -
+        a.updatedAt.getTime()
     );
-
-    return shouldSurfaceDeviceHealthAlert(mode);
-  });
 
   return {
     ok: true,
     total: visibleRows.length,
-    items: visibleRows.map((r) => ({
-      lockId: r.lockId,
-      lockName: r.lock?.ttlockLockName ?? "Lock",
-      propertyName: r.lock?.property?.name ?? null,
-      battery: r.battery,
-      gatewayConnected: r.gatewayConnected,
-      healthStatus: r.healthStatus,
-      healthMessage: r.healthMessage,
-      updatedAt: r.updatedAt,
-    })),
+    items: visibleRows,
   };
 }
 
