@@ -66,6 +66,18 @@ test("recorded escalation cannot bypass payment/refund/reservation claim protect
     assert.throws(() => assertRuntimeResponseSafe({ responseText, escalationCreated: true, toolCalls: [], requiresHumanReview: false }), /FALSE_COMPLETION/);
   }
 });
+test("acknowledgement is distinct from email delivery and physical resolution in both languages", () => {
+  for (const resolution of ["OPEN", "RESOLVED"] as const) {
+    const receipt = { reference: "GI-012345ABCDEF", category: "HOT_WATER" as const, incidentRecorded: true as const,
+      notification: "DELIVERED" as const, resolution, hostAcknowledged: true };
+    const es = formatGuestIncidentReceipt(receipt, "es"), en = formatGuestIncidentReceipt(receipt, "en");
+    assert.match(es, /correo inicial/); assert.match(es, /confirmó la atención/);
+    assert.match(es, /no acredita una reparación física/); assert.doesNotMatch(es, /haya leído/);
+    assert.match(en, /initial email/); assert.match(en, /host acknowledged/);
+    assert.match(en, /does not verify a physical repair/);
+    assert.match(es, resolution === "OPEN" ? /pendiente de resolución/ : /figura resuelto/);
+  }
+});
 test("notice template escapes guest content and links to authenticated Dashboard without approval credentials", () => {
   const built = buildGuestIncidentEmail({ to: "host@example.test", reference: "GI-012345ABCDEF", category: "HOT_WATER",
     reservationNumber: "PG-2026-000051", propertyName: "Demo", quotes: ['<script>bad()</script> & "x"'],

@@ -70,6 +70,9 @@ test("PostgreSQL host foundation: tenant isolation, concurrency, privacy, revoca
     const updates = await readPublishedIncidentUpdates({ prisma, env, guestToken: token });
     assert.equal(updates.updates.length, 1);
     assert.equal(updates.updates[0].text, "El anfitrión está revisando el reporte");
+    assert.equal(updates.updates[0].resolution, "OPEN");
+    assert.equal(updates.updates[0].hostAcknowledged, true);
+    assert.equal((await handleGuestIncident({ ...guestBase, args: { operation: "STATUS", category: "HOT_WATER" } }))!.hostAcknowledged, true);
     assert.doesNotMatch(JSON.stringify(updates), /Private|Concurrent|actorId|INTERNAL/);
     await assert.rejects(readPublishedIncidentUpdates({ prisma, env, guestToken: "wrong" }), /NOT_FOUND/);
     const cipher = await prisma.pinAIHostIncidentMessage.findMany();
@@ -87,11 +90,19 @@ test("PostgreSQL host foundation: tenant isolation, concurrency, privacy, revoca
     }
     const closeId = randomUUID(); await action("RESOLVE", "Host supplied outcome", 4, closeId);
     assert.equal((await read()).state, "RESOLVED");
+    const closedUpdates = await readPublishedIncidentUpdates({ prisma, env, guestToken: token });
+    assert.equal(closedUpdates.updates[0].resolution, "RESOLVED");
+    assert.equal(closedUpdates.updates[0].hostAcknowledged, true);
+    assert.doesNotMatch(JSON.stringify(closedUpdates), /Host supplied outcome|Private|Concurrent|actorId|INTERNAL/);
+    const closedReceipt = await handleGuestIncident({ ...guestBase, args: { operation: "STATUS", category: "HOT_WATER" } });
+    assert.equal(closedReceipt!.resolution, "RESOLVED");
+    assert.equal(closedReceipt!.hostAcknowledged, true);
     assert.equal((await action("RESOLVE", "Host supplied outcome", 4, closeId)).replayed, true);
     await assert.rejects(action("NOTE", "closed", 5), /INCIDENT_RESOLVED/);
     assert.equal((await readHostIncident({ ...base, reference: second!.reference })).state, "ACTION_REQUIRED");
     const recurrence = await handleGuestIncident({ ...guestBase, args: report });
     assert.notEqual(recurrence!.reference, ref);
+    assert.equal(recurrence!.hostAcknowledged, false);
     assert.equal((await readHostIncident({ ...base, reference: recurrence!.reference })).version, 0);
     // Host access survives checkout; guest access still expires.
     await prisma.reservation.update({ where: { id: reservation.id }, data: { checkOut: new Date(now.getTime() - 1000), guestTokenExpiresAt: new Date(now.getTime() - 1000) } });
