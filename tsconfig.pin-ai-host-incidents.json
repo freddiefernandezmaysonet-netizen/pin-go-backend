@@ -1,0 +1,4 @@
+{
+  "extends": "./tsconfig.pin-ai-action-proposal-runtime.json",
+  "include": ["src/pin-ai/host/*.ts", "src/routes/dashboard.pin-ai-host-incidents.routes.ts"]
+}

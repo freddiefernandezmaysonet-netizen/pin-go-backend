@@ -88,6 +88,7 @@ import publicBookingRouter from "./routes/public-booking.routes";
 import { buildPublicBookingPinAIRouter } from "./routes/public-booking.pin-ai.routes.js";
 import { publicReviewsRouter } from "./routes/public-reviews.routes";
 import { dashboardReviewsRouter } from "./routes/dashboard.reviews.routes";
+import { buildHostIncidentRouter } from "./routes/dashboard.pin-ai-host-incidents.routes.js";
 import { uploadsRouter } from "./routes/uploads.route";
 import { dashboardOrganizationRouter } from "./routes/dashboard.organization.route";
 import { dashboardPayoutsRouter } from "./routes/dashboard-payouts.routes";
@@ -350,6 +351,7 @@ app.use(dashboardPayoutsRouter);
 app.use(dashboardCancellationPolicyRouter);
 app.use(buildDashboardPropertyKnowledgeRouter(prisma));
 app.use(dashboardReviewsRouter);
+app.use(buildHostIncidentRouter({ prisma, env: process.env }));
 
 if (process.env.NODE_ENV !== "production") {
   app.use(devPmsRouter);
