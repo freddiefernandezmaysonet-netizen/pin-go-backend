@@ -8,6 +8,7 @@ function fakePrisma() {
 
   const prisma = {
     lock: {
+      update: async () => ({}),
       findUnique: async () => ({
         id: "lock-1",
         propertyId: "property-1",
@@ -16,6 +17,9 @@ function fakePrisma() {
           organizationId: "org-1",
         },
       }),
+    },
+    ttlockGateway: {
+      upsert: async () => ({ id: "gateway-record-1" }),
     },
     deviceHealth: {
       findUnique: async () => ({
@@ -49,6 +53,7 @@ test("enabling monitoring verifies immediately and leaves a healthy gateway idle
 
   const result = await applyGatewayMonitoringConfiguration(prisma, {
     lockId: "lock-1",
+    organizationId: "org-1",
     ttlockLockId: 123,
     enabled: true,
     now: NOW,
@@ -84,6 +89,7 @@ test("confirmed missing gateway enters eight-hour revalidation", async () => {
 
   const result = await applyGatewayMonitoringConfiguration(prisma, {
     lockId: "lock-1",
+    organizationId: "org-1",
     ttlockLockId: 123,
     enabled: true,
     now: NOW,
@@ -114,6 +120,7 @@ test("associated but offline gateway enters eight-hour revalidation as disconnec
 
   const result = await applyGatewayMonitoringConfiguration(prisma, {
     lockId: "lock-1",
+    organizationId: "org-1",
     ttlockLockId: 123,
     enabled: true,
     now: NOW,
@@ -149,6 +156,7 @@ test("online gateway with stale lock link enters revalidation without claiming g
 
   const result = await applyGatewayMonitoringConfiguration(prisma, {
     lockId: "lock-1",
+    organizationId: "org-1",
     ttlockLockId: 123,
     enabled: true,
     now: NOW,
@@ -178,6 +186,7 @@ test("online gateway without usable lock-link timestamp stays unverified instead
 
   const result = await applyGatewayMonitoringConfiguration(prisma, {
     lockId: "lock-1",
+    organizationId: "org-1",
     ttlockLockId: 123,
     enabled: true,
     now: NOW,
@@ -207,6 +216,7 @@ test("provider error clears stale offline booleans instead of treating them as c
 
   const result = await applyGatewayMonitoringConfiguration(prisma, {
     lockId: "lock-1",
+    organizationId: "org-1",
     ttlockLockId: 123,
     enabled: true,
     now: NOW,
@@ -231,6 +241,7 @@ test("disabling monitoring clears stale gateway telemetry without a provider cal
 
   const result = await applyGatewayMonitoringConfiguration(prisma, {
     lockId: "lock-1",
+    organizationId: "org-1",
     ttlockLockId: 123,
     enabled: false,
     now: NOW,
