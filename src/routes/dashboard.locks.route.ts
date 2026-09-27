@@ -69,6 +69,14 @@ dashboardLocksRouter.get("/api/dashboard/locks", requireAuth, async (req, res) =
             name: true,
           },
         },
+        ttlockGateway: {
+          select: {
+            ttlockGatewayId: true,
+            gatewayName: true,
+            isOnline: true,
+            lastEventAt: true,
+          },
+        },
         deviceHealth: {
           select: {
             battery: true,
@@ -109,16 +117,29 @@ dashboardLocksRouter.get("/api/dashboard/locks", requireAuth, async (req, res) =
       battery: l.deviceHealth?.battery ?? null,
       batteryFresh: !!l.deviceHealth?.lastSyncAt,
 
-      gatewayId: null as number | null,
-      gatewayName: null as string | null,
-      gatewayOnline: l.deviceHealth?.gatewayConnected ?? null,
-      gatewayFresh: !!l.deviceHealth?.lastSyncAt,
+      gatewayId:
+        l.ttlockGateway?.ttlockGatewayId ?? null,
+      gatewayName:
+        l.ttlockGateway?.gatewayName ?? null,
+      gatewayOnline:
+        l.ttlockGateway?.isOnline ??
+        l.deviceHealth?.gatewayConnected ??
+        null,
+      gatewayFresh:
+        !!l.ttlockGateway?.lastEventAt ||
+        !!l.deviceHealth?.lastSyncAt,
 
       deviceHealth: l.deviceHealth
         ? {
             battery: l.deviceHealth.battery ?? null,
-            gatewayConnected: l.deviceHealth.gatewayConnected ?? null,
-            isOnline: l.deviceHealth.isOnline ?? null,
+            gatewayConnected:
+              l.ttlockGateway?.isOnline ??
+              l.deviceHealth.gatewayConnected ??
+              null,
+            isOnline:
+              l.ttlockGateway?.isOnline ??
+              l.deviceHealth.isOnline ??
+              null,
             lastSeenAt: l.deviceHealth.lastSeenAt
               ? l.deviceHealth.lastSeenAt.toISOString()
               : null,
