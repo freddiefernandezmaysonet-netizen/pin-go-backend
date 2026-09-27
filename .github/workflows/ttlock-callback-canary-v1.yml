@@ -9,6 +9,11 @@ on:
       - "src/routes/ttlock-callback.routes.ts"
       - "src/routes/ttlock-callback.routes.test.ts"
       - "src/routes/ttlock-callback.server-contract.test.ts"
+      - "src/services/ttlock-gateway-health.service.ts"
+      - "src/services/ttlock-gateway-offline-callback-reconciliation.service.ts"
+      - "src/services/ttlock-gateway-offline-callback-reconciliation.test.ts"
+      - "prisma/schema.prisma"
+      - "prisma/migrations/**"
       - "src/server.ts"
       - "tsconfig.ttlock-callback-canary-v1.json"
       - ".github/workflows/ttlock-callback-canary-v1.yml"
@@ -37,6 +42,7 @@ jobs:
           src/ttlock/ttlock.callback.test.ts
           src/routes/ttlock-callback.routes.test.ts
           src/routes/ttlock-callback.server-contract.test.ts
+          src/services/ttlock-gateway-offline-callback-reconciliation.test.ts
 
       - name: Focused TypeScript build
         run: npx tsc -p tsconfig.ttlock-callback-canary-v1.json
