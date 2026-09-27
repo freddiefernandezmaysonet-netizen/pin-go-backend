@@ -111,9 +111,9 @@ test("in-stay confirmation concurrency in disposable PostgreSQL", async t => {
       await db.reservationModification.update({where: {id}, data: {
         status: "APPLYING",
         ...(scenario === "missing-payment" ? {} : {
-          stripeConnectedAccountId: "acct_synthetic", stripeCheckoutSessionId: "cs_synthetic",
-          stripePaymentIntentId: "pi_synthetic", stripeChargeId: "ch_synthetic",
-          stripeApplicationFeeId: "fee_synthetic", stripePaymentStatus: "paid",
+          stripeConnectedAccountId: "acct_synthetic", stripeCheckoutSessionId: `cs_synthetic_${id}`,
+          stripePaymentIntentId: `pi_synthetic_${id}`, stripeChargeId: `ch_synthetic_${id}`,
+          stripeApplicationFeeId: `fee_synthetic_${id}`, stripePaymentStatus: "paid",
         }),
       }});
       if (scenario === "blocked-dates") {
