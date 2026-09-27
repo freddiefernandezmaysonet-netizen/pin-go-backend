@@ -1,14 +1,12 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import {
-  effectiveGatewayHealth,
-  shouldShowHealthLock,
-} from "./dashboard.health.routes";
+import { shouldShowHealthLock } from "./dashboard.health.routes";
+import { effectiveTtlockGatewayHealth } from "../services/ttlock-gateway-read-model";
 
 test("canonical gateway state overrides contradictory legacy per-lock state", () => {
   assert.deepEqual(
-    effectiveGatewayHealth({
+    effectiveTtlockGatewayHealth({
       canonicalOnline: false,
       legacyConnected: true,
       gatewayId: 2046625,
@@ -23,7 +21,7 @@ test("canonical gateway state overrides contradictory legacy per-lock state", ()
   );
 
   assert.deepEqual(
-    effectiveGatewayHealth({
+    effectiveTtlockGatewayHealth({
       canonicalOnline: true,
       legacyConnected: false,
       gatewayId: 2046625,
@@ -39,7 +37,7 @@ test("canonical gateway state overrides contradictory legacy per-lock state", ()
 
 test("uninitialized canonical gateway falls back to legacy during cutover", () => {
   assert.deepEqual(
-    effectiveGatewayHealth({
+    effectiveTtlockGatewayHealth({
       canonicalOnline: null,
       legacyConnected: true,
       gatewayId: 2046625,
