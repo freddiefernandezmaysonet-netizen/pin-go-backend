@@ -126,7 +126,14 @@ function formatBattery(lock: LockRow) {
 }
 
 function formatGateway(lock: LockRow) {
-  const value = lock.deviceHealth?.gatewayConnected ?? lock.gatewayOnline;
+  if (lock.gatewayId != null) {
+    if (lock.gatewayOnline == null) return "Unknown";
+    return lock.gatewayOnline ? "Connected" : "Offline";
+  }
+
+  const value =
+    lock.deviceHealth?.gatewayConnected ??
+    lock.gatewayOnline;
 
   if (value == null) return "—";
   return value ? "Connected" : "No gateway";
