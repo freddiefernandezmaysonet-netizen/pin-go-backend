@@ -1,0 +1,18 @@
+{
+  "compilerOptions": {
+    "noEmit": true,
+    "module": "preserve",
+    "moduleResolution": "bundler",
+    "target": "esnext",
+    "strict": true,
+    "skipLibCheck": true,
+    "types": ["node"]
+  },
+  "include": [
+    "src/ttlock/ttlock.callback.ts",
+    "src/ttlock/ttlock.callback.test.ts",
+    "src/routes/ttlock-callback.routes.ts",
+    "src/routes/ttlock-callback.routes.test.ts",
+    "src/routes/ttlock-callback.server-contract.test.ts"
+  ]
+}
