@@ -387,10 +387,10 @@ export async function resolveGatewayReadinessIssue(
         "DEVICE_GATEWAY_CONNECTIVITY_RESTORED",
 
       title:
-        "Gateway connectivity restored",
+        "Remote access connectivity restored",
 
       issue:
-        `Pin&Go confirmed that the gateway for ${input.propertyName} is connected.`,
+        `Pin&Go confirmed that gateway and lock communication for ${input.propertyName} are available again.`,
 
       operationalImpact: null,
       recommendedAction: null,
@@ -423,7 +423,7 @@ export async function resolveGatewayReadinessIssue(
         "DEVICE_GATEWAY_RECOVERED",
 
       resolutionSummary:
-        "Pin&Go automatically confirmed that gateway connectivity was restored.",
+        "Pin&Go automatically confirmed that remote lock connectivity was restored.",
 
       resolutionType: "AUTOMATIC",
       resolvedBy: "PIN_GO",
@@ -444,7 +444,7 @@ export async function resolveGatewayReadinessIssue(
         "DEVICE_GATEWAY_RECOVERED",
 
       transitionSummary:
-        "Gateway connectivity was restored and the operational issue was resolved automatically.",
+        "Remote lock connectivity was restored and the operational issue was resolved automatically.",
 
       transitionedBy: "PIN_GO",
       occurredAt,
