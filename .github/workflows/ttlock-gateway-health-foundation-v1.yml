@@ -11,6 +11,7 @@ on:
       - "src/services/gatewayConfigurationVerification.service.ts"
       - "src/services/gatewayConfigurationVerification.service.test.ts"
       - "src/routes/dashboard.locks.route.ts"
+      - "src/workers/deviceHealth.hardened.worker.ts"
       - ".github/workflows/ttlock-gateway-health-foundation-v1.yml"
   workflow_dispatch:
 
@@ -49,3 +50,7 @@ jobs:
       - name: Bundle gateway configuration route
         run: |
           npx esbuild src/routes/dashboard.locks.route.ts --bundle --platform=node --packages=external --outfile=/tmp/dashboard.locks.route.js
+
+      - name: Bundle hardened Device Health worker
+        run: |
+          npx esbuild src/workers/deviceHealth.hardened.worker.ts --bundle --platform=node --packages=external --outfile=/tmp/deviceHealth.hardened.worker.js
