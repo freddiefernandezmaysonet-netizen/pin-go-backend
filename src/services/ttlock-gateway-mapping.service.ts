@@ -55,3 +55,43 @@ export async function learnTtlockGatewayMapping(
     providerRequests: 0,
   };
 }
+
+
+export async function resolveUniqueMappedTtlockGateway(
+  prisma: PrismaClient,
+  gatewayId: number
+) {
+  const matches = await prisma.ttlockGateway.findMany({
+    where: {
+      ttlockGatewayId: gatewayId,
+    },
+    select: {
+      id: true,
+      organizationId: true,
+      ttlockGatewayId: true,
+    },
+    take: 2,
+  });
+
+  if (matches.length === 0) {
+    return {
+      status: "UNKNOWN_GATEWAY" as const,
+      gateway: null,
+      providerRequests: 0,
+    };
+  }
+
+  if (matches.length > 1) {
+    return {
+      status: "AMBIGUOUS_GATEWAY" as const,
+      gateway: null,
+      providerRequests: 0,
+    };
+  }
+
+  return {
+    status: "RESOLVED" as const,
+    gateway: matches[0],
+    providerRequests: 0,
+  };
+}
