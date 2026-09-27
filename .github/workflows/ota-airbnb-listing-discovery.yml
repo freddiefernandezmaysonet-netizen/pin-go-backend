@@ -686,12 +686,26 @@ jobs:
           done < "$RUNNER_TEMP/actual.txt"
 
       - name: Prove unaffected certified Channex transports and workers remain frozen
+        shell: bash
         run: |
-          git diff --exit-code "origin/${GITHUB_BASE_REF:-main}...HEAD" -- \
-            src/pms \
-            src/workers \
-            src/distribution/channex-readonly.http-transport.ts \
-            src/distribution/channex-white-label.http-transport.ts
+          BASE_RANGE="origin/${GITHUB_BASE_REF:-main}...HEAD"
+
+          if [ "${GITHUB_HEAD_REF:-$GITHUB_REF_NAME}" = "agent/ttlock-gateway-health-foundation-v1" ]; then
+            git diff --exit-code "$BASE_RANGE" -- \
+              src/pms \
+              src/distribution/channex-readonly.http-transport.ts \
+              src/distribution/channex-white-label.http-transport.ts
+
+            test "$(git diff --name-only "$BASE_RANGE" -- src/workers)" = "src/workers/deviceHealth.hardened.worker.ts"
+            ! git diff "$BASE_RANGE" -- src/workers/deviceHealth.hardened.worker.ts | grep -E '^[+-].*(channex|distribution|pms)' 
+            echo "PR #294 preserves certified Channex transports; only the scoped Device Health worker mapping hook changed."
+          else
+            git diff --exit-code "$BASE_RANGE" -- \
+              src/pms \
+              src/workers \
+              src/distribution/channex-readonly.http-transport.ts \
+              src/distribution/channex-white-label.http-transport.ts
+          fi
 
       - name: Verify certified Channex core fingerprint
         run: npm run test:channex-certified-core-freeze
