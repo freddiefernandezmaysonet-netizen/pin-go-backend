@@ -1,0 +1,26 @@
+name: Dashboard Lockfile Baseline Repair
+
+on:
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - "pin-go-dashboard/package.json"
+      - "pin-go-dashboard/package-lock.json"
+      - ".github/workflows/dashboard-lockfile-baseline-repair.yml"
+
+jobs:
+  certify:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: pin-go-dashboard/package-lock.json
+      - name: Verify clean install
+        working-directory: pin-go-dashboard
+        run: npm ci --ignore-scripts --no-audit --no-fund
+      - name: Build dashboard
+        working-directory: pin-go-dashboard
+        run: npm run build
