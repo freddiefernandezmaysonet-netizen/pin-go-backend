@@ -80,6 +80,7 @@ jobs:
             test "$GITHUB_BASE_REF" = "main"
             cat > "$RUNNER_TEMP/ttlock-gateway-health-v1-allowed.txt" <<'EOF'
           .github/workflows/ota-airbnb-listing-discovery.yml
+          .github/workflows/ota-initial-distribution-enablement.yml
           .github/workflows/ttlock-callback-canary-v1.yml
           pin-go-dashboard/src/pages/locks/LocksPage.tsx
           prisma/migrations/20260927170500_ttlock_gateway_health_v1/migration.sql
