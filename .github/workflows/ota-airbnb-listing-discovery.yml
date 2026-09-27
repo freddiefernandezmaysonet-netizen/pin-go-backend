@@ -82,6 +82,7 @@ jobs:
             test "$GITHUB_BASE_REF" = "main"
             cat > "$RUNNER_TEMP/ttlock-gateway-health-foundation-v1-allowed.txt" <<'EOF'
           .github/workflows/ota-airbnb-listing-discovery.yml
+          .github/workflows/ota-initial-distribution-enablement.yml
           .github/workflows/ttlock-gateway-health-foundation-v1.yml
           prisma/migrations/20260927173000_ttlock_gateway_health_foundation_v1/migration.sql
           prisma/schema.prisma
