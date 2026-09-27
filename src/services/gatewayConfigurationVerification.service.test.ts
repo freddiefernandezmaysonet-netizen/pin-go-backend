@@ -5,17 +5,34 @@ import { applyGatewayMonitoringConfiguration } from "./gatewayConfigurationVerif
 
 function fakePrisma() {
   const writes: any[] = [];
+  const gatewayWrites: any[] = [];
+
+  const lockRecord = {
+    id: "lock-1",
+    propertyId: "property-1",
+    property: {
+      id: "property-1",
+      organizationId: "org-1",
+    },
+  };
 
   const prisma = {
     lock: {
-      findUnique: async () => ({
-        id: "lock-1",
-        propertyId: "property-1",
-        property: {
-          id: "property-1",
+      findUnique: async () => lockRecord,
+      findUniqueOrThrow: async () => lockRecord,
+      updateMany: async () => ({ count: 1 }),
+    },
+    tTLockGateway: {
+      upsert: async (args: any) => {
+        gatewayWrites.push(args);
+        return {
+          id: "gateway-row-1",
           organizationId: "org-1",
-        },
-      }),
+          ttlockGatewayId:
+            args.create.ttlockGatewayId,
+          isOnline: args.create.isOnline,
+        };
+      },
     },
     deviceHealth: {
       findUnique: async () => ({
@@ -38,7 +55,11 @@ function fakePrisma() {
     },
   };
 
-  return { prisma: prisma as any, writes };
+  return {
+    prisma: prisma as any,
+    writes,
+    gatewayWrites,
+  };
 }
 
 const NOW = new Date("2026-09-15T12:00:00.000Z");
