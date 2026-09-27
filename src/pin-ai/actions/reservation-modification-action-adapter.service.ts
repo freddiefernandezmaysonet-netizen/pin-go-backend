@@ -32,6 +32,7 @@ export type PinAIReservationModificationPreview =
     }>;
     reservation: Readonly<{
       version: Date;
+      stateFingerprint?: string;
       currency: string;
       current: Readonly<{
         checkIn: Date;
@@ -79,6 +80,7 @@ type ExecuteInput = Readonly<{
 
 type TermsV1 = Readonly<{
   operation?: "EXTEND_CHECKOUT_ONLY";
+  reservationStateFingerprint?: string;
   version: typeof PIN_AI_RESERVATION_MODIFICATION_TERMS_VERSION;
   quotedAt: string;
   quoteExpiresAt: string;
@@ -828,6 +830,8 @@ function buildTerms(
 
   return {
     ...(input.operation ? { operation: input.operation } : {}),
+    ...(input.operation === "EXTEND_CHECKOUT_ONLY" && input.preview.reservation.stateFingerprint
+      ? { reservationStateFingerprint: input.preview.reservation.stateFingerprint } : {}),
     version:
       PIN_AI_RESERVATION_MODIFICATION_TERMS_VERSION,
     quotedAt:
@@ -1671,4 +1675,3 @@ export class PinAIReservationModificationActionAdapter {
     );
   }
 }
-

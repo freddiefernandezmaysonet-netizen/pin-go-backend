@@ -15,6 +15,7 @@ import {
 function fixture() {
   const reservation = {
     id: "reservation-canary-12345678", propertyId: "property-1", reservationNumber: "PG-TEST",
+    guestEmail: "guest@example.test", preferredLanguage: "es",
     status: "ACTIVE", paymentState: "PAID", source: "DIRECT_BOOKING", externalProvider: null,
     checkIn: new Date("2026-09-26T18:17:03.123Z"), checkOut: new Date("2026-09-27T15:00:00Z"),
     updatedAt: new Date("2026-09-26T18:00:00Z"), adults: 2, children: 0,
@@ -324,7 +325,7 @@ for (const scenario of ["changed price", "outside canary", "concurrent update", 
       f.confirmationDependencies.env = { ...f.dependencies.env, PIN_AI_ACTION_CANARY_RESERVATION_IDS: "other-reservation-12345678" };
       expected = "RESERVATION_NOT_ELIGIBLE_FOR_MODIFICATION";
     } else if (scenario === "concurrent update") {
-      f.setLockedReservation({ ...f.reservation, updatedAt: new Date("2026-09-26T22:01:00Z") });
+      f.setLockedReservation({ ...f.reservation, totalAmount: 336, updatedAt: new Date("2026-09-26T22:01:00Z") });
       expected = "RESERVATION_CHANGED_RETRY_PREVIEW";
     } else if (scenario === "active modification") {
       f.setActive({ id: "other-modification", status: "AWAITING_PAYMENT" });
@@ -346,6 +347,15 @@ test("confirmation caps the payment window at original checkout", async () => {
   f.confirmationDependencies.now = () => new Date("2026-09-27T14:15:00Z");
   const result = await confirmGuestReservationModification(f.confirmationInput, f.confirmationDependencies);
   assert.equal(result.modification.checkoutExpiresAt.toISOString(), f.reservation.checkOut.toISOString());
+});
+
+test("watchdog timestamps may advance after quotation and again under the confirmation lock", async () => {
+  const f = await confirmationFixture();
+  f.reservation.updatedAt = new Date("2026-09-26T22:01:00Z");
+  f.setLockedReservation({ ...f.reservation, updatedAt: new Date("2026-09-26T22:02:00Z") });
+  const result = await confirmGuestReservationModification(f.confirmationInput, f.confirmationDependencies);
+  assert.equal(result.modification.status, "AWAITING_PAYMENT");
+  assert.equal(f.getCreates(), 1);
 });
 
 async function checkoutFixture() {
@@ -383,6 +393,8 @@ async function checkoutFixture() {
 
 test("confirmed extension checkout requotes only added nights and sends only the incremental amount to a fake provider", async () => {
   const f = await checkoutFixture();
+  f.modification.reservation.updatedAt = new Date("2026-09-26T22:01:00Z");
+  f.modification.reservation.lastReconciledAt = new Date("2026-09-26T22:01:00Z");
   const result = await f.run();
   assert.equal(result.idempotentReplay, false);
   assert.equal(f.providerCalls.length, 1);
@@ -419,6 +431,7 @@ for (const scenario of ["price changed", "availability conflict", "missing evide
       expected = "EXTENSION_STAY_WINDOW_CHANGED";
     } else if (scenario === "changed reservation") {
       f.modification.reservation.updatedAt = new Date("2026-09-26T22:01:00Z");
+      f.modification.reservation.totalAmount = 336;
       expected = "RESERVATION_CHANGED_RETRY_PREVIEW";
     } else {
       f.modification.checkoutExpiresAt = new Date(f.dependencies.now().getTime() + 29 * 60 * 1000);

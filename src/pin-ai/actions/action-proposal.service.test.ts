@@ -1,5 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
+import { reservationStateFingerprint } from "./reservation-state-fingerprint.js";
+import type { Reservation } from "@prisma/client";
 
 import {
   PinAIActionProposalStatus,
@@ -26,6 +28,38 @@ const TOKEN_A =
   "12345678-1234-1234-1234-123456789abc";
 const TOKEN_B =
   "87654321-4321-4321-4321-cba987654321";
+
+for (const change of ["bookkeeping", "material"] as const) {
+  test(`new extension proposal confirmation after ${change} update`, async () => {
+    const fixture = createPrisma();
+    const reservation = fixture.reservations[0];
+    const created = await createProposal(fixture, { termsSnapshot: {
+      operation: "EXTEND_CHECKOUT_ONLY",
+      reservationStateFingerprint: reservationStateFingerprint(reservation as unknown as Reservation),
+    } });
+    reservation.updatedAt = new Date(UPDATED_AT.getTime() + 1000);
+    if (change === "material") reservation.guestTokenExpiresAt = new Date(NOW.getTime() + 60000);
+    const confirmation = () => confirmPinAIActionProposal({ prisma: fixture.prisma, guestToken: TOKEN_A,
+      proposalId: created.proposal.id, confirmationToken: created.confirmationToken, now: NOW });
+    if (change === "material") {
+      await assert.rejects(confirmation, (error: unknown) => error instanceof PinAIActionProposalError && error.code === "PROPOSAL_SUPERSEDED");
+    } else {
+      assert.equal((await confirmation()).proposalConfirmed, true);
+      assert.equal((await confirmation()).idempotentReplay, true);
+    }
+  });
+}
+
+test("a material update between preview and proposal creation is rejected under the reservation lock", async () => {
+  const fixture = createPrisma();
+  const reservation = fixture.reservations[0];
+  const fingerprint = reservationStateFingerprint(reservation as unknown as Reservation);
+  reservation.guestTokenExpiresAt = new Date(NOW.getTime() + 60000);
+  await assert.rejects(() => createProposal(fixture, { termsSnapshot: {
+    operation: "EXTEND_CHECKOUT_ONLY", reservationStateFingerprint: fingerprint,
+  } }), (error: unknown) => error instanceof PinAIActionProposalError && error.code === "PROPOSAL_CONCURRENT_CHANGE");
+  assert.equal(fixture.proposals.length, 0);
+});
 
 type ReservationFixture = {
   id: string;
