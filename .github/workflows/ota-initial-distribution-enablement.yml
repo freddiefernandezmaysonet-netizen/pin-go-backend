@@ -66,6 +66,43 @@ jobs:
             '.github/workflows/ota-initial-distribution-enablement.yml',
           }
           changed = set(Path('/tmp/ota-initial-changed.txt').read_text().splitlines())
+          # PR #293 only; all activation, Full Sync and certified-core checks above still run.
+          if os.environ.get('GITHUB_HEAD_REF') == 'agent/ttlock-gateway-health-v1':
+            repo = 'freddiefernandezmaysonet-netizen/pin-go-backend'
+            if not (
+              os.environ.get('GITHUB_EVENT_NAME') == 'pull_request'
+              and os.environ.get('GITHUB_REPOSITORY') == repo
+              and os.environ.get('SCOPE_PR_NUMBER') == '293'
+              and os.environ.get('SCOPE_HEAD_REPO') == repo
+              and os.environ.get('SCOPE_BASE_REPO') == repo
+              and os.environ.get('GITHUB_BASE_REF') == 'main'
+            ):
+              raise SystemExit('PR #293 repository/branch scope mismatch')
+            allowed = {
+              '.github/workflows/ota-airbnb-listing-discovery.yml',
+              '.github/workflows/ota-initial-distribution-enablement.yml',
+              '.github/workflows/ttlock-callback-canary-v1.yml',
+              'pin-go-dashboard/src/pages/locks/LocksPage.tsx',
+              'prisma/migrations/20260927170500_ttlock_gateway_health_v1/migration.sql',
+              'prisma/schema.prisma',
+              'src/routes/dashboard.alerts.route.ts',
+              'src/routes/dashboard.health.routes.ts',
+              'src/routes/dashboard.locks.route.ts',
+              'src/routes/org.ttlock.sync.router.ts',
+              'src/services/gatewayConfigurationVerification.service.test.ts',
+              'src/services/gatewayConfigurationVerification.service.ts',
+              'src/services/ttlock-gateway-health.service.test.ts',
+              'src/services/ttlock-gateway-health.service.ts',
+              'src/services/ttlock-gateway-inventory-sync.service.test.ts',
+              'src/services/ttlock-gateway-inventory-sync.service.ts',
+              'src/services/ttlock-gateway-offline-callback-reconciliation.service.ts',
+              'src/services/ttlock-gateway-offline-callback-reconciliation.test.ts',
+              'src/workers/deviceHealth.hardened.worker.ts',
+            }
+            if changed != allowed:
+              raise SystemExit(f'PR #293 exact gateway-health scope required: {sorted(changed ^ allowed)}')
+            print('PR #293 exact TTLock Gateway Health V1 scope verified; all retained OTA protections executed.')
+            raise SystemExit(0)
           # PR #284 only; all activation, Full Sync and core checks above still run.
           if os.environ.get('GITHUB_HEAD_REF') == 'agent/pin-ai-server-history-v1':
             repo = 'freddiefernandezmaysonet-netizen/pin-go-backend'
