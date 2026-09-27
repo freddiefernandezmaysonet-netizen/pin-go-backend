@@ -80,6 +80,7 @@ jobs:
             test "$GITHUB_BASE_REF" = "main"
             cat > "$RUNNER_TEMP/pin-ai-host-incident-allowed.txt" <<'EOF'
           .github/workflows/ota-airbnb-listing-discovery.yml
+          .github/workflows/ota-initial-distribution-enablement.yml
           .github/workflows/pin-ai-host-incidents-v1.yml
           docs/pin-ai-host-incident-conversations-blueprint-v1.md
           docs/pin-ai-host-incident-foundation-v1.md
