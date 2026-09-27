@@ -188,6 +188,7 @@ dashboardLocksRouter.patch(
 
     const verification = await applyGatewayMonitoringConfiguration(prisma, {
       lockId: lock.id,
+      organizationId: orgId,
       ttlockLockId: lock.ttlockLockId,
       enabled: gatewayInstalled,
     });
