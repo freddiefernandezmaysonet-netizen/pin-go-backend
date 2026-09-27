@@ -42,7 +42,7 @@ not refresh their tools or instructions.
 
 - Baseline runtime/guest/property-knowledge suites: 166/166 pass.
 - All baseline test names retained; combined current runtime/action/canonical suites:
-  320/320 pass, zero skipped.
+  327/327 pass, zero skipped.
 - Default read-only model, instructions and function schemas equal the baseline,
   including web search enabled/disabled configurations.
 - Three scoped TypeScript builds pass: in-stay extension, action proposal runtime,
@@ -60,9 +60,10 @@ not refresh their tools or instructions.
 3. Certify Guest Portal proposal rendering and canonical confirmation in an isolated
    environment. Production reservation changes and charges are not authorized.
 4. Exercise actual PostgreSQL locking, concurrent requests, replay and apply transactions.
-5. Resolve expiry UX near checkout: proposal TTL can extend beyond the confirmation
-   window, while paid extension confirmation requires more than 30 minutes before
-   original checkout. Such a displayed proposal may be rejected safely at confirmation.
+5. Expiry boundary correction is implemented and locally tested: paid extension
+   proposals expire at the earlier of one hour or original checkout minus 30 minutes;
+   proposals without additional payment expire no later than original checkout.
+   Closed windows do not create proposals. Verify the displayed deadline in the portal.
 6. Review impact of bounded history during rotation, including already resolved issues.
 
 This is a draft for review, not production certification. No Ready, merge,

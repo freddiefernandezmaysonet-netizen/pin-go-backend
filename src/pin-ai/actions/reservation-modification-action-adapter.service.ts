@@ -1,3 +1,4 @@
+import { IN_STAY_EXTENSION_MIN_PAYMENT_WINDOW_MS } from "./in-stay-extension.js";
 import { formatInTimeZone } from "date-fns-tz";
 import {
   PinAIActionProposalStatus,
@@ -226,6 +227,7 @@ export class PinAIReservationModificationActionError
       | "ACTION_PROPOSAL_NOT_FOUND"
       | "ACTION_PROPOSAL_NOT_CONFIRMED"
       | "ACTION_PROPOSAL_SCOPE_MISMATCH"
+      | "EXTENSION_CONFIRMATION_WINDOW_CLOSED"
       | "ACTION_PROPOSAL_QUOTE_EXPIRED"
       | "ACTION_PROPOSAL_QUOTE_CHANGED"
       | "CHECKOUT_URL_UNAVAILABLE"
@@ -1026,7 +1028,7 @@ export class PinAIReservationModificationActionAdapter {
       language(input.language);
     const now =
       this.dependencies.now();
-    const quoteExpiresAt =
+    let quoteExpiresAt =
       new Date(
         now.getTime() +
           PIN_AI_RESERVATION_MODIFICATION_QUOTE_TTL_MS,
@@ -1055,6 +1057,16 @@ export class PinAIReservationModificationActionAdapter {
         "INVALID_QUOTE_TERMS",
         400,
       );
+    }
+
+    if (input.operation === "EXTEND_CHECKOUT_ONLY") {
+      const confirmationDeadline = preview.reservation.current.checkOut.getTime() -
+        (preview.pricing.amountDifferenceCents > 0 ? IN_STAY_EXTENSION_MIN_PAYMENT_WINDOW_MS : 0);
+      quoteExpiresAt = new Date(Math.min(quoteExpiresAt.getTime(), confirmationDeadline));
+      // Preview may take time: never persist an already unconfirmable proposal.
+      if (!Number.isFinite(quoteExpiresAt.getTime()) || quoteExpiresAt <= this.dependencies.now()) {
+        return fail("EXTENSION_CONFIRMATION_WINDOW_CLOSED", 409);
+      }
     }
 
     const terms =

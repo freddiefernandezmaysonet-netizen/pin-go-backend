@@ -12,7 +12,7 @@ import { calculateDirectBookingModificationConnectFee } from "./direct-booking-c
 import { calculateDirectBookingPricing } from "./direct-booking-pricing.service";
 
 import { resolvePinAIActionCanaryScope } from "../pin-ai/actions/action-canary-scope.js";
-import { InStayExtensionError } from "../pin-ai/actions/in-stay-extension.js";
+import { InStayExtensionError, IN_STAY_EXTENSION_MIN_PAYMENT_WINDOW_MS } from "../pin-ai/actions/in-stay-extension.js";
 import { previewGuestReservationExtension } from "./guest-reservation-extension-preview.js";
 
 const prisma = new PrismaClient();
@@ -1222,7 +1222,7 @@ export async function confirmGuestReservationModification(
       ? new Date(Math.min(confirmedAt.getTime() + 60 * 60 * 1000,
           inStayExtension ? baseReservation.checkOut.getTime() : Infinity))
       : null;
-  if (inStayExtension && checkoutExpiresAt && checkoutExpiresAt.getTime() <= confirmedAt.getTime() + 30 * 60 * 1000) {
+  if (inStayExtension && checkoutExpiresAt && checkoutExpiresAt.getTime() <= confirmedAt.getTime() + IN_STAY_EXTENSION_MIN_PAYMENT_WINDOW_MS) {
     throw new GuestReservationModificationError({
       code: "RESERVATION_MODIFICATION_CHECKOUT_WINDOW_EXPIRED",
       message: "Insufficient payment time remains before the original checkout.", statusCode: 409,

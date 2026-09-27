@@ -162,7 +162,7 @@ function preview(
   };
 }
 
-function createHarness() {
+function createHarness(previewElapsedMs = 0) {
   let now =
     new Date(BASE_NOW);
   let currentPreview =
@@ -197,6 +197,7 @@ function createHarness() {
     prisma,
     async getPreview(input: unknown) {
       previewInputs.push(input);
+      now = new Date(now.getTime() + previewElapsedMs);
       return currentPreview;
     },
     async createProposal(
@@ -803,5 +804,58 @@ test("adapter refuses extension terms that would change the original check-in", 
   value.reservation.proposed.checkIn = new Date("2026-10-02T20:00:00Z");
   h.setPreview(value);
   await assert.rejects(h.prepare("es", "EXTEND_CHECKOUT_ONLY"), /INVALID_QUOTE_TERMS/);
+  assert.equal(h.getCreateProposalInput(), null);
+});
+
+for (const remainingMs of [120 * 60_000, 40 * 60_000, 30 * 60_000 + 1, 30 * 60_000, 29 * 60_000]) {
+  test(`paid extension quote respects original-checkout payment window: ${remainingMs}ms remaining`, async () => {
+    const h = createHarness();
+    const value = preview({ managementPhase: "IN_STAY", amountDifferenceCents: 100 });
+    value.reservation.current.checkIn = new Date(BASE_NOW.getTime() - 86_400_000);
+    value.reservation.current.checkOut = new Date(BASE_NOW.getTime() + remainingMs);
+    value.reservation.proposed.checkIn = new Date(value.reservation.current.checkIn);
+    value.reservation.proposed.checkOut = new Date(value.reservation.current.checkOut.getTime() + 86_400_000);
+    h.setPreview(value);
+    if (remainingMs <= 30 * 60_000) {
+      await assert.rejects(h.prepare("es", "EXTEND_CHECKOUT_ONLY"), /EXTENSION_CONFIRMATION_WINDOW_CLOSED/);
+      assert.equal(h.getCreateProposalInput(), null);
+    } else {
+      const result = await h.prepare("es", "EXTEND_CHECKOUT_ONLY");
+      const expected = new Date(BASE_NOW.getTime() + Math.min(60 * 60_000, remainingMs - 30 * 60_000));
+      assert.equal(result.quote.quoteExpiresAt.getTime(), expected.getTime());
+      assert.equal(result.quote.priceGuaranteedUntil.getTime(), expected.getTime());
+      assert.equal(h.getCreateProposalInput().termsSnapshot.quoteExpiresAt, expected.toISOString());
+      h.setNow(expected);
+      const expired = await h.adapter.execute({guestToken: GUEST_TOKEN, proposalId: PROPOSAL_ID});
+      assert.equal(expired.outcome, "REVIEW_REQUIRED");
+      assert.equal(expired.reasonCode, "QUOTE_EXPIRED");
+      assert.equal(expired.actionExecuted, false);
+      assert.equal(h.getConfirmInput(), null);
+    }
+  });
+}
+
+test("extension without additional payment expires at original checkout without the payment buffer", async () => {
+  const h = createHarness();
+  const value = preview({ managementPhase: "IN_STAY", amountDifferenceCents: 0, financialAction: "NO_FINANCIAL_CHANGE" });
+  value.reservation.current.checkIn = new Date(BASE_NOW.getTime() - 86_400_000);
+  value.reservation.current.checkOut = new Date(BASE_NOW.getTime() + 20 * 60_000);
+  value.reservation.proposed.checkIn = new Date(value.reservation.current.checkIn);
+  value.reservation.proposed.checkOut = new Date(value.reservation.current.checkOut.getTime() + 86_400_000);
+  h.setPreview(value);
+  const result = await h.prepare("es", "EXTEND_CHECKOUT_ONLY");
+  assert.equal(result.quote.quoteExpiresAt.getTime(), value.reservation.current.checkOut.getTime());
+});
+
+
+test("preview latency cannot create a proposal after the confirmation window closes", async () => {
+  const h = createHarness(10 * 60_000);
+  const value = preview({ managementPhase: "IN_STAY", amountDifferenceCents: 100 });
+  value.reservation.current.checkIn = new Date(BASE_NOW.getTime() - 86_400_000);
+  value.reservation.current.checkOut = new Date(BASE_NOW.getTime() + 40 * 60_000);
+  value.reservation.proposed.checkIn = new Date(value.reservation.current.checkIn);
+  value.reservation.proposed.checkOut = new Date(value.reservation.current.checkOut.getTime() + 86_400_000);
+  h.setPreview(value);
+  await assert.rejects(h.prepare("es", "EXTEND_CHECKOUT_ONLY"), /EXTENSION_CONFIRMATION_WINDOW_CLOSED/);
   assert.equal(h.getCreateProposalInput(), null);
 });

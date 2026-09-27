@@ -1,5 +1,7 @@
 import { formatInTimeZone, fromZonedTime } from "date-fns-tz";
 
+export const IN_STAY_EXTENSION_MIN_PAYMENT_WINDOW_MS = 30 * 60 * 1000;
+
 /** Pure domain foundation. No database, provider calls or authorization grants. */
 export class InStayExtensionError extends Error {
   constructor(readonly code: string) {
