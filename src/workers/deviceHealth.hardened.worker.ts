@@ -544,6 +544,7 @@ export async function runHardenedDeviceHealthWorker() {
               occurredAt:
                 response.providerResponseAt,
               source: "DEVICE_HEALTH_WORKER",
+              stateWriteMode: "INITIAL_ONLY",
               rawPayload: {
                 gatewayId:
                   response.gatewayId,
