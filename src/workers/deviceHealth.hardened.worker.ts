@@ -27,6 +27,9 @@ import {
   ttlockFetchGatewayStatus,
 } from "../ttlock/ttlock.gatewayStatus";
 import {
+  evaluateTtlockLockLinkHealth,
+} from "../ttlock/ttlock.lockLinkHealth";
+import {
   isBatteryCheckDue,
   isGatewayCheckDue,
   nextGatewayFailure,
@@ -164,6 +167,8 @@ async function recordGatewayFailure(input: {
   error?: string | null;
   rawPayload?: unknown;
   providerResponseAt?: Date | null;
+  connectivityIssue?: "GATEWAY_OFFLINE" | "LOCK_LINK_STALE";
+  markGatewayDisconnected?: boolean;
 }) {
   const plan = nextGatewayFailure({
     now: input.now,
@@ -188,8 +193,10 @@ async function recordGatewayFailure(input: {
       input.providerResponseAt ?? undefined,
     gatewayNextCheckAt: plan.nextCheckAt,
     gatewayDisconnectedSince:
-      input.lock.deviceHealth?.gatewayDisconnectedSince ??
-      input.now,
+      input.markGatewayDisconnected === false
+        ? null
+        : input.lock.deviceHealth?.gatewayDisconnectedSince ??
+          input.now,
     gatewayCheckReservationId:
       input.reservation?.id ?? null,
     lastSyncAt: input.now,
@@ -199,6 +206,7 @@ async function recordGatewayFailure(input: {
       failure: true,
       error: input.error ?? null,
       retryStage: plan.stage,
+      connectivityIssue: input.connectivityIssue ?? null,
     },
   });
 
@@ -227,6 +235,7 @@ async function recordGatewayFailure(input: {
         propertyTimeZone: input.lock.property.timezone,
         checkIn: input.reservation.checkIn,
         now: input.now,
+        connectivityIssue: input.connectivityIssue,
       });
     }
 
@@ -515,10 +524,21 @@ export async function runHardenedDeviceHealthWorker() {
           );
           ttlockRequestsTotal += response.providerRequestCount;
 
+          const linkHealth =
+            evaluateTtlockLockLinkHealth({
+              hasGateway: response.hasGateway,
+              gatewayOnline: response.isOnline,
+              rssiUpdatedAt:
+                response.gatewayRssiUpdatedAt,
+              now,
+            });
+
           const gatewayAvailable =
             response.hasGateway && response.isOnline;
+          const lockLinkStale =
+            linkHealth.state === "LOCK_LINK_STALE";
 
-          if (gatewayAvailable) {
+          if (gatewayAvailable && !lockLinkStale) {
             const nextCheckAt = nextGatewaySuccessCheckAt({
               now,
               mode,
@@ -533,7 +553,10 @@ export async function runHardenedDeviceHealthWorker() {
               gatewayLastCheckedAt: now,
               gatewayLastSuccessfulAt:
                 response.providerResponseAt,
-              gatewayLastError: null,
+              gatewayLastError:
+                linkHealth.state === "LOCK_LINK_UNKNOWN"
+                  ? "TTLock did not provide a usable rssiUpdateDate; lock-link freshness is unverified"
+                  : null,
               gatewayRawPayload: response.raw,
               gatewayProviderResponseAt:
                 response.providerResponseAt,
@@ -548,6 +571,11 @@ export async function runHardenedDeviceHealthWorker() {
                 telemetryType: "GATEWAY",
                 gatewayId: response.gatewayId,
                 isOnline: response.isOnline,
+                gatewayRssiUpdatedAt:
+                  response.gatewayRssiUpdatedAt?.toISOString() ??
+                  null,
+                lockLinkState: linkHealth.state,
+                lockLinkAgeMs: linkHealth.ageMs,
                 providerRequestCount:
                   response.providerRequestCount,
               },
@@ -578,6 +606,33 @@ export async function runHardenedDeviceHealthWorker() {
                 occurredAt: now,
               });
             }
+          } else if (lockLinkStale) {
+            const ageMinutes =
+              linkHealth.ageMs === null
+                ? null
+                : Math.max(
+                    0,
+                    Math.floor(linkHealth.ageMs / 60_000)
+                  );
+
+            const alert = await recordGatewayFailure({
+              lock,
+              mode,
+              reservation,
+              now,
+              gatewayConnected: true,
+              isOnline: false,
+              gatewayRssi: response.gatewayRssi,
+              error:
+                `TTLock gateway is online but the lock-to-gateway signal has not refreshed for ${ageMinutes ?? "an unknown number of"} minutes`,
+              rawPayload: response.raw,
+              providerResponseAt:
+                response.providerResponseAt,
+              connectivityIssue: "LOCK_LINK_STALE",
+              markGatewayDisconnected: false,
+            });
+
+            if (alert.sent) criticalEmailsSent += 1;
           } else {
             const alert = await recordGatewayFailure({
               lock,
@@ -593,6 +648,7 @@ export async function runHardenedDeviceHealthWorker() {
               rawPayload: response.raw,
               providerResponseAt:
                 response.providerResponseAt,
+              connectivityIssue: "GATEWAY_OFFLINE",
             });
 
             if (alert.sent) criticalEmailsSent += 1;
@@ -639,6 +695,7 @@ export async function runHardenedDeviceHealthWorker() {
           healthStatus: true,
           battery: true,
           gatewayConnected: true,
+          isOnline: true,
           lastSeenAt: true,
         },
       });
@@ -656,6 +713,21 @@ export async function runHardenedDeviceHealthWorker() {
       });
 
       if (
+        latestHealth.gatewayConnected === true &&
+        latestHealth.isOnline === false &&
+        nextCheckInAt
+      ) {
+        const hoursToCheckIn =
+          (nextCheckInAt.getTime() - now.getTime()) /
+          HOUR_MS;
+
+        risk.operationalRisk =
+          hoursToCheckIn <= 6 ? "CRITICAL" : "WARNING";
+        risk.operationalMessage =
+          "Gateway is online, but the lock is not communicating with it.";
+        risk.recommendedAction =
+          "Wake or touch the lock, verify battery and Bluetooth range, and confirm the gateway can communicate with the lock.";
+      } else if (
         latestHealth.gatewayConnected === false &&
         nextCheckInAt
       ) {
