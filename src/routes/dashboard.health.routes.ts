@@ -35,6 +35,9 @@ function presentationForMode(input: {
   operationalRisk?: string | null;
   operationalMessage?: string | null;
   recommendedAction?: string | null;
+  gatewayOnline?: boolean | null;
+  nextCheckInAt?: Date | null;
+  now?: Date;
 }) {
   if (input.mode === "DISABLED") {
     return {
@@ -52,6 +55,25 @@ function presentationForMode(input: {
         "Gateway monitoring setup is required for this lock.",
       recommendedAction:
         "Open Locks and confirm whether a gateway is installed.",
+    };
+  }
+
+  if (input.gatewayOnline === false) {
+    const now = input.now ?? new Date();
+    const hoursToCheckIn = input.nextCheckInAt
+      ? (input.nextCheckInAt.getTime() - now.getTime()) /
+        (60 * 60 * 1000)
+      : null;
+
+    return {
+      operationalRisk:
+        hoursToCheckIn !== null && hoursToCheckIn <= 6
+          ? "CRITICAL"
+          : "WARNING",
+      operationalMessage:
+        "The shared TTLock gateway is offline.",
+      recommendedAction:
+        "Restore gateway connectivity. Every lock assigned to this gateway is affected.",
     };
   }
 
@@ -88,6 +110,14 @@ export function buildDashboardHealthRouter(prisma: PrismaClient) {
           deviceHealth: {
             select: {
               operationalRisk: true,
+              operationalMessage: true,
+              recommendedAction: true,
+              nextCheckInAt: true,
+            },
+          },
+          ttlockGateway: {
+            select: {
+              isOnline: true,
             },
           },
         },
@@ -121,7 +151,20 @@ export function buildDashboardHealthRouter(prisma: PrismaClient) {
           continue;
         }
 
-        const risk = lock.deviceHealth?.operationalRisk ?? "UNKNOWN";
+        const presentation = presentationForMode({
+          mode,
+          operationalRisk:
+            lock.deviceHealth?.operationalRisk,
+          operationalMessage:
+            lock.deviceHealth?.operationalMessage,
+          recommendedAction:
+            lock.deviceHealth?.recommendedAction,
+          gatewayOnline:
+            lock.ttlockGateway?.isOnline ?? null,
+          nextCheckInAt:
+            lock.deviceHealth?.nextCheckInAt ?? null,
+        });
+        const risk = presentation.operationalRisk;
 
         if (risk === "HEALTHY") {
           healthy++;
@@ -200,6 +243,13 @@ export function buildDashboardHealthRouter(prisma: PrismaClient) {
               name: true,
             },
           },
+          ttlockGateway: {
+            select: {
+              ttlockGatewayId: true,
+              isOnline: true,
+              lastEventAt: true,
+            },
+          },
           deviceHealth: {
             select: {
               battery: true,
@@ -236,6 +286,10 @@ export function buildDashboardHealthRouter(prisma: PrismaClient) {
             operationalRisk: health?.operationalRisk,
             operationalMessage: health?.operationalMessage,
             recommendedAction: health?.recommendedAction,
+            gatewayOnline:
+              lock.ttlockGateway?.isOnline ?? null,
+            nextCheckInAt:
+              health?.nextCheckInAt ?? null,
           });
 
           const name =
@@ -249,16 +303,32 @@ export function buildDashboardHealthRouter(prisma: PrismaClient) {
             property: lock.property ?? null,
             gatewayMonitoringMode: mode,
             battery: mode === "DISABLED" ? null : health?.battery ?? null,
-            isOnline: mode === "DISABLED" ? null : health?.isOnline ?? null,
+            gatewayId:
+              lock.ttlockGateway?.ttlockGatewayId ?? null,
+            isOnline:
+              mode === "DISABLED"
+                ? null
+                : lock.ttlockGateway?.isOnline ??
+                  health?.isOnline ??
+                  null,
             gatewayConnected:
-              mode === "DISABLED" ? null : health?.gatewayConnected ?? null,
+              mode === "DISABLED"
+                ? null
+                : lock.ttlockGateway?.isOnline ??
+                  health?.gatewayConnected ??
+                  null,
             healthStatus:
               mode === "DISABLED"
                 ? "NOT_MONITORED"
                 : mode === "LEGACY_UNCONFIGURED"
                   ? "SETUP_REQUIRED"
-                  : health?.healthStatus ?? "UNKNOWN",
-            healthMessage: health?.healthMessage ?? null,
+                  : lock.ttlockGateway?.isOnline === false
+                    ? "OFFLINE"
+                    : health?.healthStatus ?? "UNKNOWN",
+            healthMessage:
+              lock.ttlockGateway?.isOnline === false
+                ? "Shared TTLock gateway offline"
+                : health?.healthMessage ?? null,
             operationalRisk: presentation.operationalRisk,
             operationalMessage: presentation.operationalMessage,
             recommendedAction: presentation.recommendedAction,
@@ -341,6 +411,13 @@ export function buildDashboardHealthRouter(prisma: PrismaClient) {
               name: true,
             },
           },
+          ttlockGateway: {
+            select: {
+              ttlockGatewayId: true,
+              isOnline: true,
+              lastEventAt: true,
+            },
+          },
           deviceHealth: {
             select: {
               battery: true,
@@ -370,6 +447,10 @@ export function buildDashboardHealthRouter(prisma: PrismaClient) {
             operationalRisk: health?.operationalRisk,
             operationalMessage: health?.operationalMessage,
             recommendedAction: health?.recommendedAction,
+            gatewayOnline:
+              lock.ttlockGateway?.isOnline ?? null,
+            nextCheckInAt:
+              health?.nextCheckInAt ?? null,
           });
 
           const name =
@@ -383,8 +464,14 @@ export function buildDashboardHealthRouter(prisma: PrismaClient) {
             property: lock.property ?? null,
             gatewayMonitoringMode: mode,
             battery: mode === "DISABLED" ? null : health?.battery ?? null,
+            gatewayId:
+              lock.ttlockGateway?.ttlockGatewayId ?? null,
             gatewayConnected:
-              mode === "DISABLED" ? null : health?.gatewayConnected ?? null,
+              mode === "DISABLED"
+                ? null
+                : lock.ttlockGateway?.isOnline ??
+                  health?.gatewayConnected ??
+                  null,
             operationalRisk: presentation.operationalRisk,
             operationalMessage: presentation.operationalMessage,
             recommendedAction: presentation.recommendedAction,
