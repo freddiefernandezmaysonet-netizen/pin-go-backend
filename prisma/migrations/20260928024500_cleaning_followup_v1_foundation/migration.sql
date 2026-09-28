@@ -44,5 +44,5 @@ CREATE INDEX "CleaningWork_propertyId_scheduledStartAt_idx"
   ON "CleaningWork"("propertyId", "scheduledStartAt");
 CREATE INDEX "CleaningWork_staffMemberId_scheduledStartAt_idx"
   ON "CleaningWork"("staffMemberId", "scheduledStartAt");
-CREATE INDEX "CleaningWork_startConfirmedAt_completionConfirmedAt_cancelledAt_supersededAt_idx"
+CREATE INDEX "CleaningWork_state_idx"
   ON "CleaningWork"("startConfirmedAt", "completionConfirmedAt", "cancelledAt", "supersededAt");
