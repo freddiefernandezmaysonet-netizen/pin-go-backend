@@ -28,6 +28,13 @@ test("production mount order allows token-scoped guest updates while protecting 
       return where.guestToken === token ? { id: "reservation-test", propertyId: "property-test",
         property: { organizationId: "org-test" } } : null;
     } },
+    operationalIssue: { findMany: async ({ where }: any) => {
+      assert.equal(where.organizationId, "org-test");
+      assert.equal(where.reservationId, "reservation-test");
+      assert.equal(where.propertyId, "property-test");
+      return [{ id: "issue-test", createdAt: new Date("2026-09-27T19:55:00Z"), workflowState: "RESOLVED",
+        metadata: { reference: "GI-A2D58EB9A0D2" }, hostThread: { acknowledgedAt: new Date("2026-09-27T19:58:00Z") } }];
+    } },
     pinAIHostIncidentMessage: { findMany: async ({ where }: any) => {
       assert.equal(where.audience, "GUEST");
       assert.equal(where.kind, "PUBLISH");
@@ -57,6 +64,9 @@ test("production mount order allows token-scoped guest updates while protecting 
     const result = await fetch(`${base}/api/public-booking/manage/${token}/pin-ai/incident-updates`);
     assert.equal(result.status, 200, "guest must not require a Dashboard cookie");
     const body = await result.json();
+    assert.equal(body.incidents[0].reference, "GI-A2D58EB9A0D2");
+    assert.equal(body.incidents[0].resolution, "RESOLVED");
+    assert.equal(body.incidents[0].hostAcknowledged, true);
     assert.equal(body.updates[0].text, "Published test update");
     assert.equal(body.nextAfter, null);
     assert.equal(result.headers.get("cache-control"), "no-store");

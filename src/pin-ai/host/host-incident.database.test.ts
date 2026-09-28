@@ -43,6 +43,11 @@ test("PostgreSQL host foundation: tenant isolation, concurrency, privacy, revoca
     const action = (operation: string, text: string, expectedVersion: number, requestId = randomUUID()) =>
       applyHostIncidentCommand({ ...base, reference: ref, command: { operation, text, expectedVersion, requestId } });
     assert.equal((await listHostIncidents(base)).items.length, 2);
+    const statusOnly = await readPublishedIncidentUpdates({ prisma, env, guestToken: token });
+    assert.equal(statusOnly.incidents.length, 2, "guest sees incident status without a published message");
+    assert.equal(statusOnly.updates.length, 0, "status projection must not synthesize a host message");
+    assert.equal(statusOnly.incidents.find(i => i.reference === ref)?.resolution, "OPEN");
+    assert.equal(statusOnly.incidents.find(i => i.reference === ref)?.hostAcknowledged, false);
     assert.equal((await read()).version, 0);
     for (const role of ["ADMIN", "ORG_ADMIN", "PLATFORM_ADMIN"] as const) {
       await prisma.dashboardUser.update({ where: { id: user.id }, data: { role } });
@@ -70,8 +75,8 @@ test("PostgreSQL host foundation: tenant isolation, concurrency, privacy, revoca
     const updates = await readPublishedIncidentUpdates({ prisma, env, guestToken: token });
     assert.equal(updates.updates.length, 1);
     assert.equal(updates.updates[0].text, "El anfitrión está revisando el reporte");
-    assert.equal(updates.updates[0].resolution, "OPEN");
-    assert.equal(updates.updates[0].hostAcknowledged, true);
+    assert.equal(updates.incidents.find(i => i.reference === ref)?.resolution, "OPEN");
+    assert.equal(updates.incidents.find(i => i.reference === ref)?.hostAcknowledged, true);
     assert.equal((await handleGuestIncident({ ...guestBase, args: { operation: "STATUS", category: "HOT_WATER" } }))!.hostAcknowledged, true);
     assert.doesNotMatch(JSON.stringify(updates), /Private|Concurrent|actorId|INTERNAL/);
     await assert.rejects(readPublishedIncidentUpdates({ prisma, env, guestToken: "wrong" }), /NOT_FOUND/);
@@ -91,8 +96,8 @@ test("PostgreSQL host foundation: tenant isolation, concurrency, privacy, revoca
     const closeId = randomUUID(); await action("RESOLVE", "Host supplied outcome", 4, closeId);
     assert.equal((await read()).state, "RESOLVED");
     const closedUpdates = await readPublishedIncidentUpdates({ prisma, env, guestToken: token });
-    assert.equal(closedUpdates.updates[0].resolution, "RESOLVED");
-    assert.equal(closedUpdates.updates[0].hostAcknowledged, true);
+    assert.equal(closedUpdates.incidents.find(i => i.reference === ref)?.resolution, "RESOLVED");
+    assert.equal(closedUpdates.incidents.find(i => i.reference === ref)?.hostAcknowledged, true);
     assert.doesNotMatch(JSON.stringify(closedUpdates), /Host supplied outcome|Private|Concurrent|actorId|INTERNAL/);
     const closedReceipt = await handleGuestIncident({ ...guestBase, args: { operation: "STATUS", category: "HOT_WATER" } });
     assert.equal(closedReceipt!.resolution, "RESOLVED");
