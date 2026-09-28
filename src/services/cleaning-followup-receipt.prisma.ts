@@ -8,17 +8,22 @@ export function createCleaningFollowupReceiptStore(
   return {
     async claim(input) {
       try {
-        await prisma.cleaningFollowupReceipt.create({
+        const created = await prisma.cleaningFollowupReceipt.create({
           data: {
             cleaningWorkId: input.cleaningWorkId,
             kind: input.kind,
             dueAt: input.dueAt,
           },
         });
-        return "CLAIMED";
+        return { status: "CLAIMED", receiptId: created.id };
       } catch (error) {
         if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === "P2002") {
-          return "ALREADY_CLAIMED";
+          const existing = await prisma.cleaningFollowupReceipt.findUnique({
+            where: { cleaningWorkId_kind_dueAt: input },
+            select: { id: true },
+          });
+          if (!existing) throw error;
+          return { status: "ALREADY_CLAIMED", receiptId: existing.id };
         }
         throw error;
       }
