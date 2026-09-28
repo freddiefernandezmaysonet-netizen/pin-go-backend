@@ -1735,6 +1735,15 @@ model StaffAssignment {
   lastError     String?
   retryCount    Int                   @default(0)
   accessGrantId String?               @unique
+
+  // Immutable-at-assignment follow-up snapshot. These fields do not change
+  // cleaner access windows and are not proof that cleaning occurred.
+  cleaningDurationCommitmentMinutesSnapshot Int?
+  cleaningStartConfirmationGraceMinutesSnapshot Int?
+  cleaningFollowupGraceMinutesSnapshot Int?
+  cleaningStartConfirmedAt DateTime?
+  cleaningCompletionConfirmedAt DateTime?
+
   createdAt     DateTime              @default(now())
   updatedAt     DateTime              @updatedAt
   accessGrant   AccessGrant?          @relation(fields: [accessGrantId], references: [id])
@@ -1756,6 +1765,12 @@ model PropertyStaff {
   backupOrder   Int? // solo para BACKUP
 
   isActive      Boolean @default(true)
+
+  // Cleaner/property operating commitment. These are configuration values only;
+  // each assigned cleaning snapshots them before follow-up begins.
+  cleaningDurationCommitmentMinutes Int?
+  cleaningStartConfirmationGraceMinutes Int @default(30)
+  cleaningFollowupGraceMinutes Int @default(15)
 
   createdAt     DateTime @default(now())
   updatedAt     DateTime @updatedAt
