@@ -7,6 +7,6 @@ test("maps start reminder to its stable due key",()=>assert.deepEqual(followupDu
 test("maps completion reminder to committed completion",()=>assert.deepEqual(followupDueForDecision({decision:"COMPLETION_REMINDER_DUE",...dates}),{kind:"COMPLETION_REMINDER",dueAt:dates.scheduledCompletionAt}));
 test("completed work produces no receipt",()=>assert.equal(followupDueForDecision({decision:"COMPLETED",...dates}),null));
 test("claim delegates once to idempotent store",async()=>{
- let calls=0;const store={claim:async()=>{calls++;return "CLAIMED" as const;}};
- assert.equal(await claimCleaningFollowupDue(store,"work_1",{kind:"START_REMINDER",dueAt:dates.startReminderAt}),"CLAIMED");assert.equal(calls,1);
+ let calls=0;const store={claim:async()=>{calls++;return { status: "CLAIMED" as const, receiptId: "receipt_1" };}};
+ assert.deepEqual(await claimCleaningFollowupDue(store,"work_1",{kind:"START_REMINDER",dueAt:dates.startReminderAt}),{status:"CLAIMED",receiptId:"receipt_1"});assert.equal(calls,1);
 });
