@@ -69,3 +69,18 @@ CREATE UNIQUE INDEX "CleaningFollowupReceipt_work_kind_due_key"
   ON "CleaningFollowupReceipt"("cleaningWorkId", "kind", "dueAt");
 CREATE INDEX "CleaningFollowupReceipt_delivery_due_idx"
   ON "CleaningFollowupReceipt"("deliveryStatus", "dueAt");
+
+CREATE TABLE "CleaningHostAttentionNotice" (
+  "id" TEXT NOT NULL,
+  "cleaningWorkId" TEXT NOT NULL,
+  "status" TEXT NOT NULL DEFAULT 'QUEUED',
+  "recipientsJson" JSONB,
+  "providerMessageId" TEXT,
+  "lastError" TEXT,
+  "sentAt" TIMESTAMP(3),
+  "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  "updatedAt" TIMESTAMP(3) NOT NULL,
+  CONSTRAINT "CleaningHostAttentionNotice_pkey" PRIMARY KEY ("id")
+);
+CREATE UNIQUE INDEX "CleaningHostAttentionNotice_cleaningWorkId_key" ON "CleaningHostAttentionNotice"("cleaningWorkId");
+CREATE INDEX "CleaningHostAttentionNotice_status_createdAt_idx" ON "CleaningHostAttentionNotice"("status", "createdAt");
