@@ -76,7 +76,23 @@ function fakeGatewayPrisma(input?: {
       }),
     },
     deviceHealth: {
-      findUnique: async () => null,
+      findUnique: async () =>
+        input?.staleLockLink
+          ? {
+              battery: input?.battery ?? 80,
+              gatewayConnected: true,
+              isOnline: false,
+              lastSeenAt: NOW,
+              lastSyncAt: NOW,
+              lastEventAt: NOW,
+              source: "WORKER",
+              healthStatus: input?.healthStatus ?? "HEALTHY",
+              healthMessage: "Device operating normally",
+              gatewayLastError:
+                "TTLock gateway is online but the lock-to-gateway signal has not refreshed for 45 minutes",
+              gatewayNextCheckAt: null,
+            }
+          : null,
       upsert: async (args: any) => {
         deviceHealthWrites.push(args);
         return {};
