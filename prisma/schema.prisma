@@ -1839,6 +1839,20 @@ model CleaningFollowupReceipt {
   @@index([deliveryStatus, dueAt])
 }
 
+model CleaningHostAttentionNotice {
+  id              String   @id @default(cuid())
+  cleaningWorkId  String   @unique
+  status          String   @default("QUEUED")
+  recipientsJson  Json?
+  providerMessageId String?
+  lastError       String?
+  sentAt          DateTime?
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  @@index([status, createdAt])
+}
+
 model GuestLinkReminderLog {
   id            String       @id @default(cuid())
   reservationId String
