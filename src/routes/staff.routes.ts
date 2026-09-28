@@ -187,6 +187,9 @@ export function buildStaffRouter(prisma: PrismaClient) {
               role: true,
               backupOrder: true,
               isActive: true,
+              cleaningDurationCommitmentMinutes: true,
+              cleaningStartConfirmationGraceMinutes: true,
+              cleaningFollowupGraceMinutes: true,
             },
           },
         },
@@ -233,6 +236,36 @@ export function buildStaffRouter(prisma: PrismaClient) {
           const propertyId = String(item.propertyId ?? "");
           const role = String(item.role ?? "");
           const isActive = Boolean(item.isActive);
+          const cleaningDurationCommitmentMinutes =
+            item.cleaningDurationCommitmentMinutes == null ||
+            item.cleaningDurationCommitmentMinutes === ""
+              ? null
+              : Math.trunc(Number(item.cleaningDurationCommitmentMinutes));
+          const cleaningStartConfirmationGraceMinutes =
+            item.cleaningStartConfirmationGraceMinutes == null ||
+            item.cleaningStartConfirmationGraceMinutes === ""
+              ? 30
+              : Math.trunc(Number(item.cleaningStartConfirmationGraceMinutes));
+          const cleaningFollowupGraceMinutes =
+            item.cleaningFollowupGraceMinutes == null ||
+            item.cleaningFollowupGraceMinutes === ""
+              ? 15
+              : Math.trunc(Number(item.cleaningFollowupGraceMinutes));
+
+          if (
+            (cleaningDurationCommitmentMinutes !== null &&
+              (!Number.isInteger(cleaningDurationCommitmentMinutes) ||
+                cleaningDurationCommitmentMinutes < 15 ||
+                cleaningDurationCommitmentMinutes > 24 * 60)) ||
+            !Number.isInteger(cleaningStartConfirmationGraceMinutes) ||
+            cleaningStartConfirmationGraceMinutes < 5 ||
+            cleaningStartConfirmationGraceMinutes > 240 ||
+            !Number.isInteger(cleaningFollowupGraceMinutes) ||
+            cleaningFollowupGraceMinutes < 5 ||
+            cleaningFollowupGraceMinutes > 240
+          ) {
+            throw new Error("Invalid cleaning follow-up timing configuration.");
+          }
 
           if (!propertyId) continue;
 
@@ -296,11 +329,17 @@ export function buildStaffRouter(prisma: PrismaClient) {
               role: role as PropertyStaffRole,
               backupOrder,
               isActive: true,
+              cleaningDurationCommitmentMinutes,
+              cleaningStartConfirmationGraceMinutes,
+              cleaningFollowupGraceMinutes,
             },
             update: {
               role: role as PropertyStaffRole,
               backupOrder,
               isActive: true,
+              cleaningDurationCommitmentMinutes,
+              cleaningStartConfirmationGraceMinutes,
+              cleaningFollowupGraceMinutes,
             },
           });
 
