@@ -194,8 +194,8 @@ test("online callback schedules one lock-link recovery check only for stale link
     "2026-09-27T17:40:00.000Z"
   );
   assert.equal(
-    "gatewayLastSuccessfulAt" in deviceHealthWrites[0].update,
-    false
+    deviceHealthWrites[0].update.gatewayLastSuccessfulAt,
+    undefined
   );
 });
 
