@@ -1816,6 +1816,29 @@ model CleaningWork {
   @@index([startConfirmedAt, completionConfirmedAt, cancelledAt, supersededAt], map: "CleaningWork_state_idx")
 }
 
+enum CleaningFollowupReceiptKind {
+  START_REMINDER
+  COMPLETION_REMINDER
+  HOST_ATTENTION
+}
+
+model CleaningFollowupReceipt {
+  id          String   @id @default(cuid())
+  cleaningWorkId String
+  kind        CleaningFollowupReceiptKind
+  dueAt       DateTime
+  claimedAt   DateTime @default(now())
+  deliveredAt DateTime?
+  deliveryStatus String @default("CLAIMED")
+  providerMessageId String?
+  lastError   String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@unique([cleaningWorkId, kind, dueAt])
+  @@index([deliveryStatus, dueAt])
+}
+
 model GuestLinkReminderLog {
   id            String       @id @default(cuid())
   reservationId String
