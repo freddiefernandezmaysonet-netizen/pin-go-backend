@@ -1736,14 +1736,6 @@ model StaffAssignment {
   retryCount    Int                   @default(0)
   accessGrantId String?               @unique
 
-  // Immutable-at-assignment follow-up snapshot. These fields do not change
-  // cleaner access windows and are not proof that cleaning occurred.
-  cleaningDurationCommitmentMinutesSnapshot Int?
-  cleaningStartConfirmationGraceMinutesSnapshot Int?
-  cleaningFollowupGraceMinutesSnapshot Int?
-  cleaningStartConfirmedAt DateTime?
-  cleaningCompletionConfirmedAt DateTime?
-
   createdAt     DateTime              @default(now())
   updatedAt     DateTime              @updatedAt
   accessGrant   AccessGrant?          @relation(fields: [accessGrantId], references: [id])
@@ -1794,6 +1786,32 @@ model CleaningConfirmation {
 
   createdAt      DateTime @default(now())
   updatedAt      DateTime @updatedAt
+}
+
+model CleaningWork {
+  id             String   @id @default(cuid())
+  reservationId  String
+  propertyId     String
+  staffMemberId  String
+  confirmationId String?
+
+  scheduledStartAt DateTime
+  durationCommitmentMinutes Int
+  startConfirmationGraceMinutes Int
+  followupGraceMinutes Int
+
+  startConfirmedAt DateTime?
+  completionConfirmedAt DateTime?
+  cancelledAt DateTime?
+  supersededAt DateTime?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([reservationId, staffMemberId])
+  @@index([propertyId, scheduledStartAt])
+  @@index([staffMemberId, scheduledStartAt])
+  @@index([startConfirmedAt, completionConfirmedAt, cancelledAt, supersededAt])
 }
 
 model GuestLinkReminderLog {
