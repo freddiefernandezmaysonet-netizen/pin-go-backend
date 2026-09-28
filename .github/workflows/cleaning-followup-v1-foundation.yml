@@ -1,0 +1,47 @@
+name: Cleaning Follow-up V1 Foundation
+
+on:
+  pull_request:
+    paths:
+      - "prisma/schema.prisma"
+      - "prisma/migrations/20260928024500_cleaning_followup_v1_foundation/**"
+      - "src/routes/staff.routes.ts"
+      - "src/services/cleaning-followup.policy.ts"
+      - "src/services/cleaning-followup.policy.test.ts"
+      - ".github/workflows/cleaning-followup-v1-foundation.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  foundation:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout exact candidate
+        uses: actions/checkout@v4
+      - name: Use Node.js 22
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+      - name: Install locked dependencies without lifecycle scripts
+        run: npm ci --ignore-scripts
+      - name: Generate Prisma client
+        run: npx prisma generate
+      - name: Validate Prisma schema
+        run: npx prisma validate
+        env:
+          DATABASE_URL: postgresql://user:pass@localhost:5432/placeholder
+      - name: Run cleaning follow-up policy tests
+        run: node --import tsx --test src/services/cleaning-followup.policy.test.ts
+      - name: Verify migration remains additive and TTLock-free
+        shell: bash
+        run: |
+          set -euo pipefail
+          file="prisma/migrations/20260928024500_cleaning_followup_v1_foundation/migration.sql"
+          grep -q 'CREATE TABLE "CleaningWork"' "$file"
+          grep -q 'ALTER TABLE "PropertyStaff"' "$file"
+          if grep -Eqi 'DROP[[:space:]]|DELETE[[:space:]]|UPDATE[[:space:]]|TTLock|NfcAssignment|AccessGrant' "$file"; then
+            echo "Forbidden destructive/access scope found"
+            exit 1
+          fi
