@@ -113,22 +113,28 @@ export async function applyHostIncidentCommand(input: Input & { reference: strin
   });
 }
 
-// Separate read projection: never reads internal content or overwrites the
-// existing encrypted guest conversation. UI integration is a subsequent step.
+// Separate guest projection: incident status is canonical and independent
+// from optional host-published messages. Never expose internal content.
 export async function readPublishedIncidentUpdates(input: { prisma: PrismaClient; env: HostEnvironment; guestToken: string; after?: string }) {
   const reservation = await input.prisma.reservation.findFirst({ where: { guestToken: input.guestToken,
     guestTokenExpiresAt: { gt: new Date() }, status: "ACTIVE", property: { status: "ACTIVE" } },
     select: { id: true, propertyId: true, property: { select: { organizationId: true } } } });
   if (!reservation || !hostScopeEnabled(input.env, reservation.property.organizationId, reservation.id)) return fail(404, "NOT_FOUND");
+  const issueWhere = { organizationId: reservation.property.organizationId, reservationId: reservation.id,
+    propertyId: reservation.propertyId, engine: "PIN_AI_GUEST_INCIDENT", visibility: "HOST" } as const;
+  const issues = await input.prisma.operationalIssue.findMany({ where: issueWhere,
+    include: { hostThread: { select: { acknowledgedAt: true } } },
+    orderBy: [{ createdAt: "asc" }, { id: "asc" }] });
   const rows = await input.prisma.pinAIHostIncidentMessage.findMany({ where: { audience: "GUEST", kind: "PUBLISH",
     ...(input.after ? { id: { gt: input.after } } : {}), thread: { organizationId: reservation.property.organizationId,
-      reservationId: reservation.id, propertyId: reservation.propertyId,
-      issue: { organizationId: reservation.property.organizationId, reservationId: reservation.id,
-        propertyId: reservation.propertyId, engine: "PIN_AI_GUEST_INCIDENT", visibility: "HOST" } } },
+      reservationId: reservation.id, propertyId: reservation.propertyId, issue: issueWhere } },
     include: { thread: { include: { issue: true } } }, orderBy: { id: "asc" }, take: 100 });
-  return { updates: rows.map(m => ({ id: m.id, reference: reference(m.thread.issue), createdAt: m.createdAt,
-    resolution: m.thread.issue.workflowState === "RESOLVED" ? "RESOLVED" as const : "OPEN" as const,
-    hostAcknowledged: m.thread.acknowledgedAt != null,
-    text: openHostContent(input.env, `${m.thread.organizationId}:${m.threadId}:${m.sequence}:GUEST`, m.contentCiphertext) })),
-    nextAfter: rows.length === 100 ? rows[99].id : null };
+  return {
+    incidents: issues.map(issue => ({ reference: reference(issue), createdAt: issue.createdAt,
+      resolution: issue.workflowState === "RESOLVED" ? "RESOLVED" as const : "OPEN" as const,
+      hostAcknowledged: issue.hostThread?.acknowledgedAt != null })),
+    updates: rows.map(m => ({ id: m.id, reference: reference(m.thread.issue), createdAt: m.createdAt,
+      text: openHostContent(input.env, `${m.thread.organizationId}:${m.threadId}:${m.sequence}:GUEST`, m.contentCiphertext) })),
+    nextAfter: rows.length === 100 ? rows[99].id : null,
+  };
 }
