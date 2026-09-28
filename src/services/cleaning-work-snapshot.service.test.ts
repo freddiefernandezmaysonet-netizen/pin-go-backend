@@ -152,28 +152,32 @@ test("database failure is propagated, never converted to a successful snapshot",
 });
 
 test("does not materialize new follow-up work retroactively from an old confirmed link", async () => {
-  const scope = validScope();
-  const store = fakeStore({
-    context: { ...validContext(), checkOut: new Date("2026-09-27T15:00:00Z"), cleaningStartOffsetMinutes: 30 },
+  const f = fixture({
+    checkOut: new Date("2026-09-27T15:00:00Z"),
+    cleaningStartOffsetMinutes: 30,
   });
   await assert.rejects(
-    () => materializeCleaningWorkSnapshot(store, scope, new Date("2026-09-28T15:00:00Z")),
-    /CLEANING_WORK_RETROACTIVE_ACTIVATION_BLOCKED/,
+    () => materializeCleaningWorkSnapshot(f.store, scope, new Date("2026-09-28T15:00:00Z")),
+    (error: unknown) =>
+      error instanceof CleaningWorkSnapshotError &&
+      error.code === "CLEANING_WORK_RETROACTIVE_ACTIVATION_BLOCKED",
   );
+  assert.equal(f.writes, 0);
 });
 
 test("existing materialized work remains replayable after scheduled start", async () => {
-  const scope = validScope();
-  const existing = validWork();
-  const store = fakeStore({
-    context: { ...validContext(), checkOut: new Date(existing.scheduledStartAt.getTime()) },
-    existing,
-  });
-  const result = await materializeCleaningWorkSnapshot(
-    store,
+  const f = fixture();
+  const first = await materializeCleaningWorkSnapshot(
+    f.store,
     scope,
-    new Date(existing.scheduledStartAt.getTime() + 60_000),
+    new Date("2026-09-28T15:00:00Z"),
+  );
+  assert.equal(first.outcome, "CREATED");
+  const result = await materializeCleaningWorkSnapshot(
+    f.store,
+    scope,
+    new Date("2026-09-28T16:00:00Z"),
   );
   assert.equal(result.outcome, "REPLAYED");
-  assert.equal(result.work?.id, existing.id);
+  assert.equal(result.work?.id, first.work?.id);
 });
