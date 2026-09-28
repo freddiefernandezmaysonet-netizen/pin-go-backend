@@ -7,6 +7,7 @@ const workSelect = {
   id: true, reservationId: true, propertyId: true, staffMemberId: true, confirmationId: true,
   scheduledStartAt: true, durationCommitmentMinutes: true,
   startConfirmationGraceMinutes: true, followupGraceMinutes: true,
+  timingConsentVersion: true, timingConsentAcceptedAt: true,
   startConfirmedAt: true, completionConfirmedAt: true, cancelledAt: true, supersededAt: true,
 } as const;
 
