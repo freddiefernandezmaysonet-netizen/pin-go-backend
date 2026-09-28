@@ -84,6 +84,8 @@ import { createCleaningFollowupReceiptStore } from "../services/cleaning-followu
 import { shouldRunCleaningFollowupClaimCycle } from "../services/cleaning-followup-cadence.policy.js";
 import { deliverClaimedCleanerFollowup } from "../services/cleaning-followup-delivery.service.js";
 import { persistCleaningHostAttention } from "../services/cleaning-followup-host-attention.service.js";
+import { queueCleaningHostAttentionNotice } from "../services/cleaning-followup-host-notice.service.js";
+import { deliverCleaningHostAttentionNotice } from "../services/cleaning-followup-host-delivery.service.js";
 import {
   isGuestJourneyAccessOwnerScope,
 } from "../services/guest-journey-access-owner.config";
@@ -2751,6 +2753,8 @@ async function tick() {
             cleaningWorkId: item.cleaningWorkId,
             occurredAt: now,
           });
+          await queueCleaningHostAttentionNotice(prisma, item.cleaningWorkId);
+          await deliverCleaningHostAttentionNotice(prisma, item.cleaningWorkId);
         }
         if (cleaningFollowupResults.length > 0) {
           log("cleaning-followup-claims", {
