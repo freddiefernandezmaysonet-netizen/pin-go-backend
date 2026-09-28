@@ -17,6 +17,7 @@ function fakeGatewayPrisma(input?: {
   mappedLocks?: number;
   battery?: number | null;
   healthStatus?: string;
+  staleLockLink?: boolean;
 }) {
   const gatewayWrites: any[] = [];
   const deviceHealthWrites: any[] = [];
@@ -52,6 +53,10 @@ function fakeGatewayPrisma(input?: {
               lastSeenAt: NOW,
               nextCheckInAt: null,
               hasActiveAccess: false,
+              gatewayLastError: input?.staleLockLink
+                ? "TTLock gateway is online but the lock-to-gateway signal has not refreshed for 45 minutes"
+                : null,
+              gatewayNextCheckAt: null,
             },
           })),
           _count: {
@@ -149,6 +154,33 @@ test("online callback clears gateway disconnect state for every mapped lock", as
     assert.equal(write.data.recommendedAction, "No action required.");
     assert.equal(write.data.riskCalculatedAt.getTime(), NOW.getTime());
   }
+});
+
+test("online callback schedules one lock-link recovery check only for stale link evidence", async () => {
+  const { prisma, deviceHealthWrites } = fakeGatewayPrisma({
+    existingOnline: false,
+    existingEventAt: new Date("2026-09-27T17:20:00.000Z"),
+    mappedLocks: 1,
+    staleLockLink: true,
+  });
+
+  await applyTtlockGatewayCallbackState(prisma, {
+    organizationId: "org-1",
+    gatewayId: 2046625,
+    isOnline: true,
+    occurredAt: NOW,
+  });
+
+  assert.equal(deviceHealthWrites.length, 1);
+  assert.equal(deviceHealthWrites[0].update.gatewayConnected, true);
+  assert.equal(
+    deviceHealthWrites[0].update.gatewayNextCheckAt.toISOString(),
+    "2026-09-27T17:40:00.000Z"
+  );
+  assert.equal(
+    "gatewayLastSuccessfulAt" in deviceHealthWrites[0].update,
+    false
+  );
 });
 
 test("online callback preserves a real low-battery warning", async () => {
