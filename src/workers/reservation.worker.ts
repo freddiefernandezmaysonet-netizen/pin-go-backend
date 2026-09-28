@@ -83,6 +83,7 @@ import { createCleaningFollowupCycleRepository } from "../services/cleaning-foll
 import { createCleaningFollowupReceiptStore } from "../services/cleaning-followup-receipt.prisma.js";
 import { shouldRunCleaningFollowupClaimCycle } from "../services/cleaning-followup-cadence.policy.js";
 import { deliverClaimedCleanerFollowup } from "../services/cleaning-followup-delivery.service.js";
+import { reconcileCleaningFollowupDeliveryEvidence } from "../services/cleaning-followup-delivery-reconciliation.service.js";
 import { persistCleaningHostAttention } from "../services/cleaning-followup-host-attention.service.js";
 import { queueCleaningHostAttentionNotice } from "../services/cleaning-followup-host-notice.service.js";
 import { deliverCleaningHostAttentionNotice } from "../services/cleaning-followup-host-delivery.service.js";
@@ -2726,6 +2727,10 @@ async function tick() {
     })) {
       cleaningFollowupLastRunAtMs = now.getTime();
       try {
+        const deliveryReconciliation = await reconcileCleaningFollowupDeliveryEvidence(prisma, now);
+        if (deliveryReconciliation.reconciled > 0) {
+          log("cleaning-followup-delivery-reconciliation", deliveryReconciliation);
+        }
         const cleaningFollowupResults = await runCleaningFollowupClaimCycle({
           repository: createCleaningFollowupCycleRepository(prisma),
           receipts: createCleaningFollowupReceiptStore(prisma),
