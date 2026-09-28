@@ -17,6 +17,11 @@ function fakeGatewayPrisma(input?: {
   mappedLocks?: number;
 }) {
   const gatewayWrites: any[] = [];
+  const deviceHealthWrites: any[] = [];
+  const lockIds = Array.from(
+    { length: input?.mappedLocks ?? 2 },
+    (_, index) => `lock-${index + 1}`
+  );
 
   const prisma = {
     ttlockGateway: {
@@ -34,10 +39,29 @@ function fakeGatewayPrisma(input?: {
       upsert: async (args: any) => {
         gatewayWrites.push(args);
         return {
+          id: "gateway-record-1",
+          locks: lockIds.map((id) => ({ id })),
           _count: {
             locks: input?.mappedLocks ?? 2,
           },
         };
+      },
+    },
+    lock: {
+      findUnique: async ({ where }: any) => ({
+        id: where.id,
+        propertyId: "property-1",
+        property: {
+          id: "property-1",
+          organizationId: "org-1",
+        },
+      }),
+    },
+    deviceHealth: {
+      findUnique: async () => null,
+      upsert: async (args: any) => {
+        deviceHealthWrites.push(args);
+        return {};
       },
     },
   };
@@ -45,11 +69,12 @@ function fakeGatewayPrisma(input?: {
   return {
     prisma: prisma as any,
     gatewayWrites,
+    deviceHealthWrites,
   };
 }
 
 test("gateway callback updates one canonical gateway row and makes no provider calls", async () => {
-  const { prisma, gatewayWrites } = fakeGatewayPrisma({
+  const { prisma, gatewayWrites, deviceHealthWrites } = fakeGatewayPrisma({
     mappedLocks: 3,
   });
 
@@ -66,6 +91,39 @@ test("gateway callback updates one canonical gateway row and makes no provider c
   assert.equal(gatewayWrites.length, 1);
   assert.equal(gatewayWrites[0].create.isOnline, false);
   assert.equal(gatewayWrites[0].create.ttlockGatewayId, 2046625);
+  assert.equal(deviceHealthWrites.length, 3);
+  for (const write of deviceHealthWrites) {
+    assert.equal(write.create.gatewayConnected, false);
+    assert.equal(write.create.source, "TTLOCK_CALLBACK");
+    assert.equal(write.create.gatewayDisconnectedSince.getTime(), NOW.getTime());
+    assert.equal(write.create.gatewayLastFailedAt.getTime(), NOW.getTime());
+    assert.equal(write.create.isOnline, null);
+  }
+});
+
+test("online callback clears gateway disconnect state for every mapped lock", async () => {
+  const { prisma, deviceHealthWrites } = fakeGatewayPrisma({
+    existingOnline: false,
+    existingEventAt: new Date("2026-09-27T17:20:00.000Z"),
+    mappedLocks: 3,
+  });
+
+  const result = await applyTtlockGatewayCallbackState(prisma, {
+    organizationId: "org-1",
+    gatewayId: 2046625,
+    isOnline: true,
+    occurredAt: NOW,
+  });
+
+  assert.equal(result.status, "UPDATED");
+  assert.equal(deviceHealthWrites.length, 3);
+  for (const write of deviceHealthWrites) {
+    assert.equal(write.create.gatewayConnected, true);
+    assert.equal(write.create.gatewayDisconnectedSince, null);
+    assert.equal(write.create.gatewayLastError, null);
+    assert.equal(write.create.gatewayLastSuccessfulAt.getTime(), NOW.getTime());
+    assert.equal(write.create.isOnline, null);
+  }
 });
 
 test("duplicate gateway state performs no write and no provider call", async () => {

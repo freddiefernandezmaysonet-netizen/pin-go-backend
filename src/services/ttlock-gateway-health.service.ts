@@ -1,4 +1,5 @@
 import type { PrismaClient } from "@prisma/client";
+import { upsertDeviceHealth } from "./deviceHealth.service";
 
 export type TtlockGatewayCallbackState = {
   organizationId: string;
@@ -96,11 +97,36 @@ export async function applyTtlockGatewayCallbackState(
       },
     },
     select: {
+      id: true,
+      locks: {
+        select: { id: true },
+      },
       _count: {
         select: { locks: true },
       },
     },
   });
+
+  await Promise.all(
+    gateway.locks.map((lock) =>
+      upsertDeviceHealth(prisma, {
+        lockId: lock.id,
+        gatewayConnected: input.isOnline,
+        lastEventAt: occurredAt,
+        source: "TTLOCK_CALLBACK",
+        gatewayLastCheckedAt: occurredAt,
+        gatewayProviderResponseAt: occurredAt,
+        gatewayLastSuccessfulAt: input.isOnline ? occurredAt : undefined,
+        gatewayLastFailedAt: input.isOnline ? undefined : occurredAt,
+        gatewayLastError: input.isOnline ? null : "Gateway disconnected",
+        gatewayDisconnectedSince: input.isOnline ? null : occurredAt,
+        gatewayRawPayload: {
+          gatewayId: input.gatewayId,
+          isOnline: input.isOnline,
+        },
+      })
+    )
+  );
 
   return {
     status: "UPDATED" as const,
