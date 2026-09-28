@@ -19,6 +19,7 @@ on:
       - "src/services/cleaning-followup-host-recipient*"
       - "src/services/cleaning-followup-host-email*"
       - "src/services/cleaning-followup-host-notice*"
+      - "src/services/cleaning-followup-host-delivery*"
       - "src/services/cleaning-followup-delivery.service.ts"
       - "src/services/cleaning-timing-config*"
       - "src/services/cleaning-timing-consent*"
@@ -84,7 +85,7 @@ jobs:
           fi
           grep -q 'persistCleaningHostAttention' src/workers/reservation.worker.ts
           if grep -n -E 'HOST_ATTENTION.*sendSms|HOST_ATTENTION.*sendLoggedEmail|HOST_ATTENTION.*deliverClaimedCleanerFollowup' src/workers/reservation.worker.ts; then
-            echo "HOST_ATTENTION must remain Mission-Control-only in this slice"
+            echo "HOST_ATTENTION must not use cleaner SMS delivery"
             exit 1
           fi
 
