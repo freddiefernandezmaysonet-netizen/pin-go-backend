@@ -1,5 +1,6 @@
 import type { PrismaClient } from "@prisma/client";
 import { upsertDeviceHealth } from "./deviceHealth.service";
+import { computeOperationalRisk } from "../domain/computeOperationalRisk";
 
 export type TtlockGatewayCallbackState = {
   organizationId: string;
@@ -99,7 +100,19 @@ export async function applyTtlockGatewayCallbackState(
     select: {
       id: true,
       locks: {
-        select: { id: true },
+        select: {
+          id: true,
+          deviceHealth: {
+            select: {
+              healthStatus: true,
+              battery: true,
+              isOnline: true,
+              lastSeenAt: true,
+              nextCheckInAt: true,
+              hasActiveAccess: true,
+            },
+          },
+        },
       },
       _count: {
         select: { locks: true },
@@ -108,8 +121,8 @@ export async function applyTtlockGatewayCallbackState(
   });
 
   await Promise.all(
-    gateway.locks.map((lock) =>
-      upsertDeviceHealth(prisma, {
+    gateway.locks.map(async (lock) => {
+      await upsertDeviceHealth(prisma, {
         lockId: lock.id,
         gatewayConnected: input.isOnline,
         lastEventAt: occurredAt,
@@ -124,8 +137,30 @@ export async function applyTtlockGatewayCallbackState(
           gatewayId: input.gatewayId,
           isOnline: input.isOnline,
         },
-      })
-    )
+      });
+
+      const health = lock.deviceHealth;
+      if (!health) return;
+
+      const risk = computeOperationalRisk({
+        healthStatus: health.healthStatus,
+        battery: health.battery,
+        gatewayConnected: input.isOnline,
+        lastSeenAt: health.lastSeenAt,
+        nextCheckInAt: health.nextCheckInAt,
+        hasActiveAccess: health.hasActiveAccess,
+      });
+
+      await prisma.deviceHealth.update({
+        where: { lockId: lock.id },
+        data: {
+          operationalRisk: risk.operationalRisk,
+          operationalMessage: risk.operationalMessage,
+          recommendedAction: risk.recommendedAction,
+          riskCalculatedAt: occurredAt,
+        },
+      });
+    })
   );
 
   return {
