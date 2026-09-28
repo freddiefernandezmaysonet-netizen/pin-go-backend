@@ -49,7 +49,7 @@ function fakeGatewayPrisma(input?: {
             deviceHealth: {
               healthStatus: input?.healthStatus ?? "HEALTHY",
               battery: input?.battery ?? 80,
-              isOnline: true,
+              isOnline: input?.staleLockLink ? false : true,
               lastSeenAt: NOW,
               nextCheckInAt: null,
               hasActiveAccess: false,
