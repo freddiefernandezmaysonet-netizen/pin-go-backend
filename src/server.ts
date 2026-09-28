@@ -22,8 +22,6 @@ import { buildPropertiesRouter } from "./routes/properties.route";
 import { buildPropertyNearbyPlacesRouter } from "./routes/property-nearby-places.routes";
 import { buildAdminLocksRouter } from "./routes/admin.locks.routes";
 import { buildAdminLocksSwapRouter } from "./routes/admin.locks.swap.routes";
-import buildDeviceHealthRouter from "./routes/deviceHealth.routes";
-import buildDeviceBatteryRouter from "./routes/deviceBattery.routes";
 import buildDeviceGatewayRouter from "./routes/deviceGateway.routes";
 import adminUsageRoutes from "./routes/admin.usage.routes";
 import adminCapacityRoutes from "./routes/admin.capacity.routes";
@@ -284,8 +282,6 @@ app.use(orgTtlockStatusRouter);
 app.use(buildGuestRouter(prisma));
 app.use("/api/ingest", ingestRoutes);
 
-app.use(buildDeviceHealthRouter(prisma));
-app.use(buildDeviceBatteryRouter(prisma));
 app.use(buildDeviceGatewayRouter(prisma));
 app.use(dashboardAlertsRouter);
 
