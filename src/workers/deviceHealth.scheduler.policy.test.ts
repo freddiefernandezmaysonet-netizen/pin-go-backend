@@ -177,6 +177,42 @@ test("failed T-6 gateway check respects its hourly recovery timer", () => {
   );
 });
 
+test("explicit lock-link recovery timer overrides a healthy gateway callback certification", () => {
+  const checkIn = new Date("2026-09-15T07:00:00.000Z");
+  const callbackAt = new Date("2026-09-15T02:00:00.000Z");
+  const recoveryAt = new Date("2026-09-15T02:10:00.000Z");
+
+  assert.equal(
+    isGatewayCheckDue({
+      now: new Date("2026-09-15T02:05:00.000Z"),
+      mode: "ENABLED",
+      health: health({
+        gatewayConnected: true,
+        gatewayLastCheckedAt: callbackAt,
+        gatewayLastSuccessfulAt: callbackAt,
+        gatewayNextCheckAt: recoveryAt,
+      }),
+      checkIn,
+    }),
+    false
+  );
+
+  assert.equal(
+    isGatewayCheckDue({
+      now: recoveryAt,
+      mode: "ENABLED",
+      health: health({
+        gatewayConnected: true,
+        gatewayLastCheckedAt: callbackAt,
+        gatewayLastSuccessfulAt: callbackAt,
+        gatewayNextCheckAt: recoveryAt,
+      }),
+      checkIn,
+    }),
+    true
+  );
+});
+
 test("successful gateway readiness check schedules no further check", () => {
   assert.equal(
     nextGatewaySuccessCheckAt({

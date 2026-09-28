@@ -110,6 +110,8 @@ export async function applyTtlockGatewayCallbackState(
               lastSeenAt: true,
               nextCheckInAt: true,
               hasActiveAccess: true,
+              gatewayLastError: true,
+              gatewayNextCheckAt: true,
             },
           },
         },
@@ -120,8 +122,18 @@ export async function applyTtlockGatewayCallbackState(
     },
   });
 
+  const lockLinkRecoveryDelayMs = 10 * 60 * 1000;
+
   await Promise.all(
     gateway.locks.map(async (lock) => {
+      const health = lock.deviceHealth;
+      const hadStaleLockLink =
+        input.isOnline &&
+        health?.isOnline === false &&
+        health?.gatewayLastError?.includes(
+          "lock-to-gateway signal has not refreshed"
+        );
+
       await upsertDeviceHealth(prisma, {
         lockId: lock.id,
         gatewayConnected: input.isOnline,
@@ -129,17 +141,25 @@ export async function applyTtlockGatewayCallbackState(
         source: "TTLOCK_CALLBACK",
         gatewayLastCheckedAt: occurredAt,
         gatewayProviderResponseAt: occurredAt,
-        gatewayLastSuccessfulAt: input.isOnline ? occurredAt : undefined,
+        // Gateway callbacks prove gateway connectivity, not lock↔gateway
+        // reachability. Do not turn an ONLINE callback into a lock-link
+        // readiness certification.
+        gatewayLastSuccessfulAt:
+          input.isOnline && hadStaleLockLink ? undefined :
+          input.isOnline ? occurredAt : undefined,
         gatewayLastFailedAt: input.isOnline ? undefined : occurredAt,
         gatewayLastError: input.isOnline ? null : "Gateway disconnected",
         gatewayDisconnectedSince: input.isOnline ? null : occurredAt,
+        gatewayNextCheckAt:
+          hadStaleLockLink
+            ? new Date(occurredAt.getTime() + lockLinkRecoveryDelayMs)
+            : undefined,
         gatewayRawPayload: {
           gatewayId: input.gatewayId,
           isOnline: input.isOnline,
         },
       });
 
-      const health = lock.deviceHealth;
       if (!health) return;
 
       const risk = computeOperationalRisk({
