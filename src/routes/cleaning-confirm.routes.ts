@@ -11,6 +11,7 @@ import { acceptCleaningTimingConsent } from "../services/cleaning-timing-consent
 import { buildCleaningTimingConsentSnapshot } from "../services/cleaning-timing-consent.js";
 import { confirmCleaningStart } from "../services/cleaning-work-start.prisma.js";
 import { confirmCleaningCompletion } from "../services/cleaning-work-completion.prisma.js";
+import { resolveCleaningHostAttention } from "../services/cleaning-followup-host-attention.service.js";
 
 const prisma = new PrismaClient();
 
@@ -566,6 +567,15 @@ cleaningConfirmRouter.post(
         reservationId: confirmation.reservationId,
         staffMemberId: confirmation.staffMemberId,
         confirmationId: confirmation.id,
+      });
+      await resolveCleaningHostAttention({
+        prisma,
+        cleaningWorkId: prepared.work.id,
+        occurredAt: completed.completionConfirmedAt!,
+      });
+      await prisma.cleaningHostAttentionNotice.updateMany({
+        where: { cleaningWorkId: prepared.work.id, status: { in: ["QUEUED", "FAILED"] } },
+        data: { status: "OBSOLETE", lastError: "CLEANER_COMPLETION_CONFIRMED" },
       });
       return res.send(
         `Cleaning completion recorded at ${formatUtc(completed.completionConfirmedAt!)}. Pin&Go recorded your declaration; this does not independently certify a physical inspection.`
