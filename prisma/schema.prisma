@@ -1800,6 +1800,8 @@ model CleaningWork {
   startConfirmationGraceMinutes Int
   followupGraceMinutes Int
 
+  timingConsentVersion String?
+  timingConsentAcceptedAt DateTime?
   startConfirmedAt DateTime?
   completionConfirmedAt DateTime?
   cancelledAt DateTime?
