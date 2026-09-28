@@ -31,8 +31,8 @@ function fixture(changes: Partial<CleaningWorkContext> = {}) {
         async hasOtherCurrentWork() { return competingWork; },
         async create(snapshot) {
           writes += 1;
-          work = { ...snapshot, id: "work-a", startConfirmedAt: null, completionConfirmedAt: null,
-            cancelledAt: null, supersededAt: null };
+          work = { ...snapshot, id: "work-a", timingConsentVersion: null, timingConsentAcceptedAt: null,
+            startConfirmedAt: null, completionConfirmedAt: null, cancelledAt: null, supersededAt: null };
           return work;
         },
       });
