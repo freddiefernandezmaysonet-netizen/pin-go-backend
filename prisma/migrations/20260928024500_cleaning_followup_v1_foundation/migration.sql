@@ -48,3 +48,24 @@ CREATE INDEX "CleaningWork_staffMemberId_scheduledStartAt_idx"
   ON "CleaningWork"("staffMemberId", "scheduledStartAt");
 CREATE INDEX "CleaningWork_state_idx"
   ON "CleaningWork"("startConfirmedAt", "completionConfirmedAt", "cancelledAt", "supersededAt");
+
+CREATE TYPE "CleaningFollowupReceiptKind" AS ENUM ('START_REMINDER', 'COMPLETION_REMINDER', 'HOST_ATTENTION');
+
+CREATE TABLE "CleaningFollowupReceipt" (
+  "id" TEXT NOT NULL,
+  "cleaningWorkId" TEXT NOT NULL,
+  "kind" "CleaningFollowupReceiptKind" NOT NULL,
+  "dueAt" TIMESTAMP(3) NOT NULL,
+  "claimedAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  "deliveredAt" TIMESTAMP(3),
+  "deliveryStatus" TEXT NOT NULL DEFAULT 'CLAIMED',
+  "providerMessageId" TEXT,
+  "lastError" TEXT,
+  "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  "updatedAt" TIMESTAMP(3) NOT NULL,
+  CONSTRAINT "CleaningFollowupReceipt_pkey" PRIMARY KEY ("id")
+);
+CREATE UNIQUE INDEX "CleaningFollowupReceipt_work_kind_due_key"
+  ON "CleaningFollowupReceipt"("cleaningWorkId", "kind", "dueAt");
+CREATE INDEX "CleaningFollowupReceipt_delivery_due_idx"
+  ON "CleaningFollowupReceipt"("deliveryStatus", "dueAt");
