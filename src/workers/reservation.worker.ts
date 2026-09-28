@@ -83,6 +83,7 @@ import { createCleaningFollowupCycleRepository } from "../services/cleaning-foll
 import { createCleaningFollowupReceiptStore } from "../services/cleaning-followup-receipt.prisma.js";
 import { shouldRunCleaningFollowupClaimCycle } from "../services/cleaning-followup-cadence.policy.js";
 import { deliverClaimedCleanerFollowup } from "../services/cleaning-followup-delivery.service.js";
+import { persistCleaningHostAttention } from "../services/cleaning-followup-host-attention.service.js";
 import {
   isGuestJourneyAccessOwnerScope,
 } from "../services/guest-journey-access-owner.config";
@@ -2738,11 +2739,25 @@ async function tick() {
         for (const item of newlyClaimedCleanerReceipts) {
           await deliverClaimedCleanerFollowup(prisma, item.receiptId!);
         }
+        const newlyClaimedHostAttention = cleaningFollowupResults.filter(
+          (item) =>
+            item.claim === "CLAIMED" &&
+            item.receiptId &&
+            item.decision === "HOST_ATTENTION_DUE"
+        );
+        for (const item of newlyClaimedHostAttention) {
+          await persistCleaningHostAttention({
+            prisma,
+            cleaningWorkId: item.cleaningWorkId,
+            occurredAt: now,
+          });
+        }
         if (cleaningFollowupResults.length > 0) {
           log("cleaning-followup-claims", {
             evaluated: cleaningFollowupResults.length,
             claimed: cleaningFollowupResults.filter((item) => item.claim === "CLAIMED").length,
             cleanerDeliveriesAttempted: newlyClaimedCleanerReceipts.length,
+            hostAttentionProjected: newlyClaimedHostAttention.length,
           });
         }
       } catch (e) {
