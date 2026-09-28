@@ -82,6 +82,7 @@ import { runCleaningFollowupClaimCycle } from "../services/cleaning-followup-cyc
 import { createCleaningFollowupCycleRepository } from "../services/cleaning-followup-cycle.prisma.js";
 import { createCleaningFollowupReceiptStore } from "../services/cleaning-followup-receipt.prisma.js";
 import { shouldRunCleaningFollowupClaimCycle } from "../services/cleaning-followup-cadence.policy.js";
+import { deliverClaimedCleanerFollowup } from "../services/cleaning-followup-delivery.service.js";
 import {
   isGuestJourneyAccessOwnerScope,
 } from "../services/guest-journey-access-owner.config";
@@ -2727,10 +2728,21 @@ async function tick() {
           receipts: createCleaningFollowupReceiptStore(prisma),
           now,
         });
+        const newlyClaimedCleanerReceipts = cleaningFollowupResults.filter(
+          (item) =>
+            item.claim === "CLAIMED" &&
+            item.receiptId &&
+            (item.decision === "START_REMINDER_DUE" ||
+              item.decision === "COMPLETION_REMINDER_DUE")
+        );
+        for (const item of newlyClaimedCleanerReceipts) {
+          await deliverClaimedCleanerFollowup(prisma, item.receiptId!);
+        }
         if (cleaningFollowupResults.length > 0) {
           log("cleaning-followup-claims", {
             evaluated: cleaningFollowupResults.length,
             claimed: cleaningFollowupResults.filter((item) => item.claim === "CLAIMED").length,
+            cleanerDeliveriesAttempted: newlyClaimedCleanerReceipts.length,
           });
         }
       } catch (e) {
