@@ -6,6 +6,7 @@ on:
       - "prisma/schema.prisma"
       - "prisma/migrations/20260928024500_cleaning_followup_v1_foundation/**"
       - "src/routes/staff.routes.ts"
+      - "src/routes/cleaning-confirm.routes.ts"
       - "src/routes/staff.cleaning-timing.test.ts"
       - "src/services/cleaning-followup.policy.ts"
       - "src/services/cleaning-followup.policy.test.ts"
@@ -56,12 +57,12 @@ jobs:
             echo "Forbidden destructive/access scope found"
             exit 1
           fi
-      - name: Prove snapshot writer is not wired into runtime
+      - name: Prove reminder runtime is still not activated
         shell: bash
         run: |
           set -euo pipefail
-          if grep -R -n -E 'cleaning-work-snapshot|materializeCleaningWorkSnapshot' src/routes src/workers; then
-            echo "Snapshot runtime activation is not part of this slice"
+          if grep -R -n -E 'START_REMINDER_DUE|COMPLETION_REMINDER_DUE|HOST_ATTENTION_DUE' src/routes src/workers; then
+            echo "Reminder runtime activation is not part of this slice"
             exit 1
           fi
 
