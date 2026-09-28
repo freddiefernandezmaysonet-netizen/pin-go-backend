@@ -10,6 +10,7 @@ const scope: CleaningWorkScope = {
   organizationId: "org-a", propertyId: "property-a", reservationId: "reservation-a",
   staffMemberId: "staff-a", confirmationId: "confirmation-a",
 };
+const TEST_NOW = new Date("2026-09-28T15:00:00.000Z");
 const context: CleaningWorkContext = {
   reservationStatus: "ACTIVE", propertyStatus: "ACTIVE", cleaningNfcEnabled: true,
   staffActive: true, assignmentActive: true, confirmationStatus: "CONFIRMED",
@@ -46,14 +47,14 @@ function fixture(changes: Partial<CleaningWorkContext> = {}) {
   };
 }
 async function rejects(f: ReturnType<typeof fixture>, code: string) {
-  await assert.rejects(materializeCleaningWorkSnapshot(f.store, scope),
+  await assert.rejects(materializeCleaningWorkSnapshot(f.store, scope, TEST_NOW),
     (error: unknown) => error instanceof CleaningWorkSnapshotError && error.code === code);
   assert.equal(f.writes, 0);
 }
 
 test("copies Staff timings, checkout offset and scoped binding; creates no confirmations", async () => {
   const f = fixture();
-  const r = await materializeCleaningWorkSnapshot(f.store, scope);
+  const r = await materializeCleaningWorkSnapshot(f.store, scope, TEST_NOW);
   assert.equal(r.outcome, "CREATED");
   assert.equal(r.work?.scheduledStartAt.toISOString(), "2026-09-28T15:30:00.000Z");
   assert.equal(r.work?.durationCommitmentMinutes, 120);
@@ -68,16 +69,16 @@ test("copies Staff timings, checkout offset and scoped binding; creates no confi
 });
 test("repeat invocation replays one record without changing saved Staff timings", async () => {
   const f = fixture();
-  const first = await materializeCleaningWorkSnapshot(f.store, scope);
+  const first = await materializeCleaningWorkSnapshot(f.store, scope, TEST_NOW);
   f.setContext({ ...context, durationCommitmentMinutes: 240, startConfirmationGraceMinutes: 60 });
-  const second = await materializeCleaningWorkSnapshot(f.store, scope);
+  const second = await materializeCleaningWorkSnapshot(f.store, scope, TEST_NOW);
   assert.equal(second.outcome, "REPLAYED");
   assert.deepEqual(second.work, first.work);
   assert.equal(f.writes, 1);
 });
 test("no configured duration means no invented commitment and no work created", async () => {
   const f = fixture({ durationCommitmentMinutes: null });
-  assert.equal((await materializeCleaningWorkSnapshot(f.store, scope)).outcome, "NOT_CONFIGURED");
+  assert.equal((await materializeCleaningWorkSnapshot(f.store, scope, TEST_NOW)).outcome, "NOT_CONFIGURED");
   assert.equal(f.writes, 0);
 });
 test("cross-tenant, missing assignment or mismatched confirmation is rejected", async () => {
@@ -120,24 +121,24 @@ test("a different current cleaner requires explicit reassignment, not a second a
 });
 for (const terminal of ["cancelledAt", "supersededAt", "completionConfirmedAt"] as const) {
   test(`${terminal} never reopens a work record`, async () => {
-    const f = fixture(); const r = await materializeCleaningWorkSnapshot(f.store, scope);
+    const f = fixture(); const r = await materializeCleaningWorkSnapshot(f.store, scope, TEST_NOW);
     assert.ok(r.work);
     f.setWork({ ...r.work, [terminal]: new Date("2026-09-28T17:00:00Z") });
-    assert.equal((await materializeCleaningWorkSnapshot(f.store, scope)).outcome, "EXISTING_CLOSED");
+    assert.equal((await materializeCleaningWorkSnapshot(f.store, scope, TEST_NOW)).outcome, "EXISTING_CLOSED");
     assert.equal(f.writes, 1);
   });
 }
 test("checkout rescheduling cannot silently rewrite the existing schedule", async () => {
-  const f = fixture(); await materializeCleaningWorkSnapshot(f.store, scope);
+  const f = fixture(); await materializeCleaningWorkSnapshot(f.store, scope, TEST_NOW);
   f.setContext({ ...context, checkOut: new Date("2026-09-29T15:00:00Z") });
-  await assert.rejects(materializeCleaningWorkSnapshot(f.store, scope), /CLEANING_WORK_SCHEDULE_CHANGED/);
+  await assert.rejects(materializeCleaningWorkSnapshot(f.store, scope, TEST_NOW), /CLEANING_WORK_SCHEDULE_CHANGED/);
   assert.equal(f.writes, 1);
   assert.equal(f.work?.scheduledStartAt.toISOString(), "2026-09-28T15:30:00.000Z");
 });
 test("another confirmation cannot take ownership of historical work", async () => {
-  const f = fixture(); const r = await materializeCleaningWorkSnapshot(f.store, scope);
+  const f = fixture(); const r = await materializeCleaningWorkSnapshot(f.store, scope, TEST_NOW);
   assert.ok(r.work); f.setWork({ ...r.work, confirmationId: "older-confirmation" });
-  await assert.rejects(materializeCleaningWorkSnapshot(f.store, scope), /SNAPSHOT_BINDING_CONFLICT/);
+  await assert.rejects(materializeCleaningWorkSnapshot(f.store, scope, TEST_NOW), /SNAPSHOT_BINDING_CONFLICT/);
   assert.equal(f.writes, 1);
 });
 test("malformed scope rejects before any database operation", async () => {
