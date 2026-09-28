@@ -7,11 +7,13 @@ on:
       - "prisma/migrations/20260928024500_cleaning_followup_v1_foundation/**"
       - "src/routes/staff.routes.ts"
       - "src/routes/cleaning-confirm.routes.ts"
+      - "src/workers/reservation.worker.ts"
       - "src/routes/staff.cleaning-timing.test.ts"
       - "src/services/cleaning-followup.policy.ts"
       - "src/services/cleaning-followup.policy.test.ts"
       - "src/services/cleaning-followup-receipt*"
       - "src/services/cleaning-followup-cycle*"
+      - "src/services/cleaning-followup-cadence*"
       - "src/services/cleaning-timing-config*"
       - "src/services/cleaning-timing-consent*"
       - "src/services/cleaning-work-snapshot*"
@@ -51,7 +53,7 @@ jobs:
       - name: Compile cleaner confirmation route with runtime loader
         run: node --import tsx -e "import('./src/routes/cleaning-confirm.routes.ts').then(() => process.exit(0))"
       - name: Run retained timing policy and new snapshot and Staff HTTP tests
-        run: node --import tsx --test src/services/cleaning-followup.policy.test.ts src/services/cleaning-followup-receipt.service.test.ts src/services/cleaning-followup-cycle.service.test.ts src/services/cleaning-timing-config.test.ts src/services/cleaning-timing-consent.test.ts src/services/cleaning-timing-consent.prisma.test.ts src/services/cleaning-work-start.prisma.test.ts src/services/cleaning-work-completion.prisma.test.ts src/services/cleaning-work-snapshot.service.test.ts src/routes/staff.cleaning-timing.test.ts
+        run: node --import tsx --test src/services/cleaning-followup.policy.test.ts src/services/cleaning-followup-receipt.service.test.ts src/services/cleaning-followup-cycle.service.test.ts src/services/cleaning-followup-cadence.policy.test.ts src/services/cleaning-timing-config.test.ts src/services/cleaning-timing-consent.test.ts src/services/cleaning-timing-consent.prisma.test.ts src/services/cleaning-work-start.prisma.test.ts src/services/cleaning-work-completion.prisma.test.ts src/services/cleaning-work-snapshot.service.test.ts src/routes/staff.cleaning-timing.test.ts
       - name: Verify migration remains additive and TTLock-free
         shell: bash
         run: |
@@ -63,12 +65,12 @@ jobs:
             echo "Forbidden destructive/access scope found"
             exit 1
           fi
-      - name: Prove provider delivery runtime is still not activated
+      - name: Prove cleaning follow-up provider delivery is still not activated
         shell: bash
         run: |
           set -euo pipefail
-          if grep -R -n -E 'cleaning-followup-cycle|CleaningFollowupReceipt' src/workers src/routes; then
-            echo "Follow-up worker/provider activation is not part of this slice"
+          if grep -R -n -E 'sendSms|sendLoggedEmail|sendCleaning.*Sms' src/services/cleaning-followup-*; then
+            echo "Provider delivery is not part of this slice"
             exit 1
           fi
 
