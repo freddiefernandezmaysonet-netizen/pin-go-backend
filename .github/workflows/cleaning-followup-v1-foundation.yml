@@ -79,6 +79,11 @@ jobs:
             echo "HOST_ATTENTION delivery must remain disconnected"
             exit 1
           fi
+          grep -q 'persistCleaningHostAttention' src/workers/reservation.worker.ts
+          if grep -n -E 'HOST_ATTENTION.*sendSms|HOST_ATTENTION.*sendLoggedEmail|HOST_ATTENTION.*deliverClaimedCleanerFollowup' src/workers/reservation.worker.ts; then
+            echo "HOST_ATTENTION must remain Mission-Control-only in this slice"
+            exit 1
+          fi
 
   snapshot-database:
     runs-on: ubuntu-latest
