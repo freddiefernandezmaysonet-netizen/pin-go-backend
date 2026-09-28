@@ -25,16 +25,18 @@ export function followupDueForDecision(input: Readonly<{
   }
 }
 
+export type CleaningFollowupClaimResult = Readonly<{ status: "CLAIMED" | "ALREADY_CLAIMED"; receiptId: string }>;
+
 export interface CleaningFollowupReceiptStore {
-  claim(input: Readonly<{ cleaningWorkId: string; kind: CleaningFollowupReceiptKind; dueAt: Date }>): Promise<"CLAIMED" | "ALREADY_CLAIMED">;
+  claim(input: Readonly<{ cleaningWorkId: string; kind: CleaningFollowupReceiptKind; dueAt: Date }>): Promise<CleaningFollowupClaimResult>;
 }
 
 export async function claimCleaningFollowupDue(
   store: CleaningFollowupReceiptStore,
   cleaningWorkId: string,
   due: CleaningFollowupDue | null,
-): Promise<"NOT_DUE" | "CLAIMED" | "ALREADY_CLAIMED"> {
-  if (!due) return "NOT_DUE";
+): Promise<Readonly<{ status: "NOT_DUE"; receiptId: null }> | CleaningFollowupClaimResult> {
+  if (!due) return { status: "NOT_DUE", receiptId: null };
   if (typeof cleaningWorkId !== "string" || cleaningWorkId.length < 1 || !Number.isFinite(due.dueAt.getTime())) {
     throw new Error("CLEANING_FOLLOWUP_RECEIPT_INVALID");
   }
