@@ -91,6 +91,14 @@ export function isGatewayCheckDue(input: {
     return true;
   }
 
+  // An explicit recovery timer is authoritative. This is used both after
+  // failed readiness checks and for one-shot lock-link revalidation after a
+  // gateway ONLINE callback. A healthy gateway callback must not suppress a
+  // pending lock↔gateway recovery check.
+  if (health.gatewayNextCheckAt) {
+    return health.gatewayNextCheckAt <= input.now;
+  }
+
   const certifiedHealthyForArrival =
     health.gatewayConnected === true &&
     health.gatewayLastSuccessfulAt !== null &&
@@ -100,13 +108,6 @@ export function isGatewayCheckDue(input: {
   // arrival. Do not spend more TTLock calls while the gateway remains healthy.
   if (certifiedHealthyForArrival) {
     return false;
-  }
-
-  // A failed/provider-error check inside T-6 keeps its recovery timer
-  // authoritative. Failures retry hourly so Pin&Go can auto-resolve if the host
-  // restores connectivity before check-in.
-  if (health.gatewayNextCheckAt) {
-    return health.gatewayNextCheckAt <= input.now;
   }
 
   return true;
