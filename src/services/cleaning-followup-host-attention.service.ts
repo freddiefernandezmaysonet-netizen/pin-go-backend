@@ -58,3 +58,65 @@ export async function persistCleaningHostAttention(input: Readonly<{
     lastSignalAt: input.occurredAt,
   });
 }
+
+export async function resolveCleaningHostAttention(input: Readonly<{
+  prisma: PrismaClient;
+  cleaningWorkId: string;
+  occurredAt: Date;
+}>) {
+  const key = `CLEANING_FOLLOWUP:${input.cleaningWorkId}`;
+  const existing = await input.prisma.operationalIssue.findUnique({
+    where: { operationalKey: key },
+    select: { workflowState: true },
+  });
+  if (!existing || existing.workflowState === "RESOLVED") return null;
+  const work = await input.prisma.cleaningWork.findUnique({
+    where: { id: input.cleaningWorkId },
+    select: { reservationId: true, propertyId: true, staffMemberId: true, completionConfirmedAt: true },
+  });
+  if (!work?.completionConfirmedAt) return null;
+  const [reservation, staff, property] = await Promise.all([
+    input.prisma.reservation.findUnique({ where: { id: work.reservationId }, select: { reservationNumber: true } }),
+    input.prisma.staffMember.findUnique({ where: { id: work.staffMemberId }, select: { fullName: true } }),
+    input.prisma.property.findUnique({ where: { id: work.propertyId }, select: { name: true, organizationId: true } }),
+  ]);
+  if (!property) return null;
+  const cleanerName = staff?.fullName?.trim() || "Cleaner";
+  return upsertOperationalIssue(input.prisma, {
+    operationalKey: key,
+    issueCode: "CLEANING_COMPLETION_CONFIRMED",
+    title: "Cleaning completion confirmed",
+    issue: `${cleanerName} confirmed cleaning completion for ${property.name}.`,
+    operationalImpact: null,
+    recommendedAction: null,
+    nextAutomaticStep: null,
+    engine: "CLEANING",
+    severity: "INFO",
+    workflowState: "RESOLVED",
+    visibility: "SYSTEM",
+    responsibleActor: "PIN_GO",
+    actionRequired: false,
+    canAutoResolve: true,
+    autoResolveStatus: "SUCCEEDED",
+    autoResolveActionCode: "RECHECK_CLEANING_FOLLOWUP",
+    organizationId: property.organizationId,
+    propertyId: work.propertyId,
+    reservationId: work.reservationId,
+    reservationNumber: reservation?.reservationNumber ?? null,
+    staffMemberId: work.staffMemberId,
+    cleanerName,
+    sourceType: "WORKER",
+    actionTarget: "CLEANING",
+    resolutionCode: "CLEANER_COMPLETION_DECLARATION_RECEIVED",
+    resolutionSummary: "The cleaner submitted the missing completion declaration.",
+    resolutionType: "AUTOMATIC",
+    resolvedBy: "CLEANER",
+    resolvedAt: input.occurredAt,
+    metadata: { cleaningWorkId: input.cleaningWorkId, physicalCompletionVerified: false },
+    transitionCode: "CLEANING_FOLLOWUP_AUTO_RESOLVED",
+    transitionSummary: "The host-attention workflow auto-resolved after the cleaner confirmed completion.",
+    transitionedBy: "CLEANER",
+    occurredAt: input.occurredAt,
+    lastSignalAt: input.occurredAt,
+  });
+}
