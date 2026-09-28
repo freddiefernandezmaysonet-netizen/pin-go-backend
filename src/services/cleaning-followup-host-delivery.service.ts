@@ -17,7 +17,7 @@ export async function deliverCleaningHostAttentionNotice(
   cleaningWorkId: string,
 ) {
   const notice = await prisma.cleaningHostAttentionNotice.findUnique({ where: { cleaningWorkId } });
-  if (!notice || notice.status === "SENT") return { delivered: false, reason: "not_queued" };
+  if (!notice || notice.status !== "QUEUED") return { delivered: false, reason: "not_queued" };
   const work = await prisma.cleaningWork.findUnique({ where: { id: cleaningWorkId } });
   if (!work || work.cancelledAt || work.supersededAt || work.completionConfirmedAt) return { delivered: false, reason: "work_closed" };
   const [property, staff, reservation] = await Promise.all([
