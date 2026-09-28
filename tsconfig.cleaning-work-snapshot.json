@@ -12,6 +12,7 @@
   "files": [
     "src/services/cleaning-timing-config.ts",
     "src/services/cleaning-timing-consent.ts",
+    "src/services/cleaning-timing-consent.prisma.ts",
     "src/services/cleaning-timing-config.test.ts",
     "src/services/cleaning-work-snapshot.service.ts",
     "src/services/cleaning-work-snapshot.service.test.ts",
