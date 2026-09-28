@@ -1,6 +1,7 @@
 import { Router } from "express";
 import type { PrismaClient } from "@prisma/client";
 import { PropertyStaffRole } from "@prisma/client";
+import { CleaningTimingValidationError, parseCleaningTimingUpdate } from "../services/cleaning-timing-config.js";
 
 export function buildStaffRouter(prisma: PrismaClient) {
   const router = Router();
@@ -236,36 +237,7 @@ export function buildStaffRouter(prisma: PrismaClient) {
           const propertyId = String(item.propertyId ?? "");
           const role = String(item.role ?? "");
           const isActive = Boolean(item.isActive);
-          const cleaningDurationCommitmentMinutes =
-            item.cleaningDurationCommitmentMinutes == null ||
-            item.cleaningDurationCommitmentMinutes === ""
-              ? null
-              : Math.trunc(Number(item.cleaningDurationCommitmentMinutes));
-          const cleaningStartConfirmationGraceMinutes =
-            item.cleaningStartConfirmationGraceMinutes == null ||
-            item.cleaningStartConfirmationGraceMinutes === ""
-              ? 30
-              : Math.trunc(Number(item.cleaningStartConfirmationGraceMinutes));
-          const cleaningFollowupGraceMinutes =
-            item.cleaningFollowupGraceMinutes == null ||
-            item.cleaningFollowupGraceMinutes === ""
-              ? 15
-              : Math.trunc(Number(item.cleaningFollowupGraceMinutes));
-
-          if (
-            (cleaningDurationCommitmentMinutes !== null &&
-              (!Number.isInteger(cleaningDurationCommitmentMinutes) ||
-                cleaningDurationCommitmentMinutes < 15 ||
-                cleaningDurationCommitmentMinutes > 24 * 60)) ||
-            !Number.isInteger(cleaningStartConfirmationGraceMinutes) ||
-            cleaningStartConfirmationGraceMinutes < 5 ||
-            cleaningStartConfirmationGraceMinutes > 240 ||
-            !Number.isInteger(cleaningFollowupGraceMinutes) ||
-            cleaningFollowupGraceMinutes < 5 ||
-            cleaningFollowupGraceMinutes > 240
-          ) {
-            throw new Error("Invalid cleaning follow-up timing configuration.");
-          }
+          const cleaningTiming = parseCleaningTimingUpdate(item);
 
           if (!propertyId) continue;
 
@@ -329,17 +301,13 @@ export function buildStaffRouter(prisma: PrismaClient) {
               role: role as PropertyStaffRole,
               backupOrder,
               isActive: true,
-              cleaningDurationCommitmentMinutes,
-              cleaningStartConfirmationGraceMinutes,
-              cleaningFollowupGraceMinutes,
+              ...cleaningTiming,
             },
             update: {
               role: role as PropertyStaffRole,
               backupOrder,
               isActive: true,
-              cleaningDurationCommitmentMinutes,
-              cleaningStartConfirmationGraceMinutes,
-              cleaningFollowupGraceMinutes,
+              ...cleaningTiming,
             },
           });
 
@@ -351,6 +319,9 @@ export function buildStaffRouter(prisma: PrismaClient) {
 
       return res.json({ ok: true, assignments: result });
     } catch (e: any) {
+      if (e instanceof CleaningTimingValidationError) {
+        return res.status(400).json({ error: e.message, field: e.field });
+      }
       return res.status(500).json({ error: e?.message ?? String(e) });
     }
   });
