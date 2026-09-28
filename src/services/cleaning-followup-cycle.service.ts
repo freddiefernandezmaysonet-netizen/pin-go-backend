@@ -19,7 +19,7 @@ export async function runCleaningFollowupClaimCycle(input: Readonly<{
   now: Date;
 }>) {
   const works = await input.repository.findCandidates(input.now);
-  const results: Array<{ cleaningWorkId: string; decision: string; claim: string }> = [];
+  const results: Array<{ cleaningWorkId: string; decision: string; claim: string; receiptId: string | null }> = [];
   for (const work of works) {
     if (!work.timingConsentAcceptedAt || work.cancelledAt || work.supersededAt) continue;
     const evaluated = evaluateCleaningFollowup({
@@ -33,7 +33,7 @@ export async function runCleaningFollowupClaimCycle(input: Readonly<{
     }, input.now);
     const due = followupDueForDecision(evaluated);
     const claim = await claimCleaningFollowupDue(input.receipts, work.id, due);
-    results.push({ cleaningWorkId: work.id, decision: evaluated.decision, claim });
+    results.push({ cleaningWorkId: work.id, decision: evaluated.decision, claim: claim.status, receiptId: claim.receiptId });
   }
   return results;
 }
