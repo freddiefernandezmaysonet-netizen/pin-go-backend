@@ -11,7 +11,7 @@ const REPLAY_WINDOW_MS = 23 * 60 * 60 * 1000;
 type Envelope = {
   kind: string; type: string;
   retryPayload: { issueId: string; reference: string; category: string; reservationNumber: string;
-    propertyName: string; quotes: string[]; dashboardOrigin?: string };
+    propertyName: string; quotes: string[]; dashboardOrigin?: string; dashboardPath?: string };
   nextAttemptAt: string; firstAttemptAt: string | null; lease?: string;
 };
 
@@ -81,7 +81,10 @@ export async function deliverGuestIncidentNotice(input: {
   try {
     const origin = new URL(payload.dashboardOrigin ?? "");
     if (origin.protocol !== "https:" || origin.username || origin.password) throw new Error();
-    dashboardUrl = `${origin.origin}/properties/${encodeURIComponent(m.propertyId!)}/calendar`;
+    // Preserve legacy envelopes and provider retry payloads; new notices carry
+    // an immutable, reference-bound incident destination.
+    if (payload.dashboardPath !== undefined && payload.dashboardPath !== `/pin-ai/incidents/${payload.reference}`) throw new Error();
+    dashboardUrl = `${origin.origin}${payload.dashboardPath ?? `/properties/${encodeURIComponent(m.propertyId!)}/calendar`}`;
   } catch { return terminal("NOTICE_DASHBOARD_URL_INVALID", payload.issueId); }
   const claimed = JSON.stringify({ ...envelope, firstAttemptAt: envelope.firstAttemptAt ?? now.toISOString(),
     nextAttemptAt: new Date(now.getTime() + LEASE_MS).toISOString(), lease: `${m.id}:${m.retryCount + 1}:${now.toISOString()}` });

@@ -84,7 +84,7 @@ export async function handleGuestIncident(input: {
             body: JSON.stringify({ kind: "PIN_GO_EMAIL_DELIVERY", type: GUEST_INCIDENT_NOTICE,
               retryPayload: { issueId: issue.id, reference, category: command.category,
                 reservationNumber: reservation.reservationNumber, propertyName: reservation.property.name, quotes: command.quotes,
-                dashboardOrigin: env.APP_URL ?? "" },
+                dashboardOrigin: env.APP_URL ?? "", dashboardPath: `/pin-ai/incidents/${reference}` },
               nextAttemptAt: now.toISOString(), firstAttemptAt: null }),
           } });
         }
@@ -96,8 +96,12 @@ export async function handleGuestIncident(input: {
       communicationType: GUEST_INCIDENT_NOTICE, body: { contains: `"issueId":"${issue.id}"` },
     }, select: { status: true, providerDeliveryStatus: true } });
     const metadata = issue.metadata as Prisma.JsonObject;
+    const hostThread = await tx.pinAIHostIncidentThread.findFirst({ where: {
+      issueId: issue.id, organizationId: scope.organizationId,
+      propertyId: scope.propertyId, reservationId: scope.reservationId,
+    }, select: { acknowledgedAt: true } });
     return { reference: String(metadata.reference), category: command.category, incidentRecorded: true,
       notification: incidentNotificationState(notices), resolution: issue.workflowState === "RESOLVED" ? "RESOLVED" : "OPEN",
-      hostAcknowledged: false };
+      hostAcknowledged: hostThread?.acknowledgedAt != null };
   });
 }

@@ -257,6 +257,9 @@ app.use(
   "/api/public-booking",
   buildPublicBookingPinAIRouter({ prisma, env: process.env }),
 );
+// Includes the guest-token read route; mount before root Dashboard auth.
+// Host endpoints retain their own scoped requireAuth middleware.
+app.use(buildHostIncidentRouter({ prisma, env: process.env }));
 app.use(publicReviewsRouter);
 app.use(cleaningConfirmRouter);
 
@@ -351,7 +354,6 @@ app.use(dashboardPayoutsRouter);
 app.use(dashboardCancellationPolicyRouter);
 app.use(buildDashboardPropertyKnowledgeRouter(prisma));
 app.use(dashboardReviewsRouter);
-app.use(buildHostIncidentRouter({ prisma, env: process.env }));
 
 if (process.env.NODE_ENV !== "production") {
   app.use(devPmsRouter);

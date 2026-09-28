@@ -16,7 +16,7 @@ export type GuestIncidentReceipt = Readonly<{
   incidentRecorded: true;
   notification: "QUEUED" | "ACCEPTED" | "DELIVERED" | "ATTENTION_REQUIRED";
   resolution: "OPEN" | "RESOLVED";
-  hostAcknowledged: false;
+  hostAcknowledged: boolean;
 }>;
 
 export function parseIncidentInput(args: Readonly<Record<string, unknown>>) {
@@ -52,10 +52,15 @@ export function formatGuestIncidentReceipt(receipt: GuestIncidentReceipt | null,
   const notice = {
     QUEUED: es ? "El aviso al anfitrión está pendiente de envío o reintento." : "The host notice is queued for sending or retry.",
     ACCEPTED: es ? "El proveedor aceptó el aviso; la entrega aún no está confirmada." : "The provider accepted the notice; delivery is not yet confirmed.",
-    DELIVERED: es ? "El proveedor confirmó la entrega del correo. Eso no confirma que el anfitrión lo haya leído." : "The provider confirmed email delivery. This does not confirm the host has read it.",
+    DELIVERED: receipt.hostAcknowledged
+      ? (es ? "El proveedor confirmó la entrega del correo inicial." : "The provider confirmed delivery of the initial email.")
+      : (es ? "El proveedor confirmó la entrega del correo. Eso no confirma que el anfitrión lo haya leído." : "The provider confirmed email delivery. This does not confirm the host has read it."),
     ATTENTION_REQUIRED: es ? "No hay una notificación completada para todos los destinatarios. El caso sigue visible para atención; si necesitas ayuda inmediata, contacta al anfitrión directamente." : "Notification is not complete for all recipients. The case remains visible for attention; contact the host directly if you need immediate help.",
   }[receipt.notification];
-  return es
+  const acknowledgement = receipt.hostAcknowledged
+    ? (es ? " El anfitrión confirmó la atención del incidente. Esto no acredita una reparación física." : " The host acknowledged the incident. This does not verify a physical repair.")
+    : "";
+  return (es
     ? `Incidente ${receipt.reference}: ${receipt.resolution === "RESOLVED" ? "figura resuelto en el sistema" : "registrado para revisión del anfitrión; pendiente de resolución"}. ${notice}`
-    : `Incident ${receipt.reference}: ${receipt.resolution === "RESOLVED" ? "recorded as resolved in the system" : "recorded for host review; resolution pending"}. ${notice}`;
+    : `Incident ${receipt.reference}: ${receipt.resolution === "RESOLVED" ? "recorded as resolved in the system" : "recorded for host review; resolution pending"}. ${notice}`) + acknowledgement;
 }

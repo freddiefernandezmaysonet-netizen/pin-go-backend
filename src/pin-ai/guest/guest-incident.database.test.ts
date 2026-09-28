@@ -63,6 +63,7 @@ test(`PostgreSQL incident lifecycle with ${hostRole}: scoped recipients, atomic 
     assert.equal(issue.actionRequired, true); assert.doesNotMatch(issue.issue, /Deja correr/);
     const notice = await prisma.messageLog.findFirstOrThrow({ where: { reservationId: reservation.id } });
     assert.equal(notice.to, host.email);
+    assert.equal(JSON.parse(notice.body!).retryPayload.dashboardPath, `/pin-ai/incidents/${receipts[0]!.reference}`);
     let sends = 0;
     const send = async () => { sends++; return `synthetic-provider-${randomUUID()}`; };
     await Promise.all([1, 2].map(() => deliverGuestIncidentNotice({ prisma, message: notice, env, now, send })));

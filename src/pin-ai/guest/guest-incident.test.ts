@@ -66,6 +66,18 @@ test("recorded escalation cannot bypass payment/refund/reservation claim protect
     assert.throws(() => assertRuntimeResponseSafe({ responseText, escalationCreated: true, toolCalls: [], requiresHumanReview: false }), /FALSE_COMPLETION/);
   }
 });
+test("acknowledgement is distinct from email delivery and physical resolution in both languages", () => {
+  for (const resolution of ["OPEN", "RESOLVED"] as const) {
+    const receipt = { reference: "GI-012345ABCDEF", category: "HOT_WATER" as const, incidentRecorded: true as const,
+      notification: "DELIVERED" as const, resolution, hostAcknowledged: true };
+    const es = formatGuestIncidentReceipt(receipt, "es"), en = formatGuestIncidentReceipt(receipt, "en");
+    assert.match(es, /correo inicial/); assert.match(es, /confirmó la atención/);
+    assert.match(es, /no acredita una reparación física/); assert.doesNotMatch(es, /haya leído/);
+    assert.match(en, /initial email/); assert.match(en, /host acknowledged/);
+    assert.match(en, /does not verify a physical repair/);
+    assert.match(es, resolution === "OPEN" ? /pendiente de resolución/ : /figura resuelto/);
+  }
+});
 test("notice template escapes guest content and links to authenticated Dashboard without approval credentials", () => {
   const built = buildGuestIncidentEmail({ to: "host@example.test", reference: "GI-012345ABCDEF", category: "HOT_WATER",
     reservationNumber: "PG-2026-000051", propertyName: "Demo", quotes: ['<script>bad()</script> & "x"'],
@@ -79,6 +91,22 @@ test("parallel workers claim once and record provider acceptance, not delivery",
   const results = await Promise.all([1, 2].map(() => deliverGuestIncidentNotice({ prisma: f.prisma, message: f.row, env, now, send })));
   assert.equal(sends, 1); assert.ok(results.includes("CLAIM_LOST")); assert.equal(f.row.status, "SENT");
   assert.equal(f.row.providerMessageId, "provider-ack"); assert.equal(f.row.providerDeliveryStatus, null);
+});
+test("new incident links stay reference-bound and immutable across retries; legacy links are preserved", async () => {
+  for (const path of [undefined, "/pin-ai/incidents/GI-012345ABCDEF", "https://evil.test", "/pin-ai/incidents/GI-FFFFFFFFFFFF"]) {
+    const f = fixture(), envelope = JSON.parse(f.row.body);
+    envelope.retryPayload.dashboardPath = path;
+    f.patch({ body: JSON.stringify(envelope) });
+    const mails: { dashboardUrl: string; idempotencyKey: string }[] = [];
+    const send = async (mail: { dashboardUrl: string; idempotencyKey: string }) => { mails.push(mail); throw new Error("NETWORK_TIMEOUT"); };
+    await deliverGuestIncidentNotice({ prisma: f.prisma, message: f.row, env, now, send });
+    if (path !== undefined && path !== "/pin-ai/incidents/GI-012345ABCDEF") {
+      assert.equal(mails.length, 0); assert.equal(f.row.status, "FAILED_FINAL"); continue;
+    }
+    assert.equal(mails[0].dashboardUrl, `https://app.example.test${path ?? "/properties/property-1/calendar"}`);
+    await deliverGuestIncidentNotice({ prisma: f.prisma, message: f.row, env, now: new Date(now.getTime() + 61_000), send });
+    assert.deepEqual(mails[0], mails[1]);
+  }
 });
 test("notification disabled, missing scope or revoked admin never send", async () => {
   for (const scenario of ["disabled", "scope", "admin"]) {
