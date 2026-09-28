@@ -13,6 +13,7 @@ on:
       - "src/services/cleaning-timing-config*"
       - "src/services/cleaning-timing-consent*"
       - "src/services/cleaning-work-snapshot*"
+      - "src/services/cleaning-work-start*"
       - "tsconfig.cleaning-work-snapshot.json"
       - ".github/workflows/cleaning-followup-v1-foundation.yml"
 
@@ -47,7 +48,7 @@ jobs:
       - name: Compile cleaner confirmation route with runtime loader
         run: node --import tsx -e "import('./src/routes/cleaning-confirm.routes.ts').then(() => process.exit(0))"
       - name: Run retained timing policy and new snapshot and Staff HTTP tests
-        run: node --import tsx --test src/services/cleaning-followup.policy.test.ts src/services/cleaning-timing-config.test.ts src/services/cleaning-timing-consent.test.ts src/services/cleaning-timing-consent.prisma.test.ts src/services/cleaning-work-snapshot.service.test.ts src/routes/staff.cleaning-timing.test.ts
+        run: node --import tsx --test src/services/cleaning-followup.policy.test.ts src/services/cleaning-timing-config.test.ts src/services/cleaning-timing-consent.test.ts src/services/cleaning-timing-consent.prisma.test.ts src/services/cleaning-work-start.prisma.test.ts src/services/cleaning-work-snapshot.service.test.ts src/routes/staff.cleaning-timing.test.ts
       - name: Verify migration remains additive and TTLock-free
         shell: bash
         run: |
