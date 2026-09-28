@@ -2599,6 +2599,45 @@ export async function sendGuestVerificationReminderEmail(
   };
 }
 
+export async function sendCleaningHostAttentionEmail(input: {
+  to: string[];
+  propertyName: string;
+  cleanerName: string;
+  reservationNumber?: string | null;
+  dashboardUrl: string;
+  idempotencyKey: string;
+}) {
+  const recipients = Array.from(new Set(input.to.map(v => String(v ?? "").trim().toLowerCase()).filter(Boolean)));
+  if (!recipients.length) throw new Error("CLEANING_HOST_ATTENTION_RECIPIENT_REQUIRED");
+  const safeProperty = escapeHtml(input.propertyName);
+  const safeCleaner = escapeHtml(input.cleanerName);
+  const safeReservation = input.reservationNumber ? escapeHtml(input.reservationNumber) : null;
+  const safeDashboardUrl = getSafeUrl(input.dashboardUrl);
+  if (!safeDashboardUrl) throw new Error("CLEANING_HOST_ATTENTION_DASHBOARD_URL_INVALID");
+  if (!resend) {
+    if (isProd) throw new Error("RESEND_API_KEY missing in production");
+    return { ok: true, mode: "console" as const, providerMessageId: null, recipients };
+  }
+  const { data, error } = await resend.emails.send({
+    from: getEmailFrom(),
+    to: recipients,
+    subject: "Pin&Go: cleaning confirmation needs attention / confirmacion pendiente",
+    html: `
+      <div style="font-family:Arial,sans-serif;color:#111827;line-height:1.6;max-width:680px;margin:auto">
+        <h1>Cleaning confirmation needs attention / Confirmacion de limpieza pendiente</h1>
+        <p>Pin&amp;Go has not received the cleaner's completion confirmation for <strong>${safeProperty}</strong> after the agreed follow-up window.</p>
+        <p>Pin&amp;Go no ha recibido la confirmacion de finalizacion del cleaner para <strong>${safeProperty}</strong> despues del margen acordado.</p>
+        <p><strong>Cleaner:</strong> ${safeCleaner}</p>
+        ${safeReservation ? `<p><strong>Reservation / Reservacion:</strong> #${safeReservation}</p>` : ""}
+        <p><strong>This does not confirm that cleaning was not completed.</strong><br/><strong>Esto no confirma que la limpieza no se haya realizado.</strong></p>
+        <p><a href="${escapeHtml(safeDashboardUrl)}">Review in Pin&amp;Go / Revisar en Pin&amp;Go</a></p>
+      </div>`,
+  }, { idempotencyKey: input.idempotencyKey });
+  if (error) throw new Error(`CLEANING_HOST_ATTENTION_EMAIL_REJECTED: ${error.name}`);
+  if (!data?.id) throw new Error("CLEANING_HOST_ATTENTION_EMAIL_ACK_MISSING");
+  return { ok: true, mode: "resend" as const, providerMessageId: data.id, recipients };
+}
+
 export async function sendDeviceGatewayCriticalAlertEmail(
   input: SendDeviceGatewayCriticalAlertEmailInput
 ) {
