@@ -19,6 +19,9 @@
     "src/services/cleaning-work-snapshot.prisma.ts",
     "src/routes/staff.routes.ts",
     "src/routes/cleaning-confirm.routes.ts",
+    "src/services/cleaner-access-autopilot.service.ts",
+    "src/services/reservation-complete-flow-audit.service.ts",
+    "src/services/staff-selection.service.ts",
     "src/routes/staff.cleaning-timing.test.ts",
     "src/services/cleaning-work-snapshot.database.test.ts"
   ]
