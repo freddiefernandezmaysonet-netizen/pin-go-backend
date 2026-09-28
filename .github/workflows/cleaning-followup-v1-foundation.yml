@@ -67,12 +67,15 @@ jobs:
             echo "Forbidden destructive/access scope found"
             exit 1
           fi
-      - name: Prove follow-up delivery adapter is not wired into runtime
+      - name: Prove runtime delivery is limited to cleaner reminders
         shell: bash
         run: |
           set -euo pipefail
-          if grep -R -n 'deliverClaimedCleanerFollowup' src/workers src/routes; then
-            echo "Real follow-up delivery activation is not part of this slice"
+          grep -q 'deliverClaimedCleanerFollowup' src/workers/reservation.worker.ts
+          grep -q 'item.decision === "START_REMINDER_DUE"' src/workers/reservation.worker.ts
+          grep -q 'item.decision === "COMPLETION_REMINDER_DUE"' src/workers/reservation.worker.ts
+          if grep -n -E 'HOST_ATTENTION.*deliverClaimedCleanerFollowup|deliverClaimedCleanerFollowup.*HOST_ATTENTION' src/workers/reservation.worker.ts; then
+            echo "HOST_ATTENTION delivery must remain disconnected"
             exit 1
           fi
 
