@@ -78,6 +78,10 @@ import {
 import {
   runGuestJourneyCommunicationsOwnerCycle,
 } from "../services/guest-journey-communications-owner-cycle.service";
+import { runCleaningFollowupClaimCycle } from "../services/cleaning-followup-cycle.service.js";
+import { createCleaningFollowupCycleRepository } from "../services/cleaning-followup-cycle.prisma.js";
+import { createCleaningFollowupReceiptStore } from "../services/cleaning-followup-receipt.prisma.js";
+import { shouldRunCleaningFollowupClaimCycle } from "../services/cleaning-followup-cadence.policy.js";
 import {
   isGuestJourneyAccessOwnerScope,
 } from "../services/guest-journey-access-owner.config";
@@ -229,6 +233,7 @@ let guestJourneyCoordinationCursor:
   string | null = null;
 let guestJourneyMissionControlCursor:
   string | null = null;
+let cleaningFollowupLastRunAtMs: number | null = null;
 const REMINDER_HOURS = Number(
   process.env.GUEST_LINK_REMINDER_HOURS ??
     24
@@ -2710,6 +2715,28 @@ async function tick() {
 
   try {
     const now = new Date();
+
+    if (shouldRunCleaningFollowupClaimCycle({
+      nowMs: now.getTime(),
+      lastRunAtMs: cleaningFollowupLastRunAtMs,
+    })) {
+      cleaningFollowupLastRunAtMs = now.getTime();
+      try {
+        const cleaningFollowupResults = await runCleaningFollowupClaimCycle({
+          repository: createCleaningFollowupCycleRepository(prisma),
+          receipts: createCleaningFollowupReceiptStore(prisma),
+          now,
+        });
+        if (cleaningFollowupResults.length > 0) {
+          log("cleaning-followup-claims", {
+            evaluated: cleaningFollowupResults.length,
+            claimed: cleaningFollowupResults.filter((item) => item.claim === "CLAIMED").length,
+          });
+        }
+      } catch (e) {
+        errLog("cleaning-followup-claims crashed:", toErrString(e));
+      }
+    }
 
     log("tick", {
       now: now.toISOString(),
