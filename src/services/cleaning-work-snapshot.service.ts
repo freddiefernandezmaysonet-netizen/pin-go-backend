@@ -112,7 +112,9 @@ function validateStored(work: CleaningWorkSnapshot): void {
 export async function materializeCleaningWorkSnapshot(
   store: CleaningWorkSnapshotStore,
   scope: CleaningWorkScope,
+  now = new Date(),
 ): Promise<CleaningWorkSnapshotResult> {
+  const nowMs = checkDate(now);
   const keys = ["organizationId", "propertyId", "reservationId", "staffMemberId", "confirmationId"];
   if (!scope || typeof scope !== "object" || Object.keys(scope).length !== keys.length ||
       keys.some(key => !Object.hasOwn(scope, key))) fail("CLEANING_WORK_INVALID_SCOPE");
@@ -154,6 +156,9 @@ export async function materializeCleaningWorkSnapshot(
     }
 
     if (context.durationCommitmentMinutes === null) return result("NOT_CONFIGURED", null);
+    // No retroactive activation: a legacy confirmation/link opened after its scheduled
+    // cleaning start cannot create a new Follow-up V1 work item.
+    if (startMs < nowMs) fail("CLEANING_WORK_RETROACTIVE_ACTIVATION_BLOCKED");
     if (await tx.hasOtherCurrentWork(scope)) fail("CLEANING_WORK_REASSIGNMENT_REQUIRES_REVIEW");
     const snapshot: NewCleaningWorkSnapshot = {
       reservationId: scope.reservationId,
