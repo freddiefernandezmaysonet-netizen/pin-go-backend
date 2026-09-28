@@ -31,6 +31,8 @@ export type CleaningWorkSnapshot = Readonly<{
   durationCommitmentMinutes: number;
   startConfirmationGraceMinutes: number;
   followupGraceMinutes: number;
+  timingConsentVersion: string | null;
+  timingConsentAcceptedAt: Date | null;
   startConfirmedAt: Date | null;
   completionConfirmedAt: Date | null;
   cancelledAt: Date | null;
@@ -96,7 +98,7 @@ function validateStored(work: CleaningWorkSnapshot): void {
   checkMinutes(work.durationCommitmentMinutes, 15, 1440);
   checkMinutes(work.startConfirmationGraceMinutes, 5, 240);
   checkMinutes(work.followupGraceMinutes, 5, 240);
-  for (const date of [work.startConfirmedAt, work.completionConfirmedAt, work.cancelledAt, work.supersededAt]) {
+  for (const date of [work.timingConsentAcceptedAt, work.startConfirmedAt, work.completionConfirmedAt, work.cancelledAt, work.supersededAt]) {
     if (date !== null) checkDate(date);
   }
 }
