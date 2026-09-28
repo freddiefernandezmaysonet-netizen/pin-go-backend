@@ -13,6 +13,7 @@ if (process.env.CLEANING_WORK_ISOLATED_DB !== "1" ||
 }
 const db = new PrismaClient();
 const store = createCleaningWorkSnapshotStore(db);
+const TEST_NOW = new Date("2026-09-28T15:00:00.000Z");
 
 async function fixture(): Promise<CleaningWorkScope> {
   const id = randomUUID();
@@ -39,7 +40,7 @@ test("CleaningWork persistence on disposable PostgreSQL", { timeout: 60000 }, as
   try {
     await t.test("concurrent same-work requests persist one record and replay", async () => {
       const scope = await fixture();
-      const results = await Promise.all([materializeCleaningWorkSnapshot(store, scope), materializeCleaningWorkSnapshot(store, scope)]);
+      const results = await Promise.all([materializeCleaningWorkSnapshot(store, scope, TEST_NOW), materializeCleaningWorkSnapshot(store, scope, TEST_NOW)]);
       assert.deepEqual(results.map(r => r.outcome).sort(), ["CREATED", "REPLAYED"]);
       assert.equal(await count(scope), 1);
       assert.equal(results[0].work?.scheduledStartAt.toISOString(), "2026-09-28T15:30:00.000Z");
@@ -51,7 +52,7 @@ test("CleaningWork persistence on disposable PostgreSQL", { timeout: 60000 }, as
       const scope = await fixture();
       const other = { ...scope, staffMemberId: `staff-${randomUUID()}`, confirmationId: `confirmation-${randomUUID()}` };
       await addCleaner(other);
-      const results = await Promise.allSettled([materializeCleaningWorkSnapshot(store, scope), materializeCleaningWorkSnapshot(store, other)]);
+      const results = await Promise.allSettled([materializeCleaningWorkSnapshot(store, scope, TEST_NOW), materializeCleaningWorkSnapshot(store, other, TEST_NOW)]);
       assert.equal(results.filter(r => r.status === "fulfilled").length, 1);
       assert.equal(await count(scope), 1);
       const rejected = results.find(r => r.status === "rejected");
@@ -60,40 +61,40 @@ test("CleaningWork persistence on disposable PostgreSQL", { timeout: 60000 }, as
     });
     await t.test("Staff edits do not overwrite the saved timing snapshot", async () => {
       const scope = await fixture();
-      const first = await materializeCleaningWorkSnapshot(store, scope);
+      const first = await materializeCleaningWorkSnapshot(store, scope, TEST_NOW);
       await db.$executeRaw`UPDATE "PropertyStaff" SET "cleaningDurationCommitmentMinutes" = 240 WHERE "staffMemberId" = ${scope.staffMemberId}`;
-      const replay = await materializeCleaningWorkSnapshot(store, scope);
+      const replay = await materializeCleaningWorkSnapshot(store, scope, TEST_NOW);
       assert.deepEqual(replay.work, first.work);
       assert.equal(replay.work?.durationCommitmentMinutes, 120);
     });
     await t.test("foreign organization and reservation bindings reject with zero writes", async () => {
       const scope = await fixture();
-      await assert.rejects(materializeCleaningWorkSnapshot(store, { ...scope, organizationId: "foreign-org" }), /OUT_OF_SCOPE/);
-      await assert.rejects(materializeCleaningWorkSnapshot(store, { ...scope, confirmationId: "foreign-confirmation" }), /OUT_OF_SCOPE/);
+      await assert.rejects(materializeCleaningWorkSnapshot(store, { ...scope, organizationId: "foreign-org" }, TEST_NOW), /OUT_OF_SCOPE/);
+      await assert.rejects(materializeCleaningWorkSnapshot(store, { ...scope, confirmationId: "foreign-confirmation" }, TEST_NOW), /OUT_OF_SCOPE/);
       assert.equal(await count(scope), 0);
     });
     await t.test("changed checkout is rejected without rewriting existing work", async () => {
       const scope = await fixture();
-      const first = await materializeCleaningWorkSnapshot(store, scope);
+      const first = await materializeCleaningWorkSnapshot(store, scope, TEST_NOW);
       await db.$executeRaw`UPDATE "Reservation" SET "checkOut" = TIMESTAMP '2026-09-29 15:00:00' WHERE "id" = ${scope.reservationId}`;
-      await assert.rejects(materializeCleaningWorkSnapshot(store, scope), /SCHEDULE_CHANGED/);
+      await assert.rejects(materializeCleaningWorkSnapshot(store, scope, TEST_NOW), /SCHEDULE_CHANGED/);
       const row = await db.cleaningWork.findUniqueOrThrow({ where: { id: first.work!.id } });
       assert.equal(row.scheduledStartAt.toISOString(), "2026-09-28T15:30:00.000Z");
     });
     await t.test("cancelled work is never reopened", async () => {
       const scope = await fixture();
-      const first = await materializeCleaningWorkSnapshot(store, scope);
+      const first = await materializeCleaningWorkSnapshot(store, scope, TEST_NOW);
       await db.cleaningWork.update({ where: { id: first.work!.id }, data: { cancelledAt: new Date() } });
-      assert.equal((await materializeCleaningWorkSnapshot(store, scope)).outcome, "EXISTING_CLOSED");
+      assert.equal((await materializeCleaningWorkSnapshot(store, scope, TEST_NOW)).outcome, "EXISTING_CLOSED");
       assert.equal(await count(scope), 1);
     });
     await t.test("NFC-disabled and inactive staff cannot create jobs", async () => {
       const scope = await fixture();
       await db.$executeRaw`UPDATE "Property" SET "cleaningNfcEnabled" = false WHERE "id" = ${scope.propertyId}`;
-      await assert.rejects(materializeCleaningWorkSnapshot(store, scope), /NFC_FLOW_DISABLED/);
+      await assert.rejects(materializeCleaningWorkSnapshot(store, scope, TEST_NOW), /NFC_FLOW_DISABLED/);
       await db.$executeRaw`UPDATE "Property" SET "cleaningNfcEnabled" = true WHERE "id" = ${scope.propertyId}`;
       await db.$executeRaw`UPDATE "StaffMember" SET "isActive" = false WHERE "id" = ${scope.staffMemberId}`;
-      await assert.rejects(materializeCleaningWorkSnapshot(store, scope), /INACTIVE_CONTEXT/);
+      await assert.rejects(materializeCleaningWorkSnapshot(store, scope, TEST_NOW), /INACTIVE_CONTEXT/);
       assert.equal(await count(scope), 0);
     });
     await t.test("failed transaction rolls back a created snapshot", async () => {
