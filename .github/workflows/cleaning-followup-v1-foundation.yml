@@ -15,6 +15,7 @@ on:
       - "src/services/cleaning-followup-cycle*"
       - "src/services/cleaning-followup-cadence*"
       - "src/services/cleaning-followup-sms-body*"
+      - "src/services/cleaning-followup-delivery-reconciliation*"
       - "src/services/cleaning-followup-host-attention*"
       - "src/services/cleaning-followup-host-recipient*"
       - "src/services/cleaning-followup-host-email*"
@@ -60,7 +61,7 @@ jobs:
       - name: Compile cleaner confirmation route with runtime loader
         run: node --import tsx -e "import('./src/routes/cleaning-confirm.routes.ts').then(() => process.exit(0))"
       - name: Run retained timing policy and new snapshot and Staff HTTP tests
-        run: node --import tsx --test src/services/cleaning-followup.policy.test.ts src/services/cleaning-followup-receipt.service.test.ts src/services/cleaning-followup-cycle.service.test.ts src/services/cleaning-followup-cadence.policy.test.ts src/services/cleaning-followup-sms-body.service.test.ts src/services/cleaning-followup-host-attention.service.test.ts src/services/cleaning-followup-host-recipient.service.test.ts src/services/cleaning-followup-host-email.service.test.ts src/services/cleaning-followup-host-notice.service.test.ts src/services/cleaning-timing-config.test.ts src/services/cleaning-timing-consent.test.ts src/services/cleaning-timing-consent.prisma.test.ts src/services/cleaning-work-start.prisma.test.ts src/services/cleaning-work-completion.prisma.test.ts src/services/cleaning-work-snapshot.service.test.ts src/routes/staff.cleaning-timing.test.ts
+        run: node --import tsx --test src/services/cleaning-followup.policy.test.ts src/services/cleaning-followup-receipt.service.test.ts src/services/cleaning-followup-cycle.service.test.ts src/services/cleaning-followup-cadence.policy.test.ts src/services/cleaning-followup-sms-body.service.test.ts src/services/cleaning-followup-delivery-reconciliation.service.test.ts src/services/cleaning-followup-host-attention.service.test.ts src/services/cleaning-followup-host-recipient.service.test.ts src/services/cleaning-followup-host-email.service.test.ts src/services/cleaning-followup-host-notice.service.test.ts src/services/cleaning-timing-config.test.ts src/services/cleaning-timing-consent.test.ts src/services/cleaning-timing-consent.prisma.test.ts src/services/cleaning-work-start.prisma.test.ts src/services/cleaning-work-completion.prisma.test.ts src/services/cleaning-work-snapshot.service.test.ts src/routes/staff.cleaning-timing.test.ts
       - name: Verify migration remains additive and TTLock-free
         shell: bash
         run: |
