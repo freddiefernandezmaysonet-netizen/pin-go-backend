@@ -1811,7 +1811,7 @@ model CleaningWork {
   @@unique([reservationId, staffMemberId])
   @@index([propertyId, scheduledStartAt])
   @@index([staffMemberId, scheduledStartAt])
-  @@index([startConfirmedAt, completionConfirmedAt, cancelledAt, supersededAt])
+  @@index([startConfirmedAt, completionConfirmedAt, cancelledAt, supersededAt], map: "CleaningWork_state_idx")
 }
 
 model GuestLinkReminderLog {
