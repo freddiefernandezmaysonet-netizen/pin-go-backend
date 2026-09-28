@@ -18,6 +18,7 @@
     "src/services/cleaning-work-snapshot.service.test.ts",
     "src/services/cleaning-work-snapshot.prisma.ts",
     "src/routes/staff.routes.ts",
+    "src/routes/cleaning-confirm.routes.ts",
     "src/routes/staff.cleaning-timing.test.ts",
     "src/services/cleaning-work-snapshot.database.test.ts"
   ]
