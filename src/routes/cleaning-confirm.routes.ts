@@ -5,6 +5,13 @@ import {
 } from "@prisma/client";
 import { ensureCleanerNfcAccessForConfirmedCleaning } from "../services/cleaner-access-autopilot.service";
 import { auditReservationCompleteFlowSafe } from "../services/reservation-complete-flow-audit.service";
+import { materializeCleaningWorkSnapshot } from "../services/cleaning-work-snapshot.service.js";
+import { createCleaningWorkSnapshotStore } from "../services/cleaning-work-snapshot.prisma.js";
+import { acceptCleaningTimingConsent } from "../services/cleaning-timing-consent.prisma.js";
+import { buildCleaningTimingConsentSnapshot } from "../services/cleaning-timing-consent.js";
+import { confirmCleaningStart } from "../services/cleaning-work-start.prisma.js";
+import { confirmCleaningCompletion } from "../services/cleaning-work-completion.prisma.js";
+import { resolveCleaningHostAttention } from "../services/cleaning-followup-host-attention.service.js";
 
 const prisma = new PrismaClient();
 
@@ -72,6 +79,62 @@ async function loadConfirmationData(token: string) {
     staffMember,
     invalidData: false,
   };
+}
+
+function formatUtc(value: Date) {
+  return value.toISOString().replace("T", " ").replace(".000Z", " UTC");
+}
+
+async function prepareCleaningTimingConsent(data: {
+  confirmation: any;
+  reservation: any;
+}) {
+  const organizationId = data.reservation.property?.organizationId;
+  if (!organizationId) return null;
+  const snapshot = await materializeCleaningWorkSnapshot(
+    createCleaningWorkSnapshotStore(prisma),
+    {
+      organizationId,
+      propertyId: data.confirmation.propertyId,
+      reservationId: data.confirmation.reservationId,
+      staffMemberId: data.confirmation.staffMemberId,
+      confirmationId: data.confirmation.id,
+    },
+  );
+  if (!snapshot.work) return null;
+  return {
+    work: snapshot.work,
+    terms: buildCleaningTimingConsentSnapshot({
+      scheduledStartAt: snapshot.work.scheduledStartAt,
+      durationCommitmentMinutes: snapshot.work.durationCommitmentMinutes,
+      startConfirmationGraceMinutes: snapshot.work.startConfirmationGraceMinutes,
+      followupGraceMinutes: snapshot.work.followupGraceMinutes,
+    }),
+  };
+}
+
+function renderTimingConsent(token: string, prepared: Awaited<ReturnType<typeof prepareCleaningTimingConsent>>) {
+  if (!prepared) {
+    return "Cleaning availability confirmed and NFC access prepared. No cleaning-time commitment is configured for this property assignment.";
+  }
+  if (prepared.work.timingConsentAcceptedAt) {
+    return `Cleaning availability and timing commitment already confirmed. Scheduled start: ${formatUtc(prepared.terms.scheduledStartAt)}. Committed completion: ${formatUtc(prepared.terms.scheduledCompletionAt)}.`;
+  }
+  return `
+    <html><body style="font-family:Arial;padding:24px;max-width:640px;">
+      <h2>Cleaning timing commitment</h2>
+      <p>Your availability is confirmed and your NFC access remains handled by Pin&Go.</p>
+      <p><b>Scheduled start:</b> ${formatUtc(prepared.terms.scheduledStartAt)}</p>
+      <p><b>Standard duration:</b> ${prepared.terms.durationCommitmentMinutes} minutes</p>
+      <p><b>Confirm start by:</b> ${formatUtc(prepared.terms.startConfirmationDueAt)}</p>
+      <p><b>Committed completion:</b> ${formatUtc(prepared.terms.scheduledCompletionAt)}</p>
+      <p><b>Follow-up begins after:</b> ${formatUtc(prepared.terms.followupAttentionAt)}</p>
+      <form method="POST" action="/cleaning/confirm/${token}/timing-consent">
+        <button style="padding:12px 18px;background:#2563eb;color:white;border:0;border-radius:8px;">
+          I accept this cleaning schedule and time commitment
+        </button>
+      </form>
+    </body></html>`;
 }
 
 async function runCompleteFlowAuditAfterCleaningConfirmation(
@@ -177,9 +240,8 @@ cleaningConfirmRouter.get("/cleaning/confirm/:token", async (req, res) => {
     );
   }
 
-  return res.send(
-    "Cleaning already confirmed. Pin&Go verified your NFC access for the cleaning window."
-  );
+  const prepared = await prepareCleaningTimingConsent({ confirmation, reservation });
+  return res.send(renderTimingConsent(token, prepared));
 }
     if (confirmation.status === "DECLINED") {
       return res.send("This cleaning request was already declined.");
@@ -358,14 +420,169 @@ await runCompleteFlowAuditAfterCleaningConfirmation(
   confirmation.reservationId
 );
 
-return res.send(
-  "Cleaning confirmed. Pin&Go prepared your NFC access for the cleaning window."
-);
+const prepared = await prepareCleaningTimingConsent({ confirmation, reservation });
+return res.send(renderTimingConsent(token, prepared));
      
     } catch (e: any) {
       console.error("[CLEANING_CONFIRM_CONFIRM_ERROR]", e);
 
       return res.status(500).send(e?.message ?? "Failed to confirm cleaning.");
+    }
+  }
+);
+
+// POST /cleaning/confirm/:token/timing-consent
+cleaningConfirmRouter.post(
+  "/cleaning/confirm/:token/timing-consent",
+  async (req, res) => {
+    try {
+      const token = String(req.params.token ?? "");
+      const data = await loadConfirmationData(token);
+      if (!data || data.invalidData || !data.reservation || !data.staffMember) {
+        return res.status(404).send("Cleaning confirmation data is incomplete.");
+      }
+      const { confirmation, reservation } = data;
+      if (reservation.status === ReservationStatus.CANCELLED) {
+        return sendCancelledCleaningRequestResponse(res);
+      }
+      if (reservation.property?.cleaningNfcEnabled !== true) {
+        return sendCleaningNfcDisabledResponse(res);
+      }
+      if (confirmation.status !== "CONFIRMED") {
+        return res.status(409).send("Confirm cleaning availability before accepting the timing commitment.");
+      }
+      const prepared = await prepareCleaningTimingConsent({ confirmation, reservation });
+      if (!prepared) {
+        return res.status(409).send("No cleaning-time commitment is configured for this property assignment.");
+      }
+      const accepted = await acceptCleaningTimingConsent(prisma, {
+        workId: prepared.work.id,
+        reservationId: confirmation.reservationId,
+        staffMemberId: confirmation.staffMemberId,
+        confirmationId: confirmation.id,
+      });
+      return res.send(`
+        <html><body style="font-family:Arial;padding:24px;max-width:640px;">
+          <h2>Cleaning timing commitment accepted</h2>
+          <p><b>Scheduled start:</b> ${formatUtc(prepared.terms.scheduledStartAt)}</p>
+          <p><b>Committed completion:</b> ${formatUtc(prepared.terms.scheduledCompletionAt)}</p>
+          <p>Your acceptance was recorded at ${formatUtc(accepted.timingConsentAcceptedAt!)}.</p>
+          <form method="POST" action="/cleaning/confirm/${token}/start">
+            <button style="padding:12px 18px;background:#2563eb;color:white;border:0;border-radius:8px;">
+              I started cleaning
+            </button>
+          </form>
+          <p style="font-size:12px;color:#6b7280;">This button records your declaration of starting the cleaning. It does not change the committed completion time or NFC access window.</p>
+        </body></html>
+      `);
+    } catch (e: any) {
+      console.error("[CLEANING_TIMING_CONSENT_ERROR]", e);
+      return res.status(409).send(e?.message ?? "Failed to accept cleaning timing commitment.");
+    }
+  }
+);
+
+// POST /cleaning/confirm/:token/start
+cleaningConfirmRouter.post(
+  "/cleaning/confirm/:token/start",
+  async (req, res) => {
+    try {
+      const token = String(req.params.token ?? "");
+      const data = await loadConfirmationData(token);
+      if (!data || data.invalidData || !data.reservation || !data.staffMember) {
+        return res.status(404).send("Cleaning confirmation data is incomplete.");
+      }
+      const { confirmation, reservation } = data;
+      if (reservation.status === ReservationStatus.CANCELLED) {
+        return sendCancelledCleaningRequestResponse(res);
+      }
+      if (reservation.property?.cleaningNfcEnabled !== true) {
+        return sendCleaningNfcDisabledResponse(res);
+      }
+      if (confirmation.status !== "CONFIRMED") {
+        return res.status(409).send("Confirm cleaning availability before recording the cleaning start.");
+      }
+      const prepared = await prepareCleaningTimingConsent({ confirmation, reservation });
+      if (!prepared?.work.timingConsentAcceptedAt) {
+        return res.status(409).send("Accept the cleaning timing commitment before recording the cleaning start.");
+      }
+      const started = await confirmCleaningStart(prisma, {
+        workId: prepared.work.id,
+        reservationId: confirmation.reservationId,
+        staffMemberId: confirmation.staffMemberId,
+        confirmationId: confirmation.id,
+      });
+      const terms = buildCleaningTimingConsentSnapshot({
+        scheduledStartAt: prepared.work.scheduledStartAt,
+        durationCommitmentMinutes: prepared.work.durationCommitmentMinutes,
+        startConfirmationGraceMinutes: prepared.work.startConfirmationGraceMinutes,
+        followupGraceMinutes: prepared.work.followupGraceMinutes,
+      });
+      return res.send(`
+        <html><body style="font-family:Arial;padding:24px;max-width:640px;">
+          <h2>Cleaning start recorded</h2>
+          <p>Start confirmed at ${formatUtc(started.startConfirmedAt!)}.</p>
+          <p><b>Committed completion remains:</b> ${formatUtc(terms.scheduledCompletionAt)}</p>
+          <form method="POST" action="/cleaning/confirm/${token}/complete">
+            <button style="padding:12px 18px;background:#2563eb;color:white;border:0;border-radius:8px;">
+              I finished cleaning
+            </button>
+          </form>
+          <p style="font-size:12px;color:#6b7280;">This records your completion declaration. It does not independently certify an inspection or change NFC access.</p>
+        </body></html>
+      `);
+    } catch (e: any) {
+      console.error("[CLEANING_START_CONFIRM_ERROR]", e);
+      return res.status(409).send(e?.message ?? "Failed to record cleaning start.");
+    }
+  }
+);
+
+// POST /cleaning/confirm/:token/complete
+cleaningConfirmRouter.post(
+  "/cleaning/confirm/:token/complete",
+  async (req, res) => {
+    try {
+      const token = String(req.params.token ?? "");
+      const data = await loadConfirmationData(token);
+      if (!data || data.invalidData || !data.reservation || !data.staffMember) {
+        return res.status(404).send("Cleaning confirmation data is incomplete.");
+      }
+      const { confirmation, reservation } = data;
+      if (reservation.status === ReservationStatus.CANCELLED) {
+        return sendCancelledCleaningRequestResponse(res);
+      }
+      if (reservation.property?.cleaningNfcEnabled !== true) {
+        return sendCleaningNfcDisabledResponse(res);
+      }
+      if (confirmation.status !== "CONFIRMED") {
+        return res.status(409).send("Confirm cleaning availability before recording completion.");
+      }
+      const prepared = await prepareCleaningTimingConsent({ confirmation, reservation });
+      if (!prepared?.work.timingConsentAcceptedAt) {
+        return res.status(409).send("Accept the cleaning timing commitment before recording completion.");
+      }
+      const completed = await confirmCleaningCompletion(prisma, {
+        workId: prepared.work.id,
+        reservationId: confirmation.reservationId,
+        staffMemberId: confirmation.staffMemberId,
+        confirmationId: confirmation.id,
+      });
+      await resolveCleaningHostAttention({
+        prisma,
+        cleaningWorkId: prepared.work.id,
+        occurredAt: completed.completionConfirmedAt!,
+      });
+      await prisma.cleaningHostAttentionNotice.updateMany({
+        where: { cleaningWorkId: prepared.work.id, status: { in: ["QUEUED", "FAILED"] } },
+        data: { status: "OBSOLETE", lastError: "CLEANER_COMPLETION_CONFIRMED" },
+      });
+      return res.send(
+        `Cleaning completion recorded at ${formatUtc(completed.completionConfirmedAt!)}. Pin&Go recorded your declaration; this does not independently certify a physical inspection.`
+      );
+    } catch (e: any) {
+      console.error("[CLEANING_COMPLETION_CONFIRM_ERROR]", e);
+      return res.status(409).send(e?.message ?? "Failed to record cleaning completion.");
     }
   }
 );

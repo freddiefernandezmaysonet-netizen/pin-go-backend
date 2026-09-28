@@ -1,0 +1,26 @@
+{
+  "compilerOptions": {
+    "target": "ES2022",
+    "module": "NodeNext",
+    "moduleResolution": "NodeNext",
+    "strict": true,
+    "noEmit": true,
+    "esModuleInterop": true,
+    "skipLibCheck": true,
+    "types": ["node"]
+  },
+  "files": [
+    "src/services/cleaning-timing-config.ts",
+    "src/services/cleaning-timing-consent.ts",
+    "src/services/cleaning-timing-consent.prisma.ts",
+    "src/services/cleaning-timing-config.test.ts",
+    "src/services/cleaning-work-snapshot.service.ts",
+    "src/services/cleaning-work-snapshot.service.test.ts",
+    "src/services/cleaning-work-snapshot.prisma.ts",
+    "src/services/cleaning-work-start.prisma.ts",
+    "src/services/cleaning-work-completion.prisma.ts",
+    "src/routes/staff.routes.ts",
+    "src/routes/staff.cleaning-timing.test.ts",
+    "src/services/cleaning-work-snapshot.database.test.ts"
+  ]
+}

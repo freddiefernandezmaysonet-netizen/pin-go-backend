@@ -1,6 +1,7 @@
 import { Router } from "express";
 import type { PrismaClient } from "@prisma/client";
 import { PropertyStaffRole } from "@prisma/client";
+import { CleaningTimingValidationError, parseCleaningTimingUpdate } from "../services/cleaning-timing-config.js";
 
 export function buildStaffRouter(prisma: PrismaClient) {
   const router = Router();
@@ -187,6 +188,9 @@ export function buildStaffRouter(prisma: PrismaClient) {
               role: true,
               backupOrder: true,
               isActive: true,
+              cleaningDurationCommitmentMinutes: true,
+              cleaningStartConfirmationGraceMinutes: true,
+              cleaningFollowupGraceMinutes: true,
             },
           },
         },
@@ -233,6 +237,7 @@ export function buildStaffRouter(prisma: PrismaClient) {
           const propertyId = String(item.propertyId ?? "");
           const role = String(item.role ?? "");
           const isActive = Boolean(item.isActive);
+          const cleaningTiming = parseCleaningTimingUpdate(item);
 
           if (!propertyId) continue;
 
@@ -296,11 +301,13 @@ export function buildStaffRouter(prisma: PrismaClient) {
               role: role as PropertyStaffRole,
               backupOrder,
               isActive: true,
+              ...cleaningTiming,
             },
             update: {
               role: role as PropertyStaffRole,
               backupOrder,
               isActive: true,
+              ...cleaningTiming,
             },
           });
 
@@ -312,6 +319,9 @@ export function buildStaffRouter(prisma: PrismaClient) {
 
       return res.json({ ok: true, assignments: result });
     } catch (e: any) {
+      if (e instanceof CleaningTimingValidationError) {
+        return res.status(400).json({ error: e.message, field: e.field });
+      }
       return res.status(500).json({ error: e?.message ?? String(e) });
     }
   });

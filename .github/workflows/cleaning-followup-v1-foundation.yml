@@ -1,0 +1,131 @@
+name: Cleaning Follow-up V1 Foundation
+
+on:
+  pull_request:
+    paths:
+      - "prisma/schema.prisma"
+      - "prisma/migrations/20260928024500_cleaning_followup_v1_foundation/**"
+      - "src/routes/staff.routes.ts"
+      - "src/routes/cleaning-confirm.routes.ts"
+      - "src/workers/reservation.worker.ts"
+      - "src/routes/staff.cleaning-timing.test.ts"
+      - "src/services/cleaning-followup.policy.ts"
+      - "src/services/cleaning-followup.policy.test.ts"
+      - "src/services/cleaning-followup-receipt*"
+      - "src/services/cleaning-followup-cycle*"
+      - "src/services/cleaning-followup-cadence*"
+      - "src/services/cleaning-followup-sms-body*"
+      - "src/services/cleaning-followup-delivery-reconciliation*"
+      - "src/services/cleaning-followup-host-attention*"
+      - "src/services/cleaning-followup-host-recipient*"
+      - "src/services/cleaning-followup-host-email*"
+      - "src/services/cleaning-followup-host-notice*"
+      - "src/services/cleaning-followup-host-delivery*"
+      - "src/services/cleaning-followup-delivery.service.ts"
+      - "src/services/cleaning-timing-config*"
+      - "src/services/cleaning-timing-consent*"
+      - "src/services/cleaning-work-snapshot*"
+      - "src/services/cleaning-work-start*"
+      - "src/services/cleaning-work-completion*"
+      - "tsconfig.cleaning-work-snapshot.json"
+      - ".github/workflows/cleaning-followup-v1-foundation.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  foundation:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout exact candidate
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          persist-credentials: false
+      - name: Use Node.js 22
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+      - name: Install locked dependencies without lifecycle scripts
+        run: npm ci --ignore-scripts
+      - name: Generate Prisma client
+        run: npx prisma generate
+      - name: Validate Prisma schema
+        run: npx prisma validate
+        env:
+          DATABASE_URL: postgresql://user:pass@localhost:5432/placeholder
+      - name: Strict typecheck including actual Staff route and Prisma adapter
+        run: npx tsc -p tsconfig.cleaning-work-snapshot.json
+      - name: Compile cleaner confirmation route with runtime loader
+        run: node --import tsx -e "import('./src/routes/cleaning-confirm.routes.ts').then(() => process.exit(0))"
+      - name: Run retained timing policy and new snapshot and Staff HTTP tests
+        run: node --import tsx --test src/services/cleaning-followup.policy.test.ts src/services/cleaning-followup-receipt.service.test.ts src/services/cleaning-followup-cycle.service.test.ts src/services/cleaning-followup-cadence.policy.test.ts src/services/cleaning-followup-sms-body.service.test.ts src/services/cleaning-followup-delivery-reconciliation.service.test.ts src/services/cleaning-followup-host-attention.service.test.ts src/services/cleaning-followup-host-recipient.service.test.ts src/services/cleaning-followup-host-email.service.test.ts src/services/cleaning-followup-host-notice.service.test.ts src/services/cleaning-timing-config.test.ts src/services/cleaning-timing-consent.test.ts src/services/cleaning-timing-consent.prisma.test.ts src/services/cleaning-work-start.prisma.test.ts src/services/cleaning-work-completion.prisma.test.ts src/services/cleaning-work-snapshot.service.test.ts src/routes/staff.cleaning-timing.test.ts
+      - name: Verify migration remains additive and TTLock-free
+        shell: bash
+        run: |
+          set -euo pipefail
+          file="prisma/migrations/20260928024500_cleaning_followup_v1_foundation/migration.sql"
+          grep -q 'CREATE TABLE "CleaningWork"' "$file"
+          grep -q 'ALTER TABLE "PropertyStaff"' "$file"
+          if grep -Eqi 'DROP[[:space:]]|DELETE[[:space:]]|UPDATE[[:space:]]|TTLock|NfcAssignment|AccessGrant' "$file"; then
+            echo "Forbidden destructive/access scope found"
+            exit 1
+          fi
+      - name: Prove runtime delivery is limited to cleaner reminders
+        shell: bash
+        run: |
+          set -euo pipefail
+          grep -q 'deliverClaimedCleanerFollowup' src/workers/reservation.worker.ts
+          grep -q 'item.decision === "START_REMINDER_DUE"' src/workers/reservation.worker.ts
+          grep -q 'item.decision === "COMPLETION_REMINDER_DUE"' src/workers/reservation.worker.ts
+          if grep -n -E 'HOST_ATTENTION.*deliverClaimedCleanerFollowup|deliverClaimedCleanerFollowup.*HOST_ATTENTION' src/workers/reservation.worker.ts; then
+            echo "HOST_ATTENTION delivery must remain disconnected"
+            exit 1
+          fi
+          grep -q 'persistCleaningHostAttention' src/workers/reservation.worker.ts
+          if grep -n -E 'HOST_ATTENTION.*sendSms|HOST_ATTENTION.*sendLoggedEmail|HOST_ATTENTION.*deliverClaimedCleanerFollowup' src/workers/reservation.worker.ts; then
+            echo "HOST_ATTENTION must not use cleaner SMS delivery"
+            exit 1
+          fi
+
+  snapshot-database:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: cleaning_test
+          POSTGRES_PASSWORD: cleaning_test
+          POSTGRES_DB: cleaning_followup_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U cleaning_test -d cleaning_followup_test"
+          --health-interval 5s --health-timeout 5s --health-retries 10
+    env:
+      DATABASE_URL: postgresql://cleaning_test:cleaning_test@127.0.0.1:5432/cleaning_followup_test
+      CLEANING_WORK_ISOLATED_DB: "1"
+    steps:
+      - name: Checkout exact candidate
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          persist-credentials: false
+      - name: Use Node.js 22
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+      - name: Install locked dependencies without lifecycle scripts
+        run: npm ci --ignore-scripts
+      - name: Generate Prisma client
+        run: npx prisma generate
+      - name: Apply only fixture base and candidate migration to disposable database
+        run: |
+          psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f src/services/cleaning-work-snapshot.fixture.sql
+          psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f prisma/migrations/20260928024500_cleaning_followup_v1_foundation/migration.sql
+      - name: Test real PostgreSQL concurrency and rollback
+        run: node --import tsx --test src/services/cleaning-work-snapshot.database.test.ts

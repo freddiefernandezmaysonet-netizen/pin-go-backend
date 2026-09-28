@@ -1,0 +1,3 @@
+import assert from "node:assert/strict";import test from "node:test";import { buildCleanerFollowupSms } from "./cleaning-followup-sms-body.service.js";
+test("start reminder asks for confirmation without accusing cleaner",()=>{const x=buildCleanerFollowupSms({kind:"START_REMINDER",propertyName:"Casa Test",actionUrl:"https://api.example/cleaning/confirm/t"});assert.match(x,/not been marked started/);assert.doesNotMatch(x,/late|failed|lied/i);});
+test("completion reminder distinguishes missing mark from physical completion",()=>{const x=buildCleanerFollowupSms({kind:"COMPLETION_REMINDER",propertyName:"Casa Test",actionUrl:"https://api.example/cleaning/confirm/t"});assert.match(x,/not marked finished/);});

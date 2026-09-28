@@ -1735,6 +1735,7 @@ model StaffAssignment {
   lastError     String?
   retryCount    Int                   @default(0)
   accessGrantId String?               @unique
+
   createdAt     DateTime              @default(now())
   updatedAt     DateTime              @updatedAt
   accessGrant   AccessGrant?          @relation(fields: [accessGrantId], references: [id])
@@ -1756,6 +1757,12 @@ model PropertyStaff {
   backupOrder   Int? // solo para BACKUP
 
   isActive      Boolean @default(true)
+
+  // Cleaner/property operating commitment. These are configuration values only;
+  // each assigned cleaning snapshots them before follow-up begins.
+  cleaningDurationCommitmentMinutes Int?
+  cleaningStartConfirmationGraceMinutes Int @default(30)
+  cleaningFollowupGraceMinutes Int @default(15)
 
   createdAt     DateTime @default(now())
   updatedAt     DateTime @updatedAt
@@ -1779,6 +1786,71 @@ model CleaningConfirmation {
 
   createdAt      DateTime @default(now())
   updatedAt      DateTime @updatedAt
+}
+
+model CleaningWork {
+  id             String   @id @default(cuid())
+  reservationId  String
+  propertyId     String
+  staffMemberId  String
+  confirmationId String?
+
+  scheduledStartAt DateTime
+  durationCommitmentMinutes Int
+  startConfirmationGraceMinutes Int
+  followupGraceMinutes Int
+
+  timingConsentVersion String?
+  timingConsentAcceptedAt DateTime?
+  startConfirmedAt DateTime?
+  completionConfirmedAt DateTime?
+  cancelledAt DateTime?
+  supersededAt DateTime?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([reservationId, staffMemberId])
+  @@index([propertyId, scheduledStartAt])
+  @@index([staffMemberId, scheduledStartAt])
+  @@index([startConfirmedAt, completionConfirmedAt, cancelledAt, supersededAt], map: "CleaningWork_state_idx")
+}
+
+enum CleaningFollowupReceiptKind {
+  START_REMINDER
+  COMPLETION_REMINDER
+  HOST_ATTENTION
+}
+
+model CleaningFollowupReceipt {
+  id          String   @id @default(cuid())
+  cleaningWorkId String
+  kind        CleaningFollowupReceiptKind
+  dueAt       DateTime
+  claimedAt   DateTime @default(now())
+  deliveredAt DateTime?
+  deliveryStatus String @default("CLAIMED")
+  providerMessageId String?
+  lastError   String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@unique([cleaningWorkId, kind, dueAt])
+  @@index([deliveryStatus, dueAt])
+}
+
+model CleaningHostAttentionNotice {
+  id              String   @id @default(cuid())
+  cleaningWorkId  String   @unique
+  status          String   @default("QUEUED")
+  recipientsJson  Json?
+  providerMessageId String?
+  lastError       String?
+  sentAt          DateTime?
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  @@index([status, createdAt])
 }
 
 model GuestLinkReminderLog {

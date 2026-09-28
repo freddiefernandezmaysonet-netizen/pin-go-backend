@@ -78,6 +78,15 @@ import {
 import {
   runGuestJourneyCommunicationsOwnerCycle,
 } from "../services/guest-journey-communications-owner-cycle.service";
+import { runCleaningFollowupClaimCycle } from "../services/cleaning-followup-cycle.service.js";
+import { createCleaningFollowupCycleRepository } from "../services/cleaning-followup-cycle.prisma.js";
+import { createCleaningFollowupReceiptStore } from "../services/cleaning-followup-receipt.prisma.js";
+import { shouldRunCleaningFollowupClaimCycle } from "../services/cleaning-followup-cadence.policy.js";
+import { deliverClaimedCleanerFollowup } from "../services/cleaning-followup-delivery.service.js";
+import { reconcileCleaningFollowupDeliveryEvidence } from "../services/cleaning-followup-delivery-reconciliation.service.js";
+import { persistCleaningHostAttention } from "../services/cleaning-followup-host-attention.service.js";
+import { queueCleaningHostAttentionNotice } from "../services/cleaning-followup-host-notice.service.js";
+import { deliverCleaningHostAttentionNotice } from "../services/cleaning-followup-host-delivery.service.js";
 import {
   isGuestJourneyAccessOwnerScope,
 } from "../services/guest-journey-access-owner.config";
@@ -229,6 +238,7 @@ let guestJourneyCoordinationCursor:
   string | null = null;
 let guestJourneyMissionControlCursor:
   string | null = null;
+let cleaningFollowupLastRunAtMs: number | null = null;
 const REMINDER_HOURS = Number(
   process.env.GUEST_LINK_REMINDER_HOURS ??
     24
@@ -2710,6 +2720,59 @@ async function tick() {
 
   try {
     const now = new Date();
+
+    if (shouldRunCleaningFollowupClaimCycle({
+      nowMs: now.getTime(),
+      lastRunAtMs: cleaningFollowupLastRunAtMs,
+    })) {
+      cleaningFollowupLastRunAtMs = now.getTime();
+      try {
+        const deliveryReconciliation = await reconcileCleaningFollowupDeliveryEvidence(prisma, now);
+        if (deliveryReconciliation.reconciled > 0) {
+          log("cleaning-followup-delivery-reconciliation", deliveryReconciliation);
+        }
+        const cleaningFollowupResults = await runCleaningFollowupClaimCycle({
+          repository: createCleaningFollowupCycleRepository(prisma),
+          receipts: createCleaningFollowupReceiptStore(prisma),
+          now,
+        });
+        const newlyClaimedCleanerReceipts = cleaningFollowupResults.filter(
+          (item) =>
+            item.claim === "CLAIMED" &&
+            item.receiptId &&
+            (item.decision === "START_REMINDER_DUE" ||
+              item.decision === "COMPLETION_REMINDER_DUE")
+        );
+        for (const item of newlyClaimedCleanerReceipts) {
+          await deliverClaimedCleanerFollowup(prisma, item.receiptId!);
+        }
+        const newlyClaimedHostAttention = cleaningFollowupResults.filter(
+          (item) =>
+            item.claim === "CLAIMED" &&
+            item.receiptId &&
+            item.decision === "HOST_ATTENTION_DUE"
+        );
+        for (const item of newlyClaimedHostAttention) {
+          await persistCleaningHostAttention({
+            prisma,
+            cleaningWorkId: item.cleaningWorkId,
+            occurredAt: now,
+          });
+          await queueCleaningHostAttentionNotice(prisma, item.cleaningWorkId);
+          await deliverCleaningHostAttentionNotice(prisma, item.cleaningWorkId);
+        }
+        if (cleaningFollowupResults.length > 0) {
+          log("cleaning-followup-claims", {
+            evaluated: cleaningFollowupResults.length,
+            claimed: cleaningFollowupResults.filter((item) => item.claim === "CLAIMED").length,
+            cleanerDeliveriesAttempted: newlyClaimedCleanerReceipts.length,
+            hostAttentionProjected: newlyClaimedHostAttention.length,
+          });
+        }
+      } catch (e) {
+        errLog("cleaning-followup-claims crashed:", toErrString(e));
+      }
+    }
 
     log("tick", {
       now: now.toISOString(),
