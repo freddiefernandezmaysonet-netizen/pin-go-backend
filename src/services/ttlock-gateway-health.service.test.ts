@@ -92,7 +92,7 @@ function fakeGatewayPrisma(input?: {
 }
 
 test("gateway callback updates one canonical gateway row and makes no provider calls", async () => {
-  const { prisma, gatewayWrites, deviceHealthWrites } = fakeGatewayPrisma({
+  const { prisma, gatewayWrites, deviceHealthWrites, riskWrites } = fakeGatewayPrisma({
     mappedLocks: 3,
   });
 
