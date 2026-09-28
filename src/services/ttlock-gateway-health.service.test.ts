@@ -15,9 +15,12 @@ function fakeGatewayPrisma(input?: {
   existingOnline?: boolean | null;
   existingEventAt?: Date | null;
   mappedLocks?: number;
+  battery?: number | null;
+  healthStatus?: string;
 }) {
   const gatewayWrites: any[] = [];
   const deviceHealthWrites: any[] = [];
+  const riskWrites: any[] = [];
   const lockIds = Array.from(
     { length: input?.mappedLocks ?? 2 },
     (_, index) => `lock-${index + 1}`
@@ -40,7 +43,17 @@ function fakeGatewayPrisma(input?: {
         gatewayWrites.push(args);
         return {
           id: "gateway-record-1",
-          locks: lockIds.map((id) => ({ id })),
+          locks: lockIds.map((id) => ({
+            id,
+            deviceHealth: {
+              healthStatus: input?.healthStatus ?? "HEALTHY",
+              battery: input?.battery ?? 80,
+              isOnline: true,
+              lastSeenAt: NOW,
+              nextCheckInAt: null,
+              hasActiveAccess: false,
+            },
+          })),
           _count: {
             locks: input?.mappedLocks ?? 2,
           },
@@ -63,6 +76,10 @@ function fakeGatewayPrisma(input?: {
         deviceHealthWrites.push(args);
         return {};
       },
+      update: async (args: any) => {
+        riskWrites.push(args);
+        return {};
+      },
     },
   };
 
@@ -70,6 +87,7 @@ function fakeGatewayPrisma(input?: {
     prisma: prisma as any,
     gatewayWrites,
     deviceHealthWrites,
+    riskWrites,
   };
 }
 
@@ -92,6 +110,7 @@ test("gateway callback updates one canonical gateway row and makes no provider c
   assert.equal(gatewayWrites[0].create.isOnline, false);
   assert.equal(gatewayWrites[0].create.ttlockGatewayId, 2046625);
   assert.equal(deviceHealthWrites.length, 3);
+  assert.equal(riskWrites.length, 3);
   for (const write of deviceHealthWrites) {
     assert.equal(write.create.gatewayConnected, false);
     assert.equal(write.create.source, "TTLOCK_CALLBACK");
@@ -102,7 +121,7 @@ test("gateway callback updates one canonical gateway row and makes no provider c
 });
 
 test("online callback clears gateway disconnect state for every mapped lock", async () => {
-  const { prisma, deviceHealthWrites } = fakeGatewayPrisma({
+  const { prisma, deviceHealthWrites, riskWrites } = fakeGatewayPrisma({
     existingOnline: false,
     existingEventAt: new Date("2026-09-27T17:20:00.000Z"),
     mappedLocks: 3,
@@ -124,6 +143,32 @@ test("online callback clears gateway disconnect state for every mapped lock", as
     assert.equal(write.create.gatewayLastSuccessfulAt.getTime(), NOW.getTime());
     assert.equal(write.create.isOnline, null);
   }
+  for (const write of riskWrites) {
+    assert.equal(write.data.operationalRisk, "HEALTHY");
+    assert.equal(write.data.operationalMessage, "Lock is ready for normal operation.");
+    assert.equal(write.data.recommendedAction, "No action required.");
+    assert.equal(write.data.riskCalculatedAt.getTime(), NOW.getTime());
+  }
+});
+
+test("online callback preserves a real low-battery warning", async () => {
+  const { prisma, riskWrites } = fakeGatewayPrisma({
+    existingOnline: false,
+    existingEventAt: new Date("2026-09-27T17:20:00.000Z"),
+    mappedLocks: 1,
+    battery: 25,
+  });
+
+  await applyTtlockGatewayCallbackState(prisma, {
+    organizationId: "org-1",
+    gatewayId: 2046625,
+    isOnline: true,
+    occurredAt: NOW,
+  });
+
+  assert.equal(riskWrites.length, 1);
+  assert.equal(riskWrites[0].data.operationalRisk, "WARNING");
+  assert.match(riskWrites[0].data.operationalMessage, /Battery below 30%/);
 });
 
 test("duplicate gateway state performs no write and no provider call", async () => {
