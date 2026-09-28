@@ -5,6 +5,7 @@ import {
   loadGatewayMonitoringPolicies,
   type GatewayMonitoringMode,
 } from "../services/lockGatewayMonitoring.service";
+import { effectiveTtlockGatewayHealth } from "../services/ttlock-gateway-read-model";
 
 function isVisibleRisk(risk?: string | null) {
   return risk !== "HEALTHY";
@@ -28,6 +29,20 @@ function riskRank(risk?: string | null) {
 
 function getOrgId(req: any): string | null {
   return req?.user?.orgId ?? null;
+}
+
+export function shouldShowHealthLock(input: {
+  mode: GatewayMonitoringMode;
+  gatewayConnected: boolean | null;
+  operationalRisk?: string | null;
+}) {
+  return (
+    input.mode !== "DISABLED" &&
+    (
+      input.gatewayConnected === false ||
+      isVisibleRisk(input.operationalRisk)
+    )
+  );
 }
 
 function presentationForMode(input: {
@@ -85,6 +100,11 @@ export function buildDashboardHealthRouter(prisma: PrismaClient) {
         },
         select: {
           id: true,
+          ttlockGateway: {
+            select: {
+              isOnline: true,
+            },
+          },
           deviceHealth: {
             select: {
               operationalRisk: true,
@@ -105,6 +125,8 @@ export function buildDashboardHealthRouter(prisma: PrismaClient) {
       let unknown = 0;
       let notMonitored = 0;
       let setupRequired = 0;
+      let gatewayOffline = 0;
+      let openAlerts = 0;
 
       for (const lock of locks) {
         const mode = gatewayMonitoringModeFromPolicy(
@@ -118,10 +140,21 @@ export function buildDashboardHealthRouter(prisma: PrismaClient) {
 
         if (mode === "LEGACY_UNCONFIGURED") {
           setupRequired++;
+          openAlerts++;
           continue;
         }
 
         const risk = lock.deviceHealth?.operationalRisk ?? "UNKNOWN";
+        const canonicalGatewayOffline =
+          lock.ttlockGateway?.isOnline === false;
+
+        if (canonicalGatewayOffline) {
+          gatewayOffline++;
+        }
+
+        if (canonicalGatewayOffline || risk !== "HEALTHY") {
+          openAlerts++;
+        }
 
         if (risk === "HEALTHY") {
           healthy++;
@@ -156,8 +189,8 @@ export function buildDashboardHealthRouter(prisma: PrismaClient) {
           unknown,
           notMonitored,
           setupRequired,
-          openAlerts:
-            warning + atRisk + critical + unknown + setupRequired,
+          gatewayOffline,
+          openAlerts,
         },
       });
     } catch (err) {
@@ -198,6 +231,14 @@ export function buildDashboardHealthRouter(prisma: PrismaClient) {
             select: {
               id: true,
               name: true,
+            },
+          },
+          ttlockGateway: {
+            select: {
+              ttlockGatewayId: true,
+              isOnline: true,
+              lastEventAt: true,
+              source: true,
             },
           },
           deviceHealth: {
@@ -243,6 +284,13 @@ export function buildDashboardHealthRouter(prisma: PrismaClient) {
             lock.locationLabel ??
             `Lock ${lock.ttlockLockId}`;
 
+          const gateway = effectiveTtlockGatewayHealth({
+            canonicalOnline: lock.ttlockGateway?.isOnline,
+            legacyConnected: health?.gatewayConnected,
+            gatewayId: lock.ttlockGateway?.ttlockGatewayId,
+            lastEventAt: lock.ttlockGateway?.lastEventAt,
+          });
+
           return {
             id: lock.id,
             name,
@@ -251,7 +299,13 @@ export function buildDashboardHealthRouter(prisma: PrismaClient) {
             battery: mode === "DISABLED" ? null : health?.battery ?? null,
             isOnline: mode === "DISABLED" ? null : health?.isOnline ?? null,
             gatewayConnected:
-              mode === "DISABLED" ? null : health?.gatewayConnected ?? null,
+              mode === "DISABLED" ? null : gateway.gatewayConnected,
+            gatewayId:
+              mode === "DISABLED" ? null : gateway.gatewayId,
+            gatewayStateSource:
+              mode === "DISABLED" ? null : gateway.gatewayStateSource,
+            gatewayLastEventAt:
+              mode === "DISABLED" ? null : gateway.gatewayLastEventAt,
             healthStatus:
               mode === "DISABLED"
                 ? "NOT_MONITORED"
@@ -270,10 +324,12 @@ export function buildDashboardHealthRouter(prisma: PrismaClient) {
             updatedAt: lock.updatedAt,
           };
         })
-        .filter(
-          (item) =>
-            item.gatewayMonitoringMode !== "DISABLED" &&
-            isVisibleRisk(item.operationalRisk)
+        .filter((item) =>
+          shouldShowHealthLock({
+            mode: item.gatewayMonitoringMode,
+            gatewayConnected: item.gatewayConnected,
+            operationalRisk: item.operationalRisk,
+          })
         )
         .sort((a, b) => {
           const riskCompare =
@@ -341,6 +397,14 @@ export function buildDashboardHealthRouter(prisma: PrismaClient) {
               name: true,
             },
           },
+          ttlockGateway: {
+            select: {
+              ttlockGatewayId: true,
+              isOnline: true,
+              lastEventAt: true,
+              source: true,
+            },
+          },
           deviceHealth: {
             select: {
               battery: true,
@@ -377,6 +441,13 @@ export function buildDashboardHealthRouter(prisma: PrismaClient) {
             lock.locationLabel ??
             `Lock ${lock.ttlockLockId}`;
 
+          const gateway = effectiveTtlockGatewayHealth({
+            canonicalOnline: lock.ttlockGateway?.isOnline,
+            legacyConnected: health?.gatewayConnected,
+            gatewayId: lock.ttlockGateway?.ttlockGatewayId,
+            lastEventAt: lock.ttlockGateway?.lastEventAt,
+          });
+
           return {
             id: lock.id,
             name,
@@ -384,7 +455,13 @@ export function buildDashboardHealthRouter(prisma: PrismaClient) {
             gatewayMonitoringMode: mode,
             battery: mode === "DISABLED" ? null : health?.battery ?? null,
             gatewayConnected:
-              mode === "DISABLED" ? null : health?.gatewayConnected ?? null,
+              mode === "DISABLED" ? null : gateway.gatewayConnected,
+            gatewayId:
+              mode === "DISABLED" ? null : gateway.gatewayId,
+            gatewayStateSource:
+              mode === "DISABLED" ? null : gateway.gatewayStateSource,
+            gatewayLastEventAt:
+              mode === "DISABLED" ? null : gateway.gatewayLastEventAt,
             operationalRisk: presentation.operationalRisk,
             operationalMessage: presentation.operationalMessage,
             recommendedAction: presentation.recommendedAction,
@@ -392,10 +469,12 @@ export function buildDashboardHealthRouter(prisma: PrismaClient) {
             updatedAt: lock.updatedAt,
           };
         })
-        .filter(
-          (item) =>
-            item.gatewayMonitoringMode !== "DISABLED" &&
-            isVisibleRisk(item.operationalRisk)
+        .filter((item) =>
+          shouldShowHealthLock({
+            mode: item.gatewayMonitoringMode,
+            gatewayConnected: item.gatewayConnected,
+            operationalRisk: item.operationalRisk,
+          })
         )
         .sort((a, b) => {
           const riskCompare =

@@ -9,6 +9,7 @@ type HealthSummary = {
   atRisk: number;
   critical: number;
   unknown: number;
+  gatewayOffline: number;
   openAlerts: number;
 };
 
@@ -387,6 +388,11 @@ export function HealthCenterPage() {
           value={summary?.unknown ?? 0}
           helper="Missing or stale telemetry"
         />
+        <Stat
+          label="Gateway Offline"
+          value={summary?.gatewayOffline ?? 0}
+          helper="Locks currently affected by an offline shared gateway"
+        />
       </div>
 
       {error ? (
@@ -473,9 +479,9 @@ export function HealthCenterPage() {
 
       <SectionCard title="Operational Notes">
         <p style={{ color: "#6b7280", margin: 0 }}>
-          Health Center is an operational work queue. Healthy locks are counted
-          in summary only and are intentionally excluded from the control tower
-          and main table.
+          Health Center is an operational work queue. Locks with a gateway
+          offline remain visible even when their current reservation risk is
+          otherwise healthy.
         </p>
       </SectionCard>
     </div>
