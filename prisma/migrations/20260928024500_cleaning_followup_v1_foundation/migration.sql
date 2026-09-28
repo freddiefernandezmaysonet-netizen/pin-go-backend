@@ -23,6 +23,8 @@ CREATE TABLE "CleaningWork" (
   "durationCommitmentMinutes" INTEGER NOT NULL,
   "startConfirmationGraceMinutes" INTEGER NOT NULL,
   "followupGraceMinutes" INTEGER NOT NULL,
+  "timingConsentVersion" TEXT,
+  "timingConsentAcceptedAt" TIMESTAMP(3),
   "startConfirmedAt" TIMESTAMP(3),
   "completionConfirmedAt" TIMESTAMP(3),
   "cancelledAt" TIMESTAMP(3),
