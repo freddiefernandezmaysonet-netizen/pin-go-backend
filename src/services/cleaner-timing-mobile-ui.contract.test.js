@@ -1,0 +1,4 @@
+import assert from "node:assert/strict";import fs from "node:fs";import test from "node:test";
+const source=fs.readFileSync(new URL("../routes/cleaning-confirm.routes.ts",import.meta.url),"utf8");
+test("cleaner lifecycle is mobile-first",()=>{assert.match(source,/name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover"/);assert.match(source,/font-size:17px/);assert.match(source,/min-height:52px/);assert.match(source,/@media\(max-width:480px\)/);assert.match(source,/width:min\(100%,680px\)/);});
+test("timing lifecycle actions use full-width touch targets",()=>{for(const label of ["I accept this cleaning schedule and time commitment","I started cleaning","I finished cleaning"])assert.ok(source.includes(label));assert.match(source,/class="cleaner-action"/);assert.match(source,/width:100%/);});
