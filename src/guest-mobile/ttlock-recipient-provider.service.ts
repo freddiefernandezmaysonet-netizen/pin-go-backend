@@ -79,6 +79,7 @@ export async function registerAndAuthenticateTTLockRecipient(
         tokenExpiresAt: new Date(Date.now() + expiresIn * 1000),
         status: "ACTIVE",
         registeredAt: new Date(),
+        lastActivityAt: new Date(),
         lastError: null,
       },
     });
