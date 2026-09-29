@@ -147,18 +147,31 @@ async function prepareCleaningTimingConsent(data: {
   };
 }
 
+/** Shared terminal view for the immediate POST response and later GET re-entry. */
+function renderCleaningCompletedPage(
+  completedAt: string,
+  prepared: NonNullable<Awaited<ReturnType<typeof prepareCleaningTimingConsent>>>,
+) {
+  return cleanerPage(`
+    <h2>Cleaning completed</h2>
+    <p>Your cleaning completion has been recorded.</p>
+    <p><b>Completed:</b> ${completedAt}</p>
+    <p><b>Scheduled start:</b> ${formatPropertyLocal(prepared.terms.scheduledStartAt, prepared.timeZone)}</p>
+    <p><b>Committed completion:</b> ${formatPropertyLocal(prepared.terms.scheduledCompletionAt, prepared.timeZone)}</p>
+    <p class="cleaner-note">Pin&amp;Go recorded your declaration; this does not independently certify a physical inspection.</p>
+  `);
+}
+
 function renderTimingConsent(token: string, prepared: Awaited<ReturnType<typeof prepareCleaningTimingConsent>>) {
   if (!prepared) {
     return "Cleaning availability confirmed and NFC access prepared. No cleaning-time commitment is configured for this property assignment.";
   }
   if (prepared.work.timingConsentAcceptedAt) {
     if (prepared.work.completionConfirmedAt) {
-      return cleanerPage(`
-        <h2>Cleaning completed</h2>
-        <p>Your cleaning completion has already been recorded.</p>
-        <p><b>Scheduled start:</b> ${formatPropertyLocal(prepared.terms.scheduledStartAt, prepared.timeZone)}</p>
-        <p><b>Committed completion:</b> ${formatPropertyLocal(prepared.terms.scheduledCompletionAt, prepared.timeZone)}</p>
-      `);
+      return renderCleaningCompletedPage(
+        formatPropertyLocal(prepared.work.completionConfirmedAt, prepared.timeZone),
+        prepared,
+      );
     }
     if (prepared.work.startConfirmedAt) {
       return cleanerPage(`
@@ -618,9 +631,10 @@ cleaningConfirmRouter.post(
         where: { cleaningWorkId: prepared.work.id, status: { in: ["QUEUED", "FAILED"] } },
         data: { status: "OBSOLETE", lastError: "CLEANER_COMPLETION_CONFIRMED" },
       });
-      return res.send(
-        `Cleaning completion recorded at ${formatPropertyLocal(completed.completionConfirmedAt!, prepared.timeZone)}. Pin&Go recorded your declaration; this does not independently certify a physical inspection.`
-      );
+      return res.send(renderCleaningCompletedPage(
+        formatPropertyLocal(completed.completionConfirmedAt!, prepared.timeZone),
+        prepared,
+      ));
     } catch (e: any) {
       console.error("[CLEANING_COMPLETION_CONFIRM_ERROR]", e);
       return res.status(409).send(e?.message ?? "Failed to record cleaning completion.");

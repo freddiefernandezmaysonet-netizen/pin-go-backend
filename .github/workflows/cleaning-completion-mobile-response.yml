@@ -1,0 +1,48 @@
+name: Cleaning Completion Mobile Responses
+
+on:
+  pull_request:
+    paths:
+      - "src/routes/cleaning-confirm.routes.ts"
+      - "src/routes/cleaning-completion-mobile.response.test.js"
+      - "src/services/cleaning-work-completion.prisma.ts"
+      - "src/services/cleaning-timing-consent.ts"
+      - "src/services/cleaner-timing-mobile-ui.contract.test.js"
+      - "src/services/cleaner-timing-reentrant-mobile.contract.test.js"
+      - "src/services/cleaning-timing-property-timezone.contract.test.js"
+      - ".github/workflows/cleaning-completion-mobile-response.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  rendered-responses:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+      - name: Install locked test dependencies without lifecycle scripts
+        run: npm ci --ignore-scripts
+      - name: Test actual handler responses with isolated persistence
+        env:
+          CLEANER_RESPONSE_EVIDENCE_DIR: artifacts/cleaning-completion-mobile
+        run: >-
+          node --test
+          src/routes/cleaning-completion-mobile.response.test.js
+          src/services/cleaner-timing-mobile-ui.contract.test.js
+          src/services/cleaner-timing-reentrant-mobile.contract.test.js
+          src/services/cleaning-timing-property-timezone.contract.test.js
+      - name: Retain the HTML returned by POST, GET and repeated POST
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: cleaning-completion-mobile-responses
+          path: artifacts/cleaning-completion-mobile
+          if-no-files-found: warn
