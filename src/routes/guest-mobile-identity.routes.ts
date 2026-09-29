@@ -1,18 +1,31 @@
-import { Router } from "express";
+import { Router, type RequestHandler } from "express";
 import { prisma } from "../lib/prisma.js";
 import { exchangeGuestStayToken } from "../guest-mobile/guest-mobile-session.service.js";
-import { createReviewRateLimit, reviewClientKey } from "../services/reviews/review-route-security.js";
+
+const exchangeAttempts = new Map<string, { count: number; resetAt: number }>();
+
+const exchangeRateLimit: RequestHandler = (req, res, next) => {
+  const now = Date.now();
+  const key = String(req.ip ?? req.socket.remoteAddress ?? "unknown");
+  const current = exchangeAttempts.get(key);
+  if (!current || current.resetAt <= now) {
+    exchangeAttempts.set(key, { count: 1, resetAt: now + 60_000 });
+    next();
+    return;
+  }
+  if (current.count >= 20) {
+    res.status(429).json({ ok: false, error: "RATE_LIMITED" });
+    return;
+  }
+  current.count += 1;
+  next();
+};
 
 export const guestMobileIdentityRouter = Router();
 
 guestMobileIdentityRouter.post(
   "/api/guest-mobile/session/exchange",
-  createReviewRateLimit({
-    namespace: "guest-mobile-session-exchange",
-    max: 20,
-    windowMs: 60_000,
-    key: reviewClientKey,
-  }),
+  exchangeRateLimit,
   async (req, res) => {
     res.setHeader("Cache-Control", "no-store");
     res.setHeader("Referrer-Policy", "no-referrer");
