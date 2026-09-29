@@ -152,7 +152,36 @@ function renderTimingConsent(token: string, prepared: Awaited<ReturnType<typeof 
     return "Cleaning availability confirmed and NFC access prepared. No cleaning-time commitment is configured for this property assignment.";
   }
   if (prepared.work.timingConsentAcceptedAt) {
-    return `Cleaning availability and timing commitment already confirmed. Scheduled start: ${formatPropertyLocal(prepared.terms.scheduledStartAt, prepared.timeZone)}. Committed completion: ${formatPropertyLocal(prepared.terms.scheduledCompletionAt, prepared.timeZone)}.`;
+    if (prepared.work.completionConfirmedAt) {
+      return cleanerPage(`
+        <h2>Cleaning completed</h2>
+        <p>Your cleaning completion has already been recorded.</p>
+        <p><b>Scheduled start:</b> ${formatPropertyLocal(prepared.terms.scheduledStartAt, prepared.timeZone)}</p>
+        <p><b>Committed completion:</b> ${formatPropertyLocal(prepared.terms.scheduledCompletionAt, prepared.timeZone)}</p>
+      `);
+    }
+    if (prepared.work.startConfirmedAt) {
+      return cleanerPage(`
+        <h2>Cleaning in progress</h2>
+        <p>Your cleaning start has already been recorded.</p>
+        <p><b>Started:</b> ${formatPropertyLocal(prepared.work.startConfirmedAt, prepared.timeZone)}</p>
+        <p><b>Committed completion:</b> ${formatPropertyLocal(prepared.terms.scheduledCompletionAt, prepared.timeZone)}</p>
+        <form method="POST" action="/cleaning/confirm/${token}/complete">
+          <button class="cleaner-action">I finished cleaning</button>
+        </form>
+      `);
+    }
+    return cleanerPage(`
+      <h2>Cleaning timing confirmed</h2>
+      <p>Your availability and cleaning-time commitment are confirmed.</p>
+      <p><b>Scheduled start:</b> ${formatPropertyLocal(prepared.terms.scheduledStartAt, prepared.timeZone)}</p>
+      <p><b>Standard duration:</b> ${prepared.terms.durationCommitmentMinutes} minutes</p>
+      <p><b>Committed completion:</b> ${formatPropertyLocal(prepared.terms.scheduledCompletionAt, prepared.timeZone)}</p>
+      <form method="POST" action="/cleaning/confirm/${token}/start">
+        <button class="cleaner-action">I started cleaning</button>
+      </form>
+      <p class="cleaner-note">Use this when you actually begin cleaning. It does not change the committed completion time or NFC access window.</p>
+    `);
   }
   return cleanerPage(`\n      <h2>Cleaning timing commitment</h2>
       <p>Your availability is confirmed and your NFC access remains handled by Pin&Go.</p>
