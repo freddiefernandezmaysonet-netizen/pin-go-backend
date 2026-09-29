@@ -14,6 +14,7 @@ test("Staff timing HTTP contract", async t => {
   const tx = {
     property: { async findFirst() { return { id: "property-a" }; } },
     propertyStaff: {
+      async findUnique() { return { cleaningDurationCommitmentMinutes: saved.cleaningDurationCommitmentMinutes as number | null, cleaningStartConfirmationGraceMinutes: saved.cleaningStartConfirmationGraceMinutes as number }; },
       async updateMany() { return { count: 0 }; },
       async upsert(args: { update: Record<string, unknown> }) {
         lastUpdate = args.update; saved = { ...saved, ...args.update }; return saved;
@@ -47,7 +48,7 @@ test("Staff timing HTTP contract", async t => {
       assert.equal(saved.cleaningFollowupGraceMinutes, 25);
       assert.equal(saved.cleaningDurationCommitmentMinutes, 180);
     });
-    await t.test("decimal timing is a controlled HTTP 400, never truncated or persisted", async () => {
+    await t.test("zero-width start reminder is a controlled HTTP 400", async () => {\n      const before = { ...saved };\n      assert.equal((await send({ cleaningDurationCommitmentMinutes: 30, cleaningStartConfirmationGraceMinutes: 30 })).status, 400);\n      assert.deepEqual(saved, before);\n    });\n    await t.test("decimal timing is a controlled HTTP 400, never truncated or persisted", async () => {
       const before = { ...saved };
       assert.equal((await send({ cleaningDurationCommitmentMinutes: 120.7 })).status, 400);
       assert.deepEqual(saved, before);
