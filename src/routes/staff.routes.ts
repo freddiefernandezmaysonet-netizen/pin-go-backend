@@ -1,7 +1,7 @@
 import { Router } from "express";
 import type { PrismaClient } from "@prisma/client";
 import { PropertyStaffRole } from "@prisma/client";
-import { CleaningTimingValidationError, parseCleaningTimingUpdate } from "../services/cleaning-timing-config.js";
+import { CleaningTimingValidationError, assertCleaningTimingInvariant, parseCleaningTimingUpdate } from "../services/cleaning-timing-config.js";
 
 export function buildStaffRouter(prisma: PrismaClient) {
   const router = Router();
@@ -264,6 +264,19 @@ export function buildStaffRouter(prisma: PrismaClient) {
           if (role !== "PRIMARY" && role !== "BACKUP") {
             throw new Error("Invalid role. Use PRIMARY or BACKUP.");
           }
+
+          const existingTiming = await tx.propertyStaff.findUnique({
+            where: { propertyId_staffMemberId: { propertyId, staffMemberId } },
+            select: {
+              cleaningDurationCommitmentMinutes: true,
+              cleaningStartConfirmationGraceMinutes: true,
+            },
+          });
+          assertCleaningTimingInvariant({
+            currentDurationCommitmentMinutes: existingTiming?.cleaningDurationCommitmentMinutes ?? null,
+            currentStartConfirmationGraceMinutes: existingTiming?.cleaningStartConfirmationGraceMinutes ?? 30,
+            update: cleaningTiming,
+          });
 
           const backupOrder =
             role === "BACKUP"
