@@ -81,8 +81,21 @@ async function loadConfirmationData(token: string) {
   };
 }
 
-function formatUtc(value: Date) {
-  return value.toISOString().replace("T", " ").replace(".000Z", " UTC");
+function formatPropertyLocal(value: Date, timeZone: string) {
+  try {
+    return new Intl.DateTimeFormat("en-US", {
+      timeZone,
+      year: "numeric",
+      month: "short",
+      day: "numeric",
+      hour: "numeric",
+      minute: "2-digit",
+      hour12: true,
+      timeZoneName: "short",
+    }).format(value);
+  } catch {
+    return value.toISOString().replace("T", " ").replace(".000Z", " UTC");
+  }
 }
 
 async function prepareCleaningTimingConsent(data: {
@@ -104,6 +117,7 @@ async function prepareCleaningTimingConsent(data: {
   if (!snapshot.work) return null;
   return {
     work: snapshot.work,
+    timeZone: data.reservation.property?.timezone ?? "UTC",
     terms: buildCleaningTimingConsentSnapshot({
       scheduledStartAt: snapshot.work.scheduledStartAt,
       durationCommitmentMinutes: snapshot.work.durationCommitmentMinutes,
@@ -118,17 +132,17 @@ function renderTimingConsent(token: string, prepared: Awaited<ReturnType<typeof 
     return "Cleaning availability confirmed and NFC access prepared. No cleaning-time commitment is configured for this property assignment.";
   }
   if (prepared.work.timingConsentAcceptedAt) {
-    return `Cleaning availability and timing commitment already confirmed. Scheduled start: ${formatUtc(prepared.terms.scheduledStartAt)}. Committed completion: ${formatUtc(prepared.terms.scheduledCompletionAt)}.`;
+    return `Cleaning availability and timing commitment already confirmed. Scheduled start: ${formatPropertyLocal(prepared.terms.scheduledStartAt, prepared.timeZone)}. Committed completion: ${formatPropertyLocal(prepared.terms.scheduledCompletionAt, prepared.timeZone)}.`;
   }
   return `
     <html><body style="font-family:Arial;padding:24px;max-width:640px;">
       <h2>Cleaning timing commitment</h2>
       <p>Your availability is confirmed and your NFC access remains handled by Pin&Go.</p>
-      <p><b>Scheduled start:</b> ${formatUtc(prepared.terms.scheduledStartAt)}</p>
+      <p><b>Scheduled start:</b> ${formatPropertyLocal(prepared.terms.scheduledStartAt, prepared.timeZone)}</p>
       <p><b>Standard duration:</b> ${prepared.terms.durationCommitmentMinutes} minutes</p>
-      <p><b>Confirm start by:</b> ${formatUtc(prepared.terms.startConfirmationDueAt)}</p>
-      <p><b>Committed completion:</b> ${formatUtc(prepared.terms.scheduledCompletionAt)}</p>
-      <p><b>Follow-up begins after:</b> ${formatUtc(prepared.terms.followupAttentionAt)}</p>
+      <p><b>Confirm start by:</b> ${formatPropertyLocal(prepared.terms.startConfirmationDueAt, prepared.timeZone)}</p>
+      <p><b>Committed completion:</b> ${formatPropertyLocal(prepared.terms.scheduledCompletionAt, prepared.timeZone)}</p>
+      <p><b>Follow-up begins after:</b> ${formatPropertyLocal(prepared.terms.followupAttentionAt, prepared.timeZone)}</p>
       <form method="POST" action="/cleaning/confirm/${token}/timing-consent">
         <button style="padding:12px 18px;background:#2563eb;color:white;border:0;border-radius:8px;">
           I accept this cleaning schedule and time commitment
@@ -464,9 +478,9 @@ cleaningConfirmRouter.post(
       return res.send(`
         <html><body style="font-family:Arial;padding:24px;max-width:640px;">
           <h2>Cleaning timing commitment accepted</h2>
-          <p><b>Scheduled start:</b> ${formatUtc(prepared.terms.scheduledStartAt)}</p>
-          <p><b>Committed completion:</b> ${formatUtc(prepared.terms.scheduledCompletionAt)}</p>
-          <p>Your acceptance was recorded at ${formatUtc(accepted.timingConsentAcceptedAt!)}.</p>
+          <p><b>Scheduled start:</b> ${formatPropertyLocal(prepared.terms.scheduledStartAt, prepared.timeZone)}</p>
+          <p><b>Committed completion:</b> ${formatPropertyLocal(prepared.terms.scheduledCompletionAt, prepared.timeZone)}</p>
+          <p>Your acceptance was recorded at ${formatPropertyLocal(accepted.timingConsentAcceptedAt!, prepared.timeZone)}.</p>
           <form method="POST" action="/cleaning/confirm/${token}/start">
             <button style="padding:12px 18px;background:#2563eb;color:white;border:0;border-radius:8px;">
               I started cleaning
@@ -521,8 +535,8 @@ cleaningConfirmRouter.post(
       return res.send(`
         <html><body style="font-family:Arial;padding:24px;max-width:640px;">
           <h2>Cleaning start recorded</h2>
-          <p>Start confirmed at ${formatUtc(started.startConfirmedAt!)}.</p>
-          <p><b>Committed completion remains:</b> ${formatUtc(terms.scheduledCompletionAt)}</p>
+          <p>Start confirmed at ${formatPropertyLocal(started.startConfirmedAt!, prepared.timeZone)}.</p>
+          <p><b>Committed completion remains:</b> ${formatPropertyLocal(terms.scheduledCompletionAt, prepared.timeZone)}</p>
           <form method="POST" action="/cleaning/confirm/${token}/complete">
             <button style="padding:12px 18px;background:#2563eb;color:white;border:0;border-radius:8px;">
               I finished cleaning
@@ -578,7 +592,7 @@ cleaningConfirmRouter.post(
         data: { status: "OBSOLETE", lastError: "CLEANER_COMPLETION_CONFIRMED" },
       });
       return res.send(
-        `Cleaning completion recorded at ${formatUtc(completed.completionConfirmedAt!)}. Pin&Go recorded your declaration; this does not independently certify a physical inspection.`
+        `Cleaning completion recorded at ${formatPropertyLocal(completed.completionConfirmedAt!, prepared.timeZone)}. Pin&Go recorded your declaration; this does not independently certify a physical inspection.`
       );
     } catch (e: any) {
       console.error("[CLEANING_COMPLETION_CONFIRM_ERROR]", e);
