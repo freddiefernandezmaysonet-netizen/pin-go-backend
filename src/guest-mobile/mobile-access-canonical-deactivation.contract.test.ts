@@ -10,7 +10,7 @@ const expire = await fs.readFile(new URL("../workers/access-grant-expire.worker.
 test("canonical facade revokes passcode before any mobile work", () => {
   const canonicalAt = facade.indexOf("await deactivateGrant");
   const flagAt = facade.indexOf("MOBILE_ACCESS_EKEY_ENABLED");
-  const mobileAt = facade.indexOf("reconcileMobileAccessRevocationSidecar");
+  const mobileAt = facade.indexOf("await reconcileMobileAccessRevocationSidecar");
   assert.ok(canonicalAt >= 0 && flagAt > canonicalAt && mobileAt > flagAt);
 });
 
