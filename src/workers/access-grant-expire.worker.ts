@@ -1,8 +1,7 @@
 import "dotenv/config";
 import { prisma } from "../lib/prisma";
 import { AccessGrantType, AccessStatus } from "@prisma/client";
-import { activateGrant } from "../services/ttlock/ttlock.brain";
-import { deactivateGuestAccess } from "../guest-mobile/mobile-access-canonical-deactivation.service.js";
+import { activateGrant, deactivateGrant } from "../services/ttlock/ttlock.brain";
 import {
   isGuestJourneyAccessOwnerScope,
   resolveGuestJourneyAccessOwnerConfig,
@@ -131,7 +130,7 @@ async function tick() {
     }
 
     try {
-      await deactivateGuestAccess(g.id);
+      await deactivateGrant(g.id);
       deactivatedOk++;
 
       await prisma.accessGrant.update({
