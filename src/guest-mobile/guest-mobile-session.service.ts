@@ -180,3 +180,55 @@ export async function authorizeGuestMobileStay(
     stayEnded: link.reservation.checkOut <= now,
   };
 }
+
+export async function readGuestMobileStay(
+  prisma: PrismaClient,
+  input: { guestPersonId: string; reservationNumber: string },
+) {
+  const link = await prisma.guestStayLink.findFirst({
+    where: {
+      guestPersonId: input.guestPersonId,
+      revokedAt: null,
+      reservation: { reservationNumber: input.reservationNumber },
+    },
+    select: {
+      reservation: {
+        select: {
+          reservationNumber: true,
+          status: true,
+          preferredLanguage: true,
+          checkIn: true,
+          checkOut: true,
+          verificationStatus: true,
+          guestAccessReleaseStatus: true,
+          property: {
+            select: { name: true, timezone: true },
+          },
+          guestJourney: {
+            select: { currentState: true },
+          },
+        },
+      },
+    },
+  });
+
+  if (!link?.reservation?.reservationNumber) {
+    throw new Error("GUEST_MOBILE_STAY_NOT_AUTHORIZED");
+  }
+
+  const stay = link.reservation;
+  return {
+    reservationNumber: stay.reservationNumber,
+    status: stay.status,
+    preferredLanguage: stay.preferredLanguage,
+    checkIn: stay.checkIn,
+    checkOut: stay.checkOut,
+    verificationStatus: stay.verificationStatus,
+    accessReleaseStatus: stay.guestAccessReleaseStatus,
+    guestJourneyState: stay.guestJourney?.currentState ?? null,
+    property: {
+      name: stay.property.name,
+      timezone: stay.property.timezone,
+    },
+  };
+}
