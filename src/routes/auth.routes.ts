@@ -36,6 +36,11 @@ import {
 } from "../middleware/requireAuth.js";
 
 const prisma = new PrismaClient();
+const MOBILE_AUTH_HEADER = "x-pin-go-client";
+
+function isMobileAuthClient(req: { get(name: string): string | undefined }) {
+  return String(req.get(MOBILE_AUTH_HEADER) ?? "").trim().toLowerCase() === "mobile";
+}
 export const authRouter = Router();
 authRouter.use(mfaLoginRouter);
 
@@ -223,6 +228,7 @@ authRouter.post("/auth/login", async (req, res) => {
 
     return res.json({
       ok: true,
+      ...(isMobileAuthClient(req) ? { mobileSessionToken: token } : {}),
       user: {
         id: user.id,
         email: user.email,
