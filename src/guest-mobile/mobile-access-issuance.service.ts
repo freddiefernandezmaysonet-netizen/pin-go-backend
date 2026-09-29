@@ -20,6 +20,6 @@ export async function issueMobileAccessForGuestSession(
     guestDeviceSessionId: input.guestDeviceSessionId,
     reservationId: input.reservationId,
     recipient: input.recipient.trim(),
-    now: input.now,
+    ...(input.now ? { now: input.now } : {}),
   });
 }
