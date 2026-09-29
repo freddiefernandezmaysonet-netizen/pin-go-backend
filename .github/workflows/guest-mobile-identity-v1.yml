@@ -14,6 +14,8 @@ permissions:
 jobs:
   certify:
     runs-on: ubuntu-latest
+    env:
+      DATABASE_URL: postgresql://guest_mobile_ci:guest_mobile_ci@127.0.0.1:5432/guest_mobile_ci
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
