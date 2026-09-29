@@ -8,6 +8,7 @@ const railway = await fs.readFile(new URL("../../railway.json", import.meta.url)
 const server = await fs.readFile(new URL("../server.ts", import.meta.url), "utf8");
 
 test("recovery worker queries DB-driven due work and never polls TTLock directly", () => {
+  assert.match(worker, /findMobileAccessRevocationsDue/);
   assert.match(worker, /runDueMobileAccessRecovery/);
   assert.doesNotMatch(worker, /axios|TTLockMobileAccessProvider|api\.sciener|\/v3\//i);
 });
@@ -24,4 +25,16 @@ test("worker remains dormant: no package or Railway process wiring", () => {
 
 test("API server never imports or starts Mobile Access Recovery worker", () => {
   assert.doesNotMatch(server, /mobile-access-recovery\.worker|startMobileAccessRecoveryWorker|runMobileAccessRecoveryTick/);
+});
+
+
+test("observer defers credentials with scheduled recovery to the retry runner", () => {
+  assert.match(worker, /if \(credential\.recoveryNextAttemptAt\) continue/);
+  assert.match(worker, /RECOVERY_SCHEDULED/);
+});
+
+test("combined tick reports observation and retry work separately", () => {
+  assert.match(worker, /observed: observedResults\.length/);
+  assert.match(worker, /recovery,/);
+  assert.match(worker, /recoveryProcessed: result\.recovery\.processed/);
 });
