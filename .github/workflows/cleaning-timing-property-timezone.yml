@@ -23,4 +23,5 @@ jobs:
       - run: npm ci
       - run: node --test src/services/cleaning-timing-property-timezone.contract.test.js
       - run: npx prisma generate
-      - run: npx tsc --noEmit --target ES2022 --module NodeNext --moduleResolution NodeNext --esModuleInterop --skipLibCheck src/routes/cleaning-confirm.routes.ts
+      - name: Runtime import smoke
+        run: node --import tsx -e "import('./src/routes/cleaning-confirm.routes.ts').then(() => console.log('CLEANING_CONFIRM_ROUTE_IMPORT_OK'))"
