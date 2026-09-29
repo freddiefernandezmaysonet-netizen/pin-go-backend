@@ -16,8 +16,7 @@ import {
 } from "@prisma/client";
 import { prisma } from "../lib/prisma";
 import { isOrgEntitled } from "../services/billing.entitlement";
-import { activateGrant } from "../services/ttlock/ttlock.brain";
-import { deactivateGuestAccess } from "../guest-mobile/mobile-access-canonical-deactivation.service.js";
+import { activateGrant, deactivateGrant } from "../services/ttlock/ttlock.brain";
 import {
   ACCESS_RECOVERY_OPERATION,
   claimAccessRecoveryAttempt,
@@ -1887,7 +1886,7 @@ async function processCheckouts(now: Date) {
          *   cuando TTLock confirma la operación.
          */
         try {
-          await deactivateGuestAccess(grant.id);
+          await deactivateGrant(grant.id);
         } catch (deactivationError) {
           try {
             const recovery =
