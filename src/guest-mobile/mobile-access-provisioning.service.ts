@@ -96,7 +96,12 @@ export async function provisionMobileAccessCredential(
       },
     });
 
-    await prisma.tTLockRecipientIdentity.updateMany({\n      where: { guestPersonId: scope.guestPersonId, status: "ACTIVE" },\n      data: { lastActivityAt: input.now ?? new Date() },\n    });\n\n    return { credentialId: row.id, reused: false as const };
+    await prisma.tTLockRecipientIdentity.updateMany({
+      where: { guestPersonId: scope.guestPersonId, status: "ACTIVE" },
+      data: { lastActivityAt: input.now ?? new Date() },
+    });
+
+    return { credentialId: row.id, reused: false as const };
   } catch (error) {
     if (issued?.providerKeyId) {
       try {
