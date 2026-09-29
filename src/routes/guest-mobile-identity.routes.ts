@@ -3,7 +3,7 @@ import { deliverMobileAccessCredential } from "../guest-mobile/mobile-access-del
 import { TTLockMobileAccessProvider } from "../guest-mobile/ttlock-mobile-access-provider.js";
 import { Router, type RequestHandler } from "express";
 import { prisma } from "../lib/prisma.js";
-import { exchangeGuestStayToken, readGuestMobileStay, resolveGuestMobilePinAIScope, resolveGuestMobileSession } from "../guest-mobile/guest-mobile-session.service.js";
+import { authorizeGuestMobileStay, exchangeGuestStayToken, readGuestMobileStay, resolveGuestMobilePinAIScope, resolveGuestMobileSession } from "../guest-mobile/guest-mobile-session.service.js";
 import { GuestPinAIGateway, createGuestPinAIRuntimeRunner } from "../pin-ai/guest/guest-runtime-gateway.js";
 import { readGuestHistory } from "../pin-ai/guest/guest-history-reader.js";
 import { readPublishedIncidentUpdates } from "../pin-ai/host/host-incident.service.js";
@@ -229,16 +229,19 @@ guestMobileIdentityRouter.post(
 
     try {
       const session = await resolveGuestMobileSession(prisma, match[1]);
-      const stay = await readGuestMobileStay(prisma, session.guestPersonId, String(req.params.reservationNumber ?? "").trim());
+      const stay = await authorizeGuestMobileStay(prisma, {
+        guestPersonId: session.guestPersonId,
+        reservationNumber: String(req.params.reservationNumber ?? "").trim(),
+      });
       const prepared = await prepareMobileAccessOnDemand(prisma, {
-        guestDeviceSessionId: session.sessionId,
+        guestDeviceSessionId: session.id,
         reservationId: stay.reservationId,
         providerFactory: ({ organizationId, recipientIdentityId }) =>
           new TTLockMobileAccessProvider(prisma, organizationId, recipientIdentityId),
       });
       const credential = await deliverMobileAccessCredential(prisma, {
         credentialId: prepared.credentialId,
-        guestDeviceSessionId: session.sessionId,
+        guestDeviceSessionId: session.id,
       });
       return res.json({ ok: true, credential });
     } catch (error) {
