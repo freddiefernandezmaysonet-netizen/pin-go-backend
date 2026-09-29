@@ -56,8 +56,9 @@ export async function provisionMobileAccessCredential(
     },
   });
 
+  let issued: Awaited<ReturnType<MobileAccessProvider["issueTimeboundKey"]>> | null = null;
   try {
-    const issued = await provider.issueTimeboundKey({
+    issued = await provider.issueTimeboundKey({
       providerLockId: scope.providerLockId,
       recipient: input.recipient,
       startsAt: scope.startsAt,
@@ -97,6 +98,13 @@ export async function provisionMobileAccessCredential(
 
     return { credentialId: row.id, reused: false as const };
   } catch (error) {
+    if (issued?.providerKeyId) {
+      try {
+        await provider.revokeKey({ providerKeyId: issued.providerKeyId, providerLockId: scope.providerLockId });
+      } catch {
+        // Preserve FAILED state for canonical recovery; never hide the original provisioning failure.
+      }
+    }
     await prisma.mobileAccessCredential.update({
       where: { id: row.id },
       data: {
