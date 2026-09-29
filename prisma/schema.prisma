@@ -845,6 +845,7 @@ model Lock {
   property       Property        @relation(fields: [propertyId], references: [id])
   ttlockGateway  TtlockGateway?  @relation(fields: [ttlockGatewayRecordId], references: [id], onDelete: SetNull)
   groups         LockGroupLock[]
+  mobileAccessCredentials MobileAccessCredential[]
 
   @@index([propertyId, isActive])
   @@index([ttlockGatewayRecordId])
@@ -1043,6 +1044,7 @@ model Reservation {
   pinAIActionProposals     PinAIActionProposal[]
   damageCase               DamageCase?
   guestStayLink            GuestStayLink?
+  mobileAccessCredentials  MobileAccessCredential[]
 
   @@unique([propertyId, externalProvider, externalId])
   @@index([propertyId, checkIn, checkOut])
@@ -1478,6 +1480,7 @@ model AccessGrant {
   reservation                Reservation?     @relation(fields: [reservationId], references: [id])
   staffMember                StaffMember?     @relation(fields: [staffMemberId], references: [id])
   messages                   MessageLog[]
+  mobileAccessCredentials    MobileAccessCredential[]
   secureAccessCode           AccessCode?
   staffAssignment            StaffAssignment?
 
@@ -3238,6 +3241,7 @@ model GuestPerson {
 
   stays         GuestStayLink[]
   deviceSessions GuestDeviceSession[]
+  mobileAccessCredentials MobileAccessCredential[]
 
   @@index([primaryEmail])
   @@index([primaryPhone])
@@ -3253,6 +3257,7 @@ model GuestStayLink {
   updatedAt      DateTime    @updatedAt
 
   guestPerson    GuestPerson @relation(fields: [guestPersonId], references: [id], onDelete: Cascade)
+  mobileAccessCredentials MobileAccessCredential[]
   reservation    Reservation @relation(fields: [reservationId], references: [id], onDelete: Cascade)
 
   @@index([guestPersonId, revokedAt])
@@ -3274,4 +3279,48 @@ model GuestDeviceSession {
 
   @@index([guestPersonId, revokedAt])
   @@index([expiresAt])
+}
+
+
+enum MobileAccessCredentialStatus {
+  PENDING
+  ACTIVE
+  REVOKED
+  EXPIRED
+  FAILED
+}
+
+model MobileAccessCredential {
+  id                   String                       @id @default(cuid())
+  guestPersonId        String
+  guestDeviceSessionId String
+  reservationId        String
+  accessGrantId        String
+  lockId               String
+  provider             String                       @default("TTLOCK")
+  providerKeyId        String?                      @unique
+  lockDataCiphertext   String?
+  lockDataKeyVersion   String?
+  lockMac              String?
+  startsAt             DateTime
+  endsAt               DateTime
+  status               MobileAccessCredentialStatus @default(PENDING)
+  issuedAt             DateTime?
+  revokedAt            DateTime?
+  lastDeliveredAt      DateTime?
+  lastError            String?
+  createdAt            DateTime                     @default(now())
+  updatedAt            DateTime                     @updatedAt
+
+  guestPerson          GuestPerson                  @relation(fields: [guestPersonId], references: [id], onDelete: Cascade)
+  guestDeviceSession   GuestDeviceSession           @relation(fields: [guestDeviceSessionId], references: [id], onDelete: Cascade)
+  reservation          Reservation                  @relation(fields: [reservationId], references: [id], onDelete: Cascade)
+  accessGrant          AccessGrant                  @relation(fields: [accessGrantId], references: [id], onDelete: Cascade)
+  lock                 Lock                         @relation(fields: [lockId], references: [id], onDelete: Cascade)
+
+  @@unique([guestDeviceSessionId, accessGrantId])
+  @@index([reservationId, status])
+  @@index([accessGrantId, status])
+  @@index([lockId, status])
+  @@index([endsAt, status])
 }
