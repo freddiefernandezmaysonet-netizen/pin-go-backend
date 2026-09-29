@@ -289,5 +289,5 @@ test("Access cutover fences current APMS work and preserves only out-of-window l
 
   // LEGACY remains a real fallback only after the handoff resolver returns it.
   assert.match(checkinSource, /await activateGrant\(grant\.id\)/);
-  assert.match(checkoutSource, /await deactivateGrant\(grant\.id\)/);
+  assert.match(checkoutSource, /await deactivateGuestAccess\\(grant\\.id\\)/);
 });
