@@ -17,6 +17,11 @@ import { buildTrustedDeviceCookie } from "./trusted-device-cookie.js";
 import { signSessionBoundAuthToken } from "./session-bound-token.js";
 
 const prisma = new PrismaClient();
+const MOBILE_AUTH_HEADER = "x-pin-go-client";
+
+function isMobileAuthClient(req: { get(name: string): string | undefined }) {
+  return String(req.get(MOBILE_AUTH_HEADER) ?? "").trim().toLowerCase() === "mobile";
+}
 export const mfaLoginRouter = Router();
 
 function readE7Environment(): E7Environment {
@@ -262,6 +267,7 @@ mfaLoginRouter.post("/auth/mfa/verify", async (req, res) => {
 
     return res.json({
       ok: true,
+      ...(isMobileAuthClient(req) ? { mobileSessionToken: token } : {}),
       user: {
         id: user.id,
         email: user.email,
