@@ -35,7 +35,7 @@ export async function deliverCleaningHostAttentionNotice(
       propertyName: property.name,
       cleanerName: staff?.fullName?.trim() || "Cleaner",
       reservationNumber: reservation?.reservationNumber ?? null,
-      dashboardUrl: `${origin}/dashboard`,
+      dashboardUrl: `${origin}/properties/${encodeURIComponent(work.propertyId)}/calendar`,
       idempotencyKey: `cleaning-host-attention-${notice.id}`,
     });
     await prisma.cleaningHostAttentionNotice.update({ where: { id: notice.id }, data: {
