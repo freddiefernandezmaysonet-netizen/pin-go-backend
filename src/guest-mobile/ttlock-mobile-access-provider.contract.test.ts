@@ -29,7 +29,8 @@ test("recipient access token refresh uses encrypted refresh token and persists o
   assert.doesNotMatch(source, /data:\s*\{[^}]*accessToken:\s*accessToken/s);
 });
 
-test("provider remains disconnected from guest routes and reservation worker", () => {
-  assert.doesNotMatch(routes, /TTLockMobileAccessProvider|provisionMobileAccessCredential/);
+test("provider is reachable only through the default-off guest prepare route and never the reservation worker", () => {
+  assert.match(routes, /MOBILE_ACCESS_EKEY_ENABLED !== "true"/);
+  assert.match(routes, /TTLockMobileAccessProvider/);
   assert.doesNotMatch(worker, /TTLockMobileAccessProvider|provisionMobileAccessCredential/);
 });
