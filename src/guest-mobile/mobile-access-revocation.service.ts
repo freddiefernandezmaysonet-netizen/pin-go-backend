@@ -1,5 +1,6 @@
 import type { PrismaClient } from "@prisma/client";
 import type { MobileAccessProvider } from "./mobile-access-provider.js";
+import { nextMobileAccessRecovery } from "./mobile-access-recovery.policy.js";
 
 export async function revokeMobileAccessCredential(
   prisma: PrismaClient,
@@ -29,9 +30,20 @@ export async function revokeMobileAccessCredential(
         providerLockId: credential.lock.ttlockLockId,
       });
     } catch (error) {
+      const recovery = nextMobileAccessRecovery(
+        await prisma.mobileAccessCredential.findUnique({ where: { id: credential.id }, select: { recoveryAttemptCount: true } })
+          .then(row => row?.recoveryAttemptCount ?? 0),
+        now,
+      );
       await prisma.mobileAccessCredential.update({
         where: { id: credential.id },
-        data: { lastError: error instanceof Error ? error.message.slice(0, 500) : "MOBILE_ACCESS_REVOKE_FAILED" },
+        data: {
+          lastError: error instanceof Error ? error.message.slice(0, 500) : "MOBILE_ACCESS_REVOKE_FAILED",
+          recoveryAttemptCount: recovery.attemptCount,
+          recoveryLastAttemptAt: recovery.lastAttemptAt,
+          recoveryNextAttemptAt: recovery.nextAttemptAt,
+          recoveryExhaustedAt: recovery.exhaustedAt,
+        },
       });
       throw error;
     }
@@ -45,6 +57,8 @@ export async function revokeMobileAccessCredential(
       lockDataCiphertext: null,
       lockDataKeyVersion: null,
       lastError: null,
+      recoveryNextAttemptAt: null,
+      recoveryExhaustedAt: null,
     },
   });
 
