@@ -8,7 +8,9 @@ test("Help incidents are read-only and GuestDeviceSession scoped", () => {
   const marker = '"/api/guest-mobile/stays/:reservationNumber/incidents"';
   const start = route.indexOf(marker);
   assert.ok(start >= 0);
-  const block = route.slice(start);
+  const handlerStart = route.lastIndexOf("guestMobileIdentityRouter.get(", start);
+  assert.ok(handlerStart >= 0);
+  const block = route.slice(handlerStart);
   assert.match(block, /guestMobileIdentityRouter\.get/);
   assert.match(block, /resolveGuestMobileSession/);
   assert.match(block, /resolveGuestMobilePinAIScope/);
