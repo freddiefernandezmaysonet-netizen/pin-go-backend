@@ -28,6 +28,6 @@ jobs:
       - name: Generate Prisma client
         run: npx prisma generate
       - name: Type-check guest mobile service
-        run: npx tsc --noEmit --pretty false
+        run: npx tsc -p tsconfig.guest-mobile-identity-v1.json --pretty false
       - name: Run Guest Mobile Identity contracts
         run: npx tsx --test src/guest-mobile/guest-mobile-session.contract.test.ts
