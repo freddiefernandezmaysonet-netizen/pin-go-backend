@@ -38,3 +38,20 @@ export function parseCleaningTimingUpdate(input: Record<string, unknown>): Clean
   }
   return result;
 }
+
+
+export function assertCleaningTimingInvariant(input: Readonly<{
+  currentDurationCommitmentMinutes: number | null;
+  currentStartConfirmationGraceMinutes: number;
+  update: CleaningTimingUpdate;
+}>): void {
+  const duration = Object.hasOwn(input.update, "cleaningDurationCommitmentMinutes")
+    ? input.update.cleaningDurationCommitmentMinutes ?? null
+    : input.currentDurationCommitmentMinutes;
+  const startGrace = Object.hasOwn(input.update, "cleaningStartConfirmationGraceMinutes")
+    ? input.update.cleaningStartConfirmationGraceMinutes!
+    : input.currentStartConfirmationGraceMinutes;
+  if (duration !== null && startGrace >= duration) {
+    throw new CleaningTimingValidationError("cleaningStartConfirmationGraceMinutes_must_be_less_than_duration");
+  }
+}
