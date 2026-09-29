@@ -3339,8 +3339,8 @@ model TTLockRecipientIdentity {
   id                     String                        @id @default(cuid())
   guestPersonId          String                        @unique
   username               String                        @unique
-  passwordCiphertext     String
-  passwordKeyVersion     String
+  passwordCiphertext     String?
+  passwordKeyVersion     String?
   providerUid            String?
   accessTokenCiphertext  String?
   refreshTokenCiphertext String?
@@ -3348,6 +3348,7 @@ model TTLockRecipientIdentity {
   tokenExpiresAt         DateTime?
   status                 TTLockRecipientIdentityStatus @default(PENDING)
   registeredAt           DateTime?
+  lastActivityAt         DateTime?
   deleteRequestedAt      DateTime?
   deletedAt              DateTime?
   lastError              String?
@@ -3358,4 +3359,5 @@ model TTLockRecipientIdentity {
 
   @@index([status])
   @@index([tokenExpiresAt])
+  @@index([lastActivityAt, status])
 }
