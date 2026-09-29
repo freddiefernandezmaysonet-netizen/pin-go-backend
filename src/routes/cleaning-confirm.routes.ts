@@ -98,6 +98,26 @@ function formatPropertyLocal(value: Date, timeZone: string) {
   }
 }
 
+function cleanerPage(content: string) {
+  return `<!doctype html>
+<html>
+<head>
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="color-scheme" content="light">
+  <style>
+    *{box-sizing:border-box} body{margin:0;background:#f8fafc;color:#111827;font-family:Arial,sans-serif;font-size:17px;line-height:1.55}
+    .cleaner-shell{width:min(100%,680px);margin:0 auto;padding:24px 18px 40px}
+    .cleaner-card{background:#fff;border:1px solid #e5e7eb;border-radius:16px;padding:24px;box-shadow:0 8px 28px rgba(15,23,42,.06)}
+    h2{font-size:26px;line-height:1.2;margin:0 0 20px} p{margin:0 0 14px} b{font-weight:750}
+    .cleaner-action{display:block;width:100%;min-height:52px;padding:14px 18px;margin-top:20px;border:0;border-radius:12px;background:#2563eb;color:#fff;font-size:17px;font-weight:750;line-height:1.25;white-space:normal}
+    .cleaner-note{margin-top:14px;font-size:14px;line-height:1.5;color:#6b7280}
+    @media(max-width:480px){.cleaner-shell{padding:16px 12px 28px}.cleaner-card{padding:20px 16px;border-radius:14px}h2{font-size:24px}.cleaner-action{font-size:17px;min-height:54px}}
+  </style>
+</head>
+<body><main class="cleaner-shell"><section class="cleaner-card">${content}</section></main></body>
+</html>`;
+}
+
 async function prepareCleaningTimingConsent(data: {
   confirmation: any;
   reservation: any;
@@ -134,9 +154,7 @@ function renderTimingConsent(token: string, prepared: Awaited<ReturnType<typeof 
   if (prepared.work.timingConsentAcceptedAt) {
     return `Cleaning availability and timing commitment already confirmed. Scheduled start: ${formatPropertyLocal(prepared.terms.scheduledStartAt, prepared.timeZone)}. Committed completion: ${formatPropertyLocal(prepared.terms.scheduledCompletionAt, prepared.timeZone)}.`;
   }
-  return `
-    <html><body style="font-family:Arial;padding:24px;max-width:640px;">
-      <h2>Cleaning timing commitment</h2>
+  return cleanerPage(`\n      <h2>Cleaning timing commitment</h2>
       <p>Your availability is confirmed and your NFC access remains handled by Pin&Go.</p>
       <p><b>Scheduled start:</b> ${formatPropertyLocal(prepared.terms.scheduledStartAt, prepared.timeZone)}</p>
       <p><b>Standard duration:</b> ${prepared.terms.durationCommitmentMinutes} minutes</p>
@@ -144,11 +162,7 @@ function renderTimingConsent(token: string, prepared: Awaited<ReturnType<typeof 
       <p><b>Committed completion:</b> ${formatPropertyLocal(prepared.terms.scheduledCompletionAt, prepared.timeZone)}</p>
       <p><b>Follow-up begins after:</b> ${formatPropertyLocal(prepared.terms.followupAttentionAt, prepared.timeZone)}</p>
       <form method="POST" action="/cleaning/confirm/${token}/timing-consent">
-        <button style="padding:12px 18px;background:#2563eb;color:white;border:0;border-radius:8px;">
-          I accept this cleaning schedule and time commitment
-        </button>
-      </form>
-    </body></html>`;
+        <button class="cleaner-action">I accept this cleaning schedule and time commitment</button>\n      </form>`);
 }
 
 async function runCompleteFlowAuditAfterCleaningConfirmation(
@@ -475,20 +489,12 @@ cleaningConfirmRouter.post(
         staffMemberId: confirmation.staffMemberId,
         confirmationId: confirmation.id,
       });
-      return res.send(`
-        <html><body style="font-family:Arial;padding:24px;max-width:640px;">
-          <h2>Cleaning timing commitment accepted</h2>
+      return res.send(cleanerPage(`\n          <h2>Cleaning timing commitment accepted</h2>
           <p><b>Scheduled start:</b> ${formatPropertyLocal(prepared.terms.scheduledStartAt, prepared.timeZone)}</p>
           <p><b>Committed completion:</b> ${formatPropertyLocal(prepared.terms.scheduledCompletionAt, prepared.timeZone)}</p>
           <p>Your acceptance was recorded at ${formatPropertyLocal(accepted.timingConsentAcceptedAt!, prepared.timeZone)}.</p>
           <form method="POST" action="/cleaning/confirm/${token}/start">
-            <button style="padding:12px 18px;background:#2563eb;color:white;border:0;border-radius:8px;">
-              I started cleaning
-            </button>
-          </form>
-          <p style="font-size:12px;color:#6b7280;">This button records your declaration of starting the cleaning. It does not change the committed completion time or NFC access window.</p>
-        </body></html>
-      `);
+            <button class="cleaner-action">I started cleaning</button>\n          </form>\n          <p class="cleaner-note">This button records your declaration of starting the cleaning. It does not change the committed completion time or NFC access window.</p>\n      `));
     } catch (e: any) {
       console.error("[CLEANING_TIMING_CONSENT_ERROR]", e);
       return res.status(409).send(e?.message ?? "Failed to accept cleaning timing commitment.");
@@ -532,19 +538,11 @@ cleaningConfirmRouter.post(
         startConfirmationGraceMinutes: prepared.work.startConfirmationGraceMinutes,
         followupGraceMinutes: prepared.work.followupGraceMinutes,
       });
-      return res.send(`
-        <html><body style="font-family:Arial;padding:24px;max-width:640px;">
-          <h2>Cleaning start recorded</h2>
+      return res.send(cleanerPage(`\n          <h2>Cleaning start recorded</h2>
           <p>Start confirmed at ${formatPropertyLocal(started.startConfirmedAt!, prepared.timeZone)}.</p>
           <p><b>Committed completion remains:</b> ${formatPropertyLocal(terms.scheduledCompletionAt, prepared.timeZone)}</p>
           <form method="POST" action="/cleaning/confirm/${token}/complete">
-            <button style="padding:12px 18px;background:#2563eb;color:white;border:0;border-radius:8px;">
-              I finished cleaning
-            </button>
-          </form>
-          <p style="font-size:12px;color:#6b7280;">This records your completion declaration. It does not independently certify an inspection or change NFC access.</p>
-        </body></html>
-      `);
+            <button class="cleaner-action">I finished cleaning</button>\n          </form>\n          <p class="cleaner-note">This records your completion declaration. It does not independently certify an inspection or change NFC access.</p>\n      `));
     } catch (e: any) {
       console.error("[CLEANING_START_CONFIRM_ERROR]", e);
       return res.status(409).send(e?.message ?? "Failed to record cleaning start.");
