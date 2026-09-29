@@ -29,7 +29,7 @@ test("cancelled reservation deactivates grants through TTLock Brain before marki
   const source = await readReservationReconcileService();
   const branch = getCancelledReservationBranch(source);
   const deactivateCall = branch.indexOf(
-    "await deactivateGrant(grant.id)"
+    "await deactivateGuestAccess(grant.id)"
   );
   const revokedUpdate = branch.indexOf(
     "status: AccessStatus.REVOKED",
@@ -50,7 +50,7 @@ test("grant revocation failure preserves the non-revoked state and records the e
   const branch = getCancelledReservationBranch(source);
   const catchStart = branch.indexOf(
     "} catch (e: any) {",
-    branch.indexOf("await deactivateGrant(grant.id)")
+    branch.indexOf("await deactivateGuestAccess(grant.id)")
   );
   const nfcBranchStart = branch.indexOf(
     "// CANCELLED → close scheduled NFC",
