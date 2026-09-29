@@ -1042,6 +1042,7 @@ model Reservation {
   pinAIGuestConversation   PinAIGuestConversation?
   pinAIActionProposals     PinAIActionProposal[]
   damageCase               DamageCase?
+  guestStayLink            GuestStayLink?
 
   @@unique([propertyId, externalProvider, externalId])
   @@index([propertyId, checkIn, checkOut])
@@ -3224,4 +3225,53 @@ model OtaConnectionSession {
   @@index([organizationId, propertyId, status, expiresAt])
   @@index([otaChannelConnectionId, status])
   @@index([requestedByUserId, requestedAt])
+}
+
+
+model GuestPerson {
+  id            String   @id @default(cuid())
+  primaryEmail  String?
+  primaryPhone  String?
+  displayName   String?
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  stays         GuestStayLink[]
+  deviceSessions GuestDeviceSession[]
+
+  @@index([primaryEmail])
+  @@index([primaryPhone])
+}
+
+model GuestStayLink {
+  id             String      @id @default(cuid())
+  guestPersonId  String
+  reservationId  String      @unique
+  linkedAt       DateTime    @default(now())
+  revokedAt      DateTime?
+  createdAt      DateTime    @default(now())
+  updatedAt      DateTime    @updatedAt
+
+  guestPerson    GuestPerson @relation(fields: [guestPersonId], references: [id], onDelete: Cascade)
+  reservation    Reservation @relation(fields: [reservationId], references: [id], onDelete: Cascade)
+
+  @@index([guestPersonId, revokedAt])
+}
+
+model GuestDeviceSession {
+  id             String      @id @default(cuid())
+  guestPersonId  String
+  tokenHash      String      @unique
+  deviceLabel    String?
+  platform       String?
+  expiresAt      DateTime
+  lastSeenAt     DateTime    @default(now())
+  revokedAt      DateTime?
+  createdAt      DateTime    @default(now())
+  updatedAt      DateTime    @updatedAt
+
+  guestPerson    GuestPerson @relation(fields: [guestPersonId], references: [id], onDelete: Cascade)
+
+  @@index([guestPersonId, revokedAt])
+  @@index([expiresAt])
 }

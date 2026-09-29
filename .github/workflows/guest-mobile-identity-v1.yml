@@ -1,0 +1,33 @@
+name: Guest Mobile Identity V1
+
+on:
+  pull_request:
+    paths:
+      - "prisma/schema.prisma"
+      - "prisma/migrations/20260929060000_add_guest_mobile_identity_foundation/**"
+      - "src/guest-mobile/**"
+      - ".github/workflows/guest-mobile-identity-v1.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  certify:
+    runs-on: ubuntu-latest
+    env:
+      DATABASE_URL: postgresql://guest_mobile_ci:guest_mobile_ci@127.0.0.1:5432/guest_mobile_ci
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: npm ci
+      - name: Validate Prisma schema
+        run: npx prisma validate
+      - name: Generate Prisma client
+        run: npx prisma generate
+      - name: Type-check guest mobile service
+        run: npx tsc -p tsconfig.guest-mobile-identity-v1.json --pretty false
+      - name: Run Guest Mobile Identity contracts
+        run: npx tsx --test src/guest-mobile/guest-mobile-session.contract.test.ts src/guest-mobile/guest-mobile-http.contract.test.ts
