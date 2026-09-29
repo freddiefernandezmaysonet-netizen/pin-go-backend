@@ -21,7 +21,7 @@ test("route uses GuestDeviceSession and minimal delivery projection", () => {
   const start = route.indexOf('"/api/guest-mobile/stays/:reservationNumber/mobile-access/prepare"');
   const block = route.slice(start, start + 4500);
   assert.match(block, /resolveGuestMobileSession/);
-  assert.match(block, /readGuestMobileStay/);
+  assert.match(block, /authorizeGuestMobileStay/);
   assert.match(block, /deliverMobileAccessCredential/);
   assert.match(block, /res\.json\(\{ ok: true, credential \}\)/);
 });
