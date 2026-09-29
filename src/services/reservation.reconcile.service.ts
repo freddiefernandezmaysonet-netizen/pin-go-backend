@@ -9,7 +9,7 @@ import {
   StaffAssignmentStatus,
 } from "@prisma/client";
 
-import { deactivateGuestAccess } from "../guest-mobile/mobile-access-canonical-deactivation.service.js";
+import { deactivateGrant } from "../services/ttlock/ttlock.brain";
 import { ttlockChangeCardPeriod } from "../ttlock/ttlock.card";
 import { log } from "../utils/log";
 import { createCleaningConfirmation } from "./cleaning-confirmation.service";
@@ -52,7 +52,7 @@ export async function reconcileReservation(reservationId: string) {
         grant.status === AccessStatus.PENDING
       ) {
         try {
-          await deactivateGuestAccess(grant.id);
+          await deactivateGrant(grant.id);
 
           await prisma.accessGrant.update({
             where: { id: grant.id },
