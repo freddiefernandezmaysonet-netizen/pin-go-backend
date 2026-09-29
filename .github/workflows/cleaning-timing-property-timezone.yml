@@ -1,0 +1,27 @@
+name: Cleaning Timing Property Timezone
+on:
+  pull_request:
+    paths:
+      - "src/routes/cleaning-confirm.routes.ts"
+      - "src/services/cleaning-timing-property-timezone.contract.test.js"
+      - ".github/workflows/cleaning-timing-property-timezone.yml"
+permissions:
+  contents: read
+jobs:
+  contract-build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+      - run: npm ci
+      - run: node --test src/services/cleaning-timing-property-timezone.contract.test.js
+      - run: npx prisma generate
+      - name: Runtime import smoke
+        run: node --import tsx -e "import('./src/routes/cleaning-confirm.routes.ts').then(() => console.log('CLEANING_CONFIRM_ROUTE_IMPORT_OK'))"
