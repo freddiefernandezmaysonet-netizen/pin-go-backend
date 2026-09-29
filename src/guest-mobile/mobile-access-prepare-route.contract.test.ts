@@ -29,3 +29,16 @@ test("route uses GuestDeviceSession and minimal delivery projection", () => {
 test("reservation worker does not provision mobile eKeys", () => {
   assert.doesNotMatch(worker, /prepareMobileAccessOnDemand|TTLockMobileAccessProvider|mobile-access\/prepare/);
 });
+
+
+test("prepare route uses canonical stay authorization and concrete session id", () => {
+  const marker = '"/api/guest-mobile/stays/:reservationNumber/mobile-access/prepare"';
+  const start = route.indexOf(marker);
+  assert.ok(start >= 0);
+  const block = route.slice(start, start + 4500);
+  assert.match(block, /authorizeGuestMobileStay/);
+  assert.match(block, /guestPersonId: session\.guestPersonId/);
+  assert.match(block, /guestDeviceSessionId: session\.id/);
+  assert.doesNotMatch(block, /session\.sessionId/);
+  assert.doesNotMatch(block, /readGuestMobileStay\(prisma, session\.guestPersonId/);
+});
