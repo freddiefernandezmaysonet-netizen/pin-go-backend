@@ -3,6 +3,7 @@ import { prisma } from "../lib/prisma.js";
 import { exchangeGuestStayToken, readGuestMobileStay, resolveGuestMobilePinAIScope, resolveGuestMobileSession } from "../guest-mobile/guest-mobile-session.service.js";
 import { GuestPinAIGateway, createGuestPinAIRuntimeRunner } from "../pin-ai/guest/guest-runtime-gateway.js";
 import { readGuestHistory } from "../pin-ai/guest/guest-history-reader.js";
+import { readPublishedIncidentUpdates } from "../pin-ai/host/host-incident.service.js";
 
 const exchangeAttempts = new Map<string, { count: number; resetAt: number }>();
 
@@ -174,6 +175,38 @@ guestMobileIdentityRouter.post(
       if (code === "GUEST_MOBILE_PIN_AI_NOT_AVAILABLE") return res.status(404).json({ ok: false, error: "PIN_AI_NOT_AVAILABLE" });
       console.error("[GUEST_MOBILE_PIN_AI_MESSAGE] failed", { code });
       return res.status(503).json({ ok: false, error: "PIN_AI_UNAVAILABLE" });
+    }
+  },
+);
+
+
+guestMobileIdentityRouter.get(
+  "/api/guest-mobile/stays/:reservationNumber/incidents",
+  exchangeRateLimit,
+  async (req, res) => {
+    res.setHeader("Cache-Control", "no-store");
+    const match = /^Bearer\s+([^\s]+)$/i.exec(String(req.get("authorization") ?? ""));
+    if (!match?.[1]) return res.status(401).json({ ok: false, error: "UNAUTHENTICATED" });
+
+    try {
+      const session = await resolveGuestMobileSession(prisma, match[1]);
+      const scope = await resolveGuestMobilePinAIScope(prisma, {
+        guestPersonId: session.guestPersonId,
+        reservationNumber: String(req.params.reservationNumber ?? "").trim(),
+      });
+      const result = await readPublishedIncidentUpdates({
+        prisma,
+        env: process.env,
+        guestToken: scope.guestToken,
+        after: typeof req.query.after === "string" ? req.query.after : undefined,
+      });
+      return res.json({ ok: true, ...result });
+    } catch (error) {
+      const code = error instanceof Error ? error.message : "GUEST_INCIDENTS_UNAVAILABLE";
+      if (code === "GUEST_MOBILE_UNAUTHENTICATED") return res.status(401).json({ ok: false, error: "UNAUTHENTICATED" });
+      if (code === "GUEST_MOBILE_PIN_AI_NOT_AVAILABLE") return res.status(404).json({ ok: false, error: "STAY_NOT_AVAILABLE" });
+      console.error("[GUEST_MOBILE_INCIDENTS] failed", { code });
+      return res.status(503).json({ ok: false, error: "GUEST_INCIDENTS_UNAVAILABLE" });
     }
   },
 );
