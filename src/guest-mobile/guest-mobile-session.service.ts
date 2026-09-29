@@ -232,3 +232,48 @@ export async function readGuestMobileStay(
     },
   };
 }
+
+export async function resolveGuestMobilePinAIScope(
+  prisma: PrismaClient,
+  input: { guestPersonId: string; reservationNumber: string; now?: Date },
+) {
+  const now = input.now ?? new Date();
+  const link = await prisma.guestStayLink.findFirst({
+    where: {
+      guestPersonId: input.guestPersonId,
+      revokedAt: null,
+      reservation: {
+        reservationNumber: input.reservationNumber,
+        status: "ACTIVE",
+        property: { status: "ACTIVE" },
+      },
+    },
+    select: {
+      reservation: {
+        select: {
+          id: true,
+          propertyId: true,
+          guestToken: true,
+          guestTokenExpiresAt: true,
+          property: { select: { organizationId: true } },
+        },
+      },
+    },
+  });
+
+  const reservation = link?.reservation;
+  if (
+    !reservation?.guestToken ||
+    !reservation.guestTokenExpiresAt ||
+    reservation.guestTokenExpiresAt <= now
+  ) {
+    throw new Error("GUEST_MOBILE_PIN_AI_NOT_AVAILABLE");
+  }
+
+  return {
+    reservationId: reservation.id,
+    propertyId: reservation.propertyId,
+    organizationId: reservation.property.organizationId,
+    guestToken: reservation.guestToken,
+  };
+}
