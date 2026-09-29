@@ -3257,7 +3257,6 @@ model GuestStayLink {
   updatedAt      DateTime    @updatedAt
 
   guestPerson    GuestPerson @relation(fields: [guestPersonId], references: [id], onDelete: Cascade)
-  mobileAccessCredentials MobileAccessCredential[]
   reservation    Reservation @relation(fields: [reservationId], references: [id], onDelete: Cascade)
 
   @@index([guestPersonId, revokedAt])
@@ -3276,6 +3275,7 @@ model GuestDeviceSession {
   updatedAt      DateTime    @updatedAt
 
   guestPerson    GuestPerson @relation(fields: [guestPersonId], references: [id], onDelete: Cascade)
+  mobileAccessCredentials MobileAccessCredential[]
 
   @@index([guestPersonId, revokedAt])
   @@index([expiresAt])
