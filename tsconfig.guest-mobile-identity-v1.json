@@ -9,7 +9,6 @@
   "include": [
     "src/guest-mobile/guest-mobile-session.service.ts",
     "src/guest-mobile/guest-mobile-session.contract.test.ts",
-    "src/routes/guest-mobile-identity.routes.ts",
     "src/guest-mobile/guest-mobile-http.contract.test.ts",
     "src/guest-mobile/guest-mobile-my-stay.contract.test.ts",
     "src/guest-mobile/guest-mobile-pin-ai-adapter.contract.test.ts"
