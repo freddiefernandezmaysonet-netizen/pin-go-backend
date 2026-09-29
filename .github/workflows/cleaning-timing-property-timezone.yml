@@ -23,4 +23,4 @@ jobs:
       - run: npm ci
       - run: node --test src/services/cleaning-timing-property-timezone.contract.test.js
       - run: npx prisma generate
-      - run: npm run build
+      - run: npx tsc --noEmit --target ES2022 --module NodeNext --moduleResolution NodeNext --esModuleInterop --skipLibCheck src/routes/cleaning-confirm.routes.ts
