@@ -1,0 +1,11 @@
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "noEmit": true,
+    "types": ["node"]
+  },
+  "include": [
+    "src/guest-mobile/guest-mobile-session.service.ts",
+    "src/guest-mobile/guest-mobile-session.contract.test.ts"
+  ]
+}
