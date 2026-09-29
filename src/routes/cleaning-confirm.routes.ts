@@ -109,7 +109,7 @@ function cleanerPage(content: string) {
     .cleaner-shell{width:min(100%,680px);margin:0 auto;padding:24px 18px 40px}
     .cleaner-card{background:#fff;border:1px solid #e5e7eb;border-radius:16px;padding:24px;box-shadow:0 8px 28px rgba(15,23,42,.06)}
     h2{font-size:26px;line-height:1.2;margin:0 0 20px} p{margin:0 0 14px} b{font-weight:750}
-    .cleaner-action{display:block;width:100%;min-height:52px;padding:14px 18px;margin-top:20px;border:0;border-radius:12px;background:#2563eb;color:#fff;font-size:17px;font-weight:750;line-height:1.25;white-space:normal}
+    .cleaner-action{display:block;width:100%;min-height:52px;padding:14px 18px;margin-top:20px;border:0;border-radius:12px;background:#2563eb;color:#fff;font-size:17px;font-weight:750;line-height:1.25;white-space:normal}.cleaner-action-secondary{background:#fff;color:#b91c1c;border:1px solid #fecaca}
     .cleaner-note{margin-top:14px;font-size:14px;line-height:1.5;color:#6b7280}
     @media(max-width:480px){.cleaner-shell{padding:16px 12px 28px}.cleaner-card{padding:20px 16px;border-radius:14px}h2{font-size:24px}.cleaner-action{font-size:17px;min-height:54px}}
   </style>
@@ -320,28 +320,17 @@ cleaningConfirmRouter.get("/cleaning/confirm/:token", async (req, res) => {
     const propertyName = reservation.property?.name ?? "Property";
     const staffName = staffMember.fullName ?? "Cleaner";
 
-    return res.send(`
-      <html>
-        <body style="font-family: Arial; padding: 24px;">
-          <h2>Pin&Go Cleaning Request</h2>
-
-          <p><b>Cleaner:</b> ${staffName}</p>
-          <p><b>Property:</b> ${propertyName}</p>
-
-          <form method="POST" action="/cleaning/confirm/${token}/confirm" style="margin-bottom:12px;">
-            <button style="padding:12px 18px;background:#2563eb;color:white;border:0;border-radius:8px;">
-              Confirm availability
-            </button>
-          </form>
-
-          <form method="POST" action="/cleaning/confirm/${token}/decline">
-            <button style="padding:12px 18px;background:#fff;color:#b91c1c;border:1px solid #fecaca;border-radius:8px;">
-              I am not available
-            </button>
-          </form>
-        </body>
-      </html>
-    `);
+    return res.send(cleanerPage(`
+      <h2>Pin&amp;Go Cleaning Request</h2>
+      <p><b>Cleaner:</b> ${staffName}</p>
+      <p><b>Property:</b> ${propertyName}</p>
+      <form method="POST" action="/cleaning/confirm/${token}/confirm">
+        <button class="cleaner-action">Confirm availability</button>
+      </form>
+      <form method="POST" action="/cleaning/confirm/${token}/decline">
+        <button class="cleaner-action cleaner-action-secondary">I am not available</button>
+      </form>
+    `));
   } catch (e: any) {
     return res.status(500).send(e?.message ?? "Failed to load confirmation.");
   }
