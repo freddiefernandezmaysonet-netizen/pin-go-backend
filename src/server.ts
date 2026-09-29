@@ -1,3 +1,4 @@
+import { guestMobileIdentityRouter } from "./routes/guest-mobile-identity.routes.js";
 import "dotenv/config";
 import express from "express";
 import crypto from "crypto";
@@ -253,6 +254,7 @@ app.use(signupSuccessRouter);
 app.use(publicOrganizationInvitationRouter);
 app.use(publicBrandContextRouter);
 app.use("/api/public-booking", publicBookingRouter);
+app.use(guestMobileIdentityRouter);
 app.use(
   "/api/public-booking",
   buildPublicBookingPinAIRouter({ prisma, env: process.env }),
