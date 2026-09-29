@@ -26,6 +26,8 @@ test("provider is organization-scoped and issuance remains canonical", () => {
   assert.match(source, /issueMobileAccessForGuestSession/);
 });
 
-test("on-demand composition is not yet exposed over HTTP", () => {
-  assert.doesNotMatch(routes, /prepareMobileAccessOnDemand/);
+test("on-demand composition is exposed only through the dedicated default-off prepare route", () => {
+  assert.match(routes, /MOBILE_ACCESS_EKEY_ENABLED !== "true"/);
+  assert.match(routes, /prepareMobileAccessOnDemand/);
+  assert.match(routes, /mobile-access\/prepare/);
 });
