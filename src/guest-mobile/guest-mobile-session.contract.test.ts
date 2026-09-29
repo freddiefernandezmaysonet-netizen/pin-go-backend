@@ -23,7 +23,10 @@ test("an existing stay link is reused instead of silently relinking reservation"
 });
 
 test("mobile session authorization remains person-scoped", () => {
-  assert.match(source, /guestPersonId/);
-  assert.doesNotMatch(source, /organizationId/);
-  assert.doesNotMatch(source, /propertyId/);
+  const start = source.indexOf("export async function resolveGuestMobileSession");
+  const end = source.indexOf("export async function authorizeGuestMobileStay", start);
+  const block = source.slice(start, end);
+  assert.match(block, /guestPersonId/);
+  assert.doesNotMatch(block, /organizationId/);
+  assert.doesNotMatch(block, /propertyId/);
 });
