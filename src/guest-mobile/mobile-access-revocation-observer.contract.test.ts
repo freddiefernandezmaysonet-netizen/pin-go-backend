@@ -7,8 +7,8 @@ const worker = await fs.readFile(new URL("../workers/reservation.worker.ts", imp
 
 test("observer derives mobile revoke work from canonical persisted state", () => {
   assert.match(source, /endsAt: \{ lte: now \}/);
-  assert.match(source, /accessGrant: \{ status: \{ in: \["REVOKED", "EXPIRED", "FAILED"\] \} \}/);
-  assert.match(source, /reservation: \{ status: \{ in: \["CANCELLED", "COMPLETED"\] \} \}/);
+  assert.match(source, /accessGrant: \{ status: \{ in: \["REVOKED", "FAILED"\] \} \}/);
+  assert.match(source, /reservation: \{ status: "CANCELLED" \}/);
 });
 
 test("observer is DB-only and bounded", () => {
