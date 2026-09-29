@@ -1,3 +1,6 @@
+import { prepareMobileAccessOnDemand } from "../guest-mobile/mobile-access-on-demand.service.js";
+import { deliverMobileAccessCredential } from "../guest-mobile/mobile-access-delivery.service.js";
+import { TTLockMobileAccessProvider } from "../guest-mobile/ttlock-mobile-access-provider.js";
 import { Router, type RequestHandler } from "express";
 import { prisma } from "../lib/prisma.js";
 import { exchangeGuestStayToken, readGuestMobileStay, resolveGuestMobilePinAIScope, resolveGuestMobileSession } from "../guest-mobile/guest-mobile-session.service.js";
@@ -207,6 +210,42 @@ guestMobileIdentityRouter.get(
       if (code === "GUEST_MOBILE_PIN_AI_NOT_AVAILABLE") return res.status(404).json({ ok: false, error: "STAY_NOT_AVAILABLE" });
       console.error("[GUEST_MOBILE_INCIDENTS] failed", { code });
       return res.status(503).json({ ok: false, error: "GUEST_INCIDENTS_UNAVAILABLE" });
+    }
+  },
+);
+
+
+guestMobileIdentityRouter.post(
+  "/api/guest-mobile/stays/:reservationNumber/mobile-access/prepare",
+  exchangeRateLimit,
+  async (req, res) => {
+    res.setHeader("Cache-Control", "no-store");
+    if (process.env.MOBILE_ACCESS_EKEY_ENABLED !== "true") {
+      return res.status(404).json({ ok: false, error: "NOT_FOUND" });
+    }
+
+    const match = /^Bearer\s+([^\s]+)$/i.exec(String(req.get("authorization") ?? ""));
+    if (!match?.[1]) return res.status(401).json({ ok: false, error: "UNAUTHENTICATED" });
+
+    try {
+      const session = await resolveGuestMobileSession(prisma, match[1]);
+      const stay = await readGuestMobileStay(prisma, session.guestPersonId, String(req.params.reservationNumber ?? "").trim());
+      const prepared = await prepareMobileAccessOnDemand(prisma, {
+        guestDeviceSessionId: session.sessionId,
+        reservationId: stay.reservationId,
+        providerFactory: ({ organizationId, recipientIdentityId }) =>
+          new TTLockMobileAccessProvider(prisma, organizationId, recipientIdentityId),
+      });
+      const credential = await deliverMobileAccessCredential(prisma, {
+        credentialId: prepared.credentialId,
+        guestDeviceSessionId: session.sessionId,
+      });
+      return res.json({ ok: true, credential });
+    } catch (error) {
+      const code = error instanceof Error ? error.message : "MOBILE_ACCESS_UNAVAILABLE";
+      if (code === "GUEST_MOBILE_UNAUTHENTICATED") return res.status(401).json({ ok: false, error: "UNAUTHENTICATED" });
+      console.error("[GUEST_MOBILE_ACCESS_PREPARE] failed", { code });
+      return res.status(409).json({ ok: false, error: "MOBILE_ACCESS_UNAVAILABLE" });
     }
   },
 );
