@@ -11,8 +11,8 @@ export async function findMobileAccessRevocationsDue(
       recoveryExhaustedAt: null,
       OR: [
         { endsAt: { lte: now } },
-        { accessGrant: { status: { in: ["REVOKED", "EXPIRED", "FAILED"] } } },
-        { reservation: { status: { in: ["CANCELLED", "COMPLETED"] } } },
+        { accessGrant: { status: { in: ["REVOKED", "FAILED"] } } },
+        { reservation: { status: "CANCELLED" } },
       ],
     },
     select: {
