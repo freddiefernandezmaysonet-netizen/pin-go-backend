@@ -12,7 +12,7 @@ test("TTLock account deletion requires prior DELETE_PENDING authorization", () =
 
 test("provider delete happens before local credential tombstone", () => {
   const providerAt = source.indexOf("/v3/user/delete");
-  const tombstoneAt = source.indexOf("tombstoneDeletedTTLockRecipient");
+  const tombstoneAt = source.indexOf("await tombstoneDeletedTTLockRecipient");
   assert.ok(providerAt >= 0 && tombstoneAt > providerAt);
 });
 
