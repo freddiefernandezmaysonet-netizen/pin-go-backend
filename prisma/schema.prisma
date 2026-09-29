@@ -3310,6 +3310,10 @@ model MobileAccessCredential {
   revokedAt            DateTime?
   lastDeliveredAt      DateTime?
   lastError            String?
+  recoveryAttemptCount Int                          @default(0)
+  recoveryLastAttemptAt DateTime?
+  recoveryNextAttemptAt DateTime?
+  recoveryExhaustedAt  DateTime?
   createdAt            DateTime                     @default(now())
   updatedAt            DateTime                     @updatedAt
 
@@ -3324,6 +3328,7 @@ model MobileAccessCredential {
   @@index([accessGrantId, status])
   @@index([lockId, status])
   @@index([endsAt, status])
+  @@index([status, recoveryNextAttemptAt, recoveryExhaustedAt])
 }
 
 
