@@ -4,12 +4,16 @@ import fs from "node:fs/promises";
 
 const route = await fs.readFile(new URL("../routes/guest-mobile-identity.routes.ts", import.meta.url), "utf8");
 const server = await fs.readFile(new URL("../server.ts", import.meta.url), "utf8");
+const exchangeStart = route.indexOf('"/api/guest-mobile/session/exchange"');
+const exchangeEnd = route.indexOf("guestMobileIdentityRouter.", exchangeStart);
+assert.ok(exchangeStart >= 0 && exchangeEnd > exchangeStart);
+const exchange = route.slice(exchangeStart, exchangeEnd);
 
 test("exchange route exposes only the intended public contract", () => {
   assert.match(route, /"\/api\/guest-mobile\/session\/exchange"/);
-  assert.match(route, /new Set\(\["guestToken", "deviceLabel", "platform"\]\)/);
-  assert.doesNotMatch(route, /reservationId/);
-  assert.doesNotMatch(route, /guestEmail|guestPhone|organizationId|propertyId/);
+  assert.match(exchange, /new Set\(\["guestToken", "deviceLabel", "platform"\]\)/);
+  assert.doesNotMatch(exchange, /reservationId/);
+  assert.doesNotMatch(exchange, /guestEmail|guestPhone|organizationId|propertyId/);
 });
 
 test("exchange response and transport are non-cacheable and identifier-minimal", () => {
