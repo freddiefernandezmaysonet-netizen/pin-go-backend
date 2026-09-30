@@ -2,6 +2,7 @@ import { Router } from "express";
 import type { PrismaClient } from "@prisma/client";
 
 import { requireAuth } from "../middleware/requireAuth";
+import { registerCalendarOverrideRemoval } from "./dashboard.calendar-overrides-removal.route";
 import { createChannexAriOutboxEvent } from "../pms/outbound/channex-ari-outbox.service";
 import type { ChannexAriRatesRestrictionsChangedField } from "../pms/outbound/channex-ari-rates-restrictions-snapshot.policy";
 
@@ -423,5 +424,6 @@ router.put(
   }
 );
 
+registerCalendarOverrideRemoval(router, prisma);
 return router;
 }

@@ -1,0 +1,48 @@
+name: Calendar Stay Restriction Removal Certification
+on:
+  push:
+    branches: [agent/stay-restrictions-removal-v1]
+  pull_request:
+    branches: [main]
+    paths:
+      - 'src/routes/dashboard.calendar-overrides*.ts'
+      - '.github/workflows/stay-restrictions-removal.yml'
+permissions:
+  contents: read
+concurrency:
+  group: stay-restrictions-removal-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  certify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      DATABASE_URL: postgresql://test:test@127.0.0.1:1/no_runtime_database
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+      - run: npm ci --ignore-scripts --no-audit --no-fund
+      - name: Generate and validate Prisma client only (no migrations)
+        run: |
+          npx --no-install prisma generate --schema ./prisma
+          npx --no-install prisma validate --schema ./prisma
+      - name: Removal, existing save, outbox and snapshot regressions (mocked)
+        run: >-
+          node --import tsx --test
+          src/routes/dashboard.calendar-overrides-removal.route.test.ts
+          src/routes/dashboard.calendar-overrides.route.test.ts
+          src/pms/outbound/channex-ari-outbox.service.test.ts
+          src/pms/outbound/channex-ari-snapshot.service.test.ts
+          src/pms/outbound/channex-ari-rates-restrictions-snapshot.policy.test.ts
+      - name: Focused backend TypeScript (no deployment)
+        run: >-
+          npx --no-install tsc --noEmit --strict --skipLibCheck
+          --target ES2022 --module ESNext --moduleResolution Bundler
+          --esModuleInterop --types node
+          src/routes/dashboard.calendar-overrides-removal.route.ts
+          src/routes/dashboard.calendar-overrides.route.ts
