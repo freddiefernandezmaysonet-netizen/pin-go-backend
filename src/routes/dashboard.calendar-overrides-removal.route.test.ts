@@ -185,7 +185,7 @@ for (const [name, options, fields] of [
   ["maximum fallback", { rows: [row(day, 4, 7)], maximumNights: 2 }, ["maximumNights"]],
 ] as const) {
   test(`rejects ${name} when the remaining pair would be invalid`, async () => {
-    const h = harness(options);
+    const h = harness({ ...options, rows: [...options.rows] });
     const result = await h.invoke(payload([...fields]));
     assert.equal(result.statusCode, 409);
     assert.match(result.body.error, /maximum lower than the minimum/);
