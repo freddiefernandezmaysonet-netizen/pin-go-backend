@@ -39,10 +39,11 @@ jobs:
           src/pms/outbound/channex-ari-outbox.service.test.ts
           src/pms/outbound/channex-ari-snapshot.service.test.ts
           src/pms/outbound/channex-ari-rates-restrictions-snapshot.policy.test.ts
-      - name: Focused backend TypeScript (no deployment)
+      - name: Focused backend and test TypeScript (no deployment)
         run: >-
           npx --no-install tsc --noEmit --strict --skipLibCheck
           --target ES2022 --module ESNext --moduleResolution Bundler
           --esModuleInterop --types node
           src/routes/dashboard.calendar-overrides-removal.route.ts
           src/routes/dashboard.calendar-overrides.route.ts
+          src/routes/dashboard.calendar-overrides-removal.route.test.ts
