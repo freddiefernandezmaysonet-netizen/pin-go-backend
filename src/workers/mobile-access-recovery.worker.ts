@@ -1,11 +1,15 @@
 import { prisma } from "../lib/prisma.js";
 import { runDueMobileAccessRecovery } from "../guest-mobile/mobile-access-recovery.service.js";
 import { findMobileAccessRevocationsDue } from "../guest-mobile/mobile-access-revocation-observer.service.js";
+import { revokeMobileAccessCredentialById } from "../guest-mobile/mobile-access-revocation-executor.service.js";
 
 const intervalMs = Math.max(Number(process.env.MOBILE_ACCESS_RECOVERY_TICK_MS ?? 60_000), 60_000);
 
+const defaultRevokeCredential = (credentialId: string) =>
+  revokeMobileAccessCredentialById(prisma, credentialId);
+
 export async function runMobileAccessRecoveryTick(
-  revokeCredential: (credentialId: string) => Promise<unknown>,
+  revokeCredential: (credentialId: string) => Promise<unknown> = defaultRevokeCredential,
 ) {
   const observed = await findMobileAccessRevocationsDue(prisma, new Date(), 25);
   const observedResults: Array<{ credentialId: string; outcome: "REVOKED" | "RECOVERY_SCHEDULED" }> = [];
@@ -33,7 +37,7 @@ export async function runMobileAccessRecoveryTick(
 }
 
 export async function startMobileAccessRecoveryWorker(
-  revokeCredential: (credentialId: string) => Promise<unknown>,
+  revokeCredential: (credentialId: string) => Promise<unknown> = defaultRevokeCredential,
 ) {
   for (;;) {
     try {
@@ -53,4 +57,13 @@ export async function startMobileAccessRecoveryWorker(
     }
     await new Promise(resolve => setTimeout(resolve, intervalMs));
   }
+}
+
+if (process.env.MOBILE_ACCESS_RECOVERY_WORKER_ENABLED === "true") {
+  void startMobileAccessRecoveryWorker().catch(error => {
+    console.error("[MOBILE_ACCESS_RECOVERY] fatal", {
+      error: error instanceof Error ? error.message : String(error),
+    });
+    process.exitCode = 1;
+  });
 }
