@@ -7,6 +7,7 @@ export type StayTimeFee = Readonly<{
   amountMinor: number;
   currency: string;
 }>;
+export type StayTimeHourlyBasis = Readonly<{ nightlyAmountMinor: number; standardStayMinutes: number; nightDate: string }>;
 export type StayTimeRule = Readonly<{
   enabled: boolean;
   /** Earliest arrival / latest departure, in the property's local timezone. */
@@ -33,6 +34,7 @@ export type StayTimeReservation = Scope & Readonly<{
   checkOut: Date;
   /** Repeated adjustments need an incremental-pricing contract, outside V1. */
   adjustedOperations: readonly StayTimeOperation[];
+  hourlyPricingBasis?: StayTimeHourlyBasis;
 }>;
 export type StayTimeEvidence = Scope & Readonly<{
   reservationId: string;
@@ -77,22 +79,27 @@ function localTimeMinutes(value: string): number {
 function validateFee(fee: StayTimeFee): void {
   if (!["FREE", "FIXED", "PER_HOUR"].includes(fee.mode) ||
       !nonnegativeInteger(fee.amountMinor) || !/^[A-Z]{3}$/.test(fee.currency) ||
-      (fee.mode === "FREE" ? fee.amountMinor !== 0 : fee.amountMinor === 0)) {
+      (fee.mode === "FIXED" ? fee.amountMinor === 0 : fee.amountMinor !== 0)) {
     reject("INVALID_FEE_POLICY");
   }
 }
 
 /** Fees are in currency minor units. Hourly fees are prorated by elapsed minute. */
-export function calculateStayTimeFee(fee: StayTimeFee, additionalMinutes: number): number {
+export function calculateStayTimeFee(fee: StayTimeFee, additionalMinutes: number, basis?: StayTimeHourlyBasis): number {
   validateFee(fee);
   if (!Number.isSafeInteger(additionalMinutes) || additionalMinutes <= 0 || additionalMinutes > 1_500) {
     reject("INVALID_ADDITIONAL_MINUTES");
   }
+  if (fee.mode === "PER_HOUR" && (!basis || !nonnegativeInteger(basis.nightlyAmountMinor) ||
+      !Number.isSafeInteger(basis.standardStayMinutes) || basis.standardStayMinutes <= 0 || basis.standardStayMinutes > 1440)) {
+    reject("NIGHTLY_PRICING_BASIS_REQUIRED");
+  }
+  const denominator = BigInt(basis?.standardStayMinutes ?? 1);
   const amount = fee.mode === "FREE" ? 0n : fee.mode === "FIXED" ? BigInt(fee.amountMinor) :
-    (BigInt(fee.amountMinor) * BigInt(additionalMinutes) + 30n) / 60n;
+    (BigInt(basis!.nightlyAmountMinor) * BigInt(additionalMinutes) * 2n + denominator) / (denominator * 2n);
   if (amount > BigInt(Number.MAX_SAFE_INTEGER)) reject("FEE_OVERFLOW");
   // A positive paid rule must never silently become a free offer after rounding.
-  if (fee.mode !== "FREE" && amount === 0n) reject("FEE_BELOW_MINOR_UNIT");
+  if (fee.mode !== "FREE" && amount === 0n && !(fee.mode === "PER_HOUR" && basis?.nightlyAmountMinor === 0)) reject("FEE_BELOW_MINOR_UNIT");
   return Number(amount);
 }
 
@@ -145,7 +152,7 @@ export function planStayTimeAdjustment(input: Readonly<{
   if (requestedAt.getUTCSeconds() || requestedAt.getUTCMilliseconds() ||
       currentAt.getUTCSeconds() || currentAt.getUTCMilliseconds()) reject("MINUTE_PRECISION_REQUIRED");
   const additionalMinutes = delta / 60_000;
-  const feeSubtotalMinor = calculateStayTimeFee(rule.fee, additionalMinutes);
+  const feeSubtotalMinor = calculateStayTimeFee(rule.fee, additionalMinutes, reservation.hourlyPricingBasis);
 
   let requiredFreeFrom = early ? requestedAt : currentAt;
   let requiredFreeUntil = early ? currentAt : requestedAt;
@@ -185,6 +192,7 @@ export function planStayTimeAdjustment(input: Readonly<{
     checkOut: (early ? reservation.checkOut : requestedAt).toISOString(),
     additionalMinutes,
     feeMode: rule.fee.mode,
+    hourlyPricingBasis: rule.fee.mode === "PER_HOUR" ? reservation.hourlyPricingBasis : null,
     feeSubtotalMinor,
     currency: rule.fee.currency,
     requiredFreeFrom: requiredFreeFrom.toISOString(),

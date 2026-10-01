@@ -53,7 +53,7 @@ async function harness(t: test.TestContext, role: string | null = "ORG_ADMIN", o
 function body() {
   const settings = defaultStayTimeSettings();
   return { expectedRevision: 0, settings: { ...settings,
-    lateCheckout: { ...settings.lateCheckout, enabled: true, fee: { mode: "PER_HOUR", amountMinor: 2500, currency: "USD" } },
+    lateCheckout: { ...settings.lateCheckout, enabled: true, fee: { mode: "PER_HOUR", amountMinor: 0, currency: "USD" } },
   } };
 }
 
@@ -151,6 +151,7 @@ test("strict settings parser rejects unsupported currency, paid zero and free ch
   for (const fee of [
     { mode: "FREE", amountMinor: 100, currency: "USD" },
     { mode: "FIXED", amountMinor: 0, currency: "USD" },
+    { mode: "PER_HOUR", amountMinor: 2500, currency: "USD" },
     { mode: "FIXED", amountMinor: 100, currency: "EUR" },
   ]) assert.throws(() => parseStayTimeSettingsUpdate({ ...input,
     settings: { ...input.settings, lateCheckout: { ...input.settings.lateCheckout, fee } },

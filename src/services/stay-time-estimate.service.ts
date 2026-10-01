@@ -3,6 +3,7 @@ import { formatInTimeZone, fromZonedTime } from "date-fns-tz";
 import { planStayTimeAdjustment, StayTimePolicyError, type StayTimeOperation } from "../pin-ai/actions/stay-time-policy.js";
 import { defaultStayTimeSettings, parseStayTimeSettings, validateStayTimeSettingsLimits } from "../pin-ai/actions/stay-time-settings.js";
 import { readArrivalCleaningReadiness } from "./arrival-cleaning-readiness.service.js";
+import { deriveStayTimeHourlyBasis } from "./stay-time-hourly-basis.js";
 
 function reject(code: string): never { throw new StayTimePolicyError(code); }
 
@@ -44,17 +45,25 @@ export async function estimateStayTimeAdjustment(
   input: StayTimeEstimateRequest,
   now = new Date(),
 ) {
+  return db.$transaction(tx => estimateStayTimeAdjustmentInTransaction(tx, input, now), {
+    isolationLevel: Prisma.TransactionIsolationLevel.RepeatableRead, maxWait: 5000, timeout: 10000,
+  });
+}
+
+/** Reuse an existing read snapshot when binding estimate and financial terms. */
+export async function estimateStayTimeAdjustmentInTransaction(
+  tx: Prisma.TransactionClient, input: StayTimeEstimateRequest, now: Date,
+) {
   if (![input.organizationId, input.propertyId, input.reservationId].every(value => typeof value === "string" && value.trim())) {
     reject("SCOPE_MISMATCH");
   }
   if (!(now instanceof Date) || !Number.isFinite(now.getTime())) reject("INVALID_STAY_TIME");
   if (input.operation !== "EARLY_CHECKIN" && input.operation !== "LATE_CHECKOUT") reject("INVALID_OPERATION");
-  return db.$transaction(async tx => {
     const row = await tx.reservation.findFirst({
       where: { id: input.reservationId, propertyId: input.propertyId, status: "ACTIVE",
         property: { organizationId: input.organizationId, status: "ACTIVE" } },
       select: { id: true, propertyId: true, status: true, paymentState: true, source: true,
-        externalProvider: true, currency: true, checkIn: true, checkOut: true, updatedAt: true,
+        externalProvider: true, currency: true, checkIn: true, checkOut: true, updatedAt: true, pricingBreakdown: true,
         property: { select: { timezone: true, checkInTime: true, checkOutTime: true,
           stayTimeSettings: true, stayTimeSettingsRevision: true, cleaningStartOffsetMinutes: true,
           cleaningDurationMinutes: true, updatedAt: true } } },
@@ -70,6 +79,10 @@ export async function estimateStayTimeAdjustment(
     if (!(early ? settings.earlyCheckin : settings.lateCheckout).enabled) reject("SERVICE_DISABLED");
     const timezone = property.timezone ?? "";
     const requestedAt = resolveStayTimeClock(early ? row.checkIn : row.checkOut, input.requestedLocalTime, timezone);
+    const hourlyPricingBasis = (early ? settings.earlyCheckin : settings.lateCheckout).fee.mode === "PER_HOUR"
+      ? deriveStayTimeHourlyBasis({ operation: input.operation, checkIn: row.checkIn, checkOut: row.checkOut,
+        timezone, standardCheckIn: property.checkInTime ?? "15:00", standardCheckOut: property.checkOutTime ?? "11:00",
+        pricingBreakdown: row.pricingBreakdown }) : undefined;
     const scope = { organizationId: input.organizationId, propertyId: row.propertyId };
     const offset = property.cleaningStartOffsetMinutes;
     const duration = property.cleaningDurationMinutes;
@@ -126,15 +139,16 @@ export async function estimateStayTimeAdjustment(
       cleaningStartOffsetMinutes: offset,
     }) : null;
     const plan = planStayTimeAdjustment({ operation: input.operation, requestedAt, now,
-      reservation: { ...scope, ...row, currency: row.currency?.toUpperCase() ?? "", adjustedOperations },
+      reservation: { ...scope, ...row, currency: row.currency?.toUpperCase() ?? "", adjustedOperations,
+        ...(hourlyPricingBasis ? { hourlyPricingBasis } : {}) },
       policy: { ...scope, version: `stay-time-v1:${property.stayTimeSettingsRevision}:${property.updatedAt.toISOString()}`,
         timezone, ...settings, cleaningStartOffsetMinutes: offset, cleaningDurationMinutes: duration },
       evidence: { ...scope, reservationId: row.id, checkedAt: now, coveredFrom, coveredUntil, conflicts,
         arrivalReadiness },
     });
     return { ...plan, decision: "ESTIMATE_ONLY" as const, reservationUpdatedAt: row.updatedAt.toISOString(),
+      arrivalReadinessEvidenceId: arrivalReadiness?.evidenceId ?? null,
       settingsRevision: property.stayTimeSettingsRevision, estimatedAt: now.toISOString(),
       expiresAt: new Date(now.getTime() + 60_000).toISOString(), availabilityHeld: false as const,
       executionAvailable: false as const, taxesIncluded: false as const };
-  }, { isolationLevel: Prisma.TransactionIsolationLevel.RepeatableRead, maxWait: 5000, timeout: 10000 });
 }

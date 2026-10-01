@@ -106,6 +106,9 @@ jobs:
               'src/services/property-stay-time-settings.service.ts',
               'src/services/stay-time-estimate.service.test.ts',
               'src/services/stay-time-estimate.service.ts',
+              'src/services/stay-time-hourly-basis.ts',
+              'src/services/stay-time-quote.service.test.ts',
+              'src/services/stay-time-quote.service.ts',
               'tsconfig.pin-ai-stay-time-policy.json',
               'tsconfig.pin-ai-stay-time-settings.json',
             }

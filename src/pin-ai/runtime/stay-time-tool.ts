@@ -33,7 +33,8 @@ export async function checkStayTimeRequest(
       operation, requestedLocalTime: time,
     }, now);
     const spanish = request.context.preferredLanguage === "es";
-    return { ...estimate, note: spanish
+    const { arrivalReadinessEvidenceId: _internalReadinessEvidence, ...guestEstimate } = estimate;
+    return { ...guestEstimate, note: spanish
       ? "Estimación antes de impuestos. El horario no está reservado y la solicitud aún no puede confirmarse. No se modificó la reserva ni se realizó ningún cobro."
       : "Estimate before taxes. The time is not held and this request cannot yet be confirmed. No reservation change or charge was made." };
   } catch (error) {

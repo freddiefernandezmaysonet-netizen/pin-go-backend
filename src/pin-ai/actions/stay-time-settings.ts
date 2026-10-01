@@ -31,7 +31,7 @@ export function parseStayTimeSettings(value: unknown): StayTimeSettings {
         (fee.mode !== "FREE" && fee.mode !== "FIXED" && fee.mode !== "PER_HOUR") ||
         typeof fee.amountMinor !== "number" || !Number.isSafeInteger(fee.amountMinor) ||
         fee.amountMinor < 0 || fee.amountMinor > 99_999_999 || fee.currency !== "USD" ||
-        (fee.mode === "FREE" ? fee.amountMinor !== 0 : fee.amountMinor === 0)) invalid();
+        (fee.mode === "FIXED" ? fee.amountMinor === 0 : fee.amountMinor !== 0)) invalid();
     return { enabled: data.enabled, limitLocalTime: data.limitLocalTime,
       fee: { mode: fee.mode, amountMinor: fee.amountMinor, currency: "USD" } };
   }

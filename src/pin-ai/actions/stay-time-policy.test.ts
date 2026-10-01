@@ -16,11 +16,12 @@ function fixture(operation: StayTimeOperation = "LATE_CHECKOUT"): Input {
       ...scope, id: "stay-1", status: "ACTIVE", paymentState: "PAID", source: "DIRECT_BOOKING",
       externalProvider: null, currency: "USD", checkIn, checkOut: date("2026-10-02T15:00:00Z"),
       adjustedOperations: [],
+      hourlyPricingBasis: { nightlyAmountMinor: 50000, standardStayMinutes: 1200, nightDate: "2026-10-01" },
     },
     policy: {
       ...scope, version: "policy-v1", timezone: "America/Puerto_Rico",
       earlyCheckin: { enabled: true, limitLocalTime: "12:00", fee: { mode: "FREE", amountMinor: 0, currency: "USD" } },
-      lateCheckout: { enabled: true, limitLocalTime: "14:00", fee: { mode: "PER_HOUR", amountMinor: 2500, currency: "USD" } },
+      lateCheckout: { enabled: true, limitLocalTime: "14:00", fee: { mode: "PER_HOUR", amountMinor: 0, currency: "USD" } },
       cleaningStartOffsetMinutes: 30, cleaningDurationMinutes: 180,
     },
     evidence: {
@@ -67,10 +68,15 @@ test("fixed fee is charged once; hourly fee prorates minutes and rounds half up"
   const fixed: StayTimeFee = { mode: "FIXED", amountMinor: 3000, currency: "USD" };
   assert.equal(calculateStayTimeFee(fixed, 15), 3000);
   assert.equal(calculateStayTimeFee(fixed, 180), 3000);
-  const hourly: StayTimeFee = { mode: "PER_HOUR", amountMinor: 2500, currency: "USD" };
-  assert.equal(calculateStayTimeFee(hourly, 90), 3750);
-  assert.equal(calculateStayTimeFee(hourly, 1), 42);
-  assert.equal(calculateStayTimeFee({ ...hourly, amountMinor: 1 }, 30), 1);
+  const hourly: StayTimeFee = { mode: "PER_HOUR", amountMinor: 0, currency: "USD" };
+  const basis = { nightlyAmountMinor: 50000, standardStayMinutes: 1200, nightDate: "2026-10-01" };
+  assert.equal(calculateStayTimeFee(hourly, 90, basis), 3750);
+  assert.equal(calculateStayTimeFee(hourly, 1, basis), 42);
+  assert.equal(calculateStayTimeFee(hourly, 30, { ...basis, nightlyAmountMinor: 20 }), 1);
+  assert.equal(calculateStayTimeFee(hourly, 120, { ...basis, nightlyAmountMinor: 10000 }), 1000);
+  assert.equal(calculateStayTimeFee(hourly, 120, { ...basis, nightlyAmountMinor: 10000, standardStayMinutes: 1140 }), 1053);
+  assert.equal(calculateStayTimeFee(hourly, 120, { ...basis, nightlyAmountMinor: 0 }), 0);
+  assert.throws(() => calculateStayTimeFee(hourly, 60), /NIGHTLY_PRICING_BASIS_REQUIRED/);
 });
 
 for (const fee of [
@@ -85,9 +91,10 @@ for (const fee of [
 }
 
 test("overflow, sub-minor-unit prices and invalid duration fail closed", () => {
-  const fee: StayTimeFee = { mode: "PER_HOUR", amountMinor: Number.MAX_SAFE_INTEGER, currency: "USD" };
-  assert.throws(() => calculateStayTimeFee(fee, 120), /FEE_OVERFLOW/);
-  assert.throws(() => calculateStayTimeFee({ ...fee, amountMinor: 1 }, 1), /FEE_BELOW_MINOR_UNIT/);
+  const fee: StayTimeFee = { mode: "PER_HOUR", amountMinor: 0, currency: "USD" };
+  const basis = { nightlyAmountMinor: Number.MAX_SAFE_INTEGER, standardStayMinutes: 60, nightDate: "2026-10-01" };
+  assert.throws(() => calculateStayTimeFee(fee, 120, basis), /FEE_OVERFLOW/);
+  assert.throws(() => calculateStayTimeFee(fee, 1, { ...basis, nightlyAmountMinor: 1 }), /FEE_BELOW_MINOR_UNIT/);
   for (const minutes of [0, -1, 1.5, NaN, Infinity, 1501]) {
     assert.throws(() => calculateStayTimeFee(fee, minutes), /INVALID_ADDITIONAL_MINUTES/);
   }

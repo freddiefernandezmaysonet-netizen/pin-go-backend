@@ -3,6 +3,7 @@ import test from "node:test";
 import { Prisma, PrismaClient } from "@prisma/client";
 import { estimateStayTimeAdjustment, resolveStayTimeClock } from "./stay-time-estimate.service.js";
 import { defaultStayTimeSettings } from "../pin-ai/actions/stay-time-settings.js";
+import { prepareStayTimeQuote } from "./stay-time-quote.service.js";
 
 test("property-local clock resolution rejects DST gaps and folds", () => {
   assert.equal(resolveStayTimeClock(new Date("2026-10-01T19:00Z"), "12:30", "America/Puerto_Rico").toISOString(), "2026-10-01T16:30:00.000Z");
@@ -23,7 +24,7 @@ test("stay-time estimates use real scoped PostgreSQL evidence without writes", {
   const org = await db.organization.create({ data: { name: "Synthetic estimate tests" } });
   const settings = defaultStayTimeSettings();
   const enabled = { earlyCheckin: { ...settings.earlyCheckin, enabled: true },
-    lateCheckout: { ...settings.lateCheckout, enabled: true, fee: { mode: "PER_HOUR", amountMinor: 1001, currency: "USD" } } };
+    lateCheckout: { ...settings.lateCheckout, enabled: true, fee: { mode: "PER_HOUR", amountMinor: 0, currency: "USD" } } };
   const property = await db.property.create({ data: { organizationId: org.id, name: "Synthetic estimate property",
     timezone: "America/Puerto_Rico", checkInTime: "15:00", checkOutTime: "11:00",
     cleaningStartOffsetMinutes: 30, cleaningDurationMinutes: 180, stayTimeSettings: enabled } });
@@ -39,17 +40,44 @@ test("stay-time estimates use real scoped PostgreSQL evidence without writes", {
   const now = new Date("2026-10-01T12:00:00Z");
   const stay = await db.reservation.create({ data: { propertyId: property.id, guestName: "Synthetic guest",
     checkIn: new Date("2026-10-01T19:00Z"), checkOut: new Date("2026-10-03T15:00Z"),
-    status: "ACTIVE", paymentState: "PAID", source: "DIRECT_BOOKING", externalProvider: "PIN_GO_DIRECT", currency: "usd" } });
+    status: "ACTIVE", paymentState: "PAID", source: "DIRECT_BOOKING", externalProvider: "PIN_GO_DIRECT", currency: "usd",
+    guestToken: `synthetic-quote-${property.id}`, totalAmount: 150,
+    pricingBreakdown: { currency: "usd", totalAmount: 150, totalAmountCents: 15000,
+      nightlySubtotal: 100, nightlyRates: [{ date: "2026-10-01", rate: 40 }, { date: "2026-10-02", rate: 60 }], cleaningFee: 50, amenitiesTotal: 0, taxesTotal: 0 } } });
   const input = { organizationId: org.id, propertyId: property.id, reservationId: stay.id,
     operation: "LATE_CHECKOUT" as const, requestedLocalTime: "12:30" };
   const estimate = () => estimateStayTimeAdjustment(db, input, now);
   const conflictStay = async (checkIn: string, checkOut: string) => db.reservation.create({ data: {
     propertyId: property.id, guestName: "Synthetic conflict", checkIn: new Date(checkIn), checkOut: new Date(checkOut),
   } });
+  await t.test("financial quote authenticates guest, binds taxes/state and never writes a proposal", async () => {
+    const tax = await db.propertyTax.create({ data: { propertyId: property.id, name: "Synthetic configured tax", percentage: 9 } });
+    const quoteInput = { guestToken: stay.guestToken!, operation: "LATE_CHECKOUT" as const, requestedLocalTime: "12:30" };
+    const options = { now, platformFeePercent: "1.5" };
+    try {
+      const before = await db.reservation.findUniqueOrThrow({ where: { id: stay.id } });
+      const quote = await prepareStayTimeQuote(db, quoteInput, options);
+      assert.equal(quote.terms.pricing.additionalChargeMinor, 491);
+      assert.equal(quote.terms.pricing.proposedTotalMinor, 15491);
+      assert.equal(quote.confirmationAvailable, false);
+      assert.equal(quote.paymentReady, false);
+      assert.equal(quote.terms.expiresAt, "2026-10-01T12:01:00.000Z");
+      assert.equal((await prepareStayTimeQuote(db, quoteInput, options)).fingerprint, quote.fingerprint);
+      assert.notEqual((await prepareStayTimeQuote(db, quoteInput, { ...options, platformFeePercent: "2" })).fingerprint, quote.fingerprint);
+      await db.propertyTax.update({ where: { id: tax.id }, data: { percentage: 10 } });
+      assert.notEqual((await prepareStayTimeQuote(db, quoteInput, options)).fingerprint, quote.fingerprint);
+      await assert.rejects(prepareStayTimeQuote(db, { ...quoteInput, guestToken: "unknown-guest-token-12345" }, options), /NOT_FOUND/);
+      assert.deepEqual(await db.reservation.findUniqueOrThrow({ where: { id: stay.id } }), before);
+      assert.equal(await db.pinAIActionProposal.count({ where: { reservationId: stay.id } }), 0);
+      await db.reservation.update({ where: { id: stay.id }, data: { guestTokenExpiresAt: now } });
+      await assert.rejects(prepareStayTimeQuote(db, quoteInput, options), /NOT_FOUND/);
+      await db.reservation.update({ where: { id: stay.id }, data: { guestTokenExpiresAt: null } });
+    } finally { await db.propertyTax.delete({ where: { id: tax.id } }); }
+  });
   await t.test("exact minute fee, offset plus cleaning window, estimate only, no mutation", async () => {
     const before = await db.reservation.findUniqueOrThrow({ where: { id: stay.id } });
     const result = await estimate();
-    assert.equal(result.feeSubtotalMinor, 1502);
+    assert.equal(result.feeSubtotalMinor, 450);
     assert.equal(result.additionalMinutes, 90);
     assert.equal(result.requiredFreeUntil, "2026-10-03T20:00:00.000Z");
     assert.equal(result.checkIn, stay.checkIn.toISOString());

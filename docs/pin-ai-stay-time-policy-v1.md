@@ -4,9 +4,15 @@
 
 Each property configures early check-in and late checkout independently. Each
 service has an enabled switch, a local-time limit and a FREE, FIXED or PER_HOUR
-fee. Hourly fees in this implementation are prorated by actual elapsed minutes,
-rounded once half-up to the currency's minor unit. This rounding choice is an
-implementation decision; the host and guest UI must disclose it. A fixed fee is
+fee. PER_HOUR is now automatic, replacing the draft's manual hourly amount:
+first booked night for early check-in, last booked night for late checkout, from
+the persisted nightly rate snapshot (not today's calendar price, taxes or total
+reservation amount). Divide that night by the nominal local overnight duration:
+15:00→11:00 is 20 hours, 16:00→11:00 is 19 hours. Calculate the fee directly as
+nightly cents × additional elapsed minutes / standard minutes, rounding once
+half-up at the end. Do not round an intermediate hourly price. FREE and PER_HOUR
+store amountMinor=0; only FIXED accepts a manual amount. Missing/ambiguous nightly
+rates fail closed; an explicitly zero-priced night yields zero. A fixed fee is
 charged once per adjustment. Repeated adjustments of the same kind are deferred
 until incremental pricing is defined.
 
@@ -86,6 +92,20 @@ yet available. Its branch disables Vercel deployment; main's settings are retain
 Backend migration/API must precede the Dashboard rollout when authorized.
 
 ## Remaining integration work
+
+`prepareStayTimeQuote` is an internal read-only financial quote builder, not a
+confirmable proposal. It authenticates the guest token and reads the estimate,
+readiness, reservation pricing and active property tax percentages in the same
+repeatable-read snapshot. It retains the original pricing snapshot verbatim,
+adds taxes only on the additional time fee (same configured percentage-tax model
+as Direct Booking), and uses the existing incremental Connect fee calculator.
+No extra identity fee is added. The fingerprint binds reservation state, settings,
+nightly basis, exact times, readiness evidence, tax configuration and the financial
+split. Expiry is at most 60 seconds and bounded by token/stay/request timing.
+No proposal, hold, checkout or payment is created; confirmationAvailable remains
+false. Guest runtime continues to expose the pre-tax estimate until the full
+proposal/confirmation/payment/apply path is connected. Internal cleaner evidence
+identifiers are excluded from the guest tool response.
 
 The read-only `estimateStayTimeAdjustment` adapter now obtains the reservation,
 property settings, active reservations, host blocks, applied change history and
