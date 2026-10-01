@@ -12,6 +12,7 @@ on:
       - "src/services/stay-time-proposal*"
       - "src/services/stay-time-apply*"
       - "src/services/stay-time-payment-window*"
+      - "src/services/stay-time-checkout-preflight*"
       - "src/services/reservation.reconcile.service.ts"
       - "src/services/reservation-guest-access-window*"
       - "src/services/reservation-cleaning-window*"
@@ -61,6 +62,8 @@ jobs:
         run: node --import tsx --test src/services/cleaning-reconfirmation-renewal.db.test.ts
       - name: Confirmed quote and bounded payment deadlines
         run: node --import tsx --test src/services/stay-time-payment-window.test.ts
+      - name: Paid checkout preflight without payment side effects
+        run: node --import tsx --test src/services/stay-time-checkout-preflight.db.test.ts
       - name: Policy, real HTTP authorization, migration SQL and database concurrency
         # Independent DB suites share tables; keep their fixture writes separate.
         # Explicit Promise.all concurrency scenarios inside each suite are retained.

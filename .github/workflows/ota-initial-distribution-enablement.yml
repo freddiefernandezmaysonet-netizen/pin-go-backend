@@ -132,6 +132,7 @@ jobs:
               'src/services/stay-time-quote.service.test.ts',
               'src/services/stay-time-quote.service.ts',
               'src/services/stay-time-proposal.service.ts',
+              'src/services/stay-time-checkout-preflight.db.test.ts',
               'src/services/stay-time-payment-window.ts',
               'src/services/stay-time-payment-window.test.ts',
               'tsconfig.pin-ai-stay-time-policy.json',

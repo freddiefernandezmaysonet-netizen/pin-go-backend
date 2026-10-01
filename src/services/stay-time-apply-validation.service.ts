@@ -2,6 +2,8 @@ import type { Prisma, Reservation, ReservationModification } from "@prisma/clien
 import { buildPinAIActionProposalFingerprint, canonicalPinAIActionTerms } from "../pin-ai/actions/action-proposal.service.js";
 import { StayTimePolicyError } from "../pin-ai/actions/stay-time-policy.js";
 import { revalidateStayTimeTerms } from "./stay-time-proposal.service.js";
+import { prepareStayTimeQuoteInTransaction } from "./stay-time-quote.service.js";
+import { assertStayTimePaymentWindow } from "./stay-time-payment-window.js";
 
 function reject(code: string): never { throw new StayTimePolicyError(code); }
 function object(value: unknown): Record<string, unknown> {
@@ -22,9 +24,26 @@ export async function validateFreeStayTimeApply(tx: Prisma.TransactionClient, m:
       [m.amountDifference, m.additionalChargeAmount, m.additionalPlatformFeeAmount, m.additionalHostPayoutAmount].some(v => Number(v) !== 0) ||
       [m.stripeCheckoutSessionId, m.stripePaymentIntentId, m.stripeChargeId, m.stripeApplicationFeeId,
         m.stripeTransferId, m.stripePaymentStatus].some(Boolean)) reject("STAY_TIME_PAYMENT_APPLY_NOT_READY");
+  return validateStayTimeSnapshot(tx, m, r, now, false);
+}
+
+/** Internal preflight only. Does not create Checkout or authorize paid apply.
+ * The future payment adapter must call under its own scoped transaction and
+ * handle provider session persistence, payment evidence and failure recovery.
+ */
+export async function validatePaidStayTimeCheckout(tx: Prisma.TransactionClient, m: ReservationModification, r: Reservation, now: Date) {
+  if (m.status !== "AWAITING_PAYMENT" || m.financialAction !== "ADDITIONAL_PAYMENT_REQUIRED" ||
+      Number(m.additionalChargeAmount) <= 0 || !m.checkoutExpiresAt ||
+      [m.stripeCheckoutSessionId, m.stripePaymentIntentId, m.stripeChargeId, m.stripeApplicationFeeId,
+        m.stripeTransferId, m.stripePaymentStatus].some(Boolean)) reject("STAY_TIME_CHECKOUT_PREFLIGHT_NOT_ELIGIBLE");
+  return validateStayTimeSnapshot(tx, m, r, now, true);
+}
+
+async function validateStayTimeSnapshot(tx: Prisma.TransactionClient, m: ReservationModification, r: Reservation, now: Date, paidCheckout: boolean) {
   const consent = object(m.guestConfirmation);
   const terms = object(consent.quoteTerms);
-  if (m.status !== "APPLYING" || m.requestSource !== "PIN_AI_GUEST_SERVICES" || consent.source !== m.requestSource ||
+  if (m.status !== (paidCheckout ? "AWAITING_PAYMENT" : "APPLYING") || m.reservationId !== r.id ||
+      m.requestSource !== "PIN_AI_GUEST_SERVICES" || consent.source !== m.requestSource ||
       consent.confirmed !== true || typeof consent.actionProposalId !== "string" ||
       terms.version !== "stay_time_quote_v1" || consent.operation !== terms.operation || !r.guestToken) reject("STAY_TIME_CONFIRMED_PROPOSAL_REQUIRED");
   const proposal = await tx.pinAIActionProposal.findUnique({ where: { id: consent.actionProposalId } });
@@ -41,18 +60,40 @@ export async function validateFreeStayTimeApply(tx: Prisma.TransactionClient, m:
     actionType: proposal.actionType, language: proposal.language as "en" | "es", consentText: proposal.consentText,
     termsSnapshot: object(proposal.termsSnapshot) });
   if (fingerprint !== proposal.proposalFingerprint || fingerprint !== m.requestFingerprint ||
+      m.baseReservationUpdatedAt.getTime() !== proposal.baseReservationUpdatedAt.getTime() ||
       fingerprint !== consent.actionProposalFingerprint || m.clientRequestId !== `stay-time:${proposal.id}` ||
       canonicalPinAIActionTerms(terms) !== canonicalPinAIActionTerms(object(proposal.termsSnapshot))) reject("STAY_TIME_PROPOSAL_FINGERPRINT_MISMATCH");
   const pricing = object(terms.pricing);
   if (!Number.isSafeInteger(pricing.platformFeeBasisPoints) || Number(pricing.platformFeeBasisPoints) < 0 ||
       Number(pricing.platformFeeBasisPoints) > 10000) reject("INVALID_STAY_TIME_TERMS");
-  // Zero-cost terms have no platform fee. Recompute the entire quote, including
-  // all active taxes/readiness/settings, excluding only this exact applying hold.
-  const fresh = await revalidateStayTimeTerms({ db: tx, guestToken: r.guestToken, termsSnapshot: terms,
-    expiresAt: proposal.expiresAt, now }, (Number(pricing.platformFeeBasisPoints) / 100).toFixed(2), m.id);
+  const platformFeePercent = (Number(pricing.platformFeeBasisPoints) / 100).toFixed(2);
+  let fresh;
+  if (paidCheckout) {
+    if ((terms.operation !== "EARLY_CHECKIN" && terms.operation !== "LATE_CHECKOUT") ||
+        typeof terms.requestedLocalTime !== "string" || typeof terms.createdAt !== "string" ||
+        terms.expiresAt !== proposal.expiresAt.toISOString()) reject("INVALID_STAY_TIME_TERMS");
+    assertStayTimePaymentWindow({ operation: terms.operation, proposedCheckIn: m.proposedCheckIn, currentCheckOut: m.currentCheckOut,
+      guestTokenExpiresAt: r.guestTokenExpiresAt, quoteCreatedAt: new Date(terms.createdAt), quoteExpiresAt: proposal.expiresAt,
+      confirmedAt: proposal.confirmedAt, stagedAt: new Date(stagedAt), checkoutExpiresAt: m.checkoutExpiresAt!, now, phase: "CHECKOUT_CREATION" });
+    // Keep fresh operational checks at NOW, not at the earlier staging time.
+    fresh = await prepareStayTimeQuoteInTransaction(tx, { guestToken: r.guestToken,
+      operation: terms.operation, requestedLocalTime: terms.requestedLocalTime }, { now, platformFeePercent, ownModificationId: m.id });
+    const commercial = (value: Record<string, unknown>) => {
+      const { createdAt: _created, expiresAt: _expiry, ...bound } = value;
+      return canonicalPinAIActionTerms(bound);
+    };
+    if (commercial(terms) !== commercial(fresh.terms)) reject("STAY_TIME_QUOTE_CHANGED");
+  } else {
+    fresh = await revalidateStayTimeTerms({ db: tx, guestToken: r.guestToken, termsSnapshot: terms,
+      expiresAt: proposal.expiresAt, now }, platformFeePercent, m.id);
+  }
   const p = fresh.terms.pricing;
   const ids = (values: string[]) => JSON.stringify([...values].sort());
-  if (p.additionalChargeMinor !== 0 || m.currentCheckIn.toISOString() !== fresh.terms.currentCheckIn ||
+  if ((!paidCheckout && p.additionalChargeMinor !== 0) || (paidCheckout && p.additionalChargeMinor <= 0) ||
+      Number(m.amountDifference) !== p.additionalChargeMinor / 100 || Number(m.additionalChargeAmount) !== p.additionalChargeMinor / 100 ||
+      Number(m.additionalPlatformFeeAmount) !== p.additionalPlatformFeeMinor / 100 ||
+      Number(m.additionalHostPayoutAmount) !== p.additionalHostPayoutMinor / 100 ||
+      m.currentCheckIn.toISOString() !== fresh.terms.currentCheckIn ||
       m.currentCheckOut.toISOString() !== fresh.terms.currentCheckOut || m.proposedCheckIn.toISOString() !== fresh.terms.proposedCheckIn ||
       m.proposedCheckOut.toISOString() !== fresh.terms.proposedCheckOut || m.currency.toUpperCase() !== p.currency ||
       Number(m.currentTotalAmount) !== p.currentTotalMinor / 100 || Number(m.proposedTotalAmount) !== p.proposedTotalMinor / 100 ||

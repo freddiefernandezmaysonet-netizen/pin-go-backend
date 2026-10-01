@@ -95,9 +95,12 @@ export async function estimateStayTimeAdjustmentInTransaction(
       { status: "PAYMENT_PROCESSING" as const }, { status: "APPLYING" as const },
       { status: "AWAITING_PAYMENT" as const, checkoutExpiresAt: { gt: now } },
     ] };
-    // Only the applying modification of this exact authenticated stay may be excluded.
+    // Only this authenticated stay's applying change or unexpired paid staging
+    // may be excluded by an internal revalidator. Guest tools never supply an ID.
     if (ownModificationId && !await tx.reservationModification.findFirst({ where: {
-      id: ownModificationId, reservationId: row.id, status: "APPLYING", requestSource: "PIN_AI_GUEST_SERVICES",
+      id: ownModificationId, reservationId: row.id, requestSource: "PIN_AI_GUEST_SERVICES",
+      OR: [{ status: "APPLYING" }, { status: "AWAITING_PAYMENT", financialAction: "ADDITIONAL_PAYMENT_REQUIRED",
+        additionalChargeAmount: { gt: 0 }, checkoutExpiresAt: { gt: now } }],
     }, select: { id: true } })) reject("STAY_TIME_MODIFICATION_SCOPE_MISMATCH");
     const excludeOwn = ownModificationId ? { id: { not: ownModificationId } } : {};
     // A second operation on this same stay is unsafe even if its hold doesn't
