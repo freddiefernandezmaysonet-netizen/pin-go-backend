@@ -18,28 +18,22 @@ const prisma = new PrismaClient();
 
 export const cleaningConfirmRouter = Router();
 
-function sendCancelledCleaningRequestResponse(
-  res: any
-) {
-  return res.status(410).send(
-    "This cleaning request is no longer active because the reservation was cancelled. No cleaning or access action is required."
-  );
+function sendCancelledCleaningRequestResponse(res: any, language: StaffLanguage = "en") {
+  return res.status(410).send(language === "es"
+    ? "Esta solicitud de limpieza ya no esta activa porque la reservacion fue cancelada. No se requiere ninguna accion de limpieza o acceso."
+    : "This cleaning request is no longer active because the reservation was cancelled. No cleaning or access action is required.");
 }
 
-function sendCleaningNfcDisabledResponse(
-  res: any
-) {
-  return res.status(410).send(
-    "This cleaning access request is no longer active because Cleaning NFC is disabled for this property. No confirmation or access action is required."
-  );
+function sendCleaningNfcDisabledResponse(res: any, language: StaffLanguage = "en") {
+  return res.status(410).send(language === "es"
+    ? "Esta solicitud de acceso para limpieza ya no esta activa porque Cleaning NFC esta deshabilitado para esta propiedad. No se requiere confirmacion ni accion de acceso."
+    : "This cleaning access request is no longer active because Cleaning NFC is disabled for this property. No confirmation or access action is required.");
 }
 
-function sendExpiredCleaningRequestResponse(
-  res: any
-) {
-  return res.status(410).send(
-    "This cleaning request is no longer active because Pin&Go assigned it to another cleaner. No action is required."
-  );
+function sendExpiredCleaningRequestResponse(res: any, language: StaffLanguage = "en") {
+  return res.status(410).send(language === "es"
+    ? "Esta solicitud de limpieza ya no esta activa porque Pin&Go la asigno a otro personal de limpieza. No se requiere ninguna accion."
+    : "This cleaning request is no longer active because Pin&Go assigned it to another cleaner. No action is required.");
 }
 
 async function loadConfirmationData(token: string) {
@@ -265,7 +259,8 @@ cleaningConfirmRouter.get("/cleaning/confirm/:token", async (req, res) => {
       ReservationStatus.CANCELLED
     ) {
       return sendCancelledCleaningRequestResponse(
-        res
+        res,
+        language
       );
     }
 
@@ -284,12 +279,13 @@ cleaningConfirmRouter.get("/cleaning/confirm/:token", async (req, res) => {
   );
 
   return sendCleaningNfcDisabledResponse(
-    res
+    res,
+    language
   );
 }
 
     if (confirmation.status === "EXPIRED") {
-      return sendExpiredCleaningRequestResponse(res);
+      return sendExpiredCleaningRequestResponse(res, language);
     }
 
     if (confirmation.status === "CONFIRMED") {
@@ -389,12 +385,13 @@ cleaningConfirmRouter.post(
   );
 
   return sendCleaningNfcDisabledResponse(
-    res
+    res,
+    language
   );
 }
 
       if (confirmation.status === "EXPIRED") {
-        return sendExpiredCleaningRequestResponse(res);
+        return sendExpiredCleaningRequestResponse(res, language);
       }
 
       if (confirmation.status === "CONFIRMED") {
@@ -423,7 +420,7 @@ cleaningConfirmRouter.post(
           });
 
         if (currentConfirmation?.status === "EXPIRED") {
-          return sendExpiredCleaningRequestResponse(res);
+          return sendExpiredCleaningRequestResponse(res, language);
         }
 
         if (currentConfirmation?.status === "CONFIRMED") {
@@ -431,7 +428,7 @@ cleaningConfirmRouter.post(
         }
 
         if (currentConfirmation?.status === "DECLINED") {
-          return res.status(409).send("This request was already declined.");
+          return res.status(409).send(language === "es" ? "Esta solicitud ya fue rechazada." : "This request was already declined.");
         }
 
         return res.status(409).send(
@@ -464,7 +461,8 @@ if (
   );
 
   return sendCleaningNfcDisabledResponse(
-    res
+    res,
+    language
   );
 }
 
@@ -511,10 +509,10 @@ cleaningConfirmRouter.post(
       const { confirmation, reservation, staffMember } = data;
       const language = resolveStaffLanguage(staffMember.preferredLanguage);
       if (reservation.status === ReservationStatus.CANCELLED) {
-        return sendCancelledCleaningRequestResponse(res);
+        return sendCancelledCleaningRequestResponse(res, language);
       }
       if (reservation.property?.cleaningNfcEnabled !== true) {
-        return sendCleaningNfcDisabledResponse(res);
+        return sendCleaningNfcDisabledResponse(res, language);
       }
       if (confirmation.status !== "CONFIRMED") {
         return res.status(409).send("Confirm cleaning availability before accepting the timing commitment.");
@@ -560,10 +558,10 @@ cleaningConfirmRouter.post(
       const { confirmation, reservation, staffMember } = data;
       const language = resolveStaffLanguage(staffMember.preferredLanguage);
       if (reservation.status === ReservationStatus.CANCELLED) {
-        return sendCancelledCleaningRequestResponse(res);
+        return sendCancelledCleaningRequestResponse(res, language);
       }
       if (reservation.property?.cleaningNfcEnabled !== true) {
-        return sendCleaningNfcDisabledResponse(res);
+        return sendCleaningNfcDisabledResponse(res, language);
       }
       if (confirmation.status !== "CONFIRMED") {
         return res.status(409).send("Confirm cleaning availability before recording the cleaning start.");
@@ -614,10 +612,10 @@ cleaningConfirmRouter.post(
       const { confirmation, reservation, staffMember } = data;
       const language = resolveStaffLanguage(staffMember.preferredLanguage);
       if (reservation.status === ReservationStatus.CANCELLED) {
-        return sendCancelledCleaningRequestResponse(res);
+        return sendCancelledCleaningRequestResponse(res, language);
       }
       if (reservation.property?.cleaningNfcEnabled !== true) {
-        return sendCleaningNfcDisabledResponse(res);
+        return sendCleaningNfcDisabledResponse(res, language);
       }
       if (confirmation.status !== "CONFIRMED") {
         return res.status(409).send("Confirm cleaning availability before recording completion.");
@@ -670,10 +668,16 @@ cleaningConfirmRouter.post(
           .send("Invalid or expired cleaning confirmation link.");
       }
 
+      const declineStaff = await prisma.staffMember.findUnique({
+        where: { id: confirmation.staffMemberId },
+        select: { preferredLanguage: true },
+      });
+      const language = resolveStaffLanguage(declineStaff?.preferredLanguage);
+
       if (confirmation.status === "CONFIRMED") {
         return res
           .status(409)
-          .send("This request was already confirmed.");
+          .send(language === "es" ? "Esta solicitud ya fue confirmada." : "This request was already confirmed.");
       }
 
      const reservation =
@@ -688,7 +692,7 @@ cleaningConfirmRouter.post(
             if (!reservation) {
         return res
           .status(404)
-          .send("Reservation not found.");
+          .send(language === "es" ? "No se encontro la reservacion." : "Reservation not found.");
       }
 
       if (
@@ -716,12 +720,13 @@ cleaningConfirmRouter.post(
   );
 
   return sendCleaningNfcDisabledResponse(
-    res
+    res,
+    language
   );
 }
 
       if (confirmation.status === "EXPIRED") {
-        return sendExpiredCleaningRequestResponse(res);
+        return sendExpiredCleaningRequestResponse(res, language);
       }
 
       const declineTransition =
@@ -742,7 +747,7 @@ cleaningConfirmRouter.post(
           });
 
         if (currentConfirmation?.status === "EXPIRED") {
-          return sendExpiredCleaningRequestResponse(res);
+          return sendExpiredCleaningRequestResponse(res, language);
         }
 
         if (currentConfirmation?.status === "CONFIRMED") {
@@ -752,11 +757,11 @@ cleaningConfirmRouter.post(
         }
 
         if (currentConfirmation?.status === "DECLINED") {
-          return res.send("This cleaning request was already declined.");
+          return res.send(language === "es" ? "Esta solicitud de limpieza ya fue rechazada." : "This cleaning request was already declined.");
         }
 
         return res.status(409).send(
-          "This cleaning request could not be declined because it is no longer actionable."
+          language === "es" ? "Esta solicitud de limpieza no se pudo rechazar porque ya no requiere una accion." : "This cleaning request could not be declined because it is no longer actionable."
         );
       }
 
@@ -794,7 +799,7 @@ cleaningConfirmRouter.post(
         );
 
         return res.send(
-          "Cleaning declined. No backup cleaner is currently available."
+          language === "es" ? "Limpieza rechazada. No hay personal de limpieza de respaldo disponible en este momento." : "Cleaning declined. No backup cleaner is currently available."
         );
       }
 
@@ -829,7 +834,7 @@ cleaningConfirmRouter.post(
       );
 
       return res.send(
-        "Cleaning declined. Pin&Go will notify the next available backup cleaner."
+        language === "es" ? "Limpieza rechazada. Pin&Go notificara al proximo personal de limpieza de respaldo disponible." : "Cleaning declined. Pin&Go will notify the next available backup cleaner."
       );
     } catch (e: any) {
       console.error(
