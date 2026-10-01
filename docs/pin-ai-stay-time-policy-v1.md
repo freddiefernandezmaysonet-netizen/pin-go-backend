@@ -61,21 +61,43 @@ Fees use integer minor units and BigInt intermediate arithmetic. The result is a
 subtotal, never a final payment amount: taxes and platform/host split still belong
 to the canonical pricing/payment layer.
 
+## Property settings implemented
+
+The additive migration adds nullable `Property.stayTimeSettings` JSON and
+`stayTimeSettingsRevision` (default zero). An unconfigured property reads as both
+services disabled without writing a row. This is preference storage only;
+`executionAvailable` remains false in every response.
+
+`GET` and `PUT /api/dashboard/properties/:propertyId/stay-time-settings` use
+session-bound authentication and the existing ORG_ADMIN/ADMIN/PLATFORM_ADMIN
+roles, always scoped to the actor's own organization and an active property.
+PUT requires a complete strict settings object plus `expectedRevision`. The
+atomic update checks organization, status, revision, standard hours and timezone,
+then increments the revision. Conflicts return 409 instead of overwriting another
+session's changes. Enabled limits must extend the standard hours, and enabling
+requires a valid property timezone. Settings cannot update reservation data.
+
+The initial currency is USD, matching the existing Direct Booking pricing engine.
+The Dashboard companion provides English/Spanish labels, fixed/hourly/free prices,
+exact decimal-to-cent conversion, local-time limits, independent toggles, and
+explicit reload after a conflict. The panel says automatic guest requests are not
+yet available. Its branch disables Vercel deployment; main's settings are retained.
+Backend migration/API must precede the Dashboard rollout when authorized.
+
 ## Remaining integration work
 
-1. Add property persistence, versioned policy updates, authorized host API and
-   English/Spanish settings UI. Default both services to disabled.
-2. Build the canonical arrival-readiness adapter and complete availability queries
+1. Build the canonical arrival-readiness adapter and complete availability queries
    (including pending holds) without confusing the departing and arriving stay.
-3. Add distinct runtime/proposal operations. Bind policy version, exact times,
+2. Add distinct runtime/proposal operations. Bind policy version, exact times,
    readiness evidence, final fee/tax/split, scope and consent to the proposal.
-4. Recheck policy and availability under concurrency control at confirm/apply;
+3. Recheck policy and availability under concurrency control at confirm/apply;
    retain guest confirmation, payment idempotency and recovery after paid failure.
-5. Add durable reconciliation for guest passcode/NFC timing and cleaner schedule,
+4. Add durable reconciliation for guest passcode/NFC timing and cleaner schedule,
    with worker retry and operational truth. Date persistence alone cannot certify
    physical access synchronization. Preserve staff language preferences.
-6. Run connected database, UI, payment and access certification before activation.
+5. Run connected database, UI, payment and access certification before activation.
 
-No schema migration, production activation, live provider call or change to the
-existing eligibility tools is part of this foundation. The two audited live
+The additive migration is versioned for isolated CI; no persistent Pin&Go database
+has been migrated. No production activation, live provider call or change to the
+existing eligibility tools is part of this work. The two audited live
 eligibility limitations therefore remain open until the adapter integration.

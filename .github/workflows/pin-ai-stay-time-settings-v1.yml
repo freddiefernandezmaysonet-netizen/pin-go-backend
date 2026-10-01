@@ -1,0 +1,43 @@
+name: Pin AI Property Stay Time Settings V1
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - "src/pin-ai/actions/stay-time-*"
+      - "src/services/property-stay-time-settings*"
+      - "src/routes/dashboard.stay-time-settings*"
+      - "prisma/**"
+      - "src/server.ts"
+      - "tsconfig.pin-ai-stay-time-settings.json"
+      - ".github/workflows/pin-ai-stay-time-settings-v1.yml"
+permissions:
+  contents: read
+jobs:
+  settings:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: pingo_stay_time_test
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U postgres -d pingo_stay_time_test"
+          --health-interval 5s --health-timeout 5s --health-retries 10
+    env:
+      DATABASE_URL: postgresql://postgres:postgres@127.0.0.1:5432/pingo_stay_time_test
+      STAY_TIME_TEST_DATABASE_URL: postgresql://postgres:postgres@127.0.0.1:5432/pingo_stay_time_test
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+      - run: npm ci --ignore-scripts --no-audit --no-fund
+      - run: npx prisma generate && npx prisma validate && npx prisma db push --skip-generate
+      - run: npx tsc -p tsconfig.pin-ai-stay-time-settings.json --noEmit false --outDir /tmp/stay-time-settings-build
+      - name: Policy, real HTTP authorization, migration SQL and database concurrency
+        run: node --import tsx --test src/pin-ai/actions/stay-time-policy.test.ts src/routes/dashboard.stay-time-settings.routes.test.ts src/services/property-stay-time-settings.db.test.ts

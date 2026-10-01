@@ -277,6 +277,8 @@ model Property {
   smartAutomationEnabled     Boolean                     @default(false)
   checkInTime                String?                     @db.VarChar(5)
   checkOutTime               String?                     @db.VarChar(5)
+  stayTimeSettings           Json?
+  stayTimeSettingsRevision   Int                         @default(0)
   automationExecutionLogs    AutomationExecutionLog[]
   automationRules            AutomationRule[]
   deviceHealths              DeviceHealth[]

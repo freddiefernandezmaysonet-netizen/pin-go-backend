@@ -1,0 +1,13 @@
+{
+  "compilerOptions": {
+    "noEmit": true, "module": "preserve", "moduleResolution": "bundler",
+    "target": "es2022", "strict": true, "skipLibCheck": true, "types": ["node"]
+  },
+  "include": [
+    "src/pin-ai/actions/stay-time-settings.ts",
+    "src/services/property-stay-time-settings.service.ts",
+    "src/services/property-stay-time-settings.db.test.ts",
+    "src/routes/dashboard.stay-time-settings.routes.ts",
+    "src/routes/dashboard.stay-time-settings.routes.test.ts"
+  ]
+}
