@@ -5,7 +5,7 @@ import {
   resolveGuestLanguage,
   type GuestLanguage,
 } from "./guest-language.service";
-import { getStaffIntlLocale, resolveStaffLanguage, type StaffLanguage } from "./staff-language.service.js";
+import { resolveStaffLanguage, type StaffLanguage } from "./staff-language.service.js";
 
 type SmsSendResult = {
   ok: boolean;
