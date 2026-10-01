@@ -1,0 +1,31 @@
+name: Pin AI Early Check-in and Late Checkout Policy V1
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - "src/pin-ai/actions/stay-time-policy*"
+      - "tsconfig.pin-ai-stay-time-policy.json"
+      - ".github/workflows/pin-ai-stay-time-policy-v1.yml"
+      - "package.json"
+      - "package-lock.json"
+
+permissions:
+  contents: read
+
+jobs:
+  policy:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+      - name: Install locked dependencies
+        run: npm ci --ignore-scripts --no-audit --no-fund
+      - name: Compile policy and tests
+        run: npx tsc -p tsconfig.pin-ai-stay-time-policy.json --noEmit false --outDir /tmp/stay-time-policy-build
+      - name: Test scheduling boundaries and fee calculation
+        run: node --import tsx --test src/pin-ai/actions/stay-time-policy.test.ts
