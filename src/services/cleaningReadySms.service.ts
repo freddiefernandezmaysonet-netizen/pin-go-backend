@@ -1,6 +1,7 @@
 import { PrismaClient } from "@prisma/client";
 import { sendSms } from "../integrations/twilio/twilio.client";
 import { buildCleaningReadySmsBody } from "./cleaning-ready-sms-body.service";
+import { getStaffIntlLocale, resolveStaffLanguage } from "./staff-language.service.js";
 
 export async function sendCleaningReadySms(
   prisma: PrismaClient,
@@ -46,6 +47,7 @@ export async function sendCleaningReadySms(
           select: {
             fullName: true,
             phoneE164: true,
+            preferredLanguage: true,
           },
         },
       },
@@ -59,8 +61,9 @@ export async function sendCleaningReadySms(
     const roomName = assignment.reservation?.roomName ?? "N/A";
 
     const timezone = assignment.reservation?.property?.timezone ?? "UTC";
+    const language = resolveStaffLanguage(assignment.staffMember.preferredLanguage);
 
-const start = new Intl.DateTimeFormat("en-US", {
+const start = new Intl.DateTimeFormat(getStaffIntlLocale(language), {
   timeZone: timezone,
   year: "numeric",
   month: "2-digit",
@@ -70,7 +73,7 @@ const start = new Intl.DateTimeFormat("en-US", {
   hour12: true,
 }).format(new Date(assignment.startsAt));
 
-const end = new Intl.DateTimeFormat("en-US", {
+const end = new Intl.DateTimeFormat(getStaffIntlLocale(language), {
   timeZone: timezone,
   year: "numeric",
   month: "2-digit",
@@ -85,6 +88,7 @@ const end = new Intl.DateTimeFormat("en-US", {
       roomName,
       start,
       end,
+      language,
     });
 
     const sent = await sendSms(assignment.staffMember.phoneE164, body);
