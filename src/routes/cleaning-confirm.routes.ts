@@ -252,6 +252,7 @@ cleaningConfirmRouter.get("/cleaning/confirm/:token", async (req, res) => {
     }
 
     const { confirmation, reservation, staffMember, invalidData } = data;
+    const language = resolveStaffLanguage(staffMember?.preferredLanguage);
 
        if (invalidData || !reservation || !staffMember) {
       return res.status(404).send(
@@ -316,7 +317,7 @@ cleaningConfirmRouter.get("/cleaning/confirm/:token", async (req, res) => {
   }
 
   const prepared = await prepareCleaningTimingConsent({ confirmation, reservation });
-  return res.send(renderTimingConsent(token, prepared));
+  return res.send(renderTimingConsent(token, prepared, language));
 }
     if (confirmation.status === "DECLINED") {
       return res.send("This cleaning request was already declined.");
@@ -325,17 +326,18 @@ cleaningConfirmRouter.get("/cleaning/confirm/:token", async (req, res) => {
     const propertyName = reservation.property?.name ?? "Property";
     const staffName = staffMember.fullName ?? "Cleaner";
 
+    const es = language === "es";
     return res.send(cleanerPage(`
-      <h2>Pin&amp;Go Cleaning Request</h2>
-      <p><b>Cleaner:</b> ${staffName}</p>
-      <p><b>Property:</b> ${propertyName}</p>
+      <h2>${es ? "Solicitud de limpieza Pin&amp;Go" : "Pin&amp;Go Cleaning Request"}</h2>
+      <p><b>${es ? "Personal de limpieza" : "Cleaner"}:</b> ${staffName}</p>
+      <p><b>${es ? "Propiedad" : "Property"}:</b> ${propertyName}</p>
       <form method="POST" action="/cleaning/confirm/${token}/confirm">
-        <button class="cleaner-action">Confirm availability</button>
+        <button class="cleaner-action">${es ? "Confirmar disponibilidad" : "Confirm availability"}</button>
       </form>
       <form method="POST" action="/cleaning/confirm/${token}/decline">
-        <button class="cleaner-action cleaner-action-secondary">I am not available</button>
+        <button class="cleaner-action cleaner-action-secondary">${es ? "No estoy disponible" : "I am not available"}</button>
       </form>
-    `));
+    `, language));
   } catch (e: any) {
     return res.status(500).send(e?.message ?? "Failed to load confirmation.");
   }
@@ -354,6 +356,8 @@ cleaningConfirmRouter.post(
       }
 
       const { confirmation, reservation, staffMember, invalidData } = data;
+      const language = resolveStaffLanguage(staffMember?.preferredLanguage);
+    const language = resolveStaffLanguage(staffMember?.preferredLanguage);
 
           if (invalidData || !reservation || !staffMember) {
         return res.status(404).send(
@@ -485,7 +489,7 @@ await runCompleteFlowAuditAfterCleaningConfirmation(
 );
 
 const prepared = await prepareCleaningTimingConsent({ confirmation, reservation });
-return res.send(renderTimingConsent(token, prepared));
+return res.send(renderTimingConsent(token, prepared, language));
      
     } catch (e: any) {
       console.error("[CLEANING_CONFIRM_CONFIRM_ERROR]", e);
@@ -505,7 +509,8 @@ cleaningConfirmRouter.post(
       if (!data || data.invalidData || !data.reservation || !data.staffMember) {
         return res.status(404).send("Cleaning confirmation data is incomplete.");
       }
-      const { confirmation, reservation } = data;
+      const { confirmation, reservation, staffMember } = data;
+      const language = resolveStaffLanguage(staffMember.preferredLanguage);
       if (reservation.status === ReservationStatus.CANCELLED) {
         return sendCancelledCleaningRequestResponse(res);
       }
@@ -525,12 +530,17 @@ cleaningConfirmRouter.post(
         staffMemberId: confirmation.staffMemberId,
         confirmationId: confirmation.id,
       });
-      return res.send(cleanerPage(`\n          <h2>Cleaning timing commitment accepted</h2>
-          <p><b>Scheduled start:</b> ${formatPropertyLocal(prepared.terms.scheduledStartAt, prepared.timeZone)}</p>
-          <p><b>Committed completion:</b> ${formatPropertyLocal(prepared.terms.scheduledCompletionAt, prepared.timeZone)}</p>
-          <p>Your acceptance was recorded at ${formatPropertyLocal(accepted.timingConsentAcceptedAt!, prepared.timeZone)}.</p>
+      const es = language === "es";
+      return res.send(cleanerPage(`
+          <h2>${es ? "Compromiso de horario de limpieza aceptado" : "Cleaning timing commitment accepted"}</h2>
+          <p><b>${es ? "Inicio programado" : "Scheduled start"}:</b> ${formatPropertyLocal(prepared.terms.scheduledStartAt, prepared.timeZone, language)}</p>
+          <p><b>${es ? "Finalizacion comprometida" : "Committed completion"}:</b> ${formatPropertyLocal(prepared.terms.scheduledCompletionAt, prepared.timeZone, language)}</p>
+          <p>${es ? "Tu aceptacion fue registrada a las" : "Your acceptance was recorded at"} ${formatPropertyLocal(accepted.timingConsentAcceptedAt!, prepared.timeZone, language)}.</p>
           <form method="POST" action="/cleaning/confirm/${token}/start">
-            <button class="cleaner-action">I started cleaning</button>\n          </form>\n          <p class="cleaner-note">This button records your declaration of starting the cleaning. It does not change the committed completion time or NFC access window.</p>\n      `));
+            <button class="cleaner-action">${es ? "Comence la limpieza" : "I started cleaning"}</button>
+          </form>
+          <p class="cleaner-note">${es ? "Este boton registra tu declaracion de inicio. No cambia la hora comprometida de finalizacion ni la ventana de acceso NFC." : "This button records your declaration of starting the cleaning. It does not change the committed completion time or NFC access window."}</p>
+      `, language));
     } catch (e: any) {
       console.error("[CLEANING_TIMING_CONSENT_ERROR]", e);
       return res.status(409).send(e?.message ?? "Failed to accept cleaning timing commitment.");
@@ -548,7 +558,8 @@ cleaningConfirmRouter.post(
       if (!data || data.invalidData || !data.reservation || !data.staffMember) {
         return res.status(404).send("Cleaning confirmation data is incomplete.");
       }
-      const { confirmation, reservation } = data;
+      const { confirmation, reservation, staffMember } = data;
+      const language = resolveStaffLanguage(staffMember.preferredLanguage);
       if (reservation.status === ReservationStatus.CANCELLED) {
         return sendCancelledCleaningRequestResponse(res);
       }
@@ -574,11 +585,16 @@ cleaningConfirmRouter.post(
         startConfirmationGraceMinutes: prepared.work.startConfirmationGraceMinutes,
         followupGraceMinutes: prepared.work.followupGraceMinutes,
       });
-      return res.send(cleanerPage(`\n          <h2>Cleaning start recorded</h2>
-          <p>Start confirmed at ${formatPropertyLocal(started.startConfirmedAt!, prepared.timeZone)}.</p>
-          <p><b>Committed completion remains:</b> ${formatPropertyLocal(terms.scheduledCompletionAt, prepared.timeZone)}</p>
+      const es = language === "es";
+      return res.send(cleanerPage(`
+          <h2>${es ? "Inicio de limpieza registrado" : "Cleaning start recorded"}</h2>
+          <p>${es ? "Inicio confirmado a las" : "Start confirmed at"} ${formatPropertyLocal(started.startConfirmedAt!, prepared.timeZone, language)}.</p>
+          <p><b>${es ? "La finalizacion comprometida permanece" : "Committed completion remains"}:</b> ${formatPropertyLocal(terms.scheduledCompletionAt, prepared.timeZone, language)}</p>
           <form method="POST" action="/cleaning/confirm/${token}/complete">
-            <button class="cleaner-action">I finished cleaning</button>\n          </form>\n          <p class="cleaner-note">This records your completion declaration. It does not independently certify an inspection or change NFC access.</p>\n      `));
+            <button class="cleaner-action">${es ? "Termine la limpieza" : "I finished cleaning"}</button>
+          </form>
+          <p class="cleaner-note">${es ? "Esto registra tu declaracion de finalizacion. No certifica de forma independiente una inspeccion ni cambia el acceso NFC." : "This records your completion declaration. It does not independently certify an inspection or change NFC access."}</p>
+      `, language));
     } catch (e: any) {
       console.error("[CLEANING_START_CONFIRM_ERROR]", e);
       return res.status(409).send(e?.message ?? "Failed to record cleaning start.");
@@ -596,7 +612,8 @@ cleaningConfirmRouter.post(
       if (!data || data.invalidData || !data.reservation || !data.staffMember) {
         return res.status(404).send("Cleaning confirmation data is incomplete.");
       }
-      const { confirmation, reservation } = data;
+      const { confirmation, reservation, staffMember } = data;
+      const language = resolveStaffLanguage(staffMember.preferredLanguage);
       if (reservation.status === ReservationStatus.CANCELLED) {
         return sendCancelledCleaningRequestResponse(res);
       }
@@ -626,8 +643,9 @@ cleaningConfirmRouter.post(
         data: { status: "OBSOLETE", lastError: "CLEANER_COMPLETION_CONFIRMED" },
       });
       return res.send(renderCleaningCompletedPage(
-        formatPropertyLocal(completed.completionConfirmedAt!, prepared.timeZone),
+        completed.completionConfirmedAt!,
         prepared,
+        language,
       ));
     } catch (e: any) {
       console.error("[CLEANING_COMPLETION_CONFIRM_ERROR]", e);
