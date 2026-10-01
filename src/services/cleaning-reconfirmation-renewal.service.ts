@@ -42,22 +42,32 @@ export async function renewCleaningConfirmation(
             reservation.property.cleaningDurationMinutes !== input.cleaningDurationMinutes) {
           throw new Error("CLEANING_RENEWAL_RESERVATION_CHANGED");
         }
+        const confirmations = await tx.cleaningConfirmation.findMany({ where: {
+          reservationId: input.reservationId, propertyId: input.propertyId, status: { in: ["PENDING", "CONFIRMED"] },
+        }, take: 2 });
         if ((reservation.lastReconciledAt?.getTime() ?? null) !== (input.expectedLastReconciledAt?.getTime() ?? null)) {
           // A concurrent successful reconciler already committed this exact window.
           if (reservation.lastReconciledCheckIn?.getTime() === input.checkIn.getTime() &&
               reservation.lastReconciledCheckOut?.getTime() === input.checkOut.getTime()) {
-            return { replayed: true, confirmationId: null };
+            const expired = input.previousConfirmationId ? await tx.cleaningConfirmation.findFirst({ where: {
+              id: input.previousConfirmationId, reservationId: input.reservationId, propertyId: input.propertyId,
+              staffMemberId: input.staffMemberId, status: "EXPIRED",
+            } }) : true;
+            if (expired && confirmations.length === 1 && confirmations[0].id !== input.previousConfirmationId &&
+                confirmations[0].staffMemberId === input.staffMemberId) {
+              return { replayed: true, confirmationId: confirmations[0].id };
+            }
+            // A concurrent no-op snapshot alone is not proof of cleaning renewal.
+            // Continue only through the exact old-confirmation checks below.
+          } else {
+            throw new Error("CLEANING_RENEWAL_STALE_RECONCILIATION");
           }
-          throw new Error("CLEANING_RENEWAL_STALE_RECONCILIATION");
         }
         const staff = await tx.propertyStaff.findFirst({ where: {
           propertyId: input.propertyId, staffMemberId: input.staffMemberId, isActive: true,
           staffMember: { organizationId: input.organizationId, isActive: true, phoneE164: { not: null } },
         }, include: { staffMember: { select: { phoneE164: true } } } });
         if (!staff?.staffMember.phoneE164?.trim()) throw new Error("CLEANING_RENEWAL_CLEANER_UNAVAILABLE");
-        const confirmations = await tx.cleaningConfirmation.findMany({ where: {
-          reservationId: input.reservationId, propertyId: input.propertyId, status: { in: ["PENDING", "CONFIRMED"] },
-        }, take: 2 });
         if (confirmations.length > 1 ||
             (confirmations[0]?.id ?? null) !== input.previousConfirmationId ||
             (confirmations[0] && confirmations[0].staffMemberId !== input.staffMemberId)) {

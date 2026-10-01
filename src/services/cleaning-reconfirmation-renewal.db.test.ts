@@ -14,7 +14,7 @@ test("cleaning renewal commits history, confirmation and reconciliation atomical
   assert.equal(parsed.pathname, "/pingo_stay_time_test");
   const db = new PrismaClient({ datasources: { db: { url } } });
   t.after(() => db.$disconnect());
-  for (const scenario of ["concurrent", "rollback", "started", "completed", "staff-disabled", "date-changed", "scope", "start-race"] as const) {
+  for (const scenario of ["concurrent", "snapshot-touched", "rollback", "started", "completed", "staff-disabled", "date-changed", "scope", "start-race"] as const) {
     await t.test(scenario, async () => {
       const now = new Date("2026-10-01T12:00Z");
       const org = await db.organization.create({ data: { name: "Synthetic renewal" } });
@@ -41,6 +41,9 @@ test("cleaning renewal commits history, confirmation and reconciliation atomical
         if (scenario === "staff-disabled") await db.staffMember.update({ where: { id: staff.id }, data: { isActive: false } });
         if (scenario === "date-changed") input.checkOut = new Date("2026-10-02T18:00Z");
         if (scenario === "scope") input.organizationId = "wrong-organization";
+        if (scenario === "snapshot-touched") await db.reservation.update({ where: { id: reservation.id }, data: {
+          lastReconciledAt: new Date(now.getTime() - 1000), lastReconciledCheckOut: reservation.checkOut,
+        } });
         if (scenario === "start-race") {
           const results = await Promise.allSettled([
             renewCleaningConfirmation(db, input, now), confirmCleaningStart(db, declaration, now),
@@ -55,7 +58,7 @@ test("cleaning renewal commits history, confirmation and reconciliation atomical
             await run(tx); throw new Error("FORCED_RENEWAL_ROLLBACK");
           }, options)) as typeof db.$transaction };
           await assert.rejects(renewCleaningConfirmation(failing, input, now), /FORCED_RENEWAL_ROLLBACK/);
-        } else if (scenario !== "concurrent") {
+        } else if (scenario !== "concurrent" && scenario !== "snapshot-touched") {
           await assert.rejects(renewCleaningConfirmation(db, input, now), /CLEANING_RENEWAL_/);
         } else {
           const results = await Promise.all([renewCleaningConfirmation(db, input, now), renewCleaningConfirmation(db, input, now)]);
