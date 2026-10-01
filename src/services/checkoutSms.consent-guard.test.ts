@@ -197,3 +197,12 @@ test("checkout SMS retry evaluates consent before Twilio transport", () => {
   assert.notEqual(sendIndex, -1);
   assert.ok(consentIndex < sendIndex);
 });
+
+test("Channex checkout uses operational eligibility but preserves the SMS switch and opt-out", () => {
+  const ota = { externalProvider: "CHANNEX", externalId: "ota-booking" };
+  assert.deepEqual(evaluateCheckoutSmsConsent({}, { GUEST_SMS_ENABLED: "1" }, ota), { allowed: true });
+  assert.deepEqual(evaluateCheckoutSmsConsent({}, { GUEST_SMS_ENABLED: "0" }, ota),
+    { allowed: false, reason: "GUEST_SMS_DISABLED" });
+  assert.deepEqual(evaluateCheckoutSmsConsent({ consent: { smsConsent: false } }, { GUEST_SMS_ENABLED: "1" }, ota),
+    { allowed: false, reason: "SMS_CONSENT_NOT_GRANTED" });
+});

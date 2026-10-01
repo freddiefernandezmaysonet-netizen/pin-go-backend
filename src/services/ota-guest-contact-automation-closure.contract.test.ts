@@ -35,5 +35,5 @@ test("host recovery notification links only to authenticated Reservation Detail"
 test("contact completeness remains separate from channel eligibility", async () => {
   const bridge = await read("./guest-journey-access-communications-bridge.policy.ts");
   assert.match(bridge, /if \(email\)/);
-  assert.match(bridge, /if \(phone && hasGuestSmsConsent\(input\.externalRaw\)\)/);
+  assert.match(bridge, /if \(phone && isGuestOperationalSmsEligible\(input\)\)/);
 });

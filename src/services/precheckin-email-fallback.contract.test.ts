@@ -26,7 +26,7 @@ test("legacy pre-checkin delivers email independently before optional SMS consen
     "await sendPreCheckinEmail"
   );
   const consentGate = worker.indexOf(
-    "!hasGuestSmsConsent"
+    "!isGuestOperationalSmsEligible"
   );
 
   assert.ok(emailCall >= 0);

@@ -91,7 +91,7 @@ import {
   isGuestJourneyAccessOwnerScope,
 } from "../services/guest-journey-access-owner.config";
 import {
-  hasGuestSmsConsent,
+  isGuestOperationalSmsEligible,
 } from "../services/guest-journey-access-communications-bridge.policy";
 import {
   resolveGuestJourneyAccessOwnerHandoff,
@@ -445,6 +445,8 @@ async function processPreCheckinMessages(
         guestEmail: true,
         guestPhone: true,
         externalRaw: true,
+        externalProvider: true,
+        externalId: true,
       },
       take: 50,
       orderBy: {
@@ -523,9 +525,7 @@ async function processPreCheckinMessages(
     }
 
     if (
-      !hasGuestSmsConsent(
-        reservation.externalRaw
-      )
+      !isGuestOperationalSmsEligible(reservation)
     ) {
       log(
         "Pre-checkin SMS skipped",
@@ -1569,9 +1569,7 @@ async function processCheckins(now: Date) {
         }
 
         const guestSmsConsent =
-          hasGuestSmsConsent(
-            reservation.externalRaw
-          );
+          isGuestOperationalSmsEligible(reservation);
 
                 if (
           GUEST_SMS_ENABLED &&
