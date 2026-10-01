@@ -17,7 +17,7 @@ import {
   dispatchPendingCleaningConfirmationForReservation,
 } from "./cleaning-confirmation-dispatch.service";
 import { selectNextStaffForProperty } from "./staff-selection.service";
-import { guestAccessWindow } from "./reservation-guest-access-window";
+import { guestAccessWindow, guestAccessNeedsSync, synchronizeGuestAccessWindow } from "./reservation-guest-access-window";
 
 type ChangePlan = {
   reservationId: string;
@@ -196,9 +196,7 @@ const reservationDatesChanged =
   );
 
   const grantsNeedUpdate = guestGrants.some(
-    (g) =>
-      g.startsAt.getTime() !== desiredStart.getTime() ||
-      g.endsAt.getTime() !== desiredEnd.getTime()
+    (g) => guestAccessNeedsSync(g, reservation, "PASSCODE_RESYNC_FAILED")
   );
 
   const nfcAssignments = reservation.NfcAssignment ?? [];
@@ -211,7 +209,7 @@ const reservationDatesChanged =
       return false;
 
     if (a.role === NfcAssignmentRole.GUEST) {
-      return guestAccessWindow(a, reservation).changed;
+      return guestAccessNeedsSync(a, reservation, "TTLOCK_CHANGE_PERIOD_FAILED");
     } else {
       if (reservationDatesChanged) {
         return true;
@@ -286,20 +284,12 @@ if (snapshotMissing && !grantsNeedUpdate && !nfcNeedReschedule) {
   });
   return;
 }
-  // 1) Apply grants updates (DB)
+  // 1) Program existing guest passcodes before acknowledging their new window.
   if (plan.grantsNeedUpdate || reservationDatesChanged) {
     for (const g of guestGrants) {
-      const changed =
-        g.startsAt.getTime() !== desiredStart.getTime() ||
-        g.endsAt.getTime() !== desiredEnd.getTime();
+      const changed = guestAccessNeedsSync(g, reservation, "PASSCODE_RESYNC_FAILED");
 
       if (!changed) continue;
-
-     // 1. actualizar DB primero
-await prisma.accessGrant.update({
-  where: { id: g.id },
-  data: { startsAt: desiredStart, endsAt: desiredEnd, lastError: null },
-});
 
 const passcodeLock = reservation.property?.locks?.find(
   (l: any) => l.id === g.lockId && l.ttlockLockId
@@ -318,14 +308,17 @@ console.log("[reconcile][passcode]", {
   desiredEnd: desiredEnd.toISOString(),
 });
 
-if (
-  reservationDatesChanged &&
-  g.method === "PASSCODE_TIMEBOUND" &&
-  g.ttlockKeyboardPwdId &&
-  passcodeTtlockLockId
-) {
-
-  try {
+const needsPasscodeSync = g.method === "PASSCODE_TIMEBOUND" &&
+  (g.status === AccessStatus.ACTIVE || !!g.ttlockKeyboardPwdId ||
+    g.lastError?.startsWith("PASSCODE_RESYNC_FAILED:") === true);
+await synchronizeGuestAccessWindow({
+  next: guestAccessWindow(g, reservation),
+  errorPrefix: "PASSCODE_RESYNC_FAILED",
+  persist: (data) => prisma.accessGrant.update({ where: { id: g.id }, data }),
+  synchronize: needsPasscodeSync ? async () => {
+    if (!g.ttlockKeyboardPwdId || !passcodeTtlockLockId) {
+      throw new Error("PASSCODE_RESYNC_TARGET_MISSING");
+    }
    const { ttlockChangePasscode } = await import(
   "../ttlock/ttlock.passcode"
 );
@@ -335,22 +328,9 @@ await ttlockChangePasscode({
   keyboardPwdId: Number(g.ttlockKeyboardPwdId),
   startDate: desiredStart.getTime(),
   endDate: desiredEnd.getTime(),
-});    
- } catch (e: any) {
-     console.error("[reconcile][passcode][FAILED]", {
-    reservationId: reservation.id,
-    grantId: g.id,
-    error: String(e?.message ?? e),
-  });       
-
-          await prisma.accessGrant.update({
-            where: { id: g.id },
-            data: {
-              lastError: `PASSCODE_RESYNC_FAILED: ${String(e?.message ?? e)}`,
-            },
-          });
-        }
-      }
+});
+  } : undefined,
+});
     }
   }
     
@@ -363,7 +343,7 @@ await ttlockChangePasscode({
     const ttlockLockId = lock?.ttlockLockId ? Number(lock.ttlockLockId) : null;
 
     if (!ttlockLockId) {
-      console.log("[reconcile][nfc] no active ttlockLockId; DB-only");
+      console.log("[reconcile][nfc] no active ttlockLockId; programmed guest access stays pending");
     }
 
  const cleaningOffsetMin =
@@ -437,19 +417,23 @@ if (a.role === NfcAssignmentRole.CLEANING) {
 
       const next = guestAccessWindow(a, reservation);
 
-      if (!next.changed) continue;
+      if (!guestAccessNeedsSync(a, reservation, "TTLOCK_CHANGE_PERIOD_FAILED")) continue;
 
-      await prisma.nfcAssignment.update({
-        where: { id: a.id },
-        data: { startsAt: next.startsAt, endsAt: next.endsAt, lastError: null },
-      });
-
-      if (
-        plan.hardwareNeedSync &&
-        ttlockLockId &&
-        a.status === NfcAssignmentStatus.ACTIVE
-      ) {
-        try {
+      const needsCardSync = a.status === NfcAssignmentStatus.ACTIVE ||
+        a.status === NfcAssignmentStatus.PROVISIONING ||
+        a.lastError?.startsWith("TTLOCK_CHANGE_PERIOD_FAILED:") === true;
+      await synchronizeGuestAccessWindow({
+        next,
+        errorPrefix: "TTLOCK_CHANGE_PERIOD_FAILED",
+        persist: (data) => prisma.nfcAssignment.update({ where: { id: a.id }, data }),
+        synchronize: needsCardSync ? async () => {
+          if (a.status === NfcAssignmentStatus.PROVISIONING) {
+            throw new Error("NFC_RESYNC_PROVISIONING_PENDING");
+          }
+          if (!plan.hardwareNeedSync) throw new Error("NFC_RESYNC_DEBOUNCED");
+          if (!ttlockLockId || !a.NfcCard?.ttlockCardId) {
+            throw new Error("NFC_RESYNC_TARGET_MISSING");
+          }
           await ttlockChangeCardPeriod({
             lockId: ttlockLockId,
             cardId: Number(a.NfcCard.ttlockCardId),
@@ -457,17 +441,8 @@ if (a.role === NfcAssignmentRole.CLEANING) {
             endDate: next.endsAt.getTime(),
             changeType: 2,
           });
-        } catch (e: any) {
-          await prisma.nfcAssignment.update({
-            where: { id: a.id },
-            data: {
-              lastError: `TTLOCK_CHANGE_PERIOD_FAILED: ${String(
-                e?.message ?? e
-              )}`,
-            },
-          });
-        }
-      }
+        } : undefined,
+      });
     }
 
     if (plan.hardwareNeedSync) {
