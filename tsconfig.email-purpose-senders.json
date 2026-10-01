@@ -1,0 +1,21 @@
+{
+  "compilerOptions": {
+    "noEmit": true,
+    "module": "preserve",
+    "moduleResolution": "bundler",
+    "target": "esnext",
+    "strict": true,
+    "skipLibCheck": true,
+    "types": ["node"]
+  },
+  "include": [
+    "src/lib/email-senders.ts",
+    "src/lib/email-senders.test.ts",
+    "src/lib/email.ts",
+    "src/lib/mailer.ts",
+    "src/auth/mfa-email-otp-delivery.ts",
+    "src/workers/message.retry.worker.ts",
+    "src/workers/reservation.worker.ts",
+    "src/services/guest-journey-communications-delivery-adapter.service.ts"
+  ]
+}

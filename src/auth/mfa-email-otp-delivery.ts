@@ -1,4 +1,5 @@
 import { Resend } from "resend";
+import { getEmailSender } from "../lib/email-senders.js";
 import { normalizeMfaEmail } from "./mfa-email-only-policy.js";
 
 export type MfaEmailDeliveryMode = "MOCK" | "RESEND";
@@ -174,8 +175,8 @@ export async function deliverMfaEmailOtp(
   if (input.expiresInMinutes !== 5) throw new Error("MFA_EMAIL_OTP_TTL_INVALID");
 
   const apiKey = String(env.RESEND_API_KEY ?? "").trim();
-  const from = String(env.EMAIL_FROM ?? "").trim();
-  if (!apiKey || !from) throw new Error("MFA_EMAIL_DELIVERY_CONFIG_MISSING");
+  const from = getEmailSender("authentication");
+  if (!apiKey) throw new Error("MFA_EMAIL_DELIVERY_CONFIG_MISSING");
 
   const sender = options.sender ?? defaultResendSender;
   const result = await sender({
