@@ -1749,7 +1749,7 @@ export async function sendGuestContactRecoveryHostNotice(
   const subject = `Guest contact information required — Reservation #${input.reservationNumber}`;
   const { data, error } = await resend.emails.send(
     {
-      from: getEmailFrom(),
+      from: "Pin&Go Alerts <alerts@incidents.pin-ngo.com>",
       to: input.to,
       subject,
       html: `
