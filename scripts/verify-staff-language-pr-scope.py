@@ -21,6 +21,7 @@ require(pr["head"]["repo"]["full_name"] == pr["base"]["repo"]["full_name"] == re
 require(pr["head"]["ref"] == "agent/staff-preferred-language-v1" and pr["base"]["ref"] == "main", "Branch mismatch")
 base = git("merge-base", pr["base"]["sha"], "HEAD").strip()
 allowed = {
+    ".github/workflows/ota-initial-distribution-enablement.yml",
     '.github/workflows/apms-exit-closure-a-certification.yml',
     '.github/workflows/cleaning-followup-v1-foundation.yml',
     '.github/workflows/guest-journey-enterprise-e15-certification.yml',
@@ -61,4 +62,15 @@ require(addition.strip() in model, "Field must belong to StaffMember")
 migration = Path("prisma/migrations/20260930210000_staff_preferred_language_v1/migration.sql").read_text()
 require(migration == 'ALTER TABLE "StaffMember"\nADD COLUMN "preferredLanguage" VARCHAR(5) NOT NULL DEFAULT \'en\';\n', "Unexpected migration")
 git("diff", "--check", base, "HEAD")
-print("PR #328 exact scope, additive StaffMember schema and migration verified")
+
+worker = "src/workers/reservation.worker.ts"
+old_worker = git("show", f"{base}:{worker}")
+current_worker = Path(worker).read_text()
+for addition in [
+    "              preferredLanguage:\n                assignment.staffMember?.preferredLanguage,\n",
+    "      preferredLanguage: a.staffMember?.preferredLanguage,\n",
+]:
+    require(current_worker.count(addition) == 1, "Expected worker language forwarding exactly once")
+    current_worker = current_worker.replace(addition, "", 1)
+require(current_worker == old_worker, "Unexpected worker behavior change")
+print("PR #328 exact scope, schema, migration and worker language forwarding verified")

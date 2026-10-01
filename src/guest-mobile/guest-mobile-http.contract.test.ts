@@ -11,12 +11,15 @@ test("exchange route exposes only the intended public contract", () => {
   const exchanges = ast.statements.filter(statement => {
     if (!ts.isExpressionStatement(statement) || !ts.isCallExpression(statement.expression)) return false;
     const call = statement.expression;
-    return call.expression.getText(ast) === "guestMobileIdentityRouter.post"
-      && ts.isStringLiteral(call.arguments[0])
-      && call.arguments[0].text === "/api/guest-mobile/session/exchange";
+    const path = call.arguments[0];
+    return path !== undefined && call.expression.getText(ast) === "guestMobileIdentityRouter.post"
+      && ts.isStringLiteral(path)
+      && path.text === "/api/guest-mobile/session/exchange";
   });
   assert.equal(exchanges.length, 1, "exactly one exchange endpoint must exist");
-  const exchange = exchanges[0].getText(ast);
+  const endpoint = exchanges[0];
+  assert.ok(endpoint);
+  const exchange = endpoint.getText(ast);
   assert.match(exchange, /"\/api\/guest-mobile\/session\/exchange"/);
   assert.match(exchange, /new Set\(\["guestToken", "deviceLabel", "platform"\]\)/);
   assert.doesNotMatch(exchange, /reservationId/);

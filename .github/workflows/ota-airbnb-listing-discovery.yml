@@ -728,7 +728,13 @@ jobs:
         run: |
           BASE_RANGE="origin/${GITHUB_BASE_REF:-main}...HEAD"
 
-          if [ "${GITHUB_HEAD_REF:-$GITHUB_REF_NAME}" = "agent/ttlock-gateway-health-foundation-v1" ]; then
+          if [ "${GITHUB_HEAD_REF:-}" = "agent/staff-preferred-language-v1" ]; then
+            python3 scripts/verify-staff-language-pr-scope.py
+            git diff --exit-code "$BASE_RANGE" -- \
+              src/pms \
+              src/distribution/channex-readonly.http-transport.ts \
+              src/distribution/channex-white-label.http-transport.ts
+          elif [ "${GITHUB_HEAD_REF:-$GITHUB_REF_NAME}" = "agent/ttlock-gateway-health-foundation-v1" ]; then
             git diff --exit-code "$BASE_RANGE" -- \
               src/pms \
               src/distribution/channex-readonly.http-transport.ts \
