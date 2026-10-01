@@ -70,6 +70,43 @@ jobs:
             '.github/workflows/ota-initial-distribution-enablement.yml',
           }
           changed = set(Path('/tmp/ota-initial-changed.txt').read_text().splitlines())
+          # PR #333 only; all activation, Full Sync and core checks above still run.
+          if os.environ.get('GITHUB_HEAD_REF') == 'agent/pin-ai-stay-time-policy-v1':
+            repo = 'freddiefernandezmaysonet-netizen/pin-go-backend'
+            if not (
+              os.environ.get('GITHUB_EVENT_NAME') == 'pull_request'
+              and os.environ.get('GITHUB_REPOSITORY') == repo
+              and os.environ.get('SCOPE_PR_NUMBER') == '333'
+              and os.environ.get('SCOPE_HEAD_REPO') == repo
+              and os.environ.get('SCOPE_BASE_REPO') == repo
+              and os.environ.get('GITHUB_BASE_REF') == 'main'
+            ):
+              raise SystemExit('PR #333 repository/branch scope mismatch')
+            allowed = {
+              '.github/workflows/ota-airbnb-listing-discovery.yml',
+              '.github/workflows/ota-initial-distribution-enablement.yml',
+              '.github/workflows/pin-ai-host-incidents-v1.yml',
+              '.github/workflows/pin-ai-stay-time-policy-v1.yml',
+              '.github/workflows/pin-ai-stay-time-settings-v1.yml',
+              'docs/pin-ai-stay-time-policy-v1.md',
+              'prisma/migrations/20261001110000_property_stay_time_settings_v1/migration.sql',
+              'prisma/schema.prisma',
+              'src/domain/computeOperationalRisk.ts',
+              'src/pin-ai/actions/stay-time-policy.test.ts',
+              'src/pin-ai/actions/stay-time-policy.ts',
+              'src/pin-ai/actions/stay-time-settings.ts',
+              'src/routes/dashboard.stay-time-settings.routes.test.ts',
+              'src/routes/dashboard.stay-time-settings.routes.ts',
+              'src/server.ts',
+              'src/services/property-stay-time-settings.db.test.ts',
+              'src/services/property-stay-time-settings.service.ts',
+              'tsconfig.pin-ai-stay-time-policy.json',
+              'tsconfig.pin-ai-stay-time-settings.json',
+            }
+            if changed != allowed:
+              raise SystemExit(f'PR #333 exact settings scope required: {sorted(changed ^ allowed)}')
+            print('PR #333 exact settings scope verified; all retained OTA protections executed.')
+            raise SystemExit(0)
           # PR #294 only: TTLock Gateway Health foundation is outside OTA runtime scope.
           # All activation, Full Sync and certified-core checks above still run.
           if os.environ.get('GITHUB_HEAD_REF') == 'agent/ttlock-gateway-health-foundation-v1':

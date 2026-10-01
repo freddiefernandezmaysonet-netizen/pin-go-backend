@@ -81,6 +81,7 @@ jobs:
             test "$GITHUB_BASE_REF" = "main"
             cat > "$RUNNER_TEMP/stay-time-settings-allowed.txt" <<'EOF'
           .github/workflows/ota-airbnb-listing-discovery.yml
+          .github/workflows/ota-initial-distribution-enablement.yml
           .github/workflows/pin-ai-host-incidents-v1.yml
           .github/workflows/pin-ai-stay-time-policy-v1.yml
           .github/workflows/pin-ai-stay-time-settings-v1.yml
