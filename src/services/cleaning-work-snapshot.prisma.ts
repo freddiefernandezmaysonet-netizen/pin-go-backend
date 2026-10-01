@@ -54,14 +54,16 @@ function transactionAdapter(tx: Prisma.TransactionClient): CleaningWorkSnapshotT
       };
     },
     findExisting(scope) {
-      return tx.cleaningWork.findUnique({
-        where: { reservationId_staffMemberId: { reservationId: scope.reservationId, staffMemberId: scope.staffMemberId } },
+      return tx.cleaningWork.findFirst({
+        where: { reservationId: scope.reservationId, staffMemberId: scope.staffMemberId,
+          propertyId: scope.propertyId, confirmationId: scope.confirmationId },
         select: workSelect,
       });
     },
     async hasOtherCurrentWork(scope) {
       return Boolean(await tx.cleaningWork.findFirst({
-        where: { reservationId: scope.reservationId, staffMemberId: { not: scope.staffMemberId },
+        // Includes the same cleaner's older confirmation: never auto-reopen it.
+        where: { reservationId: scope.reservationId,
           cancelledAt: null, supersededAt: null }, select: { id: true },
       }));
     },

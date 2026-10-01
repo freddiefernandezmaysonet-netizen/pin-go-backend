@@ -1817,7 +1817,8 @@ model CleaningWork {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  @@unique([reservationId, staffMemberId])
+  @@unique([reservationId, staffMemberId, confirmationId], map: "CleaningWork_confirmation_scope_key")
+  @@index([reservationId, staffMemberId])
   @@index([propertyId, scheduledStartAt])
   @@index([staffMemberId, scheduledStartAt])
   @@index([startConfirmedAt, completionConfirmedAt, cancelledAt, supersededAt], map: "CleaningWork_state_idx")

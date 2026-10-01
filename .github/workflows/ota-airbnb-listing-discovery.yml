@@ -107,6 +107,10 @@ jobs:
           src/services/reservation-guest-access-window.ts
           src/services/reservation-guest-access-window.test.ts
           src/services/reservation-cleaning-window.ts
+          .github/workflows/cleaning-followup-v1-foundation.yml
+          prisma/migrations/20261001183000_cleaning_work_confirmation_history/migration.sql
+          src/services/cleaning-work-snapshot.prisma.ts
+          src/services/cleaning-work-snapshot.database.test.ts
           src/services/reservation-reconcile-cleaner-reconfirmation.contract.test.ts
           src/services/property-stay-time-settings.db.test.ts
           src/services/property-stay-time-settings.service.ts
@@ -125,7 +129,8 @@ jobs:
               sed -i '\|^src/domain/computeOperationalRisk.ts$|d' "$RUNNER_TEMP/stay-time-settings-allowed.txt"
             fi
             diff -u "$RUNNER_TEMP/stay-time-settings-allowed.txt" "$RUNNER_TEMP/actual.txt"
-            test "$(git diff --no-ext-diff --no-color --full-index --unified=0 "origin/$BASE_BRANCH...HEAD" -- prisma/schema.prisma | sha256sum | cut -d ' ' -f 1)" = "296467a9e396a7171f15cf9d1b8a719421ac346ad94718a8d0670ae8c0095e0e"
+            test "$(git diff --no-ext-diff --no-color --full-index --unified=0 "origin/$BASE_BRANCH...HEAD" -- prisma/schema.prisma | sha256sum | cut -d ' ' -f 1)" = "16617ef86bc34139dfaeb21b4381cd873441b612616ec405adb84f18a9b959a3"
+            test "$(sha256sum prisma/migrations/20261001183000_cleaning_work_confirmation_history/migration.sql | cut -d ' ' -f 1)" = "20cd60db321dc5becbadc2f56065cf9f29f320941625da3d5b246927c5d37d0a"
             test "$(sha256sum prisma/migrations/20261001110000_property_stay_time_settings_v1/migration.sql | cut -d ' ' -f 1)" = "848dc881ee67925f88af326639cc457b64704ddb01773ee8fdd7dea58a80f9df"
             # Pin exact added/removed server lines; unrelated base edits change blob IDs and offsets.
             test "$(git diff --no-ext-diff --no-color --full-index --unified=0 "origin/$BASE_BRANCH...HEAD" -- src/server.ts | sed '/^index /d; /^@@ /d' | sha256sum | cut -d ' ' -f 1)" = "0a19e9d1d9857b769dcd3725b43fb7b2db6cc6fedbce8034db8ddd8877547774"
