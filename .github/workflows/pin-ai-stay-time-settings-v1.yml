@@ -9,6 +9,8 @@ on:
       - "src/services/property-stay-time-settings*"
       - "src/services/stay-time-estimate*"
       - "src/services/stay-time-quote*"
+      - "src/services/stay-time-proposal*"
+      - "src/pin-ai/actions/action-proposal.service*"
       - "src/services/stay-time-hourly*"
       - "src/services/arrival-cleaning-readiness*"
       - "src/routes/dashboard.stay-time-settings*"

@@ -26,6 +26,22 @@ OTA change through the Direct Booking payment engine.
 
 ## Audit at main 57da92aaafb0ec4f8d89a08818266f3ad98f6072
 
+### Internal guest consent adapter
+
+`createStayTimeProposal` stores an existing PinAIActionProposal with exact stay-time
+terms, bilingual consent, hashed confirmation token and a maximum 60-second expiry.
+Creation revalidates inside the generic proposal service's serializable transaction.
+`confirmStayTimeProposal` requires the guest and proposal tokens and revalidates
+settings, reservation state, nightly basis, taxes, fee split, occupancy and cleaner
+completion before recording consent. Generic confirmation without the stay-time
+validator is rejected. Repeated confirmation returns the original consent without
+executing an action. Price or operational changes require a new quote.
+
+These internal adapters are not mounted to guest routes or runtime tools. Consent
+does not hold availability, charge money, modify a reservation or authorize access.
+Payment/apply must perform another fresh validation and atomically reserve the
+interval before this is exposed as an executable guest flow.
+
 - `pin-go-eligibility-checks.ts` currently treats a `CleaningConfirmation` with
   status `CONFIRMED` for the arriving reservation as early-arrival readiness.
   That is acceptance of a cleaning assignment, not proof of completed turnover.

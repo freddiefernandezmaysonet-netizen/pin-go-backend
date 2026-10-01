@@ -92,6 +92,7 @@ jobs:
               'prisma/migrations/20261001110000_property_stay_time_settings_v1/migration.sql',
               'prisma/schema.prisma',
               'src/domain/computeOperationalRisk.ts',
+              'src/pin-ai/actions/action-proposal.service.ts',
               'src/pin-ai/actions/stay-time-policy.test.ts',
               'src/pin-ai/actions/stay-time-policy.ts',
               'src/pin-ai/actions/stay-time-settings.ts',
@@ -109,6 +110,7 @@ jobs:
               'src/services/stay-time-hourly-basis.ts',
               'src/services/stay-time-quote.service.test.ts',
               'src/services/stay-time-quote.service.ts',
+              'src/services/stay-time-proposal.service.ts',
               'tsconfig.pin-ai-stay-time-policy.json',
               'tsconfig.pin-ai-stay-time-settings.json',
             }

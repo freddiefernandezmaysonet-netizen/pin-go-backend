@@ -63,10 +63,18 @@ export function priceStayTimeService(input: {
 export async function prepareStayTimeQuote(db: Pick<PrismaClient, "$transaction">, input: {
   guestToken: string; operation: StayTimeOperation; requestedLocalTime: string;
 }, options: { now?: Date; platformFeePercent: string }) {
+  return db.$transaction(tx => prepareStayTimeQuoteInTransaction(tx, input, options), {
+    isolationLevel: Prisma.TransactionIsolationLevel.RepeatableRead, maxWait: 5000, timeout: 10000,
+  });
+}
+
+/** Also used by proposal creation/confirmation inside their serializable transaction. */
+export async function prepareStayTimeQuoteInTransaction(tx: Prisma.TransactionClient, input: {
+  guestToken: string; operation: StayTimeOperation; requestedLocalTime: string;
+}, options: { now?: Date; platformFeePercent: string }) {
   if (!/^[A-Za-z0-9_-]{16,200}$/.test(input.guestToken)) reject("INVALID_GUEST_TOKEN");
   const now = options.now ?? new Date();
   if (!Number.isFinite(now.getTime())) reject("INVALID_STAY_TIME");
-  return db.$transaction(async tx => {
     const reservation = await tx.reservation.findFirst({
       where: { guestToken: input.guestToken, status: "ACTIVE", property: { status: "ACTIVE" },
         OR: [{ guestTokenExpiresAt: null }, { guestTokenExpiresAt: { gt: now } }] },
@@ -91,7 +99,8 @@ export async function prepareStayTimeQuote(db: Pick<PrismaClient, "$transaction"
     const terms = { version: "stay_time_quote_v1", organizationId: reservation.property.organizationId,
       propertyId: reservation.propertyId, reservationId: reservation.id,
       reservationStateFingerprint: reservationStateFingerprint(reservation),
-      operation: input.operation, currentCheckIn: reservation.checkIn.toISOString(), currentCheckOut: reservation.checkOut.toISOString(),
+      operation: input.operation, requestedLocalTime: input.requestedLocalTime,
+      currentCheckIn: reservation.checkIn.toISOString(), currentCheckOut: reservation.checkOut.toISOString(),
       proposedCheckIn: estimate.checkIn, proposedCheckOut: estimate.checkOut,
       policyVersion: estimate.policyVersion, settingsRevision: estimate.settingsRevision,
       hourlyPricingBasis: estimate.hourlyPricingBasis,
@@ -102,5 +111,4 @@ export async function prepareStayTimeQuote(db: Pick<PrismaClient, "$transaction"
     return { terms, fingerprint, requiresGuestConfirmation: true as const, confirmationAvailable: false as const,
       paymentReady: false as const, authorizationGranted: false as const, actionExecuted: false as const,
       availabilityHeld: false as const };
-  }, { isolationLevel: Prisma.TransactionIsolationLevel.RepeatableRead, maxWait: 5000, timeout: 10000 });
 }

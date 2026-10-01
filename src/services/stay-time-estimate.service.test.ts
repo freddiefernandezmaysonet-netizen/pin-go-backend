@@ -4,6 +4,8 @@ import { Prisma, PrismaClient } from "@prisma/client";
 import { estimateStayTimeAdjustment, resolveStayTimeClock } from "./stay-time-estimate.service.js";
 import { defaultStayTimeSettings } from "../pin-ai/actions/stay-time-settings.js";
 import { prepareStayTimeQuote } from "./stay-time-quote.service.js";
+import { createStayTimeProposal, confirmStayTimeProposal } from "./stay-time-proposal.service.js";
+import { createPinAIActionProposal, confirmPinAIActionProposal } from "../pin-ai/actions/action-proposal.service.js";
 
 test("property-local clock resolution rejects DST gaps and folds", () => {
   assert.equal(resolveStayTimeClock(new Date("2026-10-01T19:00Z"), "12:30", "America/Puerto_Rico").toISOString(), "2026-10-01T16:30:00.000Z");
@@ -30,6 +32,7 @@ test("stay-time estimates use real scoped PostgreSQL evidence without writes", {
     cleaningStartOffsetMinutes: 30, cleaningDurationMinutes: 180, stayTimeSettings: enabled } });
   t.after(async () => {
     try {
+      await db.pinAIActionProposal.deleteMany({ where: { propertyId: property.id } });
       await db.reservationModification.deleteMany({ where: { reservation: { propertyId: property.id } } });
       await db.reservation.deleteMany({ where: { propertyId: property.id } });
       await db.propertyBlockedDate.deleteMany({ where: { propertyId: property.id } });
@@ -73,6 +76,69 @@ test("stay-time estimates use real scoped PostgreSQL evidence without writes", {
       await assert.rejects(prepareStayTimeQuote(db, quoteInput, options), /NOT_FOUND/);
       await db.reservation.update({ where: { id: stay.id }, data: { guestTokenExpiresAt: null } });
     } finally { await db.propertyTax.delete({ where: { id: tax.id } }); }
+  });
+  const proposalInput = { guestToken: stay.guestToken!, operation: "LATE_CHECKOUT" as const,
+    requestedLocalTime: "12:30", language: "es" as const };
+  const proposalOptions = { now, platformFeePercent: "1.5" };
+  const confirmInput = (created: Awaited<ReturnType<typeof createStayTimeProposal>>) => ({
+    guestToken: stay.guestToken!, proposalId: created.proposal.id, confirmationToken: created.confirmationToken,
+  });
+  await t.test("explicit consent is revalidated, token-protected and idempotent without applying or charging", async () => {
+    const before = await db.reservation.findUniqueOrThrow({ where: { id: stay.id } });
+    const created = await createStayTimeProposal(db, proposalInput, proposalOptions);
+    try {
+      assert.equal(created.proposal.status, "PENDING_CONFIRMATION");
+      assert.match(created.proposal.consentText, /USD 5.00/);
+      assert.match(created.proposal.consentText, /no cambia la reserva/);
+      const stored = await db.pinAIActionProposal.findUniqueOrThrow({ where: { id: created.proposal.id } });
+      assert.notEqual(stored.confirmationTokenHash, created.confirmationToken);
+      await assert.rejects(confirmStayTimeProposal(db, { ...confirmInput(created), confirmationToken: "x".repeat(43) }, proposalOptions), /TOKEN_MISMATCH/);
+      await assert.rejects(confirmStayTimeProposal(db, { ...confirmInput(created), guestToken: "another-guest-token-12345" }, proposalOptions), /RESERVATION_NOT_FOUND/);
+      await assert.rejects(confirmPinAIActionProposal({ prisma: db, ...confirmInput(created), now }), /PROPOSAL_NOT_CONFIRMABLE/);
+      const results = await Promise.all([1, 2].map(() => confirmStayTimeProposal(db, confirmInput(created), {
+        ...proposalOptions, now: new Date(now.getTime() + 10_000),
+      })));
+      assert.deepEqual(results.map(r => r.idempotentReplay).sort(), [false, true]);
+      for (const result of results) {
+        assert.equal(result.proposal.status, "CONFIRMED");
+        assert.equal(result.actionExecuted, false);
+        assert.equal(result.paymentReady, false);
+        assert.equal(result.availabilityHeld, false);
+      }
+      assert.deepEqual(await db.reservation.findUniqueOrThrow({ where: { id: stay.id } }), before);
+      assert.equal(await db.reservationModification.count({ where: { reservationId: stay.id } }), 0);
+    } finally { await db.pinAIActionProposal.deleteMany({ where: { reservationId: stay.id } }); }
+  });
+  await t.test("stale price, settings and occupancy cannot record stay-time consent", async () => {
+    const created = await createStayTimeProposal(db, proposalInput, proposalOptions);
+    const confirm = () => confirmStayTimeProposal(db, confirmInput(created), proposalOptions);
+    try {
+      await assert.rejects(confirmStayTimeProposal(db, confirmInput(created), { ...proposalOptions, platformFeePercent: "2" }), /QUOTE_CHANGED/);
+      const tax = await db.propertyTax.create({ data: { propertyId: property.id, name: "New tax", percentage: 9 } });
+      try { await assert.rejects(confirm(), /QUOTE_CHANGED/); }
+      finally { await db.propertyTax.delete({ where: { id: tax.id } }); }
+      await db.property.update({ where: { id: property.id }, data: { stayTimeSettingsRevision: 1 } });
+      try { await assert.rejects(confirm(), /QUOTE_CHANGED/); }
+      finally { await db.property.update({ where: { id: property.id }, data: { stayTimeSettingsRevision: 0 } }); }
+      const conflict = await conflictStay("2026-10-03T16:00Z", "2026-10-04T15:00Z");
+      try { await assert.rejects(confirm(), /CONFLICT|UNAVAILABLE/); }
+      finally { await db.reservation.delete({ where: { id: conflict.id } }); }
+      assert.equal((await db.pinAIActionProposal.findUniqueOrThrow({ where: { id: created.proposal.id } })).status, "PENDING_CONFIRMATION");
+    } finally { await db.pinAIActionProposal.deleteMany({ where: { reservationId: stay.id } }); }
+  });
+  await t.test("expired consent and generic creation without stay-time validation fail closed", async () => {
+    const quote = await prepareStayTimeQuote(db, proposalInput, proposalOptions);
+    await assert.rejects(createPinAIActionProposal({ prisma: db, guestToken: stay.guestToken!,
+      actionType: "RESERVATION_MODIFICATION", language: "en", consentText: "Confirm", termsSnapshot: quote.terms,
+      expiresAt: new Date(quote.terms.expiresAt), now }), /INVALID_TERMS/);
+    const created = await createStayTimeProposal(db, { ...proposalInput, language: "en" }, proposalOptions);
+    try {
+      assert.match(created.proposal.consentText, /late checkout/);
+      await assert.rejects(confirmStayTimeProposal(db, confirmInput(created), {
+        ...proposalOptions, now: new Date(now.getTime() + 60_000),
+      }), /PROPOSAL_EXPIRED/);
+      assert.equal((await db.pinAIActionProposal.findUniqueOrThrow({ where: { id: created.proposal.id } })).status, "EXPIRED");
+    } finally { await db.pinAIActionProposal.deleteMany({ where: { reservationId: stay.id } }); }
   });
   await t.test("exact minute fee, offset plus cleaning window, estimate only, no mutation", async () => {
     const before = await db.reservation.findUniqueOrThrow({ where: { id: stay.id } });
@@ -118,6 +184,18 @@ test("stay-time estimates use real scoped PostgreSQL evidence without writes", {
       assert.equal(result.checkIn, "2026-10-01T16:00:00.000Z");
       assert.equal(result.checkOut, stay.checkOut.toISOString());
       assert.equal(result.authorizationGranted, false);
+      const earlyProposal = await createStayTimeProposal(db, { ...proposalInput,
+        operation: "EARLY_CHECKIN", requestedLocalTime: "12:00" }, proposalOptions);
+      try {
+        assert.match(earlyProposal.proposal.consentText, /USD 0.00/);
+        await db.cleaningWork.update({ where: { id: work.id }, data: { completionConfirmedAt: null } });
+        await assert.rejects(confirmStayTimeProposal(db, confirmInput(earlyProposal), proposalOptions), /ARRIVAL_READINESS_REQUIRED/);
+        await db.cleaningWork.update({ where: { id: work.id }, data: { completionConfirmedAt: completed } });
+        const consent = await confirmStayTimeProposal(db, confirmInput(earlyProposal), proposalOptions);
+        assert.equal(consent.proposal.status, "CONFIRMED");
+        assert.equal(consent.actionExecuted, false);
+        assert.equal((await db.reservation.findUniqueOrThrow({ where: { id: stay.id } })).checkIn.toISOString(), stay.checkIn.toISOString());
+      } finally { await db.pinAIActionProposal.deleteMany({ where: { reservationId: stay.id } }); }
       for (const patch of [
         { completionConfirmedAt: null }, { cancelledAt: completed }, { supersededAt: completed },
         { completionConfirmedAt: new Date("2026-10-01T12:01Z") },
