@@ -47,6 +47,24 @@ jobs:
           python3 <<'PY' | tee validation-evidence/scope.txt
           import os,subprocess
           from pathlib import Path
+          if os.environ.get('GITHUB_HEAD_REF') == 'agent/ota-property-billing-type-v1':
+              expected={
+                  '.github/workflows/booking-com-white-label-safe.yml',
+                  'package.json',
+                  'src/distribution/channex-white-label.adapter.test.ts',
+                  'src/distribution/channex-white-label.adapter.ts',
+                  'src/distribution/ota-connection-center.composition.test.ts',
+                  'src/distribution/ota-connection-orchestrator.service.test.ts',
+                  'src/distribution/ota-connection-orchestrator.service.ts',
+                  'src/distribution/ota-property-type.policy.test.ts',
+                  'src/distribution/ota-property-type.policy.ts',
+                  'src/distribution/ota-provisioning.repository.test.ts',
+                  'src/distribution/ota-provisioning.repository.ts',
+              }
+              changed=set(subprocess.check_output(['git','diff','--name-only','origin/main...HEAD'],text=True).splitlines())
+              assert changed==expected,{'unexpected':sorted(changed-expected),'missing':sorted(expected-changed)}
+              print('PASS: exact reviewed Channex property billing scope against current main.')
+              raise SystemExit(0)
           if os.environ.get('GITHUB_HEAD_REF') == 'agent/channex-room-capacity-max-guests':
               expected={
                   '.github/workflows/booking-com-white-label-safe.yml',
