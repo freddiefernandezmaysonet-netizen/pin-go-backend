@@ -1,0 +1,121 @@
+import assert from "node:assert/strict";
+import test from "node:test";
+import { PrismaClient } from "@prisma/client";
+import { defaultStayTimeSettings } from "../pin-ai/actions/stay-time-settings.js";
+import { createStayTimeProposal, confirmStayTimeProposal, stageStayTimeModification } from "./stay-time-proposal.service.js";
+import { applyGuestReservationModification } from "./guest-reservation-modification-apply.service.js";
+
+const url = process.env.STAY_TIME_TEST_DATABASE_URL;
+test("free stay-time changes apply atomically through the canonical service", { skip: !url }, async t => {
+  const parsed = new URL(url!);
+  assert.ok(["localhost", "127.0.0.1"].includes(parsed.hostname));
+  assert.equal(parsed.pathname, "/pingo_stay_time_test");
+  const db = new PrismaClient({ datasources: { db: { url } } });
+  t.after(() => db.$disconnect());
+  for (const scenario of ["late", "early", "cleaning-revoked", "cleaning-buffer-blocked", "reservation-changed",
+    "expired", "pricing-tampered", "reconcile-retry", "paid-blocked"] as const) {
+    await t.test(scenario, async () => {
+      const early = scenario === "early" || scenario === "cleaning-revoked";
+      const now = new Date(early ? "2026-10-01T12:00Z" : "2026-10-02T12:00Z");
+      const org = await db.organization.create({ data: { name: "Synthetic stay-time apply" } });
+      const defaults = defaultStayTimeSettings();
+      const property = await db.property.create({ data: { organizationId: org.id, name: "Synthetic free apply",
+        timezone: "America/Puerto_Rico", checkInTime: "15:00", checkOutTime: "11:00",
+        cleaningStartOffsetMinutes: 30, cleaningDurationMinutes: 180,
+        stayTimeSettings: { earlyCheckin: { ...defaults.earlyCheckin, enabled: true },
+          lateCheckout: { ...defaults.lateCheckout, enabled: true,
+            ...(scenario === "paid-blocked" ? { fee: { mode: "PER_HOUR", amountMinor: 0, currency: "USD" } } : {}) } } } });
+      const stay = await db.reservation.create({ data: { propertyId: property.id, guestName: "Synthetic apply guest",
+        guestToken: `synthetic-apply-${property.id}`, checkIn: new Date("2026-10-01T19:00Z"), checkOut: new Date("2026-10-03T15:00Z"),
+        status: "ACTIVE", paymentState: "PAID", source: "DIRECT_BOOKING", externalProvider: "PIN_GO_DIRECT",
+        currency: "usd", totalAmount: 150, amountCollected: 150, platformFeeAmount: 2.25, hostPayoutAmount: 147.75,
+        pricingBreakdown: { currency: "usd", totalAmount: 150, totalAmountCents: 15000,
+          nightlySubtotal: 100, nightlyRates: [{ date: "2026-10-01", rate: 40 }, { date: "2026-10-02", rate: 60 }],
+          cleaningFee: 50, amenitiesTotal: 0, taxesTotal: 0 } } });
+      let staffId: string | undefined;
+      let workId: string | undefined;
+      try {
+        if (early) {
+          const prior = await db.reservation.create({ data: { propertyId: property.id, guestName: "Prior synthetic guest",
+            checkIn: new Date("2026-09-29T19:00Z"), checkOut: new Date("2026-10-01T10:00Z") } });
+          const staff = await db.staffMember.create({ data: { organizationId: org.id, fullName: "Synthetic cleaner" } });
+          staffId = staff.id;
+          await db.propertyStaff.create({ data: { propertyId: property.id, staffMemberId: staff.id, role: "PRIMARY" } });
+          const confirmation = await db.cleaningConfirmation.create({ data: { reservationId: prior.id, propertyId: property.id,
+            staffMemberId: staff.id, status: "CONFIRMED", token: `synthetic-apply-${staff.id}` } });
+          const work = await db.cleaningWork.create({ data: { reservationId: prior.id, propertyId: property.id,
+            staffMemberId: staff.id, confirmationId: confirmation.id, scheduledStartAt: new Date("2026-10-01T10:30Z"),
+            durationCommitmentMinutes: 30, startConfirmationGraceMinutes: 5, followupGraceMinutes: 5,
+            timingConsentVersion: "v1", timingConsentAcceptedAt: new Date("2026-09-29T15:00Z"),
+            startConfirmedAt: new Date("2026-10-01T10:30Z"), completionConfirmedAt: new Date("2026-10-01T11:00Z") } });
+          workId = work.id;
+        }
+        const options = { now, platformFeePercent: "1.5" };
+        const proposal = await createStayTimeProposal(db, { guestToken: stay.guestToken!, language: "es",
+          operation: early ? "EARLY_CHECKIN" : "LATE_CHECKOUT", requestedLocalTime: early ? "12:00" : "12:30" }, options);
+        await confirmStayTimeProposal(db, { guestToken: stay.guestToken!, proposalId: proposal.proposal.id,
+          confirmationToken: proposal.confirmationToken }, options);
+        const staged = await stageStayTimeModification(db, { guestToken: stay.guestToken!, proposalId: proposal.proposal.id }, options);
+        const id = staged.modification.id;
+        if (scenario === "cleaning-revoked") await db.cleaningWork.update({ where: { id: workId! }, data: { completionConfirmedAt: null } });
+        if (scenario === "cleaning-buffer-blocked") await db.propertyBlockedDate.create({ data: { propertyId: property.id,
+          startDate: new Date("2026-10-03T19:59Z"), endDate: new Date("2026-10-04T15:00Z") } });
+        if (scenario === "reservation-changed") await db.reservation.update({ where: { id: stay.id }, data: { guestName: "Material change" } });
+        if (scenario === "pricing-tampered") await db.reservationModification.update({ where: { id }, data: {
+          proposedPricing: { ...(staged.modification.proposedPricing as object), cleaningFee: 999 },
+        } });
+        if (scenario === "paid-blocked") await db.reservationModification.update({ where: { id }, data: { status: "APPLYING" } });
+        const before = await db.reservation.findUniqueOrThrow({ where: { id: stay.id } });
+        const reconciled: string[] = [];
+        const dependencies = { client: db, now: () => new Date(now.getTime() + (scenario === "expired" ? 60_000 : 10_000)),
+          reconcile: async (reservationId: string) => {
+            reconciled.push(reservationId);
+            if (scenario === "reconcile-retry" && reconciled.length === 1) throw new Error("Synthetic reconcile outage");
+          } };
+        const success = ["late", "early", "reconcile-retry"].includes(scenario);
+        if (!success) {
+          const code = scenario === "cleaning-revoked" ? "ARRIVAL_READINESS_REQUIRED" : scenario === "cleaning-buffer-blocked" ? "TURNOVER_CONFLICT"
+            : scenario === "reservation-changed" ? "STAY_TIME_QUOTE_CHANGED" : scenario === "expired" ? "STAY_TIME_QUOTE_EXPIRED"
+            : scenario === "paid-blocked" ? "STAY_TIME_PAYMENT_APPLY_NOT_READY" : "STAY_TIME_MODIFICATION_TERMS_MISMATCH";
+          await assert.rejects(applyGuestReservationModification({ modificationId: id }, dependencies), (error: unknown) => (error as { code?: string }).code === code);
+          assert.deepEqual(await db.reservation.findUniqueOrThrow({ where: { id: stay.id } }), before);
+          const failed = await db.reservationModification.findUniqueOrThrow({ where: { id } });
+          assert.equal(failed.status, scenario === "paid-blocked" ? "APPLYING" : "CANCELLED");
+          assert.equal(failed.failureCode, code);
+          assert.equal(failed.appliedAt, null);
+          assert.deepEqual(reconciled, []);
+        } else {
+          if (scenario === "reconcile-retry") await assert.rejects(applyGuestReservationModification({ modificationId: id }, dependencies), /Synthetic reconcile outage/);
+          else await applyGuestReservationModification({ modificationId: id }, dependencies);
+          const applied = await db.reservation.findUniqueOrThrow({ where: { id: stay.id } });
+          assert.equal(applied.checkIn.toISOString(), early ? "2026-10-01T16:00:00.000Z" : before.checkIn.toISOString());
+          assert.equal(applied.checkOut.toISOString(), early ? before.checkOut.toISOString() : "2026-10-03T16:30:00.000Z");
+          assert.equal(applied.totalAmount?.toString(), "150");
+          assert.equal(applied.amountCollected?.toString(), "150");
+          assert.equal(applied.platformFeeAmount?.toString(), "2.25");
+          assert.equal(applied.hostPayoutAmount?.toString(), "147.75");
+          assert.equal(applied.lastReconciledCheckIn?.toISOString(), before.checkIn.toISOString());
+          assert.equal(applied.lastReconciledCheckOut?.toISOString(), before.checkOut.toISOString());
+          assert.equal(applied.lastHardwareSyncAt, null);
+          assert.equal((await db.reservationModification.findUniqueOrThrow({ where: { id } })).status, "APPLIED");
+          const replay = await applyGuestReservationModification({ modificationId: id }, dependencies);
+          assert.equal(replay.idempotentReplay, true);
+          assert.deepEqual(await db.reservation.findUniqueOrThrow({ where: { id: stay.id } }), applied);
+          assert.deepEqual(reconciled, [stay.id, stay.id]);
+          assert.equal(await db.reservationModification.count({ where: { reservationId: stay.id } }), 1);
+        }
+      } finally {
+        await db.cleaningWork.deleteMany({ where: { propertyId: property.id } });
+        await db.cleaningConfirmation.deleteMany({ where: { propertyId: property.id } });
+        await db.propertyStaff.deleteMany({ where: { propertyId: property.id } });
+        if (staffId) await db.staffMember.delete({ where: { id: staffId } });
+        await db.reservationModification.deleteMany({ where: { reservation: { propertyId: property.id } } });
+        await db.pinAIActionProposal.deleteMany({ where: { propertyId: property.id } });
+        await db.reservation.deleteMany({ where: { propertyId: property.id } });
+        await db.propertyBlockedDate.deleteMany({ where: { propertyId: property.id } });
+        await db.property.delete({ where: { id: property.id } });
+        await db.organization.delete({ where: { id: org.id } });
+      }
+    });
+  }
+});

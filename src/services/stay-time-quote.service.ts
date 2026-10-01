@@ -71,7 +71,7 @@ export async function prepareStayTimeQuote(db: Pick<PrismaClient, "$transaction"
 /** Also used by proposal creation/confirmation inside their serializable transaction. */
 export async function prepareStayTimeQuoteInTransaction(tx: Prisma.TransactionClient, input: {
   guestToken: string; operation: StayTimeOperation; requestedLocalTime: string;
-}, options: { now?: Date; platformFeePercent: string }) {
+}, options: { now?: Date; platformFeePercent: string; ownModificationId?: string }) {
   if (!/^[A-Za-z0-9_-]{16,200}$/.test(input.guestToken)) reject("INVALID_GUEST_TOKEN");
   const now = options.now ?? new Date();
   if (!Number.isFinite(now.getTime())) reject("INVALID_STAY_TIME");
@@ -86,7 +86,7 @@ export async function prepareStayTimeQuoteInTransaction(tx: Prisma.TransactionCl
     const estimate = await estimateStayTimeAdjustmentInTransaction(tx, {
       organizationId: reservation.property.organizationId, propertyId: reservation.propertyId,
       reservationId: reservation.id, operation: input.operation, requestedLocalTime: input.requestedLocalTime,
-    }, now);
+    }, now, options.ownModificationId);
     if (reservation.totalAmount === null || reservation.currency === null) reject("STAY_TIME_PRICING_SNAPSHOT_REQUIRED");
     const pricing = priceStayTimeService({ currency: reservation.currency,
       currentTotal: reservation.totalAmount.toString(), pricingBreakdown: reservation.pricingBreakdown,

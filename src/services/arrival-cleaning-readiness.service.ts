@@ -6,7 +6,7 @@ import type { StayTimeEvidence } from "../pin-ai/actions/stay-time-policy.js";
 export async function readArrivalCleaningReadiness(
   tx: Prisma.TransactionClient,
   input: { organizationId: string; propertyId: string; reservationId: string;
-    checkIn: Date; requestedAt: Date; now: Date; cleaningStartOffsetMinutes: number },
+    checkIn: Date; requestedAt: Date; now: Date; cleaningStartOffsetMinutes: number; ownModificationId?: string },
 ): Promise<StayTimeEvidence["arrivalReadiness"]> {
   const { organizationId, propertyId, reservationId, checkIn, requestedAt, now } = input;
   const offset = input.cleaningStartOffsetMinutes;
@@ -57,7 +57,8 @@ export async function readArrivalCleaningReadiness(
     select: { id: true },
   });
   const pendingChange = await tx.reservationModification.findFirst({
-    where: { reservation: { propertyId, property: { organizationId } }, AND: [
+    where: { ...(input.ownModificationId ? { id: { not: input.ownModificationId } } : {}),
+      reservation: { propertyId, property: { organizationId } }, AND: [
       { OR: [{ reservationId: prior.id }, { proposedCheckIn: { lt: checkIn }, proposedCheckOut: { gt: completed } }] },
       { OR: [{ status: "PAYMENT_PROCESSING" }, { status: "APPLYING" },
         { status: "AWAITING_PAYMENT", checkoutExpiresAt: { gt: now } }] },

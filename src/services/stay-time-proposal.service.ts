@@ -17,10 +17,10 @@ function comparable(terms: Record<string, unknown>) {
 }
 
 function validator(platformFeePercent: string): StayTimeProposalValidator {
-  return async input => { await revalidate(input, platformFeePercent); };
+  return async input => { await revalidateStayTimeTerms(input, platformFeePercent); };
 }
 
-async function revalidate({ db, guestToken, termsSnapshot, expiresAt, now }: Parameters<StayTimeProposalValidator>[0], platformFeePercent: string) {
+export async function revalidateStayTimeTerms({ db, guestToken, termsSnapshot, expiresAt, now }: Parameters<StayTimeProposalValidator>[0], platformFeePercent: string, ownModificationId?: string) {
     if (!termsSnapshot || typeof termsSnapshot !== "object" || Array.isArray(termsSnapshot)) reject("INVALID_STAY_TIME_TERMS");
     const terms = termsSnapshot as Record<string, unknown>;
     if (terms.version !== "stay_time_quote_v1" ||
@@ -34,7 +34,7 @@ async function revalidate({ db, guestToken, termsSnapshot, expiresAt, now }: Par
         expiresAt.getTime() !== expiry) reject("STAY_TIME_QUOTE_EXPIRED");
     const fresh = await prepareStayTimeQuoteInTransaction(db, {
       guestToken, operation: terms.operation, requestedLocalTime: terms.requestedLocalTime,
-    }, { now, platformFeePercent });
+    }, { now, platformFeePercent, ownModificationId });
     if (comparable(terms) !== comparable(fresh.terms)) reject("STAY_TIME_QUOTE_CHANGED");
     return fresh;
 }
@@ -65,8 +65,8 @@ export async function confirmStayTimeProposal(db: PrismaClient, input: {
   return { ...result, paymentReady: false as const, authorizationGranted: false as const, availabilityHeld: false as const };
 }
 
-/** Internal handoff only. Existing checkout/apply must reject this operation until
- * their stay-time validators and worker reconciliation are integrated. */
+/** Internal handoff only. Free canonical apply has a dedicated validator;
+ * paid checkout/apply and full worker reconciliation remain gated. */
 export async function stageStayTimeModification(db: PrismaClient, input: {
   guestToken: string; proposalId: string;
 }, options: Options) {
@@ -106,7 +106,7 @@ export async function stageStayTimeModification(db: PrismaClient, input: {
           if (existing.requestFingerprint !== fingerprint) reject("STAY_TIME_REQUEST_REUSED");
           return { modification: existing, idempotentReplay: true, paymentReady: false as const, actionExecuted: false as const };
         }
-        const fresh = await revalidate({ db: tx, guestToken: input.guestToken, termsSnapshot: terms,
+        const fresh = await revalidateStayTimeTerms({ db: tx, guestToken: input.guestToken, termsSnapshot: terms,
           expiresAt: proposal.expiresAt, now }, options.platformFeePercent);
         // Host review is also an active modification even when it has no payment hold.
         if (await tx.reservationModification.findFirst({ where: { reservationId: reservation.id,

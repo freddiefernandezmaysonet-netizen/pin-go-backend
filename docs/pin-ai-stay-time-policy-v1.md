@@ -59,12 +59,32 @@ reservation-modification interval holds. That hold alone does not reserve the
 additional cleaning buffer; a full turnover hold integration is still required.
 
 No Stripe session, payment, reservation date change, access update, or message is
-performed by this adapter. It is not exposed by a route/tool. Existing generic
-checkout/apply operation gates deliberately reject EARLY_CHECKIN/LATE_CHECKOUT
-until their validators and worker integration are implemented. In particular,
+performed by this adapter. It is not exposed by a route/tool. Paid checkout/apply
+operation gates still reject EARLY_CHECKIN/LATE_CHECKOUT. In particular,
 APPLYING here is a staged state, not proof of an applied change. The remaining
 integration must handle holds/expiry and post-payment failures, revalidate before
 apply, and durably reconcile both access and cleaning even without cleaner NFC.
+
+### Free canonical apply
+
+The existing canonical apply service now accepts zero-cost stay-time adjustments
+only after validating the persisted proposal, its fingerprint, exact pricing and
+guest/amenity preservation. It requotes inside its serializable transaction and
+checks the complete turnover interval. Only its own scoped APPLYING record is
+excluded from pending-hold/readiness checks. Late checkout may apply IN_STAY;
+early check-in still requires current cleaner completion and a future arrival.
+
+Reservation dates/pricing and APPLIED status commit together. Existing reconciliation
+snapshots retain the old dates so the reconciler can detect the change. Replays
+do not reapply the mutation but retry the existing reconciliation call. Tests stub
+this call: no hardware or messaging behavior is certified by these database tests.
+Business validation failures cancel zero-cost staging and release its hold;
+transient transaction failures remain retryable. Paid terms remain rejected.
+
+These changes are internal/unmounted. Durable cleaning-buffer protection against
+future bookings, paid checkout/apply, access/NFC start-time correctness, and cleaner
+rescheduling without NFC must be completed before rollout. No claim is made that
+a committed reservation-time change alone establishes working physical access.
 
 - `pin-go-eligibility-checks.ts` currently treats a `CleaningConfirmation` with
   status `CONFIRMED` for the arriving reservation as early-arrival readiness.

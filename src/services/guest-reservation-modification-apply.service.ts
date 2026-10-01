@@ -9,6 +9,8 @@ import {
 import { formatInTimeZone } from "date-fns-tz";
 import { isConfirmedInStayExtension } from "../pin-ai/actions/in-stay-extension-confirmation.js";
 import { InStayExtensionError } from "../pin-ai/actions/in-stay-extension.js";
+import { StayTimePolicyError, type StayTimeOperation } from "../pin-ai/actions/stay-time-policy.js";
+import { isStayTimeModification, validateFreeStayTimeApply } from "./stay-time-apply-validation.service.js";
 
 import { persistChannexAriReservationIntent } from "../pms/outbound/channex-ari-reservation-producer.service";
 import {
@@ -24,6 +26,8 @@ type MoneyValue = Prisma.Decimal | number | string | null;
 
 type ApplyPlanInput = {
   now: Date;
+  /** Internal only: supplied after locked database validation, never from a request. */
+  validatedStayTimeOperation?: StayTimeOperation;
   modification: {
     status: ReservationModificationStatus;
     financialAction: ReservationModificationFinancialAction;
@@ -314,7 +318,7 @@ export function buildGuestReservationModificationApplyPlan(
 
   let inStayExtension = false;
   try {
-    inStayExtension = isConfirmedInStayExtension(input);
+    inStayExtension = input.validatedStayTimeOperation ? false : isConfirmedInStayExtension(input);
   } catch (error) {
     if (error instanceof InStayExtensionError) {
       throw applyError({ code: error.code, message: error.message });
@@ -325,7 +329,7 @@ export function buildGuestReservationModificationApplyPlan(
   if (
     input.reservation.status !== ReservationStatus.ACTIVE ||
     input.reservation.paymentState !== PaymentState.PAID ||
-    (!inStayExtension && input.reservation.checkIn.getTime() <= input.now.getTime())
+    (!inStayExtension && input.validatedStayTimeOperation !== "LATE_CHECKOUT" && input.reservation.checkIn.getTime() <= input.now.getTime())
   ) {
     throw applyError({
       code: "RESERVATION_NOT_ELIGIBLE_FOR_MODIFICATION_APPLY",
@@ -344,7 +348,7 @@ export function buildGuestReservationModificationApplyPlan(
 
   if (
     proposedCheckOut <= proposedCheckIn ||
-    (!inStayExtension && proposedCheckIn.getTime() <= input.now.getTime())
+    (!inStayExtension && input.validatedStayTimeOperation !== "LATE_CHECKOUT" && proposedCheckIn.getTime() <= input.now.getTime())
   ) {
     throw applyError({
       code: "RESERVATION_MODIFICATION_PROPOSED_STAY_INVALID",
@@ -435,7 +439,7 @@ export function buildGuestReservationModificationApplyPlan(
   );
 
   return {
-    availabilityCheckIn: inStayExtension ? input.modification.currentCheckOut : proposedCheckIn,
+    availabilityCheckIn: inStayExtension || input.validatedStayTimeOperation === "LATE_CHECKOUT" ? input.modification.currentCheckOut : proposedCheckIn,
     datesChanged,
     guestsChanged,
     amenitiesChanged,
@@ -603,6 +607,7 @@ export async function applyGuestReservationModification(input: {
   }
 
   const now = dependencies.now();
+  let freeStayTimeAttempt = false;
 
   try {
     const result = await prisma.$transaction(
@@ -664,10 +669,16 @@ export async function applyGuestReservationModification(input: {
           };
         }
 
+        const stayTime = isStayTimeModification(modification.guestConfirmation);
+        freeStayTimeAttempt = stayTime && modification.financialAction === "NO_PAYMENT_REQUIRED" &&
+          Number(modification.additionalChargeAmount) === 0 && !modification.stripePaymentIntentId && !modification.stripeChargeId;
+        const validatedStayTime = stayTime
+          ? await validateFreeStayTimeApply(tx, modification, modification.reservation, now) : null;
         const plan = buildGuestReservationModificationApplyPlan({
           now,
           modification,
           reservation: modification.reservation,
+          ...(validatedStayTime ? { validatedStayTimeOperation: validatedStayTime.operation } : {}),
         });
 
         if (plan.datesChanged) {
@@ -677,7 +688,7 @@ export async function applyGuestReservationModification(input: {
             reservationId: modification.reservation.id,
             propertyId: modification.reservation.propertyId,
             checkIn: plan.availabilityCheckIn,
-            checkOut: modification.proposedCheckOut,
+            checkOut: validatedStayTime?.requiredFreeUntil ?? modification.proposedCheckOut,
             now,
           });
         }
@@ -793,8 +804,10 @@ export async function applyGuestReservationModification(input: {
           status: ReservationModificationStatus.APPLYING,
         },
         data: {
+          ...(freeStayTimeAttempt && error instanceof StayTimePolicyError
+            ? { status: ReservationModificationStatus.CANCELLED, cancelledAt: now } : {}),
           failureCode:
-            error instanceof GuestReservationModificationError
+            error instanceof GuestReservationModificationError || error instanceof StayTimePolicyError
               ? error.code
               : "RESERVATION_MODIFICATION_APPLY_FAILED",
           failureMessage:
@@ -804,8 +817,8 @@ export async function applyGuestReservationModification(input: {
             ),
           failureDetails: {
             retryable:
-              !(error instanceof GuestReservationModificationError) ||
-              error.statusCode >= 500,
+              !(error instanceof StayTimePolicyError) &&
+              (!(error instanceof GuestReservationModificationError) || error.statusCode >= 500),
           },
         },
       })

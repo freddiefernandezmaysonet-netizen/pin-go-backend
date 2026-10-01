@@ -52,7 +52,7 @@ export async function estimateStayTimeAdjustment(
 
 /** Reuse an existing read snapshot when binding estimate and financial terms. */
 export async function estimateStayTimeAdjustmentInTransaction(
-  tx: Prisma.TransactionClient, input: StayTimeEstimateRequest, now: Date,
+  tx: Prisma.TransactionClient, input: StayTimeEstimateRequest, now: Date, ownModificationId?: string,
 ) {
   if (![input.organizationId, input.propertyId, input.reservationId].every(value => typeof value === "string" && value.trim())) {
     reject("SCOPE_MISMATCH");
@@ -95,10 +95,15 @@ export async function estimateStayTimeAdjustmentInTransaction(
       { status: "PAYMENT_PROCESSING" as const }, { status: "APPLYING" as const },
       { status: "AWAITING_PAYMENT" as const, checkoutExpiresAt: { gt: now } },
     ] };
+    // Only the applying modification of this exact authenticated stay may be excluded.
+    if (ownModificationId && !await tx.reservationModification.findFirst({ where: {
+      id: ownModificationId, reservationId: row.id, status: "APPLYING", requestSource: "PIN_AI_GUEST_SERVICES",
+    }, select: { id: true } })) reject("STAY_TIME_MODIFICATION_SCOPE_MISMATCH");
+    const excludeOwn = ownModificationId ? { id: { not: ownModificationId } } : {};
     // A second operation on this same stay is unsafe even if its hold doesn't
     // overlap the extra interval. Confirmation/payment may still change its base.
     const ownPending = await tx.reservationModification.findFirst({
-      where: { reservationId: row.id, ...pending }, select: { id: true },
+      where: { reservationId: row.id, ...pending, ...excludeOwn }, select: { id: true },
     });
     if (ownPending) reject("RESERVATION_CHANGE_IN_PROGRESS");
     const history = await tx.reservationModification.findMany({
@@ -125,7 +130,7 @@ export async function estimateStayTimeAdjustmentInTransaction(
       select: { startDate: true, endDate: true },
     });
     const held = await tx.reservationModification.findFirst({
-      where: { reservation: { propertyId: row.propertyId, property: { organizationId: input.organizationId } },
+      where: { ...excludeOwn, reservation: { propertyId: row.propertyId, property: { organizationId: input.organizationId } },
         proposedCheckIn: { lt: coveredUntil }, proposedCheckOut: { gt: coveredFrom }, ...pending },
       select: { proposedCheckIn: true, proposedCheckOut: true },
     });
@@ -137,6 +142,7 @@ export async function estimateStayTimeAdjustmentInTransaction(
     const arrivalReadiness = early ? await readArrivalCleaningReadiness(tx, {
       ...scope, reservationId: row.id, checkIn: row.checkIn, requestedAt, now,
       cleaningStartOffsetMinutes: offset,
+      ownModificationId,
     }) : null;
     const plan = planStayTimeAdjustment({ operation: input.operation, requestedAt, now,
       reservation: { ...scope, ...row, currency: row.currency?.toUpperCase() ?? "", adjustedOperations,
