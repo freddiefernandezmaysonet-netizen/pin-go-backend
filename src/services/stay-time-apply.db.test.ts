@@ -13,7 +13,7 @@ test("free stay-time changes apply atomically through the canonical service", { 
   const db = new PrismaClient({ datasources: { db: { url } } });
   t.after(() => db.$disconnect());
   for (const scenario of ["late", "early", "cleaning-revoked", "cleaning-buffer-blocked", "reservation-changed",
-    "expired", "pricing-tampered", "reconcile-retry", "transaction-retry", "paid-blocked"] as const) {
+    "expired", "pricing-tampered", "reconcile-retry", "transaction-retry", "first-lock-retry", "paid-blocked"] as const) {
     await t.test(scenario, async () => {
       const early = scenario === "early" || scenario === "cleaning-revoked";
       const now = new Date(early ? "2026-10-01T12:00Z" : "2026-10-02T12:00Z");
@@ -71,6 +71,9 @@ test("free stay-time changes apply atomically through the canonical service", { 
         const retryClient = { reservationModification: db.reservationModification,
           $transaction: (async (callback: (tx: Prisma.TransactionClient) => Promise<unknown>, options?: { isolationLevel?: Prisma.TransactionIsolationLevel }) => {
             transactionAttempts++;
+            if (scenario === "first-lock-retry" && transactionAttempts === 1) throw new Prisma.PrismaClientKnownRequestError("Synthetic first-lock serialization conflict", {
+              code: "P2010", clientVersion: "synthetic-test", meta: { code: "40001" },
+            });
             return db.$transaction(async tx => {
               const result = await callback(tx);
               // Abort after the writes but before commit: retry must not duplicate them.
@@ -80,12 +83,12 @@ test("free stay-time changes apply atomically through the canonical service", { 
               return result;
             }, options);
           }) as typeof db.$transaction };
-        const dependencies = { client: scenario === "transaction-retry" ? retryClient : db, now: () => new Date(now.getTime() + (scenario === "expired" ? 60_000 : 10_000)),
+        const dependencies = { client: scenario === "transaction-retry" || scenario === "first-lock-retry" ? retryClient : db, now: () => new Date(now.getTime() + (scenario === "expired" ? 60_000 : 10_000)),
           reconcile: async (reservationId: string) => {
             reconciled.push(reservationId);
             if (scenario === "reconcile-retry" && reconciled.length === 1) throw new Error("Synthetic reconcile outage");
           } };
-        const success = ["late", "early", "reconcile-retry", "transaction-retry"].includes(scenario);
+        const success = ["late", "early", "reconcile-retry", "transaction-retry", "first-lock-retry"].includes(scenario);
         if (!success) {
           const code = scenario === "cleaning-revoked" ? "ARRIVAL_READINESS_REQUIRED" : scenario === "cleaning-buffer-blocked" ? "TURNOVER_CONFLICT"
             : scenario === "reservation-changed" ? "STAY_TIME_QUOTE_CHANGED" : scenario === "expired" ? "STAY_TIME_QUOTE_EXPIRED"
@@ -116,7 +119,7 @@ test("free stay-time changes apply atomically through the canonical service", { 
           assert.deepEqual(await db.reservation.findUniqueOrThrow({ where: { id: stay.id } }), applied);
           assert.deepEqual(reconciled, [stay.id, stay.id]);
           assert.equal(await db.reservationModification.count({ where: { reservationId: stay.id } }), 1);
-          if (scenario === "transaction-retry") assert.equal(transactionAttempts, 3); // failed tx, retry, idempotent replay
+          if (scenario === "transaction-retry" || scenario === "first-lock-retry") assert.equal(transactionAttempts, 3); // failed tx, retry, idempotent replay
         }
       } finally {
         await db.cleaningWork.deleteMany({ where: { propertyId: property.id } });

@@ -610,7 +610,7 @@ export async function applyGuestReservationModification(input: {
   );
   const locator = await prisma.reservationModification.findUnique({
     where: { id: modificationId },
-    select: { reservationId: true },
+    select: { reservationId: true, requestSource: true, guestConfirmation: true },
   });
 
   if (!locator) {
@@ -622,6 +622,10 @@ export async function applyGuestReservationModification(input: {
   }
 
   const now = dependencies.now();
+  // PostgreSQL can raise 40001 while acquiring the first lock, before the
+  // transaction has loaded the modification and set its validated-path flags.
+  // This hint permits bounded DB retries only; all authorization stays inside.
+  const knownStayTime = locator.requestSource === "PIN_AI_GUEST_SERVICES" && isStayTimeModification(locator.guestConfirmation);
   let freeStayTimeAttempt = false;
   let paidStayTimeAttempt = false;
 
@@ -808,7 +812,7 @@ export async function applyGuestReservationModification(input: {
       {
         isolationLevel: Prisma.TransactionIsolationLevel.Serializable,
       }
-    ), () => freeStayTimeAttempt || paidStayTimeAttempt);
+    ), () => knownStayTime || freeStayTimeAttempt || paidStayTimeAttempt);
 
     if (result.datesChanged) {
       await reconcileReservation(result.reservation.id);
