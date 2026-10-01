@@ -87,6 +87,7 @@ async function fixture(t, overrides = {}) {
   };
   const unused = async () => { throw new Error("Unexpected unrelated action in completion test"); };
   loadTs("./cleaning-confirm.routes.ts", {
+    "../services/staff-language.service.js": loadTs("../services/staff-language.service.ts"),
     express: { Router: () => router },
     "@prisma/client": { PrismaClient: class { constructor() { return db; } }, ReservationStatus: { CANCELLED: "CANCELLED" } },
     "../services/cleaner-access-autopilot.service": { ensureCleanerNfcAccessForConfirmedCleaning: async () => ({ ok: true }) },
