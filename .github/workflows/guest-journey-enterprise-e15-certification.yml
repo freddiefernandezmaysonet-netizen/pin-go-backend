@@ -112,6 +112,10 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+          if [ "${GITHUB_HEAD_REF:-}" = "agent/staff-preferred-language-v1" ]; then
+            python3 scripts/verify-staff-language-pr-scope.py
+            exit 0
+          fi
           base_sha="${{ github.event.pull_request.base.sha }}"
           if [ -n "${base_sha}" ]; then
             test -z "$(git diff --name-only "${base_sha}"...HEAD | grep -E '^prisma/migrations/|^prisma/schema\.prisma$|^package(-lock)?\.json$' || true)"

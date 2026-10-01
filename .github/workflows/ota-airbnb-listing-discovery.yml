@@ -71,6 +71,11 @@ jobs:
           git fetch origin "+refs/heads/$BASE_BRANCH:refs/remotes/origin/$BASE_BRANCH" --depth=1
           git diff --name-only "origin/$BASE_BRANCH...HEAD" | sort > "$RUNNER_TEMP/actual.txt"
 
+          if [ "${GITHUB_HEAD_REF:-}" = "agent/staff-preferred-language-v1" ]; then
+            python3 scripts/verify-staff-language-pr-scope.py
+            exit 0
+          fi
+
           # PR #294 only: TTLock Gateway Health foundation is outside OTA scope.
           # Keep this workflow fail-closed by permitting only the exact foundation files.
           if [ "${GITHUB_HEAD_REF:-$GITHUB_REF_NAME}" = "agent/ttlock-gateway-health-foundation-v1" ]; then

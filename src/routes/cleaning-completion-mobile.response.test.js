@@ -64,7 +64,7 @@ async function fixture(t, overrides = {}) {
       return where.token === "fixture-cleaner-token" ? { ...confirmation } : null;
     } },
     reservation: { async findUnique() { return structuredClone(reservation); } },
-    staffMember: { async findUnique() { return { id: work.staffMemberId }; } },
+    staffMember: { async findUnique() { return { id: work.staffMemberId, preferredLanguage: overrides.language ?? "en" }; } },
     cleaningWork: {
       async findFirst({ where }) {
         return Object.entries(where).every(([key, value]) => work[key] === value) ? { ...work } : null;
@@ -245,3 +245,23 @@ test("an invalid token cannot complete any work", async t => {
   assert.equal(response.status, 404);
   assert.equal(f.writes, 0);
 });
+
+for (const language of ["en", "es"]) {
+  for (const timezone of ["America/Puerto_Rico", "America/Los_Angeles"]) {
+    test(`completion renders ${language} in ${timezone} and preserves idempotency`, async t => {
+      const f = await fixture(t, { language, timezone });
+      const response = await f.request("POST");
+      assert.equal(response.status, 200);
+      assert.ok(response.html.includes(`<html lang="${language}">`));
+      assert.match(response.html, language === "es" ? /<h2>Limpieza completada<\/h2>/ : /<h2>Cleaning completed<\/h2>/);
+      assert.doesNotMatch(response.html, language === "es" ? /<h2>Cleaning completed/ : /<h2>Limpieza completada/);
+      const expected = new Intl.DateTimeFormat(language === "es" ? "es-US" : "en-US", {
+        timeZone: timezone, year: "numeric", month: "short", day: "numeric",
+        hour: "numeric", minute: "2-digit", hour12: true, timeZoneName: "short",
+      }).format(completedAt);
+      assert.ok(response.html.includes(expected));
+      assert.equal((await f.request("POST")).html, response.html);
+      assert.equal(f.writes, 1);
+    });
+  }
+}
