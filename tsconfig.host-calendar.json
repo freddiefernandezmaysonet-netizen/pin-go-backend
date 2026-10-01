@@ -1,0 +1,15 @@
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "noEmit": true,
+    "module": "ESNext",
+    "moduleResolution": "Bundler",
+    "types": ["node"],
+    "exactOptionalPropertyTypes": false
+  },
+  "include": [
+    "src/services/host-calendar.service.ts",
+    "src/services/host-calendar.service.test.ts",
+    "src/routes/dashboard.host-calendar.route.ts"
+  ]
+}

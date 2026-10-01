@@ -4,6 +4,8 @@ on:
   pull_request:
     branches: [main]
     paths:
+      - "src/domain/computeOperationalRisk.ts"
+      - "src/domain/computeOperationalRisk.test.ts"
       - "src/ttlock/ttlock.callback.ts"
       - "src/ttlock/ttlock.callback.test.ts"
       - "src/routes/ttlock-callback.routes.ts"
@@ -34,6 +36,7 @@ jobs:
       - name: Run callback canary tests
         run: >-
           node --import tsx --test
+          src/domain/computeOperationalRisk.test.ts
           src/ttlock/ttlock.callback.test.ts
           src/routes/ttlock-callback.routes.test.ts
           src/routes/ttlock-callback.server-contract.test.ts
