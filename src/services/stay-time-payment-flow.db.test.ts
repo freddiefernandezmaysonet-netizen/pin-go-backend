@@ -1,11 +1,13 @@
 import assert from "node:assert/strict";
 import test from "node:test";
+import type Stripe from "stripe";
 import { PrismaClient } from "@prisma/client";
 import { defaultStayTimeSettings } from "../pin-ai/actions/stay-time-settings.js";
 import { createStayTimeProposal, confirmStayTimeProposal, stageStayTimeModification } from "./stay-time-proposal.service.js";
 import { syntheticStayTimePaymentEvidence } from "./stay-time-payment-evidence.fixture.js";
 import { processStayTimePayment, type StayTimePaymentFlowDependencies, type StayTimeRefundEvidence } from "./stay-time-payment-flow.service.js";
 import { GuestReservationModificationError } from "./guest-reservation-modification.service.js";
+import { createStayTimeStripeProvider, type StayTimeStripeClient } from "./stay-time-stripe-provider.js";
 
 const url = process.env.STAY_TIME_TEST_DATABASE_URL;
 test("paid stay-time processing applies once or durably recovers only the incremental payment", { skip: !url }, async t => {
@@ -14,7 +16,7 @@ test("paid stay-time processing applies once or durably recovers only the increm
   assert.equal(parsed.pathname, "/pingo_stay_time_test");
   const db = new PrismaClient({ datasources: { db: { url } } });
   t.after(() => db.$disconnect());
-  for (const scenario of ["late", "early", "concurrent-apply", "revoked-cleaning", "blocked-turnover", "price-changed", "expired", "expired-status",
+  for (const scenario of ["late", "early", "stripe-adapter-apply", "stripe-adapter-refund", "concurrent-apply", "revoked-cleaning", "blocked-turnover", "price-changed", "expired", "expired-status",
     "refund-outage", "refund-response-lost", "refund-pending", "refund-wrong-receipt", "concurrent-refund",
     "payment-outage", "wrong-payment", "partially-refunded", "wrong-account", "reconcile-outage", "cancelled-without-recovery"] as const) {
     await t.test(scenario, async () => {
@@ -65,7 +67,7 @@ test("paid stay-time processing applies once or durably recovers only the increm
         await db.reservationModification.update({ where: { id }, data: { stripeConnectedAccountId: reservation.stripeConnectedAccountId,
           stripeCheckoutSessionId: `cs_${id}`, ...(scenario === "cancelled-without-recovery" ? { status: "CANCELLED" } : {}),
           ...(scenario === "expired-status" ? { status: "EXPIRED", expiredAt: now } : {}) } });
-        const needsRefund = ["revoked-cleaning", "blocked-turnover", "price-changed", "expired", "expired-status", "refund-outage", "refund-response-lost",
+        const needsRefund = ["stripe-adapter-refund", "revoked-cleaning", "blocked-turnover", "price-changed", "expired", "expired-status", "refund-outage", "refund-response-lost",
           "refund-pending", "refund-wrong-receipt", "concurrent-refund"].includes(scenario);
         if (scenario === "revoked-cleaning") await db.cleaningWork.update({ where: { id: workId! }, data: { completionConfirmedAt: null } });
         if (needsRefund && !["revoked-cleaning", "price-changed", "expired", "expired-status"].includes(scenario)) await db.propertyBlockedDate.create({
@@ -114,6 +116,38 @@ test("paid stay-time processing applies once or durably recovers only the increm
             return result;
           },
         };
+        if (scenario.startsWith("stripe-adapter-")) {
+          const objects = syntheticStayTimePaymentEvidence({ ...staged.modification,
+            stripeConnectedAccountId: reservation.stripeConnectedAccountId, stripeCheckoutSessionId: `cs_${id}`,
+            stripePaymentIntentId: `pi_${id}`, stripeChargeId: `ch_${id}`, stripeApplicationFeeId: `fee_${id}` }, reservation, now);
+          let receipt: Stripe.Refund | undefined;
+          const scoped = (options: Stripe.RequestOptions) => assert.equal(options.stripeAccount, reservation.stripeConnectedAccountId);
+          const client: StayTimeStripeClient = {
+            checkout: { sessions: { retrieve: async (_id, _params, options) => { scoped(options); retrieveCalls++; return objects.session; } } },
+            paymentIntents: { retrieve: async (_id, _params, options) => { scoped(options); return objects.paymentIntent; } },
+            charges: { retrieve: async (_id, _params, options) => { scoped(options); return objects.charge; } },
+            applicationFees: { retrieve: async () => objects.applicationFee! },
+            refunds: {
+              list: async (_params, options) => { scoped(options); return { object: "list", data: receipt ? [receipt] : [], has_more: false, url: "/v1/refunds" }; },
+              retrieve: async (refundId, _params, options) => { scoped(options); assert.equal(refundId, receipt?.id); return receipt!; },
+              create: async (params, options) => {
+                scoped(options); refundCalls++;
+                assert.equal(params.charge, `ch_${id}`); assert.equal(params.amount, objects.charge.amount);
+                assert.equal(params.refund_application_fee, true); assert.equal(options.idempotencyKey, `stay-time-recovery:${id}`);
+                receipt = { id: `re_${id}`, object: "refund", charge: `ch_${id}`, payment_intent: `pi_${id}`,
+                  amount: objects.charge.amount, currency: "usd", status: "succeeded", metadata: params.metadata,
+                  transfer_reversal: null, source_transfer_reversal: null } as Stripe.Refund;
+                objects.charge.amount_refunded = objects.charge.amount; objects.charge.refunded = true;
+                objects.applicationFee!.amount_refunded = objects.applicationFee!.amount; objects.applicationFee!.refunded = true;
+                refundLedger.set(options.idempotencyKey!, { refundId: receipt.id, chargeId: `ch_${id}`, paymentIntentId: `pi_${id}`,
+                  connectedAccountId: reservation.stripeConnectedAccountId!, amountMinor: receipt.amount, currency: "usd",
+                  status: "succeeded", platformFeeRefundedMinor: objects.applicationFee!.amount });
+                return receipt;
+              },
+            },
+          };
+          Object.assign(deps, createStayTimeStripeProvider(client, () => now));
+        }
         const scope = { modificationId: id, checkoutSessionId: `cs_${id}`,
           connectedAccountId: scenario === "wrong-account" ? "acct_wrong" : reservation.stripeConnectedAccountId! };
         const run = () => processStayTimePayment(scope, deps);

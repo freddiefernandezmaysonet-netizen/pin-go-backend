@@ -10,13 +10,14 @@ type Scope = { modificationId: string; checkoutSessionId: string; connectedAccou
 export type StayTimeRefundRequest = {
   modificationId: string; connectedAccountId: string; chargeId: string; paymentIntentId: string;
   amountMinor: number; platformFeeMinor: number; currency: "usd"; idempotencyKey: string; existingRefundId: string | null;
+  recoveryStartedAt: string;
 };
 export type StayTimeRefundEvidence = {
   refundId: string; connectedAccountId: string; chargeId: string; paymentIntentId: string;
   amountMinor: number; platformFeeRefundedMinor: number; currency: "usd"; status: "pending" | "succeeded" | "failed";
 };
 type Recovery = {
-  version: "stay_time_recovery_v1"; reason: string; requestedAt: string; request: StayTimeRefundRequest;
+  version: "stay_time_recovery_v2"; reason: string; requestedAt: string; request: StayTimeRefundRequest;
   refund: StayTimeRefundEvidence | null;
 };
 export type StayTimePaymentFlowDependencies = {
@@ -54,17 +55,17 @@ async function locked<T>(deps: StayTimePaymentFlowDependencies, scope: Scope, wo
     }
   }
 }
-function refundRequest(m: Snapshot): StayTimeRefundRequest {
-  if (!m.stripeChargeId || !m.stripePaymentIntentId || !m.stripeConnectedAccountId || m.stripePaymentStatus !== "paid") reject("STAY_TIME_RECOVERY_EVIDENCE_REQUIRED");
+function refundRequest(m: Snapshot, startedAt = m.cancelledAt): StayTimeRefundRequest {
+  if (!startedAt || !Number.isFinite(startedAt.getTime()) || !m.stripeChargeId || !m.stripePaymentIntentId || !m.stripeConnectedAccountId || m.stripePaymentStatus !== "paid") reject("STAY_TIME_RECOVERY_EVIDENCE_REQUIRED");
   return { modificationId: m.id, connectedAccountId: m.stripeConnectedAccountId, chargeId: m.stripeChargeId,
     paymentIntentId: m.stripePaymentIntentId, amountMinor: Math.round(Number(m.additionalChargeAmount) * 100),
     platformFeeMinor: Math.round(Number(m.additionalPlatformFeeAmount) * 100), currency: "usd",
-    idempotencyKey: `stay-time-recovery:${m.id}`, existingRefundId: null };
+    idempotencyKey: `stay-time-recovery:${m.id}`, existingRefundId: null, recoveryStartedAt: startedAt.toISOString() };
 }
 function recovery(m: Snapshot): Recovery {
   const value = m.failureDetails as unknown as Recovery | null;
   if (m.status !== "CANCELLED" || !["STAY_TIME_REFUND_PENDING", "STAY_TIME_REFUNDED"].includes(m.failureCode ?? "") ||
-      !value || value.version !== "stay_time_recovery_v1" || typeof value.reason !== "string" || !value.request ||
+      !value || value.version !== "stay_time_recovery_v2" || typeof value.reason !== "string" || !value.request ||
       Object.entries(refundRequest(m)).some(([key, expected]) => value.request[key as keyof StayTimeRefundRequest] !== expected)) reject("STAY_TIME_RECOVERY_CONFLICT");
   if (value.refund) assertRefund(value.request, value.refund);
   if (m.failureCode === "STAY_TIME_REFUNDED" && value.refund?.status !== "succeeded") reject("STAY_TIME_RECOVERY_CONFLICT");
@@ -139,9 +140,10 @@ export async function processStayTimePayment(scope: Scope, deps: StayTimePayment
       if (m.stripePaymentIntentId !== snapshot.stripePaymentIntentId || m.stripeChargeId !== snapshot.stripeChargeId ||
           Number(m.additionalChargeAmount) !== Number(snapshot.additionalChargeAmount) ||
           Number(m.additionalPlatformFeeAmount) !== Number(snapshot.additionalPlatformFeeAmount)) reject("STAY_TIME_RECOVERY_CONFLICT");
-      const journal: Recovery = { version: "stay_time_recovery_v1", reason: error.code,
-        requestedAt: deps.now().toISOString(), request: refundRequest(m), refund: null };
-      await tx.reservationModification.update({ where: { id: m.id }, data: { status: "CANCELLED", cancelledAt: deps.now(),
+      const startedAt = deps.now();
+      const journal: Recovery = { version: "stay_time_recovery_v2", reason: error.code,
+        requestedAt: startedAt.toISOString(), request: refundRequest(m, startedAt), refund: null };
+      await tx.reservationModification.update({ where: { id: m.id }, data: { status: "CANCELLED", cancelledAt: startedAt,
         failureCode: "STAY_TIME_REFUND_PENDING", failureMessage: "Paid stay-time change could not be applied; payment recovery pending.",
         failureDetails: journal as unknown as Prisma.InputJsonValue } });
       return true;

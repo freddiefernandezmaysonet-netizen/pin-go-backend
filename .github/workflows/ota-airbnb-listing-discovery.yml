@@ -130,6 +130,8 @@ jobs:
           src/services/stay-time-quote.service.ts
           src/services/stay-time-proposal.service.ts
           src/services/stay-time-checkout-preflight.db.test.ts
+          src/services/stay-time-stripe-provider.ts
+          src/services/stay-time-stripe-provider.test.ts
           src/services/stay-time-payment-flow.service.ts
           src/services/stay-time-payment-flow.db.test.ts
           src/services/stay-time-payment-evidence.ts

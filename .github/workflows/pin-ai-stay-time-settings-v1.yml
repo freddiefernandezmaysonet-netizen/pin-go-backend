@@ -14,6 +14,7 @@ on:
       - "src/services/stay-time-payment-window*"
       - "src/services/stay-time-payment-evidence*"
       - "src/services/stay-time-payment-flow*"
+      - "src/services/stay-time-stripe-provider*"
       - "src/services/stay-time-checkout-preflight*"
       - "src/services/reservation.reconcile.service.ts"
       - "src/services/reservation-guest-access-window*"
@@ -64,6 +65,8 @@ jobs:
         run: node --import tsx --test src/services/cleaning-reconfirmation-renewal.db.test.ts
       - name: Confirmed quote and bounded payment deadlines
         run: node --import tsx --test src/services/stay-time-payment-window.test.ts src/services/stay-time-payment-evidence.test.ts
+      - name: Stripe retrieval and refund adapter with offline SDK responses
+        run: node --import tsx --test src/services/stay-time-stripe-provider.test.ts
       - name: Paid checkout and post-payment validation without side effects
         run: node --import tsx --test src/services/stay-time-checkout-preflight.db.test.ts
       - name: Paid application and durable payment recovery with simulated providers
