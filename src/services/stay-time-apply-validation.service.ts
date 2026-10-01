@@ -40,13 +40,14 @@ export async function validatePaidStayTimeCheckout(tx: Prisma.TransactionClient,
   return validateStayTimeSnapshot(tx, m, r, now, "CHECKOUT_CREATION");
 }
 
-/** Internal read-only post-payment validation. Intentionally NOT wired into the
- * canonical apply service until recovery and durable turnover holds are ready.
- * Evidence must come from authenticated, account-scoped provider retrieval.
+/** Internal post-payment validation for the trusted payment processor's canonical
+ * apply call. Guest routes and legacy webhooks do not supply this evidence.
+ * Provider retrieval, durable turnover holds and rollout remain separate gates.
  */
 export async function validatePaidStayTimeApply(tx: Prisma.TransactionClient, m: ReservationModification, r: Reservation,
   now: Date, evidence: StayTimePaymentEvidence) {
   if (m.status !== "APPLYING") reject("STAY_TIME_PAYMENT_APPLY_NOT_ELIGIBLE");
+  if (m.expiredAt || m.cancelledAt) reject("STAY_TIME_PAYMENT_ALREADY_CLOSED");
   assertStayTimePaymentEvidence(m, r, evidence, now);
   return validateStayTimeSnapshot(tx, m, r, now, "PAYMENT_APPLICATION");
 }

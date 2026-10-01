@@ -10,7 +10,8 @@ import { formatInTimeZone } from "date-fns-tz";
 import { isConfirmedInStayExtension } from "../pin-ai/actions/in-stay-extension-confirmation.js";
 import { InStayExtensionError } from "../pin-ai/actions/in-stay-extension.js";
 import { StayTimePolicyError, type StayTimeOperation } from "../pin-ai/actions/stay-time-policy.js";
-import { isStayTimeModification, validateFreeStayTimeApply } from "./stay-time-apply-validation.service.js";
+import { isStayTimeModification, validateFreeStayTimeApply, validatePaidStayTimeApply } from "./stay-time-apply-validation.service.js";
+import type { StayTimePaymentEvidence } from "./stay-time-payment-evidence.js";
 
 import { persistChannexAriReservationIntent } from "../pms/outbound/channex-ari-reservation-producer.service";
 import {
@@ -22,13 +23,13 @@ import { reconcileReservation } from "./reservation.reconcile.service";
 const prisma = new PrismaClient();
 const GUEST_TOKEN_POST_CHECKOUT_MS = 48 * 60 * 60 * 1000;
 
-async function retryFreeStayTimeTransaction<T>(run: () => Promise<T>, isFree: () => boolean): Promise<T> {
+async function retryStayTimeTransaction<T>(run: () => Promise<T>, isStayTime: () => boolean): Promise<T> {
   for (let attempt = 0; ; attempt++) {
     try { return await run(); }
     catch (error) {
       const conflict = error instanceof Prisma.PrismaClientKnownRequestError &&
         (error.code === "P2034" || (error.code === "P2010" && ["40001", "40P01"].includes(String(error.meta?.code))));
-      if (!isFree() || !conflict || attempt >= 2) throw error;
+      if (!isStayTime() || !conflict || attempt >= 2) throw error;
       await new Promise(resolve => setTimeout(resolve, 20 * (attempt + 1)));
     }
   }
@@ -591,6 +592,8 @@ type ApplyDependencies = Readonly<{
   client: Pick<PrismaClient, "reservationModification" | "$transaction">;
   now: () => Date;
   reconcile: (reservationId: string) => Promise<unknown>;
+  /** Internal trusted provider evidence; never populated from a guest request. */
+  stayTimePaymentEvidence?: StayTimePaymentEvidence;
 }>;
 const defaultApplyDependencies: ApplyDependencies = {
   client: prisma, now: () => new Date(), reconcile: reconcileReservation,
@@ -620,9 +623,10 @@ export async function applyGuestReservationModification(input: {
 
   const now = dependencies.now();
   let freeStayTimeAttempt = false;
+  let paidStayTimeAttempt = false;
 
   try {
-    const result = await retryFreeStayTimeTransaction(async () => await prisma.$transaction(
+    const result = await retryStayTimeTransaction(async () => await prisma.$transaction(
       async (tx) => {
         await tx.$queryRaw`
           SELECT "id"
@@ -684,8 +688,11 @@ export async function applyGuestReservationModification(input: {
         const stayTime = isStayTimeModification(modification.guestConfirmation);
         freeStayTimeAttempt = stayTime && modification.financialAction === "NO_PAYMENT_REQUIRED" &&
           Number(modification.additionalChargeAmount) === 0 && !modification.stripePaymentIntentId && !modification.stripeChargeId;
+        paidStayTimeAttempt = stayTime && modification.financialAction === "ADDITIONAL_PAYMENT_REQUIRED" && !!dependencies.stayTimePaymentEvidence;
         const validatedStayTime = stayTime
-          ? await validateFreeStayTimeApply(tx, modification, modification.reservation, now) : null;
+          ? dependencies.stayTimePaymentEvidence && !freeStayTimeAttempt
+            ? await validatePaidStayTimeApply(tx, modification, modification.reservation, now, dependencies.stayTimePaymentEvidence)
+            : await validateFreeStayTimeApply(tx, modification, modification.reservation, now) : null;
         const plan = buildGuestReservationModificationApplyPlan({
           now,
           modification,
@@ -801,7 +808,7 @@ export async function applyGuestReservationModification(input: {
       {
         isolationLevel: Prisma.TransactionIsolationLevel.Serializable,
       }
-    ), () => freeStayTimeAttempt);
+    ), () => freeStayTimeAttempt || paidStayTimeAttempt);
 
     if (result.datesChanged) {
       await reconcileReservation(result.reservation.id);
