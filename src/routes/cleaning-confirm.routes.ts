@@ -365,7 +365,8 @@ cleaningConfirmRouter.post(
         ReservationStatus.CANCELLED
       ) {
         return sendCancelledCleaningRequestResponse(
-          res
+          res,
+          language
         );
       }
 
@@ -700,7 +701,8 @@ cleaningConfirmRouter.post(
         ReservationStatus.CANCELLED
       ) {
         return sendCancelledCleaningRequestResponse(
-          res
+          res,
+          language
         );
       }
 
