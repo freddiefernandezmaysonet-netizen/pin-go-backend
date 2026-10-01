@@ -53,3 +53,43 @@ test("battery below 20 percent is critical with upcoming arrival", () => {
 
   assert.equal(risk.operationalRisk, "CRITICAL");
 });
+
+test("missing and null battery preserve existing telemetry and gateway decisions", () => {
+  const input = {
+    healthStatus: "HEALTHY" as const,
+    gatewayConnected: true,
+    lastSeenAt: new Date(),
+    nextCheckInAt: inHours(4),
+  };
+  const absent = computeOperationalRisk(input);
+  assert.equal(absent.operationalRisk, "HEALTHY");
+  assert.deepEqual(computeOperationalRisk({ ...input, battery: null }), absent);
+  assert.equal(
+    computeOperationalRisk({ ...input, gatewayConnected: false }).operationalRisk,
+    "CRITICAL",
+  );
+  assert.equal(
+    computeOperationalRisk({ ...input, lastSeenAt: null }).operationalRisk,
+    "UNKNOWN",
+  );
+});
+
+test("zero battery and exact battery thresholds retain their risk levels", () => {
+  for (const [battery, expected] of [
+    [0, "CRITICAL"],
+    [19, "CRITICAL"],
+    [20, "WARNING"],
+    [29, "WARNING"],
+    [30, "HEALTHY"],
+  ] as const) {
+    assert.equal(
+      computeOperationalRisk({
+        ...HEALTHY_BASE,
+        battery,
+        nextCheckInAt: inHours(4),
+      }).operationalRisk,
+      expected,
+      `battery ${battery}%`,
+    );
+  }
+});
