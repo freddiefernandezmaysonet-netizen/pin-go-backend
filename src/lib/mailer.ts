@@ -1,4 +1,5 @@
 import { Resend } from "resend";
+import { getEmailSender } from "./email-senders.js";
 import { buildGuestIncidentEmail, type GuestIncidentEmail } from "./email-templates/guestIncidentEmail.js";
 import {
   buildGuestReservationEmail,
@@ -13,7 +14,6 @@ import type {
 } from "../services/cancellation-policy-renderer.js";
 
 const resendApiKey = String(process.env.RESEND_API_KEY ?? "").trim();
-const emailFrom = String(process.env.EMAIL_FROM ?? "").trim();
 const isProd = process.env.NODE_ENV === "production";
 
 const resend = resendApiKey ? new Resend(resendApiKey) : null;
@@ -24,7 +24,7 @@ export async function sendGuestIncidentHostNotice(input: GuestIncidentEmail): Pr
   let timer: ReturnType<typeof setTimeout> | undefined;
   try {
     const result = await Promise.race([
-      resend.emails.send({ from: getEmailFrom(), to: input.to, ...buildGuestIncidentEmail(input) },
+      resend.emails.send({ from: getEmailSender("incidents"), to: input.to, ...buildGuestIncidentEmail(input) },
         { idempotencyKey: input.idempotencyKey }),
       new Promise<never>((_, reject) => { timer = setTimeout(() => reject(new Error("PIN_AI_INCIDENT_EMAIL_TIMEOUT")), 20_000); }),
     ]);
@@ -171,7 +171,7 @@ export async function sendPropertyProtectionGuestDamageNotice(
 
   const { data, error } = await resend.emails.send(
     {
-      from: getEmailFrom(),
+      from: getEmailSender("incidents"),
       to: input.to,
       ...(input.replyTo ? { replyTo: input.replyTo } : {}),
       subject,
@@ -249,7 +249,7 @@ export async function sendPropertyProtectionGuestClosureNotice(
 
   const { data, error } = await resend.emails.send(
     {
-      from: getEmailFrom(),
+      from: getEmailSender("incidents"),
       to: input.to,
       ...(input.replyTo ? { replyTo: input.replyTo } : {}),
       subject,
@@ -323,7 +323,7 @@ export async function sendPropertyProtectionHostGuestResponseNotice(
 
   const { data, error } = await resend.emails.send(
     {
-      from: getEmailFrom(),
+      from: getEmailSender("incidents"),
       to: input.to,
       subject:
         `Property Protection response / Respuesta — Reservation #${input.reservationNumber}`,
@@ -395,7 +395,7 @@ export async function sendReviewInvitationEmail(input: SendReviewInvitationEmail
     ? `${isSpanish ? "Hola" : "Hi"} ${escapeHtml(input.guestName.trim())},`
     : isSpanish ? "Hola," : "Hi,";
   const { data, error } = await resend.emails.send({
-    from: getEmailFrom(),
+    from: getEmailSender("reservations"),
     to: input.to,
     ...(input.replyTo ? { replyTo: input.replyTo } : {}),
     subject: isSpanish
@@ -543,16 +543,6 @@ type SendDirectBookingHostCancellationNotificationInput = {
   paymentState?: string | null;
   hostPayoutStatus?: string | null;
 };
-
-function getEmailFrom() {
-  if (emailFrom) return emailFrom;
-
-  if (isProd) {
-    throw new Error("EMAIL_FROM missing in production");
-  }
-
-  return "Pin&Go <onboarding@resend.dev>";
-}
 
 function escapeHtml(value: unknown) {
   return String(value ?? "")
@@ -1090,7 +1080,7 @@ export async function sendResetPasswordEmail(
 
   try {
     const { data, error } = await resend.emails.send({
-      from: getEmailFrom(),
+      from: getEmailSender("authentication"),
       to,
       subject: "Reset your Pin&Go password",
       html: `
@@ -1182,7 +1172,7 @@ export async function sendSalesFollowUpEmail(
 
   const { data, error } =
     await resend.emails.send({
-      from: getEmailFrom(),
+      from: getEmailSender("sales"),
       to,
       subject:
         "Pin&Go demo follow-up / Seguimiento de demo",
@@ -1472,7 +1462,7 @@ const verificationBlock = `
 
   const { data, error } =
     await resend.emails.send({
-      from: getEmailFrom(),
+      from: getEmailSender("reservations"),
 
       to,
       ...(replyTo ? { replyTo } : {}),
@@ -1597,7 +1587,7 @@ export async function sendManualReservationGuestConfirmation(
 
     const { data, error } =
     await resend.emails.send({
-      from: getEmailFrom(),
+      from: getEmailSender("reservations"),
       to,
       ...(replyTo ? { replyTo } : {}),
       subject:
@@ -1749,7 +1739,7 @@ export async function sendGuestContactRecoveryHostNotice(
   const subject = `Guest contact information required — Reservation #${input.reservationNumber}`;
   const { data, error } = await resend.emails.send(
     {
-      from: "Pin&Go Alerts <alerts@incidents.pin-ngo.com>",
+      from: getEmailSender("channexAlerts"),
       to: input.to,
       subject,
       html: `
@@ -1811,7 +1801,7 @@ export async function sendDirectBookingHostNotification(
   }
 
   const { data, error } = await resend.emails.send({
-    from: getEmailFrom(),
+    from: getEmailSender("reservations"),
     to,
     ...(guestEmail ? { replyTo: guestEmail } : {}),
     subject: `New Reservation #${reservationNumber} - ${propertyName}`,
@@ -1923,7 +1913,7 @@ export async function sendDirectBookingGuestCancellationEmail(
   }
 
   const { data, error } = await resend.emails.send({
-    from: getEmailFrom(),
+    from: getEmailSender("reservations"),
     to,
     ...(replyTo ? { replyTo } : {}),
     subject: `${title} - ${isSpanish ? "Reservación" : "Reservation"} #${reservationNumber} - ${propertyName}`,
@@ -2054,7 +2044,7 @@ export async function sendDirectBookingHostCancellationNotification(
   }
 
   const { data, error } = await resend.emails.send({
-    from: getEmailFrom(),
+    from: getEmailSender("reservations"),
     to,
     ...(guestEmail ? { replyTo: guestEmail } : {}),
     subject: `Reservation #${reservationNumber} cancelled - ${propertyName}`,
@@ -2220,7 +2210,7 @@ export async function sendGuestPreCheckinEmail(
     `;
 
   const { data, error } = await resend.emails.send({
-    from: getEmailFrom(),
+    from: getEmailSender("reservations"),
     to: input.to,
     ...(input.replyTo ? { replyTo: input.replyTo } : {}),
     subject: getGuestPreCheckinEmailSubject(input),
@@ -2327,7 +2317,7 @@ export async function sendGuestAccessPasscodeEmail(
 
   const { data, error } =
     await resend.emails.send({
-      from: getEmailFrom(),
+      from: getEmailSender("access"),
       to,
       ...(replyTo ? { replyTo } : {}),
       subject:
@@ -2513,7 +2503,7 @@ export async function sendGuestVerificationReminderEmail(
 
   const { data, error } =
     await resend.emails.send({
-      from: getEmailFrom(),
+      from: getEmailSender("reservations"),
       to,
       ...(replyTo ? { replyTo } : {}),
       subject:
@@ -2619,7 +2609,7 @@ export async function sendCleaningHostAttentionEmail(input: {
     return { ok: true, mode: "console" as const, providerMessageId: null, recipients };
   }
   const { data, error } = await resend.emails.send({
-    from: getEmailFrom(),
+    from: getEmailSender("cleaning"),
     to: recipients,
     subject: "Pin&Go: cleaning confirmation needs attention / confirmacion pendiente",
     html: `
@@ -2738,7 +2728,7 @@ export async function sendDeviceGatewayCriticalAlertEmail(
 
   const { data, error } =
     await resend.emails.send({
-      from: getEmailFrom(),
+      from: getEmailSender("incidents"),
       to: recipients,
       subject,
       html: `
@@ -2870,7 +2860,7 @@ export async function sendManualReservationGuestCancellationEmail(
   }
 
   const { data, error } = await resend.emails.send({
-    from: getEmailFrom(),
+    from: getEmailSender("reservations"),
     to,
     ...(replyTo ? { replyTo } : {}),
     subject,

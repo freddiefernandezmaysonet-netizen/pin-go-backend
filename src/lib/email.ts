@@ -1,4 +1,5 @@
 import { Resend } from "resend";
+import { getEmailSender } from "./email-senders.js";
 
 const resend = new Resend(process.env.RESEND_API_KEY);
 
@@ -9,7 +10,7 @@ export async function sendPasswordResetEmail(params: {
   const resetUrl = `${process.env.PASSWORD_RESET_URL}?token=${params.token}`;
 
   await resend.emails.send({
-    from: process.env.EMAIL_FROM!,
+    from: getEmailSender("authentication"),
     to: params.to,
     subject: "Reset your password - Pin&Go",
     html: `

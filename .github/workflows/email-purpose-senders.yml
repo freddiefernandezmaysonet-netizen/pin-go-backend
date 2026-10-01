@@ -1,0 +1,45 @@
+name: Email purpose senders
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - 'src/lib/email-senders*'
+      - 'src/lib/email.ts'
+      - 'src/lib/mailer.ts'
+      - 'src/auth/mfa-email-otp-delivery.ts'
+      - 'src/workers/message.retry.worker.ts'
+      - 'src/workers/reservation.worker.ts'
+      - 'src/services/guest-journey-communications-delivery-adapter.service.ts'
+      - 'tsconfig.email-purpose-senders.json'
+      - '.github/workflows/email-purpose-senders.yml'
+permissions:
+  contents: read
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      DATABASE_URL: postgresql://test:test@127.0.0.1:1/no_runtime_database
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+      - run: npm ci --ignore-scripts --no-audit --no-fund
+      - run: npx --no-install prisma generate --schema ./prisma
+      - run: npx --no-install tsc -p tsconfig.email-purpose-senders.json
+      - name: Offline provider sender tests and delivery regressions
+        run: >-
+          node --import tsx --test
+          src/lib/email-senders.test.ts
+          src/auth/mfa-email-branding.test.ts
+          src/auth/enterprise-auth-e4.test.ts
+          src/auth/enterprise-auth-e6.test.ts
+          src/auth/enterprise-auth-e7.test.ts
+          src/services/ota-guest-contact-notice-retry.service.test.ts
+          src/services/ota-guest-contact-automation-closure.contract.test.ts
+          src/services/guest-journey-communications-delivery-adapter.service.test.ts
+          src/workers/message-retry-manual-cancellation.contract.test.ts
+          src/workers/message-retry-provider-delivery.contract.test.ts
+          src/lib/direct-booking-review-email.contract.test.ts
