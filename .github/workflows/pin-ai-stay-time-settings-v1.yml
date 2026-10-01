@@ -13,6 +13,8 @@ on:
       - "src/services/stay-time-apply*"
       - "src/services/reservation.reconcile.service.ts"
       - "src/services/reservation-guest-access-window*"
+      - "src/services/reservation-cleaning-window*"
+      - "src/services/reservation-reconcile-cleaner-reconfirmation.contract.test.ts"
       - "src/services/guest-reservation-modification-apply*"
       - "src/pin-ai/actions/action-proposal.service*"
       - "src/services/stay-time-hourly*"

@@ -18,6 +18,7 @@ import {
 } from "./cleaning-confirmation-dispatch.service";
 import { selectNextStaffForProperty } from "./staff-selection.service";
 import { guestAccessWindow, guestAccessNeedsSync, synchronizeGuestAccessWindow } from "./reservation-guest-access-window";
+import { planCleaningWindow } from "./reservation-cleaning-window";
 
 type ChangePlan = {
   reservationId: string;
@@ -173,9 +174,15 @@ const reservationDatesChanged =
   (prevIn.getTime() !== desiredStart.getTime() ||
     prevOut.getTime() !== desiredEnd.getTime());
 
-  const cleaningReconfirmationNeeded =
-    reservationDatesChanged &&
-    reservation.property?.cleaningNfcEnabled === true;
+  const cleaningWindow = planCleaningWindow({
+    checkOut: desiredEnd,
+    previousCheckOut: prevOut,
+    enabled: reservation.property?.cleaningNfcEnabled === true,
+    offsetMinutes: reservation.property?.cleaningStartOffsetMinutes ?? 30,
+    durationMinutes: reservation.property?.cleaningDurationMinutes ?? 180,
+    assignments: reservation.NfcAssignment ?? [],
+  });
+  const cleaningReconfirmationNeeded = cleaningWindow.requiresReconfirmation;
 
   const previousCleaningConfirmation = cleaningReconfirmationNeeded
     ? await prisma.cleaningConfirmation.findFirst({
@@ -210,30 +217,8 @@ const reservationDatesChanged =
 
     if (a.role === NfcAssignmentRole.GUEST) {
       return guestAccessNeedsSync(a, reservation, "TTLOCK_CHANGE_PERIOD_FAILED");
-    } else {
-      if (reservationDatesChanged) {
-        return true;
-      }
-
-       const cleaningOffsetMin =
-  reservation.property?.cleaningStartOffsetMinutes ?? 30;
-
-const cleaningDurationMin =
-  reservation.property?.cleaningDurationMinutes ?? 180;
-
-const cleaningStartsAt = new Date(
-  desiredEnd.getTime() + cleaningOffsetMin * 60_000
-);
-
-const cleaningEndsAt = new Date(
-  cleaningStartsAt.getTime() + cleaningDurationMin * 60_000
-);     
-
-      return (
-        a.startsAt.getTime() !== cleaningStartsAt.getTime() ||
-        a.endsAt.getTime() !== cleaningEndsAt.getTime()
-      );
     }
+    return a.role === NfcAssignmentRole.CLEANING && cleaningReconfirmationNeeded;
   });
 
   const now = Date.now();
@@ -248,7 +233,7 @@ const cleaningEndsAt = new Date(
   const plan: ChangePlan = {
     reservationId: reservation.id,
     reason:
-  reservationDatesChanged || grantsNeedUpdate || nfcNeedReschedule
+  reservationDatesChanged || grantsNeedUpdate || nfcNeedReschedule || cleaningReconfirmationNeeded
     ? "DATES_CHANGED"
     : "NOOP",
     grantsNeedUpdate,
@@ -260,7 +245,7 @@ const cleaningEndsAt = new Date(
   
   console.log("[reconcile][plan]", plan);
   
-if (snapshotMissing && !grantsNeedUpdate && !nfcNeedReschedule) {
+if (snapshotMissing && !grantsNeedUpdate && !nfcNeedReschedule && !cleaningReconfirmationNeeded) {
   await prisma.reservation.update({
     where: { id: reservation.id },
     data: {
@@ -346,20 +331,6 @@ await ttlockChangePasscode({
       console.log("[reconcile][nfc] no active ttlockLockId; programmed guest access stays pending");
     }
 
- const cleaningOffsetMin =
-  reservation.property?.cleaningStartOffsetMinutes ?? 30;
-
-const cleaningDurationMin =
-  reservation.property?.cleaningDurationMinutes ?? 180;
-
-const cleaningStartsAt = new Date(
-  desiredEnd.getTime() + cleaningOffsetMin * 60_000
-);
-
-const cleaningEndsAt = new Date(
-  cleaningStartsAt.getTime() + cleaningDurationMin * 60_000
-);   
-
     for (const a of nfcAssignments) {
       if (
         a.status === NfcAssignmentStatus.FAILED ||
@@ -368,7 +339,12 @@ const cleaningEndsAt = new Date(
         continue;
 
 if (a.role === NfcAssignmentRole.CLEANING) {
+  // Guest-only access changes must not revoke an unchanged cleaner window.
+  if (!cleaningReconfirmationNeeded) continue;
   try {
+    if (a.status === NfcAssignmentStatus.PROVISIONING) {
+      throw new Error("CLEANING_RECONFIRMATION_PROVISIONING_PENDING");
+    }
     if (a.status === NfcAssignmentStatus.ACTIVE) {
       if (!ttlockLockId || !a.NfcCard?.ttlockCardId) {
         throw new Error(

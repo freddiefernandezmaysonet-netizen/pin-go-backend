@@ -106,6 +106,8 @@ jobs:
           src/services/reservation.reconcile.service.ts
           src/services/reservation-guest-access-window.ts
           src/services/reservation-guest-access-window.test.ts
+          src/services/reservation-cleaning-window.ts
+          src/services/reservation-reconcile-cleaner-reconfirmation.contract.test.ts
           src/services/property-stay-time-settings.db.test.ts
           src/services/property-stay-time-settings.service.ts
           src/services/stay-time-estimate.service.test.ts
