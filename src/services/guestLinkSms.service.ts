@@ -1,4 +1,4 @@
-import { isChannexGuestRegistrationExempt } from "./channex-guest-registration.policy";
+import { isChannexGuestRegistrationExempt } from "./guest-registration-channel.policy";
 import { PrismaClient } from "@prisma/client";
 import { sendSms } from "../integrations/twilio/twilio.client";
 import { buildGuestLink } from "./guestToken";

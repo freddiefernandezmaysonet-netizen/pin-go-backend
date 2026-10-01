@@ -1,4 +1,4 @@
-import { isChannexGuestRegistrationExempt } from "./channex-guest-registration.policy";
+import { isChannexGuestRegistrationExempt } from "./guest-registration-channel.policy";
 import {
   PaymentState,
   Prisma,

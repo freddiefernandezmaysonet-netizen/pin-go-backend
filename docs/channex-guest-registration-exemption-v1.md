@@ -15,12 +15,14 @@ The user confirmed that imported Channex bookings must receive access like the h
 
 ## Validation
 
-137 local tests passed: persisted provenance, access blockers, old snapshots, Direct Booking regressions, HTTP GET/POST on loopback with fake data, journey transitions/idempotency, reconciliation without invented timestamps, compliance owner and communications. No real guest, provider or database was used.
+138 local tests passed (including the unchanged certified-core freeze test): persisted provenance, access blockers, old snapshots, Direct Booking regressions, HTTP GET/POST on loopback with fake data, journey transitions/idempotency, reconciliation without invented timestamps, compliance owner and communications. No real guest, provider or database was used.
 
 Strict TypeScript and emitted build now pass for the complete affected boundary, including the reservation worker. Four pre-existing errors were independently reproduced on the untouched baseline and then fixed:
 
 - Cleaning follow-up reconciliation selects the existing MessageLog.deliveredAt field and falls back to the reconciliation observation time when SENT has no provider-delivery timestamp. It does not use the original failed message creation time as delivery evidence.
 - Passcode resynchronization skips and logs a grant with no reservation before dereferencing its dates.
+
+The new policy/tests use the guest-registration-channel domain naming. Initial Channex-prefixed names accidentally entered the certified-core file selector; the names were corrected. The original 125 core files and SHA-256 remain unchanged, and the original guard passes without edits.
 
 Three cleaning delivery tests cover provider timestamp, fallback timestamp and absence of SENT evidence. No existing CI allowlist or certified Channex-core fingerprint is relaxed. This focused build is not a claim that every unrelated repository project compiles.
 

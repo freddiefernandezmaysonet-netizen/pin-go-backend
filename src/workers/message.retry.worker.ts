@@ -1,4 +1,4 @@
-import { isChannexGuestRegistrationExempt } from "../services/channex-guest-registration.policy";
+import { isChannexGuestRegistrationExempt } from "../services/guest-registration-channel.policy";
 import dotenv from "dotenv";
 dotenv.config({ path: "./.env", override: true });
 

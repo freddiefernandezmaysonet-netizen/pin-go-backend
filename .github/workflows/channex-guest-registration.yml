@@ -2,7 +2,7 @@ name: Channex Guest Registration Exemption
 on:
   pull_request:
     paths:
-      - 'src/services/channex-guest-registration*'
+      - 'src/services/guest-registration-channel*'
       - 'src/services/cleaning-followup-delivery-reconciliation*'
       - 'src/services/guest-access-readiness*'
       - 'src/services/guest-agreement.service.ts'
@@ -34,7 +34,8 @@ jobs:
       - name: Registration, access, journey and communication regressions
         run: >-
           node --import tsx --test
-          src/services/channex-guest-registration*.test.ts
+          src/contracts/channex-certified-core.freeze.test.ts
+          src/services/guest-registration-channel*.test.ts
           src/services/cleaning-followup-delivery-reconciliation.service.test.ts
           src/services/guest-access-readiness.service.test.ts
           src/services/guest-journey-evaluator.test.ts

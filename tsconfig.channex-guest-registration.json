@@ -12,9 +12,9 @@
   },
   "include": [
     "src/routes/guest.routes.ts",
-    "src/services/channex-guest-registration.integration.test.ts",
-    "src/services/channex-guest-registration.policy.test.ts",
-    "src/services/channex-guest-registration.policy.ts",
+    "src/services/guest-registration-channel.integration.test.ts",
+    "src/services/guest-registration-channel.policy.test.ts",
+    "src/services/guest-registration-channel.policy.ts",
     "src/services/cleaning-followup-delivery-reconciliation.service.test.ts",
     "src/services/cleaning-followup-delivery-reconciliation.service.ts",
     "src/services/guest-access-readiness.service.test.ts",
