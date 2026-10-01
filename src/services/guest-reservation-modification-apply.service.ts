@@ -622,7 +622,7 @@ export async function applyGuestReservationModification(input: {
   let freeStayTimeAttempt = false;
 
   try {
-    const result = await retryFreeStayTimeTransaction(() => prisma.$transaction(
+    const result = await retryFreeStayTimeTransaction(async () => await prisma.$transaction(
       async (tx) => {
         await tx.$queryRaw`
           SELECT "id"
