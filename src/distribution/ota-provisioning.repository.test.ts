@@ -64,6 +64,7 @@ const record = {
     id: "property-1",
     organizationId: "org-1",
     name: "Casa Uno",
+    listingDetails: { propertyType: "HOUSE" },
     maxGuests: 4,
     timezone: "America/Puerto_Rico",
   },
@@ -107,6 +108,8 @@ test("snapshot query and returned evidence remain tenant scoped", async () => {
   });
   assert.equal(snapshot?.currency, "USD");
   assert.equal(snapshot?.maxGuests, 4);
+  assert.equal(snapshot?.propertyType, "HOUSE");
+  assert.deepEqual(reads[0].select.property.select.listingDetails, { select: { propertyType: true } });
   assert.equal(reads[0].select.property.select.maxGuests, true);
   assert.equal(snapshot?.externalPropertyId, "property-ext");
   assert.equal(snapshot?.externalPrimaryRoomTypeId, "room-ext");
