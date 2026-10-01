@@ -131,6 +131,11 @@ jobs:
           src/services/stay-time-proposal.service.ts
           src/services/stay-time-checkout-preflight.db.test.ts
           src/services/stay-time-stripe-provider.ts
+          src/services/stay-time-checkout.service.ts
+          src/services/guest-reservation-modification-checkout-contract.ts
+          src/services/guest-reservation-modification-checkout.service.ts
+          src/services/direct-booking-direct-charges-only.contract.test.ts
+          src/services/stay-time-checkout.db.test.ts
           src/services/stay-time-stripe-provider.test.ts
           src/services/stay-time-payment-flow.service.ts
           src/services/stay-time-payment-flow.db.test.ts

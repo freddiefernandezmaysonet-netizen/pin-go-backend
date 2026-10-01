@@ -16,6 +16,9 @@ on:
       - "src/services/stay-time-payment-flow*"
       - "src/services/stay-time-stripe-provider*"
       - "src/services/stay-time-checkout-preflight*"
+      - "src/services/stay-time-checkout.service.ts"
+      - "src/services/guest-reservation-modification-checkout*"
+      - "src/services/stay-time-checkout.db.test.ts"
       - "src/services/reservation.reconcile.service.ts"
       - "src/services/reservation-guest-access-window*"
       - "src/services/reservation-cleaning-window*"
@@ -71,6 +74,10 @@ jobs:
         run: node --import tsx --test src/services/stay-time-checkout-preflight.db.test.ts
       - name: Paid application and durable payment recovery with simulated providers
         run: node --import tsx --test src/services/stay-time-payment-flow.db.test.ts
+      - name: Checkout creation and signature-verified payment events with offline Stripe
+        run: node --import tsx --test src/services/stay-time-checkout.db.test.ts
+      - name: Shared Checkout contract and Direct Charge regressions
+        run: node --import tsx --test src/services/guest-reservation-modification-checkout.service.test.ts src/services/direct-booking-direct-charges-only.contract.test.ts
       - name: Policy, real HTTP authorization, migration SQL and database concurrency
         # Independent DB suites share tables; keep their fixture writes separate.
         # Explicit Promise.all concurrency scenarios inside each suite are retained.

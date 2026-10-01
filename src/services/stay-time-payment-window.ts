@@ -38,7 +38,7 @@ export function assertStayTimePaymentWindow(input: WindowScope & {
   stagedAt: Date;
   checkoutExpiresAt: Date;
   now: Date;
-  phase: "CHECKOUT_CREATION" | "PAYMENT_APPLICATION";
+  phase: "CHECKOUT_CREATION" | "CHECKOUT_REPLAY" | "PAYMENT_APPLICATION";
 }): void {
   const created = millis(input.quoteCreatedAt);
   const expiry = millis(input.quoteExpiresAt);
@@ -49,7 +49,7 @@ export function assertStayTimePaymentWindow(input: WindowScope & {
   if (expiry <= created || expiry - created > MINUTE || confirmed < created || confirmed >= expiry ||
       staged < confirmed || staged >= expiry || now < staged ||
       deadline <= staged || deadline > staged + 60 * MINUTE || deadline > cutoff(input) ||
-      !["CHECKOUT_CREATION", "PAYMENT_APPLICATION"].includes(input.phase)) reject("INVALID_STAY_TIME_PAYMENT_WINDOW");
+      !["CHECKOUT_CREATION", "CHECKOUT_REPLAY", "PAYMENT_APPLICATION"].includes(input.phase)) reject("INVALID_STAY_TIME_PAYMENT_WINDOW");
   if (now >= deadline) reject("STAY_TIME_PAYMENT_WINDOW_EXPIRED");
   if (input.phase === "CHECKOUT_CREATION" && deadline <= now + 31 * MINUTE) reject("STAY_TIME_PAYMENT_WINDOW_TOO_SHORT");
 }

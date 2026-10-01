@@ -40,6 +40,18 @@ export async function validatePaidStayTimeCheckout(tx: Prisma.TransactionClient,
   return validateStayTimeSnapshot(tx, m, r, now, "CHECKOUT_CREATION");
 }
 
+/** Returning an existing, provider-retrieved open session does not create a new
+ * payment window. Still recheck consent, pricing, readiness and availability. */
+export async function validatePaidStayTimeCheckoutReplay(tx: Prisma.TransactionClient, m: ReservationModification, r: Reservation, now: Date) {
+  if (m.status !== "AWAITING_PAYMENT" || m.financialAction !== "ADDITIONAL_PAYMENT_REQUIRED" ||
+      Number(m.additionalChargeAmount) <= 0 || !m.checkoutExpiresAt || !m.stripeCheckoutSessionId ||
+      m.expiredAt || m.cancelledAt || (m.stripePaymentStatus !== null && m.stripePaymentStatus !== "unpaid") ||
+      [m.stripePaymentIntentId, m.stripeChargeId, m.stripeApplicationFeeId, m.stripeTransferId].some(Boolean)) {
+    reject("STAY_TIME_CHECKOUT_PREFLIGHT_NOT_ELIGIBLE");
+  }
+  return validateStayTimeSnapshot(tx, m, r, now, "CHECKOUT_REPLAY");
+}
+
 /** Internal post-payment validation for the trusted payment processor's canonical
  * apply call. Guest routes and legacy webhooks do not supply this evidence.
  * Provider retrieval, durable turnover holds and rollout remain separate gates.
@@ -53,10 +65,10 @@ export async function validatePaidStayTimeApply(tx: Prisma.TransactionClient, m:
 }
 
 async function validateStayTimeSnapshot(tx: Prisma.TransactionClient, m: ReservationModification, r: Reservation, now: Date,
-  paidPhase?: "CHECKOUT_CREATION" | "PAYMENT_APPLICATION") {
+  paidPhase?: "CHECKOUT_CREATION" | "CHECKOUT_REPLAY" | "PAYMENT_APPLICATION") {
   const consent = object(m.guestConfirmation);
   const terms = object(consent.quoteTerms);
-  if (m.status !== (paidPhase === "CHECKOUT_CREATION" ? "AWAITING_PAYMENT" : "APPLYING") || m.reservationId !== r.id ||
+  if (m.status !== (paidPhase?.startsWith("CHECKOUT_") ? "AWAITING_PAYMENT" : "APPLYING") || m.reservationId !== r.id ||
       m.requestSource !== "PIN_AI_GUEST_SERVICES" || consent.source !== m.requestSource ||
       consent.confirmed !== true || typeof consent.actionProposalId !== "string" ||
       terms.version !== "stay_time_quote_v1" || consent.operation !== terms.operation || !r.guestToken) reject("STAY_TIME_CONFIRMED_PROPOSAL_REQUIRED");
