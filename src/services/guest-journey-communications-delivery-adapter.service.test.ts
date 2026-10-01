@@ -338,3 +338,15 @@ test("first-send claims own APMS_PENDING delivery exactly once", async () => {
   assert.equal(result.providerCalls, 1);
   assert.equal(result.completion.kind, "SUCCEEDED");
 });
+
+test("queued Channex identity reminder becomes obsolete without contacting a provider", async () => {
+  const { prisma, message } = fakePrisma({
+    reservation: { externalProvider: "CHANNEX", externalId: "ota-1" },
+    message: { communicationType: "GUEST_VERIFICATION_REMINDER" },
+  });
+  const result = await executeGuestJourneyCommunicationDeliveryAdapter(prisma,
+    claim({ messageLogId: "message-1", communicationType: "GUEST_VERIFICATION_REMINDER", channel: "sms" }),
+    { now }, { sendSms: async () => { throw new Error("must not send"); }, sendEmail: noEmail });
+  assert.equal(result.providerCalls, 0);
+  assert.equal(message.status, "OBSOLETE");
+});

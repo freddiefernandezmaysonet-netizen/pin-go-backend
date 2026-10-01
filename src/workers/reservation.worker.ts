@@ -268,6 +268,14 @@ async function processGuestVerificationReminders(
       where: {
         status:
           ReservationStatus.ACTIVE,
+        // Imported Channex bookings do not consume the Direct Booking
+        // reminder batch, including old journeys still marked pending.
+        AND: [{ OR: [
+          { externalProvider: null },
+          { externalProvider: { not: "CHANNEX", mode: "insensitive" } },
+          { externalId: null },
+          { externalId: "" },
+        ] }],
         checkIn: {
           gte: reminderFrom,
           lte: reminderTo,
@@ -2576,6 +2584,10 @@ async function processPasscodeResyncs(now: Date) {
   if (grants.length === 0) return;
 
   for (const g of grants) {
+    if (!g.reservation) {
+      errLog("Passcode resync skipped: reservation missing", { accessGrantId: g.id });
+      continue;
+    }
     try {
       const desiredStart = new Date(
         g.reservation.checkIn

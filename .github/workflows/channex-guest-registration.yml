@@ -1,0 +1,47 @@
+name: Channex Guest Registration Exemption
+on:
+  pull_request:
+    paths:
+      - 'src/services/guest-registration-channel*'
+      - 'src/services/cleaning-followup-delivery-reconciliation*'
+      - 'src/services/guest-access-readiness*'
+      - 'src/services/guest-agreement.service.ts'
+      - 'src/services/guest-identity-verification.service.ts'
+      - 'src/services/guest-verification*'
+      - 'src/services/guest-journey*'
+      - 'src/services/guestLinkSms.service.ts'
+      - 'src/services/preCheckinSms*'
+      - 'src/routes/guest.routes.ts'
+      - 'src/workers/message.retry.worker.ts'
+      - 'src/workers/reservation.worker.ts'
+      - 'tsconfig.channex-guest-registration.json'
+      - '.github/workflows/channex-guest-registration.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npx tsc -p tsconfig.channex-guest-registration.json
+      - name: Registration, access, journey and communication regressions
+        run: >-
+          node --import tsx --test
+          src/contracts/channex-certified-core.freeze.test.ts
+          src/services/guest-registration-channel*.test.ts
+          src/services/cleaning-followup-delivery-reconciliation.service.test.ts
+          src/services/guest-access-readiness.service.test.ts
+          src/services/guest-journey-evaluator.test.ts
+          src/services/guest-journey-evidence.service.test.ts
+          src/services/guest-journey-reconciler.service.test.ts
+          src/services/guest-journey-compliance-owner*.test.ts
+          src/services/guest-journey-communications-delivery-adapter.service.test.ts
+          src/services/preCheckinSms*.test.ts
+          src/services/guest-verification-reminder.sms-cost-optimization.test.ts

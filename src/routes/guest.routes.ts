@@ -1,3 +1,4 @@
+import { isChannexGuestRegistrationExempt } from "../services/guest-registration-channel.policy";
 import {
   Router,
   type Request,
@@ -757,6 +758,10 @@ export function buildGuestRouter(prisma: PrismaClient) {
                 `,
               })
             );
+        }
+
+        if (isChannexGuestRegistrationExempt(reservation)) {
+          return res.redirect(303, `/guest/${encodeURIComponent(token)}`);
         }
 
                 let agreementSnapshot: unknown =
@@ -1712,6 +1717,10 @@ ${renderCancellationRefundRules(
         const code = String(
           err?.message ?? err
         );
+
+        if (code === "GUEST_REGISTRATION_NOT_REQUIRED_FOR_CHANNEX") {
+          return res.redirect(303, `/guest/${encodeURIComponent(token)}`);
+        }
 
         const guestMessages: Record<
           string,

@@ -1,3 +1,4 @@
+import { isChannexGuestRegistrationExempt } from "./guest-registration-channel.policy";
 import {
   GuestJourneyState,
   PrismaClient,
@@ -93,6 +94,8 @@ export async function sendGuestVerificationReminder(
       },
       select: {
         id: true,
+        externalProvider: true,
+        externalId: true,
         reservationNumber: true,
         status: true,
         checkIn: true,
@@ -125,6 +128,16 @@ export async function sendGuestVerificationReminder(
     throw new Error(
       "GUEST_VERIFICATION_REMINDER_RESERVATION_NOT_FOUND"
     );
+  }
+
+  if (isChannexGuestRegistrationExempt(reservation)) {
+    return {
+      reservationId: reservation.id,
+      reminderStatus: "SKIPPED",
+      emailStatus: "SKIPPED",
+      smsStatus: "SKIPPED",
+      skippedReason: "CHANNEX_REGISTRATION_NOT_REQUIRED",
+    };
   }
 
   const language = resolveGuestLanguage(

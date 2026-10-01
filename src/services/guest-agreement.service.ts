@@ -1,3 +1,4 @@
+import { isChannexGuestRegistrationExempt } from "./guest-registration-channel.policy";
 import {
   Prisma,
   PrismaClient,
@@ -120,6 +121,8 @@ export async function ensureReservationGuestAgreementSnapshot(
       },
       select: {
         id: true,
+        externalProvider: true,
+        externalId: true,
         propertyId: true,
         preferredLanguage: true,
         guestAgreementSnapshot: true,
@@ -130,6 +133,10 @@ export async function ensureReservationGuestAgreementSnapshot(
     throw new Error(
       "GUEST_AGREEMENT_RESERVATION_NOT_FOUND"
     );
+  }
+
+  if (isChannexGuestRegistrationExempt(reservation)) {
+    return { ok: true, alreadyCaptured: false, notRequired: true, snapshot: null };
   }
 
   if (reservation.guestAgreementSnapshot) {

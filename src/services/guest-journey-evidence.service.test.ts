@@ -60,6 +60,8 @@ function createBaseReservation(): Record<string, any> {
     paymentState:
       PaymentState.PAID,
 
+    externalProvider: null,
+    externalId: null,
     source:
       "DIRECT_BOOKING",
 
@@ -481,6 +483,8 @@ test(
         paymentState:
           PaymentState.PAID,
 
+        externalProvider: null,
+        externalId: null,
         source:
           "DIRECT_BOOKING",
 

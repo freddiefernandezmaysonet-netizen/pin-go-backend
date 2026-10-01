@@ -53,6 +53,8 @@ const reservationEvidenceSelect = {
   paymentState: true,
 
   source: true,
+  externalProvider: true,
+  externalId: true,
   preferredLanguage: true,
 
   checkIn: true,
@@ -938,6 +940,8 @@ export async function loadGuestJourneyEvidence(
 
       source:
         reservation.source,
+      externalProvider: reservation.externalProvider,
+      externalId: reservation.externalId,
 
       preferredLanguage:
         reservation

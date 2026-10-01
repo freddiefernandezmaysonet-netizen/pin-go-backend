@@ -317,6 +317,8 @@ export type GuestJourneyEvidenceSnapshot = {
     paymentState: PaymentState;
 
     source: string | null;
+    externalProvider?: string | null;
+    externalId?: string | null;
     preferredLanguage: string;
 
     checkIn: Date;

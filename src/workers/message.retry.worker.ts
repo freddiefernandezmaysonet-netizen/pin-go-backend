@@ -1,3 +1,4 @@
+import { isChannexGuestRegistrationExempt } from "../services/guest-registration-channel.policy";
 import dotenv from "dotenv";
 dotenv.config({ path: "./.env", override: true });
 
@@ -187,6 +188,19 @@ async function processRetries() {
           communicationType: msg.communicationType,
         });
         continue;
+      }
+      if (msg.communicationType === "GUEST_VERIFICATION_REMINDER" && msg.reservationId) {
+        const reservation = await prisma.reservation.findUnique({
+          where: { id: msg.reservationId },
+          select: { externalProvider: true, externalId: true },
+        });
+        if (reservation && isChannexGuestRegistrationExempt(reservation)) {
+          await prisma.messageLog.updateMany({
+            where: { id: msg.id, status: "FAILED" },
+            data: { status: "OBSOLETE", error: "CHANNEX_REGISTRATION_NOT_REQUIRED" },
+          });
+          continue;
+        }
       }
       if (String(msg.communicationType ?? "").toUpperCase() === "CHECKOUT") {
         const reservationId = String(msg.reservationId ?? "").trim();

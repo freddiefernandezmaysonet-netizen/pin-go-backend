@@ -1809,3 +1809,33 @@ test(
     assert.equal(intent.payload?.channel, "email");
   }
 );
+
+for (const verificationStatus of ["PENDING", "REVIEW_REQUIRED", "NOT_REQUIRED", "COMPLETED"]) {
+  test(`Channex has no Direct Booking requirements with inherited ${verificationStatus}`, () => {
+    const evidence = createEvidence({
+      reservation: { externalProvider: "CHANNEX", externalId: "ota-1" },
+      requirements: { agreementSnapshotPresent: false, cancellationSnapshotPresent: false,
+        agreementAcceptancePresent: false, agreementSignedAt: null, rulesAcceptedAt: null },
+      verification: { status: verificationStatus, verifiedAt: null },
+    });
+    const result = evaluateCanonicalGuestJourney(evidence);
+    assert.equal(result.expectedState, GuestJourneyState.VERIFICATION_COMPLETED);
+    assert.equal(result.outcomeEvidence.identityRequirementSatisfied, true);
+    assert.equal(result.outcomeEvidence.legalRequirementsSatisfied, true);
+    assert.equal(result.requiredCoordinationIntents.some((i) => i.targetEngine === "COMPLIANCE"), false);
+    assert.equal(result.blockers.some((b) => /IDENTITY|AGREEMENT|RULES/.test(b.code)), false);
+    assert.equal(result.inconsistencies.some((i) => /IDENTITY|VERIFI|AGREEMENT/.test(i.code)), false);
+  });
+}
+
+test("Channex released access is recognized without identity or signatures", () => {
+  const evidence = createEvidence({ ...completedAccessOverrides(),
+    reservation: { externalProvider: "CHANNEX", externalId: "ota-1" },
+    requirements: { agreementSnapshotPresent: false, cancellationSnapshotPresent: false,
+      agreementAcceptancePresent: false, agreementSignedAt: null, rulesAcceptedAt: null },
+    verification: { status: "PENDING", verifiedAt: null },
+  });
+  const result = evaluateCanonicalGuestJourney(evidence);
+  assert.equal(result.outcomeEvidence.accessProvisioningSatisfied, true);
+  assert.equal(result.inconsistencies.some((i) => i.code === "ACCESS_PRESENT_WITHOUT_VERIFICATION_EVIDENCE"), false);
+});

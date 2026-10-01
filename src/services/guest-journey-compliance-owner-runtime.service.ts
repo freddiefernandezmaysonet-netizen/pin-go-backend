@@ -71,7 +71,8 @@ export type ComplianceOwnerCompletion =
         | "REQUIREMENTS_SNAPSHOTS_PRESENT"
         | "GUEST_VERIFICATION_ALREADY_SATISFIED"
         | "IDENTITY_NOT_REQUIRED_MARKED_COMPLETE"
-        | "COMPLIANCE_NOT_REQUIRED_FOR_TERMINAL_RESERVATION";
+        | "COMPLIANCE_NOT_REQUIRED_FOR_TERMINAL_RESERVATION"
+        | "DIRECT_REGISTRATION_NOT_REQUIRED_FOR_CHANNEX";
       outcomeEvidenceFingerprint: string;
       verificationStatus?: string | null;
     }

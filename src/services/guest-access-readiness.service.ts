@@ -1,3 +1,4 @@
+import { isChannexGuestRegistrationExempt } from "./guest-registration-channel.policy";
 import {
   GuestAccessMode,
   GuestAccessReleaseStatus,
@@ -53,6 +54,8 @@ export async function evaluateGuestAccessReadiness(
       propertyId: true,
       status: true,
       paymentState: true,
+      externalProvider: true,
+      externalId: true,
       checkIn: true,
       checkOut: true,
 
@@ -107,37 +110,39 @@ export async function evaluateGuestAccessReadiness(
     blockers.push("PAYMENT_NOT_PAID");
   }
 
-  const agreementSnapshot =
-    reservation.guestAgreementSnapshot &&
-    typeof reservation.guestAgreementSnapshot === "object" &&
-    !Array.isArray(reservation.guestAgreementSnapshot)
-      ? (reservation.guestAgreementSnapshot as Record<string, unknown>)
-      : null;
-  const requiresIdentityVerification =
-    agreementSnapshot?.requiresIdentityVerification !== false;
-  const identityRequirementSatisfied = requiresIdentityVerification
-    ? reservation.verificationStatus === "COMPLETED" &&
-      Boolean(reservation.verifiedAt)
-    : reservation.verificationStatus === "NOT_REQUIRED";
+  if (!isChannexGuestRegistrationExempt(reservation)) {
+    const agreementSnapshot =
+      reservation.guestAgreementSnapshot &&
+      typeof reservation.guestAgreementSnapshot === "object" &&
+      !Array.isArray(reservation.guestAgreementSnapshot)
+        ? (reservation.guestAgreementSnapshot as Record<string, unknown>)
+        : null;
+    const requiresIdentityVerification =
+      agreementSnapshot?.requiresIdentityVerification !== false;
+    const identityRequirementSatisfied = requiresIdentityVerification
+      ? reservation.verificationStatus === "COMPLETED" &&
+        Boolean(reservation.verifiedAt)
+      : reservation.verificationStatus === "NOT_REQUIRED";
 
-  if (!identityRequirementSatisfied) {
-    blockers.push("GUEST_IDENTITY_NOT_VERIFIED");
-  }
+    if (!identityRequirementSatisfied) {
+      blockers.push("GUEST_IDENTITY_NOT_VERIFIED");
+    }
 
-  if (!reservation.guestAgreementSnapshot) {
-    blockers.push("GUEST_AGREEMENT_SNAPSHOT_MISSING");
-  }
+    if (!reservation.guestAgreementSnapshot) {
+      blockers.push("GUEST_AGREEMENT_SNAPSHOT_MISSING");
+    }
 
-  if (!reservation.guestAgreementSignedAt) {
-    blockers.push("GUEST_AGREEMENT_NOT_SIGNED");
-  }
+    if (!reservation.guestAgreementSignedAt) {
+      blockers.push("GUEST_AGREEMENT_NOT_SIGNED");
+    }
 
-  if (!reservation.guestAgreementAcceptance) {
-    blockers.push("GUEST_AGREEMENT_ACCEPTANCE_MISSING");
-  }
+    if (!reservation.guestAgreementAcceptance) {
+      blockers.push("GUEST_AGREEMENT_ACCEPTANCE_MISSING");
+    }
 
-  if (!reservation.verificationAcceptedRulesAt) {
-    blockers.push("PROPERTY_RULES_NOT_ACCEPTED");
+    if (!reservation.verificationAcceptedRulesAt) {
+      blockers.push("PROPERTY_RULES_NOT_ACCEPTED");
+    }
   }
 
   const ready = blockers.length === 0;

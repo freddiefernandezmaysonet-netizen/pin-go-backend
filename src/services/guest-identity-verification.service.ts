@@ -1,3 +1,4 @@
+import { isChannexGuestRegistrationExempt } from "./guest-registration-channel.policy";
 import {
   PaymentState,
   Prisma,
@@ -48,6 +49,8 @@ export async function createGuestIdentityVerificationSession(
     },
     select: {
       id: true,
+      externalProvider: true,
+      externalId: true,
       reservationNumber: true,
       guestEmail: true,
       guestPhone: true,
@@ -74,6 +77,10 @@ export async function createGuestIdentityVerificationSession(
 
   if (!reservation) {
     throw new Error("GUEST_IDENTITY_RESERVATION_NOT_FOUND");
+  }
+
+  if (isChannexGuestRegistrationExempt(reservation)) {
+    throw new Error("GUEST_IDENTITY_VERIFICATION_NOT_REQUIRED");
   }
 
   if (!reservation.reservationNumber) {

@@ -39,7 +39,7 @@ export async function reconcileCleaningFollowupDeliveryEvidence(
         createdAt: { gte: receipt.claimedAt },
       },
       orderBy: { createdAt: "desc" },
-      select: { providerMessageId: true, updatedAt: true },
+      select: { providerMessageId: true, deliveredAt: true },
     });
     if (!message) continue;
 
@@ -47,7 +47,9 @@ export async function reconcileCleaningFollowupDeliveryEvidence(
       where: { id: receipt.id, deliveryStatus: "FAILED" },
       data: {
         deliveryStatus: "SENT",
-        deliveredAt: message.updatedAt ?? now,
+        // Use provider delivery evidence when available, otherwise the time
+        // SENT was observed by reconciliation (not the original failed log time).
+        deliveredAt: message.deliveredAt ?? now,
         providerMessageId: message.providerMessageId,
         lastError: null,
       },

@@ -879,3 +879,20 @@ test(
     );
   }
 );
+
+test("Channex old verification-pending journey satisfies the stage without inventing verification time", async () => {
+  const evidence = createEvidence({
+    reservation: { externalProvider: "CHANNEX", externalId: "ota-1" },
+    requirements: { agreementSnapshotPresent: false, agreementAcceptancePresent: false,
+      agreementSignedAt: null, rulesAcceptedAt: null, cancellationSnapshotPresent: false },
+    verification: { status: "PENDING", verifiedAt: null },
+    persistedJourney: { currentState: GuestJourneyState.VERIFICATION_PENDING, verificationCompletedAt: null },
+  });
+  const database = createFakeDatabase({ evidence });
+  const result = await reconcileGuestJourneyInTransaction(database.tx, evidence.reservation.id,
+    evidence.evaluatedAt, SCOPE, database.dependencies);
+  assert.equal(result.finalPersistedState, GuestJourneyState.VERIFICATION_COMPLETED);
+  assert.equal(database.getJourney()?.verificationCompletedAt, null);
+  assert.equal(evidence.verification.status, "PENDING");
+  assert.equal(evidence.requirements.agreementSignedAt, null);
+});

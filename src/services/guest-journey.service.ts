@@ -1,3 +1,4 @@
+import { isChannexGuestRegistrationExempt } from "./guest-registration-channel.policy";
 import {
   GuestJourneyState,
   Prisma,
@@ -38,6 +39,8 @@ export async function ensureGuestJourneyForConfirmedReservation(
     select: {
       id: true,
       status: true,
+      externalProvider: true,
+      externalId: true,
       propertyId: true,
       property: {
         select: {
@@ -87,6 +90,7 @@ export async function ensureGuestJourneyForConfirmedReservation(
   }
 
   if (
+    isChannexGuestRegistrationExempt(reservation) ||
     journey.currentState !==
     GuestJourneyState.RESERVATION_CONFIRMED
   ) {
@@ -437,6 +441,8 @@ export async function scheduleGuestJourneyAccess(
     select: {
       id: true,
       status: true,
+      externalProvider: true,
+      externalId: true,
       propertyId: true,
       guestAccessReleaseStatus: true,
       guestAccessReleasedAt: true,
@@ -537,9 +543,15 @@ export async function scheduleGuestJourneyAccess(
     };
   }
 
+  const channelRegistrationExempt = isChannexGuestRegistrationExempt(reservation);
+  const channelCanSchedule = channelRegistrationExempt && (
+    journey.currentState === GuestJourneyState.RESERVATION_CONFIRMED ||
+    journey.currentState === GuestJourneyState.VERIFICATION_PENDING
+  );
+
   if (
-    journey.currentState !==
-    GuestJourneyState.VERIFICATION_COMPLETED
+    journey.currentState !== GuestJourneyState.VERIFICATION_COMPLETED &&
+    !channelCanSchedule
   ) {
     throw new Error(
       `Invalid Guest Journey transition from ${journey.currentState} to ${GuestJourneyState.ACCESS_SCHEDULED}.`
@@ -553,8 +565,7 @@ export async function scheduleGuestJourneyAccess(
     await tx.guestJourney.updateMany({
       where: {
         id: journey.id,
-        currentState:
-          GuestJourneyState.VERIFICATION_COMPLETED,
+        currentState: journey.currentState,
       },
       data: {
         currentState:
@@ -589,7 +600,7 @@ export async function scheduleGuestJourneyAccess(
     engine: "Guest Journey",
     decisionId:
       `guest-journey:${journey.id}:` +
-      "verification-completed-to-access-scheduled",
+      `${journey.currentState.toLowerCase().replaceAll("_", "-")}-to-access-scheduled`,
     entityType: "RESERVATION",
     entityId: reservation.id,
     eventType: "DECISION_APPLIED",
@@ -610,10 +621,11 @@ export async function scheduleGuestJourneyAccess(
       {
         engine: "Guest Journey",
         rule:
-          "VERIFICATION_COMPLETED_TO_ACCESS_SCHEDULED",
+          channelRegistrationExempt
+            ? "CHANNEX_ACCESS_SCHEDULED_WITHOUT_DIRECT_REGISTRATION"
+            : "VERIFICATION_COMPLETED_TO_ACCESS_SCHEDULED",
         label: "Confirm Guest Access Scheduling",
-        previousValue:
-          GuestJourneyState.VERIFICATION_COMPLETED,
+        previousValue: journey.currentState,
         newValue:
           GuestJourneyState.ACCESS_SCHEDULED,
         applied: true,
@@ -637,8 +649,7 @@ export async function scheduleGuestJourneyAccess(
       accessGrantId: accessGrant.id,
       accessCodeId:
         accessGrant.secureAccessCode.id,
-      fromState:
-        GuestJourneyState.VERIFICATION_COMPLETED,
+      fromState: journey.currentState,
       toState:
         GuestJourneyState.ACCESS_SCHEDULED,
       accessScheduledAt:

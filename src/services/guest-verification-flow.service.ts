@@ -1,3 +1,4 @@
+import { isChannexGuestRegistrationExempt } from "./guest-registration-channel.policy";
 import {
   PaymentState,
   Prisma,
@@ -9,6 +10,7 @@ import {
 } from "./guest-identity-verification.service";
 import {
   buildGuestCancellationTermsText,
+  type CancellationPolicySnapshot,
 } from "./cancellation-policy.service";
 import { completeGuestJourneyVerification } from "./guest-journey.service";
 import { evaluateGuestAccessReadiness } from "./guest-access-readiness.service";
@@ -159,6 +161,8 @@ export async function completeGuestAgreementAndStartIdentity(
     },
     select: {
       id: true,
+      externalProvider: true,
+      externalId: true,
       reservationNumber: true,
       propertyId: true,
       guestName: true,
@@ -185,6 +189,10 @@ export async function completeGuestAgreementAndStartIdentity(
     throw new Error(
       "GUEST_VERIFICATION_LINK_INVALID_OR_EXPIRED"
     );
+  }
+
+  if (isChannexGuestRegistrationExempt(reservation)) {
+    throw new Error("GUEST_REGISTRATION_NOT_REQUIRED_FOR_CHANNEX");
   }
 
   if (!reservation.reservationNumber) {
@@ -328,7 +336,7 @@ export async function completeGuestAgreementAndStartIdentity(
       acceptedAt,
       text:
         buildGuestCancellationTermsText(
-          cancellationPolicySnapshot
+          cancellationPolicySnapshot as unknown as CancellationPolicySnapshot
         ),
       source:
         "MANUAL_SECURE_PRECHECKIN_FORM",

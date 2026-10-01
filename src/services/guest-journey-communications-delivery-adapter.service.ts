@@ -1,3 +1,4 @@
+import { isChannexGuestRegistrationExempt } from "./guest-registration-channel.policy";
 import { createHash } from "node:crypto";
 
 import { PrismaClient, ReservationStatus } from "@prisma/client";
@@ -290,6 +291,8 @@ export async function executeGuestJourneyCommunicationDeliveryAdapter(
       },
       select: {
         status: true,
+        externalProvider: true,
+        externalId: true,
         guestEmail: true,
         guestPhone: true,
         checkIn: true,
@@ -405,6 +408,7 @@ export async function executeGuestJourneyCommunicationDeliveryAdapter(
   const cancellationMessage = requestedType.includes("CANCELLATION");
   const reservationCancelled = reservation.status === ReservationStatus.CANCELLED || Boolean(reservation.cancelledAt);
   const obsolete =
+    (requestedType === "GUEST_VERIFICATION_REMINDER" && isChannexGuestRegistrationExempt(reservation)) ||
     (reservationCancelled && !cancellationMessage) ||
     (!reservationCancelled && cancellationMessage) ||
     !datesMatch(retryPayload.checkIn, reservation.checkIn) ||
@@ -465,6 +469,8 @@ export async function executeGuestJourneyCommunicationDeliveryAdapter(
     },
     select: {
       status: true,
+      externalProvider: true,
+      externalId: true,
       cancelledAt: true,
       guestEmail: true,
       guestPhone: true,
@@ -489,6 +495,7 @@ export async function executeGuestJourneyCommunicationDeliveryAdapter(
     ? clean(message.to).toLowerCase()
     : clean(message.to);
   const changedBeforeSend =
+    (requestedType === "GUEST_VERIFICATION_REMINDER" && isChannexGuestRegistrationExempt(currentReservation)) ||
     currentReservation.checkIn.getTime() !== reservation.checkIn.getTime() ||
     currentReservation.checkOut.getTime() !== reservation.checkOut.getTime() ||
     currentCancelled !== reservationCancelled ||
