@@ -249,7 +249,7 @@ jobs:
           mkdir -p validation-evidence
           git rev-parse HEAD > validation-evidence/head.txt
           baseline_ref="$BASELINE_SHA"
-          if [ "${GITHUB_HEAD_REF:-$GITHUB_REF_NAME}" = "agent/vrbo-self-service-connection-center" ] || [ "${GITHUB_HEAD_REF:-$GITHUB_REF_NAME}" = "agent/expedia-connection-center-backend" ] || [ "${GITHUB_HEAD_REF:-$GITHUB_REF_NAME}" = "agent/channex-room-capacity-max-guests" ]; then
+          if [ "${GITHUB_HEAD_REF:-$GITHUB_REF_NAME}" = "agent/ota-property-billing-type-v1" ] || [ "${GITHUB_HEAD_REF:-$GITHUB_REF_NAME}" = "agent/vrbo-self-service-connection-center" ] || [ "${GITHUB_HEAD_REF:-$GITHUB_REF_NAME}" = "agent/expedia-connection-center-backend" ] || [ "${GITHUB_HEAD_REF:-$GITHUB_REF_NAME}" = "agent/channex-room-capacity-max-guests" ]; then
             baseline_ref="${{ github.event.pull_request.base.sha }}"
           fi
           git worktree add --detach "$RUNNER_TEMP/booking-types-baseline" "$baseline_ref"
