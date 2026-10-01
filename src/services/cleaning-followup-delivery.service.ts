@@ -28,7 +28,7 @@ export async function deliverClaimedCleanerFollowup(
   if (receipt.kind === "START_REMINDER" && work.startConfirmedAt) return { delivered: false, reason: "start_already_confirmed" };
 
   const [staff, reservation] = await Promise.all([
-    prisma.staffMember.findUnique({ where: { id: work.staffMemberId }, select: { phoneE164: true } }),
+    prisma.staffMember.findUnique({ where: { id: work.staffMemberId }, select: { phoneE164: true, preferredLanguage: true } }),
     prisma.reservation.findUnique({ where: { id: work.reservationId }, select: {
       id: true, propertyId: true, property: { select: { name: true, organizationId: true } },
     } }),
