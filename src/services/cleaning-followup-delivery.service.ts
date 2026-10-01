@@ -1,6 +1,7 @@
 import type { PrismaClient } from "@prisma/client";
 import { sendLoggedSms } from "./messaging.service.js";
 import { buildCleanerFollowupSms } from "./cleaning-followup-sms-body.service.js";
+import { resolveStaffLanguage } from "./staff-language.service.js";
 
 function baseUrl() {
   const raw = process.env.API_BASE_URL ?? process.env.PUBLIC_API_BASE_URL ?? process.env.APP_URL;
@@ -41,6 +42,7 @@ export async function deliverClaimedCleanerFollowup(
     kind: receipt.kind,
     propertyName: reservation.property.name,
     actionUrl: `${base}/cleaning/confirm/${confirmation.token}`,
+    language: resolveStaffLanguage(staff.preferredLanguage),
   });
   const sent = await sendLoggedSms({
     prisma,
