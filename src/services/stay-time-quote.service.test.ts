@@ -12,8 +12,8 @@ test("automatic rate uses first/last booked night and nominal 20/19-hour denomin
   const late = deriveStayTimeHourlyBasis({ ...data, operation: "LATE_CHECKOUT", standardCheckIn: "16:00" });
   assert.deepEqual(early, { nightDate: "2026-10-01", nightlyAmountMinor: 10000, standardStayMinutes: 1200 });
   assert.deepEqual(late, { nightDate: "2026-10-02", nightlyAmountMinor: 20000, standardStayMinutes: 1140 });
-  assert.equal(calculateStayTimeFee({ mode: "PER_HOUR", amountMinor: 0, currency: "USD" }, 90, early), 750);
-  assert.equal(calculateStayTimeFee({ mode: "PER_HOUR", amountMinor: 0, currency: "USD" }, 90, late), 1579);
+  assert.equal(calculateStayTimeFee({ mode: "PER_HOUR", amountMinor: 0, currency: "USD" }, 90, early), 800);
+  assert.equal(calculateStayTimeFee({ mode: "PER_HOUR", amountMinor: 0, currency: "USD" }, 90, late), 1600);
   for (const pricingBreakdown of [null, {}, { ...data.pricingBreakdown, nightlyRates: [] },
     { ...data.pricingBreakdown, nightlyRates: [data.pricingBreakdown.nightlyRates[0], data.pricingBreakdown.nightlyRates[0]] }]) {
     assert.throws(() => deriveStayTimeHourlyBasis({ ...data, operation: "EARLY_CHECKIN", pricingBreakdown }), /NIGHTLY_PRICING_BASIS_REQUIRED/);

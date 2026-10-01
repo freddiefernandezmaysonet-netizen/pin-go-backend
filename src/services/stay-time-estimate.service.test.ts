@@ -57,8 +57,8 @@ test("stay-time estimates use real scoped PostgreSQL evidence without writes", {
     try {
       const before = await db.reservation.findUniqueOrThrow({ where: { id: stay.id } });
       const quote = await prepareStayTimeQuote(db, quoteInput, options);
-      assert.equal(quote.terms.pricing.additionalChargeMinor, 491);
-      assert.equal(quote.terms.pricing.proposedTotalMinor, 15491);
+      assert.equal(quote.terms.pricing.additionalChargeMinor, 545);
+      assert.equal(quote.terms.pricing.proposedTotalMinor, 15545);
       assert.equal(quote.confirmationAvailable, false);
       assert.equal(quote.paymentReady, false);
       assert.equal(quote.terms.expiresAt, "2026-10-01T12:01:00.000Z");
@@ -77,7 +77,7 @@ test("stay-time estimates use real scoped PostgreSQL evidence without writes", {
   await t.test("exact minute fee, offset plus cleaning window, estimate only, no mutation", async () => {
     const before = await db.reservation.findUniqueOrThrow({ where: { id: stay.id } });
     const result = await estimate();
-    assert.equal(result.feeSubtotalMinor, 450);
+    assert.equal(result.feeSubtotalMinor, 500);
     assert.equal(result.additionalMinutes, 90);
     assert.equal(result.requiredFreeUntil, "2026-10-03T20:00:00.000Z");
     assert.equal(result.checkIn, stay.checkIn.toISOString());

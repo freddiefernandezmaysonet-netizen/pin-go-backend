@@ -84,7 +84,7 @@ function validateFee(fee: StayTimeFee): void {
   }
 }
 
-/** Fees are in currency minor units. Hourly fees are prorated by elapsed minute. */
+/** Fees are returned in cents. Hourly totals round half-up to a whole USD after prorating. */
 export function calculateStayTimeFee(fee: StayTimeFee, additionalMinutes: number, basis?: StayTimeHourlyBasis): number {
   validateFee(fee);
   if (!Number.isSafeInteger(additionalMinutes) || additionalMinutes <= 0 || additionalMinutes > 1_500) {
@@ -96,10 +96,9 @@ export function calculateStayTimeFee(fee: StayTimeFee, additionalMinutes: number
   }
   const denominator = BigInt(basis?.standardStayMinutes ?? 1);
   const amount = fee.mode === "FREE" ? 0n : fee.mode === "FIXED" ? BigInt(fee.amountMinor) :
-    (BigInt(basis!.nightlyAmountMinor) * BigInt(additionalMinutes) * 2n + denominator) / (denominator * 2n);
+    ((BigInt(basis!.nightlyAmountMinor) * BigInt(additionalMinutes) + denominator * 50n) / (denominator * 100n)) * 100n;
   if (amount > BigInt(Number.MAX_SAFE_INTEGER)) reject("FEE_OVERFLOW");
-  // A positive paid rule must never silently become a free offer after rounding.
-  if (fee.mode !== "FREE" && amount === 0n && !(fee.mode === "PER_HOUR" && basis?.nightlyAmountMinor === 0)) reject("FEE_BELOW_MINOR_UNIT");
+  // Normal whole-dollar rounding intentionally yields zero below $0.50.
   return Number(amount);
 }
 

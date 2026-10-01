@@ -10,7 +10,10 @@ the persisted nightly rate snapshot (not today's calendar price, taxes or total
 reservation amount). Divide that night by the nominal local overnight duration:
 15:00→11:00 is 20 hours, 16:00→11:00 is 19 hours. Calculate the fee directly as
 nightly cents × additional elapsed minutes / standard minutes, rounding once
-half-up at the end. Do not round an intermediate hourly price. FREE and PER_HOUR
+half-up to the nearest whole USD at the end ($10.20 → $10; $10.50 → $11;
+$100 / 19 × 2 → $11). Do not round an intermediate hourly price or subtotal
+to cents first. Totals below $0.50 round to zero. Fixed fees retain their configured
+cents; taxes are applied afterward under the existing tax rules. FREE and PER_HOUR
 store amountMinor=0; only FIXED accepts a manual amount. Missing/ambiguous nightly
 rates fail closed; an explicitly zero-priced night yields zero. A fixed fee is
 charged once per adjustment. Repeated adjustments of the same kind are deferred
