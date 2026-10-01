@@ -4,6 +4,7 @@ import { StayTimePolicyError } from "../pin-ai/actions/stay-time-policy.js";
 import { revalidateStayTimeTerms } from "./stay-time-proposal.service.js";
 import { prepareStayTimeQuoteInTransaction } from "./stay-time-quote.service.js";
 import { assertStayTimePaymentWindow } from "./stay-time-payment-window.js";
+import { assertStayTimePaymentEvidence, type StayTimePaymentEvidence } from "./stay-time-payment-evidence.js";
 
 function reject(code: string): never { throw new StayTimePolicyError(code); }
 function object(value: unknown): Record<string, unknown> {
@@ -24,7 +25,7 @@ export async function validateFreeStayTimeApply(tx: Prisma.TransactionClient, m:
       [m.amountDifference, m.additionalChargeAmount, m.additionalPlatformFeeAmount, m.additionalHostPayoutAmount].some(v => Number(v) !== 0) ||
       [m.stripeCheckoutSessionId, m.stripePaymentIntentId, m.stripeChargeId, m.stripeApplicationFeeId,
         m.stripeTransferId, m.stripePaymentStatus].some(Boolean)) reject("STAY_TIME_PAYMENT_APPLY_NOT_READY");
-  return validateStayTimeSnapshot(tx, m, r, now, false);
+  return validateStayTimeSnapshot(tx, m, r, now);
 }
 
 /** Internal preflight only. Does not create Checkout or authorize paid apply.
@@ -36,13 +37,25 @@ export async function validatePaidStayTimeCheckout(tx: Prisma.TransactionClient,
       Number(m.additionalChargeAmount) <= 0 || !m.checkoutExpiresAt ||
       [m.stripeCheckoutSessionId, m.stripePaymentIntentId, m.stripeChargeId, m.stripeApplicationFeeId,
         m.stripeTransferId, m.stripePaymentStatus].some(Boolean)) reject("STAY_TIME_CHECKOUT_PREFLIGHT_NOT_ELIGIBLE");
-  return validateStayTimeSnapshot(tx, m, r, now, true);
+  return validateStayTimeSnapshot(tx, m, r, now, "CHECKOUT_CREATION");
 }
 
-async function validateStayTimeSnapshot(tx: Prisma.TransactionClient, m: ReservationModification, r: Reservation, now: Date, paidCheckout: boolean) {
+/** Internal read-only post-payment validation. Intentionally NOT wired into the
+ * canonical apply service until recovery and durable turnover holds are ready.
+ * Evidence must come from authenticated, account-scoped provider retrieval.
+ */
+export async function validatePaidStayTimeApply(tx: Prisma.TransactionClient, m: ReservationModification, r: Reservation,
+  now: Date, evidence: StayTimePaymentEvidence) {
+  if (m.status !== "APPLYING") reject("STAY_TIME_PAYMENT_APPLY_NOT_ELIGIBLE");
+  assertStayTimePaymentEvidence(m, r, evidence, now);
+  return validateStayTimeSnapshot(tx, m, r, now, "PAYMENT_APPLICATION");
+}
+
+async function validateStayTimeSnapshot(tx: Prisma.TransactionClient, m: ReservationModification, r: Reservation, now: Date,
+  paidPhase?: "CHECKOUT_CREATION" | "PAYMENT_APPLICATION") {
   const consent = object(m.guestConfirmation);
   const terms = object(consent.quoteTerms);
-  if (m.status !== (paidCheckout ? "AWAITING_PAYMENT" : "APPLYING") || m.reservationId !== r.id ||
+  if (m.status !== (paidPhase === "CHECKOUT_CREATION" ? "AWAITING_PAYMENT" : "APPLYING") || m.reservationId !== r.id ||
       m.requestSource !== "PIN_AI_GUEST_SERVICES" || consent.source !== m.requestSource ||
       consent.confirmed !== true || typeof consent.actionProposalId !== "string" ||
       terms.version !== "stay_time_quote_v1" || consent.operation !== terms.operation || !r.guestToken) reject("STAY_TIME_CONFIRMED_PROPOSAL_REQUIRED");
@@ -68,13 +81,13 @@ async function validateStayTimeSnapshot(tx: Prisma.TransactionClient, m: Reserva
       Number(pricing.platformFeeBasisPoints) > 10000) reject("INVALID_STAY_TIME_TERMS");
   const platformFeePercent = (Number(pricing.platformFeeBasisPoints) / 100).toFixed(2);
   let fresh;
-  if (paidCheckout) {
+  if (paidPhase) {
     if ((terms.operation !== "EARLY_CHECKIN" && terms.operation !== "LATE_CHECKOUT") ||
         typeof terms.requestedLocalTime !== "string" || typeof terms.createdAt !== "string" ||
         terms.expiresAt !== proposal.expiresAt.toISOString()) reject("INVALID_STAY_TIME_TERMS");
     assertStayTimePaymentWindow({ operation: terms.operation, proposedCheckIn: m.proposedCheckIn, currentCheckOut: m.currentCheckOut,
       guestTokenExpiresAt: r.guestTokenExpiresAt, quoteCreatedAt: new Date(terms.createdAt), quoteExpiresAt: proposal.expiresAt,
-      confirmedAt: proposal.confirmedAt, stagedAt: new Date(stagedAt), checkoutExpiresAt: m.checkoutExpiresAt!, now, phase: "CHECKOUT_CREATION" });
+      confirmedAt: proposal.confirmedAt, stagedAt: new Date(stagedAt), checkoutExpiresAt: m.checkoutExpiresAt!, now, phase: paidPhase });
     // Keep fresh operational checks at NOW, not at the earlier staging time.
     fresh = await prepareStayTimeQuoteInTransaction(tx, { guestToken: r.guestToken,
       operation: terms.operation, requestedLocalTime: terms.requestedLocalTime }, { now, platformFeePercent, ownModificationId: m.id });
@@ -89,7 +102,7 @@ async function validateStayTimeSnapshot(tx: Prisma.TransactionClient, m: Reserva
   }
   const p = fresh.terms.pricing;
   const ids = (values: string[]) => JSON.stringify([...values].sort());
-  if ((!paidCheckout && p.additionalChargeMinor !== 0) || (paidCheckout && p.additionalChargeMinor <= 0) ||
+  if ((!paidPhase && p.additionalChargeMinor !== 0) || (paidPhase && p.additionalChargeMinor <= 0) ||
       Number(m.amountDifference) !== p.additionalChargeMinor / 100 || Number(m.additionalChargeAmount) !== p.additionalChargeMinor / 100 ||
       Number(m.additionalPlatformFeeAmount) !== p.additionalPlatformFeeMinor / 100 ||
       Number(m.additionalHostPayoutAmount) !== p.additionalHostPayoutMinor / 100 ||

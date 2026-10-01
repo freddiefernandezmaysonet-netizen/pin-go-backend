@@ -5,6 +5,7 @@
   },
   "include": [
     "src/services/stay-time-checkout-preflight.db.test.ts",
+    "src/services/stay-time-payment-evidence.test.ts",
     "src/services/stay-time-payment-window.test.ts",
     "src/services/cleaning-reconfirmation-renewal.db.test.ts",
     "src/services/reservation-reconcile-cleaner-reconfirmation.contract.test.ts",

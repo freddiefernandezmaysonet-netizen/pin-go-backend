@@ -3,7 +3,8 @@ import test from "node:test";
 import { PrismaClient } from "@prisma/client";
 import { defaultStayTimeSettings } from "../pin-ai/actions/stay-time-settings.js";
 import { createStayTimeProposal, confirmStayTimeProposal, stageStayTimeModification } from "./stay-time-proposal.service.js";
-import { validatePaidStayTimeCheckout } from "./stay-time-apply-validation.service.js";
+import { validatePaidStayTimeCheckout, validatePaidStayTimeApply, validateFreeStayTimeApply } from "./stay-time-apply-validation.service.js";
+import { syntheticStayTimePaymentEvidence } from "./stay-time-payment-evidence.fixture.js";
 
 const url = process.env.STAY_TIME_TEST_DATABASE_URL;
 test("paid stay-time preflight revalidates persisted consent and current operations without writes", { skip: !url }, async t => {
@@ -12,9 +13,9 @@ test("paid stay-time preflight revalidates persisted consent and current operati
   assert.equal(parsed.pathname, "/pingo_stay_time_test");
   const db = new PrismaClient({ datasources: { db: { url } } });
   t.after(() => db.$disconnect());
-  for (const scenario of ["late", "early", "cleaning-revoked", "turnover-blocked", "price-changed", "amount-tampered",
+  for (const phase of ["CHECKOUT", "APPLY"] as const) for (const scenario of ["late", "early", "cleaning-revoked", "turnover-blocked", "price-changed", "amount-tampered",
     "fingerprint-tampered", "existing-session", "wrong-reservation", "expired", "setup-too-short"] as const) {
-    await t.test(scenario, async () => {
+    await t.test(`${phase}: ${scenario}`, async () => {
       const early = scenario === "early" || scenario === "cleaning-revoked";
       const stagedAt = new Date(early ? "2026-10-01T12:00Z" : "2026-10-02T12:00Z");
       const org = await db.organization.create({ data: { name: "Synthetic paid preflight" } });
@@ -28,6 +29,7 @@ test("paid stay-time preflight revalidates persisted consent and current operati
         guestToken: `synthetic-preflight-${property.id}`, checkIn: new Date("2026-10-01T19:00Z"), checkOut: new Date("2026-10-03T15:00Z"),
         status: "ACTIVE", paymentState: "PAID", source: "DIRECT_BOOKING", externalProvider: "PIN_GO_DIRECT",
         currency: "usd", totalAmount: 150, amountCollected: 150, platformFeeAmount: 2.25, hostPayoutAmount: 147.75,
+        stripeConnectedAccountId: "acct_synthetic_preflight",
         pricingBreakdown: { currency: "usd", totalAmount: 150, totalAmountCents: 15000,
           nightlySubtotal: 100, nightlyRates: [{ date: "2026-10-01", rate: 40 }, { date: "2026-10-02", rate: 60 }],
           cleaningFee: 50, amenitiesTotal: 0, taxesTotal: 0 } } });
@@ -56,22 +58,34 @@ test("paid stay-time preflight revalidates persisted consent and current operati
           confirmationToken: proposal.confirmationToken }, options);
         const staged = await stageStayTimeModification(db, { guestToken: reservation.guestToken!, proposalId: proposal.proposal.id }, options);
         const id = staged.modification.id;
+        if (phase === "APPLY") await db.reservationModification.update({ where: { id }, data: {
+          status: "APPLYING", stripePaymentStatus: "paid", stripeConnectedAccountId: reservation.stripeConnectedAccountId,
+          stripeCheckoutSessionId: "cs_synthetic_preflight", stripePaymentIntentId: "pi_synthetic_preflight",
+          stripeChargeId: "ch_synthetic_preflight", stripeApplicationFeeId: "fee_synthetic_preflight",
+        } });
         if (scenario === "cleaning-revoked") await db.cleaningWork.update({ where: { id: workId! }, data: { completionConfirmedAt: null } });
         if (scenario === "turnover-blocked") await db.propertyBlockedDate.create({ data: { propertyId: property.id,
           startDate: new Date("2026-10-03T19:59Z"), endDate: new Date("2026-10-04T15:00Z") } });
         if (scenario === "price-changed") await db.reservation.update({ where: { id: reservation.id }, data: { totalAmount: 151 } });
         if (scenario === "amount-tampered") await db.reservationModification.update({ where: { id }, data: { additionalChargeAmount: 999 } });
         if (scenario === "fingerprint-tampered") await db.reservationModification.update({ where: { id }, data: { requestFingerprint: "tampered" } });
-        if (scenario === "existing-session") await db.reservationModification.update({ where: { id }, data: { stripeCheckoutSessionId: "cs_test_existing" } });
+        if (phase === "CHECKOUT" && scenario === "existing-session") await db.reservationModification.update({ where: { id }, data: { stripeCheckoutSessionId: "cs_test_existing" } });
         const now = new Date(stagedAt.getTime() + (scenario === "expired" ? 3_600_000 : scenario === "setup-too-short" ? 1_800_000 : 120_000));
         const before = await db.reservationModification.findUniqueOrThrow({ where: { id } });
         const beforeReservation = await db.reservation.findUniqueOrThrow({ where: { id: reservation.id } });
         const validate = () => db.$transaction(async tx => {
           const m = await tx.reservationModification.findUniqueOrThrow({ where: { id } });
           const r = await tx.reservation.findUniqueOrThrow({ where: { id: reservation.id } });
-          return validatePaidStayTimeCheckout(tx, m, scenario === "wrong-reservation" ? { ...r, id: "wrong" } : r, now);
+          const scopedReservation = scenario === "wrong-reservation" ? { ...r, id: "wrong" } : r;
+          if (phase === "CHECKOUT") return validatePaidStayTimeCheckout(tx, m, scopedReservation, now);
+          const evidence = syntheticStayTimePaymentEvidence(m, r, now);
+          if (scenario === "existing-session") evidence.session.id = "cs_another_payment";
+          // This internal validation must not open the canonical paid-apply gate.
+          await assert.rejects(validateFreeStayTimeApply(tx, m, r, now),
+            (error: unknown) => (error as { code?: string }).code === "STAY_TIME_PAYMENT_APPLY_NOT_READY");
+          return validatePaidStayTimeApply(tx, m, scopedReservation, now, evidence);
         }, { isolationLevel: "RepeatableRead" });
-        if (scenario === "early" || scenario === "late") {
+        if (scenario === "early" || scenario === "late" || (phase === "APPLY" && scenario === "setup-too-short")) {
           const result = await validate();
           assert.equal(result.operation, early ? "EARLY_CHECKIN" : "LATE_CHECKOUT");
           assert.ok(now > proposal.proposal.expiresAt);
