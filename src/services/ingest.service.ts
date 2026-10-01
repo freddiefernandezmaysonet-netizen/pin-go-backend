@@ -11,6 +11,7 @@
 } from "@prisma/client";
 
 import crypto from "crypto";
+import { resolveIngestGuestLanguage } from "./guest-language-ingest.policy";
 import { computeCleaningWindowPR } from "../services/cleaningWindow.service";
 import { reconcileReservation } from "./reservation.reconcile.service";
 import { log } from "../utils/log";
@@ -173,12 +174,7 @@ export async function ingestReservation(p: IngestPayload) {
         : new Date(p.checkOut)
       : new Date(p.checkOut);
 
-   const preferredLanguage =
-    String(p.preferredLanguage ?? "")
-      .trim()
-      .toLowerCase() === "es"
-      ? "es"
-      : "en";
+  const preferredLanguage = resolveIngestGuestLanguage(p);
 
   if (isNaN(checkIn.getTime())) throw new Error("Invalid checkIn");
   if (isNaN(checkOut.getTime())) throw new Error("Invalid checkOut");
@@ -912,7 +908,7 @@ async function upsertReservation(
     guestPhone?: string | null;
     adults?: number | null;
     children?: number | null;
-    preferredLanguage: string;
+    preferredLanguage: string | undefined;
     roomName?: string | null;
     guestAccessModeSnapshot: GuestAccessMode;
     externalProvider?: string | null;
@@ -1040,7 +1036,8 @@ async function upsertReservation(
               : input.guestPhone ?? null,
           ...(input.adults != null ? { adults: input.adults } : {}),
           ...(input.children != null ? { children: input.children } : {}),
-          preferredLanguage: input.preferredLanguage,
+          ...(input.preferredLanguage !== undefined
+            ? { preferredLanguage: input.preferredLanguage } : {}),
           roomName: input.roomName ?? null,
 
           externalUpdatedAt: input.externalUpdatedAt ?? undefined,
@@ -1092,7 +1089,8 @@ async function upsertReservation(
               : input.guestPhone ?? null,
           ...(input.adults != null ? { adults: input.adults } : {}),
           ...(input.children != null ? { children: input.children } : {}),
-          preferredLanguage: input.preferredLanguage,
+          ...(input.preferredLanguage !== undefined
+            ? { preferredLanguage: input.preferredLanguage } : {}),
           roomName: input.roomName ?? null,
 
           externalUpdatedAt: input.externalUpdatedAt ?? undefined,
@@ -1134,7 +1132,8 @@ async function upsertReservation(
         guestPhone: input.guestPhone ?? null,
         ...(input.adults != null ? { adults: input.adults } : {}),
         ...(input.children != null ? { children: input.children } : {}),
-        preferredLanguage: input.preferredLanguage,
+        ...(input.preferredLanguage !== undefined
+            ? { preferredLanguage: input.preferredLanguage } : {}),
         roomName: input.roomName ?? null,
 
         externalProvider: input.externalProvider!,
@@ -1176,7 +1175,8 @@ async function upsertReservation(
       guestName: input.guestName,
       guestEmail: input.guestEmail ?? null,
       guestPhone: input.guestPhone ?? null,
-      preferredLanguage: input.preferredLanguage,
+      ...(input.preferredLanguage !== undefined
+            ? { preferredLanguage: input.preferredLanguage } : {}),
       roomName: input.roomName ?? null,
 
       externalProvider: input.externalProvider ?? null,
@@ -1204,7 +1204,8 @@ async function upsertReservation(
       guestName: input.guestName,
       guestEmail: input.guestEmail ?? null,
       guestPhone: input.guestPhone ?? null,
-      preferredLanguage: input.preferredLanguage,
+      ...(input.preferredLanguage !== undefined
+            ? { preferredLanguage: input.preferredLanguage } : {}),
       roomName: input.roomName ?? null,
 
       externalUpdatedAt: input.externalUpdatedAt ?? undefined,

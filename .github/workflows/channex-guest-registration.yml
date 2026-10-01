@@ -3,6 +3,8 @@ on:
   pull_request:
     paths:
       - 'src/services/guest-registration-channel*'
+      - 'src/services/guest-language-ingest*'
+      - 'src/services/ingest.service.ts'
       - 'src/services/checkoutSms*'
       - 'src/services/checkout-sms-consent.policy.ts'
       - 'src/services/precheckin-email-fallback.contract.test.ts'
@@ -54,3 +56,4 @@ jobs:
           src/services/checkoutSms.consent-guard.test.ts
           src/services/precheckin-email-fallback.contract.test.ts
           src/services/ota-guest-contact-automation-closure.contract.test.ts
+          src/services/guest-language-ingest.policy.test.ts
