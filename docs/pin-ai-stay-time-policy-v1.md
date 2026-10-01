@@ -86,8 +86,27 @@ Backend migration/API must precede the Dashboard rollout when authorized.
 
 ## Remaining integration work
 
-1. Build the canonical arrival-readiness adapter and complete availability queries
-   (including pending holds) without confusing the departing and arriving stay.
+The read-only `estimateStayTimeAdjustment` adapter now obtains the reservation,
+property settings, active reservations, host blocks, applied change history and
+pending modification holds from one repeatable-read PostgreSQL snapshot. Holds
+include PAYMENT_PROCESSING, APPLYING and unexpired AWAITING_PAYMENT, regardless
+of the conflicting reservation's payment state. An in-flight change on the same
+reservation blocks another estimate. The adapter resolves local clock times and
+rejects DST gaps/folds rather than silently selecting an instant. It returns a
+minute-prorated fee subtotal, snapshot versions, a 60-second expiry and explicit
+`ESTIMATE_ONLY`/no-hold/no-execution flags. It does not create a quote or call a
+provider. Availability still needs transactional revalidation at confirm/apply.
+
+This adapter is not mounted into the guest runtime yet. Early arrival deliberately
+fails with ARRIVAL_READINESS_REQUIRED: there is no persisted host-readiness
+authority to trust, and cleaner acceptance/completion cannot substitute for one.
+The existing runtime eligibility tools therefore remain unchanged. PostgreSQL
+tests exercise the actual conflict predicates, including offset-only conflicts,
+exact interval boundaries, expired/processing/applying holds, same-stay changes,
+tenant scoping, disabled/invalid settings and repeated adjustments.
+
+1. Build persisted canonical arrival readiness without confusing the departing
+   and arriving stay; bind the new estimator to authenticated runtime context.
 2. Add distinct runtime/proposal operations. Bind policy version, exact times,
    readiness evidence, final fee/tax/split, scope and consent to the proposal.
 3. Recheck policy and availability under concurrency control at confirm/apply;

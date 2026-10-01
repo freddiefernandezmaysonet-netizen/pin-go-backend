@@ -7,6 +7,8 @@
     "src/pin-ai/actions/stay-time-settings.ts",
     "src/services/property-stay-time-settings.service.ts",
     "src/services/property-stay-time-settings.db.test.ts",
+    "src/services/stay-time-estimate.service.ts",
+    "src/services/stay-time-estimate.service.test.ts",
     "src/routes/dashboard.stay-time-settings.routes.ts",
     "src/routes/dashboard.stay-time-settings.routes.test.ts"
   ]

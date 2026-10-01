@@ -97,6 +97,8 @@ jobs:
           src/server.ts
           src/services/property-stay-time-settings.db.test.ts
           src/services/property-stay-time-settings.service.ts
+          src/services/stay-time-estimate.service.test.ts
+          src/services/stay-time-estimate.service.ts
           tsconfig.pin-ai-stay-time-policy.json
           tsconfig.pin-ai-stay-time-settings.json
           EOF
