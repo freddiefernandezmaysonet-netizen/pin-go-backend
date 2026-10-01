@@ -40,6 +40,9 @@
     "src/services/preCheckinSms.service.ts",
     "src/services/preCheckinSms.verification-policy.test.ts",
     "src/workers/message.retry.worker.ts",
-    "src/workers/reservation.worker.ts"
+    "src/workers/reservation.worker.ts",
+    "src/services/ingest.service.ts",
+    "src/services/guest-language-ingest.policy.ts",
+    "src/services/guest-language-ingest.policy.test.ts"
   ]
 }
