@@ -117,7 +117,8 @@ jobs:
             diff -u "$RUNNER_TEMP/stay-time-settings-allowed.txt" "$RUNNER_TEMP/actual.txt"
             test "$(git diff --no-ext-diff --no-color --full-index --unified=0 "origin/$BASE_BRANCH...HEAD" -- prisma/schema.prisma | sha256sum | cut -d ' ' -f 1)" = "296467a9e396a7171f15cf9d1b8a719421ac346ad94718a8d0670ae8c0095e0e"
             test "$(sha256sum prisma/migrations/20261001110000_property_stay_time_settings_v1/migration.sql | cut -d ' ' -f 1)" = "848dc881ee67925f88af326639cc457b64704ddb01773ee8fdd7dea58a80f9df"
-            test "$(git diff --no-ext-diff --no-color --full-index --unified=0 "origin/$BASE_BRANCH...HEAD" -- src/server.ts | sha256sum | cut -d ' ' -f 1)" = "96642af8cff7b4365acf1cd75b60e09898d95dc0450d0bfdd5c414694431dee4"
+            # Pin exact added/removed server lines; unrelated base edits change blob IDs and offsets.
+            test "$(git diff --no-ext-diff --no-color --full-index --unified=0 "origin/$BASE_BRANCH...HEAD" -- src/server.ts | sed '/^index /d; /^@@ /d' | sha256sum | cut -d ' ' -f 1)" = "0a19e9d1d9857b769dcd3725b43fb7b2db6cc6fedbce8034db8ddd8877547774"
             if ! git diff --quiet "origin/$BASE_BRANCH" HEAD -- src/domain/computeOperationalRisk.ts; then
               test "$(git diff --no-ext-diff --no-color --full-index --unified=0 "origin/$BASE_BRANCH...HEAD" -- src/domain/computeOperationalRisk.ts | sha256sum | cut -d ' ' -f 1)" = "c5591cd2c13898778ad044c54bc82543f97c3407d0d82569ed70957fef4e4244"
             fi
