@@ -4,6 +4,7 @@
     "target": "es2022", "strict": true, "skipLibCheck": true, "types": ["node"]
   },
   "include": [
+    "src/services/cleaning-reconfirmation-renewal.db.test.ts",
     "src/services/reservation-reconcile-cleaner-reconfirmation.contract.test.ts",
     "src/services/reservation-guest-access-window.test.ts",
     "src/pin-ai/actions/stay-time-settings.ts",

@@ -79,14 +79,15 @@ test("guest-triggered NFC loop skips unchanged cleaner cards; provisioning canno
 
 test("old cleaner authorization is closed before the replacement request is created", async () => {
   const source = await readReservationReconcileService();
+  const renewal = await readFile(new URL("./cleaning-reconfirmation-renewal.service.ts", import.meta.url), "utf8");
   const cleaningBranch = source.indexOf(
     "if (a.role === NfcAssignmentRole.CLEANING)"
   );
-  const expireConfirmations = source.indexOf(
-    "await prisma.cleaningConfirmation.updateMany"
+  const expireConfirmations = renewal.indexOf(
+    "await tx.cleaningConfirmation.updateMany"
   );
-  const createConfirmation = source.indexOf(
-    "const confirmation = await createCleaningConfirmation"
+  const createConfirmation = renewal.indexOf(
+    "const next = await tx.cleaningConfirmation.create"
   );
   const dispatchConfirmation = source.indexOf(
     "await dispatchPendingCleaningConfirmationForReservation"
@@ -96,11 +97,11 @@ test("old cleaner authorization is closed before the replacement request is crea
   assert.notEqual(expireConfirmations, -1);
   assert.notEqual(createConfirmation, -1);
   assert.notEqual(dispatchConfirmation, -1);
-  assert.ok(cleaningBranch < expireConfirmations);
+  assert.ok(cleaningBranch < source.indexOf("await renewCleaningConfirmation"));
   assert.ok(expireConfirmations < createConfirmation);
-  assert.ok(createConfirmation < dispatchConfirmation);
+  assert.ok(source.indexOf("await renewCleaningConfirmation") < dispatchConfirmation);
 
-  const replacementFlow = source.slice(cleaningBranch, dispatchConfirmation);
+  const replacementFlow = source.slice(cleaningBranch, dispatchConfirmation) + renewal;
 
   assert.match(replacementFlow, /await ttlockChangeCardPeriod/);
   assert.match(
@@ -109,21 +110,16 @@ test("old cleaner authorization is closed before the replacement request is crea
   );
   assert.match(
     replacementFlow,
-    /status:\s*StaffAssignmentStatus\.CANCELLED/
+    /status:\s*"CANCELLED"/
   );
   assert.match(replacementFlow, /status:\s*"EXPIRED"/);
 });
 
-test("the reconciliation snapshot is committed only after cleaner reconfirmation is prepared", async () => {
-  const source = await readReservationReconcileService();
-  const dispatchConfirmation = source.indexOf(
-    "await dispatchPendingCleaningConfirmationForReservation"
-  );
-  const finalSnapshot = source.lastIndexOf(
-    "lastReconciledCheckOut: desiredEnd"
-  );
-
-  assert.notEqual(dispatchConfirmation, -1);
-  assert.notEqual(finalSnapshot, -1);
-  assert.ok(dispatchConfirmation < finalSnapshot);
+test("replacement and reconciliation snapshot share a transaction before dispatch", async () => {
+  const source = await readFile(new URL("./cleaning-reconfirmation-renewal.service.ts", import.meta.url), "utf8");
+  assert.match(source, /return await db.\$transaction/);
+  const create = source.indexOf("await tx.cleaningConfirmation.create");
+  const snapshot = source.indexOf("lastReconciledAt: now");
+  assert.ok(create >= 0 && snapshot > create);
+  assert.doesNotMatch(source, /dispatchPendingCleaningConfirmation/);
 });

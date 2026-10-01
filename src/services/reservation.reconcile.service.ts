@@ -5,14 +5,12 @@ import {
   AccessGrantType,
   NfcAssignmentStatus,
   NfcAssignmentRole,
-  StaffAccessMethod,
-  StaffAssignmentStatus,
 } from "@prisma/client";
 
 import { deactivateGrant } from "../services/ttlock/ttlock.brain";
 import { ttlockChangeCardPeriod } from "../ttlock/ttlock.card";
 import { log } from "../utils/log";
-import { createCleaningConfirmation } from "./cleaning-confirmation.service";
+import { renewCleaningConfirmation } from "./cleaning-reconfirmation-renewal.service";
 import {
   dispatchPendingCleaningConfirmationForReservation,
 } from "./cleaning-confirmation-dispatch.service";
@@ -430,35 +428,6 @@ if (a.role === NfcAssignmentRole.CLEANING) {
   }
 
   if (cleaningReconfirmationNeeded) {
-    await prisma.staffAssignment.updateMany({
-      where: {
-        reservationId: reservation.id,
-        method: StaffAccessMethod.NFC_TIMEBOUND,
-        status: {
-          in: [
-            StaffAssignmentStatus.SCHEDULED,
-            StaffAssignmentStatus.ACTIVE,
-          ],
-        },
-      },
-      data: {
-        status: StaffAssignmentStatus.CANCELLED,
-        lastError: null,
-      },
-    });
-
-    await prisma.cleaningConfirmation.updateMany({
-      where: {
-        reservationId: reservation.id,
-        status: {
-          in: ["PENDING", "CONFIRMED"],
-        },
-      },
-      data: {
-        status: "EXPIRED",
-      },
-    });
-
     const selectedCleaner = previousCleaningConfirmation
       ? { id: previousCleaningConfirmation.staffMemberId }
       : await selectNextStaffForProperty({
@@ -466,10 +435,17 @@ if (a.role === NfcAssignmentRole.CLEANING) {
         });
 
     if (selectedCleaner) {
-      const confirmation = await createCleaningConfirmation({
+      const renewal = await renewCleaningConfirmation(prisma, {
         reservationId: reservation.id,
         propertyId: reservation.propertyId,
+        organizationId: reservation.property.organizationId,
         staffMemberId: selectedCleaner.id,
+        checkIn: desiredStart,
+        checkOut: desiredEnd,
+        expectedLastReconciledAt: reservation.lastReconciledAt,
+        previousConfirmationId: previousCleaningConfirmation?.id ?? null,
+        cleaningStartOffsetMinutes: reservation.property.cleaningStartOffsetMinutes,
+        cleaningDurationMinutes: reservation.property.cleaningDurationMinutes,
       });
 
       try {
@@ -481,7 +457,7 @@ if (a.role === NfcAssignmentRole.CLEANING) {
 
         console.log("[reconcile][cleaning] reconfirmation prepared", {
           reservationId: reservation.id,
-          confirmationId: confirmation?.id ?? null,
+          confirmationId: renewal.confirmationId,
           sent: dispatchResult.sent,
           skipped: dispatchResult.skipped,
           reason: dispatchResult.reason ?? null,
@@ -489,17 +465,15 @@ if (a.role === NfcAssignmentRole.CLEANING) {
       } catch (e: any) {
         console.error("[reconcile][cleaning] reconfirmation dispatch failed", {
           reservationId: reservation.id,
-          confirmationId: confirmation?.id ?? null,
+          confirmationId: renewal.confirmationId,
           error: String(e?.message ?? e),
         });
       }
     } else {
-      console.warn("[reconcile][cleaning] reconfirmation skipped", {
-        reservationId: reservation.id,
-        propertyId: reservation.propertyId,
-        reason: "CLEANER_NOT_FOUND",
-      });
+      throw new Error("CLEANING_RENEWAL_CLEANER_NOT_FOUND");
     }
+    // Renewal already committed the reconciliation snapshot atomically.
+    return;
   }
 
   // 3) Mark reconciled

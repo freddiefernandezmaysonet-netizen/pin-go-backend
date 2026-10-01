@@ -14,6 +14,7 @@ on:
       - "src/services/reservation.reconcile.service.ts"
       - "src/services/reservation-guest-access-window*"
       - "src/services/reservation-cleaning-window*"
+      - "src/services/cleaning-reconfirmation-renewal*"
       - "src/services/reservation-reconcile-cleaner-reconfirmation.contract.test.ts"
       - "src/services/guest-reservation-modification-apply*"
       - "src/pin-ai/actions/action-proposal.service*"
@@ -55,6 +56,8 @@ jobs:
       - run: npx tsc -p tsconfig.pin-ai-stay-time-settings.json --noEmit false --outDir /tmp/stay-time-settings-build
       - name: Guest access boundaries and existing reconciliation contracts
         run: node --import tsx --test src/services/reservation-guest-access-window.test.ts src/services/reservation-reconcile-cleaner-reconfirmation.contract.test.ts src/services/reservation-reconcile-cancellation.contract.test.ts
+      - name: Atomic cleaning renewal and concurrent cleaner declarations
+        run: node --import tsx --test src/services/cleaning-reconfirmation-renewal.db.test.ts
       - name: Policy, real HTTP authorization, migration SQL and database concurrency
         # Independent DB suites share tables; keep their fixture writes separate.
         # Explicit Promise.all concurrency scenarios inside each suite are retained.

@@ -60,6 +60,7 @@ async function fixture(t, overrides = {}) {
   const notices = [];
   const resolutions = [];
   const db = {
+    async $queryRaw() { return [{ id: reservation.id }]; },
     cleaningConfirmation: { async findUnique({ where }) {
       return where.token === "fixture-cleaner-token" ? { ...confirmation } : null;
     } },

@@ -107,6 +107,15 @@ jobs:
           src/services/reservation-guest-access-window.ts
           src/services/reservation-guest-access-window.test.ts
           src/services/reservation-cleaning-window.ts
+          src/services/cleaning-reconfirmation-renewal.service.ts
+          src/services/cleaning-reconfirmation-renewal.db.test.ts
+          src/services/cleaning-timing-consent.prisma.ts
+          src/services/cleaning-timing-consent.prisma.test.ts
+          src/services/cleaning-work-start.prisma.ts
+          src/services/cleaning-work-start.prisma.test.ts
+          src/services/cleaning-work-completion.prisma.ts
+          src/services/cleaning-work-completion.prisma.test.ts
+          src/routes/cleaning-completion-mobile.response.test.js
           .github/workflows/cleaning-followup-v1-foundation.yml
           prisma/migrations/20261001183000_cleaning_work_confirmation_history/migration.sql
           src/services/cleaning-work-snapshot.prisma.ts
