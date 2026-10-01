@@ -194,7 +194,7 @@ export function buildCleaningStartSmsBody(params: {
     fmtWithTimezone(
       params.endsAt,
       params.timezone ?? "America/Puerto_Rico",
-      "en"
+      language
     ),
     22
   );
