@@ -1,3 +1,4 @@
+import { resolveOtaPropertyType } from "./ota-property-type.policy.js";
 import type { ConnectionCenterProvider } from "./connection-center.read-model.js";
 import type {
   ProvisionedPropertyInventory,
@@ -9,6 +10,7 @@ export type ProvisioningSnapshot = {
   organizationName: string;
   propertyId: string;
   propertyName: string;
+  propertyType?: string | null;
   maxGuests: number;
   currency: string;
   timezone: string;
@@ -145,6 +147,9 @@ export async function orchestrateOtaProvisioning(args: {
     throw new OtaProvisioningError("OTA_PROVIDER_RECONCILIATION_REQUIRED");
   }
 
+  // Validate before creating any provider resources. Existing properties remain untouched.
+  if (!snapshot.externalPropertyId) resolveOtaPropertyType(snapshot.propertyType);
+
   let externalGroupId = snapshot.externalGroupId;
   if (snapshot.groupStatus !== "READY" || !externalGroupId) {
     if (!(await args.repository.claimGroup(args.organizationId, snapshot.groupId))) {
@@ -184,6 +189,7 @@ export async function orchestrateOtaProvisioning(args: {
         organizationId: args.organizationId,
         propertyId: args.propertyId,
         propertyName: snapshot.propertyName,
+        propertyType: snapshot.propertyType,
         currency: snapshot.currency,
         timezone: snapshot.timezone,
         externalGroupId,

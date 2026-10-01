@@ -1,3 +1,4 @@
+import { resolveOtaPropertyType } from "./ota-property-type.policy.js";
 import type { ConnectionCenterProvider } from "./connection-center.read-model.js";
 import type { OneTimeConnectionTokenIssuer } from "./ota-connection-session.service.js";
 
@@ -29,6 +30,7 @@ export type WhiteLabelProvisioner = {
     organizationId: string;
     propertyId: string;
     propertyName: string;
+    propertyType?: string | null;
     currency: string;
     timezone: string;
     externalGroupId: string;
@@ -140,6 +142,7 @@ export class ChannexWhiteLabelAdapter
     organizationId: string;
     propertyId: string;
     propertyName: string;
+    propertyType?: string | null;
     currency: string;
     timezone: string;
     externalGroupId: string;
@@ -155,14 +158,21 @@ export class ChannexWhiteLabelAdapter
         ),
       };
     }
+    const classification = resolveOtaPropertyType(args.propertyType);
     const propertyResponse = await this.post("/api/v1/properties", {
       property: {
+        property_type: classification.type,
         title: required(args.propertyName, "OTA_PROPERTY_NAME_REQUIRED"),
         group_id: required(args.externalGroupId, "OTA_EXTERNAL_GROUP_ID_INVALID", 120),
         currency: required(args.currency, "OTA_PROPERTY_CURRENCY_REQUIRED", 3).toUpperCase(),
         timezone: required(args.timezone, "OTA_PROPERTY_TIMEZONE_REQUIRED", 120),
       },
     });
+    const attributes = (propertyResponse as { data?: { attributes?: { property_type?: unknown; property_category?: unknown } } })?.data?.attributes;
+    if (attributes?.property_type !== classification.type || attributes?.property_category !== classification.category) {
+      // The POST may have created a resource: never retry creation automatically.
+      throw new WhiteLabelAdapterError("OTA_PROPERTY_BILLING_CATEGORY_MISMATCH", "RECONCILIATION_REQUIRED");
+    }
     return { externalPropertyId: responseId(
       propertyResponse,
       "OTA_PROVIDER_PROPERTY_RESPONSE_INVALID"

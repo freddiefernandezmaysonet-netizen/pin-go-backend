@@ -27,6 +27,7 @@ function configuredComposition(
         organizationId: "org-1",
         organizationName: "Organization One",
         propertyId: "property-1",
+        propertyType: "HOUSE",
         propertyName: "Casa Uno",
         maxGuests: 4,
         currency: "USD",
