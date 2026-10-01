@@ -96,7 +96,7 @@ export function computeOperationalRisk(
   }
 
   if (
-    battery !== null &&
+    battery != null &&
     battery < BATTERY_CRITICAL_THRESHOLD &&
     checkInSoon
   ) {
@@ -146,7 +146,7 @@ export function computeOperationalRisk(
   }
 
   if (
-    battery !== null &&
+    battery != null &&
     battery < BATTERY_WARNING_THRESHOLD
   ) {
     return {
