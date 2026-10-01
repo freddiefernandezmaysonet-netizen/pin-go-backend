@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { readFile } from "node:fs/promises";
 import { retryGuestContactHostNotices } from "./ota-guest-contact-notice-retry.service";
+import { notifyHostGuestContactRecoveryRequired } from "./ota-guest-contact-recovery-host-notification.service";
 
 function fixture(overrides: Record<string, any> = {}) {
   const updates: any[] = [], sends: any[] = [], queries: any[] = [];
@@ -27,6 +28,36 @@ function fixture(overrides: Record<string, any> = {}) {
   return { db: db as any, send: send as any, updates, sends, queries };
 }
 const options = { maxRetries: 3, batchSize: 20 };
+
+test("initial notice never falls back to other roles when no active organization admin exists", async () => {
+  const queries: any[] = [];
+  const db = {
+    reservation: { findUnique: async () => ({ id: "res", externalProvider: "CHANNEX", property: { organizationId: "org" } }) },
+    operationalIssue: { findUnique: async () => ({ workflowState: "ACTION_REQUIRED" }) },
+    dashboardUser: { findMany: async (query: any) => {
+      queries.push(query);
+      assert.deepEqual(query.where, { organizationId: "org", isActive: true, role: "ORG_ADMIN" });
+      return [];
+    } },
+  };
+  assert.deepEqual(await notifyHostGuestContactRecoveryRequired(db as any, { reservationId: "res", missingFields: ["EMAIL"] }),
+    { sent: 0, skipped: true, reason: "NO_ACTIVE_ORG_ADMIN" });
+  assert.equal(queries.length, 1);
+});
+
+test("retry cannot send to another role when no active organization admin exists", async () => {
+  const f = fixture();
+  const queries: any[] = [];
+  f.db.dashboardUser.findMany = async (query: any) => {
+    queries.push(query);
+    assert.deepEqual(query.where, { organizationId: "org", isActive: true, role: "ORG_ADMIN" });
+    return [];
+  };
+  assert.deepEqual(await retryGuestContactHostNotices(f.db, options, f.send), { sent: 0, failed: 0, skipped: 1 });
+  assert.equal(queries.length, 1);
+  assert.equal(f.sends.length, 0);
+  assert.equal(f.updates[0].data.error, "CONTACT_NOTICE_RECIPIENT_NO_LONGER_ELIGIBLE");
+});
 
 test("retries original failed host row with current fields and provider idempotency", async () => {
   const f = fixture();
