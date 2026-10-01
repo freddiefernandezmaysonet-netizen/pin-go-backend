@@ -1,5 +1,6 @@
 import { PrismaClient, ReservationStatus } from "@prisma/client";
 import { sendSms } from "../integrations/twilio/twilio.client";
+import { getStaffIntlLocale, resolveStaffLanguage, type StaffLanguage } from "./staff-language.service.js";
 
 const prisma = new PrismaClient();
 
@@ -29,9 +30,10 @@ function toGsmSafeManualCleanerCancellationText(
 
 function formatCompactStayDate(
   value: Date,
-  timeZone: string
+  timeZone: string,
+  language: StaffLanguage
 ) {
-  return new Intl.DateTimeFormat("en-US", {
+  return new Intl.DateTimeFormat(getStaffIntlLocale(language), {
     timeZone,
     month: "2-digit",
     day: "2-digit",
@@ -51,7 +53,9 @@ export function buildManualCleanerCancellationSmsBody(input: {
   checkIn: Date;
   checkOut: Date;
   timeZone: string;
+  language?: StaffLanguage;
 }) {
+  const language = resolveStaffLanguage(input.language);
   const reservationNumber =
     toGsmSafeManualCleanerCancellationText(input.reservationNumber, 24) ||
     "N/A";
@@ -59,21 +63,17 @@ export function buildManualCleanerCancellationSmsBody(input: {
     toGsmSafeManualCleanerCancellationText(input.propertyName, 20) ||
     "Property";
   const checkIn = toGsmSafeManualCleanerCancellationText(
-    formatCompactStayDate(input.checkIn, input.timeZone),
+    formatCompactStayDate(input.checkIn, input.timeZone, language),
     16
   );
   const checkOut = toGsmSafeManualCleanerCancellationText(
-    formatCompactStayDate(input.checkOut, input.timeZone),
+    formatCompactStayDate(input.checkOut, input.timeZone, language),
     16
   );
 
-  return (
-    `Pin&Go clean cancelled/cancelada. ` +
-    `Res: ${reservationNumber}. ` +
-    `Prop: ${propertyName}. ` +
-    `Stay: ${checkIn}-${checkOut}. ` +
-    `No cleaning/no limpieza.`
-  );
+  return language === "es"
+    ? `Pin&Go limpieza cancelada. Res: ${reservationNumber}. Prop: ${propertyName}. Estadía: ${checkIn}-${checkOut}. No se requiere limpieza.`
+    : `Pin&Go cleaning cancelled. Res: ${reservationNumber}. Prop: ${propertyName}. Stay: ${checkIn}-${checkOut}. No cleaning required.`;
 }
 
 export async function notifyCleanerOfManualReservationCancellation({
@@ -229,6 +229,7 @@ export async function notifyCleanerOfManualReservationCancellation({
     checkIn: reservation.checkIn,
     checkOut: reservation.checkOut,
     timeZone,
+    language: resolveStaffLanguage(staff.preferredLanguage),
   });
 
   try {
