@@ -30,7 +30,7 @@ export type WhiteLabelProvisioner = {
     organizationId: string;
     propertyId: string;
     propertyName: string;
-    propertyType?: string | null;
+    propertyType?: string | null | undefined;
     currency: string;
     timezone: string;
     externalGroupId: string;
@@ -142,7 +142,7 @@ export class ChannexWhiteLabelAdapter
     organizationId: string;
     propertyId: string;
     propertyName: string;
-    propertyType?: string | null;
+    propertyType?: string | null | undefined;
     currency: string;
     timezone: string;
     externalGroupId: string;

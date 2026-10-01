@@ -343,7 +343,7 @@ const propertyArgs = {
 test("new properties send explicit type and reject missing or mismatched billing evidence", async () => {
   for (const attributes of [undefined, { property_type: "hotel", property_category: "hotel" }, { property_type: "holiday_home", property_category: "hotel" }, { property_type: "holiday_home", property_category: "vacation_rental" }]) {
     const requests: WhiteLabelTransportRequest[] = [];
-    const value = new ChannexWhiteLabelAdapter({ enabled: true, apiKey: "test", iframeBaseUrl: "https://example.test",
+    const value = new ChannexWhiteLabelAdapter({ enabled: true, apiKey: "test", iframeBaseUrl: "https://example.test", channelFilterByProvider: {},
       transport: { async send(request) { requests.push(request); return { data: { id: "property-ext", attributes } }; } },
     });
     const operation = value.ensureProperty({ ...propertyArgs, propertyType: "HOUSE" });
@@ -352,7 +352,7 @@ test("new properties send explicit type and reject missing or mismatched billing
     } else {
       await assert.rejects(operation, (error: unknown) => error instanceof WhiteLabelAdapterError && error.retryDisposition === "RECONCILIATION_REQUIRED");
     }
-    assert.equal((requests[0].body as any).property.property_type, "holiday_home");
+    assert.equal((requests[0]?.body as any).property.property_type, "holiday_home");
     assert.equal(requests.length, 1);
   }
 });

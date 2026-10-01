@@ -10,7 +10,7 @@ export type ProvisioningSnapshot = {
   organizationName: string;
   propertyId: string;
   propertyName: string;
-  propertyType?: string | null;
+  propertyType?: string | null | undefined;
   maxGuests: number;
   currency: string;
   timezone: string;
