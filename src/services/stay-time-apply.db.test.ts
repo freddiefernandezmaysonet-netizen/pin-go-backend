@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { PrismaClient } from "@prisma/client";
+import { Prisma, PrismaClient } from "@prisma/client";
 import { defaultStayTimeSettings } from "../pin-ai/actions/stay-time-settings.js";
 import { createStayTimeProposal, confirmStayTimeProposal, stageStayTimeModification } from "./stay-time-proposal.service.js";
 import { applyGuestReservationModification } from "./guest-reservation-modification-apply.service.js";
@@ -13,7 +13,7 @@ test("free stay-time changes apply atomically through the canonical service", { 
   const db = new PrismaClient({ datasources: { db: { url } } });
   t.after(() => db.$disconnect());
   for (const scenario of ["late", "early", "cleaning-revoked", "cleaning-buffer-blocked", "reservation-changed",
-    "expired", "pricing-tampered", "reconcile-retry", "paid-blocked"] as const) {
+    "expired", "pricing-tampered", "reconcile-retry", "transaction-retry", "paid-blocked"] as const) {
     await t.test(scenario, async () => {
       const early = scenario === "early" || scenario === "cleaning-revoked";
       const now = new Date(early ? "2026-10-01T12:00Z" : "2026-10-02T12:00Z");
@@ -67,12 +67,25 @@ test("free stay-time changes apply atomically through the canonical service", { 
         if (scenario === "paid-blocked") await db.reservationModification.update({ where: { id }, data: { status: "APPLYING" } });
         const before = await db.reservation.findUniqueOrThrow({ where: { id: stay.id } });
         const reconciled: string[] = [];
-        const dependencies = { client: db, now: () => new Date(now.getTime() + (scenario === "expired" ? 60_000 : 10_000)),
+        let transactionAttempts = 0;
+        const retryClient = { reservationModification: db.reservationModification,
+          $transaction: (async (callback: (tx: Prisma.TransactionClient) => Promise<unknown>, options?: { isolationLevel?: Prisma.TransactionIsolationLevel }) => {
+            transactionAttempts++;
+            return db.$transaction(async tx => {
+              const result = await callback(tx);
+              // Abort after the writes but before commit: retry must not duplicate them.
+              if (transactionAttempts === 1) throw new Prisma.PrismaClientKnownRequestError("Synthetic serialization conflict", {
+                code: "P2034", clientVersion: "synthetic-test",
+              });
+              return result;
+            }, options);
+          }) as typeof db.$transaction };
+        const dependencies = { client: scenario === "transaction-retry" ? retryClient : db, now: () => new Date(now.getTime() + (scenario === "expired" ? 60_000 : 10_000)),
           reconcile: async (reservationId: string) => {
             reconciled.push(reservationId);
             if (scenario === "reconcile-retry" && reconciled.length === 1) throw new Error("Synthetic reconcile outage");
           } };
-        const success = ["late", "early", "reconcile-retry"].includes(scenario);
+        const success = ["late", "early", "reconcile-retry", "transaction-retry"].includes(scenario);
         if (!success) {
           const code = scenario === "cleaning-revoked" ? "ARRIVAL_READINESS_REQUIRED" : scenario === "cleaning-buffer-blocked" ? "TURNOVER_CONFLICT"
             : scenario === "reservation-changed" ? "STAY_TIME_QUOTE_CHANGED" : scenario === "expired" ? "STAY_TIME_QUOTE_EXPIRED"
@@ -103,6 +116,7 @@ test("free stay-time changes apply atomically through the canonical service", { 
           assert.deepEqual(await db.reservation.findUniqueOrThrow({ where: { id: stay.id } }), applied);
           assert.deepEqual(reconciled, [stay.id, stay.id]);
           assert.equal(await db.reservationModification.count({ where: { reservationId: stay.id } }), 1);
+          if (scenario === "transaction-retry") assert.equal(transactionAttempts, 3); // failed tx, retry, idempotent replay
         }
       } finally {
         await db.cleaningWork.deleteMany({ where: { propertyId: property.id } });

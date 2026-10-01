@@ -22,6 +22,18 @@ import { reconcileReservation } from "./reservation.reconcile.service";
 const prisma = new PrismaClient();
 const GUEST_TOKEN_POST_CHECKOUT_MS = 48 * 60 * 60 * 1000;
 
+async function retryFreeStayTimeTransaction<T>(run: () => Promise<T>, isFree: () => boolean): Promise<T> {
+  for (let attempt = 0; ; attempt++) {
+    try { return await run(); }
+    catch (error) {
+      const conflict = error instanceof Prisma.PrismaClientKnownRequestError &&
+        (error.code === "P2034" || (error.code === "P2010" && ["40001", "40P01"].includes(String(error.meta?.code))));
+      if (!isFree() || !conflict || attempt >= 2) throw error;
+      await new Promise(resolve => setTimeout(resolve, 20 * (attempt + 1)));
+    }
+  }
+}
+
 type MoneyValue = Prisma.Decimal | number | string | null;
 
 type ApplyPlanInput = {
@@ -610,7 +622,7 @@ export async function applyGuestReservationModification(input: {
   let freeStayTimeAttempt = false;
 
   try {
-    const result = await prisma.$transaction(
+    const result = await retryFreeStayTimeTransaction(() => prisma.$transaction(
       async (tx) => {
         await tx.$queryRaw`
           SELECT "id"
@@ -789,7 +801,7 @@ export async function applyGuestReservationModification(input: {
       {
         isolationLevel: Prisma.TransactionIsolationLevel.Serializable,
       }
-    );
+    ), () => freeStayTimeAttempt);
 
     if (result.datesChanged) {
       await reconcileReservation(result.reservation.id);

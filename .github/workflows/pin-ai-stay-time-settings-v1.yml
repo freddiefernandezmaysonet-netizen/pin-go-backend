@@ -50,4 +50,6 @@ jobs:
       - run: npx prisma generate && npx prisma validate && npx prisma db push --skip-generate
       - run: npx tsc -p tsconfig.pin-ai-stay-time-settings.json --noEmit false --outDir /tmp/stay-time-settings-build
       - name: Policy, real HTTP authorization, migration SQL and database concurrency
-        run: node --import tsx --test src/pin-ai/actions/stay-time-policy.test.ts src/routes/dashboard.stay-time-settings.routes.test.ts src/services/property-stay-time-settings.db.test.ts src/services/stay-time-estimate.service.test.ts src/services/stay-time-quote.service.test.ts src/services/stay-time-apply.db.test.ts src/pin-ai/runtime/stay-time-tool.test.ts src/pin-ai/runtime/pin-go-read-tool-executor.test.ts
+        # Independent DB suites share tables; keep their fixture writes separate.
+        # Explicit Promise.all concurrency scenarios inside each suite are retained.
+        run: node --import tsx --test --test-concurrency=1 src/pin-ai/actions/stay-time-policy.test.ts src/routes/dashboard.stay-time-settings.routes.test.ts src/services/property-stay-time-settings.db.test.ts src/services/stay-time-estimate.service.test.ts src/services/stay-time-quote.service.test.ts src/services/stay-time-apply.db.test.ts src/pin-ai/runtime/stay-time-tool.test.ts src/pin-ai/runtime/pin-go-read-tool-executor.test.ts
