@@ -357,7 +357,6 @@ cleaningConfirmRouter.post(
 
       const { confirmation, reservation, staffMember, invalidData } = data;
       const language = resolveStaffLanguage(staffMember?.preferredLanguage);
-    const language = resolveStaffLanguage(staffMember?.preferredLanguage);
 
           if (invalidData || !reservation || !staffMember) {
         return res.status(404).send(
