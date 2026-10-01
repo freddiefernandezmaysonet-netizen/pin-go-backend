@@ -59,17 +59,11 @@ export async function retryGuestContactHostNotices(
         await skip("CONTACT_NOTICE_NO_LONGER_REQUIRED");
         continue;
       }
-      // Revalidate the recipient against the same admin/fallback policy as ingest.
-      let recipients = await prisma.dashboardUser.findMany({
+      // Only active organization administrators may receive this notice.
+      const recipients = await prisma.dashboardUser.findMany({
         where: { organizationId: message.organizationId, isActive: true, role: "ORG_ADMIN" },
         select: { email: true, fullName: true },
       });
-      if (!recipients.length) {
-        recipients = await prisma.dashboardUser.findMany({
-          where: { organizationId: message.organizationId, isActive: true },
-          select: { email: true, fullName: true },
-        });
-      }
       const to = clean(message.to).toLowerCase();
       const recipient = recipients.find((user) => clean(user.email).toLowerCase() === to);
       if (!recipient) {

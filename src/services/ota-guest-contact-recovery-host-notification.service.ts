@@ -42,17 +42,13 @@ export async function notifyHostGuestContactRecoveryRequired(
   }
 
   const organizationId = reservation.property.organizationId;
-  let recipients = await prisma.dashboardUser.findMany({
+  const recipients = await prisma.dashboardUser.findMany({
     where: { organizationId, isActive: true, role: DashboardUserRole.ORG_ADMIN },
     select: { email: true, fullName: true },
     orderBy: { createdAt: "asc" },
   });
   if (recipients.length === 0) {
-    recipients = await prisma.dashboardUser.findMany({
-      where: { organizationId, isActive: true },
-      select: { email: true, fullName: true },
-      orderBy: { createdAt: "asc" },
-    });
+    return { sent: 0, skipped: true, reason: "NO_ACTIVE_ORG_ADMIN" } as const;
   }
 
   let sent = 0;
