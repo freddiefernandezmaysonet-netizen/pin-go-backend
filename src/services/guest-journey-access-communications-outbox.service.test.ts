@@ -118,3 +118,17 @@ test("materializer fails closed without released canonical secure access evidenc
   );
   assert.equal(state.created.length, 0);
 });
+
+test("materializer carries persisted Channex provenance into phone-only eligibility", async () => {
+  const state = fixture();
+  Object.assign(state.reservation, { guestEmail: null, externalRaw: {},
+    externalProvider: "CHANNEX", externalId: "ota-booking" });
+  state.prisma.reservation.findFirst = async ({ select }: any) => {
+    assert.equal(select.externalProvider, true);
+    assert.equal(select.externalId, true);
+    return state.reservation;
+  };
+  const result = await materializeGuestAccessCommunicationOutbox(state.prisma, input);
+  assert.equal(result.created, 1);
+  assert.equal(state.created[0].channel, "sms");
+});

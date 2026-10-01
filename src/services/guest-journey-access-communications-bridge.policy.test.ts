@@ -213,3 +213,35 @@ test("verification reminder consumes the canonical SMS consent policy", async ()
     /function hasGuestSmsConsent\(/
   );
 });
+
+test("Channex phone-only booking creates operational SMS without inventing consent", () => {
+  const externalRaw = { provider: "CHANNEX", booking: { customer: { phone: "+17875550123" } } };
+  const before = JSON.stringify(externalRaw);
+  const rows = buildGuestAccessCommunicationOutbox({ ...base, guestEmail: null,
+    externalProvider: "CHANNEX", externalId: "ota-booking", externalRaw });
+  assert.deepEqual(rows.map(row => row.channel), ["sms"]);
+  assert.equal(hasGuestSmsConsent(externalRaw), false);
+  assert.equal(JSON.stringify(externalRaw), before);
+});
+
+test("OTA operational eligibility requires persisted provider AND external ID", () => {
+  for (const provenance of [
+    {}, { externalProvider: "PIN_GO_DIRECT", externalId: "direct" },
+    { externalProvider: "CHANNEX", externalId: " " },
+    { externalProvider: "LODGIFY", externalId: "legacy" },
+  ]) {
+    const rows = buildGuestAccessCommunicationOutbox({ ...base, ...provenance,
+      guestEmail: null, externalRaw: { provider: "CHANNEX" } });
+    assert.equal(rows.length, 0);
+  }
+});
+
+test("Channex operational SMS respects explicit opt-outs and missing phone", () => {
+  for (const consent of [{ smsConsent: false }, { stayNotificationsConsent: false },
+    { smsConsent: false, stayNotificationsConsent: true, acceptedAt: "2026-10-01" }]) {
+    assert.equal(buildGuestAccessCommunicationOutbox({ ...base, guestEmail: null,
+      externalProvider: "CHANNEX", externalId: "ota", externalRaw: { consent } }).length, 0);
+  }
+  assert.equal(buildGuestAccessCommunicationOutbox({ ...base, guestEmail: null,
+    guestPhone: " ", externalProvider: "CHANNEX", externalId: "ota", externalRaw: {} }).length, 0);
+});

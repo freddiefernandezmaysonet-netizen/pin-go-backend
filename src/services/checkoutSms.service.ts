@@ -68,6 +68,8 @@ export async function sendCheckoutSms(
         preferredLanguage: true,
         checkOut: true,
         externalRaw: true,
+        externalProvider: true,
+        externalId: true,
         property: {
           select: {
             id: true,
@@ -84,7 +86,7 @@ export async function sendCheckoutSms(
     }
 
     const consentDecision =
-      evaluateCheckoutSmsConsent(r.externalRaw);
+      evaluateCheckoutSmsConsent(r.externalRaw, process.env, r);
 
     if (!consentDecision.allowed) {
       return {

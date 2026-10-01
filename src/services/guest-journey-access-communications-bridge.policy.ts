@@ -1,4 +1,5 @@
 import { createHash } from "node:crypto";
+import { isChannexGuestRegistrationExempt } from "./guest-registration-channel.policy";
 
 export type GuestAccessCommunicationChannel = "email" | "sms";
 
@@ -11,6 +12,8 @@ export type GuestAccessCommunicationOutboxInput = {
   guestPhone: string | null;
   preferredLanguage: string | null;
   externalRaw: unknown;
+  externalProvider?: string | null;
+  externalId?: string | null;
   accessGrantId: string;
   accessCodeHash: string;
   validFrom: Date;
@@ -69,6 +72,26 @@ export function hasGuestSmsConsent(externalRaw: unknown): boolean {
     clean(record.consentSource) === "DIRECT_BOOKING_WEB_FORM" &&
     clean(record.consentVersion) === "stay_notifications_v1"
   );
+}
+
+/** Operational stay messages only. OTA provenance is eligibility, not fabricated consent. */
+export function isGuestOperationalSmsEligible(reservation: {
+  externalRaw: unknown;
+  externalProvider?: string | null;
+  externalId?: string | null;
+}): boolean {
+  if (!isChannexGuestRegistrationExempt(reservation)) {
+    return hasGuestSmsConsent(reservation.externalRaw);
+  }
+  const raw = reservation.externalRaw;
+  const consent = raw && typeof raw === "object" && !Array.isArray(raw)
+    ? (raw as Record<string, unknown>).consent : null;
+  if (consent && typeof consent === "object" && !Array.isArray(consent)) {
+    const record = consent as Record<string, unknown>;
+    // Never override a recorded opt-out, including contradictory consent data.
+    if (record.smsConsent === false || record.stayNotificationsConsent === false) return false;
+  }
+  return true;
 }
 
 function resolveLanguage(value: string | null): "es" | "en" {
@@ -143,7 +166,7 @@ export function buildGuestAccessCommunicationOutbox(
   }
 
   const phone = clean(input.guestPhone);
-  if (phone && hasGuestSmsConsent(input.externalRaw)) {
+  if (phone && isGuestOperationalSmsEligible(input)) {
     rows.push({
       id: deterministicMessageId(input, "sms", phone),
       channel: "sms",
