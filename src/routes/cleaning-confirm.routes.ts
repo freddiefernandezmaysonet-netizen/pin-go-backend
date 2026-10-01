@@ -12,6 +12,7 @@ import { buildCleaningTimingConsentSnapshot } from "../services/cleaning-timing-
 import { confirmCleaningStart } from "../services/cleaning-work-start.prisma.js";
 import { confirmCleaningCompletion } from "../services/cleaning-work-completion.prisma.js";
 import { resolveCleaningHostAttention } from "../services/cleaning-followup-host-attention.service.js";
+import { getStaffIntlLocale, resolveStaffLanguage, type StaffLanguage } from "../services/staff-language.service.js";
 
 const prisma = new PrismaClient();
 
@@ -81,9 +82,9 @@ async function loadConfirmationData(token: string) {
   };
 }
 
-function formatPropertyLocal(value: Date, timeZone: string) {
+function formatPropertyLocal(value: Date, timeZone: string, language: StaffLanguage = "en") {
   try {
-    return new Intl.DateTimeFormat("en-US", {
+    return new Intl.DateTimeFormat(getStaffIntlLocale(language), {
       timeZone,
       year: "numeric",
       month: "short",
@@ -98,9 +99,9 @@ function formatPropertyLocal(value: Date, timeZone: string) {
   }
 }
 
-function cleanerPage(content: string) {
+function cleanerPage(content: string, language: StaffLanguage = "en") {
   return `<!doctype html>
-<html>
+<html lang="${language}">
 <head>
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
   <meta name="color-scheme" content="light">
@@ -149,62 +150,66 @@ async function prepareCleaningTimingConsent(data: {
 
 /** Shared terminal view for the immediate POST response and later GET re-entry. */
 function renderCleaningCompletedPage(
-  completedAt: string,
+  completedAt: Date,
   prepared: NonNullable<Awaited<ReturnType<typeof prepareCleaningTimingConsent>>>,
+  language: StaffLanguage,
 ) {
+  const es = language === "es";
   return cleanerPage(`
-    <h2>Cleaning completed</h2>
-    <p>Your cleaning completion has been recorded.</p>
-    <p><b>Completed:</b> ${completedAt}</p>
-    <p><b>Scheduled start:</b> ${formatPropertyLocal(prepared.terms.scheduledStartAt, prepared.timeZone)}</p>
-    <p><b>Committed completion:</b> ${formatPropertyLocal(prepared.terms.scheduledCompletionAt, prepared.timeZone)}</p>
-    <p class="cleaner-note">Pin&amp;Go recorded your declaration; this does not independently certify a physical inspection.</p>
-  `);
+    <h2>${es ? "Limpieza completada" : "Cleaning completed"}</h2>
+    <p>${es ? "Se registro que completaste la limpieza." : "Your cleaning completion has been recorded."}</p>
+    <p><b>${es ? "Completada" : "Completed"}:</b> ${formatPropertyLocal(completedAt, prepared.timeZone, language)}</p>
+    <p><b>${es ? "Inicio programado" : "Scheduled start"}:</b> ${formatPropertyLocal(prepared.terms.scheduledStartAt, prepared.timeZone, language)}</p>
+    <p><b>${es ? "Finalizacion comprometida" : "Committed completion"}:</b> ${formatPropertyLocal(prepared.terms.scheduledCompletionAt, prepared.timeZone, language)}</p>
+    <p class="cleaner-note">${es ? "Pin&amp;Go registro tu declaracion; esto no certifica de forma independiente una inspeccion fisica." : "Pin&amp;Go recorded your declaration; this does not independently certify a physical inspection."}</p>
+  `, language);
 }
 
-function renderTimingConsent(token: string, prepared: Awaited<ReturnType<typeof prepareCleaningTimingConsent>>) {
+function renderTimingConsent(token: string, prepared: Awaited<ReturnType<typeof prepareCleaningTimingConsent>>, language: StaffLanguage) {
+  const es = language === "es";
   if (!prepared) {
-    return "Cleaning availability confirmed and NFC access prepared. No cleaning-time commitment is configured for this property assignment.";
+    return es
+      ? "Disponibilidad de limpieza confirmada y acceso NFC preparado. No hay un compromiso de tiempo de limpieza configurado para esta asignacion."
+      : "Cleaning availability confirmed and NFC access prepared. No cleaning-time commitment is configured for this property assignment.";
   }
   if (prepared.work.timingConsentAcceptedAt) {
     if (prepared.work.completionConfirmedAt) {
-      return renderCleaningCompletedPage(
-        formatPropertyLocal(prepared.work.completionConfirmedAt, prepared.timeZone),
-        prepared,
-      );
+      return renderCleaningCompletedPage(prepared.work.completionConfirmedAt, prepared, language);
     }
     if (prepared.work.startConfirmedAt) {
       return cleanerPage(`
-        <h2>Cleaning in progress</h2>
-        <p>Your cleaning start has already been recorded.</p>
-        <p><b>Started:</b> ${formatPropertyLocal(prepared.work.startConfirmedAt, prepared.timeZone)}</p>
-        <p><b>Committed completion:</b> ${formatPropertyLocal(prepared.terms.scheduledCompletionAt, prepared.timeZone)}</p>
+        <h2>${es ? "Limpieza en progreso" : "Cleaning in progress"}</h2>
+        <p>${es ? "El inicio de tu limpieza ya fue registrado." : "Your cleaning start has already been recorded."}</p>
+        <p><b>${es ? "Iniciada" : "Started"}:</b> ${formatPropertyLocal(prepared.work.startConfirmedAt, prepared.timeZone, language)}</p>
+        <p><b>${es ? "Finalizacion comprometida" : "Committed completion"}:</b> ${formatPropertyLocal(prepared.terms.scheduledCompletionAt, prepared.timeZone, language)}</p>
         <form method="POST" action="/cleaning/confirm/${token}/complete">
-          <button class="cleaner-action">I finished cleaning</button>
+          <button class="cleaner-action">${es ? "Termine la limpieza" : "I finished cleaning"}</button>
         </form>
-      `);
+      `, language);
     }
     return cleanerPage(`
-      <h2>Cleaning timing confirmed</h2>
-      <p>Your availability and cleaning-time commitment are confirmed.</p>
-      <p><b>Scheduled start:</b> ${formatPropertyLocal(prepared.terms.scheduledStartAt, prepared.timeZone)}</p>
-      <p><b>Standard duration:</b> ${prepared.terms.durationCommitmentMinutes} minutes</p>
-      <p><b>Committed completion:</b> ${formatPropertyLocal(prepared.terms.scheduledCompletionAt, prepared.timeZone)}</p>
+      <h2>${es ? "Horario de limpieza confirmado" : "Cleaning timing confirmed"}</h2>
+      <p>${es ? "Tu disponibilidad y compromiso de tiempo de limpieza estan confirmados." : "Your availability and cleaning-time commitment are confirmed."}</p>
+      <p><b>${es ? "Inicio programado" : "Scheduled start"}:</b> ${formatPropertyLocal(prepared.terms.scheduledStartAt, prepared.timeZone, language)}</p>
+      <p><b>${es ? "Duracion estandar" : "Standard duration"}:</b> ${prepared.terms.durationCommitmentMinutes} ${es ? "minutos" : "minutes"}</p>
+      <p><b>${es ? "Finalizacion comprometida" : "Committed completion"}:</b> ${formatPropertyLocal(prepared.terms.scheduledCompletionAt, prepared.timeZone, language)}</p>
       <form method="POST" action="/cleaning/confirm/${token}/start">
-        <button class="cleaner-action">I started cleaning</button>
+        <button class="cleaner-action">${es ? "Comence la limpieza" : "I started cleaning"}</button>
       </form>
-      <p class="cleaner-note">Use this when you actually begin cleaning. It does not change the committed completion time or NFC access window.</p>
-    `);
+      <p class="cleaner-note">${es ? "Usa este boton cuando realmente comiences a limpiar. No cambia la hora comprometida de finalizacion ni la ventana de acceso NFC." : "Use this when you actually begin cleaning. It does not change the committed completion time or NFC access window."}</p>
+    `, language);
   }
-  return cleanerPage(`\n      <h2>Cleaning timing commitment</h2>
-      <p>Your availability is confirmed and your NFC access remains handled by Pin&Go.</p>
-      <p><b>Scheduled start:</b> ${formatPropertyLocal(prepared.terms.scheduledStartAt, prepared.timeZone)}</p>
-      <p><b>Standard duration:</b> ${prepared.terms.durationCommitmentMinutes} minutes</p>
-      <p><b>Confirm start by:</b> ${formatPropertyLocal(prepared.terms.startConfirmationDueAt, prepared.timeZone)}</p>
-      <p><b>Committed completion:</b> ${formatPropertyLocal(prepared.terms.scheduledCompletionAt, prepared.timeZone)}</p>
-      <p><b>Follow-up begins after:</b> ${formatPropertyLocal(prepared.terms.followupAttentionAt, prepared.timeZone)}</p>
+  return cleanerPage(`
+      <h2>${es ? "Compromiso de horario de limpieza" : "Cleaning timing commitment"}</h2>
+      <p>${es ? "Tu disponibilidad esta confirmada y Pin&Go continua gestionando tu acceso NFC." : "Your availability is confirmed and your NFC access remains handled by Pin&Go."}</p>
+      <p><b>${es ? "Inicio programado" : "Scheduled start"}:</b> ${formatPropertyLocal(prepared.terms.scheduledStartAt, prepared.timeZone, language)}</p>
+      <p><b>${es ? "Duracion estandar" : "Standard duration"}:</b> ${prepared.terms.durationCommitmentMinutes} ${es ? "minutos" : "minutes"}</p>
+      <p><b>${es ? "Confirma el inicio antes de" : "Confirm start by"}:</b> ${formatPropertyLocal(prepared.terms.startConfirmationDueAt, prepared.timeZone, language)}</p>
+      <p><b>${es ? "Finalizacion comprometida" : "Committed completion"}:</b> ${formatPropertyLocal(prepared.terms.scheduledCompletionAt, prepared.timeZone, language)}</p>
+      <p><b>${es ? "Seguimiento comienza despues de" : "Follow-up begins after"}:</b> ${formatPropertyLocal(prepared.terms.followupAttentionAt, prepared.timeZone, language)}</p>
       <form method="POST" action="/cleaning/confirm/${token}/timing-consent">
-        <button class="cleaner-action">I accept this cleaning schedule and time commitment</button>\n      </form>`);
+        <button class="cleaner-action">${es ? "Acepto este horario y compromiso de tiempo de limpieza" : "I accept this cleaning schedule and time commitment"}</button>
+      </form>`, language);
 }
 
 async function runCompleteFlowAuditAfterCleaningConfirmation(
