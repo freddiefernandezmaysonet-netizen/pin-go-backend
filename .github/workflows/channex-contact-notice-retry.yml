@@ -1,0 +1,29 @@
+name: Channex contact host notice retries
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - 'src/services/ota-guest-contact-notice-retry*'
+      - 'src/services/ota-guest-contact-recovery-host-notification.service.ts'
+      - 'src/services/ota-guest-contact-recovery.service.ts'
+      - 'src/workers/message.retry.worker.ts'
+      - 'src/lib/mailer.ts'
+      - 'tsconfig.channex-contact-notice-retry.json'
+      - '.github/workflows/channex-contact-notice-retry.yml'
+permissions:
+  contents: read
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    env:
+      DATABASE_URL: postgresql://test:test@127.0.0.1:1/no_runtime_database
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+      - run: npm ci --ignore-scripts --no-audit --no-fund
+      - run: npx --no-install prisma generate --schema ./prisma
+      - run: npx --no-install tsc -p tsconfig.channex-contact-notice-retry.json
+      - run: node --import tsx --test src/services/ota-guest-contact-notice-retry.service.test.ts src/services/ota-guest-contact-automation-closure.contract.test.ts

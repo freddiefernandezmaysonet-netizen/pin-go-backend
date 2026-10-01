@@ -1,0 +1,16 @@
+{
+  "compilerOptions": {
+    "noEmit": true,
+    "module": "preserve",
+    "moduleResolution": "bundler",
+    "target": "esnext",
+    "strict": true,
+    "skipLibCheck": true,
+    "types": ["node"]
+  },
+  "include": [
+    "src/services/ota-guest-contact-notice-retry.service.ts",
+    "src/services/ota-guest-contact-notice-retry.service.test.ts",
+    "src/workers/message.retry.worker.ts"
+  ]
+}
