@@ -2380,6 +2380,8 @@ async function processCleaningActivations(now: Date) {
                 assignment.staffMember?.phoneE164,
               staffName:
                 assignment.staffMember?.fullName,
+              preferredLanguage:
+                assignment.staffMember?.preferredLanguage,
               propertyName:
                 assignment.reservation?.property?.name,
               roomName:
@@ -2499,6 +2501,7 @@ async function processCleaningEnds(now: Date) {
       accessGrantId: a.accessGrantId ?? null,
       phoneE164: a.staffMember?.phoneE164,
       staffName: a.staffMember?.fullName,
+      preferredLanguage: a.staffMember?.preferredLanguage,
       propertyName: a.reservation?.property?.name,
       roomName: a.reservation?.roomName,
       endsAt: a.endsAt,

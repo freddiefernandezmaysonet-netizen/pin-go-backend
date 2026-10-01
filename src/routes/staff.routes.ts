@@ -2,6 +2,7 @@ import { Router } from "express";
 import type { PrismaClient } from "@prisma/client";
 import { PropertyStaffRole } from "@prisma/client";
 import { CleaningTimingValidationError, assertCleaningTimingInvariant, parseCleaningTimingUpdate } from "../services/cleaning-timing-config.js";
+import { parseStaffLanguage } from "../services/staff-language.service.js";
 
 export function buildStaffRouter(prisma: PrismaClient) {
   const router = Router();
@@ -16,6 +17,7 @@ export function buildStaffRouter(prisma: PrismaClient) {
         companyName,
         photoUrl,
         ttlockCardRef,
+        preferredLanguage,
       } = req.body ?? {};
 
       if (!organizationId) {
@@ -34,12 +36,16 @@ export function buildStaffRouter(prisma: PrismaClient) {
           companyName: companyName ? String(companyName) : null,
           photoUrl: photoUrl ? String(photoUrl) : null,
           ttlockCardRef: ttlockCardRef ? String(ttlockCardRef) : null,
+          preferredLanguage: preferredLanguage === undefined ? "en" : parseStaffLanguage(preferredLanguage),
           isActive: true,
         },
       });
 
       return res.status(201).json(staff);
     } catch (e: any) {
+      if (e?.message === "STAFF_PREFERRED_LANGUAGE_INVALID") {
+        return res.status(400).json({ error: "preferredLanguage must be en or es" });
+      }
       return res.status(500).json({ error: e?.message ?? String(e) });
     }
   });
@@ -73,6 +79,7 @@ export function buildStaffRouter(prisma: PrismaClient) {
         companyName,
         photoUrl,
         ttlockCardRef,
+        preferredLanguage,
       } = req.body ?? {};
 
       if (!id) {
@@ -115,11 +122,18 @@ export function buildStaffRouter(prisma: PrismaClient) {
                 ? String(ttlockCardRef)
                 : null
               : existing.ttlockCardRef,
+          preferredLanguage:
+            preferredLanguage !== undefined
+              ? parseStaffLanguage(preferredLanguage)
+              : existing.preferredLanguage,
         },
       });
 
       return res.json(updated);
     } catch (e: any) {
+      if (e?.message === "STAFF_PREFERRED_LANGUAGE_INVALID") {
+        return res.status(400).json({ error: "preferredLanguage must be en or es" });
+      }
       return res.status(500).json({ error: e?.message ?? String(e) });
     }
   });

@@ -12,33 +12,28 @@ import { buildCleaningTimingConsentSnapshot } from "../services/cleaning-timing-
 import { confirmCleaningStart } from "../services/cleaning-work-start.prisma.js";
 import { confirmCleaningCompletion } from "../services/cleaning-work-completion.prisma.js";
 import { resolveCleaningHostAttention } from "../services/cleaning-followup-host-attention.service.js";
+import { getStaffIntlLocale, resolveStaffLanguage, type StaffLanguage } from "../services/staff-language.service.js";
 
 const prisma = new PrismaClient();
 
 export const cleaningConfirmRouter = Router();
 
-function sendCancelledCleaningRequestResponse(
-  res: any
-) {
-  return res.status(410).send(
-    "This cleaning request is no longer active because the reservation was cancelled. No cleaning or access action is required."
-  );
+function sendCancelledCleaningRequestResponse(res: any, language: StaffLanguage = "en") {
+  return res.status(410).send(language === "es"
+    ? "Esta solicitud de limpieza ya no esta activa porque la reservacion fue cancelada. No se requiere ninguna accion de limpieza o acceso."
+    : "This cleaning request is no longer active because the reservation was cancelled. No cleaning or access action is required.");
 }
 
-function sendCleaningNfcDisabledResponse(
-  res: any
-) {
-  return res.status(410).send(
-    "This cleaning access request is no longer active because Cleaning NFC is disabled for this property. No confirmation or access action is required."
-  );
+function sendCleaningNfcDisabledResponse(res: any, language: StaffLanguage = "en") {
+  return res.status(410).send(language === "es"
+    ? "Esta solicitud de acceso para limpieza ya no esta activa porque Cleaning NFC esta deshabilitado para esta propiedad. No se requiere confirmacion ni accion de acceso."
+    : "This cleaning access request is no longer active because Cleaning NFC is disabled for this property. No confirmation or access action is required.");
 }
 
-function sendExpiredCleaningRequestResponse(
-  res: any
-) {
-  return res.status(410).send(
-    "This cleaning request is no longer active because Pin&Go assigned it to another cleaner. No action is required."
-  );
+function sendExpiredCleaningRequestResponse(res: any, language: StaffLanguage = "en") {
+  return res.status(410).send(language === "es"
+    ? "Esta solicitud de limpieza ya no esta activa porque Pin&Go la asigno a otro personal de limpieza. No se requiere ninguna accion."
+    : "This cleaning request is no longer active because Pin&Go assigned it to another cleaner. No action is required.");
 }
 
 async function loadConfirmationData(token: string) {
@@ -81,9 +76,9 @@ async function loadConfirmationData(token: string) {
   };
 }
 
-function formatPropertyLocal(value: Date, timeZone: string) {
+function formatPropertyLocal(value: Date, timeZone: string, language: StaffLanguage = "en") {
   try {
-    return new Intl.DateTimeFormat("en-US", {
+    return new Intl.DateTimeFormat(getStaffIntlLocale(language), {
       timeZone,
       year: "numeric",
       month: "short",
@@ -98,9 +93,9 @@ function formatPropertyLocal(value: Date, timeZone: string) {
   }
 }
 
-function cleanerPage(content: string) {
+function cleanerPage(content: string, language: StaffLanguage = "en") {
   return `<!doctype html>
-<html>
+<html lang="${language}">
 <head>
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
   <meta name="color-scheme" content="light">
@@ -149,62 +144,66 @@ async function prepareCleaningTimingConsent(data: {
 
 /** Shared terminal view for the immediate POST response and later GET re-entry. */
 function renderCleaningCompletedPage(
-  completedAt: string,
+  completedAt: Date,
   prepared: NonNullable<Awaited<ReturnType<typeof prepareCleaningTimingConsent>>>,
+  language: StaffLanguage,
 ) {
+  const es = language === "es";
   return cleanerPage(`
-    <h2>Cleaning completed</h2>
-    <p>Your cleaning completion has been recorded.</p>
-    <p><b>Completed:</b> ${completedAt}</p>
-    <p><b>Scheduled start:</b> ${formatPropertyLocal(prepared.terms.scheduledStartAt, prepared.timeZone)}</p>
-    <p><b>Committed completion:</b> ${formatPropertyLocal(prepared.terms.scheduledCompletionAt, prepared.timeZone)}</p>
-    <p class="cleaner-note">Pin&amp;Go recorded your declaration; this does not independently certify a physical inspection.</p>
-  `);
+    <h2>${es ? "Limpieza completada" : "Cleaning completed"}</h2>
+    <p>${es ? "Se registro que completaste la limpieza." : "Your cleaning completion has been recorded."}</p>
+    <p><b>${es ? "Completada" : "Completed"}:</b> ${formatPropertyLocal(completedAt, prepared.timeZone, language)}</p>
+    <p><b>${es ? "Inicio programado" : "Scheduled start"}:</b> ${formatPropertyLocal(prepared.terms.scheduledStartAt, prepared.timeZone, language)}</p>
+    <p><b>${es ? "Finalizacion comprometida" : "Committed completion"}:</b> ${formatPropertyLocal(prepared.terms.scheduledCompletionAt, prepared.timeZone, language)}</p>
+    <p class="cleaner-note">${es ? "Pin&amp;Go registro tu declaracion; esto no certifica de forma independiente una inspeccion fisica." : "Pin&amp;Go recorded your declaration; this does not independently certify a physical inspection."}</p>
+  `, language);
 }
 
-function renderTimingConsent(token: string, prepared: Awaited<ReturnType<typeof prepareCleaningTimingConsent>>) {
+function renderTimingConsent(token: string, prepared: Awaited<ReturnType<typeof prepareCleaningTimingConsent>>, language: StaffLanguage) {
+  const es = language === "es";
   if (!prepared) {
-    return "Cleaning availability confirmed and NFC access prepared. No cleaning-time commitment is configured for this property assignment.";
+    return es
+      ? "Disponibilidad de limpieza confirmada y acceso NFC preparado. No hay un compromiso de tiempo de limpieza configurado para esta asignacion."
+      : "Cleaning availability confirmed and NFC access prepared. No cleaning-time commitment is configured for this property assignment.";
   }
   if (prepared.work.timingConsentAcceptedAt) {
     if (prepared.work.completionConfirmedAt) {
-      return renderCleaningCompletedPage(
-        formatPropertyLocal(prepared.work.completionConfirmedAt, prepared.timeZone),
-        prepared,
-      );
+      return renderCleaningCompletedPage(prepared.work.completionConfirmedAt, prepared, language);
     }
     if (prepared.work.startConfirmedAt) {
       return cleanerPage(`
-        <h2>Cleaning in progress</h2>
-        <p>Your cleaning start has already been recorded.</p>
-        <p><b>Started:</b> ${formatPropertyLocal(prepared.work.startConfirmedAt, prepared.timeZone)}</p>
-        <p><b>Committed completion:</b> ${formatPropertyLocal(prepared.terms.scheduledCompletionAt, prepared.timeZone)}</p>
+        <h2>${es ? "Limpieza en progreso" : "Cleaning in progress"}</h2>
+        <p>${es ? "El inicio de tu limpieza ya fue registrado." : "Your cleaning start has already been recorded."}</p>
+        <p><b>${es ? "Iniciada" : "Started"}:</b> ${formatPropertyLocal(prepared.work.startConfirmedAt, prepared.timeZone, language)}</p>
+        <p><b>${es ? "Finalizacion comprometida" : "Committed completion"}:</b> ${formatPropertyLocal(prepared.terms.scheduledCompletionAt, prepared.timeZone, language)}</p>
         <form method="POST" action="/cleaning/confirm/${token}/complete">
-          <button class="cleaner-action">I finished cleaning</button>
+          <button class="cleaner-action">${es ? "Termine la limpieza" : "I finished cleaning"}</button>
         </form>
-      `);
+      `, language);
     }
     return cleanerPage(`
-      <h2>Cleaning timing confirmed</h2>
-      <p>Your availability and cleaning-time commitment are confirmed.</p>
-      <p><b>Scheduled start:</b> ${formatPropertyLocal(prepared.terms.scheduledStartAt, prepared.timeZone)}</p>
-      <p><b>Standard duration:</b> ${prepared.terms.durationCommitmentMinutes} minutes</p>
-      <p><b>Committed completion:</b> ${formatPropertyLocal(prepared.terms.scheduledCompletionAt, prepared.timeZone)}</p>
+      <h2>${es ? "Horario de limpieza confirmado" : "Cleaning timing confirmed"}</h2>
+      <p>${es ? "Tu disponibilidad y compromiso de tiempo de limpieza estan confirmados." : "Your availability and cleaning-time commitment are confirmed."}</p>
+      <p><b>${es ? "Inicio programado" : "Scheduled start"}:</b> ${formatPropertyLocal(prepared.terms.scheduledStartAt, prepared.timeZone, language)}</p>
+      <p><b>${es ? "Duracion estandar" : "Standard duration"}:</b> ${prepared.terms.durationCommitmentMinutes} ${es ? "minutos" : "minutes"}</p>
+      <p><b>${es ? "Finalizacion comprometida" : "Committed completion"}:</b> ${formatPropertyLocal(prepared.terms.scheduledCompletionAt, prepared.timeZone, language)}</p>
       <form method="POST" action="/cleaning/confirm/${token}/start">
-        <button class="cleaner-action">I started cleaning</button>
+        <button class="cleaner-action">${es ? "Comence la limpieza" : "I started cleaning"}</button>
       </form>
-      <p class="cleaner-note">Use this when you actually begin cleaning. It does not change the committed completion time or NFC access window.</p>
-    `);
+      <p class="cleaner-note">${es ? "Usa este boton cuando realmente comiences a limpiar. No cambia la hora comprometida de finalizacion ni la ventana de acceso NFC." : "Use this when you actually begin cleaning. It does not change the committed completion time or NFC access window."}</p>
+    `, language);
   }
-  return cleanerPage(`\n      <h2>Cleaning timing commitment</h2>
-      <p>Your availability is confirmed and your NFC access remains handled by Pin&Go.</p>
-      <p><b>Scheduled start:</b> ${formatPropertyLocal(prepared.terms.scheduledStartAt, prepared.timeZone)}</p>
-      <p><b>Standard duration:</b> ${prepared.terms.durationCommitmentMinutes} minutes</p>
-      <p><b>Confirm start by:</b> ${formatPropertyLocal(prepared.terms.startConfirmationDueAt, prepared.timeZone)}</p>
-      <p><b>Committed completion:</b> ${formatPropertyLocal(prepared.terms.scheduledCompletionAt, prepared.timeZone)}</p>
-      <p><b>Follow-up begins after:</b> ${formatPropertyLocal(prepared.terms.followupAttentionAt, prepared.timeZone)}</p>
+  return cleanerPage(`
+      <h2>${es ? "Compromiso de horario de limpieza" : "Cleaning timing commitment"}</h2>
+      <p>${es ? "Tu disponibilidad esta confirmada y Pin&Go continua gestionando tu acceso NFC." : "Your availability is confirmed and your NFC access remains handled by Pin&Go."}</p>
+      <p><b>${es ? "Inicio programado" : "Scheduled start"}:</b> ${formatPropertyLocal(prepared.terms.scheduledStartAt, prepared.timeZone, language)}</p>
+      <p><b>${es ? "Duracion estandar" : "Standard duration"}:</b> ${prepared.terms.durationCommitmentMinutes} ${es ? "minutos" : "minutes"}</p>
+      <p><b>${es ? "Confirma el inicio antes de" : "Confirm start by"}:</b> ${formatPropertyLocal(prepared.terms.startConfirmationDueAt, prepared.timeZone, language)}</p>
+      <p><b>${es ? "Finalizacion comprometida" : "Committed completion"}:</b> ${formatPropertyLocal(prepared.terms.scheduledCompletionAt, prepared.timeZone, language)}</p>
+      <p><b>${es ? "Seguimiento comienza despues de" : "Follow-up begins after"}:</b> ${formatPropertyLocal(prepared.terms.followupAttentionAt, prepared.timeZone, language)}</p>
       <form method="POST" action="/cleaning/confirm/${token}/timing-consent">
-        <button class="cleaner-action">I accept this cleaning schedule and time commitment</button>\n      </form>`);
+        <button class="cleaner-action">${es ? "Acepto este horario y compromiso de tiempo de limpieza" : "I accept this cleaning schedule and time commitment"}</button>
+      </form>`, language);
 }
 
 async function runCompleteFlowAuditAfterCleaningConfirmation(
@@ -238,19 +237,22 @@ async function runCompleteFlowAuditAfterCleaningConfirmation(
 
 // GET /cleaning/confirm/:token
 cleaningConfirmRouter.get("/cleaning/confirm/:token", async (req, res) => {
+    let language: StaffLanguage = "en";
   try {
     const token = String(req.params.token ?? "");
     const data = await loadConfirmationData(token);
+      language = resolveStaffLanguage(data?.staffMember?.preferredLanguage);
 
     if (!data) {
       return res.status(404).send("Invalid or expired cleaning confirmation link.");
     }
 
     const { confirmation, reservation, staffMember, invalidData } = data;
+    language = resolveStaffLanguage(staffMember?.preferredLanguage);
 
        if (invalidData || !reservation || !staffMember) {
       return res.status(404).send(
-        "Cleaning confirmation data is incomplete."
+        language === "es" ? "Los datos de confirmación de limpieza están incompletos." : "Cleaning confirmation data is incomplete."
       );
     }
 
@@ -259,7 +261,8 @@ cleaningConfirmRouter.get("/cleaning/confirm/:token", async (req, res) => {
       ReservationStatus.CANCELLED
     ) {
       return sendCancelledCleaningRequestResponse(
-        res
+        res,
+        language
       );
     }
 
@@ -278,12 +281,13 @@ cleaningConfirmRouter.get("/cleaning/confirm/:token", async (req, res) => {
   );
 
   return sendCleaningNfcDisabledResponse(
-    res
+    res,
+    language
   );
 }
 
     if (confirmation.status === "EXPIRED") {
-      return sendExpiredCleaningRequestResponse(res);
+      return sendExpiredCleaningRequestResponse(res, language);
     }
 
     if (confirmation.status === "CONFIRMED") {
@@ -306,33 +310,34 @@ cleaningConfirmRouter.get("/cleaning/confirm/:token", async (req, res) => {
     });
 
     return res.status(202).send(
-      "Cleaning already confirmed. Pin&Go could not verify NFC access automatically yet, so the issue was escalated in Mission Control."
+      language === "es" ? "La limpieza ya está confirmada. Pin&Go todavía no pudo verificar el acceso NFC automáticamente; se notificó la incidencia en Mission Control." : "Cleaning already confirmed. Pin&Go could not verify NFC access automatically yet, so the issue was escalated in Mission Control."
     );
   }
 
   const prepared = await prepareCleaningTimingConsent({ confirmation, reservation });
-  return res.send(renderTimingConsent(token, prepared));
+  return res.send(renderTimingConsent(token, prepared, language));
 }
     if (confirmation.status === "DECLINED") {
-      return res.send("This cleaning request was already declined.");
+      return res.send(language === "es" ? "Esta solicitud de limpieza ya fue rechazada." : "This cleaning request was already declined.");
     }
 
     const propertyName = reservation.property?.name ?? "Property";
     const staffName = staffMember.fullName ?? "Cleaner";
 
+    const es = language === "es";
     return res.send(cleanerPage(`
-      <h2>Pin&amp;Go Cleaning Request</h2>
-      <p><b>Cleaner:</b> ${staffName}</p>
-      <p><b>Property:</b> ${propertyName}</p>
+      <h2>${es ? "Solicitud de limpieza Pin&amp;Go" : "Pin&amp;Go Cleaning Request"}</h2>
+      <p><b>${es ? "Personal de limpieza" : "Cleaner"}:</b> ${staffName}</p>
+      <p><b>${es ? "Propiedad" : "Property"}:</b> ${propertyName}</p>
       <form method="POST" action="/cleaning/confirm/${token}/confirm">
-        <button class="cleaner-action">Confirm availability</button>
+        <button class="cleaner-action">${es ? "Confirmar disponibilidad" : "Confirm availability"}</button>
       </form>
       <form method="POST" action="/cleaning/confirm/${token}/decline">
-        <button class="cleaner-action cleaner-action-secondary">I am not available</button>
+        <button class="cleaner-action cleaner-action-secondary">${es ? "No estoy disponible" : "I am not available"}</button>
       </form>
-    `));
+    `, language));
   } catch (e: any) {
-    return res.status(500).send(e?.message ?? "Failed to load confirmation.");
+    return res.status(500).send(language === "es" ? "No se pudo cargar la confirmación. Inténtalo de nuevo." : "Failed to load confirmation.");
   }
 });
 
@@ -340,19 +345,22 @@ cleaningConfirmRouter.get("/cleaning/confirm/:token", async (req, res) => {
 cleaningConfirmRouter.post(
   "/cleaning/confirm/:token/confirm",
   async (req, res) => {
+    let language: StaffLanguage = "en";
     try {
       const token = String(req.params.token ?? "");
       const data = await loadConfirmationData(token);
+      language = resolveStaffLanguage(data?.staffMember?.preferredLanguage);
 
       if (!data) {
         return res.status(404).send("Invalid or expired cleaning confirmation link.");
       }
 
       const { confirmation, reservation, staffMember, invalidData } = data;
+      language = resolveStaffLanguage(staffMember?.preferredLanguage);
 
           if (invalidData || !reservation || !staffMember) {
         return res.status(404).send(
-          "Cleaning confirmation data is incomplete."
+          language === "es" ? "Los datos de confirmación de limpieza están incompletos." : "Cleaning confirmation data is incomplete."
         );
       }
 
@@ -361,7 +369,8 @@ cleaningConfirmRouter.post(
         ReservationStatus.CANCELLED
       ) {
         return sendCancelledCleaningRequestResponse(
-          res
+          res,
+          language
         );
       }
 
@@ -381,20 +390,21 @@ cleaningConfirmRouter.post(
   );
 
   return sendCleaningNfcDisabledResponse(
-    res
+    res,
+    language
   );
 }
 
       if (confirmation.status === "EXPIRED") {
-        return sendExpiredCleaningRequestResponse(res);
+        return sendExpiredCleaningRequestResponse(res, language);
       }
 
       if (confirmation.status === "CONFIRMED") {
-        return res.send("Cleaning already confirmed. Thank you.");
+        return res.send(language === "es" ? "La limpieza ya está confirmada. Gracias." : "Cleaning already confirmed. Thank you.");
       }
 
       if (confirmation.status === "DECLINED") {
-        return res.status(409).send("This request was already declined.");
+        return res.status(409).send(language === "es" ? "Esta solicitud ya fue rechazada." : "This request was already declined.");
       }
 
       const confirmTransition =
@@ -415,19 +425,19 @@ cleaningConfirmRouter.post(
           });
 
         if (currentConfirmation?.status === "EXPIRED") {
-          return sendExpiredCleaningRequestResponse(res);
+          return sendExpiredCleaningRequestResponse(res, language);
         }
 
         if (currentConfirmation?.status === "CONFIRMED") {
-          return res.send("Cleaning already confirmed. Thank you.");
+          return res.send(language === "es" ? "La limpieza ya está confirmada. Gracias." : "Cleaning already confirmed. Thank you.");
         }
 
         if (currentConfirmation?.status === "DECLINED") {
-          return res.status(409).send("This request was already declined.");
+          return res.status(409).send(language === "es" ? "Esta solicitud ya fue rechazada." : "This request was already declined.");
         }
 
         return res.status(409).send(
-          "This cleaning request could not be confirmed because it is no longer actionable."
+          language === "es" ? "Esta solicitud de limpieza ya no permite confirmación." : "This cleaning request could not be confirmed because it is no longer actionable."
         );
       }
 
@@ -456,7 +466,8 @@ if (
   );
 
   return sendCleaningNfcDisabledResponse(
-    res
+    res,
+    language
   );
 }
 
@@ -471,7 +482,7 @@ if (!cleanerAccessResult.ok) {
   });
 
   return res.status(202).send(
-    "Cleaning confirmed. Pin&Go recorded your availability, but NFC access could not be activated automatically yet. The issue was escalated in Mission Control."
+    language === "es" ? "Limpieza confirmada. Pin&Go registró tu disponibilidad, pero todavía no pudo activar el acceso NFC automáticamente. Se notificó la incidencia en Mission Control." : "Cleaning confirmed. Pin&Go recorded your availability, but NFC access could not be activated automatically yet. The issue was escalated in Mission Control."
   );
 }
 
@@ -480,12 +491,12 @@ await runCompleteFlowAuditAfterCleaningConfirmation(
 );
 
 const prepared = await prepareCleaningTimingConsent({ confirmation, reservation });
-return res.send(renderTimingConsent(token, prepared));
+return res.send(renderTimingConsent(token, prepared, language));
      
     } catch (e: any) {
       console.error("[CLEANING_CONFIRM_CONFIRM_ERROR]", e);
 
-      return res.status(500).send(e?.message ?? "Failed to confirm cleaning.");
+      return res.status(500).send(language === "es" ? "No se pudo confirmar la limpieza. Inténtalo de nuevo." : "Failed to confirm cleaning.");
     }
   }
 );
@@ -494,25 +505,28 @@ return res.send(renderTimingConsent(token, prepared));
 cleaningConfirmRouter.post(
   "/cleaning/confirm/:token/timing-consent",
   async (req, res) => {
+    let language: StaffLanguage = "en";
     try {
       const token = String(req.params.token ?? "");
       const data = await loadConfirmationData(token);
+      language = resolveStaffLanguage(data?.staffMember?.preferredLanguage);
       if (!data || data.invalidData || !data.reservation || !data.staffMember) {
-        return res.status(404).send("Cleaning confirmation data is incomplete.");
+        return res.status(404).send(language === "es" ? "Los datos de confirmación de limpieza están incompletos." : "Cleaning confirmation data is incomplete.");
       }
-      const { confirmation, reservation } = data;
+      const { confirmation, reservation, staffMember } = data;
+      language = resolveStaffLanguage(staffMember.preferredLanguage);
       if (reservation.status === ReservationStatus.CANCELLED) {
-        return sendCancelledCleaningRequestResponse(res);
+        return sendCancelledCleaningRequestResponse(res, language);
       }
       if (reservation.property?.cleaningNfcEnabled !== true) {
-        return sendCleaningNfcDisabledResponse(res);
+        return sendCleaningNfcDisabledResponse(res, language);
       }
       if (confirmation.status !== "CONFIRMED") {
-        return res.status(409).send("Confirm cleaning availability before accepting the timing commitment.");
+        return res.status(409).send(language === "es" ? "Confirma tu disponibilidad antes de aceptar el compromiso de horario." : "Confirm cleaning availability before accepting the timing commitment.");
       }
       const prepared = await prepareCleaningTimingConsent({ confirmation, reservation });
       if (!prepared) {
-        return res.status(409).send("No cleaning-time commitment is configured for this property assignment.");
+        return res.status(409).send(language === "es" ? "No hay un compromiso de horario configurado para esta asignación." : "No cleaning-time commitment is configured for this property assignment.");
       }
       const accepted = await acceptCleaningTimingConsent(prisma, {
         workId: prepared.work.id,
@@ -520,15 +534,20 @@ cleaningConfirmRouter.post(
         staffMemberId: confirmation.staffMemberId,
         confirmationId: confirmation.id,
       });
-      return res.send(cleanerPage(`\n          <h2>Cleaning timing commitment accepted</h2>
-          <p><b>Scheduled start:</b> ${formatPropertyLocal(prepared.terms.scheduledStartAt, prepared.timeZone)}</p>
-          <p><b>Committed completion:</b> ${formatPropertyLocal(prepared.terms.scheduledCompletionAt, prepared.timeZone)}</p>
-          <p>Your acceptance was recorded at ${formatPropertyLocal(accepted.timingConsentAcceptedAt!, prepared.timeZone)}.</p>
+      const es = language === "es";
+      return res.send(cleanerPage(`
+          <h2>${es ? "Compromiso de horario de limpieza aceptado" : "Cleaning timing commitment accepted"}</h2>
+          <p><b>${es ? "Inicio programado" : "Scheduled start"}:</b> ${formatPropertyLocal(prepared.terms.scheduledStartAt, prepared.timeZone, language)}</p>
+          <p><b>${es ? "Finalizacion comprometida" : "Committed completion"}:</b> ${formatPropertyLocal(prepared.terms.scheduledCompletionAt, prepared.timeZone, language)}</p>
+          <p>${es ? "Tu aceptacion fue registrada a las" : "Your acceptance was recorded at"} ${formatPropertyLocal(accepted.timingConsentAcceptedAt!, prepared.timeZone, language)}.</p>
           <form method="POST" action="/cleaning/confirm/${token}/start">
-            <button class="cleaner-action">I started cleaning</button>\n          </form>\n          <p class="cleaner-note">This button records your declaration of starting the cleaning. It does not change the committed completion time or NFC access window.</p>\n      `));
+            <button class="cleaner-action">${es ? "Comence la limpieza" : "I started cleaning"}</button>
+          </form>
+          <p class="cleaner-note">${es ? "Este boton registra tu declaracion de inicio. No cambia la hora comprometida de finalizacion ni la ventana de acceso NFC." : "This button records your declaration of starting the cleaning. It does not change the committed completion time or NFC access window."}</p>
+      `, language));
     } catch (e: any) {
       console.error("[CLEANING_TIMING_CONSENT_ERROR]", e);
-      return res.status(409).send(e?.message ?? "Failed to accept cleaning timing commitment.");
+      return res.status(409).send(language === "es" ? "No se pudo aceptar el compromiso de horario. Revisa la solicitud e inténtalo de nuevo." : "Failed to accept cleaning timing commitment.");
     }
   }
 );
@@ -537,25 +556,28 @@ cleaningConfirmRouter.post(
 cleaningConfirmRouter.post(
   "/cleaning/confirm/:token/start",
   async (req, res) => {
+    let language: StaffLanguage = "en";
     try {
       const token = String(req.params.token ?? "");
       const data = await loadConfirmationData(token);
+      language = resolveStaffLanguage(data?.staffMember?.preferredLanguage);
       if (!data || data.invalidData || !data.reservation || !data.staffMember) {
-        return res.status(404).send("Cleaning confirmation data is incomplete.");
+        return res.status(404).send(language === "es" ? "Los datos de confirmación de limpieza están incompletos." : "Cleaning confirmation data is incomplete.");
       }
-      const { confirmation, reservation } = data;
+      const { confirmation, reservation, staffMember } = data;
+      language = resolveStaffLanguage(staffMember.preferredLanguage);
       if (reservation.status === ReservationStatus.CANCELLED) {
-        return sendCancelledCleaningRequestResponse(res);
+        return sendCancelledCleaningRequestResponse(res, language);
       }
       if (reservation.property?.cleaningNfcEnabled !== true) {
-        return sendCleaningNfcDisabledResponse(res);
+        return sendCleaningNfcDisabledResponse(res, language);
       }
       if (confirmation.status !== "CONFIRMED") {
-        return res.status(409).send("Confirm cleaning availability before recording the cleaning start.");
+        return res.status(409).send(language === "es" ? "Confirma tu disponibilidad antes de registrar el inicio de la limpieza." : "Confirm cleaning availability before recording the cleaning start.");
       }
       const prepared = await prepareCleaningTimingConsent({ confirmation, reservation });
       if (!prepared?.work.timingConsentAcceptedAt) {
-        return res.status(409).send("Accept the cleaning timing commitment before recording the cleaning start.");
+        return res.status(409).send(language === "es" ? "Acepta el compromiso de horario antes de registrar el inicio de la limpieza." : "Accept the cleaning timing commitment before recording the cleaning start.");
       }
       const started = await confirmCleaningStart(prisma, {
         workId: prepared.work.id,
@@ -569,14 +591,19 @@ cleaningConfirmRouter.post(
         startConfirmationGraceMinutes: prepared.work.startConfirmationGraceMinutes,
         followupGraceMinutes: prepared.work.followupGraceMinutes,
       });
-      return res.send(cleanerPage(`\n          <h2>Cleaning start recorded</h2>
-          <p>Start confirmed at ${formatPropertyLocal(started.startConfirmedAt!, prepared.timeZone)}.</p>
-          <p><b>Committed completion remains:</b> ${formatPropertyLocal(terms.scheduledCompletionAt, prepared.timeZone)}</p>
+      const es = language === "es";
+      return res.send(cleanerPage(`
+          <h2>${es ? "Inicio de limpieza registrado" : "Cleaning start recorded"}</h2>
+          <p>${es ? "Inicio confirmado a las" : "Start confirmed at"} ${formatPropertyLocal(started.startConfirmedAt!, prepared.timeZone, language)}.</p>
+          <p><b>${es ? "La finalizacion comprometida permanece" : "Committed completion remains"}:</b> ${formatPropertyLocal(terms.scheduledCompletionAt, prepared.timeZone, language)}</p>
           <form method="POST" action="/cleaning/confirm/${token}/complete">
-            <button class="cleaner-action">I finished cleaning</button>\n          </form>\n          <p class="cleaner-note">This records your completion declaration. It does not independently certify an inspection or change NFC access.</p>\n      `));
+            <button class="cleaner-action">${es ? "Termine la limpieza" : "I finished cleaning"}</button>
+          </form>
+          <p class="cleaner-note">${es ? "Esto registra tu declaracion de finalizacion. No certifica de forma independiente una inspeccion ni cambia el acceso NFC." : "This records your completion declaration. It does not independently certify an inspection or change NFC access."}</p>
+      `, language));
     } catch (e: any) {
       console.error("[CLEANING_START_CONFIRM_ERROR]", e);
-      return res.status(409).send(e?.message ?? "Failed to record cleaning start.");
+      return res.status(409).send(language === "es" ? "No se pudo registrar el inicio. Revisa la solicitud e inténtalo de nuevo." : "Failed to record cleaning start.");
     }
   }
 );
@@ -585,25 +612,28 @@ cleaningConfirmRouter.post(
 cleaningConfirmRouter.post(
   "/cleaning/confirm/:token/complete",
   async (req, res) => {
+    let language: StaffLanguage = "en";
     try {
       const token = String(req.params.token ?? "");
       const data = await loadConfirmationData(token);
+      language = resolveStaffLanguage(data?.staffMember?.preferredLanguage);
       if (!data || data.invalidData || !data.reservation || !data.staffMember) {
-        return res.status(404).send("Cleaning confirmation data is incomplete.");
+        return res.status(404).send(language === "es" ? "Los datos de confirmación de limpieza están incompletos." : "Cleaning confirmation data is incomplete.");
       }
-      const { confirmation, reservation } = data;
+      const { confirmation, reservation, staffMember } = data;
+      language = resolveStaffLanguage(staffMember.preferredLanguage);
       if (reservation.status === ReservationStatus.CANCELLED) {
-        return sendCancelledCleaningRequestResponse(res);
+        return sendCancelledCleaningRequestResponse(res, language);
       }
       if (reservation.property?.cleaningNfcEnabled !== true) {
-        return sendCleaningNfcDisabledResponse(res);
+        return sendCleaningNfcDisabledResponse(res, language);
       }
       if (confirmation.status !== "CONFIRMED") {
-        return res.status(409).send("Confirm cleaning availability before recording completion.");
+        return res.status(409).send(language === "es" ? "Confirma tu disponibilidad antes de registrar la finalización." : "Confirm cleaning availability before recording completion.");
       }
       const prepared = await prepareCleaningTimingConsent({ confirmation, reservation });
       if (!prepared?.work.timingConsentAcceptedAt) {
-        return res.status(409).send("Accept the cleaning timing commitment before recording completion.");
+        return res.status(409).send(language === "es" ? "Acepta el compromiso de horario antes de registrar la finalización." : "Accept the cleaning timing commitment before recording completion.");
       }
       const completed = await confirmCleaningCompletion(prisma, {
         workId: prepared.work.id,
@@ -621,12 +651,13 @@ cleaningConfirmRouter.post(
         data: { status: "OBSOLETE", lastError: "CLEANER_COMPLETION_CONFIRMED" },
       });
       return res.send(renderCleaningCompletedPage(
-        formatPropertyLocal(completed.completionConfirmedAt!, prepared.timeZone),
+        completed.completionConfirmedAt!,
         prepared,
+        language,
       ));
     } catch (e: any) {
       console.error("[CLEANING_COMPLETION_CONFIRM_ERROR]", e);
-      return res.status(409).send(e?.message ?? "Failed to record cleaning completion.");
+      return res.status(409).send(language === "es" ? "No se pudo registrar la finalización. Revisa la solicitud e inténtalo de nuevo." : "Failed to record cleaning completion.");
     }
   }
 );
@@ -635,6 +666,7 @@ cleaningConfirmRouter.post(
 cleaningConfirmRouter.post(
   "/cleaning/confirm/:token/decline",
   async (req, res) => {
+    let language: StaffLanguage = "en";
     try {
       const token = String(req.params.token ?? "");
 
@@ -648,10 +680,16 @@ cleaningConfirmRouter.post(
           .send("Invalid or expired cleaning confirmation link.");
       }
 
+      const declineStaff = await prisma.staffMember.findUnique({
+        where: { id: confirmation.staffMemberId },
+        select: { preferredLanguage: true },
+      });
+      language = resolveStaffLanguage(declineStaff?.preferredLanguage);
+
       if (confirmation.status === "CONFIRMED") {
         return res
           .status(409)
-          .send("This request was already confirmed.");
+          .send(language === "es" ? "Esta solicitud ya fue confirmada." : "This request was already confirmed.");
       }
 
      const reservation =
@@ -666,7 +704,7 @@ cleaningConfirmRouter.post(
             if (!reservation) {
         return res
           .status(404)
-          .send("Reservation not found.");
+          .send(language === "es" ? "No se encontro la reservacion." : "Reservation not found.");
       }
 
       if (
@@ -674,7 +712,8 @@ cleaningConfirmRouter.post(
         ReservationStatus.CANCELLED
       ) {
         return sendCancelledCleaningRequestResponse(
-          res
+          res,
+          language
         );
       }
 
@@ -694,12 +733,13 @@ cleaningConfirmRouter.post(
   );
 
   return sendCleaningNfcDisabledResponse(
-    res
+    res,
+    language
   );
 }
 
       if (confirmation.status === "EXPIRED") {
-        return sendExpiredCleaningRequestResponse(res);
+        return sendExpiredCleaningRequestResponse(res, language);
       }
 
       const declineTransition =
@@ -720,21 +760,21 @@ cleaningConfirmRouter.post(
           });
 
         if (currentConfirmation?.status === "EXPIRED") {
-          return sendExpiredCleaningRequestResponse(res);
+          return sendExpiredCleaningRequestResponse(res, language);
         }
 
         if (currentConfirmation?.status === "CONFIRMED") {
           return res
             .status(409)
-            .send("This request was already confirmed.");
+            .send(language === "es" ? "Esta solicitud ya fue confirmada." : "This request was already confirmed.");
         }
 
         if (currentConfirmation?.status === "DECLINED") {
-          return res.send("This cleaning request was already declined.");
+          return res.send(language === "es" ? "Esta solicitud de limpieza ya fue rechazada." : "This cleaning request was already declined.");
         }
 
         return res.status(409).send(
-          "This cleaning request could not be declined because it is no longer actionable."
+          language === "es" ? "Esta solicitud de limpieza no se pudo rechazar porque ya no requiere una accion." : "This cleaning request could not be declined because it is no longer actionable."
         );
       }
 
@@ -772,7 +812,7 @@ cleaningConfirmRouter.post(
         );
 
         return res.send(
-          "Cleaning declined. No backup cleaner is currently available."
+          language === "es" ? "Limpieza rechazada. No hay personal de limpieza de respaldo disponible en este momento." : "Cleaning declined. No backup cleaner is currently available."
         );
       }
 
@@ -807,7 +847,7 @@ cleaningConfirmRouter.post(
       );
 
       return res.send(
-        "Cleaning declined. Pin&Go will notify the next available backup cleaner."
+        language === "es" ? "Limpieza rechazada. Pin&Go notificara al proximo personal de limpieza de respaldo disponible." : "Cleaning declined. Pin&Go will notify the next available backup cleaner."
       );
     } catch (e: any) {
       console.error(
@@ -818,8 +858,7 @@ cleaningConfirmRouter.post(
       return res
         .status(500)
         .send(
-          e?.message ??
-            "Failed to decline cleaning."
+          language === "es" ? "No se pudo rechazar la limpieza. Inténtalo de nuevo." : "Failed to decline cleaning."
         );
     }
   }

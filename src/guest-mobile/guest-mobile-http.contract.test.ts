@@ -1,15 +1,29 @@
 import assert from "node:assert/strict";
 import test from "node:test";
+import ts from "typescript";
 import fs from "node:fs/promises";
 
 const route = await fs.readFile(new URL("../routes/guest-mobile-identity.routes.ts", import.meta.url), "utf8");
 const server = await fs.readFile(new URL("../server.ts", import.meta.url), "utf8");
 
 test("exchange route exposes only the intended public contract", () => {
-  assert.match(route, /"\/api\/guest-mobile\/session\/exchange"/);
-  assert.match(route, /new Set\(\["guestToken", "deviceLabel", "platform"\]\)/);
-  assert.doesNotMatch(route, /reservationId/);
-  assert.doesNotMatch(route, /guestEmail|guestPhone|organizationId|propertyId/);
+  const ast = ts.createSourceFile("routes.ts", route, ts.ScriptTarget.Latest, true);
+  const exchanges = ast.statements.filter(statement => {
+    if (!ts.isExpressionStatement(statement) || !ts.isCallExpression(statement.expression)) return false;
+    const call = statement.expression;
+    const path = call.arguments[0];
+    return path !== undefined && call.expression.getText(ast) === "guestMobileIdentityRouter.post"
+      && ts.isStringLiteral(path)
+      && path.text === "/api/guest-mobile/session/exchange";
+  });
+  assert.equal(exchanges.length, 1, "exactly one exchange endpoint must exist");
+  const endpoint = exchanges[0];
+  assert.ok(endpoint);
+  const exchange = endpoint.getText(ast);
+  assert.match(exchange, /"\/api\/guest-mobile\/session\/exchange"/);
+  assert.match(exchange, /new Set\(\["guestToken", "deviceLabel", "platform"\]\)/);
+  assert.doesNotMatch(exchange, /reservationId/);
+  assert.doesNotMatch(exchange, /guestEmail|guestPhone|organizationId|propertyId/);
 });
 
 test("exchange response and transport are non-cacheable and identifier-minimal", () => {

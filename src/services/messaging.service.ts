@@ -5,6 +5,7 @@ import {
   resolveGuestLanguage,
   type GuestLanguage,
 } from "./guest-language.service";
+import { resolveStaffLanguage, type StaffLanguage } from "./staff-language.service.js";
 
 type SmsSendResult = {
   ok: boolean;
@@ -54,6 +55,7 @@ type CleaningSmsArgs = {
   reservationId?: string | null;
   propertyId?: string | null;
   organizationId?: string | null;
+  preferredLanguage?: StaffLanguage | string | null;
 };
 
 function cleanEnv(value: string | null | undefined): string | null {
@@ -173,7 +175,9 @@ export function buildCleaningStartSmsBody(params: {
   startsAt: Date;
   endsAt: Date;
   timezone?: string | null;
+  language?: StaffLanguage;
 }): string {
+  const language = resolveStaffLanguage(params.language);
   const propertyName =
     toGsmSafeText(cleanEnv(params.propertyName) ?? "N/A", 20) || "N/A";
   const roomName =
@@ -182,7 +186,7 @@ export function buildCleaningStartSmsBody(params: {
     fmtWithTimezone(
       params.startsAt,
       params.timezone ?? "America/Puerto_Rico",
-      "en"
+      language
     ),
     22
   );
@@ -190,18 +194,14 @@ export function buildCleaningStartSmsBody(params: {
     fmtWithTimezone(
       params.endsAt,
       params.timezone ?? "America/Puerto_Rico",
-      "en"
+      language
     ),
     22
   );
 
-  return (
-    `Pin&Go clean start/inicio. ` +
-    `Prop: ${propertyName}. ` +
-    `Unit: ${roomName}. ` +
-    `Window: ${start}-${end}. ` +
-    `NFC active/activa.`
-  );
+  return language === "es"
+    ? `Pin&Go inicio de limpieza. Prop: ${propertyName}. Unidad: ${roomName}. Ventana: ${start}-${end}. NFC activa.`
+    : `Pin&Go cleaning start. Prop: ${propertyName}. Unit: ${roomName}. Window: ${start}-${end}. NFC active.`;
 }
 
 export function buildCleaningEndSmsBody(params: {
@@ -210,7 +210,9 @@ export function buildCleaningEndSmsBody(params: {
   roomName?: string | null;
   endsAt: Date;
   timezone?: string | null;
+  language?: StaffLanguage;
 }): string {
+  const language = resolveStaffLanguage(params.language);
   const propertyName =
     toGsmSafeText(cleanEnv(params.propertyName) ?? "N/A", 24) || "N/A";
   const roomName =
@@ -219,18 +221,14 @@ export function buildCleaningEndSmsBody(params: {
     fmtWithTimezone(
       params.endsAt,
       params.timezone ?? "America/Puerto_Rico",
-      "en"
+      language
     ),
     24
   );
 
-  return (
-    `Pin&Go cleaning done/lista. ` +
-    `Prop: ${propertyName}. ` +
-    `Unit/Unidad: ${roomName}. ` +
-    `End/Fin: ${end}. ` +
-    `Access/Acceso ended/finalizado.`
-  );
+  return language === "es"
+    ? `Pin&Go limpieza terminada. Prop: ${propertyName}. Unidad: ${roomName}. Fin: ${end}. Acceso finalizado.`
+    : `Pin&Go cleaning done. Prop: ${propertyName}. Unit: ${roomName}. End: ${end}. Access ended.`;
 }
 
 export async function sendLoggedSms(args: SendLoggedSmsArgs): Promise<SmsSendResult> {
@@ -395,6 +393,7 @@ export async function sendCleaningStartSms(
     startsAt: args.startsAt,
     endsAt: args.endsAt,
     timezone: args.timezone,
+    language: resolveStaffLanguage(args.preferredLanguage),
  });
 
   return sendLoggedSms({
@@ -420,6 +419,7 @@ export async function sendCleaningEndSms(
     roomName: args.roomName,
     endsAt: args.endsAt,
     timezone: args.timezone,
+    language: resolveStaffLanguage(args.preferredLanguage),
   });
 
   return sendLoggedSms({

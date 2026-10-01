@@ -1714,6 +1714,7 @@ model StaffMember {
   phoneE164      String?
   photoUrl       String?
   companyName    String?
+  preferredLanguage String         @default("en") @db.VarChar(5)
   isActive       Boolean           @default(true)
   ttlockCardRef  String?           @db.VarChar(128)
   ttlockUserRef  String?           @db.VarChar(128)

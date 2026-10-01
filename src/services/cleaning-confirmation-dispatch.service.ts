@@ -3,6 +3,7 @@ import crypto from "crypto";
 import { sendSms } from "../integrations/twilio/twilio.client";
 import { selectNextStaffForProperty } from "./staff-selection.service";
 import { buildCleaningConfirmationSmsBody } from "./cleaning-confirmation-sms-body.service";
+import { getStaffIntlLocale, resolveStaffLanguage } from "./staff-language.service.js";
 
 const DISPATCH_TYPE = "CLEANING_CONFIRMATION";
 const SEND_START_HOUR = 8;
@@ -103,6 +104,7 @@ if (!cleaningNfcEnabled) {
   }
 
   const timezone = reservation.property?.timezone ?? "America/Puerto_Rico";
+  const language = resolveStaffLanguage(staff.preferredLanguage);
 
   if (!isWithinCleaningMessageHours(timezone, now)) {
     return { ok: false, skipped: true, reason: "outside_allowed_hours" };
@@ -162,7 +164,7 @@ if (!cleaningNfcEnabled) {
 
   const roomName = reservation.roomName ?? "N/A";
 
-  const checkOutText = new Intl.DateTimeFormat("en-US", {
+  const checkOutText = new Intl.DateTimeFormat(getStaffIntlLocale(language), {
     timeZone: timezone,
     year: "numeric",
     month: "2-digit",
@@ -177,6 +179,7 @@ if (!cleaningNfcEnabled) {
     roomName,
     checkOutText,
     confirmUrl,
+    language,
   });
 
   const sms = await sendSms(staff.phoneE164, body);

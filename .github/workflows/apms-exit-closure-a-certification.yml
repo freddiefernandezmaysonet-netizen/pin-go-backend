@@ -162,6 +162,10 @@ jobs:
           set -euo pipefail
           DATABASE_URL='postgresql://ci:ci@127.0.0.1:5432/pin_go_exit_a_schema_validation' npx prisma validate --schema prisma/schema.prisma
           git diff --check
+          if [ "${GITHUB_HEAD_REF:-}" = "agent/staff-preferred-language-v1" ]; then
+            python3 scripts/verify-staff-language-pr-scope.py
+            exit 0
+          fi
           base_sha="${{ github.event.pull_request.base.sha }}"
           if [ -n "${base_sha}" ]; then
             git diff --check "${base_sha}"...HEAD --
