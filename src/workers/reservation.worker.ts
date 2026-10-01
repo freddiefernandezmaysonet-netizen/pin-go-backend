@@ -2581,6 +2581,10 @@ async function processPasscodeResyncs(now: Date) {
   if (grants.length === 0) return;
 
   for (const g of grants) {
+    if (!g.reservation) {
+      errLog("Passcode resync skipped: reservation missing", { accessGrantId: g.id });
+      continue;
+    }
     try {
       const desiredStart = new Date(
         g.reservation.checkIn

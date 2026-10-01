@@ -15,17 +15,17 @@ The user confirmed that imported Channex bookings must receive access like the h
 
 ## Validation
 
-134 local tests passed: persisted provenance, access blockers, old snapshots, Direct Booking regressions, HTTP GET/POST on loopback with fake data, journey transitions/idempotency, reconciliation without invented timestamps, compliance owner and communications. No real guest, provider or database was used.
+137 local tests passed: persisted provenance, access blockers, old snapshots, Direct Booking regressions, HTTP GET/POST on loopback with fake data, journey transitions/idempotency, reconciliation without invented timestamps, compliance owner and communications. No real guest, provider or database was used.
 
-Strict TypeScript and emitted build passed for changed services, portal and message retry worker. Including the complete reservation worker exposes four pre-existing errors, reproduced on an untouched baseline:
+Strict TypeScript and emitted build now pass for the complete affected boundary, including the reservation worker. Four pre-existing errors were independently reproduced on the untouched baseline and then fixed:
 
-- `cleaning-followup-delivery-reconciliation.service.ts`: MessageLog has no `updatedAt` (two errors).
-- `reservation.worker.ts`: nullable `g.reservation` dereferences (two errors).
+- Cleaning follow-up reconciliation selects the existing MessageLog.deliveredAt field and falls back to the reconciliation observation time when SENT has no provider-delivery timestamp. It does not use the original failed message creation time as delivery evidence.
+- Passcode resynchronization skips and logs a grant with no reservation before dereferencing its dates.
 
-The committed focused configuration includes the reservation worker deliberately: its compilation is blocked until these errors are resolved. This is not a full production build certification. No existing CI allowlist or certified Channex-core fingerprint is relaxed.
+Three cleaning delivery tests cover provider timestamp, fallback timestamp and absence of SENT evidence. No existing CI allowlist or certified Channex-core fingerprint is relaxed. This focused build is not a claim that every unrelated repository project compiles.
 
 ## Release gate
 
-Draft only. Resolve the baseline worker errors, compile and run CI on the final merged candidate before controlled deployment. API and workers are separate services and both need the code release. Then verify a real Channex reservation without guest registration, a Direct Booking control, and normal expiry/cancellation behavior. No migration or bulk rewriting of historical identity/agreements is needed for this policy.
+Draft only. Run CI on the final candidate before controlled deployment; the local worker build blockers are resolved. API and workers are separate services and both need the code release. Then verify a real Channex reservation without guest registration, a Direct Booking control, and normal expiry/cancellation behavior. No migration or bulk rewriting of historical identity/agreements is needed for this policy.
 
 No merge, deployment, variables, database data or live access changes were performed. Existing provider sessions and historical messages already sent are not erased.

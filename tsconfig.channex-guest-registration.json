@@ -15,6 +15,8 @@
     "src/services/channex-guest-registration.integration.test.ts",
     "src/services/channex-guest-registration.policy.test.ts",
     "src/services/channex-guest-registration.policy.ts",
+    "src/services/cleaning-followup-delivery-reconciliation.service.test.ts",
+    "src/services/cleaning-followup-delivery-reconciliation.service.ts",
     "src/services/guest-access-readiness.service.test.ts",
     "src/services/guest-access-readiness.service.ts",
     "src/services/guest-agreement.service.ts",

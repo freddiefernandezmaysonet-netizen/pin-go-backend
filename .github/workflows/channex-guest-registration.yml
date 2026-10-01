@@ -3,6 +3,7 @@ on:
   pull_request:
     paths:
       - 'src/services/channex-guest-registration*'
+      - 'src/services/cleaning-followup-delivery-reconciliation*'
       - 'src/services/guest-access-readiness*'
       - 'src/services/guest-agreement.service.ts'
       - 'src/services/guest-identity-verification.service.ts'
@@ -34,6 +35,7 @@ jobs:
         run: >-
           node --import tsx --test
           src/services/channex-guest-registration*.test.ts
+          src/services/cleaning-followup-delivery-reconciliation.service.test.ts
           src/services/guest-access-readiness.service.test.ts
           src/services/guest-journey-evaluator.test.ts
           src/services/guest-journey-evidence.service.test.ts
