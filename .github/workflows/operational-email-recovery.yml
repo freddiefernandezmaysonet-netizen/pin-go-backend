@@ -1,0 +1,41 @@
+name: Operational email recovery
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - 'src/services/durable*email*.ts'
+      - 'src/services/cleaning-followup-host-delivery.service.ts'
+      - 'src/services/guest-cancellation.service.ts'
+      - 'src/services/reservation-complete-flow-audit.service.ts'
+      - 'src/lib/mailer.ts'
+      - 'src/workers/message.retry.worker.ts'
+      - 'tsconfig.operational-email-recovery.json'
+      - '.github/workflows/operational-email-recovery.yml'
+permissions:
+  contents: read
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      DATABASE_URL: postgresql://test:test@127.0.0.1:1/no_runtime_database
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+      - run: npm ci --ignore-scripts --no-audit --no-fund
+      - run: npx --no-install prisma generate --schema ./prisma
+      - run: npx --no-install tsc -p tsconfig.operational-email-recovery.json
+      - name: Recovery, offline transport, ownership and sender regressions
+        run: >-
+          node --import tsx --test
+          src/services/durable-operational-email.service.test.ts
+          src/services/durable-email-transport.test.ts
+          src/lib/email-senders.test.ts
+          src/services/cleaning-followup-host-recipient.service.test.ts
+          src/services/cleaning-followup-host-notice.service.test.ts
+          src/services/guest-journey-communications-delivery-adapter.service.test.ts
+          src/services/ota-guest-contact-notice-retry.service.test.ts
+          src/workers/message-retry-manual-cancellation.contract.test.ts

@@ -12,10 +12,7 @@ import {
 } from "./cancellation-policy.service";
 import type { CancellationPolicySnapshot } from "./cancellation-policy.service";
 import { refundDirectBookingReservation } from "./direct-booking-refund.service";
-import {
-  sendDirectBookingGuestCancellationEmail,
-  sendDirectBookingHostCancellationNotification,
-} from "../lib/mailer";
+import { enqueueOperationalEmail, deliverOperationalEmail } from "./durable-operational-email.service.js";
 import { reconcileReservation } from "./reservation.reconcile.service";
 import { resolveOperationalIssuesForReservation } from "../apms/operational-intelligence.service";
 import { auditReservationCompleteFlowSafe } from "./reservation-complete-flow-audit.service";
@@ -364,7 +361,7 @@ async function sendGuestCancellationEmailSafe({
         reservation.property.organizationId
       );
 
-      return await sendDirectBookingGuestCancellationEmail({
+      const mail = {
       to: reservation.guestEmail,
       replyTo: guestReplyTo.email,
       reservationNumber: reservation.reservationNumber,
@@ -388,7 +385,15 @@ async function sendGuestCancellationEmailSafe({
       }),
       manageReservationUrl: buildManageReservationUrl(reservation.guestToken),
       preferredLanguage: reservation.preferredLanguage,
+    };
+    const eventAt = new Date(reservation.cancelledAt);
+    if (!reservation.cancelledAt || !Number.isFinite(eventAt.getTime())) throw new Error("CANCELLATION_NOTICE_EVENT_MISSING");
+    const message = await enqueueOperationalEmail(prisma, {
+      organizationId: reservation.property.organizationId, propertyId: reservation.propertyId,
+      reservationId: reservation.id, purpose: "guestCancellation", eventKey: eventAt.toISOString(),
+      cancelledAt: eventAt.toISOString(), eventAt, mail,
     });
+    return await deliverOperationalEmail(prisma, message);
   } catch (emailError: any) {
     console.error("[GUEST_CANCELLATION_EMAIL_ERROR]", {
       reservationId: reservation.id,
@@ -511,7 +516,7 @@ async function sendHostCancellationEmailSafe({
 
   for (const recipient of recipients) {
     try {
-       const result = await sendDirectBookingHostCancellationNotification({
+       const mail = {
          to: recipient.email,
          reservationNumber: reservation.reservationNumber,
          hostName: recipient.fullName,
@@ -534,11 +539,19 @@ async function sendHostCancellationEmailSafe({
         refundBasis: snapshot.refundBasis,
         paymentState: reservation.paymentState,
         hostPayoutStatus: reservation.hostPayoutStatus,
+      };
+      const eventAt = new Date(reservation.cancelledAt);
+      if (!reservation.cancelledAt || !Number.isFinite(eventAt.getTime())) throw new Error("CANCELLATION_NOTICE_EVENT_MISSING");
+      const message = await enqueueOperationalEmail(prisma, {
+        organizationId, propertyId: reservation.propertyId, reservationId: reservation.id,
+        purpose: "hostCancellation", eventKey: eventAt.toISOString(), cancelledAt: eventAt.toISOString(),
+        eventAt, mail,
       });
+      const result = await deliverOperationalEmail(prisma, message);
 
       results.push({
         email: recipient.email,
-        ok: true,
+        ok: result === "SENT",
         result,
       });
     } catch (emailError: any) {
@@ -1019,7 +1032,6 @@ export async function cancelReservationFromGuestPortal({
 
     return {
       ok: true,
-      alreadyCancelled: true,
       ...serializeGuestCancellationPreview({
         reservation,
         snapshot,
@@ -1177,7 +1189,6 @@ export async function cancelReservationFromGuestPortal({
 
       return {
         ok: true,
-        alreadyCancelled: false,
         ...serializeGuestCancellationPreview({
           reservation: updatedReservation,
           snapshot,
@@ -1402,7 +1413,6 @@ export async function cancelReservationFromGuestPortal({
 
     return {
       ok: true,
-      alreadyCancelled: true,
       ...serializeGuestCancellationPreview({
         reservation: updatedReservation,
         snapshot,
@@ -1439,7 +1449,6 @@ export async function cancelReservationFromGuestPortal({
 
   return {
     ok: true,
-    alreadyCancelled: false,
     ...serializeGuestCancellationPreview({
       reservation: updatedReservation,
       snapshot,
