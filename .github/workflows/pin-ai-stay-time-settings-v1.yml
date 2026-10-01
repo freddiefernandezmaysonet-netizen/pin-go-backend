@@ -8,6 +8,7 @@ on:
       - "src/pin-ai/runtime/pin-go-read-tool-executor*"
       - "src/services/property-stay-time-settings*"
       - "src/services/stay-time-estimate*"
+      - "src/services/arrival-cleaning-readiness*"
       - "src/routes/dashboard.stay-time-settings*"
       - "prisma/**"
       - "src/server.ts"

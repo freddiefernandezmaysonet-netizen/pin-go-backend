@@ -71,6 +71,81 @@ test("stay-time estimates use real scoped PostgreSQL evidence without writes", {
   await t.test("early arrival never treats absent readiness as approval", async () => {
     await assert.rejects(estimateStayTimeAdjustment(db, { ...input, operation: "EARLY_CHECKIN", requestedLocalTime: "12:00" }, now), /ARRIVAL_READINESS_REQUIRED/);
   });
+  await t.test("early arrival consumes the prior turnover completion without a second host approval", async () => {
+    const prior = await conflictStay("2026-09-29T19:00Z", "2026-10-01T10:00Z");
+    const staff = await db.staffMember.create({ data: { organizationId: org.id, fullName: "Synthetic cleaner" } });
+    const assignment = await db.propertyStaff.create({ data: { propertyId: property.id, staffMemberId: staff.id, role: "PRIMARY" } });
+    const confirmation = await db.cleaningConfirmation.create({ data: { reservationId: prior.id, propertyId: property.id,
+      staffMemberId: staff.id, status: "CONFIRMED", token: `synthetic-${staff.id}` } });
+    const completed = new Date("2026-10-01T11:00Z");
+    const work = await db.cleaningWork.create({ data: { reservationId: prior.id, propertyId: property.id,
+      staffMemberId: staff.id, confirmationId: confirmation.id, scheduledStartAt: new Date("2026-10-01T10:30Z"),
+      durationCommitmentMinutes: 30, startConfirmationGraceMinutes: 5, followupGraceMinutes: 5,
+      timingConsentVersion: "v1", timingConsentAcceptedAt: new Date("2026-09-29T15:00Z"),
+      startConfirmedAt: new Date("2026-10-01T10:30Z"), completionConfirmedAt: completed } });
+    const early = () => estimateStayTimeAdjustment(db, { ...input, operation: "EARLY_CHECKIN", requestedLocalTime: "12:00" }, now);
+    try {
+      const result = await early();
+      assert.equal(result.decision, "ESTIMATE_ONLY");
+      assert.equal(result.checkIn, "2026-10-01T16:00:00.000Z");
+      assert.equal(result.checkOut, stay.checkOut.toISOString());
+      assert.equal(result.authorizationGranted, false);
+      for (const patch of [
+        { completionConfirmedAt: null }, { cancelledAt: completed }, { supersededAt: completed },
+        { completionConfirmedAt: new Date("2026-10-01T12:01Z") },
+        { startConfirmedAt: new Date("2026-10-01T09:59Z") },
+        { scheduledStartAt: new Date("2026-10-01T11:00Z") }, { timingConsentVersion: null },
+        { confirmationId: "unrelated-confirmation" },
+      ]) {
+        await db.cleaningWork.update({ where: { id: work.id }, data: patch });
+        await assert.rejects(early(), /ARRIVAL_READINESS_REQUIRED/);
+        await db.cleaningWork.update({ where: { id: work.id }, data: {
+          completionConfirmedAt: completed, cancelledAt: null, supersededAt: null,
+          startConfirmedAt: work.startConfirmedAt, scheduledStartAt: work.scheduledStartAt,
+          timingConsentVersion: "v1", confirmationId: confirmation.id,
+        } });
+      }
+      await db.propertyStaff.update({ where: { id: assignment.id }, data: { isActive: false } });
+      await assert.rejects(early(), /ARRIVAL_READINESS_REQUIRED/);
+      await db.propertyStaff.update({ where: { id: assignment.id }, data: { isActive: true } });
+      // An intervening stay has no completed turnover of its own.
+      const intervening = await conflictStay("2026-10-01T11:00Z", "2026-10-01T11:30Z");
+      try { await assert.rejects(early(), /ARRIVAL_READINESS_REQUIRED/); }
+      finally { await db.reservation.delete({ where: { id: intervening.id } }); }
+      const block = await db.propertyBlockedDate.create({ data: { propertyId: property.id,
+        startDate: new Date("2026-10-01T11:30Z"), endDate: new Date("2026-10-01T11:45Z") } });
+      try { await assert.rejects(early(), /ARRIVAL_READINESS_REQUIRED/); }
+      finally { await db.propertyBlockedDate.delete({ where: { id: block.id } }); }
+      await db.reservation.update({ where: { id: prior.id }, data: { checkOut: new Date("2026-10-01T10:15Z") } });
+      await assert.rejects(early(), /ARRIVAL_READINESS_REQUIRED/);
+      await db.reservation.update({ where: { id: prior.id }, data: { checkOut: prior.checkOut } });
+      // Cleaning for the arriving reservation cannot substitute for prior work.
+      await db.cleaningWork.update({ where: { id: work.id }, data: { reservationId: stay.id } });
+      await assert.rejects(early(), /ARRIVAL_READINESS_REQUIRED/);
+      await db.cleaningWork.update({ where: { id: work.id }, data: { reservationId: prior.id } });
+      const duplicate = await db.cleaningWork.create({ data: { ...work, id: `${work.id}-other`, staffMemberId: `${staff.id}-other` } });
+      try { await assert.rejects(early(), /ARRIVAL_READINESS_REQUIRED/); }
+      finally { await db.cleaningWork.delete({ where: { id: duplicate.id } }); }
+      const changingPrior = await db.reservationModification.create({ data: {
+        reservationId: prior.id, clientRequestId: "readiness-pending", requestFingerprint: "synthetic",
+        status: "APPLYING", financialAction: "NO_PAYMENT_REQUIRED", baseReservationUpdatedAt: prior.updatedAt,
+        currentCheckIn: prior.checkIn, currentCheckOut: prior.checkOut, proposedCheckIn: prior.checkIn,
+        proposedCheckOut: new Date("2026-10-01T11:30Z"), currentAdults: 1, currentChildren: 0,
+        proposedAdults: 1, proposedChildren: 0, currentPricing: {}, proposedPricing: {},
+        currentTotalAmount: 10, proposedTotalAmount: 10, amountDifference: 0,
+      } });
+      try { await assert.rejects(early(), /ARRIVAL_READINESS_REQUIRED/); }
+      finally { await db.reservationModification.delete({ where: { id: changingPrior.id } }); }
+      await early();
+      assert.equal((await db.cleaningWork.findUniqueOrThrow({ where: { id: work.id } })).completionConfirmedAt?.toISOString(), completed.toISOString());
+    } finally {
+      await db.cleaningWork.delete({ where: { id: work.id } });
+      await db.cleaningConfirmation.delete({ where: { id: confirmation.id } });
+      await db.propertyStaff.delete({ where: { id: assignment.id } });
+      await db.staffMember.delete({ where: { id: staff.id } });
+      await db.reservation.delete({ where: { id: prior.id } });
+    }
+  });
   await t.test("existing overlap and cleaning offset collision block; exact boundary allows", async () => {
     const conflict = await conflictStay("2026-10-03T19:45Z", "2026-10-04T15:00Z");
     await assert.rejects(estimate(), /TURNOVER_CONFLICT/);

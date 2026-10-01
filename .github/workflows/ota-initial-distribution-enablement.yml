@@ -101,6 +101,7 @@ jobs:
               'src/routes/dashboard.stay-time-settings.routes.test.ts',
               'src/routes/dashboard.stay-time-settings.routes.ts',
               'src/server.ts',
+              'src/services/arrival-cleaning-readiness.service.ts',
               'src/services/property-stay-time-settings.db.test.ts',
               'src/services/property-stay-time-settings.service.ts',
               'src/services/stay-time-estimate.service.test.ts',

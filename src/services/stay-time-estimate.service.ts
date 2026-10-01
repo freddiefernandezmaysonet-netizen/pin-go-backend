@@ -2,6 +2,7 @@ import { Prisma, type PrismaClient } from "@prisma/client";
 import { formatInTimeZone, fromZonedTime } from "date-fns-tz";
 import { planStayTimeAdjustment, StayTimePolicyError, type StayTimeOperation } from "../pin-ai/actions/stay-time-policy.js";
 import { defaultStayTimeSettings, parseStayTimeSettings, validateStayTimeSettingsLimits } from "../pin-ai/actions/stay-time-settings.js";
+import { readArrivalCleaningReadiness } from "./arrival-cleaning-readiness.service.js";
 
 function reject(code: string): never { throw new StayTimePolicyError(code); }
 
@@ -120,14 +121,16 @@ export async function estimateStayTimeAdjustment(
       ...(blocked ? [{ startsAt: blocked.startDate, endsAt: blocked.endDate }] : []),
       ...(held ? [{ startsAt: held.proposedCheckIn, endsAt: held.proposedCheckOut }] : []),
     ];
+    const arrivalReadiness = early ? await readArrivalCleaningReadiness(tx, {
+      ...scope, reservationId: row.id, checkIn: row.checkIn, requestedAt, now,
+      cleaningStartOffsetMinutes: offset,
+    }) : null;
     const plan = planStayTimeAdjustment({ operation: input.operation, requestedAt, now,
       reservation: { ...scope, ...row, currency: row.currency?.toUpperCase() ?? "", adjustedOperations },
       policy: { ...scope, version: `stay-time-v1:${property.stayTimeSettingsRevision}:${property.updatedAt.toISOString()}`,
         timezone, ...settings, cleaningStartOffsetMinutes: offset, cleaningDurationMinutes: duration },
       evidence: { ...scope, reservationId: row.id, checkedAt: now, coveredFrom, coveredUntil, conflicts,
-        // No persisted host readiness authority exists yet. Cleaning acceptance
-        // or completion must never be upgraded to READY by this adapter.
-        arrivalReadiness: null },
+        arrivalReadiness },
     });
     return { ...plan, decision: "ESTIMATE_ONLY" as const, reservationUpdatedAt: row.updatedAt.toISOString(),
       settingsRevision: property.stayTimeSettingsRevision, estimatedAt: now.toISOString(),

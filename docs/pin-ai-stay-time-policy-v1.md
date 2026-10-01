@@ -47,8 +47,8 @@ reservation, modifies access, or sends a message. Runtime uses it only through
 the read-only estimator described below.
 
 Early arrival requires a canonical `READY` decision tied to the exact arriving
-reservation and scheduled arrival instant. The readiness adapter is not built in
-this change. Late departure reserves the additional occupied interval and the
+reservation and scheduled arrival instant. The readiness adapter described below
+uses the existing cleaner completion without another host confirmation. Late departure reserves the additional occupied interval and the
 entire offset-plus-cleaning interval. Evidence is at most 60 seconds old, and
 future-dated evidence is rejected. Evidence freshness is not a concurrency lock:
 the executor must re-read under the canonical transaction before confirmation and
@@ -106,16 +106,27 @@ failures return unavailable; they never fall back to legacy eligibility. Estimat
 include ES/EN text stating that taxes are excluded and confirmation is not yet
 available. No Saved Agent update or deployment is part of this change.
 
-Early arrival deliberately
-fails with ARRIVAL_READINESS_REQUIRED: there is no persisted host-readiness
-authority to trust, and cleaner acceptance/completion cannot substitute for one.
+Early arrival uses `readArrivalCleaningReadiness` in the same database snapshot.
+The product rule is that the cleaner's `I finished cleaning` confirmation is the
+operational completion evidence; no second host approval or new mode is added.
+The resolver links exactly one current CleaningWork to the latest departing stay
+on the same property, validates its original confirmation/active staff assignment,
+consent/start/completion order, and checkout-plus-offset schedule. Cancelled,
+superseded, future-dated, ambiguous and schedule-stale work is rejected. Occupancy,
+host blocks and pending changes since completion invalidate readiness. It never
+uses the arriving guest's post-departure work. A missing prior turnover remains
+unknown rather than inventing readiness. The result is freshly assessed against
+the arriving reservation/check-in and does not assert physical inspection or
+working hardware. Availability, host hours, pricing, consent and access execution
+remain independent gates. Missing evidence returns ARRIVAL_READINESS_REQUIRED.
 The old early/late eligibility methods remain unused by the read-tool executor. PostgreSQL
 tests exercise the actual conflict predicates, including offset-only conflicts,
 exact interval boundaries, expired/processing/applying holds, same-stay changes,
 tenant scoping, disabled/invalid settings and repeated adjustments.
 
-1. Build persisted canonical arrival readiness without confusing the departing
-   and arriving stay.
+1. Bind the read-only readiness evidence to proposal confirmation/apply with
+   fresh transactional revalidation; handle properties with no prior turnover
+   evidence through an explicitly defined operational flow.
 2. Add distinct runtime/proposal operations. Bind policy version, exact times,
    readiness evidence, final fee/tax/split, scope and consent to the proposal.
 3. Recheck policy and availability under concurrency control at confirm/apply;
