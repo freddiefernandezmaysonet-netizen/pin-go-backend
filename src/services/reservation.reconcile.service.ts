@@ -17,6 +17,7 @@ import {
   dispatchPendingCleaningConfirmationForReservation,
 } from "./cleaning-confirmation-dispatch.service";
 import { selectNextStaffForProperty } from "./staff-selection.service";
+import { guestAccessWindow } from "./reservation-guest-access-window";
 
 type ChangePlan = {
   reservationId: string;
@@ -210,7 +211,7 @@ const reservationDatesChanged =
       return false;
 
     if (a.role === NfcAssignmentRole.GUEST) {
-      return a.endsAt.getTime() !== desiredEnd.getTime();
+      return guestAccessWindow(a, reservation).changed;
     } else {
       if (reservationDatesChanged) {
         return true;
@@ -434,16 +435,9 @@ if (a.role === NfcAssignmentRole.CLEANING) {
   continue;
 }
 
-      const next = {
-  startsAt: a.startsAt,
-  endsAt: desiredEnd,
-};
+      const next = guestAccessWindow(a, reservation);
 
-      const changed =
-        a.startsAt.getTime() !== next.startsAt.getTime() ||
-        a.endsAt.getTime() !== next.endsAt.getTime();
-
-      if (!changed) continue;
+      if (!next.changed) continue;
 
       await prisma.nfcAssignment.update({
         where: { id: a.id },

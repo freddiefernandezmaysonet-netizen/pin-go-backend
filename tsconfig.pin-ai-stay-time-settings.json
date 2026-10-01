@@ -4,6 +4,7 @@
     "target": "es2022", "strict": true, "skipLibCheck": true, "types": ["node"]
   },
   "include": [
+    "src/services/reservation-guest-access-window.test.ts",
     "src/pin-ai/actions/stay-time-settings.ts",
     "src/pin-ai/runtime/stay-time-tool.ts",
     "src/pin-ai/runtime/stay-time-tool.test.ts",

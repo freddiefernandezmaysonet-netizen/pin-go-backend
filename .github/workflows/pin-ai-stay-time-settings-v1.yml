@@ -11,6 +11,8 @@ on:
       - "src/services/stay-time-quote*"
       - "src/services/stay-time-proposal*"
       - "src/services/stay-time-apply*"
+      - "src/services/reservation.reconcile.service.ts"
+      - "src/services/reservation-guest-access-window*"
       - "src/services/guest-reservation-modification-apply*"
       - "src/pin-ai/actions/action-proposal.service*"
       - "src/services/stay-time-hourly*"
@@ -49,6 +51,8 @@ jobs:
       - run: npm ci --ignore-scripts --no-audit --no-fund
       - run: npx prisma generate && npx prisma validate && npx prisma db push --skip-generate
       - run: npx tsc -p tsconfig.pin-ai-stay-time-settings.json --noEmit false --outDir /tmp/stay-time-settings-build
+      - name: Guest access boundaries and existing reconciliation contracts
+        run: node --import tsx --test src/services/reservation-guest-access-window.test.ts src/services/reservation-reconcile-cleaner-reconfirmation.contract.test.ts src/services/reservation-reconcile-cancellation.contract.test.ts
       - name: Policy, real HTTP authorization, migration SQL and database concurrency
         # Independent DB suites share tables; keep their fixture writes separate.
         # Explicit Promise.all concurrency scenarios inside each suite are retained.
