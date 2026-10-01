@@ -6,6 +6,7 @@ import {
 } from "../pin-ai/actions/action-proposal.service.js";
 import { StayTimePolicyError, type StayTimeOperation } from "../pin-ai/actions/stay-time-policy.js";
 import { prepareStayTimeQuote, prepareStayTimeQuoteInTransaction } from "./stay-time-quote.service.js";
+import { createStayTimePaymentDeadline, assertStayTimePaymentWindow } from "./stay-time-payment-window.js";
 
 type Options = { now?: Date; platformFeePercent: string };
 function reject(code: string): never { throw new StayTimePolicyError(code); }
@@ -113,12 +114,12 @@ export async function stageStayTimeModification(db: PrismaClient, input: {
           status: "HOST_APPROVAL_REQUIRED" }, select: { id: true } })) reject("RESERVATION_CHANGE_IN_PROGRESS");
         const pricing = fresh.terms.pricing;
         const paid = pricing.additionalChargeMinor > 0;
-        const operationalDeadline = new Date(fresh.terms.operation === "EARLY_CHECKIN"
-          ? fresh.terms.proposedCheckIn : fresh.terms.currentCheckOut);
-        const checkoutExpiresAt = paid ? new Date(Math.min(now.getTime() + 60 * 60_000,
-          operationalDeadline.getTime(), reservation.guestTokenExpiresAt?.getTime() ?? Infinity)) : null;
-        // Stripe Checkout requires >=30 minutes at session creation; leave room for setup.
-        if (checkoutExpiresAt && checkoutExpiresAt.getTime() <= now.getTime() + 31 * 60_000) reject("STAY_TIME_PAYMENT_WINDOW_TOO_SHORT");
+        const paymentScope = { operation: fresh.terms.operation, proposedCheckIn: new Date(fresh.terms.proposedCheckIn),
+          currentCheckOut: new Date(fresh.terms.currentCheckOut), guestTokenExpiresAt: reservation.guestTokenExpiresAt };
+        const checkoutExpiresAt = paid ? createStayTimePaymentDeadline({ ...paymentScope, stagedAt: now }) : null;
+        if (checkoutExpiresAt) assertStayTimePaymentWindow({ ...paymentScope,
+          quoteCreatedAt: new Date(String(terms.createdAt)), quoteExpiresAt: proposal.expiresAt,
+          confirmedAt: proposal.confirmedAt, stagedAt: now, checkoutExpiresAt, now, phase: "CHECKOUT_CREATION" });
         if (pricing.basePricingSnapshot.stayTimeAdjustments !== undefined &&
             !Array.isArray(pricing.basePricingSnapshot.stayTimeAdjustments)) reject("STAY_TIME_PRICING_SNAPSHOT_MISMATCH");
         const proposedPricing = { ...pricing.basePricingSnapshot, totalAmount: pricing.proposedTotalMinor / 100,
