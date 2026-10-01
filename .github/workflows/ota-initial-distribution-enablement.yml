@@ -112,9 +112,6 @@ jobs:
               'tsconfig.pin-ai-stay-time-policy.json',
               'tsconfig.pin-ai-stay-time-settings.json',
             }
-            import subprocess
-            if subprocess.run(['git', 'diff', '--quiet', 'origin/' + os.environ['GITHUB_BASE_REF'], 'HEAD', '--', 'src/domain/computeOperationalRisk.ts']).returncode == 0:
-              allowed.remove('src/domain/computeOperationalRisk.ts')
             if changed != allowed:
               raise SystemExit(f'PR #333 exact settings scope required: {sorted(changed ^ allowed)}')
             print('PR #333 exact settings scope verified; all retained OTA protections executed.')
