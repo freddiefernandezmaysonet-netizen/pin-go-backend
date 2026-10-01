@@ -42,6 +42,30 @@ does not hold availability, charge money, modify a reservation or authorize acce
 Payment/apply must perform another fresh validation and atomically reserve the
 interval before this is exposed as an executable guest flow.
 
+### Internal canonical modification handoff
+
+`stageStayTimeModification` authenticates the guest, locks reservation and proposal,
+requires confirmed unexpired consent, verifies the stored proposal fingerprint,
+and revalidates all quoted terms inside a serializable transaction. A deterministic
+per-proposal request key makes duplicate/concurrent handoffs return one record.
+The record preserves guests, amenities, nightly charges and cleaning fees while
+adding the stay-time service/tax breakdown and existing incremental fee split.
+
+Paid records start AWAITING_PAYMENT; zero-cost records start APPLYING. The paid
+window ends at the earliest of one hour, proposed early arrival/original checkout,
+or guest-token expiry, and requires over 31 minutes remaining for Stripe Checkout
+setup (provider minimum is 30 minutes). These records participate in existing
+reservation-modification interval holds. That hold alone does not reserve the
+additional cleaning buffer; a full turnover hold integration is still required.
+
+No Stripe session, payment, reservation date change, access update, or message is
+performed by this adapter. It is not exposed by a route/tool. Existing generic
+checkout/apply operation gates deliberately reject EARLY_CHECKIN/LATE_CHECKOUT
+until their validators and worker integration are implemented. In particular,
+APPLYING here is a staged state, not proof of an applied change. The remaining
+integration must handle holds/expiry and post-payment failures, revalidate before
+apply, and durably reconcile both access and cleaning even without cleaner NFC.
+
 - `pin-go-eligibility-checks.ts` currently treats a `CleaningConfirmation` with
   status `CONFIRMED` for the arriving reservation as early-arrival readiness.
   That is acceptance of a cleaning assignment, not proof of completed turnover.

@@ -4,7 +4,8 @@ import { Prisma, PrismaClient } from "@prisma/client";
 import { estimateStayTimeAdjustment, resolveStayTimeClock } from "./stay-time-estimate.service.js";
 import { defaultStayTimeSettings } from "../pin-ai/actions/stay-time-settings.js";
 import { prepareStayTimeQuote } from "./stay-time-quote.service.js";
-import { createStayTimeProposal, confirmStayTimeProposal } from "./stay-time-proposal.service.js";
+import { createStayTimeProposal, confirmStayTimeProposal, stageStayTimeModification } from "./stay-time-proposal.service.js";
+import { isConfirmedInStayExtension } from "../pin-ai/actions/in-stay-extension-confirmation.js";
 import { createPinAIActionProposal, confirmPinAIActionProposal } from "../pin-ai/actions/action-proposal.service.js";
 
 test("property-local clock resolution rejects DST gaps and folds", () => {
@@ -140,6 +141,67 @@ test("stay-time estimates use real scoped PostgreSQL evidence without writes", {
       assert.equal((await db.pinAIActionProposal.findUniqueOrThrow({ where: { id: created.proposal.id } })).status, "EXPIRED");
     } finally { await db.pinAIActionProposal.deleteMany({ where: { reservationId: stay.id } }); }
   });
+  await t.test("confirmed paid stay-time handoff persists one canonical modification without charging or changing dates", async () => {
+    const before = await db.reservation.findUniqueOrThrow({ where: { id: stay.id } });
+    const created = await createStayTimeProposal(db, proposalInput, proposalOptions);
+    const stageInput = { guestToken: stay.guestToken!, proposalId: created.proposal.id };
+    try {
+      await assert.rejects(stageStayTimeModification(db, stageInput, proposalOptions), /CONFIRMED_PROPOSAL_REQUIRED/);
+      await confirmStayTimeProposal(db, confirmInput(created), proposalOptions);
+      await assert.rejects(stageStayTimeModification(db, stageInput, { ...proposalOptions, platformFeePercent: "2" }), /QUOTE_CHANGED/);
+      await assert.rejects(stageStayTimeModification(db, { ...stageInput, guestToken: "wrong-guest-token-12345" }, proposalOptions), /RESERVATION_NOT_FOUND/);
+      const results = await Promise.all([1, 2].map(() => stageStayTimeModification(db, stageInput, proposalOptions)));
+      assert.deepEqual(results.map(r => r.idempotentReplay).sort(), [false, true]);
+      assert.equal(results[0]!.modification.id, results[1]!.modification.id);
+      const m = results[0]!.modification;
+      assert.equal(m.status, "AWAITING_PAYMENT");
+      assert.equal(m.financialAction, "ADDITIONAL_PAYMENT_REQUIRED");
+      assert.equal(m.additionalChargeAmount.toString(), "5");
+      assert.equal(m.additionalPlatformFeeAmount.toString(), "0.08");
+      assert.equal(m.additionalHostPayoutAmount.toString(), "4.92");
+      assert.equal(m.proposedTotalAmount.toString(), "155");
+      assert.deepEqual(m.currentPricing, before.pricingBreakdown);
+      const pricing = m.proposedPricing as Record<string, unknown>;
+      assert.equal(pricing.totalAmount, 155);
+      assert.equal(pricing.cleaningFee, 50);
+      assert.deepEqual(pricing.nightlyRates, (before.pricingBreakdown as Record<string, unknown>).nightlyRates);
+      assert.equal(m.checkoutExpiresAt?.toISOString(), "2026-10-01T13:00:00.000Z");
+      assert.equal(m.stripeCheckoutSessionId, null);
+      assert.equal(m.stripePaymentIntentId, null);
+      assert.equal(results[0]!.paymentReady, false);
+      assert.equal(results[0]!.actionExecuted, false);
+      assert.equal(await db.reservationModification.count({ where: { reservationId: stay.id } }), 1);
+      assert.deepEqual(await db.reservation.findUniqueOrThrow({ where: { id: stay.id } }), before);
+      await assert.rejects(estimate(), /RESERVATION_CHANGE_IN_PROGRESS/);
+      // Current generic checkout/apply's operation gate must reject until integration is complete.
+      assert.throws(() => isConfirmedInStayExtension({ modification: m, reservation: before, now }), /EXTENSION_CONFIRMED_PROPOSAL_REQUIRED/);
+      const replay = await stageStayTimeModification(db, stageInput, { ...proposalOptions, now: new Date(now.getTime() + 90_000) });
+      assert.equal(replay.modification.id, m.id);
+      assert.equal(replay.idempotentReplay, true);
+    } finally {
+      await db.reservationModification.deleteMany({ where: { reservationId: stay.id } });
+      await db.pinAIActionProposal.deleteMany({ where: { reservationId: stay.id } });
+    }
+  });
+  await t.test("expired consent, altered stored terms and insufficient payment time never create a modification", async () => {
+    const created = await createStayTimeProposal(db, proposalInput, proposalOptions);
+    try {
+      await confirmStayTimeProposal(db, confirmInput(created), proposalOptions);
+      const stageInput = { guestToken: stay.guestToken!, proposalId: created.proposal.id };
+      await assert.rejects(stageStayTimeModification(db, stageInput, { ...proposalOptions,
+        now: new Date(now.getTime() + 60_000) }), /QUOTE_EXPIRED/);
+      await db.pinAIActionProposal.update({ where: { id: created.proposal.id }, data: { consentText: "Changed consent" } });
+      await assert.rejects(stageStayTimeModification(db, stageInput, proposalOptions), /FINGERPRINT_MISMATCH/);
+      assert.equal(await db.reservationModification.count({ where: { reservationId: stay.id } }), 0);
+    } finally { await db.pinAIActionProposal.deleteMany({ where: { reservationId: stay.id } }); }
+    const shortWindow = { ...proposalOptions, now: new Date(stay.checkOut.getTime() - 30 * 60_000) };
+    const tooLate = await createStayTimeProposal(db, proposalInput, shortWindow);
+    try {
+      await confirmStayTimeProposal(db, confirmInput(tooLate), shortWindow);
+      await assert.rejects(stageStayTimeModification(db, { guestToken: stay.guestToken!, proposalId: tooLate.proposal.id }, shortWindow), /PAYMENT_WINDOW_TOO_SHORT/);
+      assert.equal(await db.reservationModification.count({ where: { reservationId: stay.id } }), 0);
+    } finally { await db.pinAIActionProposal.deleteMany({ where: { reservationId: stay.id } }); }
+  });
   await t.test("exact minute fee, offset plus cleaning window, estimate only, no mutation", async () => {
     const before = await db.reservation.findUniqueOrThrow({ where: { id: stay.id } });
     const result = await estimate();
@@ -194,8 +256,18 @@ test("stay-time estimates use real scoped PostgreSQL evidence without writes", {
         const consent = await confirmStayTimeProposal(db, confirmInput(earlyProposal), proposalOptions);
         assert.equal(consent.proposal.status, "CONFIRMED");
         assert.equal(consent.actionExecuted, false);
+        const staged = await stageStayTimeModification(db, { guestToken: stay.guestToken!, proposalId: earlyProposal.proposal.id }, proposalOptions);
+        assert.equal(staged.modification.status, "APPLYING");
+        assert.equal(staged.modification.financialAction, "NO_PAYMENT_REQUIRED");
+        assert.equal(staged.modification.additionalChargeAmount.toString(), "0");
+        assert.equal(staged.modification.checkoutExpiresAt, null);
+        assert.equal(staged.modification.proposedCheckIn.toISOString(), "2026-10-01T16:00:00.000Z");
+        assert.equal(staged.modification.proposedCheckOut.toISOString(), stay.checkOut.toISOString());
         assert.equal((await db.reservation.findUniqueOrThrow({ where: { id: stay.id } })).checkIn.toISOString(), stay.checkIn.toISOString());
-      } finally { await db.pinAIActionProposal.deleteMany({ where: { reservationId: stay.id } }); }
+      } finally {
+        await db.reservationModification.deleteMany({ where: { reservationId: stay.id } });
+        await db.pinAIActionProposal.deleteMany({ where: { reservationId: stay.id } });
+      }
       for (const patch of [
         { completionConfirmedAt: null }, { cancelledAt: completed }, { supersededAt: completed },
         { completionConfirmedAt: new Date("2026-10-01T12:01Z") },
