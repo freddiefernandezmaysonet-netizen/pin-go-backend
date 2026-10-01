@@ -43,7 +43,8 @@ OTA change through the Direct Booking payment engine.
 fresh canonical evidence, validates local-day limits and the requested direction,
 checks coverage of reservations/blocks/payment holds, and produces a fee
 subtotal. It never grants authorization, creates a proposal, charges, changes a
-reservation, modifies access, or sends a message. It is not mounted into runtime.
+reservation, modifies access, or sends a message. Runtime uses it only through
+the read-only estimator described below.
 
 Early arrival requires a canonical `READY` decision tied to the exact arriving
 reservation and scheduled arrival instant. The readiness adapter is not built in
@@ -97,16 +98,24 @@ minute-prorated fee subtotal, snapshot versions, a 60-second expiry and explicit
 `ESTIMATE_ONLY`/no-hold/no-execution flags. It does not create a quote or call a
 provider. Availability still needs transactional revalidation at confirm/apply.
 
-This adapter is not mounted into the guest runtime yet. Early arrival deliberately
+The read-tool executor now routes `check_early_checkin` and `check_late_checkout`
+through this adapter, using only the gateway-authenticated request context for
+tenant/property/reservation scope and the server clock for time. Model arguments
+are restricted to `requestedLocalTime`. Missing transaction support and provider
+failures return unavailable; they never fall back to legacy eligibility. Estimates
+include ES/EN text stating that taxes are excluded and confirmation is not yet
+available. No Saved Agent update or deployment is part of this change.
+
+Early arrival deliberately
 fails with ARRIVAL_READINESS_REQUIRED: there is no persisted host-readiness
 authority to trust, and cleaner acceptance/completion cannot substitute for one.
-The existing runtime eligibility tools therefore remain unchanged. PostgreSQL
+The old early/late eligibility methods remain unused by the read-tool executor. PostgreSQL
 tests exercise the actual conflict predicates, including offset-only conflicts,
 exact interval boundaries, expired/processing/applying holds, same-stay changes,
 tenant scoping, disabled/invalid settings and repeated adjustments.
 
 1. Build persisted canonical arrival readiness without confusing the departing
-   and arriving stay; bind the new estimator to authenticated runtime context.
+   and arriving stay.
 2. Add distinct runtime/proposal operations. Bind policy version, exact times,
    readiness evidence, final fee/tax/split, scope and consent to the proposal.
 3. Recheck policy and availability under concurrency control at confirm/apply;
@@ -118,5 +127,5 @@ tenant scoping, disabled/invalid settings and repeated adjustments.
 
 The additive migration is versioned for isolated CI; no persistent Pin&Go database
 has been migrated. No production activation, live provider call or change to the
-existing eligibility tools is part of this work. The two audited live
-eligibility limitations therefore remain open until the adapter integration.
+deployed eligibility tools is part of this work. Production behavior remains
+unchanged until the migration and runtime integration are deployed when authorized.

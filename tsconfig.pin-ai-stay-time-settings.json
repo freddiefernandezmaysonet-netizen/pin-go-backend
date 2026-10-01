@@ -5,6 +5,8 @@
   },
   "include": [
     "src/pin-ai/actions/stay-time-settings.ts",
+    "src/pin-ai/runtime/stay-time-tool.ts",
+    "src/pin-ai/runtime/stay-time-tool.test.ts",
     "src/services/property-stay-time-settings.service.ts",
     "src/services/property-stay-time-settings.db.test.ts",
     "src/services/stay-time-estimate.service.ts",
