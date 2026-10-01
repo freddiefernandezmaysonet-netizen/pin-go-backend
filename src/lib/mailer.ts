@@ -498,6 +498,7 @@ type SendManualReservationGuestCancellationEmailInput = {
 };
 
 type SendDirectBookingGuestCancellationEmailInput = {
+  idempotencyKey?: string;
   to: string;
   replyTo?: string | null;
   reservationNumber: string;
@@ -521,6 +522,7 @@ type SendDirectBookingGuestCancellationEmailInput = {
 };
 
 type SendDirectBookingHostCancellationNotificationInput = {
+  idempotencyKey?: string;
   to: string;
   reservationNumber: string;
   hostName?: string | null;
@@ -1980,10 +1982,10 @@ export async function sendDirectBookingGuestCancellationEmail(
         </p>
       </div>
     `,
-  });
+  }, input.idempotencyKey ? { idempotencyKey: input.idempotencyKey } : undefined);
 
   if (error) {
-    throw new Error(`Resend guest cancellation email failed: ${error.message}`);
+    throw Object.assign(new Error("Resend guest cancellation email failed"), { statusCode: (error as any).statusCode, providerCode: error.name });
   }
 
   console.log("✅ DIRECT BOOKING GUEST CANCELLATION EMAIL SENT TO:", to);
@@ -2112,10 +2114,10 @@ export async function sendDirectBookingHostCancellationNotification(
         </p>
       </div>
     `,
-  });
+  }, input.idempotencyKey ? { idempotencyKey: input.idempotencyKey } : undefined);
 
   if (error) {
-    throw new Error(`Resend host cancellation email failed: ${error.message}`);
+    throw Object.assign(new Error("Resend host cancellation email failed"), { statusCode: (error as any).statusCode, providerCode: error.name });
   }
 
   console.log("✅ DIRECT BOOKING HOST CANCELLATION EMAIL SENT TO:", to);
@@ -2623,7 +2625,7 @@ export async function sendCleaningHostAttentionEmail(input: {
         <p><a href="${escapeHtml(safeDashboardUrl)}">Review in Pin&amp;Go / Revisar en Pin&amp;Go</a></p>
       </div>`,
   }, { idempotencyKey: input.idempotencyKey });
-  if (error) throw new Error(`CLEANING_HOST_ATTENTION_EMAIL_REJECTED: ${error.name}`);
+  if (error) throw Object.assign(new Error(`CLEANING_HOST_ATTENTION_EMAIL_REJECTED: ${error.name}`), { statusCode: (error as any).statusCode, providerCode: error.name });
   if (!data?.id) throw new Error("CLEANING_HOST_ATTENTION_EMAIL_ACK_MISSING");
   return { ok: true, mode: "resend" as const, providerMessageId: data.id, recipients };
 }

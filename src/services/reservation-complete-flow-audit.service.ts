@@ -1800,8 +1800,6 @@ addCheck(checks, {
 
     issueCode: cleaningConfirmationIssue?.issueCode ?? null,
     issueTitle: cleaningConfirmationIssue?.issueTitle ?? null,
-    issueCode: cleaningConfirmationIssue?.issueCode ?? null,
-    issueTitle: cleaningConfirmationIssue?.issueTitle ?? null,
     issue: cleaningConfirmationIssue?.issue ?? null,
     operationalImpact:
       cleaningConfirmationIssue?.operationalImpact ?? null,

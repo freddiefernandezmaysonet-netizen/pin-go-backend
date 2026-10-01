@@ -29,6 +29,8 @@ import { reconcileDamageCaseMissionControl } from "../services/damage-case-missi
 import { isDamageCaseAfterCheckout } from "../services/damage-case-checkout.policy.js";
 import { processGuestIncidentNotices } from "../pin-ai/guest/guest-incident-notification.service.js";
 import { retryGuestContactHostNotices } from "../services/ota-guest-contact-notice-retry.service";
+import { processOperationalEmailOutbox } from "../services/durable-operational-email.service.js";
+import { processCleaningHostAttentionNotices } from "../services/cleaning-followup-host-delivery.service.js";
 
 const WORKER_NAME = "message.retry.worker";
 const POLL_MS = Number(process.env.MESSAGE_RETRY_POLL_MS ?? 30000);
@@ -1602,6 +1604,12 @@ async function tick() {
   tickRunning = true;
 
   try {
+    try {
+      await processOperationalEmailOutbox(prisma, BATCH_SIZE);
+      await processCleaningHostAttentionNotices(prisma, BATCH_SIZE);
+    } catch (e) {
+      errLog("Operational email recovery failed; pending notices retained", { err: toErrString(e) });
+    }
     try {
       await processRetries();
     } catch (e) {

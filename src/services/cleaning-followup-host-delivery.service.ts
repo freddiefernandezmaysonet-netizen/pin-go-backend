@@ -1,5 +1,5 @@
 import type { PrismaClient } from "@prisma/client";
-import { sendCleaningHostAttentionEmail } from "../lib/mailer.js";
+import { deliverOperationalEmail, enqueueOperationalEmail, EMAIL_REPLAY_WINDOW_MS } from "./durable-operational-email.service.js";
 import { resolveCleaningHostAttentionRecipients } from "./cleaning-followup-host-recipient.service.js";
 
 function dashboardOrigin() {
@@ -17,9 +17,13 @@ export async function deliverCleaningHostAttentionNotice(
   cleaningWorkId: string,
 ) {
   const notice = await prisma.cleaningHostAttentionNotice.findUnique({ where: { cleaningWorkId } });
-  if (!notice || notice.status !== "QUEUED") return { delivered: false, reason: "not_queued" };
+  if (!notice || !["QUEUED", "FAILED"].includes(notice.status)) return { delivered: false, reason: "not_queued" };
   const work = await prisma.cleaningWork.findUnique({ where: { id: cleaningWorkId } });
-  if (!work || work.cancelledAt || work.supersededAt || work.completionConfirmedAt) return { delivered: false, reason: "work_closed" };
+  if (!work || work.cancelledAt || work.supersededAt || work.completionConfirmedAt) {
+    await prisma.cleaningHostAttentionNotice.updateMany({ where: { id: notice.id, status: { in: ["QUEUED", "FAILED"] } },
+      data: { status: "OBSOLETE", lastError: "CLEANING_WORK_CLOSED" } });
+    return { delivered: false, reason: "work_closed" };
+  }
   const [property, staff, reservation] = await Promise.all([
     prisma.property.findUnique({ where: { id: work.propertyId }, select: { name: true, organizationId: true } }),
     prisma.staffMember.findUnique({ where: { id: work.staffMemberId }, select: { fullName: true } }),
@@ -30,23 +34,45 @@ export async function deliverCleaningHostAttentionNotice(
   const recipients = await resolveCleaningHostAttentionRecipients(prisma, property.organizationId);
   if (!recipients.length) return { delivered: false, reason: "recipient_missing" };
   try {
-    const sent = await sendCleaningHostAttentionEmail({
-      to: recipients,
-      propertyName: property.name,
-      cleanerName: staff?.fullName?.trim() || "Cleaner",
-      reservationNumber: reservation?.reservationNumber ?? null,
-      dashboardUrl: `${origin}/properties/${encodeURIComponent(work.propertyId)}/calendar`,
-      idempotencyKey: `cleaning-host-attention-${notice.id}`,
+    const message = await enqueueOperationalEmail(prisma, {
+      organizationId: property.organizationId, propertyId: work.propertyId, reservationId: work.reservationId,
+      purpose: "cleaning", eventKey: notice.id, cleaningWorkId,
+      eventAt: notice.createdAt, idempotencyKey: `cleaning-host-attention-${notice.id}`,
+      mail: {
+        to: recipients,
+        propertyName: property.name,
+        cleanerName: staff?.fullName?.trim() || "Cleaner",
+        reservationNumber: reservation?.reservationNumber ?? null,
+        dashboardUrl: `${origin}/properties/${encodeURIComponent(work.propertyId)}/calendar`,
+        idempotencyKey: `cleaning-host-attention-${notice.id}`,
+      },
     });
-    await prisma.cleaningHostAttentionNotice.update({ where: { id: notice.id }, data: {
-      status: "SENT", recipientsJson: recipients, providerMessageId: sent.providerMessageId, sentAt: new Date(), lastError: null,
-    }});
-    return { delivered: true, reason: "sent" };
+    const result = await deliverOperationalEmail(prisma, message);
+    if (result === "FAILED_FINAL" || result === "OBSOLETE") {
+      await prisma.cleaningHostAttentionNotice.updateMany({
+        where: { id: notice.id, status: { in: ["QUEUED", "FAILED"] } },
+        data: { status: result, lastError: result === "OBSOLETE" ? "NOTICE_NO_LONGER_ELIGIBLE" : "NOTICE_RECOVERY_EXHAUSTED" },
+      });
+    }
+    return { delivered: result === "SENT", reason: result };
   } catch (error) {
-    const message = error instanceof Error ? error.message : String(error);
-    await prisma.cleaningHostAttentionNotice.update({ where: { id: notice.id }, data: {
-      status: "FAILED", recipientsJson: recipients, lastError: message.slice(0, 8000),
+    await prisma.cleaningHostAttentionNotice.updateMany({ where: { id: notice.id, status: { in: ["QUEUED", "FAILED"] } }, data: {
+      status: "FAILED", recipientsJson: recipients, lastError: "CLEANING_NOTICE_PERSISTENCE_OR_DELIVERY_FAILED",
     }});
     return { delivered: false, reason: "provider_failed" };
+  }
+}
+
+let cursor: string | undefined;
+export async function processCleaningHostAttentionNotices(prisma: PrismaClient, batchSize = 20) {
+  // Recover recent notices only, within the same provider idempotency window.
+  const notices = await prisma.cleaningHostAttentionNotice.findMany({ where: {
+    status: { in: ["QUEUED", "FAILED"] }, createdAt: { gt: new Date(Date.now() - EMAIL_REPLAY_WINDOW_MS) },
+    ...(cursor ? { id: { gt: cursor } } : {}),
+  }, orderBy: { id: "asc" }, take: batchSize });
+  cursor = notices.length === batchSize ? notices.at(-1)!.id : undefined;
+  for (const notice of notices) {
+    try { await deliverCleaningHostAttentionNotice(prisma, notice.cleaningWorkId); }
+    catch { console.error("[CLEANING_HOST_NOTICE] pending notice retained", { noticeId: notice.id }); }
   }
 }
