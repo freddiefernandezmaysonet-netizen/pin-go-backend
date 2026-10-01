@@ -51,7 +51,11 @@ async function locked<T>(deps: StayTimePaymentFlowDependencies, scope: Scope, wo
     } catch (error) {
       const conflict = error instanceof Prisma.PrismaClientKnownRequestError &&
         (error.code === "P2034" || (error.code === "P2010" && ["40001", "40P01"].includes(String(error.meta?.code))));
-      if (!conflict || attempt >= 2) throw error;
+      if (!conflict || attempt >= 4) throw error;
+      // A competing notification can commit PROCESSING, APPLYING and APPLIED
+      // separately. Immediate retries can exhaust before that short chain ends.
+      // Retry only database work, with bounded backoff; never replay provider I/O.
+      await new Promise(resolve => setTimeout(resolve, 20 * 2 ** attempt));
     }
   }
 }

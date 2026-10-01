@@ -175,8 +175,9 @@ test("internal Checkout creation and signed events preserve one incremental paym
           if (scenario === "webhook-repairs-lost-response") {
             paid(); assert.equal((await webhook()).outcome, "APPLIED"); assert.equal(creates, 1); return;
           }
-          // Changed presentation must not alter a provider idempotency retry.
-          await db.property.update({ where: { id: property.id }, data: { name: "Renamed during retry" } });
+          // Deployment URL changes must not alter a provider idempotency retry.
+          // Property edits intentionally invalidate the confirmed policy version.
+          deps.appUrl = "https://new-pingo.example.invalid";
         }
         if (scenario === "concurrent-create") {
           const results = await Promise.all([run(), run()]);

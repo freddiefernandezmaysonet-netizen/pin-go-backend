@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import type Stripe from "stripe";
-import { PrismaClient } from "@prisma/client";
+import { Prisma, PrismaClient } from "@prisma/client";
 import { defaultStayTimeSettings } from "../pin-ai/actions/stay-time-settings.js";
 import { createStayTimeProposal, confirmStayTimeProposal, stageStayTimeModification } from "./stay-time-proposal.service.js";
 import { syntheticStayTimePaymentEvidence } from "./stay-time-payment-evidence.fixture.js";
@@ -16,7 +16,7 @@ test("paid stay-time processing applies once or durably recovers only the increm
   assert.equal(parsed.pathname, "/pingo_stay_time_test");
   const db = new PrismaClient({ datasources: { db: { url } } });
   t.after(() => db.$disconnect());
-  for (const scenario of ["late", "early", "stripe-adapter-apply", "stripe-adapter-refund", "concurrent-apply", "revoked-cleaning", "blocked-turnover", "price-changed", "expired", "expired-status",
+  for (const scenario of ["late", "early", "stripe-adapter-apply", "stripe-adapter-refund", "concurrent-apply", "serialization-burst", "serialization-exhausted", "revoked-cleaning", "blocked-turnover", "price-changed", "expired", "expired-status",
     "refund-outage", "refund-response-lost", "refund-pending", "refund-wrong-receipt", "concurrent-refund",
     "payment-outage", "wrong-payment", "partially-refunded", "wrong-account", "reconcile-outage", "cancelled-without-recovery"] as const) {
     await t.test(scenario, async () => {
@@ -150,7 +150,30 @@ test("paid stay-time processing applies once or durably recovers only the increm
         }
         const scope = { modificationId: id, checkoutSessionId: `cs_${id}`,
           connectedAccountId: scenario === "wrong-account" ? "acct_wrong" : reservation.stripeConnectedAccountId! };
+        let injectedConflicts = 0;
+        if (scenario.startsWith("serialization-")) {
+          const limit = scenario === "serialization-burst" ? 4 : 10;
+          deps.client = new Proxy(db, { get(target, key) {
+            if (key !== "$transaction") return Reflect.get(target, key);
+            return (async (work: (tx: Prisma.TransactionClient) => Promise<unknown>, options: object) => db.$transaction(async tx => {
+              if (injectedConflicts < limit) {
+                injectedConflicts++;
+                throw new Prisma.PrismaClientKnownRequestError("Synthetic first-lock serialization conflict", {
+                  code: "P2010", clientVersion: Prisma.prismaVersion.client, meta: { code: "40001" },
+                });
+              }
+              return work(tx);
+            }, options)) as typeof db.$transaction;
+          } });
+        }
         const run = () => processStayTimePayment(scope, deps);
+        if (scenario === "serialization-exhausted") {
+          await assert.rejects(run, /Synthetic first-lock serialization conflict/);
+          assert.equal(injectedConflicts, 5); assert.equal(retrieveCalls, 0); assert.equal(refundCalls, 0); assert.equal(reconcileCalls, 0);
+          assert.deepEqual(await db.reservation.findUniqueOrThrow({ where: { id: reservation.id } }), before);
+          assert.equal((await db.reservationModification.findUniqueOrThrow({ where: { id } })).status, "AWAITING_PAYMENT");
+          return;
+        }
         const rejected = ["wrong-payment", "partially-refunded", "wrong-account", "cancelled-without-recovery"].includes(scenario);
         if (rejected) {
           await assert.rejects(run, (error: unknown) => ["STAY_TIME_PAYMENT_EVIDENCE_MISMATCH", "STAY_TIME_PAYMENT_SCOPE_MISMATCH", "STAY_TIME_RECOVERY_CONFLICT"].includes((error as { code: string }).code));
@@ -171,6 +194,7 @@ test("paid stay-time processing applies once or durably recovers only the increm
         }
         const results = scenario.startsWith("concurrent-") ? await Promise.all([run(), run()]) : [await run()];
         for (const result of results) assert.equal(result.outcome, needsRefund ? "REFUNDED" : "APPLIED");
+        if (scenario === "serialization-burst") { assert.equal(injectedConflicts, 4); assert.equal(retrieveCalls, 1); }
         const after = await db.reservation.findUniqueOrThrow({ where: { id: reservation.id } });
         const final = await db.reservationModification.findUniqueOrThrow({ where: { id } });
         if (needsRefund) {

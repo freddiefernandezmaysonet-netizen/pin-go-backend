@@ -52,7 +52,8 @@ async function locked<T>(deps: Pick<StayTimeCheckoutDependencies, "client">, id:
     } catch (error) {
       const conflict = error instanceof Prisma.PrismaClientKnownRequestError &&
         (error.code === "P2034" || (error.code === "P2010" && ["40001", "40P01"].includes(String(error.meta?.code))));
-      if (!conflict || attempt >= 2) throw error;
+      if (!conflict || attempt >= 4) throw error;
+      await new Promise(resolve => setTimeout(resolve, 20 * 2 ** attempt));
     }
   }
 }
