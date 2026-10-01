@@ -1,3 +1,4 @@
+import { isChannexGuestRegistrationExempt } from "./channex-guest-registration.policy";
 import { PrismaClient } from "@prisma/client";
 import { sendSms } from "../integrations/twilio/twilio.client";
 import { buildGuestLink } from "./guestToken";
@@ -37,6 +38,8 @@ export async function sendGuestAccessLinkSms(
     where: { id: reservationId },
     select: {
       id: true,
+      externalProvider: true,
+      externalId: true,
       guestName: true,
       guestPhone: true,
       preferredLanguage: true,
@@ -84,7 +87,7 @@ export async function sendGuestAccessLinkSms(
       ? r.verificationStatus === "COMPLETED"
       : r.verificationStatus === "NOT_REQUIRED";
 
-  if (!identityRequirementSatisfied) {
+  if (!isChannexGuestRegistrationExempt(r) && !identityRequirementSatisfied) {
     return {
       ok: false,
       skipped: true,

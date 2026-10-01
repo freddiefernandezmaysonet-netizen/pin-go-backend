@@ -1,3 +1,4 @@
+import { isChannexGuestRegistrationExempt } from "./channex-guest-registration.policy";
 import { createHash } from "node:crypto";
 
 import {
@@ -544,6 +545,8 @@ export function evaluateCanonicalGuestJourney(
       .getTime() >
       now.getTime();
 
+  const registrationExempt = isChannexGuestRegistrationExempt(evidence.reservation);
+
   const agreementSnapshotPresent =
     evidence.requirements
       .agreementSnapshotPresent;
@@ -568,12 +571,12 @@ export function evaluateCanonicalGuestJourney(
     evidence.requirements
       .cancellationSnapshotPresent;
 
-  const legalRequirementsSatisfied =
+  const legalRequirementsSatisfied = registrationExempt || (
     agreementSnapshotPresent &&
     agreementAcceptancePresent &&
     agreementSigned &&
     propertyRulesAccepted &&
-    cancellationSnapshotPresent;
+    cancellationSnapshotPresent);
 
   const requiresIdentityVerification =
     evidence.requirements
@@ -594,14 +597,14 @@ export function evaluateCanonicalGuestJourney(
       "NOT_REQUIRED" &&
     agreementSigned;
 
-  const identityRequirementSatisfied =
+  const identityRequirementSatisfied = registrationExempt || (
     requiresIdentityVerification ===
       true
       ? identityCompleted
       : requiresIdentityVerification ===
           false
         ? identityNotRequired
-        : false;
+        : false);
 
   const verificationSatisfied =
     legalRequirementsSatisfied &&
@@ -737,186 +740,204 @@ export function evaluateCanonicalGuestJourney(
     }
   }
 
-  if (
-    agreementSnapshotPresent
-  ) {
-    satisfiedRequirements.push(
-      "AGREEMENT_SNAPSHOT_PRESENT"
-    );
-  } else {
-    missingRequirements.push(
-      "AGREEMENT_SNAPSHOT_PRESENT"
-    );
-
-    addBlocker({
-      code:
-        "AGREEMENT_SNAPSHOT_MISSING",
-      reason:
-        "The reservation does not contain its immutable guest agreement snapshot.",
-      recoverableByPinGo: true,
-      coordinationIntentType:
-        "REQUEST_REQUIREMENTS_SNAPSHOT",
-    });
-  }
-
-  if (
-    cancellationSnapshotPresent
-  ) {
-    satisfiedRequirements.push(
-      "CANCELLATION_SNAPSHOT_PRESENT"
-    );
-  } else {
-    missingRequirements.push(
-      "CANCELLATION_SNAPSHOT_PRESENT"
-    );
-
-    addBlocker({
-      code:
-        "CANCELLATION_SNAPSHOT_MISSING",
-      reason:
-        "The reservation does not contain its cancellation policy snapshot.",
-      recoverableByPinGo: true,
-      coordinationIntentType:
-        "REQUEST_REQUIREMENTS_SNAPSHOT",
-    });
-  }
-
-  if (
-    !agreementSnapshotPresent ||
-    !cancellationSnapshotPresent
-  ) {
-    addIntent({
-      intentType:
-        "REQUEST_REQUIREMENTS_SNAPSHOT",
-      targetEngine:
-        "COMPLIANCE",
-      reasonCode:
-        "REQUIREMENTS_SNAPSHOT_INCOMPLETE",
-      expectedOutcomeCode:
-        "REQUIREMENTS_SNAPSHOTS_PRESENT",
-    });
-  }
-
-  if (
-    agreementAcceptancePresent &&
-    agreementSigned
-  ) {
-    satisfiedRequirements.push(
-      "AGREEMENT_ACCEPTED"
-    );
-  } else {
-    missingRequirements.push(
-      "AGREEMENT_ACCEPTED"
-    );
-
+  // Exempt channel reservations have no guest registration evidence to assert.
+  if (!registrationExempt) {
     if (
       agreementSnapshotPresent
     ) {
+      satisfiedRequirements.push(
+        "AGREEMENT_SNAPSHOT_PRESENT"
+      );
+    } else {
+      missingRequirements.push(
+        "AGREEMENT_SNAPSHOT_PRESENT"
+      );
+
       addBlocker({
         code:
-          "AGREEMENT_NOT_ACCEPTED",
+          "AGREEMENT_SNAPSHOT_MISSING",
         reason:
-          "The applicable guest agreement has not been fully accepted and signed.",
+          "The reservation does not contain its immutable guest agreement snapshot.",
         recoverableByPinGo: true,
         coordinationIntentType:
-          "REQUEST_GUEST_VERIFICATION",
+          "REQUEST_REQUIREMENTS_SNAPSHOT",
       });
     }
-  }
-
-  if (propertyRulesAccepted) {
-    satisfiedRequirements.push(
-      "PROPERTY_RULES_ACCEPTED"
-    );
-  } else {
-    missingRequirements.push(
-      "PROPERTY_RULES_ACCEPTED"
-    );
 
     if (
-      agreementSnapshotPresent
+      cancellationSnapshotPresent
     ) {
+      satisfiedRequirements.push(
+        "CANCELLATION_SNAPSHOT_PRESENT"
+      );
+    } else {
+      missingRequirements.push(
+        "CANCELLATION_SNAPSHOT_PRESENT"
+      );
+
       addBlocker({
         code:
-          "PROPERTY_RULES_NOT_ACCEPTED",
+          "CANCELLATION_SNAPSHOT_MISSING",
         reason:
-          "The guest has not completed the persisted property-rules acceptance.",
+          "The reservation does not contain its cancellation policy snapshot.",
         recoverableByPinGo: true,
         coordinationIntentType:
-          "REQUEST_GUEST_VERIFICATION",
+          "REQUEST_REQUIREMENTS_SNAPSHOT",
       });
     }
-  }
-
-  if (
-    identityRequirementSatisfied
-  ) {
-    satisfiedRequirements.push(
-      "IDENTITY_REQUIREMENT_SATISFIED"
-    );
-  } else {
-    missingRequirements.push(
-      "IDENTITY_REQUIREMENT_SATISFIED"
-    );
 
     if (
-      requiresIdentityVerification ===
-      true
+      !agreementSnapshotPresent ||
+      !cancellationSnapshotPresent
     ) {
-      addBlocker({
-        code:
-          evidence.verification
-            .status ===
-          "REQUIRES_INPUT"
-            ? "IDENTITY_REQUIRES_INPUT"
-            : "IDENTITY_PENDING",
-        reason:
-          evidence.verification
-            .status ===
-          "REQUIRES_INPUT"
-            ? "Identity verification requires additional guest input."
-            : "Required identity verification has not produced completed evidence.",
-        recoverableByPinGo: true,
-        coordinationIntentType:
-          "REQUEST_GUEST_VERIFICATION",
+      addIntent({
+        intentType:
+          "REQUEST_REQUIREMENTS_SNAPSHOT",
+        targetEngine:
+          "COMPLIANCE",
+        reasonCode:
+          "REQUIREMENTS_SNAPSHOT_INCOMPLETE",
+        expectedOutcomeCode:
+          "REQUIREMENTS_SNAPSHOTS_PRESENT",
       });
     }
-  }
 
-  if (
-    reservationActive &&
-    stayNotEnded &&
-    paymentSatisfied &&
-    guestTokenValid &&
-    agreementSnapshotPresent &&
-    cancellationSnapshotPresent &&
-    !verificationSatisfied
-  ) {
-    addIntent({
-      intentType:
-        "REQUEST_GUEST_VERIFICATION",
-      targetEngine:
-        "COMPLIANCE",
-      reasonCode:
-        "GUEST_REQUIREMENTS_INCOMPLETE",
-      expectedOutcomeCode:
-        "GUEST_VERIFICATION_REQUIREMENTS_SATISFIED",
-    });
-  }
-
-  if (
-    !verificationSatisfied &&
-    reservationActive &&
-    stayNotEnded
-  ) {
     if (
-      evidence.reservation
-        .guestTokenPresent
+      agreementAcceptancePresent &&
+      agreementSigned
     ) {
-      if (guestTokenValid) {
-        satisfiedRequirements.push(
-          "GUEST_TOKEN_VALID"
-        );
+      satisfiedRequirements.push(
+        "AGREEMENT_ACCEPTED"
+      );
+    } else {
+      missingRequirements.push(
+        "AGREEMENT_ACCEPTED"
+      );
+
+      if (
+        agreementSnapshotPresent
+      ) {
+        addBlocker({
+          code:
+            "AGREEMENT_NOT_ACCEPTED",
+          reason:
+            "The applicable guest agreement has not been fully accepted and signed.",
+          recoverableByPinGo: true,
+          coordinationIntentType:
+            "REQUEST_GUEST_VERIFICATION",
+        });
+      }
+    }
+
+    if (propertyRulesAccepted) {
+      satisfiedRequirements.push(
+        "PROPERTY_RULES_ACCEPTED"
+      );
+    } else {
+      missingRequirements.push(
+        "PROPERTY_RULES_ACCEPTED"
+      );
+
+      if (
+        agreementSnapshotPresent
+      ) {
+        addBlocker({
+          code:
+            "PROPERTY_RULES_NOT_ACCEPTED",
+          reason:
+            "The guest has not completed the persisted property-rules acceptance.",
+          recoverableByPinGo: true,
+          coordinationIntentType:
+            "REQUEST_GUEST_VERIFICATION",
+        });
+      }
+    }
+
+    if (
+      identityRequirementSatisfied
+    ) {
+      satisfiedRequirements.push(
+        "IDENTITY_REQUIREMENT_SATISFIED"
+      );
+    } else {
+      missingRequirements.push(
+        "IDENTITY_REQUIREMENT_SATISFIED"
+      );
+
+      if (
+        requiresIdentityVerification ===
+        true
+      ) {
+        addBlocker({
+          code:
+            evidence.verification
+              .status ===
+            "REQUIRES_INPUT"
+              ? "IDENTITY_REQUIRES_INPUT"
+              : "IDENTITY_PENDING",
+          reason:
+            evidence.verification
+              .status ===
+            "REQUIRES_INPUT"
+              ? "Identity verification requires additional guest input."
+              : "Required identity verification has not produced completed evidence.",
+          recoverableByPinGo: true,
+          coordinationIntentType:
+            "REQUEST_GUEST_VERIFICATION",
+        });
+      }
+    }
+
+    if (
+      reservationActive &&
+      stayNotEnded &&
+      paymentSatisfied &&
+      guestTokenValid &&
+      agreementSnapshotPresent &&
+      cancellationSnapshotPresent &&
+      !verificationSatisfied
+    ) {
+      addIntent({
+        intentType:
+          "REQUEST_GUEST_VERIFICATION",
+        targetEngine:
+          "COMPLIANCE",
+        reasonCode:
+          "GUEST_REQUIREMENTS_INCOMPLETE",
+        expectedOutcomeCode:
+          "GUEST_VERIFICATION_REQUIREMENTS_SATISFIED",
+      });
+    }
+
+    if (
+      !verificationSatisfied &&
+      reservationActive &&
+      stayNotEnded
+    ) {
+      if (
+        evidence.reservation
+          .guestTokenPresent
+      ) {
+        if (guestTokenValid) {
+          satisfiedRequirements.push(
+            "GUEST_TOKEN_VALID"
+          );
+        } else {
+          missingRequirements.push(
+            "GUEST_TOKEN_VALID"
+          );
+
+          addBlocker({
+            code:
+              "GUEST_TOKEN_EXPIRED",
+            reason:
+              "The persisted guest verification token is expired or has no valid expiration.",
+            recoverableByPinGo:
+              false,
+            coordinationIntentType:
+              null,
+          });
+        }
       } else {
         missingRequirements.push(
           "GUEST_TOKEN_VALID"
@@ -924,43 +945,28 @@ export function evaluateCanonicalGuestJourney(
 
         addBlocker({
           code:
-            "GUEST_TOKEN_EXPIRED",
+            "GUEST_TOKEN_MISSING",
           reason:
-            "The persisted guest verification token is expired or has no valid expiration.",
+            "The reservation does not contain a guest verification token.",
           recoverableByPinGo:
             false,
           coordinationIntentType:
             null,
         });
       }
+    }
+
+    if (
+      verificationSatisfied
+    ) {
+      satisfiedRequirements.push(
+        "GUEST_VERIFICATION_COMPLETED"
+      );
     } else {
       missingRequirements.push(
-        "GUEST_TOKEN_VALID"
+        "GUEST_VERIFICATION_COMPLETED"
       );
-
-      addBlocker({
-        code:
-          "GUEST_TOKEN_MISSING",
-        reason:
-          "The reservation does not contain a guest verification token.",
-        recoverableByPinGo:
-          false,
-        coordinationIntentType:
-          null,
-      });
     }
-  }
-
-  if (
-    verificationSatisfied
-  ) {
-    satisfiedRequirements.push(
-      "GUEST_VERIFICATION_COMPLETED"
-    );
-  } else {
-    missingRequirements.push(
-      "GUEST_VERIFICATION_COMPLETED"
-    );
   }
 
   if (
@@ -983,7 +989,9 @@ export function evaluateCanonicalGuestJourney(
       code:
         "ACCESS_NOT_ELIGIBLE",
       reason:
-        "Guest verification is complete, but Access eligibility is not yet persistently confirmed.",
+        registrationExempt
+          ? "Channex registration is exempt; Access eligibility is not yet persistently confirmed."
+          : "Guest verification is complete, but Access eligibility is not yet persistently confirmed.",
       recoverableByPinGo: true,
       coordinationIntentType:
         "REQUEST_ACCESS_EVALUATION",
@@ -1080,6 +1088,7 @@ export function evaluateCanonicalGuestJourney(
   }
 
   if (
+    !registrationExempt &&
     evidence.verification
       .status ===
       "COMPLETED" &&
@@ -1098,6 +1107,7 @@ export function evaluateCanonicalGuestJourney(
   }
 
   if (
+    !registrationExempt &&
     evidence.verification
       .status ===
       "NOT_REQUIRED" &&
@@ -1118,6 +1128,7 @@ export function evaluateCanonicalGuestJourney(
   }
 
   if (
+    !registrationExempt &&
     typeof requiresIdentityVerification ===
       "boolean" &&
     evidence.requirements
@@ -1311,7 +1322,7 @@ export function evaluateCanonicalGuestJourney(
       GuestJourneyState
         .VERIFICATION_COMPLETED;
   } else if (
-    verificationReady
+    verificationReady && !registrationExempt
   ) {
     expectedState =
       GuestJourneyState

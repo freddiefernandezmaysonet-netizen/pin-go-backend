@@ -1,3 +1,4 @@
+import { isChannexGuestRegistrationExempt } from "./channex-guest-registration.policy";
 import {
   GuestJourneyState,
   Prisma,
@@ -156,7 +157,9 @@ function maxDate(
 function verificationEffectiveAt(
   evidence:
     GuestJourneyEvidenceSnapshot
-): Date {
+): Date | null {
+  // Stage satisfied by channel exemption, not by a guest identity event.
+  if (isChannexGuestRegistrationExempt(evidence.reservation)) return null;
   if (
     evidence.verification.status ===
       "COMPLETED" &&

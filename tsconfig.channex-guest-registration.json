@@ -1,0 +1,43 @@
+{
+  "compilerOptions": {
+    "noEmit": true,
+    "module": "preserve",
+    "moduleResolution": "bundler",
+    "target": "esnext",
+    "strict": true,
+    "skipLibCheck": true,
+    "types": [
+      "node"
+    ]
+  },
+  "include": [
+    "src/routes/guest.routes.ts",
+    "src/services/channex-guest-registration.integration.test.ts",
+    "src/services/channex-guest-registration.policy.test.ts",
+    "src/services/channex-guest-registration.policy.ts",
+    "src/services/guest-access-readiness.service.test.ts",
+    "src/services/guest-access-readiness.service.ts",
+    "src/services/guest-agreement.service.ts",
+    "src/services/guest-identity-verification.service.ts",
+    "src/services/guest-journey-communications-delivery-adapter.service.test.ts",
+    "src/services/guest-journey-communications-delivery-adapter.service.ts",
+    "src/services/guest-journey-compliance-owner-adapter.service.test.ts",
+    "src/services/guest-journey-compliance-owner-adapter.service.ts",
+    "src/services/guest-journey-compliance-owner-runtime.service.ts",
+    "src/services/guest-journey-contract.ts",
+    "src/services/guest-journey-evaluator.test.ts",
+    "src/services/guest-journey-evaluator.ts",
+    "src/services/guest-journey-evidence.service.test.ts",
+    "src/services/guest-journey-evidence.service.ts",
+    "src/services/guest-journey-reconciler.service.test.ts",
+    "src/services/guest-journey-reconciler.service.ts",
+    "src/services/guest-journey.service.ts",
+    "src/services/guest-verification-flow.service.ts",
+    "src/services/guest-verification-reminder.service.ts",
+    "src/services/guestLinkSms.service.ts",
+    "src/services/preCheckinSms.service.ts",
+    "src/services/preCheckinSms.verification-policy.test.ts",
+    "src/workers/message.retry.worker.ts",
+    "src/workers/reservation.worker.ts"
+  ]
+}

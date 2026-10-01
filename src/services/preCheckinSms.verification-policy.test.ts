@@ -65,3 +65,9 @@ test("completed verification message contains no verification instruction", () =
   assert.doesNotMatch(body, /guest\/verify/i);
   assert.match(body, /Te esperamos\./);
 });
+
+test("Channex pre-checkin never asks for Direct Booking verification", () => {
+  assert.equal(shouldIncludePreCheckinVerification({ externalProvider: "CHANNEX", externalId: "ota-1",
+    guestToken: "token", verificationStatus: "PENDING", guestAgreementSnapshot: { requiresIdentityVerification: true },
+  }), false);
+});

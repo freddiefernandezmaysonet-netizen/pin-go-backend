@@ -1,3 +1,4 @@
+import { isChannexGuestRegistrationExempt } from "./channex-guest-registration.policy";
 import { PrismaClient } from "@prisma/client";
 import { sendSms } from "../integrations/twilio/twilio.client";
 import {
@@ -116,10 +117,13 @@ function buildGoogleMapsLink(input: {
 }
 
 export function shouldIncludePreCheckinVerification(input: {
+  externalProvider?: string | null;
+  externalId?: string | null;
   guestToken?: string | null;
   verificationStatus?: string | null;
   guestAgreementSnapshot?: unknown;
 }): boolean {
+  if (isChannexGuestRegistrationExempt(input)) return false;
   const guestAgreementSnapshot =
     input.guestAgreementSnapshot &&
     typeof input.guestAgreementSnapshot === "object" &&
@@ -233,6 +237,8 @@ export async function sendPreCheckinEmail(
       preferredLanguage: true,
       guestToken: true,
       guestAgreementSnapshot: true,
+      externalProvider: true,
+      externalId: true,
       verificationStatus: true,
       checkIn: true,
       property: {
@@ -272,6 +278,8 @@ export async function sendPreCheckinEmail(
     shouldIncludePreCheckinVerification({
       guestToken: r.guestToken,
       verificationStatus: r.verificationStatus,
+      externalProvider: r.externalProvider,
+      externalId: r.externalId,
       guestAgreementSnapshot:
         r.guestAgreementSnapshot,
     });
@@ -374,6 +382,8 @@ export async function sendPreCheckinSms(
         preferredLanguage: true,
         guestToken: true,
         guestAgreementSnapshot: true,
+        externalProvider: true,
+        externalId: true,
         verificationStatus: true,
         checkIn: true,
         property: {
@@ -402,6 +412,8 @@ export async function sendPreCheckinSms(
     const verificationNeeded = shouldIncludePreCheckinVerification({
       guestToken: r.guestToken,
       verificationStatus: r.verificationStatus,
+      externalProvider: r.externalProvider,
+      externalId: r.externalId,
       guestAgreementSnapshot: r.guestAgreementSnapshot,
     });
 

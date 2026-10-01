@@ -268,6 +268,14 @@ async function processGuestVerificationReminders(
       where: {
         status:
           ReservationStatus.ACTIVE,
+        // Imported Channex bookings do not consume the Direct Booking
+        // reminder batch, including old journeys still marked pending.
+        AND: [{ OR: [
+          { externalProvider: null },
+          { externalProvider: { not: "CHANNEX", mode: "insensitive" } },
+          { externalId: null },
+          { externalId: "" },
+        ] }],
         checkIn: {
           gte: reminderFrom,
           lte: reminderTo,

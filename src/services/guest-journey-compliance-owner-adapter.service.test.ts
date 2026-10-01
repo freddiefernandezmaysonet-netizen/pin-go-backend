@@ -192,3 +192,19 @@ test("E10 adapter rejects non-COMPLIANCE contracts", async () => {
     /COMPLIANCE_ADAPTER_CONTRACT_MISMATCH/
   );
 });
+
+for (const intentType of ["REQUEST_REQUIREMENTS_SNAPSHOT", "REQUEST_GUEST_VERIFICATION"] as const) {
+  test(`Channex stale ${intentType} closes without identity, signatures or writes`, async () => {
+    const prisma = fakePrisma({ ...reservation(), externalProvider: "CHANNEX", externalId: "ota-1" });
+    const result = await executeGuestJourneyComplianceOwnerAdapter(prisma, claim(intentType), {
+      now: new Date("2026-08-24T13:00:00.000Z"),
+      dependencies: {
+        ensureAgreementSnapshot: async () => { throw new Error("must not capture Direct Booking agreement"); },
+        buildCancellationSnapshot: async () => { throw new Error("must not capture Direct Booking policy"); },
+      },
+    });
+    assert.equal(result.completion.kind, "SUCCEEDED");
+    assert.equal(result.internalMutations, 0);
+    assert.deepEqual(prisma.updates, []);
+  });
+}

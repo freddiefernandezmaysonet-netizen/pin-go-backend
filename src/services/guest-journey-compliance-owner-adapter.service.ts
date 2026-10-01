@@ -1,3 +1,4 @@
+import { isChannexGuestRegistrationExempt } from "./channex-guest-registration.policy";
 import { createHash, randomBytes } from "node:crypto";
 
 import {
@@ -16,6 +17,8 @@ import type {
 
 const reservationSelect = {
   id: true,
+  externalProvider: true,
+  externalId: true,
   propertyId: true,
   status: true,
   paymentState: true,
@@ -98,6 +101,7 @@ function evidenceFingerprint(snapshot: ReservationComplianceSnapshot): string {
   return createHash("sha256")
     .update(JSON.stringify({
       reservationId: snapshot.id,
+      registrationExempt: isChannexGuestRegistrationExempt(snapshot),
       status: snapshot.status,
       paymentState: snapshot.paymentState,
       guestTokenPresent: Boolean(snapshot.guestToken),
@@ -343,6 +347,20 @@ export async function executeGuestJourneyComplianceOwnerAdapter(
       completion: {
         kind: "SUCCEEDED",
         action: "COMPLIANCE_NOT_REQUIRED_FOR_TERMINAL_RESERVATION",
+        verificationStatus: initial.verificationStatus,
+        outcomeEvidenceFingerprint: evidenceFingerprint(initial),
+      },
+    };
+  }
+
+  if (isChannexGuestRegistrationExempt(initial)) {
+    return {
+      providerCalls: 0,
+      externalSideEffects: 0,
+      internalMutations: 0,
+      completion: {
+        kind: "SUCCEEDED",
+        action: "DIRECT_REGISTRATION_NOT_REQUIRED_FOR_CHANNEX",
         verificationStatus: initial.verificationStatus,
         outcomeEvidenceFingerprint: evidenceFingerprint(initial),
       },
