@@ -4,13 +4,18 @@ on:
   pull_request:
     paths:
       - "prisma/twilio-sms-recovery.prisma"
+      - "prisma/twilio-sms-delivery-receipt.prisma"
       - "prisma/migrations/20261002190000_add_twilio_sms_recovery_v1/**"
+      - "prisma/migrations/20261002194500_add_twilio_sms_delivery_receipt_v1/**"
       - "src/services/twilio-sms-*.ts"
       - "src/apms/operational-intelligence.service.ts"
       - "src/apms/operational-transition-policy.ts"
+      - "src/services/guest-journey-communications-delivery-outcome.service.ts"
+      - "src/routes/message-delivery.webhooks.routes.ts"
       - "tsconfig.twilio-sms-recovery-v1.json"
       - ".github/workflows/twilio-sms-recovery-v1.yml"
       - "docs/twilio-sms-recovery-persistence-v1.md"
+      - "docs/twilio-sms-delivery-receipt-v1.md"
   workflow_dispatch:
 
 permissions:
@@ -59,5 +64,14 @@ jobs:
         run: node --import tsx --test src/services/twilio-sms-recovery.store.db.test.ts
       - name: PostgreSQL host attention and bounded retry coexistence
         run: node --import tsx --test src/services/twilio-sms-access-gap.db.test.ts
+      - name: Signed HTTP and PostgreSQL receipt outcome retry and host-action atomicity
+        run: node --import tsx --test src/services/twilio-sms-delivery-receipt.db.test.ts
+      - name: Retained delivery outcome contracts
+        run: >-
+          node --import tsx --test
+          src/services/guest-journey-communications-delivery-outcome.service.test.ts
+          src/services/guest-journey-communications-delivery-outcome.contract.test.ts
+      - name: Bundle API without starting it
+        run: npx --no-install esbuild src/server.ts --bundle --platform=node --packages=external --outfile=/tmp/twilio-receipt-api.js
       - name: Whitespace integrity
         run: git diff --check

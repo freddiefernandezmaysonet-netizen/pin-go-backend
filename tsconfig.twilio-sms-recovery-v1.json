@@ -15,6 +15,9 @@
     "src/services/twilio-sms-recovery.store.ts",
     "src/services/twilio-sms-recovery.store.db.test.ts",
     "src/services/twilio-sms-access-gap.service.ts",
-    "src/services/twilio-sms-access-gap.db.test.ts"
+    "src/services/twilio-sms-access-gap.db.test.ts",
+    "src/services/twilio-sms-delivery-receipt.service.ts",
+    "src/services/twilio-sms-delivery-receipt.db.test.ts",
+    "src/routes/message-delivery.webhooks.routes.ts"
   ]
 }

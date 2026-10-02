@@ -1,4 +1,4 @@
-import type { PrismaClient } from "@prisma/client";
+import type { Prisma, PrismaClient } from "@prisma/client";
 import { upsertOperationalIssue } from "../apms/operational-intelligence.service.js";
 import type { SmsRecoveryScope } from "./twilio-sms-recovery.store.js";
 
@@ -35,12 +35,12 @@ export type SmsAccessGapResult = {
  * retry remains available. No lease or MessageLog is changed by this projector.
  */
 export async function persistTwilioSmsAccessGap(
-  db: Pick<PrismaClient, "$transaction">,
+  db: Pick<PrismaClient, "$transaction"> | Prisma.TransactionClient,
   scope: SmsRecoveryScope,
   clock: () => Date = () => new Date()
 ): Promise<SmsAccessGapResult> {
   const key = twilioSmsAccessGapKey(scope);
-  return db.$transaction(async tx => {
+  const project = async (tx: Prisma.TransactionClient): Promise<SmsAccessGapResult> => {
     await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtextextended(${`sms-recovery:${scope.messageLogId}`}, 0))`;
     const [source] = await tx.$queryRaw<Source[]>`
       SELECT m."provider", m."channel", m."communicationType", m."providerMessageId",
@@ -88,10 +88,10 @@ export async function persistTwilioSmsAccessGap(
         now >= source.checkOut || now >= grant.endsAt || grant.startsAt >= grant.endsAt) {
       return noAction("RESERVATION_OR_ACCESS_NOT_CURRENT");
     }
-    const recovered = await tx.twilioSmsRecovery.findUnique({
-      where: { messageLogId: scope.messageLogId },
-      select: { state: true, organizationId: true, propertyId: true, reservationId: true, originalProviderMessageId: true },
-    });
+    const [recovered] = await tx.$queryRaw<Array<{
+      state: string; organizationId: string; propertyId: string; reservationId: string; originalProviderMessageId: string;
+    }>>`SELECT "state","organizationId","propertyId","reservationId","originalProviderMessageId"
+        FROM "TwilioSmsRecovery" WHERE "messageLogId"=${scope.messageLogId}`;
     if (recovered && (recovered.organizationId !== scope.organizationId ||
         recovered.propertyId !== scope.propertyId || recovered.reservationId !== scope.reservationId ||
         recovered.originalProviderMessageId !== scope.originalProviderMessageId)) fail("JOURNAL_SCOPE_MISMATCH");
@@ -130,5 +130,9 @@ export async function persistTwilioSmsAccessGap(
     });
     return { kind: "CREATED", reason: "ACCESS_SMS_FAILED_EMAIL_MISSING", issueId: issue.id,
       blockOtherScheduledMessages: false };
-  }, { maxWait: 10_000, timeout: 20_000 });
+  };
+  // Callback outcome, retry registration and this projection can commit together.
+  return "$transaction" in db
+    ? db.$transaction(project, { maxWait: 10_000, timeout: 20_000 })
+    : project(db);
 }
