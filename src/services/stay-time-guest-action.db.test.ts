@@ -21,14 +21,14 @@ test("internal guest stay-time bridge preserves consent, idempotency and payment
   const parsed = new URL(url!); assert.ok(["localhost", "127.0.0.1"].includes(parsed.hostname));
   assert.equal(parsed.pathname, "/pingo_stay_time_test");
   const db = new PrismaClient({ datasources: { db: { url } } }); t.after(() => db.$disconnect());
-  for (const scenario of ["late", "early", "wrong-guest", "wrong-secret", "expired", "blocked", "paid", "provider-retry", "missing-provider", "reconcile-retry", "unsafe-checkout"] as const) {
+  for (const scenario of ["late", "early", "cleaning-cutoff", "wrong-guest", "wrong-secret", "expired", "blocked", "paid", "provider-retry", "missing-provider", "reconcile-retry", "unsafe-checkout"] as const) {
     await t.test(scenario, async () => {
       const early = scenario === "early", paid = ["paid", "provider-retry", "missing-provider", "unsafe-checkout"].includes(scenario);
       let clock = new Date(early ? "2026-10-01T12:00Z" : "2026-10-02T12:00Z");
       const org = await db.organization.create({ data: { name: "Synthetic guest stay-time bridge" } });
       const defaults = defaultStayTimeSettings();
       const property = await db.property.create({ data: { organizationId: org.id, name: "Synthetic bridge property", timezone: "America/Puerto_Rico",
-        checkInTime: "15:00", checkOutTime: "11:00", cleaningNfcEnabled: true, cleaningStartOffsetMinutes: 30,
+        checkInTime: early || scenario === "cleaning-cutoff" ? "15:00" : "16:00", checkOutTime: "11:00", cleaningNfcEnabled: true, cleaningStartOffsetMinutes: 30,
         stayTimeSettings: { earlyCheckin: { ...defaults.earlyCheckin, enabled: true }, lateCheckout: { ...defaults.lateCheckout,
           enabled: true, fee: { mode: paid ? "PER_HOUR" : "FREE", amountMinor: 0, currency: "USD" } } } } });
       const stay = await db.reservation.create({ data: { propertyId: property.id, guestName: "Synthetic bridge guest",
@@ -63,6 +63,12 @@ test("internal guest stay-time bridge preserves consent, idempotency and payment
             checkoutUrl: scenario === "unsafe-checkout" ? "https://untrusted.invalid/pay" : "https://checkout.stripe.com/c/pay/synthetic",
             checkoutSessionId: "cs_synthetic", checkoutExpiresAt: m.checkoutExpiresAt!, idempotentReplay: checkoutCalls > 1 };
         } }) };
+        if (scenario === "cleaning-cutoff") {
+          await assert.rejects(prepareStayTimeGuestAction(db, { guestToken: stay.guestToken!, operation: "LATE_CHECKOUT", requestedLocalTime: "12:30", language: "es" }, deps), /CLEANING_CHECKIN_LIMIT_EXCEEDED/);
+          assert.equal(await db.pinAIActionProposal.count({ where: { reservationId: stay.id } }), 0);
+          assert.equal(await db.reservationModification.count({ where: { reservationId: stay.id } }), 0);
+          assert.equal(checkoutCalls, 0); assert.equal(reconcileCalls, 0); return;
+        }
         const prepared = await prepareStayTimeGuestAction(db, { guestToken: stay.guestToken!, operation: early ? "EARLY_CHECKIN" : "LATE_CHECKOUT",
           requestedLocalTime: early ? "12:00" : "12:30", language: "es" }, deps);
         assert.equal(prepared.publicResult.actionExecuted, false); assert.equal(prepared.publicResult.availabilityHeld, false);
