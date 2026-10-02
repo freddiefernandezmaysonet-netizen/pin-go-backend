@@ -1,13 +1,30 @@
-# Twilio SMS failure V1 — policy foundation
+# Twilio SMS failure V1 — bounded retry policy foundation
 
 ## Status and scope
 
 Draft implementation based on main `e9df89176a564a7f68e23c8cd02a539fcde065ee`.
-This first slice adds a pure decision policy, 61 offline tests and an isolated
-TypeScript/CI configuration. It is **not mounted** in the webhook, retry worker,
-provider adapter or Mission Control persistence. No deployed behavior changes.
-A returned hostAction is a persistence plan, not an incident already created.
-A returned blockAutomaticReplay is a decision, not an enforced runtime fence.
+The policy is **not mounted** in the webhook, retry worker, provider adapter or
+Mission Control persistence. No deployed behavior changes. Returned hostAction,
+retryPlan and replay decisions are plans, not provider calls, incidents or
+runtime fences already executed.
+
+## User clarification — October 2, 2026
+
+Freddie correctly noted that 30005 may be temporary: a guest may have a powered-off
+phone or no signal, including while travelling. He requested at least one retry
+or letting the flow continue to the next scheduled message, citing 2 pm in this
+reservation. This supersedes the first slice's unconditional no-replay decision.
+The screenshot does not prove the actual guest was travelling or offline.
+
+The revised policy permits **one delayed retry per logical message** when current
+evidence supports it. A failure of one message never independently suppresses
+later scheduled communications. Their own consent, recipient, reservation,
+access-release and expiration requirements still apply; this is not an opt-out
+bypass or permission to send arbitrary follow-ups.
+
+Retry time and spacing are explicit server-policy inputs, not a global 2 pm
+schedule or a configured production default. Tests use a 30-minute delay and
+15-minute separation as examples. Those intervals have not been activated.
 
 ## Observed production incident and limitations
 
@@ -35,73 +52,82 @@ delivery-webhook flag. Values were redacted. This candidate changes none of them
 
 - Only exact provider twilio + channel sms enter this policy.
 - ACCEPTED/QUEUED/SENDING/SENT without a delivery receipt never mean delivered.
-- UNDELIVERED or FAILED with exact 30005 blocks unattended replay for this
-  attempt pending review. This does not permanently invalidate the phone.
-- Inconsistent status/error evidence requires internal review, not a fabricated
-  delivered result or automatic send authorization.
-- Only PRECHECKIN and GUEST_ACCESS_PASSCODE for the same active reservation,
-  property and organization, before checkout, produce a host-action plan.
-  The action links to the reservation. Access-message failure is critical;
+- UNDELIVERED or FAILED with exact 30005 is evidence about a failed attempt,
+  not proof that a phone is permanently invalid.
+- Current correlated retry evidence is required. Missing evidence is not assumed
+  to mean zero retries. The same logical message's durable retriesUsed count must
+  survive a new provider SID; repeated callbacks cannot reset the anchored delay.
+- With zero retries used, a future retryNotBefore produces WAIT_FOR_RETRY. At the
+  due time the decision can be RETRY_ELIGIBLE, with ordinal 1 and a stable key.
+  It is not an instruction to send directly in callback handling.
+- A next independently eligible message that is due sooner or too close takes
+  priority: WAIT_FOR_NEXT_MESSAGE omits the old retry plan and creates no new
+  host demand. The retry plan's expiration is also capped by that spacing boundary.
+- A scheduled time does not prove delivery. Different content does not silently
+  replace missing arrival or access instructions or mark the old SMS delivered.
+- After one retry is used, another 30005 produces a host-action plan while later
+  scheduled messages remain independent. Access-message failure is critical;
   arrival-message failure is a warning. No lock failure is inferred.
-- Checkout, cleaner, marketing, untyped or other messages do not create a guest
-  arrival/access action. Their typed operational policies remain separate work.
-- Missing/mismatched scope, correlation or dates fail closed.
-- Key identity includes both messageLogId and the exact Twilio Message SID.
-- An existing scoped workflow owns recovery; duplicate receipts do not reopen
-  resolved actions or replace WAITING/AUTO_RESOLVING with a new host action.
-- Metadata is allowlisted: no destination number, SMS body, guest token, access
-  code, provider error free text or credentials.
-- No fallback, provider request, email, SMS, database write, reservation edit,
-  access operation or permanent destination blacklist occurs in this module.
-
-A false blockAutomaticReplay is NOT permission to send. Existing consent,
-expiration, destination, template, idempotency and other error policies apply.
-The input must come from trusted persisted evidence after signature validation;
-this pure function neither authenticates a webhook nor performs tenant lookup.
+- Claimed/uncertain retry outcomes cannot trigger blind replay. Internal review
+  is required; future persistence/reconciliation must make this bounded and durable.
+- Invalid scope, dates, attempt correlation, changed recipient/content or
+  contradictory provider evidence fail closed for this retry.
+- PRECHECKIN replay expires no later than check-in. Access replay expires no later
+  than checkout or its earlier current content/access deadline. No expired content
+  is replayed, and unavailable safe retry windows can require host action.
+- Host incident identity includes messageLogId and the exact provider SID. A scoped
+  existing workflow owns recovery; duplicates do not reopen resolved actions.
+- Every decision explicitly states blockOtherScheduledMessages=false. This only
+  describes this failure policy; independent blocking policies retain authority.
+- Metadata excludes destination numbers, message bodies, guest tokens, access
+  codes, provider error free text and credentials.
+- No database writes, provider calls, reservation/access edits, destination
+  blacklist or automatic email/Airbnb fallback are implemented in this module.
 
 ## Validation
 
-Local strict TypeScript with exactOptionalPropertyTypes and
-noUncheckedIndexedAccess passes. All 61 compiled JavaScript policy tests pass
-under Node 22.16.0. No database/provider mocks are being represented as real
-PostgreSQL, Twilio, signed HTTP, deployment or hardware certification.
-The new workflow runs the locked repository compiler, emits the same tests and
-runs them without Prisma lifecycle scripts, a database or provider credentials.
-Remote validation must be reported against the actual published head.
+First slice `b02ca711` passed 61 tests locally and in workflow 37041779778.
+The revised policy passes 100 emitted JavaScript tests locally with strict
+TypeScript, exactOptionalPropertyTypes and noUncheckedIndexedAccess on Node
+22.16.0 / TypeScript 5.8.3. Retained host-action cases now explicitly model an
+exhausted retry; 39 additional cases exercise the new bounded recovery contract.
+The existing isolated workflow and compiler configuration are unchanged.
+Remote CI must be reported against the newly published head, not the first slice.
+This is not PostgreSQL, signed HTTP, provider or full-backend certification.
 
-## Next integration gates — not implemented here
+## Remaining integration gates — not implemented here
 
-1. Bind a signature-validated callback to exactly one persisted provider SID and
-   load its current reservation/property/organization. Handle callbacks arriving
-   before send-result persistence, unknown or duplicate SID mappings, out-of-order
-   receipts and missing error fields without silently losing terminal evidence.
-2. Persist delivery evidence and its operational transition safely, with actual
-   PostgreSQL concurrency/rollback/replay tests. An old callback must not update
-   a newer send attempt. Reconciliation must survive persistence failures.
-3. Enforce the replay decision in the active SMS retry path. Audit manual resend
-   and APMS communications-owner paths too. Never replay masked log bodies or
-   obsolete access instructions; do not send anything in callback handling.
-4. Wire host visibility and a real resolution action. Do not advertise automatic
-   email or OTA messaging fallback before that route and its delivery are tested.
-5. Configure the existing delivery callback securely on all sending runtimes:
-   MESSAGE_DELIVERY_WEBHOOKS_ENABLED=1, TWILIO_AUTH_TOKEN and a consistent public
-   HTTPS API base. Under the current client, senders require the token to attach
-   the callback even though they use API-key credentials for sending. Never put
-   the Auth Token into chat, source, CI or logs. API and workers deploy separately.
-6. Run an authorized live canary and prove DELIVERED or UNDELIVERED/30005 plus
-   correct host action and no duplicate SMS. Reconcile this historical incident
-   explicitly; enabling future callbacks does not by itself backfill old receipts.
+1. Authenticate callbacks and correlate them to exactly one persisted provider
+   attempt. Retain early/unmatched/out-of-order receipts without losing evidence.
+2. Persist the original failure time, delay, one-retry budget and claim before I/O.
+   Test concurrent callbacks/workers, rollback and crash recovery in PostgreSQL.
+   A new SID must not reset the logical-message count. Unknown send outcomes must
+   be reconciled, not retried blindly. No resend may use a masked log body.
+3. Enforce the decision in active retry/manual/APMS paths. Revalidate current
+   recipient, content, consent, reservation and access state before provider I/O.
+   Coordinate the retry with the separate schedule so concurrent workers cannot
+   send both at once. When yielding, persist that the old retry was skipped, then
+   follow the scheduled message's real outcome; do not wait indefinitely on a time.
+4. Wire host visibility and resolution/recovery after repeated failure, missing
+   next-message outcome or urgent access problems. Do not claim email/OTA fallback
+   or resolution of one missing instruction from unrelated delivered content.
+5. Configure secure callbacks separately in the API and all sending workers.
+   Never put Auth Tokens into chat, source, CI or logs. Choose the production
+   delay/separation policy explicitly before activation; no interval was deployed.
+6. Run an authorized live canary and prove one retry, independent subsequent
+   messaging, correct delivery evidence and no duplicates. Historical receipts
+   require explicit reconciliation; future callbacks do not backfill them.
 
-No merge, deployment, persistent database change, configuration change, live
-provider call, real guest SMS or production activation is authorized by this
-Draft. Existing branch protections and certification allowlists remain intact.
+No merge, deployment, persistent database change, Railway configuration change,
+real SMS/email/provider call or production activation was performed. Other PRs
+and existing certification allowlists remain untouched.
 
 ## Primary provider documentation reviewed
 
 - https://www.twilio.com/docs/api/errors/30005
 - https://www.twilio.com/docs/messaging/guides/track-outbound-message-status
-- https://www.twilio.com/docs/usage/webhooks/webhooks-security
 
-Twilio lists multiple possible causes for 30005 and recommends controlled
-troubleshooting. The no-unattended-repeat choice is Pin&Go's conservative policy,
-not a claim that Twilio defines every 30005 as permanently non-retryable.
+Twilio lists powered-off devices, insufficient signal, unknown numbers, inability
+to receive SMS and carrier issues as possible causes, and suggests another test
+message. One delayed retry with independent later communications is Pin&Go's
+bounded recovery choice; it is not a provider guarantee of eventual delivery.

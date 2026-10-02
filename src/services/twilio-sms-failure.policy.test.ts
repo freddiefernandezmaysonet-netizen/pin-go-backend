@@ -5,6 +5,7 @@ import {
   smsFailureOperationalKey,
   type SmsDeliveryEvidence,
   type SmsReservationEvidence,
+  type SmsRetryEvidence,
 } from "./twilio-sms-failure.policy.js";
 
 const SID = "SM" + "1".repeat(32);
@@ -28,10 +29,12 @@ function reservation(overrides: Partial<SmsReservationEvidence> = {}): SmsReserv
   };
 }
 function evaluate(m = message(), r: SmsReservationEvidence | null = reservation()) {
-  return evaluateTwilioSmsFailure({ message: m, reservation: r, now });
+  // Retained host-action regressions explicitly model an already-used retry.
+  return evaluateTwilioSmsFailure({ message: m, reservation: r, now,
+    recovery: recovery({ retriesUsed: 1 }) });
 }
 
-test("PRECHECKIN local SENT plus carrier UNDELIVERED/30005 requires host action without replay", () => {
+test("PRECHECKIN after the one retry fails requires host action, not another replay", () => {
   const result = evaluate();
   assert.equal(result.kind, "HOST_ACTION_REQUIRED");
   assert.equal(result.deliveryConfirmed, false);
@@ -45,7 +48,7 @@ test("PRECHECKIN local SENT plus carrier UNDELIVERED/30005 requires host action 
   assert.equal(result.hostAction?.metadata.providerDeliveryStatus, "UNDELIVERED");
 });
 
-test("access-passcode failure is critical without claiming a failed lock or changing access", () => {
+test("access-passcode failure after retry is critical without changing access", () => {
   const result = evaluate(message({ communicationType: "GUEST_ACCESS_PASSCODE" }));
   assert.equal(result.hostAction?.severity, "CRITICAL");
   assert.equal(result.hostAction?.actionTarget, "RESERVATION");
@@ -162,8 +165,10 @@ test("checkout boundary suppresses a new stale arrival/access action, not the fa
   assert.equal(result.blockAutomaticReplay, true);
 });
 
-test("arrival/access failure during an active stay remains actionable", () => {
-  const result = evaluateTwilioSmsFailure({ message: message(), reservation: reservation(), now: new Date("2026-10-03T02:00:00.000Z") });
+test("access failure after exhausted retry during an active stay remains actionable", () => {
+  const result = evaluateTwilioSmsFailure({ message: message({ communicationType: "GUEST_ACCESS_PASSCODE" }),
+    reservation: reservation(), now: new Date("2026-10-03T02:00:00.000Z"),
+    recovery: recovery({ retriesUsed: 1 }) });
   assert.equal(result.kind, "HOST_ACTION_REQUIRED");
 });
 
@@ -214,7 +219,7 @@ test("action contains only allowlisted metadata, no phone, guest token, body or 
   const contaminated = { ...message(), to: "+17875550101", body: "PRIVATE-CODE-1234", providerErrorMessage: "PRIVATE-TOKEN-secret" };
   const action = evaluate(contaminated).hostAction!;
   assert.deepEqual(Object.keys(action.metadata).sort(), [
-    "automatedSameDestinationReplay", "communicationType", "messageLogId", "provider", "providerDeliveryStatus", "providerErrorCode", "providerMessageId", "version",
+    "automatedSameMessageReplay", "communicationType", "messageLogId", "provider", "providerDeliveryStatus", "providerErrorCode", "providerMessageId", "version",
   ].sort());
   assert.doesNotMatch(JSON.stringify(action), /17875550101|PRIVATE-CODE|PRIVATE-TOKEN/);
 });
@@ -228,4 +233,203 @@ test("evaluation is deterministic and leaves all input evidence unchanged", () =
   const action = evaluate(m, r).hostAction!;
   action.occurredAt.setFullYear(2030);
   assert.equal(now.toISOString(), "2026-10-02T16:00:04.000Z");
+});
+
+
+// Thirty minutes and fifteen-minute spacing are example policy inputs, not live settings.
+function recovery(overrides: Partial<SmsRetryEvidence> = {}): SmsRetryEvidence {
+  return {
+    messageLogId: "msg-fixture", providerMessageId: SID, retriesUsed: 0,
+    retryState: "AVAILABLE", firstFailureAt: new Date(now),
+    retryNotBefore: new Date(now.getTime() + 30 * 60_000),
+    contentValidUntil: reservation().checkOut, currentRecipientAndContent: true,
+    minimumSpacingMs: 15 * 60_000,
+    nextScheduledMessage: {
+      messageKey: "scheduled-access", organizationId: "org-fixture",
+      propertyId: "property-fixture", reservationId: "reservation-fixture",
+      scheduledAt: new Date("2026-10-02T18:00:00.000Z"),
+    },
+    ...overrides,
+  };
+}
+function initial(evidence: SmsRetryEvidence | null = recovery(), at = now,
+  m = message(), r = reservation()) {
+  return evaluateTwilioSmsFailure({ message: m, reservation: r, now: at, recovery: evidence });
+}
+
+test("first 30005 waits for one delayed retry without demanding immediate host action", () => {
+  const result = initial();
+  assert.equal(result.kind, "WAIT_FOR_RETRY");
+  assert.equal(result.hostAction, null);
+  assert.equal(result.deliveryConfirmed, false);
+  assert.equal(result.blockAutomaticReplay, true);
+  assert.equal(result.blockOtherScheduledMessages, false);
+  assert.equal(result.retryPlan?.retryOrdinal, 1);
+  assert.equal(result.retryPlan?.notBefore.toISOString(), "2026-10-02T16:30:04.000Z");
+});
+
+test("retry becomes eligible at its due instant, never immediately at the carrier failure", () => {
+  const e = recovery();
+  assert.equal(initial(e, new Date(e.retryNotBefore.getTime() - 1)).kind, "WAIT_FOR_RETRY");
+  const result = initial(e, e.retryNotBefore);
+  assert.equal(result.kind, "RETRY_ELIGIBLE");
+  assert.equal(result.blockAutomaticReplay, false);
+  assert.equal(result.hostAction, null);
+  assert.equal(result.retryPlan?.failedProviderMessageId, SID);
+  assert.equal(result.retryPlan?.validUntil.toISOString(), "2026-10-02T17:45:00.000Z");
+});
+
+test("a repeated callback cannot reset the anchored delay or change the one-retry key", () => {
+  const first = initial();
+  const again = initial(recovery(), new Date(now.getTime() + 10 * 60_000));
+  assert.deepEqual(first.retryPlan, again.retryPlan);
+  assert.equal(first.retryPlan?.recoveryKey, "GUEST_SMS_RETRY:msg-fixture:1");
+});
+
+test("changing provider SID does not create a second automatic retry budget", () => {
+  const providerMessageId = "SM" + "2".repeat(32);
+  const result = initial(recovery({ retriesUsed: 1, providerMessageId }),
+    recovery().retryNotBefore, message({ providerMessageId }));
+  assert.equal(result.kind, "HOST_ACTION_REQUIRED");
+  assert.equal(result.reason, "SAME_MESSAGE_RETRY_EXHAUSTED");
+  assert.equal(result.retryPlan, null);
+  assert.equal(result.blockOtherScheduledMessages, false);
+});
+
+for (const retriesUsed of [1, 2, 20]) {
+  test(`retry budget already used ${retriesUsed} times cannot start another retry`, () => {
+    const result = initial(recovery({ retriesUsed }));
+    assert.equal(result.kind, "HOST_ACTION_REQUIRED");
+    assert.equal(result.retryPlan, null);
+    assert.equal(result.blockAutomaticReplay, true);
+  });
+}
+for (const retryState of ["CLAIMED", "OUTCOME_UNKNOWN"] as const) {
+  test(`a ${retryState} retry is not repeated even when no new receipt exists`, () => {
+    const result = initial(recovery({ retryState, retriesUsed: 1 }));
+    assert.equal(result.kind, "REVIEW_EVIDENCE");
+    assert.equal(result.reason, "RETRY_ALREADY_CLAIMED_OR_OUTCOME_UNKNOWN");
+    assert.equal(result.retryPlan, null);
+    assert.equal(result.blockOtherScheduledMessages, false);
+  });
+}
+
+test("missing recovery evidence cannot be treated as zero prior retries", () => {
+  assert.equal(initial(null).reason, "RETRY_EVIDENCE_MISSING");
+});
+for (const patch of [
+  { messageLogId: "other-message" }, { providerMessageId: "SM" + "2".repeat(32) },
+]) {
+  test(`stale or foreign retry evidence is rejected ${JSON.stringify(patch)}`, () => {
+    assert.equal(initial(recovery(patch)).reason, "RETRY_CORRELATION_MISMATCH");
+  });
+}
+for (const patch of [
+  { retriesUsed: -1 }, { retriesUsed: 0.5 }, { retriesUsed: NaN },
+  { firstFailureAt: new Date("invalid") }, { firstFailureAt: new Date(now.getTime() + 1) },
+  { retryNotBefore: new Date(now) }, { retryNotBefore: new Date("invalid") },
+  { contentValidUntil: new Date("invalid") },
+  { minimumSpacingMs: 0 }, { minimumSpacingMs: 3_600_001 },
+]) {
+  test(`invalid bounded retry evidence fails closed ${JSON.stringify(patch)}`, () => {
+    const result = initial(recovery(patch));
+    assert.equal(result.reason, "RETRY_EVIDENCE_INVALID");
+    assert.equal(result.retryPlan, null);
+  });
+}
+
+test("changed recipient or instructions require review, not replay of an old log body", () => {
+  assert.equal(initial(recovery({ currentRecipientAndContent: false })).reason, "RECIPIENT_OR_CONTENT_CHANGED");
+});
+
+test("next scheduled communication takes precedence over a retry too close to it", () => {
+  const e = recovery();
+  e.nextScheduledMessage!.scheduledAt = new Date(e.retryNotBefore.getTime() + e.minimumSpacingMs);
+  const result = initial(e);
+  assert.equal(result.kind, "WAIT_FOR_NEXT_MESSAGE");
+  assert.equal(result.retryPlan, null);
+  assert.equal(result.hostAction, null);
+  assert.equal(result.blockOtherScheduledMessages, false);
+  assert.equal(result.deliveryConfirmed, false);
+});
+
+test("retry is available when its due time is outside the next-message spacing boundary", () => {
+  const e = recovery();
+  e.nextScheduledMessage!.scheduledAt = new Date(e.retryNotBefore.getTime() + e.minimumSpacingMs + 1);
+  assert.equal(initial(e, e.retryNotBefore).kind, "RETRY_ELIGIBLE");
+});
+
+test("a delayed worker yields the old retry when the 2 pm scheduled message is close or due", () => {
+  for (const at of ["2026-10-02T17:50:00Z", "2026-10-02T18:00:00Z"]) {
+    const result = initial(recovery(), new Date(at));
+    assert.equal(result.kind, "WAIT_FOR_NEXT_MESSAGE");
+    assert.equal(result.blockOtherScheduledMessages, false);
+    assert.equal(result.deliveryConfirmed, false, "scheduled does not prove delivered");
+    assert.equal(result.retryPlan, null);
+  }
+});
+
+for (const patch of [
+  { organizationId: "other-org" }, { propertyId: "other-property" },
+  { reservationId: "other-reservation" }, { messageKey: "msg-fixture" },
+  { messageKey: "https://private.invalid/token" }, { scheduledAt: new Date("invalid") },
+]) {
+  test(`next-message evidence requires its own current scope ${JSON.stringify(patch)}`, () => {
+    const e = recovery();
+    e.nextScheduledMessage = { ...e.nextScheduledMessage!, ...patch };
+    assert.equal(initial(e).reason, "NEXT_MESSAGE_SCOPE_OR_TIME_INVALID");
+  });
+}
+
+test("no upcoming communication still allows the one delayed retry", () => {
+  assert.equal(initial(recovery({ nextScheduledMessage: null })).kind, "WAIT_FOR_RETRY");
+});
+
+test("expired content is not resent and does not block other scheduled messages", () => {
+  const result = initial(recovery({ contentValidUntil: new Date(now) }));
+  assert.equal(result.reason, "MESSAGE_EXPIRED");
+  assert.equal(result.retryPlan, null);
+  assert.equal(result.blockOtherScheduledMessages, false);
+});
+
+test("precheckin cannot be replayed at checkin even with a longer content window", () => {
+  const result = initial(recovery(), reservation().checkIn);
+  assert.equal(result.reason, "MESSAGE_EXPIRED");
+});
+
+test("retry that cannot fit before content expiry needs an action rather than unsafe sending", () => {
+  const e = recovery({ nextScheduledMessage: null, contentValidUntil: new Date(now.getTime() + 10 * 60_000) });
+  const result = initial(e);
+  assert.equal(result.reason, "RETRY_WINDOW_UNAVAILABLE");
+  assert.equal(result.hostAction?.severity, "WARNING");
+  assert.equal(result.retryPlan, null);
+});
+
+test("a separate access message retains its own retry budget after precheckin exhausts its retry", () => {
+  assert.equal(initial(recovery({ retriesUsed: 1 })).kind, "HOST_ACTION_REQUIRED");
+  const accessMessage = message({ messageLogId: "access-msg", communicationType: "GUEST_ACCESS_PASSCODE" });
+  const later = initial(recovery({ messageLogId: "access-msg", nextScheduledMessage: null }),
+    recovery().retryNotBefore, accessMessage);
+  assert.equal(later.kind, "RETRY_ELIGIBLE");
+  assert.equal(later.retryPlan?.recoveryKey, "GUEST_SMS_RETRY:access-msg:1");
+});
+
+test("delivery receipt, opt-out and unrelated errors never generate this retry plan", () => {
+  for (const patch of [
+    { providerDeliveryStatus: "DELIVERED", providerErrorCode: null },
+    { providerDeliveryStatus: "SENT", providerErrorCode: null },
+    { providerErrorCode: "21610" }, { providerErrorCode: "30007" },
+  ]) {
+    const result = initial(recovery(), now, message(patch));
+    assert.equal(result.retryPlan, null);
+    assert.equal(result.blockOtherScheduledMessages, false, "other policies retain their own blocking authority");
+  }
+});
+
+test("retry plan dates do not alias trusted evidence or mutate its delay", () => {
+  const e = recovery();
+  const original = e.retryNotBefore.toISOString();
+  const result = initial(e);
+  result.retryPlan!.notBefore.setUTCFullYear(2030);
+  assert.equal(e.retryNotBefore.toISOString(), original);
 });
