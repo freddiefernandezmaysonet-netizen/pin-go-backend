@@ -20,7 +20,7 @@ test("free stay-time changes apply atomically through the canonical service", { 
       const org = await db.organization.create({ data: { name: "Synthetic stay-time apply" } });
       const defaults = defaultStayTimeSettings();
       const property = await db.property.create({ data: { organizationId: org.id, name: "Synthetic free apply",
-        timezone: "America/Puerto_Rico", checkInTime: "15:00", checkOutTime: "11:00",
+        timezone: "America/Puerto_Rico", checkInTime: early ? "15:00" : "16:00", checkOutTime: "11:00",
         cleaningStartOffsetMinutes: 30, cleaningDurationMinutes: 180,
         stayTimeSettings: { earlyCheckin: { ...defaults.earlyCheckin, enabled: true },
           lateCheckout: { ...defaults.lateCheckout, enabled: true,

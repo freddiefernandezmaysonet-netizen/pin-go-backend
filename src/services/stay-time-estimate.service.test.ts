@@ -29,7 +29,7 @@ test("stay-time estimates use real scoped PostgreSQL evidence without writes", {
   const enabled = { earlyCheckin: { ...settings.earlyCheckin, enabled: true },
     lateCheckout: { ...settings.lateCheckout, enabled: true, fee: { mode: "PER_HOUR", amountMinor: 0, currency: "USD" } } };
   const property = await db.property.create({ data: { organizationId: org.id, name: "Synthetic estimate property",
-    timezone: "America/Puerto_Rico", checkInTime: "15:00", checkOutTime: "11:00",
+    timezone: "America/Puerto_Rico", checkInTime: "16:00", checkOutTime: "11:00",
     cleaningStartOffsetMinutes: 30, cleaningDurationMinutes: 180, stayTimeSettings: enabled } });
   t.after(async () => {
     try {
@@ -201,6 +201,14 @@ test("stay-time estimates use real scoped PostgreSQL evidence without writes", {
       await assert.rejects(stageStayTimeModification(db, { guestToken: stay.guestToken!, proposalId: tooLate.proposal.id }, shortWindow), /PAYMENT_WINDOW_TOO_SHORT/);
       assert.equal(await db.reservationModification.count({ where: { reservationId: stay.id } }), 0);
     } finally { await db.pinAIActionProposal.deleteMany({ where: { reservationId: stay.id } }); }
+  });
+  await t.test("empty calendar does not allow cleaning past normal check-in or create a payable proposal", async () => {
+    await estimate(); // 12:30 + 30 minutes + 180 minutes = 16:00 exactly.
+    const tooLate = { guestToken: stay.guestToken!, operation: "LATE_CHECKOUT" as const, requestedLocalTime: "12:31" };
+    await assert.rejects(estimateStayTimeAdjustment(db, { ...input, requestedLocalTime: "12:31" }, now), /CLEANING_CHECKIN_LIMIT_EXCEEDED/);
+    await assert.rejects(createStayTimeProposal(db, { ...tooLate, language: "es" }, proposalOptions), /CLEANING_CHECKIN_LIMIT_EXCEEDED/);
+    assert.equal(await db.reservationModification.count({ where: { reservationId: stay.id } }), 0);
+    assert.equal(await db.propertyBlockedDate.count({ where: { propertyId: property.id } }), 0);
   });
   await t.test("exact minute fee, offset plus cleaning window, estimate only, no mutation", async () => {
     const before = await db.reservation.findUniqueOrThrow({ where: { id: stay.id } });

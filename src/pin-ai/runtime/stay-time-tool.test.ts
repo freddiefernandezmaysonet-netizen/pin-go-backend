@@ -22,7 +22,7 @@ function fixture(options: { early?: boolean; conflict?: boolean; error?: boolean
         return { id: "stay", propertyId: "property", status: "ACTIVE", paymentState: "PAID",
           source: "DIRECT_BOOKING", externalProvider: "PIN_GO_DIRECT", currency: "usd",
           checkIn: new Date("2030-10-01T19:00Z"), checkOut: new Date("2030-10-03T15:00Z"), updatedAt: new Date("2030-09-30T00:00Z"),
-          property: { timezone: "America/Puerto_Rico", checkInTime: "15:00", checkOutTime: "11:00",
+          property: { timezone: "America/Puerto_Rico", checkInTime: "16:00", checkOutTime: "11:00",
             stayTimeSettings: { earlyCheckin: { ...rule, limitLocalTime: "12:00" }, lateCheckout: rule },
             stayTimeSettingsRevision: 2, cleaningStartOffsetMinutes: 30, cleaningDurationMinutes: 180,
             updatedAt: new Date("2030-09-30T00:00Z") } };

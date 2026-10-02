@@ -22,6 +22,8 @@ export type StayTimePolicy = Scope & Readonly<{
   lateCheckout: StayTimeRule;
   cleaningStartOffsetMinutes: number;
   cleaningDurationMinutes: number;
+  /** Standard check-in on the departure day, resolved in the property timezone. */
+  standardCheckInAt?: Date;
 }>;
 export type StayTimeReservation = Scope & Readonly<{
   id: string;
@@ -162,6 +164,13 @@ export function planStayTimeAdjustment(input: Readonly<{
     requiredFreeUntil = new Date(requestedAt.getTime() +
       (policy.cleaningStartOffsetMinutes + policy.cleaningDurationMinutes) * 60_000);
     if (!validDate(requiredFreeUntil)) reject("INVALID_CLEANING_WINDOW");
+    const deadline = policy.standardCheckInAt;
+    if (!deadline || !validDate(deadline) ||
+        formatInTimeZone(deadline, policy.timezone, "yyyy-MM-dd") !==
+        formatInTimeZone(currentAt, policy.timezone, "yyyy-MM-dd")) reject("INVALID_TURNOVER_DEADLINE");
+    // Protect the normal arrival time even when no next reservation exists yet.
+    // Equality is allowed: 12:30 + 30 minutes + 3 hours = 16:00.
+    if (requiredFreeUntil > deadline) reject("CLEANING_CHECKIN_LIMIT_EXCEEDED");
   }
   if (!validDate(evidence.coveredFrom) || !validDate(evidence.coveredUntil) ||
       evidence.coveredFrom > requiredFreeFrom || evidence.coveredUntil < requiredFreeUntil ||

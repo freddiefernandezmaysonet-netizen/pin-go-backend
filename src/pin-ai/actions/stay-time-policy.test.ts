@@ -23,6 +23,7 @@ function fixture(operation: StayTimeOperation = "LATE_CHECKOUT"): Input {
       earlyCheckin: { enabled: true, limitLocalTime: "12:00", fee: { mode: "FREE", amountMinor: 0, currency: "USD" } },
       lateCheckout: { enabled: true, limitLocalTime: "14:00", fee: { mode: "PER_HOUR", amountMinor: 0, currency: "USD" } },
       cleaningStartOffsetMinutes: 30, cleaningDurationMinutes: 180,
+      standardCheckInAt: date("2026-10-02T21:30:00Z"),
     },
     evidence: {
       ...scope, reservationId: "stay-1", checkedAt: now,
@@ -62,6 +63,33 @@ test("early arrival preserves departure and uses its independent free rule", () 
   assert.equal(result.checkOut, input.reservation.checkOut.toISOString());
   assert.equal(result.feeSubtotalMinor, 0);
   assert.equal(result.additionalMinutes, 120);
+});
+
+test("16:00 arrival with 30-minute offset and three-hour cleaning permits 12:30 exactly, but not 12:31", () => {
+  const base = fixture();
+  const input = { ...base, policy: { ...base.policy, standardCheckInAt: date("2026-10-02T20:00Z") },
+    requestedAt: date("2026-10-02T16:30Z") };
+  assert.equal(planStayTimeAdjustment(input).requiredFreeUntil, "2026-10-02T20:00:00.000Z");
+  rejects({ ...input, requestedAt: date("2026-10-02T16:31Z") }, "CLEANING_CHECKIN_LIMIT_EXCEEDED");
+  assert.equal(input.evidence.conflicts.length, 0); // No booking is needed to enforce the limit.
+});
+
+test("15:00 arrival advances the limit to 11:30 and a shorter host limit still applies", () => {
+  const base = fixture();
+  const input = { ...base, policy: { ...base.policy, standardCheckInAt: date("2026-10-02T19:00Z") },
+    requestedAt: date("2026-10-02T15:30Z") };
+  assert.equal(planStayTimeAdjustment(input).requiredFreeUntil, "2026-10-02T19:00:00.000Z");
+  rejects({ ...input, requestedAt: date("2026-10-02T15:31Z") }, "CLEANING_CHECKIN_LIMIT_EXCEEDED");
+  rejects({ ...input, policy: { ...input.policy, lateCheckout: { ...input.policy.lateCheckout, limitLocalTime: "11:15" } } }, "HOST_TIME_LIMIT_EXCEEDED");
+});
+
+test("late checkout requires a valid same-day arrival deadline; early check-in does not", () => {
+  const input = fixture();
+  for (const standardCheckInAt of [undefined, new Date(NaN), date("2026-10-03T20:00Z")]) {
+    rejects({ ...input, policy: { ...input.policy, standardCheckInAt } }, "INVALID_TURNOVER_DEADLINE");
+  }
+  const early = fixture("EARLY_CHECKIN");
+  assert.doesNotThrow(() => planStayTimeAdjustment({ ...early, policy: { ...early.policy, standardCheckInAt: undefined } }));
 });
 
 test("fixed fee is charged once; hourly total rounds half up to whole dollars", () => {
@@ -212,7 +240,7 @@ test("hourly fee uses real elapsed minutes across DST fall-back", () => {
   const now = date("2026-11-01T04:00:00Z");
   const result = planStayTimeAdjustment({ ...input, now, requestedAt: date("2026-11-01T07:00:00Z"),
     reservation: { ...input.reservation, checkIn: date("2026-10-31T19:00:00Z"), checkOut: date("2026-11-01T05:00:00Z") },
-    policy: { ...input.policy, timezone: "America/New_York" },
+    policy: { ...input.policy, timezone: "America/New_York", standardCheckInAt: date("2026-11-01T21:00:00Z") },
     evidence: { ...input.evidence, checkedAt: now, coveredFrom: now, coveredUntil: date("2026-11-02T00:00:00Z") } });
   assert.equal(result.additionalMinutes, 120);
   assert.equal(result.feeSubtotalMinor, 5000);

@@ -151,7 +151,8 @@ export async function estimateStayTimeAdjustmentInTransaction(
       reservation: { ...scope, ...row, currency: row.currency?.toUpperCase() ?? "", adjustedOperations,
         ...(hourlyPricingBasis ? { hourlyPricingBasis } : {}) },
       policy: { ...scope, version: `stay-time-v1:${property.stayTimeSettingsRevision}:${property.updatedAt.toISOString()}`,
-        timezone, ...settings, cleaningStartOffsetMinutes: offset, cleaningDurationMinutes: duration },
+        timezone, ...settings, cleaningStartOffsetMinutes: offset, cleaningDurationMinutes: duration,
+        ...(!early ? { standardCheckInAt: resolveStayTimeClock(row.checkOut, property.checkInTime ?? "15:00", timezone) } : {}) },
       evidence: { ...scope, reservationId: row.id, checkedAt: now, coveredFrom, coveredUntil, conflicts,
         arrivalReadiness },
     });

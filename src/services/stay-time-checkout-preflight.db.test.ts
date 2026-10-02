@@ -21,7 +21,7 @@ test("paid stay-time preflight revalidates persisted consent and current operati
       const org = await db.organization.create({ data: { name: "Synthetic paid preflight" } });
       const defaults = defaultStayTimeSettings();
       const property = await db.property.create({ data: { organizationId: org.id, name: "Synthetic paid preflight",
-        timezone: "America/Puerto_Rico", checkInTime: "15:00", checkOutTime: "11:00", cleaningNfcEnabled: true,
+        timezone: "America/Puerto_Rico", checkInTime: early ? "15:00" : "16:00", checkOutTime: "11:00", cleaningNfcEnabled: true,
         cleaningStartOffsetMinutes: 30, cleaningDurationMinutes: 180,
         stayTimeSettings: { earlyCheckin: { ...defaults.earlyCheckin, enabled: true, fee: { mode: "PER_HOUR", amountMinor: 0, currency: "USD" } },
           lateCheckout: { ...defaults.lateCheckout, enabled: true, fee: { mode: "PER_HOUR", amountMinor: 0, currency: "USD" } } } } });
