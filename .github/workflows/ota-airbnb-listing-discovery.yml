@@ -110,6 +110,11 @@ jobs:
           src/services/direct-booking-ingest-transaction.test.ts
           src/services/direct-booking-ingest-transaction.db.test.ts
           src/services/manual-reservation-date-change.service.ts
+          src/services/ota-availability-conflict-review.service.ts
+          src/services/ota-availability-conflict-review.db.test.ts
+          src/routes/dashboard.ota-availability-conflicts.routes.ts
+          src/routes/dashboard.ota-availability-conflicts.routes.test.ts
+          src/routes/dashboard.route.ts
           src/services/manual-reservation-date-change.behavior.test.ts
           src/services/manual-reservation-date-change.contract.test.ts
           src/routes/dashboard.properties.route.ts
