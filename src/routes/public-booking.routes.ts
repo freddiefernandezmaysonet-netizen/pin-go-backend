@@ -1,3 +1,4 @@
+import { buildPublicStaysSitemapRouter } from "./public-stays-sitemap.routes.js";
 import { Router } from "express";
 import type Stripe from "stripe";
 import { PrismaClient, ReservationModificationStatus } from "@prisma/client";
@@ -717,6 +718,8 @@ publicBookingRouter.post("/manage/:guestToken/cancel", async (req, res) => {
   }
 });
 
+publicBookingRouter.use(buildPublicStaysSitemapRouter(prisma, resolvePublishedBrandContextForOrganization));
+
 publicBookingRouter.get("/discovery", async (req, res) => {
   try {
     const hostname = String(req.query.hostname ?? "").trim();
@@ -745,6 +748,7 @@ publicBookingRouter.get("/discovery", async (req, res) => {
           where: {
             status: "ACTIVE",
             isPublicBookable: true,
+            isTestProperty: false,
           },
           select: {
             slug: true,
