@@ -227,6 +227,7 @@ model Property {
   name                       String
   slug                       String?
   isPublicBookable           Boolean                     @default(false)
+  isTestProperty             Boolean                     @default(false)
   distributionEnabled        Boolean                     @default(false)
   distributionStatus         String                      @default("DISABLED")
   distributionEnabledAt      DateTime?
