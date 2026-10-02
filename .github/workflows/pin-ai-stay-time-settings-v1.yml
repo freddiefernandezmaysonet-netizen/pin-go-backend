@@ -12,6 +12,7 @@ on:
       - "src/services/stay-time-quote*"
       - "src/services/stay-time-proposal*"
       - "src/services/stay-time-apply*"
+      - "src/services/availability.service.ts"
       - "src/services/stay-time-payment-window*"
       - "src/services/stay-time-payment-evidence*"
       - "src/services/stay-time-payment-flow*"

@@ -1,10 +1,12 @@
 import {
   PrismaClient,
+  type Prisma,
   ReservationModificationStatus,
   ReservationStatus,
 } from "@prisma/client";
 
 const prisma = new PrismaClient();
+type AvailabilityClient = Pick<Prisma.TransactionClient, "reservation" | "reservationModification" | "propertyBlockedDate">;
 
 function toDateKey(date: Date) {
   return date.toISOString().slice(0, 10);
@@ -49,7 +51,7 @@ export async function checkPropertyAvailability(input: {
   checkOut: Date;
   excludeReservationId?: string;
   excludeReservationModificationId?: string;
-}) {
+}, client: AvailabilityClient = prisma) {
   const {
     propertyId,
     checkIn,
@@ -74,7 +76,7 @@ export async function checkPropertyAvailability(input: {
     throw new Error("checkOut must be after checkIn");
   }
 
-  const reservationConflict = await prisma.reservation.findFirst({
+  const reservationConflict = await client.reservation.findFirst({
     where: {
       propertyId,
       status: ReservationStatus.ACTIVE,
@@ -108,7 +110,7 @@ export async function checkPropertyAvailability(input: {
 
   const now = new Date();
   const modificationHoldConflict =
-    await prisma.reservationModification.findFirst({
+    await client.reservationModification.findFirst({
       where: {
         ...(excludeReservationModificationId
           ? { id: { not: excludeReservationModificationId } }
@@ -123,6 +125,7 @@ export async function checkPropertyAvailability(input: {
           gt: checkIn,
         },
         OR: [
+          { status: ReservationModificationStatus.APPLYING },
           {
             status: ReservationModificationStatus.PAYMENT_PROCESSING,
           },
@@ -153,7 +156,7 @@ export async function checkPropertyAvailability(input: {
     };
   }
 
-  const blockedDateConflict = await prisma.propertyBlockedDate.findFirst({
+  const blockedDateConflict = await client.propertyBlockedDate.findFirst({
     where: {
       propertyId,
       startDate: {
@@ -193,7 +196,7 @@ export async function getPropertyBlockedDateKeys(input: {
   to: Date;
   excludeReservationId?: string;
   excludeReservationModificationId?: string;
-}) {
+}, client: AvailabilityClient = prisma) {
   const {
     propertyId,
     from,
@@ -218,7 +221,7 @@ export async function getPropertyBlockedDateKeys(input: {
     throw new Error("to must be after from");
   }
 
-  const reservations = await prisma.reservation.findMany({
+  const reservations = await client.reservation.findMany({
     where: {
       propertyId,
       status: ReservationStatus.ACTIVE,
@@ -244,7 +247,7 @@ export async function getPropertyBlockedDateKeys(input: {
   });
 
   const now = new Date();
-  const modificationHolds = await prisma.reservationModification.findMany({
+  const modificationHolds = await client.reservationModification.findMany({
     where: {
       ...(excludeReservationModificationId
         ? { id: { not: excludeReservationModificationId } }
@@ -259,6 +262,7 @@ export async function getPropertyBlockedDateKeys(input: {
         gt: from,
       },
       OR: [
+          { status: ReservationModificationStatus.APPLYING },
         {
           status: ReservationModificationStatus.PAYMENT_PROCESSING,
         },
@@ -282,7 +286,7 @@ export async function getPropertyBlockedDateKeys(input: {
     },
   });
 
-  const manualBlocks = await prisma.propertyBlockedDate.findMany({
+  const manualBlocks = await client.propertyBlockedDate.findMany({
     where: {
       propertyId,
       startDate: {

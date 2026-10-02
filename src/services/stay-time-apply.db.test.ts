@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
+import { checkPropertyAvailability, getPropertyBlockedDateKeys } from "./availability.service.js";
 import { createStayTimeDepartureCleaningFixture } from "./stay-time-departure-cleaning.fixture.js";
 import { Prisma, PrismaClient } from "@prisma/client";
 import { defaultStayTimeSettings } from "../pin-ai/actions/stay-time-settings.js";
@@ -15,7 +16,7 @@ test("free stay-time changes apply atomically through the canonical service", { 
   t.after(() => db.$disconnect());
   for (const scenario of ["late", "early", "cleaning-revoked", "cleaning-buffer-blocked", "reservation-changed",
     "expired", "pricing-tampered", "reconcile-retry", "transaction-retry", "first-lock-retry", "paid-blocked"] as const) {
-    await t.test(scenario, async () => {
+    await t.test(scenario, async t => {
       const early = scenario === "early" || scenario === "cleaning-revoked";
       const now = new Date(early ? "2026-10-01T12:00Z" : "2026-10-02T12:00Z");
       const org = await db.organization.create({ data: { name: "Synthetic stay-time apply" } });
@@ -63,6 +64,41 @@ test("free stay-time changes apply atomically through the canonical service", { 
           confirmationToken: proposal.confirmationToken }, options);
         const staged = await stageStayTimeModification(db, { guestToken: stay.guestToken!, proposalId: proposal.proposal.id }, options);
         const id = staged.modification.id;
+        if (scenario === "late") await t.test("general availability retains applying holds and releases terminal/expired changes", async () => {
+          const interval = { propertyId: property.id, checkIn: stay.checkOut,
+            checkOut: new Date(staged.modification.proposedCheckOut.getTime() + 60_000) };
+          const calendar = { propertyId: property.id, from: stay.checkIn,
+            to: new Date("2026-10-04T20:00Z"), excludeReservationId: stay.id };
+          for (const status of ["APPLYING", "PAYMENT_PROCESSING"] as const) {
+            await db.reservationModification.update({ where: { id }, data: { status, checkoutExpiresAt: null } });
+            const result = await checkPropertyAvailability(interval, db);
+            assert.equal(result.available, false);
+            assert.equal(result.conflict?.type, "RESERVATION_MODIFICATION_HOLD");
+            assert.equal(result.conflict?.id, id);
+            const dates = await getPropertyBlockedDateKeys(calendar, db);
+            assert.deepEqual(dates.modificationHolds.map(row => row.id), [id]);
+            assert.deepEqual(dates.blockedDates, ["2026-10-01", "2026-10-02"]);
+            assert.equal((await checkPropertyAvailability({ ...interval, excludeReservationModificationId: id }, db)).available, true);
+            assert.deepEqual((await getPropertyBlockedDateKeys({ ...calendar, excludeReservationModificationId: id }, db)).blockedDates, []);
+            // Touching the exact departure boundary preserves the next saleable night.
+            assert.equal((await checkPropertyAvailability({ propertyId: property.id,
+              checkIn: staged.modification.proposedCheckOut, checkOut: new Date("2026-10-04T15:00Z") }, db)).available, true);
+            const otherProperty = await db.property.create({ data: { organizationId: org.id, name: "Other synthetic property" } });
+            try { assert.equal((await checkPropertyAvailability({ ...interval, propertyId: otherProperty.id }, db)).available, true); }
+            finally { await db.property.delete({ where: { id: otherProperty.id } }); }
+          }
+          for (const status of ["CANCELLED", "EXPIRED", "APPLIED", "AWAITING_PAYMENT"] as const) {
+            await db.reservationModification.update({ where: { id }, data: { status,
+              checkoutExpiresAt: new Date(Date.now() - 60_000) } });
+            assert.equal((await checkPropertyAvailability(interval, db)).available, true);
+            assert.deepEqual((await getPropertyBlockedDateKeys(calendar, db)).blockedDates, []);
+          }
+          await db.reservationModification.update({ where: { id }, data: { status: "AWAITING_PAYMENT",
+            checkoutExpiresAt: new Date(Date.now() + 60_000) } });
+          assert.equal((await checkPropertyAvailability(interval, db)).available, false);
+          assert.deepEqual((await getPropertyBlockedDateKeys(calendar, db)).modificationHolds.map(row => row.id), [id]);
+          await db.reservationModification.update({ where: { id }, data: { status: "APPLYING", checkoutExpiresAt: null } });
+        });
         if (scenario === "cleaning-revoked") await db.cleaningWork.update({ where: { id: workId! }, data: { completionConfirmedAt: null } });
         if (scenario === "cleaning-buffer-blocked") await db.propertyBlockedDate.create({ data: { propertyId: property.id,
           startDate: new Date("2026-10-03T19:59Z"), endDate: new Date("2026-10-04T15:00Z") } });

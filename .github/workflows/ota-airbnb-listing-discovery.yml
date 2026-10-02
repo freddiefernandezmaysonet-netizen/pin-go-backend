@@ -102,6 +102,7 @@ jobs:
           src/services/arrival-cleaning-readiness.service.ts
           src/services/guest-reservation-modification-apply.service.ts
           src/services/stay-time-apply-validation.service.ts
+          src/services/availability.service.ts
           src/services/stay-time-apply.db.test.ts
           src/services/reservation.reconcile.service.ts
           src/services/reservation-guest-access-window.ts
