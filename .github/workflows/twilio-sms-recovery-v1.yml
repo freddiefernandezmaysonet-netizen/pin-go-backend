@@ -6,6 +6,8 @@ on:
       - "prisma/twilio-sms-recovery.prisma"
       - "prisma/migrations/20261002190000_add_twilio_sms_recovery_v1/**"
       - "src/services/twilio-sms-*.ts"
+      - "src/apms/operational-intelligence.service.ts"
+      - "src/apms/operational-transition-policy.ts"
       - "tsconfig.twilio-sms-recovery-v1.json"
       - ".github/workflows/twilio-sms-recovery-v1.yml"
       - "docs/twilio-sms-recovery-persistence-v1.md"
@@ -55,5 +57,7 @@ jobs:
         run: node --import tsx --test src/services/twilio-sms-failure.policy.test.ts
       - name: PostgreSQL atomic registration claim restart and rollback
         run: node --import tsx --test src/services/twilio-sms-recovery.store.db.test.ts
+      - name: PostgreSQL host attention and bounded retry coexistence
+        run: node --import tsx --test src/services/twilio-sms-access-gap.db.test.ts
       - name: Whitespace integrity
         run: git diff --check

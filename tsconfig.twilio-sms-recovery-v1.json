@@ -13,6 +13,8 @@
   "include": [
     "src/services/twilio-sms-failure.policy.ts",
     "src/services/twilio-sms-recovery.store.ts",
-    "src/services/twilio-sms-recovery.store.db.test.ts"
+    "src/services/twilio-sms-recovery.store.db.test.ts",
+    "src/services/twilio-sms-access-gap.service.ts",
+    "src/services/twilio-sms-access-gap.db.test.ts"
   ]
 }
