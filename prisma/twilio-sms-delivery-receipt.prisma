@@ -10,7 +10,11 @@ model TwilioSmsDeliveryReceipt {
   disposition       String   @default("PENDING")
   messageLogId      String?
   processedAt       DateTime?
+  reconcileAttempts Int      @default(0)
+  lastReconciledAt  DateTime?
+  nextReconcileAt   DateTime?
 
   @@index([accountSid, providerMessageId])
   @@index([disposition, receivedAt])
+  @@index([disposition, nextReconcileAt, receivedAt])
 }

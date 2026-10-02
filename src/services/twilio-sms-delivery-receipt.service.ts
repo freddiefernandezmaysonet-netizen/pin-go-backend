@@ -6,7 +6,11 @@ import {
   shouldApplyProviderDeliveryTransition,
   type ProviderDeliveryOutcome,
 } from "./guest-journey-communications-delivery-outcome.service.js";
-import { registerTwilioSmsRecovery, type SmsRecoverySettings } from "./twilio-sms-recovery.store.js";
+import {
+  recordTwilioSmsRetryDeliveryOutcome,
+  registerTwilioSmsRecovery,
+  type SmsRecoverySettings,
+} from "./twilio-sms-recovery.store.js";
 
 type Tx = Prisma.TransactionClient;
 type Receipt = {
@@ -107,8 +111,30 @@ export async function reconcileTwilioSmsDeliveryReceipt(
     const mappings = await tx.messageLog.findMany({
       where: { provider: "twilio", providerMessageId: receipt.providerMessageId }, take: 2,
     });
+    if (mappings.length === 0) {
+      const retry = await recordTwilioSmsRetryDeliveryOutcome(
+        { $transaction: async work => work(tx) },
+        {
+          providerMessageId: receipt.providerMessageId,
+          status: receipt.deliveryStatus as ProviderDeliveryOutcome["status"],
+          errorCode: receipt.errorCode,
+          eventAt: receipt.receivedAt,
+        },
+        () => now
+      );
+      if (retry.matched) {
+        return finish(
+          tx,
+          receiptId,
+          `RETRY_${retry.disposition}`,
+          retry.messageLogId,
+          now
+        );
+      }
+      return finish(tx, receiptId, "UNMATCHED", null, now);
+    }
     if (mappings.length !== 1) {
-      return finish(tx, receiptId, mappings.length ? "AMBIGUOUS" : "UNMATCHED", null, now);
+      return finish(tx, receiptId, "AMBIGUOUS", null, now);
     }
     const mapped = mappings[0]!;
     await tx.$executeRawUnsafe("SELECT pg_advisory_xact_lock(hashtextextended($1, 0))", `sms-recovery:${mapped.id}`);

@@ -7,6 +7,7 @@ on:
       - "prisma/twilio-sms-delivery-receipt.prisma"
       - "prisma/migrations/20261002190000_add_twilio_sms_recovery_v1/**"
       - "prisma/migrations/20261002194500_add_twilio_sms_delivery_receipt_v1/**"
+      - "prisma/migrations/20261002201500_extend_twilio_sms_reconciliation_v1/**"
       - "src/services/twilio-sms-*.ts"
       - "src/apms/operational-intelligence.service.ts"
       - "src/apms/operational-transition-policy.ts"
@@ -66,6 +67,8 @@ jobs:
         run: node --import tsx --test src/services/twilio-sms-access-gap.db.test.ts
       - name: Signed HTTP and PostgreSQL receipt outcome retry and host-action atomicity
         run: node --import tsx --test src/services/twilio-sms-delivery-receipt.db.test.ts
+      - name: PostgreSQL bounded receipt continuation and retry SID outcomes
+        run: node --import tsx --test src/services/twilio-sms-receipt-reconciliation.db.test.ts
       - name: Retained delivery outcome contracts
         run: >-
           node --import tsx --test

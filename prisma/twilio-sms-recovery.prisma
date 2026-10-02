@@ -19,6 +19,10 @@ model TwilioSmsRecovery {
   claimedAt                DateTime?
   validUntil               DateTime?
   retryProviderMessageId   String?  @unique
+  retryDeliveryStatus      String?
+  retryErrorCode           String?
+  retryStatusUpdatedAt     DateTime?
+  retryDeliveredAt         DateTime?
   nextMessageKey           String?
   nextMessageAt            DateTime?
   lastDecision             String?

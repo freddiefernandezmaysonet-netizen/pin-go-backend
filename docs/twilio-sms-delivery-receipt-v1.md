@@ -89,3 +89,29 @@ Provider basis: https://www.twilio.com/docs/messaging/guides/track-outbound-mess
 and https://www.twilio.com/docs/usage/webhooks/webhooks-security.
 Twilio documents out-of-order callback arrival and recommends SDK signature
 verification. The retry limits and host escalation are Pin&Go policy decisions.
+
+
+## Bounded inbox continuation and retry SID outcome — candidate
+
+The next slice adds durable delivery fields for the one retry attempt without
+rewriting the original MessageLog. A callback for retryProviderMessageId is
+matched to TwilioSmsRecovery, keeps original and retry SIDs separate, and records
+retry delivery status/error/time. Confirmed retry delivery moves the journal to
+DELIVERED; terminal retry failure moves it to REVIEW and cannot restore the
+single consumed retry budget. Contradictory terminal provider evidence is kept
+for review rather than silently flipped.
+
+Early callbacks may race the persistence of the retry SID. They remain UNMATCHED
+in TwilioSmsDeliveryReceipt. A bounded inbox reconciler claims due unresolved
+receipts with PostgreSQL FOR UPDATE SKIP LOCKED, increments the durable attempt
+counter before processing, schedules the next attempt, and eventually marks
+unresolved evidence RECONCILIATION_EXHAUSTED. It performs no provider request and
+sends no SMS. Multiple consumers partition the due batch instead of multiplying
+attempts.
+
+Reconciliation is separately gated and has no production defaults. Interval,
+maximum age, maximum attempts and batch size must all be explicitly configured.
+This slice does not mount a worker loop or the real retry dispatcher. A retry
+journal claim remains evidence of an owned opportunity, not authorization to
+send. Host resolution after an exhausted PRECHECKIN retry and the actual fresh
+content/consent/access-readiness dispatcher remain later gates.

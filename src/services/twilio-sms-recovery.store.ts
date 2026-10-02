@@ -6,6 +6,10 @@ import {
   type SmsFailureDecision,
   type SmsRetryEvidence,
 } from "./twilio-sms-failure.policy.js";
+import {
+  shouldApplyProviderDeliveryTransition,
+  type ProviderDeliveryStatus,
+} from "./guest-journey-communications-delivery-outcome.service.js";
 
 /** Internal DB adapter. No provider I/O is allowed inside its transactions. */
 export interface SmsRecoveryTransaction {
@@ -43,6 +47,10 @@ type Journal = SmsRecoveryScope & {
   sourceFingerprint: string;
   claimToken: string | null;
   retryProviderMessageId: string | null;
+  retryDeliveryStatus: string | null;
+  retryErrorCode: string | null;
+  retryStatusUpdatedAt: Date | null;
+  retryDeliveredAt: Date | null;
 };
 type Source = {
   messageLogId: string;
@@ -284,5 +292,107 @@ export async function recordTwilioSmsRetrySubmission(
       "retryProviderMessageId"=$3, "updatedAt"=$4 WHERE "messageLogId"=$1`,
       scope.messageLogId, state, providerMessageId, nowFrom(clock));
     return { state, changed: true };
+  });
+}
+
+
+export type SmsRetryProviderOutcome = {
+  providerMessageId: string;
+  status: ProviderDeliveryStatus;
+  errorCode: string | null;
+  eventAt: Date;
+};
+
+const retryProviderStatuses = new Set<ProviderDeliveryStatus>([
+  "ACCEPTED", "QUEUED", "SENDING", "SENT", "DELIVERED", "READ",
+  "UNDELIVERED", "FAILED", "CANCELED",
+]);
+const retryProviderSuccess = (value: string | null) => value === "DELIVERED" || value === "READ";
+const retryProviderFailure = (value: string | null) =>
+  value === "UNDELIVERED" || value === "FAILED" || value === "CANCELED";
+
+/** Reconcile the provider outcome of the one already-claimed retry. This never
+ * sends, restores budget, or overwrites the original MessageLog/SID. Lookup is
+ * observational until the journal lock is acquired, preserving journal -> SID
+ * lock order with recordTwilioSmsRetrySubmission and avoiding callback races.
+ */
+export async function recordTwilioSmsRetryDeliveryOutcome(
+  db: SmsRecoveryDatabase,
+  outcome: SmsRetryProviderOutcome,
+  clock: () => Date = () => new Date()
+) {
+  if (!sid(outcome.providerMessageId) || !retryProviderStatuses.has(outcome.status) ||
+      !date(outcome.eventAt) || (outcome.errorCode !== null && !/^\\d{1,10}$/.test(outcome.errorCode))) {
+    return fail("RETRY_OUTCOME_INVALID");
+  }
+  return transact(db, async tx => {
+    const candidates = await tx.$queryRawUnsafe<Journal[]>(
+      'SELECT * FROM "TwilioSmsRecovery" WHERE "retryProviderMessageId"=$1 LIMIT 2',
+      outcome.providerMessageId
+    );
+    if (candidates.length === 0) {
+      return { matched: false as const, disposition: "UNMATCHED", messageLogId: null as string | null };
+    }
+    if (candidates.length !== 1) return fail("AMBIGUOUS_RETRY_PROVIDER_SID");
+    const candidate = candidates[0]!;
+    const scope: SmsRecoveryScope = {
+      messageLogId: candidate.messageLogId,
+      organizationId: candidate.organizationId,
+      propertyId: candidate.propertyId,
+      reservationId: candidate.reservationId,
+      originalProviderMessageId: candidate.originalProviderMessageId,
+    };
+    const journal = await lockedJournal(tx, scope);
+    if (!journal || journal.retriesUsed !== 1 ||
+        journal.retryProviderMessageId !== outcome.providerMessageId) {
+      return fail("RETRY_OUTCOME_SCOPE_CHANGED");
+    }
+    await tx.$executeRawUnsafe(
+      "SELECT pg_advisory_xact_lock(hashtextextended($1, 0))",
+      `sms-recovery-sid:${outcome.providerMessageId}`
+    );
+    const now = nowFrom(clock);
+    if (outcome.eventAt > now) return fail("RETRY_OUTCOME_TIME_INVALID");
+
+    const previous = (journal.retryDeliveryStatus || null) as ProviderDeliveryStatus | null;
+    const contradiction =
+      (retryProviderSuccess(previous) && retryProviderFailure(outcome.status)) ||
+      (retryProviderFailure(previous) && retryProviderSuccess(outcome.status)) ||
+      (outcome.errorCode !== null && !retryProviderFailure(outcome.status));
+    if (contradiction) {
+      await tx.$executeRawUnsafe(
+        `UPDATE "TwilioSmsRecovery" SET "state"='REVIEW',
+          "lastDecision"='CONTRADICTORY_RETRY_PROVIDER_EVIDENCE',"updatedAt"=$2
+         WHERE "messageLogId"=$1`,
+        journal.messageLogId, now
+      );
+      return { matched: true as const, disposition: "CONFLICT", messageLogId: journal.messageLogId,
+        state: "REVIEW" };
+    }
+    if (!shouldApplyProviderDeliveryTransition(previous, outcome.status)) {
+      return { matched: true as const, disposition: "IGNORED_OLDER_STATE",
+        messageLogId: journal.messageLogId, state: journal.state };
+    }
+
+    const sameFailure = retryProviderFailure(previous) && retryProviderFailure(outcome.status);
+    const mergedCode = sameFailure && !outcome.errorCode ? journal.retryErrorCode : outcome.errorCode;
+    const eventAt = sameFailure && journal.retryStatusUpdatedAt
+      ? new Date(Math.min(journal.retryStatusUpdatedAt.getTime(), outcome.eventAt.getTime()))
+      : outcome.eventAt;
+    const success = retryProviderSuccess(outcome.status);
+    const failure = retryProviderFailure(outcome.status);
+    const nextState = success ? "DELIVERED" : failure ? "REVIEW" : "SUBMITTED";
+    const lastDecision = success ? "RETRY_DELIVERY_CONFIRMED"
+      : failure ? `RETRY_DELIVERY_FAILED_${mergedCode ?? "NO_CODE"}`
+      : `RETRY_PROVIDER_${outcome.status}`;
+    await tx.$executeRawUnsafe(
+      `UPDATE "TwilioSmsRecovery" SET "state"=$2,"retryDeliveryStatus"=$3,
+        "retryErrorCode"=$4,"retryStatusUpdatedAt"=$5,"retryDeliveredAt"=$6,
+        "lastDecision"=$7,"updatedAt"=$8 WHERE "messageLogId"=$1`,
+      journal.messageLogId, nextState, outcome.status, success ? null : mergedCode,
+      eventAt, success ? (journal.retryDeliveredAt ?? eventAt) : null, lastDecision, now
+    );
+    return { matched: true as const, disposition: "APPLIED", messageLogId: journal.messageLogId,
+      state: nextState };
   });
 }
