@@ -1,0 +1,18 @@
+{
+  "compilerOptions": {
+    "noEmit": true,
+    "module": "preserve",
+    "moduleResolution": "bundler",
+    "target": "es2022",
+    "strict": true,
+    "exactOptionalPropertyTypes": true,
+    "noUncheckedIndexedAccess": true,
+    "skipLibCheck": true,
+    "types": ["node"]
+  },
+  "include": [
+    "src/services/twilio-sms-failure.policy.ts",
+    "src/services/twilio-sms-recovery.store.ts",
+    "src/services/twilio-sms-recovery.store.db.test.ts"
+  ]
+}

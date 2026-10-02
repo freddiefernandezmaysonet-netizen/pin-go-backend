@@ -1,0 +1,59 @@
+name: Twilio SMS Recovery V1 PostgreSQL
+
+on:
+  pull_request:
+    paths:
+      - "prisma/twilio-sms-recovery.prisma"
+      - "prisma/migrations/20261002190000_add_twilio_sms_recovery_v1/**"
+      - "src/services/twilio-sms-*.ts"
+      - "tsconfig.twilio-sms-recovery-v1.json"
+      - ".github/workflows/twilio-sms-recovery-v1.yml"
+      - "docs/twilio-sms-recovery-persistence-v1.md"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  postgres:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: ci
+          POSTGRES_PASSWORD: ci
+          POSTGRES_DB: pin_go_twilio_sms_recovery
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U ci -d pin_go_twilio_sms_recovery"
+          --health-interval 5s --health-timeout 5s --health-retries 10
+    env:
+      DATABASE_URL: postgresql://ci:ci@127.0.0.1:5432/pin_go_twilio_sms_recovery
+      TWILIO_RECOVERY_DISPOSABLE_DB: "1"
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - name: Install locked dependencies without lifecycle scripts
+        run: npm ci --ignore-scripts --no-audit --no-fund
+      - name: Validate full multi-file Prisma schema and generate client
+        run: |
+          npx --no-install prisma validate --schema ./prisma
+          npx --no-install prisma generate --schema ./prisma
+      - name: Apply actual migrations only to disposable PostgreSQL
+        run: npx --no-install prisma migrate deploy --schema ./prisma
+      - name: Strict recovery TypeScript
+        run: npx --no-install tsc -p tsconfig.twilio-sms-recovery-v1.json
+      - name: Retained bounded-retry policy tests
+        run: node --import tsx --test src/services/twilio-sms-failure.policy.test.ts
+      - name: PostgreSQL atomic registration claim restart and rollback
+        run: node --import tsx --test src/services/twilio-sms-recovery.store.db.test.ts
+      - name: Whitespace integrity
+        run: git diff --check

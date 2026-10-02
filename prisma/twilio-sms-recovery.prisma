@@ -1,0 +1,30 @@
+// Internal, non-dispatching journal. Scope IDs are verified against current
+// MessageLog -> Reservation -> Property inside each registration/claim transaction.
+// They are deliberately not cascading relations: failure evidence survives deletion.
+model TwilioSmsRecovery {
+  messageLogId             String   @id
+  organizationId           String
+  propertyId               String
+  reservationId            String
+  originalProviderMessageId String  @unique
+  originalDeliveryStatus   String
+  originalErrorCode        String
+  firstFailureAt           DateTime
+  retryNotBefore           DateTime
+  minimumSpacingMs         Int
+  sourceFingerprint        String
+  state                    String   @default("AVAILABLE")
+  retriesUsed              Int      @default(0)
+  claimToken               String?  @unique
+  claimedAt                DateTime?
+  validUntil               DateTime?
+  retryProviderMessageId   String?  @unique
+  nextMessageKey           String?
+  nextMessageAt            DateTime?
+  lastDecision             String?
+  createdAt                DateTime @default(now())
+  updatedAt                DateTime @updatedAt
+
+  @@index([state, retryNotBefore])
+  @@index([organizationId, propertyId, reservationId])
+}
