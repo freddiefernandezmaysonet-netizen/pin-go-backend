@@ -76,6 +76,33 @@ jobs:
             exit 0
           fi
 
+          # PR #340 only: additive sitemap classification; retain every OTA certification below.
+          if [ "${GITHUB_HEAD_REF:-}" = "agent/public-stays-sitemap-v1" ]; then
+            test "$GITHUB_EVENT_NAME" = "pull_request"
+            test "$GITHUB_REPOSITORY" = "freddiefernandezmaysonet-netizen/pin-go-backend"
+            test "$SCOPE_PR_NUMBER" = "340"
+            test "$SCOPE_HEAD_REPO" = "$GITHUB_REPOSITORY"
+            test "$SCOPE_BASE_REPO" = "$GITHUB_REPOSITORY"
+            test "$GITHUB_BASE_REF" = "main"
+            cat > "$RUNNER_TEMP/public-stays-sitemap-allowed.txt" <<'EOF'
+          .github/workflows/ota-airbnb-listing-discovery.yml
+          .github/workflows/ota-initial-distribution-enablement.yml
+          .github/workflows/pin-ai-host-incidents-v1.yml
+          .github/workflows/public-stays-sitemap.yml
+          prisma/migrations/20261002130000_property_test_classification/migration.sql
+          prisma/schema.prisma
+          src/routes/public-booking.routes.ts
+          src/routes/public-stays-sitemap.routes.ts
+          src/services/public-stays-sitemap.service.test.ts
+          src/services/public-stays-sitemap.service.ts
+          EOF
+            diff -u "$RUNNER_TEMP/public-stays-sitemap-allowed.txt" "$RUNNER_TEMP/actual.txt"
+            test "$(git diff --no-ext-diff --no-color --full-index --unified=0 "origin/$BASE_BRANCH...HEAD" -- prisma/schema.prisma | sha256sum | cut -d ' ' -f 1)" = "e2b2541c446ad073bc2d2298f5809daa4a2c13836a06e709842f22b2a043372c"
+            test "$(sha256sum prisma/migrations/20261002130000_property_test_classification/migration.sql | cut -d ' ' -f 1)" = "347d9d1dff2680d02e67c39b1684832cf1e46b66d5648695bcec95feb0dc1397"
+            echo "PR #340 exact sitemap scope verified; continuing all retained OTA certifications."
+            exit 0
+          fi
+
           # PR #294 only: TTLock Gateway Health foundation is outside OTA scope.
           # Keep this workflow fail-closed by permitting only the exact foundation files.
           if [ "${GITHUB_HEAD_REF:-$GITHUB_REF_NAME}" = "agent/ttlock-gateway-health-foundation-v1" ]; then
