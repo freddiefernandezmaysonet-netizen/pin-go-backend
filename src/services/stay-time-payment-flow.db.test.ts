@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
+import { createStayTimeDepartureCleaningFixture } from "./stay-time-departure-cleaning.fixture.js";
 import type Stripe from "stripe";
 import { Prisma, PrismaClient } from "@prisma/client";
 import { defaultStayTimeSettings } from "../pin-ai/actions/stay-time-settings.js";
@@ -16,7 +17,7 @@ test("paid stay-time processing applies once or durably recovers only the increm
   assert.equal(parsed.pathname, "/pingo_stay_time_test");
   const db = new PrismaClient({ datasources: { db: { url } } });
   t.after(() => db.$disconnect());
-  for (const scenario of ["late", "early", "stripe-adapter-apply", "stripe-adapter-refund", "concurrent-apply", "serialization-burst", "serialization-exhausted", "revoked-cleaning", "blocked-turnover", "price-changed", "expired", "expired-status",
+  for (const scenario of ["late", "early", "departure-duration-changed", "departure-confirmation-changed", "stripe-adapter-apply", "stripe-adapter-refund", "concurrent-apply", "serialization-burst", "serialization-exhausted", "revoked-cleaning", "blocked-turnover", "price-changed", "expired", "expired-status",
     "refund-outage", "refund-response-lost", "refund-pending", "refund-wrong-receipt", "concurrent-refund",
     "payment-outage", "wrong-payment", "partially-refunded", "wrong-account", "reconcile-outage", "cancelled-without-recovery"] as const) {
     await t.test(scenario, async () => {
@@ -41,6 +42,11 @@ test("paid stay-time processing applies once or durably recovers only the increm
       let staffId: string | undefined;
       let workId: string | undefined;
       try {
+        if (!early) {
+          const departure = await createStayTimeDepartureCleaningFixture(db, reservation, stagedAt);
+          staffId = departure.staffId;
+          workId = departure.workId;
+        }
         if (early) {
           const prior = await db.reservation.create({ data: { propertyId: property.id, guestName: "Prior synthetic guest",
             checkIn: new Date("2026-09-29T19:00Z"), checkOut: new Date("2026-10-01T10:00Z") } });
@@ -67,10 +73,20 @@ test("paid stay-time processing applies once or durably recovers only the increm
         await db.reservationModification.update({ where: { id }, data: { stripeConnectedAccountId: reservation.stripeConnectedAccountId,
           stripeCheckoutSessionId: `cs_${id}`, ...(scenario === "cancelled-without-recovery" ? { status: "CANCELLED" } : {}),
           ...(scenario === "expired-status" ? { status: "EXPIRED", expiredAt: now } : {}) } });
-        const needsRefund = ["stripe-adapter-refund", "revoked-cleaning", "blocked-turnover", "price-changed", "expired", "expired-status", "refund-outage", "refund-response-lost",
+        const needsRefund = ["departure-duration-changed", "departure-confirmation-changed", "stripe-adapter-refund", "revoked-cleaning", "blocked-turnover", "price-changed", "expired", "expired-status", "refund-outage", "refund-response-lost",
           "refund-pending", "refund-wrong-receipt", "concurrent-refund"].includes(scenario);
         if (scenario === "revoked-cleaning") await db.cleaningWork.update({ where: { id: workId! }, data: { completionConfirmedAt: null } });
-        if (needsRefund && !["revoked-cleaning", "price-changed", "expired", "expired-status"].includes(scenario)) await db.propertyBlockedDate.create({
+        if (scenario === "departure-duration-changed") {
+          await db.cleaningWork.update({ where: { id: workId! }, data: { durationCommitmentMinutes: 240 } });
+          await db.propertyStaff.updateMany({ where: { propertyId: property.id, staffMemberId: staffId! }, data: { cleaningDurationCommitmentMinutes: 240 } });
+        }
+        if (scenario === "departure-confirmation-changed") {
+          await db.cleaningConfirmation.updateMany({ where: { reservationId: reservation.id }, data: { status: "EXPIRED" } });
+          const replacement = await db.cleaningConfirmation.create({ data: { reservationId: reservation.id,
+            propertyId: property.id, staffMemberId: staffId!, status: "CONFIRMED", token: `replacement-${id}` } });
+          await db.cleaningWork.update({ where: { id: workId! }, data: { confirmationId: replacement.id } });
+        }
+        if (needsRefund && !["departure-duration-changed", "departure-confirmation-changed", "revoked-cleaning", "price-changed", "expired", "expired-status"].includes(scenario)) await db.propertyBlockedDate.create({
           data: { propertyId: property.id, startDate: new Date("2026-10-03T19:59Z"), endDate: new Date("2026-10-04T15:00Z") } });
         if (scenario === "price-changed") await db.reservation.update({ where: { id: reservation.id }, data: { totalAmount: 151 } });
         const before = await db.reservation.findUniqueOrThrow({ where: { id: reservation.id } });

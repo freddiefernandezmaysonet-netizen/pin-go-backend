@@ -4,6 +4,7 @@ import { planStayTimeAdjustment, StayTimePolicyError, type StayTimeOperation } f
 import { defaultStayTimeSettings, parseStayTimeSettings, validateStayTimeSettingsLimits } from "../pin-ai/actions/stay-time-settings.js";
 import { readArrivalCleaningReadiness } from "./arrival-cleaning-readiness.service.js";
 import { deriveStayTimeHourlyBasis } from "./stay-time-hourly-basis.js";
+import { readStayTimeDepartureCleaning } from "./stay-time-departure-cleaning.service.js";
 
 function reject(code: string): never { throw new StayTimePolicyError(code); }
 
@@ -85,7 +86,10 @@ export async function estimateStayTimeAdjustmentInTransaction(
         pricingBreakdown: row.pricingBreakdown }) : undefined;
     const scope = { organizationId: input.organizationId, propertyId: row.propertyId };
     const offset = property.cleaningStartOffsetMinutes;
-    const duration = property.cleaningDurationMinutes;
+    const departureCleaning = early ? null : await readStayTimeDepartureCleaning(tx, {
+      ...scope, reservationId: row.id, checkOut: row.checkOut, cleaningStartOffsetMinutes: offset, now,
+    });
+    const duration = departureCleaning?.durationMinutes ?? property.cleaningDurationMinutes;
     if (!early && (!Number.isInteger(offset) || offset < 0 || offset > 1440 ||
         !Number.isInteger(duration) || duration <= 0 || duration > 1440)) reject("INVALID_CLEANING_WINDOW");
     const coveredFrom = early ? requestedAt : row.checkOut;
@@ -158,6 +162,7 @@ export async function estimateStayTimeAdjustmentInTransaction(
     });
     return { ...plan, decision: "ESTIMATE_ONLY" as const, reservationUpdatedAt: row.updatedAt.toISOString(),
       arrivalReadinessEvidenceId: arrivalReadiness?.evidenceId ?? null,
+      departureCleaning,
       settingsRevision: property.stayTimeSettingsRevision, estimatedAt: now.toISOString(),
       expiresAt: new Date(now.getTime() + 60_000).toISOString(), availabilityHeld: false as const,
       executionAvailable: false as const, taxesIncluded: false as const };

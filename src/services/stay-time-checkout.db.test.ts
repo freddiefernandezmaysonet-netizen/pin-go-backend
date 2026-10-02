@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
+import { createStayTimeDepartureCleaningFixture } from "./stay-time-departure-cleaning.fixture.js";
 import Stripe from "stripe";
 import { PrismaClient } from "@prisma/client";
 import { defaultStayTimeSettings } from "../pin-ai/actions/stay-time-settings.js";
@@ -47,6 +48,11 @@ test("internal Checkout creation and signed events preserve one incremental paym
           cleaningFee: 50, amenitiesTotal: 0, taxesTotal: 0 } } });
       let staffId: string | undefined, workId: string | undefined;
       try {
+        if (!early) {
+          const departure = await createStayTimeDepartureCleaningFixture(db, reservation, stagedAt);
+          staffId = departure.staffId;
+          workId = departure.workId;
+        }
         if (early) {
           const prior = await db.reservation.create({ data: { propertyId: property.id, guestName: "Prior synthetic guest",
             checkIn: new Date("2026-09-29T19:00Z"), checkOut: new Date("2026-10-01T10:00Z") } });

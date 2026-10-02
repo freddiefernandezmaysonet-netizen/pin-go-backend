@@ -8,6 +8,7 @@ on:
       - "src/pin-ai/runtime/pin-go-read-tool-executor*"
       - "src/services/property-stay-time-settings*"
       - "src/services/stay-time-estimate*"
+      - "src/services/stay-time-departure-cleaning*"
       - "src/services/stay-time-quote*"
       - "src/services/stay-time-proposal*"
       - "src/services/stay-time-apply*"
@@ -67,7 +68,7 @@ jobs:
       - name: Atomic cleaning renewal and concurrent cleaner declarations
         run: node --import tsx --test src/services/cleaning-reconfirmation-renewal.db.test.ts
       - name: Confirmed quote and bounded payment deadlines
-        run: node --import tsx --test src/services/stay-time-payment-window.test.ts src/services/stay-time-payment-evidence.test.ts
+        run: node --import tsx --test src/services/stay-time-payment-window.test.ts src/services/stay-time-payment-evidence.test.ts src/services/stay-time-departure-cleaning.service.test.ts
       - name: Stripe retrieval and refund adapter with offline SDK responses
         run: node --import tsx --test src/services/stay-time-stripe-provider.test.ts
       - name: Paid checkout and post-payment validation without side effects

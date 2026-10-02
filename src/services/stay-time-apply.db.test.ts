@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
+import { createStayTimeDepartureCleaningFixture } from "./stay-time-departure-cleaning.fixture.js";
 import { Prisma, PrismaClient } from "@prisma/client";
 import { defaultStayTimeSettings } from "../pin-ai/actions/stay-time-settings.js";
 import { createStayTimeProposal, confirmStayTimeProposal, stageStayTimeModification } from "./stay-time-proposal.service.js";
@@ -20,7 +21,7 @@ test("free stay-time changes apply atomically through the canonical service", { 
       const org = await db.organization.create({ data: { name: "Synthetic stay-time apply" } });
       const defaults = defaultStayTimeSettings();
       const property = await db.property.create({ data: { organizationId: org.id, name: "Synthetic free apply",
-        timezone: "America/Puerto_Rico", checkInTime: early ? "15:00" : "16:00", checkOutTime: "11:00",
+        timezone: "America/Puerto_Rico", checkInTime: early ? "15:00" : "16:00", checkOutTime: "11:00", cleaningNfcEnabled: true,
         cleaningStartOffsetMinutes: 30, cleaningDurationMinutes: 180,
         stayTimeSettings: { earlyCheckin: { ...defaults.earlyCheckin, enabled: true },
           lateCheckout: { ...defaults.lateCheckout, enabled: true,
@@ -35,6 +36,11 @@ test("free stay-time changes apply atomically through the canonical service", { 
       let staffId: string | undefined;
       let workId: string | undefined;
       try {
+        if (!early) {
+          const departure = await createStayTimeDepartureCleaningFixture(db, stay, now);
+          staffId = departure.staffId;
+          workId = departure.workId;
+        }
         if (early) {
           const prior = await db.reservation.create({ data: { propertyId: property.id, guestName: "Prior synthetic guest",
             checkIn: new Date("2026-09-29T19:00Z"), checkOut: new Date("2026-10-01T10:00Z") } });

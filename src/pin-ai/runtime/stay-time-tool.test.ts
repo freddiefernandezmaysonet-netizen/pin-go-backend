@@ -28,7 +28,10 @@ function fixture(options: { early?: boolean; conflict?: boolean; error?: boolean
             updatedAt: new Date("2030-09-30T00:00Z") } };
       }
       return options.conflict ? { checkIn: new Date("2030-10-03T18:00Z"), checkOut: new Date("2030-10-04T15:00Z") } : null;
-    } }, propertyBlockedDate: { async findFirst() { return null; } },
+    } }, cleaningWork: { async findMany() { return [{ id: "work", propertyId: "property", staffMemberId: "cleaner", confirmationId: "confirmation", scheduledStartAt: new Date("2030-10-03T15:30Z"), durationCommitmentMinutes: 180, timingConsentVersion: "v1", timingConsentAcceptedAt: new Date("2020-01-01T00:00Z"), startConfirmedAt: null, completionConfirmedAt: null }]; } },
+    cleaningConfirmation: { async findMany() { return [{ id: "confirmation", propertyId: "property", staffMemberId: "cleaner", status: "CONFIRMED" }]; } },
+    propertyStaff: { async findFirst() { return { id: "assignment", cleaningDurationCommitmentMinutes: 180 }; } },
+    propertyBlockedDate: { async findFirst() { return null; } },
     reservationModification: { async findFirst() { return null; }, async findMany() { return []; } } });
   } };
   return { db: db as any, reads: () => reads };
@@ -42,6 +45,7 @@ test("real executor routes late checkout to scoped estimate and ignores conversa
   assert.equal(result.settingsRevision, 2);
   assert.equal(result.authorizationGranted, false);
   assert.equal(result.executionAvailable, false);
+  assert.equal("departureCleaning" in result, false);
   assert.match(String(result.note), /antes de impuestos/);
   assert.ok(f.reads() > 0);
 });

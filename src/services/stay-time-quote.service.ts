@@ -105,6 +105,7 @@ export async function prepareStayTimeQuoteInTransaction(tx: Prisma.TransactionCl
       policyVersion: estimate.policyVersion, settingsRevision: estimate.settingsRevision,
       hourlyPricingBasis: estimate.hourlyPricingBasis,
       arrivalReadinessEvidenceId: estimate.arrivalReadinessEvidenceId,
+      departureCleaning: estimate.departureCleaning,
       requiredFreeFrom: estimate.requiredFreeFrom, requiredFreeUntil: estimate.requiredFreeUntil,
       pricing, createdAt: now.toISOString(), expiresAt: expiresAt.toISOString() };
     const fingerprint = createHash("sha256").update(JSON.stringify(terms)).digest("hex");

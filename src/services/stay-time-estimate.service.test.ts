@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
+import { createStayTimeDepartureCleaningFixture } from "./stay-time-departure-cleaning.fixture.js";
 import { Prisma, PrismaClient } from "@prisma/client";
 import { estimateStayTimeAdjustment, resolveStayTimeClock } from "./stay-time-estimate.service.js";
 import { defaultStayTimeSettings } from "../pin-ai/actions/stay-time-settings.js";
@@ -29,12 +30,16 @@ test("stay-time estimates use real scoped PostgreSQL evidence without writes", {
   const enabled = { earlyCheckin: { ...settings.earlyCheckin, enabled: true },
     lateCheckout: { ...settings.lateCheckout, enabled: true, fee: { mode: "PER_HOUR", amountMinor: 0, currency: "USD" } } };
   const property = await db.property.create({ data: { organizationId: org.id, name: "Synthetic estimate property",
-    timezone: "America/Puerto_Rico", checkInTime: "16:00", checkOutTime: "11:00",
+    timezone: "America/Puerto_Rico", checkInTime: "16:00", checkOutTime: "11:00", cleaningNfcEnabled: true,
     cleaningStartOffsetMinutes: 30, cleaningDurationMinutes: 180, stayTimeSettings: enabled } });
   t.after(async () => {
     try {
       await db.pinAIActionProposal.deleteMany({ where: { propertyId: property.id } });
       await db.reservationModification.deleteMany({ where: { reservation: { propertyId: property.id } } });
+      await db.cleaningWork.deleteMany({ where: { propertyId: property.id } });
+      await db.cleaningConfirmation.deleteMany({ where: { propertyId: property.id } });
+      await db.propertyStaff.deleteMany({ where: { propertyId: property.id } });
+      await db.staffMember.deleteMany({ where: { organizationId: org.id } });
       await db.reservation.deleteMany({ where: { propertyId: property.id } });
       await db.propertyBlockedDate.deleteMany({ where: { propertyId: property.id } });
       await db.property.delete({ where: { id: property.id } });
@@ -48,6 +53,7 @@ test("stay-time estimates use real scoped PostgreSQL evidence without writes", {
     guestToken: `synthetic-quote-${property.id}`, totalAmount: 150,
     pricingBreakdown: { currency: "usd", totalAmount: 150, totalAmountCents: 15000,
       nightlySubtotal: 100, nightlyRates: [{ date: "2026-10-01", rate: 40 }, { date: "2026-10-02", rate: 60 }], cleaningFee: 50, amenitiesTotal: 0, taxesTotal: 0 } } });
+  const departure = await createStayTimeDepartureCleaningFixture(db, stay, now);
   const input = { organizationId: org.id, propertyId: property.id, reservationId: stay.id,
     operation: "LATE_CHECKOUT" as const, requestedLocalTime: "12:30" };
   const estimate = () => estimateStayTimeAdjustment(db, input, now);
@@ -81,8 +87,56 @@ test("stay-time estimates use real scoped PostgreSQL evidence without writes", {
   const proposalInput = { guestToken: stay.guestToken!, operation: "LATE_CHECKOUT" as const,
     requestedLocalTime: "12:30", language: "es" as const };
   const proposalOptions = { now, platformFeePercent: "1.5" };
+  await t.test("assigned cleaner duration sets each cutoff and invalidates earlier consent", async () => {
+    const created = await createStayTimeProposal(db, proposalInput, proposalOptions);
+    const duration = async (minutes: number) => {
+      await db.propertyStaff.update({ where: { id: departure.assignmentId }, data: { cleaningDurationCommitmentMinutes: minutes } });
+      await db.cleaningWork.update({ where: { id: departure.workId }, data: { durationCommitmentMinutes: minutes } });
+    };
+    try {
+      await duration(120);
+      await estimateStayTimeAdjustment(db, { ...input, requestedLocalTime: "13:30" }, now);
+      await assert.rejects(estimateStayTimeAdjustment(db, { ...input, requestedLocalTime: "13:31" }, now), /CLEANING_CHECKIN_LIMIT_EXCEEDED/);
+      await assert.rejects(confirmStayTimeProposal(db, { guestToken: stay.guestToken!, proposalId: created.proposal.id,
+        confirmationToken: created.confirmationToken }, proposalOptions), /QUOTE_CHANGED/);
+      await duration(240);
+      await estimateStayTimeAdjustment(db, { ...input, requestedLocalTime: "11:30" }, now);
+      await assert.rejects(estimate(), /CLEANING_CHECKIN_LIMIT_EXCEEDED/);
+      await duration(180);
+      await db.propertyStaff.update({ where: { id: departure.assignmentId }, data: { cleaningDurationCommitmentMinutes: 120 } });
+      await assert.rejects(estimate(), /DEPARTURE_CLEANING_COMMITMENT_REQUIRED/);
+    } finally {
+      await duration(180);
+      await db.pinAIActionProposal.deleteMany({ where: { reservationId: stay.id } });
+    }
+  });
   const confirmInput = (created: Awaited<ReturnType<typeof createStayTimeProposal>>) => ({
     guestToken: stay.guestToken!, proposalId: created.proposal.id, confirmationToken: created.confirmationToken,
+  });
+  await t.test("missing, inactive and replaced departure commitments cannot reuse a quote", async () => {
+    const created = await createStayTimeProposal(db, proposalInput, proposalOptions);
+    let replacementId: string | null = null;
+    try {
+      await db.cleaningWork.update({ where: { id: departure.workId }, data: { supersededAt: now } });
+      await assert.rejects(estimate(), /DEPARTURE_CLEANING_COMMITMENT_REQUIRED/);
+      await db.cleaningWork.update({ where: { id: departure.workId }, data: { supersededAt: null } });
+      await db.staffMember.update({ where: { id: departure.staffId }, data: { isActive: false } });
+      await assert.rejects(estimate(), /DEPARTURE_CLEANING_COMMITMENT_REQUIRED/);
+      await db.staffMember.update({ where: { id: departure.staffId }, data: { isActive: true } });
+      await db.cleaningConfirmation.update({ where: { id: departure.confirmationId }, data: { status: "EXPIRED" } });
+      const replacement = await db.cleaningConfirmation.create({ data: { reservationId: stay.id, propertyId: property.id,
+        staffMemberId: departure.staffId, status: "CONFIRMED", token: `replacement-${departure.confirmationId}` } });
+      replacementId = replacement.id;
+      await db.cleaningWork.update({ where: { id: departure.workId }, data: { confirmationId: replacement.id } });
+      await estimate();
+      await assert.rejects(confirmStayTimeProposal(db, confirmInput(created), proposalOptions), /QUOTE_CHANGED/);
+    } finally {
+      await db.staffMember.update({ where: { id: departure.staffId }, data: { isActive: true } });
+      await db.cleaningWork.update({ where: { id: departure.workId }, data: { supersededAt: null, confirmationId: departure.confirmationId } });
+      if (replacementId) await db.cleaningConfirmation.delete({ where: { id: replacementId } });
+      await db.cleaningConfirmation.update({ where: { id: departure.confirmationId }, data: { status: "CONFIRMED" } });
+      await db.pinAIActionProposal.deleteMany({ where: { reservationId: stay.id } });
+    }
   });
   await t.test("explicit consent is revalidated, token-protected and idempotent without applying or charging", async () => {
     const before = await db.reservation.findUniqueOrThrow({ where: { id: stay.id } });
