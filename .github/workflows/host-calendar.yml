@@ -1,0 +1,22 @@
+name: Host calendar
+on:
+  pull_request:
+    branches: [main]
+    paths: ['src/services/host-calendar*', 'src/routes/dashboard.host-calendar*', 'src/server.ts', 'tsconfig.host-calendar.json', '.github/workflows/host-calendar.yml']
+permissions:
+  contents: read
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    env:
+      DATABASE_URL: postgresql://test:test@127.0.0.1:1/no_runtime_database
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+      - run: npm ci --ignore-scripts --no-audit --no-fund
+      - run: npx --no-install prisma generate --schema ./prisma
+      - run: npx --no-install tsc -p tsconfig.host-calendar.json
+      - run: node --import tsx --test src/services/host-calendar.service.test.ts

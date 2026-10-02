@@ -11,7 +11,7 @@ function adapter(enabled: boolean) {
   const requests: WhiteLabelTransportRequest[] = [];
   const responses = [
     { data: { id: "group-ext" } },
-    { data: { id: "property-ext" } },
+    { data: { id: "property-ext", attributes: { property_type: "holiday_home", property_category: "vacation_rental" } } },
     { data: { id: "room-ext" } },
     { data: { id: "rate-ext" } },
     { data: { attributes: { token: "secret-one-time-token" } } },
@@ -79,6 +79,7 @@ test("provisioning contract is group then property, room and rate", async () => 
   const property = await value.ensureProperty({
     organizationId: "org-1",
     propertyId: "property-1",
+    propertyType: "HOUSE",
     propertyName: "Casa Azul",
     currency: "usd",
     timezone: "America/Puerto_Rico",
@@ -158,6 +159,7 @@ test("one-time token request is scoped to group and property", async () => {
   const property = await value.ensureProperty({
     organizationId: "org-1",
     propertyId: "property-1",
+    propertyType: "HOUSE",
     propertyName: "Casa Azul",
     currency: "USD",
     timezone: "America/Puerto_Rico",
@@ -290,6 +292,7 @@ test("partial retry reuses checkpoint IDs without transport calls", async () => 
   assert.deepEqual(await value.ensureProperty({
     organizationId: "org-1",
     propertyId: "property-1",
+    propertyType: "HOUSE",
     propertyName: "Casa Azul",
     currency: "USD",
     timezone: "America/Puerto_Rico",
@@ -329,4 +332,34 @@ test("malformed success evidence is classified as reconciliation required", asyn
       error.code === "OTA_PROVIDER_GROUP_RESPONSE_INVALID" &&
       error.retryDisposition === "RECONCILIATION_REQUIRED"
   );
+});
+
+const propertyArgs = {
+  organizationId: "org-1", propertyId: "property-1", propertyName: "Casa Azul",
+  currency: "USD", timezone: "America/Puerto_Rico", externalGroupId: "group-ext",
+  existingExternalPropertyId: null,
+};
+
+test("new properties send explicit type and reject missing or mismatched billing evidence", async () => {
+  for (const attributes of [undefined, { property_type: "hotel", property_category: "hotel" }, { property_type: "holiday_home", property_category: "hotel" }, { property_type: "holiday_home", property_category: "vacation_rental" }]) {
+    const requests: WhiteLabelTransportRequest[] = [];
+    const value = new ChannexWhiteLabelAdapter({ enabled: true, apiKey: "test", iframeBaseUrl: "https://example.test", channelFilterByProvider: {},
+      transport: { async send(request) { requests.push(request); return { data: { id: "property-ext", attributes } }; } },
+    });
+    const operation = value.ensureProperty({ ...propertyArgs, propertyType: "HOUSE" });
+    if (attributes?.property_category === "vacation_rental") {
+      assert.deepEqual(await operation, { externalPropertyId: "property-ext" });
+    } else {
+      await assert.rejects(operation, (error: unknown) => error instanceof WhiteLabelAdapterError && error.retryDisposition === "RECONCILIATION_REQUIRED");
+    }
+    assert.equal((requests[0]?.body as any).property.property_type, "holiday_home");
+    assert.equal(requests.length, 1);
+  }
+});
+
+test("missing type makes no request and existing corrected properties are reused unchanged", async () => {
+  const { value, requests } = adapter(true);
+  await assert.rejects(value.ensureProperty(propertyArgs), /OTA_PROPERTY_TYPE_REQUIRED/);
+  assert.deepEqual(await value.ensureProperty({ ...propertyArgs, existingExternalPropertyId: "already-corrected" }), { externalPropertyId: "already-corrected" });
+  assert.equal(requests.length, 0);
 });

@@ -1,3 +1,5 @@
+import { buildHostCalendarRouter } from "./routes/dashboard.host-calendar.route.js";
+import { calculateDirectBookingPricing as calendarPricing } from "./services/direct-booking-pricing.service.js";
 import { guestMobileIdentityRouter } from "./routes/guest-mobile-identity.routes.js";
 import "dotenv/config";
 import express from "express";
@@ -344,6 +346,7 @@ app.use(dashboardRouter);
 app.use(dashboardReservationsRouter);
 app.use(buildDashboardDamageCasesRouter(prisma));
 app.use(buildDashboardChannexFullSyncRouter(prisma));
+app.use(buildHostCalendarRouter(prisma, calendarPricing));
 app.use(dashboardPropertiesRouter);
 app.use(buildDashboardPropertyListingDetailsRouter(prisma));
 app.use(dashboardGuestAccessSettingsRouter);

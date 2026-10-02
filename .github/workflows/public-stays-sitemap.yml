@@ -1,0 +1,24 @@
+name: Public stays sitemap certification
+on:
+  pull_request:
+    paths:
+      - 'src/services/public-stays-sitemap*'
+      - 'src/routes/public-stays-sitemap*'
+      - 'src/routes/public-booking.routes.ts'
+      - 'prisma/schema.prisma'
+      - 'prisma/migrations/20261002130000_property_test_classification/**'
+      - '.github/workflows/public-stays-sitemap.yml'
+jobs:
+  certify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+      - run: npm ci --ignore-scripts --no-audit --no-fund
+      - run: npx prisma generate
+      - run: npx tsc --noEmit --strict --skipLibCheck --target ES2022 --module NodeNext --moduleResolution NodeNext src/routes/public-stays-sitemap.routes.ts
+      - run: node --import tsx --test src/services/public-stays-sitemap.service.test.ts

@@ -13,6 +13,7 @@ function setup(overrides: Partial<ProvisioningSnapshot> = {}) {
     organizationId: "org-1",
     organizationName: "Organization One",
     propertyId: "property-1",
+    propertyType: "HOUSE",
     propertyName: "Casa Uno",
     maxGuests: 4,
     currency: "USD",
@@ -206,4 +207,16 @@ test("a READY distribution mapping aligns PMS and returns without provider provi
   });
   assert.deepEqual(result, { provisioningStatus: "READY" });
   assert.deepEqual(calls, ["prepare", "load", "align-pms-mapping"]);
+});
+
+test("missing or ambiguous listing type blocks new provisioning before claims or provider calls", async () => {
+  for (const propertyType of [null, undefined, "OTHER"]) {
+    const { calls, repository, provisioner } = setup({ propertyType });
+    await assert.rejects(orchestrateOtaProvisioning({
+      repository, provisioner, async prepareLogicalConnection() { calls.push("prepare"); },
+      organizationId: "org-1", propertyId: "property-1", requestedByUserId: "user-1",
+      provider: "AIRBNB", requestKey: "request-123",
+    }), /OTA_PROPERTY_TYPE_REQUIRED/);
+    assert.deepEqual(calls, ["prepare", "load"]);
+  }
 });

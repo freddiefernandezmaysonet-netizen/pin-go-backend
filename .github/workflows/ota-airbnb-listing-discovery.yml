@@ -157,7 +157,7 @@ jobs:
               sed -i '\|^src/domain/computeOperationalRisk.ts$|d' "$RUNNER_TEMP/stay-time-settings-allowed.txt"
             fi
             diff -u "$RUNNER_TEMP/stay-time-settings-allowed.txt" "$RUNNER_TEMP/actual.txt"
-            test "$(git diff --no-ext-diff --no-color --full-index --unified=0 "origin/$BASE_BRANCH...HEAD" -- prisma/schema.prisma | sha256sum | cut -d ' ' -f 1)" = "16617ef86bc34139dfaeb21b4381cd873441b612616ec405adb84f18a9b959a3"
+            test "$(git diff --no-ext-diff --no-color --full-index --unified=0 "origin/$BASE_BRANCH...HEAD" -- prisma/schema.prisma | sha256sum | cut -d ' ' -f 1)" = "e4275686f99c3709a02b3040d60fc4460011f61f8aa69b45f31add54695f3409"
             test "$(sha256sum prisma/migrations/20261001183000_cleaning_work_confirmation_history/migration.sql | cut -d ' ' -f 1)" = "20cd60db321dc5becbadc2f56065cf9f29f320941625da3d5b246927c5d37d0a"
             test "$(sha256sum prisma/migrations/20261001110000_property_stay_time_settings_v1/migration.sql | cut -d ' ' -f 1)" = "848dc881ee67925f88af326639cc457b64704ddb01773ee8fdd7dea58a80f9df"
             # Pin exact added/removed server lines; unrelated base edits change blob IDs and offsets.
@@ -165,13 +165,40 @@ jobs:
             if ! git diff --quiet "origin/$BASE_BRANCH" HEAD -- src/domain/computeOperationalRisk.ts; then
               test "$(git diff --no-ext-diff --no-color --full-index --unified=0 "origin/$BASE_BRANCH...HEAD" -- src/domain/computeOperationalRisk.ts | sha256sum | cut -d ' ' -f 1)" = "c5591cd2c13898778ad044c54bc82543f97c3407d0d82569ed70957fef4e4244"
             fi
-            test "$(git diff --no-ext-diff --no-color --full-index --unified=0 "origin/$BASE_BRANCH...HEAD" -- .github/workflows/pin-ai-host-incidents-v1.yml | sha256sum | cut -d ' ' -f 1)" = "dd652c3f94135fc2685a7ab5371bdf926e5c5850ffb150fe335a3199609180c0"
+            test "$(git diff --no-ext-diff --no-color --full-index --unified=0 "origin/$BASE_BRANCH...HEAD" -- .github/workflows/pin-ai-host-incidents-v1.yml | sha256sum | cut -d ' ' -f 1)" = "16860e7db9814fe7d84ad91fac8823f709ab165cd458ef4d5807e484217d1ce1"
             echo "PR #333 exact settings scope verified; continuing retained OTA certifications."
             exit 0
           fi
 
           if [ "${GITHUB_HEAD_REF:-}" = "agent/staff-preferred-language-v1" ]; then
             python3 scripts/verify-staff-language-pr-scope.py
+            exit 0
+          fi
+
+          # PR #340 only: additive sitemap classification; retain every OTA certification below.
+          if [ "${GITHUB_HEAD_REF:-}" = "agent/public-stays-sitemap-v1" ]; then
+            test "$GITHUB_EVENT_NAME" = "pull_request"
+            test "$GITHUB_REPOSITORY" = "freddiefernandezmaysonet-netizen/pin-go-backend"
+            test "$SCOPE_PR_NUMBER" = "340"
+            test "$SCOPE_HEAD_REPO" = "$GITHUB_REPOSITORY"
+            test "$SCOPE_BASE_REPO" = "$GITHUB_REPOSITORY"
+            test "$GITHUB_BASE_REF" = "main"
+            cat > "$RUNNER_TEMP/public-stays-sitemap-allowed.txt" <<'EOF'
+          .github/workflows/ota-airbnb-listing-discovery.yml
+          .github/workflows/ota-initial-distribution-enablement.yml
+          .github/workflows/pin-ai-host-incidents-v1.yml
+          .github/workflows/public-stays-sitemap.yml
+          prisma/migrations/20261002130000_property_test_classification/migration.sql
+          prisma/schema.prisma
+          src/routes/public-booking.routes.ts
+          src/routes/public-stays-sitemap.routes.ts
+          src/services/public-stays-sitemap.service.test.ts
+          src/services/public-stays-sitemap.service.ts
+          EOF
+            diff -u "$RUNNER_TEMP/public-stays-sitemap-allowed.txt" "$RUNNER_TEMP/actual.txt"
+            test "$(git diff --no-ext-diff --no-color --full-index --unified=0 "origin/$BASE_BRANCH...HEAD" -- prisma/schema.prisma | sha256sum | cut -d ' ' -f 1)" = "e2b2541c446ad073bc2d2298f5809daa4a2c13836a06e709842f22b2a043372c"
+            test "$(sha256sum prisma/migrations/20261002130000_property_test_classification/migration.sql | cut -d ' ' -f 1)" = "347d9d1dff2680d02e67c39b1684832cf1e46b66d5648695bcec95feb0dc1397"
+            echo "PR #340 exact sitemap scope verified; continuing all retained OTA certifications."
             exit 0
           fi
 

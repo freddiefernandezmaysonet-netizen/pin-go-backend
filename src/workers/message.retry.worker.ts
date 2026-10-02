@@ -28,6 +28,9 @@ import {
 import { reconcileDamageCaseMissionControl } from "../services/damage-case-mission-control-reconciliation.service";
 import { isDamageCaseAfterCheckout } from "../services/damage-case-checkout.policy.js";
 import { processGuestIncidentNotices } from "../pin-ai/guest/guest-incident-notification.service.js";
+import { retryGuestContactHostNotices } from "../services/ota-guest-contact-notice-retry.service";
+import { processOperationalEmailOutbox } from "../services/durable-operational-email.service.js";
+import { processCleaningHostAttentionNotices } from "../services/cleaning-followup-host-delivery.service.js";
 
 const WORKER_NAME = "message.retry.worker";
 const POLL_MS = Number(process.env.MESSAGE_RETRY_POLL_MS ?? 30000);
@@ -1602,6 +1605,12 @@ async function tick() {
 
   try {
     try {
+      await processOperationalEmailOutbox(prisma, BATCH_SIZE);
+      await processCleaningHostAttentionNotices(prisma, BATCH_SIZE);
+    } catch (e) {
+      errLog("Operational email recovery failed; pending notices retained", { err: toErrString(e) });
+    }
+    try {
       await processRetries();
     } catch (e) {
       errLog(
@@ -1621,6 +1630,17 @@ async function tick() {
           err: toErrString(e),
         }
       );
+    }
+
+    try {
+      const contactNotices = await retryGuestContactHostNotices(prisma, {
+        maxRetries: MAX_RETRIES, batchSize: BATCH_SIZE,
+      });
+      if (contactNotices.sent || contactNotices.failed || contactNotices.skipped) {
+        log("Channex contact host notice retries", contactNotices);
+      }
+    } catch (e) {
+      errLog("Channex contact host notice retries crashed", { err: toErrString(e) });
     }
 
     try {

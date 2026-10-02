@@ -70,6 +70,45 @@ jobs:
             '.github/workflows/ota-initial-distribution-enablement.yml',
           }
           changed = set(Path('/tmp/ota-initial-changed.txt').read_text().splitlines())
+          # PR #340 only; activation, Full Sync and core checks above still execute.
+          if os.environ.get('GITHUB_HEAD_REF') == 'agent/public-stays-sitemap-v1':
+            import hashlib
+            import subprocess
+            repo = 'freddiefernandezmaysonet-netizen/pin-go-backend'
+            if not (
+              os.environ.get('GITHUB_EVENT_NAME') == 'pull_request'
+              and os.environ.get('GITHUB_REPOSITORY') == repo
+              and os.environ.get('SCOPE_PR_NUMBER') == '340'
+              and os.environ.get('SCOPE_HEAD_REPO') == repo
+              and os.environ.get('SCOPE_BASE_REPO') == repo
+              and os.environ.get('GITHUB_BASE_REF') == 'main'
+            ):
+              raise SystemExit('PR #340 repository/branch scope mismatch')
+            allowed = {
+              '.github/workflows/ota-airbnb-listing-discovery.yml',
+              '.github/workflows/ota-initial-distribution-enablement.yml',
+              '.github/workflows/pin-ai-host-incidents-v1.yml',
+              '.github/workflows/public-stays-sitemap.yml',
+              'prisma/migrations/20261002130000_property_test_classification/migration.sql',
+              'prisma/schema.prisma',
+              'src/routes/public-booking.routes.ts',
+              'src/routes/public-stays-sitemap.routes.ts',
+              'src/services/public-stays-sitemap.service.test.ts',
+              'src/services/public-stays-sitemap.service.ts',
+            }
+            if changed != allowed:
+              raise SystemExit(f'PR #340 exact sitemap scope required: {sorted(changed ^ allowed)}')
+            schema_diff = subprocess.check_output([
+              'git', 'diff', '--no-ext-diff', '--no-color', '--full-index', '--unified=0',
+              os.environ['BASE_SHA'] + '...HEAD', '--', 'prisma/schema.prisma',
+            ])
+            if hashlib.sha256(schema_diff).hexdigest() != 'e2b2541c446ad073bc2d2298f5809daa4a2c13836a06e709842f22b2a043372c':
+              raise SystemExit('PR #340 schema must only add the reviewed isTestProperty field')
+            migration = Path('prisma/migrations/20261002130000_property_test_classification/migration.sql')
+            if hashlib.sha256(migration.read_bytes()).hexdigest() != '347d9d1dff2680d02e67c39b1684832cf1e46b66d5648695bcec95feb0dc1397':
+              raise SystemExit('PR #340 migration differs from reviewed classification')
+            print('PR #340 exact sitemap scope verified; all OTA protections executed.')
+            raise SystemExit(0)
           # PR #333 only; all activation, Full Sync and core checks above still run.
           if os.environ.get('GITHUB_HEAD_REF') == 'agent/pin-ai-stay-time-policy-v1':
             repo = 'freddiefernandezmaysonet-netizen/pin-go-backend'

@@ -1,0 +1,16 @@
+{
+  "compilerOptions": {
+    "noEmit": true, "module": "preserve", "moduleResolution": "bundler",
+    "target": "esnext", "strict": true, "skipLibCheck": true, "types": ["node"]
+  },
+  "include": [
+    "src/services/durable-operational-email.service.ts",
+    "src/services/durable-operational-email.service.test.ts",
+    "src/services/durable-email-transport.test.ts",
+    "src/services/cleaning-followup-host-delivery.service.ts",
+    "src/services/guest-cancellation.service.ts",
+    "src/workers/message.retry.worker.ts",
+    "src/workers/reservation.worker.ts",
+    "src/services/guest-journey-communications-delivery-adapter.service.ts"
+  ]
+}
