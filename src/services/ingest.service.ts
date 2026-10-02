@@ -13,6 +13,7 @@
 import crypto from "crypto";
 import { resolveIngestGuestLanguage } from "./guest-language-ingest.policy";
 import { runIngestTransaction, assertDirectBookingIngestAvailability } from "./direct-booking-ingest-transaction";
+import { recordChannexAvailabilityConflict } from "./channex-availability-conflict.service";
 import { computeCleaningWindowPR } from "../services/cleaningWindow.service";
 import { reconcileReservation } from "./reservation.reconcile.service";
 import { log } from "../utils/log";
@@ -257,8 +258,10 @@ export async function ingestReservation(p: IngestPayload) {
       });
     }
 
-    await assertDirectBookingIngestAvailability(tx, { source: p.source, status: p.status,
-      propertyId: p.propertyId, checkIn, checkOut }, previousReservation);
+    if (externalProvider !== "CHANNEX") {
+      await assertDirectBookingIngestAvailability(tx, { source: p.source, status: p.status,
+        propertyId: p.propertyId, checkIn, checkOut }, previousReservation);
+    }
 
     const { reservation, didChange } = await upsertReservation(tx as any, {
       source: p.source,
@@ -288,6 +291,10 @@ export async function ingestReservation(p: IngestPayload) {
       externalRaw: p.externalRaw ?? null,
       status: p.status ?? undefined,
     });
+
+    if (externalProvider === "CHANNEX") {
+      await recordChannexAvailabilityConflict(tx, { reservationId: reservation.id, revision: p.externalUpdatedAt ?? null });
+    }
 
     if (didChange) {
       const distributionContext = await tx.property.findUnique({
@@ -448,7 +455,7 @@ if (property?.cleaningNfcEnabled === true) {
   didChange,
   cleaningConfirmation,
 };
-  });
+  }, externalProvider);
 
 if (String(externalProvider ?? "").toUpperCase() === "CHANNEX") {
   const contactRecovery = await syncChannexGuestContactRecovery(prisma, result.reservationId, {

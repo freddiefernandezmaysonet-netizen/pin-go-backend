@@ -43,6 +43,13 @@ test("OTA and unspecified ingestion retain existing transaction behavior", async
     assert.equal(attempts, 1);
   }
 });
+
+test("trusted Channex provider opts into serializable ingestion regardless of OTA source name", async () => {
+  const db = { $transaction: async (work: (tx: any) => Promise<string>, options: any) => {
+    assert.equal(options.isolationLevel, "Serializable"); return work({});
+  } } as any;
+  assert.equal(await runIngestTransaction(db, "AIRBNB", async () => "preserved", "CHANNEX"), "preserved");
+});
 test("replay and cancellation do not acquire new occupancy; a new stay fails on conflict", async () => {
   const checkIn = new Date("2026-10-10T19:00Z"), checkOut = new Date("2026-10-11T15:00Z");
   const input = { source: "DIRECT_BOOKING", propertyId: "property", checkIn, checkOut };

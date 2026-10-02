@@ -6,8 +6,9 @@ export async function runIngestTransaction<T>(
   db: Pick<PrismaClient, "$transaction">,
   source: string | undefined,
   work: (tx: Prisma.TransactionClient) => Promise<T>,
+  externalProvider?: string | null,
 ): Promise<T> {
-  if (source !== "DIRECT_BOOKING" && source !== "MANUAL") return db.$transaction(work);
+  if (source !== "DIRECT_BOOKING" && source !== "MANUAL" && externalProvider !== "CHANNEX") return db.$transaction(work);
   for (let attempt = 0; ; attempt++) {
     try {
       return await db.$transaction(work, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable });
