@@ -12,6 +12,7 @@
 
 import crypto from "crypto";
 import { resolveIngestGuestLanguage } from "./guest-language-ingest.policy";
+import { runIngestTransaction, assertDirectBookingIngestAvailability } from "./direct-booking-ingest-transaction";
 import { computeCleaningWindowPR } from "../services/cleaningWindow.service";
 import { reconcileReservation } from "./reservation.reconcile.service";
 import { log } from "../utils/log";
@@ -205,7 +206,7 @@ export async function ingestReservation(p: IngestPayload) {
   const externalProvider = (p.externalProvider ?? "").trim() || null;
   const externalId = (p.externalId ?? "").trim() || null;
 
-    const result: IngestReservationResult = await prisma.$transaction(async (tx) => {
+    const result: IngestReservationResult = await runIngestTransaction(prisma, p.source, async (tx) => {
     const ingestKey = buildIngestKey({
       source: p.source,
       propertyId: p.propertyId,
@@ -220,6 +221,7 @@ export async function ingestReservation(p: IngestPayload) {
     });
 
     let previousReservation: {
+      id: string;
       checkIn: Date;
       checkOut: Date;
       status: ReservationStatus;
@@ -235,6 +237,7 @@ export async function ingestReservation(p: IngestPayload) {
           },
         },
         select: {
+          id: true,
           checkIn: true,
           checkOut: true,
           status: true,
@@ -246,12 +249,16 @@ export async function ingestReservation(p: IngestPayload) {
       previousReservation = await tx.reservation.findUnique({
         where: { ingestKey },
         select: {
+          id: true,
           checkIn: true,
           checkOut: true,
           status: true,
         },
       });
     }
+
+    await assertDirectBookingIngestAvailability(tx, { source: p.source, status: p.status,
+      propertyId: p.propertyId, checkIn, checkOut }, previousReservation);
 
     const { reservation, didChange } = await upsertReservation(tx as any, {
       source: p.source,

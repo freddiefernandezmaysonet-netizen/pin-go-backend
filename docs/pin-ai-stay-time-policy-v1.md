@@ -223,3 +223,11 @@ The additive migration is versioned for isolated CI; no persistent Pin&Go databa
 has been migrated. No production activation, live provider call or change to the
 deployed eligibility tools is part of this work. Production behavior remains
 unchanged until the migration and runtime integration are deployed when authorized.
+
+### Atomic Direct Booking ingestion candidate
+
+Direct Booking now rechecks availability through the transaction client immediately before the reservation upsert, after resolving its persisted identity. The check uses the normalized property-local arrival/departure, including persisted pending/applied late-checkout turnover protection. A same-dates active replay does not acquire new occupancy; cancellation releases occupancy and keeps its existing path. Changed dates exclude only the same reservation from the occupancy query.
+
+Only DIRECT_BOOKING ingest runs at Serializable isolation, retrying the complete database callback at most three times for PostgreSQL serialization/deadlock errors. Domain/constraint failures are not retried. Post-commit reconciliation, cleaner confirmation dispatch, guest agreements and messages remain outside the retry loop. Other ingest sources retain their original isolation/behavior.
+
+The disposable PostgreSQL suite exercises the canonical stageStayTimeModification against this exact Direct Booking transaction/check: both readers finish before the first writer commits, with each commit order tested. An arrival one minute before turnover completion must not coexist with the applying hold. These tests do not certify OTA ingestion, manual creation/date changes, legacy creation routes, real Stripe charge/refund recovery, or the full runtime/worker rollout. Those remain separate audit/certification work; keep the PR Draft and execution unmounted.

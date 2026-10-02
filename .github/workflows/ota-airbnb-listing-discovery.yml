@@ -103,6 +103,10 @@ jobs:
           src/services/guest-reservation-modification-apply.service.ts
           src/services/stay-time-apply-validation.service.ts
           src/services/availability.service.ts
+          src/services/ingest.service.ts
+          src/services/direct-booking-ingest-transaction.ts
+          src/services/direct-booking-ingest-transaction.test.ts
+          src/services/direct-booking-ingest-transaction.db.test.ts
           src/services/stay-time-apply.db.test.ts
           src/services/reservation.reconcile.service.ts
           src/services/reservation-guest-access-window.ts
