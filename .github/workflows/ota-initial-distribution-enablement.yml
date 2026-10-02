@@ -190,6 +190,8 @@ jobs:
               'src/services/stay-time-quote.service.test.ts',
               'src/services/stay-time-quote.service.ts',
               'src/services/stay-time-proposal.service.ts',
+              'src/services/stay-time-guest-action.service.ts',
+              'src/services/stay-time-guest-action.db.test.ts',
               'src/services/stay-time-checkout-preflight.db.test.ts',
               'src/services/stay-time-stripe-provider.ts',
               'src/services/stay-time-checkout.service.ts',

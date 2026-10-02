@@ -11,6 +11,7 @@ on:
       - "src/services/stay-time-departure-cleaning*"
       - "src/services/stay-time-quote*"
       - "src/services/stay-time-proposal*"
+      - "src/services/stay-time-guest-action*"
       - "src/services/stay-time-apply*"
       - "src/services/availability.service.ts"
       - "src/services/stay-time-payment-window*"
@@ -88,6 +89,8 @@ jobs:
         run: node --import tsx --test src/services/manual-reservation-date-change.behavior.test.ts src/services/manual-reservation-date-change.contract.test.ts src/routes/dashboard.manual-reservation-date-change.route.test.ts
       - name: Host OTA conflict review authorization, closure and concurrency
         run: node --import tsx --test --test-concurrency=1 src/routes/dashboard.ota-availability-conflicts.routes.test.ts src/services/ota-availability-conflict-review.db.test.ts
+      - name: Internal guest consent-to-execution bridge with simulated providers
+        run: node --import tsx --test src/services/stay-time-guest-action.db.test.ts
       - name: Policy, real HTTP authorization, migration SQL and database concurrency
         # Independent DB suites share tables; keep their fixture writes separate.
         # Explicit Promise.all concurrency scenarios inside each suite are retained.
