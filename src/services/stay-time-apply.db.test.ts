@@ -80,9 +80,15 @@ test("free stay-time changes apply atomically through the canonical service", { 
             assert.deepEqual(dates.blockedDates, ["2026-10-01", "2026-10-02"]);
             assert.equal((await checkPropertyAvailability({ ...interval, excludeReservationModificationId: id }, db)).available, true);
             assert.deepEqual((await getPropertyBlockedDateKeys({ ...calendar, excludeReservationModificationId: id }, db)).blockedDates, []);
-            // Touching the exact departure boundary preserves the next saleable night.
-            assert.equal((await checkPropertyAvailability({ propertyId: property.id,
-              checkIn: staged.modification.proposedCheckOut, checkOut: new Date("2026-10-04T15:00Z") }, db)).available, true);
+            const turnover = { propertyId: property.id, checkIn: staged.modification.proposedCheckOut,
+              checkOut: new Date("2026-10-04T15:00Z") };
+            const blockedTurnover = await checkPropertyAvailability(turnover, db);
+            assert.equal(blockedTurnover.available, false);
+            assert.equal(blockedTurnover.conflict?.type, "STAY_TIME_TURNOVER_HOLD");
+            assert.equal((await checkPropertyAvailability({ ...turnover, excludeReservationModificationId: id }, db)).available, true);
+            // The exact completion boundary (16:00 local) preserves the next night.
+            assert.equal((await checkPropertyAvailability({ ...turnover,
+              checkIn: new Date("2026-10-03T20:00Z") }, db)).available, true);
             const otherProperty = await db.property.create({ data: { organizationId: org.id, name: "Other synthetic property" } });
             try { assert.equal((await checkPropertyAvailability({ ...interval, propertyId: otherProperty.id }, db)).available, true); }
             finally { await db.property.delete({ where: { id: otherProperty.id } }); }
@@ -156,6 +162,27 @@ test("free stay-time changes apply atomically through the canonical service", { 
           assert.equal(applied.lastReconciledCheckOut?.toISOString(), before.checkOut.toISOString());
           assert.equal(applied.lastHardwareSyncAt, null);
           assert.equal((await db.reservationModification.findUniqueOrThrow({ where: { id } })).status, "APPLIED");
+          if (scenario === "late") await t.test("applied late checkout retains its promised turnover without blocking the next night", async () => {
+            const turnover = { propertyId: property.id, checkIn: applied.checkOut, checkOut: new Date("2026-10-04T15:00Z") };
+            const held = await checkPropertyAvailability(turnover, db);
+            assert.equal(held.available, false);
+            assert.equal(held.conflict?.type, "STAY_TIME_TURNOVER_HOLD");
+            assert.equal((await checkPropertyAvailability({ ...turnover, checkIn: new Date("2026-10-03T19:59Z") }, db)).available, false);
+            assert.equal((await checkPropertyAvailability({ ...turnover, checkIn: new Date("2026-10-03T20:00Z") }, db)).available, true);
+            const dates = await getPropertyBlockedDateKeys({ propertyId: property.id,
+              from: new Date("2026-10-03T20:00Z"), to: turnover.checkOut }, db);
+            assert.deepEqual(dates.blockedDates, []);
+            const saved = await db.reservationModification.findUniqueOrThrow({ where: { id } });
+            const consent = saved.guestConfirmation as Prisma.JsonObject;
+            await db.reservationModification.update({ where: { id }, data: { guestConfirmation: {
+              ...consent, quoteTerms: { ...(consent.quoteTerms as Prisma.JsonObject), requiredFreeUntil: "corrupt" },
+            } } });
+            await assert.rejects(checkPropertyAvailability(turnover, db), /STAY_TIME_TURNOVER_REQUIRES_REVIEW/);
+            await db.reservationModification.update({ where: { id }, data: { guestConfirmation: consent } });
+            await db.reservation.update({ where: { id: stay.id }, data: { status: "CANCELLED" } });
+            assert.equal((await checkPropertyAvailability(turnover, db)).available, true);
+            await db.reservation.update({ where: { id: stay.id }, data: { status: "ACTIVE", updatedAt: applied.updatedAt } });
+          });
           const replay = await applyGuestReservationModification({ modificationId: id }, dependencies);
           assert.equal(replay.idempotentReplay, true);
           assert.deepEqual(await db.reservation.findUniqueOrThrow({ where: { id: stay.id } }), applied);

@@ -156,6 +156,11 @@ export async function checkPropertyAvailability(input: {
     };
   }
 
+  const turnoverConflict = await findLateCheckoutTurnoverConflict(client, input, now);
+  if (turnoverConflict) {
+    return { available: false, conflict: { type: "STAY_TIME_TURNOVER_HOLD", ...turnoverConflict } };
+  }
+
   const blockedDateConflict = await client.propertyBlockedDate.findFirst({
     where: {
       propertyId,
@@ -339,4 +344,52 @@ export async function getPropertyBlockedDateKeys(input: {
     modificationHolds,
     manualBlocks,
   };
+}
+
+/** Read the immutable promised turnover interval. No calendar/OTA day block is
+ * created. This is a reader guard; it does not serialize reservation writers. */
+async function findLateCheckoutTurnoverConflict(client: AvailabilityClient, input: {
+  propertyId: string; checkIn: Date; checkOut: Date;
+  excludeReservationId?: string; excludeReservationModificationId?: string;
+}, now: Date) {
+  // Validated quote windows cannot exceed 24h offset + 24h committed duration.
+  const rows = await client.reservationModification.findMany({ where: {
+    ...(input.excludeReservationModificationId ? { id: { not: input.excludeReservationModificationId } } : {}),
+    ...(input.excludeReservationId ? { reservationId: { not: input.excludeReservationId } } : {}),
+    requestSource: "PIN_AI_GUEST_SERVICES",
+    guestConfirmation: { path: ["quoteTerms", "operation"], equals: "LATE_CHECKOUT" },
+    reservation: { propertyId: input.propertyId, status: "ACTIVE" },
+    proposedCheckOut: { gt: new Date(input.checkIn.getTime() - 2 * 86_400_000), lt: input.checkOut },
+    OR: [{ status: "APPLYING" }, { status: "PAYMENT_PROCESSING" }, { status: "APPLIED" },
+      { status: "AWAITING_PAYMENT", checkoutExpiresAt: { gt: now } }],
+  }, take: 101, select: { id: true, reservationId: true, status: true, appliedAt: true,
+    currentCheckOut: true, proposedCheckOut: true, guestConfirmation: true,
+    reservation: { select: { checkOut: true, property: { select: { organizationId: true } } } } } });
+  if (rows.length > 100) throw new Error("STAY_TIME_TURNOVER_REQUIRES_REVIEW");
+  for (const row of rows) {
+    // A later canonical date change supersedes this historical applied window.
+    if (row.status === "APPLIED" && row.reservation.checkOut.getTime() !== row.proposedCheckOut.getTime()) continue;
+    const confirmation = row.guestConfirmation as Record<string, unknown> | null;
+    const terms = confirmation?.quoteTerms as Record<string, unknown> | undefined;
+    const departure = terms?.departureCleaning as Record<string, unknown> | undefined;
+    const until = typeof terms?.requiredFreeUntil === "string" ? new Date(terms.requiredFreeUntil) : new Date(NaN);
+    const duration = departure?.durationMinutes;
+    const offset = departure?.offsetMinutes;
+    if (confirmation?.source !== "PIN_AI_GUEST_SERVICES" || confirmation.confirmed !== true ||
+        confirmation.operation !== "LATE_CHECKOUT" || terms?.version !== "stay_time_quote_v1" ||
+        terms.propertyId !== input.propertyId || terms.reservationId !== row.reservationId ||
+        terms.organizationId !== row.reservation.property.organizationId ||
+        terms.currentCheckOut !== row.currentCheckOut.toISOString() ||
+        terms.proposedCheckOut !== row.proposedCheckOut.toISOString() ||
+        row.proposedCheckOut <= row.currentCheckOut ||
+        departure?.version !== "departure_cleaning_v1" ||
+        !Number.isInteger(duration) || Number(duration) < 15 || Number(duration) > 1440 ||
+        !Number.isInteger(offset) || Number(offset) < 0 || Number(offset) > 1440 ||
+        !Number.isFinite(until.getTime()) ||
+        until.getTime() !== row.proposedCheckOut.getTime() + (Number(duration) + Number(offset)) * 60_000 ||
+        (row.status === "APPLIED" && !row.appliedAt)) throw new Error("STAY_TIME_TURNOVER_REQUIRES_REVIEW");
+    if (until > input.checkIn) return { id: row.id, reservationId: row.reservationId,
+      startsAt: row.proposedCheckOut, endsAt: until, status: row.status };
+  }
+  return null;
 }
