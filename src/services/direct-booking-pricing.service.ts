@@ -53,7 +53,7 @@ export async function calculateDirectBookingPricing(
 ) {
   const selectedAmenityIds = new Set(input.selectedAmenityIds ?? []);
 
-  const property = await prisma.property.findUnique({
+  const propertyRecord = await prisma.property.findUnique({
     where: { id: input.propertyId },
     select: {
       id: true,
@@ -144,9 +144,11 @@ holidayPricings: {
     },
   });
 
-  if (!property) {
+  if (!propertyRecord) {
     throw new Error("DIRECT_BOOKING_PROPERTY_NOT_FOUND");
   }
+
+  const property = propertyRecord;
 
   if (!property.baseNightlyRate) {
     throw new Error("Property is missing baseNightlyRate");

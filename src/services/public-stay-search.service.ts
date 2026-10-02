@@ -1,4 +1,4 @@
-import { PrismaClient } from "@prisma/client";
+import { PrismaClient, type Prisma } from "@prisma/client";
 import { fromZonedTime } from "date-fns-tz";
 import { checkPropertyAvailability } from "./availability.service";
 import { calculateDirectBookingPricing } from "./direct-booking-pricing.service";
@@ -638,7 +638,7 @@ export async function searchPublicStays(
     },
   } as const;
 
-  const candidates: Awaited<ReturnType<typeof db.property.findMany>> = [];
+  const candidates: Prisma.PropertyGetPayload<typeof candidateQuery>[] = [];
   let cursorId: string | undefined;
 
   while (true) {
