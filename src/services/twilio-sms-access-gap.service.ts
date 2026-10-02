@@ -80,8 +80,10 @@ export async function persistTwilioSmsAccessGap(
     if (!grant || grant.status !== "ACTIVE") return noAction("CURRENT_ACCESS_EVIDENCE_MISSING");
     const now = clock();
     if (!validDate(now)) return fail("INVALID_CLOCK");
-    if (!source.providerStatusUpdatedAt || !validDate(source.providerStatusUpdatedAt) ||
-        source.providerStatusUpdatedAt > now || source.createdAt > now) fail("FAILURE_TIME_INVALID");
+    const failureAt = source.providerStatusUpdatedAt;
+    if (!failureAt || !validDate(failureAt) || failureAt > now || source.createdAt > now) {
+      return fail("FAILURE_TIME_INVALID");
+    }
     if (source.status !== "ACTIVE" || source.cancelledAt !== null || source.propertyStatus !== "ACTIVE" ||
         now >= source.checkOut || now >= grant.endsAt || grant.startsAt >= grant.endsAt) {
       return noAction("RESERVATION_OR_ACCESS_NOT_CURRENT");
@@ -115,7 +117,7 @@ export async function persistTwilioSmsAccessGap(
       canAutoResolve: false, autoResolveStatus: "NOT_SUPPORTED", autoResolveActionCode: null,
       organizationId: scope.organizationId, propertyId: scope.propertyId, reservationId: scope.reservationId,
       actionTarget: "RESERVATION", sourceType: "ENGINE_EVENT",
-      firstDetectedAt: source.providerStatusUpdatedAt, lastSignalAt: now,
+      firstDetectedAt: failureAt, lastSignalAt: now,
       transitionCode: "GUEST_ACCESS_COMMUNICATION_GAP_DETECTED",
       transitionSummary: "Access SMS failed and guest email is missing; host attention coexists with bounded retry without changing access.",
       transitionedBy: "PIN_GO", occurredAt: now,
