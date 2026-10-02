@@ -150,6 +150,9 @@ jobs:
           src/services/stay-time-proposal.service.ts
           src/services/stay-time-guest-action.service.ts
           src/services/stay-time-guest-action.db.test.ts
+          src/services/stay-time-payment-event.service.ts
+          src/services/stay-time-payment-event.test.ts
+          src/webhooks/stripe.webhook.ts
           src/services/stay-time-checkout-preflight.db.test.ts
           src/services/stay-time-stripe-provider.ts
           src/services/stay-time-checkout.service.ts

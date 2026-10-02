@@ -1,7 +1,8 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { createStayTimeDepartureCleaningFixture } from "./stay-time-departure-cleaning.fixture.js";
-import type Stripe from "stripe";
+import Stripe from "stripe";
+import { handleStayTimePaymentEvent } from "./stay-time-payment-event.service.js";
 import { Prisma, PrismaClient } from "@prisma/client";
 import { defaultStayTimeSettings } from "../pin-ai/actions/stay-time-settings.js";
 import { createStayTimeProposal, confirmStayTimeProposal, stageStayTimeModification } from "./stay-time-proposal.service.js";
@@ -17,7 +18,7 @@ test("paid stay-time processing applies once or durably recovers only the increm
   assert.equal(parsed.pathname, "/pingo_stay_time_test");
   const db = new PrismaClient({ datasources: { db: { url } } });
   t.after(() => db.$disconnect());
-  for (const scenario of ["late", "early", "departure-duration-changed", "departure-confirmation-changed", "stripe-adapter-apply", "stripe-adapter-refund", "concurrent-apply", "serialization-burst", "serialization-exhausted", "revoked-cleaning", "blocked-turnover", "price-changed", "expired", "expired-status",
+  for (const scenario of ["webhook-completed", "webhook-async", "webhook-refund", "late", "early", "departure-duration-changed", "departure-confirmation-changed", "stripe-adapter-apply", "stripe-adapter-refund", "concurrent-apply", "serialization-burst", "serialization-exhausted", "revoked-cleaning", "blocked-turnover", "price-changed", "expired", "expired-status",
     "refund-outage", "refund-response-lost", "refund-pending", "refund-wrong-receipt", "concurrent-refund",
     "payment-outage", "wrong-payment", "partially-refunded", "wrong-account", "reconcile-outage", "cancelled-without-recovery"] as const) {
     await t.test(scenario, async () => {
@@ -73,7 +74,7 @@ test("paid stay-time processing applies once or durably recovers only the increm
         await db.reservationModification.update({ where: { id }, data: { stripeConnectedAccountId: reservation.stripeConnectedAccountId,
           stripeCheckoutSessionId: `cs_${id}`, ...(scenario === "cancelled-without-recovery" ? { status: "CANCELLED" } : {}),
           ...(scenario === "expired-status" ? { status: "EXPIRED", expiredAt: now } : {}) } });
-        const needsRefund = ["departure-duration-changed", "departure-confirmation-changed", "stripe-adapter-refund", "revoked-cleaning", "blocked-turnover", "price-changed", "expired", "expired-status", "refund-outage", "refund-response-lost",
+        const needsRefund = ["webhook-refund", "departure-duration-changed", "departure-confirmation-changed", "stripe-adapter-refund", "revoked-cleaning", "blocked-turnover", "price-changed", "expired", "expired-status", "refund-outage", "refund-response-lost",
           "refund-pending", "refund-wrong-receipt", "concurrent-refund"].includes(scenario);
         if (scenario === "revoked-cleaning") await db.cleaningWork.update({ where: { id: workId! }, data: { completionConfirmedAt: null } });
         if (scenario === "departure-duration-changed") {
@@ -182,7 +183,21 @@ test("paid stay-time processing applies once or durably recovers only the increm
             }, options)) as typeof db.$transaction;
           } });
         }
-        const run = () => processStayTimePayment(scope, deps);
+        const run = async () => {
+          if (!scenario.startsWith("webhook-")) return processStayTimePayment(scope, deps);
+          const stored = await db.reservationModification.findUniqueOrThrow({ where: { id } });
+          const objects = syntheticStayTimePaymentEvidence(stored, reservation, now);
+          const payload = JSON.stringify({ id: `evt_${id}`, object: "event", account: scope.connectedAccountId, livemode: false,
+            type: scenario === "webhook-async" ? "checkout.session.async_payment_succeeded" : "checkout.session.completed",
+            data: { object: objects.session } });
+          const stripe = new Stripe("sk_test_offline", { apiVersion: "2023-10-16" });
+          const signature = stripe.webhooks.generateTestHeaderString({ payload, secret: "whsec_offline" });
+          const event = stripe.webhooks.constructEvent(payload, signature, "whsec_offline");
+          const result = await handleStayTimePaymentEvent(event, { client: db, processPayment: s => processStayTimePayment(s, deps) });
+          assert.equal(result.handled, true);
+          if (!result.handled) throw new Error("Synthetic stay-time event was not handled");
+          return result;
+        };
         if (scenario === "serialization-exhausted") {
           await assert.rejects(run, /Synthetic first-lock serialization conflict/);
           assert.equal(injectedConflicts, 5); assert.equal(retrieveCalls, 0); assert.equal(refundCalls, 0); assert.equal(reconcileCalls, 0);

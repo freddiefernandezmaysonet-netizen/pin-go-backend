@@ -10,6 +10,10 @@ import stripe from "../billing/stripe";
 import syncTuyaEntitlementFromStripeEvent from "../billing/stripe/stripe.tuya.entitlement";
 import { handleDirectBookingCheckoutCompleted } from "../services/direct-booking.service";
 import { handleGuestReservationModificationCheckoutPaid } from "../services/guest-reservation-modification-payment.service";
+import { handleStayTimePaymentEvent } from "../services/stay-time-payment-event.service.js";
+import { processStayTimePayment } from "../services/stay-time-payment-flow.service.js";
+import { createStayTimeStripeProvider } from "../services/stay-time-stripe-provider.js";
+import { reconcileReservation } from "../services/reservation.reconcile.service.js";
 import {
   handleGuestIdentityStripeEvent,
   reconcileGuestIdentityVerificationSession,
@@ -24,6 +28,19 @@ import { reconcileDamageCasePaymentIntent } from "../services/damage-case-paymen
 import { syncDamageCaseMissionControlSafely } from "../services/damage-case-mission-control.service.js";
 
 const prisma = new PrismaClient();
+
+async function handleModificationPaymentEvent(event: Stripe.Event, session: Stripe.Checkout.Session) {
+  const now = () => new Date();
+  const result = await handleStayTimePaymentEvent(event, {
+    client: prisma,
+    processPayment: scope => processStayTimePayment(scope, {
+      client: prisma, now, reconcile: reconcileReservation,
+      ...createStayTimeStripeProvider(stripe, now),
+    }),
+  });
+  if (result.handled) return result;
+  return handleGuestReservationModificationCheckoutPaid(session);
+}
 
 export function registerStripeWebhook(app: Express) {
   const endpointSecret = process.env.STRIPE_WEBHOOK_SECRET ?? "";
@@ -135,7 +152,7 @@ export function registerStripeWebhook(app: Express) {
              }
 
              const result =
-               await handleGuestReservationModificationCheckoutPaid(session);
+               await handleModificationPaymentEvent(event, session);
 
              console.log("✅ reservation modification payment completed", {
                sessionId: session.id,
@@ -170,7 +187,7 @@ export function registerStripeWebhook(app: Express) {
             }
 
             const result =
-              await handleGuestReservationModificationCheckoutPaid(session);
+              await handleModificationPaymentEvent(event, session);
 
             console.log("✅ asynchronous reservation modification payment completed", {
               sessionId: session.id,

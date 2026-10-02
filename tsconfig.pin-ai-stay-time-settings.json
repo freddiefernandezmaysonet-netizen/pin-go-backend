@@ -4,6 +4,7 @@
     "target": "es2022", "strict": true, "skipLibCheck": true, "types": ["node"]
   },
   "include": [
+    "src/services/stay-time-payment-event.test.ts",
     "src/services/stay-time-guest-action.db.test.ts",
     "src/routes/dashboard.ota-availability-conflicts.routes.test.ts",
     "src/services/ota-availability-conflict-review.db.test.ts",

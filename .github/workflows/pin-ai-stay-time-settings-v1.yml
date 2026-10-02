@@ -17,6 +17,8 @@ on:
       - "src/services/stay-time-payment-window*"
       - "src/services/stay-time-payment-evidence*"
       - "src/services/stay-time-payment-flow*"
+      - "src/services/stay-time-payment-event*"
+      - "src/webhooks/stripe.webhook.ts"
       - "src/services/stay-time-stripe-provider*"
       - "src/services/stay-time-checkout-preflight*"
       - "src/services/stay-time-checkout.service.ts"
@@ -79,6 +81,8 @@ jobs:
         run: node --import tsx --test src/services/stay-time-checkout-preflight.db.test.ts
       - name: Paid application and durable payment recovery with simulated providers
         run: node --import tsx --test src/services/stay-time-payment-flow.db.test.ts
+      - name: Signed payment event routing and Connect account isolation
+        run: node --import tsx --test src/services/stay-time-payment-event.test.ts src/services/stripe-financial-event-ledger.webhook.contract.test.ts
       - name: Checkout creation and signature-verified payment events with offline Stripe
         run: node --import tsx --test src/services/stay-time-checkout.db.test.ts
       - name: Shared Checkout contract and Direct Charge regressions
