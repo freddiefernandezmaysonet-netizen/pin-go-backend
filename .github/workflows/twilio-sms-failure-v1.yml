@@ -1,0 +1,39 @@
+name: Twilio SMS Failure V1 Policy
+
+on:
+  pull_request:
+    paths:
+      - "src/services/twilio-sms-failure.policy.ts"
+      - "src/services/twilio-sms-failure.policy.test.ts"
+      - "tsconfig.twilio-sms-failure-v1.json"
+      - ".github/workflows/twilio-sms-failure-v1.yml"
+      - "docs/twilio-sms-failure-v1.md"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  policy:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - name: Install locked dependencies without lifecycle scripts
+        run: npm ci --ignore-scripts --no-audit --no-fund
+      - name: Strict policy TypeScript
+        run: npx --no-install tsc -p tsconfig.twilio-sms-failure-v1.json
+      - name: Compile the exact tested policy
+        run: >-
+          npx --no-install tsc -p tsconfig.twilio-sms-failure-v1.json
+          --noEmit false --outDir .ci/twilio-sms-failure-v1
+      - name: Run isolated decision tests without providers or a database
+        run: node --test .ci/twilio-sms-failure-v1/twilio-sms-failure.policy.test.js
+      - name: Whitespace integrity
+        run: git diff --check
