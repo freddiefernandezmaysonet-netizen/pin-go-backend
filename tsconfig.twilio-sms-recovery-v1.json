@@ -20,6 +20,8 @@
     "src/services/twilio-sms-delivery-receipt.db.test.ts",
     "src/services/twilio-sms-receipt-reconciler.service.ts",
     "src/services/twilio-sms-receipt-reconciliation.db.test.ts",
+    "src/services/twilio-sms-access-retry-dispatcher.service.ts",
+    "src/services/twilio-sms-access-retry-dispatcher.db.test.ts",
     "src/routes/message-delivery.webhooks.routes.ts"
   ]
 }

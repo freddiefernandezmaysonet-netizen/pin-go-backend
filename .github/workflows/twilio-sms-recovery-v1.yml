@@ -69,6 +69,8 @@ jobs:
         run: node --import tsx --test src/services/twilio-sms-delivery-receipt.db.test.ts
       - name: PostgreSQL bounded receipt continuation and retry SID outcomes
         run: node --import tsx --test src/services/twilio-sms-receipt-reconciliation.db.test.ts
+      - name: PostgreSQL bounded access SMS retry dispatcher
+        run: node --import tsx --test src/services/twilio-sms-access-retry-dispatcher.db.test.ts
       - name: Retained delivery outcome contracts
         run: >-
           node --import tsx --test

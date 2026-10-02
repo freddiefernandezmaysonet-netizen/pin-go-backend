@@ -36,6 +36,10 @@ import {
   reconcilePendingTwilioSmsReceipts,
   resolveTwilioReceiptReconciliationSettings,
 } from "../services/twilio-sms-receipt-reconciler.service.js";
+import {
+  dispatchDueAccessSmsRetries,
+  resolveAccessSmsRetryDispatcherSettings,
+} from "../services/twilio-sms-access-retry-dispatcher.service.js";
 
 const WORKER_NAME = "message.retry.worker";
 const POLL_MS = Number(process.env.MESSAGE_RETRY_POLL_MS ?? 30000);
@@ -51,7 +55,17 @@ const TWILIO_RECEIPT_RECONCILIATION_SETTINGS =
   resolveTwilioReceiptReconciliationSettings(process.env);
 const TWILIO_RECEIPT_ACCOUNT_SID =
   String(process.env.TWILIO_ACCOUNT_SID ?? "").trim();
+const TWILIO_ACCESS_RETRY_DISPATCH_SETTINGS =
+  resolveAccessSmsRetryDispatcherSettings(process.env);
 
+if (
+  TWILIO_ACCESS_RETRY_DISPATCH_SETTINGS &&
+  !TWILIO_SMS_RECOVERY_SETTINGS
+) {
+  throw new Error(
+    "TWILIO_SMS_ACCESS_RETRY_DISPATCH_REQUIRES_RECOVERY"
+  );
+}
 if (
   TWILIO_RECEIPT_RECONCILIATION_SETTINGS &&
   !TWILIO_SMS_RECOVERY_SETTINGS
@@ -1658,6 +1672,27 @@ async function tick() {
     } catch (e) {
       errLog(
         "Twilio SMS receipt reconciliation failed; durable receipts retained",
+        { err: toErrString(e) }
+      );
+    }
+
+    try {
+      if (TWILIO_ACCESS_RETRY_DISPATCH_SETTINGS) {
+        const accessRetry = await dispatchDueAccessSmsRetries(
+          prisma,
+          TWILIO_ACCESS_RETRY_DISPATCH_SETTINGS
+        );
+        if (
+          accessRetry.scanned > 0 ||
+          accessRetry.reviewed > 0 ||
+          accessRetry.unknown > 0
+        ) {
+          log("Twilio access SMS bounded retry", accessRetry);
+        }
+      }
+    } catch (e) {
+      errLog(
+        "Twilio access SMS bounded retry failed; retry journal retained",
         { err: toErrString(e) }
       );
     }
