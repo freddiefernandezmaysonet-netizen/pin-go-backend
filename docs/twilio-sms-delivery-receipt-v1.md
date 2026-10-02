@@ -115,3 +115,23 @@ This slice does not mount a worker loop or the real retry dispatcher. A retry
 journal claim remains evidence of an owned opportunity, not authorization to
 send. Host resolution after an exhausted PRECHECKIN retry and the actual fresh
 content/consent/access-readiness dispatcher remain later gates.
+
+
+## Default-off worker integration — candidate
+
+The bounded receipt reconciler is now invoked from message-retry-worker only when
+both recovery and receipt-reconciliation configuration are explicitly enabled.
+A valid configured Twilio AccountSid is required at worker startup. With the
+reconciliation flag absent, the worker's prior behavior is unchanged.
+
+A newly received PENDING/UNMATCHED receipt is not claimed by the periodic worker
+until at least one configured reconciliation interval has elapsed. This grace
+period lets the authenticated webhook finish its immediate projection first.
+Concurrent workers still use FOR UPDATE SKIP LOCKED and a persisted next-attempt
+time, so they partition due receipts rather than multiplying reconciliation
+attempts.
+
+This worker path performs database reconciliation only. It does not call Twilio,
+send an SMS, consume a retry claim, change a guest access code, or alter later
+scheduled communications. The actual retry dispatcher remains a separate release
+gate.

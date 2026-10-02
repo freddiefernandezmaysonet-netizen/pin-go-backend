@@ -62,6 +62,7 @@ export async function reconcilePendingTwilioSmsReceipts(
   const now = clock();
   if (!validDate(now)) fail("CLOCK_INVALID");
   const cutoff = new Date(now.getTime() - settings.maxAgeMs);
+  const firstAutomaticAttemptAtOrBefore = new Date(now.getTime() - settings.intervalMs);
   const next = new Date(now.getTime() + settings.intervalMs);
   const states = [...unresolved];
 
@@ -81,11 +82,13 @@ export async function reconcilePendingTwilioSmsReceipts(
          AND "disposition" = ANY($2::text[])
          AND "reconcileAttempts" < $3
          AND "receivedAt" >= $4
-         AND ("nextReconcileAt" IS NULL OR "nextReconcileAt" <= $5)
+         AND "receivedAt" <= $5
+         AND ("nextReconcileAt" IS NULL OR "nextReconcileAt" <= $6)
        ORDER BY "receivedAt" ASC, "id" ASC
        FOR UPDATE SKIP LOCKED
-       LIMIT $6`,
-      accountSid, states, settings.maxAttempts, cutoff, now, settings.batchSize
+       LIMIT $7`,
+      accountSid, states, settings.maxAttempts, cutoff, firstAutomaticAttemptAtOrBefore,
+      now, settings.batchSize
     );
     for (const row of rows) {
       await tx.$executeRawUnsafe(

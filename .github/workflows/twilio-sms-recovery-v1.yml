@@ -76,5 +76,10 @@ jobs:
           src/services/guest-journey-communications-delivery-outcome.contract.test.ts
       - name: Bundle API without starting it
         run: npx --no-install esbuild src/server.ts --bundle --platform=node --packages=external --outfile=/tmp/twilio-receipt-api.js
+      - name: Bundle retry worker integration without starting it
+        run: >-
+          npx --no-install esbuild src/workers/message.retry.worker.ts
+          --bundle --platform=node --format=esm --packages=external
+          --outfile=/tmp/message-retry-twilio-receipts.mjs
       - name: Whitespace integrity
         run: git diff --check
