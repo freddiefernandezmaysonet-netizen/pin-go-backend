@@ -322,7 +322,7 @@ export async function recordTwilioSmsRetryDeliveryOutcome(
   clock: () => Date = () => new Date()
 ) {
   if (!sid(outcome.providerMessageId) || !retryProviderStatuses.has(outcome.status) ||
-      !date(outcome.eventAt) || (outcome.errorCode !== null && !/^\\d{1,10}$/.test(outcome.errorCode))) {
+      !date(outcome.eventAt) || (outcome.errorCode !== null && !/^\d{1,10}$/.test(outcome.errorCode))) {
     return fail("RETRY_OUTCOME_INVALID");
   }
   return transact(db, async tx => {
