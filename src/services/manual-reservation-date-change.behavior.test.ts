@@ -105,7 +105,7 @@ function harness(options: {
       reservation: {
         findFirst: async () => {
           reads += 1;
-          return reads % 2 === 1 ? cloneReservation(persisted) : null;
+          return cloneReservation(persisted);
         },
       },
       $transaction: async (fn: any) => {
@@ -149,6 +149,7 @@ function harness(options: {
       return {} as any;
     },
     now: () => new Date(NOW),
+    checkAvailability: async () => ({ available: true, conflict: null }),
   };
 
   return {
@@ -165,6 +166,35 @@ const dates = {
   checkInDate: "2026-09-10",
   checkOutDate: "2026-09-13",
 };
+
+test("new occupancy or cleaning conflict after preview aborts before any write", async () => {
+  const { dependencies, calls, state } = harness();
+  const before = state();
+  let checks = 0;
+  dependencies.checkAvailability = async (_input, client) => {
+    checks++;
+    if (checks === 1) { assert.equal(client, dependencies.prisma); return { available: true, conflict: null }; }
+    assert.notEqual(client, dependencies.prisma);
+    return { available: false, conflict: { type: "STAY_TIME_TURNOVER_HOLD", id: "new-hold" } } as any;
+  };
+  await assert.rejects(changeManualReservationDatesByHost({ ...dates, requestedByUserId: "host",
+    expectedReservationUpdatedAt: UPDATED_AT.toISOString(), expectedProposedTotalAmount: 300 }, dependencies),
+    (error: any) => error.code === "RESERVATION_DATE_CHANGE_CONFLICT" && error.statusCode === 409);
+  assert.equal(checks, 2);
+  assert.equal(calls.casAttempts, 0);
+  assert.equal(calls.channex, 0);
+  assert.equal(calls.reconcile, 0);
+  assert.deepEqual(state(), before);
+});
+
+test("preview rejects pending change, turnover or block without writes", async () => {
+  const { dependencies, calls } = harness();
+  dependencies.checkAvailability = async () => ({ available: false, conflict: { type: "BLOCKED_DATE", id: "blocked" } } as any);
+  await assert.rejects(previewManualReservationDateChangeByHost(dates, dependencies),
+    (error: any) => error.code === "RESERVATION_DATE_CHANGE_CONFLICT");
+  assert.equal(calls.transactions, 0);
+  assert.equal(calls.pricing, 0);
+});
 
 test("preview is behaviorally read-only", async () => {
   const { dependencies, calls, state } = harness();
@@ -234,6 +264,7 @@ test("lost atomic version fence rolls back with zero side effects", async () => 
   assert.deepEqual(lastCasWhere(), {
     id: "reservation-1",
     updatedAt: UPDATED_AT,
+    status: "ACTIVE", source: "MANUAL", property: { organizationId: "org-1" },
   });
   assert.equal(calls.transactions, 1);
   assert.equal(calls.rollbacks, 1);
@@ -279,6 +310,7 @@ test("valid confirmation performs one atomic mutation, one Channex intent, and o
   assert.deepEqual(lastCasWhere(), {
     id: "reservation-1",
     updatedAt: UPDATED_AT,
+    status: "ACTIVE", source: "MANUAL", property: { organizationId: "org-1" },
   });
   assert.equal(calls.transactions, 1);
   assert.equal(calls.rollbacks, 0);

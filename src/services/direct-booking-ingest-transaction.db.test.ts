@@ -5,6 +5,8 @@ import { defaultStayTimeSettings } from "../pin-ai/actions/stay-time-settings";
 import { createStayTimeDepartureCleaningFixture } from "./stay-time-departure-cleaning.fixture";
 import { createStayTimeProposal, confirmStayTimeProposal, stageStayTimeModification } from "./stay-time-proposal.service";
 import { runIngestTransaction, assertDirectBookingIngestAvailability } from "./direct-booking-ingest-transaction";
+import { checkPropertyAvailability } from "./availability.service";
+import { changeManualReservationDatesByHost, previewManualReservationDateChangeByHost } from "./manual-reservation-date-change.service";
 
 function signal() {
   let resolve!: () => void;
@@ -18,7 +20,8 @@ test("Direct Booking and canonical Pin AI staging cannot both reserve the cleani
   assert.equal(parsed.pathname, "/pingo_stay_time_test");
   const db = new PrismaClient({ datasources: { db: { url } } });
   t.after(() => db.$disconnect());
-  for (const first of ["booking", "pin-ai"] as const) await t.test(`${first} commits first`, async () => {
+  for (const source of ["DIRECT_BOOKING", "MANUAL"]) {
+  for (const first of ["booking", "pin-ai"] as const) await t.test(`${source}: ${first} commits first`, async () => {
     const now = new Date("2026-10-02T12:00Z");
     const org = await db.organization.create({ data: { name: "Synthetic booking race" } });
     const defaults = defaultStayTimeSettings();
@@ -47,15 +50,15 @@ test("Direct Booking and canonical Pin AI staging cannot both reserve the cleani
         confirmationToken: proposal.confirmationToken! }, options);
       const scope = { guestToken: stay.guestToken!, proposalId: proposal.proposal.id };
       // The incoming stay starts after the extended checkout but during cleaning.
-      const incoming = { source: "DIRECT_BOOKING", propertyId: property.id,
+      const incoming = { source, propertyId: property.id,
         checkIn: new Date("2026-10-03T19:59Z"), checkOut: new Date("2026-10-04T15:00Z") };
       let bookingAttempts = 0;
-      const book = () => runIngestTransaction(db, "DIRECT_BOOKING", async tx => {
+      const book = () => runIngestTransaction(db, source, async tx => {
         bookingAttempts++;
         await assertDirectBookingIngestAvailability(tx, incoming, null);
         if (first === "pin-ai" && bookingAttempts === 1) { ready.resolve(); await release.promise; }
         return tx.reservation.create({ data: { propertyId: property.id, guestName: "Synthetic incoming stay",
-          checkIn: incoming.checkIn, checkOut: incoming.checkOut, source: "DIRECT_BOOKING", status: "ACTIVE" } });
+          checkIn: incoming.checkIn, checkOut: incoming.checkOut, source, status: "ACTIVE" } });
       });
       let stagingAttempts = 0;
       const stagedDb = new Proxy(db, { get(target, key) {
@@ -92,11 +95,49 @@ test("Direct Booking and canonical Pin AI staging cannot both reserve the cleani
         release.resolve();
         const result = await settled;
         assert.ok("error" in result);
-        assert.match(String(result.error), /DIRECT_BOOKING_PROPERTY_NO_LONGER_AVAILABLE/);
+        assert.match(String(result.error), source === "MANUAL"
+          ? /MANUAL_RESERVATION_DATE_CONFLICT/ : /DIRECT_BOOKING_PROPERTY_NO_LONGER_AVAILABLE/);
         assert.ok(bookingAttempts >= 2);
       }
       assert.equal(await db.reservation.count({ where: { propertyId: property.id, guestName: "Synthetic incoming stay" } }), first === "booking" ? 1 : 0);
       assert.equal(await db.reservationModification.count({ where: { reservationId: stay.id } }), first === "pin-ai" ? 1 : 0);
+      if (source === "MANUAL" && first === "pin-ai") {
+        const manual = await db.reservation.create({ data: { propertyId: property.id, source: "MANUAL", guestName: "Synthetic date change",
+          checkIn: new Date("2026-10-05T20:00Z"), checkOut: new Date("2026-10-06T15:00Z"), totalAmount: 100, currency: "usd" } });
+        let reconciliations = 0;
+        const deps = { prisma: db, checkAvailability: checkPropertyAvailability, now: () => now,
+          calculatePricing: async () => ({ totalAmount: 100, currency: "usd" }) as any,
+          persistChannexIntent: async () => ({}) as any, reconcile: async () => { reconciliations++; return {} as any; } };
+        const dates = { organizationId: org.id, reservationId: manual.id, checkInDate: "2026-10-03", checkOutDate: "2026-10-04" };
+        // A persisted hold retains its protected interval even after host settings change.
+        await db.property.update({ where: { id: property.id }, data: { checkInTime: "15:59" } });
+        await assert.rejects(previewManualReservationDateChangeByHost(dates, deps),
+          (error: any) => error.code === "RESERVATION_DATE_CHANGE_CONFLICT");
+        assert.equal(reconciliations, 0);
+        await db.property.update({ where: { id: property.id }, data: { checkInTime: "16:00" } });
+        const preview = await previewManualReservationDateChangeByHost(dates, deps);
+        assert.equal(preview.ok, true);
+        // A conflict arriving after the preview/prepare must still abort the write.
+        let checks = 0;
+        const duringCommit = { ...deps, checkAvailability: async (...args: Parameters<typeof checkPropertyAvailability>) => {
+          checks++;
+          const result = await checkPropertyAvailability(...args);
+          if (checks === 1) await db.propertyBlockedDate.create({ data: { propertyId: property.id,
+            startDate: new Date("2026-10-03T20:00Z"), endDate: new Date("2026-10-04T15:00Z") } });
+          return result;
+        } };
+        const confirm = { ...dates, requestedByUserId: "synthetic-host", expectedReservationUpdatedAt: manual.updatedAt.toISOString(),
+          expectedProposedTotalAmount: 100 };
+        await assert.rejects(changeManualReservationDatesByHost(confirm, duringCommit),
+          (error: any) => error.code === "RESERVATION_DATE_CHANGE_CONFLICT");
+        assert.equal(checks, 2);
+        assert.equal(reconciliations, 0);
+        assert.equal((await db.reservation.findUniqueOrThrow({ where: { id: manual.id } })).checkIn.toISOString(), manual.checkIn.toISOString());
+        await db.propertyBlockedDate.deleteMany({ where: { propertyId: property.id } });
+        await changeManualReservationDatesByHost(confirm, deps);
+        assert.equal(reconciliations, 1);
+        assert.equal((await db.reservation.findUniqueOrThrow({ where: { id: manual.id } })).checkIn.toISOString(), "2026-10-03T20:00:00.000Z");
+      }
     } finally {
       release.resolve();
       if (pending) await pending.catch(() => undefined);
@@ -106,9 +147,11 @@ test("Direct Booking and canonical Pin AI staging cannot both reserve the cleani
       await db.propertyStaff.deleteMany({ where: { propertyId: property.id } });
       await db.reservationModification.deleteMany({ where: { reservation: { propertyId: property.id } } });
       await db.reservation.deleteMany({ where: { propertyId: property.id } });
+      await db.propertyBlockedDate.deleteMany({ where: { propertyId: property.id } });
       if (staffId) await db.staffMember.delete({ where: { id: staffId } });
       await db.property.delete({ where: { id: property.id } });
       await db.organization.delete({ where: { id: org.id } });
     }
   });
+  }
 });

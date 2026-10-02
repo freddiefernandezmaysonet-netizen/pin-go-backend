@@ -3,8 +3,9 @@ import test from "node:test";
 import { Prisma } from "@prisma/client";
 import { runIngestTransaction, assertDirectBookingIngestAvailability } from "./direct-booking-ingest-transaction";
 
+for (const source of ["DIRECT_BOOKING", "MANUAL"]) {
 for (const code of ["P2034", "40001", "40P01"]) {
-  test(`Direct Booking retries database conflict ${code} without external dispatch`, async () => {
+  test(`${source} retries database conflict ${code} without external dispatch`, async () => {
     let attempts = 0;
     let dispatches = 0;
     const db = { $transaction: async (work: (tx: any) => Promise<number>, options: any) => {
@@ -15,11 +16,12 @@ for (const code of ["P2034", "40001", "40P01"]) {
       });
       return work({});
     } } as any;
-    assert.equal(await runIngestTransaction(db, "DIRECT_BOOKING", async () => 7), 7);
+    assert.equal(await runIngestTransaction(db, source, async () => 7), 7);
     dispatches++;
     assert.equal(attempts, 2);
     assert.equal(dispatches, 1);
   });
+}
 }
 test("retry is bounded; availability and unrelated failures are not retried", async () => {
   for (const error of [new Prisma.PrismaClientKnownRequestError("conflict", { code: "P2034", clientVersion: "test" }),
@@ -31,8 +33,8 @@ test("retry is bounded; availability and unrelated failures are not retried", as
     assert.equal(attempts, error instanceof Prisma.PrismaClientKnownRequestError && error.code === "P2034" ? 3 : 1);
   }
 });
-test("OTA and manual ingestion retain existing transaction behavior", async () => {
-  for (const source of [undefined, "MANUAL", "CHANNEX"]) {
+test("OTA and unspecified ingestion retain existing transaction behavior", async () => {
+  for (const source of [undefined, "CHANNEX"]) {
     let attempts = 0;
     const db = { $transaction: async (_work: unknown, options: unknown) => {
       attempts++; assert.equal(options, undefined); throw new Error("original failure");

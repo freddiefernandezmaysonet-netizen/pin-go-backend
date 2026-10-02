@@ -56,7 +56,7 @@ test("confirmation uses an atomic id-and-updatedAt compare-and-swap before side 
   assert.match(source, /tx\.reservation\.findUnique/);
   assert.doesNotMatch(source, /tx\.reservation\.update\s*\(/);
 
-  const transactionStart = source.indexOf("const updated = await dependencies.prisma.$transaction");
+  const transactionStart = source.indexOf("const updated = await runIngestTransaction");
   const channexStart = source.indexOf("await dependencies.persistChannexIntent", transactionStart);
   const casStart = source.indexOf("await tx.reservation.updateMany", transactionStart);
   const countFence = source.indexOf("if (fencedUpdate.count !== 1)", transactionStart);

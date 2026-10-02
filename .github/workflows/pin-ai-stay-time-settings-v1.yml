@@ -82,6 +82,8 @@ jobs:
         run: node --import tsx --test src/services/guest-reservation-modification-checkout.service.test.ts src/services/direct-booking-direct-charges-only.contract.test.ts
       - name: Atomic Direct Booking and canonical Pin AI staging races
         run: node --import tsx --test src/services/direct-booking-ingest-transaction.test.ts src/services/direct-booking-ingest-transaction.db.test.ts
+      - name: Manual date change conflict and version-fence regressions
+        run: node --import tsx --test src/services/manual-reservation-date-change.behavior.test.ts src/services/manual-reservation-date-change.contract.test.ts src/routes/dashboard.manual-reservation-date-change.route.test.ts
       - name: Policy, real HTTP authorization, migration SQL and database concurrency
         # Independent DB suites share tables; keep their fixture writes separate.
         # Explicit Promise.all concurrency scenarios inside each suite are retained.

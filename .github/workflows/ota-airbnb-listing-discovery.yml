@@ -107,6 +107,10 @@ jobs:
           src/services/direct-booking-ingest-transaction.ts
           src/services/direct-booking-ingest-transaction.test.ts
           src/services/direct-booking-ingest-transaction.db.test.ts
+          src/services/manual-reservation-date-change.service.ts
+          src/services/manual-reservation-date-change.behavior.test.ts
+          src/services/manual-reservation-date-change.contract.test.ts
+          src/routes/dashboard.properties.route.ts
           src/services/stay-time-apply.db.test.ts
           src/services/reservation.reconcile.service.ts
           src/services/reservation-guest-access-window.ts
