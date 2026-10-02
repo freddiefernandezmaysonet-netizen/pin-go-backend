@@ -106,6 +106,7 @@ jobs:
           src/services/ingest.service.ts
           src/services/direct-booking-ingest-transaction.ts
           src/services/channex-availability-conflict.service.ts
+          src/contracts/channex-certified-core.freeze.test.ts
           src/services/direct-booking-ingest-transaction.test.ts
           src/services/direct-booking-ingest-transaction.db.test.ts
           src/services/manual-reservation-date-change.service.ts
