@@ -85,11 +85,12 @@ test("15:00 arrival advances the limit to 11:30 and a shorter host limit still a
 
 test("late checkout requires a valid same-day arrival deadline; early check-in does not", () => {
   const input = fixture();
+  const { standardCheckInAt: _deadline, ...policyWithoutDeadline } = input.policy;
   for (const standardCheckInAt of [undefined, new Date(NaN), date("2026-10-03T20:00Z")]) {
-    rejects({ ...input, policy: { ...input.policy, standardCheckInAt } }, "INVALID_TURNOVER_DEADLINE");
+    rejects({ ...input, policy: { ...policyWithoutDeadline, ...(standardCheckInAt ? { standardCheckInAt } : {}) } }, "INVALID_TURNOVER_DEADLINE");
   }
   const early = fixture("EARLY_CHECKIN");
-  assert.doesNotThrow(() => planStayTimeAdjustment({ ...early, policy: { ...early.policy, standardCheckInAt: undefined } }));
+  assert.doesNotThrow(() => planStayTimeAdjustment({ ...early, policy: policyWithoutDeadline }));
 });
 
 test("fixed fee is charged once; hourly total rounds half up to whole dollars", () => {
