@@ -1,8 +1,6 @@
 import type { PrismaClient } from "@prisma/client";
-import {
-  reconcileTwilioSmsDeliveryReceipt,
-  type SmsRecoverySettings,
-} from "./twilio-sms-delivery-receipt.service.js";
+import { reconcileTwilioSmsDeliveryReceipt } from "./twilio-sms-delivery-receipt.service.js";
+import type { SmsRecoverySettings } from "./twilio-sms-recovery.store.js";
 
 export type TwilioReceiptReconciliationSettings = {
   intervalMs: number;
