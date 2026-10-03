@@ -66,6 +66,7 @@ jobs:
           SCOPE_PR_NUMBER: ${{ github.event.pull_request.number }}
           SCOPE_HEAD_REPO: ${{ github.event.pull_request.head.repo.full_name }}
           SCOPE_BASE_REPO: ${{ github.event.pull_request.base.repo.full_name }}
+          SCOPE_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
         run: |
           BASE_BRANCH="${GITHUB_BASE_REF:-main}"
           git fetch origin "+refs/heads/$BASE_BRANCH:refs/remotes/origin/$BASE_BRANCH"
@@ -204,7 +205,10 @@ jobs:
             # Preserve the certified schema, then pin the additive worker delta.
             recovery_base=5e976be76cffd4c0077d4cfaeed3ec1b3e488214
             test "$(git diff --no-ext-diff --no-color --full-index --unified=0 "origin/$BASE_BRANCH...$recovery_base" -- prisma/schema.prisma | sha256sum | cut -d ' ' -f 1)" = "e4275686f99c3709a02b3040d60fc4460011f61f8aa69b45f31add54695f3409"
-            test "$(git diff --no-ext-diff --no-color --full-index --unified=0 "$recovery_base" HEAD -- prisma/schema.prisma | sha256sum | cut -d ' ' -f 1)" = "c3e776c3d7ed86dbdc932f861cdfe58324007bacd642b0e2896aa51c47086065"
+            # Pin the authored recovery schema exactly; HEAD also contains unrelated
+            # schema additions merged into main. Require this event's head in HEAD.
+            git merge-base --is-ancestor "$SCOPE_HEAD_SHA" HEAD
+            test "$(git diff --no-ext-diff --no-color --full-index --unified=0 "$recovery_base" "$SCOPE_HEAD_SHA" -- prisma/schema.prisma | sha256sum | cut -d ' ' -f 1)" = "c3e776c3d7ed86dbdc932f861cdfe58324007bacd642b0e2896aa51c47086065"
             test "$(sha256sum prisma/migrations/20261003010000_stay_time_recovery/migration.sql | cut -d ' ' -f 1)" = "73e34f34c3010a6bcf80ac2c267b887b8d96bd0b9cc61a827d75f2dd73a0028b"
             test "$(git diff --no-ext-diff --no-color --full-index --unified=0 "$recovery_base" HEAD -- package.json | sha256sum | cut -d ' ' -f 1)" = "0a4686c80531858708636ccefd893632e039998d69554c740e0c13b35025074f"
             test "$(sha256sum prisma/migrations/20261001183000_cleaning_work_confirmation_history/migration.sql | cut -d ' ' -f 1)" = "20cd60db321dc5becbadc2f56065cf9f29f320941625da3d5b246927c5d37d0a"
