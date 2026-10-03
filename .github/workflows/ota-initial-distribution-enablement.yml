@@ -53,6 +53,12 @@ jobs:
           SCOPE_HEAD_REPO: ${{ github.event.pull_request.head.repo.full_name }}
           SCOPE_BASE_REPO: ${{ github.event.pull_request.base.repo.full_name }}
         run: |
+          # PR #342 only: verify the approved Messages files; retain subsequent certifications.
+          if [ "${GITHUB_HEAD_REF:-}" = "agent/channex-host-messages-installation-v1" ]; then
+            python3 scripts/verify-channex-messages-pr-scope.test.py
+            python3 scripts/verify-channex-messages-pr-scope.py
+            exit 0
+          fi
           if [ "${GITHUB_HEAD_REF:-}" = "agent/staff-preferred-language-v1" ]; then
             python3 scripts/verify-staff-language-pr-scope.py
             exit 0
