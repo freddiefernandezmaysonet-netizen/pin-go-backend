@@ -3,7 +3,7 @@ import { InboxError, type Scope, type Message, type Thread, type Page, type Coll
 
 export type DraftInput = Scope & { threadId: string; messageId: string };
 export type DraftHistory = Collection<Message> & { thread: Thread };
-export type DraftContext = Scope & { reservationId: string | null; preferredLanguage: "en" | "es"; timezone: string | null };
+export type DraftContext = Scope & { reservationId: string | null; bookingId?: string; preferredLanguage: "en" | "es"; timezone: string | null };
 export type DraftResult = { text: string; requiresHumanReview: boolean; basedOnMessageId: string; sent: false };
 
 function snapshot(history: DraftHistory, messageId: string) {
