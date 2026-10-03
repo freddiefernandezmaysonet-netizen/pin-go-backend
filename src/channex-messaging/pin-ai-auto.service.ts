@@ -38,7 +38,8 @@ export function createAutomaticResponder(deps: {
       const before = await deps.messages(job), reason = await check(job, before);
       if (reason) { await finish(reason); return; }
       const response = await deps.generate(job);
-      if (response.requiresHumanReview) { await finish("PIN_AI_REQUIRES_HOST"); return; }
+      // Match Manage Reservation: review metadata does not suppress the guest-facing
+      // runtime response or transfer ownership of the whole conversation to the host.
       const after = await deps.messages(job), changed = await check(job, after);
       if (changed) { await finish(changed); return; }
       if (fingerprint(before) !== fingerprint(after) || response.basedOnMessageId !== job.messageId) { await finish("CONVERSATION_CHANGED"); return; }
@@ -46,7 +47,7 @@ export function createAutomaticResponder(deps: {
       fenced = true;
       await deps.send({ ...job, text: response.text, requestedBy: "pin-ai-channex",
         requestKey: `pin-ai:${createHash("sha256").update(JSON.stringify([job.organizationId, job.propertyId, job.threadId, job.messageId])).digest("hex")}` });
-      await deps.repository.finish(job, "SENT", "CHANNEX_ACCEPTED");
+      await deps.repository.finish(job, "SENT", response.requiresHumanReview ? "CHANNEX_ACCEPTED_REVIEW_REQUESTED" : "CHANNEX_ACCEPTED");
     } catch (error) {
       // Only sanitized finite error codes are stored. Raw model/provider text is never logged here.
       const reason = error instanceof InboxError && /^[A-Z0-9_]{1,100}$/.test(error.code) ? error.code : "PIN_AI_PROCESSING_FAILED";

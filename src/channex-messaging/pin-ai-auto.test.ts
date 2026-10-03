@@ -30,10 +30,39 @@ test("new verified guest message receives one direct reply with stable delivery 
   assert.equal(h.sent.length, 1); assert.equal(h.sent[0].requestedBy, "pin-ai-channex");
   assert.match(h.sent[0].requestKey, /^pin-ai:[a-f0-9]{64}$/); assert.equal(h.outcomes[0].status, "SENT");
 });
-test("host intervention, escalation, stale messages and lost send fence never send", async () => {
-  for (const options of [{ host: true }, { review: true }, { change: true }, { fence: false }, { old: true }]) {
+test("host intervention, stale messages and lost send fence never send", async () => {
+  for (const options of [{ host: true }, { change: true }, { fence: false }, { old: true }]) {
     const h = harness(options); await h.process(job); assert.equal(h.sent.length, 0); assert.notEqual(h.outcomes[0].status, "SENT");
   }
+});
+test("review metadata delivers the runtime answer like Manage Reservation", async () => {
+  const h = harness({ review: true }); await h.process(job);
+  assert.equal(h.sent.length, 1);
+  assert.equal(h.sent[0].text, "Sí, hay estacionamiento.");
+  assert.deepEqual(h.outcomes, [{ status: "SENT", reason: "CHANNEX_ACCEPTED_REVIEW_REQUESTED" }]);
+});
+test("a review-marked answer does not block the next guest question", async () => {
+  let mode = "AUTO", current = history(), review = true;
+  const sent: string[] = [], outcomes: string[] = [];
+  const process = createAutomaticResponder({ enabled: () => true,
+    repository: { state: async () => ({ mode, leaseToken: "lease" } as any), ownMessageIds: async () => new Set(["ai-reply"]),
+      fence: async () => mode === "AUTO", finish: async (_job, status) => {
+        outcomes.push(status); if (status === "NEEDS_HOST" || status === "UNKNOWN") mode = "HUMAN";
+      } },
+    messages: async () => current,
+    generate: async input => ({ text: review ? "Respuesta del motor sobre la cuna." : "Respuesta del motor sobre la piscina.", requiresHumanReview: review, basedOnMessageId: input.messageId, sent: false }),
+    send: async input => { sent.push(input.text); },
+  });
+  await process(job);
+  assert.equal(mode, "AUTO");
+  current = history();
+  current.items.push({ ...current.items[0]!, id: "ai-reply", sender: "property", text: sent[0]!, insertedAt: "2026-01-02T00:01:00Z" },
+    { ...current.items[0]!, id: "next-question", text: "¿Hay piscina?", insertedAt: "2026-01-02T00:02:00Z" });
+  current.total = 3; review = false;
+  await process({ ...job, id: "next-job", messageId: "next-question" });
+  assert.deepEqual(outcomes, ["SENT", "SENT"]);
+  assert.deepEqual(sent, ["Respuesta del motor sobre la cuna.", "Respuesta del motor sobre la piscina."]);
+  assert.equal(mode, "AUTO");
 });
 test("own AI receipt is distinguished from a human reply", async () => {
   const h = harness({ host: true, own: true }); await h.process(job); assert.equal(h.sent.length, 1);
