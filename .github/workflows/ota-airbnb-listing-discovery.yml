@@ -218,7 +218,8 @@ jobs:
             if ! git diff --quiet "origin/$BASE_BRANCH" HEAD -- src/domain/computeOperationalRisk.ts; then
               test "$(git diff --no-ext-diff --no-color --full-index --unified=0 "origin/$BASE_BRANCH...HEAD" -- src/domain/computeOperationalRisk.ts | sha256sum | cut -d ' ' -f 1)" = "c5591cd2c13898778ad044c54bc82543f97c3407d0d82569ed70957fef4e4244"
             fi
-            test "$(git diff --no-ext-diff --no-color --full-index --unified=0 "origin/$BASE_BRANCH...HEAD" -- .github/workflows/pin-ai-host-incidents-v1.yml | sha256sum | cut -d ' ' -f 1)" = "16860e7db9814fe7d84ad91fac8823f709ab165cd458ef4d5807e484217d1ce1"
+            # Preserve the exact four migration lines despite unrelated main workflow edits.
+            test "$(git diff --no-ext-diff --no-color --full-index --unified=0 "origin/$BASE_BRANCH...HEAD" -- .github/workflows/pin-ai-host-incidents-v1.yml | sed '/^index /d; /^@@ /d' | sha256sum | cut -d ' ' -f 1)" = "efc578723493d5adf7c3ec11e091d1b49b8b058a92883d2e1d63e9041bb54b2e"
             echo "PR #333 exact settings scope verified; continuing retained OTA certifications."
             exit 0
           fi
