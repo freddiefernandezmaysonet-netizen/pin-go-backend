@@ -54,6 +54,10 @@ jobs:
           if [ -f "$sitemap_migration" ] && ! git cat-file -e "$BASE_SHA:$sitemap_migration" 2>/dev/null; then
             npx prisma db execute --file "$sitemap_migration" --schema prisma/schema.prisma
           fi
+          arrival_migration=prisma/migrations/20261003160000_property_arrival_location/migration.sql
+          if [ -f "$arrival_migration" ] && ! git cat-file -e "$BASE_SHA:$arrival_migration" 2>/dev/null; then
+            npx prisma db execute --file "$arrival_migration" --schema prisma/schema.prisma
+          fi
           npx prisma generate
       - name: Host foundation unit and PostgreSQL API tests
         run: node --import tsx --test src/pin-ai/host/*.test.ts

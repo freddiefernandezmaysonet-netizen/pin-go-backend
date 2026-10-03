@@ -11,6 +11,8 @@ import subprocess
 REPOSITORY = "freddiefernandezmaysonet-netizen/pin-go-backend"
 BASE = "54713537611da6f766239d330a1d3bb34dd42777"
 FILES = {
+    ".github/workflows/ota-initial-distribution-enablement.yml": "e6cbaa4de1a3c9f0baf0b676fa3294e430aa1c6df0012f44db6030d195c997df",
+    ".github/workflows/pin-ai-host-incidents-v1.yml": "b4ea72cd057af15ba4d8a07ffdad5885c0d37e074a89d2e39f2f98e57b1ef358",
     ".github/workflows/apms-exit-closure-a-certification.yml": "e1708566c432cc39cc2a64b25708576e880e169518d04ed2c79761097fdaec70",
     ".github/workflows/guest-journey-enterprise-e15-certification.yml": "fa3f493b60ff965d629b537f582e42892a990ba3f18f2830135b0c6942ff5a97",
     ".github/workflows/ota-airbnb-listing-discovery.yml": "bc97ab1f546a620002a28c5f0ac467d59e122dec9ef97cf69d470f479eb3cad2",
