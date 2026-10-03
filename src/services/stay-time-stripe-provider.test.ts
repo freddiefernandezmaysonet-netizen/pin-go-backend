@@ -174,5 +174,22 @@ test("unpaid expiry adapter retrieves only the exact connected-account session w
   assert.equal(await f.provider.retrieveUnpaidSession(f.m), null);
   f.objects.session.status = "expired"; f.state.slowRead = true;
   await assert.rejects(f.provider.retrieveUnpaidSession(f.m), /STAY_TIME_PAYMENT_EVIDENCE_MISMATCH/);
-  assert.equal(f.calls.some(c => c.method !== "session"), false);
+  assert.equal(f.calls.some(c => !["session", "intent"].includes(c.method)), false);
+});
+
+test("canceled intent is independently retrieved in the connected account without charges or mutations", async () => {
+  const f = fixture(); f.setNow("2026-10-01T14:00Z");
+  Object.assign(f.objects.paymentIntent, { status: "canceled", amount_received: 0, amount_capturable: 0,
+    latest_charge: null, transfer_data: null, canceled_at: Date.parse("2026-10-01T13:00Z") / 1000 });
+  Object.assign(f.objects.session, { status: "expired", payment_status: "unpaid", payment_intent: structuredClone(f.objects.paymentIntent),
+    after_expiration: null, recovered_from: null, invoice: null, subscription: null, setup_intent: null });
+  const evidence = await f.provider.retrieveUnpaidSession(f.m);
+  assert.equal(evidence?.canceledPaymentIntent?.id, "pi_test");
+  assert.deepEqual(f.calls.map(c => c.method), ["session", "intent"]);
+  assert.deepEqual(f.calls[1].args, { id: "pi_test", params: {} });
+  for (const call of f.calls) assert.deepEqual(call.options, { stripeAccount: "acct_test" });
+  // Expanded Checkout evidence cannot override a different fresh intent result.
+  f.objects.paymentIntent.id = "pi_other";
+  await assert.rejects(f.provider.retrieveUnpaidSession(f.m), /STAY_TIME_PAYMENT_EVIDENCE_MISMATCH/);
+  assert.equal(f.calls.some(c => !["session", "intent"].includes(c.method)), false);
 });

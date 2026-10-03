@@ -199,7 +199,9 @@ test("verified abandoned Checkout expiry is atomic, fenced and never changes the
   const db = new PrismaClient({ datasources: { db: { url } } }); t.after(() => db.$disconnect());
   const { syntheticStayTimePaymentEvidence } = await import("./stay-time-payment-evidence.fixture.js");
   for (const scenario of ["expired-unpaid", "already-expired", "no-incident", "concurrent", "intent-present", "provider-outage",
-    "stale-evidence", "lost-lease", "expired-lease", "payment-race", "account-race", "journal-outage"] as const) await t.test(scenario, async () => {
+    "stale-evidence", "lost-lease", "expired-lease", "payment-race", "account-race", "journal-outage",
+    "canceled-intent", "canceled-stored-intent", "canceled-processing", "canceled-charge", "canceled-intent-race",
+    "canceled-lost-lease", "canceled-journal-outage"] as const) await t.test(scenario, async () => {
     let now = new Date("2026-10-03T15:00Z"); const old = new Date(now.getTime() - 120_000);
     const org = await db.organization.create({ data: { name: "Synthetic unpaid expiry" } });
     const property = await db.property.create({ data: { organizationId: org.id, name: "Synthetic unpaid expiry" } });
@@ -228,10 +230,22 @@ test("verified abandoned Checkout expiry is atomic, fenced and never changes the
       }
       deps.retrieveUnpaidSession = async snapshot => {
         if (scenario === "provider-outage") throw new Error("synthetic provider unavailable");
-        const evidence = syntheticStayTimePaymentEvidence(snapshot, snapshot.reservation, now);
+        const evidence: import("./stay-time-payment-evidence.js").StayTimeUnpaidExpiryEvidence & ReturnType<typeof syntheticStayTimePaymentEvidence> =
+          syntheticStayTimePaymentEvidence(snapshot, snapshot.reservation, now);
         Object.assign(evidence.session, { status: "expired", payment_status: "unpaid", payment_intent: null,
           after_expiration: null, recovered_from: null, invoice: null, subscription: null, setup_intent: null });
         if (scenario === "intent-present") evidence.session.payment_intent = "pi_pending";
+        if (scenario.startsWith("canceled-")) {
+          Object.assign(evidence.paymentIntent, { id: `pi_${m.id}`, status: "canceled", amount_received: 0, amount_capturable: 0,
+            latest_charge: null, transfer_data: null, canceled_at: Math.floor(now.getTime() / 1000) - 60 });
+          evidence.session.payment_intent = evidence.paymentIntent.id;
+          evidence.canceledPaymentIntent = evidence.paymentIntent;
+          if (scenario === "canceled-stored-intent") await db.reservationModification.update({ where: { id: m.id }, data: { stripePaymentIntentId: evidence.paymentIntent.id } });
+          if (scenario === "canceled-processing") evidence.paymentIntent.status = "processing";
+          if (scenario === "canceled-charge") evidence.paymentIntent.latest_charge = "ch_failed";
+          if (scenario === "canceled-intent-race") await db.reservationModification.update({ where: { id: m.id }, data: { stripePaymentIntentId: "pi_changed" } });
+          if (scenario === "canceled-lost-lease") await db.reservationModification.update({ where: { id: m.id }, data: { stayTimeRecoveryLeaseToken: "another-worker" } });
+        }
         if (scenario === "stale-evidence") now = new Date(now.getTime() + 60_001);
         if (scenario === "lost-lease") await db.reservationModification.update({ where: { id: m.id }, data: { stayTimeRecoveryLeaseToken: "another-worker" } });
         if (scenario === "expired-lease") { now = new Date(now.getTime() + 11 * 60_000); evidence.retrievedAt = now; }
@@ -239,7 +253,7 @@ test("verified abandoned Checkout expiry is atomic, fenced and never changes the
         if (scenario === "account-race") await db.reservation.update({ where: { id: r.id }, data: { stripeConnectedAccountId: "acct_changed" } });
         return evidence;
       };
-      if (scenario === "journal-outage") {
+      if (scenario === "journal-outage" || scenario === "canceled-journal-outage") {
         deps.client = new Proxy(db, { get(target, field) {
           if (field !== "$transaction") return Reflect.get(target, field);
           return async (work: (tx: Prisma.TransactionClient) => Promise<unknown>) => db.$transaction(tx => work(new Proxy(tx, { get(inner, key) {
@@ -261,13 +275,17 @@ test("verified abandoned Checkout expiry is atomic, fenced and never changes the
       }
       const batches = await Promise.all(Array.from({ length: scenario === "concurrent" ? 2 : 1 }, () => runStayTimeRecoveryBatch(deps)));
       const saved = await db.reservationModification.findUniqueOrThrow({ where: { id: m.id } });
-      const terminal = ["expired-unpaid", "already-expired", "no-incident", "concurrent", "journal-outage"].includes(scenario);
+      const terminal = ["expired-unpaid", "already-expired", "no-incident", "concurrent", "journal-outage",
+        "canceled-intent", "canceled-stored-intent", "canceled-journal-outage"].includes(scenario);
       if (terminal) {
         assert.equal(saved.status, "EXPIRED"); assert.equal(saved.failureCode, "STAY_TIME_EXPIRED_UNPAID");
         assert.equal(saved.stayTimeRecoveryNextAt, null); assert.equal(saved.stayTimeRecoveryLeaseToken, null); assert.equal(saved.stripePaymentStatus, null);
         assert.equal(batches.flatMap(b => b.results).filter(r => r.outcome === "EXPIRED_UNPAID").length, 1);
-        const journal = saved.failureDetails as { version: string; paymentIntentAbsent: boolean };
-        assert.equal(journal.version, "stay_time_unpaid_expiry_v1"); assert.equal(journal.paymentIntentAbsent, true);
+        const journal = saved.failureDetails as { version: string; paymentIntentAbsent: boolean; canceledPaymentIntentId?: string; paymentIntentStatus?: string; chargeAbsent?: boolean };
+        assert.equal(journal.version, "stay_time_unpaid_expiry_v1"); assert.equal(journal.paymentIntentAbsent, !scenario.startsWith("canceled-"));
+        if (scenario.startsWith("canceled-")) {
+          assert.ok(journal.canceledPaymentIntentId); assert.equal(journal.paymentIntentStatus, "canceled"); assert.equal(journal.chargeAbsent, true);
+        }
         now = new Date(now.getTime() + 2 * 3_600_000); assert.equal((await runStayTimeRecoveryBatch(deps)).processed, 0);
         if (issueId) {
           const issue = await db.operationalIssue.findUniqueOrThrow({ where: { id: issueId } });
@@ -279,7 +297,7 @@ test("verified abandoned Checkout expiry is atomic, fenced and never changes the
         assert.notEqual(saved.failureCode, "STAY_TIME_EXPIRED_UNPAID");
         assert.equal(saved.status, scenario === "payment-race" ? "PAYMENT_PROCESSING" : "AWAITING_PAYMENT");
         assert.equal((await db.operationalIssue.findUniqueOrThrow({ where: { id: issueId! } })).workflowState, "ACTION_REQUIRED");
-        if (scenario === "lost-lease") assert.equal(saved.stayTimeRecoveryLeaseToken, "another-worker");
+        if (scenario === "lost-lease" || scenario === "canceled-lost-lease") assert.equal(saved.stayTimeRecoveryLeaseToken, "another-worker");
       }
       if (scenario !== "account-race") assert.deepEqual(await db.reservation.findUniqueOrThrow({ where: { id: r.id } }), r);
       assert.equal(saved.stripeChargeId, null); assert.equal(saved.appliedAt, null); assert.equal(saved.stayTimeReconciledAt, null);

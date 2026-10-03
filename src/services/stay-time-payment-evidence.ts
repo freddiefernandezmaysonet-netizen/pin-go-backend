@@ -79,11 +79,13 @@ export function assertStayTimePaymentEvidence(m: Modification, r: Stay, evidence
 }
 
 /** Fresh, account-scoped Session retrieval. Expiry alone is insufficient: this
- * deliberately handles only sessions that never created a PaymentIntent and
- * cannot spawn a recovered checkout. Other unpaid cases retain operator review.
+ * handles absent intents or terminal canceled intents with no charge or funds,
+ * and no recovered checkout. Other unpaid cases retain operator review.
  * https://docs.stripe.com/api/checkout/sessions/expire
  */
-export type StayTimeUnpaidExpiryEvidence = Pick<StayTimePaymentEvidence, "connectedAccountId" | "retrievedAt" | "session">;
+export type StayTimeUnpaidExpiryEvidence = Pick<StayTimePaymentEvidence, "connectedAccountId" | "retrievedAt" | "session"> & {
+  canceledPaymentIntent?: Stripe.PaymentIntent;
+};
 export function assertStayTimeUnpaidExpiryEvidence(m: Modification, r: Stay, evidence: StayTimeUnpaidExpiryEvidence, now: Date): void {
   const { session: s } = evidence;
   const age = now.getTime() - evidence.retrievedAt.getTime();
@@ -92,13 +94,13 @@ export function assertStayTimeUnpaidExpiryEvidence(m: Modification, r: Stay, evi
   if (!Number.isFinite(age) || age < 0 || age > 60_000 || !account || account !== r.stripeConnectedAccountId ||
       account !== evidence.connectedAccountId || m.reservationId !== r.id || m.financialAction !== "ADDITIONAL_PAYMENT_REQUIRED" ||
       ![null, "unpaid"].includes(m.stripePaymentStatus) ||
-      [m.stripePaymentIntentId, m.stripeChargeId, m.stripeApplicationFeeId, m.stripeTransferId].some(v => v !== null) ||
+      [m.stripeChargeId, m.stripeApplicationFeeId, m.stripeTransferId].some(v => v !== null) ||
       m.currency.toUpperCase() !== "USD" || charge <= 0 || platform + host !== charge ||
       !id(m.stripeCheckoutSessionId) || !m.checkoutExpiresAt || !Number.isFinite(m.checkoutExpiresAt.getTime()) ||
       m.checkoutExpiresAt > evidence.retrievedAt || s.expires_at > Math.floor(evidence.retrievedAt.getTime() / 1000)) reject();
   const metadata = s.metadata;
   if (s.id !== m.stripeCheckoutSessionId || s.object !== "checkout.session" || s.mode !== "payment" ||
-      s.status !== "expired" || s.payment_status !== "unpaid" || s.payment_intent !== null ||
+      s.status !== "expired" || s.payment_status !== "unpaid" ||
       s.after_expiration !== null || s.recovered_from !== null || s.invoice !== null || s.subscription !== null || s.setup_intent !== null ||
       typeof s.livemode !== "boolean" || s.client_reference_id !== m.id || s.currency !== "usd" || s.amount_total !== charge ||
       s.expires_at !== Math.floor(m.checkoutExpiresAt.getTime() / 1000) ||
@@ -107,4 +109,21 @@ export function assertStayTimeUnpaidExpiryEvidence(m: Modification, r: Stay, evi
       metadata.reservationId !== r.id || metadata.propertyId !== r.propertyId ||
       metadata.additionalChargeAmountCents !== String(charge) || metadata.additionalPlatformFeeAmountCents !== String(platform) ||
       metadata.additionalHostPayoutAmountCents !== String(host)) reject();
+  const pi = evidence.canceledPaymentIntent;
+  if (s.payment_intent === null) {
+    if (pi !== undefined || m.stripePaymentIntentId !== null) reject();
+    return;
+  }
+  // Cancellation is irreversible; zero received/capturable and no charge keep
+  // authorization/refund history outside this deliberately narrow closure path.
+  // https://docs.stripe.com/payments/paymentintents/lifecycle
+  if (!pi || !id(s.payment_intent) || pi.id !== id(s.payment_intent) ||
+      (m.stripePaymentIntentId !== null && m.stripePaymentIntentId !== pi.id) ||
+      pi.object !== "payment_intent" || pi.status !== "canceled" || pi.latest_charge !== null ||
+      pi.amount_received !== 0 || pi.amount_capturable !== 0 || pi.amount !== charge || pi.currency !== "usd" ||
+      (pi.application_fee_amount ?? 0) !== platform || pi.transfer_data !== null || pi.livemode !== s.livemode ||
+      !Number.isSafeInteger(pi.canceled_at) || !pi.canceled_at || pi.canceled_at <= 0 ||
+      pi.canceled_at > Math.floor(evidence.retrievedAt.getTime() / 1000) ||
+      pi.metadata?.flow !== "direct_booking_reservation_modification" || pi.metadata.stripeChargeMode !== "DIRECT_CHARGE" ||
+      pi.metadata.reservationModificationId !== m.id || pi.metadata.reservationId !== r.id || pi.metadata.propertyId !== r.propertyId) reject();
 }

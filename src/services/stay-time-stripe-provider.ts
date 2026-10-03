@@ -59,7 +59,11 @@ export function createStayTimeStripeProvider(stripe: StayTimeStripeClient, now: 
       if (account !== m.reservation.stripeConnectedAccountId) reject();
       const session = await stripe.checkout.sessions.retrieve(id(m.stripeCheckoutSessionId), {}, { stripeAccount: account });
       if (session.status !== "expired" || session.payment_status !== "unpaid") return null;
-      const evidence = { connectedAccountId: account, retrievedAt, session };
+      // Always retrieve the intent independently in this account, even when
+      // Checkout supplied an expanded object. This adapter never cancels it.
+      const evidence: StayTimeUnpaidExpiryEvidence = { connectedAccountId: account, retrievedAt, session,
+        ...(session.payment_intent !== null ? { canceledPaymentIntent:
+          await stripe.paymentIntents.retrieve(id(session.payment_intent), {}, { stripeAccount: account }) } : {}) };
       assertStayTimeUnpaidExpiryEvidence(m, m.reservation, evidence, now());
       return evidence;
     },

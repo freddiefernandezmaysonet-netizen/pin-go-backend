@@ -36,7 +36,7 @@ async function syncRecoveryIssue(tx: Prisma.TransactionClient, modificationId: s
   if (!resolved && (!existing && (m.stayTimeRecoveryAttempts < REVIEW_AFTER_ATTEMPTS || waitingNormally))) return;
   const summary = resolved
     ? applied ? "The change was applied and its reconciliation completed; physical access is not certified by this result."
-      : unpaid ? "The provider confirmed this Checkout expired without a PaymentIntent; no schedule change or incremental payment occurred."
+      : unpaid ? "The provider confirmed this Checkout expired without a collectible payment; no schedule change or incremental payment occurred."
       : "The canonical recovery journal confirms the incremental payment was refunded."
     : "Repeated stay-time recovery attempts could not confirm a completed change or refund.";
   await upsertOperationalIssue(tx, {
@@ -187,10 +187,13 @@ export async function runStayTimeRecoveryBatch(deps: StayTimeRecoveryDependencie
               isStayTimeModification(current.guestConfirmation) && !current.appliedAt && !current.cancelledAt && !current.stayTimeReconciledAt &&
               !["STAY_TIME_REFUND_PENDING", "STAY_TIME_REFUNDED"].includes(current.failureCode ?? "")) {
             await tx.reservationModification.update({ where: { id: candidate.id }, data: { status: "EXPIRED", expiredAt: current.expiredAt ?? now,
-              failureCode: UNPAID_EXPIRY, failureMessage: "Checkout expired without a payment attempt; reservation unchanged.",
+              failureCode: UNPAID_EXPIRY, failureMessage: "Checkout expired without a collectible payment; reservation unchanged.",
               failureDetails: { version: "stay_time_unpaid_expiry_v1", verifiedAt: unpaidEvidence.retrievedAt.toISOString(),
                 checkoutSessionId: current.stripeCheckoutSessionId, connectedAccountId: current.stripeConnectedAccountId,
-                providerExpiresAt: unpaidEvidence.session.expires_at, paymentIntentAbsent: true } } });
+                providerExpiresAt: unpaidEvidence.session.expires_at, paymentIntentAbsent: !unpaidEvidence.canceledPaymentIntent,
+                ...(unpaidEvidence.canceledPaymentIntent ? { canceledPaymentIntentId: unpaidEvidence.canceledPaymentIntent.id,
+                  paymentIntentStatus: "canceled", providerCanceledAt: unpaidEvidence.canceledPaymentIntent.canceled_at,
+                  amountReceived: 0, amountCapturable: 0, chargeAbsent: true } : {}) } } });
             outcome = "EXPIRED_UNPAID";
           }
         }

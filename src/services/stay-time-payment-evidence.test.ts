@@ -104,3 +104,50 @@ test("terminal unpaid evidence requires an expired unrecoverable session with no
   ];
   for (const [name, change] of rejected) await t.test(name, () => { const f = unpaid(); change(f); assert.throws(() => verify(f.m, f.r, f.evidence, f.now)); });
 });
+
+test("canceled intent expiry requires terminal zero-fund evidence bound to the exact checkout", async t => {
+  const { assertStayTimeUnpaidExpiryEvidence: verify } = await import("./stay-time-payment-evidence.js");
+  function canceled() {
+    const f = fixture(); f.now = new Date("2026-10-01T14:00Z"); f.evidence.retrievedAt = f.now;
+    Object.assign(f.m, { stripePaymentStatus: null, stripeChargeId: null, stripeApplicationFeeId: null });
+    Object.assign(f.evidence.session, { status: "expired", payment_status: "unpaid",
+      after_expiration: null, recovered_from: null, invoice: null, subscription: null, setup_intent: null });
+    Object.assign(f.evidence.paymentIntent, { status: "canceled", amount_received: 0, amount_capturable: 0,
+      latest_charge: null, transfer_data: null, canceled_at: Math.floor(f.now.getTime() / 1000) - 60 });
+    return { ...f, evidence: { ...f.evidence, canceledPaymentIntent: f.evidence.paymentIntent } };
+  }
+  for (const stored of [true, false]) {
+    const f = canceled(); if (!stored) f.m.stripePaymentIntentId = null;
+    verify(f.m, f.r, f.evidence, f.now);
+    f.evidence.session.payment_intent = f.evidence.canceledPaymentIntent;
+    verify(f.m, f.r, f.evidence, f.now);
+  }
+  const rejected: [string, (f: ReturnType<typeof canceled>) => void][] = [
+    ...(["processing", "requires_action", "requires_capture", "requires_payment_method", "requires_confirmation", "succeeded"] as const)
+      .map(status => [status, (f: ReturnType<typeof canceled>) => { f.evidence.canceledPaymentIntent.status = status; }] as [string, (f: ReturnType<typeof canceled>) => void]),
+    ["received money", f => { f.evidence.canceledPaymentIntent.amount_received = 1; }],
+    ["capturable money", f => { f.evidence.canceledPaymentIntent.amount_capturable = 1; }],
+    ["charge exists", f => { f.evidence.canceledPaymentIntent.latest_charge = "ch_failed"; }],
+    ["missing charge field", f => { delete (f.evidence.canceledPaymentIntent as Partial<typeof f.evidence.paymentIntent>).latest_charge; }],
+    ["different intent", f => { f.evidence.canceledPaymentIntent.id = "pi_other"; }],
+    ["different stored intent", f => { f.m.stripePaymentIntentId = "pi_other"; }],
+    ["contradictory absent session intent", f => { f.evidence.session.payment_intent = null; }],
+    ["wrong object", f => { Object.assign(f.evidence.canceledPaymentIntent, { object: "charge" }); }],
+    ["wrong amount", f => { f.evidence.canceledPaymentIntent.amount++; }],
+    ["wrong fee", f => { f.evidence.canceledPaymentIntent.application_fee_amount = 1; }],
+    ["wrong currency", f => { f.evidence.canceledPaymentIntent.currency = "eur"; }],
+    ["other reservation", f => { f.evidence.canceledPaymentIntent.metadata.reservationId = "other"; }],
+    ["other property", f => { f.evidence.canceledPaymentIntent.metadata.propertyId = "other"; }],
+    ["other modification", f => { f.evidence.canceledPaymentIntent.metadata.reservationModificationId = "other"; }],
+    ["base booking flow", f => { f.evidence.canceledPaymentIntent.metadata.flow = "direct_booking"; }],
+    ["mixed live mode", f => { f.evidence.canceledPaymentIntent.livemode = !f.evidence.session.livemode; }],
+    ["transfer", f => { f.evidence.canceledPaymentIntent.transfer_data = { destination: "acct_other" }; }],
+    ["missing cancellation time", f => { f.evidence.canceledPaymentIntent.canceled_at = null; }],
+    ["future cancellation time", f => { f.evidence.canceledPaymentIntent.canceled_at = Math.floor(f.now.getTime() / 1000) + 1; }],
+    ["stale read", f => { f.evidence.retrievedAt = new Date(f.now.getTime() - 60_001); }],
+    ["stored charge", f => { f.m.stripeChargeId = "ch_known"; }],
+  ];
+  for (const [name, change] of rejected) await t.test(name, () => {
+    const f = canceled(); change(f); assert.throws(() => verify(f.m, f.r, f.evidence, f.now));
+  });
+});
