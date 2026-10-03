@@ -1,4 +1,5 @@
 import { isChannexGuestRegistrationExempt } from "../services/guest-registration-channel.policy";
+import { retireAirbnbLegacyRetry } from "../channex-messaging/airbnb-access.service.js";
 import dotenv from "dotenv";
 dotenv.config({ path: "./.env", override: true });
 
@@ -185,6 +186,7 @@ async function processRetries() {
 
   for (const msg of failedSmsMessages) {
     try {
+      if (await retireAirbnbLegacyRetry(prisma, msg)) continue;
       if (yieldsToGuestJourneyCommunicationsOwner(msg)) {
         log("SMS retry yielded to Guest Journey COMMUNICATIONS owner", {
           id: msg.id,
@@ -380,6 +382,7 @@ async function processGuestAccessEmailRetries() {
     failedEmailMessages
   ) {
     try {
+      if (await retireAirbnbLegacyRetry(prisma, message)) continue;
       if (yieldsToGuestJourneyCommunicationsOwner(message)) {
         log("Email retry yielded to Guest Journey COMMUNICATIONS owner", {
           id: message.id,

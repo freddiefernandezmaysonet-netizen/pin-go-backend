@@ -2,7 +2,7 @@ import {
   derivePropertyCommercialDistributionStatus,
   type OtaChannelConnectionStatus,
   type OtaReadinessStatus,
-} from "./ota-commercial-lifecycle.policy";
+} from "./ota-commercial-lifecycle.policy.js";
 
 export const CONNECTION_CENTER_CATALOG = [
   { provider: "AIRBNB", name: "Airbnb", availability: "AVAILABLE" },

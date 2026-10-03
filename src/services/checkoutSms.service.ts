@@ -1,4 +1,5 @@
 import { PrismaClient } from "@prisma/client";
+import { deliverAirbnbCommunication } from "../channex-messaging/airbnb-access.service.js";
 import { sendSms } from "../integrations/twilio/twilio.client";
 import {
   getGuestIntlLocale,
@@ -44,6 +45,8 @@ export async function sendCheckoutSms(
   prisma: PrismaClient,
   reservationId: string
 ) {
+  const routed = await deliverAirbnbCommunication(prisma, reservationId, "CHECKOUT");
+  if (routed) return routed;
   let retryBody: string | null = null;
   try {
     // ✅ idempotencia real: solo bloquear si ya fue enviado exitosamente

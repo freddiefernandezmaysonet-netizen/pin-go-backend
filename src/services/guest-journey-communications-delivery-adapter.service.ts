@@ -1,4 +1,5 @@
 import { isChannexGuestRegistrationExempt } from "./guest-registration-channel.policy";
+import { retireAirbnbLegacyRetry } from "../channex-messaging/airbnb-access.service.js";
 import { createHash } from "node:crypto";
 
 import { PrismaClient, ReservationStatus } from "@prisma/client";
@@ -324,6 +325,14 @@ export async function executeGuestJourneyCommunicationDeliveryAdapter(
 
   if (!reservation || !message) {
     throw new Error("COMMUNICATION_SCOPE_OR_MESSAGE_MISMATCH");
+  }
+
+  if (["APMS_PENDING", "FAILED", "FAILED_FINAL"].includes(message.status ?? "") &&
+      await retireAirbnbLegacyRetry(prisma, message)) {
+    return { providerCalls: 0, completion: {
+      kind: "SUCCEEDED", outcomeEvidenceFingerprint: hashEvidence({ messageLogId, status: "OBSOLETE", owner: "AIRBNB" }),
+      messageLogId, communicationType: requestedType, channel: requestedChannel, deliveryStatus: "OBSOLETE",
+    } };
   }
 
   if (message.status === "SENT") {
