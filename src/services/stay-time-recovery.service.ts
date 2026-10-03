@@ -3,6 +3,7 @@ import type { Prisma } from "@prisma/client";
 import { isStayTimeModification } from "./stay-time-apply-validation.service.js";
 import { applyGuestReservationModification } from "./guest-reservation-modification-apply.service.js";
 import { processStayTimePayment, type StayTimePaymentFlowDependencies } from "./stay-time-payment-flow.service.js";
+import { assertStayTimePaymentEvidence } from "./stay-time-payment-evidence.js";
 
 const MIN_AGE_MS = 60_000;
 const LEASE_MS = 10 * 60_000;
@@ -21,6 +22,8 @@ function due(now: Date): Prisma.ReservationModificationWhereInput {
         { status: { in: ["PAYMENT_PROCESSING", "APPLYING"] } },
         { status: "CANCELLED", failureCode: "STAY_TIME_REFUND_PENDING" },
         { status: "APPLIED", stayTimeReconciledAt: null },
+        { status: { in: ["AWAITING_PAYMENT", "EXPIRED"] }, financialAction: "ADDITIONAL_PAYMENT_REQUIRED",
+          stripeConnectedAccountId: { not: null }, stripeCheckoutSessionId: { not: null } },
       ] },
       { OR: [{ stayTimeRecoveryNextAt: null }, { stayTimeRecoveryNextAt: { lte: now } }] },
       { OR: [{ stayTimeRecoveryLeaseUntil: null }, { stayTimeRecoveryLeaseUntil: { lte: now } }] },
@@ -29,8 +32,9 @@ function due(now: Date): Prisma.ReservationModificationWhereInput {
   };
 }
 
-/** Resumes persisted interrupted work only. Awaiting/unobserved payments still
- * require the signed webhook. Claims limit duplicate worker I/O; canonical
+/** Resumes persisted interrupted work and detects paid sessions when a webhook
+ * was not observed. Unpaid/unverifiable sessions retain their canonical state.
+ * Claims limit duplicate worker I/O; canonical
  * transactions and Stripe idempotency remain authoritative if a lease expires.
  * No provider call occurs in a database transaction. */
 export async function runStayTimeRecoveryBatch(deps: StayTimePaymentFlowDependencies, limit = 20) {
@@ -54,7 +58,7 @@ export async function runStayTimeRecoveryBatch(deps: StayTimePaymentFlowDependen
     let outcome: (typeof results)[number]["outcome"] = "RETRY_SCHEDULED";
     let attempts = 1;
     try {
-      const m = await deps.client.reservationModification.findUniqueOrThrow({ where: { id: candidate.id } });
+      const m = await deps.client.reservationModification.findUniqueOrThrow({ where: { id: candidate.id }, include: { reservation: true } });
       attempts = m.stayTimeRecoveryAttempts;
       if (m.stayTimeRecoveryLeaseToken !== token || m.requestSource !== "PIN_AI_GUEST_SERVICES" || !isStayTimeModification(m.guestConfirmation)) {
         outcome = "SKIPPED";
@@ -65,9 +69,21 @@ export async function runStayTimeRecoveryBatch(deps: StayTimePaymentFlowDependen
         outcome = "APPLIED";
       } else if (m.status === "CANCELLED" && m.failureCode === "STAY_TIME_REFUNDED") {
         outcome = "REFUNDED";
-      } else if ((["PAYMENT_PROCESSING", "APPLYING"].includes(m.status) ||
+      } else if ((["AWAITING_PAYMENT", "EXPIRED", "PAYMENT_PROCESSING", "APPLYING"].includes(m.status) ||
           (m.status === "CANCELLED" && m.failureCode === "STAY_TIME_REFUND_PENDING")) &&
           m.stripeConnectedAccountId && m.stripeCheckoutSessionId) {
+        if (m.status === "AWAITING_PAYMENT" || m.status === "EXPIRED") {
+          // Read-only preflight before canonical processing claims the payment.
+          // Never turn an unpaid/unknown session into PAYMENT_PROCESSING, which
+          // would extend its availability hold. Processing retrieves again under
+          // its current scope and independently validates before apply/refund.
+          const evidence = await deps.retrievePayment(m);
+          assertStayTimePaymentEvidence({ ...m, stripePaymentStatus: "paid",
+            stripePaymentIntentId: m.stripePaymentIntentId ?? evidence.paymentIntent.id,
+            stripeChargeId: m.stripeChargeId ?? evidence.charge.id,
+            stripeApplicationFeeId: m.stripeApplicationFeeId ?? evidence.applicationFee?.id ?? null },
+          m.reservation, evidence, deps.now());
+        }
         const result = await processStayTimePayment({ modificationId: m.id,
           connectedAccountId: m.stripeConnectedAccountId, checkoutSessionId: m.stripeCheckoutSessionId }, deps);
         outcome = result.outcome === "REFUND_PENDING" ? "RETRY_SCHEDULED" : result.outcome;

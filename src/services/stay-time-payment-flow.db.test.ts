@@ -21,7 +21,9 @@ test("paid stay-time processing applies once or durably recovers only the increm
   t.after(() => db.$disconnect());
   for (const scenario of ["webhook-completed", "webhook-async", "webhook-refund", "late", "early", "departure-duration-changed", "departure-confirmation-changed", "stripe-adapter-apply", "stripe-adapter-refund", "concurrent-apply", "serialization-burst", "serialization-exhausted", "revoked-cleaning", "blocked-turnover", "price-changed", "expired", "expired-status",
     "refund-outage", "refund-response-lost", "refund-pending", "refund-wrong-receipt", "concurrent-refund",
-    "payment-outage", "wrong-payment", "partially-refunded", "wrong-account", "reconcile-outage", "cancelled-without-recovery"] as const) {
+    "payment-outage", "wrong-payment", "partially-refunded", "wrong-account", "reconcile-outage", "cancelled-without-recovery",
+    "recovery-paid", "recovery-expired", "recovery-unpaid", "recovery-outage", "recovery-wrong-account", "recovery-wrong-amount",
+    "recovery-concurrent", "recovery-webhook-race"] as const) {
     await t.test(scenario, async () => {
       const early = scenario === "early" || scenario === "revoked-cleaning";
       const stagedAt = new Date(early ? "2026-10-01T12:00Z" : "2026-10-02T12:00Z");
@@ -74,9 +76,9 @@ test("paid stay-time processing applies once or durably recovers only the increm
         // Simulate the persisted result of Checkout creation. No Stripe session is created.
         await db.reservationModification.update({ where: { id }, data: { stripeConnectedAccountId: reservation.stripeConnectedAccountId,
           stripeCheckoutSessionId: `cs_${id}`, ...(scenario === "cancelled-without-recovery" ? { status: "CANCELLED" } : {}),
-          ...(scenario === "expired-status" ? { status: "EXPIRED", expiredAt: now } : {}) } });
+          ...(scenario === "expired-status" || scenario === "recovery-expired" ? { status: "EXPIRED", expiredAt: now } : {}) } });
         const needsRefund = ["webhook-refund", "departure-duration-changed", "departure-confirmation-changed", "stripe-adapter-refund", "revoked-cleaning", "blocked-turnover", "price-changed", "expired", "expired-status", "refund-outage", "refund-response-lost",
-          "refund-pending", "refund-wrong-receipt", "concurrent-refund"].includes(scenario);
+          "refund-pending", "refund-wrong-receipt", "concurrent-refund", "recovery-expired"].includes(scenario);
         if (scenario === "revoked-cleaning") await db.cleaningWork.update({ where: { id: workId! }, data: { completionConfirmedAt: null } });
         if (scenario === "departure-duration-changed") {
           await db.cleaningWork.update({ where: { id: workId! }, data: { durationCommitmentMinutes: 240 } });
@@ -88,7 +90,7 @@ test("paid stay-time processing applies once or durably recovers only the increm
             propertyId: property.id, staffMemberId: staffId!, status: "CONFIRMED", token: `replacement-${id}` } });
           await db.cleaningWork.update({ where: { id: workId! }, data: { confirmationId: replacement.id } });
         }
-        if (needsRefund && !["departure-duration-changed", "departure-confirmation-changed", "revoked-cleaning", "price-changed", "expired", "expired-status"].includes(scenario)) await db.propertyBlockedDate.create({
+        if (needsRefund && !["departure-duration-changed", "departure-confirmation-changed", "revoked-cleaning", "price-changed", "expired", "expired-status", "recovery-expired"].includes(scenario)) await db.propertyBlockedDate.create({
           data: { propertyId: property.id, startDate: new Date("2026-10-03T19:59Z"), endDate: new Date("2026-10-04T15:00Z") } });
         if (scenario === "price-changed") await db.reservation.update({ where: { id: reservation.id }, data: { totalAmount: 151 } });
         const before = await db.reservation.findUniqueOrThrow({ where: { id: reservation.id } });
@@ -99,10 +101,14 @@ test("paid stay-time processing applies once or durably recovers only the increm
           retrievePayment: async m => {
             retrieveCalls++;
             if (scenario === "payment-outage" && retrieveCalls === 1) throw new Error("Synthetic payment outage");
+            if (scenario === "recovery-outage") throw new Error("Synthetic recovery provider outage");
             const evidence = syntheticStayTimePaymentEvidence({ ...m, stripePaymentIntentId: `pi_${id}`, stripeChargeId: `ch_${id}`,
               stripeApplicationFeeId: `fee_${id}` }, m.reservation, now);
             if (scenario === "wrong-payment") evidence.session.id = "cs_wrong";
             if (scenario === "partially-refunded") evidence.charge.amount_refunded = 1;
+            if (scenario === "recovery-unpaid") evidence.session.payment_status = "unpaid";
+            if (scenario === "recovery-wrong-account") evidence.connectedAccountId = "acct_other";
+            if (scenario === "recovery-wrong-amount") evidence.session.amount_total! += 1;
             return evidence;
           },
           reconcile: async () => {
@@ -134,7 +140,7 @@ test("paid stay-time processing applies once or durably recovers only the increm
             return result;
           },
         };
-        if (scenario.startsWith("stripe-adapter-")) {
+        if (scenario.startsWith("stripe-adapter-") || scenario === "recovery-paid") {
           const objects = syntheticStayTimePaymentEvidence({ ...staged.modification,
             stripeConnectedAccountId: reservation.stripeConnectedAccountId, stripeCheckoutSessionId: `cs_${id}`,
             stripePaymentIntentId: `pi_${id}`, stripeChargeId: `ch_${id}`, stripeApplicationFeeId: `fee_${id}` }, reservation, now);
@@ -185,7 +191,7 @@ test("paid stay-time processing applies once or durably recovers only the increm
           } });
         }
         const run = async () => {
-          if (!scenario.startsWith("webhook-")) return processStayTimePayment(scope, deps);
+          if (!scenario.startsWith("webhook-") && scenario !== "recovery-webhook-race") return processStayTimePayment(scope, deps);
           const stored = await db.reservationModification.findUniqueOrThrow({ where: { id } });
           const objects = syntheticStayTimePaymentEvidence(stored, reservation, now);
           const payload = JSON.stringify({ id: `evt_${id}`, object: "event", account: scope.connectedAccountId, livemode: false,
@@ -199,6 +205,32 @@ test("paid stay-time processing applies once or durably recovers only the increm
           if (!result.handled) throw new Error("Synthetic stay-time event was not handled");
           return result;
         };
+        if (scenario.startsWith("recovery-")) {
+          await db.reservationModification.update({ where: { id }, data: { updatedAt: new Date(now.getTime() - 120_000) } });
+          const batch = runStayTimeRecoveryBatch(deps);
+          const batches = scenario === "recovery-concurrent" ? await Promise.all([batch, runStayTimeRecoveryBatch(deps)]) :
+            scenario === "recovery-webhook-race" ? [(await Promise.all([batch, run()]))[0]] : [await batch];
+          const recovered = batches.flatMap(b => b.results).filter(r => r.modificationId === id);
+          const invalid = ["recovery-unpaid", "recovery-outage", "recovery-wrong-account", "recovery-wrong-amount"].includes(scenario);
+          if (scenario !== "recovery-webhook-race") assert.equal(recovered.length, 1);
+          const saved = await db.reservationModification.findUniqueOrThrow({ where: { id } });
+          assert.equal(saved.stayTimeRecoveryLeaseToken, null);
+          if (invalid) {
+            assert.equal(recovered[0].outcome, "RETRY_SCHEDULED");
+            assert.equal(saved.status, "AWAITING_PAYMENT", "unverified payments must not acquire an extended availability hold");
+            assert.equal(saved.stripePaymentStatus, staged.modification.stripePaymentStatus);
+            assert.equal(saved.stripePaymentIntentId, null);
+            assert.equal(saved.appliedAt, null);
+            assert.equal(saved.stayTimeRecoveryNextAt?.getTime(), now.getTime() + 60_000);
+            assert.equal(refundCalls, 0); assert.equal(reconcileCalls, 0); assert.equal(retrieveCalls, 1);
+            assert.deepEqual(await db.reservation.findUniqueOrThrow({ where: { id: reservation.id } }), before);
+            assert.equal((await runStayTimeRecoveryBatch(deps)).processed, 0, "backoff prevents immediate polling");
+            return;
+          }
+          for (const result of recovered) assert.equal(result.outcome, needsRefund ? "REFUNDED" : "APPLIED");
+          assert.equal(saved.status, needsRefund ? "CANCELLED" : "APPLIED");
+          assert.equal((await runStayTimeRecoveryBatch(deps)).processed, 0);
+        }
         if (scenario === "serialization-exhausted") {
           await assert.rejects(run, /Synthetic first-lock serialization conflict/);
           assert.equal(injectedConflicts, 5); assert.equal(retrieveCalls, 0); assert.equal(refundCalls, 0); assert.equal(reconcileCalls, 0);
