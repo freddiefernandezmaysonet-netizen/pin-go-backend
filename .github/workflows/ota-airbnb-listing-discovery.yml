@@ -80,6 +80,16 @@ jobs:
             test "$SCOPE_BASE_REPO" = "$GITHUB_REPOSITORY"
             test "$GITHUB_BASE_REF" = "main"
             cat > "$RUNNER_TEMP/stay-time-settings-allowed.txt" <<'EOF'
+          src/pin-ai/actions/action-broker.service.ts
+          src/pin-ai/guest/guest-history-reader.ts
+          src/pin-ai/guest/guest-runtime-gateway.ts
+          src/pin-ai/guest/stay-time-chat-actions.test.ts
+          src/pin-ai/guest/stay-time-chat-actions.ts
+          src/pin-ai/runtime/action-proposal-tool-executor.ts
+          src/pin-ai/runtime/openai-agent-config.ts
+          src/routes/public-booking.pin-ai.routes.test.ts
+          src/routes/public-booking.pin-ai.routes.ts
+          tsconfig.pin-ai-guest-gateway.json
           .github/workflows/ota-airbnb-listing-discovery.yml
           .github/workflows/ota-initial-distribution-enablement.yml
           .github/workflows/pin-ai-host-incidents-v1.yml
