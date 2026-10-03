@@ -11,6 +11,7 @@ import { PinGoRuntimeReadToolExecutor } from "../pin-ai/runtime/pin-go-read-tool
 import { GuardedPinAIRuntimeToolExecutor, type PinAIRuntimeToolExecutor } from "../pin-ai/runtime/tool-executor.js";
 import type { PinAIRuntimeRequest } from "../pin-ai/runtime/contracts.js";
 import { autoConfig } from "./pin-ai-auto.policy.js";
+import { GuestIncidentToolExecutor } from "../pin-ai/runtime/guest-incident-tool-executor.js";
 
 export function pinAIDraftsEnabled(env: NodeJS.ProcessEnv, scope: Scope): boolean {
   const ids = (raw: string | undefined) => (raw ?? "").split(",").map(s => s.trim()).filter(Boolean);
@@ -50,7 +51,7 @@ export function buildPinAIInboxDraftRuntime(args: {
       }, select: { id: true, preferredLanguage: true }, take: 2 });
       if (reservations.length !== 1) throw new InboxError("PIN_AI_DRAFT_RESERVATION_NOT_LINKED", 409);
       const reservation = reservations[0]!;
-      return { ...scope, reservationId: reservation.id, timezone: property.timezone,
+      return { ...scope, reservationId: reservation.id, bookingId: thread.bookingId, timezone: property.timezone,
         preferredLanguage: reservation.preferredLanguage.toLowerCase().startsWith("es") ? "es" : "en" };
     },
     async run(context, messages, threadId) {
@@ -73,16 +74,20 @@ export function buildPinAIInboxDraftRuntime(args: {
         conversation: messages.map(m => ({ role: m.sender === "guest" ? "guest" : "assistant", content: m.text, createdAt: m.insertedAt })),
       };
       let calls = 0;
+      const incidentsEnabled = args.automatic === true && !!context.reservationId && !!context.bookingId;
       const deadline = AbortSignal.timeout(60000);
       const transport = new OpenAIAgentsRuntimeTransport({ enabled: true, apiKey, agentId, model: "gpt-5.6-luna",
-        actionProposal: { enabled: false }, incidentsEnabled: false, webSearch: { enabled: false }, maxPolls: 40, pollDelayMs: 500,
+        actionProposal: { enabled: false }, incidentsEnabled, webSearch: { enabled: false }, maxPolls: 40, pollDelayMs: 500,
       }, async (url, init) => {
         if (++calls > 60) throw new Error("PIN_AI_DRAFT_CALL_LIMIT");
         return fetch(url, { ...init, redirect: "error", signal: deadline });
       });
+      const reads = draftTools(context, new PinGoRuntimeReadToolExecutor(args.prisma));
+      const incidents = incidentsEnabled ? new GuestIncidentToolExecutor({ prisma: args.prisma, env: args.env,
+        channel: { bookingId: context.bookingId!, threadId, messageId: messages.at(-1)!.id }, delegate: reads }) : undefined;
       const result = await new PinAIShadowOrchestrator(new GuardedPinAIModelAdapter(new LunaRuntimeAdapter(transport)),
-        draftTools(context, new PinGoRuntimeReadToolExecutor(args.prisma))).run(request);
-      if (result.actionsExecuted || result.response.escalationCreated) throw new InboxError("PIN_AI_DRAFT_WRITE_INVARIANT", 503);
+        incidents ? new GuardedPinAIRuntimeToolExecutor(incidents) : reads).run(request);
+      if (result.actionsExecuted || (result.response.escalationCreated && !incidents?.getEvidence()?.receipt)) throw new InboxError("PIN_AI_DRAFT_WRITE_INVARIANT", 503);
       return { text: result.response.responseText, requiresHumanReview: result.response.requiresHumanReview };
     },
   });

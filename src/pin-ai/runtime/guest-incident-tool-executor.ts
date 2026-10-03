@@ -11,7 +11,9 @@ export type GuestIncidentRuntimeEvidence = Readonly<{
 export class GuestIncidentToolExecutor implements PinAIRuntimeToolExecutor {
   private evidence: GuestIncidentRuntimeEvidence | undefined;
   constructor(private readonly input: {
-    prisma: PrismaClient; guestToken: string; env: IncidentEnvironment; delegate: PinAIRuntimeToolExecutor;
+    prisma: PrismaClient; guestToken?: string;
+    channel?: { bookingId: string; threadId: string; messageId: string };
+    env: IncidentEnvironment; delegate: PinAIRuntimeToolExecutor;
   }) {}
   getEvidence() { return this.evidence; }
   async execute(tool: PinAIRuntimeToolName, args: Readonly<Record<string, unknown>>,

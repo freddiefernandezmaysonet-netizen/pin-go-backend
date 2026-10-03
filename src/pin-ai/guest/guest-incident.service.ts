@@ -3,27 +3,47 @@ import type { PrismaClient, Prisma } from "@prisma/client";
 import { upsertOperationalIssue } from "../../apms/operational-intelligence.service.js";
 import type { PinAIRuntimeRequest } from "../runtime/contracts.js";
 import { readGuestMessages } from "./guest-history.js";
+import { autoConfig } from "../../channex-messaging/pin-ai-auto.policy.js";
 import { guestIncidentRecipientWhere } from "./guest-incident-recipient-policy.js";
 import { GUEST_INCIDENT_NOTICE, guestIncidentEnabled, incidentNotificationState, parseIncidentInput,
   type GuestIncidentReceipt, type IncidentEnvironment } from "./guest-incident-policy.js";
 
 export async function handleGuestIncident(input: {
-  prisma: PrismaClient; request: PinAIRuntimeRequest; guestToken: string;
+  prisma: PrismaClient; request: PinAIRuntimeRequest;
+  guestToken?: string;
+  channel?: { bookingId: string; threadId: string; messageId: string };
   args: Readonly<Record<string, unknown>>; env: IncidentEnvironment; now?: Date;
 }): Promise<GuestIncidentReceipt | null> {
   const { prisma, request, guestToken, env } = input;
   const scope = request.context;
-  if (!guestIncidentEnabled(scope.reservationId, env)) throw new Error("PIN_AI_INCIDENT_DISABLED");
+  const channel = input.channel;
+  if (channel ? (!!guestToken || !autoConfig(env).allows(scope)) : (!guestToken || !guestIncidentEnabled(scope.reservationId, env))) {
+    throw new Error("PIN_AI_INCIDENT_DISABLED");
+  }
   const command = parseIncidentInput(input.args);
   const now = input.now ?? new Date();
   return prisma.$transaction(async tx => {
     // Reauthorize the bearer token and canonical tenant on every read/write.
     const reservation = await tx.reservation.findFirst({ where: {
-      id: scope.reservationId, propertyId: scope.propertyId, guestToken,
-      guestTokenExpiresAt: { gt: now }, status: "ACTIVE", checkOut: { gt: now },
+      id: scope.reservationId, propertyId: scope.propertyId,
+      ...(channel ? { externalProvider: "CHANNEX", externalId: channel.bookingId }
+        : { guestToken: guestToken!, guestTokenExpiresAt: { gt: now } }),
+      status: "ACTIVE", checkOut: { gt: now },
       property: { organizationId: scope.organizationId, status: "ACTIVE" },
     }, select: { id: true, reservationNumber: true, property: { select: { name: true } } } });
     if (!reservation) throw new Error("PIN_AI_INCIDENT_SCOPE_INVALID");
+    if (channel) {
+      // Only a currently processing, authenticated channel event may write. No portal token is reused.
+      const job = await tx.channexAIInbound.findFirst({ where: {
+        organizationId: scope.organizationId, propertyId: scope.propertyId,
+        threadId: channel.threadId, messageId: channel.messageId, status: "PROCESSING", leaseUntil: { gt: now },
+      } });
+      const thread = job && await tx.channexAIThread.updateMany({ where: {
+        organizationId: scope.organizationId, propertyId: scope.propertyId, threadId: channel.threadId,
+        mode: "AUTO", leaseToken: job.leaseToken, leaseUntil: { gt: now },
+      }, data: { updatedAt: now } });
+      if (!job?.leaseToken || !thread?.count) throw new Error("PIN_AI_INCIDENT_CHANNEL_NOT_ACTIVE");
+    }
     const prefix = `PIN_AI_GUEST_INCIDENT:${scope.organizationId}:${scope.reservationId}:${command.category}:`;
     await tx.$executeRawUnsafe("SELECT pg_advisory_xact_lock(hashtextextended($1, 0))", prefix);
     let issue = await tx.operationalIssue.findFirst({ where: {
@@ -39,11 +59,17 @@ export async function handleGuestIncident(input: {
       issue = await tx.operationalIssue.findUnique({ where: { id: issue.id } });
     }
 
-    if (command.operation === "REPORT") {
-      const history = await tx.pinAIGuestConversation.findUnique({ where: { reservationId: scope.reservationId },
+    const replay = channel && command.operation === "REPORT" ? await tx.operationalIssue.findFirst({ where: {
+      organizationId: scope.organizationId, propertyId: scope.propertyId, reservationId: scope.reservationId,
+      operationalKey: { startsWith: prefix }, engine: "PIN_AI_GUEST_INCIDENT",
+      metadata: { path: ["channelReportMessages"], array_contains: [channel.messageId] },
+    } }) : null;
+    if (replay) issue = replay;
+    if (command.operation === "REPORT" && !replay) {
+      const history = channel ? null : await tx.pinAIGuestConversation.findUnique({ where: { reservationId: scope.reservationId },
         select: { guestHistoryCiphertext: true } });
       const guestTexts = [
-        ...readGuestMessages({ reservationId: scope.reservationId, guestToken }, history?.guestHistoryCiphertext)
+        ...readGuestMessages({ reservationId: scope.reservationId, guestToken: guestToken ?? "" }, history?.guestHistoryCiphertext)
           .filter(m => m.role === "guest").slice(-10).map(m => m.text),
         ...request.conversation.filter(m => m.role === "guest").map(m => m.content),
       ];
@@ -69,7 +95,11 @@ export async function handleGuestIncident(input: {
         actionTarget: "RESERVATION", sourceType: "PIN_AI", transitionCode: "GUEST_INCIDENT_RECORDED",
         transitionSummary: "Guest report recorded; cause and resolution remain unverified.", transitionedBy: "GUEST",
         occurredAt: now, metadata: { reference, category: command.category, quotes, guestReported: true,
-          diagnosisVerified: false, ...(isNew ? {} : { firstReportPreserved: true }) },
+          diagnosisVerified: false, ...(isNew ? {} : { firstReportPreserved: true }),
+          ...(channel ? { channelSource: "CHANNEX", channelThreadId: channel.threadId, channelBookingId: channel.bookingId,
+            channelReportMessages: [...new Set([...(isNew || !Array.isArray(prior?.channelReportMessages) ? [] : prior.channelReportMessages as string[]), channel.messageId])] }
+            : prior?.channelSource === "CHANNEX" ? { channelSource: prior.channelSource, channelThreadId: prior.channelThreadId,
+              channelBookingId: prior.channelBookingId, channelReportMessages: prior.channelReportMessages } : {}) },
       });
       if (isNew) {
         // No fallback to arbitrary staff or a model-supplied destination.

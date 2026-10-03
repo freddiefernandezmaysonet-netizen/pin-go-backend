@@ -694,7 +694,7 @@ function joinLabels(
   }
 
   if (labels.length === 1) {
-    return labels[0];
+    return labels[0]!;
   }
 
   if (labels.length === 2) {

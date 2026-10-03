@@ -2,6 +2,7 @@ import type { Prisma, PrismaClient } from "@prisma/client";
 import { upsertOperationalIssue } from "../../apms/operational-intelligence.service.js";
 import { guestIncidentRecipientWhere } from "../guest/guest-incident-recipient-policy.js";
 import { commandHash, fail, hostScopeEnabled, openHostContent, parseHostCommand, sealHostContent, type HostEnvironment } from "./host-incident-policy.js";
+import { autoConfig } from "../../channex-messaging/pin-ai-auto.policy.js";
 
 type Actor = { id: string; orgId: string };
 type Tx = Prisma.TransactionClient;
@@ -21,7 +22,9 @@ async function scopedIssue(tx: Tx, input: Input, ref: string) {
   if (!/^GI-[A-F0-9]{12}$/.test(ref)) return fail(404, "NOT_FOUND");
   const issue = await tx.operationalIssue.findFirst({ where: { organizationId: input.actor.orgId,
     engine: "PIN_AI_GUEST_INCIDENT", visibility: "HOST", metadata: { path: ["reference"], equals: ref } } });
-  if (!issue?.propertyId || !issue.reservationId || !hostScopeEnabled(input.env, input.actor.orgId, issue.reservationId)) return fail(404, "NOT_FOUND");
+  const channel = (issue?.metadata as Record<string, unknown> | null)?.channelSource === "CHANNEX";
+  if (!issue?.propertyId || !issue.reservationId || !(hostScopeEnabled(input.env, input.actor.orgId, issue.reservationId) ||
+    (channel && autoConfig(input.env).allows({ organizationId: input.actor.orgId, propertyId: issue.propertyId })))) return fail(404, "NOT_FOUND");
   const reservation = await tx.reservation.findFirst({ where: { id: issue.reservationId, propertyId: issue.propertyId,
     property: { organizationId: input.actor.orgId } }, select: { reservationNumber: true, property: { select: { name: true } } } });
   if (!reservation) return fail(404, "NOT_FOUND");
@@ -33,9 +36,12 @@ export async function listHostIncidents(input: Input & { before?: string }) {
     const { parsePinAIActionCanaryReservationIds } = await import("../actions/action-canary-scope.js");
     const ids = [...parsePinAIActionCanaryReservationIds(input.env.PIN_AI_HOST_INCIDENT_RESERVATION_IDS).ids]
       .filter(id => hostScopeEnabled(input.env, input.actor.orgId, id));
-    if (!ids.length) return fail(404, "NOT_FOUND");
+    const channelProperties = (input.env.PIN_AI_CHANNEX_AUTO_PROPERTY_IDS ?? "").split(",").map(id => id.trim())
+      .filter(propertyId => autoConfig(input.env).allows({ organizationId: input.actor.orgId, propertyId }));
+    if (!ids.length && !channelProperties.length) return fail(404, "NOT_FOUND");
     const rows = await tx.operationalIssue.findMany({ where: { organizationId: input.actor.orgId,
-      engine: "PIN_AI_GUEST_INCIDENT", visibility: "HOST", reservationId: { in: ids },
+      engine: "PIN_AI_GUEST_INCIDENT", visibility: "HOST", OR: [{ reservationId: { in: ids } },
+        { propertyId: { in: channelProperties }, metadata: { path: ["channelSource"], equals: "CHANNEX" } }],
       ...(input.before ? { id: { lt: input.before } } : {}) }, orderBy: { id: "desc" }, take: 51 });
     const items = [];
     for (const row of rows.slice(0, 50)) {
