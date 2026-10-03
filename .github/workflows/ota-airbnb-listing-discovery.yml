@@ -185,7 +185,12 @@ jobs:
               sed -i '\|^src/domain/computeOperationalRisk.ts$|d' "$RUNNER_TEMP/stay-time-settings-allowed.txt"
             fi
             diff -u "$RUNNER_TEMP/stay-time-settings-allowed.txt" "$RUNNER_TEMP/actual.txt"
-            test "$(git diff --no-ext-diff --no-color --full-index --unified=0 "origin/$BASE_BRANCH...HEAD" -- prisma/schema.prisma | sha256sum | cut -d ' ' -f 1)" = "e4275686f99c3709a02b3040d60fc4460011f61f8aa69b45f31add54695f3409"
+            # Preserve the certified schema, then pin the additive worker delta.
+            recovery_base=5e976be76cffd4c0077d4cfaeed3ec1b3e488214
+            test "$(git diff --no-ext-diff --no-color --full-index --unified=0 "origin/$BASE_BRANCH...$recovery_base" -- prisma/schema.prisma | sha256sum | cut -d ' ' -f 1)" = "e4275686f99c3709a02b3040d60fc4460011f61f8aa69b45f31add54695f3409"
+            test "$(git diff --no-ext-diff --no-color --full-index --unified=0 "$recovery_base" HEAD -- prisma/schema.prisma | sha256sum | cut -d ' ' -f 1)" = "c3e776c3d7ed86dbdc932f861cdfe58324007bacd642b0e2896aa51c47086065"
+            test "$(sha256sum prisma/migrations/20261003010000_stay_time_recovery/migration.sql | cut -d ' ' -f 1)" = "73e34f34c3010a6bcf80ac2c267b887b8d96bd0b9cc61a827d75f2dd73a0028b"
+            test "$(git diff --no-ext-diff --no-color --full-index --unified=0 "$recovery_base" HEAD -- package.json | sha256sum | cut -d ' ' -f 1)" = "0a4686c80531858708636ccefd893632e039998d69554c740e0c13b35025074f"
             test "$(sha256sum prisma/migrations/20261001183000_cleaning_work_confirmation_history/migration.sql | cut -d ' ' -f 1)" = "20cd60db321dc5becbadc2f56065cf9f29f320941625da3d5b246927c5d37d0a"
             test "$(sha256sum prisma/migrations/20261001110000_property_stay_time_settings_v1/migration.sql | cut -d ' ' -f 1)" = "848dc881ee67925f88af326639cc457b64704ddb01773ee8fdd7dea58a80f9df"
             # Pin exact added/removed server lines; unrelated base edits change blob IDs and offsets.
