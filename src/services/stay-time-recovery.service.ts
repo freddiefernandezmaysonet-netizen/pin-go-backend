@@ -4,10 +4,70 @@ import { isStayTimeModification } from "./stay-time-apply-validation.service.js"
 import { applyGuestReservationModification } from "./guest-reservation-modification-apply.service.js";
 import { processStayTimePayment, type StayTimePaymentFlowDependencies } from "./stay-time-payment-flow.service.js";
 import { assertStayTimePaymentEvidence } from "./stay-time-payment-evidence.js";
+import { upsertOperationalIssue } from "../apms/operational-intelligence.service.js";
 
 const MIN_AGE_MS = 60_000;
 const LEASE_MS = 10 * 60_000;
 const RETRY_MAX_MS = 60 * 60_000;
+const REVIEW_AFTER_ATTEMPTS = 6;
+const ISSUE_CODE = "STAY_TIME_RECOVERY_REVIEW";
+
+/** Caller holds the modification row lock. Only canonical terminal evidence
+ * closes review; expiry/cancellation alone is not evidence of a settled payment. */
+async function syncRecoveryIssue(tx: Prisma.TransactionClient, modificationId: string, now: Date) {
+  const m = await tx.reservationModification.findUnique({ where: { id: modificationId },
+    include: { reservation: { include: { property: { select: { organizationId: true } } } } } });
+  if (!m || m.requestSource !== "PIN_AI_GUEST_SERVICES" || !isStayTimeModification(m.guestConfirmation)) return;
+  const operationalKey = `${ISSUE_CODE}:${m.id}`;
+  const existing = await tx.operationalIssue.findUnique({ where: { operationalKey } });
+  if (existing && (existing.issueCode !== ISSUE_CODE || existing.reservationId !== m.reservationId ||
+      existing.propertyId !== m.reservation.propertyId || existing.organizationId !== m.reservation.property.organizationId)) return;
+  if (existing?.workflowState === "RESOLVED") return;
+  const applied = m.status === "APPLIED" && m.stayTimeReconciledAt !== null;
+  const refunded = m.status === "CANCELLED" && m.failureCode === "STAY_TIME_REFUNDED";
+  const resolved = applied || refunded;
+  if (resolved && !existing) return;
+  const waitingNormally = m.status === "AWAITING_PAYMENT" && m.checkoutExpiresAt && m.checkoutExpiresAt > now;
+  if (!resolved && (!existing && (m.stayTimeRecoveryAttempts < REVIEW_AFTER_ATTEMPTS || waitingNormally))) return;
+  const summary = resolved
+    ? applied ? "The change was applied and its reconciliation completed; physical access is not certified by this result."
+      : "The canonical recovery journal confirms the incremental payment was refunded."
+    : "Repeated stay-time recovery attempts could not confirm a completed change or refund.";
+  await upsertOperationalIssue(tx, {
+    operationalKey, issueCode: ISSUE_CODE, engine: "Reservation",
+    title: resolved ? "Stay-time recovery completed" : "Stay-time recovery requires Pin&Go review",
+    issue: summary, operationalImpact: resolved ? null : "A guest schedule change, access reconciliation or incremental payment remains unresolved.",
+    recommendedAction: resolved ? null : "Review the canonical modification, payment evidence and reconciliation. Do not create another charge or refund without verifying the existing receipt.",
+    nextAutomaticStep: resolved ? null : "Bounded recovery continues; operator review does not authorize another payment or a physical access claim.",
+    severity: resolved ? "INFO" : "CRITICAL", workflowState: resolved ? "RESOLVED" : "ACTION_REQUIRED",
+    visibility: "DEVELOPER", responsibleActor: "PIN_GO", actionRequired: !resolved,
+    canAutoResolve: true, autoResolveStatus: resolved ? "SUCCEEDED" : "FAILED", actionTarget: "SYSTEM",
+    organizationId: m.reservation.property.organizationId, propertyId: m.reservation.propertyId, reservationId: m.reservationId,
+    sourceType: "WORKER", occurredAt: now, lastSignalAt: now,
+    ...(resolved ? { resolutionCode: applied ? "STAY_TIME_RECONCILED" : "STAY_TIME_REFUNDED",
+      resolutionSummary: summary, resolutionType: "AUTOMATIC" as const, resolvedBy: "PIN_GO" as const, resolvedAt: now } : {}),
+    transitionCode: resolved ? "STAY_TIME_RECOVERY_REVIEW_RESOLVED" : "STAY_TIME_RECOVERY_REVIEW_REQUIRED",
+    transitionSummary: summary, transitionedBy: "PIN_GO",
+    metadata: { version: "stay_time_recovery_review_v1", modificationId: m.id,
+      attempts: m.stayTimeRecoveryAttempts, modificationStatus: m.status, physicalAccessCertified: false },
+  });
+}
+
+/** Repair closure after a webhook or a crash completed work outside this batch.
+ * Bounded independently of payment polling; no provider calls or message sends. */
+async function repairRecoveryIssues(deps: StayTimePaymentFlowDependencies, limit: number) {
+  const issues = await deps.client.operationalIssue.findMany({
+    where: { issueCode: ISSUE_CODE, operationalKey: { startsWith: `${ISSUE_CODE}:` }, workflowState: { not: "RESOLVED" } },
+    orderBy: [{ lastSignalAt: "asc" }, { id: "asc" }], take: limit, select: { operationalKey: true },
+  });
+  for (const issue of issues) {
+    const id = issue.operationalKey.slice(ISSUE_CODE.length + 1);
+    await deps.client.$transaction(async tx => {
+      await tx.$queryRaw`SELECT "id" FROM "ReservationModification" WHERE "id" = ${id} FOR UPDATE`;
+      await syncRecoveryIssue(tx, id, deps.now());
+    });
+  }
+}
 
 function due(now: Date): Prisma.ReservationModificationWhereInput {
   return {
@@ -41,6 +101,7 @@ export async function runStayTimeRecoveryBatch(deps: StayTimePaymentFlowDependen
   if (!Number.isInteger(limit) || limit < 1 || limit > 100) throw new Error("STAY_TIME_RECOVERY_LIMIT_INVALID");
   const observedAt = deps.now();
   if (!Number.isFinite(observedAt.getTime())) throw new Error("STAY_TIME_RECOVERY_CLOCK_INVALID");
+  await repairRecoveryIssues(deps, limit);
   const candidates = await deps.client.reservationModification.findMany({
     where: due(observedAt), orderBy: [{ stayTimeRecoveryNextAt: { sort: "asc", nulls: "first" } }, { updatedAt: "asc" }, { id: "asc" }],
     take: limit, select: { id: true },
@@ -94,10 +155,15 @@ export async function runStayTimeRecoveryBatch(deps: StayTimePaymentFlowDependen
       outcome = "RETRY_SCHEDULED";
     } finally {
       const delay = Math.min(RETRY_MAX_MS, MIN_AGE_MS * 2 ** Math.min(attempts - 1, 6));
-      await deps.client.reservationModification.updateMany({
-        where: { id: candidate.id, stayTimeRecoveryLeaseToken: token },
-        data: { updatedAt: deps.now(), stayTimeRecoveryLeaseToken: null, stayTimeRecoveryLeaseUntil: null,
-          stayTimeRecoveryNextAt: outcome === "RETRY_SCHEDULED" ? new Date(deps.now().getTime() + delay) : null },
+      await deps.client.$transaction(async tx => {
+        const released = await tx.reservationModification.updateMany({
+          where: { id: candidate.id, stayTimeRecoveryLeaseToken: token },
+          data: { updatedAt: deps.now(), stayTimeRecoveryLeaseToken: null, stayTimeRecoveryLeaseUntil: null,
+            stayTimeRecoveryNextAt: outcome === "RETRY_SCHEDULED" ? new Date(deps.now().getTime() + delay) : null },
+        });
+        // The conditional update locks the row and fences stale workers. Issue
+        // persistence and lease release commit together or are both retried.
+        if (released.count === 1) await syncRecoveryIssue(tx, candidate.id, deps.now());
       });
     }
     results.push({ modificationId: candidate.id, outcome });
