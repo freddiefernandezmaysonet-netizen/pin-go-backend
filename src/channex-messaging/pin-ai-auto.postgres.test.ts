@@ -35,5 +35,17 @@ test("Postgres: duplicate webhooks, competing workers, host fence and crash reco
     assert.equal((await a.channexAIInbound.findUniqueOrThrow({ where: { id: second.id } })).status, "SENDING");
     await other.finish(recovered!, "UNKNOWN", "RECONCILE");
     assert.equal((await repo.state(input))?.mode, "HUMAN"); assert.equal((await repo.candidates()).length, 0);
+    await repo.control(input, "AUTO", new Date());
+    await repo.enqueue({ ...input, messageId: "review-response" });
+    const reviewJob = await repo.claim((await repo.candidates())[0]!, since); assert.ok(reviewJob);
+    assert.equal(await repo.fence(reviewJob), true);
+    await repo.finish(reviewJob, "SENT", "CHANNEX_ACCEPTED_REVIEW_REQUESTED");
+    assert.equal((await repo.state(input))?.mode, "AUTO");
+    assert.equal((await repo.state(input))?.sending, false);
+    await repo.enqueue({ ...input, messageId: "following-question" });
+    const following = await other.claim((await other.candidates())[0]!, since); assert.ok(following);
+    assert.equal(await other.fence(following), true);
+    await other.finish(following, "SENT", "CHANNEX_ACCEPTED");
+    assert.equal((await repo.state(input))?.mode, "AUTO");
   } finally { await a.$disconnect(); await b.$disconnect(); await admin.$executeRawUnsafe(`DROP SCHEMA "${schema}" CASCADE`); await admin.$disconnect(); }
 });
