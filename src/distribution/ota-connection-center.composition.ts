@@ -64,6 +64,10 @@ export function buildOtaConnectionCenterComposition(args: {
     organizationId: string;
     propertyId: string;
   }): Promise<{ verified: boolean }>;
+  configureMessagesApplication?(input: {
+    organizationId: string;
+    propertyId: string;
+  }): Promise<unknown>;
 }): DistributionConnectionCenterActions {
   const requestedRuntime =
     args.runtimeOverride ?? resolveOtaConnectionCenterRuntime(args.runtimeValue);
@@ -125,6 +129,18 @@ export function buildOtaConnectionCenterComposition(args: {
         ...input,
       });
       const initialDistributionGuard = await args.initialDistributionEnablement?.capture(input);
+      // The external property and mapping are durable before Messages installation.
+      // Retry preparation reuses READY inventory and reconciles installed apps first.
+      if (args.configureMessagesApplication) {
+        try {
+          await args.configureMessagesApplication({
+            organizationId: input.organizationId,
+            propertyId: input.propertyId,
+          });
+        } catch {
+          throw new OtaProvisioningError("OTA_MESSAGES_APPLICATION_INSTALLATION_FAILED");
+        }
+      }
       // Inventory and the canonical PMS link are already committed. On webhook
       // failure the READY inventory can be reused without reprovisioning it.
       // Do not return a successful preparation until GET verification succeeds.
