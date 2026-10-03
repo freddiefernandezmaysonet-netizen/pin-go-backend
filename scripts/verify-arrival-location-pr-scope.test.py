@@ -20,6 +20,9 @@ class ScopeTests(unittest.TestCase):
 
     def test_exact_identity_and_snapshot(self):
         scope.verify_identity(self.event, self.env)
+        promoted = copy.deepcopy(self.event)
+        promoted["pull_request"]["base"].update(ref="main", sha="31b5c4c79ca7bebf253074fe38fa9164850e29a5")
+        scope.verify_identity(promoted, self.env)
         scope.verify_contents(self.changed, self.contents, self.modes)
 
     def test_other_pr_fork_branch_and_base_rejected(self):

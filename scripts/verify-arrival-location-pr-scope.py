@@ -50,7 +50,7 @@ def verify_identity(event, env):
     pr = event["pull_request"]
     require(pr["head"]["repo"]["full_name"] == pr["base"]["repo"]["full_name"] == REPOSITORY, "Repository mismatch")
     require(pr["head"]["ref"] == "agent/property-arrival-unit-v1", "Head mismatch")
-    require(pr["base"]["ref"] == "agent/airbnb-access-channel-v1" and pr["base"]["sha"] == BASE, "Stack base mismatch")
+    require((pr["base"]["ref"], pr["base"]["sha"]) in {("agent/airbnb-access-channel-v1", BASE), ("main", "31b5c4c79ca7bebf253074fe38fa9164850e29a5")}, "Stack base mismatch")
 
 
 def verify_contents(changed, contents, modes):
