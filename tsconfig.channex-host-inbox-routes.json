@@ -1,0 +1,5 @@
+{
+  "extends": "./tsconfig.channex-host-inbox.json",
+  "compilerOptions": { "exactOptionalPropertyTypes": false },
+  "include": ["src/routes/dashboard.channex-host-inbox.route.ts", "src/routes/dashboard.channex-host-inbox.route.test.ts"]
+}

@@ -1,0 +1,5 @@
+{
+  "extends": "./tsconfig.app.json",
+  "compilerOptions": { "strict": true },
+  "include": ["src/pages/messages/ChannexInbox.tsx", "src/pages/messages/MessagesPage.tsx"]
+}

@@ -1,0 +1,54 @@
+name: Channex Host Inbox V1
+on:
+  pull_request:
+    paths:
+      - 'src/channex-messaging/**'
+      - 'src/routes/dashboard.channex-host-inbox*'
+      - 'src/server.ts'
+      - 'prisma/channex-host-messaging.prisma'
+      - 'prisma/migrations/20261003010000_channex_host_message_send/**'
+      - 'pin-go-dashboard/src/pages/messages/**'
+      - '*tsconfig.channex-host-inbox*.json'
+      - 'pin-go-dashboard/tsconfig.channex-host-inbox.json'
+      - '.github/workflows/channex-host-inbox-v1.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    env:
+      CI: 'true'
+      NODE_ENV: test
+      DATABASE_URL: postgresql://test:test@127.0.0.1:5432/test
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: |
+            package-lock.json
+            pin-go-dashboard/package-lock.json
+      - run: npm ci
+      - run: npx prisma generate --schema ./prisma
+      - run: npx tsc -p tsconfig.channex-host-inbox.json
+      - run: npx tsc -p tsconfig.channex-host-inbox-routes.json
+      - name: Inbox, tenant security and certified core
+        run: >-
+          node --import tsx --test
+          src/channex-messaging/*.test.ts
+          src/routes/dashboard.channex-host-inbox.route.test.ts
+          src/contracts/channex-certified-core.freeze.test.ts
+          src/distribution/ota-connection-center.composition.test.ts
+          src/distribution/ota-connection-center.runtime-composition.test.ts
+          src/routes/dashboard.distribution-connection-center.route.test.ts
+          src/distribution/ota-connection-center-route-order.contract.test.ts
+      - name: Compile API ESM bundle
+        run: npx esbuild src/server.ts --bundle --platform=node --packages=external --format=esm --outfile=/tmp/host-inbox-server.mjs
+      - run: npm ci
+        working-directory: pin-go-dashboard
+      - run: npx tsc -p tsconfig.channex-host-inbox.json
+        working-directory: pin-go-dashboard
+      - run: npm run build
+        working-directory: pin-go-dashboard
