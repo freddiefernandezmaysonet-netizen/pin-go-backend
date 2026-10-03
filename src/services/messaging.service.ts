@@ -387,12 +387,12 @@ export async function sendCleaningStartSms(
   args: CleaningSmsArgs
 ): Promise<SmsSendResult> {
   const body = buildCleaningStartSmsBody({
-    staffName: args.staffName,
-    propertyName: args.propertyName,
-    roomName: args.roomName,
+    ...(args.staffName !== undefined ? { staffName: args.staffName } : {}),
+    ...(args.propertyName !== undefined ? { propertyName: args.propertyName } : {}),
+    ...(args.roomName !== undefined ? { roomName: args.roomName } : {}),
     startsAt: args.startsAt,
     endsAt: args.endsAt,
-    timezone: args.timezone,
+    ...(args.timezone !== undefined ? { timezone: args.timezone } : {}),
     language: resolveStaffLanguage(args.preferredLanguage),
  });
 
@@ -414,11 +414,11 @@ export async function sendCleaningEndSms(
   args: Omit<CleaningSmsArgs, "startsAt"> & { endsAt: Date }
 ): Promise<SmsSendResult> {
   const body = buildCleaningEndSmsBody({
-    staffName: args.staffName,
-    propertyName: args.propertyName,
-    roomName: args.roomName,
+    ...(args.staffName !== undefined ? { staffName: args.staffName } : {}),
+    ...(args.propertyName !== undefined ? { propertyName: args.propertyName } : {}),
+    ...(args.roomName !== undefined ? { roomName: args.roomName } : {}),
     endsAt: args.endsAt,
-    timezone: args.timezone,
+    ...(args.timezone !== undefined ? { timezone: args.timezone } : {}),
     language: resolveStaffLanguage(args.preferredLanguage),
   });
 
