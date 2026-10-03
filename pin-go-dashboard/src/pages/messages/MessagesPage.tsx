@@ -1,5 +1,4 @@
 import { useEffect, useMemo, useState } from "react";
-import ChannexInbox from "./ChannexInbox";
 
 const API_BASE = import.meta.env.VITE_API_BASE ?? "http://localhost:3000";
 
@@ -210,7 +209,6 @@ export default function MessagesPage() {
 
   return (
     <div style={{ display: "grid", gap: 20 }}>
-      <ChannexInbox />
       <div>
         <h1 style={{ fontSize: 30, fontWeight: 700, margin: 0 }}>Messages</h1>
         <p style={{ color: "#666", marginTop: 8 }}>

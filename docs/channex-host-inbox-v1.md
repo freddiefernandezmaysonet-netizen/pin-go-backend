@@ -5,9 +5,12 @@ Branch: `agent/channex-host-inbox-v1`. Installation PR stays unchanged.
 
 ## Behavior
 
-The existing `pin-go-dashboard` Messages screen now includes property selection,
+The separate `freddiefernandezmaysonet-netizen/pin-go-dashboard` repository contains
+the current Messages screen. Its `agent/channex-host-inbox-v1` branch adds property selection,
 paginated OTA conversations and message history, and a plain-text reply composer.
-The existing delivery log remains available. Messages are fetched from Channex on
+The embedded dashboard copy in this backend is not the active application; the
+initial UI edits there have been removed. The current delivery log remains available.
+Messages are fetched from Channex on
 selection or refresh; this version does not ingest messaging webhooks or run Pin AI.
 Airbnb inquiries without a booking are supported through message threads.
 Closed threads cannot be replied to. Attachments are counted in the history;
@@ -89,15 +92,22 @@ No real property, guest message, migration, merge or deployment was performed.
   authorization and frozen certified core.
 - 39 additional Connection Center, route-order and runtime-import regression
   tests pass. These suites overlap in installation regression coverage.
-- Strict messaging module and frontend Messages typechecks pass. Route checking
+- Six real PostgreSQL test results now pass: the SQL migration and status constraint,
+  12 simultaneous replies through two Prisma clients producing one provider POST,
+  reconstruction and persisted replay, conflicting text, UNKNOWN and PENDING recovery.
+  The test creates and drops only a randomized schema in an explicitly local test
+  database. Channex transport and property inventory remain synthetic.
+- Eight dashboard interaction/delivery-history tests pass in the separate current
+  dashboard repository. The branch disables automatic Vercel deployment.
+- Strict messaging module and frontend inbox typechecks pass. Route checking
   uses the existing API convention with `exactOptionalPropertyTypes=false`, since
   shared authentication sources do not satisfy that optional-property setting.
 - Backend ESM bundle and dashboard production Vite build pass.
-- Full dashboard typecheck has eight pre-existing errors outside Messages.
-  They were reproduced unchanged on the base commit in a separate worktree.
-- Provider I/O and database receipt adapters are mocked in these tests. No live
-  PostgreSQL migration/concurrency test, Channex staging send or browser visual
-  test has run. The new workflow is defined but has not run remotely.
+- The earlier full dashboard typecheck finding applied to the embedded copy,
+  not the current dashboard. The current inbox has its own strict typecheck and
+  real React DOM interaction tests; its full Vite production build is also checked.
+- No Channex staging send or browser visual test has run. The backend workflow
+  now provisions PostgreSQL 18 for the database tests.
 
 Pin AI can later consume normalized thread/message data and use this controlled
 send boundary after its own authorization and reconciliation policies are added.

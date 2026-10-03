@@ -7,9 +7,7 @@ on:
       - 'src/server.ts'
       - 'prisma/channex-host-messaging.prisma'
       - 'prisma/migrations/20261003010000_channex_host_message_send/**'
-      - 'pin-go-dashboard/src/pages/messages/**'
       - '*tsconfig.channex-host-inbox*.json'
-      - 'pin-go-dashboard/tsconfig.channex-host-inbox.json'
       - '.github/workflows/channex-host-inbox-v1.yml'
   workflow_dispatch:
 permissions:
@@ -17,19 +15,30 @@ permissions:
 jobs:
   verify:
     runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:18
+        env:
+          POSTGRES_USER: test
+          POSTGRES_PASSWORD: test
+          POSTGRES_DB: test
+        ports: ['5432:5432']
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
     env:
       CI: 'true'
       NODE_ENV: test
       DATABASE_URL: postgresql://test:test@127.0.0.1:5432/test
+      INBOX_POSTGRES_TEST_URL: postgresql://test:test@127.0.0.1:5432/test
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
           node-version: '22'
           cache: npm
-          cache-dependency-path: |
-            package-lock.json
-            pin-go-dashboard/package-lock.json
       - run: npm ci
       - run: npx prisma generate --schema ./prisma
       - run: npx tsc -p tsconfig.channex-host-inbox.json
@@ -46,9 +55,3 @@ jobs:
           src/distribution/ota-connection-center-route-order.contract.test.ts
       - name: Compile API ESM bundle
         run: npx esbuild src/server.ts --bundle --platform=node --packages=external --format=esm --outfile=/tmp/host-inbox-server.mjs
-      - run: npm ci
-        working-directory: pin-go-dashboard
-      - run: npx tsc -p tsconfig.channex-host-inbox.json
-        working-directory: pin-go-dashboard
-      - run: npm run build
-        working-directory: pin-go-dashboard
