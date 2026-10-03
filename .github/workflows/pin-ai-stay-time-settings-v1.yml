@@ -25,6 +25,9 @@ on:
       - "src/services/stay-time-payment-flow*"
       - "src/services/stay-time-payment-event*"
       - "src/services/stay-time-recovery*"
+      - "src/services/stay-time-operator-review*"
+      - "src/routes/admin.stay-time-recovery*"
+      - "src/routes/admin.financial.routes.ts"
       - "src/workers/stay-time-recovery.worker.ts"
       - "src/webhooks/stripe.webhook.ts"
       - "src/services/stay-time-stripe-provider*"
@@ -89,6 +92,8 @@ jobs:
         run: node --import tsx --test src/services/stay-time-checkout-preflight.db.test.ts
       - name: Paid application and durable payment recovery with simulated providers
         run: node --import tsx --test src/services/stay-time-payment-flow.db.test.ts
+      - name: Platform operator review permissions, concurrency and immutable payments
+        run: node --import tsx --test --test-concurrency=1 src/routes/admin.stay-time-recovery.routes.test.ts src/services/stay-time-operator-review.db.test.ts
       - name: Durable stay-time recovery worker claims and reconciliation
         run: node --import tsx --test src/services/stay-time-recovery.db.test.ts
       - name: Signed payment event routing and Connect account isolation

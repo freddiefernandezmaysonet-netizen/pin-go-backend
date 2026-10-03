@@ -98,6 +98,11 @@ jobs:
           docs/pin-ai-stay-time-policy-v1.md
           package.json
           prisma/migrations/20261003010000_stay_time_recovery/migration.sql
+          src/services/stay-time-operator-review.service.ts
+          src/services/stay-time-operator-review.db.test.ts
+          src/routes/admin.stay-time-recovery.routes.ts
+          src/routes/admin.stay-time-recovery.routes.test.ts
+          src/routes/admin.financial.routes.ts
           src/services/stay-time-recovery.service.ts
           src/apms/operational-intelligence.service.ts
           src/services/stay-time-recovery.db.test.ts

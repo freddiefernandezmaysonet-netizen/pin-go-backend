@@ -4,6 +4,8 @@
     "target": "es2022", "strict": true, "skipLibCheck": true, "types": ["node"]
   },
   "include": [
+    "src/services/stay-time-operator-review.db.test.ts",
+    "src/routes/admin.stay-time-recovery.routes.test.ts",
     "src/workers/stay-time-recovery.worker.ts",
     "src/services/stay-time-recovery.db.test.ts",
     "src/webhooks/stripe.webhook.ts",
