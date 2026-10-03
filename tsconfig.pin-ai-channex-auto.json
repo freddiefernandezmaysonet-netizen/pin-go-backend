@@ -1,0 +1,4 @@
+{
+  "extends": "./tsconfig.channex-host-inbox-routes.json",
+  "include": ["src/channex-messaging/**/*.ts", "src/routes/channex-messages.webhook.route*.ts", "src/routes/dashboard.channex-host-inbox.route*.ts", "src/workers/pin-ai-channex.process.ts"]
+}

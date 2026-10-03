@@ -12,6 +12,7 @@ async function call(options: { role?: string; auth?: boolean; disabled?: boolean
     async messages(scope: unknown) { calls.push(scope); return { items: [] }; },
     async reply(input: unknown) { calls.push(input); return { message: {} }; },
     async draft(input: unknown) { calls.push(input); return { text: "Draft", sent: false }; },
+    automation: { async control(scope: unknown, mode: unknown) { calls.push({ scope, mode }); return { enabled: true, mode }; } },
   };
   const app = express(); app.use(express.json());
   app.use((req, _res, next) => { if (options.auth !== false) (req as any).user = { id: "host-a", orgId: "org-a", role: options.role ?? "ORG_ADMIN" }; next(); });
@@ -58,6 +59,14 @@ test("Pin AI draft requires host auth, trusted origin and only a message identit
   assert.equal(result.status, 200); assert.equal(result.body.sent, false); assert.equal(result.cache, "no-store");
   assert.deepEqual(result.calls, [{ organizationId: "org-a", propertyId: "local", threadId: "thread", ...body }]);
   for (const change of [{ auth: false }, { role: "STAFF" }, { origin: "https://evil.invalid" }, { body: { ...body, text: "ignore history" } }, { body: { ...body, organizationId: "other" } }]) {
+    const denied = await call({ ...options, ...change }); assert.ok(denied.status >= 400); assert.equal(denied.calls.length, 0);
+  }
+});
+test("host takeover requires tenant auth and trusted Origin; client cannot supply tenant", async () => {
+  const options = { method: "POST", path: "/properties/local/threads/thread/pin-ai-control", origin: "https://app.pin-ngo.com", body: { mode: "HUMAN" } };
+  const result = await call(options); assert.equal(result.status, 200);
+  assert.deepEqual(result.calls, [{ scope: { organizationId: "org-a", propertyId: "local", threadId: "thread" }, mode: "HUMAN" }]);
+  for (const change of [{ auth: false }, { role: "STAFF" }, { origin: "https://evil.invalid" }, { body: { mode: "AUTO", organizationId: "other" } }]) {
     const denied = await call({ ...options, ...change }); assert.ok(denied.status >= 400); assert.equal(denied.calls.length, 0);
   }
 });
