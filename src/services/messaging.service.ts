@@ -1,3 +1,4 @@
+import { formatPropertyArrivalLocation } from "./property-arrival-location.js";
 import { PrismaClient } from "@prisma/client";
 import { sendSms } from "../integrations/twilio/twilio.client";
 import { deliverAirbnbCommunication } from "../channex-messaging/airbnb-access.service.js";
@@ -146,6 +147,7 @@ function fmtWithTimezone(
 
 export function buildGuestPasscodeSmsBody(params: {
   guestName?: string | null;
+  arrivalLocation?: string | null;
   code: string;
   validUntil: Date;
   timezone?: string;
@@ -162,11 +164,13 @@ export function buildGuestPasscodeSmsBody(params: {
     32
   );
 
+  const location = params.arrivalLocation ? ` ${params.arrivalLocation}.` : "";
+
   if (isSpanish) {
-    return `Pin&Go acceso. Codigo: ${code}. En keypad, ingresa el codigo y presiona desbloqueo (#, * o similar). Valido hasta ${validUntil}.`;
+    return `Pin&Go acceso.${location} Codigo: ${code}. En keypad, ingresa el codigo y presiona desbloqueo (#, * o similar). Valido hasta ${validUntil}.`;
   }
 
-  return `Pin&Go access. Code: ${code}. Enter code on keypad and press unlock (#, * or similar). Valid until ${validUntil}.`;
+  return `Pin&Go access.${location} Code: ${code}. Enter code on keypad and press unlock (#, * or similar). Valid until ${validUntil}.`;
 }
 
 export function buildCleaningStartSmsBody(params: {
@@ -356,6 +360,8 @@ export async function sendGuestPasscodeSms(
       property: {
         select: {
           timezone: true,
+          complexName: true,
+          unitNumber: true,
         },
       },
     },
@@ -365,6 +371,7 @@ export async function sendGuestPasscodeSms(
 
   const body = buildGuestPasscodeSmsBody({
     ...(guestName !== undefined ? { guestName } : {}),
+    arrivalLocation: formatPropertyArrivalLocation(reservation?.property ?? {}, language),
     code: String(code),
     validUntil,
     ...(reservation?.property?.timezone

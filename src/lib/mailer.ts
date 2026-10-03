@@ -58,6 +58,7 @@ export type SendGuestContactRecoveryHostNoticeInput = {
 };
 
 export type SendGuestPreCheckinEmailInput = {
+  arrivalLocation?: string | null;
   to: string;
   replyTo?: string | null;
   reservationNumber: string;
@@ -72,6 +73,7 @@ export type SendGuestPreCheckinEmailInput = {
 };
 
 type SendGuestAccessPasscodeEmailInput = {
+  arrivalLocation?: string | null;
   to: string;
   replyTo?: string | null;
   reservationNumber: string;
@@ -2237,6 +2239,7 @@ export async function sendGuestPreCheckinEmail(
             : `Your arrival at <strong>${safePropertyName}</strong> is <strong>${escapeHtml(formattedCheckIn)}</strong>.`}
         </p>
 
+        ${input.arrivalLocation ? `<p><strong>${escapeHtml(input.arrivalLocation)}</strong></p>` : ""}
         ${locationBlock}
         ${verificationBlock}
 
@@ -2347,6 +2350,8 @@ export async function sendGuestAccessPasscodeEmail(
             <strong>${safePropertyName}</strong>
             ${isSpanish ? "está listo." : "is ready."}
           </p>
+
+          ${input.arrivalLocation ? `<p><strong>${escapeHtml(input.arrivalLocation)}</strong></p>` : ""}
 
           <div style="background:#f8fafc;border:1px solid #cbd5e1;border-radius:16px;padding:20px;margin:22px 0;text-align:center;">
             <p style="margin:0 0 8px;color:#475569;font-size:13px;font-weight:700;text-transform:uppercase;letter-spacing:0.08em;">

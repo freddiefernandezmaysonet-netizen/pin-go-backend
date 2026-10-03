@@ -1,6 +1,7 @@
 import { Prisma, type PrismaClient } from "@prisma/client";
 import { resolveOtaConnectionCenterConfig } from "../distribution/ota-connection-center.config.js";
 import { decryptAccessCode } from "../services/access-code-crypto.service.js";
+import { formatPropertyArrivalLocation } from "../services/property-arrival-location.js";
 import { createHostInbox, createInboxHttpRequest, validId, type InboxRequest, type Thread } from "./host-inbox.js";
 import { airbnbDeliveryId, buildAirbnbAccessText, ownsAirbnbCommunication, type AirbnbCommunicationType } from "./airbnb-access.policy.js";
 
@@ -73,6 +74,7 @@ export async function deliverAirbnbCommunication(
     if (!current || JSON.stringify(current) !== JSON.stringify(r)) return fail("AIRBNB_RESERVATION_CHANGED");
     const code = grant?.secureAccessCode?.accessCodeEnc ? (options.decrypt ?? decryptAccessCode)(grant.secureAccessCode.accessCodeEnc) : undefined;
     const text = buildAirbnbAccessText({ type, propertyName: r.property.name, language: r.preferredLanguage,
+      arrivalLocation: formatPropertyArrivalLocation(r.property, r.preferredLanguage),
       timezone: r.property.timezone, checkIn: r.checkIn, checkOut: r.checkOut, address: r.property.address1,
       ...(code ? { code, unlockKey: grant?.unlockKey ?? "#" } : {}),
     });

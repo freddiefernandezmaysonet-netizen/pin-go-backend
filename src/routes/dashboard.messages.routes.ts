@@ -1,3 +1,4 @@
+import { buildGuestAccessSmsRetryBody } from "../services/guest-access-sms-retry-body.service.js";
 import { Router } from "express";
 import { PrismaClient } from "@prisma/client";
 import { sendSms } from "../integrations/twilio/twilio.client";
@@ -302,7 +303,8 @@ router.post("/messages/:id/retry", requireOrg(prisma), async (req, res) => {
     }
 
     try {
-      const sent = await sendSms(msg.to, msg.body);
+      const retryBody = await buildGuestAccessSmsRetryBody(prisma, msg);
+      const sent = await sendSms(msg.to, retryBody);
 
       await prisma.messageLog.update({
         where: { id: msg.id },
