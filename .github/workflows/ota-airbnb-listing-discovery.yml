@@ -86,6 +86,11 @@ jobs:
           .github/workflows/pin-ai-stay-time-policy-v1.yml
           .github/workflows/pin-ai-stay-time-settings-v1.yml
           docs/pin-ai-stay-time-policy-v1.md
+          package.json
+          prisma/migrations/20261003010000_stay_time_recovery/migration.sql
+          src/services/stay-time-recovery.service.ts
+          src/services/stay-time-recovery.db.test.ts
+          src/workers/stay-time-recovery.worker.ts
           prisma/migrations/20261001110000_property_stay_time_settings_v1/migration.sql
           prisma/schema.prisma
           src/domain/computeOperationalRisk.ts

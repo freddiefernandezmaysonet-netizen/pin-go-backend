@@ -18,6 +18,8 @@ on:
       - "src/services/stay-time-payment-evidence*"
       - "src/services/stay-time-payment-flow*"
       - "src/services/stay-time-payment-event*"
+      - "src/services/stay-time-recovery*"
+      - "src/workers/stay-time-recovery.worker.ts"
       - "src/webhooks/stripe.webhook.ts"
       - "src/services/stay-time-stripe-provider*"
       - "src/services/stay-time-checkout-preflight*"
@@ -81,6 +83,8 @@ jobs:
         run: node --import tsx --test src/services/stay-time-checkout-preflight.db.test.ts
       - name: Paid application and durable payment recovery with simulated providers
         run: node --import tsx --test src/services/stay-time-payment-flow.db.test.ts
+      - name: Durable stay-time recovery worker claims and reconciliation
+        run: node --import tsx --test src/services/stay-time-recovery.db.test.ts
       - name: Signed payment event routing and Connect account isolation
         run: node --import tsx --test src/services/stay-time-payment-event.test.ts src/services/stripe-financial-event-ledger.webhook.contract.test.ts
       - name: Checkout creation and signature-verified payment events with offline Stripe

@@ -818,6 +818,15 @@ export async function applyGuestReservationModification(input: {
       await reconcileReservation(result.reservation.id);
     }
 
+    // Persist completion only after reconciliation returns. A process crash or
+    // provider outage after APPLIED must remain visible to the recovery worker.
+    if (knownStayTime) {
+      await prisma.reservationModification.updateMany({
+        where: { id: modificationId, status: ReservationModificationStatus.APPLIED, stayTimeReconciledAt: null },
+        data: { stayTimeReconciledAt: dependencies.now() },
+      });
+    }
+
     return serializeAppliedResult(result);
   } catch (error: any) {
     await prisma.reservationModification

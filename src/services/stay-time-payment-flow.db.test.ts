@@ -3,6 +3,7 @@ import test from "node:test";
 import { createStayTimeDepartureCleaningFixture } from "./stay-time-departure-cleaning.fixture.js";
 import Stripe from "stripe";
 import { handleStayTimePaymentEvent } from "./stay-time-payment-event.service.js";
+import { runStayTimeRecoveryBatch } from "./stay-time-recovery.service.js";
 import { Prisma, PrismaClient } from "@prisma/client";
 import { defaultStayTimeSettings } from "../pin-ai/actions/stay-time-settings.js";
 import { createStayTimeProposal, confirmStayTimeProposal, stageStayTimeModification } from "./stay-time-proposal.service.js";
@@ -217,6 +218,16 @@ test("paid stay-time processing applies once or durably recovers only the increm
           const pending = await db.reservationModification.findUniqueOrThrow({ where: { id } });
           assert.equal(pending.status, scenario === "payment-outage" ? "PAYMENT_PROCESSING" : scenario === "reconcile-outage" ? "APPLIED" : "CANCELLED");
           if (needsRefund) assert.equal(pending.failureCode, "STAY_TIME_REFUND_PENDING");
+          if (scenario === "reconcile-outage") assert.equal(pending.stayTimeReconciledAt, null);
+          await db.reservationModification.update({ where: { id }, data: { updatedAt: new Date(now.getTime() - 120_000) } });
+          const batches = await Promise.all([runStayTimeRecoveryBatch(deps), runStayTimeRecoveryBatch(deps)]);
+          const recovered = batches.flatMap(b => b.results).filter(r => r.modificationId === id);
+          assert.equal(recovered.length, 1, "two workers must claim one interrupted operation once");
+          assert.equal(recovered[0].outcome, needsRefund ? "REFUNDED" : "APPLIED");
+          const saved = await db.reservationModification.findUniqueOrThrow({ where: { id } });
+          assert.equal(saved.stayTimeRecoveryAttempts, 1);
+          assert.equal(saved.stayTimeRecoveryLeaseToken, null);
+          if (!needsRefund) assert.ok(saved.stayTimeReconciledAt);
         }
         if (scenario === "refund-pending") {
           assert.equal((await run()).outcome, "REFUND_PENDING");

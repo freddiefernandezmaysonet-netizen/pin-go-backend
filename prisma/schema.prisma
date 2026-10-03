@@ -1302,6 +1302,11 @@ model ReservationModification {
   appliedAt                  DateTime?
   expiredAt                  DateTime?
   cancelledAt                DateTime?
+  stayTimeReconciledAt        DateTime?
+  stayTimeRecoveryNextAt      DateTime?
+  stayTimeRecoveryLeaseToken  String?
+  stayTimeRecoveryLeaseUntil  DateTime?
+  stayTimeRecoveryAttempts    Int                                     @default(0)
   createdAt                  DateTime                                @default(now())
   updatedAt                  DateTime                                @updatedAt
 
@@ -1310,6 +1315,7 @@ model ReservationModification {
   @@unique([reservationId, clientRequestId])
   @@index([reservationId, status])
   @@index([status, checkoutExpiresAt])
+  @@index([requestSource, status, stayTimeRecoveryNextAt], map: "ReservationModification_stay_time_recovery_idx")
   @@index([proposedCheckIn, proposedCheckOut, status])
 }
 
