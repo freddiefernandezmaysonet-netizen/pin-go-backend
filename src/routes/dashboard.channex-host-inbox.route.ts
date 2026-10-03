@@ -34,6 +34,18 @@ export function buildDashboardChannexHostInboxRouter(args: {
     catch (error) { return failure(res, error); }
   });
   const path = `${prefix}/properties/:propertyId/threads`;
+  router.post(`${path}/:threadId/pin-ai-control`, async (req: HostRequest, res) => {
+    try {
+      const raw = req.get("origin");
+      let origin: string | null = null;
+      try { const url = new URL(raw ?? ""); if (["https:", "http:"].includes(url.protocol)) origin = url.origin; } catch { /* deny */ }
+      if (!origin || raw !== origin || !await args.isTrustedOrigin(origin, req.user!.orgId)) throw new InboxError("HOST_INBOX_ORIGIN_FORBIDDEN", 403);
+      const body: unknown = req.body;
+      if (!body || typeof body !== "object" || Array.isArray(body) || Object.keys(body).some(k => k !== "mode") ||
+        !["AUTO", "HUMAN"].includes(String((body as { mode?: unknown }).mode))) throw new InboxError("PIN_AI_CONTROL_INVALID", 400);
+      return res.json({ ok: true, ...await args.runtime!.automation.control({ organizationId: req.user!.orgId, propertyId: req.params.propertyId!, threadId: req.params.threadId! }, (body as { mode: "AUTO" | "HUMAN" }).mode) });
+    } catch (error) { return failure(res, error); }
+  });
   router.get(path, async (req: HostRequest, res) => {
     try { return res.json({ ok: true, ...await args.runtime!.list({ organizationId: req.user!.orgId, propertyId: req.params.propertyId! }, page(req)) }); }
     catch (error) { return failure(res, error); }

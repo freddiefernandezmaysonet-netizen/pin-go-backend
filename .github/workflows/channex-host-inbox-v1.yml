@@ -4,6 +4,11 @@ on:
     paths:
       - 'src/channex-messaging/**'
       - 'src/routes/dashboard.channex-host-inbox*'
+      - 'src/routes/channex-messages.webhook*'
+      - 'src/workers/pin-ai-channex.process.ts'
+      - 'prisma/channex-pin-ai.prisma'
+      - 'prisma/migrations/20261003181000_channex_pin_ai_inbound/**'
+      - 'tsconfig.pin-ai-channex-auto.json'
       - 'src/server.ts'
       - 'prisma/channex-host-messaging.prisma'
       - 'prisma/migrations/20261003010000_channex_host_message_send/**'
@@ -43,11 +48,13 @@ jobs:
       - run: npx prisma generate --schema ./prisma
       - run: npx tsc -p tsconfig.channex-host-inbox.json
       - run: npx tsc -p tsconfig.channex-host-inbox-routes.json
+      - run: npx tsc -p tsconfig.pin-ai-channex-auto.json
       - name: Inbox, tenant security and certified core
         run: >-
           node --import tsx --test
           src/channex-messaging/*.test.ts
           src/routes/dashboard.channex-host-inbox.route.test.ts
+          src/routes/channex-messages.webhook.route.test.ts
           src/pin-ai/property-knowledge.service.test.ts
           src/pin-ai/runtime/luna-runtime-adapter.test.ts
           src/pin-ai/runtime/pin-go-eligibility-checks.test.ts
@@ -59,3 +66,5 @@ jobs:
           src/distribution/ota-connection-center-route-order.contract.test.ts
       - name: Compile API ESM bundle
         run: npx esbuild src/server.ts --bundle --platform=node --packages=external --format=esm --outfile=/tmp/host-inbox-server.mjs
+      - name: Compile dedicated Pin AI channel worker
+        run: npx esbuild src/workers/pin-ai-channex.process.ts --bundle --platform=node --packages=external --format=esm --outfile=/tmp/pin-ai-channex-worker.mjs

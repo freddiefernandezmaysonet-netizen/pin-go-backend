@@ -2,6 +2,7 @@ import { Prisma, type PrismaClient } from "@prisma/client";
 import { resolveOtaConnectionCenterConfig } from "../distribution/ota-connection-center.config.js";
 import { createHostInbox, createInboxHttpRequest, InboxError, validId } from "./host-inbox.js";
 import { buildPinAIInboxDraftRuntime, pinAIDraftsEnabled } from "./pin-ai-draft.runtime.js";
+import { buildAutomaticInbox } from "./pin-ai-auto.runtime.js";
 
 export function buildHostInboxRuntime(args: { prisma: PrismaClient; env: NodeJS.ProcessEnv; fetchImpl?: typeof fetch }) {
   const config = resolveOtaConnectionCenterConfig(args.env);
@@ -41,7 +42,22 @@ export function buildHostInboxRuntime(args: { prisma: PrismaClient; env: NodeJS.
     },
   });
   const draft = buildPinAIInboxDraftRuntime({ prisma, env: args.env, messages: inbox.messages });
-  return { ...inbox, draft, async properties(organizationId: string) {
+  const automation = buildAutomaticInbox({ prisma, env: args.env, inbox });
+  return { ...inbox, draft, automation,
+    async list(scope: Parameters<typeof inbox.list>[0], page: Parameters<typeof inbox.list>[1]) {
+      const result = await inbox.list(scope, page);
+      const needsHost = await automation.needsHost(scope, result.items.map(t => t.id));
+      return { ...result, items: result.items.map(t => ({ ...t, needsHost: needsHost.has(t.id) })) };
+    },
+    async messages(scope: Parameters<typeof inbox.messages>[0], threadId: string, page: Parameters<typeof inbox.messages>[2]) {
+      const result = await inbox.messages(scope, threadId, page);
+      return { ...result, automation: await automation.state({ ...scope, threadId }) };
+    },
+    async reply(input: Parameters<typeof inbox.reply>[0]) {
+      await automation.beforeHostReply(input);
+      return inbox.reply(input);
+    },
+    async properties(organizationId: string) {
     const rows = await prisma.distributionProperty.findMany({ where: { organizationId, platform: "CHANNEX", provisioningStatus: "READY",
       externalPropertyId: { not: null }, property: { organizationId, status: "ACTIVE" },
       group: { organizationId, provisioningStatus: "READY", externalGroupId: { not: null } },
