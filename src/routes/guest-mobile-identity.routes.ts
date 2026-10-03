@@ -1,4 +1,5 @@
 import { prepareMobileAccessOnDemand } from "../guest-mobile/mobile-access-on-demand.service.js";
+import { readGuestMobileAccessCodes } from "../guest-mobile/guest-mobile-access-code.service.js";
 import { deliverMobileAccessCredential } from "../guest-mobile/mobile-access-delivery.service.js";
 import { TTLockMobileAccessProvider } from "../guest-mobile/ttlock-mobile-access-provider.js";
 import { Router, type RequestHandler } from "express";
@@ -28,6 +29,35 @@ const exchangeRateLimit: RequestHandler = (req, res, next) => {
 };
 
 export const guestMobileIdentityRouter = Router();
+
+guestMobileIdentityRouter.get(
+  "/api/guest-mobile/stays/:reservationNumber/access-codes",
+  exchangeRateLimit,
+  async (req, res) => {
+    res.setHeader("Cache-Control", "no-store, private");
+    res.setHeader("Referrer-Policy", "no-referrer");
+    const match = /^Bearer\s+([^\s]+)$/i.exec(String(req.get("authorization") ?? ""));
+    if (!match?.[1]) return res.status(401).json({ ok: false, error: "UNAUTHENTICATED" });
+    try {
+      const session = await resolveGuestMobileSession(prisma, match[1]);
+      const access = await readGuestMobileAccessCodes(prisma, {
+        guestPersonId: session.guestPersonId,
+        reservationNumber: String(req.params.reservationNumber ?? "").trim(),
+      });
+      return res.json({ ok: true, access });
+    } catch (error) {
+      const code = error instanceof Error ? error.message : "";
+      if (code === "GUEST_MOBILE_UNAUTHENTICATED" || code === "GUEST_MOBILE_INVALID_STAY_TOKEN") {
+        return res.status(401).json({ ok: false, error: "UNAUTHENTICATED" });
+      }
+      if (code === "GUEST_MOBILE_STAY_NOT_AUTHORIZED") {
+        return res.status(404).json({ ok: false, error: "STAY_NOT_AVAILABLE" });
+      }
+      // Do not log crypto exceptions, encrypted values, credentials or response bodies.
+      return res.status(503).json({ ok: false, error: "ACCESS_CODE_UNAVAILABLE" });
+    }
+  },
+);
 
 guestMobileIdentityRouter.post(
   "/api/guest-mobile/session/exchange",
