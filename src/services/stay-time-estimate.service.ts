@@ -149,7 +149,7 @@ export async function estimateStayTimeAdjustmentInTransaction(
     const arrivalReadiness = early ? await readArrivalCleaningReadiness(tx, {
       ...scope, reservationId: row.id, checkIn: row.checkIn, requestedAt, now,
       cleaningStartOffsetMinutes: offset,
-      ownModificationId,
+      ...(ownModificationId !== undefined ? { ownModificationId } : {}),
     }) : null;
     const plan = planStayTimeAdjustment({ operation: input.operation, requestedAt, now,
       reservation: { ...scope, ...row, currency: row.currency?.toUpperCase() ?? "", adjustedOperations,
