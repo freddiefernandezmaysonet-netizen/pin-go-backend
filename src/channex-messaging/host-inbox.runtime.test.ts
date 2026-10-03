@@ -41,8 +41,14 @@ test("runtime is off unless both inbox and canonical Connection Center config ar
 });
 test("runtime checks canonical tenant/group readiness and exposes local property options", async () => {
   const f = setup(); const runtime = buildHostInboxRuntime({ prisma: f.prisma as any, env, fetchImpl: f.fetchImpl })!;
-  assert.deepEqual(await runtime.properties("org-a"), { items: [{ id: "local", name: "House" }] });
+  assert.deepEqual(await runtime.properties("org-a"), { items: [{ id: "local", name: "House", pinAIDraftsEnabled: false }] });
   assert.equal(f.query().where.organizationId, "org-a"); assert.equal(f.query().where.property.organizationId, "org-a"); assert.equal(f.query().where.group.organizationId, "org-a");
+});
+test("property capability exposes Pin AI only for the exact configured scope", async () => {
+  const f = setup(); const runtime = buildHostInboxRuntime({ prisma: f.prisma as any, fetchImpl: f.fetchImpl,
+    env: { ...env, PIN_AI_CHANNEX_DRAFT_ENABLED: "true", PIN_AI_CHANNEX_DRAFT_ORGANIZATION_IDS: "org-a", PIN_AI_CHANNEX_DRAFT_PROPERTY_IDS: "local" } })!;
+  assert.equal((await runtime.properties("org-a")).items[0]?.pinAIDraftsEnabled, true);
+  assert.equal((await runtime.properties("org-b")).items[0]?.pinAIDraftsEnabled, false);
 });
 test("persistent unique receipt handles concurrent sends and service restarts", async () => {
   const f = setup(), args = { prisma: f.prisma as any, env, fetchImpl: f.fetchImpl };
