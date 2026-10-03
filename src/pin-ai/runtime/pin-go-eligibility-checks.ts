@@ -371,6 +371,7 @@ function addLocalCalendarDays(
   const localDateKey = formatInTimeZone(value, timezone, "yyyy-MM-dd");
   const localTime = formatInTimeZone(value, timezone, "HH:mm:ss.SSS");
   const [year, month, day] = localDateKey.split("-").map(Number);
+  if (year === undefined || month === undefined || day === undefined) throw new Error("PIN_AI_INVALID_LOCAL_DATE");
   const shiftedDateKey = new Date(
     Date.UTC(year, month - 1, day + days),
   )

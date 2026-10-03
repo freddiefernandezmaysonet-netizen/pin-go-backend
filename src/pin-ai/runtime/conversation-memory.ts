@@ -37,7 +37,7 @@ export function createConversationMemory(
     propertyId: request.context.propertyId,
     reservationId: request.context.reservationId,
     guestId: request.context.guestId,
-    preferredLanguage: request.context.preferredLanguage,
+    ...(request.context.preferredLanguage !== undefined ? { preferredLanguage: request.context.preferredLanguage } : {}),
     facts: extractConversationFacts(request.conversation),
     issues: [],
     attemptedTroubleshooting: extractTroubleshootingAttempts(request.conversation),

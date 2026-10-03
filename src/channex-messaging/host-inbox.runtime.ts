@@ -1,6 +1,7 @@
 import { Prisma, type PrismaClient } from "@prisma/client";
 import { resolveOtaConnectionCenterConfig } from "../distribution/ota-connection-center.config.js";
 import { createHostInbox, createInboxHttpRequest, InboxError, validId } from "./host-inbox.js";
+import { buildPinAIInboxDraftRuntime, pinAIDraftsEnabled } from "./pin-ai-draft.runtime.js";
 
 export function buildHostInboxRuntime(args: { prisma: PrismaClient; env: NodeJS.ProcessEnv; fetchImpl?: typeof fetch }) {
   const config = resolveOtaConnectionCenterConfig(args.env);
@@ -39,11 +40,12 @@ export function buildHostInboxRuntime(args: { prisma: PrismaClient; env: NodeJS.
       await prisma.channexHostMessageSend.updateMany({ where: { organizationId, requestKey, status: "PENDING" }, data: { status: "UNKNOWN" } });
     },
   });
-  return { ...inbox, async properties(organizationId: string) {
+  const draft = buildPinAIInboxDraftRuntime({ prisma, env: args.env, messages: inbox.messages });
+  return { ...inbox, draft, async properties(organizationId: string) {
     const rows = await prisma.distributionProperty.findMany({ where: { organizationId, platform: "CHANNEX", provisioningStatus: "READY",
       externalPropertyId: { not: null }, property: { organizationId, status: "ACTIVE" },
       group: { organizationId, provisioningStatus: "READY", externalGroupId: { not: null } },
     }, select: { property: { select: { id: true, name: true } } }, orderBy: { property: { name: "asc" } }, take: 1000 });
-    return { items: rows.map(row => row.property) };
+    return { items: rows.map(row => ({ ...row.property, pinAIDraftsEnabled: pinAIDraftsEnabled(args.env, { organizationId, propertyId: row.property.id }) })) };
   } };
 }
