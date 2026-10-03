@@ -139,12 +139,13 @@ export async function readPublishedIncidentUpdates(input: { prisma: PrismaClient
   if (!reservation || !hostScopeEnabled(input.env, reservation.property.organizationId, reservation.id)) return fail(404, "NOT_FOUND");
   const issueWhere = { organizationId: reservation.property.organizationId, reservationId: reservation.id,
     propertyId: reservation.propertyId, engine: "PIN_AI_GUEST_INCIDENT", visibility: "HOST" } as const;
-  const issues = await input.prisma.operationalIssue.findMany({ where: issueWhere,
+  const allIssues = await input.prisma.operationalIssue.findMany({ where: issueWhere,
     include: { hostThread: { select: { acknowledgedAt: true } } },
     orderBy: [{ createdAt: "asc" }, { id: "asc" }] });
+  const issues = allIssues.filter(issue => (issue.metadata as Record<string, unknown> | null)?.channelSource !== "CHANNEX");
   const rows = await input.prisma.pinAIHostIncidentMessage.findMany({ where: { audience: "GUEST", kind: "PUBLISH",
     ...(input.after ? { id: { gt: input.after } } : {}), thread: { organizationId: reservation.property.organizationId,
-      reservationId: reservation.id, propertyId: reservation.propertyId, issue: issueWhere } },
+      reservationId: reservation.id, propertyId: reservation.propertyId, issue: { ...issueWhere, id: { in: issues.map(issue => issue.id) } } } },
     include: { thread: { include: { issue: true } } }, orderBy: { id: "asc" }, take: 100 });
   return {
     incidents: issues.map(issue => ({ reference: reference(issue), createdAt: issue.createdAt,

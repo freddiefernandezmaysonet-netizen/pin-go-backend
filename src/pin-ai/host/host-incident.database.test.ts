@@ -177,6 +177,9 @@ test("PostgreSQL channel publication is atomic, encrypted, deduplicated and sepa
     assert.equal(JSON.parse(outbox[0].body).threadId, channelThreadId);
     const view = await readHostIncident({ ...base, reference: ref });
     assert.equal(view.destination, "CHANNEL"); assert.equal(view.messages[1].deliveryStatus, "QUEUED");
+    const portal = await readPublishedIncidentUpdates({ prisma: p, guestToken: token, env: { ...env,
+      PIN_AI_HOST_INCIDENT_ORGANIZATION_IDS: org.id, PIN_AI_HOST_INCIDENT_RESERVATION_IDS: r.id } });
+    assert.equal(portal.incidents.length, 0); assert.equal(portal.updates.length, 0, "channel publication must not be rerouted to the portal");
     // Queue failure must roll back the event and thread version, too.
     const broken = new Proxy(p, { get(target, key) {
       if (key === "$transaction") return (run: any) => target.$transaction(tx => run(new Proxy(tx, { get(inner, name) {
