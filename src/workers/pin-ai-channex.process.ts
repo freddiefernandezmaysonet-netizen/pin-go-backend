@@ -3,6 +3,7 @@ import { prisma } from "../lib/prisma.js";
 import { buildHostInboxRuntime } from "../channex-messaging/host-inbox.runtime.js";
 import { autoConfig } from "../channex-messaging/pin-ai-auto.policy.js";
 import { processGuestIncidentNotices } from "../pin-ai/guest/guest-incident-notification.service.js";
+import { processIncidentChannelUpdates } from "../pin-ai/host/host-incident-channel.service.js";
 
 const runtime = buildHostInboxRuntime({ prisma, env: process.env });
 let stopping = false;
@@ -13,6 +14,7 @@ try {
   while (!stopping) {
     try {
       await processGuestIncidentNotices(prisma, process.env);
+      await processIncidentChannelUpdates(prisma, process.env, runtime);
       if (await runtime.automation.runNext()) continue;
     } catch { console.error("PIN_AI_CHANNEX_CYCLE_FAILED"); }
     await new Promise(resolve => setTimeout(resolve, 5000));
