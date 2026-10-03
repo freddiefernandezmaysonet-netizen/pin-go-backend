@@ -271,3 +271,28 @@ The worker selects only persisted Pin AI early/late changes in PAYMENT_PROCESSIN
 Each batch handles at most 20 records sequentially, with database compare-and-swap leases lasting ten minutes. Crashed claims become eligible again. Failures retain canonical evidence and the original incremental-refund journal, with persisted retries from one minute up to one hour; unresolved records remain pending. Worker logs contain counts/outcomes, not payment objects, secrets or guest details. Canonical application locks and Stripe refund idempotency remain authoritative if a lease expires during provider I/O. Reconciliation must remain replay-safe.
 
 Canonical apply records `stayTimeReconciledAt` only after reconciliation returns. An outage after APPLIED therefore remains recoverable without refunding the applied change. This marker records orchestration completion, not independent hardware certification. Existing applied stay-time rows with no marker may reconcile once on activation. PostgreSQL cases exercise two workers, active/expired leases, persisted backoff, scope exclusion, provider-response loss and successful queue removal. Guest transport, missing-event detection, operator escalation for permanently unresolved recovery and live-provider/hardware certification remain rollout limitations.
+
+## Guest chat transport (Draft, disabled by default)
+
+The chat now composes the existing consent/payment/application bridge behind
+`PIN_AI_STAY_TIME_CHAT_ENABLED=true` **and** the existing action-broker/tool flags
+and reservation canary allowlist. No flag was enabled during development.
+`check_early_checkin` and `check_late_checkout` remain read-only estimates.
+The per-session `prepare_reservation_modification` schema accepts `EARLY_CHECKIN`
+or `LATE_CHECKOUT` with `requestedLocalTime`; default Saved Agent configuration
+is unchanged. The runtime rejects extra scope, price, date or consent arguments.
+The guest card receives exact old/new times, property timezone, tax-inclusive
+incremental price, expiry and consent text. The confirmation credential travels
+only through the private gateway projection and encrypted guest history.
+
+Explicit HTTP confirmation dispatches by persisted proposal terms to the existing
+stay-time bridge. A disabled flag cannot fall through to the date-change broker.
+Provider composition is lazy; proposal preparation imports no Stripe provider.
+Free application and paid Checkout use existing canonical services. Status and
+history reads use `stay-time:<proposalId>` for stay-time proposals and preserve
+`pin_ai_<proposalId>` for ordinary date changes. Reads never construct providers.
+An applied reservation does not certify physical access readiness.
+
+Backend/companion Dashboard changes require compilation, simulated-provider
+tests and CI before rollout. Worker activation, migrations, deployment, real
+payments and provider/hardware certification remain separate, unauthorized gates.

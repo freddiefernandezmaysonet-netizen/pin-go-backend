@@ -57,6 +57,10 @@ export type PinAIActionProposalRuntimeToolDependencies =
       PinAIRuntimeToolExecutor;
     enabled: boolean;
     guestToken: string;
+    prepareStayTime?: (input: {
+      guestToken: string; operation: "EARLY_CHECKIN" | "LATE_CHECKOUT";
+      requestedLocalTime: string; language: "en" | "es";
+    }, scope: PinAIRuntimeRequest["context"]) => Promise<PinAIActionBrokerPrepareResult>;
     estimateInStayExtension?: (args: Readonly<Record<string, unknown>>) => Promise<Readonly<Record<string, unknown>> | null>;
     getModificationOptions:
       (input: Readonly<{
@@ -308,6 +312,26 @@ export class PinAIActionProposalRuntimeToolExecutor
       );
     }
 
+    if (args.operation === "EARLY_CHECKIN" || args.operation === "LATE_CHECKOUT") {
+      if (!this.dependencies.prepareStayTime) throw new Error("PIN_AI_STAY_TIME_CHAT_DISABLED");
+      if (Object.keys(args).some(key => !["operation", "requestedLocalTime"].includes(key)) ||
+          typeof args.requestedLocalTime !== "string" || !/^(?:[01]\d|2[0-3]):[0-5]\d$/.test(args.requestedLocalTime)) {
+        throw new Error("PIN_AI_RUNTIME_STAY_TIME_ARGUMENTS_INVALID");
+      }
+      const key = `${args.operation}:${args.requestedLocalTime}`;
+      if (this.proposalKey) {
+        if (this.proposalKey === key && this.modelSafeProposalResult) return this.modelSafeProposalResult;
+        throw new Error("PIN_AI_RUNTIME_MULTIPLE_ACTION_PROPOSALS_FORBIDDEN");
+      }
+      const prepared = await this.dependencies.prepareStayTime({ guestToken: this.dependencies.guestToken,
+        operation: args.operation, requestedLocalTime: args.requestedLocalTime,
+        language: request.context.preferredLanguage === "es" ? "es" : "en" }, request.context);
+      this.proposalKey = key;
+      this.privateProposal = prepared;
+      this.modelSafeProposalResult = modelSafeToolResult(prepared.publicResult);
+      return this.modelSafeProposalResult;
+    }
+    if (args.requestedLocalTime !== undefined) throw new Error("PIN_AI_RUNTIME_STAY_TIME_ARGUMENTS_INVALID");
     const isExtension = args.operation === "EXTEND_CHECKOUT_ONLY";
     if (args.operation !== undefined && !isExtension) {
       throw new Error("PIN_AI_RUNTIME_ACTION_PROPOSAL_OPERATION_INVALID");

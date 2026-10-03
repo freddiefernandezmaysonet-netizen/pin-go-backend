@@ -1,7 +1,6 @@
 import type { PrismaClient } from "@prisma/client";
 import { StayTimePolicyError, type StayTimeOperation } from "../pin-ai/actions/stay-time-policy";
 import { createStayTimeProposal, confirmStayTimeProposal, stageStayTimeModification } from "./stay-time-proposal.service";
-import { applyGuestReservationModification } from "./guest-reservation-modification-apply.service";
 import type { createStayTimeCheckout } from "./stay-time-checkout.service";
 
 type PrepareInput = { guestToken: string; operation: StayTimeOperation; requestedLocalTime: string; language: "en" | "es" };
@@ -23,8 +22,8 @@ function now(clock: Clock) {
   return result;
 }
 
-/** Internal consent-to-execution bridge. Deliberately unmounted from runtime,
- * guest routes and the Saved Agent until webhook/recovery rollout is certified. */
+/** Consent-to-execution bridge. Guest transport requires its separate disabled
+ * rollout flag and reservation allowlist; the Saved Agent is unchanged. */
 export async function prepareStayTimeGuestAction(db: PrismaClient, input: PrepareInput, clock: Clock) {
   exact(input, ["guestToken", "operation", "requestedLocalTime", "language"]);
   const prepared = await createStayTimeProposal(db, input, { now: now(clock), platformFeePercent: clock.platformFeePercent });
@@ -53,6 +52,7 @@ export async function confirmAndExecuteStayTimeGuestAction(input: ConfirmInput, 
     { now: now(deps), platformFeePercent: deps.platformFeePercent });
   const modification = staged.modification;
   const applied = async () => {
+    const { applyGuestReservationModification } = await import("./guest-reservation-modification-apply.service.js");
     const result = await applyGuestReservationModification({ modificationId: modification.id }, {
       client: deps.client, now: () => now(deps), reconcile: deps.reconcile,
     });

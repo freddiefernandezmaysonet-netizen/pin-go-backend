@@ -2,6 +2,8 @@ import { Router } from "express";
 import type { PrismaClient } from "@prisma/client";
 import { saveGuestActionReceipt } from "../pin-ai/guest/guest-history.js";
 import { readGuestHistory } from "../pin-ai/guest/guest-history-reader.js";
+import { actionModificationRequestId, createDefaultStayTimeChatActions, stayTimeChatEnabled } from "../pin-ai/guest/stay-time-chat-actions.js";
+import { StayTimePolicyError } from "../pin-ai/actions/stay-time-policy.js";
 
 import type {
   PinAIActionBroker,
@@ -29,6 +31,7 @@ export function buildPublicBookingPinAIRouter(input: Readonly<{
   env?: NodeJS.ProcessEnv;
   runtime?: GuestPinAIRuntimeRunner;
   now?: () => Date;
+  stayTimeActions?: Pick<ReturnType<typeof createDefaultStayTimeChatActions>, "confirm">;
   actionBroker?: Pick<
     PinAIActionBroker,
     "confirmAndExecute"
@@ -187,7 +190,15 @@ export function buildPublicBookingPinAIRouter(input: Readonly<{
           });
         }
 
-        const broker =
+        const proposal = input.prisma.pinAIActionProposal ? await input.prisma.pinAIActionProposal.findFirst({
+          where: { id: req.params.proposalId, reservationId: reservation.id, actionType: "RESERVATION_MODIFICATION" },
+          select: { id: true, termsSnapshot: true },
+        }) : null;
+        const isStayTime = proposal && actionModificationRequestId(proposal) === `stay-time:${proposal.id}`;
+        if (isStayTime && !stayTimeChatEnabled(reservation.id, env)) {
+          return res.status(503).json({ ok: false, error: "PIN_AI_ACTIONS_UNAVAILABLE" });
+        }
+        const broker = isStayTime ? null :
           input.actionBroker ??
           (
             input.actionBrokerFactory
@@ -197,8 +208,9 @@ export function buildPublicBookingPinAIRouter(input: Readonly<{
           );
 
         const result =
-          await broker
-            .confirmAndExecute({
+          await (isStayTime
+            ? (input.stayTimeActions ?? createDefaultStayTimeChatActions(input.prisma as PrismaClient, env, input.now)).confirm
+            : broker!.confirmAndExecute.bind(broker))({
               guestToken:
                 req.params.guestToken,
               proposalId:
@@ -274,11 +286,11 @@ export function buildPublicBookingPinAIRouter(input: Readonly<{
       const proposal = await input.prisma.pinAIActionProposal.findFirst({
         where: { id: req.params.proposalId, reservationId: reservation.id, propertyId: reservation.propertyId,
           organizationId: reservation.property.organizationId, actionType: "RESERVATION_MODIFICATION" },
-        select: { id: true, status: true },
+        select: { id: true, status: true, termsSnapshot: true },
       });
       if (!proposal) return notFound();
       const modification = await input.prisma.reservationModification.findFirst({
-        where: { reservationId: reservation.id, clientRequestId: `pin_ai_${proposal.id}`, requestSource: "PIN_AI_GUEST_SERVICES" },
+        where: { reservationId: reservation.id, clientRequestId: actionModificationRequestId(proposal), requestSource: "PIN_AI_GUEST_SERVICES" },
         select: { id: true, status: true, stripePaymentStatus: true, checkoutExpiresAt: true, appliedAt: true },
       });
       return res.json({ ok: true, status: {
@@ -315,7 +327,7 @@ async function createDefaultActionBroker(): Promise<
 function hasOnlyConfirmationTokenField(
   value: unknown,
 ): value is {
-  confirmationToken: unknown;
+  confirmationToken: string;
 } {
   if (
     !value ||
@@ -336,7 +348,10 @@ function hasOnlyConfirmationTokenField(
   return (
     keys.length === 1 &&
     keys[0] ===
-      "confirmationToken"
+      "confirmationToken" &&
+    typeof (value as { confirmationToken?: unknown }).confirmationToken === "string" &&
+    (value as { confirmationToken: string }).confirmationToken.length > 0 &&
+    (value as { confirmationToken: string }).confirmationToken.length <= 512
   );
 }
 
@@ -353,6 +368,14 @@ function mapActionBrokerError(
   publicCode: string;
   logCode: string;
 }> {
+  if (error instanceof StayTimePolicyError) {
+    const unavailable = ["STAY_TIME_CHAT_DISABLED", "STAY_TIME_CHAT_EXECUTION_UNAVAILABLE", "STAY_TIME_CHECKOUT_PROVIDER_UNAVAILABLE"].includes(error.code);
+    const missing = ["STAY_TIME_RESERVATION_NOT_FOUND", "STAY_TIME_PROPOSAL_NOT_FOUND"].includes(error.code);
+    const invalid = ["INVALID_GUEST_TOKEN", "INVALID_STAY_TIME_REQUEST"].includes(error.code);
+    return { status: unavailable ? 503 : missing ? 404 : invalid ? 400 : 409,
+      publicCode: unavailable ? "PIN_AI_ACTIONS_UNAVAILABLE" : missing ? "ACTION_PROPOSAL_NOT_FOUND" : invalid ? "INVALID_REQUEST" : "ACTION_REVIEW_REQUIRED",
+      logCode: error.code };
+  }
   if (
     error instanceof
     PinAIActionBrokerError
