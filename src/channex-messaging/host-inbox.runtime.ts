@@ -3,6 +3,7 @@ import { resolveOtaConnectionCenterConfig } from "../distribution/ota-connection
 import { createHostInbox, createInboxHttpRequest, InboxError, validId } from "./host-inbox.js";
 import { buildPinAIInboxDraftRuntime, pinAIDraftsEnabled } from "./pin-ai-draft.runtime.js";
 import { buildAutomaticInbox } from "./pin-ai-auto.runtime.js";
+import { attachInboxReservations } from "./host-inbox-reservation.js";
 
 export function buildHostInboxRuntime(args: { prisma: PrismaClient; env: NodeJS.ProcessEnv; fetchImpl?: typeof fetch }) {
   const config = resolveOtaConnectionCenterConfig(args.env);
@@ -47,11 +48,13 @@ export function buildHostInboxRuntime(args: { prisma: PrismaClient; env: NodeJS.
     async list(scope: Parameters<typeof inbox.list>[0], page: Parameters<typeof inbox.list>[1]) {
       const result = await inbox.list(scope, page);
       const needsHost = await automation.needsHost(scope, result.items.map(t => t.id));
-      return { ...result, items: result.items.map(t => ({ ...t, needsHost: needsHost.has(t.id) })) };
+      const items = await attachInboxReservations(prisma, scope, result.items);
+      return { ...result, items: items.map(t => ({ ...t, needsHost: needsHost.has(t.id) })) };
     },
     async messages(scope: Parameters<typeof inbox.messages>[0], threadId: string, page: Parameters<typeof inbox.messages>[2]) {
       const result = await inbox.messages(scope, threadId, page);
-      return { ...result, automation: await automation.state({ ...scope, threadId }) };
+      const [thread] = await attachInboxReservations(prisma, scope, [result.thread]);
+      return { ...result, thread: thread!, automation: await automation.state({ ...scope, threadId }) };
     },
     async reply(input: Parameters<typeof inbox.reply>[0]) {
       await automation.beforeHostReply(input);
