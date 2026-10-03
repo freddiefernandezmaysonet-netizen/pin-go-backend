@@ -21,7 +21,8 @@ export class GuestIncidentToolExecutor implements PinAIRuntimeToolExecutor {
     if (tool !== "escalate_to_host") return this.input.delegate.execute(tool, args, request, memory);
     if (this.evidence) throw new Error("PIN_AI_INCIDENT_ONE_OPERATION_PER_TURN");
     const receipt = await handleGuestIncident({ ...this.input, request, args });
-    const responseText = formatGuestIncidentReceipt(receipt, request.context.preferredLanguage === "es" ? "es" : "en");
+    const responseText = formatGuestIncidentReceipt(receipt, request.context.preferredLanguage === "es" ? "es" : "en",
+      args.operation === "STATUS" ? "STATUS" : "REPORT");
     this.evidence = { receipt, responseText, operationalWrites: args.operation === "REPORT" };
     return { executed: this.evidence.operationalWrites, incidentRecorded: !!receipt, receipt,
       incidentResponseText: responseText, guestFacingConstraint: "Use the exact incidentResponseText. Registration, provider acceptance, delivery, host acknowledgement and resolution are separate facts. No repair or approval was performed." };

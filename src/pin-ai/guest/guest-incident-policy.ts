@@ -46,21 +46,25 @@ export function incidentNotificationState(rows: readonly { status: string | null
   return "QUEUED";
 }
 
-export function formatGuestIncidentReceipt(receipt: GuestIncidentReceipt | null, language: "es" | "en"): string {
-  if (!receipt) return language === "es" ? "No hay un incidente registrado de esa categoría para tu reservación." : "There is no recorded incident in that category for your reservation.";
+export function formatGuestIncidentReceipt(receipt: GuestIncidentReceipt | null, language: "es" | "en", operation: "REPORT" | "STATUS" = "REPORT"): string {
+  if (!receipt) return language === "es" ? "Todavía no encuentro un reporte registrado sobre ese problema en tu reservación. Cuéntame qué está ocurriendo para poder ayudarte." : "I cannot find a report about that issue for your reservation yet. Please tell me what is happening so I can help.";
   const es = language === "es";
-  const notice = {
-    QUEUED: es ? "El aviso al anfitrión está pendiente de envío o reintento." : "The host notice is queued for sending or retry.",
-    ACCEPTED: es ? "El proveedor aceptó el aviso; la entrega aún no está confirmada." : "The provider accepted the notice; delivery is not yet confirmed.",
-    DELIVERED: receipt.hostAcknowledged
-      ? (es ? "El proveedor confirmó la entrega del correo inicial." : "The provider confirmed delivery of the initial email.")
-      : (es ? "El proveedor confirmó la entrega del correo. Eso no confirma que el anfitrión lo haya leído." : "The provider confirmed email delivery. This does not confirm the host has read it."),
-    ATTENTION_REQUIRED: es ? "No hay una notificación completada para todos los destinatarios. El caso sigue visible para atención; si necesitas ayuda inmediata, contacta al anfitrión directamente." : "Notification is not complete for all recipients. The case remains visible for attention; contact the host directly if you need immediate help.",
-  }[receipt.notification];
-  const acknowledgement = receipt.hostAcknowledged
-    ? (es ? " El anfitrión confirmó la atención del incidente. Esto no acredita una reparación física." : " The host acknowledged the incident. This does not verify a physical repair.")
+  const opening = operation === "REPORT"
+    ? (es ? "Lamento que estés teniendo este inconveniente. Gracias por avisarnos. " : "I’m sorry you’re experiencing this inconvenience. Thank you for letting us know. ")
     : "";
-  return (es
-    ? `Incidente ${receipt.reference}: ${receipt.resolution === "RESOLVED" ? "figura resuelto en el sistema" : "registrado para revisión del anfitrión; pendiente de resolución"}. ${notice}`
-    : `Incident ${receipt.reference}: ${receipt.resolution === "RESOLVED" ? "recorded as resolved in the system" : "recorded for host review; resolution pending"}. ${notice}`) + acknowledgement;
+  if (receipt.resolution === "RESOLVED") return opening + (es
+    ? `Tu reporte figura como resuelto. Si el problema continúa, cuéntame qué está ocurriendo para darle seguimiento. Referencia: ${receipt.reference}.`
+    : `Your report is marked as resolved. If the problem continues, please tell me what is happening so we can follow up. Reference: ${receipt.reference}.`);
+  const notice = {
+    QUEUED: es ? "El aviso al anfitrión está pendiente de envío." : "The notice to your host is waiting to be sent.",
+    ACCEPTED: es ? "El aviso al anfitrión está en proceso de entrega; todavía no tenemos confirmación de que haya llegado." : "The notice to your host is on its way; we do not have delivery confirmation yet.",
+    DELIVERED: es ? "El aviso llegó al correo del anfitrión; todavía no tenemos confirmación de que lo haya leído." : "The notice reached your host’s email; we do not yet have confirmation that they have read it.",
+    ATTENTION_REQUIRED: es ? "No se ha podido completar el aviso al anfitrión, pero tu reporte quedó registrado. Si necesitas ayuda inmediata, comunícate directamente con él." : "We have not been able to complete the notice to your host, but your report has been saved. If you need immediate help, please contact your host directly.",
+  }[receipt.notification];
+  const progress = receipt.hostAcknowledged
+    ? (es ? "El anfitrión confirmó que recibió tu reporte. El caso sigue abierto." : "Your host confirmed that they received your report. The case is still open.")
+    : notice;
+  return opening + (es
+    ? `${operation === "REPORT" ? "Registré tu reporte para que el anfitrión pueda ayudarte." : "Tu reporte sigue abierto."} ${progress} Referencia: ${receipt.reference}.`
+    : `${operation === "REPORT" ? "I’ve recorded your report so your host can help." : "Your report is still open."} ${progress} Reference: ${receipt.reference}.`);
 }
