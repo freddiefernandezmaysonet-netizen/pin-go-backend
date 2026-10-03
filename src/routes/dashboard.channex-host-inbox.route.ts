@@ -42,6 +42,19 @@ export function buildDashboardChannexHostInboxRouter(args: {
     try { return res.json({ ok: true, ...await args.runtime!.messages({ organizationId: req.user!.orgId, propertyId: req.params.propertyId! }, req.params.threadId!, page(req)) }); }
     catch (error) { return failure(res, error); }
   });
+  router.post(`${path}/:threadId/pin-ai-draft`, async (req: HostRequest, res) => {
+    try {
+      const raw = req.get("origin");
+      let origin: string | null = null;
+      try { const url = new URL(raw ?? ""); if (url.protocol === "https:" || url.protocol === "http:") origin = url.origin; } catch { /* deny */ }
+      if (!origin || origin !== raw || !await args.isTrustedOrigin(origin, req.user!.orgId)) throw new InboxError("HOST_INBOX_ORIGIN_FORBIDDEN", 403);
+      const body: unknown = req.body;
+      if (!body || typeof body !== "object" || Array.isArray(body) || Object.keys(body).some(key => key !== "messageId") ||
+        typeof (body as { messageId?: unknown }).messageId !== "string" || !/^[0-9a-f-]{36}$/i.test((body as { messageId: string }).messageId)) throw new InboxError("PIN_AI_DRAFT_INPUT_INVALID", 400);
+      return res.json({ ok: true, ...await args.runtime!.draft({ organizationId: req.user!.orgId, propertyId: req.params.propertyId!,
+        threadId: req.params.threadId!, messageId: (body as { messageId: string }).messageId }) });
+    } catch (error) { return failure(res, error); }
+  });
   router.post(`${path}/:threadId/messages`, async (req: HostRequest, res) => {
     try {
       const raw = req.get("origin");
