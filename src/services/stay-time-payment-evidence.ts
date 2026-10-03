@@ -77,3 +77,34 @@ export function assertStayTimePaymentEvidence(m: Modification, r: Stay, evidence
       fee.currency !== "usd" || id(fee.account) !== account || id(fee.charge) !== c.id ||
       fee.amount_refunded !== 0 || fee.refunded !== false || fee.livemode !== s.livemode) reject();
 }
+
+/** Fresh, account-scoped Session retrieval. Expiry alone is insufficient: this
+ * deliberately handles only sessions that never created a PaymentIntent and
+ * cannot spawn a recovered checkout. Other unpaid cases retain operator review.
+ * https://docs.stripe.com/api/checkout/sessions/expire
+ */
+export type StayTimeUnpaidExpiryEvidence = Pick<StayTimePaymentEvidence, "connectedAccountId" | "retrievedAt" | "session">;
+export function assertStayTimeUnpaidExpiryEvidence(m: Modification, r: Stay, evidence: StayTimeUnpaidExpiryEvidence, now: Date): void {
+  const { session: s } = evidence;
+  const age = now.getTime() - evidence.retrievedAt.getTime();
+  const account = id(m.stripeConnectedAccountId);
+  const charge = cents(m.additionalChargeAmount), platform = cents(m.additionalPlatformFeeAmount), host = cents(m.additionalHostPayoutAmount);
+  if (!Number.isFinite(age) || age < 0 || age > 60_000 || !account || account !== r.stripeConnectedAccountId ||
+      account !== evidence.connectedAccountId || m.reservationId !== r.id || m.financialAction !== "ADDITIONAL_PAYMENT_REQUIRED" ||
+      ![null, "unpaid"].includes(m.stripePaymentStatus) ||
+      [m.stripePaymentIntentId, m.stripeChargeId, m.stripeApplicationFeeId, m.stripeTransferId].some(v => v !== null) ||
+      m.currency.toUpperCase() !== "USD" || charge <= 0 || platform + host !== charge ||
+      !id(m.stripeCheckoutSessionId) || !m.checkoutExpiresAt || !Number.isFinite(m.checkoutExpiresAt.getTime()) ||
+      m.checkoutExpiresAt > evidence.retrievedAt || s.expires_at > Math.floor(evidence.retrievedAt.getTime() / 1000)) reject();
+  const metadata = s.metadata;
+  if (s.id !== m.stripeCheckoutSessionId || s.object !== "checkout.session" || s.mode !== "payment" ||
+      s.status !== "expired" || s.payment_status !== "unpaid" || s.payment_intent !== null ||
+      s.after_expiration !== null || s.recovered_from !== null || s.invoice !== null || s.subscription !== null || s.setup_intent !== null ||
+      typeof s.livemode !== "boolean" || s.client_reference_id !== m.id || s.currency !== "usd" || s.amount_total !== charge ||
+      s.expires_at !== Math.floor(m.checkoutExpiresAt.getTime() / 1000) ||
+      metadata?.flow !== "direct_booking_reservation_modification" || metadata.stripeChargeMode !== "DIRECT_CHARGE" ||
+      metadata.connectedAccountId !== account || metadata.reservationModificationId !== m.id ||
+      metadata.reservationId !== r.id || metadata.propertyId !== r.propertyId ||
+      metadata.additionalChargeAmountCents !== String(charge) || metadata.additionalPlatformFeeAmountCents !== String(platform) ||
+      metadata.additionalHostPayoutAmountCents !== String(host)) reject();
+}

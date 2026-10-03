@@ -193,3 +193,100 @@ test("durable stay-time worker claims, crash recovery and bounded retries", { sk
     });
   }
 });
+
+test("verified abandoned Checkout expiry is atomic, fenced and never changes the reservation", { skip: !url }, async t => {
+  const parsed = new URL(url!); assert.ok(["localhost", "127.0.0.1"].includes(parsed.hostname)); assert.equal(parsed.pathname, "/pingo_stay_time_test");
+  const db = new PrismaClient({ datasources: { db: { url } } }); t.after(() => db.$disconnect());
+  const { syntheticStayTimePaymentEvidence } = await import("./stay-time-payment-evidence.fixture.js");
+  for (const scenario of ["expired-unpaid", "already-expired", "no-incident", "concurrent", "intent-present", "provider-outage",
+    "stale-evidence", "lost-lease", "expired-lease", "payment-race", "account-race", "journal-outage"] as const) await t.test(scenario, async () => {
+    let now = new Date("2026-10-03T15:00Z"); const old = new Date(now.getTime() - 120_000);
+    const org = await db.organization.create({ data: { name: "Synthetic unpaid expiry" } });
+    const property = await db.property.create({ data: { organizationId: org.id, name: "Synthetic unpaid expiry" } });
+    const r = await db.reservation.create({ data: { propertyId: property.id, guestName: "Synthetic",
+      checkIn: new Date("2026-10-01T19:00Z"), checkOut: new Date("2026-10-04T15:00Z"), stripeConnectedAccountId: "acct_expiry" } });
+    try {
+      const m = await db.reservationModification.create({ data: { reservationId: r.id, clientRequestId: "synthetic", requestFingerprint: "synthetic",
+        status: scenario === "already-expired" ? "EXPIRED" : "AWAITING_PAYMENT", financialAction: "ADDITIONAL_PAYMENT_REQUIRED",
+        requestSource: "PIN_AI_GUEST_SERVICES", baseReservationUpdatedAt: r.updatedAt, currentCheckIn: r.checkIn, currentCheckOut: r.checkOut,
+        proposedCheckIn: r.checkIn, proposedCheckOut: new Date("2026-10-04T16:00Z"), currentAdults: 1, currentChildren: 0, proposedAdults: 1, proposedChildren: 0,
+        currentPricing: {}, proposedPricing: {}, currentTotalAmount: 100, proposedTotalAmount: 120, amountDifference: 20,
+        additionalChargeAmount: 20, additionalPlatformFeeAmount: 1, additionalHostPayoutAmount: 19,
+        stripeConnectedAccountId: "acct_expiry", stripeCheckoutSessionId: `cs_${r.id}`, checkoutExpiresAt: old,
+        stayTimeRecoveryAttempts: scenario === "no-incident" ? 0 : 5, guestConfirmation: { operation: "LATE_CHECKOUT" }, updatedAt: old } });
+      const deps: import("./stay-time-recovery.service.js").StayTimeRecoveryDependencies = { client: db, now: () => now,
+        retrievePayment: async () => { throw new Error("synthetic unpaid session"); },
+        ensureRefund: async () => { throw new Error("must never refund"); }, reconcile: async () => { throw new Error("must never change access"); } };
+      let issueId: string | undefined;
+      if (scenario !== "no-incident") {
+        await runStayTimeRecoveryBatch(deps);
+        const issue = await db.operationalIssue.findUniqueOrThrow({ where: { operationalKey: `STAY_TIME_RECOVERY_REVIEW:${m.id}` } }); issueId = issue.id;
+        await db.operationalIssueTransition.create({ data: { issueId, operationalKey: issue.operationalKey, issueCode: issue.issueCode,
+          fromWorkflowState: "ACTION_REQUIRED", toWorkflowState: "ACTION_REQUIRED", transitionCode: "STAY_TIME_OPERATOR_REVIEWED",
+          transitionSummary: "Existing operator review", transitionedBy: "PIN_GO", sourceType: "MANUAL" } });
+        now = (await db.reservationModification.findUniqueOrThrow({ where: { id: m.id } })).stayTimeRecoveryNextAt!;
+      }
+      deps.retrieveUnpaidSession = async snapshot => {
+        if (scenario === "provider-outage") throw new Error("synthetic provider unavailable");
+        const evidence = syntheticStayTimePaymentEvidence(snapshot, snapshot.reservation, now);
+        Object.assign(evidence.session, { status: "expired", payment_status: "unpaid", payment_intent: null,
+          after_expiration: null, recovered_from: null, invoice: null, subscription: null, setup_intent: null });
+        if (scenario === "intent-present") evidence.session.payment_intent = "pi_pending";
+        if (scenario === "stale-evidence") now = new Date(now.getTime() + 60_001);
+        if (scenario === "lost-lease") await db.reservationModification.update({ where: { id: m.id }, data: { stayTimeRecoveryLeaseToken: "another-worker" } });
+        if (scenario === "expired-lease") { now = new Date(now.getTime() + 11 * 60_000); evidence.retrievedAt = now; }
+        if (scenario === "payment-race") await db.reservationModification.update({ where: { id: m.id }, data: { status: "PAYMENT_PROCESSING", stripePaymentIntentId: `pi_${m.id}`, stripePaymentStatus: "paid" } });
+        if (scenario === "account-race") await db.reservation.update({ where: { id: r.id }, data: { stripeConnectedAccountId: "acct_changed" } });
+        return evidence;
+      };
+      if (scenario === "journal-outage") {
+        deps.client = new Proxy(db, { get(target, field) {
+          if (field !== "$transaction") return Reflect.get(target, field);
+          return async (work: (tx: Prisma.TransactionClient) => Promise<unknown>) => db.$transaction(tx => work(new Proxy(tx, { get(inner, key) {
+            if (key !== "operationalIssue") return Reflect.get(inner, key);
+            return new Proxy(inner.operationalIssue, { get(delegate, method) {
+              if (method === "upsert") return async (args: { create: { workflowState: string } }) => {
+                if (args.create.workflowState === "RESOLVED") throw new Error("synthetic closure outage");
+                return (delegate.upsert as Function)(args);
+              };
+              return Reflect.get(delegate, method);
+            } });
+          } })));
+        } });
+        await assert.rejects(runStayTimeRecoveryBatch(deps), /synthetic closure outage/);
+        const saved = await db.reservationModification.findUniqueOrThrow({ where: { id: m.id } });
+        assert.equal(saved.status, "AWAITING_PAYMENT"); assert.equal(saved.failureCode, null); assert.ok(saved.stayTimeRecoveryLeaseToken);
+        assert.equal((await db.operationalIssue.findUniqueOrThrow({ where: { id: issueId! } })).workflowState, "ACTION_REQUIRED");
+        deps.client = db; now = saved.stayTimeRecoveryLeaseUntil!;
+      }
+      const batches = await Promise.all(Array.from({ length: scenario === "concurrent" ? 2 : 1 }, () => runStayTimeRecoveryBatch(deps)));
+      const saved = await db.reservationModification.findUniqueOrThrow({ where: { id: m.id } });
+      const terminal = ["expired-unpaid", "already-expired", "no-incident", "concurrent", "journal-outage"].includes(scenario);
+      if (terminal) {
+        assert.equal(saved.status, "EXPIRED"); assert.equal(saved.failureCode, "STAY_TIME_EXPIRED_UNPAID");
+        assert.equal(saved.stayTimeRecoveryNextAt, null); assert.equal(saved.stayTimeRecoveryLeaseToken, null); assert.equal(saved.stripePaymentStatus, null);
+        assert.equal(batches.flatMap(b => b.results).filter(r => r.outcome === "EXPIRED_UNPAID").length, 1);
+        const journal = saved.failureDetails as { version: string; paymentIntentAbsent: boolean };
+        assert.equal(journal.version, "stay_time_unpaid_expiry_v1"); assert.equal(journal.paymentIntentAbsent, true);
+        now = new Date(now.getTime() + 2 * 3_600_000); assert.equal((await runStayTimeRecoveryBatch(deps)).processed, 0);
+        if (issueId) {
+          const issue = await db.operationalIssue.findUniqueOrThrow({ where: { id: issueId } });
+          assert.equal(issue.workflowState, "RESOLVED"); assert.equal(issue.resolutionCode, "STAY_TIME_EXPIRED_UNPAID");
+          assert.equal(await db.operationalIssueTransition.count({ where: { issueId } }), 3);
+          assert.equal(await db.operationalIssueTransition.count({ where: { issueId, transitionSummary: "Existing operator review" } }), 1);
+        } else assert.equal(await db.operationalIssue.count({ where: { reservationId: r.id } }), 0);
+      } else {
+        assert.notEqual(saved.failureCode, "STAY_TIME_EXPIRED_UNPAID");
+        assert.equal(saved.status, scenario === "payment-race" ? "PAYMENT_PROCESSING" : "AWAITING_PAYMENT");
+        assert.equal((await db.operationalIssue.findUniqueOrThrow({ where: { id: issueId! } })).workflowState, "ACTION_REQUIRED");
+        if (scenario === "lost-lease") assert.equal(saved.stayTimeRecoveryLeaseToken, "another-worker");
+      }
+      if (scenario !== "account-race") assert.deepEqual(await db.reservation.findUniqueOrThrow({ where: { id: r.id } }), r);
+      assert.equal(saved.stripeChargeId, null); assert.equal(saved.appliedAt, null); assert.equal(saved.stayTimeReconciledAt, null);
+    } finally {
+      await db.operationalIssue.deleteMany({ where: { reservationId: r.id } });
+      await db.reservationModification.deleteMany({ where: { reservationId: r.id } }); await db.reservation.delete({ where: { id: r.id } });
+      await db.property.delete({ where: { id: property.id } }); await db.organization.delete({ where: { id: org.id } });
+    }
+  });
+});

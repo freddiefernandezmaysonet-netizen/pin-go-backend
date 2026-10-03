@@ -160,3 +160,19 @@ test("simultaneous refund retries use one provider key and resolve the same rece
   assert.equal(f.refunds.length, 1);
   assert.equal(new Set(f.calls.filter(c => c.method === "refund-create").map(c => c.options?.idempotencyKey)).size, 1);
 });
+
+test("unpaid expiry adapter retrieves only the exact connected-account session without mutations", async () => {
+  const f = fixture(); f.setNow("2026-10-01T14:00Z");
+  Object.assign(f.objects.session, { status: "expired", payment_status: "unpaid", payment_intent: null,
+    after_expiration: null, recovered_from: null, invoice: null, subscription: null, setup_intent: null });
+  const evidence = await f.provider.retrieveUnpaidSession(f.m);
+  assert.equal(evidence?.session.id, "cs_test"); assert.deepEqual(f.calls.map(c => c.method), ["session"]);
+  assert.deepEqual(f.calls[0].options, { stripeAccount: "acct_test" });
+  f.objects.session.payment_intent = "pi_pending";
+  await assert.rejects(f.provider.retrieveUnpaidSession(f.m), /STAY_TIME_PAYMENT_EVIDENCE_MISMATCH/);
+  f.objects.session.payment_intent = null; f.objects.session.status = "complete";
+  assert.equal(await f.provider.retrieveUnpaidSession(f.m), null);
+  f.objects.session.status = "expired"; f.state.slowRead = true;
+  await assert.rejects(f.provider.retrieveUnpaidSession(f.m), /STAY_TIME_PAYMENT_EVIDENCE_MISMATCH/);
+  assert.equal(f.calls.some(c => c.method !== "session"), false);
+});

@@ -3,9 +3,13 @@ import type { Prisma } from "@prisma/client";
 import { isStayTimeModification } from "./stay-time-apply-validation.service.js";
 import { applyGuestReservationModification } from "./guest-reservation-modification-apply.service.js";
 import { processStayTimePayment, type StayTimePaymentFlowDependencies } from "./stay-time-payment-flow.service.js";
-import { assertStayTimePaymentEvidence } from "./stay-time-payment-evidence.js";
+import { assertStayTimePaymentEvidence, assertStayTimeUnpaidExpiryEvidence, type StayTimeUnpaidExpiryEvidence } from "./stay-time-payment-evidence.js";
 import { upsertOperationalIssue } from "../apms/operational-intelligence.service.js";
 
+export type StayTimeRecoveryDependencies = StayTimePaymentFlowDependencies & {
+  retrieveUnpaidSession?: (m: Parameters<StayTimePaymentFlowDependencies["retrievePayment"]>[0]) => Promise<StayTimeUnpaidExpiryEvidence | null>;
+};
+const UNPAID_EXPIRY = "STAY_TIME_EXPIRED_UNPAID";
 const MIN_AGE_MS = 60_000;
 const LEASE_MS = 10 * 60_000;
 const RETRY_MAX_MS = 60 * 60_000;
@@ -25,12 +29,14 @@ async function syncRecoveryIssue(tx: Prisma.TransactionClient, modificationId: s
   if (existing?.workflowState === "RESOLVED") return;
   const applied = m.status === "APPLIED" && m.stayTimeReconciledAt !== null;
   const refunded = m.status === "CANCELLED" && m.failureCode === "STAY_TIME_REFUNDED";
-  const resolved = applied || refunded;
+  const unpaid = m.status === "EXPIRED" && m.failureCode === UNPAID_EXPIRY;
+  const resolved = applied || refunded || unpaid;
   if (resolved && !existing) return;
   const waitingNormally = m.status === "AWAITING_PAYMENT" && m.checkoutExpiresAt && m.checkoutExpiresAt > now;
   if (!resolved && (!existing && (m.stayTimeRecoveryAttempts < REVIEW_AFTER_ATTEMPTS || waitingNormally))) return;
   const summary = resolved
     ? applied ? "The change was applied and its reconciliation completed; physical access is not certified by this result."
+      : unpaid ? "The provider confirmed this Checkout expired without a PaymentIntent; no schedule change or incremental payment occurred."
       : "The canonical recovery journal confirms the incremental payment was refunded."
     : "Repeated stay-time recovery attempts could not confirm a completed change or refund.";
   await upsertOperationalIssue(tx, {
@@ -44,7 +50,7 @@ async function syncRecoveryIssue(tx: Prisma.TransactionClient, modificationId: s
     canAutoResolve: true, autoResolveStatus: resolved ? "SUCCEEDED" : "FAILED", actionTarget: "SYSTEM",
     organizationId: m.reservation.property.organizationId, propertyId: m.reservation.propertyId, reservationId: m.reservationId,
     sourceType: "WORKER", occurredAt: now, lastSignalAt: now,
-    ...(resolved ? { resolutionCode: applied ? "STAY_TIME_RECONCILED" : "STAY_TIME_REFUNDED",
+    ...(resolved ? { resolutionCode: applied ? "STAY_TIME_RECONCILED" : unpaid ? UNPAID_EXPIRY : "STAY_TIME_REFUNDED",
       resolutionSummary: summary, resolutionType: "AUTOMATIC" as const, resolvedBy: "PIN_GO" as const, resolvedAt: now } : {}),
     transitionCode: resolved ? "STAY_TIME_RECOVERY_REVIEW_RESOLVED" : "STAY_TIME_RECOVERY_REVIEW_REQUIRED",
     transitionSummary: summary, transitionedBy: "PIN_GO",
@@ -83,7 +89,8 @@ function due(now: Date): Prisma.ReservationModificationWhereInput {
         { status: "CANCELLED", failureCode: "STAY_TIME_REFUND_PENDING" },
         { status: "APPLIED", stayTimeReconciledAt: null },
         { status: { in: ["AWAITING_PAYMENT", "EXPIRED"] }, financialAction: "ADDITIONAL_PAYMENT_REQUIRED",
-          stripeConnectedAccountId: { not: null }, stripeCheckoutSessionId: { not: null } },
+          stripeConnectedAccountId: { not: null }, stripeCheckoutSessionId: { not: null },
+          OR: [{ failureCode: null }, { failureCode: { not: UNPAID_EXPIRY } }] },
       ] },
       { OR: [{ stayTimeRecoveryNextAt: null }, { stayTimeRecoveryNextAt: { lte: now } }] },
       { OR: [{ stayTimeRecoveryLeaseUntil: null }, { stayTimeRecoveryLeaseUntil: { lte: now } }] },
@@ -93,11 +100,12 @@ function due(now: Date): Prisma.ReservationModificationWhereInput {
 }
 
 /** Resumes persisted interrupted work and detects paid sessions when a webhook
- * was not observed. Unpaid/unverifiable sessions retain their canonical state.
+ * was not observed. Only freshly verified expired sessions without any payment
+ * attempt terminate unpaid; ambiguous sessions retain their canonical state.
  * Claims limit duplicate worker I/O; canonical
  * transactions and Stripe idempotency remain authoritative if a lease expires.
  * No provider call occurs in a database transaction. */
-export async function runStayTimeRecoveryBatch(deps: StayTimePaymentFlowDependencies, limit = 20) {
+export async function runStayTimeRecoveryBatch(deps: StayTimeRecoveryDependencies, limit = 20) {
   if (!Number.isInteger(limit) || limit < 1 || limit > 100) throw new Error("STAY_TIME_RECOVERY_LIMIT_INVALID");
   const observedAt = deps.now();
   if (!Number.isFinite(observedAt.getTime())) throw new Error("STAY_TIME_RECOVERY_CLOCK_INVALID");
@@ -106,7 +114,7 @@ export async function runStayTimeRecoveryBatch(deps: StayTimePaymentFlowDependen
     where: due(observedAt), orderBy: [{ stayTimeRecoveryNextAt: { sort: "asc", nulls: "first" } }, { updatedAt: "asc" }, { id: "asc" }],
     take: limit, select: { id: true },
   });
-  const results: Array<{ modificationId: string; outcome: "APPLIED" | "REFUNDED" | "RETRY_SCHEDULED" | "SKIPPED" }> = [];
+  const results: Array<{ modificationId: string; outcome: "APPLIED" | "REFUNDED" | "EXPIRED_UNPAID" | "RETRY_SCHEDULED" | "SKIPPED" }> = [];
   for (const candidate of candidates) {
     const token = randomUUID();
     const claimedAt = deps.now();
@@ -118,6 +126,7 @@ export async function runStayTimeRecoveryBatch(deps: StayTimePaymentFlowDependen
     if (claim.count !== 1) continue;
     let outcome: (typeof results)[number]["outcome"] = "RETRY_SCHEDULED";
     let attempts = 1;
+    let unpaidEvidence: StayTimeUnpaidExpiryEvidence | null = null;
     try {
       const m = await deps.client.reservationModification.findUniqueOrThrow({ where: { id: candidate.id }, include: { reservation: true } });
       attempts = m.stayTimeRecoveryAttempts;
@@ -138,7 +147,16 @@ export async function runStayTimeRecoveryBatch(deps: StayTimePaymentFlowDependen
           // Never turn an unpaid/unknown session into PAYMENT_PROCESSING, which
           // would extend its availability hold. Processing retrieves again under
           // its current scope and independently validates before apply/refund.
-          const evidence = await deps.retrievePayment(m);
+          let evidence;
+          try { evidence = await deps.retrievePayment(m); }
+          catch (error) {
+            if (deps.retrieveUnpaidSession && m.checkoutExpiresAt && m.checkoutExpiresAt <= deps.now()) {
+              unpaidEvidence = await deps.retrieveUnpaidSession(m);
+              if (unpaidEvidence) assertStayTimeUnpaidExpiryEvidence(m, m.reservation, unpaidEvidence, deps.now());
+            }
+            // Finalize only below, under the current database locks and lease.
+            throw error;
+          }
           assertStayTimePaymentEvidence({ ...m, stripePaymentStatus: "paid",
             stripePaymentIntentId: m.stripePaymentIntentId ?? evidence.paymentIntent.id,
             stripeChargeId: m.stripeChargeId ?? evidence.charge.id,
@@ -156,6 +174,26 @@ export async function runStayTimeRecoveryBatch(deps: StayTimePaymentFlowDependen
     } finally {
       const delay = Math.min(RETRY_MAX_MS, MIN_AGE_MS * 2 ** Math.min(attempts - 1, 6));
       await deps.client.$transaction(async tx => {
+        if (unpaidEvidence) {
+          const locator = await tx.reservationModification.findUniqueOrThrow({ where: { id: candidate.id }, select: { reservationId: true } });
+          await tx.$queryRaw`SELECT "id" FROM "Reservation" WHERE "id" = ${locator.reservationId} FOR UPDATE`;
+          await tx.$queryRaw`SELECT "id" FROM "ReservationModification" WHERE "id" = ${candidate.id} FOR UPDATE`;
+          const current = await tx.reservationModification.findUniqueOrThrow({ where: { id: candidate.id }, include: { reservation: true } });
+          const now = deps.now();
+          let verified = false;
+          try { assertStayTimeUnpaidExpiryEvidence(current, current.reservation, unpaidEvidence, now); verified = true; } catch { /* Changed evidence retains recovery. */ }
+          if (verified && current.stayTimeRecoveryLeaseToken === token && current.stayTimeRecoveryLeaseUntil && current.stayTimeRecoveryLeaseUntil > now &&
+              ["AWAITING_PAYMENT", "EXPIRED"].includes(current.status) && current.requestSource === "PIN_AI_GUEST_SERVICES" &&
+              isStayTimeModification(current.guestConfirmation) && !current.appliedAt && !current.cancelledAt && !current.stayTimeReconciledAt &&
+              !["STAY_TIME_REFUND_PENDING", "STAY_TIME_REFUNDED"].includes(current.failureCode ?? "")) {
+            await tx.reservationModification.update({ where: { id: candidate.id }, data: { status: "EXPIRED", expiredAt: current.expiredAt ?? now,
+              failureCode: UNPAID_EXPIRY, failureMessage: "Checkout expired without a payment attempt; reservation unchanged.",
+              failureDetails: { version: "stay_time_unpaid_expiry_v1", verifiedAt: unpaidEvidence.retrievedAt.toISOString(),
+                checkoutSessionId: current.stripeCheckoutSessionId, connectedAccountId: current.stripeConnectedAccountId,
+                providerExpiresAt: unpaidEvidence.session.expires_at, paymentIntentAbsent: true } } });
+            outcome = "EXPIRED_UNPAID";
+          }
+        }
         const released = await tx.reservationModification.updateMany({
           where: { id: candidate.id, stayTimeRecoveryLeaseToken: token },
           data: { updatedAt: deps.now(), stayTimeRecoveryLeaseToken: null, stayTimeRecoveryLeaseUntil: null,

@@ -66,3 +66,41 @@ for (const [name, change] of cases) test(`rejects ${name}`, () => {
   assert.throws(() => assertStayTimePaymentEvidence(f.m, f.r, f.evidence, f.now),
     (error: unknown) => (error as { code?: string }).code === "STAY_TIME_PAYMENT_EVIDENCE_MISMATCH");
 });
+
+test("terminal unpaid evidence requires an expired unrecoverable session with no payment attempt", async t => {
+  const { assertStayTimeUnpaidExpiryEvidence: verify } = await import("./stay-time-payment-evidence.js");
+  function unpaid() {
+    const f = fixture(); f.now = new Date("2026-10-01T14:00Z"); f.evidence.retrievedAt = f.now;
+    Object.assign(f.m, { stripePaymentStatus: null, stripePaymentIntentId: null, stripeChargeId: null, stripeApplicationFeeId: null });
+    Object.assign(f.evidence.session, { status: "expired", payment_status: "unpaid", payment_intent: null,
+      after_expiration: null, recovered_from: null, invoice: null, subscription: null, setup_intent: null });
+    return f;
+  }
+  const f = unpaid(); verify(f.m, f.r, f.evidence, f.now);
+  const rejected: [string, (f: Fixture) => void][] = [
+    ["open session", f => { f.evidence.session.status = "open"; }],
+    ["asynchronous payment", f => { f.evidence.session.status = "complete"; f.evidence.session.payment_intent = "pi_pending"; }],
+    ["attempt exists", f => { f.evidence.session.payment_intent = "pi_failed"; }],
+    ["missing intent field", f => { delete (f.evidence.session as Partial<typeof f.evidence.session>).payment_intent; }],
+    ["paid receipt", f => { f.evidence.session.payment_status = "paid"; }],
+    ["future expiration", f => { f.now = new Date("2026-10-01T12:00Z"); f.evidence.retrievedAt = f.now; }],
+    ["stale read", f => { f.evidence.retrievedAt = new Date(f.now.getTime() - 60_001); }],
+    ["future read", f => { f.evidence.retrievedAt = new Date(f.now.getTime() + 1); }],
+    ["wrong account", f => { f.evidence.connectedAccountId = "acct_other"; }],
+    ["reservation account changed", f => { f.r.stripeConnectedAccountId = "acct_other"; }],
+    ["wrong session", f => { f.evidence.session.id = "cs_other"; }],
+    ["wrong amount", f => { f.evidence.session.amount_total = 999; }],
+    ["wrong metadata", f => { f.evidence.session.metadata!.propertyId = "other"; }],
+    ["wrong deadline", f => { f.evidence.session.expires_at--; }],
+    ["recovery enabled", f => { f.evidence.session.after_expiration = { recovery: { enabled: true, url: "https://synthetic.invalid", expires_at: 123, allow_promotion_codes: false } }; }],
+    ["recovered checkout", f => { f.evidence.session.recovered_from = "cs_original"; }],
+    ["invoice", f => { f.evidence.session.invoice = "in_pending"; }],
+    ["stored intent", f => { f.m.stripePaymentIntentId = "pi_known"; }],
+    ["stored charge", f => { f.m.stripeChargeId = "ch_known"; }],
+    ["stored fee", f => { f.m.stripeApplicationFeeId = "fee_known"; }],
+    ["stored transfer", f => { f.m.stripeTransferId = "tr_known"; }],
+    ["stored paid", f => { f.m.stripePaymentStatus = "paid"; }],
+    ["invalid split", f => { f.m.additionalHostPayoutAmount = new Prisma.Decimal(11); }],
+  ];
+  for (const [name, change] of rejected) await t.test(name, () => { const f = unpaid(); change(f); assert.throws(() => verify(f.m, f.r, f.evidence, f.now)); });
+});

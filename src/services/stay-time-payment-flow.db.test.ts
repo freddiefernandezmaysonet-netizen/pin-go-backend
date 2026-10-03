@@ -19,7 +19,7 @@ test("paid stay-time processing applies once or durably recovers only the increm
   assert.equal(parsed.pathname, "/pingo_stay_time_test");
   const db = new PrismaClient({ datasources: { db: { url } } });
   t.after(() => db.$disconnect());
-  for (const scenario of ["webhook-completed", "webhook-async", "webhook-refund", "late", "early", "departure-duration-changed", "departure-confirmation-changed", "stripe-adapter-apply", "stripe-adapter-refund", "concurrent-apply", "serialization-burst", "serialization-exhausted", "revoked-cleaning", "blocked-turnover", "price-changed", "expired", "expired-status",
+  for (const scenario of ["webhook-after-unpaid-expiry", "webhook-completed", "webhook-async", "webhook-refund", "late", "early", "departure-duration-changed", "departure-confirmation-changed", "stripe-adapter-apply", "stripe-adapter-refund", "concurrent-apply", "serialization-burst", "serialization-exhausted", "revoked-cleaning", "blocked-turnover", "price-changed", "expired", "expired-status",
     "refund-outage", "refund-response-lost", "refund-pending", "refund-wrong-receipt", "concurrent-refund",
     "payment-outage", "wrong-payment", "partially-refunded", "wrong-account", "reconcile-outage", "cancelled-without-recovery",
     "recovery-paid", "recovery-expired", "recovery-unpaid", "recovery-outage", "recovery-wrong-account", "recovery-wrong-amount",
@@ -77,7 +77,10 @@ test("paid stay-time processing applies once or durably recovers only the increm
         await db.reservationModification.update({ where: { id }, data: { stripeConnectedAccountId: reservation.stripeConnectedAccountId,
           stripeCheckoutSessionId: `cs_${id}`, ...(scenario === "cancelled-without-recovery" ? { status: "CANCELLED" } : {}),
           ...(scenario === "expired-status" || scenario === "recovery-expired" ? { status: "EXPIRED", expiredAt: now } : {}) } });
-        const needsRefund = ["webhook-refund", "departure-duration-changed", "departure-confirmation-changed", "stripe-adapter-refund", "revoked-cleaning", "blocked-turnover", "price-changed", "expired", "expired-status", "refund-outage", "refund-response-lost",
+        if (scenario === "webhook-after-unpaid-expiry") await db.reservationModification.update({ where: { id },
+          data: { status: "EXPIRED", expiredAt: now, failureCode: "STAY_TIME_EXPIRED_UNPAID",
+            failureDetails: { version: "stay_time_unpaid_expiry_v1", paymentIntentAbsent: true } } });
+        const needsRefund = ["webhook-after-unpaid-expiry", "webhook-refund", "departure-duration-changed", "departure-confirmation-changed", "stripe-adapter-refund", "revoked-cleaning", "blocked-turnover", "price-changed", "expired", "expired-status", "refund-outage", "refund-response-lost",
           "refund-pending", "refund-wrong-receipt", "concurrent-refund", "recovery-expired"].includes(scenario);
         if (scenario === "revoked-cleaning") await db.cleaningWork.update({ where: { id: workId! }, data: { completionConfirmedAt: null } });
         if (scenario === "departure-duration-changed") {
@@ -90,7 +93,7 @@ test("paid stay-time processing applies once or durably recovers only the increm
             propertyId: property.id, staffMemberId: staffId!, status: "CONFIRMED", token: `replacement-${id}` } });
           await db.cleaningWork.update({ where: { id: workId! }, data: { confirmationId: replacement.id } });
         }
-        if (needsRefund && !["departure-duration-changed", "departure-confirmation-changed", "revoked-cleaning", "price-changed", "expired", "expired-status", "recovery-expired"].includes(scenario)) await db.propertyBlockedDate.create({
+        if (needsRefund && !["webhook-after-unpaid-expiry", "departure-duration-changed", "departure-confirmation-changed", "revoked-cleaning", "price-changed", "expired", "expired-status", "recovery-expired"].includes(scenario)) await db.propertyBlockedDate.create({
           data: { propertyId: property.id, startDate: new Date("2026-10-03T19:59Z"), endDate: new Date("2026-10-04T15:00Z") } });
         if (scenario === "price-changed") await db.reservation.update({ where: { id: reservation.id }, data: { totalAmount: 151 } });
         const before = await db.reservation.findUniqueOrThrow({ where: { id: reservation.id } });

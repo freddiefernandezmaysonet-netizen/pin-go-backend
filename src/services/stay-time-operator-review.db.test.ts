@@ -78,6 +78,13 @@ test("operator inbox authorization, safe projection, concurrency and financial i
     const original = await db.operationalIssue.findUniqueOrThrow({ where: { id: issue.id } });
     assert.equal(original.actionRequired, true); assert.equal(original.resolvedAt, null);
   });
+  await t.test("terminal no-payment receipt is projected without exposing its private journal", async () => {
+    await db.reservationModification.update({ where: { id: m.id }, data: { status: "EXPIRED", failureCode: "STAY_TIME_EXPIRED_UNPAID",
+      failureDetails: { version: "stay_time_unpaid_expiry_v1", checkoutSessionId: "PRIVATE_CHECKOUT" } } });
+    const detail = await read(db, actor, issue.id);
+    assert.equal(detail.item.paymentEvidence, "UNPAID"); assert.doesNotMatch(JSON.stringify(detail), /PRIVATE_/);
+    await db.reservationModification.update({ where: { id: m.id }, data: { status: m.status, failureCode: null } });
+  });
   await t.test("different commands racing on one version cannot both record", async () => {
     const { item } = await read(db, actor, issue.id);
     const results = await Promise.allSettled(["review-race-a", "review-race-b"].map(requestId =>

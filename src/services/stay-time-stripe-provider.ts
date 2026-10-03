@@ -1,6 +1,6 @@
 import type Stripe from "stripe";
 import { StayTimePolicyError } from "../pin-ai/actions/stay-time-policy.js";
-import { assertStayTimePaymentEvidence } from "./stay-time-payment-evidence.js";
+import { assertStayTimePaymentEvidence, assertStayTimeUnpaidExpiryEvidence, type StayTimeUnpaidExpiryEvidence } from "./stay-time-payment-evidence.js";
 import type { StayTimePaymentFlowDependencies, StayTimeRefundRequest, StayTimeRefundEvidence } from "./stay-time-payment-flow.service.js";
 
 export type StayTimeStripeClient = {
@@ -26,7 +26,9 @@ const RECOVERY_FLOW = "stay_time_recovery_v1";
 /** Existing Stripe instance is explicitly injected. Construction performs no I/O;
  * no guest route, webhook, worker, SDK upgrade or production activation here. */
 export function createStayTimeStripeProvider(stripe: StayTimeStripeClient, now: () => Date):
-  Pick<StayTimePaymentFlowDependencies, "retrievePayment" | "ensureRefund"> {
+  Pick<StayTimePaymentFlowDependencies, "retrievePayment" | "ensureRefund"> & {
+    retrieveUnpaidSession: (m: Parameters<StayTimePaymentFlowDependencies["retrievePayment"]>[0]) => Promise<StayTimeUnpaidExpiryEvidence | null>;
+  } {
   return {
     retrievePayment: async m => {
       const startedAt = now();
@@ -49,6 +51,16 @@ export function createStayTimeStripeProvider(stripe: StayTimeStripeClient, now: 
       assertStayTimePaymentEvidence({ ...m, stripePaymentStatus: "paid",
         stripePaymentIntentId: m.stripePaymentIntentId ?? intentId, stripeChargeId: m.stripeChargeId ?? chargeId,
         stripeApplicationFeeId: m.stripeApplicationFeeId ?? feeId }, m.reservation, evidence, now());
+      return evidence;
+    },
+    retrieveUnpaidSession: async m => {
+      const retrievedAt = now();
+      const account = id(m.stripeConnectedAccountId);
+      if (account !== m.reservation.stripeConnectedAccountId) reject();
+      const session = await stripe.checkout.sessions.retrieve(id(m.stripeCheckoutSessionId), {}, { stripeAccount: account });
+      if (session.status !== "expired" || session.payment_status !== "unpaid") return null;
+      const evidence = { connectedAccountId: account, retrievedAt, session };
+      assertStayTimeUnpaidExpiryEvidence(m, m.reservation, evidence, now());
       return evidence;
     },
     ensureRefund: async request => ensureRefund(stripe, request, now),

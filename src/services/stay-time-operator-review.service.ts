@@ -43,7 +43,8 @@ async function readItem(tx: Tx, issueId: string) {
     detectedAt: issue.firstDetectedAt.toISOString(), organization: m.reservation.property.organization.name,
     property: m.reservation.property.name, timezone: m.reservation.property.timezone,
     reservationNumber: m.reservation.reservationNumber, operation, modificationStatus: m.status,
-    paymentEvidence: m.failureCode === "STAY_TIME_REFUNDED" ? "REFUNDED" : m.stripePaymentStatus === "paid" ? "PAID" : "UNVERIFIED",
+    paymentEvidence: m.failureCode === "STAY_TIME_REFUNDED" ? "REFUNDED" :
+      m.status === "EXPIRED" && m.failureCode === "STAY_TIME_EXPIRED_UNPAID" ? "UNPAID" : m.stripePaymentStatus === "paid" ? "PAID" : "UNVERIFIED",
     additionalChargeAmount: String(m.additionalChargeAmount), currency: m.currency,
     attempts: m.stayTimeRecoveryAttempts, nextAttemptAt: m.stayTimeRecoveryNextAt?.toISOString() ?? null,
     reconciliationCompleted: m.stayTimeReconciledAt !== null, physicalAccessCertified: false as const } };
