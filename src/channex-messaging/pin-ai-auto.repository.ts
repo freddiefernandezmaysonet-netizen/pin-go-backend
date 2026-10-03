@@ -10,7 +10,7 @@ export function createAutoRepository(db: PrismaClient) {
   return {
     async enqueue(input: AIThreadScope & { messageId: string }) {
       const key = { ...threadKey(input), messageId: input.messageId };
-      await db.channexAIInbound.upsert({ where: { organizationId_propertyId_threadId_messageId: key }, create: key, update: {} });
+      await db.channexAIInbound.createMany({ data: [key], skipDuplicates: true });
     },
     async state(scope: AIThreadScope) {
       return db.channexAIThread.findUnique({ where: { organizationId_propertyId_threadId: threadKey(scope) } });
@@ -18,8 +18,8 @@ export function createAutoRepository(db: PrismaClient) {
     async control(scope: AIThreadScope, mode: "AUTO" | "HUMAN", since: Date) {
       return db.$transaction(async tx => {
         const key = threadKey(scope);
-        const row = await tx.channexAIThread.upsert({ where: { organizationId_propertyId_threadId: key },
-          create: { ...key, mode: "HUMAN", since, reason: "HOST_TAKEOVER" }, update: {} });
+        await tx.channexAIThread.createMany({ data: [{ ...key, mode: "HUMAN", since, reason: "HOST_TAKEOVER" }], skipDuplicates: true });
+        const row = await tx.channexAIThread.findUniqueOrThrow({ where: { organizationId_propertyId_threadId: key } });
         if (mode === "AUTO") {
           const changed = await tx.channexAIThread.updateMany({ where: { id: row.id, sending: false,
             OR: [{ leaseUntil: null }, { leaseUntil: { lt: new Date() } }] }, data: { mode, since, reason: null } });
@@ -37,7 +37,7 @@ export function createAutoRepository(db: PrismaClient) {
     async claim(candidate: ChannexAIInbound, since: Date): Promise<AIJob | null> {
       return db.$transaction(async tx => {
         const key = threadKey(candidate), now = new Date(), token = randomUUID(), until = new Date(now.getTime() + 180000);
-        await tx.channexAIThread.upsert({ where: { organizationId_propertyId_threadId: key }, create: { ...key, since }, update: {} });
+        await tx.channexAIThread.createMany({ data: [{ ...key, since }], skipDuplicates: true });
         // Row update serializes claimants across processes, without holding a transaction during network calls.
         const acquired = await tx.channexAIThread.updateMany({ where: { ...key,
           OR: [{ leaseUntil: null }, { leaseUntil: { lt: now } }] }, data: { leaseToken: token, leaseUntil: until } });
