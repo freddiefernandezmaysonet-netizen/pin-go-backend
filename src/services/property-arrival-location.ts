@@ -7,7 +7,7 @@ export function parsePropertyArrivalLocation(input: Record<string, unknown>): Pr
     const value = input[key];
     if (value === undefined) continue;
     if (value !== null && typeof value !== "string") throw new Error(`${key} must be text`);
-    const text = value?.trim() ?? "";
+    const text = typeof value === "string" ? value.trim() : "";
     if (text.length > limit || /[\r\n\x00-\x1f\x7f]/.test(text)) throw new Error(`${key} is invalid`);
     result[key] = text || null;
   }
