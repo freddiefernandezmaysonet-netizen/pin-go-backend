@@ -1,3 +1,4 @@
+import { parsePropertyArrivalLocation } from "../services/property-arrival-location.js";
 import { Router } from "express";
 import type { PrismaClient } from "@prisma/client";
 import { requireAuth } from "../middleware/requireAuth";
@@ -157,11 +158,15 @@ const {
         });
       }
 
+      let arrivalLocation;
+      try { arrivalLocation = parsePropertyArrivalLocation(req.body ?? {}); }
+      catch (error) { return res.status(400).json({ ok: false, error: (error as Error).message }); }
       const property = await prisma.property.create({
         data: {
           organizationId: orgId,
           name: name.trim(),
           address1: address1?.trim() || null,
+          ...arrivalLocation,
           city: city?.trim() || null,
           region: region?.trim() || null,
           country: country?.trim() || null,
@@ -280,9 +285,13 @@ try {
         }
       }
 
+      let arrivalLocation;
+      try { arrivalLocation = parsePropertyArrivalLocation(req.body ?? {}); }
+      catch (error) { return res.status(400).json({ ok: false, error: (error as Error).message }); }
       const updated = await prisma.property.update({
         where: { id },
         data: {
+          ...arrivalLocation,
           ...(name !== undefined ? { name: String(name).trim() } : {}),
           ...(address1 !== undefined ? { address1: address1?.trim() || null } : {}),
           ...(city !== undefined ? { city: city?.trim() || null } : {}),

@@ -1,3 +1,4 @@
+import { formatPropertyArrivalLocation } from "../services/property-arrival-location.js";
 // src/workers/reservation.worker.ts
 import dotenv from "dotenv";
 dotenv.config({ path: "./.env", override: true });
@@ -692,6 +693,8 @@ async function fetchDueCheckins(now: Date) {
         select: {
           organizationId: true,
           name: true,
+          complexName: true,
+          unitNumber: true,
           timezone: true,
         },
       },
@@ -1504,6 +1507,7 @@ async function processCheckins(now: Date) {
               }
 
               return sendGuestAccessPasscodeEmail({
+                arrivalLocation: formatPropertyArrivalLocation(reservation.property, guestLanguage),
                 to: String(
                   reservation.guestEmail ?? ""
                 ),

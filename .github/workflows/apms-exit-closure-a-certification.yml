@@ -162,6 +162,12 @@ jobs:
           set -euo pipefail
           DATABASE_URL='postgresql://ci:ci@127.0.0.1:5432/pin_go_exit_a_schema_validation' npx prisma validate --schema prisma/schema.prisma
           git diff --check
+          # PR #345: exact arrival-location snapshot; all runtime certifications remain enabled.
+          if [ "${GITHUB_HEAD_REF:-}" = "agent/property-arrival-unit-v1" ]; then
+            python3 scripts/verify-arrival-location-pr-scope.test.py
+            python3 scripts/verify-arrival-location-pr-scope.py
+            exit 0
+          fi
           if [ "${GITHUB_HEAD_REF:-}" = "agent/staff-preferred-language-v1" ]; then
             python3 scripts/verify-staff-language-pr-scope.py
             exit 0

@@ -1,3 +1,4 @@
+import { formatPropertyArrivalLocation } from "./property-arrival-location.js";
 import { isChannexGuestRegistrationExempt } from "./guest-registration-channel.policy";
 import { deliverAirbnbCommunication } from "../channex-messaging/airbnb-access.service.js";
 import { PrismaClient } from "@prisma/client";
@@ -167,6 +168,7 @@ export function buildPreCheckinMessage(input: {
   guestName?: string | null;
   propertyName: string;
   checkInTime: string;
+  arrivalLocation?: string | null;
   address: string | null;
   mapsLink: string | null;
   verifyLink: string | null;
@@ -189,6 +191,8 @@ export function buildPreCheckinMessage(input: {
       ? `Pin&Go: Check-in hoy ${checkInTime} en ${propertyName}.`
       : `Pin&Go: Check-in today ${checkInTime} at ${propertyName}.`,
   ];
+
+  if (input.arrivalLocation) parts.push(input.arrivalLocation);
 
   if (location) {
     parts.push(
@@ -250,6 +254,8 @@ export async function sendPreCheckinEmail(
           organizationId: true,
           name: true,
           timezone: true,
+          complexName: true,
+          unitNumber: true,
           address1: true,
           city: true,
           region: true,
@@ -325,6 +331,7 @@ export async function sendPreCheckinEmail(
       checkIn: r.checkIn.toISOString(),
       propertyTimeZone:
         r.property?.timezone ?? null,
+      arrivalLocation: formatPropertyArrivalLocation(r.property, language),
       address,
       mapsLink,
       verificationUrl,
@@ -348,6 +355,7 @@ export async function sendPreCheckinEmail(
         checkIn: r.checkIn,
         propertyTimeZone:
           r.property?.timezone ?? null,
+        arrivalLocation: formatPropertyArrivalLocation(r.property, language),
         address,
         mapsLink,
         verificationUrl,
@@ -397,6 +405,8 @@ export async function sendPreCheckinSms(
             organizationId: true,
             name: true,
             timezone: true,
+            complexName: true,
+            unitNumber: true,
             address1: true,
             city: true,
             region: true,
@@ -451,6 +461,7 @@ export async function sendPreCheckinSms(
       guestName: r.guestName,
       propertyName,
       checkInTime,
+      arrivalLocation: formatPropertyArrivalLocation(r.property, language),
       address,
       mapsLink,
       verifyLink,
