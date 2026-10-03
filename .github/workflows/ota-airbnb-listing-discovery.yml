@@ -887,7 +887,16 @@ jobs:
         run: |
           BASE_RANGE="origin/${GITHUB_BASE_REF:-main}...HEAD"
 
-          if [ "${GITHUB_HEAD_REF:-}" = "agent/staff-preferred-language-v1" ]; then
+          if [ "${GITHUB_HEAD_REF:-}" = "agent/pin-ai-stay-time-policy-v1" ]; then
+            # The earlier exact PR/repository allowlist remains mandatory.
+            # Every pre-existing worker and Channex transport stays frozen.
+            git diff --exit-code "$BASE_RANGE" -- src/pms src/workers \
+              src/distribution/channex-readonly.http-transport.ts \
+              src/distribution/channex-white-label.http-transport.ts \
+              ':(exclude)src/workers/stay-time-recovery.worker.ts'
+            test "$(git diff --name-only --diff-filter=A "$BASE_RANGE" -- src/workers)" = "src/workers/stay-time-recovery.worker.ts"
+            test "$(sha256sum src/workers/stay-time-recovery.worker.ts | cut -d ' ' -f 1)" = "04f659ea8ed6ccc60e122843f0dc0a066384236584f3b29310879259ab05f508"
+          elif [ "${GITHUB_HEAD_REF:-}" = "agent/staff-preferred-language-v1" ]; then
             python3 scripts/verify-staff-language-pr-scope.py
             git diff --exit-code "$BASE_RANGE" -- \
               src/pms \
