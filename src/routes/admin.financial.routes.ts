@@ -3,9 +3,11 @@ import { PrismaClient } from "@prisma/client";
 import { requireAuth } from "../middleware/requireAuth";
 import { summarizeSmsFinancialTelemetry } from "../services/sms-financial-telemetry.service";
 import { getStripeFinancialActuals } from "../services/stripe-financial-adapter.service";
+import { buildAdminStayTimeRecoveryRouter } from "./admin.stay-time-recovery.routes.js";
 
 const prisma = new PrismaClient();
 const router = Router();
+router.use("/stay-time-recovery", buildAdminStayTimeRecoveryRouter(prisma));
 
 const LOCK_PRICE = 12.49;
 const SMART_PRICE = 14.99;

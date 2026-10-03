@@ -460,7 +460,7 @@ function getCancellationPolicySummaryForEmail(snapshot: any) {
 }
 
 function getCancellationRefundRulesForEmail(snapshot: any) {
-  const refundRules = Array.isArray(snapshot?.refundRules)
+  const refundRules: unknown[] = Array.isArray(snapshot?.refundRules)
     ? snapshot.refundRules
     : [];
 
@@ -1102,6 +1102,13 @@ const updatedReservation = await prisma.reservation.update({
 },
 });
 
+// Older reservations can lack a public number. Reuse the stable reservation
+// reference in subjects, initial sends and persisted retry payloads.
+const notificationReservation = {
+  ...updatedReservation,
+  reservationNumber: updatedReservation.reservationNumber ?? updatedReservation.id,
+};
+
 const amountNumber = updatedReservation.totalAmount
   ? Number(updatedReservation.totalAmount)
   : null;
@@ -1123,7 +1130,7 @@ if (updatedReservation.guestEmail) {
   const directBookingGuestEmailInput = {
     to: updatedReservation.guestEmail,
     replyTo: guestReplyTo.email,
-    reservationNumber: updatedReservation.reservationNumber,
+    reservationNumber: notificationReservation.reservationNumber,
     guestName: updatedReservation.guestName,
     propertyName: property.name,
     checkIn: updatedReservation.checkIn,
@@ -1167,7 +1174,7 @@ if (updatedReservation.guestEmail) {
     type: "DIRECT_BOOKING_GUEST_CONFIRMATION",
     to: updatedReservation.guestEmail,
     subject:
-      `${preferredLanguage === "es" ? "Reservación confirmada" : "Reservation confirmed"} #${updatedReservation.reservationNumber} - ${property.name}`,
+      `${preferredLanguage === "es" ? "Reservación confirmada" : "Reservation confirmed"} #${notificationReservation.reservationNumber} - ${property.name}`,
     reservationId: updatedReservation.id,
     propertyId: property.id,
     organizationId: property.organizationId,
@@ -1192,7 +1199,7 @@ await sendDirectBookingHostNotificationSafe({
   propertyId: property.id,
   propertyName: property.name,
   propertyTimeZone: property.timezone,
-  reservation: updatedReservation,
+  reservation: notificationReservation,
   totalAmount: amountNumber,
 });
 

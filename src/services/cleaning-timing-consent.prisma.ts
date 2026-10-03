@@ -17,6 +17,10 @@ export async function acceptCleaningTimingConsent(
     throw new Error("CLEANING_TIMING_CONSENT_INVALID_DATE");
   }
   return prisma.$transaction(async tx => {
+    // Serialize cleaner declarations with schedule renewal and snapshot creation.
+    const locked = await tx.$queryRaw<Array<{ id: string }>>`
+      SELECT "id" FROM "Reservation" WHERE "id" = ${input.reservationId} FOR UPDATE`;
+    if (locked.length !== 1) throw new Error("CLEANING_TIMING_CONSENT_RESERVATION_NOT_FOUND");
     const work = await tx.cleaningWork.findFirst({
       where: {
         id: input.workId,

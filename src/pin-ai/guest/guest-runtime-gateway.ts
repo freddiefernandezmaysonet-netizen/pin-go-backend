@@ -6,6 +6,8 @@ import type { PrismaClient } from "@prisma/client";
 import { randomUUID } from "node:crypto";
 import { appendGuestMessages, readGuestMessages, type GuestHistoryMessage } from "./guest-history.js";
 import { formatInTimeZone } from "date-fns-tz";
+import { createStayTimeChatActions, stayTimeChatEnabled } from "./stay-time-chat-actions.js";
+import type { PinAIActionBrokerPublicProposal } from "../actions/action-broker.service.js";
 
 import type { PinAIRuntimeRequest } from "../runtime/contracts.js";
 import type {
@@ -114,6 +116,7 @@ export type GuestPinAIActionProposalResponse =
       amountDifferenceCents: number;
       currency: string;
       financialAction: string;
+      stayTime?: PinAIActionBrokerPublicProposal["quote"]["stayTime"];
     }>;
   }>;
 
@@ -506,6 +509,7 @@ export function createGuestPinAIRuntimeRunner(
       });
     const actionProposalEnabled =
       actionCanary.enabled;
+    const stayTimeEnabled = stayTimeChatEnabled(request.context.reservationId, env);
 
     if (
       actionProposalEnabled &&
@@ -577,6 +581,7 @@ export function createGuestPinAIRuntimeRunner(
         actionProposal: {
           enabled:
             actionProposalEnabled,
+          stayTimeEnabled,
         },
         maxPolls: 50,
         pollDelayMs: 500,
@@ -588,9 +593,12 @@ export function createGuestPinAIRuntimeRunner(
     );
 
     const actionTools = actionProposalEnabled
-      ? createPinGoRuntimeToolExecutorWithActionProposal(createActionProposalRuntimeDependencies({
+      ? createPinGoRuntimeToolExecutorWithActionProposal({ ...createActionProposalRuntimeDependencies({
           guestToken: actionAuthorization!.guestToken, enabled: true,
-        })) : undefined;
+        }), ...(stayTimeEnabled ? { prepareStayTime: createStayTimeChatActions({
+          client: runtimePrisma, env, now: () => new Date(),
+          platformFeePercent: env.PINGO_DIRECT_BOOKING_PLATFORM_FEE_PERCENT ?? "0",
+        }).prepare } : {}) }) : undefined;
     const delegate = actionTools?.executor ?? createPinGoRuntimeReadToolExecutor();
     const incidentTools = incidentsEnabled ? new GuestIncidentToolExecutor({
       prisma: runtimePrisma, guestToken: actionAuthorization!.guestToken, env, delegate,

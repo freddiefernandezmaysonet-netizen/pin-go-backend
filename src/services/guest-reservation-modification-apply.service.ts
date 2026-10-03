@@ -9,6 +9,9 @@ import {
 import { formatInTimeZone } from "date-fns-tz";
 import { isConfirmedInStayExtension } from "../pin-ai/actions/in-stay-extension-confirmation.js";
 import { InStayExtensionError } from "../pin-ai/actions/in-stay-extension.js";
+import { StayTimePolicyError, type StayTimeOperation } from "../pin-ai/actions/stay-time-policy.js";
+import { isStayTimeModification, validateFreeStayTimeApply, validatePaidStayTimeApply } from "./stay-time-apply-validation.service.js";
+import type { StayTimePaymentEvidence } from "./stay-time-payment-evidence.js";
 
 import { persistChannexAriReservationIntent } from "../pms/outbound/channex-ari-reservation-producer.service";
 import {
@@ -20,10 +23,24 @@ import { reconcileReservation } from "./reservation.reconcile.service";
 const prisma = new PrismaClient();
 const GUEST_TOKEN_POST_CHECKOUT_MS = 48 * 60 * 60 * 1000;
 
+async function retryStayTimeTransaction<T>(run: () => Promise<T>, isStayTime: () => boolean): Promise<T> {
+  for (let attempt = 0; ; attempt++) {
+    try { return await run(); }
+    catch (error) {
+      const conflict = error instanceof Prisma.PrismaClientKnownRequestError &&
+        (error.code === "P2034" || (error.code === "P2010" && ["40001", "40P01"].includes(String(error.meta?.code))));
+      if (!isStayTime() || !conflict || attempt >= 2) throw error;
+      await new Promise(resolve => setTimeout(resolve, 20 * (attempt + 1)));
+    }
+  }
+}
+
 type MoneyValue = Prisma.Decimal | number | string | null;
 
 type ApplyPlanInput = {
   now: Date;
+  /** Internal only: supplied after locked database validation, never from a request. */
+  validatedStayTimeOperation?: StayTimeOperation;
   modification: {
     status: ReservationModificationStatus;
     financialAction: ReservationModificationFinancialAction;
@@ -314,7 +331,7 @@ export function buildGuestReservationModificationApplyPlan(
 
   let inStayExtension = false;
   try {
-    inStayExtension = isConfirmedInStayExtension(input);
+    inStayExtension = input.validatedStayTimeOperation ? false : isConfirmedInStayExtension(input);
   } catch (error) {
     if (error instanceof InStayExtensionError) {
       throw applyError({ code: error.code, message: error.message });
@@ -325,7 +342,7 @@ export function buildGuestReservationModificationApplyPlan(
   if (
     input.reservation.status !== ReservationStatus.ACTIVE ||
     input.reservation.paymentState !== PaymentState.PAID ||
-    (!inStayExtension && input.reservation.checkIn.getTime() <= input.now.getTime())
+    (!inStayExtension && input.validatedStayTimeOperation !== "LATE_CHECKOUT" && input.reservation.checkIn.getTime() <= input.now.getTime())
   ) {
     throw applyError({
       code: "RESERVATION_NOT_ELIGIBLE_FOR_MODIFICATION_APPLY",
@@ -344,7 +361,7 @@ export function buildGuestReservationModificationApplyPlan(
 
   if (
     proposedCheckOut <= proposedCheckIn ||
-    (!inStayExtension && proposedCheckIn.getTime() <= input.now.getTime())
+    (!inStayExtension && input.validatedStayTimeOperation !== "LATE_CHECKOUT" && proposedCheckIn.getTime() <= input.now.getTime())
   ) {
     throw applyError({
       code: "RESERVATION_MODIFICATION_PROPOSED_STAY_INVALID",
@@ -435,7 +452,7 @@ export function buildGuestReservationModificationApplyPlan(
   );
 
   return {
-    availabilityCheckIn: inStayExtension ? input.modification.currentCheckOut : proposedCheckIn,
+    availabilityCheckIn: inStayExtension || input.validatedStayTimeOperation === "LATE_CHECKOUT" ? input.modification.currentCheckOut : proposedCheckIn,
     datesChanged,
     guestsChanged,
     amenitiesChanged,
@@ -575,6 +592,8 @@ type ApplyDependencies = Readonly<{
   client: Pick<PrismaClient, "reservationModification" | "$transaction">;
   now: () => Date;
   reconcile: (reservationId: string) => Promise<unknown>;
+  /** Internal trusted provider evidence; never populated from a guest request. */
+  stayTimePaymentEvidence?: StayTimePaymentEvidence;
 }>;
 const defaultApplyDependencies: ApplyDependencies = {
   client: prisma, now: () => new Date(), reconcile: reconcileReservation,
@@ -591,7 +610,7 @@ export async function applyGuestReservationModification(input: {
   );
   const locator = await prisma.reservationModification.findUnique({
     where: { id: modificationId },
-    select: { reservationId: true },
+    select: { reservationId: true, requestSource: true, guestConfirmation: true },
   });
 
   if (!locator) {
@@ -603,9 +622,15 @@ export async function applyGuestReservationModification(input: {
   }
 
   const now = dependencies.now();
+  // PostgreSQL can raise 40001 while acquiring the first lock, before the
+  // transaction has loaded the modification and set its validated-path flags.
+  // This hint permits bounded DB retries only; all authorization stays inside.
+  const knownStayTime = locator.requestSource === "PIN_AI_GUEST_SERVICES" && isStayTimeModification(locator.guestConfirmation);
+  let freeStayTimeAttempt = false;
+  let paidStayTimeAttempt = false;
 
   try {
-    const result = await prisma.$transaction(
+    const result = await retryStayTimeTransaction(async () => await prisma.$transaction(
       async (tx) => {
         await tx.$queryRaw`
           SELECT "id"
@@ -664,10 +689,19 @@ export async function applyGuestReservationModification(input: {
           };
         }
 
+        const stayTime = isStayTimeModification(modification.guestConfirmation);
+        freeStayTimeAttempt = stayTime && modification.financialAction === "NO_PAYMENT_REQUIRED" &&
+          Number(modification.additionalChargeAmount) === 0 && !modification.stripePaymentIntentId && !modification.stripeChargeId;
+        paidStayTimeAttempt = stayTime && modification.financialAction === "ADDITIONAL_PAYMENT_REQUIRED" && !!dependencies.stayTimePaymentEvidence;
+        const validatedStayTime = stayTime
+          ? dependencies.stayTimePaymentEvidence && !freeStayTimeAttempt
+            ? await validatePaidStayTimeApply(tx, modification, modification.reservation, now, dependencies.stayTimePaymentEvidence)
+            : await validateFreeStayTimeApply(tx, modification, modification.reservation, now) : null;
         const plan = buildGuestReservationModificationApplyPlan({
           now,
           modification,
           reservation: modification.reservation,
+          ...(validatedStayTime ? { validatedStayTimeOperation: validatedStayTime.operation } : {}),
         });
 
         if (plan.datesChanged) {
@@ -677,7 +711,7 @@ export async function applyGuestReservationModification(input: {
             reservationId: modification.reservation.id,
             propertyId: modification.reservation.propertyId,
             checkIn: plan.availabilityCheckIn,
-            checkOut: modification.proposedCheckOut,
+            checkOut: validatedStayTime?.requiredFreeUntil ?? modification.proposedCheckOut,
             now,
           });
         }
@@ -778,10 +812,19 @@ export async function applyGuestReservationModification(input: {
       {
         isolationLevel: Prisma.TransactionIsolationLevel.Serializable,
       }
-    );
+    ), () => knownStayTime || freeStayTimeAttempt || paidStayTimeAttempt);
 
     if (result.datesChanged) {
       await reconcileReservation(result.reservation.id);
+    }
+
+    // Persist completion only after reconciliation returns. A process crash or
+    // provider outage after APPLIED must remain visible to the recovery worker.
+    if (knownStayTime) {
+      await prisma.reservationModification.updateMany({
+        where: { id: modificationId, status: ReservationModificationStatus.APPLIED, stayTimeReconciledAt: null },
+        data: { stayTimeReconciledAt: dependencies.now() },
+      });
     }
 
     return serializeAppliedResult(result);
@@ -793,8 +836,10 @@ export async function applyGuestReservationModification(input: {
           status: ReservationModificationStatus.APPLYING,
         },
         data: {
+          ...(freeStayTimeAttempt && error instanceof StayTimePolicyError
+            ? { status: ReservationModificationStatus.CANCELLED, cancelledAt: now } : {}),
           failureCode:
-            error instanceof GuestReservationModificationError
+            error instanceof GuestReservationModificationError || error instanceof StayTimePolicyError
               ? error.code
               : "RESERVATION_MODIFICATION_APPLY_FAILED",
           failureMessage:
@@ -804,8 +849,8 @@ export async function applyGuestReservationModification(input: {
             ),
           failureDetails: {
             retryable:
-              !(error instanceof GuestReservationModificationError) ||
-              error.statusCode >= 500,
+              !(error instanceof StayTimePolicyError) &&
+              (!(error instanceof GuestReservationModificationError) || error.statusCode >= 500),
           },
         },
       })

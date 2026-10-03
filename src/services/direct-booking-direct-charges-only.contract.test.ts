@@ -10,7 +10,7 @@ const chargeMode = read("src/services/direct-booking-stripe-charge-mode.service.
 const publicBooking = read("src/routes/public-booking.routes.ts");
 const modificationCheckout = read(
   "src/services/guest-reservation-modification-checkout.service.ts"
-);
+) + read("src/services/guest-reservation-modification-checkout-contract.ts");
 const modificationPayment = read(
   "src/services/guest-reservation-modification-payment.service.ts"
 );

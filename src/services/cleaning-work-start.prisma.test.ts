@@ -4,7 +4,7 @@ import { confirmCleaningStart } from "./cleaning-work-start.prisma.js";
 
 function fakeDb(seed: any) {
   let row = { ...seed };
-  const tx = { cleaningWork: {
+  const tx = { $queryRaw: async () => [{ id: seed.reservationId }], cleaningWork: {
     findFirst: async ({ where }: any) => row.id === where.id && row.reservationId === where.reservationId &&
       row.staffMemberId === where.staffMemberId && row.confirmationId === where.confirmationId ? { ...row } : null,
     update: async ({ data }: any) => (row = { ...row, ...data }),

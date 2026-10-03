@@ -1,0 +1,43 @@
+{
+  "compilerOptions": {
+    "noEmit": true, "module": "preserve", "moduleResolution": "bundler",
+    "target": "es2022", "strict": true, "skipLibCheck": true, "types": ["node"]
+  },
+  "include": [
+    "src/services/stay-time-operator-review.db.test.ts",
+    "src/routes/admin.stay-time-recovery.routes.test.ts",
+    "src/workers/stay-time-recovery.worker.ts",
+    "src/services/stay-time-recovery.db.test.ts",
+    "src/webhooks/stripe.webhook.ts",
+    "src/services/stay-time-payment-event.test.ts",
+    "src/services/stay-time-guest-action.db.test.ts",
+    "src/routes/dashboard.ota-availability-conflicts.routes.test.ts",
+    "src/services/ota-availability-conflict-review.db.test.ts",
+    "src/services/stay-time-departure-cleaning.service.test.ts",
+    "src/services/stay-time-checkout.db.test.ts",
+    "src/services/stay-time-checkout-preflight.db.test.ts",
+    "src/services/stay-time-stripe-provider.test.ts",
+    "src/services/stay-time-payment-flow.db.test.ts",
+    "src/services/stay-time-payment-evidence.test.ts",
+    "src/services/stay-time-payment-window.test.ts",
+    "src/services/cleaning-reconfirmation-renewal.db.test.ts",
+    "src/services/reservation-reconcile-cleaner-reconfirmation.contract.test.ts",
+    "src/services/reservation-guest-access-window.test.ts",
+    "src/pin-ai/actions/stay-time-settings.ts",
+    "src/pin-ai/runtime/stay-time-tool.ts",
+    "src/pin-ai/runtime/stay-time-tool.test.ts",
+    "src/services/property-stay-time-settings.service.ts",
+    "src/services/property-stay-time-settings.db.test.ts",
+    "src/services/stay-time-estimate.service.ts",
+    "src/services/stay-time-estimate.service.test.ts",
+    "src/services/stay-time-quote.service.ts",
+    "src/services/stay-time-proposal.service.ts",
+    "src/services/stay-time-apply-validation.service.ts",
+    "src/services/stay-time-apply.db.test.ts",
+    "src/services/stay-time-quote.service.test.ts",
+    "src/routes/dashboard.stay-time-settings.routes.ts",
+    "src/routes/dashboard.stay-time-settings.routes.test.ts",
+    "src/services/direct-booking-ingest-transaction.test.ts",
+    "src/services/direct-booking-ingest-transaction.db.test.ts"
+  ]
+}

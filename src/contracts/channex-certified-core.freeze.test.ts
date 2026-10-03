@@ -4,12 +4,15 @@ import fs from "node:fs";
 import path from "node:path";
 import test from "node:test";
 
-// Authorized recertification review: PR #242, 2026-09-24.
-// Channex Total booking amount/currency propagation and its focused financial certification test changed.
-// Booking Lifecycle CI passed; the protected core now contains 125 files.
+// Authorized recertification review: PR #333, 2026-10-02.
+// Only the transactional availability-conflict module is added. The previous
+// 125-file core retains its exact certified fingerprint in a separate guard.
 const CERTIFIED_CORE_SHA256 =
+  "ce1dcb2c04d27323efbd8dbff1928f09b781bf4c9af8215bca0b754eb2fbe43d";
+const CERTIFIED_CORE_FILE_COUNT = 126;
+const ORIGINAL_CORE_SHA256 =
   "4153a95b6964b7bbc83f8eacb0debefba8cb2fe65b6ea3261e370e8711134754";
-const CERTIFIED_CORE_FILE_COUNT = 125;
+const ADDED_CONFLICT_MODULE = "src/services/channex-availability-conflict.service.ts";
 
 const CHANNEX_PRODUCTION_TRANSPORT_BOUNDARY_FILES = new Set([
   "src/distribution/ota-connection-center.config.test.ts",
@@ -47,9 +50,10 @@ function isCertifiedCoreFile(filePath: string): boolean {
   );
 }
 
-function certifiedCoreFingerprint() {
+function certifiedCoreFingerprint(excludedPaths: ReadonlySet<string> = new Set()) {
   const files = [...walk("prisma"), ...walk("src")]
     .filter(isCertifiedCoreFile)
+    .filter((filePath) => !excludedPaths.has(filePath))
     .sort();
   const hash = crypto.createHash("sha256");
 
@@ -62,6 +66,12 @@ function certifiedCoreFingerprint() {
 
   return { files, sha256: hash.digest("hex") };
 }
+
+test("the original 125-file Channex core remains unchanged after the authorized addition", () => {
+  const fingerprint = certifiedCoreFingerprint(new Set([ADDED_CONFLICT_MODULE]));
+  assert.equal(fingerprint.files.length, 125);
+  assert.equal(fingerprint.sha256, ORIGINAL_CORE_SHA256);
+});
 
 test("the Channex-certified core remains byte-for-byte frozen", () => {
   const fingerprint = certifiedCoreFingerprint();

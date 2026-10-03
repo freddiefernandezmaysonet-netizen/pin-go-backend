@@ -3,6 +3,8 @@ import { fromZonedTime, formatInTimeZone } from "date-fns-tz";
 import { calculateDirectBookingPricing } from "./direct-booking-pricing.service";
 import { reconcileReservation } from "./reservation.reconcile.service";
 import { persistChannexAriReservationIntent } from "../pms/outbound/channex-ari-reservation-producer.service";
+import { checkPropertyAvailability } from "./availability.service";
+import { runIngestTransaction } from "./direct-booking-ingest-transaction";
 
 const prisma = new PrismaClient();
 
@@ -12,6 +14,7 @@ export type ManualReservationDateChangeDependencies = {
   reconcile: typeof reconcileReservation;
   persistChannexIntent: typeof persistChannexAriReservationIntent;
   now: () => Date;
+  checkAvailability: typeof checkPropertyAvailability;
 };
 
 const defaultDependencies: ManualReservationDateChangeDependencies = {
@@ -20,6 +23,7 @@ const defaultDependencies: ManualReservationDateChangeDependencies = {
   reconcile: reconcileReservation,
   persistChannexIntent: persistChannexAriReservationIntent,
   now: () => new Date(),
+  checkAvailability: checkPropertyAvailability,
 };
 
 function isDateOnly(value: unknown): value is string {
@@ -110,17 +114,10 @@ async function prepareManualReservationDateChange(input: {
   }
   if (proposedCheckIn <= dependencies.now()) throw new ManualReservationDateChangeError("RESERVATION_DATE_CHANGE_REQUIRES_FUTURE_STAY", "Reservation dates must remain in the future.", 409);
 
-  const conflictingReservation = await dependencies.prisma.reservation.findFirst({
-    where: {
-      id: { not: reservation.id },
-      propertyId: reservation.propertyId,
-      status: ReservationStatus.ACTIVE,
-      checkIn: { lt: proposedCheckOut },
-      checkOut: { gt: proposedCheckIn },
-    },
-    select: { id: true },
-  });
-  if (conflictingReservation) throw new ManualReservationDateChangeError("RESERVATION_DATE_CHANGE_CONFLICT", "The proposed dates conflict with another active reservation.", 409, { conflictingReservationId: conflictingReservation.id });
+  const availability = await dependencies.checkAvailability({ propertyId: reservation.propertyId,
+    checkIn: proposedCheckIn, checkOut: proposedCheckOut, excludeReservationId: reservation.id }, dependencies.prisma);
+  if (!availability.available) throw new ManualReservationDateChangeError("RESERVATION_DATE_CHANGE_CONFLICT",
+    "The proposed dates conflict with occupancy, a pending change, cleaning or a blocked date.", 409, availability.conflict);
 
   const pricing = await dependencies.calculatePricing({
     propertyId: reservation.propertyId,
@@ -226,11 +223,19 @@ export async function changeManualReservationDatesByHost(input: {
     requestedByUserId: input.requestedByUserId,
   }));
 
-  const updated = await dependencies.prisma.$transaction(async (tx: any) => {
+  const updated = await runIngestTransaction(dependencies.prisma, "MANUAL", async (tx) => {
+    const availability = await dependencies.checkAvailability({ propertyId: prepared.reservation.propertyId,
+      checkIn: prepared.proposedCheckIn, checkOut: prepared.proposedCheckOut,
+      excludeReservationId: prepared.reservation.id }, tx);
+    if (!availability.available) throw new ManualReservationDateChangeError("RESERVATION_DATE_CHANGE_CONFLICT",
+      "The proposed dates are no longer available. Review the reservation dates.", 409, availability.conflict);
     const fencedUpdate = await tx.reservation.updateMany({
       where: {
         id: prepared.reservation.id,
         updatedAt: prepared.reservation.updatedAt,
+        status: ReservationStatus.ACTIVE,
+        source: prepared.reservation.source,
+        property: { organizationId: input.organizationId },
       },
       data: {
         checkIn: prepared.proposedCheckIn,

@@ -3,12 +3,14 @@ import { PrismaClient, ReservationStatus } from "@prisma/client";
 import { requireAuth } from "../middleware/requireAuth";
 import { dashboardDistributionMissionControlMiddleware } from "./dashboard.distribution-mission-control.middleware";
 import { dashboardManualReservationDateChangeRouter } from "./dashboard.manual-reservation-date-change.route";
+import { buildAvailabilityConflictReviewRouter } from "./dashboard.ota-availability-conflicts.routes";
 
 const prisma = new PrismaClient();
 export const dashboardRouter = Router();
 
 dashboardRouter.use(dashboardDistributionMissionControlMiddleware);
 dashboardRouter.use(dashboardManualReservationDateChangeRouter);
+dashboardRouter.use(buildAvailabilityConflictReviewRouter(prisma));
 
 // MVP: "today" en UTC (luego lo hacemos por timezone de property)
 import { formatInTimeZone, fromZonedTime } from "date-fns-tz";

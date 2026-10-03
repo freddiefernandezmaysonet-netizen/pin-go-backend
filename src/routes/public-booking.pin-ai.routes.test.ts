@@ -17,6 +17,57 @@ import { buildPublicBookingPinAIRouter } from "./public-booking.pin-ai.routes.js
 
 const token = "12345678-1234-1234-1234-123456789abc";
 
+for (const enabled of [false, true]) test(`stay-time confirmation dispatch is gated separately: ${enabled}`, async () => {
+  let executions = 0;
+  const response = await requestAction({ confirmationToken: "private-confirmation" }, {
+    stayTime: true, stayTimeEnabled: enabled,
+    broker: { confirmAndExecute: async () => { throw new Error("Must not use date-change broker"); } },
+    stayTimeConfirm: async input => {
+      executions++;
+      assert.deepEqual(input, { guestToken: token, proposalId: "proposal-12345678", confirmationToken: "private-confirmation" });
+      return { outcome: "WAITING_FOR_PAYMENT", proposalId: input.proposalId, actionExecuted: false };
+    },
+  });
+  assert.equal(response.status, enabled ? 200 : 503);
+  assert.equal(executions, enabled ? 1 : 0);
+});
+
+test("stay-time status and history find the canonical modification after payment", async () => {
+  const now = new Date("2026-10-03T12:00:00Z");
+  const proposalId = "proposal-12345678";
+  const p = { id: proposalId, status: "CONFIRMED", termsSnapshot: { version: "stay_time_quote_v1" } };
+  let modificationReads = 0;
+  const prisma = {
+    reservation: { findFirst: async () => ({ id: "reservation-a", propertyId: "property-a", property: { organizationId: "org-a" } }) },
+    pinAIActionProposal: { findFirst: async (args: any) => {
+      assert.equal(args.where.organizationId, "org-a"); assert.equal(args.where.propertyId, "property-a"); return p;
+    } },
+    pinAIGuestConversation: { findUnique: async () => ({ guestHistoryCiphertext: sealGuestHistory({ reservationId: "reservation-a", guestToken: token }, "messages", [
+      { id: "message-a", role: "assistant", text: "Oferta", actionProposal: { proposalId, actionType: "RESERVATION_MODIFICATION",
+        quote: { amountDifference: 11.2, amountDifferenceCents: 1120, currency: "USD", quoteExpiresAt: now,
+          quoteExpiresAtLocal: now.toISOString(), propertyTimezone: "America/Puerto_Rico" } } },
+    ]), guestActionReceiptsCiphertext: null }) },
+    reservationModification: { findFirst: async (args: any) => {
+      modificationReads++;
+      assert.deepEqual(args.where, { reservationId: "reservation-a", clientRequestId: `stay-time:${proposalId}`, requestSource: "PIN_AI_GUEST_SERVICES" });
+      return { id: "modification-a", status: "APPLIED", stripePaymentStatus: "paid", appliedAt: now, checkoutExpiresAt: null };
+    } },
+  };
+  const app = express();
+  app.use(buildPublicBookingPinAIRouter({ prisma: prisma as never, env: {}, now: () => now,
+    actionBrokerFactory: async () => { throw new Error("No payment provider on reads"); } }));
+  const server = await new Promise<Server>(resolve => { const listener = app.listen(0, "127.0.0.1", () => resolve(listener)); });
+  try {
+    const base = `http://127.0.0.1:${(server.address() as AddressInfo).port}/manage/${token}/pin-ai`;
+    const status = await (await fetch(`${base}/action-proposals/${proposalId}/status`)).json();
+    assert.equal(status.status.modificationStatus, "APPLIED");
+    const history = await (await fetch(`${base}/history`)).json();
+    assert.equal(history.messages[0].actionResult.outcome, "EXECUTED");
+    assert.equal(history.messages[0].actionResult.checkoutUrl, null);
+    assert.equal(modificationReads, 2);
+  } finally { await closeServer(server); }
+});
+
 for (const scenario of ["pending", "paid", "payable", "processing", "paid processing", "expired", "foreign proposal", "foreign ciphertext", "invalid token", "expired token", "corrupt", "database error", "no history"] as const) {
   test(`durable history GET: ${scenario}`, async () => {
     const now = new Date("2026-09-27T03:40:00Z");
@@ -353,6 +404,9 @@ async function requestAction(
   body: unknown,
   options: Readonly<{
     enabled?: boolean;
+    stayTime?: boolean;
+    stayTimeEnabled?: boolean;
+    stayTimeConfirm?: (input: { guestToken: string; proposalId: string; confirmationToken: string }) => Promise<unknown>;
     canaryReservationIds?: string;
     broker?: Readonly<{
       confirmAndExecute(
@@ -370,8 +424,12 @@ async function requestAction(
   app.use(
     "/api/public-booking",
     buildPublicBookingPinAIRouter({
-      prisma: createPrisma(),
+      prisma: { ...createPrisma(), ...(options.stayTime ? { pinAIActionProposal: { findFirst: async () => ({
+        id: "proposal-12345678", termsSnapshot: { version: "stay_time_quote_v1" },
+      }) } } : {}) } as never,
+      ...(options.stayTimeConfirm ? { stayTimeActions: { confirm: options.stayTimeConfirm as never } } : {}),
       env: {
+        PIN_AI_STAY_TIME_CHAT_ENABLED: options.stayTimeEnabled ? "true" : "false",
         PIN_AI_GUEST_GATEWAY_ENABLED:
           "true",
         PIN_AI_ACTION_BROKER_ENABLED:

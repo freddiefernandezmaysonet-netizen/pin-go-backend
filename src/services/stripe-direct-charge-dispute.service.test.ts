@@ -88,6 +88,9 @@ test("closed dispute resolves the existing operational issue without financial s
   assert.equal(f.writes.length, 1);
   assert.equal(f.writes[0].workflowState, "RESOLVED");
   assert.equal(f.writes[0].actionRequired, false);
+  assert.equal(f.writes[0].resolutionType, "AUTOMATIC");
+  assert.equal(f.writes[0].resolutionCode, "STRIPE_DISPUTE_CLOSED");
+  assert.equal(f.writes[0].metadata.stripeEventType, "charge.dispute.closed");
   assert.equal(f.writes[0].resolvedAt.getTime(), 1_700_000_000 * 1000);
 });
 

@@ -278,6 +278,8 @@ model Property {
   smartAutomationEnabled     Boolean                     @default(false)
   checkInTime                String?                     @db.VarChar(5)
   checkOutTime               String?                     @db.VarChar(5)
+  stayTimeSettings           Json?
+  stayTimeSettingsRevision   Int                         @default(0)
   automationExecutionLogs    AutomationExecutionLog[]
   automationRules            AutomationRule[]
   deviceHealths              DeviceHealth[]
@@ -1300,6 +1302,11 @@ model ReservationModification {
   appliedAt                  DateTime?
   expiredAt                  DateTime?
   cancelledAt                DateTime?
+  stayTimeReconciledAt        DateTime?
+  stayTimeRecoveryNextAt      DateTime?
+  stayTimeRecoveryLeaseToken  String?
+  stayTimeRecoveryLeaseUntil  DateTime?
+  stayTimeRecoveryAttempts    Int                                     @default(0)
   createdAt                  DateTime                                @default(now())
   updatedAt                  DateTime                                @updatedAt
 
@@ -1308,6 +1315,7 @@ model ReservationModification {
   @@unique([reservationId, clientRequestId])
   @@index([reservationId, status])
   @@index([status, checkoutExpiresAt])
+  @@index([requestSource, status, stayTimeRecoveryNextAt], map: "ReservationModification_stay_time_recovery_idx")
   @@index([proposedCheckIn, proposedCheckOut, status])
 }
 
@@ -1816,7 +1824,8 @@ model CleaningWork {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  @@unique([reservationId, staffMemberId])
+  @@unique([reservationId, staffMemberId, confirmationId], map: "CleaningWork_confirmation_scope_key")
+  @@index([reservationId, staffMemberId])
   @@index([propertyId, scheduledStartAt])
   @@index([staffMemberId, scheduledStartAt])
   @@index([startConfirmedAt, completionConfirmedAt, cancelledAt, supersededAt], map: "CleaningWork_state_idx")
