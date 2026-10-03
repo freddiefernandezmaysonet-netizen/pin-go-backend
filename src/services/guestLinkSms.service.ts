@@ -1,4 +1,5 @@
 import { isChannexGuestRegistrationExempt } from "./guest-registration-channel.policy";
+import { airbnbOwnsReservation } from "../channex-messaging/airbnb-access.service.js";
 import { PrismaClient } from "@prisma/client";
 import { sendSms } from "../integrations/twilio/twilio.client";
 import { buildGuestLink } from "./guestToken";
@@ -34,6 +35,9 @@ export async function sendGuestAccessLinkSms(
   reservationId: string,
   reason: "PAID" | "REMINDER"
 ) {
+  if (await airbnbOwnsReservation(prisma, reservationId)) {
+    return { ok: false, skipped: true, error: "AIRBNB_CHANNEL_OWNS_DELIVERY" };
+  }
   const r = await prisma.reservation.findUnique({
     where: { id: reservationId },
     select: {

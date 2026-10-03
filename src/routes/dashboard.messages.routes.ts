@@ -1,6 +1,7 @@
 import { Router } from "express";
 import { PrismaClient } from "@prisma/client";
 import { sendSms } from "../integrations/twilio/twilio.client";
+import { retireAirbnbLegacyRetry } from "../channex-messaging/airbnb-access.service.js";
 import { requireOrg } from "../middleware/requireOrg";
 
 const prisma = new PrismaClient();
@@ -247,6 +248,10 @@ router.post("/messages/:id/retry", requireOrg(prisma), async (req, res) => {
 
     if (!msg) {
       return res.status(404).json({ ok: false, error: "not_found" });
+    }
+
+    if (await retireAirbnbLegacyRetry(prisma, msg)) {
+      return res.status(409).json({ ok: false, error: "AIRBNB_CHANNEL_OWNS_DELIVERY" });
     }
 
     const channel = String(msg.channel ?? "").trim().toLowerCase();

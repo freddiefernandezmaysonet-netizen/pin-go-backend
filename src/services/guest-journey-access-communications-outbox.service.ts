@@ -10,6 +10,7 @@ import {
   buildGuestAccessCommunicationOutbox,
   filterAlreadyOwnedGuestAccessDeliveries,
 } from "./guest-journey-access-communications-bridge.policy";
+import { airbnbOwnsReservation } from "../channex-messaging/airbnb-access.service.js";
 
 export type MaterializeGuestAccessCommunicationOutboxInput = {
   reservationId: string;
@@ -39,6 +40,7 @@ export async function materializeGuestAccessCommunicationOutbox(
   if (!reservationId || !organizationId || !propertyId) {
     throw new Error("ACCESS_COMMUNICATIONS_OUTBOX_SCOPE_REQUIRED");
   }
+
 
   const accessGrantIds = [...new Set(input.accessGrantIds.map(clean).filter(Boolean))];
   if (accessGrantIds.length === 0) {
@@ -88,6 +90,10 @@ export async function materializeGuestAccessCommunicationOutbox(
 
   if (!reservation) {
     throw new Error("ACCESS_COMMUNICATIONS_OUTBOX_RESERVATION_SCOPE_MISMATCH");
+  }
+  // Scope was verified before yielding delivery to the independent Airbnb scan.
+  if (await airbnbOwnsReservation(prisma, reservationId)) {
+    return { canonicalAccessGrantId: null, proposed: 0, created: 0, deduplicated: 0 };
   }
   if (
     reservation.guestAccessReleaseStatus !== GuestAccessReleaseStatus.RELEASED ||

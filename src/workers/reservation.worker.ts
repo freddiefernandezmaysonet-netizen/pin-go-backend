@@ -43,6 +43,7 @@ import {
   sendPreCheckinSms,
 } from "../services/preCheckinSms.service";
 import { sendCheckoutSms } from "../services/checkoutSms.service";
+import { processAirbnbCommunications } from "../channex-messaging/airbnb-access.service.js";
 import { sendCleaningReadySms } from "../services/cleaningReadySms.service";
 import { resolveGuestLanguage } from "../services/guest-language.service";
 import { resolveOrganizationGuestReplyTo } from "../services/organization-guest-email.service";
@@ -2859,6 +2860,11 @@ async function tick() {
         "runCheckins crashed:",
         toErrString(e)
       );
+    }
+    try {
+      await processAirbnbCommunications(prisma, process.env, now);
+    } catch {
+      errLog("Airbnb communication scan failed");
     }
     try {
       const result = await retryPendingNfcSync(

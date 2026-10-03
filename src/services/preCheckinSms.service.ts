@@ -1,4 +1,5 @@
 import { isChannexGuestRegistrationExempt } from "./guest-registration-channel.policy";
+import { deliverAirbnbCommunication } from "../channex-messaging/airbnb-access.service.js";
 import { PrismaClient } from "@prisma/client";
 import { sendSms } from "../integrations/twilio/twilio.client";
 import {
@@ -214,6 +215,8 @@ export async function sendPreCheckinEmail(
   prisma: PrismaClient,
   reservationId: string
 ) {
+  const routed = await deliverAirbnbCommunication(prisma, reservationId, "PRECHECKIN");
+  if (routed) return routed;
   const existing = await prisma.messageDispatchLog.findFirst({
     where: {
       reservationId,
@@ -359,6 +362,8 @@ export async function sendPreCheckinSms(
   prisma: PrismaClient,
   reservationId: string
 ) {
+  const routed = await deliverAirbnbCommunication(prisma, reservationId, "PRECHECKIN");
+  if (routed) return routed;
   let retryBody: string | null = null;
   try {
     const existing = await prisma.messageDispatchLog.findFirst({
