@@ -13,7 +13,8 @@ type LifecycleWebhookConfigurer = NonNullable<Parameters<typeof buildOtaConnecti
 
 function configuredComposition(
   configureBookingWebhook?: WebhookConfigurer,
-  configureChannelLifecycleWebhook?: LifecycleWebhookConfigurer
+  configureChannelLifecycleWebhook?: LifecycleWebhookConfigurer,
+  configureMessagesApplication?: NonNullable<Parameters<typeof buildOtaConnectionCenterComposition>[0]["configureMessagesApplication"]>
 ) {
   const calls: string[] = [];
   const repository: OtaProvisioningRepository = {
@@ -68,6 +69,7 @@ function configuredComposition(
     defaultCurrency: "USD",
     adapter,
     repository,
+    ...(configureMessagesApplication ? { configureMessagesApplication } : {}),
     configureBookingWebhook: configureBookingWebhook ?? (async (input) => {
       assert.deepEqual(input, { organizationId: "org-1", propertyId: "property-1" });
       calls.push("register-booking-webhook");
@@ -167,6 +169,42 @@ const prepareInput = {
   organizationId: "org-1", propertyId: "property-1", requestedByUserId: "user-1",
   provider: "AIRBNB" as const, requestKey: "request-123",
 };
+
+test("publication installs Messages after mapping and before confirming preparation", async () => {
+  let release!: () => void;
+  const pendingInstall = new Promise<void>(resolve => { release = resolve; });
+  const { actions, calls } = configuredComposition(undefined, undefined, async input => {
+    assert.deepEqual(input, { organizationId: "org-1", propertyId: "property-1" });
+    assert.equal(calls.at(-1), "align-pms-mapping");
+    calls.push("install-messages");
+    await pendingInstall;
+    calls.push("verify-messages");
+  });
+  let returned = false;
+  const result = actions.prepare!(prepareInput).then(value => { returned = true; return value; });
+  await new Promise(resolve => setImmediate(resolve));
+  assert.equal(returned, false);
+  assert.equal(calls.includes("register-booking-webhook"), false);
+  release();
+  assert.deepEqual(await result, { provisioningStatus: "READY" });
+  assert.deepEqual(calls.slice(-4), ["install-messages", "verify-messages", "register-booking-webhook", "register-channel-lifecycle-webhook"]);
+});
+
+test("Messages failure blocks success without exposing provider errors; retry reuses inventory", async () => {
+  let fail = true;
+  const { actions, calls } = configuredComposition(undefined, undefined, async () => {
+    if (fail) throw new Error("secret provider request headers");
+  });
+  await assert.rejects(actions.prepare!(prepareInput), (error: any) => {
+    assert.equal(error.code, "OTA_MESSAGES_APPLICATION_INSTALLATION_FAILED");
+    assert.equal(error.message.includes("secret"), false);
+    return true;
+  });
+  assert.equal(calls.includes("register-booking-webhook"), false);
+  fail = false;
+  assert.deepEqual(await actions.prepare!(prepareInput), { provisioningStatus: "READY" });
+  assert.equal(calls.some(c => c.startsWith("transport-")), false);
+});
 
 test("new property registers only after inventory and canonical PMS linkage are persisted", async () => {
   const { actions, calls, repository } = configuredComposition();
