@@ -233,7 +233,7 @@ export async function getPropertyKnowledgeSnapshot({
     prisma,
     organizationId,
     propertyId,
-    reservationId,
+    ...(reservationId !== undefined ? { reservationId } : {}),
   });
 
   if (!property) {
@@ -249,7 +249,7 @@ export async function getPropertyKnowledgeSnapshot({
     organizationId,
     propertyId,
     language,
-    currentDateTime,
+    ...(currentDateTime !== undefined ? { currentDateTime } : {}),
     property: { ...property, reviewSummary },
   });
 
@@ -681,7 +681,7 @@ export function composePropertyKnowledgeSnapshot({
   addPersistedKnowledgeEntries({
     facts,
     language,
-    currentDateTime,
+    ...(currentDateTime !== undefined ? { currentDateTime } : {}),
     property,
   });
 

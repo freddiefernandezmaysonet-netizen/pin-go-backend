@@ -58,8 +58,8 @@ test("receipt never equates sent with delivered, read, or resolved", () => {
   assert.equal(incidentNotificationState([{ status: "SENT", providerDeliveryStatus: "DELIVERED" }, { status: "FAILED_FINAL", providerDeliveryStatus: null }]), "ATTENTION_REQUIRED");
   const receipt = { reference: "GI-012345ABCDEF", category: "HOT_WATER" as const, incidentRecorded: true as const,
     notification: "DELIVERED" as const, resolution: "OPEN" as const, hostAcknowledged: false as const };
-  assert.match(formatGuestIncidentReceipt(receipt, "es"), /no confirma.*leído/);
-  assert.match(formatGuestIncidentReceipt(receipt, "en"), /resolution pending/);
+  assert.match(formatGuestIncidentReceipt(receipt, "es"), /no tenemos confirmación.*leído/);
+  assert.match(formatGuestIncidentReceipt(receipt, "en"), /do not yet have confirmation.*read/);
 });
 test("recorded escalation cannot bypass payment/refund/reservation claim protections", () => {
   for (const responseText of ["Your reservation has been changed", "I have issued a refund", "Tu pago fue procesado", "He notificado al anfitrión"]) {
@@ -71,11 +71,31 @@ test("acknowledgement is distinct from email delivery and physical resolution in
     const receipt = { reference: "GI-012345ABCDEF", category: "HOT_WATER" as const, incidentRecorded: true as const,
       notification: "DELIVERED" as const, resolution, hostAcknowledged: true };
     const es = formatGuestIncidentReceipt(receipt, "es"), en = formatGuestIncidentReceipt(receipt, "en");
-    assert.match(es, /correo inicial/); assert.match(es, /confirmó la atención/);
-    assert.match(es, /no acredita una reparación física/); assert.doesNotMatch(es, /haya leído/);
-    assert.match(en, /initial email/); assert.match(en, /host acknowledged/);
-    assert.match(en, /does not verify a physical repair/);
-    assert.match(es, resolution === "OPEN" ? /pendiente de resolución/ : /figura resuelto/);
+    assert.doesNotMatch(es, /haya leído|reparado|solucionamos/);
+    assert.doesNotMatch(en, /problem is fixed|repaired|we fixed/);
+    assert.match(es, resolution === "OPEN" ? /confirmó que recibió.*sigue abierto/ : /figura como resuelto.*Si el problema continúa/);
+    assert.match(en, resolution === "OPEN" ? /confirmed that they received.*still open/ : /marked as resolved.*If the problem continues/);
+  }
+});
+test("guest receipt is warm while preserving each notification outcome and avoiding repair promises", () => {
+  const base = { reference: "GI-012345ABCDEF", category: "HOT_WATER" as const, incidentRecorded: true as const,
+    resolution: "OPEN" as const, hostAcknowledged: false };
+  const expected = { QUEUED: [/pendiente de envío/, /waiting to be sent/],
+    ACCEPTED: [/no tenemos confirmación de que haya llegado/, /do not have delivery confirmation/],
+    DELIVERED: [/no tenemos confirmación de que lo haya leído/, /do not yet have confirmation that they have read/],
+    ATTENTION_REQUIRED: [/No se ha podido completar/, /not been able to complete/] };
+  for (const notification of ["QUEUED", "ACCEPTED", "DELIVERED", "ATTENTION_REQUIRED"] as const) {
+    for (const [i, language] of (["es", "en"] as const).entries()) {
+      const text = formatGuestIncidentReceipt({ ...base, notification }, language, "REPORT");
+      assert.match(text, language === "es" ? /^Lamento.*Gracias por avisarnos/ : /^I’m sorry.*Thank you for letting us know/);
+      assert.match(text, expected[notification][i]!);
+      assert.ok(text.includes(base.reference));
+      assert.doesNotMatch(text, /proveedor|provider|reintento|retry|repair time|within \d/i);
+      assertRuntimeResponseSafe({ responseText: text, escalationCreated: true, toolCalls: [], requiresHumanReview: false });
+      const status = formatGuestIncidentReceipt({ ...base, notification }, language, "STATUS");
+      assert.doesNotMatch(status, /Registré|I’ve recorded|Lamento|I’m sorry/);
+      assert.match(status, language === "es" ? /sigue abierto/ : /still open/);
+    }
   }
 });
 test("notice template escapes guest content and links to authenticated Dashboard without approval credentials", () => {

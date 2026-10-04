@@ -11,15 +11,24 @@ export type GuestIncidentRuntimeEvidence = Readonly<{
 export class GuestIncidentToolExecutor implements PinAIRuntimeToolExecutor {
   private evidence: GuestIncidentRuntimeEvidence | undefined;
   constructor(private readonly input: {
-    prisma: PrismaClient; guestToken: string; env: IncidentEnvironment; delegate: PinAIRuntimeToolExecutor;
+    prisma: PrismaClient; guestToken?: string;
+    channel?: { bookingId: string; threadId: string; messageId: string };
+    env: IncidentEnvironment; delegate: PinAIRuntimeToolExecutor;
   }) {}
   getEvidence() { return this.evidence; }
   async execute(tool: PinAIRuntimeToolName, args: Readonly<Record<string, unknown>>,
     request: PinAIRuntimeRequest, memory: PinAIConversationMemory): Promise<Readonly<Record<string, unknown>>> {
     if (tool !== "escalate_to_host") return this.input.delegate.execute(tool, args, request, memory);
     if (this.evidence) throw new Error("PIN_AI_INCIDENT_ONE_OPERATION_PER_TURN");
-    const receipt = await handleGuestIncident({ ...this.input, request, args });
-    const responseText = formatGuestIncidentReceipt(receipt, request.context.preferredLanguage === "es" ? "es" : "en");
+    // Language is presentation metadata, never part of the incident command or authorization.
+    const { responseLanguage, ...incidentArgs } = args;
+    if (responseLanguage !== undefined && responseLanguage !== "es" && responseLanguage !== "en") {
+      throw new Error("PIN_AI_INCIDENT_RESPONSE_LANGUAGE_INVALID");
+    }
+    const language = responseLanguage ?? (request.context.preferredLanguage === "es" ? "es" : "en");
+    const receipt = await handleGuestIncident({ ...this.input, request, args: incidentArgs });
+    const responseText = formatGuestIncidentReceipt(receipt, language,
+      args.operation === "STATUS" ? "STATUS" : "REPORT");
     this.evidence = { receipt, responseText, operationalWrites: args.operation === "REPORT" };
     return { executed: this.evidence.operationalWrites, incidentRecorded: !!receipt, receipt,
       incidentResponseText: responseText, guestFacingConstraint: "Use the exact incidentResponseText. Registration, provider acceptance, delivery, host acknowledgement and resolution are separate facts. No repair or approval was performed." };

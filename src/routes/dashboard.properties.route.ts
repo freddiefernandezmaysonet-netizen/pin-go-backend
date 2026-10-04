@@ -1,4 +1,5 @@
 import { reconcilePropertyCleanerAccess } from "../services/cleaner-access-property-reconcile.service";
+import { parsePropertyArrivalLocation } from "../services/property-arrival-location.js";
 import { Router } from "express";
 import crypto from "crypto";
 import { formatInTimeZone } from "date-fns-tz";
@@ -382,6 +383,8 @@ dashboardPropertiesRouter.get(
           id: true,
           name: true,
           address1: true,
+          complexName: true,
+          unitNumber: true,
           city: true,
           region: true,
           country: true,
@@ -824,6 +827,8 @@ if (
       }
 
       const data: any = {};
+      try { Object.assign(data, parsePropertyArrivalLocation(req.body ?? {})); }
+      catch (error) { return res.status(400).json({ ok: false, error: (error as Error).message }); }
 
       if (name !== undefined) {
         const cleanName = String(name).trim();
@@ -1066,6 +1071,8 @@ if (checkOutTime !== undefined) {
           id: true,
           name: true,
           address1: true,
+          complexName: true,
+          unitNumber: true,
           city: true,
           region: true,
           country: true,

@@ -1,0 +1,45 @@
+name: Channex Messages Installation V1
+on:
+  pull_request:
+    paths:
+      - 'src/channex-messaging/**'
+      - 'src/distribution/ota-connection-center.composition*'
+      - 'src/distribution/ota-connection-center.runtime-composition*'
+      - 'tsconfig.channex-messages-installation.json'
+      - '.github/workflows/channex-messages-installation-v1.yml'
+      - 'package*.json'
+      - 'prisma/**'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    env:
+      CI: 'true'
+      NODE_ENV: test
+      DATABASE_URL: postgresql://test:test@127.0.0.1:5432/test
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+      - run: npm ci
+      - run: npx prisma generate --schema ./prisma
+      - name: Strict installation typecheck
+        run: npx tsc -p tsconfig.channex-messages-installation.json
+      - name: Connection Center typecheck
+        run: npx tsc -p tsconfig.ota-connection-reconciliation-e2.json
+      - name: Installation and Connection Center regressions
+        run: >-
+          node --import tsx --test
+          src/channex-messaging/*.test.ts
+          src/distribution/ota-connection-center.composition.test.ts
+          src/distribution/ota-connection-center.runtime-composition.test.ts
+          src/distribution/ota-connection-orchestrator.service.test.ts
+          src/distribution/ota-provisioning.repository.test.ts
+          src/routes/dashboard.distribution-connection-center.route.test.ts
+          src/contracts/channex-certified-core.freeze.test.ts
+      - name: Compile API ESM bundle
+        run: npx esbuild src/server.ts --bundle --platform=node --packages=external --format=esm --outfile=/tmp/messages-server.mjs

@@ -42,6 +42,10 @@ import { buildDashboardPropertyListingDetailsRouter } from "./routes/dashboard.p
 import { buildDashboardChannexFullSyncRouter } from "./routes/dashboard.channex-full-sync.route";
 import { buildDashboardDistributionConnectionCenterRouter } from "./routes/dashboard.distribution-connection-center.route";
 import { buildRuntimeOtaConnectionCenterComposition } from "./distribution/ota-connection-center.runtime-composition";
+import { buildHostInboxRuntime } from "./channex-messaging/host-inbox.runtime.js";
+import { buildDashboardChannexHostInboxRouter } from "./routes/dashboard.channex-host-inbox.route.js";
+import { buildChannexMessagesWebhookRouter } from "./routes/channex-messages.webhook.route.js";
+import { autoConfig } from "./channex-messaging/pin-ai-auto.policy.js";
 import {
   dashboardGuestAccessSettingsRouter,
 } from "./routes/dashboard.guest-access-settings.routes";
@@ -211,10 +215,11 @@ app.use(
 app.use(bodyParser.urlencoded({ extended: true }));
 app.use(buildTtlockCallbackCanaryRouter(prisma, process.env));
 app.use(buildMessageDeliveryWebhookRouter(prisma));
+const hostInboxRuntime = buildHostInboxRuntime({ prisma, env: process.env });
+app.use(buildChannexMessagesWebhookRouter({ enabled: Boolean(hostInboxRuntime) && autoConfig(process.env).enabled,
+  secret: process.env.PIN_AI_CHANNEX_WEBHOOK_SECRET, receive: body => hostInboxRuntime!.automation.receive(body) }));
 app.use("/webhooks", pmsWebhookRouter);
-app.use(buildDashboardDistributionConnectionCenterRouter(
-  prisma,
-  buildRuntimeOtaConnectionCenterComposition({
+const connectionCenterActions = buildRuntimeOtaConnectionCenterComposition({
     prisma,
     env: process.env,
     trustedMutationOrigins: allowedOrigins,
@@ -224,8 +229,12 @@ app.use(buildDashboardDistributionConnectionCenterRouter(
       const context = await resolvePublishedBrandContextByHostname(hostname);
       return context.kind === "CUSTOM_BRAND" && context.organizationId === organizationId;
     },
-  })
-));
+  });
+app.use(buildDashboardDistributionConnectionCenterRouter(prisma, connectionCenterActions));
+app.use(buildDashboardChannexHostInboxRouter({
+  runtime: hostInboxRuntime,
+  isTrustedOrigin: connectionCenterActions.isTrustedOrigin,
+}));
 
 // =====================
 // Health

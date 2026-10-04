@@ -7,12 +7,84 @@ import { deliverGuestIncidentNotice } from "./guest-incident-notification.servic
 import { recordMessageDeliveryOutcome } from "../../services/guest-journey-communications-delivery-outcome.service.js";
 import { sealGuestHistory } from "./guest-history.js";
 import type { PinAIRuntimeRequest } from "../runtime/contracts.js";
+import { listHostIncidents, readHostIncident, applyHostIncidentCommand } from "../host/host-incident.service.js";
 
 const enabled = process.env.PIN_AI_INCIDENT_DB_TEST === "true";
 const url = new URL(process.env.DATABASE_URL ?? "http://missing");
 if (enabled && (!["localhost", "127.0.0.1"].includes(url.hostname) || url.pathname !== "/pin_ai_incident_test")) {
   throw new Error("Incident DB tests require the isolated local pin_ai_incident_test database");
 }
+
+test("Channex booking uses the canonical incident, scoped host workspace and durable notice without a portal token", { skip: !enabled }, async () => {
+  const prisma = new PrismaClient();
+  const now = new Date();
+  const org = await prisma.organization.create({ data: { name: "Synthetic channel incident" } });
+  const property = await prisma.property.create({ data: { name: "Synthetic pilot", organizationId: org.id } });
+  const bookingId = randomUUID(), threadId = randomUUID(), messageId = randomUUID(), leaseToken = randomUUID();
+  const reservation = await prisma.reservation.create({ data: { propertyId: property.id, guestName: "Synthetic guest",
+    externalProvider: "CHANNEX", externalId: bookingId,
+    checkIn: new Date(now.getTime() - 86400000), checkOut: new Date(now.getTime() + 86400000) } });
+  const host = await prisma.dashboardUser.create({ data: { organizationId: org.id, email: `${randomUUID()}@example.test`,
+    passwordHash: "not-a-login-credential", role: "ORG_ADMIN" } });
+  const env = { PIN_AI_CHANNEX_AUTO_ENABLED: "true", PIN_AI_CHANNEX_AUTO_ORGANIZATION_IDS: org.id,
+    PIN_AI_CHANNEX_AUTO_PROPERTY_IDS: property.id, PIN_AI_CHANNEX_AUTO_START_AT: now.toISOString(),
+    APP_URL: "https://app.example.test", PIN_AI_HOST_INCIDENT_KEY_ID: "synthetic",
+    PIN_AI_HOST_INCIDENT_KEYS: JSON.stringify({ synthetic: "ab".repeat(32) }) };
+  const scope = { organizationId: org.id, propertyId: property.id, threadId };
+  const request: PinAIRuntimeRequest = { context: { organizationId: org.id, propertyId: property.id,
+    reservationId: reservation.id, guestId: `channex-thread:${threadId}`, currentLocalDateTime: now.toISOString(), preferredLanguage: "es" },
+    conversation: [{ role: "guest", content: "No sale agua caliente" }, { role: "assistant", content: "No hay electricidad" }] };
+  const input = { prisma, request, env, now, channel: { bookingId, threadId, messageId },
+    args: { operation: "REPORT", category: "HOT_WATER", guestQuotes: ["No sale agua caliente"] } };
+  try {
+    await assert.rejects(handleGuestIncident(input), /CHANNEL_NOT_ACTIVE/);
+    await prisma.channexAIThread.create({ data: { ...scope, since: now, leaseToken, leaseUntil: new Date(now.getTime() + 180000) } });
+    await prisma.channexAIInbound.create({ data: { ...scope, messageId, status: "PROCESSING", leaseToken, leaseUntil: new Date(now.getTime() + 180000) } });
+    await assert.rejects(handleGuestIncident({ ...input, guestToken: "cannot-impersonate-portal" }), /DISABLED/);
+    await assert.rejects(handleGuestIncident({ ...input, channel: { ...input.channel, bookingId: "wrong-booking" } }), /SCOPE_INVALID/);
+    await assert.rejects(handleGuestIncident({ ...input, request: { ...request, context: { ...request.context, organizationId: "other" } } }), /DISABLED/);
+    await assert.rejects(handleGuestIncident({ ...input, args: { ...input.args, guestQuotes: ["No hay electricidad"] } }), /UNSUPPORTED_GUEST_QUOTE/);
+    const receipts = await Promise.all([handleGuestIncident(input), handleGuestIncident(input)]);
+    assert.equal(receipts[0]!.reference, receipts[1]!.reference);
+    assert.equal(await prisma.operationalIssue.count({ where: { reservationId: reservation.id } }), 1);
+    assert.equal(await prisma.messageLog.count({ where: { reservationId: reservation.id } }), 1);
+    assert.equal((await prisma.channexAIThread.findFirstOrThrow({ where: scope })).mode, "AUTO");
+    const hostInput = { prisma, env, actor: { id: host.id, orgId: org.id } };
+    assert.equal((await listHostIncidents(hostInput)).items[0]!.reference, receipts[0]!.reference);
+    assert.equal((await readHostIncident({ ...hostInput, reference: receipts[0]!.reference })).reservationNumber, reservation.reservationNumber);
+    await assert.rejects(readHostIncident({ ...hostInput, actor: { id: host.id, orgId: "other" }, reference: receipts[0]!.reference }), /HOST_ACCESS_DENIED/);
+    const notice = await prisma.messageLog.findFirstOrThrow({ where: { reservationId: reservation.id } });
+    let sends = 0;
+    const send = async () => { sends++; return "synthetic-provider-id"; };
+    await Promise.all([1, 2].map(() => deliverGuestIncidentNotice({ prisma, message: notice, env, now, send })));
+    assert.equal(sends, 1);
+    await applyHostIncidentCommand({ ...hostInput, reference: receipts[0]!.reference,
+      command: { operation: "ACKNOWLEDGE", text: "", expectedVersion: 0, requestId: "synthetic-ack-0001" } });
+    const status = await handleGuestIncident({ ...input, args: { operation: "STATUS", category: "HOT_WATER", guestQuotes: [] } });
+    assert.equal(status!.hostAcknowledged, true);
+    assert.equal(status!.notification, "ACCEPTED");
+    await applyHostIncidentCommand({ ...hostInput, reference: receipts[0]!.reference,
+      command: { operation: "RESOLVE", text: "Synthetic resolution", expectedVersion: 1, requestId: "synthetic-resolve-0001" } });
+    const replay = await handleGuestIncident(input);
+    assert.equal(replay!.reference, receipts[0]!.reference);
+    assert.equal(replay!.resolution, "RESOLVED");
+    assert.equal(await prisma.messageLog.count({ where: { reservationId: reservation.id } }), 1);
+    await prisma.channexAIThread.updateMany({ where: scope, data: { mode: "HUMAN" } });
+    await assert.rejects(handleGuestIncident(input), /CHANNEL_NOT_ACTIVE/);
+    await assert.rejects(listHostIncidents({ ...hostInput, env: { ...env, PIN_AI_CHANNEX_AUTO_ENABLED: "false" } }), /NOT_FOUND/);
+  } finally {
+    await prisma.channexAIInbound.deleteMany({ where: scope });
+    await prisma.channexAIThread.deleteMany({ where: scope });
+    await prisma.messageLog.deleteMany({ where: { reservationId: reservation.id } });
+    await prisma.operationalIssueTransition.deleteMany({ where: { issue: { reservationId: reservation.id } } });
+    await prisma.operationalIssue.deleteMany({ where: { reservationId: reservation.id } });
+    await prisma.reservation.delete({ where: { id: reservation.id } });
+    await prisma.dashboardUser.delete({ where: { id: host.id } });
+    await prisma.property.delete({ where: { id: property.id } });
+    await prisma.organization.delete({ where: { id: org.id } });
+    await prisma.$disconnect();
+  }
+});
 
 for (const hostRole of ["ORG_ADMIN", "ADMIN", "PLATFORM_ADMIN"] as const) {
 test(`PostgreSQL incident lifecycle with ${hostRole}: scoped recipients, atomic notice, deduplication and delivery`, { skip: !enabled }, async () => {

@@ -1,6 +1,8 @@
+import { buildGuestAccessSmsRetryBody } from "../services/guest-access-sms-retry-body.service.js";
 import { Router } from "express";
 import { PrismaClient } from "@prisma/client";
 import { sendSms } from "../integrations/twilio/twilio.client";
+import { retireAirbnbLegacyRetry } from "../channex-messaging/airbnb-access.service.js";
 import { requireOrg } from "../middleware/requireOrg";
 
 const prisma = new PrismaClient();
@@ -249,6 +251,10 @@ router.post("/messages/:id/retry", requireOrg(prisma), async (req, res) => {
       return res.status(404).json({ ok: false, error: "not_found" });
     }
 
+    if (await retireAirbnbLegacyRetry(prisma, msg)) {
+      return res.status(409).json({ ok: false, error: "AIRBNB_CHANNEL_OWNS_DELIVERY" });
+    }
+
     const channel = String(msg.channel ?? "").trim().toLowerCase();
     const status = String(msg.status ?? "").trim().toUpperCase();
 
@@ -297,7 +303,8 @@ router.post("/messages/:id/retry", requireOrg(prisma), async (req, res) => {
     }
 
     try {
-      const sent = await sendSms(msg.to, msg.body);
+      const retryBody = await buildGuestAccessSmsRetryBody(prisma, msg);
+      const sent = await sendSms(msg.to, retryBody);
 
       await prisma.messageLog.update({
         where: { id: msg.id },

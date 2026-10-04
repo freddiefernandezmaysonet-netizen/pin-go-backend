@@ -8,6 +8,7 @@ import { buildHostIncidentRouter } from "../../routes/dashboard.pin-ai-host-inci
 import { handleGuestIncident } from "../guest/guest-incident.service.js";
 import { applyHostIncidentCommand, listHostIncidents, readHostIncident, readPublishedIncidentUpdates } from "./host-incident.service.js";
 import type { PinAIRuntimeRequest } from "../runtime/contracts.js";
+import { HOST_CHANNEL_UPDATE } from "./host-incident-channel.service.js";
 
 const enabled = process.env.PIN_AI_HOST_INCIDENT_DB_TEST === "true";
 const url = new URL(process.env.DATABASE_URL ?? "http://missing");
@@ -138,5 +139,64 @@ test("PostgreSQL host foundation: tenant isolation, concurrency, privacy, revoca
     await prisma.dashboardUser.deleteMany({ where: { organizationId: { in: [org.id, other.id] } } });
     await prisma.organization.deleteMany({ where: { id: { in: [org.id, other.id] } } });
     await prisma.$disconnect();
+  }
+});
+
+test("PostgreSQL channel publication is atomic, encrypted, deduplicated and separate from private notes", { skip: !enabled }, async () => {
+  const p = new PrismaClient(), now = new Date(), bookingId = randomUUID(), channelThreadId = randomUUID();
+  const org = await p.organization.create({ data: { name: "Synthetic channel host" } });
+  const property = await p.property.create({ data: { organizationId: org.id, name: "Synthetic channel property" } });
+  const token = `synthetic-${randomUUID()}`;
+  const r = await p.reservation.create({ data: { propertyId: property.id, guestName: "Synthetic", guestToken: token,
+    guestTokenExpiresAt: new Date(now.getTime() + 86400000), checkIn: now, checkOut: new Date(now.getTime() + 86400000),
+    externalProvider: "CHANNEX", externalId: bookingId } });
+  const user = await p.dashboardUser.create({ data: { organizationId: org.id, email: `${randomUUID()}@example.test`, passwordHash: "synthetic", role: "ORG_ADMIN" } });
+  const env = { PIN_AI_HOST_INCIDENT_ENABLED: "true", PIN_AI_HOST_INCIDENT_KEY_ID: "test", PIN_AI_HOST_INCIDENT_KEYS: JSON.stringify({ test: "ab".repeat(32) }),
+    PIN_AI_CHANNEX_AUTO_ENABLED: "true", PIN_AI_CHANNEX_AUTO_ORGANIZATION_IDS: org.id, PIN_AI_CHANNEX_AUTO_PROPERTY_IDS: property.id,
+    PIN_AI_CHANNEX_AUTO_START_AT: "2026-10-03T00:00:00Z" };
+  const base = { prisma: p, env, actor: { id: user.id, orgId: org.id } };
+  try {
+    const report = await handleGuestIncident({ prisma: p, guestToken: token, now,
+      env: { PIN_AI_INCIDENT_ENABLED: "true", PIN_AI_INCIDENT_CANARY_RESERVATION_IDS: r.id },
+      request: { context: { organizationId: org.id, propertyId: property.id, reservationId: r.id, guestId: "synthetic", currentLocalDateTime: now.toISOString(), preferredLanguage: "en" }, conversation: [{ role: "guest", content: "Cold water" }] },
+      args: { operation: "REPORT", category: "HOT_WATER", guestQuotes: ["Cold water"] } });
+    assert.ok(report);
+    const issue = await p.operationalIssue.findFirstOrThrow({ where: { reservationId: r.id, engine: "PIN_AI_GUEST_INCIDENT" } });
+    const metadata = { ...(issue.metadata as Record<string, string>), channelSource: "CHANNEX", channelThreadId, channelBookingId: bookingId };
+    await p.operationalIssue.update({ where: { id: issue.id }, data: { metadata } });
+    const ref = report.reference;
+    const action = (operation: string, text: string, expectedVersion: number, requestId = randomUUID()) => applyHostIncidentCommand({ ...base, reference: ref, command: { operation, text, expectedVersion, requestId } });
+    await action("NOTE", "Private diagnostic", 0);
+    assert.equal(await p.messageLog.count({ where: { reservationId: r.id, communicationType: HOST_CHANNEL_UPDATE } }), 0);
+    const requestId = randomUUID();
+    const results = await Promise.all([action("PUBLISH", "Technician at 5", 1, requestId), action("PUBLISH", "Technician at 5", 1, requestId)]);
+    assert.equal(results[0].eventId, results[1].eventId);
+    const outbox = await p.messageLog.findMany({ where: { reservationId: r.id, communicationType: HOST_CHANNEL_UPDATE } });
+    assert.equal(outbox.length, 1); assert.equal(outbox[0].status, "QUEUED");
+    assert.doesNotMatch(outbox[0].body, /Technician|Private diagnostic/);
+    assert.equal(JSON.parse(outbox[0].body).threadId, channelThreadId);
+    const view = await readHostIncident({ ...base, reference: ref });
+    assert.equal(view.destination, "CHANNEL"); assert.equal(view.messages[1].deliveryStatus, "QUEUED");
+    const portal = await readPublishedIncidentUpdates({ prisma: p, guestToken: token, env: { ...env,
+      PIN_AI_HOST_INCIDENT_ORGANIZATION_IDS: org.id, PIN_AI_HOST_INCIDENT_RESERVATION_IDS: r.id } });
+    assert.equal(portal.incidents.length, 0); assert.equal(portal.updates.length, 0, "channel publication must not be rerouted to the portal");
+    // Queue failure must roll back the event and thread version, too.
+    const broken = new Proxy(p, { get(target, key) {
+      if (key === "$transaction") return (run: any) => target.$transaction(tx => run(new Proxy(tx, { get(inner, name) {
+        if (name === "messageLog") return { ...inner.messageLog, create: async () => { throw Error("Synthetic queue failure"); } };
+        return Reflect.get(inner, name);
+      } })));
+      return Reflect.get(target, key);
+    } });
+    await assert.rejects(applyHostIncidentCommand({ ...base, prisma: broken, reference: ref, command: { operation: "PUBLISH", text: "Rolled back", expectedVersion: 2, requestId: randomUUID() } }), /queue failure/);
+    assert.equal((await readHostIncident({ ...base, reference: ref })).version, 2);
+    await p.operationalIssue.update({ where: { id: issue.id }, data: { metadata: { ...metadata, channelBookingId: randomUUID() } } });
+    await assert.rejects(action("PUBLISH", "Wrong booking", 2), /NOT_LINKED/);
+    assert.equal(await p.messageLog.count({ where: { reservationId: r.id, communicationType: HOST_CHANNEL_UPDATE } }), 1);
+  } finally {
+    await p.messageLog.deleteMany({ where: { reservationId: r.id } });
+    await p.operationalIssue.deleteMany({ where: { reservationId: r.id } });
+    await p.reservation.delete({ where: { id: r.id } }); await p.property.delete({ where: { id: property.id } });
+    await p.dashboardUser.delete({ where: { id: user.id } }); await p.organization.delete({ where: { id: org.id } }); await p.$disconnect();
   }
 });

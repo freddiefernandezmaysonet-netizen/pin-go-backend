@@ -1,0 +1,70 @@
+name: Channex Host Inbox V1
+on:
+  pull_request:
+    paths:
+      - 'src/channex-messaging/**'
+      - 'src/routes/dashboard.channex-host-inbox*'
+      - 'src/routes/channex-messages.webhook*'
+      - 'src/workers/pin-ai-channex.process.ts'
+      - 'prisma/channex-pin-ai.prisma'
+      - 'prisma/migrations/20261003181000_channex_pin_ai_inbound/**'
+      - 'tsconfig.pin-ai-channex-auto.json'
+      - 'src/server.ts'
+      - 'prisma/channex-host-messaging.prisma'
+      - 'prisma/migrations/20261003010000_channex_host_message_send/**'
+      - '*tsconfig.channex-host-inbox*.json'
+      - '.github/workflows/channex-host-inbox-v1.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:18
+        env:
+          POSTGRES_USER: test
+          POSTGRES_PASSWORD: test
+          POSTGRES_DB: test
+        ports: ['5432:5432']
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      CI: 'true'
+      NODE_ENV: test
+      DATABASE_URL: postgresql://test:test@127.0.0.1:5432/test
+      INBOX_POSTGRES_TEST_URL: postgresql://test:test@127.0.0.1:5432/test
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+      - run: npm ci
+      - run: npx prisma generate --schema ./prisma
+      - run: npx tsc -p tsconfig.channex-host-inbox.json
+      - run: npx tsc -p tsconfig.channex-host-inbox-routes.json
+      - run: npx tsc -p tsconfig.pin-ai-channex-auto.json
+      - name: Inbox, tenant security and certified core
+        run: >-
+          node --import tsx --test
+          src/channex-messaging/*.test.ts
+          src/routes/dashboard.channex-host-inbox.route.test.ts
+          src/routes/channex-messages.webhook.route.test.ts
+          src/pin-ai/property-knowledge.service.test.ts
+          src/pin-ai/runtime/luna-runtime-adapter.test.ts
+          src/pin-ai/runtime/pin-go-eligibility-checks.test.ts
+          src/pin-ai/runtime/pin-go-read-tool-executor.test.ts
+          src/contracts/channex-certified-core.freeze.test.ts
+          src/distribution/ota-connection-center.composition.test.ts
+          src/distribution/ota-connection-center.runtime-composition.test.ts
+          src/routes/dashboard.distribution-connection-center.route.test.ts
+          src/distribution/ota-connection-center-route-order.contract.test.ts
+      - name: Compile API ESM bundle
+        run: npx esbuild src/server.ts --bundle --platform=node --packages=external --format=esm --outfile=/tmp/host-inbox-server.mjs
+      - name: Compile dedicated Pin AI channel worker
+        run: npx esbuild src/workers/pin-ai-channex.process.ts --bundle --platform=node --packages=external --format=esm --outfile=/tmp/pin-ai-channex-worker.mjs

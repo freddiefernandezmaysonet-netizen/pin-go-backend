@@ -2,6 +2,8 @@ import type { Prisma, PrismaClient } from "@prisma/client";
 import { upsertOperationalIssue } from "../../apms/operational-intelligence.service.js";
 import { guestIncidentRecipientWhere } from "../guest/guest-incident-recipient-policy.js";
 import { commandHash, fail, hostScopeEnabled, openHostContent, parseHostCommand, sealHostContent, type HostEnvironment } from "./host-incident-policy.js";
+import { autoConfig } from "../../channex-messaging/pin-ai-auto.policy.js";
+import { channelUpdateId, incidentChannelDestination, queueIncidentChannelUpdate } from "./host-incident-channel.service.js";
 
 type Actor = { id: string; orgId: string };
 type Tx = Prisma.TransactionClient;
@@ -21,9 +23,11 @@ async function scopedIssue(tx: Tx, input: Input, ref: string) {
   if (!/^GI-[A-F0-9]{12}$/.test(ref)) return fail(404, "NOT_FOUND");
   const issue = await tx.operationalIssue.findFirst({ where: { organizationId: input.actor.orgId,
     engine: "PIN_AI_GUEST_INCIDENT", visibility: "HOST", metadata: { path: ["reference"], equals: ref } } });
-  if (!issue?.propertyId || !issue.reservationId || !hostScopeEnabled(input.env, input.actor.orgId, issue.reservationId)) return fail(404, "NOT_FOUND");
+  const channel = (issue?.metadata as Record<string, unknown> | null)?.channelSource === "CHANNEX";
+  if (!issue?.propertyId || !issue.reservationId || !(hostScopeEnabled(input.env, input.actor.orgId, issue.reservationId) ||
+    (channel && autoConfig(input.env).allows({ organizationId: input.actor.orgId, propertyId: issue.propertyId })))) return fail(404, "NOT_FOUND");
   const reservation = await tx.reservation.findFirst({ where: { id: issue.reservationId, propertyId: issue.propertyId,
-    property: { organizationId: input.actor.orgId } }, select: { reservationNumber: true, property: { select: { name: true } } } });
+    property: { organizationId: input.actor.orgId } }, select: { reservationNumber: true, externalId: true, externalProvider: true, property: { select: { name: true } } } });
   if (!reservation) return fail(404, "NOT_FOUND");
   return { issue, reservation };
 }
@@ -33,9 +37,12 @@ export async function listHostIncidents(input: Input & { before?: string }) {
     const { parsePinAIActionCanaryReservationIds } = await import("../actions/action-canary-scope.js");
     const ids = [...parsePinAIActionCanaryReservationIds(input.env.PIN_AI_HOST_INCIDENT_RESERVATION_IDS).ids]
       .filter(id => hostScopeEnabled(input.env, input.actor.orgId, id));
-    if (!ids.length) return fail(404, "NOT_FOUND");
+    const channelProperties = (input.env.PIN_AI_CHANNEX_AUTO_PROPERTY_IDS ?? "").split(",").map(id => id.trim())
+      .filter(propertyId => autoConfig(input.env).allows({ organizationId: input.actor.orgId, propertyId }));
+    if (!ids.length && !channelProperties.length) return fail(404, "NOT_FOUND");
     const rows = await tx.operationalIssue.findMany({ where: { organizationId: input.actor.orgId,
-      engine: "PIN_AI_GUEST_INCIDENT", visibility: "HOST", reservationId: { in: ids },
+      engine: "PIN_AI_GUEST_INCIDENT", visibility: "HOST", OR: [{ reservationId: { in: ids } },
+        { propertyId: { in: channelProperties }, metadata: { path: ["channelSource"], equals: "CHANNEX" } }],
       ...(input.before ? { id: { lt: input.before } } : {}) }, orderBy: { id: "desc" }, take: 51 });
     const items = [];
     for (const row of rows.slice(0, 50)) {
@@ -53,11 +60,18 @@ export async function readHostIncident(input: Input & { reference: string; after
     if (thread && (thread.organizationId !== input.actor.orgId || thread.propertyId !== issue.propertyId || thread.reservationId !== issue.reservationId)) return fail(404, "NOT_FOUND");
     const rows = thread ? await tx.pinAIHostIncidentMessage.findMany({ where: { threadId: thread.id,
       sequence: { gt: input.after ?? 0 } }, orderBy: { sequence: "asc" }, take: 100 }) : [];
+    const channel = (issue.metadata as Record<string, unknown> | null)?.channelSource === "CHANNEX";
+    const deliveries = channel && rows.length ? await tx.messageLog.findMany({ where: {
+      id: { in: rows.filter(m => m.kind === "PUBLISH").map(m => channelUpdateId(m.id)) },
+      organizationId: input.actor.orgId, propertyId: issue.propertyId, reservationId: issue.reservationId,
+    }, select: { id: true, status: true } }) : [];
     return { reference: reference(issue), state: issue.workflowState, reportedFacts: issue.issue,
       reservationNumber: reservation.reservationNumber, propertyName: reservation.property.name,
+      destination: channel ? "CHANNEL" as const : "PORTAL" as const,
       version: thread?.version ?? 0, acknowledgedAt: thread?.acknowledgedAt ?? null,
       messages: rows.map(m => ({ id: m.id, sequence: m.sequence, actorId: m.actorId, kind: m.kind,
         audience: m.audience, createdAt: m.createdAt,
+        ...(channel && m.kind === "PUBLISH" ? { deliveryStatus: deliveries.find(d => d.id === channelUpdateId(m.id))?.status ?? "NOT_SENT" } : {}),
         text: openHostContent(input.env, `${input.actor.orgId}:${m.threadId}:${m.sequence}:${m.audience}`, m.contentCiphertext) })),
       nextAfter: rows.length === 100 ? rows[99].sequence : null };
   });
@@ -70,7 +84,8 @@ export async function applyHostIncidentCommand(input: Input & { reference: strin
     // writers, including closure and recurrence, against the selected issue.
     await tx.$executeRawUnsafe("SELECT pg_advisory_xact_lock(hashtextextended($1, 0))", initial.operationalKey);
     await tx.$queryRawUnsafe('SELECT "id" FROM "OperationalIssue" WHERE "id" = $1 FOR UPDATE', initial.id);
-    const { issue } = await scopedIssue(tx, input, input.reference);
+    const { issue, reservation } = await scopedIssue(tx, input, input.reference);
+    const destination = command.operation === "PUBLISH" ? incidentChannelDestination(issue, reservation) : null;
     const thread = await tx.pinAIHostIncidentThread.upsert({ where: { issueId: issue.id }, update: {}, create: {
       issueId: issue.id, organizationId: input.actor.orgId, propertyId: issue.propertyId!, reservationId: issue.reservationId!,
     } });
@@ -88,6 +103,8 @@ export async function applyHostIncidentCommand(input: Input & { reference: strin
     const event = await tx.pinAIHostIncidentMessage.create({ data: { threadId: thread.id, sequence,
       actorId: input.actor.id, requestId: command.requestId, requestHash: hash, kind: command.operation, audience,
       contentCiphertext: sealHostContent(input.env, `${input.actor.orgId}:${thread.id}:${sequence}:${audience}`, command.text) } });
+    if (destination) await queueIncidentChannelUpdate(tx, { destination, eventId: event.id,
+      organizationId: input.actor.orgId, propertyId: issue.propertyId!, reservationId: issue.reservationId! });
     await tx.pinAIHostIncidentThread.update({ where: { id: thread.id }, data: { version: sequence,
       ...(command.operation === "ACKNOWLEDGE" ? { acknowledgedBy: input.actor.id, acknowledgedAt: event.createdAt } : {}) } });
     const metadata = { ...(issue.metadata as Record<string, unknown>), lastHostEventId: event.id, lastHostActorId: input.actor.id };
@@ -122,12 +139,13 @@ export async function readPublishedIncidentUpdates(input: { prisma: PrismaClient
   if (!reservation || !hostScopeEnabled(input.env, reservation.property.organizationId, reservation.id)) return fail(404, "NOT_FOUND");
   const issueWhere = { organizationId: reservation.property.organizationId, reservationId: reservation.id,
     propertyId: reservation.propertyId, engine: "PIN_AI_GUEST_INCIDENT", visibility: "HOST" } as const;
-  const issues = await input.prisma.operationalIssue.findMany({ where: issueWhere,
+  const allIssues = await input.prisma.operationalIssue.findMany({ where: issueWhere,
     include: { hostThread: { select: { acknowledgedAt: true } } },
     orderBy: [{ createdAt: "asc" }, { id: "asc" }] });
+  const issues = allIssues.filter(issue => (issue.metadata as Record<string, unknown> | null)?.channelSource !== "CHANNEX");
   const rows = await input.prisma.pinAIHostIncidentMessage.findMany({ where: { audience: "GUEST", kind: "PUBLISH",
     ...(input.after ? { id: { gt: input.after } } : {}), thread: { organizationId: reservation.property.organizationId,
-      reservationId: reservation.id, propertyId: reservation.propertyId, issue: issueWhere } },
+      reservationId: reservation.id, propertyId: reservation.propertyId, issue: { ...issueWhere, id: { in: issues.map(issue => issue.id) } } } },
     include: { thread: { include: { issue: true } } }, orderBy: { id: "asc" }, take: 100 });
   return {
     incidents: issues.map(issue => ({ reference: reference(issue), createdAt: issue.createdAt,

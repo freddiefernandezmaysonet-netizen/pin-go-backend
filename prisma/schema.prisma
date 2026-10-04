@@ -263,6 +263,8 @@ model Property {
   minimumNights              Int                         @default(1)
   maximumNights              Int?
   address1                   String?
+  complexName                String?                     @db.VarChar(120)
+  unitNumber                 String?                     @db.VarChar(32)
   city                       String?
   region                     String?
   country                    String?

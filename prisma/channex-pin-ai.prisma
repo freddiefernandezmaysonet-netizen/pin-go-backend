@@ -1,0 +1,33 @@
+model ChannexAIThread {
+  id             String   @id @default(cuid())
+  organizationId String
+  propertyId     String
+  threadId       String
+  mode           String   @default("AUTO")
+  reason         String?
+  since          DateTime
+  leaseToken     String?
+  leaseUntil     DateTime?
+  sending        Boolean  @default(false)
+  updatedAt      DateTime @updatedAt
+
+  @@unique([organizationId, propertyId, threadId])
+}
+
+// Store identities and outcomes only; authoritative message text is fetched from Channex.
+model ChannexAIInbound {
+  id             String   @id @default(cuid())
+  organizationId String
+  propertyId     String
+  threadId       String
+  messageId      String
+  status         String   @default("QUEUED")
+  reason         String?
+  leaseToken     String?
+  leaseUntil     DateTime?
+  receivedAt     DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  @@unique([organizationId, propertyId, threadId, messageId])
+  @@index([status, receivedAt])
+}

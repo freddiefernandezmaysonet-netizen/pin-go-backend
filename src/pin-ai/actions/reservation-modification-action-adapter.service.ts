@@ -1052,8 +1052,7 @@ export class PinAIReservationModificationActionAdapter {
             input.adults,
           children:
             input.children,
-          selectedAmenityIds:
-            input.selectedAmenityIds,
+          ...(input.selectedAmenityIds !== undefined ? { selectedAmenityIds: input.selectedAmenityIds } : {}),
         });
 
     if (!preview.changes.hasChanges) {

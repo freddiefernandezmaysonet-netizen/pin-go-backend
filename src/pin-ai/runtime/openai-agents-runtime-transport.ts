@@ -55,7 +55,7 @@ type RuntimeSessionSnapshot = Readonly<{
   id: string;
   status: "idle" | "in_progress" | "requires_action" | "failed";
   requiredActions: readonly RuntimeRequiredAction[];
-  configurationFingerprint?: string;
+  configurationFingerprint?: string | undefined;
   error: unknown;
 }>;
 
@@ -75,7 +75,7 @@ export type CompletedRuntimeTurnEvidence = Readonly<{
 
 type Collection = Readonly<{
   data: readonly Record<string, unknown>[];
-  lastId?: string;
+  lastId?: string | undefined;
 }>;
 
 const MAX_COLLECTION_PAGES = 10;

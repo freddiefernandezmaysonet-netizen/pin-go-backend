@@ -1,3 +1,4 @@
+import { parsePropertyArrivalLocation } from "../services/property-arrival-location.js";
 import { Router } from "express";
 import type { PrismaClient } from "@prisma/client";
 import { requireIanaTimezone } from "../lib/iana-timezone";
@@ -138,11 +139,15 @@ export function buildCreatePropertyRouter(prisma: PrismaClient) {
         });
       }
 
+      let arrivalLocation;
+      try { arrivalLocation = parsePropertyArrivalLocation(req.body ?? {}); }
+      catch (error) { return res.status(400).json({ ok: false, error: (error as Error).message }); }
       const property = await prisma.property.create({
         data: {
           organizationId: orgId,
           name,
           address1,
+          ...arrivalLocation,
           city,
           region,
           country,

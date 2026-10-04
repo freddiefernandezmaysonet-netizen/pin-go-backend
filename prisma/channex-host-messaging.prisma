@@ -1,0 +1,17 @@
+// Durable send receipts. PENDING/UNKNOWN are never automatically replayed.
+model ChannexHostMessageSend {
+  id             String   @id @default(cuid())
+  organizationId String
+  propertyId     String
+  threadId       String
+  requestedBy    String
+  requestKey     String   @db.VarChar(120)
+  fingerprint    String   @db.VarChar(64)
+  status         String   @default("PENDING")
+  response       Json?
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  @@unique([organizationId, requestKey])
+  @@index([propertyId, threadId, createdAt])
+}

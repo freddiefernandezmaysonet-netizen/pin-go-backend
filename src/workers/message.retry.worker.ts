@@ -1,4 +1,7 @@
+import { buildGuestAccessSmsRetryBody } from "../services/guest-access-sms-retry-body.service.js";
+import { formatPropertyArrivalLocation } from "../services/property-arrival-location.js";
 import { isChannexGuestRegistrationExempt } from "../services/guest-registration-channel.policy";
+import { retireAirbnbLegacyRetry } from "../channex-messaging/airbnb-access.service.js";
 import dotenv from "dotenv";
 dotenv.config({ path: "./.env", override: true });
 
@@ -185,6 +188,7 @@ async function processRetries() {
 
   for (const msg of failedSmsMessages) {
     try {
+      if (await retireAirbnbLegacyRetry(prisma, msg)) continue;
       if (yieldsToGuestJourneyCommunicationsOwner(msg)) {
         log("SMS retry yielded to Guest Journey COMMUNICATIONS owner", {
           id: msg.id,
@@ -283,7 +287,8 @@ async function processRetries() {
         continue;
       }
 
-      const sent = await sendSms(msg.to, msg.body);
+      const retryBody = await buildGuestAccessSmsRetryBody(prisma, msg);
+      const sent = await sendSms(msg.to, retryBody);
 
       await prisma.messageLog.update({
         where: { id: msg.id },
@@ -380,6 +385,7 @@ async function processGuestAccessEmailRetries() {
     failedEmailMessages
   ) {
     try {
+      if (await retireAirbnbLegacyRetry(prisma, message)) continue;
       if (yieldsToGuestJourneyCommunicationsOwner(message)) {
         log("Email retry yielded to Guest Journey COMMUNICATIONS owner", {
           id: message.id,
@@ -412,6 +418,8 @@ async function processGuestAccessEmailRetries() {
                     id: true,
                     organizationId: true,
                     name: true,
+                    complexName: true,
+                    unitNumber: true,
                     timezone: true,
                   },
                 },
@@ -478,6 +486,7 @@ async function processGuestAccessEmailRetries() {
 
       const sent =
         await sendGuestAccessPasscodeEmail({
+          arrivalLocation: formatPropertyArrivalLocation(grant.reservation.property, grant.reservation.preferredLanguage),
           to: guestEmail,
           replyTo: guestReplyTo.email,
           reservationNumber,

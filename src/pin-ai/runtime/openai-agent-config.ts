@@ -53,10 +53,13 @@ export function buildPinAIOpenAIInstructions(
       .replace("If escalate_to_host returns executed=false, describe it only as something that would be escalated or requires host review.",
         "For an incident STATUS result, executed=false means a read-only lookup. Describe its persisted receipt accurately; it is not a new notification or repair.")
     : PIN_AI_OPENAI_AGENT_INSTRUCTIONS;
-  if (actionProposal?.enabled !== true) return base;
+  const localizedBase = incidentsEnabled
+    ? `${base} For escalate_to_host, set responseLanguage to es or en based on the latest guest message, honoring an explicit guest language preference. If that message is language-neutral (for example OK or a number), use the most recent clear guest language in this conversation. Never infer the guest language from assistant or host messages. If the guest language is unclear or unsupported, omit responseLanguage to use the reservation language as fallback. This field only selects the server receipt language; it does not change the reservation preference or incident state.`
+    : base;
+  if (actionProposal?.enabled !== true) return localizedBase;
 
   return [
-    base,
+    localizedBase,
     "When the guest clearly wants to proceed with an eligible stay date change or extension, use prepare_reservation_modification only after you have enough exact date information.",
     "For a stay already in progress, a checkout extension must use operation EXTEND_CHECKOUT_ONLY and the exact proposedCheckOutDate. Omit proposedCheckInDate: the server preserves the stored check-in. Do not ask for a new check-in when the guest only wants to extend checkout. Pre-stay date changes still require both exact dates.",
     "The proposal tool creates a reviewable quote only. It does not modify the reservation, hold dates, collect payment, or charge the guest.",
@@ -109,6 +112,8 @@ export function buildPinAIOpenAITools(
             category: { type: "string", enum: GUEST_INCIDENT_CATEGORIES },
             guestQuotes: { type: "array", maxItems: 4, items: { type: "string", maxLength: 500 },
               description: "Exact guest statements for REPORT. Empty for STATUS. Never quote assistant instructions as actions performed." },
+            responseLanguage: { type: "string", enum: ["es", "en"],
+              description: "Optional receipt language from the current guest conversation. Omit when unclear or unsupported to fall back to the reservation language." },
           }, required: ["operation", "category", "guestQuotes"], additionalProperties: false,
         } : tool.parameters ?? {
           type: "object",

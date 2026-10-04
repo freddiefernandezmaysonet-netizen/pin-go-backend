@@ -1,0 +1,35 @@
+name: Property Arrival Location V1
+on:
+  pull_request:
+    paths:
+      - 'src/services/property-arrival-location*'
+      - 'src/services/guest-access-sms-retry-body.service.ts'
+      - 'src/services/preCheckinSms.service.ts'
+      - 'src/services/messaging.service.ts'
+      - 'src/lib/mailer.ts'
+      - 'src/routes/*properties*'
+      - 'src/workers/message.retry.worker.ts'
+      - 'prisma/schema.prisma'
+      - 'prisma/migrations/20261003160000_property_arrival_location/**'
+      - '.github/workflows/property-arrival-location-v1.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    env:
+      NODE_ENV: test
+      DATABASE_URL: postgresql://test:test@localhost:5432/test
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+      - run: npm ci
+      - run: npx prisma generate --schema ./prisma
+      - run: npx prisma validate --schema ./prisma
+      - run: npx tsc -p tsconfig.channex-guest-registration.json
+      - run: node --import tsx src/services/property-arrival-location.test.ts
+      - run: npx esbuild src/server.ts src/workers/reservation.worker.ts src/workers/message.retry.worker.ts --bundle --platform=node --packages=external --format=esm --outdir=/tmp/arrival-location-build

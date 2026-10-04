@@ -1,3 +1,4 @@
+import { formatPropertyArrivalLocation } from "../services/property-arrival-location.js";
 // src/workers/reservation.worker.ts
 import dotenv from "dotenv";
 dotenv.config({ path: "./.env", override: true });
@@ -43,6 +44,7 @@ import {
   sendPreCheckinSms,
 } from "../services/preCheckinSms.service";
 import { sendCheckoutSms } from "../services/checkoutSms.service";
+import { processAirbnbCommunications } from "../channex-messaging/airbnb-access.service.js";
 import { sendCleaningReadySms } from "../services/cleaningReadySms.service";
 import { resolveGuestLanguage } from "../services/guest-language.service";
 import { resolveOrganizationGuestReplyTo } from "../services/organization-guest-email.service";
@@ -691,6 +693,8 @@ async function fetchDueCheckins(now: Date) {
         select: {
           organizationId: true,
           name: true,
+          complexName: true,
+          unitNumber: true,
           timezone: true,
         },
       },
@@ -1503,6 +1507,7 @@ async function processCheckins(now: Date) {
               }
 
               return sendGuestAccessPasscodeEmail({
+                arrivalLocation: formatPropertyArrivalLocation(reservation.property, guestLanguage),
                 to: String(
                   reservation.guestEmail ?? ""
                 ),
@@ -2859,6 +2864,11 @@ async function tick() {
         "runCheckins crashed:",
         toErrString(e)
       );
+    }
+    try {
+      await processAirbnbCommunications(prisma, process.env, now);
+    } catch {
+      errLog("Airbnb communication scan failed");
     }
     try {
       const result = await retryPendingNfcSync(

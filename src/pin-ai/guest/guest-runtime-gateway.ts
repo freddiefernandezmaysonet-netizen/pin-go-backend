@@ -605,9 +605,10 @@ export function createGuestPinAIRuntimeRunner(
     }) : undefined;
     const result = await new PinAIShadowOrchestrator(model,
       incidentTools ? new GuardedPinAIRuntimeToolExecutor(incidentTools) : delegate).run(request);
+    const guestIncidentEvidence = incidentTools?.getEvidence();
     return {
       ...result,
-      ...(incidentTools?.getEvidence() ? { guestIncidentEvidence: incidentTools.getEvidence() } : {}),
+      ...(guestIncidentEvidence ? { guestIncidentEvidence } : {}),
       ...(actionTools ? { privateActionProposal: actionTools.actionProposalExecutor.getPrivateActionProposal() } : {}),
     };
   };

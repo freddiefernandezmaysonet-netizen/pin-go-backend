@@ -4,6 +4,7 @@ import type { GuestIncidentEmail } from "../../lib/email-templates/guestIncident
 import { GUEST_INCIDENT_NOTICE, guestIncidentEnabled, type IncidentEnvironment } from "./guest-incident-policy.js";
 import { parsePinAIActionCanaryReservationIds } from "../actions/action-canary-scope.js";
 import { guestIncidentRecipientWhere } from "./guest-incident-recipient-policy.js";
+import { autoConfig } from "../../channex-messaging/pin-ai-auto.policy.js";
 
 const MAX_ATTEMPTS = 4;
 const LEASE_MS = 90_000;
@@ -35,7 +36,9 @@ export async function deliverGuestIncidentNotice(input: {
 }) {
   const { prisma, message: m, env } = input;
   const now = input.now ?? new Date();
-  if (env.PIN_AI_INCIDENT_NOTIFICATIONS_ENABLED !== "true" || !guestIncidentEnabled(m.reservationId ?? "", env)) return "DISABLED";
+  const portalEnabled = env.PIN_AI_INCIDENT_NOTIFICATIONS_ENABLED === "true" && guestIncidentEnabled(m.reservationId ?? "", env);
+  const channelEnabled = autoConfig(env).allows({ organizationId: m.organizationId ?? "", propertyId: m.propertyId ?? "" });
+  if (!portalEnabled && !channelEnabled) return "DISABLED";
   const expected = { id: m.id, body: m.body, status: m.status, retryCount: m.retryCount,
     providerDeliveryStatus: m.providerDeliveryStatus, providerMessageId: m.providerMessageId };
   const terminal = async (reason: string, issueId?: string) => {
@@ -66,6 +69,7 @@ export async function deliverGuestIncidentNotice(input: {
     id: payload.issueId, organizationId: m.organizationId, propertyId: m.propertyId, reservationId: m.reservationId,
     engine: "PIN_AI_GUEST_INCIDENT", visibility: "HOST",
   } });
+  if (!portalEnabled && (issue?.metadata as Record<string, unknown> | null)?.channelSource !== "CHANNEX") return "DISABLED";
   const reservation = await prisma.reservation.findFirst({ where: {
     id: m.reservationId ?? "", propertyId: m.propertyId ?? "", status: "ACTIVE", checkOut: { gt: now },
     property: { organizationId: m.organizationId ?? "", status: "ACTIVE" },
@@ -116,10 +120,16 @@ export async function deliverGuestIncidentNotice(input: {
 let cursor: string | undefined;
 export async function processGuestIncidentNotices(prisma: PrismaClient, env: IncidentEnvironment = process.env) {
   const parsed = parsePinAIActionCanaryReservationIds(env.PIN_AI_INCIDENT_CANARY_RESERVATION_IDS);
-  if (env.PIN_AI_INCIDENT_ENABLED !== "true" || env.PIN_AI_INCIDENT_NOTIFICATIONS_ENABLED !== "true" || !parsed.valid || !parsed.ids.size) return;
+  const portalEnabled = env.PIN_AI_INCIDENT_ENABLED === "true" && env.PIN_AI_INCIDENT_NOTIFICATIONS_ENABLED === "true" && parsed.valid && parsed.ids.size > 0;
+  const channelEnabled = autoConfig(env).enabled;
+  if (!portalEnabled && !channelEnabled) return;
   const rows = await prisma.messageLog.findMany({ where: {
     communicationType: GUEST_INCIDENT_NOTICE, provider: "resend", channel: "email",
-    reservationId: { in: [...parsed.ids] },
+    AND: [{ OR: [
+      { reservationId: { in: portalEnabled ? [...parsed.ids] : [] } },
+      ...(channelEnabled ? [{ organizationId: { in: (env.PIN_AI_CHANNEX_AUTO_ORGANIZATION_IDS ?? "").split(",").map(s => s.trim()) },
+        propertyId: { in: (env.PIN_AI_CHANNEX_AUTO_PROPERTY_IDS ?? "").split(",").map(s => s.trim()) } }] : []),
+    ] }],
     OR: [{ status: { in: ["QUEUED", "FAILED", "SENDING"] } }, { status: "SENT",
       OR: [{ providerDeliveryStatus: null }, { providerDeliveryStatus: { not: "DELIVERED" } }] }],
     ...(cursor ? { id: { gt: cursor } } : {}),

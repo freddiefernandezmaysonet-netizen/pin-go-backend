@@ -114,6 +114,7 @@ function parseDateOnly(
     dateKey
       .split("-")
       .map(Number);
+  if (year === undefined || month === undefined || day === undefined) return null;
   const parsed =
     new Date(
       Date.UTC(

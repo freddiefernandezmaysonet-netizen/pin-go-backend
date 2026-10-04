@@ -1,4 +1,5 @@
 import { createHmac } from "node:crypto";
+import { createPropertyMessagesInstaller } from "../channex-messaging/property-publication.service.js";
 
 import type { PrismaClient } from "@prisma/client";
 
@@ -313,6 +314,12 @@ export function buildRuntimeOtaConnectionCenterComposition(args: {
     allowedLaunchOrigins: config.provider.allowedLaunchOrigins,
     defaultCurrency: config.provider.defaultCurrency,
     adapter,
+    configureMessagesApplication: createPropertyMessagesInstaller({
+      prisma: args.prisma,
+      apiOrigin: config.provider.apiOrigin,
+      apiKey: config.provider.apiKey,
+      ...(args.fetchImpl ? { fetchImpl: args.fetchImpl } : {}),
+    }),
     isTenantOriginAllowed: args.isTenantOriginAllowed,
     configureChannelLifecycleWebhook: lifecycleRegistrationTransport
       ? (input) => {

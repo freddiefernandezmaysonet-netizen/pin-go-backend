@@ -57,7 +57,7 @@ export function createActionProposalRuntimeDependencies(
 > {
   const broker =
     createDefaultPinAIActionBroker({
-      now: input.now,
+      ...(input.now ? { now: input.now } : {}),
     });
 
   return {

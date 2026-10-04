@@ -1,6 +1,34 @@
 # Local compatibility candidate: stay-time and cleaner access
 
-Prepared 2026-10-04. Not published, deployed, or physically certified.
+Updated 2026-10-04. Final integration remains local; no deployment or physical certification.
+
+## Bounded database validation and current-main integration
+
+The user authorized one validation-only branch publication and one Linux job,
+with a 15-minute timeout and no retries. Remote commit
+`bb8a2620a8e771a8408d5146d9e568a966baec60` passed all 662 tests with zero
+failures/skips in run 37207534598 (job 111451761669), attempt 1. The single
+job ran for 131 seconds. This is execution time, not a billing statement.
+Its source parent tree matches local compatibility commit `1973450` exactly.
+
+The final local integration now merges main
+`bcfc72e526e438d6cb3fc99f4c1a268f53b81011`. The only textual conflict was the
+property-route imports; both cleaner reconciliation and arrival-location parsing
+are retained. Main's incident-language and arrival-location changes are preserved.
+Both affected TypeScript compilations pass, and 85 focused offline tests pass
+with zero failures/skips. The 662-test database result predates this main merge;
+it must not be reported as a database run on this final candidate.
+
+The two PR #333 scope manifests enumerate the combined 135-path diff. The
+schema fingerprint includes only main's two additional property arrival-location
+fields alongside the previously reviewed recovery changes. Existing runtime
+certifications, migration hashes and repository/PR checks remain enabled.
+The one-shot validation workflow is not included in this integration branch.
+PR #353's separate CI allowlists are not transplanted.
+
+Remote PRs #333, #353 and dashboard #177 remain unchanged and Draft. Further
+publication/CI, merge, deployment and connected canary still require specific
+authorization. The sections below describe the original pre-validation candidate.
 
 ## Inputs and scope
 

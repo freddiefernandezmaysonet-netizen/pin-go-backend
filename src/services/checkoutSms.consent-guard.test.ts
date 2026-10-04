@@ -188,7 +188,7 @@ test("checkout SMS retry evaluates consent before Twilio transport", () => {
     checkoutGuardIndex
   );
   const sendIndex = source.indexOf(
-    "const sent = await sendSms(msg.to, msg.body)",
+    "const sent = await sendSms(msg.to, retryBody)",
     checkoutGuardIndex
   );
 

@@ -1,4 +1,6 @@
+import { formatPropertyArrivalLocation } from "./property-arrival-location.js";
 import { isChannexGuestRegistrationExempt } from "./guest-registration-channel.policy";
+import { retireAirbnbLegacyRetry } from "../channex-messaging/airbnb-access.service.js";
 import { createHash } from "node:crypto";
 
 import { PrismaClient, ReservationStatus } from "@prisma/client";
@@ -140,7 +142,12 @@ async function defaultSendEmail(input: {
           input.organizationId
         );
 
+      const arrivalProperty = await input.prisma.property.findFirst({
+        where: { id: input.propertyId, organizationId: input.organizationId },
+        select: { complexName: true, unitNumber: true },
+      });
       return sendGuestPreCheckinEmail({
+        arrivalLocation: formatPropertyArrivalLocation(arrivalProperty ?? {}, clean(payload.preferredLanguage)),
         to: input.to,
         replyTo: replyTo.email,
         reservationNumber,
@@ -211,6 +218,7 @@ async function defaultSendEmail(input: {
         input.organizationId
       );
       return sendGuestAccessPasscodeEmail({
+        arrivalLocation: formatPropertyArrivalLocation(grant.reservation.property, grant.reservation.preferredLanguage),
         to: input.to,
         replyTo: replyTo.email,
         reservationNumber: grant.reservation.reservationNumber ?? "Pending",
@@ -324,6 +332,14 @@ export async function executeGuestJourneyCommunicationDeliveryAdapter(
 
   if (!reservation || !message) {
     throw new Error("COMMUNICATION_SCOPE_OR_MESSAGE_MISMATCH");
+  }
+
+  if (["APMS_PENDING", "FAILED", "FAILED_FINAL"].includes(message.status ?? "") &&
+      await retireAirbnbLegacyRetry(prisma, message)) {
+    return { providerCalls: 0, completion: {
+      kind: "SUCCEEDED", outcomeEvidenceFingerprint: hashEvidence({ messageLogId, status: "OBSOLETE", owner: "AIRBNB" }),
+      messageLogId, communicationType: requestedType, channel: requestedChannel, deliveryStatus: "OBSOLETE",
+    } };
   }
 
   if (message.status === "SENT") {
@@ -547,6 +563,7 @@ export async function executeGuestJourneyCommunicationDeliveryAdapter(
       throw new Error("COMMUNICATION_ACCESS_EVIDENCE_MISSING");
     }
     smsBody = buildGuestPasscodeSmsBody({
+      arrivalLocation: formatPropertyArrivalLocation(grant.reservation.property, grant.reservation.preferredLanguage),
       guestName: grant.reservation.guestName,
       code: decryptAccessCode(grant.secureAccessCode.accessCodeEnc),
       validUntil: grant.endsAt,
