@@ -1,0 +1,81 @@
+name: Stay-time cleaner bounded validation
+# Prepared locally. Publishing this exact branch requires explicit consumption approval.
+# No pull request, deployment, secrets, or automatic retry. PR gates remain unchanged.
+on:
+  push:
+    branches: [validation/stay-time-cleaner-1973450]
+permissions:
+  contents: read
+jobs:
+  settings:
+    if: github.run_attempt == 1 && github.event.created == true
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: pingo_stay_time_test
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U postgres -d pingo_stay_time_test"
+          --health-interval 5s --health-timeout 5s --health-retries 10
+    env:
+      DATABASE_URL: postgresql://postgres:postgres@127.0.0.1:5432/pingo_stay_time_test
+      STAY_TIME_TEST_DATABASE_URL: postgresql://postgres:postgres@127.0.0.1:5432/pingo_stay_time_test
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 2
+          persist-credentials: false
+      - name: Verify exact locally reviewed candidate
+        run: |
+          test "$(git rev-parse HEAD^)" = "6f5bd1a12e7d573b87f24cac510c3223b9bfcab0"
+          test "$(git diff --name-only HEAD^ HEAD)" = ".github/workflows/stay-time-cleaner-bounded-validation.yml"
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+      - run: npm ci --ignore-scripts --no-audit --no-fund
+      - run: npx prisma generate && npx prisma validate && npx prisma db push --skip-generate
+      - run: npx tsc -p tsconfig.pin-ai-stay-time-settings.json --noEmit false --outDir /tmp/stay-time-settings-build
+      - name: Guest access boundaries and existing reconciliation contracts
+        run: node --import tsx --test src/services/reservation-guest-access-window.test.ts src/services/reservation-reconcile-cleaner-reconfirmation.contract.test.ts src/services/reservation-reconcile-cancellation.contract.test.ts
+      - name: Atomic cleaning renewal and concurrent cleaner declarations
+        run: node --import tsx --test src/services/cleaning-reconfirmation-renewal.db.test.ts
+      - name: Confirmed quote and bounded payment deadlines
+        run: node --import tsx --test src/services/stay-time-payment-window.test.ts src/services/stay-time-payment-evidence.test.ts src/services/stay-time-departure-cleaning.service.test.ts
+      - name: Stripe retrieval and refund adapter with offline SDK responses
+        run: node --import tsx --test src/services/stay-time-stripe-provider.test.ts
+      - name: Paid checkout and post-payment validation without side effects
+        run: node --import tsx --test src/services/stay-time-checkout-preflight.db.test.ts
+      - name: Paid application and durable payment recovery with simulated providers
+        run: node --import tsx --test src/services/stay-time-payment-flow.db.test.ts
+      - name: Platform operator review permissions, concurrency and immutable payments
+        run: node --import tsx --test --test-concurrency=1 src/routes/admin.stay-time-recovery.routes.test.ts src/services/stay-time-operator-review.db.test.ts
+      - name: Durable stay-time recovery worker claims and reconciliation
+        run: node --import tsx --test src/services/stay-time-recovery.db.test.ts
+      - name: Signed payment event routing and Connect account isolation
+        run: node --import tsx --test src/services/stay-time-payment-event.test.ts src/services/stripe-financial-event-ledger.webhook.contract.test.ts
+      - name: Checkout creation and signature-verified payment events with offline Stripe
+        run: node --import tsx --test src/services/stay-time-checkout.db.test.ts
+      - name: Shared Checkout contract and Direct Charge regressions
+        run: node --import tsx --test src/services/guest-reservation-modification-checkout.service.test.ts src/services/direct-booking-direct-charges-only.contract.test.ts
+      - name: Atomic Direct Booking and canonical Pin AI staging races
+        run: node --import tsx --test src/services/direct-booking-ingest-transaction.test.ts src/services/direct-booking-ingest-transaction.db.test.ts
+      - name: Manual date change conflict and version-fence regressions
+        run: node --import tsx --test src/services/manual-reservation-date-change.behavior.test.ts src/services/manual-reservation-date-change.contract.test.ts src/routes/dashboard.manual-reservation-date-change.route.test.ts
+      - name: Host OTA conflict review authorization, closure and concurrency
+        run: node --import tsx --test --test-concurrency=1 src/routes/dashboard.ota-availability-conflicts.routes.test.ts src/services/ota-availability-conflict-review.db.test.ts
+      - name: Internal guest consent-to-execution bridge with simulated providers
+        run: node --import tsx --test src/services/stay-time-guest-action.db.test.ts
+      - name: Gated chat proposal, explicit confirmation and canonical receipt reads
+        run: node --import tsx --test src/pin-ai/guest/stay-time-chat-actions.test.ts src/routes/public-booking.pin-ai.routes.test.ts src/pin-ai/guest/guest-runtime-gateway.test.ts src/pin-ai/runtime/action-proposal-tool-executor.test.ts src/pin-ai/runtime/openai-agent-config.test.ts
+      - name: Policy, real HTTP authorization, migration SQL and database concurrency
+        # Independent DB suites share tables; keep their fixture writes separate.
+        # Explicit Promise.all concurrency scenarios inside each suite are retained.
+        run: node --import tsx --test --test-concurrency=1 src/pin-ai/actions/stay-time-policy.test.ts src/routes/dashboard.stay-time-settings.routes.test.ts src/services/property-stay-time-settings.db.test.ts src/services/stay-time-estimate.service.test.ts src/services/stay-time-quote.service.test.ts src/services/stay-time-apply.db.test.ts src/pin-ai/runtime/stay-time-tool.test.ts src/pin-ai/runtime/pin-go-read-tool-executor.test.ts
+      - name: Combined cleaner access regression coverage
+        run: node --import tsx --test src/services/cleaner-access-window.test.ts src/services/cleaner-access-provisioning.test.ts src/services/cleaner-access-property-reconcile.test.ts
