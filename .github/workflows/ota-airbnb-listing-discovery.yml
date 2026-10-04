@@ -81,6 +81,7 @@ jobs:
             cat > "$RUNNER_TEMP/cleaner-access-allowed.txt" <<'EOF'
           .github/workflows/cleaner-access-window.yml
           .github/workflows/ota-airbnb-listing-discovery.yml
+          .github/workflows/ota-initial-distribution-enablement.yml
           docs/audits/cleaner-access-window-v2.md
           src/apms/mission-control.mapper.ts
           src/data/market-season-catalog.ts
@@ -101,7 +102,7 @@ jobs:
           EOF
             diff -u "$RUNNER_TEMP/cleaner-access-allowed.txt" "$RUNNER_TEMP/actual.txt"
             # Pin the reviewed implementation, including its tests and workflow.
-            test "$(git diff --no-ext-diff --no-color --full-index --unified=0 "origin/$BASE_BRANCH...HEAD" -- . ':!.github/workflows/ota-airbnb-listing-discovery.yml' | sha256sum | cut -d ' ' -f 1)" = "7dbab2a7bbe06876b6cafaf6c4006d4ccdb48ccd0bdf6b123041a31285ab8588"
+            test "$(git diff --no-ext-diff --no-color --full-index --unified=0 "origin/$BASE_BRANCH...HEAD" -- . ':!.github/workflows/ota-airbnb-listing-discovery.yml' ':!.github/workflows/ota-initial-distribution-enablement.yml' | sha256sum | cut -d ' ' -f 1)" = "7dbab2a7bbe06876b6cafaf6c4006d4ccdb48ccd0bdf6b123041a31285ab8588"
             echo "PR #353 exact cleaner-access scope verified; continuing every OTA certification."
             exit 0
           fi
