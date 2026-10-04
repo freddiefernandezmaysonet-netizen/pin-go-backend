@@ -42,7 +42,10 @@ test("disposable PostgreSQL migration, persistence and revision concurrency", { 
         ON "CleaningWork" ("reservationId", "staffMemberId")`);
       await tx.$executeRawUnsafe(`INSERT INTO "CleaningWork" VALUES
         ('work-original', 'reservation', 'cleaner', 'confirmation-original', '{"consent":true,"completed":true,"notice":"synthetic"}')`);
-      const paymentsBefore = await tx.$queryRawUnsafe<any[]>('SELECT * FROM "ReservationModification" ORDER BY "id"');
+      // Keep the pre-DDL projection stable: Prisma caches prepared statements,
+      // and SELECT * changes its result type when the migration adds columns.
+      const paymentsBefore = await tx.$queryRawUnsafe<any[]>(`SELECT "id", "requestSource", "status",
+        "amountDifference", "stripePaymentIntentId", "receipt" FROM "ReservationModification" ORDER BY "id"`);
       const cleaningBefore = await tx.$queryRawUnsafe<any[]>('SELECT * FROM "CleaningWork" ORDER BY "id"');
       for (const name of [
         "20261001110000_property_stay_time_settings_v1",
