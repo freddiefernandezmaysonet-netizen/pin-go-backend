@@ -19,19 +19,77 @@ test("disposable PostgreSQL migration, persistence and revision concurrency", { 
       if (organizationId) await db.organization.delete({ where: { id: organizationId } });
     } finally { await db.$disconnect(); }
   });
-  await t.test("additive migration preserves existing rows and initializes disabled defaults", async () => {
+  await t.test("ordered stay-time migrations preserve synthetic payment and cleaning history", async () => {
     await db.$transaction(async tx => {
       await tx.$executeRawUnsafe('CREATE SCHEMA stay_time_migration_test');
       await tx.$executeRawUnsafe('SET LOCAL search_path TO stay_time_migration_test');
+      // Minimal pre-change tables exercise the actual three migration files.
+      // This is not a rehearsal of the complete production migration history.
       await tx.$executeRawUnsafe('CREATE TABLE "Property" ("id" TEXT PRIMARY KEY, "name" TEXT NOT NULL)');
       await tx.$executeRawUnsafe('INSERT INTO "Property" ("id", "name") VALUES (\'existing\', \'Preserved property\')');
-      const sql = readFileSync(new URL("../../prisma/migrations/20261001110000_property_stay_time_settings_v1/migration.sql", import.meta.url), "utf8");
-      for (const statement of sql.split(";").filter(value => value.trim())) await tx.$executeRawUnsafe(statement);
+      await tx.$executeRawUnsafe(`CREATE TABLE "ReservationModification" (
+        "id" TEXT PRIMARY KEY, "requestSource" TEXT NOT NULL, "status" TEXT NOT NULL,
+        "amountDifference" NUMERIC(12,2) NOT NULL, "stripePaymentIntentId" TEXT,
+        "receipt" JSONB NOT NULL)`);
+      await tx.$executeRawUnsafe(`INSERT INTO "ReservationModification" VALUES
+        ('paid', 'PIN_AI_GUEST_SERVICES', 'APPLIED', 11, 'pi_synthetic', '{"kind":"payment","amountMinor":1100}'),
+        ('pending', 'PIN_AI_GUEST_SERVICES', 'PAYMENT_PROCESSING', 7, NULL, '{"kind":"pending"}'),
+        ('ordinary', 'GUEST', 'APPLIED', 5, NULL, '{"kind":"ordinary"}')`);
+      await tx.$executeRawUnsafe(`CREATE TABLE "CleaningWork" (
+        "id" TEXT PRIMARY KEY, "reservationId" TEXT NOT NULL, "staffMemberId" TEXT NOT NULL,
+        "confirmationId" TEXT NOT NULL, "receipt" JSONB NOT NULL)`);
+      await tx.$executeRawUnsafe(`CREATE UNIQUE INDEX "CleaningWork_reservationId_staffMemberId_key"
+        ON "CleaningWork" ("reservationId", "staffMemberId")`);
+      await tx.$executeRawUnsafe(`INSERT INTO "CleaningWork" VALUES
+        ('work-original', 'reservation', 'cleaner', 'confirmation-original', '{"consent":true,"completed":true,"notice":"synthetic"}')`);
+      const paymentsBefore = await tx.$queryRawUnsafe<any[]>('SELECT * FROM "ReservationModification" ORDER BY "id"');
+      const cleaningBefore = await tx.$queryRawUnsafe<any[]>('SELECT * FROM "CleaningWork" ORDER BY "id"');
+      for (const name of [
+        "20261001110000_property_stay_time_settings_v1",
+        "20261001183000_cleaning_work_confirmation_history",
+        "20261003010000_stay_time_recovery",
+      ]) {
+        const sql = readFileSync(new URL(`../../prisma/migrations/${name}/migration.sql`, import.meta.url), "utf8");
+        for (const statement of sql.split(";").filter(value => value.trim())) await tx.$executeRawUnsafe(statement);
+      }
       const rows = await tx.$queryRawUnsafe<any[]>('SELECT * FROM "Property"');
       assert.deepEqual(rows, [{ id: "existing", name: "Preserved property", stayTimeSettings: null, stayTimeSettingsRevision: 0 }]);
+      const recoveryDefaults = { stayTimeReconciledAt: null, stayTimeRecoveryNextAt: null,
+        stayTimeRecoveryLeaseToken: null, stayTimeRecoveryLeaseUntil: null, stayTimeRecoveryAttempts: 0 };
+      assert.deepEqual(await tx.$queryRawUnsafe<any[]>('SELECT * FROM "ReservationModification" ORDER BY "id"'),
+        paymentsBefore.map(row => ({ ...row, ...recoveryDefaults })));
+      assert.deepEqual(await tx.$queryRawUnsafe<any[]>('SELECT * FROM "CleaningWork" ORDER BY "id"'), cleaningBefore);
+
+      // Existing writers can still omit every newly added field.
+      await tx.$executeRawUnsafe(`INSERT INTO "Property" ("id", "name") VALUES ('old-writer', 'Compatible')`);
+      await tx.$executeRawUnsafe(`INSERT INTO "ReservationModification"
+        ("id", "requestSource", "status", "amountDifference", "receipt")
+        VALUES ('old-writer', 'GUEST', 'AWAITING_PAYMENT', 3, '{}')`);
+      assert.deepEqual(await tx.$queryRawUnsafe<any[]>(`SELECT "stayTimeSettings", "stayTimeSettingsRevision"
+        FROM "Property" WHERE "id" = 'old-writer'`), [{ stayTimeSettings: null, stayTimeSettingsRevision: 0 }]);
+      const inserted = await tx.$queryRawUnsafe<any[]>(`SELECT * FROM "ReservationModification" WHERE "id" = 'old-writer'`);
+      for (const [key, value] of Object.entries(recoveryDefaults)) assert.equal(inserted[0][key], value);
+
+      await tx.$executeRawUnsafe('SAVEPOINT invalid_revision');
+      await assert.rejects(() => tx.$executeRawUnsafe(`UPDATE "Property" SET "stayTimeSettingsRevision" = -1 WHERE "id" = 'existing'`),
+        /Property_stayTimeSettingsRevision_nonnegative/);
+      await tx.$executeRawUnsafe('ROLLBACK TO SAVEPOINT invalid_revision');
+      await tx.$executeRawUnsafe(`INSERT INTO "CleaningWork" VALUES
+        ('work-renewed', 'reservation', 'cleaner', 'confirmation-renewed', '{"consent":false}')`);
+      await tx.$executeRawUnsafe('SAVEPOINT duplicate_confirmation');
+      await assert.rejects(() => tx.$executeRawUnsafe(`INSERT INTO "CleaningWork" VALUES
+        ('work-duplicate', 'reservation', 'cleaner', 'confirmation-renewed', '{}')`), /CleaningWork_confirmation_scope_key/);
+      await tx.$executeRawUnsafe('ROLLBACK TO SAVEPOINT duplicate_confirmation');
+      assert.deepEqual(await tx.$queryRawUnsafe<any[]>(`SELECT * FROM "CleaningWork" WHERE "id" = 'work-original'`), cleaningBefore);
+      const indexes = await tx.$queryRawUnsafe<Array<{ indexname: string; indexdef: string }>>(`SELECT indexname, indexdef FROM pg_indexes
+        WHERE schemaname = 'stay_time_migration_test' AND indexname = 'ReservationModification_stay_time_recovery_idx'`);
+      assert.equal(indexes.length, 1);
+      assert.match(indexes[0].indexdef, /\("requestSource", status, "stayTimeRecoveryNextAt"\)/);
+      await tx.$executeRawUnsafe('DROP TABLE "CleaningWork"');
+      await tx.$executeRawUnsafe('DROP TABLE "ReservationModification"');
       await tx.$executeRawUnsafe('DROP TABLE "Property"');
       await tx.$executeRawUnsafe('DROP SCHEMA stay_time_migration_test');
-    });
+    }, { timeout: 30_000 });
   });
   const org = await db.organization.create({ data: { name: "Synthetic stay time test" } });
   organizationId = org.id;

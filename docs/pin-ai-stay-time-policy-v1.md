@@ -1,5 +1,87 @@
 # Early check-in and late checkout: policy foundation
 
+## Current certification status — 2026-10-03, Puerto Rico
+
+This section supersedes the implementation-status statements in the historical
+milestones below. Those milestones describe successive increments, not a current
+list of missing functionality.
+
+Reviewed backend: `f10441cd307e2d22c40c52a9c5c8758bd6364a6b`, PR #333.
+Reviewed Dashboard: `3b38493bca05da5e0047074bdec87eb5fa6875d5`, PR #177.
+Both PRs remain open Drafts. GitHub reports 59 successful backend workflows and
+12 successful Dashboard workflows, with one conditional skip. The backend
+stay-time run reported 640 passing tests, no failures or skips. This is evidence
+for these commits and their CI environments, not deployed-system certification.
+
+Implemented in the Draft branches:
+
+- Guest chat preparation, private confirmation transport, explicit consent,
+  free canonical application and paid Checkout composition exist behind flags.
+  The standalone early/late read tools still return estimates.
+- Signed payment events and recovery use the canonical payment/application and
+  incremental-refund paths. Recovery can discover paid Checkout sessions when
+  the webhook was missed; it is no longer limited to observed payment events.
+- Expired unpaid Checkout can close only with fresh, scoped provider evidence:
+  either no PaymentIntent, or an independently retrieved canceled PaymentIntent
+  with zero received/capturable funds and no charge. Ambiguous attempts remain
+  pending; the expiry path does not cancel a provider payment.
+- Repeated unresolved recovery escalates after six attempts, except a normally
+  waiting unexpired Checkout. The operator view supports review and notes;
+  canonical terminal evidence closes the incident. Manual review cannot create
+  a charge/refund, grant access or declare financial recovery complete.
+- Reservation-time reconciliation and cleaning handling have automated coverage.
+  `stayTimeReconciledAt` records orchestration completion, not a successful
+  physical entry or independently verified device programming.
+
+### Controls that matter for the next certification
+
+| Control | Verified code behavior | Certification implication |
+| --- | --- | --- |
+| Guest actions | Require `PIN_AI_STAY_TIME_CHAT_ENABLED`, both action broker/proposal flags and an exact reservation in `PIN_AI_ACTION_CANARY_RESERVATION_IDS` | Use explicitly selected synthetic reservations in an isolated environment; existing gateway prerequisites also apply. |
+| Recovery worker | Separate process gated by `STAY_TIME_RECOVERY_ENABLED` | It does **not** consult the chat reservation allowlist. Before starting it, inventory every eligible record in its database; a chat canary does not limit worker scope. |
+| Database CI | The settings workflow provisions PostgreSQL and runs `prisma db push` | Schema-backed tests do not prove that the ordered deployment migrations succeed against an existing database. Rehearse migrations separately on a disposable copy. |
+| Physical access | Canonical apply can complete before independent device verification | Verify actual passcode/NFC boundaries and device acknowledgement separately from reservation status. |
+
+No live environment variables were inspected or changed by this audit. The
+default-off code gates are not evidence of the current production configuration.
+
+### Connected certification acceptance plan — not yet executed
+
+Use an isolated database, synthetic guests/reservations, a designated provider
+test account and a designated test lock. Record the exact backend/Dashboard
+commits, migration state, property timezone, selected reservation IDs and test
+case timestamps. Keep credentials, guest tokens and payment objects out of the
+evidence report. Provider/device operations, deployment, persistent migrations
+and activation require their separately authorized environment and scope.
+
+| Case | Required observation |
+| --- | --- |
+| Migration rehearsal | Ordered pending migrations succeed on a disposable copy of the intended baseline; existing reservation/payment data remain readable. Include both property stay-time settings and recovery migrations, plus their prerequisites. |
+| Free early arrival | Completed-turnover evidence permits the requested local time; the guest sees exact old/new times and zero total, confirms once, and one modification applies. |
+| Paid late departure | Guest sees tax-inclusive total and exact times; confirmed provider test payment applies one modification, preserves nightly pricing and moves the departure cleaning window correctly. |
+| Duplicate confirmation/event | Repeated browser confirmation and signed provider-event delivery create no second modification, incremental charge or refund. |
+| Missed event and interrupted recovery | A paid test Checkout without delivered webhook is discovered; restart/retry completes canonical work without duplication. |
+| Paid apply conflict | A conflict introduced before application prevents the time change and produces one verified incremental refund with a durable receipt. |
+| Expired unpaid Checkout | Test both absent and canceled zero-fund PaymentIntent evidence; only eligible records close unpaid. Processing/ambiguous payment evidence retains recovery. |
+| Device boundaries | Read back programmed start/end and observe entry on the designated lock before, within and after the revised window. Verify both passcode and NFC where supported, including provider failure followed by recovery. |
+| Cleaning | Late departure reschedules actual work with cleaner NFC on and off; early arrival preserves post-departure work. Check the assigned cleaner's language and duplicate-notification behavior in an authorized test destination. |
+| Operator recovery | Repeated failures surface one scoped incident; authorized notes are idempotent; canonical recovery closes it. Unauthorized users cannot inspect or mutate it. |
+| Stop and resume | Disable new chat proposals and confirmations, then inventory in-flight payments and modifications. Decide explicitly which recovery/provider processes remain active to settle existing obligations; verify safe resume. |
+
+Disabling chat is not payment cancellation, refund, reversal of an applied stay
+change or worker shutdown. Do not erase journals or revert schema as a shortcut
+for stopping a canary. Capture pending work and its designated recovery owner.
+The connected cases above remain pending; this plan is not a release approval.
+
+The follow-up migration test applies the three actual stay-time SQL files in
+order to minimal synthetic pre-change tables: property settings, cleaning
+confirmation history and recovery. It checks preservation of financial/cleaning
+receipts, defaults for existing and new rows, the nonnegative revision constraint,
+renewed cleaning history without duplicate confirmations, and the recovery index.
+This scoped test does not replace migration rehearsal against the intended
+deployment baseline. Its result must be verified on the follow-up commit's CI;
+the 640-test evidence above predates this expanded migration assertion.
+
 ## Confirmed product direction
 
 Each property configures early check-in and late checkout independently. Each
