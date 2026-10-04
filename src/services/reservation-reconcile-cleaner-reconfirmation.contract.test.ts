@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { readFile } from "node:fs/promises";
 import { planCleaningWindow } from "./reservation-cleaning-window";
+import { planCleanerAccessWindow } from "./cleaner-access-window.policy";
 
 async function readReservationReconcileService() {
   return readFile(
@@ -28,9 +29,12 @@ test("cleaner reconfirmation follows the turnover window instead of all reservat
 });
 
 const checkout = new Date("2026-10-02T15:00:00Z");
+const property = { checkOutTime: "11:00", checkInTime: "15:00", timezone: "America/Puerto_Rico", cleaningStartOffsetMinutes: 30 };
+const windowFor = (checkOut = checkout, nextCheckIn: Date | null = null, offset = 30) =>
+  planCleanerAccessWindow({ checkOut, nextCheckIn, property: { ...property, cleaningStartOffsetMinutes: offset } });
 const base = {
   checkOut: checkout, previousCheckOut: new Date(checkout), enabled: true,
-  offsetMinutes: 30, durationMinutes: 180,
+  accessWindow: windowFor(),
   assignments: [{ role: "CLEANING", status: "ACTIVE", startsAt: new Date("2026-10-02T15:30:00Z"), endsAt: new Date("2026-10-02T18:30:00Z") }],
 };
 
@@ -38,15 +42,26 @@ test("early check-in and guest access retries leave the unchanged cleaner schedu
   // Arrival is deliberately not an input to the turnover policy.
   const result = planCleaningWindow(base);
   assert.equal(result.requiresReconfirmation, false);
-  assert.equal(result.startsAt.toISOString(), "2026-10-02T15:30:00.000Z");
-  assert.equal(result.endsAt.toISOString(), "2026-10-02T18:30:00.000Z");
+  assert.equal(result.requiresAccessReschedule, false);
+  assert.equal(result.startsAt!.toISOString(), "2026-10-02T15:30:00.000Z");
+  assert.equal(result.endsAt!.toISOString(), "2026-10-02T18:30:00.000Z");
 });
 
-test("late checkout shifts cleaning with the configured offset and duration", () => {
-  const result = planCleaningWindow({ ...base, checkOut: new Date("2026-10-02T17:00:00Z") });
+test("late checkout renews consent while cleaner access stays capped at property check-in", () => {
+  const checkOut = new Date("2026-10-02T17:00:00Z");
+  const result = planCleaningWindow({ ...base, checkOut, accessWindow: windowFor(checkOut) });
   assert.equal(result.requiresReconfirmation, true);
-  assert.equal(result.startsAt.toISOString(), "2026-10-02T17:30:00.000Z");
-  assert.equal(result.endsAt.toISOString(), "2026-10-02T20:30:00.000Z");
+  assert.equal(result.requiresAccessReschedule, true);
+  assert.equal(result.startsAt!.toISOString(), "2026-10-02T17:30:00.000Z");
+  assert.equal(result.endsAt!.toISOString(), "2026-10-02T19:00:00.000Z");
+});
+
+test("next guest early arrival shortens access without discarding the cleaner's accepted start", () => {
+  const next = new Date("2026-10-02T18:00:00Z");
+  const result = planCleaningWindow({ ...base, accessWindow: windowFor(checkout, next) });
+  assert.equal(result.requiresReconfirmation, false);
+  assert.equal(result.requiresAccessReschedule, true);
+  assert.equal(result.endsAt!.getTime(), next.getTime());
 });
 
 test("checkout change requires new consent even without a card or previous arrival snapshot", () => {
@@ -54,12 +69,11 @@ test("checkout change requires new consent even without a card or previous arriv
 });
 
 test("live cleaner schedule drift requires consent; terminal and guest cards do not", () => {
-  assert.equal(planCleaningWindow({ ...base, offsetMinutes: 60 }).requiresReconfirmation, true);
-  assert.equal(planCleaningWindow({ ...base, durationMinutes: 120 }).requiresReconfirmation, true);
+  assert.equal(planCleaningWindow({ ...base, accessWindow: windowFor(checkout, null, 60) }).requiresReconfirmation, true);
   for (const status of ["FAILED", "ENDED"]) {
-    assert.equal(planCleaningWindow({ ...base, offsetMinutes: 60, assignments: [{ ...base.assignments[0], status }] }).requiresReconfirmation, false);
+    assert.equal(planCleaningWindow({ ...base, accessWindow: windowFor(checkout, null, 60), assignments: [{ ...base.assignments[0], status }] }).requiresReconfirmation, false);
   }
-  assert.equal(planCleaningWindow({ ...base, offsetMinutes: 60, assignments: [{ ...base.assignments[0], role: "GUEST" }] }).requiresReconfirmation, false);
+  assert.equal(planCleaningWindow({ ...base, accessWindow: windowFor(checkout, null, 60), assignments: [{ ...base.assignments[0], role: "GUEST" }] }).requiresReconfirmation, false);
 });
 
 test("missing snapshot alone does not invalidate unchanged cleaner consent", () => {
@@ -72,7 +86,8 @@ test("legacy NFC policy does not silently activate a non-NFC cleaning flow", () 
 
 test("guest-triggered NFC loop skips unchanged cleaner cards; provisioning cannot be marked ended", async () => {
   const source = await readReservationReconcileService();
-  assert.match(source, /if \(a.role === NfcAssignmentRole.CLEANING\) \{[\s\S]*?if \(!cleaningReconfirmationNeeded\) continue;/);
+  assert.match(source, /if \(a.role === NfcAssignmentRole.CLEANING\) \{[\s\S]*?if \(!cleaningReconfirmationNeeded\) \{/);
+  assert.match(source, /cleaningReconfirmationNeeded \|\| cleaningWindow.requiresAccessReschedule/);
   const branch = source.slice(source.indexOf("if (a.role === NfcAssignmentRole.CLEANING)"));
   assert.ok(branch.indexOf('throw new Error("CLEANING_RECONFIRMATION_PROVISIONING_PENDING")') < branch.indexOf("status: NfcAssignmentStatus.ENDED"));
 });

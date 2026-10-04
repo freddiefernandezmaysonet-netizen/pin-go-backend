@@ -6,23 +6,24 @@ type CleaningAssignment = {
 };
 
 /** The departure, not the arrival, determines this stay's turnover schedule.
- * Non-NFC cleaning is not activated by this legacy NFC-flow policy.
+ * Access expiry can shorten independently of the accepted cleaning start.
  */
 export function planCleaningWindow(input: {
   checkOut: Date;
   previousCheckOut: Date | null;
   enabled: boolean;
-  offsetMinutes: number;
-  durationMinutes: number;
+  accessWindow: { startsAt: Date; endsAt: Date } | null;
   assignments: readonly CleaningAssignment[];
 }) {
-  const startsAt = new Date(input.checkOut.getTime() + input.offsetMinutes * 60_000);
-  const endsAt = new Date(startsAt.getTime() + input.durationMinutes * 60_000);
+  const startsAt = input.accessWindow?.startsAt ?? null;
+  const endsAt = input.accessWindow?.endsAt ?? null;
   const checkoutChanged = input.previousCheckOut !== null &&
     input.previousCheckOut.getTime() !== input.checkOut.getTime();
-  const scheduleMismatch = input.assignments.some(a =>
-    a.role === "CLEANING" && a.status !== "FAILED" && a.status !== "ENDED" &&
-    (a.startsAt.getTime() !== startsAt.getTime() || a.endsAt.getTime() !== endsAt.getTime()),
-  );
-  return { startsAt, endsAt, requiresReconfirmation: input.enabled && (checkoutChanged || scheduleMismatch) };
+  const live = input.assignments.filter(a => a.role === "CLEANING" && a.status !== "FAILED" && a.status !== "ENDED");
+  const startChanged = startsAt !== null && live.some(a => a.startsAt.getTime() !== startsAt.getTime());
+  const accessChanged = startsAt !== null && endsAt !== null && live.some(a =>
+    a.startsAt.getTime() !== startsAt.getTime() || a.endsAt.getTime() !== endsAt.getTime());
+  return { startsAt, endsAt,
+    requiresReconfirmation: input.enabled && (checkoutChanged || startChanged),
+    requiresAccessReschedule: input.enabled && accessChanged };
 }

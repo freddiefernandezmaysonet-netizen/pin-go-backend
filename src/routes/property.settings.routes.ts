@@ -1,3 +1,4 @@
+import { reconcilePropertyCleanerAccess } from "../services/cleaner-access-property-reconcile.service";
 import { Router } from "express";
 import { PrismaClient } from "@prisma/client";
 
@@ -69,6 +70,7 @@ export function buildPropertySettingsRouter(prisma: PrismaClient) {
       }
 
       const data: any = {
+        checkInTime,
         cleaningDurationMinutes: durationFromCheckInTime(checkInTime),
       };
 
@@ -95,6 +97,10 @@ export function buildPropertySettingsRouter(prisma: PrismaClient) {
           updatedAt: true,
         },
       });
+
+      try { await reconcilePropertyCleanerAccess(prisma, propertyId); }
+      catch (error) { return res.status(409).json({ ok: false, propertySaved: true, property: updated,
+        error: "Property settings saved; existing cleaner access requires review." }); }
 
       return res.json({
         ok: true,
