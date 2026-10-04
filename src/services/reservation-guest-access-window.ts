@@ -28,7 +28,7 @@ export function guestAccessNeedsSync(
 export async function synchronizeGuestAccessWindow(input: {
   next: { startsAt: Date; endsAt: Date };
   errorPrefix: string;
-  synchronize?: () => Promise<unknown>;
+  synchronize?: (() => Promise<unknown>) | undefined;
   persist: (data: { startsAt?: Date; endsAt?: Date; lastError: string | null }) => Promise<unknown>;
 }) {
   if (input.synchronize) {

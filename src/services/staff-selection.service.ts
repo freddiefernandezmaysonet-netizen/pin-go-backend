@@ -43,7 +43,7 @@ export async function selectNextStaffForProperty(params: {
     .sort((a, b) => (a.backupOrder ?? 0) - (b.backupOrder ?? 0));
 
   if (backups.length > 0) {
-    return backups[0].staffMember;
+    return backups[0]!.staffMember;
   }
 
   return null;

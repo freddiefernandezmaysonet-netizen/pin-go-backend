@@ -261,9 +261,9 @@ export function buildChannexAriRatesRestrictionsSnapshot(input: {
     throw new Error("CHANNEX_ARI_RATES_RESTRICTIONS_VALUES_EXCEED_HORIZON");
   }
 
-  const dateFrom = normalizedValues[0].date;
+  const dateFrom = normalizedValues[0]!.date;
   const dateToExclusive = addUtcDays(
-    normalizedValues[normalizedValues.length - 1].date,
+    normalizedValues[normalizedValues.length - 1]!.date,
     1
   );
 
@@ -279,14 +279,14 @@ export function buildChannexAriRatesRestrictionsSnapshot(input: {
   const values: ChannexAriRatesRestrictionsValue[] = [];
 
   for (let index = 0; index < normalizedValues.length; ) {
-    const first = normalizedValues[index];
+    const first = normalizedValues[index]!;
     let lastIndex = index;
 
     while (
       lastIndex + 1 < normalizedValues.length &&
-      normalizedValues[lastIndex + 1].date ===
-        addUtcDays(normalizedValues[lastIndex].date, 1) &&
-      sameChangedFields(first, normalizedValues[lastIndex + 1])
+      normalizedValues[lastIndex + 1]!.date ===
+        addUtcDays(normalizedValues[lastIndex]!.date, 1) &&
+      sameChangedFields(first, normalizedValues[lastIndex + 1]!)
     ) {
       lastIndex += 1;
     }
@@ -303,7 +303,7 @@ export function buildChannexAriRatesRestrictionsSnapshot(input: {
         : {
             ...identity,
             date_from: date,
-            date_to: normalizedValues[lastIndex].date,
+            date_to: normalizedValues[lastIndex]!.date,
             ...changedValues,
           }
     );

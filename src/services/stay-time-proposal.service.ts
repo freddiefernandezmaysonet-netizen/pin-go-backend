@@ -35,7 +35,7 @@ export async function revalidateStayTimeTerms({ db, guestToken, termsSnapshot, e
         expiresAt.getTime() !== expiry) reject("STAY_TIME_QUOTE_EXPIRED");
     const fresh = await prepareStayTimeQuoteInTransaction(db, {
       guestToken, operation: terms.operation, requestedLocalTime: terms.requestedLocalTime,
-    }, { now, platformFeePercent, ownModificationId });
+    }, { now, platformFeePercent, ...(ownModificationId !== undefined ? { ownModificationId } : {}) });
     if (comparable(terms) !== comparable(fresh.terms)) reject("STAY_TIME_QUOTE_CHANGED");
     return fresh;
 }
@@ -61,7 +61,7 @@ export async function createStayTimeProposal(db: PrismaClient, input: {
 export async function confirmStayTimeProposal(db: PrismaClient, input: {
   guestToken: string; proposalId: string; confirmationToken: string;
 }, options: Options) {
-  const result = await confirmPinAIActionProposal({ prisma: db, ...input, now: options.now,
+  const result = await confirmPinAIActionProposal({ prisma: db, ...input, ...(options.now !== undefined ? { now: options.now } : {}),
     validateStayTime: validator(options.platformFeePercent) });
   return { ...result, paymentReady: false as const, authorizationGranted: false as const, availabilityHeld: false as const };
 }

@@ -4,15 +4,21 @@ import fs from "node:fs";
 import path from "node:path";
 import test from "node:test";
 
-// Authorized recertification review: PR #333, 2026-10-02.
-// Only the transactional availability-conflict module is added. The previous
-// 125-file core retains its exact certified fingerprint in a separate guard.
+// Authorized recertification: PR #333, 2026-10-03 (Puerto Rico).
+// Three ARI files receive only reviewed strict-typing compatibility changes.
+// The other 122 original files retain their independently verified fingerprint;
+// the full guard also includes the previously certified conflict module.
 const CERTIFIED_CORE_SHA256 =
-  "ce1dcb2c04d27323efbd8dbff1928f09b781bf4c9af8215bca0b754eb2fbe43d";
+  "99ce90a53077a01073d1687c1f29f36bb53c7590b72829c5290761e9f98cf6b4";
 const CERTIFIED_CORE_FILE_COUNT = 126;
 const ORIGINAL_CORE_SHA256 =
-  "4153a95b6964b7bbc83f8eacb0debefba8cb2fe65b6ea3261e370e8711134754";
+  "3f3548c396454453f798cd46e2ba7aeac35d1d705ce59b2392b7162f7ed41666";
 const ADDED_CONFLICT_MODULE = "src/services/channex-availability-conflict.service.ts";
+const RECERTIFIED_ARI_FILES = new Map([
+  ["src/pms/outbound/channex-ari-outbox.service.ts", "7e03d01c275bd926fe8da15c277e72e09b486fe510ddaeee24218d17e7be6aaa"],
+  ["src/pms/outbound/channex-ari-rates-restrictions-snapshot.policy.ts", "8b2f92b794de3bc503073c0f8ecd9d87bf81f9e18bfce265a051753ce5b6ca60"],
+  ["src/pms/outbound/channex-ari-reservation-producer.service.ts", "1e41e2681d41d53ef375513e2d4a1848d48b46e1707c3e272cd661464da6301f"],
+]);
 
 const CHANNEX_PRODUCTION_TRANSPORT_BOUNDARY_FILES = new Set([
   "src/distribution/ota-connection-center.config.test.ts",
@@ -67,10 +73,16 @@ function certifiedCoreFingerprint(excludedPaths: ReadonlySet<string> = new Set()
   return { files, sha256: hash.digest("hex") };
 }
 
-test("the original 125-file Channex core remains unchanged after the authorized addition", () => {
-  const fingerprint = certifiedCoreFingerprint(new Set([ADDED_CONFLICT_MODULE]));
-  assert.equal(fingerprint.files.length, 125);
+test("the 122 original Channex files outside the authorized ARI review remain unchanged", () => {
+  const fingerprint = certifiedCoreFingerprint(new Set([ADDED_CONFLICT_MODULE, ...RECERTIFIED_ARI_FILES.keys()]));
+  assert.equal(fingerprint.files.length, 122);
   assert.equal(fingerprint.sha256, ORIGINAL_CORE_SHA256);
+});
+
+test("the three recertified ARI files match their exact reviewed content", () => {
+  for (const [file, expected] of RECERTIFIED_ARI_FILES) {
+    assert.equal(crypto.createHash("sha256").update(fs.readFileSync(file)).digest("hex"), expected, file);
+  }
 });
 
 test("the Channex-certified core remains byte-for-byte frozen", () => {

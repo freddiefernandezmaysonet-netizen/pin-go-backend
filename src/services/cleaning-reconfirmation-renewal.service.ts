@@ -53,9 +53,10 @@ export async function renewCleaningConfirmation(
               id: input.previousConfirmationId, reservationId: input.reservationId, propertyId: input.propertyId,
               staffMemberId: input.staffMemberId, status: "EXPIRED",
             } }) : true;
-            if (expired && confirmations.length === 1 && confirmations[0].id !== input.previousConfirmationId &&
-                confirmations[0].staffMemberId === input.staffMemberId) {
-              return { replayed: true, confirmationId: confirmations[0].id };
+            const confirmation = confirmations[0];
+            if (expired && confirmations.length === 1 && confirmation && confirmation.id !== input.previousConfirmationId &&
+                confirmation.staffMemberId === input.staffMemberId) {
+              return { replayed: true, confirmationId: confirmation.id };
             }
             // A concurrent no-op snapshot alone is not proof of cleaning renewal.
             // Continue only through the exact old-confirmation checks below.
