@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { readFileSync } from "node:fs";
-import { PrismaClient } from "@prisma/client";
+import { Prisma, PrismaClient } from "@prisma/client";
 import { defaultStayTimeSettings } from "../pin-ai/actions/stay-time-settings.js";
 import { getPropertyStayTimeSettings, updatePropertyStayTimeSettings } from "./property-stay-time-settings.service.js";
 
@@ -81,7 +81,9 @@ test("disposable PostgreSQL migration, persistence and revision concurrency", { 
         ('work-renewed', 'reservation', 'cleaner', 'confirmation-renewed', '{"consent":false}')`);
       await tx.$executeRawUnsafe('SAVEPOINT duplicate_confirmation');
       await assert.rejects(() => tx.$executeRawUnsafe(`INSERT INTO "CleaningWork" VALUES
-        ('work-duplicate', 'reservation', 'cleaner', 'confirmation-renewed', '{}')`), /CleaningWork_confirmation_scope_key/);
+        ('work-duplicate', 'reservation', 'cleaner', 'confirmation-renewed', '{}')`),
+        (error: unknown) => error instanceof Prisma.PrismaClientKnownRequestError &&
+          error.code === "P2010" && error.meta?.code === "23505");
       await tx.$executeRawUnsafe('ROLLBACK TO SAVEPOINT duplicate_confirmation');
       assert.deepEqual(await tx.$queryRawUnsafe<any[]>(`SELECT * FROM "CleaningWork" WHERE "id" = 'work-original'`), cleaningBefore);
       const indexes = await tx.$queryRawUnsafe<Array<{ indexname: string; indexdef: string }>>(`SELECT indexname, indexdef FROM pg_indexes
