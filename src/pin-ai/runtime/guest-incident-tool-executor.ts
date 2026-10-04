@@ -20,8 +20,14 @@ export class GuestIncidentToolExecutor implements PinAIRuntimeToolExecutor {
     request: PinAIRuntimeRequest, memory: PinAIConversationMemory): Promise<Readonly<Record<string, unknown>>> {
     if (tool !== "escalate_to_host") return this.input.delegate.execute(tool, args, request, memory);
     if (this.evidence) throw new Error("PIN_AI_INCIDENT_ONE_OPERATION_PER_TURN");
-    const receipt = await handleGuestIncident({ ...this.input, request, args });
-    const responseText = formatGuestIncidentReceipt(receipt, request.context.preferredLanguage === "es" ? "es" : "en",
+    // Language is presentation metadata, never part of the incident command or authorization.
+    const { responseLanguage, ...incidentArgs } = args;
+    if (responseLanguage !== undefined && responseLanguage !== "es" && responseLanguage !== "en") {
+      throw new Error("PIN_AI_INCIDENT_RESPONSE_LANGUAGE_INVALID");
+    }
+    const language = responseLanguage ?? (request.context.preferredLanguage === "es" ? "es" : "en");
+    const receipt = await handleGuestIncident({ ...this.input, request, args: incidentArgs });
+    const responseText = formatGuestIncidentReceipt(receipt, language,
       args.operation === "STATUS" ? "STATUS" : "REPORT");
     this.evidence = { receipt, responseText, operationalWrites: args.operation === "REPORT" };
     return { executed: this.evidence.operationalWrites, incidentRecorded: !!receipt, receipt,
