@@ -7,6 +7,9 @@
     ]
   },
   "include": [
+    "src/guest-mobile/guest-mobile-access-code.db.test.ts",
+    "src/guest-mobile/guest-mobile-access-code.service.ts",
+    "src/guest-mobile/guest-mobile-access-code.service.test.ts",
     "src/guest-mobile/guest-mobile-session.service.ts",
     "src/guest-mobile/guest-mobile-session.contract.test.ts",
     "src/guest-mobile/guest-mobile-http.contract.test.ts",
