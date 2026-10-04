@@ -1,8 +1,11 @@
+import type { SeasonType } from "@prisma/client";
+
 export type MarketSeasonCatalogItem = {
   country: string;
   region: string | null;
   seasons: {
     name: string;
+    type?: SeasonType;
     startMonth: number;
     startDay: number;
     endMonth: number;

@@ -1,3 +1,4 @@
+import { readCleanerAccessWindow } from "./cleaner-access-window.service";
 import {
   NfcAssignmentRole,
   NfcAssignmentStatus,
@@ -49,20 +50,6 @@ function buildCancelledReservationSkipResult(): CleanerAccessAutopilotResult {
       "RESERVATION_CANCELLED_CLEANER_ACCESS_SKIPPED",
     error: null,
   };
-}
-
-function computeCleaningWindowFromProperty(params: {
-  checkOut: Date;
-  cleaningStartOffsetMinutes?: number | null;
-  cleaningDurationMinutes?: number | null;
-}) {
-  const offsetMinutes = params.cleaningStartOffsetMinutes ?? 30;
-  const durationMinutes = params.cleaningDurationMinutes ?? 180;
-
-  const startsAt = new Date(params.checkOut.getTime() + offsetMinutes * 60_000);
-  const endsAt = new Date(startsAt.getTime() + durationMinutes * 60_000);
-
-  return { startsAt, endsAt };
 }
 
 function buildDecisionId(params: {
@@ -425,11 +412,18 @@ export async function ensureCleanerNfcAccessForConfirmedCleaning(input: {
     },
   });
 
-  const { startsAt, endsAt } = computeCleaningWindowFromProperty({
-    checkOut: reservation.checkOut,
-    cleaningStartOffsetMinutes: reservation.property.cleaningStartOffsetMinutes,
-    cleaningDurationMinutes: reservation.property.cleaningDurationMinutes,
-  });
+  let window: Awaited<ReturnType<typeof readCleanerAccessWindow>>;
+  try {
+    window = await readCleanerAccessWindow(input.prisma, reservation);
+  } catch (error) {
+    return failWithEscalation({ prisma: input.prisma,
+      organizationId: reservation.property.organizationId, propertyId: reservation.propertyId,
+      reservationId: reservation.id, confirmationId: confirmation.id,
+      staffMemberId: confirmation.staffMemberId, trigger,
+      reason: "CLEANER_ACCESS_WINDOW_INVALID", error: toErrString(error),
+      recommendedAction: "Review checkout, cleaning offset and next check-in before scheduling cleaner access." });
+  }
+  const { startsAt, endsAt } = window;
 
   if (!staffMember) {
     return failWithEscalation({
@@ -480,6 +474,15 @@ export async function ensureCleanerNfcAccessForConfirmedCleaning(input: {
   );
 
 if (existingCleaningNfc) {
+  if (existingCleaningNfc.startsAt.getTime() !== startsAt.getTime() ||
+      existingCleaningNfc.endsAt.getTime() !== endsAt.getTime()) {
+    return failWithEscalation({ prisma: input.prisma,
+      organizationId: reservation.property.organizationId, propertyId: reservation.propertyId,
+      reservationId: reservation.id, confirmationId: confirmation.id,
+      staffMemberId: confirmation.staffMemberId, trigger,
+      reason: "CLEANER_ACCESS_WINDOW_MISMATCH", error: "Existing NFC window requires reconciliation.",
+      recommendedAction: "Reconcile the existing cleaner NFC access before the next guest check-in." });
+  }
   const alreadyActive =
     existingCleaningNfc.status === NfcAssignmentStatus.ACTIVE;
 

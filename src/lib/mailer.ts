@@ -475,7 +475,7 @@ export type SendDeviceGatewayCriticalAlertEmailInput = {
 type SendManualReservationGuestConfirmationInput = {
   to: string;
   replyTo?: string | null;
-  reservationNumber: string;
+  reservationNumber: string | null;
   guestName?: string | null;
   propertyName: string;
   checkIn: Date;

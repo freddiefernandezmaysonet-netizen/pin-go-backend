@@ -1,3 +1,4 @@
+import { reconcilePropertyCleanerAccess } from "../services/cleaner-access-property-reconcile.service";
 import { parsePropertyArrivalLocation } from "../services/property-arrival-location.js";
 import { Router } from "express";
 import crypto from "crypto";
@@ -1184,6 +1185,16 @@ if (checkOutTime !== undefined) {
 
         return persistedProperty;
       });
+
+if (checkInTime !== undefined || checkOutTime !== undefined || cleaningDurationMinutes !== undefined ||
+    cleaningStartOffsetMinutes !== undefined || timezone !== undefined) {
+  try { await reconcilePropertyCleanerAccess(prisma, updated.id); }
+  catch (error) {
+    return res.status(409).json({ ok: false, propertySaved: true, item: updated,
+      error: "Property settings saved; existing cleaner access requires review.",
+      detail: error instanceof Error ? error.message : String(error) });
+  }
+}
 
 const marketChanged =
   updated.country !== existing.country ||
@@ -2738,7 +2749,7 @@ dashboardPropertiesRouter.put(
 
       const mutationAt = new Date();
       const savedRates = await prisma.$transaction(async (tx) => {
-        const persistedRates = [];
+        const persistedRates: Array<{ id: string; date: Date; rate: Prisma.Decimal; reason: string | null }> = [];
 
         for (const item of normalizedRates) {
           const saved = await tx.propertyNightlyRate.upsert({

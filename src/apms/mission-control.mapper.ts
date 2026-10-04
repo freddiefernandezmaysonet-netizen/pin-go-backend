@@ -542,13 +542,13 @@ function mapAuditEntriesToRecommendedActions(
 ): MissionControlAction[] {
   const recommendedActionsByKey = new Map<
     string,
-    MissionControlAction
+    MissionControlAction & { engine: string }
   >();
 
   for (const entry of auditEntries) {
     if (!entry.recommendedAction) continue;
 
-    const action: MissionControlAction = {
+    const action: MissionControlAction & { engine: string } = {
       title: entry.recommendedAction,
       description: entry.summary,
       engine: entry.engine,

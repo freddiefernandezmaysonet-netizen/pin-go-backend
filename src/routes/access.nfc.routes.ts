@@ -8,7 +8,7 @@ import {
   countAvailableCardsByKind,
 } from "../services/nfc.service";
 
-import { computeCleaningWindow } from "../services/cleaning-window.service";
+import { readCleanerAccessWindow } from "../services/cleaner-access-window.service";
 import {
   isGuestJourneyAccessOwnerScope,
   resolveGuestJourneyAccessOwnerConfig,
@@ -51,7 +51,9 @@ export function buildAccessNfcRouter(prisma: PrismaClient) {
   where: { id: reservation.propertyId },
   select: {
     cleaningStartOffsetMinutes: true,
-    cleaningDurationMinutes: true,
+    checkInTime: true,
+    checkOutTime: true,
+    timezone: true,
   },
 });
 if (!property) return res.status(404).json({ ok: false, error: "Property not found" });
@@ -66,6 +68,9 @@ if (!property) return res.status(404).json({ ok: false, error: "Property not fou
       if (gCount < 0 || cCount < 0) {
         return res.status(400).json({ ok: false, error: "guestCount/cleaningCount must be >= 0" });
       }
+
+      const cleaningWindow = cCount > 0
+        ? await readCleanerAccessWindow(prisma, { ...reservation, property }) : null;
 
       if (
         gCount > 0 &&
@@ -172,11 +177,7 @@ const guestEndsAt = reservation.checkOut as Date;
 
      // 2) Asigna tarjetas de limpieza (ventana: checkout + offset, duración configurable)
      if (cCount > 0) {
-  const { start: cleaningStart, end: cleaningEnd } = computeCleaningWindow({
-    checkOut: reservation.checkOut,
-    cleaningStartOffsetMinutes: property.cleaningStartOffsetMinutes ?? 30,
-    cleaningDurationMinutes: property.cleaningDurationMinutes ?? 180,
-  });
+  const { startsAt: cleaningStart, endsAt: cleaningEnd } = cleaningWindow!;
 
   const a = await assignNfcCards(prisma, {
     reservationId: reservation.id,

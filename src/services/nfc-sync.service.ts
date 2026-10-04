@@ -1,3 +1,4 @@
+import { readCleanerAccessWindow } from "./cleaner-access-window.service";
 // src/services/nfc-sync.service.ts
 import { prisma as prismaSingleton } from "../lib/prisma";
 import {
@@ -153,8 +154,11 @@ export async function retryPendingNfcSync(
 
       // Guest recovery uses the current canonical stay window, including an
       // extension made while the original NFC assignment was FAILED.
-      const startsAt = assignment.role === "GUEST" ? assignment.Reservation.checkIn : assignment.startsAt;
-      const endsAt = assignment.role === "GUEST" ? assignment.Reservation.checkOut : assignment.endsAt;
+      const cleanerWindow = assignment.role === "CLEANING"
+        ? await readCleanerAccessWindow(prisma, assignment.Reservation) : null;
+      const startsAt = cleanerWindow?.startsAt ?? (assignment.role === "GUEST" ? assignment.Reservation.checkIn : assignment.startsAt);
+      const endsAt = cleanerWindow?.endsAt ?? (assignment.role === "GUEST" ? assignment.Reservation.checkOut : assignment.endsAt);
+      if (cleanerWindow && (endsAt <= now || startsAt >= endsAt)) throw new Error("CLEANER_ACCESS_WINDOW_EXPIRED");
       if (assignment.role === "GUEST" &&
           (endsAt <= now || startsAt >= endsAt || assignment.NfcCard.status === NfcCardStatus.RETIRED)) {
         throw new Error("NFC_ACCESS_WINDOW_OR_CARD_INVALID");
