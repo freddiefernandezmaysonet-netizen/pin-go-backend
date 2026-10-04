@@ -1,3 +1,5 @@
+import { reconcilePropertyCleanerAccess } from "./cleaner-access-property-reconcile.service";
+import { readCleanerAccessWindow } from "./cleaner-access-window.service";
 import {
   AccessGrantType,
   AccessMethod,
@@ -645,6 +647,7 @@ export async function auditReservationCompleteFlow(
           checkOutTime: true,
           
           cleaningNfcEnabled: true,
+          cleaningStartOffsetMinutes: true,
 
           distributionEnabled: true,
           distributionStatus: true,
@@ -1817,6 +1820,15 @@ addCheck(checks, {
   },
 });
 
+  try {
+    await reconcilePropertyCleanerAccess(db, reservation.propertyId, undefined, reservation.id);
+  } catch (error) {
+    addCheck(checks, { rule: "ADJACENT_CLEANER_ACCESS_WINDOW", label: "Adjacent cleaner access requires review",
+      status: "FAIL", critical: true, required: true,
+      recommendedAction: "Review and reconcile the previous cleaner access before guest arrival.",
+      metadata: { error: error instanceof Error ? error.message : String(error) } });
+  }
+
   const latestCleaningNfcAssignment =
     cleaningNfcAssignments.find(
       (assignment) =>
@@ -1886,6 +1898,20 @@ addCheck(checks, {
     }
   }
 
+  let cleanerWindowError: string | null = null;
+  if (cleaningAccessRequired && latestCleaningNfcAssignment && cleanerNfcLifecycleValid) {
+    try {
+      const expected = await readCleanerAccessWindow(db, reservation);
+      if (latestCleaningNfcAssignment.startsAt.getTime() !== expected.startsAt.getTime() ||
+          latestCleaningNfcAssignment.endsAt.getTime() !== expected.endsAt.getTime()) {
+        cleanerWindowError = "CLEANER_ACCESS_WINDOW_MISMATCH";
+      }
+    } catch (error) {
+      cleanerWindowError = error instanceof Error ? error.message : "CLEANER_ACCESS_WINDOW_INVALID";
+    }
+    if (cleanerWindowError) { cleanerAccessReady = false; cleanerNfcLifecycleValid = false; }
+  }
+
   const cleanerAccessWaitingForConfirmation = Boolean(
     latestCleaningConfirmation &&
       cleaningConfirmationPending &&
@@ -1902,7 +1928,7 @@ addCheck(checks, {
   ReservationCompleteFlowCheckStatus =
   !cleaningAccessRequired
     ? "PASS"
-    : cleanerNfcFailed
+    : cleanerNfcFailed || cleanerWindowError !== null
     ? "FAIL"
     : cleanerNfcProvisioning
     ? "WARNING"
@@ -1916,7 +1942,9 @@ addCheck(checks, {
   const cleanerAccessRecommendedAction =
   !cleaningAccessRequired
     ? undefined
-    : cleanerNfcAccessReady
+    : cleanerWindowError
+      ? "Reconcile cleaner access with checkout, offset and the next check-in. The current window is invalid."
+      : cleanerNfcAccessReady
       ? undefined
       : cleanerNfcScheduled
       ? undefined
@@ -1945,6 +1973,7 @@ addCheck(checks, {
       cleaningAccessRequired,
       cleaningNfcEnabled: property.cleaningNfcEnabled,
       
+      cleanerWindowError,
       cleanerAccessReady,
       cleanerAccessRequiredNow,
       cleanerAccessWaitingForConfirmation,

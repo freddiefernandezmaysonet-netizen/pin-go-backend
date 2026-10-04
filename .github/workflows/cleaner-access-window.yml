@@ -1,0 +1,44 @@
+name: Cleaner access window
+on:
+  pull_request:
+    paths:
+      - 'src/services/cleaner-access-*'
+      - 'src/services/nfc-sync.service.ts'
+      - 'src/services/reservation.reconcile.service.ts'
+      - 'src/services/reservation-complete-flow-audit.service.ts'
+      - 'src/routes/access.nfc.routes.ts'
+      - 'src/routes/dashboard.properties.route.ts'
+      - 'src/routes/property.settings.routes.ts'
+      - 'src/apms/mission-control.mapper.ts'
+      - 'src/data/market-season-catalog.ts'
+      - 'src/lib/mailer.ts'
+      - '.github/workflows/cleaner-access-window.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci --ignore-scripts --no-audit --no-fund
+      - run: npx prisma generate
+      - name: Compile affected services
+        run: >-
+          npx tsc --noEmit --strictNullChecks --module preserve --moduleResolution bundler --target es2022 --esModuleInterop --skipLibCheck
+          src/services/cleaner-access-window.policy.ts src/services/cleaner-access-window.service.ts
+          src/services/cleaner-access-autopilot.service.ts src/services/cleaner-access-property-reconcile.service.ts src/services/reservation.reconcile.service.ts
+          src/services/nfc-sync.service.ts src/services/reservation-complete-flow-audit.service.ts
+          src/routes/access.nfc.routes.ts src/routes/dashboard.properties.route.ts src/routes/property.settings.routes.ts
+      - name: Verify access and cancellation regressions
+        run: >-
+          node --import tsx --test src/services/cleaner-access-window.test.ts src/services/cleaner-access-provisioning.test.ts src/services/cleaner-access-property-reconcile.test.ts
+          src/services/guest-nfc-recovery.test.ts src/services/reservation-reconcile-cleaner-reconfirmation.contract.test.ts
+          src/services/reservation-reconcile-cancellation.contract.test.ts
+          src/services/reservation-complete-flow-cancelled-audit.contract.test.ts
+          src/contracts/channex-certified-core.freeze.test.ts src/pms/outbound/channex-ari-canonical-json.policy.test.ts
+          src/services/manual-reservation-cancellation-email.contract.test.ts src/apms/mission-control-projection.test.ts
