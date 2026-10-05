@@ -54,3 +54,23 @@ test("next occupancy lookup includes overlapping guests and excludes the same/ca
   assert.deepEqual(query.orderBy, { checkIn: "asc" });
   assert.equal(result.endsAt.toISOString(), "2026-10-27T18:00:00.000Z");
 });
+
+
+test("native internal Demo Center gets 30-minute cleaner access after property offset", async () => {
+  const db = { reservation: { findFirst: async () => null } };
+  const result = await readCleanerAccessWindow(db as any, {
+    id: "demo-native",
+    propertyId: "demo-property",
+    source: "INTERNAL_DEMO_DIRECT_BOOKING",
+    checkOut: new Date("2026-10-27T11:00:00-04:00"),
+    property: {
+      checkOutTime: "11:00",
+      checkInTime: "15:00",
+      timezone: "America/Puerto_Rico",
+      cleaningStartOffsetMinutes: 15,
+    },
+  });
+  assert.equal(result.startsAt.toISOString(), "2026-10-27T15:15:00.000Z");
+  assert.equal(result.endsAt.toISOString(), "2026-10-27T15:45:00.000Z");
+  assert.equal(result.durationMinutes, 30);
+});
