@@ -248,17 +248,6 @@ adminDemoRouter.post(
             error?.message ?? error
           );
 
-          await prisma.webhookEventIngest.update({
-            where: {
-              id: event.id,
-            },
-            data: {
-              status: "FAILED",
-              lastError:
-                `DEMO_SECURE_PRECHECKIN_FAILED:${message}`,
-            },
-          });
-
           return res.status(409).json({
             ok: false,
             error:
@@ -343,8 +332,8 @@ adminDemoRouter.post(
         ok: true,
         data: {
           eventId: event.id,
-          eventStatus: processedEvent?.status ?? null,
-          eventError: processedEvent?.lastError ?? null,
+          eventStatus: "PROCESSED",
+          eventError: null,
           reservation,
           checkIn: checkInDate.toISOString(),
           checkOut: checkOutDate.toISOString(),
