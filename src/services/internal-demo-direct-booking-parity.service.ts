@@ -10,7 +10,10 @@ import {
   buildGuestCancellationTermsText,
   renderCancellationPolicySnapshot,
 } from "./cancellation-policy.service";
-import { resolveOrganizationGuestReplyTo } from "./organization-guest-email.service";
+import {
+  resolveOrganizationGuestReplyTo,
+  resolveOrganizationPrimaryAdmin,
+} from "./organization-guest-email.service";
 
 function getAppUrl() {
   return String(process.env.APP_URL ?? "http://localhost:3000")
@@ -234,26 +237,11 @@ export async function applyInternalDemoDirectBookingParity(
     };
   }
 
-  const admins = await prisma.dashboardUser.findMany({
-    where: {
-      organizationId: reservation.property.organizationId,
-      isActive: true,
-      role: DashboardUserRole.ORG_ADMIN,
-    },
-    select: { email: true, fullName: true },
-    orderBy: { createdAt: "asc" },
-  });
-  const hostRecipients =
-    admins.length > 0
-      ? admins
-      : await prisma.dashboardUser.findMany({
-          where: {
-            organizationId: reservation.property.organizationId,
-            isActive: true,
-          },
-          select: { email: true, fullName: true },
-          orderBy: { createdAt: "asc" },
-        });
+  const primaryAdmin = await resolveOrganizationPrimaryAdmin(
+    prisma,
+    reservation.property.organizationId
+  );
+  const hostRecipients = primaryAdmin ? [primaryAdmin] : [];
 
   const hostEmail = {
     attempted: hostRecipients.length > 0,
