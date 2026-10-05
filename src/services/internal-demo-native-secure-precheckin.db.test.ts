@@ -64,6 +64,9 @@ test("native ingest connects to real secure pre-check-in on disposable PostgreSQ
   await db.lock.create({ data: { propertyId, ttlockLockId: 123456, isActive: true } });
   const staff = await db.staffMember.create({ data: {
     organizationId: org.id, fullName: "Synthetic cleaner", isActive: true,
+    // Staff selection requires a phone. This fixture has no real recipient;
+    // every outgoing HTTP call remains forbidden above.
+    phoneE164: "+12025550123",
   } });
   await db.propertyStaff.create({ data: {
     propertyId, staffMemberId: staff.id, role: "PRIMARY", isActive: true,
@@ -129,10 +132,14 @@ test("native ingest connects to real secure pre-check-in on disposable PostgreSQ
     const snapshot = await stored();
     const auditCount = await db.apmsAuditEntry.count();
     const journey = await db.guestJourney.findUnique({ where: { reservationId } });
+    const grants = await db.accessGrant.findMany({ where: { reservationId }, orderBy: { id: "asc" } });
+    const nfc = await db.nfcAssignment.findMany({ where: { reservationId }, orderBy: { id: "asc" } });
     await assert.rejects(complete(override), pattern);
     assert.deepEqual(await stored(), snapshot);
     assert.equal(await db.apmsAuditEntry.count(), auditCount);
     assert.deepEqual(await db.guestJourney.findUnique({ where: { reservationId } }), journey);
+    assert.deepEqual(await db.accessGrant.findMany({ where: { reservationId }, orderBy: { id: "asc" } }), grants);
+    assert.deepEqual(await db.nfcAssignment.findMany({ where: { reservationId }, orderBy: { id: "asc" } }), nfc);
   }
   await t.test("wrong role and wrong organization cannot simulate verification", async () => {
     await rejectsWithoutWrites(/INTERNAL_DEMO_PLATFORM_ADMIN_REQUIRED/, { ...actor, role: "ORG_ADMIN" });
