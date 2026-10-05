@@ -572,3 +572,48 @@ test("configuration rotation cannot bypass a busy existing session", async () =>
   })), /SESSION_BUSY/);
   assert.equal(f.calls.some(c => c.method === "POST"), false);
 });
+
+test("leased guest recovery starts a fresh turn without replaying an interrupted stay-time proposal", async () => {
+  const old = createTurnFixture({ sessionId: "sess_interrupted", actions: () => [
+    { name: "prepare_reservation_modification", arguments: { operation: "LATE_CHECKOUT", requestedLocalTime: "12:30" } },
+  ] });
+  const config = { actionProposal: { enabled: true, stayTimeEnabled: true } };
+  await assert.rejects(run(transport(old.fetchImpl, config), { async execute() {
+    throw new Error("STAY_TIME_QUOTE_EXPIRED");
+  } }), /STAY_TIME_QUOTE_EXPIRED/);
+  old.items.push({ id: "secret", type: "function_call_output", role: "tool", turn_id: "turn_1",
+    content: [{ type: "input_text", text: "PRIVATE_CONFIRMATION_SENTINEL" }] });
+  old.calls.length = 0;
+  const fresh = createTurnFixture({ sessionId: "sess_recovered" });
+  const fetchImpl: RuntimeFetch = (url, init) => url.includes("/sess_interrupted")
+    ? old.fetchImpl(url, init) : fresh.fetchImpl(url, init);
+  const result = await run(transport(fetchImpl, { ...config, resumeSessionId: old.sessionId,
+    recoverWaitingStayTimeProposal: true }));
+  assert.equal(result.openaiSessionId, fresh.sessionId);
+  assert.equal(fresh.createCount, 1);
+  assert.equal(old.toolResults.length, 0);
+  assert.equal(old.calls.some(call => call.method === "POST"), false);
+  const input = JSON.parse(fresh.inputs[0]!);
+  assert.deepEqual(input.conversation, request.conversation);
+  assert.match(input.historyConstraint, /interrupted/);
+  assert.equal(fresh.inputs[0]!.includes("PRIVATE_CONFIRMATION_SENTINEL"), false);
+});
+
+for (const scenario of ["disabled", "other-tool", "date-change", "in-progress"] as const) {
+  test(`stay-time recovery keeps ${scenario} sessions blocked`, async () => {
+    const action = { type: "function_call", turn_id: "turn_old", call_id: "call_old",
+      name: scenario === "other-tool" ? "escalate_to_host" : "prepare_reservation_modification",
+      arguments: scenario === "date-change" ? { operation: "EXTEND_CHECKOUT_ONLY" }
+        : { operation: "LATE_CHECKOUT", requestedLocalTime: "12:30" } };
+    let calls = 0;
+    const fetchImpl: RuntimeFetch = async (_url, init) => {
+      calls++; assert.equal(init.method, "GET");
+      return jsonResponse({ id: "sess_blocked", status: scenario === "in-progress" ? "in_progress" : "requires_action",
+        required_actions: scenario === "in-progress" ? [] : [action] });
+    };
+    await assert.rejects(run(transport(fetchImpl, { resumeSessionId: "sess_blocked",
+      recoverWaitingStayTimeProposal: scenario !== "disabled",
+      actionProposal: { enabled: true, stayTimeEnabled: true } })), /SESSION_BUSY/);
+    assert.equal(calls, 1);
+  });
+}

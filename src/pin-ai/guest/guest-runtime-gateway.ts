@@ -562,6 +562,7 @@ export function createGuestPinAIRuntimeRunner(
         agentId,
         ...(resumeSessionId ? { resumeSessionId } : {}),
         requireCurrentSessionConfig: true,
+        recoverWaitingStayTimeProposal: stayTimeEnabled,
         incidentsEnabled,
         model: "gpt-5.6-luna",
         webSearch: {

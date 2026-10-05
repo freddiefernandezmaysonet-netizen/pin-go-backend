@@ -71,7 +71,7 @@ test("stay-time estimates use real scoped PostgreSQL evidence without writes", {
       assert.equal(quote.terms.pricing.proposedTotalMinor, 15545);
       assert.equal(quote.confirmationAvailable, false);
       assert.equal(quote.paymentReady, false);
-      assert.equal(quote.terms.expiresAt, "2026-10-01T12:01:00.000Z");
+      assert.equal(quote.terms.expiresAt, "2026-10-01T12:05:00.000Z");
       assert.equal((await prepareStayTimeQuote(db, quoteInput, options)).fingerprint, quote.fingerprint);
       assert.notEqual((await prepareStayTimeQuote(db, quoteInput, { ...options, platformFeePercent: "2" })).fingerprint, quote.fingerprint);
       await db.propertyTax.update({ where: { id: tax.id }, data: { percentage: 10 } });
@@ -190,7 +190,7 @@ test("stay-time estimates use real scoped PostgreSQL evidence without writes", {
     try {
       assert.match(created.proposal.consentText, /late checkout/);
       await assert.rejects(confirmStayTimeProposal(db, confirmInput(created), {
-        ...proposalOptions, now: new Date(now.getTime() + 60_000),
+        ...proposalOptions, now: new Date(now.getTime() + 5 * 60_000),
       }), /PROPOSAL_EXPIRED/);
       assert.equal((await db.pinAIActionProposal.findUniqueOrThrow({ where: { id: created.proposal.id } })).status, "EXPIRED");
     } finally { await db.pinAIActionProposal.deleteMany({ where: { reservationId: stay.id } }); }

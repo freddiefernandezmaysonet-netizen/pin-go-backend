@@ -1,8 +1,30 @@
 import assert from "node:assert/strict";
 import test from "node:test";
+import { revalidateStayTimeTerms } from "./stay-time-proposal.service.js";
 import { priceStayTimeService } from "./stay-time-quote.service.js";
 import { deriveStayTimeHourlyBasis } from "./stay-time-hourly-basis.js";
 import { calculateStayTimeFee } from "../pin-ai/actions/stay-time-policy.js";
+const created = new Date("2026-10-05T01:00:00Z");
+const at = (seconds: number) => new Date(created.getTime() + seconds * 1000);
+test("five-minute consent reaches fresh reservation validation; expired and overlong terms do not", async () => {
+  const freshRead = new Error("FRESH_RESERVATION_READ");
+  let reads = 0;
+  const db = { reservation: { async findFirst() { reads++; throw freshRead; } } };
+  const validate = (ttl: number, elapsed: number) => revalidateStayTimeTerms({ db: db as never,
+    guestToken: "synthetic-guest-token-12345", now: at(elapsed), expiresAt: at(ttl),
+    termsSnapshot: { version: "stay_time_quote_v1", operation: "LATE_CHECKOUT", requestedLocalTime: "12:30",
+      createdAt: created.toISOString(), expiresAt: at(ttl).toISOString() } }, "0");
+  // The sentinel proves the temporal gate requires a fresh database read,
+  // rather than accepting consent from the old quote alone.
+  for (const elapsed of [0, 61, 240, 299]) await assert.rejects(validate(300, elapsed), error => error === freshRead);
+  await assert.rejects(validate(60, 30), error => error === freshRead);
+  assert.equal(reads, 5);
+  for (const [ttl, elapsed] of [[300, 300], [301, 0], [60, 61]]) {
+    await assert.rejects(validate(ttl!, elapsed!), /STAY_TIME_QUOTE_EXPIRED/);
+  }
+  assert.equal(reads, 5);
+});
+
 
 test("automatic rate uses first/last booked night and nominal 20/19-hour denominator", () => {
   const data = { checkIn: new Date("2026-10-01T19:00Z"), checkOut: new Date("2026-10-03T15:00Z"),

@@ -1,4 +1,5 @@
 import { StayTimePolicyError, type StayTimeOperation } from "../pin-ai/actions/stay-time-policy.js";
+import { STAY_TIME_QUOTE_TTL_MS } from "./stay-time-quote-window.js";
 
 const MINUTE = 60_000;
 function reject(code: string): never { throw new StayTimePolicyError(code); }
@@ -46,7 +47,7 @@ export function assertStayTimePaymentWindow(input: WindowScope & {
   const staged = millis(input.stagedAt);
   const deadline = millis(input.checkoutExpiresAt);
   const now = millis(input.now);
-  if (expiry <= created || expiry - created > MINUTE || confirmed < created || confirmed >= expiry ||
+  if (expiry <= created || expiry - created > STAY_TIME_QUOTE_TTL_MS || confirmed < created || confirmed >= expiry ||
       staged < confirmed || staged >= expiry || now < staged ||
       deadline <= staged || deadline > staged + 60 * MINUTE || deadline > cutoff(input) ||
       !["CHECKOUT_CREATION", "CHECKOUT_REPLAY", "PAYMENT_APPLICATION"].includes(input.phase)) reject("INVALID_STAY_TIME_PAYMENT_WINDOW");

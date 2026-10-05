@@ -1,4 +1,5 @@
 import { createHash } from "node:crypto";
+import { STAY_TIME_QUOTE_TTL_MS } from "./stay-time-quote-window.js";
 import { Prisma, type PrismaClient } from "@prisma/client";
 import { estimateStayTimeAdjustmentInTransaction } from "./stay-time-estimate.service.js";
 import { calculateDirectBookingModificationConnectFee } from "./direct-booking-connect-fee.service.js";
@@ -92,7 +93,7 @@ export async function prepareStayTimeQuoteInTransaction(tx: Prisma.TransactionCl
       currentTotal: reservation.totalAmount.toString(), pricingBreakdown: reservation.pricingBreakdown,
       feeSubtotalMinor: estimate.feeSubtotalMinor, platformFeePercent: options.platformFeePercent,
       taxes: reservation.property.taxes.map(tax => ({ ...tax, percentage: tax.percentage.toString(), updatedAt: tax.updatedAt.toISOString() })) });
-    const expiresAt = new Date(Math.min(now.getTime() + 5 * 60_000,
+    const expiresAt = new Date(Math.min(now.getTime() + STAY_TIME_QUOTE_TTL_MS,
       reservation.guestTokenExpiresAt?.getTime() ?? Infinity,
       reservation.checkOut.getTime(), new Date(estimate.checkIn).getTime() > now.getTime()
         ? new Date(estimate.checkIn).getTime() : Infinity));

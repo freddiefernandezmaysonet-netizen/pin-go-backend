@@ -1,4 +1,5 @@
 import { PinAIActionProposalType, Prisma, type PrismaClient } from "@prisma/client";
+import { STAY_TIME_QUOTE_TTL_MS } from "./stay-time-quote-window.js";
 import {
   canonicalPinAIActionTerms, createPinAIActionProposal, confirmPinAIActionProposal,
   buildPinAIActionProposalFingerprint,
@@ -31,7 +32,7 @@ export async function revalidateStayTimeTerms({ db, guestToken, termsSnapshot, e
     const created = Date.parse(terms.createdAt);
     const expiry = Date.parse(terms.expiresAt);
     if (!Number.isFinite(created) || !Number.isFinite(expiry) || created > now.getTime() ||
-        expiry <= now.getTime() || expiry <= created || expiry - created > 60_000 ||
+        expiry <= now.getTime() || expiry <= created || expiry - created > STAY_TIME_QUOTE_TTL_MS ||
         expiresAt.getTime() !== expiry) reject("STAY_TIME_QUOTE_EXPIRED");
     const fresh = await prepareStayTimeQuoteInTransaction(db, {
       guestToken, operation: terms.operation, requestedLocalTime: terms.requestedLocalTime,
