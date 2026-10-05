@@ -99,9 +99,38 @@ function assertSession(m: Snapshot, s: Stripe.Checkout.Session, account: string,
 async function associate(deps: StayTimeCheckoutDependencies, id: string, session: Stripe.Checkout.Session, account: string) {
   return locked(deps, id, async (tx, m) => {
     assertSession(m, session, account, deps.livemode);
-    if (m.stripeCheckoutSessionId) return m;
-    journal(m);
-    return tx.reservationModification.update({ where: { id }, data: { stripeCheckoutSessionId: session.id } });
+    return persistCheckoutAssociation(tx, m, session);
+  });
+}
+async function persistCheckoutAssociation(tx: Prisma.TransactionClient, m: Snapshot, session: Stripe.Checkout.Session) {
+  // Initialize only from a verified open Checkout. Never overwrite a webhook's
+  // payment evidence or move a terminal/processing modification backwards.
+  const initializeUnpaid = m.status === "AWAITING_PAYMENT" && m.stripePaymentStatus === null &&
+    session.status === "open" && session.payment_status === "unpaid";
+  if (m.stripeCheckoutSessionId && !initializeUnpaid) return m;
+  if (!m.stripeCheckoutSessionId) journal(m);
+  return tx.reservationModification.update({ where: { id: m.id }, data: {
+    stripeCheckoutSessionId: session.id, ...(initializeUnpaid ? { stripePaymentStatus: "unpaid" } : {}),
+  } });
+}
+
+/** Repair only a missing display status from an already-associated Checkout.
+ * No create, confirm, expire, charge, or reservation application is permitted. */
+export async function recoverStayTimeCheckoutStatus(input: { guestToken: string; modificationId: string },
+  deps: Pick<StayTimeCheckoutDependencies, "client" | "now" | "stripe" | "livemode">): Promise<void> {
+  const candidate = await locked(deps, input.modificationId, async (_tx, m) => {
+    assertGuest(m, input.guestToken, deps.now());
+    return m.status === "AWAITING_PAYMENT" && m.stripePaymentStatus === null &&
+      m.stripeCheckoutSessionId && m.stripeConnectedAccountId && m.checkoutExpiresAt && m.checkoutExpiresAt > deps.now() ? m : null;
+  });
+  if (!candidate) return;
+  const account = candidate.stripeConnectedAccountId!;
+  const session = await deps.stripe.checkout.sessions.retrieve(candidate.stripeCheckoutSessionId!, {}, { stripeAccount: account });
+  await locked(deps, input.modificationId, async (tx, current) => {
+    assertGuest(current, input.guestToken, deps.now());
+    assertSession(current, session, account, deps.livemode);
+    if (current.checkoutExpiresAt! <= deps.now()) return;
+    await persistCheckoutAssociation(tx, current, session);
   });
 }
 async function expireOpen(deps: StayTimeCheckoutDependencies, id: string, session: Stripe.Checkout.Session, account: string) {

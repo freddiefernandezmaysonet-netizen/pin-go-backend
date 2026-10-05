@@ -505,6 +505,47 @@ async function requestAction(
   }
 }
 
+for (const scenario of ["recover", "provider-error", "disabled", "already-unpaid"] as const) {
+  test(`stay-time status recovers only an authorized missing payment status: ${scenario}`, async () => {
+    const now = new Date("2026-10-05T02:00:00Z");
+    let payment: string | null = scenario === "already-unpaid" ? "unpaid" : null;
+    let recoveries = 0;
+    const deadline = new Date(now.getTime() + 3600000);
+    const prisma = {
+      reservation: { findFirst: async () => ({ id: "reservation-a", propertyId: "property-a", property: { organizationId: "org-a" } }) },
+      pinAIActionProposal: { findFirst: async () => ({ id: "proposal-12345678", status: "CONFIRMED", termsSnapshot: { version: "stay_time_quote_v1" } }) },
+      reservationModification: { findFirst: async (args: any) => {
+        assert.equal(args.where.clientRequestId, "stay-time:proposal-12345678");
+        return { id: "modification-a", status: "AWAITING_PAYMENT", stripePaymentStatus: payment, checkoutExpiresAt: deadline, appliedAt: null };
+      } },
+    };
+    const app = express();
+    app.use(buildPublicBookingPinAIRouter({ prisma: prisma as never, now: () => now,
+      env: { PIN_AI_ACTION_BROKER_ENABLED: "true", PIN_AI_ACTION_PROPOSAL_TOOL_ENABLED: "true",
+        PIN_AI_STAY_TIME_CHAT_ENABLED: scenario === "disabled" ? "false" : "true",
+        PIN_AI_ACTION_CANARY_RESERVATION_IDS: "reservation-a" },
+      runtime: async () => { throw new Error("No model call allowed"); },
+      recoverStayTimePaymentStatus: async input => {
+        recoveries++; assert.deepEqual(input, { guestToken: token, modificationId: "modification-a" });
+        if (scenario === "provider-error") throw new Error("private-provider-detail");
+        payment = "unpaid";
+      } }));
+    const server = await new Promise<Server>(resolve => { const listener = app.listen(0, "127.0.0.1", () => resolve(listener)); });
+    try {
+      const response = await fetch(`http://127.0.0.1:${(server.address() as AddressInfo).port}/manage/${token}/pin-ai/action-proposals/proposal-12345678/status`);
+      assert.equal(response.status, scenario === "provider-error" ? 503 : 200);
+      const result = await response.json() as any;
+      assert.doesNotMatch(JSON.stringify(result), /private-provider-detail|checkoutUrl|stripeCheckoutSessionId/);
+      assert.equal(recoveries, ["disabled", "already-unpaid"].includes(scenario) ? 0 : 1);
+      if (response.ok) {
+        assert.equal(result.status.paymentStatus, scenario === "disabled" ? null : "unpaid");
+        assert.equal(result.status.modificationId, "modification-a");
+        assert.equal(result.status.paymentExpiresAt, deadline.toISOString());
+      }
+    } finally { await closeServer(server); }
+  });
+}
+
 test("returns a minimal no-store shadow response without internal tool data", async () => {
   const response = await request({ message: "What time is checkout?" });
   assert.equal(response.status, 200);

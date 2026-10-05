@@ -31,6 +31,7 @@ export function buildPublicBookingPinAIRouter(input: Readonly<{
   env?: NodeJS.ProcessEnv;
   runtime?: GuestPinAIRuntimeRunner;
   now?: () => Date;
+  recoverStayTimePaymentStatus?: (input: { guestToken: string; modificationId: string }) => Promise<void>;
   stayTimeActions?: Pick<ReturnType<typeof createDefaultStayTimeChatActions>, "confirm">;
   actionBroker?: Pick<
     PinAIActionBroker,
@@ -289,10 +290,27 @@ export function buildPublicBookingPinAIRouter(input: Readonly<{
         select: { id: true, status: true, termsSnapshot: true },
       });
       if (!proposal) return notFound();
-      const modification = await input.prisma.reservationModification.findFirst({
+      const modificationQuery = {
         where: { reservationId: reservation.id, clientRequestId: actionModificationRequestId(proposal), requestSource: "PIN_AI_GUEST_SERVICES" },
         select: { id: true, status: true, stripePaymentStatus: true, checkoutExpiresAt: true, appliedAt: true },
-      });
+      } as const;
+      let modification = await input.prisma.reservationModification.findFirst(modificationQuery);
+      if (proposal.status === "CONFIRMED" && actionModificationRequestId(proposal) === `stay-time:${proposal.id}` &&
+          stayTimeChatEnabled(reservation.id, env) && modification?.status === "AWAITING_PAYMENT" &&
+          modification.stripePaymentStatus === null && modification.checkoutExpiresAt && modification.checkoutExpiresAt > now) {
+        const recover = input.recoverStayTimePaymentStatus ?? (async (scope: { guestToken: string; modificationId: string }) => {
+          const key = env.STRIPE_SECRET_KEY?.trim() ?? "";
+          if (!/^(?:sk|rk)_(?:test|live)_/.test(key) || key !== process.env.STRIPE_SECRET_KEY?.trim()) {
+            throw new Error("STAY_TIME_CHECKOUT_CONFIG_INVALID");
+          }
+          const { default: stripe } = await import("../billing/stripe.js");
+          const { recoverStayTimeCheckoutStatus } = await import("../services/stay-time-checkout.service.js");
+          await recoverStayTimeCheckoutStatus(scope, { client: input.prisma as PrismaClient, stripe,
+            now: input.now ?? (() => new Date()), livemode: /^(?:sk|rk)_live_/.test(key) });
+        });
+        await recover({ guestToken: req.params.guestToken, modificationId: modification.id });
+        modification = await input.prisma.reservationModification.findFirst(modificationQuery);
+      }
       return res.json({ ok: true, status: {
         proposalId: proposal.id, proposalStatus: proposal.status,
         modificationId: modification?.id ?? null, modificationStatus: modification?.status ?? null,

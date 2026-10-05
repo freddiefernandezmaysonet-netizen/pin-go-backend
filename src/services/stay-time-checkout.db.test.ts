@@ -6,7 +6,7 @@ import { PrismaClient } from "@prisma/client";
 import { defaultStayTimeSettings } from "../pin-ai/actions/stay-time-settings.js";
 import { createStayTimeProposal, confirmStayTimeProposal, stageStayTimeModification } from "./stay-time-proposal.service.js";
 import { syntheticStayTimePaymentEvidence } from "./stay-time-payment-evidence.fixture.js";
-import { createStayTimeCheckout, handleStayTimeStripeWebhook, type StayTimeCheckoutDependencies, type StayTimeCheckoutStripeClient } from "./stay-time-checkout.service.js";
+import { createStayTimeCheckout, recoverStayTimeCheckoutStatus, handleStayTimeStripeWebhook, type StayTimeCheckoutDependencies, type StayTimeCheckoutStripeClient } from "./stay-time-checkout.service.js";
 import { createStayTimeStripeProvider, type StayTimeStripeClient } from "./stay-time-stripe-provider.js";
 import type { StayTimePaymentFlowDependencies } from "./stay-time-payment-flow.service.js";
 
@@ -16,6 +16,55 @@ void acceptsInstalledSdk;
 const signing = new Stripe("sk_test_synthetic_offline_only");
 const secret = "whsec_synthetic_offline_only";
 const url = process.env.STAY_TIME_TEST_DATABASE_URL;
+for (const scenario of ["missing", "already-unpaid", "paid-race", "processing-race", "expired", "provider-expired",
+  "provider-paid", "wrong-amount", "wrong-session", "wrong-account", "wrong-mode", "wrong-guest", "outage"] as const) {
+  test(`Checkout status recovery: ${scenario}`, async () => {
+    const now = new Date("2026-10-05T02:00:00Z");
+    const deadline = new Date("2026-10-05T03:00:00Z");
+    const m = { id: "modification", reservationId: "reservation", requestSource: "PIN_AI_GUEST_SERVICES",
+      guestConfirmation: { operation: "LATE_CHECKOUT" }, financialAction: "ADDITIONAL_PAYMENT_REQUIRED", currency: "usd",
+      status: "AWAITING_PAYMENT", stripePaymentStatus: scenario === "already-unpaid" ? "unpaid" : null as string | null,
+      stripeCheckoutSessionId: "cs_existing", stripeConnectedAccountId: "acct_existing",
+      additionalChargeAmount: 8, additionalPlatformFeeAmount: 0, additionalHostPayoutAmount: 8,
+      checkoutExpiresAt: scenario === "expired" ? now : deadline,
+      reservation: { guestToken: "guest-token", guestTokenExpiresAt: deadline, propertyId: "property" } };
+    let retrieves = 0, writes = 0;
+    const tx = { $queryRaw: async () => [], reservationModification: {
+      findUniqueOrThrow: async () => structuredClone(m),
+      update: async ({ data }: { data: object }) => { writes++; Object.assign(m, data); return structuredClone(m); },
+    } };
+    const client = { reservationModification: tx.reservationModification, $transaction: async (fn: (arg: typeof tx) => Promise<unknown>) => fn(tx) };
+    const forbidden = async () => { assert.fail("Recovery must not create, expire, or charge"); };
+    const stripe = { checkout: { sessions: { create: forbidden, expire: forbidden,
+      retrieve: async (id: string, _params: object, options: { stripeAccount: string }) => {
+        retrieves++; assert.equal(id, "cs_existing"); assert.equal(options.stripeAccount, "acct_existing");
+        if (scenario === "outage") throw new Error("PROVIDER_UNAVAILABLE");
+        if (scenario === "paid-race") { m.status = "APPLIED"; m.stripePaymentStatus = "paid"; }
+        if (scenario === "processing-race") m.status = "PAYMENT_PROCESSING";
+        return { id: scenario === "wrong-session" ? "cs_other" : id, object: "checkout.session", mode: "payment",
+          livemode: scenario === "wrong-mode", client_reference_id: m.id, currency: "usd",
+          amount_total: scenario === "wrong-amount" ? 900 : 800, expires_at: deadline.getTime() / 1000,
+          status: scenario === "provider-expired" ? "expired" : scenario === "provider-paid" ? "complete" : "open",
+          payment_status: scenario === "provider-paid" ? "paid" : "unpaid",
+          metadata: { flow: "direct_booking_reservation_modification", stripeChargeMode: "DIRECT_CHARGE",
+            reservationModificationId: m.id, reservationId: m.reservationId, propertyId: "property",
+            connectedAccountId: scenario === "wrong-account" ? "acct_other" : "acct_existing",
+            additionalChargeAmountCents: "800", additionalPlatformFeeAmountCents: "0", additionalHostPayoutAmountCents: "800" } };
+      } } } };
+    const run = () => recoverStayTimeCheckoutStatus({ guestToken: scenario === "wrong-guest" ? "other" : "guest-token", modificationId: m.id },
+      { client: client as never, stripe: stripe as never, now: () => now, livemode: false });
+    if (scenario.startsWith("wrong-") || scenario === "outage") await assert.rejects(run());
+    else await run();
+    assert.equal(writes, scenario === "missing" ? 1 : 0);
+    assert.equal(retrieves, ["expired", "wrong-guest", "already-unpaid"].includes(scenario) ? 0 : 1);
+    assert.equal(m.stripeCheckoutSessionId, "cs_existing");
+    if (scenario === "missing") {
+      assert.equal(m.stripePaymentStatus, "unpaid"); assert.equal(m.status, "AWAITING_PAYMENT");
+      await run(); assert.equal(retrieves, 1); assert.equal(writes, 1);
+    }
+    if (scenario === "paid-race") { assert.equal(m.stripePaymentStatus, "paid"); assert.equal(m.status, "APPLIED"); }
+  });
+}
 test("internal Checkout creation and signed events preserve one incremental payment across retries", { skip: !url }, async t => {
   const parsed = new URL(url!);
   assert.ok(["localhost", "127.0.0.1"].includes(parsed.hostname));
@@ -197,6 +246,7 @@ test("internal Checkout creation and signed events preserve one incremental paym
         assert.equal(saved.stripeCheckoutSessionId, session.id); assert.deepEqual(saved.checkoutExpiresAt, m.checkoutExpiresAt);
         if (scenario === "webhook-before-create-returns") { assert.equal(saved.status, "APPLIED"); return; }
         assert.equal(saved.status, "AWAITING_PAYMENT");
+        assert.equal(saved.stripePaymentStatus, "unpaid");
         assert.deepEqual(await db.reservation.findUniqueOrThrow({ where: { id: reservation.id } }), reservation);
         if (scenario === "replay-near-deadline") {
           now = new Date(m.checkoutExpiresAt!.getTime() - 60_000);
