@@ -184,3 +184,16 @@ test("Direct Booking and canonical Pin AI staging cannot both reserve the cleani
   });
   }
 });
+
+
+test("internal Demo Direct Booking participates in canonical availability serialization", async () => {
+  const source = await readFile(
+    new URL("./direct-booking-ingest-transaction.ts", import.meta.url),
+    "utf8"
+  );
+  assert.match(
+    source,
+    /"DIRECT_BOOKING",\s*"INTERNAL_DEMO_DIRECT_BOOKING",\s*"MANUAL"/
+  );
+  assert.match(source, /DEMO_RESERVATION_DATE_CONFLICT/);
+});
