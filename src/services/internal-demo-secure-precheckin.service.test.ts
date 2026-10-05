@@ -376,7 +376,7 @@ test("Demo Center invokes secure pre-check-in only for a processed demo reservat
   );
   assert.match(
     source,
-    /email:\s*\{\s*enabled:\s*true,\s*to:\s*cleanGuestEmail/
+    /email:\s*\{\s*enabled:\s*true,\s*to:\s*cleanGuestEmail[\s\S]*attempted:\s*directBookingParity\?\.guestEmail\?\.attempted/
   );
   assert.match(
     source,
@@ -396,7 +396,7 @@ test("Demo Center invokes secure pre-check-in only for a processed demo reservat
   );
   assert.match(
     source,
-    /cleaningConfirmationDispatch,\s*message:\s*"Demo pipeline executed"/
+    /directBookingParity,[\s\S]*cleaningConfirmationDispatch,[\s\S]*guest confirmation accepted for delivery/
   );
   assert.ok(
     source.indexOf("processWebhookEventById(event.id)") <
@@ -407,6 +407,14 @@ test("Demo Center invokes secure pre-check-in only for a processed demo reservat
   assert.ok(
     source.indexOf(
       "await completeInternalDemoSecurePrecheckin"
+    ) <
+      source.indexOf(
+        "await applyInternalDemoDirectBookingParity"
+      )
+  );
+  assert.ok(
+    source.indexOf(
+      "await applyInternalDemoDirectBookingParity"
     ) <
       source.indexOf(
         "await dispatchPendingCleaningConfirmationForReservation"
@@ -423,5 +431,63 @@ test("Demo Center invokes secure pre-check-in only for a processed demo reservat
   assert.doesNotMatch(
     serviceSource,
     /ttlock|activateGrant|accessGrant\.(?:create|update)/i
+  );
+});
+
+
+test("Demo Center Direct Booking parity remains payment-free and uses logged production email types", async () => {
+  const routeSource = await readFile(
+    new URL("../routes/admin.demo.routes.ts", import.meta.url),
+    "utf8"
+  );
+  const paritySource = await readFile(
+    new URL("./internal-demo-direct-booking-parity.service.ts", import.meta.url),
+    "utf8"
+  );
+  const auditSource = await readFile(
+    new URL("./reservation-complete-flow-audit.service.ts", import.meta.url),
+    "utf8"
+  );
+
+  assert.match(routeSource, /paymentSimulated:\s*true/);
+  assert.match(
+    routeSource,
+    /applyInternalDemoDirectBookingParity\(\s*prisma/
+  );
+  assert.match(
+    paritySource,
+    /type:\s*"DIRECT_BOOKING_GUEST_CONFIRMATION"/
+  );
+  assert.match(
+    paritySource,
+    /type:\s*"DIRECT_BOOKING_HOST_NOTIFICATION"/
+  );
+  assert.match(
+    paritySource,
+    /source:\s*"INTERNAL_DEMO_DIRECT_BOOKING"/
+  );
+  assert.match(
+    paritySource,
+    /paymentSimulated:\s*true/
+  );
+  assert.match(
+    paritySource,
+    /charged:\s*false/
+  );
+  assert.doesNotMatch(
+    paritySource,
+    /stripe\.(?:checkout|paymentIntents|charges|transfers|refunds)/
+  );
+  assert.match(
+    auditSource,
+    /auditSource\s*===\s*"INTERNAL_DEMO_DIRECT_BOOKING"/
+  );
+  assert.match(
+    auditSource,
+    /stripeRequired\s*=\s*[\s\S]*!isInternalDemoDirectBooking/
+  );
+  assert.match(
+    auditSource,
+    /hostPayoutRequired\s*=\s*[\s\S]*!isInternalDemoDirectBooking/
   );
 });
