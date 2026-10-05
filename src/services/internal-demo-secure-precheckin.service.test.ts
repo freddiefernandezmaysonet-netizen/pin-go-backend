@@ -388,7 +388,11 @@ test("Demo Center invokes secure pre-check-in only for a processed demo reservat
   );
   assert.match(
     source,
-    /DEMO_SECURE_PRECHECKIN_FAILED:/
+    /ingestReservation\(\{[\s\S]*source:\s*"INTERNAL_DEMO_DIRECT_BOOKING"[\s\S]*externalProvider:\s*"PIN_GO_INTERNAL_DEMO"/
+  );
+  assert.doesNotMatch(
+    source,
+    /webhookEventIngest\.create|provider:\s*PmsProvider\.LODGIFY|eventType:\s*"DEMO_BOOKING"/
   );
   assert.match(
     source,
@@ -399,7 +403,7 @@ test("Demo Center invokes secure pre-check-in only for a processed demo reservat
     /directBookingParity,[\s\S]*cleaningConfirmationDispatch,[\s\S]*guest confirmation accepted for delivery/
   );
   assert.ok(
-    source.indexOf("processWebhookEventById(event.id)") <
+    source.indexOf("await ingestReservation") <
       source.indexOf(
         "await completeInternalDemoSecurePrecheckin"
       )
