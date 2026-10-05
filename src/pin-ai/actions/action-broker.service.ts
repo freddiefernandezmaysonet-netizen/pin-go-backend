@@ -45,6 +45,7 @@ export type PinAIActionBrokerPublicProposal =
         proposedCheckIn: string;
         proposedCheckOut: string;
         consentText: string;
+        language?: "en" | "es";
       }>;
     }>;
   }>;

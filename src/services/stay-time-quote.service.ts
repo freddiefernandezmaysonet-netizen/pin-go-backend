@@ -92,7 +92,7 @@ export async function prepareStayTimeQuoteInTransaction(tx: Prisma.TransactionCl
       currentTotal: reservation.totalAmount.toString(), pricingBreakdown: reservation.pricingBreakdown,
       feeSubtotalMinor: estimate.feeSubtotalMinor, platformFeePercent: options.platformFeePercent,
       taxes: reservation.property.taxes.map(tax => ({ ...tax, percentage: tax.percentage.toString(), updatedAt: tax.updatedAt.toISOString() })) });
-    const expiresAt = new Date(Math.min(now.getTime() + 60_000,
+    const expiresAt = new Date(Math.min(now.getTime() + 5 * 60_000,
       reservation.guestTokenExpiresAt?.getTime() ?? Infinity,
       reservation.checkOut.getTime(), new Date(estimate.checkIn).getTime() > now.getTime()
         ? new Date(estimate.checkIn).getTime() : Infinity));

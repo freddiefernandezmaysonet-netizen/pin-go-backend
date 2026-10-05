@@ -73,6 +73,7 @@ for (const paid of [false, true]) test(`preparation exposes exact schedule and t
   const result = await actions.prepare(prepareInput, scope);
   assert.equal(result.publicResult.quote.amountDifferenceCents, paid ? 1120 : 0);
   assert.equal(result.publicResult.quote.stayTime?.requestedLocalTime, "12:00");
+  assert.equal(result.publicResult.quote.stayTime?.language, "es");
   assert.equal(result.publicResult.quote.quoteExpiresAtLocal, "2026-10-03T08:01:00-04:00");
   assert.equal(result.publicResult.actionExecuted, false);
   assert.equal(JSON.stringify(result.publicResult).includes("secret-not-for-model"), false);

@@ -66,7 +66,8 @@ export function createStayTimeChatActions(deps: Dependencies) {
             currency: q.currency, financialAction: q.additionalChargeMinor === 0 ? "NO_PAYMENT_REQUIRED" : "ADDITIONAL_PAYMENT_REQUIRED",
             stayTime: { operation: p.operation, requestedLocalTime: q.requestedLocalTime,
               currentCheckIn: q.currentCheckIn, currentCheckOut: q.currentCheckOut,
-              proposedCheckIn: q.proposedCheckIn, proposedCheckOut: q.proposedCheckOut, consentText: q.consentText } } },
+              proposedCheckIn: q.proposedCheckIn, proposedCheckOut: q.proposedCheckOut, consentText: q.consentText,
+              language: input.language } } },
         privateConfirmation: { ...prepared.privateConfirmation, expiresAt },
       };
     },
