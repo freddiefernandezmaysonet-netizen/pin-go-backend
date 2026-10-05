@@ -308,6 +308,7 @@ export async function ingestReservation(p: IngestPayload) {
       });
 
       if (
+        p.source !== "INTERNAL_DEMO_DIRECT_BOOKING" &&
         distributionContext?.distributionEnabled === true &&
         distributionContext.distributionStatus === "ACTIVE"
       ) {
