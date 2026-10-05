@@ -197,3 +197,19 @@ test("internal Demo Direct Booking participates in canonical availability serial
   );
   assert.match(source, /DEMO_RESERVATION_DATE_CONFLICT/);
 });
+
+
+test("internal Demo ingest suppresses Channex ARI while normal distribution path remains present", async () => {
+  const ingestSource = await readFile(
+    new URL("./ingest.service.ts", import.meta.url),
+    "utf8"
+  );
+  assert.match(
+    ingestSource,
+    /p\.source\s*!==\s*"INTERNAL_DEMO_DIRECT_BOOKING"[\s\S]*distributionContext\?\.distributionEnabled\s*===\s*true[\s\S]*persistChannexAriReservationIntent\(/
+  );
+  assert.match(
+    ingestSource,
+    /distributionContext\.distributionStatus\s*===\s*"ACTIVE"/
+  );
+});
