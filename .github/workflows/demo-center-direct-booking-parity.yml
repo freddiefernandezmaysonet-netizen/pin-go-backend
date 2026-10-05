@@ -1,0 +1,32 @@
+name: Demo Center Direct Booking parity
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - 'src/routes/admin.demo.routes.ts'
+      - 'src/services/internal-demo-direct-booking-parity.service.ts'
+      - 'src/services/internal-demo-secure-precheckin.service.ts'
+      - 'src/services/internal-demo-secure-precheckin.service.test.ts'
+      - 'src/services/reservation-complete-flow-audit.service.ts'
+      - 'tsconfig.demo-center-direct-booking-parity.json'
+      - '.github/workflows/demo-center-direct-booking-parity.yml'
+permissions:
+  contents: read
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      DATABASE_URL: postgresql://test:test@127.0.0.1:1/no_runtime_database
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+      - run: npm ci --ignore-scripts --no-audit --no-fund
+      - run: npx --no-install prisma generate --schema ./prisma
+      - name: Focused TypeScript build
+        run: npx --no-install tsc -p tsconfig.demo-center-direct-booking-parity.json
+      - name: Demo Center parity contracts
+        run: node --import tsx --test src/services/internal-demo-secure-precheckin.service.test.ts
