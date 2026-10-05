@@ -70,7 +70,8 @@ test("internal Demo Center uses 30-minute cleaner access after the configured of
   const result = await readCleanerAccessWindow(db as any, {
     id: "demo-r1",
     propertyId: "demo-property",
-    source: "INTERNAL_DEMO_DIRECT_BOOKING",
+    source: "LODGIFY",
+    externalId: "DEMO-1791228000171",
     checkOut,
     property: {
       checkOutTime: "11:00",
