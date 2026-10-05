@@ -1,7 +1,7 @@
 import { Router } from "express";
-import { PrismaClient, PmsProvider } from "@prisma/client";
+import { PrismaClient } from "@prisma/client";
 import { requireAuth } from "../middleware/requireAuth";
-import { processWebhookEventById } from "../pms/ingest/webhook.processor";
+import { ingestReservation } from "../services/ingest.service";
 import { completeInternalDemoSecurePrecheckin } from "../services/internal-demo-secure-precheckin.service";
 import { dispatchPendingCleaningConfirmationForReservation } from "../services/cleaning-confirmation-dispatch.service";
 import { applyInternalDemoDirectBookingParity } from "../services/internal-demo-direct-booking-parity.service";
@@ -142,89 +142,61 @@ adminDemoRouter.post(
         });
       }
 
-      const connection = await prisma.pmsConnection.findFirst({
+      const demoProperty = await prisma.property.findFirst({
         where: {
+          id: "cmomyua8b0001rv1dvl6xjr6g",
           organizationId: orgId,
-          provider: PmsProvider.LODGIFY,
           status: "ACTIVE",
+        },
+        select: {
+          id: true,
+          name: true,
         },
       });
 
-      if (!connection) {
+      if (!demoProperty) {
         return res.status(400).json({
           ok: false,
-          error: "No active Lodgify connection found",
+          error: "Pin&Go Demo Property is not available for this organization",
         });
       }
 
       const externalId = `DEMO-${Date.now()}`;
-
-      const demoCreatedAt =
-        new Date().toISOString();
-      const payload = {
-        event: "booking_change",
-        booking_id: externalId,
-        id: externalId,
-
-        property_id: "DEMO",
-        property_name: "Demo",
-
-        arrival: checkInDate.toISOString(),
-        departure: checkOutDate.toISOString(),
-
-        guest_name: cleanGuestName,
-        guest_email: cleanGuestEmail,
-        guest_phone:
-          cleanGuestPhone || null,
-
-        status: "Booked",
-
-        amount_paid: 100,
-        total_amount: 100,
-        amount_due: 0,
-
-        updated_at: demoCreatedAt,
-        created_at: demoCreatedAt,
-
-        consent: {
-          stayNotificationsConsent:
-            hasSmsConsent,
-          smsConsent: hasSmsConsent,
-          consentSource:
-            "INTERNAL_DEMO_CENTER",
-          consentVersion:
-            "stay_notifications_v1",
-          acceptedAt: hasSmsConsent
-            ? demoCreatedAt
-            : null,
+      const ingestResult = await ingestReservation({
+        source: "INTERNAL_DEMO_DIRECT_BOOKING",
+        propertyId: demoProperty.id,
+        guestName: cleanGuestName,
+        guestEmail: cleanGuestEmail,
+        guestPhone: cleanGuestPhone || null,
+        preferredLanguage: cleanPreferredLanguage,
+        adults: 1,
+        children: 0,
+        roomName: demoProperty.name,
+        checkIn: checkInDate.toISOString(),
+        checkOut: checkOutDate.toISOString(),
+        paymentState: "PAID",
+        totalAmount: 0,
+        currency: "usd",
+        externalProvider: "PIN_GO_INTERNAL_DEMO",
+        externalId,
+        externalUpdatedAt: new Date().toISOString(),
+        externalRaw: {
+          demo: true,
+          paymentSimulated: true,
+          consent: {
+            stayNotificationsConsent: hasSmsConsent,
+            smsConsent: hasSmsConsent,
+            consentSource: "INTERNAL_DEMO_CENTER",
+            consentVersion: "stay_notifications_v1",
+            acceptedAt: hasSmsConsent ? new Date().toISOString() : null,
+          },
+          created_by: user.email ?? user.id,
         },
-
-        demo: true,
-        created_by: user.email ?? user.id,
-      };
-
-      const event = await prisma.webhookEventIngest.create({
-        data: {
-          connectionId: connection.id,
-          provider: PmsProvider.LODGIFY,
-          eventType: "DEMO_BOOKING",
-          externalEventId: externalId,
-          payloadRaw: payload,
-          status: "PENDING",
-        },
+        status: "ACTIVE",
       });
 
-      await processWebhookEventById(event.id);
-
-      const processedEvent = await prisma.webhookEventIngest.findUnique({
-        where: { id: event.id },
-      });
-
-      const reservation = await prisma.reservation.findFirst({
-        where: {
-          externalProvider: "LODGIFY",
-          externalId,
-        },
+      const reservation = await prisma.reservation.findUnique({
+        where: { id: ingestResult.reservationId },
         include: {
           accessGrants: {
             include: {
@@ -234,6 +206,14 @@ adminDemoRouter.post(
           NfcAssignment: true,
         },
       });
+
+      const processedEvent = {
+        status: "PROCESSED",
+        lastError: null,
+      };
+      const event = {
+        id: `NATIVE-${ingestResult.reservationId}`,
+      };
 
       let securePrecheckin = null;
       let directBookingParity: any = null;
