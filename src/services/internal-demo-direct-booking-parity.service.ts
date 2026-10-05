@@ -129,11 +129,15 @@ export async function applyInternalDemoDirectBookingParity(
   };
 
   const guestToken = await ensureGuestToken(prisma, reservation.id);
+  const reservationNumber =
+    reservation.reservationNumber ??
+    (await generateReservationNumber(prisma));
 
   const updated = await prisma.reservation.update({
     where: { id: reservation.id },
     data: {
       source: "INTERNAL_DEMO_DIRECT_BOOKING",
+      reservationNumber,
       preferredLanguage: input.preferredLanguage,
       cancellationPolicyId: policy.policyId,
       cancellationPolicySnapshot: cancellationPolicySnapshot as any,
