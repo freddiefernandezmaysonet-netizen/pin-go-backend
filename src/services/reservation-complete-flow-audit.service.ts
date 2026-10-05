@@ -841,8 +841,12 @@ export async function auditReservationCompleteFlow(
   const isManualReservation =
     auditSource === "MANUAL" || auditExternalProvider === "PIN_GO_MANUAL";
 
+  const isInternalDemoDirectBooking =
+    auditSource === "INTERNAL_DEMO_DIRECT_BOOKING";
+
   const isDirectBookingReservation =
     auditSource === "DIRECT_BOOKING" ||
+    isInternalDemoDirectBooking ||
     auditExternalProvider === "PIN_GO_DIRECT" ||
     Boolean(reservation.stripeCheckoutSessionId);
 
@@ -853,8 +857,12 @@ export async function auditReservationCompleteFlow(
     : "OTA_RESERVATION";
 
   const paymentPaidRequired = isDirectBookingReservation;
-  const stripeRequired = isDirectBookingReservation;
-  const hostPayoutRequired = isDirectBookingReservation;
+  const stripeRequired =
+    isDirectBookingReservation &&
+    !isInternalDemoDirectBooking;
+  const hostPayoutRequired =
+    isDirectBookingReservation &&
+    !isInternalDemoDirectBooking;
   const directBookingMessagingEvidenceRequired = isDirectBookingReservation;
   const manualReservationMessagingEvidenceRequired =
   isManualReservation && Boolean(reservation.guestEmail);
