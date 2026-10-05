@@ -391,7 +391,10 @@ adminDemoRouter.post(
           securePrecheckin,
           directBookingParity,
           cleaningConfirmationDispatch,
-          message: "Demo pipeline executed",
+          message:
+            directBookingParity?.guestEmail?.ok
+              ? "Demo pipeline executed and guest confirmation accepted for delivery"
+              : "Demo pipeline executed; review guest email delivery status",
         },
       });
     } catch (error) {
