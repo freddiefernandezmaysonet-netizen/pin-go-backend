@@ -1,56 +1,109 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { defaultCleanerAccessMinutes, planCleanerAccessWindow } from "./cleaner-access-window.policy";
+import { planCleanerAccessWindow } from "./cleaner-access-window.policy";
 import { readCleanerAccessWindow } from "./cleaner-access-window.service";
 
-const property = { checkOutTime: "12:00", checkInTime: "16:00", timezone: "America/Puerto_Rico", cleaningStartOffsetMinutes: 45 };
 const departure = new Date("2026-10-27T12:00:00-04:00");
-for (const [out, arrival, duration] of [["11:00", "16:00", 240], ["11:00", "15:00", 180],
-  ["12:00", "16:00", 180], ["12:00", "15:00", 120]] as const) {
-  test(`${out} to ${arrival}: ${duration} access minutes`, () => {
-    assert.equal(defaultCleanerAccessMinutes(out, arrival), duration);
+
+test("configured duration starts after effective checkout plus offset", () => {
+  const w = planCleanerAccessWindow({
+    checkOut: departure,
+    property: { cleaningStartOffsetMinutes: 30, cleaningDurationMinutes: 180 },
+    nextCheckIn: null,
   });
-}
-test("Casa Collores ends at 15:45, not 16:45", () => {
-  const w = planCleanerAccessWindow({ checkOut: departure, property, nextCheckIn: null });
-  assert.equal(w.startsAt.toISOString(), "2026-10-27T16:45:00.000Z");
-  assert.equal(w.endsAt.toISOString(), "2026-10-27T19:45:00.000Z");
+  assert.equal(w.startsAt.toISOString(), "2026-10-27T16:30:00.000Z");
+  assert.equal(w.endsAt.toISOString(), "2026-10-27T19:30:00.000Z");
+  assert.equal(w.durationMinutes, 180);
 });
-test("approved early arrival caps cleaner access", () => {
-  const nextCheckIn = new Date("2026-10-27T14:00:00-04:00");
-  assert.equal(planCleanerAccessWindow({ checkOut: departure, property, nextCheckIn }).endsAt.getTime(), nextCheckIn.getTime());
+
+test("demo property can keep a one-hour cleaner access window at any time", () => {
+  const w = planCleanerAccessWindow({
+    checkOut: new Date("2026-10-27T11:00:00-04:00"),
+    property: { cleaningStartOffsetMinutes: 15, cleaningDurationMinutes: 60 },
+    nextCheckIn: null,
+  });
+  assert.equal(w.startsAt.toISOString(), "2026-10-27T15:15:00.000Z");
+  assert.equal(w.endsAt.toISOString(), "2026-10-27T16:15:00.000Z");
 });
-test("later reservation never extends the property default window", () => {
-  const nextCheckIn = new Date("2026-10-29T16:00:00-04:00");
-  assert.equal(planCleanerAccessWindow({ checkOut: departure, property, nextCheckIn }).endsAt.toISOString(), "2026-10-27T19:45:00.000Z");
+
+test("configured 240-minute window is not recalculated from standard property hours", () => {
+  const w = planCleanerAccessWindow({
+    checkOut: new Date("2026-10-27T11:00:00-04:00"),
+    property: { cleaningStartOffsetMinutes: 30, cleaningDurationMinutes: 240 },
+    nextCheckIn: null,
+  });
+  assert.equal(w.endsAt.toISOString(), "2026-10-27T19:30:00.000Z");
 });
-test("late departure and large offset never exceed standard arrival", () => {
-  const w = planCleanerAccessWindow({ checkOut: new Date("2026-10-27T13:00:00-04:00"), property, nextCheckIn: null });
-  assert.equal(w.endsAt.toISOString(), "2026-10-27T20:00:00.000Z");
-  assert.equal(planCleanerAccessWindow({ checkOut: departure, property: { ...property, cleaningStartOffsetMinutes: 90 }, nextCheckIn: null }).endsAt.toISOString(), "2026-10-27T20:00:00.000Z");
+
+test("next real occupancy caps a configured window that would overlap it", () => {
+  const nextCheckIn = new Date("2026-10-27T15:00:00-04:00");
+  const w = planCleanerAccessWindow({
+    checkOut: departure,
+    property: { cleaningStartOffsetMinutes: 30, cleaningDurationMinutes: 240 },
+    nextCheckIn,
+  });
+  assert.equal(w.endsAt.getTime(), nextCheckIn.getTime());
 });
-test("arrival at or before cleaner start rejects empty window", () => {
-  for (const time of ["12:45", "12:30", "11:00"]) assert.throws(() => planCleanerAccessWindow({
-    checkOut: departure, property, nextCheckIn: new Date(`2026-10-27T${time}:00-04:00`),
-  }), /CLEANER_ACCESS_WINDOW_EMPTY/);
+
+test("next arrival at or before cleaner start rejects an empty window", () => {
+  for (const time of ["12:30", "12:15", "11:00"]) {
+    assert.throws(
+      () =>
+        planCleanerAccessWindow({
+          checkOut: departure,
+          property: { cleaningStartOffsetMinutes: 30, cleaningDurationMinutes: 180 },
+          nextCheckIn: new Date(`2026-10-27T${time}:00-04:00`),
+        }),
+      /CLEANER_ACCESS_WINDOW_EMPTY/
+    );
+  }
 });
-test("invalid times and offsets fail closed", () => {
-  assert.throws(() => defaultCleanerAccessMinutes("24:00", "16:00"));
-  assert.throws(() => defaultCleanerAccessMinutes("16:00", "12:00"));
-  for (const cleaningStartOffsetMinutes of [-1, NaN, 1.5]) assert.throws(() => planCleanerAccessWindow({
-    checkOut: departure, property: { ...property, cleaningStartOffsetMinutes }, nextCheckIn: null,
-  }));
+
+test("invalid configured duration and offset fail closed", () => {
+  for (const cleaningDurationMinutes of [0, -1, NaN, 1.5]) {
+    assert.throws(() =>
+      planCleanerAccessWindow({
+        checkOut: departure,
+        property: { cleaningStartOffsetMinutes: 30, cleaningDurationMinutes },
+        nextCheckIn: null,
+      })
+    );
+  }
+  for (const cleaningStartOffsetMinutes of [-1, NaN, 1.5]) {
+    assert.throws(() =>
+      planCleanerAccessWindow({
+        checkOut: departure,
+        property: { cleaningStartOffsetMinutes, cleaningDurationMinutes: 180 },
+        nextCheckIn: null,
+      })
+    );
+  }
 });
-test("local date boundaries use the property's timezone", () => {
-  const w = planCleanerAccessWindow({ checkOut: new Date("2026-10-27T12:00:00+09:00"),
-    property: { ...property, timezone: "Asia/Tokyo" }, nextCheckIn: null });
-  assert.equal(w.endsAt.toISOString(), "2026-10-27T06:45:00.000Z");
-});
-test("next occupancy lookup includes overlapping guests and excludes the same/cancelled stay", async () => {
+
+test("next occupancy lookup excludes same/cancelled stay and uses earliest arrival", async () => {
   let query: any;
-  const db = { reservation: { findFirst: async (args: any) => { query = args; return { checkIn: new Date("2026-10-27T14:00:00-04:00") }; } } };
-  const result = await readCleanerAccessWindow(db as any, { id: "r60", propertyId: "collores", checkOut: departure, property });
-  assert.deepEqual(query.where, { propertyId: "collores", id: { not: "r60" }, status: { not: "CANCELLED" }, checkOut: { gt: departure } });
+  const nextCheckIn = new Date("2026-10-27T15:00:00-04:00");
+  const db = {
+    reservation: {
+      findFirst: async (args: any) => {
+        query = args;
+        return { checkIn: nextCheckIn };
+      },
+    },
+  };
+  const property = { cleaningStartOffsetMinutes: 30, cleaningDurationMinutes: 180 };
+  const result = await readCleanerAccessWindow(db as any, {
+    id: "r60",
+    propertyId: "collores",
+    checkOut: departure,
+    property,
+  });
+  assert.deepEqual(query.where, {
+    propertyId: "collores",
+    id: { not: "r60" },
+    status: { not: "CANCELLED" },
+    checkOut: { gt: departure },
+  });
   assert.deepEqual(query.orderBy, { checkIn: "asc" });
-  assert.equal(result.endsAt.toISOString(), "2026-10-27T18:00:00.000Z");
+  assert.equal(result.endsAt.getTime(), nextCheckIn.getTime());
 });
