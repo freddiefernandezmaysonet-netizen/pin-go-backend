@@ -5,12 +5,16 @@ import {
   sendDirectBookingHostNotification,
 } from "../lib/mailer";
 import { sendLoggedEmail } from "./email-delivery.service";
+import { generateReservationNumber } from "./reservation-number.service";
 import {
   buildCancellationPolicySnapshot,
   buildGuestCancellationTermsText,
   renderCancellationPolicySnapshot,
 } from "./cancellation-policy.service";
-import { resolveOrganizationGuestReplyTo } from "./organization-guest-email.service";
+import {
+  resolveOrganizationGuestReplyTo,
+  resolveOrganizationPrimaryAdmin,
+} from "./organization-guest-email.service";
 
 function getAppUrl() {
   return String(process.env.APP_URL ?? "http://localhost:3000")
@@ -126,11 +130,15 @@ export async function applyInternalDemoDirectBookingParity(
   };
 
   const guestToken = await ensureGuestToken(prisma, reservation.id);
+  const canonicalReservationNumber =
+    reservation.reservationNumber ??
+    (await generateReservationNumber(prisma));
 
   const updated = await prisma.reservation.update({
     where: { id: reservation.id },
     data: {
       source: "INTERNAL_DEMO_DIRECT_BOOKING",
+      reservationNumber: canonicalReservationNumber,
       preferredLanguage: input.preferredLanguage,
       cancellationPolicyId: policy.policyId,
       cancellationPolicySnapshot: cancellationPolicySnapshot as any,
@@ -234,26 +242,11 @@ export async function applyInternalDemoDirectBookingParity(
     };
   }
 
-  const admins = await prisma.dashboardUser.findMany({
-    where: {
-      organizationId: reservation.property.organizationId,
-      isActive: true,
-      role: DashboardUserRole.ORG_ADMIN,
-    },
-    select: { email: true, fullName: true },
-    orderBy: { createdAt: "asc" },
-  });
-  const hostRecipients =
-    admins.length > 0
-      ? admins
-      : await prisma.dashboardUser.findMany({
-          where: {
-            organizationId: reservation.property.organizationId,
-            isActive: true,
-          },
-          select: { email: true, fullName: true },
-          orderBy: { createdAt: "asc" },
-        });
+  const primaryAdmin = await resolveOrganizationPrimaryAdmin(
+    prisma,
+    reservation.property.organizationId
+  );
+  const hostRecipients = primaryAdmin ? [primaryAdmin] : [];
 
   const hostEmail = {
     attempted: hostRecipients.length > 0,

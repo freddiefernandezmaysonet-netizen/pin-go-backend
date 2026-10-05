@@ -6,7 +6,9 @@
     "target": "esnext",
     "strict": true,
     "skipLibCheck": true,
-    "types": ["node"]
+    "types": [
+      "node"
+    ]
   },
   "include": [
     "src/routes/admin.demo.routes.ts",
@@ -17,6 +19,9 @@
     "src/services/email-delivery.service.ts",
     "src/services/cancellation-policy.service.ts",
     "src/services/organization-guest-email.service.ts",
-    "src/lib/mailer.ts"
+    "src/lib/mailer.ts",
+    "src/services/guest-cancellation.service.ts",
+    "src/services/direct-booking.service.ts",
+    "src/services/reservation-number.service.ts"
   ]
 }

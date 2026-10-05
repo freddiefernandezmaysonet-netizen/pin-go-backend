@@ -491,3 +491,53 @@ test("Demo Center Direct Booking parity remains payment-free and uses logged pro
     /hostPayoutRequired\s*=\s*[\s\S]*!isInternalDemoDirectBooking/
   );
 });
+
+
+test("Demo Direct Booking parity uses canonical reservation numbers, guest portal eligibility, and one primary host recipient", async () => {
+  const paritySource = await readFile(
+    new URL("./internal-demo-direct-booking-parity.service.ts", import.meta.url),
+    "utf8"
+  );
+  const guestPortalSource = await readFile(
+    new URL("./guest-cancellation.service.ts", import.meta.url),
+    "utf8"
+  );
+  const directBookingSource = await readFile(
+    new URL("./direct-booking.service.ts", import.meta.url),
+    "utf8"
+  );
+  const organizationEmailSource = await readFile(
+    new URL("./organization-guest-email.service.ts", import.meta.url),
+    "utf8"
+  );
+
+  assert.match(paritySource, /generateReservationNumber\(prisma\)/);
+  assert.match(
+    paritySource,
+    /reservationNumber:\s*canonicalReservationNumber/
+  );
+  assert.match(
+    guestPortalSource,
+    /reservation\.source\s*===\s*"INTERNAL_DEMO_DIRECT_BOOKING"/
+  );
+  assert.match(
+    paritySource,
+    /resolveOrganizationPrimaryAdmin\(/
+  );
+  assert.doesNotMatch(
+    paritySource,
+    /dashboardUser\.findMany/
+  );
+  assert.match(
+    directBookingSource,
+    /resolveOrganizationPrimaryAdmin\(/
+  );
+  assert.match(
+    organizationEmailSource,
+    /role:\s*DashboardUserRole\.ORG_ADMIN[\s\S]*createdAt:\s*"asc"/
+  );
+  assert.match(
+    organizationEmailSource,
+    /findFirst\(/
+  );
+});

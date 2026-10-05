@@ -20,7 +20,10 @@ import {
   renderCancellationPolicySnapshot,
 } from "./cancellation-policy.service";
 import { dispatchPendingCleaningConfirmationForReservation } from "./cleaning-confirmation-dispatch.service";
-import { resolveOrganizationGuestReplyTo } from "./organization-guest-email.service";
+import {
+  resolveOrganizationGuestReplyTo,
+  resolveOrganizationPrimaryAdmin,
+} from "./organization-guest-email.service";
 
 const prisma = new PrismaClient();
 
@@ -255,57 +258,12 @@ type HostNotificationRecipient = {
 };
 
 async function getHostNotificationRecipients(organizationId: string) {
-  const adminUsers = await prisma.dashboardUser.findMany({
-    where: {
-      organizationId,
-      isActive: true,
-      role: DashboardUserRole.ORG_ADMIN,
-    },
-    select: {
-      email: true,
-      fullName: true,
-    },
-    orderBy: {
-      createdAt: "asc",
-    },
-  });
+  const primaryAdmin = await resolveOrganizationPrimaryAdmin(
+    prisma,
+    organizationId
+  );
 
-  const users =
-    adminUsers.length > 0
-      ? adminUsers
-      : await prisma.dashboardUser.findMany({
-          where: {
-            organizationId,
-            isActive: true,
-          },
-          select: {
-            email: true,
-            fullName: true,
-          },
-          orderBy: {
-            createdAt: "asc",
-          },
-        });
-
-  const seenEmails = new Set<string>();
-  const recipients: HostNotificationRecipient[] = [];
-
-  for (const user of users) {
-    const email = String(user.email ?? "").trim().toLowerCase();
-
-    if (!email || seenEmails.has(email)) {
-      continue;
-    }
-
-    seenEmails.add(email);
-
-    recipients.push({
-      email,
-      fullName: user.fullName,
-    });
-  }
-
-  return recipients;
+  return primaryAdmin ? [primaryAdmin] : [];
 }
 
 async function sendDirectBookingHostNotificationSafe({
