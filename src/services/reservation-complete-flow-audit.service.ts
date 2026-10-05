@@ -648,6 +648,7 @@ export async function auditReservationCompleteFlow(
           
           cleaningNfcEnabled: true,
           cleaningStartOffsetMinutes: true,
+    cleaningDurationMinutes: true,
 
           distributionEnabled: true,
           distributionStatus: true,
