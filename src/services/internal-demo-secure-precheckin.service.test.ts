@@ -2,14 +2,21 @@ import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import test from "node:test";
 import type { PrismaClient } from "@prisma/client";
-import { completeInternalDemoSecurePrecheckin } from "./internal-demo-secure-precheckin.service.js";
+import {
+  completeInternalDemoSecurePrecheckin,
+  INTERNAL_DEMO_PROPERTY_ID,
+} from "./internal-demo-secure-precheckin.service.js";
 
 const now = new Date("2026-08-17T12:00:00.000Z");
 
 function buildHarness(input?: {
   role?: string;
+  source?: string | null;
   externalId?: string | null;
   externalProvider?: string | null;
+  externalRaw?: unknown;
+  propertyId?: string;
+  propertyStatus?: string;
   requiresIdentityVerification?: boolean;
   readiness?: {
     ready: boolean;
@@ -19,6 +26,7 @@ function buildHarness(input?: {
   const calls = {
     findUnique: 0,
     transaction: 0,
+    queries: [] as Array<Record<string, any>>,
     updates: [] as Array<Record<string, any>>,
     ensureJourney: 0,
     ensureSnapshot: 0,
@@ -28,19 +36,23 @@ function buildHarness(input?: {
   };
   const reservation = {
     id: "reservation-demo-1",
+    source: input?.source === undefined ? "INTERNAL_DEMO_DIRECT_BOOKING" : input.source,
     externalId:
       input?.externalId === undefined
         ? "DEMO-123"
         : input.externalId,
     externalProvider:
       input?.externalProvider === undefined
-        ? "LODGIFY"
+        ? "PIN_GO_INTERNAL_DEMO"
         : input.externalProvider,
     guestName: "Pin&Go Demo Guest",
-    propertyId: "property-1",
-    externalRaw: null,
+    propertyId: input?.propertyId ?? INTERNAL_DEMO_PROPERTY_ID,
+    externalRaw: input?.externalRaw === undefined
+      ? { demo: true, paymentSimulated: true, created_by: "platform@example.com" }
+      : input.externalRaw,
     property: {
       organizationId: "organization-1",
+      status: input?.propertyStatus ?? "ACTIVE",
     },
   };
   const tx = {
@@ -53,8 +65,9 @@ function buildHarness(input?: {
   };
   const prisma = {
     reservation: {
-      findUnique: async () => {
+      findUnique: async (query: Record<string, any>) => {
         calls.findUnique += 1;
+        calls.queries.push(query);
         return reservation;
       },
     },
@@ -84,7 +97,7 @@ function buildHarness(input?: {
         alreadyCaptured: false,
         snapshot: {
           agreementId: "agreement-1",
-          propertyId: "property-1",
+          propertyId: reservation.propertyId,
           version: "1",
           title: "Demo agreement",
           capturedAt: now.toISOString(),
@@ -168,6 +181,9 @@ test("controlled demo records simulated verification evidence and remains access
   assert.equal(harness.calls.completeJourney, 1);
   assert.equal(harness.calls.evaluateReadiness, 1);
   assert.equal(harness.calls.audits.length, 1);
+  assert.equal(harness.calls.queries[0].select.source, true);
+  assert.equal(harness.calls.queries[0].select.externalRaw, true);
+  assert.equal(harness.calls.queries[0].select.property.select.status, true);
 
   const update = harness.calls.updates[0];
   assert.equal(update.where.id, "reservation-demo-1");
@@ -177,6 +193,9 @@ test("controlled demo records simulated verification evidence and remains access
     update.data.guestAccessModeSnapshot,
     "PASSCODE_PLUS_NFC"
   );
+  assert.equal(update.data.externalRaw.demo, true);
+  assert.equal(update.data.externalRaw.paymentSimulated, true);
+  assert.equal(update.data.externalRaw.created_by, "platform@example.com");
   assert.deepEqual(
     update.data.externalRaw.consent,
     {
@@ -298,6 +317,49 @@ test("controlled demo rejects ordinary reservations before writing evidence", as
   assert.equal(harness.calls.updates.length, 0);
 });
 
+const deniedIdentities: Array<[string, Parameters<typeof buildHarness>[0]]> = [
+  ["missing source", { source: null }],
+  ["commercial Direct Booking", { source: "DIRECT_BOOKING", externalProvider: "PIN_GO_DIRECT" }],
+  ["manual source with demo-looking ID", { source: "MANUAL" }],
+  ["Channex source with demo-looking ID", { source: "AIRBNB", externalProvider: "CHANNEX" }],
+  ["legacy Lodgify demo", { source: "LODGIFY", externalProvider: "LODGIFY" }],
+  ["native source but Lodgify provider", { externalProvider: "LODGIFY" }],
+  ["missing provider", { externalProvider: null }],
+  ["missing external ID", { externalId: null }],
+  ["missing simulation metadata", { externalRaw: null }],
+  ["array instead of metadata", { externalRaw: [] }],
+  ["text instead of metadata", { externalRaw: "demo" }],
+  ["missing demo flag", { externalRaw: { paymentSimulated: true } }],
+  ["false demo flag", { externalRaw: { demo: false, paymentSimulated: true } }],
+  ["string demo flag", { externalRaw: { demo: "true", paymentSimulated: true } }],
+  ["missing payment simulation", { externalRaw: { demo: true } }],
+  ["false payment simulation", { externalRaw: { demo: true, paymentSimulated: false } }],
+  ["string payment simulation", { externalRaw: { demo: true, paymentSimulated: "true" } }],
+];
+for (const [label, input] of deniedIdentities) {
+  test(`native pre-check-in rejects ${label} without writes`, async () => {
+    const h = buildHarness(input);
+    await assert.rejects(completeInternalDemoSecurePrecheckin(h.prisma, {
+      reservationId: "reservation-demo-1", actor: h.actor, now,
+    }, h.dependencies), /INTERNAL_DEMO_RESERVATION_REQUIRED/);
+    assert.equal(h.calls.transaction, 0);
+    assert.equal(h.calls.updates.length, 0);
+    assert.equal(h.calls.audits.length, 0);
+    assert.equal(h.calls.completeJourney, 0);
+  });
+}
+for (const input of [{ propertyId: "ordinary-property" }, { propertyStatus: "INACTIVE" }]) {
+  test(`native pre-check-in requires the dedicated active demo property: ${JSON.stringify(input)}`, async () => {
+    const h = buildHarness(input);
+    await assert.rejects(completeInternalDemoSecurePrecheckin(h.prisma, {
+      reservationId: "reservation-demo-1", actor: h.actor, now,
+    }, h.dependencies), /INTERNAL_DEMO_PROPERTY_REQUIRED/);
+    assert.equal(h.calls.transaction, 0);
+    assert.equal(h.calls.updates.length, 0);
+    assert.equal(h.calls.audits.length, 0);
+  });
+}
+
 test("controlled demo rejects reservations from another organization", async () => {
   const harness = buildHarness();
 
@@ -390,6 +452,7 @@ test("Demo Center invokes secure pre-check-in only for a processed demo reservat
     source,
     /ingestReservation\(\{[\s\S]*source:\s*"INTERNAL_DEMO_DIRECT_BOOKING"[\s\S]*externalProvider:\s*"PIN_GO_INTERNAL_DEMO"/
   );
+  assert.ok(source.includes(`id: "${INTERNAL_DEMO_PROPERTY_ID}"`));
   assert.doesNotMatch(
     source,
     /webhookEventIngest\.create|provider:\s*PmsProvider\.LODGIFY|eventType:\s*"DEMO_BOOKING"/
@@ -402,28 +465,15 @@ test("Demo Center invokes secure pre-check-in only for a processed demo reservat
     source,
     /directBookingParity,[\s\S]*cleaningConfirmationDispatch,[\s\S]*guest confirmation accepted for delivery/
   );
-  assert.ok(
-    source.indexOf("await ingestReservation") <
-      source.indexOf(
-        "await completeInternalDemoSecurePrecheckin"
-      )
-  );
-  assert.ok(
-    source.indexOf(
-      "await completeInternalDemoSecurePrecheckin"
-    ) <
-      source.indexOf(
-        "await applyInternalDemoDirectBookingParity"
-      )
-  );
-  assert.ok(
-    source.indexOf(
-      "await applyInternalDemoDirectBookingParity"
-    ) <
-      source.indexOf(
-        "await dispatchPendingCleaningConfirmationForReservation"
-      )
-  );
+  const orderedCalls = ["await ingestReservation", "await completeInternalDemoSecurePrecheckin",
+    "await applyInternalDemoDirectBookingParity", "await dispatchPendingCleaningConfirmationForReservation"];
+  let previous = -1;
+  for (const call of orderedCalls) {
+    const index = source.indexOf(call);
+    assert.ok(index >= 0, `${call} must exist`);
+    assert.ok(index > previous, `${call} must follow the previous stage`);
+    previous = index;
+  }
   const cleaningDispatchCall = source.match(
     /dispatchPendingCleaningConfirmationForReservation\(\{[\s\S]*?\}\)/
   )?.[0];
