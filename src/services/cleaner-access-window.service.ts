@@ -3,14 +3,18 @@ import { planCleanerAccessWindow } from "./cleaner-access-window.policy";
 
 /** Read the next occupancy, including an arrival already overlapping departure. */
 export async function readCleanerAccessWindow(db: Pick<PrismaClient | Prisma.TransactionClient, "reservation">,
-  reservation: { id: string; propertyId: string; checkOut: Date; source?: string | null;
+  reservation: { id: string; propertyId: string; checkOut: Date; source?: string | null; externalId?: string | null;
     property: Parameters<typeof planCleanerAccessWindow>[0]["property"] }) {
   const next = await db.reservation.findFirst({
     where: { propertyId: reservation.propertyId, id: { not: reservation.id },
       status: { not: "CANCELLED" }, checkOut: { gt: reservation.checkOut } },
     orderBy: { checkIn: "asc" }, select: { checkIn: true },
   });
-  if ((reservation as { source?: string | null }).source === "INTERNAL_DEMO_DIRECT_BOOKING") {
+  const demoReservation =
+    reservation.source === "INTERNAL_DEMO_DIRECT_BOOKING" ||
+    String(reservation.externalId ?? "").startsWith("DEMO-");
+
+  if (demoReservation) {
     const startsAt = new Date(
       reservation.checkOut.getTime() +
         reservation.property.cleaningStartOffsetMinutes * 60_000
