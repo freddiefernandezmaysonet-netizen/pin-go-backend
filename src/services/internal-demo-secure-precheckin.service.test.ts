@@ -512,7 +512,10 @@ test("Demo Direct Booking parity uses canonical reservation numbers, guest porta
   );
 
   assert.match(paritySource, /generateReservationNumber\(prisma\)/);
-  assert.match(paritySource, /reservationNumber:\s*reservationNumber/);
+  assert.match(
+    paritySource,
+    /reservationNumber:\s*canonicalReservationNumber/
+  );
   assert.match(
     guestPortalSource,
     /reservation\.source\s*===\s*"INTERNAL_DEMO_DIRECT_BOOKING"/
