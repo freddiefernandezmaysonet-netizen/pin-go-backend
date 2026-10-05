@@ -5,6 +5,7 @@ import {
   sendDirectBookingHostNotification,
 } from "../lib/mailer";
 import { sendLoggedEmail } from "./email-delivery.service";
+import { generateReservationNumber } from "./reservation-number.service";
 import {
   buildCancellationPolicySnapshot,
   buildGuestCancellationTermsText,
@@ -129,7 +130,7 @@ export async function applyInternalDemoDirectBookingParity(
   };
 
   const guestToken = await ensureGuestToken(prisma, reservation.id);
-  const reservationNumber =
+  const canonicalReservationNumber =
     reservation.reservationNumber ??
     (await generateReservationNumber(prisma));
 
@@ -137,7 +138,7 @@ export async function applyInternalDemoDirectBookingParity(
     where: { id: reservation.id },
     data: {
       source: "INTERNAL_DEMO_DIRECT_BOOKING",
-      reservationNumber,
+      reservationNumber: canonicalReservationNumber,
       preferredLanguage: input.preferredLanguage,
       cancellationPolicyId: policy.policyId,
       cancellationPolicySnapshot: cancellationPolicySnapshot as any,
