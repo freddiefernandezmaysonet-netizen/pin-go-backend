@@ -582,6 +582,7 @@ function isDirectBookingReservation(reservation: {
 }) {
   return (
     reservation.source === "DIRECT_BOOKING" ||
+    reservation.source === "INTERNAL_DEMO_DIRECT_BOOKING" ||
     reservation.externalProvider === "PIN_GO_DIRECT" ||
     Boolean(reservation.stripeCheckoutSessionId)
   );
