@@ -28,7 +28,7 @@ export async function persistChannexAriReservationIntent(
   input: PersistChannexAriReservationIntentInput
 ) {
   const intent = buildChannexAriReservationIntent({
-    previous: input.previous,
+    ...(input.previous !== undefined ? { previous: input.previous } : {}),
     current: input.current,
     propertyTimezone: input.propertyTimezone,
     todayDateKey: input.todayDateKey,
@@ -46,7 +46,7 @@ export async function persistChannexAriReservationIntent(
     dateKeys: intent.dateKeys,
     sourceEntityType: "RESERVATION",
     sourceEntityId: input.reservationId,
-    now: input.now,
-    coalesceMs: input.coalesceMs,
+    ...(input.now !== undefined ? { now: input.now } : {}),
+    ...(input.coalesceMs !== undefined ? { coalesceMs: input.coalesceMs } : {}),
   });
 }

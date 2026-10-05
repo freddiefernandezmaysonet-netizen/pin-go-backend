@@ -1,4 +1,6 @@
 import { fromZonedTime } from "date-fns-tz";
+import type { PrismaClient } from "@prisma/client";
+import { checkStayTimeRequest } from "./stay-time-tool.js";
 import { readGuestNfcEvidence, type GuestNfcEvidenceReader } from "./guest-nfc-evidence.js";
 
 import {
@@ -23,6 +25,7 @@ import {
 } from "./google-places-read-client.js";
 
 type RuntimeReadPrisma = GuestNfcEvidenceReader & Readonly<{
+  $transaction?: PrismaClient["$transaction"];
   property: Readonly<{
     findFirst(args: unknown): Promise<any>;
   }>;
@@ -137,9 +140,9 @@ export class PinGoRuntimeReadToolExecutor implements PinAIRuntimeToolExecutor {
       case "get_cleaning_status":
         return this.getCleaningStatus(request);
       case "check_early_checkin":
-        return this.eligibility.checkEarlyCheckin(request, args);
+        return checkStayTimeRequest(this.stayTimeDb(), "EARLY_CHECKIN", args, request);
       case "check_late_checkout":
-        return this.eligibility.checkLateCheckout(request, args);
+        return checkStayTimeRequest(this.stayTimeDb(), "LATE_CHECKOUT", args, request);
       case "check_extension_availability":
         return this.eligibility.checkExtensionAvailability(request, args);
       case "calculate_extension_price":
@@ -155,6 +158,11 @@ export class PinGoRuntimeReadToolExecutor implements PinAIRuntimeToolExecutor {
       default:
         throw new Error(`PIN_AI_RUNTIME_READ_TOOL_NOT_IMPLEMENTED:${tool}`);
     }
+  }
+
+  private stayTimeDb(): Pick<PrismaClient, "$transaction"> | undefined {
+    const transaction = this.prisma.$transaction;
+    return transaction ? { $transaction: transaction.bind(this.prisma) } : undefined;
   }
 
   private async searchNearbyPlaces(

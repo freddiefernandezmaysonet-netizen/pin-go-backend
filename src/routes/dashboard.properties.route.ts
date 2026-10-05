@@ -1736,7 +1736,7 @@ dashboardPropertiesRouter.post(
     } catch (error: any) {
       console.error("POST manual reservation error", error);
 
-      return res.status(500).json({
+      return res.status(error?.message === "MANUAL_RESERVATION_DATE_CONFLICT" ? 409 : 500).json({
         ok: false,
         error: error?.message ?? "Failed to create manual reservation",
       });

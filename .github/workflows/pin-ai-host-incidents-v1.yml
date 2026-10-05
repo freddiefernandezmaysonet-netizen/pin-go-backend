@@ -49,6 +49,10 @@ jobs:
           if ! git cat-file -e "$BASE_SHA:$migration" 2>/dev/null; then
             npx prisma db execute --file "$migration" --schema prisma/schema.prisma
           fi
+          migration=prisma/migrations/20261001110000_property_stay_time_settings_v1/migration.sql
+          if ! git cat-file -e "$BASE_SHA:$migration" 2>/dev/null; then
+            npx prisma db execute --file "$migration" --schema prisma/schema.prisma
+          fi
           # The base schema predates additive Property fields introduced by this PR.
           sitemap_migration=prisma/migrations/20261002130000_property_test_classification/migration.sql
           if [ -f "$sitemap_migration" ] && ! git cat-file -e "$BASE_SHA:$sitemap_migration" 2>/dev/null; then

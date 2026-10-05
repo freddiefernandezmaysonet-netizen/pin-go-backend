@@ -2,6 +2,8 @@ import { Router } from "express";
 import type { PrismaClient } from "@prisma/client";
 import { saveGuestActionReceipt } from "../pin-ai/guest/guest-history.js";
 import { readGuestHistory } from "../pin-ai/guest/guest-history-reader.js";
+import { actionModificationRequestId, createDefaultStayTimeChatActions, stayTimeChatEnabled } from "../pin-ai/guest/stay-time-chat-actions.js";
+import { StayTimePolicyError } from "../pin-ai/actions/stay-time-policy.js";
 
 import type {
   PinAIActionBroker,
@@ -29,6 +31,8 @@ export function buildPublicBookingPinAIRouter(input: Readonly<{
   env?: NodeJS.ProcessEnv;
   runtime?: GuestPinAIRuntimeRunner;
   now?: () => Date;
+  recoverStayTimePaymentStatus?: (input: { guestToken: string; modificationId: string }) => Promise<void>;
+  stayTimeActions?: Pick<ReturnType<typeof createDefaultStayTimeChatActions>, "confirm">;
   actionBroker?: Pick<
     PinAIActionBroker,
     "confirmAndExecute"
@@ -187,7 +191,15 @@ export function buildPublicBookingPinAIRouter(input: Readonly<{
           });
         }
 
-        const broker =
+        const proposal = input.prisma.pinAIActionProposal ? await input.prisma.pinAIActionProposal.findFirst({
+          where: { id: req.params.proposalId, reservationId: reservation.id, actionType: "RESERVATION_MODIFICATION" },
+          select: { id: true, termsSnapshot: true },
+        }) : null;
+        const isStayTime = proposal && actionModificationRequestId(proposal) === `stay-time:${proposal.id}`;
+        if (isStayTime && !stayTimeChatEnabled(reservation.id, env)) {
+          return res.status(503).json({ ok: false, error: "PIN_AI_ACTIONS_UNAVAILABLE" });
+        }
+        const broker = isStayTime ? null :
           input.actionBroker ??
           (
             input.actionBrokerFactory
@@ -197,8 +209,9 @@ export function buildPublicBookingPinAIRouter(input: Readonly<{
           );
 
         const result =
-          await broker
-            .confirmAndExecute({
+          await (isStayTime
+            ? (input.stayTimeActions ?? createDefaultStayTimeChatActions(input.prisma as PrismaClient, env, input.now)).confirm
+            : broker!.confirmAndExecute.bind(broker))({
               guestToken:
                 req.params.guestToken,
               proposalId:
@@ -274,13 +287,30 @@ export function buildPublicBookingPinAIRouter(input: Readonly<{
       const proposal = await input.prisma.pinAIActionProposal.findFirst({
         where: { id: req.params.proposalId, reservationId: reservation.id, propertyId: reservation.propertyId,
           organizationId: reservation.property.organizationId, actionType: "RESERVATION_MODIFICATION" },
-        select: { id: true, status: true },
+        select: { id: true, status: true, termsSnapshot: true },
       });
       if (!proposal) return notFound();
-      const modification = await input.prisma.reservationModification.findFirst({
-        where: { reservationId: reservation.id, clientRequestId: `pin_ai_${proposal.id}`, requestSource: "PIN_AI_GUEST_SERVICES" },
+      const modificationQuery = {
+        where: { reservationId: reservation.id, clientRequestId: actionModificationRequestId(proposal), requestSource: "PIN_AI_GUEST_SERVICES" },
         select: { id: true, status: true, stripePaymentStatus: true, checkoutExpiresAt: true, appliedAt: true },
-      });
+      } as const;
+      let modification = await input.prisma.reservationModification.findFirst(modificationQuery);
+      if (proposal.status === "CONFIRMED" && actionModificationRequestId(proposal) === `stay-time:${proposal.id}` &&
+          stayTimeChatEnabled(reservation.id, env) && modification?.status === "AWAITING_PAYMENT" &&
+          modification.stripePaymentStatus === null && modification.checkoutExpiresAt && modification.checkoutExpiresAt > now) {
+        const recover = input.recoverStayTimePaymentStatus ?? (async (scope: { guestToken: string; modificationId: string }) => {
+          const key = env.STRIPE_SECRET_KEY?.trim() ?? "";
+          if (!/^(?:sk|rk)_(?:test|live)_/.test(key) || key !== process.env.STRIPE_SECRET_KEY?.trim()) {
+            throw new Error("STAY_TIME_CHECKOUT_CONFIG_INVALID");
+          }
+          const { default: stripe } = await import("../billing/stripe.js");
+          const { recoverStayTimeCheckoutStatus } = await import("../services/stay-time-checkout.service.js");
+          await recoverStayTimeCheckoutStatus(scope, { client: input.prisma as PrismaClient, stripe,
+            now: input.now ?? (() => new Date()), livemode: /^(?:sk|rk)_live_/.test(key) });
+        });
+        await recover({ guestToken: req.params.guestToken, modificationId: modification.id });
+        modification = await input.prisma.reservationModification.findFirst(modificationQuery);
+      }
       return res.json({ ok: true, status: {
         proposalId: proposal.id, proposalStatus: proposal.status,
         modificationId: modification?.id ?? null, modificationStatus: modification?.status ?? null,
@@ -315,7 +345,7 @@ async function createDefaultActionBroker(): Promise<
 function hasOnlyConfirmationTokenField(
   value: unknown,
 ): value is {
-  confirmationToken: unknown;
+  confirmationToken: string;
 } {
   if (
     !value ||
@@ -336,7 +366,10 @@ function hasOnlyConfirmationTokenField(
   return (
     keys.length === 1 &&
     keys[0] ===
-      "confirmationToken"
+      "confirmationToken" &&
+    typeof (value as { confirmationToken?: unknown }).confirmationToken === "string" &&
+    (value as { confirmationToken: string }).confirmationToken.length > 0 &&
+    (value as { confirmationToken: string }).confirmationToken.length <= 512
   );
 }
 
@@ -353,6 +386,14 @@ function mapActionBrokerError(
   publicCode: string;
   logCode: string;
 }> {
+  if (error instanceof StayTimePolicyError) {
+    const unavailable = ["STAY_TIME_CHAT_DISABLED", "STAY_TIME_CHAT_EXECUTION_UNAVAILABLE", "STAY_TIME_CHECKOUT_PROVIDER_UNAVAILABLE"].includes(error.code);
+    const missing = ["STAY_TIME_RESERVATION_NOT_FOUND", "STAY_TIME_PROPOSAL_NOT_FOUND"].includes(error.code);
+    const invalid = ["INVALID_GUEST_TOKEN", "INVALID_STAY_TIME_REQUEST"].includes(error.code);
+    return { status: unavailable ? 503 : missing ? 404 : invalid ? 400 : 409,
+      publicCode: unavailable ? "PIN_AI_ACTIONS_UNAVAILABLE" : missing ? "ACTION_PROPOSAL_NOT_FOUND" : invalid ? "INVALID_REQUEST" : "ACTION_REVIEW_REQUIRED",
+      logCode: error.code };
+  }
   if (
     error instanceof
     PinAIActionBrokerError
@@ -481,6 +522,43 @@ function mapActionBrokerError(
   };
 }
 
+// Exact codes only: never log arbitrary error messages, names, bodies or causes.
+const SAFE_GATEWAY_RUNTIME_CODES = new Set([
+  "PIN_AI_RUNTIME_SHADOW_DISABLED",
+  "PIN_AI_RUNTIME_REAL_READ_DISABLED",
+  "PIN_AI_RUNTIME_ACTION_BROKER_REQUIRED",
+  "PIN_AI_RUNTIME_ACTION_AUTHORIZATION_MISSING",
+  "PIN_AI_RUNTIME_OPENAI_API_KEY_MISSING",
+  "PIN_AI_RUNTIME_OPENAI_AGENT_ID_MISSING",
+  "PIN_AI_RUNTIME_OPENAI_AGENT_ID_INVALID",
+  "PIN_AI_RUNTIME_OPENAI_DISABLED",
+  "PIN_AI_RUNTIME_OPENAI_INVALID_RESPONSE",
+  "PIN_AI_RUNTIME_OPENAI_SESSION_ID_INVALID",
+  "PIN_AI_RUNTIME_OPENAI_SESSION_ID_MISMATCH",
+  "PIN_AI_RUNTIME_AGENT_SESSION_BUSY",
+  "PIN_AI_RUNTIME_AGENT_SESSION_FAILED",
+  "PIN_AI_RUNTIME_AGENT_TURN_POLL_LIMIT",
+  "PIN_AI_RUNTIME_MODEL_NOT_ALLOWED",
+  "PIN_AI_GUEST_GATEWAY_NETWORK_CALL_LIMIT",
+]);
+
+function safeGatewayRuntimeLogCode(error: unknown): string {
+  if (!(error instanceof Error)) return "PIN_AI_GATEWAY_UNKNOWN_ERROR";
+  if (SAFE_GATEWAY_RUNTIME_CODES.has(error.message)) return error.message;
+  if (/^PIN_AI_RUNTIME_OPENAI_HTTP_[45][0-9]{2}$/.test(error.message)) {
+    return error.message;
+  }
+  const cause = error.cause;
+  if (error instanceof TypeError && error.message === "fetch failed" &&
+      cause && typeof cause === "object" && "code" in cause &&
+      typeof cause.code === "string" &&
+      ["ENOTFOUND", "EAI_AGAIN", "ECONNREFUSED", "ECONNRESET",
+        "ETIMEDOUT", "UND_ERR_CONNECT_TIMEOUT"].includes(cause.code)) {
+    return `PIN_AI_GATEWAY_NETWORK_${cause.code}`;
+  }
+  return "PIN_AI_GATEWAY_UNCLASSIFIED_ERROR";
+}
+
 function mapGatewayError(error: unknown): Readonly<{
   status: number;
   publicCode: string;
@@ -525,6 +603,6 @@ function mapGatewayError(error: unknown): Readonly<{
   return {
     status: 502,
     publicCode: "PIN_AI_UNAVAILABLE",
-    logCode: error instanceof Error ? error.name : "UnknownError",
+    logCode: safeGatewayRuntimeLogCode(error),
   };
 }

@@ -7,7 +7,7 @@ type RevenueAuditEntryInput = {
   pricingBreakdown: DecisionStep<number>[];
   startedAt?: Date;
   completedAt?: Date;
-  reason?: string;
+  reason?: string | undefined;
   metadata?: Record<string, unknown>;
 };
 
@@ -20,11 +20,11 @@ function toAuditDecisionTrace(
     label: decision.label,
     previousValue: decision.previousValue,
     newValue: decision.newValue,
-    adjustment: decision.adjustment,
-    adjustmentPercent: decision.adjustmentPercent,
+    ...(decision.adjustment !== undefined ? { adjustment: decision.adjustment } : {}),
+    ...(decision.adjustmentPercent !== undefined ? { adjustmentPercent: decision.adjustmentPercent } : {}),
     applied: decision.applied,
     confidence: decision.confidence,
-    metadata: decision.metadata,
+    ...(decision.metadata !== undefined ? { metadata: decision.metadata } : {}),
   };
 }
 
@@ -83,6 +83,7 @@ export function createRevenueAuditEntry(
     input.pricingBreakdown
   );
 
+  const recommendedAction = getRevenueAuditRecommendedAction(decisions);
   return {
     engine: "Revenue",
     decisionId: input.decisionId,
@@ -95,9 +96,9 @@ export function createRevenueAuditEntry(
     startedAt,
     completedAt,
     durationMs: Math.max(0, completedAt.getTime() - startedAt.getTime()),
-    reason: input.reason,
+    ...(input.reason !== undefined ? { reason: input.reason } : {}),
     decisions,
-    recommendedAction: getRevenueAuditRecommendedAction(decisions),
-    metadata: input.metadata,
+    ...(recommendedAction !== undefined ? { recommendedAction } : {}),
+    ...(input.metadata !== undefined ? { metadata: input.metadata } : {}),
   };
 }

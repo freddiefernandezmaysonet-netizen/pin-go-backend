@@ -66,9 +66,10 @@ jobs:
           SCOPE_PR_NUMBER: ${{ github.event.pull_request.number }}
           SCOPE_HEAD_REPO: ${{ github.event.pull_request.head.repo.full_name }}
           SCOPE_BASE_REPO: ${{ github.event.pull_request.base.repo.full_name }}
+          SCOPE_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
         run: |
           BASE_BRANCH="${GITHUB_BASE_REF:-main}"
-          git fetch origin "+refs/heads/$BASE_BRANCH:refs/remotes/origin/$BASE_BRANCH" --depth=1
+          git fetch origin "+refs/heads/$BASE_BRANCH:refs/remotes/origin/$BASE_BRANCH"
           git diff --name-only "origin/$BASE_BRANCH...HEAD" | sort > "$RUNNER_TEMP/actual.txt"
           # PR #353 only: exact reviewed cleaner-access candidate; retain all OTA certifications.
           if [ "${GITHUB_HEAD_REF:-}" = "agent/cleaner-access-window-v2" ]; then
@@ -116,6 +117,180 @@ jobs:
           if [ "${GITHUB_HEAD_REF:-}" = "agent/channex-host-messages-installation-v1" ]; then
             python3 scripts/verify-channex-messages-pr-scope.test.py
             python3 scripts/verify-channex-messages-pr-scope.py
+            exit 0
+          fi
+
+          # PR #333 only: exact property stay-time settings scope; retain all OTA tests below.
+          if [ "${GITHUB_HEAD_REF:-$GITHUB_REF_NAME}" = "agent/pin-ai-stay-time-policy-v1" ]; then
+            test "$GITHUB_EVENT_NAME" = "pull_request"
+            test "$GITHUB_REPOSITORY" = "freddiefernandezmaysonet-netizen/pin-go-backend"
+            test "$SCOPE_PR_NUMBER" = "333"
+            test "$SCOPE_HEAD_REPO" = "$GITHUB_REPOSITORY"
+            test "$SCOPE_BASE_REPO" = "$GITHUB_REPOSITORY"
+            test "$GITHUB_BASE_REF" = "main"
+            cat > "$RUNNER_TEMP/stay-time-settings-allowed.txt" <<'EOF'
+          .github/workflows/cleaner-access-window.yml
+          .github/workflows/cleaning-followup-v1-foundation.yml
+          .github/workflows/ota-airbnb-listing-discovery.yml
+          .github/workflows/ota-initial-distribution-enablement.yml
+          .github/workflows/pin-ai-host-incidents-v1.yml
+          .github/workflows/pin-ai-stay-time-policy-v1.yml
+          .github/workflows/pin-ai-stay-time-settings-v1.yml
+          docs/audits/cleaner-access-window-v2.md
+          docs/audits/stay-time-cleaner-compatibility.md
+          docs/pin-ai-stay-time-policy-v1.md
+          package.json
+          prisma/migrations/20261001110000_property_stay_time_settings_v1/migration.sql
+          prisma/migrations/20261001183000_cleaning_work_confirmation_history/migration.sql
+          prisma/migrations/20261003010000_stay_time_recovery/migration.sql
+          prisma/schema.prisma
+          src/apms/mission-control.mapper.ts
+          src/apms/operational-intelligence.service.ts
+          src/apms/revenue-audit.mapper.ts
+          src/contracts/channex-certified-core.freeze.test.ts
+          src/data/market-season-catalog.ts
+          src/domain/computeOperationalRisk.ts
+          src/lib/mailer.ts
+          src/pin-ai/actions/action-broker.service.ts
+          src/pin-ai/actions/action-proposal.service.ts
+          src/pin-ai/actions/stay-time-policy.test.ts
+          src/pin-ai/actions/stay-time-policy.ts
+          src/pin-ai/actions/stay-time-settings.ts
+          src/pin-ai/guest/guest-history-reader.ts
+          src/pin-ai/guest/guest-runtime-gateway.ts
+          src/pin-ai/guest/stay-time-chat-actions.test.ts
+          src/pin-ai/guest/stay-time-chat-actions.ts
+          src/pin-ai/runtime/action-proposal-tool-executor.ts
+          src/pin-ai/runtime/openai-agent-config.ts
+          src/pin-ai/runtime/pin-go-read-tool-executor.ts
+          src/pin-ai/runtime/stay-time-tool.test.ts
+          src/pin-ai/runtime/stay-time-tool.ts
+          src/pms/outbound/channex-ari-outbox.service.ts
+          src/pms/outbound/channex-ari-rates-restrictions-snapshot.policy.ts
+          src/pms/outbound/channex-ari-reservation-producer.service.ts
+          src/routes/access.nfc.routes.ts
+          src/routes/admin.financial.routes.ts
+          src/routes/admin.stay-time-recovery.routes.test.ts
+          src/routes/admin.stay-time-recovery.routes.ts
+          src/routes/cleaning-completion-mobile.response.test.js
+          src/routes/dashboard.ota-availability-conflicts.routes.test.ts
+          src/routes/dashboard.ota-availability-conflicts.routes.ts
+          src/routes/dashboard.properties.route.ts
+          src/routes/dashboard.route.ts
+          src/routes/dashboard.stay-time-settings.routes.test.ts
+          src/routes/dashboard.stay-time-settings.routes.ts
+          src/routes/property.settings.routes.ts
+          src/routes/public-booking.pin-ai.routes.test.ts
+          src/routes/public-booking.pin-ai.routes.ts
+          src/server.ts
+          src/services/arrival-cleaning-readiness.service.ts
+          src/services/availability.service.ts
+          src/services/channex-availability-conflict.service.ts
+          src/services/cleaner-access-autopilot.service.ts
+          src/services/cleaner-access-property-reconcile.service.ts
+          src/services/cleaner-access-property-reconcile.test.ts
+          src/services/cleaner-access-provisioning.test.ts
+          src/services/cleaner-access-window.policy.ts
+          src/services/cleaner-access-window.service.ts
+          src/services/cleaner-access-window.test.ts
+          src/services/cleaning-reconfirmation-renewal.db.test.ts
+          src/services/cleaning-reconfirmation-renewal.service.ts
+          src/services/cleaning-timing-consent.prisma.test.ts
+          src/services/cleaning-timing-consent.prisma.ts
+          src/services/cleaning-work-completion.prisma.test.ts
+          src/services/cleaning-work-completion.prisma.ts
+          src/services/cleaning-work-snapshot.database.test.ts
+          src/services/cleaning-work-snapshot.prisma.ts
+          src/services/cleaning-work-start.prisma.test.ts
+          src/services/cleaning-work-start.prisma.ts
+          src/services/direct-booking-direct-charges-only.contract.test.ts
+          src/services/direct-booking-ingest-transaction.db.test.ts
+          src/services/direct-booking-ingest-transaction.test.ts
+          src/services/direct-booking-ingest-transaction.ts
+          src/services/direct-booking.service.ts
+          src/services/guest-reservation-modification-apply.service.ts
+          src/services/guest-reservation-modification-checkout-contract.ts
+          src/services/guest-reservation-modification-checkout.service.ts
+          src/services/ingest.service.ts
+          src/services/manual-reservation-date-change.behavior.test.ts
+          src/services/manual-reservation-date-change.contract.test.ts
+          src/services/manual-reservation-date-change.service.ts
+          src/services/nfc-sync.service.ts
+          src/services/ota-availability-conflict-review.db.test.ts
+          src/services/ota-availability-conflict-review.service.ts
+          src/services/property-stay-time-settings.db.test.ts
+          src/services/property-stay-time-settings.service.ts
+          src/services/reservation-cleaning-window.ts
+          src/services/reservation-complete-flow-audit.service.ts
+          src/services/reservation-guest-access-window.test.ts
+          src/services/reservation-guest-access-window.ts
+          src/services/reservation-reconcile-cleaner-reconfirmation.contract.test.ts
+          src/services/reservation.reconcile.service.ts
+          src/services/staff-selection.service.ts
+          src/services/stay-time-apply-validation.service.ts
+          src/services/stay-time-apply.db.test.ts
+          src/services/stay-time-checkout-preflight.db.test.ts
+          src/services/stay-time-checkout.db.test.ts
+          src/services/stay-time-checkout.service.ts
+          src/services/stay-time-departure-cleaning.fixture.ts
+          src/services/stay-time-departure-cleaning.service.test.ts
+          src/services/stay-time-departure-cleaning.service.ts
+          src/services/stay-time-estimate.service.test.ts
+          src/services/stay-time-estimate.service.ts
+          src/services/stay-time-guest-action.db.test.ts
+          src/services/stay-time-guest-action.service.ts
+          src/services/stay-time-hourly-basis.ts
+          src/services/stay-time-operator-review.db.test.ts
+          src/services/stay-time-operator-review.service.ts
+          src/services/stay-time-payment-event.service.ts
+          src/services/stay-time-payment-event.test.ts
+          src/services/stay-time-payment-evidence.fixture.ts
+          src/services/stay-time-payment-evidence.test.ts
+          src/services/stay-time-payment-evidence.ts
+          src/services/stay-time-payment-flow.db.test.ts
+          src/services/stay-time-payment-flow.service.ts
+          src/services/stay-time-payment-window.test.ts
+          src/services/stay-time-payment-window.ts
+          src/services/stay-time-proposal.service.ts
+          src/services/stay-time-quote.service.test.ts
+          src/services/stay-time-quote.service.ts
+          src/services/stay-time-recovery.db.test.ts
+          src/services/stay-time-recovery.service.ts
+          src/services/stay-time-stripe-provider.test.ts
+          src/services/stay-time-stripe-provider.ts
+          src/services/stripe-direct-charge-dispute.service.test.ts
+          src/services/stripe-direct-charge-dispute.service.ts
+          src/webhooks/stripe.webhook.ts
+          src/workers/stay-time-recovery.worker.ts
+          tsconfig.pin-ai-guest-gateway.json
+          tsconfig.pin-ai-stay-time-policy.json
+          tsconfig.pin-ai-stay-time-settings.json
+          EOF
+            sort "$RUNNER_TEMP/stay-time-settings-allowed.txt" -o "$RUNNER_TEMP/stay-time-settings-allowed.txt"
+            # Another merged PR may already contain the exact battery correction.
+            if git diff --quiet "origin/$BASE_BRANCH" HEAD -- src/domain/computeOperationalRisk.ts; then
+              sed -i '\|^src/domain/computeOperationalRisk.ts$|d' "$RUNNER_TEMP/stay-time-settings-allowed.txt"
+            fi
+            diff -u "$RUNNER_TEMP/stay-time-settings-allowed.txt" "$RUNNER_TEMP/actual.txt"
+            # Preserve the certified schema, then pin the additive worker delta.
+            recovery_base=5e976be76cffd4c0077d4cfaeed3ec1b3e488214
+            test "$(git diff --no-ext-diff --no-color --full-index --unified=0 "origin/$BASE_BRANCH...$recovery_base" -- prisma/schema.prisma | sha256sum | cut -d ' ' -f 1)" = "e4275686f99c3709a02b3040d60fc4460011f61f8aa69b45f31add54695f3409"
+            # Pin recovery plus the two reviewed arrival-location fields from main.
+            # Require this event's head in HEAD; no other schema delta is allowed.
+            git merge-base --is-ancestor "$SCOPE_HEAD_SHA" HEAD
+            test "$(git diff --no-ext-diff --no-color --full-index --unified=0 "$recovery_base" "$SCOPE_HEAD_SHA" -- prisma/schema.prisma | sha256sum | cut -d ' ' -f 1)" = "b10addcc333c8f56357650ee5a9ff0456e0becebc17dcaf936a997d7d0b7a1c4"
+            test "$(sha256sum prisma/migrations/20261003010000_stay_time_recovery/migration.sql | cut -d ' ' -f 1)" = "73e34f34c3010a6bcf80ac2c267b887b8d96bd0b9cc61a827d75f2dd73a0028b"
+            test "$(git diff --no-ext-diff --no-color --full-index --unified=0 "$recovery_base" HEAD -- package.json | sha256sum | cut -d ' ' -f 1)" = "0a4686c80531858708636ccefd893632e039998d69554c740e0c13b35025074f"
+            test "$(sha256sum prisma/migrations/20261001183000_cleaning_work_confirmation_history/migration.sql | cut -d ' ' -f 1)" = "20cd60db321dc5becbadc2f56065cf9f29f320941625da3d5b246927c5d37d0a"
+            test "$(sha256sum prisma/migrations/20261001110000_property_stay_time_settings_v1/migration.sql | cut -d ' ' -f 1)" = "848dc881ee67925f88af326639cc457b64704ddb01773ee8fdd7dea58a80f9df"
+            # Pin exact added/removed server lines; unrelated base edits change blob IDs and offsets.
+            test "$(git diff --no-ext-diff --no-color --full-index --unified=0 "origin/$BASE_BRANCH...HEAD" -- src/server.ts | sed '/^index /d; /^@@ /d' | sha256sum | cut -d ' ' -f 1)" = "0a19e9d1d9857b769dcd3725b43fb7b2db6cc6fedbce8034db8ddd8877547774"
+            if ! git diff --quiet "origin/$BASE_BRANCH" HEAD -- src/domain/computeOperationalRisk.ts; then
+              test "$(git diff --no-ext-diff --no-color --full-index --unified=0 "origin/$BASE_BRANCH...HEAD" -- src/domain/computeOperationalRisk.ts | sha256sum | cut -d ' ' -f 1)" = "c5591cd2c13898778ad044c54bc82543f97c3407d0d82569ed70957fef4e4244"
+            fi
+            # Preserve the exact four migration lines despite unrelated main workflow edits.
+            test "$(git diff --no-ext-diff --no-color --full-index --unified=0 "origin/$BASE_BRANCH...HEAD" -- .github/workflows/pin-ai-host-incidents-v1.yml | sed '/^index /d; /^@@ /d' | sha256sum | cut -d ' ' -f 1)" = "efc578723493d5adf7c3ec11e091d1b49b8b058a92883d2e1d63e9041bb54b2e"
+            echo "PR #333 exact settings scope verified; continuing retained OTA certifications."
             exit 0
           fi
 
@@ -809,7 +984,25 @@ jobs:
             exit 0
           fi
 
-          if [ "${GITHUB_HEAD_REF:-}" = "agent/staff-preferred-language-v1" ]; then
+          if [ "${GITHUB_HEAD_REF:-}" = "agent/pin-ai-stay-time-policy-v1" ]; then
+            # The earlier exact PR/repository allowlist remains mandatory.
+            # Only the three explicitly recertified ARI files may differ; pin
+            # their exact reviewed bytes before retaining the transport freeze.
+            sha256sum --check <<'EOF'
+          7e03d01c275bd926fe8da15c277e72e09b486fe510ddaeee24218d17e7be6aaa  src/pms/outbound/channex-ari-outbox.service.ts
+          8b2f92b794de3bc503073c0f8ecd9d87bf81f9e18bfce265a051753ce5b6ca60  src/pms/outbound/channex-ari-rates-restrictions-snapshot.policy.ts
+          1e41e2681d41d53ef375513e2d4a1848d48b46e1707c3e272cd661464da6301f  src/pms/outbound/channex-ari-reservation-producer.service.ts
+          EOF
+            git diff --exit-code "$BASE_RANGE" -- src/pms src/workers \
+              src/distribution/channex-readonly.http-transport.ts \
+              src/distribution/channex-white-label.http-transport.ts \
+              ':(exclude)src/workers/stay-time-recovery.worker.ts' \
+              ':(exclude)src/pms/outbound/channex-ari-outbox.service.ts' \
+              ':(exclude)src/pms/outbound/channex-ari-rates-restrictions-snapshot.policy.ts' \
+              ':(exclude)src/pms/outbound/channex-ari-reservation-producer.service.ts'
+            test "$(git diff --name-only --diff-filter=A "$BASE_RANGE" -- src/workers)" = "src/workers/stay-time-recovery.worker.ts"
+            test "$(sha256sum src/workers/stay-time-recovery.worker.ts | cut -d ' ' -f 1)" = "04f659ea8ed6ccc60e122843f0dc0a066384236584f3b29310879259ab05f508"
+          elif [ "${GITHUB_HEAD_REF:-}" = "agent/staff-preferred-language-v1" ]; then
             python3 scripts/verify-staff-language-pr-scope.py
             git diff --exit-code "$BASE_RANGE" -- \
               src/pms \

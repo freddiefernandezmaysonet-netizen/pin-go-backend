@@ -28,6 +28,7 @@ export const PIN_AI_OPENAI_AGENT_INSTRUCTIONS = [
 
 export type PinAIOpenAIActionProposalConfig = Readonly<{
   enabled: boolean;
+  stayTimeEnabled?: boolean;
 }>;
 
 export type PinAIOpenAIWebSearchConfig = Readonly<{
@@ -65,6 +66,9 @@ export function buildPinAIOpenAIInstructions(
     "If a proposal is prepared, state the exact quote expiration returned by the tool, state that availability is not held and will be checked again, and ask the guest to use the confirmation control shown in the interface.",
     "Never ask the guest to type or repeat a confirmation token. Never mention or infer any private confirmation credential.",
     "Never claim the reservation changed unless a later canonical result explicitly says actionExecuted=true.",
+    ...(actionProposal.stayTimeEnabled ? [
+      "For early check-in or late checkout, first check the requested HH:MM property-local time with check_early_checkin or check_late_checkout. Those tools return estimates only. When the guest wants a reviewable offer, call prepare_reservation_modification with operation EARLY_CHECKIN or LATE_CHECKOUT and requestedLocalTime only. Do not send dates for these operations. Display the returned additional amount including taxes, requested time, property timezone and expiry. A typed yes is not consent: direct the guest to the interface confirmation control. Payment and access are not completed by this tool.",
+    ] : []),
   ].join(" ");
 }
 
@@ -94,6 +98,14 @@ export function buildPinAIOpenAITools(
       name: tool.name,
       description: tool.description,
       parameters:
+        tool.name === "prepare_reservation_modification" && actionProposal?.stayTimeEnabled ? {
+          type: "object", properties: {
+            operation: { type: "string", enum: ["EXTEND_CHECKOUT_ONLY", "EARLY_CHECKIN", "LATE_CHECKOUT"] },
+            proposedCheckInDate: { type: "string", description: "YYYY-MM-DD for a pre-stay date change only." },
+            proposedCheckOutDate: { type: "string", description: "YYYY-MM-DD required for date changes and EXTEND_CHECKOUT_ONLY. Omit for stay-time operations." },
+            requestedLocalTime: { type: "string", description: "HH:MM required only for EARLY_CHECKIN or LATE_CHECKOUT, in the property timezone." },
+          }, additionalProperties: false,
+        } :
         tool.name === "escalate_to_host" && incidentsEnabled ? {
           type: "object", properties: {
             operation: { type: "string", enum: ["REPORT", "STATUS"] },

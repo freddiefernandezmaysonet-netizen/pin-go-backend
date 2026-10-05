@@ -134,7 +134,7 @@ export async function syncStripeDirectChargeDispute(
     resolvedAt: isClosed ? occurredAt : null,
     resolutionCode: isClosed ? "STRIPE_DISPUTE_CLOSED" : null,
     resolutionSummary: isClosed ? "Stripe reported the dispute as closed." : null,
-    resolutionType: isClosed ? "EXTERNAL" : null,
+    resolutionType: isClosed ? "AUTOMATIC" : null,
     resolvedBy: isClosed ? "SYSTEM" : null,
     actionTarget: "PAYMENT",
     metadata: {

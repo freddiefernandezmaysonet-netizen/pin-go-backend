@@ -113,6 +113,48 @@ test("CleaningWork persistence on disposable PostgreSQL", { timeout: 60000 }, as
       const scope = await fixture();
       await assert.rejects(db.$executeRaw`UPDATE "PropertyStaff" SET "cleaningDurationCommitmentMinutes" = 14 WHERE "staffMemberId" = ${scope.staffMemberId}`);
     });
+    await t.test("new confirmation preserves historical work and never inherits consent", async () => {
+      const scope = await fixture();
+      const first = await materializeCleaningWorkSnapshot(store, scope, TEST_NOW);
+      const oldId = first.work!.id;
+      await db.cleaningWork.update({ where: { id: oldId }, data: {
+        timingConsentAcceptedAt: TEST_NOW, timingConsentVersion: "historical-consent",
+      } });
+      const replacement = { ...scope, confirmationId: `confirmation-${randomUUID()}` };
+      await db.$executeRaw`INSERT INTO "CleaningConfirmation" VALUES (
+        ${replacement.confirmationId}, ${scope.propertyId}, ${scope.reservationId}, ${scope.staffMemberId}, 'CONFIRMED')`;
+      // New confirmation alone is not authority to replace current work.
+      await assert.rejects(materializeCleaningWorkSnapshot(store, replacement, TEST_NOW), /REASSIGNMENT_REQUIRES_REVIEW/);
+      assert.equal(await count(scope), 1);
+      // Simulate the separately authorized supersession transaction; this adapter
+      // must never perform it implicitly when a cleaner opens a new link.
+      await db.$executeRaw`UPDATE "CleaningConfirmation" SET "status" = 'EXPIRED' WHERE "id" = ${scope.confirmationId}`;
+      const historical = await db.cleaningWork.update({ where: { id: oldId }, data: { supersededAt: TEST_NOW } });
+      await db.$executeRaw`UPDATE "Reservation" SET "checkOut" = TIMESTAMP '2026-09-28 17:00:00' WHERE "id" = ${scope.reservationId}`;
+      const results = await Promise.all([
+        materializeCleaningWorkSnapshot(store, replacement, TEST_NOW),
+        materializeCleaningWorkSnapshot(store, replacement, TEST_NOW),
+      ]);
+      assert.deepEqual(results.map(r => r.outcome).sort(), ["CREATED", "REPLAYED"]);
+      assert.equal(await count(scope), 2);
+      const next = results[0].work!;
+      assert.notEqual(next.id, oldId);
+      assert.equal(next.confirmationId, replacement.confirmationId);
+      assert.equal(next.scheduledStartAt.toISOString(), "2026-09-28T17:30:00.000Z");
+      assert.equal(next.timingConsentAcceptedAt, null);
+      assert.equal(next.timingConsentVersion, null);
+      assert.equal(next.startConfirmedAt, null);
+      assert.equal(next.completionConfirmedAt, null);
+      assert.deepEqual(await db.cleaningWork.findUniqueOrThrow({ where: { id: oldId } }), historical);
+      await assert.rejects(materializeCleaningWorkSnapshot(store, scope, TEST_NOW), /CONFIRMATION_REQUIRED/);
+      assert.equal(await count(scope), 2);
+    });
+    await t.test("database prevents duplicate work for the same non-null confirmation", async () => {
+      const scope = await fixture();
+      const first = await materializeCleaningWorkSnapshot(store, scope, TEST_NOW);
+      const row = await db.cleaningWork.findUniqueOrThrow({ where: { id: first.work!.id } });
+      await assert.rejects(db.cleaningWork.create({ data: { ...row, id: randomUUID() } }), (error: any) => error.code === "P2002");
+    });
   } finally {
     await db.$disconnect();
   }

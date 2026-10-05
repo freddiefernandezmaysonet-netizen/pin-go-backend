@@ -34,6 +34,18 @@ type ProposalLanguage = "en" | "es";
 type ProposalTerms =
   Readonly<Record<string, unknown>>;
 
+/** Internal validator; never populated from request/model arguments. */
+export type StayTimeProposalValidator = (input: {
+  db: Prisma.TransactionClient; guestToken: string; termsSnapshot: unknown;
+  expiresAt: Date; now: Date;
+}) => Promise<void>;
+
+function isStayTimeProposal(terms: unknown): boolean {
+  if (!terms || typeof terms !== "object" || Array.isArray(terms)) return false;
+  const value = terms as Record<string, unknown>;
+  return value.version === "stay_time_quote_v1" || value.operation === "EARLY_CHECKIN" || value.operation === "LATE_CHECKOUT";
+}
+
 type ProposalReservationScope = Readonly<{
   stateFingerprint: string;
   id: string;
@@ -85,6 +97,7 @@ export type CreatePinAIActionProposalInput =
     termsSnapshot: ProposalTerms;
     expiresAt?: Date;
     now?: Date;
+    validateStayTime?: StayTimeProposalValidator;
   }>;
 
 export type ConfirmPinAIActionProposalInput =
@@ -94,6 +107,7 @@ export type ConfirmPinAIActionProposalInput =
     proposalId: unknown;
     confirmationToken: unknown;
     now?: Date;
+    validateStayTime?: StayTimeProposalValidator;
   }>;
 
 export type SupersedePinAIActionProposalInput =
@@ -719,6 +733,10 @@ export async function createPinAIActionProposal(
                   .guestTokenExpiresAt,
               );
             const quotedState = extensionStateFingerprint(input.termsSnapshot);
+            if (isStayTimeProposal(input.termsSnapshot)) {
+              if (!input.validateStayTime) return fail("INVALID_TERMS", 400);
+              await input.validateStayTime({ db, guestToken, termsSnapshot: input.termsSnapshot, expiresAt, now });
+            }
             if (quotedState && (actionType !== PinAIActionProposalType.RESERVATION_MODIFICATION ||
                 quotedState !== reservation.stateFingerprint)) {
               return fail("PROPOSAL_CONCURRENT_CHANGE");
@@ -1044,6 +1062,13 @@ export async function confirmPinAIActionProposal(
               );
             }
 
+            // Generic confirmation must not bypass the stay-time revalidation adapter.
+            if (input.validateStayTime && !isStayTimeProposal(proposal.termsSnapshot)) {
+              return fail("INVALID_TERMS", 400);
+            }
+            if (isStayTimeProposal(proposal.termsSnapshot) && !input.validateStayTime) {
+              return fail("PROPOSAL_NOT_CONFIRMABLE");
+            }
             if (
               proposal.status ===
               PinAIActionProposalStatus
@@ -1132,6 +1157,11 @@ export async function confirmPinAIActionProposal(
                   "PROPOSAL_SUPERSEDED",
                 statusCode: 409,
               };
+            }
+
+            if (isStayTimeProposal(proposal.termsSnapshot)) {
+              await input.validateStayTime!({ db, guestToken, termsSnapshot: proposal.termsSnapshot,
+                expiresAt: proposal.expiresAt, now });
             }
 
             const updated =

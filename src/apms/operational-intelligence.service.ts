@@ -841,6 +841,10 @@ export async function resolveOperationalIssuesForReservation(
     const resolvedIssueIds: string[] = [];
 
     for (const activeIssue of activeIssues) {
+      // Cancelling/ending a reservation does not settle an incremental stay-time
+      // payment or prove access reconciliation. Its recovery owner closes this
+      // incident only after canonical application/refund evidence is present.
+      if (activeIssue.issueCode === "STAY_TIME_RECOVERY_REVIEW") continue;
       requireOperationalTransition(
         activeIssue.workflowState,
         "RESOLVED"

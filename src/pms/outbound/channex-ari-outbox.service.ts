@@ -119,8 +119,8 @@ function normalizeIncrementalScope(
       throw new Error("CHANNEX_ARI_DATE_KEYS_EXCEED_HORIZON");
     }
 
-    const dateFrom = dateKeys[0];
-    const dateToExclusive = addUtcDays(dateKeys[dateKeys.length - 1], 1);
+    const dateFrom = dateKeys[0]!;
+    const dateToExclusive = addUtcDays(dateKeys[dateKeys.length - 1]!, 1);
 
     assertWithinActiveHorizon({
       from: dateFrom,
@@ -282,12 +282,12 @@ export async function createChannexAriOutboxEvent(
   const changedFields = normalizeChangedFields({
     messageKind,
     syncMode: normalizedScope.syncMode,
-    changedFields: input.changedFields,
+    ...(input.changedFields !== undefined ? { changedFields: input.changedFields } : {}),
   });
   const availableAt = resolveAvailableAt({
     now,
     syncMode: normalizedScope.syncMode,
-    coalesceMs: input.coalesceMs,
+    ...(input.coalesceMs !== undefined ? { coalesceMs: input.coalesceMs } : {}),
   });
 
   if (Boolean(sourceEntityType) !== Boolean(sourceEntityId)) {

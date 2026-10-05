@@ -37,6 +37,16 @@ export type PinAIActionBrokerPublicProposal =
       amountDifferenceCents: number;
       currency: string;
       financialAction: string;
+      stayTime?: Readonly<{
+        operation: "EARLY_CHECKIN" | "LATE_CHECKOUT";
+        requestedLocalTime: string;
+        currentCheckIn: string;
+        currentCheckOut: string;
+        proposedCheckIn: string;
+        proposedCheckOut: string;
+        consentText: string;
+        language?: "en" | "es";
+      }>;
     }>;
   }>;
 

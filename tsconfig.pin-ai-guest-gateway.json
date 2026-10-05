@@ -2,11 +2,14 @@
   "extends": "./tsconfig.json",
   "compilerOptions": {
     "noEmit": true,
+    "module": "preserve",
+    "moduleResolution": "bundler",
     "types": ["node"],
     "exactOptionalPropertyTypes": false,
     "noUncheckedIndexedAccess": false
   },
   "include": [
+    "src/pin-ai/guest/stay-time-chat-actions.test.ts",
     "src/pin-ai/guest/guest-runtime-gateway.ts",
     "src/pin-ai/guest/guest-runtime-gateway.test.ts",
     "src/pin-ai/guest/guest-history.database.test.ts",

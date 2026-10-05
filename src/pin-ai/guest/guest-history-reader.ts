@@ -1,6 +1,7 @@
 import type { PrismaClient } from "@prisma/client";
 import type { PinAIActionBrokerExecuteResult } from "../actions/action-broker.service.js";
 import { openGuestHistory, readGuestMessages, type GuestHistoryMessage } from "./guest-history.js";
+import { actionModificationRequestId } from "./stay-time-chat-actions.js";
 
 type HistoryPrisma = Pick<PrismaClient, "pinAIGuestConversation" | "pinAIActionProposal" | "reservationModification">;
 
@@ -21,10 +22,10 @@ export async function readGuestHistory(prisma: HistoryPrisma, scope: {
     const proposal = await prisma.pinAIActionProposal.findFirst({
       where: { id: p.proposalId, reservationId: scope.reservationId, propertyId: scope.propertyId,
         organizationId: scope.organizationId, actionType: "RESERVATION_MODIFICATION" },
-      select: { id: true, status: true },
+      select: { id: true, status: true, termsSnapshot: true },
     });
     const modification = proposal ? await prisma.reservationModification.findFirst({
-      where: { reservationId: scope.reservationId, clientRequestId: `pin_ai_${proposal.id}`, requestSource: "PIN_AI_GUEST_SERVICES" },
+      where: { reservationId: scope.reservationId, clientRequestId: actionModificationRequestId(proposal), requestSource: "PIN_AI_GUEST_SERVICES" },
       select: { id: true, status: true, stripePaymentStatus: true, checkoutExpiresAt: true, appliedAt: true },
     }) : null;
     if (proposal?.status === "PENDING_CONFIRMATION" && !modification) return message;

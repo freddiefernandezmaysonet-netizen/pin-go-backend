@@ -6,6 +6,7 @@ import { CLEANING_TIMING_CONSENT_VERSION } from "./cleaning-timing-consent.js";
 function fakeDb(seed: any) {
   let row = { ...seed };
   const tx = {
+    $queryRaw: async () => [{ id: seed.reservationId }],
     cleaningWork: {
       findFirst: async ({ where }: any) =>
         row.id === where.id && row.reservationId === where.reservationId &&
