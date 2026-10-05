@@ -51,6 +51,7 @@ export function buildAccessNfcRouter(prisma: PrismaClient) {
   where: { id: reservation.propertyId },
   select: {
     cleaningStartOffsetMinutes: true,
+    cleaningDurationMinutes: true,
     checkInTime: true,
     checkOutTime: true,
     timezone: true,
