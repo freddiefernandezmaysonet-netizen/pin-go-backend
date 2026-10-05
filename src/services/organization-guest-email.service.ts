@@ -13,6 +13,11 @@ export type OrganizationGuestReplyTo = {
   source: GuestReplyToSource;
 };
 
+export type OrganizationPrimaryAdmin = {
+  email: string;
+  fullName: string | null;
+};
+
 const PIN_GO_SUPPORT_EMAIL = "support@pin-ngo.com";
 
 export async function resolveOrganizationGuestReplyTo(
@@ -116,4 +121,38 @@ function normalizeEmail(value: unknown) {
   }
 
   return email;
+}
+
+
+export async function resolveOrganizationPrimaryAdmin(
+  prisma: PrismaClient,
+  organizationId: string
+): Promise<OrganizationPrimaryAdmin | null> {
+  const cleanOrganizationId = String(organizationId ?? "").trim();
+  if (!cleanOrganizationId) {
+    throw new Error("PRIMARY_ADMIN_ORGANIZATION_ID_REQUIRED");
+  }
+
+  const user = await prisma.dashboardUser.findFirst({
+    where: {
+      organizationId: cleanOrganizationId,
+      isActive: true,
+      role: DashboardUserRole.ORG_ADMIN,
+    },
+    orderBy: {
+      createdAt: "asc",
+    },
+    select: {
+      email: true,
+      fullName: true,
+    },
+  });
+
+  const email = normalizeEmail(user?.email);
+  if (!email) return null;
+
+  return {
+    email,
+    fullName: user?.fullName ?? null,
+  };
 }
