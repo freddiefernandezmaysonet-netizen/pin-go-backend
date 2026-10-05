@@ -15,6 +15,7 @@
     "src/services/internal-demo-direct-booking-parity.service.ts",
     "src/services/internal-demo-secure-precheckin.service.ts",
     "src/services/internal-demo-secure-precheckin.service.test.ts",
+    "src/services/internal-demo-native-secure-precheckin.db.test.ts",
     "src/services/reservation-complete-flow-audit.service.ts",
     "src/services/email-delivery.service.ts",
     "src/services/cancellation-policy.service.ts",
