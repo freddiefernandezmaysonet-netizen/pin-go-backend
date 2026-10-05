@@ -8,7 +8,8 @@ export async function runIngestTransaction<T>(
   work: (tx: Prisma.TransactionClient) => Promise<T>,
   externalProvider?: string | null,
 ): Promise<T> {
-  if (source !== "DIRECT_BOOKING" && source !== "MANUAL" && externalProvider !== "CHANNEX") return db.$transaction(work);
+  if (!["DIRECT_BOOKING", "INTERNAL_DEMO_DIRECT_BOOKING", "MANUAL"].includes(source ?? "") &&
+      externalProvider !== "CHANNEX") return db.$transaction(work);
   for (let attempt = 0; ; attempt++) {
     try {
       return await db.$transaction(work, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable });
@@ -26,7 +27,8 @@ export async function assertDirectBookingIngestAvailability(
   input: { source?: string; status?: "ACTIVE" | "CANCELLED"; propertyId: string; checkIn: Date; checkOut: Date },
   previous: { id: string; checkIn: Date; checkOut: Date; status: ReservationStatus } | null,
 ): Promise<void> {
-  if (!["DIRECT_BOOKING", "MANUAL"].includes(input.source ?? "") || input.status === "CANCELLED") return;
+  if (!["DIRECT_BOOKING", "INTERNAL_DEMO_DIRECT_BOOKING", "MANUAL"].includes(input.source ?? "") ||
+      input.status === "CANCELLED") return;
   // A replay of the same active stay does not acquire new occupancy.
   if (previous?.status === "ACTIVE" && previous.checkIn.getTime() === input.checkIn.getTime() &&
       previous.checkOut.getTime() === input.checkOut.getTime()) return;
@@ -34,6 +36,11 @@ export async function assertDirectBookingIngestAvailability(
     propertyId: input.propertyId, checkIn: input.checkIn, checkOut: input.checkOut,
     ...(previous ? { excludeReservationId: previous.id } : {}),
   }, tx);
-  if (!result.available) throw new Error(input.source === "MANUAL"
-    ? "MANUAL_RESERVATION_DATE_CONFLICT" : "DIRECT_BOOKING_PROPERTY_NO_LONGER_AVAILABLE");
+  if (!result.available) throw new Error(
+    input.source === "MANUAL"
+      ? "MANUAL_RESERVATION_DATE_CONFLICT"
+      : input.source === "INTERNAL_DEMO_DIRECT_BOOKING"
+        ? "DEMO_RESERVATION_DATE_CONFLICT"
+        : "DIRECT_BOOKING_PROPERTY_NO_LONGER_AVAILABLE"
+  );
 }
