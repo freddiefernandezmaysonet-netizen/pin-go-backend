@@ -54,3 +54,47 @@ test("next occupancy lookup includes overlapping guests and excludes the same/ca
   assert.deepEqual(query.orderBy, { checkIn: "asc" });
   assert.equal(result.endsAt.toISOString(), "2026-10-27T18:00:00.000Z");
 });
+
+
+test("internal Demo Center uses 30-minute cleaner access after the configured offset", async () => {
+  let query: any;
+  const db = {
+    reservation: {
+      findFirst: async (args: any) => {
+        query = args;
+        return null;
+      },
+    },
+  };
+  const checkOut = new Date("2026-10-27T11:00:00-04:00");
+  const result = await readCleanerAccessWindow(db as any, {
+    id: "demo-r1",
+    propertyId: "demo-property",
+    source: "INTERNAL_DEMO_DIRECT_BOOKING",
+    checkOut,
+    property: {
+      checkOutTime: "11:00",
+      checkInTime: "15:00",
+      timezone: "America/Puerto_Rico",
+      cleaningStartOffsetMinutes: 15,
+    },
+  });
+  assert.equal(result.startsAt.toISOString(), "2026-10-27T15:15:00.000Z");
+  assert.equal(result.endsAt.toISOString(), "2026-10-27T15:45:00.000Z");
+  assert.equal(result.durationMinutes, 30);
+  assert.equal(query.where.propertyId, "demo-property");
+});
+
+test("normal reservations retain the existing cleaner access calculation", async () => {
+  const db = { reservation: { findFirst: async () => null } };
+  const result = await readCleanerAccessWindow(db as any, {
+    id: "normal-r1",
+    propertyId: "normal-property",
+    source: "DIRECT_BOOKING",
+    checkOut: departure,
+    property,
+  });
+  assert.equal(result.startsAt.toISOString(), "2026-10-27T16:45:00.000Z");
+  assert.equal(result.endsAt.toISOString(), "2026-10-27T19:45:00.000Z");
+  assert.equal(result.durationMinutes, 180);
+});
