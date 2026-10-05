@@ -4,6 +4,7 @@ import { requireAuth } from "../middleware/requireAuth";
 import { processWebhookEventById } from "../pms/ingest/webhook.processor";
 import { completeInternalDemoSecurePrecheckin } from "../services/internal-demo-secure-precheckin.service";
 import { dispatchPendingCleaningConfirmationForReservation } from "../services/cleaning-confirmation-dispatch.service";
+import { applyInternalDemoDirectBookingParity } from "../services/internal-demo-direct-booking-parity.service";
 
 const prisma = new PrismaClient();
 export const adminDemoRouter = Router();
@@ -235,6 +236,7 @@ adminDemoRouter.post(
       });
 
       let securePrecheckin = null;
+      let directBookingParity: any = null;
       let cleaningConfirmationDispatch: any = null;
 
       if (
@@ -281,6 +283,36 @@ adminDemoRouter.post(
             ok: false,
             error:
               `Demo secure pre-check-in failed: ${message}`,
+          });
+        }
+
+        try {
+          directBookingParity =
+            await applyInternalDemoDirectBookingParity(
+              prisma,
+              {
+                reservationId: reservation.id,
+                preferredLanguage:
+                  cleanPreferredLanguage,
+              }
+            );
+        } catch (error: any) {
+          const message = String(
+            error?.message ?? error
+          );
+
+          console.error(
+            "[DEMO_DIRECT_BOOKING_PARITY_ERROR]",
+            {
+              reservationId: reservation.id,
+              error: message,
+            }
+          );
+
+          return res.status(409).json({
+            ok: false,
+            error:
+              `Demo Direct Booking parity failed: ${message}`,
           });
         }
 
@@ -337,10 +369,15 @@ adminDemoRouter.post(
           checkIn: checkInDate.toISOString(),
           checkOut: checkOutDate.toISOString(),
           paymentState: "PAID",
+          paymentSimulated: true,
           delivery: {
             email: {
               enabled: true,
               to: cleanGuestEmail,
+              attempted: directBookingParity?.guestEmail?.attempted ?? false,
+              ok: directBookingParity?.guestEmail?.ok ?? false,
+              status: directBookingParity?.guestEmail?.status ?? "NOT_ATTEMPTED",
+              error: directBookingParity?.guestEmail?.error ?? null,
             },
             sms: {
               enabled: hasSmsConsent,
@@ -352,6 +389,7 @@ adminDemoRouter.post(
               cleanPreferredLanguage,
           },
           securePrecheckin,
+          directBookingParity,
           cleaningConfirmationDispatch,
           message: "Demo pipeline executed",
         },
