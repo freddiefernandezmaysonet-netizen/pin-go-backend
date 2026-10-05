@@ -622,6 +622,32 @@ test("rejects client-supplied conversation history and arbitrary fields", async 
   });
 });
 
+test("gateway diagnostics expose only allowlisted codes in logs, never in guest responses", async (t) => {
+  const secret = "sk-secret-private-guest-message";
+  const cases: [unknown, string][] = [
+    ...[401, 403, 429, 500].map(status => [new Error(`PIN_AI_RUNTIME_OPENAI_HTTP_${status}`), `PIN_AI_RUNTIME_OPENAI_HTTP_${status}`] as [Error, string]),
+    [new Error("PIN_AI_RUNTIME_OPENAI_API_KEY_MISSING"), "PIN_AI_RUNTIME_OPENAI_API_KEY_MISSING"],
+    [new Error("PIN_AI_RUNTIME_OPENAI_AGENT_ID_INVALID"), "PIN_AI_RUNTIME_OPENAI_AGENT_ID_INVALID"],
+    [new TypeError("fetch failed", { cause: { code: "ENOTFOUND", hostname: secret } }), "PIN_AI_GATEWAY_NETWORK_ENOTFOUND"],
+    [new Error(`PIN_AI_RUNTIME_OPENAI_HTTP_403 ${secret}`), "PIN_AI_GATEWAY_UNCLASSIFIED_ERROR"],
+    [new Error(`PIN_AI_RUNTIME_${secret}`), "PIN_AI_GATEWAY_UNCLASSIFIED_ERROR"],
+    [Object.assign(new Error(secret), { name: secret }), "PIN_AI_GATEWAY_UNCLASSIFIED_ERROR"],
+    [new TypeError("fetch failed", { cause: { code: secret } }), "PIN_AI_GATEWAY_UNCLASSIFIED_ERROR"],
+    [secret, "PIN_AI_GATEWAY_UNKNOWN_ERROR"],
+  ];
+  for (const [error, expected] of cases) {
+    const entries: unknown[][] = [];
+    const logger = t.mock.method(console, "error", (...args: unknown[]) => { entries.push(args); });
+    try {
+      const response = await request({ message: "Hello" }, true, async () => { throw error; });
+      assert.equal(response.status, 502);
+      assert.deepEqual(await response.json(), { ok: false, error: "PIN_AI_UNAVAILABLE" });
+      assert.deepEqual(entries, [["[public-booking pin-ai gateway]", { code: expected }]]);
+      assert.equal(JSON.stringify(entries).includes(secret), false);
+    } finally { logger.mock.restore(); }
+  }
+});
+
 test("returns a controlled 503 while the guest gateway flag is disabled", async () => {
   const response = await request({ message: "Hello" }, false);
   assert.equal(response.status, 503);

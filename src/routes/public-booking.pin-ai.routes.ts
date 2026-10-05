@@ -504,6 +504,43 @@ function mapActionBrokerError(
   };
 }
 
+// Exact codes only: never log arbitrary error messages, names, bodies or causes.
+const SAFE_GATEWAY_RUNTIME_CODES = new Set([
+  "PIN_AI_RUNTIME_SHADOW_DISABLED",
+  "PIN_AI_RUNTIME_REAL_READ_DISABLED",
+  "PIN_AI_RUNTIME_ACTION_BROKER_REQUIRED",
+  "PIN_AI_RUNTIME_ACTION_AUTHORIZATION_MISSING",
+  "PIN_AI_RUNTIME_OPENAI_API_KEY_MISSING",
+  "PIN_AI_RUNTIME_OPENAI_AGENT_ID_MISSING",
+  "PIN_AI_RUNTIME_OPENAI_AGENT_ID_INVALID",
+  "PIN_AI_RUNTIME_OPENAI_DISABLED",
+  "PIN_AI_RUNTIME_OPENAI_INVALID_RESPONSE",
+  "PIN_AI_RUNTIME_OPENAI_SESSION_ID_INVALID",
+  "PIN_AI_RUNTIME_OPENAI_SESSION_ID_MISMATCH",
+  "PIN_AI_RUNTIME_AGENT_SESSION_BUSY",
+  "PIN_AI_RUNTIME_AGENT_SESSION_FAILED",
+  "PIN_AI_RUNTIME_AGENT_TURN_POLL_LIMIT",
+  "PIN_AI_RUNTIME_MODEL_NOT_ALLOWED",
+  "PIN_AI_GUEST_GATEWAY_NETWORK_CALL_LIMIT",
+]);
+
+function safeGatewayRuntimeLogCode(error: unknown): string {
+  if (!(error instanceof Error)) return "PIN_AI_GATEWAY_UNKNOWN_ERROR";
+  if (SAFE_GATEWAY_RUNTIME_CODES.has(error.message)) return error.message;
+  if (/^PIN_AI_RUNTIME_OPENAI_HTTP_[45][0-9]{2}$/.test(error.message)) {
+    return error.message;
+  }
+  const cause = error.cause;
+  if (error instanceof TypeError && error.message === "fetch failed" &&
+      cause && typeof cause === "object" && "code" in cause &&
+      typeof cause.code === "string" &&
+      ["ENOTFOUND", "EAI_AGAIN", "ECONNREFUSED", "ECONNRESET",
+        "ETIMEDOUT", "UND_ERR_CONNECT_TIMEOUT"].includes(cause.code)) {
+    return `PIN_AI_GATEWAY_NETWORK_${cause.code}`;
+  }
+  return "PIN_AI_GATEWAY_UNCLASSIFIED_ERROR";
+}
+
 function mapGatewayError(error: unknown): Readonly<{
   status: number;
   publicCode: string;
@@ -548,6 +585,6 @@ function mapGatewayError(error: unknown): Readonly<{
   return {
     status: 502,
     publicCode: "PIN_AI_UNAVAILABLE",
-    logCode: error instanceof Error ? error.name : "UnknownError",
+    logCode: safeGatewayRuntimeLogCode(error),
   };
 }
