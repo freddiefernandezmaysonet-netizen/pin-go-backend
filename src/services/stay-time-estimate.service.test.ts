@@ -243,7 +243,7 @@ test("stay-time estimates use real scoped PostgreSQL evidence without writes", {
       await confirmStayTimeProposal(db, confirmInput(created), proposalOptions);
       const stageInput = { guestToken: stay.guestToken!, proposalId: created.proposal.id };
       await assert.rejects(stageStayTimeModification(db, stageInput, { ...proposalOptions,
-        now: new Date(now.getTime() + 60_000) }), /QUOTE_EXPIRED/);
+        now: new Date(created.proposal.expiresAt.getTime() + 1) }), /QUOTE_EXPIRED/);
       await db.pinAIActionProposal.update({ where: { id: created.proposal.id }, data: { consentText: "Changed consent" } });
       await assert.rejects(stageStayTimeModification(db, stageInput, proposalOptions), /FINGERPRINT_MISMATCH/);
       assert.equal(await db.reservationModification.count({ where: { reservationId: stay.id } }), 0);
