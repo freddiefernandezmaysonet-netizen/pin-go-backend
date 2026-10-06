@@ -98,6 +98,7 @@ test("one Demo reservation through HTTP, messages, access, incident, host and cl
   await db.nfcCard.createMany({ data: [
     { propertyId, label: "Cleaning Service-Demo", ttlockCardId: 810002 },
     { propertyId, label: "Guest-Demo", ttlockCardId: 810001 },
+    { propertyId, label: "Guest-Demo-2", ttlockCardId: 810003 },
   ] });
   await db.propertyGuestAgreement.create({ data: { propertyId, version: "1", title: "Demo",
     agreementText: "Synthetic terms", isActive: true, requiresIdentityVerification: true, requiresAgreementSignature: true } });
@@ -153,6 +154,13 @@ test("one Demo reservation through HTTP, messages, access, incident, host and cl
     const prep = await (await fetch(`${base}/api/internal/admin/demo/preparation`)).json() as any;
     assert.equal(prep.data.ready, true, JSON.stringify(prep.data.blockers));
     assert.equal(prep.data.primaryAdmin.email, principal.email); assert.equal(prep.data.cleaner.id, cleaner.id);
+    await db.nfcCard.updateMany({ where: { propertyId, ttlockCardId: 810003 }, data: { status: "RETIRED" } });
+    const missingCard = await command(input);
+    assert.equal(missingCard.status, 409); assert.equal(missingCard.body.safeToEdit, true);
+    assert.match(missingCard.body.error, /GUEST_CARDS_UNAVAILABLE/);
+    assert.equal(await db.reservation.count(), 1, "missing cards must block before any reservation or message");
+    assert.equal(emails.length, 0);
+    await db.nfcCard.updateMany({ where: { propertyId, ttlockCardId: 810003 }, data: { status: "AVAILABLE" } });
     assert.equal((await command(input, "ORG_ADMIN")).status, 403);
     const invalid = await command({ ...input, guestEmail: "invalid" });
     assert.equal(invalid.status, 400); assert.equal(invalid.body.safeToEdit, true);
@@ -224,9 +232,20 @@ test("one Demo reservation through HTTP, messages, access, incident, host and cl
     assert.equal(pin.form.get("startDate"), String(checkIn.getTime())); assert.equal(pin.form.get("endDate"), String(checkOut.getTime()));
     assert.equal(pin.form.get("addType"), "2");
     const before = hardware.length; await activateGrant(grant.id); assert.equal(hardware.length, before);
-    const [nfc] = await assignNfcCards(db, { reservationId, propertyId, ttlockLockId: 29944630,
-      role: "GUEST", startsAt: checkIn, endsAt: checkOut, count: 1 });
-    assert.equal(nfc.status, "ACTIVE");
+    const cards = await assignNfcCards(db, { reservationId, propertyId, ttlockLockId: 29944630,
+      role: "GUEST", startsAt: checkIn, endsAt: checkOut, count: 2, skipTtlock: true });
+    assert.equal(cards.length, 2); assert.ok(cards.every(card => card.status === "SCHEDULED"));
+    const { retryPendingNfcSync } = await import("./nfc-sync.service.js");
+    await retryPendingNfcSync(db, checkIn, { guestOnly: true });
+    const activeCards = await db.nfcAssignment.findMany({ where: { reservationId, role: "GUEST" } });
+    assert.equal(activeCards.length, 2); assert.ok(activeCards.every(card => card.status === "ACTIVE"));
+    const cardCalls = hardware.filter(call => call.path === "/v3/identityCard/changePeriod");
+    assert.equal(cardCalls.length, 2);
+    for (const call of cardCalls) {
+      assert.equal(call.form.get("startDate"), String(checkIn.getTime()));
+      assert.equal(call.form.get("endDate"), String(checkOut.getTime()));
+      assert.equal(call.form.get("lockId"), "29944630");
+    }
   });
   await t.test("guest gateway persists same-reservation conversation; incident reaches only principal and host reply returns to guest", async () => {
     const { GuestPinAIGateway, createGuestPinAIRuntimeRunner } = await import("../pin-ai/guest/guest-runtime-gateway.js");

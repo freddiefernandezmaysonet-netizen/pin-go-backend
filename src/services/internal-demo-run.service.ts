@@ -35,7 +35,12 @@ export async function readDemoPreparation(db: PrismaClient, actor: DemoActor, en
   const agreement = await db.propertyGuestAgreement.findFirst({ where: { propertyId: property.id, isActive: true } });
   const ttlockAuth = await db.tTLockAuth.findUnique({ where: { organizationId: actor.organizationId }, select: { id: true } });
   const cleanerCard = cleaner?.staffMember.ttlockCardRef ? await db.nfcCard.findFirst({ where: {
-    propertyId: property.id, label: cleaner.staffMember.ttlockCardRef }, select: { id: true } }) : null;
+    propertyId: property.id, label: cleaner.staffMember.ttlockCardRef, status: { not: "RETIRED" },
+    ttlockCardId: { gt: 0 } }, select: { id: true } }) : null;
+  // The existing guest access worker schedules two distinct Guest cards.
+  const guestCards = await db.nfcCard.findMany({ where: { propertyId: property.id, status: "AVAILABLE",
+    label: { startsWith: "Guest-", mode: "insensitive" }, ttlockCardId: { gt: 0 } },
+    distinct: ["ttlockCardId"], take: 2, select: { id: true } });
   const required = ["PIN_AI_GUEST_GATEWAY_ENABLED", "PIN_AI_RUNTIME_SHADOW_ENABLED", "PIN_AI_RUNTIME_REAL_READ_ENABLED",
     "PIN_AI_INCIDENT_ENABLED", "PIN_AI_INCIDENT_NOTIFICATIONS_ENABLED", "PIN_AI_HOST_INCIDENT_ENABLED"];
   const blockers = [
@@ -43,6 +48,7 @@ export async function readDemoPreparation(db: PrismaClient, actor: DemoActor, en
     ...(!cleaner ? ["CLEANER_MISSING"] : []),
     ...(cleaner && !cleaner.cleaningDurationCommitmentMinutes ? ["CLEANER_COMPLETION_FLOW_NOT_CONFIGURED"] : []),
     ...(!cleanerCard ? ["CLEANER_CARD_MISSING"] : []),
+    ...(guestCards.length < 2 ? ["GUEST_CARDS_UNAVAILABLE"] : []),
     ...(!ttlockAuth ? ["TTLOCK_CONNECTION_MISSING"] : []),
     ...(!property.cleaningNfcEnabled ? ["CLEANING_NFC_DISABLED"] : []),
     ...(!agreement ? ["AGREEMENT_MISSING"] : []),
