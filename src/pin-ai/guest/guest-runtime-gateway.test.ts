@@ -117,7 +117,10 @@ function createPrisma(reservation: unknown) {
     reservation: {
       async findFirst(args: unknown) {
         calls.push(args);
-        return reservation;
+        return reservation ? { status: "ACTIVE",
+          checkIn: new Date("2026-09-20T20:00:00Z"),
+          checkOut: new Date("2026-09-22T15:00:00Z"),
+          ...reservation as object } : null;
       },
     },
     pinAIGuestConversation: {
@@ -313,6 +316,8 @@ test("scopes one valid token to one active reservation and sends no guest PII", 
 test("keeps the property-local calendar date when UTC has already crossed midnight", async () => {
   const utcAfterMidnight = new Date("2026-09-26T02:13:00.000Z");
   const { prisma } = createPrisma({
+    checkIn: new Date("2026-09-25T20:00:00Z"),
+    checkOut: new Date("2026-09-27T15:00:00Z"),
     id: "reservation-a",
     propertyId: "property-a",
     preferredLanguage: "es-PR",
