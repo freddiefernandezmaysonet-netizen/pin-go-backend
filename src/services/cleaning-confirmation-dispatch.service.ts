@@ -424,7 +424,7 @@ export async function dispatchPendingCleaningConfirmationForReservation(params: 
     prisma: params.prisma,
     confirmation,
     now,
-    send: params.send,
+    ...(params.send ? { send: params.send } : {}),
   });
 
   return {

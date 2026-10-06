@@ -107,7 +107,7 @@ test("one Demo reservation through HTTP, messages, access, incident, host and cl
     checkIn: new Date(Date.now() + 5 * 86400000), checkOut: new Date(Date.now() + 6 * 86400000) } });
   const env = { ...process.env, PIN_AI_GUEST_GATEWAY_ENABLED: "true", PIN_AI_RUNTIME_SHADOW_ENABLED: "true",
     PIN_AI_RUNTIME_REAL_READ_ENABLED: "true", PIN_AI_INCIDENT_ENABLED: "true", PIN_AI_INCIDENT_NOTIFICATIONS_ENABLED: "true",
-    PIN_AI_HOST_INCIDENT_ENABLED: "true", OPENAI_API_KEY: "synthetic", PIN_AI_OPENAI_AGENT_ID: "synthetic",
+    PIN_AI_HOST_INCIDENT_ENABLED: "true", OPENAI_API_KEY: "synthetic", PIN_AI_OPENAI_AGENT_ID: "agent_test123",
     PIN_AI_HOST_INCIDENT_KEYS: JSON.stringify({ test: "ab".repeat(32) }), PIN_AI_HOST_INCIDENT_KEY_ID: "test",
     TWILIO_ACCOUNT_SID: "synthetic", TWILIO_API_KEY: "synthetic", TWILIO_API_SECRET: "synthetic", TWILIO_FROM_NUMBER: "+12025550124" };
   const { ingestReservation } = await import("./ingest.service.js");
@@ -196,6 +196,23 @@ test("one Demo reservation through HTTP, messages, access, incident, host and cl
     await assert.rejects(cancelReservationFromGuestPortal({ guestToken: token }), /Commercial cancellation/);
     await assert.rejects(getGuestReservationModificationOptions({ guestToken: token }));
     await assert.rejects(refundDirectBookingReservation({ organizationId: org.id, reservationId }));
+  });
+  await t.test("provider delivery is separate from acceptance and unknown send results cannot duplicate a message", async () => {
+    const { recordMessageDeliveryOutcome } = await import("./guest-journey-communications-delivery-outcome.service.js");
+    const { sendInternalDemoMessage } = await import("./internal-demo-message.service.js");
+    const mail = await db.messageLog.findFirstOrThrow({ where: { reservationId, communicationType: "DIRECT_BOOKING_GUEST_CONFIRMATION" } });
+    assert.equal(mail.status, "SENT"); assert.notEqual(mail.providerDeliveryStatus, "DELIVERED");
+    await recordMessageDeliveryOutcome(db, { provider: "resend", providerMessageId: mail.providerMessageId!,
+      status: "DELIVERED", eventAt: new Date(), deliveredAt: new Date() });
+    const read = await (await fetch(`${base}/api/internal/admin/demo/runs/${input.requestId}`)).json() as any;
+    assert.equal(read.data.messages.find((m: any) => m.id === mail.id).delivery, "DELIVERED");
+    let attempts = 0;
+    const uncertain = { prisma: db, reservationId, propertyId, organizationId: org.id, type: "SYNTHETIC_AMBIGUOUS_TEST",
+      channel: "email" as const, to: "uncertain@example.invalid", body: "Synthetic test", send: async () => {
+        attempts++; throw new Error("synthetic connection lost after send");
+      } };
+    assert.equal((await sendInternalDemoMessage(uncertain)).status, "ATTENTION_REQUIRED");
+    assert.equal((await sendInternalDemoMessage(uncertain)).ok, false); assert.equal(attempts, 1);
   });
   await t.test("real grant service provisions exact minute window only on Demo lock; guest NFC uses same dates", async () => {
     const { activateGrant } = await import("./ttlock/ttlock.brain.js");

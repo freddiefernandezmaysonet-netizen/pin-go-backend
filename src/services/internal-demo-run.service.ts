@@ -110,7 +110,7 @@ export async function runInternalDemo(db: PrismaClient, actor: DemoActor, body: 
   if (!Number.isFinite(input.checkIn.getTime()) || !Number.isFinite(input.checkOut.getTime()) || input.checkOut <= input.checkIn ||
     !input.guestName || input.guestName.length > 120 || input.guestEmail.length > 254 || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(input.guestEmail) ||
     !["es", "en"].includes(input.preferredLanguage) || (input.guestPhone && !/^\+[1-9]\d{7,14}$/.test(input.guestPhone)) ||
-    (input.smsConsent && !input.guestPhone) || !input.afterHoursAuthorized) throw new DemoRunError("DEMO_INPUT_INVALID", 400, true);
+    !input.smsConsent || !input.guestPhone || !input.afterHoursAuthorized) throw new DemoRunError("DEMO_INPUT_INVALID", 400, true);
   const fingerprint = createHash("sha256").update(JSON.stringify(input)).digest("hex");
   let reservationId: string | undefined;
   let stage = "PREPARATION";
