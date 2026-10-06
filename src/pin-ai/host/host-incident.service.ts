@@ -1,3 +1,4 @@
+import { INTERNAL_DEMO_PROPERTY_ID, readInternalDemo } from "../../services/internal-demo-scope.js";
 import type { Prisma, PrismaClient } from "@prisma/client";
 import { upsertOperationalIssue } from "../../apms/operational-intelligence.service.js";
 import { guestIncidentRecipientWhere } from "../guest/guest-incident-recipient-policy.js";
@@ -24,7 +25,9 @@ async function scopedIssue(tx: Tx, input: Input, ref: string) {
   const issue = await tx.operationalIssue.findFirst({ where: { organizationId: input.actor.orgId,
     engine: "PIN_AI_GUEST_INCIDENT", visibility: "HOST", metadata: { path: ["reference"], equals: ref } } });
   const channel = (issue?.metadata as Record<string, unknown> | null)?.channelSource === "CHANNEX";
-  if (!issue?.propertyId || !issue.reservationId || !(hostScopeEnabled(input.env, input.actor.orgId, issue.reservationId) ||
+  const demo = issue?.reservationId && issue.propertyId === INTERNAL_DEMO_PROPERTY_ID && input.env.PIN_AI_HOST_INCIDENT_ENABLED === "true"
+    ? await readInternalDemo(tx, { reservationId: issue.reservationId, organizationId: input.actor.orgId, propertyId: issue.propertyId }) : null;
+  if (!issue?.propertyId || !issue.reservationId || !(demo || hostScopeEnabled(input.env, input.actor.orgId, issue.reservationId) ||
     (channel && autoConfig(input.env).allows({ organizationId: input.actor.orgId, propertyId: issue.propertyId })))) return fail(404, "NOT_FOUND");
   const reservation = await tx.reservation.findFirst({ where: { id: issue.reservationId, propertyId: issue.propertyId,
     property: { organizationId: input.actor.orgId } }, select: { reservationNumber: true, externalId: true, externalProvider: true, property: { select: { name: true } } } });
@@ -39,9 +42,13 @@ export async function listHostIncidents(input: Input & { before?: string }) {
       .filter(id => hostScopeEnabled(input.env, input.actor.orgId, id));
     const channelProperties = (input.env.PIN_AI_CHANNEX_AUTO_PROPERTY_IDS ?? "").split(",").map(id => id.trim())
       .filter(propertyId => autoConfig(input.env).allows({ organizationId: input.actor.orgId, propertyId }));
-    if (!ids.length && !channelProperties.length) return fail(404, "NOT_FOUND");
+    const demoEnabled = input.env.PIN_AI_HOST_INCIDENT_ENABLED === "true" && !!(await tx.property.findFirst({
+      where: { id: INTERNAL_DEMO_PROPERTY_ID, organizationId: input.actor.orgId, status: "ACTIVE" }, select: { id: true },
+    }));
+    if (!ids.length && !channelProperties.length && !demoEnabled) return fail(404, "NOT_FOUND");
     const rows = await tx.operationalIssue.findMany({ where: { organizationId: input.actor.orgId,
       engine: "PIN_AI_GUEST_INCIDENT", visibility: "HOST", OR: [{ reservationId: { in: ids } },
+        ...(demoEnabled ? [{ propertyId: INTERNAL_DEMO_PROPERTY_ID, metadata: { path: ["internalDemo"], equals: true } }] : []),
         { propertyId: { in: channelProperties }, metadata: { path: ["channelSource"], equals: "CHANNEX" } }],
       ...(input.before ? { id: { lt: input.before } } : {}) }, orderBy: { id: "desc" }, take: 51 });
     const items = [];
@@ -136,7 +143,10 @@ export async function readPublishedIncidentUpdates(input: { prisma: PrismaClient
   const reservation = await input.prisma.reservation.findFirst({ where: { guestToken: input.guestToken,
     guestTokenExpiresAt: { gt: new Date() }, status: "ACTIVE", property: { status: "ACTIVE" } },
     select: { id: true, propertyId: true, property: { select: { organizationId: true } } } });
-  if (!reservation || !hostScopeEnabled(input.env, reservation.property.organizationId, reservation.id)) return fail(404, "NOT_FOUND");
+  const demo = reservation?.propertyId === INTERNAL_DEMO_PROPERTY_ID && input.env.PIN_AI_HOST_INCIDENT_ENABLED === "true"
+    ? await readInternalDemo(input.prisma, { reservationId: reservation.id, organizationId: reservation.property.organizationId,
+      propertyId: reservation.propertyId, guestToken: input.guestToken }) : null;
+  if (!reservation || !(demo || hostScopeEnabled(input.env, reservation.property.organizationId, reservation.id))) return fail(404, "NOT_FOUND");
   const issueWhere = { organizationId: reservation.property.organizationId, reservationId: reservation.id,
     propertyId: reservation.propertyId, engine: "PIN_AI_GUEST_INCIDENT", visibility: "HOST" } as const;
   const allIssues = await input.prisma.operationalIssue.findMany({ where: issueWhere,

@@ -5,7 +5,10 @@ import {
  } from "@prisma/client";
 
 import { prisma } from "../../lib/prisma";
+import { randomInt } from "node:crypto";
+import { isInternalDemo } from "../internal-demo-scope";
 import {
+  ttlockCreatePasscode,
   ttlockDeletePasscode,
   ttlockGetPasscode,
 } from "../../ttlock/ttlock.passcode";
@@ -47,7 +50,7 @@ export async function activateGrant(grantId: string) {
     where: { id: grantId },
     include: {
       lock: true,
-      reservation: true,
+      reservation: { include: { property: true } },
     },
   });
 
@@ -122,7 +125,17 @@ assertAccessCodeEncryptionConfigured();
     ? `PinGo ${grant.reservation.reservationNumber}`.slice(0, 30)
     : "PinGo Guest";
 
-  const pass = await ttlockGetPasscode({
+  const demo = isInternalDemo(grant.reservation);
+  if (demo && (grant.lock.ttlockLockId !== 29944630 || grant.lock.propertyId !== grant.reservation.propertyId)) {
+    throw new Error("DEMO_LOCK_BINDING_REQUIRED");
+  }
+  // Cloud-generated PINs are rounded to hours by TTLock. A short Demo needs
+  // the existing gateway custom-PIN operation with the reservation's exact window.
+  const demoCode = demo ? String(randomInt(10_000_000, 100_000_000)) : null;
+  const pass = demo ? { ...(await ttlockCreatePasscode({
+    lockId: Number(grant.lock.ttlockLockId), code: demoCode!, startDate, endDate,
+    name: passcodeName, accessToken, addType: 2,
+  })), keyboardPwd: demoCode } : await ttlockGetPasscode({
     lockId: Number(grant.lock.ttlockLockId),
     keyboardPwdType: 3,
     startDate,
@@ -188,6 +201,7 @@ assertAccessCodeEncryptionConfigured();
               provider: "TTLOCK",
               keyboardPwdId,
               keyboardPwdType: 3,
+              ...(demo ? { provisioningMethod: "CUSTOM_GATEWAY" } : {}),
               startsAt:
                 grant.startsAt.toISOString(),
               endsAt:

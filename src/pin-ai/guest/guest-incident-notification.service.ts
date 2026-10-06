@@ -1,3 +1,5 @@
+import { INTERNAL_DEMO_PROPERTY_ID, readInternalDemo, demoIncidentEnvironment } from "../../services/internal-demo-scope.js";
+import { resolveOrganizationPrimaryAdmin } from "../../services/organization-guest-email.service.js";
 import type { PrismaClient, MessageLog } from "@prisma/client";
 import { sendGuestIncidentHostNotice } from "../../lib/mailer.js";
 import type { GuestIncidentEmail } from "../../lib/email-templates/guestIncidentEmail.js";
@@ -34,7 +36,10 @@ export async function deliverGuestIncidentNotice(input: {
   prisma: PrismaClient; message: MessageLog; env: IncidentEnvironment; now?: Date;
   send?: (mail: GuestIncidentEmail) => Promise<string>;
 }) {
-  const { prisma, message: m, env } = input;
+  const { prisma, message: m } = input;
+  const demo = m.propertyId === INTERNAL_DEMO_PROPERTY_ID && m.reservationId && m.organizationId
+    ? await readInternalDemo(prisma, { reservationId: m.reservationId, organizationId: m.organizationId, propertyId: m.propertyId }) : null;
+  const env = demo ? demoIncidentEnvironment(input.env, m.organizationId!, demo.id) : input.env;
   const now = input.now ?? new Date();
   const portalEnabled = env.PIN_AI_INCIDENT_NOTIFICATIONS_ENABLED === "true" && guestIncidentEnabled(m.reservationId ?? "", env);
   const channelEnabled = autoConfig(env).allows({ organizationId: m.organizationId ?? "", propertyId: m.propertyId ?? "" });
@@ -74,7 +79,8 @@ export async function deliverGuestIncidentNotice(input: {
     id: m.reservationId ?? "", propertyId: m.propertyId ?? "", status: "ACTIVE", checkOut: { gt: now },
     property: { organizationId: m.organizationId ?? "", status: "ACTIVE" },
   }, select: { id: true } });
-  const admins = m.organizationId ? await prisma.dashboardUser.findMany({
+  const principal = demo ? await resolveOrganizationPrimaryAdmin(prisma, m.organizationId!) : null;
+  const admins = demo ? (principal ? [principal] : []) : m.organizationId ? await prisma.dashboardUser.findMany({
     where: guestIncidentRecipientWhere(m.organizationId), select: { email: true },
   }) : [];
   if (!issue || issue.workflowState === "RESOLVED" || !reservation ||
@@ -122,11 +128,13 @@ export async function processGuestIncidentNotices(prisma: PrismaClient, env: Inc
   const parsed = parsePinAIActionCanaryReservationIds(env.PIN_AI_INCIDENT_CANARY_RESERVATION_IDS);
   const portalEnabled = env.PIN_AI_INCIDENT_ENABLED === "true" && env.PIN_AI_INCIDENT_NOTIFICATIONS_ENABLED === "true" && parsed.valid && parsed.ids.size > 0;
   const channelEnabled = autoConfig(env).enabled;
-  if (!portalEnabled && !channelEnabled) return;
+  const demoEnabled = env.PIN_AI_INCIDENT_ENABLED === "true" && env.PIN_AI_INCIDENT_NOTIFICATIONS_ENABLED === "true";
+  if (!portalEnabled && !channelEnabled && !demoEnabled) return;
   const rows = await prisma.messageLog.findMany({ where: {
     communicationType: GUEST_INCIDENT_NOTICE, provider: "resend", channel: "email",
     AND: [{ OR: [
       { reservationId: { in: portalEnabled ? [...parsed.ids] : [] } },
+      ...(demoEnabled ? [{ propertyId: INTERNAL_DEMO_PROPERTY_ID }] : []),
       ...(channelEnabled ? [{ organizationId: { in: (env.PIN_AI_CHANNEX_AUTO_ORGANIZATION_IDS ?? "").split(",").map(s => s.trim()) },
         propertyId: { in: (env.PIN_AI_CHANNEX_AUTO_PROPERTY_IDS ?? "").split(",").map(s => s.trim()) } }] : []),
     ] }],

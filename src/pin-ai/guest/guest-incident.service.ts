@@ -1,3 +1,5 @@
+import { readInternalDemo, demoIncidentEnvironment } from "../../services/internal-demo-scope.js";
+import { resolveOrganizationPrimaryAdmin } from "../../services/organization-guest-email.service.js";
 import { randomUUID } from "node:crypto";
 import type { PrismaClient, Prisma } from "@prisma/client";
 import { upsertOperationalIssue } from "../../apms/operational-intelligence.service.js";
@@ -14,7 +16,9 @@ export async function handleGuestIncident(input: {
   channel?: { bookingId: string; threadId: string; messageId: string };
   args: Readonly<Record<string, unknown>>; env: IncidentEnvironment; now?: Date;
 }): Promise<GuestIncidentReceipt | null> {
-  const { prisma, request, guestToken, env } = input;
+  const { prisma, request, guestToken } = input;
+  const demo = guestToken ? await readInternalDemo(prisma, { ...request.context, guestToken }) : null;
+  const env = demo ? demoIncidentEnvironment(input.env, request.context.organizationId, demo.id) : input.env;
   const scope = request.context;
   const channel = input.channel;
   if (channel ? (!!guestToken || !autoConfig(env).allows(scope)) : (!guestToken || !guestIncidentEnabled(scope.reservationId, env))) {
@@ -95,7 +99,7 @@ export async function handleGuestIncident(input: {
         actionTarget: "RESERVATION", sourceType: "PIN_AI", transitionCode: "GUEST_INCIDENT_RECORDED",
         transitionSummary: "Guest report recorded; cause and resolution remain unverified.", transitionedBy: "GUEST",
         occurredAt: now, metadata: { reference, category: command.category, quotes, guestReported: true,
-          diagnosisVerified: false, ...(isNew ? {} : { firstReportPreserved: true }),
+          diagnosisVerified: false, ...(demo ? { internalDemo: true } : {}), ...(isNew ? {} : { firstReportPreserved: true }),
           ...(channel ? { channelSource: "CHANNEX", channelThreadId: channel.threadId, channelBookingId: channel.bookingId,
             channelReportMessages: [...new Set([...(isNew || !Array.isArray(prior?.channelReportMessages) ? [] : prior.channelReportMessages as string[]), channel.messageId])] }
             : prior?.channelSource === "CHANNEX" ? { channelSource: prior.channelSource, channelThreadId: prior.channelThreadId,
@@ -103,7 +107,8 @@ export async function handleGuestIncident(input: {
       });
       if (isNew) {
         // No fallback to arbitrary staff or a model-supplied destination.
-        const admins = await tx.dashboardUser.findMany({
+        const principal = demo ? await resolveOrganizationPrimaryAdmin(tx as any, scope.organizationId) : null;
+        const admins = demo ? (principal ? [principal] : []) : await tx.dashboardUser.findMany({
           where: guestIncidentRecipientWhere(scope.organizationId), select: { email: true },
         });
         const recipients = [...new Set(admins.map(a => a.email.trim().toLowerCase()).filter(Boolean))];

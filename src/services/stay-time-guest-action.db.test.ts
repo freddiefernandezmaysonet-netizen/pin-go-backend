@@ -77,7 +77,9 @@ test("internal guest stay-time bridge preserves consent, idempotency and payment
         const publicText = JSON.stringify(prepared.publicResult);
         for (const secret of [prepared.privateConfirmation.confirmationToken, "arrivalReadinessEvidenceId", "departureCleaning", "basePricingSnapshot", "organizationId"]) assert.ok(!publicText.includes(secret));
         const input = { guestToken: stay.guestToken!, proposalId: prepared.privateConfirmation.proposalId, confirmationToken: prepared.privateConfirmation.confirmationToken };
-        clock = new Date(clock.getTime() + (scenario === "expired" ? 60_000 : 5_000));
+        clock = scenario === "expired"
+          ? new Date(Date.parse(prepared.privateConfirmation.expiresAt) + 1)
+          : new Date(clock.getTime() + 5_000);
         if (scenario === "wrong-guest") input.guestToken = "synthetic-unrelated-guest-token";
         if (scenario === "wrong-secret") input.confirmationToken = "synthetic-invalid-confirmation-token";
         if (scenario === "blocked") await db.propertyBlockedDate.create({ data: { propertyId: property.id,

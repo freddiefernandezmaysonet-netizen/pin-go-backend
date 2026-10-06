@@ -43,7 +43,8 @@ export function buildCheckoutMessage(input: {
 
 export async function sendCheckoutSms(
   prisma: PrismaClient,
-  reservationId: string
+  reservationId: string,
+  send: typeof sendSms = sendSms,
 ) {
   const routed = await deliverAirbnbCommunication(prisma, reservationId, "CHECKOUT");
   if (routed) return routed;
@@ -118,7 +119,7 @@ export async function sendCheckoutSms(
     });
     retryBody = body;
 
-    const sent = await sendSms(r.guestPhone, body);
+    const sent = await send(r.guestPhone, body);
 
     await prisma.messageLog.create({
       data: {

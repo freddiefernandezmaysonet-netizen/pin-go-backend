@@ -95,6 +95,7 @@ type CancellationRefundRuleEmailInput = {
 };
 
 type SendDirectBookingGuestConfirmationInput = {
+  demoSimulation?: boolean;
   to: string;
   replyTo?: string | null;
   reservationNumber: string;
@@ -447,6 +448,7 @@ export type SendPropertyProtectionHostGuestResponseNoticeInput = {
 };
 
 type SendDirectBookingHostNotificationInput = {
+  demoSimulation?: boolean;
   to: string;
   reservationNumber: string;
   hostName?: string | null;
@@ -1334,7 +1336,9 @@ if (!safeVerificationUrl) {
   );
 }
 
-const verificationBlock = `
+const verificationBlock = input.demoSimulation
+  ? `<p style="padding:16px;background:#eff6ff;border-radius:12px;"><strong>Pin&amp;Go Demo</strong><br/>${isSpanish ? "Pago e identidad simulados. No se realizó ningún cobro. El registro de demostración ya está preparado; abre Manage Reservation para continuar." : "Payment and identity are simulated. No charge was made. Demo registration is ready; open Manage Reservation to continue."}</p>`
+  : `
       <div
         style="
           background:#eff6ff;
@@ -1457,7 +1461,7 @@ const verificationBlock = `
       totalPaid:
         formattedTotalPaid,
 
-      paymentStatus: isSpanish ? "Pagado" : "Paid",
+      paymentStatus: input.demoSimulation ? (isSpanish ? "Simulado · sin cobro" : "Simulated · no charge") : (isSpanish ? "Pagado" : "Paid"),
 
       verificationBlock,
       manageReservationBlock,
@@ -1812,6 +1816,7 @@ export async function sendDirectBookingHostNotification(
     html: `
       <div style="font-family: Arial, sans-serif; color: #111827; line-height: 1.6;">
         <h2 style="margin-bottom: 8px;">New direct booking received</h2>
+        ${input.demoSimulation ? '<p><strong>Pin&amp;Go Demo — payment and identity simulated. No charge was made.</strong></p>' : ""}
 
         <p>Hi ${safeHostName},</p>
 
@@ -1826,7 +1831,7 @@ export async function sendDirectBookingHostNotification(
           <p><strong>Phone:</strong> ${escapeHtml(guestPhone || "Not provided")}</p>
           <p><strong>Check-in:</strong> ${formatBookingDate(checkIn, dateTimeZone)}</p>
           <p><strong>Check-out:</strong> ${formatBookingDate(checkOut, dateTimeZone)}</p>
-          <p><strong>Total paid:</strong> ${formatBookingAmount(totalAmount, currency)}</p>
+          <p><strong>${input.demoSimulation ? "Simulated amount (no charge)" : "Total paid"}:</strong> ${formatBookingAmount(totalAmount, currency)}</p>
         </div>
 
         <p>

@@ -76,7 +76,11 @@ test("paid stay-time preflight revalidates persisted consent and current operati
         if (scenario === "amount-tampered") await db.reservationModification.update({ where: { id }, data: { additionalChargeAmount: 999 } });
         if (scenario === "fingerprint-tampered") await db.reservationModification.update({ where: { id }, data: { requestFingerprint: "tampered" } });
         if (phase === "CHECKOUT" && scenario === "existing-session") await db.reservationModification.update({ where: { id }, data: { stripeCheckoutSessionId: "cs_test_existing" } });
-        const now = new Date(stagedAt.getTime() + (scenario === "expired" ? 3_600_000 : scenario === "setup-too-short" ? 1_800_000 : 120_000));
+        // Successful paid validation must occur after the five-minute quote has
+        // expired, while preserving the separately frozen payment deadline.
+        const elapsed = scenario === "expired" ? 3_600_000 : scenario === "setup-too-short" ? 1_800_000
+          : proposal.proposal.expiresAt.getTime() - stagedAt.getTime() + 60_000;
+        const now = new Date(stagedAt.getTime() + elapsed);
         const before = await db.reservationModification.findUniqueOrThrow({ where: { id } });
         const beforeReservation = await db.reservation.findUniqueOrThrow({ where: { id: reservation.id } });
         const validate = () => db.$transaction(async tx => {

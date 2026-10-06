@@ -1,3 +1,4 @@
+import { hasDemoMarker } from "./internal-demo-scope.js";
 import {
   CancellationActor,
   PrismaClient,
@@ -968,6 +969,16 @@ export async function getGuestCancellationPreview({
     checkOut: reservation.checkOut,
   });
 
+  if (hasDemoMarker(reservation)) {
+    const snapshot = await getEffectiveCancellationPolicySnapshot(reservation);
+    const evaluation = evaluateCancellationPolicy({ snapshot, checkIn: reservation.checkIn,
+      totalAmount: reservation.totalAmount, pricingBreakdown: reservation.pricingBreakdown,
+      requestedAt, actor: CancellationActor.GUEST });
+    return { ...serializeGuestCancellationPreview({ reservation, snapshot, evaluation, managementPhase }),
+      demo: { paymentSimulated: true, identitySimulated: true, timezone: reservation.property.timezone }, cancellationAllowed: false,
+      modificationAllowed: false, action: "DEMO_READ_ONLY" };
+  }
+
   if (managementPhase === "IN_STAY") {
     return {
       managementPhase,
@@ -1008,6 +1019,10 @@ export async function cancelReservationFromGuestPortal({
   reason,
 }: GuestCancellationConfirmInput) {
   const reservation = await getReservationByGuestToken(guestToken);
+  if (hasDemoMarker(reservation)) throw new GuestCancellationError({
+    code: "DEMO_COMMERCIAL_OPERATION_DISABLED", message: "Commercial cancellation is unavailable for a demonstration.", statusCode: 409,
+  });
+
   const requestedAt = new Date();
   const managementPhase = classifyGuestReservationManagementPhase({
     status: reservation.status,

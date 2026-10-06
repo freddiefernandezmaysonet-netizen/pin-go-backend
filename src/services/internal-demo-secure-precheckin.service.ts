@@ -20,6 +20,8 @@ const INTERNAL_DEMO_SOURCE =
   "INTERNAL_DEMO_CENTER";
 const INTERNAL_DEMO_GUEST_ACCESS_MODE =
   GuestAccessMode.PASSCODE_PLUS_NFC;
+// The same dedicated property allowed by the authenticated Demo Center route.
+export const INTERNAL_DEMO_PROPERTY_ID = "cmomyua8b0001rv1dvl6xjr6g";
 
 type InternalDemoActor = {
   userId: string;
@@ -113,6 +115,7 @@ export async function completeInternalDemoSecurePrecheckin(
       },
       select: {
         id: true,
+        source: true,
         externalId: true,
         externalProvider: true,
         guestName: true,
@@ -121,6 +124,7 @@ export async function completeInternalDemoSecurePrecheckin(
         property: {
           select: {
             organizationId: true,
+            status: true,
           },
         },
       },
@@ -132,11 +136,18 @@ export async function completeInternalDemoSecurePrecheckin(
     );
   }
 
+  // Read the identity and simulation evidence persisted by native ingest.
+  // A DEMO- prefix alone must never authorize simulated guest verification.
+  const demoMetadata = reservation.externalRaw;
   if (
-    reservation.externalProvider !== "LODGIFY" ||
-    !String(reservation.externalId ?? "").startsWith(
-      "DEMO-"
-    )
+    reservation.source !== "INTERNAL_DEMO_DIRECT_BOOKING" ||
+    reservation.externalProvider !== "PIN_GO_INTERNAL_DEMO" ||
+    !String(reservation.externalId ?? "").startsWith("DEMO-") ||
+    !demoMetadata ||
+    typeof demoMetadata !== "object" ||
+    Array.isArray(demoMetadata) ||
+    demoMetadata.demo !== true ||
+    demoMetadata.paymentSimulated !== true
   ) {
     throw new Error(
       "INTERNAL_DEMO_RESERVATION_REQUIRED"
@@ -150,6 +161,13 @@ export async function completeInternalDemoSecurePrecheckin(
     throw new Error(
       "INTERNAL_DEMO_ORGANIZATION_MISMATCH"
     );
+  }
+
+  if (
+    reservation.propertyId !== INTERNAL_DEMO_PROPERTY_ID ||
+    reservation.property.status !== "ACTIVE"
+  ) {
+    throw new Error("INTERNAL_DEMO_PROPERTY_REQUIRED");
   }
 
   const now = input.now ?? new Date();
