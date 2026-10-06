@@ -60,7 +60,8 @@ export async function readDemoPreparation(db: PrismaClient, actor: DemoActor, en
       "TWILIO_ACCOUNT_SID", "TWILIO_API_KEY", "TWILIO_API_SECRET", "TWILIO_FROM_NUMBER", "TTLOCK_CLIENT_ID", "ACCESS_CODE_ENC_KEY_BASE64", "APP_URL"]
       .filter(k => !env[k]).map(k => `${k}_MISSING`),
     ...(!env.PUBLIC_API_BASE_URL && !env.API_BASE_URL ? ["PUBLIC_API_BASE_URL_MISSING"] : []),
-    ...(env.GUEST_SMS_ENABLED !== "1" ? ["GUEST_SMS_DISABLED"] : []),
+    // Guest access/checkout SMS belong to reservation-worker, which enforces its
+    // own GUEST_SMS_ENABLED switch. API settings cannot certify worker delivery.
   ];
   return { ready: blockers.length === 0, blockers, property: { id: property.id, name: property.name,
     timezone: property.timezone, cleaningStartOffsetMinutes: property.cleaningStartOffsetMinutes,
