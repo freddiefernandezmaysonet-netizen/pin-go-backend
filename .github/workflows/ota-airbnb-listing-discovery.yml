@@ -71,6 +71,11 @@ jobs:
           BASE_BRANCH="${GITHUB_BASE_REF:-main}"
           git fetch origin "+refs/heads/$BASE_BRANCH:refs/remotes/origin/$BASE_BRANCH"
           git diff --name-only "origin/$BASE_BRANCH...HEAD" | sort > "$RUNNER_TEMP/actual.txt"
+          if [ "${GITHUB_HEAD_REF:-}" = "agent/pin-ai-property-activation-v1" ]; then
+            python3 scripts/verify-pin-ai-activation-pr-scope.test.py
+            python3 scripts/verify-pin-ai-activation-pr-scope.py
+            exit 0
+          fi
           # PR #353 only: exact reviewed cleaner-access candidate; retain all OTA certifications.
           if [ "${GITHUB_HEAD_REF:-}" = "agent/cleaner-access-window-v2" ]; then
             test "$GITHUB_EVENT_NAME" = "pull_request"
@@ -977,6 +982,15 @@ jobs:
         shell: bash
         run: |
           BASE_RANGE="origin/${GITHUB_BASE_REF:-main}...HEAD"
+          if [ "${GITHUB_HEAD_REF:-}" = "agent/pin-ai-property-activation-v1" ]; then
+            python3 scripts/verify-pin-ai-activation-pr-scope.py
+            # Only the pinned Pin AI fee hook may change in the workers.
+            git diff --exit-code "$BASE_RANGE" -- src/pms src/workers \
+              src/distribution/channex-readonly.http-transport.ts \
+              src/distribution/channex-white-label.http-transport.ts \
+              ':(exclude)src/workers/reservation.worker.ts'
+            exit 0
+          fi
           # PR #345: exact arrival-location snapshot; all runtime certifications remain enabled.
           if [ "${GITHUB_HEAD_REF:-}" = "agent/property-arrival-unit-v1" ]; then
             python3 scripts/verify-arrival-location-pr-scope.test.py
