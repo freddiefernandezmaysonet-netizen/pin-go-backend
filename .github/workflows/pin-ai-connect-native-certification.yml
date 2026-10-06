@@ -1,0 +1,57 @@
+name: Pin AI Connect Native PostgreSQL Certification
+
+on:
+  workflow_dispatch:
+  pull_request:
+    branches: [main]
+    paths:
+      - "src/pin-ai/fee-connect*"
+      - "src/pin-ai/reservation-fee.service.ts"
+      - "src/pin-ai/property-activation.ts"
+      - "src/pin-ai/billing-terms.ts"
+      - "src/pin-ai/guest/guest-availability.ts"
+      - "src/services/internal-demo-scope.ts"
+      - "prisma/**"
+      - ".github/workflows/pin-ai-connect-native-certification.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  native-concurrency:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: pin_ai_activation_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d pin_ai_activation_test"
+          --health-interval 5s --health-timeout 5s --health-retries 10
+    env:
+      DATABASE_URL: postgresql://postgres:postgres@127.0.0.1:5432/pin_ai_activation_test?connection_limit=8
+      PIN_AI_NATIVE_DB_TEST: "true"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+      - name: Install locked dependencies
+        run: npm ci --ignore-scripts --no-audit --no-fund
+      - name: Generate client and initialize disposable database
+        run: |
+          ./node_modules/.bin/prisma generate --schema ./prisma
+          ./node_modules/.bin/prisma db push --schema ./prisma --skip-generate
+      - name: Compile native concurrency contract
+        run: >-
+          ./node_modules/.bin/tsc --noEmit --strict --skipLibCheck
+          --target ES2022 --module NodeNext --moduleResolution NodeNext
+          src/pin-ai/fee-connect.native.database.test.ts
+      - name: Certify concurrent accrual and uncertain payment recovery
+        run: node --import tsx --test src/pin-ai/fee-connect.native.database.test.ts

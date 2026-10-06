@@ -1,5 +1,6 @@
 import { Router } from "express";
 import { guestPinAIAvailability } from "../pin-ai/guest/guest-availability.js";
+import { commercialPinAIEnabled } from "../pin-ai/property-activation.js";
 import type { PrismaClient } from "@prisma/client";
 import { saveGuestActionReceipt } from "../pin-ai/guest/guest-history.js";
 import { readGuestHistory } from "../pin-ai/guest/guest-history-reader.js";
@@ -57,12 +58,15 @@ export function buildPublicBookingPinAIRouter(input: Readonly<{
       const reservation = await input.prisma.reservation.findFirst({
         where: { guestToken: req.params.guestToken, guestTokenExpiresAt: { gt: now },
           property: { status: "ACTIVE" } },
-        select: { checkIn: true, checkOut: true, status: true, property: { select: { timezone: true } } },
+        select: { checkIn: true, checkOut: true, status: true, propertyId: true, property: { select: { timezone: true, organizationId: true } } },
       });
       if (!reservation) return res.status(404).json({ ok: false, error: "RESERVATION_NOT_FOUND" });
       const window = guestPinAIAvailability(reservation, now);
+      const commercial = await commercialPinAIEnabled(input.prisma, env, {
+        organizationId: reservation.property.organizationId, propertyId: reservation.propertyId,
+      });
       return res.json({ ok: true, ...window,
-        available: env.PIN_AI_GUEST_GATEWAY_ENABLED === "true" && window.available,
+        available: env.PIN_AI_GUEST_GATEWAY_ENABLED === "true" && window.available && commercial !== false,
         timezone: reservation.property.timezone, checkedAt: now });
     } catch {
       return res.status(503).json({ ok: false, error: "PIN_AI_UNAVAILABLE" });
@@ -73,6 +77,7 @@ export function buildPublicBookingPinAIRouter(input: Readonly<{
     input.runtime ?? createGuestPinAIRuntimeRunner(env),
     env.PIN_AI_GUEST_GATEWAY_ENABLED === "true",
     input.now,
+    env,
   );
 
   router.post("/manage/:guestToken/pin-ai/messages", async (req, res) => {
@@ -190,6 +195,8 @@ export function buildPublicBookingPinAIRouter(input: Readonly<{
                 checkOut: true,
                 status: true,
                 id: true,
+                propertyId: true,
+                property: { select: { organizationId: true } },
               },
             });
 
@@ -204,6 +211,9 @@ export function buildPublicBookingPinAIRouter(input: Readonly<{
         if (!guestPinAIAvailability(reservation, currentDateTime).available) {
           return res.status(403).json({ ok: false, error: "PIN_AI_OUTSIDE_AVAILABILITY_WINDOW" });
         }
+        if (await commercialPinAIEnabled(input.prisma, env, {
+          organizationId: reservation.property?.organizationId ?? "", propertyId: reservation.propertyId,
+        }) === false) return res.status(503).json({ ok: false, error: "PIN_AI_ACTIONS_UNAVAILABLE" });
 
         const canary =
           resolvePinAIActionCanaryScope({

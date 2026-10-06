@@ -1,3 +1,4 @@
+import { capturePinAIReservationService } from "../pin-ai/reservation-service-evidence.js";
 import { hasDemoMarker } from "./internal-demo-scope.js";
 import {
   CancellationActor,
@@ -1314,6 +1315,8 @@ export async function cancelReservationFromGuestPortal({
     const currentExternalRaw = normalizeJsonObject(
       currentReservation.externalRaw
     );
+
+    await capturePinAIReservationService(tx, currentReservation.id, process.env, new Date(cancelledAt.getTime() - 1));
 
     const cancellationUpdate = await tx.reservation.updateMany({
       where: {

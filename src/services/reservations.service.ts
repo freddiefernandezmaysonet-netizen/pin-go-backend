@@ -1,3 +1,4 @@
+import { capturePinAIReservationService } from "../pin-ai/reservation-service-evidence.js";
 import crypto from "crypto";
 import { PrismaClient, AccessStatus, PaymentState, AccessMethod, ReservationStatus } from "@prisma/client";
 import type { Request, Response } from "express";
@@ -56,6 +57,8 @@ export async function createReservationHandler(req: Request, res: Response) {
           guestTokenExpiresAt,
         },
       });
+
+      await capturePinAIReservationService(tx, reservation.id);
 
       const accessGrant = await tx.accessGrant.create({
         data: {

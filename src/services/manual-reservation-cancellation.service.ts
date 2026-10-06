@@ -1,3 +1,4 @@
+import { capturePinAIReservationService } from "../pin-ai/reservation-service-evidence.js";
 import {
   CancellationActor,
   PrismaClient,
@@ -380,6 +381,8 @@ export async function cancelManualReservationByHost({
         didCancel: false,
       };
     }
+
+    await capturePinAIReservationService(tx, reservation.id, process.env, new Date(requestedAt.getTime() - 1));
 
     const cancellationUpdate = await tx.reservation.updateMany({
       where: {

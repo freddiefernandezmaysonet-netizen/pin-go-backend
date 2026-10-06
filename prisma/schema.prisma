@@ -8,11 +8,14 @@ datasource db {
 }
 
 model Organization {
+  pinAIReservationFees PinAIReservationFee[]
   id               String          @id @default(cuid())
   name             String
   createdAt        DateTime        @default(now())
   slug             String?         @unique
   publicBookingEnabled Boolean     @default(false)
+  pinAIEnabled         Boolean     @default(false)
+  pinAIRevision        Int         @default(0)
   updatedAt        DateTime        @updatedAt
   stripeCustomerId String?
 
@@ -222,11 +225,17 @@ model OrganizationInvitation {
 }
 
 model Property {
+  pinAIReservationFees PinAIReservationFee[]
   id                         String                      @id @default(cuid())
   organizationId             String
   name                       String
   slug                       String?
   isPublicBookable           Boolean                     @default(false)
+  pinAIEnabled               Boolean                     @default(false)
+  pinAIRevision              Int                         @default(0)
+  pinAITermsVersion          String?
+  pinAITermsAcceptedAt       DateTime?
+  pinAITermsAcceptedBy       String?
   isTestProperty             Boolean                     @default(false)
   distributionEnabled        Boolean                     @default(false)
   distributionStatus         String                      @default("DISABLED")
@@ -925,6 +934,8 @@ model Subscription {
 }
 
 model Reservation {
+  pinAIServiceEnrollment PinAIServiceEnrollment?
+  pinAIReservationFee PinAIReservationFee?
   id                      String                   @id @default(cuid())
   reservationNumber       String?                  @unique
   propertyId              String
