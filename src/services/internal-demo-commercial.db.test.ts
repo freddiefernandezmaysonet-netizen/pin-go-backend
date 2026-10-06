@@ -136,7 +136,9 @@ test("one Demo reservation through HTTP, messages, access, incident, host and cl
   const app = express(); app.use(express.json()); app.use(express.urlencoded({ extended: false }));
   app.use((req: any, _res, next) => { req.user = { id: platform.id, orgId: org.id,
     role: req.headers["x-test-role"] ?? "PLATFORM_ADMIN", email: platform.email }; next(); });
-  app.use(buildAdminDemoRunRouter(db, deps, { ...env, PIN_AI_INCIDENT_NOTIFICATIONS_ENABLED: undefined }));
+  app.use(buildAdminDemoRunRouter(db, deps, {
+    ...env, PIN_AI_INCIDENT_NOTIFICATIONS_ENABLED: undefined, GUEST_SMS_ENABLED: "0",
+  }));
   app.use(cleaningConfirmRouter);
   const server = app.listen(0, "127.0.0.1");
   await new Promise<void>(resolve => server.once("listening", resolve));
