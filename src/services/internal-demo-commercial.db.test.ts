@@ -203,6 +203,7 @@ test("one Demo reservation through HTTP, messages, access, incident, host and cl
     }
     assert.equal(await db.reservation.count(), 2); assert.equal(emails.length, 2); assert.equal(sms.length, 1);
     assert.deepEqual(emails.map(e => e.to), [input.guestEmail, principal.email]);
+    assert.equal(emails[0].reply_to, principal.email, "guest replies reach the same Demo principal");
     assert.ok(emails[0].html.includes(`/booking/manage/${token}`));
     assert.ok(emails.every(e => e.html.includes("Demo") && e.html.includes(number)));
     assert.ok(emails[0].html.includes("sin cobro"));

@@ -13,9 +13,6 @@ import {
   buildGuestCancellationTermsText,
   renderCancellationPolicySnapshot,
 } from "./cancellation-policy.service";
-import {
-  resolveOrganizationGuestReplyTo,
-} from "./organization-guest-email.service";
 
 function getAppUrl() {
   return String(process.env.APP_URL ?? "http://localhost:3000")
@@ -203,15 +200,10 @@ export async function applyInternalDemoDirectBookingParity(
   };
 
   if (updated.guestEmail) {
-    const replyTo = await resolveOrganizationGuestReplyTo(
-      prisma,
-      reservation.property.organizationId
-    );
-
     const payload = {
       demoSimulation: true,
       to: updated.guestEmail,
-      replyTo: replyTo.email,
+      replyTo: primaryAdmin.email,
       reservationNumber,
       guestName: updated.guestName,
       propertyName: reservation.property.name,
