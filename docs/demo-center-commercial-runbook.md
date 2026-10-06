@@ -7,7 +7,7 @@ Objetivo: mostrar cómo Pin&Go coordina una reserva desde su creación hasta el 
 | Paso en pantalla | Acción del presentador | Qué debe verse | Valor para el cliente |
 |---|---|---|---|
 | 1 · Reserva y registro | Crear una reserva desde Demo Center con los contactos participantes. | Un número PG, fechas, zona de la propiedad y enlace Manage Reservation. Pago e identidad identificados como simulados. | Una reserva inicia la operación. |
-| 2 · Comunicaciones | Abrir el correo del huésped y el del administrador principal; abrir Manage Reservation desde el correo. | Ambos correos corresponden al mismo número PG. El portal conserva la estancia y su horario. Mostrar el SMS de acceso y el enlace del cleaner cuando lleguen. | Huésped y equipo reciben la información que necesitan. |
+| 2 · Comunicaciones | Abrir el correo del huésped y el del administrador principal; mostrar el acuerdo del huésped y abrir Manage Reservation desde el correo. | Ambos correos corresponden al mismo número PG. El correo del huésped incluye el texto y versión del acuerdo guardado para esa reserva, con aceptación expresamente simulada. El portal conserva la estancia y su horario. Mostrar el SMS de acceso y el enlace del cleaner cuando lleguen. | Huésped y equipo reciben la información que necesitan. |
 | 3 · Acceso real | Usar el PIN recibido y la tarjeta Guest en la cerradura Demo dentro del horario. | Apertura física y vigencia coincidente con la reserva. El panel muestra el estado registrado y un PIN enmascarado. | Acceso vinculado a la estancia, con inicio y final definidos. |
 | 4 · Pin AI | Conversar desde el enlace del huésped. Preguntar por información documentada de la propiedad y horario de la reserva. | Respuestas del modelo en vivo, con el contexto de esa misma reserva; recargar y comprobar que continúa la conversación. | Atención al huésped con contexto, sin buscar manualmente cada dato. |
 | 5 · Incidente y respuesta | Reportar un incidente de demostración; el administrador abre el aviso, reconoce el caso, publica una respuesta y lo resuelve. | Una referencia GI, correo al principal y respuesta visible al huésped en Manage Reservation. | El caso llega a una persona responsable y su respuesta regresa al huésped. |
@@ -57,7 +57,7 @@ Registrar en una sola ficha: número PG y requestId, commit desplegado en API/wo
 
 La demo se considera comprobada solamente cuando esa ficha contiene:
 
-1. Correo recibido por huésped y principal, enlaces correctos y el mismo PG en ambos.
+1. Correo recibido por huésped y principal, enlaces correctos y el mismo PG en ambos. En el del huésped se ve el acuerdo guardado, su versión y la indicación de aceptación simulada. Un correo ya enviado no cambia; comprobar esta incorporación en la siguiente ejecución, sin reenviar para ocultar fallos.
 2. Manage Reservation accesible con los horarios correctos y sin cobros/cambios comerciales.
 3. Mensaje de acceso recibido; apertura real del PIN y tarjeta Guest dentro de su ventana, y rechazo después de checkout.
 4. Conversación real de Pin AI conservada al recargar, con contexto correcto de la reserva.
