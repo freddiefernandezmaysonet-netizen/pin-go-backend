@@ -4,7 +4,7 @@ import { ingestReservation } from "./ingest.service.js";
 import { completeInternalDemoSecurePrecheckin } from "./internal-demo-secure-precheckin.service.js";
 import { applyInternalDemoDirectBookingParity } from "./internal-demo-direct-booking-parity.service.js";
 import { dispatchPendingCleaningConfirmationForReservation } from "./cleaning-confirmation-dispatch.service.js";
-import { resolveOrganizationPrimaryAdmin } from "./organization-guest-email.service.js";
+import { resolveInternalDemoPrimaryAdmin } from "./internal-demo-primary-admin.service.js";
 import { readCleanerAccessWindow } from "./cleaner-access-window.service.js";
 import { demoMessageState } from "./internal-demo-message.service.js";
 import { INTERNAL_DEMO_PROPERTY_ID, INTERNAL_DEMO_SOURCE, INTERNAL_DEMO_PROVIDER, isInternalDemo } from "./internal-demo-scope.js";
@@ -28,7 +28,7 @@ export async function readDemoPreparation(db: PrismaClient, actor: DemoActor, en
   const property = await db.property.findFirst({ where: { id: INTERNAL_DEMO_PROPERTY_ID,
     organizationId: actor.organizationId, status: "ACTIVE" }, include: { locks: { where: { isActive: true } } } });
   if (!property) throw new DemoRunError("DEMO_PROPERTY_UNAVAILABLE");
-  const primaryAdmin = await resolveOrganizationPrimaryAdmin(db, actor.organizationId);
+  const primaryAdmin = await resolveInternalDemoPrimaryAdmin(db, actor.organizationId, actor.userId);
   const staff = await db.propertyStaff.findMany({ where: { propertyId: property.id, isActive: true,
     staffMember: { isActive: true, phoneE164: { not: null } } }, include: { staffMember: true } });
   const cleaner = staff.find(s => s.role === "PRIMARY") ?? staff.filter(s => s.role === "BACKUP").sort((a,b) => (a.backupOrder ?? 0) - (b.backupOrder ?? 0))[0];
@@ -41,8 +41,10 @@ export async function readDemoPreparation(db: PrismaClient, actor: DemoActor, en
   const guestCards = await db.nfcCard.findMany({ where: { propertyId: property.id, status: "AVAILABLE",
     label: { startsWith: "Guest-", mode: "insensitive" }, ttlockCardId: { gt: 0 } },
     distinct: ["ttlockCardId"], take: 2, select: { id: true } });
+  // Notification delivery is owned by message-retry-worker and checks its own
+  // PIN_AI_INCIDENT_NOTIFICATIONS_ENABLED switch. It is not an API setting.
   const required = ["PIN_AI_GUEST_GATEWAY_ENABLED", "PIN_AI_RUNTIME_SHADOW_ENABLED", "PIN_AI_RUNTIME_REAL_READ_ENABLED",
-    "PIN_AI_INCIDENT_ENABLED", "PIN_AI_INCIDENT_NOTIFICATIONS_ENABLED", "PIN_AI_HOST_INCIDENT_ENABLED"];
+    "PIN_AI_INCIDENT_ENABLED", "PIN_AI_HOST_INCIDENT_ENABLED"];
   const blockers = [
     ...(!primaryAdmin ? ["PRIMARY_ADMIN_MISSING"] : []),
     ...(!cleaner ? ["CLEANER_MISSING"] : []),

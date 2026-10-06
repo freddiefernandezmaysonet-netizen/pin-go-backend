@@ -1,5 +1,5 @@
 import { readInternalDemo, demoIncidentEnvironment } from "../../services/internal-demo-scope.js";
-import { resolveOrganizationPrimaryAdmin } from "../../services/organization-guest-email.service.js";
+import { resolveInternalDemoPrimaryAdmin } from "../../services/internal-demo-primary-admin.service.js";
 import { randomUUID } from "node:crypto";
 import type { PrismaClient, Prisma } from "@prisma/client";
 import { upsertOperationalIssue } from "../../apms/operational-intelligence.service.js";
@@ -107,7 +107,8 @@ export async function handleGuestIncident(input: {
       });
       if (isNew) {
         // No fallback to arbitrary staff or a model-supplied destination.
-        const principal = demo ? await resolveOrganizationPrimaryAdmin(tx as any, scope.organizationId) : null;
+        const principal = demo ? await resolveInternalDemoPrimaryAdmin(tx as any, scope.organizationId,
+          (demo.externalRaw as any)?.demoRun?.actorUserId) : null;
         const admins = demo ? (principal ? [principal] : []) : await tx.dashboardUser.findMany({
           where: guestIncidentRecipientWhere(scope.organizationId), select: { email: true },
         });

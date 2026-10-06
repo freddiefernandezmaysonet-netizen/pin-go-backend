@@ -6,16 +6,13 @@ import {
 } from "../lib/mailer";
 import { sendInternalDemoMessage } from "./internal-demo-message.service";
 import { isInternalDemo } from "./internal-demo-scope";
+import { resolveInternalDemoPrimaryAdmin } from "./internal-demo-primary-admin.service.js";
 import { generateReservationNumber } from "./reservation-number.service";
 import {
   buildCancellationPolicySnapshot,
   buildGuestCancellationTermsText,
   renderCancellationPolicySnapshot,
 } from "./cancellation-policy.service";
-import {
-  resolveOrganizationGuestReplyTo,
-  resolveOrganizationPrimaryAdmin,
-} from "./organization-guest-email.service";
 
 function getAppUrl() {
   return String(process.env.APP_URL ?? "http://localhost:3000")
@@ -106,7 +103,8 @@ export async function applyInternalDemoDirectBookingParity(
   }
 
   if (!isInternalDemo(reservation)) throw new Error("INTERNAL_DEMO_RESERVATION_REQUIRED");
-  const primaryAdmin = await resolveOrganizationPrimaryAdmin(prisma, reservation.property.organizationId);
+  const primaryAdmin = await resolveInternalDemoPrimaryAdmin(prisma, reservation.property.organizationId,
+    (reservation.externalRaw as any)?.demoRun?.actorUserId);
   const approvedEmail = (reservation.externalRaw as any)?.demoRun?.primaryAdminEmail;
   if (!primaryAdmin || (approvedEmail && primaryAdmin.email.toLowerCase() !== approvedEmail)) {
     throw new Error("INTERNAL_DEMO_PRIMARY_ADMIN_CHANGED");
@@ -202,15 +200,10 @@ export async function applyInternalDemoDirectBookingParity(
   };
 
   if (updated.guestEmail) {
-    const replyTo = await resolveOrganizationGuestReplyTo(
-      prisma,
-      reservation.property.organizationId
-    );
-
     const payload = {
       demoSimulation: true,
       to: updated.guestEmail,
-      replyTo: replyTo.email,
+      replyTo: primaryAdmin.email,
       reservationNumber,
       guestName: updated.guestName,
       propertyName: reservation.property.name,
