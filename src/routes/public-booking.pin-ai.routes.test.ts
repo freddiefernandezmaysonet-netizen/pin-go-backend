@@ -17,6 +17,59 @@ import { buildPublicBookingPinAIRouter } from "./public-booking.pin-ai.routes.js
 
 const token = "12345678-1234-1234-1234-123456789abc";
 
+test("server window gates availability, messages and old confirmations without invoking AI or payments", async () => {
+  let now = new Date("2026-10-25T18:59:59.999Z");
+  let reservation: any = { id: "reservation-a", propertyId: "property-a", status: "ACTIVE",
+    checkIn: new Date("2026-10-26T19:00:00Z"), checkOut: new Date("2026-10-28T15:00:00Z"),
+    property: { status: "ACTIVE", timezone: "America/Puerto_Rico", organizationId: "org-a" } };
+  const prisma = { reservation: { findFirst: async (args: any) => {
+    assert.equal(args.where.guestToken, token);
+    assert.deepEqual(args.where.guestTokenExpiresAt, { gt: now });
+    return reservation;
+  } } };
+  const forbidden = async () => { assert.fail("No model, broker or stay-time execution outside the window"); };
+  const app = express();
+  app.use(express.json());
+  app.use(buildPublicBookingPinAIRouter({ prisma: prisma as never, now: () => now,
+    runtime: forbidden, actionBrokerFactory: forbidden, stayTimeActions: { confirm: forbidden } as never,
+    env: { PIN_AI_GUEST_GATEWAY_ENABLED: "true", PIN_AI_ACTION_BROKER_ENABLED: "true",
+      PIN_AI_STAY_TIME_CHAT_ENABLED: "true", PIN_AI_ACTION_CANARY_RESERVATION_IDS: "reservation-a" } }));
+  const server = await new Promise<Server>(resolve => { const listener = app.listen(0, "127.0.0.1", () => resolve(listener)); });
+  try {
+    const base = `http://127.0.0.1:${(server.address() as AddressInfo).port}/manage/${token}/pin-ai`;
+    const availability = async () => {
+      const response = await fetch(`${base}/availability`);
+      assert.equal(response.headers.get("cache-control"), "no-store");
+      return response;
+    };
+    for (const instant of ["2026-10-25T18:59:59.999Z", "2026-10-29T15:00:00Z"]) {
+      now = new Date(instant);
+      assert.equal((await (await availability()).json()).available, false);
+      for (const [path, body] of [["messages", { message: "Salida tardía" }],
+        ["action-proposals/proposal-12345678/confirm", { confirmationToken: "old-confirmation" }]] as const) {
+        const response = await fetch(`${base}/${path}`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
+        assert.equal(response.status, 403);
+        assert.equal((await response.json()).error, "PIN_AI_OUTSIDE_AVAILABILITY_WINDOW");
+      }
+    }
+    for (const instant of ["2026-10-25T19:00:00Z", "2026-10-29T14:59:59.999Z"]) {
+      now = new Date(instant);
+      const data = await (await availability()).json();
+      assert.equal(data.available, true);
+      assert.equal(data.timezone, "America/Puerto_Rico");
+      assert.equal(data.closesAt, "2026-10-29T15:00:00.000Z");
+    }
+    reservation = { ...reservation, checkOut: new Date("2026-10-28T16:00:00Z") };
+    now = new Date("2026-10-29T15:30:00Z");
+    assert.equal((await (await availability()).json()).available, true);
+    reservation.status = "CANCELLED";
+    assert.equal((await (await availability()).json()).available, false);
+    reservation = null;
+    assert.equal((await availability()).status, 404);
+    assert.equal((await fetch(`${base.replace(token, "bad")}/availability`)).status, 400);
+  } finally { await closeServer(server); }
+});
+
 for (const enabled of [false, true]) test(`stay-time confirmation dispatch is gated separately: ${enabled}`, async () => {
   let executions = 0;
   const response = await requestAction({ confirmationToken: "private-confirmation" }, {
@@ -283,6 +336,9 @@ function createPrisma() {
       async findFirst() {
         return {
           id: "reservation-a",
+          status: "ACTIVE",
+          checkIn: new Date("2026-09-20T20:00:00Z"),
+          checkOut: new Date("2026-09-22T15:00:00Z"),
           propertyId: "property-a",
           preferredLanguage: "en",
           property: {

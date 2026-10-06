@@ -1,3 +1,4 @@
+import { guestPinAIAvailability } from "./guest-availability.js";
 import { readInternalDemo, demoIncidentEnvironment } from "../../services/internal-demo-scope.js";
 import { prisma as runtimePrisma } from "../../lib/prisma.js";
 import { GuestIncidentToolExecutor, type GuestIncidentRuntimeEvidence } from "../runtime/guest-incident-tool-executor.js";
@@ -57,6 +58,9 @@ function formatPropertyLocalDateTime(date: Date, timezone: string | null): strin
 }
 
 type GuestReservationScope = Readonly<{
+  checkIn: Date;
+  checkOut: Date;
+  status: string;
   id: string;
   propertyId: string;
   preferredLanguage: string;
@@ -143,6 +147,7 @@ export class GuestPinAIGatewayError extends Error {
   constructor(
     readonly code:
       | "GATEWAY_DISABLED"
+      | "OUTSIDE_AVAILABILITY_WINDOW"
       | "INVALID_TOKEN"
       | "INVALID_MESSAGE"
       | "RESERVATION_NOT_FOUND"
@@ -184,6 +189,9 @@ export class GuestPinAIGateway {
         property: { status: "ACTIVE" },
       },
       select: {
+        checkIn: true,
+        checkOut: true,
+        status: true,
         id: true,
         propertyId: true,
         preferredLanguage: true,
@@ -201,6 +209,9 @@ export class GuestPinAIGateway {
 
     if (!reservation) {
       throw new GuestPinAIGatewayError("RESERVATION_NOT_FOUND");
+    }
+    if (!guestPinAIAvailability(reservation, currentDateTime).available) {
+      throw new GuestPinAIGatewayError("OUTSIDE_AVAILABILITY_WINDOW");
     }
 
     const preferredLanguage: "en" | "es" =

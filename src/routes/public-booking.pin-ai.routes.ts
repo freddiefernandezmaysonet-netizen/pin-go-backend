@@ -1,4 +1,5 @@
 import { Router } from "express";
+import { guestPinAIAvailability } from "../pin-ai/guest/guest-availability.js";
 import type { PrismaClient } from "@prisma/client";
 import { saveGuestActionReceipt } from "../pin-ai/guest/guest-history.js";
 import { readGuestHistory } from "../pin-ai/guest/guest-history-reader.js";
@@ -46,6 +47,27 @@ export function buildPublicBookingPinAIRouter(input: Readonly<{
 }>) {
   const router = Router();
   const env = input.env ?? process.env;
+  router.get("/manage/:guestToken/pin-ai/availability", async (req, res) => {
+    res.setHeader("Cache-Control", "no-store");
+    if (!/^[A-Za-z0-9_-]{16,200}$/.test(req.params.guestToken)) {
+      return res.status(400).json({ ok: false, error: "INVALID_REQUEST" });
+    }
+    try {
+      const now = input.now?.() ?? new Date();
+      const reservation = await input.prisma.reservation.findFirst({
+        where: { guestToken: req.params.guestToken, guestTokenExpiresAt: { gt: now },
+          property: { status: "ACTIVE" } },
+        select: { checkIn: true, checkOut: true, status: true, property: { select: { timezone: true } } },
+      });
+      if (!reservation) return res.status(404).json({ ok: false, error: "RESERVATION_NOT_FOUND" });
+      const window = guestPinAIAvailability(reservation, now);
+      return res.json({ ok: true, ...window,
+        available: env.PIN_AI_GUEST_GATEWAY_ENABLED === "true" && window.available,
+        timezone: reservation.property.timezone, checkedAt: now });
+    } catch {
+      return res.status(503).json({ ok: false, error: "PIN_AI_UNAVAILABLE" });
+    }
+  });
   const gateway = new GuestPinAIGateway(
     input.prisma,
     input.runtime ?? createGuestPinAIRuntimeRunner(env),
@@ -164,6 +186,9 @@ export function buildPublicBookingPinAIRouter(input: Readonly<{
                 },
               },
               select: {
+                checkIn: true,
+                checkOut: true,
+                status: true,
                 id: true,
               },
             });
@@ -174,6 +199,10 @@ export function buildPublicBookingPinAIRouter(input: Readonly<{
             error:
               "ACTION_PROPOSAL_NOT_FOUND",
           });
+        }
+
+        if (!guestPinAIAvailability(reservation, currentDateTime).available) {
+          return res.status(403).json({ ok: false, error: "PIN_AI_OUTSIDE_AVAILABILITY_WINDOW" });
         }
 
         const canary =
@@ -590,6 +619,13 @@ function mapGatewayError(error: unknown): Readonly<{
       return {
         status: 409,
         publicCode: "PIN_AI_BUSY",
+        logCode: error.code,
+      };
+    }
+    if (error.code === "OUTSIDE_AVAILABILITY_WINDOW") {
+      return {
+        status: 403,
+        publicCode: "PIN_AI_OUTSIDE_AVAILABILITY_WINDOW",
         logCode: error.code,
       };
     }
