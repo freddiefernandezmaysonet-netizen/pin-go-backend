@@ -1,5 +1,5 @@
 import { INTERNAL_DEMO_PROPERTY_ID, readInternalDemo, demoIncidentEnvironment } from "../../services/internal-demo-scope.js";
-import { resolveOrganizationPrimaryAdmin } from "../../services/organization-guest-email.service.js";
+import { resolveInternalDemoPrimaryAdmin } from "../../services/internal-demo-primary-admin.service.js";
 import type { PrismaClient, MessageLog } from "@prisma/client";
 import { sendGuestIncidentHostNotice } from "../../lib/mailer.js";
 import type { GuestIncidentEmail } from "../../lib/email-templates/guestIncidentEmail.js";
@@ -79,7 +79,8 @@ export async function deliverGuestIncidentNotice(input: {
     id: m.reservationId ?? "", propertyId: m.propertyId ?? "", status: "ACTIVE", checkOut: { gt: now },
     property: { organizationId: m.organizationId ?? "", status: "ACTIVE" },
   }, select: { id: true } });
-  const principal = demo ? await resolveOrganizationPrimaryAdmin(prisma, m.organizationId!) : null;
+  const principal = demo ? await resolveInternalDemoPrimaryAdmin(prisma, m.organizationId!,
+    (demo.externalRaw as any)?.demoRun?.actorUserId) : null;
   const admins = demo ? (principal ? [principal] : []) : m.organizationId ? await prisma.dashboardUser.findMany({
     where: guestIncidentRecipientWhere(m.organizationId), select: { email: true },
   }) : [];

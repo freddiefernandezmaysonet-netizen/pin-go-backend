@@ -85,12 +85,15 @@ test("one Demo reservation through HTTP, messages, access, incident, host and cl
   await db.lock.create({ data: { propertyId, ttlockLockId: 29944630, isActive: true } });
   await db.tTLockAuth.create({ data: { organizationId: org.id, accessToken: "synthetic",
     refreshToken: "synthetic", expiresAt: new Date(Date.now() + 30 * 86400000) } });
+  // Mirror the real Demo organization: its principal is the platform operator,
+  // with no ORG_ADMIN. Another platform account must never receive the demo.
   const principal = await db.dashboardUser.create({ data: { organizationId: org.id,
-    email: "principal@example.invalid", passwordHash: "not-a-login", fullName: "Synthetic principal", role: "ORG_ADMIN" } });
-  const platform = await db.dashboardUser.create({ data: { organizationId: org.id,
-    email: "platform@example.invalid", passwordHash: "not-a-login", role: "PLATFORM_ADMIN" } });
+    email: "principal@example.invalid", passwordHash: "not-a-login", fullName: "Synthetic principal", role: "PLATFORM_ADMIN" } });
+  const platform = principal;
   await db.dashboardUser.create({ data: { organizationId: org.id,
-    email: "other-admin@example.invalid", passwordHash: "not-a-login", role: "ORG_ADMIN", createdAt: new Date(Date.now() + 1000) } });
+    email: "other-platform@example.invalid", passwordHash: "not-a-login", role: "PLATFORM_ADMIN", createdAt: new Date(Date.now() - 1000) } });
+  const orgAdmin = await db.dashboardUser.create({ data: { organizationId: org.id, isActive: false,
+    email: "org-admin@example.invalid", passwordHash: "not-a-login", role: "ORG_ADMIN" } });
   const cleaner = await db.staffMember.create({ data: { organizationId: org.id,
     fullName: "Synthetic cleaner", phoneE164: "+12025550123", isActive: true, preferredLanguage: "es", ttlockCardRef: "Cleaning Service-Demo" } });
   await db.propertyStaff.create({ data: { propertyId, staffMemberId: cleaner.id, role: "PRIMARY", isActive: true,
@@ -133,7 +136,8 @@ test("one Demo reservation through HTTP, messages, access, incident, host and cl
   const app = express(); app.use(express.json()); app.use(express.urlencoded({ extended: false }));
   app.use((req: any, _res, next) => { req.user = { id: platform.id, orgId: org.id,
     role: req.headers["x-test-role"] ?? "PLATFORM_ADMIN", email: platform.email }; next(); });
-  app.use(buildAdminDemoRunRouter(db, deps, env)); app.use(cleaningConfirmRouter);
+  app.use(buildAdminDemoRunRouter(db, deps, { ...env, PIN_AI_INCIDENT_NOTIFICATIONS_ENABLED: undefined }));
+  app.use(cleaningConfirmRouter);
   const server = app.listen(0, "127.0.0.1");
   await new Promise<void>(resolve => server.once("listening", resolve));
   t.after(() => new Promise<void>((resolve, reject) => server.close(e => e ? reject(e) : resolve())));
@@ -151,6 +155,19 @@ test("one Demo reservation through HTTP, messages, access, incident, host and cl
   let reservationId = "", token = "", number = "";
 
   await t.test("preparation names actual recipients; invalid data and non-platform actors write nothing", async () => {
+    const { resolveInternalDemoPrimaryAdmin } = await import("./internal-demo-primary-admin.service.js");
+    const { resolveOrganizationPrimaryAdmin } = await import("./organization-guest-email.service.js");
+    assert.equal(await resolveOrganizationPrimaryAdmin(db, org.id), null, "commercial recipient policy is unchanged");
+    assert.equal(await resolveInternalDemoPrimaryAdmin(db, org.id, undefined), null);
+    assert.equal(await resolveInternalDemoPrimaryAdmin(db, commercialProperty.id, platform.id), null, "actor must belong to the organization");
+    await db.dashboardUser.update({ where: { id: platform.id }, data: { role: "MEMBER" } });
+    assert.equal(await resolveInternalDemoPrimaryAdmin(db, org.id, platform.id), null, "never fall back to a member or another platform admin");
+    await db.dashboardUser.update({ where: { id: platform.id }, data: { role: "PLATFORM_ADMIN", isActive: false } });
+    assert.equal(await resolveInternalDemoPrimaryAdmin(db, org.id, platform.id), null, "inactive actors are ineligible");
+    await db.dashboardUser.update({ where: { id: platform.id }, data: { isActive: true } });
+    await db.dashboardUser.update({ where: { id: orgAdmin.id }, data: { isActive: true } });
+    assert.equal((await resolveInternalDemoPrimaryAdmin(db, org.id, platform.id))?.email, orgAdmin.email, "ORG_ADMIN still takes precedence");
+    await db.dashboardUser.update({ where: { id: orgAdmin.id }, data: { isActive: false } });
     const prep = await (await fetch(`${base}/api/internal/admin/demo/preparation`)).json() as any;
     assert.equal(prep.data.ready, true, JSON.stringify(prep.data.blockers));
     assert.equal(prep.data.primaryAdmin.email, principal.email); assert.equal(prep.data.cleaner.id, cleaner.id);

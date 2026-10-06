@@ -439,7 +439,7 @@ test("Demo Direct Booking parity uses canonical reservation numbers, guest porta
   );
   assert.match(
     paritySource,
-    /resolveOrganizationPrimaryAdmin\(/
+    /resolveInternalDemoPrimaryAdmin\(/
   );
   assert.doesNotMatch(
     paritySource,
