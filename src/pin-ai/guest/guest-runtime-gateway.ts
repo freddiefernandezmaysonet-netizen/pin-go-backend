@@ -1,3 +1,4 @@
+import { readInternalDemo, demoIncidentEnvironment } from "../../services/internal-demo-scope.js";
 import { prisma as runtimePrisma } from "../../lib/prisma.js";
 import { GuestIncidentToolExecutor, type GuestIncidentRuntimeEvidence } from "../runtime/guest-incident-tool-executor.js";
 import { GuardedPinAIRuntimeToolExecutor } from "../runtime/tool-executor.js";
@@ -500,6 +501,10 @@ export function createGuestPinAIRuntimeRunner(
       );
     }
 
+    const demo = actionAuthorization?.guestToken ? await readInternalDemo(runtimePrisma, {
+      ...request.context, guestToken: actionAuthorization.guestToken,
+    }) : null;
+    const incidentEnv = demo ? demoIncidentEnvironment(env, request.context.organizationId, demo.id) : env;
     const actionCanary =
       resolvePinAIActionCanaryScope({
         reservationId:
@@ -508,8 +513,8 @@ export function createGuestPinAIRuntimeRunner(
         env,
       });
     const actionProposalEnabled =
-      actionCanary.enabled;
-    const stayTimeEnabled = stayTimeChatEnabled(request.context.reservationId, env);
+      !demo && actionCanary.enabled;
+    const stayTimeEnabled = !demo && stayTimeChatEnabled(request.context.reservationId, env);
 
     if (
       actionProposalEnabled &&
@@ -554,7 +559,7 @@ export function createGuestPinAIRuntimeRunner(
     const webSearchEnabled =
       env.PIN_AI_RUNTIME_WEB_SEARCH_ENABLED === "true" &&
       location.label.length > 0;
-    const incidentsEnabled = !!actionAuthorization?.guestToken && guestIncidentEnabled(request.context.reservationId, env);
+    const incidentsEnabled = !!actionAuthorization?.guestToken && guestIncidentEnabled(request.context.reservationId, incidentEnv);
     const transport = new OpenAIAgentsRuntimeTransport(
       {
         enabled: true,
@@ -602,7 +607,7 @@ export function createGuestPinAIRuntimeRunner(
         }).prepare } : {}) }) : undefined;
     const delegate = actionTools?.executor ?? createPinGoRuntimeReadToolExecutor();
     const incidentTools = incidentsEnabled ? new GuestIncidentToolExecutor({
-      prisma: runtimePrisma, guestToken: actionAuthorization!.guestToken, env, delegate,
+      prisma: runtimePrisma, guestToken: actionAuthorization!.guestToken, env: incidentEnv, delegate,
     }) : undefined;
     const result = await new PinAIShadowOrchestrator(model,
       incidentTools ? new GuardedPinAIRuntimeToolExecutor(incidentTools) : delegate).run(request);

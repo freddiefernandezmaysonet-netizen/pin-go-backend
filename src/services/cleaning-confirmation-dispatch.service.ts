@@ -4,6 +4,8 @@ import { sendSms } from "../integrations/twilio/twilio.client";
 import { selectNextStaffForProperty } from "./staff-selection.service";
 import { buildCleaningConfirmationSmsBody } from "./cleaning-confirmation-sms-body.service";
 import { getStaffIntlLocale, resolveStaffLanguage } from "./staff-language.service.js";
+import { isInternalDemo } from "./internal-demo-scope.js";
+import { sendInternalDemoMessage } from "./internal-demo-message.service.js";
 
 const DISPATCH_TYPE = "CLEANING_CONFIRMATION";
 const SEND_START_HOUR = 8;
@@ -53,6 +55,7 @@ function buildConfirmUrl(token: string) {
 
 async function sendCleaningConfirmationSms(params: {
   prisma: PrismaClient;
+  send?: typeof sendSms;
   confirmation: {
     id: string;
     reservationId: string;
@@ -106,7 +109,13 @@ if (!cleaningNfcEnabled) {
   const timezone = reservation.property?.timezone ?? "America/Puerto_Rico";
   const language = resolveStaffLanguage(staff.preferredLanguage);
 
-  if (!isWithinCleaningMessageHours(timezone, now)) {
+  const raw = reservation.externalRaw as Record<string, any> | null;
+  const demoAuthorized = isInternalDemo(reservation) && raw?.demoRun?.cleanerId === staff.id &&
+    raw?.demoRun?.afterHoursAuthorized === true;
+  if (isInternalDemo(reservation) && !demoAuthorized) {
+    return { ok: false, skipped: true, reason: "demo_recipient_not_authorized" };
+  }
+  if (!demoAuthorized && !isWithinCleaningMessageHours(timezone, now)) {
     return { ok: false, skipped: true, reason: "outside_allowed_hours" };
   }
 
@@ -181,6 +190,14 @@ if (!cleaningNfcEnabled) {
     confirmUrl,
     language,
   });
+
+  if (demoAuthorized) {
+    const delivery = await sendInternalDemoMessage({ prisma, reservationId: reservation.id,
+      propertyId: reservation.propertyId, organizationId: reservation.property.organizationId,
+      channel: "sms", type: DISPATCH_TYPE, to: staff.phoneE164, body, key: confirmation.id,
+      send: () => (params.send ?? sendSms)(staff.phoneE164!, body) });
+    return { ok: delivery.ok, skipped: false, reason: delivery.status };
+  }
 
   const sms = await sendSms(staff.phoneE164, body);
 
@@ -371,6 +388,7 @@ export async function dispatchPendingCleaningConfirmationForReservation(params: 
   prisma: PrismaClient;
   reservationId: string;
   now?: Date;
+  send?: typeof sendSms;
 }) {
   const now = params.now ?? new Date();
 
@@ -406,6 +424,7 @@ export async function dispatchPendingCleaningConfirmationForReservation(params: 
     prisma: params.prisma,
     confirmation,
     now,
+    send: params.send,
   });
 
   return {

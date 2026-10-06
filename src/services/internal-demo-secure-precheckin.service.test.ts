@@ -2,14 +2,21 @@ import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import test from "node:test";
 import type { PrismaClient } from "@prisma/client";
-import { completeInternalDemoSecurePrecheckin } from "./internal-demo-secure-precheckin.service.js";
+import {
+  completeInternalDemoSecurePrecheckin,
+  INTERNAL_DEMO_PROPERTY_ID,
+} from "./internal-demo-secure-precheckin.service.js";
 
 const now = new Date("2026-08-17T12:00:00.000Z");
 
 function buildHarness(input?: {
   role?: string;
+  source?: string | null;
   externalId?: string | null;
   externalProvider?: string | null;
+  externalRaw?: unknown;
+  propertyId?: string;
+  propertyStatus?: string;
   requiresIdentityVerification?: boolean;
   readiness?: {
     ready: boolean;
@@ -19,6 +26,7 @@ function buildHarness(input?: {
   const calls = {
     findUnique: 0,
     transaction: 0,
+    queries: [] as Array<Record<string, any>>,
     updates: [] as Array<Record<string, any>>,
     ensureJourney: 0,
     ensureSnapshot: 0,
@@ -28,19 +36,23 @@ function buildHarness(input?: {
   };
   const reservation = {
     id: "reservation-demo-1",
+    source: input?.source === undefined ? "INTERNAL_DEMO_DIRECT_BOOKING" : input.source,
     externalId:
       input?.externalId === undefined
         ? "DEMO-123"
         : input.externalId,
     externalProvider:
       input?.externalProvider === undefined
-        ? "LODGIFY"
+        ? "PIN_GO_INTERNAL_DEMO"
         : input.externalProvider,
     guestName: "Pin&Go Demo Guest",
-    propertyId: "property-1",
-    externalRaw: null,
+    propertyId: input?.propertyId ?? INTERNAL_DEMO_PROPERTY_ID,
+    externalRaw: input?.externalRaw === undefined
+      ? { demo: true, paymentSimulated: true, created_by: "platform@example.com" }
+      : input.externalRaw,
     property: {
       organizationId: "organization-1",
+      status: input?.propertyStatus ?? "ACTIVE",
     },
   };
   const tx = {
@@ -53,8 +65,9 @@ function buildHarness(input?: {
   };
   const prisma = {
     reservation: {
-      findUnique: async () => {
+      findUnique: async (query: Record<string, any>) => {
         calls.findUnique += 1;
+        calls.queries.push(query);
         return reservation;
       },
     },
@@ -84,7 +97,7 @@ function buildHarness(input?: {
         alreadyCaptured: false,
         snapshot: {
           agreementId: "agreement-1",
-          propertyId: "property-1",
+          propertyId: reservation.propertyId,
           version: "1",
           title: "Demo agreement",
           capturedAt: now.toISOString(),
@@ -168,6 +181,9 @@ test("controlled demo records simulated verification evidence and remains access
   assert.equal(harness.calls.completeJourney, 1);
   assert.equal(harness.calls.evaluateReadiness, 1);
   assert.equal(harness.calls.audits.length, 1);
+  assert.equal(harness.calls.queries[0].select.source, true);
+  assert.equal(harness.calls.queries[0].select.externalRaw, true);
+  assert.equal(harness.calls.queries[0].select.property.select.status, true);
 
   const update = harness.calls.updates[0];
   assert.equal(update.where.id, "reservation-demo-1");
@@ -177,6 +193,9 @@ test("controlled demo records simulated verification evidence and remains access
     update.data.guestAccessModeSnapshot,
     "PASSCODE_PLUS_NFC"
   );
+  assert.equal(update.data.externalRaw.demo, true);
+  assert.equal(update.data.externalRaw.paymentSimulated, true);
+  assert.equal(update.data.externalRaw.created_by, "platform@example.com");
   assert.deepEqual(
     update.data.externalRaw.consent,
     {
@@ -298,6 +317,49 @@ test("controlled demo rejects ordinary reservations before writing evidence", as
   assert.equal(harness.calls.updates.length, 0);
 });
 
+const deniedIdentities: Array<[string, Parameters<typeof buildHarness>[0]]> = [
+  ["missing source", { source: null }],
+  ["commercial Direct Booking", { source: "DIRECT_BOOKING", externalProvider: "PIN_GO_DIRECT" }],
+  ["manual source with demo-looking ID", { source: "MANUAL" }],
+  ["Channex source with demo-looking ID", { source: "AIRBNB", externalProvider: "CHANNEX" }],
+  ["legacy Lodgify demo", { source: "LODGIFY", externalProvider: "LODGIFY" }],
+  ["native source but Lodgify provider", { externalProvider: "LODGIFY" }],
+  ["missing provider", { externalProvider: null }],
+  ["missing external ID", { externalId: null }],
+  ["missing simulation metadata", { externalRaw: null }],
+  ["array instead of metadata", { externalRaw: [] }],
+  ["text instead of metadata", { externalRaw: "demo" }],
+  ["missing demo flag", { externalRaw: { paymentSimulated: true } }],
+  ["false demo flag", { externalRaw: { demo: false, paymentSimulated: true } }],
+  ["string demo flag", { externalRaw: { demo: "true", paymentSimulated: true } }],
+  ["missing payment simulation", { externalRaw: { demo: true } }],
+  ["false payment simulation", { externalRaw: { demo: true, paymentSimulated: false } }],
+  ["string payment simulation", { externalRaw: { demo: true, paymentSimulated: "true" } }],
+];
+for (const [label, input] of deniedIdentities) {
+  test(`native pre-check-in rejects ${label} without writes`, async () => {
+    const h = buildHarness(input);
+    await assert.rejects(completeInternalDemoSecurePrecheckin(h.prisma, {
+      reservationId: "reservation-demo-1", actor: h.actor, now,
+    }, h.dependencies), /INTERNAL_DEMO_RESERVATION_REQUIRED/);
+    assert.equal(h.calls.transaction, 0);
+    assert.equal(h.calls.updates.length, 0);
+    assert.equal(h.calls.audits.length, 0);
+    assert.equal(h.calls.completeJourney, 0);
+  });
+}
+for (const input of [{ propertyId: "ordinary-property" }, { propertyStatus: "INACTIVE" }]) {
+  test(`native pre-check-in requires the dedicated active demo property: ${JSON.stringify(input)}`, async () => {
+    const h = buildHarness(input);
+    await assert.rejects(completeInternalDemoSecurePrecheckin(h.prisma, {
+      reservationId: "reservation-demo-1", actor: h.actor, now,
+    }, h.dependencies), /INTERNAL_DEMO_PROPERTY_REQUIRED/);
+    assert.equal(h.calls.transaction, 0);
+    assert.equal(h.calls.updates.length, 0);
+    assert.equal(h.calls.audits.length, 0);
+  });
+}
+
 test("controlled demo rejects reservations from another organization", async () => {
   const harness = buildHarness();
 
@@ -345,157 +407,8 @@ test("controlled demo refuses to audit or release access while readiness remains
   assert.equal(harness.calls.audits.length, 0);
 });
 
-test("Demo Center invokes secure pre-check-in only for a processed demo reservation", async () => {
-  const source = await readFile(
-    new URL("../routes/admin.demo.routes.ts", import.meta.url),
-    "utf8"
-  );
-  const serviceSource = await readFile(
-    new URL(
-      "./internal-demo-secure-precheckin.service.ts",
-      import.meta.url
-    ),
-    "utf8"
-  );
-
-  assert.match(
-    source,
-    /reservation\s*&&\s*processedEvent\?\.status\s*===\s*"PROCESSED"/
-  );
-  assert.match(
-    source,
-    /completeInternalDemoSecurePrecheckin\(\s*prisma,\s*\{\s*reservationId:\s*reservation\.id/
-  );
-  assert.match(
-    source,
-    /userId:\s*user\.id[\s\S]*organizationId:\s*user\.orgId[\s\S]*role:\s*user\.role/
-  );
-  assert.match(
-    source,
-    /delivery:\s*\{\s*preferredLanguage:\s*cleanPreferredLanguage,\s*smsConsent:\s*hasSmsConsent/
-  );
-  assert.match(
-    source,
-    /email:\s*\{\s*enabled:\s*true,\s*to:\s*cleanGuestEmail[\s\S]*attempted:\s*directBookingParity\?\.guestEmail\?\.attempted/
-  );
-  assert.match(
-    source,
-    /sms:\s*\{\s*enabled:\s*hasSmsConsent/
-  );
-  assert.doesNotMatch(
-    source,
-    /demo@pingo\.com|\+17876768198/
-  );
-  assert.match(
-    source,
-    /ingestReservation\(\{[\s\S]*source:\s*"INTERNAL_DEMO_DIRECT_BOOKING"[\s\S]*externalProvider:\s*"PIN_GO_INTERNAL_DEMO"/
-  );
-  assert.doesNotMatch(
-    source,
-    /webhookEventIngest\.create|provider:\s*PmsProvider\.LODGIFY|eventType:\s*"DEMO_BOOKING"/
-  );
-  assert.match(
-    source,
-    /dispatchPendingCleaningConfirmationForReservation\(\{\s*prisma,\s*reservationId:\s*reservation\.id,?\s*\}\)/
-  );
-  assert.match(
-    source,
-    /directBookingParity,[\s\S]*cleaningConfirmationDispatch,[\s\S]*guest confirmation accepted for delivery/
-  );
-  assert.ok(
-    source.indexOf("await ingestReservation") <
-      source.indexOf(
-        "await completeInternalDemoSecurePrecheckin"
-      )
-  );
-  assert.ok(
-    source.indexOf(
-      "await completeInternalDemoSecurePrecheckin"
-    ) <
-      source.indexOf(
-        "await applyInternalDemoDirectBookingParity"
-      )
-  );
-  assert.ok(
-    source.indexOf(
-      "await applyInternalDemoDirectBookingParity"
-    ) <
-      source.indexOf(
-        "await dispatchPendingCleaningConfirmationForReservation"
-      )
-  );
-  const cleaningDispatchCall = source.match(
-    /dispatchPendingCleaningConfirmationForReservation\(\{[\s\S]*?\}\)/
-  )?.[0];
-  assert.ok(cleaningDispatchCall);
-  assert.doesNotMatch(
-    cleaningDispatchCall,
-    /smsConsent|hasSmsConsent/
-  );
-  assert.doesNotMatch(
-    serviceSource,
-    /ttlock|activateGrant|accessGrant\.(?:create|update)/i
-  );
-});
-
-
-test("Demo Center Direct Booking parity remains payment-free and uses logged production email types", async () => {
-  const routeSource = await readFile(
-    new URL("../routes/admin.demo.routes.ts", import.meta.url),
-    "utf8"
-  );
-  const paritySource = await readFile(
-    new URL("./internal-demo-direct-booking-parity.service.ts", import.meta.url),
-    "utf8"
-  );
-  const auditSource = await readFile(
-    new URL("./reservation-complete-flow-audit.service.ts", import.meta.url),
-    "utf8"
-  );
-
-  assert.match(routeSource, /paymentSimulated:\s*true/);
-  assert.match(
-    routeSource,
-    /applyInternalDemoDirectBookingParity\(\s*prisma/
-  );
-  assert.match(
-    paritySource,
-    /type:\s*"DIRECT_BOOKING_GUEST_CONFIRMATION"/
-  );
-  assert.match(
-    paritySource,
-    /type:\s*"DIRECT_BOOKING_HOST_NOTIFICATION"/
-  );
-  assert.match(
-    paritySource,
-    /source:\s*"INTERNAL_DEMO_DIRECT_BOOKING"/
-  );
-  assert.match(
-    paritySource,
-    /paymentSimulated:\s*true/
-  );
-  assert.match(
-    paritySource,
-    /charged:\s*false/
-  );
-  assert.doesNotMatch(
-    paritySource,
-    /stripe\.(?:checkout|paymentIntents|charges|transfers|refunds)/
-  );
-  assert.match(
-    auditSource,
-    /auditSource\s*===\s*"INTERNAL_DEMO_DIRECT_BOOKING"/
-  );
-  assert.match(
-    auditSource,
-    /stripeRequired\s*=\s*[\s\S]*!isInternalDemoDirectBooking/
-  );
-  assert.match(
-    auditSource,
-    /hostPayoutRequired\s*=\s*[\s\S]*!isInternalDemoDirectBooking/
-  );
-});
-
+// Route ordering and payment-free delivery are exercised through real services
+// and disposable PostgreSQL in internal-demo-commercial.db.test.ts.
 
 test("Demo Direct Booking parity uses canonical reservation numbers, guest portal eligibility, and one primary host recipient", async () => {
   const paritySource = await readFile(

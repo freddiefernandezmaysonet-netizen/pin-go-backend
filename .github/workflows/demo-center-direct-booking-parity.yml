@@ -1,5 +1,7 @@
 name: Demo Center Direct Booking parity
 on:
+  push:
+    branches: ['agent/demo-center-commercial-stabilization-v1']
   pull_request:
     branches: [main]
     paths:
@@ -7,7 +9,24 @@ on:
       - 'src/services/internal-demo-direct-booking-parity.service.ts'
       - 'src/services/internal-demo-secure-precheckin.service.ts'
       - 'src/services/internal-demo-secure-precheckin.service.test.ts'
+      - 'src/services/internal-demo-native-secure-precheckin.db.test.ts'
+      - 'src/services/internal-demo-*.ts'
+      - 'src/services/ttlock/ttlock.brain.ts'
+      - 'src/pin-ai/guest/guest-*.ts'
+      - 'src/pin-ai/host/host-incident.service.ts'
+      - 'src/services/cleaning-confirmation-dispatch.service.ts'
+      - 'src/services/guest-cancellation.service.ts'
+      - 'src/services/guest-reservation-modification.service.ts'
+      - 'src/services/direct-booking-refund.service.ts'
+      - 'src/lib/mailer.ts'
+      - 'src/services/ingest.service.ts'
+      - 'src/services/direct-booking-ingest-transaction.ts'
+      - 'src/services/guest-agreement.service.ts'
+      - 'src/services/guest-journey.service.ts'
+      - 'src/services/guest-access-readiness.service.ts'
+      - 'src/services/cleaner-access-window.service.ts'
       - 'src/services/reservation-complete-flow-audit.service.ts'
+      - 'prisma/**'
       - 'tsconfig.demo-center-direct-booking-parity.json'
       - '.github/workflows/demo-center-direct-booking-parity.yml'
 permissions:
@@ -18,6 +37,8 @@ jobs:
     timeout-minutes: 10
     env:
       DATABASE_URL: postgresql://test:test@127.0.0.1:1/no_runtime_database
+      NODE_ENV: test
+      STRIPE_SECRET_KEY: sk_test_synthetic_demo_no_network
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -28,5 +49,86 @@ jobs:
       - run: npx --no-install prisma generate --schema ./prisma
       - name: Focused TypeScript build
         run: npx --no-install tsc -p tsconfig.demo-center-direct-booking-parity.json
-      - name: Demo Center parity contracts
-        run: node --import tsx --test src/services/internal-demo-secure-precheckin.service.test.ts
+      - name: Demo Center parity contracts and native identity denial tests
+        run: node --import tsx --test src/services/internal-demo-secure-precheckin.service.test.ts src/pin-ai/guest/guest-incident.test.ts src/pin-ai/guest/guest-runtime-gateway.test.ts
+  connected-commercial-demo:
+    name: Same reservation commercial demonstration (PostgreSQL)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: pingo_demo_commercial_test
+        ports: ['5432:5432']
+        options: >-
+          --health-cmd "pg_isready -U postgres -d pingo_demo_commercial_test"
+          --health-interval 5s --health-timeout 5s --health-retries 10
+    env:
+      NODE_ENV: test
+      DATABASE_URL: postgresql://postgres:postgres@127.0.0.1:5432/pingo_demo_commercial_test
+      DEMO_COMMERCIAL_TEST_DATABASE_URL: postgresql://postgres:postgres@127.0.0.1:5432/pingo_demo_commercial_test
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+      - name: Require disposable database before schema writes
+        run: |
+          node -e 'const a=require("node:assert/strict"), u=new URL(process.env.DATABASE_URL); a.equal(process.env.NODE_ENV,"test"); a.equal(process.env.DATABASE_URL,process.env.DEMO_COMMERCIAL_TEST_DATABASE_URL); a.equal(u.hostname,"127.0.0.1"); a.equal(u.pathname,"/pingo_demo_commercial_test"); a.equal(u.search,"");'
+      - run: npm ci --ignore-scripts --no-audit --no-fund
+      - run: npx --no-install prisma generate --schema ./prisma
+      - run: npx --no-install prisma migrate deploy --schema ./prisma
+      - name: Connected journey with controlled provider transports; no live credentials
+        run: timeout 150s node --import tsx --test --test-reporter=tap src/services/internal-demo-commercial.db.test.ts
+  connected-precheckin:
+    name: Native Demo PostgreSQL (${{ matrix.version }})
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    strategy:
+      fail-fast: false
+      matrix:
+        version: [baseline, candidate]
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: pingo_demo_precheckin_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d pingo_demo_precheckin_test"
+          --health-interval 5s --health-timeout 5s --health-retries 10
+    env:
+      NODE_ENV: test
+      DATABASE_URL: postgresql://postgres:postgres@127.0.0.1:5432/pingo_demo_precheckin_test
+      DEMO_NATIVE_TEST_DATABASE_URL: postgresql://postgres:postgres@127.0.0.1:5432/pingo_demo_precheckin_test
+      DEMO_NATIVE_EXPECT_LEGACY_REJECTION: ${{ matrix.version == 'baseline' && '1' || '0' }}
+      STRIPE_SECRET_KEY: sk_test_synthetic_demo_no_network
+      RESEND_API_KEY: ''
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+      - name: Require disposable loopback database before any schema writes
+        run: |
+          node -e 'const assert=require("node:assert/strict"); const u=new URL(process.env.DATABASE_URL); assert.equal(process.env.NODE_ENV,"test"); assert.equal(process.env.DATABASE_URL,process.env.DEMO_NATIVE_TEST_DATABASE_URL); assert.equal(u.hostname,"127.0.0.1"); assert.equal(u.pathname,"/pingo_demo_precheckin_test"); assert.equal(u.search,"");'
+      - run: npm ci --ignore-scripts --no-audit --no-fund
+      - run: npx --no-install prisma generate --schema ./prisma
+      - name: Apply actual migrations only to the disposable PostgreSQL service
+        run: npx --no-install prisma migrate deploy --schema ./prisma
+      - name: Load the exact pre-fix validator for the negative-control job
+        if: matrix.version == 'baseline'
+        run: |
+          git fetch --no-tags --depth=1 origin 66cdf20f111b441ec0aa39803f8b13479a3283de
+          git show 66cdf20f111b441ec0aa39803f8b13479a3283de:src/services/internal-demo-secure-precheckin.service.ts > src/services/internal-demo-secure-precheckin.service.ts
+          test "$(git hash-object src/services/internal-demo-secure-precheckin.service.ts)" = "987e6baa0365d95af77e0c727b52e4b01b43d452"
+      - name: Native ingest to real secure pre-check-in, without external HTTP
+        run: timeout 120s node --import tsx --test --test-reporter=tap src/services/internal-demo-native-secure-precheckin.db.test.ts

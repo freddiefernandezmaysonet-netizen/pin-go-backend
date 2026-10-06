@@ -1,3 +1,4 @@
+import { hasDemoMarker } from "./internal-demo-scope.js";
 import {
   CancellationActor,
   HostPayoutStatus,
@@ -57,9 +58,9 @@ function isDirectBookingReservation(reservation: {
   stripeCheckoutSessionId: string | null;
 }) {
   return (
-    reservation.source === "DIRECT_BOOKING" ||
+    !hasDemoMarker(reservation) && (reservation.source === "DIRECT_BOOKING" ||
     reservation.externalProvider === "PIN_GO_DIRECT" ||
-    Boolean(reservation.stripeCheckoutSessionId)
+    Boolean(reservation.stripeCheckoutSessionId))
   );
 }
 

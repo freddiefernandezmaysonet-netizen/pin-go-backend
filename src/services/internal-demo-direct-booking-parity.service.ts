@@ -4,7 +4,8 @@ import {
   sendDirectBookingGuestConfirmation,
   sendDirectBookingHostNotification,
 } from "../lib/mailer";
-import { sendLoggedEmail } from "./email-delivery.service";
+import { sendInternalDemoMessage } from "./internal-demo-message.service";
+import { isInternalDemo } from "./internal-demo-scope";
 import { generateReservationNumber } from "./reservation-number.service";
 import {
   buildCancellationPolicySnapshot,
@@ -82,7 +83,8 @@ export async function applyInternalDemoDirectBookingParity(
   input: {
     reservationId: string;
     preferredLanguage: "es" | "en";
-  }
+  },
+  providers = { guest: sendDirectBookingGuestConfirmation, host: sendDirectBookingHostNotification }
 ) {
   const reservation = await prisma.reservation.findUnique({
     where: { id: input.reservationId },
@@ -90,6 +92,7 @@ export async function applyInternalDemoDirectBookingParity(
       property: {
         select: {
           id: true,
+          status: true,
           name: true,
           timezone: true,
           organizationId: true,
@@ -102,8 +105,16 @@ export async function applyInternalDemoDirectBookingParity(
     throw new Error("INTERNAL_DEMO_RESERVATION_NOT_FOUND");
   }
 
-  const policy = await buildCancellationPolicySnapshot(reservation.propertyId);
-  const acceptedAt = new Date().toISOString();
+  if (!isInternalDemo(reservation)) throw new Error("INTERNAL_DEMO_RESERVATION_REQUIRED");
+  const primaryAdmin = await resolveOrganizationPrimaryAdmin(prisma, reservation.property.organizationId);
+  const approvedEmail = (reservation.externalRaw as any)?.demoRun?.primaryAdminEmail;
+  if (!primaryAdmin || (approvedEmail && primaryAdmin.email.toLowerCase() !== approvedEmail)) {
+    throw new Error("INTERNAL_DEMO_PRIMARY_ADMIN_CHANGED");
+  }
+  const policy = reservation.cancellationPolicySnapshot
+    ? reservation.cancellationPolicySnapshot as any
+    : await buildCancellationPolicySnapshot(reservation.propertyId);
+  const acceptedAt = (reservation.cancellationPolicySnapshot as any)?.guestAcceptedCancellationTermsAt ?? new Date().toISOString();
   const termsText = buildGuestCancellationTermsText(
     policy,
     input.preferredLanguage
@@ -197,6 +208,7 @@ export async function applyInternalDemoDirectBookingParity(
     );
 
     const payload = {
+      demoSimulation: true,
       to: updated.guestEmail,
       replyTo: replyTo.email,
       reservationNumber,
@@ -220,33 +232,28 @@ export async function applyInternalDemoDirectBookingParity(
       preferredLanguage: input.preferredLanguage,
     };
 
-    const result = await sendLoggedEmail({
+    const result = await sendInternalDemoMessage({
       prisma,
       type: "DIRECT_BOOKING_GUEST_CONFIRMATION",
       to: updated.guestEmail,
-      subject:
-        `${input.preferredLanguage === "es" ? "Reservación confirmada" : "Reservation confirmed"} #${reservationNumber} - ${reservation.property.name}`,
+      channel: "email",
+      body: JSON.stringify({ kind: "INTERNAL_DEMO_CONFIRMATION", reservationNumber }),
       reservationId: updated.id,
       propertyId: reservation.property.id,
       organizationId: reservation.property.organizationId,
-      retryPayload: payload,
-      send: () => sendDirectBookingGuestConfirmation(payload),
+      send: () => providers.guest(payload),
     });
 
     guestEmail = {
       attempted: true,
       ok: result.ok,
       status: result.status,
-      error: result.error ?? null,
+      error: result.ok ? null : result.status,
       to: updated.guestEmail,
     };
   }
 
-  const primaryAdmin = await resolveOrganizationPrimaryAdmin(
-    prisma,
-    reservation.property.organizationId
-  );
-  const hostRecipients = primaryAdmin ? [primaryAdmin] : [];
+  const hostRecipients = [primaryAdmin];
 
   const hostEmail = {
     attempted: hostRecipients.length > 0,
@@ -261,6 +268,7 @@ export async function applyInternalDemoDirectBookingParity(
     seen.add(to);
 
     const payload = {
+      demoSimulation: true,
       to,
       reservationNumber,
       hostName: recipient.fullName,
@@ -277,16 +285,16 @@ export async function applyInternalDemoDirectBookingParity(
       hostPayoutStatus: "DEMO_SIMULATED",
     };
 
-    const result = await sendLoggedEmail({
+    const result = await sendInternalDemoMessage({
       prisma,
       type: "DIRECT_BOOKING_HOST_NOTIFICATION",
       to,
-      subject: `New Reservation #${reservationNumber} - ${reservation.property.name}`,
+      channel: "email",
+      body: JSON.stringify({ kind: "INTERNAL_DEMO_HOST_NOTIFICATION", reservationNumber }),
       reservationId: updated.id,
       propertyId: reservation.property.id,
       organizationId: reservation.property.organizationId,
-      retryPayload: payload,
-      send: () => sendDirectBookingHostNotification(payload as any),
+      send: () => providers.host(payload as any),
     });
 
     if (result.ok) hostEmail.sent += 1;
