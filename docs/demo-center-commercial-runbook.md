@@ -70,11 +70,25 @@ CI, un proveedor que devuelve “aceptado”, una asignación marcada ACTIVE o R
 
 La implementación conecta servicios existentes mediante un coordinador acotado a Demo. No crea un producto separado, no restaura Lodgify, no agrega migraciones de producción y no habilita acciones financieras de Pin AI. Las canaries comerciales existentes siguen su política; la autorización adicional de incidentes solo se deriva de una reserva Demo canónica de la organización correcta.
 
-El PIN personalizado de Demo reutiliza la integración existente de gateway. La API de PIN aleatorio de TTLock documenta precisión por horas, por eso no se utiliza para esta estancia corta. Referencias: [PIN aleatorio](https://euopen.ttlock.com/documentPages/htmlPages/cloud/passcode/getEn.html) y [PIN personalizado por gateway](https://euopen.ttlock.com/documentPages/htmlPages/cloud/passcode/addEn.html). Las reservas comerciales conservan su método actual.
+La regla acordada para **nuevos accesos de huésped**, incluida Demo, es:
+
+| Cerradura | PIN | Vigencia |
+| --- | --- | --- |
+| Sin gateway asociado, confirmado por TTLock | Timed aleatorio, por el flujo existente | Ventana de la reserva, con las restricciones de TTLock para Timed |
+| Con gateway asociado | Custom con los últimos cuatro dígitos del teléfono, conservando ceros iniciales | Check-in a checkout; no es permanente |
+| Con gateway, sin teléfono válido o con PIN ocupado | Custom aleatorio de ocho dígitos | La misma ventana |
+
+Un gateway conocido pero desconectado no se sustituye por Timed. Solo una respuesta válida de creación, o la conciliación exacta de un intento anterior, permite activar y comunicar el acceso. Un fallo incierto conserva el candidato cifrado y requiere conciliación; no genera otro PIN ni elimina códigos ajenos. La selección se serializa por cerradura. Los accesos ya emitidos conservan su código y vigencia; no hay migración ni recodificación masiva. Un PIN revocado puede reutilizarse solo si ya no aparece en TTLock ni está reservado por otro acceso pendiente/activo.
+
+Demo requiere gateway para respetar sus minutos exactos. Referencias del proveedor: [PIN aleatorio](https://euopen.ttlock.com/documentPages/htmlPages/cloud/passcode/getEn.html), [Custom por gateway](https://euopen.ttlock.com/documentPages/htmlPages/cloud/passcode/addEn.html) e [inventario de PIN](https://euopen.ttlock.com/doc/api/v3/lock/listKeyboardPwd).
+
+Frase para la presentación: «El huésped recibe un acceso fácil de recordar y válido únicamente durante su estancia. Pin&Go coordina la cerradura, la reserva y los mensajes; después del checkout comienza la ventana independiente de limpieza». No afirmar que el PIN de cuatro dígitos abre la cerradura física hasta comprobarlo en la siguiente ejecución controlada. La apertura previa con Custom aleatorio no certifica esta nueva política.
 
 ## Evidencia automatizada
 
 Prueba principal: `src/services/internal-demo-commercial.db.test.ts`, workflow **Demo Center Direct Booking parity**. PostgreSQL 16 desechable, migraciones reales, rutas HTTP reales, servicios reales y transportes controlados de correo, SMS, TTLock y OpenAI. Cubre autorización, recuperación tras aceptación de correo, concurrencia/reintentos, PG/token estables, entregas e incertidumbre, portal, bloqueo comercial, acceso temporal, conversación/continuidad, incidente/respuesta y limpieza/revocación; repite horarios nocturnos y cruce de medianoche. Conserva intacta una reserva comercial centinela.
+
+La misma prueba comprueba la política de nuevos accesos en reservas comerciales sintéticas: ceros iniciales, conflicto entre reservas, concurrencia, cifrado y ocultación, recuperación de respuesta perdida sin una segunda creación, gateway desconectado, Timed sin gateway y eliminación exclusiva del PIN propio. `guest-passcode-provision.service.test.ts` añade errores de proveedor, inventario incompleto, límites de reintento y rechazo de conciliaciones con otra ventana o reserva.
 
 El mismo workflow reproduce el rechazo del validador desplegado en `66cdf20` y prueba la corrección sobre una reserva creada por ingest nativo. El dashboard añade **Demo Center commercial journey UI**, con pantallas React reales, respuestas sintéticas de API y capturas de escritorio/móvil. Ninguna de estas pruebas utiliza contactos, credenciales o dispositivos de producción.
 

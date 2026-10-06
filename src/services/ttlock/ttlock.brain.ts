@@ -2,26 +2,26 @@ import {
   AccessGrantType,
   AccessMethod,
   AccessStatus,
+  Prisma,
  } from "@prisma/client";
 
 import { prisma } from "../../lib/prisma";
-import { randomInt } from "node:crypto";
 import { isInternalDemo } from "../internal-demo-scope";
 import {
-  ttlockCreatePasscode,
   ttlockDeletePasscode,
-  ttlockGetPasscode,
 } from "../../ttlock/ttlock.passcode";
+import { provisionGuestPasscode } from "../guest-passcode-provision.service";
 import { getOrgTtlockAccessToken } from "./ttlock.org-auth";
 import { assertGuestAccessReady } from "../guest-access-readiness.service";
 import {
   assertAccessCodeEncryptionConfigured,
+  decryptAccessCode,
   encryptAccessCode,
   hashAccessCode,
 } from "../access-code-crypto.service";
 
 function maskCode(code: string) {
-  if (code.length <= 2) return "**";
+  if (code.length <= 4) return "****";
   return `${code.slice(0, 2)}*****`;
 }
 
@@ -46,6 +46,19 @@ async function resolveGrantAccessToken(propertyId?: string | null) {
 }
 
 export async function activateGrant(grantId: string) {
+  const scope = await prisma.accessGrant.findUnique({ where: { id: grantId }, select: { lockId: true } });
+  if (!scope) throw new Error("ACCESS_GRANT_NOT_FOUND");
+  // Also protects callers outside E14 and two reservations choosing the same
+  // phone suffix. State writes use prisma so they survive an uncertain request.
+  return prisma.$transaction(async tx => {
+    const [claim] = await tx.$queryRaw<{ acquired: boolean }[]>`
+      SELECT pg_try_advisory_xact_lock(hashtextextended(${`guest-passcode:${scope.lockId}`}, 0)) AS acquired`;
+    if (!claim?.acquired) throw new Error("GUEST_ACCESS_PROVISION_SAFE_TO_RETRY:LOCK_PROVISIONING_BUSY");
+    return activateGrantUnderLock(grantId);
+  }, { timeout: 60_000, maxWait: 5_000 });
+}
+
+async function activateGrantUnderLock(grantId: string) {
   const grant = await prisma.accessGrant.findUnique({
     where: { id: grantId },
     include: {
@@ -129,19 +142,32 @@ assertAccessCodeEncryptionConfigured();
   if (demo && (grant.lock.ttlockLockId !== 29944630 || grant.lock.propertyId !== grant.reservation.propertyId)) {
     throw new Error("DEMO_LOCK_BINDING_REQUIRED");
   }
-  // Cloud-generated PINs are rounded to hours by TTLock. A short Demo needs
-  // the existing gateway custom-PIN operation with the reservation's exact window.
-  const demoCode = demo ? String(randomInt(10_000_000, 100_000_000)) : null;
-  const pass = demo ? { ...(await ttlockCreatePasscode({
-    lockId: Number(grant.lock.ttlockLockId), code: demoCode!, startDate, endDate,
-    name: passcodeName, accessToken, addType: 2,
-  })), keyboardPwd: demoCode } : await ttlockGetPasscode({
-    lockId: Number(grant.lock.ttlockLockId),
-    keyboardPwdType: 3,
-    startDate,
-    endDate,
-    name: passcodeName,
-    accessToken,
+  const payload = (grant.ttlockPayload ?? {}) as Prisma.JsonObject;
+  const rearm = payload.e15 as Prisma.JsonObject | undefined;
+  const pass = await provisionGuestPasscode({
+    lockId: Number(grant.lock.ttlockLockId), accessToken, name: passcodeName, startDate, endDate,
+    phone: grant.reservation.guestPhone, mappedGateway: Boolean(grant.lock.ttlockGatewayRecordId),
+    requireGateway: demo, savedPlan: payload.customPasscodePlan,
+    ...(rearm?.state === "REARMED" && typeof rearm.observedAt === "string" ? { rearmedAt: rearm.observedAt } : {}),
+    savePlan: async plan => {
+      const current = await prisma.accessGrant.findUniqueOrThrow({ where: { id: grant.id }, select: { ttlockPayload: true } });
+      const saved = await prisma.accessGrant.updateMany({ where: { id: grant.id, status: AccessStatus.PENDING,
+        ttlockKeyboardPwdId: null, startsAt: grant.startsAt, endsAt: grant.endsAt },
+        data: { ttlockPayload: { ...((current.ttlockPayload ?? {}) as Prisma.JsonObject), customPasscodePlan: plan } } });
+      if (saved.count !== 1) throw new Error("CUSTOM_PASSCODE_GRANT_CHANGED_REQUIRES_RECONCILIATION");
+    },
+    codeReserved: async code => {
+      if (await prisma.accessCode.findFirst({ where: { lockId: Number(grant.lock.ttlockLockId),
+        accessCodeHash: hashAccessCode(code),
+        accessGrant: { status: { not: AccessStatus.REVOKED } } }, select: { id: true } })) return true;
+      const pending = await prisma.accessGrant.findMany({ where: { lockId: grant.lockId, id: { not: grant.id },
+        status: { in: [AccessStatus.PENDING, AccessStatus.FAILED] },
+        ttlockPayload: { path: ["customPasscodePlan"], not: Prisma.DbNull } }, select: { ttlockPayload: true } });
+      return pending.some(row => {
+        const plan = (row.ttlockPayload as Prisma.JsonObject)?.customPasscodePlan as Prisma.JsonObject | undefined;
+        return typeof plan?.codeEnc === "string" && decryptAccessCode(plan.codeEnc) === code;
+      });
+    },
   });
 
   const code = String(pass?.keyboardPwd ?? "").trim();
@@ -176,12 +202,17 @@ assertAccessCodeEncryptionConfigured();
     encryptAccessCode(code);
   const provisionedAt =
     new Date();
+  const currentPayload = (await prisma.accessGrant.findUniqueOrThrow({ where: { id: grant.id }, select: { ttlockPayload: true } })).ttlockPayload;
 
     try {
     await prisma.$transaction([
       prisma.accessGrant.update({
         where: {
           id: grant.id,
+          status: AccessStatus.PENDING,
+          ttlockKeyboardPwdId: null,
+          startsAt: grant.startsAt,
+          endsAt: grant.endsAt,
         },
         data: {
           status: AccessStatus.ACTIVE,
@@ -196,12 +227,13 @@ assertAccessCodeEncryptionConfigured();
           lastAppliedAt:
             provisionedAt,
           ttlockPayload: {
-            ...(grant.ttlockPayload as any),
+            ...(currentPayload as any),
             passcode: {
               provider: "TTLOCK",
               keyboardPwdId,
               keyboardPwdType: 3,
-              ...(demo ? { provisioningMethod: "CUSTOM_GATEWAY" } : {}),
+              provisioningMethod: pass.provisioningMethod,
+              ...(pass.provisioningMethod === "CUSTOM_GATEWAY" ? { codeSource: pass.codeSource } : {}),
               startsAt:
                 grant.startsAt.toISOString(),
               endsAt:
@@ -255,6 +287,9 @@ assertAccessCodeEncryptionConfigured();
       }),
     ]);
   } catch (persistenceError) {
+    // The confirmed custom candidate is durable. Reconcile/adopt that same PIN
+    // on retry instead of deleting it and possibly creating another credential.
+    if (pass.provisioningMethod === "CUSTOM_GATEWAY") throw persistenceError;
     try {
       await ttlockDeletePasscode({
         lockId: Number(
