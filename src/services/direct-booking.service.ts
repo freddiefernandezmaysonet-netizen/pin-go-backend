@@ -22,8 +22,8 @@ import {
 import { dispatchPendingCleaningConfirmationForReservation } from "./cleaning-confirmation-dispatch.service";
 import {
   resolveOrganizationGuestReplyTo,
-  resolveOrganizationPrimaryAdmin,
 } from "./organization-guest-email.service";
+import { resolveDirectBookingHostRecipient } from "./direct-booking-host-recipient.service";
 
 const prisma = new PrismaClient();
 
@@ -258,7 +258,7 @@ type HostNotificationRecipient = {
 };
 
 async function getHostNotificationRecipients(organizationId: string) {
-  const primaryAdmin = await resolveOrganizationPrimaryAdmin(
+  const primaryAdmin = await resolveDirectBookingHostRecipient(
     prisma,
     organizationId
   );
