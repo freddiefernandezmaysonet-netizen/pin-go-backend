@@ -64,7 +64,9 @@ export async function collectPinAIConnectFee(db: PrismaClient, provider: Connect
         if (!evidence.complete) return await review("CONNECT_RECONCILIATION_INCOMPLETE");
         if (evidence.payments.length !== 1) return await review(evidence.payments.length
           ? "CONNECT_MULTIPLE_DEBITS_FOUND" : "CONNECT_DEBIT_NOT_FOUND");
-        payment = evidence.payments[0];
+        const candidate = evidence.payments[0];
+        if (!candidate) return await review("CONNECT_DEBIT_NOT_FOUND");
+        payment = candidate;
       } else {
       if (!current.debitStartedAt) {
         const organization = await db.organization.findUnique({ where: { id: current.organizationId },
