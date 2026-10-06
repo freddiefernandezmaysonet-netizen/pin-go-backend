@@ -9,7 +9,7 @@ export function demoMessageState(row: { status?: string | null; providerDelivery
   if (["FAILED", "BOUNCED", "COMPLAINED", "SUPPRESSED", "UNDELIVERED"].includes(row.providerDeliveryStatus ?? "")) return "FAILED";
   if (row.providerDeliveryStatus === "DELIVERED") return "DELIVERED";
   if (row.status === "SENT") return "ACCEPTED";
-  if (row.status === "DEMO_SENDING" || row.status === "DEMO_UNKNOWN") return "ATTENTION_REQUIRED";
+  if (["DEMO_SENDING", "DEMO_UNKNOWN", "FAILED_FINAL"].includes(row.status ?? "")) return "ATTENTION_REQUIRED";
   return row.status ?? "PENDING";
 }
 

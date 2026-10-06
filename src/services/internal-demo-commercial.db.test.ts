@@ -234,6 +234,14 @@ test("one Demo reservation through HTTP, messages, access, incident, host and cl
       status: "DELIVERED", eventAt: new Date(), deliveredAt: new Date() });
     const read = await (await fetch(`${base}/api/internal/admin/demo/runs/${input.requestId}`)).json() as any;
     assert.equal(read.data.messages.find((m: any) => m.id === mail.id).delivery, "DELIVERED");
+    const failedNotice = await db.messageLog.create({ data: {
+      reservationId, propertyId, organizationId: org.id, channel: "email", to: "host@example.invalid",
+      body: "Synthetic terminal provider rejection", provider: "resend", status: "FAILED_FINAL",
+      communicationType: "PIN_AI_GUEST_INCIDENT_NOTICE", error: "NOTICE_SEND_FAILED_FINAL",
+    } });
+    const terminalRead = await (await fetch(`${base}/api/internal/admin/demo/runs/${input.requestId}`)).json() as any;
+    assert.equal(terminalRead.data.messages.find((m: any) => m.id === failedNotice.id).delivery, "ATTENTION_REQUIRED");
+    assert.equal((await db.messageLog.findUniqueOrThrow({ where: { id: failedNotice.id } })).status, "FAILED_FINAL");
     let attempts = 0;
     const uncertain = { prisma: db, reservationId, propertyId, organizationId: org.id, type: "SYNTHETIC_AMBIGUOUS_TEST",
       channel: "email" as const, to: "uncertain@example.invalid", body: "Synthetic test", send: async () => {
