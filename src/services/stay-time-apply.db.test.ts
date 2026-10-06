@@ -131,7 +131,8 @@ test("free stay-time changes apply atomically through the canonical service", { 
               return result;
             }, options);
           }) as typeof db.$transaction };
-        const dependencies = { client: scenario === "transaction-retry" || scenario === "first-lock-retry" ? retryClient : db, now: () => new Date(now.getTime() + (scenario === "expired" ? 60_000 : 10_000)),
+        const dependencies = { client: scenario === "transaction-retry" || scenario === "first-lock-retry" ? retryClient : db,
+          now: () => scenario === "expired" ? new Date(proposal.proposal.expiresAt.getTime() + 1) : new Date(now.getTime() + 10_000),
           reconcile: async (reservationId: string) => {
             reconciled.push(reservationId);
             if (scenario === "reconcile-retry" && reconciled.length === 1) throw new Error("Synthetic reconcile outage");
