@@ -12,6 +12,8 @@ on:
       - 'src/services/internal-demo-native-secure-precheckin.db.test.ts'
       - 'src/services/internal-demo-*.ts'
       - 'src/services/ttlock/ttlock.brain.ts'
+      - 'src/services/guest-passcode-provision.service*.ts'
+      - 'src/ttlock/ttlock.passcode.ts'
       - 'src/pin-ai/guest/guest-*.ts'
       - 'src/pin-ai/host/host-incident.service.ts'
       - 'src/services/cleaning-confirmation-dispatch.service.ts'
@@ -51,6 +53,8 @@ jobs:
         run: npx --no-install tsc -p tsconfig.demo-center-direct-booking-parity.json
       - name: Demo Center parity contracts and native identity denial tests
         run: node --import tsx --test src/services/internal-demo-secure-precheckin.service.test.ts src/pin-ai/guest/guest-incident.test.ts src/pin-ai/guest/guest-runtime-gateway.test.ts
+      - name: Guest PIN policy and provider recovery tests
+        run: node --import tsx --test src/services/guest-passcode-provision.service.test.ts
   connected-commercial-demo:
     name: Same reservation commercial demonstration (PostgreSQL)
     runs-on: ubuntu-latest

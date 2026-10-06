@@ -10,6 +10,13 @@ function roundDownToHourMs(ms: number) {
 
 type TTLockResp = { errcode?: number; errmsg?: string } & Record<string, any>;
 
+export class TTLockPasscodeError extends Error {
+  constructor(message: string, readonly errcode: number | null, readonly providerMessage: string) {
+    super(message);
+    this.name = "TTLockPasscodeError";
+  }
+}
+
 function toMs(ts: number) {
   // si viene en seconds, lo pasamos a ms
   return ts < 10_000_000_000 ? ts * 1000 : ts;
@@ -26,14 +33,15 @@ async function resolveAccessToken(accessToken?: string, ttlockLockId?: number) {
   return typeof token === "string" ? token : token.access_token;
 }
 
-async function postForm(url: string, form: Record<string, string | number>) {
+async function postForm(url: string, form: Record<string, string | number>, timeoutMs = 20_000) {
   const body = new URLSearchParams();
   for (const [k, v] of Object.entries(form)) body.set(k, String(v));
 
   const controller = new AbortController();
-  const t = setTimeout(() => controller.abort(), 20000);
+  const t = setTimeout(() => controller.abort(), timeoutMs);
 
   let resp: Response;
+  let text: string;
   try {
     resp = await fetch(url, {
       method: "POST",
@@ -41,11 +49,10 @@ async function postForm(url: string, form: Record<string, string | number>) {
       body: body.toString(),
       signal: controller.signal,
     });
+    text = await resp.text();
   } finally {
     clearTimeout(t);
   }
-
-  const text = await resp.text();
 
   let data: TTLockResp;
   try {
@@ -68,7 +75,8 @@ async function postForm(url: string, form: Record<string, string | number>) {
       date: form.date,
       keys: Object.keys(form).sort(),
     };
-    throw new Error(`TTLock error ${JSON.stringify(safe)}`);
+    throw new TTLockPasscodeError(`TTLock error ${JSON.stringify(safe)}`,
+      Number.isFinite(Number(data?.errcode)) ? Number(data.errcode) : null, String(data?.errmsg ?? ""));
   }
 
   return data;
@@ -340,7 +348,7 @@ async function postFormWithRetry(
 }
 
 /**
- * ✅ CUSTOM PASSCODE ADD (si algún día lo vuelves a usar)
+ * Time-bound custom passcode written through the gateway.
  */
 export async function ttlockCreatePasscode(params: {
   lockId: number;
@@ -350,6 +358,7 @@ export async function ttlockCreatePasscode(params: {
   addType?: number;
   name?: string;
   accessToken?: string;
+  timeoutMs?: number;
 }) {
   const base = process.env.TTLOCK_API_BASE ?? "https://api.sciener.com";
   const clientId = process.env.TTLOCK_CLIENT_ID ?? "";
@@ -372,10 +381,62 @@ export async function ttlockCreatePasscode(params: {
     accessToken,
     lockId,
     keyboardPwd: params.code,
+    keyboardPwdType: 3,
     keyboardPwdName: params.name ?? "Pin&Go Custom",
     startDate: start,
     endDate: end,
     addType: Number(params.addType ?? 2),
     date: Date.now(),
-  });
+  }, params.timeoutMs);
+}
+
+export async function ttlockHasAssociatedGateway(params: { lockId: number; accessToken: string }) {
+  const data = await postForm(`${process.env.TTLOCK_API_BASE ?? "https://api.sciener.com"}/v3/gateway/listByLock`, {
+    clientId: process.env.TTLOCK_CLIENT_ID ?? "", accessToken: params.accessToken,
+    lockId: params.lockId, date: Date.now(),
+  }, 5_000);
+  if (!Array.isArray(data.list) || data.list.some((item: any) => !Number.isInteger(Number(item?.gatewayId)) || Number(item.gatewayId) <= 0)) {
+    throw new Error("TTLOCK_GATEWAY_ASSOCIATION_INVALID");
+  }
+  return data.list.length > 0;
+}
+
+export type TtlockListedPasscode = {
+  keyboardPwdId: number; keyboardPwd: string; keyboardPwdName: string;
+  keyboardPwdType: number; startDate: number; endDate: number; status: number | null;
+};
+
+// Read all pages before deciding a candidate is free; never treat malformed or
+// truncated inventory as an empty lock. Returned credentials must not be logged.
+export async function ttlockListPasscodes(params: { lockId: number; accessToken: string }): Promise<TtlockListedPasscode[]> {
+  const result: TtlockListedPasscode[] = [];
+  const deadline = Date.now() + 8_000;
+  for (let pageNo = 1; pageNo <= 20 && Date.now() < deadline; pageNo++) {
+    const data = await postForm(`${process.env.TTLOCK_API_BASE ?? "https://api.sciener.com"}/v3/lock/listKeyboardPwd`, {
+      clientId: process.env.TTLOCK_CLIENT_ID ?? "", accessToken: params.accessToken,
+      lockId: params.lockId, pageNo, pageSize: 100, date: Date.now(),
+    }, Math.min(5_000, Math.max(1, deadline - Date.now())));
+    if (!Array.isArray(data.list)) throw new Error("TTLOCK_PASSCODE_INVENTORY_INVALID");
+    for (const item of data.list) {
+      if (!Number.isInteger(Number(item?.keyboardPwdId)) || Number(item.keyboardPwdId) <= 0 ||
+        typeof item.keyboardPwd !== "string" || !/^\d{4,9}$/.test(item.keyboardPwd)) {
+        throw new Error("TTLOCK_PASSCODE_INVENTORY_INVALID");
+      }
+      result.push({ keyboardPwdId: Number(item.keyboardPwdId), keyboardPwd: item.keyboardPwd,
+        keyboardPwdName: String(item.keyboardPwdName ?? ""), keyboardPwdType: Number(item.keyboardPwdType),
+        startDate: Number(item.startDate), endDate: Number(item.endDate),
+        status: item.status == null ? null : Number(item.status) });
+    }
+    const pages = Number(data.pages), total = Number(data.total);
+    if ((data.pages != null && (!Number.isInteger(pages) || pages < 0)) ||
+      (data.total != null && (!Number.isInteger(total) || total < 0))) throw new Error("TTLOCK_PASSCODE_INVENTORY_INVALID");
+    if (data.pages != null && pageNo >= pages) {
+      if (data.total != null && result.length !== total) throw new Error("TTLOCK_PASSCODE_INVENTORY_INCOMPLETE");
+      return result;
+    }
+    if (data.pages == null && data.total != null && result.length === total) return result;
+    if (data.pages == null && data.total == null && data.list.length < 100) return result;
+    if (!data.list.length) throw new Error("TTLOCK_PASSCODE_INVENTORY_INCOMPLETE");
+  }
+  throw new Error("TTLOCK_PASSCODE_INVENTORY_INCOMPLETE");
 }

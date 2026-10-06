@@ -22,6 +22,10 @@ test("one Demo reservation through HTTP, messages, access, incident, host and cl
     ACCESS_CODE_ENC_KEY_BASE64: Buffer.alloc(32, 7).toString("base64"),
   });
   const emails: any[] = [], hardware: { path: string; form: URLSearchParams }[] = [], sms: any[] = [];
+  const noGateway = new Set<number>();
+  const pinInventory = new Map<number, any[]>();
+  let nextPinId = 910001;
+  let customFailure: "offline" | "accepted-timeout" | null = null;
   let openaiFixture: ReturnType<typeof import("../pin-ai/runtime/runtime-turn.test-fixture.js").createTurnFixture> | undefined;
   let forbidden = 0;
   const original = { fetch: globalThis.fetch, request: http.request, get: http.get,
@@ -56,12 +60,37 @@ test("one Demo reservation through HTTP, messages, access, incident, host and cl
     }
     if (address.origin === "https://ttlock.example.invalid") {
       const form = new URLSearchParams(String(init?.body));
-      assert.equal(form.get("lockId"), "29944630");
+      const hardwareLock = Number(form.get("lockId"));
+      assert.ok([29944630, 990001, 990002].includes(hardwareLock));
       hardware.push({ path: address.pathname, form });
+      if (address.pathname === "/v3/gateway/listByLock") {
+        return Response.json({ list: noGateway.has(hardwareLock) ? [] : [{ gatewayId: 777 }] });
+      }
+      if (address.pathname === "/v3/lock/listKeyboardPwd") {
+        const list = pinInventory.get(hardwareLock) ?? [];
+        return Response.json({ list, total: list.length });
+      }
+      if (address.pathname === "/v3/lock/getKeyboardPwdVersion") return Response.json({ keyboardPwdVersion: 4 });
+      if (address.pathname === "/v3/keyboardPwd/get") {
+        assert.ok(noGateway.has(hardwareLock)); assert.equal(form.get("keyboardPwdType"), "3");
+        return Response.json({ keyboardPwdId: nextPinId++, keyboardPwd: "87654321" });
+      }
       if (address.pathname === "/v3/keyboardPwd/add") {
-        return new Response(JSON.stringify({ keyboardPwdId: 910001 }), { status: 200 });
+        if (customFailure === "offline") return Response.json({ errcode: -2012, errmsg: "not connected to gateway" });
+        const list = pinInventory.get(hardwareLock) ?? [];
+        assert.ok(!list.some(p => p.keyboardPwd === form.get("keyboardPwd")), "candidate must be free on this lock");
+        const keyboardPwdId = nextPinId++;
+        list.push({ keyboardPwdId, keyboardPwd: form.get("keyboardPwd"), keyboardPwdName: form.get("keyboardPwdName"),
+          keyboardPwdType: Number(form.get("keyboardPwdType")), startDate: Number(form.get("startDate")),
+          endDate: Number(form.get("endDate")), status: 1 });
+        pinInventory.set(hardwareLock, list);
+        if (customFailure === "accepted-timeout") throw new Error("synthetic response lost after hardware accepted");
+        return Response.json({ keyboardPwdId });
       }
       if (["/v3/keyboardPwd/delete", "/v3/identityCard/changePeriod"].includes(address.pathname)) {
+        if (address.pathname === "/v3/keyboardPwd/delete") {
+          pinInventory.set(hardwareLock, (pinInventory.get(hardwareLock) ?? []).filter(p => p.keyboardPwdId !== Number(form.get("keyboardPwdId"))));
+        }
         return new Response(JSON.stringify({ errcode: 0 }), { status: 200 });
       }
     }
@@ -267,6 +296,7 @@ test("one Demo reservation through HTTP, messages, access, incident, host and cl
     const pin = hardware.find(h => h.path === "/v3/keyboardPwd/add")!;
     assert.equal(pin.form.get("startDate"), String(checkIn.getTime())); assert.equal(pin.form.get("endDate"), String(checkOut.getTime()));
     assert.equal(pin.form.get("addType"), "2");
+    assert.equal(pin.form.get("keyboardPwd"), "0125"); assert.equal(pin.form.get("keyboardPwdType"), "3");
     const before = hardware.length; await activateGrant(grant.id); assert.equal(hardware.length, before);
     const cards = await assignNfcCards(db, { reservationId, propertyId, ttlockLockId: 29944630,
       role: "GUEST", startsAt: checkIn, endsAt: checkOut, count: 2, skipTtlock: true });
@@ -407,6 +437,80 @@ test("one Demo reservation through HTTP, messages, access, incident, host and cl
     const { demoGuestAgreement: _agreement, ...withoutAgreement } = payload;
     await assert.rejects(sendDirectBookingGuestConfirmation({ ...withoutAgreement, demoSimulation: true }), /agreement snapshot is missing/);
     assert.equal(emails.length, before);
+  });
+  await t.test("new commercial accesses select gateway policy, preserve existing PINs and reconcile lost responses", async () => {
+    const { activateGrant, deactivateGrant } = await import("./ttlock/ttlock.brain.js");
+    const { decryptAccessCode } = await import("./access-code-crypto.service.js");
+    const gatewayLock = await db.lock.create({ data: { propertyId: commercialProperty.id, ttlockLockId: 990001, isActive: true } });
+    const offlineLock = await db.lock.create({ data: { propertyId: commercialProperty.id, ttlockLockId: 990002, isActive: true } });
+    noGateway.add(990002);
+    let sequence = 0;
+    async function createGrant(lockId = gatewayLock.id, phone = "+12025550001") {
+      const reservation = await db.reservation.create({ data: { propertyId: commercialProperty.id,
+        guestName: "Synthetic policy test", guestPhone: phone, reservationNumber: `SYNTHETIC-POLICY-${++sequence}`,
+        source: "DIRECT_BOOKING", externalProvider: "PIN_GO_DIRECT", status: "ACTIVE", paymentState: "PAID",
+        checkIn, checkOut, verificationStatus: "NOT_REQUIRED", guestAgreementSnapshot: { requiresIdentityVerification: false },
+        guestAgreementSignedAt: new Date(), guestAgreementAcceptance: { accepted: true }, verificationAcceptedRulesAt: new Date() } });
+      return db.accessGrant.create({ data: { reservationId: reservation.id, lockId, type: "GUEST",
+        method: "PASSCODE_TIMEBOUND", status: "PENDING", startsAt: checkIn, endsAt: checkOut } });
+    }
+    const first = await createGrant();
+    const concurrent = await Promise.allSettled([activateGrant(first.id), activateGrant(first.id)]);
+    assert.ok(concurrent.some(r => r.status === "fulfilled" && r.value.ok));
+    for (const result of concurrent) if (result.status === "rejected") assert.match(String(result.reason), /LOCK_PROVISIONING_BUSY/);
+    const saved = await db.accessGrant.findUniqueOrThrow({ where: { id: first.id } });
+    const firstCode = await db.accessCode.findUniqueOrThrow({ where: { accessGrantId: first.id } });
+    assert.equal(saved.status, "ACTIVE"); assert.equal(saved.accessCodeMasked, "****");
+    assert.equal(decryptAccessCode(firstCode.accessCodeEnc!), "0001");
+    assert.equal((saved.ttlockPayload as any).passcode.provisioningMethod, "CUSTOM_GATEWAY");
+    assert.equal(firstCode.expiresAt!.getTime(), checkOut.getTime());
+    const before = hardware.length;
+    await activateGrant(first.id); assert.equal(hardware.length, before);
+    assert.deepEqual(await db.accessCode.findUniqueOrThrow({ where: { accessGrantId: first.id } }), firstCode);
+
+    const second = await createGrant(); await activateGrant(second.id);
+    const secondCode = await db.accessCode.findUniqueOrThrow({ where: { accessGrantId: second.id } });
+    assert.match(decryptAccessCode(secondCode.accessCodeEnc!), /^\d{8}$/);
+    assert.equal((await db.accessGrant.findUniqueOrThrow({ where: { id: second.id } })).accessCodeMasked!.length, 7);
+    assert.deepEqual(await db.accessCode.findUniqueOrThrow({ where: { accessGrantId: first.id } }), firstCode);
+
+    const pending = await createGrant(gatewayLock.id, "+12025550234");
+    customFailure = "accepted-timeout";
+    await assert.rejects(activateGrant(pending.id), /RESULT_AMBIGUOUS/);
+    assert.equal((await db.accessGrant.findUniqueOrThrow({ where: { id: pending.id } })).status, "PENDING");
+    assert.equal(await db.accessCode.count({ where: { accessGrantId: pending.id } }), 0);
+    const adds = hardware.filter(h => h.path === "/v3/keyboardPwd/add").length;
+    customFailure = null; await activateGrant(pending.id);
+    assert.equal(hardware.filter(h => h.path === "/v3/keyboardPwd/add").length, adds);
+    assert.equal(decryptAccessCode((await db.accessCode.findUniqueOrThrow({ where: { accessGrantId: pending.id } })).accessCodeEnc!), "0234");
+
+    const retry = await createGrant(gatewayLock.id, "+12025550345"); customFailure = "offline";
+    await assert.rejects(activateGrant(retry.id), /SAFE_TO_RETRY/);
+    assert.equal(await db.accessCode.count({ where: { accessGrantId: retry.id } }), 0);
+    assert.equal((await db.accessGrant.findUniqueOrThrow({ where: { id: retry.id } })).status, "PENDING");
+    customFailure = null;
+    const competing = await createGrant(gatewayLock.id, "+12025550345"); await activateGrant(competing.id);
+    assert.match(decryptAccessCode((await db.accessCode.findUniqueOrThrow({ where: { accessGrantId: competing.id } })).accessCodeEnc!), /^\d{8}$/,
+      "a durable pending candidate is reserved even while absent from provider inventory");
+    await activateGrant(retry.id);
+    assert.equal(decryptAccessCode((await db.accessCode.findUniqueOrThrow({ where: { accessGrantId: retry.id } })).accessCodeEnc!), "0345");
+
+    const timed = await createGrant(offlineLock.id); await activateGrant(timed.id);
+    const timedSaved = await db.accessGrant.findUniqueOrThrow({ where: { id: timed.id } });
+    assert.equal(timedSaved.status, "ACTIVE");
+    assert.equal(hardware.some(h => h.path === "/v3/keyboardPwd/add" && h.form.get("lockId") === "990002"), false);
+    assert.equal((timedSaved.ttlockPayload as any).passcode.provisioningMethod, "RANDOM_TIMED");
+
+    await deactivateGrant(first.id);
+    assert.equal((await db.accessGrant.findUniqueOrThrow({ where: { id: first.id } })).status, "REVOKED");
+    assert.ok(pinInventory.get(990001)!.every(p => p.keyboardPwdId !== saved.ttlockKeyboardPwdId));
+    assert.ok(pinInventory.get(990001)!.some(p => String(p.keyboardPwdId) === secondCode.keyboardPwdId));
+    const deletion = hardware.filter(h => h.path === "/v3/keyboardPwd/delete").at(-1)!;
+    assert.equal(deletion.form.get("keyboardPwdId"), String(saved.ttlockKeyboardPwdId));
+    assert.equal(deletion.form.get("deleteType"), "2");
+    const returning = await createGrant(); await activateGrant(returning.id);
+    assert.equal(decryptAccessCode((await db.accessCode.findUniqueOrThrow({ where: { accessGrantId: returning.id } })).accessCodeEnc!), "0001",
+      "a confirmed revoked and deleted PIN may be reused without rewriting the old access");
   });
   assert.deepEqual(await db.reservation.findUniqueOrThrow({ where: { id: commercial.id } }), commercial);
   assert.equal((await db.property.findUniqueOrThrow({ where: { id: propertyId } })).cleaningDurationMinutes, 240);
