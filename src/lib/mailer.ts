@@ -96,6 +96,11 @@ type CancellationRefundRuleEmailInput = {
 
 type SendDirectBookingGuestConfirmationInput = {
   demoSimulation?: boolean;
+  demoGuestAgreement?: {
+    title: string;
+    version: string;
+    agreementText: string;
+  };
   to: string;
   replyTo?: string | null;
   reservationNumber: string;
@@ -1336,8 +1341,22 @@ if (!safeVerificationUrl) {
   );
 }
 
+const demoAgreement = input.demoSimulation ? input.demoGuestAgreement : undefined;
+if (input.demoSimulation && (!demoAgreement?.title.trim() || !demoAgreement.version.trim() || !demoAgreement.agreementText.trim())) {
+  throw new Error("Demo guest agreement snapshot is missing or invalid");
+}
+const demoAgreementBlock = demoAgreement ? `
+  <div lang="${language}" style="padding:20px;margin:22px 0;border:1px solid #bfdbfe;border-radius:16px;">
+    <h2>${isSpanish ? "Acuerdo del huésped · Demo" : "Guest agreement · Demo"}</h2>
+    <p><strong>${escapeHtml(demoAgreement.title)}</strong><br/>${isSpanish ? "Versión" : "Version"}: ${escapeHtml(demoAgreement.version)}</p>
+    <p>${isSpanish
+      ? "Este es el acuerdo guardado para esta reservación de demostración. Su aceptación es simulada; no constituye una firma real del huésped."
+      : "This is the agreement saved for this demonstration reservation. Acceptance is simulated; it is not an actual guest signature."}</p>
+    <p style="line-height:1.6;">${escapeHtml(demoAgreement.agreementText).replace(/\r?\n/g, "<br />")}</p>
+  </div>` : "";
+
 const verificationBlock = input.demoSimulation
-  ? `<p style="padding:16px;background:#eff6ff;border-radius:12px;"><strong>Pin&amp;Go Demo</strong><br/>${isSpanish ? "Pago e identidad simulados. No se realizó ningún cobro. El registro de demostración ya está preparado; abre Manage Reservation para continuar." : "Payment and identity are simulated. No charge was made. Demo registration is ready; open Manage Reservation to continue."}</p>`
+  ? `<p style="padding:16px;background:#eff6ff;border-radius:12px;"><strong>Pin&amp;Go Demo</strong><br/>${isSpanish ? "Pago e identidad simulados. No se realizó ningún cobro. El registro de demostración ya está preparado; abre Manage Reservation para continuar." : "Payment and identity are simulated. No charge was made. Demo registration is ready; open Manage Reservation to continue."}</p>${demoAgreementBlock}`
   : `
       <div
         style="

@@ -103,6 +103,13 @@ export async function applyInternalDemoDirectBookingParity(
   }
 
   if (!isInternalDemo(reservation)) throw new Error("INTERNAL_DEMO_RESERVATION_REQUIRED");
+  const agreement = reservation.guestAgreementSnapshot;
+  if (!agreement || typeof agreement !== "object" || Array.isArray(agreement) ||
+    typeof agreement.title !== "string" || !agreement.title.trim() ||
+    typeof agreement.version !== "string" || !agreement.version.trim() ||
+    typeof agreement.agreementText !== "string" || !agreement.agreementText.trim()) {
+    throw new Error("INTERNAL_DEMO_GUEST_AGREEMENT_SNAPSHOT_REQUIRED");
+  }
   const primaryAdmin = await resolveInternalDemoPrimaryAdmin(prisma, reservation.property.organizationId,
     (reservation.externalRaw as any)?.demoRun?.actorUserId);
   const approvedEmail = (reservation.externalRaw as any)?.demoRun?.primaryAdminEmail;
@@ -202,6 +209,11 @@ export async function applyInternalDemoDirectBookingParity(
   if (updated.guestEmail) {
     const payload = {
       demoSimulation: true,
+      demoGuestAgreement: {
+        title: agreement.title,
+        version: agreement.version,
+        agreementText: agreement.agreementText,
+      },
       to: updated.guestEmail,
       replyTo: primaryAdmin.email,
       reservationNumber,
