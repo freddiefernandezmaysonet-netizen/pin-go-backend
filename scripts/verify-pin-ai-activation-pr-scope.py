@@ -8,6 +8,7 @@ import subprocess
 REPO = "freddiefernandezmaysonet-netizen/pin-go-backend"
 BASE = "c97cb69f7c8e531bced491cdd5588c2c74510963"
 ALLOWED = {'.github/workflows/apms-exit-closure-a-certification.yml',
+ '.github/workflows/ota-initial-distribution-enablement.yml',
  '.github/workflows/guest-journey-enterprise-e15-certification.yml',
  '.github/workflows/ota-airbnb-listing-discovery.yml',
  '.github/workflows/pin-ai-connect-native-certification.yml',
