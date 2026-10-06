@@ -104,7 +104,8 @@ test("one Demo reservation through HTTP, messages, access, incident, host and cl
     { propertyId, label: "Guest-Demo-2", ttlockCardId: 810003 },
   ] });
   await db.propertyGuestAgreement.create({ data: { propertyId, version: "1", title: "Demo",
-    agreementText: "Synthetic terms", isActive: true, requiresIdentityVerification: true, requiresAgreementSignature: true } });
+    agreementText: "Synthetic terms", titleEs: "Acuerdo & Demo", agreementTextEs: "Condiciones guardadas\nTexto <sin HTML>",
+    isActive: true, requiresIdentityVerification: true, requiresAgreementSignature: true } });
   const commercialProperty = await db.property.create({ data: { name: "Commercial sentinel", organizationId: org.id } });
   const commercial = await db.reservation.create({ data: { propertyId: commercialProperty.id,
     guestName: "Do not modify", source: "DIRECT_BOOKING", externalProvider: "PIN_GO_DIRECT",
@@ -210,6 +211,13 @@ test("one Demo reservation through HTTP, messages, access, incident, host and cl
     assert.ok(emails.every(e => e.html.includes("Demo") && e.html.includes(number)));
     assert.ok(emails[0].html.includes("sin cobro"));
     assert.ok(!emails[0].html.includes(`/guest/verify/${token}`));
+    assert.ok(emails[0].html.includes("Acuerdo del huésped · Demo"));
+    assert.ok(emails[0].html.includes("Acuerdo &amp; Demo"));
+    assert.ok(emails[0].html.includes("Versión: 1"));
+    assert.ok(emails[0].html.includes("Condiciones guardadas<br />Texto &lt;sin HTML&gt;"));
+    assert.ok(emails[0].html.includes("aceptación es simulada"));
+    assert.ok(!emails[0].html.includes("Synthetic terms"), "uses the localized reservation snapshot");
+    assert.equal((saved.guestAgreementAcceptance as any).simulated, true);
     assert.equal((await command({ ...input, guestEmail: "changed@example.invalid" })).status, 409);
     assert.equal(emails.length, 2);
   });
@@ -376,6 +384,30 @@ test("one Demo reservation through HTTP, messages, access, incident, host and cl
     });
   }
   assert.equal(sms.length, 3);
+  await t.test("agreement is escaped in English and excluded from commercial email; a missing Demo agreement cannot be sent", async () => {
+    const { sendDirectBookingGuestConfirmation } = await import("../lib/mailer.js");
+    const payload = { to: "guest@example.invalid", reservationNumber: number, propertyName: "Synthetic Demo", checkIn, checkOut,
+      manageReservationUrl: `https://app.example.invalid/booking/manage/${token}`,
+      verificationUrl: `https://api.example.invalid/guest/verify/${token}`, preferredLanguage: "en",
+      demoGuestAgreement: { title: "Saved <agreement>", version: "v1", agreementText: "Saved & unchanged\nSecond line" } };
+    await sendDirectBookingGuestConfirmation({ ...payload, demoSimulation: true });
+    const demoHtml = emails.at(-1).html;
+    assert.ok(demoHtml.includes("Guest agreement · Demo"));
+    assert.ok(demoHtml.includes("Saved &lt;agreement&gt;"));
+    assert.ok(demoHtml.includes("Version: v1"));
+    assert.ok(demoHtml.includes("Saved &amp; unchanged<br />Second line"));
+    assert.ok(demoHtml.includes("Acceptance is simulated"));
+    await sendDirectBookingGuestConfirmation(payload);
+    const commercialHtml = emails.at(-1).html;
+    assert.ok(commercialHtml.includes(`/guest/verify/${token}`));
+    assert.ok(commercialHtml.includes("sign the guest agreement"));
+    assert.ok(!commercialHtml.includes("Saved &lt;agreement&gt;"));
+    assert.ok(!commercialHtml.includes("Acceptance is simulated"));
+    const before = emails.length;
+    const { demoGuestAgreement: _agreement, ...withoutAgreement } = payload;
+    await assert.rejects(sendDirectBookingGuestConfirmation({ ...withoutAgreement, demoSimulation: true }), /agreement snapshot is missing/);
+    assert.equal(emails.length, before);
+  });
   assert.deepEqual(await db.reservation.findUniqueOrThrow({ where: { id: commercial.id } }), commercial);
   assert.equal((await db.property.findUniqueOrThrow({ where: { id: propertyId } })).cleaningDurationMinutes, 240);
   assert.equal(await db.webhookEventIngest.count(), 0);
