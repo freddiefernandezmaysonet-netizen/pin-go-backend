@@ -24,12 +24,16 @@ async function authorize(tx: Tx, actor: Actor, platform = false) {
 function updateBody(body: unknown, property: boolean) {
   if (!body || typeof body !== "object" || Array.isArray(body)) reject(400, "INVALID_REQUEST");
   const value = body as Record<string, unknown>;
-  if (property && value.enabled === true && value.acceptedTermsVersion !== PIN_AI_BILLING_TERMS.version) reject(428, "PIN_AI_BILLING_TERMS_REQUIRED");
-  const keys = property ? ["enabled", "expectedRevision", "organizationRevision", ...(value.enabled === true ? ["acceptedTermsVersion"] : [])] : ["enabled", "expectedRevision"];
+  if (property && value.enabled === true && value.acceptedTermsVersion !== undefined && value.acceptedTermsVersion !== PIN_AI_BILLING_TERMS.version) reject(428, "PIN_AI_BILLING_TERMS_REQUIRED");
+  const keys = property ? ["enabled", "expectedRevision", "organizationRevision", ...(value.enabled === true && value.acceptedTermsVersion !== undefined ? ["acceptedTermsVersion"] : [])] : ["enabled", "expectedRevision"];
   if (Object.keys(value).length !== keys.length || Object.keys(value).some(k => !keys.includes(k)) ||
       typeof value.enabled !== "boolean" || !Number.isSafeInteger(value.expectedRevision) || Number(value.expectedRevision) < 0 ||
       (property && (!Number.isSafeInteger(value.organizationRevision) || Number(value.organizationRevision) < 0))) reject(400, "INVALID_REQUEST");
-  return { enabled: value.enabled as boolean, revision: value.expectedRevision as number, orgRevision: value.organizationRevision as number };
+  return { enabled: value.enabled as boolean, revision: value.expectedRevision as number, orgRevision: value.organizationRevision as number,
+    acceptsCurrentTerms: value.acceptedTermsVersion === PIN_AI_BILLING_TERMS.version };
+}
+function hasCurrentAcceptance(row: Prisma.PropertyGetPayload<{ select: typeof propertySelect }>) {
+  return row.pinAITermsVersion === PIN_AI_BILLING_TERMS.version && !!row.pinAITermsAcceptedAt && !!row.pinAITermsAcceptedBy;
 }
 function propertyView(row: Prisma.PropertyGetPayload<{ select: typeof propertySelect }>, env: ActivationEnvironment) {
   const managed = row.organization.pinAIRevision > 0;
@@ -110,6 +114,7 @@ export async function setPinAIProperty(db: PrismaClient, env: ActivationEnvironm
       await authorize(tx, actor);
       const row = await tx.property.findFirst({ where: { id: propertyId, organizationId: actor.orgId, status: "ACTIVE" }, select: propertySelect });
       if (!row) return reject(404, "PROPERTY_NOT_FOUND");
+      if (!hasCurrentAcceptance(row) && !input.acceptsCurrentTerms) reject(428, "PIN_AI_BILLING_TERMS_REQUIRED");
       if (row.organization.pinAIRevision !== input.orgRevision || row.pinAIRevision !== input.revision) reject(409, "PIN_AI_ACTIVATION_CONFLICT");
       if (!row.organization.pinAIEnabled) reject(403, "PIN_AI_ORGANIZATION_NOT_ENABLED");
       if (!row.organization.pinAIRevision) reject(409, "PIN_AI_ORGANIZATION_NOT_CONFIGURED");
@@ -127,12 +132,13 @@ export async function setPinAIProperty(db: PrismaClient, env: ActivationEnvironm
     await authorize(tx, actor);
     const row = await tx.property.findFirst({ where: { id: propertyId, organizationId: actor.orgId, status: "ACTIVE" }, select: propertySelect });
     if (!row) return reject(404, "PROPERTY_NOT_FOUND");
+    if (input.enabled && !hasCurrentAcceptance(row) && !input.acceptsCurrentTerms) reject(428, "PIN_AI_BILLING_TERMS_REQUIRED");
     if (row.organization.pinAIRevision !== input.orgRevision || row.pinAIRevision !== input.revision) reject(409, "PIN_AI_ACTIVATION_CONFLICT");
     if (input.enabled && !row.organization.pinAIEnabled) reject(403, "PIN_AI_ORGANIZATION_NOT_ENABLED");
     if (!row.organization.pinAIRevision) reject(409, "PIN_AI_ORGANIZATION_NOT_CONFIGURED");
     if (input.enabled && row.organization.stripeConnectAccountId !== checkedAccount)
       reject(409, "PIN_AI_ACTIVATION_CONFLICT");
-    const acceptance = input.enabled ? { pinAITermsVersion: PIN_AI_BILLING_TERMS.version,
+    const acceptance = input.enabled && !hasCurrentAcceptance(row) ? { pinAITermsVersion: PIN_AI_BILLING_TERMS.version,
       pinAITermsAcceptedAt: new Date(), pinAITermsAcceptedBy: actor.id } : {};
     const result = await tx.property.updateMany({ where: { id: propertyId, organizationId: actor.orgId, status: "ACTIVE", pinAIRevision: input.revision },
       data: { pinAIEnabled: input.enabled, pinAIRevision: { increment: 1 }, ...acceptance } });

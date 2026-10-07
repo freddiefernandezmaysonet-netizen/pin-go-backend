@@ -146,3 +146,46 @@ test("account replaced during verification cannot commit acceptance", async t =>
   assert.equal(h.property.pinAITermsAcceptedAt, null);
   assert.equal(h.events.length, 0);
 });
+
+test("disable and re-enable preserve current acceptance, including an explicit repeat", async t => {
+  const h = await harness(t);
+  const acceptedAt = new Date("2026-10-01T12:00:00Z");
+  Object.assign(h.property, { pinAIEnabled: true, pinAITermsVersion: PIN_AI_BILLING_TERMS.version,
+    pinAITermsAcceptedAt: acceptedAt, pinAITermsAcceptedBy: "original-host" });
+  assert.equal((await h.request(path, { enabled: false, expectedRevision: 0, organizationRevision: 1 })).status, 200);
+  const { acceptedTermsVersion: _terms, ...noConsent } = update;
+  assert.equal((await h.request(path, { ...noConsent, expectedRevision: 1 })).status, 200);
+  assert.equal((await h.request(path, { ...update, expectedRevision: 2 })).status, 200);
+  assert.equal(h.property.pinAITermsAcceptedAt, acceptedAt);
+  assert.equal(h.property.pinAITermsAcceptedBy, "original-host");
+  assert.equal(h.reads(), 2);
+});
+
+for (const evidence of [
+  { pinAITermsVersion: "obsolete", pinAITermsAcceptedAt: new Date(), pinAITermsAcceptedBy: "original-host" },
+  { pinAITermsVersion: PIN_AI_BILLING_TERMS.version, pinAITermsAcceptedAt: null, pinAITermsAcceptedBy: "original-host" },
+  { pinAITermsVersion: PIN_AI_BILLING_TERMS.version, pinAITermsAcceptedAt: new Date(), pinAITermsAcceptedBy: null },
+]) {
+  test(`stale or incomplete acceptance requires renewal: ${JSON.stringify(evidence)}`, async t => {
+    const h = await harness(t);
+    Object.assign(h.property, evidence);
+    const { acceptedTermsVersion: _terms, ...noConsent } = update;
+    assert.equal((await h.request(path, noConsent)).status, 428);
+    assert.equal(h.reads(), 0);
+    assert.equal((await h.request(path, update)).status, 200);
+    assert.equal(h.property.pinAITermsAcceptedBy, "host-a");
+    assert.equal(h.property.pinAITermsVersion, PIN_AI_BILLING_TERMS.version);
+    assert.ok(h.property.pinAITermsAcceptedAt);
+  });
+}
+
+test("acceptance is rechecked after external Connect verification", async t => {
+  const h = await harness(t);
+  Object.assign(h.property, { pinAITermsVersion: PIN_AI_BILLING_TERMS.version,
+    pinAITermsAcceptedAt: new Date(), pinAITermsAcceptedBy: "original-host" });
+  h.setAfterCheck(() => { h.property.pinAITermsAcceptedBy = null; });
+  const { acceptedTermsVersion: _terms, ...noConsent } = update;
+  assert.equal((await h.request(path, noConsent)).status, 428);
+  assert.equal(h.property.pinAIEnabled, false);
+  assert.equal(h.events.length, 0);
+});
