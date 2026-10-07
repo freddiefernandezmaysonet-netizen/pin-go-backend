@@ -8,6 +8,8 @@ on:
       - "src/pin-ai/fee-connect*"
       - "src/pin-ai/reservation-fee.service.ts"
       - "src/pin-ai/property-activation.ts"
+      - "src/services/pin-ai-activation.service.ts"
+      - "src/routes/dashboard.pin-ai-activation.routes*"
       - "src/pin-ai/billing-terms.ts"
       - "src/pin-ai/guest/guest-availability.ts"
       - "src/services/internal-demo-scope.ts"
