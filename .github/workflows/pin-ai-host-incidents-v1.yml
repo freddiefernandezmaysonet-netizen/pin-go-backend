@@ -69,7 +69,8 @@ jobs:
             prisma/migrations/20261006174000_pin_ai_reservation_fee/migration.sql \
             prisma/migrations/20261006180000_pin_ai_fee_invoice_export/migration.sql \
             prisma/migrations/20261006193000_pin_ai_connect_debit/migration.sql \
-            prisma/migrations/20261006200000_pin_ai_service_enrollment/migration.sql; do
+            prisma/migrations/20261006200000_pin_ai_service_enrollment/migration.sql \
+            prisma/migrations/20261007195500_pin_ai_property_fee_exemption/migration.sql; do
             if [ -f "$migration" ] && ! git cat-file -e "$BASE_SHA:$migration" 2>/dev/null; then
               npx prisma db execute --file "$migration" --schema prisma/schema.prisma
             fi
