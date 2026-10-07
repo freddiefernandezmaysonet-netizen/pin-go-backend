@@ -52,6 +52,12 @@ test("PostgreSQL: globally activated OTA property, one fee, incident and retaine
         amount: 100, currency: "usd", paid: true, status: "succeeded", metadata: { pinAIReservationId: reservation.id,
           organizationId: org.id, propertyId: property.id, pinAITermsVersion: PIN_AI_BILLING_TERMS.version } }; },
       retrieve: async () => { throw Error("paid replay must not contact provider"); } };
+    await db.property.update({ where: { id: property.id }, data: { pinAIFeeExempt: true } });
+    assert.equal(await channelPropertyEnabled(db, env, scope), true);
+    assert.equal(await recordPinAIReservationFee(db, env, scope, now), "EXEMPT");
+    assert.equal(await collectPinAIConnectFee(db, provider, env, reservation.id, now), "EXEMPT");
+    assert.equal(debits, 0);
+    await db.property.update({ where: { id: property.id }, data: { pinAIFeeExempt: false } });
     assert.equal(await collectPinAIConnectFee(db, provider, env, reservation.id, now), "PAID");
     assert.equal(await collectPinAIConnectFee(db, provider, env, reservation.id, now), "PAID");
     assert.equal(debits, 1);

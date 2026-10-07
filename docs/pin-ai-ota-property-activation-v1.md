@@ -28,3 +28,9 @@ Pruebas locales de gating, límites de ventana, consentimiento, reactivación, t
 **Pendientes reales:** confirmar activación de Casa Collores; asistencia, incidentes, entrega externa y débito real USD 1; early/late checkout y recuperación. Freddie decidió realizar esas pruebas después. No declararlas completadas.
 
 Referencia oficial para webhook global: https://docs.channex.io/api-v.1-documentation/webhook-collection .
+
+## Exenciones solicitadas 2026-10-07
+
+Casa Collores, PinGo demo property / Pin&Go Demo Property, Serena Studio y Remanso de Paz: exentas de USD 1 por reserva Direct Booking u OTA, sin desactivar asistencia. `Property.pinAIFeeExempt` bloquea registro, inscripción programada, devengo y débito; los lotes excluyen estas propiedades para evitar inanición. Los cargos ya pagados y evidencia de solicitudes inciertas se conservan; no hay reembolso automático ni replay de débitos exentos.
+
+Migración aditiva con valor false por defecto, sin cambios para las demás propiedades. Operación `ops/pin-ai-fee-exempt-properties.ts`: primero audita coincidencias exactas de nombre sin distinguir mayúsculas; exige exactamente una por cada propiedad y aborta si hay ausencias/duplicados. Aplicar con `PIN_AI_APPLY_PROPERTY_FEE_EXEMPTIONS=true` solo tras verificar las cuatro identificaciones. Esta operación únicamente modifica la marca de exención, dentro de una transacción serializable. No habilita Pin AI ni acepta términos. **Pendiente aplicar/verificar en producción antes de declarar estas exenciones activas y antes del rollout global.**

@@ -31,6 +31,11 @@ export async function collectPinAIConnectFee(db: PrismaClient, provider: Connect
   env: ActivationEnvironment, reservationId: string, now = new Date()) {
   const fee = await db.pinAIReservationFee.findUnique({ where: { reservationId } });
   if (!fee || !pinAIConnectBillingAllows(env, fee.organizationId)) return "DISABLED";
+  const property = await db.property.findFirst({ where: { id: fee.propertyId, organizationId: fee.organizationId },
+    select: { pinAIFeeExempt: true } });
+  // Preserve existing evidence, including uncertain requests, without issuing
+  // another debit. Previously paid fees are not refunded by this policy.
+  if (property?.pinAIFeeExempt && fee.billingStatus !== "PAID") return "EXEMPT";
   const recoverExpired = fee.billingStatus === "NEEDS_REVIEW" && fee.lastError === "CONNECT_REPLAY_WINDOW_EXPIRED";
   if (fee.billingStatus === "PAID" || (fee.billingStatus === "NEEDS_REVIEW" && !recoverExpired)) return fee.billingStatus;
   if (fee.serviceStartedAt > now) return "NOT_DUE";

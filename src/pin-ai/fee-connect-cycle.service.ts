@@ -20,7 +20,7 @@ export async function runPinAIConnectBillingCycle(db: PrismaClient, provider: Co
       pinAIReservationFee: null, pinAIServiceEnrollment: null,
       AND: [{ OR: [{ source: null }, { source: { not: INTERNAL_DEMO_SOURCE } }] },
         { OR: [{ externalProvider: null }, { externalProvider: { not: INTERNAL_DEMO_PROVIDER } }] }],
-      property: { ...organizationScope, status: "ACTIVE", isTestProperty: false,
+      property: { ...organizationScope, status: "ACTIVE", isTestProperty: false, pinAIFeeExempt: false,
         pinAIEnabled: true, pinAIRevision: { gt: 0 },
         organization: { pinAIEnabled: true, pinAIRevision: { gt: 0 }, stripeConnectAccountId: { not: null } },
         pinAITermsVersion: PIN_AI_BILLING_TERMS.version, pinAITermsAcceptedAt: { lte: now },
@@ -33,7 +33,7 @@ export async function runPinAIConnectBillingCycle(db: PrismaClient, provider: Co
       catch { failures++; }
     }
     const scheduled = await db.pinAIServiceEnrollment.findMany({ where: { ...organizationScope,
-      status: "SCHEDULED", opensAt: { lte: now } }, orderBy: [{ opensAt: "asc" }, { reservationId: "asc" }], take: 20 });
+      reservation: { property: { pinAIFeeExempt: false } }, status: "SCHEDULED", opensAt: { lte: now } }, orderBy: [{ opensAt: "asc" }, { reservationId: "asc" }], take: 20 });
     for (const e of scheduled) {
       try { if (await accrueEnrolledPinAIFee(db, env, e.reservationId, now) === "RECORDED") recorded++; }
       catch { failures++; }
@@ -43,7 +43,7 @@ export async function runPinAIConnectBillingCycle(db: PrismaClient, provider: Co
       checkOut: { gt: new Date(now.getTime() - 86400000) }, pinAIReservationFee: null,
       AND: [{ OR: [{ source: null }, { source: { not: INTERNAL_DEMO_SOURCE } }] },
         { OR: [{ externalProvider: null }, { externalProvider: { not: INTERNAL_DEMO_PROVIDER } }] }],
-      property: { ...organizationScope, status: "ACTIVE", isTestProperty: false,
+      property: { ...organizationScope, status: "ACTIVE", isTestProperty: false, pinAIFeeExempt: false,
         pinAIEnabled: true, organization: { pinAIEnabled: true, pinAIRevision: { gt: 0 }, stripeConnectAccountId: { not: null } },
         pinAITermsVersion: PIN_AI_BILLING_TERMS.version, pinAITermsAcceptedAt: { lte: now },
         pinAITermsAcceptedBy: { not: null } },
@@ -57,7 +57,7 @@ export async function runPinAIConnectBillingCycle(db: PrismaClient, provider: Co
   }
   // Already accrued fees remain payable after property disable/cancellation.
   const fees = await db.pinAIReservationFee.findMany({ where: { ...organizationScope,
-    serviceStartedAt: { lte: now }, termsVersion: PIN_AI_BILLING_TERMS.version,
+    property: { pinAIFeeExempt: false }, serviceStartedAt: { lte: now }, termsVersion: PIN_AI_BILLING_TERMS.version,
     OR: [{ billingStatus: { in: ["PENDING_CONNECT", "PENDING_BALANCE"] } },
       { billingStatus: "NEEDS_REVIEW", lastError: "CONNECT_REPLAY_WINDOW_EXPIRED" }],
     AND: [{ OR: [{ exportNextAttemptAt: null }, { exportNextAttemptAt: { lte: now } }] },
