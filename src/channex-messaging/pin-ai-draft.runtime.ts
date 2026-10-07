@@ -10,8 +10,8 @@ import { PinAIShadowOrchestrator } from "../pin-ai/runtime/shadow-orchestrator.j
 import { PinGoRuntimeReadToolExecutor } from "../pin-ai/runtime/pin-go-read-tool-executor.js";
 import { GuardedPinAIRuntimeToolExecutor, type PinAIRuntimeToolExecutor } from "../pin-ai/runtime/tool-executor.js";
 import type { PinAIRuntimeRequest } from "../pin-ai/runtime/contracts.js";
-import { autoConfig } from "./pin-ai-auto.policy.js";
 import { GuestIncidentToolExecutor } from "../pin-ai/runtime/guest-incident-tool-executor.js";
+import { channelPropertyEnabled, channelBookingAvailable } from "./pin-ai-commercial.policy.js";
 
 export function pinAIDraftsEnabled(env: NodeJS.ProcessEnv, scope: Scope): boolean {
   const ids = (raw: string | undefined) => (raw ?? "").split(",").map(s => s.trim()).filter(Boolean);
@@ -39,7 +39,7 @@ export function buildPinAIInboxDraftRuntime(args: {
   messages: Parameters<typeof createPinAIInboxDrafts>[0]["messages"];
 }) {
   return createPinAIInboxDrafts({
-    enabled: scope => args.automatic ? autoConfig(args.env).allows(scope) : pinAIDraftsEnabled(args.env, scope),
+    enabled: scope => args.automatic ? channelPropertyEnabled(args.prisma, args.env, scope) : pinAIDraftsEnabled(args.env, scope),
     messages: args.messages,
     async resolveContext(scope, thread) {
       const property = await args.prisma.property.findFirst({ where: { id: scope.propertyId, organizationId: scope.organizationId, status: "ACTIVE" }, select: { timezone: true } });
@@ -51,6 +51,8 @@ export function buildPinAIInboxDraftRuntime(args: {
       }, select: { id: true, preferredLanguage: true }, take: 2 });
       if (reservations.length !== 1) throw new InboxError("PIN_AI_DRAFT_RESERVATION_NOT_LINKED", 409);
       const reservation = reservations[0]!;
+      if (args.automatic && !await channelBookingAvailable(args.prisma, args.env, scope, thread.bookingId))
+        throw new InboxError("PIN_AI_SERVICE_WINDOW_CLOSED", 409);
       return { ...scope, reservationId: reservation.id, bookingId: thread.bookingId, timezone: property.timezone,
         preferredLanguage: reservation.preferredLanguage.toLowerCase().startsWith("es") ? "es" : "en" };
     },

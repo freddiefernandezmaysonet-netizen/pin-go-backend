@@ -28,7 +28,7 @@ async function scopedIssue(tx: Tx, input: Input, ref: string) {
   const channel = (issue?.metadata as Record<string, unknown> | null)?.channelSource === "CHANNEX";
   const demo = issue?.reservationId && issue.propertyId === INTERNAL_DEMO_PROPERTY_ID && input.env.PIN_AI_HOST_INCIDENT_ENABLED === "true"
     ? await readInternalDemo(tx, { reservationId: issue.reservationId, organizationId: input.actor.orgId, propertyId: issue.propertyId }) : null;
-  const commercial = !channel && issue?.propertyId && await commercialIncidentHistoryAllowed(tx, input.env,
+  const commercial = issue?.propertyId && await commercialIncidentHistoryAllowed(tx, input.env,
     { organizationId: input.actor.orgId, propertyId: issue.propertyId });
   if (!issue?.propertyId || !issue.reservationId || !(demo || commercial || hostScopeEnabled(input.env, input.actor.orgId, issue.reservationId) ||
     (channel && autoConfig(input.env).allows({ organizationId: input.actor.orgId, propertyId: issue.propertyId })))) return fail(404, "NOT_FOUND");
@@ -52,7 +52,9 @@ export async function listHostIncidents(input: Input & { before?: string }) {
     if (!ids.length && !channelProperties.length && !demoEnabled && !commercialProperties.length) return fail(404, "NOT_FOUND");
     const rows = await tx.operationalIssue.findMany({ where: { organizationId: input.actor.orgId,
       engine: "PIN_AI_GUEST_INCIDENT", visibility: "HOST", OR: [{ reservationId: { in: ids } },
-        { propertyId: { in: commercialProperties }, metadata: { path: ["commercialActivation"], equals: true } },
+        { propertyId: { in: commercialProperties }, OR: [
+          { metadata: { path: ["commercialActivation"], equals: true } },
+          { metadata: { path: ["channelSource"], equals: "CHANNEX" } }] },
         ...(demoEnabled ? [{ propertyId: INTERNAL_DEMO_PROPERTY_ID, metadata: { path: ["internalDemo"], equals: true } }] : []),
         { propertyId: { in: channelProperties }, metadata: { path: ["channelSource"], equals: "CHANNEX" } }],
       ...(input.before ? { id: { lt: input.before } } : {}) }, orderBy: { id: "desc" }, take: 51 });
@@ -62,7 +64,7 @@ export async function listHostIncidents(input: Input & { before?: string }) {
       items.push({ reference: reference(row), state: row.workflowState, propertyName: scoped.reservation.property.name,
         reservationNumber: scoped.reservation.reservationNumber });
     }
-    return { items, nextCursor: rows.length > 50 ? rows[49].id : null };
+    return { items, nextCursor: rows.length > 50 ? rows[49]!.id : null };
   });
 }
 export async function readHostIncident(input: Input & { reference: string; after?: number }) {
@@ -85,7 +87,7 @@ export async function readHostIncident(input: Input & { reference: string; after
         audience: m.audience, createdAt: m.createdAt,
         ...(channel && m.kind === "PUBLISH" ? { deliveryStatus: deliveries.find(d => d.id === channelUpdateId(m.id))?.status ?? "NOT_SENT" } : {}),
         text: openHostContent(input.env, `${input.actor.orgId}:${m.threadId}:${m.sequence}:${m.audience}`, m.contentCiphertext) })),
-      nextAfter: rows.length === 100 ? rows[99].sequence : null };
+      nextAfter: rows.length === 100 ? rows[99]!.sequence : null };
   });
 }
 export async function applyHostIncidentCommand(input: Input & { reference: string; command: unknown }) {
@@ -170,6 +172,6 @@ export async function readPublishedIncidentUpdates(input: { prisma: PrismaClient
       hostAcknowledged: issue.hostThread?.acknowledgedAt != null })),
     updates: rows.map(m => ({ id: m.id, reference: reference(m.thread.issue), createdAt: m.createdAt,
       text: openHostContent(input.env, `${m.thread.organizationId}:${m.threadId}:${m.sequence}:GUEST`, m.contentCiphertext) })),
-    nextAfter: rows.length === 100 ? rows[99].id : null,
+    nextAfter: rows.length === 100 ? rows[99]!.id : null,
   };
 }

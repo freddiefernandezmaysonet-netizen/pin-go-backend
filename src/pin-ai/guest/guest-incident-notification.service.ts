@@ -46,7 +46,10 @@ export async function deliverGuestIncidentNotice(input: {
     await commercialIncidentHistoryAllowed(prisma, env, { organizationId: m.organizationId, propertyId: m.propertyId });
   const portalEnabled = env.PIN_AI_INCIDENT_NOTIFICATIONS_ENABLED === "true" &&
     (guestIncidentEnabled(m.reservationId ?? "", env) || commercial);
-  const channelEnabled = autoConfig(env).allows({ organizationId: m.organizationId ?? "", propertyId: m.propertyId ?? "" });
+  const channelConfig = autoConfig(env);
+  const channelEnabled = channelConfig.allows({ organizationId: m.organizationId ?? "", propertyId: m.propertyId ?? "" }) &&
+    (!channelConfig.managed || !!(m.organizationId && m.propertyId && await commercialIncidentHistoryAllowed(prisma, env,
+      { organizationId: m.organizationId, propertyId: m.propertyId })));
   if (!portalEnabled && !channelEnabled) return "DISABLED";
   const expected = { id: m.id, body: m.body, status: m.status, retryCount: m.retryCount,
     providerDeliveryStatus: m.providerDeliveryStatus, providerMessageId: m.providerMessageId };

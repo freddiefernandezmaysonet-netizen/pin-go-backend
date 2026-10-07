@@ -8,10 +8,15 @@ export function autoConfig(env: NodeJS.ProcessEnv) {
   const organizations = list(env.PIN_AI_CHANNEX_AUTO_ORGANIZATION_IDS), properties = list(env.PIN_AI_CHANNEX_AUTO_PROPERTY_IDS);
   const value = env.PIN_AI_CHANNEX_AUTO_START_AT ?? "";
   const since = new Date(value);
+  // Global availability removes pilot ID lists, never property consent. All
+  // commercial callers must also check channelPropertyAuthorization below.
+  const managed = env.PIN_AI_ALL_ORGANIZATIONS_ENABLED === "true" &&
+    env.PIN_AI_PROPERTY_ACTIVATION_ENABLED === "true";
   const enabled = env.PIN_AI_CHANNEX_AUTO_ENABLED === "true" && /Z$/.test(value) && Number.isFinite(since.getTime()) &&
-    organizations.length > 0 && organizations.length <= 50 && properties.length > 0 && properties.length <= 50 &&
-    ![...organizations, ...properties].includes("*");
-  return { enabled, since, allows: (scope: Scope) => enabled && organizations.includes(scope.organizationId) && properties.includes(scope.propertyId) };
+    (managed || (organizations.length > 0 && organizations.length <= 50 && properties.length > 0 && properties.length <= 50 &&
+    ![...organizations, ...properties].includes("*")));
+  return { enabled, managed, since, allows: (scope: Scope) => enabled && !!scope.organizationId && !!scope.propertyId &&
+    (managed || (organizations.includes(scope.organizationId) && properties.includes(scope.propertyId))) };
 }
 export function validWebhookSecret(expected: string | undefined, received: unknown): boolean {
   if (!expected || expected.length < 32 || typeof received !== "string" || received.length > 512) return false;
