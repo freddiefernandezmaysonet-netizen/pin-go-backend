@@ -1,0 +1,31 @@
+name: Identity Check Host Consent
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - 'src/services/identity-check-billing-consent*.ts'
+      - 'src/routes/dashboard.guest-access-settings.routes.ts'
+      - 'src/routes/dashboard.identity-check-consent.routes.test.ts'
+      - 'src/routes/public-booking.routes.ts'
+      - 'prisma/schema.prisma'
+      - 'prisma/migrations/20261006231500_identity_check_host_consent/**'
+      - 'tsconfig.identity-check-host-consent.json'
+      - '.github/workflows/identity-check-host-consent.yml'
+permissions:
+  contents: read
+jobs:
+  consent:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+      - run: npm ci --ignore-scripts --no-audit --no-fund
+      - run: npx prisma generate --schema prisma
+      - run: node --import tsx --test src/services/identity-check-billing-consent.test.ts src/routes/dashboard.identity-check-consent.routes.test.ts src/services/direct-booking-connect-fee.service.test.ts
+      - run: npx tsc -p tsconfig.identity-check-host-consent.json --noEmit

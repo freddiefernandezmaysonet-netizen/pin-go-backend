@@ -1,0 +1,19 @@
+{
+  "compilerOptions": {
+    "noEmit": true,
+    "module": "preserve",
+    "moduleResolution": "bundler",
+    "target": "es2022",
+    "strict": true,
+    "skipLibCheck": true,
+    "types": [
+      "node"
+    ]
+  },
+  "include": [
+    "src/services/identity-check-billing-consent*.ts",
+    "src/routes/dashboard.guest-access-settings.routes.ts",
+    "src/routes/dashboard.identity-check-consent.routes.test.ts",
+    "src/routes/public-booking.routes.ts"
+  ]
+}
