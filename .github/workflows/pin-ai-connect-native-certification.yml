@@ -11,6 +11,10 @@ on:
       - "src/pin-ai/billing-terms.ts"
       - "src/pin-ai/guest/guest-availability.ts"
       - "src/services/internal-demo-scope.ts"
+      - "src/channex-messaging/pin-ai-commercial*"
+      - "src/pin-ai/ota-commercial.database.test.ts"
+      - "src/pin-ai/guest/guest-incident*"
+      - "src/pin-ai/host/host-incident*"
       - "prisma/**"
       - ".github/workflows/pin-ai-connect-native-certification.yml"
 
@@ -55,7 +59,9 @@ jobs:
           src/pin-ai/fee-connect.native.database.test.ts
       - name: Certify global availability, property consent and bounded collection
         run: |
-          node --import tsx --test src/routes/dashboard.pin-ai-activation.routes.test.ts src/pin-ai/fee-connect.test.ts src/pin-ai/property-activation.test.ts
+          node --import tsx --test src/routes/dashboard.pin-ai-activation.routes.test.ts src/pin-ai/fee-connect.test.ts src/pin-ai/property-activation.test.ts src/pin-ai/property-fee-exemption.test.ts
           ./node_modules/.bin/tsc --noEmit --strict --skipLibCheck --target ES2022 --module ESNext --moduleResolution Bundler src/routes/dashboard.pin-ai-activation.routes.test.ts src/pin-ai/fee-connect.test.ts src/pin-ai/property-activation.ts
       - name: Certify concurrent accrual and uncertain payment recovery
         run: node --import tsx --test src/pin-ai/fee-connect.native.database.test.ts
+      - name: Certify commercial OTA consent, single fee and incident history
+        run: node --import tsx --test src/pin-ai/ota-commercial.database.test.ts

@@ -71,6 +71,54 @@ jobs:
           BASE_BRANCH="${GITHUB_BASE_REF:-main}"
           git fetch origin "+refs/heads/$BASE_BRANCH:refs/remotes/origin/$BASE_BRANCH"
           git diff --name-only "origin/$BASE_BRANCH...HEAD" | sort > "$RUNNER_TEMP/actual.txt"
+          # PR #373 only: exact reviewed OTA commercial/exemption scope; retain runtime tests.
+          if [ "${GITHUB_HEAD_REF:-}" = "agent/pin-ai-ota-property-activation-v1" ]; then
+            test "$GITHUB_EVENT_NAME" = "pull_request"
+            test "$GITHUB_REPOSITORY" = "freddiefernandezmaysonet-netizen/pin-go-backend"
+            test "$SCOPE_PR_NUMBER" = "373"
+            test "$SCOPE_HEAD_REPO" = "$GITHUB_REPOSITORY"
+            test "$SCOPE_BASE_REPO" = "$GITHUB_REPOSITORY"
+            test "$GITHUB_BASE_REF" = "main"
+            reviewed_base=525eaf51c24d38f3f2ef0622294b8c0c53e2b36e
+            test "$(git merge-base "$reviewed_base" HEAD)" = "$reviewed_base"
+            git diff --check "$reviewed_base"...HEAD
+            git diff --name-only "$reviewed_base"...HEAD | sort > "$RUNNER_TEMP/pin-ai-actual.txt"
+            cat > "$RUNNER_TEMP/pin-ai-allowed.txt" <<'EOF'
+          .github/workflows/ota-airbnb-listing-discovery.yml
+          .github/workflows/ota-initial-distribution-enablement.yml
+          .github/workflows/pin-ai-connect-native-certification.yml
+          .github/workflows/pin-ai-host-incidents-v1.yml
+          docs/pin-ai-ota-property-activation-v1.md
+          ops/pin-ai-fee-exempt-properties.ts
+          ops/pin-ai-global-webhook-once.ts
+          prisma/migrations/20261007195500_pin_ai_property_fee_exemption/migration.sql
+          prisma/schema.prisma
+          src/channex-messaging/pin-ai-auto.policy.ts
+          src/channex-messaging/pin-ai-auto.runtime.ts
+          src/channex-messaging/pin-ai-auto.service.ts
+          src/channex-messaging/pin-ai-auto.test.ts
+          src/channex-messaging/pin-ai-commercial.policy.test.ts
+          src/channex-messaging/pin-ai-commercial.policy.ts
+          src/channex-messaging/pin-ai-draft.runtime.ts
+          src/channex-messaging/pin-ai-draft.ts
+          src/channex-messaging/pin-ai-global-webhook.test.ts
+          src/channex-messaging/pin-ai-global-webhook.ts
+          src/pin-ai/fee-connect-cycle.service.ts
+          src/pin-ai/fee-connect.service.ts
+          src/pin-ai/fee-connect.test.ts
+          src/pin-ai/guest/guest-incident-notification.service.ts
+          src/pin-ai/guest/guest-incident.service.ts
+          src/pin-ai/host/host-incident-channel.service.ts
+          src/pin-ai/host/host-incident.service.ts
+          src/pin-ai/ota-commercial.database.test.ts
+          src/pin-ai/property-fee-exemption.test.ts
+          src/pin-ai/reservation-fee.service.ts
+          src/pin-ai/service-enrollment.service.ts
+          EOF
+            diff -u "$RUNNER_TEMP/pin-ai-allowed.txt" "$RUNNER_TEMP/pin-ai-actual.txt"
+            test "$(git diff --no-ext-diff --no-color --full-index --unified=0 "$reviewed_base"...HEAD -- . ':!.github/workflows/ota-airbnb-listing-discovery.yml' ':!.github/workflows/ota-initial-distribution-enablement.yml' | sha256sum | cut -d ' ' -f 1)" = "ef3d4d26b785f3ef27357be508ec078cb8590851c42e8cb01d1d22e2918688e6"
+            exit 0
+          fi
           if [ "${GITHUB_HEAD_REF:-}" = "agent/pin-ai-property-activation-v1" ]; then
             python3 scripts/verify-pin-ai-activation-pr-scope.test.py
             python3 scripts/verify-pin-ai-activation-pr-scope.py

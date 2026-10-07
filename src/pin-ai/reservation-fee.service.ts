@@ -29,6 +29,7 @@ export async function recordPinAIReservationFeeInTransaction(tx: Prisma.Transact
     property: { organizationId: scope.organizationId } }, include: { property: { include: { organization: true } } } });
   if (!r || !guestPinAIAvailability(r, now).available) return "NOT_ELIGIBLE";
   const p = r.property;
+  if (p.pinAIFeeExempt) return "EXEMPT";
   const kind = pinAIFeeBookingKind(r);
   if (!kind || p.isTestProperty || p.status !== "ACTIVE" || !p.pinAIEnabled || !p.organization.pinAIEnabled ||
     p.organization.pinAIRevision === 0 || p.pinAITermsVersion !== PIN_AI_BILLING_TERMS.version ||

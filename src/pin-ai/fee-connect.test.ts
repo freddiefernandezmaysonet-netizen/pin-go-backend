@@ -16,7 +16,7 @@ function fixture() {
   let accountId = "acct_host", available = 100, calls = 0, balanceReads = 0;
   let loseResponse = false, failPaidSave = false, balanceRace = false;
   const requests = new Map<string, any>();
-  const db = { organization: { findUnique: async () => ({ stripeConnectAccountId: accountId }) },
+  const db = { property: { findFirst: async () => ({ pinAIFeeExempt: false }) }, organization: { findUnique: async () => ({ stripeConnectAccountId: accountId }) },
     pinAIReservationFee: { findUnique: async () => ({ ...row }), findUniqueOrThrow: async () => ({ ...row }),
       updateMany: async ({ where, data }: any) => {
         if (where.exportLeaseToken && where.exportLeaseToken !== row.exportLeaseToken) return { count: 0 };

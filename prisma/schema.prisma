@@ -233,6 +233,7 @@ model Property {
   isPublicBookable           Boolean                     @default(false)
   pinAIEnabled               Boolean                     @default(false)
   pinAIRevision              Int                         @default(0)
+  pinAIFeeExempt             Boolean                     @default(false)
   pinAITermsVersion          String?
   pinAITermsAcceptedAt       DateTime?
   pinAITermsAcceptedBy       String?

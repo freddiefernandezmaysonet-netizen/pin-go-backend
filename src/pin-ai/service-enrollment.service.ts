@@ -24,6 +24,7 @@ export async function enrollPinAIServiceInTransaction(tx: Prisma.TransactionClie
     property: { organizationId: scope.organizationId } }, include: { property: { include: { organization: true } } } });
   if (!r || r.status !== "ACTIVE" || !pinAIFeeBookingKind(r)) return "NOT_ELIGIBLE";
   const p = r.property, o = p.organization;
+  if (p.pinAIFeeExempt) return "EXEMPT";
   const { opensAt, closesAt } = guestPinAIAvailability(r, now);
   if (!opensAt || !closesAt || now >= opensAt || p.isTestProperty || p.status !== "ACTIVE" ||
     !p.pinAIEnabled || !o.pinAIEnabled || !p.pinAIRevision || !o.pinAIRevision ||
@@ -44,6 +45,13 @@ export async function accrueEnrolledPinAIFee(db: PrismaClient, env: ActivationEn
   return db.$transaction(async tx => {
     const e = await tx.pinAIServiceEnrollment.findUnique({ where: { reservationId } });
     if (!e || !enabled(env, e.organizationId)) return "DISABLED";
+    const property = await tx.property.findFirst({ where: { id: e.propertyId, organizationId: e.organizationId },
+      select: { pinAIFeeExempt: true } });
+    if (property?.pinAIFeeExempt) {
+      if (e.status === "SCHEDULED") await tx.pinAIServiceEnrollment.update({ where: { reservationId },
+        data: { status: "EXCLUDED", reason: "PROPERTY_FEE_EXEMPT", resolvedAt: now } });
+      return "EXEMPT";
+    }
     if (e.status !== "SCHEDULED") return e.status;
     if (now < e.opensAt) return "NOT_DUE";
     const finish = async (status: string, reason: string | null) => {

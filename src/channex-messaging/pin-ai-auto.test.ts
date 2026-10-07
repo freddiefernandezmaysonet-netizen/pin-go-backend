@@ -86,3 +86,18 @@ test("documented webhook identities are validated; body text cannot supply scope
   assert.throws(() => parseMessageEvent({ ...body, property_id: threadId })); assert.equal(parseMessageEvent({ event: "ari" }), null);
   assert.equal(validWebhookSecret("x".repeat(32), "x".repeat(32)), true); assert.equal(validWebhookSecret("x".repeat(32), ["x".repeat(32)]), false); assert.equal(validWebhookSecret("short", "short"), false);
 });
+
+test("async commercial disable during generation prevents delivery without taking over the thread", async () => {
+  let enabled = true, sends = 0; const outcomes: any[] = [];
+  const process = createAutomaticResponder({ enabled: async () => enabled,
+    repository: { state: async () => ({ mode: "AUTO", leaseToken: "lease" } as any),
+      ownMessageIds: async () => new Set<string>(), fence: async () => true,
+      finish: async (_job, status, reason) => { outcomes.push({ status, reason }); } },
+    messages: async () => history(),
+    generate: async () => { enabled = false; return { text: "Respuesta", requiresHumanReview: false, basedOnMessageId: messageId, sent: false }; },
+    send: async () => { sends++; },
+  });
+  await process(job);
+  assert.equal(sends, 0);
+  assert.deepEqual(outcomes, [{ status: "SKIPPED", reason: "DISABLED" }]);
+});

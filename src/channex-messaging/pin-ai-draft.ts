@@ -22,7 +22,7 @@ function snapshot(history: DraftHistory, messageId: string) {
 }
 
 export function createPinAIInboxDrafts(deps: {
-  enabled(scope: Scope): boolean;
+  enabled(scope: Scope): boolean | Promise<boolean>;
   messages(scope: Scope, threadId: string, page: Page): Promise<DraftHistory>;
   resolveContext(scope: Scope, thread: Thread): Promise<DraftContext>;
   run(context: DraftContext, messages: Message[], threadId: string): Promise<{ text: string; requiresHumanReview: boolean }>;
@@ -30,7 +30,7 @@ export function createPinAIInboxDrafts(deps: {
   // Bounded per-process concurrency guard; drafts never acquire a send receipt or invoke delivery.
   const active = new Set<string>();
   return async (input: DraftInput): Promise<DraftResult> => {
-    if (!deps.enabled(input)) throw new InboxError("PIN_AI_DRAFT_DISABLED", 503);
+    if (!await deps.enabled(input)) throw new InboxError("PIN_AI_DRAFT_DISABLED", 503);
     const key = JSON.stringify([input.organizationId, input.propertyId, input.threadId]);
     if (active.has(key) || active.size >= 8) throw new InboxError("PIN_AI_DRAFT_BUSY", 429);
     active.add(key);
