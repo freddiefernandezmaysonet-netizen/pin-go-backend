@@ -179,7 +179,8 @@ test("one Demo reservation through HTTP, messages, access, incident, host and cl
       headers: { "Content-Type": "application/json", "x-test-role": role }, body: JSON.stringify(body) });
     return { status: response.status, body: await response.json() as any };
   }
-  const checkIn = new Date(Date.now() + 2 * 86400000); checkIn.setUTCHours(13, 7, 0, 0);
+  // Exercise the real 24-hour guest window without changing production policy.
+  const checkIn = new Date(Date.now() + 6 * 3600000); checkIn.setUTCSeconds(0, 0);
   const checkOut = new Date(checkIn.getTime() + 20 * 60000);
   const input = { requestId: randomUUID(), checkIn: checkIn.toISOString(), checkOut: checkOut.toISOString(),
     guestName: "Synthetic guest", guestEmail: "guest@example.invalid", guestPhone: "+12025550125",
