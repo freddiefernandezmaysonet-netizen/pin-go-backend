@@ -7,6 +7,11 @@ import { ttlockChangeCardPeriod } from "../ttlock/ttlock.card.js";
 export async function extendCleanerAccess(db: PrismaClient, scope: { reportId: string; organizationId: string },
   dependencies = { changeCardPeriod: ttlockChangeCardPeriod, now: () => new Date() }) {
   const intent = await db.$transaction(async tx => {
+    const report = await tx.cleaningWorkIssueReport.findUnique({ where: { id: scope.reportId },
+      select: { work: { select: { reservationId: true } } } });
+    if (!report) throw new Error("CLEANER_EXTENSION_REPORT_NOT_FOUND");
+    // Serialize discovery with creation, not just the later hardware claim.
+    await tx.$queryRaw`SELECT "id" FROM "Reservation" WHERE "id" = ${report.work.reservationId} FOR UPDATE`;
     const previous = await tx.cleaningAccessExtension.findUnique({ where: { reportId: scope.reportId } });
     if (previous) {
       if (previous.organizationId !== scope.organizationId) throw new Error("CLEANER_EXTENSION_SCOPE_INVALID");

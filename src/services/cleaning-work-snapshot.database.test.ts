@@ -29,7 +29,7 @@ async function addCleaner(scope: CleaningWorkScope) {
   await db.$executeRaw`INSERT INTO "PropertyStaff" (
     "id", "propertyId", "staffMemberId", "isActive", "cleaningDurationCommitmentMinutes"
   ) VALUES (${randomUUID()}, ${scope.propertyId}, ${scope.staffMemberId}, true, 120)`;
-  await db.$executeRaw`INSERT INTO "CleaningConfirmation" VALUES (
+  await db.$executeRaw`INSERT INTO "CleaningConfirmation" ("id", "propertyId", "reservationId", "staffMemberId", "status") VALUES (
     ${scope.confirmationId}, ${scope.propertyId}, ${scope.reservationId}, ${scope.staffMemberId}, 'CONFIRMED')`;
 }
 async function count(scope: CleaningWorkScope) {
@@ -121,7 +121,7 @@ test("CleaningWork persistence on disposable PostgreSQL", { timeout: 60000 }, as
         timingConsentAcceptedAt: TEST_NOW, timingConsentVersion: "historical-consent",
       } });
       const replacement = { ...scope, confirmationId: `confirmation-${randomUUID()}` };
-      await db.$executeRaw`INSERT INTO "CleaningConfirmation" VALUES (
+      await db.$executeRaw`INSERT INTO "CleaningConfirmation" ("id", "propertyId", "reservationId", "staffMemberId", "status") VALUES (
         ${replacement.confirmationId}, ${scope.propertyId}, ${scope.reservationId}, ${scope.staffMemberId}, 'CONFIRMED')`;
       // New confirmation alone is not authority to replace current work.
       await assert.rejects(materializeCleaningWorkSnapshot(store, replacement, TEST_NOW), /REASSIGNMENT_REQUIRES_REVIEW/);

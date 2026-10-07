@@ -214,4 +214,41 @@ test("cleaning recovery persists real SQL transitions with injected hardware onl
     assert.equal(await db.cleaningAccessExtension.count({ where: { reportId: f.report.id } }), 0);
   });
 
+  await t.test("native concurrent requests share one intent and one hardware attempt", { skip: process.env.CLEANER_NATIVE_DB_TEST !== "true" }, async () => {
+    const version = await db.$queryRaw<Array<{ version: string }>>`SELECT version() AS version`;
+    assert.match(version[0].version, /PostgreSQL/); assert.doesNotMatch(version[0].version, /pglite|wasm|emscripten/i);
+    const f = await fixture();
+    const second = new PrismaClient({ datasources: { db: { url: databaseUrl! } } });
+    try {
+      const results = await Promise.all([
+        extendCleanerAccess(db, f.scope, f.dependencies),
+        extendCleanerAccess(second, f.scope, f.dependencies),
+      ]);
+      assert.ok(results.some(r => r.state === "APPLIED"));
+      assert.ok(results.every(r => ["APPLIED", "SENDING"].includes(r.state)));
+      assert.equal(f.commands.length, 1);
+      assert.equal(await db.cleaningAccessExtension.count({ where: { reportId: f.report.id } }), 1);
+      assert.equal((await db.cleaningAccessExtension.findUniqueOrThrow({ where: { reportId: f.report.id } })).state, "APPLIED");
+    } finally { await second.$disconnect(); }
+  });
+  await t.test("native expiry does not retire an extension command in flight", { skip: process.env.CLEANER_NATIVE_DB_TEST !== "true" }, async () => {
+    const f = await fixture();
+    const second = new PrismaClient({ datasources: { db: { url: databaseUrl! } } });
+    let entered!: () => void, release!: () => void;
+    const ready = new Promise<void>(resolve => { entered = resolve; });
+    const remote = new Promise<void>(resolve => { release = resolve; });
+    const extending = extendCleanerAccess(db, f.scope, { ...f.dependencies, changeCardPeriod: async (args: any) => {
+      f.commands.push(args); entered(); await remote; return {};
+    } });
+    try {
+      await ready;
+      await expireNfcAssignments(second, new Date(f.end.getTime() + 1000));
+      assert.equal((await second.nfcAssignment.findUniqueOrThrow({ where: { id: f.grant.id } })).status, "PROVISIONING");
+      release(); assert.equal((await extending).state, "APPLIED");
+      await expireNfcAssignments(second, new Date(f.end.getTime() + 1000));
+      assert.equal((await second.nfcAssignment.findUniqueOrThrow({ where: { id: f.grant.id } })).status, "ACTIVE");
+      assert.equal(f.commands.length, 1);
+    } finally { release(); await extending; await second.$disconnect(); }
+  });
+
 });
