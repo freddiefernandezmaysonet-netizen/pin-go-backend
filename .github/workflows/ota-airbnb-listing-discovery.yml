@@ -76,6 +76,12 @@ jobs:
             python3 scripts/verify-pin-ai-activation-pr-scope.py
             exit 0
           fi
+          # Exact Identity Check host-consent PR; subsequent OTA tests remain enabled.
+          if [ "${GITHUB_HEAD_REF:-}" = "agent/identity-check-host-consent-v1" ]; then
+            python3 scripts/verify-identity-consent-pr-scope.test.py
+            python3 scripts/verify-identity-consent-pr-scope.py
+            exit 0
+          fi
           # PR #353 only: exact reviewed cleaner-access candidate; retain all OTA certifications.
           if [ "${GITHUB_HEAD_REF:-}" = "agent/cleaner-access-window-v2" ]; then
             test "$GITHUB_EVENT_NAME" = "pull_request"

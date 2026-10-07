@@ -6,7 +6,7 @@ from pathlib import Path
 import subprocess
 
 REPO = "freddiefernandezmaysonet-netizen/pin-go-backend"
-BASE = "c97cb69f7c8e531bced491cdd5588c2c74510963"
+BASE = "aa175c7ab696c39cc083530b7e8593368668113d"
 ALLOWED = {'.github/workflows/apms-exit-closure-a-certification.yml',
  '.github/workflows/ota-initial-distribution-enablement.yml',
  '.github/workflows/guest-journey-enterprise-e15-certification.yml',
@@ -58,8 +58,6 @@ ALLOWED = {'.github/workflows/apms-exit-closure-a-certification.yml',
  'src/server.ts',
  'src/services/guest-cancellation.service.ts',
  'src/services/ingest.service.ts',
- 'src/services/internal-demo-commercial.db.test.ts',
- 'src/services/internal-demo-secure-precheckin.service.test.ts',
  'src/services/manual-reservation-cancellation.service.ts',
  'src/services/pin-ai-activation.service.ts',
  'src/services/reservations.patch.service.ts',
@@ -71,7 +69,7 @@ PINNED = {'prisma/migrations/20261006170000_pin_ai_property_activation/migration
  'prisma/migrations/20261006180000_pin_ai_fee_invoice_export/migration.sql': 'e9333590d4b398840d2744ec15df66e08e9f543edca99b366dd584ab581802bc',
  'prisma/migrations/20261006193000_pin_ai_connect_debit/migration.sql': '01ae270a9c47ce524bb37526c73d47cdcea5d80626abedc0abc3b6449c6c9dbb',
  'prisma/migrations/20261006200000_pin_ai_service_enrollment/migration.sql': '5cbcf2eea2e80e2ec425d61c1315b5e92b344c8c306af5892c9b716244c0c2d2',
- 'prisma/schema.prisma': 'f9253a41ef0d2e0091847df3a5c8a4ae2a457bb3e0dd5bff6b114ca2d9acb0c9',
+ 'prisma/schema.prisma': '780710a47561b7d411a75ec09c5e4991ca7f7e5e63c24c59cf40855d17749b9d',
  'src/workers/reservation.worker.ts': '705d62624e3b64f3a733834e4f3941fd4f0511250c0e63bc9b6152bede86a4d2'}
 
 def require(condition, message):
