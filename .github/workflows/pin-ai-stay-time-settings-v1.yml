@@ -6,6 +6,7 @@ on:
       - "src/pin-ai/actions/stay-time-*"
       - "src/pin-ai/runtime/stay-time-tool*"
       - "src/pin-ai/guest/stay-time-chat-actions*"
+      - "src/pin-ai/guest/stay-time-commercial-policy*"
       - "src/pin-ai/guest/guest-runtime-gateway*"
       - "src/pin-ai/guest/guest-history*"
       - "src/pin-ai/runtime/action-proposal-tool-executor*"
@@ -111,7 +112,7 @@ jobs:
       - name: Internal guest consent-to-execution bridge with simulated providers
         run: node --import tsx --test src/services/stay-time-guest-action.db.test.ts
       - name: Gated chat proposal, explicit confirmation and canonical receipt reads
-        run: node --import tsx --test src/pin-ai/guest/stay-time-chat-actions.test.ts src/routes/public-booking.pin-ai.routes.test.ts src/pin-ai/guest/guest-runtime-gateway.test.ts src/pin-ai/runtime/action-proposal-tool-executor.test.ts src/pin-ai/runtime/openai-agent-config.test.ts
+        run: node --import tsx --test src/pin-ai/guest/stay-time-commercial-policy.test.ts src/pin-ai/guest/stay-time-chat-actions.test.ts src/routes/public-booking.pin-ai.routes.test.ts src/pin-ai/guest/guest-runtime-gateway.test.ts src/pin-ai/runtime/action-proposal-tool-executor.test.ts src/pin-ai/runtime/openai-agent-config.test.ts
       - name: Policy, real HTTP authorization, migration SQL and database concurrency
         # Independent DB suites share tables; keep their fixture writes separate.
         # Explicit Promise.all concurrency scenarios inside each suite are retained.

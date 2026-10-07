@@ -120,11 +120,33 @@ test("runtime separates credential, reuses one proposal and rejects a second off
   assert.deepEqual(await executor.execute("check_late_checkout", { requestedLocalTime: "12:00" }, request, memory), { readOnly: true });
   assert.deepEqual(calls, ["scope", "prepare"]);
 });
+test("commercial stay-time capability does not enable ordinary date modifications", async () => {
+  const { actions, calls } = harness({ paid: true });
+  const executor = new PinAIActionProposalRuntimeToolExecutor({ enabled: false, guestToken, prepareStayTime: actions.prepare,
+    delegate: { execute: async () => ({ readOnly: true }) },
+    getModificationOptions: async () => { throw new Error("ordinary date operation must not run"); },
+    prepareReservationModification: async () => { throw new Error("ordinary date operation must not run"); } });
+  const memory = createConversationMemory(request);
+  const result = await executor.execute("prepare_reservation_modification",
+    { operation: "LATE_CHECKOUT", requestedLocalTime: "12:00" }, request, memory);
+  assert.equal(result.actionExecuted, false);
+  assert.equal(executor.getPrivateActionProposal()?.publicResult.quote.stayTime?.operation, "LATE_CHECKOUT");
+  for (const args of [{ operation: "EXTEND_CHECKOUT_ONLY", proposedCheckOutDate: "2026-10-04" },
+    { proposedCheckInDate: "2026-10-04", proposedCheckOutDate: "2026-10-06" }]) {
+    await assert.rejects(executor.execute("prepare_reservation_modification", args, request, memory), /TOOL_DISABLED/);
+  }
+  assert.deepEqual(calls, ["scope", "prepare"]);
+});
 test("session-only schema changes preserve default Saved Agent configuration", () => {
   const legacy = JSON.stringify(buildPinAIOpenAITools(undefined, { enabled: true }));
   assert.equal(legacy.includes('"EARLY_CHECKIN"'), false);
   const enabled = JSON.stringify(buildPinAIOpenAITools(undefined, { enabled: true, stayTimeEnabled: true }));
   assert.equal(enabled.includes('"EARLY_CHECKIN"'), true);
+  const commercial = JSON.stringify(buildPinAIOpenAITools(undefined, { enabled: true, stayTimeEnabled: true, dateChangesEnabled: false }).find(tool => tool.name === "prepare_reservation_modification"));
+  assert.equal(commercial.includes('"EXTEND_CHECKOUT_ONLY"'), false);
+  assert.equal(commercial.includes('"proposedCheckInDate"'), false);
+  assert.equal(commercial.includes('"EARLY_CHECKIN"'), true);
+  assert.match(buildPinAIOpenAIInstructions({ enabled: true, stayTimeEnabled: true, dateChangesEnabled: false }), /Ordinary date changes and additional-night extensions are unavailable/);
   assert.match(buildPinAIOpenAIInstructions({ enabled: true, stayTimeEnabled: true }), /typed yes is not consent/);
   assert.equal(JSON.stringify(buildPinAIOpenAITools()).includes("prepare_reservation_modification"), false);
 });

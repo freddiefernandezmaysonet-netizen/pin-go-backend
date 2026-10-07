@@ -305,14 +305,6 @@ export class PinAIActionProposalRuntimeToolExecutor
         );
     }
 
-    if (
-      !this.dependencies.enabled
-    ) {
-      throw new Error(
-        "PIN_AI_RUNTIME_ACTION_PROPOSAL_TOOL_DISABLED",
-      );
-    }
-
     if (args.operation === "EARLY_CHECKIN" || args.operation === "LATE_CHECKOUT") {
       if (!this.dependencies.prepareStayTime) throw new Error("PIN_AI_STAY_TIME_CHAT_DISABLED");
       if (Object.keys(args).some(key => !["operation", "requestedLocalTime"].includes(key)) ||
@@ -332,6 +324,14 @@ export class PinAIActionProposalRuntimeToolExecutor
       this.modelSafeProposalResult = modelSafeToolResult(prepared.publicResult);
       return this.modelSafeProposalResult;
     }
+    if (
+      !this.dependencies.enabled
+    ) {
+      throw new Error(
+        "PIN_AI_RUNTIME_ACTION_PROPOSAL_TOOL_DISABLED",
+      );
+    }
+
     if (args.requestedLocalTime !== undefined) throw new Error("PIN_AI_RUNTIME_STAY_TIME_ARGUMENTS_INVALID");
     const isExtension = args.operation === "EXTEND_CHECKOUT_ONLY";
     if (args.operation !== undefined && !isExtension) {

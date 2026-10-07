@@ -51,6 +51,40 @@ test("managed activation blocks chat and old paid confirmations despite a legacy
   } finally { await closeServer(server); }
 });
 
+test("commercial stay-time confirmation needs host settings, while ordinary dates remain in the pilot", async () => {
+  const now = new Date("2026-10-27T12:00:00Z");
+  let configured = true, stayTime = true, executions = 0;
+  const rule = { enabled: true, limitLocalTime: "12:00", fee: { mode: "FREE", amountMinor: 0, currency: "USD" } };
+  const prisma = {
+    reservation: { findFirst: async () => ({ id: "reservation-a", propertyId: "property-a", status: "ACTIVE",
+      checkIn: new Date("2026-10-26T19:00:00Z"), checkOut: new Date("2026-10-28T15:00:00Z"),
+      property: { organizationId: "org-a", timezone: "America/Puerto_Rico", pinAITermsAcceptedAt: new Date(+now - 1000),
+        pinAITermsAcceptedBy: "host", stayTimeSettings: configured ? { earlyCheckin: rule, lateCheckout: rule } : null } }) },
+    property: { findFirst: async () => ({ pinAITermsVersion: "pin-ai-connect-usd-1-reservation-v1", pinAIEnabled: true,
+      organization: { stripeConnectAccountId: "acct_synthetic", pinAIEnabled: true, pinAIRevision: 1 } }) },
+    pinAIActionProposal: { findFirst: async () => ({ id: "proposal-12345678", termsSnapshot: { version: stayTime ? "stay_time_quote_v1" : "date_change_v1" } }) },
+  };
+  const app = express(); app.use(express.json());
+  app.use(buildPublicBookingPinAIRouter({ prisma: prisma as never, now: () => now,
+    runtime: async () => { throw new Error("Must not call model"); },
+    actionBrokerFactory: async () => { throw new Error("Ordinary date broker must stay disabled"); },
+    stayTimeActions: { confirm: async () => { executions++; return { outcome: "WAITING_FOR_PAYMENT", actionExecuted: false }; } } as never,
+    env: { PIN_AI_ALL_ORGANIZATIONS_ENABLED: "true", PIN_AI_CONNECT_DEBIT_ENABLED: "true", PIN_AI_RESERVATION_FEE_RECORDING_ENABLED: "true",
+      PIN_AI_PROPERTY_ACTIVATION_ENABLED: "true", PIN_AI_GUEST_GATEWAY_ENABLED: "true", PIN_AI_ACTION_BROKER_ENABLED: "true",
+      PIN_AI_ACTION_PROPOSAL_TOOL_ENABLED: "true", PIN_AI_STAY_TIME_CHAT_ENABLED: "true" } }));
+  const server = await new Promise<Server>(resolve => { const listener = app.listen(0, "127.0.0.1", () => resolve(listener)); });
+  try {
+    const url = `http://127.0.0.1:${(server.address() as AddressInfo).port}/manage/${token}/pin-ai/action-proposals/proposal-12345678/confirm`;
+    const confirm = () => fetch(url, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ confirmationToken: "private-confirmation" }) });
+    assert.equal((await confirm()).status, 200);
+    configured = false;
+    assert.equal((await confirm()).status, 503);
+    configured = true; stayTime = false;
+    assert.equal((await confirm()).status, 503);
+    assert.equal(executions, 1);
+  } finally { await closeServer(server); }
+});
+
 test("server window gates availability, messages and old confirmations without invoking AI or payments", async () => {
   let now = new Date("2026-10-25T18:59:59.999Z");
   let reservation: any = { id: "reservation-a", propertyId: "property-a", status: "ACTIVE",
