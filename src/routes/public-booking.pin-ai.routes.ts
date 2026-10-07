@@ -1,10 +1,11 @@
+import { commercialStayTimeChatEnabled } from "../pin-ai/guest/stay-time-commercial-policy.js";
 import { Router } from "express";
 import { guestPinAIAvailability } from "../pin-ai/guest/guest-availability.js";
 import { commercialPinAIEnabled } from "../pin-ai/property-activation.js";
 import type { PrismaClient } from "@prisma/client";
 import { saveGuestActionReceipt } from "../pin-ai/guest/guest-history.js";
 import { readGuestHistory } from "../pin-ai/guest/guest-history-reader.js";
-import { actionModificationRequestId, createDefaultStayTimeChatActions, stayTimeChatEnabled } from "../pin-ai/guest/stay-time-chat-actions.js";
+import { actionModificationRequestId, createDefaultStayTimeChatActions } from "../pin-ai/guest/stay-time-chat-actions.js";
 import { StayTimePolicyError } from "../pin-ai/actions/stay-time-policy.js";
 
 import type {
@@ -222,20 +223,16 @@ export function buildPublicBookingPinAIRouter(input: Readonly<{
             env,
           });
 
-        if (!canary.enabled) {
-          return res.status(503).json({
-            ok: false,
-            error:
-              "PIN_AI_ACTIONS_UNAVAILABLE",
-          });
-        }
-
         const proposal = input.prisma.pinAIActionProposal ? await input.prisma.pinAIActionProposal.findFirst({
-          where: { id: req.params.proposalId, reservationId: reservation.id, actionType: "RESERVATION_MODIFICATION" },
+          where: { id: req.params.proposalId, reservationId: reservation.id, propertyId: reservation.propertyId,
+            organizationId: reservation.property?.organizationId ?? "", actionType: "RESERVATION_MODIFICATION" },
           select: { id: true, termsSnapshot: true },
         }) : null;
         const isStayTime = proposal && actionModificationRequestId(proposal) === `stay-time:${proposal.id}`;
-        if (isStayTime && !stayTimeChatEnabled(reservation.id, env)) {
+        if (isStayTime ? !await commercialStayTimeChatEnabled(input.prisma as PrismaClient, env, {
+          reservationId: reservation.id, propertyId: reservation.propertyId,
+          organizationId: reservation.property?.organizationId ?? "",
+        }, currentDateTime) : !canary.enabled) {
           return res.status(503).json({ ok: false, error: "PIN_AI_ACTIONS_UNAVAILABLE" });
         }
         const broker = isStayTime ? null :
@@ -335,8 +332,12 @@ export function buildPublicBookingPinAIRouter(input: Readonly<{
       } as const;
       let modification = await input.prisma.reservationModification.findFirst(modificationQuery);
       if (proposal.status === "CONFIRMED" && actionModificationRequestId(proposal) === `stay-time:${proposal.id}` &&
-          stayTimeChatEnabled(reservation.id, env) && modification?.status === "AWAITING_PAYMENT" &&
-          modification.stripePaymentStatus === null && modification.checkoutExpiresAt && modification.checkoutExpiresAt > now) {
+          modification?.status === "AWAITING_PAYMENT" && modification.stripePaymentStatus === null &&
+          modification.checkoutExpiresAt && modification.checkoutExpiresAt > now &&
+          await commercialStayTimeChatEnabled(input.prisma as PrismaClient, env, {
+            reservationId: reservation.id, propertyId: reservation.propertyId,
+            organizationId: reservation.property.organizationId,
+          }, now)) {
         const recover = input.recoverStayTimePaymentStatus ?? (async (scope: { guestToken: string; modificationId: string }) => {
           const key = env.STRIPE_SECRET_KEY?.trim() ?? "";
           if (!/^(?:sk|rk)_(?:test|live)_/.test(key) || key !== process.env.STRIPE_SECRET_KEY?.trim()) {

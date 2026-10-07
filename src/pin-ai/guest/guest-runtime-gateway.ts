@@ -1,3 +1,4 @@
+import { commercialStayTimeChatEnabled } from "./stay-time-commercial-policy.js";
 import { guestPinAIAvailability } from "./guest-availability.js";
 import { commercialPinAIEnabled, commercialIncidentRuntimeReady, type ActivationEnvironment } from "../property-activation.js";
 import { readInternalDemo, demoIncidentEnvironment } from "../../services/internal-demo-scope.js";
@@ -9,7 +10,7 @@ import type { PrismaClient } from "@prisma/client";
 import { randomUUID } from "node:crypto";
 import { appendGuestMessages, readGuestMessages, type GuestHistoryMessage } from "./guest-history.js";
 import { formatInTimeZone } from "date-fns-tz";
-import { createStayTimeChatActions, stayTimeChatEnabled } from "./stay-time-chat-actions.js";
+import { createStayTimeChatActions } from "./stay-time-chat-actions.js";
 import type { PinAIActionBrokerPublicProposal } from "../actions/action-broker.service.js";
 
 import type { PinAIRuntimeRequest } from "../runtime/contracts.js";
@@ -528,9 +529,8 @@ export function createGuestPinAIRuntimeRunner(
             .reservationId,
         env,
       });
-    const actionProposalEnabled =
-      !demo && actionCanary.enabled;
-    const stayTimeEnabled = !demo && stayTimeChatEnabled(request.context.reservationId, env);
+    const stayTimeEnabled = !demo && await commercialStayTimeChatEnabled(runtimePrisma, env, request.context);
+    const actionProposalEnabled = !demo && (actionCanary.enabled || stayTimeEnabled);
 
     if (
       actionProposalEnabled &&
@@ -608,6 +608,7 @@ export function createGuestPinAIRuntimeRunner(
           enabled:
             actionProposalEnabled,
           stayTimeEnabled,
+          dateChangesEnabled: actionCanary.enabled,
         },
         maxPolls: 50,
         pollDelayMs: 500,
@@ -620,7 +621,7 @@ export function createGuestPinAIRuntimeRunner(
 
     const actionTools = actionProposalEnabled
       ? createPinGoRuntimeToolExecutorWithActionProposal({ ...createActionProposalRuntimeDependencies({
-          guestToken: actionAuthorization!.guestToken, enabled: true,
+          guestToken: actionAuthorization!.guestToken, enabled: actionCanary.enabled,
         }), ...(stayTimeEnabled ? { prepareStayTime: createStayTimeChatActions({
           client: runtimePrisma, env, now: () => new Date(),
           platformFeePercent: env.PINGO_DIRECT_BOOKING_PLATFORM_FEE_PERCENT ?? "0",
