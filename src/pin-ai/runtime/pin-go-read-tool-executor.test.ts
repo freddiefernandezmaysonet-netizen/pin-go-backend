@@ -1274,3 +1274,76 @@ test("local places search converts provider failures to a safe unavailable resul
   assert.equal(result.actionsExecuted, false);
   assert.doesNotMatch(JSON.stringify(result), /PRIVATE_PROVIDER_DIAGNOSTIC/);
 });
+
+test("cleaning read exposes a sanitized policy assessment without extending access or forwarding cleaner free text", async () => {
+  const fixture = createPrismaFixture() as any;
+  const now = new Date();
+  const start = new Date(now.getTime() - 10 * 60000);
+  const work = { id: "private-work", reservationId: request.context.reservationId, propertyId: request.context.propertyId,
+    staffMemberId: "private-staff", confirmationId: "private-offer", scheduledStartAt: start, durationCommitmentMinutes: 30,
+    timingConsentAcceptedAt: start, startConfirmedAt: start, completionConfirmedAt: null, cancelledAt: null, supersededAt: null };
+  fixture.cleaningConfirmation.findMany = async () => [{ id: work.confirmationId, staffMemberId: work.staffMemberId, status: "CONFIRMED" }];
+  fixture.cleaningWork = { findMany: async () => [work] };
+  const tx: any = {
+    cleaningWorkIssueReport: { findFirst: async ({ where }: any) => {
+      assert.equal(where.cleaningWorkId, work.id);
+      return { kind: "MORE_TIME", estimatedAt: new Date(now.getTime() + 30 * 60000), reportedAt: start, reason: "PRIVATE_CLEANER_NOTE" };
+    } },
+    cleaningRecoveryPolicy: { findUnique: async () => ({ revision: 1, maxDelayMinutes: 30, maxAccessExtensionMinutes: 60, arrivalSafetyMarginMinutes: 0 }) },
+    reservation: { findFirst: async (args: any) => args.where.id?.not ? null : args.include?.property ? {
+      id: work.reservationId, propertyId: work.propertyId, checkOut: start, source: "INTERNAL_DEMO_DIRECT_BOOKING",
+      property: { status: "ACTIVE", organizationId: request.context.organizationId, cleaningStartOffsetMinutes: 0 },
+    } : { checkOut: start } },
+    cleaningConfirmation: { findFirst: async () => ({ id: work.confirmationId }) },
+    propertyStaff: { findFirst: async () => ({ id: "mapping" }) },
+    staffAssignment: { findUnique: async () => ({ endsAt: new Date(now.getTime() + 20 * 60000) }) },
+  };
+  fixture.cleaningWorkIssueReport = tx.cleaningWorkIssueReport;
+  fixture.$transaction = async (callback: any) => callback(tx);
+  const result: any = await new PinGoRuntimeReadToolExecutor(fixture).execute("get_cleaning_status", {}, request, createConversationMemory(request));
+  assert.equal(result.issueAssessment.decision, "ACCESS_EXTENSION_REQUIRED");
+  assert.equal(result.issueAssessment.actionsExecuted, false);
+  assert.equal(result.issueAssessment.authorizationGranted, false);
+  assert.equal(result.issueAssessment.accessChanged, false);
+  assert.equal(result.completionDeclared, false);
+  assert.doesNotMatch(JSON.stringify(result), /PRIVATE_CLEANER_NOTE|private-work|private-staff|private-offer/);
+});
+
+for (const [name, offers, works, expected] of [
+  ["no request", [], [], "NOT_REQUESTED"],
+  ["accepted offer without work", [{ id: "offer", staffMemberId: "staff", status: "CONFIRMED" }], [], "WORK_CONFIRMATION_UNAVAILABLE"],
+  ["pending backup", [{ id: "offer", staffMemberId: "staff", status: "PENDING" }, { status: "CANCELLED" }], [], "AWAITING_ACCEPTANCE"],
+  ["cancelled assignment", [{ status: "CANCELLED" }], [], "NO_CURRENT_ASSIGNMENT"],
+  ["missing start", [{ id: "offer", staffMemberId: "staff", status: "CONFIRMED" }], [{ timingConsentAcceptedAt: new Date(), startConfirmedAt: null, completionConfirmedAt: null }], "AWAITING_START_CONFIRMATION"],
+  ["missing consent", [{ id: "offer", staffMemberId: "staff", status: "CONFIRMED" }], [{ timingConsentAcceptedAt: null, startConfirmedAt: null, completionConfirmedAt: null }], "AWAITING_TIMING_CONSENT"],
+  ["invalid start", [{ id: "offer", staffMemberId: "staff", status: "CONFIRMED" }], [{ startConfirmedAt: "invalid", completionConfirmedAt: null }], "WORK_CONFIRMATION_UNAVAILABLE"],
+  ["in progress", [{ id: "offer", staffMemberId: "staff", status: "CONFIRMED" }], [{ startConfirmedAt: new Date("2026-10-01T12:00Z"), completionConfirmedAt: null }], "IN_PROGRESS"],
+  ["declared completion", [{ id: "offer", staffMemberId: "staff", status: "CONFIRMED" }], [{ startConfirmedAt: new Date("2026-10-01T12:00Z"), completionConfirmedAt: new Date("2026-10-01T12:30Z") }], "COMPLETED"],
+  ["completion without start", [{ id: "offer", staffMemberId: "staff", status: "CONFIRMED" }], [{ startConfirmedAt: null, completionConfirmedAt: new Date() }], "WORK_CONFIRMATION_UNAVAILABLE"],
+  ["completion before start", [{ id: "offer", staffMemberId: "staff", status: "CONFIRMED" }], [{ startConfirmedAt: new Date("2026-10-01T12:00Z"), completionConfirmedAt: new Date("2026-10-01T11:30Z") }], "WORK_CONFIRMATION_UNAVAILABLE"],
+  ["ambiguous offers", [{ status: "CONFIRMED" }, { status: "PENDING" }], [], "AMBIGUOUS_ASSIGNMENT"],
+  ["ambiguous work", [{ id: "offer", staffMemberId: "staff", status: "CONFIRMED" }], [{}, {}], "AMBIGUOUS_ASSIGNMENT"],
+] as const) {
+  test(`cleaning read: ${name}`, async () => {
+    const fixture = createPrismaFixture() as any;
+    fixture.cleaningConfirmation.findMany = async () => offers;
+    fixture.cleaningWork = { findMany: async (args: any) => {
+      assert.equal(args.where.reservationId, request.context.reservationId);
+      assert.equal(args.where.propertyId, request.context.propertyId);
+      assert.equal(args.where.confirmationId, "offer");
+      assert.equal(args.where.staffMemberId, "staff");
+      assert.equal(args.where.cancelledAt, null);
+      assert.equal(args.where.supersededAt, null);
+      return works;
+    } };
+    const result = await new PinGoRuntimeReadToolExecutor(fixture).execute("get_cleaning_status", {}, request, createConversationMemory(request));
+    const payload = result;
+    assert.equal(payload.workStatus, expected);
+    assert.equal(payload.completionDeclared, expected === "COMPLETED");
+    assert.equal(payload.physicalCompletionVerified, false);
+    assert.equal(payload.authorizationGranted, false);
+    assert.equal(payload.operationalWrites, false);
+    assert.equal(payload.actionsExecuted, false);
+    assert.doesNotMatch(JSON.stringify(result), /staffMemberId|confirmationId|token|synthetic-card/);
+  });
+}

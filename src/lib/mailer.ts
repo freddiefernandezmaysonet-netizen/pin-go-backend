@@ -2627,6 +2627,7 @@ export async function sendCleaningHostAttentionEmail(input: {
   reservationNumber?: string | null;
   dashboardUrl: string;
   idempotencyKey: string;
+  attentionReason?: string;
 }) {
   const recipients = Array.from(new Set(input.to.map(v => String(v ?? "").trim().toLowerCase()).filter(Boolean)));
   if (!recipients.length) throw new Error("CLEANING_HOST_ATTENTION_RECIPIENT_REQUIRED");
@@ -2642,12 +2643,11 @@ export async function sendCleaningHostAttentionEmail(input: {
   const { data, error } = await resend.emails.send({
     from: getEmailSender("cleaning"),
     to: recipients,
-    subject: "Pin&Go: cleaning confirmation needs attention / confirmacion pendiente",
+    subject: input.attentionReason ? "Pin&Go: cleaning needs attention / limpieza requiere atención" : "Pin&Go: cleaning confirmation needs attention / confirmacion pendiente",
     html: `
       <div style="font-family:Arial,sans-serif;color:#111827;line-height:1.6;max-width:680px;margin:auto">
         <h1>Cleaning confirmation needs attention / Confirmacion de limpieza pendiente</h1>
-        <p>Pin&amp;Go has not received the cleaner's completion confirmation for <strong>${safeProperty}</strong> after the agreed follow-up window.</p>
-        <p>Pin&amp;Go no ha recibido la confirmacion de finalizacion del cleaner para <strong>${safeProperty}</strong> despues del margen acordado.</p>
+        ${input.attentionReason ? `<p>A reported cleaning issue at <strong>${safeProperty}</strong> requires your review in Mission Control.</p><p>Un problema reportado en la limpieza de <strong>${safeProperty}</strong> requiere tu revisión en Mission Control.</p>` : `<p>Pin&amp;Go has not received the cleaner's completion confirmation for <strong>${safeProperty}</strong> after the agreed follow-up window.</p><p>Pin&amp;Go no ha recibido la confirmacion de finalizacion del cleaner para <strong>${safeProperty}</strong> despues del margen acordado.</p>`}
         <p><strong>Cleaner:</strong> ${safeCleaner}</p>
         ${safeReservation ? `<p><strong>Reservation / Reservacion:</strong> #${safeReservation}</p>` : ""}
         <p><strong>This does not confirm that cleaning was not completed.</strong><br/><strong>Esto no confirma que la limpieza no se haya realizado.</strong></p>

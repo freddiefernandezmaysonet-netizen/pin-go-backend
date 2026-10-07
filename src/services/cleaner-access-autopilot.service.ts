@@ -1,4 +1,5 @@
 import { readCleanerAccessWindow } from "./cleaner-access-window.service";
+import { retireUnusedWithdrawnCleanerGrant, scheduleBackupAlongsideCancelledProgrammedGrant } from "./cleaner-unused-grant.service";
 import {
   NfcAssignmentRole,
   NfcAssignmentStatus,
@@ -474,6 +475,62 @@ export async function ensureCleanerNfcAccessForConfirmedCleaning(input: {
   );
 
 if (existingCleaningNfc) {
+  // A reservation can retain the previous cleaner's grant after reassignment.
+  // Matching periods alone are not evidence that the accepting cleaner can enter.
+  const currentCardRef = String(staffMember.ttlockCardRef ?? "").trim();
+  const currentCard = currentCardRef
+    ? await input.prisma.nfcCard.findFirst({
+        where: { propertyId: confirmation.propertyId, label: currentCardRef },
+      })
+    : null;
+  if (!currentCard || currentCard.id !== existingCleaningNfc.nfcCardId) {
+    if (currentCard && lock?.ttlockLockId &&
+        (existingCleaningNfc.status === NfcAssignmentStatus.ACTIVE ||
+         existingCleaningNfc.status === NfcAssignmentStatus.PROVISIONING)) {
+      const replacementId = await scheduleBackupAlongsideCancelledProgrammedGrant(input.prisma, {
+        reservationId: confirmation.reservationId, propertyId: confirmation.propertyId,
+        confirmationId: confirmation.id, grantId: existingCleaningNfc.id,
+        grantCardId: existingCleaningNfc.nfcCardId, replacementCardId: currentCard.id, startsAt, endsAt,
+      });
+      if (replacementId) {
+        await persistCleanerAccessAuditEntry({ prisma: input.prisma,
+          organizationId: reservation.property.organizationId, propertyId: confirmation.propertyId,
+          reservationId: confirmation.reservationId, confirmationId: confirmation.id,
+          staffMemberId: confirmation.staffMemberId, nfcAssignmentId: replacementId,
+          nfcCardId: currentCard.id, trigger, status: "SUCCESS", severity: "INFO",
+          eventType: "DECISION_APPLIED", reason: "CLEANER_BACKUP_NFC_SCHEDULED",
+          summary: "Replacement cleaner NFC scheduled; cancelled cleaner's prior permission is left unchanged." });
+        return { ok: true, alreadyReady: false, repaired: true, skipped: false,
+          escalated: false, reason: "CLEANER_BACKUP_NFC_SCHEDULED", nfcAssignmentId: replacementId, error: null };
+      }
+    }
+    if (currentCard && existingCleaningNfc.status === NfcAssignmentStatus.SCHEDULED &&
+        existingCleaningNfc.retryCount === 0 && !existingCleaningNfc.provisionedAt &&
+        !existingCleaningNfc.provisioningStartedAt) {
+      const retired = await retireUnusedWithdrawnCleanerGrant(input.prisma, {
+        reservationId: confirmation.reservationId, propertyId: confirmation.propertyId,
+        confirmationId: confirmation.id, grantId: existingCleaningNfc.id,
+        grantCardId: existingCleaningNfc.nfcCardId, replacementCardId: currentCard.id,
+      });
+      if (retired) {
+        return ensureCleanerNfcAccessForConfirmedCleaning({ ...input, confirmationId: confirmation.id, trigger });
+      }
+    }
+    return failWithEscalation({
+      prisma: input.prisma,
+      organizationId: reservation.property.organizationId,
+      propertyId: reservation.propertyId,
+      reservationId: reservation.id,
+      confirmationId: confirmation.id,
+      staffMemberId: confirmation.staffMemberId,
+      startsAt,
+      endsAt,
+      trigger,
+      reason: "CLEANER_ACCESS_CARD_MISMATCH",
+      error: "Existing NFC access is not verified for the accepting cleaner's card.",
+      recommendedAction: "Reconcile cleaner card ownership before declaring replacement access ready.",
+    });
+  }
   if (existingCleaningNfc.startsAt.getTime() !== startsAt.getTime() ||
       existingCleaningNfc.endsAt.getTime() !== endsAt.getTime()) {
     return failWithEscalation({ prisma: input.prisma,

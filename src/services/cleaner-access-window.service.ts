@@ -20,9 +20,30 @@ export async function readCleanerAccessWindow(db: Pick<PrismaClient | Prisma.Tra
       Math.min(desiredEndsAt.getTime(), next?.checkIn?.getTime() ?? Infinity)
     );
     if (endsAt <= startsAt) throw new Error("CLEANER_ACCESS_WINDOW_EMPTY");
-    return { startsAt, endsAt, durationMinutes: 30 };
+    return includeAppliedCleanerExtension(db, reservation.id, reservation.propertyId, { startsAt, endsAt, durationMinutes: 30 }, Boolean(next));
   }
 
-  return planCleanerAccessWindow({ checkOut: reservation.checkOut, property: reservation.property,
+  const window = planCleanerAccessWindow({ checkOut: reservation.checkOut, property: reservation.property,
     nextCheckIn: next?.checkIn ?? null });
+  return includeAppliedCleanerExtension(db, reservation.id, reservation.propertyId, window, Boolean(next));
+}
+
+async function includeAppliedCleanerExtension(db: Pick<PrismaClient | Prisma.TransactionClient, "reservation">,
+  reservationId: string, propertyId: string, window: { startsAt: Date; endsAt: Date; durationMinutes: number }, hasNext: boolean) {
+  // Optional only for the existing narrow read adapters; real Prisma clients
+  // supply both delegates. Any database error fails the read rather than hiding it.
+  const source = db as Partial<Prisma.TransactionClient>;
+  if (hasNext || !source.cleaningAccessExtension || !source.cleaningRecoveryPolicy || !source.cleaningConfirmation) return window;
+  const current = await source.cleaningConfirmation.findMany({ where: { reservationId, propertyId, status: { in: ["PENDING", "CONFIRMED"] } }, take: 2 });
+  if (current.length !== 1 || current[0].status !== "CONFIRMED") return window;
+  const [extension, policy] = await Promise.all([
+    source.cleaningAccessExtension.findFirst({ where: { reservationId, propertyId, state: "APPLIED", startsAt: window.startsAt,
+      confirmationId: current[0].id, report: { work: { cancelledAt: null, supersededAt: null } } },
+      orderBy: { proposedEndsAt: "desc" } }),
+    source.cleaningRecoveryPolicy.findUnique({ where: { propertyId } }),
+  ]);
+  if (!extension || !policy) return window;
+  const endsAt = new Date(Math.max(window.endsAt.getTime(), Math.min(extension.proposedEndsAt.getTime(),
+    window.endsAt.getTime() + policy.maxAccessExtensionMinutes * 60_000)));
+  return { ...window, endsAt };
 }

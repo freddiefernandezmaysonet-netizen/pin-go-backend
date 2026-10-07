@@ -636,7 +636,7 @@ export async function upsertOperationalIssue(
 }
 
 export async function reopenOperationalIssue(
-  prisma: PrismaClient,
+  prisma: PrismaClient | Prisma.TransactionClient,
   input: ReopenOperationalIssueInput
 ) {
   validateReopenOperationalState(input);
@@ -658,7 +658,7 @@ export async function reopenOperationalIssue(
 
   const occurredAt = input.occurredAt ?? new Date();
 
-  return prisma.$transaction(async (transaction) => {
+  const persist = async (transaction: Prisma.TransactionClient) => {
     const currentIssue =
       await transaction.operationalIssue.findUnique({
         where: {
@@ -797,7 +797,8 @@ export async function reopenOperationalIssue(
     }
 
     return reopenedIssue;
-  });
+  };
+  return "$transaction" in prisma ? prisma.$transaction(persist) : persist(prisma);
 }
 
 export async function resolveOperationalIssuesForReservation(
