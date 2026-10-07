@@ -6,7 +6,7 @@ import express from "express";
 import { PIN_AI_BILLING_TERMS } from "../pin-ai/billing-terms.js";
 import { buildPinAIActivationRouter } from "./dashboard.pin-ai-activation.routes.js";
 
-async function harness(t: test.TestContext, role = "ORG_ADMIN", actorOrg = "org-a", active = true) {
+async function harness(t: test.TestContext, role = "ORG_ADMIN", actorOrg = "org-a", active = true, env: NodeJS.ProcessEnv = {}) {
   const old = process.env.CI; process.env.CI = "true";
   t.after(() => { if (old === undefined) delete process.env.CI; else process.env.CI = old; });
   const organization = { id: "org-a", name: "Synthetic", pinAIEnabled: true, pinAIRevision: 1, stripeConnectAccountId: "acct_host" };
@@ -31,7 +31,7 @@ async function harness(t: test.TestContext, role = "ORG_ADMIN", actorOrg = "org-
   app.use((req, _res, next) => { if (role) Object.assign(req, { user: { id: "host-a", orgId: actorOrg, role } }); next(); });
   let compatible = true, unavailable = false, reads = 0;
   let afterCheck = () => {};
-  app.use(buildPinAIActivationRouter(db, {}, { eligibility: async accountId => {
+  app.use(buildPinAIActivationRouter(db, env, { eligibility: async accountId => {
     reads++; assert.equal(accountId, "acct_host");
     if (unavailable) throw Error("Stripe unavailable");
     afterCheck(); return { compatible, availableCents: 0 };
@@ -188,4 +188,38 @@ test("acceptance is rechecked after external Connect verification", async t => {
   assert.equal((await h.request(path, noConsent)).status, 428);
   assert.equal(h.property.pinAIEnabled, false);
   assert.equal(h.events.length, 0);
+});
+
+test("global availability initializes a new organization only after property consent", async t => {
+  const h = await harness(t, "ORG_ADMIN", "org-a", true, { PIN_AI_ALL_ORGANIZATIONS_ENABLED: "true" });
+  h.organization.pinAIEnabled = false; h.organization.pinAIRevision = 0;
+  const initial = await (await h.request(path)).json();
+  assert.equal(initial.organization.enabled, true); assert.equal(initial.organization.revision, 0);
+  assert.equal(h.events.length, 0); assert.equal(h.organization.pinAIRevision, 0);
+  const { acceptedTermsVersion: _terms, ...noConsent } = update;
+  assert.equal((await h.request(path, { ...noConsent, organizationRevision: 0 })).status, 428);
+  assert.equal(h.organization.pinAIRevision, 0);
+  const saved = await (await h.request(path, { ...update, organizationRevision: 0 })).json();
+  assert.equal(saved.ok, true); assert.equal(saved.organization.revision, 1);
+  assert.equal(h.organization.pinAIEnabled, true); assert.equal(h.property.pinAIEnabled, true);
+  assert.equal(h.property.pinAITermsAcceptedBy, "host-a"); assert.equal(h.events.length, 2);
+});
+
+test("global availability does not override an explicit organization disable", async t => {
+  const h = await harness(t, "ORG_ADMIN", "org-a", true, { PIN_AI_ALL_ORGANIZATIONS_ENABLED: "true" });
+  h.organization.pinAIEnabled = false;
+  assert.equal((await (await h.request(path)).json()).organization.enabled, false);
+  assert.equal((await h.request(path, update)).status, 403); assert.equal(h.events.length, 0);
+});
+
+test("global availability cannot initialize when Connect verification fails or changes revision", async t => {
+  const h = await harness(t, "ORG_ADMIN", "org-a", true, { PIN_AI_ALL_ORGANIZATIONS_ENABLED: "true" });
+  h.organization.pinAIEnabled = false; h.organization.pinAIRevision = 0;
+  h.setCompatibility(false);
+  assert.equal((await h.request(path, { ...update, organizationRevision: 0 })).status, 422);
+  assert.equal(h.organization.pinAIRevision, 0); assert.equal(h.events.length, 0);
+  h.setCompatibility(true);
+  h.setAfterCheck(() => { h.organization.pinAIRevision = 1; });
+  assert.equal((await h.request(path, { ...update, organizationRevision: 0 })).status, 409);
+  assert.equal(h.property.pinAIEnabled, false); assert.equal(h.events.length, 0);
 });

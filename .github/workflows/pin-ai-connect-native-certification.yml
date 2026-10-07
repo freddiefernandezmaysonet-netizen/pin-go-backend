@@ -53,5 +53,9 @@ jobs:
           ./node_modules/.bin/tsc --noEmit --strict --skipLibCheck
           --target ES2022 --module NodeNext --moduleResolution NodeNext
           src/pin-ai/fee-connect.native.database.test.ts
+      - name: Certify global availability, property consent and bounded collection
+        run: |
+          node --import tsx --test src/routes/dashboard.pin-ai-activation.routes.test.ts src/pin-ai/fee-connect.test.ts src/pin-ai/property-activation.test.ts
+          ./node_modules/.bin/tsc --noEmit --strict --skipLibCheck --target ES2022 --module ESNext --moduleResolution Bundler src/routes/dashboard.pin-ai-activation.routes.test.ts src/pin-ai/fee-connect.test.ts src/pin-ai/property-activation.ts
       - name: Certify concurrent accrual and uncertain payment recovery
         run: node --import tsx --test src/pin-ai/fee-connect.native.database.test.ts

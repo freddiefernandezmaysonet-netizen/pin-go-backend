@@ -4,6 +4,7 @@ import type { PinAIReservationFee, PrismaClient } from "@prisma/client";
 import { collectPinAIConnectFee, ConnectDebitInsufficientBalanceError, pinAIConnectBillingAllows,
   type ConnectDebitProvider } from "./fee-connect.service.js";
 import { PIN_AI_BILLING_TERMS } from "./billing-terms.js";
+import { runPinAIConnectBillingCycle } from "./fee-connect-cycle.service.js";
 const now = new Date("2026-10-06T19:00:00Z");
 const env = { PIN_AI_CONNECT_DEBIT_ENABLED: "true", PIN_AI_CONNECT_DEBIT_ORGANIZATION_IDS: "org" };
 function fixture() {
@@ -49,6 +50,38 @@ function fixture() {
 test("new Connect gate rejects old invoice switches and wildcard", () => {
   assert.equal(pinAIConnectBillingAllows({ PIN_AI_BILLING_ENABLED: "true", PIN_AI_BILLING_ORGANIZATION_IDS: "org" }, "org"), false);
   assert.equal(pinAIConnectBillingAllows({ ...env, PIN_AI_CONNECT_DEBIT_ORGANIZATION_IDS: "*" }, "org"), false);
+});
+test("global scope admits current and future organizations only with debit enabled", () => {
+  const global = { PIN_AI_ALL_ORGANIZATIONS_ENABLED: "true", PIN_AI_CONNECT_DEBIT_ENABLED: "true" };
+  for (const id of ["current-org", "future-org"]) assert.equal(pinAIConnectBillingAllows(global, id), true);
+  assert.equal(pinAIConnectBillingAllows(global, ""), false);
+  assert.equal(pinAIConnectBillingAllows({ ...global, PIN_AI_CONNECT_DEBIT_ENABLED: "false" }, "current-org"), false);
+  assert.equal(pinAIConnectBillingAllows({ ...global, PIN_AI_ALL_ORGANIZATIONS_ENABLED: "false" }, "current-org"), false);
+});
+test("global worker queries all organizations while retaining consent, Demo exclusion and bounded batches", async () => {
+  const queries: { model: string; args: any }[] = [];
+  const model = (name: string) => ({ findMany: async (args: any) => { queries.push({ model: name, args }); return []; } });
+  const db = { reservation: model("reservation"), pinAIServiceEnrollment: model("enrollment"),
+    pinAIReservationFee: model("fee") } as unknown as PrismaClient;
+  const provider = {} as ConnectDebitProvider;
+  await runPinAIConnectBillingCycle(db, provider, { PIN_AI_ALL_ORGANIZATIONS_ENABLED: "true",
+    PIN_AI_CONNECT_DEBIT_ENABLED: "false" }, now);
+  assert.equal(queries.length, 0);
+  await runPinAIConnectBillingCycle(db, provider, { PIN_AI_ALL_ORGANIZATIONS_ENABLED: "true",
+    PIN_AI_CONNECT_DEBIT_ENABLED: "true", PIN_AI_PROPERTY_ACTIVATION_ENABLED: "true",
+    PIN_AI_RESERVATION_FEE_RECORDING_ENABLED: "true" }, now);
+  assert.equal(queries.length, 4);
+  for (const q of queries) {
+    assert.equal(q.args.where.organizationId, undefined);
+    assert.ok(q.args.take <= 20);
+    if (q.model === "reservation") {
+      const p = q.args.where.property;
+      assert.equal(p.organizationId, undefined); assert.equal(p.pinAIEnabled, true);
+      assert.equal(p.isTestProperty, false); assert.equal(p.pinAITermsVersion, PIN_AI_BILLING_TERMS.version);
+      assert.deepEqual(p.pinAITermsAcceptedBy, { not: null });
+      assert.equal(q.args.where.AND.length, 2);
+    }
+  }
 });
 test("one fee pays once; a paid repeat makes no provider call", async () => {
   const h = fixture();

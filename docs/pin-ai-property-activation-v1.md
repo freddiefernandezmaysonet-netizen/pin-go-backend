@@ -1,5 +1,15 @@
 # Pin AI V1 — organización y propiedad
 
+## Disponibilidad global — actualización 2026-10-07
+
+La decisión vigente ofrece Pin AI a todas las organizaciones actuales y futuras. `PIN_AI_ALL_ORGANIZATIONS_ENABLED=true` elimina la selección manual de organizaciones para disponibilidad y, junto con `PIN_AI_CONNECT_DEBIT_ENABLED=true`, permite procesar cargos de cualquier organización sin mantener una lista de IDs. Ambos controles siguen apagados por defecto; esta actualización de código no activa producción.
+
+Las organizaciones sin configuración previa (revisión cero) pueden habilitar sus propiedades directamente. La primera activación de propiedad inicializa y audita la revisión de organización en la misma transacción, después de comprobar autoridad, consentimiento y compatibilidad Connect. No se registra aceptación por terceros ni se activan propiedades en masa. Una deshabilitación explícita previa de organización conserva su efecto y requiere revisión del administrador de Pin&Go.
+
+El worker consulta todos los tenants con lotes limitados y conserva elegibilidad por propiedad, aceptación vigente, cuenta fijada, exclusión de Demo/test e idempotencia. Las nuevas organizaciones no necesitan añadirse a una variable de IDs. Los términos vigentes son Connect USD 1 por reserva de cualquier origen. Los párrafos históricos siguientes describen etapas anteriores; no son el estado actual de certificación ni instrucciones de rollout global.
+
+En modo global, una organización con revisión cero no vuelve al piloto anterior: sin aceptación de propiedad, no obtiene asistencia comercial. Sin modo global se conserva la compatibilidad con el piloto. No utilizar el interruptor de adopción como parada total.
+
 Estado al 2026-10-06: implementación local preparada; no desplegada ni activada en producción.
 
 Corrección comercial vigente: USD $1.00 por reserva de cualquier origen con Pin AI activado, descontado desde Connect. El diseño de factura SaaS fue descartado y desconectado del worker/webhook. Leer `pin-ai-connect-reservation-fee-v1.md`: Account Debits todavía no está implementado ni certificado y se requiere nuevo consentimiento. No habilitar el rollout comercial con los gates o términos anteriores.

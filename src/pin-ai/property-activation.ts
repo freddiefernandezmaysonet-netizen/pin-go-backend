@@ -1,6 +1,6 @@
 import type { PrismaClient } from "@prisma/client";
 import { PIN_AI_BILLING_TERMS } from "./billing-terms.js";
-import { pinAIConnectBillingAllows } from "./fee-connect.service.js";
+import { pinAIConnectBillingAllows, pinAIAllOrganizationsAvailable } from "./fee-connect.service.js";
 
 export type ActivationEnvironment = Readonly<Record<string, string | undefined>>;
 export type ActivationDb = Pick<PrismaClient, "property">;
@@ -19,7 +19,7 @@ export async function commercialPinAIEnabled(db: ActivationDb, env: ActivationEn
     select: { pinAIEnabled: true, pinAITermsVersion: true, organization: { select: { pinAIEnabled: true, pinAIRevision: true, stripeConnectAccountId: true } } },
   });
   if (!row) return false;
-  if (row.organization.pinAIRevision === 0) return null;
+  if (row.organization.pinAIRevision === 0) return pinAIAllOrganizationsAvailable(env) ? false : null;
   return row.organization.pinAIEnabled && row.pinAIEnabled && row.pinAITermsVersion === PIN_AI_BILLING_TERMS.version &&
     !!row.organization.stripeConnectAccountId && pinAIConnectBillingAllows(env, scope.organizationId) &&
     env.PIN_AI_RESERVATION_FEE_RECORDING_ENABLED === "true";

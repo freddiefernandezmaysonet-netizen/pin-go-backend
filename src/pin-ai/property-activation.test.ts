@@ -32,3 +32,9 @@ test("past incident access stays tenant-bound and does not depend on new-assista
   } } } as unknown as ActivationDb;
   assert.equal(await commercialIncidentHistoryAllowed(exactDb, env, scope), true);
 });
+test("global availability never falls back to pilot before host activation", async () => {
+  const db = { property: { findFirst: async () => ({ pinAIEnabled: false, pinAITermsVersion: null,
+    organization: { pinAIEnabled: false, pinAIRevision: 0, stripeConnectAccountId: "acct_synthetic" } }) } } as unknown as ActivationDb;
+  assert.equal(await commercialPinAIEnabled(db, { ...env, PIN_AI_ALL_ORGANIZATIONS_ENABLED: "true" }, scope), false);
+  assert.equal(await commercialPinAIEnabled(db, env, scope), null);
+});

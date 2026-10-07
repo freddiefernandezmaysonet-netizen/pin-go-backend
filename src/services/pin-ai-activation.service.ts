@@ -1,7 +1,7 @@
 import type { Prisma, PrismaClient } from "@prisma/client";
 import { propertyActivationEnabled, commercialIncidentRuntimeReady, type ActivationEnvironment } from "../pin-ai/property-activation.js";
 import { PIN_AI_BILLING_TERMS } from "../pin-ai/billing-terms.js";
-import { type ConnectDebitProvider, pinAIConnectBillingAllows } from "../pin-ai/fee-connect.service.js";
+import { type ConnectDebitProvider, pinAIConnectBillingAllows, pinAIAllOrganizationsAvailable } from "../pin-ai/fee-connect.service.js";
 
 export class PinAIActivationError extends Error {
   constructor(readonly status: number, readonly code: string) { super(code); }
@@ -35,8 +35,11 @@ function updateBody(body: unknown, property: boolean) {
 function hasCurrentAcceptance(row: Prisma.PropertyGetPayload<{ select: typeof propertySelect }>) {
   return row.pinAITermsVersion === PIN_AI_BILLING_TERMS.version && !!row.pinAITermsAcceptedAt && !!row.pinAITermsAcceptedBy;
 }
+function organizationAvailable(row: Prisma.PropertyGetPayload<{ select: typeof propertySelect }>, env: ActivationEnvironment) {
+  return row.organization.pinAIEnabled || (pinAIAllOrganizationsAvailable(env) && row.organization.pinAIRevision === 0);
+}
 function propertyView(row: Prisma.PropertyGetPayload<{ select: typeof propertySelect }>, env: ActivationEnvironment) {
-  const managed = row.organization.pinAIRevision > 0;
+  const managed = row.organization.pinAIRevision > 0 || pinAIAllOrganizationsAvailable(env);
   const runtimeReady = propertyActivationEnabled(env) && env.PIN_AI_GUEST_GATEWAY_ENABLED === "true" &&
     env.PIN_AI_RUNTIME_SHADOW_ENABLED === "true" && env.PIN_AI_RUNTIME_REAL_READ_ENABLED === "true" &&
     commercialIncidentRuntimeReady(env) && pinAIConnectBillingAllows(env, row.organization.id) &&
@@ -45,8 +48,8 @@ function propertyView(row: Prisma.PropertyGetPayload<{ select: typeof propertySe
     billing: { ...PIN_AI_BILLING_TERMS, acceptedAt: row.pinAITermsAcceptedAt, acceptedVersion: row.pinAITermsVersion,
       collectionReady: pinAIConnectBillingAllows(env, row.organization.id) &&
         env.PIN_AI_RESERVATION_FEE_RECORDING_ENABLED === "true" && !!row.organization.stripeConnectAccountId },
-    organization: { enabled: row.organization.pinAIEnabled, revision: row.organization.pinAIRevision },
-    state: !managed ? "EXISTING_SCOPE" : !propertyActivationEnabled(env) ? "PENDING_ACTIVATION" : !row.organization.pinAIEnabled || !row.pinAIEnabled ? "DISABLED" :
+    organization: { enabled: organizationAvailable(row, env), revision: row.organization.pinAIRevision },
+    state: !managed ? "EXISTING_SCOPE" : !propertyActivationEnabled(env) ? "PENDING_ACTIVATION" : !organizationAvailable(row, env) || !row.pinAIEnabled ? "DISABLED" :
       runtimeReady && row.pinAITermsVersion === PIN_AI_BILLING_TERMS.version ? "ENABLED" : "PENDING_ACTIVATION",
     capabilities: { guestAssistance: true, guestIncidents: true, reservationActions: "CONTROLLED_RELEASE", channelReplies: "SEPARATE_ACTIVATION" } };
 }
@@ -116,8 +119,8 @@ export async function setPinAIProperty(db: PrismaClient, env: ActivationEnvironm
       if (!row) return reject(404, "PROPERTY_NOT_FOUND");
       if (!hasCurrentAcceptance(row) && !input.acceptsCurrentTerms) reject(428, "PIN_AI_BILLING_TERMS_REQUIRED");
       if (row.organization.pinAIRevision !== input.orgRevision || row.pinAIRevision !== input.revision) reject(409, "PIN_AI_ACTIVATION_CONFLICT");
-      if (!row.organization.pinAIEnabled) reject(403, "PIN_AI_ORGANIZATION_NOT_ENABLED");
-      if (!row.organization.pinAIRevision) reject(409, "PIN_AI_ORGANIZATION_NOT_CONFIGURED");
+      if (!organizationAvailable(row, env)) reject(403, "PIN_AI_ORGANIZATION_NOT_ENABLED");
+      if (!row.organization.pinAIRevision && !pinAIAllOrganizationsAvailable(env)) reject(409, "PIN_AI_ORGANIZATION_NOT_CONFIGURED");
       if (!row.organization.stripeConnectAccountId) reject(422, "PIN_AI_CONNECT_ACCOUNT_REQUIRED");
       return row.organization.stripeConnectAccountId;
     });
@@ -134,10 +137,19 @@ export async function setPinAIProperty(db: PrismaClient, env: ActivationEnvironm
     if (!row) return reject(404, "PROPERTY_NOT_FOUND");
     if (input.enabled && !hasCurrentAcceptance(row) && !input.acceptsCurrentTerms) reject(428, "PIN_AI_BILLING_TERMS_REQUIRED");
     if (row.organization.pinAIRevision !== input.orgRevision || row.pinAIRevision !== input.revision) reject(409, "PIN_AI_ACTIVATION_CONFLICT");
-    if (input.enabled && !row.organization.pinAIEnabled) reject(403, "PIN_AI_ORGANIZATION_NOT_ENABLED");
-    if (!row.organization.pinAIRevision) reject(409, "PIN_AI_ORGANIZATION_NOT_CONFIGURED");
+    if (input.enabled && !organizationAvailable(row, env)) reject(403, "PIN_AI_ORGANIZATION_NOT_ENABLED");
+    if (!row.organization.pinAIRevision && !pinAIAllOrganizationsAvailable(env)) reject(409, "PIN_AI_ORGANIZATION_NOT_CONFIGURED");
     if (input.enabled && row.organization.stripeConnectAccountId !== checkedAccount)
       reject(409, "PIN_AI_ACTIVATION_CONFLICT");
+    // Global availability is a platform configuration, not host-granted entitlement.
+    // Initialize revision evidence only after host consent and Connect verification.
+    if (input.enabled && row.organization.pinAIRevision === 0 && pinAIAllOrganizationsAvailable(env)) {
+      const initialized = await tx.organization.updateMany({ where: { id: actor.orgId, pinAIRevision: 0 },
+        data: { pinAIEnabled: true, pinAIRevision: { increment: 1 } } });
+      if (initialized.count !== 1) reject(409, "PIN_AI_ACTIVATION_CONFLICT");
+      await audit(tx, actor, actor.orgId, null, true, 1);
+      row.organization = { ...row.organization, pinAIEnabled: true, pinAIRevision: 1 };
+    }
     const acceptance = input.enabled && !hasCurrentAcceptance(row) ? { pinAITermsVersion: PIN_AI_BILLING_TERMS.version,
       pinAITermsAcceptedAt: new Date(), pinAITermsAcceptedBy: actor.id } : {};
     const result = await tx.property.updateMany({ where: { id: propertyId, organizationId: actor.orgId, status: "ACTIVE", pinAIRevision: input.revision },

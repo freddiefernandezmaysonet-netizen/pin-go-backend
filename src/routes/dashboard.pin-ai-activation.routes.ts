@@ -6,6 +6,7 @@ import { getPinAIProperty, setPinAIProperty, listPinAIOrganizations, setPinAIOrg
 
 import type { ConnectDebitProvider } from "../pin-ai/fee-connect.service.js";
 import { createPinAIConnectStripeProvider } from "../pin-ai/fee-connect-stripe.provider.js";
+import { pinAIAllOrganizationsAvailable } from "../pin-ai/fee-connect.service.js";
 
 export function buildPinAIActivationRouter(db: PrismaClient, env: NodeJS.ProcessEnv = process.env,
   provider: Pick<ConnectDebitProvider, "eligibility"> = {
@@ -34,6 +35,7 @@ export function buildPinAIActivationRouter(db: PrismaClient, env: NodeJS.Process
   router.put(property, requireTrustedReviewMutationOrigin,
     wrap(req => setPinAIProperty(db, env, actor(req), String(req.params.propertyId), req.body, provider)));
   router.get(organizations, wrap(async req => ({ ...await listPinAIOrganizations(db, actor(req), req.query.q ?? ""),
+    allOrganizationsAvailable: pinAIAllOrganizationsAvailable(env),
     rolloutActive: env.PIN_AI_PROPERTY_ACTIVATION_ENABLED === "true" })));
   router.put(`${organizations}/:organizationId`, requireTrustedReviewMutationOrigin,
     wrap(req => setPinAIOrganization(db, actor(req), String(req.params.organizationId), req.body)));

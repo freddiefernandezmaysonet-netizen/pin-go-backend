@@ -12,9 +12,13 @@ export type ConnectDebitProvider = {
   reconcile?(fee: PinAIReservationFee, now: Date): Promise<{ payments: ConnectDebitPayment[]; complete: boolean }>;
 };
 export class ConnectDebitInsufficientBalanceError extends Error {}
+export function pinAIAllOrganizationsAvailable(env: ActivationEnvironment) {
+  return env.PIN_AI_ALL_ORGANIZATIONS_ENABLED === "true";
+}
 export function pinAIConnectBillingAllows(env: ActivationEnvironment, organizationId: string) {
   const ids = (env.PIN_AI_CONNECT_DEBIT_ORGANIZATION_IDS ?? "").split(",").map(s => s.trim()).filter(Boolean);
-  return env.PIN_AI_CONNECT_DEBIT_ENABLED === "true" && !ids.includes("*") && ids.includes(organizationId);
+  return !!organizationId && env.PIN_AI_CONNECT_DEBIT_ENABLED === "true" &&
+    (pinAIAllOrganizationsAvailable(env) || (!ids.includes("*") && ids.includes(organizationId)));
 }
 export const pinAIConnectDebitKey = (id: string, generation = 0) =>
   `pin-ai-connect-fee-v1:${createHash("sha256").update(id).digest("hex")}:${generation}`;
