@@ -10,7 +10,7 @@ async function harness(t: test.TestContext, role = "ORG_ADMIN", actorOrg = "org-
   const old = process.env.CI; process.env.CI = "true";
   t.after(() => { if (old === undefined) delete process.env.CI; else process.env.CI = old; });
   const organization = { id: "org-a", name: "Synthetic", pinAIEnabled: true, pinAIRevision: 1, stripeConnectAccountId: "acct_host" };
-  const property = { id: "property-a", name: "Synthetic", organizationId: "org-a", status: "ACTIVE", pinAIEnabled: false, pinAIRevision: 0, organization, pinAITermsVersion: null, pinAITermsAcceptedAt: null, pinAITermsAcceptedBy: null };
+  const property = { id: "property-a", name: "Synthetic", organizationId: "org-a", status: "ACTIVE", pinAIEnabled: false, pinAIRevision: 0, pinAIFeeExempt: false, organization, pinAITermsVersion: null, pinAITermsAcceptedAt: null, pinAITermsAcceptedBy: null };
   const events: unknown[] = [];
   const tx = {
     dashboardUser: { findFirst: async ({ where }: any) => active && where.id === "host-a" && where.organizationId === actorOrg && where.role.in.includes(role) ? { id: "host-a" } : null },
@@ -49,6 +49,19 @@ async function harness(t: test.TestContext, role = "ORG_ADMIN", actorOrg = "org-
 }
 const path = "/api/dashboard/properties/property-a/pin-ai-settings";
 const update = { enabled: true, expectedRevision: 0, organizationRevision: 1, acceptedTermsVersion: PIN_AI_BILLING_TERMS.version };
+
+test("fee exemption is disclosed on read and save but cannot be self-granted by a host", async t => {
+  const h = await harness(t);
+  assert.equal((await (await h.request(path)).json()).billing.exempt, false);
+  h.property.pinAIFeeExempt = true;
+  assert.equal((await (await h.request(path)).json()).billing.exempt, true);
+  assert.equal((await h.request(path, { ...update, pinAIFeeExempt: false })).status, 400);
+  assert.equal(h.events.length, 0);
+  const saved = await (await h.request(path, update)).json();
+  assert.equal(saved.billing.exempt, true);
+  assert.equal(h.property.pinAIFeeExempt, true);
+  assert.equal(saved.billing.amountCents, PIN_AI_BILLING_TERMS.amountCents);
+});
 
 for (const [role, active, status] of [["", true, 401], ["MEMBER", true, 403], ["ORG_ADMIN", false, 403]] as const) {
   test(`activation rejects missing/revoked authority: ${role || "unauthenticated"}/${active}`, async t => {

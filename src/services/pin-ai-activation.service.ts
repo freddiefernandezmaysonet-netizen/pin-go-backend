@@ -10,7 +10,7 @@ type Actor = { id: string; orgId: string; role?: string };
 type Tx = Prisma.TransactionClient;
 const reject = (status: number, code: string): never => { throw new PinAIActivationError(status, code); };
 const orgSelect = { id: true, name: true, pinAIEnabled: true, pinAIRevision: true, stripeConnectAccountId: true } as const;
-const propertySelect = { id: true, name: true, pinAIEnabled: true, pinAIRevision: true,
+const propertySelect = { id: true, name: true, pinAIEnabled: true, pinAIRevision: true, pinAIFeeExempt: true,
   pinAITermsVersion: true, pinAITermsAcceptedAt: true, pinAITermsAcceptedBy: true,
   organization: { select: orgSelect } } as const;
 
@@ -45,7 +45,8 @@ function propertyView(row: Prisma.PropertyGetPayload<{ select: typeof propertySe
     commercialIncidentRuntimeReady(env) && pinAIConnectBillingAllows(env, row.organization.id) &&
     env.PIN_AI_RESERVATION_FEE_RECORDING_ENABLED === "true" && !!row.organization.stripeConnectAccountId;
   return { propertyId: row.id, name: row.name, enabled: row.pinAIEnabled, revision: row.pinAIRevision,
-    billing: { ...PIN_AI_BILLING_TERMS, acceptedAt: row.pinAITermsAcceptedAt, acceptedVersion: row.pinAITermsVersion,
+    billing: { ...PIN_AI_BILLING_TERMS, exempt: row.pinAIFeeExempt === true,
+      acceptedAt: row.pinAITermsAcceptedAt, acceptedVersion: row.pinAITermsVersion,
       collectionReady: pinAIConnectBillingAllows(env, row.organization.id) &&
         env.PIN_AI_RESERVATION_FEE_RECORDING_ENABLED === "true" && !!row.organization.stripeConnectAccountId },
     organization: { enabled: organizationAvailable(row, env), revision: row.organization.pinAIRevision },
