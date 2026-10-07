@@ -12,6 +12,7 @@ on:
       - "src/pin-ai/guest/guest-availability.ts"
       - "src/services/internal-demo-scope.ts"
       - "src/channex-messaging/pin-ai-commercial*"
+      - "src/pin-ai/ota-commercial.database.test.ts"
       - "src/pin-ai/guest/guest-incident*"
       - "src/pin-ai/host/host-incident*"
       - "prisma/**"
@@ -63,4 +64,4 @@ jobs:
       - name: Certify concurrent accrual and uncertain payment recovery
         run: node --import tsx --test src/pin-ai/fee-connect.native.database.test.ts
       - name: Certify commercial OTA consent, single fee and incident history
-        run: node --import tsx --test src/channex-messaging/pin-ai-commercial.database.test.ts
+        run: node --import tsx --test src/pin-ai/ota-commercial.database.test.ts
