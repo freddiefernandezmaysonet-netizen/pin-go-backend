@@ -1,0 +1,52 @@
+{
+  "apiVersion": "2026-09-30.preview",
+  "account": "acct_1SmdRdRzkK1jKKf3",
+  "item": {
+    "id": "ii_1UNcRvRzkK1jKKf3YxA0hMFL",
+    "amount": 100,
+    "currency": "usd",
+    "customer": "cus_VOPFHvBWACf0Or",
+    "invoice": "in_1UNcSvRzkK1jKKf36UVRXr1J",
+    "parent": {
+      "subscription_details": {
+        "subscription": "sub_1UNcRdRzkK1jKKf3UlDqHIjw"
+      },
+      "type": "subscription_details"
+    },
+    "metadata": {
+      "organizationId": "qa-org-20261006",
+      "pinAIReservationId": "qa-pin-ai-20261006",
+      "pinAITermsVersion": "pin-ai-usd-1-reservation-v1",
+      "propertyId": "qa-property-20261006",
+      "synthetic": "true"
+    },
+    "livemode": false,
+    "discountable": false
+  },
+  "invoice": {
+    "id": "in_1UNcSvRzkK1jKKf36UVRXr1J",
+    "currency": "usd",
+    "customer": "cus_VOPFHvBWACf0Or",
+    "parent": {
+      "quote_details": null,
+      "subscription_details": {
+        "metadata": {
+          "pin_ai_qa": "20261006",
+          "synthetic": "true"
+        },
+        "subscription": "sub_1UNcRdRzkK1jKKf3UlDqHIjw"
+      },
+      "type": "subscription_details"
+    },
+    "status": "open",
+    "amount_remaining": 100,
+    "amount_paid": 0,
+    "status_transitions": {
+      "finalized_at": 1791309026,
+      "marked_uncollectible_at": null,
+      "paid_at": null,
+      "voided_at": null
+    },
+    "livemode": false
+  }
+}

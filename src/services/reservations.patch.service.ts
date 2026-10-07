@@ -1,3 +1,4 @@
+import { capturePinAIReservationService } from "../pin-ai/reservation-service-evidence.js";
 import type { Request, Response } from 'express';
 import {
   AccessMethod,
@@ -108,6 +109,8 @@ export async function patchReservationHandler(req: Request, res: Response) {
         if (currentReservation.status === ReservationStatus.CANCELLED) {
           return;
         }
+
+        await capturePinAIReservationService(tx, currentReservation.id, process.env, new Date(cancelledAt.getTime() - 1));
 
         const cancellationUpdate = await tx.reservation.updateMany({
           where: {

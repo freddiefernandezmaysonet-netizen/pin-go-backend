@@ -62,6 +62,10 @@ jobs:
             exit 0
           fi
           # PR #353 only: exact reviewed cleaner-access candidate; retain all OTA certifications.
+          if [ "${GITHUB_HEAD_REF:-}" = "agent/pin-ai-property-activation-v1" ]; then
+            python3 scripts/verify-pin-ai-activation-pr-scope.py
+            exit 0
+          fi
           if [ "${GITHUB_HEAD_REF:-}" = "agent/cleaner-access-window-v2" ]; then
             git diff --check "$BASE_SHA"...HEAD
             git diff --name-only "$BASE_SHA"...HEAD | sort > "$RUNNER_TEMP/actual.txt"

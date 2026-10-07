@@ -62,6 +62,18 @@ jobs:
           if [ -f "$arrival_migration" ] && ! git cat-file -e "$BASE_SHA:$arrival_migration" 2>/dev/null; then
             npx prisma db execute --file "$arrival_migration" --schema prisma/schema.prisma
           fi
+          # Apply candidate activation/billing additions to this disposable base.
+          for migration in \
+            prisma/migrations/20261006170000_pin_ai_property_activation/migration.sql \
+            prisma/migrations/20261006173000_pin_ai_billing_acceptance/migration.sql \
+            prisma/migrations/20261006174000_pin_ai_reservation_fee/migration.sql \
+            prisma/migrations/20261006180000_pin_ai_fee_invoice_export/migration.sql \
+            prisma/migrations/20261006193000_pin_ai_connect_debit/migration.sql \
+            prisma/migrations/20261006200000_pin_ai_service_enrollment/migration.sql; do
+            if [ -f "$migration" ] && ! git cat-file -e "$BASE_SHA:$migration" 2>/dev/null; then
+              npx prisma db execute --file "$migration" --schema prisma/schema.prisma
+            fi
+          done
           npx prisma generate
       - name: Host foundation unit and PostgreSQL API tests
         run: node --import tsx --test src/pin-ai/host/*.test.ts

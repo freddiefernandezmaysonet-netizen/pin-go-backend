@@ -112,6 +112,10 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+          if [ "${GITHUB_HEAD_REF:-}" = "agent/pin-ai-property-activation-v1" ]; then
+            python3 scripts/verify-pin-ai-activation-pr-scope.py
+            exit 0
+          fi
           # PR #345: exact arrival-location snapshot; all runtime certifications remain enabled.
           if [ "${GITHUB_HEAD_REF:-}" = "agent/property-arrival-unit-v1" ]; then
             python3 scripts/verify-arrival-location-pr-scope.test.py

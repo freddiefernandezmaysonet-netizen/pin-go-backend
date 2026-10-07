@@ -1,3 +1,4 @@
+import { capturePinAIReservationService } from "../pin-ai/reservation-service-evidence.js";
 ﻿import {
   PrismaClient,
   PaymentState,
@@ -291,6 +292,10 @@ export async function ingestReservation(p: IngestPayload) {
       externalRaw: p.externalRaw ?? null,
       status: p.status ?? undefined,
     });
+
+    if (didChange) {
+      await capturePinAIReservationService(tx, reservation.id);
+    }
 
     if (externalProvider === "CHANNEX") {
       await recordChannexAvailabilityConflict(tx, { reservationId: reservation.id, revision: p.externalUpdatedAt ?? null });

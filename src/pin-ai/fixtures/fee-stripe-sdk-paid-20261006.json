@@ -1,0 +1,51 @@
+{
+  "run": "0c6117e6-296b-42d0-a887-0e4af60cf6a4",
+  "railwayDeployment": "d961fcc4-a9e0-4b6e-9586-604cbcb33269",
+  "sdk": "14.25.0",
+  "sdkApiVersion": "2023-10-16",
+  "sdkRuntime": "Bun 1.4.0",
+  "sameItemOnRetry": true,
+  "webhookDeliveryCertified": false,
+  "nativePostgresCertified": false,
+  "subscriptionCleanup": "canceled",
+  "priceCleanup": "inactive",
+  "invoice": {
+    "id": "in_1UNd5pRzkK1jKKf3IYWGAhfp",
+    "customer": "cus_VOPvcVyfOihsnD",
+    "parent": {
+      "quote_details": null,
+      "subscription_details": {
+        "metadata": {
+          "pin_ai_qa": "0c6117e6-296b-42d0-a887-0e4af60cf6a4",
+          "synthetic": "true"
+        },
+        "subscription": "sub_1UNd5nRzkK1jKKf3KDNIMD7b"
+      },
+      "type": "subscription_details"
+    },
+    "status": "paid",
+    "currency": "usd",
+    "amount_paid": 100,
+    "amount_remaining": 0,
+    "status_transitions": {
+      "finalized_at": 1791311281,
+      "marked_uncollectible_at": null,
+      "paid_at": 1791311283,
+      "voided_at": null
+    },
+    "livemode": false,
+    "metadata": {
+      "pin_ai_qa": "0c6117e6-296b-42d0-a887-0e4af60cf6a4",
+      "synthetic": "true"
+    }
+  },
+  "charge": {
+    "id": "ch_3UNd5qRzkK1jKKf31QR6PJwz",
+    "customer": "cus_VOPvcVyfOihsnD",
+    "amount": 100,
+    "currency": "usd",
+    "paid": true,
+    "status": "succeeded",
+    "livemode": false
+  }
+}

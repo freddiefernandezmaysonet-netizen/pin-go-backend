@@ -102,6 +102,7 @@ import { dashboardPayoutsRouter } from "./routes/dashboard-payouts.routes";
 import { dashboardCancellationPolicyRouter } from "./routes/dashboard.cancellation-policy.routes";
 import { buildDashboardPropertyKnowledgeRouter } from "./routes/dashboard.property-knowledge.routes";
 import { buildDashboardStayTimeSettingsRouter } from "./routes/dashboard.stay-time-settings.routes.js";
+import { buildPinAIActivationRouter } from "./routes/dashboard.pin-ai-activation.routes.js";
 import {
   hostnameFromSecureRequestOrigin,
   isPublishedBrandOriginAllowed,
@@ -369,6 +370,7 @@ app.use(dashboardPayoutsRouter);
 app.use(dashboardCancellationPolicyRouter);
 app.use(buildDashboardPropertyKnowledgeRouter(prisma));
 app.use(buildDashboardStayTimeSettingsRouter(prisma));
+app.use(buildPinAIActivationRouter(prisma));
 app.use(dashboardReviewsRouter);
 
 if (process.env.NODE_ENV !== "production") {
