@@ -79,6 +79,8 @@ import {
   runGuestJourneyCommunicationsOwnerCycle,
 } from "../services/guest-journey-communications-owner-cycle.service";
 import { runCleaningFollowupClaimCycle } from "../services/cleaning-followup-cycle.service.js";
+import { runPinAIConnectBillingCycle } from "../pin-ai/fee-connect-cycle.service.js";
+import { createPinAIConnectStripeProvider } from "../pin-ai/fee-connect-stripe.provider.js";
 import { createCleaningFollowupCycleRepository } from "../services/cleaning-followup-cycle.prisma.js";
 import { createCleaningFollowupReceiptStore } from "../services/cleaning-followup-receipt.prisma.js";
 import { shouldRunCleaningFollowupClaimCycle } from "../services/cleaning-followup-cadence.policy.js";
@@ -2632,6 +2634,7 @@ let tickRunning = false;
 let cleaningRecoveryRunning = false;
 let lastGuestAccessAdmissionSafetyAt = 0;
 let lastGuestAccessAmbiguityE15At = 0;
+let lastPinAIConnectBillingAt = 0;
 
 async function tick() {
   if (shuttingDown) return;
@@ -2653,6 +2656,19 @@ async function tick() {
       void processCleaningIssueRecoveries(prisma, now)
         .catch(e => errLog("cleaning issue recovery crashed:", toErrString(e)))
         .finally(() => { cleaningRecoveryRunning = false; });
+    }
+
+    if (process.env.PIN_AI_CONNECT_DEBIT_ENABLED === "true" &&
+      now.getTime() - lastPinAIConnectBillingAt >= 60_000) {
+      lastPinAIConnectBillingAt = now.getTime();
+      try {
+        const { default: stripe } = await import("../billing/stripe.js");
+        const result = await runPinAIConnectBillingCycle(prisma,
+          createPinAIConnectStripeProvider(stripe), process.env, now);
+        if (result.recorded || result.attempted || result.failures) log("pin-ai-connect-billing", result);
+      } catch {
+        log("pin-ai-connect-billing: cycle failed; pending fees will retry");
+      }
     }
 
     if (shouldRunCleaningFollowupClaimCycle({
@@ -3374,4 +3390,3 @@ void start().catch((e) => {
 });
    
   
-

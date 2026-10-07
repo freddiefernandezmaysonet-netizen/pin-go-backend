@@ -1,3 +1,4 @@
+import { getIdentityCheckFeeCents } from "../services/identity-check-billing-consent.js";
 import { buildPublicStaysSitemapRouter } from "./public-stays-sitemap.routes.js";
 import { Router } from "express";
 import type Stripe from "stripe";
@@ -341,17 +342,6 @@ function getDirectBookingPlatformFeeCents(totalAmountCents: number) {
   return Math.min(Math.max(0, feeCents), totalAmountCents);
 }
 
-function getIdentityCheckFeeCents() {
-  const rawAmount = Number(
-    process.env.DIRECT_BOOKING_PROTECTION_FEE_AMOUNT ?? "2.50"
-  );
-
-  if (!Number.isFinite(rawAmount) || rawAmount < 0) {
-    throw new Error("DIRECT_BOOKING_PROTECTION_FEE_AMOUNT_INVALID");
-  }
-
-  return Math.round(rawAmount * 100);
-}
 
 function toMoneyFromCents(cents: number) {
   return Number((cents / 100).toFixed(2));
@@ -1890,7 +1880,7 @@ const guestAcceptedSecurePreCheckinRequirementText =
       ],
       success_url:
         `${APP_URL}/booking/success?organization=${encodeURIComponent(
-          property.organization.slug
+          String(property.organization.slug)
         )}&identityCheck=${
           identityVerificationRequired
             ? "required"

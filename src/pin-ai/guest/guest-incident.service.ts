@@ -1,11 +1,12 @@
 import { readInternalDemo, demoIncidentEnvironment } from "../../services/internal-demo-scope.js";
+import { commercialPinAIEnabled, commercialIncidentRuntimeReady } from "../property-activation.js";
 import { resolveInternalDemoPrimaryAdmin } from "../../services/internal-demo-primary-admin.service.js";
 import { randomUUID } from "node:crypto";
 import type { PrismaClient, Prisma } from "@prisma/client";
 import { upsertOperationalIssue } from "../../apms/operational-intelligence.service.js";
 import type { PinAIRuntimeRequest } from "../runtime/contracts.js";
 import { readGuestMessages } from "./guest-history.js";
-import { autoConfig } from "../../channex-messaging/pin-ai-auto.policy.js";
+import { channelPropertyEnabled } from "../../channex-messaging/pin-ai-commercial.policy.js";
 import { guestIncidentRecipientWhere } from "./guest-incident-recipient-policy.js";
 import { GUEST_INCIDENT_NOTICE, guestIncidentEnabled, incidentNotificationState, parseIncidentInput,
   type GuestIncidentReceipt, type IncidentEnvironment } from "./guest-incident-policy.js";
@@ -21,12 +22,16 @@ export async function handleGuestIncident(input: {
   const env = demo ? demoIncidentEnvironment(input.env, request.context.organizationId, demo.id) : input.env;
   const scope = request.context;
   const channel = input.channel;
-  if (channel ? (!!guestToken || !autoConfig(env).allows(scope)) : (!guestToken || !guestIncidentEnabled(scope.reservationId, env))) {
+  const commercial = demo ? null : await commercialPinAIEnabled(prisma, env, scope);
+  if (channel ? (!!guestToken || !await channelPropertyEnabled(prisma, env, scope)) : (!guestToken || !(commercial === null
+    ? guestIncidentEnabled(scope.reservationId, env) : commercial && commercialIncidentRuntimeReady(env)))) {
     throw new Error("PIN_AI_INCIDENT_DISABLED");
   }
   const command = parseIncidentInput(input.args);
   const now = input.now ?? new Date();
   return prisma.$transaction(async tx => {
+    if (channel && !await channelPropertyEnabled(tx, env, scope)) throw new Error("PIN_AI_INCIDENT_DISABLED");
+    if (!demo && !channel && await commercialPinAIEnabled(tx, env, scope) === false) throw new Error("PIN_AI_INCIDENT_DISABLED");
     // Reauthorize the bearer token and canonical tenant on every read/write.
     const reservation = await tx.reservation.findFirst({ where: {
       id: scope.reservationId, propertyId: scope.propertyId,
@@ -99,6 +104,7 @@ export async function handleGuestIncident(input: {
         actionTarget: "RESERVATION", sourceType: "PIN_AI", transitionCode: "GUEST_INCIDENT_RECORDED",
         transitionSummary: "Guest report recorded; cause and resolution remain unverified.", transitionedBy: "GUEST",
         occurredAt: now, metadata: { reference, category: command.category, quotes, guestReported: true,
+          ...(commercial === true ? { commercialActivation: true } : {}),
           diagnosisVerified: false, ...(demo ? { internalDemo: true } : {}), ...(isNew ? {} : { firstReportPreserved: true }),
           ...(channel ? { channelSource: "CHANNEX", channelThreadId: channel.threadId, channelBookingId: channel.bookingId,
             channelReportMessages: [...new Set([...(isNew || !Array.isArray(prior?.channelReportMessages) ? [] : prior.channelReportMessages as string[]), channel.messageId])] }

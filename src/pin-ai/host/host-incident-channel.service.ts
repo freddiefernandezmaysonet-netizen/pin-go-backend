@@ -1,6 +1,7 @@
 import type { Prisma, PrismaClient, MessageLog } from "@prisma/client";
 import { validId } from "../../channex-messaging/host-inbox.js";
 import { autoConfig } from "../../channex-messaging/pin-ai-auto.policy.js";
+import { commercialIncidentHistoryAllowed } from "../property-activation.js";
 import { guestIncidentRecipientWhere } from "../guest/guest-incident-recipient-policy.js";
 import { fail, openHostContent, type HostEnvironment } from "./host-incident-policy.js";
 import type { buildHostInboxRuntime } from "../../channex-messaging/host-inbox.runtime.js";
@@ -37,6 +38,9 @@ export async function deliverIncidentChannelUpdate(input: {
   const { prisma, env, message: m, runtime } = input;
   if (!m.organizationId || !m.propertyId || !m.reservationId || !autoConfig(env).allows({ organizationId: m.organizationId, propertyId: m.propertyId })) return "DISABLED";
   const scope = { organizationId: m.organizationId, propertyId: m.propertyId };
+  // A host-approved update to an existing incident remains deliverable after
+  // disabling new AI replies; tenant/actor/thread checks below still apply.
+  if (autoConfig(env).managed && !await commercialIncidentHistoryAllowed(prisma, env, scope)) return "DISABLED";
   let claimedSend = false;
   const finish = async (status: string, error: string | null, providerMessageId?: string) => {
     await prisma.messageLog.updateMany({ where: { id: m.id, status: claimedSend ? "SENDING" : m.status },

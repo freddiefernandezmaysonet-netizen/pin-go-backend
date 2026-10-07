@@ -427,6 +427,10 @@ test("Demo Direct Booking parity uses canonical reservation numbers, guest porta
     new URL("./organization-guest-email.service.ts", import.meta.url),
     "utf8"
   );
+  const hostRecipientSource = await readFile(
+    new URL("./direct-booking-host-recipient.service.ts", import.meta.url),
+    "utf8"
+  );
 
   assert.match(paritySource, /generateReservationNumber\(prisma\)/);
   assert.match(
@@ -447,8 +451,9 @@ test("Demo Direct Booking parity uses canonical reservation numbers, guest porta
   );
   assert.match(
     directBookingSource,
-    /resolveOrganizationPrimaryAdmin\(/
+    /resolveDirectBookingHostRecipient\(/
   );
+  assert.match(hostRecipientSource, /resolveOrganizationPrimaryAdmin\(/);
   assert.match(
     organizationEmailSource,
     /role:\s*DashboardUserRole\.ORG_ADMIN[\s\S]*createdAt:\s*"asc"/

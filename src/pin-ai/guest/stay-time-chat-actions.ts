@@ -1,3 +1,4 @@
+import { commercialStayTimeChatEnabled } from "./stay-time-commercial-policy.js";
 import { formatInTimeZone } from "date-fns-tz";
 import type { PrismaClient } from "@prisma/client";
 import type { PinAIActionBrokerPrepareResult, PinAIActionBrokerExecuteResult } from "../actions/action-broker.service.js";
@@ -38,7 +39,7 @@ export function createStayTimeChatActions(deps: Dependencies) {
       select: { id: true, propertyId: true, property: { select: { organizationId: true, timezone: true } } },
     });
     if (!reservation) reject("STAY_TIME_RESERVATION_NOT_FOUND");
-    if (!stayTimeChatEnabled(reservation.id, deps.env)) reject("STAY_TIME_CHAT_DISABLED");
+    if (!await commercialStayTimeChatEnabled(deps.client, deps.env, { reservationId: reservation.id, propertyId: reservation.propertyId, organizationId: reservation.property.organizationId }, deps.now())) reject("STAY_TIME_CHAT_DISABLED");
     if (!reservation.property.timezone) reject("STAY_TIME_TIMEZONE_REQUIRED");
     return reservation;
   }

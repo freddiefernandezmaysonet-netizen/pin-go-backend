@@ -1,4 +1,5 @@
 import { INTERNAL_DEMO_PROPERTY_ID, readInternalDemo, demoIncidentEnvironment } from "../../services/internal-demo-scope.js";
+import { commercialIncidentHistoryAllowed, commercialIncidentPropertyIds, commercialIncidentRuntimeReady } from "../property-activation.js";
 import { resolveInternalDemoPrimaryAdmin } from "../../services/internal-demo-primary-admin.service.js";
 import type { PrismaClient, MessageLog } from "@prisma/client";
 import { sendGuestIncidentHostNotice } from "../../lib/mailer.js";
@@ -41,8 +42,14 @@ export async function deliverGuestIncidentNotice(input: {
     ? await readInternalDemo(prisma, { reservationId: m.reservationId, organizationId: m.organizationId, propertyId: m.propertyId }) : null;
   const env = demo ? demoIncidentEnvironment(input.env, m.organizationId!, demo.id) : input.env;
   const now = input.now ?? new Date();
-  const portalEnabled = env.PIN_AI_INCIDENT_NOTIFICATIONS_ENABLED === "true" && guestIncidentEnabled(m.reservationId ?? "", env);
-  const channelEnabled = autoConfig(env).allows({ organizationId: m.organizationId ?? "", propertyId: m.propertyId ?? "" });
+  const commercial = m.organizationId && m.propertyId && commercialIncidentRuntimeReady(env) &&
+    await commercialIncidentHistoryAllowed(prisma, env, { organizationId: m.organizationId, propertyId: m.propertyId });
+  const portalEnabled = env.PIN_AI_INCIDENT_NOTIFICATIONS_ENABLED === "true" &&
+    (guestIncidentEnabled(m.reservationId ?? "", env) || commercial);
+  const channelConfig = autoConfig(env);
+  const channelEnabled = channelConfig.allows({ organizationId: m.organizationId ?? "", propertyId: m.propertyId ?? "" }) &&
+    (!channelConfig.managed || !!(m.organizationId && m.propertyId && await commercialIncidentHistoryAllowed(prisma, env,
+      { organizationId: m.organizationId, propertyId: m.propertyId })));
   if (!portalEnabled && !channelEnabled) return "DISABLED";
   const expected = { id: m.id, body: m.body, status: m.status, retryCount: m.retryCount,
     providerDeliveryStatus: m.providerDeliveryStatus, providerMessageId: m.providerMessageId };
@@ -74,6 +81,7 @@ export async function deliverGuestIncidentNotice(input: {
     id: payload.issueId, organizationId: m.organizationId, propertyId: m.propertyId, reservationId: m.reservationId,
     engine: "PIN_AI_GUEST_INCIDENT", visibility: "HOST",
   } });
+  if ((issue?.metadata as Record<string, unknown> | null)?.channelSource === "CHANNEX" && !channelEnabled) return "DISABLED";
   if (!portalEnabled && (issue?.metadata as Record<string, unknown> | null)?.channelSource !== "CHANNEX") return "DISABLED";
   const reservation = await prisma.reservation.findFirst({ where: {
     id: m.reservationId ?? "", propertyId: m.propertyId ?? "", status: "ACTIVE", checkOut: { gt: now },
@@ -130,11 +138,13 @@ export async function processGuestIncidentNotices(prisma: PrismaClient, env: Inc
   const portalEnabled = env.PIN_AI_INCIDENT_ENABLED === "true" && env.PIN_AI_INCIDENT_NOTIFICATIONS_ENABLED === "true" && parsed.valid && parsed.ids.size > 0;
   const channelEnabled = autoConfig(env).enabled;
   const demoEnabled = env.PIN_AI_INCIDENT_ENABLED === "true" && env.PIN_AI_INCIDENT_NOTIFICATIONS_ENABLED === "true";
-  if (!portalEnabled && !channelEnabled && !demoEnabled) return;
+  const commercialProperties = demoEnabled && commercialIncidentRuntimeReady(env) ? await commercialIncidentPropertyIds(prisma, env) : [];
+  if (!portalEnabled && !channelEnabled && !demoEnabled && !commercialProperties.length) return;
   const rows = await prisma.messageLog.findMany({ where: {
     communicationType: GUEST_INCIDENT_NOTICE, provider: "resend", channel: "email",
     AND: [{ OR: [
       { reservationId: { in: portalEnabled ? [...parsed.ids] : [] } },
+      { propertyId: { in: commercialProperties } },
       ...(demoEnabled ? [{ propertyId: INTERNAL_DEMO_PROPERTY_ID }] : []),
       ...(channelEnabled ? [{ organizationId: { in: (env.PIN_AI_CHANNEX_AUTO_ORGANIZATION_IDS ?? "").split(",").map(s => s.trim()) },
         propertyId: { in: (env.PIN_AI_CHANNEX_AUTO_PROPERTY_IDS ?? "").split(",").map(s => s.trim()) } }] : []),

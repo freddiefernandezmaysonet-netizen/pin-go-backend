@@ -5,6 +5,8 @@
     "types": ["node"]
   },
   "files": [
+    "src/services/cleaning-pin-ai-activation.service.test.ts",
+    "src/services/cleaning-issue-recovery.service.test.ts",
     "src/services/cleaning-issue-recovery.database.test.ts",
     "src/services/cleaning-issue-recovery.service.ts",
     "src/services/cleaner-access-extension.service.ts",

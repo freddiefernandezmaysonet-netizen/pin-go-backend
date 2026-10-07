@@ -1,6 +1,8 @@
 import type { Prisma, PrismaClient } from "@prisma/client";
 import { assessLatestCleaningIssue } from "./cleaning-issue-assessment.service.js";
 
+import { cleaningPinAIRecoveryAllowed } from "./cleaning-pin-ai-activation.service.js";
+
 export class CleanerAccessExtensionPlanError extends Error {
   constructor(public code: string) { super(code); }
 }
@@ -24,6 +26,7 @@ export async function prepareCleanerAccessExtensionInTransaction(tx: Prisma.Tran
     if (work.cancelledAt || work.supersededAt || work.completionConfirmedAt || !work.startConfirmedAt || report.kind !== "MORE_TIME") return reject("CLEANER_EXTENSION_WORK_NOT_ELIGIBLE");
     const reservation = await tx.reservation.findFirst({ where: { id: work.reservationId, propertyId: work.propertyId, status: "ACTIVE", property: { organizationId: scope.organizationId, status: "ACTIVE" } }, include: { property: true } });
     if (!reservation) return reject("CLEANER_EXTENSION_SCOPE_INVALID");
+    if (!await cleaningPinAIRecoveryAllowed(tx, { propertyId: work.propertyId, organizationId: scope.organizationId }, now)) return reject("CLEANER_EXTENSION_PIN_AI_NOT_AUTHORIZED");
     const offers = await tx.cleaningConfirmation.findMany({ where: { reservationId: work.reservationId, propertyId: work.propertyId, status: { in: ["PENDING", "CONFIRMED"] } }, take: 2 });
     if (offers.length !== 1 || offers[0].id !== work.confirmationId || offers[0].status !== "CONFIRMED" || offers[0].staffMemberId !== work.staffMemberId) return reject("CLEANER_EXTENSION_ASSIGNMENT_CHANGED");
     const latest = await tx.cleaningWorkIssueReport.findFirst({ where: { cleaningWorkId: work.id }, orderBy: [{ reportedAt: "desc" }, { id: "desc" }] });

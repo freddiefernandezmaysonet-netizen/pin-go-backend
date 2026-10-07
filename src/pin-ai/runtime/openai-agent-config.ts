@@ -30,6 +30,7 @@ export const PIN_AI_OPENAI_AGENT_INSTRUCTIONS = [
 export type PinAIOpenAIActionProposalConfig = Readonly<{
   enabled: boolean;
   stayTimeEnabled?: boolean;
+  dateChangesEnabled?: boolean;
 }>;
 
 export type PinAIOpenAIWebSearchConfig = Readonly<{
@@ -61,8 +62,12 @@ export function buildPinAIOpenAIInstructions(
 
   return [
     localizedBase,
-    "When the guest clearly wants to proceed with an eligible stay date change or extension, use prepare_reservation_modification only after you have enough exact date information.",
-    "For a stay already in progress, a checkout extension must use operation EXTEND_CHECKOUT_ONLY and the exact proposedCheckOutDate. Omit proposedCheckInDate: the server preserves the stored check-in. Do not ask for a new check-in when the guest only wants to extend checkout. Pre-stay date changes still require both exact dates.",
+    ...(actionProposal.dateChangesEnabled === false ? [
+      "This session can prepare early check-in or late checkout only. Ordinary date changes and additional-night extensions are unavailable; do not offer to prepare them.",
+    ] : [
+      "When the guest clearly wants to proceed with an eligible stay date change or extension, use prepare_reservation_modification only after you have enough exact date information.",
+      "For a stay already in progress, a checkout extension must use operation EXTEND_CHECKOUT_ONLY and the exact proposedCheckOutDate. Omit proposedCheckInDate: the server preserves the stored check-in. Do not ask for a new check-in when the guest only wants to extend checkout. Pre-stay date changes still require both exact dates.",
+    ]),
     "The proposal tool creates a reviewable quote only. It does not modify the reservation, hold dates, collect payment, or charge the guest.",
     "If a proposal is prepared, state the exact quote expiration returned by the tool, state that availability is not held and will be checked again, and ask the guest to use the confirmation control shown in the interface.",
     "Never ask the guest to type or repeat a confirmation token. Never mention or infer any private confirmation credential.",
@@ -101,11 +106,13 @@ export function buildPinAIOpenAITools(
       parameters:
         tool.name === "prepare_reservation_modification" && actionProposal?.stayTimeEnabled ? {
           type: "object", properties: {
-            operation: { type: "string", enum: ["EXTEND_CHECKOUT_ONLY", "EARLY_CHECKIN", "LATE_CHECKOUT"] },
+            operation: { type: "string", enum: actionProposal.dateChangesEnabled === false ? ["EARLY_CHECKIN", "LATE_CHECKOUT"] : ["EXTEND_CHECKOUT_ONLY", "EARLY_CHECKIN", "LATE_CHECKOUT"] },
+            ...(actionProposal.dateChangesEnabled === false ? {} : {
             proposedCheckInDate: { type: "string", description: "YYYY-MM-DD for a pre-stay date change only." },
             proposedCheckOutDate: { type: "string", description: "YYYY-MM-DD required for date changes and EXTEND_CHECKOUT_ONLY. Omit for stay-time operations." },
+            }),
             requestedLocalTime: { type: "string", description: "HH:MM required only for EARLY_CHECKIN or LATE_CHECKOUT, in the property timezone." },
-          }, additionalProperties: false,
+          }, ...(actionProposal.dateChangesEnabled === false ? { required: ["operation", "requestedLocalTime"] } : {}), additionalProperties: false,
         } :
         tool.name === "escalate_to_host" && incidentsEnabled ? {
           type: "object", properties: {

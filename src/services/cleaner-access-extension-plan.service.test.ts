@@ -1,6 +1,10 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { prepareCleanerAccessExtension } from "./cleaner-access-extension-plan.service.js";
+process.env.PIN_AI_CONNECT_DEBIT_ENABLED = "true";
+process.env.PIN_AI_PROPERTY_ACTIVATION_ENABLED = "true";
+process.env.PIN_AI_ALL_ORGANIZATIONS_ENABLED = "true";
+process.env.PIN_AI_RESERVATION_FEE_RECORDING_ENABLED = "true";
 const now = new Date("2026-10-07T19:00:00Z");
 const start = new Date(now.getTime() - 10 * 60000);
 const end = new Date(now.getTime() + 20 * 60000);
@@ -11,6 +15,8 @@ function fixture() {
   const receipt: any = { state: "ACKNOWLEDGED", acknowledgedAt: start, confirmationId: "offer", organizationId: "org", ttlockLockId: 42, ttlockCardId: 123, startsAt: start, endsAt: end };
   let latest: any = report; let next: any = null; let conflict: any = null; let offers: any[] = [{ id: "offer", staffMemberId: "staff", status: "CONFIRMED" }]; let locked = false;
   const tx: any = {
+    property: { findFirst: async () => ({ pinAIEnabled: true, pinAITermsVersion: "pin-ai-connect-usd-1-reservation-v1",
+      pinAITermsAcceptedAt: start, pinAITermsAcceptedBy: "host", organization: { pinAIEnabled: true, pinAIRevision: 1, stripeConnectAccountId: "acct_test" } }) },
     $queryRaw: async () => { locked = true; },
     cleaningWorkIssueReport: { findUnique: async () => report, findFirst: async () => latest },
     reservation: { findFirst: async (args: any) => args.where.id?.not ? next : args.where.property?.organizationId && args.where.property.organizationId !== "org" ? null : args.include?.property ? { id: "res", propertyId: "property", checkOut: start, source: "INTERNAL_DEMO_DIRECT_BOOKING", property: { status: "ACTIVE", organizationId: "org", cleaningStartOffsetMinutes: 0 } } : { checkOut: start } },

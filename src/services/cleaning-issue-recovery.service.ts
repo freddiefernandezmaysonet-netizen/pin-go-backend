@@ -5,8 +5,10 @@ import { offerBackupForIncompleteCleaning } from "./cleaning-reassignment.servic
 import { upsertOperationalIssue } from "../apms/operational-intelligence.service.js";
 import { queueCleaningHostAttentionNotice } from "./cleaning-followup-host-notice.service.js";
 
+import { cleaningPinAIRecoveryAllowed } from "./cleaning-pin-ai-activation.service.js";
+
 const defaults = { extend: extendCleanerAccess, backup: offerBackupForIncompleteCleaning,
-  assess: assessLatestCleaningIssue, persist: upsertOperationalIssue, notify: queueCleaningHostAttentionNotice };
+  assess: assessLatestCleaningIssue, allowed: cleaningPinAIRecoveryAllowed, persist: upsertOperationalIssue, notify: queueCleaningHostAttentionNotice };
 /** Internal deterministic Pin AI recovery. The guest-facing read tool never
  * executes this function or receives report text, card IDs or offer tokens. */
 export async function recoverCleaningIssue(db: PrismaClient, workId: string, now = new Date(), dependencies = defaults) {
@@ -31,6 +33,8 @@ export async function recoverCleaningIssue(db: PrismaClient, workId: string, now
       // The existing availability dispatcher owns quiet-hours urgency for all
       // offers, including cancellation backups. Do not duplicate its host issue.
     } else { state = "HOST_REVIEW_REQUIRED"; reason = "NO_VIABLE_BACKUP"; needsHost = true; }
+  } else if (!await dependencies.allowed(db, { propertyId: work.propertyId, organizationId: reservation.property.organizationId }, now)) {
+    state = "HOST_REVIEW_REQUIRED"; reason = "PIN_AI_NOT_ACTIVE_OR_CONSENTED"; needsHost = true;
   } else {
     const assessment = await db.$transaction(tx => dependencies.assess(tx, work, now));
     if (!assessment) return { state: "NO_REPORT" };

@@ -1,3 +1,5 @@
+import { identityCheckBillingTerms, validIdentityBillingConsent, resolveIdentityBillingConsent } from "../services/identity-check-billing-consent.js";
+import { requireTrustedReviewMutationOrigin } from "../services/reviews/review-route-security.js";
 import { Router } from "express";
 import {
   GuestAccessMode,
@@ -8,10 +10,13 @@ import {
   requireAuth,
 } from "../middleware/requireAuth";
 
-const prisma = new PrismaClient();
 
-export const dashboardGuestAccessSettingsRouter =
-  Router();
+
+export function buildGuestAccessSettingsRouter(prisma: PrismaClient) {
+const dashboardGuestAccessSettingsRouter = Router();
+dashboardGuestAccessSettingsRouter.use("/api/dashboard/properties/:propertyId/guest-access-settings", (_req, res, next) => {
+  res.setHeader("Cache-Control", "no-store"); next();
+});
 
 function cleanRequiredText(
   value: unknown,
@@ -182,6 +187,10 @@ dashboardGuestAccessSettingsRouter.get(
                 rulesEs: true,
                 guestFacingSummaryEn: true,
                 guestFacingSummaryEs: true,
+                identityBillingTermsVersion: true,
+                identityBillingAmountCents: true,
+                identityBillingAcceptedAt: true,
+                identityBillingAcceptedBy: true,
                 requiresIdentityVerification:
                   true,
                 requiresAgreementSignature:
@@ -207,6 +216,9 @@ dashboardGuestAccessSettingsRouter.get(
       return res.json({
         ok: true,
         settings: {
+          identityBilling: { ...identityCheckBillingTerms(),
+            accepted: validIdentityBillingConsent(activeAgreement, identityCheckBillingTerms()),
+            acceptedAt: activeAgreement?.identityBillingAcceptedAt ?? null },
           propertyId: property.id,
           propertyName: property.name,
           maxGuests: property.maxGuests,
@@ -241,6 +253,7 @@ dashboardGuestAccessSettingsRouter.get(
 dashboardGuestAccessSettingsRouter.put(
   "/api/dashboard/properties/:propertyId/guest-access-settings",
   requireAuth,
+  requireTrustedReviewMutationOrigin,
   async (req, res) => {
     try {
       const user = (req as any).user;
@@ -353,6 +366,11 @@ const rulesEs =
       const result =
         await prisma.$transaction(
           async (tx) => {
+            const actor = await tx.dashboardUser.findFirst({ where: { id: user.id, organizationId,
+              isActive: true, role: { in: ["PLATFORM_ADMIN", "ORG_ADMIN", "ADMIN"] } }, select: { id: true } });
+            if (!actor) throw new Error("IDENTITY_BILLING_FORBIDDEN");
+            // Serialize agreement replacement and its consent evidence for this tenant/property.
+            await tx.$queryRaw`SELECT "id" FROM "Property" WHERE "id" = ${propertyId} AND "organizationId" = ${organizationId} FOR UPDATE`;
             const property =
               await tx.property.findFirst({
                 where: {
@@ -399,8 +417,19 @@ const rulesEs =
                 }
               );
 
+            const terms = identityCheckBillingTerms();
+            if (requiresIdentityVerification && req.body?.expectedAgreementVersion !== (activeAgreement?.version ?? null)) {
+              throw new Error("GUEST_ACCESS_SETTINGS_CONFLICT");
+            }
+            const billingConsent = resolveIdentityBillingConsent({ existing: activeAgreement,
+              requiresIdentityVerification, acceptedTermsVersion: req.body?.acceptedIdentityBillingTermsVersion,
+              terms, actorId: actor.id, now: new Date() });
            const agreementUnchanged =
   Boolean(activeAgreement) &&
+  activeAgreement?.identityBillingTermsVersion === billingConsent.identityBillingTermsVersion &&
+  activeAgreement?.identityBillingAmountCents === billingConsent.identityBillingAmountCents &&
+  activeAgreement?.identityBillingAcceptedAt?.getTime() === billingConsent.identityBillingAcceptedAt?.getTime() &&
+  activeAgreement?.identityBillingAcceptedBy === billingConsent.identityBillingAcceptedBy &&
   activeAgreement?.title ===
     legacyTitle &&
   activeAgreement?.agreementText ===
@@ -494,6 +523,7 @@ const rulesEs =
                    data: {
                      propertyId,
                      version,
+                     ...billingConsent,
 
                      // Legacy compatibility fields.
                      title: legacyTitle,
@@ -509,7 +539,7 @@ const rulesEs =
                     agreementTextEn,
                     agreementTextEs,
                     rulesEn,
-                    rulesEs,
+                    rulesEs: rulesEs ?? Prisma.DbNull,
                     guestFacingSummaryEn,
                     guestFacingSummaryEs,
                     requiresIdentityVerification:
@@ -552,6 +582,9 @@ const rulesEs =
       return res.json({
         ok: true,
         settings: {
+          identityBilling: { ...identityCheckBillingTerms(),
+            accepted: validIdentityBillingConsent(result.activeAgreement, identityCheckBillingTerms()),
+            acceptedAt: result.activeAgreement.identityBillingAcceptedAt },
           propertyId:
             result.property.id,
           propertyName:
@@ -574,6 +607,9 @@ const rulesEs =
         error?.message ?? error
       );
 
+      if (code === "IDENTITY_BILLING_FORBIDDEN") return res.status(403).json({ ok: false, error: code });
+      if (code === "IDENTITY_BILLING_TERMS_REQUIRED") return res.status(428).json({ ok: false, error: code });
+      if (code === "GUEST_ACCESS_SETTINGS_CONFLICT") return res.status(409).json({ ok: false, error: code });
       if (code === "PROPERTY_NOT_FOUND") {
         return res.status(404).json({
           ok: false,
@@ -613,3 +649,7 @@ const rulesEs =
     }
   }
 );
+
+return dashboardGuestAccessSettingsRouter;
+}
+export const dashboardGuestAccessSettingsRouter = buildGuestAccessSettingsRouter(new PrismaClient());

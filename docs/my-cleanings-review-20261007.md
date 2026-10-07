@@ -52,7 +52,7 @@ Los grupos SQL se ejecutaron por separado en bases PGlite descartables. Un inten
 
 ## Lo que falta para publicar
 
-1. Revisar este flujo y el diff consolidado en las ramas aisladas. Comprobar compatibilidad con la rama de destino y los controles vigentes de activación de Pin AI.
+1. Revisar este flujo y el diff consolidado. La integración con los main indicados y los controles actuales de Pin AI está verificada localmente; consultar `my-cleanings-continuity.md`. Cambios posteriores en main requieren nueva revisión.
 2. Aplicar y comprobar migraciones en el entorno de certificación autorizado, con PostgreSQL nativo. Probar sesiones concurrentes: cancelar/programar, extensión/vencimiento y cambio de política/llegada durante una recuperación.
 3. Revisar visualmente en móvil y ejecutar una limpieza de certificación con tarjeta real: aceptación, programación anticipada, entrada dentro del período, botones, finalización y cierre de acceso. La variante respaldo debe comprobar su propia tarjeta.
 4. Solo después, autorizar incorporación y publicación controlada con posibilidad de volver a la versión previa.

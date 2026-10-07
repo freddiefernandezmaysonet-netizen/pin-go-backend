@@ -1,3 +1,4 @@
+import { cleaningPinAIRecoveryAllowed } from "./cleaning-pin-ai-activation.service.js";
 import { randomBytes } from "node:crypto";
 import { Prisma, type PrismaClient } from "@prisma/client";
 import { planCleanerAccessWindow } from "./cleaner-access-window.policy.js";
@@ -74,6 +75,8 @@ export async function offerBackupForIncompleteCleaning(db: PrismaClient,
   scope: Scope & { reportId: string }, now = new Date()) {
   return atomic(db, async tx => {
     const ctx = await context(tx, scope);
+    await tx.$queryRaw`SELECT "id" FROM "Property" WHERE "id" = ${ctx.reservation.propertyId} FOR UPDATE`;
+    if (!await cleaningPinAIRecoveryAllowed(tx, { propertyId: ctx.reservation.propertyId, organizationId: scope.organizationId }, now)) throw new CleaningReassignmentError("CLEANING_RECOVERY_PIN_AI_NOT_AUTHORIZED");
     const report = await tx.cleaningWorkIssueReport.findUnique({ where: { id: scope.reportId }, include: { work: true } });
     if (!report || report.kind !== "INCOMPLETE" || report.work.confirmationId !== ctx.offer.id || report.work.staffMemberId !== scope.staffMemberId) throw new CleaningReassignmentError("CLEANING_RECOVERY_REPORT_INVALID");
     if (report.work.supersededAt && ctx.offer.status === "REASSIGNED") return { replayed: true, nextConfirmationId: null, recovery: "ALREADY_RECORDED" as const };

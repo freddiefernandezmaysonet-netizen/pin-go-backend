@@ -177,3 +177,9 @@ Consolidated review: `my-cleanings-review-20261007.md`. The focused closure grou
 ## Draft PR publication and continuity — 2026-10-07
 
 Explicitly authorized publication to the two named private repositories. Terminal push lacked credentials; the authorized GitHub connector published consolidated commits with verified exact local tree hashes. Backend Draft PR #376 and Dashboard Draft PR #198 are cross-linked. Original local commit history is documented; new checkouts must use the remote branches. `my-cleanings-continuity.md` records links, source/remote SHA mapping and the closed certification checklist. No merge or production release was authorized or performed. Main compatibility and CI status are not certified by the earlier local tests.
+
+## Main integration and commercial recovery authorization — 2026-10-07
+
+Resolved Prisma/worker/property-editor conflicts while retaining both main commercial Pin AI and cleaner functionality. Automatic staff recovery now uses the canonical commercial activation predicate and verifies current, attributed, non-future terms acceptance; exact-target extension and incomplete handoff revalidate before their command. Fee exemption remains independent of assistance. Normal cleaner cancellation remains independent of Pin AI activation.
+
+Integration groups pass 163 tests; cleaner TypeScript, Prisma generation, worker bundling and Dashboard build pass. SQL uses separate PGlite instances, not native concurrency or physical NFC certification. Integrated main bases and authoritative worktrees are documented in `my-cleanings-continuity.md`. No main merge or production deployment.

@@ -1,4 +1,6 @@
+import { commercialStayTimeChatEnabled } from "./stay-time-commercial-policy.js";
 import { guestPinAIAvailability } from "./guest-availability.js";
+import { commercialPinAIEnabled, commercialIncidentRuntimeReady, type ActivationEnvironment } from "../property-activation.js";
 import { readInternalDemo, demoIncidentEnvironment } from "../../services/internal-demo-scope.js";
 import { prisma as runtimePrisma } from "../../lib/prisma.js";
 import { GuestIncidentToolExecutor, type GuestIncidentRuntimeEvidence } from "../runtime/guest-incident-tool-executor.js";
@@ -8,7 +10,7 @@ import type { PrismaClient } from "@prisma/client";
 import { randomUUID } from "node:crypto";
 import { appendGuestMessages, readGuestMessages, type GuestHistoryMessage } from "./guest-history.js";
 import { formatInTimeZone } from "date-fns-tz";
-import { createStayTimeChatActions, stayTimeChatEnabled } from "./stay-time-chat-actions.js";
+import { createStayTimeChatActions } from "./stay-time-chat-actions.js";
 import type { PinAIActionBrokerPublicProposal } from "../actions/action-broker.service.js";
 
 import type { PinAIRuntimeRequest } from "../runtime/contracts.js";
@@ -167,6 +169,7 @@ export class GuestPinAIGateway {
     private readonly runtime: GuestPinAIRuntimeRunner,
     private readonly enabled: boolean,
     private readonly now: () => Date = () => new Date(),
+    private readonly activationEnv: ActivationEnvironment = process.env,
   ) {}
 
   async reply(input: Readonly<{
@@ -213,6 +216,9 @@ export class GuestPinAIGateway {
     if (!guestPinAIAvailability(reservation, currentDateTime).available) {
       throw new GuestPinAIGatewayError("OUTSIDE_AVAILABILITY_WINDOW");
     }
+    if (await commercialPinAIEnabled(this.prisma, this.activationEnv, {
+      organizationId: reservation.property.organizationId, propertyId: reservation.propertyId,
+    }) === false) throw new GuestPinAIGatewayError("GATEWAY_DISABLED");
 
     const preferredLanguage: "en" | "es" =
       reservation.preferredLanguage.toLowerCase().startsWith("es") ? "es" : "en";
@@ -523,9 +529,8 @@ export function createGuestPinAIRuntimeRunner(
             .reservationId,
         env,
       });
-    const actionProposalEnabled =
-      !demo && actionCanary.enabled;
-    const stayTimeEnabled = !demo && stayTimeChatEnabled(request.context.reservationId, env);
+    const stayTimeEnabled = !demo && await commercialStayTimeChatEnabled(runtimePrisma, env, request.context);
+    const actionProposalEnabled = !demo && (actionCanary.enabled || stayTimeEnabled);
 
     if (
       actionProposalEnabled &&
@@ -570,7 +575,11 @@ export function createGuestPinAIRuntimeRunner(
     const webSearchEnabled =
       env.PIN_AI_RUNTIME_WEB_SEARCH_ENABLED === "true" &&
       location.label.length > 0;
-    const incidentsEnabled = !!actionAuthorization?.guestToken && guestIncidentEnabled(request.context.reservationId, incidentEnv);
+    const commercial = demo ? null : await commercialPinAIEnabled(runtimePrisma, env, request.context);
+    if (commercial === false) throw new GuestPinAIGatewayError("GATEWAY_DISABLED");
+    const incidentsEnabled = !!actionAuthorization?.guestToken && (commercial === null
+      ? guestIncidentEnabled(request.context.reservationId, incidentEnv)
+      : commercial && commercialIncidentRuntimeReady(env));
     const transport = new OpenAIAgentsRuntimeTransport(
       {
         enabled: true,
@@ -599,6 +608,7 @@ export function createGuestPinAIRuntimeRunner(
           enabled:
             actionProposalEnabled,
           stayTimeEnabled,
+          dateChangesEnabled: actionCanary.enabled,
         },
         maxPolls: 50,
         pollDelayMs: 500,
@@ -611,7 +621,7 @@ export function createGuestPinAIRuntimeRunner(
 
     const actionTools = actionProposalEnabled
       ? createPinGoRuntimeToolExecutorWithActionProposal({ ...createActionProposalRuntimeDependencies({
-          guestToken: actionAuthorization!.guestToken, enabled: true,
+          guestToken: actionAuthorization!.guestToken, enabled: actionCanary.enabled,
         }), ...(stayTimeEnabled ? { prepareStayTime: createStayTimeChatActions({
           client: runtimePrisma, env, now: () => new Date(),
           platformFeePercent: env.PINGO_DIRECT_BOOKING_PLATFORM_FEE_PERCENT ?? "0",

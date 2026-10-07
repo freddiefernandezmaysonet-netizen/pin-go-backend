@@ -8,11 +8,14 @@ datasource db {
 }
 
 model Organization {
+  pinAIReservationFees PinAIReservationFee[]
   id               String          @id @default(cuid())
   name             String
   createdAt        DateTime        @default(now())
   slug             String?         @unique
   publicBookingEnabled Boolean     @default(false)
+  pinAIEnabled         Boolean     @default(false)
+  pinAIRevision        Int         @default(0)
   updatedAt        DateTime        @updatedAt
   stripeCustomerId String?
 
@@ -226,11 +229,18 @@ model Property {
   cleaningRecoveryPolicy CleaningRecoveryPolicy?
   cleaningChecklistTemplate CleaningChecklistTemplate?
   cleaningTaskChecklists CleaningTaskChecklist[]
+  pinAIReservationFees PinAIReservationFee[]
   id                         String                      @id @default(cuid())
   organizationId             String
   name                       String
   slug                       String?
   isPublicBookable           Boolean                     @default(false)
+  pinAIEnabled               Boolean                     @default(false)
+  pinAIRevision              Int                         @default(0)
+  pinAIFeeExempt             Boolean                     @default(false)
+  pinAITermsVersion          String?
+  pinAITermsAcceptedAt       DateTime?
+  pinAITermsAcceptedBy       String?
   isTestProperty             Boolean                     @default(false)
   distributionEnabled        Boolean                     @default(false)
   distributionStatus         String                      @default("DISABLED")
@@ -941,6 +951,8 @@ model Subscription {
 
 model Reservation {
   cleaningTaskChecklist CleaningTaskChecklist?
+  pinAIServiceEnrollment PinAIServiceEnrollment?
+  pinAIReservationFee PinAIReservationFee?
   id                      String                   @id @default(cuid())
   reservationNumber       String?                  @unique
   propertyId              String
@@ -2429,6 +2441,10 @@ model ApmsAuditEntry {
 }
 
 model PropertyGuestAgreement {
+  identityBillingTermsVersion  String?
+  identityBillingAmountCents   Int?
+  identityBillingAcceptedAt    DateTime?
+  identityBillingAcceptedBy    String?
   id                           String   @id @default(cuid())
   propertyId                   String
   version                      String
@@ -3482,4 +3498,65 @@ model CleanerAccountActivation {
   consumedAt DateTime?
   createdAt DateTime @default(now())
   @@index([staffMemberId, expiresAt])
+}
+
+// One payable service record per canonical reservation. Invoice fields are
+// retained for historical evidence only; new fees use Connect Account Debits.
+model PinAIReservationFee {
+  reservationId String @id
+  organizationId String
+  propertyId String
+  amountCents Int @default(100)
+  currency String @default("USD")
+  termsVersion String
+  acceptedBy String
+  acceptedAt DateTime
+  serviceStartedAt DateTime
+  recordedAt DateTime @default(now())
+  billingStatus String @default("PENDING_CONNECT")
+  stripeConnectedAccountId String?
+  stripeDebitPaymentId String? @unique
+  debitStartedAt DateTime?
+  debitGeneration Int @default(0)
+  stripeCustomerId String?
+  stripeSubscriptionId String?
+  stripeInvoiceItemId String? @unique
+  stripeInvoiceId String?
+  exportStartedAt DateTime?
+  exportLeaseToken String?
+  exportLeaseUntil DateTime?
+  exportNextAttemptAt DateTime?
+  exportAttempts Int @default(0)
+  lastError String?
+  paidAt DateTime?
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Restrict)
+  property Property @relation(fields: [propertyId], references: [id], onDelete: Restrict)
+  reservation Reservation @relation(fields: [reservationId], references: [id], onDelete: Restrict)
+
+  @@index([organizationId, billingStatus, recordedAt])
+  @@index([billingStatus, exportNextAttemptAt])
+}
+
+// Eligibility evidence saved before the window opens. This is not a fee.
+model PinAIServiceEnrollment {
+  reservationId String @id
+  organizationId String
+  propertyId String
+  stripeConnectedAccountId String
+  termsVersion String
+  acceptedBy String
+  acceptedAt DateTime
+  enrolledAt DateTime
+  checkIn DateTime
+  checkOut DateTime
+  opensAt DateTime
+  closesAt DateTime
+  propertyRevision Int
+  organizationRevision Int
+  status String @default("SCHEDULED")
+  reason String?
+  resolvedAt DateTime?
+  reservation Reservation @relation(fields: [reservationId], references: [id], onDelete: Restrict)
+
+  @@index([organizationId, status, opensAt])
 }

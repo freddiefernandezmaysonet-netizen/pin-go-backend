@@ -5,13 +5,13 @@ import type { AIJob, AutoRepository } from "./pin-ai-auto.repository.js";
 
 export function createAutomaticResponder(deps: {
   repository: Pick<AutoRepository, "state" | "ownMessageIds" | "fence" | "finish">;
-  enabled(job: AIJob): boolean;
+  enabled(job: AIJob): boolean | Promise<boolean>;
   messages(job: AIJob): Promise<DraftHistory>;
   generate(input: DraftInput): Promise<DraftResult>;
   send(input: DraftInput & { text: string; requestedBy: string; requestKey: string }): Promise<unknown>;
 }) {
   async function check(job: AIJob, history: DraftHistory) {
-    if (!deps.enabled(job)) return "DISABLED";
+    if (!await deps.enabled(job)) return "DISABLED";
     const state = await deps.repository.state(job);
     if (state?.mode !== "AUTO" || state.leaseToken !== job.leaseToken) return "HOST_TAKEOVER";
     if (history.thread.isClosed) return "THREAD_CLOSED";
@@ -28,7 +28,7 @@ export function createAutomaticResponder(deps: {
     return null;
   }
   const fingerprint = (history: DraftHistory) => createHash("sha256").update(JSON.stringify([history.thread, history.items.map((m: Message) => [m.id, m.text, m.sender, m.insertedAt, m.attachments])])).digest("hex");
-  const skip = new Set(["DISABLED", "THREAD_CLOSED", "SUPERSEDED_OR_ECHO", "BEFORE_ACTIVATION"]);
+  const skip = new Set(["DISABLED", "THREAD_CLOSED", "SUPERSEDED_OR_ECHO", "BEFORE_ACTIVATION", "PIN_AI_SERVICE_WINDOW_CLOSED"]);
   return async (job: AIJob) => {
     let fenced = false;
     const finish = async (reason: string) => deps.repository.finish(job, skip.has(reason) ? "SKIPPED" : "NEEDS_HOST", reason);
@@ -51,7 +51,7 @@ export function createAutomaticResponder(deps: {
     } catch (error) {
       // Only sanitized finite error codes are stored. Raw model/provider text is never logged here.
       const reason = error instanceof InboxError && /^[A-Z0-9_]{1,100}$/.test(error.code) ? error.code : "PIN_AI_PROCESSING_FAILED";
-      await deps.repository.finish(job, fenced ? "UNKNOWN" : "NEEDS_HOST", reason);
+      await deps.repository.finish(job, fenced ? "UNKNOWN" : skip.has(reason) ? "SKIPPED" : "NEEDS_HOST", reason);
     }
   };
 }

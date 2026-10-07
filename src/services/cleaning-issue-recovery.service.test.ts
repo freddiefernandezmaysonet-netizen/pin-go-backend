@@ -16,6 +16,7 @@ function fixture(decision = "FOLLOW_ESTIMATE") {
     $transaction: async (fn: any) => fn(db),
   };
   const deps: any = {
+    allowed: async () => true,
     assess: async () => ({ decision, reason: "SYNTHETIC_REASON" }),
     extend: async (_db: any, scope: any) => { assert.deepEqual(scope, { reportId: "report", organizationId: "org" }); actions.push("extend"); return { state: extensionState }; },
     backup: async (_db: any, scope: any) => { assert.equal(scope.staffMemberId, "cleaner"); actions.push("offer-backup"); return { recovery: backupRecovery }; },
@@ -111,4 +112,14 @@ test("invalid page sizes fail before any database or recovery operation", async 
   const f = scanFixture(1);
   for (const size of [0, -1, 1.5, NaN, Infinity]) await assert.rejects(processCleaningIssueRecoveries(f.db, daytime, size), RangeError);
   assert.deepEqual(f.queries, []);
+});
+
+test("inactive or unconsented Pin AI performs no automatic recovery action", async () => {
+  for (const decision of ["ACCESS_EXTENSION_REQUIRED", "BACKUP_REVIEW_REQUIRED", "FOLLOW_ESTIMATE"]) {
+    const f = fixture(decision); f.deps.allowed = async () => false;
+    const result = await recoverCleaningIssue(f.db, "work", daytime, f.deps);
+    assert.equal(result.reason, "PIN_AI_NOT_ACTIVE_OR_CONSENTED");
+    assert.deepEqual(f.actions, []); assert.equal(f.notices.length, 1);
+    assert.equal(f.persisted[0].actionRequired, true);
+  }
 });

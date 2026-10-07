@@ -16,6 +16,10 @@ import { confirmCleaningStart } from "./cleaning-work-start.prisma.js";
 import { acceptCleaningTimingConsent } from "./cleaning-timing-consent.prisma.js";
 import { recordDeferredCleaningOfferAttention } from "./cleaning-offer-hours.service.js";
 
+process.env.PIN_AI_CONNECT_DEBIT_ENABLED = "true";
+process.env.PIN_AI_PROPERTY_ACTIVATION_ENABLED = "true";
+process.env.PIN_AI_ALL_ORGANIZATIONS_ENABLED = "true";
+process.env.PIN_AI_RESERVATION_FEE_RECORDING_ENABLED = "true";
 const databaseUrl = process.env.CLEANER_ACCOUNT_TEST_DATABASE_URL;
 if (databaseUrl) {
   const url = new URL(databaseUrl);
@@ -46,8 +50,8 @@ test("cleaning recovery persists real SQL transitions with injected hardware onl
     const id = `recovery-${randomUUID()}`; fixtureIds.push(id);
     const start = new Date(now.getTime() - 10 * 60000), end = new Date(start.getTime() + 30 * 60000);
     const lockId = ++lockSequence;
-    await db.organization.create({ data: { id, name: "Synthetic recovery org" } });
-    await db.property.create({ data: { id, organizationId: id, name: "Synthetic recovery", status: "ACTIVE", cleaningNfcEnabled: true, cleaningStartOffsetMinutes: 0 } });
+    await db.organization.create({ data: { id, name: "Synthetic recovery org", pinAIEnabled: true, pinAIRevision: 1, stripeConnectAccountId: `acct_${id}` } });
+    await db.property.create({ data: { id, organizationId: id, name: "Synthetic recovery", pinAIEnabled: true, pinAIRevision: 1, pinAITermsVersion: "pin-ai-connect-usd-1-reservation-v1", pinAITermsAcceptedAt: start, pinAITermsAcceptedBy: "synthetic-host", status: "ACTIVE", cleaningNfcEnabled: true, cleaningStartOffsetMinutes: 0 } });
     await db.lock.create({ data: { propertyId: id, ttlockLockId: lockId } });
     await db.staffMember.create({ data: { id, organizationId: id, fullName: "Synthetic cleaner", phoneE164: "+15555550101", ttlockCardRef: "own-card" } });
     await db.propertyStaff.create({ data: { propertyId: id, staffMemberId: id, role: "PRIMARY", cleaningDurationCommitmentMinutes: 30 } });
@@ -200,6 +204,14 @@ test("cleaning recovery persists real SQL transitions with injected hardware onl
     assert.ok(attempted.includes(f.id));
     assert.equal(new Set(attempted).size, eligible);
     assert.equal(f.commands.length, 0);
+  });
+
+  await t.test("disabled property blocks hardware even with an eligible more-time report", async () => {
+    const f = await fixture();
+    await db.property.update({ where: { id: f.id }, data: { pinAIEnabled: false } });
+    await assert.rejects(extendCleanerAccess(db, f.scope, f.dependencies), /PIN_AI_NOT_AUTHORIZED/);
+    assert.equal(f.commands.length, 0);
+    assert.equal(await db.cleaningAccessExtension.count({ where: { reportId: f.report.id } }), 0);
   });
 
 });

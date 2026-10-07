@@ -26,3 +26,13 @@ Este documento y las actualizaciones de estado posteriores modifican únicamente
 6. Mantener ambos PR Draft, sin auto-merge. La autorización recibida cubre publicar estas ramas y abrir PR; no cubre merge ni despliegue de producción.
 
 Los recordatorios, límites de los botones, duración comprometida independiente y reglas de cancelación/acceso están detallados en la revisión. No ampliar el alcance. La extensión automática de un acceso ENDED sigue fuera de lo implementado.
+
+## Integración con main — 7 de octubre de 2026
+
+Se integran Backend main `ba9cd60ea3a1365dd155e3d438043e84dd61e716` y Dashboard main `2a5b1976fcdf5b94377ba0872977c31ca29c7b25` en las ramas Draft. Se conservan los modelos y el ciclo de cobro recientes de Pin AI, sus rutas/configuración y los modelos/recuperaciones de limpieza.
+
+La recuperación automática usa la habilitación comercial canónica de Pin AI por organización/propiedad y exige aceptación vigente, fechada y atribuida al host. No utiliza el canary de reservas como permiso de hardware ni la ventana de conversación del huésped como ventana de trabajo del cleaner. La exención de cargos no desactiva la asistencia. Los comandos de extensión y respaldo vuelven a comprobar esa habilitación dentro de su transacción; la cancelación normal no adquiere ese requisito.
+
+Validación de integración: 17 pruebas de planificación/recuperación/activación, 64 pruebas de Pin AI existente y ventanas/recordatorios, 45 pruebas API/configuración/recibos, 11 SQL de recuperación, 23 SQL de reasignación/ventanas/checklist/vistas y 3 de interacción React: 163 pruebas aprobadas. TypeScript del cleaner, generación Prisma, bundling del worker y build del Dashboard aprobados. SQL sigue siendo PGlite descartable con comandos físicos simulados. La combinación inicial de fixtures SQL requería un Connect account sintético distinto por organización; se ajustó el fixture sin cambiar la restricción única de producción.
+
+El código integrado se conserva en los worktrees `cleaner-backend-integration` y `cleaner-dashboard-integration`. Los directorios `pin-go-backend` y `pin-go-dashboard` conservan los snapshots previos. Para continuar desde otra sesión, usar siempre los heads remotos de los dos PR. Permanece pendiente certificación PostgreSQL nativa, visual móvil y NFC real. No se hace merge a main ni despliegue de producción.
