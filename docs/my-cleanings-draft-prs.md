@@ -1,4 +1,6 @@
-# Mis limpiezas — PR Draft preparados
+# Mis limpiezas — preparación histórica de PR Draft
+
+Los PR ya están abiertos: Backend #376 y Dashboard #198. Estado actual y enlaces en `my-cleanings-continuity.md`. Las descripciones siguientes registran la preparación previa.
 
 Publicar únicamente las ramas `agent/cleaner-account-access-v1`. Destinos: `freddiefernandezmaysonet-netizen/pin-go-backend` y `freddiefernandezmaysonet-netizen/pin-go-dashboard`. Base: `main`. No habilitar auto-merge ni hacer merge o despliegue de producción.
 

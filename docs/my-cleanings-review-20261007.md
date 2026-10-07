@@ -1,6 +1,6 @@
 # Mis limpiezas — entrega para revisión
 
-Fecha: 7 de octubre de 2026. Estado: implementación local revisable; pendiente de certificación en el entorno de destino. No se ha publicado esta entrega.
+Fecha: 7 de octubre de 2026. Estado: implementación local revisable; pendiente de certificación en el entorno de destino. Publicada en PR Draft Backend #376 y Dashboard #198, sin merge ni despliegue de producción. Consultar `my-cleanings-continuity.md` para los commits remotos.
 
 ## Alcance cerrado
 
