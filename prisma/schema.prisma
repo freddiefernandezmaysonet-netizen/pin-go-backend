@@ -2342,6 +2342,10 @@ model ApmsAuditEntry {
 }
 
 model PropertyGuestAgreement {
+  identityBillingTermsVersion  String?
+  identityBillingAmountCents   Int?
+  identityBillingAcceptedAt    DateTime?
+  identityBillingAcceptedBy    String?
   id                           String   @id @default(cuid())
   propertyId                   String
   version                      String
