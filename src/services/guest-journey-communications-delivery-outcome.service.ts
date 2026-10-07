@@ -281,7 +281,7 @@ export function normalizeTwilioDeliveryCallback(
 }
 
 export async function recordMessageDeliveryOutcome(
-  prisma: PrismaClient,
+  prisma: Pick<PrismaClient, "messageLog">,
   outcome: ProviderDeliveryOutcome
 ) {
   const existing = await prisma.messageLog.findFirst({

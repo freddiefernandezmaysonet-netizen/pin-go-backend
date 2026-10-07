@@ -1,0 +1,20 @@
+// Allowlisted authenticated evidence; never store webhook payloads or credentials.
+// Receipt identity is a digest of account, SID, status and error code.
+model TwilioSmsDeliveryReceipt {
+  id                String   @id
+  accountSid        String
+  providerMessageId String
+  deliveryStatus    String
+  errorCode         String?
+  receivedAt        DateTime @default(now())
+  disposition       String   @default("PENDING")
+  messageLogId      String?
+  processedAt       DateTime?
+  reconcileAttempts Int      @default(0)
+  lastReconciledAt  DateTime?
+  nextReconcileAt   DateTime?
+
+  @@index([accountSid, providerMessageId])
+  @@index([disposition, receivedAt])
+  @@index([disposition, nextReconcileAt, receivedAt])
+}

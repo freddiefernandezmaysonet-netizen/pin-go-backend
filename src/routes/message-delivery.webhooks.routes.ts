@@ -1,6 +1,10 @@
 import { Router } from "express";
 import type { PrismaClient } from "@prisma/client";
 import Twilio from "twilio";
+import {
+  persistTwilioSmsDeliveryReceipt,
+  resolveTwilioSmsRecoverySettings,
+} from "../services/twilio-sms-delivery-receipt.service.js";
 
 import {
   normalizeResendDeliveryEvent,
@@ -214,6 +218,27 @@ export function buildMessageDeliveryWebhookRouter(
         );
       }
 
+      let recoverySettings: ReturnType<typeof resolveTwilioSmsRecoverySettings> = null;
+      try {
+        recoverySettings = resolveTwilioSmsRecoverySettings(env);
+      } catch {
+        return res.status(503).send("TWILIO_SMS_RECOVERY_CONFIG_INVALID");
+      }
+      if (recoverySettings) {
+        const accountSid = clean(env.TWILIO_ACCOUNT_SID);
+        if (!/^AC[0-9a-fA-F]{32}$/.test(accountSid)) {
+          return res.status(503).send("TWILIO_SMS_RECOVERY_ACCOUNT_MISSING");
+        }
+        if (req.body?.AccountSid !== accountSid) {
+          return res.status(403).send("TWILIO_SMS_RECOVERY_ACCOUNT_MISMATCH");
+        }
+        const sid = req.body?.MessageSid;
+        if (typeof sid !== "string" || !/^SM[0-9a-fA-F]{32}$/.test(sid) ||
+            [req.body?.SmsSid, req.body?.SmsMessageSid].some(value => value != null && value !== sid)) {
+          return res.status(400).send("TWILIO_SMS_RECOVERY_SID_INVALID");
+        }
+      }
+
       const outcome =
         normalizeTwilioDeliveryCallback(
           req.body ?? {}
@@ -224,10 +249,13 @@ export function buildMessageDeliveryWebhookRouter(
       }
 
       try {
-        await recordMessageDeliveryOutcome(
-          prisma,
-          outcome
-        );
+        if (recoverySettings) {
+          await persistTwilioSmsDeliveryReceipt(
+            prisma, clean(env.TWILIO_ACCOUNT_SID), outcome, recoverySettings
+          );
+        } else {
+          await recordMessageDeliveryOutcome(prisma, outcome);
+        }
 
         return res.status(204).send();
       } catch (error) {
@@ -237,7 +265,7 @@ export function buildMessageDeliveryWebhookRouter(
             providerMessageId:
               outcome.providerMessageId,
             status: outcome.status,
-            error:
+            error: recoverySettings ? "TWILIO_SMS_RECEIPT_PROCESSING_FAILED" :
               error instanceof Error
                 ? error.message
                 : String(error),

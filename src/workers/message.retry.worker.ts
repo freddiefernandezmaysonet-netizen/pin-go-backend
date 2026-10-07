@@ -34,6 +34,15 @@ import { processGuestIncidentNotices } from "../pin-ai/guest/guest-incident-noti
 import { retryGuestContactHostNotices } from "../services/ota-guest-contact-notice-retry.service";
 import { processOperationalEmailOutbox } from "../services/durable-operational-email.service.js";
 import { processCleaningHostAttentionNotices } from "../services/cleaning-followup-host-delivery.service.js";
+import { resolveTwilioSmsRecoverySettings } from "../services/twilio-sms-delivery-receipt.service.js";
+import {
+  reconcilePendingTwilioSmsReceipts,
+  resolveTwilioReceiptReconciliationSettings,
+} from "../services/twilio-sms-receipt-reconciler.service.js";
+import {
+  dispatchDueAccessSmsRetries,
+  resolveAccessSmsRetryDispatcherSettings,
+} from "../services/twilio-sms-access-retry-dispatcher.service.js";
 
 const WORKER_NAME = "message.retry.worker";
 const POLL_MS = Number(process.env.MESSAGE_RETRY_POLL_MS ?? 30000);
@@ -43,6 +52,39 @@ const MAX_RETRIES = resolveDamageCaseMaxMessageRetries(
 const BATCH_SIZE = Number(process.env.MESSAGE_RETRY_BATCH_SIZE ?? 20);
 const GUEST_JOURNEY_COMMUNICATIONS_OWNER_CONFIG =
   resolveGuestJourneyCommunicationsOwnerConfig();
+const TWILIO_SMS_RECOVERY_SETTINGS =
+  resolveTwilioSmsRecoverySettings(process.env);
+const TWILIO_RECEIPT_RECONCILIATION_SETTINGS =
+  resolveTwilioReceiptReconciliationSettings(process.env);
+const TWILIO_RECEIPT_ACCOUNT_SID =
+  String(process.env.TWILIO_ACCOUNT_SID ?? "").trim();
+const TWILIO_ACCESS_RETRY_DISPATCH_SETTINGS =
+  resolveAccessSmsRetryDispatcherSettings(process.env);
+
+if (
+  TWILIO_ACCESS_RETRY_DISPATCH_SETTINGS &&
+  !TWILIO_SMS_RECOVERY_SETTINGS
+) {
+  throw new Error(
+    "TWILIO_SMS_ACCESS_RETRY_DISPATCH_REQUIRES_RECOVERY"
+  );
+}
+if (
+  TWILIO_RECEIPT_RECONCILIATION_SETTINGS &&
+  !TWILIO_SMS_RECOVERY_SETTINGS
+) {
+  throw new Error(
+    "TWILIO_SMS_RECEIPT_RECONCILIATION_REQUIRES_RECOVERY"
+  );
+}
+if (
+  TWILIO_RECEIPT_RECONCILIATION_SETTINGS &&
+  !/^AC[0-9a-fA-F]{32}$/.test(TWILIO_RECEIPT_ACCOUNT_SID)
+) {
+  throw new Error(
+    "TWILIO_SMS_RECEIPT_RECONCILIATION_ACCOUNT_INVALID"
+  );
+}
 
 function yieldsToGuestJourneyCommunicationsOwner(message: {
   organizationId?: string | null;
@@ -1613,6 +1655,57 @@ async function tick() {
   tickRunning = true;
 
   try {
+    try {
+      if (
+        TWILIO_SMS_RECOVERY_SETTINGS &&
+        TWILIO_RECEIPT_RECONCILIATION_SETTINGS
+      ) {
+        const reconciliation =
+          await reconcilePendingTwilioSmsReceipts(
+            prisma,
+            TWILIO_RECEIPT_ACCOUNT_SID,
+            TWILIO_SMS_RECOVERY_SETTINGS,
+            TWILIO_RECEIPT_RECONCILIATION_SETTINGS
+          );
+        if (
+          reconciliation.claimed > 0 ||
+          reconciliation.failed > 0 ||
+          reconciliation.exhausted > 0
+        ) {
+          log(
+            "Twilio SMS receipt reconciliation",
+            reconciliation
+          );
+        }
+      }
+    } catch (e) {
+      errLog(
+        "Twilio SMS receipt reconciliation failed; durable receipts retained",
+        { err: toErrString(e) }
+      );
+    }
+
+    try {
+      if (TWILIO_ACCESS_RETRY_DISPATCH_SETTINGS) {
+        const accessRetry = await dispatchDueAccessSmsRetries(
+          prisma,
+          TWILIO_ACCESS_RETRY_DISPATCH_SETTINGS
+        );
+        if (
+          accessRetry.scanned > 0 ||
+          accessRetry.reviewed > 0 ||
+          accessRetry.unknown > 0
+        ) {
+          log("Twilio access SMS bounded retry", accessRetry);
+        }
+      }
+    } catch (e) {
+      errLog(
+        "Twilio access SMS bounded retry failed; retry journal retained",
+        { err: toErrString(e) }
+      );
+    }
+
     try {
       await processOperationalEmailOutbox(prisma, BATCH_SIZE);
       await processCleaningHostAttentionNotices(prisma, BATCH_SIZE);
