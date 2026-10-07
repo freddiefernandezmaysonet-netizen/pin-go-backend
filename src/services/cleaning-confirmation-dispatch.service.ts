@@ -395,8 +395,8 @@ export async function processPendingCleaningConfirmations(
       orderBy: [{ createdAt: "asc" }, { id: "asc" }],
       take: 25,
     });
-    if (confirmations.length === 0) break;
     const last = confirmations[confirmations.length - 1];
+    if (!last) break;
     boundary = { createdAt: last.createdAt, id: last.id };
     processedCount += confirmations.length;
 

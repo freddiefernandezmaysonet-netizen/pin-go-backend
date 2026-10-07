@@ -1,5 +1,13 @@
 # Mis limpiezas — release and general activation
 
+## Latest checkpoint — native CI verified, 2026-10-07
+
+The newest evidence supersedes the historical per-step status below. Backend PR #376 remains Draft; Dashboard PR #198 remains Draft. No main merge, production migration, hardware command or production deployment occurred.
+
+Native PostgreSQL 16 certification passed on remote candidate `fa4ace51b29e5b2f1633f0173cabfaa7ca85e0d7`: 41 persisted-flow/concurrency tests plus 21 policy/authorization tests, zero failures and zero skips. Additive migrations applied over the recorded pre-feature schema and preserved the synthetic legacy cleaner/card mapping. Cleaning Follow-up's native snapshot/concurrency job and foundation job also passed; mobile responses passed. Exact evidence and remaining CI blockers are in `my-cleanings-certification-20261007.md`.
+
+Remaining release work: resolve the documented cross-feature CI gates, finish visual mobile review and obtain real card/phone evidence in an authorized environment. An extension of already ENDED access still requires host review. Do not equate native database certification with physical NFC verification.
+
 ## Current authorized scope
 
 Freddie changed the rollout decision on 2026-10-07: implement for all current and future properties. No single-property canary, organization allowlist or separate rollout switch is required. Serena Studio is included when its staff configuration is enabled. This decision supersedes the earlier property-limited plan.

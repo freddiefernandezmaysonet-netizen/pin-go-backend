@@ -35,10 +35,11 @@ async function includeAppliedCleanerExtension(db: Pick<PrismaClient | Prisma.Tra
   const source = db as Partial<Prisma.TransactionClient>;
   if (hasNext || !source.cleaningAccessExtension || !source.cleaningRecoveryPolicy || !source.cleaningConfirmation) return window;
   const current = await source.cleaningConfirmation.findMany({ where: { reservationId, propertyId, status: { in: ["PENDING", "CONFIRMED"] } }, take: 2 });
-  if (current.length !== 1 || current[0].status !== "CONFIRMED") return window;
+  const confirmation = current[0];
+  if (current.length !== 1 || !confirmation || confirmation.status !== "CONFIRMED") return window;
   const [extension, policy] = await Promise.all([
     source.cleaningAccessExtension.findFirst({ where: { reservationId, propertyId, state: "APPLIED", startsAt: window.startsAt,
-      confirmationId: current[0].id, report: { work: { cancelledAt: null, supersededAt: null } } },
+      confirmationId: confirmation.id, report: { work: { cancelledAt: null, supersededAt: null } } },
       orderBy: { proposedEndsAt: "desc" } }),
     source.cleaningRecoveryPolicy.findUnique({ where: { propertyId } }),
   ]);
