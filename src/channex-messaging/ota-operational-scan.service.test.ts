@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { processOtaOperationalCommunications } from "./ota-operational-scan.service.js";
 import type { deliverOtaOperationalCommunication } from "./ota-operational-guest.service.js";
+import type { reconcileOtaOperationalDeliveryAttention } from "./ota-operational-attention.service.js";
 
 const now = new Date("2026-10-03T18:00:00Z");
 const env = {
@@ -11,6 +12,7 @@ const env = {
 function row(id: string, source = "BookingCom") {
   return {
     id, source, externalProvider: "CHANNEX",
+    propertyId: "prop", reservationNumber: "PG-SYNTHETIC", property: { organizationId: "org" },
     externalId: "11111111-1111-4111-8111-111111111111",
     // Crucial: an OTA communication must NOT depend on phone/email.
     guestEmail: null, guestPhone: null,
@@ -36,19 +38,20 @@ function fixture(rows: ReturnType<typeof row>[]) {
     calls.push(id + ":" + type);
     return { ok: true, status: "SENT" };
   }) as typeof deliverOtaOperationalCommunication;
-  return { db, deliver, calls, get queries() { return queries; } };
+  const reconcile = (async () => "UNCHANGED") as typeof reconcileOtaOperationalDeliveryAttention;
+  return { db, deliver, reconcile, calls, get queries() { return queries; } };
 }
 
 test("disabling OTA switch avoids all scans", async () => {
   const f = fixture([row("1")]);
-  const result = await processOtaOperationalCommunications(f.db, {}, now, f.deliver);
+  const result = await processOtaOperationalCommunications(f.db, {}, now, f.deliver, f.reconcile);
   assert.deepEqual(result, { candidates: 0, accepted: 0, blocked: 0 });
   assert.equal(f.queries, 0);
 });
 
 test("Airbnb and Booking.com without guest contact are scanned; Expedia remains untouched", async () => {
   const f = fixture([row("1", "BookingCom"), row("2", "Airbnb"), row("3", "Expedia")]);
-  const result = await processOtaOperationalCommunications(f.db, env, now, f.deliver);
+  const result = await processOtaOperationalCommunications(f.db, env, now, f.deliver, f.reconcile);
   assert.deepEqual(result, { candidates: 2, accepted: 4, blocked: 0 });
   assert.equal(f.calls.length, 4);
   assert.ok(f.calls.includes("1:PRECHECKIN"));
@@ -61,7 +64,7 @@ test("Airbnb and Booking.com without guest contact are scanned; Expedia remains 
 test("pagination visits every candidate across the first 100 rows and beyond", async () => {
   const rows = Array.from({ length: 101 }, (_, index) => row(String(index).padStart(4, "0")));
   const f = fixture(rows);
-  const result = await processOtaOperationalCommunications(f.db, env, now, f.deliver);
+  const result = await processOtaOperationalCommunications(f.db, env, now, f.deliver, f.reconcile);
   assert.equal(result.candidates, 101);
   assert.equal(result.accepted, 202);
   assert.equal(f.queries, 2);
@@ -70,8 +73,8 @@ test("pagination visits every candidate across the first 100 rows and beyond", a
 
 test("new scan starts at first page; no persistent in-memory cursor", async () => {
   const f = fixture([row("a")]);
-  const one = await processOtaOperationalCommunications(f.db, env, now, f.deliver);
-  const two = await processOtaOperationalCommunications(f.db, env, now, f.deliver);
+  const one = await processOtaOperationalCommunications(f.db, env, now, f.deliver, f.reconcile);
+  const two = await processOtaOperationalCommunications(f.db, env, now, f.deliver, f.reconcile);
   assert.equal(one.candidates, 1);
   assert.equal(two.candidates, 1);
   assert.equal(f.queries, 2);
