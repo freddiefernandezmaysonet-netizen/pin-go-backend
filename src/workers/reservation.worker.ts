@@ -387,6 +387,8 @@ async function processPreCheckinMessages(
   const FOUR_HOURS =
     4 * 60 * 60 * 1000;
 
+  let cursor: string | undefined;
+  while (true) {
   const upcoming =
     await prisma.reservation.findMany({
       where: {
@@ -408,11 +410,6 @@ async function processPreCheckinMessages(
                 checkOut: {
                   gt: now,
                 },
-                createdAt: {
-                  gte:
-                    prisma.reservation.fields
-                      .checkIn,
-                },
               },
             ],
           },
@@ -422,11 +419,13 @@ async function processPreCheckinMessages(
                 guestEmail: {
                   not: null,
                 },
+                messageDispatchLogs: { none: { type: "PRECHECKIN", channel: "email", status: "SENT" } },
               },
               {
                 guestPhone: {
                   not: null,
                 },
+                messageDispatchLogs: { none: { type: "PRECHECKIN", channel: "sms", status: "SENT" } },
               },
             ],
           },
@@ -435,12 +434,7 @@ async function processPreCheckinMessages(
           PaymentState.PAID,
         status:
           ReservationStatus.ACTIVE,
-        messageDispatchLogs: {
-          none: {
-            type: "PRECHECKIN",
-            status: "SENT",
-          },
-        },
+        cancelledAt: null,
       },
       select: {
         id: true,
@@ -450,11 +444,12 @@ async function processPreCheckinMessages(
         externalRaw: true,
         externalProvider: true,
         externalId: true,
+        checkIn: true,
+        createdAt: true,
       },
       take: 50,
-      orderBy: {
-        checkIn: "asc",
-      },
+      orderBy: { id: "asc" },
+      ...(cursor ? { cursor: { id: cursor }, skip: 1 } : {}),
     });
 
   if (upcoming.length === 0) {
@@ -469,7 +464,8 @@ async function processPreCheckinMessages(
   );
 
   for (const reservation of upcoming) {
-    if (reservation.guestEmail) {
+    // Keep the original email window; only the pending SMS catches up during a stay.
+    if (reservation.guestEmail && (now < reservation.checkIn || reservation.createdAt >= reservation.checkIn)) {
       try {
         const emailResult =
           await sendPreCheckinEmail(
@@ -492,21 +488,6 @@ async function processPreCheckinMessages(
           }
         );
 
-        if (emailResult.status === "SENT") {
-          log(
-            "Pre-checkin obligation fulfilled",
-            {
-              reservationNumber:
-                reservation.reservationNumber ??
-                null,
-              reservationId:
-                reservation.id,
-              channel: "email",
-            }
-          );
-
-          continue;
-        }
       } catch (error) {
         errLog(
           "Pre-checkin email crashed",
@@ -549,7 +530,8 @@ async function processPreCheckinMessages(
     try {
       await sendPreCheckinSms(
         prisma,
-        reservation.id
+        reservation.id,
+        now
       );
     } catch (error) {
       errLog(
@@ -565,6 +547,9 @@ async function processPreCheckinMessages(
         }
       );
     }
+  }
+  cursor = upcoming[upcoming.length - 1]!.id;
+  if (upcoming.length < 50) return;
   }
 }
 
