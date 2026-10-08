@@ -22,6 +22,8 @@
     "src/services/cleaning-followup-delivery.service.test.ts",
     "src/services/cleaning-reminder-retry.service.test.ts",
     "src/services/cleaner-access-autopilot.test.ts",
+    "src/services/cleaner-access-audit.service.test.ts",
+    "src/services/cleaner-access-audit.database.test.ts",
     "src/services/cleaner-access-provisioning.test.ts",
     "src/services/cleaner-unused-grant.test.ts",
     "src/services/cleaner-nfc-period-evidence.test.ts",

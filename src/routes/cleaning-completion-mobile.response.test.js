@@ -11,7 +11,7 @@ import ts from "typescript";
 // Only persistence/provider boundaries and Router registration are replaced.
 // A loopback HTTP bridge transports each real handler's res.send() output.
 // The VM has no process, network client, provider credentials or database client.
-function loadTs(relativePath, dependencies = {}) {
+function loadTs(relativePath, dependencies = {}, errorLogs = []) {
   const source = readFileSync(new URL(relativePath, import.meta.url), "utf8");
   const compiled = ts.transpileModule(source, {
     fileName: relativePath,
@@ -23,7 +23,7 @@ function loadTs(relativePath, dependencies = {}) {
   const module = { exports: {} };
   new vm.Script(compiled.outputText, { filename: relativePath }).runInNewContext({
     module, exports: module.exports, Date, Intl, URL, process: { env: {} },
-    console: { log() {}, warn() {}, error() {} },
+    console: { log() {}, warn() {}, error(label, data) { errorLogs.push({ label, data }); } },
     require(specifier) {
       assert.ok(Object.hasOwn(dependencies, specifier), `Unexpected dependency: ${specifier}`);
       return dependencies[specifier];
@@ -41,6 +41,7 @@ const actionRules = {
 const completion = loadTs("../services/cleaning-work-completion.prisma.ts", { "./cleaning-action-window.js": actionRules, "./cleaning-checklist.service.js": { assertChecklistComplete: async () => {} } });
 const actionButtons = loadTs("../services/cleaning-action-button.ts", { "./cleaning-action-window.js": actionRules });
 const timing = loadTs("../services/cleaning-timing-consent.ts");
+const snapshotRules = loadTs("../services/cleaning-work-snapshot.service.ts");
 const completedAt = new Date("2026-10-01T15:44:05.000Z");
 const routePath = "/cleaning/confirm/fixture-cleaner-token";
 
@@ -66,6 +67,8 @@ async function fixture(t, overrides = {}) {
   let clock = overrides.clock ?? completedAt;
   const notices = [];
   const resolutions = [];
+  const errors = [];
+  let accessCalls = 0;
   const db = {
     async $queryRaw() { return [{ id: reservation.id }]; },
     cleaningConfirmation: { async findUnique({ where }) {
@@ -106,9 +109,11 @@ async function fixture(t, overrides = {}) {
     "../services/staff-language.service.js": loadTs("../services/staff-language.service.ts"),
     express: { Router: () => router },
     "@prisma/client": { PrismaClient: class { constructor() { return db; } }, ReservationStatus: { CANCELLED: "CANCELLED" } },
-    "../services/cleaner-access-autopilot.service": { ensureCleanerNfcAccessForConfirmedCleaning: async () => ({ ok: true }) },
+    "../services/cleaner-access-autopilot.service": { ensureCleanerNfcAccessForConfirmedCleaning: async () => { accessCalls++; return { ok: true }; } },
     "../services/reservation-complete-flow-audit.service": { auditReservationCompleteFlowSafe: unused },
-    "../services/cleaning-work-snapshot.service.js": { materializeCleaningWorkSnapshot: async (_store, scope) => {
+    "../services/cleaning-work-snapshot.service.js": { CleaningWorkSnapshotError: snapshotRules.CleaningWorkSnapshotError, materializeCleaningWorkSnapshot: async (_store, scope) => {
+      if (overrides.snapshotCode) throw new snapshotRules.CleaningWorkSnapshotError(overrides.snapshotCode);
+      if (overrides.snapshotUnexpected) throw overrides.snapshotUnexpected;
       assert.equal(scope.reservationId, work.reservationId);
       assert.equal(scope.organizationId, "fixture-org");
       return { work: { ...work } };
@@ -123,7 +128,7 @@ async function fixture(t, overrides = {}) {
     "../services/cleaning-followup-host-attention.service.js": {
       resolveCleaningHostAttention: async input => { resolutions.push(input); },
     },
-  });
+  }, errors);
   const server = createServer(async (req, res) => {
     const match = /^\/cleaning\/confirm\/([^/]+)(\/complete)?$/.exec(req.url);
     const handler = match && handlers.get(`${req.method} /cleaning/confirm/:token${match[2] ?? ""}`);
@@ -145,7 +150,7 @@ async function fixture(t, overrides = {}) {
   t.after(() => new Promise((resolve, reject) => server.close(e => e ? reject(e) : resolve())));
   const origin = `http://127.0.0.1:${server.address().port}`;
   return {
-    get work() { return work; }, get writes() { return writes; }, initial, notices, resolutions,
+    get work() { return work; }, get writes() { return writes; }, get accessCalls() { return accessCalls; }, initial, notices, resolutions, errors,
     advanceClock() { clock = new Date(completedAt.getTime() + 3600000); },
     async request(method, path = routePath + (method === "POST" ? "/complete" : "")) {
       const response = await fetch(origin + path, { method, signal: AbortSignal.timeout(5000) });
@@ -300,4 +305,31 @@ test("cleaning GET and POST preserve same-origin form submission and remain unca
     assert.equal(response.headers.get("referrer-policy"), "same-origin");
     assert.equal(response.headers.get("cache-control"), "no-store");
   }
+});
+
+for (const language of ["es", "en"]) {
+  test(`legacy confirmation returns a terminal ${language} document before NFC work`, async t => {
+    const f = await fixture(t, { language, snapshotCode: "CLEANING_WORK_RETROACTIVE_ACTIVATION_BLOCKED" });
+    const response = await f.request("GET");
+    assert.equal(response.status, 410);
+    assert.match(response.html, language === "es" ? /Confirmación anterior/ : /Earlier confirmation/);
+    assert.match(response.html, /my-cleanings/);
+    assert.doesNotMatch(response.html, /<(?:form|button|input)\b/i);
+    assert.equal(f.accessCalls, 0); assert.equal(f.writes, 0); assert.deepEqual(f.errors, []);
+  });
+}
+for (const [code, status] of [["CLEANING_WORK_INACTIVE_CONTEXT", 410], ["CLEANING_WORK_SCHEDULE_CHANGED", 409], ["CLEANING_WORK_REASSIGNMENT_REQUIRES_REVIEW", 409]]) {
+  test(`${code} is explained without scheduling access or producing a generic 500`, async t => {
+    const f = await fixture(t, { snapshotCode: code }); const response = await f.request("GET");
+    assert.equal(response.status, status); assert.equal(f.accessCalls, 0); assert.equal(f.writes, 0);
+    assert.doesNotMatch(response.html, /<(?:form|button|input)\b/i);
+  });
+}
+test("unexpected GET failure records safe scope, phase and code without the link or raw exception", async t => {
+  const error = Object.assign(new Error("fixture-cleaner-token sensitive provider payload"), { code: "P1001" });
+  const f = await fixture(t, { snapshotUnexpected: error }); const response = await f.request("GET");
+  assert.equal(response.status, 500); assert.equal(f.errors.length, 1);
+  assert.deepEqual(JSON.parse(JSON.stringify(f.errors[0])), { label: "[CLEANING_CONFIRM_VIEW_ERROR]", data: { confirmationId: "fixture-confirmation", reservationId: "fixture-reservation", propertyId: "fixture-property", stage: "PREPARE_TIMING", code: "P1001", errorType: "Error" } });
+  assert.doesNotMatch(JSON.stringify(f.errors), /fixture-cleaner-token|sensitive provider/);
+  assert.equal(f.accessCalls, 0); assert.equal(f.writes, 0);
 });

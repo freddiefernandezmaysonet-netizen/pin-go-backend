@@ -8,7 +8,7 @@ import {
   StaffAccessMethod,
   StaffAssignmentStatus,
 } from "@prisma/client";
-import { persistAuditEntry } from "../apms/audit-persistence.service";
+import { persistCleanerAccessEvidence } from "./cleaner-access-audit.service.js";
 import type { AuditEntry } from "../apms/audit-types";
 
 export type CleanerAccessAutopilotTrigger =
@@ -145,7 +145,7 @@ async function persistCleanerAccessAuditEntry(input: {
   };
 
   try {
-    await persistAuditEntry(input.prisma, auditEntry);
+    await persistCleanerAccessEvidence(input.prisma, auditEntry);
   } catch (auditError: any) {
     console.error("[CLEANER_ACCESS_AUTOPILOT_AUDIT_ERROR]", {
       propertyId: input.propertyId,

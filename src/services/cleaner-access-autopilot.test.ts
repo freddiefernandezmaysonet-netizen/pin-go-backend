@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import type { PrismaClient } from "@prisma/client";
+import type { Prisma, PrismaClient } from "@prisma/client";
 import { ensureCleanerNfcAccessForConfirmedCleaning } from "./cleaner-access-autopilot.service";
 
 function fixture(status = "ACTIVE", unusedWithdrawal = false, programmedWithdrawal = false) {
@@ -19,7 +19,7 @@ function fixture(status = "ACTIVE", unusedWithdrawal = false, programmedWithdraw
       locks: [{ isActive: true, ttlockLockId: "42" }] } };
   const assignmentWrites: unknown[] = [];
   const cardReads: unknown[] = [];
-  const audits: { status: string; reason: string }[] = [];
+  const audits: Prisma.ApmsAuditEntryCreateInput[] = [];
   const createdGrants: any[] = [];
   let cardResult: { id: string } | null = card;
   const db = {
@@ -47,8 +47,8 @@ function fixture(status = "ACTIVE", unusedWithdrawal = false, programmedWithdraw
       cardReads.push(args); return args.where.id === "primary-nfc" ? { id: "primary-nfc" } : cardResult;
     } },
     $queryRawUnsafe: async () => [{ id: "reservation" }],
-    apmsAuditEntry: { findUnique: async () => null,
-      create: async ({ data }: { data: { status: string; reason: string } }) => {
+    apmsAuditEntry: { findUnique: async ({ where }: any) => audits.find(row => row.decisionId === where.decisionId) ?? null,
+      create: async ({ data }: { data: Prisma.ApmsAuditEntryCreateInput }) => {
       audits.push(data); return data;
     } },
   };
@@ -136,4 +136,13 @@ test("accepted backup is scheduled while explicitly cancelled primary programmin
   assert.equal(result.nfcAssignmentId, "backup-grant");
   assert.equal(f.createdGrants[0].status, "SCHEDULED");
   assert.deepEqual(f.grant, original);
+});
+
+test("repeated opening of an already-ready cleaner grant does not duplicate audit evidence or modify access", async () => {
+  const f = fixture("SCHEDULED"); f.grant.nfcCardId = "backup-nfc";
+  const before = { ...f.grant };
+  assert.equal((await f.run()).ok, true);
+  assert.equal((await f.run()).ok, true);
+  assert.equal(f.audits.length, 1); assert.deepEqual(f.grant, before);
+  assert.equal(f.createdGrants.length, 0);
 });
