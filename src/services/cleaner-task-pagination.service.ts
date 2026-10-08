@@ -1,23 +1,23 @@
 import { Prisma, type PrismaClient } from "@prisma/client";
-export type CleanerTaskFilters = { q?: string; status?: string; from?: string; to?: string };
+export type CleanerTaskFilters = { q?: string; propertyId?: string; status?: string; from?: string; to?: string };
 const STATUSES = new Set(["PENDING", "CONFIRMED", "IN_PROGRESS", "COMPLETED", "CANCELLED", "REASSIGNED", "EXPIRED", "DECLINED"]);
 export function parseCleanerTaskFilters(query: Record<string, unknown>): CleanerTaskFilters {
   const filters: CleanerTaskFilters = {};
-  for (const key of ["q", "status", "from", "to"] as const) {
+  for (const key of ["q", "propertyId", "status", "from", "to"] as const) {
     const value = query[key];
     if (value === undefined || value === "") continue;
     if (typeof value !== "string") throw new Error("CLEANING_FILTER_INVALID");
     const trimmed = value.trim();
     if (trimmed) filters[key] = trimmed;
   }
-  if ((filters.q?.length ?? 0) > 100 || (filters.status && !STATUSES.has(filters.status))) throw new Error("CLEANING_FILTER_INVALID");
+  if ((filters.q?.length ?? 0) > 100 || (filters.propertyId?.length ?? 0) > 200 || (filters.status && !STATUSES.has(filters.status))) throw new Error("CLEANING_FILTER_INVALID");
   for (const value of [filters.from, filters.to]) {
     if (value && (!/^\d{4}-\d{2}-\d{2}$/.test(value) || value.slice(0, 4) === "0000" || !Number.isFinite(Date.parse(value)) || new Date(value).toISOString().slice(0, 10) !== value)) throw new Error("CLEANING_FILTER_INVALID");
   }
   if (filters.from && filters.to && filters.from > filters.to) throw new Error("CLEANING_FILTER_INVALID");
   return filters;
 }
-export type CleanerTaskView = "today" | "upcoming" | "history";
+export type CleanerTaskView = "today" | "upcoming" | "history" | "overdue" | "all";
 
 /** Filter in property local time before pagination, scoped to the authenticated cleaner. */
 export async function cleanerTaskPageIds(db: PrismaClient, input: {
@@ -44,11 +44,14 @@ export async function cleanerTaskPageIds(db: PrismaClient, input: {
       LEFT JOIN "CleaningWork" w ON w."confirmationId" = c.id AND w."staffMemberId" = c."staffMemberId"
         AND w."reservationId" = r.id AND w."propertyId" = p.id
       WHERE c."staffMemberId" = ${input.staffMemberId} AND p."organizationId" = ${input.organizationId}
+        ${input.filters?.propertyId ? Prisma.sql`AND p.id = ${input.filters.propertyId}` : Prisma.empty}
         ${input.filters?.q ? Prisma.sql`AND strpos(lower(p.name), lower(${input.filters.q})) > 0` : Prisma.empty}
         ${input.cursor ? Prisma.sql`AND c.id < ${input.cursor}` : Prisma.empty}
     )
     SELECT id FROM tasks WHERE (
-      (${input.view} = 'today' AND (day = today OR (day < today AND NOT closed))) OR
+      (${input.view} = 'all') OR
+      (${input.view} = 'today' AND day = today) OR
+      (${input.view} = 'overdue' AND day < today AND NOT closed) OR
       (${input.view} = 'upcoming' AND day > today AND NOT closed) OR
       (${input.view} = 'history' AND closed))
       ${input.filters?.status ? Prisma.sql`AND status = ${input.filters.status}` : Prisma.empty}
@@ -57,4 +60,16 @@ export async function cleanerTaskPageIds(db: PrismaClient, input: {
     ORDER BY id DESC LIMIT ${input.limit}
   `);
   return rows.map(row => row.id);
+}
+
+/** All properties with this cleaner's tasks, independent of view, filters and task pagination. */
+export async function cleanerTaskProperties(db: PrismaClient, input: { staffMemberId: string; organizationId: string }): Promise<{ id: string; name: string }[]> {
+  return db.$queryRaw(Prisma.sql`
+    SELECT DISTINCT p.id, p.name
+    FROM "CleaningConfirmation" c
+    JOIN "Reservation" r ON r.id = c."reservationId" AND r."propertyId" = c."propertyId"
+    JOIN "Property" p ON p.id = c."propertyId"
+    WHERE c."staffMemberId" = ${input.staffMemberId} AND p."organizationId" = ${input.organizationId}
+    ORDER BY p.name, p.id
+  `);
 }
