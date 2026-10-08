@@ -25,10 +25,10 @@ const receipt = (overrides: Partial<OperationalReceipt> = {}): OperationalReceip
   ...overrides,
 });
 
-function fixture(rows: OperationalReceipt[]) {
+function fixture(rows: OperationalReceipt[], aiIds: string[] = []) {
   const queries: any[] = [];
   const db = {
-    channexHostMessageSend: { findMany: async () => [] },
+    channexHostMessageSend: { findMany: async () => aiIds.map(id => ({ response: { id } })) },
     messageLog: { findMany: async ({ where, take }: any) => {
       queries.push(where);
       return rows.filter(row =>
@@ -57,6 +57,13 @@ test("trusted Channex operational receipts are owned by Pin&Go, not the host", a
       "PRECHECKIN", "GUEST_ACCESS_PASSCODE", "CHECKOUT",
     ]);
   }
+});
+
+test("previous Pin AI receipts still count alongside operational messages", async () => {
+  const f = fixture([receipt()], [hostId]);
+  const own = await f.repo.ownMessageIds({ organizationId, propertyId, threadId }, [operationId, hostId]);
+  assert.equal(own.has(operationId), true);
+  assert.equal(own.has(hostId), true);
 });
 
 test("incorrect scope, uncertain receipts and other message types never bypass host takeover", async () => {
