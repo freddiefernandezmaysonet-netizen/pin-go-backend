@@ -26,7 +26,8 @@ export const cleaningConfirmRouter = Router();
 
 // Only the separate activation capability delivered in a newly built SMS adds this action.
 cleaningConfirmRouter.use("/cleaning/confirm/:token", async (req, res, next) => {
-  res.setHeader("Referrer-Policy", "no-referrer");
+  // Preserve same-origin form POSTs while withholding capability URLs from other sites.
+  res.setHeader("Referrer-Policy", "same-origin");
   res.setHeader("Cache-Control", "no-store");
   const activationToken = String(req.query.activation ?? "");
   if (req.method !== "GET" || !/^[a-f0-9]{48}$/.test(activationToken)) return next();

@@ -89,8 +89,9 @@ async function fixture(t, overrides = {}) {
     async $transaction(run) { return run(db); },
   };
   const handlers = new Map();
+  const middleware = [];
   const router = {
-    use() {},
+    use(path, handler) { middleware.push(handler); },
     get(path, handler) { handlers.set(`GET ${path}`, handler); },
     post(path, handler) { handlers.set(`POST ${path}`, handler); },
   };
@@ -128,10 +129,15 @@ async function fixture(t, overrides = {}) {
     const handler = match && handlers.get(`${req.method} /cleaning/confirm/:token${match[2] ?? ""}`);
     if (!handler) { res.writeHead(404).end(); return; }
     const response = {
+      setHeader(name, value) { res.setHeader(name, value); return response; },
       status(code) { res.statusCode = code; return response; },
       send(body) { res.setHeader("Content-Type", "text/html; charset=utf-8"); res.end(body); return response; },
     };
-    try { await handler({ params: { token: match[1] } }, response); }
+    try {
+      const request = { params: { token: match[1] }, method: req.method, query: {} };
+      for (const run of middleware) await run(request, response, () => {});
+      await handler(request, response);
+    }
     catch (error) { res.statusCode = 500; res.end(String(error)); }
   });
   server.listen(0, "127.0.0.1");
@@ -143,7 +149,7 @@ async function fixture(t, overrides = {}) {
     advanceClock() { clock = new Date(completedAt.getTime() + 3600000); },
     async request(method, path = routePath + (method === "POST" ? "/complete" : "")) {
       const response = await fetch(origin + path, { method, signal: AbortSignal.timeout(5000) });
-      return { status: response.status, html: await response.text() };
+      return { status: response.status, headers: response.headers, html: await response.text() };
     },
   };
 }
@@ -283,3 +289,14 @@ for (const language of ["en", "es"]) {
     });
   }
 }
+
+
+test("cleaning GET and POST preserve same-origin form submission and remain uncached", async t => {
+  const f = await fixture(t);
+  for (const method of ["GET", "POST"]) {
+    const response = await f.request(method);
+    assert.equal(response.status, 200);
+    assert.equal(response.headers.get("referrer-policy"), "same-origin");
+    assert.equal(response.headers.get("cache-control"), "no-store");
+  }
+});
