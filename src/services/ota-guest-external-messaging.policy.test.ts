@@ -27,3 +27,14 @@ test("does not block with an unset variable", () => {
 test("does not trust missing external booking identity", () => {
   assert.equal(isOtaGuestExternalDeliveryBlocked({ source: "AIRBNB", externalProvider: "CHANNEX", externalId: null }, "sms", env), false);
 });
+
+test("recognizes persisted Booking.com and Airbnb source spellings", () => {
+  for (const source of ["bookingcom", "Booking.com", "BOOKING-COM", "airbnb", "AIR_BNB"]) {
+    assert.equal(isOtaGuestExternalDeliveryBlocked(ota(source), "email", env), true);
+  }
+});
+test("does not block Channex Vrbo or Expedia when OTA suppression is configured", () => {
+  for (const source of ["vrbo", "expedia"]) {
+    assert.equal(isOtaGuestExternalDeliveryBlocked(ota(source), "sms", env), false);
+  }
+});
