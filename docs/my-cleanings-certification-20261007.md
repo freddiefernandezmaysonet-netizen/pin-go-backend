@@ -51,6 +51,8 @@ Four failure-path scope tests pass. An additional local authentication run passe
 
 CI for this follow-up must finish before claiming the earlier failures are closed. Mobile visual and physical NFC tests remain pending.
 
+CI checkpoint on `1fce14f57aecbe79cc6dacbbda3882b291c440bb`: 65 checks passed, two still running, one failed. Native cleaning, E5–E8B authentication, Channex Host Inbox/Airbnb Access/Messages Installation, E15, APMS Exit Closure and Airbnb Listing Discovery passed. The sole completed failure was OTA Initial Distribution's old file allowlist; its focused runtime, strict compile, activation, Full Sync and certified-core steps passed first. Added the same exact PR #376 scope guard to that step and updated the reviewed manifest. Its new candidate CI remains pending. Dashboard build and six view/interaction tests also passed locally.
+
 - [x] Durable recovery traversal and restart/failure rediscovery verified.
 - [x] Main integration and current Pin AI activation/terms controls verified.
 - [x] Additive migration rehearsal and native concurrent cleaning certification.
