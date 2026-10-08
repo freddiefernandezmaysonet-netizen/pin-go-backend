@@ -107,3 +107,47 @@ test("same-stay later failure uses approved reopen transition instead of illegal
   assert.equal(f.reopenCalls.length, 1);
   assert.equal(f.saved[2].workflowState, "ACTION_REQUIRED");
 });
+
+test("legacy Airbnb pilot transport failures reach Mission Control without new SMS/email", async () => {
+  for (const error of [
+    "AIRBNB_BOOKING_THREAD_MISSING_OR_AMBIGUOUS",
+    "AIRBNB_THREAD_NOT_ELIGIBLE",
+    "AIRBNB_PROPERTY_MAPPING_MISSING",
+    "AIRBNB_PREFLIGHT_FAILED",
+  ]) {
+    const f = fixture();
+    const result = await reconcileOtaOperationalDeliveryAttention(f.db, {
+      ...input, error,
+    }, f.deps);
+    assert.equal(result, "CREATED");
+    assert.equal(f.saved.length, 1);
+    assert.equal(f.saved[0].visibility, "HOST");
+    assert.equal(f.saved[0].actionTarget, "MESSAGING");
+  }
+});
+
+test("legacy Airbnb uncertain acceptance never authorizes blind replay", async () => {
+  const f = fixture();
+  await reconcileOtaOperationalDeliveryAttention(f.db, {
+    ...input, error: "AIRBNB_SEND_OUTCOME_UNKNOWN",
+  }, f.deps);
+  assert.equal(f.saved.length, 1);
+  assert.match(f.saved[0].recommendedAction, /before any manual resend/);
+  assert.equal(f.saved[0].nextAutomaticStep, null);
+});
+
+test("legacy Airbnb not-due conditions do not alert the host", async () => {
+  const f = fixture();
+  for (const error of [
+    "AIRBNB_PRECHECKIN_NOT_DUE",
+    "AIRBNB_CHECKOUT_NOT_DUE",
+    "AIRBNB_ACCESS_NOT_RELEASED",
+    "AIRBNB_ACCESS_EXPIRED",
+  ]) {
+    const result = await reconcileOtaOperationalDeliveryAttention(f.db, {
+      ...input, error,
+    }, f.deps);
+    assert.equal(result, "UNCHANGED");
+  }
+  assert.equal(f.saved.length, 0);
+});
