@@ -1,6 +1,6 @@
 import { formatPropertyArrivalLocation } from "./property-arrival-location.js";
 import { isChannexGuestRegistrationExempt } from "./guest-registration-channel.policy";
-import { deliverAirbnbCommunication } from "../channex-messaging/airbnb-access.service.js";
+import { deliverOtaOperationalCommunication } from "../channex-messaging/ota-operational-guest.service.js";
 import { isOtaGuestExternalDeliveryBlocked } from "./ota-guest-external-messaging.policy.js";
 import { PrismaClient } from "@prisma/client";
 import { sendSms } from "../integrations/twilio/twilio.client";
@@ -220,7 +220,7 @@ export async function sendPreCheckinEmail(
   prisma: PrismaClient,
   reservationId: string
 ) {
-  const routed = await deliverAirbnbCommunication(prisma, reservationId, "PRECHECKIN");
+  const routed = await deliverOtaOperationalCommunication(prisma, reservationId, "PRECHECKIN");
   if (routed) return routed;
   const existing = await prisma.messageDispatchLog.findFirst({
     where: {
@@ -376,7 +376,7 @@ export async function sendPreCheckinSms(
   prisma: PrismaClient,
   reservationId: string
 ) {
-  const routed = await deliverAirbnbCommunication(prisma, reservationId, "PRECHECKIN");
+  const routed = await deliverOtaOperationalCommunication(prisma, reservationId, "PRECHECKIN");
   if (routed) return routed;
   let retryBody: string | null = null;
   try {
