@@ -42,12 +42,12 @@ export async function processOtaOperationalCommunications(
         externalProvider: "CHANNEX", externalId: { not: null },
         source: { in: [...OTA_SOURCE_SPELLINGS], mode: "insensitive" },
         status: "ACTIVE", paymentState: "PAID", cancelledAt: null,
+        // Do not backfill access codes to guests already in-stay when
+        // the OTA switch is first enabled; historical SMS/OTA delivery may
+        // already have provided the same credential. New check-ins are
+        // processed in their upcoming window, and checkout still runs on time.
         OR: [
           { checkIn: { gt: now, lte: fourHours } },
-          {
-            guestAccessReleaseStatus: "RELEASED",
-            checkIn: { lte: fourHours }, checkOut: { gt: now },
-          },
           { checkOut: { gte: pastHour, lte: now } },
         ],
       },
@@ -72,8 +72,10 @@ export async function processOtaOperationalCommunications(
       await Promise.all(eligible.slice(index, index + CONCURRENCY).map(async r => {
         const types: Array<"PRECHECKIN" | "GUEST_ACCESS_PASSCODE" | "CHECKOUT"> = [];
         if (r.checkIn > now && r.checkIn <= fourHours) types.push("PRECHECKIN");
+        // Initial/manual access release still routes through the canonical
+        // send service; only the broad periodic sweep must avoid in-stay replay.
         if (r.guestAccessReleaseStatus === "RELEASED" && r.checkOut > now &&
-            r.checkIn <= fourHours) types.push("GUEST_ACCESS_PASSCODE");
+            r.checkIn > now && r.checkIn <= fourHours) types.push("GUEST_ACCESS_PASSCODE");
         if (r.checkOut >= pastHour && r.checkOut <= now) types.push("CHECKOUT");
 
         for (const type of types) {
