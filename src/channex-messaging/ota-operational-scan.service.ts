@@ -1,6 +1,7 @@
 import type { PrismaClient } from "@prisma/client";
 import { isOtaGuestExternalDeliveryBlocked } from "../services/ota-guest-external-messaging.policy.js";
 import { deliverOtaOperationalCommunication } from "./ota-operational-guest.service.js";
+import { reconcileOtaOperationalDeliveryAttention } from "./ota-operational-attention.service.js";
 
 const PAGE_SIZE = 100;
 const CONCURRENCY = 4;
@@ -16,6 +17,7 @@ export async function processOtaOperationalCommunications(
   env: NodeJS.ProcessEnv = process.env,
   now = new Date(),
   deliver: typeof deliverOtaOperationalCommunication = deliverOtaOperationalCommunication,
+  reconcile: typeof reconcileOtaOperationalDeliveryAttention = reconcileOtaOperationalDeliveryAttention,
 ): Promise<{ candidates: number; accepted: number; blocked: number }> {
   if (!String(env.OTA_GUEST_EXTERNAL_MESSAGING_BLOCKED_PROVIDERS ?? "").trim()) {
     return { candidates: 0, accepted: 0, blocked: 0 };
@@ -43,6 +45,8 @@ export async function processOtaOperationalCommunications(
       },
       select: {
         id: true, source: true, externalProvider: true, externalId: true,
+        reservationNumber: true, propertyId: true,
+        property: { select: { organizationId: true } },
         checkIn: true, checkOut: true, guestAccessReleaseStatus: true,
       },
       orderBy: { id: "asc" },
@@ -76,6 +80,23 @@ export async function processOtaOperationalCommunications(
               console.error("[OTA_CHANNEX_OPERATIONAL_BLOCKED]", {
                 reservationId: r.id, type, code: result.error ?? "UNKNOWN",
               });
+            }
+            if (result) {
+              try {
+                await reconcile(prisma, {
+                  organizationId: r.property.organizationId,
+                  propertyId: r.propertyId,
+                  reservationId: r.id,
+                  reservationNumber: r.reservationNumber,
+                  type, ok: result.ok, error: result.error, now,
+                });
+              } catch {
+                // Channex send outcome is authoritative even if Mission Control
+                // persistence fails. The next scan can reconcile the issue.
+                console.error("[OTA_CHANNEX_HOST_ATTENTION_WRITE_FAILED]", {
+                  reservationId: r.id, type,
+                });
+              }
             }
           } catch {
             blocked++;
