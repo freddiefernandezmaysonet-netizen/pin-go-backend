@@ -471,7 +471,8 @@ test("one Demo reservation through HTTP, messages, access, incident, host and cl
 
     const second = await createGrant(); await activateGrant(second.id);
     const secondCode = await db.accessCode.findUniqueOrThrow({ where: { accessGrantId: second.id } });
-    assert.match(decryptAccessCode(secondCode.accessCodeEnc!), /^\d{8}$/);
+    assert.equal(decryptAccessCode(secondCode.accessCodeEnc!), "00010");
+    assert.equal(secondCode.expiresAt!.getTime(), checkOut.getTime());
     assert.equal((await db.accessGrant.findUniqueOrThrow({ where: { id: second.id } })).accessCodeMasked!.length, 7);
     assert.deepEqual(await db.accessCode.findUniqueOrThrow({ where: { accessGrantId: first.id } }), firstCode);
 
@@ -491,7 +492,7 @@ test("one Demo reservation through HTTP, messages, access, incident, host and cl
     assert.equal((await db.accessGrant.findUniqueOrThrow({ where: { id: retry.id } })).status, "PENDING");
     customFailure = null;
     const competing = await createGrant(gatewayLock.id, "+12025550345"); await activateGrant(competing.id);
-    assert.match(decryptAccessCode((await db.accessCode.findUniqueOrThrow({ where: { accessGrantId: competing.id } })).accessCodeEnc!), /^\d{8}$/,
+    assert.equal(decryptAccessCode((await db.accessCode.findUniqueOrThrow({ where: { accessGrantId: competing.id } })).accessCodeEnc!), "03450",
       "a durable pending candidate is reserved even while absent from provider inventory");
     await activateGrant(retry.id);
     assert.equal(decryptAccessCode((await db.accessCode.findUniqueOrThrow({ where: { accessGrantId: retry.id } })).accessCodeEnc!), "0345");
