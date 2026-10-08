@@ -96,6 +96,41 @@ const noEmail = async () => {
   throw new Error("email must not execute");
 };
 
+test("blocked Booking.com and Airbnb operational E7 retries never call SMS or email providers", async () => {
+  const oldValue = process.env.OTA_GUEST_EXTERNAL_MESSAGING_BLOCKED_PROVIDERS;
+  process.env.OTA_GUEST_EXTERNAL_MESSAGING_BLOCKED_PROVIDERS = "AIRBNB,BOOKING_COM";
+  try {
+    for (const source of ["Airbnb", "BookingCom"]) {
+      for (const channel of ["sms", "email"] as const) {
+        const f = fakePrisma({
+          reservation: {
+            source,
+            externalProvider: "CHANNEX",
+            externalId: "11111111-1111-4111-8111-111111111111",
+          },
+          message: { channel },
+        });
+        let calls = 0;
+        const result = await executeGuestJourneyCommunicationDeliveryAdapter(
+          f.prisma,
+          claim({ messageLogId: "message-1", communicationType: "PRECHECKIN", channel }),
+          { now },
+          {
+            sendSms: async () => { calls++; return { sid: "unexpected" } as any; },
+            sendEmail: async () => { calls++; return { id: "unexpected" } as any; },
+          },
+        );
+        assert.equal(calls, 0);
+        assert.equal(result.providerCalls, 0);
+        assert.equal(f.message.status, "OBSOLETE");
+      }
+    }
+  } finally {
+    if (oldValue === undefined) delete process.env.OTA_GUEST_EXTERNAL_MESSAGING_BLOCKED_PROVIDERS;
+    else process.env.OTA_GUEST_EXTERNAL_MESSAGING_BLOCKED_PROVIDERS = oldValue;
+  }
+});
+
 test("missing correlation evidence waits without contacting a provider", async () => {
   const { prisma } = fakePrisma({});
   let calls = 0;
