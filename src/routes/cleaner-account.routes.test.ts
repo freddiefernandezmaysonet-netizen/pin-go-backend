@@ -30,7 +30,9 @@ test("requireAuth rejects an authenticated cleaner on a host route", async () =>
 test("personal API ignores supplied identity, rejects other tasks and never uses NFC completion as work completion", async () => {
   const queries: any[] = [];
   let staffActive = true;
+  const sqlQueries: any[] = [];
   const db: any = {
+    $queryRaw: async (query: any) => { sqlQueries.push(query); return query.sql.includes("SELECT DISTINCT") ? [{ id: "property", name: "Casa" }] : [{ id: "own" }]; },
     staffMember: { findUnique: async () => ({ id: "staff", dashboardUserId: "user", organizationId: "org", isActive: staffActive, fullName: "Maria", preferredLanguage: "es" }) },
     cleaningConfirmation: {
       findMany: async ({ where }: any) => { queries.push(where); return [{ id: "own", staffMemberId: "staff", propertyId: "property", reservationId: "reservation", status: "CONFIRMED" }]; },
@@ -65,7 +67,14 @@ test("personal API ignores supplied identity, rejects other tasks and never uses
       const invalid = await fetch(`${base}/api/cleaner/cleanings?${query}`);
       assert.equal(invalid.status, 400, query);
     }
+    const properties = await fetch(`${base}/api/cleaner/cleaning-properties?staffMemberId=other&organizationId=other`);
+    assert.equal(properties.status, 200);
+    assert.equal(properties.headers.get("cache-control"), "no-store");
+    assert.deepEqual(await properties.json(), { items: [{ id: "property", name: "Casa" }] });
+    assert.deepEqual(sqlQueries.at(-1).values, ["staff", "org"]);
+    for (const view of ["all", "overdue"]) assert.equal((await fetch(`${base}/api/cleaner/cleanings?view=${view}&propertyId=property`)).status, 200);
     staffActive = false;
+    assert.equal((await fetch(`${base}/api/cleaner/cleaning-properties`)).status, 403);
     assert.equal((await fetch(`${base}/api/cleaner/cleanings`)).status, 403);
   } finally { await new Promise<void>(resolve => server.close(() => resolve())); }
 });

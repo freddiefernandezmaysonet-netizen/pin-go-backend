@@ -92,18 +92,26 @@ export function buildCleanerAccountRouter(prisma: PrismaClient, authenticate: Re
       return res.json({ id: staff.id, fullName: staff.fullName, preferredLanguage: staff.preferredLanguage });
     } catch { return res.status(400).json({ error: "LANGUAGE_INVALID" }); }
   });
+  router.get("/api/cleaner/cleaning-properties", async (_req, res) => {
+    try {
+      const staff = res.locals.cleaner;
+      const items = await cleanerTaskProperties(prisma, { staffMemberId: staff.id, organizationId: staff.organizationId });
+      res.setHeader("Cache-Control", "no-store");
+      return res.json({ items });
+    } catch (error) { return fail(res, error); }
+  });
   router.get("/api/cleaner/cleanings", async (req, res) => {
     try {
       const staff = res.locals.cleaner;
       const limit = 25;
       const cursor = typeof req.query.cursor === "string" ? req.query.cursor : undefined;
       const view = req.query.view;
-      if (view !== undefined && (typeof view !== "string" || !["today", "upcoming", "history"].includes(view))) return res.status(400).json({ error: "CLEANING_VIEW_INVALID" });
+      if (view !== undefined && (typeof view !== "string" || !["today", "upcoming", "history", "overdue", "all"].includes(view))) return res.status(400).json({ error: "CLEANING_VIEW_INVALID" });
       let filters;
       try { filters = parseCleanerTaskFilters(req.query); }
       catch { return res.status(400).json({ error: "CLEANING_FILTER_INVALID" }); }
       const ids = view === undefined && Object.keys(filters).length === 0 ? null : await cleanerTaskPageIds(prisma, {
-        staffMemberId: staff.id, organizationId: staff.organizationId, view: (view ?? "today") as CleanerTaskView, filters,
+        staffMemberId: staff.id, organizationId: staff.organizationId, view: (view ?? "all") as CleanerTaskView, filters,
         cursor, now: new Date(), limit: limit + 1,
       });
       const offers = await prisma.cleaningConfirmation.findMany({
@@ -163,4 +171,4 @@ export function buildCleanerAccountRouter(prisma: PrismaClient, authenticate: Re
   });
   return router;
 }
-import { cleanerTaskPageIds, parseCleanerTaskFilters, type CleanerTaskView } from "../services/cleaner-task-pagination.service.js";
+import { cleanerTaskPageIds, cleanerTaskProperties, parseCleanerTaskFilters, type CleanerTaskView } from "../services/cleaner-task-pagination.service.js";

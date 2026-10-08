@@ -2,14 +2,15 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
 import { PrismaClient } from "@prisma/client";
-import { cleanerTaskPageIds } from "./cleaner-task-pagination.service.js";
+import { cleanerTaskPageIds, cleanerTaskProperties } from "./cleaner-task-pagination.service.js";
 const url = process.env.CLEANER_ACCOUNT_TEST_DATABASE_URL;
 if (url) { const u = new URL(url); if (!["127.0.0.1", "localhost", "[::1]"].includes(u.hostname) || u.pathname !== "/cleaner_account_test") throw new Error("Isolated loopback database required"); }
 test("view filter precedes 25-record pagination and respects local day and cleaner ownership", { skip: !url }, async t => {
   const db = new PrismaClient({ datasources: { db: { url: url! } } });
   const id = `page-${randomUUID()}`;
   await db.organization.create({ data: { id, name: "Synthetic pagination" } });
-  t.after(async () => { await db.cleaningWork.deleteMany({ where: { propertyId: id } }); await db.cleaningConfirmation.deleteMany({ where: { propertyId: id } }); await db.reservation.deleteMany({ where: { propertyId: id } }); await db.property.delete({ where: { id } }); await db.staffMember.deleteMany({ where: { organizationId: id } }); await db.organization.delete({ where: { id } }); await db.$disconnect(); });
+  const properties = [id, `${id}-other`, `${id}-unassigned`];
+  t.after(async () => { await db.cleaningWork.deleteMany({ where: { propertyId: { in: properties } } }); await db.cleaningConfirmation.deleteMany({ where: { propertyId: { in: properties } } }); await db.reservation.deleteMany({ where: { propertyId: { in: properties } } }); await db.property.deleteMany({ where: { id: { in: properties } } }); await db.staffMember.deleteMany({ where: { organizationId: id } }); await db.organization.delete({ where: { id } }); await db.$disconnect(); });
   await db.property.create({ data: { id, organizationId: id, name: "Synthetic property 100%_", timezone: "America/Puerto_Rico" } });
   await db.staffMember.create({ data: { id, organizationId: id, fullName: "Synthetic cleaner" } });
   for (let index = 0; index < 30; index++) {
@@ -23,7 +24,17 @@ test("view filter precedes 25-record pagination and respects local day and clean
     await db.cleaningConfirmation.create({ data: { id: rid, reservationId: rid, propertyId: id, staffMemberId: id, token: randomUUID(), status: status! } });
   }
   const input = { staffMemberId: id, organizationId: id, now: new Date("2026-10-08T02:00:00Z"), limit: 26 };
-  assert.deepEqual(await cleanerTaskPageIds(db, { ...input, view: "today" }), [`${id}-a-today`, `${id}-a-overdue`]);
+  assert.deepEqual(await cleanerTaskPageIds(db, { ...input, view: "today" }), [`${id}-a-today`]);
+  assert.deepEqual(await cleanerTaskPageIds(db, { ...input, view: "overdue" }), [`${id}-a-overdue`]);
+  const allFirst = await cleanerTaskPageIds(db, { ...input, view: "all" });
+  const allSecond = await cleanerTaskPageIds(db, { ...input, view: "all", cursor: allFirst[24] });
+  assert.equal(new Set([...allFirst.slice(0, 25), ...allSecond]).size, 33);
+  assert.deepEqual(await cleanerTaskProperties(db, input), [{ id, name: "Synthetic property 100%_" }]);
+  assert.deepEqual(await cleanerTaskProperties(db, { ...input, staffMemberId: "foreign" }), []);
+  assert.deepEqual(await cleanerTaskProperties(db, { ...input, organizationId: "foreign" }), []);
+  assert.equal((await cleanerTaskPageIds(db, { ...input, view: "all", filters: { propertyId: id } })).length, 26);
+  assert.deepEqual(await cleanerTaskPageIds(db, { ...input, view: "all", filters: { propertyId: "foreign" } }), []);
+  assert.deepEqual(await cleanerTaskPageIds(db, { ...input, view: "all", filters: { status: "CANCELLED" } }), [`${id}-a-closed`]);
   const first = await cleanerTaskPageIds(db, { ...input, view: "upcoming" }); assert.equal(first.length, 26);
   const second = await cleanerTaskPageIds(db, { ...input, view: "upcoming", cursor: first[24] }); assert.equal(second.length, 5);
   assert.equal(new Set([...first.slice(0, 25), ...second]).size, 30);
@@ -31,7 +42,7 @@ test("view filter precedes 25-record pagination and respects local day and clean
   assert.deepEqual(await cleanerTaskPageIds(db, { ...input, view: "today", filters: { q: "PROPERTY 100%_", status: "CONFIRMED", from: "2026-10-07", to: "2026-10-07" } }), [`${id}-a-today`]);
   assert.deepEqual(await cleanerTaskPageIds(db, { ...input, view: "history", filters: { status: "CONFIRMED" } }), []);
   assert.deepEqual(await cleanerTaskPageIds(db, { ...input, view: "today", filters: { q: "absent" } }), []);
-  assert.deepEqual(await cleanerTaskPageIds(db, { ...input, view: "today", filters: { to: "2026-10-06" } }), [`${id}-a-overdue`]);
+  assert.deepEqual(await cleanerTaskPageIds(db, { ...input, view: "overdue", filters: { to: "2026-10-06" } }), [`${id}-a-overdue`]);
   const filtered = await cleanerTaskPageIds(db, { ...input, view: "upcoming", filters: { q: "property", status: "CONFIRMED", from: "2026-11-02", to: "2026-11-02" } });
   assert.equal(filtered.length, 26);
   assert.equal((await cleanerTaskPageIds(db, { ...input, view: "upcoming", cursor: filtered[24], filters: { q: "property", status: "CONFIRMED", from: "2026-11-02", to: "2026-11-02" } })).length, 5);
@@ -41,4 +52,13 @@ test("view filter precedes 25-record pagination and respects local day and clean
   assert.deepEqual(await cleanerTaskPageIds(db, { ...input, view: "history", filters: { status: "CANCELLED", from: "2026-10-07", to: "2026-10-07" } }), [`${id}-a-today`]);
   assert.deepEqual(await cleanerTaskPageIds(db, { ...input, view: "today", organizationId: "foreign" }), []);
   assert.deepEqual(await cleanerTaskPageIds(db, { ...input, view: "today", staffMemberId: "foreign" }), []);
+  await db.property.create({ data: { id: `${id}-other`, organizationId: id, name: "Older assignment", timezone: "America/Puerto_Rico" } });
+  await db.property.create({ data: { id: `${id}-unassigned`, organizationId: id, name: "Unassigned", timezone: "America/Puerto_Rico" } });
+  const oldId = `${id}-0-old`;
+  await db.reservation.create({ data: { id: oldId, propertyId: `${id}-other`, guestName: "Synthetic", status: "ACTIVE", checkIn: new Date("2025-01-01T20:00Z"), checkOut: new Date("2025-01-02T16:00Z") } });
+  await db.cleaningConfirmation.create({ data: { id: oldId, reservationId: oldId, propertyId: `${id}-other`, staffMemberId: id, token: randomUUID(), status: "CONFIRMED" } });
+  assert.deepEqual(await cleanerTaskProperties(db, input), [{ id: `${id}-other`, name: "Older assignment" }, { id, name: "Synthetic property 100%_" }]);
+  assert.deepEqual(await cleanerTaskPageIds(db, { ...input, view: "all", filters: { propertyId: `${id}-other` } }), [oldId]);
+  assert.deepEqual(await cleanerTaskPageIds(db, { ...input, view: "overdue", filters: { propertyId: `${id}-other` } }), [oldId]);
+  assert.deepEqual(await cleanerTaskPageIds(db, { ...input, view: "today", filters: { propertyId: `${id}-other` } }), []);
 });
