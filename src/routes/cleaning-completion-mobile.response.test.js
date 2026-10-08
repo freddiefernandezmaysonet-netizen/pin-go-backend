@@ -22,7 +22,7 @@ function loadTs(relativePath, dependencies = {}) {
   assert.equal(errors.length, 0, JSON.stringify(errors.map(d => d.messageText)));
   const module = { exports: {} };
   new vm.Script(compiled.outputText, { filename: relativePath }).runInNewContext({
-    module, exports: module.exports, Date, Intl,
+    module, exports: module.exports, Date, Intl, URL, process: { env: {} },
     console: { log() {}, warn() {}, error() {} },
     require(specifier) {
       assert.ok(Object.hasOwn(dependencies, specifier), `Unexpected dependency: ${specifier}`);
@@ -162,6 +162,7 @@ function assertCompleted(response, localTime = "11:44 AM AST") {
   assert.match(response.html, /<h2>Cleaning completed<\/h2>/);
   assert.ok(response.html.includes(`<p><b>Completed:</b> Oct 1, 2026, ${localTime}</p>`));
   assert.match(response.html, /does not independently certify a physical inspection/);
+  assert.match(response.html, /href="https:\/\/app\.pin-ngo\.com\/my-cleanings">Back to My cleanings<\/a>/);
   assert.doesNotMatch(response.html, /<(?:form|button|input)\b/i);
   assert.doesNotMatch(response.html, /fixture-cleaner-token/);
 }

@@ -1,5 +1,14 @@
 import { assertCleaningActionTime, type CleaningActionWindow } from "./cleaning-action-window.js";
 
+/** Cancellation closes at the window start even without a Start declaration. */
+export function renderCleaningCancellation(input: { token: string; language: "es" | "en"; window: CleaningActionWindow | null; now?: Date }) {
+  const now = input.now ?? new Date();
+  const start = input.window?.startsAt.getTime();
+  if (!start || !Number.isFinite(start) || !Number.isFinite(now.getTime()) || now.getTime() >= start) return "";
+  const es = input.language === "es";
+  return `<details id="cleaning-cancellation"><summary>${es ? "Cancelar limpieza" : "Cancel cleaning"}</summary><p>${es ? "Confirma si ya no puedes realizar esta limpieza. Pin&Go buscará un respaldo." : "Confirm if you can no longer perform this cleaning. Pin&Go will look for a backup."}</p><form method="POST" action="/cleaning/confirm/${encodeURIComponent(input.token)}/cancel"><button class="cleaner-action cleaner-action-secondary">${es ? "Sí, cancelar limpieza" : "Yes, cancel cleaning"}</button></form></details><script>(()=>{const d=document.getElementById("cleaning-cancellation"),base=${now.getTime()},origin=performance.now(),start=${start};function update(){d.hidden=base+performance.now()-origin>=start;d.querySelector("button").disabled=d.hidden;}d.querySelector("form").addEventListener("submit",e=>{update();if(d.hidden)e.preventDefault();});setInterval(update,1000);document.addEventListener("visibilitychange",update);window.addEventListener("pageshow",update);update();})()</script>`;
+}
+
 /** One action per portal view; server remains authoritative on every POST. */
 export function renderCleaningActionButton(input: { token: string; action: "start" | "complete"; window: CleaningActionWindow | null; startedAt: Date | null; language: "es" | "en"; now?: Date; blockedReason?: string }) {
   const { action, window, language } = input;

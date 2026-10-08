@@ -51,9 +51,36 @@ export async function reportCleaningIssue(db: PrismaClient, identity: Identity, 
 }
 export async function readCleaningIssues(db: PrismaClient, identity: Identity, now = new Date()) {
   return db.$transaction(async tx => {
-    const work = await currentWork(tx, identity);
+    // Historical reads retain the original cleaner/organization scope. They do
+    // not use currentWork, which deliberately rejects closed work on writes.
+    const offer = await tx.cleaningConfirmation.findFirst({ where: { id: identity.confirmationId, staffMemberId: identity.staffMemberId } });
+    if (!offer) throw new CleaningWorkIssueError("CLEANING_NOT_AVAILABLE", 404);
+    const reservation = await tx.reservation.findFirst({ where: { id: offer.reservationId, propertyId: offer.propertyId,
+      property: { organizationId: identity.organizationId } }, include: { property: { select: { status: true } } } });
+    const staff = await tx.staffMember.findFirst({ where: { id: identity.staffMemberId, organizationId: identity.organizationId, isActive: true } });
+    if (!reservation || !staff) throw new CleaningWorkIssueError("CLEANING_NOT_AVAILABLE", 404);
+    const works = await tx.cleaningWork.findMany({ where: { confirmationId: offer.id, reservationId: offer.reservationId,
+      propertyId: offer.propertyId, staffMemberId: identity.staffMemberId }, take: 2 });
+    if (works.length > 1) throw new CleaningWorkIssueError("CLEANING_NOT_AVAILABLE", 404);
+    const work = works[0];
+    if (!work) return { reports: [], assessment: null, recoveryOutcome: null, canReport: false, recoveryStatus: "RECORDED" as const };
+    const closed = Boolean(work.cancelledAt || work.supersededAt || work.completionConfirmedAt ||
+      reservation.status !== "ACTIVE" || reservation.property.status !== "ACTIVE");
+    const offers = closed ? [] : await tx.cleaningConfirmation.findMany({ where: { reservationId: offer.reservationId,
+      propertyId: offer.propertyId, status: "CONFIRMED" }, take: 2 });
+    const canReport = !closed && offers.length === 1 && offers[0].id === offer.id;
     const reports = await tx.cleaningWorkIssueReport.findMany({ where: { cleaningWorkId: work.id }, orderBy: [{ reportedAt: "desc" }, { id: "desc" }], take: 20 });
-    const assessment = await assessLatestCleaningIssue(tx, work, now);
-    return { reports, assessment, recoveryStatus: "RECORDED" as const };
+    const assessment = !canReport ? (reports.length ? { decision: "REPORT_SUPERSEDED", reason: "WORK_CLOSED",
+      estimatedFinishAt: null, proposedAccessEnd: null, actionsExecuted: false, accessChanged: false } : null)
+      : await assessLatestCleaningIssue(tx, work, now);
+    const outcome = reports[0] && await tx.operationalIssue.findFirst({ where: { operationalKey: `CLEANING_RECOVERY:${reports[0].id}`,
+      organizationId: identity.organizationId, propertyId: offer.propertyId, reservationId: offer.reservationId }, select: { metadata: true } });
+    const metadata = outcome?.metadata;
+    const state = metadata && typeof metadata === "object" && !Array.isArray(metadata) ? metadata.recoveryState : null;
+    // Return only a known outcome, never host-only text, card IDs or tokens.
+    const recoveryOutcome = typeof state === "string" && ["FOLLOW_ESTIMATE", "ACCESS_EXTENDED", "ACCESS_EXTENSION_PENDING",
+      "BACKUP_OFFER_PENDING", "BACKUP_ACCEPTED", "HOST_REVIEW_REQUIRED", "REPORT_SUPERSEDED", "CLEANER_ACTION_REQUIRED"].includes(state)
+      ? { state } : null;
+    return { reports, assessment, recoveryOutcome, canReport, recoveryStatus: "RECORDED" as const };
   });
 }
