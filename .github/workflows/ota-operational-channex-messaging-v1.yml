@@ -34,6 +34,7 @@ jobs:
           src/services/ota-guest-external-messaging.policy.test.ts
           src/channex-messaging/ota-operational-guest.service.test.ts
           src/channex-messaging/ota-operational-scan.service.test.ts
+          src/channex-messaging/ota-operational-attention.service.test.ts
           src/channex-messaging/airbnb-access.test.ts
           src/services/airbnb-access-routing.test.ts
           src/services/guest-journey-access-communications-outbox.service.test.ts
