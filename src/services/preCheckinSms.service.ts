@@ -1,6 +1,7 @@
 import { formatPropertyArrivalLocation } from "./property-arrival-location.js";
 import { isChannexGuestRegistrationExempt } from "./guest-registration-channel.policy";
 import { deliverAirbnbCommunication } from "../channex-messaging/airbnb-access.service.js";
+import { isOtaGuestExternalDeliveryBlocked } from "./ota-guest-external-messaging.policy.js";
 import { PrismaClient } from "@prisma/client";
 import { sendSms } from "../integrations/twilio/twilio.client";
 import {
@@ -244,6 +245,7 @@ export async function sendPreCheckinEmail(
       preferredLanguage: true,
       guestToken: true,
       guestAgreementSnapshot: true,
+      source: true,
       externalProvider: true,
       externalId: true,
       verificationStatus: true,
@@ -266,6 +268,10 @@ export async function sendPreCheckinEmail(
       },
     },
   });
+
+  if (r && isOtaGuestExternalDeliveryBlocked(r, "email")) {
+    return { ok: true, skipped: true, status: "SKIPPED" as const, reason: "OTA_GUEST_EXTERNAL_MESSAGING_BLOCKED" };
+  }
 
   if (!r || !r.guestEmail) {
     return {
@@ -395,6 +401,7 @@ export async function sendPreCheckinSms(
         preferredLanguage: true,
         guestToken: true,
         guestAgreementSnapshot: true,
+        source: true,
         externalProvider: true,
         externalId: true,
         verificationStatus: true,
@@ -417,6 +424,10 @@ export async function sendPreCheckinSms(
         },
       },
     });
+
+    if (r && isOtaGuestExternalDeliveryBlocked(r, "sms")) {
+      return { ok: true, skipped: true, reason: "OTA_GUEST_EXTERNAL_MESSAGING_BLOCKED" };
+    }
 
     if (!r || !r.guestPhone) {
       return { ok: false, skipped: true, error: "Missing guestPhone" };
