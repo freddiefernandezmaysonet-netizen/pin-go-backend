@@ -91,7 +91,7 @@ test("property checklist snapshots, progress and completion against isolated SQL
     await assert.rejects(setChecklistItem(db, { ...backupOwn, itemId: item.id, checked: false, version: item.version + 1 }), /NOT_EDITABLE/);
     assert.equal((await db.staffMember.findUniqueOrThrow({ where: { id: `${id}-b` } })).ttlockCardRef, "synthetic-card-b");
   });
-  await t.test("new tasks copy the edited template; historical offers do not acquire obligations", async () => {
+  await t.test("unstarted assignments use the current template; started historical cleanings stay empty", async () => {
     await createReservation(`${id}-next`);
     await db.cleaningConfirmation.create({ data: { reservationId: `${id}-next`, propertyId: id, staffMemberId: `${id}-a`, token: randomUUID(), status: "PENDING" } });
     const next = await prepareChecklistSnapshot(db, `${id}-next`);
@@ -99,7 +99,7 @@ test("property checklist snapshots, progress and completion against isolated SQL
     assert.equal(next.items[0]!.labelEs, "Nuevo punto");
     await createReservation(`${id}-legacy`);
     await db.cleaningConfirmation.create({ data: { reservationId: `${id}-legacy`, propertyId: id, staffMemberId: `${id}-a`, token: randomUUID(), status: "CONFIRMED", createdAt: new Date(now.getTime() - 86400000) } });
-    assert.equal((await prepareChecklistSnapshot(db, `${id}-legacy`)).items.length, 0);
+    assert.equal((await prepareChecklistSnapshot(db, `${id}-legacy`)).items.length, 1);
     await createReservation(`${id}-started`);
     const startedOffer = await db.cleaningConfirmation.create({ data: { reservationId: `${id}-started`, propertyId: id, staffMemberId: `${id}-a`, token: randomUUID(), status: "CONFIRMED" } });
     await db.cleaningWork.create({ data: { reservationId: `${id}-started`, propertyId: id, staffMemberId: `${id}-a`, confirmationId: startedOffer.id, scheduledStartAt: start, durationCommitmentMinutes: 20, startConfirmationGraceMinutes: 5, followupGraceMinutes: 15, timingConsentVersion: "v1", timingConsentAcceptedAt: checkout, startConfirmedAt: start } });
@@ -107,4 +107,67 @@ test("property checklist snapshots, progress and completion against isolated SQL
     assert.equal(startedChecklist.legacy, true);
     assert.equal(startedChecklist.items.length, 0);
   });
+  await t.test("saving a template fills empty assigned lists and preserves populated, started and closed lists", async () => {
+    const ids = Object.fromEntries(["empty", "legacy-empty", "started-empty", "completed-empty", "cancelled-empty", "expired-empty", "populated", "read-repair"].map(kind => [kind, `${id}-${kind}`]));
+    for (const [kind, reservationId] of Object.entries(ids)) {
+      await createReservation(reservationId);
+      if (kind === "cancelled-empty") await db.reservation.update({ where: { id: reservationId }, data: { status: "CANCELLED" } });
+      const offer = await db.cleaningConfirmation.create({ data: { reservationId, propertyId: id, staffMemberId: `${id}-a`, token: randomUUID(),
+        status: kind === "expired-empty" ? "EXPIRED" : "CONFIRMED", createdAt: new Date(now.getTime() - 86400000) } });
+      await db.cleaningTaskChecklist.create({ data: { reservationId, propertyId: id, templateRevision: 0, legacy: kind === "legacy-empty",
+        ...(kind === "populated" ? { items: { create: { templateKey: "original", position: 0, labelEs: "Original", labelEn: "Original", required: true, checked: true } } } : {}) } });
+      if (kind === "started-empty" || kind === "completed-empty") await db.cleaningWork.create({ data: {
+        reservationId, propertyId: id, staffMemberId: `${id}-a`, confirmationId: offer.id, scheduledStartAt: start,
+        durationCommitmentMinutes: 20, startConfirmationGraceMinutes: 5, followupGraceMinutes: 15,
+        ...(kind === "started-empty" ? { startConfirmedAt: start } : { completionConfirmedAt: now }),
+      } });
+    }
+    // Repairs lists already saved empty before this fix, without requiring the host to save again.
+    const repaired = await prepareChecklistSnapshot(db, ids["read-repair"]!);
+    assert.equal(repaired.templateRevision, 2); assert.equal(repaired.items.length, 1);
+    const populatedBefore = await prepareChecklistSnapshot(db, ids.populated!);
+    const saved = await saveChecklistTemplate(db, { ...templateInput, revision: 2, items: [
+      { id: "late", es: "Lista posterior", en: "Later checklist", required: true },
+    ] });
+    assert.equal(saved.revision, 3);
+    for (const kind of ["empty", "legacy-empty"]) {
+      const row = await db.cleaningTaskChecklist.findUniqueOrThrow({ where: { reservationId: ids[kind]! }, include: { items: true } });
+      assert.equal(row.templateRevision, 3); assert.equal(row.legacy, false);
+      assert.equal(row.items.length, 1); assert.equal(row.items[0]!.labelEs, "Lista posterior");
+      assert.equal(row.items[0]!.checked, false);
+      await assert.rejects(assertChecklistComplete(db, ids[kind]!), /REQUIRED_ITEMS_PENDING/);
+    }
+    for (const kind of ["started-empty", "completed-empty", "cancelled-empty", "expired-empty"]) {
+      const row = await db.cleaningTaskChecklist.findUniqueOrThrow({ where: { reservationId: ids[kind]! }, include: { items: true } });
+      assert.equal(row.templateRevision, 0); assert.equal(row.items.length, 0);
+      assert.equal((await prepareChecklistSnapshot(db, ids[kind]!)).items.length, 0);
+    }
+    assert.deepEqual(await prepareChecklistSnapshot(db, ids.populated!), populatedBefore);
+    assert.deepEqual(await prepareChecklistSnapshot(db, ids["read-repair"]!), repaired);
+    const after = await prepareChecklistSnapshot(db, ids.empty!);
+    assert.deepEqual(await prepareChecklistSnapshot(db, ids.empty!), after);
+    const concurrentId = `${id}-concurrent-empty`;
+    await createReservation(concurrentId);
+    await db.cleaningConfirmation.create({ data: { reservationId: concurrentId, propertyId: id, staffMemberId: `${id}-a`, token: randomUUID(), status: "CONFIRMED" } });
+    await db.cleaningTaskChecklist.create({ data: { reservationId: concurrentId, propertyId: id, templateRevision: 0 } });
+    const [firstRead, secondRead] = await Promise.all([
+      prepareChecklistSnapshot(db, concurrentId), prepareChecklistSnapshot(db, concurrentId),
+    ]);
+    assert.deepEqual(firstRead, secondRead);
+    assert.equal(firstRead.items.length, 1);
+    assert.equal(await db.cleaningTaskChecklistItem.count({ where: { checklistId: firstRead.id } }), 1);
+    const unsnapshottedId = `${id}-concurrent-missing`;
+    await createReservation(unsnapshottedId);
+    await db.cleaningConfirmation.create({ data: { reservationId: unsnapshottedId, propertyId: id, staffMemberId: `${id}-a`, token: randomUUID(), status: "CONFIRMED" } });
+    const [savedAgain] = await Promise.all([
+      saveChecklistTemplate(db, { ...templateInput, revision: 3 }),
+      prepareChecklistSnapshot(db, unsnapshottedId),
+    ]);
+    assert.equal(savedAgain.revision, 4);
+    const concurrentList = await prepareChecklistSnapshot(db, unsnapshottedId);
+    assert.ok([3, 4].includes(concurrentList.templateRevision));
+    assert.equal(concurrentList.items.length, concurrentList.templateRevision === 3 ? 1 : 2);
+    assert.equal(new Set(concurrentList.items.map(item => item.templateKey)).size, concurrentList.items.length);
+  });
+
 });

@@ -17,32 +17,57 @@ export async function saveChecklistTemplate(db: PrismaClient, input: { propertyI
   const items = parseChecklistItems(input.items);
   if (!Number.isSafeInteger(input.revision) || input.revision < 0) throw new CleaningChecklistError("CHECKLIST_INVALID", 400);
   return db.$transaction(async tx => {
-    await tx.$queryRaw`SELECT "id" FROM "Property" WHERE "id" = ${input.propertyId} FOR UPDATE`;
+    // Serialize host saves without blocking FK checks by reservation-locked readers.
+    await tx.$queryRaw`SELECT "id" FROM "Property" WHERE "id" = ${input.propertyId} FOR NO KEY UPDATE`;
     const property = await tx.property.findFirst({ where: { id: input.propertyId, organizationId: input.organizationId }, select: { id: true } });
     if (!property) throw new CleaningChecklistError("PROPERTY_NOT_FOUND", 404);
     const existing = await tx.cleaningChecklistTemplate.findUnique({ where: { propertyId: input.propertyId } });
     if ((existing?.revision ?? 0) !== input.revision) throw new CleaningChecklistError("CHECKLIST_REVISION_CONFLICT");
-    return tx.cleaningChecklistTemplate.upsert({ where: { propertyId: input.propertyId }, create: { propertyId: input.propertyId, revision: 1, items, updatedByUserId: input.userId }, update: { revision: { increment: 1 }, items, updatedByUserId: input.userId } });
-  });
+    const saved = await tx.cleaningChecklistTemplate.upsert({ where: { propertyId: input.propertyId }, create: { propertyId: input.propertyId, revision: 1, items, updatedByUserId: input.userId }, update: { revision: { increment: 1 }, items, updatedByUserId: input.userId } });
+    if (items.length) {
+      // Use the same reservation fence as start, completion and item commands.
+      // Lock in a stable order, then recheck eligibility under each lock.
+      const reservations = await tx.$queryRaw<{ id: string }[]>`
+        SELECT r."id" FROM "Reservation" r
+        WHERE r."propertyId" = ${input.propertyId} AND r."status"::text = 'ACTIVE'
+          AND EXISTS (SELECT 1 FROM "CleaningConfirmation" o
+            WHERE o."reservationId" = r."id" AND o."propertyId" = r."propertyId"
+              AND o."status" IN ('PENDING', 'CONFIRMED'))
+          AND NOT EXISTS (SELECT 1 FROM "CleaningWork" w WHERE w."reservationId" = r."id"
+            AND (w."startConfirmedAt" IS NOT NULL OR w."completionConfirmedAt" IS NOT NULL))
+          AND NOT EXISTS (SELECT 1 FROM "CleaningTaskChecklist" c
+            JOIN "CleaningTaskChecklistItem" i ON i."checklistId" = c."id"
+            WHERE c."reservationId" = r."id")
+        ORDER BY r."id" FOR UPDATE OF r`;
+      for (const reservation of reservations) await ensureChecklistSnapshot(tx, reservation.id);
+    }
+    return saved;
+  }, { timeout: 30_000 });
 }
 const checklistInclude = { items: { orderBy: { position: "asc" as const } } };
-/** Called under the reservation lock. Never replaces a task's snapshot/progress. */
+/** Called under the reservation lock. Only empty, unstarted assigned lists can be filled. */
 export async function ensureChecklistSnapshot(tx: Prisma.TransactionClient, reservationId: string) {
   const existing = await tx.cleaningTaskChecklist.findUnique({ where: { reservationId }, include: checklistInclude });
-  const reservation = await tx.reservation.findUnique({ where: { id: reservationId }, select: { propertyId: true } });
+  const reservation = await tx.reservation.findUnique({ where: { id: reservationId }, select: { propertyId: true, status: true } });
   if (!reservation) throw new CleaningChecklistError("CLEANING_NOT_AVAILABLE", 404);
   if (existing) {
     if (existing.propertyId !== reservation.propertyId) throw new CleaningChecklistError("CHECKLIST_BINDING_CONFLICT");
-    return existing;
+    if (existing.items.length) return existing;
   }
   const [template, firstOffer, started] = await Promise.all([
     tx.cleaningChecklistTemplate.findUnique({ where: { propertyId: reservation.propertyId } }),
-    tx.cleaningConfirmation.findFirst({ where: { reservationId, propertyId: reservation.propertyId }, orderBy: { createdAt: "asc" }, select: { createdAt: true } }),
-    tx.cleaningWork.findFirst({ where: { reservationId, startConfirmedAt: { not: null } }, select: { id: true } }),
+    tx.cleaningConfirmation.findFirst({ where: { reservationId, propertyId: reservation.propertyId, status: { in: ["PENDING", "CONFIRMED"] } }, orderBy: { createdAt: "asc" }, select: { createdAt: true } }),
+    tx.cleaningWork.findFirst({ where: { reservationId, OR: [{ startConfirmedAt: { not: null } }, { completionConfirmedAt: { not: null } }] }, select: { id: true } }),
   ]);
-  // Missing historical revisions must never introduce obligations retroactively.
-  const legacy = Boolean(started || !firstOffer || (template && template.updatedAt > firstOffer.createdAt));
+  const legacy = Boolean(started || !firstOffer || reservation.status !== "ACTIVE");
   const items = template && !legacy ? parseChecklistItems(template.items) : [];
+  if (existing) {
+    if (!items.length) return existing;
+    return tx.cleaningTaskChecklist.update({ where: { id: existing.id }, data: {
+      templateRevision: template!.revision, legacy: false,
+      items: { create: items.map((item, position) => ({ templateKey: item.id, position, labelEs: item.es, labelEn: item.en, required: item.required })) },
+    }, include: checklistInclude });
+  }
   return tx.cleaningTaskChecklist.create({ data: { reservationId, propertyId: reservation.propertyId, templateRevision: template && !legacy ? template.revision : 0, legacy,
     items: { create: items.map((item, position) => ({ templateKey: item.id, position, labelEs: item.es, labelEn: item.en, required: item.required })) } }, include: checklistInclude });
 }
