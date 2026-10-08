@@ -88,7 +88,8 @@ export async function processOtaOperationalCommunications(
                   propertyId: r.propertyId,
                   reservationId: r.id,
                   reservationNumber: r.reservationNumber,
-                  type, ok: result.ok, error: result.error, now,
+                  type, ok: result.ok, now,
+                  ...(result.error ? { error: result.error } : {}),
                 });
               } catch {
                 // Channex send outcome is authoritative even if Mission Control
@@ -103,6 +104,19 @@ export async function processOtaOperationalCommunications(
             console.error("[OTA_CHANNEX_OPERATIONAL_BLOCKED]", {
               reservationId: r.id, type, code: "UNEXPECTED",
             });
+            try {
+              await reconcile(prisma, {
+                organizationId: r.property.organizationId,
+                propertyId: r.propertyId,
+                reservationId: r.id,
+                reservationNumber: r.reservationNumber,
+                type, ok: false, error: "OTA_OPERATIONAL_UNEXPECTED", now,
+              });
+            } catch {
+              console.error("[OTA_CHANNEX_HOST_ATTENTION_WRITE_FAILED]", {
+                reservationId: r.id, type,
+              });
+            }
           }
         }
       }));
