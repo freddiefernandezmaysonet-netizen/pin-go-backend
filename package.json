@@ -178,7 +178,8 @@
     "pin-ai:benchmark:canary:018": "node --import tsx src/pin-ai/benchmark/canary-018-luna.ts",
     "pin-ai:benchmark:canary:019": "node --import tsx src/pin-ai/benchmark/canary-019-luna.ts",
     "pin-ai:benchmark:canary:020": "node --import tsx src/pin-ai/benchmark/canary-020-luna.ts",
-    "pin-ai:benchmark:usage-reconcile": "node --import tsx src/pin-ai/benchmark/reconcile-provider-usage.ts"
+    "pin-ai:benchmark:usage-reconcile": "node --import tsx src/pin-ai/benchmark/reconcile-provider-usage.ts",
+    "worker:mobile-access-recovery": "tsx src/workers/mobile-access-recovery.worker.ts"
   },
   "dependencies": {
     "@prisma/client": "6.19.3",
