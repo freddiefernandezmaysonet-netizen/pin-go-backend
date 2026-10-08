@@ -75,12 +75,37 @@ export function createAutoRepository(db: PrismaClient) {
       });
     },
     async ownMessageIds(scope: AIThreadScope, ids: string[]) {
-      const receipts = await db.channexHostMessageSend.findMany({ where: { ...threadKey(scope), requestedBy: "pin-ai-channex", status: "SENT" },
-        select: { response: true }, orderBy: { createdAt: "desc" }, take: 100 });
-      return new Set(receipts.flatMap(r => {
+      // Only property messages visible within the bounded 25-message window
+      // matter for takeover detection. Operational pre-checkin/access/checkout
+      // messages are Pin&Go-owned, not a human host intervention.
+      if (!ids.length) return new Set<string>();
+      const [receipts, operational] = await Promise.all([
+        db.channexHostMessageSend.findMany({ where: {
+          ...threadKey(scope), requestedBy: "pin-ai-channex", status: "SENT",
+        }, select: { response: true }, orderBy: { createdAt: "desc" }, take: 100 }),
+        db.messageLog.findMany({ where: {
+          organizationId: scope.organizationId,
+          propertyId: scope.propertyId,
+          to: scope.threadId,
+          channel: "channex", provider: "channex", status: "SENT",
+          communicationType: { in: ["PRECHECKIN", "GUEST_ACCESS_PASSCODE", "CHECKOUT"] },
+          providerMessageId: { in: ids },
+          OR: [
+            { body: { contains: '"kind":"PIN_GO_AIRBNB_DELIVERY"' } },
+            { body: { contains: '"kind":"PIN_GO_OTA_OPERATIONAL_DELIVERY"' } },
+          ],
+        }, select: { providerMessageId: true }, take: ids.length }),
+      ]);
+      const own = new Set(receipts.flatMap(r => {
         const id = r.response && typeof r.response === "object" && !Array.isArray(r.response) ? r.response.id : null;
         return typeof id === "string" && ids.includes(id) ? [id] : [];
       }));
+      for (const receipt of operational) {
+        if (receipt.providerMessageId && ids.includes(receipt.providerMessageId)) {
+          own.add(receipt.providerMessageId);
+        }
+      }
+      return own;
     },
   };
 }

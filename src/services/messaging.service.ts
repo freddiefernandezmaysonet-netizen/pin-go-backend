@@ -1,7 +1,7 @@
 import { formatPropertyArrivalLocation } from "./property-arrival-location.js";
 import { PrismaClient } from "@prisma/client";
 import { sendSms } from "../integrations/twilio/twilio.client";
-import { deliverAirbnbCommunication } from "../channex-messaging/airbnb-access.service.js";
+import { deliverOtaOperationalCommunication } from "../channex-messaging/ota-operational-guest.service.js";
 import {
   getGuestIntlLocale,
   resolveGuestLanguage,
@@ -325,7 +325,7 @@ export async function sendLoggedSms(args: SendLoggedSmsArgs): Promise<SmsSendRes
 export async function sendGuestPasscodeSms(
   args: GuestPasscodeSmsArgs
 ): Promise<SmsSendResult> {
-  const routed = await deliverAirbnbCommunication(args.prisma, args.reservationId, "GUEST_ACCESS_PASSCODE");
+  const routed = await deliverOtaOperationalCommunication(args.prisma, args.reservationId, "GUEST_ACCESS_PASSCODE");
   if (routed) return routed;
   const {
     prisma,

@@ -43,6 +43,7 @@ import {
 } from "../services/preCheckinSms.service";
 import { sendCheckoutSms } from "../services/checkoutSms.service";
 import { processAirbnbCommunications } from "../channex-messaging/airbnb-access.service.js";
+import { processOtaOperationalCommunications } from "../channex-messaging/ota-operational-scan.service.js";
 import { resolveGuestLanguage } from "../services/guest-language.service";
 import { resolveOrganizationGuestReplyTo } from "../services/organization-guest-email.service";
 import { expireNfcAssignments } from "../services/nfc-expire.service";
@@ -2801,6 +2802,16 @@ async function tick() {
       await processAirbnbCommunications(prisma, process.env, now);
     } catch {
       errLog("Airbnb communication scan failed");
+    }
+    // Only active when explicitly configured; reads all eligible Channex
+    // reservations without requiring an email/phone contact.
+    try {
+      const ota = await processOtaOperationalCommunications(prisma, process.env, now);
+      if (ota.candidates > 0 || ota.blocked > 0) {
+        log("OTA operational Channex dispatch", ota);
+      }
+    } catch {
+      errLog("OTA operational Channex scan failed; durable receipts retained");
     }
     try {
       const result = await retryPendingNfcSync(

@@ -1,5 +1,6 @@
 import { PrismaClient } from "@prisma/client";
-import { deliverAirbnbCommunication } from "../channex-messaging/airbnb-access.service.js";
+import { deliverOtaOperationalCommunication } from "../channex-messaging/ota-operational-guest.service.js";
+import { isOtaGuestExternalDeliveryBlocked } from "./ota-guest-external-messaging.policy.js";
 import { sendSms } from "../integrations/twilio/twilio.client";
 import {
   getGuestIntlLocale,
@@ -46,7 +47,7 @@ export async function sendCheckoutSms(
   reservationId: string,
   send: typeof sendSms = sendSms,
 ) {
-  const routed = await deliverAirbnbCommunication(prisma, reservationId, "CHECKOUT");
+  const routed = await deliverOtaOperationalCommunication(prisma, reservationId, "CHECKOUT");
   if (routed) return routed;
   let retryBody: string | null = null;
   try {
@@ -72,6 +73,7 @@ export async function sendCheckoutSms(
         preferredLanguage: true,
         checkOut: true,
         externalRaw: true,
+        source: true,
         externalProvider: true,
         externalId: true,
         property: {
@@ -87,6 +89,10 @@ export async function sendCheckoutSms(
 
     if (!r || !r.guestPhone) {
       return { ok: false, skipped: true, error: "Missing guestPhone" };
+    }
+
+    if (isOtaGuestExternalDeliveryBlocked(r, "sms")) {
+      return { ok: true, skipped: true, reason: "OTA_GUEST_EXTERNAL_MESSAGING_BLOCKED" };
     }
 
     const consentDecision =

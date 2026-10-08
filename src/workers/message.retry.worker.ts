@@ -1,3 +1,4 @@
+import { isOtaGuestExternalDeliveryBlocked } from "../services/ota-guest-external-messaging.policy.js";
 import { buildGuestAccessSmsRetryBody } from "../services/guest-access-sms-retry-body.service.js";
 import { formatPropertyArrivalLocation } from "../services/property-arrival-location.js";
 import { isChannexGuestRegistrationExempt } from "../services/guest-registration-channel.policy";
@@ -169,6 +170,54 @@ function isNonRetryableSmsError(value: unknown) {
   );
 }
 
+async function retireBlockedOtaGuestRetry(message: {
+  id: string;
+  reservationId: string | null;
+  communicationType: string | null;
+  channel: string;
+  status: string | null;
+  providerDeliveryStatus?: string | null;
+  body?: string;
+}): Promise<boolean> {
+  let type = String(message.communicationType ?? "").toUpperCase();
+  if (!type && message.channel === "email" && message.body) {
+    try {
+      const envelope = JSON.parse(message.body);
+      if (envelope?.kind === "PIN_GO_EMAIL_DELIVERY") {
+        type = String(envelope.type ?? "").toUpperCase();
+      }
+    } catch { /* Unparseable email is handled by the original retry guard. */ }
+  }
+  if (!message.reservationId ||
+      !["PRECHECKIN", "CHECKOUT", "GUEST_ACCESS_PASSCODE"].includes(type) ||
+      (message.channel !== "sms" && message.channel !== "email")) return false;
+  const reservation = await prisma.reservation.findUnique({
+    where: { id: message.reservationId },
+    select: { source: true, externalProvider: true, externalId: true },
+  });
+  if (!reservation || !isOtaGuestExternalDeliveryBlocked(reservation, message.channel)) return false;
+  // Preserve provider-accepted historical SENT evidence even if a later receipt
+  // reports failed delivery; exhaust the retry budget without rewriting SENT.
+  if (message.status === "SENT" && message.providerDeliveryStatus === "FAILED") {
+    await prisma.messageLog.updateMany({
+      where: { id: message.id, status: "SENT", providerDeliveryStatus: "FAILED" },
+      data: {
+        retryCount: MAX_RETRIES,
+        error: "OTA_GUEST_EXTERNAL_MESSAGING_BLOCKED",
+      },
+    });
+    return true;
+  }
+  if (message.status === "FAILED") {
+    await prisma.messageLog.updateMany({
+      where: { id: message.id, status: "FAILED" },
+      data: { status: "OBSOLETE", error: "OTA_GUEST_EXTERNAL_MESSAGING_BLOCKED" },
+    });
+    return true;
+  }
+  return false;
+}
+
 async function processRetries() {
   const failedSmsMessages = await prisma.messageLog.findMany({
     where: {
@@ -189,6 +238,7 @@ async function processRetries() {
 
   for (const msg of failedSmsMessages) {
     try {
+      if (await retireBlockedOtaGuestRetry(msg)) continue;
       if (await retireAirbnbLegacyRetry(prisma, msg)) continue;
       if (yieldsToGuestJourneyCommunicationsOwner(msg)) {
         log("SMS retry yielded to Guest Journey COMMUNICATIONS owner", {
@@ -387,6 +437,7 @@ async function processGuestAccessEmailRetries() {
     failedEmailMessages
   ) {
     try {
+      if (await retireBlockedOtaGuestRetry(message)) continue;
       if (await retireAirbnbLegacyRetry(prisma, message)) continue;
       if (yieldsToGuestJourneyCommunicationsOwner(message)) {
         log("Email retry yielded to Guest Journey COMMUNICATIONS owner", {

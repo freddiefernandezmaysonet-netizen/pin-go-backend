@@ -1,0 +1,53 @@
+name: OTA Operational Channex Messaging V1
+on:
+  pull_request:
+    paths:
+      - 'src/channex-messaging/ota-operational-*'
+      - 'src/channex-messaging/pin-ai-auto.repository.ts'
+      - 'src/channex-messaging/pin-ai-operational-receipt-parity.test.ts'
+      - 'src/services/ota-guest-external-messaging.policy*'
+      - 'src/services/guest-journey-access-communications-outbox.service.ts'
+      - 'src/services/preCheckinSms.service.ts'
+      - 'src/services/checkoutSms.service.ts'
+      - 'src/services/email-delivery.service.ts'
+      - 'src/services/messaging.service.ts'
+      - 'src/routes/dashboard.messages*'
+      - 'src/workers/message.retry.worker.ts'
+      - 'src/workers/reservation.worker.ts'
+      - '.github/workflows/ota-operational-channex-messaging-v1.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    env:
+      NODE_ENV: test
+      DATABASE_URL: postgresql://test:test@localhost:5432/test
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+      - run: npm ci
+      - run: npx prisma generate --schema ./prisma
+      - run: >-
+          node --import tsx --test
+          src/routes/dashboard.messages.ota-retry.test.mjs
+          src/services/ota-guest-external-messaging.policy.test.ts
+          src/channex-messaging/ota-operational-guest.service.test.ts
+          src/channex-messaging/ota-operational-scan.service.test.ts
+          src/channex-messaging/ota-operational-attention.service.test.ts
+          src/channex-messaging/pin-ai-operational-receipt-parity.test.ts
+          src/channex-messaging/pin-ai-auto.test.ts
+          src/channex-messaging/airbnb-access.test.ts
+          src/services/airbnb-access-routing.test.ts
+          src/services/guest-journey-access-communications-outbox.service.test.ts
+      - run: npx tsc -p tsconfig.channex-host-inbox.json
+      - run: npx tsc -p tsconfig.guest-journey-enterprise-e7.json
+      - run: >-
+          npx esbuild
+          src/server.ts src/workers/reservation.worker.ts src/workers/message.retry.worker.ts
+          --bundle --platform=node --packages=external --format=esm
+          --outdir=/tmp/ota-channex-messaging-build

@@ -3,6 +3,7 @@ import { Router } from "express";
 import { PrismaClient } from "@prisma/client";
 import { sendSms } from "../integrations/twilio/twilio.client";
 import { retireAirbnbLegacyRetry } from "../channex-messaging/airbnb-access.service.js";
+import { isOtaGuestExternalDeliveryBlocked } from "../services/ota-guest-external-messaging.policy.js";
 import { requireOrg } from "../middleware/requireOrg";
 
 const prisma = new PrismaClient();
@@ -235,6 +236,7 @@ router.post("/messages/:id/retry", requireOrg(prisma), async (req, res) => {
           select: {
             reservation: {
               select: {
+                id: true,
                 property: {
                   select: {
                     organizationId: true,
@@ -284,6 +286,38 @@ router.post("/messages/:id/retry", requireOrg(prisma), async (req, res) => {
 
     if (!msg.to || !msg.body) {
       return res.status(400).json({ ok: false, error: "invalid_message" });
+    }
+
+    // Manual retries obey the same OTA switch as the automatic workers.
+    // Read persisted provenance under the authenticated tenant; a request body,
+    // phone number or stale MessageLog cannot select a different OTA.
+    const operationalType = String(msg.communicationType ?? "").trim().toUpperCase();
+    if (
+      String(process.env.OTA_GUEST_EXTERNAL_MESSAGING_BLOCKED_PROVIDERS ?? "").trim() &&
+      ["PRECHECKIN", "GUEST_ACCESS_PASSCODE", "CHECKOUT"].includes(operationalType)
+    ) {
+      const grantReservationId = msg.accessGrant?.reservation?.id ?? null;
+      const reservationId = msg.reservationId ?? grantReservationId;
+      if (!reservationId ||
+          (msg.reservationId && grantReservationId && msg.reservationId !== grantReservationId)) {
+        return res.status(409).json({ ok: false, error: "retry_reservation_scope_mismatch" });
+      }
+      const reservation = await prisma.reservation.findFirst({
+        where: { id: reservationId, property: { organizationId: orgId } },
+        select: { source: true, externalProvider: true, externalId: true },
+      });
+      if (!reservation) {
+        return res.status(409).json({ ok: false, error: "retry_reservation_scope_mismatch" });
+      }
+      if (isOtaGuestExternalDeliveryBlocked(reservation, "sms")) {
+        // A rejected retry is not another attempt: preserve SID, status,
+        // original error and retryCount. Channex owns operational delivery.
+        return res.status(409).json({
+          ok: false,
+          error: "OTA_GUEST_EXTERNAL_MESSAGING_BLOCKED",
+          message: "This OTA guest message must use Channex Messages, not an external SMS retry.",
+        });
+      }
     }
 
     if (isNonRetryableSmsError(msg.error)) {

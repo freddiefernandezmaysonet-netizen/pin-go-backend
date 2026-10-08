@@ -1,5 +1,5 @@
 import type { PrismaClient } from "@prisma/client";
-import { deliverAirbnbCommunication } from "../channex-messaging/airbnb-access.service.js";
+import { deliverOtaOperationalCommunication } from "../channex-messaging/ota-operational-guest.service.js";
 
 export type LoggedEmailMessageType =
   | "DIRECT_BOOKING_GUEST_CONFIRMATION"
@@ -184,7 +184,7 @@ export async function sendLoggedEmail(
   args: SendLoggedEmailArgs
 ): Promise<SendLoggedEmailResult> {
   if (args.type === "GUEST_ACCESS_PASSCODE" || args.type === "PRECHECKIN") {
-    const routed = await deliverAirbnbCommunication(args.prisma, args.reservationId, args.type);
+    const routed = await deliverOtaOperationalCommunication(args.prisma, args.reservationId, args.type);
     if (routed) return routed;
   }
   const to = cleanValue(args.to);
