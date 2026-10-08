@@ -1,6 +1,7 @@
 import { formatPropertyArrivalLocation } from "./property-arrival-location.js";
 import { isChannexGuestRegistrationExempt } from "./guest-registration-channel.policy";
 import { retireAirbnbLegacyRetry } from "../channex-messaging/airbnb-access.service.js";
+import { isOtaGuestExternalDeliveryBlocked } from "./ota-guest-external-messaging.policy.js";
 import { createHash } from "node:crypto";
 
 import { PrismaClient, ReservationStatus } from "@prisma/client";
@@ -299,6 +300,7 @@ export async function executeGuestJourneyCommunicationDeliveryAdapter(
       },
       select: {
         status: true,
+        source: true,
         externalProvider: true,
         externalId: true,
         guestEmail: true,
@@ -332,6 +334,24 @@ export async function executeGuestJourneyCommunicationDeliveryAdapter(
 
   if (!reservation || !message) {
     throw new Error("COMMUNICATION_SCOPE_OR_MESSAGE_MISMATCH");
+  }
+
+  // A guest OTA's operational email/SMS belongs to Channex. This fence also
+  // retires pre-existing E7 queues; never send them through Twilio/Resend.
+  const otaOperationalType = ["PRECHECKIN", "CHECKOUT", "GUEST_ACCESS_PASSCODE"].includes(requestedType);
+  if (otaOperationalType &&
+      isOtaGuestExternalDeliveryBlocked(reservation, requestedChannel as "sms" | "email") &&
+      ["APMS_PENDING", "FAILED", "FAILED_FINAL"].includes(message.status ?? "")) {
+    await prisma.messageLog.updateMany({
+      where: { id: message.id, status: message.status },
+      data: { status: "OBSOLETE", error: "OTA_GUEST_EXTERNAL_MESSAGING_BLOCKED" },
+    });
+    return { providerCalls: 0, completion: {
+      kind: "SUCCEEDED",
+      outcomeEvidenceFingerprint: hashEvidence({ messageLogId, status: "OBSOLETE", owner: "CHANNEX" }),
+      messageLogId, communicationType: requestedType, channel: requestedChannel,
+      deliveryStatus: "OBSOLETE",
+    } };
   }
 
   if (["APMS_PENDING", "FAILED", "FAILED_FINAL"].includes(message.status ?? "") &&
@@ -485,6 +505,7 @@ export async function executeGuestJourneyCommunicationDeliveryAdapter(
     },
     select: {
       status: true,
+      source: true,
       externalProvider: true,
       externalId: true,
       cancelledAt: true,
@@ -512,6 +533,7 @@ export async function executeGuestJourneyCommunicationDeliveryAdapter(
     : clean(message.to);
   const changedBeforeSend =
     (requestedType === "GUEST_VERIFICATION_REMINDER" && isChannexGuestRegistrationExempt(currentReservation)) ||
+    (otaOperationalType && isOtaGuestExternalDeliveryBlocked(currentReservation, requestedChannel as "sms" | "email")) ||
     currentReservation.checkIn.getTime() !== reservation.checkIn.getTime() ||
     currentReservation.checkOut.getTime() !== reservation.checkOut.getTime() ||
     currentCancelled !== reservationCancelled ||
