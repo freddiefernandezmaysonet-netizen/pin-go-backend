@@ -79,3 +79,37 @@ test("new scan starts at first page; no persistent in-memory cursor", async () =
   assert.equal(two.candidates, 1);
   assert.equal(f.queries, 2);
 });
+
+test("first switch activation never backfills an access code to an already in-stay guest", async () => {
+  const inStay = row("existing-stay");
+  inStay.checkIn = new Date(now.getTime() - 24 * 3600000);
+  inStay.checkOut = new Date(now.getTime() + 24 * 3600000);
+  const f = fixture([inStay]);
+  const result = await processOtaOperationalCommunications(f.db, env, now, f.deliver, f.reconcile);
+  assert.equal(result.accepted, 0);
+  assert.equal(result.blocked, 0);
+  assert.deepEqual(f.calls, [], "do not replay pre-checkin or access when check-in has passed");
+});
+
+test("upcoming check-in still schedules both operational messages without guest contact", async () => {
+  const upcoming = row("upcoming-stay");
+  const f = fixture([upcoming]);
+  const result = await processOtaOperationalCommunications(f.db, env, now, f.deliver, f.reconcile);
+  assert.equal(result.accepted, 2);
+  assert.deepEqual(f.calls, ["upcoming-stay:PRECHECKIN", "upcoming-stay:GUEST_ACCESS_PASSCODE"]);
+});
+
+test("query excludes all already in-stay access backfill candidates before pagination", async () => {
+  const f = fixture([row("upcoming")]);
+  let query: any = null;
+  f.db.reservation.findMany = async (args: any) => {
+    query = args;
+    return [];
+  };
+  await processOtaOperationalCommunications(f.db, env, now, f.deliver, f.reconcile);
+  assert.ok(query);
+  assert.deepEqual(query.where.OR, [
+    { checkIn: { gt: now, lte: new Date(now.getTime() + 4 * 3600000) } },
+    { checkOut: { gte: new Date(now.getTime() - 3600000), lte: now } },
+  ]);
+});
