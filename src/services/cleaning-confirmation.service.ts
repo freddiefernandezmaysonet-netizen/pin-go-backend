@@ -172,8 +172,6 @@ export async function createCleaningConfirmation(params: {
     where: {
       reservationId,
       propertyId,
-      staffMemberId,
-      status: "PENDING",
     },
     orderBy: {
       createdAt: "desc",
@@ -181,7 +179,7 @@ export async function createCleaningConfirmation(params: {
   });
 
    if (existing) {
-    console.log("[CLEANING_CONFIRMATION] pending already exists", {
+    console.log("[CLEANING_CONFIRMATION] existing offer history preserved", {
       reservationId,
       propertyId,
       staffMemberId,
@@ -196,9 +194,9 @@ export async function createCleaningConfirmation(params: {
       status: "SUCCESS",
       severity: "INFO",
       eventType: "DECISION_APPLIED",
-      reason: "CLEANING_CONFIRMATION_PENDING_EXISTS",
+      reason: "CLEANING_CONFIRMATION_ALREADY_PREPARED",
       summary:
-        "Messaging Engine reused an existing pending cleaning confirmation for the cleaner.",
+        "Messaging Engine preserved the existing cleaning offer history.",
       decisions: [
         {
           engine: "Messaging",
@@ -217,8 +215,8 @@ export async function createCleaningConfirmation(params: {
         },
         {
           engine: "Messaging",
-          rule: "CLEANING_CONFIRMATION_PENDING_EXISTS",
-          label: "Cleaning Confirmation Pending Exists",
+          rule: "CLEANING_CONFIRMATION_ALREADY_PREPARED",
+          label: "Cleaning Confirmation Already Prepared",
           applied: true,
           adjustment: null,
           adjustmentPercent: null,
@@ -237,16 +235,18 @@ export async function createCleaningConfirmation(params: {
   }
   const token = crypto.randomBytes(32).toString("hex");
 
-  const confirmation = await prisma.cleaningConfirmation.create({
-    data: {
-      reservationId,
-      propertyId,
-      staffMemberId,
-      token,
-      status: "PENDING",
-    },
+  const confirmation = await prisma.$transaction(async tx => {
+    await tx.$queryRaw`SELECT "id" FROM "Reservation" WHERE "id" = ${reservationId} FOR UPDATE`;
+    // Booking replay must never reopen a cancelled/expired principal or create a
+    // competing offer while the replacement chain is active.
+    const current = await tx.cleaningConfirmation.findFirst({ where: { reservationId, propertyId }, orderBy: { createdAt: "desc" } });
+    if (current) return current;
+    const active = await tx.reservation.findFirst({ where: { id: reservationId, propertyId, status: "ACTIVE", property: { organizationId: staff.organizationId, status: "ACTIVE" } } });
+    const assignment = await tx.propertyStaff.findFirst({ where: { propertyId, staffMemberId, isActive: true, staffMember: { isActive: true, organizationId: staff.organizationId } } });
+    if (!active || !assignment) throw new Error("CLEANING_CONFIRMATION_INACTIVE_SCOPE");
+    return tx.cleaningConfirmation.create({ data: { reservationId, propertyId, staffMemberId, token, status: "PENDING" } });
   });
-  console.log("[CLEANING_CONFIRMATION] created pending", {
+  console.log("[CLEANING_CONFIRMATION] prepared or reused", {
     reservationId,
     propertyId,
     staffMemberId,

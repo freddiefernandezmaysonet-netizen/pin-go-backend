@@ -15,6 +15,7 @@ export type CleaningWorkContext = Readonly<{
   assignmentActive: boolean;
   confirmationStatus: string;
   checkOut: Date;
+  recoveryScheduledStartAt?: Date;
   cleaningStartOffsetMinutes: number;
   durationCommitmentMinutes: number | null;
   startConfirmationGraceMinutes: number;
@@ -134,8 +135,10 @@ export async function materializeCleaningWorkSnapshot(
     if (!context.cleaningNfcEnabled) fail("CLEANING_WORK_NFC_FLOW_DISABLED");
     if (context.confirmationStatus !== "CONFIRMED") fail("CLEANING_WORK_CONFIRMATION_REQUIRED");
 
-    const startMs = checkDate(context.checkOut) +
+    const baseStartMs = checkDate(context.checkOut) +
       checkMinutes(context.cleaningStartOffsetMinutes, 0, 1440) * 60_000;
+    const startMs = context.recoveryScheduledStartAt === undefined ? baseStartMs : checkDate(context.recoveryScheduledStartAt);
+    if (startMs < baseStartMs) fail("CLEANING_WORK_INVALID_TIMING");
     const scheduledStartAt = new Date(startMs);
     checkDate(scheduledStartAt);
     const existing = await tx.findExisting(scope);

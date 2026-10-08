@@ -27,8 +27,6 @@ import {
 import { assignNfcCards } from "../services/nfc.service";
 import {
   sendGuestPasscodeSms,
-  sendCleaningStartSms,
-  sendCleaningEndSms,
 } from "../services/messaging.service";
 import {
   sendLoggedEmail,
@@ -45,7 +43,6 @@ import {
 } from "../services/preCheckinSms.service";
 import { sendCheckoutSms } from "../services/checkoutSms.service";
 import { processAirbnbCommunications } from "../channex-messaging/airbnb-access.service.js";
-import { sendCleaningReadySms } from "../services/cleaningReadySms.service";
 import { resolveGuestLanguage } from "../services/guest-language.service";
 import { resolveOrganizationGuestReplyTo } from "../services/organization-guest-email.service";
 import { expireNfcAssignments } from "../services/nfc-expire.service";
@@ -58,6 +55,7 @@ import { NfcCardStatus } from "@prisma/client";
 import { unassignAllNfcForReservation } from "../services/nfc.service";
 import { unassignGuestNfcForReservation } from "../services/nfc.service";
 import { processPendingCleaningConfirmations } from "../services/cleaning-confirmation-dispatch.service";
+import { processCleaningIssueRecoveries } from "../services/cleaning-issue-recovery.service.js";
 import {
   markGuestJourneyReadyForArrival,
   scheduleGuestJourneyAccess,
@@ -574,7 +572,6 @@ const ALLOW_UNPAID = process.env.ALLOW_UNPAID === '1';
 
 // SMS flags (separados)
 const GUEST_SMS_ENABLED = process.env.GUEST_SMS_ENABLED === '1'; // recomendado: 0 hasta prod
-const CLEANING_SMS_ENABLED = process.env.CLEANING_SMS_ENABLED === '1'; // recomendado: 0 hasta prod
 
 function fmtUtc(d: Date) {
   return new Date(d).toISOString().replace('T', ' ').slice(0, 16) + ' UTC';
@@ -2147,28 +2144,7 @@ async function processCheckouts(now: Date) {
           });
         }
 
-        try {
-          await sendCleaningReadySms(
-            prisma,
-            reservation.id
-          );
-        } catch (cleaningReadyError) {
-          errLog(
-            "Cleaning READY SMS failed",
-            {
-              reservationNumber:
-                reservation
-                  .reservationNumber ?? null,
-              reservationId:
-                reservation.id,
-              accessGrantId: grant.id,
-              error:
-                toErrString(
-                  cleaningReadyError
-                ),
-            }
-          );
-        }
+
 
         log("Guest checkout completed", {
           reservationNumber:
@@ -2383,50 +2359,7 @@ async function processCleaningActivations(now: Date) {
         }
       }
 
-      if (CLEANING_SMS_ENABLED) {
-        try {
-          const result =
-            await sendCleaningStartSms({
-              prisma,
-              accessGrantId: grant.id,
-              phoneE164:
-                assignment.staffMember?.phoneE164,
-              staffName:
-                assignment.staffMember?.fullName,
-              preferredLanguage:
-                assignment.staffMember?.preferredLanguage,
-              propertyName:
-                assignment.reservation?.property?.name,
-              roomName:
-                assignment.reservation?.roomName,
-              startsAt: assignment.startsAt,
-              endsAt: assignment.endsAt,
-              timezone:
-                assignment.reservation?.property
-                  ?.timezone,
-          });
 
-          if (result.ok) {
-            log("Cleaning SMS sent (START)", {
-              assignmentId: assignment.id,
-            });
-          } else if (result.skipped) {
-            log("Cleaning SMS skipped (START)", {
-              assignmentId: assignment.id,
-              reason: result.error,
-            });
-          } else {
-            throw new Error(
-              result.error ??
-                "Unknown SMS error"
-            );
-          }
-        } catch (error) {
-          errLog(
-            `Cleaning SMS START FAILED assignment ${assignment.id} -> ${toErrString(error)}`
-          );
-        }
-      }
 
       log("Cleaning assignment ACTIVE", {
         reservationNumber:
@@ -2507,34 +2440,7 @@ async function processCleaningEnds(now: Date) {
         data: { status: StaffAssignmentStatus.COMPLETED, lastError: null },
       });
 
-     if (CLEANING_SMS_ENABLED) {
-  try {
-    const result = await sendCleaningEndSms({
-      prisma,
-      accessGrantId: a.accessGrantId ?? null,
-      phoneE164: a.staffMember?.phoneE164,
-      staffName: a.staffMember?.fullName,
-      preferredLanguage: a.staffMember?.preferredLanguage,
-      propertyName: a.reservation?.property?.name,
-      roomName: a.reservation?.roomName,
-      endsAt: a.endsAt,
-      timezone: a.reservation?.property?.timezone,
-   });
 
-    if (result.ok) {
-      log(`Cleaning SMS sent (END)`, { assignmentId: a.id });
-    } else if (result.skipped) {
-      log(`Cleaning SMS skipped (END)`, {
-        assignmentId: a.id,
-        reason: result.error,
-      });
-    } else {
-      throw new Error(result.error ?? "Unknown SMS error");
-    }
-  } catch (e) {
-    errLog(`Cleaning SMS END FAILED assignment ${a.id} -> ${toErrString(e)}`);
-  }
-}
 
       log(`Cleaning COMPLETED assignment ${a.id} -> revoked grant ${grant.id}`);
     } catch (e) {
@@ -2725,6 +2631,7 @@ if (!ttlockLockId) {
 // ====== LOOP ======
 let shuttingDown = false;
 let tickRunning = false;
+let cleaningRecoveryRunning = false;
 let lastGuestAccessAdmissionSafetyAt = 0;
 let lastGuestAccessAmbiguityE15At = 0;
 let lastPinAIConnectBillingAt = 0;
@@ -2741,6 +2648,15 @@ async function tick() {
 
   try {
     const now = new Date();
+
+    // Gateway recovery must not delay guest check-ins/check-outs in this tick.
+    // One background batch at a time; the durable NFC claim owns each command.
+    if (!cleaningRecoveryRunning) {
+      cleaningRecoveryRunning = true;
+      void processCleaningIssueRecoveries(prisma, now)
+        .catch(e => errLog("cleaning issue recovery crashed:", toErrString(e)))
+        .finally(() => { cleaningRecoveryRunning = false; });
+    }
 
     if (process.env.PIN_AI_CONNECT_DEBIT_ENABLED === "true" &&
       now.getTime() - lastPinAIConnectBillingAt >= 60_000) {
@@ -3355,9 +3271,7 @@ async function start() {
     `Starting. poll=${POLL_MS}ms batch=${BATCH_SIZE} allow_unpaid=${ALLOW_UNPAID ? 'yes' : 'no'}`
   );
   log(
-    `SMS flags: guest=${GUEST_SMS_ENABLED ? 'on' : 'off'} cleaning=${
-      CLEANING_SMS_ENABLED ? 'on' : 'off'
-    }`
+    `SMS flags: guest=${GUEST_SMS_ENABLED ? 'on' : 'off'} cleaning_routine=off`
   );
   log("Guest Journey E11-E13 activation", {
     version:

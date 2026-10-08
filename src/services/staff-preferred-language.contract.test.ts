@@ -21,7 +21,9 @@ test("cleaner mobile lifecycle derives language from StaffMember", () => {
   assert.match(source,/resolveStaffLanguage\(staffMember\??\.preferredLanguage\)/);
   assert.match(source,/Limpieza completada/);
   assert.match(source,/Confirmar disponibilidad/);
-  assert.match(source,/Comence la limpieza/);
-  assert.match(source,/Termine la limpieza/);
+  const actions=fs.readFileSync(new URL("./cleaning-action-button.ts",import.meta.url),"utf8");
+  assert.match(actions,/Comencé la limpieza/);
+  assert.match(actions,/Terminé la limpieza/);
+  assert.match(source,/renderCleaningActionButton/);
   assert.match(source,/html lang="\$\{language\}"/);
 });

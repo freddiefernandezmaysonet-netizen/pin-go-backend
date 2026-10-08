@@ -7,7 +7,7 @@ export type AuthTokenPayload = {
   sub: string;
   orgId: string;
   email: string;
-  role?: string;
+  role?: string | undefined;
   tokenVersion: number;
 };
 
@@ -18,7 +18,7 @@ export type AuthCookieOptions = {
 const JWT_SECRET = process.env.JWT_SECRET;
 const JWT_EXPIRES_IN = (
   process.env.JWT_EXPIRES_IN ?? "7d"
-) as SignOptions["expiresIn"];
+) as NonNullable<SignOptions["expiresIn"]>;
 const AUTH_COOKIE_NAME = process.env.AUTH_COOKIE_NAME ?? "pingo_token";
 const COOKIE_DOMAIN = process.env.COOKIE_DOMAIN;
 const BRAND_HOSTNAME_HEADER = "x-pin-go-brand-hostname";

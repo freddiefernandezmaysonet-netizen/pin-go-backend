@@ -23,9 +23,9 @@ import { persistAuditEntry } from "../apms/audit-persistence.service";
 import { ensureCleanerNfcAccessForConfirmedCleaning } from "./cleaner-access-autopilot.service";
 import {
   resolveOperationalIssuesForReservation,
-  upsertOperationalIssue,
 } from "../apms/operational-intelligence.service";
 import { mapReservationCleaningOperationalItems } from "../apms/reservation-operational-intelligence.mapper";
+import { persistCleaningAuditAttention } from "./cleaning-reassignment-attention.service.js";
 
 const prisma = new PrismaClient();
 
@@ -1847,16 +1847,39 @@ addCheck(checks, {
     latestCleaningNfcAssignment?.status
   );
 
+  // A previous cleaner's grant can survive a work reassignment. Validate the
+  // accepting cleaner's card before treating any lifecycle state as ready.
+  const acceptedCleaner = cleaningAccessRequired && cleaningConfirmationConfirmed
+    ? await db.staffMember.findUnique({
+        where: { id: latestCleaningConfirmation!.staffMemberId },
+        select: { ttlockCardRef: true },
+      })
+    : null;
+  const acceptedCardRef = String(acceptedCleaner?.ttlockCardRef ?? "").trim();
+  const acceptedCard = acceptedCardRef
+    ? await db.nfcCard.findFirst({
+        where: { propertyId: reservation.propertyId, label: acceptedCardRef },
+        select: { id: true },
+      })
+    : null;
+  const cleanerNfcOwnershipValid = Boolean(
+    acceptedCard && latestCleaningNfcAssignment?.nfcCardId === acceptedCard.id
+  );
+  let cleanerOwnershipError = cleaningAccessRequired && cleaningConfirmationConfirmed &&
+    latestCleaningNfcAssignment && !cleanerNfcOwnershipValid &&
+    ["SCHEDULED", "PROVISIONING", "ACTIVE"].includes(cleaningNfcStatus)
+    ? "CLEANER_ACCESS_CARD_MISMATCH" : null;
+
   const cleanerNfcScheduled =
-    cleaningNfcStatus ===
+    cleanerNfcOwnershipValid && cleaningNfcStatus ===
     NfcAssignmentStatus.SCHEDULED;
 
   const cleanerNfcProvisioning =
-    cleaningNfcStatus ===
+    cleanerNfcOwnershipValid && cleaningNfcStatus ===
     NfcAssignmentStatus.PROVISIONING;
 
   const cleanerNfcAccessReady =
-    cleaningNfcStatus ===
+    cleanerNfcOwnershipValid && cleaningNfcStatus ===
     NfcAssignmentStatus.ACTIVE;
 
   const cleanerNfcFailed =
@@ -1877,7 +1900,7 @@ addCheck(checks, {
 
   let cleanerAccessReady = Boolean(
     cleanerNfcLifecycleValid ||
-      legacyCleanerAccessReady
+      (!cleaningAccessRequired && legacyCleanerAccessReady)
   );
 
   let cleanerAccessAutopilotResult: Awaited<
@@ -1900,14 +1923,21 @@ addCheck(checks, {
         trigger: "RESERVATION_COMPLETE_FLOW_AUDIT",
       });
 
-    if (cleanerAccessAutopilotResult.ok) {
+    if (cleanerAccessAutopilotResult.ok && !cleanerAccessAutopilotResult.skipped) {
       cleanerNfcLifecycleValid = true;
       cleanerAccessReady = true;
+      // A verified repair may have replaced the pre-repair snapshot's unused grant.
+      if (cleanerAccessAutopilotResult.nfcAssignmentId &&
+          cleanerAccessAutopilotResult.nfcAssignmentId !== latestCleaningNfcAssignment?.id) {
+        cleanerOwnershipError = null;
+      }
     }
   }
 
   let cleanerWindowError: string | null = null;
-  if (cleaningAccessRequired && latestCleaningNfcAssignment && cleanerNfcLifecycleValid) {
+  if (cleaningAccessRequired && latestCleaningNfcAssignment && cleanerNfcLifecycleValid &&
+      (!cleanerAccessAutopilotResult?.nfcAssignmentId ||
+        cleanerAccessAutopilotResult.nfcAssignmentId === latestCleaningNfcAssignment.id)) {
     try {
       const expected = await readCleanerAccessWindow(db, reservation);
       if (latestCleaningNfcAssignment.startsAt.getTime() !== expected.startsAt.getTime() ||
@@ -1936,7 +1966,8 @@ addCheck(checks, {
   ReservationCompleteFlowCheckStatus =
   !cleaningAccessRequired
     ? "PASS"
-    : cleanerNfcFailed || cleanerWindowError !== null
+    : cleanerNfcFailed || cleanerWindowError !== null || cleanerOwnershipError !== null ||
+      cleanerAccessAutopilotResult?.escalated
     ? "FAIL"
     : cleanerNfcProvisioning
     ? "WARNING"
@@ -1950,7 +1981,9 @@ addCheck(checks, {
   const cleanerAccessRecommendedAction =
   !cleaningAccessRequired
     ? undefined
-    : cleanerWindowError
+    : cleanerOwnershipError
+      ? "Reconcile the accepting cleaner's card. Existing NFC access belongs to another or unmapped card."
+      : cleanerWindowError
       ? "Reconcile cleaner access with checkout, offset and the next check-in. The current window is invalid."
       : cleanerNfcAccessReady
       ? undefined
@@ -1982,6 +2015,9 @@ addCheck(checks, {
       cleaningNfcEnabled: property.cleaningNfcEnabled,
       
       cleanerWindowError,
+      cleanerOwnershipError,
+      cleanerNfcOwnershipValid,
+      acceptedCleanerNfcCardId: acceptedCard?.id ?? null,
       cleanerAccessReady,
       cleanerAccessRequiredNow,
       cleanerAccessWaitingForConfirmation,
@@ -2013,6 +2049,7 @@ addCheck(checks, {
       cleanerAccessAutopilotAttempted: Boolean(cleanerAccessAutopilotResult),
       cleanerAccessAutopilotOk: cleanerAccessAutopilotResult?.ok ?? null,
       cleanerAccessAutopilotReason: cleanerAccessAutopilotResult?.reason ?? null,
+      cleanerAccessAutopilotNfcAssignmentId: cleanerAccessAutopilotResult?.nfcAssignmentId ?? null,
       cleanerAccessAutopilotError: cleanerAccessAutopilotResult?.error ?? null,
       cleanerAccessAutopilotEscalated:
       cleanerAccessAutopilotResult?.escalated ?? null,
@@ -2173,12 +2210,7 @@ addCheck(checks, {
         signalAt: completedAt,
       });
 
-    for (const operationalItem of operationalItems) {
-      await upsertOperationalIssue(
-        db,
-        operationalItem
-      );
-    }
+    await persistCleaningAuditAttention(db, operationalItems);
   } catch (operationalIntelligenceError: any) {
     console.error(
       "[RESERVATION_OPERATIONAL_INTELLIGENCE_ERROR]",

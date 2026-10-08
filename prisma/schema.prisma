@@ -78,6 +78,7 @@ model DashboardUser {
   updatedAt           DateTime             @updatedAt
   tokenVersion        Int                  @default(0)
   organization        Organization         @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  cleanerStaffMember StaffMember?
   passwordResetTokens PasswordResetToken[]
   passwordResetSmsCodes PasswordResetSmsCode[]
   brandRevisionsCreated           BrandRevision[]          @relation("BrandRevisionCreatedBy")
@@ -225,6 +226,9 @@ model OrganizationInvitation {
 }
 
 model Property {
+  cleaningRecoveryPolicy CleaningRecoveryPolicy?
+  cleaningChecklistTemplate CleaningChecklistTemplate?
+  cleaningTaskChecklists CleaningTaskChecklist[]
   pinAIReservationFees PinAIReservationFee[]
   id                         String                      @id @default(cuid())
   organizationId             String
@@ -326,6 +330,17 @@ model Property {
   @@index([organizationId])
   @@index([organizationId, status])
   @@unique([organizationId, slug])
+}
+
+model CleaningRecoveryPolicy {
+  propertyId String @id
+  revision Int @default(1)
+  maxDelayMinutes Int @default(30)
+  maxAccessExtensionMinutes Int @default(0)
+  arrivalSafetyMarginMinutes Int @default(0)
+  updatedByUserId String
+  updatedAt DateTime @updatedAt
+  property Property @relation(fields: [propertyId], references: [id], onDelete: Cascade)
 }
 
 enum ListingAccommodationType {
@@ -935,6 +950,7 @@ model Subscription {
 }
 
 model Reservation {
+  cleaningTaskChecklist CleaningTaskChecklist?
   pinAIServiceEnrollment PinAIServiceEnrollment?
   pinAIReservationFee PinAIReservationFee?
   id                      String                   @id @default(cuid())
@@ -1731,6 +1747,11 @@ model PrimeNotifyState {
 }
 
 model StaffMember {
+  dashboardUserId String? @unique
+  dashboardUser DashboardUser? @relation(fields: [dashboardUserId], references: [id], onDelete: SetNull)
+  cleanerAccountEmail String? @db.VarChar(320)
+  cleanerAccountRequestedAt DateTime?
+  accountActivations CleanerAccountActivation[]
   id             String            @id @default(cuid())
   organizationId String
   fullName       String
@@ -1834,6 +1855,7 @@ model CleaningWork {
   completionConfirmedAt DateTime?
   cancelledAt DateTime?
   supersededAt DateTime?
+  issueReports CleaningWorkIssueReport[]
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -1845,10 +1867,52 @@ model CleaningWork {
   @@index([startConfirmedAt, completionConfirmedAt, cancelledAt, supersededAt], map: "CleaningWork_state_idx")
 }
 
+model CleaningWorkIssueReport {
+  id String @id @default(cuid())
+  cleaningWorkId String
+  requestId String
+  kind String
+  reason String
+  estimatedAt DateTime?
+  reportedAt DateTime @default(now())
+  work CleaningWork @relation(fields: [cleaningWorkId], references: [id], onDelete: Restrict, map: "CleaningWorkIssueReport_work_fkey")
+  accessExtension CleaningAccessExtension?
+
+  @@unique([cleaningWorkId, requestId])
+  @@index([cleaningWorkId, reportedAt])
+}
+
 enum CleaningFollowupReceiptKind {
   START_REMINDER
   COMPLETION_REMINDER
   HOST_ATTENTION
+}
+
+model CleaningAccessExtension {
+  id String @id @default(cuid())
+  reportId String @unique
+  organizationId String
+  propertyId String
+  reservationId String
+  cleaningWorkId String
+  confirmationId String
+  nfcAssignmentId String
+  nfcCardId String
+  ttlockLockId Int
+  ttlockCardId Int
+  policyRevision Int
+  startsAt DateTime
+  previousEndsAt DateTime
+  proposedEndsAt DateTime
+  state String @default("PREPARED")
+  acknowledgedAt DateTime?
+  lastError String?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  report CleaningWorkIssueReport @relation(fields: [reportId], references: [id], onDelete: Restrict, map: "CleaningAccessExtension_report_fkey")
+
+  @@index([reservationId, state])
+  @@index([state, updatedAt])
 }
 
 model CleaningFollowupReceipt {
@@ -1872,6 +1936,7 @@ model CleaningHostAttentionNotice {
   id              String   @id @default(cuid())
   cleaningWorkId  String   @unique
   status          String   @default("QUEUED")
+  reasonCode      String?
   recipientsJson  Json?
   providerMessageId String?
   lastError       String?
@@ -1929,9 +1994,31 @@ model NfcAssignment {
   updatedAt     DateTime            @updatedAt
   NfcCard       NfcCard             @relation(fields: [nfcCardId], references: [id])
   Reservation   Reservation         @relation(fields: [reservationId], references: [id], onDelete: Cascade)
+  cleanerProgrammingAttempts CleanerNfcProgrammingAttempt[]
 
   @@index([nfcCardId, status])
   @@index([reservationId, status])
+}
+
+model CleanerNfcProgrammingAttempt {
+  id              String   @id @default(cuid())
+  nfcAssignmentId String
+  confirmationId  String
+  attemptNumber   Int
+  organizationId  String
+  ttlockLockId    Int
+  ttlockCardId    Int
+  startsAt        DateTime
+  endsAt          DateTime
+  state           String   @default("PREPARED")
+  acknowledgedAt  DateTime?
+  lastError       String?
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+  nfcAssignment   NfcAssignment @relation(fields: [nfcAssignmentId], references: [id], onDelete: Cascade)
+
+  @@unique([nfcAssignmentId, attemptNumber])
+  @@index([organizationId, ttlockLockId, ttlockCardId, state], map: "CleanerNfcProgrammingAttempt_target_state_idx")
 }
 
 model PmsConnection {
@@ -2716,6 +2803,7 @@ enum PendingSignupStatus {
 }
 
 enum DashboardUserRole {
+  CLEANER
   ADMIN
   MEMBER
   PLATFORM_ADMIN
@@ -3396,6 +3484,22 @@ model TTLockRecipientIdentity {
   @@index([lastActivityAt, status])
 }
 
+
+// Separate capability from a cleaning offer. Old offer tokens never activate accounts.
+model CleanerAccountActivation {
+  id String @id @default(cuid())
+  staffMemberId String
+  staffMember StaffMember @relation(fields: [staffMemberId], references: [id], onDelete: Cascade)
+  confirmationId String
+  email String @db.VarChar(320)
+  requestedAt DateTime
+  tokenHash String @unique @db.VarChar(64)
+  expiresAt DateTime
+  consumedAt DateTime?
+  createdAt DateTime @default(now())
+  @@index([staffMemberId, expiresAt])
+}
+
 // One payable service record per canonical reservation. Invoice fields are
 // retained for historical evidence only; new fees use Connect Account Debits.
 model PinAIReservationFee {
@@ -3455,4 +3559,57 @@ model PinAIServiceEnrollment {
   reservation Reservation @relation(fields: [reservationId], references: [id], onDelete: Restrict)
 
   @@index([organizationId, status, opensAt])
+}
+
+model CleaningChecklistTemplate {
+  propertyId String @id
+  revision Int @default(1)
+  items Json
+  updatedByUserId String
+  updatedAt DateTime @updatedAt
+  property Property @relation(fields: [propertyId], references: [id], onDelete: Cascade)
+}
+
+// One stable checklist per departure cleaning, independent of offer/cleaner.
+model CleaningTaskChecklist {
+  id String @id @default(cuid())
+  reservationId String @unique
+  propertyId String
+  templateRevision Int
+  legacy Boolean @default(false)
+  createdAt DateTime @default(now())
+  reservation Reservation @relation(fields: [reservationId], references: [id], onDelete: Cascade)
+  property Property @relation(fields: [propertyId], references: [id], onDelete: Cascade)
+  items CleaningTaskChecklistItem[]
+  @@index([propertyId])
+}
+
+model CleaningTaskChecklistItem {
+  id String @id @default(cuid())
+  checklistId String
+  templateKey String
+  position Int
+  labelEs String @db.VarChar(500)
+  labelEn String @db.VarChar(500)
+  required Boolean
+  checked Boolean @default(false)
+  checkedAt DateTime?
+  checkedByStaffMemberId String?
+  version Int @default(0)
+  checklist CleaningTaskChecklist @relation(fields: [checklistId], references: [id], onDelete: Cascade)
+  events CleaningChecklistItemEvent[]
+  @@unique([checklistId, templateKey])
+  @@index([checklistId, position])
+}
+
+// Actor identity/name are retained as audit snapshots when Staff is removed.
+model CleaningChecklistItemEvent {
+  id String @id @default(cuid())
+  checklistItemId String
+  actorStaffMemberId String
+  actorName String
+  checked Boolean
+  createdAt DateTime @default(now())
+  item CleaningTaskChecklistItem @relation(fields: [checklistItemId], references: [id], onDelete: Cascade)
+  @@index([checklistItemId, createdAt])
 }

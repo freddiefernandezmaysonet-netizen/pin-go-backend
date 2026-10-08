@@ -1,15 +1,15 @@
+import { withdrawCleaning } from "./cleaning-reassignment.service.js";
+import { issueCleanerActivation } from "./cleaner-account.service.js";
+import { prepareChecklistSnapshot } from "./cleaning-checklist.service.js";
 import { PrismaClient } from "@prisma/client";
-import crypto from "crypto";
 import { sendSms } from "../integrations/twilio/twilio.client";
-import { selectNextStaffForProperty } from "./staff-selection.service";
 import { buildCleaningConfirmationSmsBody } from "./cleaning-confirmation-sms-body.service";
 import { getStaffIntlLocale, resolveStaffLanguage } from "./staff-language.service.js";
 import { isInternalDemo } from "./internal-demo-scope.js";
 import { sendInternalDemoMessage } from "./internal-demo-message.service.js";
+import { isWithinCleaningMessageHours, recordDeferredCleaningOfferAttention, resolveDeferredCleaningOfferAttention } from "./cleaning-offer-hours.service.js";
 
 const DISPATCH_TYPE = "CLEANING_CONFIRMATION";
-const SEND_START_HOUR = 8;
-const SEND_END_HOUR = 18;
 const FAILED_RETRY_COOLDOWN_MINUTES = 15;
 const FALLBACK_AFTER_MINUTES = 120;
 
@@ -27,18 +27,6 @@ async function isCleaningNfcEnabledForProperty(
   });
 
   return property?.cleaningNfcEnabled === true;
-}
-
-function isWithinCleaningMessageHours(timeZone: string, now: Date) {
-  const parts = new Intl.DateTimeFormat("en-US", {
-    timeZone,
-    hour: "2-digit",
-    hour12: false,
-  }).formatToParts(now);
-
-  const hour = Number(parts.find((p) => p.type === "hour")?.value ?? "0");
-
-  return hour >= SEND_START_HOUR && hour < SEND_END_HOUR;
 }
 
 function buildConfirmUrl(token: string) {
@@ -116,6 +104,7 @@ if (!cleaningNfcEnabled) {
     return { ok: false, skipped: true, reason: "demo_recipient_not_authorized" };
   }
   if (!demoAuthorized && !isWithinCleaningMessageHours(timezone, now)) {
+    await recordDeferredCleaningOfferAttention(prisma, confirmation.id, now);
     return { ok: false, skipped: true, reason: "outside_allowed_hours" };
   }
 
@@ -152,10 +141,11 @@ if (!cleaningNfcEnabled) {
   });
 
   if (alreadySentForThisConfirmation) {
+    await resolveDeferredCleaningOfferAttention(prisma, confirmation.id, now);
     return { ok: true, skipped: true, reason: "already_sent_for_confirmation" };
   }
 
-  const confirmUrl = buildConfirmUrl(confirmation.token);
+  let confirmUrl = buildConfirmUrl(confirmation.token);
 
   if (!confirmUrl) {
     console.warn("[CLEANING_CONFIRMATION_DISPATCH] missing API base url", {
@@ -165,6 +155,13 @@ if (!cleaningNfcEnabled) {
 
     return { ok: false, skipped: true, reason: "missing_api_base_url" };
   }
+
+  if (staff.cleanerAccountEmail && !staff.dashboardUserId) {
+    const activation = await issueCleanerActivation(prisma, confirmation.id, now);
+    if (activation) confirmUrl += `?activation=${activation}`;
+  }
+
+  await prepareChecklistSnapshot(prisma, confirmation.reservationId);
 
   const propertyName =
     reservation.property?.name ??
@@ -224,6 +221,7 @@ if (!cleaningNfcEnabled) {
       status: "SENT",
     },
   });
+  await resolveDeferredCleaningOfferAttention(prisma, confirmation.id, now);
 
   console.log("[CLEANING_CONFIRMATION_DISPATCH] sms sent", {
     confirmationId: confirmation.id,
@@ -312,76 +310,11 @@ if (!cleaningNfcEnabled) {
     return { fallbackCreated: false, reason: "not_expired_yet" };
   }
 
-  const existingPendingOther = await prisma.cleaningConfirmation.findFirst({
-    where: {
-      reservationId: confirmation.reservationId,
-      status: "PENDING",
-      id: { not: confirmation.id },
-    },
-  });
+  const property = await prisma.property.findUniqueOrThrow({ where: { id: confirmation.propertyId }, select: { organizationId: true } });
+  const result = await withdrawCleaning(prisma, { confirmationId: confirmation.id, staffMemberId: confirmation.staffMemberId, organizationId: property.organizationId }, "expire", now);
+  const nextConfirmation = result.nextConfirmationId ? await prisma.cleaningConfirmation.findUnique({ where: { id: result.nextConfirmationId } }) : null;
+  return nextConfirmation ? { fallbackCreated: true, nextConfirmation } : { fallbackCreated: false, reason: "no_backup_available" };
 
-  if (existingPendingOther) {
-    return { fallbackCreated: false, reason: "another_pending_exists" };
-  }
-
-  const allAttempts = await prisma.cleaningConfirmation.findMany({
-    where: {
-      reservationId: confirmation.reservationId,
-    },
-    select: {
-      staffMemberId: true,
-    },
-  });
-
-  const excludeStaffIds = allAttempts.map((a) => a.staffMemberId);
-
-  const nextStaff = await selectNextStaffForProperty({
-    propertyId: confirmation.propertyId,
-    excludeStaffIds,
-  });
-
-  await prisma.cleaningConfirmation.update({
-    where: { id: confirmation.id },
-    data: {
-      status: "EXPIRED",
-    },
-  });
-
-  if (!nextStaff) {
-    console.warn("[CLEANING_CONFIRMATION_FALLBACK] no backup staff available", {
-      reservationId: confirmation.reservationId,
-      propertyId: confirmation.propertyId,
-      expiredConfirmationId: confirmation.id,
-      excludeStaffIds,
-    });
-
-    return { fallbackCreated: false, reason: "no_backup_available" };
-  }
-
-  const token = crypto.randomBytes(32).toString("hex");
-
-  const nextConfirmation = await prisma.cleaningConfirmation.create({
-    data: {
-      reservationId: confirmation.reservationId,
-      propertyId: confirmation.propertyId,
-      staffMemberId: nextStaff.id,
-      token,
-      status: "PENDING",
-    },
-  });
-
-  console.log("[CLEANING_CONFIRMATION_FALLBACK] created backup confirmation", {
-    reservationId: confirmation.reservationId,
-    propertyId: confirmation.propertyId,
-    expiredConfirmationId: confirmation.id,
-    nextConfirmationId: nextConfirmation.id,
-    nextStaffId: nextStaff.id,
-  });
-
-  return {
-    fallbackCreated: true,
-    nextConfirmation,
-  };
 }
 
 export async function dispatchPendingCleaningConfirmationForReservation(params: {
@@ -441,62 +374,78 @@ export async function processPendingCleaningConfirmations(
   prisma: PrismaClient,
   now: Date = new Date()
 ) {
-  const confirmations = await prisma.cleaningConfirmation.findMany({
-    where: {
-      status: "PENDING",
-    },
-    orderBy: {
-      createdAt: "asc",
-    },
-    take: 25,
-  });
-
-  if (confirmations.length === 0) {
-    return {
-      processed: 0,
-      sent: 0,
-      skipped: 0,
-      fallbackCreated: 0,
-      expired: 0,
-    };
-  }
-
+  // Keyset pagination keeps skipped offers from blocking later pending offers.
+  // A stable timestamp/id boundary also survives status changes during fallback.
+  let boundary: { createdAt: Date; id: string } | undefined;
+  let processedCount = 0;
   let sentCount = 0;
   let skippedCount = 0;
   let fallbackCreatedCount = 0;
   let expiredCount = 0;
 
-  for (const confirmation of confirmations) {
-    try {
-      const fallbackResult = await maybeFallbackCleaningConfirmation({
-        prisma,
-        confirmation,
-        now,
-      });
+  while (true) {
+    const confirmations = await prisma.cleaningConfirmation.findMany({
+      where: {
+        status: "PENDING",
+        ...(boundary ? { OR: [
+          { createdAt: { gt: boundary.createdAt } },
+          { createdAt: boundary.createdAt, id: { gt: boundary.id } },
+        ] } : {}),
+      },
+      orderBy: [{ createdAt: "asc" }, { id: "asc" }],
+      take: 25,
+    });
+    const last = confirmations[confirmations.length - 1];
+    if (!last) break;
+    boundary = { createdAt: last.createdAt, id: last.id };
+    processedCount += confirmations.length;
 
-      if (fallbackResult.reason === "cleaning_nfc_disabled") {
-        skippedCount++;
-        continue;
-      }
+    for (const confirmation of confirmations) {
+      try {
+        const fallbackResult = await maybeFallbackCleaningConfirmation({
+          prisma,
+          confirmation,
+          now,
+        });
 
-      if (fallbackResult.reason === "already_confirmed") {
-        skippedCount++;
-        continue;
-      }
+        if (fallbackResult.reason === "cleaning_nfc_disabled") {
+          skippedCount++;
+          continue;
+        }
 
-      if (fallbackResult.reason === "no_backup_available") {
-        expiredCount++;
-        skippedCount++;
-        continue;
-      }
+        if (fallbackResult.reason === "already_confirmed") {
+          skippedCount++;
+          continue;
+        }
 
-      if (fallbackResult.fallbackCreated && fallbackResult.nextConfirmation) {
-        fallbackCreatedCount++;
-        expiredCount++;
+        if (fallbackResult.reason === "no_backup_available") {
+          expiredCount++;
+          skippedCount++;
+          continue;
+        }
+
+        if (fallbackResult.fallbackCreated && fallbackResult.nextConfirmation) {
+          fallbackCreatedCount++;
+          expiredCount++;
+
+          const sent = await sendCleaningConfirmationSms({
+            prisma,
+            confirmation: fallbackResult.nextConfirmation,
+            now,
+          });
+
+          if (sent.ok && !sent.skipped) {
+            sentCount++;
+          } else {
+            skippedCount++;
+          }
+
+          continue;
+        }
 
         const sent = await sendCleaningConfirmationSms({
           prisma,
-          confirmation: fallbackResult.nextConfirmation,
+          confirmation,
           now,
         });
 
@@ -505,45 +454,33 @@ export async function processPendingCleaningConfirmations(
         } else {
           skippedCount++;
         }
+      } catch (e: any) {
+        console.error("[CLEANING_CONFIRMATION_DISPATCH] failed", {
+          confirmationId: confirmation.id,
+          reservationId: confirmation.reservationId,
+          error: e?.message ?? String(e),
+        });
 
-        continue;
-      }
+        await prisma.messageDispatchLog
+          .create({
+            data: {
+              reservationId: confirmation.reservationId,
+              type: DISPATCH_TYPE,
+              channel: "sms",
+              status: "FAILED",
+            },
+          })
+          .catch(() => {});
 
-      const sent = await sendCleaningConfirmationSms({
-        prisma,
-        confirmation,
-        now,
-      });
-
-      if (sent.ok && !sent.skipped) {
-        sentCount++;
-      } else {
         skippedCount++;
       }
-    } catch (e: any) {
-      console.error("[CLEANING_CONFIRMATION_DISPATCH] failed", {
-        confirmationId: confirmation.id,
-        reservationId: confirmation.reservationId,
-        error: e?.message ?? String(e),
-      });
-
-      await prisma.messageDispatchLog
-        .create({
-          data: {
-            reservationId: confirmation.reservationId,
-            type: DISPATCH_TYPE,
-            channel: "sms",
-            status: "FAILED",
-          },
-        })
-        .catch(() => {});
-
-      skippedCount++;
     }
+
+    if (confirmations.length < 25) break;
   }
 
   return {
-    processed: confirmations.length,
+    processed: processedCount,
     sent: sentCount,
     skipped: skippedCount,
     fallbackCreated: fallbackCreatedCount,

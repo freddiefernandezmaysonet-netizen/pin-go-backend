@@ -18,5 +18,6 @@ CREATE TABLE "PropertyStaff" (
 );
 CREATE TABLE "CleaningConfirmation" (
   "id" TEXT PRIMARY KEY, "propertyId" TEXT NOT NULL, "reservationId" TEXT NOT NULL,
-  "staffMemberId" TEXT NOT NULL, "status" TEXT NOT NULL
+  "staffMemberId" TEXT NOT NULL, "status" TEXT NOT NULL,
+  "updatedAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP
 );

@@ -43,6 +43,7 @@ export async function deliverCleaningHostAttentionNotice(
         propertyName: property.name,
         cleanerName: staff?.fullName?.trim() || "Cleaner",
         reservationNumber: reservation?.reservationNumber ?? null,
+        attentionReason: notice.reasonCode ?? undefined,
         dashboardUrl: `${origin}/properties/${encodeURIComponent(work.propertyId)}/calendar`,
         idempotencyKey: `cleaning-host-attention-${notice.id}`,
       },

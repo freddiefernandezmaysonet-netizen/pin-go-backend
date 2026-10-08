@@ -32,7 +32,14 @@ function loadTs(relativePath, dependencies = {}) {
   return module.exports;
 }
 
-const completion = loadTs("../services/cleaning-work-completion.prisma.ts");
+const actionRules = {
+  ...loadTs("../services/cleaning-action-window.ts", { "./cleaner-access-window.policy.js": {} }),
+  // This test focuses on route documents. SQL/window lookup is independently
+  // exercised by cleaning-action-window.database.test.ts.
+  readCleaningActionWindow: async () => ({ startsAt: new Date("2026-10-01T15:10Z"), latestStartAt: new Date("2026-10-01T18:00Z"), latestCompletionAt: new Date("2026-10-01T18:00Z") }),
+};
+const completion = loadTs("../services/cleaning-work-completion.prisma.ts", { "./cleaning-action-window.js": actionRules, "./cleaning-checklist.service.js": { assertChecklistComplete: async () => {} } });
+const actionButtons = loadTs("../services/cleaning-action-button.ts", { "./cleaning-action-window.js": actionRules });
 const timing = loadTs("../services/cleaning-timing-consent.ts");
 const completedAt = new Date("2026-10-01T15:44:05.000Z");
 const routePath = "/cleaning/confirm/fixture-cleaner-token";
@@ -56,7 +63,7 @@ async function fixture(t, overrides = {}) {
       timezone: overrides.timezone ?? "America/Puerto_Rico",
     } };
   let writes = 0;
-  let clock = completedAt;
+  let clock = overrides.clock ?? completedAt;
   const notices = [];
   const resolutions = [];
   const db = {
@@ -83,11 +90,18 @@ async function fixture(t, overrides = {}) {
   };
   const handlers = new Map();
   const router = {
+    use() {},
     get(path, handler) { handlers.set(`GET ${path}`, handler); },
     post(path, handler) { handlers.set(`POST ${path}`, handler); },
   };
   const unused = async () => { throw new Error("Unexpected unrelated action in completion test"); };
   loadTs("./cleaning-confirm.routes.ts", {
+    "../services/cleaning-reassignment.service.js": { acceptCleaningOffer: unused, withdrawCleaning: unused, CleaningReassignmentError: class extends Error {} },
+    "../services/cleaning-checklist.service.js": { readOwnChecklist: async () => ({ items: [], editable: false }), setChecklistItem: unused, CleaningChecklistError: class extends Error {} },
+    "../services/cleaning-checklist-render.js": { renderCleaningChecklist: () => "" },
+    "../services/cleaner-account.service.js": { loadCleanerActivation: unused },
+    "../services/cleaning-action-window.js": actionRules,
+    "../services/cleaning-action-button.js": actionButtons,
     "../services/staff-language.service.js": loadTs("../services/staff-language.service.ts"),
     express: { Router: () => router },
     "@prisma/client": { PrismaClient: class { constructor() { return db; } }, ReservationStatus: { CANCELLED: "CANCELLED" } },
@@ -224,6 +238,9 @@ test("in-progress GET retains only the finish action", async t => {
 });
 
 for (const [name, overrides, status] of [
+  ["completion before scheduled start", { clock: new Date("2026-10-01T15:00Z") }, 409],
+  ["completion before recorded start", { clock: new Date("2026-10-01T15:11Z") }, 409],
+  ["completion exactly at window close", { clock: new Date("2026-10-01T18:00Z") }, 409],
   ["missing start", { work: { startConfirmedAt: null } }, 409],
   ["missing consent", { work: { timingConsentAcceptedAt: null } }, 409],
   ["cancelled reservation", { reservationStatus: "CANCELLED" }, 410],

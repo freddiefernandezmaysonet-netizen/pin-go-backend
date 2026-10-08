@@ -1,7 +1,12 @@
+import "dotenv/config";
+import { buildCleanerAccountRouter } from "./routes/cleaner-account.routes.js";
+import { buildCleaningChecklistRouter } from "./routes/cleaning-checklist.routes.js";
+import { buildCleaningRecoveryPolicyRouter } from "./routes/cleaning-recovery-policy.routes.js";
+import { buildCleanerSurfaceGuard } from "./middleware/cleanerSurfaceGuard.js";
+import { requireAuth } from "./middleware/requireAuth.js";
 import { buildHostCalendarRouter } from "./routes/dashboard.host-calendar.route.js";
 import { calculateDirectBookingPricing as calendarPricing } from "./services/direct-booking-pricing.service.js";
 import { guestMobileIdentityRouter } from "./routes/guest-mobile-identity.routes.js";
-import "dotenv/config";
 import express from "express";
 import crypto from "crypto";
 import { prisma } from "./lib/prisma";
@@ -214,6 +219,10 @@ app.use(
 );
 
 app.use(bodyParser.urlencoded({ extended: true }));
+app.use(buildCleanerSurfaceGuard(prisma));
+app.use(buildCleanerAccountRouter(prisma));
+app.use(buildCleaningChecklistRouter(prisma));
+app.use(buildCleaningRecoveryPolicyRouter(prisma));
 app.use(buildTtlockCallbackCanaryRouter(prisma, process.env));
 app.use(buildMessageDeliveryWebhookRouter(prisma));
 const hostInboxRuntime = buildHostInboxRuntime({ prisma, env: process.env });
@@ -383,7 +392,7 @@ app.use(eventsRouter);
 app.use(tuyaRoutes);
 app.use(orgTuyaRoutes);
 
-app.use("/staff", buildStaffRouter(prisma));
+app.use("/staff", requireAuth, buildStaffRouter(prisma));
 
 
 // =====================

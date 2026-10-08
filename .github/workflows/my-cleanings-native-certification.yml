@@ -1,0 +1,83 @@
+name: My Cleanings Native Certification
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - "src/services/cleaning-*"
+      - "src/services/cleaner-*"
+      - "src/routes/cleaner-account*"
+      - "src/workers/reservation.worker.ts"
+      - "prisma/**"
+      - ".github/workflows/my-cleanings-native-certification.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  native-cleaning:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: cleaner_test
+          POSTGRES_PASSWORD: cleaner_test
+          POSTGRES_DB: cleaner_account_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U cleaner_test -d cleaner_account_test"
+          --health-interval 5s --health-timeout 5s --health-retries 10
+    env:
+      DATABASE_URL: postgresql://cleaner_test:cleaner_test@127.0.0.1:5432/cleaner_account_test?connection_limit=8
+      CLEANER_ACCOUNT_TEST_DATABASE_URL: postgresql://cleaner_test:cleaner_test@127.0.0.1:5432/cleaner_account_test?connection_limit=8
+      CLEANER_SQL_URL: postgresql://cleaner_test:cleaner_test@127.0.0.1:5432/cleaner_account_test
+      CLEANER_NATIVE_DB_TEST: "true"
+      JWT_SECRET: isolated-ci-test-secret-at-least-32-characters
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+      - run: npm ci --ignore-scripts --no-audit --no-fund
+      - name: Validate both supported schema entry points
+        run: |
+          npx prisma validate --schema prisma/schema.prisma
+          npx prisma validate --schema prisma
+          npx prisma generate --schema prisma
+      - name: Apply additive migrations over the recorded pre-feature schema
+        shell: bash
+        run: |
+          set -euo pipefail
+          base=c97cb69f7c8e531bced491cdd5588c2c74510963
+          mkdir -p .native-baseline
+          git archive "$base" prisma | tar -x -C .native-baseline
+          npx prisma migrate diff --from-empty --to-schema-datamodel .native-baseline/prisma --script > .native-baseline/base.sql
+          psql "$CLEANER_SQL_URL" -v ON_ERROR_STOP=1 -f .native-baseline/base.sql
+          psql "$CLEANER_SQL_URL" -v ON_ERROR_STOP=1 -c 'INSERT INTO "Organization" (id,name,"updatedAt") VALUES ('"'"'native-legacy-org'"'"','"'"'Synthetic legacy'"'"',NOW()); INSERT INTO "StaffMember" (id,"organizationId","fullName","ttlockCardRef","updatedAt") VALUES ('"'"'native-legacy-staff'"'"','"'"'native-legacy-org'"'"','"'"'Synthetic cleaner'"'"','"'"'legacy-card'"'"',NOW());'
+          git diff --name-only --diff-filter=A "$base" HEAD -- prisma/migrations | sort | while IFS= read -r migration; do
+            psql "$CLEANER_SQL_URL" -v ON_ERROR_STOP=1 -f "$migration"
+          done
+          psql "$CLEANER_SQL_URL" -v ON_ERROR_STOP=1 -c 'DO $$ BEGIN IF NOT EXISTS (SELECT 1 FROM "StaffMember" WHERE id='"'"'native-legacy-staff'"'"' AND "ttlockCardRef"='"'"'legacy-card'"'"' AND "dashboardUserId" IS NULL) THEN RAISE EXCEPTION '"'"'Legacy cleaner changed'"'"'; END IF; END $$;'
+      - name: Certify persisted cleaning flows and concurrent command recovery
+        run: >-
+          node --import tsx --test --test-concurrency=1
+          src/services/cleaning-issue-recovery.database.test.ts
+          src/services/cleaning-reassignment.database.test.ts
+          src/services/cleaning-action-window.database.test.ts
+          src/services/cleaning-checklist.database.test.ts
+          src/services/cleaner-task-pagination.database.test.ts
+          src/services/cleaner-account.database.test.ts
+      - name: Certify authorization and recovery policies
+        run: >-
+          node --import tsx --test
+          src/services/cleaning-pin-ai-activation.service.test.ts
+          src/services/cleaning-issue-recovery.service.test.ts
+          src/services/cleaner-access-extension-plan.service.test.ts
+          src/routes/cleaner-account.routes.test.ts

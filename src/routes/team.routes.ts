@@ -227,6 +227,10 @@ if (target.role === DashboardUserRole.PLATFORM_ADMIN) {
   });
 }
 
+    if (target.role === DashboardUserRole.CLEANER && typeof req.body?.role === "string") {
+      return res.status(409).json({ error: "CLEANER_ROLE_MANAGED_FROM_STAFF" });
+    }
+
     const data: {
       fullName?: string | null;
       role?: DashboardUserRole;
@@ -323,6 +327,10 @@ if (target.role === DashboardUserRole.PLATFORM_ADMIN) {
     error: "Platform admin users cannot be managed",
   });
 }
+
+      if (target.role === DashboardUserRole.CLEANER) {
+        return res.status(409).json({ error: "CLEANER_USE_SELF_SERVICE_PASSWORD_RECOVERY" });
+      }
 
       const temporaryPassword = makeTemporaryPassword();
       const passwordHash = await bcrypt.hash(temporaryPassword, 12);

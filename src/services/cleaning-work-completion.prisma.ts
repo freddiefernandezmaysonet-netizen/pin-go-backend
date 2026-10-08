@@ -1,4 +1,6 @@
 import type { PrismaClient } from "@prisma/client";
+import { assertCleaningActionTime, readCleaningActionWindow } from "./cleaning-action-window.js";
+import { assertChecklistComplete } from "./cleaning-checklist.service.js";
 
 export type ConfirmCleaningCompletionInput = Readonly<{
   workId: string;
@@ -14,9 +16,9 @@ export type ConfirmCleaningCompletionInput = Readonly<{
 export async function confirmCleaningCompletion(
   prisma: PrismaClient,
   input: ConfirmCleaningCompletionInput,
-  now = new Date(),
+  now?: Date,
 ) {
-  if (!(now instanceof Date) || !Number.isFinite(now.getTime())) {
+  if (now !== undefined && (!(now instanceof Date) || !Number.isFinite(now.getTime()))) {
     throw new Error("CLEANING_COMPLETION_INVALID_DATE");
   }
   return prisma.$transaction(async tx => {
@@ -43,9 +45,13 @@ export async function confirmCleaningCompletion(
       throw new Error("CLEANING_COMPLETION_START_REQUIRED");
     }
     if (work.completionConfirmedAt) return work;
+    const window = await readCleaningActionWindow(tx, work);
+    const occurredAt = now ?? new Date();
+    assertCleaningActionTime(window, "complete", occurredAt, work.startConfirmedAt);
+    await assertChecklistComplete(tx, work.reservationId);
     return tx.cleaningWork.update({
       where: { id: work.id },
-      data: { completionConfirmedAt: now },
+      data: { completionConfirmedAt: occurredAt },
     });
-  });
+  }, { isolationLevel: "Serializable", maxWait: 5000, timeout: 10000 });
 }
