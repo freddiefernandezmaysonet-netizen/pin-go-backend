@@ -38,7 +38,7 @@ function fixture() {
       workflowState: payload.workflowState,
       metadata: payload.metadata,
     };
-  }) as typeof reopenOperationalIssue;
+  }) as unknown as typeof reopenOperationalIssue;
   return {
     db, saved, reopenCalls,
     deps: { upsert, reopen },
