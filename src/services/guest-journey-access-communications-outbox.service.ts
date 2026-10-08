@@ -11,6 +11,7 @@ import {
   filterAlreadyOwnedGuestAccessDeliveries,
 } from "./guest-journey-access-communications-bridge.policy";
 import { airbnbOwnsReservation } from "../channex-messaging/airbnb-access.service.js";
+import { isOtaGuestExternalDeliveryBlocked } from "./ota-guest-external-messaging.policy.js";
 
 export type MaterializeGuestAccessCommunicationOutboxInput = {
   reservationId: string;
@@ -60,6 +61,7 @@ export async function materializeGuestAccessCommunicationOutbox(
       guestPhone: true,
       preferredLanguage: true,
       externalRaw: true,
+      source: true,
       externalProvider: true,
       externalId: true,
       checkIn: true,
@@ -91,7 +93,13 @@ export async function materializeGuestAccessCommunicationOutbox(
   if (!reservation) {
     throw new Error("ACCESS_COMMUNICATIONS_OUTBOX_RESERVATION_SCOPE_MISMATCH");
   }
-  // Scope was verified before yielding delivery to the independent Airbnb scan.
+  // The independent Channex operational dispatcher owns blocked OTA deliveries;
+  // never enqueue an external SMS/email in this durable access outbox.
+  if (isOtaGuestExternalDeliveryBlocked(reservation, "sms") ||
+      isOtaGuestExternalDeliveryBlocked(reservation, "email")) {
+    return { canonicalAccessGrantId: null, proposed: 0, created: 0, deduplicated: 0 };
+  }
+  // Preserve the independent legacy Airbnb pilot scan.
   if (await airbnbOwnsReservation(prisma, reservationId)) {
     return { canonicalAccessGrantId: null, proposed: 0, created: 0, deduplicated: 0 };
   }
