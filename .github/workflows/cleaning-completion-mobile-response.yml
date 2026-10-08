@@ -6,6 +6,10 @@ on:
       - "src/routes/cleaning-confirm.routes.ts"
       - "src/routes/cleaning-completion-mobile.response.test.js"
       - "src/services/cleaning-work-completion.prisma.ts"
+      - "src/services/cleaning-action-button.ts"
+      - "src/services/cleaning-cancellation-render.test.ts"
+      - "src/services/cleaning-work-issue.service.ts"
+      - "src/services/cleaning-work-issue.service.test.ts"
       - "src/services/cleaning-timing-consent.ts"
       - "src/services/cleaner-timing-mobile-ui.contract.test.js"
       - "src/services/cleaner-timing-reentrant-mobile.contract.test.js"
@@ -34,8 +38,10 @@ jobs:
         env:
           CLEANER_RESPONSE_EVIDENCE_DIR: artifacts/cleaning-completion-mobile
         run: >-
-          node --test
+          node --import tsx --test
           src/routes/cleaning-completion-mobile.response.test.js
+          src/services/cleaning-cancellation-render.test.ts
+          src/services/cleaning-work-issue.service.test.ts
           src/services/cleaner-timing-mobile-ui.contract.test.js
           src/services/cleaner-timing-reentrant-mobile.contract.test.js
           src/services/cleaning-timing-property-timezone.contract.test.js

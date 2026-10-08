@@ -81,3 +81,4 @@ jobs:
           src/services/cleaning-issue-recovery.service.test.ts
           src/services/cleaner-access-extension-plan.service.test.ts
           src/routes/cleaner-account.routes.test.ts
+          src/services/cleaner-task-filters.test.ts

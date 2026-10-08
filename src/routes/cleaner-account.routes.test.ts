@@ -61,6 +61,10 @@ test("personal API ignores supplied identity, rejects other tasks and never uses
     assert.equal((await fetch(`${base}/api/cleaner/cleanings/other`)).status, 404);
     assert.equal((await fetch(`${base}/api/cleaner/cleanings/own`)).status, 200);
     assert.equal((await fetch(`${base}/api/staff/staff/cleaner-account`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ email: "a@example.com" }) })).status, 403);
+    for (const query of ["status=UNKNOWN", "from=2026-02-29", "from=2026-10-08&to=2026-10-07", "q=a&q=b", "view=today&view=history"]) {
+      const invalid = await fetch(`${base}/api/cleaner/cleanings?${query}`);
+      assert.equal(invalid.status, 400, query);
+    }
     staffActive = false;
     assert.equal((await fetch(`${base}/api/cleaner/cleanings`)).status, 403);
   } finally { await new Promise<void>(resolve => server.close(() => resolve())); }

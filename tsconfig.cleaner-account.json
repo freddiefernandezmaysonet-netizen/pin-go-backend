@@ -16,6 +16,7 @@
     "src/services/cleaning-recovery-policy.service.test.ts",
     "src/services/cleaning-work-issue.service.test.ts",
     "src/services/cleaner-task-pagination.database.test.ts",
+    "src/services/cleaner-task-filters.test.ts",
     "src/workers/cleaner-routine-sms-removal.test.ts",
     "src/services/cleaning-followup-delivery.service.ts",
     "src/services/cleaning-followup-delivery.service.test.ts",

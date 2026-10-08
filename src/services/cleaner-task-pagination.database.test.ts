@@ -9,8 +9,8 @@ test("view filter precedes 25-record pagination and respects local day and clean
   const db = new PrismaClient({ datasources: { db: { url: url! } } });
   const id = `page-${randomUUID()}`;
   await db.organization.create({ data: { id, name: "Synthetic pagination" } });
-  t.after(async () => { await db.cleaningConfirmation.deleteMany({ where: { propertyId: id } }); await db.reservation.deleteMany({ where: { propertyId: id } }); await db.property.delete({ where: { id } }); await db.staffMember.deleteMany({ where: { organizationId: id } }); await db.organization.delete({ where: { id } }); await db.$disconnect(); });
-  await db.property.create({ data: { id, organizationId: id, name: "Synthetic property", timezone: "America/Puerto_Rico" } });
+  t.after(async () => { await db.cleaningWork.deleteMany({ where: { propertyId: id } }); await db.cleaningConfirmation.deleteMany({ where: { propertyId: id } }); await db.reservation.deleteMany({ where: { propertyId: id } }); await db.property.delete({ where: { id } }); await db.staffMember.deleteMany({ where: { organizationId: id } }); await db.organization.delete({ where: { id } }); await db.$disconnect(); });
+  await db.property.create({ data: { id, organizationId: id, name: "Synthetic property 100%_", timezone: "America/Puerto_Rico" } });
   await db.staffMember.create({ data: { id, organizationId: id, fullName: "Synthetic cleaner" } });
   for (let index = 0; index < 30; index++) {
     const rid = `${id}-z${String(index).padStart(2, "0")}`;
@@ -28,6 +28,17 @@ test("view filter precedes 25-record pagination and respects local day and clean
   const second = await cleanerTaskPageIds(db, { ...input, view: "upcoming", cursor: first[24] }); assert.equal(second.length, 5);
   assert.equal(new Set([...first.slice(0, 25), ...second]).size, 30);
   assert.deepEqual(await cleanerTaskPageIds(db, { ...input, view: "history" }), [`${id}-a-closed`]);
+  assert.deepEqual(await cleanerTaskPageIds(db, { ...input, view: "today", filters: { q: "PROPERTY 100%_", status: "CONFIRMED", from: "2026-10-07", to: "2026-10-07" } }), [`${id}-a-today`]);
+  assert.deepEqual(await cleanerTaskPageIds(db, { ...input, view: "history", filters: { status: "CONFIRMED" } }), []);
+  assert.deepEqual(await cleanerTaskPageIds(db, { ...input, view: "today", filters: { q: "absent" } }), []);
+  assert.deepEqual(await cleanerTaskPageIds(db, { ...input, view: "today", filters: { to: "2026-10-06" } }), [`${id}-a-overdue`]);
+  const filtered = await cleanerTaskPageIds(db, { ...input, view: "upcoming", filters: { q: "property", status: "CONFIRMED", from: "2026-11-02", to: "2026-11-02" } });
+  assert.equal(filtered.length, 26);
+  assert.equal((await cleanerTaskPageIds(db, { ...input, view: "upcoming", cursor: filtered[24], filters: { q: "property", status: "CONFIRMED", from: "2026-11-02", to: "2026-11-02" } })).length, 5);
+  await db.cleaningWork.create({ data: { reservationId: `${id}-a-overdue`, propertyId: id, staffMemberId: id, confirmationId: `${id}-a-overdue`, scheduledStartAt: new Date("2026-10-07T16:00:00Z"), durationCommitmentMinutes: 60, startConfirmationGraceMinutes: 30, followupGraceMinutes: 15, timingConsentVersion: "cleaning_timing_v1", timingConsentAcceptedAt: input.now, startConfirmedAt: input.now } });
+  assert.deepEqual(await cleanerTaskPageIds(db, { ...input, view: "today", filters: { status: "IN_PROGRESS", from: "2026-10-07", to: "2026-10-07" } }), [`${id}-a-overdue`]);
+  await db.reservation.update({ where: { id: `${id}-a-today` }, data: { status: "CANCELLED" } });
+  assert.deepEqual(await cleanerTaskPageIds(db, { ...input, view: "history", filters: { status: "CANCELLED", from: "2026-10-07", to: "2026-10-07" } }), [`${id}-a-today`]);
   assert.deepEqual(await cleanerTaskPageIds(db, { ...input, view: "today", organizationId: "foreign" }), []);
   assert.deepEqual(await cleanerTaskPageIds(db, { ...input, view: "today", staffMemberId: "foreign" }), []);
 });

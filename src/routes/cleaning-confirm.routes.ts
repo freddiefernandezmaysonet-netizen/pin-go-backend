@@ -14,7 +14,7 @@ import { buildCleaningTimingConsentSnapshot } from "../services/cleaning-timing-
 import { confirmCleaningStart } from "../services/cleaning-work-start.prisma.js";
 import { confirmCleaningCompletion } from "../services/cleaning-work-completion.prisma.js";
 import { readCleaningActionWindow, CleaningActionWindowError, type CleaningActionWindow } from "../services/cleaning-action-window.js";
-import { renderCleaningActionButton } from "../services/cleaning-action-button.js";
+import { renderCleaningActionButton, renderCleaningCancellation } from "../services/cleaning-action-button.js";
 import { CleaningChecklistError, readOwnChecklist, setChecklistItem } from "../services/cleaning-checklist.service.js";
 import { renderCleaningChecklist } from "../services/cleaning-checklist-render.js";
 import { resolveCleaningHostAttention } from "../services/cleaning-followup-host-attention.service.js";
@@ -76,10 +76,6 @@ function sendCleaningActionWindowFailure(res: any, error: CleaningActionWindowEr
   return res.status(409).send(cleanerPage(`<h2>${es ? "Revisa el horario" : "Review the schedule"}</h2><p role="alert">${text}</p>`, language));
 }
 
-function cancelForm(token: string, language: StaffLanguage) {
-  const es = language === "es";
-  return `<details><summary>${es ? "Cancelar limpieza" : "Cancel cleaning"}</summary><p>${es ? "Confirma si ya no puedes realizar esta limpieza. Pin&Go buscará un respaldo." : "Confirm if you can no longer perform this cleaning. Pin&Go will look for a backup."}</p><form method="POST" action="/cleaning/confirm/${encodeURIComponent(token)}/cancel"><button class="cleaner-action cleaner-action-secondary">${es ? "Sí, cancelar limpieza" : "Yes, cancel cleaning"}</button></form></details>`;
-}
 cleaningConfirmRouter.post("/cleaning/confirm/:token/cancel", async (req, res) => {
   let language: StaffLanguage = "en";
   try {
@@ -170,6 +166,12 @@ function formatPropertyLocal(value: Date, timeZone: string, language: StaffLangu
 }
 
 function cleanerPage(content: string, language: StaffLanguage = "en") {
+  let dashboardUrl = "https://app.pin-ngo.com/my-cleanings";
+  try {
+    const url = new URL("/my-cleanings", process.env.DASHBOARD_URL ?? process.env.APP_URL ?? "https://app.pin-ngo.com");
+    if (url.protocol === "https:" || (url.protocol === "http:" && url.hostname === "localhost")) dashboardUrl = url.toString();
+  } catch { /* An invalid configuration must not break the cleaning action. */ }
+  const dashboardHref = dashboardUrl.replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c]!);
   return `<!doctype html>
 <html lang="${language}">
 <head>
@@ -181,11 +183,12 @@ function cleanerPage(content: string, language: StaffLanguage = "en") {
     .cleaner-card{background:#fff;border:1px solid #e5e7eb;border-radius:16px;padding:24px;box-shadow:0 8px 28px rgba(15,23,42,.06)}
     h2{font-size:26px;line-height:1.2;margin:0 0 20px} p{margin:0 0 14px} b{font-weight:750}
     .cleaner-action{display:block;width:100%;min-height:52px;padding:14px 18px;margin-top:20px;border:0;border-radius:12px;background:#2563eb;color:#fff;font-size:17px;font-weight:750;line-height:1.25;white-space:normal}.cleaner-action-secondary{background:#fff;color:#b91c1c;border:1px solid #fecaca}
+    .cleaner-action:disabled{background:#e5e7eb;color:#6b7280;cursor:not-allowed;box-shadow:none}.cleaner-back{display:inline-flex;align-items:center;min-height:44px;margin-bottom:16px;color:#1d4ed8}.cleaner-back:focus-visible{outline:3px solid #2563eb;outline-offset:3px}
     .cleaner-note{margin-top:14px;font-size:14px;line-height:1.5;color:#6b7280}
     @media(max-width:480px){.cleaner-shell{padding:16px 12px 28px}.cleaner-card{padding:20px 16px;border-radius:14px}h2{font-size:24px}.cleaner-action{font-size:17px;min-height:54px}}
   </style>
 </head>
-<body><main class="cleaner-shell"><section class="cleaner-card">${content}</section></main></body>
+<body><main class="cleaner-shell"><a class="cleaner-back" href="${dashboardHref}">${language === "es" ? "Volver a Mis limpiezas" : "Back to My cleanings"}</a><section class="cleaner-card">${content}</section></main></body>
 </html>`;
 }
 
@@ -272,7 +275,7 @@ function renderTimingConsent(token: string, prepared: Awaited<ReturnType<typeof 
       <p><b>${es ? "Duracion estandar" : "Standard duration"}:</b> ${prepared.terms.durationCommitmentMinutes} ${es ? "minutos" : "minutes"}</p>
       <p><b>${es ? "Finalizacion comprometida" : "Committed completion"}:</b> ${formatPropertyLocal(prepared.terms.scheduledCompletionAt, prepared.timeZone, language)}</p>
       ${renderCleaningChecklist(prepared.checklist, token, language)}
-      ${cancelForm(token, language)}
+      ${renderCleaningCancellation({ token, language, window: prepared.actionWindow })}
       ${renderCleaningActionButton({ token, action: "start", window: prepared.actionWindow, startedAt: null, language })}
       <p class="cleaner-note">${es ? "Usa este boton cuando realmente comiences a limpiar. No cambia la hora comprometida de finalizacion ni la ventana de acceso NFC." : "Use this when you actually begin cleaning. It does not change the committed completion time or NFC access window."}</p>
     `, language);
@@ -288,7 +291,7 @@ function renderTimingConsent(token: string, prepared: Awaited<ReturnType<typeof 
       <form method="POST" action="/cleaning/confirm/${token}/timing-consent">
         <button class="cleaner-action">${es ? "Acepto este horario y compromiso de tiempo de limpieza" : "I accept this cleaning schedule and time commitment"}</button>
       </form>
-      ${cancelForm(token, language)}`, language);
+      ${renderCleaningCancellation({ token, language, window: prepared.actionWindow })}`, language);
 }
 
 async function runCompleteFlowAuditAfterCleaningConfirmation(
@@ -597,7 +600,7 @@ cleaningConfirmRouter.post(
           <p><b>${es ? "Finalizacion comprometida" : "Committed completion"}:</b> ${formatPropertyLocal(prepared.terms.scheduledCompletionAt, prepared.timeZone, language)}</p>
           <p>${es ? "Tu aceptacion fue registrada a las" : "Your acceptance was recorded at"} ${formatPropertyLocal(accepted.timingConsentAcceptedAt!, prepared.timeZone, language)}.</p>
           ${renderCleaningChecklist(prepared.checklist, token, language)}
-      ${cancelForm(token, language)}
+      ${renderCleaningCancellation({ token, language, window: prepared.actionWindow })}
       ${renderCleaningActionButton({ token, action: "start", window: prepared.actionWindow, startedAt: null, language })}
           <p class="cleaner-note">${es ? "Este boton registra tu declaracion de inicio. No cambia la hora comprometida de finalizacion ni la ventana de acceso NFC." : "This button records your declaration of starting the cleaning. It does not change the committed completion time or NFC access window."}</p>
       `, language));
