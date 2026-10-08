@@ -1,5 +1,5 @@
 import { PrismaClient } from "@prisma/client";
-import { deliverAirbnbCommunication } from "../channex-messaging/airbnb-access.service.js";
+import { deliverOtaOperationalCommunication } from "../channex-messaging/ota-operational-guest.service.js";
 import { isOtaGuestExternalDeliveryBlocked } from "./ota-guest-external-messaging.policy.js";
 import { sendSms } from "../integrations/twilio/twilio.client";
 import {
@@ -47,7 +47,7 @@ export async function sendCheckoutSms(
   reservationId: string,
   send: typeof sendSms = sendSms,
 ) {
-  const routed = await deliverAirbnbCommunication(prisma, reservationId, "CHECKOUT");
+  const routed = await deliverOtaOperationalCommunication(prisma, reservationId, "CHECKOUT");
   if (routed) return routed;
   let retryBody: string | null = null;
   try {
