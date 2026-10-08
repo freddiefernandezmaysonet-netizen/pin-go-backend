@@ -138,7 +138,8 @@ export function buildCleanerAccountRouter(prisma: PrismaClient, authenticate: Re
 
   router.get("/cleaning/account/activate/:token", async (req, res) => {
     res.setHeader("Cache-Control", "no-store");
-    res.setHeader("Referrer-Policy", "no-referrer");
+    // Keep same-origin form POSTs identifiable without leaking activation URLs to other sites.
+    res.setHeader("Referrer-Policy", "same-origin");
     try {
       const activation = await loadCleanerActivation(prisma, String(req.params.token));
       const es = activation.staffMember.preferredLanguage === "es";
@@ -147,7 +148,8 @@ export function buildCleanerAccountRouter(prisma: PrismaClient, authenticate: Re
   });
   router.post("/cleaning/account/activate/:token", async (req, res) => {
     res.setHeader("Cache-Control", "no-store");
-    res.setHeader("Referrer-Policy", "no-referrer");
+    // Keep same-origin form POSTs identifiable without leaking activation URLs to other sites.
+    res.setHeader("Referrer-Policy", "same-origin");
     try {
       const activation = await loadCleanerActivation(prisma, String(req.params.token));
       const es = activation.staffMember.preferredLanguage === "es";

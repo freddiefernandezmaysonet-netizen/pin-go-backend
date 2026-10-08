@@ -97,3 +97,28 @@ test("global guard blocks legacy host routes and another cleaner's offer even wi
     if (previousNode === undefined) delete process.env.NODE_ENV; else process.env.NODE_ENV = previousNode;
   }
 });
+
+
+test("activation form preserves its same-origin POST and keeps token pages uncached", async () => {
+  const staff = { id: "staff", organizationId: "org", fullName: "Maria", preferredLanguage: "es", isActive: true,
+    dashboardUserId: null, cleanerAccountEmail: "maria@example.com", cleanerAccountRequestedAt: new Date("2026-01-01") };
+  const db: any = {
+    cleanerAccountActivation: { findUnique: async () => ({ staffMember: staff, staffMemberId: staff.id,
+      email: staff.cleanerAccountEmail, requestedAt: staff.cleanerAccountRequestedAt, consumedAt: null,
+      expiresAt: new Date(Date.now() + 60000), confirmationId: "confirmation" }) },
+    cleaningConfirmation: { findFirst: async () => ({ id: "confirmation", reservationId: "reservation", propertyId: "property" }) },
+    reservation: { findFirst: async () => ({ id: "reservation" }) },
+    cleaningWork: { findFirst: async () => null },
+  };
+  const app = express();
+  app.use(buildCleanerAccountRouter(db, (_req, _res, next) => next()));
+  const server = app.listen(0, "127.0.0.1");
+  await new Promise<void>(resolve => server.once("listening", resolve));
+  try {
+    const response = await fetch(`http://127.0.0.1:${(server.address() as any).port}/cleaning/account/activate/${"a".repeat(48)}`);
+    assert.equal(response.status, 200);
+    assert.equal(response.headers.get("referrer-policy"), "same-origin");
+    assert.equal(response.headers.get("cache-control"), "no-store");
+    assert.match(await response.text(), /<form method="POST">/);
+  } finally { await new Promise<void>(resolve => server.close(() => resolve())); }
+});
