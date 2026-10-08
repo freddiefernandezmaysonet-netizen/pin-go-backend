@@ -2,6 +2,7 @@ import { formatPropertyArrivalLocation } from "./property-arrival-location.js";
 import { isChannexGuestRegistrationExempt } from "./guest-registration-channel.policy";
 import { deliverOtaOperationalCommunication } from "../channex-messaging/ota-operational-guest.service.js";
 import { isOtaGuestExternalDeliveryBlocked } from "./ota-guest-external-messaging.policy.js";
+import { isGuestOperationalSmsEligible } from "./guest-journey-access-communications-bridge.policy.js";
 import { PrismaClient } from "@prisma/client";
 import { sendSms } from "../integrations/twilio/twilio.client";
 import {
@@ -174,6 +175,7 @@ export function buildPreCheckinMessage(input: {
   mapsLink: string | null;
   verifyLink: string | null;
   language: GuestLanguage;
+  arrivalStarted?: boolean;
 }) {
   const isSpanish = input.language === "es";
   const propertyName =
@@ -188,7 +190,9 @@ export function buildPreCheckinMessage(input: {
     : null;
 
   const parts: string[] = [
-    isSpanish
+    input.arrivalStarted
+      ? (isSpanish ? `Pin&Go: Informacion de llegada a ${propertyName}.` : `Pin&Go: Arrival details for ${propertyName}.`)
+      : isSpanish
       ? `Pin&Go: Check-in hoy ${checkInTime} en ${propertyName}.`
       : `Pin&Go: Check-in today ${checkInTime} at ${propertyName}.`,
   ];
@@ -374,7 +378,8 @@ export async function sendPreCheckinEmail(
 
 export async function sendPreCheckinSms(
   prisma: PrismaClient,
-  reservationId: string
+  reservationId: string,
+  now: Date = new Date()
 ) {
   const routed = await deliverOtaOperationalCommunication(prisma, reservationId, "PRECHECKIN");
   if (routed) return routed;
@@ -384,6 +389,7 @@ export async function sendPreCheckinSms(
       where: {
         reservationId,
         type: "PRECHECKIN",
+        channel: "sms",
         status: "SENT",
       },
     });
@@ -406,6 +412,11 @@ export async function sendPreCheckinSms(
         externalId: true,
         verificationStatus: true,
         checkIn: true,
+        checkOut: true,
+        status: true,
+        paymentState: true,
+        cancelledAt: true,
+        externalRaw: true,
         property: {
           select: {
             id: true,
@@ -431,6 +442,12 @@ export async function sendPreCheckinSms(
 
     if (!r || !r.guestPhone) {
       return { ok: false, skipped: true, error: "Missing guestPhone" };
+    }
+    if (r.status !== "ACTIVE" || r.cancelledAt || r.paymentState !== "PAID" || now >= r.checkOut || r.checkIn.getTime() - now.getTime() > 4 * 3600000) {
+      return { ok: true, skipped: true, reason: "PRECHECKIN_SMS_NOT_DUE" };
+    }
+    if (!isGuestOperationalSmsEligible(r)) {
+      return { ok: true, skipped: true, reason: "SMS_CONSENT_NOT_GRANTED" };
     }
 
     const propertyName = r.property?.name ?? "your property";
@@ -477,6 +494,7 @@ export async function sendPreCheckinSms(
       mapsLink,
       verifyLink,
       language,
+      arrivalStarted: now >= r.checkIn,
     });
     retryBody = body;
 
