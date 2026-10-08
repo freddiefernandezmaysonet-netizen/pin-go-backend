@@ -153,7 +153,8 @@ test("public booking keeps its own access rules regardless of a cleaner cookie",
   const token = signAuthToken({ sub: "synthetic-cleaner", orgId: "org", email: "cleaner@example.com", role: "CLEANER", tokenVersion: 1 });
   const cookie = { Cookie: `${process.env.AUTH_COOKIE_NAME ?? "pingo_token"}=${token}` };
   try {
-    for (const headers of [{}, cookie, { Authorization: `Bearer ${token}` }, { Cookie: "pingo_token=expired" }]) {
+    const sessions: Record<string, string>[] = [{}, cookie, { Authorization: `Bearer ${token}` }, { Cookie: "pingo_token=expired" }];
+    for (const headers of sessions) {
       for (const path of ["/api/public-booking/discovery", "/api/public-booking/org/property?preview=false"]) assert.equal((await fetch(`${base}${path}`, { headers })).status, 200);
       assert.equal((await fetch(`${base}/api/public-booking/quote`, { method: "POST", headers })).status, 200);
       const denied = await fetch(`${base}/api/public-booking/manage/invalid`, { headers });
