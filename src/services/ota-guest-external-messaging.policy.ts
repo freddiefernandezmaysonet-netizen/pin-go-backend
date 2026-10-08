@@ -1,19 +1,30 @@
-/** Guest-directed external SMS/email policy. Channex inbox messages are not external delivery. */
+/** Controls *guest-directed* external SMS/email only; never suppress Channex inbox traffic. */
 export type OtaGuestExternalChannel = "sms" | "email";
+export type ChannexOperationalProvider = "AIRBNB" | "BOOKING_COM";
+
+export function resolveChannexOperationalProvider(reservation: {
+  source?: string | null;
+  externalProvider?: string | null;
+  externalId?: string | null;
+}): ChannexOperationalProvider | null {
+  if (String(reservation.externalProvider ?? "").trim().toUpperCase() !== "CHANNEX" ||
+      !String(reservation.externalId ?? "").trim()) return null;
+  const source = String(reservation.source ?? "").trim().toUpperCase().replace(/[.\s-]/g, "_");
+  if (source === "AIRBNB" || source === "AIR_BNB") return "AIRBNB";
+  if (source === "BOOKING_COM" || source === "BOOKINGCOM") return "BOOKING_COM";
+  return null;
+}
 
 export function isOtaGuestExternalDeliveryBlocked(
   reservation: { source?: string | null; externalProvider?: string | null; externalId?: string | null },
   channel: OtaGuestExternalChannel,
   env: NodeJS.ProcessEnv = process.env,
 ): boolean {
-  // Fail open until explicitly configured; preserve existing Direct Booking behavior.
-  if (reservation.externalProvider?.trim().toUpperCase() !== "CHANNEX" ||
-      !reservation.externalId?.trim()) return false;
-  const source = String(reservation.source ?? "").trim().toUpperCase().replace(/[.\s-]/g, "_");
-  const provider = source === "BOOKINGCOM" || source === "BOOKING_COM" ? "BOOKING_COM"
-    : source === "AIR_BNB" || source === "AIRBNB" ? "AIRBNB" : source;
-  const blocked = (env.OTA_GUEST_EXTERNAL_MESSAGING_BLOCKED_PROVIDERS ?? "")
+  const provider = resolveChannexOperationalProvider(reservation);
+  if (!provider || (channel !== "sms" && channel !== "email")) return false;
+  const blocked = String(env.OTA_GUEST_EXTERNAL_MESSAGING_BLOCKED_PROVIDERS ?? "")
     .split(",").map(s => s.trim().toUpperCase().replace(/[.\s-]/g, "_"))
     .map(s => s === "BOOKINGCOM" ? "BOOKING_COM" : s === "AIR_BNB" ? "AIRBNB" : s);
-  return (channel === "sms" || channel === "email") && blocked.includes(provider);
+  // Unset by default: existing production behavior is unchanged.
+  return blocked.includes(provider);
 }
