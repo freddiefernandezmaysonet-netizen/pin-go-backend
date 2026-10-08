@@ -9,6 +9,7 @@ on:
       - 'src/services/checkoutSms.service.ts'
       - 'src/services/email-delivery.service.ts'
       - 'src/services/messaging.service.ts'
+      - 'src/routes/dashboard.messages*'
       - 'src/workers/message.retry.worker.ts'
       - 'src/workers/reservation.worker.ts'
       - '.github/workflows/ota-operational-channex-messaging-v1.yml'
@@ -31,6 +32,7 @@ jobs:
       - run: npx prisma generate --schema ./prisma
       - run: >-
           node --import tsx --test
+          src/routes/dashboard.messages.ota-retry.test.mjs
           src/services/ota-guest-external-messaging.policy.test.ts
           src/channex-messaging/ota-operational-guest.service.test.ts
           src/channex-messaging/ota-operational-scan.service.test.ts
