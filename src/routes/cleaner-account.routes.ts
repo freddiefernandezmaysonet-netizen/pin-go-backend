@@ -98,9 +98,12 @@ export function buildCleanerAccountRouter(prisma: PrismaClient, authenticate: Re
       const limit = 25;
       const cursor = typeof req.query.cursor === "string" ? req.query.cursor : undefined;
       const view = req.query.view;
-      if (view !== undefined && !["today", "upcoming", "history"].includes(String(view))) return res.status(400).json({ error: "CLEANING_VIEW_INVALID" });
-      const ids = view === undefined ? null : await cleanerTaskPageIds(prisma, {
-        staffMemberId: staff.id, organizationId: staff.organizationId, view: view as CleanerTaskView,
+      if (view !== undefined && (typeof view !== "string" || !["today", "upcoming", "history"].includes(view))) return res.status(400).json({ error: "CLEANING_VIEW_INVALID" });
+      let filters;
+      try { filters = parseCleanerTaskFilters(req.query); }
+      catch { return res.status(400).json({ error: "CLEANING_FILTER_INVALID" }); }
+      const ids = view === undefined && Object.keys(filters).length === 0 ? null : await cleanerTaskPageIds(prisma, {
+        staffMemberId: staff.id, organizationId: staff.organizationId, view: (view ?? "today") as CleanerTaskView, filters,
         cursor, now: new Date(), limit: limit + 1,
       });
       const offers = await prisma.cleaningConfirmation.findMany({
@@ -160,4 +163,4 @@ export function buildCleanerAccountRouter(prisma: PrismaClient, authenticate: Re
   });
   return router;
 }
-import { cleanerTaskPageIds, type CleanerTaskView } from "../services/cleaner-task-pagination.service.js";
+import { cleanerTaskPageIds, parseCleanerTaskFilters, type CleanerTaskView } from "../services/cleaner-task-pagination.service.js";
