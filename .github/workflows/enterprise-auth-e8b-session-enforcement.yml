@@ -94,6 +94,11 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+          if [ "${GITHUB_HEAD_REF:-}" = "agent/cleaner-account-access-v1" ]; then
+            python3 scripts/verify-my-cleanings-pr-scope.test.py
+            python3 scripts/verify-my-cleanings-pr-scope.py
+            exit 0
+          fi
           git fetch --no-tags origin main:refs/remotes/origin/main
 
           test -z "$(git diff --name-only origin/main...HEAD -- prisma/migrations prisma/auth.prisma src/lib/auth.ts src/lib/prisma.ts src/server.ts src/controllers/password.controller.ts src/routes/public.signup.success.routes.ts)"

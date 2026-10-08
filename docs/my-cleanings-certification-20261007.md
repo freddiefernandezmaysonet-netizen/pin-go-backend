@@ -39,6 +39,18 @@ Do not remove cleaner migrations, widen all allowlists or disable unrelated cert
 
 ## Remaining completion checklist
 
+### Follow-up correction — 2026-10-07 evening, Puerto Rico
+
+Candidate `d7400f020825d16a75775430ea51ef157a3ab8a3` also passed native cleaning (run 37704848615), follow-up (37704848480), mobile responses (37704848784), access-window (37704849054) and timezone (37704849066). The preceding evidence is no longer the only successful candidate.
+
+The two inherited auth compile errors are repaired with type-only declarations: optional role explicitly permits the existing undefined value and expiresIn excludes undefined because its existing default is always present. Cookie/JWT/session behavior is unchanged. Strict Channex Host Inbox compilation passes locally.
+
+Cross-feature scope steps now use a PR #376-only check of exact changed paths and SHA-256 file contents. The check rejects other PRs/repos/branches, a changed main base, missing files, unreviewed migrations/provider/auth files, or altered reviewed bytes. Its manifest is committed for review, never regenerated in CI. Runtime/test/typecheck steps outside those scope steps stay active. These are replacements for obsolete single-module diff restrictions, not a certification of skipped runtime tests. Any changed code or new main requires an explicit manifest review. The checker and its manifest are reviewable CI control files, not independent evidence of their own trustworthiness.
+
+Four failure-path scope tests pass. An additional local authentication run passed 18 of 19 tests: the old auth-cookie source-count contract expects two login/four logout call sites in auth.routes.ts; current main moved login into MFA and has one login/one logout there. Its actual cookie isolation tests passed. This stale source-count test was not changed or represented as passing.
+
+CI for this follow-up must finish before claiming the earlier failures are closed. Mobile visual and physical NFC tests remain pending.
+
 - [x] Durable recovery traversal and restart/failure rediscovery verified.
 - [x] Main integration and current Pin AI activation/terms controls verified.
 - [x] Additive migration rehearsal and native concurrent cleaning certification.
