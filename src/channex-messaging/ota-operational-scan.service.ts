@@ -6,6 +6,13 @@ import { reconcileOtaOperationalDeliveryAttention } from "./ota-operational-atte
 const PAGE_SIZE = 100;
 const CONCURRENCY = 4;
 const MAX_PAGES = 100;
+// Exactly the spellings normalized by resolveChannexOperationalProvider.
+// Restrict the SQL scan before pagination so unrelated OTA traffic cannot
+// starve Booking.com/Airbnb when many reservations are due simultaneously.
+const OTA_SOURCE_SPELLINGS = [
+  "airbnb", "air bnb", "air.bnb", "air-bnb", "air_bnb",
+  "bookingcom", "booking com", "booking.com", "booking-com", "booking_com",
+] as const;
 
 /**
  * Scan due OTA operational events independently of the guest's phone/email.
@@ -33,6 +40,7 @@ export async function processOtaOperationalCommunications(
     const rows = await prisma.reservation.findMany({
       where: {
         externalProvider: "CHANNEX", externalId: { not: null },
+        source: { in: [...OTA_SOURCE_SPELLINGS], mode: "insensitive" },
         status: "ACTIVE", paymentState: "PAID", cancelledAt: null,
         OR: [
           { checkIn: { gt: now, lte: fourHours } },
