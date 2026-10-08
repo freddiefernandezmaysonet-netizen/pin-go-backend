@@ -156,6 +156,18 @@ test("property checklist snapshots, progress and completion against isolated SQL
     assert.deepEqual(firstRead, secondRead);
     assert.equal(firstRead.items.length, 1);
     assert.equal(await db.cleaningTaskChecklistItem.count({ where: { checklistId: firstRead.id } }), 1);
+    const unsnapshottedId = `${id}-concurrent-missing`;
+    await createReservation(unsnapshottedId);
+    await db.cleaningConfirmation.create({ data: { reservationId: unsnapshottedId, propertyId: id, staffMemberId: `${id}-a`, token: randomUUID(), status: "CONFIRMED" } });
+    const [savedAgain] = await Promise.all([
+      saveChecklistTemplate(db, { ...templateInput, revision: 3 }),
+      prepareChecklistSnapshot(db, unsnapshottedId),
+    ]);
+    assert.equal(savedAgain.revision, 4);
+    const concurrentList = await prepareChecklistSnapshot(db, unsnapshottedId);
+    assert.ok([3, 4].includes(concurrentList.templateRevision));
+    assert.equal(concurrentList.items.length, concurrentList.templateRevision === 3 ? 1 : 2);
+    assert.equal(new Set(concurrentList.items.map(item => item.templateKey)).size, concurrentList.items.length);
   });
 
 });

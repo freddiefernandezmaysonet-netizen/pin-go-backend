@@ -17,7 +17,8 @@ export async function saveChecklistTemplate(db: PrismaClient, input: { propertyI
   const items = parseChecklistItems(input.items);
   if (!Number.isSafeInteger(input.revision) || input.revision < 0) throw new CleaningChecklistError("CHECKLIST_INVALID", 400);
   return db.$transaction(async tx => {
-    await tx.$queryRaw`SELECT "id" FROM "Property" WHERE "id" = ${input.propertyId} FOR UPDATE`;
+    // Serialize host saves without blocking FK checks by reservation-locked readers.
+    await tx.$queryRaw`SELECT "id" FROM "Property" WHERE "id" = ${input.propertyId} FOR NO KEY UPDATE`;
     const property = await tx.property.findFirst({ where: { id: input.propertyId, organizationId: input.organizationId }, select: { id: true } });
     if (!property) throw new CleaningChecklistError("PROPERTY_NOT_FOUND", 404);
     const existing = await tx.cleaningChecklistTemplate.findUnique({ where: { propertyId: input.propertyId } });
