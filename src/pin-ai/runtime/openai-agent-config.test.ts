@@ -124,3 +124,24 @@ test("canary proposal schema allows checkout-only extensions and instructs prese
   assert.match(String(config.instructions), /Omit proposedCheckInDate: the server preserves the stored check-in/);
   assert.match(String(config.instructions), /Pre-stay date changes still require both exact dates/);
 });
+
+
+test("guest clock instructions distinguish 12-hour conversation from internal tool time", () => {
+  for (const options of [undefined, { enabled: true, stayTimeEnabled: true, dateChangesEnabled: false }]) {
+    const config = buildPinAIOpenAIAgentConfig(undefined, options);
+    const instructions = String(config.instructions);
+    assert.match(instructions, /12-hour format/);
+    assert.match(instructions, /Do not ask the guest to use 24-hour format/);
+    assert.match(instructions, /1:00 p\.m\. becomes 13:00/);
+    assert.match(instructions, /12:00 a\.m\. becomes 00:00/);
+    assert.match(instructions, /12:00 p\.m\. becomes 12:00/);
+    assert.match(instructions, /ask the guest to clarify rather than guessing/);
+    assert.match(instructions, /Keep dates and the property timezone unchanged/);
+    const tools = config.tools as Array<{ name: string; parameters: { properties: { requestedLocalTime?: { description: string } } } }>;
+    for (const tool of tools.filter(t => ["check_early_checkin", "check_late_checkout", "prepare_reservation_modification"].includes(t.name))) {
+      const description = tool.parameters.properties.requestedLocalTime!.description;
+      assert.match(description, /Internal zero-padded 24-hour HH:MM/);
+      assert.match(description, /never require the guest to use this format/);
+    }
+  }
+});

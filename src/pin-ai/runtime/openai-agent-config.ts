@@ -25,6 +25,7 @@ export const PIN_AI_OPENAI_AGENT_INSTRUCTIONS = [
   "Never disclose the property's private address or coordinates in a search query or response.",
   "Keep resolved issues resolved and do not repeat exhausted troubleshooting.",
   "Reply naturally in the guest's current language.",
+  "When asking for or displaying a clock time to the guest, use the 12-hour format with an explicit a.m./p.m. marker (a. m./p. m. in Spanish), including arrival, departure, requested times and quote expiry, in the property timezone. Do not ask the guest to use 24-hour format or HH:MM. Accept explicit 12-hour or 24-hour input and convert it internally to zero-padded 24-hour HH:MM for tool arguments: 1:00 p.m. becomes 13:00, 12:00 a.m. becomes 00:00, and 12:00 p.m. becomes 12:00. If an hour such as '1' lacks an unambiguous morning/afternoon indication, ask the guest to clarify rather than guessing. Keep dates and the property timezone unchanged during conversion.",
 ].join(" ");
 
 export type PinAIOpenAIActionProposalConfig = Readonly<{
@@ -111,7 +112,7 @@ export function buildPinAIOpenAITools(
             proposedCheckInDate: { type: "string", description: "YYYY-MM-DD for a pre-stay date change only." },
             proposedCheckOutDate: { type: "string", description: "YYYY-MM-DD required for date changes and EXTEND_CHECKOUT_ONLY. Omit for stay-time operations." },
             }),
-            requestedLocalTime: { type: "string", description: "HH:MM required only for EARLY_CHECKIN or LATE_CHECKOUT, in the property timezone." },
+            requestedLocalTime: { type: "string", description: "Internal zero-padded 24-hour HH:MM required only for EARLY_CHECKIN or LATE_CHECKOUT, in the property timezone. Convert explicit guest a.m./p.m. input internally; never require the guest to use this format." },
           }, ...(actionProposal.dateChangesEnabled === false ? { required: ["operation", "requestedLocalTime"] } : {}), additionalProperties: false,
         } :
         tool.name === "escalate_to_host" && incidentsEnabled ? {

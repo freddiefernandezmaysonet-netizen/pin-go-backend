@@ -131,7 +131,7 @@ export const PIN_AI_RUNTIME_TOOLS: readonly PinAIRuntimeToolDefinition[] = [
       properties: {
         requestedLocalTime: {
           type: "string",
-          description: "Requested local arrival time in HH:MM format when stated by the guest.",
+          description: "Internal zero-padded 24-hour HH:MM arrival time in the property timezone. Convert explicit guest a.m./p.m. input internally; never require the guest to use this format. Clarify ambiguous times before calling.",
         },
       },
       additionalProperties: false,
@@ -147,7 +147,7 @@ export const PIN_AI_RUNTIME_TOOLS: readonly PinAIRuntimeToolDefinition[] = [
       properties: {
         requestedLocalTime: {
           type: "string",
-          description: "Requested local checkout time in HH:MM format when stated by the guest.",
+          description: "Internal zero-padded 24-hour HH:MM checkout time in the property timezone. Convert explicit guest a.m./p.m. input internally; never require the guest to use this format. Clarify ambiguous times before calling.",
         },
       },
       additionalProperties: false,
