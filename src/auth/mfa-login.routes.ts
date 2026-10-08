@@ -92,6 +92,16 @@ async function resolveMfaChallengeUser(
     return { ok: false, status: 404, error: "MFA_NOT_ACTIVE" };
   }
 
+  // The Staff binding may change after the password step. Do not issue a
+  // session or resend a challenge to a cleaner who no longer has access.
+  if (user.role === "CLEANER") {
+    const staff = await prisma.staffMember.findFirst({
+      where: { dashboardUserId: user.id, organizationId: user.organizationId, isActive: true },
+      select: { id: true },
+    });
+    if (!staff) return { ok: false, status: 404, error: "MFA_NOT_ACTIVE" };
+  }
+
   const effective = evaluateE7EffectiveMode(user.id, readE7Environment());
 
   if (effective.mode === "ENFORCE" && !effective.ready) {

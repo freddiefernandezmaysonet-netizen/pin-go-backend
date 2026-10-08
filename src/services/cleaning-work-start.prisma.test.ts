@@ -2,15 +2,8 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { confirmCleaningStart } from "./cleaning-work-start.prisma.js";
 
-function fakeDb(seed: any) {
-  let row = { ...seed };
-  const tx = { $queryRaw: async () => [{ id: seed.reservationId }], cleaningWork: {
-    findFirst: async ({ where }: any) => row.id === where.id && row.reservationId === where.reservationId &&
-      row.staffMemberId === where.staffMemberId && row.confirmationId === where.confirmationId ? { ...row } : null,
-    update: async ({ data }: any) => (row = { ...row, ...data }),
-  }};
-  return { db: { $transaction: async (run: any) => run(tx) } as any, read: () => row };
-}
+import { cleaningActionFixture as fakeDb } from "./cleaning-action-window.fixture.js";
+
 const base = {
   id:"work_1", reservationId:"res_1", staffMemberId:"staff_1", confirmationId:"conf_1",
   timingConsentVersion:"cleaning_timing_v1", timingConsentAcceptedAt:new Date("2026-09-28T14:00:00Z"),

@@ -35,7 +35,8 @@ test("cleaning end SMS fits one representative GSM-7 segment", () => {
   assert.ok(body.includes("Casa Collores"));
   assert.ok(body.includes("Main House"));
   assert.ok(body.includes("07:00 PM"));
-  assert.ok(body.includes("Access/Acceso ended/finalizado"));
+  // Default language is English; the retired formatter is no longer bilingual.
+  assert.ok(body.includes("Access ended."));
   assert.equal(body.includes("Benjamin Ortiz"), false);
 });
 

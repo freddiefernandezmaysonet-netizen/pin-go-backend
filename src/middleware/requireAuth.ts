@@ -1,3 +1,4 @@
+import { cleanerSurfaceAllowed } from "../auth/cleaner-surface.policy.js";
 import type { Request, Response, NextFunction } from "express";
 import {
   buildClearAuthCookie,
@@ -27,6 +28,13 @@ function clearAuthCookie(req: Request, res: Response) {
   );
 }
 
+function continueAuthorized(req: Request, res: Response, next: NextFunction) {
+  if ((req as any).user?.role === "CLEANER" && !cleanerSurfaceAllowed(req.originalUrl)) {
+    return res.status(403).json({ error: "CLEANER_SURFACE_ONLY" });
+  }
+  return next();
+}
+
 export async function requireAuth(
   req: Request,
   res: Response,
@@ -43,7 +51,7 @@ export async function requireAuth(
     existingUser?.id &&
     existingUser?.orgId
   ) {
-    return next();
+    return continueAuthorized(req, res, next);
   }
 
   const token = extractTokenFromRequest(req);
@@ -109,5 +117,5 @@ export async function requireAuth(
     return res.status(403).json({ error: "NO_ORG" });
   }
 
-  return next();
+  return continueAuthorized(req, res, next);
 }

@@ -22,19 +22,21 @@ export async function expireNfcAssignments(db?: PrismaClient, now: Date = new Da
 
   if (expired.length === 0) return { expired: 0 };
 
-  await prisma.$transaction(async (tx) => {
-    await tx.nfcAssignment.updateMany({
-      where: { id: { in: expired.map((e) => e.id) } },
+  const ended = await prisma.$transaction(async (tx) => {
+    const closed = await tx.nfcAssignment.updateManyAndReturn({
+      where: { id: { in: expired.map((e) => e.id) }, status: NfcAssignmentStatus.ACTIVE, endsAt: { lt: now } },
       data: { status: NfcAssignmentStatus.ENDED },
+      select: { id: true, nfcCardId: true },
     });
 
     await tx.nfcCard.updateMany({
-      where: { id: { in: expired.map((e) => e.nfcCardId) } },
+      where: { id: { in: closed.map((e) => e.nfcCardId) }, NfcAssignment: { none: { status: { in: ["ACTIVE", "PROVISIONING", "SCHEDULED"] } } } },
       data: { status: NfcCardStatus.AVAILABLE },
     });
+    return closed.length;
   });
 
-  return { expired: expired.length };
+  return { expired: ended };
 }
 
 export async function expireCleaningNfcAssignments(prisma: PrismaClient, now: Date) {
@@ -52,6 +54,9 @@ export async function expireCleaningNfcAssignments(prisma: PrismaClient, now: Da
 
   for (const a of due) {
     try {
+      const claimed = await prisma.nfcAssignment.updateMany({ where: { id: a.id, status: "ACTIVE", endsAt: { lte: now }, updatedAt: a.updatedAt },
+        data: { status: "PROVISIONING", provisioningStartedAt: now, lastError: "CLEANER_EXPIRY_PENDING" } });
+      if (!claimed.count) continue;
       // lockId TTLock: lo sacamos de cualquier lock del reservation/grant (simple)
       const lockIdTt = a.Reservation?.accessGrants?.[0]?.lock?.ttlockLockId;
       if (lockIdTt && a.NfcCard?.ttlockCardId) {
@@ -78,9 +83,9 @@ export async function expireCleaningNfcAssignments(prisma: PrismaClient, now: Da
 
       ended++;
     } catch (e: any) {
-      await prisma.nfcAssignment.update({
-        where: { id: a.id },
-        data: { lastError: `EXPIRE_FAILED: ${String(e?.message ?? e)}` },
+      await prisma.nfcAssignment.updateMany({
+        where: { id: a.id, status: "PROVISIONING", lastError: "CLEANER_EXPIRY_PENDING" },
+        data: { status: "ACTIVE", provisioningStartedAt: null, lastError: `EXPIRE_FAILED: ${String(e?.message ?? e)}` },
       }).catch(() => {});
     }
   }

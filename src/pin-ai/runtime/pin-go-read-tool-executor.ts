@@ -2,6 +2,7 @@ import { fromZonedTime } from "date-fns-tz";
 import type { PrismaClient } from "@prisma/client";
 import { checkStayTimeRequest } from "./stay-time-tool.js";
 import { readGuestNfcEvidence, type GuestNfcEvidenceReader } from "./guest-nfc-evidence.js";
+import { assessLatestCleaningIssue } from "../../services/cleaning-issue-assessment.service.js";
 
 import {
   getPropertyKnowledgeSnapshot,
@@ -41,6 +42,10 @@ type RuntimeReadPrisma = GuestNfcEvidenceReader & Readonly<{
   accessGrant: Readonly<{
     findMany(args: unknown): Promise<any[]>;
   }>;
+  cleaningWork?: Readonly<{
+    findMany(args: unknown): Promise<any[]>;
+  }>;
+  cleaningWorkIssueReport?: Readonly<{ findFirst(args: unknown): Promise<any> }>;
   cleaningConfirmation: Readonly<{
     findFirst(args: unknown): Promise<any>;
     findMany(args: unknown): Promise<any[]>;
@@ -1179,27 +1184,57 @@ export class PinGoRuntimeReadToolExecutor implements PinAIRuntimeToolExecutor {
     request: PinAIRuntimeRequest,
   ): Promise<Readonly<Record<string, unknown>>> {
     await this.assertReservationScope(request);
-
-    const confirmations = await this.prisma.cleaningConfirmation.findMany({
-      where: {
-        reservationId: request.context.reservationId,
-        propertyId: request.context.propertyId,
-      },
-      orderBy: {
-        createdAt: "desc",
-      },
-      select: {
-        status: true,
-        createdAt: true,
-        updatedAt: true,
-      },
+    const offers = await this.prisma.cleaningConfirmation.findMany({
+      where: { reservationId: request.context.reservationId, propertyId: request.context.propertyId },
+      orderBy: { createdAt: "desc" },
+      select: { id: true, staffMemberId: true, status: true, createdAt: true, updatedAt: true },
     });
-
+    const current = offers.filter(offer => ["PENDING", "CONFIRMED"].includes(offer.status));
+    const offer = current.length === 1 ? current[0] : null;
+    const works = offer?.status === "CONFIRMED" && this.prisma.cleaningWork
+      ? await this.prisma.cleaningWork.findMany({
+          where: { reservationId: request.context.reservationId, propertyId: request.context.propertyId,
+            confirmationId: offer.id, staffMemberId: offer.staffMemberId, cancelledAt: null, supersededAt: null },
+          select: { id: true, reservationId: true, propertyId: true, staffMemberId: true, confirmationId: true,
+            cancelledAt: true, supersededAt: true, scheduledStartAt: true, durationCommitmentMinutes: true,
+            timingConsentAcceptedAt: true, startConfirmedAt: true, completionConfirmedAt: true }, take: 2,
+        }) : [];
+    const work = works.length === 1 ? works[0] : null;
+    const validStart = Boolean(work?.startConfirmedAt &&
+      Number.isFinite(new Date(work.startConfirmedAt).getTime()));
+    const validCompletion = Boolean(validStart && work?.completionConfirmedAt &&
+      Number.isFinite(new Date(work.completionConfirmedAt).getTime()) &&
+      new Date(work.completionConfirmedAt) >= new Date(work.startConfirmedAt));
+    const workStatus = current.length > 1 || works.length > 1 ? "AMBIGUOUS_ASSIGNMENT"
+      : offer?.status === "PENDING" ? "AWAITING_ACCEPTANCE"
+      : !offer ? (offers.length ? "NO_CURRENT_ASSIGNMENT" : "NOT_REQUESTED")
+      : !work ? "WORK_CONFIRMATION_UNAVAILABLE"
+      : work.completionConfirmedAt ? (validCompletion ? "COMPLETED" : "WORK_CONFIRMATION_UNAVAILABLE")
+      : work.startConfirmedAt ? (validStart ? "IN_PROGRESS" : "WORK_CONFIRMATION_UNAVAILABLE")
+      : work.timingConsentAcceptedAt ? "AWAITING_START_CONFIRMATION" : "AWAITING_TIMING_CONSENT";
+    let issueAssessment: unknown = null;
+    if (work && current.length === 1 && works.length === 1 && workStatus !== "COMPLETED" && this.prisma.cleaningWorkIssueReport && this.prisma.$transaction) {
+      try { issueAssessment = await this.prisma.$transaction(tx => assessLatestCleaningIssue(tx, work)); }
+      catch { issueAssessment = { decision: "CONTEXT_UNAVAILABLE", authorizationGranted: false, actionsExecuted: false, accessChanged: false }; }
+    }
     return {
       reservationId: request.context.reservationId,
       propertyId: request.context.propertyId,
-      latestStatus: confirmations[0]?.status ?? "NOT_REQUESTED",
-      confirmations,
+      latestStatus: offers[0]?.status ?? "NOT_REQUESTED",
+      confirmations: offers.map(({ status, createdAt, updatedAt }) => ({ status, createdAt, updatedAt })),
+      workStatus,
+      completionDeclared: workStatus === "COMPLETED",
+      physicalCompletionVerified: false,
+      issueAssessment,
+      work: work && current.length === 1 && works.length === 1 ? {
+        scheduledStartAt: work.scheduledStartAt, durationCommitmentMinutes: work.durationCommitmentMinutes,
+        startedAt: validStart ? work.startConfirmedAt : null,
+        completedAt: validCompletion ? work.completionConfirmedAt : null,
+      } : null,
+      authorizationGranted: false,
+      operationalWrites: false,
+      actionsExecuted: false,
+      note: "Read-only departure cleaning status for this reservation. Offer acceptance and access expiry do not prove work completion. This result does not authorize arrival, extension, reassignment, or access changes.",
     };
   }
 

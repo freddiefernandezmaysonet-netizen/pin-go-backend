@@ -1,4 +1,5 @@
 import type { PrismaClient } from "@prisma/client";
+import { assertCleaningActionTime, readCleaningActionWindow } from "./cleaning-action-window.js";
 
 export type ConfirmCleaningStartInput = Readonly<{
   workId: string;
@@ -14,9 +15,9 @@ export type ConfirmCleaningStartInput = Readonly<{
 export async function confirmCleaningStart(
   prisma: PrismaClient,
   input: ConfirmCleaningStartInput,
-  now = new Date(),
+  now?: Date,
 ) {
-  if (!(now instanceof Date) || !Number.isFinite(now.getTime())) {
+  if (now !== undefined && (!(now instanceof Date) || !Number.isFinite(now.getTime()))) {
     throw new Error("CLEANING_START_INVALID_DATE");
   }
   return prisma.$transaction(async tx => {
@@ -40,9 +41,12 @@ export async function confirmCleaningStart(
       throw new Error("CLEANING_START_TIMING_CONSENT_REQUIRED");
     }
     if (work.startConfirmedAt) return work;
+    const window = await readCleaningActionWindow(tx, work);
+    const occurredAt = now ?? new Date();
+    assertCleaningActionTime(window, "start", occurredAt);
     return tx.cleaningWork.update({
       where: { id: work.id },
-      data: { startConfirmedAt: now },
+      data: { startConfirmedAt: occurredAt },
     });
-  });
+  }, { isolationLevel: "Serializable", maxWait: 5000, timeout: 10000 });
 }

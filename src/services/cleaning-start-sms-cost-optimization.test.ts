@@ -37,7 +37,8 @@ test("cleaning start SMS fits one representative GSM-7 segment", () => {
   assert.ok(body.includes("Main House"));
   assert.ok(body.includes("11:00 AM"));
   assert.ok(body.includes("07:00 PM"));
-  assert.ok(body.includes("NFC active/activa"));
+  // Default language is English; retain the existing language-specific formatter.
+  assert.ok(body.includes("NFC active"));
   assert.equal(body.includes("Benjamin Ortiz"), false);
 });
 

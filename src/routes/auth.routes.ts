@@ -100,6 +100,11 @@ authRouter.post("/auth/login", async (req, res) => {
       return res.status(401).json({ error: "INVALID_CREDENTIALS" });
     }
 
+    if (user.role === "CLEANER") {
+      const staff = await prisma.staffMember.findFirst({ where: { dashboardUserId: user.id, organizationId: user.organizationId, isActive: true }, select: { id: true } });
+      if (!staff) return res.status(403).json({ error: "CLEANER_IDENTITY_REQUIRED" });
+    }
+
     const trustedDeviceToken = extractTrustedDeviceToken(req);
     const e6Environment = readE6Environment();
     const e6Runtime = evaluateE7EffectiveMode(user.id, e6Environment);

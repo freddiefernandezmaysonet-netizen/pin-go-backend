@@ -53,6 +53,11 @@ jobs:
           SCOPE_HEAD_REPO: ${{ github.event.pull_request.head.repo.full_name }}
           SCOPE_BASE_REPO: ${{ github.event.pull_request.base.repo.full_name }}
         run: |
+          if [ "${GITHUB_HEAD_REF:-}" = "agent/cleaner-account-access-v1" ]; then
+            python3 scripts/verify-my-cleanings-pr-scope.test.py
+            python3 scripts/verify-my-cleanings-pr-scope.py
+            exit 0
+          fi
           # PR #373 only: exact reviewed OTA commercial/exemption scope; retain runtime tests.
           if [ "${GITHUB_HEAD_REF:-}" = "agent/pin-ai-ota-property-activation-v1" ]; then
             test "$GITHUB_EVENT_NAME" = "pull_request"

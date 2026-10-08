@@ -39,10 +39,19 @@ function transactionAdapter(tx: Prisma.TransactionClient): CleaningWorkSnapshotT
       const confirmation = await tx.cleaningConfirmation.findFirst({
         where: { id: scope.confirmationId, reservationId: scope.reservationId,
           propertyId: scope.propertyId, staffMemberId: scope.staffMemberId },
-        select: { status: true },
+        select: { status: true, updatedAt: true },
       });
       if (!reservation || !staff || !assignment || !confirmation) return null;
+      const predecessor = confirmation.status === "CONFIRMED" ? await tx.cleaningConfirmation.findFirst({
+        where: { reservationId: scope.reservationId, propertyId: scope.propertyId, status: "REASSIGNED" },
+        select: { id: true },
+      }) : null;
+      const recoveryScheduledStartAt = predecessor ? new Date(Math.max(
+        reservation.checkOut.getTime() + reservation.property.cleaningStartOffsetMinutes * 60_000,
+        confirmation.updatedAt.getTime(),
+      )) : undefined;
       return {
+        recoveryScheduledStartAt,
         reservationStatus: reservation.status, propertyStatus: reservation.property.status,
         cleaningNfcEnabled: reservation.property.cleaningNfcEnabled,
         staffActive: staff.isActive, assignmentActive: assignment.isActive,

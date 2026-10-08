@@ -35,6 +35,7 @@ import { processGuestIncidentNotices } from "../pin-ai/guest/guest-incident-noti
 import { retryGuestContactHostNotices } from "../services/ota-guest-contact-notice-retry.service";
 import { processOperationalEmailOutbox } from "../services/durable-operational-email.service.js";
 import { processCleaningHostAttentionNotices } from "../services/cleaning-followup-host-delivery.service.js";
+import { retireObsoleteCleaningReminder } from "../services/cleaning-reminder-retry.service.js";
 
 const WORKER_NAME = "message.retry.worker";
 const POLL_MS = Number(process.env.MESSAGE_RETRY_POLL_MS ?? 30000);
@@ -338,6 +339,7 @@ async function processRetries() {
       }
 
       const retryBody = await buildGuestAccessSmsRetryBody(prisma, msg);
+      if (await retireObsoleteCleaningReminder(prisma, msg)) continue;
       const sent = await sendSms(msg.to, retryBody);
 
       await prisma.messageLog.update({
