@@ -73,6 +73,7 @@ jobs:
           src/services/cleaning-action-window.database.test.ts
           src/services/cleaning-checklist.database.test.ts
           src/services/cleaner-task-pagination.database.test.ts
+          src/services/cleaner-access-audit.database.test.ts
           src/services/cleaner-account.database.test.ts
       - name: Certify authorization and recovery policies
         run: >-

@@ -7,6 +7,9 @@ on:
       - "src/routes/cleaning-completion-mobile.response.test.js"
       - "src/services/cleaning-work-completion.prisma.ts"
       - "src/services/cleaning-action-button.ts"
+      - "src/services/cleaner-access-audit.service.ts"
+      - "src/services/cleaner-access-audit.service.test.ts"
+      - "src/services/cleaner-access-autopilot.service.ts"
       - "src/services/cleaning-cancellation-render.test.ts"
       - "src/services/cleaning-work-issue.service.ts"
       - "src/services/cleaning-work-issue.service.test.ts"
@@ -34,12 +37,17 @@ jobs:
           cache: npm
       - name: Install locked test dependencies without lifecycle scripts
         run: npm ci --ignore-scripts
+      - name: Generate Prisma client for access scheduling tests
+        run: npx prisma generate
       - name: Test actual handler responses with isolated persistence
         env:
           CLEANER_RESPONSE_EVIDENCE_DIR: artifacts/cleaning-completion-mobile
         run: >-
           node --import tsx --test
           src/routes/cleaning-completion-mobile.response.test.js
+          src/services/cleaner-access-audit.service.test.ts
+          src/services/cleaner-access-autopilot.test.ts
+          src/apms/audit-persistence.service.test.ts
           src/services/cleaning-cancellation-render.test.ts
           src/services/cleaning-work-issue.service.test.ts
           src/services/cleaner-timing-mobile-ui.contract.test.js

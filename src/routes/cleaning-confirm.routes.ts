@@ -7,7 +7,7 @@ import {
 } from "@prisma/client";
 import { ensureCleanerNfcAccessForConfirmedCleaning } from "../services/cleaner-access-autopilot.service";
 import { auditReservationCompleteFlowSafe } from "../services/reservation-complete-flow-audit.service";
-import { materializeCleaningWorkSnapshot } from "../services/cleaning-work-snapshot.service.js";
+import { materializeCleaningWorkSnapshot, CleaningWorkSnapshotError } from "../services/cleaning-work-snapshot.service.js";
 import { createCleaningWorkSnapshotStore } from "../services/cleaning-work-snapshot.prisma.js";
 import { acceptCleaningTimingConsent } from "../services/cleaning-timing-consent.prisma.js";
 import { buildCleaningTimingConsentSnapshot } from "../services/cleaning-timing-consent.js";
@@ -326,6 +326,8 @@ async function runCompleteFlowAuditAfterCleaningConfirmation(
 // GET /cleaning/confirm/:token
 cleaningConfirmRouter.get("/cleaning/confirm/:token", async (req, res) => {
     let language: StaffLanguage = "en";
+    let stage = "LOAD_CONFIRMATION";
+    let errorScope: { confirmationId?: string; reservationId?: string; propertyId?: string } = {};
   try {
     const token = String(req.params.token ?? "");
     const data = await loadConfirmationData(token);
@@ -336,6 +338,7 @@ cleaningConfirmRouter.get("/cleaning/confirm/:token", async (req, res) => {
     }
 
     const { confirmation, reservation, staffMember, invalidData } = data;
+    errorScope = { confirmationId: confirmation.id, reservationId: confirmation.reservationId, propertyId: confirmation.propertyId };
     language = resolveStaffLanguage(staffMember?.preferredLanguage);
 
        if (invalidData || !reservation || !staffMember) {
@@ -380,6 +383,10 @@ cleaningConfirmRouter.get("/cleaning/confirm/:token", async (req, res) => {
     }
 
     if (confirmation.status === "CONFIRMED") {
+  // Reject legacy/stale timing before a GET can repair or schedule NFC access.
+  stage = "PREPARE_TIMING";
+  const prepared = await prepareCleaningTimingConsent({ confirmation, reservation });
+  stage = "ENSURE_ACCESS";
   const cleanerAccessResult =
     await ensureCleanerNfcAccessForConfirmedCleaning({
       prisma,
@@ -403,7 +410,7 @@ cleaningConfirmRouter.get("/cleaning/confirm/:token", async (req, res) => {
     );
   }
 
-  const prepared = await prepareCleaningTimingConsent({ confirmation, reservation });
+  stage = "RENDER_TIMING";
   return res.send(renderTimingConsent(token, prepared, language));
 }
     if (confirmation.status === "DECLINED") {
@@ -426,7 +433,17 @@ cleaningConfirmRouter.get("/cleaning/confirm/:token", async (req, res) => {
       </form>
     `, language));
   } catch (e: any) {
-    return res.status(500).send(language === "es" ? "No se pudo cargar la confirmación. Inténtalo de nuevo." : "Failed to load confirmation.");
+    const es = language === "es";
+    if (e instanceof CleaningWorkSnapshotError) {
+      if (e.code === "CLEANING_WORK_RETROACTIVE_ACTIVATION_BLOCKED") return res.status(410).send(cleanerPage(`<h2>${es ? "Confirmación anterior" : "Earlier confirmation"}</h2><p>${es ? "Esta limpieza corresponde a una fecha anterior y no tiene un trabajo registrado en el nuevo flujo. Consulta su estado en Mis limpiezas." : "This cleaning belongs to an earlier date and has no recorded work in the new flow. View its status in My cleanings."}</p>`, language));
+      if (["CLEANING_WORK_INACTIVE_CONTEXT", "CLEANING_WORK_OUT_OF_SCOPE", "CLEANING_WORK_NFC_FLOW_DISABLED", "CLEANING_WORK_CONFIRMATION_REQUIRED"].includes(e.code)) return res.status(410).send(cleanerPage(`<p>${es ? "Esta confirmación ya no está disponible. Consulta el estado actual en Mis limpiezas." : "This confirmation is no longer available. View the current status in My cleanings."}</p>`, language));
+      if (["CLEANING_WORK_SCHEDULE_CHANGED", "CLEANING_WORK_REASSIGNMENT_REQUIRES_REVIEW"].includes(e.code)) return res.status(409).send(cleanerPage(`<p>${es ? "El horario o la asignación de esta limpieza requiere revisión del host. Consulta Mis limpiezas." : "This cleaning's schedule or assignment needs host review. View My cleanings."}</p>`, language));
+    }
+    if (e instanceof CleaningChecklistError && e.code === "CLEANING_NOT_AVAILABLE") return res.status(410).send(cleanerPage(`<p>${es ? "Esta limpieza ya no está disponible para realizar acciones. Consulta Mis limpiezas." : "This cleaning is no longer available for actions. View My cleanings."}</p>`, language));
+    const safeCode = typeof e?.code === "string" && /^[A-Z][A-Z0-9_]{1,79}$/.test(e.code) ? e.code : "UNEXPECTED_ERROR";
+    const errorType = typeof e?.name === "string" && /^[A-Za-z][A-Za-z0-9]{0,79}$/.test(e.name) ? e.name : "Error";
+    console.error("[CLEANING_CONFIRM_VIEW_ERROR]", { ...errorScope, stage, code: safeCode, errorType });
+    return res.status(500).send(es ? "No se pudo cargar la confirmación. Inténtalo de nuevo." : "Failed to load confirmation.");
   }
 });
 
