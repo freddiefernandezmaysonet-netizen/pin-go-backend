@@ -165,7 +165,7 @@ test("changed access code invalidates the send", async () => {
   let reads = 0;
   f.prisma.reservation.findUnique = async () => {
     const r = structuredClone(f.reservation);
-    if (++reads > 2) r.accessGrants[0].secureAccessCode.accessCodeHash = "changed";
+    if (++reads >= 2) r.accessGrants[0].secureAccessCode.accessCodeHash = "changed";
     return r;
   };
   assert.equal((await f.send())?.error, "OTA_OPERATIONAL_RESERVATION_CHANGED");
