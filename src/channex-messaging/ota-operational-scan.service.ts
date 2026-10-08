@@ -15,6 +15,7 @@ export async function processOtaOperationalCommunications(
   prisma: PrismaClient,
   env: NodeJS.ProcessEnv = process.env,
   now = new Date(),
+  deliver: typeof deliverOtaOperationalCommunication = deliverOtaOperationalCommunication,
 ): Promise<{ candidates: number; accepted: number; blocked: number }> {
   if (!String(env.OTA_GUEST_EXTERNAL_MESSAGING_BLOCKED_PROVIDERS ?? "").trim()) {
     return { candidates: 0, accepted: 0, blocked: 0 };
@@ -65,7 +66,7 @@ export async function processOtaOperationalCommunications(
 
         for (const type of types) {
           try {
-            const result = await deliverOtaOperationalCommunication(
+            const result = await deliver(
               prisma, r.id, type, { env, now },
             );
             if (result?.ok) accepted++;
