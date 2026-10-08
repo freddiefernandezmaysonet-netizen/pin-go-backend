@@ -28,6 +28,19 @@ const ACTIONABLE_ERRORS = new Set([
   "OTA_OPERATIONAL_MESSAGE_INVALID",
   "OTA_OPERATIONAL_RESERVATION_CHANGED",
   "OTA_OPERATIONAL_UNEXPECTED",
+  // Existing Airbnb canary delivers through its own receipt boundary.
+  // Its transport/mapping/thread errors must reach the same host workflow.
+  "AIRBNB_BOOKING_THREAD_MISSING_OR_AMBIGUOUS",
+  "AIRBNB_THREAD_NOT_ELIGIBLE",
+  "AIRBNB_THREAD_SEARCH_LIMIT",
+  "AIRBNB_PROPERTY_MAPPING_MISSING",
+  "AIRBNB_BOOKING_MAPPING_MISSING",
+  "AIRBNB_TRANSPORT_DISABLED",
+  "AIRBNB_SEND_OUTCOME_UNKNOWN",
+  "AIRBNB_PREFLIGHT_FAILED",
+  "AIRBNB_PROPERTY_TIMEZONE_MISSING",
+  "AIRBNB_RESERVATION_CHANGED",
+  "AIRBNB_MESSAGE_TOO_LONG",
 ]);
 
 export function otaOperationalIssueKey(input: Pick<OtaOperationalDeliveryEvidence, "reservationId" | "type">): string {
@@ -89,7 +102,7 @@ export async function reconcileOtaOperationalDeliveryAttention(
       ? String(metadata.errorCode ?? "") : null;
   if (existing?.workflowState === "ACTION_REQUIRED" && currentError === reason) return "UNCHANGED";
   const critical = input.type === "GUEST_ACCESS_PASSCODE";
-  const recommendedAction = reason === "OTA_OPERATIONAL_SEND_OUTCOME_UNKNOWN"
+  const recommendedAction = ["OTA_OPERATIONAL_SEND_OUTCOME_UNKNOWN", "AIRBNB_SEND_OUTCOME_UNKNOWN"].includes(reason)
     ? "Review the Channex conversation and provider receipt before any manual resend; delivery outcome is uncertain."
     : "Review the OTA conversation in Channex, confirm the Messages app and booking mapping, and provide the instructions through the OTA if needed. Do not use an automatic SMS/email fallback.";
 
