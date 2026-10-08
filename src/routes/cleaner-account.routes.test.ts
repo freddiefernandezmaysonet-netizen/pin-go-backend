@@ -135,3 +135,33 @@ test("activation form preserves its same-origin POST and keeps token pages uncac
     assert.match(await response.text(), /<form method="POST">/);
   } finally { await new Promise<void>(resolve => server.close(() => resolve())); }
 });
+
+test("public booking keeps its own access rules regardless of a cleaner cookie", async () => {
+  let accountReads = 0;
+  const db: any = { dashboardUser: { findUnique: async () => { accountReads++; throw new Error("No Dashboard lookup on public booking"); } } };
+  const app = express();
+  app.use(buildCleanerSurfaceGuard(db));
+  app.get("/api/public-booking/discovery", (_req, res) => res.json({ public: true }));
+  app.get("/api/public-booking/org/property", (_req, res) => res.json({ public: true }));
+  app.post("/api/public-booking/quote", (_req, res) => res.json({ public: true }));
+  // Token portals still enforce their independent guest authentication.
+  app.get("/api/public-booking/manage/invalid", (_req, res) => res.status(404).json({ error: "INVALID_GUEST_TOKEN" }));
+  app.get("/api/public-booking-admin", (_req, res) => res.json({ private: true }));
+  const server = app.listen(0, "127.0.0.1");
+  await new Promise<void>(resolve => server.once("listening", resolve));
+  const base = `http://127.0.0.1:${(server.address() as any).port}`;
+  const token = signAuthToken({ sub: "synthetic-cleaner", orgId: "org", email: "cleaner@example.com", role: "CLEANER", tokenVersion: 1 });
+  const cookie = { Cookie: `${process.env.AUTH_COOKIE_NAME ?? "pingo_token"}=${token}` };
+  try {
+    for (const headers of [{}, cookie, { Authorization: `Bearer ${token}` }, { Cookie: "pingo_token=expired" }]) {
+      for (const path of ["/api/public-booking/discovery", "/api/public-booking/org/property?preview=false"]) assert.equal((await fetch(`${base}${path}`, { headers })).status, 200);
+      assert.equal((await fetch(`${base}/api/public-booking/quote`, { method: "POST", headers })).status, 200);
+      const denied = await fetch(`${base}/api/public-booking/manage/invalid`, { headers });
+      assert.equal(denied.status, 404);
+      assert.deepEqual(await denied.json(), { error: "INVALID_GUEST_TOKEN" });
+    }
+    assert.equal(accountReads, 0);
+    assert.equal((await fetch(`${base}/api/public-booking-admin`, { headers: cookie })).status, 503);
+    assert.equal(accountReads, 1);
+  } finally { server.closeAllConnections(); await new Promise<void>(resolve => server.close(() => resolve())); }
+});

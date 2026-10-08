@@ -8,8 +8,9 @@ import { requireAuth } from "./requireAuth.js";
 /** Covers legacy routes too, including ones without their own requireAuth. */
 export function buildCleanerSurfaceGuard(prisma: PrismaClient): RequestHandler {
   return async (req, res, next) => {
-    // Public branding and existing auth endpoints keep their own authentication rules.
-    if (req.path === "/api/public/brand-context" || req.path.startsWith("/auth/")) return next();
+    // Public booking (including guest-token portals) keeps its own access rules,
+    // independent of an incidental Dashboard cookie. Match the namespace boundary.
+    if (req.path === "/api/public/brand-context" || /^\/api\/public-booking(?:\/|$)/.test(req.path) || req.path.startsWith("/auth/")) return next();
     const token = extractTokenFromRequest(req);
     if (!token) return next();
     let payload;
