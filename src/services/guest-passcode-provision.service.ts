@@ -5,7 +5,8 @@ import { ttlockCreatePasscode, ttlockGetPasscode, ttlockHasAssociatedGateway,
 
 export type CustomPasscodePlan = {
   version: 1; state: "READY" | "SUBMITTED" | "CONFIRMED";
-  codeEnc: string; source: "PHONE_LAST4" | "RANDOM";
+  codeEnc: string; source: "PHONE_LAST4" | "PHONE_LAST4_SUFFIX" | "RANDOM";
+  rejectedCodeEncs?: string[];
   lockId: number; name: string; startDate: number; endDate: number;
   submittedAt?: string; keyboardPwdId?: number;
 };
@@ -81,19 +82,33 @@ export async function provisionGuestPasscode(input: {
   }
 
   let source: CustomPasscodePlan["source"] = plan?.source ?? (code ? "PHONE_LAST4" : "RANDOM");
+  const phoneBase = plan ? (plan.source === "RANDOM" ? null : code!.slice(0, 4)) : guestPhoneLastFour(input.phone);
+  const rejectedCodeEncs = [...(plan?.rejectedCodeEncs ?? [])];
+  const rejectedCodes = new Set(rejectedCodeEncs.map(decryptAccessCode));
+  const available = async (candidate: string) => !rejectedCodes.has(candidate) &&
+    !inventory.some(p => p.keyboardPwd === candidate) && !await input.codeReserved(candidate);
   for (let attempt = 0; attempt < 3; attempt++) {
-    if (!code || inventory.some(p => p.keyboardPwd === code) || await input.codeReserved(code)) {
-      source = "RANDOM";
+    if (!code || !await available(code)) {
       code = null;
-      for (let candidateAttempt = 0; candidateAttempt < 10; candidateAttempt++) {
+      if (phoneBase) {
+        for (const candidate of [phoneBase, ...Array.from({ length: 10 }, (_, digit) => `${phoneBase}${digit}`)]) {
+          if (await available(candidate)) {
+            code = candidate;
+            source = candidate.length === 4 ? "PHONE_LAST4" : "PHONE_LAST4_SUFFIX";
+            break;
+          }
+        }
+      }
+      for (let candidateAttempt = 0; !code && candidateAttempt < 10; candidateAttempt++) {
         const candidate = deps.random();
-        if (/^\d{4,9}$/.test(candidate) && !inventory.some(p => p.keyboardPwd === candidate) && !await input.codeReserved(candidate)) {
-          code = candidate; break;
+        if (/^\d{4,9}$/.test(candidate) && await available(candidate)) {
+          code = candidate; source = "RANDOM"; break;
         }
       }
       if (!code) return retry("CUSTOM_PASSCODE_NO_FREE_CANDIDATE");
     }
     plan = { version: 1, state: "READY", codeEnc: encryptAccessCode(code), source,
+      ...(rejectedCodeEncs.length ? { rejectedCodeEncs: [...rejectedCodeEncs] } : {}),
       lockId: input.lockId, name: input.name, startDate: input.startDate, endDate: input.endDate };
     await input.savePlan(plan);
     // Stay inside the existing 30-second physical fence, including read calls.
@@ -112,7 +127,9 @@ export async function provisionGuestPasscode(input: {
       const duplicate = rejected && /(?:passcode|password).*(?:already exists|already exist)|same (?:passcode|password).*exists/i.test(error.providerMessage);
       if (duplicate) {
         // Provider explicitly rejected this candidate. Never delete someone else's PIN.
-        plan = { ...plan, state: "READY" };
+        rejectedCodes.add(code);
+        rejectedCodeEncs.push(plan.codeEnc);
+        plan = { ...plan, state: "READY", rejectedCodeEncs: [...rejectedCodeEncs] };
         await input.savePlan(plan);
         code = null;
         continue;
