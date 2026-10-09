@@ -615,7 +615,7 @@ async function safeSyncBySubscriptionId(
 const items = fullSub.items.data;
 
 const lockItem =
-  items.find((i) => i.price?.id === lockPriceId || i.price?.id === process.env.STRIPE_PRICE_PLATFORM_MONTHLY) ?? null;
+  items.find((i) => i.price?.id === lockPriceId || i.price?.id === process.env.STRIPE_PRICE_PLATFORM_MONTHLY || i.price?.id === process.env.STRIPE_PRICE_PLATFORM_YEARLY) ?? null;
 
 const smartItem =
   smartPriceId
