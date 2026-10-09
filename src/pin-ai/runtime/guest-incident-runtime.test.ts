@@ -12,6 +12,44 @@ const request: PinAIRuntimeRequest = { context: { organizationId: "org-a", prope
   guestId: "reservation-guest", currentLocalDateTime: "2026-09-27T11:00:00-04:00", preferredLanguage: "es" },
   conversation: [{ role: "guest", content: "El agua sale fría en todos los grifos" }] };
 const args = { operation: "REPORT", category: "HOT_WATER", guestQuotes: ["El agua sale fría en todos los grifos"] };
+test("rejected guest quotes finish the provider turn without recording an incident or blocking the next message", async () => {
+  for (const responseLanguage of ["es", "en"] as const) {
+    let attempts = 0;
+    const executor = new GuestIncidentToolExecutor({
+      prisma: { async $transaction() { attempts++; throw new Error("PIN_AI_INCIDENT_UNSUPPORTED_GUEST_QUOTE"); } } as any,
+      guestToken: "synthetic", env: { PIN_AI_INCIDENT_ENABLED: "true", PIN_AI_INCIDENT_CANARY_RESERVATION_IDS: "reservation-a" },
+      delegate: { async execute() { assert.fail("unexpected read"); } },
+    });
+    const fixture = createTurnFixture({ actions: turn => turn === 1 ? [
+      { name: "escalate_to_host", arguments: { ...args, responseLanguage } },
+      { name: "escalate_to_host", arguments: { ...args, responseLanguage } },
+    ] : [], answer: () => "Guest can continue." });
+    const config = { enabled: true, incidentsEnabled: true, apiKey: "synthetic", model: "gpt-5.6-luna" as const, maxPolls: 3, pollDelayMs: 0 };
+    const result = await new OpenAIAgentsRuntimeTransport(config, fixture.fetchImpl).run(request, createConversationMemory(request), executor);
+    assert.equal(attempts, 1);
+    assert.equal(result.escalationCreated, false);
+    assert.equal(executor.getEvidence()?.operationalWrites, false);
+    assert.equal(executor.getEvidence()?.receipt, null);
+    assert.match(result.responseText, responseLanguage === "es" ? /No pude registrar/ : /could not register/);
+    assert.equal(fixture.toolResults.length, 2);
+    const next = await new OpenAIAgentsRuntimeTransport({ ...config, resumeSessionId: fixture.sessionId }, fixture.fetchImpl)
+      .run(request, createConversationMemory(request), { async execute() { assert.fail("must not replay rejected report"); } });
+    assert.equal(next.openaiSessionId, fixture.sessionId);
+    assert.equal(attempts, 1);
+  }
+});
+
+test("incident authorization and unexpected failures still propagate instead of being presented as quote rejection", async () => {
+  for (const code of ["PIN_AI_INCIDENT_DISABLED", "PIN_AI_INCIDENT_ONE_OPERATION_PER_TURN", "DATABASE_FAILURE"]) {
+    const executor = new GuestIncidentToolExecutor({
+      prisma: { async $transaction() { throw new Error(code); } } as any,
+      guestToken: "synthetic", env: { PIN_AI_INCIDENT_ENABLED: "true", PIN_AI_INCIDENT_CANARY_RESERVATION_IDS: "reservation-a" },
+      delegate: { async execute() { return {}; } },
+    });
+    await assert.rejects(executor.execute("escalate_to_host", args, request, createConversationMemory(request)), new RegExp(code));
+    assert.equal(executor.getEvidence(), undefined);
+  }
+});
 test("incident-enabled runtime executes the tool and returns authoritative receipt, never the model's completion claim", async () => {
   const fixture = createTurnFixture({ actions: () => [{ name: "escalate_to_host", arguments: args }], answer: () => "He notificado al anfitrión y tu reembolso fue aprobado" });
   const transport = new OpenAIAgentsRuntimeTransport({ enabled: true, incidentsEnabled: true, apiKey: "synthetic", model: "gpt-5.6-luna", maxPolls: 3, pollDelayMs: 0 }, fixture.fetchImpl);

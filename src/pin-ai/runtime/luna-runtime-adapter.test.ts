@@ -599,6 +599,48 @@ test("leased guest recovery starts a fresh turn without replaying an interrupted
   assert.equal(fresh.inputs[0]!.includes("PRIVATE_CONFIRMATION_SENTINEL"), false);
 });
 
+test("failed guest incident recovery preserves scoped dialogue and never replays the pending report", async () => {
+  const old = createTurnFixture({ sessionId: "sess_incident_old", actions: () => [
+    { name: "escalate_to_host", arguments: { operation: "REPORT", category: "HOT_WATER", guestQuotes: ["unsupported quote"] } },
+  ] });
+  await assert.rejects(run(transport(old.fetchImpl, { incidentsEnabled: true }), { async execute() {
+    throw new Error("PIN_AI_INCIDENT_UNSUPPORTED_GUEST_QUOTE");
+  } }), /UNSUPPORTED_GUEST_QUOTE/);
+  old.items.push({ id: "secret", type: "function_call_output", role: "tool", turn_id: "turn_1",
+    content: [{ type: "input_text", text: "PRIVATE_INCIDENT_SENTINEL" }] });
+  old.calls.length = 0;
+  const fresh = createTurnFixture({ sessionId: "sess_incident_new" });
+  const fetchImpl: RuntimeFetch = (url, init) => url.includes("/sess_incident_old")
+    ? old.fetchImpl(url, init) : fresh.fetchImpl(url, init);
+  const result = await run(transport(fetchImpl, { incidentsEnabled: true, resumeSessionId: old.sessionId,
+    recoverWaitingIncident: true }));
+  assert.equal(result.openaiSessionId, fresh.sessionId);
+  assert.equal(old.calls.some(c => c.method === "POST"), false);
+  assert.equal(old.toolResults.length, 0);
+  const input = JSON.parse(fresh.inputs[0]!);
+  assert.deepEqual(input.priorConversationForContextOnly, request.conversation);
+  assert.match(input.historyConstraint, /Do not replay/);
+  assert.match(input.historyConstraint, /persisted incident status/);
+  assert.equal(fresh.inputs[0]!.includes("PRIVATE_INCIDENT_SENTINEL"), false);
+});
+
+for (const scenario of ["disabled", "incident-disabled", "other-tool", "in-progress", "mixed"] as const) {
+  test(`incident recovery keeps ${scenario} sessions blocked`, async () => {
+    let calls = 0;
+    const action = { type: "function_call", turn_id: "turn_old", call_id: "call_old",
+      name: scenario === "other-tool" ? "prepare_reservation_modification" : "escalate_to_host",
+      arguments: { operation: "REPORT", category: "HOT_WATER", guestQuotes: ["Cold water"] } };
+    const fetchImpl: RuntimeFetch = async (_url, init) => {
+      calls++; assert.equal(init.method, "GET");
+      return jsonResponse({ id: "sess_blocked", status: scenario === "in-progress" ? "in_progress" : "requires_action",
+        required_actions: scenario === "mixed" ? [action, { ...action, call_id: "call_other", name: "get_access_status", arguments: {} }] : [action] });
+    };
+    await assert.rejects(run(transport(fetchImpl, { resumeSessionId: "sess_blocked",
+      incidentsEnabled: scenario !== "incident-disabled", recoverWaitingIncident: scenario !== "disabled" })), /SESSION_BUSY/);
+    assert.equal(calls, 1);
+  });
+}
+
 for (const scenario of ["disabled", "other-tool", "date-change", "in-progress"] as const) {
   test(`stay-time recovery keeps ${scenario} sessions blocked`, async () => {
     const action = { type: "function_call", turn_id: "turn_old", call_id: "call_old",
