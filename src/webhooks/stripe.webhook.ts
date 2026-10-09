@@ -1,3 +1,4 @@
+import { haasPriceIds } from "../services/signup-pricing.service.js";
 import { recordHaasPayment } from "../services/haas-admin.service.js";
 import type { Express, Request, Response } from "express";
 import bodyParser from "body-parser";
@@ -614,7 +615,7 @@ async function safeSyncBySubscriptionId(
 const items = fullSub.items.data;
 
 const lockItem =
-  items.find((i) => i.price?.id === lockPriceId) ?? null;
+  items.find((i) => i.price?.id === lockPriceId || i.price?.id === process.env.STRIPE_PRICE_PLATFORM_MONTHLY) ?? null;
 
 const smartItem =
   smartPriceId
@@ -622,6 +623,7 @@ const smartItem =
     : null;
 
 const HAAS_LOCK_PRICE_IDS = [
+  ...haasPriceIds(),
   process.env.STRIPE_PRICE_HAAS_ESSENTIAL_LOCK_MONTHLY,
   process.env.STRIPE_PRICE_HAAS_PRO_LOCK_MONTHLY,
   process.env.STRIPE_PRICE_HAAS_ELITE_LOCK_MONTHLY,

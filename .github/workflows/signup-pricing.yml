@@ -1,0 +1,30 @@
+name: Signup Pricing
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - 'src/routes/public.signup*'
+      - 'src/services/signup-pricing*'
+      - 'src/webhooks/stripe.webhook.ts'
+      - '.github/workflows/signup-pricing.yml'
+permissions:
+  contents: read
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+      - run: npm ci --ignore-scripts --no-audit --no-fund
+      - run: npx prisma generate
+        env:
+          DATABASE_URL: postgresql://fixture:fixture@localhost:5432/fixture
+      - run: node --import tsx --test src/services/signup-pricing.service.test.ts src/routes/public.signup.pricing.test.ts
+      - run: npx tsc --noEmit --skipLibCheck --esModuleInterop --module ESNext --moduleResolution Bundler --target ES2022 src/services/signup-pricing.service.ts src/routes/public.signup.routes.ts
+      - run: node --input-type=module -e "import {build} from 'esbuild'; await build({entryPoints:['src/server.ts'],bundle:true,platform:'node',format:'esm',packages:'external',outfile:'/tmp/pingo-server.mjs'});"
