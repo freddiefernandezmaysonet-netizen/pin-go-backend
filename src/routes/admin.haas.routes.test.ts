@@ -29,3 +29,16 @@ test('platform list exposes selected customer fields, never signup passwords or 
   assert(!JSON.stringify(body).includes('hidden'));
  });} finally {(prisma.pendingSignup as any).findMany=original;await prisma.$disconnect();}
 });
+
+test('linked battery is returned from stored DeviceHealth data along with installation details',async()=>{
+ const originalList=prisma.pendingSignup.findMany, originalLock=prisma.lock.findFirst;
+ (prisma.pendingSignup as any).findMany=async()=>[{id:'order',organizationId:'customer',metadata:{haasSelection:{plan:'haas',lock:'pro'},haasInstallation:{lockId:'lock',installationAddress:'Demo address',serialNumber:'SERIAL-DEMO'}}}];
+ (prisma.lock as any).findFirst=async({where,select}:any)=>{
+  assert.equal(where.property.organizationId,'customer');assert.equal(select.deviceHealth.select.battery,true);
+  return {id:'lock',deviceHealth:{battery:77,batteryLastSuccessfulAt:'2026-10-09T12:00:00Z'}};
+ };
+ try{await run('PLATFORM_ADMIN',async url=>{
+  const response=await fetch(url+'/api/internal/admin/haas');const body:any=await response.json();
+  assert.equal(body.items[0].lock.deviceHealth.battery,77);assert.equal(body.items[0].installation.installationAddress,'Demo address');assert.equal(body.items[0].installation.serialNumber,'SERIAL-DEMO');
+ });}finally{(prisma.pendingSignup as any).findMany=originalList;(prisma.lock as any).findFirst=originalLock;await prisma.$disconnect();}
+});

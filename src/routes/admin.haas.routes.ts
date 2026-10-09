@@ -37,7 +37,8 @@ adminHaasRouter.get('/api/internal/admin/haas', async (req, res) => {
       const { metadata, ...customer } = row;
       return { ...customer, selection, payment: object(meta.haasPayment), installation: {
         status: installation.status ?? 'PENDING', lockId: lock?.id ?? null,
-        scheduledAt: installation.scheduledAt ?? null, notes: installation.notes ?? '' }, lock };
+        scheduledAt: installation.scheduledAt ?? null, notes: installation.notes ?? '',
+        installationAddress: installation.installationAddress ?? '', serialNumber: installation.serialNumber ?? '' }, lock };
     }));
     res.json({ ok: true, items, nextCursor: rows.length > 40 ? rows[39]!.id : null });
   } catch(error) { fail(res,error); }
@@ -56,7 +57,9 @@ adminHaasRouter.patch('/api/internal/admin/haas/:id/installation', async (req, r
     const b = object(req.body);
     await saveHaasInstallation(prisma, req.params.id!, { expectedUpdatedAt: String(b.expectedUpdatedAt ?? ''),
       status: String(b.status ?? ''), lockId: b.lockId ? String(b.lockId) : null,
-      scheduledAt: b.scheduledAt ? String(b.scheduledAt) : null, notes: String(b.notes ?? '') }, (req as any).user.id);
+      scheduledAt: b.scheduledAt ? String(b.scheduledAt) : null, notes: String(b.notes ?? ''),
+      ...(b.installationAddress !== undefined ? { installationAddress: String(b.installationAddress) } : {}),
+      ...(b.serialNumber !== undefined ? { serialNumber: String(b.serialNumber) } : {}) }, (req as any).user.id);
     res.json({ ok: true });
   } catch(error) { fail(res,error); }
 });
