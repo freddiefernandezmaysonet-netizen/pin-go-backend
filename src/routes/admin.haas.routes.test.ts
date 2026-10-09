@@ -42,3 +42,38 @@ test('linked battery is returned from stored DeviceHealth data along with instal
   assert.equal(body.items[0].lock.deviceHealth.battery,77);assert.equal(body.items[0].installation.installationAddress,'Demo address');assert.equal(body.items[0].installation.serialNumber,'SERIAL-DEMO');
  });}finally{(prisma.pendingSignup as any).findMany=originalList;(prisma.lock as any).findFirst=originalLock;await prisma.$disconnect();}
 });
+
+
+test('low battery filters stored readings and tenant links before contract pagination',async()=>{
+ const originalList=prisma.pendingSignup.findMany, originalLocks=prisma.lock.findMany;
+ const batteries=[0,30,31,null,-1];
+ (prisma.lock as any).findMany=async({where,select}:any)=>{
+  assert.deepEqual(where.deviceHealth.is.battery,{gte:0,lte:30});
+  assert.equal(select.property.select.organizationId,true);
+  return batteries.filter(b=>b!==null && b>=where.deviceHealth.is.battery.gte && b<=where.deviceHealth.is.battery.lte)
+   .map(b=>({id:'lock-'+b,property:{organizationId:'customer-'+b}}));
+ };
+ (prisma.pendingSignup as any).findMany=async({where,take,cursor,skip}:any)=>{
+  assert.equal(take,41);assert.deepEqual(cursor,{id:'previous'});assert.equal(skip,1);
+  assert.deepEqual(where.AND,[{OR:[
+   {organizationId:'customer-0',metadata:{path:['haasInstallation','lockId'],equals:'lock-0'}},
+   {organizationId:'customer-30',metadata:{path:['haasInstallation','lockId'],equals:'lock-30'}}
+  ]}]);
+  assert.equal(where.OR[0].organizationName.contains,'Demo');
+  return Array.from({length:41},(_,i)=>({id:'order-'+i,metadata:{haasSelection:{plan:'haas',lock:'pro'}}}));
+ };
+ try{await run('PLATFORM_ADMIN',async url=>{
+  const response=await fetch(url+'/api/internal/admin/haas?battery=low&q=Demo&cursor=previous');assert.equal(response.status,200);
+  const body:any=await response.json();assert.equal(body.items.length,40);assert.equal(body.nextCursor,'order-39');
+ });}finally{(prisma.pendingSignup as any).findMany=originalList;(prisma.lock as any).findMany=originalLocks;await prisma.$disconnect();}
+});
+
+test('low battery with no stored readings matches no contracts',async()=>{
+ const originalList=prisma.pendingSignup.findMany,originalLocks=prisma.lock.findMany;
+ (prisma.lock as any).findMany=async()=>[];
+ (prisma.pendingSignup as any).findMany=async({where}:any)=>{assert.deepEqual(where.AND,[{OR:[]}]);return [];};
+ try{await run('PLATFORM_ADMIN',async url=>{
+  const body:any=await (await fetch(url+'/api/internal/admin/haas?battery=low')).json();
+  assert.deepEqual(body,{ok:true,items:[],nextCursor:null});
+ });}finally{(prisma.pendingSignup as any).findMany=originalList;(prisma.lock as any).findMany=originalLocks;await prisma.$disconnect();}
+});
