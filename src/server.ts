@@ -1,3 +1,4 @@
+import { adminHaasRouter } from "./routes/admin.haas.routes.js";
 import "dotenv/config";
 import { buildCleanerAccountRouter } from "./routes/cleaner-account.routes.js";
 import { buildCleaningChecklistRouter } from "./routes/cleaning-checklist.routes.js";
@@ -359,6 +360,7 @@ app.use("/api/dashboard/health", buildDashboardHealthRouter(prisma));
 app.use("/api/org", ttlockDisconnectRoutes);
 
 app.use(adminSalesFollowupsRouter);
+app.use(adminHaasRouter);
 app.use(adminDemoRouter);
 
 app.use(dashboardRouter);
