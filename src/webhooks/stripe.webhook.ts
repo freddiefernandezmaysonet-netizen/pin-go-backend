@@ -1,3 +1,4 @@
+import { recordHaasPayment } from "../services/haas-admin.service.js";
 import type { Express, Request, Response } from "express";
 import bodyParser from "body-parser";
 import Stripe from "stripe";
@@ -166,6 +167,7 @@ export function registerStripeWebhook(app: Express) {
            }
 
             await maybeCompleteSignupOnboarding(session);
+            await recordHaasPayment(prisma, session, new Date(event.created * 1000));
 
             if (session.subscription) {
               await safeSyncBySubscriptionId(String(session.subscription), {
@@ -180,6 +182,13 @@ export function registerStripeWebhook(app: Express) {
           case "checkout.session.async_payment_succeeded": {
             const session = event.data.object as Stripe.Checkout.Session;
             const flow = String(session.metadata?.flow ?? "").trim();
+
+            if (session.metadata?.pendingSignupId && session.metadata.haasPlan === "haas" && session.payment_status === "paid") {
+              await maybeCompleteSignupOnboarding(session);
+              await recordHaasPayment(prisma, session, new Date(event.created * 1000));
+              if (session.subscription) await safeSyncBySubscriptionId(String(session.subscription), { source: event.type, session });
+              break;
+            }
 
             if (flow !== "direct_booking_reservation_modification") {
               console.log("ℹ️ Stripe event ignored:", event.type);

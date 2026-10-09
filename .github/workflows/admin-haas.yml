@@ -1,0 +1,28 @@
+name: Hardware as a Service Admin
+on:
+  pull_request:
+    paths:
+      - 'src/services/haas-admin*'
+      - 'src/routes/admin.haas*'
+      - 'src/webhooks/stripe.webhook.ts'
+      - 'src/server.ts'
+      - '.github/workflows/admin-haas.yml'
+permissions:
+  contents: read
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      DATABASE_URL: postgresql://test:test@127.0.0.1:5432/test
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+      - run: npm ci --ignore-scripts --no-audit --no-fund
+      - run: npx prisma generate
+      - run: node --import tsx --test src/services/haas-admin.service.test.ts src/routes/admin.haas.routes.test.ts
+      - run: npx tsc --noEmit --skipLibCheck --esModuleInterop --module ESNext --moduleResolution Bundler --target ES2022 src/services/haas-admin.service.ts src/routes/admin.haas.routes.ts
+      - run: node --input-type=module -e "import {build} from 'esbuild'; await build({entryPoints:['src/server.ts'],bundle:true,platform:'node',format:'esm',packages:'external',outfile:'/tmp/haas-server.mjs'});"
