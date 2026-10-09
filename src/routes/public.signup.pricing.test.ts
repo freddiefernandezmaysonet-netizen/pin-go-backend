@@ -10,7 +10,7 @@ test('signup checkout charges each package once monthly and retains model/term t
  (db.pendingSignup as any).create=async({data}:any)=>{pending=data;return {id:'pending'};};
  (db.pendingSignup as any).update=async()=>({});
  (stripe.customers as any).create=async(data:any)=>{customer=data;return {id:'cus_fixture'};};
- (stripe.prices as any).retrieve=async(id:string)=>{assert.equal(id,expectedId);return {active:true,currency:'usd',unit_amount:expectedAmount,type:'recurring',billing_scheme:'per_unit',recurring:{interval:'month',interval_count:1,usage_type:'licensed'}};};
+ (stripe.prices as any).retrieve=async(id:string)=>{assert.equal(id,expectedId);return {active:true,tax_behavior:'exclusive',currency:'usd',unit_amount:expectedAmount,type:'recurring',billing_scheme:'per_unit',recurring:{interval:'month',interval_count:1,usage_type:'licensed'}};};
  (stripe.checkout.sessions as any).create=async(data:any)=>{session=data;return {id:'cs_fixture',url:'https://checkout.stripe.com/fixture'};};
  const app=express();app.use(express.json());app.use(router);const server=app.listen(0,'127.0.0.1');await new Promise<void>(r=>server.once('listening',r));const url=`http://127.0.0.1:${(server.address() as any).port}/api/public/signup-checkout`;
  const base={organizationName:'Rental Demo',fullName:'Demo Host',email:'fixture@example.invalid',phone:'0000000000',password:'Jade!Clouds7Fence',locks:1,billingInterval:'monthly'};
@@ -19,7 +19,7 @@ test('signup checkout charges each package once monthly and retains model/term t
    expectedId=`price_${model}_${term}`;expectedAmount=values[term as 12|24];process.env[`STRIPE_PRICE_HAAS_${model.toUpperCase()}_${term}_MONTHLY`]=expectedId;
    const response=await fetch(url,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({...base,contractOption:'standard',haasSelection:{plan:'haas',lock:model,termMonths:term,smartDevices:'none'}})});assert.equal(response.status,200);
    assert.equal(pending.requestedLocks,1);assert.equal(pending.stripePriceId,expectedId);assert.equal(pending.metadata.haasSelection.termMonths,term);
-   assert.equal(session.mode,'subscription');assert.deepEqual(session.line_items,[{price:expectedId,quantity:1}]);assert.equal(session.discounts,undefined);
+   assert.deepEqual(session.automatic_tax,{enabled:true});assert.equal(session.billing_address_collection,'required');assert.deepEqual(session.customer_update,{address:'auto'});assert.equal(session.mode,'subscription');assert.deepEqual(session.line_items,[{price:expectedId,quantity:1}]);assert.equal(session.discounts,undefined);
    for(const meta of [customer.metadata,session.metadata,session.subscription_data.metadata]){assert.equal(meta.haasLock,model);assert.equal(meta.haasTermMonths,String(term));assert.equal(meta.contractOption,`contract_${term}_lock`);}
   }
   expectedId='price_platform';expectedAmount=3999;process.env.STRIPE_PRICE_PLATFORM_MONTHLY=expectedId;

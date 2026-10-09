@@ -291,6 +291,7 @@ const session = await stripe.checkout.sessions.create({
   mode: "subscription",
   customer: customer.id,
   locale: body.lang === "en" ? "en" : "es",
+  ...((selectedPrice || isPlatformCheckout) ? {automatic_tax:{enabled:true},billing_address_collection:"required" as const,customer_update:{address:"auto" as const}} : {}),
   ...(selectedPrice ? {custom_text:{submit:{message: body.lang === "en" ? `Monthly payment. ${selectedPrice.termMonths}-month agreement. Includes Pin&Go and hardware rental.` : `Pago mensual. Contrato de ${selectedPrice.termMonths} meses. Incluye Pin&Go y el alquiler del hardware.`}}} : {}),
   line_items: lineItems,
   discounts: saasVolumeCouponId

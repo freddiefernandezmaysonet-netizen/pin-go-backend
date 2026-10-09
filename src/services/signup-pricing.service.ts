@@ -20,7 +20,7 @@ export function resolveHaasPrice(selection: any, locks: number, interval: string
 
 export function assertMonthlyPrice(price: any, amount: number) {
   if (!price?.active || price.currency !== 'usd' || price.unit_amount !== amount || price.type !== 'recurring'
-    || price.billing_scheme !== 'per_unit' || price.transform_quantity
+    || price.tax_behavior !== 'exclusive' || price.billing_scheme !== 'per_unit' || price.transform_quantity
     || price.recurring?.interval !== 'month' || price.recurring.interval_count !== 1
     || price.recurring.usage_type !== 'licensed') throw new Error('SUBSCRIPTION_PRICE_MISMATCH');
 }

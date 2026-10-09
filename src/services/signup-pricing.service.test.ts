@@ -17,7 +17,7 @@ test('invalid package, term, quantity, annual billing and paused add-ons fail cl
  assert.equal(resolveHaasPrice({plan:'haas',lock:'pro'},1,'monthly'),null);
 });
 test('Stripe price must match active USD monthly licensed amount; never accepts upfront annual billing',()=>{
- const good={active:true,currency:'usd',unit_amount:7499,type:'recurring',billing_scheme:'per_unit',recurring:{interval:'month',interval_count:1,usage_type:'licensed'}};
+ const good={active:true,tax_behavior:'exclusive',currency:'usd',unit_amount:7499,type:'recurring',billing_scheme:'per_unit',recurring:{interval:'month',interval_count:1,usage_type:'licensed'}};
  assert.doesNotThrow(()=>assertMonthlyPrice(good,7499));
- for(const change of [{active:false},{currency:'eur'},{unit_amount:6499},{transform_quantity:{divide_by:2}},{recurring:{interval:'year',interval_count:1,usage_type:'licensed'}},{recurring:{interval:'month',interval_count:12,usage_type:'licensed'}}])assert.throws(()=>assertMonthlyPrice({...good,...change},7499),/SUBSCRIPTION_PRICE_MISMATCH/);
+ for(const change of [{tax_behavior:'inclusive'},{tax_behavior:'unspecified'},{active:false},{currency:'eur'},{unit_amount:6499},{transform_quantity:{divide_by:2}},{recurring:{interval:'year',interval_count:1,usage_type:'licensed'}},{recurring:{interval:'month',interval_count:12,usage_type:'licensed'}}])assert.throws(()=>assertMonthlyPrice({...good,...change},7499),/SUBSCRIPTION_PRICE_MISMATCH/);
 });
