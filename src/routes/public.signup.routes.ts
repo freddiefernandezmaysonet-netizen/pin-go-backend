@@ -3,6 +3,7 @@ import type { Request, Response } from "express";
 import bcrypt from "bcryptjs";
 import { PrismaClient, PendingSignupStatus } from "@prisma/client";
 import stripe from "../billing/stripe";
+import { resolveHaasPrice, assertMonthlyPrice } from "../services/signup-pricing.service.js";
 import { buildAuthCookie, signAuthToken } from "../lib/auth";
 import { validatePasswordPolicy } from "../lib/passwordPolicy";
 
@@ -27,7 +28,8 @@ function getSaasLocksVolumeCouponId(lockQuantity: number): string | undefined {
 }
 
 const router = Router();
-const prisma = new PrismaClient();
+export const signupCheckoutDb = new PrismaClient();
+const prisma = signupCheckoutDb;
 
 const APP_URL = process.env.APP_URL ?? "http://localhost:5173";
 
@@ -49,11 +51,14 @@ type BillingInterval = "monthly" | "yearly";
 
 type ContractOption =
   | "standard"
+  | "contract_12_lock"
   | "contract_24_lock"
   | "contract_24_lock_1_smart"
   | "contract_24_lock_2_smart";
 
 type SignupCheckoutBody = {
+  lang?: string;
+  plan?: string;
   email?: string;
   password?: string;
   fullName?: string;
@@ -67,6 +72,7 @@ type SignupCheckoutBody = {
     plan?: string;
     lock?: string;
     smartDevices?: string;
+    termMonths?: number;
   };
 
 };
@@ -89,12 +95,17 @@ router.post("/api/public/signup-checkout", async (req: Request, res: Response) =
     const organizationName = String(body.organizationName ?? "").trim();
     const phone = body.phone?.trim() || null;
     const locks = Number(body.locks ?? 1);
-    const haasSelection = body.haasSelection ?? null;
+    const selectedPrice = resolveHaasPrice(body.haasSelection, locks, body.billingInterval ?? 'monthly');
+    const isPlatformCheckout = body.plan === 'platform';
+    if (isPlatformCheckout && (body.haasSelection || body.billingInterval === 'yearly' || (body.contractOption && body.contractOption !== 'standard'))) {
+      return res.status(400).json({ok:false,error:'INVALID_PLATFORM_SELECTION'});
+    }
+    const haasSelection = selectedPrice?.selection ?? body.haasSelection ?? null;
     
     const billingInterval: BillingInterval =
       body.billingInterval === "yearly" ? "yearly" : "monthly";
 
-    const contractOption: ContractOption =
+    const contractOption: ContractOption = selectedPrice ? (selectedPrice.termMonths === 12 ? "contract_12_lock" : "contract_24_lock") :
   body.contractOption === "contract_24_lock" ||
   body.contractOption === "contract_24_lock_1_smart" ||
   body.contractOption === "contract_24_lock_2_smart"
@@ -137,7 +148,7 @@ const smartHaasPriceId =
       : "";
     
     const PRICE_ID =
-      isHaasCheckout
+      isPlatformCheckout ? (process.env.STRIPE_PRICE_PLATFORM_MONTHLY ?? "") : selectedPrice ? selectedPrice.priceId : isHaasCheckout
         ? lockHaasPriceId
         : contractOption === "contract_24_lock"
           ? STRIPE_PRICE_CONTRACT_24_LOCK
@@ -149,7 +160,7 @@ const smartHaasPriceId =
                 ? STRIPE_PRICE_LOCK_YEARLY
                 : STRIPE_PRICE_LOCK_MONTHLY;
 
-    const lineItems = isHaasCheckout
+    const lineItems = selectedPrice ? [{price:selectedPrice.priceId,quantity:1}] : isHaasCheckout
       ? [
           {
             price: lockHaasPriceId,
@@ -176,18 +187,6 @@ const saasVolumeCouponId =
     ? getSaasLocksVolumeCouponId(locks)
     : undefined;
  
-  console.log("🧪 signup checkout request", {
-  billingInterval,
-  contractOption,
-  priceId: PRICE_ID,
-  email,
-  organizationName,
-  locks,
-  haasSelection,
-  lineItems,
-  saasVolumeCouponId: saasVolumeCouponId ? "SET" : "NOT_SET",
-});
-   
    if (!PRICE_ID) {
       return res.status(500).json({
         ok: false,
@@ -228,6 +227,10 @@ const saasVolumeCouponId =
         ok: false,
         error: "Locks must be >= 1",
       });
+    }
+
+    if (selectedPrice || isPlatformCheckout) {
+      assertMonthlyPrice(await stripe.prices.retrieve(PRICE_ID), selectedPrice?.amount ?? 3999);
     }
 
     const existingUser = await prisma.dashboardUser.findUnique({
@@ -280,12 +283,16 @@ const saasVolumeCouponId =
         haasPlan: haasSelection?.plan ?? "",
         haasLock: haasSelection?.lock ?? "",
         haasSmartDevices: haasSelection?.smartDevices ?? "",
+        haasTermMonths: String(selectedPrice?.termMonths ?? ""),
       },
     });
 
 const session = await stripe.checkout.sessions.create({
   mode: "subscription",
   customer: customer.id,
+  locale: body.lang === "en" ? "en" : "es",
+  ...((selectedPrice || isPlatformCheckout) ? {automatic_tax:{enabled:true},billing_address_collection:"required" as const,customer_update:{address:"auto" as const}} : {}),
+  ...(selectedPrice ? {custom_text:{submit:{message: body.lang === "en" ? `Monthly payment. ${selectedPrice.termMonths}-month agreement. Includes Pin&Go and hardware rental.` : `Pago mensual. Contrato de ${selectedPrice.termMonths} meses. Incluye Pin&Go y el alquiler del hardware.`}}} : {}),
   line_items: lineItems,
   discounts: saasVolumeCouponId
     ? [{ coupon: saasVolumeCouponId }]
@@ -300,6 +307,7 @@ const session = await stripe.checkout.sessions.create({
          haasPlan: haasSelection?.plan ?? "",
          haasLock: haasSelection?.lock ?? "",
          haasSmartDevices: haasSelection?.smartDevices ?? "",
+         haasTermMonths: String(selectedPrice?.termMonths ?? ""),
        },
 
       },
@@ -310,6 +318,7 @@ const session = await stripe.checkout.sessions.create({
        haasPlan: haasSelection?.plan ?? "",
        haasLock: haasSelection?.lock ?? "",
        haasSmartDevices: haasSelection?.smartDevices ?? "",
+       haasTermMonths: String(selectedPrice?.termMonths ?? ""),
       },
     });
 
@@ -327,7 +336,8 @@ const session = await stripe.checkout.sessions.create({
       url: session.url,
     });
   } catch (error: any) {
-    console.error("🔥 signup-checkout error:", error);
+    if (error?.message === 'INVALID_HAAS_SELECTION') return res.status(400).json({ok:false,error:error.message});
+    console.error("signup-checkout error:", error?.message);
     return res.status(500).json({
       ok: false,
       error: error?.message ?? "Internal server error",
