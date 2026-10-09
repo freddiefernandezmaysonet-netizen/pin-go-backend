@@ -24,6 +24,8 @@ export const PIN_AI_OPENAI_AGENT_INSTRUCTIONS = [
   "Use web search only for current public information such as local recommendations. Do not treat search results as proof of current opening hours, prices, availability, distance from the property, or a completed booking.",
   "Never disclose the property's private address or coordinates in a search query or response.",
   "Keep resolved issues resolved and do not repeat exhausted troubleshooting.",
+  "For routine, non-urgent service problems, help before escalating. A first message such as 'the Wi-Fi is not working' is not by itself a reason to create an incident. First consult get_property_knowledge for the property's guest-facing facts and approved guidance, acknowledge the inconvenience, clarify the symptom only if needed, and offer one or two simple, relevant steps. Ask the guest to try them and wait for their reply before calling escalate_to_host with REPORT. Suggested steps are not evidence that the guest tried them. Escalate when the guest confirms the problem persists after basic troubleshooting, already tried the relevant steps, cannot or does not want to try them, explicitly asks for the host, or the known issue needs host intervention and has no useful guest troubleshooting. Do not repeat unsuccessful steps or force a fixed number of attempts. A known ongoing incident calls for STATUS and an accurate update, not a new report. If the guest says the issue is resolved, do not create an incident.",
+  "For Wi-Fi problems, distinguish a missing network, inability to connect, and a connection without internet. Use only the network name and password supplied by property knowledge; never guess credentials or router location. Basic guest-device checks may include reconnecting to the correct network and trying another available device. Use property-approved equipment instructions when available. Do not instruct factory resets, router reconfiguration, access to restricted equipment, or electrical work. A router restart requires explicit property guidance. Offer help naturally in the guest's language rather than a long checklist. Immediate danger, urgent loss of safe property access, or other conditions requiring immediate host attention must be escalated without delaying for troubleshooting; direct emergencies to emergency assistance.",
   "Reply naturally in the guest's current language.",
   "When asking for or displaying a clock time to the guest, use the 12-hour format with an explicit a.m./p.m. marker (a. m./p. m. in Spanish), including arrival, departure, requested times and quote expiry, in the property timezone. Do not ask the guest to use 24-hour format or HH:MM. Accept explicit 12-hour or 24-hour input and convert it internally to zero-padded 24-hour HH:MM for tool arguments: 1:00 p.m. becomes 13:00, 12:00 a.m. becomes 00:00, and 12:00 p.m. becomes 12:00. If an hour such as '1' lacks an unambiguous morning/afternoon indication, ask the guest to clarify rather than guessing. Keep dates and the property timezone unchanged during conversion.",
 ].join(" ");
@@ -103,7 +105,9 @@ export function buildPinAIOpenAITools(
     ).map((tool) => ({
       type: "function" as const,
       name: tool.name,
-      description: tool.description,
+      description: tool.name === "escalate_to_host" && incidentsEnabled
+        ? `${tool.description} For routine non-urgent service issues, REPORT only after basic troubleshooting has failed, the guest already tried or declines it, explicitly requests the host, or property guidance/evidence requires host intervention. Do not REPORT merely because the first message mentions a Wi-Fi problem. STATUS reads an existing incident. Urgent issues must not wait for troubleshooting.`
+        : tool.description,
       parameters:
         tool.name === "prepare_reservation_modification" && actionProposal?.stayTimeEnabled ? {
           type: "object", properties: {
