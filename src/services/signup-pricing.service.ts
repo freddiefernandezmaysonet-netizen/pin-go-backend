@@ -18,10 +18,10 @@ export function resolveHaasPrice(selection: any, locks: number, interval: string
     selection: { plan: 'haas', lock: model, termMonths: term, smartDevices: 'none' } };
 }
 
-export function assertMonthlyPrice(price: any, amount: number) {
+export function assertMonthlyPrice(price: any, amount: number, interval: 'month' | 'year' = 'month') {
   if (!price?.active || price.currency !== 'usd' || price.unit_amount !== amount || price.type !== 'recurring'
     || price.tax_behavior !== 'exclusive' || price.billing_scheme !== 'per_unit' || price.transform_quantity
-    || price.recurring?.interval !== 'month' || price.recurring.interval_count !== 1
+    || price.recurring?.interval !== interval || price.recurring.interval_count !== 1
     || price.recurring.usage_type !== 'licensed') throw new Error('SUBSCRIPTION_PRICE_MISMATCH');
 }
 

@@ -97,7 +97,7 @@ router.post("/api/public/signup-checkout", async (req: Request, res: Response) =
     const locks = Number(body.locks ?? 1);
     const selectedPrice = resolveHaasPrice(body.haasSelection, locks, body.billingInterval ?? 'monthly');
     const isPlatformCheckout = body.plan === 'platform';
-    if (isPlatformCheckout && (body.haasSelection || body.billingInterval === 'yearly' || (body.contractOption && body.contractOption !== 'standard'))) {
+    if (isPlatformCheckout && (body.haasSelection || (body.billingInterval && !['monthly','yearly'].includes(body.billingInterval)) || (body.contractOption && body.contractOption !== 'standard'))) {
       return res.status(400).json({ok:false,error:'INVALID_PLATFORM_SELECTION'});
     }
     const haasSelection = selectedPrice?.selection ?? body.haasSelection ?? null;
@@ -148,7 +148,7 @@ const smartHaasPriceId =
       : "";
     
     const PRICE_ID =
-      isPlatformCheckout ? (process.env.STRIPE_PRICE_PLATFORM_MONTHLY ?? "") : selectedPrice ? selectedPrice.priceId : isHaasCheckout
+      isPlatformCheckout ? (process.env[billingInterval === "yearly" ? "STRIPE_PRICE_PLATFORM_YEARLY" : "STRIPE_PRICE_PLATFORM_MONTHLY"] ?? "") : selectedPrice ? selectedPrice.priceId : isHaasCheckout
         ? lockHaasPriceId
         : contractOption === "contract_24_lock"
           ? STRIPE_PRICE_CONTRACT_24_LOCK
@@ -230,7 +230,7 @@ const saasVolumeCouponId =
     }
 
     if (selectedPrice || isPlatformCheckout) {
-      assertMonthlyPrice(await stripe.prices.retrieve(PRICE_ID), selectedPrice?.amount ?? 3999);
+      assertMonthlyPrice(await stripe.prices.retrieve(PRICE_ID), selectedPrice?.amount ?? (billingInterval === "yearly" ? 39990 : 3999), billingInterval === "yearly" ? "year" : "month");
     }
 
     const existingUser = await prisma.dashboardUser.findUnique({
