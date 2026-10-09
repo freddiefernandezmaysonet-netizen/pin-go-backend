@@ -35,8 +35,11 @@ export async function recordHaasPayment(db: PrismaClient, session: {
 
 export async function saveHaasInstallation(db: PrismaClient, id: string, input: {
   expectedUpdatedAt: string; status: string; lockId: string | null; scheduledAt: string | null; notes: string;
+  installationAddress?: string; serialNumber?: string;
 }, adminId: string) {
   if (!['PENDING', 'SCHEDULED', 'COMPLETED'].includes(input.status) || input.notes.length > 2000 ||
+    (input.installationAddress !== undefined && input.installationAddress.length > 1000) ||
+    (input.serialNumber !== undefined && input.serialNumber.length > 120) ||
     !Number.isFinite(Date.parse(input.expectedUpdatedAt)) ||
     (input.scheduledAt !== null && !Number.isFinite(Date.parse(input.scheduledAt)))) {
     throw new HaasAdminError(400, 'INVALID_INSTALLATION');
@@ -61,7 +64,10 @@ export async function saveHaasInstallation(db: PrismaClient, id: string, input: 
     if (input.status === 'COMPLETED' && !input.lockId) throw new HaasAdminError(400, 'INSTALLED_LOCK_REQUIRED');
     if (input.status === 'SCHEDULED' && !input.scheduledAt) throw new HaasAdminError(400, 'INSTALLATION_DATE_REQUIRED');
     const result = await tx.pendingSignup.updateMany({ where: { id, updatedAt: row.updatedAt }, data: {
-      metadata: { ...meta, haasInstallation: { ...input, updatedBy: adminId, updatedAt: new Date().toISOString() } } as Prisma.InputJsonValue,
+      metadata: { ...meta, haasInstallation: { ...input,
+        installationAddress: input.installationAddress?.trim() ?? object(meta.haasInstallation).installationAddress ?? "",
+        serialNumber: input.serialNumber?.trim() ?? object(meta.haasInstallation).serialNumber ?? "",
+        updatedBy: adminId, updatedAt: new Date().toISOString() } } as Prisma.InputJsonValue,
     } });
     if (result.count !== 1) throw new HaasAdminError(409, 'HAAS_CONCURRENT_UPDATE');
   }, { isolationLevel: 'Serializable' });

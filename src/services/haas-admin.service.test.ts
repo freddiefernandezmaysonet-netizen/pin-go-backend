@@ -40,3 +40,13 @@ test('installation preserves selection/payment and records the admin, concurrent
   assert.equal(f.row.metadata.haasInstallation.updatedBy,'admin');assert.equal(f.row.metadata.haasPayment.status,'paid');assert.equal(f.row.metadata.haasSelection.lock,'pro');
   f.db.pendingSignup.updateMany=async()=>({count:0});await assert.rejects(saveHaasInstallation(f.db,'order',input,'admin'),/HAAS_CONCURRENT_UPDATE/);
 });
+
+test('address and physical serial are saved, omitted fields preserved, explicit clearing supported',async()=>{
+ const f=fixture();await recordHaasPayment(f.db,paid,created);
+ await saveHaasInstallation(f.db,'order',{...input,installationAddress:'  Demo address\nSuite 2  ',serialNumber:'  SERIAL-DEMO  '},'admin');
+ assert.equal(f.row.metadata.haasInstallation.installationAddress,'Demo address\nSuite 2');assert.equal(f.row.metadata.haasInstallation.serialNumber,'SERIAL-DEMO');
+ await saveHaasInstallation(f.db,'order',input,'admin');assert.equal(f.row.metadata.haasInstallation.serialNumber,'SERIAL-DEMO');
+ await saveHaasInstallation(f.db,'order',{...input,serialNumber:'',installationAddress:''},'admin');assert.equal(f.row.metadata.haasInstallation.serialNumber,'');assert.equal(f.row.metadata.haasInstallation.installationAddress,'');
+ await assert.rejects(saveHaasInstallation(f.db,'order',{...input,serialNumber:'x'.repeat(121)},'admin'),/INVALID_INSTALLATION/);
+ await assert.rejects(saveHaasInstallation(f.db,'order',{...input,installationAddress:'x'.repeat(1001)},'admin'),/INVALID_INSTALLATION/);
+});
