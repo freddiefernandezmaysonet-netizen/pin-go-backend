@@ -1,4 +1,5 @@
 import { commercialStayTimeChatEnabled } from "./stay-time-commercial-policy.js";
+import { commercialReservationChangesEnabled } from "./reservation-change-commercial-policy.js";
 import { guestPinAIAvailability } from "./guest-availability.js";
 import { commercialPinAIEnabled, commercialIncidentRuntimeReady, type ActivationEnvironment } from "../property-activation.js";
 import { readInternalDemo, demoIncidentEnvironment } from "../../services/internal-demo-scope.js";
@@ -18,9 +19,6 @@ import type { PinAIRuntimeRequest } from "../runtime/contracts.js";
 import type {
   PinAIPrivateActionProposal,
 } from "../runtime/action-proposal-tool-executor.js";
-import {
-  resolvePinAIActionCanaryScope,
-} from "../actions/action-canary-scope.js";
 import {
   createActionProposalRuntimeDependencies,
 } from "../runtime/action-proposal-runtime-composition.js";
@@ -126,6 +124,7 @@ export type GuestPinAIActionProposalResponse =
       currency: string;
       financialAction: string;
       stayTime?: PinAIActionBrokerPublicProposal["quote"]["stayTime"];
+      reservationChange?: PinAIActionBrokerPublicProposal["quote"]["reservationChange"];
     }>;
   }>;
 
@@ -533,15 +532,9 @@ export function createGuestPinAIRuntimeRunner(
       ...request.context, guestToken: actionAuthorization.guestToken,
     }) : null;
     const incidentEnv = demo ? demoIncidentEnvironment(env, request.context.organizationId, demo.id) : env;
-    const actionCanary =
-      resolvePinAIActionCanaryScope({
-        reservationId:
-          request.context
-            .reservationId,
-        env,
-      });
+    const dateChangesEnabled = !demo && await commercialReservationChangesEnabled(runtimePrisma, env, request.context);
     const stayTimeEnabled = !demo && await commercialStayTimeChatEnabled(runtimePrisma, env, request.context);
-    const actionProposalEnabled = !demo && (actionCanary.enabled || stayTimeEnabled);
+    const actionProposalEnabled = !demo && (dateChangesEnabled || stayTimeEnabled);
 
     if (
       actionProposalEnabled &&
@@ -620,7 +613,7 @@ export function createGuestPinAIRuntimeRunner(
           enabled:
             actionProposalEnabled,
           stayTimeEnabled,
-          dateChangesEnabled: actionCanary.enabled,
+          dateChangesEnabled,
         },
         maxPolls: 50,
         pollDelayMs: 500,
@@ -633,7 +626,7 @@ export function createGuestPinAIRuntimeRunner(
 
     const actionTools = actionProposalEnabled
       ? createPinGoRuntimeToolExecutorWithActionProposal({ ...createActionProposalRuntimeDependencies({
-          guestToken: actionAuthorization!.guestToken, enabled: actionCanary.enabled,
+          guestToken: actionAuthorization!.guestToken, enabled: dateChangesEnabled,
         }), ...(stayTimeEnabled ? { prepareStayTime: createStayTimeChatActions({
           client: runtimePrisma, env, now: () => new Date(),
           platformFeePercent: env.PINGO_DIRECT_BOOKING_PLATFORM_FEE_PERCENT ?? "0",

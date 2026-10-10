@@ -31,7 +31,9 @@ function fixture() {
       totalAmount: 335, totalAmountCents: 33500,
     },
     property: {
-      name: "Test Property", status: "ACTIVE", isPublicBookable: true, maxGuests: 4,
+      organizationId: "org-1", isPublicBookable: true,
+      pinAITermsAcceptedAt: new Date("2026-09-01T00:00:00Z"), pinAITermsAcceptedBy: "host",
+      name: "Test Property", status: "ACTIVE", maxGuests: 4,
       timezone: "America/Puerto_Rico", checkInTime: "16:00", checkOutTime: "11:00",
       minimumNights: 3, maximumNights: 30,
       amenities: [{ id: "breakfast", name: "Breakfast", description: null, feeType: "PER_NIGHT", amount: 10 }],
@@ -67,6 +69,29 @@ function fixture() {
 function code(expected: string) {
   return (error: unknown) => Boolean(error && typeof error === "object" && "code" in error && error.code === expected);
 }
+
+function activateCommercial(dependencies: ReturnType<typeof fixture>["dependencies"]) {
+  const property = { pinAIEnabled: true, pinAITermsVersion: "pin-ai-connect-usd-1-reservation-v1",
+    organization: { pinAIEnabled: true, pinAIRevision: 1, stripeConnectAccountId: "acct_host" } };
+  dependencies.env = { PIN_AI_ALL_ORGANIZATIONS_ENABLED: "true", PIN_AI_PROPERTY_ACTIVATION_ENABLED: "true",
+    PIN_AI_CONNECT_DEBIT_ENABLED: "true", PIN_AI_RESERVATION_FEE_RECORDING_ENABLED: "true",
+    PIN_AI_ACTION_BROKER_ENABLED: "true", PIN_AI_ACTION_PROPOSAL_TOOL_ENABLED: "true" };
+  dependencies.client = { ...dependencies.client, property: { findFirst: async ({ where }: any) =>
+    where.id === "property-1" && where.organizationId === "org-1" ? property : null } } as never;
+  return property;
+}
+
+test("activated commercial extension quotes without a pilot and rejects opt-out before pricing", async () => {
+  const f = fixture();
+  const property = activateCommercial(f.dependencies);
+  const result = await getGuestReservationModificationPreview(f.input, f.dependencies);
+  assert.equal(result.pricing.amountDifferenceCents, 12100);
+  assert.equal(result.managementPhase, "IN_STAY");
+  property.pinAIEnabled = false;
+  const before = f.calls.pricing.length;
+  await assert.rejects(getGuestReservationModificationPreview(f.input, f.dependencies), code("RESERVATION_NOT_ELIGIBLE_FOR_MODIFICATION"));
+  assert.equal(f.calls.pricing.length, before);
+});
 
 test("canonical preview reads only the added interval and retains original price components", async () => {
   const { input, dependencies, calls, reservation } = fixture();
@@ -312,6 +337,20 @@ test("canonical confirmation records a checkout-only extension once without modi
   assert.equal(f.getCreates(), 1);
   assert.equal(JSON.stringify(f.reservation), before);
   await assert.rejects(confirmGuestReservationModification({ ...f.confirmationInput, checkOut: new Date("2026-09-29T15:00:00Z") }, f.confirmationDependencies), code("CLIENT_REQUEST_ID_REUSED"));
+});
+
+test("commercial extension confirmation preserves payment, consent and idempotency without a pilot", async () => {
+  const f = await confirmationFixture();
+  activateCommercial(f.confirmationDependencies);
+  const before = JSON.stringify(f.reservation);
+  const result = await confirmGuestReservationModification(f.confirmationInput, f.confirmationDependencies);
+  assert.equal(result.modification.status, "AWAITING_PAYMENT");
+  assert.equal(result.modification.additionalChargeAmount, 121);
+  assert.equal(f.getStored().guestConfirmation.source, "PIN_AI_GUEST_SERVICES");
+  const replay = await confirmGuestReservationModification(f.confirmationInput, f.confirmationDependencies);
+  assert.equal(replay.idempotentReplay, true);
+  assert.equal(f.getCreates(), 1);
+  assert.equal(JSON.stringify(f.reservation), before);
 });
 
 for (const scenario of ["changed price", "outside canary", "concurrent update", "active modification", "near checkout", "missing evidence"] as const) {

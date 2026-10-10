@@ -1,4 +1,5 @@
 import { commercialStayTimeChatEnabled } from "../pin-ai/guest/stay-time-commercial-policy.js";
+import { commercialReservationChangesEnabled } from "../pin-ai/guest/reservation-change-commercial-policy.js";
 import { Router } from "express";
 import { guestPinAIAvailability } from "../pin-ai/guest/guest-availability.js";
 import { commercialPinAIEnabled } from "../pin-ai/property-activation.js";
@@ -17,9 +18,6 @@ import {
 import {
   PinAIActionProposalError,
 } from "../pin-ai/actions/action-proposal.service.js";
-import {
-  resolvePinAIActionCanaryScope,
-} from "../pin-ai/actions/action-canary-scope.js";
 
 import {
   createGuestPinAIRuntimeRunner,
@@ -216,13 +214,6 @@ export function buildPublicBookingPinAIRouter(input: Readonly<{
           organizationId: reservation.property?.organizationId ?? "", propertyId: reservation.propertyId,
         }) === false) return res.status(503).json({ ok: false, error: "PIN_AI_ACTIONS_UNAVAILABLE" });
 
-        const canary =
-          resolvePinAIActionCanaryScope({
-            reservationId:
-              reservation.id,
-            env,
-          });
-
         const proposal = input.prisma.pinAIActionProposal ? await input.prisma.pinAIActionProposal.findFirst({
           where: { id: req.params.proposalId, reservationId: reservation.id, propertyId: reservation.propertyId,
             organizationId: reservation.property?.organizationId ?? "", actionType: "RESERVATION_MODIFICATION" },
@@ -232,7 +223,10 @@ export function buildPublicBookingPinAIRouter(input: Readonly<{
         if (isStayTime ? !await commercialStayTimeChatEnabled(input.prisma as PrismaClient, env, {
           reservationId: reservation.id, propertyId: reservation.propertyId,
           organizationId: reservation.property?.organizationId ?? "",
-        }, currentDateTime) : !canary.enabled) {
+        }, currentDateTime) : !await commercialReservationChangesEnabled(input.prisma as PrismaClient, env, {
+          reservationId: reservation.id, propertyId: reservation.propertyId,
+          organizationId: reservation.property?.organizationId ?? "",
+        }, currentDateTime)) {
           return res.status(503).json({ ok: false, error: "PIN_AI_ACTIONS_UNAVAILABLE" });
         }
         const broker = isStayTime ? null :

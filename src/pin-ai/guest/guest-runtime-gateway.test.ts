@@ -17,6 +17,52 @@ import {
 const token = "12345678-1234-1234-1234-123456789abc";
 const now = new Date("2026-09-21T16:00:00.000Z");
 
+test("commercial runtime advertises date preparation only for an activated eligible Direct Booking stay", async t => {
+  const { prisma } = await import("../../lib/prisma.js");
+  const current = new Date();
+  let activated = true;
+  const originalPropertyRead = prisma.property.findFirst;
+  const originalReservationRead = prisma.reservation.findFirst;
+  t.after(() => { prisma.property.findFirst = originalPropertyRead; prisma.reservation.findFirst = originalReservationRead; });
+  prisma.property.findFirst = (async () => ({ pinAIEnabled: activated,
+    pinAITermsVersion: "pin-ai-connect-usd-1-reservation-v1",
+    organization: { pinAIEnabled: true, pinAIRevision: 1, stripeConnectAccountId: "acct_synthetic" } })) as never;
+  prisma.reservation.findFirst = (async () => ({ status: "ACTIVE", paymentState: "PAID",
+    source: "DIRECT_BOOKING", externalProvider: null, checkIn: new Date(+current - 86400000),
+    checkOut: new Date(+current + 86400000), property: { isPublicBookable: true,
+      pinAITermsAcceptedAt: new Date(+current - 1000), pinAITermsAcceptedBy: "host" } })) as never;
+  const fixture = createTurnFixture({ answer: () => "I can check your stay." });
+  t.mock.method(globalThis, "fetch", async (input: string | URL | Request, init?: RequestInit) => {
+    const response = await fixture.fetchImpl(String(input), { method: init?.method === "POST" ? "POST" : "GET",
+      headers: {}, ...(typeof init?.body === "string" ? { body: init.body } : {}) });
+    return new Response(JSON.stringify(await response.json()), { status: 200, headers: { "Content-Type": "application/json" } });
+  });
+  const runner = createGuestPinAIRuntimeRunner({ PIN_AI_RUNTIME_SHADOW_ENABLED: "true", PIN_AI_RUNTIME_REAL_READ_ENABLED: "true",
+    PIN_AI_ACTION_PROPOSAL_TOOL_ENABLED: "true", PIN_AI_ACTION_BROKER_ENABLED: "true",
+    PIN_AI_ALL_ORGANIZATIONS_ENABLED: "true", PIN_AI_PROPERTY_ACTIVATION_ENABLED: "true",
+    PIN_AI_CONNECT_DEBIT_ENABLED: "true", PIN_AI_RESERVATION_FEE_RECORDING_ENABLED: "true",
+    PIN_AI_OPENAI_AGENT_ID: "agent_test123", OPENAI_API_KEY: "test-key" });
+  const request: PinAIRuntimeRequest = { context: { organizationId: "org-a", propertyId: "property-a",
+    reservationId: "reservation-a", guestId: "guest", currentLocalDateTime: current.toISOString() },
+    conversation: [{ role: "guest", content: "I want to add a night." }] };
+  const location = { city: "", region: "", country: "", timezone: "America/Puerto_Rico", label: "" };
+  for (const enabled of [true, false]) {
+    activated = enabled;
+    const before = fixture.calls.length;
+    if (!enabled) {
+      await assert.rejects(runner(request, location, undefined, { guestToken: token }), /GATEWAY_DISABLED/);
+      assert.equal(fixture.calls.length, before);
+      continue;
+    }
+    await runner(request, location, undefined, { guestToken: token });
+    const session = fixture.calls.slice(before).find(call => call.method === "POST" && call.body?.includes('"agent"'));
+    const payload = JSON.parse(session?.body ?? "{}");
+    const tool = payload.agent?.tools?.find((value: { name?: string }) => value.name === "prepare_reservation_modification");
+    assert.equal(Boolean(tool), enabled);
+    if (enabled) assert.match(JSON.stringify(tool.parameters), /EXTEND_CHECKOUT_ONLY/);
+  }
+});
+
 function createPropertyKnowledgeRecord(propertyId: string, organizationId: string) {
   return {
     id: propertyId,

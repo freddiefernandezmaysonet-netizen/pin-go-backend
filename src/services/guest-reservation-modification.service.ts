@@ -12,7 +12,7 @@ import { checkPropertyAvailability } from "./availability.service";
 import { calculateDirectBookingModificationConnectFee } from "./direct-booking-connect-fee.service";
 import { calculateDirectBookingPricing } from "./direct-booking-pricing.service";
 
-import { resolvePinAIActionCanaryScope } from "../pin-ai/actions/action-canary-scope.js";
+import { commercialReservationChangesEnabled } from "../pin-ai/guest/reservation-change-commercial-policy.js";
 import { InStayExtensionError, IN_STAY_EXTENSION_MIN_PAYMENT_WINDOW_MS } from "../pin-ai/actions/in-stay-extension.js";
 import { previewGuestReservationExtension } from "./guest-reservation-extension-preview.js";
 import { reservationStateFingerprint } from "../pin-ai/actions/reservation-state-fingerprint.js";
@@ -20,7 +20,7 @@ import { reservationStateFingerprint } from "../pin-ai/actions/reservation-state
 const prisma = new PrismaClient();
 
 type PreviewDependencies = {
-  client: Pick<PrismaClient, "reservation">;
+  client: Pick<PrismaClient, "reservation" | "property">;
   now: () => Date;
   env: NodeJS.ProcessEnv;
   checkAvailability: typeof checkPropertyAvailability;
@@ -32,7 +32,7 @@ const defaultPreviewDependencies: PreviewDependencies = {
 };
 
 type ConfirmationDependencies = PreviewDependencies & {
-  client: Pick<PrismaClient, "reservation" | "reservationModification" | "$transaction">;
+  client: Pick<PrismaClient, "reservation" | "property" | "reservationModification" | "$transaction">;
 };
 const defaultConfirmationDependencies: ConfirmationDependencies = {
   ...defaultPreviewDependencies, client: prisma,
@@ -353,6 +353,7 @@ async function getEligibleReservationByGuestToken(
       property: {
         select: {
           id: true,
+          organizationId: true,
           name: true,
           status: true,
           isPublicBookable: true,
@@ -402,7 +403,10 @@ async function getEligibleReservationByGuestToken(
     reservation.paymentState !== PaymentState.PAID ||
     (reservation.checkIn <= now && !(
       allowInStayExtension && reservation.checkOut > now &&
-      resolvePinAIActionCanaryScope({ reservationId: reservation.id, env: dependencies.env }).enabled
+      await commercialReservationChangesEnabled(dependencies.client, dependencies.env, {
+        reservationId: reservation.id, propertyId: reservation.propertyId,
+        organizationId: reservation.property.organizationId,
+      }, now)
     ))
   ) {
     throw new GuestReservationModificationError({

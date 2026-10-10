@@ -51,14 +51,15 @@ test("managed activation blocks chat and old paid confirmations despite a legacy
   } finally { await closeServer(server); }
 });
 
-test("commercial stay-time confirmation needs host settings, while ordinary dates remain in the pilot", async () => {
+test("commercial confirmations separate hourly host settings from activated Direct Booking date changes", async () => {
   const now = new Date("2026-10-27T12:00:00Z");
   let configured = true, stayTime = true, executions = 0;
   const rule = { enabled: true, limitLocalTime: "12:00", fee: { mode: "FREE", amountMinor: 0, currency: "USD" } };
   const prisma = {
     reservation: { findFirst: async () => ({ id: "reservation-a", propertyId: "property-a", status: "ACTIVE",
+      paymentState: "PAID", source: "DIRECT_BOOKING", externalProvider: null,
       checkIn: new Date("2026-10-26T19:00:00Z"), checkOut: new Date("2026-10-28T15:00:00Z"),
-      property: { organizationId: "org-a", timezone: "America/Puerto_Rico", pinAITermsAcceptedAt: new Date(+now - 1000),
+      property: { organizationId: "org-a", timezone: "America/Puerto_Rico", isPublicBookable: true, pinAITermsAcceptedAt: new Date(+now - 1000),
         pinAITermsAcceptedBy: "host", stayTimeSettings: configured ? { earlyCheckin: rule, lateCheckout: rule } : null } }) },
     property: { findFirst: async () => ({ pinAITermsVersion: "pin-ai-connect-usd-1-reservation-v1", pinAIEnabled: true,
       organization: { stripeConnectAccountId: "acct_synthetic", pinAIEnabled: true, pinAIRevision: 1 } }) },
@@ -67,7 +68,9 @@ test("commercial stay-time confirmation needs host settings, while ordinary date
   const app = express(); app.use(express.json());
   app.use(buildPublicBookingPinAIRouter({ prisma: prisma as never, now: () => now,
     runtime: async () => { throw new Error("Must not call model"); },
-    actionBrokerFactory: async () => { throw new Error("Ordinary date broker must stay disabled"); },
+    actionBrokerFactory: async () => ({ confirmAndExecute: async () => {
+      executions++; return { outcome: "WAITING_FOR_PAYMENT", actionExecuted: false };
+    } }) as never,
     stayTimeActions: { confirm: async () => { executions++; return { outcome: "WAITING_FOR_PAYMENT", actionExecuted: false }; } } as never,
     env: { PIN_AI_ALL_ORGANIZATIONS_ENABLED: "true", PIN_AI_CONNECT_DEBIT_ENABLED: "true", PIN_AI_RESERVATION_FEE_RECORDING_ENABLED: "true",
       PIN_AI_PROPERTY_ACTIVATION_ENABLED: "true", PIN_AI_GUEST_GATEWAY_ENABLED: "true", PIN_AI_ACTION_BROKER_ENABLED: "true",
@@ -80,8 +83,10 @@ test("commercial stay-time confirmation needs host settings, while ordinary date
     configured = false;
     assert.equal((await confirm()).status, 503);
     configured = true; stayTime = false;
-    assert.equal((await confirm()).status, 503);
-    assert.equal(executions, 1);
+    assert.equal((await confirm()).status, 200);
+    configured = false;
+    assert.equal((await confirm()).status, 200);
+    assert.equal(executions, 3);
   } finally { await closeServer(server); }
 });
 
