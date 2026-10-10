@@ -259,6 +259,12 @@ export class GuestPinAIGateway {
         guestId: "reservation-guest",
         currentLocalDateTime,
         preferredLanguage,
+        reservationSchedule: {
+          source: "PERSISTED_RESERVATION",
+          propertyTimezone: reservation.property.timezone,
+          checkIn: formatPropertyLocalDateTime(reservation.checkIn, reservation.property.timezone),
+          checkOut: formatPropertyLocalDateTime(reservation.checkOut, reservation.property.timezone),
+        },
         propertyKnowledge,
       },
       conversation: [{ role: "guest", content: message }],

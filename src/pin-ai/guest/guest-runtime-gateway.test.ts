@@ -349,6 +349,48 @@ test("keeps the property-local calendar date when UTC has already crossed midnig
   );
 });
 
+test("every turn supplies the persisted booked schedule over property defaults and prior dialogue", async () => {
+  const reservation = {
+    id: "reservation-a", propertyId: "property-a", preferredLanguage: "es",
+    checkIn: new Date("2026-10-08T20:00:00Z"), checkOut: new Date("2026-10-10T16:00:00Z"),
+    property: { organizationId: "org-a", timezone: "America/Puerto_Rico" },
+  };
+  const { prisma } = createPrisma(reservation);
+  const requests: PinAIRuntimeRequest[] = [];
+  const gateway = new GuestPinAIGateway(prisma, async request => {
+    requests.push(request);
+    return shadowResult(request, { responseText: "Gracias por tu visita." });
+  }, true, () => new Date("2026-10-10T13:00:00Z"));
+  await gateway.reply({ guestToken: token, message: "Gracias, buen día" });
+  assert.deepEqual(requests[0].context.reservationSchedule, {
+    source: "PERSISTED_RESERVATION", propertyTimezone: "America/Puerto_Rico",
+    checkIn: "2026-10-08T16:00:00-04:00", checkOut: "2026-10-10T12:00:00-04:00",
+  });
+  assert.equal(requests[0].context.propertyKnowledge?.facts.find(fact => fact.key === "checkOutTime")?.value, "11:00");
+  // A persisted approved change must replace the previous turn's schedule.
+  reservation.checkOut = new Date("2026-10-10T18:00:00Z");
+  await gateway.reply({ guestToken: token, message: "Hasta luego" });
+  assert.equal(requests[1].context.reservationSchedule?.checkOut, "2026-10-10T14:00:00-04:00");
+});
+
+test("booked schedule uses the property's daylight-saving offset and local calendar date", async () => {
+  const { prisma } = createPrisma({
+    id: "reservation-a", propertyId: "property-a", preferredLanguage: "en",
+    checkIn: new Date("2026-11-01T00:00:00Z"), checkOut: new Date("2026-11-01T17:00:00Z"),
+    property: { organizationId: "org-a", timezone: "America/New_York" },
+  });
+  let request: PinAIRuntimeRequest | undefined;
+  const gateway = new GuestPinAIGateway(prisma, async received => {
+    request = received;
+    return shadowResult(received);
+  }, true, () => new Date("2026-11-01T12:00:00Z"));
+  await gateway.reply({ guestToken: token, message: "Thanks" });
+  assert.deepEqual(request?.context.reservationSchedule, {
+    source: "PERSISTED_RESERVATION", propertyTimezone: "America/New_York",
+    checkIn: "2026-10-31T20:00:00-04:00", checkOut: "2026-11-01T12:00:00-05:00",
+  });
+});
+
 test("reuses one server-side OpenAI session for conversational follow-ups", async () => {
   const { prisma, getConversation } = createPrisma({
     id: "reservation-a",

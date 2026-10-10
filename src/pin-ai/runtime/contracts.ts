@@ -45,6 +45,12 @@ export type PinAIStayContext = Readonly<{
   guestId: string;
   currentLocalDateTime: string;
   preferredLanguage?: "en" | "es";
+  reservationSchedule?: Readonly<{
+    source: "PERSISTED_RESERVATION";
+    propertyTimezone: string | null;
+    checkIn: string;
+    checkOut: string;
+  }>;
   propertyKnowledge?: PropertyKnowledgeSnapshot;
 }>;
 
