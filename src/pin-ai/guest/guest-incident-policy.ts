@@ -63,8 +63,12 @@ export function formatGuestIncidentReceipt(receipt: GuestIncidentReceipt | null,
   }[receipt.notification];
   const progress = receipt.hostAcknowledged
     ? (es ? "El anfitrión confirmó que recibió tu reporte. El caso sigue abierto." : "Your host confirmed that they received your report. The case is still open.")
-    : notice;
-  return opening + (es
-    ? `${operation === "REPORT" ? "Registré tu reporte para que el anfitrión pueda ayudarte." : "Tu reporte sigue abierto."} ${progress} Referencia: ${receipt.reference}.`
-    : `${operation === "REPORT" ? "I’ve recorded your report so your host can help." : "Your report is still open."} ${progress} Reference: ${receipt.reference}.`);
+    : operation === "REPORT" && (receipt.notification === "QUEUED" || receipt.notification === "ACCEPTED")
+      ? "" // Transient delivery states belong to a fresh STATUS lookup, not a permanent creation receipt.
+      : notice;
+  const statement = es
+    ? (operation === "REPORT" ? "Registré tu reporte para que el anfitrión pueda ayudarte." : "Tu reporte sigue abierto.")
+    : (operation === "REPORT" ? "I’ve recorded your report so your host can help." : "Your report is still open.");
+  return opening + [statement, progress, es ? `Referencia: ${receipt.reference}.` : `Reference: ${receipt.reference}.`]
+    .filter(Boolean).join(" ");
 }
