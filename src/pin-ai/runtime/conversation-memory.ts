@@ -38,9 +38,11 @@ export function createConversationMemory(
     reservationId: request.context.reservationId,
     guestId: request.context.guestId,
     ...(request.context.preferredLanguage !== undefined ? { preferredLanguage: request.context.preferredLanguage } : {}),
-    facts: extractConversationFacts(request.conversation),
+    // Conversation interpretation belongs to the model. Do not synthesize facts
+    // or performed attempts from isolated keywords or assistant suggestions.
+    facts: {},
     issues: [],
-    attemptedTroubleshooting: extractTroubleshootingAttempts(request.conversation),
+    attemptedTroubleshooting: [],
     completedToolChecks: [],
   };
 }
@@ -61,55 +63,3 @@ export function assertMemoryMatchesRequest(
   }
 }
 
-function extractConversationFacts(
-  conversation: readonly PinAIConversationMessage[],
-): Readonly<Record<string, unknown>> {
-  const facts: Record<string, unknown> = {};
-
-  for (const message of conversation) {
-    const text = message.content.toLowerCase();
-
-    if (text.includes("display is on") || text === "yes.") {
-      facts.thermostatDisplayOn = true;
-    }
-
-    const temperatureMatch = message.content.match(/\b(\d{2})\b/);
-    if (temperatureMatch && text.includes("78")) {
-      facts.reportedRoomTemperatureF = 78;
-    }
-
-    if (temperatureMatch && text.includes("72")) {
-      facts.reportedSetpointF = 72;
-    }
-
-    if (
-      text.includes("we're inside") ||
-      text.includes("door opened") ||
-      text.includes("we are inside")
-    ) {
-      facts.accessResolved = true;
-    }
-  }
-
-  return facts;
-}
-
-function extractTroubleshootingAttempts(
-  conversation: readonly PinAIConversationMessage[],
-): readonly string[] {
-  const attempts = new Set<string>();
-
-  for (const message of conversation) {
-    const text = message.content.toLowerCase();
-
-    if (text.includes("reset") && text.includes("thermostat")) {
-      attempts.add("THERMOSTAT_RESET");
-    }
-
-    if (text.includes("tried that twice")) {
-      attempts.add("PREVIOUS_ACCESS_STEP_RETRIED_TWICE");
-    }
-  }
-
-  return [...attempts];
-}

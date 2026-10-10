@@ -14,6 +14,7 @@ import {
   type PinAIOpenAIWebSearchConfig,
 } from "./openai-agent-config.js";
 import type { PinAIRuntimeToolExecutor } from "./tool-executor.js";
+import { composeGuestIncidentReply } from "./guest-incident-response.js";
 
 export type OpenAIRuntimeTransportConfig = Readonly<{
   enabled: boolean;
@@ -296,7 +297,8 @@ export class OpenAIAgentsRuntimeTransport {
               status: "completed",
             });
             return {
-              responseText: incidentResponseText ?? message.text,
+              responseText: incidentResponseText === undefined ? message.text
+                : composeGuestIncidentReply(message.text, incidentResponseText),
               openaiSessionId: sessionId,
               toolCalls: recordedToolCalls,
               webSearch: {

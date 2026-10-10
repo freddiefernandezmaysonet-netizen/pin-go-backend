@@ -82,6 +82,21 @@ test("status lookup is read-only even when it finds an open case", async () => {
   } });
   assert.equal(result.escalationCreated, false); assert.match(result.responseText, /pendiente/);
 });
+
+test("completed incident lookup preserves contextual narration and appends canonical status", async () => {
+  const narrative = "Gracias por avisarme que te llamó. ¿Te indicó qué puedes hacer mientras tanto?";
+  const receipt = "Tu reporte sigue abierto. Referencia: GI-TEST.";
+  const fixture = createTurnFixture({ actions: () => [{ name: "escalate_to_host",
+    arguments: { operation: "STATUS", category: "HOT_WATER", guestQuotes: [] } }], answer: () => narrative });
+  const result = await new OpenAIAgentsRuntimeTransport({ enabled: true, incidentsEnabled: true,
+    apiKey: "synthetic", model: "gpt-5.6-luna", maxPolls: 3, pollDelayMs: 0 }, fixture.fetchImpl)
+    .run(request, createConversationMemory(request), { async execute() {
+      return { executed: false, incidentRecorded: true, incidentResponseText: receipt };
+    } });
+  assert.equal(result.responseText, `${narrative}\n\n${receipt}`);
+  assert.equal(result.escalationCreated, false);
+  assert.equal(fixture.toolResults.length, 1);
+});
 test("enabled manifest changes only escalation schema; baseline read/action tools remain unchanged", () => {
   const baseline = buildPinAIOpenAIAgentConfig(undefined, { enabled: true }) as any;
   const enabled = buildPinAIOpenAIAgentConfig(undefined, { enabled: true }, true) as any;

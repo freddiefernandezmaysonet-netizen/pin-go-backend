@@ -547,6 +547,31 @@ test("persists a server-backed incident receipt and rejects mismatched runtime c
   }
 });
 
+test("gateway persists contextual incident replies but rejects unsafe additions to a canonical receipt", async () => {
+  const receipt = { reference: "GI-012345ABCDEF", category: "HOT_WATER" as const, incidentRecorded: true as const,
+    notification: "DELIVERED" as const, resolution: "OPEN" as const, hostAcknowledged: false };
+  const text = "Tu reporte sigue abierto. El aviso llegó al correo del anfitrión. Referencia: GI-012345ABCDEF.";
+  for (const narrative of ["Gracias por contarme que te llamó. ¿Cómo quedó la situación?", "He notificado al anfitrión."]) {
+    const { prisma } = createPrisma({ id: "reservation-a", propertyId: "property-a", preferredLanguage: "es",
+      property: { organizationId: "org-a", city: null, region: null, country: null, timezone: "America/Puerto_Rico" } });
+    const runtime: GuestPinAIRuntimeRunner = async request => ({
+      ...shadowResult(request, { responseText: `${narrative}\n\n${text}` }),
+      guestIncidentEvidence: { receipt, operationalWrites: false, responseText: text },
+    });
+    const gateway = new GuestPinAIGateway(prisma, runtime, true, () => now);
+    if (narrative.startsWith("He")) {
+      await assert.rejects(gateway.reply({ guestToken: token, message: "El anfitrión me llamó" }), /SHADOW_INVARIANT_FAILED/);
+    } else {
+      const result = await gateway.reply({ guestToken: token, message: "El anfitrión me llamó" });
+      assert.equal(result.reply, `${narrative}\n\n${text}`);
+      assert.equal(result.operationalWrites, false);
+      assert.deepEqual(result.incident, receipt);
+      const persisted = await prisma.pinAIGuestConversation.findUnique({ where: { reservationId: "reservation-a" } });
+      assert.equal(readGuestMessages({ reservationId: "reservation-a", guestToken: token }, persisted?.guestHistoryCiphertext).at(-1)?.text, result.reply);
+    }
+  }
+});
+
 test("enables native OpenAI web search with coarse location only", async () => {
   const originalFetch = globalThis.fetch;
   const fixture = createTurnFixture({ answer: () => "Three options nearby." });
