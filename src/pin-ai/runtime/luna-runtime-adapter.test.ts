@@ -41,6 +41,20 @@ test("Luna runtime adapter executes read tools but shadows escalation", async ()
   assert.equal(JSON.parse(f.toolResults[1]?.output as string).executed, false);
 });
 
+test("new and resumed Luna sessions receive the current persisted reservation schedule", async () => {
+  const f = createTurnFixture();
+  const schedule = { source: "PERSISTED_RESERVATION" as const, propertyTimezone: "America/Puerto_Rico",
+    checkIn: "2026-10-08T16:00:00-04:00", checkOut: "2026-10-10T12:00:00-04:00" };
+  const first = { ...request, context: { ...request.context, reservationSchedule: schedule } };
+  await new LunaRuntimeAdapter(transport(f.fetchImpl)).run(first, createConversationMemory(first), noTools);
+  assert.deepEqual(JSON.parse(f.inputs[0]).context.reservationSchedule, schedule);
+  const updated = { ...schedule, checkOut: "2026-10-10T14:00:00-04:00" };
+  const next = { ...request, context: { ...request.context, reservationSchedule: updated } };
+  await new LunaRuntimeAdapter(transport(f.fetchImpl, { resumeSessionId: f.sessionId })).run(next, createConversationMemory(next), noTools);
+  assert.equal(f.createCount, 1);
+  assert.deepEqual(JSON.parse(f.inputs[1]).context.reservationSchedule, updated);
+});
+
 test("runtime transport fails closed before network for invalid configuration", async () => {
   for (const [config, error] of [
     [{ enabled: false }, /OPENAI_DISABLED/],
