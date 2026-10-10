@@ -90,13 +90,17 @@ test("guest receipt is warm while preserving each notification outcome and avoid
     for (const [i, language] of (["es", "en"] as const).entries()) {
       const text = formatGuestIncidentReceipt({ ...base, notification }, language, "REPORT");
       assert.match(text, language === "es" ? /^Lamento.*Gracias por avisarnos/ : /^I’m sorry.*Thank you for letting us know/);
-      assert.match(text, expected[notification][i]!);
+      if (notification === "QUEUED" || notification === "ACCEPTED") {
+        assert.doesNotMatch(text, /pendiente de envío|waiting to be sent|en proceso de entrega|on its way|confirmación de que haya llegado|delivery confirmation/);
+        assert.match(text, language === "es" ? /Registré tu reporte/ : /I’ve recorded your report/);
+      } else assert.match(text, expected[notification][i]!);
       assert.ok(text.includes(base.reference));
       assert.doesNotMatch(text, /proveedor|provider|reintento|retry|repair time|within \d/i);
       assertRuntimeResponseSafe({ responseText: text, escalationCreated: true, toolCalls: [], requiresHumanReview: false });
       const status = formatGuestIncidentReceipt({ ...base, notification }, language, "STATUS");
       assert.doesNotMatch(status, /Registré|I’ve recorded|Lamento|I’m sorry/);
       assert.match(status, language === "es" ? /sigue abierto/ : /still open/);
+      assert.match(status, expected[notification][i]!);
     }
   }
 });
