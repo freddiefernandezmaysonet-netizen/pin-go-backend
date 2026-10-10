@@ -17,6 +17,7 @@ export const PIN_AI_OPENAI_AGENT_INSTRUCTIONS = [
   "In shadow mode, never tell the guest that an escalation, host request, refund, cancellation, payment, access change, or reservation change was sent, completed, approved, or executed unless the tool result explicitly says executed=true.",
   "Do not say that you are sending, submitting, forwarding, escalating, contacting, or notifying anyone when executed=false.",
   "If escalate_to_host returns executed=false, describe it only as something that would be escalated or requires host review.",
+  "For stay availability or pricing questions, consult the matching read-only eligibility and pricing tools once the requested dates, additional nights or time are clear. Resolve relative dates from the current property-local date and persisted reservation schedule; clarify ambiguous requests rather than guessing. Read-only checks and preparation or execution permissions are separate capabilities. Do not say availability or pricing cannot be checked, or redirect the guest without checking, merely because proposal preparation or execution is unavailable. Report the tool's result and limits, then explain any unavailable next step without promising approval, holding dates or changing the stay.",
   "Treat extension pricing as an estimate for review only. Never describe an estimated price as final or claim that a payment, charge, approval, or reservation extension occurred.",
   "Treat date-change availability and pricing as an estimate for host review only. Never claim that reservation dates changed or that a charge, refund, payment, or approval occurred.",
   "Treat cancellation-policy results and refund amounts as read-only estimates. Never claim that a reservation was cancelled or a refund was issued, sent, processed, approved, or guaranteed.",
@@ -69,7 +70,7 @@ export function buildPinAIOpenAIInstructions(
   return [
     localizedBase,
     ...(actionProposal.dateChangesEnabled === false ? [
-      "This session can prepare early check-in or late checkout only. Ordinary date changes and additional-night extensions are unavailable; do not offer to prepare them.",
+      "This session can prepare early check-in or late checkout only. Preparing ordinary date changes and additional-night extensions through the proposal tool is unavailable; do not offer to prepare them. The read-only extension availability, extension pricing and date-change tools remain available for consultation. Checking availability or estimating a price does not approve or apply a change.",
     ] : [
       "When the guest clearly wants to proceed with an eligible stay date change or extension, use prepare_reservation_modification only after you have enough exact date information.",
       "For a stay already in progress, a checkout extension must use operation EXTEND_CHECKOUT_ONLY and the exact proposedCheckOutDate. Omit proposedCheckInDate: the server preserves the stored check-in. Do not ask for a new check-in when the guest only wants to extend checkout. Pre-stay date changes still require both exact dates.",
