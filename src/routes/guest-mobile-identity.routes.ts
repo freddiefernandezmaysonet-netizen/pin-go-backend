@@ -1,4 +1,6 @@
 import { prepareMobileAccessOnDemand } from "../guest-mobile/mobile-access-on-demand.service.js";
+import { buildGuestMobileActionRouter } from "../guest-mobile/guest-mobile-action-router.js";
+import { buildPublicBookingPinAIRouter } from "./public-booking.pin-ai.routes.js";
 import { readGuestMobileAccessCodes } from "../guest-mobile/guest-mobile-access-code.service.js";
 import { deliverMobileAccessCredential } from "../guest-mobile/mobile-access-delivery.service.js";
 import { TTLockMobileAccessProvider } from "../guest-mobile/ttlock-mobile-access-provider.js";
@@ -29,6 +31,13 @@ const exchangeRateLimit: RequestHandler = (req, res, next) => {
 };
 
 export const guestMobileIdentityRouter = Router();
+guestMobileIdentityRouter.use(
+  "/api/guest-mobile/stays/:reservationNumber/pin-ai/action-proposals",
+  exchangeRateLimit,
+);
+guestMobileIdentityRouter.use(buildGuestMobileActionRouter({
+  prisma, actions: buildPublicBookingPinAIRouter({ prisma }),
+}));
 
 guestMobileIdentityRouter.get(
   "/api/guest-mobile/stays/:reservationNumber/access-codes",
@@ -282,3 +291,4 @@ guestMobileIdentityRouter.post(
     }
   },
 );
+

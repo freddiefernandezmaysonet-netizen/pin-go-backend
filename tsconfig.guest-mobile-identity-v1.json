@@ -7,6 +7,8 @@
     ]
   },
   "include": [
+    "src/guest-mobile/guest-mobile-action-router.ts",
+    "src/guest-mobile/guest-mobile-action-router.test.ts",
     "src/guest-mobile/guest-mobile-access-code.db.test.ts",
     "src/guest-mobile/guest-mobile-access-code.service.ts",
     "src/guest-mobile/guest-mobile-access-code.service.test.ts",
@@ -18,3 +20,4 @@
     "src/guest-mobile/guest-mobile-help-incidents.contract.test.ts"
   ]
 }
+

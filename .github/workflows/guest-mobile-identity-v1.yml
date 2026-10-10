@@ -6,6 +6,8 @@ on:
       - "prisma/schema.prisma"
       - "prisma/migrations/20260929060000_add_guest_mobile_identity_foundation/**"
       - "src/guest-mobile/**"
+      - "src/routes/guest-mobile-identity.routes.ts"
+      - "tsconfig.guest-mobile-identity-v1.json"
       - ".github/workflows/guest-mobile-identity-v1.yml"
 
 permissions:
@@ -47,6 +49,7 @@ jobs:
       - name: Type-check guest mobile service
         run: npx tsc -p tsconfig.guest-mobile-identity-v1.json --pretty false
       - name: Run Guest Mobile Identity contracts
-        run: npx tsx --test src/guest-mobile/guest-mobile-access-code.service.test.ts src/guest-mobile/guest-mobile-session.contract.test.ts src/guest-mobile/guest-mobile-http.contract.test.ts src/guest-mobile/guest-mobile-my-stay.contract.test.ts src/guest-mobile/guest-mobile-pin-ai-adapter.contract.test.ts src/guest-mobile/guest-mobile-help-incidents.contract.test.ts
+        run: npx tsx --test src/guest-mobile/guest-mobile-action-router.test.ts src/guest-mobile/guest-mobile-access-code.service.test.ts src/guest-mobile/guest-mobile-session.contract.test.ts src/guest-mobile/guest-mobile-http.contract.test.ts src/guest-mobile/guest-mobile-my-stay.contract.test.ts src/guest-mobile/guest-mobile-pin-ai-adapter.contract.test.ts src/guest-mobile/guest-mobile-help-incidents.contract.test.ts
       - name: Verify access codes with real PostgreSQL
         run: npx tsx --test src/guest-mobile/guest-mobile-access-code.db.test.ts
+
