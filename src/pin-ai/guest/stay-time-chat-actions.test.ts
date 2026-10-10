@@ -146,7 +146,9 @@ test("session-only schema changes preserve default Saved Agent configuration", (
   assert.equal(commercial.includes('"EXTEND_CHECKOUT_ONLY"'), false);
   assert.equal(commercial.includes('"proposedCheckInDate"'), false);
   assert.equal(commercial.includes('"EARLY_CHECKIN"'), true);
-  assert.match(buildPinAIOpenAIInstructions({ enabled: true, stayTimeEnabled: true, dateChangesEnabled: false }), /Ordinary date changes and additional-night extensions are unavailable/);
+  const commercialInstructions = buildPinAIOpenAIInstructions({ enabled: true, stayTimeEnabled: true, dateChangesEnabled: false });
+  assert.match(commercialInstructions, /Preparing ordinary date changes and additional-night extensions through the proposal tool is unavailable/);
+  assert.match(commercialInstructions, /read-only extension availability, extension pricing and date-change tools remain available for consultation/);
   assert.match(buildPinAIOpenAIInstructions({ enabled: true, stayTimeEnabled: true }), /typed yes is not consent/);
   assert.equal(JSON.stringify(buildPinAIOpenAITools()).includes("prepare_reservation_modification"), false);
 });
