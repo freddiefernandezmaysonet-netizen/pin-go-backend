@@ -43,7 +43,7 @@ export class GuestIncidentToolExecutor implements PinAIRuntimeToolExecutor {
         executed: false, incidentRecorded: false, receipt: null,
         reason: "PIN_AI_INCIDENT_UNSUPPORTED_GUEST_QUOTE",
         incidentResponseText: responseText,
-        guestFacingConstraint: "Use the exact incidentResponseText. No incident or notification was created. Do not retry escalation in this turn; wait for the guest to clarify.",
+        guestFacingConstraint: "No incident or notification was created. Do not retry escalation in this turn; wait for the guest to clarify. Respond naturally to the guest without claiming operational results or repeating incidentResponseText: the server appends that authoritative receipt separately.",
       };
       return this.rejectedQuoteResult;
     }
@@ -51,6 +51,6 @@ export class GuestIncidentToolExecutor implements PinAIRuntimeToolExecutor {
       args.operation === "STATUS" ? "STATUS" : "REPORT");
     this.evidence = { receipt, responseText, operationalWrites: args.operation === "REPORT" };
     return { executed: this.evidence.operationalWrites, incidentRecorded: !!receipt, receipt,
-      incidentResponseText: responseText, guestFacingConstraint: "Use the exact incidentResponseText. Registration, provider acceptance, delivery, host acknowledgement and resolution are separate facts. No repair or approval was performed." };
+      incidentResponseText: responseText, guestFacingConstraint: "Respond naturally to the guest's current message: acknowledge guest-supplied updates, explain relevant next steps or ask a useful question. Do not restate operational status, copy incidentResponseText or include its reference: the server appends that authoritative receipt separately. Registration, provider acceptance, delivery, host acknowledgement and resolution are separate facts. No repair or approval was performed." };
   }
 }

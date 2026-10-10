@@ -26,7 +26,7 @@ const request: PinAIRuntimeRequest = {
   ],
 };
 
-test("conversation memory is stay-scoped and retains resolved/troubleshooting facts", () => {
+test("conversation memory stays scoped without turning dialogue into operational facts", () => {
   const memory = createConversationMemory(request);
 
   assert.equal(memory.organizationId, "org-a");
@@ -34,8 +34,22 @@ test("conversation memory is stay-scoped and retains resolved/troubleshooting fa
   assert.equal(memory.reservationId, "reservation-a");
   assert.equal(memory.guestId, "guest-a");
   assert.equal(memory.preferredLanguage, "es");
-  assert.equal(memory.facts.accessResolved, true);
-  assert.deepEqual(memory.attemptedTroubleshooting, ["THERMOSTAT_RESET"]);
+  assert.deepEqual(memory.facts, {});
+  assert.deepEqual(memory.attemptedTroubleshooting, []);
+});
+
+test("ambiguous replies and suggested or negated steps never become confirmed memory", () => {
+  for (const conversation of [
+    [{ role: "guest" as const, content: "yes." }],
+    [{ role: "assistant" as const, content: "Try to reset the thermostat." },
+      { role: "guest" as const, content: "No lo he intentado." }],
+    [{ role: "guest" as const, content: "I have not reset the thermostat." }],
+  ]) {
+    const memory = createConversationMemory({ ...request, conversation });
+    assert.deepEqual(memory.facts, {});
+    assert.deepEqual(memory.attemptedTroubleshooting, []);
+    assert.deepEqual(memory.issues, []);
+  }
 });
 
 test("conversation memory rejects cross-reservation reuse", () => {

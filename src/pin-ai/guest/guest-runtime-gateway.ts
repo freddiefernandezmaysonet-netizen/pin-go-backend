@@ -9,6 +9,7 @@ import { guestIncidentEnabled, type GuestIncidentReceipt } from "./guest-inciden
 import type { PrismaClient } from "@prisma/client";
 import { randomUUID } from "node:crypto";
 import { appendGuestMessages, readGuestMessages, type GuestHistoryMessage } from "./guest-history.js";
+import { hasCanonicalGuestIncidentReply } from "../runtime/guest-incident-response.js";
 import { formatInTimeZone } from "date-fns-tz";
 import { createStayTimeChatActions } from "./stay-time-chat-actions.js";
 import type { PinAIActionBrokerPublicProposal } from "../actions/action-broker.service.js";
@@ -297,7 +298,7 @@ export class GuestPinAIGateway {
       result.actionsExecuted !== false ||
       result.response.escalationCreated !== (result.guestIncidentEvidence?.operationalWrites ?? false) ||
       (result.guestIncidentEvidence !== undefined &&
-        result.response.responseText !== result.guestIncidentEvidence.responseText)
+        !hasCanonicalGuestIncidentReply(result.response.responseText, result.guestIncidentEvidence.responseText))
     ) {
       await this.releaseFailedConversationLease(
         reservation.id,
