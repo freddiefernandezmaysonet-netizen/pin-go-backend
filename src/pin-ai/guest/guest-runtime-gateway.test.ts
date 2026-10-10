@@ -459,6 +459,29 @@ test("returns a retryable busy error without discarding an existing conversation
   assert.equal(getConversation()?.leaseToken, null);
 });
 
+test("guest incident recovery is authorized only after a recorded failed request and clears after success", async () => {
+  const { prisma, getConversation } = createPrisma({ id: "reservation-a", propertyId: "property-a", preferredLanguage: "es",
+    property: { organizationId: "org-a", city: null, region: null, country: null, timezone: null } });
+  const recovery: (boolean | undefined)[] = [];
+  let turns = 0;
+  const runtime: GuestPinAIRuntimeRunner = async (request, _location, _session, authorization) => {
+    recovery.push(authorization?.recoverWaitingIncident);
+    if (++turns === 2) throw new Error("PIN_AI_INCIDENT_UNSUPPORTED_GUEST_QUOTE");
+    return shadowResult(request, { openaiSessionId: turns > 2 ? "sess_recovered" : "sess_existing" });
+  };
+  const gateway = new GuestPinAIGateway(prisma, runtime, true, () => now);
+  await gateway.reply({ guestToken: token, message: "El agua sale fría" });
+  await assert.rejects(gateway.reply({ guestToken: token, message: "Ya probé el grifo" }), /UNSUPPORTED_GUEST_QUOTE/);
+  assert.equal(getConversation()?.leaseToken, null);
+  await gateway.reply({ guestToken: token, message: "Sigue fría" });
+  assert.equal(getConversation()?.openaiSessionId, "sess_recovered");
+  assert.equal(getConversation()?.lastErrorCode, null);
+  await gateway.reply({ guestToken: token, message: "Gracias" });
+  assert.deepEqual(recovery, [undefined, undefined, true, undefined]);
+  const history = readGuestMessages({ reservationId: "reservation-a", guestToken: token }, getConversation()?.guestHistoryCiphertext);
+  assert.deepEqual(history.filter(m => m.role === "guest").map(m => m.text), ["El agua sale fría", "Sigue fría", "Gracias"]);
+});
+
 test("does not call the runtime for an invalid, expired, inactive, or cross-scope token", async () => {
   const { prisma } = createPrisma(null);
   let runtimeCalls = 0;

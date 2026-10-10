@@ -82,6 +82,7 @@ export type GuestPinAIGatewayPrisma = Pick<
 
 export type GuestPinAIActionAuthorization = Readonly<{
   guestToken: string;
+  recoverWaitingIncident?: boolean;
 }>;
 
 export type GuestPinAIRuntimeRunResult =
@@ -271,6 +272,9 @@ export class GuestPinAIGateway {
         lease.openaiSessionId ?? undefined,
         {
           guestToken,
+          ...((lease.lastErrorCode === "PIN_AI_INCIDENT_UNSUPPORTED_GUEST_QUOTE" ||
+            lease.lastErrorCode === "PIN_AI_RUNTIME_AGENT_SESSION_BUSY")
+            ? { recoverWaitingIncident: true } : {}),
         },
       );
     } catch (error) {
@@ -416,14 +420,14 @@ export class GuestPinAIGateway {
   private async acquireConversationLease(
     reservationId: string,
     currentDateTime: Date,
-  ): Promise<Readonly<{ leaseToken: string; openaiSessionId: string | null; guestHistoryCiphertext: string | null }>> {
+  ): Promise<Readonly<{ leaseToken: string; openaiSessionId: string | null; guestHistoryCiphertext: string | null; lastErrorCode: string | null }>> {
     const leaseToken = randomUUID();
     const leaseExpiresAt = new Date(
       currentDateTime.getTime() + CONVERSATION_LEASE_MS,
     );
     let conversation = await this.prisma.pinAIGuestConversation.findUnique({
       where: { reservationId },
-      select: { openaiSessionId: true, guestHistoryCiphertext: true },
+      select: { openaiSessionId: true, guestHistoryCiphertext: true, lastErrorCode: true },
     });
 
     if (!conversation) {
@@ -435,11 +439,11 @@ export class GuestPinAIGateway {
             leaseExpiresAt,
           },
         });
-        return { leaseToken, openaiSessionId: null, guestHistoryCiphertext: null };
+        return { leaseToken, openaiSessionId: null, guestHistoryCiphertext: null, lastErrorCode: null };
       } catch {
         conversation = await this.prisma.pinAIGuestConversation.findUnique({
           where: { reservationId },
-          select: { openaiSessionId: true, guestHistoryCiphertext: true },
+          select: { openaiSessionId: true, guestHistoryCiphertext: true, lastErrorCode: true },
         });
       }
     }
@@ -460,12 +464,12 @@ export class GuestPinAIGateway {
 
     conversation = await this.prisma.pinAIGuestConversation.findUnique({
       where: { reservationId },
-      select: { openaiSessionId: true, guestHistoryCiphertext: true },
+      select: { openaiSessionId: true, guestHistoryCiphertext: true, lastErrorCode: true },
     });
     if (!conversation) {
       throw new GuestPinAIGatewayError("CONVERSATION_STATE_CONFLICT");
     }
-    return { leaseToken, openaiSessionId: conversation.openaiSessionId, guestHistoryCiphertext: conversation.guestHistoryCiphertext };
+    return { leaseToken, openaiSessionId: conversation.openaiSessionId, guestHistoryCiphertext: conversation.guestHistoryCiphertext, lastErrorCode: conversation.lastErrorCode };
   }
 
   private async releaseFailedConversationLease(
@@ -589,6 +593,7 @@ export function createGuestPinAIRuntimeRunner(
         requireCurrentSessionConfig: true,
         recoverWaitingStayTimeProposal: stayTimeEnabled,
         incidentsEnabled,
+        recoverWaitingIncident: actionAuthorization?.recoverWaitingIncident === true,
         model: "gpt-5.6-luna",
         webSearch: {
           enabled: webSearchEnabled,

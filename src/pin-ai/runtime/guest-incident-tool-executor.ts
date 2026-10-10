@@ -10,6 +10,7 @@ export type GuestIncidentRuntimeEvidence = Readonly<{
 }>;
 export class GuestIncidentToolExecutor implements PinAIRuntimeToolExecutor {
   private evidence: GuestIncidentRuntimeEvidence | undefined;
+  private rejectedQuoteResult: Readonly<Record<string, unknown>> | undefined;
   constructor(private readonly input: {
     prisma: PrismaClient; guestToken?: string;
     channel?: { bookingId: string; threadId: string; messageId: string };
@@ -19,6 +20,7 @@ export class GuestIncidentToolExecutor implements PinAIRuntimeToolExecutor {
   async execute(tool: PinAIRuntimeToolName, args: Readonly<Record<string, unknown>>,
     request: PinAIRuntimeRequest, memory: PinAIConversationMemory): Promise<Readonly<Record<string, unknown>>> {
     if (tool !== "escalate_to_host") return this.input.delegate.execute(tool, args, request, memory);
+    if (this.rejectedQuoteResult) return this.rejectedQuoteResult;
     if (this.evidence) throw new Error("PIN_AI_INCIDENT_ONE_OPERATION_PER_TURN");
     // Language is presentation metadata, never part of the incident command or authorization.
     const { responseLanguage, ...incidentArgs } = args;
@@ -26,7 +28,25 @@ export class GuestIncidentToolExecutor implements PinAIRuntimeToolExecutor {
       throw new Error("PIN_AI_INCIDENT_RESPONSE_LANGUAGE_INVALID");
     }
     const language = responseLanguage ?? (request.context.preferredLanguage === "es" ? "es" : "en");
-    const receipt = await handleGuestIncident({ ...this.input, request, args: incidentArgs });
+    let receipt: GuestIncidentReceipt | null;
+    try {
+      receipt = await handleGuestIncident({ ...this.input, request, args: incidentArgs });
+    } catch (error) {
+      if (!(error instanceof Error) || error.message !== "PIN_AI_INCIDENT_UNSUPPORTED_GUEST_QUOTE") throw error;
+      // The transaction rejected the quotes before any incident write. Finish
+      // the tool protocol instead of leaving the provider waiting indefinitely.
+      const responseText = language === "es"
+        ? "No pude registrar el reporte ni solicitar asistencia. Para continuar, confirma brevemente qué problema sigue ocurriendo."
+        : "I could not register the report or request assistance. To continue, briefly confirm which problem is still happening.";
+      this.evidence = { receipt: null, operationalWrites: false, responseText };
+      this.rejectedQuoteResult = {
+        executed: false, incidentRecorded: false, receipt: null,
+        reason: "PIN_AI_INCIDENT_UNSUPPORTED_GUEST_QUOTE",
+        incidentResponseText: responseText,
+        guestFacingConstraint: "Use the exact incidentResponseText. No incident or notification was created. Do not retry escalation in this turn; wait for the guest to clarify.",
+      };
+      return this.rejectedQuoteResult;
+    }
     const responseText = formatGuestIncidentReceipt(receipt, language,
       args.operation === "STATUS" ? "STATUS" : "REPORT");
     this.evidence = { receipt, responseText, operationalWrites: args.operation === "REPORT" };
