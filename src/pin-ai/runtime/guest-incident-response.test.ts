@@ -13,7 +13,8 @@ test("guest-supplied contact and a useful follow-up survive with the separate ca
 });
 test("model action claims or contradictory status fall back to evidence without blocking the dialogue", () => {
   for (const narrative of ["He notificado al anfitrión.", "He registrado el problema de conexión.",
-    "I've recorded your report.", "Your refund has been approved.",
+    "I've recorded your report.", "Registré el reporte.", "Ya registré el reporte.",
+    "Resolví el problema.", "Your refund has been approved.",
     "Tu caso está resuelto.", "The notification was delivered.", "Your host has read your email.",
     "Referencia: GI-FFFFFFFFFFFF", "x".repeat(4001)]) {
     assert.equal(composeGuestIncidentReply(narrative, receipt), receipt);

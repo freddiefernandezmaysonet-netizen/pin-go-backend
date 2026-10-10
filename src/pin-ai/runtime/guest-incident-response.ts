@@ -5,7 +5,7 @@ import { assertRuntimeResponseSafe } from "./policy.js";
 // Unsupported operational sentences are replaced by the canonical receipt.
 const INCIDENT_STATUS_ASSERTIONS = [
   /\b(?:i(?:'|’)ve|i have|i) (?:recorded|registered|created|opened|closed|resolved)\b/i,
-  /\b(?:he|hemos) (?:registrado|creado|abierto|cerrado|resuelto)\b|\b(?:registr[eé]|registramos|cre[eé]|creamos|resolv[ií]|resolvimos)\b/i,
+  /\b(?:he|hemos) (?:registrado|creado|abierto|cerrado|resuelto)\b|\b(?:registr[eé]|registramos|cre[eé]|creamos|resolv[ií]|resolvimos)(?![\p{L}\p{N}_])/iu,
   /\b(?:the|your|this) (?:incident|report|case|issue|problem) (?:is|was|has been) (?:open|closed|resolved|fixed|recorded|registered|created)\b/i,
   /\b(?:el|tu|su|este) (?:incidente|reporte|caso|problema) (?:esta|está|fue|ha sido|quedo|quedó) (?:abierto|cerrado|resuelto|reparado|registrado|creado)\b/i,
   /\b(?:the|your) (?:notice|notification|email|message) (?:was|has been|is) (?:sent|delivered|received|read|pending)\b/i,
