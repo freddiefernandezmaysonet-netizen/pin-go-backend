@@ -145,3 +145,21 @@ test("guest clock instructions distinguish 12-hour conversation from internal to
     }
   }
 });
+
+test("read-only stay checks remain available when date-change proposals are disabled", () => {
+  for (const options of [undefined, { enabled: true, stayTimeEnabled: true, dateChangesEnabled: false }]) {
+    const config = buildPinAIOpenAIAgentConfig(undefined, options, true);
+    const instructions = String(config.instructions);
+    const tools = config.tools as Array<{ name?: string; parameters?: { properties?: { operation?: { enum?: string[] } } } }>;
+    for (const name of ["check_extension_availability", "calculate_extension_price", "check_date_change"]) {
+      assert.equal(tools.some(tool => tool.name === name), true);
+    }
+    assert.match(instructions, /consult the matching read-only eligibility and pricing tools/);
+    assert.match(instructions, /clarify ambiguous requests rather than guessing/);
+    assert.match(instructions, /separate capabilities/);
+    if (options) {
+      assert.match(instructions, /read-only extension availability, extension pricing and date-change tools remain available/);
+      assert.deepEqual(tools.find(tool => tool.name === "prepare_reservation_modification")?.parameters?.properties?.operation?.enum, ["EARLY_CHECKIN", "LATE_CHECKOUT"]);
+    } else assert.equal(tools.some(tool => tool.name === "prepare_reservation_modification"), false);
+  }
+});

@@ -131,8 +131,21 @@ function assertNoFalseCompletionClaims(response: PinAIRuntimeResponse): void {
   ];
 
   if (
-    falseCompletionPatterns.some((pattern) => pattern.test(text))
+    falseCompletionPatterns.some((pattern) =>
+      Array.from(text.matchAll(new RegExp(pattern.source, "g"))).some((match) =>
+        !isExplicitNonAssertion(text.slice(0, match.index)),
+      ),
+    )
   ) {
     throw new Error("PIN_AI_RUNTIME_FALSE_COMPLETION_CLAIM");
   }
+}
+
+// A warning or inability to confirm is not evidence that an action occurred.
+// Scope the exception to the immediately governed claim, never the sentence
+// or response: another completion claim must still be checked independently.
+// Unknown phrasing remains subject to the existing conservative rejection.
+function isExplicitNonAssertion(prefix: string): boolean {
+  return /(?:^|[.!?;,\n])\s*(?:por favor\s+)?(?:no (?:asumas|supongas|des por hecho|consideres)|(?:todavia |aun )?no (?:puedo|podemos) (?:confirmar|asegurar|garantizar)|(?:esto |eso )?no significa)\s+que\s*$/.test(prefix) ||
+    /(?:^|[.!?;,\n])\s*(?:please\s+)?(?:(?:do not|don['’]t|never) (?:assume|presume)|(?:i|we) (?:cannot|can['’]t) (?:confirm|guarantee)|(?:this|that) does not mean)(?:\s+that)?\s+$/.test(prefix);
 }

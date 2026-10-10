@@ -311,3 +311,67 @@ test("runtime allows conditional language when shadow escalation is not executed
     );
   }
 });
+
+function guardedText(responseText: string) {
+  return { responseText, toolCalls: [], escalationCreated: false, requiresHumanReview: false };
+}
+
+test("runtime preserves a warning not to assume an extension was approved", () => {
+  const reply = "No puedo confirmar ni gestionar desde aquí la disponibilidad para extender tu estadía hasta mañana. Por ahora, tu reserva mantiene la salida hoy a las 12:00 p. m., hora de Puerto Rico.\n\nComunícate con el anfitrión para consultar si puedes añadir una noche más; hasta recibir una confirmación formal, no asumas que la extensión está aprobada.";
+  assert.doesNotThrow(() => assertRuntimeResponseSafe(guardedText(reply)));
+});
+
+test("runtime distinguishes explicit non-assertions across operational domains and languages", () => {
+  for (const responseText of [
+    "No supongas que tu reserva está modificada.",
+    "No des por hecho que el pago ha sido procesado.",
+    "Por favor no consideres que tu reembolso está garantizado.",
+    "No puedo confirmar que la salida tardía fue aprobada.",
+    "Aún no podemos garantizar que su transferencia fue procesada.",
+    "Esto no significa que he enviado la solicitud.",
+    "Do not assume that your extension is approved.",
+    "Don't assume your reservation has been changed.",
+    "Please never presume that your payment has been processed.",
+    "I cannot confirm that your refund is guaranteed.",
+    "We can't guarantee your compensation is approved.",
+    "This does not mean that I've sent the request.",
+  ]) {
+    assert.doesNotThrow(() => assertRuntimeResponseSafe(guardedText(responseText)), responseText);
+  }
+});
+
+test("a non-assertion never exempts another unsupported claim", () => {
+  for (const responseText of [
+    "No asumas que la extensión está aprobada. La extensión está aprobada.",
+    "No asumas que la extensión está aprobada; le envié la solicitud al anfitrión.",
+    "No asumas que la extensión está aprobada, pero tu reserva está modificada.",
+    "No asumas que la extensión está aprobada y tu reserva está extendida.",
+    "No puedo confirmar que tu pago ha sido procesado; tu reembolso está garantizado.",
+    "Your extension is approved. Do not assume that your extension is approved.",
+    "Do not assume that your extension is approved. Your extension is approved.",
+    "Don't assume your payment has been processed, but I've sent your refund.",
+    "I cannot confirm that your reservation is modified and your payment has been processed.",
+  ]) {
+    assert.throws(() => assertRuntimeResponseSafe(guardedText(responseText)), /PIN_AI_RUNTIME_FALSE_COMPLETION_CLAIM/, responseText);
+  }
+});
+
+test("runtime conservatively rejects ambiguous scope and double negation", () => {
+  for (const responseText of [
+    "No es cierto que no asumas que la extensión está aprobada.",
+    "No asumas que no es cierto que la extensión está aprobada.",
+    "No puedo negar que la extensión está aprobada.",
+    "Don't assume it is false that your extension is approved.",
+    "I cannot deny that your payment has been processed.",
+    "Do not assume that your extension is approved? Your extension is confirmed.",
+  ]) {
+    assert.throws(() => assertRuntimeResponseSafe(guardedText(responseText)), /PIN_AI_RUNTIME_FALSE_COMPLETION_CLAIM/, responseText);
+  }
+});
+
+test("multiple explicit warnings do not interfere with each other", () => {
+  for (const responseText of [
+    "No asumas que la extensión está aprobada; no supongas que tu reserva está modificada.",
+    "Do not assume your extension is approved. I cannot confirm that your payment has been processed.",
+  ]) assert.doesNotThrow(() => assertRuntimeResponseSafe(guardedText(responseText)));
+});
