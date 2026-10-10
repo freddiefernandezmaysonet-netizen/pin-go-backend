@@ -58,8 +58,10 @@ test("receipt never equates sent with delivered, read, or resolved", () => {
   assert.equal(incidentNotificationState([{ status: "SENT", providerDeliveryStatus: "DELIVERED" }, { status: "FAILED_FINAL", providerDeliveryStatus: null }]), "ATTENTION_REQUIRED");
   const receipt = { reference: "GI-012345ABCDEF", category: "HOT_WATER" as const, incidentRecorded: true as const,
     notification: "DELIVERED" as const, resolution: "OPEN" as const, hostAcknowledged: false as const };
-  assert.match(formatGuestIncidentReceipt(receipt, "es"), /no tenemos confirmación.*leído/);
-  assert.match(formatGuestIncidentReceipt(receipt, "en"), /do not yet have confirmation.*read/);
+  assert.match(formatGuestIncidentReceipt(receipt, "es"), /aviso llegó al correo/);
+  assert.match(formatGuestIncidentReceipt(receipt, "en"), /notice reached your host’s email/);
+  assert.doesNotMatch(formatGuestIncidentReceipt(receipt, "es"), /leído|confirmó|resuelto/);
+  assert.doesNotMatch(formatGuestIncidentReceipt(receipt, "en"), /read|confirmed|resolved/);
 });
 test("recorded escalation cannot bypass payment/refund/reservation claim protections", () => {
   for (const responseText of ["Your reservation has been changed", "I have issued a refund", "Tu pago fue procesado", "He notificado al anfitrión"]) {
@@ -82,7 +84,7 @@ test("guest receipt is warm while preserving each notification outcome and avoid
     resolution: "OPEN" as const, hostAcknowledged: false };
   const expected = { QUEUED: [/pendiente de envío/, /waiting to be sent/],
     ACCEPTED: [/no tenemos confirmación de que haya llegado/, /do not have delivery confirmation/],
-    DELIVERED: [/no tenemos confirmación de que lo haya leído/, /do not yet have confirmation that they have read/],
+    DELIVERED: [/aviso llegó al correo/, /notice reached your host’s email/],
     ATTENTION_REQUIRED: [/No se ha podido completar/, /not been able to complete/] };
   for (const notification of ["QUEUED", "ACCEPTED", "DELIVERED", "ATTENTION_REQUIRED"] as const) {
     for (const [i, language] of (["es", "en"] as const).entries()) {

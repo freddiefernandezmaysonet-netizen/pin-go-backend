@@ -58,7 +58,7 @@ export function formatGuestIncidentReceipt(receipt: GuestIncidentReceipt | null,
   const notice = {
     QUEUED: es ? "El aviso al anfitrión está pendiente de envío." : "The notice to your host is waiting to be sent.",
     ACCEPTED: es ? "El aviso al anfitrión está en proceso de entrega; todavía no tenemos confirmación de que haya llegado." : "The notice to your host is on its way; we do not have delivery confirmation yet.",
-    DELIVERED: es ? "El aviso llegó al correo del anfitrión; todavía no tenemos confirmación de que lo haya leído." : "The notice reached your host’s email; we do not yet have confirmation that they have read it.",
+    DELIVERED: es ? "El aviso llegó al correo del anfitrión." : "The notice reached your host’s email.",
     ATTENTION_REQUIRED: es ? "No se ha podido completar el aviso al anfitrión, pero tu reporte quedó registrado. Si necesitas ayuda inmediata, comunícate directamente con él." : "We have not been able to complete the notice to your host, but your report has been saved. If you need immediate help, please contact your host directly.",
   }[receipt.notification];
   const progress = receipt.hostAcknowledged
