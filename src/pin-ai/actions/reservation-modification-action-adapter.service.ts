@@ -505,9 +505,15 @@ function consentText(
           : " This change requires host review or approval before the reservation is modified."
         : "";
 
+  const date = (value: string) => formatInTimeZone(new Date(value), input.terms.propertyTimezone, "yyyy-MM-dd HH:mm");
+  const dates = input.language === "es"
+    ? `Estadía actual: ${date(input.terms.current.checkIn)} a ${date(input.terms.current.checkOut)}. Nueva estadía: ${date(input.terms.proposed.checkIn)} a ${date(input.terms.proposed.checkOut)} (${input.terms.propertyTimezone}).`
+    : `Current stay: ${date(input.terms.current.checkIn)} to ${date(input.terms.current.checkOut)}. New stay: ${date(input.terms.proposed.checkIn)} to ${date(input.terms.proposed.checkOut)} (${input.terms.propertyTimezone}).`;
+
   if (input.language === "es") {
     return [
       "Confirmo los cambios de reservación y los términos mostrados.",
+      dates,
       `Total actual: ${current}. Nuevo total: ${proposed}. Diferencia: ${difference}.`,
       `Esta cotización de precio puede aceptarse hasta ${input.terms.quoteExpiresAtLocal} (${input.terms.propertyTimezone}).`,
       "La disponibilidad se volverá a verificar antes de completar el cambio; esta cotización no retiene las fechas.",
@@ -519,6 +525,7 @@ function consentText(
 
   return [
     "I confirm the reservation changes and the terms shown.",
+    dates,
     `Current total: ${current}. New total: ${proposed}. Difference: ${difference}.`,
     `This price quote may be accepted until ${input.terms.quoteExpiresAtLocal} (${input.terms.propertyTimezone}).`,
     "Availability will be checked again before the change is completed; this quote does not hold the dates.",
@@ -1158,6 +1165,14 @@ export class PinAIReservationModificationActionAdapter {
         financialAction:
           terms.pricing
             .financialAction,
+        reservationChange: {
+          currentCheckIn: terms.current.checkIn,
+          currentCheckOut: terms.current.checkOut,
+          proposedCheckIn: terms.proposed.checkIn,
+          proposedCheckOut: terms.proposed.checkOut,
+          consentText: consentText({ language: cleanLanguage, terms }),
+          language: cleanLanguage,
+        },
       },
     };
   }

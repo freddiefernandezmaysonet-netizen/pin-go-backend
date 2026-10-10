@@ -517,6 +517,16 @@ test(
       input.consentText,
       /no retiene las fechas/i,
     );
+    assert.deepEqual(result.quote.reservationChange, {
+      currentCheckIn: input.termsSnapshot.current.checkIn,
+      currentCheckOut: input.termsSnapshot.current.checkOut,
+      proposedCheckIn: input.termsSnapshot.proposed.checkIn,
+      proposedCheckOut: input.termsSnapshot.proposed.checkOut,
+      consentText: input.consentText,
+      language: "es",
+    });
+    assert.match(input.consentText, /Estadía actual:/);
+    assert.match(input.consentText, /Nueva estadía:/);
   },
 );
 
