@@ -1,8 +1,8 @@
 import { assertRuntimeResponseSafe } from "./policy.js";
 
 // Operational status belongs to the canonical receipt, not model narration.
-// Keep useful paragraphs even when a separate paragraph repeats an action claim.
-// Unsupported operational paragraphs are replaced by the canonical receipt.
+// Keep useful guidance even when another sentence repeats an action claim.
+// Unsupported operational sentences are replaced by the canonical receipt.
 const INCIDENT_STATUS_ASSERTIONS = [
   /\b(?:i(?:'|’)ve|i have|i) (?:recorded|registered|created|opened|closed|resolved)\b/i,
   /\b(?:he|hemos) (?:registrado|creado|abierto|cerrado|resuelto)\b|\b(?:registr[eé]|registramos|cre[eé]|creamos|resolv[ií]|resolvimos)\b/i,
@@ -19,17 +19,20 @@ export function composeGuestIncidentReply(modelText: string, receiptText: string
   if (!receipt) throw new Error("PIN_AI_INCIDENT_RECEIPT_REQUIRED");
   const narrative = modelText.split(receiptText).join("").trim();
   if (!narrative || narrative.length > 4000) return receipt;
-  const safeParagraphs = narrative.split(/\n\s*\n/).filter(paragraph => {
-    if (/\bGI-[A-Z0-9]+\b/i.test(paragraph) ||
-        INCIDENT_STATUS_ASSERTIONS.some(pattern => pattern.test(paragraph))) return false;
+  const isSafe = (text: string): boolean => {
+    if (/\bGI-[A-Z0-9]+\b/i.test(text) ||
+        INCIDENT_STATUS_ASSERTIONS.some(pattern => pattern.test(text))) return false;
     try {
-      assertRuntimeResponseSafe({ responseText: paragraph, escalationCreated: false,
+      assertRuntimeResponseSafe({ responseText: text, escalationCreated: false,
         toolCalls: [], requiresHumanReview: false });
       return true;
     } catch {
       return false;
     }
-  }).join("\n\n");
+  };
+  const safeParagraphs = narrative.split(/\n\s*\n/).map(paragraph =>
+    paragraph.split(/(?<=[.!?])\s+/).filter(isSafe).join(" ")
+  ).filter(paragraph => paragraph && isSafe(paragraph)).join("\n\n");
   return safeParagraphs ? `${safeParagraphs}\n\n${receipt}` : receipt;
 }
 

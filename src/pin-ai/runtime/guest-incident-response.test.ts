@@ -32,5 +32,7 @@ test("operational claims do not discard separate useful or urgent guidance", () 
     assert.equal(reply, `${guidance}\n\n${receipt}`);
     assert.equal(hasCanonicalGuestIncidentReply(reply, receipt), true);
     assert.equal(hasCanonicalGuestIncidentReply(`He registrado el problema.\n\n${reply}`, receipt), false);
+    assert.equal(composeGuestIncidentReply(`El reporte quedó registrado. ${guidance}`, receipt),
+      `${guidance}\n\n${receipt}`);
   }
 });
