@@ -25,3 +25,12 @@ test("copying the receipt does not duplicate it and an empty receipt is rejected
   assert.equal(composeGuestIncidentReply(`Gracias.\n${receipt}`, receipt), `Gracias.\n\n${receipt}`);
   assert.throws(() => composeGuestIncidentReply("Hello", ""), /RECEIPT_REQUIRED/);
 });
+test("operational claims do not discard separate useful or urgent guidance", () => {
+  for (const guidance of ["Si tienes datos móviles, puedes usarlos temporalmente.",
+    "Aléjate del enchufe y llama a los servicios de emergencia."]) {
+    const reply = composeGuestIncidentReply(`He registrado el problema.\n\n${guidance}`, receipt);
+    assert.equal(reply, `${guidance}\n\n${receipt}`);
+    assert.equal(hasCanonicalGuestIncidentReply(reply, receipt), true);
+    assert.equal(hasCanonicalGuestIncidentReply(`He registrado el problema.\n\n${reply}`, receipt), false);
+  }
+});
