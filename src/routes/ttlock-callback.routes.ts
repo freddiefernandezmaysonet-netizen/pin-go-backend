@@ -1,5 +1,6 @@
 import { Router } from "express";
 import type { PrismaClient } from "@prisma/client";
+import { log, warn, err } from "../utils/log";
 
 import { applyTtlockGatewayCallbackState } from "../services/ttlock-gateway-health.service";
 import { resolveUniqueMappedTtlockGateway } from "../services/ttlock-gateway-mapping.service";
@@ -123,7 +124,7 @@ export function buildTtlockCallbackCanaryRouter(
     });
 
     if (!result.accepted) {
-      console.warn("[ttlock.callback.canary] rejected", {
+      warn("ttlock.callback.rejected", {
         status: result.status,
         reason: result.body,
       });
@@ -134,7 +135,7 @@ export function buildTtlockCallbackCanaryRouter(
         .send(result.body);
     }
 
-    console.log("[ttlock.callback.canary] received", {
+    log("ttlock.callback.received", {
       fingerprint: result.fingerprint,
       ...result.metadata,
     });
@@ -151,8 +152,8 @@ export function buildTtlockCallbackCanaryRouter(
       )
         .then(async (resolution) => {
           if (resolution.status !== "RESOLVED" || !resolution.gateway) {
-            console.warn(
-              "[ttlock.callback.gateway-health] unresolved",
+            warn(
+              "ttlock.callback.gateway-health.unresolved",
               {
                 gatewayId: gatewayState.gatewayId,
                 isOnline: gatewayState.isOnline,
@@ -173,14 +174,13 @@ export function buildTtlockCallbackCanaryRouter(
             }
           );
 
-          console.log(
-            "[ttlock.callback.gateway-health] completed",
-            transition
-          );
+          if (transition.status !== "DUPLICATE_STATE") {
+            log("ttlock.callback.gateway-health.completed", transition);
+          }
         })
         .catch((error) => {
-          console.error(
-            "[ttlock.callback.gateway-health] failed",
+          err(
+            "ttlock.callback.gateway-health.failed",
             {
               gatewayId: gatewayState.gatewayId,
               isOnline: gatewayState.isOnline,
