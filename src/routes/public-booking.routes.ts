@@ -1,6 +1,7 @@
 import { getIdentityCheckFeeCents } from "../services/identity-check-billing-consent.js";
 import { buildPublicStaysSitemapRouter } from "./public-stays-sitemap.routes.js";
 import { Router } from "express";
+import { log, err } from "../utils/log";
 import type Stripe from "stripe";
 import { PrismaClient, ReservationModificationStatus } from "@prisma/client";
 import {
@@ -411,9 +412,13 @@ function sendGuestReservationModificationRouteError({
   fallbackMessage: string;
   logLabel: string;
 }) {
-  console.error(logLabel, error?.message ?? error);
-
   if (isGuestReservationModificationRouteError(error)) {
+    const data = { code: error.code, statusCode: error.statusCode };
+    if (error.statusCode >= 400 && error.statusCode < 500) {
+      log("public-booking.reservation-modification.rejected", data);
+    } else {
+      err(logLabel, { ...data, message: error.message });
+    }
     return res.status(error.statusCode).json({
       ok: false,
       error: error.code,
@@ -422,6 +427,7 @@ function sendGuestReservationModificationRouteError({
     });
   }
 
+  console.error(logLabel, error?.message ?? error);
   return res.status(500).json({
     ok: false,
     error: fallbackMessage,
