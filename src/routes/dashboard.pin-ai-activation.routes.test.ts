@@ -12,10 +12,15 @@ async function harness(t: test.TestContext, role = "ORG_ADMIN", actorOrg = "org-
   const organization = { id: "org-a", name: "Synthetic", pinAIEnabled: true, pinAIRevision: 1, stripeConnectAccountId: "acct_host" };
   const property = { id: "property-a", name: "Synthetic", organizationId: "org-a", status: "ACTIVE", pinAIEnabled: false, pinAIRevision: 0, pinAIFeeExempt: false, organization, pinAITermsVersion: null, pinAITermsAcceptedAt: null, pinAITermsAcceptedBy: null };
   const events: unknown[] = [];
+  let afterPropertyRead = () => {};
   const tx = {
     dashboardUser: { findFirst: async ({ where }: any) => active && where.id === "host-a" && where.organizationId === actorOrg && where.role.in.includes(role) ? { id: "host-a" } : null },
     property: {
-      findFirst: async ({ where }: any) => where.id === property.id && where.organizationId === property.organizationId ? structuredClone(property) : null,
+      findFirst: async ({ where }: any) => {
+        const snapshot = where.id === property.id && where.organizationId === property.organizationId ? structuredClone(property) : null;
+        afterPropertyRead();
+        return snapshot;
+      },
       updateMany: async ({ where, data }: any) => { if (where.pinAIRevision !== property.pinAIRevision) return { count: 0 };
         Object.assign(property, { pinAITermsVersion: data.pinAITermsVersion ?? property.pinAITermsVersion, pinAITermsAcceptedAt: data.pinAITermsAcceptedAt ?? property.pinAITermsAcceptedAt, pinAITermsAcceptedBy: data.pinAITermsAcceptedBy ?? property.pinAITermsAcceptedBy }); property.pinAIEnabled = data.pinAIEnabled; property.pinAIRevision++; return { count: 1 }; },
     },
@@ -45,6 +50,7 @@ async function harness(t: test.TestContext, role = "ORG_ADMIN", actorOrg = "org-
     setCompatibility: (value: boolean) => { compatible = value; },
     setUnavailable: () => { unavailable = true; },
     setAfterCheck: (fn: () => void) => { afterCheck = fn; },
+    setAfterPropertyRead: (fn: () => void) => { afterPropertyRead = fn; },
     reads: () => reads };
 }
 const path = "/api/dashboard/properties/property-a/pin-ai-settings";
@@ -61,6 +67,57 @@ test("fee exemption is disclosed on read and save but cannot be self-granted by 
   assert.equal(saved.billing.exempt, true);
   assert.equal(h.property.pinAIFeeExempt, true);
   assert.equal(saved.billing.amountCents, PIN_AI_BILLING_TERMS.amountCents);
+});
+
+test("exempt assistance activates without Connect or debit rollout and never queries Stripe", async t => {
+  const h = await harness(t, "ORG_ADMIN", "org-a", true, {
+    PIN_AI_PROPERTY_ACTIVATION_ENABLED: "true", PIN_AI_GUEST_GATEWAY_ENABLED: "true",
+    PIN_AI_RUNTIME_SHADOW_ENABLED: "true", PIN_AI_RUNTIME_REAL_READ_ENABLED: "true",
+    PIN_AI_INCIDENT_ENABLED: "true", PIN_AI_HOST_INCIDENT_ENABLED: "true",
+  });
+  h.property.pinAIFeeExempt = true;
+  h.organization.stripeConnectAccountId = "";
+  h.setUnavailable();
+  const response = await h.request(path, update);
+  assert.equal(response.status, 200);
+  const saved = await response.json();
+  assert.equal(saved.state, "ENABLED");
+  assert.equal(saved.billing.exempt, true);
+  assert.equal(saved.billing.collectionReady, false);
+  assert.equal(h.reads(), 0);
+  assert.ok(saved.billing.acceptedAt);
+});
+test("exempt assistance does not require debit-compatible Connect", async t => {
+  const h = await harness(t);
+  h.property.pinAIFeeExempt = true;
+  h.setCompatibility(false);
+  assert.equal((await h.request(path, update)).status, 200);
+  assert.equal(h.reads(), 0);
+});
+test("exempt assistance still requires current terms and organization authorization", async t => {
+  const h = await harness(t);
+  h.property.pinAIFeeExempt = true;
+  const { acceptedTermsVersion: _terms, ...noConsent } = update;
+  assert.equal((await h.request(path, noConsent)).status, 428);
+  h.organization.pinAIEnabled = false;
+  assert.equal((await h.request(path, update)).status, 403);
+  assert.equal(h.reads(), 0);
+  assert.equal(h.events.length, 0);
+});
+test("exemption revoked between preflight and commit cannot bypass debit verification", async t => {
+  const h = await harness(t);
+  h.property.pinAIFeeExempt = true;
+  h.setAfterPropertyRead(() => { h.property.pinAIFeeExempt = false; });
+  assert.equal((await h.request(path, update)).status, 409);
+  assert.equal(h.reads(), 0);
+  assert.equal(h.events.length, 0);
+  assert.equal(h.property.pinAITermsAcceptedAt, null);
+});
+test("exemption changed during paid-account verification invalidates the activation snapshot", async t => {
+  const h = await harness(t);
+  h.setAfterCheck(() => { h.property.pinAIFeeExempt = true; });
+  assert.equal((await h.request(path, update)).status, 409);
+  assert.equal(h.events.length, 0);
 });
 
 for (const [role, active, status] of [["", true, 401], ["MEMBER", true, 403], ["ORG_ADMIN", false, 403]] as const) {
