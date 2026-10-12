@@ -9,6 +9,29 @@ const unavailable = (decision: string, reason: string) => ({
   executionAvailable: false, paymentReady: false, availabilityHeld: false,
 });
 
+function cleaningRejectionNote(reason: string, spanish: boolean) {
+  switch (reason) {
+    case "DEPARTURE_CLEANING_COMMITMENT_REQUIRED":
+      return spanish
+        ? "Aún no puedo verificar un compromiso de limpieza confirmado y vigente para esta salida. La solicitud puede volver a evaluarse cuando se valide ese compromiso."
+        : "I cannot yet verify a confirmed and current cleaning commitment for this checkout. The request can be evaluated again once that commitment is validated.";
+    case "ARRIVAL_READINESS_REQUIRED":
+      return spanish
+        ? "La preparación de la propiedad para la llegada aún no está verificada. La solicitud puede volver a evaluarse cuando se confirme que está lista."
+        : "The property's arrival readiness is not yet verified. The request can be evaluated again once readiness is confirmed.";
+    case "CLEANING_CHECKIN_LIMIT_EXCEEDED":
+      return spanish
+        ? "El horario solicitado, más el margen de inicio y la duración de limpieza, excede la hora estándar de entrada de la propiedad. Este límite se aplica aunque no haya otra llegada reservada."
+        : "The requested time, plus the cleaning start offset and duration, exceeds the property's standard check-in time. This limit applies even when no other arrival is booked.";
+    case "TURNOVER_CONFLICT":
+      return spanish
+        ? "Hay un conflicto de disponibilidad en el intervalo necesario para el cambio y la limpieza. La consulta no identifica aquí si corresponde a otra reserva, un bloqueo o una solicitud de cambio pendiente."
+        : "There is an availability conflict in the interval needed for the change and cleaning. This check does not identify here whether it is another reservation, a block or a pending change request.";
+    default:
+      return undefined;
+  }
+}
+
 /** Identity comes exclusively from the gateway-authenticated request context. */
 export async function checkStayTimeRequest(
   db: Pick<PrismaClient, "$transaction"> | undefined,
@@ -44,7 +67,8 @@ export async function checkStayTimeRequest(
         : error.code === "SERVICE_DISABLED" ? "SERVICE_DISABLED"
         : error.code === "TURNOVER_CONFLICT" ? "NOT_OPERATIONALLY_AVAILABLE"
         : "NOT_ELIGIBLE";
-      return unavailable(decision, error.code);
+      const note = cleaningRejectionNote(error.code, request.context.preferredLanguage === "es");
+      return { ...unavailable(decision, error.code), ...(note ? { note } : {}) };
     }
     if (error instanceof StayTimeSettingsError) return unavailable("UNAVAILABLE", "STAY_TIME_CONFIGURATION_REQUIRES_REVIEW");
     // Never expose database/provider errors or fall back to the old permissive check.

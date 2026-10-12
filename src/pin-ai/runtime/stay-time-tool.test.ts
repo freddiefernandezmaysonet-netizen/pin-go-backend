@@ -7,7 +7,7 @@ import type { PinAIRuntimeRequest } from "./contracts.js";
 
 const request: PinAIRuntimeRequest = { context: { organizationId: "org", propertyId: "property", reservationId: "stay",
   guestId: "guest", currentLocalDateTime: "2099-01-01T00:00Z", preferredLanguage: "es" }, conversation: [] };
-function fixture(options: { early?: boolean; conflict?: boolean; error?: boolean; disabled?: boolean } = {}) {
+function fixture(options: { early?: boolean; conflict?: boolean; error?: boolean; disabled?: boolean; pendingCleaning?: boolean } = {}) {
   let reads = 0;
   const rule = { enabled: !options.disabled, limitLocalTime: "14:00", fee: { mode: "FIXED", amountMinor: 1000, currency: "USD" } };
   const db = { async $transaction(callback: (tx: any) => Promise<unknown>, config: any) {
@@ -29,7 +29,7 @@ function fixture(options: { early?: boolean; conflict?: boolean; error?: boolean
       }
       return options.conflict ? { checkIn: new Date("2030-10-03T18:00Z"), checkOut: new Date("2030-10-04T15:00Z") } : null;
     } }, cleaningWork: { async findMany() { return [{ id: "work", propertyId: "property", staffMemberId: "cleaner", confirmationId: "confirmation", scheduledStartAt: new Date("2030-10-03T15:30Z"), durationCommitmentMinutes: 180, timingConsentVersion: "v1", timingConsentAcceptedAt: new Date("2020-01-01T00:00Z"), startConfirmedAt: null, completionConfirmedAt: null }]; } },
-    cleaningConfirmation: { async findMany() { return [{ id: "confirmation", propertyId: "property", staffMemberId: "cleaner", status: "CONFIRMED" }]; } },
+    cleaningConfirmation: { async findMany() { return [{ id: "confirmation", propertyId: "property", staffMemberId: "cleaner", status: options.pendingCleaning ? "PENDING" : "CONFIRMED" }]; } },
     propertyStaff: { async findFirst() { return { id: "assignment", cleaningDurationCommitmentMinutes: 180 }; } },
     propertyBlockedDate: { async findFirst() { return null; } },
     reservationModification: { async findFirst() { return null; }, async findMany() { return []; } } });
@@ -88,4 +88,27 @@ test("English estimate states no hold, tax exclusion and no completed action", a
   assert.match(String(result.note), /before taxes/);
   assert.equal(result.availabilityHeld, false);
   assert.equal(result.actionExecuted, false);
+});
+
+test("cleaning rejection explanations distinguish pending commitment, standard arrival deadline and availability conflict", async () => {
+  for (const language of ["es", "en"] as const) {
+    const localizedRequest = { ...request, context: { ...request.context, preferredLanguage: language } };
+    const pending = await checkStayTimeRequest(fixture({ pendingCleaning: true }).db, "LATE_CHECKOUT", { requestedLocalTime: "12:00" }, localizedRequest);
+    assert.equal(pending.reason, "DEPARTURE_CLEANING_COMMITMENT_REQUIRED");
+    assert.match(String(pending.note), language === "es" ? /compromiso de limpieza confirmado y vigente/ : /confirmed and current cleaning commitment/);
+    assert.doesNotMatch(String(pending.note), /próxim[oa]|siguiente|next (stay|arrival|guest)/i);
+    const deadline = await checkStayTimeRequest(fixture().db, "LATE_CHECKOUT", { requestedLocalTime: "13:00" }, localizedRequest);
+    assert.equal(deadline.reason, "CLEANING_CHECKIN_LIMIT_EXCEEDED");
+    assert.match(String(deadline.note), language === "es" ? /hora estándar de entrada/ : /standard check-in time/);
+    assert.doesNotMatch(String(deadline.note), /próxim[oa]|siguiente|next (stay|arrival|guest)/i);
+    const conflict = await checkStayTimeRequest(fixture({ conflict: true }).db, "LATE_CHECKOUT", { requestedLocalTime: "12:00" }, localizedRequest);
+    assert.equal(conflict.reason, "TURNOVER_CONFLICT");
+    assert.match(String(conflict.note), language === "es" ? /conflicto de disponibilidad/ : /availability conflict/);
+    for (const result of [pending, deadline, conflict]) {
+      assert.equal(result.authorizationGranted, false);
+      assert.equal(result.actionExecuted, false);
+      assert.equal(result.availabilityHeld, false);
+      assert.equal(result.paymentReady, false);
+    }
+  }
 });
