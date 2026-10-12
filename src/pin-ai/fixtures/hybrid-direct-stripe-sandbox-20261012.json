@@ -1,0 +1,68 @@
+{
+  "observedAt": "2026-10-12T06:00:00Z",
+  "deploymentId": "01eedfba-1441-4dc6-a533-9f4ad96f0320",
+  "platformId": "acct_1SmdRdRzkK1jKKf3",
+  "connectedAccountId": "acct_1UPbUgRqmXnirYx7",
+  "livemode": false,
+  "userAuthorizedSyntheticVerification": true,
+  "certified": false,
+  "remainingRequirements": [
+    "tos_acceptance.date",
+    "tos_acceptance.ip"
+  ],
+  "controller": {
+    "feesPayer": "account",
+    "lossesPayments": "stripe",
+    "requirementCollection": "stripe",
+    "dashboard": "none"
+  },
+  "directPaymentsCreated": 0,
+  "browserOnboarding": "Tool timed out; no form submitted",
+  "productionChanged": false,
+  "rows": [
+    {
+      "message": "Installed dependences in 275ms"
+    },
+    {
+      "message": "bun run index.tsx"
+    },
+    {
+      "message": "Starting Container"
+    },
+    {
+      "message": "",
+      "certificate": "PIN_AI_HYBRID_SANDBOX",
+      "stage": "GUARD",
+      "customerId": "cus_VQTDW711DkVT70",
+      "run": "qa-pin-ai-hybrid-5524fbf9-698f-4cc3-898e-d992c23a1df9",
+      "livemode": false
+    },
+    {
+      "message": "",
+      "certificate": "PIN_AI_HYBRID_SANDBOX",
+      "stage": "CONNECT",
+      "connectedAccountId": "acct_1UPbUgRqmXnirYx7",
+      "chargesEnabled": false,
+      "losses": "stripe",
+      "dashboard": "none",
+      "requirements": [
+        "tos_acceptance.date",
+        "tos_acceptance.ip"
+      ]
+    },
+    {
+      "message": "",
+      "certificate": "PIN_AI_HYBRID_SANDBOX",
+      "cleanup": "RECURRING_BILLING_STOPPED",
+      "syntheticConnectAccountId": "acct_1UPbUgRqmXnirYx7"
+    },
+    {
+      "message": "SYNTHETIC_CONNECT_ONBOARDING_REQUIRED",
+      "certificate": "PIN_AI_HYBRID_SANDBOX",
+      "run": "qa-pin-ai-hybrid-5524fbf9-698f-4cc3-898e-d992c23a1df9",
+      "certified": false,
+      "phase": "CONNECT",
+      "errorType": "Error"
+    }
+  ]
+}
