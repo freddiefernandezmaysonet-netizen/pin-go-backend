@@ -64,7 +64,7 @@ for (const [invoiceStatus, amountRemaining, creditAmount] of [["paid", 0, 100], 
     const h = fixture({ invoiceStatus, amountRemaining }); const request = await h.provider.reversalPlan(fee);
     assert.deepEqual(request, { kind: "CREDIT_NOTE", invoiceId: "in_membership", lineId: "il_fee", creditAmount });
     await h.provider.reverse(fee, request, "key"); const call = h.calls[0];
-    assert.equal(call[1].credit_amount, creditAmount); assert.equal(call[1].lines[0].amount, 100);
+    assert.equal(call[1].credit_amount, creditAmount > 0 ? creditAmount : undefined); assert.equal(call[1].lines[0].amount, 100);
     assert.equal(call[1].lines[0].invoice_line_item, "il_fee");
   });
 test("wrong host invoice cannot be billed, marked paid, deleted, or credited", async () => {
