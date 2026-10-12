@@ -58,6 +58,16 @@ jobs:
         run: |
           ./node_modules/.bin/prisma generate --schema ./prisma
           ./node_modules/.bin/prisma db push --schema ./prisma --skip-generate
+      - name: Verify nullable-column upgrade on disposable PostgreSQL
+        run: |
+          python3 - <<'PY'
+          import os, subprocess
+          url = os.environ["DATABASE_URL"].split("?")[0]
+          columns = ["collectionMethod", "stripePaymentIntentId", "stripeApplicationFeeId", "stripeReversalId", "reversedAt", "reversalStartedAt", "reversalRequest"]
+          sql = 'ALTER TABLE "PinAIReservationFee" ' + ', '.join('DROP COLUMN "' + c + '"' for c in columns)
+          subprocess.run(["psql", url, "-v", "ON_ERROR_STOP=1", "-c", sql], check=True)
+          subprocess.run(["psql", url, "-v", "ON_ERROR_STOP=1", "-f", "prisma/migrations/20261012000000_pin_ai_hybrid_fee/migration.sql"], check=True)
+          PY
       - name: Compile native concurrency contract
         run: >-
           ./node_modules/.bin/tsc --noEmit --strict --skipLibCheck
