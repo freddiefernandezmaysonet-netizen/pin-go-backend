@@ -109,7 +109,8 @@ export function createHybridFeeStripeProvider(stripe: Stripe): HybridFeeProvider
       try {
         return (await stripe.creditNotes.create({ invoice: request.invoiceId,
           lines: [{ type: "invoice_line_item", invoice_line_item: request.lineId, amount: 100 }],
-          credit_amount: request.creditAmount, memo: "Cancelled reservation · Pin AI fee reversal",
+          ...(request.creditAmount > 0 ? { credit_amount: request.creditAmount } : {}),
+          memo: "Cancelled reservation · Pin AI fee reversal",
           metadata: meta(fee, key) }, { idempotencyKey: key })).id;
       } catch (e) {
         if ((e as { type?: string }).type === "StripeInvalidRequestError") throw Error("HYBRID_REVERSAL_REJECTED");
