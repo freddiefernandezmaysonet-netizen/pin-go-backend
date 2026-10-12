@@ -1,3 +1,4 @@
+import { PIN_AI_HYBRID_BILLING_TERMS } from "../pin-ai/billing-terms.js";
 import { hasDemoMarker } from "./internal-demo-scope.js";
 import {
   CancellationActor,
@@ -304,9 +305,16 @@ export async function refundDirectBookingReservation({
   const previousExternalRaw = normalizeJsonObject(reservation.externalRaw);
   const previousRefunds = normalizeJsonArray(previousExternalRaw.refunds);
 
-  const refundApplicationFee = shouldRefundApplicationFee(
-    reservation.platformFeeAmount
-  );
+  const hybridFee = await prisma.pinAIReservationFee.findUnique({ where: { reservationId: reservation.id },
+    select: { termsVersion: true, collectionMethod: true } });
+  const checkoutMetadata = normalizeJsonObject(previousExternalRaw.metadata);
+  const usesHybridFee = (hybridFee?.termsVersion === PIN_AI_HYBRID_BILLING_TERMS.version &&
+    hybridFee.collectionMethod === "DIRECT_APPLICATION_FEE") ||
+    (checkoutMetadata.pinAITermsVersion === PIN_AI_HYBRID_BILLING_TERMS.version && checkoutMetadata.pinAIFeeAmountCents === "100");
+  // The billing worker returns Pin AI in full and the other commission in
+  // proportion to the guest refund. Stripe's automatic proportional refund
+  // would mix those two policies and can race a separate Pin AI reversal.
+  const refundApplicationFee = !usesHybridFee && shouldRefundApplicationFee(reservation.platformFeeAmount);
 
   const refundIdempotencyKey = `direct-booking-refund:${reservation.id}:${resolvedRefundAmountCents}`;
 
