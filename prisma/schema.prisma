@@ -3514,6 +3514,13 @@ model PinAIReservationFee {
   serviceStartedAt DateTime
   recordedAt DateTime @default(now())
   billingStatus String @default("PENDING_CONNECT")
+  collectionMethod String?
+  stripePaymentIntentId String?
+  stripeApplicationFeeId String?
+  stripeReversalId String? @unique
+  reversedAt DateTime?
+  reversalStartedAt DateTime?
+  reversalRequest Json?
   stripeConnectedAccountId String?
   stripeDebitPaymentId String? @unique
   debitStartedAt DateTime?
