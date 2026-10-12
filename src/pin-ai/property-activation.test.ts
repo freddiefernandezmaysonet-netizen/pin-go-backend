@@ -38,3 +38,22 @@ test("global availability never falls back to pilot before host activation", asy
   assert.equal(await commercialPinAIEnabled(db, { ...env, PIN_AI_ALL_ORGANIZATIONS_ENABLED: "true" }, scope), false);
   assert.equal(await commercialPinAIEnabled(db, env, scope), null);
 });
+
+test("exempt assistance bypasses debit prerequisites but preserves host, organization and terms gates", async () => {
+  const row = { pinAIFeeExempt: true, pinAIEnabled: true, pinAITermsVersion: "pin-ai-connect-usd-1-reservation-v1" as string | null,
+    organization: { pinAIEnabled: true, pinAIRevision: 1, stripeConnectAccountId: null } };
+  const db = { property: { findFirst: async () => row } } as unknown as ActivationDb;
+  const runtimeEnv = { PIN_AI_PROPERTY_ACTIVATION_ENABLED: "true" };
+  assert.equal(await commercialPinAIEnabled(db, runtimeEnv, scope), true);
+  row.pinAIFeeExempt = false;
+  assert.equal(await commercialPinAIEnabled(db, runtimeEnv, scope), false);
+  row.pinAIFeeExempt = true;
+  row.pinAIEnabled = false;
+  assert.equal(await commercialPinAIEnabled(db, runtimeEnv, scope), false);
+  row.pinAIEnabled = true;
+  row.organization.pinAIEnabled = false;
+  assert.equal(await commercialPinAIEnabled(db, runtimeEnv, scope), false);
+  row.organization.pinAIEnabled = true;
+  row.pinAITermsVersion = null;
+  assert.equal(await commercialPinAIEnabled(db, runtimeEnv, scope), false);
+});
