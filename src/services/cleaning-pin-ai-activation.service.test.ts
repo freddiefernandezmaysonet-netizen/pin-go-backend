@@ -40,3 +40,10 @@ test("missing commercial controls and legacy pilot cannot grant cleaner hardware
   }
   assert.equal(await cleaningPinAIRecoveryAllowed(fixture().db, { propertyId: "p", organizationId: "org" }, now, {}), false);
 });
+
+ test("hybrid assistance keeps staff recovery scoped without requiring a balance-debit rollout", async () => {
+  const f = fixture(); const hybrid = { ...env, PIN_AI_CONNECT_DEBIT_ENABLED: "false", PIN_AI_HYBRID_BILLING_ENABLED: "true" };
+  assert.equal(await cleaningPinAIRecoveryAllowed(f.db, { propertyId: "p", organizationId: "org" }, now, hybrid), true);
+  assert.equal(await cleaningPinAIRecoveryAllowed(f.db, { propertyId: "p", organizationId: "org" }, now,
+    { ...hybrid, PIN_AI_ALL_ORGANIZATIONS_ENABLED: "false", PIN_AI_HYBRID_BILLING_ORGANIZATION_IDS: "other" }), false);
+ });
