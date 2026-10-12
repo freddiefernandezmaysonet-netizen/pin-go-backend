@@ -1,0 +1,48 @@
+name: Pin AI Hybrid HTTP PostgreSQL Certification
+on:
+  push:
+    branches: [agent/pin-ai-hybrid-stripe-certification]
+    paths:
+      - src/scripts/certify-pin-ai-hybrid-http.test.ts
+      - src/routes/public-booking.routes.ts
+      - .github/workflows/pin-ai-hybrid-http-certification.yml
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  http-reservation-worker:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: pin_ai_activation_test
+        ports: [5432:5432]
+        options: >-
+          --health-cmd "pg_isready -U postgres -d pin_ai_activation_test"
+          --health-interval 5s --health-timeout 5s --health-retries 10
+    env:
+      DATABASE_URL: postgresql://postgres:postgres@127.0.0.1:5432/pin_ai_activation_test?connection_limit=8
+      PIN_AI_HYBRID_HTTP_TEST: "true"
+      STRIPE_SECRET_KEY: sk_test_synthetic_http_only
+      STRIPE_WEBHOOK_SECRET: whsec_synthetic_http_only
+      NODE_ENV: test
+      JWT_SECRET: synthetic-http-test-only
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+      - run: npm ci --ignore-scripts --no-audit --no-fund
+      - name: Prepare disposable PostgreSQL
+        run: |
+          npx prisma generate --schema ./prisma
+          npx prisma db push --schema ./prisma --skip-generate
+      - name: Compile HTTP certification
+        run: npx tsc --noEmit --strict --skipLibCheck --target ES2022 --module preserve --moduleResolution bundler src/scripts/certify-pin-ai-hybrid-http.test.ts
+      - name: Certify HTTP signature, replay, reservation, ledger and worker cancellation
+        run: node --import tsx --test --test-force-exit src/scripts/certify-pin-ai-hybrid-http.test.ts
