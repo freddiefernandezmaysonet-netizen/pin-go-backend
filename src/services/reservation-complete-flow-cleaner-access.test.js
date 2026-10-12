@@ -9,7 +9,7 @@ import { fromZonedTime } from "date-fns-tz";
 // Execute the complete audit with storage and repair boundaries injected.
 // No database connection, TTLock operation, email or SMS is possible here.
 function fixture({ status = "ACTIVE", owned = false, pending = false, legacy = false,
-  missingCard = false, windowMismatch = false, skippedRepair = false, repairedUnused = false } = {}) {
+  missingCard = false, windowMismatch = false, skippedRepair = false, repairedUnused = false, feeSnapshot } = {}) {
   const start = new Date("2026-10-27T16:45:00Z");
   const end = new Date("2026-10-27T19:45:00Z");
   const confirmation = { id: "backup-offer", propertyId: "property", staffMemberId: "backup",
@@ -26,6 +26,11 @@ function fixture({ status = "ACTIVE", owned = false, pending = false, legacy = f
       cleaningNfcEnabled: true, timezone: "America/Puerto_Rico",
       distributionLastSyncedAt: null,
       checkInTime: "16:00", checkOutTime: "12:00", cleaningStartOffsetMinutes: 45 } };
+  if (feeSnapshot) Object.assign(reservation, {
+    identityVerificationRequiredSnapshot: false, basePlatformFeeAmount: 1.5,
+    directBookingProtectionFeeAmount: 0, platformFeeAmount: 2.5, hostPayoutAmount: 97.5,
+    ...feeSnapshot,
+  });
   const repairs = [], reads = [];
   const db = {
     reservation: { findUnique: async () => reservation, count: async () => 0 },
@@ -65,11 +70,32 @@ function fixture({ status = "ACTIVE", owned = false, pending = false, legacy = f
   new vm.Script(compiled.outputText).runInNewContext({ module, exports: module.exports, Date, Intl, console,
     require: key => { assert.ok(Object.hasOwn(dependencies, key), `Unexpected dependency ${key}`); return dependencies[key]; },
   });
-  return { repairs, reads, run: async () => {
+  return { repairs, reads, run: async (rule = "CLEANER_ACCESS_CREATED") => {
     const result = await module.exports.auditReservationCompleteFlow("reservation", db);
-    return result.checks.find(check => check.rule === "CLEANER_ACCESS_CREATED");
+    return result.checks.find(check => check.rule === rule);
   } };
 }
+
+test("complete audit includes the persisted Direct Booking Pin AI dollar in platform proceeds", async () => {
+  const check = await fixture({ feeSnapshot: { pinAIReservationFee: {
+    collectionMethod: "DIRECT_APPLICATION_FEE", amountCents: 100, currency: "USD",
+  } } }).run("IDENTITY_CHECK_CONNECT_FEE_BREAKDOWN");
+  assert.equal(check.status, "PASS"); assert.equal(check.metadata.pinAIFeeAmount, 1);
+  assert.equal(check.metadata.platformFeeAmount, 2.5);
+});
+test("complete audit preserves legacy fee validation without a hybrid ledger", async () => {
+  const check = await fixture({ feeSnapshot: { platformFeeAmount: 1.5, hostPayoutAmount: 98.5 } })
+    .run("IDENTITY_CHECK_CONNECT_FEE_BREAKDOWN");
+  assert.equal(check.status, "PASS"); assert.equal(check.metadata.pinAIFeeAmount, 0);
+});
+for (const feeSnapshot of [
+  { pinAIReservationFee: { collectionMethod: "DIRECT_APPLICATION_FEE", amountCents: 200, currency: "USD" }, platformFeeAmount: 3.5, hostPayoutAmount: 96.5 },
+  { pinAIReservationFee: { collectionMethod: "DIRECT_APPLICATION_FEE", amountCents: 100, currency: "EUR" } },
+  { pinAIReservationFee: { collectionMethod: "MEMBERSHIP", amountCents: 100, currency: "USD" } },
+  { pinAIReservationFee: { collectionMethod: "DIRECT_APPLICATION_FEE", amountCents: 100, currency: "USD" }, platformFeeAmount: 3.5, hostPayoutAmount: 96.5 },
+]) test("complete audit still rejects an unsupported or incorrectly charged fee snapshot", async () => {
+  assert.equal((await fixture({ feeSnapshot }).run("IDENTITY_CHECK_CONNECT_FEE_BREAKDOWN")).status, "FAIL");
+});
 
 for (const status of ["SCHEDULED", "PROVISIONING", "ACTIVE"]) {
   test(`audit rejects primary ${status} NFC for confirmed backup`, async () => {
