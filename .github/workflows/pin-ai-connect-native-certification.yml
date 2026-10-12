@@ -6,6 +6,9 @@ on:
     branches: [main]
     paths:
       - "src/pin-ai/fee-connect*"
+      - "src/pin-ai/hybrid-fee*"
+      - "src/pin-ai/reservation-service-evidence.ts"
+      - "tsconfig.pin-ai-hybrid-billing.json"
       - "src/pin-ai/reservation-fee.service.ts"
       - "src/pin-ai/property-activation.ts"
       - "src/services/pin-ai-activation.service.ts"
@@ -42,6 +45,7 @@ jobs:
     env:
       DATABASE_URL: postgresql://postgres:postgres@127.0.0.1:5432/pin_ai_activation_test?connection_limit=8
       PIN_AI_NATIVE_DB_TEST: "true"
+      PIN_AI_HYBRID_DB_TEST: "true"
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -67,3 +71,7 @@ jobs:
         run: node --import tsx --test src/pin-ai/fee-connect.native.database.test.ts
       - name: Certify commercial OTA consent, single fee and incident history
         run: node --import tsx --test src/pin-ai/ota-commercial.database.test.ts
+      - name: Certify hybrid collection and cancellation
+        run: |
+          ./node_modules/.bin/tsc -p tsconfig.pin-ai-hybrid-billing.json
+          node --import tsx --test src/pin-ai/hybrid-fee-stripe.provider.test.ts src/pin-ai/hybrid-fee.database.test.ts
