@@ -1,0 +1,172 @@
+{
+  "certificationDeploymentId": "463feb0d-63bb-481c-b582-9cba5f634167",
+  "cleanupDeploymentId": "d384a3b9-fb0f-48e6-b7f9-92c7868cf572",
+  "result": {
+    "message": "",
+    "certificate": "PIN_AI_HYBRID_SANDBOX",
+    "certified": true,
+    "run": "qa-pin-ai-hybrid-1c0d6f8b-951a-4ad0-947f-1552146284b5",
+    "platform": "acct_1SmdRdRzkK1jKKf3",
+    "connectedAccountId": "acct_1UPbUgRqmXnirYx7",
+    "livemode": false,
+    "sdk": "14.25.0",
+    "apiVersion": "2023-10-16",
+    "receipts": [
+      {
+        "case": "DIRECT",
+        "guestRefundCents": 0,
+        "paymentIntentId": "pi_3UPi7wRqmXnirYx70YwedGeY",
+        "applicationFeeId": "fee_1UPi7xRqmXnirYx7XQww5ZM1",
+        "reversalId": "fr_1UPi7zRqmXnirYx7E8FlJXEp",
+        "guestPaidCents": 10000,
+        "applicationFeeReturnedCents": 100,
+        "pinAIFeeReturnedCents": 100,
+        "samePaymentOnRetry": true,
+        "sameReversalOnRetry": true
+      },
+      {
+        "case": "DIRECT",
+        "guestRefundCents": 5000,
+        "paymentIntentId": "pi_3UPi82RqmXnirYx71EEM67IV",
+        "applicationFeeId": "fee_1UPi82RqmXnirYx7FvAagL2e",
+        "reversalId": "fr_1UPi85RqmXnirYx7VCWwmQKJ",
+        "guestPaidCents": 10000,
+        "applicationFeeReturnedCents": 350,
+        "pinAIFeeReturnedCents": 100,
+        "samePaymentOnRetry": true,
+        "sameReversalOnRetry": true
+      },
+      {
+        "case": "DIRECT",
+        "guestRefundCents": 10000,
+        "paymentIntentId": "pi_3UPi88RqmXnirYx70GOARvek",
+        "applicationFeeId": "fee_1UPi89RqmXnirYx7hBbkruum",
+        "reversalId": "fr_1UPi8CRqmXnirYx7chal1Ikr",
+        "guestPaidCents": 10000,
+        "applicationFeeReturnedCents": 600,
+        "pinAIFeeReturnedCents": 100,
+        "samePaymentOnRetry": true,
+        "sameReversalOnRetry": true
+      },
+      {
+        "case": "MEMBERSHIP",
+        "state": "PENDING",
+        "customerId": "cus_VQZGeFBz0w0Q9w",
+        "subscriptionId": "sub_1UPi8DRzkK1jKKf3j8f74Sc2",
+        "invoiceItemId": "ii_1UPi8FRzkK1jKKf3TMC4wtnp",
+        "invoiceId": null,
+        "reversalId": "deleted:ii_1UPi8FRzkK1jKKf3TMC4wtnp",
+        "amountCents": 100,
+        "netPinAIFeeCents": 0,
+        "sameItemOnRetry": true,
+        "sameReversalOnRetry": true
+      },
+      {
+        "case": "MEMBERSHIP",
+        "state": "DRAFT",
+        "customerId": "cus_VQZG4MbvFxozpe",
+        "subscriptionId": "sub_1UPi8GRzkK1jKKf3h0R4rOFc",
+        "invoiceItemId": "ii_1UPi8HRzkK1jKKf3eoNMspaZ",
+        "invoiceId": "in_1UPi8HRzkK1jKKf3XKKnELvp",
+        "reversalId": "deleted:ii_1UPi8HRzkK1jKKf3eoNMspaZ",
+        "amountCents": 100,
+        "netPinAIFeeCents": 0,
+        "sameItemOnRetry": true,
+        "sameReversalOnRetry": true
+      },
+      {
+        "case": "MEMBERSHIP",
+        "state": "OPEN",
+        "customerId": "cus_VQZGgWKNvZjwjL",
+        "subscriptionId": "sub_1UPi8JRzkK1jKKf3UcWcVtwb",
+        "invoiceItemId": "ii_1UPi8KRzkK1jKKf3TdUYvtVk",
+        "invoiceId": "in_1UPi8KRzkK1jKKf3jLcpo1es",
+        "reversalId": "cn_1UPi8MRzkK1jKKf373Nx5tp7",
+        "amountCents": 100,
+        "netPinAIFeeCents": 0,
+        "sameItemOnRetry": true,
+        "sameReversalOnRetry": true
+      },
+      {
+        "case": "MEMBERSHIP",
+        "state": "PAID",
+        "customerId": "cus_VQZGdAONfdFS9g",
+        "subscriptionId": "sub_1UPi8ORzkK1jKKf3XURCK6ZE",
+        "invoiceItemId": "ii_1UPi8PRzkK1jKKf3nDAFRwmE",
+        "invoiceId": "in_1UPi8QRzkK1jKKf3GeIZb3x3",
+        "reversalId": "cn_1UPi8URzkK1jKKf3S9Co6K1X",
+        "amountCents": 100,
+        "netPinAIFeeCents": 0,
+        "sameItemOnRetry": true,
+        "sameReversalOnRetry": true
+      }
+    ],
+    "certificationScope": "REAL_STRIPE_PROVIDER; POSTGRES_CERTIFIED_SEPARATELY; HTTP_WEBHOOK_NOT_EXERCISED"
+  },
+  "cleanup": {
+    "message": "",
+    "certificate": "PIN_AI_HYBRID_CLEANUP",
+    "run": "qa-pin-ai-hybrid-1c0d6f8b-951a-4ad0-947f-1552146284b5",
+    "verified": true,
+    "readback": [
+      {
+        "case": "DIRECT",
+        "paymentIntentId": "pi_3UPi7wRqmXnirYx70YwedGeY",
+        "guestRefundedCents": 10000,
+        "totalApplicationFeeReturnedCents": 600,
+        "verified": true
+      },
+      {
+        "case": "DIRECT",
+        "paymentIntentId": "pi_3UPi82RqmXnirYx71EEM67IV",
+        "guestRefundedCents": 10000,
+        "totalApplicationFeeReturnedCents": 600,
+        "verified": true
+      },
+      {
+        "case": "DIRECT",
+        "paymentIntentId": "pi_3UPi88RqmXnirYx70GOARvek",
+        "guestRefundedCents": 10000,
+        "totalApplicationFeeReturnedCents": 600,
+        "verified": true
+      },
+      {
+        "case": "MEMBERSHIP",
+        "state": "PENDING",
+        "subscriptionId": "sub_1UPi8DRzkK1jKKf3j8f74Sc2",
+        "status": "canceled",
+        "priceActive": false,
+        "productActive": false,
+        "verified": true
+      },
+      {
+        "case": "MEMBERSHIP",
+        "state": "DRAFT",
+        "subscriptionId": "sub_1UPi8GRzkK1jKKf3h0R4rOFc",
+        "status": "canceled",
+        "priceActive": false,
+        "productActive": false,
+        "verified": true
+      },
+      {
+        "case": "MEMBERSHIP",
+        "state": "OPEN",
+        "subscriptionId": "sub_1UPi8JRzkK1jKKf3UcWcVtwb",
+        "status": "canceled",
+        "priceActive": false,
+        "productActive": false,
+        "verified": true
+      },
+      {
+        "case": "MEMBERSHIP",
+        "state": "PAID",
+        "subscriptionId": "sub_1UPi8ORzkK1jKKf3XURCK6ZE",
+        "status": "canceled",
+        "priceActive": false,
+        "productActive": false,
+        "customerBalanceCents": -100,
+        "verified": true
+      }
+    ]
+  }
+}
