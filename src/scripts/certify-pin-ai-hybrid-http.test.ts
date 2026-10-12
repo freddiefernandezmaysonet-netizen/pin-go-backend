@@ -99,9 +99,11 @@ test("HTTP checkout, signed webhook, native reservation ledger and worker share 
     assert.equal(fee.amountCents, 100); assert.equal(fee.acceptedBy, "synthetic-host");
     assert.equal(fee.collectionMethod, "DIRECT_APPLICATION_FEE");
     assert.equal(fee.stripePaymentIntentId, payment.id);
-    const { auditReservationCompleteFlow } = await import("../services/reservation-complete-flow-audit.service.js");
-    const audit = await auditReservationCompleteFlow(reservation.id, db);
-    assert.equal(audit.checks.find(check => check.rule === "IDENTITY_CHECK_CONNECT_FEE_BREAKDOWN")?.status, "PASS");
+    const audit = await db.apmsAuditEntry.findFirstOrThrow({ where: {
+      decisionId: `reservation-complete-flow:${reservation.id}`,
+    } });
+    const decisions = audit.decisions as Array<{ rule: string; metadata: { checkStatus: string } }>;
+    assert.equal(decisions.find(check => check.rule === "IDENTITY_CHECK_CONNECT_FEE_BREAKDOWN")?.metadata.checkStatus, "PASS");
     const provider = createHybridFeeStripeProvider(sdk);
     assert.equal((await runHybridFeeCycle(db, provider, process.env)).failures, 0);
     assert.equal((await db.pinAIReservationFee.findUniqueOrThrow({ where: { reservationId: reservation.id } })).billingStatus, "PAID");
