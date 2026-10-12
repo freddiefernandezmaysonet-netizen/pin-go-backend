@@ -31,7 +31,7 @@ export function buildPinAIActivationRouter(db: PrismaClient, env: NodeJS.Process
   router.use([property, organizations, billing], (_req, res, next) => { res.setHeader("Cache-Control", "no-store"); next(); }, requireAuth,
     createReviewRateLimit({ namespace: "pin-ai-activation", max: 60, windowMs: 60_000, key: reviewActorClientKey }));
   router.get(property, wrap(req => getPinAIProperty(db, env, actor(req), String(req.params.propertyId))));
-  router.get(billing, wrap(req => getPinAIFeeOverview(db, actor(req))));
+  router.get(billing, wrap(req => getPinAIFeeOverview(db, actor(req), env)));
   router.put(property, requireTrustedReviewMutationOrigin,
     wrap(req => setPinAIProperty(db, env, actor(req), String(req.params.propertyId), req.body, provider)));
   router.get(organizations, wrap(async req => ({ ...await listPinAIOrganizations(db, actor(req), req.query.q ?? ""),
