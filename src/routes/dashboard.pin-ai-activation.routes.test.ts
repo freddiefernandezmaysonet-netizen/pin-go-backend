@@ -3,7 +3,7 @@ import test from "node:test";
 import type { AddressInfo } from "node:net";
 import type { PrismaClient } from "@prisma/client";
 import express from "express";
-import { PIN_AI_BILLING_TERMS } from "../pin-ai/billing-terms.js";
+import { PIN_AI_BILLING_TERMS, PIN_AI_HYBRID_BILLING_TERMS } from "../pin-ai/billing-terms.js";
 import { buildPinAIActivationRouter } from "./dashboard.pin-ai-activation.routes.js";
 
 async function harness(t: test.TestContext, role = "ORG_ADMIN", actorOrg = "org-a", active = true, env: NodeJS.ProcessEnv = {}) {
@@ -236,3 +236,24 @@ test("global availability cannot initialize when Connect verification fails or c
   assert.equal((await h.request(path, { ...update, organizationRevision: 0 })).status, 409);
   assert.equal(h.property.pinAIEnabled, false); assert.equal(h.events.length, 0);
 });
+
+ test("hybrid activation requires new consent and never checks balance-debit compatibility", async t => {
+  const env = { PIN_AI_HYBRID_BILLING_ENABLED: "true", PIN_AI_HYBRID_BILLING_ORGANIZATION_IDS: "org-a" };
+  const h = await harness(t, "ORG_ADMIN", "org-a", true, env); h.setCompatibility(false);
+  Object.assign(h.property, { pinAITermsVersion: PIN_AI_BILLING_TERMS.version,
+    pinAITermsAcceptedAt: new Date(), pinAITermsAcceptedBy: "host-a" });
+  const body = { enabled: true, expectedRevision: 0, organizationRevision: 1 };
+  assert.equal((await h.request(path, body)).status, 428);
+  const response = await h.request(path, { ...body, acceptedTermsVersion: PIN_AI_HYBRID_BILLING_TERMS.version });
+  assert.equal(response.status, 200); assert.equal(h.reads(), 0);
+  const view = await response.json(); assert.equal(view.billing.collectionMethod, "DIRECT_APPLICATION_FEE_OR_MEMBERSHIP");
+  assert.equal(h.property.pinAITermsVersion, PIN_AI_HYBRID_BILLING_TERMS.version);
+ });
+ test("exempt property enables without Connect verification and keeps legacy acceptance during hybrid rollout", async t => {
+  const h = await harness(t, "ORG_ADMIN", "org-a", true, { PIN_AI_HYBRID_BILLING_ENABLED: "true" });
+  Object.assign(h.property, { pinAIFeeExempt: true, pinAITermsVersion: PIN_AI_BILLING_TERMS.version,
+    pinAITermsAcceptedAt: new Date(), pinAITermsAcceptedBy: "host-a" });
+  h.setUnavailable(); h.organization.stripeConnectAccountId = "";
+  const response = await h.request(path, { enabled: true, expectedRevision: 0, organizationRevision: 1 });
+  assert.equal(response.status, 200); assert.equal(h.reads(), 0); assert.equal((await response.json()).billing.exempt, true);
+ });
