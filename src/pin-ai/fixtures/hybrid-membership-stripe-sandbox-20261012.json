@@ -1,0 +1,121 @@
+{
+  "date": "2026-10-12",
+  "backendCandidate": "a1a03428cdae8b6cf7856f36d1c1a189ff3eb6be",
+  "railway": {
+    "projectId": "84db0f26-4fd1-413b-bcc5-c5b7014f3a9c",
+    "environmentId": "9833f06b-463f-4551-bda7-a9a1eaaa9aa6",
+    "membershipDeployment": "0722541b-f30d-46c1-aad1-f139869020de",
+    "cleanupDeployment": "f3b73c03-f56a-42b1-bdfa-063d193bb91c"
+  },
+  "membership": {
+    "message": "",
+    "certificate": "PIN_AI_MEMBERSHIP_SANDBOX",
+    "certified": true,
+    "run": "qa-pin-ai-hybrid-d8f22aef-decc-4081-a93c-468c142d7fe3",
+    "platform": "acct_1SmdRdRzkK1jKKf3",
+    "livemode": false,
+    "sdk": "14.25.0",
+    "apiVersion": "2023-10-16",
+    "receipts": [
+      {
+        "case": "MEMBERSHIP",
+        "state": "PENDING",
+        "customerId": "cus_VQSdzfx0depPDC",
+        "subscriptionId": "sub_1UPbihRzkK1jKKf3jqtzBvhi",
+        "invoiceItemId": "ii_1UPbihRzkK1jKKf3I6xojET4",
+        "invoiceId": null,
+        "reversalId": "deleted:ii_1UPbihRzkK1jKKf3I6xojET4",
+        "amountCents": 100,
+        "netPinAIFeeCents": 0,
+        "sameItemOnRetry": true,
+        "sameReversalOnRetry": true
+      },
+      {
+        "case": "MEMBERSHIP",
+        "state": "DRAFT",
+        "customerId": "cus_VQSe56i4S3tDaL",
+        "subscriptionId": "sub_1UPbijRzkK1jKKf3UlAWnLmC",
+        "invoiceItemId": "ii_1UPbikRzkK1jKKf31opt3RHb",
+        "invoiceId": "in_1UPbikRzkK1jKKf3GF2pJUjd",
+        "reversalId": "deleted:ii_1UPbikRzkK1jKKf31opt3RHb",
+        "amountCents": 100,
+        "netPinAIFeeCents": 0,
+        "sameItemOnRetry": true,
+        "sameReversalOnRetry": true
+      },
+      {
+        "case": "MEMBERSHIP",
+        "state": "OPEN",
+        "customerId": "cus_VQSeA4Z2lOeUaz",
+        "subscriptionId": "sub_1UPbilRzkK1jKKf3JHsUn93i",
+        "invoiceItemId": "ii_1UPbimRzkK1jKKf39qHScVD1",
+        "invoiceId": "in_1UPbinRzkK1jKKf3BNTP32HF",
+        "reversalId": "cn_1UPbipRzkK1jKKf3ZdvyduF4",
+        "amountCents": 100,
+        "netPinAIFeeCents": 0,
+        "sameItemOnRetry": true,
+        "sameReversalOnRetry": true
+      },
+      {
+        "case": "MEMBERSHIP",
+        "state": "PAID",
+        "customerId": "cus_VQSeHvW6R7FXK6",
+        "subscriptionId": "sub_1UPbirRzkK1jKKf3uSuE1pSC",
+        "invoiceItemId": "ii_1UPbisRzkK1jKKf3kYIbJZrN",
+        "invoiceId": "in_1UPbisRzkK1jKKf3OutoMpcj",
+        "reversalId": "cn_1UPbixRzkK1jKKf3m1z7gxa1",
+        "amountCents": 100,
+        "netPinAIFeeCents": 0,
+        "sameItemOnRetry": true,
+        "sameReversalOnRetry": true
+      }
+    ],
+    "certificationScope": "REAL_MEMBERSHIP_STRIPE_PROVIDER; POSTGRES_CERTIFIED_SEPARATELY; DIRECT_BOOKING_NOT_EXERCISED; HTTP_WEBHOOK_NOT_EXERCISED"
+  },
+  "cleanup": {
+    "message": "",
+    "certificate": "PIN_AI_MEMBERSHIP_CLEANUP",
+    "verified": true,
+    "livemode": false,
+    "paidCustomerId": "cus_VQSeHvW6R7FXK6",
+    "paidCustomerCreditBalanceCents": -100,
+    "subscriptions": [
+      {
+        "id": "sub_1UPbihRzkK1jKKf3jqtzBvhi",
+        "status": "canceled"
+      },
+      {
+        "id": "sub_1UPbijRzkK1jKKf3UlAWnLmC",
+        "status": "canceled"
+      },
+      {
+        "id": "sub_1UPbilRzkK1jKKf3JHsUn93i",
+        "status": "canceled"
+      },
+      {
+        "id": "sub_1UPbirRzkK1jKKf3uSuE1pSC",
+        "status": "canceled"
+      }
+    ],
+    "invoices": [
+      {
+        "id": "in_1UPbbwRzkK1jKKf31KBTFPRD",
+        "status": "paid",
+        "total": 0
+      },
+      {
+        "id": "in_1UPbdqRzkK1jKKf3mphmLgjp",
+        "status": "paid",
+        "total": 0
+      }
+    ],
+    "oldPriceArchived": true
+  },
+  "directBooking": {
+    "certified": false,
+    "syntheticConnectAccountId": "acct_1UPbUgRqmXnirYx7",
+    "lossesOwner": "stripe",
+    "dashboard": "none",
+    "status": "WAITING_EXPLICIT_AUTHORIZATION_FOR_SYNTHETIC_KYC_BANK_TOS"
+  }
+}
