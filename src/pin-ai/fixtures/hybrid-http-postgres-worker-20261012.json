@@ -1,0 +1,14 @@
+{
+  "workflowRunId": 38253217938,
+  "jobId": 114824529483,
+  "certificationCommit": "898e298e620fe47ca790f4a4dc04fcb8e7ed4f71",
+  "billingCandidate": "3627eeac8372edf95fb69f88bd0c755217d0c5a9",
+  "certificate": "PIN_AI_HYBRID_HTTP",
+  "certified": true,
+  "scope": "REAL_HTTP_SIGNATURE_POSTGRES_INGEST_WORKER; STRIPE_TRANSPORT_SIMULATED",
+  "reservationCount": 1,
+  "feeCount": 1,
+  "guestPaidCents": 10000,
+  "pinAIFeeReturnedCents": 100,
+  "duplicateWebhookSuppressed": true
+}
