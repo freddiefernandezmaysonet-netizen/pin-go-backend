@@ -42,7 +42,6 @@ test("host consent, payment, channel, booking status and the action window remai
     (f: ReturnType<typeof fixture>) => { f.reservation.source = "CHANNEX"; f.reservation.externalProvider = "AIRBNB"; },
     (f: ReturnType<typeof fixture>) => { f.reservation.checkOut = now; },
     (f: ReturnType<typeof fixture>) => { f.reservation.checkIn = new Date(+now + 2 * 86400000); f.reservation.checkOut = new Date(+now + 3 * 86400000); },
-    (f: ReturnType<typeof fixture>) => { f.reservation.property.isPublicBookable = false; },
     (f: ReturnType<typeof fixture>) => { f.reservation.property.pinAITermsAcceptedBy = ""; },
     (f: ReturnType<typeof fixture>) => { f.reservation.property.pinAITermsAcceptedAt = new Date(+now + 1000); },
     (f: ReturnType<typeof fixture>) => { f.property.pinAITermsVersion = "old-version"; },
@@ -50,6 +49,16 @@ test("host consent, payment, channel, booking status and the action window remai
     const f = fixture(); change(f);
     assert.equal(await commercialReservationChangesEnabled(f.db, env, scope, now), false);
   }
+});
+test("a private active property can extend an eligible paid in-stay booking, but not change pre-stay dates", async () => {
+  const f = fixture();
+  f.reservation.property.isPublicBookable = false;
+  assert.equal(await commercialReservationChangesEnabled(f.db, env, scope, now), true);
+  f.reservation.checkIn = new Date(+now + 12 * 3600000);
+  assert.equal(await commercialReservationChangesEnabled(f.db, env, scope, now), false);
+  f.reservation.checkIn = new Date(+now - 86400000);
+  f.property.pinAIEnabled = false;
+  assert.equal(await commercialReservationChangesEnabled(f.db, env, scope, now), false);
 });
 test("global action switches retain their kill-switch and legacy selected-reservation behavior", async () => {
   for (const flag of ["PIN_AI_ACTION_BROKER_ENABLED", "PIN_AI_ACTION_PROPOSAL_TOOL_ENABLED"] as const) {

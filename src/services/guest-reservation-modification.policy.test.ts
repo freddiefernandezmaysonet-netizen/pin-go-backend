@@ -10,10 +10,72 @@ import {
   buildGuestReservationModificationRequestFingerprint,
   evaluateGuestReservationModificationReduction,
   getGuestReservationModificationInitialStatus,
+  getGuestReservationModificationOptions,
+  getGuestReservationModificationPreview,
 } from "./guest-reservation-modification.service";
 
 const currentCheckIn = new Date("2026-10-10T20:00:00.000Z");
 const currentCheckOut = new Date("2026-10-15T15:00:00.000Z");
+
+test("private-property in-stay extension reaches canonical pricing while normal changes stay blocked", async () => {
+  const now = new Date("2026-10-12T13:00:00Z");
+  const property = { id: "private-property", organizationId: "host", name: "Synthetic",
+    status: "ACTIVE", isPublicBookable: false, pinAIEnabled: true, pinAIFeeExempt: false,
+    pinAITermsVersion: "pin-ai-connect-usd-1-reservation-v1",
+    pinAITermsAcceptedAt: new Date("2026-10-01T12:00:00Z"), pinAITermsAcceptedBy: "host",
+    organization: { pinAIEnabled: true, pinAIRevision: 1, stripeConnectAccountId: "acct_synthetic" },
+    timezone: "America/Puerto_Rico", checkInTime: "15:00", checkOutTime: "11:00",
+    maxGuests: 3, minimumNights: 1, maximumNights: 30, amenities: [] };
+  const reservation = { id: "paid-stay", propertyId: property.id, property,
+    reservationNumber: "SYNTHETIC", source: "DIRECT_BOOKING", externalProvider: "PIN_GO_DIRECT",
+    status: "ACTIVE", paymentState: "PAID", checkIn: new Date("2026-10-11T19:00:00Z"),
+    checkOut: new Date("2026-10-13T15:00:00Z"), updatedAt: now, currency: "usd",
+    adults: 2, children: 0, selectedAmenityIds: [], totalAmount: 250,
+    verificationGuestCount: null, verificationAcceptedRulesAt: null,
+    guestAgreementAcceptance: null, guestAgreementSignedAt: null,
+    pricingBreakdown: { currency: "usd", nights: 2, nightlyRate: 100, nightlySubtotal: 200, cleaningFee: 50,
+      amenitiesTotal: 0, taxesTotal: 0, totalAmount: 250, totalAmountCents: 25000,
+      nightlyRates: [{ date: "2026-10-11", rate: 100 }, { date: "2026-10-12", rate: 100 }],
+      amenities: [], taxes: [] } };
+  let availabilityChecks = 0;
+  const dependencies: NonNullable<Parameters<typeof getGuestReservationModificationOptions>[1]> = {
+    now: () => now,
+    env: { PIN_AI_ALL_ORGANIZATIONS_ENABLED: "true", PIN_AI_PROPERTY_ACTIVATION_ENABLED: "true",
+      PIN_AI_CONNECT_DEBIT_ENABLED: "true", PIN_AI_RESERVATION_FEE_RECORDING_ENABLED: "true",
+      PIN_AI_ACTION_BROKER_ENABLED: "true", PIN_AI_ACTION_PROPOSAL_TOOL_ENABLED: "true" },
+    client: { reservation: { findFirst: async () => reservation },
+      property: { findFirst: async () => property.status === "ACTIVE" ? property : null } } as never,
+    checkAvailability: (async () => { availabilityChecks++; return { available: true }; }) as never,
+    calculatePricing: (async () => ({ currency: "usd",
+      nightlyRates: [{ date: "2026-10-13", rate: 100 }], amenities: [], taxes: [] })) as never,
+  };
+  const input = { guestToken: "synthetic-token", allowInStayExtension: true };
+  const options = await getGuestReservationModificationOptions(input, dependencies);
+  assert.equal(options.managementPhase, "IN_STAY");
+  assert.equal(options.constraints.guestCountEditable, false);
+  const preview = await getGuestReservationModificationPreview({
+    guestToken: input.guestToken, operation: "EXTEND_CHECKOUT_ONLY",
+    checkIn: reservation.checkIn, checkOut: new Date("2026-10-14T15:00:00Z"),
+    adults: 2, children: 0, selectedAmenityIds: [],
+  }, dependencies);
+  assert.equal(preview.pricing.amountDifferenceCents, 10000);
+  assert.equal(availabilityChecks, 1);
+  assert.equal(property.isPublicBookable, false);
+  assert.equal(reservation.checkOut.toISOString(), "2026-10-13T15:00:00.000Z");
+  await assert.rejects(getGuestReservationModificationOptions({ ...input, allowInStayExtension: false }, dependencies),
+    { code: "RESERVATION_NOT_ELIGIBLE_FOR_MODIFICATION" });
+  property.status = "INACTIVE";
+  await assert.rejects(getGuestReservationModificationOptions(input, dependencies),
+    { code: "RESERVATION_NOT_ELIGIBLE_FOR_MODIFICATION" });
+  property.status = "ACTIVE";
+  property.pinAIEnabled = false;
+  await assert.rejects(getGuestReservationModificationOptions(input, dependencies),
+    { code: "RESERVATION_NOT_ELIGIBLE_FOR_MODIFICATION" });
+  property.pinAIEnabled = true;
+  reservation.checkIn = new Date("2026-10-12T19:00:00Z");
+  await assert.rejects(getGuestReservationModificationOptions(input, dependencies),
+    { code: "PROPERTY_NOT_AVAILABLE_FOR_MODIFICATION" });
+});
 
 test("does not apply reduction policy when the price does not decrease", () => {
   const result = evaluateGuestReservationModificationReduction({

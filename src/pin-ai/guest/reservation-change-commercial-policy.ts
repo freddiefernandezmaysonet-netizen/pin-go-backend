@@ -26,6 +26,9 @@ export async function commercialReservationChangesEnabled(
   return !!reservation && reservation.paymentState === "PAID" &&
     (reservation.source === "DIRECT_BOOKING" || reservation.externalProvider === "PIN_GO_DIRECT") &&
     reservation.checkOut > now && guestPinAIAvailability(reservation, now).available &&
-    reservation.property.isPublicBookable === true && !!reservation.property.pinAITermsAcceptedAt &&
+    // Public listing controls new bookings and pre-stay date changes. An
+    // activated, paid stay already in progress may still extend checkout.
+    (reservation.property.isPublicBookable === true || reservation.checkIn <= now) &&
+    !!reservation.property.pinAITermsAcceptedAt &&
     reservation.property.pinAITermsAcceptedAt <= now && !!reservation.property.pinAITermsAcceptedBy;
 }
