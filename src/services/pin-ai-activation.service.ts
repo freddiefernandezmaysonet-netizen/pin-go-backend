@@ -1,6 +1,6 @@
 import type { Prisma, PrismaClient } from "@prisma/client";
 import { propertyActivationEnabled, commercialIncidentRuntimeReady, type ActivationEnvironment } from "../pin-ai/property-activation.js";
-import { PIN_AI_BILLING_TERMS } from "../pin-ai/billing-terms.js";
+import { PIN_AI_BILLING_TERMS, pinAIBillingTerms, pinAIHybridBillingAllows } from "../pin-ai/billing-terms.js";
 import { type ConnectDebitProvider, pinAIConnectBillingAllows, pinAIAllOrganizationsAvailable } from "../pin-ai/fee-connect.service.js";
 
 export class PinAIActivationError extends Error {
@@ -21,46 +21,48 @@ async function authorize(tx: Tx, actor: Actor, platform = false) {
   }, select: { id: true } });
   if (!user) reject(403, "PIN_AI_ACTIVATION_FORBIDDEN");
 }
-function updateBody(body: unknown, property: boolean) {
+function updateBody(body: unknown, property: boolean, env: ActivationEnvironment = {}) {
   if (!body || typeof body !== "object" || Array.isArray(body)) reject(400, "INVALID_REQUEST");
   const value = body as Record<string, unknown>;
-  if (property && value.enabled === true && value.acceptedTermsVersion !== undefined && value.acceptedTermsVersion !== PIN_AI_BILLING_TERMS.version) reject(428, "PIN_AI_BILLING_TERMS_REQUIRED");
+  if (property && value.enabled === true && value.acceptedTermsVersion !== undefined && value.acceptedTermsVersion !== pinAIBillingTerms(env).version) reject(428, "PIN_AI_BILLING_TERMS_REQUIRED");
   const keys = property ? ["enabled", "expectedRevision", "organizationRevision", ...(value.enabled === true && value.acceptedTermsVersion !== undefined ? ["acceptedTermsVersion"] : [])] : ["enabled", "expectedRevision"];
   if (Object.keys(value).length !== keys.length || Object.keys(value).some(k => !keys.includes(k)) ||
       typeof value.enabled !== "boolean" || !Number.isSafeInteger(value.expectedRevision) || Number(value.expectedRevision) < 0 ||
       (property && (!Number.isSafeInteger(value.organizationRevision) || Number(value.organizationRevision) < 0))) reject(400, "INVALID_REQUEST");
   return { enabled: value.enabled as boolean, revision: value.expectedRevision as number, orgRevision: value.organizationRevision as number,
-    acceptsCurrentTerms: value.acceptedTermsVersion === PIN_AI_BILLING_TERMS.version };
+    acceptsCurrentTerms: value.acceptedTermsVersion === pinAIBillingTerms(env).version };
 }
-function hasCurrentAcceptance(row: Prisma.PropertyGetPayload<{ select: typeof propertySelect }>) {
-  return row.pinAITermsVersion === PIN_AI_BILLING_TERMS.version && !!row.pinAITermsAcceptedAt && !!row.pinAITermsAcceptedBy;
+function hasCurrentAcceptance(row: Prisma.PropertyGetPayload<{ select: typeof propertySelect }>, env: ActivationEnvironment) {
+  return (row.pinAITermsVersion === pinAIBillingTerms(env).version || (row.pinAIFeeExempt && row.pinAITermsVersion === PIN_AI_BILLING_TERMS.version)) && !!row.pinAITermsAcceptedAt && !!row.pinAITermsAcceptedBy;
 }
 function organizationAvailable(row: Prisma.PropertyGetPayload<{ select: typeof propertySelect }>, env: ActivationEnvironment) {
   return row.organization.pinAIEnabled || (pinAIAllOrganizationsAvailable(env) && row.organization.pinAIRevision === 0);
 }
 function propertyView(row: Prisma.PropertyGetPayload<{ select: typeof propertySelect }>, env: ActivationEnvironment) {
   const managed = row.organization.pinAIRevision > 0 || pinAIAllOrganizationsAvailable(env);
+  const exempt = row.pinAIFeeExempt === true;
+  const collectionReady = !exempt && env.PIN_AI_RESERVATION_FEE_RECORDING_ENABLED === "true" &&
+    (env.PIN_AI_HYBRID_BILLING_ENABLED === "true" ? pinAIHybridBillingAllows(env, row.organization.id) :
+      pinAIConnectBillingAllows(env, row.organization.id) && !!row.organization.stripeConnectAccountId);
   const runtimeReady = propertyActivationEnabled(env) && env.PIN_AI_GUEST_GATEWAY_ENABLED === "true" &&
     env.PIN_AI_RUNTIME_SHADOW_ENABLED === "true" && env.PIN_AI_RUNTIME_REAL_READ_ENABLED === "true" &&
-    commercialIncidentRuntimeReady(env) && pinAIConnectBillingAllows(env, row.organization.id) &&
-    env.PIN_AI_RESERVATION_FEE_RECORDING_ENABLED === "true" && !!row.organization.stripeConnectAccountId;
+    commercialIncidentRuntimeReady(env) && (exempt || collectionReady);
   return { propertyId: row.id, name: row.name, enabled: row.pinAIEnabled, revision: row.pinAIRevision,
-    billing: { ...PIN_AI_BILLING_TERMS, exempt: row.pinAIFeeExempt === true,
+    billing: { ...pinAIBillingTerms(env), exempt,
       acceptedAt: row.pinAITermsAcceptedAt, acceptedVersion: row.pinAITermsVersion,
-      collectionReady: pinAIConnectBillingAllows(env, row.organization.id) &&
-        env.PIN_AI_RESERVATION_FEE_RECORDING_ENABLED === "true" && !!row.organization.stripeConnectAccountId },
+      collectionReady },
     organization: { enabled: organizationAvailable(row, env), revision: row.organization.pinAIRevision },
     state: !managed ? "EXISTING_SCOPE" : !propertyActivationEnabled(env) ? "PENDING_ACTIVATION" : !organizationAvailable(row, env) || !row.pinAIEnabled ? "DISABLED" :
-      runtimeReady && row.pinAITermsVersion === PIN_AI_BILLING_TERMS.version ? "ENABLED" : "PENDING_ACTIVATION",
+      runtimeReady && hasCurrentAcceptance(row, env) ? "ENABLED" : "PENDING_ACTIVATION",
     capabilities: { guestAssistance: true, guestIncidents: true, reservationActions: "CONTROLLED_RELEASE", channelReplies: "SEPARATE_ACTIVATION" } };
 }
-async function audit(tx: Tx, actor: Actor, organizationId: string, propertyId: string | null, enabled: boolean, revision: number) {
+async function audit(tx: Tx, actor: Actor, organizationId: string, propertyId: string | null, enabled: boolean, revision: number, env: ActivationEnvironment = {}) {
   const entityId = propertyId ?? organizationId;
   await tx.apmsAuditEntry.create({ data: { organizationId, propertyId, entityType: propertyId ? "PROPERTY" : "ORGANIZATION",
     entityId, engine: "PIN_AI_ACTIVATION", eventType: "SET_ENABLED", status: "APPLIED",
     decisionId: `pin-ai-activation:${propertyId ? "property" : "organization"}:${entityId}:${revision}`,
     summary: enabled ? "Pin AI enabled" : "Pin AI disabled", metadata: { actorId: actor.id, enabled, revision,
-      ...(propertyId && enabled ? { billingTerms: PIN_AI_BILLING_TERMS } : {}) } } });
+      ...(propertyId && enabled ? { billingTerms: pinAIBillingTerms(env) } : {}) } } });
 }
 export async function listPinAIOrganizations(db: PrismaClient, actor: Actor, query: unknown) {
   if (typeof query !== "string" || query.length > 80) return reject(400, "INVALID_REQUEST");
@@ -72,7 +74,7 @@ export async function listPinAIOrganizations(db: PrismaClient, actor: Actor, que
     ] } : {}, select: orgSelect, orderBy: [{ name: "asc" }, { id: "asc" }], take: 30 }) };
   });
 }
-export async function getPinAIFeeOverview(db: PrismaClient, actor: Actor) {
+export async function getPinAIFeeOverview(db: PrismaClient, actor: Actor, env: ActivationEnvironment = {}) {
   return db.$transaction(async tx => {
     await authorize(tx, actor);
     const totals = await tx.pinAIReservationFee.groupBy({ by: ["billingStatus"], where: { organizationId: actor.orgId },
@@ -83,9 +85,9 @@ export async function getPinAIFeeOverview(db: PrismaClient, actor: Actor) {
         reservation: { select: { reservationNumber: true } }, property: { select: { name: true } } } });
     const serviceReviews = await tx.pinAIServiceEnrollment.count({ where: { organizationId: actor.orgId,
       status: "NEEDS_REVIEW", reservation: { pinAIReservationFee: null } } });
-    return { currency: "USD", serviceReviews, totals: totals.map(r => ({ status: r.billingStatus, count: r._count._all, amountCents: r._sum.amountCents ?? 0 })),
+    return { currency: "USD", billingTerms: pinAIBillingTerms(env), serviceReviews, totals: totals.map(r => ({ status: r.billingStatus, count: r._count._all, amountCents: r.billingStatus === "REVERSED" ? 0 : r._sum.amountCents ?? 0 })),
       recent: recent.map(r => ({ reservationId: r.reservationId, reservationNumber: r.reservation.reservationNumber,
-        propertyName: r.property.name, amountCents: r.amountCents, status: r.billingStatus, recordedAt: r.recordedAt })) };
+        propertyName: r.property.name, amountCents: r.billingStatus === "REVERSED" ? 0 : r.amountCents, status: r.billingStatus, recordedAt: r.recordedAt })) };
   });
 }
 export async function setPinAIOrganization(db: PrismaClient, actor: Actor, organizationId: string, body: unknown) {
@@ -109,41 +111,49 @@ export async function getPinAIProperty(db: PrismaClient, env: ActivationEnvironm
 }
 export async function setPinAIProperty(db: PrismaClient, env: ActivationEnvironment, actor: Actor, propertyId: string, body: unknown,
   provider?: Pick<ConnectDebitProvider, "eligibility">) {
-  const input = updateBody(body, true);
+  const input = updateBody(body, true, env);
+  const hybrid = env.PIN_AI_HYBRID_BILLING_ENABLED === "true";
   // Check external compatibility outside the SQL transaction, after authority
   // and tenant checks. The account and revisions are rechecked when committing.
   let checkedAccount: string | null = null;
+  let checkedExempt = false;
   if (input.enabled) {
-    checkedAccount = await db.$transaction(async tx => {
+    const preflight = await db.$transaction(async tx => {
       await authorize(tx, actor);
       const row = await tx.property.findFirst({ where: { id: propertyId, organizationId: actor.orgId, status: "ACTIVE" }, select: propertySelect });
       if (!row) return reject(404, "PROPERTY_NOT_FOUND");
-      if (!hasCurrentAcceptance(row) && !input.acceptsCurrentTerms) reject(428, "PIN_AI_BILLING_TERMS_REQUIRED");
+      if (!hasCurrentAcceptance(row, env) && !input.acceptsCurrentTerms) reject(428, "PIN_AI_BILLING_TERMS_REQUIRED");
       if (row.organization.pinAIRevision !== input.orgRevision || row.pinAIRevision !== input.revision) reject(409, "PIN_AI_ACTIVATION_CONFLICT");
       if (!organizationAvailable(row, env)) reject(403, "PIN_AI_ORGANIZATION_NOT_ENABLED");
       if (!row.organization.pinAIRevision && !pinAIAllOrganizationsAvailable(env)) reject(409, "PIN_AI_ORGANIZATION_NOT_CONFIGURED");
-      if (!row.organization.stripeConnectAccountId) reject(422, "PIN_AI_CONNECT_ACCOUNT_REQUIRED");
-      return row.organization.stripeConnectAccountId;
+      const exempt = row.pinAIFeeExempt === true;
+      if (!exempt && !hybrid && !row.organization.stripeConnectAccountId) reject(422, "PIN_AI_CONNECT_ACCOUNT_REQUIRED");
+      return { accountId: row.organization.stripeConnectAccountId, exempt };
     });
-    if (!provider) reject(503, "PIN_AI_CONNECT_VERIFICATION_UNAVAILABLE");
-    let compatible = false;
-    try { compatible = (await provider!.eligibility(checkedAccount!)).compatible; }
-    catch { reject(503, "PIN_AI_CONNECT_VERIFICATION_UNAVAILABLE"); }
-    if (!compatible) reject(422, "PIN_AI_CONNECT_ACCOUNT_INCOMPATIBLE");
-    // Zero available balance is allowed: accrued fees wait for funds.
+    checkedAccount = preflight.accountId;
+    checkedExempt = preflight.exempt;
+    if (!checkedExempt && !hybrid) {
+      if (!provider) reject(503, "PIN_AI_CONNECT_VERIFICATION_UNAVAILABLE");
+      let compatible = false;
+      try { compatible = (await provider!.eligibility(checkedAccount!)).compatible; }
+      catch { reject(503, "PIN_AI_CONNECT_VERIFICATION_UNAVAILABLE"); }
+      if (!compatible) reject(422, "PIN_AI_CONNECT_ACCOUNT_INCOMPATIBLE");
+      // Zero available balance is allowed: accrued fees wait for funds.
+    }
   }
   return db.$transaction(async tx => {
     await authorize(tx, actor);
     const row = await tx.property.findFirst({ where: { id: propertyId, organizationId: actor.orgId, status: "ACTIVE" }, select: propertySelect });
     if (!row) return reject(404, "PROPERTY_NOT_FOUND");
-    if (input.enabled && !hasCurrentAcceptance(row) && !input.acceptsCurrentTerms) reject(428, "PIN_AI_BILLING_TERMS_REQUIRED");
+    if (input.enabled && !hasCurrentAcceptance(row, env) && !input.acceptsCurrentTerms) reject(428, "PIN_AI_BILLING_TERMS_REQUIRED");
     if (row.organization.pinAIRevision !== input.orgRevision || row.pinAIRevision !== input.revision) reject(409, "PIN_AI_ACTIVATION_CONFLICT");
     if (input.enabled && !organizationAvailable(row, env)) reject(403, "PIN_AI_ORGANIZATION_NOT_ENABLED");
     if (!row.organization.pinAIRevision && !pinAIAllOrganizationsAvailable(env)) reject(409, "PIN_AI_ORGANIZATION_NOT_CONFIGURED");
-    if (input.enabled && row.organization.stripeConnectAccountId !== checkedAccount)
+    if (input.enabled && ((row.pinAIFeeExempt === true) !== checkedExempt ||
+        (!checkedExempt && !hybrid && row.organization.stripeConnectAccountId !== checkedAccount)))
       reject(409, "PIN_AI_ACTIVATION_CONFLICT");
     // Global availability is a platform configuration, not host-granted entitlement.
-    // Initialize revision evidence only after host consent and Connect verification.
+    // Initialize after host consent and, for billable properties, Connect verification.
     if (input.enabled && row.organization.pinAIRevision === 0 && pinAIAllOrganizationsAvailable(env)) {
       const initialized = await tx.organization.updateMany({ where: { id: actor.orgId, pinAIRevision: 0 },
         data: { pinAIEnabled: true, pinAIRevision: { increment: 1 } } });
@@ -151,12 +161,12 @@ export async function setPinAIProperty(db: PrismaClient, env: ActivationEnvironm
       await audit(tx, actor, actor.orgId, null, true, 1);
       row.organization = { ...row.organization, pinAIEnabled: true, pinAIRevision: 1 };
     }
-    const acceptance = input.enabled && !hasCurrentAcceptance(row) ? { pinAITermsVersion: PIN_AI_BILLING_TERMS.version,
+    const acceptance = input.enabled && !hasCurrentAcceptance(row, env) ? { pinAITermsVersion: pinAIBillingTerms(env).version,
       pinAITermsAcceptedAt: new Date(), pinAITermsAcceptedBy: actor.id } : {};
     const result = await tx.property.updateMany({ where: { id: propertyId, organizationId: actor.orgId, status: "ACTIVE", pinAIRevision: input.revision },
       data: { pinAIEnabled: input.enabled, pinAIRevision: { increment: 1 }, ...acceptance } });
     if (result.count !== 1) reject(409, "PIN_AI_ACTIVATION_CONFLICT");
-    await audit(tx, actor, actor.orgId, propertyId, input.enabled, input.revision + 1);
+    await audit(tx, actor, actor.orgId, propertyId, input.enabled, input.revision + 1, env);
     return propertyView({ ...row, ...acceptance, pinAIEnabled: input.enabled, pinAIRevision: input.revision + 1 }, env);
   }, { isolationLevel: "Serializable" });
 }

@@ -6,6 +6,9 @@ on:
     branches: [main]
     paths:
       - "src/pin-ai/fee-connect*"
+      - "src/pin-ai/hybrid-fee*"
+      - "src/pin-ai/reservation-service-evidence.ts"
+      - "tsconfig.pin-ai-hybrid-billing.json"
       - "src/pin-ai/reservation-fee.service.ts"
       - "src/pin-ai/property-activation.ts"
       - "src/services/pin-ai-activation.service.ts"
@@ -42,6 +45,7 @@ jobs:
     env:
       DATABASE_URL: postgresql://postgres:postgres@127.0.0.1:5432/pin_ai_activation_test?connection_limit=8
       PIN_AI_NATIVE_DB_TEST: "true"
+      PIN_AI_HYBRID_DB_TEST: "true"
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -54,6 +58,16 @@ jobs:
         run: |
           ./node_modules/.bin/prisma generate --schema ./prisma
           ./node_modules/.bin/prisma db push --schema ./prisma --skip-generate
+      - name: Verify nullable-column upgrade on disposable PostgreSQL
+        run: |
+          python3 - <<'PY'
+          import os, subprocess
+          url = os.environ["DATABASE_URL"].split("?")[0]
+          columns = ["collectionMethod", "stripePaymentIntentId", "stripeApplicationFeeId", "stripeReversalId", "reversedAt", "reversalStartedAt", "reversalRequest"]
+          sql = 'ALTER TABLE "PinAIReservationFee" ' + ', '.join('DROP COLUMN "' + c + '"' for c in columns)
+          subprocess.run(["psql", url, "-v", "ON_ERROR_STOP=1", "-c", sql], check=True)
+          subprocess.run(["psql", url, "-v", "ON_ERROR_STOP=1", "-f", "prisma/migrations/20261012000000_pin_ai_hybrid_fee/migration.sql"], check=True)
+          PY
       - name: Compile native concurrency contract
         run: >-
           ./node_modules/.bin/tsc --noEmit --strict --skipLibCheck
@@ -67,3 +81,7 @@ jobs:
         run: node --import tsx --test src/pin-ai/fee-connect.native.database.test.ts
       - name: Certify commercial OTA consent, single fee and incident history
         run: node --import tsx --test src/pin-ai/ota-commercial.database.test.ts
+      - name: Certify hybrid collection and cancellation
+        run: |
+          ./node_modules/.bin/tsc -p tsconfig.pin-ai-hybrid-billing.json
+          node --import tsx --test src/pin-ai/hybrid-fee-stripe.provider.test.ts src/pin-ai/hybrid-fee.database.test.ts src/services/reservation-complete-flow-cleaner-access.test.js

@@ -615,6 +615,7 @@ export async function auditReservationCompleteFlow(
       stripeApplicationFeeId: true,
       basePlatformFeeAmount: true,
       platformFeeAmount: true,
+      pinAIReservationFee: { select: { collectionMethod: true, amountCents: true, currency: true } },
       hostPayoutAmount: true,
       hostPayoutStatus: true,
       hostPayoutFailureReason: true,
@@ -1298,6 +1299,11 @@ const hasHostEmailEvidence = hasMessageEvidence({
     reservation.directBookingProtectionFeeAmount
   );
   const platformFeeAmount = toNumber(reservation.platformFeeAmount);
+  const directPinAIFee = reservation.pinAIReservationFee?.collectionMethod === "DIRECT_APPLICATION_FEE"
+    ? reservation.pinAIReservationFee : null;
+  const pinAIFeeAmount = directPinAIFee ? directPinAIFee.amountCents / 100 : 0;
+  const pinAIFeeSnapshotValid = !directPinAIFee ||
+    (directPinAIFee.amountCents === 100 && directPinAIFee.currency === "USD");
   const hostPayoutAmount = toNumber(reservation.hostPayoutAmount);
   const hasConnectFeeSnapshot =
     reservation.identityVerificationRequiredSnapshot !== null;
@@ -1308,8 +1314,9 @@ const hasHostEmailEvidence = hasMessageEvidence({
       identityFeeAmount !== null &&
       platformFeeAmount !== null &&
       hostPayoutAmount !== null &&
+      pinAIFeeSnapshotValid &&
       Math.abs(
-        basePlatformFeeAmount + identityFeeAmount - platformFeeAmount
+        basePlatformFeeAmount + identityFeeAmount + pinAIFeeAmount - platformFeeAmount
       ) < 0.01 &&
       Math.abs(platformFeeAmount + hostPayoutAmount - totalAmount) < 0.01 &&
       (reservation.identityVerificationRequiredSnapshot
@@ -1331,6 +1338,8 @@ const hasHostEmailEvidence = hasMessageEvidence({
         reservation.identityVerificationRequiredSnapshot,
       basePlatformFeeAmount,
       identityFeeAmount,
+      pinAIFeeAmount,
+      pinAIFeeSnapshotValid,
       platformFeeAmount,
       hostPayoutAmount,
       totalAmount,

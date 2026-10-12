@@ -1,3 +1,5 @@
+import { runHybridFeeCycle } from "../pin-ai/hybrid-fee.service.js";
+import { createHybridFeeStripeProvider } from "../pin-ai/hybrid-fee-stripe.provider.js";
 import { formatPropertyArrivalLocation } from "../services/property-arrival-location.js";
 // src/workers/reservation.worker.ts
 import dotenv from "dotenv";
@@ -2644,13 +2646,17 @@ async function tick() {
         .finally(() => { cleaningRecoveryRunning = false; });
     }
 
-    if (process.env.PIN_AI_CONNECT_DEBIT_ENABLED === "true" &&
-      now.getTime() - lastPinAIConnectBillingAt >= 60_000) {
+    if (now.getTime() - lastPinAIConnectBillingAt >= 60_000) {
       lastPinAIConnectBillingAt = now.getTime();
       try {
         const { default: stripe } = await import("../billing/stripe.js");
-        const result = await runPinAIConnectBillingCycle(prisma,
-          createPinAIConnectStripeProvider(stripe), process.env, now);
+        // Existing charged obligations remain reversible after rollout disablement.
+        const hybrid = await runHybridFeeCycle(prisma, createHybridFeeStripeProvider(stripe), process.env, now);
+        const legacy = process.env.PIN_AI_HYBRID_BILLING_ENABLED !== "true" && process.env.PIN_AI_CONNECT_DEBIT_ENABLED === "true"
+          ? await runPinAIConnectBillingCycle(prisma, createPinAIConnectStripeProvider(stripe), process.env, now)
+          : { recorded: 0, attempted: 0, failures: 0 };
+        const result = { recorded: legacy.recorded, attempted: legacy.attempted + hybrid.attempted,
+          failures: legacy.failures + hybrid.failures };
         if (result.recorded || result.attempted || result.failures) log("pin-ai-connect-billing", result);
       } catch {
         log("pin-ai-connect-billing: cycle failed; pending fees will retry");

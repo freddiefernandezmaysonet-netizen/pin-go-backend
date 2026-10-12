@@ -294,7 +294,7 @@ export async function ingestReservation(p: IngestPayload) {
     });
 
     if (didChange) {
-      await capturePinAIReservationService(tx, reservation.id);
+      await capturePinAIReservationService(tx, reservation.id, process.env, new Date(), !previousReservation);
     }
 
     if (externalProvider === "CHANNEX") {

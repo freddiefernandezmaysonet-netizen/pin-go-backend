@@ -1,3 +1,4 @@
+import { directPinAIFeeSnapshot } from "../pin-ai/hybrid-fee-evidence.service.js";
 import { getIdentityCheckFeeCents } from "../services/identity-check-billing-consent.js";
 import { buildPublicStaysSitemapRouter } from "./public-stays-sitemap.routes.js";
 import { Router } from "express";
@@ -1828,6 +1829,8 @@ const guestAcceptedSecurePreCheckinRequirementText =
       throw error;
     }
 
+    const pinAIFeeMetadata = await directPinAIFeeSnapshot(prisma, process.env, property.id, property.organizationId);
+    const pinAIFeeAmountCents = Number(pinAIFeeMetadata.pinAIFeeAmountCents ?? 0);
     const basePlatformFeeAmountCents =
       getDirectBookingPlatformFeeCents(totalAmountCents);
     const connectFee = calculateDirectBookingConnectFee({
@@ -1839,8 +1842,9 @@ const guestAcceptedSecurePreCheckinRequirementText =
     });
     const directBookingProtectionFeeAmountCents =
       connectFee.identityCheckFeeAmountCents;
-    const platformFeeAmountCents = connectFee.platformFeeAmountCents;
-    const hostPayoutAmountCents = connectFee.hostPayoutAmountCents;
+    const platformFeeAmountCents = connectFee.platformFeeAmountCents + pinAIFeeAmountCents;
+    if (platformFeeAmountCents > totalAmountCents) throw Error("PIN_AI_FEE_EXCEEDS_HOST_PROCEEDS");
+    const hostPayoutAmountCents = totalAmountCents - platformFeeAmountCents;
 
     const basePlatformFeeAmount = toMoneyFromCents(
       basePlatformFeeAmountCents
@@ -1853,6 +1857,9 @@ const guestAcceptedSecurePreCheckinRequirementText =
 
     const paymentIntentData: Stripe.Checkout.SessionCreateParams.PaymentIntentData = {};
 
+    if (pinAIFeeAmountCents > 0) paymentIntentData.metadata = {
+      ...pinAIFeeMetadata, propertyId: property.id, organizationId: property.organizationId,
+    };
     if (platformFeeAmountCents > 0) {
       paymentIntentData.application_fee_amount = platformFeeAmountCents;
     }
@@ -1895,6 +1902,7 @@ const guestAcceptedSecurePreCheckinRequirementText =
       cancel_url: `${APP_URL}/booking/cancel?organization=${property.organization.slug}`,
       metadata: {
         flow: "direct_booking",
+        ...pinAIFeeMetadata,
         preferredLanguage: normalizedPreferredLanguage,
         organizationId: property.organizationId,
         propertyId: property.id,
@@ -1950,16 +1958,16 @@ const guestAcceptedSecurePreCheckinRequirementText =
         ),
         cancellationPolicySnapshot: cancellationPolicyMetadata,
         cancellationPolicyId: cancellationPolicySnapshot.policyId ?? "",
-        cancellationPolicyName: cancellationPolicySnapshot.name.slice(0, 100),
-        cancellationPolicyType: cancellationPolicySnapshot.type,
+        // Hybrid consent adds four keys. Keep Stripe's 50-key Session budget;
+        // these legacy display fields are already in cancellationPolicySnapshot.
+        ...(pinAIFeeAmountCents > 0 ? {} : {
+          cancellationPolicyName: cancellationPolicySnapshot.name.slice(0, 100),
+          cancellationPolicyType: cancellationPolicySnapshot.type,
+          refundPercentBeforeDeadline: String(cancellationPolicySnapshot.refundPercentBeforeDeadline),
+          refundPercentAfterDeadline: String(cancellationPolicySnapshot.refundPercentAfterDeadline),
+        }),
         freeCancellationHoursBeforeCheckIn: String(
           cancellationPolicySnapshot.freeCancellationHoursBeforeCheckIn
-        ),
-        refundPercentBeforeDeadline: String(
-          cancellationPolicySnapshot.refundPercentBeforeDeadline
-        ),
-        refundPercentAfterDeadline: String(
-          cancellationPolicySnapshot.refundPercentAfterDeadline
         ),
       },
     });

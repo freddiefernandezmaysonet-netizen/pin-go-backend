@@ -1,5 +1,5 @@
 import type { PrismaClient } from "@prisma/client";
-import { PIN_AI_BILLING_TERMS } from "./billing-terms.js";
+import { PIN_AI_BILLING_TERMS, pinAIBillingTerms, pinAIHybridBillingAllows } from "./billing-terms.js";
 import { pinAIConnectBillingAllows, pinAIAllOrganizationsAvailable } from "./fee-connect.service.js";
 
 export type ActivationEnvironment = Readonly<Record<string, string | undefined>>;
@@ -16,13 +16,14 @@ export async function commercialPinAIEnabled(db: ActivationDb, env: ActivationEn
   if (!propertyActivationEnabled(env)) return null;
   const row = await db.property.findFirst({
     where: { id: scope.propertyId, organizationId: scope.organizationId, status: "ACTIVE" },
-    select: { pinAIEnabled: true, pinAITermsVersion: true, organization: { select: { pinAIEnabled: true, pinAIRevision: true, stripeConnectAccountId: true } } },
+    select: { pinAIEnabled: true, pinAITermsVersion: true, pinAIFeeExempt: true, organization: { select: { pinAIEnabled: true, pinAIRevision: true, stripeConnectAccountId: true } } },
   });
   if (!row) return false;
   if (row.organization.pinAIRevision === 0) return pinAIAllOrganizationsAvailable(env) ? false : null;
-  return row.organization.pinAIEnabled && row.pinAIEnabled && row.pinAITermsVersion === PIN_AI_BILLING_TERMS.version &&
-    !!row.organization.stripeConnectAccountId && pinAIConnectBillingAllows(env, scope.organizationId) &&
-    env.PIN_AI_RESERVATION_FEE_RECORDING_ENABLED === "true";
+  return row.organization.pinAIEnabled && row.pinAIEnabled && (row.pinAITermsVersion === pinAIBillingTerms(env).version || (row.pinAIFeeExempt && row.pinAITermsVersion === PIN_AI_BILLING_TERMS.version)) &&
+    (row.pinAIFeeExempt === true || (env.PIN_AI_RESERVATION_FEE_RECORDING_ENABLED === "true" &&
+      (env.PIN_AI_HYBRID_BILLING_ENABLED === "true" ? pinAIHybridBillingAllows(env, scope.organizationId) :
+        !!row.organization.stripeConnectAccountId && pinAIConnectBillingAllows(env, scope.organizationId))));
 }
 
 // Existing cases remain readable/actionable by their authorized host after new

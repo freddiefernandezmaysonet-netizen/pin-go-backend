@@ -58,7 +58,7 @@ export async function createReservationHandler(req: Request, res: Response) {
         },
       });
 
-      await capturePinAIReservationService(tx, reservation.id);
+      await capturePinAIReservationService(tx, reservation.id, process.env, new Date(), true);
 
       const accessGrant = await tx.accessGrant.create({
         data: {

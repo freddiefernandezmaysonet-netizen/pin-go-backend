@@ -1,3 +1,4 @@
+import { captureDirectPinAIFee } from "../pin-ai/hybrid-fee-evidence.service.js";
 import Stripe from "stripe";
 import { randomBytes } from "crypto";
 import {
@@ -481,6 +482,7 @@ export async function handleDirectBookingCheckoutCompleted(
   });
 
   if (existing) {
+    await captureDirectPinAIFee(prisma, existing.id, session.metadata);
     return existing;
   }
 
@@ -1059,6 +1061,8 @@ const updatedReservation = await prisma.reservation.update({
   identityVerificationRequiredSnapshot: true,
 },
 });
+
+await captureDirectPinAIFee(prisma, updatedReservation.id, session.metadata);
 
 // Older reservations can lack a public number. Reuse the stable reservation
 // reference in subjects, initial sends and persisted retry payloads.
