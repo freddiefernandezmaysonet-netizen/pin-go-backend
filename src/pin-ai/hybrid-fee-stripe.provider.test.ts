@@ -1,5 +1,8 @@
 import assert from "node:assert/strict";
 import test from "node:test";
+import { readFileSync } from "node:fs";
+import { runInNewContext } from "node:vm";
+import ts from "typescript";
 import { createHybridFeeStripeProvider } from "./hybrid-fee-stripe.provider.js";
 import { PIN_AI_HYBRID_BILLING_TERMS as TERMS } from "./billing-terms.js";
 const fee = { reservationId: "r", organizationId: "org", propertyId: "p", amountCents: 100, currency: "USD",
@@ -7,6 +10,50 @@ const fee = { reservationId: "r", organizationId: "org", propertyId: "p", amount
   stripeApplicationFeeId: "fee_platform", stripeCustomerId: "cus_host", stripeSubscriptionId: "sub_membership",
   stripeInvoiceItemId: "ii_pin_ai", collectionMethod: "MEMBERSHIP" } as any;
 const metadata = { pinAIReservationId: "r", organizationId: "org", propertyId: "p", pinAITermsVersion: TERMS.version };
+test("actual public checkout metadata fits Stripe's limit with hybrid consent and preserves the cancellation snapshot", () => {
+  const source = ts.createSourceFile("checkout.ts", readFileSync("src/routes/public-booking.routes.ts", "utf8"), ts.ScriptTarget.Latest, true);
+  let expression = "";
+  const visit = (node: ts.Node) => {
+    if (ts.isCallExpression(node) && node.expression.getText(source) === "stripe.checkout.sessions.create") {
+      const argument = node.arguments[0];
+      assert.ok(ts.isObjectLiteralExpression(argument));
+      const property = argument.properties.find(p => ts.isPropertyAssignment(p) && p.name.getText(source) === "metadata");
+      assert.ok(property && ts.isPropertyAssignment(property));
+      expression = property.initializer.getText(source);
+    }
+    ts.forEachChild(node, visit);
+  };
+  visit(source); assert.ok(expression);
+  const policy = { name: "Synthetic", type: "CUSTOM", refundBasis: "TOTAL_AMOUNT", policyId: "policy",
+    freeCancellationHoursBeforeCheckIn: 24, refundPercentBeforeDeadline: 100, refundPercentAfterDeadline: 0 };
+  for (const enabled of [false, true]) {
+    const consent = enabled ? { pinAIFeeAmountCents: "100", pinAITermsVersion: TERMS.version,
+      pinAITermsAcceptedBy: "host", pinAITermsAcceptedAt: "2030-01-01T00:00:00Z" } : {};
+    const values = runInNewContext(`(${expression})`, {
+      pinAIFeeMetadata: consent, pinAIFeeAmountCents: enabled ? 100 : 0,
+      normalizedPreferredLanguage: "es", property: { id: "p", organizationId: "org" },
+      stayDates: { checkIn: new Date("2030-01-02"), checkOut: new Date("2030-01-03"), timeZone: "UTC", checkInTime: "16:00", checkOutTime: "11:00" },
+      guestName: "Synthetic", guestEmail: "synthetic@example.com", guestPhone: "", stayNotificationsConsent: false,
+      propertyProtectionCheckoutEvidence: "{}", guestAcceptedSecurePreCheckinRequirementAt: "2030-01-01",
+      guestAcceptedSecurePreCheckinRequirementText: "accepted", toStripeMetadataValue: String,
+      SECURE_PRECHECKIN_DISCLOSURE_VERSION: "v1", SECURE_PRECHECKIN_DISCLOSURE_SOURCE: "DIRECT_BOOKING_WEB_FORM",
+      adultsCount: 1, childrenCount: 0, nights: 1, pricing: { nightlyRate: 100, cleaningFee: 0, amenitiesTotal: 0, taxesTotal: 0, totalAmount: 100 },
+      cleanSelectedAmenityIds: [], connectedAccountId: "acct_host", basePlatformFeeAmount: 5,
+      directBookingProtectionFeeAmount: 0, identityVerificationRequired: false, platformFeeAmount: enabled ? 6 : 5,
+      hostPayoutAmount: enabled ? 94 : 95, guestAcceptedCancellationTermsAt: "2030-01-01",
+      guestAcceptedCancellationTermsText: "accepted", cancellationPolicySnapshot: policy,
+      cancellationPolicyMetadata: JSON.stringify(policy),
+    }) as Record<string, string>;
+    // The billing wrapper removes this derived key and adds charge mode.
+    delete values.hostPayoutStatus; values.stripeChargeMode = "DIRECT_CHARGE";
+    assert.equal(Object.keys(values).length, 50);
+    assert.deepEqual(JSON.parse(values.cancellationPolicySnapshot), policy);
+    assert.equal(values.guestAcceptedCancellationTerms, "true");
+    assert.equal(values.securePrecheckinAccepted, "true");
+    assert.equal(values.pinAIFeeAmountCents, enabled ? "100" : undefined);
+    if (enabled) assert.equal(values.pinAITermsAcceptedBy, "host");
+  }
+});
 function fixture({ guestRefunded = 0, feeRefunded = 0, invoiceStatus = "paid", amountRemaining = 0,
   itemInvoice = "in_membership", customerId = "cus_host" } = {}) {
   const calls: any[] = [];
