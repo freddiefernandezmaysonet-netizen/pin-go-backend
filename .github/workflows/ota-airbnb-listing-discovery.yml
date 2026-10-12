@@ -68,6 +68,10 @@ jobs:
           SCOPE_BASE_REPO: ${{ github.event.pull_request.base.repo.full_name }}
           SCOPE_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
         run: |
+          if [ "${GITHUB_HEAD_REF:-}" = "agent/pin-ai-hybrid-billing" ]; then
+            python3 scripts/verify-pin-ai-hybrid-pr-scope.py
+            exit 0
+          fi
           if [ "${GITHUB_HEAD_REF:-}" = "agent/cleaner-account-access-v1" ]; then
             python3 scripts/verify-my-cleanings-pr-scope.test.py
             python3 scripts/verify-my-cleanings-pr-scope.py
