@@ -1,3 +1,4 @@
+import { captureHybridMembershipFee } from "./hybrid-fee-evidence.service.js";
 import type { Prisma } from "@prisma/client";
 import type { ActivationEnvironment } from "./property-activation.js";
 import { pinAIConnectBillingAllows } from "./fee-connect.service.js";
@@ -8,7 +9,16 @@ import { enrollPinAIServiceInTransaction } from "./service-enrollment.service.js
 // Stripe, emails, new transaction or worker dependency. Failures roll back with
 // the reservation write, so a retry cannot commit an unevidenced commercial use.
 export async function capturePinAIReservationService(tx: Prisma.TransactionClient, reservationId: string,
-  env: ActivationEnvironment = process.env, now = new Date()) {
+  env: ActivationEnvironment = process.env, now = new Date(), newReservation = false) {
+  if (env.PIN_AI_HYBRID_BILLING_ENABLED === "true") {
+    if (!newReservation) {
+      // Wake settlement on updates/cancellation without creating a new fee.
+      await tx.pinAIReservationFee.updateMany({ where: { reservationId,
+        termsVersion: "pin-ai-hybrid-usd-1-reservation-v2" }, data: { exportNextAttemptAt: null } });
+      return "NOT_ELIGIBLE";
+    }
+    return captureHybridMembershipFee(tx, env, reservationId, now);
+  }
   if (env.PIN_AI_PROPERTY_ACTIVATION_ENABLED !== "true" || env.PIN_AI_RESERVATION_FEE_RECORDING_ENABLED !== "true" ||
     env.PIN_AI_CONNECT_DEBIT_ENABLED !== "true") return "DISABLED";
   // Serialize competing reservation mutations before checking current state.
