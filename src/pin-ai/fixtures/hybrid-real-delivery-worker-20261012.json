@@ -1,0 +1,52 @@
+{
+  "deploymentId": "f493f60b-9b0c-4116-b782-4539762b57a8",
+  "runtimeCommit": "fd4b6cc6063a77223e4caa01cb09c43645014851",
+  "productionChanged": false,
+  "receipt": {
+    "message": "",
+    "certificate": "PIN_AI_HYBRID_LIVE",
+    "run": "qa-pin-ai-hybrid-live-315e184a-e6a8-4256-b15e-532536e7a6fc",
+    "certified": true,
+    "reservationId": "cmv5ar0ot0008nl01kejcecp6",
+    "sessionId": "cs_test_a1N2j3A3N0Qrhf4Rkz7LatfKzLGoNO3dsElZ3gZ43BOdZTorxRu0NHXEeP",
+    "paymentIntentId": "pi_3UPjPvRqmXnirYx70BdNthch",
+    "applicationFeeId": "fee_1UPjPwRqmXnirYx7G5TUojNW",
+    "applicationFeeReturnedCents": 100,
+    "guestRefundId": "re_3UPjPvRqmXnirYx70hpw3Ras",
+    "guestPaidCents": 10000,
+    "pinAIFeeReturnedCents": 100,
+    "reservationCount": 1,
+    "feeCount": 1,
+    "scope": "REAL_PUBLIC_HTTP_CHECKOUT_STRIPE_DELIVERY_POSTGRES_RESERVATION_WORKER_SCHEDULER"
+  },
+  "delivery": {
+    "message": "",
+    "certificate": "PIN_AI_HYBRID_LIVE",
+    "run": "qa-pin-ai-hybrid-live-315e184a-e6a8-4256-b15e-532536e7a6fc",
+    "stage": "STRIPE_DELIVERY",
+    "eventId": "evt_1UPjPxRqmXnirYx74C6n23c4",
+    "sessionId": "cs_test_a1N2j3A3N0Qrhf4Rkz7LatfKzLGoNO3dsElZ3gZ43BOdZTorxRu0NHXEeP",
+    "livemode": false
+  },
+  "cleanup": {
+    "message": "",
+    "certificate": "PIN_AI_HYBRID_LIVE",
+    "run": "qa-pin-ai-hybrid-live-315e184a-e6a8-4256-b15e-532536e7a6fc",
+    "stage": "CLEANUP",
+    "workerStopped": true,
+    "webhookRemoved": true
+  },
+  "readbackDeploymentId": "c6034d7c-dc74-4f30-acc0-ed0905057c8f",
+  "readback": {
+    "message": "",
+    "certificate": "PIN_AI_HYBRID_LIVE_READBACK",
+    "verified": true,
+    "paymentIntentId": "pi_3UPjPvRqmXnirYx70BdNthch",
+    "guestRefundedCents": 10000,
+    "applicationFeeReturnedCents": 100,
+    "webhookRemoved": true,
+    "losses": "stripe",
+    "livemode": false
+  },
+  "auditFinding": "Legacy commission audit omitted Pin AI fee; corrected separately before release. Hardware access checks were intentionally not configured in this isolated billing fixture."
+}
