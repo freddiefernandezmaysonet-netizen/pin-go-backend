@@ -4,7 +4,7 @@ Railway project `PinGo Stay-Time Certification`, environment `certification`, al
 
 The production membership provider passed four real Stripe cases using SDK 14.25.0/API 2023-10-16: pending item deletion, draft item deletion, credit against an open invoice, and customer credit after a USD 1.00 test-card payment. Each item and reversal replay reused its original ID. All four cancellations ended with net Pin AI USD 0.00. A subsequent GET verified the paid customer's credit balance was -100 cents and all four synthetic subscriptions were canceled. Earlier unused prices and zero-value draft invoices were closed. The function was restored to its prior expired read-only source.
 
-The sandbox exposed a real compatibility defect: Stripe rejects `credit_amount=0`. The provider now omits that field for credits against unpaid invoices, while sending the paid portion for partially/fully paid invoices. This correction and its regression assertion are in backend PR #407; the candidate is `a1a03428cdae8b6cf7856f36d1c1a189ff3eb6be` and all 58 checks passed.
+The sandbox exposed a real compatibility defect: Stripe rejects `credit_amount=0`. The provider now omits that field for credits against unpaid invoices, while sending the paid portion for partially/fully paid invoices. This correction and its regression assertion are in backend PR #407; the candidate is `3627eeac8372edf95fb69f88bd0c755217d0c5a9` and all 58 checks passed.
 
 Actual execution receipts are in `src/pin-ai/fixtures/hybrid-membership-stripe-sandbox-20261012.json`. Certification deployment: `0722541b-f30d-46c1-aad1-f139869020de`. Cleanup/read-back deployment: `f3b73c03-f56a-42b1-bdfa-063d193bb91c`. These are real Stripe provider tests; PostgreSQL concurrency/persistence was certified separately. Public HTTP, signed webhook delivery and the live worker were not exercised by this script.
 
@@ -23,3 +23,17 @@ The earlier blocked attempts are retained in `src/pin-ai/fixtures/hybrid-direct-
 Membership-only tests are independently implemented in `src/scripts/certify-pin-ai-membership-sandbox.ts`; that runner has no Connect identity, bank or TOS mutation. Paid production collection remains disabled, and PRs #407 and dashboard #217 remain unmerged.
 
 References: https://docs.stripe.com/connect/testing ; https://docs.stripe.com/api/credit_notes/create ; https://docs.stripe.com/api/invoiceitems/create .
+
+## Public Checkout metadata boundary
+
+The integrated audit found a second release blocker: public Checkout already used Stripe's 50 Session metadata keys, and adding hybrid consent produced 54 after the existing billing normalization. The public route now omits four legacy display fields only for hybrid checkout (`cancellationPolicyName`, `cancellationPolicyType`, `refundPercentBeforeDeadline`, `refundPercentAfterDeadline`). Their complete values remain in the existing serialized cancellation snapshot; guest and host acceptance evidence is retained. Legacy/exempt checkout metadata remains unchanged.
+
+A regression test evaluates the actual route metadata expression for both consent modes and validates the wrapper's normalization, the 50-key budget and the complete cancellation snapshot. All 12 provider/boundary tests and 25 targeted Direct Booking/financial replay checks passed; both billing and Direct Booking TypeScript configurations compiled. All 58 PR #407 checks passed at candidate `3627eeac8372edf95fb69f88bd0c755217d0c5a9`.
+
+Real Stripe accepted both Checkout Sessions against the synthetic account with 50 keys and guest total 10000 cents. The consent evidence was preserved and both unpaid Sessions were expired immediately. Receipts are in `src/pin-ai/fixtures/hybrid-checkout-metadata-stripe-sandbox-20261012.json`. This certification evaluates route metadata but does not itself exercise the public HTTP route.
+
+## Integrated HTTP, signature, PostgreSQL and fee cycle
+
+Workflow run `38253217938`, job `114824529483`, passed compilation and the complete internal flow on disposable PostgreSQL 16: public HTTP checkout creates unchanged guest total and hybrid consent; a malformed signature is rejected without a reservation; a valid signed `checkout.session.completed` creates one ACTIVE/PAID reservation and one 100-cent fee; repeated delivery is acknowledged as a duplicate; the production hybrid worker cycle verifies direct payment evidence and marks the fee PAID; cancellation makes one 100-cent fee reversal; another cycle does not duplicate it. Resource IDs and counts are recorded in `src/pin-ai/fixtures/hybrid-http-postgres-worker-20261012.json`.
+
+This run uses real Express HTTP, Stripe signature verification, PostgreSQL, ingest, event ledger, and the production worker billing cycle. Stripe transport is simulated and no external messaging/access credentials are present. The separate real Stripe receipts validate the transport adapter and Checkout metadata, but this is not a certification of Stripe's actual webhook delivery to Railway or the browser completing a Checkout Session. The worker scheduler itself is not started by this isolated test. Those limits remain explicit for release review.
