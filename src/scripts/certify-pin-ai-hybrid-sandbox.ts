@@ -48,12 +48,11 @@ export async function certifyPinAIHybridSandbox(stripe: Stripe, run: string,
       account = await stripe.accounts.update(account.id, {
         business_profile: { url: "https://accessible.stripe.com", support_phone: "0000000000" },
         individual: { first_name: "Jenny", last_name: "Rosen", email: "jenny.rosen@example.com", phone: "0000000000",
-          dob: { day: 1, month: 1, year: 1902 }, id_number: "222222222", ssn_last_4: "0000",
+          dob: { day: 1, month: 1, year: 1902 }, id_number: "222222222",
           address: { line1: "address_full_match", city: "San Francisco", state: "CA", postal_code: "94103", country: "US" },
           verification: { document: { front: "file_identity_document_success" } } },
         external_account: { object: "bank_account", country: "US", currency: "usd", routing_number: "110000000",
           account_number: "000123456789", account_holder_name: "Synthetic QA", account_holder_type: "individual" },
-        tos_acceptance: { date: Math.floor(Date.now() / 1000), ip: "127.0.0.1" },
       }, { idempotencyKey: key("synthetic-verification") });
       for (let attempt = 0; !account.charges_enabled && attempt < 5; attempt++) {
         await new Promise(resolve => setTimeout(resolve, 2000));
