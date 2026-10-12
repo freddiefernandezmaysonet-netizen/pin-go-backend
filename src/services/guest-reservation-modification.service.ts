@@ -398,16 +398,18 @@ async function getEligibleReservationByGuestToken(
     });
   }
 
+  const eligibleInStayExtension = reservation.status === ReservationStatus.ACTIVE &&
+    reservation.paymentState === PaymentState.PAID && allowInStayExtension &&
+    reservation.checkIn <= now && reservation.checkOut > now &&
+    await commercialReservationChangesEnabled(dependencies.client, dependencies.env, {
+      reservationId: reservation.id, propertyId: reservation.propertyId,
+      organizationId: reservation.property.organizationId,
+    }, now);
+
   if (
     reservation.status !== ReservationStatus.ACTIVE ||
     reservation.paymentState !== PaymentState.PAID ||
-    (reservation.checkIn <= now && !(
-      allowInStayExtension && reservation.checkOut > now &&
-      await commercialReservationChangesEnabled(dependencies.client, dependencies.env, {
-        reservationId: reservation.id, propertyId: reservation.propertyId,
-        organizationId: reservation.property.organizationId,
-      }, now)
-    ))
+    (reservation.checkIn <= now && !eligibleInStayExtension)
   ) {
     throw new GuestReservationModificationError({
       code: "RESERVATION_NOT_ELIGIBLE_FOR_MODIFICATION",
@@ -422,7 +424,7 @@ async function getEligibleReservationByGuestToken(
 
   if (
     reservation.property.status !== "ACTIVE" ||
-    reservation.property.isPublicBookable !== true
+    (reservation.property.isPublicBookable !== true && !eligibleInStayExtension)
   ) {
     throw new GuestReservationModificationError({
       code: "PROPERTY_NOT_AVAILABLE_FOR_MODIFICATION",
