@@ -10,7 +10,13 @@
   "connectedAccountId": "acct_1UPbUgRqmXnirYx7",
   "productionChanged": false,
   "certified": false,
-  "status": "DEPLOYING_BOUNDED_TEST_RUNTIME",
+  "status": "AWAITING_TEST_CHECKOUT",
   "scope": "DISPOSABLE_DATABASE_REAL_CHECKOUT_STRIPE_CONNECT_WEBHOOK_AND_ORIGINAL_RESERVATION_WORKER",
-  "cleanupRequired": "Remove synthetic endpoint; refund synthetic payment; remove temporary API/database after recording receipt"
+  "cleanupRequired": "Remove synthetic endpoint; refund synthetic payment; remove temporary API/database after recording receipt",
+  "run": "qa-pin-ai-hybrid-live-315e184a-e6a8-4256-b15e-532536e7a6fc",
+  "sessionId": "cs_test_a1N2j3A3N0Qrhf4Rkz7LatfKzLGoNO3dsElZ3gZ43BOdZTorxRu0NHXEeP",
+  "webhookEndpointId": "we_1UPj5wRzkK1jKKf3JjUtLsw2",
+  "workerPid": 49,
+  "publicReadyVerified": true,
+  "automaticTimeoutMinutes": 30
 }
