@@ -1,0 +1,16 @@
+{
+  "projectId": "84db0f26-4fd1-413b-bcc5-c5b7014f3a9c",
+  "environmentId": "9833f06b-463f-4551-bda7-a9a1eaaa9aa6",
+  "apiServiceId": "2c020c33-ce17-43e4-ad34-8a708fbd41a0",
+  "databaseServiceId": "217b16af-ca5a-48fa-ad48-1bb1464787fe",
+  "apiDeploymentId": "f493f60b-9b0c-4116-b782-4539762b57a8",
+  "databaseDeploymentId": "41294488-c975-4b3f-9c80-cc16c4c8e32b",
+  "domain": "pin-ai-hybrid-e2e-certification.up.railway.app",
+  "runtimeCommit": "fd4b6cc6063a77223e4caa01cb09c43645014851",
+  "connectedAccountId": "acct_1UPbUgRqmXnirYx7",
+  "productionChanged": false,
+  "certified": false,
+  "status": "DEPLOYING_BOUNDED_TEST_RUNTIME",
+  "scope": "DISPOSABLE_DATABASE_REAL_CHECKOUT_STRIPE_CONNECT_WEBHOOK_AND_ORIGINAL_RESERVATION_WORKER",
+  "cleanupRequired": "Remove synthetic endpoint; refund synthetic payment; remove temporary API/database after recording receipt"
+}
