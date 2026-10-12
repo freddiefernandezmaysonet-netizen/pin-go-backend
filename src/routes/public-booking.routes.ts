@@ -1958,16 +1958,16 @@ const guestAcceptedSecurePreCheckinRequirementText =
         ),
         cancellationPolicySnapshot: cancellationPolicyMetadata,
         cancellationPolicyId: cancellationPolicySnapshot.policyId ?? "",
-        cancellationPolicyName: cancellationPolicySnapshot.name.slice(0, 100),
-        cancellationPolicyType: cancellationPolicySnapshot.type,
+        // Hybrid consent adds four keys. Keep Stripe's 50-key Session budget;
+        // these legacy display fields are already in cancellationPolicySnapshot.
+        ...(pinAIFeeAmountCents > 0 ? {} : {
+          cancellationPolicyName: cancellationPolicySnapshot.name.slice(0, 100),
+          cancellationPolicyType: cancellationPolicySnapshot.type,
+          refundPercentBeforeDeadline: String(cancellationPolicySnapshot.refundPercentBeforeDeadline),
+          refundPercentAfterDeadline: String(cancellationPolicySnapshot.refundPercentAfterDeadline),
+        }),
         freeCancellationHoursBeforeCheckIn: String(
           cancellationPolicySnapshot.freeCancellationHoursBeforeCheckIn
-        ),
-        refundPercentBeforeDeadline: String(
-          cancellationPolicySnapshot.refundPercentBeforeDeadline
-        ),
-        refundPercentAfterDeadline: String(
-          cancellationPolicySnapshot.refundPercentAfterDeadline
         ),
       },
     });
