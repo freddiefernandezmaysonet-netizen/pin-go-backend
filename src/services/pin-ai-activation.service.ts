@@ -40,15 +40,16 @@ function organizationAvailable(row: Prisma.PropertyGetPayload<{ select: typeof p
 }
 function propertyView(row: Prisma.PropertyGetPayload<{ select: typeof propertySelect }>, env: ActivationEnvironment) {
   const managed = row.organization.pinAIRevision > 0 || pinAIAllOrganizationsAvailable(env);
+  const exempt = row.pinAIFeeExempt === true;
+  const collectionReady = !exempt && pinAIConnectBillingAllows(env, row.organization.id) &&
+    env.PIN_AI_RESERVATION_FEE_RECORDING_ENABLED === "true" && !!row.organization.stripeConnectAccountId;
   const runtimeReady = propertyActivationEnabled(env) && env.PIN_AI_GUEST_GATEWAY_ENABLED === "true" &&
     env.PIN_AI_RUNTIME_SHADOW_ENABLED === "true" && env.PIN_AI_RUNTIME_REAL_READ_ENABLED === "true" &&
-    commercialIncidentRuntimeReady(env) && pinAIConnectBillingAllows(env, row.organization.id) &&
-    env.PIN_AI_RESERVATION_FEE_RECORDING_ENABLED === "true" && !!row.organization.stripeConnectAccountId;
+    commercialIncidentRuntimeReady(env) && (exempt || collectionReady);
   return { propertyId: row.id, name: row.name, enabled: row.pinAIEnabled, revision: row.pinAIRevision,
-    billing: { ...PIN_AI_BILLING_TERMS, exempt: row.pinAIFeeExempt === true,
+    billing: { ...PIN_AI_BILLING_TERMS, exempt,
       acceptedAt: row.pinAITermsAcceptedAt, acceptedVersion: row.pinAITermsVersion,
-      collectionReady: pinAIConnectBillingAllows(env, row.organization.id) &&
-        env.PIN_AI_RESERVATION_FEE_RECORDING_ENABLED === "true" && !!row.organization.stripeConnectAccountId },
+      collectionReady },
     organization: { enabled: organizationAvailable(row, env), revision: row.organization.pinAIRevision },
     state: !managed ? "EXISTING_SCOPE" : !propertyActivationEnabled(env) ? "PENDING_ACTIVATION" : !organizationAvailable(row, env) || !row.pinAIEnabled ? "DISABLED" :
       runtimeReady && row.pinAITermsVersion === PIN_AI_BILLING_TERMS.version ? "ENABLED" : "PENDING_ACTIVATION",
@@ -113,8 +114,9 @@ export async function setPinAIProperty(db: PrismaClient, env: ActivationEnvironm
   // Check external compatibility outside the SQL transaction, after authority
   // and tenant checks. The account and revisions are rechecked when committing.
   let checkedAccount: string | null = null;
+  let checkedExempt = false;
   if (input.enabled) {
-    checkedAccount = await db.$transaction(async tx => {
+    const preflight = await db.$transaction(async tx => {
       await authorize(tx, actor);
       const row = await tx.property.findFirst({ where: { id: propertyId, organizationId: actor.orgId, status: "ACTIVE" }, select: propertySelect });
       if (!row) return reject(404, "PROPERTY_NOT_FOUND");
@@ -122,15 +124,20 @@ export async function setPinAIProperty(db: PrismaClient, env: ActivationEnvironm
       if (row.organization.pinAIRevision !== input.orgRevision || row.pinAIRevision !== input.revision) reject(409, "PIN_AI_ACTIVATION_CONFLICT");
       if (!organizationAvailable(row, env)) reject(403, "PIN_AI_ORGANIZATION_NOT_ENABLED");
       if (!row.organization.pinAIRevision && !pinAIAllOrganizationsAvailable(env)) reject(409, "PIN_AI_ORGANIZATION_NOT_CONFIGURED");
-      if (!row.organization.stripeConnectAccountId) reject(422, "PIN_AI_CONNECT_ACCOUNT_REQUIRED");
-      return row.organization.stripeConnectAccountId;
+      const exempt = row.pinAIFeeExempt === true;
+      if (!exempt && !row.organization.stripeConnectAccountId) reject(422, "PIN_AI_CONNECT_ACCOUNT_REQUIRED");
+      return { accountId: row.organization.stripeConnectAccountId, exempt };
     });
-    if (!provider) reject(503, "PIN_AI_CONNECT_VERIFICATION_UNAVAILABLE");
-    let compatible = false;
-    try { compatible = (await provider!.eligibility(checkedAccount!)).compatible; }
-    catch { reject(503, "PIN_AI_CONNECT_VERIFICATION_UNAVAILABLE"); }
-    if (!compatible) reject(422, "PIN_AI_CONNECT_ACCOUNT_INCOMPATIBLE");
-    // Zero available balance is allowed: accrued fees wait for funds.
+    checkedAccount = preflight.accountId;
+    checkedExempt = preflight.exempt;
+    if (!checkedExempt) {
+      if (!provider) reject(503, "PIN_AI_CONNECT_VERIFICATION_UNAVAILABLE");
+      let compatible = false;
+      try { compatible = (await provider!.eligibility(checkedAccount!)).compatible; }
+      catch { reject(503, "PIN_AI_CONNECT_VERIFICATION_UNAVAILABLE"); }
+      if (!compatible) reject(422, "PIN_AI_CONNECT_ACCOUNT_INCOMPATIBLE");
+      // Zero available balance is allowed: accrued fees wait for funds.
+    }
   }
   return db.$transaction(async tx => {
     await authorize(tx, actor);
@@ -140,10 +147,11 @@ export async function setPinAIProperty(db: PrismaClient, env: ActivationEnvironm
     if (row.organization.pinAIRevision !== input.orgRevision || row.pinAIRevision !== input.revision) reject(409, "PIN_AI_ACTIVATION_CONFLICT");
     if (input.enabled && !organizationAvailable(row, env)) reject(403, "PIN_AI_ORGANIZATION_NOT_ENABLED");
     if (!row.organization.pinAIRevision && !pinAIAllOrganizationsAvailable(env)) reject(409, "PIN_AI_ORGANIZATION_NOT_CONFIGURED");
-    if (input.enabled && row.organization.stripeConnectAccountId !== checkedAccount)
+    if (input.enabled && ((row.pinAIFeeExempt === true) !== checkedExempt ||
+        (!checkedExempt && row.organization.stripeConnectAccountId !== checkedAccount)))
       reject(409, "PIN_AI_ACTIVATION_CONFLICT");
     // Global availability is a platform configuration, not host-granted entitlement.
-    // Initialize revision evidence only after host consent and Connect verification.
+    // Initialize after host consent and, for billable properties, Connect verification.
     if (input.enabled && row.organization.pinAIRevision === 0 && pinAIAllOrganizationsAvailable(env)) {
       const initialized = await tx.organization.updateMany({ where: { id: actor.orgId, pinAIRevision: 0 },
         data: { pinAIEnabled: true, pinAIRevision: { increment: 1 } } });
