@@ -1,0 +1,4 @@
+{
+  "compilerOptions": { "noEmit": true, "module": "preserve", "moduleResolution": "bundler", "target": "es2022", "strict": true, "skipLibCheck": true, "types": ["node"] },
+  "include": ["src/pin-ai/hybrid-fee*.ts", "src/services/pin-ai-activation.service.ts", "src/pin-ai/property-activation.ts", "src/pin-ai/reservation-service-evidence.ts"]
+}
