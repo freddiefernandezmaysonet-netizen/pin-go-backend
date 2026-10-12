@@ -1,6 +1,6 @@
 {
-  "checkedAt": "2026-10-12T21:12:23.188Z",
-  "backendMain": "6939b2d",
+  "checkedAt": "2026-10-12T21:15:10.355Z",
+  "backendMain": "6939b2dc3e32cd6c9b95615fb3c18988db525d3d",
   "mergedPRs": {
     "backend": [
       405,
@@ -36,102 +36,93 @@
     {
       "name": "device-health-worker",
       "id": "3b613117-b271-4720-9f46-6cdadd53714b",
-      "status": "BUILDING",
-      "createdAt": "2026-10-12T21:09:42.935Z",
-      "url": null
+      "status": "SUCCESS",
+      "sha": "6939b2dc3e32cd6c9b95615fb3c18988db525d3d"
     },
     {
       "name": "demo-follow-up-worker",
       "id": "b5d484a2-e5d5-41be-b6dd-abe4126b1674",
       "status": "SUCCESS",
-      "createdAt": "2026-10-12T21:09:47.701Z",
-      "url": null
+      "sha": "6939b2dc3e32cd6c9b95615fb3c18988db525d3d"
     },
     {
       "name": "pms-watchdog-worker",
       "id": "6a20ecd3-447e-4aa9-9aef-713a4b804edf",
       "status": "SUCCESS",
-      "createdAt": "2026-10-12T21:09:53.047Z",
-      "url": null
+      "sha": "6939b2dc3e32cd6c9b95615fb3c18988db525d3d"
     },
     {
       "name": "pin-go-channex-ari-dispatch",
       "id": "205ad71f-c677-41d2-a589-47ca39fc7887",
-      "status": "BUILDING",
-      "createdAt": "2026-10-12T21:09:57.970Z",
-      "url": null
+      "status": "SUCCESS",
+      "sha": "6939b2dc3e32cd6c9b95615fb3c18988db525d3d"
     },
     {
       "name": "pin-go-backend",
       "id": "d0a89b4e-68a8-4fb3-8dca-3fb8fea9403e",
-      "status": "BUILDING",
-      "createdAt": "2026-10-12T21:10:03.178Z",
-      "url": null
+      "status": "SUCCESS",
+      "sha": "6939b2dc3e32cd6c9b95615fb3c18988db525d3d"
     },
     {
       "name": "pin-go-channex-global-feed",
       "id": "db2c3811-fe47-4450-a721-76245cf8e2cc",
-      "status": "DEPLOYING",
-      "createdAt": "2026-10-12T21:10:10.246Z",
-      "url": null
+      "status": "SUCCESS",
+      "sha": "6939b2dc3e32cd6c9b95615fb3c18988db525d3d"
     },
     {
       "name": "message-retry-worker",
       "id": "e4760c36-7518-4278-a3bd-2206578e0e71",
-      "status": "BUILDING",
-      "createdAt": "2026-10-12T21:10:15.061Z",
-      "url": null
+      "status": "SUCCESS",
+      "sha": "6939b2dc3e32cd6c9b95615fb3c18988db525d3d"
     },
     {
       "name": "pin-go-pms-webhook-recovery",
       "id": "18c2f666-0057-4c4b-8820-efeb16d3b218",
       "status": "SUCCESS",
-      "createdAt": "2026-10-12T21:10:20.817Z",
-      "url": null
+      "sha": "6939b2dc3e32cd6c9b95615fb3c18988db525d3d"
     },
     {
       "name": "pin-ai-channex-worker",
       "id": "9e7c8305-0835-404f-8ee2-9aca281d56b1",
       "status": "SUCCESS",
-      "createdAt": "2026-10-12T21:10:26.707Z",
-      "url": null
+      "sha": "6939b2dc3e32cd6c9b95615fb3c18988db525d3d"
     },
     {
       "name": "nfc-watchdog-worker",
       "id": "f28c3a8b-9a8e-41c2-88f2-f64597732109",
-      "status": "BUILDING",
-      "createdAt": "2026-10-12T21:10:32.289Z",
-      "url": null
+      "status": "SUCCESS",
+      "sha": "6939b2dc3e32cd6c9b95615fb3c18988db525d3d"
     },
     {
       "name": "stay-time-recovery-worker",
       "id": "0ca1f2ed-f563-4054-839d-f84a5a6fc6df",
-      "status": "BUILDING",
-      "createdAt": "2026-10-12T21:10:36.773Z",
-      "url": null
+      "status": "SUCCESS",
+      "sha": "6939b2dc3e32cd6c9b95615fb3c18988db525d3d"
     },
     {
       "name": "reservation-worker",
       "id": "1fd81a2e-1910-4242-be1b-5022191b61b3",
-      "status": "BUILDING",
-      "createdAt": "2026-10-12T21:10:42.411Z",
-      "url": null
+      "status": "SUCCESS",
+      "sha": "6939b2dc3e32cd6c9b95615fb3c18988db525d3d"
     },
     {
       "name": "review-invitation-worker",
       "id": "0370ddd3-4e04-4e0a-aa63-f1413de9b325",
-      "status": "BUILDING",
-      "createdAt": "2026-10-12T21:10:47.722Z",
-      "url": null
+      "status": "SUCCESS",
+      "sha": "6939b2dc3e32cd6c9b95615fb3c18988db525d3d"
     },
     {
       "name": "automation.worker",
       "id": "193ed94f-75c6-451b-96ad-428980f2ecac",
-      "status": "BUILDING",
-      "createdAt": "2026-10-12T21:10:53.336Z",
-      "url": null
+      "status": "SUCCESS",
+      "sha": "6939b2dc3e32cd6c9b95615fb3c18988db525d3d"
     }
   ],
   "temporarySandboxCleanup": "BLOCKED: connector cancelled deletion despite explicit authorization. Disposable database remains.",
-  "diagnosticFunction": "Returned to idle; no database/Stripe requests."
+  "diagnosticFunction": "Returned to idle; no database/Stripe requests.",
+  "health": {
+    "health200": true,
+    "ready200": true
+  },
+  "releaseComplete": true
 }
