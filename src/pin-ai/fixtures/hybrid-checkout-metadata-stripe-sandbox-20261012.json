@@ -1,0 +1,25 @@
+{
+  "candidateCommit": "3627eeac8372edf95fb69f88bd0c755217d0c5a9",
+  "deploymentId": "79a55c18-8db5-40c2-98fa-da4a3afae95f",
+  "message": "",
+  "certificate": "PIN_AI_CHECKOUT_METADATA",
+  "certified": true,
+  "receipts": [
+    {
+      "enabled": false,
+      "sessionId": "cs_test_a1dYhFPMj4rEoIyoxBRovCZJGb5d4WtDQjDstaL8mesCLQ0nY24t1StA2S",
+      "metadataKeys": 50,
+      "guestAmountCents": 10000,
+      "pinAITermsPreserved": true
+    },
+    {
+      "enabled": true,
+      "sessionId": "cs_test_a1qQiKku6Dcflp7vmGbBarML0Ivy8J002nPF9D1ZGgOw113isx2oeCXz5s",
+      "metadataKeys": 50,
+      "guestAmountCents": 10000,
+      "pinAITermsPreserved": true
+    }
+  ],
+  "cleanup": "CHECKOUTS_EXPIRED",
+  "scope": "REAL_STRIPE_SESSION_CREATE; ROUTE_METADATA_EXPRESSION; PUBLIC_HTTP_NOT_EXERCISED"
+}
