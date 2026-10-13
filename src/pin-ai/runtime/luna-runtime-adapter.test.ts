@@ -26,6 +26,26 @@ function resumed() {
   return f;
 }
 
+test("coordinate local search is independently gated and rejects disabled calls before execution", async () => {
+  const disabled = createTurnFixture({ actions: () => [{ name: "get_access_status" }, { name: "search_local_places", arguments: { query: "restaurants" } }] });
+  await assert.rejects(run(transport(disabled.fetchImpl)), /LOCAL_PLACES_TOOL_DISABLED/);
+  const enabled = createTurnFixture({ actions: () => [{ name: "search_local_places", arguments: { query: "restaurants" } }] });
+  let executions = 0;
+  const result = await run(transport(enabled.fetchImpl, { webSearch: { enabled: false, localPlacesEnabled: true } }), {
+    async execute(name, args) {
+      assert.equal(name, "search_local_places");
+      assert.deepEqual(args, { query: "restaurants" });
+      executions += 1;
+      return { decision: "LOCAL_PLACES_SEARCH_COMPLETED", places: [{ name: "Nearby Restaurant" }], actionsExecuted: false };
+    },
+  });
+  assert.equal(executions, 1);
+  const advertised = (enabled.createPayload.agent as { tools: TestItem[] }).tools;
+  assert.equal(advertised.some(tool => tool.name === "search_local_places"), true);
+  assert.equal(advertised.some(tool => tool.type === "web_search"), false);
+  assert.equal(result.toolCalls[0]?.name, "search_local_places");
+});
+
 test("Luna runtime adapter executes read tools but shadows escalation", async () => {
   const f = createTurnFixture({ actions: () => [{ name: "get_property_knowledge" }, { name: "escalate_to_host" }],
     answer: () => "I checked the property guidance and would escalate this for review." });
@@ -286,8 +306,8 @@ test("runtime preserves read-only function and web-search evidence in the same c
   assert.equal(result.requiresHumanReview, true); assert.equal(result.webSearch?.callCount, 1);
 });
 
-test("runtime rejects disabled tools and invalid arguments before execution", async () => {
-  for (const action of [{ name: "search_local_places" }, ...[null, "{}", []].map((arguments_) => ({ name: "get_access_status", arguments: arguments_ }))]) {
+test("runtime rejects unregistered tools and invalid arguments before execution", async () => {
+  for (const action of [{ name: "unregistered_tool" }, ...[null, "{}", []].map((arguments_) => ({ name: "get_access_status", arguments: arguments_ }))]) {
     let executed = 0;
     const f = createTurnFixture({ actions: () => [action] });
     await assert.rejects(run(transport(f.fetchImpl), { async execute() { executed += 1; return {}; } }), /UNAPPROVED_TOOL|TOOL_ARGUMENTS_INVALID/);

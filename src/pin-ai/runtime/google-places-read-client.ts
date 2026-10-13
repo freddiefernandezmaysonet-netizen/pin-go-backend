@@ -98,6 +98,8 @@ export async function searchGooglePlaces(
       .filter(
         (place) => place.straightLineDistanceMeters <= input.radiusMeters,
       )
+      .filter((place) => place.businessStatus !== "CLOSED_PERMANENTLY")
+      .sort((a, b) => a.straightLineDistanceMeters - b.straightLineDistanceMeters)
       .slice(0, input.maxResults),
   };
 }
@@ -116,7 +118,8 @@ function normalizePlace(
   const latitude = finiteNumber(location.latitude);
   const longitude = finiteNumber(location.longitude);
 
-  if (!name || latitude === null || longitude === null) return null;
+  if (!name || latitude === null || longitude === null ||
+      latitude < -90 || latitude > 90 || longitude < -180 || longitude > 180) return null;
 
   return {
     name,
@@ -168,6 +171,7 @@ function haversineDistanceMeters(
 }
 
 function finiteNumber(value: unknown): number | null {
+  if (typeof value !== "number") return null;
   const parsed = Number(value);
   return Number.isFinite(parsed) ? parsed : null;
 }

@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import type { PinAIRuntimeRequest } from "./contracts.js";
+import type { PinAIRuntimeRequest, PinAIRuntimeToolName } from "./contracts.js";
 import {
   assertMemoryMatchesRequest,
   createConversationMemory,
@@ -241,7 +241,7 @@ test("guarded executor permits read-only payment context", async () => {
   assert.equal(result.guestId, "guest-a");
 });
 
-test("guarded executor rejects disabled tools before delegation", async () => {
+test("guarded executor rejects unregistered tools before delegation", async () => {
   let delegateExecutions = 0;
   const delegate: PinAIRuntimeToolExecutor = {
     async execute() {
@@ -253,7 +253,7 @@ test("guarded executor rejects disabled tools before delegation", async () => {
   const executor = new GuardedPinAIRuntimeToolExecutor(delegate);
   const memory = createConversationMemory(request);
 
-  for (const tool of ["search_local_places"] as const) {
+  for (const tool of ["unknown_tool" as PinAIRuntimeToolName]) {
     await assert.rejects(
       executor.execute(tool, {}, request, memory),
       new RegExp(`PIN_AI_RUNTIME_TOOL_NOT_ENABLED:${tool}`),
