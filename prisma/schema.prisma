@@ -3669,6 +3669,14 @@ model SalesVoiceCall {
   answeredAt       DateTime?
   endedAt          DateTime?
   durationSeconds  Int?
+  // Live SIP billing observation and confirmed sideband finalization only.
+  lastUsageSeconds      Float?
+  usageObservedAt       DateTime?
+  finalUsageSeconds     Float?
+  finalizedAt           DateTime?
+  closeReason           String?        @db.VarChar(40)
+  hangupClaimedAt       DateTime?
+  hangupAcknowledgedAt  DateTime?
   createdAt        DateTime       @default(now())
   updatedAt        DateTime       @updatedAt
 
