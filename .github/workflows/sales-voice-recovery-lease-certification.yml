@@ -40,20 +40,28 @@ jobs:
         with:
           node-version: '22'
           cache: npm
-      - name: Exact five-file scope and additive migration only
+      - name: Exact seven-file commercial scope and additive migration only
         run: |
           node --input-type=module <<'NODE'
           import assert from 'node:assert/strict';
           import {execFileSync} from 'node:child_process';
-          import {readFileSync} from 'node:fs';
+          import {readFileSync,writeFileSync} from 'node:fs';
           const files=execFileSync('git',['diff','--name-only',process.env.BASE_SHA,'HEAD'],{encoding:'utf8'}).trim().split('\n').sort();
           assert.deepEqual(files,[
+            '.github/workflows/sales-voice-crm-foundation-v1.yml',
+            '.github/workflows/sales-voice-main-integration-certification.yml',
             '.github/workflows/sales-voice-recovery-lease-certification.yml',
             'prisma/migrations/20261013221500_sales_voice_recovery_lease_v1/migration.sql',
             'prisma/schema.prisma',
             'src/services/sales-voice-recovery-lease.service.test.ts',
             'src/services/sales-voice-recovery-lease.service.ts',
           ]);
+          const before=execFileSync('git',['show',process.env.BASE_SHA+':prisma/schema.prisma'],{encoding:'utf8'});
+          const after=readFileSync('prisma/schema.prisma','utf8');
+          const addition="  // Durable, fenced sideband recovery ownership. Unused until certified.\n  recoveryLeaseOwner   String?   @db.VarChar(80)\n  recoveryLeaseUntil   DateTime?\n  recoveryLeaseEpoch   Int       @default(0)\n";
+          assert.equal(after.split(addition).length,2,'Exactly one lease block required');
+          assert.equal(after.replace(addition,''),before,'Existing schema must remain byte-for-byte intact');
+          writeFileSync(process.env.RUNNER_TEMP+'/sales-voice-base.prisma',before);
           const sql=readFileSync('prisma/migrations/20261013221500_sales_voice_recovery_lease_v1/migration.sql','utf8');
           assert.match(sql,/ALTER TABLE "SalesVoiceCall"/);
           assert.equal((sql.match(/ADD COLUMN/g)||[]).length,3);
@@ -65,12 +73,34 @@ jobs:
           npm ci --ignore-scripts --no-audit --no-fund
           ./node_modules/.bin/prisma validate
           ./node_modules/.bin/prisma generate
+      - name: Apply actual migration to populated baseline and verify schema parity
+        run: |
+          ./node_modules/.bin/prisma db push --schema "$RUNNER_TEMP/sales-voice-base.prisma" --skip-generate
+          ./node_modules/.bin/prisma db execute --url "$DATABASE_URL" --stdin <<'SQL'
+          INSERT INTO "SalesVoiceCall" ("id","providerCallId","provider","status","lastUsageSeconds","updatedAt")
+          VALUES ('recovery-migration-sentinel','live_migration_sentinel','OPENAI_LIVE_SIP','ACCEPTED',17.5,TIMESTAMP '2026-01-01 00:00:00');
+          SQL
+          ./node_modules/.bin/prisma db execute --url "$DATABASE_URL" --file prisma/migrations/20261013221500_sales_voice_recovery_lease_v1/migration.sql
+          ./node_modules/.bin/prisma migrate diff --from-url "$DATABASE_URL" --to-schema-datamodel prisma/schema.prisma --exit-code
+          node --input-type=module <<'NODE'
+          import assert from 'node:assert/strict';
+          import {PrismaClient} from '@prisma/client';
+          const db=new PrismaClient();
+          try {
+            const row=await db.salesVoiceCall.findUniqueOrThrow({where:{id:'recovery-migration-sentinel'}});
+            assert.equal(row.status,'ACCEPTED');
+            assert.equal(row.lastUsageSeconds,17.5);
+            assert.equal(row.updatedAt.toISOString(),'2026-01-01T00:00:00.000Z');
+            assert.equal(row.recoveryLeaseOwner,null);
+            assert.equal(row.recoveryLeaseUntil,null);
+            assert.equal(row.recoveryLeaseEpoch,0);
+          } finally { await db.$disconnect(); }
+          NODE
       - name: Typecheck and test lease fencing against disposable PostgreSQL
         run: |
           ./node_modules/.bin/tsc --noEmit --skipLibCheck --target es2022 --module nodenext --moduleResolution nodenext --esModuleInterop \
             src/services/sales-voice-recovery-lease.service.ts \
             src/services/sales-voice-recovery-lease.service.test.ts
-          ./node_modules/.bin/prisma db push --skip-generate
           node --import tsx --test src/services/sales-voice-recovery-lease.service.test.ts
       - name: Safety boundary
         run: |
