@@ -55,6 +55,7 @@ async function request(input: {
   corruptSignature?: boolean;
   overridePath?: string;
   rawText?: string;
+  signedRawText?: string;
 }) {
   const store = fixture();
   const app = express();
@@ -71,7 +72,7 @@ async function request(input: {
     const stamp = String(Math.floor(Date.now()/1000));
     const whid = "wh_sales_mount_123";
     const sig = createHmac("sha256", Buffer.from(fixtureSecret.slice(6), "base64"))
-      .update(whid + "." + stamp + "." + raw).digest("base64");
+      .update(whid + "." + stamp + "." + (input.signedRawText ?? raw)).digest("base64");
     const res = await fetch(
       "http://127.0.0.1:" + address.port +
         (input.overridePath ?? "/webhooks/openai/sales-live-voice"), {
@@ -132,11 +133,9 @@ test("raw byte tampering is rejected even with a previously valid signature", as
   const original=JSON.stringify(body);
   const tampered=original+" ";
   const env=enabledConfig;
-  // The helper signs the exact submitted body; malformed JSON instead checks
-  // strict parsing. Authentication of changed bytes is tested in SIP auth suite.
-  const r=await request({env,rawText:tampered});
-  assert.equal(r.status,202);
-  assert.equal(r.records.length,1);
+  // Signature was computed for the original, but the network body was changed.
+  const r=await request({env,rawText:tampered,signedRawText:original});
+  assert.deepEqual(r,{status:401,records:[],writes:0});
 });
 test("main server registers the signed route before the global JSON parser", () => {
   const source=readFileSync(new URL("../server.ts",import.meta.url),"utf8");
