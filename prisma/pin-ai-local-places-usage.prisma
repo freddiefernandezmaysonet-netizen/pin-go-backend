@@ -1,0 +1,5 @@
+model PinAILocalPlacesUsageBucket {
+  monthKey  String   @id
+  attempts  Int      @default(0)
+  updatedAt DateTime @updatedAt
+}
