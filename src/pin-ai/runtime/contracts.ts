@@ -1,4 +1,5 @@
 import type { PropertyKnowledgeSnapshot } from "../property-knowledge.service.js";
+import type { StoredPropertyLocation } from "./web-search-location.js";
 
 export type PinAIRuntimeToolName =
   | "get_property_knowledge"
@@ -52,6 +53,7 @@ export type PinAIStayContext = Readonly<{
     checkOut: string;
   }>;
   propertyKnowledge?: PropertyKnowledgeSnapshot;
+  propertyLocation?: StoredPropertyLocation | null;
 }>;
 
 export type PinAIRuntimeRequest = Readonly<{

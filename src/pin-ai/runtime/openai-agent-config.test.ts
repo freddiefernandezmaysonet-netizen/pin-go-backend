@@ -23,6 +23,14 @@ const EXPECTED_FUNCTION_TOOLS = [
   "escalate_to_host",
 ] as const;
 
+test("location guidance uses stored reservation coordinates and requires current business-status evidence", () => {
+  assert.match(PIN_AI_OPENAI_AGENT_INSTRUCTIONS, /context\.propertyLocation/);
+  assert.match(PIN_AI_OPENAI_AGENT_INSTRUCTIONS, /Do not display raw coordinates unsolicited/);
+  assert.match(PIN_AI_OPENAI_AGENT_INSTRUCTIONS, /Exclude businesses marked permanently closed/);
+  assert.match(PIN_AI_OPENAI_AGENT_INSTRUCTIONS, /permanent closure, temporary closure and being closed at the current hour/);
+  assert.match(PIN_AI_OPENAI_AGENT_INSTRUCTIONS, /cannot verify current nearby businesses/);
+});
+
 test("saved-agent manifest contains exactly the certified Runtime V1 function tools", () => {
   const tools = buildPinAIOpenAITools();
   const functionToolNames = tools

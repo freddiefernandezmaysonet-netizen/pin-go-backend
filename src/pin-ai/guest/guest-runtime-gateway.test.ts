@@ -286,6 +286,8 @@ test("scopes one valid token to one active reservation and sends no guest PII", 
       region: "PR",
       country: "PR",
       timezone: "America/Puerto_Rico",
+      latitude: { toString: () => "18.4655000" },
+      longitude: { toString: () => "-66.1057000" },
     },
   });
   let receivedRequest: PinAIRuntimeRequest | undefined;
@@ -320,6 +322,11 @@ test("scopes one valid token to one active reservation and sends no guest PII", 
   assert.equal(receivedRequest?.context.reservationId, "reservation-a");
   assert.equal(receivedRequest?.context.preferredLanguage, "es");
   assert.equal(receivedRequest?.context.currentLocalDateTime, "2026-09-21T12:00:00-04:00");
+  assert.deepEqual(receivedRequest?.context.propertyLocation, {
+    source: "PERSISTED_PROPERTY", latitude: 18.4655, longitude: -66.1057,
+    city: "San Juan", region: "PR", country: "PR",
+  });
+  assert.doesNotMatch(JSON.stringify(result), /latitude|longitude|18\.4655|66\.1057/);
   assert.deepEqual(
     propertyCalls.map((call) => (call as { where: unknown }).where),
     [{ id: "property-a", organizationId: "org-a", status: "ACTIVE" }],

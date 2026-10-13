@@ -4,6 +4,7 @@ import { createPinAIInboxDrafts, type DraftHistory } from "./pin-ai-draft.js";
 import { buildPinAIInboxDraftRuntime, draftTools, pinAIDraftsEnabled } from "./pin-ai-draft.runtime.js";
 import { createConversationMemory } from "../pin-ai/runtime/conversation-memory.js";
 import type { PinAIRuntimeRequest } from "../pin-ai/runtime/contracts.js";
+import { createTurnFixture } from "../pin-ai/runtime/runtime-turn.test-fixture.js";
 
 const scope = { organizationId: "org-a", propertyId: "property-a" };
 const input = { ...scope, threadId: "thread-a", messageId: "message-a" };
@@ -81,4 +82,33 @@ test("booking context lookup requires exact provider, booking, property and orga
   await assert.rejects(draft(input), /RESERVATION_NOT_LINKED/);
   assert.deepEqual(query.where, { propertyId: "property-a", externalProvider: "CHANNEX", externalId: "booking-a", property: { organizationId: "org-a", status: "ACTIVE" }, status: "ACTIVE" });
   assert.deepEqual(query.select, { id: true, preferredLanguage: true });
+});
+
+test("OTA coordinates reach the model only after an exact reservation link, never for inquiries", async t => {
+  let fixture = createTurnFixture({ answer: () => "Puedo ayudarte con la ubicación de tu estadía." });
+  t.mock.method(globalThis, "fetch", async (url: string | URL | Request, init?: RequestInit) => {
+    const result = await fixture.fetchImpl(String(url), { method: init?.method === "POST" ? "POST" : "GET",
+      headers: {}, ...(typeof init?.body === "string" ? { body: init.body } : {}) });
+    return new Response(JSON.stringify(await result.json()), { status: 200 });
+  });
+  for (const linked of [false, true]) {
+    fixture = createTurnFixture({ answer: () => "Puedo ayudarte con la ubicación de tu estadía." });
+    const property = { id: "property-a", organizationId: "org-a", name: "Test", timezone: "America/Puerto_Rico",
+      city: "San Juan", region: "PR", country: "PR", latitude: "18.4655", longitude: "-66.1057",
+      amenities: [], locks: [], propertyDevices: [], guestAgreements: [], cancellationPolicies: [], knowledgeEntries: [] };
+    const draft = buildPinAIInboxDraftRuntime({ env: { PIN_AI_CHANNEX_DRAFT_ENABLED: "true",
+      PIN_AI_CHANNEX_DRAFT_ORGANIZATION_IDS: "org-a", PIN_AI_CHANNEX_DRAFT_PROPERTY_IDS: "property-a",
+      OPENAI_API_KEY: "test-key", PIN_AI_OPENAI_AGENT_ID: "agent_test123" },
+      prisma: { property: { findFirst: async (args: any) => {
+        assert.deepEqual(args.where, { id: "property-a", organizationId: "org-a", status: "ACTIVE" }); return property;
+      } }, propertyReview: { aggregate: async () => ({ _avg: { overallRating: null }, _count: { _all: 0 } }) },
+        reservation: { findMany: async () => [{ id: "reservation-a", preferredLanguage: "es" }] } } as any,
+      messages: async () => { const h = history(); if (linked) h.thread.bookingId = "booking-a"; return h; } });
+    await draft(input);
+    const supplied = JSON.parse(fixture.inputs[0]!).context.propertyLocation;
+    if (linked) assert.deepEqual(supplied, { source: "PERSISTED_PROPERTY", latitude: 18.4655, longitude: -66.1057,
+      city: "San Juan", region: "PR", country: "PR" });
+    else assert.equal(supplied, undefined);
+    assert.equal((fixture.createPayload.agent as { tools: { name?: string }[] }).tools.some(t => t.name === "search_local_places"), false);
+  }
 });
