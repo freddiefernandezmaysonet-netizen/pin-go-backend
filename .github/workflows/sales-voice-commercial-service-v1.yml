@@ -1,0 +1,93 @@
+name: Sales Voice Commercial Service V1
+
+on:
+  pull_request:
+    branches:
+      - agent/sales-voice-crm-foundation-v1-20261013
+      - main
+    paths:
+      - 'src/services/sales-voice-commercial.service.ts'
+      - 'src/services/sales-voice-commercial.service.test.ts'
+      - '.github/workflows/sales-voice-commercial-service-v1.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  certify:
+    name: Commercial service read/write safety contracts
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: pingo_sales_voice_service_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d pingo_sales_voice_service_test"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      DATABASE_URL: postgresql://postgres:postgres@127.0.0.1:5432/pingo_sales_voice_service_test
+      SALES_VOICE_SERVICE_TEST_DATABASE_URL: postgresql://postgres:postgres@127.0.0.1:5432/pingo_sales_voice_service_test
+      BASE_SHA: ${{ github.event.pull_request.base.sha }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+      - name: Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+      - name: Verify isolated three-file diff on PRs
+        if: github.event_name == 'pull_request'
+        run: |
+          node --input-type=module <<'NODE'
+          import assert from 'node:assert/strict';
+          import { execFileSync } from 'node:child_process';
+          const changed=execFileSync('git',['diff','--name-only',process.env.BASE_SHA,'HEAD'],{encoding:'utf8'}).trim().split('\n');
+          const allowed=new Set([
+            'src/services/sales-voice-commercial.service.ts',
+            'src/services/sales-voice-commercial.service.test.ts',
+            '.github/workflows/sales-voice-commercial-service-v1.yml',
+          ]);
+          assert.deepEqual(new Set(changed), allowed);
+          console.log('PASS: only new sales commercial service files changed');
+          NODE
+          git diff --check "$BASE_SHA" HEAD
+      - name: Install locked dependencies
+        run: npm ci --ignore-scripts --no-audit --no-fund
+      - name: Validate Prisma schema and generate client
+        run: |
+          ./node_modules/.bin/prisma validate
+          ./node_modules/.bin/prisma generate
+      - name: Typecheck isolated service and tests
+        run: |
+          ./node_modules/.bin/tsc --noEmit --skipLibCheck --target es2022 --module nodenext --moduleResolution nodenext --esModuleInterop src/services/sales-voice-commercial.service.ts src/services/sales-voice-commercial.service.test.ts
+      - name: Create ONLY disposable local database schema
+        run: |
+          node --input-type=module <<'NODE'
+          import assert from 'node:assert/strict';
+          const db=new URL(process.env.DATABASE_URL);
+          assert.equal(db.hostname,'127.0.0.1');
+          assert.equal(db.pathname,'/pingo_sales_voice_service_test');
+          assert.equal(process.env.DATABASE_URL,process.env.SALES_VOICE_SERVICE_TEST_DATABASE_URL);
+          NODE
+          ./node_modules/.bin/prisma db push --skip-generate
+      - name: PostgreSQL end-to-end service contract tests
+        run: node --import tsx --test src/services/sales-voice-commercial.service.test.ts
+      - name: Scope statement
+        run: |
+          echo '## Sales Voice Commercial Service' >> "$GITHUB_STEP_SUMMARY"
+          echo 'Isolated internal service, synthetic disposable PostgreSQL tests, and focused TypeScript passed.' >> "$GITHUB_STEP_SUMMARY"
+          echo 'No REST/SIP webhook, OpenAI calls, Twilio provisioning, SMS/email delivery, signup mutation, or deployment.' >> "$GITHUB_STEP_SUMMARY"
+          echo 'Prerequisite CRM schema remains Draft in PR #411. Do not merge/deploy this stacked PR independently.' >> "$GITHUB_STEP_SUMMARY"
