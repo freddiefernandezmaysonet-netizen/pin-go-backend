@@ -21,6 +21,7 @@ jobs:
     timeout-minutes: 10
     env:
       BASE_SHA: ${{ github.event.pull_request.base.sha }}
+      DATABASE_URL: postgresql://fixture:fixture@127.0.0.1:5432/pingo_ws_schema_validation
     steps:
       - name: Checkout exact commit
         uses: actions/checkout@v4
