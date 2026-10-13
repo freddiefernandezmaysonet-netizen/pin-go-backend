@@ -1,0 +1,85 @@
+name: Sales Voice Sideband WebSocket Transport V1
+
+on:
+  pull_request:
+    branches:
+      - agent/sales-voice-sideband-supervisor-v1-20261013
+    paths:
+      - 'package.json'
+      - 'package-lock.json'
+      - 'src/services/sales-voice-sideband-ws-transport.service.ts'
+      - 'src/services/sales-voice-sideband-ws-transport.service.test.ts'
+      - '.github/workflows/sales-voice-sideband-ws-transport-v1.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  certify:
+    name: Pinned ws authenticated transport and loopback handshake
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      BASE_SHA: ${{ github.event.pull_request.base.sha }}
+    steps:
+      - name: Checkout exact commit
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          persist-credentials: false
+          fetch-depth: 0
+      - name: Setup Node 22
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+      - name: Exact isolated five-file diff
+        run: |
+          node --input-type=module <<'NODE'
+          import assert from 'node:assert/strict';
+          import { execFileSync } from 'node:child_process';
+          const paths = execFileSync('git',['diff','--name-only',process.env.BASE_SHA,'HEAD'],{encoding:'utf8'}).trim().split('\n').sort();
+          assert.deepEqual(paths,[
+            '.github/workflows/sales-voice-sideband-ws-transport-v1.yml',
+            'package-lock.json',
+            'package.json',
+            'src/services/sales-voice-sideband-ws-transport.service.test.ts',
+            'src/services/sales-voice-sideband-ws-transport.service.ts',
+          ]);
+          NODE
+          git diff --check "$BASE_SHA" HEAD
+      - name: Locked install and transport dependency pin
+        run: |
+          npm ci --ignore-scripts --no-audit --no-fund
+          npm ls ws --depth=0
+          node - <<'NODE'
+          const assert=require('node:assert/strict');
+          const pkg=require('./package.json');
+          const lock=require('./package-lock.json');
+          assert.equal(pkg.dependencies.ws,'8.18.3');
+          assert.equal(lock.packages[''].dependencies.ws,'8.18.3');
+          assert.equal(lock.packages['node_modules/ws'].version,'8.18.3');
+          assert.equal(require('ws/package.json').version,'8.18.3');
+          NODE
+      - name: Focused TypeScript validation
+        run: |
+          ./node_modules/.bin/tsc --noEmit --skipLibCheck --target es2022 --module nodenext --moduleResolution nodenext --esModuleInterop src/services/sales-voice-sideband-ws-transport.service.ts src/services/sales-voice-sideband-ws-transport.service.test.ts
+      - name: Test real ws client against loopback fixture only
+        run: node --import tsx --test src/services/sales-voice-sideband-ws-transport.service.test.ts
+      - name: Confirm preserved default server build (not started)
+        run: |
+          node --input-type=module <<'NODE'
+          import { build } from 'esbuild';
+          await build({
+            entryPoints:['src/server.ts'],
+            bundle:true, platform:'node', format:'esm',
+            packages:'external', outfile:'/tmp/sales-ws-server.mjs'
+          });
+          NODE
+      - name: State strict release boundaries
+        run: |
+          echo '## Sideband WebSocket transport' >> "$GITHUB_STEP_SUMMARY"
+          echo 'Pinned ws, localhost HTTP upgrade + authorization, exact URL/options checks, focused TS and server bundle passed.' >> "$GITHUB_STEP_SUMMARY"
+          echo 'Local loopback is NOT a real OpenAI/Twilio provider attach and does not prove TLS interoperability.' >> "$GITHUB_STEP_SUMMARY"
+          echo 'Unmounted and disabled: no OpenAI key, Railway deploy, SIP call, WebSocket session or T-Mobile change.' >> "$GITHUB_STEP_SUMMARY"
+          echo 'Depends on draft #417 and earlier stack. Do not merge independently.' >> "$GITHUB_STEP_SUMMARY"
