@@ -37,7 +37,8 @@ export async function runIsolatedSalesVoiceWatchdogWorker(
     return;
   }
   const settings = salesVoiceWorkerSettings(env);
-  const apiKey = env.OPENAI_API_KEY;
+  // Never reuse the guest Pin AI credential for commercial telephone calls.
+  const apiKey = env.SALES_VOICE_OPENAI_API_KEY;
   if (!apiKey || !apiKey.startsWith("sk-")) {
     throw new Error("SALES_VOICE_WATCHDOG_MISSING_API_KEY");
   }
