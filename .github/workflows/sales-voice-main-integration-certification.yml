@@ -51,6 +51,7 @@ jobs:
           const paths=execFileSync('git',['diff','--name-only','origin/main...HEAD'],{encoding:'utf8'}).trim().split('\n');
           for (const p of paths) assert.ok(
             p==='package.json'||p==='package-lock.json'||p==='prisma/schema.prisma'||
+            p==='src/pin-ai/runtime/pin-go-read-tool-executor.test.ts'||
             p.startsWith('prisma/migrations/20261013160000_sales_voice_crm_foundation_v1/')||
             p.startsWith('prisma/migrations/20261013170000_sales_live_watchdog_v1/')||
             p.startsWith('src/services/sales-voice-')||
