@@ -421,8 +421,11 @@ test("real read adapter returns scoped reservation context without guest PII or 
 
 test("local recommendation area comes from the scoped property without address or coordinates", async () => {
   const prisma = createPrismaFixture();
-  const originalRead = prisma.reservation.findFirst.bind(prisma.reservation);
-  prisma.reservation.findFirst = async (args: any) => {
+  // This test deliberately overrides only the reservation finder; preserve
+  // runtime assertions while widening the fixture mock's inferred union type.
+  const reservationReader = prisma.reservation as { findFirst(args: any): Promise<any> };
+  const originalRead = reservationReader.findFirst.bind(reservationReader);
+  reservationReader.findFirst = async (args: any) => {
     assert.deepEqual(args.where, {
       id: "reservation-a", propertyId: "property-a", property: { organizationId: "org-a" },
     });
