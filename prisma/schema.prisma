@@ -34,6 +34,7 @@ model Organization {
   deviceHealths    DeviceHealth[]
   lockGroups       LockGroup[]
   pendingSignups   PendingSignup[]
+  salesProspects   SalesProspect[]
   people           Person[]
   pmsConnections   PmsConnection[]
   properties       Property[]
@@ -3619,4 +3620,60 @@ model CleaningChecklistItemEvent {
   createdAt DateTime @default(now())
   item CleaningTaskChecklistItem @relation(fields: [checklistItemId], references: [id], onDelete: Cascade)
   @@index([checklistItemId, createdAt])
+}
+
+ 
+// Independent CRM records for inbound commercial conversations.
+// Do not infer customer identity from caller ID alone.
+model SalesProspect {
+  id                      String           @id @default(cuid())
+  fullName                String?          @db.VarChar(200)
+  email                   String?          @db.VarChar(320)
+  phoneE164               String?          @db.VarChar(20)
+  organizationName        String?          @db.VarChar(200)
+  propertyCount           Int?
+  preferredLanguage       String?          @db.VarChar(8)
+  source                  String           @default("PHONE") @db.VarChar(32)
+  status                  String           @default("NEW") @db.VarChar(32)
+  contactConsentAt        DateTime?
+  marketingConsentAt      DateTime?
+  marketingConsentSource  String?          @db.VarChar(64)
+  convertedOrganizationId String?
+  convertedAt             DateTime?
+  createdAt               DateTime         @default(now())
+  updatedAt               DateTime         @updatedAt
+
+  convertedOrganization Organization? @relation(fields: [convertedOrganizationId], references: [id], onDelete: SetNull)
+  voiceCalls            SalesVoiceCall[]
+
+  @@index([status, createdAt])
+  @@index([email])
+  @@index([phoneE164])
+  @@index([convertedOrganizationId])
+}
+
+// Metadata only; audio recordings and full transcripts are NOT persisted by default.
+// providerCallId supports idempotent receipt of repeated telephony events.
+model SalesVoiceCall {
+  id               String         @id @default(cuid())
+  prospectId       String?
+  provider         String         @default("TWILIO") @db.VarChar(32)
+  providerCallId   String?        @unique @db.VarChar(128)
+  direction        String         @default("INBOUND") @db.VarChar(16)
+  fromPhoneE164    String?        @db.VarChar(20)
+  toPhoneE164      String?        @db.VarChar(20)
+  language         String?        @db.VarChar(8)
+  status           String         @default("RECEIVED") @db.VarChar(32)
+  disposition      String?        @db.VarChar(64)
+  startedAt        DateTime       @default(now())
+  answeredAt       DateTime?
+  endedAt          DateTime?
+  durationSeconds  Int?
+  createdAt        DateTime       @default(now())
+  updatedAt        DateTime       @updatedAt
+
+  prospect SalesProspect? @relation(fields: [prospectId], references: [id], onDelete: SetNull)
+
+  @@index([prospectId, startedAt])
+  @@index([status, startedAt])
 }
