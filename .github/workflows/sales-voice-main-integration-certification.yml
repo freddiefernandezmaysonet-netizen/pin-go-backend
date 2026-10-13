@@ -126,6 +126,7 @@ jobs:
           run_suite pingo_sales_watchdog_test SALES_WATCHDOG_TEST_DATABASE_URL src/services/sales-voice-recovery-classifier.service.test.ts
           run_suite pingo_sales_watchdog_test SALES_WATCHDOG_TEST_DATABASE_URL src/services/sales-voice-live-watchdog.service.test.ts
           run_suite pingo_sales_sideband_test SALES_SIDEBAND_TEST_DATABASE_URL src/services/sales-voice-sideband-supervisor.service.test.ts
+          run_suite pingo_sales_sideband_test SALES_SIDEBAND_TEST_DATABASE_URL src/services/sales-voice-recovery-observation.service.test.ts
           run_suite pingo_sales_watchdog_test SALES_WATCHDOG_TEST_DATABASE_URL src/services/sales-voice-recovery-cycle.service.test.ts
       - name: Run worker and local loopback transport tests
         run: |
