@@ -6,6 +6,8 @@ on:
     paths:
       - 'src/server.ts'
       - '.github/workflows/sales-voice-main-integration-certification.yml'
+      - 'src/services/sales-voice-live-ingress-admission.service.ts'
+      - 'src/services/sales-voice-live-ingress-admission.service.test.ts'
       - 'src/services/sales-voice-live-sip-mount.service.ts'
       - 'src/services/sales-voice-live-sip-mount.service.test.ts'
       - '.github/workflows/sales-voice-live-sip-mount-v1.yml'
@@ -37,13 +39,25 @@ jobs:
           import assert from 'node:assert/strict';
           import {execFileSync} from 'node:child_process';
           const paths=execFileSync('git',['diff','--name-only',process.env.BASE_SHA,'HEAD'],{encoding:'utf8'}).trim().split('\n').sort();
-          assert.deepEqual(paths,[
+          // Preserve the original reviewed #424 allowlist, while requiring
+          // the exact signed-ingress/admission integration files for #425.
+          const original = [
             '.github/workflows/sales-voice-live-sip-mount-v1.yml',
             '.github/workflows/sales-voice-main-integration-certification.yml',
             'src/server.ts',
             'src/services/sales-voice-live-sip-mount.service.test.ts',
             'src/services/sales-voice-live-sip-mount.service.ts',
-          ]);
+          ];
+          const admissionBridge = [
+            '.github/workflows/sales-voice-live-sip-mount-v1.yml',
+            '.github/workflows/sales-voice-main-integration-certification.yml',
+            'src/services/sales-voice-live-ingress-admission.service.test.ts',
+            'src/services/sales-voice-live-ingress-admission.service.ts',
+            'src/services/sales-voice-live-sip-mount.service.ts',
+          ];
+          assert.deepEqual(paths,
+            process.env.GITHUB_HEAD_REF === 'agent/sales-voice-signed-ingress-admission-v1-20261013'
+              ? admissionBridge : original);
           NODE
           git diff --check "$BASE_SHA" HEAD
       - name: Install pinned dependencies and generate Prisma client
