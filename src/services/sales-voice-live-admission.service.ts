@@ -9,7 +9,7 @@ export class SalesVoiceAdmissionError extends Error {
   constructor(readonly code: string) { super(code); this.name = "SalesVoiceAdmissionError"; }
 }
 const deny = (code: string): never => { throw new SalesVoiceAdmissionError(code); };
-const HELD = ["ADMISSION_CLAIMED", "ACCEPTED", "ACCEPT_UNKNOWN"] as const;
+const HELD = ["ADMISSION_CLAIMED", "ACCEPTED", "ACCEPT_UNKNOWN", "HANGUP_CLAIMED", "HANGUP_SENT", "HANGUP_UNKNOWN"] as const;
 type HeldStatus = (typeof HELD)[number];
 
 export type AdmissionLimits = {
@@ -71,14 +71,18 @@ export class SalesVoiceLiveAdmission {
           startedAt: { gte: monthStart(now), lte: now },
           status: { in: [...HELD, "COMPLETED"] },
         },
-        select: { status: true, durationSeconds: true },
+        select: { status: true, durationSeconds: true, lastUsageSeconds: true, finalUsageSeconds: true, startedAt: true, answeredAt: true },
       });
-      const usage = rows.reduce((sum, row) => sum + reserve(
-        HELD.includes(row.status as HeldStatus)
-          ? limits.reservedSecondsPerCall
-          : Math.max(0, row.durationSeconds ?? limits.reservedSecondsPerCall),
-        limits.estimatedCentsPerMinute,
-      ), 0);
+      const usage = rows.reduce((sum, row) => {
+        const active = HELD.includes(row.status as HeldStatus);
+        const wallSeconds = Math.max(0, Math.ceil((now.getTime()
+          - (row.answeredAt ?? row.startedAt).getTime()) / 1000));
+        const seconds = active
+          ? Math.max(limits.reservedSecondsPerCall, wallSeconds, row.lastUsageSeconds ?? 0)
+          : Math.max(0, row.finalUsageSeconds ?? row.lastUsageSeconds
+            ?? row.durationSeconds ?? limits.reservedSecondsPerCall);
+        return sum + reserve(seconds, limits.estimatedCentsPerMinute);
+      }, 0);
       if (usage + reserve(limits.reservedSecondsPerCall, limits.estimatedCentsPerMinute)
         > limits.monthlyBudgetCents) deny("ESTIMATED_MONTHLY_BUDGET_LIMIT");
       const changed = await tx.salesVoiceCall.updateMany({
