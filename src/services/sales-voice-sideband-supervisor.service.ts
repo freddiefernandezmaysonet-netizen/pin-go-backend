@@ -3,6 +3,12 @@ import {
   parseBoundLiveSidebandEvent, noteLiveUsage, finalizeLiveClosed,
 } from "./sales-voice-live-watchdog.service.js";
 
+import type { RecoveryLease } from "./sales-voice-recovery-lease.service.js";
+import {
+  verifySalesVoiceRecoveryOwnership, applyFencedSalesVoiceObservation,
+  SalesVoiceRecoveryOwnershipLost, type RecoveryObservationDB,
+} from "./sales-voice-recovery-observation.service.js";
+
 // ISOLATED AND UNMOUNTED: only a signed, previously persisted Live SIP call
 // may be monitored. This module never sends audio, tools, session.start,
 // session.close, provider hangup, or outbound communications.
@@ -33,13 +39,14 @@ export type SidebandSocketFactory = (url: string, options: {
   maxPayload: number;
   perMessageDeflate: false;
 }) => SidebandWebSocket;
-type Db = Pick<PrismaClient, "salesVoiceCall">;
+type Db = Pick<PrismaClient, "salesVoiceCall"> & Partial<Pick<PrismaClient, "$transaction">>;
 
 export type SidebandSessionResult =
   | { state: "CONFIRMED_CLOSED"; sessionId: string; eventCount: number }
   | { state: "UNCONFIRMED_DISCONNECT"; sessionId: string; eventCount: number }
   | { state: "AUTHENTICATION_MISMATCH"; sessionId: string; eventCount: number }
-  | { state: "PROCESSING_ERROR"; sessionId: string; eventCount: number };
+  | { state: "PROCESSING_ERROR"; sessionId: string; eventCount: number }
+  | { state: "OWNERSHIP_LOST"; sessionId: string; eventCount: number };
 
 /**
  * WebSocket authentication must come from a server-only project API key.
@@ -54,6 +61,7 @@ export async function observeExistingLiveSession(input: {
   enabled: boolean;
   connect: SidebandSocketFactory;
   onObservation?: (kind: "usage" | "closed") => void;
+  recoveryLease?: RecoveryLease;
 }): Promise<{
   completion: Promise<SidebandSessionResult>;
   disconnect: () => void;
@@ -70,6 +78,14 @@ export async function observeExistingLiveSession(input: {
   if (!row || row.provider !== "OPENAI_LIVE_SIP" || row.direction !== "INBOUND"
       || row.finalizedAt || !allowed.has(row.status)) {
     reject("VERIFIED_ACTIVE_LIVE_CALL_REQUIRED");
+  }
+
+  const recoveryLease = input.recoveryLease ? { ...input.recoveryLease } : undefined;
+  if (recoveryLease) {
+    if (recoveryLease.sessionId !== input.sessionId || typeof input.db.$transaction !== "function") {
+      reject("RECOVERY_LEASE_AND_TRANSACTION_REQUIRED");
+    }
+    await verifySalesVoiceRecoveryOwnership(input.db as RecoveryObservationDB, recoveryLease);
   }
 
   const socket = input.connect(url, {
@@ -137,15 +153,17 @@ export async function observeExistingLiveSession(input: {
         if (!parsed) return;
         count++;
         if (parsed.type === "usage") {
-          await noteLiveUsage(input.db, parsed);
+          if (recoveryLease) await applyFencedSalesVoiceObservation(input.db as RecoveryObservationDB, recoveryLease, parsed);
+          else await noteLiveUsage(input.db, parsed);
           input.onObservation?.("usage");
         } else {
-          await finalizeLiveClosed(input.db, parsed);
+          if (recoveryLease) await applyFencedSalesVoiceObservation(input.db as RecoveryObservationDB, recoveryLease, parsed);
+          else await finalizeLiveClosed(input.db, parsed);
           input.onObservation?.("closed");
           settle("CONFIRMED_CLOSED");
         }
-      } catch {
-        settle("PROCESSING_ERROR");
+      } catch (error) {
+        settle(error instanceof SalesVoiceRecoveryOwnershipLost ? "OWNERSHIP_LOST" : "PROCESSING_ERROR");
       }
     }).catch(() => settle("PROCESSING_ERROR"));
   });
