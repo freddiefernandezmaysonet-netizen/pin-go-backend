@@ -1,0 +1,112 @@
+name: Sales Voice CRM Foundation
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - 'prisma/schema.prisma'
+      - 'prisma/migrations/20261013160000_sales_voice_crm_foundation_v1/migration.sql'
+      - 'tests/sales-voice-crm-foundation.db.test.mjs'
+      - '.github/workflows/sales-voice-crm-foundation-v1.yml'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: sales-voice-crm-foundation-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  certify:
+    name: Additive sales migration and PostgreSQL contracts
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: pingo_sales_voice_crm_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d pingo_sales_voice_crm_test"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      DATABASE_URL: postgresql://postgres:postgres@127.0.0.1:5432/pingo_sales_voice_crm_test
+      SALES_VOICE_TEST_DATABASE_URL: postgresql://postgres:postgres@127.0.0.1:5432/pingo_sales_voice_crm_test
+      BASE_SHA: ${{ github.event.pull_request.base.sha }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+      - name: Verify exact foundation scope and preserve existing schema
+        run: |
+          node --input-type=module <<'NODE'
+          import assert from 'node:assert/strict';
+          import { execFileSync } from 'node:child_process';
+          import { readFileSync, writeFileSync } from 'node:fs';
+          const base = process.env.BASE_SHA;
+          assert.match(base, /^[0-9a-f]{40}$/);
+          const url = new URL(process.env.SALES_VOICE_TEST_DATABASE_URL);
+          assert.equal(url.hostname, '127.0.0.1');
+          assert.equal(url.pathname, '/pingo_sales_voice_crm_test');
+          assert.equal(process.env.DATABASE_URL, url.href);
+          const changes = execFileSync('git', ['diff', '--name-only', base, 'HEAD'], { encoding: 'utf8' }).trim().split('\n');
+          const allowed = new Set(['prisma/schema.prisma', 'prisma/migrations/20261013160000_sales_voice_crm_foundation_v1/migration.sql', 'tests/sales-voice-crm-foundation.db.test.mjs', '.github/workflows/sales-voice-crm-foundation-v1.yml']);
+          for (const path of changes) assert.ok(allowed.has(path), `Outside foundation scope: ${path}`);
+          const before = execFileSync('git', ['show', `${base}:prisma/schema.prisma`], { encoding: 'utf8' });
+          const after = readFileSync('prisma/schema.prisma', 'utf8');
+          const boundary = after.indexOf('// Independent CRM records for inbound commercial conversations.');
+          assert.ok(boundary > 0, 'New model boundary missing');
+          const preserved = after.slice(0, boundary).replace(/^  salesProspects   SalesProspect\[\]\r?\n/m, '').trimEnd();
+          assert.equal(preserved, before.trimEnd(), 'An existing schema definition changed');
+          const newModels = [...after.slice(boundary).matchAll(/^model (\w+) \{/gm)].map(match => match[1]);
+          assert.deepEqual(newModels, ['SalesProspect', 'SalesVoiceCall']);
+          writeFileSync(`${process.env.RUNNER_TEMP}/sales-voice-base.prisma`, before);
+          console.log('PASS: additive foundation only; existing application and certification files unchanged');
+          NODE
+          git diff --check "$BASE_SHA" HEAD
+          node --check tests/sales-voice-crm-foundation.db.test.mjs
+      - name: Install locked dependencies without application lifecycle scripts
+        run: npm ci --ignore-scripts --no-audit --no-fund
+      - name: Validate schema and generate the pinned Prisma client
+        run: |
+          ./node_modules/.bin/prisma validate
+          ./node_modules/.bin/prisma generate
+      - name: Build baseline schema in disposable PostgreSQL only
+        run: |
+          ./node_modules/.bin/prisma db push --schema "$RUNNER_TEMP/sales-voice-base.prisma" --skip-generate
+          cat > "$RUNNER_TEMP/sales-voice-baseline.sql" <<'SQL'
+          INSERT INTO "Organization" ("id", "name", "createdAt", "updatedAt")
+          VALUES ('sales-voice-baseline-sentinel', 'Sales voice baseline - do not change',
+                  TIMESTAMP '2026-01-01 00:00:00', TIMESTAMP '2026-01-01 00:00:00');
+          SQL
+          ./node_modules/.bin/prisma db execute --url "$SALES_VOICE_TEST_DATABASE_URL" --file "$RUNNER_TEMP/sales-voice-baseline.sql"
+      - name: Apply the actual candidate SQL migration and verify full schema parity
+        run: |
+          ./node_modules/.bin/prisma db execute --url "$SALES_VOICE_TEST_DATABASE_URL" --file prisma/migrations/20261013160000_sales_voice_crm_foundation_v1/migration.sql
+          ./node_modules/.bin/prisma migrate diff --from-url "$SALES_VOICE_TEST_DATABASE_URL" --to-schema-datamodel prisma/schema.prisma --exit-code
+      - name: Run real PostgreSQL persistence and concurrency contracts
+        run: node --test tests/sales-voice-crm-foundation.db.test.mjs
+      - name: Bundle the backend without starting it or any worker
+        run: |
+          node --input-type=module <<'NODE'
+          import { build } from 'esbuild';
+          await build({ entryPoints: ['src/server.ts'], bundle: true, platform: 'node', format: 'esm', packages: 'external', outfile: `${process.env.RUNNER_TEMP}/sales-voice-server.mjs` });
+          NODE
+      - name: Record certification scope
+        run: |
+          echo '## Sales Voice CRM Foundation' >> "$GITHUB_STEP_SUMMARY"
+          echo 'Actual additive SQL applied to disposable PostgreSQL; schema parity, 16 database contracts, and backend bundle passed.' >> "$GITHUB_STEP_SUMMARY"
+          echo 'Baseline came from the base schema, not the full historical migration chain. No production migration or telephone test was run.' >> "$GITHUB_STEP_SUMMARY"
+          echo 'This job does not waive other checks or authorize merge, deployment, messages, or telephone activation.' >> "$GITHUB_STEP_SUMMARY"

@@ -1,0 +1,89 @@
+name: Sales Voice Live SIP Signed Webhooks V1
+
+on:
+  pull_request:
+    branches:
+      - agent/sales-voice-sip-ingress-v1-20261013
+    paths:
+      - 'src/services/sales-voice-live-sip-auth.service.ts'
+      - 'src/services/sales-voice-live-sip-auth.service.test.ts'
+      - '.github/workflows/sales-voice-live-sip-auth-v1.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  certify:
+    name: HMAC verification and Live SIP metadata contracts
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: pingo_sales_live_sip_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d pingo_sales_live_sip_test"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      DATABASE_URL: postgresql://postgres:postgres@127.0.0.1:5432/pingo_sales_live_sip_test
+      SALES_LIVE_SIP_TEST_DATABASE_URL: postgresql://postgres:postgres@127.0.0.1:5432/pingo_sales_live_sip_test
+      BASE_SHA: ${{ github.event.pull_request.base.sha }}
+    steps:
+      - name: Checkout exact candidate
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+      - name: Verify exactly three new files, no customer code or certified flows
+        run: |
+          node --input-type=module <<'NODE'
+          import assert from 'node:assert/strict';
+          import { execFileSync } from 'node:child_process';
+          const files=execFileSync('git',['diff','--name-only',process.env.BASE_SHA,'HEAD'],{encoding:'utf8'}).trim().split('\n').sort();
+          const allowed=[
+            '.github/workflows/sales-voice-live-sip-auth-v1.yml',
+            'src/services/sales-voice-live-sip-auth.service.test.ts',
+            'src/services/sales-voice-live-sip-auth.service.ts',
+          ].sort();
+          assert.deepEqual(files,allowed);
+          console.log('PASS: only three isolated Live SIP files changed');
+          NODE
+          git diff --check "$BASE_SHA" HEAD
+      - name: Install locked dependencies
+        run: npm ci --ignore-scripts --no-audit --no-fund
+      - name: Validate and generate Prisma client
+        run: |
+          ./node_modules/.bin/prisma validate
+          ./node_modules/.bin/prisma generate
+      - name: Typecheck signed webhooks and tests
+        run: ./node_modules/.bin/tsc --noEmit --skipLibCheck --target es2022 --module nodenext --moduleResolution nodenext --esModuleInterop src/services/sales-voice-live-sip-auth.service.ts src/services/sales-voice-live-sip-auth.service.test.ts
+      - name: Confirm disposable PostgreSQL target
+        run: |
+          node --input-type=module <<'NODE'
+          import assert from 'node:assert/strict';
+          const db=new URL(process.env.DATABASE_URL);
+          assert.equal(db.hostname,'127.0.0.1');
+          assert.equal(db.pathname,'/pingo_sales_live_sip_test');
+          assert.equal(process.env.DATABASE_URL,process.env.SALES_LIVE_SIP_TEST_DATABASE_URL);
+          NODE
+          ./node_modules/.bin/prisma db push --skip-generate
+      - name: Run signature and Live SIP contracts with disposable database
+        run: node --import tsx --test src/services/sales-voice-live-sip-auth.service.test.ts
+      - name: Record limitations
+        run: |
+          echo '## Sales Voice Live SIP HMAC foundation' >> "$GITHUB_STEP_SUMMARY"
+          echo 'Synthetic cryptographically signed webhook fixtures and disposable PostgreSQL. No OpenAI SDK or live provider event was exercised.' >> "$GITHUB_STEP_SUMMARY"
+          echo 'No controller is mounted, no accept/reject call, no T-Mobile forwarding, no production changes.' >> "$GITHUB_STEP_SUMMARY"
+          echo 'Gated stacked PR only; do not merge until upstream CRM and all release checks are cleared.' >> "$GITHUB_STEP_SUMMARY"
