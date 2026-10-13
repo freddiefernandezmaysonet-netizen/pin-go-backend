@@ -49,7 +49,7 @@ export class SalesVoiceLiveAdmission {
     validLimits(limits);
     if (!Number.isFinite(now.getTime())) deny("INVALID_TIME");
     return this.db.$transaction(async tx => {
-      await tx.$queryRawUnsafe("SELECT pg_advisory_xact_lock(414812, 20261013)");
+      await tx.$queryRawUnsafe("SELECT pg_advisory_xact_lock(414812, 20261013)::text AS lock_held");
       const call = await tx.salesVoiceCall.findUnique({ where: { providerCallId: id } });
       if (!call || call.provider !== "OPENAI_LIVE_SIP" || call.direction !== "INBOUND")
         deny("VERIFIED_LIVE_CALL_REQUIRED");
