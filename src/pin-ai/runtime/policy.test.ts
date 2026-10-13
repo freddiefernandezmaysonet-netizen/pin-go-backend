@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
+import type { PinAIRuntimeToolName } from "./contracts.js";
 
 import {
   assertNoDirectIrreversibleAction,
@@ -38,8 +39,8 @@ test("runtime permits bounded read and escalation tools", () => {
   );
 });
 
-test("runtime rejects every conceptually declared but disabled tool", () => {
-  for (const tool of ["search_local_places"] as const) {
+test("runtime rejects unregistered tools", () => {
+  for (const tool of ["unknown_tool" as PinAIRuntimeToolName]) {
     assert.throws(
       () =>
         assertRuntimeResponseSafe({

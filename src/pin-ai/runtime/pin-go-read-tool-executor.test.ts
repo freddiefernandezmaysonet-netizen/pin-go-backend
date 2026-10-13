@@ -1193,8 +1193,18 @@ test("payment context fails closed on invalid persisted amounts", async () => {
 
 test("local places search uses scoped property coordinates without exposing them", async () => {
   let searchInput: Record<string, unknown> | null = null;
+  const prisma = createPrismaFixture();
+  const readProperty = prisma.property.findFirst.bind(prisma.property);
+  prisma.property.findFirst = async (args?: any) => {
+    assert.deepEqual(args.where, {
+      id: "property-a", organizationId: "org-a", status: "ACTIVE",
+      reservations: { some: { id: "reservation-a" } },
+    });
+    assert.deepEqual(args.select, { id: true, latitude: true, longitude: true });
+    return readProperty();
+  };
   const executor = new PinGoRuntimeReadToolExecutor(
-    createPrismaFixture(),
+    prisma,
     undefined,
     undefined,
     async (input) => {

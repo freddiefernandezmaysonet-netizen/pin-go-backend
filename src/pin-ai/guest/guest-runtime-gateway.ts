@@ -597,6 +597,8 @@ export function createGuestPinAIRuntimeRunner(
         model: "gpt-5.6-luna",
         webSearch: {
           enabled: webSearchEnabled,
+          localPlacesEnabled: env.PIN_AI_RUNTIME_LOCAL_PLACES_ENABLED === "true" &&
+            Boolean(env.GOOGLE_MAPS_SERVER_API_KEY?.trim()),
           mode: "live",
           ...(webSearchEnabled
             ? {

@@ -660,6 +660,37 @@ test("gateway persists contextual incident replies but rejects unsafe additions 
   }
 });
 
+test("coordinate search requires its explicit flag and server credential even without a municipality", async t => {
+  let fixture = createTurnFixture();
+  t.mock.method(globalThis, "fetch", async (input: string | URL | Request, init?: RequestInit) => {
+    const response = await fixture.fetchImpl(String(input), {
+      method: init?.method === "POST" ? "POST" : "GET", headers: {},
+      ...(typeof init?.body === "string" ? { body: init.body } : {}),
+    });
+    return new Response(JSON.stringify(await response.json()), { status: 200 });
+  });
+  const runtimeRequest: PinAIRuntimeRequest = {
+    context: { organizationId: "org-a", propertyId: "property-a", reservationId: "reservation-a",
+      guestId: "guest-a", currentLocalDateTime: now.toISOString() },
+    conversation: [{ role: "guest", content: "Find nearby restaurants" }],
+  };
+  for (const [flag, key, expected] of [
+    ["true", "test-server-key", true], ["false", "test-server-key", false],
+    ["true", "", false], ["true", "   ", false],
+  ] as const) {
+    fixture = createTurnFixture();
+    await createGuestPinAIRuntimeRunner({ PIN_AI_RUNTIME_SHADOW_ENABLED: "true",
+      PIN_AI_RUNTIME_REAL_READ_ENABLED: "true", PIN_AI_OPENAI_AGENT_ID: "agent_test123",
+      OPENAI_API_KEY: "test-key", PIN_AI_RUNTIME_LOCAL_PLACES_ENABLED: flag,
+      GOOGLE_MAPS_SERVER_API_KEY: key,
+    })(runtimeRequest, { city: "", region: "", country: "", timezone: "", label: "" });
+    const tools = (fixture.createPayload.agent as { tools: { name?: string; type: string }[] }).tools;
+    assert.equal(tools.some(tool => tool.name === "search_local_places"), expected);
+    assert.equal(tools.some(tool => tool.type === "web_search"), false);
+    assert.doesNotMatch(JSON.stringify(fixture.createPayload), /test-server-key/);
+  }
+});
+
 test("enables native OpenAI web search with coarse location only", async () => {
   const originalFetch = globalThis.fetch;
   const fixture = createTurnFixture({ answer: () => "Three options nearby." });

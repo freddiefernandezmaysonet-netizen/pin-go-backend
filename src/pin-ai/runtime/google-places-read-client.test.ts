@@ -93,3 +93,19 @@ test("Google Places read client fails closed without a configured API key", asyn
     /PIN_AI_RUNTIME_GOOGLE_PLACES_API_KEY_MISSING/,
   );
 });
+
+test("nearby results exclude invalid coordinates and permanent closures and sort by straight-line distance", async () => {
+  const result = await searchGooglePlaces({ query: "restaurants", latitude: 18.2, longitude: -66.3,
+    radiusMeters: 5000, maxResults: 5, languageCode: "es" }, {
+    apiKey: "test-key", fetchImpl: async () => ({ ok: true, status: 200, json: async () => ({ places: [
+      { displayName: { text: "Farther" }, location: { latitude: 18.22, longitude: -66.3 } },
+      { displayName: { text: "Missing latitude" }, location: { latitude: null, longitude: -66.3 } },
+      { displayName: { text: "Invalid longitude" }, location: { latitude: 18.2, longitude: 181 } },
+      { displayName: { text: "Closed" }, businessStatus: "CLOSED_PERMANENTLY", location: { latitude: 18.201, longitude: -66.3 } },
+      { displayName: { text: "Closer" }, location: { latitude: 18.202, longitude: -66.3 } },
+    ] }) }),
+  });
+  assert.deepEqual(result.places.map(place => place.name), ["Closer", "Farther"]);
+  assert.ok(result.places[0]!.straightLineDistanceMeters < result.places[1]!.straightLineDistanceMeters);
+  assert.doesNotMatch(JSON.stringify(result), /latitude|longitude/);
+});

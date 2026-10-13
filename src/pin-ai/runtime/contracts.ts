@@ -91,6 +91,7 @@ export const PIN_AI_RUNTIME_ENABLED_TOOL_NAMES = [
   "prepare_reservation_modification",
   "get_cancellation_policy",
   "get_payment_context",
+  "search_local_places",
   "escalate_to_host",
 ] as const satisfies readonly PinAIRuntimeToolName[];
 
@@ -278,7 +279,7 @@ export const PIN_AI_RUNTIME_TOOLS: readonly PinAIRuntimeToolDefinition[] = [
           type: "integer",
           minimum: 500,
           maximum: 50000,
-          description: "Optional search radius in meters. Defaults to 15000.",
+          description: "Optional search radius in meters. Defaults to 5000.",
         },
         maxResults: {
           type: "integer",

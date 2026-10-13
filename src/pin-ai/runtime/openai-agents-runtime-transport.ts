@@ -230,6 +230,10 @@ export class OpenAIAgentsRuntimeTransport {
             }
             const batchIds = new Set<string>();
             for (const action of session.requiredActions) {
+              if (action.name === "search_local_places" &&
+                  this.config.webSearch?.localPlacesEnabled !== true) {
+                throw new Error("PIN_AI_RUNTIME_LOCAL_PLACES_TOOL_DISABLED");
+              }
               if (batchIds.has(action.callId)) {
                 throw new Error("PIN_AI_RUNTIME_DUPLICATE_TOOL_CALL_ID");
               }

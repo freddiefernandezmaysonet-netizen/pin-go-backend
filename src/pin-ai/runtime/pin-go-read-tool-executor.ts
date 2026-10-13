@@ -180,7 +180,7 @@ export class PinGoRuntimeReadToolExecutor implements PinAIRuntimeToolExecutor {
       return localPlacesUnavailable("INVALID_LOCAL_PLACES_QUERY");
     }
 
-    const radiusMeters = integerInRange(args.radiusMeters, 500, 50_000) ?? 15_000;
+    const radiusMeters = integerInRange(args.radiusMeters, 500, 50_000) ?? 5_000;
     const maxResults = integerInRange(args.maxResults, 1, 5) ?? 5;
     if (
       (args.radiusMeters !== undefined &&
@@ -195,6 +195,7 @@ export class PinGoRuntimeReadToolExecutor implements PinAIRuntimeToolExecutor {
         id: request.context.propertyId,
         organizationId: request.context.organizationId,
         status: "ACTIVE",
+        reservations: { some: { id: request.context.reservationId } },
       },
       select: {
         id: true,
