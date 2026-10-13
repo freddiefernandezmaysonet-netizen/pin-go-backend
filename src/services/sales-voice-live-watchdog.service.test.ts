@@ -165,7 +165,9 @@ test("watchdog only selects overdue accepted calls; request acknowledgement stil
   assert.ok(due.hangupClaimedAt && due.hangupAcknowledgedAt);
   assert.equal(due.finalizedAt,null);
   assert.equal((await db.salesVoiceCall.findUniqueOrThrow({where:{providerCallId:liveId(10)}})).status,"ACCEPTED");
-  await assert.rejects(admission.claim(liveId(12),capacity()),e=>e instanceof Error);
+  await createCall(12,"RECEIVED",10);
+  await assert.rejects(admission.claim(liveId(12),capacity()), e =>
+    typeof e === "object" && e !== null && "code" in e && e.code === "CONCURRENCY_LIMIT");
 });
 
 test("overdue unknown-accept can receive exactly one precautionary hangup", async () => {
