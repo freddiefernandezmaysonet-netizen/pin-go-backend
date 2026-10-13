@@ -244,3 +244,29 @@ test("usage beyond reserved duration increases estimate for later admissions", a
   })), e=> typeof e==="object" && e!==null && "code" in e
     && e.code==="ESTIMATED_MONTHLY_BUDGET_LIMIT");
 });
+
+test("late usage racing with finalization cannot release an undercounted call", async () => {
+  await reset(); await createCall(22);
+  await noteLiveUsage(db,observation(liveId(22),20));
+  // Deterministically simulate usage arriving after the initial read but
+  // before the final UPDATE; the SQL predicate must fence the race.
+  const injectedDb = { salesVoiceCall: {
+    findUnique: (arg: any) => db.salesVoiceCall.findUnique(arg),
+    findUniqueOrThrow: (arg: any) => db.salesVoiceCall.findUniqueOrThrow(arg),
+    updateMany: async (arg: any) => {
+      await db.salesVoiceCall.update({
+        where: { providerCallId: liveId(22) },
+        data: { lastUsageSeconds: 200 },
+      });
+      return db.salesVoiceCall.updateMany(arg);
+    },
+  } } as any;
+  await assert.rejects(
+    finalizeLiveClosed(injectedDb,closure(liveId(22),100)),
+    error("FINAL_USAGE_BELOW_OBSERVED"),
+  );
+  const stored=await db.salesVoiceCall.findUniqueOrThrow({where:{providerCallId:liveId(22)}});
+  assert.equal(stored.status,"ACCEPTED");
+  assert.equal(stored.lastUsageSeconds,200);
+  assert.equal(stored.finalizedAt,null);
+});
