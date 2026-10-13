@@ -37,6 +37,7 @@ class MockSocket extends EventEmitter {
   sent: unknown[] = [];
   closed = false;
   close() { this.closed = true; }
+  opened() { this.emit("open"); }
   deliver(event: unknown) { this.emit("message", Buffer.from(JSON.stringify(event))); }
   drop() { this.emit("close"); }
   started(sessionId: string) {
@@ -120,6 +121,7 @@ test("wrong session.started ID cannot authorize usage, and capacity stays held",
   await reset(); await call(6);
   const socket = new MockSocket(), seen: unknown[] = [];
   const c = await attach(6,socket,seen);
+  socket.opened();
   socket.started(incomingId(99));
   socket.finished(incomingId(6),80);
   assert.equal((await c.completion).state,"AUTHENTICATION_MISMATCH");
@@ -127,11 +129,11 @@ test("wrong session.started ID cannot authorize usage, and capacity stays held",
   assert.equal(row.status,"ACCEPTED");
 });
 
-test("cumulative voice updates persist after matching session.started", async () => {
+test("cumulative voice updates persist even if late attach missed session.started", async () => {
   await reset(); await call(7);
   const socket = new MockSocket(), seen: unknown[] = [];
   const c=await attach(7,socket,seen);
-  socket.started(incomingId(7));
+  socket.opened();
   socket.usage(10);
   socket.usage(14);
   socket.usage(8);
@@ -152,7 +154,7 @@ test("session.closed confirms final usage and frees only this session", async ()
   await reset(); await call(8);
   const socket=new MockSocket(), seen: unknown[] = [];
   const c=await attach(8,socket,seen);
-  socket.started(incomingId(8));
+  socket.opened();
   socket.usage(12);
   socket.finished(incomingId(8),12.5);
   const result=await c.completion;
@@ -168,7 +170,7 @@ test("sideband socket loss after usage does not falsely finalize or release capa
   await reset(); await call(9);
   const socket=new MockSocket(), seen: unknown[] = [];
   const c=await attach(9,socket,seen);
-  socket.started(incomingId(9));
+  socket.opened();
   socket.usage(20);
   await tick(); await tick();
   socket.drop();
@@ -182,7 +184,7 @@ test("malformed and contradictory closure data fail closed", async () => {
   await reset(); await call(10);
   const socket=new MockSocket(), seen: unknown[] = [];
   const c=await attach(10,socket,seen);
-  socket.started(incomingId(10));
+  socket.opened();
   socket.finished(incomingId(99),20);
   assert.equal((await c.completion).state,"PROCESSING_ERROR");
   const row=await db.salesVoiceCall.findUniqueOrThrow({where:{providerCallId:incomingId(10)}});
@@ -198,5 +200,55 @@ test("malformed JSON cannot reach CRM or authorization tools", async () => {
   assert.equal((await c.completion).state,"PROCESSING_ERROR");
   const row=await db.salesVoiceCall.findUniqueOrThrow({where:{providerCallId:incomingId(11)}});
   assert.equal(row.prospectId,null);
+  assert.equal(row.finalizedAt,null);
+});
+
+test("canonical transport session_id mismatch is rejected after WSS upgrade", async () => {
+  await reset(); await call(12);
+  const socket = new MockSocket(), seen: unknown[] = [];
+  const attached = await attach(12,socket,seen);
+  socket.opened();
+  socket.deliver({type:"transport.answered",event_id:"transport_bad_id",
+    session_id:incomingId(99)});
+  socket.usage(30);
+  assert.equal((await attached.completion).state,"AUTHENTICATION_MISMATCH");
+  const row=await db.salesVoiceCall.findUniqueOrThrow({where:{providerCallId:incomingId(12)}});
+  assert.equal(row.lastUsageSeconds,null);
+  assert.equal(row.finalizedAt,null);
+});
+
+test("late attach accepts a direct session.closed only after authenticated WSS open", async () => {
+  await reset(); await call(13);
+  const socket = new MockSocket(), seen: unknown[] = [];
+  const attached = await attach(13,socket,seen);
+  socket.opened();
+  // On a sideband attached after acceptance, session.started can be long past.
+  socket.finished(incomingId(13),26);
+  assert.equal((await attached.completion).state,"CONFIRMED_CLOSED");
+  const row=await db.salesVoiceCall.findUniqueOrThrow({where:{providerCallId:incomingId(13)}});
+  assert.equal(row.status,"COMPLETED");
+  assert.equal(row.finalUsageSeconds,26);
+  assert.ok(row.finalizedAt);
+});
+
+test("session.started still accepts the correct session but never overrides the WSS check", async () => {
+  await reset(); await call(14);
+  const socket = new MockSocket(), seen: unknown[] = [];
+  const attached = await attach(14,socket,seen);
+  socket.opened();
+  socket.started(incomingId(14));
+  socket.finished(incomingId(14),20);
+  assert.equal((await attached.completion).state,"CONFIRMED_CLOSED");
+});
+
+test("a closed sideband socket does not become authenticated merely by a late open event", async () => {
+  await reset(); await call(15);
+  const socket = new MockSocket(), seen: unknown[] = [];
+  const attached = await attach(15,socket,seen);
+  socket.drop();
+  assert.equal((await attached.completion).state,"UNCONFIRMED_DISCONNECT");
+  socket.opened();
+  socket.finished(incomingId(15),40);
+  const row=await db.salesVoiceCall.findUniqueOrThrow({where:{providerCallId:incomingId(15)}});
   assert.equal(row.finalizedAt,null);
 });
