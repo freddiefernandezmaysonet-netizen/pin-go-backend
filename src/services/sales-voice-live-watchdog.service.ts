@@ -123,8 +123,13 @@ export async function finalizeLiveClosed(db: Db, observation: Extract<SidebandOb
     fail("FINAL_USAGE_BELOW_OBSERVED");
   }
   const elapsed = Math.max(0, Math.floor((now.getTime() - call.startedAt.getTime()) / 1000));
+  // Include the observed-usage bound in the same database compare-and-set
+  // to fence usage updates that race between the initial read and finalization.
   await db.salesVoiceCall.updateMany({
-    where: { id: call.id, finalizedAt: null, status: { in: ["RECEIVED", ...HELD] } },
+    where: {
+      id: call.id, finalizedAt: null, status: { in: ["RECEIVED", ...HELD] },
+      OR: [{ lastUsageSeconds: null }, { lastUsageSeconds: { lte: observation.seconds + 0.001 } }],
+    },
     data: {
       status: "COMPLETED", finalUsageSeconds: observation.seconds,
       lastUsageSeconds: observation.seconds, usageObservedAt: now,
@@ -133,7 +138,13 @@ export async function finalizeLiveClosed(db: Db, observation: Extract<SidebandOb
     },
   });
   const stored = await db.salesVoiceCall.findUniqueOrThrow({ where: { id: call.id } });
-  if (!stored.finalizedAt || stored.finalUsageSeconds !== observation.seconds
+  if (!stored.finalizedAt) {
+    if (stored.lastUsageSeconds !== null && observation.seconds + 0.001 < stored.lastUsageSeconds) {
+      fail("FINAL_USAGE_BELOW_OBSERVED");
+    }
+    fail("FINALIZATION_NOT_CONFIRMED");
+  }
+  if (stored.finalUsageSeconds !== observation.seconds
     || stored.closeReason !== observation.reason) fail("CONFLICTING_FINAL_EVENT");
   return stored;
 }
