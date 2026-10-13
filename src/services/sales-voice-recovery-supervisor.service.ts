@@ -25,7 +25,8 @@ const permitted = (env: Env): boolean =>
  * No timer or real network client, and not imported by any API/worker.
  * Each epoch gets at most ONE attach attempt in this process. Disconnects
  * retain capacity and are NOT retried blindly. Restart/provider reconciliation
- * and global attempt/cost budgets remain separate live-release gates.
+ * A lifetime epoch budget is persisted by the lease service; monetary budgets
+ * and real-provider duration enforcement remain separate live-release gates.
  */
 export class SimulatedSalesVoiceRecoverySupervisor {
   private readonly records = new Map<string, RecordState>();
@@ -70,12 +71,12 @@ export class SimulatedSalesVoiceRecoverySupervisor {
   }
 
   async sweep(): Promise<{
-    state: "READY" | "DISABLED"; opened: number; lost: string[]; hasMore: boolean;
+    state: "READY" | "DISABLED"; opened: number; lost: string[]; exhausted: string[]; hasMore: boolean;
   }> {
     if (this.busy) throw new Error("RECOVERY_SUPERVISOR_CYCLE_BUSY");
     if (this.stopped || !permitted(this.input.env)) {
       this.stop();
-      return { state: "DISABLED", opened: 0, lost: [], hasMore: false };
+      return { state: "DISABLED", opened: 0, lost: [], exhausted: [], hasMore: false };
     }
     this.busy = true;
     let opened = 0;
@@ -98,7 +99,7 @@ export class SimulatedSalesVoiceRecoverySupervisor {
       for (const owned of cycle.owned) {
         if (!permitted(this.input.env) || this.stopped) {
           this.stop();
-          return { state: "DISABLED", opened, lost: cycle.lost, hasMore: cycle.hasMore };
+          return { state: "DISABLED", opened, lost: cycle.lost, exhausted: cycle.exhausted, hasMore: cycle.hasMore };
         }
         const sessionId = owned.lease.sessionId;
         const existing = this.records.get(sessionId);
@@ -130,14 +131,14 @@ export class SimulatedSalesVoiceRecoverySupervisor {
           // Gate may have been disabled during async ownership/attach validation.
           if (!permitted(this.input.env) || this.stopped) {
             this.stop();
-            return { state: "DISABLED", opened, lost: cycle.lost, hasMore: cycle.hasMore };
+            return { state: "DISABLED", opened, lost: cycle.lost, exhausted: cycle.exhausted, hasMore: cycle.hasMore };
           }
         } catch {
           // Unconfirmed attach outcome: retain claim and never replay here.
           record.phase = "DISCONNECTED";
         }
       }
-      return { state: "READY", opened, lost: cycle.lost, hasMore: cycle.hasMore };
+      return { state: "READY", opened, lost: cycle.lost, exhausted: cycle.exhausted, hasMore: cycle.hasMore };
     } catch {
       this.stop(); // DB/clock failure stops all local observers without releasing capacity.
       throw new Error("RECOVERY_SUPERVISOR_FAILED_CLOSED");
