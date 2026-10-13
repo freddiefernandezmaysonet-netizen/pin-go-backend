@@ -55,9 +55,17 @@ jobs:
             'src/services/sales-voice-live-ingress-admission.service.ts',
             'src/services/sales-voice-live-sip-mount.service.ts',
           ];
-          assert.deepEqual(paths,
-            process.env.GITHUB_HEAD_REF === 'agent/sales-voice-signed-ingress-admission-v1-20261013'
-              ? admissionBridge : original);
+          const liveSessionCoordinator = [
+            '.github/workflows/sales-voice-live-sip-mount-v1.yml',
+            '.github/workflows/sales-voice-main-integration-certification.yml',
+            'src/services/sales-voice-live-session-coordinator.service.test.ts',
+            'src/services/sales-voice-live-session-coordinator.service.ts',
+          ];
+          const selected = process.env.GITHUB_HEAD_REF === 'agent/sales-voice-live-session-coordinator-v1-20261013'
+            ? liveSessionCoordinator
+            : process.env.GITHUB_HEAD_REF === 'agent/sales-voice-signed-ingress-admission-v1-20261013'
+              ? admissionBridge : original;
+          assert.deepEqual(paths, selected);
           NODE
           git diff --check "$BASE_SHA" HEAD
       - name: Install pinned dependencies and generate Prisma client
