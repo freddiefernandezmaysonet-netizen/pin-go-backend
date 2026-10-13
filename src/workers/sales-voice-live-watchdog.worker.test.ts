@@ -50,6 +50,9 @@ test("worker enforces bounded batch size, polling cadence, and call age", () => 
 test("no API key or database means no staging worker process",async () => {
   await assert.rejects(runIsolatedSalesVoiceWatchdogWorker(enabled),/MISSING_API_KEY/);
   await assert.rejects(runIsolatedSalesVoiceWatchdogWorker({
-    ...enabled,OPENAI_API_KEY:"sk-test-isolated",
+    ...enabled,OPENAI_API_KEY:"sk-guest-pin-ai-key-not-authorized",
+  }),/MISSING_API_KEY/);
+  await assert.rejects(runIsolatedSalesVoiceWatchdogWorker({
+    ...enabled,SALES_VOICE_OPENAI_API_KEY:"sk-sales-voice-test-isolated",
   }),/MISSING_DATABASE_URL/);
 });
