@@ -19,7 +19,7 @@ import {
  * Production veto is unconditional, even if somebody incorrectly sets both
  * simulation flags true in Railway. No call is answered by this module.
  */
-type Db = Pick<PrismaClient, "salesVoiceCall" | "$transaction">;
+type Db = Pick<PrismaClient, "salesVoiceCall"> & Partial<Pick<PrismaClient, "$transaction">>;
 type Env = Readonly<Record<string, string | undefined>>;
 type ClaimResult = "CLAIMED" | "ALREADY_CLAIMED";
 
@@ -91,7 +91,14 @@ export async function ingestVerifiedLiveSipWithAdmission(input: {
     };
   }
 
-  const admission = input.admission ?? new SalesVoiceLiveAdmission(input.db);
+  // Existing signed-ingress fixtures only expose salesVoiceCall; a real
+  // transactional client is mandatory solely for simulated admission claims.
+  if (!input.admission && typeof input.db.$transaction !== "function") {
+    reject("TRANSACTIONAL_ADMISSION_REQUIRED");
+  }
+  const admission = input.admission ?? new SalesVoiceLiveAdmission(
+    input.db as Pick<PrismaClient, "salesVoiceCall" | "$transaction">
+  );
   if (typeof admission.claim !== "function") reject("ADMISSION_REQUIRED");
   const result = await admission.claim(input.invite.sessionId, limits);
   return {
