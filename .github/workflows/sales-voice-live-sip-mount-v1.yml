@@ -76,7 +76,10 @@ jobs:
           const recoveryLease = [".github/workflows/ota-airbnb-listing-discovery.yml",".github/workflows/ota-initial-distribution-enablement.yml",".github/workflows/sales-voice-crm-foundation-v1.yml",".github/workflows/sales-voice-live-sip-mount-v1.yml",".github/workflows/sales-voice-main-integration-certification.yml",".github/workflows/sales-voice-recovery-lease-certification.yml","prisma/migrations/20261013221500_sales_voice_recovery_lease_v1/migration.sql","prisma/schema.prisma","src/services/sales-voice-recovery-lease.service.test.ts","src/services/sales-voice-recovery-lease.service.ts","tests/sales-voice-crm-foundation.db.test.mjs"];
           const recoveryCycle = [".github/workflows/sales-voice-live-sip-mount-v1.yml",".github/workflows/sales-voice-main-integration-certification.yml","src/services/sales-voice-recovery-cycle.service.test.ts","src/services/sales-voice-recovery-cycle.service.ts"];
           const recoveryObservation = [".github/workflows/sales-voice-live-sip-mount-v1.yml",".github/workflows/sales-voice-main-integration-certification.yml","src/services/sales-voice-recovery-observation.service.test.ts","src/services/sales-voice-recovery-observation.service.ts","src/services/sales-voice-sideband-supervisor.service.ts"];
-          const selected = process.env.GITHUB_HEAD_REF === 'agent/sales-voice-recovery-observation-fence-v1-20261013'
+          const recoverySupervisor = [".github/workflows/sales-voice-live-sip-mount-v1.yml",".github/workflows/sales-voice-main-integration-certification.yml","src/services/sales-voice-recovery-supervisor.service.test.ts","src/services/sales-voice-recovery-supervisor.service.ts"];
+          const selected = process.env.GITHUB_HEAD_REF === 'agent/sales-voice-recovery-supervisor-v1-20261013'
+            ? recoverySupervisor
+            : process.env.GITHUB_HEAD_REF === 'agent/sales-voice-recovery-observation-fence-v1-20261013'
             ? recoveryObservation
             : process.env.GITHUB_HEAD_REF === 'agent/sales-voice-recovery-cycle-v1-20261013'
             ? recoveryCycle
