@@ -56,7 +56,7 @@ jobs:
             p==='package.json'||p==='package-lock.json'||p==='prisma/schema.prisma'||
             p==='src/pin-ai/runtime/pin-go-read-tool-executor.test.ts'||
             (approvedSipMount && p==='src/server.ts')||
-            (approvedRecoveryLease && p==='.github/workflows/ota-airbnb-listing-discovery.yml')||
+            (approvedRecoveryLease && (p==='.github/workflows/ota-airbnb-listing-discovery.yml'||p==='.github/workflows/ota-initial-distribution-enablement.yml'))||
             p.startsWith('prisma/migrations/20261013160000_sales_voice_crm_foundation_v1/')||
             p.startsWith('prisma/migrations/20261013170000_sales_live_watchdog_v1/')||
             p==='prisma/migrations/20261013221500_sales_voice_recovery_lease_v1/migration.sql'||
