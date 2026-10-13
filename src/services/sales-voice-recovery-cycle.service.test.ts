@@ -23,7 +23,7 @@ const a = "voice_recovery_owner_0001", b = "voice_recovery_owner_0002";
 const input = (owner = a, held: Parameters<typeof runSimulatedSalesVoiceRecoveryCycle>[0]["held"] = []) => ({
   db, env, owner, held, now, ttlSeconds: 30, staleAfterSeconds: 60, maxOwned: 5,
 });
-const reset = () => db.salesVoiceCall.deleteMany({ where: { providerCallId: { startsWith: "live_cycle_" } } });
+const reset = () => db.salesVoiceCall.deleteMany({});
 async function seed(id: string, status = "ACCEPTED") {
   return db.salesVoiceCall.create({ data: {
     providerCallId: id, provider: "OPENAI_LIVE_SIP", direction: "INBOUND", status,
