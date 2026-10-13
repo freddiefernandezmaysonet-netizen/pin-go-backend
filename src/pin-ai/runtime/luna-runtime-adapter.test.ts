@@ -75,6 +75,20 @@ test("new and resumed Luna sessions receive the current persisted reservation sc
   assert.deepEqual(JSON.parse(f.inputs[1]).context.reservationSchedule, updated);
 });
 
+test("new and resumed turns receive the current scoped location as context without adding Google Places", async () => {
+  const fixture = createTurnFixture();
+  const propertyLocation = { source: "PERSISTED_PROPERTY" as const, latitude: 29.4241, longitude: -98.4936,
+    city: "San Antonio", region: "Texas", country: "US" };
+  const first = { ...request, context: { ...request.context, propertyLocation } };
+  await new LunaRuntimeAdapter(transport(fixture.fetchImpl)).run(first, createConversationMemory(first), noTools);
+  assert.deepEqual(JSON.parse(fixture.inputs[0]).context.propertyLocation, propertyLocation);
+  const next = { ...request, context: { ...request.context, propertyLocation: null } };
+  await new LunaRuntimeAdapter(transport(fixture.fetchImpl, { resumeSessionId: fixture.sessionId }))
+    .run(next, createConversationMemory(next), noTools);
+  assert.equal(JSON.parse(fixture.inputs[1]).context.propertyLocation, null);
+  assert.equal((fixture.createPayload.agent as { tools: TestItem[] }).tools.some(t => t.name === "search_local_places"), false);
+});
+
 test("runtime transport fails closed before network for invalid configuration", async () => {
   for (const [config, error] of [
     [{ enabled: false }, /OPENAI_DISABLED/],

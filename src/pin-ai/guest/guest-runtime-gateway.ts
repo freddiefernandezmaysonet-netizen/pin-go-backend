@@ -36,6 +36,7 @@ import {
 } from "../runtime/shadow-orchestrator.js";
 import {
   resolveWebSearchLocation,
+  resolveStoredPropertyLocation,
   type WebSearchLocation,
 } from "../runtime/web-search-location.js";
 
@@ -71,6 +72,8 @@ type GuestReservationScope = Readonly<{
     region: string | null;
     country: string | null;
     timezone: string | null;
+    latitude?: unknown;
+    longitude?: unknown;
   }>;
 }>;
 
@@ -206,6 +209,8 @@ export class GuestPinAIGateway {
             region: true,
             country: true,
             timezone: true,
+            latitude: true,
+            longitude: true,
           },
         },
       },
@@ -265,6 +270,7 @@ export class GuestPinAIGateway {
           checkOut: formatPropertyLocalDateTime(reservation.checkOut, reservation.property.timezone),
         },
         propertyKnowledge,
+        propertyLocation: resolveStoredPropertyLocation(reservation.property),
       },
       conversation: [{ role: "guest", content: message }],
     };
