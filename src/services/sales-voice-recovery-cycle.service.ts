@@ -1,6 +1,6 @@
 import type { PrismaClient } from "@prisma/client";
 import { inventoryUnresolvedSalesVoiceCalls } from "./sales-voice-recovery-classifier.service.js";
-import { SalesVoiceRecoveryLease, type RecoveryLease } from "./sales-voice-recovery-lease.service.js";
+import { SalesVoiceRecoveryLease, SALES_VOICE_MAX_RECOVERY_EPOCHS, type RecoveryLease } from "./sales-voice-recovery-lease.service.js";
 import { decideSalesVoiceRecovery, type RecoveryDecision } from "./sales-voice-reconciliation-decisions.service.js";
 
 type DB = Pick<PrismaClient, "salesVoiceCall">;
@@ -26,6 +26,7 @@ export async function runSimulatedSalesVoiceRecoveryCycle(input: {
 }): Promise<{
   owned: OwnedRecovery[];
   lost: string[];
+  exhausted: string[];
   quarantined: number;
   hasMore: boolean;
 }> {
@@ -58,6 +59,7 @@ export async function runSimulatedSalesVoiceRecoveryCycle(input: {
   const leases = new SalesVoiceRecoveryLease(input.db);
   const owned: OwnedRecovery[] = [];
   const lost: string[] = [];
+  const exhausted: string[] = [];
   const remember = async (lease: RecoveryLease): Promise<void> => {
     const row = await input.db.salesVoiceCall.findUnique({
       where: { providerCallId: lease.sessionId },
@@ -86,7 +88,7 @@ export async function runSimulatedSalesVoiceRecoveryCycle(input: {
     else lost.push(lease.sessionId);
   }
   if (owned.length === maxOwned) {
-    return { owned, lost, quarantined: 0, hasMore: true };
+    return { owned, lost, exhausted, quarantined: 0, hasMore: true };
   }
 
   const inventory = await inventoryUnresolvedSalesVoiceCalls({
@@ -102,6 +104,15 @@ export async function runSimulatedSalesVoiceRecoveryCycle(input: {
       sessionId: candidate.sessionId, owner, now, ttlSeconds,
     });
     if (lease) await remember(lease);
+    else {
+      const row = await input.db.salesVoiceCall.findUnique({
+        where: { providerCallId: candidate.sessionId },
+        select: { recoveryLeaseEpoch: true },
+      });
+      if (row && row.recoveryLeaseEpoch >= SALES_VOICE_MAX_RECOVERY_EPOCHS) {
+        exhausted.push(candidate.sessionId);
+      }
+    }
   }
-  return { owned, lost, quarantined, hasMore: deferred };
+  return { owned, lost, exhausted, quarantined, hasMore: deferred };
 }
