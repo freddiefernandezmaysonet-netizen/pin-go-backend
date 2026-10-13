@@ -61,7 +61,15 @@ jobs:
             'src/services/sales-voice-live-session-coordinator.service.test.ts',
             'src/services/sales-voice-live-session-coordinator.service.ts',
           ];
-          const selected = process.env.GITHUB_HEAD_REF === 'agent/sales-voice-live-session-coordinator-v1-20261013'
+          const recoveryAudit = [
+            '.github/workflows/sales-voice-live-sip-mount-v1.yml',
+            '.github/workflows/sales-voice-main-integration-certification.yml',
+            'src/services/sales-voice-recovery-classifier.service.test.ts',
+            'src/services/sales-voice-recovery-classifier.service.ts',
+          ];
+          const selected = process.env.GITHUB_HEAD_REF === 'agent/sales-voice-durable-recovery-audit-v1-20261013'
+            ? recoveryAudit
+            : process.env.GITHUB_HEAD_REF === 'agent/sales-voice-live-session-coordinator-v1-20261013'
             ? liveSessionCoordinator
             : process.env.GITHUB_HEAD_REF === 'agent/sales-voice-signed-ingress-admission-v1-20261013'
               ? admissionBridge : original;
