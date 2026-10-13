@@ -67,7 +67,15 @@ jobs:
             'src/services/sales-voice-recovery-classifier.service.test.ts',
             'src/services/sales-voice-recovery-classifier.service.ts',
           ];
-          const selected = process.env.GITHUB_HEAD_REF === 'agent/sales-voice-durable-recovery-audit-v1-20261013'
+          const reconciliationDecisions = [
+            '.github/workflows/sales-voice-live-sip-mount-v1.yml',
+            '.github/workflows/sales-voice-main-integration-certification.yml',
+            'src/services/sales-voice-reconciliation-decisions.service.test.ts',
+            'src/services/sales-voice-reconciliation-decisions.service.ts',
+          ];
+          const selected = process.env.GITHUB_HEAD_REF === 'agent/sales-voice-reconciliation-decisions-v1-20261013'
+            ? reconciliationDecisions
+            : process.env.GITHUB_HEAD_REF === 'agent/sales-voice-durable-recovery-audit-v1-20261013'
             ? recoveryAudit
             : process.env.GITHUB_HEAD_REF === 'agent/sales-voice-live-session-coordinator-v1-20261013'
             ? liveSessionCoordinator
