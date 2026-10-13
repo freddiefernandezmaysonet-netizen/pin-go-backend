@@ -77,7 +77,10 @@ jobs:
           const recoveryCycle = [".github/workflows/sales-voice-live-sip-mount-v1.yml",".github/workflows/sales-voice-main-integration-certification.yml","src/services/sales-voice-recovery-cycle.service.test.ts","src/services/sales-voice-recovery-cycle.service.ts"];
           const recoveryObservation = [".github/workflows/sales-voice-live-sip-mount-v1.yml",".github/workflows/sales-voice-main-integration-certification.yml","src/services/sales-voice-recovery-observation.service.test.ts","src/services/sales-voice-recovery-observation.service.ts","src/services/sales-voice-sideband-supervisor.service.ts"];
           const recoverySupervisor = [".github/workflows/sales-voice-live-sip-mount-v1.yml",".github/workflows/sales-voice-main-integration-certification.yml","src/services/sales-voice-recovery-supervisor.service.test.ts","src/services/sales-voice-recovery-supervisor.service.ts"];
-          const selected = process.env.GITHUB_HEAD_REF === 'agent/sales-voice-recovery-supervisor-v1-20261013'
+          const recoveryBudget = [".github/workflows/sales-voice-live-sip-mount-v1.yml",".github/workflows/sales-voice-main-integration-certification.yml",".github/workflows/sales-voice-recovery-lease-certification.yml","src/services/sales-voice-recovery-budget.service.test.ts","src/services/sales-voice-recovery-cycle.service.ts","src/services/sales-voice-recovery-lease.service.ts","src/services/sales-voice-recovery-supervisor.service.ts"];
+          const selected = process.env.GITHUB_HEAD_REF === 'agent/sales-voice-recovery-budget-v1-20261013'
+            ? recoveryBudget
+            : process.env.GITHUB_HEAD_REF === 'agent/sales-voice-recovery-supervisor-v1-20261013'
             ? recoverySupervisor
             : process.env.GITHUB_HEAD_REF === 'agent/sales-voice-recovery-observation-fence-v1-20261013'
             ? recoveryObservation

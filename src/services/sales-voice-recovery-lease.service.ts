@@ -12,6 +12,9 @@ const held = [
   "ADMISSION_CLAIMED", "ACCEPTED", "ACCEPT_UNKNOWN",
   "HANGUP_CLAIMED", "HANGUP_SENT", "HANGUP_UNKNOWN",
 ] as const;
+// Conservative lifetime budget: an acquisition consumes an epoch even if no
+// sideband attach follows. Renewal/release never reset this persisted counter.
+export const SALES_VOICE_MAX_RECOVERY_EPOCHS = 3;
 export type RecoveryLease = Readonly<{
   sessionId: string;
   owner: string;
@@ -56,6 +59,7 @@ export class SalesVoiceRecoveryLease {
       where:{
         providerCallId:sessionId,provider:"OPENAI_LIVE_SIP",
         direction:"INBOUND",status:{in:[...held]},finalizedAt:null,
+        recoveryLeaseEpoch:{gte:0,lt:SALES_VOICE_MAX_RECOVERY_EPOCHS},
         OR:[{recoveryLeaseUntil:null},{recoveryLeaseUntil:{lte:now}}],
       },
       data:{
