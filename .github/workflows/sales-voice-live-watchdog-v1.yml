@@ -1,0 +1,100 @@
+name: Sales Voice Live Watchdog V1
+
+on:
+  pull_request:
+    branches:
+      - agent/sales-voice-live-admission-v1-20261013
+    paths:
+      - 'prisma/schema.prisma'
+      - 'prisma/migrations/20261013170000_sales_live_watchdog_v1/migration.sql'
+      - 'src/services/sales-voice-live-admission.service.ts'
+      - 'src/services/sales-voice-live-watchdog.service.ts'
+      - 'src/services/sales-voice-live-watchdog.service.test.ts'
+      - '.github/workflows/sales-voice-live-watchdog-v1.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  certify:
+    name: Live SIP hangup and authoritative close contracts
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: pingo_sales_watchdog_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d pingo_sales_watchdog_test"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      DATABASE_URL: postgresql://postgres:postgres@127.0.0.1:5432/pingo_sales_watchdog_test
+      SALES_WATCHDOG_TEST_DATABASE_URL: postgresql://postgres:postgres@127.0.0.1:5432/pingo_sales_watchdog_test
+      BASE_SHA: ${{ github.event.pull_request.base.sha }}
+    steps:
+      - name: Checkout exact candidate
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+      - name: Exact six-file scope and no certified flow changes
+        run: |
+          node --input-type=module <<'NODE'
+          import assert from 'node:assert/strict';
+          import { execFileSync } from 'node:child_process';
+          const actual=execFileSync('git',['diff','--name-only',process.env.BASE_SHA,'HEAD'],{encoding:'utf8'}).trim().split('\n').sort();
+          assert.deepEqual(actual, [
+            '.github/workflows/sales-voice-live-watchdog-v1.yml',
+            'prisma/migrations/20261013170000_sales_live_watchdog_v1/migration.sql',
+            'prisma/schema.prisma',
+            'src/services/sales-voice-live-admission.service.ts',
+            'src/services/sales-voice-live-watchdog.service.test.ts',
+            'src/services/sales-voice-live-watchdog.service.ts',
+          ]);
+          console.log('PASS: only standalone sales voice watchdog and additive schema');
+          NODE
+          git diff --check "$BASE_SHA" HEAD
+      - name: Install pinned dependencies
+        run: npm ci --ignore-scripts --no-audit --no-fund
+      - name: Validate schema and generated client
+        run: |
+          ./node_modules/.bin/prisma validate
+          ./node_modules/.bin/prisma generate
+      - name: Typecheck isolated watchdog and related admission
+        run: ./node_modules/.bin/tsc --noEmit --skipLibCheck --target es2022 --module nodenext --moduleResolution nodenext --esModuleInterop src/services/sales-voice-live-watchdog.service.ts src/services/sales-voice-live-watchdog.service.test.ts src/services/sales-voice-live-admission.service.ts
+      - name: Verify disposable local DB and reconstruct BASE schema
+        run: |
+          node --input-type=module <<'NODE'
+          import assert from 'node:assert/strict';
+          const url=new URL(process.env.DATABASE_URL);
+          assert.equal(url.hostname,'127.0.0.1');
+          assert.equal(url.pathname,'/pingo_sales_watchdog_test');
+          assert.equal(process.env.DATABASE_URL,process.env.SALES_WATCHDOG_TEST_DATABASE_URL);
+          NODE
+          git show "$BASE_SHA:prisma/schema.prisma" > "$RUNNER_TEMP/sales-watchdog-base.prisma"
+          ./node_modules/.bin/prisma db push --schema "$RUNNER_TEMP/sales-watchdog-base.prisma" --skip-generate
+      - name: Apply exact additive SQL and prove schema parity
+        run: |
+          ./node_modules/.bin/prisma db execute --url "$DATABASE_URL" --file prisma/migrations/20261013170000_sales_live_watchdog_v1/migration.sql
+          ./node_modules/.bin/prisma migrate diff --from-url "$DATABASE_URL" --to-schema-datamodel prisma/schema.prisma --exit-code
+      - name: Run disposable PostgreSQL watchdog and close tests
+        run: node --import tsx --test src/services/sales-voice-live-watchdog.service.test.ts
+      - name: Clear release gate warning
+        run: |
+          echo '## Draft Live SIP watchdog foundation' >> "$GITHUB_STEP_SUMMARY"
+          echo 'Authenticated sideband parser and hangup transport are NOT wired to production. Tests use synthetic events and mock HTTP.' >> "$GITHUB_STEP_SUMMARY"
+          echo 'No automated worker, real Live session, OpenAI/Twilio credentials, T-Mobile forwarding, or hard billing cap.' >> "$GITHUB_STEP_SUMMARY"
+          echo 'Slot release requires trusted session.closed; unknown hangups stay held until explicit reconciliation.' >> "$GITHUB_STEP_SUMMARY"
+          echo 'Stacked on #415 -> #414 -> #413 -> #412 -> #411. Do not merge independently.' >> "$GITHUB_STEP_SUMMARY"
