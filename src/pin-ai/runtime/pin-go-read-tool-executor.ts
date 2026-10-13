@@ -1,4 +1,5 @@
 import { fromZonedTime } from "date-fns-tz";
+import { resolveWebSearchLocation } from "./web-search-location.js";
 import type { PrismaClient } from "@prisma/client";
 import { checkStayTimeRequest } from "./stay-time-tool.js";
 import { readGuestNfcEvidence, type GuestNfcEvidenceReader } from "./guest-nfc-evidence.js";
@@ -961,6 +962,9 @@ export class PinGoRuntimeReadToolExecutor implements PinAIRuntimeToolExecutor {
             checkInTime: true,
             checkOutTime: true,
             maxGuests: true,
+            city: true,
+            region: true,
+            country: true,
           },
         },
       },
@@ -1002,6 +1006,12 @@ export class PinGoRuntimeReadToolExecutor implements PinAIRuntimeToolExecutor {
         checkInTime: reservation.property.checkInTime,
         checkOutTime: reservation.property.checkOutTime,
         maxGuests: reservation.property.maxGuests,
+        publicLocation: resolveWebSearchLocation({
+          city: reservation.property.city ?? null,
+          region: reservation.property.region ?? null,
+          country: reservation.property.country ?? null,
+          timezone: reservation.property.timezone ?? null,
+        }),
       },
     };
   }

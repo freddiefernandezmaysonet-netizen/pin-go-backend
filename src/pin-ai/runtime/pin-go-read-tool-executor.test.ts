@@ -419,6 +419,43 @@ test("real read adapter returns scoped reservation context without guest PII or 
   assert.doesNotMatch(serialized, /guestEmail|guestPhone|guestToken|stripePaymentIntentId/);
 });
 
+test("local recommendation area comes from the scoped property without address or coordinates", async () => {
+  const prisma = createPrismaFixture();
+  const originalRead = prisma.reservation.findFirst.bind(prisma.reservation);
+  prisma.reservation.findFirst = async (args: any) => {
+    assert.deepEqual(args.where, {
+      id: "reservation-a", propertyId: "property-a", property: { organizationId: "org-a" },
+    });
+    const select = args.select.property.select;
+    assert.equal(select.city, true);
+    assert.equal(select.region, true);
+    assert.equal(select.country, true);
+    for (const field of ["address", "latitude", "longitude"]) assert.equal(select[field], undefined);
+    const reservation = await originalRead(args);
+    return { ...reservation, property: { ...reservation.property,
+      city: "San Juan", region: "Puerto Rico", country: "PR",
+      address: "PRIVATE_ADDRESS_SENTINEL", latitude: 18.123456, longitude: -66.123456,
+    } };
+  };
+  const result = await new PinGoRuntimeReadToolExecutor(prisma).execute(
+    "get_reservation_context", {}, request, createConversationMemory(request),
+  );
+  assert.deepEqual((result.property as any).publicLocation, {
+    city: "San Juan", region: "Puerto Rico", country: "PR",
+    timezone: "America/Puerto_Rico", label: "San Juan, Puerto Rico, PR",
+  });
+  assert.doesNotMatch(JSON.stringify(result), /PRIVATE_ADDRESS_SENTINEL|latitude|longitude|18\.123456|66\.123456/);
+});
+
+test("missing property municipality stays unknown rather than being invented from timezone", async () => {
+  const result = await new PinGoRuntimeReadToolExecutor(createPrismaFixture()).execute(
+    "get_reservation_context", {}, request, createConversationMemory(request),
+  );
+  assert.deepEqual((result.property as any).publicLocation, {
+    city: "", region: "", country: "PR", timezone: "America/Puerto_Rico", label: "PR",
+  });
+});
+
 test("real read adapter returns sanitized canonical Guest Journey status without executing lifecycle work", async () => {
   const executor = new PinGoRuntimeReadToolExecutor(createPrismaFixture());
   const result = await executor.execute(
