@@ -39,7 +39,7 @@ test("pure state mapping never confuses disconnect or hangup acknowledgment with
 test("inventory selects stale unfinalized inbound OpenAI calls only and never modifies them",async()=>{
   await reset();
   await make(1,"ACCEPTED");
-  await make(2,"HANGUP_SENT");
+  await make(2,"HANGUP_SENT",{updatedAt:new Date(old.getTime()+1000)});
   await make(3,"ACCEPT_UNKNOWN",{updatedAt:recent});
   await make(4,"COMPLETED");
   await make(5,"ACCEPTED",{provider:"TWILIO"});
@@ -59,8 +59,8 @@ test("inventory selects stale unfinalized inbound OpenAI calls only and never mo
 test("bounded scan is deterministic and reports more without taking ownership",async()=>{
   await reset();
   await make(11,"ADMISSION_CLAIMED");
-  await make(12,"ACCEPT_UNKNOWN");
-  await make(13,"HANGUP_UNKNOWN");
+  await make(12,"ACCEPT_UNKNOWN",{updatedAt:new Date(old.getTime()+1000)});
+  await make(13,"HANGUP_UNKNOWN",{updatedAt:new Date(old.getTime()+2000)});
   const result=await inventoryUnresolvedSalesVoiceCalls({db,now,staleAfterSeconds:60,limit:2});
   assert.equal(result.candidates.length,2);
   assert.equal(result.hasMore,true);
