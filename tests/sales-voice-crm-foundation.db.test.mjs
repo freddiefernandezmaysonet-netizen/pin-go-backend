@@ -35,7 +35,7 @@ await test('Sales voice foundation on the actual SQL migration', async t => {
   await t.test('generated client exposes metadata only, without credential or recording fields', () => {
     const expected = {
       SalesProspect: ['id', 'fullName', 'email', 'phoneE164', 'organizationName', 'propertyCount', 'preferredLanguage', 'source', 'status', 'contactConsentAt', 'marketingConsentAt', 'marketingConsentSource', 'convertedOrganizationId', 'convertedAt', 'createdAt', 'updatedAt'],
-      SalesVoiceCall: ['id', 'prospectId', 'provider', 'providerCallId', 'direction', 'fromPhoneE164', 'toPhoneE164', 'language', 'status', 'disposition', 'startedAt', 'answeredAt', 'endedAt', 'durationSeconds', 'createdAt', 'updatedAt'],
+      SalesVoiceCall: ['id', 'prospectId', 'provider', 'providerCallId', 'direction', 'fromPhoneE164', 'toPhoneE164', 'language', 'status', 'disposition', 'startedAt', 'answeredAt', 'endedAt', 'durationSeconds', 'lastUsageSeconds', 'usageObservedAt', 'finalUsageSeconds', 'finalizedAt', 'closeReason', 'hangupClaimedAt', 'hangupAcknowledgedAt', 'createdAt', 'updatedAt'],
     };
     for (const [name, fields] of Object.entries(expected)) {
       const model = Prisma.dmmf.datamodel.models.find(value => value.name === name);
