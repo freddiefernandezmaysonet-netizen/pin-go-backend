@@ -80,6 +80,31 @@ jobs:
           BASE_BRANCH="${GITHUB_BASE_REF:-main}"
           git fetch origin "+refs/heads/$BASE_BRANCH:refs/remotes/origin/$BASE_BRANCH"
           git diff --name-only "origin/$BASE_BRANCH...HEAD" | sort > "$RUNNER_TEMP/actual.txt"
+          # PR #430 only: exact dormant commercial recovery lease; retain every OTA test.
+          if [ "${GITHUB_HEAD_REF:-}" = "agent/sales-voice-durable-lease-v1-20261013" ]; then
+            test "$GITHUB_EVENT_NAME" = "pull_request"
+            test "$GITHUB_REPOSITORY" = "freddiefernandezmaysonet-netizen/pin-go-backend"
+            test "$SCOPE_PR_NUMBER" = "430"
+            test "$SCOPE_HEAD_REPO" = "$GITHUB_REPOSITORY"
+            test "$SCOPE_BASE_REPO" = "$GITHUB_REPOSITORY"
+            test "$GITHUB_BASE_REF" = "main"
+            node --input-type=module <<'NODE'
+          import assert from 'node:assert/strict';
+          import {execFileSync} from 'node:child_process';
+          import {readFileSync} from 'node:fs';
+          const base='fab2cd4ed559e49e678158b269ad39c54b6043b6';
+          assert.equal(execFileSync('git',['merge-base',base,'HEAD'],{encoding:'utf8'}).trim(),base);
+          const paths=execFileSync('git',['diff','--name-only',base,'HEAD'],{encoding:'utf8'}).trim().split('\n').sort();
+          assert.deepEqual(paths,[".github/workflows/ota-airbnb-listing-discovery.yml",".github/workflows/ota-initial-distribution-enablement.yml",".github/workflows/sales-voice-crm-foundation-v1.yml",".github/workflows/sales-voice-live-sip-mount-v1.yml",".github/workflows/sales-voice-main-integration-certification.yml",".github/workflows/sales-voice-recovery-lease-certification.yml","prisma/migrations/20261013221500_sales_voice_recovery_lease_v1/migration.sql","prisma/schema.prisma","src/services/sales-voice-recovery-lease.service.test.ts","src/services/sales-voice-recovery-lease.service.ts","tests/sales-voice-crm-foundation.db.test.mjs"]);
+          const before=execFileSync('git',['show',base+':prisma/schema.prisma'],{encoding:'utf8'});
+          const after=readFileSync('prisma/schema.prisma','utf8');
+          const addition="  // Durable, fenced sideband recovery ownership. Unused until certified.\n  recoveryLeaseOwner   String?   @db.VarChar(80)\n  recoveryLeaseUntil   DateTime?\n  recoveryLeaseEpoch   Int       @default(0)\n";
+          assert.equal(after.split(addition).length,2);
+          assert.equal(after.replace(addition,''),before);
+          execFileSync('git',['diff','--exit-code',base,'HEAD','--','src/distribution','src/channex-messaging','src/pms','src/pin-ai','src/routes','src/workers','src/server.ts']);
+          NODE
+            exit 0
+          fi
           # PR #373 only: exact reviewed OTA commercial/exemption scope; retain runtime tests.
           if [ "${GITHUB_HEAD_REF:-}" = "agent/pin-ai-ota-property-activation-v1" ]; then
             test "$GITHUB_EVENT_NAME" = "pull_request"

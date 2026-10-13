@@ -3677,6 +3677,10 @@ model SalesVoiceCall {
   closeReason           String?        @db.VarChar(40)
   hangupClaimedAt       DateTime?
   hangupAcknowledgedAt  DateTime?
+  // Durable, fenced sideband recovery ownership. Unused until certified.
+  recoveryLeaseOwner   String?   @db.VarChar(80)
+  recoveryLeaseUntil   DateTime?
+  recoveryLeaseEpoch   Int       @default(0)
   createdAt        DateTime       @default(now())
   updatedAt        DateTime       @updatedAt
 
