@@ -1,0 +1,125 @@
+name: Sales Voice Main Integration Certification
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - 'src/services/sales-voice-*'
+      - 'src/workers/sales-voice-*'
+      - 'tests/sales-voice-*'
+      - 'prisma/schema.prisma'
+      - 'prisma/migrations/20261013160000_sales_voice_crm_foundation_v1/migration.sql'
+      - 'prisma/migrations/20261013170000_sales_live_watchdog_v1/migration.sql'
+      - 'package.json'
+      - 'package-lock.json'
+      - '.github/workflows/sales-voice-main-integration-certification.yml'
+permissions:
+  contents: read
+jobs:
+  integration:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: postgres
+        ports: ['5432:5432']
+        options: >-
+          --health-cmd "pg_isready -U postgres -d postgres"
+          --health-interval 5s --health-timeout 5s --health-retries 10
+    env:
+      DATABASE_URL: postgresql://postgres:postgres@127.0.0.1:5432/postgres
+      PGPASSWORD: postgres
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+      - name: Guard sales-only scope
+        run: |
+          git diff --check origin/main...HEAD
+          node --input-type=module <<'NODE'
+          import assert from 'node:assert/strict';
+          import { execFileSync } from 'node:child_process';
+          const paths=execFileSync('git',['diff','--name-only','origin/main...HEAD'],{encoding:'utf8'}).trim().split('\n');
+          for (const p of paths) assert.ok(
+            p==='package.json'||p==='package-lock.json'||p==='prisma/schema.prisma'||
+            p.startsWith('prisma/migrations/20261013160000_sales_voice_crm_foundation_v1/')||
+            p.startsWith('prisma/migrations/20261013170000_sales_live_watchdog_v1/')||
+            p.startsWith('src/services/sales-voice-')||
+            p.startsWith('src/workers/sales-voice-')||
+            p.startsWith('tests/sales-voice-')||
+            p.startsWith('.github/workflows/sales-voice-'),
+            'Out-of-scope file: '+p
+          );
+          console.log('PASS sales scope',paths.length);
+          NODE
+      - name: Install pinned dependencies and generate Prisma client
+        run: |
+          npm ci --ignore-scripts --no-audit --no-fund
+          npm ls ws --depth=0
+          ./node_modules/.bin/prisma validate
+          ./node_modules/.bin/prisma generate
+      - name: Typecheck the integrated sales voice code
+        run: |
+          ./node_modules/.bin/tsc --noEmit --skipLibCheck --target es2022 --module nodenext --moduleResolution nodenext --esModuleInterop \
+            src/services/sales-voice-*.ts src/workers/sales-voice-*.ts
+      - name: Bundle backend, do not run it
+        run: |
+          node --input-type=module <<'NODE'
+          import {build} from 'esbuild';
+          await build({entryPoints:['src/server.ts'],bundle:true,platform:'node',
+            format:'esm',packages:'external',outfile:'/tmp/main-sales-candidate.mjs'});
+          NODE
+      - name: Set up seven isolated disposable databases
+        run: |
+          set -euo pipefail
+          for database in \
+            pingo_sales_voice_crm_test \
+            pingo_sales_voice_service_test \
+            pingo_sales_sip_test \
+            pingo_sales_live_sip_test \
+            pingo_sales_admission_test \
+            pingo_sales_watchdog_test \
+            pingo_sales_sideband_test
+          do
+            psql -h 127.0.0.1 -U postgres -d postgres -v ON_ERROR_STOP=1 -c "CREATE DATABASE $database"
+            DATABASE_URL="postgresql://postgres:postgres@127.0.0.1:5432/$database" \
+              ./node_modules/.bin/prisma db push --skip-generate
+          done
+          psql -h 127.0.0.1 -U postgres -d pingo_sales_voice_crm_test -v ON_ERROR_STOP=1 <<'SQL'
+          INSERT INTO "Organization"("id","name","createdAt","updatedAt")
+          VALUES ('sales-voice-baseline-sentinel','Sales voice baseline - do not change',
+            TIMESTAMP '2026-01-01 00:00:00', TIMESTAMP '2026-01-01 00:00:00');
+          SQL
+      - name: Run all seven PostgreSQL-backed sales suites
+        run: |
+          set -euo pipefail
+          run_suite() {
+            local database="$1" variable="$2" test_file="$3"
+            export DATABASE_URL="postgresql://postgres:postgres@127.0.0.1:5432/$database"
+            export "$variable=$DATABASE_URL"
+            node --import tsx --test "$test_file"
+          }
+          run_suite pingo_sales_voice_crm_test SALES_VOICE_TEST_DATABASE_URL tests/sales-voice-crm-foundation.db.test.mjs
+          run_suite pingo_sales_voice_service_test SALES_VOICE_SERVICE_TEST_DATABASE_URL src/services/sales-voice-commercial.service.test.ts
+          run_suite pingo_sales_sip_test SALES_SIP_TEST_DATABASE_URL src/services/sales-voice-sip-ingress.service.test.ts
+          run_suite pingo_sales_live_sip_test SALES_LIVE_SIP_TEST_DATABASE_URL src/services/sales-voice-live-sip-auth.service.test.ts
+          run_suite pingo_sales_admission_test SALES_VOICE_ADMISSION_TEST_DATABASE_URL src/services/sales-voice-live-admission.service.test.ts
+          run_suite pingo_sales_watchdog_test SALES_WATCHDOG_TEST_DATABASE_URL src/services/sales-voice-live-watchdog.service.test.ts
+          run_suite pingo_sales_sideband_test SALES_SIDEBAND_TEST_DATABASE_URL src/services/sales-voice-sideband-supervisor.service.test.ts
+      - name: Run worker and local loopback transport tests
+        run: |
+          node --import tsx --test src/workers/sales-voice-live-watchdog.worker.test.ts
+          node --import tsx --test src/services/sales-voice-sideband-ws-transport.service.test.ts
+      - name: Certification boundary
+        run: |
+          echo 'Sales voice all-source integration passed against latest main. No API route or worker was enabled.' >> "$GITHUB_STEP_SUMMARY"
+          echo 'No real OpenAI/Twilio/SIP calls. Separate Airbnb CI scope check is not waived.' >> "$GITHUB_STEP_SUMMARY"
