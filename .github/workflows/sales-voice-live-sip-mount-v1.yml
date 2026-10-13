@@ -5,6 +5,7 @@ on:
     branches: [main]
     paths:
       - 'src/server.ts'
+      - '.github/workflows/sales-voice-main-integration-certification.yml'
       - 'src/services/sales-voice-live-sip-mount.service.ts'
       - 'src/services/sales-voice-live-sip-mount.service.test.ts'
       - '.github/workflows/sales-voice-live-sip-mount-v1.yml'
@@ -30,7 +31,7 @@ jobs:
         with:
           node-version: '22'
           cache: npm
-      - name: Enforce exact four-file integration scope
+      - name: Enforce exact five-file integration scope
         run: |
           node --input-type=module <<'NODE'
           import assert from 'node:assert/strict';
@@ -38,6 +39,7 @@ jobs:
           const paths=execFileSync('git',['diff','--name-only',process.env.BASE_SHA,'HEAD'],{encoding:'utf8'}).trim().split('\n').sort();
           assert.deepEqual(paths,[
             '.github/workflows/sales-voice-live-sip-mount-v1.yml',
+            '.github/workflows/sales-voice-main-integration-certification.yml',
             'src/server.ts',
             'src/services/sales-voice-live-sip-mount.service.test.ts',
             'src/services/sales-voice-live-sip-mount.service.ts',
