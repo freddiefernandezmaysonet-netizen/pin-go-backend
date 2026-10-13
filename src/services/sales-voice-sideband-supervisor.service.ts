@@ -81,7 +81,9 @@ export async function observeExistingLiveSession(input: {
   if (!socket || typeof socket.on !== "function" || typeof socket.close !== "function") {
     reject("INVALID_SOCKET");
   }
-  let authenticatedSession = false;
+  // WSS authentication and the selected live_ session URL are the binding.
+  // A secondary attach may occur after session.started; that event is optional.
+  let authenticatedTransport = false;
   let terminal: SidebandSessionResult["state"] | null = null;
   let count = 0;
   let chained = Promise.resolve();
@@ -94,6 +96,7 @@ export async function observeExistingLiveSession(input: {
     try { socket.close(); } catch { /* preserve state; never treat close as finalization */ }
   };
 
+  socket.on("open", () => { if (!terminal) authenticatedTransport = true; });
   socket.on("message", (raw: unknown) => {
     if (terminal) return;
     // Serialize DB work to preserve causal order under bursts of messages.
@@ -111,19 +114,24 @@ export async function observeExistingLiveSession(input: {
         settle("PROCESSING_ERROR"); return;
       }
       const obj = event as Record<string, unknown>;
+      // No provider event may modify state before a successful authenticated
+      // WSS upgrade, even if a mock transport delivers data prematurely.
+      if (!authenticatedTransport) { settle("AUTHENTICATION_MISMATCH"); return; }
+      // If any server event carries its canonical session ID, verify it.
+      // Usage events may omit that field: their scope is the authenticated
+      // WSS connection to the exact session URL.
+      if ("session_id" in obj && obj.session_id !== input.sessionId) {
+        settle("AUTHENTICATION_MISMATCH"); return;
+      }
       if (obj.type === "session.started") {
         const session = obj.session;
         if (!session || typeof session !== "object" || Array.isArray(session)
             || (session as Record<string, unknown>).id !== input.sessionId) {
           settle("AUTHENTICATION_MISMATCH"); return;
         }
-        authenticatedSession = true;
         return;
       }
       if (obj.type !== "session.usage.updated" && obj.type !== "session.closed") return;
-      // Sideband attach must first establish an exact session identity;
-      // never accept usage/close data from an unauthenticated socket.
-      if (!authenticatedSession) { settle("AUTHENTICATION_MISMATCH"); return; }
       try {
         const parsed = parseBoundLiveSidebandEvent(obj, input.sessionId);
         if (!parsed) return;
