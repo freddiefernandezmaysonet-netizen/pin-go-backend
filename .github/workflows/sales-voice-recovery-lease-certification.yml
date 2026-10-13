@@ -40,22 +40,14 @@ jobs:
         with:
           node-version: '22'
           cache: npm
-      - name: Exact seven-file commercial scope and additive migration only
+      - name: Exact nine-file commercial scope and additive migration only
         run: |
           node --input-type=module <<'NODE'
           import assert from 'node:assert/strict';
           import {execFileSync} from 'node:child_process';
           import {readFileSync,writeFileSync} from 'node:fs';
           const files=execFileSync('git',['diff','--name-only',process.env.BASE_SHA,'HEAD'],{encoding:'utf8'}).trim().split('\n').sort();
-          assert.deepEqual(files,[
-            '.github/workflows/sales-voice-crm-foundation-v1.yml',
-            '.github/workflows/sales-voice-main-integration-certification.yml',
-            '.github/workflows/sales-voice-recovery-lease-certification.yml',
-            'prisma/migrations/20261013221500_sales_voice_recovery_lease_v1/migration.sql',
-            'prisma/schema.prisma',
-            'src/services/sales-voice-recovery-lease.service.test.ts',
-            'src/services/sales-voice-recovery-lease.service.ts',
-          ]);
+          assert.deepEqual(files,[".github/workflows/sales-voice-crm-foundation-v1.yml",".github/workflows/sales-voice-live-sip-mount-v1.yml",".github/workflows/sales-voice-main-integration-certification.yml",".github/workflows/sales-voice-recovery-lease-certification.yml","prisma/migrations/20261013221500_sales_voice_recovery_lease_v1/migration.sql","prisma/schema.prisma","src/services/sales-voice-recovery-lease.service.test.ts","src/services/sales-voice-recovery-lease.service.ts","tests/sales-voice-crm-foundation.db.test.mjs"]);
           const before=execFileSync('git',['show',process.env.BASE_SHA+':prisma/schema.prisma'],{encoding:'utf8'});
           const after=readFileSync('prisma/schema.prisma','utf8');
           const addition="  // Durable, fenced sideband recovery ownership. Unused until certified.\n  recoveryLeaseOwner   String?   @db.VarChar(80)\n  recoveryLeaseUntil   DateTime?\n  recoveryLeaseEpoch   Int       @default(0)\n";
