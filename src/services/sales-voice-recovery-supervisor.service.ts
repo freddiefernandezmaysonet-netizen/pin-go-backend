@@ -104,9 +104,11 @@ export class SimulatedSalesVoiceRecoverySupervisor {
         const existing = this.records.get(sessionId);
         if (existing) {
           existing.lease = owned.lease;
-          continue; // No duplicate attach or blind retry in this epoch.
+          // REVIEW has not attempted attach: authoritative ACCEPTED may now permit it.
+          if (existing.phase !== "REVIEW" || owned.decision !== "KEEP_CAPACITY_HELD") continue;
+          // Every other phase already reserved its single attempt for this epoch.
         }
-        const record: RecordState = { lease: owned.lease, phase: "REVIEW" };
+        const record: RecordState = existing ?? { lease: owned.lease, phase: "REVIEW" };
         this.records.set(sessionId, record);
         if (owned.decision !== "KEEP_CAPACITY_HELD") continue;
         record.phase = "DISCONNECTED"; // Attempt is reserved before awaiting attach.
