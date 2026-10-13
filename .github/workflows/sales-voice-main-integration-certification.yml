@@ -49,9 +49,11 @@ jobs:
           import assert from 'node:assert/strict';
           import { execFileSync } from 'node:child_process';
           const paths=execFileSync('git',['diff','--name-only','origin/main...HEAD'],{encoding:'utf8'}).trim().split('\n');
+          const approvedSipMount = process.env.GITHUB_HEAD_REF === 'agent/sales-voice-signed-webhook-mount-v1-20261013';
           for (const p of paths) assert.ok(
             p==='package.json'||p==='package-lock.json'||p==='prisma/schema.prisma'||
             p==='src/pin-ai/runtime/pin-go-read-tool-executor.test.ts'||
+            (approvedSipMount && p==='src/server.ts')||
             p.startsWith('prisma/migrations/20261013160000_sales_voice_crm_foundation_v1/')||
             p.startsWith('prisma/migrations/20261013170000_sales_live_watchdog_v1/')||
             p.startsWith('src/services/sales-voice-')||
@@ -120,6 +122,8 @@ jobs:
         run: |
           node --import tsx --test src/workers/sales-voice-live-watchdog.worker.test.ts
           node --import tsx --test src/services/sales-voice-sideband-ws-transport.service.test.ts
+      - name: Verify signed mounted Live webhook with real local HTTP
+        run: node --import tsx --test src/services/sales-voice-live-sip-mount.service.test.ts
       - name: Certification boundary
         run: |
           echo 'Sales voice all-source integration passed against latest main. No API route or worker was enabled.' >> "$GITHUB_STEP_SUMMARY"

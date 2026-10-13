@@ -1,0 +1,72 @@
+name: Sales Voice Signed SIP Webhook Mount V1
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - 'src/server.ts'
+      - '.github/workflows/sales-voice-main-integration-certification.yml'
+      - 'src/services/sales-voice-live-sip-mount.service.ts'
+      - 'src/services/sales-voice-live-sip-mount.service.test.ts'
+      - '.github/workflows/sales-voice-live-sip-mount-v1.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  certify:
+    name: Verify disabled commercial webhook and exact signed payload
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      DATABASE_URL: postgresql://test:test@127.0.0.1:5432/dummy_no_connection
+      BASE_SHA: ${{ github.event.pull_request.base.sha }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          persist-credentials: false
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+      - name: Enforce exact five-file integration scope
+        run: |
+          node --input-type=module <<'NODE'
+          import assert from 'node:assert/strict';
+          import {execFileSync} from 'node:child_process';
+          const paths=execFileSync('git',['diff','--name-only',process.env.BASE_SHA,'HEAD'],{encoding:'utf8'}).trim().split('\n').sort();
+          assert.deepEqual(paths,[
+            '.github/workflows/sales-voice-live-sip-mount-v1.yml',
+            '.github/workflows/sales-voice-main-integration-certification.yml',
+            'src/server.ts',
+            'src/services/sales-voice-live-sip-mount.service.test.ts',
+            'src/services/sales-voice-live-sip-mount.service.ts',
+          ]);
+          NODE
+          git diff --check "$BASE_SHA" HEAD
+      - name: Install pinned dependencies and generate Prisma client
+        run: |
+          npm ci --ignore-scripts --no-audit --no-fund
+          ./node_modules/.bin/prisma validate
+          ./node_modules/.bin/prisma generate
+      - name: Typecheck mount and signed router integration
+        run: |
+          ./node_modules/.bin/tsc --noEmit --skipLibCheck --target es2022 --module nodenext --moduleResolution nodenext --esModuleInterop \
+            src/services/sales-voice-live-sip-mount.service.ts \
+            src/services/sales-voice-live-sip-mount.service.test.ts
+      - name: Run local HTTP signature / disable / separation tests
+        run: node --import tsx --test src/services/sales-voice-live-sip-mount.service.test.ts
+      - name: Bundle backend without starting the server
+        run: |
+          node --input-type=module <<'NODE'
+          import {build} from 'esbuild';
+          await build({entryPoints:['src/server.ts'],bundle:true,
+            platform:'node',format:'esm',packages:'external',outfile:'/tmp/signed-sip-mount.mjs'});
+          NODE
+      - name: Certification limitations
+        run: |
+          echo 'Existing production backend only; receiver off unless BOTH release gates set.' >> "$GITHUB_STEP_SUMMARY"
+          echo 'Signature is separate from SALES_VOICE_OPENAI_API_KEY; no real provider traffic or automatic accept.' >> "$GITHUB_STEP_SUMMARY"
+          echo 'No Twilio changes, SIP calls, Railway variables, new services or certified guest/OTA code changes.' >> "$GITHUB_STEP_SUMMARY"

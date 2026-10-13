@@ -13,6 +13,7 @@ import crypto from "crypto";
 import { prisma } from "./lib/prisma";
 import bodyParser from "body-parser";
 import { registerStripeWebhook } from "./webhooks/stripe.webhook";
+import { mountSalesVoiceLiveSipWebhook } from "./services/sales-voice-live-sip-mount.service.js";
 import cors from "cors";
 
 // Routers (NO TOCAR)
@@ -186,6 +187,9 @@ console.log("[server] START", {
 // Webhooks PRIMERO
 // =====================
 registerStripeWebhook(app);
+// Signed OpenAI GPT-Live webhook must run before the application JSON parser.
+// Double-gated OFF by default; signed metadata only, never accepts calls.
+mountSalesVoiceLiveSipWebhook(app, prisma, process.env);
 // =====================
 // Middleware
 // =====================
