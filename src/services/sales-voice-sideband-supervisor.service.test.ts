@@ -135,8 +135,13 @@ test("cumulative voice updates persist after matching session.started", async ()
   socket.usage(10);
   socket.usage(14);
   socket.usage(8);
-  await tick(); await tick(); await tick();
-  const row=await db.salesVoiceCall.findUniqueOrThrow({where:{providerCallId:incomingId(7)}});
+  // Wait for the actual serialized DB updates, not a fixed number of event-loop turns.
+  // This avoids racing the test reader with PostgreSQL I/O on slower CI hosts.
+  let row = await db.salesVoiceCall.findUniqueOrThrow({where:{providerCallId:incomingId(7)}});
+  for (let i = 0; row.lastUsageSeconds !== 14 && i < 100; i++) {
+    await new Promise(resolve => setTimeout(resolve, 10));
+    row = await db.salesVoiceCall.findUniqueOrThrow({where:{providerCallId:incomingId(7)}});
+  }
   assert.equal(row.lastUsageSeconds,14);
   assert.equal(row.finalizedAt,null);
   socket.drop();
