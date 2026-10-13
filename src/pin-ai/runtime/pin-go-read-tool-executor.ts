@@ -1,5 +1,6 @@
 import { fromZonedTime } from "date-fns-tz";
 import { resolveWebSearchLocation } from "./web-search-location.js";
+import { LocalPlacesBudgetError, createBudgetedLocalPlacesSearch } from "./local-places-budget.js";
 import type { PrismaClient } from "@prisma/client";
 import { checkStayTimeRequest } from "./stay-time-tool.js";
 import { readGuestNfcEvidence, type GuestNfcEvidenceReader } from "./guest-nfc-evidence.js";
@@ -21,13 +22,13 @@ import type {
 } from "./tool-executor.js";
 import { PinGoRuntimeEligibilityChecks } from "./pin-go-eligibility-checks.js";
 import {
-  searchGooglePlaces,
   type GooglePlacesSearchInput,
   type GooglePlacesSearchResult,
 } from "./google-places-read-client.js";
 
 type RuntimeReadPrisma = GuestNfcEvidenceReader & Readonly<{
   $transaction?: PrismaClient["$transaction"];
+  $queryRaw?: PrismaClient["$queryRaw"];
   property: Readonly<{
     findFirst(args: unknown): Promise<any>;
   }>;
@@ -123,7 +124,7 @@ export class PinGoRuntimeReadToolExecutor implements PinAIRuntimeToolExecutor {
     private readonly evaluateCancellationPolicy: RuntimeCancellationPolicyEvaluator =
       evaluateRuntimeCancellationPolicy,
     private readonly searchLocalPlaces: RuntimeLocalPlacesSearch =
-      searchGooglePlaces,
+      createBudgetedLocalPlacesSearch(prisma),
   ) {
     this.eligibility = new PinGoRuntimeEligibilityChecks(prisma);
   }
@@ -242,7 +243,8 @@ export class PinGoRuntimeReadToolExecutor implements PinAIRuntimeToolExecutor {
         note:
           "Read-only local search. Distances are straight-line estimates. Current hours, prices, availability, and booking status were not requested or verified.",
       };
-    } catch {
+    } catch (error) {
+      if (error instanceof LocalPlacesBudgetError) return localPlacesUnavailable(error.code);
       return localPlacesUnavailable("LOCAL_PLACES_PROVIDER_UNAVAILABLE");
     }
   }
