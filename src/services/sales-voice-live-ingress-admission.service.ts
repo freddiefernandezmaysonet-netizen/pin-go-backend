@@ -42,7 +42,7 @@ function simulationEnabled(env: Env): boolean {
       || env.SALES_VOICE_ADMISSION_SIMULATION_RELEASE_CERTIFIED !== "true") {
     return false;
   }
-  if (env.NODE_ENV === "production" || env.RAILWAY_ENVIRONMENT_NAME === "production") {
+  if (env.NODE_ENV !== "test" || env.RAILWAY_ENVIRONMENT_NAME !== "sales-voice-certification") {
     reject("PRODUCTION_SIMULATION_FORBIDDEN");
   }
   return true;
