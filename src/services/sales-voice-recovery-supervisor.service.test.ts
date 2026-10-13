@@ -171,3 +171,15 @@ test("database-clock failure stops active observer without changing call outcome
   const stored = await row(id);
   assert.equal(stored.status, "ACCEPTED"); assert.equal(stored.finalizedAt, null);
 });
+
+test("review-only session attaches once after authoritative status becomes ACCEPTED", async () => {
+  await reset(); const id = "live_supervisor_reviewed"; await seed(id, "ACCEPT_UNKNOWN");
+  const fixture = input(), engine = new SimulatedSalesVoiceRecoverySupervisor(fixture.options);
+  assert.equal((await engine.sweep()).opened, 0);
+  assert.equal(engine.snapshot()[0].phase, "REVIEW");
+  await db.salesVoiceCall.update({ where: { providerCallId: id }, data: { status: "ACCEPTED" } });
+  assert.equal((await engine.sweep()).opened, 1);
+  assert.equal((await engine.sweep()).opened, 0);
+  assert.equal(fixture.sockets.length, 1);
+  engine.stop();
+});
