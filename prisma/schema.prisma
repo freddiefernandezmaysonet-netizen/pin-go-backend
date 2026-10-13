@@ -3622,7 +3622,7 @@ model CleaningChecklistItemEvent {
   @@index([checklistItemId, createdAt])
 }
 
- 
+
 // Independent CRM records for inbound commercial conversations.
 // Do not infer customer identity from caller ID alone.
 model SalesProspect {
