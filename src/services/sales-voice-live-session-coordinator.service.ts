@@ -50,13 +50,14 @@ export type CoordinatorCompletion =
   | "HANGUP_UNKNOWN_AWAITING_RECONCILIATION"
   | "PREVIOUS_HANGUP_OR_CLOSE";
 
+type ObservableResult = {
+  completion: Promise<CoordinatorCompletion>;
+  disconnect: () => void;
+};
 export type CoordinatorResult =
   | { state: "ALREADY_CLAIMED" | "ACCEPT_UNKNOWN"; completion?: never; disconnect?: never }
-  | {
-    state: "MONITORING" | "SIDE_BAND_CONNECT_FAILED";
-    completion: Promise<CoordinatorCompletion>;
-    disconnect: () => void;
-  };
+  | ({ state: "MONITORING" } & ObservableResult)
+  | ({ state: "SIDE_BAND_CONNECT_FAILED" } & ObservableResult);
 
 /** One durable hangup claim, one provider request, never a blind retry. */
 async function fenceHangup(
