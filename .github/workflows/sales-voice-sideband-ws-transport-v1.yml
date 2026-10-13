@@ -61,6 +61,10 @@ jobs:
           assert.equal(lock.packages['node_modules/ws'].version,'8.18.3');
           assert.equal(require('ws/package.json').version,'8.18.3');
           NODE
+      - name: Generate Prisma client before dependent typecheck
+        run: |
+          ./node_modules/.bin/prisma validate
+          ./node_modules/.bin/prisma generate
       - name: Focused TypeScript validation
         run: |
           ./node_modules/.bin/tsc --noEmit --skipLibCheck --target es2022 --module nodenext --moduleResolution nodenext --esModuleInterop src/services/sales-voice-sideband-ws-transport.service.ts src/services/sales-voice-sideband-ws-transport.service.test.ts
