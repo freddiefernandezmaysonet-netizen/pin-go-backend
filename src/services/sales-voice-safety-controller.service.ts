@@ -1,3 +1,4 @@
+import {salesVoiceCertificationEnvironmentAllowed, salesVoiceCertificationLimitsMatch} from "./sales-voice-certification-profile.service.js";
 import { performance } from "node:perf_hooks";
 import type { ObserverHeartbeatTimer } from "./sales-voice-live-session-coordinator.service.js";
 import type { PrismaClient } from "@prisma/client";
@@ -9,8 +10,7 @@ import type { SidebandSocketFactory } from "./sales-voice-sideband-supervisor.se
 type DB = Pick<PrismaClient, "salesVoiceCall" | "$queryRaw" | "$transaction">;
 type Env = Readonly<Record<string, string | undefined>>;
 const permitted = (env: Env): boolean =>
-  env.NODE_ENV === "test"
-  && env.RAILWAY_ENVIRONMENT_NAME === "sales-voice-certification"
+  salesVoiceCertificationEnvironmentAllowed(env)
   && env.SALES_VOICE_SAFETY_CONTROLLER_SIMULATION_ENABLED === "true"
   && env.SALES_VOICE_SAFETY_CONTROLLER_RELEASE_CERTIFIED === "true";
 type WatchdogResult = { inspected: number; claimed: number; sent: number; unknown: number };
@@ -44,6 +44,8 @@ export class SimulatedSalesVoiceSafetyController {
   }) {
     if (!permitted(input.env)) throw new Error("SAFETY_CONTROLLER_PRODUCTION_VETO");
     const limits = input.admissionLimits;
+    if(!salesVoiceCertificationLimitsMatch(input.env,limits))
+      throw new Error("PRIVATE_CERTIFICATION_POLICY_REQUIRED");
     const window = limits.certificationWindow;
     if (window && (!Number.isSafeInteger(window.startsAtMs) || window.startsAtMs <= 0
       || !Number.isSafeInteger(window.endsAtMs) || window.endsAtMs <= window.startsAtMs
@@ -80,7 +82,8 @@ export class SimulatedSalesVoiceSafetyController {
   /** Local supervision proof only: no remote call-state inference. */
   permitsAdmission(limits: AdmissionLimits): boolean {
     try {
-      if (!this.active() || this.admissionReady?.() !== true) return false;
+      if (!this.active() || !salesVoiceCertificationLimitsMatch(this.input.env,limits)
+        || this.admissionReady?.() !== true) return false;
       const required = this.input.admissionLimits;
       return limits.enabled === required.enabled
         && limits.maxConcurrentCalls === required.maxConcurrentCalls

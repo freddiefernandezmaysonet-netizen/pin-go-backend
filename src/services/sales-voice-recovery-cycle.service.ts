@@ -1,3 +1,4 @@
+import {salesVoiceCertificationEnvironmentAllowed} from "./sales-voice-certification-profile.service.js";
 import type { PrismaClient } from "@prisma/client";
 import { inventoryUnresolvedSalesVoiceCalls } from "./sales-voice-recovery-classifier.service.js";
 import { SalesVoiceRecoveryLease, SALES_VOICE_MAX_RECOVERY_EPOCHS, type RecoveryLease } from "./sales-voice-recovery-lease.service.js";
@@ -8,11 +9,11 @@ type Env = Readonly<Record<string, string | undefined>>;
 export type OwnedRecovery = Readonly<{ lease: RecoveryLease; decision: RecoveryDecision }>;
 
 /**
- * Isolated certification cycle, NOT mounted in the API or any worker.
+ * Explicit certification cycle, owned by the gated existing runtime.
  * Coordinates persisted inventory + lease renewal/claim + no-evidence policy.
  * No transport, accept, hangup, attach, finalization or capacity release.
- * A future runtime must use an authoritative clock and fence every side effect;
- * the supplied fixture clock is permitted ONLY in this simulation environment.
+ * The supervisor supplies authoritative PostgreSQL time and fences side effects;
+ * test fixtures may supply their own time only in disposable certification.
  */
 export async function runSimulatedSalesVoiceRecoveryCycle(input: {
   db: DB;
@@ -30,8 +31,7 @@ export async function runSimulatedSalesVoiceRecoveryCycle(input: {
   quarantined: number;
   hasMore: boolean;
 }> {
-  if (input.env.NODE_ENV !== "test"
-    || input.env.RAILWAY_ENVIRONMENT_NAME !== "sales-voice-certification"
+  if (!salesVoiceCertificationEnvironmentAllowed(input.env)
     || input.env.SALES_VOICE_RECOVERY_CYCLE_SIMULATION_ENABLED !== "true"
     || input.env.SALES_VOICE_RECOVERY_CYCLE_RELEASE_CERTIFIED !== "true") {
     throw new Error("RECOVERY_CYCLE_PRODUCTION_VETO");

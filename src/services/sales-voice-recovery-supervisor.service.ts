@@ -1,3 +1,4 @@
+import {salesVoiceCertificationEnvironmentAllowed} from "./sales-voice-certification-profile.service.js";
 import type { PrismaClient } from "@prisma/client";
 import { runSimulatedSalesVoiceRecoveryCycle } from "./sales-voice-recovery-cycle.service.js";
 import { observeExistingLiveSession, type SidebandSocketFactory, type SidebandSessionResult } from "./sales-voice-sideband-supervisor.service.js";
@@ -13,8 +14,7 @@ type RecordState = {
   completion?: Promise<SidebandSessionResult>;
 };
 const permitted = (env: Env): boolean =>
-  env.NODE_ENV === "test"
-  && env.RAILWAY_ENVIRONMENT_NAME === "sales-voice-certification"
+  salesVoiceCertificationEnvironmentAllowed(env)
   && env.SALES_VOICE_RECOVERY_CYCLE_SIMULATION_ENABLED === "true"
   && env.SALES_VOICE_RECOVERY_CYCLE_RELEASE_CERTIFIED === "true"
   && env.SALES_VOICE_RECOVERY_SUPERVISOR_SIMULATION_ENABLED === "true"
@@ -22,7 +22,7 @@ const permitted = (env: Env): boolean =>
 
 /**
  * Certification-only orchestrator: inventory -> renew/claim -> fenced observer.
- * No timer or real network client, and not imported by any API/worker.
+ * No autonomous timer or default network client; the existing runtime owns it.
  * Each epoch gets at most ONE attach attempt in this process. Disconnects
  * retain capacity and are NOT retried blindly. Restart/provider reconciliation
  * A lifetime epoch budget is persisted by the lease service; monetary budgets

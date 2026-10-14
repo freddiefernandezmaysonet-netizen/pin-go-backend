@@ -1,3 +1,4 @@
+import {salesVoiceCertificationEnvironmentAllowed, salesVoiceCertificationLimitsMatch} from "./sales-voice-certification-profile.service.js";
 import { performance } from "node:perf_hooks";
 import type { SimulatedSalesVoiceSafetyController } from "./sales-voice-safety-controller.service.js";
 import type { PrismaClient, Prisma } from "@prisma/client";
@@ -23,9 +24,9 @@ import {
  * by src/server.ts or invoked by a production worker.
  *
  * No default network clients are provided: an explicit test transport is
- * required for every provider operation. NODE_ENV=test and the named
- * certification environment are mandatory; deployment to production cannot
- * accidentally enable it through a boolean alone.
+ * required for every provider operation. Test certification or the separately
+ * opted-in bounded private production profile is mandatory. No flag alone
+ * enables production execution.
  *
  * Even if provider accepted a session, WebSocket loss is not proof of end:
  * request one fenced hangup, retain the capacity slot until session.closed.
@@ -43,8 +44,7 @@ const reject = (code: string): never => {
   throw new SalesVoiceCoordinationError(code);
 };
 const permitted = (env: Env): boolean =>
-  env.NODE_ENV === "test"
-  && env.RAILWAY_ENVIRONMENT_NAME === "sales-voice-certification"
+  salesVoiceCertificationEnvironmentAllowed(env)
   && env.SALES_VOICE_SESSION_COORDINATOR_SIMULATION_ENABLED === "true"
   && env.SALES_VOICE_SESSION_COORDINATOR_RELEASE_CERTIFIED === "true";
 
@@ -159,6 +159,7 @@ export async function coordinateSimulatedLiveSipSession(input: {
   sidebandConnect: SidebandSocketFactory;
 }): Promise<CoordinatorResult> {
   if (!permitted(input.env)) reject("PRODUCTION_AND_RELEASE_VETO");
+  if (!salesVoiceCertificationLimitsMatch(input.env,input.limits)) reject("PRIVATE_CERTIFICATION_POLICY_REQUIRED");
   if (!input.apiKey?.startsWith("sk-")
       || typeof input.acceptTransport !== "function"
       || typeof input.hangupTransport !== "function"
@@ -172,10 +173,12 @@ export async function coordinateSimulatedLiveSipSession(input: {
     reject("VALID_OBSERVER_OWNERSHIP_REQUIRED");
   }
 
-  input = { ...input, limits: { ...input.limits } }; // snapshot validated configuration
+  input = { ...input, limits: { ...input.limits,
+    certificationWindow:input.limits.certificationWindow?{...input.limits.certificationWindow}:undefined } }; // snapshot validated configuration
 
   const ready = () => {
-    try { return input.supervision?.permitsAdmission(input.limits) === true; }
+    try { return permitted(input.env)&&salesVoiceCertificationLimitsMatch(input.env,input.limits)
+      &&input.supervision?.permitsAdmission(input.limits) === true; }
     catch { return false; }
   };
   if (!ready()) reject("ACTIVE_MATCHING_SUPERVISION_REQUIRED");

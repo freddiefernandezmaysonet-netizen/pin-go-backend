@@ -105,3 +105,75 @@ test("mount registration failure cancels only the runtime created by that mount"
     db,env(),undefined,d.deps),/fixture mount failure/);
   assert.equal(d.timers[0].cancelled,true);assert.equal(d.counts().removed,1);
 });
+
+function productionProfile(){
+  const now=Date.now();
+  return{...env(),NODE_ENV:"production",RAILWAY_ENVIRONMENT_NAME:"production",
+    SALES_VOICE_PRIVATE_CERTIFICATION_ENABLED:"true",
+    SALES_VOICE_PRIVATE_CERTIFICATION_RELEASE_CERTIFIED:"true",
+    SALES_VOICE_CERTIFICATION_STARTS_AT_MS:String(now-10000),
+    SALES_VOICE_CERTIFICATION_ENDS_AT_MS:String(now+300000),
+  };
+}
+test("private production requires both dedicated gates before touching credentials or clients",()=>{
+  const d=dependencies();
+  for(const config of [
+    {...productionProfile(),SALES_VOICE_PRIVATE_CERTIFICATION_ENABLED:"false"},
+    {...productionProfile(),SALES_VOICE_PRIVATE_CERTIFICATION_RELEASE_CERTIFIED:"false"},
+    {...productionProfile(),RAILWAY_ENVIRONMENT_NAME:"staging-channex-certification"},
+    {...productionProfile(),RAILWAY_ENVIRONMENT_NAME:"channex-production-parity"},
+    {...productionProfile(),NODE_ENV:"development"},
+  ]){
+    const guarded=new Proxy(config,{get(target,key){
+      if(key==="SALES_VOICE_OPENAI_API_KEY"||key==="OPENAI_API_KEY")throw Error("CREDENTIAL_TOUCHED");
+      return Reflect.get(target,key);
+    }});
+    assert.equal(bootSalesVoiceRuntime(db,guarded,d.deps),undefined);
+  }
+  assert.equal(d.counts().clients,0);assert.equal(d.timers.length,0);
+});
+test("private window is explicit and bounded before provider clients or database access",()=>{
+  const d=dependencies(),base=productionProfile(),start=Number(base.SALES_VOICE_CERTIFICATION_STARTS_AT_MS);
+  for(const config of [
+    {...base,SALES_VOICE_CERTIFICATION_STARTS_AT_MS:undefined},
+    {...base,SALES_VOICE_CERTIFICATION_ENDS_AT_MS:"NaN"},
+    {...base,SALES_VOICE_CERTIFICATION_STARTS_AT_MS:"123"},
+    {...base,SALES_VOICE_CERTIFICATION_ENDS_AT_MS:String(start)},
+    {...base,SALES_VOICE_CERTIFICATION_ENDS_AT_MS:String(start+900001)},
+  ])assert.throws(()=>bootSalesVoiceRuntime(db,config,d.deps),/PRIVATE_CERTIFICATION_WINDOW/);
+  assert.equal(d.counts().clients,0);assert.equal(d.timers.length,0);
+});
+test("private production rejects enlarged call, reservation, concurrency and estimate limits",()=>{
+  const d=dependencies(),base=productionProfile();
+  for(const config of [
+    {...base,SALES_VOICE_MAX_CONCURRENT_CALLS:"2"},
+    {...base,SALES_VOICE_RESERVED_SECONDS_PER_CALL:"121"},
+    {...base,SALES_VOICE_MAX_CALL_SECONDS:"91"},
+    {...base,SALES_VOICE_MONTHLY_BUDGET_CENTS:"1001"},
+  ])assert.throws(()=>bootSalesVoiceRuntime(db,config,d.deps),/PRIVATE_CERTIFICATION_LIMITS_REQUIRED/);
+  assert.equal(d.counts().clients,0);
+});
+test("valid private boot preserves the shared production and guest environment",()=>{
+  const d=dependencies(),config=productionProfile(),before={...config};
+  const nodeEnv=process.env.NODE_ENV,railwayEnv=process.env.RAILWAY_ENVIRONMENT_NAME;
+  const runtime=bootSalesVoiceRuntime(db,config,d.deps)!;
+  assert.equal(runtime.ready(),false);assert.equal(d.timers.length,1);
+  assert.deepEqual(config,before);
+  assert.equal(process.env.NODE_ENV,nodeEnv);assert.equal(process.env.RAILWAY_ENVIRONMENT_NAME,railwayEnv);
+  d.halt();runtime.stop();assert.equal(d.timers[0].cancelled,true);
+});
+test("every existing release gate remains mandatory for private production boot",()=>{
+  const d=dependencies(),base=productionProfile();
+  for(const key of Object.keys(env()).filter(k=>(k.endsWith("_ENABLED")||k.endsWith("_CERTIFIED"))
+    &&!k.startsWith("SALES_VOICE_RUNTIME_BOOT_")))assert.throws(
+      ()=>bootSalesVoiceRuntime(db,{...base,[key]:"false"},d.deps),/RELEASE_GATES_REQUIRED/);
+  assert.equal(d.counts().clients,0);
+});
+test("private mounted production is boot-owned and refuses explicit runtime injection",()=>{
+  const d=dependencies(),config=productionProfile();
+  assert.throws(()=>mountSalesVoiceLiveSipWebhook(express(),db,config,
+    {receiveVerified:async()=>({state:"STOPPED"})},d.deps),/MOUNT_PRODUCTION_VETO/);
+  assert.equal(d.counts().clients,0);
+  mountSalesVoiceLiveSipWebhook(express(),db,config,undefined,d.deps);
+  assert.deepEqual(d.counts(),{clients:1,registered:1,removed:0});d.halt();
+});

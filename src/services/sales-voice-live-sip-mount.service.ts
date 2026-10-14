@@ -14,7 +14,8 @@ import { ingestVerifiedLiveSipWithAdmission } from "./sales-voice-live-ingress-a
  * In production this registration only saves authenticated metadata; an
  * explicitly gated NONPRODUCTION simulation can claim a database slot.
  * A separately boot-gated test environment may compose supervised execution.
- * Production always keeps metadata-only behavior; no Twilio setup occurs here.
+ * Private production certification is boot-owned and bounded separately.
+ * Explicit production runtime injection remains prohibited; no Twilio setup.
  */
 export function mountSalesVoiceLiveSipWebhook(
   app: Pick<Express, "use">,
