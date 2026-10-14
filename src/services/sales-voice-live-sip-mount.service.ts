@@ -1,3 +1,4 @@
+import {diagnoseSalesVoiceIngress} from "./sales-voice-ingress-diagnostics.service.js";
 import {bootSalesVoiceRuntime,type SalesVoiceBootDependencies} from "./sales-voice-runtime-boot.service.js";
 import type { SimulatedSalesVoiceRuntime } from "./sales-voice-runtime-composition.service.js";
 import type { Express } from "express";
@@ -38,9 +39,9 @@ export function mountSalesVoiceLiveSipWebhook(
       env.SALES_VOICE_LIVE_WEBHOOK_ENABLED === "true"
       && env.SALES_VOICE_WEBHOOK_RELEASE_CERTIFIED === "true",
     webhookSecret: () => env.SALES_VOICE_OPENAI_WEBHOOK_SECRET,
-    persist: invite => execution ? execution.receiveVerified(invite) : ingestVerifiedLiveSipWithAdmission({
+    persist: invite => diagnoseSalesVoiceIngress<unknown>(() => execution ? execution.receiveVerified(invite) : ingestVerifiedLiveSipWithAdmission({
       db, invite, env,
-    }),
+    }), booted ? () => booted.snapshot() : undefined),
   })); } catch(error) {
     booted?.stop();
     throw error;
