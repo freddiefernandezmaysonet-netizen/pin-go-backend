@@ -532,3 +532,16 @@ test("timer initialization failure closes only the local observer",async()=>{
   assert.equal(await r.completion,"OBSERVER_STOPPED");
   assert.equal((await state(id))?.finalizedAt,null);assert.equal(d.counts.hangups,0);
 });
+
+test("same observer cannot start a duplicate heartbeat or restart a stopped one",async()=>{
+  await clean();const id=next();await seeded(id);
+  const d=deps(id);const r=await d.run();monitoring(r);
+  const timer=manualTimer();
+  const input={session:r,env:heartbeatEnv(),pollMs:1000,schedule:timer.schedule,monotonicNow:()=>0};
+  const h=startSimulatedSalesVoiceObserverHeartbeat(input);
+  assert.throws(()=>startSimulatedSalesVoiceObserverHeartbeat(input),/OBSERVER_HEARTBEAT_ALREADY_STARTED/);
+  assert.equal(timer.tasks.length,1);
+  h.stop();await r.completion;
+  assert.throws(()=>startSimulatedSalesVoiceObserverHeartbeat(input),/OBSERVER_HEARTBEAT_ALREADY_STARTED/);
+  assert.equal(d.counts.hangups,0);
+});
