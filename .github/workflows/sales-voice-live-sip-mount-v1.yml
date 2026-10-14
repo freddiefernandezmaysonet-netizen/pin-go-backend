@@ -95,7 +95,10 @@ jobs:
           const ingressDiagnostics = [".github/workflows/sales-voice-live-sip-mount-v1.yml",".github/workflows/sales-voice-main-integration-certification.yml","src/services/sales-voice-ingress-diagnostics.service.test.ts","src/services/sales-voice-ingress-diagnostics.service.ts","src/services/sales-voice-live-sip-mount.service.ts"];
           const developmentBudget = [".github/workflows/sales-voice-live-sip-mount-v1.yml","src/services/sales-voice-certification-profile.service.ts","src/services/sales-voice-live-admission.service.test.ts","src/services/sales-voice-runtime-boot.service.test.ts","src/services/sales-voice-runtime-boot.service.ts"];
           const managedAnswers = [".github/workflows/sales-voice-live-sip-mount-v1.yml",".github/workflows/sales-voice-main-integration-certification.yml","src/services/sales-voice-answer-backend.service.ts","src/services/sales-voice-conversation-diagnostics.service.test.ts","src/services/sales-voice-conversation-diagnostics.service.ts","src/services/sales-voice-pricing.service.test.ts","src/services/sales-voice-pricing.service.ts","src/services/sales-voice-runtime-boot.service.ts"];
-          const selected = process.env.GITHUB_HEAD_REF === 'agent/sales-voice-managed-commercial-answers-v1-20261014'
+          const conciseConversation = [".github/workflows/sales-voice-live-sip-mount-v1.yml","src/services/sales-voice-answer-backend.service.ts","src/services/sales-voice-pricing.service.test.ts","src/services/sales-voice-pricing.service.ts"];
+          const selected = process.env.GITHUB_HEAD_REF === 'agent/sales-voice-concise-conversation-v1-20261014'
+            ? conciseConversation
+            : process.env.GITHUB_HEAD_REF === 'agent/sales-voice-managed-commercial-answers-v1-20261014'
             ? managedAnswers
             : process.env.GITHUB_HEAD_REF === 'agent/sales-voice-development-budget-v1-20261014'
             ? developmentBudget
