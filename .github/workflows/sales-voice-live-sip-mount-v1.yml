@@ -90,7 +90,10 @@ jobs:
           const fiveMinuteCertification = [".github/workflows/sales-voice-live-sip-mount-v1.yml","src/services/sales-voice-certification-profile.service.ts","src/services/sales-voice-live-admission.service.test.ts","src/services/sales-voice-live-admission.service.ts","src/services/sales-voice-runtime-boot.service.test.ts","src/services/sales-voice-runtime-boot.service.ts","src/services/sales-voice-runtime-composition.service.test.ts","src/services/sales-voice-safety-controller.service.test.ts","src/services/sales-voice-safety-controller.service.ts"];
           const verifiedDirectBookingFaq = [".github/workflows/sales-voice-live-sip-mount-v1.yml","src/services/sales-voice-live-admission.service.test.ts","src/services/sales-voice-live-admission.service.ts"];
           const productKnowledge = [".github/workflows/sales-voice-live-sip-mount-v1.yml",".github/workflows/sales-voice-main-integration-certification.yml","src/services/sales-voice-live-admission.service.ts","src/services/sales-voice-product-knowledge.service.test.ts","src/services/sales-voice-product-knowledge.service.ts"];
-          const selected = process.env.GITHUB_HEAD_REF === 'agent/sales-voice-product-knowledge-v1-20261014'
+          const currentPricing = [".github/workflows/sales-voice-live-sip-mount-v1.yml",".github/workflows/sales-voice-main-integration-certification.yml","src/services/sales-voice-live-admission.service.ts","src/services/sales-voice-pricing.service.test.ts","src/services/sales-voice-pricing.service.ts","src/services/sales-voice-product-knowledge.service.test.ts","src/services/sales-voice-product-knowledge.service.ts","src/services/sales-voice-runtime-boot.service.ts"];
+          const selected = process.env.GITHUB_HEAD_REF === 'agent/sales-voice-current-pricing-v1-20261014'
+            ? currentPricing
+            : process.env.GITHUB_HEAD_REF === 'agent/sales-voice-product-knowledge-v1-20261014'
             ? productKnowledge
             : process.env.GITHUB_HEAD_REF === 'agent/sales-voice-verified-direct-booking-faq-v1-20261014'
             ? verifiedDirectBookingFaq
