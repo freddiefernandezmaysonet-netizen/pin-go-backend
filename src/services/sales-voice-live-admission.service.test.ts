@@ -282,3 +282,17 @@ test("failed terminal status cannot refund a certification attempt",async()=>{
   await incoming(113);
   await assert.rejects(new SalesVoiceLiveAdmission(db).claim(id(113),limits),err("CERTIFICATION_ATTEMPT_LIMIT"));
 });
+
+test("development budget expansion retains prior usage and reserves next call without resetting history",async()=>{
+  await reset();
+  await incoming(90,{status:"COMPLETED",finalUsageSeconds:61,startedAt:new Date()});
+  await incoming(91,{status:"COMPLETED",finalUsageSeconds:181,startedAt:new Date()});
+  await incoming(92);
+  const limits=policy({maxConcurrentCalls:1,monthlyBudgetCents:1000,estimatedCentsPerMinute:100,reservedSecondsPerCall:360});
+  await assert.rejects(service.claim(id(92),limits),err("ESTIMATED_MONTHLY_BUDGET_LIMIT"));
+  assert.equal((await service.claim(id(92),{...limits,monthlyBudgetCents:2500})).result,"CLAIMED");
+  assert.equal((await db.salesVoiceCall.findUniqueOrThrow({where:{providerCallId:id(90)}})).finalUsageSeconds,61);
+  assert.equal((await db.salesVoiceCall.findUniqueOrThrow({where:{providerCallId:id(91)}})).finalUsageSeconds,181);
+  await incoming(93);
+  await assert.rejects(service.claim(id(93),{...limits,monthlyBudgetCents:2500}),err("CONCURRENCY_LIMIT"));
+});

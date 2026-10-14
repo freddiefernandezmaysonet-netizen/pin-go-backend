@@ -1,6 +1,8 @@
 import type {AdmissionLimits} from "./sales-voice-live-admission.service.js";
 // Bounds for private phone certification; ordinary production stays disabled.
 export const SALES_VOICE_CERTIFICATION_MAX_CALL_SECONDS=300;
+// Development estimate ceiling, not a provider charge or hard spending guarantee.
+export const SALES_VOICE_CERTIFICATION_MAX_BUDGET_CENTS=2500;
 export const SALES_VOICE_CERTIFICATION_MAX_RESERVED_SECONDS=360;
 type Env=Readonly<Record<string,string|undefined>>;
 
@@ -46,7 +48,7 @@ export function salesVoiceCertificationLimitsMatch(env:Env,limits:AdmissionLimit
       &&Number.isSafeInteger(limits.reservedSecondsPerCall)
       &&limits.reservedSecondsPerCall>=60&&limits.reservedSecondsPerCall<=SALES_VOICE_CERTIFICATION_MAX_RESERVED_SECONDS
       &&Number.isSafeInteger(limits.monthlyBudgetCents)
-      &&limits.monthlyBudgetCents>=1&&limits.monthlyBudgetCents<=1000
+      &&limits.monthlyBudgetCents>=1&&limits.monthlyBudgetCents<=SALES_VOICE_CERTIFICATION_MAX_BUDGET_CENTS
       &&limits.certificationWindow?.startsAtMs===window.startsAtMs
       &&limits.certificationWindow?.endsAtMs===window.endsAtMs;
   }catch{return false;}
