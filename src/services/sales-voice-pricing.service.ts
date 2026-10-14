@@ -1,3 +1,4 @@
+import {salesVoiceAnswerBackend,SALES_VOICE_MANAGED_ANSWER_POLICY} from "./sales-voice-answer-backend.service.js";
 import {salesVoiceAddonPrices} from "./sales-voice-addon-pricing.service.js";
 import {assertMonthlyPrice,haasMonthlyAmounts} from "./signup-pricing.service.js";
 import type {ProviderHTTP} from "./sales-voice-live-admission.service.js";
@@ -12,44 +13,53 @@ const offers:readonly Offer[]=[
     amount:terms[term],interval:"month" as const,term,
   }))),
 ];
+type PriceState="MISSING"|"INVALID"|"VERIFIED"|"FAILED"|"TIMEOUT"|"ABORTED";
+type PriceDiagnostic=Readonly<{monthly:PriceState;yearly:PriceState;verified:number;unavailable:number}>;
 export type PricingSnapshot=Readonly<{checkedAt:number;expiresAt:number;lines:readonly string[];addonLines?:readonly string[]}>;
-/** Fresh read-only checkout-compatible prices. No cross-call cache, raw metadata or IDs in output. */
+/** Fresh checkout-compatible prices; slow unrelated offers cannot erase completed validations. */
 export async function readSalesVoicePricing(env:Env,read:PriceReader,options:{
-  now?:()=>number;timeoutMs?:number;signal?:AbortSignal;
+  now?:()=>number;timeoutMs?:number;signal?:AbortSignal;report?:(entry:PriceDiagnostic)=>void;
 }={}):Promise<PricingSnapshot>{
   const now=options.now??Date.now,checkedAt=now(),timeoutMs=options.timeoutMs??1250;
   if(!Number.isFinite(checkedAt)||!Number.isInteger(timeoutMs)||timeoutMs<1||timeoutMs>1500)
     throw new Error("INVALID_SALES_PRICING_LIMIT");
   const unavailable=offers.map(o=>o.label+": UNAVAILABLE.");
+  const lines=[...unavailable],states:PriceState[]=offers.map(()=>"TIMEOUT");
   if(options.signal?.aborted)return Object.freeze({checkedAt,expiresAt:checkedAt,lines:Object.freeze(unavailable)});
-  const work=Promise.all(offers.map(async o=>{
+  let sealed=false;
+  const complete=(i:number,state:PriceState,text=unavailable[i])=>{
+    if(!sealed){states[i]=state;lines[i]=text;}
+  };
+  const work=Promise.all(offers.map(async(o,i)=>{
     const id=env[o.key]?.trim();
-    if(!id||!/^price_[A-Za-z0-9_]+$/.test(id))return o.label+": UNAVAILABLE.";
+    if(!id||!/^price_[A-Za-z0-9_]+$/.test(id)){complete(i,"MISSING");return;}
+    let price:any;
+    try{price=await read(id);}catch{complete(i,"FAILED");return;}
     try{
-      const price=await read(id) as any;
       if(price?.object!=="price"||price.id!==id||typeof price.livemode!=="boolean"
         ||(env.NODE_ENV==="production"&&!price.livemode)
         ||!Number.isSafeInteger(price.unit_amount)||price.unit_amount<=0)throw new Error("INVALID_PRICE");
-      // Same amount and eligibility checks as signup checkout; mismatch cannot be quoted.
       assertMonthlyPrice(price,o.amount,o.interval);
-      return o.label+": VERIFIED USD "+(price.unit_amount/100).toFixed(2)
+      complete(i,"VERIFIED",o.label+": VERIFIED USD "+(price.unit_amount/100).toFixed(2)
         +(o.interval==="year"?" por año / per year":" por mes / per month")
         +(o.term?"; 1 cerradura / lock; plazo / term "+o.term+" meses / months":" por cerradura / per lock")
-        +"; impuestos adicionales / taxes extra.";
-    }catch{return o.label+": UNAVAILABLE.";}
+        +"; impuestos adicionales / taxes extra.");
+    }catch{complete(i,"INVALID");}
   }));
   let timer:ReturnType<typeof setTimeout>|undefined;
   let abort:()=>void=()=>{};
-  const fallback=new Promise<string[]>(resolve=>{
-    timer=setTimeout(()=>resolve(unavailable),timeoutMs);
-    abort=()=>resolve(unavailable);
+  const fallback=new Promise<void>(resolve=>{
+    timer=setTimeout(resolve,timeoutMs);
+    abort=()=>resolve();
     options.signal?.addEventListener("abort",abort,{once:true});
     if(options.signal?.aborted)abort();
   });
-  let lines:readonly string[];
-  try{lines=await Promise.race([work,fallback]);}
-  finally{if(timer)clearTimeout(timer);options.signal?.removeEventListener("abort",abort);}
-  if(options.signal?.aborted)lines=unavailable;
+  try{await Promise.race([work,fallback]);}
+  finally{sealed=true;if(timer)clearTimeout(timer);options.signal?.removeEventListener("abort",abort);}
+  if(options.signal?.aborted){for(let i=0;i<lines.length;i++){lines[i]=unavailable[i];states[i]="ABORTED";}}
+  const verified=states.filter(s=>s==="VERIFIED").length;
+  try{(options.report??(entry=>console.info("[sales-voice] pricing",entry)))(
+    Object.freeze({monthly:states[0],yearly:states[1],verified,unavailable:offers.length-verified}));}catch{/* telemetry never changes call outcome */}
   return Object.freeze({checkedAt,expiresAt:checkedAt+300000,lines:Object.freeze([...lines]),addonLines:salesVoiceAddonPrices(env)});
 }
 export function renderSalesVoicePricing(snapshot:PricingSnapshot):string{
@@ -74,7 +84,9 @@ export function withSalesVoicePricing(transport:ProviderHTTP,env:Env,read:PriceR
       throw new Error("INVALID_SALES_PRICING_SESSION");
     const snapshot=await readSalesVoicePricing(env,read,{signal:request.signal});
     if(request.signal.aborted)throw new Error("SALES_ACCEPT_ABORTED");
-    payload.session.instructions+="\n"+renderSalesVoicePricing(snapshot);
+    const verifiedContext=payload.session.instructions+"\n"+renderSalesVoicePricing(snapshot);
+    payload.session.delegation=salesVoiceAnswerBackend(verifiedContext);
+    payload.session.instructions=verifiedContext+"\n"+SALES_VOICE_MANAGED_ANSWER_POLICY;
     return transport(url,{...request,body:JSON.stringify(payload)});
   };
 }
