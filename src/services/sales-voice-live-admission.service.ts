@@ -151,7 +151,7 @@ export type ProviderHTTP = (
 ) => Promise<{ status: number }>;
 const SCRIPT = [
   "Eres el asistente virtual de ventas de Pin&Go, una plataforma para gestionar propiedades vacacionales.",
-  "Identificate claramente como inteligencia artificial. Habla en español o ingles, segun la preferencia del interlocutor.",
+  "Identificate claramente como inteligencia artificial en tu saludo inicial. Habla en español hasta que el interlocutor prefiera ingles; si cambia de idioma, continua la misma conversacion en el idioma elegido.",
   "Explica la plataforma a nivel general sin inventar precios, descuentos, disponibilidad o funciones no verificadas.",
   "No afirmes haber creado cuentas, reservado citas, enviado mensajes o procesado pagos.",
   "Nunca solicites contraseñas, codigos de verificacion ni tarjetas bancarias.",
@@ -163,6 +163,14 @@ export function salesVoiceStartupConfig() {
     type: "live" as const,
     model: "gpt-live-1" as const,
     instructions: SCRIPT,
+    // Seed the opening at acceptance; sideband recovery must not restart it.
+    input: [{
+      type: "message" as const,
+      role: "developer" as const,
+      content: [{ type: "input_text" as const, text:
+        'Saluda ahora en español, sin esperar a que el interlocutor hable. Di: "Hola, soy el asistente de inteligencia artificial de Pin&Go. ¿En qué puedo ayudarte?" Despues haz una pausa y escucha.',
+      }],
+    }],
     audio: { output: { voice: "marin" as const } },
   } };
 }

@@ -140,6 +140,16 @@ test("network adapter uses documented URL, POST, valid bearer auth and no retry"
     const request=JSON.parse(options.body);
     assert.equal(request.session.model,"gpt-live-1");
     assert.equal(request.session.type,"live");
+    assert.equal(request.session.input.length,1);
+    const opening=request.session.input[0];
+    assert.equal(opening.type,"message");
+    assert.equal(opening.role,"developer");
+    assert.equal(opening.content.length,1);
+    assert.equal(opening.content[0].type,"input_text");
+    assert.match(opening.content[0].text,/Saluda ahora en español, sin esperar/);
+    assert.match(opening.content[0].text,/soy el asistente de inteligencia artificial de Pin&Go/);
+    assert.match(opening.content[0].text,/pausa y escucha/);
+    assert.match(request.session.instructions,/continua la misma conversacion en el idioma elegido/);
     return {status:200};
   };
   await postOneOpenAILiveAccept({sessionId:id(15),apiKey:"sk-test-not-live",transport,explicitlyEnabled:true});
@@ -158,7 +168,11 @@ test("disabled provider transport, invalid credentials and non-200 cannot look s
 test("one-shot accept only calls provider once under simultaneous requests", async () => {
   await reset(); await incoming(17);
   let requests=0;
-  const transport: ProviderHTTP=async()=>{ requests++; await new Promise(r=>setTimeout(r,20)); return {status:200}; };
+  const transport: ProviderHTTP=async(_url,options)=>{
+    requests++;
+    assert.equal(JSON.parse(options.body).session.input.filter((m:{role:string})=>m.role==="developer").length,1);
+    await new Promise(r=>setTimeout(r,20)); return {status:200};
+  };
   const args={admission:service,sessionId:id(17),limits:policy(),apiKey:"sk-test",transport,explicitlyEnabled:true};
   const all=await Promise.all([attemptOneLiveAccept(args),attemptOneLiveAccept(args),attemptOneLiveAccept(args)]);
   assert.equal(all.filter(x=>x==="ACCEPTED").length,1);
