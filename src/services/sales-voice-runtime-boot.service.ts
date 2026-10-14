@@ -1,3 +1,4 @@
+import {withSalesVoiceConversationDiagnostics} from "./sales-voice-conversation-diagnostics.service.js";
 import {withSalesVoicePricing} from "./sales-voice-pricing.service.js";
 import {isSalesVoiceSimulationEnvironment,privateSalesVoiceCertificationRequested,
   privateSalesVoiceCertificationWindow,SALES_VOICE_CERTIFICATION_MAX_CALL_SECONDS,
@@ -54,7 +55,7 @@ function providerTransports(env:Env):ReturnType<NonNullable<SalesVoiceBootDepend
     const {default:stripe}=await import("../billing/stripe.js");
     return stripe.prices.retrieve(id,{timeout:1000,maxNetworkRetries:0});
   });
-  return{accept:pricedAccept,hangup,connect:createOpenAISidebandWsFactory()};
+  return{accept:pricedAccept,hangup,connect:withSalesVoiceConversationDiagnostics(createOpenAISidebandWsFactory())};
 }
 
 /** Existing mount boot. Ordinary production remains metadata-only. A separate
