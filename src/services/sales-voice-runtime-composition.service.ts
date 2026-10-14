@@ -1,3 +1,4 @@
+import {salesVoiceCertificationEnvironmentAllowed, salesVoiceCertificationLimitsMatch} from "./sales-voice-certification-profile.service.js";
 import type { PrismaClient } from "@prisma/client";
 import type { AdmissionLimits, ProviderHTTP } from "./sales-voice-live-admission.service.js";
 import type { HangupHTTP } from "./sales-voice-live-watchdog.service.js";
@@ -11,8 +12,7 @@ import {
 
 type Env = Readonly<Record<string,string|undefined>>;
 type DB = Pick<PrismaClient,"salesVoiceCall"|"$transaction"|"$queryRaw">;
-const allowed = (env: Env) => env.NODE_ENV === "test"
-  && env.RAILWAY_ENVIRONMENT_NAME === "sales-voice-certification"
+const allowed = (env: Env) => salesVoiceCertificationEnvironmentAllowed(env)
   && env.SALES_VOICE_RUNTIME_SIMULATION_ENABLED === "true"
   && env.SALES_VOICE_RUNTIME_RELEASE_CERTIFIED === "true";
 type State = "MONITORING" | "ALREADY_CLAIMED" | "ACCEPT_UNKNOWN" | "RECOVERY_OWNERSHIP_UNAVAILABLE" | "SIDE_BAND_CONNECT_FAILED" | "STOPPED";
@@ -40,6 +40,8 @@ export class SimulatedSalesVoiceRuntime {
     subscribeShutdown?:(stop:()=>void)=>()=>void;
   }) {
     if(!allowed(input.env))throw new Error("SALES_RUNTIME_PRODUCTION_VETO");
+    if(!salesVoiceCertificationLimitsMatch(input.env,input.limits))
+      throw new Error("PRIVATE_CERTIFICATION_POLICY_REQUIRED");
     if(input.env.SALES_VOICE_ADMISSION_SIMULATION_ENABLED==="true"
       ||input.env.SALES_VOICE_ADMISSION_SIMULATION_RELEASE_CERTIFIED==="true")
       throw new Error("SALES_RUNTIME_LEGACY_ADMISSION_CONFLICT");
@@ -59,7 +61,8 @@ export class SimulatedSalesVoiceRuntime {
         if(!allowed(this.input.env)||(this.loop&&this.loop.snapshot().phase!=="RUNNING"))this.stop();
       }
     },delay);
-    this.input={...input,limits:{...input.limits}};
+    this.input={...input,limits:{...input.limits,
+      certificationWindow:input.limits.certificationWindow?{...input.limits.certificationWindow}:undefined}};
     this.safety=new SimulatedSalesVoiceSafetyController({
       db:input.db,env:input.env,owner:input.owner,ttlSeconds:input.ttlSeconds,
       staleAfterSeconds:60,maxOwned:input.limits.maxConcurrentCalls,
@@ -90,6 +93,7 @@ export class SimulatedSalesVoiceRuntime {
   }
   ready():boolean {
     return this.started&&!this.stopped&&allowed(this.input.env)
+      &&salesVoiceCertificationLimitsMatch(this.input.env,this.input.limits)
       &&this.safety.permitsAdmission(this.input.limits);
   }
   snapshot(){return{started:this.started,stopped:this.stopped,
