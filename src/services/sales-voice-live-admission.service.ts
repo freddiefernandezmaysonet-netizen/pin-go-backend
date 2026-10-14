@@ -16,6 +16,7 @@ type HeldStatus = (typeof HELD)[number];
 
 export type AdmissionLimits = {
   enabled: boolean;
+  developmentUnrestricted?: boolean;
   maxConcurrentCalls: number;
   monthlyBudgetCents: number;
   estimatedCentsPerMinute: number;
@@ -29,6 +30,8 @@ function validLimits(l: AdmissionLimits): void {
     || !Number.isSafeInteger(l.estimatedCentsPerMinute) || l.estimatedCentsPerMinute < 1
     || !Number.isSafeInteger(l.reservedSecondsPerCall) || l.reservedSecondsPerCall < 60
     || l.reservedSecondsPerCall > 3600) deny("INVALID_LIMITS");
+  if(l.developmentUnrestricted!==undefined&&typeof l.developmentUnrestricted!=="boolean")deny("INVALID_LIMITS");
+  if(l.developmentUnrestricted&&l.certificationWindow)deny("INVALID_CERTIFICATION_WINDOW");
   const w=l.certificationWindow;
   if(w && (!Number.isSafeInteger(w.startsAtMs)||!Number.isSafeInteger(w.endsAtMs)
     ||w.startsAtMs<=0||w.endsAtMs<=w.startsAtMs||w.endsAtMs-w.startsAtMs>15*60*1000
@@ -88,6 +91,7 @@ export class SalesVoiceLiveAdmission {
         }});
         if(used!==0)deny("CERTIFICATION_ATTEMPT_LIMIT");
       }
+      if(!limits.developmentUnrestricted){
       const active = await tx.salesVoiceCall.count({
         where: { provider: "OPENAI_LIVE_SIP", status: { in: [...HELD] } },
       });
@@ -115,6 +119,7 @@ export class SalesVoiceLiveAdmission {
       }, 0);
       if (usage + reserve(limits.reservedSecondsPerCall, limits.estimatedCentsPerMinute)
         > limits.monthlyBudgetCents) deny("ESTIMATED_MONTHLY_BUDGET_LIMIT");
+      } // Continuous development retains history, without pilot capacity/budget rejection.
       const changed = await tx.salesVoiceCall.updateMany({
         where: { id: call.id, status: "RECEIVED" },
         data: { status: "ADMISSION_CLAIMED" },
