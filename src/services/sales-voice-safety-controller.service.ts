@@ -1,3 +1,5 @@
+import { performance } from "node:perf_hooks";
+import type { ObserverHeartbeatTimer } from "./sales-voice-live-session-coordinator.service.js";
 import type { PrismaClient } from "@prisma/client";
 import type { AdmissionLimits } from "./sales-voice-live-admission.service.js";
 import { SalesVoiceLiveWatchdog, type HangupHTTP } from "./sales-voice-live-watchdog.service.js";
@@ -26,6 +28,10 @@ export class SimulatedSalesVoiceSafetyController {
   private readonly apiKey: string;
   private busy = false;
   private stopped = false;
+  private loopStarted = false;
+  private cancelLoop?: () => void;
+  private loopGate?: () => boolean;
+  private active(): boolean { return !this.stopped && permitted(this.input.env) && (!this.loopGate || this.loopGate()); }
 
   constructor(private readonly input: {
     db: DB; env: Env; owner: string; ttlSeconds: number; staleAfterSeconds: number;
@@ -54,13 +60,100 @@ export class SimulatedSalesVoiceSafetyController {
     this.apiKey = key;
     // Snapshot validated scalars/transport; only the referenced release gates remain dynamic.
     this.input = { ...input, admissionLimits: { ...input.admissionLimits } };
-    this.recovery = new SimulatedSalesVoiceRecoverySupervisor(this.input);
+    this.recovery = new SimulatedSalesVoiceRecoverySupervisor({ ...this.input, connect: (url, options) => {
+      if (!this.active()) throw new Error("SAFETY_TRANSPORT_DISABLED");
+      return this.input.connect(url, options);
+    } });
     this.watchdog = new SalesVoiceLiveWatchdog(this.input.db);
   }
 
   completion(sessionId: string) { return this.recovery.completion(sessionId); }
   snapshot() { return this.recovery.snapshot(); }
-  stop(): void { this.stopped = true; this.recovery.stop(); }
+  stop(): void {
+    this.stopped = true;
+    const cancel = this.cancelLoop; this.cancelLoop = undefined;
+    cancel?.(); this.recovery.stop();
+  }
+
+  /** Explicit certification scheduling; construction/import starts no timers. */
+  startLoop(options: {
+    pollMs: number; schedule?: ObserverHeartbeatTimer; monotonicNow?: () => number;
+  }): {stop: () => void; snapshot: () => {phase: string; cycles: number}} {
+    const enabled = () => permitted(this.input.env)
+      && this.input.env.SALES_VOICE_SAFETY_LOOP_SIMULATION_ENABLED === "true"
+      && this.input.env.SALES_VOICE_SAFETY_LOOP_RELEASE_CERTIFIED === "true";
+    if (!enabled()) throw new Error("SAFETY_LOOP_PRODUCTION_AND_RELEASE_VETO");
+    if (this.loopStarted || this.stopped || this.busy) throw new Error("SAFETY_LOOP_ALREADY_STARTED_OR_STOPPED");
+    const intervalMs = this.input.maxSweepIntervalSeconds * 1000, pollMs = options.pollMs;
+    if (!Number.isSafeInteger(pollMs) || pollMs < 1000
+      || pollMs > Math.floor(intervalMs / 2) || this.input.ttlSeconds < 30
+      || intervalMs > Math.floor(this.input.ttlSeconds * 1000 / 3)) {
+      throw new Error("INVALID_SAFETY_LOOP_BOUNDS");
+    }
+    this.loopStarted = true; this.loopGate = enabled;
+    const now = options.monotonicNow ?? (() => performance.now());
+    const schedule: ObserverHeartbeatTimer = options.schedule ?? ((task, delayMs) => {
+      const timer = setTimeout(() => { void task(); }, delayMs);
+      timer.unref(); return () => clearTimeout(timer);
+    });
+    let phase = "RUNNING", cycles = 0, generation = 0, inFlight = false;
+    let cancelWake: (() => void) | undefined, cancelDeadline: (() => void) | undefined;
+    let lastStart: number;
+    const clock = () => {
+      const value = now();
+      if (!Number.isFinite(value) || value < 0) throw new Error("SAFETY_MONOTONIC_CLOCK_REQUIRED");
+      return value;
+    };
+    const cancelTimers = () => {
+      generation++;
+      const wake = cancelWake, deadline = cancelDeadline;
+      cancelWake = cancelDeadline = undefined;
+      try { wake?.(); } catch { /* generation still fences callback */ }
+      try { deadline?.(); } catch { /* generation still fences callback */ }
+    };
+    this.cancelLoop = () => {
+      if (phase === "RUNNING") phase = "STOPPED";
+      cancelTimers();
+    };
+    const halt = (reason: string) => {
+      if (phase !== "RUNNING") return;
+      phase = reason; this.stop(); // local observers only; capacity stays persisted
+    };
+    const arm = (delayMs: number) => {
+      if (phase !== "RUNNING") return;
+      const token = ++generation;
+      cancelWake = schedule(async () => {
+        if (phase !== "RUNNING" || token !== generation || inFlight) return;
+        cancelWake = undefined; inFlight = true;
+        try {
+          if (!enabled()) { halt("STOPPED"); return; }
+          const start = clock();
+          if (start < lastStart) { halt("FAILED"); return; }
+          if (start - lastStart >= intervalMs) { halt("DELAYED"); return; }
+          lastStart = start;
+          // Deadline halts a pending cycle, never overlaps ticks or replays requests.
+          cancelDeadline = schedule(async () => {
+            if (phase === "RUNNING" && token === generation) halt("DELAYED");
+          }, intervalMs);
+          if (typeof cancelDeadline !== "function") throw new Error("INVALID_SAFETY_DEADLINE_TIMER");
+          const result = await this.tick();
+          if (phase !== "RUNNING" || token !== generation) return;
+          cancelDeadline(); cancelDeadline = undefined;
+          if (!enabled() || result.state !== "READY") { halt("STOPPED"); return; }
+          const end = clock();
+          if (end < start) { halt("FAILED"); return; }
+          if (end - start >= intervalMs) { halt("DELAYED"); return; }
+          cycles++;
+          arm(Math.max(0, pollMs - (end - start)));
+        } catch { halt("FAILED"); }
+        finally { inFlight = false; }
+      }, delayMs);
+      if (typeof cancelWake !== "function") throw new Error("INVALID_SAFETY_WAKE_TIMER");
+    };
+    try { lastStart = clock(); arm(0); }
+    catch { halt("FAILED"); }
+    return {stop: () => this.stop(), snapshot: () => ({phase, cycles})};
+  }
 
   async tick(): Promise<{
     state: "READY" | "DISABLED";
@@ -68,13 +161,13 @@ export class SimulatedSalesVoiceSafetyController {
     watchdog?: WatchdogResult;
   }> {
     if (this.busy) throw new Error("SAFETY_CONTROLLER_TICK_BUSY");
-    if (this.stopped || !permitted(this.input.env)) {
+    if (!this.active()) {
       this.stop(); return { state: "DISABLED" };
     }
     this.busy = true;
     try {
       const recovery = await this.recovery.sweep();
-      if (recovery.state === "DISABLED" || !permitted(this.input.env) || this.stopped) {
+      if (recovery.state === "DISABLED" || !this.active()) {
         this.stop(); return { state: "DISABLED", recovery };
       }
       const [time] = await this.input.db.$queryRaw<Array<{ now: Date }>>
