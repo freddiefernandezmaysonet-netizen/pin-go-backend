@@ -485,18 +485,24 @@ test("authenticated session closure cancels the heartbeat without fabricating an
 test("default native timer executes a real PostgreSQL renewal and can be stopped",async()=>{
   await clean();const id=next();await seeded(id);
   const d=deps(id);const r=await d.run();monitoring(r);
-  let resolve!:()=>void;
-  const renewed=new Promise<void>(done=>{resolve=done;});
+  let resolve!:(value:boolean)=>void;
+  const renewed=new Promise<boolean>(done=>{resolve=done;});
   const original=r.renewOwnership;
-  r.renewOwnership=async()=>{const result=await original();resolve();return result;};
+  r.renewOwnership=async()=>{const result=await original();resolve(result);return result;};
+  // The real API keeps the process alive. This isolated test owns a bounded
+  // reference so the deliberately unref'ed heartbeat can actually execute.
+  let deadline!:ReturnType<typeof setTimeout>;
+  const timeout=new Promise<never>((_resolve,reject)=>{
+    deadline=setTimeout(()=>reject(Error("native heartbeat did not renew")),5000);
+  });
   const h=startSimulatedSalesVoiceObserverHeartbeat({
     session:r,env:heartbeatEnv(),pollMs:1000,
   });
   try {
-    await renewed;
+    assert.equal(await Promise.race([renewed,timeout]),true);
     assert.equal((await state(id))?.recoveryLeaseEpoch,1);
     assert.equal((await state(id))?.status,"ACCEPTED");
-  } finally {h.stop();}
+  } finally {clearTimeout(deadline);h.stop();}
   assert.equal(await r.completion,"OBSERVER_STOPPED");assert.equal(d.counts.hangups,0);
 });
 
