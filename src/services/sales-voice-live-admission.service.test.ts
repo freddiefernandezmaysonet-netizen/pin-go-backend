@@ -153,8 +153,13 @@ test("network adapter uses documented URL, POST, valid bearer auth and no retry"
     assert.match(opening.content[0].text,/Would you prefer Spanish or English\?/);
     assert.match(opening.content[0].text,/pausa y escucha/);
     assert.ok(!request.session.instructions.includes("Habla en español hasta"));
-    assert.match(request.session.instructions,/idioma elegido o en el que use el interlocutor/);
-    assert.match(request.session.instructions,/continua la misma conversacion en el idioma elegido/);
+    assert.match(request.session.instructions,/pide ingles, cambia inmediatamente a ingles/);
+    assert.match(request.session.instructions,/manten ese idioma hasta que pida otro/);
+    assert.match(request.session.instructions,/Pin&Go SI cuenta con Direct Booking o reservas directas/);
+    assert.match(request.session.instructions,/propiedades publicadas/);
+    assert.match(request.session.instructions,/Si preguntan si Pin&Go tiene Direct Booking, responde SI inmediatamente/);
+    assert.match(request.session.instructions,/Nunca digas que vas a verificar, consultar, revisar, contactar a alguien o devolver una respuesta despues/);
+    assert.match(request.session.instructions,/no tenga herramientas para consultar una propiedad concreta o crear una reserva/);
     return {status:200};
   };
   await postOneOpenAILiveAccept({sessionId:id(15),apiKey:"sk-test-not-live",transport,explicitlyEnabled:true});
