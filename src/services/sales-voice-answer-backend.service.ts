@@ -3,6 +3,7 @@ export function salesVoiceAnswerBackend(verifiedContext:string){
   return {type:"responses" as const,responses:{
     model:"gpt-6-luna",
     max_output_tokens:512,
+    reasoning:{effort:"none" as const},
     tools:[],
     tool_choice:"none" as const,
     instructions:[
