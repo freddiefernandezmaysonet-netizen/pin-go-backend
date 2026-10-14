@@ -63,7 +63,7 @@ test("the admitted accept carries fresh prices once and preserves payload, crede
   await postOneOpenAILiveAccept({sessionId:"live_price_fixture",apiKey:"sk-fixture",explicitlyEnabled:true,
     transport:withSalesVoicePricing(async(_url,request)=>{
       accepts++;const body=JSON.parse(request.body);
-      assert.ok(body.session.instructions.includes("VERIFIED USD 39.99"));
+      assert.ok(body.session.delegation.responses.instructions.includes("VERIFIED USD 39.99"));
       assert.equal(body.session.input.length,1);assert.equal(body.session.tools,undefined);
       assert.equal(request.headers.Authorization,"Bearer sk-fixture");assert.equal(request.signal.aborted,false);
       return{status:200};
@@ -126,4 +126,28 @@ test("price diagnostics classify invalid and failed data without serializing raw
   await readSalesVoicePricing(env,async()=>{throw Error("sk-PRIVATE");},{report:entry=>{report=entry;}});
   assert.deepEqual(report,{monthly:"FAILED",yearly:"MISSING",verified:0,unavailable:8});
   assert.ok(!JSON.stringify(report).includes("PRIVATE"));
+});
+
+test("voice prompt remains concise while commercial evidence stays in backend and opening seed is preserved",async()=>{
+  let originalInput:unknown;
+  await postOneOpenAILiveAccept({sessionId:"live_concise_fixture",apiKey:"sk-fixture",explicitlyEnabled:true,
+    transport:async(url,request)=>{
+      originalInput=JSON.parse(request.body).session.input;
+      return withSalesVoicePricing(async(_url,priced)=>{
+        const session=JSON.parse(priced.body).session;
+        assert.deepEqual(session.input,originalInput);
+        assert.ok(session.input[0].content[0].text.includes("Saluda ahora"));
+        assert.ok(session.instructions.length<3000);
+        assert.ok(!session.instructions.includes("VERIFIED USD"));
+        assert.ok(!session.instructions.includes("Conocimiento comercial verificado"));
+        assert.ok(session.delegation.responses.instructions.includes("VERIFIED USD 39.99"));
+        assert.ok(session.delegation.responses.instructions.includes("Conocimiento comercial verificado"));
+        assert.ok(session.instructions.includes("sin esperar"));
+        assert.ok(session.instructions.includes("Cambia inmediatamente"));
+        assert.ok(session.instructions.includes("Backchannel policy:"));
+        assert.ok(session.instructions.includes("Interruption policy:"));
+        assert.ok(session.instructions.includes("Delegation policy:"));
+        return{status:200};
+      },env,async()=>price)(url,request);
+    }});
 });
