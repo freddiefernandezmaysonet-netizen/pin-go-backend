@@ -178,3 +178,75 @@ test("provider timeout is ambiguous: never retries or marks false success", asyn
   const row=await db.salesVoiceCall.findUniqueOrThrow({where:{providerCallId:id(18)}});
   assert.equal(row.status,"ACCEPT_UNKNOWN");
 });
+
+function windowPolicy():AdmissionLimits {
+  return policy({maxConcurrentCalls:1,reservedSecondsPerCall:120,
+    certificationWindow:{startsAtMs:Date.now()-10000,endsAtMs:Date.now()+300000}});
+}
+test("certification quota persists across new admission instances and completed calls",async()=>{
+  await reset();await incoming(101);const limits=windowPolicy();
+  await service.claim(id(101),limits);
+  await db.salesVoiceCall.update({where:{providerCallId:id(101)},data:{
+    status:"COMPLETED",finalizedAt:new Date(),finalUsageSeconds:4,
+  }});
+  await incoming(102);
+  const restarted=new SalesVoiceLiveAdmission(db);
+  await assert.rejects(restarted.claim(id(102),limits),err("CERTIFICATION_ATTEMPT_LIMIT"));
+  assert.equal((await db.salesVoiceCall.findUniqueOrThrow({where:{providerCallId:id(102)}})).status,"RECEIVED");
+});
+test("simultaneous distinct calls compete for one durable certification attempt",async()=>{
+  await reset();await incoming(103);await incoming(104);const limits=windowPolicy();
+  const results=await Promise.allSettled([103,104].map(n=>service.claim(id(n),limits)));
+  assert.equal(results.filter(v=>v.status==="fulfilled").length,1);
+  const failed=results.find(v=>v.status==="rejected") as PromiseRejectedResult;
+  assert.ok(err("CERTIFICATION_ATTEMPT_LIMIT")(failed.reason));
+});
+test("unknown provider outcome consumes certification attempt without retry or release",async()=>{
+  await reset();await incoming(105);await incoming(106);const limits=windowPolicy();let calls=0;
+  assert.equal(await attemptOneLiveAccept({
+    admission:service,sessionId:id(105),limits,apiKey:"sk-certification-fixture",
+    transport:async()=>{calls++;throw Error("fixture timeout");},explicitlyEnabled:true,
+  }),"ACCEPT_UNKNOWN");
+  await assert.rejects(new SalesVoiceLiveAdmission(db).claim(id(106),limits),err("CERTIFICATION_ATTEMPT_LIMIT"));
+  assert.equal(calls,1);
+});
+test("expired window uses database time and cannot be reopened by caller clock",async()=>{
+  await reset();await incoming(107);
+  const limits=windowPolicy();
+  limits.certificationWindow={startsAtMs:Date.now()-300000,endsAtMs:Date.now()-1000};
+  await assert.rejects(service.claim(id(107),limits,new Date(limits.certificationWindow.startsAtMs+1000)),
+    err("CERTIFICATION_WINDOW_CLOSED"));
+});
+test("stale invite and insufficient drain reservation are denied before claiming",async()=>{
+  await reset();const limits=windowPolicy();
+  await incoming(108,{startedAt:new Date(limits.certificationWindow!.startsAtMs-1000)});
+  await assert.rejects(service.claim(id(108),limits),err("CERTIFICATION_FRESH_INVITE_REQUIRED"));
+  await incoming(109);
+  const short={...limits,certificationWindow:{startsAtMs:Date.now()-10000,endsAtMs:Date.now()+60000}};
+  await assert.rejects(service.claim(id(109),short),err("CERTIFICATION_WINDOW_CLOSED"));
+});
+test("invalid or enlarged certification window cannot bypass one-call policy",async()=>{
+  await reset();await incoming(110);const limits=windowPolicy();
+  for(const broken of [
+    {...limits,maxConcurrentCalls:2},
+    {...limits,reservedSecondsPerCall:300},
+    {...limits,certificationWindow:{startsAtMs:NaN,endsAtMs:Date.now()+300000}},
+    {...limits,certificationWindow:{startsAtMs:Date.now(),endsAtMs:Date.now()+3600000}},
+  ])await assert.rejects(service.claim(id(110),broken),err("INVALID_CERTIFICATION_WINDOW"));
+});
+test("window expiry during admission transaction rolls back the claim",async()=>{
+  await reset();await incoming(111);const limits=windowPolicy();let clocks=0;
+  const guarded=new Proxy(db,{get(target,prop){
+    const value=Reflect.get(target,prop,target);
+    if(prop==="$transaction")return(callback:(tx:unknown)=>Promise<unknown>)=>value.call(target,
+      (tx:object)=>callback(new Proxy(tx,{get(inner,key){
+        const method=Reflect.get(inner,key,inner);
+        if(key==="$queryRaw")return()=>Promise.resolve([{now:new Date(
+          ++clocks===1?Date.now():limits.certificationWindow!.endsAtMs)}]);
+        return typeof method==="function"?method.bind(inner):method;
+      }})));
+    return typeof value==="function"?value.bind(target):value;
+  }});
+  await assert.rejects(new SalesVoiceLiveAdmission(guarded).claim(id(111),limits),err("CERTIFICATION_WINDOW_CLOSED"));
+  assert.equal((await db.salesVoiceCall.findUniqueOrThrow({where:{providerCallId:id(111)}})).status,"RECEIVED");
+});
