@@ -381,3 +381,17 @@ test("private window duration cannot be enlarged through lower-level safety inje
     maxCallSeconds:301,admissionLimits:limits}),/INVALID_CERTIFICATION_WINDOW/);
   assert.equal(f.sockets.length,0);
 });
+
+test("continuous development observes calls without pilot duration hangup or budget reservation veto",async()=>{
+  await seed(900);let hangups=0;
+  const f=fixture(owner,async()=>{hangups++;return{status:200};});
+  const c=new SimulatedSalesVoiceSafetyController({...f.options,
+    maxCallSeconds:300,admissionLimits:{...f.options.admissionLimits,developmentUnrestricted:true,
+      monthlyBudgetCents:1,reservedSecondsPerCall:60}});
+  const timer=timerFixture(),loop=c.startLoop({pollMs:1000,schedule:timer.schedule,monotonicNow:()=>0});
+  await timer.tasks[0].task();
+  assert.equal(hangups,0);assert.equal((await row()).status,"ACCEPTED");
+  assert.equal((await row()).finalizedAt,null);
+  assert.equal(loop.snapshot().phase,"RUNNING");
+  c.stop();
+});
