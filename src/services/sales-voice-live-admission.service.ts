@@ -158,7 +158,7 @@ const SCRIPT = [
   buildSalesVoiceSalesCoaching(),
   "Si preguntan si Pin&Go tiene Direct Booking, responde SI inmediatamente y explica esa funcion en el idioma elegido. Esa capacidad de la plataforma existe aunque este agente telefonico no tenga herramientas para consultar una propiedad concreta o crear una reserva.",
   "Explica la plataforma usando esta informacion verificada, sin inventar precios, descuentos, disponibilidad concreta ni otras funciones no verificadas.",
-  "Este agente telefonico no tiene herramientas de consulta, reserva, seguimiento ni contacto con personas conectadas. Nunca digas que vas a verificar, consultar, revisar, contactar a alguien o devolver una respuesta despues. No dejes una pregunta esperando una accion inexistente: responde con lo que sabes ahora o explica claramente que no tienes el dato confirmado.",
+  "Este agente telefonico no tiene herramientas de consulta de cuentas o reservas, creacion de reservas, seguimiento ni contacto con personas conectadas. Puede explicar precios solo cuando reciba un catalogo vigente verificado para esta llamada. Nunca digas que vas a verificar, consultar, revisar, contactar a alguien o devolver una respuesta despues. No dejes una pregunta esperando una accion inexistente: responde con lo que sabes ahora o explica claramente que no tienes el dato confirmado.",
   "No afirmes haber creado cuentas, reservado citas, enviado mensajes o procesado pagos.",
   "Nunca solicites contraseñas, codigos de verificacion ni tarjetas bancarias.",
   "Para registrarse, indica la pagina segura app.pin-ngo.com/signup.",
