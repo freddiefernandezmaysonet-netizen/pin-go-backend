@@ -110,7 +110,7 @@ test("managed commercial backend receives the exact validated call prices withou
       assert.equal(body.session.model,"gpt-live-1");assert.equal(body.session.input.length,1);
       assert.equal(backend.type,"responses");assert.equal(backend.responses.model,"gpt-6-luna");
       assert.deepEqual(backend.responses.tools,[]);assert.equal(backend.responses.tool_choice,"none");
-      assert.equal(backend.responses.max_output_tokens,512);
+      assert.equal(backend.responses.max_output_tokens,512);assert.equal(backend.responses.reasoning.effort,"none");
       assert.ok(backend.responses.instructions.includes("VERIFIED USD 39.99"));
       assert.ok(backend.responses.instructions.includes("Direct Booking"));
       assert.ok(backend.responses.instructions.includes("UNAVAILABLE"));
