@@ -248,7 +248,7 @@ test("invalid or enlarged certification window cannot bypass one-call policy",as
   await reset();await incoming(110);const limits=windowPolicy();
   for(const broken of [
     {...limits,maxConcurrentCalls:2},
-    {...limits,reservedSecondsPerCall:300},
+    {...limits,reservedSecondsPerCall:361},
     {...limits,certificationWindow:{startsAtMs:NaN,endsAtMs:Date.now()+300000}},
     {...limits,certificationWindow:{startsAtMs:Date.now(),endsAtMs:Date.now()+3600000}},
   ])await assert.rejects(service.claim(id(110),broken),err("INVALID_CERTIFICATION_WINDOW"));
