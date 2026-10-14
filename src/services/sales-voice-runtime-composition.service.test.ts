@@ -5,6 +5,7 @@ import {createHmac} from "node:crypto";
 import {createServer} from "node:http";
 import express from "express";
 import {PrismaClient} from "@prisma/client";
+import {bootSalesVoiceRuntime} from "./sales-voice-runtime-boot.service.js";
 import {SimulatedSalesVoiceRuntime} from "./sales-voice-runtime-composition.service.js";
 import {mountSalesVoiceLiveSipWebhook} from "./sales-voice-live-sip-mount.service.js";
 
@@ -142,4 +143,79 @@ test("runtime release disablement stops scheduled work and initial observer",asy
   await f.tasks[2].task();
   assert.equal(r.snapshot().stopped,true);assert.equal(f.sockets[0].closed,true);
   assert.equal(f.counts().hangups,0);assert.equal((await row()).finalizedAt,null);
+});
+
+function privateFixture(window={startsAtMs:Date.now()-10000,endsAtMs:Date.now()+300000}){
+  const f=fixture();
+  const config={...f.options.env,NODE_ENV:"production",RAILWAY_ENVIRONMENT_NAME:"production",
+    SALES_VOICE_RUNTIME_BOOT_ENABLED:"true",SALES_VOICE_RUNTIME_BOOT_RELEASE_CERTIFIED:"true",
+    SALES_VOICE_PRIVATE_CERTIFICATION_ENABLED:"true",SALES_VOICE_PRIVATE_CERTIFICATION_RELEASE_CERTIFIED:"true",
+    SALES_VOICE_CERTIFICATION_STARTS_AT_MS:String(window.startsAtMs),
+    SALES_VOICE_CERTIFICATION_ENDS_AT_MS:String(window.endsAtMs),
+    SALES_VOICE_MAX_CONCURRENT_CALLS:"1",SALES_VOICE_MONTHLY_BUDGET_CENTS:"1000",
+    SALES_VOICE_ESTIMATED_CENTS_PER_MINUTE:"10",SALES_VOICE_RESERVED_SECONDS_PER_CALL:"120",
+    SALES_VOICE_RECOVERY_LEASE_TTL_SECONDS:"120",SALES_VOICE_MAX_CALL_SECONDS:"60",
+    SALES_VOICE_MAX_SWEEP_INTERVAL_SECONDS:"10",SALES_VOICE_SAFETY_POLL_MS:"1000",
+  };
+  const deps={...f.options,createTransports:()=>({accept:f.options.accept,
+    hangup:f.options.hangup,connect:f.options.connect})};
+  return{...f,config,window,deps};
+}
+test("private production profile composes PG admission, observer heartbeat and authenticated closure",async()=>{
+  await clean();const f=privateFixture(),r=bootSalesVoiceRuntime(db,f.config,f.deps)!;
+  await f.tasks[0].task();assert.equal(r.ready(),true);
+  assert.equal((await r.receiveVerified(invite())).state,"MONITORING");
+  assert.equal(f.counts().accepts,1);assert.equal(f.sockets.length,1);
+  await f.tasks[3].task(); // immediate initial-observer heartbeat
+  assert.equal(f.sockets[0].closed,false);
+  assert.equal((await r.receiveVerified(invite())).state,"ALREADY_CLAIMED");
+  f.sockets[0].emit("open");
+  f.sockets[0].emit("message",JSON.stringify({type:"session.closed",event_id:"private_profile_close",
+    session:{id},reason:"remote_hangup",usage:{seconds:4}}));
+  for(let i=0;i<30&&((await row()).finalizedAt===null||r.snapshot().observers!==0);i++)
+    await new Promise(done=>setTimeout(done,5));
+  assert.equal((await row()).status,"COMPLETED");assert.equal((await row()).finalUsageSeconds,4);
+  assert.equal(r.snapshot().observers,0);assert.equal(f.counts().hangups,0);r.stop();
+});
+test("private production one-attempt window remains consumed after closure and process replacement",async()=>{
+  await clean();const f=privateFixture(),r=bootSalesVoiceRuntime(db,f.config,f.deps)!;
+  await f.tasks[0].task();await r.receiveVerified(invite());
+  f.sockets[0].emit("open");
+  f.sockets[0].emit("message",JSON.stringify({type:"session.closed",event_id:"private_restart_close",
+    session:{id},reason:"remote_hangup",usage:{seconds:4}}));
+  for(let i=0;i<30&&(await row()).finalizedAt===null;i++)await new Promise(done=>setTimeout(done,5));
+  assert.equal((await row()).status,"COMPLETED");r.stop();
+  const second=privateFixture(f.window),restarted=bootSalesVoiceRuntime(db,second.config,second.deps)!;
+  await second.tasks[0].task();
+  await assert.rejects(restarted.receiveVerified({...invite(),sessionId:id+"_second",
+    webhookEventId:"evt_private_second_123"}),/CERTIFICATION_ATTEMPT_LIMIT/);
+  assert.equal(second.counts().accepts,0);restarted.stop();
+});
+test("private production restart after window expiry drains a pending call without reopening admission",async()=>{
+  await clean();const now=Date.now(),window={startsAtMs:now-20000,endsAtMs:now-1000};
+  await db.salesVoiceCall.create({data:{providerCallId:id,provider:"OPENAI_LIVE_SIP",direction:"INBOUND",
+    status:"ACCEPTED",startedAt:new Date(now-10000),answeredAt:new Date(now-1000),updatedAt:new Date(0)}});
+  const f=privateFixture(window),r=bootSalesVoiceRuntime(db,f.config,f.deps)!;
+  await f.tasks[0].task();
+  assert.equal(r.ready(),false);assert.equal(r.snapshot().stopped,false);
+  assert.equal(f.counts().hangups,1);assert.equal(f.sockets[0].closed,false);
+  assert.equal((await row()).status,"HANGUP_SENT");assert.equal((await row()).finalizedAt,null);
+  await assert.rejects(r.receiveVerified({...invite(),sessionId:id+"_late",
+    webhookEventId:"evt_private_late_123"}),/SUPERVISION_NOT_READY/);
+  assert.equal(f.counts().accepts,0);assert.equal(r.snapshot().stopped,false);
+  f.sockets[0].emit("open");
+  f.sockets[0].emit("message",JSON.stringify({type:"session.closed",event_id:"private_expiry_close",
+    session:{id},reason:"close_requested",usage:{seconds:2}}));
+  for(let i=0;i<30&&(await row()).finalizedAt===null;i++)await new Promise(done=>setTimeout(done,5));
+  assert.equal((await row()).status,"COMPLETED");r.stop();
+});
+test("production lower-level composition cannot omit or enlarge the private admission window",()=>{
+  const f=privateFixture();
+  for(const limits of [
+    f.options.limits,
+    {...f.options.limits,certificationWindow:{...f.window,endsAtMs:f.window.endsAtMs+1}},
+    {...f.options.limits,maxConcurrentCalls:2,certificationWindow:f.window},
+  ])assert.throws(()=>new SimulatedSalesVoiceRuntime({...f.options,env:f.config,limits}),
+    /PRIVATE_CERTIFICATION_POLICY_REQUIRED/);
+  assert.equal(f.tasks.length,0);assert.equal(f.counts().accepts,0);
 });
