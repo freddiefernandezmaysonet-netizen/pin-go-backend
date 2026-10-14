@@ -365,10 +365,19 @@ test("invalid certification window and oversized pilot limits reject before cons
   const f=fixture(),now=Date.now(),valid={startsAtMs:now,endsAtMs:now+300000};
   for(const limits of [
     {...f.options.admissionLimits,certificationWindow:valid},
-    {...f.options.admissionLimits,maxConcurrentCalls:1,reservedSecondsPerCall:121,certificationWindow:valid},
+    {...f.options.admissionLimits,maxConcurrentCalls:1,reservedSecondsPerCall:361,certificationWindow:valid},
     {...f.options.admissionLimits,maxConcurrentCalls:1,certificationWindow:{...valid,endsAtMs:now+900001}},
     {...f.options.admissionLimits,maxConcurrentCalls:1,certificationWindow:{...valid,startsAtMs:NaN}},
   ])assert.throws(()=>new SimulatedSalesVoiceSafetyController({...f.options,maxOwned:1,admissionLimits:limits}),
     /INVALID_CERTIFICATION_WINDOW/);
+  assert.equal(f.sockets.length,0);
+});
+
+test("private window duration cannot be enlarged through lower-level safety injection",()=>{
+  const f=fixture(),now=Date.now();
+  const limits={...f.options.admissionLimits,maxConcurrentCalls:1,reservedSecondsPerCall:360,
+    certificationWindow:{startsAtMs:now,endsAtMs:now+900000}};
+  assert.throws(()=>new SimulatedSalesVoiceSafetyController({...f.options,maxOwned:1,
+    maxCallSeconds:301,admissionLimits:limits}),/INVALID_CERTIFICATION_WINDOW/);
   assert.equal(f.sockets.length,0);
 });
