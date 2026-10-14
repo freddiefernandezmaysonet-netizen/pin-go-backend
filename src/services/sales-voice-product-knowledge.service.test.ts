@@ -24,7 +24,7 @@ test("caller-facing knowledge omits internal evidence and does not freeze a pric
   assert.ok(!text.includes(SALES_VOICE_PRODUCT_KNOWLEDGE_SOURCE_COMMIT));
   assert.ok(!text.includes("src/")&&!text.includes("process.env"));
   assert.ok(!/\$\s*\d|USD\s*\d|US\$\s*\d/.test(text));
-  assert.match(text,/No hay una consulta de precios vigentes conectada/);
+  assert.match(text,/Cotiza solo con el catalogo de precios verificado/);
   assert.match(text,/no prueba de activacion en la cuenta/);
 });
 test("actual Live acceptance carries product knowledge and sales coaching without executable tools",async()=>{
