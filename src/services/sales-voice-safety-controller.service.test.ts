@@ -59,6 +59,7 @@ test("duration reservation must include sweep delay and provider timeout, within
   const f = fixture();
   for (const admissionLimits of [
     { ...f.options.admissionLimits, reservedSecondsPerCall: 60 },
+    { ...f.options.admissionLimits, reservedSecondsPerCall: 80 },
     { ...f.options.admissionLimits, monthlyBudgetCents: 49 },
     { ...f.options.admissionLimits, maxConcurrentCalls: 2 },
   ]) assert.throws(() => new SimulatedSalesVoiceSafetyController({
