@@ -147,8 +147,8 @@ test("private production rejects enlarged call, reservation, concurrency and est
   const d=dependencies(),base=productionProfile();
   for(const config of [
     {...base,SALES_VOICE_MAX_CONCURRENT_CALLS:"2"},
-    {...base,SALES_VOICE_RESERVED_SECONDS_PER_CALL:"121"},
-    {...base,SALES_VOICE_MAX_CALL_SECONDS:"91"},
+    {...base,SALES_VOICE_RESERVED_SECONDS_PER_CALL:"361"},
+    {...base,SALES_VOICE_MAX_CALL_SECONDS:"301"},
     {...base,SALES_VOICE_MONTHLY_BUDGET_CENTS:"1001"},
   ])assert.throws(()=>bootSalesVoiceRuntime(db,config,d.deps),/PRIVATE_CERTIFICATION_LIMITS_REQUIRED/);
   assert.equal(d.counts().clients,0);
@@ -176,4 +176,17 @@ test("private mounted production is boot-owned and refuses explicit runtime inje
   assert.equal(d.counts().clients,0);
   mountSalesVoiceLiveSipWebhook(express(),db,config,undefined,d.deps);
   assert.deepEqual(d.counts(),{clients:1,registered:1,removed:0});d.halt();
+});
+
+test("five-minute private boot requires aligned reserve and retains all bounded gates",()=>{
+  const d=dependencies(),base={...productionProfile(),
+    SALES_VOICE_RESERVED_SECONDS_PER_CALL:"360",SALES_VOICE_MAX_CALL_SECONDS:"300"};
+  for(const config of [
+    {...base,SALES_VOICE_RESERVED_SECONDS_PER_CALL:"300"},
+    {...base,SALES_VOICE_MONTHLY_BUDGET_CENTS:"500",SALES_VOICE_ESTIMATED_CENTS_PER_MINUTE:"100"},
+  ])assert.throws(()=>bootSalesVoiceRuntime(db,config,d.deps),/SALES_BOOT_LIMITS_MISMATCH/);
+  assert.equal(d.counts().clients,0);
+  const runtime=bootSalesVoiceRuntime(db,base,d.deps)!;
+  assert.equal(runtime.ready(),false);assert.equal(d.timers.length,1);
+  d.halt();runtime.stop();assert.equal(d.timers[0].cancelled,true);
 });

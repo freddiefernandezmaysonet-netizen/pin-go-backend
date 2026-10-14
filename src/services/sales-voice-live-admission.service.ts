@@ -1,3 +1,4 @@
+import {SALES_VOICE_CERTIFICATION_MAX_RESERVED_SECONDS} from "./sales-voice-certification-profile.service.js";
 import type { PrismaClient, SalesVoiceCall } from "@prisma/client";
 
 /**
@@ -30,7 +31,7 @@ function validLimits(l: AdmissionLimits): void {
   const w=l.certificationWindow;
   if(w && (!Number.isSafeInteger(w.startsAtMs)||!Number.isSafeInteger(w.endsAtMs)
     ||w.startsAtMs<=0||w.endsAtMs<=w.startsAtMs||w.endsAtMs-w.startsAtMs>15*60*1000
-    ||l.maxConcurrentCalls!==1||l.reservedSecondsPerCall>120))
+    ||l.maxConcurrentCalls!==1||l.reservedSecondsPerCall>SALES_VOICE_CERTIFICATION_MAX_RESERVED_SECONDS))
     deny("INVALID_CERTIFICATION_WINDOW");
 }
 function sessionId(value: string): string {

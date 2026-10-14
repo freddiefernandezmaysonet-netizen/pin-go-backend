@@ -1,4 +1,5 @@
-import {salesVoiceCertificationEnvironmentAllowed, salesVoiceCertificationLimitsMatch} from "./sales-voice-certification-profile.service.js";
+import {salesVoiceCertificationEnvironmentAllowed, salesVoiceCertificationLimitsMatch,
+  SALES_VOICE_CERTIFICATION_MAX_CALL_SECONDS,SALES_VOICE_CERTIFICATION_MAX_RESERVED_SECONDS} from "./sales-voice-certification-profile.service.js";
 import { performance } from "node:perf_hooks";
 import type { ObserverHeartbeatTimer } from "./sales-voice-live-session-coordinator.service.js";
 import type { PrismaClient } from "@prisma/client";
@@ -50,7 +51,8 @@ export class SimulatedSalesVoiceSafetyController {
     if (window && (!Number.isSafeInteger(window.startsAtMs) || window.startsAtMs <= 0
       || !Number.isSafeInteger(window.endsAtMs) || window.endsAtMs <= window.startsAtMs
       || window.endsAtMs - window.startsAtMs > 15 * 60 * 1000
-      || limits.maxConcurrentCalls !== 1 || limits.reservedSecondsPerCall > 120))
+      || limits.maxConcurrentCalls !== 1 || limits.reservedSecondsPerCall > SALES_VOICE_CERTIFICATION_MAX_RESERVED_SECONDS
+      || input.maxCallSeconds > SALES_VOICE_CERTIFICATION_MAX_CALL_SECONDS))
       throw new Error("INVALID_CERTIFICATION_WINDOW");
     const reserveCents = Math.ceil(limits.reservedSecondsPerCall / 60) * limits.estimatedCentsPerMinute;
     // The guardian sends sequentially: reserve the existing five-second

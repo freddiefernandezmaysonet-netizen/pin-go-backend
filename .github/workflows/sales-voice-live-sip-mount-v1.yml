@@ -87,7 +87,10 @@ jobs:
           const privateCertificationProfile = [".github/workflows/sales-voice-live-sip-mount-v1.yml",".github/workflows/sales-voice-main-integration-certification.yml","src/services/sales-voice-certification-profile.service.ts","src/services/sales-voice-live-session-coordinator.service.ts","src/services/sales-voice-live-sip-mount.service.ts","src/services/sales-voice-recovery-cycle.service.ts","src/services/sales-voice-recovery-supervisor.service.ts","src/services/sales-voice-runtime-boot.service.test.ts","src/services/sales-voice-runtime-boot.service.ts","src/services/sales-voice-runtime-composition.service.test.ts","src/services/sales-voice-runtime-composition.service.ts","src/services/sales-voice-safety-controller.service.ts"];
           const proactiveGreeting = [".github/workflows/sales-voice-live-sip-mount-v1.yml",".github/workflows/sales-voice-main-integration-certification.yml","src/services/sales-voice-live-admission.service.test.ts","src/services/sales-voice-live-admission.service.ts"];
           const bilingualOpening = [".github/workflows/sales-voice-live-sip-mount-v1.yml","src/services/sales-voice-live-admission.service.test.ts","src/services/sales-voice-live-admission.service.ts"];
-          const selected = process.env.GITHUB_HEAD_REF === 'agent/sales-voice-bilingual-opening-v1-20261014'
+          const fiveMinuteCertification = [".github/workflows/sales-voice-live-sip-mount-v1.yml","src/services/sales-voice-certification-profile.service.ts","src/services/sales-voice-live-admission.service.test.ts","src/services/sales-voice-live-admission.service.ts","src/services/sales-voice-runtime-boot.service.test.ts","src/services/sales-voice-runtime-boot.service.ts","src/services/sales-voice-runtime-composition.service.test.ts","src/services/sales-voice-safety-controller.service.test.ts","src/services/sales-voice-safety-controller.service.ts"];
+          const selected = process.env.GITHUB_HEAD_REF === 'agent/sales-voice-five-minute-certification-v1-20261014'
+            ? fiveMinuteCertification
+            : process.env.GITHUB_HEAD_REF === 'agent/sales-voice-bilingual-opening-v1-20261014'
             ? bilingualOpening
             : process.env.GITHUB_HEAD_REF === 'agent/sales-voice-proactive-greeting-v1-20261014'
             ? proactiveGreeting

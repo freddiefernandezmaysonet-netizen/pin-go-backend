@@ -1,5 +1,6 @@
 import {isSalesVoiceSimulationEnvironment,privateSalesVoiceCertificationRequested,
-  privateSalesVoiceCertificationWindow} from "./sales-voice-certification-profile.service.js";
+  privateSalesVoiceCertificationWindow,SALES_VOICE_CERTIFICATION_MAX_CALL_SECONDS,
+  SALES_VOICE_CERTIFICATION_MAX_RESERVED_SECONDS} from "./sales-voice-certification-profile.service.js";
 import {randomUUID} from "node:crypto";
 import type {PrismaClient} from "@prisma/client";
 import type {AdmissionLimits,ProviderHTTP} from "./sales-voice-live-admission.service.js";
@@ -77,8 +78,8 @@ export function bootSalesVoiceRuntime(db:DB,env:Env,
   const maxCallSeconds=integer(env,"SALES_VOICE_MAX_CALL_SECONDS",60,3600);
   const maxSweepIntervalSeconds=integer(env,"SALES_VOICE_MAX_SWEEP_INTERVAL_SECONDS",2,60);
   const pollMs=integer(env,"SALES_VOICE_SAFETY_POLL_MS",1000,30000);
-  if(certificationWindow&&(limits.maxConcurrentCalls!==1||limits.reservedSecondsPerCall>120
-    ||limits.monthlyBudgetCents>1000||maxCallSeconds>90))
+  if(certificationWindow&&(limits.maxConcurrentCalls!==1||limits.reservedSecondsPerCall>SALES_VOICE_CERTIFICATION_MAX_RESERVED_SECONDS
+    ||limits.monthlyBudgetCents>1000||maxCallSeconds>SALES_VOICE_CERTIFICATION_MAX_CALL_SECONDS))
     throw new Error("PRIVATE_CERTIFICATION_LIMITS_REQUIRED");
   if(limits.reservedSecondsPerCall<maxCallSeconds+maxSweepIntervalSeconds+5*limits.maxConcurrentCalls
     ||Math.ceil(limits.reservedSecondsPerCall/60)*limits.estimatedCentsPerMinute>limits.monthlyBudgetCents
