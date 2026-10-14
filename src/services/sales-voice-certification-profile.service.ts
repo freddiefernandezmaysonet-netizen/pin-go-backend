@@ -1,4 +1,7 @@
 import type {AdmissionLimits} from "./sales-voice-live-admission.service.js";
+// Bounds for private phone certification; ordinary production stays disabled.
+export const SALES_VOICE_CERTIFICATION_MAX_CALL_SECONDS=300;
+export const SALES_VOICE_CERTIFICATION_MAX_RESERVED_SECONDS=360;
 type Env=Readonly<Record<string,string|undefined>>;
 
 export const isSalesVoiceSimulationEnvironment=(env:Env):boolean=>
@@ -41,7 +44,7 @@ export function salesVoiceCertificationLimitsMatch(env:Env,limits:AdmissionLimit
     const window=privateSalesVoiceCertificationWindow(env)!;
     return limits.enabled&&limits.maxConcurrentCalls===1
       &&Number.isSafeInteger(limits.reservedSecondsPerCall)
-      &&limits.reservedSecondsPerCall>=60&&limits.reservedSecondsPerCall<=120
+      &&limits.reservedSecondsPerCall>=60&&limits.reservedSecondsPerCall<=SALES_VOICE_CERTIFICATION_MAX_RESERVED_SECONDS
       &&Number.isSafeInteger(limits.monthlyBudgetCents)
       &&limits.monthlyBudgetCents>=1&&limits.monthlyBudgetCents<=1000
       &&limits.certificationWindow?.startsAtMs===window.startsAtMs
