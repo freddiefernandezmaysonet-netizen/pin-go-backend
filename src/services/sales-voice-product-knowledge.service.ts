@@ -1,6 +1,6 @@
 /** Reviewed product facts, separate from call control. No DB, env or provider
  * access. Provenance records implementation evidence, not a tenant's activation.
- * Prices and executable sales tools require separate live integrations.
+ * Pricing requires a validated per-call snapshot; executable sales tools remain separate.
  */
 export const SALES_VOICE_PRODUCT_KNOWLEDGE_VERSION="20261014-v1";
 export const SALES_VOICE_PRODUCT_KNOWLEDGE_SOURCE_COMMIT="8261a4945d57d567cab63598c0977e0a943a0d2d";
@@ -80,7 +80,7 @@ const reviewedFacts:Fact[]=[
     "id": "signup_and_plans",
     "es": "El registro de Pin&Go se realiza en https://app.pin-ngo.com/signup. El checkout de registro contempla opciones de plataforma y paquetes con hardware, segun la seleccion y configuracion comercial.",
     "en": "Pin&Go registration is at https://app.pin-ngo.com/signup. Signup checkout supports platform and hardware-package options according to the selected, configured offer.",
-    "limit": "No hay una consulta de precios vigentes conectada al agente. No cotices importes, impuestos, descuentos, plazos, inclusiones ni disponibilidad de hardware sin confirmacion vigente; dirige al registro para revisar la seleccion y el checkout. No crees la cuenta ni pidas contraseñas o tarjetas por telefono.",
+    "limit": "Cotiza solo con el catalogo de precios verificado para esta llamada. Sin un precio vigente confirmado, no cotices importes, impuestos, descuentos, plazos, inclusiones ni disponibilidad de hardware; dirige al registro para revisar la seleccion y el checkout. No crees la cuenta ni pidas contraseñas o tarjetas por telefono.",
     "sources": [
       "src/routes/public.signup.routes.ts",
       "src/services/signup-pricing.service.ts",
