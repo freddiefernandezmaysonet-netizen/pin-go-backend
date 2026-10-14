@@ -136,6 +136,7 @@ jobs:
         run: |
           node --import tsx --test src/workers/sales-voice-live-watchdog.worker.test.ts
           node --import tsx --test src/services/sales-voice-sideband-ws-transport.service.test.ts
+          node --import tsx --test src/services/sales-voice-runtime-boot.service.test.ts
           node --import tsx --test src/services/sales-voice-reconciliation-decisions.service.test.ts
       - name: Verify signed mounted Live webhook with real local HTTP
         run: node --import tsx --test src/services/sales-voice-live-sip-mount.service.test.ts
