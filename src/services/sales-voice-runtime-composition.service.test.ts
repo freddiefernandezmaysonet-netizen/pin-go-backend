@@ -219,3 +219,33 @@ test("production lower-level composition cannot omit or enlarge the private admi
     /PRIVATE_CERTIFICATION_POLICY_REQUIRED/);
   assert.equal(f.tasks.length,0);assert.equal(f.counts().accepts,0);
 });
+
+test("five-minute private call survives 61 seconds and hangs up once at its duration limit",async()=>{
+  await clean();const now=Date.now(),f=privateFixture({startsAtMs:now-310000,endsAtMs:now+580000});
+  f.config.SALES_VOICE_RESERVED_SECONDS_PER_CALL="360";f.config.SALES_VOICE_MAX_CALL_SECONDS="300";
+  const r=bootSalesVoiceRuntime(db,f.config,f.deps)!;
+  try{
+    await f.tasks[0].task();assert.equal(r.ready(),true);
+    await r.receiveVerified(invite());assert.equal(f.counts().accepts,1);
+    const sweep=async(seconds:number)=>{
+      await db.salesVoiceCall.update({where:{providerCallId:id},data:{
+        startedAt:new Date(f.window.startsAtMs+1000),answeredAt:new Date(Date.now()-seconds*1000),
+      }});
+      const wake=[...f.tasks].reverse().find(t=>!t.cancelled&&t.delay===1000)!;
+      await wake.task();
+    };
+    await sweep(61);assert.equal(f.counts().hangups,0);assert.equal((await row()).status,"ACCEPTED");
+    await sweep(290);assert.equal(f.counts().hangups,0);
+    await sweep(301);assert.equal(f.counts().hangups,1);
+    assert.equal((await row()).status,"HANGUP_SENT");assert.equal((await row()).finalizedAt,null);
+    await sweep(302);assert.equal(f.counts().hangups,1);assert.equal(f.sockets[0].closed,false);
+    f.sockets[0].emit("open");
+    f.sockets[0].emit("message",JSON.stringify({type:"session.closed",event_id:"five_minute_close",
+      session:{id},reason:"close_requested",usage:{seconds:301}}));
+    for(let i=0;i<30&&(await row()).finalizedAt===null;i++)await new Promise(done=>setTimeout(done,5));
+    assert.equal((await row()).status,"COMPLETED");assert.equal((await row()).finalUsageSeconds,301);
+    await assert.rejects(r.receiveVerified({...invite(),sessionId:id+"_second",
+      webhookEventId:"evt_five_minute_second"}),/CERTIFICATION_ATTEMPT_LIMIT/);
+    assert.equal(f.counts().accepts,1);
+  }finally{r.stop();}
+});
