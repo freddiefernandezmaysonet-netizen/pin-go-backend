@@ -134,6 +134,7 @@ jobs:
           run_suite pingo_sales_watchdog_test SALES_WATCHDOG_TEST_DATABASE_URL src/services/sales-voice-recovery-budget.service.test.ts
       - name: Run product knowledge, worker and local loopback transport tests
         run: |
+          node --import tsx --test src/services/sales-voice-addon-pricing.service.test.ts
           node --import tsx --test src/services/sales-voice-pricing.service.test.ts
           node --import tsx --test src/services/sales-voice-product-knowledge.service.test.ts
           node --import tsx --test src/workers/sales-voice-live-watchdog.worker.test.ts
