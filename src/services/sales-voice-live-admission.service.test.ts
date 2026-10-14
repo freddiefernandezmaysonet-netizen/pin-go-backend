@@ -250,3 +250,11 @@ test("window expiry during admission transaction rolls back the claim",async()=>
   await assert.rejects(new SalesVoiceLiveAdmission(guarded).claim(id(111),limits),err("CERTIFICATION_WINDOW_CLOSED"));
   assert.equal((await db.salesVoiceCall.findUniqueOrThrow({where:{providerCallId:id(111)}})).status,"RECEIVED");
 });
+
+test("failed terminal status cannot refund a certification attempt",async()=>{
+  await reset();await incoming(112);const limits=windowPolicy();
+  await service.claim(id(112),limits);
+  await db.salesVoiceCall.update({where:{providerCallId:id(112)},data:{status:"FAILED",endedAt:new Date()}});
+  await incoming(113);
+  await assert.rejects(new SalesVoiceLiveAdmission(db).claim(id(113),limits),err("CERTIFICATION_ATTEMPT_LIMIT"));
+});
