@@ -270,3 +270,66 @@ test("late usage racing with finalization cannot release an undercounted call", 
   assert.equal(stored.lastUsageSeconds,200);
   assert.equal(stored.finalizedAt,null);
 });
+
+test("certification expiry drains each running state without fabricating final closure", async () => {
+  for (const status of ["ADMISSION_CLAIMED","ACCEPTED","ACCEPT_UNKNOWN"]) {
+    await reset(); const now=Date.now(),window={startsAtMs:now-20000,endsAtMs:now+1000};
+    await createCall(30,status,1);
+    const settings={...config(),certificationWindow:window};
+    let calls=0;const transport:HangupHTTP=async()=>{calls++;return{status:200};};
+    assert.equal((await watchdog.runOnce({policy:settings,apiKey:"sk-test",transport,
+      now:new Date(window.endsAtMs-1)})).claimed,0);
+    assert.equal((await watchdog.runOnce({policy:settings,apiKey:"sk-test",transport,
+      now:new Date(window.endsAtMs)})).sent,1);
+    const stored=await db.salesVoiceCall.findUniqueOrThrow({where:{providerCallId:liveId(30)}});
+    assert.equal(calls,1);assert.equal(stored.status,"HANGUP_SENT");
+    assert.equal(stored.finalizedAt,null);assert.equal(stored.endedAt,null);
+  }
+});
+
+test("window drain excludes calls outside its time range and non-inbound sessions",async()=>{
+  await reset();const now=Date.now(),window={startsAtMs:now-20000,endsAtMs:now-1000};
+  await createCall(31,"ACCEPTED",1); // inside window
+  await createCall(32,"ACCEPTED",30); // before window, below normal duration limit
+  await createCall(33,"ACCEPTED",1);
+  await db.salesVoiceCall.update({where:{providerCallId:liveId(33)},data:{startedAt:new Date(window.endsAtMs)}});
+  await createCall(34,"ACCEPTED",1);
+  await db.salesVoiceCall.update({where:{providerCallId:liveId(34)},data:{direction:"OUTBOUND"}});
+  const bound:string[]=[];
+  const result=await watchdog.runOnce({policy:{...config(),certificationWindow:window},
+    apiKey:"sk-test",now:new Date(now),transport:async(url)=>{bound.push(url);return{status:200};}});
+  assert.equal(result.claimed,1);
+  assert.deepEqual(bound,["https://api.openai.com/v1/live/sessions/"+liveId(31)+"/hangup"]);
+  for(const i of [32,33,34])assert.equal(
+    (await db.salesVoiceCall.findUniqueOrThrow({where:{providerCallId:liveId(i)}})).status,"ACCEPTED");
+});
+
+test("expired window shares the durable hangup fence across concurrency and restart",async()=>{
+  await reset();await createCall(35,"ACCEPTED",1);
+  const now=Date.now(),settings={...config(),certificationWindow:{startsAtMs:now-20000,endsAtMs:now-1000}};
+  let calls=0;const transport:HangupHTTP=async()=>{calls++;throw Error("ambiguous window drain");};
+  const outcomes=await Promise.all([watchdog,new SalesVoiceLiveWatchdog(db)].map(w=>
+    w.runOnce({policy:settings,apiKey:"sk-test",transport,now:new Date(now)})));
+  assert.equal(outcomes.reduce((n,x)=>n+x.claimed,0),1);assert.equal(calls,1);
+  assert.equal((await new SalesVoiceLiveWatchdog(db).runOnce({
+    policy:settings,apiKey:"sk-test",transport,now:new Date(now+1000)})).claimed,0);
+  const stored=await db.salesVoiceCall.findUniqueOrThrow({where:{providerCallId:liveId(35)}});
+  assert.equal(stored.status,"HANGUP_UNKNOWN");assert.equal(stored.finalizedAt,null);
+});
+
+test("malformed certification windows fail before any watchdog database access",async()=>{
+  const trapped=new SalesVoiceLiveWatchdog(new Proxy(db,{get(){throw Error("DATABASE_TOUCHED");}}));
+  for(const window of [
+    {startsAtMs:0,endsAtMs:1000},{startsAtMs:1000,endsAtMs:1000},
+    {startsAtMs:1000,endsAtMs:901001},{startsAtMs:1000,endsAtMs:NaN},
+    {startsAtMs:1.5,endsAtMs:1000},
+  ])await assert.rejects(trapped.runOnce({policy:{...config(),certificationWindow:window},
+    apiKey:"sk-test",transport:async()=>({status:200})}),error("INVALID_CERTIFICATION_WINDOW"));
+});
+
+test("an unexpired certification window preserves the independent duration limit",async()=>{
+  await reset();await createCall(36,"ACCEPTED",400);
+  const now=Date.now(),window={startsAtMs:now-1000,endsAtMs:now+300000};
+  assert.equal((await watchdog.runOnce({policy:{...config(),certificationWindow:window},
+    apiKey:"sk-test",now:new Date(now),transport:async()=>({status:200})})).sent,1);
+});
