@@ -8,6 +8,7 @@ import {
   type ObserverHeartbeatTimer,
 } from "./sales-voice-live-session-coordinator.service.js";
 import type { AdmissionLimits, ProviderHTTP } from "./sales-voice-live-admission.service.js";
+import { SimulatedSalesVoiceSafetyController } from "./sales-voice-safety-controller.service.js";
 import type { HangupHTTP } from "./sales-voice-live-watchdog.service.js";
 import type { SidebandSocketFactory } from "./sales-voice-sideband-supervisor.service.js";
 
@@ -69,6 +70,7 @@ function deps(id:string, opts: {
   attachThrows?:boolean;
   useLimits?:AdmissionLimits;
   useDb?:PrismaClient;
+  supervision?:Pick<SimulatedSalesVoiceSafetyController,"permitsAdmission">;
 }={}){
   const socket=new Socket();
   let accepts=0,hangups=0,attaches=0;
@@ -105,6 +107,7 @@ function deps(id:string, opts: {
       db:opts.useDb??db,env:opts.env??environment,sessionId:id,apiKey:key,
       limits:opts.useLimits??limits,acceptTransport,
       observerOwner:"voice_initial_observer_fixture",observerTtlSeconds:120,
+      supervision:opts.supervision??{permitsAdmission:()=>true},
       hangupTransport,sidebandConnect:connect,
     }),
   };
@@ -550,4 +553,64 @@ test("same observer cannot start a duplicate heartbeat or restart a stopped one"
   h.stop();await r.completion;
   assert.throws(()=>startSimulatedSalesVoiceObserverHeartbeat(input),/OBSERVER_HEARTBEAT_ALREADY_STARTED/);
   assert.equal(d.counts.hangups,0);
+});
+
+test("unavailable or failing supervision denies before any admission claim",async()=>{
+  await clean();const id=next();await seeded(id);
+  for(const supervision of [
+    {permitsAdmission:()=>false},
+    {permitsAdmission:()=>{throw Error("fixture unavailable supervisor");}},
+  ]) {
+    const d=deps(id,{supervision});
+    await assert.rejects(d.run(),/ACTIVE_MATCHING_SUPERVISION_REQUIRED/);
+    assert.deepEqual(d.counts,{accepts:0,hangups:0,attaches:0});
+    assert.equal((await state(id))?.status,"RECEIVED");
+  }
+});
+test("supervision lost during admission transaction prevents provider accept and holds capacity",async()=>{
+  await clean();const id=next();await seeded(id);let ready=true;
+  const guarded=new Proxy(db,{get(target,prop){
+    const value=Reflect.get(target,prop,target);
+    if(prop==="$transaction")return(...args:unknown[])=>value.apply(target,args).then((result:unknown)=>{
+      ready=false;return result;
+    });
+    return typeof value==="function"?value.bind(target):value;
+  }});
+  const d=deps(id,{useDb:guarded,supervision:{permitsAdmission:()=>ready}});
+  assert.equal((await d.run()).state,"ACCEPT_UNKNOWN");
+  assert.deepEqual(d.counts,{accepts:0,hangups:0,attaches:0});
+  assert.equal((await state(id))?.status,"ACCEPT_UNKNOWN");
+  assert.equal((await state(id))?.finalizedAt,null);
+});
+test("actual safety loop authorizes one accept only after its first healthy cycle",async()=>{
+  await clean();const id=next();await seeded(id);
+  const env={...environment,
+    SALES_VOICE_OPENAI_API_KEY:key,
+    SALES_VOICE_RECOVERY_CYCLE_SIMULATION_ENABLED:"true",
+    SALES_VOICE_RECOVERY_CYCLE_RELEASE_CERTIFIED:"true",
+    SALES_VOICE_RECOVERY_SUPERVISOR_SIMULATION_ENABLED:"true",
+    SALES_VOICE_RECOVERY_SUPERVISOR_RELEASE_CERTIFIED:"true",
+    SALES_VOICE_SAFETY_CONTROLLER_SIMULATION_ENABLED:"true",
+    SALES_VOICE_SAFETY_CONTROLLER_RELEASE_CERTIFIED:"true",
+    SALES_VOICE_SAFETY_LOOP_SIMULATION_ENABLED:"true",
+    SALES_VOICE_SAFETY_LOOP_RELEASE_CERTIFIED:"true",
+  };
+  const controller=new SimulatedSalesVoiceSafetyController({
+    db,env,owner:"voice_supervised_accept_fixture",ttlSeconds:120,staleAfterSeconds:60,
+    maxOwned:1,maxCallSeconds:60,maxSweepIntervalSeconds:10,admissionLimits:limits,
+    connect:()=>{throw Error("RECEIVED must not attach through recovery");},
+    hangup:async()=>{throw Error("RECEIVED must not trigger guardian");},
+  });
+  const d=deps(id,{supervision:controller});
+  await assert.rejects(d.run(),/ACTIVE_MATCHING_SUPERVISION_REQUIRED/);
+  const timer=manualTimer();
+  const loop=controller.startLoop({pollMs:1000,schedule:timer.schedule,monotonicNow:()=>0});
+  try {
+    await timer.tasks[0].task();
+    const result=await d.run();monitoring(result);
+    assert.deepEqual(d.counts,{accepts:1,hangups:0,attaches:1});
+    result.disconnect();await result.completion;
+    loop.stop();
+    assert.equal(controller.permitsAdmission(limits),false);
+  } finally {loop.stop();}
 });

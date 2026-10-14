@@ -1,4 +1,5 @@
 import { performance } from "node:perf_hooks";
+import type { SimulatedSalesVoiceSafetyController } from "./sales-voice-safety-controller.service.js";
 import type { PrismaClient, Prisma } from "@prisma/client";
 import { SalesVoiceRecoveryLease, type RecoveryLease } from "./sales-voice-recovery-lease.service.js";
 import { SalesVoiceRecoveryOwnershipLost } from "./sales-voice-recovery-observation.service.js";
@@ -152,6 +153,7 @@ export async function coordinateSimulatedLiveSipSession(input: {
   limits: AdmissionLimits;
   observerOwner: string;
   observerTtlSeconds: number;
+  supervision: Pick<SimulatedSalesVoiceSafetyController, "permitsAdmission">;
   acceptTransport: ProviderHTTP;
   hangupTransport: HangupHTTP;
   sidebandConnect: SidebandSocketFactory;
@@ -172,6 +174,12 @@ export async function coordinateSimulatedLiveSipSession(input: {
 
   input = { ...input, limits: { ...input.limits } }; // snapshot validated configuration
 
+  const ready = () => {
+    try { return input.supervision?.permitsAdmission(input.limits) === true; }
+    catch { return false; }
+  };
+  if (!ready()) reject("ACTIVE_MATCHING_SUPERVISION_REQUIRED");
+
   // One owner of admission + /accept. A separately claimed slot cannot
   // be accepted again here: ALREADY_CLAIMED is a hard no-op.
   const admission = new SalesVoiceLiveAdmission(input.db);
@@ -180,7 +188,12 @@ export async function coordinateSimulatedLiveSipSession(input: {
     sessionId: input.sessionId,
     limits: input.limits,
     apiKey: input.apiKey,
-    transport: input.acceptTransport,
+    transport: async (url, request) => {
+      // Admission may have waited on the global DB lock. Recheck immediately
+      // before the one provider request; failure retains the claimed capacity.
+      if (!ready()) reject("ACTIVE_MATCHING_SUPERVISION_REQUIRED");
+      return input.acceptTransport(url, request);
+    },
     explicitlyEnabled: true,
   });
   if (state !== "ACCEPTED") return { state };

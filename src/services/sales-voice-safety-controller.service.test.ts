@@ -255,3 +255,57 @@ test("native global safety timer executes one real PostgreSQL guardian cycle",as
   try {await Promise.race([finished,timeout]);assert.equal(calls,1);assert.equal((await row()).finalizedAt,null);}
   finally {clearTimeout(deadline);h.stop();}
 });
+
+test("admission requires a completed healthy scheduled cycle and matching policy",async()=>{
+  await seed(1);const f=fixture(),c=new SimulatedSalesVoiceSafetyController(f.options),timer=timerFixture();
+  assert.equal(c.permitsAdmission(f.options.admissionLimits),false);
+  await c.tick();assert.equal(c.permitsAdmission(f.options.admissionLimits),false);
+  const h=c.startLoop({pollMs:1000,schedule:timer.schedule,monotonicNow:()=>0});
+  assert.equal(c.permitsAdmission(f.options.admissionLimits),false);
+  await timer.tasks[0].task();
+  assert.equal(c.permitsAdmission(f.options.admissionLimits),true);
+  for(const limits of [
+    {...f.options.admissionLimits,reservedSecondsPerCall:120},
+    {...f.options.admissionLimits,maxConcurrentCalls:1},
+    {...f.options.admissionLimits,monthlyBudgetCents:9999},
+    {...f.options.admissionLimits,estimatedCentsPerMinute:1},
+    {...f.options.admissionLimits,enabled:false},
+  ])assert.equal(c.permitsAdmission(limits),false);
+  h.stop();assert.equal(c.permitsAdmission(f.options.admissionLimits),false);
+});
+test("stale or reversed monotonic clock denies admission before delayed callback fires",async()=>{
+  await seed(1);const f=fixture(),c=new SimulatedSalesVoiceSafetyController(f.options),timer=timerFixture();
+  let time=100;
+  const h=c.startLoop({pollMs:1000,schedule:timer.schedule,monotonicNow:()=>time});
+  await timer.tasks[0].task();
+  assert.equal(c.permitsAdmission(f.options.admissionLimits),true);
+  time=10100;assert.equal(c.permitsAdmission(f.options.admissionLimits),false);
+  time=99;assert.equal(c.permitsAdmission(f.options.admissionLimits),false);
+  time=NaN;assert.equal(c.permitsAdmission(f.options.admissionLimits),false);h.stop();
+});
+test("pending scheduled work and disabled recovery gates cannot authorize admission",async()=>{
+  await seed(1);const f=fixture(),c=new SimulatedSalesVoiceSafetyController(f.options),timer=timerFixture();
+  const h=c.startLoop({pollMs:1000,schedule:timer.schedule,monotonicNow:()=>0});
+  const pending=timer.tasks[0].task();
+  assert.equal(c.permitsAdmission(f.options.admissionLimits),false);
+  await pending;assert.equal(c.permitsAdmission(f.options.admissionLimits),true);
+  f.options.env.SALES_VOICE_RECOVERY_SUPERVISOR_RELEASE_CERTIFIED="false";
+  assert.equal(c.permitsAdmission(f.options.admissionLimits),false);h.stop();
+});
+test("loop gate disabled between provider requests vetoes later requests in same cycle",async()=>{
+  await seed(70,3);const start=new Date(Date.now()-70000);
+  await db.salesVoiceCall.create({data:{
+    providerCallId:id+"_second",provider:"OPENAI_LIVE_SIP",direction:"INBOUND",status:"ACCEPTED",
+    startedAt:start,answeredAt:start,updatedAt:new Date(0),recoveryLeaseEpoch:3,
+  }});
+  let calls=0;
+  const f=fixture(owner,async()=>{
+    calls++;f.options.env.SALES_VOICE_SAFETY_LOOP_RELEASE_CERTIFIED="false";
+    return{status:200};
+  }),c=new SimulatedSalesVoiceSafetyController(f.options),timer=timerFixture();
+  const h=c.startLoop({pollMs:1000,schedule:timer.schedule,monotonicNow:()=>0});
+  await timer.tasks[0].task();
+  assert.equal(calls,1);assert.equal(c.permitsAdmission(f.options.admissionLimits),false);
+  assert.notEqual(h.snapshot().phase,"RUNNING");
+  assert.equal(await db.salesVoiceCall.count({where:{finalizedAt:{not:null}}}),0);
+});

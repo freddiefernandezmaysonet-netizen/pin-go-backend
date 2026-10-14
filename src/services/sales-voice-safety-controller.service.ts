@@ -16,7 +16,7 @@ const permitted = (env: Env): boolean =>
 type WatchdogResult = { inspected: number; claimed: number; sent: number; unknown: number };
 
 /**
- * Isolated certification controller; no timer or default provider transport.
+ * Isolated certification controller; no automatic timer or default provider transport.
  * Recovery leases govern observers. The independent duration guardian uses
  * the existing persisted hangup claim, shared across ALL controller processes.
  * No HTTP acknowledgment, timeout or disconnect releases capacity here.
@@ -31,6 +31,7 @@ export class SimulatedSalesVoiceSafetyController {
   private loopStarted = false;
   private cancelLoop?: () => void;
   private loopGate?: () => boolean;
+  private admissionReady?: () => boolean;
   private active(): boolean { return !this.stopped && permitted(this.input.env) && (!this.loopGate || this.loopGate()); }
 
   constructor(private readonly input: {
@@ -65,6 +66,19 @@ export class SimulatedSalesVoiceSafetyController {
       return this.input.connect(url, options);
     } });
     this.watchdog = new SalesVoiceLiveWatchdog(this.input.db);
+  }
+
+  /** Local supervision proof only: no remote call-state inference. */
+  permitsAdmission(limits: AdmissionLimits): boolean {
+    try {
+      if (!this.active() || this.admissionReady?.() !== true) return false;
+      const required = this.input.admissionLimits;
+      return limits.enabled === required.enabled
+        && limits.maxConcurrentCalls === required.maxConcurrentCalls
+        && limits.monthlyBudgetCents === required.monthlyBudgetCents
+        && limits.estimatedCentsPerMinute === required.estimatedCentsPerMinute
+        && limits.reservedSecondsPerCall === required.reservedSecondsPerCall;
+    } catch { return false; }
   }
 
   completion(sessionId: string) { return this.recovery.completion(sessionId); }
@@ -103,6 +117,16 @@ export class SimulatedSalesVoiceSafetyController {
       const value = now();
       if (!Number.isFinite(value) || value < 0) throw new Error("SAFETY_MONOTONIC_CLOCK_REQUIRED");
       return value;
+    };
+    this.admissionReady = () => {
+      const time = clock();
+      return phase === "RUNNING" && cycles > 0 && !inFlight && !this.busy
+        && enabled()
+        && this.input.env.SALES_VOICE_RECOVERY_CYCLE_SIMULATION_ENABLED === "true"
+        && this.input.env.SALES_VOICE_RECOVERY_CYCLE_RELEASE_CERTIFIED === "true"
+        && this.input.env.SALES_VOICE_RECOVERY_SUPERVISOR_SIMULATION_ENABLED === "true"
+        && this.input.env.SALES_VOICE_RECOVERY_SUPERVISOR_RELEASE_CERTIFIED === "true"
+        && time >= lastStart && time - lastStart < intervalMs;
     };
     const cancelTimers = () => {
       generation++;
@@ -175,18 +199,18 @@ export class SimulatedSalesVoiceSafetyController {
       if (!(time?.now instanceof Date) || !Number.isFinite(time.now.getTime())) {
         throw new Error("SAFETY_DATABASE_CLOCK_REQUIRED");
       }
-      if (!permitted(this.input.env) || this.stopped) {
+      if (!this.active()) {
         this.stop(); return { state: "DISABLED", recovery };
       }
       const watchdog = await this.watchdog.runOnce({
         policy: { enabled: true, maxCallSeconds: this.input.maxCallSeconds, batchSize: this.input.maxOwned },
         apiKey: this.apiKey, now: time.now,
         transport: async (url, request) => {
-          if (!permitted(this.input.env) || this.stopped) throw new Error("SAFETY_TRANSPORT_DISABLED");
+          if (!this.active()) throw new Error("SAFETY_TRANSPORT_DISABLED");
           return this.input.hangup(url, request);
         },
       });
-      if (!permitted(this.input.env) || this.stopped) {
+      if (!this.active()) {
         this.stop(); return { state: "DISABLED", recovery, watchdog };
       }
       return { state: "READY", recovery, watchdog };

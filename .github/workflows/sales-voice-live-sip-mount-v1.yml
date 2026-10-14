@@ -79,7 +79,10 @@ jobs:
           const recoverySupervisor = [".github/workflows/sales-voice-live-sip-mount-v1.yml",".github/workflows/sales-voice-main-integration-certification.yml","src/services/sales-voice-recovery-supervisor.service.test.ts","src/services/sales-voice-recovery-supervisor.service.ts"];
           const recoveryBudget = [".github/workflows/sales-voice-live-sip-mount-v1.yml",".github/workflows/sales-voice-main-integration-certification.yml",".github/workflows/sales-voice-recovery-lease-certification.yml","src/services/sales-voice-recovery-budget.service.test.ts","src/services/sales-voice-recovery-cycle.service.ts","src/services/sales-voice-recovery-lease.service.ts","src/services/sales-voice-recovery-supervisor.service.ts"];
           const safetyController = [".github/workflows/sales-voice-live-sip-mount-v1.yml",".github/workflows/sales-voice-main-integration-certification.yml","src/services/sales-voice-safety-controller.service.test.ts","src/services/sales-voice-safety-controller.service.ts"];
-          const selected = process.env.GITHUB_HEAD_REF === 'agent/sales-voice-safety-loop-v1-20261014'
+          const supervisedAdmission = [".github/workflows/sales-voice-live-sip-mount-v1.yml",".github/workflows/sales-voice-main-integration-certification.yml","src/services/sales-voice-live-session-coordinator.service.test.ts","src/services/sales-voice-live-session-coordinator.service.ts","src/services/sales-voice-safety-controller.service.test.ts","src/services/sales-voice-safety-controller.service.ts"];
+          const selected = process.env.GITHUB_HEAD_REF === 'agent/sales-voice-supervision-admission-v1-20261014'
+            ? supervisedAdmission
+            : process.env.GITHUB_HEAD_REF === 'agent/sales-voice-safety-loop-v1-20261014'
             ? safetyController
             : process.env.GITHUB_HEAD_REF === 'agent/sales-voice-observer-heartbeat-v1-20261014'
             ? liveSessionCoordinator
