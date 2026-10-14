@@ -18,8 +18,12 @@ export const privateSalesVoiceCertificationRequested=(env:Env):boolean=>
   &&env.SALES_VOICE_PRIVATE_CERTIFICATION_ENABLED==="true"
   &&env.SALES_VOICE_PRIVATE_CERTIFICATION_RELEASE_CERTIFIED==="true";
 
+/** Explicit development-only operation requested for the dedicated commercial number. */
+export const salesVoiceDevelopmentRequested=(env:Env):boolean=>
+  privateSalesVoiceCertificationRequested(env)&&env.SALES_VOICE_DEVELOPMENT_ENABLED==="true";
+
 export function privateSalesVoiceCertificationWindow(env:Env):AdmissionLimits["certificationWindow"] {
-  if(!privateSalesVoiceCertificationRequested(env))return;
+  if(!privateSalesVoiceCertificationRequested(env)||salesVoiceDevelopmentRequested(env))return;
   const start=env.SALES_VOICE_CERTIFICATION_STARTS_AT_MS,end=env.SALES_VOICE_CERTIFICATION_ENDS_AT_MS;
   if(typeof start!=="string"||typeof end!=="string"||!/^\d{13}$/.test(start)||!/^\d{13}$/.test(end))
     throw new Error("INVALID_PRIVATE_CERTIFICATION_WINDOW");
@@ -33,6 +37,7 @@ export function salesVoiceCertificationEnvironmentAllowed(env:Env):boolean {
   if(isSalesVoiceSimulationEnvironment(env))return true;
   if(env.SALES_VOICE_RUNTIME_BOOT_ENABLED!=="true"
     ||env.SALES_VOICE_RUNTIME_BOOT_RELEASE_CERTIFIED!=="true")return false;
+  if(salesVoiceDevelopmentRequested(env))return true;
   try{return privateSalesVoiceCertificationWindow(env)!==undefined;}catch{return false;}
 }
 
@@ -42,6 +47,10 @@ export function salesVoiceCertificationEnvironmentAllowed(env:Env):boolean {
 export function salesVoiceCertificationLimitsMatch(env:Env,limits:AdmissionLimits):boolean {
   if(isSalesVoiceSimulationEnvironment(env))return true;
   if(!salesVoiceCertificationEnvironmentAllowed(env))return false;
+  if(salesVoiceDevelopmentRequested(env))return limits.enabled
+    &&limits.developmentUnrestricted===true&&limits.certificationWindow===undefined
+    &&limits.maxConcurrentCalls===10;
+  if(limits.developmentUnrestricted)return false;
   try{
     const window=privateSalesVoiceCertificationWindow(env)!;
     return limits.enabled&&limits.maxConcurrentCalls===1
