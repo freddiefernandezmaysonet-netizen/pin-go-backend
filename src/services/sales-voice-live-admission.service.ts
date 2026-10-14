@@ -18,6 +18,7 @@ export type AdmissionLimits = {
   monthlyBudgetCents: number;
   estimatedCentsPerMinute: number;
   reservedSecondsPerCall: number;
+  certificationWindow?: Readonly<{startsAtMs:number;endsAtMs:number}>;
 };
 function validLimits(l: AdmissionLimits): void {
   if (!l.enabled) deny("DISABLED");
@@ -26,6 +27,11 @@ function validLimits(l: AdmissionLimits): void {
     || !Number.isSafeInteger(l.estimatedCentsPerMinute) || l.estimatedCentsPerMinute < 1
     || !Number.isSafeInteger(l.reservedSecondsPerCall) || l.reservedSecondsPerCall < 60
     || l.reservedSecondsPerCall > 3600) deny("INVALID_LIMITS");
+  const w=l.certificationWindow;
+  if(w && (!Number.isSafeInteger(w.startsAtMs)||!Number.isSafeInteger(w.endsAtMs)
+    ||w.startsAtMs<=0||w.endsAtMs<=w.startsAtMs||w.endsAtMs-w.startsAtMs>15*60*1000
+    ||l.maxConcurrentCalls!==1||l.reservedSecondsPerCall>120))
+    deny("INVALID_CERTIFICATION_WINDOW");
 }
 function sessionId(value: string): string {
   if (typeof value !== "string" || !/^live_[A-Za-z0-9_-]{1,123}$/.test(value)) deny("INVALID_SESSION_ID");
@@ -46,6 +52,7 @@ export class SalesVoiceLiveAdmission {
     call: SalesVoiceCall;
   }> {
     sessionId(id);
+    limits={...limits,certificationWindow:limits.certificationWindow?{...limits.certificationWindow}:undefined};
     validLimits(limits);
     if (!Number.isFinite(now.getTime())) deny("INVALID_TIME");
     return this.db.$transaction(async tx => {
@@ -57,6 +64,27 @@ export class SalesVoiceLiveAdmission {
         if (HELD.includes(call.status as HeldStatus))
           return { result: "ALREADY_CLAIMED" as const, call };
         deny("NOT_ADMISSIBLE_STATUS");
+      }
+      const window=limits.certificationWindow;
+      if(window){
+        // Read PostgreSQL time AFTER the global lock wait; caller clocks cannot
+        // reopen an expired window. Leave the full reservation before its end.
+        const [time]=await tx.$queryRaw<Array<{now:Date}>>`SELECT clock_timestamp() AS "now"`;
+        if(!(time?.now instanceof Date)||!Number.isFinite(time.now.getTime()))
+          deny("CERTIFICATION_DATABASE_CLOCK_REQUIRED");
+        const clock=time.now.getTime();
+        if(clock<window.startsAtMs||clock+limits.reservedSecondsPerCall*1000>window.endsAtMs)
+          deny("CERTIFICATION_WINDOW_CLOSED");
+        if(call.startedAt.getTime()<window.startsAtMs||call.startedAt.getTime()>clock)
+          deny("CERTIFICATION_FRESH_INVITE_REQUIRED");
+        // Any call that left RECEIVED conservatively consumes the attempt. The
+        // existing global advisory lock makes this quota durable across restart.
+        const used=await tx.salesVoiceCall.count({where:{
+          provider:"OPENAI_LIVE_SIP",direction:"INBOUND",
+          startedAt:{gte:new Date(window.startsAtMs),lte:new Date(window.endsAtMs)},
+          status:{not:"RECEIVED"},
+        }});
+        if(used!==0)deny("CERTIFICATION_ATTEMPT_LIMIT");
       }
       const active = await tx.salesVoiceCall.count({
         where: { provider: "OPENAI_LIVE_SIP", status: { in: [...HELD] } },
@@ -90,6 +118,13 @@ export class SalesVoiceLiveAdmission {
         data: { status: "ADMISSION_CLAIMED" },
       });
       if (changed.count !== 1) deny("CLAIM_RACE");
+      if(window){
+        const [end]=await tx.$queryRaw<Array<{now:Date}>>`SELECT clock_timestamp() AS "now"`;
+        if(!(end?.now instanceof Date)||!Number.isFinite(end.now.getTime())
+          ||end.now.getTime()<window.startsAtMs
+          ||end.now.getTime()+limits.reservedSecondsPerCall*1000>window.endsAtMs)
+          deny("CERTIFICATION_WINDOW_CLOSED"); // rollback late claim before any provider request
+      }
       return {
         result: "CLAIMED" as const,
         call: await tx.salesVoiceCall.findUniqueOrThrow({ where: { id: call.id } }),

@@ -60,7 +60,8 @@ export class SimulatedSalesVoiceSafetyController {
     if (!key?.startsWith("sk-")) throw new Error("COMMERCIAL_SAFETY_KEY_REQUIRED");
     this.apiKey = key;
     // Snapshot validated scalars/transport; only the referenced release gates remain dynamic.
-    this.input = { ...input, admissionLimits: { ...input.admissionLimits } };
+    this.input = { ...input, admissionLimits: { ...input.admissionLimits,
+      certificationWindow: input.admissionLimits.certificationWindow?{...input.admissionLimits.certificationWindow}:undefined } };
     this.recovery = new SimulatedSalesVoiceRecoverySupervisor({ ...this.input, connect: (url, options) => {
       if (!this.active()) throw new Error("SAFETY_TRANSPORT_DISABLED");
       return this.input.connect(url, options);
@@ -77,7 +78,9 @@ export class SimulatedSalesVoiceSafetyController {
         && limits.maxConcurrentCalls === required.maxConcurrentCalls
         && limits.monthlyBudgetCents === required.monthlyBudgetCents
         && limits.estimatedCentsPerMinute === required.estimatedCentsPerMinute
-        && limits.reservedSecondsPerCall === required.reservedSecondsPerCall;
+        && limits.reservedSecondsPerCall === required.reservedSecondsPerCall
+        && limits.certificationWindow?.startsAtMs === required.certificationWindow?.startsAtMs
+        && limits.certificationWindow?.endsAtMs === required.certificationWindow?.endsAtMs;
     } catch { return false; }
   }
 

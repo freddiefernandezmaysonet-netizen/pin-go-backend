@@ -82,7 +82,10 @@ jobs:
           const supervisedAdmission = [".github/workflows/sales-voice-live-sip-mount-v1.yml",".github/workflows/sales-voice-main-integration-certification.yml","src/services/sales-voice-live-session-coordinator.service.test.ts","src/services/sales-voice-live-session-coordinator.service.ts","src/services/sales-voice-safety-controller.service.test.ts","src/services/sales-voice-safety-controller.service.ts"];
           const runtimeComposition = [".github/workflows/sales-voice-live-sip-mount-v1.yml",".github/workflows/sales-voice-main-integration-certification.yml","src/services/sales-voice-live-sip-mount.service.ts","src/services/sales-voice-runtime-composition.service.test.ts","src/services/sales-voice-runtime-composition.service.ts"];
           const runtimeBoot = [".github/workflows/sales-voice-live-sip-mount-v1.yml",".github/workflows/sales-voice-main-integration-certification.yml","src/services/sales-voice-live-sip-mount.service.ts","src/services/sales-voice-runtime-boot.service.test.ts","src/services/sales-voice-runtime-boot.service.ts"];
-          const selected = process.env.GITHUB_HEAD_REF === 'agent/sales-voice-runtime-boot-v1-20261014'
+          const certificationAttemptCap = [".github/workflows/sales-voice-live-sip-mount-v1.yml",".github/workflows/sales-voice-main-integration-certification.yml","src/services/sales-voice-live-admission.service.test.ts","src/services/sales-voice-live-admission.service.ts","src/services/sales-voice-safety-controller.service.test.ts","src/services/sales-voice-safety-controller.service.ts"];
+          const selected = process.env.GITHUB_HEAD_REF === 'agent/sales-voice-certification-attempt-cap-v1-20261014'
+            ? certificationAttemptCap
+            : process.env.GITHUB_HEAD_REF === 'agent/sales-voice-runtime-boot-v1-20261014'
             ? runtimeBoot
             : process.env.GITHUB_HEAD_REF === 'agent/sales-voice-runtime-composition-v1-20261014'
             ? runtimeComposition

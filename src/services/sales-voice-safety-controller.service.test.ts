@@ -309,3 +309,19 @@ test("loop gate disabled between provider requests vetoes later requests in same
   assert.notEqual(h.snapshot().phase,"RUNNING");
   assert.equal(await db.salesVoiceCall.count({where:{finalizedAt:{not:null}}}),0);
 });
+
+test("supervision snapshots certification window and rejects replacement or bypass",async()=>{
+  await seed(1);const f=fixture();
+  const window={startsAtMs:Date.now()-10000,endsAtMs:Date.now()+300000};
+  const limits={...f.options.admissionLimits,maxConcurrentCalls:1,reservedSecondsPerCall:120,
+    certificationWindow:window};
+  const c=new SimulatedSalesVoiceSafetyController({...f.options,maxOwned:1,admissionLimits:limits});
+  const timer=timerFixture(),h=c.startLoop({pollMs:1000,schedule:timer.schedule,monotonicNow:()=>0});
+  await timer.tasks[0].task();
+  const original={...limits,certificationWindow:{...window}};
+  assert.equal(c.permitsAdmission(original),true);
+  window.endsAtMs+=1000;
+  assert.equal(c.permitsAdmission(limits),false);
+  assert.equal(c.permitsAdmission({...original,certificationWindow:undefined}),false);
+  assert.equal(c.permitsAdmission(original),true);h.stop();
+});
