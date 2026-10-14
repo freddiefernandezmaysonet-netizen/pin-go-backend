@@ -90,3 +90,40 @@ test("abort during pricing prevents any late accept",async()=>{
   }));
   assert.equal(accepts,0);
 });
+
+test("verified monthly price survives another offer timing out, and late success cannot alter snapshot",async()=>{
+  let finish!:(value:unknown)=>void;const reports:unknown[]=[];
+  const snapshot=await readSalesVoicePricing({...env,STRIPE_PRICE_PLATFORM_YEARLY:"price_yearly"},async id=>{
+    if(id==="price_monthly")return price;
+    return new Promise(resolve=>{finish=resolve;});
+  },{timeoutMs:5,report:entry=>reports.push(entry)});
+  assert.ok(snapshot.lines[0].includes("VERIFIED USD 39.99"));assert.ok(snapshot.lines[1].includes("UNAVAILABLE"));
+  finish({...price,id:"price_yearly",unit_amount:39990,recurring:{...price.recurring,interval:"year"}});
+  await Promise.resolve();
+  assert.ok(snapshot.lines[1].includes("UNAVAILABLE"));assert.equal(reports.length,1);
+  assert.deepEqual(reports[0],{monthly:"VERIFIED",yearly:"TIMEOUT",verified:1,unavailable:7});
+});
+test("managed commercial backend receives the exact validated call prices without executable tools",async()=>{
+  await postOneOpenAILiveAccept({sessionId:"live_backend_fixture",apiKey:"sk-fixture",explicitlyEnabled:true,
+    transport:withSalesVoicePricing(async(_url,request)=>{
+      const body=JSON.parse(request.body),backend=body.session.delegation;
+      assert.equal(body.session.model,"gpt-live-1");assert.equal(body.session.input.length,1);
+      assert.equal(backend.type,"responses");assert.equal(backend.responses.model,"gpt-6-luna");
+      assert.deepEqual(backend.responses.tools,[]);assert.equal(backend.responses.tool_choice,"none");
+      assert.equal(backend.responses.max_output_tokens,512);
+      assert.ok(backend.responses.instructions.includes("VERIFIED USD 39.99"));
+      assert.ok(backend.responses.instructions.includes("Direct Booking"));
+      assert.ok(backend.responses.instructions.includes("UNAVAILABLE"));
+      assert.ok(body.session.instructions.includes("Delegation policy:"));
+      assert.ok(!JSON.stringify(backend).includes("price_monthly"));return{status:200};
+    },env,async()=>price)});
+});
+test("price diagnostics classify invalid and failed data without serializing raw provider fields",async()=>{
+  let report:unknown;
+  await readSalesVoicePricing(env,async()=>({...price,unit_amount:1,metadata:{secret:"PRIVATE"}}),
+    {report:entry=>{report=entry;}});
+  assert.deepEqual(report,{monthly:"INVALID",yearly:"MISSING",verified:0,unavailable:8});
+  await readSalesVoicePricing(env,async()=>{throw Error("sk-PRIVATE");},{report:entry=>{report=entry;}});
+  assert.deepEqual(report,{monthly:"FAILED",yearly:"MISSING",verified:0,unavailable:8});
+  assert.ok(!JSON.stringify(report).includes("PRIVATE"));
+});
