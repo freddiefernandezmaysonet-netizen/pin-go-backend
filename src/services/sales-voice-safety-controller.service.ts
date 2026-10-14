@@ -36,7 +36,8 @@ export class SimulatedSalesVoiceSafetyController {
     if (!permitted(input.env)) throw new Error("SAFETY_CONTROLLER_PRODUCTION_VETO");
     const limits = input.admissionLimits;
     const reserveCents = Math.ceil(limits.reservedSecondsPerCall / 60) * limits.estimatedCentsPerMinute;
-    // Five seconds is the existing provider hangup request timeout.
+    // The guardian sends sequentially: reserve the existing five-second
+    // request timeout for every candidate in the bounded batch.
     if (!limits.enabled
       || !Number.isSafeInteger(limits.maxConcurrentCalls) || limits.maxConcurrentCalls < 1 || limits.maxConcurrentCalls > 10
       || !Number.isSafeInteger(limits.monthlyBudgetCents) || limits.monthlyBudgetCents < 1
@@ -44,7 +45,7 @@ export class SimulatedSalesVoiceSafetyController {
       || !Number.isSafeInteger(limits.reservedSecondsPerCall) || limits.reservedSecondsPerCall < 60 || limits.reservedSecondsPerCall > 3600
       || !Number.isSafeInteger(input.maxCallSeconds) || input.maxCallSeconds < 60 || input.maxCallSeconds > 3600
       || !Number.isSafeInteger(input.maxSweepIntervalSeconds) || input.maxSweepIntervalSeconds < 1 || input.maxSweepIntervalSeconds > 60
-      || limits.reservedSecondsPerCall < input.maxCallSeconds + input.maxSweepIntervalSeconds + 5
+      || limits.reservedSecondsPerCall < input.maxCallSeconds + input.maxSweepIntervalSeconds + 5 * input.maxOwned
       || !Number.isSafeInteger(reserveCents) || reserveCents > limits.monthlyBudgetCents
       || input.maxOwned > limits.maxConcurrentCalls
       || typeof input.hangup !== "function") throw new Error("SAFETY_RESERVATION_LIMITS_MISMATCH");
