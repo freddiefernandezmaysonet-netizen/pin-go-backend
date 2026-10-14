@@ -102,6 +102,7 @@ function deps(id:string, opts: {
     run:()=>coordinateSimulatedLiveSipSession({
       db,env:opts.env??environment,sessionId:id,apiKey:key,
       limits:opts.useLimits??limits,acceptTransport,
+      observerOwner:"voice_initial_observer_fixture",observerTtlSeconds:120,
       hangupTransport,sidebandConnect:connect,
     }),
   };
@@ -138,6 +139,8 @@ test("successful accept attaches to exact sideband; only session.closed finalize
   monitoring(result);
   assert.deepEqual(d.counts,{accepts:1,hangups:0,attaches:1});
   assert.equal((await state(id))?.status,"ACCEPTED");
+  assert.equal((await state(id))?.recoveryLeaseOwner,"voice_initial_observer_fixture");
+  assert.equal((await state(id))?.recoveryLeaseEpoch,1);
   d.socket.opened();
   d.socket.usage(10);
   d.socket.closeConfirmed(id,12);
@@ -214,4 +217,41 @@ test("budget and concurrency deny before provider calls",async()=>{
   await assert.rejects(d.run(),/ESTIMATED_MONTHLY_BUDGET_LIMIT/);
   assert.equal((await state(id))?.status,"RECEIVED");
   assert.deepEqual(d.counts,{accepts:0,hangups:0,attaches:0});
+});
+
+test("replacement owner fences initial observer: no usage, closure or hangup",async()=>{
+  await clean();const id=next();await seeded(id);
+  const d=deps(id);const r=await d.run();monitoring(r);
+  d.socket.opened();
+  await db.salesVoiceCall.update({where:{providerCallId:id},data:{
+    recoveryLeaseOwner:"voice_replacement_fixture",recoveryLeaseEpoch:{increment:1},
+  }});
+  d.socket.closeConfirmed(id,9);
+  assert.equal(await r.completion,"OWNERSHIP_LOST");
+  const saved=await state(id);
+  assert.equal(saved?.status,"ACCEPTED");assert.equal(saved?.finalizedAt,null);
+  assert.equal(saved?.finalUsageSeconds,null);assert.equal(d.counts.hangups,0);
+  assert.equal(d.socket.closed,true);
+});
+test("expired initial ownership cannot finalize or trigger callback hangup",async()=>{
+  await clean();const id=next();await seeded(id);
+  const d=deps(id);const r=await d.run();monitoring(r);
+  d.socket.opened();
+  await db.salesVoiceCall.update({where:{providerCallId:id},data:{
+    recoveryLeaseUntil:new Date("2000-01-01T00:00:00Z"),
+  }});
+  d.socket.usage(8);
+  assert.equal(await r.completion,"OWNERSHIP_LOST");
+  const saved=await state(id);
+  assert.equal(saved?.lastUsageSeconds,null);assert.equal(saved?.finalizedAt,null);
+  assert.equal(d.counts.hangups,0);
+});
+test("exhausted persisted observer budget holds accepted call without attach or hangup",async()=>{
+  await clean();const id=next();await seeded(id);
+  await db.salesVoiceCall.update({where:{providerCallId:id},data:{recoveryLeaseEpoch:3}});
+  const d=deps(id);
+  assert.equal((await d.run()).state,"RECOVERY_OWNERSHIP_UNAVAILABLE");
+  assert.deepEqual(d.counts,{accepts:1,hangups:0,attaches:0});
+  assert.equal((await state(id))?.status,"ACCEPTED");
+  assert.equal((await state(id))?.finalizedAt,null);
 });
