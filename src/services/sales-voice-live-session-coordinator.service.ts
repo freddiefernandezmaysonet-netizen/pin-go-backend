@@ -1,4 +1,6 @@
 import type { PrismaClient } from "@prisma/client";
+import { SalesVoiceRecoveryLease } from "./sales-voice-recovery-lease.service.js";
+import { SalesVoiceRecoveryOwnershipLost } from "./sales-voice-recovery-observation.service.js";
 import {
   SalesVoiceLiveAdmission, attemptOneLiveAccept,
   type AdmissionLimits, type ProviderHTTP,
@@ -45,6 +47,7 @@ const permitted = (env: Env): boolean =>
   && env.SALES_VOICE_SESSION_COORDINATOR_RELEASE_CERTIFIED === "true";
 
 export type CoordinatorCompletion =
+  | "OWNERSHIP_LOST"
   | "CONFIRMED_CLOSED"
   | "HANGUP_SENT_AWAITING_CLOSE"
   | "HANGUP_UNKNOWN_AWAITING_RECONCILIATION"
@@ -55,7 +58,7 @@ type ObservableResult = {
   disconnect: () => void;
 };
 export type CoordinatorResult =
-  | { state: "ALREADY_CLAIMED" | "ACCEPT_UNKNOWN"; completion?: never; disconnect?: never }
+  | { state: "ALREADY_CLAIMED" | "ACCEPT_UNKNOWN" | "RECOVERY_OWNERSHIP_UNAVAILABLE"; completion?: never; disconnect?: never }
   | ({ state: "MONITORING" } & ObservableResult)
   | ({ state: "SIDE_BAND_CONNECT_FAILED" } & ObservableResult);
 
@@ -98,6 +101,8 @@ export async function coordinateSimulatedLiveSipSession(input: {
   sessionId: string;
   apiKey: string;
   limits: AdmissionLimits;
+  observerOwner: string;
+  observerTtlSeconds: number;
   acceptTransport: ProviderHTTP;
   hangupTransport: HangupHTTP;
   sidebandConnect: SidebandSocketFactory;
@@ -108,6 +113,12 @@ export async function coordinateSimulatedLiveSipSession(input: {
       || typeof input.hangupTransport !== "function"
       || typeof input.sidebandConnect !== "function") {
     reject("TRUSTED_TRANSPORTS_AND_KEY_REQUIRED");
+  }
+
+  if (!/^voice_[A-Za-z0-9_-]{12,70}$/.test(input.observerOwner)
+      || !Number.isSafeInteger(input.observerTtlSeconds)
+      || input.observerTtlSeconds < 10 || input.observerTtlSeconds > 120) {
+    reject("VALID_OBSERVER_OWNERSHIP_REQUIRED");
   }
 
   // One owner of admission + /accept. A separately claimed slot cannot
@@ -123,6 +134,22 @@ export async function coordinateSimulatedLiveSipSession(input: {
   });
   if (state !== "ACCEPTED") return { state };
 
+  // Acquire the initial observer through the SAME persisted epoch/owner fence
+  // used after restart. No inventory delay between acceptance and attach.
+  // Failure preserves capacity and delegates duration enforcement to the guardian.
+  const lease = await input.db.$transaction(async tx => {
+    const [time] = await tx.$queryRaw<Array<{ now: Date }>>
+      `SELECT clock_timestamp() AS "now"`;
+    if (!(time?.now instanceof Date) || !Number.isFinite(time.now.getTime())) {
+      throw new Error("OBSERVER_DATABASE_CLOCK_REQUIRED");
+    }
+    return new SalesVoiceRecoveryLease(tx).claim({
+      sessionId: input.sessionId, owner: input.observerOwner,
+      ttlSeconds: input.observerTtlSeconds, now: time.now,
+    });
+  }).catch(() => null);
+  if (!lease) return { state: "RECOVERY_OWNERSHIP_UNAVAILABLE" };
+
   const watchdog = new SalesVoiceLiveWatchdog(input.db);
   // Provider acceptance precedes sideband attach per the Live SIP contract.
   let session: Awaited<ReturnType<typeof observeExistingLiveSession>>;
@@ -133,8 +160,12 @@ export async function coordinateSimulatedLiveSipSession(input: {
       apiKey: input.apiKey,
       enabled: true,
       connect: input.sidebandConnect,
+      recoveryLease: lease,
     });
-  } catch {
+  } catch (error) {
+    if (error instanceof SalesVoiceRecoveryOwnershipLost) {
+      return { state: "RECOVERY_OWNERSHIP_UNAVAILABLE" };
+    }
     // Provider may already be speaking to the caller. End it once; never
     // claim that a failed /attach proves the provider has disconnected.
     const completion = fenceHangup(
@@ -149,6 +180,7 @@ export async function coordinateSimulatedLiveSipSession(input: {
 
   const completion = session.completion.then(
     async (result: SidebandSessionResult): Promise<CoordinatorCompletion> => {
+      if (result.state === "OWNERSHIP_LOST") return "OWNERSHIP_LOST";
       if (result.state === "CONFIRMED_CLOSED") return "CONFIRMED_CLOSED";
       return fenceHangup(watchdog, input.sessionId, input.apiKey, input.hangupTransport);
     },
