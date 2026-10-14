@@ -77,12 +77,12 @@ export class SalesVoiceLiveAdmission {
           deny("CERTIFICATION_WINDOW_CLOSED");
         if(call.startedAt.getTime()<window.startsAtMs||call.startedAt.getTime()>clock)
           deny("CERTIFICATION_FRESH_INVITE_REQUIRED");
-        // A completed/ambiguous call still consumes the one attempt. The
+        // Any call that left RECEIVED conservatively consumes the attempt. The
         // existing global advisory lock makes this quota durable across restart.
         const used=await tx.salesVoiceCall.count({where:{
           provider:"OPENAI_LIVE_SIP",direction:"INBOUND",
           startedAt:{gte:new Date(window.startsAtMs),lte:new Date(window.endsAtMs)},
-          status:{in:[...HELD,"COMPLETED"]},
+          status:{not:"RECEIVED"},
         }});
         if(used!==0)deny("CERTIFICATION_ATTEMPT_LIMIT");
       }
