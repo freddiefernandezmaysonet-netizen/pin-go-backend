@@ -149,7 +149,7 @@ test("private production rejects enlarged call, reservation, concurrency and est
     {...base,SALES_VOICE_MAX_CONCURRENT_CALLS:"2"},
     {...base,SALES_VOICE_RESERVED_SECONDS_PER_CALL:"361"},
     {...base,SALES_VOICE_MAX_CALL_SECONDS:"301"},
-    {...base,SALES_VOICE_MONTHLY_BUDGET_CENTS:"1001"},
+    {...base,SALES_VOICE_MONTHLY_BUDGET_CENTS:"2501"},
   ])assert.throws(()=>bootSalesVoiceRuntime(db,config,d.deps),/PRIVATE_CERTIFICATION_LIMITS_REQUIRED/);
   assert.equal(d.counts().clients,0);
 });
@@ -189,4 +189,13 @@ test("five-minute private boot requires aligned reserve and retains all bounded 
   const runtime=bootSalesVoiceRuntime(db,base,d.deps)!;
   assert.equal(runtime.ready(),false);assert.equal(d.timers.length,1);
   d.halt();runtime.stop();assert.equal(d.timers[0].cancelled,true);
+});
+
+test("development estimate ceiling admits aligned 25-dollar policy without changing duration or gates",()=>{
+  const d=dependencies(),config={...productionProfile(),SALES_VOICE_MONTHLY_BUDGET_CENTS:"2500",
+    SALES_VOICE_ESTIMATED_CENTS_PER_MINUTE:"100",SALES_VOICE_RESERVED_SECONDS_PER_CALL:"360",
+    SALES_VOICE_MAX_CALL_SECONDS:"300"};
+  const runtime=bootSalesVoiceRuntime(db,config,d.deps)!;
+  assert.equal(runtime.ready(),false);assert.equal(d.counts().clients,1);
+  d.halt();runtime.stop();
 });
