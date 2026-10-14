@@ -1,3 +1,4 @@
+import type { SimulatedSalesVoiceRuntime } from "./sales-voice-runtime-composition.service.js";
 import type { Express } from "express";
 import type { PrismaClient } from "@prisma/client";
 import { buildIsolatedSalesLiveSipRouter } from "./sales-voice-live-sip-auth.service.js";
@@ -17,13 +18,19 @@ export function mountSalesVoiceLiveSipWebhook(
   app: Pick<Express, "use">,
   db: Pick<PrismaClient, "salesVoiceCall">,
   env: Readonly<Record<string, string | undefined>>,
+  runtime?: Pick<SimulatedSalesVoiceRuntime,"receiveVerified">,
 ): void {
+  if(runtime && (env.NODE_ENV!=="test" || env.RAILWAY_ENVIRONMENT_NAME!=="sales-voice-certification"))
+    throw new Error("SALES_RUNTIME_MOUNT_PRODUCTION_VETO");
+  if(runtime && (env.SALES_VOICE_ADMISSION_SIMULATION_ENABLED==="true"
+    ||env.SALES_VOICE_ADMISSION_SIMULATION_RELEASE_CERTIFIED==="true"))
+    throw new Error("SALES_RUNTIME_LEGACY_ADMISSION_CONFLICT");
   app.use(buildIsolatedSalesLiveSipRouter({
     enabled: () =>
       env.SALES_VOICE_LIVE_WEBHOOK_ENABLED === "true"
       && env.SALES_VOICE_WEBHOOK_RELEASE_CERTIFIED === "true",
     webhookSecret: () => env.SALES_VOICE_OPENAI_WEBHOOK_SECRET,
-    persist: invite => ingestVerifiedLiveSipWithAdmission({
+    persist: invite => runtime ? runtime.receiveVerified(invite) : ingestVerifiedLiveSipWithAdmission({
       db, invite, env,
     }),
   }));
