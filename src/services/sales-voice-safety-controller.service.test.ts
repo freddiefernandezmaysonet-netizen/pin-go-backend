@@ -147,3 +147,11 @@ test("exhausted recovery budget does not disable independent duration guardian",
   assert.equal((await row()).status, "HANGUP_SENT"); assert.equal((await row()).finalizedAt, null);
   controller.stop();
 });
+
+test("caller mutation cannot enlarge validated duration after construction", async () => {
+  await seed(); const f = fixture(), controller = new SimulatedSalesVoiceSafetyController(f.options);
+  f.options.maxCallSeconds = 3600;
+  f.options.admissionLimits.reservedSecondsPerCall = 3600;
+  assert.equal((await controller.tick()).watchdog!.claimed, 1);
+  assert.equal((await row()).status, "HANGUP_SENT"); controller.stop();
+});
