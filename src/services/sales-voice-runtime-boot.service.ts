@@ -1,6 +1,8 @@
+import {isSalesVoiceSimulationEnvironment,privateSalesVoiceCertificationRequested,
+  privateSalesVoiceCertificationWindow} from "./sales-voice-certification-profile.service.js";
 import {randomUUID} from "node:crypto";
 import type {PrismaClient} from "@prisma/client";
-import type {ProviderHTTP} from "./sales-voice-live-admission.service.js";
+import type {AdmissionLimits,ProviderHTTP} from "./sales-voice-live-admission.service.js";
 import type {HangupHTTP} from "./sales-voice-live-watchdog.service.js";
 import type {SidebandSocketFactory} from "./sales-voice-sideband-supervisor.service.js";
 import {createOpenAISidebandWsFactory} from "./sales-voice-sideband-ws-transport.service.js";
@@ -49,30 +51,35 @@ function providerTransports():ReturnType<NonNullable<SalesVoiceBootDependencies[
   return{accept,hangup,connect:createOpenAISidebandWsFactory()};
 }
 
-/** Called by the existing mount. Production stays metadata-only even if boot
- * flags are accidentally true. No DB, key or provider client is touched off.
- * No live release, new Railway service or environment mutation occurs here.
+/** Existing mount boot. Ordinary production remains metadata-only. A separate
+ * private commercial opt-in requires a bounded, exact persisted admission window.
+ * No shared environment mutation, Railway resource creation or phone routing.
  */
 export function bootSalesVoiceRuntime(db:DB,env:Env,
   dependencies:SalesVoiceBootDependencies={}):SimulatedSalesVoiceRuntime|undefined {
   if(env.SALES_VOICE_RUNTIME_BOOT_ENABLED!=="true"
-    ||env.SALES_VOICE_RUNTIME_BOOT_RELEASE_CERTIFIED!=="true"
-    ||env.NODE_ENV!=="test"||env.RAILWAY_ENVIRONMENT_NAME!=="sales-voice-certification")return;
+    ||env.SALES_VOICE_RUNTIME_BOOT_RELEASE_CERTIFIED!=="true")return;
+  if(!isSalesVoiceSimulationEnvironment(env)&&!privateSalesVoiceCertificationRequested(env))return;
+  const certificationWindow=privateSalesVoiceCertificationWindow(env);
   if(gates.some(name=>env[name]!=="true"))throw new Error("SALES_BOOT_RELEASE_GATES_REQUIRED");
   if(env.SALES_VOICE_ADMISSION_SIMULATION_ENABLED==="true"
     ||env.SALES_VOICE_ADMISSION_SIMULATION_RELEASE_CERTIFIED==="true")
     throw new Error("SALES_RUNTIME_LEGACY_ADMISSION_CONFLICT");
-  const limits={
+  const limits:AdmissionLimits={
     enabled:true,
     maxConcurrentCalls:integer(env,"SALES_VOICE_MAX_CONCURRENT_CALLS",1,2),
     monthlyBudgetCents:integer(env,"SALES_VOICE_MONTHLY_BUDGET_CENTS",1,100000),
     estimatedCentsPerMinute:integer(env,"SALES_VOICE_ESTIMATED_CENTS_PER_MINUTE",1,1000),
     reservedSecondsPerCall:integer(env,"SALES_VOICE_RESERVED_SECONDS_PER_CALL",60,3600),
+    certificationWindow,
   };
   const ttlSeconds=integer(env,"SALES_VOICE_RECOVERY_LEASE_TTL_SECONDS",30,120);
   const maxCallSeconds=integer(env,"SALES_VOICE_MAX_CALL_SECONDS",60,3600);
   const maxSweepIntervalSeconds=integer(env,"SALES_VOICE_MAX_SWEEP_INTERVAL_SECONDS",2,60);
   const pollMs=integer(env,"SALES_VOICE_SAFETY_POLL_MS",1000,30000);
+  if(certificationWindow&&(limits.maxConcurrentCalls!==1||limits.reservedSecondsPerCall>120
+    ||limits.monthlyBudgetCents>1000||maxCallSeconds>90))
+    throw new Error("PRIVATE_CERTIFICATION_LIMITS_REQUIRED");
   if(limits.reservedSecondsPerCall<maxCallSeconds+maxSweepIntervalSeconds+5*limits.maxConcurrentCalls
     ||Math.ceil(limits.reservedSecondsPerCall/60)*limits.estimatedCentsPerMinute>limits.monthlyBudgetCents
     ||pollMs>maxSweepIntervalSeconds*500||maxSweepIntervalSeconds>Math.floor(ttlSeconds/3))
