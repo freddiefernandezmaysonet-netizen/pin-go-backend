@@ -122,6 +122,7 @@ jobs:
           run_suite pingo_sales_admission_test SALES_VOICE_ADMISSION_TEST_DATABASE_URL src/services/sales-voice-live-admission.service.test.ts
           run_suite pingo_sales_admission_test SALES_VOICE_ADMISSION_TEST_DATABASE_URL src/services/sales-voice-live-ingress-admission.service.test.ts
           run_suite pingo_sales_admission_test SALES_VOICE_ADMISSION_TEST_DATABASE_URL src/services/sales-voice-live-session-coordinator.service.test.ts
+          run_suite pingo_sales_admission_test SALES_VOICE_ADMISSION_TEST_DATABASE_URL src/services/sales-voice-runtime-composition.service.test.ts
           run_suite pingo_sales_watchdog_test SALES_WATCHDOG_TEST_DATABASE_URL src/services/sales-voice-recovery-lease.service.test.ts
           run_suite pingo_sales_watchdog_test SALES_WATCHDOG_TEST_DATABASE_URL src/services/sales-voice-recovery-classifier.service.test.ts
           run_suite pingo_sales_watchdog_test SALES_WATCHDOG_TEST_DATABASE_URL src/services/sales-voice-live-watchdog.service.test.ts
