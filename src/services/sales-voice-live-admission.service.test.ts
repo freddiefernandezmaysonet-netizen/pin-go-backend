@@ -146,9 +146,14 @@ test("network adapter uses documented URL, POST, valid bearer auth and no retry"
     assert.equal(opening.role,"developer");
     assert.equal(opening.content.length,1);
     assert.equal(opening.content[0].type,"input_text");
-    assert.match(opening.content[0].text,/Saluda ahora en español, sin esperar/);
+    assert.match(opening.content[0].text,/Saluda ahora en español e ingles, sin esperar/);
     assert.match(opening.content[0].text,/soy el asistente de inteligencia artificial de Pin&Go/);
+    assert.match(opening.content[0].text,/Hello, I am Pin&Go.s AI assistant/);
+    assert.match(opening.content[0].text,/¿Prefieres español o inglés\?/);
+    assert.match(opening.content[0].text,/Would you prefer Spanish or English\?/);
     assert.match(opening.content[0].text,/pausa y escucha/);
+    assert.ok(!request.session.instructions.includes("Habla en español hasta"));
+    assert.match(request.session.instructions,/idioma elegido o en el que use el interlocutor/);
     assert.match(request.session.instructions,/continua la misma conversacion en el idioma elegido/);
     return {status:200};
   };
