@@ -28,9 +28,10 @@ export function mountSalesVoiceLiveSipWebhook(
   if(runtime && (env.SALES_VOICE_ADMISSION_SIMULATION_ENABLED==="true"
     ||env.SALES_VOICE_ADMISSION_SIMULATION_RELEASE_CERTIFIED==="true"))
     throw new Error("SALES_RUNTIME_LEGACY_ADMISSION_CONFLICT");
-  const execution=runtime??bootSalesVoiceRuntime(
+  const booted=runtime?undefined:bootSalesVoiceRuntime(
     db as Pick<PrismaClient,"salesVoiceCall"|"$transaction"|"$queryRaw">,env,bootDependencies,
   );
+  const execution=runtime??booted;
   try { app.use(buildIsolatedSalesLiveSipRouter({
     enabled: () =>
       env.SALES_VOICE_LIVE_WEBHOOK_ENABLED === "true"
@@ -40,7 +41,7 @@ export function mountSalesVoiceLiveSipWebhook(
       db, invite, env,
     }),
   })); } catch(error) {
-    if(execution!==runtime && execution && "stop" in execution) execution.stop();
+    booted?.stop();
     throw error;
   }
 }
