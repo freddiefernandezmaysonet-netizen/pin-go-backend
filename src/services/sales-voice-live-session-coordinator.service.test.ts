@@ -67,6 +67,7 @@ function deps(id:string, opts: {
   hangupThrows?:boolean;
   attachThrows?:boolean;
   useLimits?:AdmissionLimits;
+  useDb?:PrismaClient;
 }={}){
   const socket=new Socket();
   let accepts=0,hangups=0,attaches=0;
@@ -100,7 +101,7 @@ function deps(id:string, opts: {
     socket,
     get counts(){return {accepts,hangups,attaches};},
     run:()=>coordinateSimulatedLiveSipSession({
-      db,env:opts.env??environment,sessionId:id,apiKey:key,
+      db:opts.useDb??db,env:opts.env??environment,sessionId:id,apiKey:key,
       limits:opts.useLimits??limits,acceptTransport,
       observerOwner:"voice_initial_observer_fixture",observerTtlSeconds:120,
       hangupTransport,sidebandConnect:connect,
@@ -254,4 +255,108 @@ test("exhausted persisted observer budget holds accepted call without attach or 
   assert.deepEqual(d.counts,{accepts:1,hangups:0,attaches:0});
   assert.equal((await state(id))?.status,"ACCEPTED");
   assert.equal((await state(id))?.finalizedAt,null);
+});
+
+test("explicit heartbeat extends persisted ownership without another epoch or attach",async()=>{
+  await clean();const id=next();await seeded(id);
+  const d=deps(id);const r=await d.run();monitoring(r);
+  d.socket.opened();
+  await db.salesVoiceCall.update({where:{providerCallId:id},data:{
+    recoveryLeaseUntil:new Date(Date.now()+30000),
+  }});
+  const before=(await state(id))!.recoveryLeaseUntil!;
+  assert.equal(await r.renewOwnership(),true);
+  const saved=await state(id);
+  assert.ok(saved!.recoveryLeaseUntil!.getTime()>before.getTime());
+  assert.equal(saved?.recoveryLeaseEpoch,1);
+  assert.equal(saved?.recoveryLeaseOwner,"voice_initial_observer_fixture");
+  assert.deepEqual(d.counts,{accepts:1,hangups:0,attaches:1});
+  d.socket.closeConfirmed(id,5);
+  assert.equal(await r.completion,"CONFIRMED_CLOSED");
+  assert.equal(await r.renewOwnership(),false);
+});
+test("concurrent explicit heartbeats share one pending renewal",async()=>{
+  await clean();const id=next();await seeded(id);
+  const d=deps(id);const r=await d.run();monitoring(r);
+  const a=r.renewOwnership(),b=r.renewOwnership();
+  assert.equal(a,b);assert.equal(await a,true);
+  assert.equal((await state(id))?.recoveryLeaseEpoch,1);
+  r.disconnect();assert.equal(await r.completion,"OBSERVER_STOPPED");
+  assert.equal(d.counts.hangups,0);
+});
+test("local shutdown is idempotent and preserves capacity without provider hangup",async()=>{
+  await clean();const id=next();await seeded(id);
+  const d=deps(id);const r=await d.run();monitoring(r);
+  r.disconnect();r.disconnect();
+  assert.equal(await r.completion,"OBSERVER_STOPPED");
+  assert.equal(await r.renewOwnership(),false);
+  assert.equal(d.socket.closed,true);
+  const saved=await state(id);
+  assert.equal(saved?.status,"ACCEPTED");assert.equal(saved?.finalizedAt,null);
+  assert.equal(saved?.recoveryLeaseEpoch,1);assert.equal(d.counts.hangups,0);
+});
+test("heartbeat cannot renew a replacement owner's lease and closes only local socket",async()=>{
+  await clean();const id=next();await seeded(id);
+  const d=deps(id);const r=await d.run();monitoring(r);
+  await db.salesVoiceCall.update({where:{providerCallId:id},data:{
+    recoveryLeaseOwner:"voice_replacement_fixture",recoveryLeaseEpoch:{increment:1},
+  }});
+  assert.equal(await r.renewOwnership(),false);
+  assert.equal(await r.completion,"OWNERSHIP_LOST");
+  assert.equal((await state(id))?.recoveryLeaseOwner,"voice_replacement_fixture");
+  assert.equal((await state(id))?.status,"ACCEPTED");
+  assert.equal(d.socket.closed,true);assert.equal(d.counts.hangups,0);
+});
+test("expired heartbeat cannot reacquire ownership or release the call",async()=>{
+  await clean();const id=next();await seeded(id);
+  const d=deps(id);const r=await d.run();monitoring(r);
+  await db.salesVoiceCall.update({where:{providerCallId:id},data:{
+    recoveryLeaseUntil:new Date("2000-01-01T00:00:00Z"),
+  }});
+  assert.equal(await r.renewOwnership(),false);
+  assert.equal(await r.completion,"OWNERSHIP_LOST");
+  assert.equal((await state(id))?.recoveryLeaseEpoch,1);
+  assert.equal((await state(id))?.finalizedAt,null);assert.equal(d.counts.hangups,0);
+});
+test("disabled release gate stops heartbeat and callback provider effects",async()=>{
+  await clean();const id=next();await seeded(id);
+  const env={...environment};const d=deps(id,{env});
+  const r=await d.run();monitoring(r);
+  env.SALES_VOICE_SESSION_COORDINATOR_RELEASE_CERTIFIED="false";
+  assert.equal(await r.renewOwnership(),false);
+  assert.equal(await r.completion,"OBSERVER_STOPPED");
+  assert.equal(d.counts.hangups,0);assert.equal((await state(id))?.status,"ACCEPTED");
+});
+test("database renewal failure stops local observer without releasing capacity",async()=>{
+  await clean();const id=next();await seeded(id);
+  let fault=false;
+  const faulty=new Proxy(db,{get(target,prop){
+    if(prop==="$transaction"&&fault)return()=>Promise.reject(Error("fixture DB outage"));
+    const value=Reflect.get(target,prop,target);
+    return typeof value==="function"?value.bind(target):value;
+  }});
+  const d=deps(id,{useDb:faulty});const r=await d.run();monitoring(r);
+  fault=true;assert.equal(await r.renewOwnership(),false);
+  assert.equal(await r.completion,"OWNERSHIP_LOST");
+  assert.equal(d.socket.closed,true);assert.equal(d.counts.hangups,0);
+  assert.equal((await state(id))?.status,"ACCEPTED");
+});
+test("provider socket loss after takeover cannot claim or send a callback hangup",async()=>{
+  await clean();const id=next();await seeded(id);
+  const d=deps(id);const r=await d.run();monitoring(r);
+  await db.salesVoiceCall.update({where:{providerCallId:id},data:{
+    recoveryLeaseOwner:"voice_replacement_fixture",recoveryLeaseEpoch:{increment:1},
+  }});
+  d.socket.lost();
+  assert.equal(await r.completion,"OWNERSHIP_LOST");
+  assert.equal((await state(id))?.hangupClaimedAt,null);
+  assert.equal((await state(id))?.status,"ACCEPTED");assert.equal(d.counts.hangups,0);
+});
+test("shutdown during pending heartbeat never revives the stopped observer",async()=>{
+  await clean();const id=next();await seeded(id);
+  const d=deps(id);const r=await d.run();monitoring(r);
+  const pending=r.renewOwnership();r.disconnect();
+  assert.equal(await pending,false);assert.equal(await r.completion,"OBSERVER_STOPPED");
+  assert.equal(await r.renewOwnership(),false);
+  assert.equal(d.counts.hangups,0);assert.equal((await state(id))?.finalizedAt,null);
 });

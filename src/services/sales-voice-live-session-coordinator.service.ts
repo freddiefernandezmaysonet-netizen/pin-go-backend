@@ -1,5 +1,5 @@
-import type { PrismaClient } from "@prisma/client";
-import { SalesVoiceRecoveryLease } from "./sales-voice-recovery-lease.service.js";
+import type { PrismaClient, Prisma } from "@prisma/client";
+import { SalesVoiceRecoveryLease, type RecoveryLease } from "./sales-voice-recovery-lease.service.js";
 import { SalesVoiceRecoveryOwnershipLost } from "./sales-voice-recovery-observation.service.js";
 import {
   SalesVoiceLiveAdmission, attemptOneLiveAccept,
@@ -47,6 +47,7 @@ const permitted = (env: Env): boolean =>
   && env.SALES_VOICE_SESSION_COORDINATOR_RELEASE_CERTIFIED === "true";
 
 export type CoordinatorCompletion =
+  | "OBSERVER_STOPPED"
   | "OWNERSHIP_LOST"
   | "CONFIRMED_CLOSED"
   | "HANGUP_SENT_AWAITING_CLOSE"
@@ -56,28 +57,74 @@ export type CoordinatorCompletion =
 type ObservableResult = {
   completion: Promise<CoordinatorCompletion>;
   disconnect: () => void;
+  renewOwnership: () => Promise<boolean>;
 };
 export type CoordinatorResult =
   | { state: "ALREADY_CLAIMED" | "ACCEPT_UNKNOWN" | "RECOVERY_OWNERSHIP_UNAVAILABLE"; completion?: never; disconnect?: never }
   | ({ state: "MONITORING" } & ObservableResult)
   | ({ state: "SIDE_BAND_CONNECT_FAILED" } & ObservableResult);
 
+/**
+ * Lock before reading DB time: takeover, renewal and callback hangup claims
+ * share the same owner/epoch boundary. No provider request runs in this lock.
+ */
+async function withObserverOwnership<T>(
+  db: Db, lease: RecoveryLease,
+  action: (tx: Prisma.TransactionClient, now: Date) => Promise<T>,
+): Promise<T> {
+  return db.$transaction(async tx => {
+    const locked = await tx.$queryRaw<Array<{ id: string }>>
+      `SELECT "id" FROM "SalesVoiceCall"
+       WHERE "providerCallId" = ${lease.sessionId} FOR UPDATE`;
+    const [time] = await tx.$queryRaw<Array<{ now: Date }>>
+      `SELECT clock_timestamp() AS "now"`;
+    const row = await tx.salesVoiceCall.findUnique({where:{providerCallId:lease.sessionId}});
+    if (!(time?.now instanceof Date) || !Number.isFinite(time.now.getTime())) {
+      throw new Error("OBSERVER_DATABASE_CLOCK_REQUIRED");
+    }
+    if (locked.length !== 1 || !row || row.finalizedAt
+      || row.provider !== "OPENAI_LIVE_SIP" || row.direction !== "INBOUND"
+      || row.recoveryLeaseOwner !== lease.owner || row.recoveryLeaseEpoch !== lease.epoch
+      || !row.recoveryLeaseUntil || row.recoveryLeaseUntil.getTime() <= time.now.getTime()) {
+      throw new SalesVoiceRecoveryOwnershipLost();
+    }
+    const result = await action(tx, time.now);
+    const [end] = await tx.$queryRaw<Array<{ now: Date }>>
+      `SELECT clock_timestamp() AS "now"`;
+    if (!(end?.now instanceof Date) || !Number.isFinite(end.now.getTime())
+      || row.recoveryLeaseUntil.getTime() <= end.now.getTime()) {
+      throw new SalesVoiceRecoveryOwnershipLost();
+    }
+    return result;
+  }, {maxWait:2000,timeout:5000});
+}
+
 /** One durable hangup claim, one provider request, never a blind retry. */
 async function fenceHangup(
-  watchdog: SalesVoiceLiveWatchdog,
-  sessionId: string,
+  db: Db,
+  lease: RecoveryLease,
   apiKey: string,
   hangupTransport: HangupHTTP,
+  active: () => boolean,
 ): Promise<CoordinatorCompletion> {
+  const sessionId = lease.sessionId;
+  const watchdog = new SalesVoiceLiveWatchdog(db);
+  if (!active()) return "OBSERVER_STOPPED";
   let decision: "CLAIMED" | "ALREADY_HELD";
   try {
-    decision = await watchdog.claimHangup(sessionId);
-  } catch {
+    decision = await withObserverOwnership(db, lease, async (tx, now) => {
+      if (!active()) throw new Error("OBSERVER_STOPPED");
+      return new SalesVoiceLiveWatchdog(tx).claimHangup(sessionId, now);
+    });
+  } catch (error) {
+    if (!active()) return "OBSERVER_STOPPED";
+    if (error instanceof SalesVoiceRecoveryOwnershipLost) return "OWNERSHIP_LOST";
     return "HANGUP_UNKNOWN_AWAITING_RECONCILIATION";
   }
   if (decision !== "CLAIMED") return "PREVIOUS_HANGUP_OR_CLOSE";
   let acknowledged = false;
   try {
+    if (!active()) return "OBSERVER_STOPPED";
     await postOneLiveHangup({
       sessionId, apiKey, transport: hangupTransport, enabled: true,
     });
@@ -121,6 +168,8 @@ export async function coordinateSimulatedLiveSipSession(input: {
     reject("VALID_OBSERVER_OWNERSHIP_REQUIRED");
   }
 
+  input = { ...input, limits: { ...input.limits } }; // snapshot validated configuration
+
   // One owner of admission + /accept. A separately claimed slot cannot
   // be accepted again here: ALREADY_CLAIMED is a hard no-op.
   const admission = new SalesVoiceLiveAdmission(input.db);
@@ -137,7 +186,7 @@ export async function coordinateSimulatedLiveSipSession(input: {
   // Acquire the initial observer through the SAME persisted epoch/owner fence
   // used after restart. No inventory delay between acceptance and attach.
   // Failure preserves capacity and delegates duration enforcement to the guardian.
-  const lease = await input.db.$transaction(async tx => {
+  let lease = await input.db.$transaction(async tx => {
     const [time] = await tx.$queryRaw<Array<{ now: Date }>>
       `SELECT clock_timestamp() AS "now"`;
     if (!(time?.now instanceof Date) || !Number.isFinite(time.now.getTime())) {
@@ -150,7 +199,9 @@ export async function coordinateSimulatedLiveSipSession(input: {
   }).catch(() => null);
   if (!lease) return { state: "RECOVERY_OWNERSHIP_UNAVAILABLE" };
 
-  const watchdog = new SalesVoiceLiveWatchdog(input.db);
+  let stopReason: "OBSERVER_STOPPED" | "OWNERSHIP_LOST" | null = null;
+  let settled = false;
+  const active = () => stopReason === null && permitted(input.env);
   // Provider acceptance precedes sideband attach per the Live SIP contract.
   let session: Awaited<ReturnType<typeof observeExistingLiveSession>>;
   try {
@@ -159,7 +210,10 @@ export async function coordinateSimulatedLiveSipSession(input: {
       sessionId: input.sessionId,
       apiKey: input.apiKey,
       enabled: true,
-      connect: input.sidebandConnect,
+      connect: (url, options) => {
+        if (!active()) throw new Error("OBSERVER_STOPPED");
+        return input.sidebandConnect(url, options);
+      },
       recoveryLease: lease,
     });
   } catch (error) {
@@ -169,27 +223,51 @@ export async function coordinateSimulatedLiveSipSession(input: {
     // Provider may already be speaking to the caller. End it once; never
     // claim that a failed /attach proves the provider has disconnected.
     const completion = fenceHangup(
-      watchdog, input.sessionId, input.apiKey, input.hangupTransport,
+      input.db, lease, input.apiKey, input.hangupTransport, active,
     );
     return {
       state: "SIDE_BAND_CONNECT_FAILED",
       completion,
-      disconnect: () => undefined,
+      disconnect: () => { stopReason = "OBSERVER_STOPPED"; },
+      renewOwnership: async () => false,
     };
   }
 
-  const completion = session.completion.then(
-    async (result: SidebandSessionResult): Promise<CoordinatorCompletion> => {
-      if (result.state === "OWNERSHIP_LOST") return "OWNERSHIP_LOST";
-      if (result.state === "CONFIRMED_CLOSED") return "CONFIRMED_CLOSED";
-      return fenceHangup(watchdog, input.sessionId, input.apiKey, input.hangupTransport);
-    },
-    async (): Promise<CoordinatorCompletion> =>
-      fenceHangup(watchdog, input.sessionId, input.apiKey, input.hangupTransport),
-  );
-  return {
-    state: "MONITORING",
-    completion,
-    disconnect: session.disconnect,
+  const disconnect = () => {
+    stopReason ??= "OBSERVER_STOPPED";
+    session.disconnect(); // local close, no provider hangup or capacity release
   };
+  let renewal: Promise<boolean> | undefined;
+  const renewOwnership = (): Promise<boolean> => {
+    if (renewal) return renewal; // concurrent heartbeats share one renewal
+    renewal = (async () => {
+      if (settled || !active()) { disconnect(); return false; }
+      try {
+        const renewed = await withObserverOwnership(input.db, lease!, async (tx, now) => {
+          if (!active()) throw new Error("OBSERVER_STOPPED");
+          return new SalesVoiceRecoveryLease(tx).renew(lease!, now, input.observerTtlSeconds);
+        });
+        if (!renewed) throw new SalesVoiceRecoveryOwnershipLost();
+        if (settled || !active()) { disconnect(); return false; }
+        lease = renewed; // persisted epoch remains unchanged; observer checks DB expiry
+        return true;
+      } catch {
+        stopReason ??= permitted(input.env) ? "OWNERSHIP_LOST" : "OBSERVER_STOPPED";
+        session.disconnect();
+        return false;
+      }
+    })().finally(() => { renewal = undefined; });
+    return renewal;
+  };
+  const finish = async (result?: SidebandSessionResult): Promise<CoordinatorCompletion> => {
+    settled = true;
+    if (result?.state === "CONFIRMED_CLOSED") return "CONFIRMED_CLOSED";
+    if (result?.state === "OWNERSHIP_LOST") return "OWNERSHIP_LOST";
+    if (stopReason) return stopReason;
+    if (!permitted(input.env)) return "OBSERVER_STOPPED";
+    return fenceHangup(input.db, lease!, input.apiKey, input.hangupTransport, active);
+  };
+  const completion = session.completion.then(finish, () => finish());
+  if (!active()) disconnect();
+  return { state: "MONITORING", completion, disconnect, renewOwnership };
 }
