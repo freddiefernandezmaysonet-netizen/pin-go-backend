@@ -325,3 +325,50 @@ test("supervision snapshots certification window and rejects replacement or bypa
   assert.equal(c.permitsAdmission({...original,certificationWindow:undefined}),false);
   assert.equal(c.permitsAdmission(original),true);h.stop();
 });
+
+test("PG window expiry drains while the scheduled loop and authenticated observer stay active",async()=>{
+  await seed(1);const now=Date.now(),window={startsAtMs:now-20000,endsAtMs:now-1000};
+  let calls=0;const f=fixture(owner,async()=>{calls++;return{status:200};});
+  const limits={...f.options.admissionLimits,maxConcurrentCalls:1,certificationWindow:window};
+  const c=new SimulatedSalesVoiceSafetyController({...f.options,maxOwned:1,admissionLimits:limits});
+  const timer=timerFixture(),h=c.startLoop({pollMs:1000,schedule:timer.schedule,monotonicNow:()=>0});
+  await timer.tasks[0].task();
+  assert.equal(calls,1);assert.equal(h.snapshot().phase,"RUNNING");
+  assert.equal(c.permitsAdmission(limits),false);assert.equal(f.sockets[0].closed,false);
+  assert.equal((await row()).status,"HANGUP_SENT");assert.equal((await row()).finalizedAt,null);
+  await timer.tasks[2].task();assert.equal(calls,1);assert.equal(h.snapshot().phase,"RUNNING");
+  const completion=c.completion(id)!;
+  f.sockets[0].emit("open");
+  f.sockets[0].emit("message",JSON.stringify({type:"session.closed",event_id:"window_expired_close",
+    session:{id},usage:{seconds:2},reason:"close_requested"}));
+  assert.equal((await completion).state,"CONFIRMED_CLOSED");
+  assert.equal((await row()).status,"COMPLETED");assert.equal((await row()).finalUsageSeconds,2);
+  h.stop();
+});
+
+test("reservation margin closes admission even before a delayed wake and never reopens",async()=>{
+  await seed(1);const f=fixture(),now=Date.now();
+  const window={startsAtMs:now-10000,endsAtMs:now+300000};
+  const limits={...f.options.admissionLimits,maxConcurrentCalls:1,certificationWindow:window};
+  const c=new SimulatedSalesVoiceSafetyController({...f.options,maxOwned:1,admissionLimits:limits});
+  const timer=timerFixture();let time=0;
+  const h=c.startLoop({pollMs:1000,schedule:timer.schedule,monotonicNow:()=>time});
+  await timer.tasks[0].task();assert.equal(c.permitsAdmission(limits),true);
+  time=220000;assert.equal(c.permitsAdmission(limits),false);
+  // A reversed or corrected clock cannot reopen the already closed window.
+  time=0;assert.equal(c.permitsAdmission(limits),false);
+  assert.equal(h.snapshot().phase,"RUNNING");assert.equal(f.sockets[0].closed,false);
+  assert.equal((await row()).hangupClaimedAt,null);h.stop();
+});
+
+test("invalid certification window and oversized pilot limits reject before constructing observers",()=>{
+  const f=fixture(),now=Date.now(),valid={startsAtMs:now,endsAtMs:now+300000};
+  for(const limits of [
+    {...f.options.admissionLimits,certificationWindow:valid},
+    {...f.options.admissionLimits,maxConcurrentCalls:1,reservedSecondsPerCall:121,certificationWindow:valid},
+    {...f.options.admissionLimits,maxConcurrentCalls:1,certificationWindow:{...valid,endsAtMs:now+900001}},
+    {...f.options.admissionLimits,maxConcurrentCalls:1,certificationWindow:{...valid,startsAtMs:NaN}},
+  ])assert.throws(()=>new SimulatedSalesVoiceSafetyController({...f.options,maxOwned:1,admissionLimits:limits}),
+    /INVALID_CERTIFICATION_WINDOW/);
+  assert.equal(f.sockets.length,0);
+});

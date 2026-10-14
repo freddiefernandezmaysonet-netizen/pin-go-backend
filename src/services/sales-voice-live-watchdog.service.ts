@@ -172,8 +172,14 @@ export type WatchdogPolicy = {
   enabled: boolean;
   maxCallSeconds: number;
   batchSize: number;
+  certificationWindow?: Readonly<{ startsAtMs: number; endsAtMs: number }>;
 };
 function policy(p: WatchdogPolicy): void {
+  const window = p.certificationWindow;
+  if (window && (!Number.isSafeInteger(window.startsAtMs) || window.startsAtMs <= 0
+    || !Number.isSafeInteger(window.endsAtMs) || window.endsAtMs <= window.startsAtMs
+    || window.endsAtMs - window.startsAtMs > 15 * 60 * 1000))
+    fail("INVALID_CERTIFICATION_WINDOW");
   if (!p.enabled) fail("WATCHDOG_DISABLED");
   if (!Number.isSafeInteger(p.maxCallSeconds) || p.maxCallSeconds < 60
     || p.maxCallSeconds > 3600 || !Number.isSafeInteger(p.batchSize)
@@ -236,12 +242,20 @@ export class SalesVoiceLiveWatchdog {
     if (!input.apiKey?.startsWith("sk-")) fail("API_KEY_REQUIRED");
     const now = timestamp(input.now ?? new Date());
     const cutoff = new Date(now.getTime() - input.policy.maxCallSeconds * 1000);
+    const window = input.policy.certificationWindow;
+    // Expiry drains only inbound calls received in this explicit window.
+    // It does not disable observers or imply that the remote call has closed.
+    const expiredWindow = window && now.getTime() >= window.endsAtMs ? [{
+      direction: "INBOUND",
+      startedAt: { gte: new Date(window.startsAtMs), lt: new Date(window.endsAtMs) },
+    }] : [];
     const due = await this.db.salesVoiceCall.findMany({
       where: { provider: "OPENAI_LIVE_SIP", finalizedAt: null,
         status: { in: [...RUNNING] }, hangupClaimedAt: null,
         OR: [
           { answeredAt: { lte: cutoff } },
           { answeredAt: null, startedAt: { lte: cutoff } },
+          ...expiredWindow,
         ],
       },
       orderBy: { startedAt: "asc" },

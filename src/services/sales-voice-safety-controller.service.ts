@@ -32,6 +32,8 @@ export class SimulatedSalesVoiceSafetyController {
   private cancelLoop?: () => void;
   private loopGate?: () => boolean;
   private admissionReady?: () => boolean;
+  private databaseNowMs?: number;
+  private windowAdmissionClosed = false;
   private active(): boolean { return !this.stopped && permitted(this.input.env) && (!this.loopGate || this.loopGate()); }
 
   constructor(private readonly input: {
@@ -42,6 +44,12 @@ export class SimulatedSalesVoiceSafetyController {
   }) {
     if (!permitted(input.env)) throw new Error("SAFETY_CONTROLLER_PRODUCTION_VETO");
     const limits = input.admissionLimits;
+    const window = limits.certificationWindow;
+    if (window && (!Number.isSafeInteger(window.startsAtMs) || window.startsAtMs <= 0
+      || !Number.isSafeInteger(window.endsAtMs) || window.endsAtMs <= window.startsAtMs
+      || window.endsAtMs - window.startsAtMs > 15 * 60 * 1000
+      || limits.maxConcurrentCalls !== 1 || limits.reservedSecondsPerCall > 120))
+      throw new Error("INVALID_CERTIFICATION_WINDOW");
     const reserveCents = Math.ceil(limits.reservedSecondsPerCall / 60) * limits.estimatedCentsPerMinute;
     // The guardian sends sequentially: reserve the existing five-second
     // request timeout for every candidate in the bounded batch.
@@ -123,6 +131,18 @@ export class SimulatedSalesVoiceSafetyController {
     };
     this.admissionReady = () => {
       const time = clock();
+      const window = this.input.admissionLimits.certificationWindow;
+      if (window) {
+        if (this.windowAdmissionClosed || this.databaseNowMs === undefined
+          || time < lastStart) return false;
+        // PG clock anchored to the cycle start deliberately overestimates time.
+        // A delayed callback cannot extend admission; once drained, never reopen.
+        const projectedNow = this.databaseNowMs + Math.ceil(time - lastStart);
+        if (projectedNow + this.input.admissionLimits.reservedSecondsPerCall * 1000 > window.endsAtMs) {
+          this.windowAdmissionClosed = true; return false;
+        }
+        if (projectedNow < window.startsAtMs) return false;
+      }
       return phase === "RUNNING" && cycles > 0 && !inFlight && !this.busy
         && enabled()
         && this.input.env.SALES_VOICE_RECOVERY_CYCLE_SIMULATION_ENABLED === "true"
@@ -205,8 +225,13 @@ export class SimulatedSalesVoiceSafetyController {
       if (!this.active()) {
         this.stop(); return { state: "DISABLED", recovery };
       }
+      this.databaseNowMs = time.now.getTime();
+      const window = this.input.admissionLimits.certificationWindow;
+      if (window && this.databaseNowMs + this.input.admissionLimits.reservedSecondsPerCall * 1000 > window.endsAtMs)
+        this.windowAdmissionClosed = true;
       const watchdog = await this.watchdog.runOnce({
-        policy: { enabled: true, maxCallSeconds: this.input.maxCallSeconds, batchSize: this.input.maxOwned },
+        policy: { enabled: true, maxCallSeconds: this.input.maxCallSeconds, batchSize: this.input.maxOwned,
+          certificationWindow: this.input.admissionLimits.certificationWindow },
         apiKey: this.apiKey, now: time.now,
         transport: async (url, request) => {
           if (!this.active()) throw new Error("SAFETY_TRANSPORT_DISABLED");
