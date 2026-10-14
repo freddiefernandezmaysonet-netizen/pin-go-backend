@@ -106,7 +106,7 @@ jobs:
           VALUES ('sales-voice-baseline-sentinel','Sales voice baseline - do not change',
             TIMESTAMP '2026-01-01 00:00:00', TIMESTAMP '2026-01-01 00:00:00');
           SQL
-      - name: Run all PostgreSQL-backed sales suites, including supervision-dependent admission and scheduled safety
+      - name: Run all PostgreSQL-backed sales suites, including durable certification attempt limits and scheduled safety
         run: |
           set -euo pipefail
           run_suite() {
