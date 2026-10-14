@@ -1,3 +1,4 @@
+import { performance } from "node:perf_hooks";
 import type { PrismaClient, Prisma } from "@prisma/client";
 import { SalesVoiceRecoveryLease, type RecoveryLease } from "./sales-voice-recovery-lease.service.js";
 import { SalesVoiceRecoveryOwnershipLost } from "./sales-voice-recovery-observation.service.js";
@@ -55,6 +56,7 @@ export type CoordinatorCompletion =
   | "PREVIOUS_HANGUP_OR_CLOSE";
 
 type ObservableResult = {
+  readonly observerTtlSeconds: number;
   completion: Promise<CoordinatorCompletion>;
   disconnect: () => void;
   renewOwnership: () => Promise<boolean>;
@@ -227,6 +229,7 @@ export async function coordinateSimulatedLiveSipSession(input: {
     );
     return {
       state: "SIDE_BAND_CONNECT_FAILED",
+      observerTtlSeconds: input.observerTtlSeconds,
       completion,
       disconnect: () => { stopReason = "OBSERVER_STOPPED"; },
       renewOwnership: async () => false,
@@ -269,5 +272,96 @@ export async function coordinateSimulatedLiveSipSession(input: {
   };
   const completion = session.completion.then(finish, () => finish());
   if (!active()) disconnect();
-  return { state: "MONITORING", completion, disconnect, renewOwnership };
+  return { state: "MONITORING", observerTtlSeconds: input.observerTtlSeconds, completion, disconnect, renewOwnership };
+}
+
+const scheduledObservers = new WeakSet<object>();
+
+type HeartbeatPhase = "RUNNING" | "STOPPED" | "SETTLED" | "OWNERSHIP_LOST" | "FAILED" | "DELAYED";
+export type ObserverHeartbeatTimer = (
+  task: () => Promise<void>, delayMs: number,
+) => () => void;
+
+/**
+ * Explicit certification-only timer. Importing this module starts nothing.
+ * No accept, reconnect, provider hangup or capacity release is performed here.
+ * The future API runtime must explicitly start/stop it for each initial observer.
+ */
+export function startSimulatedSalesVoiceObserverHeartbeat(input: {
+  session: Extract<CoordinatorResult, {state:"MONITORING"}>;
+  env: Env;
+  pollMs: number;
+  schedule?: ObserverHeartbeatTimer;
+  monotonicNow?: () => number;
+}): {stop: () => void; snapshot: () => {phase: HeartbeatPhase; renewals: number}} {
+  const enabled = () => permitted(input.env)
+    && input.env.SALES_VOICE_OBSERVER_HEARTBEAT_SIMULATION_ENABLED === "true"
+    && input.env.SALES_VOICE_OBSERVER_HEARTBEAT_RELEASE_CERTIFIED === "true";
+  if (!enabled()) reject("OBSERVER_HEARTBEAT_PRODUCTION_AND_RELEASE_VETO");
+  const {session, pollMs} = input;
+  const ttlMs = session.observerTtlSeconds * 1000;
+  // Allow the existing two-second lock wait + five-second transaction budget.
+  if (session.state !== "MONITORING" || !Number.isSafeInteger(ttlMs)
+    || ttlMs < 30000 || ttlMs > 120000
+    || !Number.isSafeInteger(pollMs) || pollMs < 1000 || pollMs > Math.floor(ttlMs / 3)) {
+    reject("INVALID_OBSERVER_HEARTBEAT_BOUNDS");
+  }
+  if (scheduledObservers.has(session)) reject("OBSERVER_HEARTBEAT_ALREADY_STARTED");
+  scheduledObservers.add(session); // at most one scheduler per observer result, even after stop
+  const now = input.monotonicNow ?? (() => performance.now());
+  const schedule: ObserverHeartbeatTimer = input.schedule ?? ((task, delayMs) => {
+    const timer = setTimeout(() => { void task(); }, delayMs);
+    timer.unref(); // the existing API owns process lifetime
+    return () => clearTimeout(timer);
+  });
+  let phase: HeartbeatPhase = "RUNNING";
+  let renewals = 0;
+  let generation = 0;
+  let cancel: (() => void) | undefined;
+  let busy = false;
+  let lastStart: number;
+  const readTime = () => {
+    const value = now();
+    if (!Number.isFinite(value) || value < 0) throw new Error("INVALID_MONOTONIC_CLOCK");
+    return value;
+  };
+  const halt = (reason: HeartbeatPhase, disconnect = true) => {
+    if (phase !== "RUNNING") return;
+    phase = reason; generation++;
+    const pending = cancel; cancel = undefined;
+    try { pending?.(); } catch { /* stopped generation also invalidates callback */ }
+    if (disconnect) { try { session.disconnect(); } catch { /* no provider action */ } }
+  };
+  const arm = (delayMs: number) => {
+    if (phase !== "RUNNING") return;
+    const token = ++generation;
+    cancel = schedule(async () => {
+      if (phase !== "RUNNING" || token !== generation || busy) return;
+      cancel = undefined;
+      busy = true;
+      try {
+        if (!enabled()) { halt("STOPPED"); return; }
+        const start = readTime();
+        if (start < lastStart) { halt("FAILED"); return; }
+        if (start - lastStart >= ttlMs - 7000) { halt("DELAYED"); return; }
+        lastStart = start;
+        const renewed = await session.renewOwnership();
+        if (phase !== "RUNNING" || token !== generation) return;
+        if (!enabled()) { halt("STOPPED"); return; }
+        if (!renewed) { halt("OWNERSHIP_LOST"); return; }
+        const end = readTime();
+        if (end < start) { halt("FAILED"); return; }
+        if (end - start >= ttlMs - 7000) { halt("DELAYED"); return; }
+        renewals++;
+        arm(pollMs); // self-schedule only after completion; never overlap or replay
+      } catch { halt("FAILED"); }
+      finally { busy = false; }
+    }, delayMs);
+    if (typeof cancel !== "function") throw new Error("INVALID_HEARTBEAT_TIMER");
+  };
+  // Completion means the observer settled, not that the provider call is closed.
+  void session.completion.then(() => halt("SETTLED", false), () => halt("FAILED"));
+  try { lastStart = readTime(); arm(0); } // immediate DB renewal precedes periodic work
+  catch { halt("FAILED"); }
+  return { stop: () => halt("STOPPED"), snapshot: () => ({phase, renewals}) };
 }

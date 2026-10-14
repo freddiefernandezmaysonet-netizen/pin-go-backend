@@ -4,7 +4,8 @@ import { after, test } from "node:test";
 import { PrismaClient } from "@prisma/client";
 import {
   coordinateSimulatedLiveSipSession, SalesVoiceCoordinationError,
-  type CoordinatorResult,
+  type CoordinatorResult, startSimulatedSalesVoiceObserverHeartbeat,
+  type ObserverHeartbeatTimer,
 } from "./sales-voice-live-session-coordinator.service.js";
 import type { AdmissionLimits, ProviderHTTP } from "./sales-voice-live-admission.service.js";
 import type { HangupHTTP } from "./sales-voice-live-watchdog.service.js";
@@ -359,4 +360,194 @@ test("shutdown during pending heartbeat never revives the stopped observer",asyn
   assert.equal(await pending,false);assert.equal(await r.completion,"OBSERVER_STOPPED");
   assert.equal(await r.renewOwnership(),false);
   assert.equal(d.counts.hangups,0);assert.equal((await state(id))?.finalizedAt,null);
+});
+
+const heartbeatEnv=()=>({...environment,
+  SALES_VOICE_OBSERVER_HEARTBEAT_SIMULATION_ENABLED:"true",
+  SALES_VOICE_OBSERVER_HEARTBEAT_RELEASE_CERTIFIED:"true",
+});
+function manualTimer() {
+  const tasks:Array<{task:()=>Promise<void>;delay:number;cancelled:boolean}>=[];
+  const schedule:ObserverHeartbeatTimer=(task,delay)=>{
+    const entry={task,delay,cancelled:false};tasks.push(entry);
+    return()=>{entry.cancelled=true;};
+  };
+  return {tasks,schedule};
+}
+test("heartbeat timer is production-vetoed and requires both release flags",async()=>{
+  await clean();const id=next();await seeded(id);
+  const d=deps(id);const r=await d.run();monitoring(r);
+  const timer=manualTimer();
+  for(const env of [
+    {...heartbeatEnv(),NODE_ENV:"production"},
+    {...heartbeatEnv(),SALES_VOICE_OBSERVER_HEARTBEAT_SIMULATION_ENABLED:"false"},
+    {...heartbeatEnv(),SALES_VOICE_OBSERVER_HEARTBEAT_RELEASE_CERTIFIED:"false"},
+  ])assert.throws(()=>startSimulatedSalesVoiceObserverHeartbeat({
+    session:r,env,pollMs:1000,schedule:timer.schedule,
+  }),/OBSERVER_HEARTBEAT_PRODUCTION_AND_RELEASE_VETO/);
+  assert.equal(timer.tasks.length,0);r.disconnect();await r.completion;
+});
+test("timer renews persisted ownership immediately and then self-schedules",async()=>{
+  await clean();const id=next();await seeded(id);
+  const d=deps(id);const r=await d.run();monitoring(r);
+  const timer=manualTimer();let time=0;
+  const h=startSimulatedSalesVoiceObserverHeartbeat({
+    session:r,env:heartbeatEnv(),pollMs:1000,schedule:timer.schedule,monotonicNow:()=>time,
+  });
+  assert.equal(timer.tasks[0].delay,0);
+  await timer.tasks[0].task();
+  assert.equal(h.snapshot().renewals,1);assert.equal(timer.tasks[1].delay,1000);
+  time=1000;await timer.tasks[1].task();
+  assert.equal(h.snapshot().renewals,2);
+  assert.equal((await state(id))?.recoveryLeaseEpoch,1);
+  assert.deepEqual(d.counts,{accepts:1,hangups:0,attaches:1});
+  h.stop();assert.equal(await r.completion,"OBSERVER_STOPPED");
+  assert.equal(timer.tasks[2].cancelled,true);
+});
+test("stopped timer rejects queued callbacks and preserves unresolved call capacity",async()=>{
+  await clean();const id=next();await seeded(id);
+  const d=deps(id);const r=await d.run();monitoring(r);
+  const timer=manualTimer();
+  const h=startSimulatedSalesVoiceObserverHeartbeat({
+    session:r,env:heartbeatEnv(),pollMs:1000,schedule:timer.schedule,monotonicNow:()=>0,
+  });
+  h.stop();h.stop();await timer.tasks[0].task();
+  assert.equal(await r.completion,"OBSERVER_STOPPED");
+  assert.deepEqual(h.snapshot(),{phase:"STOPPED",renewals:0});
+  assert.equal((await state(id))?.finalizedAt,null);assert.equal(d.counts.hangups,0);
+});
+test("takeover stops scheduled renewal without another attach or provider hangup",async()=>{
+  await clean();const id=next();await seeded(id);
+  const d=deps(id);const r=await d.run();monitoring(r);
+  const timer=manualTimer();
+  const h=startSimulatedSalesVoiceObserverHeartbeat({
+    session:r,env:heartbeatEnv(),pollMs:1000,schedule:timer.schedule,monotonicNow:()=>0,
+  });
+  await db.salesVoiceCall.update({where:{providerCallId:id},data:{
+    recoveryLeaseOwner:"voice_replacement_fixture",recoveryLeaseEpoch:{increment:1},
+  }});
+  await timer.tasks[0].task();await r.completion;
+  assert.notEqual(h.snapshot().phase,"RUNNING");
+  assert.equal(timer.tasks.length,1);assert.equal(d.counts.hangups,0);
+  assert.equal((await state(id))?.recoveryLeaseOwner,"voice_replacement_fixture");
+});
+test("overdue timer stops local observer before trying to renew an uncertain lease",async()=>{
+  await clean();const id=next();await seeded(id);
+  const d=deps(id);const r=await d.run();monitoring(r);
+  const timer=manualTimer();let time=0;
+  const h=startSimulatedSalesVoiceObserverHeartbeat({
+    session:r,env:heartbeatEnv(),pollMs:1000,schedule:timer.schedule,monotonicNow:()=>time,
+  });
+  time=113000;await timer.tasks[0].task();
+  assert.deepEqual(h.snapshot(),{phase:"DELAYED",renewals:0});
+  assert.equal(await r.completion,"OBSERVER_STOPPED");assert.equal(d.counts.hangups,0);
+  assert.equal((await state(id))?.status,"ACCEPTED");
+});
+test("disabled heartbeat gate cancels periodic work without provider side effects",async()=>{
+  await clean();const id=next();await seeded(id);
+  const d=deps(id);const r=await d.run();monitoring(r);
+  const timer=manualTimer();const env=heartbeatEnv();
+  const h=startSimulatedSalesVoiceObserverHeartbeat({
+    session:r,env,pollMs:1000,schedule:timer.schedule,monotonicNow:()=>0,
+  });
+  env.SALES_VOICE_OBSERVER_HEARTBEAT_RELEASE_CERTIFIED="false";
+  await timer.tasks[0].task();
+  assert.equal(h.snapshot().phase,"STOPPED");assert.equal(await r.completion,"OBSERVER_STOPPED");
+  assert.equal(timer.tasks.length,1);assert.equal(d.counts.hangups,0);
+});
+test("shutdown during scheduled renewal does not rearm or overlap callbacks",async()=>{
+  await clean();const id=next();await seeded(id);
+  const d=deps(id);const r=await d.run();monitoring(r);
+  const timer=manualTimer();
+  const h=startSimulatedSalesVoiceObserverHeartbeat({
+    session:r,env:heartbeatEnv(),pollMs:1000,schedule:timer.schedule,monotonicNow:()=>0,
+  });
+  const pending=timer.tasks[0].task();
+  const duplicate=timer.tasks[0].task();
+  h.stop();await Promise.all([pending,duplicate]);
+  assert.equal(timer.tasks.length,1);assert.equal(h.snapshot().phase,"STOPPED");
+  assert.equal(await r.completion,"OBSERVER_STOPPED");assert.equal(d.counts.hangups,0);
+});
+test("authenticated session closure cancels the heartbeat without fabricating another close",async()=>{
+  await clean();const id=next();await seeded(id);
+  const d=deps(id);const r=await d.run();monitoring(r);
+  const timer=manualTimer();
+  const h=startSimulatedSalesVoiceObserverHeartbeat({
+    session:r,env:heartbeatEnv(),pollMs:1000,schedule:timer.schedule,monotonicNow:()=>0,
+  });
+  d.socket.opened();d.socket.closeConfirmed(id,7);
+  assert.equal(await r.completion,"CONFIRMED_CLOSED");
+  await Promise.resolve();assert.equal(h.snapshot().phase,"SETTLED");
+  assert.equal(timer.tasks[0].cancelled,true);
+  await timer.tasks[0].task();assert.equal(h.snapshot().renewals,0);
+  assert.equal((await state(id))?.finalUsageSeconds,7);assert.equal(d.counts.hangups,0);
+});
+test("default native timer executes a real PostgreSQL renewal and can be stopped",async()=>{
+  await clean();const id=next();await seeded(id);
+  const d=deps(id);const r=await d.run();monitoring(r);
+  let resolve!:(value:boolean)=>void;
+  const renewed=new Promise<boolean>(done=>{resolve=done;});
+  const original=r.renewOwnership;
+  r.renewOwnership=async()=>{const result=await original();resolve(result);return result;};
+  // The real API keeps the process alive. This isolated test owns a bounded
+  // reference so the deliberately unref'ed heartbeat can actually execute.
+  let deadline!:ReturnType<typeof setTimeout>;
+  const timeout=new Promise<never>((_resolve,reject)=>{
+    deadline=setTimeout(()=>reject(Error("native heartbeat did not renew")),5000);
+  });
+  const h=startSimulatedSalesVoiceObserverHeartbeat({
+    session:r,env:heartbeatEnv(),pollMs:1000,
+  });
+  try {
+    assert.equal(await Promise.race([renewed,timeout]),true);
+    assert.equal((await state(id))?.recoveryLeaseEpoch,1);
+    assert.equal((await state(id))?.status,"ACCEPTED");
+  } finally {clearTimeout(deadline);h.stop();}
+  assert.equal(await r.completion,"OBSERVER_STOPPED");assert.equal(d.counts.hangups,0);
+});
+
+test("unsafe heartbeat interval is rejected before creating a timer",async()=>{
+  await clean();const id=next();await seeded(id);
+  const d=deps(id);const r=await d.run();monitoring(r);
+  const timer=manualTimer();
+  for(const pollMs of [0,999,40001,NaN])assert.throws(
+    ()=>startSimulatedSalesVoiceObserverHeartbeat({
+      session:r,env:heartbeatEnv(),pollMs,schedule:timer.schedule,
+    }),/INVALID_OBSERVER_HEARTBEAT_BOUNDS/);
+  assert.equal(timer.tasks.length,0);r.disconnect();await r.completion;
+});
+test("monotonic clock reversal stops the local observer without renewal",async()=>{
+  await clean();const id=next();await seeded(id);
+  const d=deps(id);const r=await d.run();monitoring(r);
+  const timer=manualTimer();let time=100;
+  const h=startSimulatedSalesVoiceObserverHeartbeat({
+    session:r,env:heartbeatEnv(),pollMs:1000,schedule:timer.schedule,monotonicNow:()=>time,
+  });
+  time=99;await timer.tasks[0].task();
+  assert.deepEqual(h.snapshot(),{phase:"FAILED",renewals:0});
+  assert.equal(await r.completion,"OBSERVER_STOPPED");assert.equal(d.counts.hangups,0);
+});
+test("timer initialization failure closes only the local observer",async()=>{
+  await clean();const id=next();await seeded(id);
+  const d=deps(id);const r=await d.run();monitoring(r);
+  const h=startSimulatedSalesVoiceObserverHeartbeat({
+    session:r,env:heartbeatEnv(),pollMs:1000,
+    schedule:()=>{throw Error("fixture timer unavailable");},monotonicNow:()=>0,
+  });
+  assert.equal(h.snapshot().phase,"FAILED");
+  assert.equal(await r.completion,"OBSERVER_STOPPED");
+  assert.equal((await state(id))?.finalizedAt,null);assert.equal(d.counts.hangups,0);
+});
+
+test("same observer cannot start a duplicate heartbeat or restart a stopped one",async()=>{
+  await clean();const id=next();await seeded(id);
+  const d=deps(id);const r=await d.run();monitoring(r);
+  const timer=manualTimer();
+  const input={session:r,env:heartbeatEnv(),pollMs:1000,schedule:timer.schedule,monotonicNow:()=>0};
+  const h=startSimulatedSalesVoiceObserverHeartbeat(input);
+  assert.throws(()=>startSimulatedSalesVoiceObserverHeartbeat(input),/OBSERVER_HEARTBEAT_ALREADY_STARTED/);
+  assert.equal(timer.tasks.length,1);
+  h.stop();await r.completion;
+  assert.throws(()=>startSimulatedSalesVoiceObserverHeartbeat(input),/OBSERVER_HEARTBEAT_ALREADY_STARTED/);
+  assert.equal(d.counts.hangups,0);
 });
