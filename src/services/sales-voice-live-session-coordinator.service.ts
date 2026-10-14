@@ -275,6 +275,8 @@ export async function coordinateSimulatedLiveSipSession(input: {
   return { state: "MONITORING", observerTtlSeconds: input.observerTtlSeconds, completion, disconnect, renewOwnership };
 }
 
+const scheduledObservers = new WeakSet<object>();
+
 type HeartbeatPhase = "RUNNING" | "STOPPED" | "SETTLED" | "OWNERSHIP_LOST" | "FAILED" | "DELAYED";
 export type ObserverHeartbeatTimer = (
   task: () => Promise<void>, delayMs: number,
@@ -304,6 +306,8 @@ export function startSimulatedSalesVoiceObserverHeartbeat(input: {
     || !Number.isSafeInteger(pollMs) || pollMs < 1000 || pollMs > Math.floor(ttlMs / 3)) {
     reject("INVALID_OBSERVER_HEARTBEAT_BOUNDS");
   }
+  if (scheduledObservers.has(session)) reject("OBSERVER_HEARTBEAT_ALREADY_STARTED");
+  scheduledObservers.add(session); // at most one scheduler per observer result, even after stop
   const now = input.monotonicNow ?? (() => performance.now());
   const schedule: ObserverHeartbeatTimer = input.schedule ?? ((task, delayMs) => {
     const timer = setTimeout(() => { void task(); }, delayMs);
