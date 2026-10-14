@@ -106,7 +106,7 @@ jobs:
           VALUES ('sales-voice-baseline-sentinel','Sales voice baseline - do not change',
             TIMESTAMP '2026-01-01 00:00:00', TIMESTAMP '2026-01-01 00:00:00');
           SQL
-      - name: Run all PostgreSQL-backed sales suites, including observer ownership, scheduled renewal and local shutdown
+      - name: Run all PostgreSQL-backed sales suites, including scheduled ownership renewal and global safety supervision
         run: |
           set -euo pipefail
           run_suite() {
