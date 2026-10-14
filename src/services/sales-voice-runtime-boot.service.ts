@@ -1,3 +1,4 @@
+import {withSalesVoicePricing} from "./sales-voice-pricing.service.js";
 import {isSalesVoiceSimulationEnvironment,privateSalesVoiceCertificationRequested,
   privateSalesVoiceCertificationWindow,SALES_VOICE_CERTIFICATION_MAX_CALL_SECONDS,
   SALES_VOICE_CERTIFICATION_MAX_RESERVED_SECONDS} from "./sales-voice-certification-profile.service.js";
@@ -34,7 +35,7 @@ function integer(env:Env,name:string,min:number,max:number):number {
 }
 
 /** Fixed-origin, redirect-free defaults. Creation opens no socket or SIP call. */
-function providerTransports():ReturnType<NonNullable<SalesVoiceBootDependencies["createTransports"]>> {
+function providerTransports(env:Env):ReturnType<NonNullable<SalesVoiceBootDependencies["createTransports"]>> {
   const valid=(url:string,action:"accept"|"hangup")=>{
     if(!new RegExp("^https://api\\.openai\\.com/v1/live/sessions/live_[A-Za-z0-9_-]{1,123}/"+action+"$").test(url))
       throw new Error("INVALID_SALES_BOOT_PROVIDER_ENDPOINT");
@@ -49,7 +50,11 @@ function providerTransports():ReturnType<NonNullable<SalesVoiceBootDependencies[
     const response=await fetch(url,{...request,redirect:"error"});
     return{status:response.status};
   };
-  return{accept,hangup,connect:createOpenAISidebandWsFactory()};
+  const pricedAccept=withSalesVoicePricing(accept,env,async id=>{
+    const {default:stripe}=await import("../billing/stripe.js");
+    return stripe.prices.retrieve(id,{timeout:1000,maxNetworkRetries:0});
+  });
+  return{accept:pricedAccept,hangup,connect:createOpenAISidebandWsFactory()};
 }
 
 /** Existing mount boot. Ordinary production remains metadata-only. A separate
@@ -92,7 +97,7 @@ export function bootSalesVoiceRuntime(db:DB,env:Env,
   const encoded=secret.slice(6),decoded=Buffer.from(encoded,"base64");
   if(decoded.length<16||decoded.toString("base64")!==encoded)
     throw new Error("COMMERCIAL_RUNTIME_SIGNATURE_REQUIRED");
-  const transports=(dependencies.createTransports??providerTransports)();
+  const transports=dependencies.createTransports?dependencies.createTransports():providerTransports(env);
   const runtime=new SimulatedSalesVoiceRuntime({
     db,env,owner:"voice_"+randomUUID(),limits,ttlSeconds,maxCallSeconds,maxSweepIntervalSeconds,pollMs,
     ...transports,schedule:dependencies.schedule,monotonicNow:dependencies.monotonicNow,
