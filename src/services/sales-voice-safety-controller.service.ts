@@ -51,8 +51,10 @@ export class SimulatedSalesVoiceSafetyController {
     const key = input.env.SALES_VOICE_OPENAI_API_KEY;
     if (!key?.startsWith("sk-")) throw new Error("COMMERCIAL_SAFETY_KEY_REQUIRED");
     this.apiKey = key;
-    this.recovery = new SimulatedSalesVoiceRecoverySupervisor(input);
-    this.watchdog = new SalesVoiceLiveWatchdog(input.db);
+    // Snapshot validated scalars/transport; only the referenced release gates remain dynamic.
+    this.input = { ...input, admissionLimits: { ...input.admissionLimits } };
+    this.recovery = new SimulatedSalesVoiceRecoverySupervisor(this.input);
+    this.watchdog = new SalesVoiceLiveWatchdog(this.input.db);
   }
 
   completion(sessionId: string) { return this.recovery.completion(sessionId); }
