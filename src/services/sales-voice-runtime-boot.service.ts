@@ -1,6 +1,6 @@
 import {withSalesVoiceConversationDiagnostics} from "./sales-voice-conversation-diagnostics.service.js";
 import {withSalesVoicePricing} from "./sales-voice-pricing.service.js";
-import {isSalesVoiceSimulationEnvironment,privateSalesVoiceCertificationRequested,
+import {isSalesVoiceSimulationEnvironment,privateSalesVoiceCertificationRequested,salesVoiceDevelopmentRequested,
   privateSalesVoiceCertificationWindow,SALES_VOICE_CERTIFICATION_MAX_CALL_SECONDS,
   SALES_VOICE_CERTIFICATION_MAX_RESERVED_SECONDS,SALES_VOICE_CERTIFICATION_MAX_BUDGET_CENTS} from "./sales-voice-certification-profile.service.js";
 import {randomUUID} from "node:crypto";
@@ -67,6 +67,7 @@ export function bootSalesVoiceRuntime(db:DB,env:Env,
   if(env.SALES_VOICE_RUNTIME_BOOT_ENABLED!=="true"
     ||env.SALES_VOICE_RUNTIME_BOOT_RELEASE_CERTIFIED!=="true")return;
   if(!isSalesVoiceSimulationEnvironment(env)&&!privateSalesVoiceCertificationRequested(env))return;
+  const development=salesVoiceDevelopmentRequested(env);
   const certificationWindow=privateSalesVoiceCertificationWindow(env);
   if(gates.some(name=>env[name]!=="true"))throw new Error("SALES_BOOT_RELEASE_GATES_REQUIRED");
   if(env.SALES_VOICE_ADMISSION_SIMULATION_ENABLED==="true"
@@ -74,7 +75,8 @@ export function bootSalesVoiceRuntime(db:DB,env:Env,
     throw new Error("SALES_RUNTIME_LEGACY_ADMISSION_CONFLICT");
   const limits:AdmissionLimits={
     enabled:true,
-    maxConcurrentCalls:integer(env,"SALES_VOICE_MAX_CONCURRENT_CALLS",1,2),
+    developmentUnrestricted:development||undefined,
+    maxConcurrentCalls:development?10:integer(env,"SALES_VOICE_MAX_CONCURRENT_CALLS",1,2),
     monthlyBudgetCents:integer(env,"SALES_VOICE_MONTHLY_BUDGET_CENTS",1,100000),
     estimatedCentsPerMinute:integer(env,"SALES_VOICE_ESTIMATED_CENTS_PER_MINUTE",1,1000),
     reservedSecondsPerCall:integer(env,"SALES_VOICE_RESERVED_SECONDS_PER_CALL",60,3600),
@@ -87,8 +89,8 @@ export function bootSalesVoiceRuntime(db:DB,env:Env,
   if(certificationWindow&&(limits.maxConcurrentCalls!==1||limits.reservedSecondsPerCall>SALES_VOICE_CERTIFICATION_MAX_RESERVED_SECONDS
     ||limits.monthlyBudgetCents>SALES_VOICE_CERTIFICATION_MAX_BUDGET_CENTS||maxCallSeconds>SALES_VOICE_CERTIFICATION_MAX_CALL_SECONDS))
     throw new Error("PRIVATE_CERTIFICATION_LIMITS_REQUIRED");
-  if(limits.reservedSecondsPerCall<maxCallSeconds+maxSweepIntervalSeconds+5*limits.maxConcurrentCalls
-    ||Math.ceil(limits.reservedSecondsPerCall/60)*limits.estimatedCentsPerMinute>limits.monthlyBudgetCents
+  if((!development&&(limits.reservedSecondsPerCall<maxCallSeconds+maxSweepIntervalSeconds+5*limits.maxConcurrentCalls
+    ||Math.ceil(limits.reservedSecondsPerCall/60)*limits.estimatedCentsPerMinute>limits.monthlyBudgetCents))
     ||pollMs>maxSweepIntervalSeconds*500||maxSweepIntervalSeconds>Math.floor(ttlSeconds/3))
     throw new Error("SALES_BOOT_LIMITS_MISMATCH");
   if(!env.SALES_VOICE_OPENAI_API_KEY?.startsWith("sk-"))
