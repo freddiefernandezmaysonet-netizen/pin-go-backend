@@ -1,3 +1,4 @@
+import {salesVoiceAddonPrices} from "./sales-voice-addon-pricing.service.js";
 import {assertMonthlyPrice,haasMonthlyAmounts} from "./signup-pricing.service.js";
 import type {ProviderHTTP} from "./sales-voice-live-admission.service.js";
 type Env=Readonly<Record<string,string|undefined>>;
@@ -11,7 +12,7 @@ const offers:readonly Offer[]=[
     amount:terms[term],interval:"month" as const,term,
   }))),
 ];
-export type PricingSnapshot=Readonly<{checkedAt:number;expiresAt:number;lines:readonly string[]}>;
+export type PricingSnapshot=Readonly<{checkedAt:number;expiresAt:number;lines:readonly string[];addonLines?:readonly string[]}>;
 /** Fresh read-only checkout-compatible prices. No cross-call cache, raw metadata or IDs in output. */
 export async function readSalesVoicePricing(env:Env,read:PriceReader,options:{
   now?:()=>number;timeoutMs?:number;signal?:AbortSignal;
@@ -49,16 +50,17 @@ export async function readSalesVoicePricing(env:Env,read:PriceReader,options:{
   try{lines=await Promise.race([work,fallback]);}
   finally{if(timer)clearTimeout(timer);options.signal?.removeEventListener("abort",abort);}
   if(options.signal?.aborted)lines=unavailable;
-  return Object.freeze({checkedAt,expiresAt:checkedAt+300000,lines:Object.freeze([...lines])});
+  return Object.freeze({checkedAt,expiresAt:checkedAt+300000,lines:Object.freeze([...lines]),addonLines:salesVoiceAddonPrices(env)});
 }
 export function renderSalesVoicePricing(snapshot:PricingSnapshot):string{
   return [
     "Catalogo de precios verificado para esta llamada / Verified call pricing.",
     "Consultado / checked: "+new Date(snapshot.checkedAt).toISOString()+". Valido hasta / valid until: "+new Date(snapshot.expiresAt).toISOString()+".",
     ...snapshot.lines,
+    ...(snapshot.addonLines??[]),
     "Cotiza solamente ofertas VERIFIED y dentro de su vigencia; UNAVAILABLE no confirma ningun importe. Si falta o vence el dato, dilo inmediatamente y ofrece app.pin-ngo.com/signup; nunca prometas verificar despues.",
     "Responde en el idioma elegido. Explica frecuencia, precio por cerradura y plazo antes de recomendar. Para varias cerraduras de plataforma puedes calcular precio base por cantidad, siempre antes de impuestos. El anual se cobra por año, no mensualmente.",
-    "HaaS corresponde a una cerradura y mensualidad del paquete con hardware; no prometas stock, instalacion ni inclusiones adicionales. No cotices complementos Pin AI, verificacion de identidad, descuentos, impuestos exactos ni totales finales: no estan verificados en este catalogo.",
+    "HaaS corresponde a una cerradura y mensualidad del paquete con hardware; no prometas stock, instalacion ni inclusiones adicionales. Para complementos usa solo sus tarifas verificadas y condiciones separadas. No cotices descuentos, impuestos exactos ni totales finales.",
   ].join("\n");
 }
 /** Called only by the existing one-shot admitted accept, under its original total deadline. */
