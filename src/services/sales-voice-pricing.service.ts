@@ -1,4 +1,4 @@
-import {salesVoiceAnswerBackend,SALES_VOICE_MANAGED_ANSWER_POLICY} from "./sales-voice-answer-backend.service.js";
+import {salesVoiceAnswerBackend,SALES_VOICE_MANAGED_ANSWER_POLICY,SALES_VOICE_CONVERSATION_INSTRUCTIONS} from "./sales-voice-answer-backend.service.js";
 import {salesVoiceAddonPrices} from "./sales-voice-addon-pricing.service.js";
 import {assertMonthlyPrice,haasMonthlyAmounts} from "./signup-pricing.service.js";
 import type {ProviderHTTP} from "./sales-voice-live-admission.service.js";
@@ -86,7 +86,7 @@ export function withSalesVoicePricing(transport:ProviderHTTP,env:Env,read:PriceR
     if(request.signal.aborted)throw new Error("SALES_ACCEPT_ABORTED");
     const verifiedContext=payload.session.instructions+"\n"+renderSalesVoicePricing(snapshot);
     payload.session.delegation=salesVoiceAnswerBackend(verifiedContext);
-    payload.session.instructions=verifiedContext+"\n"+SALES_VOICE_MANAGED_ANSWER_POLICY;
+    payload.session.instructions=SALES_VOICE_CONVERSATION_INSTRUCTIONS+"\n"+SALES_VOICE_MANAGED_ANSWER_POLICY;
     return transport(url,{...request,body:JSON.stringify(payload)});
   };
 }
