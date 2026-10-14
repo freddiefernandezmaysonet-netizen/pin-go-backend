@@ -64,8 +64,8 @@ export class SimulatedSalesVoiceSafetyController {
       || !Number.isSafeInteger(limits.reservedSecondsPerCall) || limits.reservedSecondsPerCall < 60 || limits.reservedSecondsPerCall > 3600
       || !Number.isSafeInteger(input.maxCallSeconds) || input.maxCallSeconds < 60 || input.maxCallSeconds > 3600
       || !Number.isSafeInteger(input.maxSweepIntervalSeconds) || input.maxSweepIntervalSeconds < 1 || input.maxSweepIntervalSeconds > 60
-      || limits.reservedSecondsPerCall < input.maxCallSeconds + input.maxSweepIntervalSeconds + 5 * input.maxOwned
-      || !Number.isSafeInteger(reserveCents) || reserveCents > limits.monthlyBudgetCents
+      || (!limits.developmentUnrestricted&&(limits.reservedSecondsPerCall < input.maxCallSeconds + input.maxSweepIntervalSeconds + 5 * input.maxOwned
+      || !Number.isSafeInteger(reserveCents) || reserveCents > limits.monthlyBudgetCents))
       || input.maxOwned > limits.maxConcurrentCalls
       || typeof input.hangup !== "function") throw new Error("SAFETY_RESERVATION_LIMITS_MISMATCH");
     const key = input.env.SALES_VOICE_OPENAI_API_KEY;
@@ -87,7 +87,8 @@ export class SimulatedSalesVoiceSafetyController {
       if (!this.active() || !salesVoiceCertificationLimitsMatch(this.input.env,limits)
         || this.admissionReady?.() !== true) return false;
       const required = this.input.admissionLimits;
-      return limits.enabled === required.enabled
+      return limits.developmentUnrestricted===required.developmentUnrestricted
+        && limits.enabled === required.enabled
         && limits.maxConcurrentCalls === required.maxConcurrentCalls
         && limits.monthlyBudgetCents === required.monthlyBudgetCents
         && limits.estimatedCentsPerMinute === required.estimatedCentsPerMinute
@@ -148,7 +149,8 @@ export class SimulatedSalesVoiceSafetyController {
         }
         if (projectedNow < window.startsAtMs) return false;
       }
-      return phase === "RUNNING" && cycles > 0 && !inFlight && !this.busy
+      return phase === "RUNNING" && cycles > 0
+        && (this.input.admissionLimits.developmentUnrestricted||(!inFlight&&!this.busy))
         && enabled()
         && this.input.env.SALES_VOICE_RECOVERY_CYCLE_SIMULATION_ENABLED === "true"
         && this.input.env.SALES_VOICE_RECOVERY_CYCLE_RELEASE_CERTIFIED === "true"
@@ -234,7 +236,9 @@ export class SimulatedSalesVoiceSafetyController {
       const window = this.input.admissionLimits.certificationWindow;
       if (window && this.databaseNowMs + this.input.admissionLimits.reservedSecondsPerCall * 1000 > window.endsAtMs)
         this.windowAdmissionClosed = true;
-      const watchdog = await this.watchdog.runOnce({
+      const watchdog = this.input.admissionLimits.developmentUnrestricted
+        ? {inspected:0,claimed:0,sent:0,unknown:0}
+        : await this.watchdog.runOnce({
         policy: { enabled: true, maxCallSeconds: this.input.maxCallSeconds, batchSize: this.input.maxOwned,
           certificationWindow: this.input.admissionLimits.certificationWindow },
         apiKey: this.apiKey, now: time.now,

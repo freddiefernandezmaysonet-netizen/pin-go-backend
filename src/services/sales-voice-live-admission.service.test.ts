@@ -296,3 +296,18 @@ test("development budget expansion retains prior usage and reserves next call wi
   await incoming(93);
   await assert.rejects(service.claim(id(93),{...limits,monthlyBudgetCents:2500}),err("CONCURRENCY_LIMIT"));
 });
+
+test("continuous development permits redial despite consumed pilot history, held prior calls and exhausted estimate",async()=>{
+  await reset();
+  await incoming(200,{status:"COMPLETED",finalUsageSeconds:3600,startedAt:new Date()});
+  await incoming(201);await incoming(202);
+  const limits=policy({developmentUnrestricted:true,maxConcurrentCalls:1,monthlyBudgetCents:1,
+    estimatedCentsPerMinute:100,reservedSecondsPerCall:360});
+  assert.equal((await service.claim(id(201),limits)).result,"CLAIMED");
+  await service.recordProviderOutcome(id(201),false);
+  assert.equal((await service.claim(id(202),limits)).result,"CLAIMED");
+  assert.equal((await service.claim(id(202),limits)).result,"ALREADY_CLAIMED");
+  assert.equal((await db.salesVoiceCall.findUniqueOrThrow({where:{providerCallId:id(201)}})).status,"ACCEPT_UNKNOWN");
+  assert.equal((await db.salesVoiceCall.findUniqueOrThrow({where:{providerCallId:id(200)}})).finalUsageSeconds,3600);
+  await assert.rejects(service.claim(id(202),{...limits,certificationWindow:{startsAtMs:Date.now()-1000,endsAtMs:Date.now()+300000}}),err("INVALID_CERTIFICATION_WINDOW"));
+});

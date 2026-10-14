@@ -46,7 +46,7 @@ export class SimulatedSalesVoiceRuntime {
       ||input.env.SALES_VOICE_ADMISSION_SIMULATION_RELEASE_CERTIFIED==="true")
       throw new Error("SALES_RUNTIME_LEGACY_ADMISSION_CONFLICT");
     if(!Number.isSafeInteger(input.limits.maxConcurrentCalls)
-      ||input.limits.maxConcurrentCalls<1||input.limits.maxConcurrentCalls>2
+      ||input.limits.maxConcurrentCalls<1||input.limits.maxConcurrentCalls>(input.limits.developmentUnrestricted?10:2)
       ||typeof input.accept!=="function"||typeof input.hangup!=="function"
       ||typeof input.connect!=="function")throw new Error("INVALID_RUNTIME_DEPENDENCIES");
     const key=input.env.SALES_VOICE_OPENAI_API_KEY;
@@ -116,7 +116,7 @@ export class SimulatedSalesVoiceRuntime {
         ||existing.invite.toPhoneHint!==invite.toPhoneHint)throw new Error("SESSION_ID_COLLISION");
       return existing.work;
     }
-    if(this.pending.size>=this.input.limits.maxConcurrentCalls)
+    if(!this.input.limits.developmentUnrestricted&&this.pending.size>=this.input.limits.maxConcurrentCalls)
       throw new Error("SALES_RUNTIME_PENDING_LIMIT");
     const saved={...invite};
     const work=this.runVerified(saved).finally(()=>{this.pending.delete(saved.sessionId);});

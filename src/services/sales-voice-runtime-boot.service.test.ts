@@ -199,3 +199,15 @@ test("development estimate ceiling admits aligned 25-dollar policy without chang
   assert.equal(runtime.ready(),false);assert.equal(d.counts().clients,1);
   d.halt();runtime.stop();
 });
+
+test("continuous development ignores expired pilot windows and estimate cutoffs while retaining commercial gates",()=>{
+  const d=dependencies(),base={...productionProfile(),SALES_VOICE_DEVELOPMENT_ENABLED:"true",
+    SALES_VOICE_CERTIFICATION_STARTS_AT_MS:"expired",SALES_VOICE_CERTIFICATION_ENDS_AT_MS:"expired",
+    SALES_VOICE_MONTHLY_BUDGET_CENTS:"1",SALES_VOICE_RESERVED_SECONDS_PER_CALL:"60",
+    SALES_VOICE_MAX_CALL_SECONDS:"300"};
+  const runtime=bootSalesVoiceRuntime(db,base,d.deps)!;
+  assert.ok(runtime);assert.equal(d.counts().clients,1);d.halt();runtime.stop();
+  const denied=dependencies();
+  assert.equal(bootSalesVoiceRuntime(db,{...base,SALES_VOICE_PRIVATE_CERTIFICATION_ENABLED:"false"},denied.deps),undefined);
+  assert.equal(denied.counts().clients,0);
+});
