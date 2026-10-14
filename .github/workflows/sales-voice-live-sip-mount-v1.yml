@@ -92,7 +92,10 @@ jobs:
           const productKnowledge = [".github/workflows/sales-voice-live-sip-mount-v1.yml",".github/workflows/sales-voice-main-integration-certification.yml","src/services/sales-voice-live-admission.service.ts","src/services/sales-voice-product-knowledge.service.test.ts","src/services/sales-voice-product-knowledge.service.ts"];
           const currentPricing = [".github/workflows/sales-voice-live-sip-mount-v1.yml",".github/workflows/sales-voice-main-integration-certification.yml","src/services/sales-voice-live-admission.service.ts","src/services/sales-voice-pricing.service.test.ts","src/services/sales-voice-pricing.service.ts","src/services/sales-voice-product-knowledge.service.test.ts","src/services/sales-voice-product-knowledge.service.ts","src/services/sales-voice-runtime-boot.service.ts"];
           const addonPricing = [".github/workflows/sales-voice-live-sip-mount-v1.yml",".github/workflows/sales-voice-main-integration-certification.yml","src/services/sales-voice-addon-pricing.service.test.ts","src/services/sales-voice-addon-pricing.service.ts","src/services/sales-voice-pricing.service.ts"];
-          const selected = process.env.GITHUB_HEAD_REF === 'agent/sales-voice-addon-pricing-v1-20261014'
+          const ingressDiagnostics = [".github/workflows/sales-voice-live-sip-mount-v1.yml",".github/workflows/sales-voice-main-integration-certification.yml","src/services/sales-voice-ingress-diagnostics.service.test.ts","src/services/sales-voice-ingress-diagnostics.service.ts","src/services/sales-voice-live-sip-mount.service.ts"];
+          const selected = process.env.GITHUB_HEAD_REF === 'agent/sales-voice-ingress-diagnostics-v1-20261014'
+            ? ingressDiagnostics
+            : process.env.GITHUB_HEAD_REF === 'agent/sales-voice-addon-pricing-v1-20261014'
             ? addonPricing
             : process.env.GITHUB_HEAD_REF === 'agent/sales-voice-current-pricing-v1-20261014'
             ? currentPricing
