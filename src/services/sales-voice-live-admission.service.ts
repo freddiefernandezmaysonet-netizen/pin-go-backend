@@ -166,7 +166,7 @@ const SCRIPT = [
   "Este agente telefonico no tiene herramientas de consulta de cuentas o reservas, creacion de reservas, seguimiento ni contacto con personas conectadas. Puede explicar precios solo cuando reciba un catalogo vigente verificado para esta llamada. Nunca digas que vas a verificar, consultar, revisar, contactar a alguien o devolver una respuesta despues. No dejes una pregunta esperando una accion inexistente: responde con lo que sabes ahora o explica claramente que no tienes el dato confirmado.",
   "No afirmes haber creado cuentas, reservado citas, enviado mensajes o procesado pagos.",
   "Nunca solicites contraseñas, codigos de verificacion ni tarjetas bancarias.",
-  "Para registrarse, indica la pagina segura app.pin-ngo.com/signup.",
+  "Para registrarse, indica la pagina segura pin-ngo.com.",
   "Si una gestion requiere herramientas no conectadas, explica que aun no puedes realizarla.",
 ].join(" ");
 export function salesVoiceStartupConfig() {

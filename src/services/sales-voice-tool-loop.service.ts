@@ -35,7 +35,7 @@ export function withSalesVoiceToolLoop(connect:SidebandSocketFactory,execute:Com
           if(backendActive&&!errorNotified){
             errorNotified=true;backendActive=false;
             send({type:"session.instructions.append",delegation_id:null,content:
-              "La consulta comercial del backend no pudo completarse. Responde ahora brevemente en el idioma elegido que no pudiste confirmar esa informacion y ofrece app.pin-ngo.com/signup. No prometas volver a consultar, no inventes la respuesta ni dejes al interlocutor esperando.",
+              "La consulta comercial del backend no pudo completarse. Responde ahora brevemente en el idioma elegido que no pudiste confirmar esa informacion y ofrece pin-ngo.com. No prometas volver a consultar, no inventes la respuesta ni dejes al interlocutor esperando.",
             });
           }
           return;

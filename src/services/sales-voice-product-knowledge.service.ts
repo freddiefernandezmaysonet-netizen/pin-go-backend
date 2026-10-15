@@ -78,8 +78,8 @@ const reviewedFacts:Fact[]=[
   },
   {
     "id": "signup_and_plans",
-    "es": "El registro de Pin&Go se realiza en https://app.pin-ngo.com/signup. El checkout de registro contempla opciones de plataforma y paquetes con hardware, segun la seleccion y configuracion comercial.",
-    "en": "Pin&Go registration is at https://app.pin-ngo.com/signup. Signup checkout supports platform and hardware-package options according to the selected, configured offer.",
+    "es": "El registro de Pin&Go se realiza en https://pin-ngo.com. El checkout de registro contempla opciones de plataforma y paquetes con hardware, segun la seleccion y configuracion comercial.",
+    "en": "Pin&Go registration is at https://pin-ngo.com. Signup checkout supports platform and hardware-package options according to the selected, configured offer.",
     "limit": "Cotiza solo con el catalogo de precios verificado para esta llamada. Sin un precio vigente confirmado, no cotices importes, impuestos, descuentos, plazos, inclusiones ni disponibilidad de hardware; dirige al registro para revisar la seleccion y el checkout. No crees la cuenta ni pidas contraseñas o tarjetas por telefono.",
     "sources": [
       "src/routes/public.signup.routes.ts",

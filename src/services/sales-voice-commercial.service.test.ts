@@ -105,7 +105,7 @@ test("invalid identity and lead attributes cannot create a prospect", async () =
 test("signup handoff contains no personal data, card, session, or authentication token", async () => {
   const lead=await db.salesProspect.create({data:{fullName:"Link request",email:"private@example.com"}});
   const handoff=await service.prepareSignupHandoff(lead.id);
-  assert.deepEqual(handoff,{url:"https://app.pin-ngo.com/signup",status:"CUSTOMER_ACTION_REQUIRED"});
+  assert.deepEqual(handoff,{url:"https://pin-ngo.com",status:"CUSTOMER_ACTION_REQUIRED"});
   assert.equal(handoff.url.includes(lead.email!),false);
 });
 
