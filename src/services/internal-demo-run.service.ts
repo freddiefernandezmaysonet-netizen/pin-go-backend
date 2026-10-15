@@ -8,6 +8,7 @@ import { resolveInternalDemoPrimaryAdmin } from "./internal-demo-primary-admin.s
 import { readCleanerAccessWindow } from "./cleaner-access-window.service.js";
 import { demoMessageState } from "./internal-demo-message.service.js";
 import { INTERNAL_DEMO_PROPERTY_ID, INTERNAL_DEMO_SOURCE, INTERNAL_DEMO_PROVIDER, isInternalDemo } from "./internal-demo-scope.js";
+import { readDemoGuestNfcDiagnostics } from "./internal-demo-nfc-diagnostics.js";
 
 export type DemoActor = { userId: string; organizationId: string; email: string | null; role: string };
 export class DemoRunError extends Error {
@@ -63,7 +64,9 @@ export async function readDemoPreparation(db: PrismaClient, actor: DemoActor, en
     // Guest access/checkout SMS belong to reservation-worker, which enforces its
     // own GUEST_SMS_ENABLED switch. API settings cannot certify worker delivery.
   ];
-  return { ready: blockers.length === 0, blockers, property: { id: property.id, name: property.name,
+  const guestNfcDiagnostics = guestCards.length < 2
+    ? await readDemoGuestNfcDiagnostics(db, property.id) : [];
+  return { ready: blockers.length === 0, blockers, guestNfcDiagnostics, property: { id: property.id, name: property.name,
     timezone: property.timezone, cleaningStartOffsetMinutes: property.cleaningStartOffsetMinutes,
     cleaningAccessMinutes: 30 }, primaryAdmin, cleaner: cleaner ? { id: cleaner.staffMemberId,
       name: cleaner.staffMember.fullName, phone: cleaner.staffMember.phoneE164, language: cleaner.staffMember.preferredLanguage } : null,
