@@ -1,3 +1,4 @@
+import {withSalesVoiceFarewell} from "./sales-voice-farewell.service.js";
 import {salesVoiceCertificationEnvironmentAllowed, salesVoiceCertificationLimitsMatch} from "./sales-voice-certification-profile.service.js";
 import { performance } from "node:perf_hooks";
 import type { SimulatedSalesVoiceSafetyController } from "./sales-voice-safety-controller.service.js";
@@ -230,7 +231,9 @@ export async function coordinateSimulatedLiveSipSession(input: {
       enabled: true,
       connect: (url, options) => {
         if (!active()) throw new Error("OBSERVER_STOPPED");
-        return input.sidebandConnect(url, options);
+        return withSalesVoiceFarewell(input.sidebandConnect, stillWanted =>
+          fenceHangup(input.db, lease!, input.apiKey, input.hangupTransport, () => active() && stillWanted()),
+        )(url, options);
       },
       recoveryLease: lease,
     });
