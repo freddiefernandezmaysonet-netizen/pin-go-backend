@@ -64,7 +64,8 @@ test("the admitted accept carries fresh prices once and preserves payload, crede
     transport:withSalesVoicePricing(async(_url,request)=>{
       accepts++;const body=JSON.parse(request.body);
       assert.ok(body.session.delegation.responses.instructions.includes("VERIFIED USD 39.99"));
-      assert.equal(body.session.input.length,1);assert.equal(body.session.tools,undefined);
+      assert.equal(body.session.input.length,2);assert.equal(body.session.tools,undefined);
+      assert.ok(body.session.input[1].content[0].text.includes("VERIFIED USD 39.99"));
       assert.equal(request.headers.Authorization,"Bearer sk-fixture");assert.equal(request.signal.aborted,false);
       return{status:200};
     },env,async()=>{reads++;return price;})});
@@ -107,7 +108,7 @@ test("managed commercial backend receives the exact validated call prices withou
   await postOneOpenAILiveAccept({sessionId:"live_backend_fixture",apiKey:"sk-fixture",explicitlyEnabled:true,
     transport:withSalesVoicePricing(async(_url,request)=>{
       const body=JSON.parse(request.body),backend=body.session.delegation;
-      assert.equal(body.session.model,"gpt-live-1");assert.equal(body.session.input.length,1);
+      assert.equal(body.session.model,"gpt-live-1");assert.equal(body.session.input.length,2);
       assert.equal(backend.type,"responses");assert.equal(backend.responses.model,"gpt-6-luna");
       assert.deepEqual(backend.responses.tools,[]);assert.equal(backend.responses.tool_choice,"none");
       assert.equal(backend.responses.max_output_tokens,512);assert.equal(backend.responses.reasoning.effort,"none");
@@ -127,17 +128,36 @@ test("price diagnostics classify invalid and failed data without serializing raw
   assert.deepEqual(report,{monthly:"FAILED",yearly:"MISSING",verified:0,unavailable:8});
   assert.ok(!JSON.stringify(report).includes("PRIVATE"));
 });
+test("unverified prices cannot leak into the speaking model's direct price context",async()=>{
+  await postOneOpenAILiveAccept({sessionId:"live_unavailable_fixture",apiKey:"sk-fixture",explicitlyEnabled:true,
+    transport:withSalesVoicePricing(async(_url,request)=>{
+      const session=JSON.parse(request.body).session;
+      const facts=session.input[1].content[0].text;
+      assert.ok(facts.includes("Plataforma mensual / Monthly platform: UNAVAILABLE"));
+      assert.ok(!facts.includes("39.99")&&!facts.includes("PRIVATE"));
+      assert.ok(session.instructions.includes("UNAVAILABLE"));
+      assert.ok(session.instructions.includes("no anuncies una consulta"));
+      return{status:200};
+    },env,async()=>({...price,active:false,metadata:{secret:"PRIVATE"}}))});
+});
 
-test("voice prompt remains concise while commercial evidence stays in backend and opening seed is preserved",async()=>{
+test("speaking model receives verified prices directly while the original proactive greeting is preserved",async()=>{
   let originalInput:unknown;
   await postOneOpenAILiveAccept({sessionId:"live_concise_fixture",apiKey:"sk-fixture",explicitlyEnabled:true,
     transport:async(url,request)=>{
       originalInput=JSON.parse(request.body).session.input;
       return withSalesVoicePricing(async(_url,priced)=>{
         const session=JSON.parse(priced.body).session;
-        assert.deepEqual(session.input,originalInput);
+        assert.deepEqual(session.input.slice(0,1),originalInput);
+        assert.equal(session.input[1].role,"developer");
+        const facts=session.input[1].content[0].text;
+        assert.ok(facts.includes("VERIFIED USD 39.99"));
+        assert.ok(facts.includes("UNAVAILABLE"));
+        assert.ok(facts.includes("per lock")&&facts.includes("taxes extra"));
+        assert.ok(!facts.includes("price_monthly"));
+        assert.ok(facts.includes("sin delegar"));
         assert.ok(session.input[0].content[0].text.includes("Saluda ahora"));
-        assert.ok(session.instructions.length<3000);
+        assert.ok(session.instructions.length<4000);
         assert.ok(!session.instructions.includes("VERIFIED USD"));
         assert.ok(!session.instructions.includes("Conocimiento comercial verificado"));
         assert.ok(session.delegation.responses.instructions.includes("VERIFIED USD 39.99"));

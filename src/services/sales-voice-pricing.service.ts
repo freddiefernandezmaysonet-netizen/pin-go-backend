@@ -84,9 +84,17 @@ export function withSalesVoicePricing(transport:ProviderHTTP,env:Env,read:PriceR
       throw new Error("INVALID_SALES_PRICING_SESSION");
     const snapshot=await readSalesVoicePricing(env,read,{signal:request.signal});
     if(request.signal.aborted)throw new Error("SALES_ACCEPT_ABORTED");
-    const verifiedContext=payload.session.instructions+"\n"+renderSalesVoicePricing(snapshot);
+    const pricing=renderSalesVoicePricing(snapshot);
+    const verifiedContext=payload.session.instructions+"\n"+pricing;
     payload.session.delegation=salesVoiceAnswerBackend(verifiedContext);
     payload.session.instructions=SALES_VOICE_CONVERSATION_INSTRUCTIONS+"\n"+SALES_VOICE_MANAGED_ANSWER_POLICY;
+    // Trusted facts are available to the speaking model without a second model
+    // request. Preserve the proactive greeting as the first startup message.
+    payload.session.input=[...(payload.session.input??[]),{
+      type:"message",role:"developer",content:[{type:"input_text",text:
+        "Datos comerciales para responder cuando pregunten; no los leas en el saludo. Usa solo las ofertas VERIFIED vigentes. Responde el precio solicitado directamente sin delegar ni decir que vas a consultarlo.\n"+pricing,
+      }],
+    }];
     return transport(url,{...request,body:JSON.stringify(payload)});
   };
 }

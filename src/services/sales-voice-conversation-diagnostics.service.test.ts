@@ -37,7 +37,7 @@ test("caller-first order, validation failure and incomplete backend are visible 
     {type:"response.event",event:{type:"response.incomplete"}},
   ])socket.emit("message",JSON.stringify(event));
   assert.deepEqual(logs.at(-1),{inputSeen:true,outputSeen:true,outputBeforeInput:false,delegations:0,completed:0,failed:1,validationFailed:true,
-    clientDelegations:0,responsesDelegations:0,backendStarted:0,backendTextSeen:false,providerErrors:1});
+    clientDelegations:0,responsesDelegations:0,backendStarted:0,backendTextSeen:false,providerErrors:1,lastErrorCategory:"OTHER"});
 });
 test("client-owned work and unknown provider errors are visible without copying untrusted fields",()=>{
   const socket=new Socket(),logs:unknown[]=[];
@@ -61,6 +61,25 @@ test("default telemetry is one JSON line so filtering keeps all diagnostic field
   assert.equal(lines.length,1);assert.equal(lines[0].length,1);
   const line=String(lines[0][0]);assert.ok(!line.includes("\n"));
   assert.equal(JSON.parse(line.slice(line.indexOf("{"))).responsesDelegations,1);
+});
+test("provider failure categories distinguish configuration, access and capacity without exposing details",()=>{
+  for(const [code,message,category] of [
+    ["model_not_found","PRIVATE_MODEL","MODEL_ACCESS"],
+    ["unsupported_value","reasoning.effort PRIVATE_VALUE","REASONING_CONFIGURATION"],
+    ["invalid_request_error","max_output_tokens PRIVATE_VALUE","OUTPUT_LIMIT_CONFIGURATION"],
+    ["insufficient_quota","PRIVATE_ACCOUNT","QUOTA"],
+    ["rate_limit_exceeded","PRIVATE_LIMIT","RATE_LIMIT"],
+    ["invalid_api_key","PRIVATE_KEY","AUTHORIZATION"],
+    ["unknown_parameter","PRIVATE_PARAMETER","REQUEST_CONFIGURATION"],
+    ["server_error","PRIVATE_TRACE","PROVIDER_INTERNAL"],
+    ["PRIVATE_CODE","PRIVATE_MESSAGE","OTHER"],
+  ]){
+    const socket=new Socket(),logs:unknown[]=[];
+    withSalesVoiceConversationDiagnostics(()=>socket,value=>logs.push(value))(url,options);
+    socket.emit("open");socket.emit("message",JSON.stringify({type:"error",error:{code,message}}));
+    assert.equal((logs.at(-1) as Record<string,unknown>).lastErrorCategory,category);
+    assert.ok(!JSON.stringify(logs).includes("PRIVATE"));
+  }
 });
 test("pre-open, malformed, unrelated sessions and logger failure do not control the socket",()=>{
   const socket=new Socket();let reports=0;
