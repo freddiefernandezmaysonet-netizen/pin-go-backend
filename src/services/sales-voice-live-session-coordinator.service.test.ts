@@ -614,3 +614,16 @@ test("actual safety loop authorizes one accept only after its first healthy cycl
     assert.equal(controller.permitsAdmission(limits),false);
   } finally {loop.stop();}
 });
+
+test("normal caller farewell makes one owned provider hangup and waits for confirmed closure",async()=>{
+  await clean();const id=next();await seeded(id);const d=deps(id);
+  const result=await d.run();monitoring(result);d.socket.opened();
+  for(const [type,delta] of [["session.input_transcript.delta","Eso es todo, muchas gracias."],["session.output_transcript.delta","Gracias por llamar. Hasta luego."]]){
+    d.socket.emit("message",JSON.stringify({type,delta}));
+  }
+  assert.equal(d.counts.hangups,0);
+  for(let i=0;i<40&&d.counts.hangups===0;i++)await new Promise(resolve=>setTimeout(resolve,100));
+  assert.equal(d.counts.hangups,1);assert.equal((await state(id))?.finalizedAt,null);
+  d.socket.closeConfirmed(id,20);assert.equal(await result.completion,"CONFIRMED_CLOSED");
+  assert.equal((await state(id))?.finalUsageSeconds,20);assert.equal(d.counts.hangups,1);
+});
