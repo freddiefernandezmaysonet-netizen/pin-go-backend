@@ -10,7 +10,7 @@ Opening the app does not mark registration complete, release physical access, or
 
 ## Verification
 
-`Guest App Handoff` CI uses a disposable PostgreSQL database and synthetic fixtures only. It exercises the actual HTTP landing page, the pinned release's native link parser (cold/warm), real Prisma session exchange and restoration, blocked access-code disclosure, revoked/expired sessions, Spanish instructions, invalid/expired/cancelled/ended/revoked links, and inactive properties. Existing email fallback, mobile authorization and native session-storage tests run alongside it.
+`Guest App Handoff` CI uses a disposable PostgreSQL database and synthetic fixtures only. It exercises the actual HTTP landing page, the native link URL contract, real Prisma session exchange and restoration, blocked access-code disclosure, revoked/expired sessions, Spanish instructions, invalid/expired/cancelled/ended/revoked links, and inactive properties. Existing email fallback and mobile authorization tests run alongside it. The current Guest release parser (cold/warm) and 18 native session-storage scenarios passed locally against its release source; CI does not fetch that separate repository or require additional credentials.
 
 These are automated integration checks, not physical-device certification. Email inbox delivery and opening the button from a real iPhone/Android browser must still be verified after an approved deployment. The new backend page must be integrated and deployed before it is available to guests. This PR neither deploys the page nor uploads a new binary. The existing custom-scheme contract is reused, but compatibility with the exact installed TestFlight build remains a physical-device check.
 

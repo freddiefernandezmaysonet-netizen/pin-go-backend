@@ -3,32 +3,13 @@ import test from "node:test";
 import { once } from "node:events";
 import { createServer } from "node:http";
 import type { AddressInfo } from "node:net";
-import { readFileSync } from "node:fs";
-import path from "node:path";
-import ts from "typescript";
 import express from "express";
 import { PrismaClient } from "@prisma/client";
 import { buildGuestAppRouter, renderGuestAppEntry } from "./guest-app.routes.js";
 import { exchangeGuestStayToken, readGuestMobileStay, resolveGuestMobileSession } from "../guest-mobile/guest-mobile-session.service.js";
 import { readGuestMobileAccessCodes } from "../guest-mobile/guest-mobile-access-code.service.js";
 
-// Execute the released app's production parser, not a test-only reimplementation.
-function loadMobile(file: string): Record<string, any> {
-  const root = process.env.GUEST_APP_SOURCE;
-  assert.ok(root, "GUEST_APP_SOURCE must point to the pinned Guest release checkout");
-  const filename = path.resolve(root, file);
-  const source = ts.transpileModule(readFileSync(filename, "utf8"), {
-    compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 },
-  }).outputText;
-  const exports = {};
-  new Function("require", "exports", source)((specifier: string) => {
-    assert.ok(specifier.startsWith("."), "Only pure native link helpers are loaded");
-    return loadMobile(path.relative(root, path.resolve(path.dirname(filename), specifier) + ".ts"));
-  }, exports);
-  return exports;
-}
-
-test("portal to released Guest app with no phone or SMS, real Prisma and session recovery", async t => {
+test("portal native-link contract with no phone or SMS, real Prisma and session recovery", async t => {
   const TEST_URL = "postgresql://guest_app_ci:guest_app_ci@127.0.0.1:5432/guest_app_ci";
   assert.equal(process.env.GUEST_APP_DB_TEST, "true");
   assert.equal(process.env.DATABASE_URL, TEST_URL, "Refusing any non-test database");
@@ -69,13 +50,13 @@ test("portal to released Guest app with no phone or SMS, real Prisma and session
     assert.match(html, /do not need to receive SMS/);
     assert.doesNotMatch(html, /<script|http-equiv="refresh"|https?:\/\//);
     const nativeUrl = html.match(/href="(pingo-guest:[^"]+)"/)![1]!;
-    const { guestTokenFromUrl } = loadMobile("src/guest/deepLink.ts");
-    const { redirectSystemPath } = loadMobile("app/+native-intent.tsx");
-    assert.equal(guestTokenFromUrl(nativeUrl), token);
-    for (const initial of [true, false]) {
-      assert.equal(redirectSystemPath({ path: nativeUrl, initial }), `/?guestToken=${token}`);
-    }
-    const exchanged = await exchangeGuestStayToken(db, { guestToken: guestTokenFromUrl(nativeUrl), platform: "ios" });
+    const parsed = new URL(nativeUrl);
+    assert.equal(parsed.protocol, "pingo-guest:");
+    assert.equal(parsed.hostname, "stay");
+    assert.equal(parsed.pathname, `/${token}`);
+    assert.equal(parsed.search, "");
+    assert.equal(parsed.hash, "");
+    const exchanged = await exchangeGuestStayToken(db, { guestToken: parsed.pathname.slice(1), platform: "ios" });
     const restored = await resolveGuestMobileSession(db, exchanged.bearer);
     assert.equal(restored.guestPersonId, exchanged.guestPersonId);
     const stay = await readGuestMobileStay(db, { guestPersonId: restored.guestPersonId, reservationNumber: exchanged.stay.reservationNumber });

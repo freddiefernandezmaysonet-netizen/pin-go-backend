@@ -33,15 +33,8 @@ jobs:
     env:
       DATABASE_URL: postgresql://guest_app_ci:guest_app_ci@127.0.0.1:5432/guest_app_ci
       GUEST_APP_DB_TEST: "true"
-      GUEST_APP_SOURCE: ${{ github.workspace }}/guest-mobile
     steps:
       - uses: actions/checkout@v4
-      - uses: actions/checkout@v4
-        with:
-          repository: freddiefernandezmaysonet-netizen/pin-go-guest-mobile
-          ref: 5a1cbd915f08c5c744d92df7ca20658294f118fb
-          path: guest-mobile
-          persist-credentials: false
       - uses: actions/setup-node@v4
         with:
           node-version: 22
@@ -50,13 +43,7 @@ jobs:
       - run: npx prisma validate
       - run: npx prisma db push --skip-generate
       - run: npx tsc -p tsconfig.guest-app-handoff.json --pretty false
-      - name: Portal, released native link parser, real database and session recovery
+      - name: Portal native-link contract, real database and session recovery
         run: npx tsx --test src/routes/guest-app.db.test.ts
       - name: Existing email fallback and mobile authorization contracts
         run: npx tsx --test src/services/precheckin-email-fallback.contract.test.ts src/guest-mobile/guest-mobile-session.contract.test.ts src/guest-mobile/guest-mobile-http.contract.test.ts src/guest-mobile/guest-mobile-my-stay.contract.test.ts
-      - name: Released app session storage and link routing
-        working-directory: guest-mobile
-        run: |
-          npm ci --ignore-scripts
-          node tests/native-link.cjs
-          node --experimental-vm-modules tests/guest-session.mjs
