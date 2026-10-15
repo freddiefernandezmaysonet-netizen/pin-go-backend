@@ -42,3 +42,22 @@ test("disconnect, provider closure and wrong session cannot close a call",()=>{
   for(const action of ["close","error","session.closed"]){const d=setup();d.user("Eso es todo.");d.say("Hasta luego.");action==="session.closed"?d.emit(action):d.socket.emit(action,...(action==="error"?[new Error("test")]:[]));d.flush();assert.equal(d.calls,0);}
   const d=setup();d.emit("session.input_transcript.delta","Eso es todo.",{session_id:"live_other"});d.say("Hasta luego.");d.flush();assert.equal(d.calls,0);
 });
+
+test("Live backchannels between caller transcript fragments do not erase the ending",()=>{
+  const d=setup();
+  d.emit("session.input_transcript.delta","Eso es ",{start_ms:10000,end_ms:10300});
+  d.emit("session.output_transcript.delta"," [hum] ",{start_ms:10200,end_ms:10400});
+  d.emit("session.input_transcript.delta","todo, muchas gracias.",{start_ms:10300,end_ms:11200});
+  d.emit("session.output_transcript.delta","Hasta luego.",{start_ms:12000,end_ms:13000});
+  d.flush();assert.equal(d.calls,1);
+});
+test("a previous question is separated by the caller audio timeline",()=>{
+ const d=setup();d.emit("session.input_transcript.delta","¿Cuánto cuesta?",{start_ms:1000,end_ms:2000});
+ d.say("Cuesta la tarifa verificada.");
+ d.emit("session.input_transcript.delta","Eso es todo, gracias.",{start_ms:7000,end_ms:8000});d.say("Hasta luego.");d.flush();assert.equal(d.calls,1);
+});
+test("late caller fragments spoken before the farewell do not cancel closing",()=>{
+ const d=setup();d.emit("session.input_transcript.delta","Eso es todo.",{start_ms:1000,end_ms:1800});
+ d.emit("session.output_transcript.delta","Hasta luego.",{start_ms:2500,end_ms:3300});
+ d.emit("session.input_transcript.delta"," Muchas gracias.",{start_ms:1800,end_ms:2300});d.flush();assert.equal(d.calls,1);
+});
