@@ -1,4 +1,5 @@
 import { createRequire } from "node:module";
+import { SALES_VOICE_SIDEBAND_MAX_MESSAGE_BYTES } from "./sales-voice-protocol-limits.service.js";
 import type {
   SidebandSocketFactory,
   SidebandWebSocket,
@@ -59,14 +60,14 @@ export function createOpenAISidebandWsFactory(testConstructor?: WsConstructor): 
       fail("INVALID_PROVIDER_AUTHORIZATION");
     }
     if (input.handshakeTimeout !== 5000
-      || input.maxPayload !== 16 * 1024
+      || input.maxPayload !== SALES_VOICE_SIDEBAND_MAX_MESSAGE_BYTES
       || input.perMessageDeflate !== false) {
       fail("UNSAFE_WEBSOCKET_SETTINGS");
     }
     return new build(url, {
       headers: { Authorization: token },
       handshakeTimeout: 5000,
-      maxPayload: 16 * 1024,
+      maxPayload: SALES_VOICE_SIDEBAND_MAX_MESSAGE_BYTES,
       perMessageDeflate: false,
       followRedirects: false,
       rejectUnauthorized: true,

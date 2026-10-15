@@ -3,6 +3,11 @@ import { createRequire } from "node:module";
 import { createServer, type IncomingMessage } from "node:http";
 import { test } from "node:test";
 import type { Socket } from "node:net";
+import { SALES_VOICE_SIDEBAND_MAX_MESSAGE_BYTES } from "./sales-voice-protocol-limits.service.js";
+import { salesVoiceStartupConfig } from "./sales-voice-live-admission.service.js";
+import { withSalesVoicePricing } from "./sales-voice-pricing.service.js";
+import { observeExistingLiveSession } from "./sales-voice-sideband-supervisor.service.js";
+import { withSalesVoiceConversationDiagnostics } from "./sales-voice-conversation-diagnostics.service.js";
 import {
   createOpenAISidebandWsFactory,
   SalesSidebandTransportError,
@@ -13,7 +18,7 @@ const auth = "Bearer sk-fixture12345";
 const options = {
   headers: { Authorization: auth },
   handshakeTimeout: 5000,
-  maxPayload: 16 * 1024,
+  maxPayload: SALES_VOICE_SIDEBAND_MAX_MESSAGE_BYTES,
   perMessageDeflate: false as const,
 };
 
@@ -37,7 +42,7 @@ test("exact official Live sideband origin, pinned options and Bearer header only
   assert.deepEqual(attempts[0].options, {
     headers: { Authorization: auth },
     handshakeTimeout: 5000,
-    maxPayload: 16 * 1024,
+    maxPayload: SALES_VOICE_SIDEBAND_MAX_MESSAGE_BYTES,
     perMessageDeflate: false,
     followRedirects: false,
     rejectUnauthorized: true,
@@ -154,4 +159,57 @@ test("no transport is created during import and no connection is initiated autom
   const factory=createOpenAISidebandWsFactory();
   assert.equal(typeof factory,"function");
   // No invocation -> no WebSocket, no network and no provider API charge.
+});
+
+test("actual commercial startup snapshot crosses the old 16 KiB limit without dropping the monitored call",async()=>{
+  const WS=createRequire(import.meta.url)("ws");
+  let session:any;
+  await withSalesVoicePricing(async(_url,request)=>{
+    session={...JSON.parse(request.body).session,id:"live_fixture123"};return{status:200};
+  },{},async()=>null)("https://api.openai.com/v1/live/sessions/live_fixture123/accept",{
+    method:"POST",headers:{},body:JSON.stringify(salesVoiceStartupConfig()),signal:new AbortController().signal,
+  });
+  const frame=JSON.stringify({type:"session.started",session});
+  assert.ok(Buffer.byteLength(frame)>16*1024,"fixture must reproduce the previous message-size failure");
+  assert.ok(Buffer.byteLength(frame)<SALES_VOICE_SIDEBAND_MAX_MESSAGE_BYTES);
+  const server=createServer(),sockets=new WS.WebSocketServer({server,perMessageDeflate:false});
+  sockets.on("connection",(peer:any)=>{
+    peer.send(frame);
+    peer.send(JSON.stringify({type:"session.output_transcript.delta",delta:"PRIVATE_GREETING"}));
+  });
+  await new Promise<void>(resolve=>server.listen(0,"127.0.0.1",resolve));
+  const addr=server.address();assert.ok(addr&&typeof addr!=="string");
+  const local="ws://127.0.0.1:"+addr.port;
+  let client:any,connection:Awaited<ReturnType<typeof observeExistingLiveSession>>|undefined;
+  const reports:any[]=[];
+  class LoopbackSocket{
+    constructor(_url:string,input:any){return client=new WS(local,input);}
+  }
+  try{
+    connection=await observeExistingLiveSession({
+      db:{salesVoiceCall:{findUnique:async()=>({provider:"OPENAI_LIVE_SIP",direction:"INBOUND",status:"ACCEPTED",finalizedAt:null})}} as any,
+      sessionId:"live_fixture123",apiKey:"sk-fixture",enabled:true,
+      connect:withSalesVoiceConversationDiagnostics(createOpenAISidebandWsFactory(LoopbackSocket as any),value=>reports.push(value)),
+    });
+    let settled=false;void connection.completion.then(()=>{settled=true;});
+    await new Promise<void>((resolve,reject)=>{
+      const timer=setTimeout(()=>reject(Error("STARTUP_FRAME_TIMEOUT")),1500);
+      client.once("error",(error:Error)=>{clearTimeout(timer);reject(error);});
+      client.on("message",(raw:Buffer)=>{
+        if(JSON.parse(raw.toString()).type==="session.output_transcript.delta"){
+          clearTimeout(timer);setImmediate(resolve);
+        }
+      });
+    });
+    assert.equal(client.readyState,WS.OPEN);assert.equal(settled,false);
+    assert.equal(reports.at(-1).outputSeen,true);
+    assert.ok(!JSON.stringify(reports).includes("PRIVATE_GREETING"));
+    connection.disconnect();
+    assert.equal((await connection.completion).state,"UNCONFIRMED_DISCONNECT");
+  }finally{
+    connection?.disconnect();client?.terminate();
+    for(const peer of sockets.clients)peer.terminate();
+    await new Promise<void>(resolve=>sockets.close(()=>resolve()));
+    await new Promise<void>((resolve,reject)=>server.close(e=>e?reject(e):resolve()));
+  }
 });

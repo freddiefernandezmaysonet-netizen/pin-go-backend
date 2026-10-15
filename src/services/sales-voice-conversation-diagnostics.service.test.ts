@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import {test} from "node:test";
 import {withSalesVoiceConversationDiagnostics} from "./sales-voice-conversation-diagnostics.service.js";
+import {SALES_VOICE_SIDEBAND_MAX_MESSAGE_BYTES} from "./sales-voice-protocol-limits.service.js";
 class Socket{
   callbacks=new Map<string,Array<(...args:unknown[])=>void>>();
   on(event:string,cb:(...args:unknown[])=>void){this.callbacks.set(event,[...(this.callbacks.get(event)??[]),cb]);return this;}
@@ -8,7 +9,7 @@ class Socket{
   close(){this.emit("close");}
 }
 const url="wss://api.openai.com/v1/live/sessions/live_fixture/attach";
-const options={headers:{Authorization:"Bearer sk-fixture"},handshakeTimeout:5000,maxPayload:16384,perMessageDeflate:false as const};
+const options={headers:{Authorization:"Bearer sk-fixture"},handshakeTimeout:5000,maxPayload:SALES_VOICE_SIDEBAND_MAX_MESSAGE_BYTES,perMessageDeflate:false as const};
 test("passive diagnostics track greeting ordering and backend completion without retaining conversation",()=>{
   const socket=new Socket(),logs:unknown[]=[];
   const connect=withSalesVoiceConversationDiagnostics(()=>socket,value=>logs.push(value));
@@ -80,6 +81,16 @@ test("provider failure categories distinguish configuration, access and capacity
     assert.equal((logs.at(-1) as Record<string,unknown>).lastErrorCategory,category);
     assert.ok(!JSON.stringify(logs).includes("PRIVATE"));
   }
+});
+test("transport overflow and close code are reported without retaining transport errors",()=>{
+  const socket=new Socket(),logs:any[]=[];
+  withSalesVoiceConversationDiagnostics(()=>socket,value=>logs.push(value))(url,options);
+  socket.emit("open");
+  socket.emit("error",{code:"WS_ERR_UNSUPPORTED_MESSAGE_LENGTH",message:"PRIVATE_MESSAGE"});
+  socket.emit("close",1006);
+  assert.equal(logs.at(-1).transportFailure,"MESSAGE_TOO_LARGE");
+  assert.equal(logs.at(-1).closeCode,1006);
+  assert.ok(!JSON.stringify(logs).includes("PRIVATE"));
 });
 test("pre-open, malformed, unrelated sessions and logger failure do not control the socket",()=>{
   const socket=new Socket();let reports=0;
