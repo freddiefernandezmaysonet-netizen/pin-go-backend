@@ -1,4 +1,5 @@
 import { isChannexGuestRegistrationExempt } from "../services/guest-registration-channel.policy";
+import { buildGuestAppRouter, renderGuestAppEntry } from "./guest-app.routes";
 import {
   Router,
   type Request,
@@ -412,6 +413,7 @@ function autoRefreshScript(enabled: boolean) {
 ===================== */
 export function buildGuestRouter(prisma: PrismaClient) {
   const router = Router();
+  router.use(buildGuestAppRouter(prisma));
 
   // ✅ Canonical: /guest/:token
   router.get("/guest/:token", async (req, res) => {
@@ -592,6 +594,9 @@ export function buildGuestRouter(prisma: PrismaClient) {
             <h1>${escapeHtml(headline)}</h1>
             <p class="sub">Hola <b>${escapeHtml(reservation.guestName ?? "Guest")}</b></p>
             ${bodyHtml}
+            ${reservation.status === "ACTIVE" && now < checkOut
+              ? renderGuestAppEntry(token, reservation.preferredLanguage)
+              : ""}
             ${autoRefreshScript(shouldAutoRefresh)}
             <div class="footer">
               <span class="brand">Pin&Go</span>
@@ -1078,6 +1083,7 @@ export function buildGuestRouter(prisma: PrismaClient) {
                     }
                   </p>
 
+                  ${renderGuestAppEntry(token, reservation.preferredLanguage)}
                   <p>
                     <a class="link" href="/guest/${encodeURIComponent(
                       token
