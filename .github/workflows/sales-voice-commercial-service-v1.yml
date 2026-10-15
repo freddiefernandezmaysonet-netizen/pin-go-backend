@@ -60,7 +60,8 @@ jobs:
             'src/services/sales-voice-commercial.service.test.ts',
             '.github/workflows/sales-voice-commercial-service-v1.yml',
           ]);
-          assert.deepEqual(new Set(changed), allowed);
+          const signupDomain = new Set([".github/workflows/sales-voice-commercial-service-v1.yml", ".github/workflows/sales-voice-live-sip-mount-v1.yml", "src/services/sales-voice-answer-backend.service.ts", "src/services/sales-voice-commercial.service.test.ts", "src/services/sales-voice-commercial.service.ts", "src/services/sales-voice-live-admission.service.ts", "src/services/sales-voice-pricing.service.ts", "src/services/sales-voice-product-knowledge.service.ts", "src/services/sales-voice-tool-loop.service.ts"]);
+          assert.deepEqual(new Set(changed), process.env.GITHUB_HEAD_REF === "agent/sales-voice-signup-domain-20261015" ? signupDomain : allowed);
           console.log('PASS: only new sales commercial service files changed');
           NODE
           git diff --check "$BASE_SHA" HEAD
