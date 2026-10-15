@@ -55,6 +55,8 @@ jobs:
         run: node --import tsx --test src/services/internal-demo-secure-precheckin.service.test.ts src/pin-ai/guest/guest-incident.test.ts src/pin-ai/guest/guest-runtime-gateway.test.ts
       - name: Guest PIN policy and provider recovery tests
         run: node --import tsx --test src/services/guest-passcode-provision.service.test.ts
+      - name: Read-only NFC diagnostics and error redaction
+        run: node --import tsx --test src/services/internal-demo-nfc-diagnostics.test.ts
   connected-commercial-demo:
     name: Same reservation commercial demonstration (PostgreSQL)
     runs-on: ubuntu-latest
